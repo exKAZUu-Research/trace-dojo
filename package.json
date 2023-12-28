@@ -5,7 +5,8 @@
   "license": "Apache-2.0",
   "author": "Tokyo Online University",
   "scripts": {
-    "build": "next build",
+    "build": "wb buildIfNeeded -c 'yarn run build/core'",
+    "build/core": "next build",
     "cleanup": "yarn format && yarn lint-fix",
     "db-create-migrate": "wb prisma migrate-dev",
     "db-help": "wb prisma --help",
