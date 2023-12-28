@@ -3,7 +3,7 @@
   "version": "0.0.0-semantically-released",
   "repository": "github:exKAZUu-Research/trace-dojo",
   "license": "Apache-2.0",
-  "author": "Tokyo Online University",
+  "author": "Kazunori Sakamoto",
   "scripts": {
     "build": "wb buildIfNeeded -c 'yarn run build/core'",
     "build/core": "next build",
