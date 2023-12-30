@@ -34,7 +34,6 @@
     "@emotion/styled": "11.11.0",
     "@prisma/client": "5.5.2",
     "@willbooster/shared-lib-react": "3.0.0",
-    "cookie": "0.6.0",
     "framer-motion": "10.16.4",
     "next": "14.0.1",
     "nextjs-cors": "2.2.0",
