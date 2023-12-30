@@ -1,11 +1,16 @@
+import { Container, Spinner } from '@chakra-ui/react';
 import type { NextPage } from 'next';
 import { redirect } from 'next/navigation';
+import React, { Suspense } from 'react';
 
-import { getSSRSession } from '../../app/sessionUtils';
-import { SessionAuthForNext } from '../molecules/SessionAuthForNext';
-import { TryRefreshComponent } from '../molecules/TryRefreshComponent';
+import { SessionAuthForNext } from '../../components/molecules/SessionAuthForNext';
+import { TryRefreshComponent } from '../../components/molecules/TryRefreshComponent';
+import { DefaultFooter } from '../../components/organisms/DefaultFooter';
+import { DefaultHeader } from '../../components/organisms/DefaultHeader';
+import type { LayoutProps } from '../../types';
+import { getSSRSession } from '../sessionUtils';
 
-export const HomePage: NextPage = async () => {
+const DefaultLayout: NextPage<LayoutProps> = async ({ children }) => {
   const { hasInvalidClaims, hasToken, session } = await getSSRSession();
 
   // `session` will be undefined if it does not exist or has expired
@@ -46,7 +51,17 @@ export const HomePage: NextPage = async () => {
    */
   return (
     <SessionAuthForNext>
-      <div>Your user id is: {session.getUserId()}</div>
+      <DefaultHeader />
+
+      <Suspense fallback={<Spinner left="50%" position="fixed" top="50%" transform="translate(-50%, -50%)" />}>
+        <Container pb={16} pt={8}>
+          {children}
+        </Container>
+      </Suspense>
+
+      <DefaultFooter />
     </SessionAuthForNext>
   );
 };
+
+export default DefaultLayout;

@@ -11,7 +11,7 @@ import { ensureSuperTokensInit } from '../infrastructures/supertokens/backendCon
 
 ensureSuperTokensInit();
 
-interface SSRSession {
+export interface SSRSession {
   session: SessionContainer | undefined;
   hasToken: boolean;
   /**
