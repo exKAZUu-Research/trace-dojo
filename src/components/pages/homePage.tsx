@@ -12,20 +12,20 @@ export const HomePage: NextPage = async () => {
   if (!session) {
     if (!hasToken) {
       /**
-       * This means that the user is not logged in. If you want to display some other UI in this
-       * case, you can do so here.
+       * This means that the user is not logged in.
+       * If you want to display some other UI in this case, you can do so here.
        */
       return redirect('/auth');
     }
 
     /**
-     * `hasInvalidClaims` indicates that session claims did not pass validation. For example if email
-     * verification is required but the user's email has not been verified.
+     * `hasInvalidClaims` indicates that session claims did not pass validation.
+     * For example if email verification is required but the user's email has not been verified.
      */
     return hasInvalidClaims ? (
       /**
-       * This will make sure that the user is redirected based on their session claims. For example they
-       * will be redirected to the email verification screen if needed.
+       * This will make sure that the user is redirected based on their session claims.
+       * For example, they will be redirected to the email verification screen if needed.
        *
        * We pass in no children in this case to prevent hydration issues and still be able to redirect the
        * user.
@@ -33,8 +33,8 @@ export const HomePage: NextPage = async () => {
       <SessionAuthForNext />
     ) : (
       /**
-       * This means that the session does not exist but we have session tokens for the user. In this case
-       * the `TryRefreshComponent` will try to refresh the session.
+       * This means that the session does not exist, but we have session tokens for the user.
+       * In this case the `TryRefreshComponent` will try to refresh the session.
        */
       <TryRefreshComponent />
     );
