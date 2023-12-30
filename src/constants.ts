@@ -1,3 +1,3 @@
-export const APP_AUTHOR = 'WillBooster Inc.';
-export const APP_DESCRIPTION = 'This is an app';
-export const APP_NAME = '無限ドリルβ';
+export const APP_AUTHOR = 'Kazunori Sakamoto';
+export const APP_DESCRIPTION = 'An educational web app for training trace skills';
+export const APP_NAME = 'トレース道場';
