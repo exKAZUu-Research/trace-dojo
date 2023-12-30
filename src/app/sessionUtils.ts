@@ -2,7 +2,7 @@ import { serialize } from 'cookie';
 import { cookies, headers } from 'next/headers';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { PreParsedRequest, CollectingResponse } from 'supertokens-node/framework/custom';
+import { CollectingResponse, PreParsedRequest } from 'supertokens-node/framework/custom';
 import type { SessionContainer, VerifySessionOptions } from 'supertokens-node/recipe/session';
 import Session from 'supertokens-node/recipe/session';
 import type { HTTPMethod } from 'supertokens-node/types';

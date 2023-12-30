@@ -1,5 +1,6 @@
 import type { BoxProps } from '@chakra-ui/react';
 import { Box, HStack } from '@chakra-ui/react';
+import React from 'react';
 
 import { APP_AUTHOR } from '../../constants';
 

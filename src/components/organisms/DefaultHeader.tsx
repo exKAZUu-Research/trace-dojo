@@ -16,7 +16,7 @@ import {
 import NextLink from 'next/link';
 import { useRouter } from 'next/navigation';
 import React from 'react';
-import { FaChevronDown, FaSignOutAlt, FaUser, FaCog } from 'react-icons/fa';
+import { FaChevronDown, FaCog, FaSignOutAlt, FaUser } from 'react-icons/fa';
 import { signOut, useSessionContext } from 'supertokens-auth-react/recipe/session';
 
 import { APP_NAME } from '../../constants';

@@ -46,11 +46,13 @@ const DefaultLayout: NextPage<LayoutProps> = async ({ children }) => {
   }
 
   /**
-   * SessionAuthForNextJS will handle proper redirection for the user based on the different session states.
+   * SessionAuthForNext will handle proper redirection for the user based on the different session states.
    * It will redirect to the login page if the session does not exist etc.
    */
   return (
-    <SessionAuthForNext>
+    <>
+      <SessionAuthForNext />
+
       <DefaultHeader />
 
       <Suspense fallback={<Spinner left="50%" position="fixed" top="50%" transform="translate(-50%, -50%)" />}>
@@ -60,7 +62,7 @@ const DefaultLayout: NextPage<LayoutProps> = async ({ children }) => {
       </Suspense>
 
       <DefaultFooter />
-    </SessionAuthForNext>
+    </>
   );
 };
 
