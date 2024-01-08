@@ -12,3 +12,5 @@ run_if_changed() {
 run_if_changed "\..+-version" "asdf plugin update --all"
 run_if_changed "\..+-version" "asdf install"
 run_if_changed "package\.json" "yarn && rm -Rf .next"
+run_if_changed "prisma/schema.prisma" "node node_modules/.bin/dotenv -c development -- node node_modules/.bin/prisma migrate deploy"
+run_if_changed "prisma/schema.prisma" "node node_modules/.bin/dotenv -c development -- node node_modules/.bin/prisma generate"
