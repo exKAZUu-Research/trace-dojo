@@ -7,11 +7,11 @@ import { SessionAuthForNext } from '../../components/molecules/SessionAuthForNex
 import { TryRefreshComponent } from '../../components/molecules/TryRefreshComponent';
 import { DefaultFooter } from '../../components/organisms/DefaultFooter';
 import { DefaultHeader } from '../../components/organisms/DefaultHeader';
+import { getSessionOnServerLayout } from '../../infrastructures/session';
 import type { LayoutProps } from '../../types';
-import { getSSRSession } from '../sessionUtils';
 
 const DefaultLayout: NextPage<LayoutProps> = async ({ children }) => {
-  const { hasInvalidClaims, hasToken, session } = await getSSRSession();
+  const { hasInvalidClaims, hasToken, session } = await getSessionOnServerLayout();
 
   // `session` will be undefined if it does not exist or has expired
   if (!session) {
