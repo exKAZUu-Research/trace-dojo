@@ -14,22 +14,16 @@ An educational web app for training program tracing skills.
    git clone git@github.com:exKAZUu-Research/trace-dojo.git
    ```
 
-1. yarn
+1. Install dependencies
 
    ```
    yarn install
    ```
 
-1. Create `.env`
+1. Reset local database by applying migration files and adding initial records
 
    ```
-   cp .env.development .env
-   ```
-
-1. Sync database schema
-
-   ```
-   npx prisma migrate dev
+   yarn db-reset
    ```
 
 ### Start Development
@@ -38,4 +32,14 @@ An educational web app for training program tracing skills.
 
    ```
    yarn start
+   ```
+
+### Change Database Schema
+
+1. Change `prisma/schema.prisma`
+
+1. Create migration files on the basis of `prisma/schema.prisma`
+
+   ```
+   yarn db-migrate-create
    ```
