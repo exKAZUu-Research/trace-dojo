@@ -1,39 +1,27 @@
 'use client';
 
+import { Box } from '@chakra-ui/react';
 import React, { useEffect } from 'react';
 
+export interface CharacterInterface {
+  id: number;
+  name: string;
+  x: number;
+  y: number;
+  direction: string;
+  color: string;
+  penDown: boolean;
+  path: string[];
+}
+
 interface CharacterProps {
-  character: {
-    id: number;
-    name: string;
-    x: number;
-    y: number;
-    direction: string;
-    color: string;
-    penDown: boolean;
-    path: string[];
-  };
+  character: CharacterInterface;
   gridColumns: number;
   gridSize: number;
   onMoveForward: (id: number) => void;
 }
 
 export const Character: React.FC<CharacterProps> = ({ character, gridColumns, gridSize, onMoveForward }) => {
-  const characterStyle: React.CSSProperties = {
-    position: 'absolute',
-    top: character.y * gridSize + 'px',
-    left: character.x * gridSize + 'px',
-    width: gridSize + 'px',
-    height: gridSize + 'px',
-    backgroundColor: character.color,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    color: 'white',
-    textAlign: 'center',
-  };
-
   // 軌跡の描画
   useEffect(() => {
     for (const position of character.path) {
@@ -48,8 +36,15 @@ export const Character: React.FC<CharacterProps> = ({ character, gridColumns, gr
   });
 
   return (
-    <div style={characterStyle}>
+    <Box
+      bgColor={character.color}
+      h={gridSize + 'px'}
+      left={character.x * gridSize + 'px'}
+      position="absolute"
+      top={character.y * gridSize + 'px'}
+      w={gridSize + 'px'}
+    >
       <button onClick={() => onMoveForward(character.id)}>{character.name}</button>
-    </div>
+    </Box>
   );
 };

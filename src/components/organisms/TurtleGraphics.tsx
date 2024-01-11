@@ -4,18 +4,10 @@ import { Grid, GridItem } from '@chakra-ui/react';
 import React, { useState } from 'react';
 
 import { Character } from '../../components/organisms/Character';
+import type { CharacterInterface } from '../../components/organisms/Character';
 
 interface TurtleGraphicsProps {
-  characters: {
-    id: number;
-    name: string;
-    x: number;
-    y: number;
-    direction: string;
-    color: string;
-    penDown: boolean;
-    path: string[];
-  }[];
+  characters: CharacterInterface[];
   gridColumns?: number;
   gridRows?: number;
   gridSize?: number;
