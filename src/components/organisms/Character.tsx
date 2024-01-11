@@ -40,6 +40,9 @@ export const Character: React.FC<CharacterProps> = ({ character, onMoveForward }
       const [x, y] = position.split(',').map(Number);
       // TODO: 12（グリッドの列数）を定数にする
       const gridCell = document.querySelectorAll('.grid-cell')[x + y * 12] as HTMLElement;
+
+      if (!gridCell) return;
+
       gridCell.style.backgroundColor = character.color;
       gridCell.style.opacity = '0.5';
     }
