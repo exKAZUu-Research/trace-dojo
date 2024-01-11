@@ -19,6 +19,7 @@ import React from 'react';
 import { FaChevronDown, FaCog, FaSignOutAlt, FaUser } from 'react-icons/fa';
 import { signOut, useSessionContext } from 'supertokens-auth-react/recipe/session';
 
+import { useCurrentDisplayName } from '../../asyncFunctions/users/queries';
 import { APP_NAME } from '../../constants';
 
 const MENU_ITEMS: readonly [string, string][] = [
@@ -28,6 +29,8 @@ const MENU_ITEMS: readonly [string, string][] = [
 
 export const DefaultHeader: React.FC<BoxProps> = (props) => {
   const session = useSessionContext();
+  const sessionAvailable = !session.loading && session.doesSessionExist;
+  const { data: displayName } = useCurrentDisplayName({ enabled: sessionAvailable });
 
   const router = useRouter();
 
@@ -46,7 +49,7 @@ export const DefaultHeader: React.FC<BoxProps> = (props) => {
         </HStack>
       </HStack>
       <Box flexGrow={0} flexShrink={0}>
-        {!session.loading && session.doesSessionExist ? (
+        {sessionAvailable && displayName ? (
           <Menu direction="rtl">
             <MenuButton
               as={Button}
@@ -54,7 +57,7 @@ export const DefaultHeader: React.FC<BoxProps> = (props) => {
               rightIcon={<FaChevronDown />}
               variant="ghost"
             >
-              {`User ${session.userId.slice(0, 4)}...${session.userId.slice(-4)}`}
+              {displayName}
             </MenuButton>
             <MenuList>
               <MenuItem as={NextLink} href="/settings" icon={<Icon as={FaCog} boxSize={5} />}>

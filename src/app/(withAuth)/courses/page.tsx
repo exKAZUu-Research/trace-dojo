@@ -1,6 +1,6 @@
 import type { NextPage } from 'next';
 
-import { getSessionOnServerPage } from '../../../infrastructures/session';
+import { getSessionOnServerPage } from '../../../utils/session';
 
 const CoursePage: NextPage = async () => {
   const session = await getSessionOnServerPage();

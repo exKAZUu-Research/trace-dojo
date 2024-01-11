@@ -3745,6 +3745,24 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@tanstack/query-core@npm:5.17.9":
+  version: 5.17.9
+  resolution: "@tanstack/query-core@npm:5.17.9"
+  checksum: 54d5c10797e4478d40f12455fd1cc5447d06fb7c633fb868b8c48bcc323d83828f2cd51ce3275ce980f90f111d3f300d4efb6f0fbc35a10a78f98c64713009d7
+  languageName: node
+  linkType: hard
+
+"@tanstack/react-query@npm:5.17.9":
+  version: 5.17.9
+  resolution: "@tanstack/react-query@npm:5.17.9"
+  dependencies:
+    "@tanstack/query-core": "npm:5.17.9"
+  peerDependencies:
+    react: ^18.0.0
+  checksum: fe9c3c37594cddda1a3c3ec7f489243b5d8117af07cb7096a82ea644c248b31c8c3b9e248fef59ee9d41ff78663e87dd900d17da2b7f95d9b9171479a7c2d4da
+  languageName: node
+  linkType: hard
+
 "@tootallnate/quickjs-emscripten@npm:^0.23.0":
   version: 0.23.0
   resolution: "@tootallnate/quickjs-emscripten@npm:0.23.0"
@@ -10567,6 +10585,7 @@ __metadata:
     "@emotion/react": "npm:11.11.3"
     "@emotion/styled": "npm:11.11.0"
     "@prisma/client": "npm:5.7.1"
+    "@tanstack/react-query": "npm:5.17.9"
     "@types/cookie": "npm:0.6.0"
     "@types/eslint": "npm:8.56.1"
     "@types/micromatch": "npm:4.0.6"
@@ -10610,6 +10629,7 @@ __metadata:
     supertokens-web-js: "npm:0.8.0"
     typescript: "npm:5.3.3"
     zod: "npm:3.22.4"
+    zod-form-data: "npm:2.0.2"
   languageName: unknown
   linkType: soft
 
@@ -11305,6 +11325,15 @@ __metadata:
   version: 0.1.0
   resolution: "yocto-queue@npm:0.1.0"
   checksum: dceb44c28578b31641e13695d200d34ec4ab3966a5729814d5445b194933c096b7ced71494ce53a0e8820685d1d010df8b2422e5bf2cdea7e469d97ffbea306f
+  languageName: node
+  linkType: hard
+
+"zod-form-data@npm:2.0.2":
+  version: 2.0.2
+  resolution: "zod-form-data@npm:2.0.2"
+  peerDependencies:
+    zod: ">= 3.11.0"
+  checksum: 962ad1d3f9ffead8c794b7adefdd3192ebb6483b3cd3b9f9295d5ffb517d15889b33994576ec2a4c56785e3bc0b4843aa007299d4a6c29bc750a367715174794
   languageName: node
   linkType: hard
 

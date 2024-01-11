@@ -6,9 +6,9 @@ import type { SessionContainer, VerifySessionOptions } from 'supertokens-node/re
 import Session from 'supertokens-node/recipe/session';
 import type { HTTPMethod } from 'supertokens-node/types';
 
-import { logger } from './pino';
-import { prisma } from './prisma';
-import { ensureSuperTokensInit } from './supertokens/backendConfig';
+import { logger } from '../infrastructures/pino';
+import { prisma } from '../infrastructures/prisma';
+import { ensureSuperTokensInit } from '../infrastructures/supertokens/backendConfig';
 
 ensureSuperTokensInit();
 
@@ -109,7 +109,7 @@ async function upsertUserToPrisma(superTokensUserId: string): Promise<void> {
 
   upsertedUserIds.add(superTokensUserId);
   const user = await prisma.user.upsert({
-    create: { superTokensUserId },
+    create: { superTokensUserId, displayName: superTokensUserId },
     update: {},
     where: { superTokensUserId },
   });

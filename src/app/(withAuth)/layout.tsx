@@ -7,8 +7,8 @@ import { SessionAuthForNext } from '../../components/molecules/SessionAuthForNex
 import { TryRefreshComponent } from '../../components/molecules/TryRefreshComponent';
 import { DefaultFooter } from '../../components/organisms/DefaultFooter';
 import { DefaultHeader } from '../../components/organisms/DefaultHeader';
-import { getSessionOnServerLayout } from '../../infrastructures/session';
 import type { LayoutProps } from '../../types';
+import { getSessionOnServerLayout } from '../../utils/session';
 
 const DefaultLayout: NextPage<LayoutProps> = async ({ children }) => {
   const { hasInvalidClaims, hasToken, session } = await getSessionOnServerLayout();

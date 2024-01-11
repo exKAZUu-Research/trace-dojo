@@ -18,4 +18,7 @@ model User {
   updatedAt DateTime @updatedAt
 
   superTokensUserId String @unique
+  displayName       String
+
+  @@index([superTokensUserId])
 }
