@@ -19,7 +19,9 @@ const HomePage: NextPage = async () => {
         <ul>
           {users.map((user) => (
             <li key={user.id}>
-              <Text>{user.superTokensUserId}</Text>
+              <Text>
+                {user.displayName} ({user.id})
+              </Text>
             </li>
           ))}
         </ul>

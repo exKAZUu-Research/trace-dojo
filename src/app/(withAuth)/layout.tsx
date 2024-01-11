@@ -8,10 +8,10 @@ import { TryRefreshComponent } from '../../components/molecules/TryRefreshCompon
 import { DefaultFooter } from '../../components/organisms/DefaultFooter';
 import { DefaultHeader } from '../../components/organisms/DefaultHeader';
 import type { LayoutProps } from '../../types';
-import { getSessionOnServerLayout } from '../../utils/session';
+import { getNullableSessionOnServer } from '../../utils/session';
 
 const DefaultLayout: NextPage<LayoutProps> = async ({ children }) => {
-  const { hasInvalidClaims, hasToken, session } = await getSessionOnServerLayout();
+  const { hasInvalidClaims, hasToken, session } = await getNullableSessionOnServer();
 
   // `session` will be undefined if it does not exist or has expired
   if (!session) {
@@ -54,13 +54,11 @@ const DefaultLayout: NextPage<LayoutProps> = async ({ children }) => {
       <SessionAuthForNext />
 
       <DefaultHeader />
-
       <Suspense fallback={<Spinner left="50%" position="fixed" top="50%" transform="translate(-50%, -50%)" />}>
         <Container pb={16} pt={8}>
           {children}
         </Container>
       </Suspense>
-
       <DefaultFooter />
     </>
   );

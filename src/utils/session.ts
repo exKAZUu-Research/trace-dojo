@@ -24,7 +24,7 @@ export interface SessionOnServerLayout {
   nextResponse?: NextResponse;
 }
 
-export async function getSessionOnServerLayout(
+export async function getNullableSessionOnServer(
   req?: NextRequest,
   options?: VerifySessionOptions
 ): Promise<SessionOnServerLayout> {
@@ -69,7 +69,7 @@ export async function getSessionOnServerLayout(
   }
 }
 
-export async function getSessionOnServerPage(
+export async function getNonNullableSessionOnServer(
   req?: NextRequest,
   options?: VerifySessionOptions
 ): Promise<SessionContainer> {
@@ -104,14 +104,14 @@ function getBaseRequest(req: NextRequest | undefined): PreParsedRequest {
 
 const upsertedUserIds = new Set<string>();
 
-async function upsertUserToPrisma(superTokensUserId: string): Promise<void> {
-  if (upsertedUserIds.has(superTokensUserId)) return;
+async function upsertUserToPrisma(id: string): Promise<void> {
+  if (upsertedUserIds.has(id)) return;
 
-  upsertedUserIds.add(superTokensUserId);
+  upsertedUserIds.add(id);
   const user = await prisma.user.upsert({
-    create: { superTokensUserId, displayName: superTokensUserId },
+    create: { id, displayName: id },
     update: {},
-    where: { superTokensUserId },
+    where: { id },
   });
   logger.debug('User upserted: %o', user);
 }

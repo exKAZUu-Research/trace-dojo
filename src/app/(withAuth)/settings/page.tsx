@@ -1,17 +1,17 @@
 import { Box, Button, FormControl, FormLabel, Input } from '@chakra-ui/react';
 import type { NextPage } from 'next';
+import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { zfd } from 'zod-form-data';
 
 import { prisma } from '../../../infrastructures/prisma';
-import { getSessionOnServerPage } from '../../../utils/session';
-import { revalidatePath } from 'next/cache';
+import { getNonNullableSessionOnServer } from '../../../utils/session';
 
 const SettingsPage: NextPage = async () => {
-  const session = await getSessionOnServerPage();
+  const session = await getNonNullableSessionOnServer();
   const user = await prisma.user.findUnique({
     where: {
-      superTokensUserId: session.getUserId(),
+      id: session.getUserId(),
     },
   });
 
@@ -20,7 +20,7 @@ const SettingsPage: NextPage = async () => {
       <form action={updateDisplayName}>
         <FormControl>
           <FormLabel>あなたの表示名</FormLabel>
-          <Input name="displayName" type="text" defaultValue={user?.displayName} />
+          <Input defaultValue={user?.displayName} name="displayName" type="text" />
         </FormControl>
         <Button colorScheme="blue" mt={4} type="submit">
           更新
@@ -37,10 +37,10 @@ const inputSchema = zfd.formData({
 async function updateDisplayName(formData: FormData): Promise<void> {
   'use server';
   const input = inputSchema.parse(formData);
-  const session = await getSessionOnServerPage();
+  const session = await getNonNullableSessionOnServer();
   await prisma.user.update({
     where: {
-      superTokensUserId: session.getUserId(),
+      id: session.getUserId(),
     },
     data: {
       displayName: input.displayName,
