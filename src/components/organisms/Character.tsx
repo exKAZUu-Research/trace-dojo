@@ -13,12 +13,12 @@ interface CharacterProps {
     penDown: boolean;
     path: string[];
   };
+  gridColumns: number;
+  gridSize: number;
   onMoveForward: (id: number) => void;
 }
 
-export const Character: React.FC<CharacterProps> = ({ character, onMoveForward }) => {
-  const gridSize = 40;
-
+export const Character: React.FC<CharacterProps> = ({ character, gridColumns, gridSize, onMoveForward }) => {
   const characterStyle: React.CSSProperties = {
     position: 'absolute',
     top: character.y * gridSize + 'px',
@@ -38,8 +38,7 @@ export const Character: React.FC<CharacterProps> = ({ character, onMoveForward }
   useEffect(() => {
     for (const position of character.path) {
       const [x, y] = position.split(',').map(Number);
-      // TODO: 12（グリッドの列数）を定数にする
-      const gridCell = document.querySelectorAll('.grid-cell')[x + y * 12] as HTMLElement;
+      const gridCell = document.querySelectorAll('.grid-cell')[x + y * gridColumns] as HTMLElement;
 
       if (!gridCell) return;
 

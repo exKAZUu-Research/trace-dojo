@@ -16,14 +16,16 @@ interface TurtleGraphicsProps {
     penDown: boolean;
     path: string[];
   }[];
-  columns?: number;
-  rows?: number;
+  gridColumns?: number;
+  gridRows?: number;
+  gridSize?: number;
 }
 
 export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({
   characters: initialCharacters,
-  columns: columns = 12,
-  rows: rows = 8,
+  gridColumns: gridColumns = 12,
+  gridRows: gridRows = 8,
+  gridSize: gridSize = 40,
 }) => {
   const [characters, setCharacters] = useState(initialCharacters);
 
@@ -74,12 +76,22 @@ export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({
 
   return (
     <div className="turtle-graphics-container">
-      <Grid position="relative" templateColumns={`repeat(${columns}, 40px)`} templateRows={`repeat(${rows}, 40px)`}>
-        {Array.from({ length: columns * rows }).map((_, index) => (
+      <Grid
+        position="relative"
+        templateColumns={`repeat(${gridColumns}, ${gridSize}px)`}
+        templateRows={`repeat(${gridRows}, ${gridSize}px)`}
+      >
+        {Array.from({ length: gridColumns * gridRows }).map((_, index) => (
           <GridItem key={index} borderColor="black" borderWidth="1px" className="grid-cell" />
         ))}
         {characters.map((character) => (
-          <Character key={character.id} character={character} onMoveForward={handleMoveForward} />
+          <Character
+            key={character.id}
+            character={character}
+            gridColumns={gridColumns}
+            gridSize={gridSize}
+            onMoveForward={handleMoveForward}
+          />
         ))}
       </Grid>
       {characters.map((character) => (
