@@ -1,4 +1,6 @@
-import React from 'react';
+'use client';
+
+import React, { useEffect } from 'react';
 
 interface CharacterProps {
   character: {
@@ -32,17 +34,16 @@ export const Character: React.FC<CharacterProps> = ({ character, onMoveForward }
     textAlign: 'center',
   };
 
-  // 軌跡を描画
-  // TODO: 初期位置が軌跡として表示されない問題の解消
-  {
-    character.path.map((position) => {
+  // 軌跡の描画
+  useEffect(() => {
+    for (const position of character.path) {
       const [x, y] = position.split(',').map(Number);
       // TODO: 12（グリッドの列数）を定数にする
-      const gridCell = document.querySelectorAll('.grid-cell')[x + y * 12];
-      (gridCell as HTMLElement).style.backgroundColor = character.color;
-      (gridCell as HTMLElement).style.opacity = '0.5';
-    });
-  }
+      const gridCell = document.querySelectorAll('.grid-cell')[x + y * 12] as HTMLElement;
+      gridCell.style.backgroundColor = character.color;
+      gridCell.style.opacity = '0.5';
+    }
+  });
 
   return (
     <div style={characterStyle}>
