@@ -54,6 +54,18 @@ export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({ characters: init
     );
   };
 
+  const handleChangeDirection = (id: number, direction: string): void => {
+    setCharacters((prevCharacters) =>
+      prevCharacters.map((character) => {
+        if (character.id === id) {
+          const updatedCharacter = { ...character, direction };
+          return updatedCharacter;
+        }
+        return character;
+      })
+    );
+  };
+
   return (
     <div className="turtle-graphics-container">
       <div className="grid">
@@ -64,6 +76,17 @@ export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({ characters: init
           <Character key={character.id} character={character} onMoveForward={handleMoveForward} />
         ))}
       </div>
+      {characters.map((character) => (
+        <div key={character.id}>
+          <div>{character.name}</div>
+          <select value={character.direction} onChange={(e) => handleChangeDirection(character.id, e.target.value)}>
+            <option value="up">Up</option>
+            <option value="down">Down</option>
+            <option value="left">Left</option>
+            <option value="right">Right</option>
+          </select>
+        </div>
+      ))}
     </div>
   );
 };

@@ -1,7 +1,3 @@
-.turtle-graphics-container {
-  display: flex;
-}
-
 .grid {
   display: grid;
   grid-template-columns: repeat(12, 40px); /* グリッドの列数とセルの幅 */

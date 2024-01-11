@@ -12,7 +12,6 @@ const SamplePage: NextPage = async () => {
 
   return (
     <div>
-      <h1>Turtle Graphics App</h1>
       <TurtleGraphics characters={initialCharacters} />
     </div>
   );
