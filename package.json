@@ -34,6 +34,7 @@
     "@emotion/react": "11.11.3",
     "@emotion/styled": "11.11.0",
     "@prisma/client": "5.7.1",
+    "@tanstack/react-query": "5.17.9",
     "@willbooster/shared-lib-react": "3.0.5",
     "framer-motion": "10.17.9",
     "next": "14.0.4",
@@ -47,7 +48,8 @@
     "supertokens-auth-react": "0.36.1",
     "supertokens-node": "16.6.8",
     "supertokens-web-js": "0.8.0",
-    "zod": "3.22.4"
+    "zod": "3.22.4",
+    "zod-form-data": "2.0.2"
   },
   "devDependencies": {
     "@chakra-ui/cli": "2.4.1",

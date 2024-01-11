@@ -13,9 +13,9 @@ datasource db {
 // -----------------------------------------------------------------------------
 
 model User {
-  id        Int      @id @default(autoincrement())
+  id        String      @id
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  superTokensUserId String @unique
+  displayName       String @unique
 }

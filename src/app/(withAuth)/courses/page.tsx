@@ -1,13 +1,13 @@
 import type { NextPage } from 'next';
 
-import { getSessionOnServerPage } from '../../../infrastructures/session';
+import { getNonNullableSessionOnServer } from '../../../utils/session';
 
 const CoursePage: NextPage = async () => {
-  const session = await getSessionOnServerPage();
+  const session = await getNonNullableSessionOnServer();
 
   return (
     <main>
-      <div>UserID on Supertokens: {session.getUserId()}</div>
+      <div>UserID: {session.getUserId()}</div>
       <h1>Courses</h1>
     </main>
   );
