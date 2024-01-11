@@ -46,6 +46,8 @@ async function updateDisplayName(formData: FormData): Promise<void> {
       displayName: input.displayName,
     },
   });
+
+  // ユーザ名の変更を全ページに反映する。
   revalidatePath('/', 'layout');
 }
 
