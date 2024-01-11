@@ -1,7 +1,5 @@
 'use client';
 
-// TurtleGraphics.tsx
-
 import React, { useState } from 'react';
 
 import { Character } from '../../components/organisms/Character';
@@ -47,6 +45,7 @@ export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({ characters: init
               break;
             }
           }
+          updatedCharacter.path.push(`${updatedCharacter.x},${updatedCharacter.y}`);
 
           return updatedCharacter;
         }

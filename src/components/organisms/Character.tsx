@@ -1,5 +1,3 @@
-// Character.tsx
-
 import React from 'react';
 
 interface CharacterProps {
@@ -33,6 +31,18 @@ export const Character: React.FC<CharacterProps> = ({ character, onMoveForward }
     color: 'white',
     textAlign: 'center',
   };
+
+  // 軌跡を描画
+  // TODO: 初期位置が軌跡として表示されない問題の解消
+  {
+    character.path.map((position) => {
+      const [x, y] = position.split(',').map(Number);
+      // TODO: 12（グリッドの列数）を定数にする
+      const gridCell = document.querySelectorAll('.grid-cell')[x + y * 12];
+      (gridCell as HTMLElement).style.backgroundColor = character.color;
+      (gridCell as HTMLElement).style.opacity = '0.5';
+    });
+  }
 
   return (
     <div style={characterStyle}>
