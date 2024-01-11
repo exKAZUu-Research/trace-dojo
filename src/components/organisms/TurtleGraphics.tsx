@@ -1,9 +1,9 @@
 'use client';
 
+import { Grid, GridItem } from '@chakra-ui/react';
 import React, { useState } from 'react';
 
 import { Character } from '../../components/organisms/Character';
-import './TurtleGraphics.css';
 
 interface TurtleGraphicsProps {
   characters: {
@@ -16,9 +16,15 @@ interface TurtleGraphicsProps {
     penDown: boolean;
     path: string[];
   }[];
+  columns?: number;
+  rows?: number;
 }
 
-export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({ characters: initialCharacters }) => {
+export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({
+  characters: initialCharacters,
+  columns: columns = 12,
+  rows: rows = 8,
+}) => {
   const [characters, setCharacters] = useState(initialCharacters);
 
   const handleMoveForward = (id: number): void => {
@@ -68,14 +74,14 @@ export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({ characters: init
 
   return (
     <div className="turtle-graphics-container">
-      <div className="grid">
-        {Array.from({ length: 96 }).map((_, index) => (
-          <div key={index} className="grid-cell"></div>
+      <Grid position="relative" templateColumns={`repeat(${columns}, 40px)`} templateRows={`repeat(${rows}, 40px)`}>
+        {Array.from({ length: columns * rows }).map((_, index) => (
+          <GridItem key={index} borderColor="black" borderWidth="1px" className="grid-cell" />
         ))}
         {characters.map((character) => (
           <Character key={character.id} character={character} onMoveForward={handleMoveForward} />
         ))}
-      </div>
+      </Grid>
       {characters.map((character) => (
         <div key={character.id}>
           <div>{character.name}</div>
