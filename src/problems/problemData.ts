@@ -12,6 +12,15 @@ export const courseIdToName: Record<CourseId, string> = {
   tuBeginner2: '初級プログラミングⅡ',
 };
 
+export const programIdToName: Record<ProgramId, string> = {
+  straight: '線を描こう(1)',
+  curve: '線を描こう(2)',
+  stairs: '線を描こう(3)',
+  square: '図形を描こう(1)',
+  rectangle: '図形を描こう(2)',
+  diamond: '図形を描こう(3)',
+};
+
 export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
   tuBeginner1: [
     ['straight', 'curve', 'stairs'],
@@ -20,13 +29,19 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
   tuBeginner2: [],
 };
 
-export function generateProgramById(problemId: string): string {
+export function generateProgram(programId: ProgramId, languageId: LanguageId): string {
   // TODO(exKAZUu): 問題IDに紐づくプログラム（テンプレート）を取得して、乱数を使って具体的なプログラムを生成する。
-  return `const turtle = new Turtle();
-turtle.moveForward(5);`;
+  return (
+    `const turtle = new Turtle();
+turtle.moveForward(5);` || programIdToLanguageIdToProgram[programId][languageId]
+  );
 }
 
-export const programIdToProgram: Record<ProgramId, Record<LanguageId, string>> = {
+export function getExplanation(programId: ProgramId, languageId: LanguageId): string {
+  return programIdToLanguageIdToExplanation[programId][languageId];
+}
+
+export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId, string>> = {
   straight: {
     js: `
 const turtle = new Turtle();
@@ -57,6 +72,25 @@ public class Curve {
     turtle.moveForward(<3-5>);
   }
 }
+`.trim(),
+  },
+};
+
+export const programIdToLanguageIdToExplanation: Record<ProgramId, Record<LanguageId, string>> = {
+  straight: {
+    js: `
+JavaScript向けの解説。JavaScript向けの解説。
+`.trim(),
+    java: `
+Java向けの解説。Java向けの解説。
+`.trim(),
+  },
+  curve: {
+    js: `
+JavaScript向けの解説。JavaScript向けの解説。
+`.trim(),
+    java: `
+Java向けの解説。Java向けの解説。
 `.trim(),
   },
 };
