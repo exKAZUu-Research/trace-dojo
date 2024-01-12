@@ -1,13 +1,12 @@
 'use client';
 
-import { Grid, GridItem } from '@chakra-ui/react';
-import React, { useState } from 'react';
+import { Box, Grid, GridItem } from '@chakra-ui/react';
+import React, { useState, useEffect } from 'react';
 
-import { Character } from '../molecules/Character';
-import type { CharacterInterface } from '../molecules/Character';
+import { Character } from '../../app/lib/Character';
 
 interface TurtleGraphicsProps {
-  characters: CharacterInterface[];
+  characters: Character[];
   gridColumns?: number;
   gridRows?: number;
   gridSize?: number;
@@ -21,49 +20,79 @@ export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({
 }) => {
   const [characters, setCharacters] = useState(initialCharacters);
 
-  const handleMoveForward = (id: number): void => {
+  useEffect(() => {
+    // 軌跡の描画
+    for (const character of characters) {
+      if (!character.penDown) continue;
+
+      for (const position of character.path) {
+        const [x, y] = position.split(',').map(Number);
+        const gridCell = document.querySelectorAll('.grid-cell')[x + y * gridColumns] as HTMLElement;
+
+        if (!gridCell) return;
+
+        gridCell.style.backgroundColor = character.color;
+        gridCell.style.opacity = '0.5';
+      }
+    }
+  }, [characters, gridColumns]);
+
+  const updateCharacter = (character: Character, updater: (char: Character) => void): void => {
     setCharacters((prevCharacters) =>
-      prevCharacters.map((character) => {
-        if (character.id === id) {
-          const updatedCharacter = { ...character };
-
-          switch (updatedCharacter.direction) {
-            case 'up': {
-              updatedCharacter.y = Math.max(0, updatedCharacter.y - 1);
-              break;
-            }
-            case 'down': {
-              updatedCharacter.y = Math.min(7, updatedCharacter.y + 1);
-              break;
-            }
-            case 'left': {
-              updatedCharacter.x = Math.max(0, updatedCharacter.x - 1);
-              break;
-            }
-            case 'right': {
-              updatedCharacter.x = Math.min(11, updatedCharacter.x + 1);
-              break;
-            }
-          }
-          updatedCharacter.path.push(`${updatedCharacter.x},${updatedCharacter.y}`);
-
+      prevCharacters.map((prevCharacter) => {
+        if (prevCharacter.id === character.id) {
+          const updatedCharacter = new Character(
+            character.id,
+            character.name,
+            character.x,
+            character.y,
+            character.direction,
+            character.color,
+            character.penDown,
+            [...character.path]
+          );
+          updater(updatedCharacter);
           return updatedCharacter;
         }
-        return character;
+        return prevCharacter;
       })
     );
   };
 
-  const handleChangeDirection = (id: number, direction: string): void => {
-    setCharacters((prevCharacters) =>
-      prevCharacters.map((character) => {
-        if (character.id === id) {
-          const updatedCharacter = { ...character, direction };
-          return updatedCharacter;
-        }
-        return character;
-      })
-    );
+  const handleMoveForward = (character: Character): void => {
+    updateCharacter(character, (updatedCharacter) => {
+      updatedCharacter.moveForward(gridColumns, gridRows);
+    });
+  };
+
+  const handleMoveBack = (character: Character): void => {
+    updateCharacter(character, (updatedCharacter) => {
+      updatedCharacter.moveBack(gridColumns, gridRows);
+    });
+  };
+
+  const handleTurnleft = (character: Character): void => {
+    updateCharacter(character, (updatedCharacter) => {
+      updatedCharacter.turnLeft();
+    });
+  };
+
+  const handleTurnRight = (character: Character): void => {
+    updateCharacter(character, (updatedCharacter) => {
+      updatedCharacter.turnRight();
+    });
+  };
+
+  const handlePutPen = (character: Character): void => {
+    updateCharacter(character, (updatedCharacter) => {
+      updatedCharacter.putPen();
+    });
+  };
+
+  const handleUpPen = (character: Character): void => {
+    updateCharacter(character, (updatedCharacter) => {
+      updatedCharacter.upPen();
+    });
   };
 
   return (
@@ -77,24 +106,41 @@ export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({
           <GridItem key={index} borderColor="black" borderWidth="1px" className="grid-cell" />
         ))}
         {characters.map((character) => (
-          <Character
+          <Box
             key={character.id}
-            character={character}
-            gridColumns={gridColumns}
-            gridSize={gridSize}
-            onMoveForward={handleMoveForward}
-          />
+            bgColor={character.color}
+            h={gridSize + 'px'}
+            left={character.x * gridSize + 'px'}
+            position="absolute"
+            top={character.y * gridSize + 'px'}
+            w={gridSize + 'px'}
+          >
+            {character.name}
+          </Box>
         ))}
       </Grid>
       {characters.map((character) => (
         <div key={character.id}>
           <div>{character.name}</div>
-          <select value={character.direction} onChange={(e) => handleChangeDirection(character.id, e.target.value)}>
-            <option value="up">Up</option>
-            <option value="down">Down</option>
-            <option value="left">Left</option>
-            <option value="right">Right</option>
-          </select>
+          <div>
+            <button onClick={() => handleMoveForward(character)}>Move Forword</button>
+          </div>
+          <div>
+            <button onClick={() => handleMoveBack(character)}>Move Back</button>
+          </div>
+          <div>
+            <button onClick={() => handleTurnleft(character)}>Turn Left</button>
+          </div>
+          <div>
+            <button onClick={() => handleTurnRight(character)}>Turn Right</button>
+          </div>
+          <div>
+            <button onClick={() => handlePutPen(character)}>Put Pen</button>
+          </div>
+          <div>
+            <button onClick={() => handleUpPen(character)}>Up Pen</button>
+          </div>
+          <div> --- </div>
         </div>
       ))}
     </div>
