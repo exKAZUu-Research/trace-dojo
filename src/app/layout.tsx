@@ -1,5 +1,5 @@
 import { VersionOverlay } from '@willbooster/shared-lib-react';
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import React from 'react';
 
 import { Providers } from '../components/organisms/Providers';
@@ -9,7 +9,11 @@ import type { LayoutComponent } from '../types';
 export const metadata: Metadata = {
   title: { absolute: APP_NAME, template: `%s | ${APP_NAME}` },
   description: APP_DESCRIPTION,
-  viewport: { width: 'device-width', initialScale: 1 },
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
 };
 
 const RootLayout: LayoutComponent = ({ children }) => {
