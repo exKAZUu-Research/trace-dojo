@@ -13,6 +13,7 @@ export const SignOutMenuItem: React.FC = () => {
       onClick={async () => {
         await signOut();
         router.push('/');
+        router.refresh();
       }}
     >
       サインアウト

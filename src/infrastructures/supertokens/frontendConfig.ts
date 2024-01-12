@@ -5,6 +5,7 @@ import EmailPasswordReact from 'supertokens-auth-react/recipe/emailpassword';
 import SessionReact from 'supertokens-auth-react/recipe/session';
 
 import { appInfo } from './appInfo';
+import { router } from 'next/client';
 
 const routerInfo: { router?: ReturnType<typeof useRouter>; pathName?: string } = {};
 
@@ -16,7 +17,14 @@ export function setRouter(router: ReturnType<typeof useRouter>, pathName: string
 export const frontendConfig = (): SuperTokensConfig => {
   return {
     appInfo,
-    recipeList: [EmailPasswordReact.init(), SessionReact.init()],
+    recipeList: [
+      EmailPasswordReact.init({
+        onHandleEvent: async (context) => {
+          router.referesh();
+        },
+      }),
+      SessionReact.init(),
+    ],
     windowHandler: (original) => ({
       ...original,
       location: {
