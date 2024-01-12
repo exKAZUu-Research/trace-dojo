@@ -9,7 +9,6 @@ const CoursePage: NextPage = async () => {
     <main>
       <div>UserID: {session.getUserId()}</div>
       <h1>Courses</h1>
-      <ul>{}</ul>
     </main>
   );
 };
