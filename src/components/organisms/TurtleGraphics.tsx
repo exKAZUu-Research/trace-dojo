@@ -3,8 +3,8 @@
 import { Grid, GridItem } from '@chakra-ui/react';
 import React, { useState } from 'react';
 
-import { Character } from '../../components/organisms/Character';
-import type { CharacterInterface } from '../../components/organisms/Character';
+import { Character } from '../molecules/Character';
+import type { CharacterInterface } from '../molecules/Character';
 
 interface TurtleGraphicsProps {
   characters: CharacterInterface[];
