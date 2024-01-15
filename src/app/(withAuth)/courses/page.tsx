@@ -1,4 +1,4 @@
-import { Box, Heading, Link, List, ListItem, Text } from '@chakra-ui/react';
+import { Box, Heading, LinkBox, LinkOverlay, List, ListItem, Text } from '@chakra-ui/react';
 import type { NextPage } from 'next';
 import NextLink from 'next/link';
 
@@ -18,9 +18,11 @@ const CoursesPage: NextPage = async () => {
         <List spacing={3}>
           {courseIds.map((id) => (
             <ListItem key={id}>
-              <NextLink passHref href={`/courses/${id}`}>
-                <Link>{courseIdToName[id]}</Link>
-              </NextLink>
+              <LinkBox borderWidth="1px" p="5" rounded="md">
+                <LinkOverlay passHref as={NextLink} href={`/courses/${id}`}>
+                  {courseIdToName[id]}
+                </LinkOverlay>
+              </LinkBox>
             </ListItem>
           ))}
         </List>
