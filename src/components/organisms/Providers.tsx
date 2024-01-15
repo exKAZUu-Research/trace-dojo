@@ -7,7 +7,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import React from 'react';
 import { SuperTokensWrapper } from 'supertokens-auth-react';
 
-import { ensureSuperTokensReactInit, setRouter } from '../../infrastructures/supertokens/frontend';
+import { ensureSuperTokensReactInit, setRouter } from '../../infrastructures/supertokens/frontendConfig';
 import { theme } from '../../theme';
 
 ensureSuperTokensReactInit();

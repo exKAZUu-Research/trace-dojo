@@ -3,7 +3,7 @@ import type { NextPage } from 'next';
 import { redirect } from 'next/navigation';
 import React, { Suspense } from 'react';
 
-import { SessionAuthForNext } from '../../components/molecules/SessionAuthForNext';
+import { SessionAuthForNextJs } from '../../components/molecules/SessionAuthForNextJs';
 import { TryRefreshComponent } from '../../components/molecules/TryRefreshComponent';
 import { DefaultFooter } from '../../components/organisms/DefaultFooter';
 import { DefaultHeader } from '../../components/organisms/DefaultHeader';
@@ -35,7 +35,7 @@ const DefaultLayout: NextPage<LayoutProps> = async ({ children }) => {
        * We pass in no children in this case to prevent hydration issues and still be able to redirect the
        * user.
        */
-      <SessionAuthForNext />
+      <SessionAuthForNextJs />
     ) : (
       /**
        * This means that the session does not exist, but we have session tokens for the user.
@@ -51,7 +51,7 @@ const DefaultLayout: NextPage<LayoutProps> = async ({ children }) => {
    */
   return (
     <>
-      <SessionAuthForNext />
+      <SessionAuthForNextJs />
 
       <DefaultHeader />
       <Suspense fallback={<Spinner left="50%" position="fixed" top="50%" transform="translate(-50%, -50%)" />}>
