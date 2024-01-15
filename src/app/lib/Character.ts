@@ -28,7 +28,7 @@ export class Character {
     this.path = path;
   }
 
-  moveForward(gridColumns: number, girdRows: number): void {
+  moveForward(gridColumns: number, gridRows: number): void {
     switch (this.direction) {
       case 'up': {
         if (this.y <= 0) return;
@@ -37,7 +37,7 @@ export class Character {
         break;
       }
       case 'down': {
-        if (this.y >= girdRows - 1) return;
+        if (this.y >= gridRows - 1) return;
 
         this.y += 1;
         break;
@@ -61,10 +61,10 @@ export class Character {
     }
   }
 
-  moveBack(gridColumns: number, girdRows: number): void {
+  moveBack(gridColumns: number, gridRows: number): void {
     switch (this.direction) {
       case 'up': {
-        if (this.y >= girdRows - 1) return;
+        if (this.y >= gridRows - 1) return;
 
         this.y += 1;
         break;
