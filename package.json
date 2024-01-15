@@ -24,6 +24,7 @@
     "prettify": "prettier --cache --color --write \"**/{.*/,}*.{cjs,css,cts,htm,html,js,json,json5,jsx,md,mjs,mts,scss,ts,tsx,vue,yaml,yml}\" \"!**/test-fixtures/**\"",
     "start": "next dev",
     "start-prod": "next start",
+    "test": "vitest tests",
     "test/ci-setup": "wb prisma reset",
     "typecheck": "wb typecheck"
   },
@@ -81,7 +82,8 @@
     "prettier": "3.1.1",
     "prisma": "5.8.0",
     "sort-package-json": "2.6.0",
-    "typescript": "5.3.3"
+    "typescript": "5.3.3",
+    "vitest": "1.2.0"
   },
   "packageManager": "yarn@4.0.2",
   "publishConfig": {
