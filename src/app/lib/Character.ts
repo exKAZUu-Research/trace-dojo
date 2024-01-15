@@ -31,25 +31,25 @@ export class Character {
   moveForward(gridColumns: number, gridRows: number): void {
     switch (this.direction) {
       case 'up': {
-        if (this.y <= 0) return;
+        if (this.y <= 1) return;
 
         this.y -= 1;
         break;
       }
       case 'down': {
-        if (this.y >= gridRows - 1) return;
+        if (this.y >= gridRows) return;
 
         this.y += 1;
         break;
       }
       case 'left': {
-        if (this.x <= 0) return;
+        if (this.x <= 1) return;
 
         this.x -= 1;
         break;
       }
       case 'right': {
-        if (this.x >= gridColumns - 1) return;
+        if (this.x >= gridColumns) return;
 
         this.x += 1;
         break;
@@ -64,25 +64,25 @@ export class Character {
   moveBack(gridColumns: number, gridRows: number): void {
     switch (this.direction) {
       case 'up': {
-        if (this.y >= gridRows - 1) return;
+        if (this.y >= gridRows) return;
 
         this.y += 1;
         break;
       }
       case 'down': {
-        if (this.y <= 0) return;
+        if (this.y <= 1) return;
 
         this.y -= 1;
         break;
       }
       case 'left': {
-        if (this.x >= gridColumns - 1) return;
+        if (this.x >= gridColumns) return;
 
         this.x += 1;
         break;
       }
       case 'right': {
-        if (this.x <= 0) return;
+        if (this.x <= 1) return;
 
         this.x -= 1;
         break;

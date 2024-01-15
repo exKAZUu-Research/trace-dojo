@@ -5,6 +5,10 @@ import React, { useState, useEffect } from 'react';
 
 import { Character } from '../../app/lib/Character';
 
+// 原点（左上隅）の座標
+const ORIGIN_X = 1;
+const ORIGIN_Y = 1;
+
 interface TurtleGraphicsProps {
   characters: Character[];
   gridColumns?: number;
@@ -27,7 +31,9 @@ export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({
 
       for (const position of character.path) {
         const [x, y] = position.split(',').map(Number);
-        const gridCell = document.querySelectorAll('.grid-cell')[x + y * gridColumns] as HTMLElement;
+        const gridCell = document.querySelectorAll('.grid-cell')[
+          x - ORIGIN_X + (y - ORIGIN_Y) * gridColumns
+        ] as HTMLElement;
 
         if (!gridCell) return;
 
@@ -110,9 +116,9 @@ export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({
             key={character.id}
             bgColor={character.color}
             h={gridSize + 'px'}
-            left={character.x * gridSize + 'px'}
+            left={(character.x - ORIGIN_X) * gridSize + 'px'}
             position="absolute"
-            top={character.y * gridSize + 'px'}
+            top={(character.y - ORIGIN_Y) * gridSize + 'px'}
             w={gridSize + 'px'}
           >
             {character.name}
