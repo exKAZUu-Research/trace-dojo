@@ -15,6 +15,7 @@ interface TurtleGraphicsProps {
   gridColumns?: number;
   gridRows?: number;
   gridSize?: number;
+  isEnableOperation?: boolean;
 }
 
 export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({
@@ -22,6 +23,7 @@ export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({
   gridColumns: gridColumns = 12,
   gridRows: gridRows = 8,
   gridSize: gridSize = 40,
+  isEnableOperation: isEnableOperation = false,
 }) => {
   const [characters, setCharacters] = useState(initialCharacters);
 
@@ -129,30 +131,31 @@ export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({
           </Box>
         ))}
       </Grid>
-      {characters.map((character) => (
-        <div key={character.id}>
-          <div>{character.name}</div>
-          <div>
-            <button onClick={() => handleMoveForward(character)}>Move Forword</button>
+      {isEnableOperation &&
+        characters.map((character) => (
+          <div key={character.id}>
+            <div>{character.name}</div>
+            <div>
+              <button onClick={() => handleMoveForward(character)}>Move Forword</button>
+            </div>
+            <div>
+              <button onClick={() => handleMoveBack(character)}>Move Back</button>
+            </div>
+            <div>
+              <button onClick={() => handleTurnleft(character)}>Turn Left</button>
+            </div>
+            <div>
+              <button onClick={() => handleTurnRight(character)}>Turn Right</button>
+            </div>
+            <div>
+              <button onClick={() => handlePutPen(character)}>Put Pen</button>
+            </div>
+            <div>
+              <button onClick={() => handleUpPen(character)}>Up Pen</button>
+            </div>
+            <div> --- </div>
           </div>
-          <div>
-            <button onClick={() => handleMoveBack(character)}>Move Back</button>
-          </div>
-          <div>
-            <button onClick={() => handleTurnleft(character)}>Turn Left</button>
-          </div>
-          <div>
-            <button onClick={() => handleTurnRight(character)}>Turn Right</button>
-          </div>
-          <div>
-            <button onClick={() => handlePutPen(character)}>Put Pen</button>
-          </div>
-          <div>
-            <button onClick={() => handleUpPen(character)}>Up Pen</button>
-          </div>
-          <div> --- </div>
-        </div>
-      ))}
+        ))}
     </div>
   );
 };
