@@ -1,5 +1,3 @@
-import { Character } from '../app/lib/Character';
-
 export const courseIds = ['tuBeginner1', 'tuBeginner2'];
 export type CourseId = (typeof courseIds)[number];
 
@@ -45,10 +43,6 @@ export function getDescription(programId: ProgramId): string {
 
 export function getExplanation(programId: ProgramId, languageId: LanguageId): string {
   return programIdToLanguageIdToExplanation[programId][languageId];
-}
-
-export function getTurtleGraphicsInitialCharacters(programId: ProgramId): Character[] {
-  return programIdToTurtleGraphicsInitialCharacters[programId];
 }
 
 export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId, string>> = {
@@ -112,12 +106,4 @@ JavaScript向けの解説。JavaScript向けの解説。
 Java向けの解説。Java向けの解説。
 `.trim(),
   },
-};
-
-export const programIdToTurtleGraphicsInitialCharacters: Record<ProgramId, Character[]> = {
-  straight: [
-    new Character(1, 'Turtle1', 1, 1, 'down', 'blue', false, ['1,1']),
-    new Character(2, 'Turtle2', 3, 3, 'right', 'red', true, ['2,3', '3,3']),
-  ],
-  curve: [],
 };

@@ -4,12 +4,7 @@ import { Box, Button, Flex, HStack, Heading, VStack } from '@chakra-ui/react';
 import type { NextPage } from 'next';
 
 import { TurtleGraphics } from '../../../../components/organisms/TurtleGraphics';
-import {
-  programIdToName,
-  generateProgram,
-  getDescription,
-  getTurtleGraphicsInitialCharacters,
-} from '../../../../problems/problemData';
+import { programIdToName, generateProgram, getDescription } from '../../../../problems/problemData';
 
 const GRID_COLUMNS = 12;
 const GRID_ROWS = 8;
@@ -24,12 +19,7 @@ const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) =>
           <VStack spacing="10" w={GRID_COLUMNS * GRID_SIZE}>
             <Box>{getDescription(params.problemId)}</Box>
             <Box>
-              <TurtleGraphics
-                characters={getTurtleGraphicsInitialCharacters(params.problemId) || []}
-                gridColumns={GRID_COLUMNS}
-                gridRows={GRID_ROWS}
-                gridSize={GRID_SIZE}
-              />
+              <TurtleGraphics characters={[]} gridColumns={GRID_COLUMNS} gridRows={GRID_ROWS} gridSize={GRID_SIZE} />
             </Box>
           </VStack>
           <VStack align="end" w="100%">
