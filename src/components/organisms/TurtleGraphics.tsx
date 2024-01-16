@@ -125,6 +125,7 @@ export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({
             <Box transform={character.rotateCss()}>
               <Image alt={character.name} height={gridSize} src="/character.png" width={gridSize} />
             </Box>
+            <Box position="absolute">{character.name}</Box>
           </Box>
         ))}
       </Grid>
