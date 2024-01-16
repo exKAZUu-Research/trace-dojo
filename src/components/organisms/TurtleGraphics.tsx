@@ -1,6 +1,7 @@
 'use client';
 
 import { Box, Grid, GridItem } from '@chakra-ui/react';
+import Image from 'next/image';
 import React, { useState, useEffect } from 'react';
 
 import { Character } from '../../app/lib/Character';
@@ -121,7 +122,9 @@ export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({
             top={(character.y - ORIGIN_Y) * gridSize + 'px'}
             w={gridSize + 'px'}
           >
-            {character.name}
+            <Box transform={character.rotateCss()}>
+              <Image alt={character.name} height={gridSize} src="/character.png" width={gridSize} />
+            </Box>
           </Box>
         ))}
       </Grid>

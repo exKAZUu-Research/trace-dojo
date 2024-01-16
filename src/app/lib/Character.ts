@@ -143,4 +143,22 @@ export class Character {
   upPen(): void {
     this.penDown = false;
   }
+
+  rotateCss(): string {
+    switch (this.direction) {
+      case 'up': {
+        return 'rotate(180deg)';
+      }
+      case 'down': {
+        return 'rotate(0deg)';
+      }
+      case 'left': {
+        return 'rotate(90deg)';
+      }
+      case 'right': {
+        return 'rotate(270deg)';
+      }
+    }
+    return '';
+  }
 }

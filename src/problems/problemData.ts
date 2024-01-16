@@ -103,8 +103,8 @@ Java向けの解説。Java向けの解説。
 
 export const programIdToTurtleGraphicsInitialCharacters: Record<ProgramId, Character[]> = {
   straight: [
-    new Character(1, 'Turtle1', 1, 1, 'up', 'blue', false, ['1,1']),
-    new Character(2, 'Turtle2', 3, 3, 'up', 'red', true, ['2,3', '3,3']),
+    new Character(1, 'Turtle1', 1, 1, 'down', 'blue', false, ['1,1']),
+    new Character(2, 'Turtle2', 3, 3, 'right', 'red', true, ['2,3', '3,3']),
   ],
   curve: [],
 };
