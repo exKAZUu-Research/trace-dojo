@@ -25,7 +25,7 @@ const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) =>
             <Box>{getDescription(params.problemId)}</Box>
             <Box>
               <TurtleGraphics
-                characters={getTurtleGraphicsInitialCharacters(params.problemId)}
+                characters={getTurtleGraphicsInitialCharacters(params.problemId) || []}
                 gridColumns={GRID_COLUMNS}
                 gridRows={GRID_ROWS}
                 gridSize={GRID_SIZE}
