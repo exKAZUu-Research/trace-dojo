@@ -3,7 +3,7 @@
 import { Box, Button, Flex, HStack, Heading, VStack } from '@chakra-ui/react';
 import type { NextPage } from 'next';
 
-import { CodeEditor } from '../../../../components/organisms/CodeEditor';
+import { SyntaxHighlighter } from '../../../../components/organisms/CodeEditor';
 import { TurtleGraphics } from '../../../../components/organisms/TurtleGraphics';
 import { programIdToName, generateProgram, getDescription } from '../../../../problems/problemData';
 
@@ -30,7 +30,7 @@ const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) =>
             <Button colorScheme="gray">解説</Button>
             {/* 画面に収まる高さに設定 */}
             <Box h="calc(100vh - 370px)" w="100%">
-              <CodeEditor
+              <SyntaxHighlighter
                 code={generateProgram(params.problemId, programmingLanguageId)}
                 programmingLanguageId={programmingLanguageId}
               />

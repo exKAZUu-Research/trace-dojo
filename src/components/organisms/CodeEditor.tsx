@@ -3,12 +3,15 @@ import React from 'react';
 import { Prism } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 
-interface CodeEditorProps {
+interface SyntaxHighlighterProps {
   code: string;
   programmingLanguageId: string;
 }
 
-export const CodeEditor: React.FC<CodeEditorProps> = ({ code: code, programmingLanguageId: programmingLanguageId }) => {
+export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
+  code: code,
+  programmingLanguageId: programmingLanguageId,
+}) => {
   return (
     <Box bgColor="#011627" h="100%" overflowY="auto" pb={2}>
       <Prism
