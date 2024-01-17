@@ -26,7 +26,7 @@ const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) =>
               <TurtleGraphics characters={[]} gridColumns={GRID_COLUMNS} gridRows={GRID_ROWS} gridSize={GRID_SIZE} />
             </Box>
           </VStack>
-          <VStack align="end" overflow="hidden">
+          <VStack align="end" minW="50%" overflow="hidden">
             <Button colorScheme="gray">解説</Button>
             {/* 画面に収まる高さに設定 */}
             <Box h="calc(100vh - 370px)" w="100%">
