@@ -17,7 +17,7 @@ const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) =>
 
   return (
     <main>
-      <VStack spacing="10">
+      <VStack spacing="4">
         <Heading as="h1">{programIdToName[params.problemId]}</Heading>
         <Flex gap="6" w="100%">
           <VStack spacing="10" w={GRID_COLUMNS * GRID_SIZE}>
@@ -26,9 +26,10 @@ const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) =>
               <TurtleGraphics characters={[]} gridColumns={GRID_COLUMNS} gridRows={GRID_ROWS} gridSize={GRID_SIZE} />
             </Box>
           </VStack>
-          <VStack align="end" w="50%">
+          <VStack align="end" overflow="hidden">
             <Button colorScheme="gray">解説</Button>
-            <Box w="100%">
+            {/* 画面に収まる高さに設定 */}
+            <Box h="calc(100vh - 370px)" w="100%">
               <CodeEditor
                 code={generateProgram(params.problemId, programmingLanguageId)}
                 programmingLanguageId={programmingLanguageId}
