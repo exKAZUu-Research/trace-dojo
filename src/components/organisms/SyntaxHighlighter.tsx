@@ -13,23 +13,21 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
   programmingLanguageId: programmingLanguageId,
 }) => {
   return (
-    <Box bgColor="#011627" h="100%" overflowY="auto" pb={2}>
+    <Box h="100%">
       <Prism
         codeTagProps={{ style: { fontSize: '1rem' } }}
         customStyle={{
-          backgroundColor: 'transparent',
+          backgroundColor: '#011627',
           marginTop: 0,
           overflow: 'auto',
-          padding: 0,
+          padding: 10,
+          height: '100%',
         }}
         language={programmingLanguageId === 'c' ? 'cpp' : programmingLanguageId}
-        lineNumberStyle={{ paddingRight: 0, marginRight: 10 }}
+        lineNumberStyle={{ paddingRight: 0, marginRight: 16, minWidth: '1rem' }}
         // lineProps={(lineNumber) => {
         lineProps={() => {
           const style = {
-            backgroundColor: 'transparent',
-            marginTop: 0,
-            overflow: 'auto',
             padding: 0,
           };
           // TODO: チェックポイント問題・ステップ問題のハイライト
