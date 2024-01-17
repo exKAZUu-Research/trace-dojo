@@ -3,7 +3,7 @@
 import { Box, Button, Flex, HStack, Heading, VStack } from '@chakra-ui/react';
 import type { NextPage } from 'next';
 
-import { SyntaxHighlighter } from '../../../../components/organisms/CodeEditor';
+import { SyntaxHighlighter } from '../../../../components/organisms/SyntaxHighlighter';
 import { TurtleGraphics } from '../../../../components/organisms/TurtleGraphics';
 import { programIdToName, generateProgram, getDescription } from '../../../../problems/problemData';
 
