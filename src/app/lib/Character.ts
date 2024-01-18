@@ -1,10 +1,19 @@
+export const CharacterColor = {
+  Red: 'red',
+  Blue: 'blue',
+  Green: 'green',
+  Yellow: 'yellow',
+  Purple: 'purple',
+};
+type Color = (typeof CharacterColor)[keyof typeof CharacterColor];
+
 export class Character {
   id: number;
   name: string;
   x: number;
   y: number;
   direction: string;
-  color: string;
+  color: Color;
   penDown: boolean;
   path: string[];
 
@@ -134,6 +143,10 @@ export class Character {
         break;
       }
     }
+  }
+
+  setColor(color: Color): void {
+    this.color = color;
   }
 
   putPen(): void {

@@ -2,9 +2,10 @@
 
 import { Box, Grid, GridItem } from '@chakra-ui/react';
 import Image from 'next/image';
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 
 import { Character } from '../../app/lib/Character';
+import { TurtleGraphicsCell } from '../../app/lib/TurtleGraphicsCell';
 
 // 原点（左上隅）の座標
 const ORIGIN_X = 1;
@@ -26,25 +27,13 @@ export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({
   isEnableOperation: isEnableOperation = false,
 }) => {
   const [characters, setCharacters] = useState(initialCharacters);
-
-  useEffect(() => {
-    // 軌跡の描画
-    for (const character of characters) {
-      if (!character.penDown) continue;
-
-      for (const position of character.path) {
-        const [x, y] = position.split(',').map(Number);
-        const gridCell = document.querySelectorAll('.grid-cell')[
-          x - ORIGIN_X + (y - ORIGIN_Y) * gridColumns
-        ] as HTMLElement;
-
-        if (!gridCell) return;
-
-        gridCell.style.backgroundColor = character.color;
-        gridCell.style.opacity = '0.5';
-      }
-    }
-  }, [characters, gridColumns]);
+  const [cells] = useState<TurtleGraphicsCell[]>(
+    Array.from({ length: gridColumns * gridRows }).map((_, index) => {
+      const x = (index % gridColumns) + ORIGIN_X;
+      const y = Math.floor(index / gridColumns) + ORIGIN_Y;
+      return new TurtleGraphicsCell(index, x, y, '');
+    })
+  );
 
   const updateCharacter = (character: Character, updater: (char: Character) => void): void => {
     setCharacters((prevCharacters) =>
@@ -111,8 +100,14 @@ export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({
         templateColumns={`repeat(${gridColumns}, ${gridSize}px)`}
         templateRows={`repeat(${gridRows}, ${gridSize}px)`}
       >
-        {Array.from({ length: gridColumns * gridRows }).map((_, index) => (
-          <GridItem key={index} borderColor="black" borderWidth="1px" className="grid-cell" />
+        {cells.map((cell) => (
+          <GridItem
+            key={cell.id}
+            backgroundColor={cell.backgroundColor}
+            borderColor="black"
+            borderWidth="1px"
+            className="grid-cell"
+          />
         ))}
         {characters.map((character) => (
           <Box
