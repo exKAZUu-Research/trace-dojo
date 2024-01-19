@@ -47,16 +47,7 @@ export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({
     setCharacters((prevCharacters) =>
       prevCharacters.map((prevCharacter) => {
         if (prevCharacter.id === character.id) {
-          const updatedCharacter = new Character(
-            character.id,
-            character.name,
-            character.x,
-            character.y,
-            character.direction,
-            character.color,
-            character.penDown,
-            [...character.path]
-          );
+          const updatedCharacter = new Character({ ...character });
           updater(updatedCharacter);
           return updatedCharacter;
         }

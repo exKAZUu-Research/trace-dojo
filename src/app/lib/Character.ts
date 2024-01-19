@@ -8,16 +8,25 @@ export class Character {
   penDown: boolean;
   path: string[];
 
-  constructor(
-    id: number,
-    name: string,
-    x: number,
-    y: number,
-    direction: string,
-    color: string,
-    penDown: boolean,
-    path: string[]
-  ) {
+  constructor({
+    color,
+    direction,
+    id,
+    name,
+    path,
+    penDown,
+    x,
+    y,
+  }: {
+    id: number;
+    name: string;
+    x: number;
+    y: number;
+    direction: string;
+    color: string;
+    penDown: boolean;
+    path: string[];
+  }) {
     this.id = id;
     this.name = name;
     this.x = x;
