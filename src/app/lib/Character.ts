@@ -1,10 +1,19 @@
+export const CharacterColor = {
+  Red: 'red',
+  Blue: 'blue',
+  Green: 'green',
+  Yellow: 'yellow',
+  Purple: 'purple',
+};
+type Color = (typeof CharacterColor)[keyof typeof CharacterColor];
+
 export class Character {
   id: number;
   name: string;
   x: number;
   y: number;
   direction: string;
-  color: string;
+  color: Color;
   penDown: boolean;
   path: string[];
 
@@ -136,11 +145,33 @@ export class Character {
     }
   }
 
+  setColor(color: Color): void {
+    this.color = color;
+  }
+
   putPen(): void {
     this.penDown = true;
   }
 
   upPen(): void {
     this.penDown = false;
+  }
+
+  rotateCss(): string {
+    switch (this.direction) {
+      case 'up': {
+        return 'rotate(180deg)';
+      }
+      case 'down': {
+        return 'rotate(0deg)';
+      }
+      case 'left': {
+        return 'rotate(90deg)';
+      }
+      case 'right': {
+        return 'rotate(270deg)';
+      }
+    }
+    return '';
   }
 }
