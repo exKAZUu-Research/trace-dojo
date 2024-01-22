@@ -9,24 +9,24 @@ export class Character {
   path: string[];
 
   constructor({
-    color,
-    direction,
-    id,
-    name,
-    path,
-    penDown,
-    x,
-    y,
+    color = 'red',
+    direction = 'down',
+    id = 1,
+    name = 'Bear',
+    path = ['1,1'],
+    penDown = true,
+    x = 1,
+    y = 1,
   }: {
-    id: number;
-    name: string;
-    x: number;
-    y: number;
-    direction: string;
-    color: string;
-    penDown: boolean;
-    path: string[];
-  }) {
+    id?: number;
+    name?: string;
+    x?: number;
+    y?: number;
+    direction?: string;
+    color?: string;
+    penDown?: boolean;
+    path?: string[];
+  } = {}) {
     this.id = id;
     this.name = name;
     this.x = x;
