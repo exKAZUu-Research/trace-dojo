@@ -1,156 +1,275 @@
 'use client';
-
 import { Box, Grid, GridItem } from '@chakra-ui/react';
 import Image from 'next/image';
-import React, { useState } from 'react';
+import React, { useState, forwardRef, useImperativeHandle, useMemo, useCallback } from 'react';
 
 import { Character } from '../../app/lib/Character';
 import { TurtleGraphicsCell } from '../../app/lib/TurtleGraphicsCell';
+import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController';
 
 // 原点（左上隅）の座標
-const ORIGIN_X = 1;
-const ORIGIN_Y = 1;
+export const ORIGIN_X = 1;
+export const ORIGIN_Y = 1;
 
 interface TurtleGraphicsProps {
-  characters: Character[];
   gridColumns?: number;
   gridRows?: number;
   gridSize?: number;
   isEnableOperation?: boolean;
 }
 
-export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({
-  characters: initialCharacters,
-  gridColumns: gridColumns = 12,
-  gridRows: gridRows = 8,
-  gridSize: gridSize = 40,
-  isEnableOperation: isEnableOperation = false,
-}) => {
-  const [characters, setCharacters] = useState(initialCharacters);
-  const [cells] = useState<TurtleGraphicsCell[]>(
-    Array.from({ length: gridColumns * gridRows }).map((_, index) => {
-      const x = (index % gridColumns) + ORIGIN_X;
-      const y = Math.floor(index / gridColumns) + ORIGIN_Y;
-      return new TurtleGraphicsCell(index, x, y, '');
-    })
-  );
+export interface TurtleGraphicsHandle {
+  reset(): void;
+  isCorrect(): boolean;
+}
 
-  const updateCharacter = (character: Character, updater: (char: Character) => void): void => {
-    setCharacters((prevCharacters) =>
-      prevCharacters.map((prevCharacter) => {
-        if (prevCharacter.id === character.id) {
-          const updatedCharacter = new Character(
-            character.id,
-            character.name,
-            character.x,
-            character.y,
-            character.direction,
-            character.color,
-            character.penDown,
-            [...character.path]
-          );
-          updater(updatedCharacter);
-          return updatedCharacter;
+export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
+  ({ gridColumns = 12, gridRows = 8, gridSize = 40, isEnableOperation = false }, ref) => {
+    const [selectedCharacter, setSelectedCharacter] = useState<Character>();
+    const [selectedCell, setSelectedCell] = useState<TurtleGraphicsCell>();
+    const [dragging, setDragging] = useState<boolean>(false);
+
+    useImperativeHandle(ref, () => ({
+      // 親コンポーネントから関数を呼び出せるようにする
+      reset,
+      isCorrect,
+    }));
+
+    // TODO: プログラムから盤面を生成する処理ができたら置き換える
+    const getInithialCells = useCallback((): TurtleGraphicsCell[] => {
+      return Array.from({ length: gridColumns * gridRows }).map((_, index) => {
+        const x = (index % gridColumns) + ORIGIN_X;
+        const y = Math.floor(index / gridColumns) + ORIGIN_Y;
+
+        let color = '';
+
+        if ((x === 1 && y === 2) || (x === 2 && y === 2) || (x === 3 && y === 2)) {
+          color = 'red';
         }
-        return prevCharacter;
-      })
-    );
-  };
 
-  const handleMoveForward = (character: Character): void => {
-    updateCharacter(character, (updatedCharacter) => {
-      updatedCharacter.moveForward(gridColumns, gridRows);
-    });
-  };
+        return new TurtleGraphicsCell(index, x, y, color);
+      });
+    }, [gridColumns, gridRows]);
+    const getInitialCellsResult = useMemo(() => getInithialCells(), [getInithialCells]);
+    const [cells, setCells] = useState(getInitialCellsResult);
 
-  const handleMoveBack = (character: Character): void => {
-    updateCharacter(character, (updatedCharacter) => {
-      updatedCharacter.moveBack(gridColumns, gridRows);
-    });
-  };
+    // TODO: プログラムから盤面を生成する処理ができたら置き換える
+    const getInitialCharacters = (): Character[] => {
+      return [new Character('A', 4, 2, 'right', 'red', true, ['1,2', '2,2', '3,2'])];
+    };
+    const getInitialCharactersResult = useMemo(() => getInitialCharacters(), []);
+    const [characters, setCharacters] = useState(getInitialCharactersResult);
 
-  const handleTurnleft = (character: Character): void => {
-    updateCharacter(character, (updatedCharacter) => {
-      updatedCharacter.turnLeft();
-    });
-  };
+    const updateCharacter = (updater: (char: Character) => void): void => {
+      setCharacters((prevCharacters) =>
+        prevCharacters.map((prevCharacter) => {
+          if (prevCharacter.id === selectedCharacter?.id) {
+            updater(selectedCharacter);
+            return selectedCharacter;
+          }
+          return prevCharacter;
+        })
+      );
+    };
 
-  const handleTurnRight = (character: Character): void => {
-    updateCharacter(character, (updatedCharacter) => {
-      updatedCharacter.turnRight();
-    });
-  };
+    const reset = (): void => {
+      setCells(getInithialCells());
+      setCharacters(getInitialCharacters());
+      setSelectedCharacter(undefined);
+      setSelectedCell(undefined);
+    };
 
-  const handlePutPen = (character: Character): void => {
-    updateCharacter(character, (updatedCharacter) => {
-      updatedCharacter.putPen();
-    });
-  };
+    const isCorrect = (): boolean => {
+      // TODO: 正答を取得する処理ができたら置き換える
+      const correctCharacters = [new Character('A', 5, 2, 'right', 'red', true, ['1,2', '2,2', '3,2'])];
+      // 順番は関係なく、name, x, y, direction, colorが一致していれば正解
+      const isCorrectCharacters = correctCharacters.every((correctCharacter) => {
+        const character = characters.find((character) => character.name === correctCharacter.name);
 
-  const handleUpPen = (character: Character): void => {
-    updateCharacter(character, (updatedCharacter) => {
-      updatedCharacter.upPen();
-    });
-  };
+        if (!character) return false;
 
-  return (
-    <div className="turtle-graphics-container">
-      <Grid
-        position="relative"
-        templateColumns={`repeat(${gridColumns}, ${gridSize}px)`}
-        templateRows={`repeat(${gridRows}, ${gridSize}px)`}
+        return (
+          character.x === correctCharacter.x &&
+          character.y === correctCharacter.y &&
+          character.direction === correctCharacter.direction &&
+          character.color === correctCharacter.color
+        );
+      });
+
+      // TODO: 正答を取得する処理ができたら置き換える
+      const correctCells = Array.from({ length: gridColumns * gridRows }).map((_, index) => {
+        const x = (index % gridColumns) + ORIGIN_X;
+        const y = Math.floor(index / gridColumns) + ORIGIN_Y;
+
+        let color = '';
+
+        if ((x === 1 && y === 2) || (x === 2 && y === 2) || (x === 3 && y === 2) || (x === 4 && y === 2)) {
+          color = 'red';
+        }
+
+        return new TurtleGraphicsCell(index, x, y, color);
+      });
+      // すべてのセルの色が一致していれば正解
+      const isCorrectCells = correctCells.every((correctCell) => {
+        const cell = cells.find((cell) => cell.id === correctCell.id);
+
+        if (!cell) return false;
+
+        return correctCell.backgroundColor === cell.backgroundColor;
+      });
+
+      return isCorrectCharacters && isCorrectCells;
+    };
+
+    const handleClickCharacter = (character: Character): void => {
+      setSelectedCell(undefined);
+      setSelectedCharacter(character);
+    };
+
+    const handleClickCharacterMoveButton = (): void => {
+      setDragging(true);
+    };
+
+    const finishCharacterDragging = (): void => {
+      setDragging(false);
+    };
+
+    const handleCharacterDragging = (event: React.MouseEvent<HTMLDivElement>): void => {
+      if (selectedCharacter && dragging) {
+        const rect = event.currentTarget.getBoundingClientRect();
+        let x = Math.floor((event.clientX - rect.left) / gridSize) + 1;
+        let y = Math.floor((event.clientY - rect.top) / gridSize) + 1;
+
+        // 移動先の座標がマップ内に収まるように制御
+        x = Math.max(ORIGIN_X, Math.min(x, ORIGIN_X + gridColumns - 1));
+        y = Math.max(ORIGIN_Y, Math.min(y, ORIGIN_Y + gridRows - 1));
+
+        // 移動先のセルのインデックス
+        const destinationCellIndex = (y - ORIGIN_Y) * gridColumns + (x - ORIGIN_X);
+
+        // 移動先のセルに色がついていない、かつ他のキャラクターがいない場合のみ移動可能
+        const destinationCell = cells[destinationCellIndex];
+        if (destinationCell && destinationCell.backgroundColor === '') {
+          const isCellOccupied = characters.some(
+            (character) => character.x === x && character.y === y && character.id !== selectedCharacter.id
+          );
+
+          if (!isCellOccupied) {
+            updateCharacter((character) => {
+              character.setPosition(x, y);
+            });
+          }
+        }
+      }
+    };
+
+    const handleClickChangeCharacterDirectionButton = (direction: string): void => {
+      if (!selectedCharacter) return;
+
+      updateCharacter((character) => {
+        character.setDirection(direction);
+      });
+    };
+
+    const handleClickChangeCharacterColorButton = (color: string): void => {
+      if (!selectedCharacter) return;
+
+      updateCharacter((character) => {
+        character.setColor(color);
+      });
+    };
+
+    const handleAddCharacterButton = (): void => {
+      if (!selectedCell) return;
+
+      selectedCell.setBackgroundColor('');
+
+      const x = (selectedCell.id % gridColumns) + ORIGIN_X;
+      const y = Math.floor(selectedCell.id / gridColumns) + ORIGIN_Y;
+      const newCharacter = new Character('', x, y, 'down', '', true, [`${x},${y}`]);
+
+      setCharacters((prevCharacters) => [...prevCharacters, newCharacter]);
+      setSelectedCharacter(newCharacter);
+      setSelectedCell(undefined);
+    };
+
+    const handleRemoveCharacterButton = (character: Character): void => {
+      setCharacters((prevCharacters) => prevCharacters.filter((prevCharacter) => prevCharacter.id !== character.id));
+      setSelectedCharacter(undefined);
+    };
+
+    const handleClickCell = (index: number): void => {
+      setSelectedCharacter(undefined);
+      setSelectedCell(cells[index]);
+    };
+
+    const handleChangeCellColorButton = (color: string): void => {
+      setCells((prevCells) =>
+        prevCells.map((prevCell) => {
+          if (prevCell.id === selectedCell?.id) {
+            selectedCell.setBackgroundColor(color);
+            return selectedCell;
+          }
+          return prevCell;
+        })
+      );
+    };
+
+    return (
+      <Box
+        className="turtle-graphics-container"
+        onMouseMove={handleCharacterDragging}
+        onMouseUp={finishCharacterDragging}
       >
-        {cells.map((cell) => (
-          <GridItem
-            key={cell.id}
-            backgroundColor={cell.backgroundColor}
-            borderColor="black"
-            borderWidth="1px"
-            className="grid-cell"
-          />
-        ))}
-        {characters.map((character) => (
-          <Box
-            key={character.id}
-            bgColor={character.color}
-            h={gridSize + 'px'}
-            left={(character.x - ORIGIN_X) * gridSize + 'px'}
-            position="absolute"
-            top={(character.y - ORIGIN_Y) * gridSize + 'px'}
-            w={gridSize + 'px'}
-          >
-            <Box transform={character.rotateCss()}>
-              <Image alt={character.name} height={gridSize} src="/character.png" width={gridSize} />
+        <Grid
+          position="relative"
+          templateColumns={`repeat(${gridColumns}, ${gridSize}px)`}
+          templateRows={`repeat(${gridRows}, ${gridSize}px)`}
+        >
+          {cells.map((cell) => (
+            <GridItem
+              key={cell.id}
+              backgroundColor={cell.backgroundColor}
+              borderColor="black"
+              borderWidth={selectedCell?.id === cell.id ? '2px' : '0.5px'}
+              className="grid-cell"
+              onClick={() => handleClickCell(cell.id)}
+            />
+          ))}
+          {characters.map((character) => (
+            <Box
+              key={character.id}
+              bgColor={character.color}
+              borderColor={selectedCharacter?.id === character.id ? 'black' : 'transparent'}
+              borderWidth="2px"
+              h={gridSize + 'px'}
+              left={(character.x - ORIGIN_X) * gridSize + 'px'}
+              position="absolute"
+              top={(character.y - ORIGIN_Y) * gridSize + 'px'}
+              w={gridSize + 'px'}
+              onClick={() => handleClickCharacter(character)}
+            >
+              <Box transform={character.rotateCss()}>
+                <Image alt={character.name} height={gridSize} src="/character.png" width={gridSize} />
+              </Box>
             </Box>
-            <Box position="absolute">{character.name}</Box>
-          </Box>
-        ))}
-      </Grid>
-      {isEnableOperation &&
-        characters.map((character) => (
-          <div key={character.id}>
-            <div>{character.name}</div>
-            <div>
-              <button onClick={() => handleMoveForward(character)}>Move Forword</button>
-            </div>
-            <div>
-              <button onClick={() => handleMoveBack(character)}>Move Back</button>
-            </div>
-            <div>
-              <button onClick={() => handleTurnleft(character)}>Turn Left</button>
-            </div>
-            <div>
-              <button onClick={() => handleTurnRight(character)}>Turn Right</button>
-            </div>
-            <div>
-              <button onClick={() => handlePutPen(character)}>Put Pen</button>
-            </div>
-            <div>
-              <button onClick={() => handleUpPen(character)}>Up Pen</button>
-            </div>
-            <div> --- </div>
-          </div>
-        ))}
-    </div>
-  );
-};
+          ))}
+        </Grid>
+        {isEnableOperation && (
+          <TurtleGraphicsController
+            handleAddCharacterButton={handleAddCharacterButton}
+            handleChangeCellColorButton={handleChangeCellColorButton}
+            handleChangeCharacterColorButton={handleClickChangeCharacterColorButton}
+            handleClickChangeCharacterDirectionButton={handleClickChangeCharacterDirectionButton}
+            handleClickCharacterMoveButton={handleClickCharacterMoveButton}
+            handleRemoveCharacterButton={handleRemoveCharacterButton}
+            selectedCell={selectedCell}
+            selectedCharacter={selectedCharacter}
+          />
+        )}
+      </Box>
+    );
+  }
+);
+
+TurtleGraphics.displayName = 'TurtleGraphics';
