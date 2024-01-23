@@ -82,7 +82,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     const isCorrect = (): boolean => {
       // TODO: 正答を取得する処理ができたら置き換える
       const correctCharacters = [new Character('A', 5, 2, 'right', 'red', true, ['1,2', '2,2', '3,2'])];
-      // 順番は関係なく、name, x, y, direction, colorが一致していれば正解
+      // 順番は関係なく、name, x, y, direction, color、penDownが一致していれば正解
       const isCorrectCharacters = correctCharacters.every((correctCharacter) => {
         const character = characters.find((character) => character.name === correctCharacter.name);
 
@@ -92,11 +92,11 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
           character.x === correctCharacter.x &&
           character.y === correctCharacter.y &&
           character.direction === correctCharacter.direction &&
-          character.color === correctCharacter.color
+          character.color === correctCharacter.color &&
+          character.penDown === correctCharacter.penDown
         );
       });
 
-      // TODO: 正答を取得する処理ができたら置き換える
       const correctCells = Array.from({ length: gridColumns * gridRows }).map((_, index) => {
         const x = (index % gridColumns) + ORIGIN_X;
         const y = Math.floor(index / gridColumns) + ORIGIN_Y;
