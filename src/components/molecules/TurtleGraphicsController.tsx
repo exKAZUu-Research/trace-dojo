@@ -17,6 +17,8 @@ interface TurtleGraphicsControllerProps {
   handleClickCharacterMoveButton: () => void;
   handleClickChangeCharacterDirectionButton: (direction: string) => void;
   handleClickCharacterMoveForwardButton: () => void;
+  handleClickCharacterPenUpButton: () => void;
+  handleClickCharacterPenDownButton: () => void;
 }
 
 interface ColorChangeButtonProps {
@@ -32,6 +34,8 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
   handleClickChangeCharacterDirectionButton,
   handleClickCharacterMoveButton,
   handleClickCharacterMoveForwardButton,
+  handleClickCharacterPenDownButton,
+  handleClickCharacterPenUpButton,
   handleRemoveCharacterButton,
   selectedCell,
   selectedCharacter,
@@ -55,6 +59,10 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
           <HStack>
             <Button onClick={() => handleClickChangeCharacterDirectionButton(CharacterDirection.Left)}>⤹</Button>
             <Button onClick={() => handleClickChangeCharacterDirectionButton(CharacterDirection.Right)}>⤵</Button>
+          </HStack>
+          <HStack>
+            <Button onClick={() => handleClickCharacterMoveButton()}>✜</Button>
+            <Button onClick={() => handleClickCharacterMoveForwardButton()}>前に進む</Button>
           </HStack>
           <HStack>
             <ColorChangeButton
@@ -89,8 +97,12 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
             />
           </HStack>
           <HStack>
-            <Button onClick={() => handleClickCharacterMoveButton()}>✜</Button>
-            <Button onClick={() => handleClickCharacterMoveForwardButton()}>前に進む</Button>
+            <Button border={selectedCharacter.penDown ? '' : '1px'} onClick={() => handleClickCharacterPenUpButton()}>
+              ペンを上げる
+            </Button>
+            <Button border={selectedCharacter.penDown ? '1px' : ''} onClick={() => handleClickCharacterPenDownButton()}>
+              ペンを下ろす
+            </Button>
           </HStack>
           <Box>
             <Button onClick={() => handleRemoveCharacterButton(selectedCharacter)}>削除する</Button>

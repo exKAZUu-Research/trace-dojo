@@ -207,6 +207,22 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       });
     };
 
+    const handleClickCharacterPenUpButton = (): void => {
+      if (!selectedCharacter) return;
+
+      updateCharacter((character) => {
+        character.upPen();
+      });
+    };
+
+    const handleClickCharacterPenDownButton = (): void => {
+      if (!selectedCharacter) return;
+
+      updateCharacter((character) => {
+        character.putPen();
+      });
+    };
+
     const handleAddCharacterButton = (): void => {
       if (!selectedCell) return;
 
@@ -291,6 +307,8 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
             handleClickChangeCharacterDirectionButton={handleClickChangeCharacterDirectionButton}
             handleClickCharacterMoveButton={handleClickCharacterMoveButton}
             handleClickCharacterMoveForwardButton={handleClickCharacterMoveForwardButton}
+            handleClickCharacterPenDownButton={handleClickCharacterPenDownButton}
+            handleClickCharacterPenUpButton={handleClickCharacterPenUpButton}
             handleRemoveCharacterButton={handleRemoveCharacterButton}
             selectedCell={selectedCell}
             selectedCharacter={selectedCharacter}
