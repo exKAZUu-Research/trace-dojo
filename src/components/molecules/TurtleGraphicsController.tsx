@@ -95,7 +95,7 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
             />
             <ColorChangeButton
               color={'white'}
-              handleOnClick={() => handleChangeCharacterColorButton('')}
+              handleOnClick={() => handleChangeCharacterColorButton(CharacterColor.White)}
               selectedColor={selectedCharacter.color}
             />
           </HStack>

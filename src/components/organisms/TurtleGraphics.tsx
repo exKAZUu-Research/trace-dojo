@@ -3,7 +3,7 @@ import { Box, Grid, GridItem } from '@chakra-ui/react';
 import Image from 'next/image';
 import React, { useState, forwardRef, useImperativeHandle, useMemo, useCallback } from 'react';
 
-import { Character, CharacterDirection } from '../../app/lib/Character';
+import { Character, CharacterDirection, CharacterColor } from '../../app/lib/Character';
 import { TurtleGraphicsCell } from '../../app/lib/TurtleGraphicsCell';
 import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController';
 
@@ -157,28 +157,15 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
         x = Math.max(ORIGIN_X, Math.min(x, ORIGIN_X + gridColumns - 1));
         y = Math.max(ORIGIN_Y, Math.min(y, ORIGIN_Y + gridRows - 1));
 
-        // 移動先のセルのインデックス
-        const destinationCellIndex = (y - ORIGIN_Y) * gridColumns + (x - ORIGIN_X);
-
-        // 移動先のセルに色がついていない、かつ他のキャラクターがいない場合のみ移動可能
-        const destinationCell = cells[destinationCellIndex];
-        if (destinationCell && destinationCell.backgroundColor === '') {
-          const isCellOccupied = characters.some(
-            (character) => character.x === x && character.y === y && character.id !== selectedCharacter.id
-          );
-
-          if (!isCellOccupied) {
-            setCharacters((prevCharacters) =>
-              prevCharacters.map((prevCharacter) => {
-                if (prevCharacter.id === selectedCharacter.id) {
-                  selectedCharacter.setPosition(x, y);
-                  return selectedCharacter;
-                }
-                return prevCharacter;
-              })
-            );
-          }
-        }
+        setCharacters((prevCharacters) =>
+          prevCharacters.map((prevCharacter) => {
+            if (prevCharacter.id === selectedCharacter.id) {
+              selectedCharacter.setPosition(x, y);
+              return selectedCharacter;
+            }
+            return prevCharacter;
+          })
+        );
       }
     };
 
@@ -238,7 +225,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
 
       const x = (selectedCell.id % gridColumns) + ORIGIN_X;
       const y = Math.floor(selectedCell.id / gridColumns) + ORIGIN_Y;
-      const newCharacter = new Character('', x, y, 'down', '', true, [`${x},${y}`]);
+      const newCharacter = new Character('', x, y, 'down', CharacterColor.White, true, [`${x},${y}`]);
 
       setCharacters((prevCharacters) => [...prevCharacters, newCharacter]);
       setSelectedCharacter(newCharacter);
@@ -291,7 +278,6 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
           {characters.map((character) => (
             <Box
               key={character.id}
-              bgColor={character.color}
               borderColor={selectedCharacter?.id === character.id ? 'black' : 'transparent'}
               borderWidth="2px"
               h={gridSize + 'px'}
@@ -302,7 +288,12 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
               onClick={() => handleClickCharacter(character)}
             >
               <Box transform={character.rotateCss()}>
-                <Image alt={character.name} height={gridSize} src="/character.png" width={gridSize} />
+                <Image
+                  alt={character.name}
+                  height={gridSize}
+                  src={`/character/${character.color}.png`}
+                  width={gridSize}
+                />
               </Box>
             </Box>
           ))}

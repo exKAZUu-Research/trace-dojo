@@ -14,6 +14,7 @@ export const CharacterColor = {
   Green: 'green',
   Yellow: 'yellow',
   Purple: 'purple',
+  White: 'white',
 };
 type Color = (typeof CharacterColor)[keyof typeof CharacterColor];
 
