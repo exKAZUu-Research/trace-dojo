@@ -190,6 +190,14 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       });
     };
 
+    const handleClickCharacterMoveBackButton = (): void => {
+      if (!selectedCharacter) return;
+
+      updateCharacter((character) => {
+        character.moveBack(gridColumns, gridRows);
+      });
+    };
+
     const handleClickChangeCharacterDirectionButton = (direction: string): void => {
       if (!selectedCharacter) return;
 
@@ -305,6 +313,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
             handleChangeCellColorButton={handleChangeCellColorButton}
             handleChangeCharacterColorButton={handleClickChangeCharacterColorButton}
             handleClickChangeCharacterDirectionButton={handleClickChangeCharacterDirectionButton}
+            handleClickCharacterMoveBackButton={handleClickCharacterMoveBackButton}
             handleClickCharacterMoveButton={handleClickCharacterMoveButton}
             handleClickCharacterMoveForwardButton={handleClickCharacterMoveForwardButton}
             handleClickCharacterPenDownButton={handleClickCharacterPenDownButton}
