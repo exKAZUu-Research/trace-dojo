@@ -51,30 +51,8 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
       {selectedCharacter && (
         <>
           <HStack>
-            <Button
-              border={CharacterDirection.Up === selectedCharacter.direction ? '1px' : ''}
-              onClick={() => handleClickChangeCharacterDirectionButton(CharacterDirection.Up)}
-            >
-              ↑
-            </Button>
-            <Button
-              border={CharacterDirection.Down === selectedCharacter.direction ? '1px' : ''}
-              onClick={() => handleClickChangeCharacterDirectionButton(CharacterDirection.Down)}
-            >
-              ↓
-            </Button>
-            <Button
-              border={CharacterDirection.Left === selectedCharacter.direction ? '1px' : ''}
-              onClick={() => handleClickChangeCharacterDirectionButton(CharacterDirection.Left)}
-            >
-              ←
-            </Button>
-            <Button
-              border={CharacterDirection.Right === selectedCharacter.direction ? '1px' : ''}
-              onClick={() => handleClickChangeCharacterDirectionButton(CharacterDirection.Right)}
-            >
-              →
-            </Button>
+            <Button onClick={() => handleClickChangeCharacterDirectionButton(CharacterDirection.Left)}>←</Button>
+            <Button onClick={() => handleClickChangeCharacterDirectionButton(CharacterDirection.Right)}>→</Button>
           </HStack>
           <HStack>
             <ColorChangeButton

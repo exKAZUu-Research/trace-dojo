@@ -104,10 +104,6 @@ export class Character {
     }
   }
 
-  setDirection(direction: Direction): void {
-    this.direction = direction;
-  }
-
   turnLeft(): void {
     switch (this.direction) {
       case CharacterDirection.Up: {
@@ -130,6 +126,7 @@ export class Character {
   }
 
   turnRight(): void {
+    console.log(this.direction);
     switch (this.direction) {
       case CharacterDirection.Up: {
         this.direction = CharacterDirection.Right;

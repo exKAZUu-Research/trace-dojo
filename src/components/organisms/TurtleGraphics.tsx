@@ -3,7 +3,7 @@ import { Box, Grid, GridItem } from '@chakra-ui/react';
 import Image from 'next/image';
 import React, { useState, forwardRef, useImperativeHandle, useMemo, useCallback } from 'react';
 
-import { Character } from '../../app/lib/Character';
+import { Character, CharacterDirection } from '../../app/lib/Character';
 import { TurtleGraphicsCell } from '../../app/lib/TurtleGraphicsCell';
 import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController';
 
@@ -61,15 +61,28 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     const [characters, setCharacters] = useState(getInitialCharactersResult);
 
     const updateCharacter = (updater: (char: Character) => void): void => {
+      if (!selectedCharacter) return;
+
+      const updatedCharacter = new Character(
+        selectedCharacter.name,
+        selectedCharacter.x,
+        selectedCharacter.y,
+        selectedCharacter.direction,
+        selectedCharacter.color,
+        selectedCharacter.penDown,
+        selectedCharacter.path
+      );
+      updater(updatedCharacter);
+
       setCharacters((prevCharacters) =>
         prevCharacters.map((prevCharacter) => {
-          if (prevCharacter.id === selectedCharacter?.id) {
-            updater(selectedCharacter);
-            return selectedCharacter;
+          if (prevCharacter.id === selectedCharacter.id) {
+            return updatedCharacter;
           }
           return prevCharacter;
         })
       );
+      setSelectedCharacter(updatedCharacter);
     };
 
     const reset = (): void => {
@@ -155,9 +168,15 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
           );
 
           if (!isCellOccupied) {
-            updateCharacter((character) => {
-              character.setPosition(x, y);
-            });
+            setCharacters((prevCharacters) =>
+              prevCharacters.map((prevCharacter) => {
+                if (prevCharacter.id === selectedCharacter.id) {
+                  selectedCharacter.setPosition(x, y);
+                  return selectedCharacter;
+                }
+                return prevCharacter;
+              })
+            );
           }
         }
       }
@@ -167,7 +186,8 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       if (!selectedCharacter) return;
 
       updateCharacter((character) => {
-        character.setDirection(direction);
+        if (direction === CharacterDirection.Left) character.turnLeft();
+        else if (direction === CharacterDirection.Right) character.turnRight();
       });
     };
 
