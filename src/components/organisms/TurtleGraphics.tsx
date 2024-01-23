@@ -182,6 +182,14 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       }
     };
 
+    const handleClickCharacterMoveForwardButton = (): void => {
+      if (!selectedCharacter) return;
+
+      updateCharacter((character) => {
+        character.moveForward(gridColumns, gridRows);
+      });
+    };
+
     const handleClickChangeCharacterDirectionButton = (direction: string): void => {
       if (!selectedCharacter) return;
 
@@ -282,6 +290,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
             handleChangeCharacterColorButton={handleClickChangeCharacterColorButton}
             handleClickChangeCharacterDirectionButton={handleClickChangeCharacterDirectionButton}
             handleClickCharacterMoveButton={handleClickCharacterMoveButton}
+            handleClickCharacterMoveForwardButton={handleClickCharacterMoveForwardButton}
             handleRemoveCharacterButton={handleRemoveCharacterButton}
             selectedCell={selectedCell}
             selectedCharacter={selectedCharacter}
