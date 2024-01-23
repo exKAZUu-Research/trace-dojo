@@ -7,7 +7,7 @@ import { useRef } from 'react';
 import { SyntaxHighlighter } from '../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../components/organisms/TurtleGraphics';
-import { programIdToName, generateProgram, getDescription } from '../../../../problems/problemData';
+import { programIdToName, generateProgram } from '../../../../problems/problemData';
 
 const GRID_COLUMNS = 12;
 const GRID_ROWS = 8;
@@ -40,7 +40,7 @@ const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) =>
         <Heading as="h1">{programIdToName[params.problemId]}</Heading>
         <Flex gap="6" w="100%">
           <VStack spacing="10" w={GRID_COLUMNS * GRID_SIZE}>
-            <Box>{getDescription(params.problemId)}</Box>
+            <Box>プログラムの実行後の結果を解答してください。</Box>
             <Box>
               <TurtleGraphics
                 ref={turtleGraphicsRef}

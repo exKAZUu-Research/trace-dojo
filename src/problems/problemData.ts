@@ -80,15 +80,6 @@ public class Curve {
   },
 };
 
-export const programIdToLanguageIdToDescription: Record<ProgramId, string> = {
-  straight: `
-直線を描くプログラムです。
-`.trim(),
-  curve: `
-曲線を描くプログラムです。
-`.trim(),
-};
-
 export const programIdToLanguageIdToExplanation: Record<ProgramId, Record<LanguageId, string>> = {
   straight: {
     js: `
