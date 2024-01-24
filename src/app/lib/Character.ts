@@ -8,14 +8,14 @@ export class Character {
   direction: string;
   color: Color;
   penDown: boolean;
-  path: [number, number];
+  path: string[];
 
   constructor({
     color = 'red',
     direction = 'down',
     id = 1,
     name = 'Bear',
-    path = [1, 1],
+    path = ['1,1'],
     penDown = true,
     x = 1,
     y = 1,
@@ -27,7 +27,7 @@ export class Character {
     direction?: string;
     color?: Color;
     penDown?: boolean;
-    path?: [number, number];
+    path?: string[];
   } = {}) {
     this.id = id;
     this.name = name;
@@ -68,7 +68,7 @@ export class Character {
     }
 
     if (this.penDown) {
-      this.path = [this.x, this.y];
+      this.path.push(`${this.x},${this.y}`);
     }
   }
 
@@ -101,7 +101,7 @@ export class Character {
     }
 
     if (this.penDown) {
-      this.path = [this.x, this.y];
+      this.path.push(`${this.x},${this.y}`);
     }
   }
 

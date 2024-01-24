@@ -28,15 +28,12 @@ export const TurtleGraphics: React.FC<TurtleGraphicsProps> = ({
     // 軌跡の描画
     for (const character of characters) {
       if (!character.penDown) continue;
-
       for (const position of character.path) {
         const [x, y] = position.split(',').map(Number);
         const gridCell = document.querySelectorAll('.grid-cell')[
           x - ORIGIN_X + (y - ORIGIN_Y) * gridColumns
         ] as HTMLElement;
-
         if (!gridCell) return;
-
         gridCell.style.backgroundColor = character.color;
         gridCell.style.opacity = '0.5';
       }

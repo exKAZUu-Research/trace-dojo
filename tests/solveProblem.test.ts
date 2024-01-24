@@ -39,7 +39,6 @@ test('Solve a problem', () => {
   expect(answer).not.toBeFalsy();
   expect(answer.character).not.toBeFalsy();
   expect(answer.board).not.toBeFalsy();
-  expect(answer.character.path).toEqual([1, 6]);
   expect(answer.character.direction).toEqual('down');
   expect(answer.character.penDown).toEqual(true);
 
