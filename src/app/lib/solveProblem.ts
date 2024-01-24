@@ -1,13 +1,42 @@
-import type { Character } from './Character';
+import type { CellColor } from '../../types';
 
-interface Board {
+import { Character as CharacterClass } from './Character';
+
+// TODO: move to Board.ts
+class BoardClass {
   grid: Cell[][];
-}
-interface Cell {
-  color: undefined | 'r' | 'g' | 'b';
+  constructor({
+    gridSize = [8, 12],
+  }: {
+    gridSize?: [number, number];
+  } = {}) {
+    this.grid = createBoard(gridSize[1], gridSize[0]);
+  }
+
+  updateGrid(character: CharacterClass): void {
+    const { color, penDown, x, y } = character;
+    if (penDown) this.grid[y - 1][x - 1].color = color;
+  }
 }
 
-export const createBoard = (numRows: number, numColumns: number): Board => {
+// TODO: move to types?
+type Cell = {
+  color: CellColor | undefined;
+};
+
+type History = {
+  step: number;
+  character: CharacterClass;
+  board: BoardClass;
+};
+
+type SolveProblemResult = {
+  character: CharacterClass;
+  board: BoardClass;
+  histories: History[] | undefined;
+};
+
+export const createBoard = (numRows: number, numColumns: number): Cell[][] => {
   const grid: Cell[][] = [];
   for (let i = 0; i < numRows; i++) {
     grid.push([]);
@@ -15,7 +44,7 @@ export const createBoard = (numRows: number, numColumns: number): Board => {
       grid[i].push({ color: undefined });
     }
   }
-  return { grid };
+  return grid;
 };
 
 export function parseProgram(program: string): string[] {
@@ -25,27 +54,48 @@ export function parseProgram(program: string): string[] {
     .filter((line) => line !== '');
 }
 
-export function solveProblem(
-  program: string,
-  character: Character,
-  board: Board
-): {
-  character: Character;
-  board: Board;
-  histories: { step: number; character: Character; board: Board }[];
-} {
-  const commands = parseProgram(program);
-  const histories: { step: number; character: Character; board: Board }[] = [];
+export function executeEval(command: string): CharacterClass {
+  const Character = CharacterClass; // eslint-disable-line
+  const Board = BoardClass; // eslint-disable-line
+  const characterVariableName = 'character';
+  const semicolonEndedCommand = (() => {
+    if (command.endsWith(';')) return command;
+    command += ';';
+  })();
+  const returnValueCommand = `
+    ${characterVariableName};
+  `;
 
-  // コマンドを順番に実行
-  for (const command of commands) {
-    eval(command);
-    histories.push({ step: histories.length + 1, character, board });
+  const mergedCommand = semicolonEndedCommand + '\n' + returnValueCommand;
+
+  return eval(mergedCommand);
+}
+
+export function solveProblem(program: string): SolveProblemResult {
+  const commands = parseProgram(program);
+  const character = new CharacterClass();
+  const board = new BoardClass();
+  const histories = [{ step: 0, character, board }];
+
+  for (let i = 0; i < commands.length; i++) {
+    if (i < commands.length) {
+      let mergedCommand = '';
+
+      for (let j = 0; j <= i; j++) {
+        mergedCommand += commands[j];
+      }
+
+      const character = executeEval(mergedCommand);
+
+      board.updateGrid(character);
+      histories.push({ step: histories.length + 1, character, board });
+    }
   }
 
-  // 実行結果を返す
-  const result = { character, board, histories };
-  console.log('result');
-  console.log(result);
+  const result = {
+    character: histories?.at(-1)?.character || character,
+    board: histories?.at(-1)?.board || board,
+    histories,
+  };
   return result;
 }

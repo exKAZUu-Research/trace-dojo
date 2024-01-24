@@ -1,19 +1,21 @@
+import type { CellColor as Color } from '../../types';
+
 export class Character {
   id: number;
   name: string;
   x: number;
   y: number;
   direction: string;
-  color: string;
+  color: Color;
   penDown: boolean;
-  path: string[];
+  path: [number, number];
 
   constructor({
     color = 'red',
     direction = 'down',
     id = 1,
     name = 'Bear',
-    path = ['1,1'],
+    path = [1, 1],
     penDown = true,
     x = 1,
     y = 1,
@@ -23,9 +25,9 @@ export class Character {
     x?: number;
     y?: number;
     direction?: string;
-    color?: string;
+    color?: Color;
     penDown?: boolean;
-    path?: string[];
+    path?: [number, number];
   } = {}) {
     this.id = id;
     this.name = name;
@@ -66,7 +68,7 @@ export class Character {
     }
 
     if (this.penDown) {
-      this.path.push(`${this.x},${this.y}`);
+      this.path = [this.x, this.y];
     }
   }
 
@@ -99,7 +101,7 @@ export class Character {
     }
 
     if (this.penDown) {
-      this.path.push(`${this.x},${this.y}`);
+      this.path = [this.x, this.y];
     }
   }
 

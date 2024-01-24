@@ -5,3 +5,5 @@ export interface LayoutProps {
 }
 
 export type LayoutComponent = React.FC<LayoutProps>;
+
+export type CellColor = 'red' | 'green' | 'blue';
