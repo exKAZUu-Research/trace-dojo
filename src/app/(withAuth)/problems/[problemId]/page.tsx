@@ -2,18 +2,23 @@
 
 import { Box, Button, Flex, HStack, Heading, VStack } from '@chakra-ui/react';
 import type { NextPage } from 'next';
+import { useEffect, useState } from 'react';
 
 import { SyntaxHighlighter } from '../../../../components/organisms/SyntaxHighlighter';
 import { TurtleGraphics } from '../../../../components/organisms/TurtleGraphics';
 import { programIdToName, generateProgram, getDescription } from '../../../../problems/problemData';
+import { getLanguageIdFromSessionStorage } from '../../../lib/SessionStorage';
 
 const GRID_COLUMNS = 12;
 const GRID_ROWS = 8;
 const GRID_SIZE = 40;
 
 const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) => {
-  // TODO: 一旦Java固定 言語選択機能実装時に変更する
-  const programmingLanguageId = 'java';
+  const [selectedLanguageId, setSelectedLanguageId] = useState('');
+
+  useEffect(() => {
+    setSelectedLanguageId(getLanguageIdFromSessionStorage());
+  }, []);
 
   return (
     <main>
@@ -31,8 +36,8 @@ const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) =>
             {/* 画面に収まる高さに設定 */}
             <Box h="calc(100vh - 370px)" w="100%">
               <SyntaxHighlighter
-                code={generateProgram(params.problemId, programmingLanguageId)}
-                programmingLanguageId={programmingLanguageId}
+                code={generateProgram(params.problemId, selectedLanguageId)}
+                programmingLanguageId={selectedLanguageId}
               />
             </Box>
             <HStack>

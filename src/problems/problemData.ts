@@ -31,10 +31,7 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
 
 export function generateProgram(programId: ProgramId, languageId: LanguageId): string {
   // TODO(exKAZUu): 問題IDに紐づくプログラム（テンプレート）を取得して、乱数を使って具体的なプログラムを生成する。
-  return (
-    `const turtle = new Turtle();
-turtle.moveForward(5);` || programIdToLanguageIdToProgram[programId][languageId]
-  );
+  return programIdToLanguageIdToProgram[programId][languageId];
 }
 
 export function getDescription(programId: ProgramId): string {

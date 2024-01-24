@@ -15,15 +15,22 @@ import {
 } from '@chakra-ui/react';
 import type { NextPage } from 'next';
 import NextLink from 'next/link';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 import { courseIdToProgramIdLists, languageIds, programIdToName } from '../../../../problems/problemData';
+import { getLanguageIdFromSessionStorage, setLanguageIdToSessionStorage } from '../../../lib/SessionStorage';
 
 const CoursePage: NextPage<{ params: { courseId: string } }> = ({ params }) => {
-  const [selectedLanguageId, setSelectedLanguageId] = useState('java');
+  const [selectedLanguageId, setSelectedLanguageId] = useState('');
+
+  useEffect(() => {
+    setSelectedLanguageId(getLanguageIdFromSessionStorage());
+  }, []);
 
   const handleSelectLanguage = (event: React.ChangeEvent<HTMLSelectElement>): void => {
-    setSelectedLanguageId(event.target.value);
+    const inputValue = event.target.value;
+    setLanguageIdToSessionStorage(inputValue);
+    setSelectedLanguageId(inputValue);
   };
 
   return (
