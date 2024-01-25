@@ -4,15 +4,14 @@ import { Box, Button, HStack, VStack } from '@chakra-ui/react';
 import React from 'react';
 
 import type { Character } from '../../app/lib/Character';
-import type { TurtleGraphicsCell } from '../../app/lib/TurtleGraphicsCell';
 import type { CellColor, CharacterDirection } from '../../types';
 
 interface TurtleGraphicsControllerProps {
   selectedCharacter?: Character;
-  selectedCell?: TurtleGraphicsCell;
-  handleChangeCellColorButton: (color: CellColor) => void;
+  // selectedCell?: TurtleGraphicsCell;
+  // handleChangeCellColorButton: (color: CellColor) => void;
   handleChangeCharacterColorButton: (color: CellColor) => void;
-  handleAddCharacterButton: () => void;
+  // handleAddCharacterButton: () => void;
   handleRemoveCharacterButton: (character: Character) => void;
   handleClickCharacterMoveButton: () => void;
   handleClickChangeCharacterDirectionButton: (direction: CharacterDirection) => void;
@@ -29,8 +28,8 @@ interface ColorChangeButtonProps {
 }
 
 export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> = ({
-  handleAddCharacterButton,
-  handleChangeCellColorButton,
+  // handleAddCharacterButton,
+  // handleChangeCellColorButton,
   handleChangeCharacterColorButton,
   handleClickChangeCharacterDirectionButton,
   handleClickCharacterMoveBackButton,
@@ -39,7 +38,7 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
   handleClickCharacterPenDownButton,
   handleClickCharacterPenUpButton,
   handleRemoveCharacterButton,
-  selectedCell,
+  // selectedCell,
   selectedCharacter,
 }) => {
   const ColorChangeButton: React.FC<ColorChangeButtonProps> = ({ color, handleOnClick, selectedColor }) => {
@@ -113,7 +112,7 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
         </>
       )}
 
-      {selectedCell && (
+      {/* {selectedCell && (
         <>
           <Box>
             <Button onClick={() => handleAddCharacterButton()}>キャラクターを追加する</Button>
@@ -151,7 +150,7 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
             />
           </HStack>
         </>
-      )}
+      )} */}
     </VStack>
   );
 };
