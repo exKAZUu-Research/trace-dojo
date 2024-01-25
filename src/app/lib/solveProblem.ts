@@ -1,51 +1,7 @@
-import type { CellColor } from '../../types';
+import type { SolveProblemResult } from '../../types';
 
+import { Board as BoardClass } from './Board';
 import { Character as CharacterClass } from './Character';
-
-// TODO: move to Board.ts
-class BoardClass {
-  grid: Cell[][];
-  constructor({
-    gridSize = [8, 12],
-  }: {
-    gridSize?: [number, number];
-  } = {}) {
-    this.grid = createBoard(gridSize[1], gridSize[0]);
-  }
-
-  updateGrid(character: CharacterClass): void {
-    const { color, penDown, x, y } = character;
-    if (penDown) this.grid[y - 1][x - 1].color = color;
-  }
-}
-
-// TODO: move to types?
-type Cell = {
-  color: CellColor | undefined;
-};
-
-type History = {
-  step: number;
-  character: CharacterClass;
-  board: BoardClass;
-};
-
-type SolveProblemResult = {
-  character: CharacterClass;
-  board: BoardClass;
-  histories: History[] | undefined;
-};
-
-export const createBoard = (numRows: number, numColumns: number): Cell[][] => {
-  const grid: Cell[][] = [];
-  for (let i = 0; i < numRows; i++) {
-    grid.push([]);
-    for (let j = 0; j < numColumns; j++) {
-      grid[i].push({ color: undefined });
-    }
-  }
-  return grid;
-};
 
 export function parseProgram(program: string): string[] {
   return program

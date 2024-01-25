@@ -58,5 +58,6 @@ test('Solve a problem', () => {
     [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
   ]);
   expect(answer.histories).not.toBeFalsy();
-  expect(answer.histories?.at(-1)?.character.path).toEqual([1, 6]);
+  expect(answer.histories?.at(-1)?.character.x).toEqual(1);
+  expect(answer.histories?.at(-1)?.character.y).toEqual(6);
 });
