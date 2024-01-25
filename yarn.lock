@@ -4262,6 +4262,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/uuid@npm:^9":
+  version: 9.0.7
+  resolution: "@types/uuid@npm:9.0.7"
+  checksum: b329ebd4f9d1d8e08d4f2cc211be4922d70d1149f73d5772630e4a3acfb5170c6d37b3d7a39a0412f1a56e86e8a844c7f297c798b082f90380608bf766688787
+  languageName: node
+  linkType: hard
+
 "@typescript-eslint/eslint-plugin@npm:6.18.1":
   version: 6.18.1
   resolution: "@typescript-eslint/eslint-plugin@npm:6.18.1"
@@ -11509,6 +11516,7 @@ __metadata:
     "@types/node": "npm:20.11.0"
     "@types/react-dom": "npm:18.2.18"
     "@types/react-syntax-highlighter": "npm:^15"
+    "@types/uuid": "npm:^9"
     "@typescript-eslint/eslint-plugin": "npm:6.18.1"
     "@typescript-eslint/parser": "npm:6.18.1"
     "@willbooster/eslint-config-next": "npm:1.1.0"
@@ -11547,6 +11555,7 @@ __metadata:
     supertokens-node: "npm:16.7.1"
     supertokens-web-js: "npm:0.8.0"
     typescript: "npm:5.3.3"
+    uuid: "npm:9.0.1"
     vitest: "npm:1.2.0"
     zod: "npm:3.22.4"
     zod-form-data: "npm:2.0.2"
@@ -11946,6 +11955,15 @@ __metadata:
     "@types/react":
       optional: true
   checksum: 89f0018fd9aee1fc17c85ac18c4bf8944d460d453d0d0e04ddbc8eaddf3fa591e9c74a1f8a438a1bff368a7a2417fab380bdb3df899d2194c4375b0982736de0
+  languageName: node
+  linkType: hard
+
+"uuid@npm:9.0.1":
+  version: 9.0.1
+  resolution: "uuid@npm:9.0.1"
+  bin:
+    uuid: dist/bin/uuid
+  checksum: 1607dd32ac7fc22f2d8f77051e6a64845c9bce5cd3dd8aa0070c074ec73e666a1f63c7b4e0f4bf2bc8b9d59dc85a15e17807446d9d2b17c8485fbc2147b27f9b
   languageName: node
   linkType: hard
 

@@ -9,9 +9,13 @@ export interface LayoutProps {
 
 export type LayoutComponent = React.FC<LayoutProps>;
 
-export type CellColor = 'red' | 'green' | 'blue';
+export type CellColor = 'red' | 'blue' | 'green' | 'yellow' | 'purple' | undefined;
 export type Cell = {
-  color: CellColor | undefined;
+  color: CellColor;
+};
+export type SelectedCell = {
+  x: number;
+  y: number;
 };
 
 export type History = {
@@ -25,3 +29,5 @@ export type SolveProblemResult = {
   board: Board;
   histories: History[] | undefined;
 };
+
+export type CharacterDirection = 'up' | 'down' | 'left' | 'right';

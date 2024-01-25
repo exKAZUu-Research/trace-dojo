@@ -37,10 +37,6 @@ turtle.moveForward(5);` || programIdToLanguageIdToProgram[programId][languageId]
   );
 }
 
-export function getDescription(programId: ProgramId): string {
-  return programIdToLanguageIdToDescription[programId];
-}
-
 export function getExplanation(programId: ProgramId, languageId: LanguageId): string {
   return programIdToLanguageIdToExplanation[programId][languageId];
 }
@@ -78,15 +74,6 @@ public class Curve {
 }
 `.trim(),
   },
-};
-
-export const programIdToLanguageIdToDescription: Record<ProgramId, string> = {
-  straight: `
-直線を描くプログラムです。
-`.trim(),
-  curve: `
-曲線を描くプログラムです。
-`.trim(),
 };
 
 export const programIdToLanguageIdToExplanation: Record<ProgramId, Record<LanguageId, string>> = {
