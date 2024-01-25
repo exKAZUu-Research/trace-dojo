@@ -38,20 +38,9 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     }));
 
     // // TODO: プログラムから盤面を生成する処理ができたら置き換える
-    // const getInithialCells = useCallback((): Cell[] => {
-    //   return Array.from({ length: gridColumns * gridRows }).map((_, index) => {
-    //     const x = (index % gridColumns) + ORIGIN_X;
-    //     const y = Math.floor(index / gridColumns) + ORIGIN_Y;
-
-    //     let color = 'white' as CellColor;
-
-    //     if ((x === 1 && y === 2) || (x === 2 && y === 2) || (x === 3 && y === 2)) {
-    //       color = 'red';
-    //     }
-
-    //     return new TurtleGraphicsCell(index, x, y, color);
-    //   });
-    // }, [gridColumns, gridRows]);
+    const getInitialBoard = (): Board => {
+      return new Board();
+    };
 
     // TODO: プログラムから盤面を生成する処理ができたら置き換える
     const getInitialCharacters = (): Character[] => {
@@ -78,10 +67,10 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     };
 
     const reset = (): void => {
-      // setCells(getInithialCells());
+      setBoard(getInitialBoard());
       setCharacters(getInitialCharacters());
       setSelectedCharacter(undefined);
-      // setSelectedCell(undefined);
+      setSelectedCell(undefined);
     };
 
     const isCorrect = (): boolean => {
@@ -138,7 +127,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     };
 
     const handleClickCharacter = (character: Character): void => {
-      // setSelectedCell(undefined);
+      setSelectedCell(undefined);
       setSelectedCharacter(character);
     };
 
