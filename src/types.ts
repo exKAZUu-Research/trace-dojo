@@ -25,3 +25,5 @@ export type SolveProblemResult = {
   board: Board;
   histories: History[] | undefined;
 };
+
+export type CharacterDirection = 'up' | 'down' | 'left' | 'right';

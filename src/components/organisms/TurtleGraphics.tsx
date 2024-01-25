@@ -3,9 +3,9 @@ import { Box, Grid, GridItem } from '@chakra-ui/react';
 import Image from 'next/image';
 import React, { useState, forwardRef, useImperativeHandle, useMemo, useCallback } from 'react';
 
-import { Character, CharacterDirection } from '../../app/lib/Character';
+import { Character } from '../../app/lib/Character';
 import { TurtleGraphicsCell } from '../../app/lib/TurtleGraphicsCell';
-import type { CellColor } from '../../types';
+import type { CellColor, CharacterDirection } from '../../types';
 import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController';
 
 // 原点（左上隅）の座標
@@ -219,12 +219,12 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       });
     };
 
-    const handleClickChangeCharacterDirectionButton = (direction: string): void => {
+    const handleClickChangeCharacterDirectionButton = (direction: CharacterDirection): void => {
       if (!selectedCharacter) return;
 
       updateCharacter((character) => {
-        if (direction === CharacterDirection.Left) character.turnLeft();
-        else if (direction === CharacterDirection.Right) character.turnRight();
+        if (direction === 'left') character.turnLeft();
+        else if (direction === 'right') character.turnRight();
       });
     };
 

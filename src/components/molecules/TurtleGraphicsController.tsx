@@ -4,9 +4,8 @@ import { Box, Button, HStack, VStack } from '@chakra-ui/react';
 import React from 'react';
 
 import type { Character } from '../../app/lib/Character';
-import { CharacterDirection } from '../../app/lib/Character';
 import type { TurtleGraphicsCell } from '../../app/lib/TurtleGraphicsCell';
-import type { CellColor } from '../../types';
+import type { CellColor, CharacterDirection } from '../../types';
 
 interface TurtleGraphicsControllerProps {
   selectedCharacter?: Character;
@@ -16,7 +15,7 @@ interface TurtleGraphicsControllerProps {
   handleAddCharacterButton: () => void;
   handleRemoveCharacterButton: (character: Character) => void;
   handleClickCharacterMoveButton: () => void;
-  handleClickChangeCharacterDirectionButton: (direction: string) => void;
+  handleClickChangeCharacterDirectionButton: (direction: CharacterDirection) => void;
   handleClickCharacterMoveForwardButton: () => void;
   handleClickCharacterMoveBackButton: () => void;
   handleClickCharacterPenUpButton: () => void;
@@ -60,8 +59,8 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
       {selectedCharacter && (
         <>
           <HStack>
-            <Button onClick={() => handleClickChangeCharacterDirectionButton(CharacterDirection.Left)}>⤹</Button>
-            <Button onClick={() => handleClickChangeCharacterDirectionButton(CharacterDirection.Right)}>⤵</Button>
+            <Button onClick={() => handleClickChangeCharacterDirectionButton('left')}>⤹</Button>
+            <Button onClick={() => handleClickChangeCharacterDirectionButton('right')}>⤵</Button>
           </HStack>
           <HStack>
             <Button onClick={() => handleClickCharacterMoveButton()}>✜</Button>

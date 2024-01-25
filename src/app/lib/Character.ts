@@ -1,20 +1,13 @@
 import { v4 as uuidv4 } from 'uuid';
 
-export const CharacterDirection = {
-  Up: 'up',
-  Down: 'down',
-  Left: 'left',
-  Right: 'right',
-};
-type Direction = (typeof CharacterDirection)[keyof typeof CharacterDirection];
-import type { CellColor } from '../../types';
+import type { CellColor, CharacterDirection } from '../../types';
 
 export class Character {
   id: string;
   name: string;
   x: number;
   y: number;
-  direction: Direction;
+  direction: CharacterDirection;
   color: CellColor;
   penDown: boolean;
   path: string[];
@@ -33,7 +26,7 @@ export class Character {
     name?: string;
     x?: number;
     y?: number;
-    direction?: string;
+    direction?: CharacterDirection;
     color?: CellColor;
     penDown?: boolean;
     path?: string[];
@@ -52,19 +45,19 @@ export class Character {
     if (!this.canMoveForward(gridColumns, gridRows)) return;
 
     switch (this.direction) {
-      case CharacterDirection.Up: {
+      case 'up': {
         this.y -= 1;
         break;
       }
-      case CharacterDirection.Down: {
+      case 'down': {
         this.y += 1;
         break;
       }
-      case CharacterDirection.Left: {
+      case 'left': {
         this.x -= 1;
         break;
       }
-      case CharacterDirection.Right: {
+      case 'right': {
         this.x += 1;
         break;
       }
@@ -79,19 +72,19 @@ export class Character {
     if (!this.canMoveBack(gridColumns, gridRows)) return;
 
     switch (this.direction) {
-      case CharacterDirection.Up: {
+      case 'up': {
         this.y += 1;
         break;
       }
-      case CharacterDirection.Down: {
+      case 'down': {
         this.y -= 1;
         break;
       }
-      case CharacterDirection.Left: {
+      case 'left': {
         this.x += 1;
         break;
       }
-      case CharacterDirection.Right: {
+      case 'right': {
         this.x -= 1;
         break;
       }
@@ -104,42 +97,41 @@ export class Character {
 
   turnLeft(): void {
     switch (this.direction) {
-      case CharacterDirection.Up: {
-        this.direction = CharacterDirection.Left;
+      case 'up': {
+        this.direction = 'left';
         break;
       }
-      case CharacterDirection.Down: {
-        this.direction = CharacterDirection.Right;
+      case 'down': {
+        this.direction = 'right';
         break;
       }
-      case CharacterDirection.Left: {
-        this.direction = CharacterDirection.Down;
+      case 'left': {
+        this.direction = 'down';
         break;
       }
-      case CharacterDirection.Right: {
-        this.direction = CharacterDirection.Up;
+      case 'right': {
+        this.direction = 'up';
         break;
       }
     }
   }
 
   turnRight(): void {
-    console.log(this.direction);
     switch (this.direction) {
-      case CharacterDirection.Up: {
-        this.direction = CharacterDirection.Right;
+      case 'up': {
+        this.direction = 'right';
         break;
       }
-      case CharacterDirection.Down: {
-        this.direction = CharacterDirection.Left;
+      case 'down': {
+        this.direction = 'left';
         break;
       }
-      case CharacterDirection.Left: {
-        this.direction = CharacterDirection.Up;
+      case 'left': {
+        this.direction = 'up';
         break;
       }
-      case CharacterDirection.Right: {
-        this.direction = CharacterDirection.Down;
+      case 'right': {
+        this.direction = 'down';
         break;
       }
     }
@@ -164,16 +156,16 @@ export class Character {
 
   rotateCss(): string {
     switch (this.direction) {
-      case CharacterDirection.Up: {
+      case 'up': {
         return 'rotate(180deg)';
       }
-      case CharacterDirection.Down: {
+      case 'down': {
         return 'rotate(0deg)';
       }
-      case CharacterDirection.Left: {
+      case 'left': {
         return 'rotate(90deg)';
       }
-      case CharacterDirection.Right: {
+      case 'right': {
         return 'rotate(270deg)';
       }
     }
@@ -182,16 +174,16 @@ export class Character {
 
   canMoveForward(gridColumns: number, gridRows: number): boolean {
     switch (this.direction) {
-      case CharacterDirection.Up: {
+      case 'up': {
         return this.y > 1;
       }
-      case CharacterDirection.Down: {
+      case 'down': {
         return this.y < gridRows;
       }
-      case CharacterDirection.Left: {
+      case 'left': {
         return this.x > 1;
       }
-      case CharacterDirection.Right: {
+      case 'right': {
         return this.x < gridColumns;
       }
     }
@@ -200,16 +192,16 @@ export class Character {
 
   canMoveBack(gridColumns: number, gridRows: number): boolean {
     switch (this.direction) {
-      case CharacterDirection.Up: {
+      case 'up': {
         return this.y < gridRows;
       }
-      case CharacterDirection.Down: {
+      case 'down': {
         return this.y > 1;
       }
-      case CharacterDirection.Left: {
+      case 'left': {
         return this.x < gridColumns;
       }
-      case CharacterDirection.Right: {
+      case 'right': {
         return this.x > 1;
       }
     }
