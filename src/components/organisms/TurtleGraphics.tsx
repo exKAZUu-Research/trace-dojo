@@ -55,7 +55,17 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
 
     // TODO: プログラムから盤面を生成する処理ができたら置き換える
     const getInitialCharacters = (): Character[] => {
-      return [new Character('A', 4, 2, 'right', 'red', true, ['1,2', '2,2', '3,2'])];
+      return [
+        new Character({
+          id: 'A',
+          x: 4,
+          y: 2,
+          direction: 'right',
+          color: 'red',
+          penDown: true,
+          path: ['1,2', '2,2', '3,2'],
+        }),
+      ];
     };
     const getInitialCharactersResult = useMemo(() => getInitialCharacters(), []);
     const [characters, setCharacters] = useState(getInitialCharactersResult);
@@ -63,15 +73,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     const updateCharacter = (updater: (char: Character) => void): void => {
       if (!selectedCharacter) return;
 
-      const updatedCharacter = new Character(
-        selectedCharacter.name,
-        selectedCharacter.x,
-        selectedCharacter.y,
-        selectedCharacter.direction,
-        selectedCharacter.color,
-        selectedCharacter.penDown,
-        selectedCharacter.path
-      );
+      const updatedCharacter = new Character({ ...selectedCharacter });
       updater(updatedCharacter);
 
       setCharacters((prevCharacters) =>
@@ -94,7 +96,17 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
 
     const isCorrect = (): boolean => {
       // TODO: 正答を取得する処理ができたら置き換える
-      const correctCharacters = [new Character('A', 5, 2, 'right', 'red', true, ['1,2', '2,2', '3,2'])];
+      const correctCharacters = [
+        new Character({
+          name: 'A',
+          x: 5,
+          y: 2,
+          direction: 'right',
+          color: 'red',
+          penDown: true,
+          path: ['1,2', '2,2', '3,2'],
+        }),
+      ];
       // 順番は関係なく、name, x, y, direction, color、penDownが一致していれば正解
       const isCorrectCharacters = correctCharacters.every((correctCharacter) => {
         const character = characters.find((character) => character.name === correctCharacter.name);
@@ -246,7 +258,15 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
 
       const x = (selectedCell.id % gridColumns) + ORIGIN_X;
       const y = Math.floor(selectedCell.id / gridColumns) + ORIGIN_Y;
-      const newCharacter = new Character('', x, y, 'down', CharacterColor.White, true, [`${x},${y}`]);
+      const newCharacter = new Character({
+        name: '',
+        x,
+        y,
+        direction: 'down',
+        color: CharacterColor.White,
+        penDown: true,
+        path: [`${x},${y}`],
+      });
 
       setCharacters((prevCharacters) => [...prevCharacters, newCharacter]);
       setSelectedCharacter(newCharacter);
