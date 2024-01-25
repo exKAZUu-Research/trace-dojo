@@ -24,7 +24,7 @@ export class Board {
   }
 
   updateGrid(character: Character): void {
-    const { color, penDown, x, y } = character;
-    if (penDown) this.grid[y - 1][x - 1].color = color;
+    const { cellColor, penDown, x, y } = character;
+    if (penDown) this.grid[y - 1][x - 1].color = cellColor;
   }
 }

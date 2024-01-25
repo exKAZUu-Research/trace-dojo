@@ -1,4 +1,5 @@
-// import type { CellColor as Color } from '../../types';
+import type { CellColor } from '../../types';
+
 export const CharacterColor = {
   Red: 'red',
   Blue: 'blue',
@@ -14,11 +15,13 @@ export class Character {
   x: number;
   y: number;
   direction: string;
+  cellColor: CellColor;
   color: Color;
   penDown: boolean;
   path: string[];
 
   constructor({
+    cellColor = 'red',
     color = 'red',
     direction = 'down',
     id = 1,
@@ -33,6 +36,7 @@ export class Character {
     x?: number;
     y?: number;
     direction?: string;
+    cellColor?: CellColor;
     color?: Color;
     penDown?: boolean;
     path?: string[];
@@ -42,6 +46,7 @@ export class Character {
     this.x = x;
     this.y = y;
     this.direction = direction;
+    this.cellColor = cellColor;
     this.color = color;
     this.penDown = penDown;
     this.path = path;
