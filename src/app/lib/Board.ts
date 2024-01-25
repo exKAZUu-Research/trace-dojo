@@ -1,3 +1,4 @@
+import { GRID_COLUMNS, GRID_ROWS } from '../../components/organisms/TurtleGraphics';
 import type { Cell, CellColor } from '../../types';
 
 import type { Character } from './Character';
@@ -5,7 +6,7 @@ import type { Character } from './Character';
 export class Board {
   grid: Cell[][];
   constructor({
-    gridSize = [8, 12],
+    gridSize = [GRID_ROWS, GRID_COLUMNS],
   }: {
     gridSize?: [number, number];
   } = {}) {

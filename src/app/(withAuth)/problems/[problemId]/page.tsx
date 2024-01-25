@@ -9,10 +9,6 @@ import type { TurtleGraphicsHandle } from '../../../../components/organisms/Turt
 import { TurtleGraphics } from '../../../../components/organisms/TurtleGraphics';
 import { programIdToName, generateProgram } from '../../../../problems/problemData';
 
-const GRID_COLUMNS = 12;
-const GRID_ROWS = 8;
-const GRID_SIZE = 40;
-
 const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
 
@@ -40,17 +36,10 @@ const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) =>
       <VStack spacing="4">
         <Heading as="h1">{programIdToName[params.problemId]}</Heading>
         <Flex gap="6" w="100%">
-          <VStack spacing="10" w={GRID_COLUMNS * GRID_SIZE}>
+          <VStack spacing="10">
             <Box>プログラムの実行後の結果を解答してください。</Box>
             <Box>
-              <TurtleGraphics
-                ref={turtleGraphicsRef}
-                gridColumns={GRID_COLUMNS}
-                gridRows={GRID_ROWS}
-                gridSize={GRID_SIZE}
-                isEnableOperation={true}
-                problemProgram={problemProgram}
-              />
+              <TurtleGraphics ref={turtleGraphicsRef} isEnableOperation={true} problemProgram={problemProgram} />
             </Box>
           </VStack>
           <VStack align="end" minW="50%" overflow="hidden">

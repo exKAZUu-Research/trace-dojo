@@ -1,4 +1,5 @@
 'use client';
+
 import { Box, Grid, GridItem } from '@chakra-ui/react';
 import Image from 'next/image';
 import React, { useState, forwardRef, useImperativeHandle, useMemo } from 'react';
@@ -13,10 +14,11 @@ import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController'
 export const ORIGIN_X = 1;
 export const ORIGIN_Y = 1;
 
+export const GRID_COLUMNS = 12;
+export const GRID_ROWS = 8;
+export const GRID_SIZE = 40;
+
 interface TurtleGraphicsProps {
-  gridColumns?: number;
-  gridRows?: number;
-  gridSize?: number;
   isEnableOperation?: boolean;
   problemProgram: string;
 }
@@ -27,7 +29,7 @@ export interface TurtleGraphicsHandle {
 }
 
 export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
-  ({ gridColumns = 12, gridRows = 8, gridSize = 40, isEnableOperation = false, problemProgram }, ref) => {
+  ({ isEnableOperation = false, problemProgram }, ref) => {
     const [board, setBoard] = useState<Board>(new Board());
     const [selectedCharacter, setSelectedCharacter] = useState<Character>();
     const [selectedCell, setSelectedCell] = useState<SelectedCell>();
@@ -123,12 +125,12 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     const handleCharacterDragging = (event: React.MouseEvent<HTMLDivElement>): void => {
       if (selectedCharacter && dragging) {
         const rect = event.currentTarget.getBoundingClientRect();
-        let x = Math.floor((event.clientX - rect.left) / gridSize) + 1;
-        let y = Math.floor((event.clientY - rect.top) / gridSize) + 1;
+        let x = Math.floor((event.clientX - rect.left) / GRID_SIZE) + 1;
+        let y = Math.floor((event.clientY - rect.top) / GRID_SIZE) + 1;
 
         // 移動先の座標がマップ内に収まるように制御
-        x = Math.max(ORIGIN_X, Math.min(x, ORIGIN_X + gridColumns - 1));
-        y = Math.max(ORIGIN_Y, Math.min(y, ORIGIN_Y + gridRows - 1));
+        x = Math.max(ORIGIN_X, Math.min(x, ORIGIN_X + GRID_COLUMNS - 1));
+        y = Math.max(ORIGIN_Y, Math.min(y, ORIGIN_Y + GRID_ROWS - 1));
 
         setCharacters((prevCharacters) =>
           prevCharacters.map((prevCharacter) => {
@@ -151,24 +153,24 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     const handleClickCharacterMoveForwardButton = (): void => {
       if (!selectedCharacter) return;
 
-      if (selectedCharacter.canMoveForward(gridColumns, gridRows)) {
+      if (selectedCharacter.canMoveForward()) {
         drawCharacterPath();
       }
 
       updateCharacter((character) => {
-        character.moveForward(gridColumns, gridRows);
+        character.moveForward();
       });
     };
 
     const handleClickCharacterMoveBackButton = (): void => {
       if (!selectedCharacter) return;
 
-      if (selectedCharacter.canMoveBack(gridColumns, gridRows)) {
+      if (selectedCharacter.canMoveBack()) {
         drawCharacterPath();
       }
 
       updateCharacter((character) => {
-        character.moveBack(gridColumns, gridRows);
+        character.moveBack();
       });
     };
 
@@ -254,8 +256,8 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       >
         <Grid
           position="relative"
-          templateColumns={`repeat(${gridColumns}, ${gridSize}px)`}
-          templateRows={`repeat(${gridRows}, ${gridSize}px)`}
+          templateColumns={`repeat(${GRID_COLUMNS}, ${GRID_SIZE}px)`}
+          templateRows={`repeat(${GRID_ROWS}, ${GRID_SIZE}px)`}
         >
           {board.grid.map((columns, rowIndex) =>
             columns.map((g, columnIndex) => (
@@ -274,19 +276,19 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
               key={character.id}
               borderColor={selectedCharacter?.id === character.id ? 'black' : 'transparent'}
               borderWidth="2px"
-              h={gridSize + 'px'}
-              left={(character.x - ORIGIN_Y) * gridSize + 'px'}
+              h={GRID_SIZE + 'px'}
+              left={(character.x - ORIGIN_Y) * GRID_SIZE + 'px'}
               position="absolute"
-              top={(character.y - ORIGIN_X) * gridSize + 'px'}
-              w={gridSize + 'px'}
+              top={(character.y - ORIGIN_X) * GRID_SIZE + 'px'}
+              w={GRID_SIZE + 'px'}
               onClick={() => handleClickCharacter(character)}
             >
               <Box transform={character.rotateCss()}>
                 <Image
                   alt={character.name}
-                  height={gridSize}
+                  height={GRID_SIZE}
                   src={`/character/${character.color}.png`}
-                  width={gridSize}
+                  width={GRID_SIZE}
                 />
               </Box>
             </Box>

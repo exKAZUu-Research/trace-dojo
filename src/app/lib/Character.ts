@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 
+import { GRID_COLUMNS, GRID_ROWS } from '../../components/organisms/TurtleGraphics';
 import type { CellColor, CharacterDirection } from '../../types';
 
 export class Character {
@@ -41,8 +42,8 @@ export class Character {
     this.path = path;
   }
 
-  moveForward(gridColumns: number, gridRows: number): void {
-    if (!this.canMoveForward(gridColumns, gridRows)) return;
+  moveForward(): void {
+    if (!this.canMoveForward()) return;
 
     switch (this.direction) {
       case 'up': {
@@ -68,8 +69,8 @@ export class Character {
     }
   }
 
-  moveBack(gridColumns: number, gridRows: number): void {
-    if (!this.canMoveBack(gridColumns, gridRows)) return;
+  moveBack(): void {
+    if (!this.canMoveBack()) return;
 
     switch (this.direction) {
       case 'up': {
@@ -172,34 +173,34 @@ export class Character {
     return '';
   }
 
-  canMoveForward(gridColumns: number, gridRows: number): boolean {
+  canMoveForward(): boolean {
     switch (this.direction) {
       case 'up': {
         return this.y > 1;
       }
       case 'down': {
-        return this.y < gridRows;
+        return this.y < GRID_ROWS;
       }
       case 'left': {
         return this.x > 1;
       }
       case 'right': {
-        return this.x < gridColumns;
+        return this.x < GRID_COLUMNS;
       }
     }
     return false;
   }
 
-  canMoveBack(gridColumns: number, gridRows: number): boolean {
+  canMoveBack(): boolean {
     switch (this.direction) {
       case 'up': {
-        return this.y < gridRows;
+        return this.y < GRID_ROWS;
       }
       case 'down': {
         return this.y > 1;
       }
       case 'left': {
-        return this.x < gridColumns;
+        return this.x < GRID_COLUMNS;
       }
       case 'right': {
         return this.x > 1;
