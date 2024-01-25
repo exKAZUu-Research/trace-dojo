@@ -3,8 +3,9 @@ import { Box, Grid, GridItem } from '@chakra-ui/react';
 import Image from 'next/image';
 import React, { useState, forwardRef, useImperativeHandle, useMemo, useCallback } from 'react';
 
-import { Character, CharacterDirection, CharacterColor } from '../../app/lib/Character';
+import { Character, CharacterDirection } from '../../app/lib/Character';
 import { TurtleGraphicsCell } from '../../app/lib/TurtleGraphicsCell';
+import type { CellColor } from '../../types';
 import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController';
 
 // 原点（左上隅）の座標
@@ -41,7 +42,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
         const x = (index % gridColumns) + ORIGIN_X;
         const y = Math.floor(index / gridColumns) + ORIGIN_Y;
 
-        let color = '';
+        let color = 'white' as CellColor;
 
         if ((x === 1 && y === 2) || (x === 2 && y === 2) || (x === 3 && y === 2)) {
           color = 'red';
@@ -126,7 +127,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
         const x = (index % gridColumns) + ORIGIN_X;
         const y = Math.floor(index / gridColumns) + ORIGIN_Y;
 
-        let color = '';
+        let color = 'white' as CellColor;
 
         if ((x === 1 && y === 2) || (x === 2 && y === 2) || (x === 3 && y === 2) || (x === 4 && y === 2)) {
           color = 'red';
@@ -227,7 +228,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       });
     };
 
-    const handleClickChangeCharacterColorButton = (color: string): void => {
+    const handleClickChangeCharacterColorButton = (color: CellColor): void => {
       if (!selectedCharacter) return;
 
       updateCharacter((character) => {
@@ -254,7 +255,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     const handleAddCharacterButton = (): void => {
       if (!selectedCell) return;
 
-      selectedCell.setBackgroundColor('');
+      selectedCell.setBackgroundColor('white');
 
       const x = (selectedCell.id % gridColumns) + ORIGIN_X;
       const y = Math.floor(selectedCell.id / gridColumns) + ORIGIN_Y;
@@ -263,7 +264,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
         x,
         y,
         direction: 'down',
-        color: CharacterColor.White,
+        color: 'white',
         penDown: true,
         path: [`${x},${y}`],
       });
@@ -283,7 +284,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       setSelectedCell(cells[index]);
     };
 
-    const handleChangeCellColorButton = (color: string): void => {
+    const handleChangeCellColorButton = (color: CellColor): void => {
       setCells((prevCells) =>
         prevCells.map((prevCell) => {
           if (prevCell.id === selectedCell?.id) {

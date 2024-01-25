@@ -1,21 +1,19 @@
-import type { CharacterColor } from './Character';
-
-type Color = (typeof CharacterColor)[keyof typeof CharacterColor];
+import type { CellColor } from '../../types';
 
 export class TurtleGraphicsCell {
   id: number;
   x: number;
   y: number;
-  backgroundColor: string;
+  backgroundColor: CellColor;
 
-  constructor(id: number, x: number, y: number, backgroundColor: string) {
+  constructor(id: number, x: number, y: number, backgroundColor: CellColor) {
     this.id = id;
     this.x = x;
     this.y = y;
     this.backgroundColor = backgroundColor;
   }
 
-  setBackgroundColor(color: Color): void {
+  setBackgroundColor(color: CellColor): void {
     this.backgroundColor = color;
   }
 }

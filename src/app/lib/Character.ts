@@ -9,29 +9,17 @@ export const CharacterDirection = {
 type Direction = (typeof CharacterDirection)[keyof typeof CharacterDirection];
 import type { CellColor } from '../../types';
 
-export const CharacterColor = {
-  Red: 'red',
-  Blue: 'blue',
-  Green: 'green',
-  Yellow: 'yellow',
-  Purple: 'purple',
-  White: 'white',
-};
-type Color = (typeof CharacterColor)[keyof typeof CharacterColor];
-
 export class Character {
   id: string;
   name: string;
   x: number;
   y: number;
   direction: Direction;
-  cellColor: CellColor;
-  color: Color;
+  color: CellColor;
   penDown: boolean;
   path: string[];
 
   constructor({
-    cellColor = 'red',
     color = 'red',
     direction = 'down',
     id = uuidv4(),
@@ -46,8 +34,7 @@ export class Character {
     x?: number;
     y?: number;
     direction?: string;
-    cellColor?: CellColor;
-    color?: Color;
+    color?: CellColor;
     penDown?: boolean;
     path?: string[];
   } = {}) {
@@ -56,7 +43,6 @@ export class Character {
     this.x = x;
     this.y = y;
     this.direction = direction;
-    this.cellColor = cellColor;
     this.color = color;
     this.penDown = penDown;
     this.path = path;
@@ -164,7 +150,7 @@ export class Character {
     this.y = y;
   }
 
-  setColor(color: Color): void {
+  setColor(color: CellColor): void {
     this.color = color;
   }
 
