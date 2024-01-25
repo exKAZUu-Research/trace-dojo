@@ -96,8 +96,8 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
               selectedColor={selectedCharacter.color}
             />
             <ColorChangeButton
-              color={'white'}
-              handleOnClick={() => handleChangeCharacterColorButton('white')}
+              color={undefined}
+              handleOnClick={() => handleChangeCharacterColorButton(undefined)}
               selectedColor={selectedCharacter.color}
             />
           </HStack>
@@ -147,8 +147,8 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
               selectedColor={board.getCellColor(selectedCell.x, selectedCell.y)}
             />
             <ColorChangeButton
-              color={'white'}
-              handleOnClick={() => handleChangeCellColorButton('white')}
+              color={undefined}
+              handleOnClick={() => handleChangeCellColorButton(undefined)}
               selectedColor={board.getCellColor(selectedCell.x, selectedCell.y)}
             />
           </HStack>

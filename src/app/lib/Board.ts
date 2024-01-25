@@ -17,7 +17,7 @@ export class Board {
     for (let i = 0; i < numRows; i++) {
       grid.push([]);
       for (let j = 0; j < numColumns; j++) {
-        grid[i].push({ color: 'white' });
+        grid[i].push({ color: undefined });
       }
     }
     return grid;

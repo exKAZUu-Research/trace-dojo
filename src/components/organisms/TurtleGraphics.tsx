@@ -5,6 +5,7 @@ import React, { useState, forwardRef, useImperativeHandle, useMemo } from 'react
 
 import { Board } from '../../app/lib/Board';
 import { Character } from '../../app/lib/Character';
+import { solveProblem } from '../../app/lib/solveProblem';
 import type { CellColor, CharacterDirection, SelectedCell } from '../../types';
 import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController';
 
@@ -17,6 +18,7 @@ interface TurtleGraphicsProps {
   gridRows?: number;
   gridSize?: number;
   isEnableOperation?: boolean;
+  problemProgram: string;
 }
 
 export interface TurtleGraphicsHandle {
@@ -25,7 +27,7 @@ export interface TurtleGraphicsHandle {
 }
 
 export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
-  ({ gridColumns = 12, gridRows = 8, gridSize = 40, isEnableOperation = false }, ref) => {
+  ({ gridColumns = 12, gridRows = 8, gridSize = 40, isEnableOperation = false, problemProgram }, ref) => {
     const [board, setBoard] = useState<Board>(new Board());
     const [selectedCharacter, setSelectedCharacter] = useState<Character>();
     const [selectedCell, setSelectedCell] = useState<SelectedCell>();
@@ -74,18 +76,10 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     };
 
     const isCorrect = (): boolean => {
+      const answer = solveProblem(problemProgram);
+
       // TODO: 正答を取得する処理ができたら置き換える
-      const correctCharacters = [
-        new Character({
-          name: 'A',
-          x: 5,
-          y: 2,
-          direction: 'right',
-          color: 'red',
-          penDown: true,
-          path: ['1,2', '2,2', '3,2'],
-        }),
-      ];
+      const correctCharacters = [answer.character];
       // 順番は関係なく、name, x, y, direction, color、penDownが一致していれば正解
       const isCorrectCharacters = correctCharacters.every((correctCharacter) => {
         const character = characters.find((character) => character.name === correctCharacter.name);
@@ -101,29 +95,16 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
         );
       });
 
-      // const correctCells = Array.from({ length: gridColumns * gridRows }).map((_, index) => {
-      //   const x = (index % gridColumns) + ORIGIN_X;
-      //   const y = Math.floor(index / gridColumns) + ORIGIN_Y;
+      const correctBoard = answer.board;
+      // すべてのセルの色が一致していれば正解
+      const isCorrectBoard = correctBoard.grid.every((rows, rowIndex) =>
+        rows.every((column, columnIndex) => {
+          const cell = board.grid[rowIndex][columnIndex];
+          return cell.color === column.color;
+        })
+      );
 
-      //   let color = 'white' as CellColor;
-
-      //   if ((x === 1 && y === 2) || (x === 2 && y === 2) || (x === 3 && y === 2) || (x === 4 && y === 2)) {
-      //     color = 'red';
-      //   }
-
-      //   return new TurtleGraphicsCell(index, x, y, color);
-      // });
-      // // すべてのセルの色が一致していれば正解
-      // const isCorrectCells = correctCells.every((correctCell) => {
-      //   const cell = cells.find((cell) => cell.id === correctCell.id);
-
-      //   if (!cell) return false;
-
-      //   return correctCell.backgroundColor === cell.backgroundColor;
-      // });
-
-      return isCorrectCharacters;
-      // return isCorrectCharacters && isCorrectCells;
+      return isCorrectCharacters && isCorrectBoard;
     };
 
     const handleClickCharacter = (character: Character): void => {
@@ -227,7 +208,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     const handleAddCharacterButton = (): void => {
       if (!selectedCell) return;
 
-      board.setCellColor(selectedCell.x, selectedCell.y, 'white');
+      board.setCellColor(selectedCell.x, selectedCell.y, undefined);
 
       const newCharacter = new Character({
         x: selectedCell.x + ORIGIN_X,

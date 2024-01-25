@@ -18,6 +18,7 @@ const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) =>
 
   // TODO: 一旦Java固定 言語選択機能実装時に変更する
   const programmingLanguageId = 'java';
+  const problemProgram = generateProgram(params.problemId, programmingLanguageId);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.reset();
@@ -48,6 +49,7 @@ const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) =>
                 gridRows={GRID_ROWS}
                 gridSize={GRID_SIZE}
                 isEnableOperation={true}
+                problemProgram={problemProgram}
               />
             </Box>
           </VStack>
@@ -55,10 +57,7 @@ const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) =>
             <Button colorScheme="gray">解説</Button>
             {/* 画面に収まる高さに設定 */}
             <Box h="calc(100vh - 370px)" w="100%">
-              <SyntaxHighlighter
-                code={generateProgram(params.problemId, programmingLanguageId)}
-                programmingLanguageId={programmingLanguageId}
-              />
+              <SyntaxHighlighter code={problemProgram} programmingLanguageId={programmingLanguageId} />
             </Box>
             <HStack>
               <Button onClick={() => handleClickResetButton()}>リセット</Button>
