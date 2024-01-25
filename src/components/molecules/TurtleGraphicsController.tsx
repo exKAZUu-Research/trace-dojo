@@ -13,7 +13,7 @@ interface TurtleGraphicsControllerProps {
   selectedCell?: SelectedCell;
   handleChangeCellColorButton: (color: CellColor) => void;
   handleChangeCharacterColorButton: (color: CellColor) => void;
-  // handleAddCharacterButton: () => void;
+  handleAddCharacterButton: () => void;
   handleRemoveCharacterButton: (character: Character) => void;
   handleClickCharacterMoveButton: () => void;
   handleClickChangeCharacterDirectionButton: (direction: CharacterDirection) => void;
@@ -31,7 +31,7 @@ interface ColorChangeButtonProps {
 
 export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> = ({
   board,
-  // handleAddCharacterButton,
+  handleAddCharacterButton,
   handleChangeCellColorButton,
   handleChangeCharacterColorButton,
   handleClickChangeCharacterDirectionButton,
@@ -117,9 +117,9 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
 
       {selectedCell && (
         <>
-          {/* <Box>
+          <Box>
             <Button onClick={() => handleAddCharacterButton()}>キャラクターを追加する</Button>
-          </Box> */}
+          </Box>
           <HStack>
             <ColorChangeButton
               color={'red'}

@@ -235,36 +235,30 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       });
     };
 
-    // const handleAddCharacterButton = (): void => {
-    //   if (!selectedCell) return;
+    const handleAddCharacterButton = (): void => {
+      if (!selectedCell) return;
 
-    //   selectedCell.setBackgroundColor('white');
+      board.setCellColor(selectedCell.x, selectedCell.y, 'white');
 
-    //   const x = (selectedCell.id % gridColumns) + ORIGIN_X;
-    //   const y = Math.floor(selectedCell.id / gridColumns) + ORIGIN_Y;
-    //   const newCharacter = new Character({
-    //     name: '',
-    //     x,
-    //     y,
-    //     direction: 'down',
-    //     color: 'white',
-    //     penDown: true,
-    //     path: [`${x},${y}`],
-    //   });
+      const newCharacter = new Character({
+        x: selectedCell.x + ORIGIN_X,
+        y: selectedCell.y + ORIGIN_Y,
+        path: [`${selectedCell.x},${selectedCell.y}`],
+      });
 
-    //   setCharacters((prevCharacters) => [...prevCharacters, newCharacter]);
-    //   setSelectedCharacter(newCharacter);
-    //   setSelectedCell(undefined);
-    // };
+      setCharacters((prevCharacters) => [...prevCharacters, newCharacter]);
+      setSelectedCharacter(newCharacter);
+      setSelectedCell(undefined);
+    };
 
     const handleRemoveCharacterButton = (character: Character): void => {
       setCharacters((prevCharacters) => prevCharacters.filter((prevCharacter) => prevCharacter.id !== character.id));
       setSelectedCharacter(undefined);
     };
 
-    const handleClickCell = (column: number, row: number): void => {
+    const handleClickCell = (x: number, y: number): void => {
       setSelectedCharacter(undefined);
-      setSelectedCell({ x: column, y: row });
+      setSelectedCell({ x, y });
     };
 
     const handleChangeCellColorButton = (color: CellColor): void => {
@@ -272,9 +266,9 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
 
       setBoard((prevBoard) => {
         const newBoard = new Board();
-        for (const [columnIndex, columns] of prevBoard.grid.entries()) {
-          for (const [rowIndex, row] of columns.entries()) {
-            newBoard.setCellColor(columnIndex, rowIndex, row.color);
+        for (const [y, rows] of prevBoard.grid.entries()) {
+          for (const [x, column] of rows.entries()) {
+            newBoard.setCellColor(x, y, column.color);
           }
         }
         newBoard.setCellColor(selectedCell.x, selectedCell.y, color);
@@ -293,10 +287,10 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
           templateColumns={`repeat(${gridColumns}, ${gridSize}px)`}
           templateRows={`repeat(${gridRows}, ${gridSize}px)`}
         >
-          {board.grid.map((columns, columnIndex) =>
-            columns.map((g, rowIndex) => (
+          {board.grid.map((columns, rowIndex) =>
+            columns.map((g, columnIndex) => (
               <GridItem
-                key={rowIndex}
+                key={columnIndex}
                 backgroundColor={g.color}
                 borderColor="black"
                 borderWidth={selectedCell?.x === columnIndex && selectedCell?.y === rowIndex ? '2px' : '0.5px'}
@@ -311,9 +305,9 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
               borderColor={selectedCharacter?.id === character.id ? 'black' : 'transparent'}
               borderWidth="2px"
               h={gridSize + 'px'}
-              left={(character.x - ORIGIN_X) * gridSize + 'px'}
+              left={(character.x - ORIGIN_Y) * gridSize + 'px'}
               position="absolute"
-              top={(character.y - ORIGIN_Y) * gridSize + 'px'}
+              top={(character.y - ORIGIN_X) * gridSize + 'px'}
               w={gridSize + 'px'}
               onClick={() => handleClickCharacter(character)}
             >
@@ -331,7 +325,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
         {isEnableOperation && (
           <TurtleGraphicsController
             board={board}
-            // handleAddCharacterButton={handleAddCharacterButton}
+            handleAddCharacterButton={handleAddCharacterButton}
             handleChangeCellColorButton={handleChangeCellColorButton}
             handleChangeCharacterColorButton={handleClickChangeCharacterColorButton}
             handleClickChangeCharacterDirectionButton={handleClickChangeCharacterDirectionButton}

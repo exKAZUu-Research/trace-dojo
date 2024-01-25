@@ -9,7 +9,7 @@ export class Board {
   }: {
     gridSize?: [number, number];
   } = {}) {
-    this.grid = this.createGrid(gridSize[1], gridSize[0]);
+    this.grid = this.createGrid(gridSize[0], gridSize[1]);
   }
 
   createGrid(numRows: number, numColumns: number): Cell[][] {
@@ -29,10 +29,10 @@ export class Board {
   }
 
   getCellColor(x: number, y: number): CellColor {
-    return this.grid[x][y].color;
+    return this.grid[y][x].color;
   }
 
   setCellColor(x: number, y: number, color: CellColor): void {
-    this.grid[x][y].color = color;
+    this.grid[y][x].color = color;
   }
 }
