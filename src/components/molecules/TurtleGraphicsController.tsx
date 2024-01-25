@@ -3,13 +3,15 @@
 import { Box, Button, HStack, VStack } from '@chakra-ui/react';
 import React from 'react';
 
+import type { Board } from '../../app/lib/Board';
 import type { Character } from '../../app/lib/Character';
-import type { CellColor, CharacterDirection } from '../../types';
+import type { CellColor, CharacterDirection, SelectedCell } from '../../types';
 
 interface TurtleGraphicsControllerProps {
+  board: Board;
   selectedCharacter?: Character;
-  // selectedCell?: TurtleGraphicsCell;
-  // handleChangeCellColorButton: (color: CellColor) => void;
+  selectedCell?: SelectedCell;
+  handleChangeCellColorButton: (color: CellColor) => void;
   handleChangeCharacterColorButton: (color: CellColor) => void;
   // handleAddCharacterButton: () => void;
   handleRemoveCharacterButton: (character: Character) => void;
@@ -28,8 +30,9 @@ interface ColorChangeButtonProps {
 }
 
 export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> = ({
+  board,
   // handleAddCharacterButton,
-  // handleChangeCellColorButton,
+  handleChangeCellColorButton,
   handleChangeCharacterColorButton,
   handleClickChangeCharacterDirectionButton,
   handleClickCharacterMoveBackButton,
@@ -38,7 +41,7 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
   handleClickCharacterPenDownButton,
   handleClickCharacterPenUpButton,
   handleRemoveCharacterButton,
-  // selectedCell,
+  selectedCell,
   selectedCharacter,
 }) => {
   const ColorChangeButton: React.FC<ColorChangeButtonProps> = ({ color, handleOnClick, selectedColor }) => {
@@ -112,45 +115,45 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
         </>
       )}
 
-      {/* {selectedCell && (
+      {selectedCell && (
         <>
-          <Box>
+          {/* <Box>
             <Button onClick={() => handleAddCharacterButton()}>キャラクターを追加する</Button>
-          </Box>
+          </Box> */}
           <HStack>
             <ColorChangeButton
               color={'red'}
               handleOnClick={() => handleChangeCellColorButton('red')}
-              selectedColor={selectedCell.backgroundColor}
+              selectedColor={board.getCellColor(selectedCell.x, selectedCell.y)}
             />
             <ColorChangeButton
               color={'blue'}
               handleOnClick={() => handleChangeCellColorButton('blue')}
-              selectedColor={selectedCell.backgroundColor}
+              selectedColor={board.getCellColor(selectedCell.x, selectedCell.y)}
             />
             <ColorChangeButton
               color={'green'}
               handleOnClick={() => handleChangeCellColorButton('green')}
-              selectedColor={selectedCell.backgroundColor}
+              selectedColor={board.getCellColor(selectedCell.x, selectedCell.y)}
             />
             <ColorChangeButton
               color={'yellow'}
               handleOnClick={() => handleChangeCellColorButton('yellow')}
-              selectedColor={selectedCell.backgroundColor}
+              selectedColor={board.getCellColor(selectedCell.x, selectedCell.y)}
             />
             <ColorChangeButton
               color={'purple'}
               handleOnClick={() => handleChangeCellColorButton('purple')}
-              selectedColor={selectedCell.backgroundColor}
+              selectedColor={board.getCellColor(selectedCell.x, selectedCell.y)}
             />
             <ColorChangeButton
               color={'white'}
               handleOnClick={() => handleChangeCellColorButton('white')}
-              selectedColor={selectedCell.backgroundColor}
+              selectedColor={board.getCellColor(selectedCell.x, selectedCell.y)}
             />
           </HStack>
         </>
-      )} */}
+      )}
     </VStack>
   );
 };

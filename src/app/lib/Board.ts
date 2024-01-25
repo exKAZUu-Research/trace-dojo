@@ -1,4 +1,4 @@
-import type { Cell } from '../../types';
+import type { Cell, CellColor } from '../../types';
 
 import type { Character } from './Character';
 
@@ -17,7 +17,7 @@ export class Board {
     for (let i = 0; i < numRows; i++) {
       grid.push([]);
       for (let j = 0; j < numColumns; j++) {
-        grid[i].push({ color: undefined });
+        grid[i].push({ color: 'white' });
       }
     }
     return grid;
@@ -26,5 +26,13 @@ export class Board {
   updateGrid(character: Character): void {
     const { color, penDown, x, y } = character;
     if (penDown) this.grid[y - 1][x - 1].color = color;
+  }
+
+  getCellColor(x: number, y: number): CellColor {
+    return this.grid[x][y].color;
+  }
+
+  setCellColor(x: number, y: number, color: CellColor): void {
+    this.grid[x][y].color = color;
   }
 }

@@ -5,7 +5,7 @@ import React, { useState, forwardRef, useImperativeHandle, useMemo } from 'react
 
 import { Board } from '../../app/lib/Board';
 import { Character } from '../../app/lib/Character';
-import type { CellColor, CharacterDirection } from '../../types';
+import type { CellColor, CharacterDirection, SelectedCell } from '../../types';
 import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController';
 
 // 原点（左上隅）の座標
@@ -26,9 +26,9 @@ export interface TurtleGraphicsHandle {
 
 export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
   ({ gridColumns = 12, gridRows = 8, gridSize = 40, isEnableOperation = false }, ref) => {
-    const [board] = useState(new Board());
+    const [board, setBoard] = useState<Board>(new Board());
     const [selectedCharacter, setSelectedCharacter] = useState<Character>();
-    // const [selectedCell, setSelectedCell] = useState<Cell>();
+    const [selectedCell, setSelectedCell] = useState<SelectedCell>();
     const [dragging, setDragging] = useState<boolean>(false);
 
     useImperativeHandle(ref, () => ({
@@ -55,17 +55,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
 
     // TODO: プログラムから盤面を生成する処理ができたら置き換える
     const getInitialCharacters = (): Character[] => {
-      return [
-        new Character({
-          id: 'A',
-          x: 4,
-          y: 2,
-          direction: 'right',
-          color: 'red',
-          penDown: true,
-          path: ['1,2', '2,2', '3,2'],
-        }),
-      ];
+      return [];
     };
     const getInitialCharactersResult = useMemo(() => getInitialCharacters(), []);
     const [characters, setCharacters] = useState(getInitialCharactersResult);
@@ -272,22 +262,25 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       setSelectedCharacter(undefined);
     };
 
-    // const handleClickCell = (index: number): void => {
-    //   setSelectedCharacter(undefined);
-    //   setSelectedCell(cells[index]);
-    // };
+    const handleClickCell = (column: number, row: number): void => {
+      setSelectedCharacter(undefined);
+      setSelectedCell({ x: column, y: row });
+    };
 
-    // const handleChangeCellColorButton = (color: CellColor): void => {
-    //   setCells((prevCells) =>
-    //     prevCells.map((prevCell) => {
-    //       if (prevCell.id === selectedCell?.id) {
-    //         selectedCell.setBackgroundColor(color);
-    //         return selectedCell;
-    //       }
-    //       return prevCell;
-    //     })
-    //   );
-    // };
+    const handleChangeCellColorButton = (color: CellColor): void => {
+      if (!selectedCell) return;
+
+      setBoard((prevBoard) => {
+        const newBoard = new Board();
+        for (const [columnIndex, columns] of prevBoard.grid.entries()) {
+          for (const [rowIndex, row] of columns.entries()) {
+            newBoard.setCellColor(columnIndex, rowIndex, row.color);
+          }
+        }
+        newBoard.setCellColor(selectedCell.x, selectedCell.y, color);
+        return newBoard;
+      });
+    };
 
     return (
       <Box
@@ -300,16 +293,15 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
           templateColumns={`repeat(${gridColumns}, ${gridSize}px)`}
           templateRows={`repeat(${gridRows}, ${gridSize}px)`}
         >
-          {board.grid.map((columns) =>
-            columns.map((g, index) => (
+          {board.grid.map((columns, columnIndex) =>
+            columns.map((g, rowIndex) => (
               <GridItem
-                key={index}
+                key={rowIndex}
                 backgroundColor={g.color}
                 borderColor="black"
-                // borderWidth={selectedCell?.id === cell.id ? '2px' : '0.5px'}
-                borderWidth={'0.5px'}
+                borderWidth={selectedCell?.x === columnIndex && selectedCell?.y === rowIndex ? '2px' : '0.5px'}
                 className="grid-cell"
-                // onClick={() => handleClickCell(cell.id)}
+                onClick={() => handleClickCell(columnIndex, rowIndex)}
               />
             ))
           )}
@@ -338,8 +330,9 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
         </Grid>
         {isEnableOperation && (
           <TurtleGraphicsController
+            board={board}
             // handleAddCharacterButton={handleAddCharacterButton}
-            // handleChangeCellColorButton={handleChangeCellColorButton}
+            handleChangeCellColorButton={handleChangeCellColorButton}
             handleChangeCharacterColorButton={handleClickChangeCharacterColorButton}
             handleClickChangeCharacterDirectionButton={handleClickChangeCharacterDirectionButton}
             handleClickCharacterMoveBackButton={handleClickCharacterMoveBackButton}
@@ -348,7 +341,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
             handleClickCharacterPenDownButton={handleClickCharacterPenDownButton}
             handleClickCharacterPenUpButton={handleClickCharacterPenUpButton}
             handleRemoveCharacterButton={handleRemoveCharacterButton}
-            // selectedCell={selectedCell}
+            selectedCell={selectedCell}
             selectedCharacter={selectedCharacter}
           />
         )}

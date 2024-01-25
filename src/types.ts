@@ -11,7 +11,11 @@ export type LayoutComponent = React.FC<LayoutProps>;
 
 export type CellColor = 'red' | 'blue' | 'green' | 'yellow' | 'purple' | 'white';
 export type Cell = {
-  color: CellColor | undefined;
+  color: CellColor;
+};
+export type SelectedCell = {
+  x: number;
+  y: number;
 };
 
 export type History = {
