@@ -40,28 +40,22 @@ export class Character {
   }
 
   moveForward(gridColumns: number, gridRows: number): void {
+    if (!this.canMoveForward(gridColumns, gridRows)) return;
+
     switch (this.direction) {
       case CharacterDirection.Up: {
-        if (this.y <= 1) return;
-
         this.y -= 1;
         break;
       }
       case CharacterDirection.Down: {
-        if (this.y >= gridRows) return;
-
         this.y += 1;
         break;
       }
       case CharacterDirection.Left: {
-        if (this.x <= 1) return;
-
         this.x -= 1;
         break;
       }
       case CharacterDirection.Right: {
-        if (this.x >= gridColumns) return;
-
         this.x += 1;
         break;
       }
@@ -73,28 +67,22 @@ export class Character {
   }
 
   moveBack(gridColumns: number, gridRows: number): void {
+    if (!this.canMoveBack(gridColumns, gridRows)) return;
+
     switch (this.direction) {
       case CharacterDirection.Up: {
-        if (this.y >= gridRows) return;
-
         this.y += 1;
         break;
       }
       case CharacterDirection.Down: {
-        if (this.y <= 1) return;
-
         this.y -= 1;
         break;
       }
       case CharacterDirection.Left: {
-        if (this.x >= gridColumns) return;
-
         this.x += 1;
         break;
       }
       case CharacterDirection.Right: {
-        if (this.x <= 1) return;
-
         this.x -= 1;
         break;
       }
@@ -181,5 +169,41 @@ export class Character {
       }
     }
     return '';
+  }
+
+  canMoveForward(gridColumns: number, gridRows: number): boolean {
+    switch (this.direction) {
+      case CharacterDirection.Up: {
+        return this.y > 1;
+      }
+      case CharacterDirection.Down: {
+        return this.y < gridRows;
+      }
+      case CharacterDirection.Left: {
+        return this.x > 1;
+      }
+      case CharacterDirection.Right: {
+        return this.x < gridColumns;
+      }
+    }
+    return false;
+  }
+
+  canMoveBack(gridColumns: number, gridRows: number): boolean {
+    switch (this.direction) {
+      case CharacterDirection.Up: {
+        return this.y < gridRows;
+      }
+      case CharacterDirection.Down: {
+        return this.y > 1;
+      }
+      case CharacterDirection.Left: {
+        return this.x < gridColumns;
+      }
+      case CharacterDirection.Right: {
+        return this.x > 1;
+      }
+    }
+    return false;
   }
 }

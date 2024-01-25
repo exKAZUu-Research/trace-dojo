@@ -169,8 +169,25 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       }
     };
 
+    const drawCharacterPath = (): void => {
+      if (!selectedCharacter || !selectedCharacter.penDown) return;
+
+      setCells((prevCells) =>
+        prevCells.map((prevCell) => {
+          if (prevCell.x === selectedCharacter.x && prevCell.y === selectedCharacter.y) {
+            prevCell.setBackgroundColor(selectedCharacter.color);
+          }
+          return prevCell;
+        })
+      );
+    };
+
     const handleClickCharacterMoveForwardButton = (): void => {
       if (!selectedCharacter) return;
+
+      if (selectedCharacter.canMoveForward(gridColumns, gridRows)) {
+        drawCharacterPath();
+      }
 
       updateCharacter((character) => {
         character.moveForward(gridColumns, gridRows);
@@ -179,6 +196,10 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
 
     const handleClickCharacterMoveBackButton = (): void => {
       if (!selectedCharacter) return;
+
+      if (selectedCharacter.canMoveBack(gridColumns, gridRows)) {
+        drawCharacterPath();
+      }
 
       updateCharacter((character) => {
         character.moveBack(gridColumns, gridRows);
