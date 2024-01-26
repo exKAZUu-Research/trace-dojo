@@ -2,19 +2,23 @@
 
 import { Box, Button, Flex, HStack, Heading, VStack } from '@chakra-ui/react';
 import type { NextPage } from 'next';
-import { useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 import { SyntaxHighlighter } from '../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../components/organisms/TurtleGraphics';
 import { programIdToName, generateProgram } from '../../../../problems/problemData';
+import { getLanguageIdFromSessionStorage } from '../../../lib/SessionStorage';
 
 const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
+  const [selectedLanguageId, setSelectedLanguageId] = useState('');
 
-  // TODO: 一旦Java固定 言語選択機能実装時に変更する
-  const programmingLanguageId = 'java';
-  const problemProgram = generateProgram(params.problemId, programmingLanguageId);
+  useEffect(() => {
+    setSelectedLanguageId(getLanguageIdFromSessionStorage());
+  }, []);
+
+  const problemProgram = generateProgram(params.problemId, selectedLanguageId);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.reset();
@@ -46,7 +50,7 @@ const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) =>
             <Button colorScheme="gray">解説</Button>
             {/* 画面に収まる高さに設定 */}
             <Box h="calc(100vh - 370px)" w="100%">
-              <SyntaxHighlighter code={problemProgram} programmingLanguageId={programmingLanguageId} />
+              <SyntaxHighlighter code={problemProgram} programmingLanguageId={selectedLanguageId} />
             </Box>
             <HStack>
               <Button onClick={() => handleClickResetButton()}>リセット</Button>

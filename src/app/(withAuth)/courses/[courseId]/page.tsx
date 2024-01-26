@@ -1,3 +1,5 @@
+'use client';
+
 import {
   Box,
   Heading,
@@ -9,16 +11,46 @@ import {
   AccordionButton,
   AccordionIcon,
   AccordionPanel,
+  Select,
 } from '@chakra-ui/react';
 import type { NextPage } from 'next';
 import NextLink from 'next/link';
+import React, { useEffect, useState } from 'react';
 
-import { courseIdToProgramIdLists, programIdToName } from '../../../../problems/problemData';
+import { courseIdToProgramIdLists, languageIds, programIdToName } from '../../../../problems/problemData';
+import { getLanguageIdFromSessionStorage, setLanguageIdToSessionStorage } from '../../../lib/SessionStorage';
 
-const CoursePage: NextPage<{ params: { courseId: string } }> = async ({ params }) => {
+const CoursePage: NextPage<{ params: { courseId: string } }> = ({ params }) => {
+  const [selectedLanguageId, setSelectedLanguageId] = useState('');
+
+  useEffect(() => {
+    setSelectedLanguageId(getLanguageIdFromSessionStorage());
+  }, []);
+
+  const handleSelectLanguage = (event: React.ChangeEvent<HTMLSelectElement>): void => {
+    const inputValue = event.target.value;
+    setLanguageIdToSessionStorage(inputValue);
+    setSelectedLanguageId(inputValue);
+  };
+
   return (
     <main>
-      <Heading as="h1">Lessons</Heading>
+      <Heading as="h1" marginBottom="4">
+        Lessons
+      </Heading>
+      <Select
+        marginBottom="4"
+        maxW="300"
+        placeholder="Select language"
+        value={selectedLanguageId}
+        onChange={(e) => handleSelectLanguage(e)}
+      >
+        {languageIds.map((languageId) => (
+          <option key={languageId} value={languageId}>
+            {languageId}
+          </option>
+        ))}
+      </Select>
       <VStack align="stretch">
         {courseIdToProgramIdLists[params.courseId].map((programIds, iLesson) => (
           <Box key={iLesson}>
