@@ -16,7 +16,7 @@ export function executeEval(command: string): CharacterClass {
   const characterVariableName = 'character';
   const semicolonEndedCommand = (() => {
     if (command.endsWith(';')) return command;
-    command += ';';
+    return (command += ';');
   })();
   const returnValueCommand = `
     ${characterVariableName};

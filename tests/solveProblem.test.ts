@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { solveProblem, parseProgram } from '../src/app/lib/solveProblem';
+import { parseProgram, executeEval, solveProblem } from '../src/app/lib/solveProblem';
 
 test('Parse a program', () => {
   const program = `
@@ -22,6 +22,22 @@ test('Parse a program', () => {
     'character.moveForward();',
     'character.moveForward();',
   ]);
+});
+
+test('Execute eval', () => {
+  const command = `
+    const character = new Character();
+    character.moveForward();
+    character.moveForward();
+    character.moveForward();
+    character.moveForward();
+    character.moveForward();
+  `;
+  const character = executeEval(command);
+
+  expect(character).not.toBeFalsy();
+  expect(character.x).toEqual(1);
+  expect(character.y).toEqual(6);
 });
 
 test('Solve a problem', () => {
