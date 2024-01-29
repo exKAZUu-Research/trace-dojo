@@ -27,6 +27,15 @@ export function executeEval(command: string): CharacterClass {
   return eval(mergedCommand);
 }
 
+export function extractVariables(variableName: string, command: string): string[] {
+  const regex = new RegExp(`${variableName}\\d+`, 'g');
+  const matches = command.match(regex);
+  if (matches) {
+    return [...new Set(matches)];
+  }
+  return [];
+}
+
 export function solveProblem(program: string): SolveProblemResult {
   const commands = parseProgram(program);
   const character = new CharacterClass();
