@@ -67,6 +67,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
           return prevCharacter;
         })
       );
+      board.updateGrid(updatedCharacter);
       setSelectedCharacter(updatedCharacter);
     };
 
@@ -145,18 +146,8 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       }
     };
 
-    const drawCharacterPath = (): void => {
-      if (!selectedCharacter || !selectedCharacter.penDown) return;
-
-      board.updateGrid(selectedCharacter);
-    };
-
     const handleClickCharacterMoveForwardButton = (): void => {
       if (!selectedCharacter) return;
-
-      if (selectedCharacter.canMoveForward()) {
-        drawCharacterPath();
-      }
 
       updateCharacter((character) => {
         character.moveForward();
@@ -165,10 +156,6 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
 
     const handleClickCharacterMoveBackButton = (): void => {
       if (!selectedCharacter) return;
-
-      if (selectedCharacter.canMoveBack()) {
-        drawCharacterPath();
-      }
 
       updateCharacter((character) => {
         character.moveBack();
@@ -211,11 +198,10 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     const handleAddCharacterButton = (): void => {
       if (!selectedCell) return;
 
-      board.setCellColor(selectedCell.x, selectedCell.y, undefined);
-
       const newCharacter = new Character({
         x: selectedCell.x + ORIGIN_X,
         y: selectedCell.y + ORIGIN_Y,
+        penDown: false,
         path: [`${selectedCell.x},${selectedCell.y}`],
       });
 
