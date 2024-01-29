@@ -201,10 +201,10 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       const newCharacter = new Character({
         x: selectedCell.x + ORIGIN_X,
         y: selectedCell.y + ORIGIN_Y,
-        penDown: false,
-        path: [`${selectedCell.x},${selectedCell.y}`],
+        path: [`${selectedCell.x + ORIGIN_X},${selectedCell.y + ORIGIN_Y}`],
       });
 
+      board.updateGrid(newCharacter);
       setCharacters((prevCharacters) => [...prevCharacters, newCharacter]);
       setSelectedCharacter(newCharacter);
       setSelectedCell(undefined);
