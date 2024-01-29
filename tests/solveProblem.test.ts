@@ -81,11 +81,20 @@ test('Execute eval (2characters)', () => {
 test('Solve a problem (1character)', () => {
   const problemProgram = `
     const character1 = new Character();
+    character1.moveBack();
     character1.moveForward();
     character1.moveForward();
     character1.moveForward();
     character1.moveForward();
     character1.moveForward();
+    character1.turnLeft();
+    character1.moveForward();
+    character1.turnRight();
+    character1.moveBack();
+    character1.upPen();
+    character1.moveBack();
+    character1.moveBack();
+    character1.putPen();
   `;
 
   const answer = solveProblem(problemProgram);
@@ -102,16 +111,16 @@ test('Solve a problem (1character)', () => {
   expect(answer.board.grid).toEqual([
     [{ color: 'red' }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
     [{ color: 'red' }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
+    [{ color: 'red' }, { color: 'red' }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
     [{ color: 'red' }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: 'red' }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: 'red' }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: 'red' }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
+    [{ color: 'red' }, { color: 'red' }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
+    [{ color: 'red' }, { color: "red" }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
     [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
     [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
   ]);
   expect(answer.histories?.at(-1)?.characters?.length).toEqual(1);
-  expect(answer.histories?.at(-1)?.characters?.[0]?.x).toEqual(1);
-  expect(answer.histories?.at(-1)?.characters?.[0]?.y).toEqual(6);
+  expect(answer.histories?.at(-1)?.characters?.[0]?.x).toEqual(2);
+  expect(answer.histories?.at(-1)?.characters?.[0]?.y).toEqual(3);
 });
 
 test('Solve a problem (2characters)', () => {
