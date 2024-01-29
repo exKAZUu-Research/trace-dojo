@@ -198,11 +198,10 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     const handleAddCharacterButton = (): void => {
       if (!selectedCell) return;
 
-      board.setCellColor(selectedCell.x, selectedCell.y, undefined);
-
       const newCharacter = new Character({
         x: selectedCell.x + ORIGIN_X,
         y: selectedCell.y + ORIGIN_Y,
+        penDown: false,
         path: [`${selectedCell.x},${selectedCell.y}`],
       });
 
