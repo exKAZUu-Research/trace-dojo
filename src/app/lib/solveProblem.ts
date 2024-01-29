@@ -1,4 +1,4 @@
-import type { SolveProblemResult } from '../../types';
+import type { History, SolveProblemResult } from '../../types';
 
 import { Board as BoardClass } from './Board';
 import { Character as CharacterClass } from './Character';
@@ -10,16 +10,18 @@ export function parseProgram(program: string): string[] {
     .filter((line) => line !== '');
 }
 
-export function executeEval(command: string): CharacterClass {
+export function executeEval(command: string): CharacterClass[] {
   const Character = CharacterClass; // eslint-disable-line
   const Board = BoardClass; // eslint-disable-line
   const characterVariableName = 'character';
+  const charactersVariables = extractVariables(characterVariableName, command);
   const semicolonEndedCommand = (() => {
     if (command.endsWith(';')) return command;
-    command += ';';
+    return (command += ';');
   })();
+
   const returnValueCommand = `
-    ${characterVariableName};
+    [${charactersVariables}];
   `;
 
   const mergedCommand = semicolonEndedCommand + '\n' + returnValueCommand;
@@ -27,11 +29,19 @@ export function executeEval(command: string): CharacterClass {
   return eval(mergedCommand);
 }
 
+export function extractVariables(variableName: string, command: string): string[] {
+  const regex = new RegExp(`${variableName}\\d+`, 'g');
+  const matches = command.match(regex);
+  if (matches) {
+    return [...new Set(matches)];
+  }
+  return [];
+}
+
 export function solveProblem(program: string): SolveProblemResult {
   const commands = parseProgram(program);
-  const character = new CharacterClass();
   const board = new BoardClass();
-  const histories = [{ step: 0, character, board }];
+  const histories: History[] = [{ step: 0, characters: [], board }];
 
   for (let i = 0; i < commands.length; i++) {
     if (i < commands.length) {
@@ -41,15 +51,18 @@ export function solveProblem(program: string): SolveProblemResult {
         mergedCommand += commands[j];
       }
 
-      const character = executeEval(mergedCommand);
+      const characters = executeEval(mergedCommand);
 
-      board.updateGrid(character);
-      histories.push({ step: histories.length + 1, character, board });
+      for (const character of characters) {
+        board.updateGrid(character);
+      }
+
+      histories.push({ step: histories.length + 1, characters, board });
     }
   }
 
-  const result = {
-    character: histories?.at(-1)?.character || character,
+  const result: SolveProblemResult = {
+    characters: histories?.at(-1)?.characters,
     board: histories?.at(-1)?.board || board,
     histories,
   };

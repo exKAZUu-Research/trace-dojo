@@ -81,7 +81,8 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       const answer = solveProblem(problemProgram);
 
       // TODO: 正答を取得する処理ができたら置き換える
-      const correctCharacters = [answer.character];
+      const correctCharacters = answer.characters;
+      if (!correctCharacters) return false;
       // 順番は関係なく、name, x, y, direction, color、penDownが一致していれば正解
       const isCorrectCharacters = correctCharacters.every((correctCharacter) => {
         const character = characters.find((character) => character.name === correctCharacter.name);
