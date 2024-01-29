@@ -123,7 +123,7 @@ test('Solve a problem (1character)', () => {
   expect(answer.histories?.at(-1)?.characters?.[0]?.y).toEqual(3);
 });
 
-test('Solve a problem (2characters)', () => {
+test('Solve a problem (multiple characters)', () => {
   const problemProgram = `
     const character1 = new Character();
     const character2 = new Character({color: 'green', x: 2, y: 1});
@@ -131,13 +131,14 @@ test('Solve a problem (2characters)', () => {
     character1.moveForward();
     character2.moveForward();
     character2.moveForward();
+    const character3 = new Character({color: 'yellow', penDown: false, x: 3, y: 1});
   `;
 
   const answer = solveProblem(problemProgram);
 
   expect(answer).not.toBeFalsy();
   expect(answer.characters).not.toBeFalsy();
-  expect(answer.characters?.length).toEqual(2);
+  expect(answer.characters?.length).toEqual(3);
   expect(answer.board).not.toBeFalsy();
   expect(answer.characters?.[0].color).toEqual('red');
   expect(answer.characters?.[0].direction).toEqual('down');
@@ -157,7 +158,7 @@ test('Solve a problem (2characters)', () => {
     [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
     [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
   ]);
-  expect(answer.histories?.at(-1)?.characters?.length).toEqual(2);
+  expect(answer.histories?.at(-1)?.characters?.length).toEqual(3);
   expect(answer.histories?.at(-1)?.characters?.[0]?.x).toEqual(1);
   expect(answer.histories?.at(-1)?.characters?.[0]?.y).toEqual(3);
   expect(answer.histories?.at(-1)?.characters?.[1]?.x).toEqual(2);
