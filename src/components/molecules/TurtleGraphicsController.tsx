@@ -95,11 +95,6 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
               handleOnClick={() => handleChangeCharacterColorButton('purple')}
               selectedColor={selectedCharacter.color}
             />
-            <ColorChangeButton
-              color={undefined}
-              handleOnClick={() => handleChangeCharacterColorButton(undefined)}
-              selectedColor={selectedCharacter.color}
-            />
           </HStack>
           <HStack>
             <Button border={selectedCharacter.penDown ? '' : '1px'} onClick={() => handleClickCharacterPenUpButton()}>
