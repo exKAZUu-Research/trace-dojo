@@ -20,12 +20,12 @@ export type SelectedCell = {
 
 export type History = {
   step: number;
-  character: Character;
+  characters: Character[] | undefined;
   board: Board;
 };
 
 export type SolveProblemResult = {
-  character: Character;
+  characters: Character[] | undefined;
   board: Board;
   histories: History[] | undefined;
 };
