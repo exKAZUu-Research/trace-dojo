@@ -31,3 +31,5 @@ export type SolveProblemResult = {
 };
 
 export type CharacterDirection = 'up' | 'down' | 'left' | 'right';
+
+export type ProblemType = 'normal' | 'checkpoint' | 'step';
