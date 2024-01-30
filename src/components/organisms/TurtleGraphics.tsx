@@ -2,7 +2,7 @@
 
 import { Box, Grid, GridItem } from '@chakra-ui/react';
 import Image from 'next/image';
-import React, { useState, forwardRef, useImperativeHandle, useMemo } from 'react';
+import React, { useState, forwardRef, useImperativeHandle, useEffect, useCallback } from 'react';
 
 import { Board } from '../../app/lib/Board';
 import { Character } from '../../app/lib/Character';
@@ -21,37 +21,45 @@ export const GRID_SIZE = 40;
 interface TurtleGraphicsProps {
   isEnableOperation?: boolean;
   problemProgram: string;
+  currentCheckPointLine?: number;
+  beforeCheckPointLine?: number;
 }
 
 export interface TurtleGraphicsHandle {
-  reset(): void;
+  init(): void;
   isCorrect(): boolean;
 }
 
 export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
-  ({ isEnableOperation = false, problemProgram }, ref) => {
+  ({ beforeCheckPointLine = 0, isEnableOperation = false, problemProgram }, ref) => {
     const [board, setBoard] = useState<Board>(new Board());
+    const [characters, setCharacters] = useState<Character[]>([]);
     const [selectedCharacter, setSelectedCharacter] = useState<Character>();
     const [selectedCell, setSelectedCell] = useState<SelectedCell>();
     const [dragging, setDragging] = useState<boolean>(false);
 
+    const init = useCallback((): void => {
+      if (!problemProgram) return;
+
+      const solveResult = solveProblem(problemProgram).histories?.at(beforeCheckPointLine);
+      const initBoard = solveResult?.board;
+      const initCharacters = solveResult?.characters;
+
+      setBoard(initBoard || new Board());
+      setCharacters(initCharacters || []);
+      setSelectedCharacter(undefined);
+      setSelectedCell(undefined);
+    }, [beforeCheckPointLine, problemProgram]);
+
     useImperativeHandle(ref, () => ({
       // 親コンポーネントから関数を呼び出せるようにする
-      reset,
+      init,
       isCorrect,
     }));
 
-    // // TODO: プログラムから盤面を生成する処理ができたら置き換える
-    const getInitialBoard = (): Board => {
-      return new Board();
-    };
-
-    // TODO: プログラムから盤面を生成する処理ができたら置き換える
-    const getInitialCharacters = (): Character[] => {
-      return [];
-    };
-    const getInitialCharactersResult = useMemo(() => getInitialCharacters(), []);
-    const [characters, setCharacters] = useState(getInitialCharactersResult);
+    useEffect(() => {
+      init();
+    }, [beforeCheckPointLine, init, problemProgram]);
 
     const updateCharacter = (updater: (char: Character) => void): void => {
       if (!selectedCharacter) return;
@@ -69,13 +77,6 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       );
       board.updateGrid(updatedCharacter);
       setSelectedCharacter(updatedCharacter);
-    };
-
-    const reset = (): void => {
-      setBoard(getInitialBoard());
-      setCharacters(getInitialCharacters());
-      setSelectedCharacter(undefined);
-      setSelectedCell(undefined);
     };
 
     const isCorrect = (): boolean => {

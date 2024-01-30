@@ -26,7 +26,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({ 
   const problemProgram = generateProgram(problemId, selectedLanguageId);
 
   const handleClickResetButton = (): void => {
-    turtleGraphicsRef.current?.reset();
+    turtleGraphicsRef.current?.init();
   };
 
   const handleClickAnswerButton = (): void => {
