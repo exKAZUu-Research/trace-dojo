@@ -270,7 +270,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
               w={GRID_SIZE + 'px'}
               onClick={() => handleClickCharacter(character)}
             >
-              <Box transform={character.rotateCss()}>
+              <Box p="0.2rem" transform={character.rotateCss()}>
                 <Image
                   alt={character.name}
                   height={GRID_SIZE}
