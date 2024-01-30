@@ -6,7 +6,7 @@ import React, { useState, forwardRef, useImperativeHandle, useEffect, useCallbac
 
 import { Board } from '../../app/lib/Board';
 import { Character } from '../../app/lib/Character';
-import { isAnswerCorrect } from '../../app/lib/solveProblem';
+import { isAnswerCorrect, solveProblem } from '../../app/lib/solveProblem';
 import type { CellColor, CharacterDirection, SelectedCell } from '../../types';
 import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController';
 
@@ -31,7 +31,7 @@ export interface TurtleGraphicsHandle {
 }
 
 export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
-  ({ beforeCheckPointLine = 0, isEnableOperation = false, problemProgram }, ref) => {
+  ({ beforeCheckPointLine = 0, currentCheckPointLine, isEnableOperation = false, problemProgram }, ref) => {
     const [board, setBoard] = useState<Board>(new Board());
     const [characters, setCharacters] = useState<Character[]>([]);
     const [selectedCharacter, setSelectedCharacter] = useState<Character>();
@@ -80,7 +80,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     };
 
     const isCorrect = (): boolean => {
-      return isAnswerCorrect(problemProgram, characters, board);
+      return isAnswerCorrect(problemProgram, characters, board, currentCheckPointLine);
     };
 
     const handleClickCharacter = (character: Character): void => {
