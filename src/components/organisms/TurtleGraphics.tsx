@@ -6,7 +6,7 @@ import React, { useState, forwardRef, useImperativeHandle, useEffect, useCallbac
 
 import { Board } from '../../app/lib/Board';
 import { Character } from '../../app/lib/Character';
-import { solveProblem } from '../../app/lib/solveProblem';
+import { isAnswerCorrect } from '../../app/lib/solveProblem';
 import type { CellColor, CharacterDirection, SelectedCell } from '../../types';
 import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController';
 
@@ -80,36 +80,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     };
 
     const isCorrect = (): boolean => {
-      const answer = solveProblem(problemProgram);
-
-      // TODO: 正答を取得する処理ができたら置き換える
-      const correctCharacters = answer.characters;
-      if (!correctCharacters) return false;
-      // 順番は関係なく、name, x, y, direction, color、penDownが一致していれば正解
-      const isCorrectCharacters = correctCharacters.every((correctCharacter) => {
-        const character = characters.find((character) => character.name === correctCharacter.name);
-
-        if (!character) return false;
-
-        return (
-          character.x === correctCharacter.x &&
-          character.y === correctCharacter.y &&
-          character.direction === correctCharacter.direction &&
-          character.color === correctCharacter.color &&
-          character.penDown === correctCharacter.penDown
-        );
-      });
-
-      const correctBoard = answer.board;
-      // すべてのセルの色が一致していれば正解
-      const isCorrectBoard = correctBoard.grid.every((rows, rowIndex) =>
-        rows.every((column, columnIndex) => {
-          const cell = board.grid[rowIndex][columnIndex];
-          return cell.color === column.color;
-        })
-      );
-
-      return isCorrectCharacters && isCorrectBoard;
+      return isAnswerCorrect(problemProgram, characters, board);
     };
 
     const handleClickCharacter = (character: Character): void => {
@@ -202,10 +173,10 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       const newCharacter = new Character({
         x: selectedCell.x + ORIGIN_X,
         y: selectedCell.y + ORIGIN_Y,
-        penDown: false,
-        path: [`${selectedCell.x},${selectedCell.y}`],
+        path: [`${selectedCell.x + ORIGIN_X},${selectedCell.y + ORIGIN_Y}`],
       });
 
+      board.updateGrid(newCharacter);
       setCharacters((prevCharacters) => [...prevCharacters, newCharacter]);
       setSelectedCharacter(newCharacter);
       setSelectedCell(undefined);

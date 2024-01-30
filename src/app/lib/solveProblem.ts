@@ -76,3 +76,38 @@ export function solveProblem(program: string): SolveProblemResult {
   };
   return result;
 }
+
+export function isAnswerCorrect(
+  problemProgram: string,
+  answerCharacters: CharacterClass[],
+  answerBoard: BoardClass
+): boolean {
+  const answer = solveProblem(problemProgram);
+
+  if (!answer.characters || !answer.board) return false;
+
+  // 順番は関係なく、id以外のキャラクターの状態が一致しているかチェック
+  const isCorrectCharacters: boolean = answer.characters.every((correctCharacter) => {
+    const character = answerCharacters.find(
+      (answerCharacter) =>
+        answerCharacter.name === correctCharacter.name &&
+        answerCharacter.x === correctCharacter.x &&
+        answerCharacter.y === correctCharacter.y &&
+        answerCharacter.direction === correctCharacter.direction &&
+        answerCharacter.color === correctCharacter.color &&
+        answerCharacter.penDown === correctCharacter.penDown &&
+        answerCharacter.path?.join(',') === correctCharacter.path?.join(',')
+    );
+    return character;
+  });
+
+  // すべてのセルの色が一致しているかチェック
+  const isCorrectBoard: boolean = answer.board.grid.every((rows, rowIndex) =>
+    rows.every((column, columnIndex) => {
+      const cell = answerBoard.grid[rowIndex][columnIndex];
+      return cell.color === column.color;
+    })
+  );
+
+  return isCorrectCharacters && isCorrectBoard;
+}
