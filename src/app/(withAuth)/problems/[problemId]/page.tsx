@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { programIdToName } from '../../../../problems/problemData';
 import type { ProblemType } from '../../../../types';
 
+import { CheckpointProblem } from './CheckpointProblem';
 import { ExecutionResultProblem } from './ExecutionResultProblem';
 
 const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) => {
@@ -16,6 +17,9 @@ const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) =>
     switch (step) {
       case 'normal': {
         return <ExecutionResultProblem problemId={params.problemId} setStep={setStep} />;
+      }
+      case 'checkpoint': {
+        return <CheckpointProblem problemId={params.problemId} setStep={setStep} />;
       }
     }
   };
