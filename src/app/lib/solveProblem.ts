@@ -53,6 +53,14 @@ export function solveProblem(program: string): SolveProblemResult {
 
       const characters = executeEval(mergedCommand);
 
+      const board = new BoardClass();
+      for (const history of histories) {
+        if (!history.characters) continue;
+
+        for (const character of history.characters) {
+          board.updateGrid(character);
+        }
+      }
       for (const character of characters) {
         board.updateGrid(character);
       }
