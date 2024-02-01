@@ -11,14 +11,12 @@ export class Character {
   direction: CharacterDirection;
   color: CellColor;
   penDown: boolean;
-  path: string[];
 
   constructor({
     color = 'red',
     direction = 'down',
     id = uuidv4(),
     name = 'Bear',
-    path = ['1,1'],
     penDown = true,
     x = 1,
     y = 1,
@@ -39,7 +37,6 @@ export class Character {
     this.direction = direction;
     this.color = color;
     this.penDown = penDown;
-    this.path = path;
   }
 
   moveForward(): void {
@@ -63,10 +60,6 @@ export class Character {
         break;
       }
     }
-
-    if (this.penDown) {
-      this.path.push(`${this.x},${this.y}`);
-    }
   }
 
   moveBack(): void {
@@ -89,10 +82,6 @@ export class Character {
         this.x -= 1;
         break;
       }
-    }
-
-    if (this.penDown) {
-      this.path.push(`${this.x},${this.y}`);
     }
   }
 
