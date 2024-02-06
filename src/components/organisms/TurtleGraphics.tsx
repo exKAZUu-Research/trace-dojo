@@ -188,6 +188,8 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     };
 
     const handleClickCell = (x: number, y: number): void => {
+      if (!isEnableOperation) return;
+
       setSelectedCharacter(undefined);
       setSelectedCell({ x, y });
     };
