@@ -15,7 +15,7 @@ interface CheckpointProblemProps {
   setStep: (step: ProblemType) => void;
 }
 
-export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({ problemId, setStep }) => {
+export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({ problemId }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
   const [selectedLanguageId, setSelectedLanguageId] = useState('');
 
@@ -50,7 +50,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({ problemId,
       setCurrentCheckPointLine(getCheckPointLines[getCheckPointLines.indexOf(currentCheckPointLine) + 1]);
     } else {
       alert('不正解です');
-      setStep('step');
+      // setStep('step');
     }
   };
 
