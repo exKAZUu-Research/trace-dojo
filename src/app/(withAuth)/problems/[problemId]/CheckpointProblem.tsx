@@ -81,8 +81,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({ problemId 
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">
         <Button colorScheme="gray">解説</Button>
-        {/* 画面に収まる高さに設定 */}
-        <Box h="calc(100vh - 370px)" w="100%">
+        <Box h="840px" w="100%">
           <SyntaxHighlighter
             beforeCheckPointLine={beforeCheckPointLine}
             code={problemProgram}
