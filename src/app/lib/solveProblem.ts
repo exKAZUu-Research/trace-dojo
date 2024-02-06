@@ -96,8 +96,7 @@ export function isAnswerCorrect(
         answerCharacter.y === correctCharacter.y &&
         answerCharacter.direction === correctCharacter.direction &&
         answerCharacter.color === correctCharacter.color &&
-        answerCharacter.penDown === correctCharacter.penDown &&
-        answerCharacter.path?.join(',') === correctCharacter.path?.join(',')
+        answerCharacter.penDown === correctCharacter.penDown
     );
     return character;
   });
