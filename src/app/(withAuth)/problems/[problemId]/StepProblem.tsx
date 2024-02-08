@@ -10,20 +10,18 @@ import { generateProgram } from '../../../../problems/problemData';
 import type { ProblemType } from '../../../../types';
 import { getLanguageIdFromSessionStorage } from '../../../lib/SessionStorage';
 
-interface CheckpointProblemProps {
+interface StepProblemProps {
   problemId: string;
   setStep: (step: ProblemType) => void;
 }
 
-export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({ problemId, setStep }) => {
+export const StepProblem: React.FC<StepProblemProps> = ({ problemId }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
   const [selectedLanguageId, setSelectedLanguageId] = useState('');
 
-  // TODO: チェックポイントを取得する処理が実装できたら置き換える
-  const getCheckPointLines = [1, 4];
   const [problemProgram, setProblemProgram] = useState<string>('');
   const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(0);
-  const [currentCheckPointLine, setCurrentCheckPointLine] = useState(getCheckPointLines[0]);
+  const [currentCheckPointLine, setCurrentCheckPointLine] = useState(1);
 
   useEffect(() => {
     setSelectedLanguageId(getLanguageIdFromSessionStorage());
@@ -44,13 +42,13 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({ problemId,
     if (isCorrect) {
       alert('正解です');
 
-      if (currentCheckPointLine === getCheckPointLines.at(-1)) return;
+      const problemProgramLines = problemProgram.split('\n').length;
+      if (currentCheckPointLine === problemProgramLines) return;
 
       setBeforeCheckPointLine(currentCheckPointLine);
-      setCurrentCheckPointLine(getCheckPointLines[getCheckPointLines.indexOf(currentCheckPointLine) + 1]);
+      setCurrentCheckPointLine(currentCheckPointLine + 1);
     } else {
       alert('不正解です');
-      setStep('step');
     }
   };
 

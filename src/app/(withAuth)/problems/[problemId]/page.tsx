@@ -9,6 +9,7 @@ import type { ProblemType } from '../../../../types';
 
 import { CheckpointProblem } from './CheckpointProblem';
 import { ExecutionResultProblem } from './ExecutionResultProblem';
+import { StepProblem } from './StepProblem';
 
 const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) => {
   const [step, setStep] = useState<ProblemType>('normal');
@@ -20,6 +21,9 @@ const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) =>
       }
       case 'checkpoint': {
         return <CheckpointProblem problemId={params.problemId} setStep={setStep} />;
+      }
+      case 'step': {
+        return <StepProblem problemId={params.problemId} setStep={setStep} />;
       }
     }
   };
