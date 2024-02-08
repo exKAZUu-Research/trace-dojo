@@ -7,6 +7,11 @@ export type ProgramId = (typeof programIds)[number];
 export const languageIds = ['js', 'java'];
 export type LanguageId = (typeof languageIds)[number];
 
+export const languageIdToName: Record<LanguageId, string> = {
+  js: 'JavaScript',
+  java: 'Java',
+};
+
 export const courseIdToName: Record<CourseId, string> = {
   tuBeginner1: '初級プログラミングⅠ',
   tuBeginner2: '初級プログラミングⅡ',
