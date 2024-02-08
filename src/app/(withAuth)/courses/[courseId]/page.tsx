@@ -17,7 +17,12 @@ import type { NextPage } from 'next';
 import NextLink from 'next/link';
 import React, { useEffect, useState } from 'react';
 
-import { courseIdToProgramIdLists, languageIds, programIdToName } from '../../../../problems/problemData';
+import {
+  courseIdToProgramIdLists,
+  languageIdToName,
+  languageIds,
+  programIdToName,
+} from '../../../../problems/problemData';
 import { getLanguageIdFromSessionStorage, setLanguageIdToSessionStorage } from '../../../lib/SessionStorage';
 
 const CoursePage: NextPage<{ params: { courseId: string } }> = ({ params }) => {
@@ -47,7 +52,7 @@ const CoursePage: NextPage<{ params: { courseId: string } }> = ({ params }) => {
       >
         {languageIds.map((languageId) => (
           <option key={languageId} value={languageId}>
-            {languageId}
+            {languageIdToName[languageId]}
           </option>
         ))}
       </Select>
