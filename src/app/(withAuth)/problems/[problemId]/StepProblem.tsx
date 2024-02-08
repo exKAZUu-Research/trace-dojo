@@ -35,15 +35,17 @@ export const StepProblem: React.FC<StepProblemProps> = ({
 
     // TODO: 一旦アラートで表示
     if (isCorrect) {
-      alert('正解です');
-
       const problemProgramLines = problemProgram.split('\n').length;
-      if (currentCheckPointLine === problemProgramLines) return;
 
-      setBeforeCheckPointLine(currentCheckPointLine);
-      setCurrentCheckPointLine(currentCheckPointLine + 1);
+      if (currentCheckPointLine === problemProgramLines) {
+        alert('正解です。この問題は終了です');
+      } else {
+        alert('正解です。次の行に進みます');
+        setBeforeCheckPointLine(currentCheckPointLine);
+        setCurrentCheckPointLine(currentCheckPointLine + 1);
+      }
     } else {
-      alert('不正解です');
+      alert('不正解です。もう一度回答してください');
     }
   };
 

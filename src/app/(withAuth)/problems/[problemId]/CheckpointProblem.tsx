@@ -40,14 +40,20 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
 
     // TODO: 一旦アラートで表示
     if (isCorrect) {
-      alert('正解です');
-
-      if (currentCheckPointLine === checkPointLines.at(-1)) return;
-
       setBeforeCheckPointLine(currentCheckPointLine);
-      setCurrentCheckPointLine(checkPointLines[checkPointLines.indexOf(currentCheckPointLine) + 1]);
+
+      if (currentCheckPointLine === checkPointLines.at(-1)) {
+        // 最終チェックポイントを正解した場合はその次の行からステップ問題に移行
+        alert('正解です。このチェックポイントから1行ずつ回答してください');
+        setCurrentCheckPointLine(currentCheckPointLine + 1);
+        setStep('step');
+      } else {
+        alert('正解です。次のチェックポイントに進みます');
+        setCurrentCheckPointLine(checkPointLines[checkPointLines.indexOf(currentCheckPointLine) + 1]);
+      }
     } else {
-      alert('不正解です');
+      // 不正解の場合は最後に正解したチェックポイントからステップ問題に移行
+      alert('不正解です。最後に正解したチェックポイントから1行ずつ回答してください');
       setCurrentCheckPointLine(beforeCheckPointLine + 1);
       setStep('step');
     }

@@ -30,9 +30,9 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
 
     // TODO: 一旦アラートで表示
     if (isCorrect) {
-      alert('正解です');
+      alert('正解です。この問題は終了です');
     } else {
-      alert('不正解です');
+      alert('不正解です。チェックポイントごとに回答してください');
       setStep('checkpoint');
     }
   };
