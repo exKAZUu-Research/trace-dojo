@@ -53,6 +53,14 @@ export function solveProblem(program: string): SolveProblemResult {
 
       const characters = executeEval(mergedCommand);
 
+      const board = new BoardClass();
+      for (const history of histories) {
+        if (!history.characters) continue;
+
+        for (const character of history.characters) {
+          board.updateGrid(character);
+        }
+      }
       for (const character of characters) {
         board.updateGrid(character);
       }
@@ -72,14 +80,15 @@ export function solveProblem(program: string): SolveProblemResult {
 export function isAnswerCorrect(
   problemProgram: string,
   answerCharacters: CharacterClass[],
-  answerBoard: BoardClass
+  answerBoard: BoardClass,
+  step?: number
 ): boolean {
-  const answer = solveProblem(problemProgram);
+  const correctAnswer = solveProblem(problemProgram).histories?.at(step || -1);
 
-  if (!answer.characters || !answer.board) return false;
+  if (!correctAnswer || !correctAnswer.characters) return false;
 
   // 順番は関係なく、id以外のキャラクターの状態が一致しているかチェック
-  const isCorrectCharacters: boolean = answer.characters.every((correctCharacter) => {
+  const isCorrectCharacters: boolean = correctAnswer.characters.every((correctCharacter) => {
     const character = answerCharacters.find(
       (answerCharacter) =>
         answerCharacter.name === correctCharacter.name &&
@@ -93,7 +102,7 @@ export function isAnswerCorrect(
   });
 
   // すべてのセルの色が一致しているかチェック
-  const isCorrectBoard: boolean = answer.board.grid.every((rows, rowIndex) =>
+  const isCorrectBoard: boolean = correctAnswer.board.grid.every((rows, rowIndex) =>
     rows.every((column, columnIndex) => {
       const cell = answerBoard.grid[rowIndex][columnIndex];
       return cell.color === column.color;
