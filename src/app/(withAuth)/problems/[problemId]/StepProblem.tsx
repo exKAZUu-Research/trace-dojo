@@ -1,35 +1,30 @@
 'use client';
 
 import { Box, Button, Flex, HStack, VStack } from '@chakra-ui/react';
-import { useEffect, useRef, useState } from 'react';
+import { useRef } from 'react';
 
 import { SyntaxHighlighter } from '../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../components/organisms/TurtleGraphics';
-import { generateProgram } from '../../../../problems/problemData';
-import type { ProblemType } from '../../../../types';
-import { getLanguageIdFromSessionStorage } from '../../../lib/SessionStorage';
 
 interface StepProblemProps {
-  problemId: string;
-  setStep: (step: ProblemType) => void;
+  beforeCheckPointLine: number;
+  currentCheckPointLine: number;
+  problemProgram: string;
+  selectedLanguageId: string;
+  setBeforeCheckPointLine: (line: number) => void;
+  setCurrentCheckPointLine: (line: number) => void;
 }
 
-export const StepProblem: React.FC<StepProblemProps> = ({ problemId }) => {
+export const StepProblem: React.FC<StepProblemProps> = ({
+  beforeCheckPointLine,
+  currentCheckPointLine,
+  problemProgram,
+  selectedLanguageId,
+  setBeforeCheckPointLine,
+  setCurrentCheckPointLine,
+}) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
-  const [selectedLanguageId, setSelectedLanguageId] = useState('');
-
-  const [problemProgram, setProblemProgram] = useState<string>('');
-  const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(0);
-  const [currentCheckPointLine, setCurrentCheckPointLine] = useState(1);
-
-  useEffect(() => {
-    setSelectedLanguageId(getLanguageIdFromSessionStorage());
-  }, []);
-
-  useEffect(() => {
-    setProblemProgram(generateProgram(problemId, selectedLanguageId));
-  }, [problemId, selectedLanguageId]);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();

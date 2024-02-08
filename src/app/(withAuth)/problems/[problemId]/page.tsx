@@ -57,7 +57,16 @@ const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) =>
         );
       }
       case 'step': {
-        return <StepProblem problemId={problemId} setStep={setStep} />;
+        return (
+          <StepProblem
+            beforeCheckPointLine={beforeCheckPointLine}
+            currentCheckPointLine={currentCheckPointLine}
+            problemProgram={problemProgram}
+            selectedLanguageId={selectedLanguageId}
+            setBeforeCheckPointLine={setBeforeCheckPointLine}
+            setCurrentCheckPointLine={setCurrentCheckPointLine}
+          />
+        );
       }
     }
   };

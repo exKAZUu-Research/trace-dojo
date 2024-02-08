@@ -48,6 +48,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
       setCurrentCheckPointLine(checkPointLines[checkPointLines.indexOf(currentCheckPointLine) + 1]);
     } else {
       alert('不正解です');
+      setCurrentCheckPointLine(beforeCheckPointLine + 1);
       setStep('step');
     }
   };
