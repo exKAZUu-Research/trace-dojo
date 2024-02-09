@@ -11,11 +11,11 @@ import type { ProblemType } from '../../../../types';
 import { getLanguageIdFromSessionStorage } from '../../../lib/SessionStorage';
 
 interface ExecutionResultProblemProps {
-  problemId: string;
+  programId: string;
   setStep: (step: ProblemType) => void;
 }
 
-export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({ problemId, setStep }) => {
+export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({ programId, setStep }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
   const [selectedLanguageId, setSelectedLanguageId] = useState('');
 
@@ -23,7 +23,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({ 
     setSelectedLanguageId(getLanguageIdFromSessionStorage());
   }, []);
 
-  const problemProgram = generateProgram(problemId, selectedLanguageId);
+  const problemProgram = generateProgram(programId, selectedLanguageId);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();

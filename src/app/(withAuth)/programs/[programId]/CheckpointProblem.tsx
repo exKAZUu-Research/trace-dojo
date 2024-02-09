@@ -11,11 +11,11 @@ import type { ProblemType } from '../../../../types';
 import { getLanguageIdFromSessionStorage } from '../../../lib/SessionStorage';
 
 interface CheckpointProblemProps {
-  problemId: string;
+  programId: string;
   setStep: (step: ProblemType) => void;
 }
 
-export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({ problemId }) => {
+export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({ programId }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
   const [selectedLanguageId, setSelectedLanguageId] = useState('');
 
@@ -30,8 +30,8 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({ problemId 
   }, []);
 
   useEffect(() => {
-    setProblemProgram(generateProgram(problemId, selectedLanguageId));
-  }, [problemId, selectedLanguageId]);
+    setProblemProgram(generateProgram(programId, selectedLanguageId));
+  }, [programId, selectedLanguageId]);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();

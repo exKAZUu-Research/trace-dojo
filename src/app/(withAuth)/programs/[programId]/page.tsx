@@ -10,16 +10,16 @@ import type { ProblemType } from '../../../../types';
 import { CheckpointProblem } from './CheckpointProblem';
 import { ExecutionResultProblem } from './ExecutionResultProblem';
 
-const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) => {
+const ProblemPage: NextPage<{ params: { programId: string } }> = ({ params }) => {
   const [step, setStep] = useState<ProblemType>('normal');
 
   const ProblemComponent: React.FC = () => {
     switch (step) {
       case 'normal': {
-        return <ExecutionResultProblem problemId={params.problemId} setStep={setStep} />;
+        return <ExecutionResultProblem programId={params.programId} setStep={setStep} />;
       }
       case 'checkpoint': {
-        return <CheckpointProblem problemId={params.problemId} setStep={setStep} />;
+        return <CheckpointProblem programId={params.programId} setStep={setStep} />;
       }
     }
   };
@@ -27,7 +27,7 @@ const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) =>
   return (
     <main>
       <VStack spacing="4">
-        <Heading as="h1">{programIdToName[params.problemId]}</Heading>
+        <Heading as="h1">{programIdToName[params.programId]}</Heading>
         <ProblemComponent />
       </VStack>
     </main>
