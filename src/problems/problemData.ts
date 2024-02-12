@@ -42,8 +42,7 @@ character1.moveForward();
 character1.moveForward();
 character1.moveForward();
 character1.moveForward();
-character1.moveForward();
-` || programIdToLanguageIdToProgram[programId][languageId]
+character1.moveForward();` || programIdToLanguageIdToProgram[programId][languageId]
   );
 }
 

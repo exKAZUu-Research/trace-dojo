@@ -6,28 +6,23 @@ import { useRef } from 'react';
 import { SyntaxHighlighter } from '../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../components/organisms/TurtleGraphics';
-import type { ProblemType } from '../../../../types';
 
-interface CheckpointProblemProps {
+interface StepProblemProps {
+  beforeCheckPointLine: number;
+  currentCheckPointLine: number;
   problemProgram: string;
   selectedLanguageId: string;
-  checkPointLines: number[];
-  setStep: (step: ProblemType) => void;
-  beforeCheckPointLine: number;
   setBeforeCheckPointLine: (line: number) => void;
-  currentCheckPointLine: number;
   setCurrentCheckPointLine: (line: number) => void;
 }
 
-export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
+export const StepProblem: React.FC<StepProblemProps> = ({
   beforeCheckPointLine,
-  checkPointLines,
   currentCheckPointLine,
   problemProgram,
   selectedLanguageId,
   setBeforeCheckPointLine,
   setCurrentCheckPointLine,
-  setStep,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
 
@@ -40,22 +35,17 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
 
     // TODO: 一旦アラートで表示
     if (isCorrect) {
-      setBeforeCheckPointLine(currentCheckPointLine);
+      const problemProgramLines = problemProgram.split('\n').length;
 
-      if (currentCheckPointLine === checkPointLines.at(-1)) {
-        // 最終チェックポイントを正解した場合はその次の行からステップ問題に移行
-        alert('正解です。このチェックポイントから1行ずつ回答してください');
-        setCurrentCheckPointLine(currentCheckPointLine + 1);
-        setStep('step');
+      if (currentCheckPointLine === problemProgramLines) {
+        alert('正解です。この問題は終了です');
       } else {
-        alert('正解です。次のチェックポイントに進みます');
-        setCurrentCheckPointLine(checkPointLines[checkPointLines.indexOf(currentCheckPointLine) + 1]);
+        alert('正解です。次の行に進みます');
+        setBeforeCheckPointLine(currentCheckPointLine);
+        setCurrentCheckPointLine(currentCheckPointLine + 1);
       }
     } else {
-      // 不正解の場合は最後に正解したチェックポイントからステップ問題に移行
-      alert('不正解です。最後に正解したチェックポイントから1行ずつ回答してください');
-      setCurrentCheckPointLine(beforeCheckPointLine + 1);
-      setStep('step');
+      alert('不正解です。もう一度回答してください');
     }
   };
 
