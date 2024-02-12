@@ -1,29 +1,25 @@
 'use client';
 
 import { Box, Button, Flex, HStack, VStack } from '@chakra-ui/react';
-import { useEffect, useState, useRef } from 'react';
+import { useRef } from 'react';
 
 import { SyntaxHighlighter } from '../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../components/organisms/TurtleGraphics';
-import { generateProgram } from '../../../../problems/problemData';
 import type { ProblemType } from '../../../../types';
-import { getLanguageIdFromSessionStorage } from '../../../lib/SessionStorage';
 
 interface ExecutionResultProblemProps {
-  problemId: string;
+  problemProgram: string;
+  selectedLanguageId: string;
   setStep: (step: ProblemType) => void;
 }
 
-export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({ problemId, setStep }) => {
+export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
+  problemProgram,
+  selectedLanguageId,
+  setStep,
+}) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
-  const [selectedLanguageId, setSelectedLanguageId] = useState('');
-
-  useEffect(() => {
-    setSelectedLanguageId(getLanguageIdFromSessionStorage());
-  }, []);
-
-  const problemProgram = generateProgram(problemId, selectedLanguageId);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -34,9 +30,9 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({ 
 
     // TODO: 一旦アラートで表示
     if (isCorrect) {
-      alert('正解です');
+      alert('正解です。この問題は終了です');
     } else {
-      alert('不正解です');
+      alert('不正解です。チェックポイントごとに回答してください');
       setStep('checkpoint');
     }
   };
