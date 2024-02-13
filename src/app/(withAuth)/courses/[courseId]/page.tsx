@@ -3,8 +3,6 @@
 import {
   Box,
   Heading,
-  OrderedList,
-  ListItem,
   VStack,
   Accordion,
   AccordionItem,
@@ -12,6 +10,13 @@ import {
   AccordionIcon,
   AccordionPanel,
   Select,
+  Table,
+  TableContainer,
+  Thead,
+  Tbody,
+  Tr,
+  Td,
+  Th,
 } from '@chakra-ui/react';
 import type { NextPage } from 'next';
 import NextLink from 'next/link';
@@ -27,6 +32,8 @@ import { getLanguageIdFromSessionStorage, setLanguageIdToSessionStorage } from '
 
 const CoursePage: NextPage<{ params: { courseId: string } }> = ({ params }) => {
   const [selectedLanguageId, setSelectedLanguageId] = useState('');
+
+  const SPECIFIED_COMPLETION_COUNT = 2;
 
   useEffect(() => {
     setSelectedLanguageId(getLanguageIdFromSessionStorage());
@@ -68,15 +75,30 @@ const CoursePage: NextPage<{ params: { courseId: string } }> = ({ params }) => {
                   <AccordionIcon />
                 </AccordionButton>
                 <AccordionPanel pb={4}>
-                  <OrderedList>
-                    {programIds.map((programId) => (
-                      <ListItem key={programId}>
-                        <NextLink passHref href={`${params.courseId}/programs/${programId}`}>
-                          {programIdToName[programId]}
-                        </NextLink>
-                      </ListItem>
-                    ))}
-                  </OrderedList>
+                  <TableContainer>
+                    <Table>
+                      <Thead>
+                        <Tr>
+                          <Th textAlign="left">プログラム</Th>
+                          <Th align="left">進捗</Th>
+                        </Tr>
+                      </Thead>
+                      <Tbody>
+                        {programIds.map((programId) => (
+                          <Tr key={programId}>
+                            <Td>
+                              <NextLink passHref href={`${params.courseId}/programs/${programId}`}>
+                                {programIdToName[programId]}
+                              </NextLink>
+                            </Td>
+                            <Td>
+                              <p>completedProblemCount / {SPECIFIED_COMPLETION_COUNT}</p>
+                            </Td>
+                          </Tr>
+                        ))}
+                      </Tbody>
+                    </Table>
+                  </TableContainer>
                 </AccordionPanel>
               </AccordionItem>
             </Accordion>
