@@ -1,37 +1,35 @@
 'use client';
 
 import { Box, Button, Flex, HStack, VStack } from '@chakra-ui/react';
-import { useEffect, useRef, useState } from 'react';
+import { useRef } from 'react';
 
 import { SyntaxHighlighter } from '../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../components/organisms/TurtleGraphics';
-import { generateProgram } from '../../../../problems/problemData';
 import type { ProblemType } from '../../../../types';
-import { getLanguageIdFromSessionStorage } from '../../../lib/SessionStorage';
 
 interface CheckpointProblemProps {
-  problemId: string;
+  problemProgram: string;
+  selectedLanguageId: string;
+  checkPointLines: number[];
   setStep: (step: ProblemType) => void;
+  beforeCheckPointLine: number;
+  setBeforeCheckPointLine: (line: number) => void;
+  currentCheckPointLine: number;
+  setCurrentCheckPointLine: (line: number) => void;
 }
 
-export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({ problemId }) => {
+export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
+  beforeCheckPointLine,
+  checkPointLines,
+  currentCheckPointLine,
+  problemProgram,
+  selectedLanguageId,
+  setBeforeCheckPointLine,
+  setCurrentCheckPointLine,
+  setStep,
+}) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
-  const [selectedLanguageId, setSelectedLanguageId] = useState('');
-
-  // TODO: チェックポイントを取得する処理が実装できたら置き換える
-  const getCheckPointLines = [2, 4];
-  const [problemProgram, setProblemProgram] = useState<string>('');
-  const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(1);
-  const [currentCheckPointLine, setCurrentCheckPointLine] = useState(getCheckPointLines[0]);
-
-  useEffect(() => {
-    setSelectedLanguageId(getLanguageIdFromSessionStorage());
-  }, []);
-
-  useEffect(() => {
-    setProblemProgram(generateProgram(problemId, selectedLanguageId));
-  }, [problemId, selectedLanguageId]);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -42,15 +40,22 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({ problemId 
 
     // TODO: 一旦アラートで表示
     if (isCorrect) {
-      alert('正解です');
-
-      if (currentCheckPointLine === getCheckPointLines.at(-1)) return;
-
       setBeforeCheckPointLine(currentCheckPointLine);
-      setCurrentCheckPointLine(getCheckPointLines[getCheckPointLines.indexOf(currentCheckPointLine) + 1]);
+
+      if (currentCheckPointLine === checkPointLines.at(-1)) {
+        // 最終チェックポイントを正解した場合はその次の行からステップ問題に移行
+        alert('正解です。このチェックポイントから1行ずつ回答してください');
+        setCurrentCheckPointLine(currentCheckPointLine + 1);
+        setStep('step');
+      } else {
+        alert('正解です。次のチェックポイントに進みます');
+        setCurrentCheckPointLine(checkPointLines[checkPointLines.indexOf(currentCheckPointLine) + 1]);
+      }
     } else {
-      alert('不正解です');
-      // setStep('step');
+      // 不正解の場合は最後に正解したチェックポイントからステップ問題に移行
+      alert('不正解です。最後に正解したチェックポイントから1行ずつ回答してください');
+      setCurrentCheckPointLine(beforeCheckPointLine + 1);
+      setStep('step');
     }
   };
 
