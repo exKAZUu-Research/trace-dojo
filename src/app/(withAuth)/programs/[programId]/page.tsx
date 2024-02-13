@@ -12,8 +12,8 @@ import { CheckpointProblem } from './CheckpointProblem';
 import { ExecutionResultProblem } from './ExecutionResultProblem';
 import { StepProblem } from './StepProblem';
 
-const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) => {
-  const problemId = params.problemId;
+const ProblemPage: NextPage<{ params: { programId: string } }> = ({ params }) => {
+  const programId = params.programId;
   // TODO: チェックポイントを取得する処理が実装できたら置き換える
   const checkPointLines = [1, 4];
 
@@ -28,8 +28,8 @@ const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) =>
   }, []);
 
   useEffect(() => {
-    setProblemProgram(generateProgram(problemId, selectedLanguageId));
-  }, [problemId, selectedLanguageId]);
+    setProblemProgram(generateProgram(programId, selectedLanguageId));
+  }, [programId, selectedLanguageId]);
 
   const ProblemComponent: React.FC = () => {
     switch (step) {
@@ -74,7 +74,7 @@ const ProblemPage: NextPage<{ params: { problemId: string } }> = ({ params }) =>
   return (
     <main>
       <VStack spacing="4">
-        <Heading as="h1">{programIdToName[problemId]}</Heading>
+        <Heading as="h1">{programIdToName[programId]}</Heading>
         <ProblemComponent />
       </VStack>
     </main>
