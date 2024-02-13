@@ -37,7 +37,6 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
   }, [programId, selectedLanguageId]);
 
   const handleSolveProblem = async (): Promise<void> => {
-    console.log('handleSolveProblem');
     if (userId) {
       await createUserSolvedProblem(userId, courseId, programId, selectedLanguageId);
     }

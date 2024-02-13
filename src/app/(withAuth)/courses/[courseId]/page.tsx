@@ -32,8 +32,7 @@ import {
   programIdToName,
 } from '../../../../problems/problemData';
 import { getLanguageIdFromSessionStorage, setLanguageIdToSessionStorage } from '../../../lib/SessionStorage';
-
-import { getUserSolvedProblems } from '@/src/app/lib/actions';
+import { getUserSolvedProblems } from '../../../lib/actions';
 
 const CoursePage: NextPage<{ params: { courseId: string } }> = ({ params }) => {
   const [selectedLanguageId, setSelectedLanguageId] = useState('');
