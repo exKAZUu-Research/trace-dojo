@@ -3,10 +3,10 @@
 import { Box, Button, Flex, HStack, VStack } from '@chakra-ui/react';
 import { useRef } from 'react';
 
-import { SyntaxHighlighter } from '../../../../components/organisms/SyntaxHighlighter';
-import type { TurtleGraphicsHandle } from '../../../../components/organisms/TurtleGraphics';
-import { TurtleGraphics } from '../../../../components/organisms/TurtleGraphics';
-import type { ProblemType } from '../../../../types';
+import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
+import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
+import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
+import type { ProblemType } from '../../../../../../types';
 
 interface ExecutionResultProblemProps {
   problemProgram: string;

@@ -4,9 +4,9 @@ import { Heading, VStack } from '@chakra-ui/react';
 import type { NextPage } from 'next';
 import { useEffect, useState } from 'react';
 
-import { generateProgram, programIdToName } from '../../../../problems/problemData';
-import type { ProblemType } from '../../../../types';
-import { getLanguageIdFromSessionStorage } from '../../../lib/SessionStorage';
+import { generateProgram, programIdToName } from '../../../../../../problems/problemData';
+import type { ProblemType } from '../../../../../../types';
+import { getLanguageIdFromSessionStorage } from '../../../../../lib/SessionStorage';
 
 import { CheckpointProblem } from './CheckpointProblem';
 import { ExecutionResultProblem } from './ExecutionResultProblem';

@@ -71,7 +71,7 @@ const CoursePage: NextPage<{ params: { courseId: string } }> = ({ params }) => {
                   <OrderedList>
                     {programIds.map((programId) => (
                       <ListItem key={programId}>
-                        <NextLink passHref href={`/programs/${programId}`}>
+                        <NextLink passHref href={`${params.courseId}/programs/${programId}`}>
                           {programIdToName[programId]}
                         </NextLink>
                       </ListItem>
