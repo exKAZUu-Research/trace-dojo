@@ -39,6 +39,8 @@ export function generateProgram(programId: ProgramId, languageId: LanguageId): s
   return (
     `const character1 = new Character();
 character1.moveForward();
+character1.turnLeft();
+character1.moveForward();
 character1.moveForward();
 character1.moveForward();
 character1.moveForward();

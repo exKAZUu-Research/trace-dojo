@@ -6,7 +6,9 @@ import { useRef } from 'react';
 import { SyntaxHighlighter } from '../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../components/organisms/TurtleGraphics';
+import { Variables } from '../../../../components/organisms/Variables';
 import type { ProblemType } from '../../../../types';
+import { solveProblem } from '../../../lib/solveProblem';
 
 interface CheckpointProblemProps {
   problemProgram: string;
@@ -30,6 +32,8 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
   setStep,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
+
+  const characters = solveProblem(problemProgram).histories?.at(beforeCheckPointLine)?.characters;
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -86,7 +90,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">
         <Button colorScheme="gray">解説</Button>
-        <Box h="840px" w="100%">
+        <Box h="640px" w="100%">
           <SyntaxHighlighter
             beforeCheckPointLine={beforeCheckPointLine}
             code={problemProgram}
@@ -94,6 +98,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
             programmingLanguageId={selectedLanguageId}
           />
         </Box>
+        <Variables characters={characters} />
         <HStack>
           <Button onClick={() => handleClickResetButton()}>リセット</Button>
           <Button onClick={() => handleClickAnswerButton()}>解答</Button>

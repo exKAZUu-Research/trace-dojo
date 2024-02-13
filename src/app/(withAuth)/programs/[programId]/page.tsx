@@ -15,7 +15,7 @@ import { StepProblem } from './StepProblem';
 const ProblemPage: NextPage<{ params: { programId: string } }> = ({ params }) => {
   const programId = params.programId;
   // TODO: チェックポイントを取得する処理が実装できたら置き換える
-  const checkPointLines = [1, 4];
+  const checkPointLines = [1, 4, 6];
 
   const [selectedLanguageId, setSelectedLanguageId] = useState('');
   const [problemProgram, setProblemProgram] = useState<string>('');
