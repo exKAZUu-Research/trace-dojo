@@ -14,11 +14,13 @@ interface StepProblemProps {
   selectedLanguageId: string;
   setBeforeCheckPointLine: (line: number) => void;
   setCurrentCheckPointLine: (line: number) => void;
+  handleComplete: () => void;
 }
 
 export const StepProblem: React.FC<StepProblemProps> = ({
   beforeCheckPointLine,
   currentCheckPointLine,
+  handleComplete,
   problemProgram,
   selectedLanguageId,
   setBeforeCheckPointLine,
@@ -39,6 +41,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
 
       if (currentCheckPointLine === problemProgramLines) {
         alert('正解です。この問題は終了です');
+        handleComplete();
       } else {
         alert('正解です。次の行に進みます');
         setBeforeCheckPointLine(currentCheckPointLine);

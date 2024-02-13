@@ -9,12 +9,16 @@ export async function createUserSolvedProblem(
   programId: string,
   languageId: string
 ): Promise<void> {
-  prisma.userSolvedProblem.create({
-    data: {
-      userId,
-      courseId,
-      programId,
-      languageId,
-    },
-  });
+  try {
+    await prisma.userSolvedProblem.create({
+      data: {
+        userId,
+        courseId,
+        programId,
+        languageId,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+  }
 }

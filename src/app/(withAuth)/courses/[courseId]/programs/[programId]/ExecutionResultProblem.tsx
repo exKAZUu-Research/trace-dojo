@@ -12,9 +12,11 @@ interface ExecutionResultProblemProps {
   problemProgram: string;
   selectedLanguageId: string;
   setStep: (step: ProblemType) => void;
+  handleComplete: () => void;
 }
 
 export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
+  handleComplete,
   problemProgram,
   selectedLanguageId,
   setStep,
@@ -31,6 +33,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
     // TODO: 一旦アラートで表示
     if (isCorrect) {
       alert('正解です。この問題は終了です');
+      handleComplete();
     } else {
       alert('不正解です。チェックポイントごとに回答してください');
       setStep('checkpoint');
