@@ -17,10 +17,13 @@ import {
   Tr,
   Td,
   Th,
+  Flex,
 } from '@chakra-ui/react';
 import type { NextPage } from 'next';
+import Image from 'next/image';
 import NextLink from 'next/link';
 import React, { useEffect, useState } from 'react';
+import { useSessionContext } from 'supertokens-auth-react/recipe/session';
 
 import {
   courseIdToProgramIdLists,
@@ -30,10 +33,17 @@ import {
 } from '../../../../problems/problemData';
 import { getLanguageIdFromSessionStorage, setLanguageIdToSessionStorage } from '../../../lib/SessionStorage';
 
+import { getUserSolvedProblems } from '@/src/app/lib/actions';
+
 const CoursePage: NextPage<{ params: { courseId: string } }> = ({ params }) => {
   const [selectedLanguageId, setSelectedLanguageId] = useState('');
+  const [userSolvedProblems, setUserSolvedProblems] = useState<Array<{ programId: string; languageId: string }>>([]);
 
   const SPECIFIED_COMPLETION_COUNT = 2;
+
+  const session = useSessionContext();
+  const userId = session.loading ? '' : session.userId;
+  const courseId = params.courseId;
 
   useEffect(() => {
     setSelectedLanguageId(getLanguageIdFromSessionStorage());
@@ -43,6 +53,15 @@ const CoursePage: NextPage<{ params: { courseId: string } }> = ({ params }) => {
     const inputValue = event.target.value;
     setLanguageIdToSessionStorage(inputValue);
     setSelectedLanguageId(inputValue);
+    getUserSolvedProblems(userId, courseId).then((data) => {
+      setUserSolvedProblems(data);
+    });
+  };
+
+  const countUserSolvedProblems = (programId: string, languageId: string): number => {
+    return userSolvedProblems.filter(
+      (userSolvedProblem) => userSolvedProblem.programId === programId && userSolvedProblem.languageId === languageId
+    ).length;
   };
 
   return (
@@ -79,8 +98,12 @@ const CoursePage: NextPage<{ params: { courseId: string } }> = ({ params }) => {
                     <Table>
                       <Thead>
                         <Tr>
-                          <Th textAlign="left">プログラム</Th>
-                          <Th align="left">進捗</Th>
+                          <Th textAlign="left" width="50%">
+                            プログラム
+                          </Th>
+                          <Th align="left" width="50%">
+                            進捗
+                          </Th>
                         </Tr>
                       </Thead>
                       <Tbody>
@@ -92,7 +115,18 @@ const CoursePage: NextPage<{ params: { courseId: string } }> = ({ params }) => {
                               </NextLink>
                             </Td>
                             <Td>
-                              <p>completedProblemCount / {SPECIFIED_COMPLETION_COUNT}</p>
+                              <Flex>
+                                <p>
+                                  {countUserSolvedProblems(programId, selectedLanguageId)} /{' '}
+                                  {SPECIFIED_COMPLETION_COUNT}
+                                </p>
+                                {countUserSolvedProblems(programId, selectedLanguageId) >=
+                                  SPECIFIED_COMPLETION_COUNT && (
+                                  <Box h={4} ml={2} position={'relative'} w={4}>
+                                    <Image fill alt="完了の王冠" src="/crown.png" />
+                                  </Box>
+                                )}
+                              </Flex>
                             </Td>
                           </Tr>
                         ))}

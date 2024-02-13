@@ -22,3 +22,25 @@ export async function createUserSolvedProblem(
     console.error(error);
   }
 }
+
+export async function getUserSolvedProblems(
+  userId: string,
+  courseId: string
+): Promise<Array<{ programId: string; languageId: string }>> {
+  try {
+    const userSolvedProblems = await prisma.userSolvedProblem.findMany({
+      where: {
+        userId,
+        courseId,
+      },
+      select: {
+        programId: true,
+        languageId: true,
+      },
+    });
+    return userSolvedProblems;
+  } catch (error) {
+    console.error(error);
+    return [];
+  }
+}
