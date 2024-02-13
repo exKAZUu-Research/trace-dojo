@@ -1,4 +1,4 @@
-import { Box, Table, TableCaption, TableContainer, Tbody, Td, Th, Thead, Tr } from '@chakra-ui/react';
+import { Box, Table, TableCaption, TableContainer, Tbody, Td, Th, Thead, Tr, VStack } from '@chakra-ui/react';
 import React from 'react';
 
 import type { Character } from '../../app/lib/Character';
@@ -21,32 +21,49 @@ const penStateJapanese = (penDown: boolean): string => {
 
 export const Variables: React.FC<VariablesProps> = ({ characters }) => {
   return (
-    <TableContainer mb="4" w="100%">
-      <Table variant="simple">
-        <TableCaption placement="top">キャラクター</TableCaption>
-        <Thead>
-          <Tr>
-            <Th>変数名</Th>
-            <Th>名前</Th>
-            <Th>線の色</Th>
-            <Th>向き</Th>
-            <Th>ペンの状態</Th>
-          </Tr>
-        </Thead>
-        <Tbody>
-          {characters?.map((character) => (
-            <Tr key={character.id}>
-              <Td></Td>
-              <Td>{character.name}</Td>
-              <Td>
-                <Box bg={character.color} h="20px" w="20px" />
-              </Td>
-              <Td>{directionJapanese[character.direction]}</Td>
-              <Td>{penStateJapanese(character.penDown)}</Td>
+    <VStack>
+      <TableContainer w="100%">
+        <Table variant="simple">
+          <TableCaption placement="top">キャラクター</TableCaption>
+          <Thead>
+            <Tr>
+              <Th>変数名</Th>
+              <Th>名前</Th>
+              <Th>線の色</Th>
+              <Th>向き</Th>
+              <Th>ペンの状態</Th>
             </Tr>
-          ))}
-        </Tbody>
-      </Table>
-    </TableContainer>
+          </Thead>
+          <Tbody>
+            {characters?.map((character) => (
+              <Tr key={character.id}>
+                <Td></Td>
+                <Td>{character.name}</Td>
+                <Td>
+                  <Box bg={character.color} h="20px" w="20px" />
+                </Td>
+                <Td>{directionJapanese[character.direction]}</Td>
+                <Td>{penStateJapanese(character.penDown)}</Td>
+              </Tr>
+            ))}
+          </Tbody>
+        </Table>
+      </TableContainer>
+      <TableContainer mb="4" w="100%">
+        <Table variant="simple">
+          <TableCaption placement="top">変数</TableCaption>
+          <Thead>
+            <Tr>
+              <Th>変数名</Th>
+              <Th>値</Th>
+            </Tr>
+          </Thead>
+          <Tbody>
+            <Td></Td>
+            <Td></Td>
+          </Tbody>
+        </Table>
+      </TableContainer>
+    </VStack>
   );
 };
