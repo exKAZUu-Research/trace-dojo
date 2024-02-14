@@ -23,7 +23,7 @@ export async function createUserSolvedProblem(
   }
 }
 
-export async function getUserSolvedProblems(
+export async function fetchUserSolvedProblems(
   userId: string,
   courseId: string
 ): Promise<Array<{ programId: string; languageId: string }>> {

@@ -32,7 +32,7 @@ import {
   programIdToName,
 } from '../../../../problems/problemData';
 import { getLanguageIdFromSessionStorage, setLanguageIdToSessionStorage } from '../../../lib/SessionStorage';
-import { getUserSolvedProblems } from '../../../lib/actions';
+import { fetchUserSolvedProblems } from '../../../lib/actions';
 
 const CoursePage: NextPage<{ params: { courseId: string } }> = ({ params }) => {
   const [selectedLanguageId, setSelectedLanguageId] = useState('');
@@ -52,7 +52,7 @@ const CoursePage: NextPage<{ params: { courseId: string } }> = ({ params }) => {
     const inputValue = event.target.value;
     setLanguageIdToSessionStorage(inputValue);
     setSelectedLanguageId(inputValue);
-    getUserSolvedProblems(userId, courseId).then((data) => {
+    fetchUserSolvedProblems(userId, courseId).then((data) => {
       setUserSolvedProblems(data);
     });
   };
