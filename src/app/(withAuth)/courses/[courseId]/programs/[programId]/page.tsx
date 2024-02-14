@@ -20,7 +20,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
   const courseId = params.courseId;
   const programId = params.programId;
   // TODO: チェックポイントを取得する処理が実装できたら置き換える
-  const checkPointLines = [1, 4, 6];
+  const checkPointLines = [5, 8];
 
   const [selectedLanguageId, setSelectedLanguageId] = useState('');
   const [problemProgram, setProblemProgram] = useState<string>('');

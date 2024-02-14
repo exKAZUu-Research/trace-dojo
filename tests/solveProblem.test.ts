@@ -56,8 +56,8 @@ test('Execute eval (1character)', () => {
   const characters = executeEval(command);
 
   expect(characters).not.toBeFalsy();
-  expect(characters[0].x).toEqual(1);
-  expect(characters[0].y).toEqual(6);
+  expect(characters[0].value.x).toEqual(1);
+  expect(characters[0].value.y).toEqual(6);
 });
 
 test('Execute eval (2characters)', () => {
@@ -72,10 +72,10 @@ test('Execute eval (2characters)', () => {
   const characters = executeEval(command);
 
   expect(characters).not.toBeFalsy();
-  expect(characters[0].x).toEqual(1);
-  expect(characters[0].y).toEqual(3);
-  expect(characters[1].x).toEqual(2);
-  expect(characters[1].y).toEqual(3);
+  expect(characters[0].value.x).toEqual(1);
+  expect(characters[0].value.y).toEqual(3);
+  expect(characters[1].value.x).toEqual(2);
+  expect(characters[1].value.y).toEqual(3);
 });
 
 test('Solve a problem (1character)', () => {
@@ -100,12 +100,12 @@ test('Solve a problem (1character)', () => {
   const answer = solveProblem(problemProgram);
 
   expect(answer).not.toBeFalsy();
-  expect(answer.characters).not.toBeFalsy();
-  expect(answer.characters?.length).toEqual(1);
+  expect(answer.characterVariables).not.toBeFalsy();
+  expect(answer.characterVariables?.length).toEqual(1);
   expect(answer.board).not.toBeFalsy();
-  expect(answer.characters?.[0].color).toEqual('red');
-  expect(answer.characters?.[0].direction).toEqual('down');
-  expect(answer.characters?.[0].penDown).toEqual(true);
+  expect(answer.characterVariables?.[0].value.color).toEqual('red');
+  expect(answer.characterVariables?.[0].value.direction).toEqual('down');
+  expect(answer.characterVariables?.[0].value.penDown).toEqual(true);
 
   // prettier-ignore
   expect(answer.board.grid).toEqual([
@@ -119,15 +119,15 @@ test('Solve a problem (1character)', () => {
     [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
   ]);
 
-  expect(answer.histories?.at(0)?.characters?.length).toEqual(0);
+  expect(answer.histories?.at(0)?.characterVariables?.length).toEqual(0);
 
-  expect(answer.histories?.at(1)?.characters?.length).toEqual(1);
-  expect(answer.histories?.at(1)?.characters?.[0]?.x).toEqual(1);
-  expect(answer.histories?.at(1)?.characters?.[0]?.y).toEqual(1);
+  expect(answer.histories?.at(1)?.characterVariables?.length).toEqual(1);
+  expect(answer.histories?.at(1)?.characterVariables?.[0]?.value.x).toEqual(1);
+  expect(answer.histories?.at(1)?.characterVariables?.[0]?.value.y).toEqual(1);
 
-  expect(answer.histories?.at(-1)?.characters?.length).toEqual(1);
-  expect(answer.histories?.at(-1)?.characters?.[0]?.x).toEqual(2);
-  expect(answer.histories?.at(-1)?.characters?.[0]?.y).toEqual(3);
+  expect(answer.histories?.at(-1)?.characterVariables?.length).toEqual(1);
+  expect(answer.histories?.at(-1)?.characterVariables?.[0]?.value.x).toEqual(2);
+  expect(answer.histories?.at(-1)?.characterVariables?.[0]?.value.y).toEqual(3);
 
   // prettier-ignore
   expect(answer.histories?.at(0)?.board?.grid).toEqual([
@@ -167,15 +167,15 @@ test('Solve a problem (multiple characters)', () => {
   const answer = solveProblem(problemProgram);
 
   expect(answer).not.toBeFalsy();
-  expect(answer.characters).not.toBeFalsy();
-  expect(answer.characters?.length).toEqual(3);
+  expect(answer.characterVariables).not.toBeFalsy();
+  expect(answer.characterVariables?.length).toEqual(3);
   expect(answer.board).not.toBeFalsy();
-  expect(answer.characters?.[0].color).toEqual('red');
-  expect(answer.characters?.[0].direction).toEqual('down');
-  expect(answer.characters?.[0].penDown).toEqual(true);
-  expect(answer.characters?.[1].color).toEqual('green');
-  expect(answer.characters?.[1].direction).toEqual('down');
-  expect(answer.characters?.[1].penDown).toEqual(true);
+  expect(answer.characterVariables?.[0].value.color).toEqual('red');
+  expect(answer.characterVariables?.[0].value.direction).toEqual('down');
+  expect(answer.characterVariables?.[0].value.penDown).toEqual(true);
+  expect(answer.characterVariables?.[1].value.color).toEqual('green');
+  expect(answer.characterVariables?.[1].value.direction).toEqual('down');
+  expect(answer.characterVariables?.[1].value.penDown).toEqual(true);
 
   // prettier-ignore
   expect(answer.board.grid).toEqual([
@@ -188,9 +188,9 @@ test('Solve a problem (multiple characters)', () => {
     [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
     [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
   ]);
-  expect(answer.histories?.at(-1)?.characters?.length).toEqual(3);
-  expect(answer.histories?.at(-1)?.characters?.[0]?.x).toEqual(1);
-  expect(answer.histories?.at(-1)?.characters?.[0]?.y).toEqual(3);
-  expect(answer.histories?.at(-1)?.characters?.[1]?.x).toEqual(2);
-  expect(answer.histories?.at(-1)?.characters?.[1]?.y).toEqual(3);
+  expect(answer.histories?.at(-1)?.characterVariables?.length).toEqual(3);
+  expect(answer.histories?.at(-1)?.characterVariables?.[0]?.value.x).toEqual(1);
+  expect(answer.histories?.at(-1)?.characterVariables?.[0]?.value.y).toEqual(3);
+  expect(answer.histories?.at(-1)?.characterVariables?.[1]?.value.x).toEqual(2);
+  expect(answer.histories?.at(-1)?.characterVariables?.[1]?.value.y).toEqual(3);
 });

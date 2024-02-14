@@ -1,11 +1,12 @@
 import { Box, Table, TableCaption, TableContainer, Tbody, Td, Th, Thead, Tr, VStack } from '@chakra-ui/react';
 import React from 'react';
 
-import type { CharacterDirection } from '../../../../../../types';
-import type { Character } from '../../../../../lib/Character';
+import type { CharacterDirection, CharacterVariable } from '../../../../../../types';
+import type { Variable } from '../../../../../lib/Variable';
 
 interface VariablesProps {
-  characters?: Character[];
+  characterVariables?: CharacterVariable[];
+  variables?: Variable[];
 }
 
 const directionJapanese: { [key in CharacterDirection]: string } = {
@@ -19,7 +20,7 @@ const penStateJapanese = (penDown: boolean): string => {
   return penDown ? 'おいている' : 'あげている';
 };
 
-export const Variables: React.FC<VariablesProps> = ({ characters }) => {
+export const Variables: React.FC<VariablesProps> = ({ characterVariables, variables }) => {
   return (
     <VStack>
       <TableContainer w="100%">
@@ -35,15 +36,15 @@ export const Variables: React.FC<VariablesProps> = ({ characters }) => {
             </Tr>
           </Thead>
           <Tbody>
-            {characters?.map((character) => (
-              <Tr key={character.id}>
-                <Td></Td>
-                <Td>{character.name}</Td>
+            {characterVariables?.map((variable) => (
+              <Tr key={variable.value.id}>
+                <Td>{variable.name}</Td>
+                <Td>{variable.value.name}</Td>
                 <Td>
-                  <Box bg={character.color} h="20px" w="20px" />
+                  <Box bg={variable.value.color} h="20px" w="20px" />
                 </Td>
-                <Td>{directionJapanese[character.direction]}</Td>
-                <Td>{penStateJapanese(character.penDown)}</Td>
+                <Td>{directionJapanese[variable.value.direction]}</Td>
+                <Td>{penStateJapanese(variable.value.penDown)}</Td>
               </Tr>
             ))}
           </Tbody>
@@ -59,8 +60,12 @@ export const Variables: React.FC<VariablesProps> = ({ characters }) => {
             </Tr>
           </Thead>
           <Tbody>
-            <Td></Td>
-            <Td></Td>
+            {variables?.map((variable) => (
+              <Tr key={variable.name}>
+                <Td>{variable.name}</Td>
+                <Td>{variable.value}</Td>
+              </Tr>
+            ))}
           </Tbody>
         </Table>
       </TableContainer>

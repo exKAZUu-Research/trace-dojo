@@ -31,7 +31,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
 
-  const characters = solveProblem(problemProgram).histories?.at(beforeCheckPointLine)?.characters;
+  const beforeCheckpointResult = solveProblem(problemProgram).histories?.at(beforeCheckPointLine);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -92,7 +92,10 @@ export const StepProblem: React.FC<StepProblemProps> = ({
             programmingLanguageId={selectedLanguageId}
           />
         </Box>
-        <Variables characters={characters} />
+        <Variables
+          characterVariables={beforeCheckpointResult?.characterVariables}
+          variables={beforeCheckpointResult?.variables}
+        />
         <HStack>
           <Button onClick={() => handleClickResetButton()}>リセット</Button>
           <Button onClick={() => handleClickAnswerButton()}>解答</Button>

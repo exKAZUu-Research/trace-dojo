@@ -41,6 +41,8 @@ export function generateProgram(programId: ProgramId, languageId: LanguageId): s
 character1.moveForward();
 character1.turnLeft();
 character1.moveForward();
+let i = 0;
+i = i + 1;
 character1.moveForward();
 character1.moveForward();
 character1.moveForward();
