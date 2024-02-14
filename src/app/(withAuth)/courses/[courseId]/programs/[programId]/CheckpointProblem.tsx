@@ -6,9 +6,10 @@ import { useRef } from 'react';
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
-import { Variables } from '../../../../../../components/organisms/Variables';
 import type { ProblemType } from '../../../../../../types';
 import { solveProblem } from '../../../../../lib/solveProblem';
+
+import { Variables } from './Variables';
 
 interface CheckpointProblemProps {
   problemProgram: string;
