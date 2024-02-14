@@ -3,18 +3,20 @@
 import { Box, Button, Flex, HStack, VStack } from '@chakra-ui/react';
 import { useRef } from 'react';
 
-import { SyntaxHighlighter } from '../../../../components/organisms/SyntaxHighlighter';
-import type { TurtleGraphicsHandle } from '../../../../components/organisms/TurtleGraphics';
-import { TurtleGraphics } from '../../../../components/organisms/TurtleGraphics';
-import type { ProblemType } from '../../../../types';
+import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
+import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
+import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
+import type { ProblemType } from '../../../../../../types';
 
 interface ExecutionResultProblemProps {
   problemProgram: string;
   selectedLanguageId: string;
   setStep: (step: ProblemType) => void;
+  handleComplete: () => void;
 }
 
 export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
+  handleComplete,
   problemProgram,
   selectedLanguageId,
   setStep,
@@ -31,6 +33,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
     // TODO: 一旦アラートで表示
     if (isCorrect) {
       alert('正解です。この問題は終了です');
+      handleComplete();
     } else {
       alert('不正解です。チェックポイントごとに回答してください');
       setStep('checkpoint');
