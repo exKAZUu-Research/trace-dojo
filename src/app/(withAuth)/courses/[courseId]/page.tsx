@@ -1,90 +1,30 @@
-'use client';
-
-import {
-  Box,
-  Heading,
-  OrderedList,
-  ListItem,
-  VStack,
-  Accordion,
-  AccordionItem,
-  AccordionButton,
-  AccordionIcon,
-  AccordionPanel,
-  Select,
-} from '@chakra-ui/react';
 import type { NextPage } from 'next';
-import NextLink from 'next/link';
-import React, { useEffect, useState } from 'react';
+import { redirect } from 'next/navigation';
 
-import {
-  courseIdToProgramIdLists,
-  languageIdToName,
-  languageIds,
-  programIdToName,
-} from '../../../../problems/problemData';
-import { getLanguageIdFromSessionStorage, setLanguageIdToSessionStorage } from '../../../lib/SessionStorage';
+import { prisma } from '../../../../infrastructures/prisma';
+import { getNullableSessionOnServer } from '../../../../utils/session';
+import { fetchUserSolvedProblems } from '../../../lib/actions';
 
-const CoursePage: NextPage<{ params: { courseId: string } }> = ({ params }) => {
-  const [selectedLanguageId, setSelectedLanguageId] = useState('');
+import { Course } from './Course';
 
-  useEffect(() => {
-    setSelectedLanguageId(getLanguageIdFromSessionStorage());
-  }, []);
+const CoursePage: NextPage<{ params: { courseId: string } }> = async ({ params }) => {
+  const { session } = await getNullableSessionOnServer();
+  const user =
+    session &&
+    (await prisma.user.findUnique({
+      where: {
+        id: session.getUserId(),
+      },
+    }));
 
-  const handleSelectLanguage = (event: React.ChangeEvent<HTMLSelectElement>): void => {
-    const inputValue = event.target.value;
-    setLanguageIdToSessionStorage(inputValue);
-    setSelectedLanguageId(inputValue);
-  };
+  if (!user) {
+    return redirect('/auth');
+  }
 
-  return (
-    <main>
-      <Heading as="h1" marginBottom="4">
-        Lessons
-      </Heading>
-      <Select
-        marginBottom="4"
-        maxW="300"
-        placeholder="Select language"
-        value={selectedLanguageId}
-        onChange={(e) => handleSelectLanguage(e)}
-      >
-        {languageIds.map((languageId) => (
-          <option key={languageId} value={languageId}>
-            {languageIdToName[languageId]}
-          </option>
-        ))}
-      </Select>
-      <VStack align="stretch">
-        {courseIdToProgramIdLists[params.courseId].map((programIds, iLesson) => (
-          <Box key={iLesson}>
-            <Accordion allowToggle>
-              <AccordionItem>
-                <AccordionButton>
-                  <Box flex="1" textAlign="left">
-                    第{iLesson + 1}回
-                  </Box>
-                  <AccordionIcon />
-                </AccordionButton>
-                <AccordionPanel pb={4}>
-                  <OrderedList>
-                    {programIds.map((programId) => (
-                      <ListItem key={programId}>
-                        <NextLink passHref href={`/programs/${programId}`}>
-                          {programIdToName[programId]}
-                        </NextLink>
-                      </ListItem>
-                    ))}
-                  </OrderedList>
-                </AccordionPanel>
-              </AccordionItem>
-            </Accordion>
-          </Box>
-        ))}
-      </VStack>
-    </main>
-  );
+  const courseId = params.courseId;
+  const userSolvedProblems = await fetchUserSolvedProblems(user.id, courseId);
+
+  return <Course courseId={params.courseId} userSolvedProblems={userSolvedProblems} />;
 };
 
 export default CoursePage;
