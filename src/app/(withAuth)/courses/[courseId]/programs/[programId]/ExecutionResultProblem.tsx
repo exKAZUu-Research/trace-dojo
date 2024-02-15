@@ -6,10 +6,10 @@ import { useRef } from 'react';
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
-import type { ProblemType } from '../../../../../../types';
+import type { GeneratedProgram, ProblemType } from '../../../../../../types';
 
 interface ExecutionResultProblemProps {
-  problemProgram: string;
+  problemProgram: GeneratedProgram;
   selectedLanguageId: string;
   setStep: (step: ProblemType) => void;
   handleComplete: () => void;
@@ -45,14 +45,18 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
       <VStack spacing="10">
         <Box>プログラムの実行後の結果を解答してください。</Box>
         <Box>
-          <TurtleGraphics ref={turtleGraphicsRef} isEnableOperation={true} problemProgram={problemProgram} />
+          <TurtleGraphics
+            ref={turtleGraphicsRef}
+            isEnableOperation={true}
+            problemProgram={problemProgram.excuteProgram}
+          />
         </Box>
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">
         <Button colorScheme="gray">解説</Button>
         {/* 画面に収まる高さに設定 */}
         <Box h="calc(100vh - 370px)" w="100%">
-          <SyntaxHighlighter code={problemProgram} programmingLanguageId={selectedLanguageId} />
+          <SyntaxHighlighter code={problemProgram.displayProgram} programmingLanguageId={selectedLanguageId} />
         </Box>
         <HStack>
           <Button onClick={() => handleClickResetButton()}>リセット</Button>

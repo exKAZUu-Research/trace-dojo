@@ -6,11 +6,12 @@ import { useRef } from 'react';
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
+import type { GeneratedProgram } from '../../../../../../types';
 
 interface StepProblemProps {
   beforeCheckPointLine: number;
   currentCheckPointLine: number;
-  problemProgram: string;
+  problemProgram: GeneratedProgram;
   selectedLanguageId: string;
   setBeforeCheckPointLine: (line: number) => void;
   setCurrentCheckPointLine: (line: number) => void;
@@ -37,7 +38,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
 
     // TODO: 一旦アラートで表示
     if (isCorrect) {
-      const problemProgramLines = problemProgram.split('\n').length;
+      const problemProgramLines = problemProgram.displayProgram.split('\n').length;
 
       if (currentCheckPointLine === problemProgramLines) {
         alert('正解です。この問題は終了です');
@@ -63,7 +64,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
             beforeCheckPointLine={beforeCheckPointLine}
             currentCheckPointLine={currentCheckPointLine}
             isEnableOperation={false}
-            problemProgram={problemProgram}
+            problemProgram={problemProgram.excuteProgram}
           />
         </Box>
         <Box>茶色のハイライト時点の実行結果</Box>
@@ -73,7 +74,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
             beforeCheckPointLine={beforeCheckPointLine}
             currentCheckPointLine={currentCheckPointLine}
             isEnableOperation={true}
-            problemProgram={problemProgram}
+            problemProgram={problemProgram.excuteProgram}
           />
         </Box>
       </VStack>
@@ -82,7 +83,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
         <Box h="840px" w="100%">
           <SyntaxHighlighter
             beforeCheckPointLine={beforeCheckPointLine}
-            code={problemProgram}
+            code={problemProgram.displayProgram}
             currentCheckPointLine={currentCheckPointLine}
             programmingLanguageId={selectedLanguageId}
           />

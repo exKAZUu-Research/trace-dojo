@@ -6,10 +6,10 @@ import { useRef } from 'react';
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
-import type { ProblemType } from '../../../../../../types';
+import type { GeneratedProgram, ProblemType } from '../../../../../../types';
 
 interface CheckpointProblemProps {
-  problemProgram: string;
+  problemProgram: GeneratedProgram;
   selectedLanguageId: string;
   checkPointLines: number[];
   setStep: (step: ProblemType) => void;
@@ -70,7 +70,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
             beforeCheckPointLine={beforeCheckPointLine}
             currentCheckPointLine={currentCheckPointLine}
             isEnableOperation={false}
-            problemProgram={problemProgram}
+            problemProgram={problemProgram.excuteProgram}
           />
         </Box>
         <Box>茶色のハイライト時点の実行結果</Box>
@@ -80,7 +80,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
             beforeCheckPointLine={beforeCheckPointLine}
             currentCheckPointLine={currentCheckPointLine}
             isEnableOperation={true}
-            problemProgram={problemProgram}
+            problemProgram={problemProgram.excuteProgram}
           />
         </Box>
       </VStack>
@@ -89,7 +89,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         <Box h="840px" w="100%">
           <SyntaxHighlighter
             beforeCheckPointLine={beforeCheckPointLine}
-            code={problemProgram}
+            code={problemProgram.displayProgram}
             currentCheckPointLine={currentCheckPointLine}
             programmingLanguageId={selectedLanguageId}
           />

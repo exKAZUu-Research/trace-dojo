@@ -1,3 +1,5 @@
+import type { GeneratedProgram } from '../types';
+
 export const courseIds = ['tuBeginner1', 'tuBeginner2'];
 export type CourseId = (typeof courseIds)[number];
 
@@ -34,7 +36,7 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
   tuBeginner2: [],
 };
 
-export function generateProgram(programId: ProgramId, languageId: LanguageId): string {
+export function generateProgram(programId: ProgramId, languageId: LanguageId): GeneratedProgram {
   // TODO(exKAZUu): 問題IDに紐づくプログラム（テンプレート）を取得して、乱数を使って具体的なプログラムを生成する。
   console.log('languageId', languageId);
   const randomNumberRegex = /<(\d+)-(\d+)>/g;
@@ -55,7 +57,7 @@ export function generateProgram(programId: ProgramId, languageId: LanguageId): s
     displayProgram,
     excuteProgram: jsProgram,
   };
-  return generateProgram.excuteProgram;
+  return generateProgram;
 }
 
 function getRandomInt(min: number, max: number): number {

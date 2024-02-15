@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { useSessionContext } from 'supertokens-auth-react/recipe/session';
 
 import { generateProgram, programIdToName } from '../../../../../../problems/problemData';
-import type { ProblemType } from '../../../../../../types';
+import type { GeneratedProgram, ProblemType } from '../../../../../../types';
 import { getLanguageIdFromSessionStorage } from '../../../../../lib/SessionStorage';
 import { createUserSolvedProblem } from '../../../../../lib/actions';
 
@@ -23,7 +23,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
   const checkPointLines = [1, 4];
 
   const [selectedLanguageId, setSelectedLanguageId] = useState('');
-  const [problemProgram, setProblemProgram] = useState<string>('');
+  const [problemProgram, setProblemProgram] = useState<GeneratedProgram>();
   const [step, setStep] = useState<ProblemType>('normal');
   const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(0);
   const [currentCheckPointLine, setCurrentCheckPointLine] = useState(checkPointLines[0]);
@@ -43,6 +43,8 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
   };
 
   const ProblemComponent: React.FC = () => {
+    // problemProgramがundefinedの時の処理。どうしたらいいですか。
+    if (!problemProgram) return <></>;
     switch (step) {
       case 'normal': {
         return (
