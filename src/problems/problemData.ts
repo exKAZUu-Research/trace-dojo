@@ -73,45 +73,47 @@ export function getExplanation(programId: ProgramId, languageId: LanguageId): st
 export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId, string>> = {
   straight: {
     js: `
-const turtle1 = new Character();
-turtle1.moveForward();
-turtle1.moveForward();
-turtle1.moveForward();
-turtle1.moveForward();
+const character1 = new Character();
+character1.moveForward();
+character1.moveForward();
+character1.moveForward();
+character1.moveForward();
+<3-5>
 `.trim(),
     java: `
 public class Straight {
   public static void main(String[] args) {
-    var turtle1 = new Character();
-    turtle1.moveForward();
-    turtle1.moveForward();
-    turtle1.moveForward();
-    turtle1.moveForward();
+    var character1 = new Character();
+    character1.moveForward();
+    character1.moveForward();
+    character1.moveForward();
+    character1.moveForward();
+    <3-5>;
   }
 }
 `.trim(),
   },
   curve: {
     js: `
-const turtle = new Character();
+const character = new Character();
 for (let i = 0; i < <3-10>; i++) {
-  turtle.moveForward();
+  character.moveForward();
 }
-turtle.turnLeft();
+character.turnLeft();
 for (let i = 0; i < <3-5>; i++) {
-  turtle.moveForward();
+  character.moveForward();
 }
 `.trim(),
     java: `
 public class Curve {
   public static void main(String[] args) {
-    var turtle = new Character();
+    var character = new Character();
     for (int i = 0; i < <3-10>; i++) {
-      turtle.moveForward();
+      character.moveForward();
     }
-    turtle.turnLeft();
+    character.turnLeft();
     for (int i = 0; i < <3-5>; i++) {
-      turtle.moveForward();
+      character.moveForward();
     }
   }
 }
