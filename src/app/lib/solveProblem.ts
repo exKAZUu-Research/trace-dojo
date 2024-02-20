@@ -30,6 +30,14 @@ export function executeEval(command: string): (CharacterVariable | Variable)[] {
   return result;
 }
 
+export function selectCharacterVariables(variables: (CharacterVariable | Variable)[]): CharacterVariable[] {
+  return variables.filter((variable) => variable.value instanceof CharacterClass) as CharacterVariable[];
+}
+
+export function selectOtherVariables(variables: (CharacterVariable | Variable)[]): Variable[] {
+  return variables.filter((variable) => !(variable.value instanceof CharacterClass)) as Variable[];
+}
+
 export function extractVariableNames(command: string): string[] {
   // 'const' 'let' 'var' で始まる変数名を comand から抽出する
   const regex = /(?:const|let|var)\s+(\w+)\s*=\s*(.*?);/g;
@@ -57,10 +65,8 @@ export function solveProblem(program: string): SolveProblemResult {
       }
 
       const variables = executeEval(mergedCommand);
-      const characterVariables = variables.filter(
-        (variable) => variable.value instanceof CharacterClass
-      ) as CharacterVariable[];
-      const otherVariables = variables.filter((variable) => !(variable.value instanceof CharacterClass)) as Variable[];
+      const characterVariables = selectCharacterVariables(variables);
+      const otherVariables = selectOtherVariables(variables);
 
       const board = new BoardClass();
       for (const history of histories) {

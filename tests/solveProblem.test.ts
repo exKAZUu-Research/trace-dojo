@@ -1,6 +1,12 @@
 import { expect, test } from 'vitest';
 
-import { parseProgram, extractVariables, executeEval, solveProblem } from '../src/app/lib/solveProblem';
+import {
+  parseProgram,
+  extractVariableNames,
+  executeEval,
+  solveProblem,
+  selectCharacterVariables,
+} from '../src/app/lib/solveProblem';
 
 test('Parse a program', () => {
   const program = `
@@ -25,7 +31,6 @@ test('Parse a program', () => {
 });
 
 test('Extract variables', () => {
-  const variableName = 'character';
   const command = `
     const character1 = new Character();
     const character2 = new Character();
@@ -38,7 +43,7 @@ test('Extract variables', () => {
     character4.moveForward();
     character5.moveForward();
   `;
-  const characterVariables = extractVariables(variableName, command);
+  const characterVariables = extractVariableNames(command);
 
   expect(characterVariables).not.toBeFalsy();
   expect(characterVariables).toEqual(['character1', 'character2', 'character3', 'character4', 'character5']);
@@ -53,11 +58,12 @@ test('Execute eval (1character)', () => {
     character1.moveForward();
     character1.moveForward();
   `;
-  const characters = executeEval(command);
+  const variables = executeEval(command);
+  const characterVariables = selectCharacterVariables(variables);
 
-  expect(characters).not.toBeFalsy();
-  expect(characters[0].value.x).toEqual(1);
-  expect(characters[0].value.y).toEqual(6);
+  expect(characterVariables).not.toBeFalsy();
+  expect(characterVariables[0].value.x).toEqual(1);
+  expect(characterVariables[0].value.y).toEqual(6);
 });
 
 test('Execute eval (2characters)', () => {
@@ -69,13 +75,14 @@ test('Execute eval (2characters)', () => {
     character2.moveForward();
     character2.moveForward();
   `;
-  const characters = executeEval(command);
+  const variables = executeEval(command);
+  const characterVariables = selectCharacterVariables(variables);
 
-  expect(characters).not.toBeFalsy();
-  expect(characters[0].value.x).toEqual(1);
-  expect(characters[0].value.y).toEqual(3);
-  expect(characters[1].value.x).toEqual(2);
-  expect(characters[1].value.y).toEqual(3);
+  expect(characterVariables).not.toBeFalsy();
+  expect(characterVariables[0].value.x).toEqual(1);
+  expect(characterVariables[0].value.y).toEqual(3);
+  expect(characterVariables[1].value.x).toEqual(2);
+  expect(characterVariables[1].value.y).toEqual(3);
 });
 
 test('Solve a problem (1character)', () => {
