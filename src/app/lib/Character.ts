@@ -16,7 +16,7 @@ export class Character {
     color = 'red',
     direction = 'down',
     id = uuidv4(),
-    name = 'Bear',
+    name = '',
     penDown = true,
     x = 1,
     y = 1,
@@ -125,6 +125,10 @@ export class Character {
         break;
       }
     }
+  }
+
+  setName(name: string): void {
+    this.name = name;
   }
 
   setPosition(x: number, y: number): void {
