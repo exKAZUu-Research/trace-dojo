@@ -18,6 +18,7 @@ import {
   Td,
   Th,
   Flex,
+  HStack,
 } from '@chakra-ui/react';
 import Image from 'next/image';
 import NextLink from 'next/link';
@@ -55,6 +56,15 @@ export const Course: React.FC<{
     ).length;
   };
 
+  const countCompletedProblems = (programIds: string[], languageId: string): number => {
+    let count = 0;
+
+    for (const programId of programIds) {
+      if (countUserSolvedProblems(programId, languageId) >= SPECIFIED_COMPLETION_COUNT) count++;
+    }
+    return count;
+  };
+
   return (
     <main>
       <Heading as="h1" marginBottom="4">
@@ -79,8 +89,20 @@ export const Course: React.FC<{
             <Accordion allowToggle>
               <AccordionItem>
                 <AccordionButton>
-                  <Box flex="1" textAlign="left">
-                    第{iLesson + 1}回
+                  <Box flex="1">
+                    <HStack spacing="50%">
+                      <Box>第{iLesson + 1}回</Box>
+                      <HStack>
+                        <Box>
+                          Completed {countCompletedProblems(programIds, selectedLanguageId)} / {programIds.length}
+                        </Box>
+                        {countCompletedProblems(programIds, selectedLanguageId) >= programIds.length && (
+                          <Box h={4} ml={2} position={'relative'} w={4}>
+                            <Image fill alt="完了の王冠" src="/crown.png" />
+                          </Box>
+                        )}
+                      </HStack>
+                    </HStack>
                   </Box>
                   <AccordionIcon />
                 </AccordionButton>
