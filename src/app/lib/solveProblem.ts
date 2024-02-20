@@ -1,8 +1,7 @@
-import type { CharacterVariable, History, SolveProblemResult } from '../../types';
+import type { CharacterVariable, History, SolveProblemResult, Variable } from '../../types';
 
 import { Board as BoardClass } from './Board';
 import { Character as CharacterClass } from './Character';
-import { Variable as VariableClass } from './Variable';
 
 export function parseProgram(program: string): string[] {
   return program
@@ -11,35 +10,16 @@ export function parseProgram(program: string): string[] {
     .filter((line) => line !== '');
 }
 
-export function getVariableValue(command: string, variableName: string): string {
-  const Character = CharacterClass; // eslint-disable-line
-  const Variable = VariableClass; // eslint-disable-line
-
-  const semicolonEndedCommand = (() => {
-    if (command.endsWith(';')) return command;
-    return (command += ';');
-  })();
-
-  const returnValueCommand = `
-${variableName};
-  `;
-
-  const mergedCommand = semicolonEndedCommand + '\n' + returnValueCommand;
-
-  return eval(mergedCommand);
-}
-
-export function executeEval(command: string): CharacterVariable[] {
+export function executeEval(command: string): (CharacterVariable | Variable)[] {
   const Character = CharacterClass; // eslint-disable-line
   const Board = BoardClass; // eslint-disable-line
-  const characterVariableName = 'character';
-  const charactersVariables = extractVariables(characterVariableName, command);
+  const variableNames = extractVariableNames(command);
   const semicolonEndedCommand = (() => {
     if (command.endsWith(';')) return command;
     return (command += ';');
   })();
 
-  const result = charactersVariables.map((variableName) => {
+  const result = variableNames.map((variableName) => {
     const returnValueCommand = `
       ${variableName};
     `;
@@ -50,17 +30,8 @@ export function executeEval(command: string): CharacterVariable[] {
   return result;
 }
 
-export function extractVariables(variableName: string, command: string): string[] {
-  const regex = new RegExp(`${variableName}\\d+`, 'g');
-  const matches = command.match(regex);
-  if (matches) {
-    return [...new Set(matches)];
-  }
-  return [];
-}
-
 export function extractVariableNames(command: string): string[] {
-  // 'const' 'let' 'var' で始まる変数宣言を comand から抽出
+  // 'const' 'let' 'var' で始まる変数名を comand から抽出する
   const regex = /(?:const|let|var)\s+(\w+)\s*=\s*(.*?);/g;
   const matches = [...command.matchAll(regex)];
 
@@ -75,7 +46,7 @@ export function extractVariableNames(command: string): string[] {
 export function solveProblem(program: string): SolveProblemResult {
   const commands = parseProgram(program);
   const board = new BoardClass();
-  const histories: History[] = [{ step: 0, characterVariables: [], board, variables: [] }];
+  const histories: History[] = [{ step: 0, characterVariables: [], board, otherVariables: [] }];
 
   for (let i = 0; i < commands.length; i++) {
     if (i < commands.length) {
@@ -85,17 +56,11 @@ export function solveProblem(program: string): SolveProblemResult {
         mergedCommand += commands[j];
       }
 
-      const characterVariables = executeEval(mergedCommand);
-
-      // TODO: extractVariableNames と extractVariablesをまとめたい
-      // TODO: executeEval と getVariableValue をまとめたい
-      // TODO: Vraiableクラス必要？
-      const variableNames = extractVariableNames(mergedCommand).filter((name) => !name.startsWith('character'));
-
-      const variables = variableNames.map((name) => {
-        const value = getVariableValue(mergedCommand, name);
-        return new VariableClass({ name, value });
-      });
+      const variables = executeEval(mergedCommand);
+      const characterVariables = variables.filter(
+        (variable) => variable.value instanceof CharacterClass
+      ) as CharacterVariable[];
+      const otherVariables = variables.filter((variable) => !(variable.value instanceof CharacterClass)) as Variable[];
 
       const board = new BoardClass();
       for (const history of histories) {
@@ -106,16 +71,16 @@ export function solveProblem(program: string): SolveProblemResult {
         }
       }
       for (const character of characterVariables) {
-        board.updateGrid(character.value);
+        board.updateGrid(character.value as CharacterClass);
       }
 
-      histories.push({ step: histories.length + 1, characterVariables, board, variables });
+      histories.push({ step: histories.length + 1, characterVariables, board, otherVariables });
     }
   }
 
   const result: SolveProblemResult = {
     characterVariables: histories?.at(-1)?.characterVariables,
-    variables: histories?.at(-1)?.variables,
+    otherVariables: histories?.at(-1)?.otherVariables,
     board: histories?.at(-1)?.board || board,
     histories,
   };

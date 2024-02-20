@@ -2,7 +2,6 @@ import type React from 'react';
 
 import type { Board } from './app/lib/Board';
 import type { Character } from './app/lib/Character';
-import type { Variable } from './app/lib/Variable';
 
 export interface LayoutProps {
   children: React.ReactNode;
@@ -21,16 +20,18 @@ export type SelectedCell = {
 
 export type CharacterVariable = { name: string; value: Character };
 
+export type Variable = { name: string; value: string };
+
 export type History = {
   step: number;
   characterVariables: CharacterVariable[] | undefined;
   board: Board;
-  variables: Variable[];
+  otherVariables: Variable[];
 };
 
 export type SolveProblemResult = {
   characterVariables: CharacterVariable[] | undefined;
-  variables: Variable[] | undefined;
+  otherVariables: Variable[] | undefined;
   board: Board;
   histories: History[] | undefined;
 };

@@ -94,7 +94,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
         </Box>
         <Variables
           characterVariables={beforeCheckpointResult?.characterVariables}
-          variables={beforeCheckpointResult?.variables}
+          variables={beforeCheckpointResult?.otherVariables}
         />
         <HStack>
           <Button onClick={() => handleClickResetButton()}>リセット</Button>

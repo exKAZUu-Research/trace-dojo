@@ -1,8 +1,7 @@
 import { Box, Table, TableCaption, TableContainer, Tbody, Td, Th, Thead, Tr, VStack } from '@chakra-ui/react';
 import React from 'react';
 
-import type { CharacterDirection, CharacterVariable } from '../../../../../../types';
-import type { Variable } from '../../../../../lib/Variable';
+import type { CharacterDirection, CharacterVariable, Variable } from '../../../../../../types';
 
 interface VariablesProps {
   characterVariables?: CharacterVariable[];

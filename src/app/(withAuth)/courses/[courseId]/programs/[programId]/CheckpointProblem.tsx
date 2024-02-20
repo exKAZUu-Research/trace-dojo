@@ -101,7 +101,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         </Box>
         <Variables
           characterVariables={beforeCheckpointResult?.characterVariables}
-          variables={beforeCheckpointResult?.variables}
+          variables={beforeCheckpointResult?.otherVariables}
         />
         <HStack>
           <Button onClick={() => handleClickResetButton()}>リセット</Button>

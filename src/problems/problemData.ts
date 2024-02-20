@@ -37,16 +37,19 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
 export function generateProgram(programId: ProgramId, languageId: LanguageId): string {
   // TODO(exKAZUu): 問題IDに紐づくプログラム（テンプレート）を取得して、乱数を使って具体的なプログラムを生成する。
   return (
-    `const character1 = new Character();
-character1.moveForward();
-character1.turnLeft();
-character1.moveForward();
+    `const bear = new Character();
+bear.moveForward();
+bear.turnLeft();
+bear.upPen();
 let i = 0;
+bear.moveForward();
+const turtle = new Character({x: 3, y: 1, color: 'green'});
+turtle.moveForward();
+const foo = 'あいうえお';
+var bar = 123;
 i = i + 1;
-character1.moveForward();
-character1.moveForward();
-character1.moveForward();
-character1.moveForward();` || programIdToLanguageIdToProgram[programId][languageId]
+turtle.moveForward();
+turtle.moveForward();` || programIdToLanguageIdToProgram[programId][languageId]
   );
 }
 
