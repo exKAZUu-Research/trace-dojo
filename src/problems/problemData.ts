@@ -37,8 +37,6 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
 };
 
 export function generateProgram(programId: ProgramId, languageId: LanguageId): GeneratedProgram {
-  // TODO(exKAZUu): 問題IDに紐づくプログラム（テンプレート）を取得して、乱数を使って具体的なプログラムを生成する。
-  console.log('languageId', languageId);
   const randomNumberRegex = /<(\d+)-(\d+)>/g;
   const programTemplete = programIdToLanguageIdToProgram[programId];
   const jsTemplete = programTemplete['js'];
@@ -78,7 +76,6 @@ character1.moveForward();
 character1.moveForward();
 character1.moveForward();
 character1.moveForward();
-<3-5>
 `.trim(),
     java: `
 public class Straight {
@@ -88,7 +85,6 @@ public class Straight {
     character1.moveForward();
     character1.moveForward();
     character1.moveForward();
-    <3-5>;
   }
 }
 `.trim(),
