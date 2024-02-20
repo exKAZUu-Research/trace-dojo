@@ -50,9 +50,9 @@ export function generateProgram(programId: ProgramId, languageId: LanguageId): G
   });
 
   let index = 0;
-  const displayProgram = programTemplete['java'].replaceAll(randomNumberRegex, () =>
-    randomNumberArray[index++].toString()
-  );
+  const displayProgram = languageId
+    ? programTemplete[languageId].replaceAll(randomNumberRegex, () => randomNumberArray[index++].toString())
+    : '';
   const generateProgram = {
     displayProgram,
     excuteProgram: jsProgram,
