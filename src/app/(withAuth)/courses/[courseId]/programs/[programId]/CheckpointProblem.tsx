@@ -1,8 +1,9 @@
 'use client';
 
-import { Box, Button, Flex, HStack, VStack } from '@chakra-ui/react';
+import { Box, Button, Flex, HStack, VStack, useDisclosure } from '@chakra-ui/react';
 import { useRef } from 'react';
 
+import { ExplanationModal } from '../../../../../../components/molecules/ExplanationModal';
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
@@ -30,6 +31,8 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
   setStep,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
+
+  const { isOpen, onClose, onOpen } = useDisclosure();
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -85,7 +88,10 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         </Box>
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">
-        <Button colorScheme="gray">解説</Button>
+        <Button colorScheme="gray" onClick={onOpen}>
+          解説
+        </Button>
+        <ExplanationModal body="解説" buttonLabel="解説" isOpen={isOpen} title="解説" onClose={onClose} />
         <Box h="840px" w="100%">
           <SyntaxHighlighter
             beforeCheckPointLine={beforeCheckPointLine}
