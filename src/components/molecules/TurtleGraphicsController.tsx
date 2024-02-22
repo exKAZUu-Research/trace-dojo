@@ -1,6 +1,6 @@
 'use client';
 
-import { Box, Button, Input, HStack, VStack } from '@chakra-ui/react';
+import { Box, Button, HStack, VStack } from '@chakra-ui/react';
 import React from 'react';
 
 import type { Board } from '../../app/lib/Board';
@@ -21,7 +21,6 @@ interface TurtleGraphicsControllerProps {
   handleClickCharacterMoveBackButton: () => void;
   handleClickCharacterPenUpButton: () => void;
   handleClickCharacterPenDownButton: () => void;
-  handleClickChangeCharacterName: (name: string) => void;
 }
 
 interface ColorChangeButtonProps {
@@ -36,7 +35,6 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
   handleChangeCellColorButton,
   handleChangeCharacterColorButton,
   handleClickChangeCharacterDirectionButton,
-  handleClickChangeCharacterName,
   handleClickCharacterMoveBackButton,
   handleClickCharacterMoveButton,
   handleClickCharacterMoveForwardButton,
@@ -62,13 +60,6 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
     <VStack justifyContent="center" marginTop="4" spacing="4">
       {selectedCharacter && (
         <>
-          <HStack>
-            <Input
-              placeholder="キャラクターの名前"
-              value={selectedCharacter.name}
-              onChange={(e) => handleClickChangeCharacterName(e.target.value)}
-            />
-          </HStack>
           <HStack>
             <Button onClick={() => handleClickChangeCharacterDirectionButton('left')}>⤹</Button>
             <Button onClick={() => handleClickChangeCharacterDirectionButton('right')}>⤵</Button>
