@@ -114,7 +114,7 @@ public class Main {
     bear.upPen();
     int i = 0;
     bear.moveForward();
-    Character turtle = new Character(<2-5>, <6-10>, "green");
+    Character turtle = new Character(<2-5>, <3-5>, "green");
     turtle.moveForward();
     String foo = "あいうえお";
     int bar = <1-100>;
