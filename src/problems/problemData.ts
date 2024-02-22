@@ -91,20 +91,38 @@ public class Straight {
   },
   curve: {
     js: `
-const character = new Character();
-for (let i = 0; i < <3-10>; i++) { character.moveForward(); }
-character.turnLeft();
-for (let i = 0; i < <3-5>; i++) { character.moveForward(); }
+const bear = new Character();
+bear.moveForward();
+bear.turnLeft();
+bear.upPen();
+let i = 0;
+bear.moveForward();
+const turtle = new Character({x: <2-5>, y: <3-5>, color: 'green'});
+turtle.moveForward();
+const foo = 'あいうえお';
+var bar = <1-100>;
+i = i + 1;
+turtle.moveForward();
+turtle.moveForward();
 `.trim(),
     java: `
-public class Curve {
+public class Main {
   public static void main(String[] args) {
-    var character = new Character();
-    for (int i = 0; i < <3-10>; i++) { character.moveForward(); }
-    character.turnLeft();
-    for (int i = 0; i < <3-5>; i++) { character.moveForward(); }
+    Character bear = new Character();
+    bear.moveForward();
+    bear.turnLeft();
+    bear.upPen();
+    int i = 0;
+    bear.moveForward();
+    Character turtle = new Character(<2-5>, <6-10>, "green");
+    turtle.moveForward();
+    String foo = "あいうえお";
+    int bar = <1-100>;
+    i = i + 1;
+    turtle.moveForward();
+    turtle.moveForward();
   }
-}
+};
 `.trim(),
   },
 };
