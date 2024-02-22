@@ -18,14 +18,20 @@ export type SelectedCell = {
   y: number;
 };
 
+export type CharacterVariable = { name: string; value: Character };
+
+export type Variable = { name: string; value: string };
+
 export type History = {
   step: number;
-  characters: Character[] | undefined;
+  characterVariables: CharacterVariable[] | undefined;
   board: Board;
+  otherVariables: Variable[];
 };
 
 export type SolveProblemResult = {
-  characters: Character[] | undefined;
+  characterVariables: CharacterVariable[] | undefined;
+  otherVariables: Variable[] | undefined;
   board: Board;
   histories: History[] | undefined;
 };
