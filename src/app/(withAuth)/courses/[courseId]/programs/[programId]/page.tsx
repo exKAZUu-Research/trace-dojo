@@ -23,7 +23,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
   const checkPointLines = [2, 6, 8, 12];
 
   const [selectedLanguageId, setSelectedLanguageId] = useState('');
-  const [problemProgram, setProblemProgram] = useState<GeneratedProgram>();
+  const [problemProgram, setProblemProgram] = useState<GeneratedProgram>({ displayProgram: '', excuteProgram: '' });
   const [step, setStep] = useState<ProblemType>('normal');
   const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(0);
   const [currentCheckPointLine, setCurrentCheckPointLine] = useState(checkPointLines[0]);
@@ -43,8 +43,6 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
   };
 
   const ProblemComponent: React.FC = () => {
-    // problemProgramがundefinedの時の処理。どうしたらいいですか。
-    if (!problemProgram) return <></>;
     switch (step) {
       case 'normal': {
         return (

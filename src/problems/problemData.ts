@@ -92,25 +92,17 @@ public class Straight {
   curve: {
     js: `
 const character = new Character();
-for (let i = 0; i < <3-10>; i++) {
-  character.moveForward();
-}
+for (let i = 0; i < <3-10>; i++) { character.moveForward(); }
 character.turnLeft();
-for (let i = 0; i < <3-5>; i++) {
-  character.moveForward();
-}
+for (let i = 0; i < <3-5>; i++) { character.moveForward(); }
 `.trim(),
     java: `
 public class Curve {
   public static void main(String[] args) {
     var character = new Character();
-    for (int i = 0; i < <3-10>; i++) {
-      character.moveForward();
-    }
+    for (int i = 0; i < <3-10>; i++) { character.moveForward(); }
     character.turnLeft();
-    for (int i = 0; i < <3-5>; i++) {
-      character.moveForward();
-    }
+    for (int i = 0; i < <3-5>; i++) { character.moveForward(); }
   }
 }
 `.trim(),
