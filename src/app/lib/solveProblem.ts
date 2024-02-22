@@ -1,4 +1,4 @@
-import type { History, SolveProblemResult } from '../../types';
+import type { CharacterVariable, History, SolveProblemResult, Variable } from '../../types';
 
 import { Board as BoardClass } from './Board';
 import { Character as CharacterClass } from './Character';
@@ -10,30 +10,43 @@ export function parseProgram(program: string): string[] {
     .filter((line) => line !== '');
 }
 
-export function executeEval(command: string): CharacterClass[] {
+export function executeEval(command: string): (CharacterVariable | Variable)[] {
   const Character = CharacterClass; // eslint-disable-line
   const Board = BoardClass; // eslint-disable-line
-  const characterVariableName = 'character';
-  const charactersVariables = extractVariables(characterVariableName, command);
+  const variableNames = extractVariableNames(command);
   const semicolonEndedCommand = (() => {
     if (command.endsWith(';')) return command;
     return (command += ';');
   })();
 
-  const returnValueCommand = `
-    [${charactersVariables}];
-  `;
+  const result = variableNames.map((variableName) => {
+    const returnValueCommand = `
+      ${variableName};
+    `;
+    const mergedCommand = semicolonEndedCommand + '\n' + returnValueCommand;
+    return { name: variableName, value: eval(mergedCommand) };
+  });
 
-  const mergedCommand = semicolonEndedCommand + '\n' + returnValueCommand;
-
-  return eval(mergedCommand);
+  return result;
 }
 
-export function extractVariables(variableName: string, command: string): string[] {
-  const regex = new RegExp(`${variableName}\\d+`, 'g');
-  const matches = command.match(regex);
+export function selectCharacterVariables(variables: (CharacterVariable | Variable)[]): CharacterVariable[] {
+  return variables.filter((variable) => variable.value instanceof CharacterClass) as CharacterVariable[];
+}
+
+export function selectOtherVariables(variables: (CharacterVariable | Variable)[]): Variable[] {
+  return variables.filter((variable) => !(variable.value instanceof CharacterClass)) as Variable[];
+}
+
+export function extractVariableNames(command: string): string[] {
+  // 'const' 'let' 'var' で始まる変数名を comand から抽出する
+  const regex = /(?:const|let|var)\s+(\w+)\s*=\s*(.*?);/g;
+  const matches = [...command.matchAll(regex)];
+
   if (matches) {
-    return [...new Set(matches)];
+    return matches.map((match) => {
+      return match[1];
+    });
   }
   return [];
 }
@@ -41,7 +54,7 @@ export function extractVariables(variableName: string, command: string): string[
 export function solveProblem(program: string): SolveProblemResult {
   const commands = parseProgram(program);
   const board = new BoardClass();
-  const histories: History[] = [{ step: 0, characters: [], board }];
+  const histories: History[] = [{ step: 0, characterVariables: [], board, otherVariables: [] }];
 
   for (let i = 0; i < commands.length; i++) {
     if (i < commands.length) {
@@ -51,26 +64,29 @@ export function solveProblem(program: string): SolveProblemResult {
         mergedCommand += commands[j];
       }
 
-      const characters = executeEval(mergedCommand);
+      const variables = executeEval(mergedCommand);
+      const characterVariables = selectCharacterVariables(variables);
+      const otherVariables = selectOtherVariables(variables);
 
       const board = new BoardClass();
       for (const history of histories) {
-        if (!history.characters) continue;
+        if (!history.characterVariables) continue;
 
-        for (const character of history.characters) {
-          board.updateGrid(character);
+        for (const character of history.characterVariables) {
+          board.updateGrid(character.value);
         }
       }
-      for (const character of characters) {
-        board.updateGrid(character);
+      for (const character of characterVariables) {
+        board.updateGrid(character.value as CharacterClass);
       }
 
-      histories.push({ step: histories.length + 1, characters, board });
+      histories.push({ step: histories.length + 1, characterVariables, board, otherVariables });
     }
   }
 
   const result: SolveProblemResult = {
-    characters: histories?.at(-1)?.characters,
+    characterVariables: histories?.at(-1)?.characterVariables,
+    otherVariables: histories?.at(-1)?.otherVariables,
     board: histories?.at(-1)?.board || board,
     histories,
   };
@@ -85,10 +101,12 @@ export function isAnswerCorrect(
 ): boolean {
   const correctAnswer = solveProblem(problemProgram).histories?.at(step || -1);
 
-  if (!correctAnswer || !correctAnswer.characters) return false;
+  if (!correctAnswer || !correctAnswer.characterVariables) return false;
 
   // 順番は関係なく、id以外のキャラクターの状態が一致しているかチェック
-  const isCorrectCharacters: boolean = correctAnswer.characters.every((correctCharacter) => {
+  const isCorrectCharacters: boolean = correctAnswer.characterVariables.every((characterVariable) => {
+    const correctCharacter = characterVariable.value;
+
     const character = answerCharacters.find(
       (answerCharacter) =>
         answerCharacter.name === correctCharacter.name &&
