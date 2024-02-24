@@ -1,3 +1,5 @@
+import { instrumentCode, traceCode } from '../app/lib/solveProblem';
+
 export const courseIds = ['tuBeginner1', 'tuBeginner2'];
 export type CourseId = (typeof courseIds)[number];
 
@@ -36,6 +38,20 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
 
 export function generateProgram(programId: ProgramId, languageId: LanguageId): string {
   // TODO(exKAZUu): 問題IDに紐づくプログラム（テンプレート）を取得して、乱数を使って具体的なプログラムを生成する。
+  const code = `const bear = new Character(); /* 1 */
+bear.moveForward(); /* 2 */
+bear.turnLeft(); /* 3 */
+bear.upPen(); /* 4 */
+let i = 0; /* 5 */
+bear.moveForward(); /* 6 */
+const turtle = new Character({x: 3, y: 1, color: 'green'}); /* 7 */
+turtle.moveForward(); /* 8 */
+const foo = 'あいうえお'; /* 9 */
+var bar = 123; /* 10 */
+i = i + 1; /* 11 */
+turtle.moveForward(); /* 12 */
+turtle.moveForward(); /* 13 */`;
+  traceCode(instrumentCode(code));
   return (
     `const bear = new Character();
 bear.moveForward();

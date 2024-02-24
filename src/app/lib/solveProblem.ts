@@ -10,6 +10,86 @@ export function parseProgram(program: string): string[] {
     .filter((line) => line !== '');
 }
 
+export function instrumentCode(code: string): string {
+  // generateCodeからコードを受け取って、トレースできるコードを返す関数
+  const sidRegex = /\/\* (\d+) \*\//;
+  const assignmentRegex = /([\w.]+)(?: = |\+\+|--)/;
+  const modifiedCodeLines: string[] = [];
+  const lines = code.split('\n');
+
+  for (const line of lines) {
+    const trimmedLine = line.trimStart();
+    let modifiedCodeLine = trimmedLine;
+    const statementMatch = trimmedLine.match(sidRegex);
+    if (statementMatch) {
+      const sid = statementMatch[1];
+
+      // ' = 'を含むline
+      const assignmentMatch = line.match(assignmentRegex);
+      if (assignmentMatch) {
+        const variableName = assignmentMatch[1].trim();
+        modifiedCodeLine = modifiedCodeLine.replace(sidRegex, `log(${sid}, '${variableName}', ${variableName});`);
+      }
+    }
+    modifiedCodeLines.push(modifiedCodeLine);
+  }
+  return modifiedCodeLines.join('\n');
+}
+
+type Trace = {
+  sid: number;
+  variableName: string;
+  variableValue: string;
+};
+
+export async function traceCode(code: string): Promise<void> {
+  const Character = CharacterClass; // eslint-disable-line
+  const Board = BoardClass; // eslint-disable-line
+  const codeForTracing = `
+const traceList = [];
+
+${code}
+
+function log(sid, variableName, variableValue) {
+  if (typeof value === 'number' && (!isFinite(value) || isNaN(value) || (modulo && value < 0))) {
+    process.exit(1);
+  }
+  traceList.push({
+    sid,
+    variableName,
+    variableValue
+  });
+}
+
+JSON.stringify(traceList);
+`.replaceAll(/\s+/g, ' ');
+  const ret: Trace[] = JSON.parse(eval(codeForTracing));
+  console.log('variableList', traceToVariablesList(ret));
+}
+
+function traceToVariablesList(traceList: Trace[]): Variable[][] {
+  console.log(traceList);
+  const lineCount = traceList.at(-1)?.sid ?? 0;
+  const variablesList: Variable[][] = [];
+  console.log('variableList', variablesList);
+  let index = 0;
+  for (let i = 0; i < lineCount; i++) {
+    const variables = variablesList.at(-1) ?? ([] as Variable[]);
+    while (traceList[index].sid <= i) {
+      const { variableName, variableValue } = traceList[index];
+      const variablesIndex = variables.findIndex((variable) => variable.name === variableName);
+      if (variablesIndex === -1) {
+        variables.push({ name: variableName, value: variableValue });
+      } else {
+        variables[variablesIndex].value = variableValue;
+      }
+      index++;
+    }
+    variablesList.push(variables);
+  }
+  return variablesList;
+}
+
 export function executeEval(command: string): (CharacterVariable | Variable)[] {
   const Character = CharacterClass; // eslint-disable-line
   const Board = BoardClass; // eslint-disable-line
