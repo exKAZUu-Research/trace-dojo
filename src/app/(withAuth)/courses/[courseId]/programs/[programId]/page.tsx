@@ -44,7 +44,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
   };
 
   const createAnswerLog = async (isPassed: boolean): Promise<void> => {
-    await createProblemAnswerLog(programId, problemType, selectedLanguageId, startedAt, new Date(), isPassed);
+    await createProblemAnswerLog(programId, problemType, selectedLanguageId, userId, startedAt, new Date(), isPassed);
     setStartedAt(new Date());
   };
 

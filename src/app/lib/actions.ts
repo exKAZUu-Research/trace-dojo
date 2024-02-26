@@ -49,6 +49,7 @@ export async function createProblemAnswerLog(
   programId: string,
   problemType: string,
   languageId: string,
+  userId: string,
   startedAt: Date,
   answeredAt: Date,
   isPassed: boolean
@@ -59,6 +60,7 @@ export async function createProblemAnswerLog(
         programId,
         problemType,
         languageId,
+        userId,
         startedAt,
         answeredAt,
         isPassed,
