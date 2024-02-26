@@ -9,14 +9,14 @@ import {
   ModalOverlay,
 } from '@chakra-ui/react';
 
-interface ExplanationModalProps {
+interface CustomModalProps {
   title: string;
   body: string;
   isOpen: boolean;
   onClose: () => void;
 }
 
-export const ExplanationModal: React.FC<ExplanationModalProps> = ({ body, isOpen, onClose, title }) => {
+export const CustomModal: React.FC<CustomModalProps> = ({ body, isOpen, onClose, title }) => {
   return (
     <>
       <Modal isOpen={isOpen} onClose={onClose}>

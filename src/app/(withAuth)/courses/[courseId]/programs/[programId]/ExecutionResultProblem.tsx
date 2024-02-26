@@ -3,7 +3,7 @@
 import { Box, Button, Flex, HStack, VStack, useDisclosure } from '@chakra-ui/react';
 import { useRef } from 'react';
 
-import { ExplanationModal } from '../../../../../../components/molecules/ExplanationModal';
+import { CustomModal } from '../../../../../../components/molecules/CustomModal';
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
@@ -58,7 +58,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
             <Button colorScheme="gray" onClick={onOpen}>
               解説
             </Button>
-            <ExplanationModal body={explanation.body} isOpen={isOpen} title={explanation.title} onClose={onClose} />
+            <CustomModal body={explanation.body} isOpen={isOpen} title={explanation.title} onClose={onClose} />
           </>
         )}
         {/* 画面に収まる高さに設定 */}
