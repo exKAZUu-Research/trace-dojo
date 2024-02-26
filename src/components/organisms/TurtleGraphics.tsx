@@ -221,7 +221,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       event.preventDefault();
 
       handleClickCell(columnIndex, rowIndex);
-      updateCellColor(undefined, columnIndex, rowIndex);
+      updateCellColor('white', columnIndex, rowIndex);
     };
 
     return (
