@@ -99,13 +99,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         <Button colorScheme="gray" onClick={onOpen}>
           解説
         </Button>
-        <ExplanationModal
-          body={explanation.body}
-          buttonLabel="解説"
-          isOpen={isOpen}
-          title={explanation.title}
-          onClose={onClose}
-        />
+        <ExplanationModal body={explanation.body} isOpen={isOpen} title={explanation.title} onClose={onClose} />
         <Box h="640px" w="100%">
           <SyntaxHighlighter
             beforeCheckPointLine={beforeCheckPointLine}

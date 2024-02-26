@@ -60,13 +60,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
             <Button colorScheme="gray" onClick={onOpen}>
               解説
             </Button>
-            <ExplanationModal
-              body={explanation.body}
-              buttonLabel="解説"
-              isOpen={isOpen}
-              title={explanation.title}
-              onClose={onClose}
-            />
+            <ExplanationModal body={explanation.body} isOpen={isOpen} title={explanation.title} onClose={onClose} />
           </>
         )}
         {/* 画面に収まる高さに設定 */}

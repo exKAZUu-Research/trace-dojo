@@ -10,7 +10,6 @@ import {
 } from '@chakra-ui/react';
 
 interface ExplanationModalProps {
-  buttonLabel: string;
   title: string;
   body: string;
   isOpen: boolean;
