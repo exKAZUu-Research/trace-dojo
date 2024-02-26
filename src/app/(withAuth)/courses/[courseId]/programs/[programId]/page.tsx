@@ -24,7 +24,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
 
   const [selectedLanguageId, setSelectedLanguageId] = useState('');
   const [problemProgram, setProblemProgram] = useState<string>('');
-  const [step, setStep] = useState<ProblemType>('normal');
+  const [problemType, setProblemType] = useState<ProblemType>('normal');
   const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(0);
   const [currentCheckPointLine, setCurrentCheckPointLine] = useState(checkPointLines[0]);
 
@@ -43,14 +43,14 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
   };
 
   const ProblemComponent: React.FC = () => {
-    switch (step) {
+    switch (problemType) {
       case 'normal': {
         return (
           <ExecutionResultProblem
             handleComplete={handleSolveProblem}
             problemProgram={problemProgram}
             selectedLanguageId={selectedLanguageId}
-            setStep={setStep}
+            setProblemType={setProblemType}
           />
         );
       }
@@ -64,7 +64,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
             selectedLanguageId={selectedLanguageId}
             setBeforeCheckPointLine={setBeforeCheckPointLine}
             setCurrentCheckPointLine={setCurrentCheckPointLine}
-            setStep={setStep}
+            setProblemType={setProblemType}
           />
         );
       }

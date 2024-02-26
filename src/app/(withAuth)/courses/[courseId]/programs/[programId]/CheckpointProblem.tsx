@@ -15,7 +15,7 @@ interface CheckpointProblemProps {
   problemProgram: string;
   selectedLanguageId: string;
   checkPointLines: number[];
-  setStep: (step: ProblemType) => void;
+  setProblemType: (step: ProblemType) => void;
   beforeCheckPointLine: number;
   setBeforeCheckPointLine: (line: number) => void;
   currentCheckPointLine: number;
@@ -30,7 +30,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
   selectedLanguageId,
   setBeforeCheckPointLine,
   setCurrentCheckPointLine,
-  setStep,
+  setProblemType,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
 
@@ -51,7 +51,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         // 最終チェックポイントを正解した場合はその次の行からステップ問題に移行
         alert('正解です。このチェックポイントから1行ずつ回答してください');
         setCurrentCheckPointLine(currentCheckPointLine + 1);
-        setStep('step');
+        setProblemType('step');
       } else {
         alert('正解です。次のチェックポイントに進みます');
         setCurrentCheckPointLine(checkPointLines[checkPointLines.indexOf(currentCheckPointLine) + 1]);
@@ -60,7 +60,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
       // 不正解の場合は最後に正解したチェックポイントからステップ問題に移行
       alert('不正解です。最後に正解したチェックポイントから1行ずつ回答してください');
       setCurrentCheckPointLine(beforeCheckPointLine + 1);
-      setStep('step');
+      setProblemType('step');
     }
   };
 

@@ -12,7 +12,7 @@ import { createProblemAnswerLog } from '../../../../../lib/actions';
 interface ExecutionResultProblemProps {
   problemProgram: string;
   selectedLanguageId: string;
-  setStep: (step: ProblemType) => void;
+  setProblemType: (step: ProblemType) => void;
   handleComplete: () => void;
 }
 
@@ -20,7 +20,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
   handleComplete,
   problemProgram,
   selectedLanguageId,
-  setStep,
+  setProblemType,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
 
@@ -39,7 +39,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
       handleComplete();
     } else {
       alert('不正解です。チェックポイントごとに回答してください');
-      setStep('checkpoint');
+      setProblemType('checkpoint');
     }
   };
 
