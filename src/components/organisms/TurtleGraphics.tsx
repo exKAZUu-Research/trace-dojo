@@ -43,7 +43,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
 
       const solveResult = solveProblem(problemProgram).histories?.at(beforeCheckPointLine);
       const initBoard = solveResult?.board;
-      const initCharacters = solveResult?.characters;
+      const initCharacters = solveResult?.characterVariables?.map((character) => character.value);
 
       setBoard(initBoard || new Board());
       setCharacters(initCharacters || []);
