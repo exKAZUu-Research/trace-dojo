@@ -7,27 +7,25 @@ import { ExplanationModal } from '../../../../../../components/molecules/Explana
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
-import { getExplanation } from '../../../../../../problems/problemData';
 import type { ProblemType } from '../../../../../../types';
 
 interface ExecutionResultProblemProps {
+  explanation?: Record<'title' | 'body', string>;
+  handleComplete: () => void;
   problemProgram: string;
   selectedLanguageId: string;
-  programId: string;
   setStep: (step: ProblemType) => void;
-  handleComplete: () => void;
 }
 
 export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
+  explanation,
   handleComplete,
   problemProgram,
-  programId,
   selectedLanguageId,
   setStep,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
   const { isOpen, onClose, onOpen } = useDisclosure();
-  const explanation = getExplanation(programId, selectedLanguageId);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();

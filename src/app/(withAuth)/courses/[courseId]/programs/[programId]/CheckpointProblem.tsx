@@ -7,30 +7,29 @@ import { ExplanationModal } from '../../../../../../components/molecules/Explana
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
-import { getExplanation } from '../../../../../../problems/problemData';
 import type { ProblemType } from '../../../../../../types';
 import { solveProblem } from '../../../../../lib/solveProblem';
 
 import { Variables } from './Variables';
 
 interface CheckpointProblemProps {
+  beforeCheckPointLine: number;
+  checkPointLines: number[];
+  currentCheckPointLine: number;
+  explanation?: Record<'title' | 'body', string>;
   problemProgram: string;
   selectedLanguageId: string;
-  programId: string;
-  checkPointLines: number[];
-  setStep: (step: ProblemType) => void;
-  beforeCheckPointLine: number;
   setBeforeCheckPointLine: (line: number) => void;
-  currentCheckPointLine: number;
   setCurrentCheckPointLine: (line: number) => void;
+  setStep: (step: ProblemType) => void;
 }
 
 export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
   beforeCheckPointLine,
   checkPointLines,
   currentCheckPointLine,
+  explanation,
   problemProgram,
-  programId,
   selectedLanguageId,
   setBeforeCheckPointLine,
   setCurrentCheckPointLine,
@@ -39,7 +38,6 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
 
   const { isOpen, onClose, onOpen } = useDisclosure();
-  const explanation = getExplanation(programId, selectedLanguageId);
   const beforeCheckpointResult = solveProblem(problemProgram).histories?.at(beforeCheckPointLine);
 
   const handleClickResetButton = (): void => {
@@ -96,10 +94,14 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         </Box>
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">
-        <Button colorScheme="gray" onClick={onOpen}>
-          解説
-        </Button>
-        <ExplanationModal body={explanation.body} isOpen={isOpen} title={explanation.title} onClose={onClose} />
+        {explanation && (
+          <>
+            <Button colorScheme="gray" onClick={onOpen}>
+              解説
+            </Button>
+            <ExplanationModal body={explanation.body} isOpen={isOpen} title={explanation.title} onClose={onClose} />
+          </>
+        )}
         <Box h="640px" w="100%">
           <SyntaxHighlighter
             beforeCheckPointLine={beforeCheckPointLine}
