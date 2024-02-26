@@ -18,10 +18,12 @@ interface StepProblemProps {
   setBeforeCheckPointLine: (line: number) => void;
   setCurrentCheckPointLine: (line: number) => void;
   handleComplete: () => void;
+  createAnswerLog: (isPassed: boolean) => void;
 }
 
 export const StepProblem: React.FC<StepProblemProps> = ({
   beforeCheckPointLine,
+  createAnswerLog,
   currentCheckPointLine,
   handleComplete,
   problemProgram,
@@ -38,7 +40,9 @@ export const StepProblem: React.FC<StepProblemProps> = ({
   };
 
   const handleClickAnswerButton = (): void => {
-    const isPassed = turtleGraphicsRef.current?.isPassed();
+    const isPassed = turtleGraphicsRef.current?.isPassed() || false;
+
+    createAnswerLog(isPassed);
 
     // TODO: 一旦アラートで表示
     if (isPassed) {

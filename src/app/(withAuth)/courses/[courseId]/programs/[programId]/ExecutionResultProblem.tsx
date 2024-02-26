@@ -7,16 +7,17 @@ import { SyntaxHighlighter } from '../../../../../../components/organisms/Syntax
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
 import type { ProblemType } from '../../../../../../types';
-import { createProblemAnswerLog } from '../../../../../lib/actions';
 
 interface ExecutionResultProblemProps {
   problemProgram: string;
   selectedLanguageId: string;
   setProblemType: (step: ProblemType) => void;
   handleComplete: () => void;
+  createAnswerLog: (isPassed: boolean) => void;
 }
 
 export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
+  createAnswerLog,
   handleComplete,
   problemProgram,
   selectedLanguageId,
@@ -31,7 +32,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
   const handleClickAnswerButton = async (): Promise<void> => {
     const isPassed = turtleGraphicsRef.current?.isPassed() || false;
 
-    createProblemAnswerLog('programId', 'problemType', selectedLanguageId, new Date(), new Date(), isPassed);
+    createAnswerLog(isPassed);
 
     // TODO: 一旦アラートで表示
     if (isPassed) {

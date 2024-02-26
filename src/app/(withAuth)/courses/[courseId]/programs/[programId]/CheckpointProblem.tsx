@@ -15,16 +15,19 @@ interface CheckpointProblemProps {
   problemProgram: string;
   selectedLanguageId: string;
   checkPointLines: number[];
+  setStartedAt: (date: Date) => void;
   setProblemType: (step: ProblemType) => void;
   beforeCheckPointLine: number;
   setBeforeCheckPointLine: (line: number) => void;
   currentCheckPointLine: number;
   setCurrentCheckPointLine: (line: number) => void;
+  createAnswerLog: (isPassed: boolean) => void;
 }
 
 export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
   beforeCheckPointLine,
   checkPointLines,
+  createAnswerLog,
   currentCheckPointLine,
   problemProgram,
   selectedLanguageId,
@@ -33,7 +36,6 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
   setProblemType,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
-
   const beforeCheckpointResult = solveProblem(problemProgram).histories?.at(beforeCheckPointLine);
 
   const handleClickResetButton = (): void => {
@@ -41,7 +43,9 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
   };
 
   const handleClickAnswerButton = (): void => {
-    const isPassed = turtleGraphicsRef.current?.isPassed();
+    const isPassed = turtleGraphicsRef.current?.isPassed() || false;
+
+    createAnswerLog(isPassed);
 
     // TODO: 一旦アラートで表示
     if (isPassed) {
