@@ -1,8 +1,9 @@
 'use client';
 
-import { Box, Button, Flex, HStack, VStack } from '@chakra-ui/react';
+import { Box, Button, Flex, HStack, VStack, useDisclosure } from '@chakra-ui/react';
 import { useRef } from 'react';
 
+import { CustomModal } from '../../../../../../components/molecules/CustomModal';
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
@@ -15,15 +16,17 @@ interface StepProblemProps {
   beforeCheckPointLine: number;
   currentCheckPointLine: number;
   problemProgram: GeneratedProgram;
+  explanation?: Record<'title' | 'body', string>;
+  handleComplete: () => void;
   selectedLanguageId: string;
   setBeforeCheckPointLine: (line: number) => void;
   setCurrentCheckPointLine: (line: number) => void;
-  handleComplete: () => void;
 }
 
 export const StepProblem: React.FC<StepProblemProps> = ({
   beforeCheckPointLine,
   currentCheckPointLine,
+  explanation,
   handleComplete,
   problemProgram,
   selectedLanguageId,
@@ -31,6 +34,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
   setCurrentCheckPointLine,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
+  const { isOpen, onClose, onOpen } = useDisclosure();
 
   const beforeCheckpointResult = solveProblem(problemProgram.excuteProgram).histories?.at(beforeCheckPointLine);
 
@@ -84,7 +88,14 @@ export const StepProblem: React.FC<StepProblemProps> = ({
         </Box>
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">
-        <Button colorScheme="gray">解説</Button>
+        {explanation && (
+          <>
+            <Button colorScheme="gray" onClick={onOpen}>
+              解説
+            </Button>
+            <CustomModal body={explanation.body} isOpen={isOpen} title={explanation.title} onClose={onClose} />
+          </>
+        )}
         <Box h="640px" w="100%">
           <SyntaxHighlighter
             beforeCheckPointLine={beforeCheckPointLine}

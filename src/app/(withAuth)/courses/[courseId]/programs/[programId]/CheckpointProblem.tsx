@@ -1,8 +1,9 @@
 'use client';
 
-import { Box, Button, Flex, HStack, VStack } from '@chakra-ui/react';
+import { Box, Button, Flex, HStack, VStack, useDisclosure } from '@chakra-ui/react';
 import { useRef } from 'react';
 
+import { CustomModal } from '../../../../../../components/molecules/CustomModal';
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
@@ -13,19 +14,21 @@ import { Variables } from './Variables';
 
 interface CheckpointProblemProps {
   problemProgram: GeneratedProgram;
-  selectedLanguageId: string;
-  checkPointLines: number[];
-  setStep: (step: ProblemType) => void;
   beforeCheckPointLine: number;
-  setBeforeCheckPointLine: (line: number) => void;
+  checkPointLines: number[];
   currentCheckPointLine: number;
+  explanation?: Record<'title' | 'body', string>;
+  selectedLanguageId: string;
+  setBeforeCheckPointLine: (line: number) => void;
   setCurrentCheckPointLine: (line: number) => void;
+  setStep: (step: ProblemType) => void;
 }
 
 export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
   beforeCheckPointLine,
   checkPointLines,
   currentCheckPointLine,
+  explanation,
   problemProgram,
   selectedLanguageId,
   setBeforeCheckPointLine,
@@ -34,6 +37,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
 
+  const { isOpen, onClose, onOpen } = useDisclosure();
   const beforeCheckpointResult = solveProblem(problemProgram.excuteProgram).histories?.at(beforeCheckPointLine);
 
   const handleClickResetButton = (): void => {
@@ -90,7 +94,14 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         </Box>
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">
-        <Button colorScheme="gray">解説</Button>
+        {explanation && (
+          <>
+            <Button colorScheme="gray" onClick={onOpen}>
+              解説
+            </Button>
+            <CustomModal body={explanation.body} isOpen={isOpen} title={explanation.title} onClose={onClose} />
+          </>
+        )}
         <Box h="640px" w="100%">
           <SyntaxHighlighter
             beforeCheckPointLine={beforeCheckPointLine}
