@@ -116,14 +116,14 @@ test('Solve a problem (1character)', () => {
 
   // prettier-ignore
   expect(answer.board.grid).toEqual([
-    [{ color: 'red' }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: 'red' }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: 'red' }, { color: 'red' }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: 'red' }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: 'red' }, { color: 'red' }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: 'red' }, { color: "red" }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
+    [{ color: 'red' }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: 'red' }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: 'red' }, { color: 'red' }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: 'red' }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: 'red' }, { color: 'red' }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: 'red' }, { color: "red" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
   ]);
 
   expect(answer.histories?.at(0)?.characterVariables?.length).toEqual(0);
@@ -138,25 +138,25 @@ test('Solve a problem (1character)', () => {
 
   // prettier-ignore
   expect(answer.histories?.at(0)?.board?.grid).toEqual([
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined },],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined },],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined },],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined },],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined },],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined },],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined },],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined },],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" },],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" },],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" },],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" },],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" },],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" },],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" },],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" },],
   ]);
   // prettier-ignore
   expect(answer.histories?.at(1)?.board?.grid).toEqual([
-    [{ color: 'red' }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
+    [{ color: 'red' }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
   ]);
 });
 
@@ -186,14 +186,14 @@ test('Solve a problem (multiple characters)', () => {
 
   // prettier-ignore
   expect(answer.board.grid).toEqual([
-    [{ color: 'red' }, { color: 'green' }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: 'red' }, { color: 'green' }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: 'red' }, { color: 'green' }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
-    [{ color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }, { color: undefined }],
+    [{ color: 'red' }, { color: 'green' }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: 'red' }, { color: 'green' }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: 'red' }, { color: 'green' }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
+    [{ color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }, { color: "white" }],
   ]);
   expect(answer.histories?.at(-1)?.characterVariables?.length).toEqual(3);
   expect(answer.histories?.at(-1)?.characterVariables?.[0]?.value.x).toEqual(1);
