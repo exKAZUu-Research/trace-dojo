@@ -1,16 +1,19 @@
 'use client';
 
-import { Box, Button, Flex, HStack, VStack } from '@chakra-ui/react';
+import { Box, Button, Flex, HStack, VStack, useDisclosure } from '@chakra-ui/react';
 import { useRef } from 'react';
 
+import { ExplanationModal } from '../../../../../../components/molecules/ExplanationModal';
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
+import { getExplanation } from '../../../../../../problems/problemData';
 
 interface StepProblemProps {
   beforeCheckPointLine: number;
   currentCheckPointLine: number;
   problemProgram: string;
+  programId: string;
   selectedLanguageId: string;
   setBeforeCheckPointLine: (line: number) => void;
   setCurrentCheckPointLine: (line: number) => void;
@@ -22,11 +25,14 @@ export const StepProblem: React.FC<StepProblemProps> = ({
   currentCheckPointLine,
   handleComplete,
   problemProgram,
+  programId,
   selectedLanguageId,
   setBeforeCheckPointLine,
   setCurrentCheckPointLine,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
+  const { isOpen, onClose, onOpen } = useDisclosure();
+  const explanation = getExplanation(programId, selectedLanguageId);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -78,7 +84,16 @@ export const StepProblem: React.FC<StepProblemProps> = ({
         </Box>
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">
-        <Button colorScheme="gray">解説</Button>
+        <Button colorScheme="gray" onClick={onOpen}>
+          解説
+        </Button>
+        <ExplanationModal
+          body={explanation.body}
+          buttonLabel="解説"
+          isOpen={isOpen}
+          title={explanation.title}
+          onClose={onClose}
+        />
         <Box h="840px" w="100%">
           <SyntaxHighlighter
             beforeCheckPointLine={beforeCheckPointLine}

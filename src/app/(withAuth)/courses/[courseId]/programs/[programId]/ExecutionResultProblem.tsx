@@ -7,11 +7,13 @@ import { ExplanationModal } from '../../../../../../components/molecules/Explana
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
+import { getExplanation } from '../../../../../../problems/problemData';
 import type { ProblemType } from '../../../../../../types';
 
 interface ExecutionResultProblemProps {
   problemProgram: string;
   selectedLanguageId: string;
+  programId: string;
   setStep: (step: ProblemType) => void;
   handleComplete: () => void;
 }
@@ -19,12 +21,13 @@ interface ExecutionResultProblemProps {
 export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
   handleComplete,
   problemProgram,
+  programId,
   selectedLanguageId,
   setStep,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
-
   const { isOpen, onClose, onOpen } = useDisclosure();
+  const explanation = getExplanation(programId, selectedLanguageId);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -52,10 +55,20 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
         </Box>
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">
-        <Button colorScheme="gray" onClick={onOpen}>
-          解説
-        </Button>
-        <ExplanationModal body="解説" buttonLabel="解説" isOpen={isOpen} title="解説" onClose={onClose} />
+        {explanation && (
+          <>
+            <Button colorScheme="gray" onClick={onOpen}>
+              解説
+            </Button>
+            <ExplanationModal
+              body={explanation.body}
+              buttonLabel="解説"
+              isOpen={isOpen}
+              title={explanation.title}
+              onClose={onClose}
+            />
+          </>
+        )}
         {/* 画面に収まる高さに設定 */}
         <Box h="calc(100vh - 370px)" w="100%">
           <SyntaxHighlighter code={problemProgram} programmingLanguageId={selectedLanguageId} />

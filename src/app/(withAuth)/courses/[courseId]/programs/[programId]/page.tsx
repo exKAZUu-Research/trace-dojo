@@ -49,6 +49,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
           <ExecutionResultProblem
             handleComplete={handleSolveProblem}
             problemProgram={problemProgram}
+            programId={programId}
             selectedLanguageId={selectedLanguageId}
             setStep={setStep}
           />
@@ -61,6 +62,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
             checkPointLines={checkPointLines}
             currentCheckPointLine={currentCheckPointLine}
             problemProgram={problemProgram}
+            programId={programId}
             selectedLanguageId={selectedLanguageId}
             setBeforeCheckPointLine={setBeforeCheckPointLine}
             setCurrentCheckPointLine={setCurrentCheckPointLine}
@@ -75,6 +77,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
             currentCheckPointLine={currentCheckPointLine}
             handleComplete={handleSolveProblem}
             problemProgram={problemProgram}
+            programId={programId}
             selectedLanguageId={selectedLanguageId}
             setBeforeCheckPointLine={setBeforeCheckPointLine}
             setCurrentCheckPointLine={setCurrentCheckPointLine}

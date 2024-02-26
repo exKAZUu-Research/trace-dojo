@@ -7,11 +7,13 @@ import { ExplanationModal } from '../../../../../../components/molecules/Explana
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
+import { getExplanation } from '../../../../../../problems/problemData';
 import type { ProblemType } from '../../../../../../types';
 
 interface CheckpointProblemProps {
   problemProgram: string;
   selectedLanguageId: string;
+  programId: string;
   checkPointLines: number[];
   setStep: (step: ProblemType) => void;
   beforeCheckPointLine: number;
@@ -25,6 +27,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
   checkPointLines,
   currentCheckPointLine,
   problemProgram,
+  programId,
   selectedLanguageId,
   setBeforeCheckPointLine,
   setCurrentCheckPointLine,
@@ -33,6 +36,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
 
   const { isOpen, onClose, onOpen } = useDisclosure();
+  const explanation = getExplanation(programId, selectedLanguageId);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -91,7 +95,13 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         <Button colorScheme="gray" onClick={onOpen}>
           解説
         </Button>
-        <ExplanationModal body="解説" buttonLabel="解説" isOpen={isOpen} title="解説" onClose={onClose} />
+        <ExplanationModal
+          body={explanation.body}
+          buttonLabel="解説"
+          isOpen={isOpen}
+          title={explanation.title}
+          onClose={onClose}
+        />
         <Box h="840px" w="100%">
           <SyntaxHighlighter
             beforeCheckPointLine={beforeCheckPointLine}
