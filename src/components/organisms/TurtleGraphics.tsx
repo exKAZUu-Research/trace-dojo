@@ -27,7 +27,7 @@ interface TurtleGraphicsProps {
 
 export interface TurtleGraphicsHandle {
   init(): void;
-  isCorrect(): boolean;
+  isPassed(): boolean;
 }
 
 export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
@@ -54,7 +54,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     useImperativeHandle(ref, () => ({
       // 親コンポーネントから関数を呼び出せるようにする
       init,
-      isCorrect,
+      isPassed,
     }));
 
     useEffect(() => {
@@ -79,7 +79,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       setSelectedCharacter(updatedCharacter);
     };
 
-    const isCorrect = (): boolean => {
+    const isPassed = (): boolean => {
       return isAnswerCorrect(problemProgram, characters, board, currentCheckPointLine);
     };
 

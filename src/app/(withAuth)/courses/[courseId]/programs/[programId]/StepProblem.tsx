@@ -38,10 +38,10 @@ export const StepProblem: React.FC<StepProblemProps> = ({
   };
 
   const handleClickAnswerButton = (): void => {
-    const isCorrect = turtleGraphicsRef.current?.isCorrect();
+    const isPassed = turtleGraphicsRef.current?.isPassed();
 
     // TODO: 一旦アラートで表示
-    if (isCorrect) {
+    if (isPassed) {
       const problemProgramLines = problemProgram.split('\n').length;
 
       if (currentCheckPointLine === problemProgramLines) {

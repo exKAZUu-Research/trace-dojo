@@ -28,10 +28,10 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
   };
 
   const handleClickAnswerButton = (): void => {
-    const isCorrect = turtleGraphicsRef.current?.isCorrect();
+    const isPassed = turtleGraphicsRef.current?.isPassed();
 
     // TODO: 一旦アラートで表示
-    if (isCorrect) {
+    if (isPassed) {
       alert('正解です。この問題は終了です');
       handleComplete();
     } else {

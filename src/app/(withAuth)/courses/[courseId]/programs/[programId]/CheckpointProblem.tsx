@@ -41,10 +41,10 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
   };
 
   const handleClickAnswerButton = (): void => {
-    const isCorrect = turtleGraphicsRef.current?.isCorrect();
+    const isPassed = turtleGraphicsRef.current?.isPassed();
 
     // TODO: 一旦アラートで表示
-    if (isCorrect) {
+    if (isPassed) {
       setBeforeCheckPointLine(currentCheckPointLine);
 
       if (currentCheckPointLine === checkPointLines.at(-1)) {
