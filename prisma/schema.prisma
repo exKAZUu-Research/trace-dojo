@@ -32,3 +32,16 @@ model UserSolvedProblem {
   programId  String
   languageId String
 }
+
+model ProblemAnswerLog {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  programId   String
+  languageId  String
+  problemType String
+  startedAt   DateTime
+  answeredAt  DateTime
+  isPassed    Boolean
+}
