@@ -1,6 +1,7 @@
 import type { CharacterVariable, History, SolveProblemResult, Variable } from '../../types';
 
 import { Board as BoardClass } from './Board';
+import type { Character } from './Character';
 import { Character as CharacterClass } from './Character';
 
 export function parseProgram(program: string): string[] {
@@ -28,6 +29,7 @@ export function instrumentCode(code: string): string {
       const assignmentMatch = line.match(assignmentRegex);
       if (assignmentMatch) {
         const variableName = assignmentMatch[1].trim();
+
         modifiedCodeLine = modifiedCodeLine.replace(sidRegex, `log(${sid}, '${variableName}', ${variableName});`);
       }
     }
@@ -39,10 +41,10 @@ export function instrumentCode(code: string): string {
 type Trace = {
   sid: number;
   variableName: string;
-  variableValue: string;
+  variableValue: Character | string;
 };
 
-export async function traceCode(code: string): Promise<void> {
+export function traceCode(code: string): Trace[] {
   const Character = CharacterClass; // eslint-disable-line
   const Board = BoardClass; // eslint-disable-line
   const codeForTracing = `
@@ -64,28 +66,31 @@ function log(sid, variableName, variableValue) {
 JSON.stringify(traceList);
 `.replaceAll(/\s+/g, ' ');
   const ret: Trace[] = JSON.parse(eval(codeForTracing));
-  console.log('variableList', traceToVariablesList(ret));
+  return ret;
 }
 
-function traceToVariablesList(traceList: Trace[]): Variable[][] {
-  console.log(traceList);
+function traceToVariablesList(traceList: Trace[]): (CharacterVariable | Variable)[][] {
   const lineCount = traceList.at(-1)?.sid ?? 0;
-  const variablesList: Variable[][] = [];
-  console.log('variableList', variablesList);
+  const variablesList: (CharacterVariable | Variable)[][] = [];
   let index = 0;
   for (let i = 0; i < lineCount; i++) {
-    const variables = variablesList.at(-1) ?? ([] as Variable[]);
+    const variables = variablesList.at(-1) ?? ([] as (CharacterVariable | Variable)[]);
     while (traceList[index].sid <= i) {
       const { variableName, variableValue } = traceList[index];
       const variablesIndex = variables.findIndex((variable) => variable.name === variableName);
       if (variablesIndex === -1) {
-        variables.push({ name: variableName, value: variableValue });
+        if (variableValue instanceof CharacterClass) {
+          console.log('character');
+          variables.push({ name: variableName, value: variableValue } as CharacterVariable);
+        } else {
+          variables.push({ name: variableName, value: variableValue } as Variable);
+        }
       } else {
         variables[variablesIndex].value = variableValue;
       }
       index++;
     }
-    variablesList.push(variables);
+    variablesList.push([...variables]);
   }
   return variablesList;
 }
@@ -132,37 +137,35 @@ export function extractVariableNames(command: string): string[] {
 }
 
 export function solveProblem(program: string): SolveProblemResult {
-  const commands = parseProgram(program);
   const board = new BoardClass();
   const histories: History[] = [{ step: 0, characterVariables: [], board, otherVariables: [] }];
 
-  for (let i = 0; i < commands.length; i++) {
-    if (i < commands.length) {
-      let mergedCommand = '';
+  const traceList = traceCode(instrumentCode(program));
+  const variablesList = traceToVariablesList(traceList);
 
-      for (let j = 0; j <= i; j++) {
-        mergedCommand += commands[j];
+  for (const variables of variablesList) {
+    console.log('variables', variables);
+    const characterVariables = selectCharacterVariables(variables);
+    const otherVariables = selectOtherVariables(variables);
+    console.log('characterVariables', characterVariables);
+    console.log('otherVariables', otherVariables);
+
+    const board = new BoardClass();
+    for (const history of histories) {
+      if (!history.characterVariables) continue;
+
+      for (const character of history.characterVariables) {
+        board.updateGrid(character.value);
       }
-
-      const variables = executeEval(mergedCommand);
-      const characterVariables = selectCharacterVariables(variables);
-      const otherVariables = selectOtherVariables(variables);
-
-      const board = new BoardClass();
-      for (const history of histories) {
-        if (!history.characterVariables) continue;
-
-        for (const character of history.characterVariables) {
-          board.updateGrid(character.value);
-        }
-      }
-      for (const character of characterVariables) {
-        board.updateGrid(character.value as CharacterClass);
-      }
-
-      histories.push({ step: histories.length + 1, characterVariables, board, otherVariables });
     }
+    for (const character of characterVariables) {
+      board.updateGrid(character.value as CharacterClass);
+    }
+
+    histories.push({ step: histories.length + 1, characterVariables, board, otherVariables });
   }
+
+  console.log(histories);
 
   const result: SolveProblemResult = {
     characterVariables: histories?.at(-1)?.characterVariables,
