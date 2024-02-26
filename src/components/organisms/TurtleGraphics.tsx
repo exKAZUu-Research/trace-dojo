@@ -79,6 +79,19 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       setSelectedCharacter(updatedCharacter);
     };
 
+    const updateCellColor = (color: CellColor, columnIndex: number, rowIndex: number): void => {
+      setBoard((prevBoard) => {
+        const newBoard = new Board();
+        for (const [y, rows] of prevBoard.grid.entries()) {
+          for (const [x, column] of rows.entries()) {
+            newBoard.setCellColor(x, y, column.color);
+          }
+        }
+        newBoard.setCellColor(columnIndex, rowIndex, color);
+        return newBoard;
+      });
+    };
+
     const isCorrect = (): boolean => {
       return isAnswerCorrect(problemProgram, characters, board, currentCheckPointLine);
     };
@@ -197,16 +210,18 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     const handleChangeCellColorButton = (color: CellColor): void => {
       if (!selectedCell) return;
 
-      setBoard((prevBoard) => {
-        const newBoard = new Board();
-        for (const [y, rows] of prevBoard.grid.entries()) {
-          for (const [x, column] of rows.entries()) {
-            newBoard.setCellColor(x, y, column.color);
-          }
-        }
-        newBoard.setCellColor(selectedCell.x, selectedCell.y, color);
-        return newBoard;
-      });
+      updateCellColor(color, selectedCell.x, selectedCell.y);
+    };
+
+    const handleContextMenu = (
+      event: React.MouseEvent<HTMLDivElement>,
+      columnIndex: number,
+      rowIndex: number
+    ): void => {
+      event.preventDefault();
+
+      handleClickCell(columnIndex, rowIndex);
+      updateCellColor('white', columnIndex, rowIndex);
     };
 
     return (
@@ -229,6 +244,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
                 borderWidth={selectedCell?.x === columnIndex && selectedCell?.y === rowIndex ? '2px' : '0.5px'}
                 className="grid-cell"
                 onClick={() => handleClickCell(columnIndex, rowIndex)}
+                onContextMenu={(e) => handleContextMenu(e, columnIndex, rowIndex)}
               />
             ))
           )}
@@ -238,11 +254,12 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
               borderColor={selectedCharacter?.id === character.id ? 'black' : 'transparent'}
               borderWidth="2px"
               h={GRID_SIZE + 'px'}
-              left={(character.x - ORIGIN_Y) * GRID_SIZE + 'px'}
+              left={(character.x - ORIGIN_X) * GRID_SIZE + 'px'}
               position="absolute"
-              top={(character.y - ORIGIN_X) * GRID_SIZE + 'px'}
+              top={(character.y - ORIGIN_Y) * GRID_SIZE + 'px'}
               w={GRID_SIZE + 'px'}
               onClick={() => handleClickCharacter(character)}
+              onContextMenu={(e) => handleContextMenu(e, character.x - ORIGIN_X, character.y - ORIGIN_Y)}
             >
               <Box p="0.2rem" transform={character.rotateCss()}>
                 <Image
