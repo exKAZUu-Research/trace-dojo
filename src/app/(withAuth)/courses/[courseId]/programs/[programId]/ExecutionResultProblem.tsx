@@ -1,27 +1,31 @@
 'use client';
 
-import { Box, Button, Flex, HStack, VStack } from '@chakra-ui/react';
+import { Box, Button, Flex, HStack, VStack, useDisclosure } from '@chakra-ui/react';
 import { useRef } from 'react';
 
+import { CustomModal } from '../../../../../../components/molecules/CustomModal';
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
 import type { ProblemType } from '../../../../../../types';
 
 interface ExecutionResultProblemProps {
+  explanation?: Record<'title' | 'body', string>;
+  handleComplete: () => void;
   problemProgram: string;
   selectedLanguageId: string;
   setStep: (step: ProblemType) => void;
-  handleComplete: () => void;
 }
 
 export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
+  explanation,
   handleComplete,
   problemProgram,
   selectedLanguageId,
   setStep,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
+  const { isOpen, onClose, onOpen } = useDisclosure();
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -49,7 +53,14 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
         </Box>
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">
-        <Button colorScheme="gray">解説</Button>
+        {explanation && (
+          <>
+            <Button colorScheme="gray" onClick={onOpen}>
+              解説
+            </Button>
+            <CustomModal body={explanation.body} isOpen={isOpen} title={explanation.title} onClose={onClose} />
+          </>
+        )}
         {/* 画面に収まる高さに設定 */}
         <Box h="calc(100vh - 370px)" w="100%">
           <SyntaxHighlighter code={problemProgram} programmingLanguageId={selectedLanguageId} />

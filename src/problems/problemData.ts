@@ -53,8 +53,8 @@ turtle.moveForward();` || programIdToLanguageIdToProgram[programId][languageId]
   );
 }
 
-export function getExplanation(programId: ProgramId, languageId: LanguageId): string {
-  return programIdToLanguageIdToExplanation[programId][languageId];
+export function getExplanation(programId: ProgramId, languageId: LanguageId): Record<'title' | 'body', string> {
+  return programIdToLanguageIdToExplanation[programId]?.[languageId];
 }
 
 export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId, string>> = {
@@ -92,21 +92,40 @@ public class Curve {
   },
 };
 
-export const programIdToLanguageIdToExplanation: Record<ProgramId, Record<LanguageId, string>> = {
+export const programIdToLanguageIdToExplanation: Record<
+  ProgramId,
+  Record<LanguageId, Record<'title' | 'body', string>>
+> = {
   straight: {
-    js: `
-JavaScript向けの解説。JavaScript向けの解説。
+    js: {
+      title: 'JavaScript向けstraightの解説のタイトル',
+      body: `
+JavaScript向けstraightの解説
+解説文がここに入ります。
 `.trim(),
-    java: `
-Java向けの解説。Java向けの解説。
+    },
+    java: {
+      title: 'Java向けstraightの解説のタイトル',
+      body: `
+Java向けstraightの解説
+解説文がここに入ります。
 `.trim(),
+    },
   },
   curve: {
-    js: `
-JavaScript向けの解説。JavaScript向けの解説。
+    js: {
+      title: 'JavaScript向けcurveの解説のタイトル',
+      body: `
+JavaScript向けcurveの解説
+解説文がここに入ります。
 `.trim(),
-    java: `
-Java向けの解説。Java向けの解説。
+    },
+    java: {
+      title: 'Java向けcurveの解説のタイトル',
+      body: `
+Java向けcurveの解説
+解説文がここに入ります。
 `.trim(),
+    },
   },
 };

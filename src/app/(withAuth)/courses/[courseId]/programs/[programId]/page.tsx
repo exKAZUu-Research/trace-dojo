@@ -5,7 +5,7 @@ import type { NextPage } from 'next';
 import { useEffect, useState } from 'react';
 import { useSessionContext } from 'supertokens-auth-react/recipe/session';
 
-import { generateProgram, programIdToName } from '../../../../../../problems/problemData';
+import { generateProgram, getExplanation, programIdToName } from '../../../../../../problems/problemData';
 import type { ProblemType } from '../../../../../../types';
 import { getLanguageIdFromSessionStorage } from '../../../../../lib/SessionStorage';
 import { createUserSolvedProblem } from '../../../../../lib/actions';
@@ -42,11 +42,14 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
     }
   };
 
+  const explanation = getExplanation(programId, selectedLanguageId);
+
   const ProblemComponent: React.FC = () => {
     switch (step) {
       case 'normal': {
         return (
           <ExecutionResultProblem
+            explanation={explanation}
             handleComplete={handleSolveProblem}
             problemProgram={problemProgram}
             selectedLanguageId={selectedLanguageId}
@@ -60,6 +63,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
             beforeCheckPointLine={beforeCheckPointLine}
             checkPointLines={checkPointLines}
             currentCheckPointLine={currentCheckPointLine}
+            explanation={explanation}
             problemProgram={problemProgram}
             selectedLanguageId={selectedLanguageId}
             setBeforeCheckPointLine={setBeforeCheckPointLine}
@@ -73,6 +77,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
           <StepProblem
             beforeCheckPointLine={beforeCheckPointLine}
             currentCheckPointLine={currentCheckPointLine}
+            explanation={explanation}
             handleComplete={handleSolveProblem}
             problemProgram={problemProgram}
             selectedLanguageId={selectedLanguageId}
