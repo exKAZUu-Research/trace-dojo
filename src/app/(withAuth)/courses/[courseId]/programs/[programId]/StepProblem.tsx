@@ -33,7 +33,12 @@ export const StepProblem: React.FC<StepProblemProps> = ({
   setCurrentCheckPointLine,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
-  const { isOpen, onClose, onOpen } = useDisclosure();
+  const {
+    isOpen: isExplanationModalOpen,
+    onClose: onExplanationModalClose,
+    onOpen: onExplanationModalOpen,
+  } = useDisclosure();
+  const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
 
   const beforeCheckpointResult = solveProblem(problemProgram).histories?.at(beforeCheckPointLine);
 
@@ -87,14 +92,30 @@ export const StepProblem: React.FC<StepProblemProps> = ({
         </Box>
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">
-        {explanation && (
-          <>
-            <Button colorScheme="gray" onClick={onOpen}>
-              解説
-            </Button>
-            <CustomModal body={explanation.body} isOpen={isOpen} title={explanation.title} onClose={onClose} />
-          </>
-        )}
+        <HStack>
+          <Button colorScheme="gray" onClick={onHelpModalOpen}>
+            解答方法
+          </Button>
+          <CustomModal
+            body="ステップ問題の解答方法の説明"
+            isOpen={isHelpModalOpen}
+            title="ステップ問題について"
+            onClose={onHelpModalClose}
+          />
+          {explanation && (
+            <>
+              <Button colorScheme="gray" onClick={onExplanationModalOpen}>
+                解説
+              </Button>
+              <CustomModal
+                body={explanation.body}
+                isOpen={isExplanationModalOpen}
+                title={explanation.title}
+                onClose={onExplanationModalClose}
+              />
+            </>
+          )}
+        </HStack>
         <Box h="640px" w="100%">
           <SyntaxHighlighter
             beforeCheckPointLine={beforeCheckPointLine}
