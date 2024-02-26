@@ -7,6 +7,7 @@ import { SyntaxHighlighter } from '../../../../../../components/organisms/Syntax
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
 import type { ProblemType } from '../../../../../../types';
+import { createProblemAnswerLog } from '../../../../../lib/actions';
 
 interface ExecutionResultProblemProps {
   problemProgram: string;
@@ -27,8 +28,10 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
     turtleGraphicsRef.current?.init();
   };
 
-  const handleClickAnswerButton = (): void => {
-    const isPassed = turtleGraphicsRef.current?.isPassed();
+  const handleClickAnswerButton = async (): Promise<void> => {
+    const isPassed = turtleGraphicsRef.current?.isPassed() || false;
+
+    createProblemAnswerLog('programId', 'problemType', selectedLanguageId, new Date(), new Date(), isPassed);
 
     // TODO: 一旦アラートで表示
     if (isPassed) {
