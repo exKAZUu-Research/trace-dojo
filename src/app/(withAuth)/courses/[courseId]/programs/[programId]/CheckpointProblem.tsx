@@ -7,17 +7,17 @@ import { CustomModal } from '../../../../../../components/molecules/CustomModal'
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
-import type { ProblemType } from '../../../../../../types';
+import type { GeneratedProgram, ProblemType } from '../../../../../../types';
 import { solveProblem } from '../../../../../lib/solveProblem';
 
 import { Variables } from './Variables';
 
 interface CheckpointProblemProps {
+  problemProgram: GeneratedProgram;
   beforeCheckPointLine: number;
   checkPointLines: number[];
   currentCheckPointLine: number;
   explanation?: Record<'title' | 'body', string>;
-  problemProgram: string;
   selectedLanguageId: string;
   setBeforeCheckPointLine: (line: number) => void;
   setCurrentCheckPointLine: (line: number) => void;
@@ -38,7 +38,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
 
   const { isOpen, onClose, onOpen } = useDisclosure();
-  const beforeCheckpointResult = solveProblem(problemProgram).histories?.at(beforeCheckPointLine);
+  const beforeCheckpointResult = solveProblem(problemProgram.excuteProgram).histories?.at(beforeCheckPointLine);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -79,7 +79,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
             beforeCheckPointLine={beforeCheckPointLine}
             currentCheckPointLine={currentCheckPointLine}
             isEnableOperation={false}
-            problemProgram={problemProgram}
+            problemProgram={problemProgram.excuteProgram}
           />
         </Box>
         <Box>茶色のハイライト時点の実行結果</Box>
@@ -89,7 +89,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
             beforeCheckPointLine={beforeCheckPointLine}
             currentCheckPointLine={currentCheckPointLine}
             isEnableOperation={true}
-            problemProgram={problemProgram}
+            problemProgram={problemProgram.excuteProgram}
           />
         </Box>
       </VStack>
@@ -105,7 +105,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         <Box h="640px" w="100%">
           <SyntaxHighlighter
             beforeCheckPointLine={beforeCheckPointLine}
-            code={problemProgram}
+            code={problemProgram.displayProgram}
             currentCheckPointLine={currentCheckPointLine}
             programmingLanguageId={selectedLanguageId}
           />
