@@ -39,3 +39,8 @@ export type SolveProblemResult = {
 export type CharacterDirection = 'up' | 'down' | 'left' | 'right';
 
 export type ProblemType = 'normal' | 'checkpoint' | 'step';
+
+export type GeneratedProgram = {
+  displayProgram: string;
+  excuteProgram: string;
+};

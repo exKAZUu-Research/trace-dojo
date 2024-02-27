@@ -1,3 +1,5 @@
+import type { GeneratedProgram } from '../types';
+
 export const courseIds = ['tuBeginner1', 'tuBeginner2'];
 export type CourseId = (typeof courseIds)[number];
 
@@ -34,23 +36,32 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
   tuBeginner2: [],
 };
 
-export function generateProgram(programId: ProgramId, languageId: LanguageId): string {
-  // TODO(exKAZUu): 問題IDに紐づくプログラム（テンプレート）を取得して、乱数を使って具体的なプログラムを生成する。
-  return (
-    `const bear = new Character();
-bear.moveForward();
-bear.turnLeft();
-bear.upPen();
-let i = 0;
-bear.moveForward();
-const turtle = new Character({x: 3, y: 1, color: 'green'});
-turtle.moveForward();
-const foo = 'あいうえお';
-var bar = 123;
-i = i + 1;
-turtle.moveForward();
-turtle.moveForward();` || programIdToLanguageIdToProgram[programId][languageId]
-  );
+export function generateProgram(programId: ProgramId, languageId: LanguageId): GeneratedProgram {
+  const randomNumberRegex = /<(\d+)-(\d+)>/g;
+  const programTemplete = programIdToLanguageIdToProgram[programId];
+  const jsTemplete = programTemplete['js'];
+  const randomNumberArray: number[] = [];
+  const jsProgram = jsTemplete.replaceAll(randomNumberRegex, (match, min, max) => {
+    const randomNumber = getRandomInt(Number(min), Number(max));
+    randomNumberArray.push(randomNumber);
+    return randomNumber.toString();
+  });
+
+  let index = 0;
+  const displayProgram = languageId
+    ? programTemplete[languageId].replaceAll(randomNumberRegex, () => randomNumberArray[index++].toString())
+    : '';
+  const generateProgram = {
+    displayProgram,
+    excuteProgram: jsProgram,
+  };
+  return generateProgram;
+}
+
+function getRandomInt(min: number, max: number): number {
+  min = Math.ceil(min);
+  max = Math.floor(max);
+  return Math.floor(Math.random() * (max - min)) + min;
 }
 
 export function getExplanation(programId: ProgramId, languageId: LanguageId): Record<'title' | 'body', string> {
@@ -60,34 +71,58 @@ export function getExplanation(programId: ProgramId, languageId: LanguageId): Re
 export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId, string>> = {
   straight: {
     js: `
-const turtle = new Turtle();
-turtle.moveForward(<3-5>);
+const character1 = new Character();
+character1.moveForward();
+character1.moveForward();
+character1.moveForward();
+character1.moveForward();
 `.trim(),
     java: `
 public class Straight {
   public static void main(String[] args) {
-    var turtle = new Turtle();
-    turtle.moveForward(<3-5>);
+    var character1 = new Character();
+    character1.moveForward();
+    character1.moveForward();
+    character1.moveForward();
+    character1.moveForward();
   }
 }
 `.trim(),
   },
   curve: {
     js: `
-const turtle = new Turtle();
-turtle.moveForward(<3-5>);
-turtle.turnLeft();
-turtle.moveForward(<3-5>);
+const bear = new Character();
+bear.moveForward();
+bear.turnLeft();
+bear.upPen();
+let i = 0;
+bear.moveForward();
+const turtle = new Character({x: <2-5>, y: <3-5>, color: 'green'});
+turtle.moveForward();
+const foo = 'あいうえお';
+var bar = <1-100>;
+i = i + 1;
+turtle.moveForward();
+turtle.moveForward();
 `.trim(),
     java: `
-public class Curve {
+public class Main {
   public static void main(String[] args) {
-    var turtle = new Turtle();
-    turtle.moveForward(<3-5>);
-    turtle.turnLeft();
-    turtle.moveForward(<3-5>);
+    Character bear = new Character();
+    bear.moveForward();
+    bear.turnLeft();
+    bear.upPen();
+    int i = 0;
+    bear.moveForward();
+    Character turtle = new Character(<2-5>, <3-5>, "green");
+    turtle.moveForward();
+    String foo = "あいうえお";
+    int bar = <1-100>;
+    i = i + 1;
+    turtle.moveForward();
+    turtle.moveForward();
   }
-}
+};
 `.trim(),
   },
 };
