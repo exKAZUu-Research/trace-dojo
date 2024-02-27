@@ -1,29 +1,33 @@
 'use client';
 
-import { Box, Button, Flex, HStack, VStack } from '@chakra-ui/react';
+import { Box, Button, Flex, HStack, VStack, useDisclosure } from '@chakra-ui/react';
 import { useRef } from 'react';
 
+import { CustomModal } from '../../../../../../components/molecules/CustomModal';
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
-import type { ProblemType } from '../../../../../../types';
+import type { GeneratedProgram, ProblemType } from '../../../../../../types';
 
 interface ExecutionResultProblemProps {
-  problemProgram: string;
+  problemProgram: GeneratedProgram;
+  createAnswerLog: (isPassed: boolean) => void;
+  explanation?: Record<'title' | 'body', string>;
+  handleComplete: () => void;
   selectedLanguageId: string;
   setProblemType: (step: ProblemType) => void;
-  handleComplete: () => void;
-  createAnswerLog: (isPassed: boolean) => void;
 }
 
 export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
   createAnswerLog,
+  explanation,
   handleComplete,
   problemProgram,
   selectedLanguageId,
   setProblemType,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
+  const { isOpen, onClose, onOpen } = useDisclosure();
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -49,14 +53,25 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
       <VStack spacing="10">
         <Box>プログラムの実行後の結果を解答してください。</Box>
         <Box>
-          <TurtleGraphics ref={turtleGraphicsRef} isEnableOperation={true} problemProgram={problemProgram} />
+          <TurtleGraphics
+            ref={turtleGraphicsRef}
+            isEnableOperation={true}
+            problemProgram={problemProgram.excuteProgram}
+          />
         </Box>
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">
-        <Button colorScheme="gray">解説</Button>
+        {explanation && (
+          <>
+            <Button colorScheme="gray" onClick={onOpen}>
+              解説
+            </Button>
+            <CustomModal body={explanation.body} isOpen={isOpen} title={explanation.title} onClose={onClose} />
+          </>
+        )}
         {/* 画面に収まる高さに設定 */}
         <Box h="calc(100vh - 370px)" w="100%">
-          <SyntaxHighlighter code={problemProgram} programmingLanguageId={selectedLanguageId} />
+          <SyntaxHighlighter code={problemProgram.displayProgram} programmingLanguageId={selectedLanguageId} />
         </Box>
         <HStack>
           <Button onClick={() => handleClickResetButton()}>リセット</Button>

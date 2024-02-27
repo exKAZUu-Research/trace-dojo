@@ -5,8 +5,8 @@ import type { NextPage } from 'next';
 import { useEffect, useState } from 'react';
 import { useSessionContext } from 'supertokens-auth-react/recipe/session';
 
-import { generateProgram, programIdToName } from '../../../../../../problems/problemData';
-import type { ProblemType } from '../../../../../../types';
+import { generateProgram, getExplanation, programIdToName } from '../../../../../../problems/problemData';
+import type { GeneratedProgram, ProblemType } from '../../../../../../types';
 import { getLanguageIdFromSessionStorage } from '../../../../../lib/SessionStorage';
 import { createProblemAnswerLog, createUserSolvedProblem } from '../../../../../lib/actions';
 
@@ -24,8 +24,8 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
 
   const [startedAt, setStartedAt] = useState(new Date());
   const [selectedLanguageId, setSelectedLanguageId] = useState('');
-  const [problemProgram, setProblemProgram] = useState<string>('');
   const [problemType, setProblemType] = useState<ProblemType>('executionResult');
+  const [problemProgram, setProblemProgram] = useState<GeneratedProgram>({ displayProgram: '', excuteProgram: '' });
   const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(0);
   const [currentCheckPointLine, setCurrentCheckPointLine] = useState(checkPointLines[0]);
 
@@ -48,12 +48,15 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
     setStartedAt(new Date());
   };
 
+  const explanation = getExplanation(programId, selectedLanguageId);
+
   const ProblemComponent: React.FC = () => {
     switch (problemType) {
       case 'executionResult': {
         return (
           <ExecutionResultProblem
             createAnswerLog={createAnswerLog}
+            explanation={explanation}
             handleComplete={handleSolveProblem}
             problemProgram={problemProgram}
             selectedLanguageId={selectedLanguageId}
@@ -68,6 +71,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
             checkPointLines={checkPointLines}
             createAnswerLog={createAnswerLog}
             currentCheckPointLine={currentCheckPointLine}
+            explanation={explanation}
             problemProgram={problemProgram}
             selectedLanguageId={selectedLanguageId}
             setBeforeCheckPointLine={setBeforeCheckPointLine}
@@ -83,6 +87,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
             beforeCheckPointLine={beforeCheckPointLine}
             createAnswerLog={createAnswerLog}
             currentCheckPointLine={currentCheckPointLine}
+            explanation={explanation}
             handleComplete={handleSolveProblem}
             problemProgram={problemProgram}
             selectedLanguageId={selectedLanguageId}
