@@ -13,30 +13,32 @@ import { solveProblem } from '../../../../../lib/solveProblem';
 import { Variables } from './Variables';
 
 interface CheckpointProblemProps {
+  setStartedAt: (date: Date) => void;
+  setProblemType: (step: ProblemType) => void;
   problemProgram: GeneratedProgram;
   beforeCheckPointLine: number;
   checkPointLines: number[];
+  createAnswerLog: (isPassed: boolean) => void;
   currentCheckPointLine: number;
   explanation?: Record<'title' | 'body', string>;
   selectedLanguageId: string;
   setBeforeCheckPointLine: (line: number) => void;
   setCurrentCheckPointLine: (line: number) => void;
-  setStep: (step: ProblemType) => void;
 }
 
 export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
   beforeCheckPointLine,
   checkPointLines,
+  createAnswerLog,
   currentCheckPointLine,
   explanation,
   problemProgram,
   selectedLanguageId,
   setBeforeCheckPointLine,
   setCurrentCheckPointLine,
-  setStep,
+  setProblemType,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
-
   const {
     isOpen: isExplanationModalOpen,
     onClose: onExplanationModalClose,
@@ -50,17 +52,19 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
   };
 
   const handleClickAnswerButton = (): void => {
-    const isCorrect = turtleGraphicsRef.current?.isCorrect();
+    const isPassed = turtleGraphicsRef.current?.isPassed() || false;
+
+    createAnswerLog(isPassed);
 
     // TODO: 一旦アラートで表示
-    if (isCorrect) {
+    if (isPassed) {
       setBeforeCheckPointLine(currentCheckPointLine);
 
       if (currentCheckPointLine === checkPointLines.at(-1)) {
         // 最終チェックポイントを正解した場合はその次の行からステップ問題に移行
         alert('正解です。このチェックポイントから1行ずつ回答してください');
         setCurrentCheckPointLine(currentCheckPointLine + 1);
-        setStep('step');
+        setProblemType('step');
       } else {
         alert('正解です。次のチェックポイントに進みます');
         setCurrentCheckPointLine(checkPointLines[checkPointLines.indexOf(currentCheckPointLine) + 1]);
@@ -69,7 +73,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
       // 不正解の場合は最後に正解したチェックポイントからステップ問題に移行
       alert('不正解です。最後に正解したチェックポイントから1行ずつ回答してください');
       setCurrentCheckPointLine(beforeCheckPointLine + 1);
-      setStep('step');
+      setProblemType('step');
     }
   };
 

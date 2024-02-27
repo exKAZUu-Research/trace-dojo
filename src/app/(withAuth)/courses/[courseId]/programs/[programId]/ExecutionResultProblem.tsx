@@ -11,18 +11,20 @@ import type { GeneratedProgram, ProblemType } from '../../../../../../types';
 
 interface ExecutionResultProblemProps {
   problemProgram: GeneratedProgram;
+  createAnswerLog: (isPassed: boolean) => void;
   explanation?: Record<'title' | 'body', string>;
   handleComplete: () => void;
   selectedLanguageId: string;
-  setStep: (step: ProblemType) => void;
+  setProblemType: (step: ProblemType) => void;
 }
 
 export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
+  createAnswerLog,
   explanation,
   handleComplete,
   problemProgram,
   selectedLanguageId,
-  setStep,
+  setProblemType,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
   const {
@@ -36,16 +38,18 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
     turtleGraphicsRef.current?.init();
   };
 
-  const handleClickAnswerButton = (): void => {
-    const isCorrect = turtleGraphicsRef.current?.isCorrect();
+  const handleClickAnswerButton = async (): Promise<void> => {
+    const isPassed = turtleGraphicsRef.current?.isPassed() || false;
+
+    createAnswerLog(isPassed);
 
     // TODO: 一旦アラートで表示
-    if (isCorrect) {
+    if (isPassed) {
       alert('正解です。この問題は終了です');
       handleComplete();
     } else {
       alert('不正解です。チェックポイントごとに回答してください');
-      setStep('checkpoint');
+      setProblemType('checkpoint');
     }
   };
 

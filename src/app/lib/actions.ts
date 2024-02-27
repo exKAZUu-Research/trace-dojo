@@ -44,3 +44,29 @@ export async function fetchUserSolvedProblems(
     return [];
   }
 }
+
+export async function createProblemAnswerLog(
+  programId: string,
+  problemType: string,
+  languageId: string,
+  userId: string,
+  startedAt: Date,
+  answeredAt: Date,
+  isPassed: boolean
+): Promise<void> {
+  try {
+    await prisma.problemAnswerLog.create({
+      data: {
+        programId,
+        problemType,
+        languageId,
+        userId,
+        startedAt,
+        answeredAt,
+        isPassed,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+  }
+}

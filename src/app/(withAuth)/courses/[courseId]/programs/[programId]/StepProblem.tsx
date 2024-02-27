@@ -14,6 +14,7 @@ import { Variables } from './Variables';
 
 interface StepProblemProps {
   beforeCheckPointLine: number;
+  createAnswerLog: (isPassed: boolean) => void;
   currentCheckPointLine: number;
   problemProgram: GeneratedProgram;
   explanation?: Record<'title' | 'body', string>;
@@ -25,6 +26,7 @@ interface StepProblemProps {
 
 export const StepProblem: React.FC<StepProblemProps> = ({
   beforeCheckPointLine,
+  createAnswerLog,
   currentCheckPointLine,
   explanation,
   handleComplete,
@@ -48,10 +50,12 @@ export const StepProblem: React.FC<StepProblemProps> = ({
   };
 
   const handleClickAnswerButton = (): void => {
-    const isCorrect = turtleGraphicsRef.current?.isCorrect();
+    const isPassed = turtleGraphicsRef.current?.isPassed() || false;
+
+    createAnswerLog(isPassed);
 
     // TODO: 一旦アラートで表示
-    if (isCorrect) {
+    if (isPassed) {
       const problemProgramLines = problemProgram.displayProgram.split('\n').length;
 
       if (currentCheckPointLine === problemProgramLines) {
