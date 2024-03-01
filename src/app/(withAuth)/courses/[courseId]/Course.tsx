@@ -34,8 +34,8 @@ import { getLanguageIdFromSessionStorage, setLanguageIdToSessionStorage } from '
 
 export const Course: React.FC<{
   courseId: string;
-  userSolvedProblems: { programId: string; languageId: string }[];
-}> = ({ courseId, userSolvedProblems }) => {
+  userCompletedProblems: { programId: string; languageId: string }[];
+}> = ({ courseId, userCompletedProblems }) => {
   const [selectedLanguageId, setSelectedLanguageId] = useState('');
 
   const SPECIFIED_COMPLETION_COUNT = 2;
@@ -50,9 +50,10 @@ export const Course: React.FC<{
     setSelectedLanguageId(inputValue);
   };
 
-  const countUserSolvedProblems = (programId: string, languageId: string): number => {
-    return userSolvedProblems.filter(
-      (userSolvedProblem) => userSolvedProblem.programId === programId && userSolvedProblem.languageId === languageId
+  const countUserCompletedProblems = (programId: string, languageId: string): number => {
+    return userCompletedProblems.filter(
+      (userCompletedProblem) =>
+        userCompletedProblem.programId === programId && userCompletedProblem.languageId === languageId
     ).length;
   };
 
@@ -60,7 +61,7 @@ export const Course: React.FC<{
     let count = 0;
 
     for (const programId of programIds) {
-      if (countUserSolvedProblems(programId, languageId) >= SPECIFIED_COMPLETION_COUNT) count++;
+      if (countUserCompletedProblems(programId, languageId) >= SPECIFIED_COMPLETION_COUNT) count++;
     }
     return count;
   };
@@ -130,10 +131,10 @@ export const Course: React.FC<{
                             <Td>
                               <Flex>
                                 <p>
-                                  {countUserSolvedProblems(programId, selectedLanguageId)} /{' '}
+                                  {countUserCompletedProblems(programId, selectedLanguageId)} /{' '}
                                   {SPECIFIED_COMPLETION_COUNT}
                                 </p>
-                                {countUserSolvedProblems(programId, selectedLanguageId) >=
+                                {countUserCompletedProblems(programId, selectedLanguageId) >=
                                   SPECIFIED_COMPLETION_COUNT && (
                                   <Box h={4} ml={2} position={'relative'} w={4}>
                                     <Image fill alt="完了の王冠" src="/crown.png" />

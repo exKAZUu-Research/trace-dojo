@@ -8,7 +8,7 @@ import { useSessionContext } from 'supertokens-auth-react/recipe/session';
 import { generateProgram, getExplanation, programIdToName } from '../../../../../../problems/problemData';
 import type { GeneratedProgram, ProblemType } from '../../../../../../types';
 import { getLanguageIdFromSessionStorage } from '../../../../../lib/SessionStorage';
-import { createProblemAnswerLog, createUserSolvedProblem } from '../../../../../lib/actions';
+import { createProblemAnswerLog, createUserCompletedProblem } from '../../../../../lib/actions';
 
 import { CheckpointProblem } from './CheckpointProblem';
 import { ExecutionResultProblem } from './ExecutionResultProblem';
@@ -39,7 +39,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
 
   const handleSolveProblem = async (): Promise<void> => {
     if (userId) {
-      await createUserSolvedProblem(userId, courseId, programId, selectedLanguageId);
+      await createUserCompletedProblem(userId, courseId, programId, selectedLanguageId);
     }
   };
 

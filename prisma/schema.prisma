@@ -17,12 +17,12 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  displayName       String              @unique
-  userSolvedAnswers UserSolvedProblem[]
+  displayName       String                 @unique
+  userSolvedAnswers UserCompletedProblem[]
   ProblemAnswerLog  ProblemAnswerLog[]
 }
 
-model UserSolvedProblem {
+model UserCompletedProblem {
   id        Int      @id @default(autoincrement())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
