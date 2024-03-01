@@ -13,7 +13,6 @@ import { solveProblem } from '../../../../../lib/solveProblem';
 import { Variables } from './Variables';
 
 interface CheckpointProblemProps {
-  setStartedAt: (date: Date) => void;
   setProblemType: (step: ProblemType) => void;
   problemProgram: GeneratedProgram;
   beforeCheckPointLine: number;

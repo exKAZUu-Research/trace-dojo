@@ -8,7 +8,7 @@ import { useSessionContext } from 'supertokens-auth-react/recipe/session';
 import { generateProgram, getExplanation, programIdToName } from '../../../../../../problems/problemData';
 import type { GeneratedProgram, ProblemType } from '../../../../../../types';
 import { getLanguageIdFromSessionStorage } from '../../../../../lib/SessionStorage';
-import { createProblemAnswerLog, createUserCompletedProblem } from '../../../../../lib/actions';
+import { createUserAnswer, createUserCompletedProblem } from '../../../../../lib/actions';
 
 import { CheckpointProblem } from './CheckpointProblem';
 import { ExecutionResultProblem } from './ExecutionResultProblem';
@@ -22,7 +22,6 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
   // TODO: チェックポイントを取得する処理が実装できたら置き換える
   const checkPointLines = [2, 6, 8, 12];
 
-  const [startedAt, setStartedAt] = useState(new Date());
   const [selectedLanguageId, setSelectedLanguageId] = useState('');
   const [problemType, setProblemType] = useState<ProblemType>('executionResult');
   const [problemProgram, setProblemProgram] = useState<GeneratedProgram>({ displayProgram: '', excuteProgram: '' });
@@ -44,8 +43,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
   };
 
   const createAnswerLog = async (isPassed: boolean): Promise<void> => {
-    await createProblemAnswerLog(programId, problemType, selectedLanguageId, userId, startedAt, new Date(), isPassed);
-    setStartedAt(new Date());
+    await createUserAnswer(programId, problemType, selectedLanguageId, userId, currentCheckPointLine, isPassed);
   };
 
   const explanation = getExplanation(programId, selectedLanguageId);
@@ -77,7 +75,6 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
             setBeforeCheckPointLine={setBeforeCheckPointLine}
             setCurrentCheckPointLine={setCurrentCheckPointLine}
             setProblemType={setProblemType}
-            setStartedAt={setStartedAt}
           />
         );
       }

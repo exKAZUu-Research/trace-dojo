@@ -45,24 +45,22 @@ export async function fetchUserCompletedProblems(
   }
 }
 
-export async function createProblemAnswerLog(
+export async function createUserAnswer(
   programId: string,
   problemType: string,
   languageId: string,
   userId: string,
-  startedAt: Date,
-  answeredAt: Date,
+  step: number,
   isPassed: boolean
 ): Promise<void> {
   try {
-    await prisma.problemAnswerLog.create({
+    await prisma.userAnswer.create({
       data: {
         programId,
         problemType,
         languageId,
         userId,
-        startedAt,
-        answeredAt,
+        step,
         isPassed,
       },
     });
