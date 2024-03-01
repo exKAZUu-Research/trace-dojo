@@ -30,9 +30,10 @@ model UserProblemSession {
   user      User     @relation(fields: [userId], references: [id])
   userId    String
 
-  courseId   String
-  programId  String
-  languageId String
+  courseId         String
+  programId        String
+  languageId       String
+  problemVariables ProblemVariable[]
 
   currentProblemType String
   currentStep        Int
@@ -40,6 +41,18 @@ model UserProblemSession {
   startedAt          DateTime
   finishedAt         DateTime
   isCompleted        Boolean
+}
+
+model ProblemVariable {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userProblemSession   UserProblemSession @relation(fields: [userProblemSessionId], references: [id])
+  userProblemSessionId Int
+
+  position Int
+  value    Int
 }
 
 model UserCompletedProblem {
