@@ -3,14 +3,14 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-export async function createUserSolvedProblem(
+export async function createUserCompletedProblem(
   userId: string,
   courseId: string,
   programId: string,
   languageId: string
 ): Promise<void> {
   try {
-    await prisma.userSolvedProblem.create({
+    await prisma.userCompletedProblem.create({
       data: {
         userId,
         courseId,
@@ -23,12 +23,12 @@ export async function createUserSolvedProblem(
   }
 }
 
-export async function fetchUserSolvedProblems(
+export async function fetchUserCompletedProblems(
   userId: string,
   courseId: string
 ): Promise<Array<{ programId: string; languageId: string }>> {
   try {
-    const userSolvedProblems = await prisma.userSolvedProblem.findMany({
+    const userCompletedProblems = await prisma.userCompletedProblem.findMany({
       where: {
         userId,
         courseId,
@@ -38,31 +38,29 @@ export async function fetchUserSolvedProblems(
         languageId: true,
       },
     });
-    return userSolvedProblems;
+    return userCompletedProblems;
   } catch (error) {
     console.error(error);
     return [];
   }
 }
 
-export async function createProblemAnswerLog(
+export async function createUserAnswer(
   programId: string,
   problemType: string,
   languageId: string,
   userId: string,
-  startedAt: Date,
-  answeredAt: Date,
+  step: number,
   isPassed: boolean
 ): Promise<void> {
   try {
-    await prisma.problemAnswerLog.create({
+    await prisma.userAnswer.create({
       data: {
         programId,
         problemType,
         languageId,
         userId,
-        startedAt,
-        answeredAt,
+        step,
         isPassed,
       },
     });
