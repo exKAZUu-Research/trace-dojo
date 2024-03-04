@@ -53,6 +53,8 @@ model ProblemVariable {
 
   position Int
   value    Int
+
+  @@unique([userProblemSessionId, position])
 }
 
 model UserCompletedProblem {
