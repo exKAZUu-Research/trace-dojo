@@ -41,6 +41,13 @@ export type CharacterDirection = 'up' | 'down' | 'left' | 'right';
 export type ProblemType = 'executionResult' | 'checkpoint' | 'step';
 
 export type GeneratedProgram = {
+  /**
+   * The program to be displayed to the user.
+   */
   displayProgram: string;
-  executableProgram: string;
+
+  /**
+   * The instrumented program to be executed with `eval()`.
+   */
+  instrumentedProgram: string;
 };

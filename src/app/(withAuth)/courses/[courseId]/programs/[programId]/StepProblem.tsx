@@ -43,7 +43,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
   } = useDisclosure();
   const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
 
-  const beforeCheckpointResult = solveProblem(problemProgram.executableProgram).histories?.at(beforeCheckPointLine);
+  const beforeCheckpointResult = solveProblem(problemProgram.instrumentedProgram).histories?.at(beforeCheckPointLine);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -82,7 +82,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
             beforeCheckPointLine={beforeCheckPointLine}
             currentCheckPointLine={currentCheckPointLine}
             isEnableOperation={false}
-            problemProgram={problemProgram.executableProgram}
+            problemProgram={problemProgram.instrumentedProgram}
           />
         </Box>
         <Box>茶色のハイライト時点の実行結果</Box>
@@ -92,7 +92,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
             beforeCheckPointLine={beforeCheckPointLine}
             currentCheckPointLine={currentCheckPointLine}
             isEnableOperation={true}
-            problemProgram={problemProgram.executableProgram}
+            problemProgram={problemProgram.instrumentedProgram}
           />
         </Box>
       </VStack>

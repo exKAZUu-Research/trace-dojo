@@ -58,7 +58,7 @@ export function generateProgram(programId: ProgramId, languageId: LanguageId): G
     : '';
   return {
     displayProgram,
-    executableProgram: jsProgram,
+    instrumentedProgram: jsProgram,
   };
 }
 

@@ -35,7 +35,10 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
 
   const [selectedLanguageId, setSelectedLanguageId] = useState<VisibleLanguageId>(defaultLanguageId);
   const [problemType, setProblemType] = useState<ProblemType>('executionResult');
-  const [problemProgram, setProblemProgram] = useState<GeneratedProgram>({ displayProgram: '', executableProgram: '' });
+  const [problemProgram, setProblemProgram] = useState<GeneratedProgram>({
+    displayProgram: '',
+    instrumentedProgram: '',
+  });
   const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(0);
   const [currentCheckPointLine, setCurrentCheckPointLine] = useState(checkPointLines[0]);
 

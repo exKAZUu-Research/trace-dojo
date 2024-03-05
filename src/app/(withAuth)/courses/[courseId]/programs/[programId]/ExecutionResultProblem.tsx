@@ -61,7 +61,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
           <TurtleGraphics
             ref={turtleGraphicsRef}
             isEnableOperation={true}
-            problemProgram={problemProgram.executableProgram}
+            problemProgram={problemProgram.instrumentedProgram}
           />
         </Box>
       </VStack>
