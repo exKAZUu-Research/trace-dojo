@@ -1,7 +1,79 @@
 'use server';
+import type { UserProblemSession } from '@prisma/client';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
+
+export async function upsertUserProblemSession(
+  id: number,
+  userId: string,
+  courseId: string,
+  programId: string,
+  languageId: string,
+  currentProblemType: string,
+  currentStep: number,
+  timeSpent: number,
+  startedAt: Date,
+  finishedAt: Date | undefined,
+  isCompleted: boolean
+): Promise<void> {
+  try {
+    await prisma.userProblemSession.upsert({
+      where: {
+        id,
+      },
+      update: {
+        currentProblemType,
+        currentStep,
+        timeSpent,
+        startedAt,
+        finishedAt,
+        isCompleted,
+      },
+      create: {
+        userId,
+        courseId,
+        programId,
+        languageId,
+        currentProblemType,
+        currentStep,
+        timeSpent,
+        startedAt,
+        finishedAt,
+        isCompleted,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+export async function fetchUserProblemSessions({
+  courseId,
+  languageId,
+  programId,
+  userId,
+}: {
+  userId: string;
+  courseId: string;
+  programId: string;
+  languageId: string;
+}): Promise<Array<UserProblemSession>> {
+  try {
+    const userProblemSessions = await prisma.userProblemSession.findMany({
+      where: {
+        userId,
+        courseId,
+        programId,
+        languageId,
+      },
+    });
+    return userProblemSessions;
+  } catch (error) {
+    console.error(error);
+    return [];
+  }
+}
 
 export async function createUserCompletedProblem(
   userId: string,

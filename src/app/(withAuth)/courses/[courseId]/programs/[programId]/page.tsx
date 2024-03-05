@@ -8,7 +8,12 @@ import { useSessionContext } from 'supertokens-auth-react/recipe/session';
 import { generateProgram, getExplanation, programIdToName } from '../../../../../../problems/problemData';
 import type { GeneratedProgram, ProblemType } from '../../../../../../types';
 import { getLanguageIdFromSessionStorage } from '../../../../../lib/SessionStorage';
-import { createUserAnswer, createUserCompletedProblem } from '../../../../../lib/actions';
+import {
+  createUserAnswer,
+  createUserCompletedProblem,
+  fetchUserProblemSessions,
+  upsertUserProblemSession,
+} from '../../../../../lib/actions';
 
 import { CheckpointProblem } from './CheckpointProblem';
 import { ExecutionResultProblem } from './ExecutionResultProblem';
@@ -35,6 +40,31 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
   useEffect(() => {
     setProblemProgram(generateProgram(programId, selectedLanguageId));
   }, [programId, selectedLanguageId]);
+
+  useEffect(() => {
+    if (!userId || !courseId || !programId || !selectedLanguageId) return;
+
+    (async () => {
+      const sessions = await fetchUserProblemSessions({ userId, courseId, programId, languageId: selectedLanguageId });
+      const suspendedSession = sessions.find((session) => !session.finishedAt && !session.isCompleted);
+
+      upsertUserProblemSession(
+        // レコードが存在しない場合に作成するためにidに0を指定
+        suspendedSession ? suspendedSession.id : 0,
+        userId,
+        courseId,
+        programId,
+        selectedLanguageId,
+        problemType,
+        problemType === 'executionResult' ? 0 : currentCheckPointLine,
+        0,
+        new Date(),
+        undefined,
+        false
+      );
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentCheckPointLine, problemType, selectedLanguageId]);
 
   const handleSolveProblem = async (): Promise<void> => {
     if (userId) {
