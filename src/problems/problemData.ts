@@ -1,16 +1,20 @@
 import type { GeneratedProgram } from '../types';
 
-export const courseIds = ['tuBeginner1', 'tuBeginner2'];
+export const courseIds = ['tuBeginner1', 'tuBeginner2'] as const;
 export type CourseId = (typeof courseIds)[number];
 
-export const programIds = ['straight', 'curve', 'stairs', 'square', 'rectangle', 'diamond'];
+export const programIds = ['straight', 'curve', 'stairs', 'square', 'rectangle', 'diamond', 'test1'] as const;
 export type ProgramId = (typeof programIds)[number];
 
-export const languageIds = ['js', 'java'];
+export const languageIds = ['jsInstrumentation', 'js', 'java'] as const;
 export type LanguageId = (typeof languageIds)[number];
 
-export const languageIdToName: Record<LanguageId, string> = {
-  js: 'JavaScript',
+export const visibleLanguageIds = ['java'] as const;
+export type VisibleLanguageId = (typeof visibleLanguageIds)[number];
+
+export const defaultLanguageId = 'java';
+
+export const languageIdToName: Record<VisibleLanguageId, string> = {
   java: 'Java',
 };
 
@@ -26,6 +30,7 @@ export const programIdToName: Record<ProgramId, string> = {
   square: '図形を描こう(1)',
   rectangle: '図形を描こう(2)',
   diamond: '図形を描こう(3)',
+  test1: 'ステップ実行のテスト用問題(1)',
 };
 
 export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
@@ -33,15 +38,15 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
     ['straight', 'curve', 'stairs'],
     ['square', 'rectangle', 'diamond'],
   ],
-  tuBeginner2: [],
+  tuBeginner2: [['test1']],
 };
 
 export function generateProgram(programId: ProgramId, languageId: LanguageId): GeneratedProgram {
   const randomNumberRegex = /<(\d+)-(\d+)>/g;
-  const programTemplete = programIdToLanguageIdToProgram[programId];
-  const jsTemplete = programTemplete['js'];
+  const programTemplate = programIdToLanguageIdToProgram[programId];
+  const jsTemplate = programTemplate['js'];
   const randomNumberArray: number[] = [];
-  const jsProgram = jsTemplete.replaceAll(randomNumberRegex, (match, min, max) => {
+  const jsProgram = jsTemplate.replaceAll(randomNumberRegex, (match, min, max) => {
     const randomNumber = getRandomInt(Number(min), Number(max));
     randomNumberArray.push(randomNumber);
     return randomNumber.toString();
@@ -49,13 +54,12 @@ export function generateProgram(programId: ProgramId, languageId: LanguageId): G
 
   let index = 0;
   const displayProgram = languageId
-    ? programTemplete[languageId].replaceAll(randomNumberRegex, () => randomNumberArray[index++].toString())
+    ? programTemplate[languageId].replaceAll(randomNumberRegex, () => randomNumberArray[index++].toString())
     : '';
-  const generateProgram = {
+  return {
     displayProgram,
-    excuteProgram: jsProgram,
+    executableProgram: jsProgram,
   };
-  return generateProgram;
 }
 
 function getRandomInt(min: number, max: number): number {
@@ -64,12 +68,19 @@ function getRandomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min)) + min;
 }
 
-export function getExplanation(programId: ProgramId, languageId: LanguageId): Record<'title' | 'body', string> {
+export function getExplanation(programId: ProgramId, languageId: VisibleLanguageId): Record<'title' | 'body', string> {
   return programIdToLanguageIdToExplanation[programId]?.[languageId];
 }
 
+const defaultProgram = {
+  jsInstrumentation: '',
+  js: '',
+  java: '',
+};
+
 export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId, string>> = {
   straight: {
+    jsInstrumentation: '',
     js: `
 const character1 = new Character();
 character1.moveForward();
@@ -90,6 +101,7 @@ public class Straight {
 `.trim(),
   },
   curve: {
+    jsInstrumentation: '',
     js: `
 const bear = new Character();
 bear.moveForward();
@@ -125,42 +137,78 @@ public class Main {
 };
 `.trim(),
   },
+  diamond: defaultProgram,
+  rectangle: defaultProgram,
+  square: defaultProgram,
+  stairs: defaultProgram,
+  test1: {
+    jsInstrumentation: `
+stack = [];
+
+enterScope();
+set("a", 1);
+if (get("a") > 0) {               // 2
+  set("b", 2);                    // 3
+  set("a", f(get("a"), get("b")); // 4
+}
+let c = get("a") * 2;             // 5
+
+function f(x, y) {                // 6
+  enterScope();
+  const ret = x * y;              // 7
+  leaveScope();
+  return ret;
+}
+
+function enterScope() {
+  stack.push({});
+}
+
+function leaveScope() {
+  if (stack.length === 0) throw new Error();
+  stack.pop();
+}
+
+function get(name) {
+  for (let i = stack.length; i >= 0; i--) {
+    if (stack[i][name] !== undefined) {
+      return stack[i][name];
+    }
+  }
+  throw new Error();
+}
+
+function set(value, name) {
+  for (let i = stack.length; i >= 0; i--) {
+    if (stack[i][name] !== undefined) {
+      stack[i][name] = value;
+      return;
+    }
+  }
+  stack[i].at(-1) = value;
+}
+`,
+    js: '',
+    java: '',
+  },
+};
+
+const defaultExplanation = {
+  java: {
+    title: '',
+    body: '',
+  },
 };
 
 export const programIdToLanguageIdToExplanation: Record<
   ProgramId,
-  Record<LanguageId, Record<'title' | 'body', string>>
+  Record<VisibleLanguageId, Record<'title' | 'body', string>>
 > = {
-  straight: {
-    js: {
-      title: 'JavaScript向けstraightの解説のタイトル',
-      body: `
-JavaScript向けstraightの解説
-解説文がここに入ります。
-`.trim(),
-    },
-    java: {
-      title: 'Java向けstraightの解説のタイトル',
-      body: `
-Java向けstraightの解説
-解説文がここに入ります。
-`.trim(),
-    },
-  },
-  curve: {
-    js: {
-      title: 'JavaScript向けcurveの解説のタイトル',
-      body: `
-JavaScript向けcurveの解説
-解説文がここに入ります。
-`.trim(),
-    },
-    java: {
-      title: 'Java向けcurveの解説のタイトル',
-      body: `
-Java向けcurveの解説
-解説文がここに入ります。
-`.trim(),
-    },
-  },
+  straight: defaultExplanation,
+  curve: defaultExplanation,
+  diamond: defaultExplanation,
+  rectangle: defaultExplanation,
+  square: defaultExplanation,
+  stairs: defaultExplanation,
+  test1: defaultExplanation,
 };

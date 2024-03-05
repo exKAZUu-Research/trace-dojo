@@ -11,6 +11,6 @@ test.each([
     programId: 'curve',
     languageId: 'java',
   },
-])('Get a program by program and language ids', ({ languageId, programId }) => {
+] as const)('Get a program by program and language ids', ({ languageId, programId }) => {
   expect(generateProgram(programId, languageId)).not.toBeFalsy();
 });

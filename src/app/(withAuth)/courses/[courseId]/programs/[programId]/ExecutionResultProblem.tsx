@@ -1,6 +1,6 @@
 'use client';
 
-import { Box, Button, Flex, HStack, VStack, useDisclosure } from '@chakra-ui/react';
+import { Box, Button, Flex, HStack, useDisclosure, VStack } from '@chakra-ui/react';
 import { useRef } from 'react';
 
 import { CustomModal } from '../../../../../../components/molecules/CustomModal';
@@ -61,7 +61,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
           <TurtleGraphics
             ref={turtleGraphicsRef}
             isEnableOperation={true}
-            problemProgram={problemProgram.excuteProgram}
+            problemProgram={problemProgram.executableProgram}
           />
         </Box>
       </VStack>

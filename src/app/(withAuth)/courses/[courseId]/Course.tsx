@@ -1,40 +1,41 @@
 'use client';
 
 import {
-  Box,
-  Heading,
-  VStack,
   Accordion,
-  AccordionItem,
   AccordionButton,
   AccordionIcon,
+  AccordionItem,
   AccordionPanel,
+  Box,
+  Flex,
+  Heading,
+  HStack,
   Select,
   Table,
   TableContainer,
-  Thead,
   Tbody,
-  Tr,
   Td,
   Th,
-  Flex,
-  HStack,
+  Thead,
+  Tr,
+  VStack,
 } from '@chakra-ui/react';
 import Image from 'next/image';
 import NextLink from 'next/link';
 import React, { useEffect, useState } from 'react';
 
+import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../problems/problemData';
 import {
   courseIdToProgramIdLists,
   languageIdToName,
-  languageIds,
   programIdToName,
+  visibleLanguageIds,
 } from '../../../../problems/problemData';
 import { getLanguageIdFromSessionStorage, setLanguageIdToSessionStorage } from '../../../lib/SessionStorage';
 
 export const Course: React.FC<{
-  courseId: string;
-  userCompletedProblems: { programId: string; languageId: string }[];
+  courseId: CourseId;
+  userCompletedProblems: { programId: ProgramId; languageId: VisibleLanguageId }[];
 }> = ({ courseId, userCompletedProblems }) => {
   const [selectedLanguageId, setSelectedLanguageId] = useState('');
 
@@ -78,7 +79,7 @@ export const Course: React.FC<{
         value={selectedLanguageId}
         onChange={(e) => handleSelectLanguage(e)}
       >
-        {languageIds.map((languageId) => (
+        {visibleLanguageIds.map((languageId) => (
           <option key={languageId} value={languageId}>
             {languageIdToName[languageId]}
           </option>

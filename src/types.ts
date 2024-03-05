@@ -42,5 +42,5 @@ export type ProblemType = 'executionResult' | 'checkpoint' | 'step';
 
 export type GeneratedProgram = {
   displayProgram: string;
-  excuteProgram: string;
+  executableProgram: string;
 };
