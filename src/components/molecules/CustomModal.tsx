@@ -1,7 +1,7 @@
 import {
   Button,
-  ModalBody,
   Modal,
+  ModalBody,
   ModalCloseButton,
   ModalContent,
   ModalFooter,

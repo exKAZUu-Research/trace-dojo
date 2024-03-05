@@ -2,7 +2,7 @@
 
 import { Box, Grid, GridItem } from '@chakra-ui/react';
 import Image from 'next/image';
-import React, { useState, forwardRef, useImperativeHandle, useEffect, useCallback } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
 
 import { Board } from '../../app/lib/Board';
 import { Character } from '../../app/lib/Character';

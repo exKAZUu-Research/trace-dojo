@@ -5,7 +5,13 @@ import type { NextPage } from 'next';
 import { useEffect, useState } from 'react';
 import { useSessionContext } from 'supertokens-auth-react/recipe/session';
 
-import { generateProgram, getExplanation, programIdToName } from '../../../../../../problems/problemData';
+import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
+import {
+  defaultLanguageId,
+  generateProgram,
+  getExplanation,
+  programIdToName,
+} from '../../../../../../problems/problemData';
 import type { GeneratedProgram, ProblemType } from '../../../../../../types';
 import { getLanguageIdFromSessionStorage } from '../../../../../lib/SessionStorage';
 import {
@@ -19,7 +25,7 @@ import { CheckpointProblem } from './CheckpointProblem';
 import { ExecutionResultProblem } from './ExecutionResultProblem';
 import { StepProblem } from './StepProblem';
 
-const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }> = ({ params }) => {
+const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId } }> = ({ params }) => {
   const session = useSessionContext();
   const userId = session.loading ? '' : session.userId;
   const courseId = params.courseId;
@@ -27,9 +33,12 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
   // TODO: チェックポイントを取得する処理が実装できたら置き換える
   const checkPointLines = [2, 6, 8, 12];
 
-  const [selectedLanguageId, setSelectedLanguageId] = useState('');
+  const [selectedLanguageId, setSelectedLanguageId] = useState<VisibleLanguageId>(defaultLanguageId);
   const [problemType, setProblemType] = useState<ProblemType>('executionResult');
-  const [problemProgram, setProblemProgram] = useState<GeneratedProgram>({ displayProgram: '', excuteProgram: '' });
+  const [problemProgram, setProblemProgram] = useState<GeneratedProgram>({
+    displayProgram: '',
+    instrumentedProgram: '',
+  });
   const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(0);
   const [currentCheckPointLine, setCurrentCheckPointLine] = useState(checkPointLines[0]);
 
@@ -48,7 +57,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
       const sessions = await fetchUserProblemSessions({ userId, courseId, programId, languageId: selectedLanguageId });
       const suspendedSession = sessions.find((session) => !session.finishedAt && !session.isCompleted);
 
-      upsertUserProblemSession(
+      void upsertUserProblemSession(
         // レコードが存在しない場合に作成するためにidに0を指定
         suspendedSession ? suspendedSession.id : 0,
         userId,

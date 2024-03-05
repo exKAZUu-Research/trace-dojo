@@ -1,6 +1,9 @@
 'use server';
+
 import type { UserProblemSession } from '@prisma/client';
 import { PrismaClient } from '@prisma/client';
+
+import type { ProgramId, VisibleLanguageId } from '../../problems/problemData';
 
 const prisma = new PrismaClient();
 
@@ -58,7 +61,7 @@ export async function fetchUserProblemSessions({
   courseId: string;
   programId: string;
   languageId: string;
-}): Promise<Array<UserProblemSession>> {
+}): Promise<UserProblemSession[]> {
   try {
     const userProblemSessions = await prisma.userProblemSession.findMany({
       where: {
@@ -98,7 +101,7 @@ export async function createUserCompletedProblem(
 export async function fetchUserCompletedProblems(
   userId: string,
   courseId: string
-): Promise<Array<{ programId: string; languageId: string }>> {
+): Promise<{ programId: ProgramId; languageId: VisibleLanguageId }[]> {
   try {
     const userCompletedProblems = await prisma.userCompletedProblem.findMany({
       where: {
@@ -110,7 +113,7 @@ export async function fetchUserCompletedProblems(
         languageId: true,
       },
     });
-    return userCompletedProblems;
+    return userCompletedProblems as { programId: ProgramId; languageId: VisibleLanguageId }[];
   } catch (error) {
     console.error(error);
     return [];

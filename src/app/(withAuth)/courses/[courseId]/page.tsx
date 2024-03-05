@@ -2,12 +2,13 @@ import type { NextPage } from 'next';
 import { redirect } from 'next/navigation';
 
 import { prisma } from '../../../../infrastructures/prisma';
+import type { CourseId } from '../../../../problems/problemData';
 import { getNullableSessionOnServer } from '../../../../utils/session';
 import { fetchUserCompletedProblems } from '../../../lib/actions';
 
 import { Course } from './Course';
 
-const CoursePage: NextPage<{ params: { courseId: string } }> = async ({ params }) => {
+const CoursePage: NextPage<{ params: { courseId: CourseId } }> = async ({ params }) => {
   const { session } = await getNullableSessionOnServer();
   const user =
     session &&
