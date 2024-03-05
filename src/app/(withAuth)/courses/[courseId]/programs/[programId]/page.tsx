@@ -34,7 +34,21 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
   const [currentCheckPointLine, setCurrentCheckPointLine] = useState(checkPointLines[0]);
 
   useEffect(() => {
-    setSelectedLanguageId(getLanguageIdFromSessionStorage());
+    (async () => {
+      const languageId = getLanguageIdFromSessionStorage();
+      setSelectedLanguageId(languageId);
+
+      const sessions = await fetchUserProblemSessions({ userId, courseId, programId, languageId });
+      const suspendedSession = sessions.find((session) => !session.finishedAt && !session.isCompleted);
+
+      if (suspendedSession) {
+        // 中断中のセッションを再開する
+        setProblemType(suspendedSession.currentProblemType as ProblemType);
+        setBeforeCheckPointLine(suspendedSession.currentStep);
+        setCurrentCheckPointLine(suspendedSession.currentStep);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -48,7 +62,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
       const sessions = await fetchUserProblemSessions({ userId, courseId, programId, languageId: selectedLanguageId });
       const suspendedSession = sessions.find((session) => !session.finishedAt && !session.isCompleted);
 
-      upsertUserProblemSession(
+      await upsertUserProblemSession(
         // レコードが存在しない場合に作成するためにidに0を指定
         suspendedSession ? suspendedSession.id : 0,
         userId,
@@ -56,6 +70,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
         programId,
         selectedLanguageId,
         problemType,
+        problemType === 'executionResult' ? 0 : beforeCheckPointLine,
         problemType === 'executionResult' ? 0 : currentCheckPointLine,
         0,
         suspendedSession ? suspendedSession.startedAt : new Date(),
@@ -64,7 +79,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
       );
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentCheckPointLine, problemType, selectedLanguageId]);
+  }, [currentCheckPointLine, problemType]);
 
   const handleSolveProblem = async (): Promise<void> => {
     if (userId) {
