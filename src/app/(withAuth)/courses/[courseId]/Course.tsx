@@ -20,45 +20,51 @@ import {
   Tr,
   VStack,
 } from '@chakra-ui/react';
+import { useLocalStorage } from '@uidotdev/usehooks';
 import Image from 'next/image';
 import NextLink from 'next/link';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 
 import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../problems/problemData';
 import {
   courseIdToProgramIdLists,
+  defaultLanguageId,
   languageIdToName,
   programIdToName,
   visibleLanguageIds,
 } from '../../../../problems/problemData';
-import { getLanguageIdFromSessionStorage, setLanguageIdToSessionStorage } from '../../../lib/SessionStorage';
+import { selectedLanguageIdKey } from '../../../lib/sessionStorage';
+
+const SPECIFIED_COMPLETION_COUNT = 2;
 
 export const Course: React.FC<{
   courseId: CourseId;
   userCompletedProblems: { programId: ProgramId; languageId: VisibleLanguageId }[];
 }> = ({ courseId, userCompletedProblems }) => {
-  const [selectedLanguageId, setSelectedLanguageId] = useState('');
-
-  const SPECIFIED_COMPLETION_COUNT = 2;
+  const [selectedLanguageId, setSelectedLanguageId] = useLocalStorage<VisibleLanguageId>(
+    selectedLanguageIdKey,
+    defaultLanguageId
+  );
 
   useEffect(() => {
-    setSelectedLanguageId(getLanguageIdFromSessionStorage());
-  }, []);
+    if (!visibleLanguageIds.includes(selectedLanguageId)) {
+      setSelectedLanguageId(defaultLanguageId);
+    }
+  }, [selectedLanguageId]);
 
   const handleSelectLanguage = (event: React.ChangeEvent<HTMLSelectElement>): void => {
     const inputValue = event.target.value;
-    setLanguageIdToSessionStorage(inputValue);
-    setSelectedLanguageId(inputValue);
+    setSelectedLanguageId(inputValue as VisibleLanguageId);
   };
 
-  const countUserCompletedProblems = (programId: string, languageId: string): number => {
+  const countUserCompletedProblems = (programId: ProgramId, languageId: VisibleLanguageId): number => {
     return userCompletedProblems.filter(
       (userCompletedProblem) =>
         userCompletedProblem.programId === programId && userCompletedProblem.languageId === languageId
     ).length;
   };
 
-  const countCompletedProblems = (programIds: string[], languageId: string): number => {
+  const countCompletedProblems = (programIds: ProgramId[], languageId: VisibleLanguageId): number => {
     let count = 0;
 
     for (const programId of programIds) {

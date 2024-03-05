@@ -1,8 +1,9 @@
 'use client';
 
 import { Heading, VStack } from '@chakra-ui/react';
+import { useLocalStorage } from '@uidotdev/usehooks';
 import type { NextPage } from 'next';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSessionContext } from 'supertokens-auth-react/recipe/session';
 
 import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
@@ -13,13 +14,13 @@ import {
   programIdToName,
 } from '../../../../../../problems/problemData';
 import type { GeneratedProgram, ProblemType } from '../../../../../../types';
-import { getLanguageIdFromSessionStorage } from '../../../../../lib/SessionStorage';
 import {
   createUserAnswer,
   createUserCompletedProblem,
   fetchUserProblemSessions,
   upsertUserProblemSession,
 } from '../../../../../lib/actions';
+import { selectedLanguageIdKey } from '../../../../../lib/sessionStorage';
 
 import { CheckpointProblem } from './CheckpointProblem';
 import { ExecutionResultProblem } from './ExecutionResultProblem';
@@ -33,22 +34,14 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
   // TODO: チェックポイントを取得する処理が実装できたら置き換える
   const checkPointLines = [2, 6, 8, 12];
 
-  const [selectedLanguageId, setSelectedLanguageId] = useState<VisibleLanguageId>(defaultLanguageId);
+  const [selectedLanguageId] = useLocalStorage<VisibleLanguageId>(selectedLanguageIdKey, defaultLanguageId);
   const [problemType, setProblemType] = useState<ProblemType>('executionResult');
-  const [problemProgram, setProblemProgram] = useState<GeneratedProgram>({
-    displayProgram: '',
-    instrumentedProgram: '',
-  });
+  const problemProgram = useMemo<GeneratedProgram>(
+    () => generateProgram(programId, selectedLanguageId),
+    [programId, selectedLanguageId]
+  );
   const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(0);
   const [currentCheckPointLine, setCurrentCheckPointLine] = useState(checkPointLines[0]);
-
-  useEffect(() => {
-    setSelectedLanguageId(getLanguageIdFromSessionStorage());
-  }, []);
-
-  useEffect(() => {
-    setProblemProgram(generateProgram(programId, selectedLanguageId));
-  }, [programId, selectedLanguageId]);
 
   useEffect(() => {
     if (!userId || !courseId || !programId || !selectedLanguageId) return;
