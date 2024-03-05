@@ -54,7 +54,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
       const sessions = await fetchUserProblemSessions({ userId, courseId, programId, languageId: selectedLanguageId });
       const suspendedSession = sessions.find((session) => !session.finishedAt && !session.isCompleted);
 
-      upsertUserProblemSession(
+      void upsertUserProblemSession(
         // レコードが存在しない場合に作成するためにidに0を指定
         suspendedSession ? suspendedSession.id : 0,
         userId,
