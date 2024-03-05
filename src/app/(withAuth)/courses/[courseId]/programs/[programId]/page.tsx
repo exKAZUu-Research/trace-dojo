@@ -58,7 +58,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
         problemType,
         problemType === 'executionResult' ? 0 : currentCheckPointLine,
         0,
-        new Date(),
+        suspendedSession ? suspendedSession.startedAt : new Date(),
         undefined,
         false
       );
