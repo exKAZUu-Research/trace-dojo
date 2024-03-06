@@ -1,6 +1,7 @@
 'use client';
 
 import { Heading, VStack } from '@chakra-ui/react';
+import type { UserProblemSession } from '@prisma/client';
 import type { NextPage } from 'next';
 import { useEffect, useState } from 'react';
 import { useSessionContext } from 'supertokens-auth-react/recipe/session';
@@ -27,6 +28,8 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
   // TODO: チェックポイントを取得する処理が実装できたら置き換える
   const checkPointLines = [2, 6, 8, 12];
 
+  const [startedAt] = useState(new Date());
+  const [suspendedSession, setSuspendedSession] = useState<UserProblemSession>();
   const [selectedLanguageId, setSelectedLanguageId] = useState('');
   const [problemType, setProblemType] = useState<ProblemType>('executionResult');
   const [problemProgram, setProblemProgram] = useState<GeneratedProgram>({ displayProgram: '', excuteProgram: '' });
@@ -47,6 +50,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
           !session.finishedAt &&
           !session.isCompleted
       );
+      setSuspendedSession(suspendedSession);
 
       if (suspendedSession) {
         // 中断中のセッションを再開する
@@ -66,17 +70,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
     if (!userId || !courseId || !programId || !selectedLanguageId) return;
 
     (async () => {
-      const sessions = await fetchUserProblemSessions({ userId });
-      const suspendedSession = sessions.find(
-        (session) =>
-          session.courseId === courseId &&
-          session.programId === programId &&
-          session.languageId === selectedLanguageId &&
-          !session.finishedAt &&
-          !session.isCompleted
-      );
-
-      await upsertUserProblemSession(
+      const updatedSession = await upsertUserProblemSession(
         // レコードが存在しない場合に作成するためにidに0を指定
         suspendedSession ? suspendedSession.id : 0,
         userId,
@@ -87,17 +81,32 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
         problemType === 'executionResult' ? 0 : beforeCheckPointLine,
         problemType === 'executionResult' ? 0 : currentCheckPointLine,
         0,
-        suspendedSession ? suspendedSession.startedAt : new Date(),
+        suspendedSession ? suspendedSession.startedAt : startedAt,
         undefined,
         false
       );
+      setSuspendedSession(updatedSession);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentCheckPointLine, problemType]);
+  }, [currentCheckPointLine, problemType, selectedLanguageId]);
 
   const handleSolveProblem = async (): Promise<void> => {
-    if (userId) {
+    if (userId && suspendedSession) {
       await createUserCompletedProblem(userId, courseId, programId, selectedLanguageId);
+      await upsertUserProblemSession(
+        suspendedSession.id,
+        userId,
+        courseId,
+        programId,
+        selectedLanguageId,
+        problemType,
+        problemType === 'executionResult' ? 0 : beforeCheckPointLine,
+        problemType === 'executionResult' ? 0 : currentCheckPointLine,
+        0,
+        suspendedSession.startedAt,
+        new Date(),
+        true
+      );
     }
   };
 

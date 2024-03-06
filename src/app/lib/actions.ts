@@ -17,9 +17,9 @@ export async function upsertUserProblemSession(
   startedAt: Date,
   finishedAt: Date | undefined,
   isCompleted: boolean
-): Promise<void> {
+): Promise<UserProblemSession | undefined> {
   try {
-    await prisma.userProblemSession.upsert({
+    const userProblemSession = await prisma.userProblemSession.upsert({
       where: {
         id,
       },
@@ -46,8 +46,10 @@ export async function upsertUserProblemSession(
         isCompleted,
       },
     });
+    return userProblemSession;
   } catch (error) {
     console.error(error);
+    return undefined;
   }
 }
 
