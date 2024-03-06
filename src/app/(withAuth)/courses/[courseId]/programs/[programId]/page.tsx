@@ -51,7 +51,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
       if (suspendedSession) {
         // 中断中のセッションを再開する
         setProblemType(suspendedSession.currentProblemType as ProblemType);
-        setBeforeCheckPointLine(suspendedSession.currentStep);
+        setBeforeCheckPointLine(suspendedSession.beforeStep);
         setCurrentCheckPointLine(suspendedSession.currentStep);
       }
     })();

@@ -25,6 +25,7 @@ export async function upsertUserProblemSession(
       },
       update: {
         currentProblemType,
+        beforeStep,
         currentStep,
         timeSpent,
         startedAt,
