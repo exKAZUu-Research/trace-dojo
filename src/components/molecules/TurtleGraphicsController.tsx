@@ -3,8 +3,8 @@
 import { Box, Button, HStack, VStack } from '@chakra-ui/react';
 import React from 'react';
 
-import type { Board } from '../../app/lib/Board';
-import type { Character } from '../../app/lib/Character';
+import type { Board } from '../../app/lib/board';
+import type { Character } from '../../app/lib/character';
 import type { CellColor, CharacterDirection, SelectedCell } from '../../types';
 
 interface TurtleGraphicsControllerProps {

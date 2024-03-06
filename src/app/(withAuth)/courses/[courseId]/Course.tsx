@@ -1,66 +1,74 @@
 'use client';
 
 import {
-  Box,
-  Heading,
-  VStack,
   Accordion,
-  AccordionItem,
   AccordionButton,
   AccordionIcon,
+  AccordionItem,
   AccordionPanel,
+  Box,
+  Flex,
+  Heading,
+  HStack,
   Select,
   Table,
   TableContainer,
-  Thead,
   Tbody,
-  Tr,
   Td,
   Th,
-  Flex,
-  HStack,
   Tag,
+  VStack,
+  Thead,
+  Tr,
 } from '@chakra-ui/react';
 import type { UserProblemSession } from '@prisma/client';
+import { useLocalStorage } from '@uidotdev/usehooks';
 import Image from 'next/image';
 import NextLink from 'next/link';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 
+import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../problems/problemData';
 import {
   courseIdToProgramIdLists,
+  defaultLanguageId,
   languageIdToName,
-  languageIds,
   programIdToName,
+  visibleLanguageIds,
 } from '../../../../problems/problemData';
-import { getLanguageIdFromSessionStorage, setLanguageIdToSessionStorage } from '../../../lib/SessionStorage';
+import { selectedLanguageIdKey } from '../../../lib/sessionStorage';
+
+const SPECIFIED_COMPLETION_COUNT = 2;
 
 export const Course: React.FC<{
-  courseId: string;
-  userCompletedProblems: { programId: string; languageId: string }[];
+  courseId: CourseId;
+  userCompletedProblems: { programId: string; languageId: VisibleLanguageId }[];
   userProblemSessions: UserProblemSession[];
 }> = ({ courseId, userCompletedProblems, userProblemSessions }) => {
-  const [selectedLanguageId, setSelectedLanguageId] = useState('');
-
-  const SPECIFIED_COMPLETION_COUNT = 2;
+  const [selectedLanguageId, setSelectedLanguageId] = useLocalStorage<VisibleLanguageId>(
+    selectedLanguageIdKey,
+    defaultLanguageId
+  );
 
   useEffect(() => {
-    setSelectedLanguageId(getLanguageIdFromSessionStorage());
-  }, []);
+    if (!visibleLanguageIds.includes(selectedLanguageId)) {
+      setSelectedLanguageId(defaultLanguageId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLanguageId]);
 
   const handleSelectLanguage = (event: React.ChangeEvent<HTMLSelectElement>): void => {
     const inputValue = event.target.value;
-    setLanguageIdToSessionStorage(inputValue);
-    setSelectedLanguageId(inputValue);
+    setSelectedLanguageId(inputValue as VisibleLanguageId);
   };
 
-  const countUserCompletedProblems = (programId: string, languageId: string): number => {
+  const countUserCompletedProblems = (programId: ProgramId, languageId: VisibleLanguageId): number => {
     return userCompletedProblems.filter(
       (userCompletedProblem) =>
         userCompletedProblem.programId === programId && userCompletedProblem.languageId === languageId
     ).length;
   };
 
-  const countCompletedProblems = (programIds: string[], languageId: string): number => {
+  const countCompletedProblems = (programIds: ProgramId[], languageId: VisibleLanguageId): number => {
     let count = 0;
 
     for (const programId of programIds) {
@@ -92,7 +100,7 @@ export const Course: React.FC<{
         value={selectedLanguageId}
         onChange={(e) => handleSelectLanguage(e)}
       >
-        {languageIds.map((languageId) => (
+        {visibleLanguageIds.map((languageId) => (
           <option key={languageId} value={languageId}>
             {languageIdToName[languageId]}
           </option>

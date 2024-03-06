@@ -2,10 +2,10 @@
 
 import { Box, Grid, GridItem } from '@chakra-ui/react';
 import Image from 'next/image';
-import React, { useState, forwardRef, useImperativeHandle, useEffect, useCallback } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
 
-import { Board } from '../../app/lib/Board';
-import { Character } from '../../app/lib/Character';
+import { Board } from '../../app/lib/board';
+import { Character } from '../../app/lib/character';
 import { isAnswerCorrect, solveProblem } from '../../app/lib/solveProblem';
 import type { CellColor, CharacterDirection, SelectedCell } from '../../types';
 import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController';

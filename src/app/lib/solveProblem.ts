@@ -1,7 +1,7 @@
 import type { CharacterVariable, History, SolveProblemResult, Variable } from '../../types';
 
-import { Board as BoardClass } from './Board';
-import { Character as CharacterClass } from './Character';
+import { Board as BoardClass } from './board';
+import { Character as CharacterClass } from './character';
 
 export function parseProgram(program: string): string[] {
   return program

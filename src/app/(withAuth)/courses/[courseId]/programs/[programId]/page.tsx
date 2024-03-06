@@ -2,25 +2,33 @@
 
 import { Heading, VStack } from '@chakra-ui/react';
 import type { UserProblemSession } from '@prisma/client';
+import { useLocalStorage } from '@uidotdev/usehooks';
 import type { NextPage } from 'next';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSessionContext } from 'supertokens-auth-react/recipe/session';
 
-import { generateProgram, getExplanation, programIdToName } from '../../../../../../problems/problemData';
+import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
+import {
+  defaultLanguageId,
+  generateProgram,
+  getExplanation,
+  programIdToName,
+  visibleLanguageIds,
+} from '../../../../../../problems/problemData';
 import type { GeneratedProgram, ProblemType } from '../../../../../../types';
-import { getLanguageIdFromSessionStorage } from '../../../../../lib/SessionStorage';
 import {
   createUserAnswer,
   createUserCompletedProblem,
   fetchUserProblemSessions,
   upsertUserProblemSession,
 } from '../../../../../lib/actions';
+import { selectedLanguageIdKey } from '../../../../../lib/sessionStorage';
 
 import { CheckpointProblem } from './CheckpointProblem';
 import { ExecutionResultProblem } from './ExecutionResultProblem';
 import { StepProblem } from './StepProblem';
 
-const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }> = ({ params }) => {
+const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId } }> = ({ params }) => {
   const session = useSessionContext();
   const userId = session.loading ? '' : session.userId;
   const courseId = params.courseId;
@@ -30,23 +38,30 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
 
   const [startedAt] = useState(new Date());
   const [suspendedSession, setSuspendedSession] = useState<UserProblemSession>();
-  const [selectedLanguageId, setSelectedLanguageId] = useState('');
+  const [selectedLanguageId, setSelectedLanguageId] = useLocalStorage<VisibleLanguageId>(
+    selectedLanguageIdKey,
+    defaultLanguageId
+  );
   const [problemType, setProblemType] = useState<ProblemType>('executionResult');
-  const [problemProgram, setProblemProgram] = useState<GeneratedProgram>({ displayProgram: '', excuteProgram: '' });
+  const problemProgram = useMemo<GeneratedProgram>(
+    () => generateProgram(programId, selectedLanguageId),
+    [programId, selectedLanguageId]
+  );
   const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(0);
   const [currentCheckPointLine, setCurrentCheckPointLine] = useState(checkPointLines[0]);
 
   useEffect(() => {
     (async () => {
-      const languageId = getLanguageIdFromSessionStorage();
-      setSelectedLanguageId(languageId);
+      if (!visibleLanguageIds.includes(selectedLanguageId)) {
+        setSelectedLanguageId(defaultLanguageId);
+      }
 
       const sessions = await fetchUserProblemSessions({ userId });
       const suspendedSession = sessions.find(
         (session) =>
           session.courseId === courseId &&
           session.programId === programId &&
-          session.languageId === languageId &&
+          session.languageId === selectedLanguageId &&
           !session.finishedAt &&
           !session.isCompleted
       );
@@ -63,11 +78,9 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
   }, []);
 
   useEffect(() => {
-    setProblemProgram(generateProgram(programId, selectedLanguageId));
-  }, [programId, selectedLanguageId]);
-
-  useEffect(() => {
     if (!userId || !courseId || !programId || !selectedLanguageId) return;
+
+    console.log(suspendedSession);
 
     (async () => {
       const updatedSession = await upsertUserProblemSession(
@@ -88,7 +101,7 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
       setSuspendedSession(updatedSession);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentCheckPointLine, problemType, selectedLanguageId]);
+  }, [currentCheckPointLine, problemType]);
 
   const handleSolveProblem = async (): Promise<void> => {
     if (userId && suspendedSession) {

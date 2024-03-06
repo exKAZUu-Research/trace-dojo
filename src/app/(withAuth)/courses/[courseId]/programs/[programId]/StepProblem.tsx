@@ -1,6 +1,6 @@
 'use client';
 
-import { Box, Button, Flex, HStack, VStack, useDisclosure } from '@chakra-ui/react';
+import { Box, Button, Flex, HStack, useDisclosure, VStack } from '@chakra-ui/react';
 import { useRef } from 'react';
 
 import { CustomModal } from '../../../../../../components/molecules/CustomModal';
@@ -43,7 +43,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
   } = useDisclosure();
   const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
 
-  const beforeCheckpointResult = solveProblem(problemProgram.excuteProgram).histories?.at(beforeCheckPointLine);
+  const beforeCheckpointResult = solveProblem(problemProgram.instrumentedProgram).histories?.at(beforeCheckPointLine);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -82,7 +82,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
             beforeCheckPointLine={beforeCheckPointLine}
             currentCheckPointLine={currentCheckPointLine}
             isEnableOperation={false}
-            problemProgram={problemProgram.excuteProgram}
+            problemProgram={problemProgram.instrumentedProgram}
           />
         </Box>
         <Box>茶色のハイライト時点の実行結果</Box>
@@ -92,7 +92,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
             beforeCheckPointLine={beforeCheckPointLine}
             currentCheckPointLine={currentCheckPointLine}
             isEnableOperation={true}
-            problemProgram={problemProgram.excuteProgram}
+            problemProgram={problemProgram.instrumentedProgram}
           />
         </Box>
       </VStack>

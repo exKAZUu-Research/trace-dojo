@@ -1,7 +1,7 @@
 import type React from 'react';
 
-import type { Board } from './app/lib/Board';
-import type { Character } from './app/lib/Character';
+import type { Board } from './app/lib/board';
+import type { Character } from './app/lib/character';
 
 export interface LayoutProps {
   children: React.ReactNode;
@@ -41,6 +41,13 @@ export type CharacterDirection = 'up' | 'down' | 'left' | 'right';
 export type ProblemType = 'executionResult' | 'checkpoint' | 'step';
 
 export type GeneratedProgram = {
+  /**
+   * The program to be displayed to the user.
+   */
   displayProgram: string;
-  excuteProgram: string;
+
+  /**
+   * The instrumented program to be executed with `eval()`.
+   */
+  instrumentedProgram: string;
 };
