@@ -80,9 +80,8 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
   useEffect(() => {
     if (!userId || !courseId || !programId || !selectedLanguageId) return;
 
-    console.log(suspendedSession);
-
     (async () => {
+      // MEMO: reactStrictModeを有効にするとレコードが二重に作成されるため、無効化している
       const updatedSession = await upsertUserProblemSession(
         // レコードが存在しない場合に作成するためにidに0を指定
         suspendedSession ? suspendedSession.id : 0,
