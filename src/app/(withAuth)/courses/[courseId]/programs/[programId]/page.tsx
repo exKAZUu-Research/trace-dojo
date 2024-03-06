@@ -57,7 +57,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
       }
 
       const sessions = await fetchUserProblemSessions({ userId });
-      const suspendedSession = sessions.find(
+      let suspendedSession = sessions.find(
         (session) =>
           session.courseId === courseId &&
           session.programId === programId &&
@@ -65,26 +65,41 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
           !session.finishedAt &&
           !session.isCompleted
       );
-      setSuspendedSession(suspendedSession);
 
       if (suspendedSession) {
         // 中断中のセッションを再開する
         setProblemType(suspendedSession.currentProblemType as ProblemType);
         setBeforeCheckPointLine(suspendedSession.beforeStep);
         setCurrentCheckPointLine(suspendedSession.currentStep);
+      } else {
+        // MEMO: reactStrictModeを有効にするとレコードが二重に作成されるため、無効化している
+        suspendedSession = await upsertUserProblemSession(
+          // レコードが存在しない場合に作成するためにidに0を指定
+          0,
+          userId,
+          courseId,
+          programId,
+          selectedLanguageId,
+          problemType,
+          0,
+          0,
+          0,
+          startedAt,
+          undefined,
+          false
+        );
       }
+      setSuspendedSession(suspendedSession);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!userId || !courseId || !programId || !selectedLanguageId) return;
+    if (!userId || !courseId || !programId || !selectedLanguageId || !suspendedSession) return;
 
     (async () => {
-      // MEMO: reactStrictModeを有効にするとレコードが二重に作成されるため、無効化している
       const updatedSession = await upsertUserProblemSession(
-        // レコードが存在しない場合に作成するためにidに0を指定
-        suspendedSession ? suspendedSession.id : 0,
+        suspendedSession.id,
         userId,
         courseId,
         programId,
@@ -93,7 +108,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
         problemType === 'executionResult' ? 0 : beforeCheckPointLine,
         problemType === 'executionResult' ? 0 : currentCheckPointLine,
         0,
-        suspendedSession ? suspendedSession.startedAt : startedAt,
+        suspendedSession.startedAt,
         undefined,
         false
       );
