@@ -50,24 +50,11 @@ export async function upsertUserProblemSession(
   }
 }
 
-export async function fetchUserProblemSessions({
-  courseId,
-  languageId,
-  programId,
-  userId,
-}: {
-  userId: string;
-  courseId: string;
-  programId: string;
-  languageId: string;
-}): Promise<Array<UserProblemSession>> {
+export async function fetchUserProblemSessions({ userId }: { userId: string }): Promise<Array<UserProblemSession>> {
   try {
     const userProblemSessions = await prisma.userProblemSession.findMany({
       where: {
         userId,
-        courseId,
-        programId,
-        languageId,
       },
     });
     return userProblemSessions;

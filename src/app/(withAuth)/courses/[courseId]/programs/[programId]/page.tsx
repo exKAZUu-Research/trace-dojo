@@ -38,8 +38,15 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
       const languageId = getLanguageIdFromSessionStorage();
       setSelectedLanguageId(languageId);
 
-      const sessions = await fetchUserProblemSessions({ userId, courseId, programId, languageId });
-      const suspendedSession = sessions.find((session) => !session.finishedAt && !session.isCompleted);
+      const sessions = await fetchUserProblemSessions({ userId });
+      const suspendedSession = sessions.find(
+        (session) =>
+          session.courseId === courseId &&
+          session.programId === programId &&
+          session.languageId === languageId &&
+          !session.finishedAt &&
+          !session.isCompleted
+      );
 
       if (suspendedSession) {
         // 中断中のセッションを再開する
@@ -59,8 +66,15 @@ const ProblemPage: NextPage<{ params: { courseId: string; programId: string } }>
     if (!userId || !courseId || !programId || !selectedLanguageId) return;
 
     (async () => {
-      const sessions = await fetchUserProblemSessions({ userId, courseId, programId, languageId: selectedLanguageId });
-      const suspendedSession = sessions.find((session) => !session.finishedAt && !session.isCompleted);
+      const sessions = await fetchUserProblemSessions({ userId });
+      const suspendedSession = sessions.find(
+        (session) =>
+          session.courseId === courseId &&
+          session.programId === programId &&
+          session.languageId === selectedLanguageId &&
+          !session.finishedAt &&
+          !session.isCompleted
+      );
 
       await upsertUserProblemSession(
         // レコードが存在しない場合に作成するためにidに0を指定

@@ -19,7 +19,9 @@ import {
   Th,
   Flex,
   HStack,
+  Tag,
 } from '@chakra-ui/react';
+import type { UserProblemSession } from '@prisma/client';
 import Image from 'next/image';
 import NextLink from 'next/link';
 import React, { useEffect, useState } from 'react';
@@ -35,7 +37,8 @@ import { getLanguageIdFromSessionStorage, setLanguageIdToSessionStorage } from '
 export const Course: React.FC<{
   courseId: string;
   userCompletedProblems: { programId: string; languageId: string }[];
-}> = ({ courseId, userCompletedProblems }) => {
+  userProblemSessions: UserProblemSession[];
+}> = ({ courseId, userCompletedProblems, userProblemSessions }) => {
   const [selectedLanguageId, setSelectedLanguageId] = useState('');
 
   const SPECIFIED_COMPLETION_COUNT = 2;
@@ -64,6 +67,17 @@ export const Course: React.FC<{
       if (countUserCompletedProblems(programId, languageId) >= SPECIFIED_COMPLETION_COUNT) count++;
     }
     return count;
+  };
+
+  const SuspendedSession = (programId: string): UserProblemSession | undefined => {
+    return userProblemSessions.find(
+      (session) =>
+        session.courseId === courseId &&
+        session.programId === programId &&
+        session.languageId === selectedLanguageId &&
+        !session.finishedAt &&
+        !session.isCompleted
+    );
   };
 
   return (
@@ -118,10 +132,11 @@ export const Course: React.FC<{
                           <Th align="left" width="50%">
                             進捗
                           </Th>
+                          <Th></Th>
                         </Tr>
                       </Thead>
                       <Tbody>
-                        {programIds.map((programId) => (
+                        {programIds.map(async (programId) => (
                           <Tr key={programId}>
                             <Td>
                               <NextLink passHref href={`${courseId}/programs/${programId}`}>
@@ -142,6 +157,7 @@ export const Course: React.FC<{
                                 )}
                               </Flex>
                             </Td>
+                            <Td>{SuspendedSession(programId) && <Tag>挑戦中</Tag>}</Td>
                           </Tr>
                         ))}
                       </Tbody>
