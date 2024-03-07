@@ -56,7 +56,7 @@ export async function upsertUserProblemSession(
   }
 }
 
-export async function fetchUserProblemSessions({ userId }: { userId: string }): Promise<UserProblemSession[]> {
+export async function fetchUserProblemSessions(userId: string): Promise<UserProblemSession[]> {
   try {
     const userProblemSessions = await prisma.userProblemSession.findMany({
       where: {
@@ -67,6 +67,30 @@ export async function fetchUserProblemSessions({ userId }: { userId: string }): 
   } catch (error) {
     console.error(error);
     return [];
+  }
+}
+
+export async function getSuspendedUserProblemSession(
+  userId: string,
+  courseId: string,
+  programId: string,
+  languageId: string
+): Promise<UserProblemSession | undefined> {
+  try {
+    const suspendedUserProblemSession = await prisma.userProblemSession.findFirst({
+      where: {
+        userId,
+        courseId,
+        programId,
+        languageId,
+        finishedAt: undefined,
+        isCompleted: false,
+      },
+    });
+    return suspendedUserProblemSession || undefined;
+  } catch (error) {
+    console.error(error);
+    return undefined;
   }
 }
 

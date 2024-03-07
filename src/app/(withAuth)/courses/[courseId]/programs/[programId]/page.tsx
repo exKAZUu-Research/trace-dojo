@@ -19,7 +19,7 @@ import type { GeneratedProgram, ProblemType } from '../../../../../../types';
 import {
   createUserAnswer,
   createUserCompletedProblem,
-  fetchUserProblemSessions,
+  getSuspendedUserProblemSession,
   upsertUserProblemSession,
 } from '../../../../../lib/actions';
 import { selectedLanguageIdKey } from '../../../../../lib/sessionStorage';
@@ -56,15 +56,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
         setSelectedLanguageId(defaultLanguageId);
       }
 
-      const sessions = await fetchUserProblemSessions({ userId });
-      let suspendedSession = sessions.find(
-        (session) =>
-          session.courseId === courseId &&
-          session.programId === programId &&
-          session.languageId === selectedLanguageId &&
-          !session.finishedAt &&
-          !session.isCompleted
-      );
+      let suspendedSession = await getSuspendedUserProblemSession(userId, courseId, programId, selectedLanguageId);
 
       if (suspendedSession) {
         // 中断中のセッションを再開する
