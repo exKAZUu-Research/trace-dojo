@@ -4,7 +4,7 @@ import { Heading, VStack } from '@chakra-ui/react';
 import type { UserProblemSession } from '@prisma/client';
 import { useLocalStorage } from '@uidotdev/usehooks';
 import type { NextPage } from 'next';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSessionContext } from 'supertokens-auth-react/recipe/session';
 
 import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
@@ -29,6 +29,8 @@ import { ExecutionResultProblem } from './ExecutionResultProblem';
 import { StepProblem } from './StepProblem';
 
 const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId } }> = ({ params }) => {
+  const didFetchSessionRef = useRef(false);
+
   const session = useSessionContext();
   const userId = session.loading ? '' : session.userId;
   const courseId = params.courseId;
@@ -64,22 +66,25 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
         setBeforeCheckPointLine(suspendedSession.beforeStep);
         setCurrentCheckPointLine(suspendedSession.currentStep);
       } else {
-        // MEMO: reactStrictModeを有効にするとレコードが二重に作成されるため、無効化している
-        suspendedSession = await upsertUserProblemSession(
-          // レコードが存在しない場合に作成するためにidに0を指定
-          0,
-          userId,
-          courseId,
-          programId,
-          selectedLanguageId,
-          problemType,
-          0,
-          0,
-          0,
-          startedAt,
-          undefined,
-          false
-        );
+        // reactStrictModeが有効の場合にレコードが二重に作成されることを防ぐためrefで制御
+        if (didFetchSessionRef.current === false) {
+          didFetchSessionRef.current = true;
+          suspendedSession = await upsertUserProblemSession(
+            // createするためにidに0を指定
+            0,
+            userId,
+            courseId,
+            programId,
+            selectedLanguageId,
+            problemType,
+            0,
+            0,
+            0,
+            startedAt,
+            undefined,
+            false
+          );
+        }
       }
       setSuspendedSession(suspendedSession);
     })();
