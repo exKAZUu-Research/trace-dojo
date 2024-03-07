@@ -37,6 +37,7 @@ model UserProblemSession {
   problemVariables ProblemVariable[]
 
   currentProblemType String
+  beforeStep         Int
   currentStep        Int
   timeSpent          Int
   startedAt          DateTime

@@ -14,19 +14,21 @@ export async function upsertUserProblemSession(
   programId: string,
   languageId: string,
   currentProblemType: string,
+  beforeStep: number,
   currentStep: number,
   timeSpent: number,
   startedAt: Date,
   finishedAt: Date | undefined,
   isCompleted: boolean
-): Promise<void> {
+): Promise<UserProblemSession | undefined> {
   try {
-    await prisma.userProblemSession.upsert({
+    const userProblemSession = await prisma.userProblemSession.upsert({
       where: {
         id,
       },
       update: {
         currentProblemType,
+        beforeStep,
         currentStep,
         timeSpent,
         startedAt,
@@ -39,6 +41,7 @@ export async function upsertUserProblemSession(
         programId,
         languageId,
         currentProblemType,
+        beforeStep,
         currentStep,
         timeSpent,
         startedAt,
@@ -46,35 +49,48 @@ export async function upsertUserProblemSession(
         isCompleted,
       },
     });
+    return userProblemSession;
   } catch (error) {
     console.error(error);
+    return undefined;
   }
 }
 
-export async function fetchUserProblemSessions({
-  courseId,
-  languageId,
-  programId,
-  userId,
-}: {
-  userId: string;
-  courseId: string;
-  programId: string;
-  languageId: string;
-}): Promise<UserProblemSession[]> {
+export async function fetchUserProblemSessions(userId: string): Promise<UserProblemSession[]> {
   try {
     const userProblemSessions = await prisma.userProblemSession.findMany({
       where: {
         userId,
-        courseId,
-        programId,
-        languageId,
       },
     });
     return userProblemSessions;
   } catch (error) {
     console.error(error);
     return [];
+  }
+}
+
+export async function getSuspendedUserProblemSession(
+  userId: string,
+  courseId: string,
+  programId: string,
+  languageId: string
+): Promise<UserProblemSession | undefined> {
+  try {
+    const suspendedUserProblemSession = await prisma.userProblemSession.findFirst({
+      where: {
+        userId,
+        courseId,
+        programId,
+        languageId,
+        finishedAt: undefined,
+        isCompleted: false,
+      },
+    });
+    return suspendedUserProblemSession || undefined;
+  } catch (error) {
+    console.error(error);
+    return undefined;
   }
 }
 
