@@ -69,6 +69,8 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
         // reactStrictModeが有効の場合にレコードが二重に作成されることを防ぐためrefで制御
         if (didFetchSessionRef.current === false) {
           didFetchSessionRef.current = true;
+
+          const problemVariableSeed = Date.now().toString();
           suspendedSession = await upsertUserProblemSession(
             // createするためにidに0を指定
             0,
@@ -76,6 +78,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
             courseId,
             programId,
             selectedLanguageId,
+            problemVariableSeed,
             problemType,
             0,
             0,
@@ -101,6 +104,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
         courseId,
         programId,
         selectedLanguageId,
+        suspendedSession.problemVariablesSeed,
         problemType,
         problemType === 'executionResult' ? 0 : beforeCheckPointLine,
         problemType === 'executionResult' ? 0 : currentCheckPointLine,
@@ -123,6 +127,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
         courseId,
         programId,
         selectedLanguageId,
+        suspendedSession.problemVariablesSeed,
         problemType,
         problemType === 'executionResult' ? 0 : beforeCheckPointLine,
         problemType === 'executionResult' ? 0 : currentCheckPointLine,
