@@ -7,7 +7,7 @@ import type { NextPage } from 'next';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSessionContext } from 'supertokens-auth-react/recipe/session';
 
-import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
+import type { CourseId, LanguageId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
 import {
   defaultLanguageId,
   generateProgram,
@@ -45,10 +45,14 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
     defaultLanguageId
   );
   const [problemType, setProblemType] = useState<ProblemType>('executionResult');
-  const problemProgram = useMemo<GeneratedProgram>(
-    () => generateProgram(programId, selectedLanguageId),
-    [programId, selectedLanguageId]
-  );
+  const problemProgram = useMemo<GeneratedProgram>(() => {
+    if (!suspendedSession) return { displayProgram: '', instrumentedProgram: '' };
+    return generateProgram(
+      suspendedSession.programId as ProgramId,
+      suspendedSession.languageId as LanguageId,
+      suspendedSession.problemVariablesSeed
+    );
+  }, [suspendedSession]);
   const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(0);
   const [currentCheckPointLine, setCurrentCheckPointLine] = useState(checkPointLines[0]);
 
