@@ -12,9 +12,9 @@ export function traceProgram(program: GeneratedProgram): void {
     throw new Error('Instrumented program MUST NOT contain variable declarations.');
   }
 
-  let sid = 1;
+  let statementId = 1;
   const modifiedCode = program.instrumentedProgram.replaceAll(/s\.set\((.+)\);/g, (_, args) => {
-    return `s.set(${args}, ${sid++});`;
+    return `s.set(${args}, ${statementId++});`;
   });
   const executableCode = `
 const trace = [];
