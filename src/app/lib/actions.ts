@@ -169,7 +169,8 @@ export async function createUserAnswer(
   userId: string,
   step: number,
   isPassed: boolean,
-  timeSpent?: number
+  timeSpent?: number,
+  startedAt?: Date | undefined
 ): Promise<void> {
   try {
     await prisma.userAnswer.create({
@@ -181,6 +182,7 @@ export async function createUserAnswer(
         step,
         isPassed,
         timeSpent,
+        startedAt,
       },
     });
   } catch (error) {

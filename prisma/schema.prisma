@@ -60,6 +60,7 @@ model UserAnswer {
   id        Int      @id @default(autoincrement())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  startedAt DateTime?
 
   user   User   @relation(fields: [userId], references: [id])
   userId String
