@@ -34,28 +34,14 @@ model UserProblemSession {
   programId  String
   languageId String
 
-  problemVariables ProblemVariable[]
-
-  currentProblemType String
-  currentStep        Int
-  timeSpent          Int
-  startedAt          DateTime
-  finishedAt         DateTime?
-  isCompleted        Boolean
-}
-
-model ProblemVariable {
-  id        Int      @id @default(autoincrement())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  userProblemSession   UserProblemSession @relation(fields: [userProblemSessionId], references: [id])
-  userProblemSessionId Int
-
-  position Int
-  value    Int
-
-  @@unique([userProblemSessionId, position])
+  problemVariablesSeed String
+  currentProblemType   String
+  beforeStep           Int
+  currentStep          Int
+  timeSpent            Int
+  startedAt            DateTime
+  finishedAt           DateTime?
+  isCompleted          Boolean
 }
 
 model UserCompletedProblem {

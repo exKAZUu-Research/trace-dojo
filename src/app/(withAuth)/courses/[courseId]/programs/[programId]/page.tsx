@@ -1,23 +1,25 @@
 'use client';
 
 import { Heading, VStack } from '@chakra-ui/react';
-import { useLocalStorage } from '@uidotdev/usehooks';
+import type { UserProblemSession } from '@prisma/client';
 import type { NextPage } from 'next';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSessionContext } from 'supertokens-auth-react/recipe/session';
+import { useLocalStorage } from 'usehooks-ts';
 
-import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
+import type { CourseId, LanguageId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
 import {
   defaultLanguageId,
   generateProgram,
   getExplanation,
   programIdToName,
+  visibleLanguageIds,
 } from '../../../../../../problems/problemData';
 import type { GeneratedProgram, ProblemType } from '../../../../../../types';
 import {
   createUserAnswer,
   createUserCompletedProblem,
-  fetchUserProblemSessions,
+  getSuspendedUserProblemSession,
   upsertUserProblemSession,
 } from '../../../../../lib/actions';
 import { selectedLanguageIdKey } from '../../../../../lib/sessionStorage';
@@ -27,6 +29,8 @@ import { ExecutionResultProblem } from './ExecutionResultProblem';
 import { StepProblem } from './StepProblem';
 
 const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId } }> = ({ params }) => {
+  const didFetchSessionRef = useRef(false);
+
   const session = useSessionContext();
   const userId = session.loading ? '' : session.userId;
   const courseId = params.courseId;
@@ -34,43 +38,108 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
   // TODO: チェックポイントを取得する処理が実装できたら置き換える
   const checkPointLines = [2, 6, 8, 12];
 
-  const [selectedLanguageId] = useLocalStorage<VisibleLanguageId>(selectedLanguageIdKey, defaultLanguageId);
-  const [problemType, setProblemType] = useState<ProblemType>('executionResult');
-  const problemProgram = useMemo<GeneratedProgram>(
-    () => generateProgram(programId, selectedLanguageId),
-    [programId, selectedLanguageId]
+  const [startedAt] = useState(new Date());
+  const [suspendedSession, setSuspendedSession] = useState<UserProblemSession>();
+  const [selectedLanguageId, setSelectedLanguageId] = useLocalStorage<VisibleLanguageId>(
+    selectedLanguageIdKey,
+    defaultLanguageId
   );
+  const [problemType, setProblemType] = useState<ProblemType>('executionResult');
+  const problemProgram = useMemo<GeneratedProgram>(() => {
+    if (!suspendedSession) return { displayProgram: '', instrumentedProgram: '' };
+    return generateProgram(
+      suspendedSession.programId as ProgramId,
+      suspendedSession.languageId as LanguageId,
+      suspendedSession.problemVariablesSeed
+    );
+  }, [suspendedSession]);
   const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(0);
   const [currentCheckPointLine, setCurrentCheckPointLine] = useState(checkPointLines[0]);
 
   useEffect(() => {
-    if (!userId || !courseId || !programId || !selectedLanguageId) return;
+    (async () => {
+      if (!visibleLanguageIds.includes(selectedLanguageId)) {
+        setSelectedLanguageId(defaultLanguageId);
+      }
+
+      let suspendedSession = await getSuspendedUserProblemSession(userId, courseId, programId, selectedLanguageId);
+
+      if (suspendedSession) {
+        // 中断中のセッションを再開する
+        setProblemType(suspendedSession.currentProblemType as ProblemType);
+        setBeforeCheckPointLine(suspendedSession.beforeStep);
+        setCurrentCheckPointLine(suspendedSession.currentStep);
+      } else {
+        // reactStrictModeが有効の場合にレコードが二重に作成されることを防ぐためrefで制御
+        if (didFetchSessionRef.current === false) {
+          didFetchSessionRef.current = true;
+
+          const problemVariableSeed = Date.now().toString();
+          suspendedSession = await upsertUserProblemSession(
+            // createするためにidに0を指定
+            0,
+            userId,
+            courseId,
+            programId,
+            selectedLanguageId,
+            problemVariableSeed,
+            problemType,
+            0,
+            0,
+            0,
+            startedAt,
+            undefined,
+            false
+          );
+        }
+      }
+      setSuspendedSession(suspendedSession);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!userId || !courseId || !programId || !selectedLanguageId || !suspendedSession) return;
 
     (async () => {
-      const sessions = await fetchUserProblemSessions({ userId, courseId, programId, languageId: selectedLanguageId });
-      const suspendedSession = sessions.find((session) => !session.finishedAt && !session.isCompleted);
-
-      void upsertUserProblemSession(
-        // レコードが存在しない場合に作成するためにidに0を指定
-        suspendedSession ? suspendedSession.id : 0,
+      const updatedSession = await upsertUserProblemSession(
+        suspendedSession.id,
         userId,
         courseId,
         programId,
         selectedLanguageId,
+        suspendedSession.problemVariablesSeed,
         problemType,
+        problemType === 'executionResult' ? 0 : beforeCheckPointLine,
         problemType === 'executionResult' ? 0 : currentCheckPointLine,
         0,
-        new Date(),
+        suspendedSession.startedAt,
         undefined,
         false
       );
+      setSuspendedSession(updatedSession);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentCheckPointLine, problemType, selectedLanguageId]);
+  }, [currentCheckPointLine, problemType]);
 
   const handleSolveProblem = async (): Promise<void> => {
-    if (userId) {
+    if (userId && suspendedSession) {
       await createUserCompletedProblem(userId, courseId, programId, selectedLanguageId);
+      await upsertUserProblemSession(
+        suspendedSession.id,
+        userId,
+        courseId,
+        programId,
+        selectedLanguageId,
+        suspendedSession.problemVariablesSeed,
+        problemType,
+        problemType === 'executionResult' ? 0 : beforeCheckPointLine,
+        problemType === 'executionResult' ? 0 : currentCheckPointLine,
+        0,
+        suspendedSession.startedAt,
+        new Date(),
+        true
+      );
     }
   };
 

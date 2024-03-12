@@ -16,14 +16,16 @@ import {
   Tbody,
   Td,
   Th,
+  Tag,
+  VStack,
   Thead,
   Tr,
-  VStack,
 } from '@chakra-ui/react';
-import { useLocalStorage } from '@uidotdev/usehooks';
+import type { UserProblemSession } from '@prisma/client';
 import Image from 'next/image';
 import NextLink from 'next/link';
 import React, { useEffect } from 'react';
+import { useLocalStorage } from 'usehooks-ts';
 
 import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../problems/problemData';
 import {
@@ -39,17 +41,20 @@ const SPECIFIED_COMPLETION_COUNT = 2;
 
 export const Course: React.FC<{
   courseId: CourseId;
-  userCompletedProblems: { programId: ProgramId; languageId: VisibleLanguageId }[];
-}> = ({ courseId, userCompletedProblems }) => {
+  userCompletedProblems: { programId: string; languageId: VisibleLanguageId }[];
+  userProblemSessions: UserProblemSession[];
+}> = ({ courseId, userCompletedProblems, userProblemSessions }) => {
   const [selectedLanguageId, setSelectedLanguageId] = useLocalStorage<VisibleLanguageId>(
     selectedLanguageIdKey,
     defaultLanguageId
   );
 
   useEffect(() => {
+    // 念の為、未知の言語が指定された場合、デフォルト言語に設定し直す。
     if (!visibleLanguageIds.includes(selectedLanguageId)) {
       setSelectedLanguageId(defaultLanguageId);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLanguageId]);
 
   const handleSelectLanguage = (event: React.ChangeEvent<HTMLSelectElement>): void => {
@@ -71,6 +76,17 @@ export const Course: React.FC<{
       if (countUserCompletedProblems(programId, languageId) >= SPECIFIED_COMPLETION_COUNT) count++;
     }
     return count;
+  };
+
+  const SuspendedSession = (programId: string): UserProblemSession | undefined => {
+    return userProblemSessions.find(
+      (session) =>
+        session.courseId === courseId &&
+        session.programId === programId &&
+        session.languageId === selectedLanguageId &&
+        !session.finishedAt &&
+        !session.isCompleted
+    );
   };
 
   return (
@@ -125,10 +141,11 @@ export const Course: React.FC<{
                           <Th align="left" width="50%">
                             進捗
                           </Th>
+                          <Th></Th>
                         </Tr>
                       </Thead>
                       <Tbody>
-                        {programIds.map((programId) => (
+                        {programIds.map(async (programId) => (
                           <Tr key={programId}>
                             <Td>
                               <NextLink passHref href={`${courseId}/programs/${programId}`}>
@@ -149,6 +166,7 @@ export const Course: React.FC<{
                                 )}
                               </Flex>
                             </Td>
+                            <Td>{SuspendedSession(programId) && <Tag>挑戦中</Tag>}</Td>
                           </Tr>
                         ))}
                       </Tbody>
