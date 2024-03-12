@@ -1,7 +1,13 @@
 import type { GeneratedProgram } from '../types';
 
 export function traceProgram(program: GeneratedProgram): void {
-  const code = `
+  let sid = 1;
+  const modifiedCode = program.instrumentedProgram.replaceAll(/s\.set\((.+)\);/g, (_, args) => {
+    return `s.set(${args}, ${sid++});`;
+  });
+  const executableCode = `
+const trace = [];
+let s;
 class Scope {
   constructor(parent) {
     this.parent = parent;
@@ -18,35 +24,43 @@ class Scope {
     throw new Error();
   }
 
-  set(varName, value) {
+  set(varName, value, sid) {
+    if (!this.update(varName, value)) {
+      this.variables[varName] = value;
+    }
+    trace.push({ sid, variables: { ...this.variables } });
+  }
+
+  update(varName, value) {
     if (this.variables[varName] !== undefined) {
       this.variables[varName] = value;
       return true;
     }
-    if (this.parent && this.parent.set(varName, value)) {
+    if (this.parent && this.parent.update(varName, value)) {
       return true;
     }
-    this.variables[varName] = value;
     return false;
   }
 
   enterNewScope() {
-    return new Scope(this);
+    s = new Scope(this);
   }
 
   leaveScope() {
     if (!this.parent) {
       throw new Error();
     }
-    return this.parent;
+    s = this.parent;
   }
 }
+s = new Scope();
 
-let s = new Scope();
-${program.instrumentedProgram}
-s;
+${modifiedCode}
+
+trace;
 `;
 
-  const ret = eval(code);
-  console.log(ret);
+  const ret = eval(executableCode);
+  console.log(ret); // TODO: remove this later
+  return ret;
 }

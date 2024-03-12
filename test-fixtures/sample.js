@@ -1,15 +1,16 @@
 s.set('a', 1);
 if (s.get('a') > 0) {
-  // 2
-  s.set('b', 2); // 3
-  s.set('a', f(s.get('a'), s.get('b'))); // 4
+  s.set('b', 2);
+  s.set('a', f(s.get('a'), s.get('b')));
 }
-let c = s.get('a') * 2; // 5
+s.set('c', s.get('a') * 2);
 
 function f(x, y) {
-  // 6
-  s = s.enterNewScope();
-  const ret = x * y; // 7
-  s = s.leaveScope();
-  return ret;
+  try {
+    s.enterNewScope();
+    s.set('ret', x * y);
+    return s.get('ret');
+  } finally {
+    s.leaveScope();
+  }
 }
