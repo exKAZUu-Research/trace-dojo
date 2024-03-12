@@ -1,6 +1,17 @@
 import type { GeneratedProgram } from '../types';
 
 export function traceProgram(program: GeneratedProgram): void {
+  if (program.instrumentedProgram.includes(' = ')) {
+    throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
+  }
+  if (
+    program.instrumentedProgram.includes('const ') ||
+    program.instrumentedProgram.includes('let ') ||
+    program.instrumentedProgram.includes('var ')
+  ) {
+    throw new Error('Instrumented program MUST NOT contain variable declarations.');
+  }
+
   let sid = 1;
   const modifiedCode = program.instrumentedProgram.replaceAll(/s\.set\((.+)\);/g, (_, args) => {
     return `s.set(${args}, ${sid++});`;
