@@ -24,6 +24,7 @@ CREATE TABLE "new_UserProblemSession" (
     "courseId" TEXT NOT NULL,
     "programId" TEXT NOT NULL,
     "languageId" TEXT NOT NULL,
+    "problemVariablesSeed" TEXT NOT NULL,
     "currentProblemType" TEXT NOT NULL,
     "beforeStep" INTEGER NOT NULL,
     "currentStep" INTEGER NOT NULL,
@@ -33,7 +34,7 @@ CREATE TABLE "new_UserProblemSession" (
     "isCompleted" BOOLEAN NOT NULL,
     CONSTRAINT "UserProblemSession_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
 );
-INSERT INTO "new_UserProblemSession" ("beforeStep", "courseId", "createdAt", "currentProblemType", "currentStep", "finishedAt", "id", "isCompleted", "languageId", "programId", "startedAt", "timeSpent", "updatedAt", "userId") SELECT "beforeStep", "courseId", "createdAt", "currentProblemType", "currentStep", "finishedAt", "id", "isCompleted", "languageId", "programId", "startedAt", "timeSpent", "updatedAt", "userId" FROM "UserProblemSession";
+INSERT INTO "new_UserProblemSession" ("beforeStep", "courseId", "createdAt", "currentProblemType", "currentStep", "finishedAt", "id", "isCompleted", "languageId", "problemVariablesSeed", "programId", "startedAt", "timeSpent", "updatedAt", "userId") SELECT "beforeStep", "courseId", "createdAt", "currentProblemType", "currentStep", "finishedAt", "id", "isCompleted", "languageId", "problemVariablesSeed", "programId", "startedAt", "timeSpent", "updatedAt", "userId" FROM "UserProblemSession";
 DROP TABLE "UserProblemSession";
 ALTER TABLE "new_UserProblemSession" RENAME TO "UserProblemSession";
 PRAGMA foreign_key_check;
