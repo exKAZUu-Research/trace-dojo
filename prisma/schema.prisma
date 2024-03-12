@@ -39,7 +39,7 @@ model UserProblemSession {
   currentProblemType String
   beforeStep         Int
   currentStep        Int
-  timeSpent          Int
+  timeSpent          Int       @default(0)
   startedAt          DateTime
   finishedAt         DateTime?
   isCompleted        Boolean
@@ -83,6 +83,7 @@ model UserAnswer {
   languageId  String
   problemType String
 
-  step     Int
-  isPassed Boolean
+  timeSpent Int     @default(0)
+  step      Int
+  isPassed  Boolean
 }

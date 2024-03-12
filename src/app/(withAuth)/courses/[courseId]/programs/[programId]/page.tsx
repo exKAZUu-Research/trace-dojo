@@ -54,28 +54,32 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
   );
   const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(0);
   const [currentCheckPointLine, setCurrentCheckPointLine] = useState(checkPointLines[0]);
+  const [timeSpent, setTimeSpent] = useState(0);
+  const [activityState, setActivityState] = useState('Active');
 
-  const { getTotalActiveTime } = useIdleTimer({
+  const { getActiveTime, reset } = useIdleTimer({
+    onIdle: () => setActivityState('Idle'),
+    onActive: () => setActivityState('Active'),
     timeout: 10_000,
     throttle: 500,
   });
 
   useEffect(() => {
-    if (!suspendedSession) return;
-    const interval = setInterval(() => {
-      const totalActiveTime = getTotalActiveTime();
-      console.log(`suspendedSession.timeSpent: ${suspendedSession?.timeSpent}ms`);
-      console.log(`totalActiveTime: ${totalActiveTime}ms`);
-      updateUserProblemSession(suspendedSession.id, {
-        timeSpent: suspendedSession.timeSpent + totalActiveTime,
-      });
-      // TODO: UserAnswer に経過時間を保存する
+    const interval = setInterval(async () => {
+      console.log('timeSpent:', suspendedSession?.timeSpent);
+      console.log('activeTime:', getActiveTime());
+
+      if (suspendedSession && activityState === 'Active') {
+        await updateUserProblemSession(suspendedSession.id, {
+          timeSpent: timeSpent + getActiveTime(),
+        });
+      }
     }, INTERVAL_MS_OF_IDLE_TIMER);
 
     return () => {
       clearInterval(interval);
     };
-  }, [getTotalActiveTime, suspendedSession]);
+  }, [activityState, getActiveTime, suspendedSession, timeSpent]);
 
   useEffect(() => {
     (async () => {
@@ -112,7 +116,10 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
           );
         }
       }
-      setSuspendedSession(suspendedSession);
+      if (suspendedSession) {
+        setSuspendedSession(suspendedSession);
+        setTimeSpent(suspendedSession.timeSpent);
+      }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -135,7 +142,10 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
         undefined,
         false
       );
-      setSuspendedSession(updatedSession);
+      if (updatedSession) {
+        setSuspendedSession(updatedSession);
+        setTimeSpent(updatedSession.timeSpent);
+      }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentCheckPointLine, problemType]);
@@ -161,7 +171,27 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
   };
 
   const createAnswerLog = async (isPassed: boolean): Promise<void> => {
-    await createUserAnswer(programId, problemType, selectedLanguageId, userId, currentCheckPointLine, isPassed);
+    const activeTime = getActiveTime();
+    await createUserAnswer(
+      programId,
+      problemType,
+      selectedLanguageId,
+      userId,
+      currentCheckPointLine,
+      isPassed,
+      activeTime
+    );
+
+    if (suspendedSession) {
+      const userProblemSession = await updateUserProblemSession(suspendedSession.id, {
+        timeSpent: timeSpent + activeTime,
+      });
+
+      if (userProblemSession) {
+        setTimeSpent(userProblemSession.timeSpent);
+        reset(); // Reset activeTime
+      }
+    }
   };
 
   const explanation = getExplanation(programId, selectedLanguageId);
