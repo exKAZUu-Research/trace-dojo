@@ -1,3 +1,4 @@
+import { Random } from '../app/lib/random';
 import type { GeneratedProgram } from '../types';
 
 export const courseIds = ['tuBeginner1', 'tuBeginner2'] as const;
@@ -41,13 +42,15 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
   tuBeginner2: [['test1']],
 };
 
-export function generateProgram(programId: ProgramId, languageId: LanguageId): GeneratedProgram {
+export function generateProgram(programId: ProgramId, languageId: LanguageId, variableSeed: string): GeneratedProgram {
   const randomNumberRegex = /<(\d+)-(\d+)>/g;
   const programTemplate = programIdToLanguageIdToProgram[programId];
   const jsTemplate = programTemplate['js'];
   const randomNumberArray: number[] = [];
+
+  const random = new Random(variableSeed);
   const jsProgram = jsTemplate.replaceAll(randomNumberRegex, (match, min, max) => {
-    const randomNumber = getRandomInt(Number(min), Number(max));
+    const randomNumber = random.getInteger(Number(min), Number(max));
     randomNumberArray.push(randomNumber);
     return randomNumber.toString();
   });
@@ -60,12 +63,6 @@ export function generateProgram(programId: ProgramId, languageId: LanguageId): G
     displayProgram,
     instrumentedProgram: jsProgram,
   };
-}
-
-function getRandomInt(min: number, max: number): number {
-  min = Math.ceil(min);
-  max = Math.floor(max);
-  return Math.floor(Math.random() * (max - min)) + min;
 }
 
 export function getExplanation(programId: ProgramId, languageId: VisibleLanguageId): Record<'title' | 'body', string> {
