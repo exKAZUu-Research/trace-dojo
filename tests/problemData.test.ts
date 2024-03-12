@@ -12,5 +12,5 @@ test.each([
     languageId: 'java',
   },
 ] as const)('Get a program by program and language ids', ({ languageId, programId }) => {
-  expect(generateProgram(programId, languageId)).not.toBeFalsy();
+  expect(generateProgram(programId, languageId, Date.now().toString())).not.toBeFalsy();
 });
