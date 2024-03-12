@@ -16,7 +16,7 @@ export async function upsertUserProblemSession(
   currentProblemType: string,
   beforeStep: number,
   currentStep: number,
-  timeSpent: number,
+  timeSpent: number | undefined,
   startedAt: Date,
   finishedAt: Date | undefined,
   isCompleted: boolean
@@ -88,6 +88,30 @@ export async function getSuspendedUserProblemSession(
       },
     });
     return suspendedUserProblemSession || undefined;
+  } catch (error) {
+    console.error(error);
+    return undefined;
+  }
+}
+
+export async function updateUserProblemSession(
+  id: number,
+  data: {
+    currentStep?: number;
+    timeSpent?: number;
+    finishedAt?: Date;
+    isCompleted?: boolean;
+  }
+): Promise<UserProblemSession | undefined> {
+  try {
+    const userProblemSession = await prisma.userProblemSession.update({
+      where: {
+        id,
+      },
+      data,
+    });
+
+    return userProblemSession;
   } catch (error) {
     console.error(error);
     return undefined;

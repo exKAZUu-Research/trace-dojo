@@ -65,6 +65,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
         setProblemType(suspendedSession.currentProblemType as ProblemType);
         setBeforeCheckPointLine(suspendedSession.beforeStep);
         setCurrentCheckPointLine(suspendedSession.currentStep);
+        didFetchSessionRef.current = true;
       } else {
         // reactStrictModeが有効の場合にレコードが二重に作成されることを防ぐためrefで制御
         if (didFetchSessionRef.current === false) {
@@ -79,7 +80,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
             problemType,
             0,
             0,
-            0,
+            undefined,
             startedAt,
             undefined,
             false
@@ -104,7 +105,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
         problemType,
         problemType === 'executionResult' ? 0 : beforeCheckPointLine,
         problemType === 'executionResult' ? 0 : currentCheckPointLine,
-        0,
+        suspendedSession.timeSpent,
         suspendedSession.startedAt,
         undefined,
         false
