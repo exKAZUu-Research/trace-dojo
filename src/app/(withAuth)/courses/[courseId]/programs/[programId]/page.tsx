@@ -5,8 +5,10 @@ import type { UserProblemSession } from '@prisma/client';
 import { useLocalStorage } from '@uidotdev/usehooks';
 import type { NextPage } from 'next';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useIdleTimer } from 'react-idle-timer';
 import { useSessionContext } from 'supertokens-auth-react/recipe/session';
 
+import { INTERVAL_MS_OF_IDLE_TIMER } from '../../../../../../constants';
 import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
 import {
   defaultLanguageId,
@@ -21,6 +23,7 @@ import {
   createUserCompletedProblem,
   getSuspendedUserProblemSession,
   upsertUserProblemSession,
+  updateUserProblemSession,
 } from '../../../../../lib/actions';
 import { selectedLanguageIdKey } from '../../../../../lib/sessionStorage';
 
@@ -51,6 +54,28 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
   );
   const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(0);
   const [currentCheckPointLine, setCurrentCheckPointLine] = useState(checkPointLines[0]);
+
+  const { getTotalActiveTime } = useIdleTimer({
+    timeout: 10_000,
+    throttle: 500,
+  });
+
+  useEffect(() => {
+    if (!suspendedSession) return;
+    const interval = setInterval(() => {
+      const totalActiveTime = getTotalActiveTime();
+      console.log(`suspendedSession.timeSpent: ${suspendedSession?.timeSpent}ms`);
+      console.log(`totalActiveTime: ${totalActiveTime}ms`);
+      updateUserProblemSession(suspendedSession.id, {
+        timeSpent: suspendedSession.timeSpent + totalActiveTime,
+      });
+      // TODO: UserAnswer に経過時間を保存する
+    }, INTERVAL_MS_OF_IDLE_TIMER);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [getTotalActiveTime, suspendedSession]);
 
   useEffect(() => {
     (async () => {
