@@ -13,7 +13,7 @@ export type LanguageId = (typeof languageIds)[number];
 export const visibleLanguageIds = ['java'] as const;
 export type VisibleLanguageId = (typeof visibleLanguageIds)[number];
 
-export const defaultLanguageId = 'java';
+export const defaultLanguageId = 'java' as const;
 
 export const languageIdToName: Record<VisibleLanguageId, string> = {
   java: 'Java',

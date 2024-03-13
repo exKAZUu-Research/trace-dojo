@@ -13,19 +13,19 @@ import {
   Select,
   Table,
   TableContainer,
+  Tag,
   Tbody,
   Td,
   Th,
-  Tag,
-  VStack,
   Thead,
   Tr,
+  VStack,
 } from '@chakra-ui/react';
 import type { UserProblemSession } from '@prisma/client';
-import { useLocalStorage } from '@uidotdev/usehooks';
 import Image from 'next/image';
 import NextLink from 'next/link';
 import React, { useEffect } from 'react';
+import { useLocalStorage } from 'usehooks-ts';
 
 import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../problems/problemData';
 import {
@@ -50,6 +50,7 @@ export const Course: React.FC<{
   );
 
   useEffect(() => {
+    // 念の為、未知の言語が指定された場合、デフォルト言語に設定し直す。
     if (!visibleLanguageIds.includes(selectedLanguageId)) {
       setSelectedLanguageId(defaultLanguageId);
     }

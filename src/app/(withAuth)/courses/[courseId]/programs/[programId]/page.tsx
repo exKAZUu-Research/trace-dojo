@@ -2,11 +2,11 @@
 
 import { Heading, VStack } from '@chakra-ui/react';
 import type { UserProblemSession } from '@prisma/client';
-import { useLocalStorage } from '@uidotdev/usehooks';
 import type { NextPage } from 'next';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
 import { useSessionContext } from 'supertokens-auth-react/recipe/session';
+import { useLocalStorage } from 'usehooks-ts';
 
 import { INTERVAL_MS_OF_IDLE_TIMER } from '../../../../../../constants';
 import type { CourseId, LanguageId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';

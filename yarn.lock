@@ -4463,16 +4463,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@uidotdev/usehooks@npm:2.4.1":
-  version: 2.4.1
-  resolution: "@uidotdev/usehooks@npm:2.4.1"
-  peerDependencies:
-    react: ">=18.0.0"
-    react-dom: ">=18.0.0"
-  checksum: 181c43fb324dbe4fef9762c61ab4b8235efa48abedf39a9bfeab65872522c43dae789c4f85b82a1164ed7bb18ae7ff25c3a19e7c4e0eb944937ac7f8109cee9b
-  languageName: node
-  linkType: hard
-
 "@ungap/structured-clone@npm:^1.2.0":
   version: 1.2.0
   resolution: "@ungap/structured-clone@npm:1.2.0"
@@ -11554,7 +11544,6 @@ __metadata:
     "@types/uuid": "npm:^9"
     "@typescript-eslint/eslint-plugin": "npm:6.18.1"
     "@typescript-eslint/parser": "npm:6.18.1"
-    "@uidotdev/usehooks": "npm:2.4.1"
     "@willbooster/eslint-config-next": "npm:1.1.0"
     "@willbooster/prettier-config": "npm:9.1.2"
     "@willbooster/shared-lib-react": "npm:3.0.5"
@@ -11593,6 +11582,7 @@ __metadata:
     supertokens-node: "npm:16.7.1"
     supertokens-web-js: "npm:0.8.0"
     typescript: "npm:5.3.3"
+    usehooks-ts: "npm:3.0.1"
     uuid: "npm:9.0.1"
     vitest: "npm:1.2.0"
     zod: "npm:3.22.4"
@@ -11993,6 +11983,17 @@ __metadata:
     "@types/react":
       optional: true
   checksum: 89f0018fd9aee1fc17c85ac18c4bf8944d460d453d0d0e04ddbc8eaddf3fa591e9c74a1f8a438a1bff368a7a2417fab380bdb3df899d2194c4375b0982736de0
+  languageName: node
+  linkType: hard
+
+"usehooks-ts@npm:3.0.1":
+  version: 3.0.1
+  resolution: "usehooks-ts@npm:3.0.1"
+  dependencies:
+    lodash.debounce: "npm:^4.0.8"
+  peerDependencies:
+    react: ^16.8.0  || ^17 || ^18
+  checksum: c1673758100251c35a62d8d50aafe375fdce253eaa4374e7f4686bfc68505bd1b24dfe1c605db6d2ddfbe3a4ac1eca826c52ce454c9e58d8da96a45c351e0e05
   languageName: node
   linkType: hard
 
