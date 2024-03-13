@@ -41,8 +41,21 @@ test.each([
   },
   {
     program: {
-      displayProgram: 'TODO...',
-      instrumentedProgram: fs.readFileSync('test-fixtures/curve.js', { encoding: 'utf8' }),
+      displayProgram: `
+const t = new Turtle(); // sid: 1
+for (let i = 0; i < 2; i++) { // sid: 2
+  t.forward(); // sid: 3
+  t.forward(); // sid: 4
+  t.rotateRight(); // sid: 5
+}
+`.trim(),
+      instrumentedProgram: `
+s.set('t', new Turtle());
+for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
+  s.get('t').forward();
+  s.get('t').forward();
+  s.get('t').rotateRight();
+}`.trim(),
     },
     expected: [
       {
