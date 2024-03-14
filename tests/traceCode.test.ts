@@ -39,17 +39,17 @@ test.each([
     expected: [
       {
         sid: 1,
-        vars: { t: JSON.stringify(defaultTurtle) },
+        vars: { t: defaultTurtle },
         board: getBoard([{ x: cx, y: cy, color: '#' }]),
       },
       {
         sid: 2,
-        vars: { t: JSON.stringify(defaultTurtle), i: 0 },
+        vars: { t: defaultTurtle, i: 0 },
         board: getBoard([{ x: cx, y: cy, color: '#' }]),
       },
       {
         sid: 3,
-        vars: { t: JSON.stringify({ ...defaultTurtle, y: cy - 1 }), i: 0 },
+        vars: { t: { ...defaultTurtle, y: cy - 1 }, i: 0 },
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
@@ -57,7 +57,7 @@ test.each([
       },
       {
         sid: 4,
-        vars: { t: JSON.stringify({ ...defaultTurtle, y: cy - 2 }), i: 0 },
+        vars: { t: { ...defaultTurtle, y: cy - 2 }, i: 0 },
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
@@ -66,7 +66,7 @@ test.each([
       },
       {
         sid: 5,
-        vars: { t: JSON.stringify({ ...defaultTurtle, y: cy - 2, dir: 'E' }), i: 0 },
+        vars: { t: { ...defaultTurtle, y: cy - 2, dir: 'E' }, i: 0 },
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
@@ -75,7 +75,7 @@ test.each([
       },
       {
         sid: 2,
-        vars: { t: JSON.stringify({ ...defaultTurtle, y: cy - 2, dir: 'E' }), i: 1 },
+        vars: { t: { ...defaultTurtle, y: cy - 2, dir: 'E' }, i: 1 },
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
@@ -84,7 +84,7 @@ test.each([
       },
       {
         sid: 3,
-        vars: { t: JSON.stringify({ ...defaultTurtle, x: cx + 1, y: cy - 2, dir: 'E' }), i: 1 },
+        vars: { t: { ...defaultTurtle, x: cx + 1, y: cy - 2, dir: 'E' }, i: 1 },
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
@@ -94,7 +94,7 @@ test.each([
       },
       {
         sid: 4,
-        vars: { t: JSON.stringify({ ...defaultTurtle, x: cx + 2, y: cy - 2, dir: 'E' }), i: 1 },
+        vars: { t: { ...defaultTurtle, x: cx + 2, y: cy - 2, dir: 'E' }, i: 1 },
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
@@ -105,7 +105,7 @@ test.each([
       },
       {
         sid: 5,
-        vars: { t: JSON.stringify({ ...defaultTurtle, x: cx + 2, y: cy - 2, dir: 'S' }), i: 1 },
+        vars: { t: { ...defaultTurtle, x: cx + 2, y: cy - 2, dir: 'S' }, i: 1 },
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
@@ -116,7 +116,7 @@ test.each([
       },
       {
         sid: 2,
-        vars: { t: JSON.stringify({ ...defaultTurtle, x: cx + 2, y: cy - 2, dir: 'S' }), i: 2 },
+        vars: { t: { ...defaultTurtle, x: cx + 2, y: cy - 2, dir: 'S' }, i: 2 },
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
@@ -128,13 +128,13 @@ test.each([
     ] as TraceItem[],
   },
 ] as const)('Trace a program', ({ expected, program }) => {
-  expect(stringifyObjects(traceProgram(program))).toEqual(expected);
+  expect(stringifyObjects(traceProgram(program))).toEqual(stringifyObjects(expected));
 });
 
 /**
  * テストに失敗した際に、WebStorm上で期待値との差異を確認しやすくするために、文字列化しておく。
  */
-function stringifyObjects(trace: TraceItem[]): unknown {
+function stringifyObjects(trace: TraceItem[]): TraceItem[] {
   // 目視で差異を確認しやすくするために文字列化する。
   for (const item of trace) {
     const vars = { ...item.vars };
