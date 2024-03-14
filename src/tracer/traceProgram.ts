@@ -15,7 +15,7 @@ export interface TurtleTrace {
 export interface TraceItem {
   sid: number;
   // できる限り、可能性のある型を具体的に列挙していきたい。
-  vars: Record<string, number | TurtleTrace>;
+  vars: Record<string, number | string | TurtleTrace>;
   board: string;
 }
 

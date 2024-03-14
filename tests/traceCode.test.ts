@@ -139,7 +139,7 @@ function stringifyObjects(trace: TraceItem[]): unknown {
   for (const item of trace) {
     const vars = { ...item.vars };
     for (const key in vars) {
-      if (typeof vars[key] === 'object' && 'x' in (vars[key] as TraceItem)) {
+      if (typeof vars[key] === 'object' && 'x' in (vars[key] as TurtleTrace)) {
         vars[key] = JSON.stringify(vars[key]);
       }
     }
