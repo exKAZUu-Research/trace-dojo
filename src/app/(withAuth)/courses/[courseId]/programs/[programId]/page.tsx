@@ -70,9 +70,6 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
 
   useEffect(() => {
     const interval = setInterval(async () => {
-      console.log('timeSpent:', suspendedSession?.timeSpent);
-      console.log('activeTime:', getActiveTime());
-
       if (suspendedSession && activityState === 'Active') {
         await updateUserProblemSession(suspendedSession.id, {
           timeSpent: timeSpent + getActiveTime(),
@@ -171,7 +168,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
         problemType,
         problemType === 'executionResult' ? 0 : beforeCheckPointLine,
         problemType === 'executionResult' ? 0 : currentCheckPointLine,
-        0,
+        suspendedSession.timeSpent,
         suspendedSession.startedAt,
         new Date(),
         true
