@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import { expect, test } from 'vitest';
 
 import { GRID_COLUMNS, GRID_ROWS } from '../src/components/organisms/TurtleGraphics';
-import type { TurtleTrace } from '../src/tracer/traceProgram';
+import type { TraceItem, TurtleTrace } from '../src/tracer/traceProgram';
 import { traceProgram } from '../src/tracer/traceProgram';
 
 const defaultBoard = ('.'.repeat(GRID_COLUMNS) + '\n').repeat(GRID_ROWS).trim();
@@ -17,14 +17,6 @@ const defaultTurtle: TurtleTrace = {
   pen: true,
 };
 
-function getBoard(dots: { x: number; y: number; color: string }[]): string {
-  const board = defaultBoard.split('\n').map((row) => [...row]);
-  for (const dot of dots) {
-    board[dot.y][dot.x] = dot.color;
-  }
-  return board.map((row) => row.join('')).join('\n');
-}
-
 test.each([
   {
     program: {
@@ -37,7 +29,7 @@ test.each([
       { sid: 5, vars: { ret: 2 }, board: defaultBoard },
       { sid: 3, vars: { a: 2, b: 2 }, board: defaultBoard },
       { sid: 4, vars: { a: 2, b: 2, c: 4 }, board: defaultBoard },
-    ],
+    ] as TraceItem[],
   },
   {
     program: {
@@ -133,8 +125,34 @@ test.each([
           { x: cx + 2, y: cy - 2, color: '#' },
         ]),
       },
-    ],
+    ] as TraceItem[],
   },
 ] as const)('Trace a program', ({ expected, program }) => {
-  expect(traceProgram(program)).toEqual(expected);
+  expect(stringifyObjects(traceProgram(program))).toEqual(expected);
 });
+
+/**
+ * テストに失敗した際に、WebStorm上で期待値との差異を確認しやすくするために、文字列化しておく。
+ */
+function stringifyObjects(trace: TraceItem[]): unknown {
+  // 目視で差異を確認しやすくするために文字列化する。
+  for (const item of trace) {
+    const vars = { ...item.vars };
+    for (const key in vars) {
+      if (typeof vars[key] === 'object' && 'x' in (vars[key] as TurtleTrace)) {
+        vars[key] = JSON.stringify(vars[key]);
+      }
+    }
+    item.vars = vars;
+  }
+  console.log(trace); // TODO: remove this later
+  return trace;
+}
+
+function getBoard(dots: { x: number; y: number; color: string }[]): string {
+  const board = defaultBoard.split('\n').map((row) => [...row]);
+  for (const dot of dots) {
+    board[dot.y][dot.x] = dot.color;
+  }
+  return board.map((row) => row.join('')).join('\n');
+}
