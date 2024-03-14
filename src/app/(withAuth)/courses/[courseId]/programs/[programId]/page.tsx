@@ -59,7 +59,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
   const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(0);
   const [currentCheckPointLine, setCurrentCheckPointLine] = useState(checkPointLines[0]);
   const [timeSpent, setTimeSpent] = useState(0);
-  const [activityState, setActivityState] = useState('Active');
+  const [activityState, setActivityState] = useState<'Active' | 'Idle'>('Active');
 
   const { getActiveTime, reset } = useIdleTimer({
     onIdle: () => setActivityState('Idle'),
