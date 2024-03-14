@@ -85,6 +85,9 @@ export async function fetchUserProblemSessionsWithUserAnswer(
       include: {
         userAnswers: true,
       },
+      orderBy: {
+        createdAt: 'asc',
+      },
     });
     return userProblemSessions;
   } catch (error) {
