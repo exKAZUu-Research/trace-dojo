@@ -58,7 +58,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
   }, [suspendedSession]);
   const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(0);
   const [currentCheckPointLine, setCurrentCheckPointLine] = useState(checkPointLines[0]);
-  const [timeSpent, setTimeSpent] = useState(0);
+  const [lastTimeSpent, setLastTimeSpent] = useState(0);
   const [activityState, setActivityState] = useState<'Active' | 'Idle'>('Active');
 
   const { getActiveTime, reset } = useIdleTimer({
@@ -72,7 +72,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
     const interval = setInterval(async () => {
       if (suspendedSession && activityState === 'Active') {
         await updateUserProblemSession(suspendedSession.id, {
-          timeSpent: timeSpent + getActiveTime(),
+          timeSpent: lastTimeSpent + getActiveTime(),
         });
       }
     }, INTERVAL_MS_OF_IDLE_TIMER);
@@ -80,7 +80,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
     return () => {
       clearInterval(interval);
     };
-  }, [activityState, getActiveTime, suspendedSession, timeSpent]);
+  }, [activityState, getActiveTime, suspendedSession, lastTimeSpent]);
 
   useEffect(() => {
     (async () => {
@@ -122,7 +122,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
       }
       if (suspendedSession) {
         setSuspendedSession(suspendedSession);
-        setTimeSpent(suspendedSession.timeSpent);
+        setLastTimeSpent(suspendedSession.timeSpent);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -149,7 +149,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
       );
       if (updatedSession) {
         setSuspendedSession(updatedSession);
-        setTimeSpent(updatedSession.timeSpent);
+        setLastTimeSpent(updatedSession.timeSpent);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -197,11 +197,11 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
 
     if (suspendedSession) {
       const userProblemSession = await updateUserProblemSession(suspendedSession.id, {
-        timeSpent: timeSpent + activeTime,
+        timeSpent: lastTimeSpent + activeTime,
       });
 
       if (userProblemSession) {
-        setTimeSpent(userProblemSession.timeSpent);
+        setLastTimeSpent(userProblemSession.timeSpent);
         reset(); // Reset activeTime
       }
     }
