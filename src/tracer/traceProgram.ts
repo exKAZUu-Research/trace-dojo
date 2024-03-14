@@ -14,7 +14,8 @@ export interface TurtleTrace {
 
 export interface TraceItem {
   sid: number;
-  vars: Record<string, unknown>;
+  // できる限り、可能性のある型を具体的に列挙していきたい。
+  vars: Record<string, number | TurtleTrace>;
   board: string;
 }
 
@@ -132,15 +133,5 @@ trace;
 `;
 
   console.log(executableCode); // TODO: remove this later
-  const ret = eval(executableCode);
-  // 目視で差異を確認しやすくするために文字列化する。
-  for (const item of ret) {
-    const vars = { ...item.vars };
-    for (const key in vars) {
-      if (vars[key].color) vars[key] = JSON.stringify(vars[key]);
-    }
-    item.vars = vars;
-  }
-  console.log(ret); // TODO: remove this later
-  return ret;
+  return eval(executableCode);
 }
