@@ -180,6 +180,8 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
   };
 
   const createAnswerLog = async (isPassed: boolean): Promise<void> => {
+    if (!userId || !suspendedSession) return;
+
     const activeTime = getActiveTime();
     const now = new Date();
     const startedAt = new Date(now.getTime() - activeTime);
@@ -189,6 +191,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
       problemType,
       selectedLanguageId,
       userId,
+      suspendedSession.id,
       currentCheckPointLine,
       isPassed,
       activeTime,

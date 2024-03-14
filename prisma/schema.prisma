@@ -38,10 +38,11 @@ model UserProblemSession {
   currentProblemType   String
   beforeStep           Int
   currentStep          Int
-  timeSpent            Int       @default(0)
+  timeSpent            Int          @default(0)
   startedAt            DateTime
   finishedAt           DateTime?
   isCompleted          Boolean
+  userAnswers          UserAnswer[]
 }
 
 model UserCompletedProblem {
@@ -57,13 +58,16 @@ model UserCompletedProblem {
 }
 
 model UserAnswer {
-  id        Int      @id @default(autoincrement())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id        Int       @id @default(autoincrement())
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
   startedAt DateTime?
 
   user   User   @relation(fields: [userId], references: [id])
   userId String
+
+  userProblemSession   UserProblemSession @relation(fields: [userProblemSessionId], references: [id])
+  userProblemSessionId Int
 
   programId   String
   languageId  String

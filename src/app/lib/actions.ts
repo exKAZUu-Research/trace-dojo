@@ -1,9 +1,11 @@
 'use server';
 
-import type { UserProblemSession } from '@prisma/client';
+import type { UserAnswer, UserProblemSession } from '@prisma/client';
 import { PrismaClient } from '@prisma/client';
 
 import type { ProgramId, VisibleLanguageId } from '../../problems/problemData';
+
+export type UserProblemSessionWithUserAnswers = UserProblemSession & { userAnswers: UserAnswer[] };
 
 const prisma = new PrismaClient();
 
@@ -63,6 +65,25 @@ export async function fetchUserProblemSessions(userId: string): Promise<UserProb
     const userProblemSessions = await prisma.userProblemSession.findMany({
       where: {
         userId,
+      },
+    });
+    return userProblemSessions;
+  } catch (error) {
+    console.error(error);
+    return [];
+  }
+}
+
+export async function fetchUserProblemSessionsWithUserAnswer(
+  userId: string
+): Promise<UserProblemSessionWithUserAnswers[]> {
+  try {
+    const userProblemSessions = await prisma.userProblemSession.findMany({
+      where: {
+        userId,
+      },
+      include: {
+        userAnswers: true,
       },
     });
     return userProblemSessions;
@@ -167,6 +188,7 @@ export async function createUserAnswer(
   problemType: string,
   languageId: string,
   userId: string,
+  userProblemSessionId: number,
   step: number,
   isPassed: boolean,
   timeSpent?: number,
@@ -179,6 +201,7 @@ export async function createUserAnswer(
         problemType,
         languageId,
         userId,
+        userProblemSessionId,
         step,
         isPassed,
         timeSpent,
