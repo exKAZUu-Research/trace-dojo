@@ -134,7 +134,7 @@ test.each([
 /**
  * テストに失敗した際に、WebStorm上で期待値との差異を確認しやすくするために、文字列化しておく。
  */
-function stringifyObjects(trace: TraceItem[]): unknown {
+function stringifyObjects(trace: TraceItem[]): TraceItem[] {
   // 目視で差異を確認しやすくするために文字列化する。
   for (const item of trace) {
     const vars = { ...item.vars };
