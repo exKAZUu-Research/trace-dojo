@@ -14,9 +14,12 @@ import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController'
 export const ORIGIN_X = 1;
 export const ORIGIN_Y = 1;
 
-export const GRID_COLUMNS = 12;
-export const GRID_ROWS = 8;
+export const GRID_COLUMNS = 13;
+export const GRID_ROWS = 9;
 export const GRID_SIZE = 40;
+
+export const EMPTY_COLOR = '.';
+export const DEFAULT_COLOR = '#';
 
 interface TurtleGraphicsProps {
   isEnableOperation?: boolean;

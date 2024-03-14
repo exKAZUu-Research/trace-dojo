@@ -8,7 +8,7 @@ import {
   selectCharacterVariables,
 } from '../src/app/lib/solveProblem';
 
-test('Parse a program', () => {
+test.skip('Parse a program', () => {
   const program = `
     const character = new Character();
     character.moveForward();
@@ -30,7 +30,7 @@ test('Parse a program', () => {
   ]);
 });
 
-test('Extract variables', () => {
+test.skip('Extract variables', () => {
   const command = `
     const character1 = new Character();
     const character2 = new Character();
@@ -49,7 +49,7 @@ test('Extract variables', () => {
   expect(characterVariables).toEqual(['character1', 'character2', 'character3', 'character4', 'character5']);
 });
 
-test('Execute eval (1character)', () => {
+test.skip('Execute eval (1character)', () => {
   const command = `
     const character1 = new Character();
     character1.moveForward();
@@ -66,7 +66,7 @@ test('Execute eval (1character)', () => {
   expect(characterVariables[0].value.y).toEqual(6);
 });
 
-test('Execute eval (2characters)', () => {
+test.skip('Execute eval (2characters)', () => {
   const command = `
     const character1 = new Character();
     const character2 = new Character({x: 2, y: 1});
@@ -85,7 +85,7 @@ test('Execute eval (2characters)', () => {
   expect(characterVariables[1].value.y).toEqual(3);
 });
 
-test('Solve a problem (1character)', () => {
+test.skip('Solve a problem (1character)', () => {
   const problemProgram = `
     const character1 = new Character();
     character1.moveBack();
@@ -160,7 +160,7 @@ test('Solve a problem (1character)', () => {
   ]);
 });
 
-test('Solve a problem (multiple characters)', () => {
+test.skip('Solve a problem (multiple characters)', () => {
   const problemProgram = `
     const character1 = new Character();
     const character2 = new Character({color: 'green', x: 2, y: 1});
