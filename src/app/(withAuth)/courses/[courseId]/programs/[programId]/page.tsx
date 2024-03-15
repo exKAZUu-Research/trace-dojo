@@ -12,6 +12,7 @@ import {
   defaultLanguageId,
   generateProgram,
   getExplanation,
+  getProgramCheckpoints,
   programIdToName,
   visibleLanguageIds,
 } from '../../../../../../problems/problemData';
@@ -35,8 +36,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
   const userId = session.loading ? '' : session.userId;
   const courseId = params.courseId;
   const programId = params.programId;
-  // TODO: チェックポイントを取得する処理が実装できたら置き換える
-  const checkPointLines = [2, 6, 8, 12];
+  const checkPointLines = getProgramCheckpoints(programId);
 
   const [startedAt] = useState(new Date());
   const [suspendedSession, setSuspendedSession] = useState<UserProblemSession>();

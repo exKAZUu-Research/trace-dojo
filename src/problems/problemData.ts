@@ -4,7 +4,16 @@ import type { GeneratedProgram } from '../types';
 export const courseIds = ['tuBeginner1', 'tuBeginner2'] as const;
 export type CourseId = (typeof courseIds)[number];
 
-export const programIds = ['straight', 'curve', 'stairs', 'square', 'rectangle', 'diamond', 'test1'] as const;
+export const programIds = [
+  'straight',
+  'curve',
+  'stairs',
+  'square',
+  'rectangle',
+  'diamond',
+  'test1',
+  'getProgramCheckpointsTest',
+] as const;
 export type ProgramId = (typeof programIds)[number];
 
 export const languageIds = ['jsInstrumentation', 'js', 'java'] as const;
@@ -32,6 +41,7 @@ export const programIdToName: Record<ProgramId, string> = {
   rectangle: '図形を描こう(2)',
   diamond: '図形を描こう(3)',
   test1: 'ステップ実行のテスト用問題(1)',
+  getProgramCheckpointsTest: 'チェックポイント取得のテスト用問題',
 };
 
 export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
@@ -39,7 +49,7 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
     ['straight', 'curve', 'stairs'],
     ['square', 'rectangle', 'diamond'],
   ],
-  tuBeginner2: [['test1']],
+  tuBeginner2: [['test1', 'getProgramCheckpointsTest']],
 };
 
 export function generateProgram(programId: ProgramId, languageId: LanguageId, variableSeed: string): GeneratedProgram {
@@ -67,6 +77,20 @@ export function generateProgram(programId: ProgramId, languageId: LanguageId, va
 
 export function getExplanation(programId: ProgramId, languageId: VisibleLanguageId): Record<'title' | 'body', string> {
   return programIdToLanguageIdToExplanation[programId]?.[languageId];
+}
+
+export function getProgramCheckpoints(programId: ProgramId): number[] {
+  const jsInstrumentationProgram = programIdToLanguageIdToProgram[programId]['jsInstrumentation'];
+  const lines = jsInstrumentationProgram.split('\n');
+
+  const checkpoints: number[] = [];
+  for (const [i, line] of lines.entries()) {
+    if (/(\/\/|#)\s*CP\s*$/.test(line)) {
+      checkpoints.push(i + 1);
+    }
+  }
+
+  return checkpoints;
 }
 
 const defaultProgram = {
@@ -188,6 +212,42 @@ function set(value, name) {
     js: '',
     java: '',
   },
+  getProgramCheckpointsTest: {
+    jsInstrumentation: `
+s.set('t', new Turtle());
+s.get('t').forward(); // CP
+s.get('t').forward();
+s.get('t').rotateRight();
+s.get('t').forward(); //  CP
+s.get('t').forward(); // CP character at end: NG
+s.get('t').forward();
+s.get('t').forward();
+`.trim(),
+    js: `
+const t = new Character();
+t.moveForward();
+t.moveForward();
+t.turnRight();
+t.moveForward();
+t.moveForward();
+t.moveForward();
+t.moveForward();
+`.trim(),
+    java: `
+public class Straight {
+  public static void main(String[] args) {
+    var t = new Character();
+    t.moveForward();
+    t.moveForward();
+    t.turnRight();
+    t.moveForward();
+    t.moveForward();
+    t.moveForward();
+    t.moveForward();
+  }
+}
+`.trim(),
+  },
 };
 
 const defaultExplanation = {
@@ -208,4 +268,5 @@ export const programIdToLanguageIdToExplanation: Record<
   square: defaultExplanation,
   stairs: defaultExplanation,
   test1: defaultExplanation,
+  getProgramCheckpointsTest: defaultExplanation,
 };
