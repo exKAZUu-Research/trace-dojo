@@ -127,6 +127,7 @@ function addTrace(sid) {
   }
   trace.push({ sid, vars, board: board.map(r => r.join('')).join('\\n') });
 }
+trace.push({board: board.map(r => r.join('')).join('\\n') });
 s = new Scope();
 ${modifiedCode.trim()}
 trace;

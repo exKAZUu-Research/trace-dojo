@@ -34,6 +34,8 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
   } = useDisclosure();
   const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
 
+  const lastStep = problemProgram.instrumentedProgram.split('\n').length;
+
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
   };
@@ -60,8 +62,9 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
         <Box>
           <TurtleGraphics
             ref={turtleGraphicsRef}
+            currentCheckPointLine={lastStep}
             isEnableOperation={true}
-            problemProgram={problemProgram.instrumentedProgram}
+            problemProgram={problemProgram}
           />
         </Box>
       </VStack>

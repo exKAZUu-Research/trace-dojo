@@ -82,7 +82,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
             beforeCheckPointLine={beforeCheckPointLine}
             currentCheckPointLine={currentCheckPointLine}
             isEnableOperation={false}
-            problemProgram={problemProgram.instrumentedProgram}
+            problemProgram={problemProgram}
           />
         </Box>
         <Box>茶色のハイライト時点の実行結果</Box>
@@ -92,7 +92,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
             beforeCheckPointLine={beforeCheckPointLine}
             currentCheckPointLine={currentCheckPointLine}
             isEnableOperation={true}
-            problemProgram={problemProgram.instrumentedProgram}
+            problemProgram={problemProgram}
           />
         </Box>
       </VStack>

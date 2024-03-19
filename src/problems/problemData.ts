@@ -55,7 +55,7 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
 export function generateProgram(programId: ProgramId, languageId: LanguageId, variableSeed: string): GeneratedProgram {
   const randomNumberRegex = /<(\d+)-(\d+)>/g;
   const programTemplate = programIdToLanguageIdToProgram[programId];
-  const jsTemplate = programTemplate['js'];
+  const jsTemplate = programTemplate['jsInstrumentation'];
   const randomNumberArray: number[] = [];
 
   const random = new Random(variableSeed);
@@ -122,40 +122,32 @@ public class Straight {
 `.trim(),
   },
   curve: {
-    jsInstrumentation: '',
+    jsInstrumentation: `
+s.set('t', new Turtle(1, 1, 5, 'G'));
+s.get('t').forward();
+s.set('a', new Turtle(1, 0, 2, 'R'));
+s.set('b', 1);
+s.get('t').forward();
+s.get('t').forward(); // CP
+s.get('t').forward();
+`.trim(),
     js: `
-const bear = new Character();
-bear.moveForward();
-bear.turnLeft();
-bear.upPen();
-let i = 0;
-bear.moveForward();
-const turtle = new Character({x: <2-5>, y: <3-5>, color: 'green'});
-turtle.moveForward();
-const foo = 'あいうえお';
-var bar = <1-100>;
-i = i + 1;
-turtle.moveForward();
-turtle.moveForward();
+const t = new Turtle(1, 1, 5, 'G');
+t.forward();
+const a = new Turtle(1, 0, 2, 'R');
+const b = 1;
+t.forward();
+t.forward();
+t.forward();
 `.trim(),
     java: `
-public class Main {
-  public static void main(String[] args) {
-    Character bear = new Character();
-    bear.moveForward();
-    bear.turnLeft();
-    bear.upPen();
-    int i = 0;
-    bear.moveForward();
-    Character turtle = new Character(<2-5>, <3-5>, "green");
-    turtle.moveForward();
-    String foo = "あいうえお";
-    int bar = <1-100>;
-    i = i + 1;
-    turtle.moveForward();
-    turtle.moveForward();
-  }
-};
+const t = new Turtle(1, 1, 5, 'G');
+t.forward();
+const a = new Turtle(1, 0, 2, 'R');
+const b = 1;
+t.forward();
+t.forward();
+t.forward();
 `.trim(),
   },
   diamond: defaultProgram,
