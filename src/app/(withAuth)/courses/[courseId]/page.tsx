@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { prisma } from '../../../../infrastructures/prisma';
 import type { CourseId } from '../../../../problems/problemData';
 import { getNullableSessionOnServer } from '../../../../utils/session';
-import { fetchUserCompletedProblems, fetchUserProblemSessions } from '../../../lib/actions';
+import { fetchUserCompletedProblems, fetchUserProblemSessionsWithUserAnswer } from '../../../lib/actions';
 
 import { Course } from './Course';
 
@@ -24,7 +24,7 @@ const CoursePage: NextPage<{ params: { courseId: CourseId } }> = async ({ params
 
   const courseId = params.courseId;
   const userCompletedProblems = await fetchUserCompletedProblems(user.id, courseId);
-  const userProblemSessions = await fetchUserProblemSessions(user.id);
+  const userProblemSessions = await fetchUserProblemSessionsWithUserAnswer(user.id);
 
   return (
     <Course
