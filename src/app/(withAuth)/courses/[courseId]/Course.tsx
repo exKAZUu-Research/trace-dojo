@@ -21,7 +21,7 @@ import {
   Tr,
   VStack,
 } from '@chakra-ui/react';
-import type { UserProblemSession } from '@prisma/client';
+import type { UserAnswer } from '@prisma/client';
 import Image from 'next/image';
 import NextLink from 'next/link';
 import React, { useEffect } from 'react';
@@ -35,14 +35,30 @@ import {
   programIdToName,
   visibleLanguageIds,
 } from '../../../../problems/problemData';
+import type { UserProblemSessionWithUserAnswers } from '../../../lib/actions';
 import { selectedLanguageIdKey } from '../../../lib/sessionStorage';
 
 const SPECIFIED_COMPLETION_COUNT = 2;
 
+const countFailedAnswers = (userProblemSession: UserProblemSessionWithUserAnswers | undefined): number => {
+  if (!userProblemSession) return 0;
+
+  return userProblemSession.userAnswers.filter((userAnswer: UserAnswer) => !userAnswer.isPassed).length;
+};
+
+const totalAnswerTimeSpent = (userProblemSession: UserProblemSessionWithUserAnswers | undefined): number => {
+  if (!userProblemSession) return 0;
+
+  return userProblemSession.userAnswers.reduce(
+    (totalTimeSpent: number, userAnswer: UserAnswer) => totalTimeSpent + (userAnswer.timeSpent || 0),
+    0
+  );
+};
+
 export const Course: React.FC<{
   courseId: CourseId;
   userCompletedProblems: { programId: string; languageId: VisibleLanguageId }[];
-  userProblemSessions: UserProblemSession[];
+  userProblemSessions: UserProblemSessionWithUserAnswers[];
 }> = ({ courseId, userCompletedProblems, userProblemSessions }) => {
   const [selectedLanguageId, setSelectedLanguageId] = useLocalStorage<VisibleLanguageId>(
     selectedLanguageIdKey,
@@ -78,7 +94,7 @@ export const Course: React.FC<{
     return count;
   };
 
-  const SuspendedSession = (programId: string): UserProblemSession | undefined => {
+  const SuspendedSession = (programId: string): UserProblemSessionWithUserAnswers | undefined => {
     return userProblemSessions.find(
       (session) =>
         session.courseId === courseId &&
@@ -86,7 +102,14 @@ export const Course: React.FC<{
         session.languageId === selectedLanguageId &&
         !session.finishedAt &&
         !session.isCompleted
-    );
+    ) as UserProblemSessionWithUserAnswers | undefined;
+  };
+
+  const firstSession = (programId: string): UserProblemSessionWithUserAnswers | undefined => {
+    return userProblemSessions.find(
+      (session) =>
+        session.courseId === courseId && session.programId === programId && session.languageId === selectedLanguageId
+    ) as UserProblemSessionWithUserAnswers | undefined;
   };
 
   return (
@@ -135,13 +158,19 @@ export const Course: React.FC<{
                     <Table>
                       <Thead>
                         <Tr>
-                          <Th textAlign="left" width="50%">
-                            プログラム
-                          </Th>
-                          <Th align="left" width="50%">
-                            進捗
-                          </Th>
+                          <Th textAlign="left">プログラム</Th>
                           <Th></Th>
+                          <Th align="left">進捗</Th>
+                          <Th align="left">
+                            初回セッションの
+                            <br />
+                            不正解回数
+                          </Th>
+                          <Th align="left">
+                            初回セッションの
+                            <br />
+                            所要時間（秒）
+                          </Th>
                         </Tr>
                       </Thead>
                       <Tbody>
@@ -152,6 +181,7 @@ export const Course: React.FC<{
                                 {programIdToName[programId]}
                               </NextLink>
                             </Td>
+                            <Td>{SuspendedSession(programId) && <Tag>挑戦中</Tag>}</Td>
                             <Td>
                               <Flex>
                                 <p>
@@ -166,7 +196,12 @@ export const Course: React.FC<{
                                 )}
                               </Flex>
                             </Td>
-                            <Td>{SuspendedSession(programId) && <Tag>挑戦中</Tag>}</Td>
+                            <Td>{countFailedAnswers(firstSession(programId))}</Td>
+                            <Td>
+                              {typeof firstSession(programId)?.timeSpent === 'number'
+                                ? Math.floor(totalAnswerTimeSpent(firstSession(programId)) / 1000)
+                                : 0}
+                            </Td>
                           </Tr>
                         ))}
                       </Tbody>

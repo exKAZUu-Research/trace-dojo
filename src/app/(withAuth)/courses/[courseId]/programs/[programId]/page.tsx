@@ -4,9 +4,11 @@ import { Heading, VStack } from '@chakra-ui/react';
 import type { UserProblemSession } from '@prisma/client';
 import type { NextPage } from 'next';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useIdleTimer } from 'react-idle-timer';
 import { useSessionContext } from 'supertokens-auth-react/recipe/session';
 import { useLocalStorage } from 'usehooks-ts';
 
+import { INTERVAL_MS_OF_IDLE_TIMER } from '../../../../../../constants';
 import type { CourseId, LanguageId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
 import {
   defaultLanguageId,
@@ -21,6 +23,7 @@ import {
   createUserCompletedProblem,
   getSuspendedUserProblemSession,
   upsertUserProblemSession,
+  updateUserProblemSession,
 } from '../../../../../lib/actions';
 import { selectedLanguageIdKey } from '../../../../../lib/sessionStorage';
 
@@ -55,6 +58,29 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
   }, [suspendedSession]);
   const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(0);
   const [currentCheckPointLine, setCurrentCheckPointLine] = useState(checkPointLines[0]);
+  const [lastTimeSpent, setLastTimeSpent] = useState(0);
+  const [activityState, setActivityState] = useState<'Active' | 'Idle'>('Active');
+
+  const { getActiveTime, reset } = useIdleTimer({
+    onIdle: () => setActivityState('Idle'),
+    onActive: () => setActivityState('Active'),
+    timeout: 10_000,
+    throttle: 500,
+  });
+
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (suspendedSession && activityState === 'Active') {
+        await updateUserProblemSession(suspendedSession.id, {
+          timeSpent: lastTimeSpent + getActiveTime(),
+        });
+      }
+    }, INTERVAL_MS_OF_IDLE_TIMER);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [activityState, getActiveTime, suspendedSession, lastTimeSpent]);
 
   useEffect(() => {
     (async () => {
@@ -69,6 +95,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
         setProblemType(suspendedSession.currentProblemType as ProblemType);
         setBeforeCheckPointLine(suspendedSession.beforeStep);
         setCurrentCheckPointLine(suspendedSession.currentStep);
+        didFetchSessionRef.current = true;
       } else {
         // reactStrictModeが有効の場合にレコードが二重に作成されることを防ぐためrefで制御
         if (didFetchSessionRef.current === false) {
@@ -86,14 +113,17 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
             problemType,
             0,
             0,
-            0,
+            undefined,
             startedAt,
             undefined,
             false
           );
         }
       }
-      setSuspendedSession(suspendedSession);
+      if (suspendedSession) {
+        setSuspendedSession(suspendedSession);
+        setLastTimeSpent(suspendedSession.timeSpent);
+      }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -112,12 +142,15 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
         problemType,
         problemType === 'executionResult' ? 0 : beforeCheckPointLine,
         problemType === 'executionResult' ? 0 : currentCheckPointLine,
-        0,
+        suspendedSession.timeSpent,
         suspendedSession.startedAt,
         undefined,
         false
       );
-      setSuspendedSession(updatedSession);
+      if (updatedSession) {
+        setSuspendedSession(updatedSession);
+        setLastTimeSpent(updatedSession.timeSpent);
+      }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentCheckPointLine, problemType]);
@@ -135,7 +168,7 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
         problemType,
         problemType === 'executionResult' ? 0 : beforeCheckPointLine,
         problemType === 'executionResult' ? 0 : currentCheckPointLine,
-        0,
+        suspendedSession.timeSpent,
         suspendedSession.startedAt,
         new Date(),
         true
@@ -144,7 +177,34 @@ const ProblemPage: NextPage<{ params: { courseId: CourseId; programId: ProgramId
   };
 
   const createAnswerLog = async (isPassed: boolean): Promise<void> => {
-    await createUserAnswer(programId, problemType, selectedLanguageId, userId, currentCheckPointLine, isPassed);
+    if (!userId || !suspendedSession) return;
+
+    const activeTime = getActiveTime();
+    const now = new Date();
+    const startedAt = new Date(now.getTime() - activeTime);
+
+    await createUserAnswer(
+      programId,
+      problemType,
+      selectedLanguageId,
+      userId,
+      suspendedSession.id,
+      currentCheckPointLine,
+      isPassed,
+      activeTime,
+      startedAt
+    );
+
+    if (suspendedSession) {
+      const userProblemSession = await updateUserProblemSession(suspendedSession.id, {
+        timeSpent: lastTimeSpent + activeTime,
+      });
+
+      if (userProblemSession) {
+        setLastTimeSpent(userProblemSession.timeSpent);
+        reset(); // Reset activeTime
+      }
+    }
   };
 
   const explanation = getExplanation(programId, selectedLanguageId);
