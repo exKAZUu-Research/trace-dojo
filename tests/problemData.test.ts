@@ -18,7 +18,7 @@ test.each([
 test.each([
   {
     programId: 'getProgramCheckpointsTest',
-    expected: [2, 5],
+    expected: [2, 5, 6],
   },
 ] as const)('Get program checkpoint line numbers', ({ expected, programId }) => {
   expect(getProgramCheckpoints(programId)).toEqual(expected);

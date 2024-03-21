@@ -85,7 +85,7 @@ export function getProgramCheckpoints(programId: ProgramId): number[] {
 
   const checkpoints: number[] = [];
   for (const [i, line] of lines.entries()) {
-    if (/(\/\/|#)\s*CP\s*$/.test(line)) {
+    if (/(\/\/|#)\s*CP\s*(?:$|\s)/.test(line)) {
       checkpoints.push(i + 1);
     }
   }
@@ -219,8 +219,8 @@ s.get('t').forward(); // CP
 s.get('t').forward();
 s.get('t').rotateRight();
 s.get('t').forward(); //  CP
-s.get('t').forward(); // CP character at end: NG
-s.get('t').forward();
+s.get('t').forward(); // CP character at end: OK
+s.get('t').forward(); // SID
 s.get('t').forward();
 `.trim(),
     js: `
