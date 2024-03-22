@@ -16,6 +16,8 @@ import {
   programIdToName,
   visibleLanguageIds,
 } from '../../../../../../problems/problemData';
+import { traceProgram } from '../../../../../../tracer/traceProgram';
+import type { TraceItem } from '../../../../../../tracer/traceProgram';
 import type { GeneratedProgram, ProblemType } from '../../../../../../types';
 import {
   createUserAnswer,
@@ -53,6 +55,9 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
       suspendedSession.problemVariablesSeed
     );
   }, [suspendedSession]);
+  const traceItems = useMemo<TraceItem[]>(() => {
+    return traceProgram(problemProgram);
+  }, [problemProgram]);
   const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(0);
   const [currentCheckPointLine, setCurrentCheckPointLine] = useState(checkPointLines[0]);
   const [lastTimeSpent, setLastTimeSpent] = useState(0);
@@ -217,6 +222,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
             problemProgram={problemProgram}
             selectedLanguageId={selectedLanguageId}
             setProblemType={setProblemType}
+            traceItems={traceItems}
           />
         );
       }
@@ -233,6 +239,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
             setBeforeCheckPointLine={setBeforeCheckPointLine}
             setCurrentCheckPointLine={setCurrentCheckPointLine}
             setProblemType={setProblemType}
+            traceItems={traceItems}
           />
         );
       }
@@ -248,6 +255,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
             selectedLanguageId={selectedLanguageId}
             setBeforeCheckPointLine={setBeforeCheckPointLine}
             setCurrentCheckPointLine={setCurrentCheckPointLine}
+            traceItems={traceItems}
           />
         );
       }

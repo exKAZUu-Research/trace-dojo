@@ -7,8 +7,8 @@ import { CustomModal } from '../../../../../../components/molecules/CustomModal'
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
+import type { TraceItem } from '../../../../../../tracer/traceProgram';
 import type { GeneratedProgram } from '../../../../../../types';
-import { solveProblem } from '../../../../../lib/solveProblem';
 
 import { Variables } from './Variables';
 
@@ -22,6 +22,7 @@ interface StepProblemProps {
   selectedLanguageId: string;
   setBeforeCheckPointLine: (line: number) => void;
   setCurrentCheckPointLine: (line: number) => void;
+  traceItems: TraceItem[];
 }
 
 export const StepProblem: React.FC<StepProblemProps> = ({
@@ -34,6 +35,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
   selectedLanguageId,
   setBeforeCheckPointLine,
   setCurrentCheckPointLine,
+  traceItems,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
   const {
@@ -42,8 +44,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
     onOpen: onExplanationModalOpen,
   } = useDisclosure();
   const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
-
-  const beforeCheckpointResult = solveProblem(problemProgram.instrumentedProgram).histories?.at(beforeCheckPointLine);
+  const beforeCheckpointTraceItem = traceItems[beforeCheckPointLine];
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -83,6 +84,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
             currentCheckPointLine={currentCheckPointLine}
             isEnableOperation={false}
             problemProgram={problemProgram}
+            traceItems={traceItems}
           />
         </Box>
         <Box>茶色のハイライト時点の実行結果</Box>
@@ -93,6 +95,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
             currentCheckPointLine={currentCheckPointLine}
             isEnableOperation={true}
             problemProgram={problemProgram}
+            traceItems={traceItems}
           />
         </Box>
       </VStack>
@@ -129,10 +132,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
             programmingLanguageId={selectedLanguageId}
           />
         </Box>
-        <Variables
-          characterVariables={beforeCheckpointResult?.characterVariables}
-          variables={beforeCheckpointResult?.otherVariables}
-        />
+        <Variables traceItemVars={beforeCheckpointTraceItem?.vars} />
         <HStack>
           <Button onClick={() => handleClickResetButton()}>リセット</Button>
           <Button onClick={() => handleClickAnswerButton()}>解答</Button>

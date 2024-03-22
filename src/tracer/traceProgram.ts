@@ -14,10 +14,12 @@ export interface TurtleTrace {
 
 export interface TraceItem {
   sid: number;
-  // できる限り、可能性のある型を具体的に列挙していきたい。
-  vars: Record<string, number | string | TurtleTrace>;
+  vars: TraceItemVar;
   board: string;
 }
+
+// できる限り、可能性のある型を具体的に列挙していきたい。
+export type TraceItemVar = Record<string, number | string | TurtleTrace>;
 
 export function traceProgram(program: GeneratedProgram): TraceItem[] {
   if (program.instrumentedProgram.includes(' = ')) {

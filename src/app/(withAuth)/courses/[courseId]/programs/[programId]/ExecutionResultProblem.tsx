@@ -7,6 +7,7 @@ import { CustomModal } from '../../../../../../components/molecules/CustomModal'
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
+import type { TraceItem } from '../../../../../../tracer/traceProgram';
 import type { GeneratedProgram, ProblemType } from '../../../../../../types';
 
 interface ExecutionResultProblemProps {
@@ -16,6 +17,7 @@ interface ExecutionResultProblemProps {
   handleComplete: () => void;
   selectedLanguageId: string;
   setProblemType: (step: ProblemType) => void;
+  traceItems: TraceItem[];
 }
 
 export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
@@ -25,6 +27,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
   problemProgram,
   selectedLanguageId,
   setProblemType,
+  traceItems,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
   const {
@@ -65,6 +68,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
             currentCheckPointLine={lastStep}
             isEnableOperation={true}
             problemProgram={problemProgram}
+            traceItems={traceItems}
           />
         </Box>
       </VStack>

@@ -5,7 +5,7 @@ import React, { useState } from 'react';
 
 import type { TurtleTrace } from '../../tracer/traceProgram';
 import type { SelectedCell } from '../../types';
-import { COLOR_MAP, type Color } from '../organisms/TurtleGraphics';
+import { COLOR_MAP, DEFAULT_COLOR, type Color } from '../organisms/TurtleGraphics';
 
 interface TurtleGraphicsControllerProps {
   board: string[][];
@@ -38,7 +38,7 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
   selectedCell,
   selectedTurtle,
 }) => {
-  const [selectedTurtleColor, setSelectedTurtleColor] = useState<Color>('.');
+  const [selectedTurtleColor, setSelectedTurtleColor] = useState<Color>(DEFAULT_COLOR);
 
   const ColorChangeButton: React.FC<ColorChangeButtonProps> = ({ color, handleOnClick, selectedColor }) => {
     return (
@@ -89,8 +89,8 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
               <Button onClick={() => handleAddTurtleButton(selectedTurtleColor)}>キャラクターを追加する</Button>
             </Box>
             <Select
+              defaultValue={DEFAULT_COLOR}
               maxW="300"
-              placeholder="Select color"
               value={selectedTurtleColor}
               onChange={(e) => handleSelectTurtleColor(e)}
             >

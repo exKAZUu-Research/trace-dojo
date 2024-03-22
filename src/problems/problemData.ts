@@ -123,7 +123,7 @@ public class Straight {
   },
   curve: {
     jsInstrumentation: `
-s.set('t', new Turtle(1, 1, 5, 'G'));
+s.set('t', new Turtle(1, 1, 5, 'G')); // CP
 s.get('t').forward();
 s.set('a', new Turtle(1, 0, 2, 'R'));
 s.set('b', 1);

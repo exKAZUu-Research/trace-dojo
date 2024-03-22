@@ -2,10 +2,9 @@
 
 import { Box, Grid, GridItem } from '@chakra-ui/react';
 import Image from 'next/image';
-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
 
 import type { TraceItem, TurtleTrace } from '../../tracer/traceProgram';
-import { traceProgram } from '../../tracer/traceProgram';
 import type { GeneratedProgram, SelectedCell } from '../../types';
 import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController';
 
@@ -14,7 +13,7 @@ export const GRID_ROWS = 9;
 export const GRID_SIZE = 40;
 
 export const EMPTY_COLOR = '.';
-export const DEFAULT_COLOR = '#';
+export const DEFAULT_COLOR = 'R';
 export type Color = typeof EMPTY_COLOR | 'R' | 'G' | 'B' | 'Y' | 'P';
 export const COLOR_MAP = {
   '.': 'white',
@@ -27,6 +26,12 @@ export const COLOR_MAP = {
 const TURTLE_DIRS = ['N', 'E', 'S', 'W'];
 const DX = [0, 1, 0, -1];
 const DY = [-1, 0, 1, 0];
+export const DIR_JAPANESE = {
+  N: '上',
+  E: '下',
+  S: '左',
+  W: '右',
+};
 const TURTLE_ROTATE = {
   N: 'rotate(180deg)',
   S: 'rotate(0deg)',
@@ -39,6 +44,7 @@ interface TurtleGraphicsProps {
   problemProgram: GeneratedProgram;
   currentCheckPointLine: number;
   beforeCheckPointLine?: number;
+  traceItems: TraceItem[];
 }
 
 export interface TurtleGraphicsHandle {
@@ -47,10 +53,7 @@ export interface TurtleGraphicsHandle {
 }
 
 export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
-  ({ beforeCheckPointLine = 0, currentCheckPointLine, isEnableOperation = false, problemProgram }, ref) => {
-    const traceItems = useMemo<TraceItem[]>(() => {
-      return traceProgram(problemProgram);
-    }, [problemProgram]);
+  ({ beforeCheckPointLine = 0, currentCheckPointLine, isEnableOperation = false, problemProgram, traceItems }, ref) => {
     const [board, setBoard] = useState<Color[][]>([]);
     const [turtleVars, setTurtleVars] = useState<TurtleTrace[]>([]);
     const [selectedTurtle, setSelectedTurtle] = useState<TurtleTrace>();
@@ -76,7 +79,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
         const value = variables[key];
         if (typeof value === 'string' || typeof value === 'number') {
           initOtherVars.push(value);
-        } else if (value.x && value.y && value.color) {
+        } else if (value.dir && value.color) {
           initTurtleVars.push(value);
         }
       }
@@ -125,7 +128,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       const correctTurtles = [];
       for (const key in variables) {
         const value = variables[key];
-        if (typeof value !== 'string' && typeof value !== 'number' && value.x && value.y && value.color) {
+        if (typeof value !== 'string' && typeof value !== 'number' && value.dir && value.color) {
           correctTurtles.push(value);
         }
       }
@@ -268,7 +271,6 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
           {turtleVars.map((turtle) => (
             <Box
               key={'turtle' + turtle.x + turtle.y}
-              borderWidth="2px"
               h={GRID_SIZE + 'px'}
               left={turtle.x * GRID_SIZE + 'px'}
               position="absolute"
