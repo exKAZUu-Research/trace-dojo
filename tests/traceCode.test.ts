@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 
 import { GRID_COLUMNS, GRID_ROWS } from '../src/components/organisms/TurtleGraphics';
-import { generateProgram } from '../src/problems/generateProgram';
+import { generateProblem } from '../src/problems/generateProblem';
 import type { TraceItem, CharacterTrace } from '../src/problems/traceProgram';
 
 const defaultBoard = ('.'.repeat(GRID_COLUMNS) + '\n').repeat(GRID_ROWS).trim();
@@ -549,7 +549,7 @@ public class Straight {
     languageId,
     problemId,
   }) => {
-    const { checkpointSids, displayProgram, sidToLineIndex, traceItems } = generateProgram(problemId, languageId, '');
+    const { checkpointSids, displayProgram, sidToLineIndex, traceItems } = generateProblem(problemId, languageId, '');
     expect(displayProgram).toEqual(expectedDisplayProgram);
     expect(sidToLineIndex).toEqual(
       new Map(Object.entries(expectedSidToLineIndex).map(([sid, lineIndex]) => [Number(sid), lineIndex]))

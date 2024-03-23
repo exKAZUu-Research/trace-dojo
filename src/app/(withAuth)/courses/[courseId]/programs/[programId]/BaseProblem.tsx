@@ -7,8 +7,8 @@ import { useIdleTimer } from 'react-idle-timer';
 import { useLocalStorage } from 'usehooks-ts';
 
 import { INTERVAL_MS_OF_IDLE_TIMER } from '../../../../../../constants';
-import type { GeneratedProgram } from '../../../../../../problems/generateProgram';
-import { generateProgram } from '../../../../../../problems/generateProgram';
+import type { Problem } from '../../../../../../problems/generateProblem';
+import { generateProblem } from '../../../../../../problems/generateProblem';
 import type { CourseId, LanguageId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
 import {
   defaultLanguageId,
@@ -44,7 +44,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
     defaultLanguageId
   );
   const [problemType, setProblemType] = useState<ProblemType>('executionResult');
-  const program = useMemo<GeneratedProgram>(() => {
+  const problem = useMemo<Problem>(() => {
     // TODO: 後述の通り、Server Componentで `suspendedSession` 取得することで、ダミーデータを使う状況を排除したい。
     if (!suspendedSession)
       return {
@@ -54,7 +54,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
         traceItems: [],
         sidToLineIndex: new Map(),
       };
-    return generateProgram(
+    return generateProblem(
       suspendedSession.programId as ProgramId,
       suspendedSession.languageId as LanguageId,
       suspendedSession.problemVariablesSeed
@@ -63,7 +63,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
 
   // TODO: チェックポイントはあくまでsidなので、可視化する際は `sidToLineIndex` を用いて、行番号を特定すること。
   const [beforeCheckpointSid, setBeforeCheckpointSid] = useState(0);
-  const [currentCheckpointSid, setCurrentCheckpointSid] = useState(program.checkpointSids[0] ?? 0);
+  const [currentCheckpointSid, setCurrentCheckpointSid] = useState(problem.checkpointSids[0] ?? 0);
   const [lastTimeSpent, setLastTimeSpent] = useState(0);
   const [activityState, setActivityState] = useState<'Active' | 'Idle'>('Active');
 
@@ -224,7 +224,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
             createAnswerLog={createAnswerLog}
             explanation={explanation}
             handleComplete={handleSolveProblem}
-            program={program}
+            problem={problem}
             selectedLanguageId={selectedLanguageId}
             setProblemType={setProblemType}
           />
@@ -237,7 +237,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
             createAnswerLog={createAnswerLog}
             currentCheckpointSid={currentCheckpointSid}
             explanation={explanation}
-            program={program}
+            problem={problem}
             selectedLanguageId={selectedLanguageId}
             setBeforeCheckpointSid={setBeforeCheckpointSid}
             setCurrentCheckpointSid={setCurrentCheckpointSid}
@@ -253,7 +253,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
             currentCheckpointSid={currentCheckpointSid}
             explanation={explanation}
             handleComplete={handleSolveProblem}
-            program={program}
+            problem={problem}
             selectedLanguageId={selectedLanguageId}
             setBeforeCheckpointSid={setBeforeCheckpointSid}
             setCurrentCheckpointSid={setCurrentCheckpointSid}

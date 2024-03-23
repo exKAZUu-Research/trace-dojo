@@ -1,4 +1,4 @@
-import type { GeneratedProgram } from '../../problems/generateProgram';
+import type { Problem } from '../../problems/generateProblem';
 import type { CharacterVariable, History, SolveProblemResult, Variable } from '../../types';
 
 import { Board as BoardClass } from './board';
@@ -95,7 +95,7 @@ export function solveProblem(program: string): SolveProblemResult {
 }
 
 export function isAnswerCorrect(
-  problemProgram: GeneratedProgram,
+  problemProgram: Problem,
   answerCharacters: CharacterClass[],
   answerBoard: BoardClass,
   step?: number

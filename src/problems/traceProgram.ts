@@ -1,7 +1,7 @@
 import { DEFAULT_COLOR, EMPTY_COLOR, GRID_COLUMNS, GRID_ROWS } from '../components/organisms/TurtleGraphics';
 import type { CellColor, ColorChar } from '../types';
 
-import type { GeneratedProgram } from './generateProgram';
+import type { Problem } from './generateProblem';
 import type { LanguageId } from './problemData';
 
 export interface CharacterTrace {
@@ -38,11 +38,7 @@ export const colorToChar = Object.fromEntries(
   Object.entries(charToColor).map(([char, color]) => [color, char])
 ) as Record<CellColor, ColorChar>;
 
-export function traceProgram(
-  instrumented: string,
-  rawDisplayProgram: string,
-  languageId: LanguageId
-): GeneratedProgram {
+export function traceProgram(instrumented: string, rawDisplayProgram: string, languageId: LanguageId): Problem {
   if (instrumented.includes(' = ')) {
     throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
   }

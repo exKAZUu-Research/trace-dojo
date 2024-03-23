@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { generateProgram } from '../src/problems/generateProgram';
+import { generateProblem } from '../src/problems/generateProblem';
 
 test.each([
   {
@@ -12,5 +12,5 @@ test.each([
     languageId: 'java',
   },
 ] as const)('Get a program by program and language ids', ({ languageId, programId }) => {
-  expect(generateProgram(programId, languageId, Date.now().toString())).not.toBeFalsy();
+  expect(generateProblem(programId, languageId, Date.now().toString())).not.toBeFalsy();
 });

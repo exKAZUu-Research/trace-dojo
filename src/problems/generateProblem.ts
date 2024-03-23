@@ -5,7 +5,7 @@ import { programIdToLanguageIdToProgram } from './problemData';
 import type { TraceItem } from './traceProgram';
 import { traceProgram } from './traceProgram';
 
-export type GeneratedProgram = {
+export type Problem = {
   /**
    * The language ID of the program.
    */
@@ -34,7 +34,7 @@ export type GeneratedProgram = {
 
 const randomNumberRegex = /<(\d+)-(\d+)>/g;
 
-export function generateProgram(programId: ProgramId, languageId: LanguageId, variableSeed: string): GeneratedProgram {
+export function generateProblem(programId: ProgramId, languageId: LanguageId, variableSeed: string): Problem {
   const random = new Random(variableSeed);
   const template = programIdToLanguageIdToProgram[programId];
   const generatedNumbers: number[] = [];
