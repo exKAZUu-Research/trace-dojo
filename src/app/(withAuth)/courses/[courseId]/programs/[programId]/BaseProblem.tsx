@@ -44,7 +44,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
     defaultLanguageId
   );
   const [problemType, setProblemType] = useState<ProblemType>('executionResult');
-  const problemProgram = useMemo<GeneratedProgram>(() => {
+  const program = useMemo<GeneratedProgram>(() => {
     // TODO: 後述の通り、Server Componentで `suspendedSession` 取得することで、ダミーデータを使う状況を排除したい。
     if (!suspendedSession)
       return {
@@ -63,7 +63,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
 
   // TODO: チェックポイントはあくまでsidなので、可視化する際は `sidToLineIndex` を用いて、行番号を特定すること。
   const [beforeCheckpointSid, setBeforeCheckpointSid] = useState(0);
-  const [currentCheckpointSid, setCurrentCheckpointSid] = useState(problemProgram.checkpointSids[0] ?? 0);
+  const [currentCheckpointSid, setCurrentCheckpointSid] = useState(program.checkpointSids[0] ?? 0);
   const [lastTimeSpent, setLastTimeSpent] = useState(0);
   const [activityState, setActivityState] = useState<'Active' | 'Idle'>('Active');
 
@@ -224,7 +224,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
             createAnswerLog={createAnswerLog}
             explanation={explanation}
             handleComplete={handleSolveProblem}
-            problemProgram={problemProgram}
+            program={program}
             selectedLanguageId={selectedLanguageId}
             setProblemType={setProblemType}
           />
@@ -237,7 +237,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
             createAnswerLog={createAnswerLog}
             currentCheckpointSid={currentCheckpointSid}
             explanation={explanation}
-            problemProgram={problemProgram}
+            program={program}
             selectedLanguageId={selectedLanguageId}
             setBeforeCheckpointSid={setBeforeCheckpointSid}
             setCurrentCheckpointSid={setCurrentCheckpointSid}
@@ -253,7 +253,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
             currentCheckpointSid={currentCheckpointSid}
             explanation={explanation}
             handleComplete={handleSolveProblem}
-            problemProgram={problemProgram}
+            program={program}
             selectedLanguageId={selectedLanguageId}
             setBeforeCheckpointSid={setBeforeCheckpointSid}
             setCurrentCheckpointSid={setCurrentCheckpointSid}

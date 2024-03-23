@@ -14,7 +14,7 @@ import { Variables } from './Variables';
 
 interface CheckpointProblemProps {
   setProblemType: (step: ProblemType) => void;
-  problemProgram: GeneratedProgram;
+  program: GeneratedProgram;
   beforeCheckpointSid: number;
   createAnswerLog: (isPassed: boolean) => void;
   currentCheckpointSid: number;
@@ -29,7 +29,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
   createAnswerLog,
   currentCheckpointSid,
   explanation,
-  problemProgram,
+  program,
   selectedLanguageId,
   setBeforeCheckpointSid,
   setCurrentCheckpointSid,
@@ -42,7 +42,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
     onOpen: onExplanationModalOpen,
   } = useDisclosure();
   const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
-  const beforeCheckpointResult = problemProgram.traceItems.find((traceItem) => traceItem.sid === beforeCheckpointSid);
+  const beforeCheckpointResult = program.traceItems.find((traceItem) => traceItem.sid === beforeCheckpointSid);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -57,7 +57,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
     if (isPassed) {
       setBeforeCheckpointSid(currentCheckpointSid);
 
-      if (currentCheckpointSid === problemProgram.checkpointSids.at(-1)) {
+      if (currentCheckpointSid === program.checkpointSids.at(-1)) {
         // 最終チェックポイントを正解した場合はその次の行からステップ問題に移行
         alert('正解です。このチェックポイントから1行ずつ回答してください');
         // TODO: ループの場合は、過去のsidに戻ることがあるので、sidを増やしてはならない。
@@ -68,9 +68,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         alert('正解です。次のチェックポイントに進みます');
         // TODO: ループの場合は、過去のsidに戻ることがあるので、sidを増やしてはならない。
         // TODO: 代わりに `problemProgram.traceItems` の次の要素を参照すること。
-        setCurrentCheckpointSid(
-          problemProgram.checkpointSids[problemProgram.checkpointSids.indexOf(currentCheckpointSid) + 1]
-        );
+        setCurrentCheckpointSid(program.checkpointSids[program.checkpointSids.indexOf(currentCheckpointSid) + 1]);
       }
     } else {
       // 不正解の場合は最後に正解したチェックポイントからステップ問題に移行
@@ -93,7 +91,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
             beforeCheckpointSid={beforeCheckpointSid}
             currentCheckpointSid={currentCheckpointSid}
             isEnableOperation={false}
-            problemProgram={problemProgram}
+            program={program}
           />
         </Box>
         <Box>茶色のハイライト時点の実行結果</Box>
@@ -103,7 +101,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
             beforeCheckpointSid={beforeCheckpointSid}
             currentCheckpointSid={currentCheckpointSid}
             isEnableOperation={true}
-            problemProgram={problemProgram}
+            program={program}
           />
         </Box>
       </VStack>
@@ -136,7 +134,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
           <SyntaxHighlighter
             // TODO: sid から行番号に変換すること。
             beforeCheckpointLine={beforeCheckpointSid}
-            code={problemProgram.displayProgram}
+            code={program.displayProgram}
             currentCheckpointLine={currentCheckpointSid}
             programmingLanguageId={selectedLanguageId}
           />

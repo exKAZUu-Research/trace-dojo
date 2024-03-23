@@ -24,7 +24,7 @@ export const DEFAULT_COLOR = '#';
 
 interface TurtleGraphicsProps {
   isEnableOperation?: boolean;
-  problemProgram: GeneratedProgram;
+  program: GeneratedProgram;
   currentCheckpointSid?: number;
   beforeCheckpointSid?: number;
 }
@@ -35,7 +35,7 @@ export interface TurtleGraphicsHandle {
 }
 
 export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
-  ({ beforeCheckpointSid = 0, currentCheckpointSid, isEnableOperation = false, problemProgram }, ref) => {
+  ({ beforeCheckpointSid = 0, currentCheckpointSid, isEnableOperation = false, program }, ref) => {
     const [board, setBoard] = useState<Board>(new Board());
     const [characters, setCharacters] = useState<Character[]>([]);
     const [selectedCharacter, setSelectedCharacter] = useState<Character>();
@@ -43,10 +43,10 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     const [dragging, setDragging] = useState<boolean>(false);
 
     const init = useCallback((): void => {
-      if (!problemProgram) return;
+      if (!program) return;
 
-      // TODO: `solveProblem()` の代わりに `problemProgram.traceItems` を参照すること。
-      const solveResult = solveProblem(problemProgram.displayProgram).histories?.at(beforeCheckpointSid);
+      // TODO: `solveProblem()` の代わりに `program.traceItems` を参照すること。
+      const solveResult = solveProblem(program.displayProgram).histories?.at(beforeCheckpointSid);
       const initBoard = solveResult?.board;
       const initCharacters = solveResult?.characterVariables?.map((character) => character.value);
 
@@ -54,7 +54,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       setCharacters(initCharacters || []);
       setSelectedCharacter(undefined);
       setSelectedCell(undefined);
-    }, [beforeCheckpointSid, problemProgram]);
+    }, [beforeCheckpointSid, program]);
 
     useImperativeHandle(ref, () => ({
       // 親コンポーネントから関数を呼び出せるようにする
@@ -64,7 +64,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
 
     useEffect(() => {
       init();
-    }, [beforeCheckpointSid, init, problemProgram]);
+    }, [beforeCheckpointSid, init, program]);
 
     const updateCharacter = (updater: (char: Character) => void): void => {
       if (!selectedCharacter) return;
@@ -98,7 +98,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     };
 
     const isPassed = (): boolean => {
-      return isAnswerCorrect(problemProgram, characters, board, currentCheckpointSid);
+      return isAnswerCorrect(program, characters, board, currentCheckpointSid);
     };
 
     const handleClickCharacter = (character: Character): void => {

@@ -11,7 +11,7 @@ import type { GeneratedProgram } from '../../../../../../problems/generateProgra
 import type { ProblemType } from '../../../../../../types';
 
 interface ExecutionResultProblemProps {
-  problemProgram: GeneratedProgram;
+  program: GeneratedProgram;
   createAnswerLog: (isPassed: boolean) => void;
   explanation?: Record<'title' | 'body', string>;
   handleComplete: () => void;
@@ -23,7 +23,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
   createAnswerLog,
   explanation,
   handleComplete,
-  problemProgram,
+  program,
   selectedLanguageId,
   setProblemType,
 }) => {
@@ -59,7 +59,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
       <VStack spacing="10">
         <Box>プログラムの実行後の結果を解答してください。</Box>
         <Box>
-          <TurtleGraphics ref={turtleGraphicsRef} isEnableOperation={true} problemProgram={problemProgram} />
+          <TurtleGraphics ref={turtleGraphicsRef} isEnableOperation={true} program={program} />
         </Box>
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">
@@ -89,7 +89,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
         </HStack>
         {/* 画面に収まる高さに設定 */}
         <Box h="calc(100vh - 370px)" w="100%">
-          <SyntaxHighlighter code={problemProgram.displayProgram} programmingLanguageId={selectedLanguageId} />
+          <SyntaxHighlighter code={program.displayProgram} programmingLanguageId={selectedLanguageId} />
         </Box>
         <HStack>
           <Button onClick={() => handleClickResetButton()}>リセット</Button>
