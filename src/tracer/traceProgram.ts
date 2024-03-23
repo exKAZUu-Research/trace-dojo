@@ -17,6 +17,8 @@ export interface TraceItem {
   // できる限り、可能性のある型を具体的に列挙していきたい。
   vars: Record<string, number | string | TurtleTrace>;
   board: string;
+  /** Pythonなどの拡張for文しかない言語において、削除すべき更新式か否か。 */
+  last?: boolean;
 }
 
 export const charToColor = {
@@ -161,5 +163,9 @@ trace;
 `;
 
   console.log(executableCode); // TODO: remove this later
-  return eval(executableCode);
+  let trace = eval(executableCode);
+  if ((program.languageId as string) === 'python') {
+    trace = trace.filter((item: TraceItem) => !item.last);
+  }
+  return trace;
 }

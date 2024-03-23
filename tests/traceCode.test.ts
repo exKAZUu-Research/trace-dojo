@@ -20,6 +20,7 @@ const defaultTurtle: TurtleTrace = {
 test.each([
   {
     program: {
+      languageId: 'java',
       displayProgram: 'TODO...',
       instrumentedProgram: fs.readFileSync('test-fixtures/no-turtle.js', { encoding: 'utf8' }),
     },
@@ -33,6 +34,7 @@ test.each([
   },
   {
     program: {
+      languageId: 'java',
       displayProgram: `
 const t = new Turtle(); // sid: 1
 for (let i = 0; i < 2; i++) { // sid: 2

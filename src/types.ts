@@ -2,6 +2,7 @@ import type React from 'react';
 
 import type { Board } from './app/lib/board';
 import type { Character } from './app/lib/character';
+import type { LanguageId } from './problems/problemData';
 
 export interface LayoutProps {
   children: React.ReactNode;
@@ -42,6 +43,8 @@ export type CharacterDirection = 'up' | 'down' | 'left' | 'right';
 export type ProblemType = 'executionResult' | 'checkpoint' | 'step';
 
 export type GeneratedProgram = {
+  languageId: LanguageId;
+
   /**
    * The program to be displayed to the user.
    */
