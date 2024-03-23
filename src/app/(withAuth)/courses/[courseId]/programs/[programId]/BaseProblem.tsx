@@ -45,6 +45,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
   );
   const [problemType, setProblemType] = useState<ProblemType>('executionResult');
   const problemProgram = useMemo<GeneratedProgram>(() => {
+    // TODO: 後述の通り、Server Componentで `suspendedSession` 取得することで、ダミーデータを使う状況を排除したい。
     if (!suspendedSession)
       return {
         languageId: selectedLanguageId,
