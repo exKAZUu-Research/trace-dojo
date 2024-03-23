@@ -40,7 +40,7 @@ export class Character {
   }
 
   moveForward(): void {
-    if (!this.canForward()) return;
+    if (!this.canMoveForward()) return;
 
     switch (this.direction) {
       case 'up': {
@@ -136,15 +136,15 @@ export class Character {
     this.color = color;
   }
 
-  putPen(): void {
+  dropPen(): void {
     this.penDown = true;
   }
 
-  penUp(): void {
+  liftPen(): void {
     this.penDown = false;
   }
 
-  canForward(): boolean {
+  canMoveForward(): boolean {
     switch (this.direction) {
       case 'up': {
         return this.y > 1;

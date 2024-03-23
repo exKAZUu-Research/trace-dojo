@@ -173,7 +173,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       if (!selectedCharacter) return;
 
       updateCharacter((character) => {
-        character.penUp();
+        character.liftPen();
       });
     };
 
@@ -181,7 +181,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       if (!selectedCharacter) return;
 
       updateCharacter((character) => {
-        character.putPen();
+        character.dropPen();
       });
     };
 
