@@ -144,7 +144,9 @@ for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
     ] as TraceItem[],
   },
 ] as const)('Trace a program', ({ expected, program }) => {
-  expect(stringifyObjects(traceProgram(program))).toEqual(stringifyObjects(expected));
+  const [trace, sidToLineIndex] = traceProgram(program);
+  expect(stringifyObjects(trace)).toEqual(stringifyObjects(expected));
+  expect(sidToLineIndex).toBeTruthy();
 });
 
 /**

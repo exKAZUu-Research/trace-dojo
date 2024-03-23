@@ -35,7 +35,7 @@ export const colorToChar = Object.fromEntries(
   Object.entries(charToColor).map(([char, color]) => [color, char])
 ) as Record<CellColor, ColorChar>;
 
-export function traceProgram(program: GeneratedProgram): TraceItem[] {
+export function traceProgram(program: GeneratedProgram): [TraceItem[], Map<number, number>] {
   if (program.instrumentedProgram.includes(' = ')) {
     throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
   }
@@ -163,9 +163,19 @@ trace;
 `;
 
   console.log(executableCode); // TODO: remove this later
-  let trace = eval(executableCode);
+  let trace = eval(executableCode) as TraceItem[];
   if ((program.languageId as string) === 'python') {
     trace = trace.filter((item: TraceItem) => !item.last);
   }
-  return trace;
+
+  const lines = program.displayProgram.split('\n');
+  const sidToLineIndex = new Map<number, number>();
+  for (const [index, line] of lines.entries()) {
+    const matched = line.match(/sid\s*:\s*(\d+)/);
+    if (matched) {
+      sidToLineIndex.set(Number(matched[1]), index);
+    }
+  }
+
+  return [trace, sidToLineIndex];
 }
