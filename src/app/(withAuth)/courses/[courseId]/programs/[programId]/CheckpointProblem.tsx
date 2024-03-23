@@ -135,7 +135,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
           />
         </Box>
         <Variables
-          // TODO: Fix Variables component
+          // TODO: beforeCheckpointResult?.vars からキャラクタおよび変数の情報を取得するようにすること。
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           characterVariables={beforeCheckpointResult?.vars as any}
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
