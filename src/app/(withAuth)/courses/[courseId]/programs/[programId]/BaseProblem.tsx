@@ -46,7 +46,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
   );
   const [problemType, setProblemType] = useState<ProblemType>('executionResult');
   const problemProgram = useMemo<GeneratedProgram>(() => {
-    if (!suspendedSession) return { displayProgram: '', instrumentedProgram: '' };
+    if (!suspendedSession) return { languageId: selectedLanguageId, displayProgram: '', instrumentedProgram: '' };
     return generateProgram(
       suspendedSession.programId as ProgramId,
       suspendedSession.languageId as LanguageId,
