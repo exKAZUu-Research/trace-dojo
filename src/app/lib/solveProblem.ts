@@ -95,13 +95,13 @@ export function solveProblem(program: string): SolveProblemResult {
 }
 
 export function isAnswerCorrect(
-  problemProgram: Problem,
+  problem: Problem,
   answerCharacters: CharacterClass[],
   answerBoard: BoardClass,
   step?: number
 ): boolean {
-  // TODO: `solveProblem()` の代わりに `problemProgram.traceItems` を参照すること。
-  const correctAnswer = solveProblem(problemProgram.displayProgram).histories?.at(step || -1);
+  // TODO: `solveProblem()` の代わりに `problem.traceItems` を参照すること。
+  const correctAnswer = solveProblem(problem.displayProgram).histories?.at(step || -1);
 
   if (!correctAnswer || !correctAnswer.characterVariables) return false;
 
