@@ -98,7 +98,7 @@ test.skip('Solve a problem (1character)', () => {
     character1.forward();
     character1.turnRight();
     character1.moveBack();
-    character1.upPen();
+    character1.penUp();
     character1.moveBack();
     character1.moveBack();
     character1.putPen();

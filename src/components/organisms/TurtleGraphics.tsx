@@ -173,7 +173,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       if (!selectedCharacter) return;
 
       updateCharacter((character) => {
-        character.upPen();
+        character.penUp();
       });
     };
 

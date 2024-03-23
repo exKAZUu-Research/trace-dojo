@@ -118,7 +118,7 @@ const dx = [0, 1, 0, -1];
 const dy = [-1, 0, 1, 0];
 const board = Array.from({ length: ${GRID_ROWS} }, () => Array.from({ length: ${GRID_COLUMNS} }, () => '${EMPTY_COLOR}'));
 class Character {
-  constructor(sid, x = ${Math.floor(GRID_COLUMNS / 2)}, y = ${Math.floor(GRID_ROWS / 2)}, color = '${DEFAULT_COLOR}') {
+  constructor(x = ${Math.floor(GRID_COLUMNS / 2)}, y = ${Math.floor(GRID_ROWS / 2)}, color = '${DEFAULT_COLOR}') {
     this.x = x;
     this.y = y;
     this.color = color;

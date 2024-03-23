@@ -12,7 +12,7 @@ export const programIds = [
   'test2',
   'test3',
   'test4',
-  'testCheckpoints',
+  'test5',
 ] as const;
 export type ProgramId = (typeof programIds)[number];
 
@@ -44,7 +44,7 @@ export const programIdToName: Record<ProgramId, string> = {
   test2: 'ステップ実行のテスト用問題(2)',
   test3: 'ステップ実行のテスト用問題(3)',
   test4: 'ステップ実行のテスト用問題(4)',
-  testCheckpoints: 'チェックポイント取得のテスト用問題',
+  test5: 'チェックポイント取得のテスト用問題',
 };
 
 export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
@@ -52,7 +52,7 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
     ['straight', 'curve', 'stairs'],
     ['square', 'rectangle', 'diamond'],
   ],
-  tuBeginner2: [['test1', 'test2', 'test3', 'test4', 'testCheckpoints']],
+  tuBeginner2: [['test1', 'test2', 'test3', 'test4', 'test5']],
 };
 
 export function getExplanation(programId: ProgramId, languageId: VisibleLanguageId): Record<'title' | 'body', string> {
@@ -243,7 +243,7 @@ public class Main {
 s.set('c1', new Character());
 s.get('c1').forward();
 s.get('c1').turnLeft();
-s.get('c1').upPen();
+s.get('c1').penUp();
 s.set('i', 0);
 s.get('c1').forward();
 
@@ -256,43 +256,43 @@ s.get('c2').forward();
 s.get('c2').forward();
 `.trim(),
     js: `
-const c1 = new Character();
-c1.forward();
-c1.turnLeft();
-c1.upPen();
-let i = 0;
-c1.forward();
+const c1 = new Character(); // sid
+c1.forward(); // sid
+c1.turnLeft(); // sid
+c1.penUp(); // sid
+let i = 0; // sid
+c1.forward(); // sid
 
-const c2 = new Character({x: <2-5>, y: <3-5>, color: 'green'});
-c2.forward();
-const foo = 'あいうえお';
-let bar = <1-100>;
-i = bar + 1;
-c2.forward();
-c2.forward();
+const c2 = new Character({x: <2-5>, y: <3-5>, color: 'green'}); // sid
+c2.forward(); // sid
+const foo = 'あいうえお'; // sid
+let bar = <1-100>; // sid
+i = bar + 1; // sid
+c2.forward(); // sid
+c2.forward(); // sid
 `.trim(),
     java: `
 public class Main {
   public static void main(String[] args) {
-    Character c1 = new Character();
-    c1.forward();
-    c1.turnLeft();
-    c1.upPen();
-    int i = 0;
-    c1.forward();
+    Character c1 = new Character(); // sid
+    c1.forward(); // sid
+    c1.turnLeft(); // sid
+    c1.penUp(); // sid
+    int i = 0; // sid
+    c1.forward(); // sid
 
-    Character c2 = new Character(<2-5>, <3-5>, "green");
-    c2.forward();
-    String foo = "あいうえお";
-    int bar = <1-100>;
-    i = bar + 1;
-    c2.forward();
-    c2.forward();
+    Character c2 = new Character(<2-5>, <3-5>, "green"); // sid
+    c2.forward(); // sid
+    String foo = "あいうえお"; // sid
+    int bar = <1-100>; // sid
+    i = bar + 1; // sid
+    c2.forward(); // sid
+    c2.forward(); // sid
   }
-};
+}
 `.trim(),
   },
-  testCheckpoints: {
+  test5: {
     instrumented: `
 s.set('t', new Character());
 s.get('t').forward(); // CP
@@ -351,5 +351,5 @@ export const programIdToLanguageIdToExplanation: Record<
   test2: defaultExplanation,
   test3: defaultExplanation,
   test4: defaultExplanation,
-  testCheckpoints: defaultExplanation,
+  test5: defaultExplanation,
 };

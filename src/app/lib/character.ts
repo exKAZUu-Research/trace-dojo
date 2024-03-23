@@ -140,7 +140,7 @@ export class Character {
     this.penDown = true;
   }
 
-  upPen(): void {
+  penUp(): void {
     this.penDown = false;
   }
 
