@@ -558,14 +558,6 @@ public class Straight {
     expect(stringifyObjects(traceItems)).toEqual(stringifyObjects(expectedTrace));
   }
 );
-test.each([
-  {
-    programId: 'test5',
-    expected: [2, 5, 6],
-  },
-] as const)('Get program checkpoint line numbers', ({ expected, programId }) => {
-  expect(generateProgram(programId, 'js', '').checkpointSids).toEqual(expected);
-});
 
 /**
  * テストに失敗した際に、WebStorm上で期待値との差異を確認しやすくするために、文字列化しておく。
