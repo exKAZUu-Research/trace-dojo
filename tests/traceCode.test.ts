@@ -431,6 +431,114 @@ public class Main {
       },
     ] as TraceItem[],
   },
+  {
+    languageId: 'java',
+    problemId: 'test5',
+    expectedDisplayProgram: `
+public class Straight {
+  public static void main(String[] args) {
+    var c = new Character();
+    c.forward();
+    c.forward();
+    c.turnRight();
+    c.forward();
+    c.forward();
+    c.forward();
+    c.forward();
+  }
+}
+`.trim(),
+    expectedSidToLineIndex: {
+      1: 2,
+      2: 3,
+      3: 4,
+      4: 5,
+      5: 6,
+      6: 7,
+      7: 8,
+      8: 9,
+    },
+    expectedCheckpointSids: [2, 5, 6],
+    expectedTrace: [
+      {
+        sid: 1,
+        vars: { c: defaultCharacter },
+        board: getBoard([{ x: cx, y: cy, color: '#' }]),
+      },
+      {
+        sid: 2,
+        vars: { c: { ...defaultCharacter, y: cy - 1 } },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+        ]),
+      },
+      {
+        sid: 3,
+        vars: { c: { ...defaultCharacter, y: cy - 2 } },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx, y: cy - 2, color: '#' },
+        ]),
+      },
+      {
+        sid: 4,
+        vars: { c: { ...defaultCharacter, y: cy - 2, dir: 'E' } },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx, y: cy - 2, color: '#' },
+        ]),
+      },
+      {
+        sid: 5,
+        vars: { c: { ...defaultCharacter, x: cx + 1, y: cy - 2, dir: 'E' } },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx, y: cy - 2, color: '#' },
+          { x: cx + 1, y: cy - 2, color: '#' },
+        ]),
+      },
+      {
+        sid: 6,
+        vars: { c: { ...defaultCharacter, x: cx + 2, y: cy - 2, dir: 'E' } },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx, y: cy - 2, color: '#' },
+          { x: cx + 1, y: cy - 2, color: '#' },
+          { x: cx + 2, y: cy - 2, color: '#' },
+        ]),
+      },
+      {
+        sid: 7,
+        vars: { c: { ...defaultCharacter, x: cx + 3, y: cy - 2, dir: 'E' } },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx, y: cy - 2, color: '#' },
+          { x: cx + 1, y: cy - 2, color: '#' },
+          { x: cx + 2, y: cy - 2, color: '#' },
+          { x: cx + 3, y: cy - 2, color: '#' },
+        ]),
+      },
+      {
+        sid: 8,
+        vars: { c: { ...defaultCharacter, x: cx + 4, y: cy - 2, dir: 'E' } },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx, y: cy - 2, color: '#' },
+          { x: cx + 1, y: cy - 2, color: '#' },
+          { x: cx + 2, y: cy - 2, color: '#' },
+          { x: cx + 3, y: cy - 2, color: '#' },
+          { x: cx + 4, y: cy - 2, color: '#' },
+        ]),
+      },
+    ] as TraceItem[],
+  },
 ] as const)(
   'Trace a program',
   ({

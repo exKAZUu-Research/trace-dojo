@@ -294,36 +294,36 @@ public class Main {
   },
   test5: {
     instrumented: `
-s.set('t', new Character());
-s.get('t').forward(); // CP
-s.get('t').forward();
-s.get('t').turnRight();
-s.get('t').forward(); // CP
-s.get('t').forward(); // CP character at end: OK
-s.get('t').forward();
-s.get('t').forward();
+s.set('c', new Character());
+s.get('c').forward(); // CP
+s.get('c').forward();
+s.get('c').turnRight();
+s.get('c').forward(); // CP
+s.get('c').forward(); // CP character at end: OK
+s.get('c').forward();
+s.get('c').forward();
 `.trim(),
     js: `
-const t = new Character(); // sid
-t.forward(); // sid
-t.forward(); // sid
-t.turnRight(); // sid
-t.forward(); // sid
-t.forward(); // sid
-t.forward(); // sid
-t.forward(); // sid
+const c = new Character(); // sid
+c.forward(); // sid
+c.forward(); // sid
+c.turnRight(); // sid
+c.forward(); // sid
+c.forward(); // sid
+c.forward(); // sid
+c.forward(); // sid
 `.trim(),
     java: `
 public class Straight {
   public static void main(String[] args) {
-    var t = new Character(); // sid
-    t.forward(); // sid
-    t.forward(); // sid
-    t.turnRight(); // sid
-    t.forward(); // sid
-    t.forward(); // sid
-    t.forward(); // sid
-    t.forward(); // sid
+    var c = new Character(); // sid
+    c.forward(); // sid
+    c.forward(); // sid
+    c.turnRight(); // sid
+    c.forward(); // sid
+    c.forward(); // sid
+    c.forward(); // sid
+    c.forward(); // sid
   }
 }
 `.trim(),
