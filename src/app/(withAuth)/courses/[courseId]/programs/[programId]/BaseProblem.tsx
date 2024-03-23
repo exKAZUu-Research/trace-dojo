@@ -94,7 +94,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
         setSelectedLanguageId(defaultLanguageId);
       }
 
-      // TODO: suspendedSessionが読み込まれる前の状態では、不正確な画面が描画されてしまうため、Server Componentで読み込むこと。
+      // TODO: suspendedSessionの読み込み前では不正確な画面を描画してしまうため、Server Componentで描画前にデータを読み込むこと。
       let suspendedSession = await getSuspendedUserProblemSession(userId, courseId, programId, selectedLanguageId);
 
       if (suspendedSession) {
