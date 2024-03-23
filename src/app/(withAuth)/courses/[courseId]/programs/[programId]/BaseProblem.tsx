@@ -61,7 +61,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
     );
   }, [suspendedSession]);
 
-  // TODO: チェックポイントはあくまで `sid` なので、可視化する際は `sidToLineIndex` を用いて、行番号を特定すること。
+  // TODO: チェックポイントはあくまでsidなので、可視化する際は `sidToLineIndex` を用いて、行番号を特定すること。
   const [beforeCheckpointSid, setBeforeCheckpointSid] = useState(0);
   const [currentCheckpointSid, setCurrentCheckpointSid] = useState(problemProgram.checkpointSids[0] ?? 0);
   const [lastTimeSpent, setLastTimeSpent] = useState(0);
