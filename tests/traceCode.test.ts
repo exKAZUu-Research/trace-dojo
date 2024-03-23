@@ -1,8 +1,8 @@
 import { expect, test } from 'vitest';
 
 import { GRID_COLUMNS, GRID_ROWS } from '../src/components/organisms/TurtleGraphics';
-import type { TraceItem, CharacterTrace } from '../src/tracer/traceProgram';
-import { traceProgram } from '../src/tracer/traceProgram';
+import { generateProgram } from '../src/problems/generateProgram';
+import type { TraceItem, CharacterTrace } from '../src/problems/traceProgram';
 
 const defaultBoard = ('.'.repeat(GRID_COLUMNS) + '\n').repeat(GRID_ROWS).trim();
 const cx = Math.floor(GRID_COLUMNS / 2);
@@ -17,44 +17,8 @@ const defaultCharacter: CharacterTrace = {
 
 test.each([
   {
-    program: {
-      languageId: 'java',
-      rawDisplayProgram: `
-import net.exkazuu.Character;
-
-public class Main {
-  public static void main(String[] args) {
-    int a = 1; // sid: 1
-    if (a > 0) {
-      int b = 2; // sid: 2
-      a = f(a, b); // sid: 3
-    }
-    int c = a * 2; // sid: 4
-
-    public static int f(int x, int y) {
-      return x * y; // sid: 5
-    }
-  }
-}
-`.trim(),
-      instrumentedProgram: `
-s.set('a', 1);
-if (s.get('a') > 0) {
-  s.set('b', 2);
-  s.set('a', f(s.get('a'), s.get('b')));
-}
-s.set('c', s.get('a') * 2);
-
-function f(x, y) {
-  try {
-    s.enterNewScope();
-    s.set('ret', x * y);
-    return s.get('ret');
-  } finally {
-    s.leaveScope();
-  }
-}`.trim(),
-    },
+    languageId: 'java',
+    problemId: 'test3',
     expectedDisplayProgram: `
 import net.exkazuu.Character;
 
@@ -71,7 +35,8 @@ public class Main {
       return x * y;
     }
   }
-}`.trim(),
+}
+`.trim(),
     expectedSidToLineIndex: {
       1: 4,
       2: 6,
@@ -79,6 +44,7 @@ public class Main {
       4: 9,
       5: 12,
     },
+    expectedCheckpointSids: [],
     expectedTrace: [
       { sid: 1, vars: { a: 1 }, board: defaultBoard },
       { sid: 2, vars: { a: 1, b: 2 }, board: defaultBoard },
@@ -88,30 +54,8 @@ public class Main {
     ] as TraceItem[],
   },
   {
-    program: {
-      languageId: 'java',
-      rawDisplayProgram: `
-import net.exkazuu.Character;
-
-public class Main {
-  public static void main(String[] args) {
-    Character c = new Character(); // sid: 1
-    for (let i = 0; i < 2; i++) { // sid: 2
-      c.forward(); // sid: 3
-      c.forward(); // sid: 4
-      c.turnRight(); // sid: 5
-    }
-  }
-}
-`.trim(),
-      instrumentedProgram: `
-s.set('c', new Character());
-for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
-  s.get('c').forward();
-  s.get('c').forward();
-  s.get('c').turnRight();
-}`.trim(),
-    },
+    languageId: 'java',
+    problemId: 'test2',
     expectedDisplayProgram: `
 import net.exkazuu.Character;
 
@@ -133,6 +77,7 @@ public class Main {
       4: 7,
       5: 8,
     },
+    expectedCheckpointSids: [4],
     expectedTrace: [
       {
         sid: 1,
@@ -225,13 +170,32 @@ public class Main {
       },
     ] as TraceItem[],
   },
-] as const)('Trace a program', ({ expectedDisplayProgram, expectedSidToLineIndex, expectedTrace, program }) => {
-  const { displayProgram, sidToLineIndex, traceItems } = traceProgram(program);
-  expect(displayProgram).toEqual(expectedDisplayProgram);
-  expect(sidToLineIndex).toEqual(
-    new Map(Object.entries(expectedSidToLineIndex).map(([sid, lineIndex]) => [Number(sid), lineIndex]))
-  );
-  expect(stringifyObjects(traceItems)).toEqual(stringifyObjects(expectedTrace));
+] as const)(
+  'Trace a program',
+  ({
+    expectedCheckpointSids,
+    expectedDisplayProgram,
+    expectedSidToLineIndex,
+    expectedTrace,
+    languageId,
+    problemId,
+  }) => {
+    const { checkpointSids, displayProgram, sidToLineIndex, traceItems } = generateProgram(problemId, languageId, '');
+    expect(displayProgram).toEqual(expectedDisplayProgram);
+    expect(sidToLineIndex).toEqual(
+      new Map(Object.entries(expectedSidToLineIndex).map(([sid, lineIndex]) => [Number(sid), lineIndex]))
+    );
+    expect(checkpointSids).toEqual(expectedCheckpointSids);
+    expect(stringifyObjects(traceItems)).toEqual(stringifyObjects(expectedTrace));
+  }
+);
+test.each([
+  {
+    programId: 'testCheckpoints',
+    expected: [2, 5, 6],
+  },
+] as const)('Get program checkpoint line numbers', ({ expected, programId }) => {
+  expect(generateProgram(programId, 'js', '').checkpointSids).toEqual(expected);
 });
 
 /**

@@ -1,5 +1,8 @@
 import { DEFAULT_COLOR, EMPTY_COLOR, GRID_COLUMNS, GRID_ROWS } from '../components/organisms/TurtleGraphics';
-import type { CellColor, ColorChar, GeneratedProgram } from '../types';
+import type { CellColor, ColorChar } from '../types';
+
+import type { GeneratedProgram } from './generateProgram';
+import type { LanguageId } from './problemData';
 
 export interface CharacterTrace {
   x: number;
@@ -31,31 +34,27 @@ export const charToColor = {
   P: 'purple',
 } as const;
 
-export interface TraceResult {
-  traceItems: TraceItem[];
-  sidToLineIndex: Map<number, number>;
-  displayProgram: string;
-}
-
 export const colorToChar = Object.fromEntries(
   Object.entries(charToColor).map(([char, color]) => [color, char])
 ) as Record<CellColor, ColorChar>;
 
-export function traceProgram(program: GeneratedProgram): TraceResult {
-  if (program.instrumentedProgram.includes(' = ')) {
+export function traceProgram(
+  instrumented: string,
+  rawDisplayProgram: string,
+  languageId: LanguageId
+): GeneratedProgram {
+  if (instrumented.includes(' = ')) {
     throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
   }
-  if (
-    program.instrumentedProgram.includes('const ') ||
-    program.instrumentedProgram.includes('let ') ||
-    program.instrumentedProgram.includes('var ')
-  ) {
+  if (instrumented.includes('const ') || instrumented.includes('let ') || instrumented.includes('var ')) {
     throw new Error('Instrumented program MUST NOT contain variable declarations.');
   }
 
+  const checkpointSids: number[] = [];
+
   let statementId = 1;
   const modifiedCodeLines = [];
-  for (const line of program.instrumentedProgram.split('\n')) {
+  for (const line of instrumented.split('\n')) {
     let replaced = false;
     const newLine = line
       .replace(/for\s*\(([^;]*);\s*([^;]*);/, (_, init, cond) => `for (${init}; checkForCond(${cond}, ${statementId});`)
@@ -66,7 +65,11 @@ export function traceProgram(program: GeneratedProgram): TraceResult {
           const delimiter = args === '' ? '' : ', ';
           return `.${methodName}(${args}${delimiter}${statementId})${tail}`;
         }
-      );
+      )
+      .replace(/\/\/\s*CP.*/, () => {
+        checkpointSids.push(statementId);
+        return '';
+      });
     if (replaced) statementId++;
     modifiedCodeLines.push(newLine);
   }
@@ -170,20 +173,26 @@ trace;
   console.log(executableCode); // TODO: remove this later
 
   let trace = eval(executableCode) as TraceItem[];
-  if ((program.languageId as string) === 'python') {
+  if ((languageId as string) === 'python') {
     trace = trace.filter((item: TraceItem) => !item.last);
   }
 
-  const lines = program.rawDisplayProgram.split('\n');
+  const lines = rawDisplayProgram.split('\n');
   const refinedLines = [];
   const sidToLineIndex = new Map<number, number>();
+  let lastSid = 0;
   for (const [index, line] of lines.entries()) {
-    const refinedLine = line.replace(/\s*\/\/\s*sid\s*:\s*(\d+)\s*/, (_, sid) => {
-      sidToLineIndex.set(Number(sid), index);
+    const refinedLine = line.replace(/\s*\/\/\s*sid\s*(:\s*\d+|)\s*/, (_, sid) => {
+      if (sid) {
+        lastSid = Number(sid.slice(1));
+      } else {
+        lastSid++;
+      }
+      sidToLineIndex.set(lastSid, index);
       return '';
     });
     refinedLines.push(refinedLine);
   }
 
-  return { traceItems: trace, sidToLineIndex, displayProgram: refinedLines.join('\n') };
+  return { languageId, displayProgram: refinedLines.join('\n'), traceItems: trace, sidToLineIndex, checkpointSids };
 }

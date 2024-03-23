@@ -7,7 +7,8 @@ import { CustomModal } from '../../../../../../components/molecules/CustomModal'
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
-import type { GeneratedProgram, ProblemType } from '../../../../../../types';
+import type { GeneratedProgram } from '../../../../../../problems/generateProgram';
+import type { ProblemType } from '../../../../../../types';
 
 interface ExecutionResultProblemProps {
   problemProgram: GeneratedProgram;
@@ -58,11 +59,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
       <VStack spacing="10">
         <Box>プログラムの実行後の結果を解答してください。</Box>
         <Box>
-          <TurtleGraphics
-            ref={turtleGraphicsRef}
-            isEnableOperation={true}
-            problemProgram={problemProgram.instrumentedProgram}
-          />
+          <TurtleGraphics ref={turtleGraphicsRef} isEnableOperation={true} problemProgram={problemProgram} />
         </Box>
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">

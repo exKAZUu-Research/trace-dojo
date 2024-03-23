@@ -7,7 +7,7 @@ import { CustomModal } from '../../../../../../components/molecules/CustomModal'
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
-import type { GeneratedProgram } from '../../../../../../types';
+import type { GeneratedProgram } from '../../../../../../problems/generateProgram';
 import { solveProblem } from '../../../../../lib/solveProblem';
 
 import { Variables } from './Variables';
@@ -20,8 +20,8 @@ interface StepProblemProps {
   explanation?: Record<'title' | 'body', string>;
   handleComplete: () => void;
   selectedLanguageId: string;
-  setBeforeCheckPointLine: (line: number) => void;
-  setCurrentCheckPointLine: (line: number) => void;
+  setBeforeCheckpointSid: (line: number) => void;
+  setCurrentCheckpointSid: (line: number) => void;
 }
 
 export const StepProblem: React.FC<StepProblemProps> = ({
@@ -32,8 +32,8 @@ export const StepProblem: React.FC<StepProblemProps> = ({
   handleComplete,
   problemProgram,
   selectedLanguageId,
-  setBeforeCheckPointLine,
-  setCurrentCheckPointLine,
+  setBeforeCheckpointSid,
+  setCurrentCheckpointSid,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
   const {
@@ -43,7 +43,8 @@ export const StepProblem: React.FC<StepProblemProps> = ({
   } = useDisclosure();
   const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
 
-  const beforeCheckpointResult = solveProblem(problemProgram.instrumentedProgram).histories?.at(beforeCheckPointLine);
+  // TODO: Use problemProgram.traceItems instead of solveProblem
+  const beforeCheckpointResult = solveProblem(problemProgram.displayProgram).histories?.at(beforeCheckPointLine);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -63,8 +64,8 @@ export const StepProblem: React.FC<StepProblemProps> = ({
         handleComplete();
       } else {
         alert('正解です。次の行に進みます');
-        setBeforeCheckPointLine(currentCheckPointLine);
-        setCurrentCheckPointLine(currentCheckPointLine + 1);
+        setBeforeCheckpointSid(currentCheckPointLine);
+        setCurrentCheckpointSid(currentCheckPointLine + 1);
       }
     } else {
       alert('不正解です。もう一度回答してください');
@@ -79,20 +80,20 @@ export const StepProblem: React.FC<StepProblemProps> = ({
         <Box>
           <TurtleGraphics
             ref={turtleGraphicsRef}
-            beforeCheckPointLine={beforeCheckPointLine}
-            currentCheckPointLine={currentCheckPointLine}
+            beforeCheckpointSid={beforeCheckPointLine}
+            currentCheckpointSid={currentCheckPointLine}
             isEnableOperation={false}
-            problemProgram={problemProgram.instrumentedProgram}
+            problemProgram={problemProgram}
           />
         </Box>
         <Box>茶色のハイライト時点の実行結果</Box>
         <Box>
           <TurtleGraphics
             ref={turtleGraphicsRef}
-            beforeCheckPointLine={beforeCheckPointLine}
-            currentCheckPointLine={currentCheckPointLine}
+            beforeCheckpointSid={beforeCheckPointLine}
+            currentCheckpointSid={currentCheckPointLine}
             isEnableOperation={true}
-            problemProgram={problemProgram.instrumentedProgram}
+            problemProgram={problemProgram}
           />
         </Box>
       </VStack>

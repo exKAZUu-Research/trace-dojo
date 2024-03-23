@@ -40,7 +40,7 @@ export class Character {
   }
 
   moveForward(): void {
-    if (!this.canMoveForward()) return;
+    if (!this.canForward()) return;
 
     switch (this.direction) {
       case 'up': {
@@ -144,25 +144,7 @@ export class Character {
     this.penDown = false;
   }
 
-  rotateCss(): string {
-    switch (this.direction) {
-      case 'up': {
-        return 'rotate(180deg)';
-      }
-      case 'down': {
-        return 'rotate(0deg)';
-      }
-      case 'left': {
-        return 'rotate(90deg)';
-      }
-      case 'right': {
-        return 'rotate(270deg)';
-      }
-    }
-    return '';
-  }
-
-  canMoveForward(): boolean {
+  canForward(): boolean {
     switch (this.direction) {
       case 'up': {
         return this.y > 1;
@@ -177,7 +159,6 @@ export class Character {
         return this.x < GRID_COLUMNS;
       }
     }
-    return false;
   }
 
   canMoveBack(): boolean {
@@ -195,6 +176,22 @@ export class Character {
         return this.x > 1;
       }
     }
-    return false;
+  }
+}
+
+export function convertCharacterDirectionToCss(ch: Character): string {
+  switch (ch.direction) {
+    case 'up': {
+      return 'rotate(180deg)';
+    }
+    case 'down': {
+      return 'rotate(0deg)';
+    }
+    case 'left': {
+      return 'rotate(90deg)';
+    }
+    case 'right': {
+      return 'rotate(270deg)';
+    }
   }
 }

@@ -11,22 +11,22 @@ import {
 test.skip('Parse a program', () => {
   const program = `
     const character = new Character();
-    character.moveForward();
-    character.moveForward();
-    character.moveForward();
-    character.moveForward();
-    character.moveForward();
+    character.forward();
+    character.forward();
+    character.forward();
+    character.forward();
+    character.forward();
   `;
   const parsedProgram = parseProgram(program);
 
   expect(parsedProgram).not.toBeFalsy();
   expect(parsedProgram).toEqual([
     'const character = new Character();',
-    'character.moveForward();',
-    'character.moveForward();',
-    'character.moveForward();',
-    'character.moveForward();',
-    'character.moveForward();',
+    'character.forward();',
+    'character.forward();',
+    'character.forward();',
+    'character.forward();',
+    'character.forward();',
   ]);
 });
 
@@ -37,11 +37,11 @@ test.skip('Extract variables', () => {
     const character3 = new Character();
     const character4 = new Character();
     const character5 = new Character();
-    character1.moveForward();
-    character2.moveForward();
-    character3.moveForward();
-    character4.moveForward();
-    character5.moveForward();
+    character1.forward();
+    character2.forward();
+    character3.forward();
+    character4.forward();
+    character5.forward();
   `;
   const characterVariables = extractVariableNames(command);
 
@@ -52,11 +52,11 @@ test.skip('Extract variables', () => {
 test.skip('Execute eval (1character)', () => {
   const command = `
     const character1 = new Character();
-    character1.moveForward();
-    character1.moveForward();
-    character1.moveForward();
-    character1.moveForward();
-    character1.moveForward();
+    character1.forward();
+    character1.forward();
+    character1.forward();
+    character1.forward();
+    character1.forward();
   `;
   const variables = executeEval(command);
   const characterVariables = selectCharacterVariables(variables);
@@ -70,10 +70,10 @@ test.skip('Execute eval (2characters)', () => {
   const command = `
     const character1 = new Character();
     const character2 = new Character({x: 2, y: 1});
-    character1.moveForward();
-    character1.moveForward();
-    character2.moveForward();
-    character2.moveForward();
+    character1.forward();
+    character1.forward();
+    character2.forward();
+    character2.forward();
   `;
   const variables = executeEval(command);
   const characterVariables = selectCharacterVariables(variables);
@@ -89,13 +89,13 @@ test.skip('Solve a problem (1character)', () => {
   const problemProgram = `
     const character1 = new Character();
     character1.moveBack();
-    character1.moveForward();
-    character1.moveForward();
-    character1.moveForward();
-    character1.moveForward();
-    character1.moveForward();
+    character1.forward();
+    character1.forward();
+    character1.forward();
+    character1.forward();
+    character1.forward();
     character1.turnLeft();
-    character1.moveForward();
+    character1.forward();
     character1.turnRight();
     character1.moveBack();
     character1.upPen();
@@ -164,10 +164,10 @@ test.skip('Solve a problem (multiple characters)', () => {
   const problemProgram = `
     const character1 = new Character();
     const character2 = new Character({color: 'green', x: 2, y: 1});
-    character1.moveForward();
-    character1.moveForward();
-    character2.moveForward();
-    character2.moveForward();
+    character1.forward();
+    character1.forward();
+    character2.forward();
+    character2.forward();
     const character3 = new Character({color: 'yellow', penDown: false, x: 3, y: 1});
   `;
 
