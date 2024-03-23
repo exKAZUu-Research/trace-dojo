@@ -60,10 +60,14 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
       if (currentCheckpointSid === problemProgram.checkpointSids.at(-1)) {
         // 最終チェックポイントを正解した場合はその次の行からステップ問題に移行
         alert('正解です。このチェックポイントから1行ずつ回答してください');
+        // TODO: ループの場合は、過去のsidに戻ることがあるので、sidを増やしてはならない。
+        // TODO: 代わりに `problemProgram.traceItems` の次の要素を参照すること。
         setCurrentCheckpointSid(currentCheckpointSid + 1);
         setProblemType('step');
       } else {
         alert('正解です。次のチェックポイントに進みます');
+        // TODO: ループの場合は、過去のsidに戻ることがあるので、sidを増やしてはならない。
+        // TODO: 代わりに `problemProgram.traceItems` の次の要素を参照すること。
         setCurrentCheckpointSid(
           problemProgram.checkpointSids[problemProgram.checkpointSids.indexOf(currentCheckpointSid) + 1]
         );
@@ -71,6 +75,8 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
     } else {
       // 不正解の場合は最後に正解したチェックポイントからステップ問題に移行
       alert('不正解です。最後に正解したチェックポイントから1行ずつ回答してください');
+      // TODO: ループの場合は、過去のsidに戻ることがあるので、sidを増やしてはならない。
+      // TODO: 代わりに `problemProgram.traceItems` の次の要素を参照すること。
       setCurrentCheckpointSid(beforeCheckpointSid + 1);
       setProblemType('step');
     }
@@ -128,9 +134,10 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         </HStack>
         <Box h="640px" w="100%">
           <SyntaxHighlighter
-            beforeCheckPointLine={beforeCheckpointSid}
+            // TODO: sid から行番号に変換すること。
+            beforeCheckpointLine={beforeCheckpointSid}
             code={problemProgram.displayProgram}
-            currentCheckPointLine={currentCheckpointSid}
+            currentCheckpointLine={currentCheckpointSid}
             programmingLanguageId={selectedLanguageId}
           />
         </Box>

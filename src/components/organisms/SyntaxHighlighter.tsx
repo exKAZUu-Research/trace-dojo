@@ -4,17 +4,17 @@ import { Prism } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 
 interface SyntaxHighlighterProps {
-  beforeCheckPointLine?: number;
+  beforeCheckpointLine?: number;
   code: string;
   programmingLanguageId: string;
-  currentCheckPointLine?: number;
+  currentCheckpointLine?: number;
 }
 
 export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
-  beforeCheckPointLine: beforeCheckPointLine,
-  code: code,
-  currentCheckPointLine: currentCheckPointLine,
-  programmingLanguageId: programmingLanguageId,
+  beforeCheckpointLine,
+  code,
+  currentCheckpointLine,
+  programmingLanguageId,
 }) => {
   return (
     <Box h="100%">
@@ -35,9 +35,9 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
             backgroundColor: '',
           };
           // チェックポイント問題・ステップ問題のハイライト
-          if (lineNumber === beforeCheckPointLine) {
+          if (lineNumber === beforeCheckpointLine) {
             style.backgroundColor = '#2E3D9F';
-          } else if (lineNumber === currentCheckPointLine) {
+          } else if (lineNumber === currentCheckpointLine) {
             style.backgroundColor = '#744210';
           }
           return { style };

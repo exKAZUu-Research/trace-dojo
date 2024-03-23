@@ -248,9 +248,9 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
       case 'step': {
         return (
           <StepProblem
-            beforeCheckPointLine={beforeCheckpointSid}
+            beforeCheckpointSid={beforeCheckpointSid}
             createAnswerLog={createAnswerLog}
-            currentCheckPointLine={currentCheckpointSid}
+            currentCheckpointSid={currentCheckpointSid}
             explanation={explanation}
             handleComplete={handleSolveProblem}
             problemProgram={problemProgram}
