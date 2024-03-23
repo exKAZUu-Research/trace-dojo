@@ -1,7 +1,7 @@
 import { DEFAULT_COLOR, EMPTY_COLOR, GRID_COLUMNS, GRID_ROWS } from '../components/organisms/TurtleGraphics';
 import type { CellColor, ColorChar, GeneratedProgram } from '../types';
 
-export interface TurtleTrace {
+export interface CharacterTrace {
   x: number;
   y: number;
   /** 色を表現する1文字 */
@@ -15,7 +15,7 @@ export interface TurtleTrace {
 export interface TraceItem {
   sid: number;
   // できる限り、可能性のある型を具体的に列挙していきたい。
-  vars: Record<string, number | string | TurtleTrace>;
+  vars: Record<string, number | string | CharacterTrace>;
   board: string;
   /** Pythonなどの拡張for文しかない言語において、削除すべき更新式か否か。 */
   last?: boolean;
@@ -31,11 +31,17 @@ export const charToColor = {
   P: 'purple',
 } as const;
 
+export interface TraceResult {
+  traceItems: TraceItem[];
+  sidToLineIndex: Map<number, number>;
+  displayProgram: string;
+}
+
 export const colorToChar = Object.fromEntries(
   Object.entries(charToColor).map(([char, color]) => [color, char])
 ) as Record<CellColor, ColorChar>;
 
-export function traceProgram(program: GeneratedProgram): [TraceItem[], Map<number, number>] {
+export function traceProgram(program: GeneratedProgram): TraceResult {
   if (program.instrumentedProgram.includes(' = ')) {
     throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
   }
@@ -54,7 +60,7 @@ export function traceProgram(program: GeneratedProgram): [TraceItem[], Map<numbe
     const newLine = line
       .replace(/for\s*\(([^;]*);\s*([^;]*);/, (_, init, cond) => `for (${init}; checkForCond(${cond}, ${statementId});`)
       .replaceAll(
-        /\.(set|forward|penDown|penUp|rotateRight|rotateLeft)\(([^\n;]*)\)(;|\)\s*{)/g,
+        /\.(set|forward|penDown|penUp|turnRight|turnLeft)\(([^\n;]*)\)(;|\)\s*{)/g,
         (_, methodName, args, tail) => {
           replaced = true;
           const delimiter = args === '' ? '' : ', ';
@@ -108,7 +114,7 @@ const dirs = ['N', 'E', 'S', 'W'];
 const dx = [0, 1, 0, -1];
 const dy = [-1, 0, 1, 0];
 const board = Array.from({ length: ${GRID_ROWS} }, () => Array.from({ length: ${GRID_COLUMNS} }, () => '${EMPTY_COLOR}'));
-class Turtle {
+class Character {
   constructor(sid, x = ${Math.floor(GRID_COLUMNS / 2)}, y = ${Math.floor(GRID_ROWS / 2)}, color = '${DEFAULT_COLOR}') {
     this.x = x;
     this.y = y;
@@ -135,11 +141,11 @@ class Turtle {
     this.pen = false;
     addTrace(sid);
   }
-  rotateRight(sid) {
+  turnRight(sid) {
     this.dir = dirs[(dirs.indexOf(this.dir) + 1) % 4];
     addTrace(sid);
   }
-  rotateLeft(sid) {
+  turnLeft(sid) {
     this.dir = dirs[(dirs.indexOf(this.dir) + 3) % 4];
     addTrace(sid);
   }
@@ -147,7 +153,7 @@ class Turtle {
 function addTrace(sid) {
   const vars = { ...s.vars };
   for (const key in vars) {
-    if (vars[key] instanceof Turtle) vars[key] = { ...vars[key] };
+    if (vars[key] instanceof Character) vars[key] = { ...vars[key] };
   }
   trace.push({ sid, vars, board: board.map(r => r.join('')).join('\\n') });
 }
@@ -161,21 +167,23 @@ s = new Scope();
 ${modifiedCode.trim()}
 trace;
 `;
-
   console.log(executableCode); // TODO: remove this later
+
   let trace = eval(executableCode) as TraceItem[];
   if ((program.languageId as string) === 'python') {
     trace = trace.filter((item: TraceItem) => !item.last);
   }
 
-  const lines = program.displayProgram.split('\n');
+  const lines = program.rawDisplayProgram.split('\n');
+  const refinedLines = [];
   const sidToLineIndex = new Map<number, number>();
   for (const [index, line] of lines.entries()) {
-    const matched = line.match(/sid\s*:\s*(\d+)/);
-    if (matched) {
-      sidToLineIndex.set(Number(matched[1]), index);
-    }
+    const refinedLine = line.replace(/\s*\/\/\s*sid\s*:\s*(\d+)\s*/, (_, sid) => {
+      sidToLineIndex.set(Number(sid), index);
+      return '';
+    });
+    refinedLines.push(refinedLine);
   }
 
-  return [trace, sidToLineIndex];
+  return { traceItems: trace, sidToLineIndex, displayProgram: refinedLines.join('\n') };
 }

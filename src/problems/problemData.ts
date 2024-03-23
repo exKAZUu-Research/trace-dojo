@@ -66,11 +66,12 @@ export function generateProgram(programId: ProgramId, languageId: LanguageId, va
   });
 
   let index = 0;
-  const displayProgram = languageId
+  const rawDisplayProgram = languageId
     ? programTemplate[languageId].replaceAll(randomNumberRegex, () => randomNumberArray[index++].toString())
     : '';
   return {
-    displayProgram,
+    languageId,
+    rawDisplayProgram,
     instrumentedProgram: jsProgram,
   };
 }
@@ -214,10 +215,10 @@ function set(value, name) {
   },
   getProgramCheckpointsTest: {
     jsInstrumentation: `
-s.set('t', new Turtle());
+s.set('t', new Character());
 s.get('t').forward(); // CP
 s.get('t').forward();
-s.get('t').rotateRight();
+s.get('t').turnRight();
 s.get('t').forward(); //  CP
 s.get('t').forward(); // CP character at end: OK
 s.get('t').forward(); // SID

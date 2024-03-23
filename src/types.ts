@@ -43,12 +43,15 @@ export type CharacterDirection = 'up' | 'down' | 'left' | 'right';
 export type ProblemType = 'executionResult' | 'checkpoint' | 'step';
 
 export type GeneratedProgram = {
+  /**
+   * The language ID of the program.
+   */
   languageId: LanguageId;
 
   /**
-   * The program to be displayed to the user.
+   * The raw program for a refined program to be displayed to the user.
    */
-  displayProgram: string;
+  rawDisplayProgram: string;
 
   /**
    * The instrumented program to be executed with `eval()`.
