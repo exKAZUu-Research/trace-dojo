@@ -45,7 +45,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     const init = useCallback((): void => {
       if (!problemProgram) return;
 
-      // TODO: Use problemProgram.traceItems instead of solveProblem
+      // TODO: `solveProblem()` の代わりに `problemProgram.traceItems` を参照すること。
       const solveResult = solveProblem(problemProgram.displayProgram).histories?.at(beforeCheckpointSid);
       const initBoard = solveResult?.board;
       const initCharacters = solveResult?.characterVariables?.map((character) => character.value);

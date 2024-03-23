@@ -100,7 +100,7 @@ export function isAnswerCorrect(
   answerBoard: BoardClass,
   step?: number
 ): boolean {
-  // TODO: Use problemProgram.traceItems instead of solveProblem
+  // TODO: `solveProblem()` の代わりに `problemProgram.traceItems` を参照すること。
   const correctAnswer = solveProblem(problemProgram.displayProgram).histories?.at(step || -1);
 
   if (!correctAnswer || !correctAnswer.characterVariables) return false;

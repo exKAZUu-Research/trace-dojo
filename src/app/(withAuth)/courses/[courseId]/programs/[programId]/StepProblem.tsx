@@ -43,7 +43,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
   } = useDisclosure();
   const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
 
-  // TODO: Use problemProgram.traceItems instead of solveProblem
+  // TODO: `solveProblem()` の代わりに `problemProgram.traceItems` を参照すること。
   const beforeCheckpointResult = solveProblem(problemProgram.displayProgram).histories?.at(beforeCheckPointLine);
 
   const handleClickResetButton = (): void => {
