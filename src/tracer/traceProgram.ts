@@ -1,5 +1,5 @@
 import { DEFAULT_COLOR, EMPTY_COLOR, GRID_COLUMNS, GRID_ROWS } from '../components/organisms/TurtleGraphics';
-import type { GeneratedProgram } from '../types';
+import type { CellColor, ColorChar, GeneratedProgram } from '../types';
 
 export interface TurtleTrace {
   x: number;
@@ -19,6 +19,20 @@ export interface TraceItem {
   board: string;
 }
 
+export const charToColor = {
+  '#': 'black',
+  '.': 'white',
+  R: 'red',
+  G: 'green',
+  B: 'blue',
+  Y: 'yellow',
+  P: 'purple',
+} as const;
+
+export const colorToChar = Object.fromEntries(
+  Object.entries(charToColor).map(([char, color]) => [color, char])
+) as Record<CellColor, ColorChar>;
+
 export function traceProgram(program: GeneratedProgram): TraceItem[] {
   if (program.instrumentedProgram.includes(' = ')) {
     throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
@@ -32,15 +46,23 @@ export function traceProgram(program: GeneratedProgram): TraceItem[] {
   }
 
   let statementId = 1;
-  const modifiedCode = program.instrumentedProgram.replaceAll(
-    /\.(set|forward|penDown|penUp|rotateRight|rotateLeft)\(([^\n;]*)\)(;|\)\s*{)/g,
-    (_, methodName, args, tail) => {
-      const delimiter = args === '' ? '' : ', ';
-      // for文の初期化式と更新式は同じステートメントIDを共有する
-      if (tail !== ';') statementId--;
-      return `.${methodName}(${args}${delimiter}${statementId++})${tail}`;
-    }
-  );
+  const modifiedCodeLines = [];
+  for (const line of program.instrumentedProgram.split('\n')) {
+    let replaced = false;
+    const newLine = line
+      .replace(/for\s*\(([^;]*);\s*([^;]*);/, (_, init, cond) => `for (${init}; checkForCond(${cond}, ${statementId});`)
+      .replaceAll(
+        /\.(set|forward|penDown|penUp|rotateRight|rotateLeft)\(([^\n;]*)\)(;|\)\s*{)/g,
+        (_, methodName, args, tail) => {
+          replaced = true;
+          const delimiter = args === '' ? '' : ', ';
+          return `.${methodName}(${args}${delimiter}${statementId})${tail}`;
+        }
+      );
+    if (replaced) statementId++;
+    modifiedCodeLines.push(newLine);
+  }
+  const modifiedCode = modifiedCodeLines.join('\n');
   // 無理に難読化する必要はないが、コードの文量を減らす意識を持つ。
   const executableCode = `
 const trace = [];
@@ -126,6 +148,12 @@ function addTrace(sid) {
     if (vars[key] instanceof Turtle) vars[key] = { ...vars[key] };
   }
   trace.push({ sid, vars, board: board.map(r => r.join('')).join('\\n') });
+}
+function checkForCond(cond, sid) {
+  if (!cond && trace.at(-1).sid === sid) {
+    trace.at(-1).last = true;
+  }
+  return cond;
 }
 s = new Scope();
 ${modifiedCode.trim()}

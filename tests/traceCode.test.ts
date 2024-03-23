@@ -137,6 +137,7 @@ for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
           { x: cx + 1, y: cy - 2, color: '#' },
           { x: cx + 2, y: cy - 2, color: '#' },
         ]),
+        last: true,
       },
     ] as TraceItem[],
   },

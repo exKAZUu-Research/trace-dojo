@@ -9,7 +9,8 @@ export interface LayoutProps {
 
 export type LayoutComponent = React.FC<LayoutProps>;
 
-export type CellColor = 'red' | 'blue' | 'green' | 'yellow' | 'purple' | 'white';
+export type ColorChar = '#' | '.' | 'R' | 'B' | 'G' | 'Y' | 'P';
+export type CellColor = 'black' | 'white' | 'red' | 'blue' | 'green' | 'yellow' | 'purple';
 export type Cell = {
   color: CellColor;
 };
