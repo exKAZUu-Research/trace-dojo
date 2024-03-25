@@ -39,7 +39,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
     turtleGraphicsRef.current?.init();
   };
 
-  const lastStep = problem.traceItems.length;
+  const lastSid = problem.traceItems.at(-1)?.sid;
 
   const handleClickAnswerButton = async (): Promise<void> => {
     const isPassed = turtleGraphicsRef.current?.isPassed() || false;
@@ -63,7 +63,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
         <Box>
           <TurtleGraphics
             ref={turtleGraphicsRef}
-            currentCheckpointSid={lastStep}
+            currentCheckpointSid={lastSid}
             isEnableOperation={true}
             problem={problem}
           />
