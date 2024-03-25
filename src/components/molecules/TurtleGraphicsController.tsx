@@ -88,12 +88,7 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
             <Box>
               <Button onClick={() => handleAddTurtleButton(selectedTurtleColor)}>キャラクターを追加する</Button>
             </Box>
-            <Select
-              defaultValue={DEFAULT_COLOR}
-              maxW="300"
-              value={selectedTurtleColor}
-              onChange={(e) => handleSelectTurtleColor(e)}
-            >
+            <Select maxW="300" value={selectedTurtleColor} onChange={(e) => handleSelectTurtleColor(e)}>
               <option key={'R'} value={'R'}>
                 赤
               </option>
