@@ -11,7 +11,7 @@ export const dirCharToJapanese = {
   N: '上',
   E: '右',
   S: '下',
-  W: '右',
+  W: '左',
 };
 
 const penStateJapanese = (penDown: boolean): string => {
