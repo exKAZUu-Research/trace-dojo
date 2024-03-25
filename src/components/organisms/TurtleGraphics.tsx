@@ -1,19 +1,12 @@
 'use client';
 
-import { Box, Grid, GridItem } from '@chakra-ui/react';
-import Image from 'next/image';
+import { Box, Grid, GridItem, Image } from '@chakra-ui/react';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
 
-import { Board } from '../../app/lib/board';
-import { Character, convertCharacterDirectionToCss } from '../../app/lib/character';
-import { isAnswerCorrect, solveProblem } from '../../app/lib/solveProblem';
 import type { Problem } from '../../problems/generateProblem';
-import type { CellColor, CharacterDirection, SelectedCell } from '../../types';
+import { charToColor, type CharacterTrace } from '../../problems/traceProgram';
+import type { ColorChar, SelectedCell } from '../../types';
 import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController';
-
-// 原点（左上隅）の座標
-export const ORIGIN_X = 1;
-export const ORIGIN_Y = 1;
 
 export const GRID_COLUMNS = 13;
 export const GRID_ROWS = 9;
@@ -21,6 +14,17 @@ export const GRID_SIZE = 40;
 
 export const EMPTY_COLOR = '.';
 export const DEFAULT_COLOR = '#';
+
+const CHARACTER_DIRS = ['N', 'E', 'S', 'W'];
+const DX = [0, 1, 0, -1];
+const DY = [-1, 0, 1, 0];
+
+const charToRotateStyle = {
+  N: 'rotate(180deg)',
+  S: 'rotate(0deg)',
+  W: 'rotate(90deg)',
+  E: 'rotate(270deg)',
+} as const;
 
 interface TurtleGraphicsProps {
   isEnableOperation?: boolean;
@@ -36,21 +40,37 @@ export interface TurtleGraphicsHandle {
 
 export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
   ({ beforeCheckpointSid = 0, currentCheckpointSid, isEnableOperation = false, problem }, ref) => {
-    const [board, setBoard] = useState<Board>(new Board());
-    const [characters, setCharacters] = useState<Character[]>([]);
-    const [selectedCharacter, setSelectedCharacter] = useState<Character>();
+    const [board, setBoard] = useState<ColorChar[][]>([]);
+    const [characters, setCharacters] = useState<CharacterTrace[]>([]);
+    const [selectedCharacter, setSelectedCharacter] = useState<CharacterTrace>();
     const [selectedCell, setSelectedCell] = useState<SelectedCell>();
-    const [dragging, setDragging] = useState<boolean>(false);
 
     const init = useCallback((): void => {
       if (!problem) return;
 
-      // TODO: `solveProblem()` の代わりに `problem.traceItems` を参照すること。
-      const solveResult = solveProblem(problem.displayProgram).histories?.at(beforeCheckpointSid);
-      const initBoard = solveResult?.board;
-      const initCharacters = solveResult?.characterVariables?.map((character) => character.value);
+      const traceItem = problem.traceItems.find((traceItem) => traceItem.sid === beforeCheckpointSid);
 
-      setBoard(initBoard || new Board());
+      if (!traceItem) return;
+
+      const initBoard = traceItem.board
+        .trim()
+        .split('\n')
+        .filter((line) => line.trim() !== '')
+        .map((line) => [...line.trim()]);
+
+      const variables = traceItem.vars;
+      const initCharacters = [];
+      const initOtherVars = [];
+      for (const key in variables) {
+        const value = variables[key];
+        if (typeof value === 'string' || typeof value === 'number') {
+          initOtherVars.push(value);
+        } else if (value.dir && value.color) {
+          initCharacters.push(value);
+        }
+      }
+
+      setBoard(initBoard as ColorChar[][]);
       setCharacters(initCharacters || []);
       setSelectedCharacter(undefined);
       setSelectedCell(undefined);
@@ -66,142 +86,127 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       init();
     }, [beforeCheckpointSid, init, problem]);
 
-    const updateCharacter = (updater: (char: Character) => void): void => {
-      if (!selectedCharacter) return;
-
-      const updatedCharacter = new Character({ ...selectedCharacter });
-      updater(updatedCharacter);
-
+    const updateCharacters = (character: CharacterTrace): void => {
       setCharacters((prevCharacters) =>
         prevCharacters.map((prevCharacter) => {
-          if (prevCharacter.id === selectedCharacter.id) {
-            return updatedCharacter;
+          if (prevCharacter === selectedCharacter) {
+            return character;
           }
           return prevCharacter;
         })
       );
-      board.updateGrid(updatedCharacter);
-      setSelectedCharacter(updatedCharacter);
     };
 
-    const updateCellColor = (color: CellColor, columnIndex: number, rowIndex: number): void => {
+    const updateCellColor = (color: ColorChar, columnIndex: number, rowIndex: number): void => {
       setBoard((prevBoard) => {
-        const newBoard = new Board();
-        for (const [y, rows] of prevBoard.grid.entries()) {
-          for (const [x, column] of rows.entries()) {
-            newBoard.setCellColor(x, y, column.color);
-          }
-        }
-        newBoard.setCellColor(columnIndex, rowIndex, color);
+        const newBoard = prevBoard.map((row) => [...row]);
+        newBoard[rowIndex][columnIndex] = color;
         return newBoard;
       });
     };
 
     const isPassed = (): boolean => {
-      return isAnswerCorrect(problem, characters, board, currentCheckpointSid);
+      const traceItem = problem.traceItems.find((traceItem) => traceItem.sid === currentCheckpointSid);
+
+      if (!traceItem) return false;
+
+      const variables = traceItem.vars;
+      const correctCharacters = [];
+      for (const key in variables) {
+        const value = variables[key];
+        if (typeof value !== 'string' && typeof value !== 'number' && value.dir && value.color) {
+          correctCharacters.push(value);
+        }
+      }
+
+      const correctBoard = traceItem.board
+        .trim()
+        .split('\n')
+        .filter((line) => line.trim() !== '')
+        .map((line) => [...line.trim()]);
+
+      // TODO: remove this later
+      console.log('correctCharacters', correctCharacters);
+      console.log('userCharacters', characters);
+      console.log('correctBoard', correctBoard);
+      console.log('userBoard', board);
+
+      return (
+        JSON.stringify(correctCharacters) === JSON.stringify(characters) &&
+        JSON.stringify(correctBoard) === JSON.stringify(board)
+      );
     };
 
-    const handleClickCharacter = (character: Character): void => {
+    const handleClickCharacter = (character: CharacterTrace): void => {
       setSelectedCell(undefined);
       setSelectedCharacter(character);
-    };
-
-    const handleClickCharacterMoveButton = (): void => {
-      setDragging(true);
-    };
-
-    const finishCharacterDragging = (): void => {
-      setDragging(false);
-    };
-
-    const handleCharacterDragging = (event: React.MouseEvent<HTMLDivElement>): void => {
-      if (selectedCharacter && dragging) {
-        const rect = event.currentTarget.getBoundingClientRect();
-        let x = Math.floor((event.clientX - rect.left) / GRID_SIZE) + 1;
-        let y = Math.floor((event.clientY - rect.top) / GRID_SIZE) + 1;
-
-        // 移動先の座標がマップ内に収まるように制御
-        x = Math.max(ORIGIN_X, Math.min(x, ORIGIN_X + GRID_COLUMNS - 1));
-        y = Math.max(ORIGIN_Y, Math.min(y, ORIGIN_Y + GRID_ROWS - 1));
-
-        setCharacters((prevCharacters) =>
-          prevCharacters.map((prevCharacter) => {
-            if (prevCharacter.id === selectedCharacter.id) {
-              selectedCharacter.setPosition(x, y);
-              return selectedCharacter;
-            }
-            return prevCharacter;
-          })
-        );
-      }
     };
 
     const handleClickCharacterMoveForwardButton = (): void => {
       if (!selectedCharacter) return;
 
-      updateCharacter((character) => {
-        character.moveForward();
-      });
+      const index = CHARACTER_DIRS.indexOf(selectedCharacter.dir);
+      const updatedX = selectedCharacter.x + DX[index];
+      const updatedY = selectedCharacter.y + DY[index];
+
+      if (updatedX < 0 || GRID_COLUMNS <= updatedX || updatedY < 0 || GRID_ROWS <= updatedY) {
+        return;
+      }
+
+      selectedCharacter.x = updatedX;
+      selectedCharacter.y = updatedY;
+      if (selectedCharacter.pen) {
+        updateCellColor(selectedCharacter.color as ColorChar, selectedCharacter.x, selectedCharacter.y);
+      }
+      updateCharacters(selectedCharacter);
     };
 
-    const handleClickCharacterMoveBackButton = (): void => {
+    const handleClickChangeCharacterDirectionButton = (dir: string): void => {
       if (!selectedCharacter) return;
 
-      updateCharacter((character) => {
-        character.moveBack();
-      });
-    };
+      if (dir === 'left') {
+        selectedCharacter.dir = CHARACTER_DIRS[(CHARACTER_DIRS.indexOf(selectedCharacter.dir) + 3) % 4];
+      } else if (dir === 'right') {
+        selectedCharacter.dir = CHARACTER_DIRS[(CHARACTER_DIRS.indexOf(selectedCharacter.dir) + 1) % 4];
+      }
 
-    const handleClickChangeCharacterDirectionButton = (direction: CharacterDirection): void => {
-      if (!selectedCharacter) return;
-
-      updateCharacter((character) => {
-        if (direction === 'left') character.turnLeft();
-        else if (direction === 'right') character.turnRight();
-      });
-    };
-
-    const handleClickChangeCharacterColorButton = (color: CellColor): void => {
-      if (!selectedCharacter) return;
-
-      updateCharacter((character) => {
-        character.setColor(color);
-      });
+      updateCharacters(selectedCharacter);
     };
 
     const handleClickCharacterPenUpButton = (): void => {
       if (!selectedCharacter) return;
 
-      updateCharacter((character) => {
-        character.liftPen();
-      });
+      selectedCharacter.pen = false;
+      updateCharacters(selectedCharacter);
     };
 
     const handleClickCharacterPenDownButton = (): void => {
       if (!selectedCharacter) return;
 
-      updateCharacter((character) => {
-        character.dropPen();
-      });
+      selectedCharacter.pen = true;
+      updateCellColor(selectedCharacter.color as ColorChar, selectedCharacter.x, selectedCharacter.y);
+      updateCharacters(selectedCharacter);
     };
 
-    const handleAddCharacterButton = (): void => {
-      if (!selectedCell) return;
+    const handleAddCharacterButton = (color: ColorChar): void => {
+      if (!selectedCell || !color) return;
 
-      const newCharacter = new Character({
-        x: selectedCell.x + ORIGIN_X,
-        y: selectedCell.y + ORIGIN_Y,
-        path: [`${selectedCell.x + ORIGIN_X},${selectedCell.y + ORIGIN_Y}`],
-      });
+      const newTurtle = {
+        x: selectedCell.x,
+        y: selectedCell.y,
+        color,
+        dir: 'N',
+        pen: true,
+      };
 
-      board.updateGrid(newCharacter);
-      setCharacters((prevCharacters) => [...prevCharacters, newCharacter]);
-      setSelectedCharacter(newCharacter);
+      setCharacters((prevCharacters) => [...prevCharacters, newTurtle]);
+      updateCellColor(newTurtle.color as ColorChar, newTurtle.x, newTurtle.y);
+      setSelectedCharacter(newTurtle);
       setSelectedCell(undefined);
     };
 
-    const handleRemoveCharacterButton = (character: Character): void => {
-      setCharacters((prevCharacters) => prevCharacters.filter((prevCharacter) => prevCharacter.id !== character.id));
+    const handleRemoveCharacterButton = (character: CharacterTrace): void => {
+      setCharacters((prevCharacters) => prevCharacters.filter((prevCharacter) => prevCharacter === character));
       setSelectedCharacter(undefined);
     };
 
@@ -212,7 +217,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       setSelectedCell({ x, y });
     };
 
-    const handleChangeCellColorButton = (color: CellColor): void => {
+    const handleChangeCellColorButton = (color: ColorChar): void => {
       if (!selectedCell) return;
 
       updateCellColor(color, selectedCell.x, selectedCell.y);
@@ -226,25 +231,21 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       event.preventDefault();
 
       handleClickCell(columnIndex, rowIndex);
-      updateCellColor('white', columnIndex, rowIndex);
+      updateCellColor('.', columnIndex, rowIndex);
     };
 
     return (
-      <Box
-        className="turtle-graphics-container"
-        onMouseMove={handleCharacterDragging}
-        onMouseUp={finishCharacterDragging}
-      >
+      <Box className="turtle-graphics-container">
         <Grid
           position="relative"
           templateColumns={`repeat(${GRID_COLUMNS}, ${GRID_SIZE}px)`}
           templateRows={`repeat(${GRID_ROWS}, ${GRID_SIZE}px)`}
         >
-          {board.grid.map((columns, rowIndex) =>
-            columns.map((g, columnIndex) => (
+          {board.map((columns, rowIndex) =>
+            columns.map((color, columnIndex) => (
               <GridItem
                 key={columnIndex}
-                backgroundColor={g.color}
+                backgroundColor={charToColor[color]}
                 borderColor="black"
                 borderWidth={selectedCell?.x === columnIndex && selectedCell?.y === rowIndex ? '2px' : '0.5px'}
                 className="grid-cell"
@@ -255,22 +256,22 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
           )}
           {characters.map((character) => (
             <Box
-              key={character.id}
-              borderColor={selectedCharacter?.id === character.id ? 'black' : 'transparent'}
+              key={'character' + character.x + character.y}
+              borderColor={selectedCharacter?.color === character.color ? 'black' : 'transparent'}
               borderWidth="2px"
               h={GRID_SIZE + 'px'}
-              left={(character.x - ORIGIN_X) * GRID_SIZE + 'px'}
+              left={character.x * GRID_SIZE + 'px'}
               position="absolute"
-              top={(character.y - ORIGIN_Y) * GRID_SIZE + 'px'}
+              top={character.y * GRID_SIZE + 'px'}
               w={GRID_SIZE + 'px'}
               onClick={() => handleClickCharacter(character)}
-              onContextMenu={(e) => handleContextMenu(e, character.x - ORIGIN_X, character.y - ORIGIN_Y)}
+              onContextMenu={(e) => handleContextMenu(e, character.x, character.y)}
             >
-              <Box p="0.2rem" transform={convertCharacterDirectionToCss(character)}>
+              <Box p="0.2rem" transform={charToRotateStyle[character.dir as keyof typeof charToRotateStyle]}>
                 <Image
-                  alt={character.name}
+                  alt={'character' + character.x + character.y}
                   height={GRID_SIZE}
-                  src={`/character/${character.color}.png`}
+                  src={`/character/${charToColor[character.color as keyof typeof charToColor]}.png`}
                   width={GRID_SIZE}
                 />
               </Box>
@@ -282,10 +283,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
             board={board}
             handleAddCharacterButton={handleAddCharacterButton}
             handleChangeCellColorButton={handleChangeCellColorButton}
-            handleChangeCharacterColorButton={handleClickChangeCharacterColorButton}
             handleClickChangeCharacterDirectionButton={handleClickChangeCharacterDirectionButton}
-            handleClickCharacterMoveBackButton={handleClickCharacterMoveBackButton}
-            handleClickCharacterMoveButton={handleClickCharacterMoveButton}
             handleClickCharacterMoveForwardButton={handleClickCharacterMoveForwardButton}
             handleClickCharacterPenDownButton={handleClickCharacterPenDownButton}
             handleClickCharacterPenUpButton={handleClickCharacterPenUpButton}

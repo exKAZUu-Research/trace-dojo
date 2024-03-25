@@ -1,25 +1,35 @@
 import { Box, Table, TableCaption, TableContainer, Tbody, Td, Th, Thead, Tr, VStack } from '@chakra-ui/react';
 import React from 'react';
 
-import type { CharacterDirection, CharacterVariable, Variable } from '../../../../../../types';
+import { charToColor, type TraceItemVar } from '../../../../../../problems/traceProgram';
 
 interface VariablesProps {
-  characterVariables?: CharacterVariable[];
-  variables?: Variable[];
+  traceItemVars?: TraceItemVar;
 }
 
-const directionJapanese: { [key in CharacterDirection]: string } = {
-  up: '上',
-  down: '下',
-  left: '左',
-  right: '右',
+export const dirCharToJapanese = {
+  N: '上',
+  E: '下',
+  S: '左',
+  W: '右',
 };
 
 const penStateJapanese = (penDown: boolean): string => {
   return penDown ? 'おいている' : 'あげている';
 };
 
-export const Variables: React.FC<VariablesProps> = ({ characterVariables, variables }) => {
+export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
+  const characterVars = [];
+  const otherVars = [];
+  for (const key in traceItemVars) {
+    const value = traceItemVars[key];
+    if (typeof value === 'string' || typeof value === 'number') {
+      otherVars.push({ key, value });
+    } else if (value.dir && value.color) {
+      characterVars.push({ key, value });
+    }
+  }
+
   return (
     <VStack>
       <TableContainer w="100%">
@@ -28,22 +38,20 @@ export const Variables: React.FC<VariablesProps> = ({ characterVariables, variab
           <Thead>
             <Tr>
               <Th>変数名</Th>
-              <Th>名前</Th>
               <Th>線の色</Th>
               <Th>向き</Th>
               <Th>ペンの状態</Th>
             </Tr>
           </Thead>
           <Tbody>
-            {characterVariables?.map((variable) => (
-              <Tr key={variable.value.id}>
-                <Td>{variable.name}</Td>
-                <Td>{variable.value.name}</Td>
+            {characterVars?.map((variable) => (
+              <Tr key={variable.key}>
+                <Td>{variable.key}</Td>
                 <Td>
-                  <Box bg={variable.value.color} h="20px" w="20px" />
+                  <Box bg={charToColor[variable.value.color as keyof typeof charToColor]} h="20px" w="20px" />
                 </Td>
-                <Td>{directionJapanese[variable.value.direction]}</Td>
-                <Td>{penStateJapanese(variable.value.penDown)}</Td>
+                <Td>{dirCharToJapanese[variable.value.dir as keyof typeof dirCharToJapanese]}</Td>
+                <Td>{penStateJapanese(variable.value.pen)}</Td>
               </Tr>
             ))}
           </Tbody>
@@ -59,9 +67,9 @@ export const Variables: React.FC<VariablesProps> = ({ characterVariables, variab
             </Tr>
           </Thead>
           <Tbody>
-            {variables?.map((variable) => (
-              <Tr key={variable.name}>
-                <Td>{variable.name}</Td>
+            {otherVars?.map((variable) => (
+              <Tr key={variable.key}>
+                <Td>{variable.key}</Td>
                 <Td>{variable.value}</Td>
               </Tr>
             ))}

@@ -17,12 +17,14 @@ export interface CharacterTrace {
 
 export interface TraceItem {
   sid: number;
-  // できる限り、可能性のある型を具体的に列挙していきたい。
-  vars: Record<string, number | string | CharacterTrace>;
+  vars: TraceItemVar;
   board: string;
   /** Pythonなどの拡張for文しかない言語において、削除すべき更新式か否か。 */
   last?: boolean;
 }
+
+// できる限り、可能性のある型を具体的に列挙していきたい。
+export type TraceItemVar = Record<string, number | string | CharacterTrace>;
 
 export const charToColor = {
   '#': 'black',
@@ -162,6 +164,7 @@ function checkForCond(cond, sid) {
   }
   return cond;
 }
+trace.push({board: board.map(r => r.join('')).join('\\n') });
 s = new Scope();
 ${modifiedCode.trim()}
 trace;

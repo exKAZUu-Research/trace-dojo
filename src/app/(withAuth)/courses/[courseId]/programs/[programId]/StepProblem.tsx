@@ -8,7 +8,6 @@ import { SyntaxHighlighter } from '../../../../../../components/organisms/Syntax
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
 import type { Problem } from '../../../../../../problems/generateProblem';
-import { solveProblem } from '../../../../../lib/solveProblem';
 
 import { Variables } from './Variables';
 
@@ -43,8 +42,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
   } = useDisclosure();
   const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
 
-  // TODO: `solveProblem()` の代わりに `problem.traceItems` を参照すること。
-  const beforeCheckpointResult = solveProblem(problem.displayProgram).histories?.at(beforeCheckpointSid);
+  const beforeCheckpointTraceItem = problem.traceItems.find((traceItem) => traceItem.sid === beforeCheckpointSid);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -134,10 +132,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
             programmingLanguageId={selectedLanguageId}
           />
         </Box>
-        <Variables
-          characterVariables={beforeCheckpointResult?.characterVariables}
-          variables={beforeCheckpointResult?.otherVariables}
-        />
+        <Variables traceItemVars={beforeCheckpointTraceItem?.vars} />
         <HStack>
           <Button onClick={() => handleClickResetButton()}>リセット</Button>
           <Button onClick={() => handleClickAnswerButton()}>解答</Button>
