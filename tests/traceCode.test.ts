@@ -46,7 +46,7 @@ public class Main {
     },
     expectedCheckpointSids: [],
     expectedTrace: [
-      { vars: {}, board: defaultBoard },
+      { sid: 0, vars: {}, board: defaultBoard },
       { sid: 1, vars: { a: 1 }, board: defaultBoard },
       { sid: 2, vars: { a: 1, b: 2 }, board: defaultBoard },
       { sid: 5, vars: { ret: 2 }, board: defaultBoard },
@@ -77,7 +77,7 @@ public class Main {
     },
     expectedCheckpointSids: [3],
     expectedTrace: [
-      { vars: {}, board: defaultBoard },
+      { sid: 0, vars: {}, board: defaultBoard },
       {
         sid: 1,
         vars: { c: defaultCharacter },
@@ -138,7 +138,7 @@ public class Main {
     },
     expectedCheckpointSids: [4],
     expectedTrace: [
-      { vars: {}, board: defaultBoard },
+      { sid: 0, vars: {}, board: defaultBoard },
       {
         sid: 1,
         vars: { c: defaultCharacter },
@@ -270,7 +270,7 @@ public class Main {
     },
     expectedCheckpointSids: [],
     expectedTrace: [
-      { vars: {}, board: defaultBoard },
+      { sid: 0, vars: {}, board: defaultBoard },
       {
         sid: 1,
         vars: { c1: defaultCharacter },
@@ -464,7 +464,7 @@ public class Straight {
     },
     expectedCheckpointSids: [2, 5, 6],
     expectedTrace: [
-      { vars: {}, board: defaultBoard },
+      { sid: 0, vars: {}, board: defaultBoard },
       {
         sid: 1,
         vars: { c: defaultCharacter },

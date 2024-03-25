@@ -34,24 +34,6 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
 }) => {
   const [selectedCharacterColor, setSelectedCharacterColor] = useState<ColorChar>(DEFAULT_COLOR);
 
-  interface ColorChangeButtonProps {
-    color: ColorChar;
-    selectedColor?: ColorChar;
-    handleOnClick: (color: ColorChar) => void;
-  }
-
-  const ColorChangeButton: React.FC<ColorChangeButtonProps> = ({ color, handleOnClick, selectedColor }) => {
-    return (
-      <Button
-        backgroundColor={color}
-        border={'1px'}
-        borderColor={'gray.400'}
-        opacity={color === selectedColor ? '1' : '0.3'}
-        onClick={() => handleOnClick(color)}
-      ></Button>
-    );
-  };
-
   const handleSelectCharacterColor = (event: React.ChangeEvent<HTMLSelectElement>): void => {
     const inputValue = event.target.value;
     setSelectedCharacterColor(inputValue as ColorChar);
@@ -89,6 +71,9 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
               <Button onClick={() => handleAddCharacterButton(selectedCharacterColor)}>キャラクターを追加する</Button>
             </Box>
             <Select maxW="300" value={selectedCharacterColor} onChange={(e) => handleSelectCharacterColor(e)}>
+              <option key={'#'} value={'#'}>
+                黒
+              </option>
               <option key={'R'} value={'R'}>
                 赤
               </option>
@@ -107,31 +92,48 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
             </Select>
           </HStack>
           <HStack>
-            <ColorChangeButton
-              color={'R'}
-              handleOnClick={() => handleChangeCellColorButton('R')}
-              selectedColor={board[selectedCell.y][selectedCell.x] as ColorChar}
-            />
-            <ColorChangeButton
-              color={'B'}
-              handleOnClick={() => handleChangeCellColorButton('B')}
-              selectedColor={board[selectedCell.y][selectedCell.x] as ColorChar}
-            />
-            <ColorChangeButton
-              color={'G'}
-              handleOnClick={() => handleChangeCellColorButton('G')}
-              selectedColor={board[selectedCell.y][selectedCell.x] as ColorChar}
-            />
-            <ColorChangeButton
-              color={'Y'}
-              handleOnClick={() => handleChangeCellColorButton('Y')}
-              selectedColor={board[selectedCell.y][selectedCell.x] as ColorChar}
-            />
-            <ColorChangeButton
-              color={'P'}
-              handleOnClick={() => handleChangeCellColorButton('P')}
-              selectedColor={board[selectedCell.y][selectedCell.x] as ColorChar}
-            />
+            <Button
+              backgroundColor={'black'}
+              border={'1px'}
+              borderColor={'gray.400'}
+              opacity={'#' === (board[selectedCell.y][selectedCell.x] as ColorChar) ? '1' : '0.3'}
+              onClick={() => handleChangeCellColorButton('#')}
+            ></Button>
+            <Button
+              backgroundColor={'red'}
+              border={'1px'}
+              borderColor={'gray.400'}
+              opacity={'R' === (board[selectedCell.y][selectedCell.x] as ColorChar) ? '1' : '0.3'}
+              onClick={() => handleChangeCellColorButton('R')}
+            ></Button>
+            <Button
+              backgroundColor={'blue'}
+              border={'1px'}
+              borderColor={'gray.400'}
+              opacity={'B' === (board[selectedCell.y][selectedCell.x] as ColorChar) ? '1' : '0.3'}
+              onClick={() => handleChangeCellColorButton('B')}
+            ></Button>
+            <Button
+              backgroundColor={'green'}
+              border={'1px'}
+              borderColor={'gray.400'}
+              opacity={'G' === (board[selectedCell.y][selectedCell.x] as ColorChar) ? '1' : '0.3'}
+              onClick={() => handleChangeCellColorButton('G')}
+            ></Button>
+            <Button
+              backgroundColor={'yellow'}
+              border={'1px'}
+              borderColor={'gray.400'}
+              opacity={'Y' === (board[selectedCell.y][selectedCell.x] as ColorChar) ? '1' : '0.3'}
+              onClick={() => handleChangeCellColorButton('Y')}
+            ></Button>
+            <Button
+              backgroundColor={'purple'}
+              border={'1px'}
+              borderColor={'gray.400'}
+              opacity={'P' === (board[selectedCell.y][selectedCell.x] as ColorChar) ? '1' : '0.3'}
+              onClick={() => handleChangeCellColorButton('P')}
+            ></Button>
           </HStack>
         </>
       )}

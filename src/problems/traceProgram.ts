@@ -164,7 +164,7 @@ function checkForCond(cond, sid) {
   }
   return cond;
 }
-trace.push({board: board.map(r => r.join('')).join('\\n') });
+trace.push({sid: 0, board: board.map(r => r.join('')).join('\\n') });
 s = new Scope();
 ${modifiedCode.trim()}
 trace;

@@ -206,7 +206,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     };
 
     const handleRemoveCharacterButton = (character: CharacterTrace): void => {
-      setCharacters((prevCharacters) => prevCharacters.filter((prevCharacter) => prevCharacter === character));
+      setCharacters((prevCharacters) => prevCharacters.filter((prevCharacter) => prevCharacter !== character));
       setSelectedCharacter(undefined);
     };
 
@@ -270,7 +270,6 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
               <Box p="0.2rem" transform={charToRotateStyle[character.dir as keyof typeof charToRotateStyle]}>
                 <Image
                   alt={'character' + character.x + character.y}
-                  height={GRID_SIZE}
                   src={`/character/${charToColor[character.color as keyof typeof charToColor]}.png`}
                   width={GRID_SIZE}
                 />

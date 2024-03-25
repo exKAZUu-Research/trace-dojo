@@ -9,8 +9,8 @@ interface VariablesProps {
 
 export const dirCharToJapanese = {
   N: '上',
-  E: '下',
-  S: '左',
+  E: '右',
+  S: '下',
   W: '右',
 };
 
