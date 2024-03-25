@@ -7,16 +7,16 @@ import { useIdleTimer } from 'react-idle-timer';
 import { useLocalStorage } from 'usehooks-ts';
 
 import { INTERVAL_MS_OF_IDLE_TIMER } from '../../../../../../constants';
+import type { Problem } from '../../../../../../problems/generateProblem';
+import { generateProblem } from '../../../../../../problems/generateProblem';
 import type { CourseId, LanguageId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
 import {
   defaultLanguageId,
-  generateProgram,
   getExplanation,
-  getProgramCheckpoints,
   programIdToName,
   visibleLanguageIds,
 } from '../../../../../../problems/problemData';
-import type { GeneratedProgram, ProblemType } from '../../../../../../types';
+import type { ProblemType } from '../../../../../../types';
 import {
   createUserAnswer,
   createUserCompletedProblem,
@@ -36,7 +36,6 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
   userId,
 }) => {
   const didFetchSessionRef = useRef(false);
-  const checkPointLines = getProgramCheckpoints(programId);
 
   const [startedAt] = useState(new Date());
   const [suspendedSession, setSuspendedSession] = useState<UserProblemSession>();
@@ -45,16 +44,26 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
     defaultLanguageId
   );
   const [problemType, setProblemType] = useState<ProblemType>('executionResult');
-  const problemProgram = useMemo<GeneratedProgram>(() => {
-    if (!suspendedSession) return { displayProgram: '', instrumentedProgram: '' };
-    return generateProgram(
+  const problem = useMemo<Problem>(() => {
+    // TODO: 後述の通り、Server Componentで `suspendedSession` 取得することで、ダミーデータを使う状況を排除したい。
+    if (!suspendedSession)
+      return {
+        languageId: selectedLanguageId,
+        displayProgram: '',
+        checkpointSids: [],
+        traceItems: [],
+        sidToLineIndex: new Map(),
+      };
+    return generateProblem(
       suspendedSession.programId as ProgramId,
       suspendedSession.languageId as LanguageId,
       suspendedSession.problemVariablesSeed
     );
   }, [suspendedSession]);
-  const [beforeCheckPointLine, setBeforeCheckPointLine] = useState(0);
-  const [currentCheckPointLine, setCurrentCheckPointLine] = useState(checkPointLines[0]);
+
+  // TODO: チェックポイントはあくまでsidなので、可視化する際は `sidToLineIndex` を用いて、行番号を特定すること。
+  const [beforeCheckpointSid, setBeforeCheckpointSid] = useState(0);
+  const [currentCheckpointSid, setCurrentCheckpointSid] = useState(problem.checkpointSids[0] ?? 0);
   const [lastTimeSpent, setLastTimeSpent] = useState(0);
   const [activityState, setActivityState] = useState<'Active' | 'Idle'>('Active');
 
@@ -85,13 +94,14 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
         setSelectedLanguageId(defaultLanguageId);
       }
 
+      // TODO: suspendedSessionの読み込み前では不正確な画面を描画してしまうため、Server Componentで描画前にデータを読み込むこと。
       let suspendedSession = await getSuspendedUserProblemSession(userId, courseId, programId, selectedLanguageId);
 
       if (suspendedSession) {
         // 中断中のセッションを再開する
         setProblemType(suspendedSession.currentProblemType as ProblemType);
-        setBeforeCheckPointLine(suspendedSession.beforeStep);
-        setCurrentCheckPointLine(suspendedSession.currentStep);
+        setBeforeCheckpointSid(suspendedSession.beforeStep);
+        setCurrentCheckpointSid(suspendedSession.currentStep);
         didFetchSessionRef.current = true;
       } else {
         // reactStrictModeが有効の場合にレコードが二重に作成されることを防ぐためrefで制御
@@ -137,8 +147,8 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
         selectedLanguageId,
         suspendedSession.problemVariablesSeed,
         problemType,
-        problemType === 'executionResult' ? 0 : beforeCheckPointLine,
-        problemType === 'executionResult' ? 0 : currentCheckPointLine,
+        problemType === 'executionResult' ? 0 : beforeCheckpointSid,
+        problemType === 'executionResult' ? 0 : currentCheckpointSid,
         suspendedSession.timeSpent,
         suspendedSession.startedAt,
         undefined,
@@ -150,7 +160,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentCheckPointLine, problemType]);
+  }, [currentCheckpointSid, problemType]);
 
   const handleSolveProblem = async (): Promise<void> => {
     if (userId && suspendedSession) {
@@ -163,8 +173,8 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
         selectedLanguageId,
         suspendedSession.problemVariablesSeed,
         problemType,
-        problemType === 'executionResult' ? 0 : beforeCheckPointLine,
-        problemType === 'executionResult' ? 0 : currentCheckPointLine,
+        problemType === 'executionResult' ? 0 : beforeCheckpointSid,
+        problemType === 'executionResult' ? 0 : currentCheckpointSid,
         suspendedSession.timeSpent,
         suspendedSession.startedAt,
         new Date(),
@@ -186,7 +196,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
       selectedLanguageId,
       userId,
       suspendedSession.id,
-      currentCheckPointLine,
+      currentCheckpointSid,
       isPassed,
       activeTime,
       startedAt
@@ -214,7 +224,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
             createAnswerLog={createAnswerLog}
             explanation={explanation}
             handleComplete={handleSolveProblem}
-            problemProgram={problemProgram}
+            problem={problem}
             selectedLanguageId={selectedLanguageId}
             setProblemType={setProblemType}
           />
@@ -223,15 +233,14 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
       case 'checkpoint': {
         return (
           <CheckpointProblem
-            beforeCheckPointLine={beforeCheckPointLine}
-            checkPointLines={checkPointLines}
+            beforeCheckpointSid={beforeCheckpointSid}
             createAnswerLog={createAnswerLog}
-            currentCheckPointLine={currentCheckPointLine}
+            currentCheckpointSid={currentCheckpointSid}
             explanation={explanation}
-            problemProgram={problemProgram}
+            problem={problem}
             selectedLanguageId={selectedLanguageId}
-            setBeforeCheckPointLine={setBeforeCheckPointLine}
-            setCurrentCheckPointLine={setCurrentCheckPointLine}
+            setBeforeCheckpointSid={setBeforeCheckpointSid}
+            setCurrentCheckpointSid={setCurrentCheckpointSid}
             setProblemType={setProblemType}
           />
         );
@@ -239,15 +248,15 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
       case 'step': {
         return (
           <StepProblem
-            beforeCheckPointLine={beforeCheckPointLine}
+            beforeCheckpointSid={beforeCheckpointSid}
             createAnswerLog={createAnswerLog}
-            currentCheckPointLine={currentCheckPointLine}
+            currentCheckpointSid={currentCheckpointSid}
             explanation={explanation}
             handleComplete={handleSolveProblem}
-            problemProgram={problemProgram}
+            problem={problem}
             selectedLanguageId={selectedLanguageId}
-            setBeforeCheckPointLine={setBeforeCheckPointLine}
-            setCurrentCheckPointLine={setCurrentCheckPointLine}
+            setBeforeCheckpointSid={setBeforeCheckpointSid}
+            setCurrentCheckpointSid={setCurrentCheckpointSid}
           />
         );
       }

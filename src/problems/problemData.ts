@@ -1,6 +1,3 @@
-import { Random } from '../app/lib/random';
-import type { GeneratedProgram } from '../types';
-
 export const courseIds = ['tuBeginner1', 'tuBeginner2'] as const;
 export type CourseId = (typeof courseIds)[number];
 
@@ -12,11 +9,14 @@ export const programIds = [
   'rectangle',
   'diamond',
   'test1',
-  'getProgramCheckpointsTest',
+  'test2',
+  'test3',
+  'test4',
+  'test5',
 ] as const;
 export type ProgramId = (typeof programIds)[number];
 
-export const languageIds = ['jsInstrumentation', 'js', 'java'] as const;
+export const languageIds = ['instrumented', 'js', 'java'] as const;
 export type LanguageId = (typeof languageIds)[number];
 
 export const visibleLanguageIds = ['java'] as const;
@@ -41,7 +41,10 @@ export const programIdToName: Record<ProgramId, string> = {
   rectangle: '図形を描こう(2)',
   diamond: '図形を描こう(3)',
   test1: 'ステップ実行のテスト用問題(1)',
-  getProgramCheckpointsTest: 'チェックポイント取得のテスト用問題',
+  test2: 'ステップ実行のテスト用問題(2)',
+  test3: 'ステップ実行のテスト用問題(3)',
+  test4: 'ステップ実行のテスト用問題(4)',
+  test5: 'チェックポイント取得のテスト用問題',
 };
 
 export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
@@ -49,113 +52,77 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
     ['straight', 'curve', 'stairs'],
     ['square', 'rectangle', 'diamond'],
   ],
-  tuBeginner2: [['test1', 'getProgramCheckpointsTest']],
+  tuBeginner2: [['test1', 'test2', 'test3', 'test4', 'test5']],
 };
-
-export function generateProgram(programId: ProgramId, languageId: LanguageId, variableSeed: string): GeneratedProgram {
-  const randomNumberRegex = /<(\d+)-(\d+)>/g;
-  const programTemplate = programIdToLanguageIdToProgram[programId];
-  const jsTemplate = programTemplate['js'];
-  const randomNumberArray: number[] = [];
-
-  const random = new Random(variableSeed);
-  const jsProgram = jsTemplate.replaceAll(randomNumberRegex, (match, min, max) => {
-    const randomNumber = random.getInteger(Number(min), Number(max));
-    randomNumberArray.push(randomNumber);
-    return randomNumber.toString();
-  });
-
-  let index = 0;
-  const displayProgram = languageId
-    ? programTemplate[languageId].replaceAll(randomNumberRegex, () => randomNumberArray[index++].toString())
-    : '';
-  return {
-    displayProgram,
-    instrumentedProgram: jsProgram,
-  };
-}
 
 export function getExplanation(programId: ProgramId, languageId: VisibleLanguageId): Record<'title' | 'body', string> {
   return programIdToLanguageIdToExplanation[programId]?.[languageId];
 }
 
-export function getProgramCheckpoints(programId: ProgramId): number[] {
-  const jsInstrumentationProgram = programIdToLanguageIdToProgram[programId]['jsInstrumentation'];
-  const lines = jsInstrumentationProgram.split('\n');
-
-  const checkpoints: number[] = [];
-  for (const [i, line] of lines.entries()) {
-    if (/(\/\/|#)\s*CP\s*(?:$|\s)/.test(line)) {
-      checkpoints.push(i + 1);
-    }
-  }
-
-  return checkpoints;
-}
-
 const defaultProgram = {
-  jsInstrumentation: '',
+  instrumented: '',
   js: '',
   java: '',
 };
 
 export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId, string>> = {
   straight: {
-    jsInstrumentation: '',
-    js: `
-const character1 = new Character();
-character1.moveForward();
-character1.moveForward();
-character1.moveForward();
-character1.moveForward();
+    instrumented: `
+s.set('c', new Character());
+s.get('c').forward();
+s.get('c').forward(); // CP
+s.get('c').forward();
 `.trim(),
+    js: `
+const c = new Character(); // sid: 1
+c.forward(); // sid: 2
+c.forward(); // sid: 3
+c.forward(); // sid: 4
+`.trim(),
+    // sidがただの連番である場合、番号を省略できる。
     java: `
-public class Straight {
+import net.exkazuu.Character;
+
+public class Main {
   public static void main(String[] args) {
-    var character1 = new Character();
-    character1.moveForward();
-    character1.moveForward();
-    character1.moveForward();
-    character1.moveForward();
+    Character c = new Character(); // sid
+    c.forward(); // sid
+    c.forward(); // sid
+    c.forward(); // sid
   }
 }
 `.trim(),
   },
   curve: {
-    jsInstrumentation: '',
+    instrumented: `
+s.set('c', new Character());
+for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
+  s.get('c').forward();
+  s.get('c').forward(); // CP
+  s.get('c').turnRight();
+}
+`.trim(),
     js: `
-const bear = new Character();
-bear.moveForward();
-bear.turnLeft();
-bear.upPen();
-let i = 0;
-bear.moveForward();
-const turtle = new Character({x: <2-5>, y: <3-5>, color: 'green'});
-turtle.moveForward();
-const foo = 'あいうえお';
-var bar = <1-100>;
-i = i + 1;
-turtle.moveForward();
-turtle.moveForward();
+const c = new Character(); // sid
+for (let i = 0; i < 2; i++) { // sid
+  c.forward(); // sid
+  c.forward(); // sid
+  c.turnRight(); // sid
+}
 `.trim(),
     java: `
+import net.exkazuu.Character;
+
 public class Main {
   public static void main(String[] args) {
-    Character bear = new Character();
-    bear.moveForward();
-    bear.turnLeft();
-    bear.upPen();
-    int i = 0;
-    bear.moveForward();
-    Character turtle = new Character(<2-5>, <3-5>, "green");
-    turtle.moveForward();
-    String foo = "あいうえお";
-    int bar = <1-100>;
-    i = i + 1;
-    turtle.moveForward();
-    turtle.moveForward();
+    Character c = new Character(); // sid
+    for (let i = 0; i < 2; i++) { // sid
+      c.forward(); // sid
+      c.forward(); // sid
+      c.turnRight(); // sid
+    }
   }
-};
+}
 `.trim(),
   },
   diamond: defaultProgram,
@@ -163,87 +130,200 @@ public class Main {
   square: defaultProgram,
   stairs: defaultProgram,
   test1: {
-    jsInstrumentation: `
-stack = [];
-
-enterScope();
-set("a", 1);
-if (get("a") > 0) {               // 2
-  set("b", 2);                    // 3
-  set("a", f(get("a"), get("b")); // 4
-}
-let c = get("a") * 2;             // 5
-
-function f(x, y) {                // 6
-  enterScope();
-  const ret = x * y;              // 7
-  leaveScope();
-  return ret;
-}
-
-function enterScope() {
-  stack.push({});
-}
-
-function leaveScope() {
-  if (stack.length === 0) throw new Error();
-  stack.pop();
-}
-
-function get(name) {
-  for (let i = stack.length; i >= 0; i--) {
-    if (stack[i][name] !== undefined) {
-      return stack[i][name];
-    }
-  }
-  throw new Error();
-}
-
-function set(value, name) {
-  for (let i = stack.length; i >= 0; i--) {
-    if (stack[i][name] !== undefined) {
-      stack[i][name] = value;
-      return;
-    }
-  }
-  stack[i].at(-1) = value;
-}
-`,
-    js: '',
-    java: '',
-  },
-  getProgramCheckpointsTest: {
-    jsInstrumentation: `
-s.set('t', new Turtle());
-s.get('t').forward(); // CP
-s.get('t').forward();
-s.get('t').rotateRight();
-s.get('t').forward(); //  CP
-s.get('t').forward(); // CP character at end: OK
-s.get('t').forward(); // SID
-s.get('t').forward();
+    instrumented: `
+s.set('c', new Character());
+s.get('c').forward();
+s.get('c').forward(); // CP
+s.get('c').forward();
 `.trim(),
     js: `
-const t = new Character();
-t.moveForward();
-t.moveForward();
-t.turnRight();
-t.moveForward();
-t.moveForward();
-t.moveForward();
-t.moveForward();
+const c = new Character(); // sid: 1
+c.forward(); // sid: 2
+c.forward(); // sid: 3
+c.forward(); // sid: 4
+`.trim(),
+    // sidがただの連番である場合、番号を省略できる。
+    java: `
+import net.exkazuu.Character;
+
+public class Main {
+  public static void main(String[] args) {
+    Character c = new Character(); // sid
+    c.forward(); // sid
+    c.forward(); // sid
+    c.forward(); // sid
+  }
+}
+`.trim(),
+  },
+  test2: {
+    instrumented: `
+s.set('c', new Character());
+for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
+  s.get('c').forward();
+  s.get('c').forward(); // CP
+  s.get('c').turnRight();
+}
+`.trim(),
+    js: `
+const c = new Character(); // sid
+for (let i = 0; i < 2; i++) { // sid
+  c.forward(); // sid
+  c.forward(); // sid
+  c.turnRight(); // sid
+}
+`.trim(),
+    java: `
+import net.exkazuu.Character;
+
+public class Main {
+  public static void main(String[] args) {
+    Character c = new Character(); // sid
+    for (let i = 0; i < 2; i++) { // sid
+      c.forward(); // sid
+      c.forward(); // sid
+      c.turnRight(); // sid
+    }
+  }
+}
+`.trim(),
+  },
+  test3: {
+    instrumented: `
+s.set('a', 1);
+if (s.get('a') > 0) {
+  s.set('b', 2);
+  s.set('a', f(s.get('a'), s.get('b')));
+}
+s.set('c', s.get('a') * 2);
+
+function f(x, y) {
+  try {
+    s.enterNewScope();
+    s.set('ret', x * y);
+    return s.get('ret');
+  } finally {
+    s.leaveScope();
+  }
+}
+`,
+    js: `
+let a = 1; // sid
+if (a > 0) {
+  let b = 2; // sid
+  a = f(a, b); // sid
+}
+let c = a * 2; // sid
+
+function f(x, y) {
+  return x * y; // sid
+}
+`,
+    java: `
+import net.exkazuu.Character;
+
+public class Main {
+  public static void main(String[] args) {
+    int a = 1; // sid: 1
+    if (a > 0) {
+      int b = 2; // sid: 2
+      a = f(a, b); // sid: 3
+    }
+    int c = a * 2; // sid: 4
+
+    public static int f(int x, int y) {
+      return x * y; // sid: 5
+    }
+  }
+}
+`.trim(),
+  },
+  test4: {
+    instrumented: `
+s.set('c1', new Character());
+s.get('c1').forward();
+s.get('c1').turnLeft();
+s.get('c1').penUp();
+s.set('i', 0);
+s.get('c1').forward();
+
+s.set('c2', new Character(<2-5>, <3-5>, 'G'));
+s.get('c2').forward();
+s.set('foo', 'あいうえお');
+s.set('bar', <1-100>);
+s.set('i', s.get('bar') + 1);
+s.get('c2').forward();
+s.get('c2').forward();
+`.trim(),
+    js: `
+const c1 = new Character(); // sid
+c1.forward(); // sid
+c1.turnLeft(); // sid
+c1.penUp(); // sid
+let i = 0; // sid
+c1.forward(); // sid
+
+const c2 = new Character({x: <2-5>, y: <3-5>, color: 'green'}); // sid
+c2.forward(); // sid
+const foo = 'あいうえお'; // sid
+let bar = <1-100>; // sid
+i = bar + 1; // sid
+c2.forward(); // sid
+c2.forward(); // sid
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Character c1 = new Character(); // sid
+    c1.forward(); // sid
+    c1.turnLeft(); // sid
+    c1.penUp(); // sid
+    int i = 0; // sid
+    c1.forward(); // sid
+
+    Character c2 = new Character(<2-5>, <3-5>, "green"); // sid
+    c2.forward(); // sid
+    String foo = "あいうえお"; // sid
+    int bar = <1-100>; // sid
+    i = bar + 1; // sid
+    c2.forward(); // sid
+    c2.forward(); // sid
+  }
+}
+`.trim(),
+  },
+  test5: {
+    instrumented: `
+s.set('c', new Character());
+s.get('c').forward(); // CP
+s.get('c').forward();
+s.get('c').turnRight();
+s.get('c').forward(); // CP
+s.get('c').forward(); // CP character at end: OK
+s.get('c').forward();
+s.get('c').forward();
+`.trim(),
+    js: `
+const c = new Character(); // sid
+c.forward(); // sid
+c.forward(); // sid
+c.turnRight(); // sid
+c.forward(); // sid
+c.forward(); // sid
+c.forward(); // sid
+c.forward(); // sid
 `.trim(),
     java: `
 public class Straight {
   public static void main(String[] args) {
-    var t = new Character();
-    t.moveForward();
-    t.moveForward();
-    t.turnRight();
-    t.moveForward();
-    t.moveForward();
-    t.moveForward();
-    t.moveForward();
+    var c = new Character(); // sid
+    c.forward(); // sid
+    c.forward(); // sid
+    c.turnRight(); // sid
+    c.forward(); // sid
+    c.forward(); // sid
+    c.forward(); // sid
+    c.forward(); // sid
   }
 }
 `.trim(),
@@ -268,5 +348,8 @@ export const programIdToLanguageIdToExplanation: Record<
   square: defaultExplanation,
   stairs: defaultExplanation,
   test1: defaultExplanation,
-  getProgramCheckpointsTest: defaultExplanation,
+  test2: defaultExplanation,
+  test3: defaultExplanation,
+  test4: defaultExplanation,
+  test5: defaultExplanation,
 };

@@ -5,8 +5,9 @@ import Image from 'next/image';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
 
 import { Board } from '../../app/lib/board';
-import { Character } from '../../app/lib/character';
+import { Character, convertCharacterDirectionToCss } from '../../app/lib/character';
 import { isAnswerCorrect, solveProblem } from '../../app/lib/solveProblem';
+import type { Problem } from '../../problems/generateProblem';
 import type { CellColor, CharacterDirection, SelectedCell } from '../../types';
 import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController';
 
@@ -23,9 +24,9 @@ export const DEFAULT_COLOR = '#';
 
 interface TurtleGraphicsProps {
   isEnableOperation?: boolean;
-  problemProgram: string;
-  currentCheckPointLine?: number;
-  beforeCheckPointLine?: number;
+  problem: Problem;
+  currentCheckpointSid?: number;
+  beforeCheckpointSid?: number;
 }
 
 export interface TurtleGraphicsHandle {
@@ -34,7 +35,7 @@ export interface TurtleGraphicsHandle {
 }
 
 export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
-  ({ beforeCheckPointLine = 0, currentCheckPointLine, isEnableOperation = false, problemProgram }, ref) => {
+  ({ beforeCheckpointSid = 0, currentCheckpointSid, isEnableOperation = false, problem }, ref) => {
     const [board, setBoard] = useState<Board>(new Board());
     const [characters, setCharacters] = useState<Character[]>([]);
     const [selectedCharacter, setSelectedCharacter] = useState<Character>();
@@ -42,9 +43,10 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     const [dragging, setDragging] = useState<boolean>(false);
 
     const init = useCallback((): void => {
-      if (!problemProgram) return;
+      if (!problem) return;
 
-      const solveResult = solveProblem(problemProgram).histories?.at(beforeCheckPointLine);
+      // TODO: `solveProblem()` の代わりに `problem.traceItems` を参照すること。
+      const solveResult = solveProblem(problem.displayProgram).histories?.at(beforeCheckpointSid);
       const initBoard = solveResult?.board;
       const initCharacters = solveResult?.characterVariables?.map((character) => character.value);
 
@@ -52,7 +54,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       setCharacters(initCharacters || []);
       setSelectedCharacter(undefined);
       setSelectedCell(undefined);
-    }, [beforeCheckPointLine, problemProgram]);
+    }, [beforeCheckpointSid, problem]);
 
     useImperativeHandle(ref, () => ({
       // 親コンポーネントから関数を呼び出せるようにする
@@ -62,7 +64,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
 
     useEffect(() => {
       init();
-    }, [beforeCheckPointLine, init, problemProgram]);
+    }, [beforeCheckpointSid, init, problem]);
 
     const updateCharacter = (updater: (char: Character) => void): void => {
       if (!selectedCharacter) return;
@@ -96,7 +98,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     };
 
     const isPassed = (): boolean => {
-      return isAnswerCorrect(problemProgram, characters, board, currentCheckPointLine);
+      return isAnswerCorrect(problem, characters, board, currentCheckpointSid);
     };
 
     const handleClickCharacter = (character: Character): void => {
@@ -171,7 +173,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       if (!selectedCharacter) return;
 
       updateCharacter((character) => {
-        character.upPen();
+        character.liftPen();
       });
     };
 
@@ -179,7 +181,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       if (!selectedCharacter) return;
 
       updateCharacter((character) => {
-        character.putPen();
+        character.dropPen();
       });
     };
 
@@ -264,7 +266,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
               onClick={() => handleClickCharacter(character)}
               onContextMenu={(e) => handleContextMenu(e, character.x - ORIGIN_X, character.y - ORIGIN_Y)}
             >
-              <Box p="0.2rem" transform={character.rotateCss()}>
+              <Box p="0.2rem" transform={convertCharacterDirectionToCss(character)}>
                 <Image
                   alt={character.name}
                   height={GRID_SIZE}

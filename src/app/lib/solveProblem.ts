@@ -1,3 +1,4 @@
+import type { Problem } from '../../problems/generateProblem';
 import type { CharacterVariable, History, SolveProblemResult, Variable } from '../../types';
 
 import { Board as BoardClass } from './board';
@@ -94,12 +95,13 @@ export function solveProblem(program: string): SolveProblemResult {
 }
 
 export function isAnswerCorrect(
-  problemProgram: string,
+  problem: Problem,
   answerCharacters: CharacterClass[],
   answerBoard: BoardClass,
   step?: number
 ): boolean {
-  const correctAnswer = solveProblem(problemProgram).histories?.at(step || -1);
+  // TODO: `solveProblem()` の代わりに `problem.traceItems` を参照すること。
+  const correctAnswer = solveProblem(problem.displayProgram).histories?.at(step || -1);
 
   if (!correctAnswer || !correctAnswer.characterVariables) return false;
 

@@ -7,34 +7,32 @@ import { CustomModal } from '../../../../../../components/molecules/CustomModal'
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
-import type { GeneratedProgram, ProblemType } from '../../../../../../types';
-import { solveProblem } from '../../../../../lib/solveProblem';
+import type { Problem } from '../../../../../../problems/generateProblem';
+import type { ProblemType } from '../../../../../../types';
 
 import { Variables } from './Variables';
 
 interface CheckpointProblemProps {
   setProblemType: (step: ProblemType) => void;
-  problemProgram: GeneratedProgram;
-  beforeCheckPointLine: number;
-  checkPointLines: number[];
+  problem: Problem;
+  beforeCheckpointSid: number;
   createAnswerLog: (isPassed: boolean) => void;
-  currentCheckPointLine: number;
+  currentCheckpointSid: number;
   explanation?: Record<'title' | 'body', string>;
   selectedLanguageId: string;
-  setBeforeCheckPointLine: (line: number) => void;
-  setCurrentCheckPointLine: (line: number) => void;
+  setBeforeCheckpointSid: (line: number) => void;
+  setCurrentCheckpointSid: (line: number) => void;
 }
 
 export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
-  beforeCheckPointLine,
-  checkPointLines,
+  beforeCheckpointSid,
   createAnswerLog,
-  currentCheckPointLine,
+  currentCheckpointSid,
   explanation,
-  problemProgram,
+  problem,
   selectedLanguageId,
-  setBeforeCheckPointLine,
-  setCurrentCheckPointLine,
+  setBeforeCheckpointSid,
+  setCurrentCheckpointSid,
   setProblemType,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
@@ -44,7 +42,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
     onOpen: onExplanationModalOpen,
   } = useDisclosure();
   const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
-  const beforeCheckpointResult = solveProblem(problemProgram.instrumentedProgram).histories?.at(beforeCheckPointLine);
+  const beforeCheckpointResult = problem.traceItems.find((traceItem) => traceItem.sid === beforeCheckpointSid);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -57,21 +55,27 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
 
     // TODO: 一旦アラートで表示
     if (isPassed) {
-      setBeforeCheckPointLine(currentCheckPointLine);
+      setBeforeCheckpointSid(currentCheckpointSid);
 
-      if (currentCheckPointLine === checkPointLines.at(-1)) {
+      if (currentCheckpointSid === problem.checkpointSids.at(-1)) {
         // 最終チェックポイントを正解した場合はその次の行からステップ問題に移行
         alert('正解です。このチェックポイントから1行ずつ回答してください');
-        setCurrentCheckPointLine(currentCheckPointLine + 1);
+        // TODO: ループの場合は、過去のsidに戻ることがあるので、sidを増やしてはならない。
+        // TODO: 代わりに `problem.traceItems` の次の要素を参照すること。
+        setCurrentCheckpointSid(currentCheckpointSid + 1);
         setProblemType('step');
       } else {
         alert('正解です。次のチェックポイントに進みます');
-        setCurrentCheckPointLine(checkPointLines[checkPointLines.indexOf(currentCheckPointLine) + 1]);
+        // TODO: ループの場合は、過去のsidに戻ることがあるので、sidを増やしてはならない。
+        // TODO: 代わりに `problem.traceItems` の次の要素を参照すること。
+        setCurrentCheckpointSid(problem.checkpointSids[problem.checkpointSids.indexOf(currentCheckpointSid) + 1]);
       }
     } else {
       // 不正解の場合は最後に正解したチェックポイントからステップ問題に移行
       alert('不正解です。最後に正解したチェックポイントから1行ずつ回答してください');
-      setCurrentCheckPointLine(beforeCheckPointLine + 1);
+      // TODO: ループの場合は、過去のsidに戻ることがあるので、sidを増やしてはならない。
+      // TODO: 代わりに `problem.traceItems` の次の要素を参照すること。
+      setCurrentCheckpointSid(beforeCheckpointSid + 1);
       setProblemType('step');
     }
   };
@@ -84,20 +88,20 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         <Box>
           <TurtleGraphics
             ref={turtleGraphicsRef}
-            beforeCheckPointLine={beforeCheckPointLine}
-            currentCheckPointLine={currentCheckPointLine}
+            beforeCheckpointSid={beforeCheckpointSid}
+            currentCheckpointSid={currentCheckpointSid}
             isEnableOperation={false}
-            problemProgram={problemProgram.instrumentedProgram}
+            problem={problem}
           />
         </Box>
         <Box>茶色のハイライト時点の実行結果</Box>
         <Box>
           <TurtleGraphics
             ref={turtleGraphicsRef}
-            beforeCheckPointLine={beforeCheckPointLine}
-            currentCheckPointLine={currentCheckPointLine}
+            beforeCheckpointSid={beforeCheckpointSid}
+            currentCheckpointSid={currentCheckpointSid}
             isEnableOperation={true}
-            problemProgram={problemProgram.instrumentedProgram}
+            problem={problem}
           />
         </Box>
       </VStack>
@@ -128,15 +132,19 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         </HStack>
         <Box h="640px" w="100%">
           <SyntaxHighlighter
-            beforeCheckPointLine={beforeCheckPointLine}
-            code={problemProgram.displayProgram}
-            currentCheckPointLine={currentCheckPointLine}
+            // TODO: sid から行番号に変換すること。
+            beforeCheckpointLine={beforeCheckpointSid}
+            code={problem.displayProgram}
+            currentCheckpointLine={currentCheckpointSid}
             programmingLanguageId={selectedLanguageId}
           />
         </Box>
         <Variables
-          characterVariables={beforeCheckpointResult?.characterVariables}
-          variables={beforeCheckpointResult?.otherVariables}
+          // TODO: beforeCheckpointResult?.vars からキャラクタおよび変数の情報を取得するようにすること。
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          characterVariables={beforeCheckpointResult?.vars as any}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          variables={beforeCheckpointResult?.vars as any}
         />
         <HStack>
           <Button onClick={() => handleClickResetButton()}>リセット</Button>

@@ -136,30 +136,12 @@ export class Character {
     this.color = color;
   }
 
-  putPen(): void {
+  dropPen(): void {
     this.penDown = true;
   }
 
-  upPen(): void {
+  liftPen(): void {
     this.penDown = false;
-  }
-
-  rotateCss(): string {
-    switch (this.direction) {
-      case 'up': {
-        return 'rotate(180deg)';
-      }
-      case 'down': {
-        return 'rotate(0deg)';
-      }
-      case 'left': {
-        return 'rotate(90deg)';
-      }
-      case 'right': {
-        return 'rotate(270deg)';
-      }
-    }
-    return '';
   }
 
   canMoveForward(): boolean {
@@ -177,7 +159,6 @@ export class Character {
         return this.x < GRID_COLUMNS;
       }
     }
-    return false;
   }
 
   canMoveBack(): boolean {
@@ -195,6 +176,22 @@ export class Character {
         return this.x > 1;
       }
     }
-    return false;
+  }
+}
+
+export function convertCharacterDirectionToCss(ch: Character): string {
+  switch (ch.direction) {
+    case 'up': {
+      return 'rotate(180deg)';
+    }
+    case 'down': {
+      return 'rotate(0deg)';
+    }
+    case 'left': {
+      return 'rotate(90deg)';
+    }
+    case 'right': {
+      return 'rotate(270deg)';
+    }
   }
 }

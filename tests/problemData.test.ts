@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { generateProgram, getProgramCheckpoints } from '../src/problems/problemData';
+import { generateProblem } from '../src/problems/generateProblem';
 
 test.each([
   {
@@ -12,14 +12,5 @@ test.each([
     languageId: 'java',
   },
 ] as const)('Get a program by program and language ids', ({ languageId, programId }) => {
-  expect(generateProgram(programId, languageId, Date.now().toString())).not.toBeFalsy();
-});
-
-test.each([
-  {
-    programId: 'getProgramCheckpointsTest',
-    expected: [2, 5, 6],
-  },
-] as const)('Get program checkpoint line numbers', ({ expected, programId }) => {
-  expect(getProgramCheckpoints(programId)).toEqual(expected);
+  expect(generateProblem(programId, languageId, Date.now().toString())).not.toBeFalsy();
 });

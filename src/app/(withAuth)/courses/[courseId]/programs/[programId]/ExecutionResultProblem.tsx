@@ -7,10 +7,11 @@ import { CustomModal } from '../../../../../../components/molecules/CustomModal'
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
-import type { GeneratedProgram, ProblemType } from '../../../../../../types';
+import type { Problem } from '../../../../../../problems/generateProblem';
+import type { ProblemType } from '../../../../../../types';
 
 interface ExecutionResultProblemProps {
-  problemProgram: GeneratedProgram;
+  problem: Problem;
   createAnswerLog: (isPassed: boolean) => void;
   explanation?: Record<'title' | 'body', string>;
   handleComplete: () => void;
@@ -22,7 +23,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
   createAnswerLog,
   explanation,
   handleComplete,
-  problemProgram,
+  problem,
   selectedLanguageId,
   setProblemType,
 }) => {
@@ -58,11 +59,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
       <VStack spacing="10">
         <Box>プログラムの実行後の結果を解答してください。</Box>
         <Box>
-          <TurtleGraphics
-            ref={turtleGraphicsRef}
-            isEnableOperation={true}
-            problemProgram={problemProgram.instrumentedProgram}
-          />
+          <TurtleGraphics ref={turtleGraphicsRef} isEnableOperation={true} problem={problem} />
         </Box>
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">
@@ -92,7 +89,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
         </HStack>
         {/* 画面に収まる高さに設定 */}
         <Box h="calc(100vh - 370px)" w="100%">
-          <SyntaxHighlighter code={problemProgram.displayProgram} programmingLanguageId={selectedLanguageId} />
+          <SyntaxHighlighter code={problem.displayProgram} programmingLanguageId={selectedLanguageId} />
         </Box>
         <HStack>
           <Button onClick={() => handleClickResetButton()}>リセット</Button>

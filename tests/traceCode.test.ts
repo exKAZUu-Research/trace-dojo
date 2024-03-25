@@ -1,15 +1,13 @@
-import * as fs from 'node:fs';
-
 import { expect, test } from 'vitest';
 
 import { GRID_COLUMNS, GRID_ROWS } from '../src/components/organisms/TurtleGraphics';
-import type { TraceItem, TurtleTrace } from '../src/tracer/traceProgram';
-import { traceProgram } from '../src/tracer/traceProgram';
+import { generateProblem } from '../src/problems/generateProblem';
+import type { TraceItem, CharacterTrace } from '../src/problems/traceProgram';
 
 const defaultBoard = ('.'.repeat(GRID_COLUMNS) + '\n').repeat(GRID_ROWS).trim();
 const cx = Math.floor(GRID_COLUMNS / 2);
 const cy = Math.floor(GRID_ROWS / 2);
-const defaultTurtle: TurtleTrace = {
+const defaultCharacter: CharacterTrace = {
   x: cx,
   y: cy,
   color: '#',
@@ -19,11 +17,35 @@ const defaultTurtle: TurtleTrace = {
 
 test.each([
   {
-    program: {
-      displayProgram: 'TODO...',
-      instrumentedProgram: fs.readFileSync('test-fixtures/no-turtle.js', { encoding: 'utf8' }),
+    languageId: 'java',
+    problemId: 'test3',
+    expectedDisplayProgram: `
+import net.exkazuu.Character;
+
+public class Main {
+  public static void main(String[] args) {
+    int a = 1;
+    if (a > 0) {
+      int b = 2;
+      a = f(a, b);
+    }
+    int c = a * 2;
+
+    public static int f(int x, int y) {
+      return x * y;
+    }
+  }
+}
+`.trim(),
+    expectedSidToLineIndex: {
+      1: 4,
+      2: 6,
+      3: 7,
+      4: 9,
+      5: 12,
     },
-    expected: [
+    expectedCheckpointSids: [],
+    expectedTrace: [
       { sid: 1, vars: { a: 1 }, board: defaultBoard },
       { sid: 2, vars: { a: 1, b: 2 }, board: defaultBoard },
       { sid: 5, vars: { ret: 2 }, board: defaultBoard },
@@ -32,104 +54,510 @@ test.each([
     ] as TraceItem[],
   },
   {
-    program: {
-      displayProgram: 'TODO...',
-      instrumentedProgram: fs.readFileSync('test-fixtures/curve.js', { encoding: 'utf8' }),
+    languageId: 'java',
+    problemId: 'test1',
+    expectedDisplayProgram: `
+import net.exkazuu.Character;
+
+public class Main {
+  public static void main(String[] args) {
+    Character c = new Character();
+    c.forward();
+    c.forward();
+    c.forward();
+  }
+}
+`.trim(),
+    expectedSidToLineIndex: {
+      1: 4,
+      2: 5,
+      3: 6,
+      4: 7,
     },
-    expected: [
+    expectedCheckpointSids: [3],
+    expectedTrace: [
       {
         sid: 1,
-        vars: { t: defaultTurtle },
+        vars: { c: defaultCharacter },
         board: getBoard([{ x: cx, y: cy, color: '#' }]),
       },
       {
         sid: 2,
-        vars: { t: defaultTurtle, i: 0 },
-        board: getBoard([{ x: cx, y: cy, color: '#' }]),
-      },
-      {
-        sid: 3,
-        vars: { t: { ...defaultTurtle, y: cy - 1 }, i: 0 },
+        vars: { c: { ...defaultCharacter, y: cy - 1 } },
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
-        ]),
-      },
-      {
-        sid: 4,
-        vars: { t: { ...defaultTurtle, y: cy - 2 }, i: 0 },
-        board: getBoard([
-          { x: cx, y: cy, color: '#' },
-          { x: cx, y: cy - 1, color: '#' },
-          { x: cx, y: cy - 2, color: '#' },
-        ]),
-      },
-      {
-        sid: 5,
-        vars: { t: { ...defaultTurtle, y: cy - 2, dir: 'E' }, i: 0 },
-        board: getBoard([
-          { x: cx, y: cy, color: '#' },
-          { x: cx, y: cy - 1, color: '#' },
-          { x: cx, y: cy - 2, color: '#' },
-        ]),
-      },
-      {
-        sid: 2,
-        vars: { t: { ...defaultTurtle, y: cy - 2, dir: 'E' }, i: 1 },
-        board: getBoard([
-          { x: cx, y: cy, color: '#' },
-          { x: cx, y: cy - 1, color: '#' },
-          { x: cx, y: cy - 2, color: '#' },
         ]),
       },
       {
         sid: 3,
-        vars: { t: { ...defaultTurtle, x: cx + 1, y: cy - 2, dir: 'E' }, i: 1 },
+        vars: { c: { ...defaultCharacter, y: cy - 2 } },
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
           { x: cx, y: cy - 2, color: '#' },
-          { x: cx + 1, y: cy - 2, color: '#' },
         ]),
       },
       {
         sid: 4,
-        vars: { t: { ...defaultTurtle, x: cx + 2, y: cy - 2, dir: 'E' }, i: 1 },
+        vars: { c: { ...defaultCharacter, y: cy - 3 } },
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
           { x: cx, y: cy - 2, color: '#' },
-          { x: cx + 1, y: cy - 2, color: '#' },
-          { x: cx + 2, y: cy - 2, color: '#' },
-        ]),
-      },
-      {
-        sid: 5,
-        vars: { t: { ...defaultTurtle, x: cx + 2, y: cy - 2, dir: 'S' }, i: 1 },
-        board: getBoard([
-          { x: cx, y: cy, color: '#' },
-          { x: cx, y: cy - 1, color: '#' },
-          { x: cx, y: cy - 2, color: '#' },
-          { x: cx + 1, y: cy - 2, color: '#' },
-          { x: cx + 2, y: cy - 2, color: '#' },
-        ]),
-      },
-      {
-        sid: 2,
-        vars: { t: { ...defaultTurtle, x: cx + 2, y: cy - 2, dir: 'S' }, i: 2 },
-        board: getBoard([
-          { x: cx, y: cy, color: '#' },
-          { x: cx, y: cy - 1, color: '#' },
-          { x: cx, y: cy - 2, color: '#' },
-          { x: cx + 1, y: cy - 2, color: '#' },
-          { x: cx + 2, y: cy - 2, color: '#' },
+          { x: cx, y: cy - 3, color: '#' },
         ]),
       },
     ] as TraceItem[],
   },
-] as const)('Trace a program', ({ expected, program }) => {
-  expect(stringifyObjects(traceProgram(program))).toEqual(stringifyObjects(expected));
-});
+  {
+    languageId: 'java',
+    problemId: 'test2',
+    expectedDisplayProgram: `
+import net.exkazuu.Character;
+
+public class Main {
+  public static void main(String[] args) {
+    Character c = new Character();
+    for (let i = 0; i < 2; i++) {
+      c.forward();
+      c.forward();
+      c.turnRight();
+    }
+  }
+}
+`.trim(),
+    expectedSidToLineIndex: {
+      1: 4,
+      2: 5,
+      3: 6,
+      4: 7,
+      5: 8,
+    },
+    expectedCheckpointSids: [4],
+    expectedTrace: [
+      {
+        sid: 1,
+        vars: { c: defaultCharacter },
+        board: getBoard([{ x: cx, y: cy, color: '#' }]),
+      },
+      {
+        sid: 2,
+        vars: { c: defaultCharacter, i: 0 },
+        board: getBoard([{ x: cx, y: cy, color: '#' }]),
+      },
+      {
+        sid: 3,
+        vars: { c: { ...defaultCharacter, y: cy - 1 }, i: 0 },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+        ]),
+      },
+      {
+        sid: 4,
+        vars: { c: { ...defaultCharacter, y: cy - 2 }, i: 0 },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx, y: cy - 2, color: '#' },
+        ]),
+      },
+      {
+        sid: 5,
+        vars: { c: { ...defaultCharacter, y: cy - 2, dir: 'E' }, i: 0 },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx, y: cy - 2, color: '#' },
+        ]),
+      },
+      {
+        sid: 2,
+        vars: { c: { ...defaultCharacter, y: cy - 2, dir: 'E' }, i: 1 },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx, y: cy - 2, color: '#' },
+        ]),
+      },
+      {
+        sid: 3,
+        vars: { c: { ...defaultCharacter, x: cx + 1, y: cy - 2, dir: 'E' }, i: 1 },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx, y: cy - 2, color: '#' },
+          { x: cx + 1, y: cy - 2, color: '#' },
+        ]),
+      },
+      {
+        sid: 4,
+        vars: { c: { ...defaultCharacter, x: cx + 2, y: cy - 2, dir: 'E' }, i: 1 },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx, y: cy - 2, color: '#' },
+          { x: cx + 1, y: cy - 2, color: '#' },
+          { x: cx + 2, y: cy - 2, color: '#' },
+        ]),
+      },
+      {
+        sid: 5,
+        vars: { c: { ...defaultCharacter, x: cx + 2, y: cy - 2, dir: 'S' }, i: 1 },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx, y: cy - 2, color: '#' },
+          { x: cx + 1, y: cy - 2, color: '#' },
+          { x: cx + 2, y: cy - 2, color: '#' },
+        ]),
+      },
+      {
+        sid: 2,
+        vars: { c: { ...defaultCharacter, x: cx + 2, y: cy - 2, dir: 'S' }, i: 2 },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx, y: cy - 2, color: '#' },
+          { x: cx + 1, y: cy - 2, color: '#' },
+          { x: cx + 2, y: cy - 2, color: '#' },
+        ]),
+        last: true,
+      },
+    ] as TraceItem[],
+  },
+  {
+    languageId: 'java',
+    problemId: 'test4',
+    expectedDisplayProgram: `
+public class Main {
+  public static void main(String[] args) {
+    Character c1 = new Character();
+    c1.forward();
+    c1.turnLeft();
+    c1.penUp();
+    int i = 0;
+    c1.forward();
+
+    Character c2 = new Character(2, 3, "green");
+    c2.forward();
+    String foo = "あいうえお";
+    int bar = 79;
+    i = bar + 1;
+    c2.forward();
+    c2.forward();
+  }
+}
+`.trim(),
+    expectedSidToLineIndex: {
+      1: 2,
+      2: 3,
+      3: 4,
+      4: 5,
+      5: 6,
+      6: 7,
+      7: 9,
+      8: 10,
+      9: 11,
+      10: 12,
+      11: 13,
+      12: 14,
+      13: 15,
+    },
+    expectedCheckpointSids: [],
+    expectedTrace: [
+      {
+        sid: 1,
+        vars: { c1: defaultCharacter },
+        board: getBoard([{ x: cx, y: cy, color: '#' }]),
+      },
+      {
+        sid: 2,
+        vars: { c1: { ...defaultCharacter, y: cy - 1 } },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+        ]),
+      },
+      {
+        sid: 3,
+        vars: { c1: { ...defaultCharacter, y: cy - 1, dir: 'W' } },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+        ]),
+      },
+      {
+        sid: 4,
+        vars: { c1: { ...defaultCharacter, y: cy - 1, dir: 'W', pen: false } },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+        ]),
+      },
+      {
+        sid: 5,
+        vars: { c1: { ...defaultCharacter, y: cy - 1, dir: 'W', pen: false }, i: 0 },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+        ]),
+      },
+      {
+        sid: 6,
+        vars: { c1: { ...defaultCharacter, x: cx - 1, y: cy - 1, dir: 'W', pen: false }, i: 0 },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx - 1, y: cy - 1, color: '#' },
+        ]),
+      },
+      {
+        sid: 7,
+        vars: {
+          c1: { ...defaultCharacter, x: cx - 1, y: cy - 1, dir: 'W', pen: false },
+          c2: { ...defaultCharacter, x: 2, y: 3, color: 'G' },
+          i: 0,
+        },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx - 1, y: cy - 1, color: '#' },
+          { x: 2, y: 3, color: 'G' },
+        ]),
+      },
+      {
+        sid: 8,
+        vars: {
+          c1: { ...defaultCharacter, x: cx - 1, y: cy - 1, dir: 'W', pen: false },
+          c2: { ...defaultCharacter, x: 2, y: 2, color: 'G' },
+          i: 0,
+        },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx - 1, y: cy - 1, color: '#' },
+          { x: 2, y: 3, color: 'G' },
+          { x: 2, y: 2, color: 'G' },
+        ]),
+      },
+      {
+        sid: 9,
+        vars: {
+          c1: { ...defaultCharacter, x: cx - 1, y: cy - 1, dir: 'W', pen: false },
+          c2: { ...defaultCharacter, x: 2, y: 2, color: 'G' },
+          i: 0,
+          foo: 'あいうえお',
+        },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx - 1, y: cy - 1, color: '#' },
+          { x: 2, y: 3, color: 'G' },
+          { x: 2, y: 2, color: 'G' },
+        ]),
+      },
+      {
+        sid: 10,
+        vars: {
+          c1: { ...defaultCharacter, x: cx - 1, y: cy - 1, dir: 'W', pen: false },
+          c2: { ...defaultCharacter, x: 2, y: 2, color: 'G' },
+          i: 0,
+          foo: 'あいうえお',
+          bar: 79,
+        },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx - 1, y: cy - 1, color: '#' },
+          { x: 2, y: 3, color: 'G' },
+          { x: 2, y: 2, color: 'G' },
+        ]),
+      },
+      {
+        sid: 11,
+        vars: {
+          c1: { ...defaultCharacter, x: cx - 1, y: cy - 1, dir: 'W', pen: false },
+          c2: { ...defaultCharacter, x: 2, y: 2, color: 'G' },
+          i: 80,
+          foo: 'あいうえお',
+          bar: 79,
+        },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx - 1, y: cy - 1, color: '#' },
+          { x: 2, y: 3, color: 'G' },
+          { x: 2, y: 2, color: 'G' },
+        ]),
+      },
+      {
+        sid: 12,
+        vars: {
+          c1: { ...defaultCharacter, x: cx - 1, y: cy - 1, dir: 'W', pen: false },
+          c2: { ...defaultCharacter, x: 2, y: 1, color: 'G' },
+          i: 80,
+          foo: 'あいうえお',
+          bar: 79,
+        },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx - 1, y: cy - 1, color: '#' },
+          { x: 2, y: 3, color: 'G' },
+          { x: 2, y: 2, color: 'G' },
+          { x: 2, y: 1, color: 'G' },
+        ]),
+      },
+      {
+        sid: 13,
+        vars: {
+          c1: { ...defaultCharacter, x: cx - 1, y: cy - 1, dir: 'W', pen: false },
+          c2: { ...defaultCharacter, x: 2, y: 0, color: 'G' },
+          i: 80,
+          foo: 'あいうえお',
+          bar: 79,
+        },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx - 1, y: cy - 1, color: '#' },
+          { x: 2, y: 3, color: 'G' },
+          { x: 2, y: 2, color: 'G' },
+          { x: 2, y: 1, color: 'G' },
+          { x: 2, y: 0, color: 'G' },
+        ]),
+      },
+    ] as TraceItem[],
+  },
+  {
+    languageId: 'java',
+    problemId: 'test5',
+    expectedDisplayProgram: `
+public class Straight {
+  public static void main(String[] args) {
+    var c = new Character();
+    c.forward();
+    c.forward();
+    c.turnRight();
+    c.forward();
+    c.forward();
+    c.forward();
+    c.forward();
+  }
+}
+`.trim(),
+    expectedSidToLineIndex: {
+      1: 2,
+      2: 3,
+      3: 4,
+      4: 5,
+      5: 6,
+      6: 7,
+      7: 8,
+      8: 9,
+    },
+    expectedCheckpointSids: [2, 5, 6],
+    expectedTrace: [
+      {
+        sid: 1,
+        vars: { c: defaultCharacter },
+        board: getBoard([{ x: cx, y: cy, color: '#' }]),
+      },
+      {
+        sid: 2,
+        vars: { c: { ...defaultCharacter, y: cy - 1 } },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+        ]),
+      },
+      {
+        sid: 3,
+        vars: { c: { ...defaultCharacter, y: cy - 2 } },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx, y: cy - 2, color: '#' },
+        ]),
+      },
+      {
+        sid: 4,
+        vars: { c: { ...defaultCharacter, y: cy - 2, dir: 'E' } },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx, y: cy - 2, color: '#' },
+        ]),
+      },
+      {
+        sid: 5,
+        vars: { c: { ...defaultCharacter, x: cx + 1, y: cy - 2, dir: 'E' } },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx, y: cy - 2, color: '#' },
+          { x: cx + 1, y: cy - 2, color: '#' },
+        ]),
+      },
+      {
+        sid: 6,
+        vars: { c: { ...defaultCharacter, x: cx + 2, y: cy - 2, dir: 'E' } },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx, y: cy - 2, color: '#' },
+          { x: cx + 1, y: cy - 2, color: '#' },
+          { x: cx + 2, y: cy - 2, color: '#' },
+        ]),
+      },
+      {
+        sid: 7,
+        vars: { c: { ...defaultCharacter, x: cx + 3, y: cy - 2, dir: 'E' } },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx, y: cy - 2, color: '#' },
+          { x: cx + 1, y: cy - 2, color: '#' },
+          { x: cx + 2, y: cy - 2, color: '#' },
+          { x: cx + 3, y: cy - 2, color: '#' },
+        ]),
+      },
+      {
+        sid: 8,
+        vars: { c: { ...defaultCharacter, x: cx + 4, y: cy - 2, dir: 'E' } },
+        board: getBoard([
+          { x: cx, y: cy, color: '#' },
+          { x: cx, y: cy - 1, color: '#' },
+          { x: cx, y: cy - 2, color: '#' },
+          { x: cx + 1, y: cy - 2, color: '#' },
+          { x: cx + 2, y: cy - 2, color: '#' },
+          { x: cx + 3, y: cy - 2, color: '#' },
+          { x: cx + 4, y: cy - 2, color: '#' },
+        ]),
+      },
+    ] as TraceItem[],
+  },
+] as const)(
+  'Trace a program',
+  ({
+    expectedCheckpointSids,
+    expectedDisplayProgram,
+    expectedSidToLineIndex,
+    expectedTrace,
+    languageId,
+    problemId,
+  }) => {
+    const { checkpointSids, displayProgram, sidToLineIndex, traceItems } = generateProblem(problemId, languageId, '');
+    expect(displayProgram).toEqual(expectedDisplayProgram);
+    expect(sidToLineIndex).toEqual(
+      new Map(Object.entries(expectedSidToLineIndex).map(([sid, lineIndex]) => [Number(sid), lineIndex]))
+    );
+    expect(checkpointSids).toEqual(expectedCheckpointSids);
+    expect(stringifyObjects(traceItems)).toEqual(stringifyObjects(expectedTrace));
+  }
+);
 
 /**
  * テストに失敗した際に、WebStorm上で期待値との差異を確認しやすくするために、文字列化しておく。
@@ -139,7 +567,7 @@ function stringifyObjects(trace: TraceItem[]): TraceItem[] {
   for (const item of trace) {
     const vars = { ...item.vars };
     for (const key in vars) {
-      if (typeof vars[key] === 'object' && 'x' in (vars[key] as TurtleTrace)) {
+      if (typeof vars[key] === 'object' && 'x' in (vars[key] as CharacterTrace)) {
         vars[key] = JSON.stringify(vars[key]);
       }
     }
