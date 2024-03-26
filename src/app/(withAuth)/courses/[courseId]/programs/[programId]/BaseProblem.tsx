@@ -62,8 +62,8 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
   }, [suspendedSession]);
 
   // TODO: チェックポイントはあくまでsidなので、可視化する際は `sidToLineIndex` を用いて、行番号を特定すること。
-  const [beforeCheckpointSid, setBeforeCheckpointSid] = useState(0);
-  const [currentCheckpointSid, setCurrentCheckpointSid] = useState(problem.checkpointSids[0] ?? 0);
+  const [beforeTraceItemIndex, setBeforeTraceItemIndex] = useState(0);
+  const [currentTraceItemIndex, setCurrentTraceItemIndex] = useState(problem.checkpointSids[0] ?? 0);
   const [lastTimeSpent, setLastTimeSpent] = useState(0);
   const [activityState, setActivityState] = useState<'Active' | 'Idle'>('Active');
 
@@ -100,8 +100,8 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
       if (suspendedSession) {
         // 中断中のセッションを再開する
         setProblemType(suspendedSession.currentProblemType as ProblemType);
-        setBeforeCheckpointSid(suspendedSession.beforeStep);
-        setCurrentCheckpointSid(suspendedSession.currentStep);
+        setBeforeTraceItemIndex(suspendedSession.beforeTraceItemIndex);
+        setCurrentTraceItemIndex(suspendedSession.currentTraceItemIndex);
         didFetchSessionRef.current = true;
       } else {
         // reactStrictModeが有効の場合にレコードが二重に作成されることを防ぐためrefで制御
@@ -147,8 +147,8 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
         selectedLanguageId,
         suspendedSession.problemVariablesSeed,
         problemType,
-        problemType === 'executionResult' ? 0 : beforeCheckpointSid,
-        problemType === 'executionResult' ? 0 : currentCheckpointSid,
+        problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
+        problemType === 'executionResult' ? 0 : currentTraceItemIndex,
         suspendedSession.timeSpent,
         suspendedSession.startedAt,
         undefined,
@@ -160,7 +160,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentCheckpointSid, problemType]);
+  }, [currentTraceItemIndex, problemType]);
 
   const handleSolveProblem = async (): Promise<void> => {
     if (userId && suspendedSession) {
@@ -173,8 +173,8 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
         selectedLanguageId,
         suspendedSession.problemVariablesSeed,
         problemType,
-        problemType === 'executionResult' ? 0 : beforeCheckpointSid,
-        problemType === 'executionResult' ? 0 : currentCheckpointSid,
+        problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
+        problemType === 'executionResult' ? 0 : currentTraceItemIndex,
         suspendedSession.timeSpent,
         suspendedSession.startedAt,
         new Date(),
@@ -196,7 +196,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
       selectedLanguageId,
       userId,
       suspendedSession.id,
-      currentCheckpointSid,
+      currentTraceItemIndex,
       isPassed,
       activeTime,
       startedAt
@@ -233,14 +233,14 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
       case 'checkpoint': {
         return (
           <CheckpointProblem
-            beforeCheckpointSid={beforeCheckpointSid}
+            beforeTraceItemIndex={beforeTraceItemIndex}
             createAnswerLog={createAnswerLog}
-            currentCheckpointSid={currentCheckpointSid}
+            currentTraceItemIndex={currentTraceItemIndex}
             explanation={explanation}
             problem={problem}
             selectedLanguageId={selectedLanguageId}
-            setBeforeCheckpointSid={setBeforeCheckpointSid}
-            setCurrentCheckpointSid={setCurrentCheckpointSid}
+            setBeforeTraceItemIndex={setBeforeTraceItemIndex}
+            setCurrentTraceItemIndex={setCurrentTraceItemIndex}
             setProblemType={setProblemType}
           />
         );
@@ -248,15 +248,15 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
       case 'step': {
         return (
           <StepProblem
-            beforeCheckpointSid={beforeCheckpointSid}
+            beforeTraceItemIndex={beforeTraceItemIndex}
             createAnswerLog={createAnswerLog}
-            currentCheckpointSid={currentCheckpointSid}
+            currentTraceItemIndex={currentTraceItemIndex}
             explanation={explanation}
             handleComplete={handleSolveProblem}
             problem={problem}
             selectedLanguageId={selectedLanguageId}
-            setBeforeCheckpointSid={setBeforeCheckpointSid}
-            setCurrentCheckpointSid={setCurrentCheckpointSid}
+            setBeforeTraceItemIndex={setBeforeTraceItemIndex}
+            setCurrentTraceItemIndex={setCurrentTraceItemIndex}
           />
         );
       }

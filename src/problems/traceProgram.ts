@@ -187,7 +187,7 @@ trace;
       } else {
         lastSid++;
       }
-      sidToLineIndex.set(lastSid, index);
+      sidToLineIndex.set(lastSid, index + 1);
       return '';
     });
     refinedLines.push(refinedLine);
