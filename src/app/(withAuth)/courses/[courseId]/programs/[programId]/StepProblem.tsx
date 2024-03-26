@@ -56,7 +56,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
 
     // TODO: 一旦アラートで表示
     if (isPassed) {
-      if (currentTraceItemIndex === problem.traceItems.length) {
+      if (currentCheckpointTraceItem === problem.traceItems.at(-1)) {
         alert('正解です。この問題は終了です');
         handleComplete();
       } else {

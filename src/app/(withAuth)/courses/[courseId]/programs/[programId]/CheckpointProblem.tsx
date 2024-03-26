@@ -66,8 +66,11 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         setProblemType('step');
       } else {
         alert('正解です。次のチェックポイントに進みます');
-        // TODO
-        const nextCheckpointTraceItemIndex = problem.traceItems.findIndex((traceItem) => traceItem.sid === 6);
+        const nextCheckpointTraceItemIndex = problem.traceItems.findIndex(
+          (traceItem) =>
+            traceItem.sid ===
+            problem.checkpointSids.at(problem.checkpointSids.indexOf(currentCheckpointTraceItem.sid) + 1)
+        );
         setCurrentTraceItemIndex(nextCheckpointTraceItemIndex);
       }
     } else {

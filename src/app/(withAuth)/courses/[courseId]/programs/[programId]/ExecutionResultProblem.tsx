@@ -16,6 +16,7 @@ interface ExecutionResultProblemProps {
   explanation?: Record<'title' | 'body', string>;
   handleComplete: () => void;
   selectedLanguageId: string;
+  setCurrentTraceItemIndex: (line: number) => void;
   setProblemType: (step: ProblemType) => void;
 }
 
@@ -25,6 +26,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
   handleComplete,
   problem,
   selectedLanguageId,
+  setCurrentTraceItemIndex,
   setProblemType,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
@@ -50,6 +52,10 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
       handleComplete();
     } else {
       alert('不正解です。チェックポイントごとに回答してください');
+      const nextCheckpointTraceItemIndex = problem.traceItems.findIndex(
+        (traceItem) => traceItem.sid === problem.checkpointSids.at(0)
+      );
+      setCurrentTraceItemIndex(nextCheckpointTraceItemIndex);
       setProblemType('checkpoint');
     }
   };
@@ -61,6 +67,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
         <Box>
           <TurtleGraphics
             ref={turtleGraphicsRef}
+            beforeTraceItem={problem.traceItems.at(0)}
             currentTraceItem={problem.traceItems.at(-1)}
             isEnableOperation={true}
             problem={problem}

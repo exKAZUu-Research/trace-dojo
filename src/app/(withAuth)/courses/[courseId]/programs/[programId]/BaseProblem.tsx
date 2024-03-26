@@ -62,8 +62,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
   }, [suspendedSession]);
 
   const [beforeTraceItemIndex, setBeforeTraceItemIndex] = useState(0);
-  // TODO
-  const [currentTraceItemIndex, setCurrentTraceItemIndex] = useState(4);
+  const [currentTraceItemIndex, setCurrentTraceItemIndex] = useState(0);
   const [lastTimeSpent, setLastTimeSpent] = useState(0);
   const [activityState, setActivityState] = useState<'Active' | 'Idle'>('Active');
 
@@ -226,6 +225,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
             handleComplete={handleSolveProblem}
             problem={problem}
             selectedLanguageId={selectedLanguageId}
+            setCurrentTraceItemIndex={setCurrentTraceItemIndex}
             setProblemType={setProblemType}
           />
         );
