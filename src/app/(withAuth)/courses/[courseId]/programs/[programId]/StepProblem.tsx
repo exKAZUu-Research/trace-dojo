@@ -77,8 +77,8 @@ export const StepProblem: React.FC<StepProblemProps> = ({
         <Box>
           <TurtleGraphics
             ref={turtleGraphicsRef}
-            beforeCheckpointSid={beforeCheckpointTraceItem.sid}
-            currentCheckpointSid={currentCheckpointTraceItem.sid}
+            beforeTraceItem={beforeCheckpointTraceItem}
+            currentTraceItem={currentCheckpointTraceItem}
             isEnableOperation={false}
             problem={problem}
           />
@@ -87,8 +87,8 @@ export const StepProblem: React.FC<StepProblemProps> = ({
         <Box>
           <TurtleGraphics
             ref={turtleGraphicsRef}
-            beforeCheckpointSid={beforeCheckpointTraceItem.sid}
-            currentCheckpointSid={currentCheckpointTraceItem.sid}
+            beforeTraceItem={beforeCheckpointTraceItem}
+            currentTraceItem={currentCheckpointTraceItem}
             isEnableOperation={true}
             problem={problem}
           />

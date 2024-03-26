@@ -4,7 +4,7 @@ import { Box, Grid, GridItem, Image } from '@chakra-ui/react';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
 
 import type { Problem } from '../../problems/generateProblem';
-import { charToColor, type CharacterTrace } from '../../problems/traceProgram';
+import { charToColor, type CharacterTrace, type TraceItem } from '../../problems/traceProgram';
 import type { ColorChar, SelectedCell } from '../../types';
 import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController';
 
@@ -29,8 +29,8 @@ const charToRotateStyle = {
 interface TurtleGraphicsProps {
   isEnableOperation?: boolean;
   problem: Problem;
-  currentCheckpointSid?: number;
-  beforeCheckpointSid?: number;
+  currentTraceItem?: TraceItem;
+  beforeTraceItem?: TraceItem;
 }
 
 export interface TurtleGraphicsHandle {
@@ -39,26 +39,22 @@ export interface TurtleGraphicsHandle {
 }
 
 export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
-  ({ beforeCheckpointSid = 0, currentCheckpointSid, isEnableOperation = false, problem }, ref) => {
+  ({ beforeTraceItem, currentTraceItem, isEnableOperation = false, problem }, ref) => {
     const [board, setBoard] = useState<ColorChar[][]>([]);
     const [characters, setCharacters] = useState<CharacterTrace[]>([]);
     const [selectedCharacter, setSelectedCharacter] = useState<CharacterTrace>();
     const [selectedCell, setSelectedCell] = useState<SelectedCell>();
 
     const init = useCallback((): void => {
-      if (!problem) return;
+      if (!problem || !beforeTraceItem) return;
 
-      const traceItem = problem.traceItems.find((traceItem) => traceItem.sid === beforeCheckpointSid);
-
-      if (!traceItem) return;
-
-      const initBoard = traceItem.board
+      const initBoard = beforeTraceItem.board
         .trim()
         .split('\n')
         .filter((line) => line.trim() !== '')
         .map((line) => [...line.trim()]);
 
-      const variables = traceItem.vars;
+      const variables = beforeTraceItem.vars;
       const initCharacters = [];
       const initOtherVars = [];
       for (const key in variables) {
@@ -74,7 +70,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       setCharacters(initCharacters || []);
       setSelectedCharacter(undefined);
       setSelectedCell(undefined);
-    }, [beforeCheckpointSid, problem]);
+    }, [beforeTraceItem, problem]);
 
     useImperativeHandle(ref, () => ({
       // 親コンポーネントから関数を呼び出せるようにする
@@ -84,7 +80,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
 
     useEffect(() => {
       init();
-    }, [beforeCheckpointSid, init, problem]);
+    }, [beforeTraceItem, init, problem]);
 
     const updateCharacters = (character: CharacterTrace): void => {
       setCharacters((prevCharacters) =>
@@ -106,11 +102,9 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     };
 
     const isPassed = (): boolean => {
-      const traceItem = problem.traceItems.find((traceItem) => traceItem.sid === currentCheckpointSid);
+      if (!currentTraceItem) return false;
 
-      if (!traceItem) return false;
-
-      const variables = traceItem.vars;
+      const variables = currentTraceItem.vars;
       const correctCharacters = [];
       for (const key in variables) {
         const value = variables[key];
@@ -119,7 +113,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
         }
       }
 
-      const correctBoard = traceItem.board
+      const correctBoard = currentTraceItem.board
         .trim()
         .split('\n')
         .filter((line) => line.trim() !== '')

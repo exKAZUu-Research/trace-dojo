@@ -57,7 +57,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
 
     // TODO: 一旦アラートで表示
     if (isPassed) {
-      setBeforeTraceItemIndex(currentCheckpointTraceItem.sid);
+      setBeforeTraceItemIndex(currentTraceItemIndex);
 
       if (currentCheckpointTraceItem.sid === problem.checkpointSids.at(-1)) {
         // 最終チェックポイントを正解した場合はその次の行からステップ問題に移行
@@ -66,18 +66,14 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         setProblemType('step');
       } else {
         alert('正解です。次のチェックポイントに進みます');
-        // TODO: ループの場合は、過去のsidに戻ることがあるので、sidを増やしてはならない。
-        // TODO: 代わりに `problem.traceItems` の次の要素を参照すること。
-        setCurrentTraceItemIndex(
-          problem.checkpointSids[problem.checkpointSids.indexOf(currentCheckpointTraceItem.sid) + 1]
-        );
+        // TODO
+        const nextCheckpointTraceItemIndex = problem.traceItems.findIndex((traceItem) => traceItem.sid === 6);
+        setCurrentTraceItemIndex(nextCheckpointTraceItemIndex);
       }
     } else {
       // 不正解の場合は最後に正解したチェックポイントからステップ問題に移行
       alert('不正解です。最後に正解したチェックポイントから1行ずつ回答してください');
-      // TODO: ループの場合は、過去のsidに戻ることがあるので、sidを増やしてはならない。
-      // TODO: 代わりに `problem.traceItems` の次の要素を参照すること。
-      setCurrentTraceItemIndex(currentTraceItemIndex + 1);
+      setCurrentTraceItemIndex(beforeTraceItemIndex + 1);
       setProblemType('step');
     }
   };
@@ -90,8 +86,8 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         <Box>
           <TurtleGraphics
             ref={turtleGraphicsRef}
-            beforeCheckpointSid={beforeCheckpointTraceItem.sid}
-            currentCheckpointSid={currentCheckpointTraceItem.sid}
+            beforeTraceItem={beforeCheckpointTraceItem}
+            currentTraceItem={currentCheckpointTraceItem}
             isEnableOperation={false}
             problem={problem}
           />
@@ -100,8 +96,8 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         <Box>
           <TurtleGraphics
             ref={turtleGraphicsRef}
-            beforeCheckpointSid={beforeCheckpointTraceItem.sid}
-            currentCheckpointSid={currentCheckpointTraceItem.sid}
+            beforeTraceItem={beforeCheckpointTraceItem}
+            currentTraceItem={currentCheckpointTraceItem}
             isEnableOperation={true}
             problem={problem}
           />
