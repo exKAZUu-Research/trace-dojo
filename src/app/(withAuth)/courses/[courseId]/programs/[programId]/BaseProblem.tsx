@@ -61,9 +61,8 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
     );
   }, [suspendedSession]);
 
-  // TODO: チェックポイントはあくまでsidなので、可視化する際は `sidToLineIndex` を用いて、行番号を特定すること。
   const [beforeTraceItemIndex, setBeforeTraceItemIndex] = useState(0);
-  const [currentTraceItemIndex, setCurrentTraceItemIndex] = useState(problem.checkpointSids[0] ?? 0);
+  const [currentTraceItemIndex, setCurrentTraceItemIndex] = useState(0);
   const [lastTimeSpent, setLastTimeSpent] = useState(0);
   const [activityState, setActivityState] = useState<'Active' | 'Idle'>('Active');
 
@@ -124,6 +123,9 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
             startedAt,
             undefined,
             false
+          );
+          setCurrentTraceItemIndex(
+            problem.traceItems.findIndex((traceItem) => traceItem.sid === problem.checkpointSids[0])
           );
         }
       }

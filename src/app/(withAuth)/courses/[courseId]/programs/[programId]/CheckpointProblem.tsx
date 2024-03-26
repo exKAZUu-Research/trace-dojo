@@ -134,9 +134,9 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         </HStack>
         <Box h="640px" w="100%">
           <SyntaxHighlighter
-            beforeCheckpointLine={beforeCheckpointTraceItem.sid}
+            beforeCheckpointLine={problem.sidToLineIndex.get(beforeCheckpointTraceItem.sid)}
             code={problem.displayProgram}
-            currentCheckpointLine={currentCheckpointTraceItem.sid}
+            currentCheckpointLine={problem.sidToLineIndex.get(currentCheckpointTraceItem.sid)}
             programmingLanguageId={selectedLanguageId}
           />
         </Box>
