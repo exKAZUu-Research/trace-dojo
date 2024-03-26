@@ -39,6 +39,8 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
     turtleGraphicsRef.current?.init();
   };
 
+  const lastStep = problem.traceItems.length;
+
   const handleClickAnswerButton = async (): Promise<void> => {
     const isPassed = turtleGraphicsRef.current?.isPassed() || false;
 
@@ -59,7 +61,12 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
       <VStack spacing="10">
         <Box>プログラムの実行後の結果を解答してください。</Box>
         <Box>
-          <TurtleGraphics ref={turtleGraphicsRef} isEnableOperation={true} problem={problem} />
+          <TurtleGraphics
+            ref={turtleGraphicsRef}
+            currentCheckpointSid={lastStep}
+            isEnableOperation={true}
+            problem={problem}
+          />
         </Box>
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">

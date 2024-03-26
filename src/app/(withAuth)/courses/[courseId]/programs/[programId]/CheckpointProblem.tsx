@@ -42,7 +42,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
     onOpen: onExplanationModalOpen,
   } = useDisclosure();
   const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
-  const beforeCheckpointResult = problem.traceItems.find((traceItem) => traceItem.sid === beforeCheckpointSid);
+  const beforeCheckpointTraceItem = problem.traceItems.find((traceItem) => traceItem.sid === beforeCheckpointSid);
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -139,13 +139,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
             programmingLanguageId={selectedLanguageId}
           />
         </Box>
-        <Variables
-          // TODO: beforeCheckpointResult?.vars からキャラクタおよび変数の情報を取得するようにすること。
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          characterVariables={beforeCheckpointResult?.vars as any}
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          variables={beforeCheckpointResult?.vars as any}
-        />
+        <Variables traceItemVars={beforeCheckpointTraceItem?.vars} />
         <HStack>
           <Button onClick={() => handleClickResetButton()}>リセット</Button>
           <Button onClick={() => handleClickAnswerButton()}>解答</Button>
