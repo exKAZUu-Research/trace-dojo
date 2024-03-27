@@ -314,7 +314,6 @@ public class Main {
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
-          { x: cx - 1, y: cy - 1, color: '#' },
         ]),
       },
       {
@@ -327,7 +326,6 @@ public class Main {
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
-          { x: cx - 1, y: cy - 1, color: '#' },
           { x: 2, y: 3, color: 'G' },
         ]),
       },
@@ -341,7 +339,6 @@ public class Main {
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
-          { x: cx - 1, y: cy - 1, color: '#' },
           { x: 2, y: 3, color: 'G' },
           { x: 2, y: 2, color: 'G' },
         ]),
@@ -357,7 +354,6 @@ public class Main {
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
-          { x: cx - 1, y: cy - 1, color: '#' },
           { x: 2, y: 3, color: 'G' },
           { x: 2, y: 2, color: 'G' },
         ]),
@@ -374,7 +370,6 @@ public class Main {
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
-          { x: cx - 1, y: cy - 1, color: '#' },
           { x: 2, y: 3, color: 'G' },
           { x: 2, y: 2, color: 'G' },
         ]),
@@ -391,7 +386,6 @@ public class Main {
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
-          { x: cx - 1, y: cy - 1, color: '#' },
           { x: 2, y: 3, color: 'G' },
           { x: 2, y: 2, color: 'G' },
         ]),
@@ -408,7 +402,6 @@ public class Main {
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
-          { x: cx - 1, y: cy - 1, color: '#' },
           { x: 2, y: 3, color: 'G' },
           { x: 2, y: 2, color: 'G' },
           { x: 2, y: 1, color: 'G' },
@@ -426,7 +419,6 @@ public class Main {
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
-          { x: cx - 1, y: cy - 1, color: '#' },
           { x: 2, y: 3, color: 'G' },
           { x: 2, y: 2, color: 'G' },
           { x: 2, y: 1, color: 'G' },
