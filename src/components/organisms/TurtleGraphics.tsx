@@ -83,6 +83,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     }, [beforeTraceItem, init, problem]);
 
     const updateCharacters = (character: CharacterTrace): void => {
+      setSelectedCharacter(character);
       setCharacters((prevCharacters) =>
         prevCharacters.map((prevCharacter) => {
           if (prevCharacter === selectedCharacter) {
@@ -147,24 +148,31 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
         return;
       }
 
-      selectedCharacter.x = updatedX;
-      selectedCharacter.y = updatedY;
+      const updatedCharacter = { ...selectedCharacter, x: updatedX, y: updatedY };
       if (selectedCharacter.pen) {
-        updateCellColor(selectedCharacter.color as ColorChar, selectedCharacter.x, selectedCharacter.y);
+        updateCellColor(updatedCharacter.color as ColorChar, updatedCharacter.x, updatedCharacter.y);
       }
-      updateCharacters(selectedCharacter);
+      updateCharacters(updatedCharacter);
     };
 
-    const handleClickChangeCharacterDirectionButton = (dir: string): void => {
+    const handleClickCharacterTurnLeftButton = (): void => {
       if (!selectedCharacter) return;
 
-      if (dir === 'left') {
-        selectedCharacter.dir = CHARACTER_DIRS[(CHARACTER_DIRS.indexOf(selectedCharacter.dir) + 3) % 4];
-      } else if (dir === 'right') {
-        selectedCharacter.dir = CHARACTER_DIRS[(CHARACTER_DIRS.indexOf(selectedCharacter.dir) + 1) % 4];
-      }
+      const updatedCharacter = {
+        ...selectedCharacter,
+        dir: CHARACTER_DIRS[(CHARACTER_DIRS.indexOf(selectedCharacter.dir) + 3) % 4],
+      };
+      updateCharacters(updatedCharacter);
+    };
 
-      updateCharacters(selectedCharacter);
+    const handleClickCharacterTurnRightButton = (): void => {
+      if (!selectedCharacter) return;
+
+      const updatedCharacter = {
+        ...selectedCharacter,
+        dir: CHARACTER_DIRS[(CHARACTER_DIRS.indexOf(selectedCharacter.dir) + 1) % 4],
+      };
+      updateCharacters(updatedCharacter);
     };
 
     const handleClickCharacterPenUpButton = (): void => {
@@ -276,10 +284,11 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
             board={board}
             handleAddCharacterButton={handleAddCharacterButton}
             handleChangeCellColorButton={handleChangeCellColorButton}
-            handleClickChangeCharacterDirectionButton={handleClickChangeCharacterDirectionButton}
             handleClickCharacterMoveForwardButton={handleClickCharacterMoveForwardButton}
             handleClickCharacterPenDownButton={handleClickCharacterPenDownButton}
             handleClickCharacterPenUpButton={handleClickCharacterPenUpButton}
+            handleClickCharacterTurnLeftButton={handleClickCharacterTurnLeftButton}
+            handleClickCharacterTurnRightButton={handleClickCharacterTurnRightButton}
             handleRemoveCharacterButton={handleRemoveCharacterButton}
             selectedCell={selectedCell}
             selectedCharacter={selectedCharacter}

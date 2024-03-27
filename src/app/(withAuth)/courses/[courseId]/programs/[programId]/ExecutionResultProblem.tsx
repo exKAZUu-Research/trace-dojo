@@ -51,12 +51,18 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
       alert('正解です。この問題は終了です');
       handleComplete();
     } else {
-      alert('不正解です。チェックポイントごとに回答してください');
-      const nextCheckpointTraceItemIndex = problem.traceItems.findIndex(
-        (traceItem) => traceItem.sid === problem.checkpointSids.at(0)
-      );
-      setCurrentTraceItemIndex(nextCheckpointTraceItemIndex);
-      setProblemType('checkpoint');
+      if (problem.checkpointSids.length > 0) {
+        alert('不正解です。チェックポイントごとに回答してください');
+        const nextCheckpointTraceItemIndex = problem.traceItems.findIndex(
+          (traceItem) => traceItem.sid === problem.checkpointSids.at(0)
+        );
+        setCurrentTraceItemIndex(nextCheckpointTraceItemIndex);
+        setProblemType('checkpoint');
+      } else {
+        alert('不正解です。ステップごとに回答してください');
+        setCurrentTraceItemIndex(1);
+        setProblemType('step');
+      }
     }
   };
 
