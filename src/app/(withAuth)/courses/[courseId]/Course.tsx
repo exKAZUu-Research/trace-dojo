@@ -177,7 +177,7 @@ export const Course: React.FC<{
                         {programIds.map(async (programId) => (
                           <Tr key={programId}>
                             <Td>
-                              <NextLink passHref href={`${courseId}/programs/${programId}`}>
+                              <NextLink passHref href={`${courseId}/${selectedLanguageId}/${programId}`}>
                                 {programIdToName[programId]}
                               </NextLink>
                             </Td>
