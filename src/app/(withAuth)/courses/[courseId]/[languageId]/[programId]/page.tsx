@@ -49,9 +49,6 @@ const ProblemPage: NextPage<{
     );
   }
 
-  console.log('languageId:', languageId);
-  console.log('userProblemSession:', userProblemSession);
-
   if (!userProblemSession) return <>undefined</>;
 
   return (
