@@ -136,7 +136,7 @@ class Character {
     if (this.x < 0 || ${GRID_COLUMNS} <= this.x || this.y < 0 || ${GRID_ROWS} <= this.y) {
       throw new Error('Out of bounds');
     }
-    board[this.y][this.x] = this.color;
+    if (this.pen) board[this.y][this.x] = this.color;
     addTrace(sid);
   }
   penDown(sid) {
@@ -192,7 +192,7 @@ trace;
       } else {
         lastSid++;
       }
-      sidToLineIndex.set(lastSid, index);
+      sidToLineIndex.set(lastSid, index + 1);
       return '';
     });
     refinedLines.push(refinedLine);

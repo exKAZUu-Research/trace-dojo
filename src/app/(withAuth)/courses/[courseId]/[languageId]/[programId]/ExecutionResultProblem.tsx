@@ -16,6 +16,7 @@ interface ExecutionResultProblemProps {
   explanation?: Record<'title' | 'body', string>;
   handleComplete: () => void;
   selectedLanguageId: string;
+  setCurrentTraceItemIndex: (line: number) => void;
   setProblemType: (step: ProblemType) => void;
 }
 
@@ -25,6 +26,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
   handleComplete,
   problem,
   selectedLanguageId,
+  setCurrentTraceItemIndex,
   setProblemType,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
@@ -39,8 +41,6 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
     turtleGraphicsRef.current?.init();
   };
 
-  const lastStep = problem.traceItems.length;
-
   const handleClickAnswerButton = async (): Promise<void> => {
     const isPassed = turtleGraphicsRef.current?.isPassed() || false;
 
@@ -51,8 +51,18 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
       alert('正解です。この問題は終了です');
       handleComplete();
     } else {
-      alert('不正解です。チェックポイントごとに回答してください');
-      setProblemType('checkpoint');
+      if (problem.checkpointSids.length > 0) {
+        alert('不正解です。チェックポイントごとに回答してください');
+        const nextCheckpointTraceItemIndex = problem.traceItems.findIndex(
+          (traceItem) => traceItem.sid === problem.checkpointSids.at(0)
+        );
+        setCurrentTraceItemIndex(nextCheckpointTraceItemIndex);
+        setProblemType('checkpoint');
+      } else {
+        alert('不正解です。ステップごとに回答してください');
+        setCurrentTraceItemIndex(1);
+        setProblemType('step');
+      }
     }
   };
 
@@ -63,7 +73,8 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
         <Box>
           <TurtleGraphics
             ref={turtleGraphicsRef}
-            currentCheckpointSid={lastStep}
+            beforeTraceItem={problem.traceItems.at(0)}
+            currentTraceItem={problem.traceItems.at(-1)}
             isEnableOperation={true}
             problem={problem}
           />

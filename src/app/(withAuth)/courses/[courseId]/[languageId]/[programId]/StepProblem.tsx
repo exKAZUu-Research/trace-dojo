@@ -12,27 +12,27 @@ import type { Problem } from '../../../../../../problems/generateProblem';
 import { Variables } from './Variables';
 
 interface StepProblemProps {
-  beforeCheckpointSid: number;
+  beforeTraceItemIndex: number;
   createAnswerLog: (isPassed: boolean) => void;
-  currentCheckpointSid: number;
+  currentTraceItemIndex: number;
   problem: Problem;
   explanation?: Record<'title' | 'body', string>;
   handleComplete: () => void;
   selectedLanguageId: string;
-  setBeforeCheckpointSid: (line: number) => void;
-  setCurrentCheckpointSid: (line: number) => void;
+  setBeforeTraceItemIndex: (line: number) => void;
+  setCurrentTraceItemIndex: (line: number) => void;
 }
 
 export const StepProblem: React.FC<StepProblemProps> = ({
-  beforeCheckpointSid,
+  beforeTraceItemIndex,
   createAnswerLog,
-  currentCheckpointSid,
+  currentTraceItemIndex,
   explanation,
   handleComplete,
   problem,
   selectedLanguageId,
-  setBeforeCheckpointSid,
-  setCurrentCheckpointSid,
+  setBeforeTraceItemIndex,
+  setCurrentTraceItemIndex,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
   const {
@@ -42,7 +42,8 @@ export const StepProblem: React.FC<StepProblemProps> = ({
   } = useDisclosure();
   const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
 
-  const beforeCheckpointTraceItem = problem.traceItems.find((traceItem) => traceItem.sid === beforeCheckpointSid);
+  const beforeCheckpointTraceItem = problem.traceItems[beforeTraceItemIndex];
+  const currentCheckpointTraceItem = problem.traceItems[currentTraceItemIndex];
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -55,18 +56,13 @@ export const StepProblem: React.FC<StepProblemProps> = ({
 
     // TODO: 一旦アラートで表示
     if (isPassed) {
-      // TODO: `problem.traceItems` の全要素を参照したかどうかで判断すること。
-      const programLines = problem.displayProgram.split('\n').length;
-
-      if (currentCheckpointSid === programLines) {
+      if (currentCheckpointTraceItem === problem.traceItems.at(-1)) {
         alert('正解です。この問題は終了です');
         handleComplete();
       } else {
         alert('正解です。次の行に進みます');
-        // TODO: ループの場合は、過去のsidに戻ることがあるので、sidを増やしてはならない。
-        // TODO: 代わりに `problem.traceItems` の次の要素を参照すること。
-        setBeforeCheckpointSid(currentCheckpointSid);
-        setCurrentCheckpointSid(currentCheckpointSid + 1);
+        setBeforeTraceItemIndex(currentTraceItemIndex);
+        setCurrentTraceItemIndex(currentTraceItemIndex + 1);
       }
     } else {
       alert('不正解です。もう一度回答してください');
@@ -81,8 +77,8 @@ export const StepProblem: React.FC<StepProblemProps> = ({
         <Box>
           <TurtleGraphics
             ref={turtleGraphicsRef}
-            beforeCheckpointSid={beforeCheckpointSid}
-            currentCheckpointSid={currentCheckpointSid}
+            beforeTraceItem={beforeCheckpointTraceItem}
+            currentTraceItem={currentCheckpointTraceItem}
             isEnableOperation={false}
             problem={problem}
           />
@@ -91,8 +87,8 @@ export const StepProblem: React.FC<StepProblemProps> = ({
         <Box>
           <TurtleGraphics
             ref={turtleGraphicsRef}
-            beforeCheckpointSid={beforeCheckpointSid}
-            currentCheckpointSid={currentCheckpointSid}
+            beforeTraceItem={beforeCheckpointTraceItem}
+            currentTraceItem={currentCheckpointTraceItem}
             isEnableOperation={true}
             problem={problem}
           />
@@ -125,10 +121,9 @@ export const StepProblem: React.FC<StepProblemProps> = ({
         </HStack>
         <Box h="640px" w="100%">
           <SyntaxHighlighter
-            // TODO: sid から行番号に変換すること。
-            beforeCheckpointLine={beforeCheckpointSid}
+            beforeCheckpointLine={problem.sidToLineIndex.get(beforeCheckpointTraceItem.sid)}
             code={problem.displayProgram}
-            currentCheckpointLine={currentCheckpointSid}
+            currentCheckpointLine={problem.sidToLineIndex.get(currentCheckpointTraceItem.sid)}
             programmingLanguageId={selectedLanguageId}
           />
         </Box>

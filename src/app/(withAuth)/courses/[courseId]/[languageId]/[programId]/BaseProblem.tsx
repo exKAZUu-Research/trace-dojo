@@ -32,9 +32,8 @@ export const BaseProblem: React.FC<{
   const [suspendedSession, setSuspendedSession] = useState<UserProblemSession>(userProblemSession);
   const [problemType, setProblemType] = useState<ProblemType>(userProblemSession.currentProblemType as ProblemType);
 
-  // TODO: チェックポイントはあくまでsidなので、可視化する際は `sidToLineIndex` を用いて、行番号を特定すること。
-  const [beforeCheckpointSid, setBeforeCheckpointSid] = useState(0);
-  const [currentCheckpointSid, setCurrentCheckpointSid] = useState(problem.checkpointSids[0] ?? 0);
+  const [beforeTraceItemIndex, setBeforeTraceItemIndex] = useState(0);
+  const [currentTraceItemIndex, setCurrentTraceItemIndex] = useState(0);
   const [lastTimeSpent, setLastTimeSpent] = useState(0);
 
   const { getActiveTime, isIdle, reset } = useIdleTimer({
@@ -57,6 +56,15 @@ export const BaseProblem: React.FC<{
   }, [isIdle, getActiveTime, suspendedSession, lastTimeSpent]);
 
   useEffect(() => {
+    // 中断中のセッションを再開する
+    if (!suspendedSession) return;
+
+    setProblemType(suspendedSession.currentProblemType as ProblemType);
+    setBeforeTraceItemIndex(suspendedSession.beforeTraceItemIndex);
+    setCurrentTraceItemIndex(suspendedSession.currentTraceItemIndex);
+  }, []);
+
+  useEffect(() => {
     if (!userId || !courseId || !programId || !languageId || !suspendedSession) return;
 
     (async () => {
@@ -68,8 +76,8 @@ export const BaseProblem: React.FC<{
         languageId,
         suspendedSession.problemVariablesSeed,
         problemType,
-        problemType === 'executionResult' ? 0 : beforeCheckpointSid,
-        problemType === 'executionResult' ? 0 : currentCheckpointSid,
+        problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
+        problemType === 'executionResult' ? 0 : currentTraceItemIndex,
         suspendedSession.timeSpent,
         suspendedSession.startedAt,
         undefined,
@@ -81,7 +89,7 @@ export const BaseProblem: React.FC<{
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentCheckpointSid, problemType]);
+  }, [currentTraceItemIndex, problemType]);
 
   const handleSolveProblem = async (): Promise<void> => {
     if (userId && suspendedSession) {
@@ -94,8 +102,8 @@ export const BaseProblem: React.FC<{
         languageId,
         suspendedSession.problemVariablesSeed,
         problemType,
-        problemType === 'executionResult' ? 0 : beforeCheckpointSid,
-        problemType === 'executionResult' ? 0 : currentCheckpointSid,
+        problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
+        problemType === 'executionResult' ? 0 : currentTraceItemIndex,
         suspendedSession.timeSpent,
         suspendedSession.startedAt,
         new Date(),
@@ -117,7 +125,7 @@ export const BaseProblem: React.FC<{
       languageId,
       userId,
       suspendedSession.id,
-      currentCheckpointSid,
+      currentTraceItemIndex,
       isPassed,
       activeTime,
       startedAt
@@ -147,6 +155,7 @@ export const BaseProblem: React.FC<{
             handleComplete={handleSolveProblem}
             problem={problem}
             selectedLanguageId={languageId}
+            setCurrentTraceItemIndex={setCurrentTraceItemIndex}
             setProblemType={setProblemType}
           />
         );
@@ -154,14 +163,14 @@ export const BaseProblem: React.FC<{
       case 'checkpoint': {
         return (
           <CheckpointProblem
-            beforeCheckpointSid={beforeCheckpointSid}
+            beforeTraceItemIndex={beforeTraceItemIndex}
             createAnswerLog={createAnswerLog}
-            currentCheckpointSid={currentCheckpointSid}
+            currentTraceItemIndex={currentTraceItemIndex}
             explanation={explanation}
             problem={problem}
             selectedLanguageId={languageId}
-            setBeforeCheckpointSid={setBeforeCheckpointSid}
-            setCurrentCheckpointSid={setCurrentCheckpointSid}
+            setBeforeTraceItemIndex={setBeforeTraceItemIndex}
+            setCurrentTraceItemIndex={setCurrentTraceItemIndex}
             setProblemType={setProblemType}
           />
         );
@@ -169,15 +178,15 @@ export const BaseProblem: React.FC<{
       case 'step': {
         return (
           <StepProblem
-            beforeCheckpointSid={beforeCheckpointSid}
+            beforeTraceItemIndex={beforeTraceItemIndex}
             createAnswerLog={createAnswerLog}
-            currentCheckpointSid={currentCheckpointSid}
+            currentTraceItemIndex={currentTraceItemIndex}
             explanation={explanation}
             handleComplete={handleSolveProblem}
             problem={problem}
             selectedLanguageId={languageId}
-            setBeforeCheckpointSid={setBeforeCheckpointSid}
-            setCurrentCheckpointSid={setCurrentCheckpointSid}
+            setBeforeTraceItemIndex={setBeforeTraceItemIndex}
+            setCurrentTraceItemIndex={setCurrentTraceItemIndex}
           />
         );
       }

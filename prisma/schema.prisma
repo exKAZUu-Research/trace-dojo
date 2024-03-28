@@ -34,15 +34,15 @@ model UserProblemSession {
   programId  String
   languageId String
 
-  problemVariablesSeed String
-  currentProblemType   String
-  beforeStep           Int
-  currentStep          Int
-  timeSpent            Int          @default(0)
-  startedAt            DateTime
-  finishedAt           DateTime?
-  isCompleted          Boolean
-  userAnswers          UserAnswer[]
+  problemVariablesSeed  String
+  currentProblemType    String
+  beforeTraceItemIndex  Int
+  currentTraceItemIndex Int
+  timeSpent             Int          @default(0)
+  startedAt             DateTime
+  finishedAt            DateTime?
+  isCompleted           Boolean
+  userAnswers           UserAnswer[]
 }
 
 model UserCompletedProblem {

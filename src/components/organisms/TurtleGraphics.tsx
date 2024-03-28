@@ -9,7 +9,7 @@ import {
   TURTLE_GRAPHICS_GRID_SIZE as GRID_SIZE,
 } from '../../constants';
 import type { Problem } from '../../problems/generateProblem';
-import { charToColor, type CharacterTrace } from '../../problems/traceProgram';
+import { charToColor, type CharacterTrace, type TraceItem } from '../../problems/traceProgram';
 import type { ColorChar, SelectedCell } from '../../types';
 import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController';
 
@@ -27,8 +27,8 @@ const charToRotateStyle = {
 interface TurtleGraphicsProps {
   isEnableOperation?: boolean;
   problem: Problem;
-  currentCheckpointSid?: number;
-  beforeCheckpointSid?: number;
+  currentTraceItem?: TraceItem;
+  beforeTraceItem?: TraceItem;
 }
 
 export interface TurtleGraphicsHandle {
@@ -37,26 +37,22 @@ export interface TurtleGraphicsHandle {
 }
 
 export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
-  ({ beforeCheckpointSid = 0, currentCheckpointSid, isEnableOperation = false, problem }, ref) => {
+  ({ beforeTraceItem, currentTraceItem, isEnableOperation = false, problem }, ref) => {
     const [board, setBoard] = useState<ColorChar[][]>([]);
     const [characters, setCharacters] = useState<CharacterTrace[]>([]);
     const [selectedCharacter, setSelectedCharacter] = useState<CharacterTrace>();
     const [selectedCell, setSelectedCell] = useState<SelectedCell>();
 
     const init = useCallback((): void => {
-      if (!problem) return;
+      if (!problem || !beforeTraceItem) return;
 
-      const traceItem = problem.traceItems.find((traceItem) => traceItem.sid === beforeCheckpointSid);
-
-      if (!traceItem) return;
-
-      const initBoard = traceItem.board
+      const initBoard = beforeTraceItem.board
         .trim()
         .split('\n')
         .filter((line) => line.trim() !== '')
         .map((line) => [...line.trim()]);
 
-      const variables = traceItem.vars;
+      const variables = beforeTraceItem.vars;
       const initCharacters = [];
       const initOtherVars = [];
       for (const key in variables) {
@@ -72,7 +68,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       setCharacters(initCharacters || []);
       setSelectedCharacter(undefined);
       setSelectedCell(undefined);
-    }, [beforeCheckpointSid, problem]);
+    }, [beforeTraceItem, problem]);
 
     useImperativeHandle(ref, () => ({
       // 親コンポーネントから関数を呼び出せるようにする
@@ -82,9 +78,10 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
 
     useEffect(() => {
       init();
-    }, [beforeCheckpointSid, init, problem]);
+    }, [beforeTraceItem, init, problem]);
 
     const updateCharacters = (character: CharacterTrace): void => {
+      setSelectedCharacter(character);
       setCharacters((prevCharacters) =>
         prevCharacters.map((prevCharacter) => {
           if (prevCharacter === selectedCharacter) {
@@ -104,11 +101,9 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     };
 
     const isPassed = (): boolean => {
-      const traceItem = problem.traceItems.find((traceItem) => traceItem.sid === currentCheckpointSid);
+      if (!currentTraceItem) return false;
 
-      if (!traceItem) return false;
-
-      const variables = traceItem.vars;
+      const variables = currentTraceItem.vars;
       const correctCharacters = [];
       for (const key in variables) {
         const value = variables[key];
@@ -117,7 +112,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
         }
       }
 
-      const correctBoard = traceItem.board
+      const correctBoard = currentTraceItem.board
         .trim()
         .split('\n')
         .filter((line) => line.trim() !== '')
@@ -151,24 +146,31 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
         return;
       }
 
-      selectedCharacter.x = updatedX;
-      selectedCharacter.y = updatedY;
+      const updatedCharacter = { ...selectedCharacter, x: updatedX, y: updatedY };
       if (selectedCharacter.pen) {
-        updateCellColor(selectedCharacter.color as ColorChar, selectedCharacter.x, selectedCharacter.y);
+        updateCellColor(updatedCharacter.color as ColorChar, updatedCharacter.x, updatedCharacter.y);
       }
-      updateCharacters(selectedCharacter);
+      updateCharacters(updatedCharacter);
     };
 
-    const handleClickChangeCharacterDirectionButton = (dir: string): void => {
+    const handleClickCharacterTurnLeftButton = (): void => {
       if (!selectedCharacter) return;
 
-      if (dir === 'left') {
-        selectedCharacter.dir = CHARACTER_DIRS[(CHARACTER_DIRS.indexOf(selectedCharacter.dir) + 3) % 4];
-      } else if (dir === 'right') {
-        selectedCharacter.dir = CHARACTER_DIRS[(CHARACTER_DIRS.indexOf(selectedCharacter.dir) + 1) % 4];
-      }
+      const updatedCharacter = {
+        ...selectedCharacter,
+        dir: CHARACTER_DIRS[(CHARACTER_DIRS.indexOf(selectedCharacter.dir) + 3) % 4],
+      };
+      updateCharacters(updatedCharacter);
+    };
 
-      updateCharacters(selectedCharacter);
+    const handleClickCharacterTurnRightButton = (): void => {
+      if (!selectedCharacter) return;
+
+      const updatedCharacter = {
+        ...selectedCharacter,
+        dir: CHARACTER_DIRS[(CHARACTER_DIRS.indexOf(selectedCharacter.dir) + 1) % 4],
+      };
+      updateCharacters(updatedCharacter);
     };
 
     const handleClickCharacterPenUpButton = (): void => {
@@ -280,10 +282,11 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
             board={board}
             handleAddCharacterButton={handleAddCharacterButton}
             handleChangeCellColorButton={handleChangeCellColorButton}
-            handleClickChangeCharacterDirectionButton={handleClickChangeCharacterDirectionButton}
             handleClickCharacterMoveForwardButton={handleClickCharacterMoveForwardButton}
             handleClickCharacterPenDownButton={handleClickCharacterPenDownButton}
             handleClickCharacterPenUpButton={handleClickCharacterPenUpButton}
+            handleClickCharacterTurnLeftButton={handleClickCharacterTurnLeftButton}
+            handleClickCharacterTurnRightButton={handleClickCharacterTurnRightButton}
             handleRemoveCharacterButton={handleRemoveCharacterButton}
             selectedCell={selectedCell}
             selectedCharacter={selectedCharacter}

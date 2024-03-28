@@ -38,11 +38,11 @@ public class Main {
 }
 `.trim(),
     expectedSidToLineIndex: {
-      1: 4,
-      2: 6,
-      3: 7,
-      4: 9,
-      5: 12,
+      1: 5,
+      2: 7,
+      3: 8,
+      4: 10,
+      5: 13,
     },
     expectedCheckpointSids: [],
     expectedTrace: [
@@ -70,10 +70,10 @@ public class Main {
 }
 `.trim(),
     expectedSidToLineIndex: {
-      1: 4,
-      2: 5,
-      3: 6,
-      4: 7,
+      1: 5,
+      2: 6,
+      3: 7,
+      4: 8,
     },
     expectedCheckpointSids: [3],
     expectedTrace: [
@@ -130,11 +130,11 @@ public class Main {
 }
 `.trim(),
     expectedSidToLineIndex: {
-      1: 4,
-      2: 5,
-      3: 6,
-      4: 7,
-      5: 8,
+      1: 5,
+      2: 6,
+      3: 7,
+      4: 8,
+      5: 9,
     },
     expectedCheckpointSids: [4],
     expectedTrace: [
@@ -254,19 +254,19 @@ public class Main {
 }
 `.trim(),
     expectedSidToLineIndex: {
-      1: 2,
-      2: 3,
-      3: 4,
-      4: 5,
-      5: 6,
-      6: 7,
-      7: 9,
-      8: 10,
-      9: 11,
-      10: 12,
-      11: 13,
-      12: 14,
-      13: 15,
+      1: 3,
+      2: 4,
+      3: 5,
+      4: 6,
+      5: 7,
+      6: 8,
+      7: 10,
+      8: 11,
+      9: 12,
+      10: 13,
+      11: 14,
+      12: 15,
+      13: 16,
     },
     expectedCheckpointSids: [],
     expectedTrace: [
@@ -314,7 +314,6 @@ public class Main {
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
-          { x: cx - 1, y: cy - 1, color: '#' },
         ]),
       },
       {
@@ -327,7 +326,6 @@ public class Main {
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
-          { x: cx - 1, y: cy - 1, color: '#' },
           { x: 2, y: 3, color: 'G' },
         ]),
       },
@@ -341,7 +339,6 @@ public class Main {
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
-          { x: cx - 1, y: cy - 1, color: '#' },
           { x: 2, y: 3, color: 'G' },
           { x: 2, y: 2, color: 'G' },
         ]),
@@ -357,7 +354,6 @@ public class Main {
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
-          { x: cx - 1, y: cy - 1, color: '#' },
           { x: 2, y: 3, color: 'G' },
           { x: 2, y: 2, color: 'G' },
         ]),
@@ -374,7 +370,6 @@ public class Main {
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
-          { x: cx - 1, y: cy - 1, color: '#' },
           { x: 2, y: 3, color: 'G' },
           { x: 2, y: 2, color: 'G' },
         ]),
@@ -391,7 +386,6 @@ public class Main {
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
-          { x: cx - 1, y: cy - 1, color: '#' },
           { x: 2, y: 3, color: 'G' },
           { x: 2, y: 2, color: 'G' },
         ]),
@@ -408,7 +402,6 @@ public class Main {
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
-          { x: cx - 1, y: cy - 1, color: '#' },
           { x: 2, y: 3, color: 'G' },
           { x: 2, y: 2, color: 'G' },
           { x: 2, y: 1, color: 'G' },
@@ -426,7 +419,6 @@ public class Main {
         board: getBoard([
           { x: cx, y: cy, color: '#' },
           { x: cx, y: cy - 1, color: '#' },
-          { x: cx - 1, y: cy - 1, color: '#' },
           { x: 2, y: 3, color: 'G' },
           { x: 2, y: 2, color: 'G' },
           { x: 2, y: 1, color: 'G' },
@@ -453,14 +445,14 @@ public class Straight {
 }
 `.trim(),
     expectedSidToLineIndex: {
-      1: 2,
-      2: 3,
-      3: 4,
-      4: 5,
-      5: 6,
-      6: 7,
-      7: 8,
-      8: 9,
+      1: 3,
+      2: 4,
+      3: 5,
+      4: 6,
+      5: 7,
+      6: 8,
+      7: 9,
+      8: 10,
     },
     expectedCheckpointSids: [2, 5, 6],
     expectedTrace: [

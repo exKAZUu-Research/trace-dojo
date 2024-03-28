@@ -14,7 +14,8 @@ interface TurtleGraphicsControllerProps {
   handleChangeCellColorButton: (color: ColorChar) => void;
   handleAddCharacterButton: (color: ColorChar) => void;
   handleRemoveCharacterButton: (character: CharacterTrace) => void;
-  handleClickChangeCharacterDirectionButton: (dir: string) => void;
+  handleClickCharacterTurnLeftButton: () => void;
+  handleClickCharacterTurnRightButton: () => void;
   handleClickCharacterMoveForwardButton: () => void;
   handleClickCharacterPenUpButton: () => void;
   handleClickCharacterPenDownButton: () => void;
@@ -24,10 +25,11 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
   board,
   handleAddCharacterButton,
   handleChangeCellColorButton,
-  handleClickChangeCharacterDirectionButton,
   handleClickCharacterMoveForwardButton,
   handleClickCharacterPenDownButton,
   handleClickCharacterPenUpButton,
+  handleClickCharacterTurnLeftButton,
+  handleClickCharacterTurnRightButton,
   handleRemoveCharacterButton,
   selectedCell,
   selectedCharacter,
@@ -44,8 +46,8 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
       {selectedCharacter && (
         <>
           <HStack>
-            <Button onClick={() => handleClickChangeCharacterDirectionButton('left')}>⤹</Button>
-            <Button onClick={() => handleClickChangeCharacterDirectionButton('right')}>⤵</Button>
+            <Button onClick={() => handleClickCharacterTurnLeftButton()}>⤹</Button>
+            <Button onClick={() => handleClickCharacterTurnRightButton()}>⤵</Button>
           </HStack>
           <HStack>
             <Button onClick={() => handleClickCharacterMoveForwardButton()}>前に進む</Button>
