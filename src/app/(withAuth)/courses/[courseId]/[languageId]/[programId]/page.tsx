@@ -1,7 +1,8 @@
 import type { UserProblemSession } from '@prisma/client';
 import type { NextPage } from 'next';
 
-import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
+import { generateProblem, type Problem } from '../../../../../../problems/generateProblem';
+import type { CourseId, LanguageId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
 import { getNonNullableSessionOnServer } from '../../../../../../utils/session';
 import { getSuspendedUserProblemSession, upsertUserProblemSession } from '../../../../../lib/actions';
 
@@ -49,12 +50,19 @@ const ProblemPage: NextPage<{
     );
   }
 
-  if (!userProblemSession) return <>undefined</>;
+  const problem: Problem | undefined = userProblemSession
+    ? generateProblem(
+        userProblemSession.programId as ProgramId,
+        userProblemSession.languageId as LanguageId,
+        userProblemSession.problemVariablesSeed
+      )
+    : undefined;
 
-  return userProblemSession ? (
+  return userProblemSession && problem ? (
     <BaseProblem
       courseId={params.courseId}
       languageId={languageId}
+      problem={problem}
       programId={params.programId}
       userId={session.getUserId()}
       userProblemSession={userProblemSession}

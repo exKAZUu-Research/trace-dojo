@@ -2,13 +2,12 @@
 
 import { Heading, VStack } from '@chakra-ui/react';
 import type { UserProblemSession } from '@prisma/client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
 
 import { INTERVAL_MS_OF_IDLE_TIMER } from '../../../../../../constants';
 import type { Problem } from '../../../../../../problems/generateProblem';
-import { generateProblem } from '../../../../../../problems/generateProblem';
-import type { CourseId, LanguageId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
+import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
 import { getExplanation, programIdToName } from '../../../../../../problems/problemData';
 import type { ProblemType } from '../../../../../../types';
 import {
@@ -28,25 +27,10 @@ export const BaseProblem: React.FC<{
   userId: string;
   languageId: VisibleLanguageId;
   userProblemSession: UserProblemSession;
-}> = ({ courseId, languageId, programId, userId, userProblemSession }) => {
+  problem: Problem;
+}> = ({ courseId, languageId, problem, programId, userId, userProblemSession }) => {
   const [suspendedSession, setSuspendedSession] = useState<UserProblemSession>(userProblemSession);
   const [problemType, setProblemType] = useState<ProblemType>(userProblemSession.currentProblemType as ProblemType);
-  const problem = useMemo<Problem>(() => {
-    // TODO: 後述の通り、Server Componentで `suspendedSession` 取得することで、ダミーデータを使う状況を排除したい。
-    if (!suspendedSession)
-      return {
-        languageId,
-        displayProgram: '',
-        checkpointSids: [],
-        traceItems: [],
-        sidToLineIndex: new Map(),
-      };
-    return generateProblem(
-      suspendedSession.programId as ProgramId,
-      suspendedSession.languageId as LanguageId,
-      suspendedSession.problemVariablesSeed
-    );
-  }, [languageId, suspendedSession]);
 
   // TODO: チェックポイントはあくまでsidなので、可視化する際は `sidToLineIndex` を用いて、行番号を特定すること。
   const [beforeCheckpointSid, setBeforeCheckpointSid] = useState(0);
