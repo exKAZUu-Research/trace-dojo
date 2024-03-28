@@ -1,4 +1,9 @@
-import { DEFAULT_COLOR, EMPTY_COLOR, GRID_COLUMNS, GRID_ROWS } from '../components/organisms/TurtleGraphics';
+import {
+  TURTLE_GRAPHICS_GRID_COLUMNS as GRID_COLUMNS,
+  TURTLE_GRAPHICS_GRID_ROWS as GRID_ROWS,
+  TURTLE_GRAPHICS_EMPTY_COLOR as EMPTY_COLOR,
+  TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR,
+} from '../constants';
 import type { CellColor, ColorChar } from '../types';
 
 import type { Problem } from './generateProblem';
