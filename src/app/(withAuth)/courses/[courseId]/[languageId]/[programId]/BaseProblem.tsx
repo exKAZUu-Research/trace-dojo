@@ -2,64 +2,35 @@
 
 import { Heading, VStack } from '@chakra-ui/react';
 import type { UserProblemSession } from '@prisma/client';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
-import { useLocalStorage } from 'usehooks-ts';
 
 import { INTERVAL_MS_OF_IDLE_TIMER } from '../../../../../../constants';
 import type { Problem } from '../../../../../../problems/generateProblem';
-import { generateProblem } from '../../../../../../problems/generateProblem';
-import type { CourseId, LanguageId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
-import {
-  defaultLanguageId,
-  getExplanation,
-  programIdToName,
-  visibleLanguageIds,
-} from '../../../../../../problems/problemData';
+import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
+import { getExplanation, programIdToName } from '../../../../../../problems/problemData';
 import type { ProblemType } from '../../../../../../types';
 import {
   createUserAnswer,
   createUserCompletedProblem,
-  getSuspendedUserProblemSession,
   updateUserProblemSession,
   upsertUserProblemSession,
 } from '../../../../../lib/actions';
-import { selectedLanguageIdKey } from '../../../../../lib/sessionStorage';
 
 import { CheckpointProblem } from './CheckpointProblem';
 import { ExecutionResultProblem } from './ExecutionResultProblem';
 import { StepProblem } from './StepProblem';
 
-export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; userId: string }> = ({
-  courseId,
-  programId,
-  userId,
-}) => {
-  const didFetchSessionRef = useRef(false);
-
-  const [startedAt] = useState(new Date());
-  const [suspendedSession, setSuspendedSession] = useState<UserProblemSession>();
-  const [selectedLanguageId, setSelectedLanguageId] = useLocalStorage<VisibleLanguageId>(
-    selectedLanguageIdKey,
-    defaultLanguageId
-  );
-  const [problemType, setProblemType] = useState<ProblemType>('executionResult');
-  const problem = useMemo<Problem>(() => {
-    // TODO: 後述の通り、Server Componentで `suspendedSession` 取得することで、ダミーデータを使う状況を排除したい。
-    if (!suspendedSession)
-      return {
-        languageId: selectedLanguageId,
-        displayProgram: '',
-        checkpointSids: [],
-        traceItems: [],
-        sidToLineIndex: new Map(),
-      };
-    return generateProblem(
-      suspendedSession.programId as ProgramId,
-      suspendedSession.languageId as LanguageId,
-      suspendedSession.problemVariablesSeed
-    );
-  }, [suspendedSession]);
+export const BaseProblem: React.FC<{
+  courseId: CourseId;
+  programId: ProgramId;
+  userId: string;
+  languageId: VisibleLanguageId;
+  userProblemSession: UserProblemSession;
+  problem: Problem;
+}> = ({ courseId, languageId, problem, programId, userId, userProblemSession }) => {
+  const [suspendedSession, setSuspendedSession] = useState<UserProblemSession>(userProblemSession);
+  const [problemType, setProblemType] = useState<ProblemType>(userProblemSession.currentProblemType as ProblemType);
 
   // TODO: チェックポイントはあくまでsidなので、可視化する際は `sidToLineIndex` を用いて、行番号を特定すること。
   const [beforeCheckpointSid, setBeforeCheckpointSid] = useState(0);
@@ -86,54 +57,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
   }, [isIdle, getActiveTime, suspendedSession, lastTimeSpent]);
 
   useEffect(() => {
-    (async () => {
-      if (!visibleLanguageIds.includes(selectedLanguageId)) {
-        setSelectedLanguageId(defaultLanguageId);
-      }
-
-      // TODO: suspendedSessionの読み込み前では不正確な画面を描画してしまうため、Server Componentで描画前にデータを読み込むこと。
-      let suspendedSession = await getSuspendedUserProblemSession(userId, courseId, programId, selectedLanguageId);
-
-      if (suspendedSession) {
-        // 中断中のセッションを再開する
-        setProblemType(suspendedSession.currentProblemType as ProblemType);
-        setBeforeCheckpointSid(suspendedSession.beforeStep);
-        setCurrentCheckpointSid(suspendedSession.currentStep);
-        didFetchSessionRef.current = true;
-      } else {
-        // reactStrictModeが有効の場合にレコードが二重に作成されることを防ぐためrefで制御
-        if (didFetchSessionRef.current === false) {
-          didFetchSessionRef.current = true;
-
-          const problemVariableSeed = Date.now().toString();
-          suspendedSession = await upsertUserProblemSession(
-            // createするためにidに0を指定
-            0,
-            userId,
-            courseId,
-            programId,
-            selectedLanguageId,
-            problemVariableSeed,
-            problemType,
-            0,
-            0,
-            undefined,
-            startedAt,
-            undefined,
-            false
-          );
-        }
-      }
-      if (suspendedSession) {
-        setSuspendedSession(suspendedSession);
-        setLastTimeSpent(suspendedSession.timeSpent);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!userId || !courseId || !programId || !selectedLanguageId || !suspendedSession) return;
+    if (!userId || !courseId || !programId || !languageId || !suspendedSession) return;
 
     (async () => {
       const updatedSession = await upsertUserProblemSession(
@@ -141,7 +65,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
         userId,
         courseId,
         programId,
-        selectedLanguageId,
+        languageId,
         suspendedSession.problemVariablesSeed,
         problemType,
         problemType === 'executionResult' ? 0 : beforeCheckpointSid,
@@ -161,13 +85,13 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
 
   const handleSolveProblem = async (): Promise<void> => {
     if (userId && suspendedSession) {
-      await createUserCompletedProblem(userId, courseId, programId, selectedLanguageId);
+      await createUserCompletedProblem(userId, courseId, programId, languageId);
       await upsertUserProblemSession(
         suspendedSession.id,
         userId,
         courseId,
         programId,
-        selectedLanguageId,
+        languageId,
         suspendedSession.problemVariablesSeed,
         problemType,
         problemType === 'executionResult' ? 0 : beforeCheckpointSid,
@@ -190,7 +114,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
     await createUserAnswer(
       programId,
       problemType,
-      selectedLanguageId,
+      languageId,
       userId,
       suspendedSession.id,
       currentCheckpointSid,
@@ -211,7 +135,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
     }
   };
 
-  const explanation = getExplanation(programId, selectedLanguageId);
+  const explanation = getExplanation(programId, languageId);
 
   const ProblemComponent: React.FC = () => {
     switch (problemType) {
@@ -222,7 +146,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
             explanation={explanation}
             handleComplete={handleSolveProblem}
             problem={problem}
-            selectedLanguageId={selectedLanguageId}
+            selectedLanguageId={languageId}
             setProblemType={setProblemType}
           />
         );
@@ -235,7 +159,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
             currentCheckpointSid={currentCheckpointSid}
             explanation={explanation}
             problem={problem}
-            selectedLanguageId={selectedLanguageId}
+            selectedLanguageId={languageId}
             setBeforeCheckpointSid={setBeforeCheckpointSid}
             setCurrentCheckpointSid={setCurrentCheckpointSid}
             setProblemType={setProblemType}
@@ -251,7 +175,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
             explanation={explanation}
             handleComplete={handleSolveProblem}
             problem={problem}
-            selectedLanguageId={selectedLanguageId}
+            selectedLanguageId={languageId}
             setBeforeCheckpointSid={setBeforeCheckpointSid}
             setCurrentCheckpointSid={setCurrentCheckpointSid}
           />
