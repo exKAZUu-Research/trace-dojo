@@ -64,18 +64,15 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
   const [beforeTraceItemIndex, setBeforeTraceItemIndex] = useState(0);
   const [currentTraceItemIndex, setCurrentTraceItemIndex] = useState(0);
   const [lastTimeSpent, setLastTimeSpent] = useState(0);
-  const [activityState, setActivityState] = useState<'Active' | 'Idle'>('Active');
 
-  const { getActiveTime, reset } = useIdleTimer({
-    onIdle: () => setActivityState('Idle'),
-    onActive: () => setActivityState('Active'),
+  const { getActiveTime, isIdle, reset } = useIdleTimer({
     timeout: 10_000,
     throttle: 500,
   });
 
   useEffect(() => {
     const interval = setInterval(async () => {
-      if (suspendedSession && activityState === 'Active') {
+      if (suspendedSession && !isIdle()) {
         await updateUserProblemSession(suspendedSession.id, {
           timeSpent: lastTimeSpent + getActiveTime(),
         });
@@ -85,7 +82,7 @@ export const BaseProblem: React.FC<{ courseId: CourseId; programId: ProgramId; u
     return () => {
       clearInterval(interval);
     };
-  }, [activityState, getActiveTime, suspendedSession, lastTimeSpent]);
+  }, [isIdle, getActiveTime, suspendedSession, lastTimeSpent]);
 
   useEffect(() => {
     (async () => {
