@@ -3,17 +3,15 @@
 import { Box, Grid, GridItem, Image } from '@chakra-ui/react';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
 
+import {
+  TURTLE_GRAPHICS_GRID_COLUMNS as GRID_COLUMNS,
+  TURTLE_GRAPHICS_GRID_ROWS as GRID_ROWS,
+  TURTLE_GRAPHICS_GRID_SIZE as GRID_SIZE,
+} from '../../constants';
 import type { Problem } from '../../problems/generateProblem';
 import { charToColor, type CharacterTrace, type TraceItem } from '../../problems/traceProgram';
 import type { ColorChar, SelectedCell } from '../../types';
 import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController';
-
-export const GRID_COLUMNS = 13;
-export const GRID_ROWS = 9;
-export const GRID_SIZE = 40;
-
-export const EMPTY_COLOR = '.';
-export const DEFAULT_COLOR = '#';
 
 const CHARACTER_DIRS = ['N', 'E', 'S', 'W'];
 const DX = [0, 1, 0, -1];

@@ -3,9 +3,9 @@
 import { Box, Button, HStack, Select, VStack } from '@chakra-ui/react';
 import React, { useState } from 'react';
 
+import { TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR } from '../../constants';
 import type { CharacterTrace } from '../../problems/traceProgram';
 import type { ColorChar, SelectedCell } from '../../types';
-import { DEFAULT_COLOR } from '../organisms/TurtleGraphics';
 
 interface TurtleGraphicsControllerProps {
   board: ColorChar[][];
