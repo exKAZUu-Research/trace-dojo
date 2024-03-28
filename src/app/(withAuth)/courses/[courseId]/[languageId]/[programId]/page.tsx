@@ -14,7 +14,6 @@ const ProblemPage: NextPage<{
   const session = await getNonNullableSessionOnServer();
   const userId = session.getUserId();
   const courseId = params.courseId;
-  // TODO: fix typo
   const languageId = params.languageId;
   const programId = params.programId;
 
