@@ -51,7 +51,7 @@ const ProblemPage: NextPage<{
 
   if (!userProblemSession) return <>undefined</>;
 
-  return (
+  return userProblemSession ? (
     <BaseProblem
       courseId={params.courseId}
       languageId={languageId}
@@ -59,6 +59,8 @@ const ProblemPage: NextPage<{
       userId={session.getUserId()}
       userProblemSession={userProblemSession}
     />
+  ) : (
+    <></>
   );
 };
 
