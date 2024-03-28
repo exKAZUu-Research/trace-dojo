@@ -8,13 +8,13 @@ import { getSuspendedUserProblemSession, upsertUserProblemSession } from '../../
 import { BaseProblem } from './BaseProblem';
 
 const ProblemPage: NextPage<{
-  params: { courseId: CourseId; languateId: VisibleLanguageId; programId: ProgramId };
+  params: { courseId: CourseId; languageId: VisibleLanguageId; programId: ProgramId };
 }> = async ({ params }) => {
   const session = await getNonNullableSessionOnServer();
   const userId = session.getUserId();
   const courseId = params.courseId;
   // TODO: fix typo
-  const languageId = params.languateId;
+  const languageId = params.languageId;
   const programId = params.programId;
 
   const suspendedSession: UserProblemSession | undefined = await getSuspendedUserProblemSession(
