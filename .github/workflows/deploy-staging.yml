@@ -1,0 +1,21 @@
+name: Deploy staging
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - '**/docs/**'
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+jobs:
+  deploy:
+    uses: exKAZUu-Research/reusable-workflows/.github/workflows/deploy.yml@main
+    with:
+      environment: staging
+    secrets:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      GCP_SA_KEY_JSON: ${{ secrets.GCP_SA_KEY }}
+      GH_TOKEN: ${{ secrets.GH_BOT_PAT }}
