@@ -8,8 +8,12 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   experimental: {
-    // https://github.com/vercel/next.js/discussions/46987
     serverComponentsExternalPackages: ['pino'],
+    optimizePackageImports: ['@chakra-ui/react', 'supertokens-auth-react'],
+    staleTimes: {
+      dynamic: 0,
+      static: 0,
+    },
   },
 };
 
