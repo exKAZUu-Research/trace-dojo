@@ -1,7 +1,8 @@
-import { Box } from '@chakra-ui/react';
 import React from 'react';
 import { Prism } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism';
+
+import { Box } from '../../infrastructures/useClient/chakra';
 
 interface SyntaxHighlighterProps {
   beforeCheckpointLine?: number;

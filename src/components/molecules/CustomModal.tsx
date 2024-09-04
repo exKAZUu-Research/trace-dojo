@@ -7,7 +7,7 @@ import {
   ModalFooter,
   ModalHeader,
   ModalOverlay,
-} from '@chakra-ui/react';
+} from '../../infrastructures/useClient/chakra';
 
 interface CustomModalProps {
   title: string;

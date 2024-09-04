@@ -1,4 +1,3 @@
-import { Container, Spinner } from '@chakra-ui/react';
 import type { NextPage } from 'next';
 import { redirect } from 'next/navigation';
 import React, { Suspense } from 'react';
@@ -7,6 +6,7 @@ import { SessionAuthForNextJs } from '../../components/molecules/SessionAuthForN
 import { TryRefreshComponent } from '../../components/molecules/TryRefreshComponent';
 import { DefaultFooter } from '../../components/organisms/DefaultFooter';
 import { DefaultHeader } from '../../components/organisms/DefaultHeader';
+import { Container, Spinner } from '../../infrastructures/useClient/chakra';
 import type { LayoutProps } from '../../types';
 import { getNullableSessionOnServer } from '../../utils/session';
 

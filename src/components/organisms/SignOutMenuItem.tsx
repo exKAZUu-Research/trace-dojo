@@ -1,11 +1,11 @@
 'use client';
-import { MenuItem } from '@chakra-ui/react';
 import { useRouter } from 'next/navigation';
 import React from 'react';
 import { FaSignOutAlt } from 'react-icons/fa';
 import { signOut } from 'supertokens-auth-react/recipe/session';
 
 import { clearAllCaches } from '../../asyncFunctions/cache/actions';
+import { MenuItem } from '../../infrastructures/useClient/chakra';
 
 export const SignOutMenuItem: React.FC = () => {
   const router = useRouter();

@@ -1,16 +1,16 @@
-FROM node:20.12.0-slim
+FROM node:22.5.1-slim
 WORKDIR /app
 
 EXPOSE 8080
 
-ENV NODE_ENV production
-ENV HUSKY 0
-ENV TZ Asia/Tokyo
+ENV NODE_ENV=production
+ENV HUSKY=0
+ENV TZ=Asia/Tokyo
 
-ENV GOOGLE_APPLICATION_CREDENTIALS /app/gcp-sa-key.json
+ENV GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-sa-key.json
 
 ARG ARCH
-ENV ARCH $ARCH
+ENV ARCH=$ARCH
 
 RUN apt-get -qq update \
     && node -e 'fetch("https://raw.githubusercontent.com/WillBooster/docker-utils/main/bash/prepare-node-web.sh").then(r => r.text()).then(t => process.stdout.write(t))' | bash \
@@ -25,12 +25,12 @@ COPY .env* .yarnrc.yml blitz* ecosystem* gcp-sa-key.* next* tsconfig.json yarn.l
 COPY dist/package.json ./
 
 ARG WB_VERSION
-ENV WB_VERSION $WB_VERSION
-ENV NEXT_PUBLIC_WB_VERSION $WB_VERSION
+ENV WB_VERSION=$WB_VERSION
+ENV NEXT_PUBLIC_WB_VERSION=$WB_VERSION
 
 ARG WB_ENV
-ENV WB_ENV $WB_ENV
-ENV NEXT_PUBLIC_WB_ENV $WB_ENV
+ENV WB_ENV=$WB_ENV
+ENV NEXT_PUBLIC_WB_ENV=$WB_ENV
 
 RUN node -e 'fetch("https://raw.githubusercontent.com/WillBooster/docker-utils/main/bash/configure-yarn.sh").then(r => r.text()).then(t => process.stdout.write(t))' | bash \
     && yarn \
@@ -43,8 +43,8 @@ RUN node -e 'fetch("https://raw.githubusercontent.com/WillBooster/docker-utils/m
     && rm -Rf db/mount \
     && rm -Rf .yarn/cache
 
-ENV ALLOW_TO_SKIP_SEED 1
-ENV RESTORE_BACKUP 0
+ENV ALLOW_TO_SKIP_SEED=1
+ENV RESTORE_BACKUP=0
 
 CMD if [ "$RESTORE_BACKUP" -eq 1 ] && [ -s gcp-sa-key.json ] && [ "$WB_ENV" != "" ] && [ "$WB_ENV" != "development" ] && [ "$WB_ENV" != "test" ]; then \
         node node_modules/.bin/wb prisma deploy-force gcs://wb-online-judge/trace-dojo-${WB_ENV}/prod.sqlite3; \

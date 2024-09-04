@@ -1,6 +1,17 @@
-import { Box, Table, TableCaption, TableContainer, Tbody, Td, Th, Thead, Tr, VStack } from '@chakra-ui/react';
 import React from 'react';
 
+import {
+  Box,
+  Table,
+  TableCaption,
+  TableContainer,
+  Tbody,
+  Td,
+  Th,
+  Thead,
+  Tr,
+  VStack,
+} from '../../../../../../infrastructures/useClient/chakra';
 import { charToColor, type TraceItemVar } from '../../../../../../problems/traceProgram';
 
 interface VariablesProps {

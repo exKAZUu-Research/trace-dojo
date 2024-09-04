@@ -1,12 +1,12 @@
 'use client';
 
-import { Box, Button, Flex, HStack, useDisclosure, VStack } from '@chakra-ui/react';
 import { useRef } from 'react';
 
 import { CustomModal } from '../../../../../../components/molecules/CustomModal';
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
+import { Box, Button, Flex, HStack, useDisclosure, VStack } from '../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../problems/generateProblem';
 
 import { Variables } from './Variables';

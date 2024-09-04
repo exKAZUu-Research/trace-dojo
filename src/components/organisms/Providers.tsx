@@ -1,13 +1,13 @@
 'use client';
 
 import { CacheProvider } from '@chakra-ui/next-js';
-import { ChakraProvider } from '@chakra-ui/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { usePathname, useRouter } from 'next/navigation';
 import React from 'react';
 import { SuperTokensWrapper } from 'supertokens-auth-react';
 
 import { ensureSuperTokensReactInit, setRouter } from '../../infrastructures/supertokens/frontendConfig';
+import { ChakraProvider } from '../../infrastructures/useClient/chakra';
 import { theme } from '../../theme';
 
 ensureSuperTokensReactInit();

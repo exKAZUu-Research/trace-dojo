@@ -1,6 +1,5 @@
 'use client';
 
-import { Box, Grid, GridItem, Image } from '@chakra-ui/react';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
 
 import {
@@ -8,6 +7,7 @@ import {
   TURTLE_GRAPHICS_GRID_ROWS as GRID_ROWS,
   TURTLE_GRAPHICS_GRID_SIZE as GRID_SIZE,
 } from '../../constants';
+import { Box, Grid, GridItem, Image } from '../../infrastructures/useClient/chakra';
 import type { Problem } from '../../problems/generateProblem';
 import { charToColor, type CharacterTrace, type TraceItem } from '../../problems/traceProgram';
 import type { ColorChar, SelectedCell } from '../../types';

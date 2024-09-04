@@ -1,10 +1,10 @@
-import { Box, Button, FormControl, FormLabel, Input } from '@chakra-ui/react';
 import type { NextPage } from 'next';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { zfd } from 'zod-form-data';
 
 import { prisma } from '../../../infrastructures/prisma';
+import { Box, Button, FormControl, FormLabel, Input } from '../../../infrastructures/useClient/chakra';
 import { getNonNullableSessionOnServer } from '../../../utils/session';
 
 const SettingsPage: NextPage = async () => {

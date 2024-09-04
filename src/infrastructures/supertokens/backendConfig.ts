@@ -9,9 +9,8 @@ export const backendConfig = (): TypeInput => {
   return {
     framework: 'custom',
     supertokens: {
-      // https://try.supertokens.com is for demo purposes. Replace this with the address of your core instance (sign up on supertokens.com), or self host a core.
-      connectionURI: 'https://try.supertokens.com',
-      // apiKey: <API_KEY(if configured)>,
+      connectionURI: process.env.SUPERTOKENS_URI ?? '',
+      apiKey: process.env.SUPERTOKENS_API_KEY ?? '',
     },
     appInfo,
     recipeList: [EmailPasswordNode.init(), SessionNode.init()],

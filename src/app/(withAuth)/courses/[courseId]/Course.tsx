@@ -1,5 +1,11 @@
 'use client';
 
+import type { UserAnswer } from '@prisma/client';
+import Image from 'next/image';
+import NextLink from 'next/link';
+import React, { useEffect } from 'react';
+import { useLocalStorage } from 'usehooks-ts';
+
 import {
   Accordion,
   AccordionButton,
@@ -20,13 +26,7 @@ import {
   Thead,
   Tr,
   VStack,
-} from '@chakra-ui/react';
-import type { UserAnswer } from '@prisma/client';
-import Image from 'next/image';
-import NextLink from 'next/link';
-import React, { useEffect } from 'react';
-import { useLocalStorage } from 'usehooks-ts';
-
+} from '../../../../infrastructures/useClient/chakra';
 import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../problems/problemData';
 import {
   courseIdToProgramIdLists,

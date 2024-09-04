@@ -1,7 +1,7 @@
-import { Box, Heading, LinkBox, LinkOverlay, List, ListItem, Text } from '@chakra-ui/react';
 import type { NextPage } from 'next';
 import NextLink from 'next/link';
 
+import { Box, Heading, LinkBox, LinkOverlay, List, ListItem, Text } from '../../../infrastructures/useClient/chakra';
 import { courseIds, courseIdToName } from '../../../problems/problemData';
 import { getNonNullableSessionOnServer } from '../../../utils/session';
 

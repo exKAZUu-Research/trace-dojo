@@ -1,6 +1,7 @@
-import { Button, Heading, VStack } from '@chakra-ui/react';
 import type { NextPage } from 'next';
 import NextLink from 'next/link';
+
+import { Button, Heading, VStack } from '../../infrastructures/useClient/chakra';
 
 const HomePage: NextPage = async () => {
   return (
@@ -10,7 +11,7 @@ const HomePage: NextPage = async () => {
           トレーシング力を鍛えよう
         </Heading>
         <Button as={NextLink} colorScheme="brand" href="/courses" size="lg">
-          今すぐはじめる
+          鍛える
         </Button>
       </VStack>
     </VStack>

@@ -1,8 +1,8 @@
 export const appInfo = {
-  // learn more about this on https://supertokens.com/docs/thirdpartyemailpassword/appinfo
+  // cf. https://supertokens.com/docs/emailpassword/nextjs/app-directory/init
   appName: 'TraceDojo',
-  apiDomain: 'http://localhost:3000',
-  websiteDomain: 'http://localhost:3000',
+  apiDomain: process.env.NEXT_PUBLIC_BASE_URL ?? '',
+  websiteDomain: process.env.NEXT_PUBLIC_BASE_URL ?? '',
   apiBasePath: '/api/auth',
   websiteBasePath: '/auth',
 };

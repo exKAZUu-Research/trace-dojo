@@ -1,22 +1,32 @@
-import { Box, Button, Heading, HStack, Menu, MenuButton, MenuDivider, MenuItem, MenuList } from '@chakra-ui/react';
 import type { NextPage } from 'next';
 import NextLink from 'next/link';
 import React from 'react';
 import { FaChevronDown, FaCog, FaUser } from 'react-icons/fa';
+import SuperTokensNode from 'supertokens-node';
 
 import { APP_NAME } from '../../constants';
 import { prisma } from '../../infrastructures/prisma';
+import {
+  Box,
+  Button,
+  Heading,
+  HStack,
+  Menu,
+  MenuButton,
+  MenuDivider,
+  MenuItem,
+  MenuList,
+} from '../../infrastructures/useClient/chakra';
 import { getNullableSessionOnServer } from '../../utils/session';
 
 import { SignOutMenuItem } from './SignOutMenuItem';
 
-const MENU_ITEMS: readonly [string, string][] = [
-  ['/courses', '科目一覧'],
-  ['/submissions', '提出一覧'],
-];
+const MENU_ITEMS: readonly [string, string][] = [['/courses', '科目一覧']];
 
 export const DefaultHeader: NextPage = async () => {
   const { session } = await getNullableSessionOnServer();
+  const superTokensUser = session && (await SuperTokensNode.getUser(session.getUserId()));
+
   const user =
     session &&
     (await prisma.user.findUnique({
@@ -43,7 +53,7 @@ export const DefaultHeader: NextPage = async () => {
         {user?.displayName ? (
           <Menu direction="rtl">
             <MenuButton as={Button} leftIcon={<FaUser size="1em" />} rightIcon={<FaChevronDown />} variant="ghost">
-              {user.displayName}
+              {superTokensUser?.emails[0] ?? user.displayName}
             </MenuButton>
             <MenuList>
               <MenuItem as={NextLink} href="/settings" icon={<FaCog size="1.5em" />}>

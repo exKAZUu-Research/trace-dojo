@@ -1,9 +1,9 @@
 'use client';
 
-import { Box, Button, HStack, Select, VStack } from '@chakra-ui/react';
 import React, { useState } from 'react';
 
 import { TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR } from '../../constants';
+import { Box, Button, HStack, Select, VStack } from '../../infrastructures/useClient/chakra';
 import type { CharacterTrace } from '../../problems/traceProgram';
 import type { ColorChar, SelectedCell } from '../../types';
 
