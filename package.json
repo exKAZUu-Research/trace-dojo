@@ -42,7 +42,7 @@
     "@willbooster/shared-lib-react": "3.2.9",
     "@willbooster/wb": "8.0.2",
     "build-ts": "13.1.8",
-    "dotenv": "16.4.5",
+    "dotenv-cli": "7.4.2",
     "framer-motion": "11.4.0",
     "jsonwebtoken": "9.0.2",
     "jwks-rsa": "3.1.0",
