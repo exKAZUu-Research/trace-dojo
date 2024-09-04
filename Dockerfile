@@ -51,8 +51,8 @@ CMD if [ "$RESTORE_BACKUP" -eq 1 ] && [ -s gcp-sa-key.json ] && [ "$WB_ENV" != "
     else \
         node node_modules/.bin/wb prisma deploy; \
     fi \
-    && node ../../node_modules/.bin/wb prisma seed \
-    && node ../../node_modules/.bin/wb prisma litestream \
+    && node node_modules/.bin/wb prisma seed \
+    && node node_modules/.bin/wb prisma litestream \
     && if [ -s gcp-sa-key.json ] && [ "$WB_ENV" != "" ] && [ "$WB_ENV" != "development" ] && [ "$WB_ENV" != "test" ]; then \
            bash -c "node node_modules/.bin/pm2-runtime start ecosystem.config.cjs"; \
        else \
