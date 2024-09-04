@@ -1,47 +1,40 @@
-import { cookies, headers } from 'next/headers';
-import { getSSRSession } from 'supertokens-node/nextjs';
-import type { SessionContainer } from 'supertokens-node/recipe/session';
-
 import { logger } from '../infrastructures/pino';
 import { prisma } from '../infrastructures/prisma';
 import { ensureSuperTokensInit } from '../infrastructures/supertokens/backendConfig';
 
+import type { SessionOnNode } from './sessionOnNode';
+import { getSessionOnServer } from './sessionOnServer';
+
 ensureSuperTokensInit();
 
-export interface SessionOnServerLayout {
-  session: SessionContainer | undefined;
+export interface SessionOnServer {
+  session: SessionOnNode | undefined;
   hasToken: boolean;
-  /**
-   * This allows us to protect our routes based on the current session claims.
-   * For example this will be true if email verification is required but the user has not verified their email.
-   */
-  hasInvalidClaims: boolean;
   error: unknown | undefined;
 }
 
-export async function getNullableSessionOnServer(): Promise<SessionOnServerLayout> {
-  let session: SessionContainer | undefined;
+export async function getNullableSessionOnServer(): Promise<SessionOnServer> {
+  let session: SessionOnNode | undefined;
   let hasToken = false;
-  let hasInvalidClaims = false;
   let error: unknown | undefined = undefined;
 
   try {
-    ({ hasInvalidClaims, hasToken, session } = await getSSRSession(cookies().getAll(), headers()));
+    ({ hasToken, session } = await getSessionOnServer());
     if (session) {
-      void upsertUserToPrisma(session.getUserId());
+      void upsertUserToPrisma(session.superTokensUserId);
     }
   } catch (error_: unknown) {
     error = error_;
   }
-  return { session, hasToken, hasInvalidClaims, error };
+  return { session, hasToken, error };
 }
 
-export async function getNonNullableSessionOnServer(): Promise<SessionContainer> {
-  const { session } = await getSSRSession(cookies().getAll(), headers());
+export async function getNonNullableSessionOnServer(): Promise<SessionOnNode> {
+  const { session } = await getSessionOnServer();
   if (!session) {
     throw new Error('Failed to get a session.');
   }
-  void upsertUserToPrisma(session.getUserId());
+  void upsertUserToPrisma(session.superTokensUserId);
   return session;
 }
 

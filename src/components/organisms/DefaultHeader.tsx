@@ -25,13 +25,13 @@ const MENU_ITEMS: readonly [string, string][] = [['/courses', '科目一覧']];
 
 export const DefaultHeader: NextPage = async () => {
   const { session } = await getNullableSessionOnServer();
-  const superTokensUser = session && (await SuperTokensNode.getUser(session.getUserId()));
+  const superTokensUser = session && (await SuperTokensNode.getUser(session.superTokensUserId));
 
   const user =
     session &&
     (await prisma.user.findUnique({
       where: {
-        id: session.getUserId(),
+        id: session.superTokensUserId,
       },
     }));
 

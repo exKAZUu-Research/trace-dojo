@@ -11,7 +11,7 @@ const SettingsPage: NextPage = async () => {
   const session = await getNonNullableSessionOnServer();
   const user = await prisma.user.findUnique({
     where: {
-      id: session.getUserId(),
+      id: session.superTokensUserId,
     },
   });
 
@@ -40,7 +40,7 @@ async function updateDisplayName(formData: FormData): Promise<void> {
   const session = await getNonNullableSessionOnServer();
   await prisma.user.update({
     where: {
-      id: session.getUserId(),
+      id: session.superTokensUserId,
     },
     data: {
       displayName: input.displayName,

@@ -14,7 +14,7 @@ const CoursePage: NextPage<{ params: { courseId: CourseId } }> = async ({ params
     session &&
     (await prisma.user.findUnique({
       where: {
-        id: session.getUserId(),
+        id: session.superTokensUserId,
       },
     }));
 

@@ -12,7 +12,7 @@ const ProblemPage: NextPage<{
   params: { courseId: CourseId; languageId: VisibleLanguageId; programId: ProgramId };
 }> = async ({ params }) => {
   const session = await getNonNullableSessionOnServer();
-  const userId = session.getUserId();
+  const userId = session.superTokensUserId;
   const courseId = params.courseId;
   const languageId = params.languageId;
   const programId = params.programId;
@@ -63,7 +63,7 @@ const ProblemPage: NextPage<{
       languageId={languageId}
       problem={problem}
       programId={params.programId}
-      userId={session.getUserId()}
+      userId={session.superTokensUserId}
       userProblemSession={userProblemSession}
     />
   ) : (

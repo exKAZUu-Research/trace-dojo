@@ -11,42 +11,29 @@ import type { LayoutProps } from '../../types';
 import { getNullableSessionOnServer } from '../../utils/session';
 
 const DefaultLayout: NextPage<LayoutProps> = async ({ children }) => {
-  const { hasInvalidClaims, hasToken, session } = await getNullableSessionOnServer();
+  const { hasToken, session } = await getNullableSessionOnServer();
 
   // `session` will be undefined if it does not exist or has expired
   if (!session) {
     if (!hasToken) {
       /**
-       * This means that the user is not logged in.
-       * If you want to display some other UI in this case, you can do so here.
+       * This means that the user is not logged in. If you want to display some other UI in this
+       * case, you can do so here.
        */
       return redirect('/auth');
     }
 
     /**
-     * `hasInvalidClaims` indicates that session claims did not pass validation.
-     * For example if email verification is required but the user's email has not been verified.
+     * This means that the session does not exist but we have session tokens for the user. In this case
+     * the `TryRefreshComponent` will try to refresh the session.
+     *
+     * To learn about why the 'key' attribute is required refer to: https://github.com/supertokens/supertokens-node/issues/826#issuecomment-2092144048
      */
-    return hasInvalidClaims ? (
-      /**
-       * This will make sure that the user is redirected based on their session claims.
-       * For example, they will be redirected to the email verification screen if needed.
-       *
-       * We pass in no children in this case to prevent hydration issues and still be able to redirect the
-       * user.
-       */
-      <SessionAuthForNextJs />
-    ) : (
-      /**
-       * This means that the session does not exist, but we have session tokens for the user.
-       * In this case the `TryRefreshComponent` will try to refresh the session.
-       */
-      <TryRefreshComponent />
-    );
+    return <TryRefreshComponent key={Date.now()} />;
   }
 
   /**
-   * SessionAuthForNext will handle proper redirection for the user based on the different session states.
+   * SessionAuthForNextJS will handle proper redirection for the user based on the different session states.
    * It will redirect to the login page if the session does not exist etc.
    */
   return (

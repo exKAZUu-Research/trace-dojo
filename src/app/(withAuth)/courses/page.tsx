@@ -11,7 +11,7 @@ const CoursesPage: NextPage = async () => {
   return (
     <main>
       <Box>
-        <Text>User ID: {session.getUserId()}</Text>
+        <Text>User ID: {session.superTokensUserId}</Text>
         <Heading as="h1" size="xl">
           Courses
         </Heading>
