@@ -54,7 +54,7 @@ CMD if [ "$RESTORE_BACKUP" -eq 1 ] && [ -s gcp-sa-key.json ] && [ "$WB_ENV" != "
     && node node_modules/.bin/wb prisma seed \
     && node node_modules/.bin/wb prisma litestream \
     && if [ -s gcp-sa-key.json ] && [ "$WB_ENV" != "" ] && [ "$WB_ENV" != "development" ] && [ "$WB_ENV" != "test" ]; then \
-           bash -c "litestream replicate -exec 'bun node_modules/.bin/pm2-runtime start ecosystem.config.cjs' prisma/mount/prod.sqlite3 gcs://wb-online-judge/trace-dojo-${WB_ENV}/prod.sqlite3"; \
+           bash -c "litestream replicate -exec 'node node_modules/.bin/pm2-runtime start ecosystem.config.cjs' prisma/mount/prod.sqlite3 gcs://wb-online-judge/trace-dojo-${WB_ENV}/prod.sqlite3"; \
        else \
            bash -c "node node_modules/.bin/pm2-runtime start ecosystem.config.cjs"; \
        fi
