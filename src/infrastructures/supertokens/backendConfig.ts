@@ -23,7 +23,7 @@ export const backendConfig = (): TypeInput => {
             return {
               ...originalImplementation,
               async signUp(input) {
-                if (!input.email.toLowerCase().endsWith('@internet.ac.jp')) {
+                if (process.env.WB_ENV === 'production' && !input.email.toLowerCase().endsWith('@internet.ac.jp')) {
                   return {
                     status: 'LINKING_TO_SESSION_USER_FAILED',
                     reason: 'EMAIL_VERIFICATION_REQUIRED',
