@@ -6,6 +6,7 @@ import {
   TURTLE_GRAPHICS_GRID_COLUMNS as GRID_COLUMNS,
   TURTLE_GRAPHICS_GRID_ROWS as GRID_ROWS,
   TURTLE_GRAPHICS_GRID_SIZE as GRID_SIZE,
+  TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR,
 } from '../../constants';
 import { Box, Grid, GridItem, Image } from '../../infrastructures/useClient/chakra';
 import type { Problem } from '../../problems/generateProblem';
@@ -188,13 +189,13 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       updateCharacters(selectedCharacter);
     };
 
-    const handleAddCharacterButton = (color: ColorChar): void => {
-      if (!selectedCell || !color) return;
+    const handleAddCharacterButton = (): void => {
+      if (!selectedCell) return;
 
       const newTurtle = {
         x: selectedCell.x,
         y: selectedCell.y,
-        color,
+        color: DEFAULT_COLOR,
         dir: 'N',
         pen: true,
       };
@@ -215,12 +216,6 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
 
       setSelectedCharacter(undefined);
       setSelectedCell({ x, y });
-    };
-
-    const handleChangeCellColorButton = (color: ColorChar): void => {
-      if (!selectedCell) return;
-
-      updateCellColor(color, selectedCell.x, selectedCell.y);
     };
 
     const handleContextMenu = (
@@ -279,9 +274,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
         </Grid>
         {isEnableOperation && (
           <TurtleGraphicsController
-            board={board}
             handleAddCharacterButton={handleAddCharacterButton}
-            handleChangeCellColorButton={handleChangeCellColorButton}
             handleClickCharacterMoveForwardButton={handleClickCharacterMoveForwardButton}
             handleClickCharacterPenDownButton={handleClickCharacterPenDownButton}
             handleClickCharacterPenUpButton={handleClickCharacterPenUpButton}
