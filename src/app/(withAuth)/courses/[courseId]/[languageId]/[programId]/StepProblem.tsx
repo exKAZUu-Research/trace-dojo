@@ -72,7 +72,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
   return (
     <Flex gap="6" w="100%">
       <VStack spacing="10">
-        <Box>茶色にハイライトされている行における盤面を作成してください。</Box>
+        <Box>赤色にハイライトされている行における盤面を作成してください。</Box>
         <Box>青色のハイライト時点の実行結果</Box>
         <Box>
           <TurtleGraphics
@@ -83,7 +83,7 @@ export const StepProblem: React.FC<StepProblemProps> = ({
             problem={problem}
           />
         </Box>
-        <Box>茶色のハイライト時点の実行結果</Box>
+        <Box>赤色のハイライト時点の実行結果</Box>
         <Box>
           <TurtleGraphics
             ref={turtleGraphicsRef}
