@@ -154,6 +154,24 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       updateCharacters(updatedCharacter);
     };
 
+    const handleClickCharacterMoveBackwardButton = (): void => {
+      if (!selectedCharacter) return;
+
+      const index = CHARACTER_DIRS.indexOf(selectedCharacter.dir);
+      const updatedX = selectedCharacter.x - DX[index];
+      const updatedY = selectedCharacter.y - DY[index];
+
+      if (updatedX < 0 || GRID_COLUMNS <= updatedX || updatedY < 0 || GRID_ROWS <= updatedY) {
+        return;
+      }
+
+      const updatedCharacter = { ...selectedCharacter, x: updatedX, y: updatedY };
+      if (selectedCharacter.pen) {
+        updateCellColor('.' as ColorChar, selectedCharacter.x, selectedCharacter.y);
+      }
+      updateCharacters(updatedCharacter);
+    };
+
     const handleClickCharacterTurnLeftButton = (): void => {
       if (!selectedCharacter) return;
 
@@ -275,6 +293,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
         {isEnableOperation && (
           <TurtleGraphicsController
             handleAddCharacterButton={handleAddCharacterButton}
+            handleClickCharacterMoveBackwardButton={handleClickCharacterMoveBackwardButton}
             handleClickCharacterMoveForwardButton={handleClickCharacterMoveForwardButton}
             handleClickCharacterPenDownButton={handleClickCharacterPenDownButton}
             handleClickCharacterPenUpButton={handleClickCharacterPenUpButton}

@@ -14,12 +14,14 @@ interface TurtleGraphicsControllerProps {
   handleClickCharacterTurnLeftButton: () => void;
   handleClickCharacterTurnRightButton: () => void;
   handleClickCharacterMoveForwardButton: () => void;
+  handleClickCharacterMoveBackwardButton: () => void;
   handleClickCharacterPenUpButton: () => void;
   handleClickCharacterPenDownButton: () => void;
 }
 
 export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> = ({
   handleAddCharacterButton,
+  handleClickCharacterMoveBackwardButton,
   handleClickCharacterMoveForwardButton,
   handleClickCharacterPenDownButton,
   handleClickCharacterPenUpButton,
@@ -39,6 +41,7 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
           </HStack>
           <HStack>
             <Button onClick={() => handleClickCharacterMoveForwardButton()}>前に進む</Button>
+            <Button onClick={() => handleClickCharacterMoveBackwardButton()}>後ろに戻る</Button>
           </HStack>
           <HStack>
             <Button border={selectedCharacter.pen ? '' : '1px'} onClick={() => handleClickCharacterPenUpButton()}>
