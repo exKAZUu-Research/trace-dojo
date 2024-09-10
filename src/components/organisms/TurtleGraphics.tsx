@@ -15,7 +15,7 @@ import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController'
 
 const CHARACTER_DIRS = ['N', 'E', 'S', 'W'];
 const DX = [0, 1, 0, -1];
-const DY = [-1, 0, 1, 0];
+const DY = [1, 0, -1, 0];
 
 const charToRotateStyle = {
   N: 'rotate(180deg)',
@@ -259,28 +259,32 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
           templateColumns={`repeat(${GRID_COLUMNS}, ${GRID_SIZE}px)`}
           templateRows={`repeat(${GRID_ROWS}, ${GRID_SIZE}px)`}
         >
-          {board.map((columns, rowIndex) =>
-            columns.map((color, columnIndex) => (
-              <GridItem
-                key={columnIndex}
-                backgroundColor={charToColor[color]}
-                borderColor="black"
-                borderWidth={selectedCell?.x === columnIndex && selectedCell?.y === rowIndex ? '2px' : '0.5px'}
-                className="grid-cell"
-                onClick={() => handleClickCell(columnIndex, rowIndex)}
-                onContextMenu={(e) => handleContextMenu(e, columnIndex, rowIndex)}
-              />
-            ))
-          )}
+          {[...board]
+            .reverse()
+            .map((columns, rowIndex) =>
+              columns.map((color, columnIndex) => (
+                <GridItem
+                  key={columnIndex}
+                  backgroundColor={charToColor[color]}
+                  borderColor="black"
+                  borderWidth={
+                    selectedCell?.x === columnIndex && selectedCell?.y === GRID_ROWS - rowIndex - 1 ? '2px' : '0.5px'
+                  }
+                  className="grid-cell"
+                  onClick={() => handleClickCell(columnIndex, GRID_ROWS - rowIndex - 1)}
+                  onContextMenu={(e) => handleContextMenu(e, columnIndex, GRID_ROWS - rowIndex - 1)}
+                />
+              ))
+            )}
           {characters.map((character) => (
             <Box
               key={'character' + character.x + character.y}
               borderColor={selectedCharacter?.color === character.color ? 'black' : 'transparent'}
               borderWidth="2px"
+              bottom={character.y * GRID_SIZE + 'px'}
               h={GRID_SIZE + 'px'}
               left={character.x * GRID_SIZE + 'px'}
               position="absolute"
-              top={character.y * GRID_SIZE + 'px'}
               w={GRID_SIZE + 'px'}
               onClick={() => handleClickCharacter(character)}
               onContextMenu={(e) => handleContextMenu(e, character.x, character.y)}
