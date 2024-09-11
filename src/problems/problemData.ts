@@ -6,11 +6,12 @@ export const programIds = [
   'stepBack',
   'turnRight',
   'turnRightAndTurnLeft',
-  'square',
+  'square1',
   'square2',
   'variable',
   'variable2',
   'variable3',
+
   'test1',
   'test2',
   'test3',
@@ -41,7 +42,7 @@ export const programIdToName: Record<ProgramId, string> = {
   stepBack: '線を描こう(2)',
   turnRight: '線を描こう(3)',
   turnRightAndTurnLeft: '線を描こう(4)',
-  square: '図形を描こう(1)',
+  square1: '図形を描こう(1)',
   square2: '図形を描こう(2)',
   variable: '変数を使おう(1)',
   variable2: '変数を使おう(2)',
@@ -57,7 +58,7 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
   tuBeginner1: [
     ['straight', 'stepBack', 'turnRight', 'turnRightAndTurnLeft'],
 
-    ['square', 'square2', 'variable', 'variable2', 'variable3'],
+    ['square1', 'square2', 'variable', 'variable2', 'variable3'],
   ],
   tuBeginner2: [['test1', 'test2', 'test3', 'test4', 'test5']],
 };
@@ -137,7 +138,7 @@ export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId
 }
 	`.trim(),
   },
-  square: {
+  square1: {
     instrumented: `
 s.set('c', new Character());
 s.get('c').forward();
@@ -403,7 +404,7 @@ export const programIdToLanguageIdToExplanation: Record<
   stepBack: defaultExplanation,
   turnRight: defaultExplanation,
   turnRightAndTurnLeft: defaultExplanation,
-  square: defaultExplanation,
+  square1: defaultExplanation,
   square2: defaultExplanation,
   variable: defaultExplanation,
   variable2: defaultExplanation,
