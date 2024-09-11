@@ -74,15 +74,13 @@ export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId
 	s.get('c').forward();
 	`.trim(),
     java: `
-	import net.exkazuu.Character;
-	
 	public class Main {
-	  public static void main(String[] args) {
-		Character c = new Character(); // sid
-		c.forward(); // sid
-		c.forward(); // sid
-		  }
-	}
+		public static void main(String[] args) {
+			Turtle 亀 = new Turtle(); // sid
+			亀.前に進む(); // sid
+			亀.前に進む(); // sid
+		}
+}
 	`.trim(),
   },
   stepBack: {
@@ -92,15 +90,13 @@ export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId
 	s.get('c').backward();
 	`.trim(),
     java: `
-	import net.exkazuu.Character;
-
 	public class Main {
-	  public static void main(String[] args) {
-	  	Character c = new Character(); // sid
-			c.forward(); // sid
-			c.backward(); // sid
-	  }
-	}
+		public static void main(String[] args) {
+			Turtle 亀 = new Turtle(); // sid
+			亀.前に進む(); // sid
+			亀.後に戻る(); // sid
+		}
+}
 	`.trim(),
   },
 
@@ -112,16 +108,14 @@ export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId
 	s.get('c').forward();
 	`.trim(),
     java: `
-	import net.exkazuu.Character;
-
 	public class Main {
-	  public static void main(String[] args) {
-	  	Caracter c = new Character(); // sid
-			c.forward(); // sid
-			c.turnRight(); // sid
-			c.forward(); // sid
-	  }
-	}
+		public static void main(String[] args) {
+			Turtle 亀 = new Turtle(); // sid
+			亀.前に進む(); // sid
+			亀.右を向く(); // sid
+			亀.前に進む(); // sid
+		}
+}
 	`.trim(),
   },
   turnRightAndTurnLeft: {
@@ -133,17 +127,15 @@ export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId
 	s.get('c').forward();
 	`.trim(),
     java: `
-	import net.exkazuu.Character;
-
 	public class Main {
-	  public static void main(String[] args) {
-	  	Character c = new Character(); // sid
-			c.turnRight(); // sid
-			c.forward(); // sid
-			c.turnLeft(); // sid
-			c.forward(); // sid
-	  }
-	}
+		public static void main(String[] args) {
+			Turtle 亀 = new Turtle(); // sid
+			亀.右を向く(); // sid
+			亀.前に進む(); // sid
+			亀.左を向く(); // sid
+			亀.前に進む(); // sid
+		}
+}
 	`.trim(),
   },
   diamond: defaultProgram,
