@@ -7,8 +7,10 @@ export const programIds = [
   'turnRight',
   'turnRightAndTurnLeft',
   'square',
-  'rectangle',
-  'diamond',
+  'square2',
+  'variable',
+  'variable2',
+  'variable3',
   'test1',
   'test2',
   'test3',
@@ -40,8 +42,10 @@ export const programIdToName: Record<ProgramId, string> = {
   turnRight: '線を描こう(3)',
   turnRightAndTurnLeft: '線を描こう(4)',
   square: '図形を描こう(1)',
-  rectangle: '図形を描こう(2)',
-  diamond: '図形を描こう(3)',
+  square2: '図形を描こう(2)',
+  variable: '変数を使おう(1)',
+  variable2: '変数を使おう(2)',
+  variable3: '変数を使おう(3)',
   test1: 'ステップ実行のテスト用問題(1)',
   test2: 'ステップ実行のテスト用問題(2)',
   test3: 'ステップ実行のテスト用問題(3)',
@@ -52,7 +56,8 @@ export const programIdToName: Record<ProgramId, string> = {
 export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
   tuBeginner1: [
     ['straight', 'stepBack', 'turnRight', 'turnRightAndTurnLeft'],
-    ['square', 'rectangle', 'diamond'],
+
+    ['square', 'square2', 'variable', 'variable2', 'variable3'],
   ],
   tuBeginner2: [['test1', 'test2', 'test3', 'test4', 'test5']],
 };
@@ -60,11 +65,6 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
 export function getExplanation(programId: ProgramId, languageId: VisibleLanguageId): Record<'title' | 'body', string> {
   return programIdToLanguageIdToExplanation[programId]?.[languageId];
 }
-
-const defaultProgram = {
-  instrumented: '',
-  java: '',
-};
 
 export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId, string>> = {
   straight: {
@@ -99,7 +99,6 @@ export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId
 }
 	`.trim(),
   },
-
   turnRight: {
     instrumented: `
 	s.set('c', new Character());
@@ -138,9 +137,108 @@ export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId
 }
 	`.trim(),
   },
-  diamond: defaultProgram,
-  rectangle: defaultProgram,
-  square: defaultProgram,
+  square: {
+    instrumented: `
+s.set('c', new Character());
+s.get('c').forward();
+s.get('c').turnRight();
+s.get('c').forward(); // CP
+s.get('c').turnRight();
+s.get('c').forward();
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+	Turtle 亀 = new Turtle(); // sid
+	亀.前に進む(); // sid
+	亀.右を向く(); // sid
+	亀.前に進む(); // sid
+	亀.右を向く(); // sid
+	亀.前に進む(); // sid
+  }
+}
+	`.trim(),
+  },
+  square2: {
+    instrumented: `
+s.set('c', new Character(<1-5>, <1-4>));
+s.get('c').forward();
+s.get('c').turnRight();
+s.get('c').forward(); // CP
+s.get('c').turnRight();
+s.get('c').forward();
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+	Turtle 亀 = new Turtle(<1-5>, <1-4>); // sid
+	亀.前に進む(); // sid
+	亀.右を向く(); // sid
+	亀.前に進む(); // sid
+	亀.右を向く(); // sid
+	亀.前に進む(); // sid
+  }
+}
+	`.trim(),
+  },
+  variable: {
+    instrumented: `
+ s.set('x', <1-5>);
+ s.set('c', new Character(s.get('x'), <1-5>)); // CP
+ s.get('c').forward();
+ `.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+	int x = <1-5>; // sid
+	Turtle 亀 = new Turtle(x, <1-5>); // sid
+	亀.前に進む(); // sid
+  }
+}
+	`.trim(),
+  },
+  variable2: {
+    instrumented: `
+s.set('x', <1-5>);
+s.set('x', s.get('x') + 1);
+s.set('y', s.get('x') + 1);
+s.set('c', new Character(s.get('x'), s.get('y'))); // CP
+s.get('c').forward();
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+	int x = <1-5>; // sid
+	x = x + 1; // sid
+	int y = x + 1; // sid
+	Turtle 亀 = new Turtle(x, y); // sid
+	亀.前に進む(); // sid
+  }
+}
+	`.trim(),
+  },
+  variable3: {
+    instrumented: `
+s.set('x', <1-5>);
+s.set('x', s.get('x') - 1);
+s.set('y', s.get('x') * 2);
+s.set('y', Math.floor(s.get('y') / 3));
+s.set('c', new Character(s.get('x'), s.get('y'))); // CP
+s.get('c').forward();
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+	int x = <1-5>; // sid
+	x--; // sid
+	int y = x * 2; // sid
+	y /= 3; // sid
+	Turtle 亀 = new Turtle(x, y); // sid
+	亀.前に進む(); // sid
+  }
+}
+	`.trim(),
+  },
   test1: {
     instrumented: `
 s.set('c', new Character());
@@ -305,9 +403,11 @@ export const programIdToLanguageIdToExplanation: Record<
   stepBack: defaultExplanation,
   turnRight: defaultExplanation,
   turnRightAndTurnLeft: defaultExplanation,
-  diamond: defaultExplanation,
-  rectangle: defaultExplanation,
   square: defaultExplanation,
+  square2: defaultExplanation,
+  variable: defaultExplanation,
+  variable2: defaultExplanation,
+  variable3: defaultExplanation,
   test1: defaultExplanation,
   test2: defaultExplanation,
   test3: defaultExplanation,
