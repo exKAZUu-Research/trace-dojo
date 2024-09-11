@@ -7,6 +7,7 @@ import React from 'react';
 import { SuperTokensWrapper } from 'supertokens-auth-react';
 
 import { ensureSuperTokensReactInit, setRouter } from '../../infrastructures/supertokens/frontendConfig';
+import { backendTrpcReact, backendTrpcReactClient } from '../../infrastructures/trpcBackend/client';
 import { ChakraProvider } from '../../infrastructures/useClient/chakra';
 import { theme } from '../../theme';
 
@@ -19,12 +20,14 @@ export const Providers: React.FC<{ children: React.ReactNode }> = ({ children })
 
   return (
     <SuperTokensWrapper>
-      <QueryClientProvider client={queryClient}>
-        {/* Chakra UI */}
-        <CacheProvider>
-          <ChakraProvider theme={theme}>{children}</ChakraProvider>
-        </CacheProvider>
-      </QueryClientProvider>
+      <backendTrpcReact.Provider client={backendTrpcReactClient} queryClient={queryClient}>
+        <QueryClientProvider client={queryClient}>
+          {/* Chakra UI */}
+          <CacheProvider>
+            <ChakraProvider theme={theme}>{children}</ChakraProvider>
+          </CacheProvider>
+        </QueryClientProvider>
+      </backendTrpcReact.Provider>
     </SuperTokensWrapper>
   );
 };
