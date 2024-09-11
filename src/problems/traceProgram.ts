@@ -62,7 +62,7 @@ export function traceProgram(instrumented: string, rawDisplayProgram: string, la
     const newLine = line
       .replace(/for\s*\(([^;]*);\s*([^;]*);/, (_, init, cond) => `for (${init}; checkForCond(${cond}, ${statementId});`)
       .replaceAll(
-        /\.(set|forward|penDown|penUp|turnRight|turnLeft)\(([^\n;]*)\)(;|\)\s*{)/g,
+        /\.(set|forward|backward|penDown|penUp|turnRight|turnLeft)\(([^\n;]*)\)(;|\)\s*{)/g,
         (_, methodName, args, tail) => {
           replaced = true;
           const delimiter = args === '' ? '' : ', ';
@@ -138,6 +138,17 @@ class Character {
     }
     if (this.pen) board[this.y][this.x] = this.color;
     addTrace(sid);
+  }
+  backward(sid) {
+	const index = dirs.indexOf(this.dir);
+	if (this.pen) board[this.y][this.x] = '${EMPTY_COLOR}';
+	this.x -= dx[index];
+	this.y -= dy[index];
+	if (this.x < 0 || ${GRID_COLUMNS} <= this.x || this.y < 0 || ${GRID_ROWS} <= this.y) {
+	  throw new Error('Out of bounds');
+	}
+	if (this.pen) board[this.y][this.x] = this.color;
+	addTrace(sid);
   }
   penDown(sid) {
     this.pen = true;
