@@ -6,6 +6,7 @@ import {
   TURTLE_GRAPHICS_GRID_COLUMNS as GRID_COLUMNS,
   TURTLE_GRAPHICS_GRID_ROWS as GRID_ROWS,
   TURTLE_GRAPHICS_GRID_SIZE as GRID_SIZE,
+  TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR,
 } from '../../constants';
 import { Box, Grid, GridItem, Image } from '../../infrastructures/useClient/chakra';
 import type { Problem } from '../../problems/generateProblem';
@@ -15,7 +16,7 @@ import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController'
 
 const CHARACTER_DIRS = ['N', 'E', 'S', 'W'];
 const DX = [0, 1, 0, -1];
-const DY = [-1, 0, 1, 0];
+const DY = [1, 0, -1, 0];
 
 const charToRotateStyle = {
   N: 'rotate(180deg)',
@@ -206,13 +207,13 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       updateCharacters(selectedCharacter);
     };
 
-    const handleAddCharacterButton = (color: ColorChar): void => {
-      if (!selectedCell || !color) return;
+    const handleAddCharacterButton = (): void => {
+      if (!selectedCell) return;
 
       const newTurtle = {
         x: selectedCell.x,
         y: selectedCell.y,
-        color,
+        color: DEFAULT_COLOR,
         dir: 'N',
         pen: true,
       };
@@ -235,12 +236,6 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       setSelectedCell({ x, y });
     };
 
-    const handleChangeCellColorButton = (color: ColorChar): void => {
-      if (!selectedCell) return;
-
-      updateCellColor(color, selectedCell.x, selectedCell.y);
-    };
-
     const handleContextMenu = (
       event: React.MouseEvent<HTMLDivElement>,
       columnIndex: number,
@@ -259,28 +254,32 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
           templateColumns={`repeat(${GRID_COLUMNS}, ${GRID_SIZE}px)`}
           templateRows={`repeat(${GRID_ROWS}, ${GRID_SIZE}px)`}
         >
-          {board.map((columns, rowIndex) =>
-            columns.map((color, columnIndex) => (
-              <GridItem
-                key={columnIndex}
-                backgroundColor={charToColor[color]}
-                borderColor="black"
-                borderWidth={selectedCell?.x === columnIndex && selectedCell?.y === rowIndex ? '2px' : '0.5px'}
-                className="grid-cell"
-                onClick={() => handleClickCell(columnIndex, rowIndex)}
-                onContextMenu={(e) => handleContextMenu(e, columnIndex, rowIndex)}
-              />
-            ))
-          )}
+          {[...board]
+            .reverse()
+            .map((columns, rowIndex) =>
+              columns.map((color, columnIndex) => (
+                <GridItem
+                  key={columnIndex}
+                  backgroundColor={charToColor[color]}
+                  borderColor="black"
+                  borderWidth={
+                    selectedCell?.x === columnIndex && selectedCell?.y === GRID_ROWS - rowIndex - 1 ? '2px' : '0.5px'
+                  }
+                  className="grid-cell"
+                  onClick={() => handleClickCell(columnIndex, GRID_ROWS - rowIndex - 1)}
+                  onContextMenu={(e) => handleContextMenu(e, columnIndex, GRID_ROWS - rowIndex - 1)}
+                />
+              ))
+            )}
           {characters.map((character) => (
             <Box
               key={'character' + character.x + character.y}
               borderColor={selectedCharacter?.color === character.color ? 'black' : 'transparent'}
               borderWidth="2px"
+              bottom={character.y * GRID_SIZE + 'px'}
               h={GRID_SIZE + 'px'}
               left={character.x * GRID_SIZE + 'px'}
               position="absolute"
-              top={character.y * GRID_SIZE + 'px'}
               w={GRID_SIZE + 'px'}
               onClick={() => handleClickCharacter(character)}
               onContextMenu={(e) => handleContextMenu(e, character.x, character.y)}
@@ -297,9 +296,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
         </Grid>
         {isEnableOperation && (
           <TurtleGraphicsController
-            board={board}
             handleAddCharacterButton={handleAddCharacterButton}
-            handleChangeCellColorButton={handleChangeCellColorButton}
             handleClickCharacterMoveBackwardButton={handleClickCharacterMoveBackwardButton}
             handleClickCharacterMoveForwardButton={handleClickCharacterMoveForwardButton}
             handleClickCharacterPenDownButton={handleClickCharacterPenDownButton}
