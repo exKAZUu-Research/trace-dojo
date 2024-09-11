@@ -39,7 +39,7 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
           if (lineNumber === beforeCheckpointLine) {
             style.backgroundColor = '#2E3D9F';
           } else if (lineNumber === currentCheckpointLine) {
-            style.backgroundColor = '#744210';
+            style.backgroundColor = '#800000';
           }
           return { style };
         }}
