@@ -20,6 +20,10 @@ export const programIds = [
   'doubleLoop2',
   'if1',
   'if2',
+  'elseIf1',
+  'elseIf2',
+  'switch1',
+  'switch2',
   'test1',
   'test2',
   'test3',
@@ -64,6 +68,10 @@ export const programIdToName: Record<ProgramId, string> = {
   doubleLoop2: '二重ループ(2)',
   if1: 'if文を使おう(1)',
   if2: 'if文を使おう(2)',
+  elseIf1: 'else if文を使おう(1)',
+  elseIf2: 'else if文を使おう(2)',
+  switch1: 'switch文を使おう(1)',
+  switch2: 'switch文を使おう(2)',
   test1: 'ステップ実行のテスト用問題(1)',
   test2: 'ステップ実行のテスト用問題(2)',
   test3: 'ステップ実行のテスト用問題(3)',
@@ -77,6 +85,7 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
     ['square1', 'square2', 'variable', 'variable2', 'variable3'],
     ['while1', 'while2', 'for1', 'for2', 'for3'],
     ['doubleLoop1', 'doubleLoop2', 'if1', 'if2'],
+    ['elseIf1', 'elseIf2', 'switch1', 'switch2'],
   ],
   tuBeginner2: [['test1', 'test2', 'test3', 'test4', 'test5']],
 };
@@ -475,6 +484,114 @@ public class Main {
 }
 	`.trim(),
   },
+  elseIf1: {
+    instrumented: `
+	s.set('c', new Character());
+	for (s.set('i', 0); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
+		if (s.get('i') < <2-3>) {
+			s.get('c').forward();
+		} else if (s.get('i') === <2-3>) {
+			s.get('c').turnLeft(); // CP
+		} else {
+			s.get('c').backward(); // CP
+		}
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(); // sid
+		for (int i = 0; i < <4-6>, i++) { // sid
+			if (i < <2-3>)			t.前に進む(); // sid
+			else if (i == <2-3>)	t.左を向く(); // sid
+			else 					t.後に戻る(); // sid
+		}
+	}
+}
+	`.trim(),
+  },
+  elseIf2: {
+    instrumented: `
+	s.set('c', new Character());
+	for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
+		if (s.get('i') % 4 === 0) {
+			s.get('c').forward();
+		} else if (s.get('i') % 4 === 1) {
+			s.get('c').turnRight(); // CP
+		} else if (s.get('i') % 4 === 2) {
+			s.get('c').forward(); // CP
+		} else {
+			s.get('c').turnLeft(); // CP
+		}
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(); // sid
+		for (int i = 0; i < <5-7>, i++) { // sid
+			if (i % 4 == 0)			t.前に進む(); // sid
+			else if (i % 4 == 1)	t.右を向く(); // sid
+			else if (i % 4 == 2)	t.前に進む(); // sid
+			else						t.左を向く(); // sid
+		}
+	}
+}
+	`.trim(),
+  },
+  switch1: {
+    instrumented: `
+	s.set('c', new Character());
+	for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
+		switch (s.get('i')) {
+			case 0: case 1:
+				s.get('c').forward(); break;
+			case 2:		s.get('c').turnLeft(); break; // CP
+			default:	s.get('c').backward(); break; // CP
+		}
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(); // sid
+		for (int i = 0; i < <5-7>; i++) { // sid
+			switch (i) {
+				case 0: case 1:
+					t.前に進む(); break; // sid
+				case 2:		t.左を向く(); break; // sid
+				default:	t.後に戻る(); break; // sid
+			}
+		}
+	}
+	`.trim(),
+  },
+  switch2: {
+    instrumented: `
+	s.set('c', new Character());
+	for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
+		switch (s.get('i') % 4) {
+			case 1:	s.get('c').turnRight(); break; // CP
+			case 3:		s.get('c').turnLeft(); break; // CP
+			default:	s.get('c').forward(); break; // CP
+		}
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(); // sid
+		for (int i = 0; i < <5-7>; i++) { // sid
+			switch (i % 4) {
+				case 1:		t.右を向く(); break; // sid
+				case 3:		t.左を向く(); break; // sid
+				default:		t.前に進む(); break; // sid
+			}
+		}
+	}
+}
+	`.trim(),
+  },
   test1: {
     instrumented: `
 s.set('c', new Character());
@@ -653,6 +770,10 @@ export const programIdToLanguageIdToExplanation: Record<
   doubleLoop2: defaultExplanation,
   if1: defaultExplanation,
   if2: defaultExplanation,
+  elseIf1: defaultExplanation,
+  elseIf2: defaultExplanation,
+  switch1: defaultExplanation,
+  switch2: defaultExplanation,
   test1: defaultExplanation,
   test2: defaultExplanation,
   test3: defaultExplanation,
