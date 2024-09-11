@@ -3,14 +3,14 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
 
 import {
+  TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR,
   TURTLE_GRAPHICS_GRID_COLUMNS as GRID_COLUMNS,
   TURTLE_GRAPHICS_GRID_ROWS as GRID_ROWS,
   TURTLE_GRAPHICS_GRID_SIZE as GRID_SIZE,
-  TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR,
 } from '../../constants';
 import { Box, Grid, GridItem, Image } from '../../infrastructures/useClient/chakra';
 import type { Problem } from '../../problems/generateProblem';
-import { charToColor, type CharacterTrace, type TraceItem } from '../../problems/traceProgram';
+import { type CharacterTrace, charToColor, type TraceItem } from '../../problems/traceProgram';
 import type { ColorChar, SelectedCell } from '../../types';
 import { TurtleGraphicsController } from '../molecules/TurtleGraphicsController';
 

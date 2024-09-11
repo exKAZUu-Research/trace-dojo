@@ -6,6 +6,7 @@ import NextLink from 'next/link';
 import React, { useEffect } from 'react';
 import { useLocalStorage } from 'usehooks-ts';
 
+import { backendTrpcReact } from '../../../../infrastructures/trpcBackend/client';
 import {
   Accordion,
   AccordionButton,
@@ -60,6 +61,10 @@ export const Course: React.FC<{
   userCompletedProblems: { programId: string; languageId: VisibleLanguageId }[];
   userProblemSessions: UserProblemSessionWithUserAnswers[];
 }> = ({ courseId, userCompletedProblems, userProblemSessions }) => {
+  // TODO: remove the following example code
+  const getSessionQuery = backendTrpcReact.getSession.useQuery();
+  console.log('getSessionQuery:', getSessionQuery.isLoading, getSessionQuery.data, getSessionQuery.error);
+
   const [selectedLanguageId, setSelectedLanguageId] = useLocalStorage<VisibleLanguageId>(
     selectedLanguageIdKey,
     defaultLanguageId
