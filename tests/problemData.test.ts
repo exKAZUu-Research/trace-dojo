@@ -8,8 +8,16 @@ test.each([
     languageId: 'js',
   },
   {
-    programId: 'curve',
-    languageId: 'java',
+    programId: 'stepBack',
+    languageId: 'js',
+  },
+  {
+    programId: 'turnRight',
+    languageId: 'js',
+  },
+  {
+    programId: 'turnRightAndTurnLeft',
+    languageId: 'js',
   },
 ] as const)('Get a program by program and language ids', ({ languageId, programId }) => {
   expect(generateProblem(programId, languageId, Date.now().toString())).not.toBeFalsy();
