@@ -16,6 +16,10 @@ export const programIds = [
   'for1',
   'for2',
   'for3',
+  'doubleLoop1',
+  'doubleLoop2',
+  'if1',
+  'if2',
   'test1',
   'test2',
   'test3',
@@ -56,6 +60,10 @@ export const programIdToName: Record<ProgramId, string> = {
   for1: 'for文を使おう(1)',
   for2: 'for文を使おう(2)',
   for3: 'for文を使おう(3)',
+  doubleLoop1: '二重ループ(1)',
+  doubleLoop2: '二重ループ(2)',
+  if1: 'if文を使おう(1)',
+  if2: 'if文を使おう(2)',
   test1: 'ステップ実行のテスト用問題(1)',
   test2: 'ステップ実行のテスト用問題(2)',
   test3: 'ステップ実行のテスト用問題(3)',
@@ -68,6 +76,7 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
     ['straight', 'stepBack', 'turnRight', 'turnRightAndTurnLeft'],
     ['square1', 'square2', 'variable', 'variable2', 'variable3'],
     ['while1', 'while2', 'for1', 'for2', 'for3'],
+    ['doubleLoop1', 'doubleLoop2', 'if1', 'if2'],
   ],
   tuBeginner2: [['test1', 'test2', 'test3', 'test4', 'test5']],
 };
@@ -366,6 +375,106 @@ public class Main {
 }
 	`.trim(),
   },
+  doubleLoop1: {
+    instrumented: `
+	s.set('c', new Character());
+	for (s.set('i', 0); s.get('i') < <2-3>; s.set('i', s.get('i') + 1)) {
+	  for (s.set('j', 0); s.get('j') < <2-3>; s.set('j', s.get('j') + 1)) {
+	  	s.get('c').forward(); // CP
+	  }
+	  s.get('c').turnRight();
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(); // sid
+		for (int i = 0; i < <2-3>; i++) { // sid
+			for (int j = 0; j < <2-3>; j++) { // sid
+				t.前に進む(); // sid
+			}
+			t.右を向く(); // sid
+		}
+	}
+}
+	`.trim(),
+  },
+  doubleLoop2: {
+    instrumented: `
+	s.set('c', new Character());
+	for (s.set('i', <3-4>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
+	  for (s.set('j', 0); s.get('j') < s.get('i'); s.set('j', s.get('j') + 1)) {
+	  	s.get('c').forward(); // CP
+	  }
+	  s.get('c').turnRight();
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(); // sid
+		for (int i = <3-4>; i > 0; i--) { // sid
+			for (int j = 0; j < i; j++) { // sid
+				t.前に進む(); // sid
+			}
+			t.右を向く(); // sid
+		}
+	}
+}
+	`.trim(),
+  },
+  if1: {
+    instrumented: `
+	s.set('c', new Character());
+	for (s.set('i', 0); s.get('i') < <7-9>; s.set('i', s.get('i') + 1)) {
+		s.get('c').forward();
+		if (s.get('i') % 3 === 2) {
+			s.get('c').turnRight(); // CP
+		}
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(); // sid
+		for (int i = 0; i < <7-9>; i++) { // sid
+			t.前に進む(); // sid
+			if (i % 3 == 2) {
+				t.右を向く(); // sid
+			}
+		}
+	}
+}
+	`.trim(),
+  },
+  if2: {
+    instrumented: `
+	s.set('c', new Character());
+	for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
+		s.get('c').forward();
+		if (s.get('i') % 2 === 0) {
+			s.get('c').turnRight(); // CP
+		} else {
+			s.get('c').turnLeft(); // CP
+		}
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(); // sid
+		for (int i = 0; i < 4; i++) { // sid
+			t.前に進む(); // sid
+			if (i % 2 == 0) {
+				t.右を向く(); // sid
+			} else {
+				t.左を向く(); // sid
+			}
+		}
+	}
+}
+	`.trim(),
+  },
   test1: {
     instrumented: `
 s.set('c', new Character());
@@ -540,6 +649,10 @@ export const programIdToLanguageIdToExplanation: Record<
   for1: defaultExplanation,
   for2: defaultExplanation,
   for3: defaultExplanation,
+  doubleLoop1: defaultExplanation,
+  doubleLoop2: defaultExplanation,
+  if1: defaultExplanation,
+  if2: defaultExplanation,
   test1: defaultExplanation,
   test2: defaultExplanation,
   test3: defaultExplanation,
