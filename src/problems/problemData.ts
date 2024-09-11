@@ -6,8 +6,9 @@ export const programIds = [
   'curve',
   'stairs',
   'square',
-  'rectangle',
-  'diamond',
+  'square2',
+  'variable',
+  'variable2',
   'test1',
   'test2',
   'test3',
@@ -38,8 +39,9 @@ export const programIdToName: Record<ProgramId, string> = {
   curve: '線を描こう(2)',
   stairs: '線を描こう(3)',
   square: '図形を描こう(1)',
-  rectangle: '図形を描こう(2)',
-  diamond: '図形を描こう(3)',
+  square2: '図形を描こう(2)',
+  variable: '変数を使おう(1)',
+  variable2: '変数を使おう(2)',
   test1: 'ステップ実行のテスト用問題(1)',
   test2: 'ステップ実行のテスト用問題(2)',
   test3: 'ステップ実行のテスト用問題(3)',
@@ -50,7 +52,7 @@ export const programIdToName: Record<ProgramId, string> = {
 export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
   tuBeginner1: [
     ['straight', 'curve', 'stairs'],
-    ['square', 'rectangle', 'diamond'],
+    ['square', 'square2', 'variable', 'variable2'],
   ],
   tuBeginner2: [['test1', 'test2', 'test3', 'test4', 'test5']],
 };
@@ -125,9 +127,121 @@ public class Main {
 }
 `.trim(),
   },
-  diamond: defaultProgram,
-  rectangle: defaultProgram,
-  square: defaultProgram,
+  square: {
+    instrumented: `
+s.set('c', new Character());
+s.get('c').forward();
+s.get('c').turnRight();
+s.get('c').forward(); // CP
+s.get('c').turnRight();
+s.get('c').forward();
+`.trim(),
+    js: `
+const c = new Character(); // sid
+c.forward(); // sid
+c.turnRight(); // sid
+c.forward(); // sid
+c.turnRight(); // sid
+c.forward(); // sid
+`.trim(),
+    java: `
+import net.exkazuu.Character;
+
+public class Main {
+  public static void main(String[] args) {
+	Character c = new Character(); // sid
+	c.forward(); // sid
+	c.turnRight(); // sid
+	c.forward(); // sid
+	c.turnRight(); // sid
+	c.forward(); // sid
+  }
+}`.trim(),
+  },
+  square2: {
+    instrumented: `
+s.set('c', new Character(<1-5>, <1-4>));
+s.get('c').forward();
+s.get('c').turnRight();
+s.get('c').forward(); // CP
+s.get('c').turnRight();
+s.get('c').forward();
+`.trim(),
+    js: `
+const c = new Character(<1-5>, <1-4>); // sid
+c.forward(); // sid
+c.turnRight(); // sid
+c.forward(); // sid
+c.turnRight(); // sid
+c.forward(); // sid
+`.trim(),
+    java: `
+import net.exkazuu.Character;
+
+public class Main {
+  public static void main(String[] args) {
+	Character c = new Character(<1-5>, <1-4>); // sid
+	c.forward(); // sid
+	c.turnRight(); // sid
+	c.forward(); // sid
+	c.turnRight(); // sid
+	c.forward(); // sid
+  }
+}`.trim(),
+  },
+  variable: {
+    instrumented: `
+ s.set('x', <1-5>);
+ s.set('c', new Character(s.get('x'), <1-5>)); // CP
+s.get('c').forward();
+ `.trim(),
+    js: `
+ let x = <1-5>;
+ const c = new Character(x, <1-5>); // sid
+ c.forward(); // sid
+ `.trim(),
+    java: `
+import net.exkazuu.Character;
+
+public class Main {
+  public static void main(String[] args) {
+	int x = <1-5>;
+	Character c = new Character(x, <1-5>); // sid
+	c.forward(); // sid
+  }
+}`.trim(),
+  },
+  variable2: {
+    instrumented: `
+s.set('x', <1-5>);
+s.set('x', s.get('x') - 1);
+s.set('y', s.get('x') * 2);
+s.set('y', Math.floor(s.get('y') / 3));
+s.set('c', new Character(s.get('x'), s.get('y')));
+s.get('c').forward();
+`.trim(),
+    js: `
+let x = <1-5>; // sid
+x -= 1; // sid
+let y = x * 2; // sid
+y = y / 3; // sid
+const c = new Character(x, y); // sid
+c.forward(); // sid
+`.trim(),
+    java: `
+import net.exkazuu.Character;
+
+public class Main {
+  public static void main(String[] args) {
+	int x = <1-5>; // sid
+	x--; // sid
+	int y = x * 2; // sid
+	y = y / 3; // sid
+	Character c = new Character(x, y); // sid
+	c.forward(); // sid
+  }
+}`.trim(),
+  },
   stairs: defaultProgram,
   test1: {
     instrumented: `
@@ -343,9 +457,10 @@ export const programIdToLanguageIdToExplanation: Record<
 > = {
   straight: defaultExplanation,
   curve: defaultExplanation,
-  diamond: defaultExplanation,
-  rectangle: defaultExplanation,
   square: defaultExplanation,
+  square2: defaultExplanation,
+  variable: defaultExplanation,
+  variable2: defaultExplanation,
   stairs: defaultExplanation,
   test1: defaultExplanation,
   test2: defaultExplanation,
