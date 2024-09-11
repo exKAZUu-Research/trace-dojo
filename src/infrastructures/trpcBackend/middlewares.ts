@@ -5,7 +5,7 @@ import { logger } from '../pino';
 
 import { middleware } from './trpc';
 
-const accessTokenRegex = /(^|;)\s*sAccessToken=([^;]*)/;
+const accessTokenRegex = /(?:^|;)\s*sAccessToken=([^;]*)/;
 
 // https://dev.to/franciscomendes10866/authentication-and-authorization-in-a-node-api-using-fastify-trpc-and-supertokens-3cgn
 export const authorize = middleware(async ({ ctx, next }) => {
@@ -13,8 +13,8 @@ export const authorize = middleware(async ({ ctx, next }) => {
 
   let session;
   try {
-    const match = ctx.req.headers.get('Cookie')?.match(accessTokenRegex);
-    const token = match && decodeURIComponent(match[2]);
+    const [, match] = ctx.req.headers.get('Cookie')?.match(accessTokenRegex) ?? [];
+    const token = match && decodeURIComponent(match);
     if (token) session = await getSessionOnNode(token);
   } catch (error) {
     logger.warn(error);
