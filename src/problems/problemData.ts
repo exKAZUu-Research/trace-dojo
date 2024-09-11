@@ -11,7 +11,11 @@ export const programIds = [
   'variable',
   'variable2',
   'variable3',
-
+  'while1',
+  'while2',
+  'for1',
+  'for2',
+  'for3',
   'test1',
   'test2',
   'test3',
@@ -47,6 +51,11 @@ export const programIdToName: Record<ProgramId, string> = {
   variable: '変数を使おう(1)',
   variable2: '変数を使おう(2)',
   variable3: '変数を使おう(3)',
+  while1: 'while文を使おう(1)',
+  while2: 'while文を使おう(2)',
+  for1: 'for文を使おう(1)',
+  for2: 'for文を使おう(2)',
+  for3: 'for文を使おう(3)',
   test1: 'ステップ実行のテスト用問題(1)',
   test2: 'ステップ実行のテスト用問題(2)',
   test3: 'ステップ実行のテスト用問題(3)',
@@ -57,8 +66,8 @@ export const programIdToName: Record<ProgramId, string> = {
 export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
   tuBeginner1: [
     ['straight', 'stepBack', 'turnRight', 'turnRightAndTurnLeft'],
-
     ['square1', 'square2', 'variable', 'variable2', 'variable3'],
+    ['while1', 'while2', 'for1', 'for2', 'for3'],
   ],
   tuBeginner2: [['test1', 'test2', 'test3', 'test4', 'test5']],
 };
@@ -66,6 +75,11 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
 export function getExplanation(programId: ProgramId, languageId: VisibleLanguageId): Record<'title' | 'body', string> {
   return programIdToLanguageIdToExplanation[programId]?.[languageId];
 }
+
+// const defaultProgram = {
+//   instrumented: '',
+//   java: '',
+// };
 
 export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId, string>> = {
   straight: {
@@ -240,6 +254,118 @@ public class Main {
 }
 	`.trim(),
   },
+  while1: {
+    instrumented: `
+	s.set('c', new Character());
+	s.set('i', 0);
+	while (s.get('i') < <3-5>) {
+	  s.get('c').forward(); // CP
+	  s.set('i', s.get('i') + 1);
+	}
+	`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle 亀 = new Turtle(); // sid
+	int i = 0; // sid
+	while (i < <3-5>) {
+	  亀.前に進む(); // sid
+	  i++; // sid
+	}
+  }
+}
+	`.trim(),
+  },
+  while2: {
+    instrumented: `
+	s.set('c', new Character());
+	s.set('i', 0);
+	while (s.get('i') < <2-3>) {
+	  s.set('i', s.get('i') + 1);
+	  s.get('c').forward(); // CP
+	  s.get('c').turnRight(); 
+	}
+	`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+	Turtle 亀 = new Turtle(); // sid
+	int i = 0; // sid
+	while (i < 2) {
+	  i++; // sid
+	  亀.前に進む(); // sid
+	  亀.右を向く(); // sid
+	}
+  }
+}
+	`.trim(),
+  },
+  for1: {
+    instrumented: `
+	s.set('c', new Character());
+	for (s.set('i', 0); s.get('i') < <3-5>; s.set('i', s.get('i') + 1)) {
+	  s.get('c').forward(); // CP
+   	}
+   	`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle 亀 = new Turtle(); // sid
+    for (int i = 0; i < <3-5>; i++) { // sid
+      亀.前に進む(); // sid
+    }
+  }
+}
+	`.trim(),
+  },
+  for2: {
+    instrumented: `
+	s.set('c', new Character());
+	s.set('i', 0);
+	for (s.set('i', s.get('i')) ; s.get('i') < <2-3>; s.set('i', s.get('i'))) {
+	  s.get('c').forward(); // CP
+	  s.get('c').turnRight();
+	  s.set('i', s.get('i') + 1);
+	}
+	`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+	Turtle 亀 = new Turtle(); // sid
+	int i = 0; // sid
+	for (; i < <2-3>;) { // sid
+	  亀.前に進む(); // sid
+	  亀.右を向く(); // sid
+	  i++; // sid
+	}
+  }
+}
+	`.trim(),
+  },
+  for3: {
+    instrumented: `
+	s.set('x', 0);
+	for (s.set('i', 2); s.get('i') <= <4-5>; s.set('i', s.get('i') + 1)) {
+	  s.set('x', s.get('x') + s.get('i'));
+	}
+	s.set('x', Math.floor(s.get('x') / 3));
+	s.set('c', new Character(s.get('x'), 0)); // CP
+	s.get('c').forward();
+	`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+	int x = 0; // sid
+	for (int i = 2; i <= <4-5>; i++) { // sid
+	  x += i; // sid
+	}
+	x /= 3; // sid
+	Turtle 亀 = new Turtle(x, 0); // sid
+	亀.前に進む(); // sid
+  }
+}
+	`.trim(),
+  },
   test1: {
     instrumented: `
 s.set('c', new Character());
@@ -409,6 +535,11 @@ export const programIdToLanguageIdToExplanation: Record<
   variable: defaultExplanation,
   variable2: defaultExplanation,
   variable3: defaultExplanation,
+  while1: defaultExplanation,
+  while2: defaultExplanation,
+  for1: defaultExplanation,
+  for2: defaultExplanation,
+  for3: defaultExplanation,
   test1: defaultExplanation,
   test2: defaultExplanation,
   test3: defaultExplanation,
