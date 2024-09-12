@@ -1066,8 +1066,7 @@ public class Main {
     instrumented: `
 	s.set('c', new Character());
 	s.set('arr', [0, 1, 0, 2, 0]);
-	const arr = [0, 1, 0, 2, 0];
-	for (const cmd of arr) {
+	for (const cmd of [0, 1, 0, 2, 0]) {
 		s.set('cmd', cmd);
 		switch (s.get('cmd')) {
 			case 0: s.get('c').forward(); break; // CP
@@ -1132,8 +1131,7 @@ public class Main {
     instrumented: `
 	s.set('c', new Character());
 	s.set('s', 'frflf');
-	const str = 'frflf';
-	for (const ch of str) {
+	for (const ch of 'frflf') {
 		s.set('ch', ch);
 		switch (s.get('ch')) {
 			case 'f':
@@ -1167,8 +1165,7 @@ public class Main {
     instrumented: `
 	s.set('c', new Character());
 	s.set('cmds', ['ri', 'aa', 'fo']); // CP
-	const cmds = ['ri', 'aa', 'fo'];
-	for (const cmd of cmds) {
+	for (const cmd of ['ri', 'aa', 'fo']) {
 		s.set('cmd', cmd);
 		parse(s.get('c'), s.get('cmd'));
 	}
