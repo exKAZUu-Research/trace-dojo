@@ -149,6 +149,12 @@ class Character {
 	if (this.pen) board[this.y][this.x] = this.color;
 	addTrace(sid);
   }
+  canMoveForward() {
+    const index = dirs.indexOf(this.dir);
+	const nx = this.x + dx[index];
+	const ny = this.y + dy[index];
+	return nx >= 0 && nx < ${GRID_COLUMNS} && ny >= 0 && ny < ${GRID_ROWS};
+	}
   penDown(sid) {
     this.pen = true;
     addTrace(sid);

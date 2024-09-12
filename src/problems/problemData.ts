@@ -24,6 +24,12 @@ export const programIds = [
   'elseIf2',
   'switch1',
   'switch2',
+  'break1',
+  'break2',
+  'break3',
+  'continue1',
+  'continue2',
+  'continue3',
   'test1',
   'test2',
   'test3',
@@ -72,6 +78,12 @@ export const programIdToName: Record<ProgramId, string> = {
   elseIf2: 'else if文を使おう(2)',
   switch1: 'switch文を使おう(1)',
   switch2: 'switch文を使おう(2)',
+  break1: 'break文を使おう(1)',
+  break2: 'break文を使おう(2)',
+  break3: 'break文を使おう(3)',
+  continue1: 'continue文を使おう(1)',
+  continue2: 'continue文を使おう(2)',
+  continue3: 'continue文を使おう(3)',
   test1: 'ステップ実行のテスト用問題(1)',
   test2: 'ステップ実行のテスト用問題(2)',
   test3: 'ステップ実行のテスト用問題(3)',
@@ -86,6 +98,7 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
     ['while1', 'while2', 'for1', 'for2', 'for3'],
     ['doubleLoop1', 'doubleLoop2', 'if1', 'if2'],
     ['elseIf1', 'elseIf2', 'switch1', 'switch2'],
+    ['break1', 'break2', 'break3', 'continue1', 'continue2', 'continue3'],
   ],
   tuBeginner2: [['test1', 'test2', 'test3', 'test4', 'test5']],
 };
@@ -592,6 +605,164 @@ public class Main {
 }
 	`.trim(),
   },
+  break1: {
+    instrumented: `
+	s.set('c', new Character());
+	while (true) {
+		if (!s.get('c').canMoveForward()) break;
+		s.get('c').forward(); // CP
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(); // sid
+		while (true) {
+			if (!t.前に進めるか()) break;
+			t.前に進む(); // sid
+		}
+	}
+}
+	`.trim(),
+  },
+  break2: {
+    instrumented: `
+	s.set('c', new Character(<3-4>,<3-4>));
+	while (true) {
+		if (!s.get('c').canMoveForward()) break;
+		s.get('c').forward();
+		s.get('c').turnRight(); // CP
+		if (!s.get('c').canMoveForward()) break;
+		s.get('c').forward();
+		s.get('c').turnLeft(); // CP
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(<3-4>, <3-4>); // sid	
+		while (true) {
+			if (!t.前に進めるか()) break;
+			t.前に進む(); // sid
+			t.右を向く(); // sid
+			if (!t.前に進めるか()) break;
+			t.前に進む(); // sid
+			t.左を向く(); // sid
+		}
+	}
+}
+	`.trim(),
+  },
+  break3: {
+    instrumented: `
+	s.set('c', new Character(<4-6>, <4-6>));
+	for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
+		while (true) {
+			s.get('c').forward();
+			if (!s.get('c').canMoveForward()) break;
+		}
+		s.get('c').turnRight(); // CP
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(<4-6>, <4-6>); // sid
+		for (int i = 0; i < 4; i++) { // sid
+			for (;;) {
+				t.前に進む(); // sid
+				if (!t.前に進めるか()) break;
+			}
+			t.右を向く(); // sid
+		}
+	}
+}
+	`.trim(),
+  },
+  continue1: {
+    instrumented: `
+	s.set('c', new Character());
+	for (s.set('i', 0); s.get('i') < <3-5>; s.set('i', s.get('i') + 1)) {
+		if (s.get('i') == 0) {
+			continue;
+		}
+		s.get('c').forward(); // CP
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(); // sid
+		for (int i = 0; i < <3-5>; i++) { // sid
+			if (i == 0) {
+				continue;
+			}
+			t.前に進む(); // sid
+		}
+	}
+}
+	`.trim(),
+  },
+  continue2: {
+    instrumented: `
+	s.set('c', new Character());
+	for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
+		if (s.get('i') % <2-3> == 1) {
+			s.get('c').turnRight(); // CP
+			continue;
+		}
+		s.get('c').forward();
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(); // sid
+		for (int i = 0; i < <5-7>; i++) { // sid
+			if (i % <2-3> == 1) {
+				t.右を向く(); // sid
+				continue;
+			}
+			t.前に進む(); // sid
+		}
+	}
+}
+	`.trim(),
+  },
+  continue3: {
+    instrumented: `
+	s.set('c', new Character());
+	for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
+		for (s.set('j', s.get('i') * 4); s.get('j') < 8; s.set('j', s.get('j') + 1)) {
+			if (s.get('j') % 4 == 1) {
+				s.get('c').turnRight(); continue;// CP
+			} else if (s.get('j') % 4 == 3) {
+				s.get('c').turnLeft(); continue; // CP
+			}
+			s.get('c').forward();
+		}
+		s.get('c').turnLeft();
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(); // sid
+		for (int i = 0; i < 2; i++) { // sid
+			for (int j = i * 4; j < 8; j++) { // sid
+				if (j % 4 == 1) {
+					t.右を向く(); continue; // sid
+				} else if (j % 4 == 3) {
+					t.左を向く(); continue; // sid
+				}
+				t.前に進む(); // sid
+			}
+			t.左を向く(); // sid
+		}
+	}
+}
+	`.trim(),
+  },
   test1: {
     instrumented: `
 s.set('c', new Character());
@@ -774,6 +945,12 @@ export const programIdToLanguageIdToExplanation: Record<
   elseIf2: defaultExplanation,
   switch1: defaultExplanation,
   switch2: defaultExplanation,
+  break1: defaultExplanation,
+  break2: defaultExplanation,
+  break3: defaultExplanation,
+  continue1: defaultExplanation,
+  continue2: defaultExplanation,
+  continue3: defaultExplanation,
   test1: defaultExplanation,
   test2: defaultExplanation,
   test3: defaultExplanation,
