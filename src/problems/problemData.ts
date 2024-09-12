@@ -817,11 +817,11 @@ public class Main {
   method2: {
     instrumented: `
 	s.set('c', new Character());
-	NStepsForward(s.get('c'), <3-4>);
+	forwardGivenSteps(s.get('c'), <3-4>);
 	s.get('c').turnRight(); // CP
-	NStepsForward(s.get('c'), 2);
+	forwardGivenSteps(s.get('c'), 2);
 
-	function NStepsForward(c, n) {
+	function forwardGivenSteps(c, n) {
 		for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
 			c.forward();
 		}
@@ -884,9 +884,9 @@ public class Main {
     instrumented: `
 	s.set('c', new Character());
 	s.set('x', double(<2-3>)); // CP
-	NStepsForward(s.get('c'), s.get('x'));
+	forwardGivenSteps(s.get('c'), s.get('x'));
 	
-	function NStepsForward(c, n) {
+	function forwardGivenSteps(c, n) {
 		for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
 			c.forward();
 		}
@@ -917,10 +917,10 @@ public class Main {
   return2: {
     instrumented: `
 	s.set('c', new Character());
-	NStepsForward(s.get('c'), add(1, 1));
-	NStepsForward(s.get('c'), add(1, 2));
+	forwardGivenSteps(s.get('c'), add(1, 1));
+	forwardGivenSteps(s.get('c'), add(1, 2));
 
-	function NStepsForward(c, n) {
+	function forwardGivenSteps(c, n) {
 		for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
 			c.forward();
 		}
