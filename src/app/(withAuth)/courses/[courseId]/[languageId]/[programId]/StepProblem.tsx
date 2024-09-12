@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 
 import { CustomModal } from '../../../../../../components/molecules/CustomModal';
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
@@ -68,6 +68,21 @@ export const StepProblem: React.FC<StepProblemProps> = ({
       alert('不正解です。もう一度回答してください');
     }
   };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.shiftKey && event.key === 'E') {
+        event.preventDefault();
+        handleClickAnswerButton();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   return (
     <Flex gap="6" w="100%">
