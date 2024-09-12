@@ -83,28 +83,36 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
 
   return (
     <Flex gap="6" w="100%">
-      <VStack spacing="10">
+      <VStack spacing="4">
         <Box>赤色にハイライトされている行における盤面を作成してください。</Box>
-        <Box>赤色のハイライト時点の実行結果</Box>
-        <Box>
-          <TurtleGraphics
-            ref={turtleGraphicsRef}
-            beforeTraceItem={beforeCheckpointTraceItem}
-            currentTraceItem={currentCheckpointTraceItem}
-            isEnableOperation={true}
-            problem={problem}
-          />
-        </Box>
-        <Box>青色のハイライト時点の実行結果</Box>
-        <Box>
-          <TurtleGraphics
-            ref={turtleGraphicsRef}
-            beforeTraceItem={beforeCheckpointTraceItem}
-            currentTraceItem={currentCheckpointTraceItem}
-            isEnableOperation={false}
-            problem={problem}
-          />
-        </Box>
+        <VStack align="start">
+          <HStack>
+            <Button onClick={() => handleClickAnswerButton()}>解答</Button>
+            <Button onClick={() => handleClickResetButton()}>リセット</Button>
+          </HStack>
+          <Box>赤色のハイライト時点の実行結果</Box>
+          <Box>
+            <TurtleGraphics
+              ref={turtleGraphicsRef}
+              beforeTraceItem={beforeCheckpointTraceItem}
+              currentTraceItem={currentCheckpointTraceItem}
+              isEnableOperation={true}
+              problem={problem}
+            />
+          </Box>
+        </VStack>
+        <VStack>
+          <Box>青色のハイライト時点の実行結果</Box>
+          <Box>
+            <TurtleGraphics
+              ref={turtleGraphicsRef}
+              beforeTraceItem={beforeCheckpointTraceItem}
+              currentTraceItem={currentCheckpointTraceItem}
+              isEnableOperation={false}
+              problem={problem}
+            />
+          </Box>
+        </VStack>
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">
         <HStack>
@@ -140,10 +148,6 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
           />
         </Box>
         <Variables traceItemVars={beforeCheckpointTraceItem?.vars} />
-        <HStack>
-          <Button onClick={() => handleClickResetButton()}>リセット</Button>
-          <Button onClick={() => handleClickAnswerButton()}>解答</Button>
-        </HStack>
       </VStack>
     </Flex>
   );

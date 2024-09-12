@@ -68,17 +68,23 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
 
   return (
     <Flex gap="6" w="100%">
-      <VStack spacing="10">
+      <VStack spacing="4">
         <Box>プログラムの実行後の結果を解答してください。</Box>
-        <Box>
-          <TurtleGraphics
-            ref={turtleGraphicsRef}
-            beforeTraceItem={problem.traceItems.at(0)}
-            currentTraceItem={problem.traceItems.at(-1)}
-            isEnableOperation={true}
-            problem={problem}
-          />
-        </Box>
+        <VStack align="start">
+          <HStack>
+            <Button onClick={() => handleClickAnswerButton()}>解答</Button>
+            <Button onClick={() => handleClickResetButton()}>リセット</Button>
+          </HStack>
+          <Box>
+            <TurtleGraphics
+              ref={turtleGraphicsRef}
+              beforeTraceItem={problem.traceItems.at(0)}
+              currentTraceItem={problem.traceItems.at(-1)}
+              isEnableOperation={true}
+              problem={problem}
+            />
+          </Box>
+        </VStack>
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">
         <HStack>
@@ -109,10 +115,6 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
         <Box h="calc(100vh - 370px)" w="100%">
           <SyntaxHighlighter code={problem.displayProgram} programmingLanguageId={selectedLanguageId} />
         </Box>
-        <HStack>
-          <Button onClick={() => handleClickResetButton()}>リセット</Button>
-          <Button onClick={() => handleClickAnswerButton()}>解答</Button>
-        </HStack>
       </VStack>
     </Flex>
   );
