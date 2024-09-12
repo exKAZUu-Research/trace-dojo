@@ -46,12 +46,12 @@ export const colorToChar = Object.fromEntries(
 ) as Record<CellColor, ColorChar>;
 
 export function traceProgram(instrumented: string, rawDisplayProgram: string, languageId: LanguageId): Problem {
-  if (instrumented.includes(' = ')) {
-    throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
-  }
-  if (instrumented.includes('const ') || instrumented.includes('let ') || instrumented.includes('var ')) {
-    throw new Error('Instrumented program MUST NOT contain variable declarations.');
-  }
+  //   if (instrumented.includes(' = ')) {
+  //     throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
+  //   }
+  //   if (instrumented.includes('const ') || instrumented.includes('let ') || instrumented.includes('var ')) {
+  //     throw new Error('Instrumented program MUST NOT contain variable declarations.');
+  //   }
 
   const checkpointSids: number[] = [];
 

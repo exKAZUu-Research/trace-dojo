@@ -36,6 +36,12 @@ export const programIds = [
   'return1',
   'return2',
   'return3',
+  'array1',
+  'array2',
+  'array3',
+  'string1',
+  'string2',
+  'string3',
   'test1',
   'test2',
   'test3',
@@ -96,6 +102,12 @@ export const programIdToName: Record<ProgramId, string> = {
   return1: 'return文を使おう(1)',
   return2: 'return文を使おう(2)',
   return3: 'return文を使おう(3)',
+  array1: '配列を使おう(1)',
+  array2: '配列を使おう(2)',
+  array3: '配列を使おう(3)',
+  string1: '文字列を使おう(1)',
+  string2: '文字列を使おう(2)',
+  string3: '文字列を使おう(3)',
   test1: 'ステップ実行のテスト用問題(1)',
   test2: 'ステップ実行のテスト用問題(2)',
   test3: 'ステップ実行のテスト用問題(3)',
@@ -112,6 +124,7 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
     ['elseIf1', 'elseIf2', 'switch1', 'switch2'],
     ['break1', 'break2', 'break3', 'continue1', 'continue2', 'continue3'],
     ['method1', 'method2', 'method3', 'return1', 'return2', 'return3'],
+    ['array1', 'array2', 'array3', 'string1', 'string2', 'string3'],
   ],
   tuBeginner2: [['test1', 'test2', 'test3', 'test4', 'test5']],
 };
@@ -119,11 +132,6 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
 export function getExplanation(programId: ProgramId, languageId: VisibleLanguageId): Record<'title' | 'body', string> {
   return programIdToLanguageIdToExplanation[programId]?.[languageId];
 }
-
-// const defaultProgram = {
-//   instrumented: '',
-//   java: '',
-// };
 
 export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId, string>> = {
   straight: {
@@ -990,6 +998,202 @@ public class Main {
 }
 	`.trim(),
   },
+  array1: {
+    instrumented: `
+	s.set('c', new Character());
+	s.set('arr', [2, <1-2>, <1-2>]); // CP
+	for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
+		forwardGivenSteps(s.get('c'), s.get('arr')[s.get('i')]);
+		s.get('c').turnRight(); // CP
+	}
+
+	function forwardGivenSteps(c, n) {
+		for (s.set('j', 0); s.get('j') < n; s.set('j', s.get('j') + 1)) {
+			c.forward();
+		}
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(); // sid
+		int[] arr = { 2, <1-2>, <1-2> }; // sid
+		for (int i = 0; i < arr.length; i++) { // sid
+			N歩前に進める(t, arr[i]);
+			t.右を向く(); // sid
+		}
+	}
+		static void N歩前に進める(Turtle t, int n) {
+			for (int j = 0; j < n; j++) { // sid
+				t.前に進む(); // sid
+			}
+		}
+}
+	`.trim(),
+  },
+  array2: {
+    instrumented: `
+	s.set('c', new Character());
+	s.set('arr', [0, 1, 0, 2, 0]);
+	for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
+		switch (s.get('arr')[s.get('i')]) {
+			case 0: s.get('c').forward(); break; // CP
+			case 1: s.get('c').turnRight(); break;
+			case 2: s.get('c').turnLeft(); break;
+		}
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(); // sid
+		int [] arr = { 0, 1, 0, 2, 0 }; // sid	
+		for (int i = 0; i < arr.length; i++) { // sid
+			switch (arr[i]) {
+				case 0:
+					t.前に進む(); break; // sid
+				case 1:
+					t.右を向く(); break; // sid
+				case 2:
+					t.左を向く(); break; // sid
+			}
+		}
+	}
+}
+	`.trim(),
+  },
+  array3: {
+    instrumented: `
+	s.set('c', new Character());
+	s.set('arr', [0, 1, 0, 2, 0]);
+	const arr = [0, 1, 0, 2, 0];
+	for (const cmd of arr) {
+		s.set('cmd', cmd);
+		switch (s.get('cmd')) {
+			case 0: s.get('c').forward(); break; // CP
+			case 1: s.get('c').turnRight(); break;
+			case 2: s.get('c').turnLeft(); break;
+		}
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(); // sid
+		int [] arr = { 0, 1, 0, 2, 0 }; // sid
+		for (int cmd : array) { // sid
+			switch (cmd) {
+				case 0:
+					t.前に進む(); break; // sid
+				case 1:
+					t.右を向く(); break; // sid
+				case 2:
+					t.左を向く(); break; // sid
+			}
+		}
+	}
+	`,
+  },
+  string1: {
+    instrumented: `
+	s.set('c', new Character());
+	s.set('s', 'frflf');
+	for (s.set('i', 0); s.get('i') < s.get('s').length; s.set('i', s.get('i') + 1)) {
+		switch (s.get('s').charAt(s.get('i'))) {
+			case 'f':
+				s.get('c').forward(); break; // CP
+			case 'r':
+				s.get('c').turnRight(); break;
+			case 'l':
+				s.get('c').turnLeft(); break;
+		}
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(); // sid
+		String s = "frflf"; // sid
+		for (int i = 0; i < s.length(); i++) { // sid
+			switch (s.charAt(i)) {
+				case 'f':
+					t.前に進む(); break; // sid
+				case 'r':
+					t.右を向く(); break; // sid
+				case 'l':
+					t.左を向く(); break; // sid
+			}
+		}
+	}
+}
+	`.trim(),
+  },
+  string2: {
+    instrumented: `
+	s.set('c', new Character());
+	s.set('s', 'frflf');
+	const str = 'frflf';
+	for (const ch of str) {
+		s.set('ch', ch);
+		switch (s.get('ch')) {
+			case 'f':
+				s.get('c').forward(); break; // CP
+			case 'r':
+				s.get('c').turnRight(); break;
+			case 'l':
+				s.get('c').turnLeft(); break;
+		}
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(); // sid
+		String s = "frflf"; // sid
+		for (char ch : s.toCharArray()) { // sid
+			switch (ch) {
+				case 'f':
+					t.前に進む(); break; // sid
+				case 'r':
+					t.右を向く(); break; // sid
+				case 'l':
+					t.左を向く(); break; // sid
+			}
+		}
+	}
+	`.trim(),
+  },
+  string3: {
+    instrumented: `
+	s.set('c', new Character());
+	s.set('cmds', ['ri', 'aa', 'fo']); // CP
+	const cmds = ['ri', 'aa', 'fo'];
+	for (const cmd of cmds) {
+		s.set('cmd', cmd);
+		parse(s.get('c'), s.get('cmd'));
+	}
+
+	function parse(t, c) {
+		if (c === 'fo') t.forward();
+		else if (c === 'ri') t.turnRight();
+	}
+	`.trim(),
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t = new Turtle(); // sid
+		Strings[] cmds = { "ri", 'aa', 'fo' }; // sid
+		for (String cmd : cmds) { // sid
+			parse(t, cmd);
+		}
+	}
+	static void parse(Turtle t, String c) {
+		if (c.equals("fo")) t.前に進む(); // sid
+		else if (c.equals("ri")) t.右を向く(); // sid
+	}
+}
+	`.trim(),
+  },
   test1: {
     instrumented: `
 s.set('c', new Character());
@@ -1184,6 +1388,12 @@ export const programIdToLanguageIdToExplanation: Record<
   return1: defaultExplanation,
   return2: defaultExplanation,
   return3: defaultExplanation,
+  array1: defaultExplanation,
+  array2: defaultExplanation,
+  array3: defaultExplanation,
+  string1: defaultExplanation,
+  string2: defaultExplanation,
+  string3: defaultExplanation,
   test1: defaultExplanation,
   test2: defaultExplanation,
   test3: defaultExplanation,
