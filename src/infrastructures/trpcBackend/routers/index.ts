@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { upsertUserProblemSession } from '../../../utils/upsertUserProblemSession';
 import { prisma } from '../../prisma';
 import { authorize } from '../middlewares';
 import { procedure, router } from '../trpc';
@@ -22,56 +23,28 @@ export const backendRouter = router({
         currentProblemType: z.string(),
         beforeTraceItemIndex: z.number().nonnegative(),
         currentTraceItemIndex: z.number().nonnegative(),
-        timeSpent: z.number().nullable(),
+        timeSpent: z.number().optional(),
         startedAt: z.date(),
-        finishedAt: z.date().nullable(),
+        finishedAt: z.date().optional(),
         isCompleted: z.boolean(),
       })
     )
     .mutation(async ({ input }) => {
-      const {
-        beforeTraceItemIndex,
-        courseId,
-        currentProblemType,
-        currentTraceItemIndex,
-        finishedAt,
-        id,
-        isCompleted,
-        languageId,
-        problemVariablesSeed,
-        programId,
-        startedAt,
-        userId,
-      } = input;
-      const userProblemSession = await prisma.userProblemSession.upsert({
-        where: {
-          id,
-        },
-        update: {
-          currentProblemType,
-          beforeTraceItemIndex,
-          currentTraceItemIndex,
-          timeSpent: input.timeSpent ?? undefined,
-          startedAt,
-          finishedAt,
-          isCompleted,
-        },
-        create: {
-          userId,
-          courseId,
-          programId,
-          languageId,
-          problemVariablesSeed,
-          currentProblemType,
-          beforeTraceItemIndex,
-          currentTraceItemIndex,
-          timeSpent: input.timeSpent ?? undefined,
-          startedAt,
-          finishedAt,
-          isCompleted,
-        },
-      });
-      return userProblemSession;
+      return await upsertUserProblemSession(
+        input.id,
+        input.userId,
+        input.courseId,
+        input.programId,
+        input.languageId,
+        input.problemVariablesSeed,
+        input.currentProblemType,
+        input.beforeTraceItemIndex,
+        input.currentTraceItemIndex,
+        input.timeSpent,
+        input.startedAt,
+        input.finishedAt,
+        input.isCompleted
+      );
     }),
   updateUserProblemSession: procedure
     .use(authorize)

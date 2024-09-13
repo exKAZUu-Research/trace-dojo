@@ -5,7 +5,7 @@ import { generateProblem, type Problem } from '../../../../../../problems/genera
 import type { CourseId, LanguageId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
 import { getSuspendedUserProblemSession } from '../../../../../../utils/fetch';
 import { getNonNullableSessionOnServer } from '../../../../../../utils/session';
-import { upsertUserProblemSession } from '../../../../../lib/actions';
+import { upsertUserProblemSession } from '../../../../../../utils/upsertUserProblemSession';
 
 import { BaseProblem } from './BaseProblem';
 

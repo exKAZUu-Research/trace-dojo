@@ -83,8 +83,7 @@ export const BaseProblem: React.FC<{
         currentTraceItemIndex: problemType === 'executionResult' ? 0 : currentTraceItemIndex,
         timeSpent: suspendedSession.timeSpent,
         startedAt: suspendedSession.startedAt,
-        // eslint-disable-next-line
-        finishedAt: null,
+        finishedAt: undefined,
         isCompleted: false,
       });
       if (updatedSession) {

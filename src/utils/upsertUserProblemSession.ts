@@ -1,10 +1,6 @@
-'use server';
+import type { UserProblemSession } from '@prisma/client';
 
-import type { UserAnswer, UserProblemSession } from '@prisma/client';
-
-import { prisma } from '../../infrastructures/prisma';
-
-export type UserProblemSessionWithUserAnswers = UserProblemSession & { userAnswers: UserAnswer[] };
+import { prisma } from '../infrastructures/prisma';
 
 export async function upsertUserProblemSession(
   id: number,
