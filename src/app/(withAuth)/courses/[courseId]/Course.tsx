@@ -36,7 +36,7 @@ import {
   programIdToName,
   visibleLanguageIds,
 } from '../../../../problems/problemData';
-import type { UserProblemSessionWithUserAnswers } from '../../../lib/actions';
+import type { UserProblemSessionWithUserAnswers } from '../../../../utils/fetch';
 import { selectedLanguageIdKey } from '../../../lib/sessionStorage';
 
 const SPECIFIED_COMPLETION_COUNT = 2;
