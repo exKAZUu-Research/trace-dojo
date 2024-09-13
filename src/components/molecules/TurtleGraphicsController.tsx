@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { FaArrowRotateRight, FaArrowRotateLeft } from 'react-icons/fa6';
+import { FaArrowRotateRight, FaArrowRotateLeft, FaTrashCan } from 'react-icons/fa6';
 
 import { TURTLE_GRAPHICS_GRID_ROWS as GRID_ROWS, TURTLE_GRAPHICS_GRID_SIZE as GRID_SIZE } from '../../constants';
 import { Box, Button, HStack, IconButton, VStack } from '../../infrastructures/useClient/chakra';
@@ -56,7 +56,12 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
             <Button onClick={() => handleClickCharacterMoveBackwardButton()}>後に戻る</Button>
           </HStack>
           <Box>
-            <Button onClick={() => handleRemoveCharacterButton(selectedCharacter)}>削除する</Button>
+            <IconButton
+              aria-label="Remove"
+              colorScheme="red"
+              icon={<FaTrashCan />}
+              onClick={() => handleRemoveCharacterButton(selectedCharacter)}
+            />
           </Box>
         </VStack>
       )}
