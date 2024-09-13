@@ -83,7 +83,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.shiftKey && event.key === 'E') {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
         event.preventDefault();
         handleClickAnswerButton();
       }
