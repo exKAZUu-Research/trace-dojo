@@ -57,20 +57,6 @@ export async function upsertUserProblemSession(
   }
 }
 
-export async function fetchUserProblemSessions(userId: string): Promise<UserProblemSession[]> {
-  try {
-    const userProblemSessions = await prisma.userProblemSession.findMany({
-      where: {
-        userId,
-      },
-    });
-    return userProblemSessions;
-  } catch (error) {
-    console.error(error);
-    return [];
-  }
-}
-
 export async function updateUserProblemSession(
   id: number,
   data: {
