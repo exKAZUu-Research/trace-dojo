@@ -3,8 +3,8 @@ import { redirect } from 'next/navigation';
 
 import { prisma } from '../../../../infrastructures/prisma';
 import type { CourseId } from '../../../../problems/problemData';
+import { fetchUserCompletedProblems, fetchUserProblemSessionsWithUserAnswer } from '../../../../utils/fetch';
 import { getNullableSessionOnServer } from '../../../../utils/session';
-import { fetchUserCompletedProblems, fetchUserProblemSessionsWithUserAnswer } from '../../../lib/actions';
 
 import { Course } from './Course';
 

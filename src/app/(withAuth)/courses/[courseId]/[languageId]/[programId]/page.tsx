@@ -3,8 +3,9 @@ import type { NextPage } from 'next';
 
 import { generateProblem, type Problem } from '../../../../../../problems/generateProblem';
 import type { CourseId, LanguageId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
+import { getSuspendedUserProblemSession } from '../../../../../../utils/fetch';
 import { getNonNullableSessionOnServer } from '../../../../../../utils/session';
-import { getSuspendedUserProblemSession, upsertUserProblemSession } from '../../../../../lib/actions';
+import { upsertUserProblemSession } from '../../../../../lib/actions';
 
 import { BaseProblem } from './BaseProblem';
 
