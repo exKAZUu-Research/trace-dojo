@@ -1,8 +1,9 @@
 'use client';
 
 import React from 'react';
+import { FaArrowRotateRight, FaArrowRotateLeft } from 'react-icons/fa6';
 
-import { Box, Button, HStack, VStack } from '../../infrastructures/useClient/chakra';
+import { Box, Button, HStack, IconButton, VStack } from '../../infrastructures/useClient/chakra';
 import type { CharacterTrace } from '../../problems/traceProgram';
 import type { SelectedCell } from '../../types';
 
@@ -36,8 +37,16 @@ export const TurtleGraphicsController: React.FC<TurtleGraphicsControllerProps> =
       {selectedCharacter && (
         <>
           <HStack>
-            <Button onClick={() => handleClickCharacterTurnLeftButton()}>⤹</Button>
-            <Button onClick={() => handleClickCharacterTurnRightButton()}>⤵</Button>
+            <IconButton
+              aria-label="Turn Left"
+              icon={<FaArrowRotateLeft />}
+              onClick={() => handleClickCharacterTurnLeftButton()}
+            />
+            <IconButton
+              aria-label="Turn Right"
+              icon={<FaArrowRotateRight />}
+              onClick={() => handleClickCharacterTurnRightButton()}
+            />
           </HStack>
           <HStack>
             <Button onClick={() => handleClickCharacterMoveForwardButton()}>前に進む</Button>
