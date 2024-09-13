@@ -56,33 +56,3 @@ export async function upsertUserProblemSession(
     return undefined;
   }
 }
-
-export async function createUserAnswer(
-  programId: string,
-  problemType: string,
-  languageId: string,
-  userId: string,
-  userProblemSessionId: number,
-  step: number,
-  isPassed: boolean,
-  timeSpent?: number,
-  startedAt?: Date | undefined
-): Promise<void> {
-  try {
-    await prisma.userAnswer.create({
-      data: {
-        programId,
-        problemType,
-        languageId,
-        userId,
-        userProblemSessionId,
-        step,
-        isPassed,
-        timeSpent,
-        startedAt,
-      },
-    });
-  } catch (error) {
-    console.error(error);
-  }
-}

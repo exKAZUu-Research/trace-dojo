@@ -11,7 +11,6 @@ import type { Problem } from '../../../../../../problems/generateProblem';
 import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
 import { getExplanation, programIdToName } from '../../../../../../problems/problemData';
 import type { ProblemType } from '../../../../../../types';
-import { createUserAnswer } from '../../../../../lib/actions';
 
 import { CheckpointProblem } from './CheckpointProblem';
 import { ExecutionResultProblem } from './ExecutionResultProblem';
@@ -40,6 +39,7 @@ export const BaseProblem: React.FC<{
   const updatedSessionQuery = backendTrpcReact.upsertUserProblemSession.useMutation();
   const updateUserProblemSessionQuery = backendTrpcReact.updateUserProblemSession.useMutation();
   const createUserCompletedProblemQuery = backendTrpcReact.createUserCompletedProblem.useMutation();
+  const createUserAnswerQuery = backendTrpcReact.createUserAnswer.useMutation();
 
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -128,17 +128,17 @@ export const BaseProblem: React.FC<{
     const now = new Date();
     const startedAt = new Date(now.getTime() - activeTime);
 
-    await createUserAnswer(
+    await createUserAnswerQuery.mutateAsync({
       programId,
       problemType,
       languageId,
       userId,
-      suspendedSession.id,
-      currentTraceItemIndex,
+      userProblemSessionId: suspendedSession.id,
+      step: currentTraceItemIndex,
       isPassed,
-      activeTime,
-      startedAt
-    );
+      timeSpent: activeTime,
+      startedAt,
+    });
 
     if (suspendedSession) {
       const userProblemSession = await updateUserProblemSessionQuery.mutateAsync({
