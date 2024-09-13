@@ -62,6 +62,7 @@
     "react-idle-timer": "5.7.2",
     "react-syntax-highlighter": "15.5.0",
     "seedrandom": "3.0.5",
+    "superjson": "2.2.1",
     "supertokens-auth-react": "0.47.0",
     "supertokens-node": "20.0.5",
     "supertokens-web-js": "0.13.0",
