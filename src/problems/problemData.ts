@@ -141,12 +141,12 @@ export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId
 	s.get('c').forward();
 	`.trim(),
     java: `
-	public class Main {
-		public static void main(String[] args) {
-			Turtle 亀 = new Turtle(); // sid
-			亀.前に進む(); // sid
-			亀.前に進む(); // sid
-		}
+public class Main {
+	public static void main(String[] args) {
+		Turtle 亀 = new Turtle(); // sid
+		亀.前に進む(); // sid
+		亀.前に進む(); // sid
+	}
 }
 	`.trim(),
   },
@@ -157,12 +157,12 @@ export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId
 	s.get('c').backward();
 	`.trim(),
     java: `
-	public class Main {
-		public static void main(String[] args) {
-			Turtle 亀 = new Turtle(); // sid
-			亀.前に進む(); // sid
-			亀.後に戻る(); // sid
-		}
+public class Main {
+	public static void main(String[] args) {
+		Turtle 亀 = new Turtle(); // sid
+		亀.前に進む(); // sid
+		亀.後に戻る(); // sid
+	}
 }
 	`.trim(),
   },
@@ -174,13 +174,13 @@ export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId
 	s.get('c').forward();
 	`.trim(),
     java: `
-	public class Main {
-		public static void main(String[] args) {
-			Turtle 亀 = new Turtle(); // sid
-			亀.前に進む(); // sid
-			亀.右を向く(); // sid
-			亀.前に進む(); // sid
-		}
+public class Main {
+	public static void main(String[] args) {
+		Turtle 亀 = new Turtle(); // sid
+		亀.前に進む(); // sid
+		亀.右を向く(); // sid
+		亀.前に進む(); // sid
+	}
 }
 	`.trim(),
   },
@@ -193,14 +193,14 @@ export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId
 	s.get('c').forward();
 	`.trim(),
     java: `
-	public class Main {
-		public static void main(String[] args) {
-			Turtle 亀 = new Turtle(); // sid
-			亀.右を向く(); // sid
-			亀.前に進む(); // sid
-			亀.左を向く(); // sid
-			亀.前に進む(); // sid
-		}
+public class Main {
+	public static void main(String[] args) {
+		Turtle 亀 = new Turtle(); // sid
+		亀.右を向く(); // sid
+		亀.前に進む(); // sid
+		亀.左を向く(); // sid
+		亀.前に進む(); // sid
+	}
 }
 	`.trim(),
   },
@@ -1159,6 +1159,7 @@ public class Main {
 			}
 		}
 	}
+}
 	`.trim(),
   },
   string3: {
