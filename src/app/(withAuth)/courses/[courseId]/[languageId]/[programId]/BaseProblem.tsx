@@ -11,7 +11,7 @@ import type { Problem } from '../../../../../../problems/generateProblem';
 import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
 import { getExplanation, programIdToName } from '../../../../../../problems/problemData';
 import type { ProblemType } from '../../../../../../types';
-import { createUserAnswer, createUserCompletedProblem, updateUserProblemSession } from '../../../../../lib/actions';
+import { createUserAnswer, createUserCompletedProblem } from '../../../../../lib/actions';
 
 import { CheckpointProblem } from './CheckpointProblem';
 import { ExecutionResultProblem } from './ExecutionResultProblem';
@@ -37,11 +37,17 @@ export const BaseProblem: React.FC<{
     throttle: 500,
   });
 
+  const updatedSessionQuery = backendTrpcReact.upsertUserProblemSession.useMutation();
+  const updateUserProblemSessionQuery = backendTrpcReact.updateUserProblemSession.useMutation();
+
   useEffect(() => {
     const interval = setInterval(async () => {
       if (suspendedSession && !isIdle()) {
-        await updateUserProblemSession(suspendedSession.id, {
-          timeSpent: lastTimeSpent + getActiveTime(),
+        await updateUserProblemSessionQuery.mutateAsync({
+          id: suspendedSession.id,
+          data: {
+            timeSpent: lastTimeSpent + getActiveTime(),
+          },
         });
       }
     }, INTERVAL_MS_OF_IDLE_TIMER);
@@ -59,8 +65,6 @@ export const BaseProblem: React.FC<{
     setBeforeTraceItemIndex(suspendedSession.beforeTraceItemIndex);
     setCurrentTraceItemIndex(suspendedSession.currentTraceItemIndex);
   }, []);
-
-  const updatedSessionQuery = backendTrpcReact.upsertUserProblemSession.useMutation();
 
   useEffect(() => {
     if (!userId || !courseId || !programId || !languageId || !suspendedSession) return;
@@ -131,8 +135,11 @@ export const BaseProblem: React.FC<{
     );
 
     if (suspendedSession) {
-      const userProblemSession = await updateUserProblemSession(suspendedSession.id, {
-        timeSpent: lastTimeSpent + activeTime,
+      const userProblemSession = await updateUserProblemSessionQuery.mutateAsync({
+        id: suspendedSession.id,
+        data: {
+          timeSpent: lastTimeSpent + activeTime,
+        },
       });
 
       if (userProblemSession) {

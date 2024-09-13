@@ -73,6 +73,29 @@ export const backendRouter = router({
       });
       return userProblemSession;
     }),
+  updateUserProblemSession: procedure
+    .use(authorize)
+    .input(
+      z.object({
+        id: z.number(),
+        data: z.object({
+          currentStep: z.number().optional(),
+          timeSpent: z.number().optional(),
+          finishedAt: z.date().optional(),
+          isCompleted: z.boolean().optional(),
+        }),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const { data, id } = input;
+      const userProblemSession = await prisma.userProblemSession.update({
+        where: {
+          id,
+        },
+        data,
+      });
+      return userProblemSession;
+    }),
 });
 
 // export type definition of API
