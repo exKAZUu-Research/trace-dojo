@@ -5,17 +5,13 @@ import { useEffect, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
 
 import { INTERVAL_MS_OF_IDLE_TIMER } from '../../../../../../constants';
+import { backendTrpcReact } from '../../../../../../infrastructures/trpcBackend/client';
 import { Heading, VStack } from '../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../problems/generateProblem';
 import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
 import { getExplanation, programIdToName } from '../../../../../../problems/problemData';
 import type { ProblemType } from '../../../../../../types';
-import {
-  createUserAnswer,
-  createUserCompletedProblem,
-  updateUserProblemSession,
-  upsertUserProblemSession,
-} from '../../../../../lib/actions';
+import { createUserAnswer, createUserCompletedProblem, updateUserProblemSession } from '../../../../../lib/actions';
 
 import { CheckpointProblem } from './CheckpointProblem';
 import { ExecutionResultProblem } from './ExecutionResultProblem';
@@ -64,25 +60,28 @@ export const BaseProblem: React.FC<{
     setCurrentTraceItemIndex(suspendedSession.currentTraceItemIndex);
   }, []);
 
+  const updatedSessionQuery = backendTrpcReact.upsertUserProblemSession.useMutation();
+
   useEffect(() => {
     if (!userId || !courseId || !programId || !languageId || !suspendedSession) return;
 
     (async () => {
-      const updatedSession = await upsertUserProblemSession(
-        suspendedSession.id,
+      const updatedSession = await updatedSessionQuery.mutateAsync({
+        id: suspendedSession.id,
         userId,
         courseId,
         programId,
         languageId,
-        suspendedSession.problemVariablesSeed,
-        problemType,
-        problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
-        problemType === 'executionResult' ? 0 : currentTraceItemIndex,
-        suspendedSession.timeSpent,
-        suspendedSession.startedAt,
-        undefined,
-        false
-      );
+        problemVariablesSeed: suspendedSession.problemVariablesSeed,
+        currentProblemType: problemType,
+        beforeTraceItemIndex: problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
+        currentTraceItemIndex: problemType === 'executionResult' ? 0 : currentTraceItemIndex,
+        timeSpent: suspendedSession.timeSpent,
+        startedAt: suspendedSession.startedAt,
+        // eslint-disable-next-line
+        finishedAt: null,
+        isCompleted: false,
+      });
       if (updatedSession) {
         setSuspendedSession(updatedSession);
         setLastTimeSpent(updatedSession.timeSpent);
@@ -94,21 +93,21 @@ export const BaseProblem: React.FC<{
   const handleSolveProblem = async (): Promise<void> => {
     if (userId && suspendedSession) {
       await createUserCompletedProblem(userId, courseId, programId, languageId);
-      await upsertUserProblemSession(
-        suspendedSession.id,
+      await updatedSessionQuery.mutateAsync({
+        id: suspendedSession.id,
         userId,
         courseId,
         programId,
         languageId,
-        suspendedSession.problemVariablesSeed,
-        problemType,
-        problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
-        problemType === 'executionResult' ? 0 : currentTraceItemIndex,
-        suspendedSession.timeSpent,
-        suspendedSession.startedAt,
-        new Date(),
-        true
-      );
+        problemVariablesSeed: suspendedSession.problemVariablesSeed,
+        currentProblemType: problemType,
+        beforeTraceItemIndex: problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
+        currentTraceItemIndex: problemType === 'executionResult' ? 0 : currentTraceItemIndex,
+        timeSpent: suspendedSession.timeSpent,
+        startedAt: suspendedSession.startedAt,
+        finishedAt: new Date(),
+        isCompleted: true,
+      });
     }
   };
 
