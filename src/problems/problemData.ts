@@ -388,7 +388,7 @@ public class Main {
 		for (; i < <2-3>;) { // sid
 			亀.前に進む(); // sid
 			亀.右を向く(); // sid
-		i++; // sid
+			i++; // sid
 		}
 	}
 }
@@ -598,6 +598,7 @@ public class Main {
 			}
 		}
 	}
+}
 	`.trim(),
   },
   switch2: {
@@ -1023,11 +1024,11 @@ public class Main {
 			t.右を向く(); // sid
 		}
 	}
-		static void N歩前に進める(Turtle t, int n) {
-			for (int j = 0; j < n; j++) { // sid
-				t.前に進む(); // sid
-			}
+	static void N歩前に進める(Turtle t, int n) {
+		for (int j = 0; j < n; j++) { // sid
+			t.前に進む(); // sid
 		}
+	}
 }
 	`.trim(),
   },
@@ -1091,7 +1092,8 @@ public class Main {
 			}
 		}
 	}
-	`,
+}
+	`.trim(),
   },
   string1: {
     instrumented: `
@@ -1180,7 +1182,7 @@ public class Main {
 public class Main {
 	public static void main(String[] args) {
 		Turtle t = new Turtle(); // sid
-		Strings[] cmds = { "ri", 'aa', 'fo' }; // sid
+		String[] cmds = { "ri", "aa", "fo" }; // sid
 		for (String cmd : cmds) { // sid
 			parse(t, cmd);
 		}
