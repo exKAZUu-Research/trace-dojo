@@ -25,10 +25,6 @@ export const dirCharToJapanese = {
   W: '左',
 };
 
-const penStateJapanese = (penDown: boolean): string => {
-  return penDown ? 'おいている' : 'あげている';
-};
-
 export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
   const characterVars = [];
   const otherVars = [];
@@ -51,7 +47,6 @@ export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
               <Th>変数名</Th>
               <Th>線の色</Th>
               <Th>向き</Th>
-              <Th>ペンの状態</Th>
             </Tr>
           </Thead>
           <Tbody>
@@ -62,7 +57,6 @@ export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
                   <Box bg={charToColor[variable.value.color as keyof typeof charToColor]} h="20px" w="20px" />
                 </Td>
                 <Td>{dirCharToJapanese[variable.value.dir as keyof typeof dirCharToJapanese]}</Td>
-                <Td>{penStateJapanese(variable.value.pen)}</Td>
               </Tr>
             ))}
           </Tbody>

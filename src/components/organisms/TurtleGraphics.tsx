@@ -148,9 +148,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       }
 
       const updatedCharacter = { ...selectedCharacter, x: updatedX, y: updatedY };
-      if (selectedCharacter.pen) {
-        updateCellColor(updatedCharacter.color as ColorChar, updatedCharacter.x, updatedCharacter.y);
-      }
+      updateCellColor(updatedCharacter.color as ColorChar, updatedCharacter.x, updatedCharacter.y);
       updateCharacters(updatedCharacter);
     };
 
@@ -166,9 +164,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       }
 
       const updatedCharacter = { ...selectedCharacter, x: updatedX, y: updatedY };
-      if (selectedCharacter.pen) {
-        updateCellColor('.' as ColorChar, selectedCharacter.x, selectedCharacter.y);
-      }
+      updateCellColor('.' as ColorChar, selectedCharacter.x, selectedCharacter.y);
       updateCharacters(updatedCharacter);
     };
 
@@ -192,21 +188,6 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       updateCharacters(updatedCharacter);
     };
 
-    const handleClickCharacterPenUpButton = (): void => {
-      if (!selectedCharacter) return;
-
-      selectedCharacter.pen = false;
-      updateCharacters(selectedCharacter);
-    };
-
-    const handleClickCharacterPenDownButton = (): void => {
-      if (!selectedCharacter) return;
-
-      selectedCharacter.pen = true;
-      updateCellColor(selectedCharacter.color as ColorChar, selectedCharacter.x, selectedCharacter.y);
-      updateCharacters(selectedCharacter);
-    };
-
     const handleAddCharacterButton = (): void => {
       if (!selectedCell) return;
 
@@ -215,7 +196,6 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
         y: selectedCell.y,
         color: DEFAULT_COLOR,
         dir: 'N',
-        pen: true,
       };
 
       setCharacters((prevCharacters) => [...prevCharacters, newTurtle]);
@@ -299,8 +279,6 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
             handleAddCharacterButton={handleAddCharacterButton}
             handleClickCharacterMoveBackwardButton={handleClickCharacterMoveBackwardButton}
             handleClickCharacterMoveForwardButton={handleClickCharacterMoveForwardButton}
-            handleClickCharacterPenDownButton={handleClickCharacterPenDownButton}
-            handleClickCharacterPenUpButton={handleClickCharacterPenUpButton}
             handleClickCharacterTurnLeftButton={handleClickCharacterTurnLeftButton}
             handleClickCharacterTurnRightButton={handleClickCharacterTurnRightButton}
             handleRemoveCharacterButton={handleRemoveCharacterButton}
