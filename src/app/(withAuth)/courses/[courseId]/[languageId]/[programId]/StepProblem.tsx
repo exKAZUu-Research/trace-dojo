@@ -6,7 +6,15 @@ import { CustomModal } from '../../../../../../components/molecules/CustomModal'
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
-import { Box, Button, Flex, HStack, useDisclosure, VStack } from '../../../../../../infrastructures/useClient/chakra';
+import {
+  Box,
+  Button,
+  Flex,
+  HStack,
+  Tooltip,
+  useDisclosure,
+  VStack,
+} from '../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../problems/generateProblem';
 
 import { Variables } from './Variables';
@@ -87,13 +95,24 @@ export const StepProblem: React.FC<StepProblemProps> = ({
   return (
     <Flex gap="6" w="100%">
       <VStack spacing="4">
-        <Box>赤色にハイライトされている行における盤面を作成してください。</Box>
         <VStack align="start">
+          <Box>赤色にハイライトされている行における盤面を作成してください。</Box>
           <HStack>
-            <Button onClick={() => handleClickAnswerButton()}>解答</Button>
+            <Tooltip
+              hasArrow
+              fontSize="xs"
+              label={`${navigator.platform.toLowerCase().includes('mac') ? 'Cmd+Enter' : 'Ctrl+Enter'}`}
+              placement="bottom"
+            >
+              <Button onClick={() => handleClickAnswerButton()}>解答</Button>
+            </Tooltip>
             <Button onClick={() => handleClickResetButton()}>リセット</Button>
           </HStack>
-          <Box>赤色のハイライト時点の実行結果</Box>
+        </VStack>
+        <VStack align="center">
+          <Box textAlign="center" w="100%">
+            赤線で囲われた時点の実行結果
+          </Box>
           <Box>
             <TurtleGraphics
               ref={turtleGraphicsRef}

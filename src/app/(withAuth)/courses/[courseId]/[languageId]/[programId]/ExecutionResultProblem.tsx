@@ -6,7 +6,15 @@ import { CustomModal } from '../../../../../../components/molecules/CustomModal'
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
-import { Box, Button, Flex, HStack, useDisclosure, VStack } from '../../../../../../infrastructures/useClient/chakra';
+import {
+  Box,
+  Button,
+  Flex,
+  HStack,
+  Tooltip,
+  useDisclosure,
+  VStack,
+} from '../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../problems/generateProblem';
 import type { ProblemType } from '../../../../../../types';
 
@@ -83,13 +91,22 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
 
   return (
     <Flex gap="6" w="100%">
-      <VStack spacing="4">
-        <Box>プログラムの実行後の結果を解答してください。</Box>
-        <VStack align="start">
+      <VStack align="start" spacing="4" w="100%">
+        <Box>
+          <Box>プログラムの実行後の結果を解答してください。</Box>
           <HStack>
-            <Button onClick={() => handleClickAnswerButton()}>解答</Button>
+            <Tooltip
+              hasArrow
+              fontSize="xs"
+              label={`${navigator.platform.toLowerCase().includes('mac') ? 'Cmd+Enter' : 'Ctrl+Enter'}`}
+              placement="bottom"
+            >
+              <Button onClick={() => handleClickAnswerButton()}>解答</Button>
+            </Tooltip>
             <Button onClick={() => handleClickResetButton()}>リセット</Button>
           </HStack>
+        </Box>
+        <VStack align="center" w="100%">
           <Box>
             <TurtleGraphics
               ref={turtleGraphicsRef}
@@ -101,6 +118,7 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
           </Box>
         </VStack>
       </VStack>
+
       <VStack align="end" minW="50%" overflow="hidden">
         <HStack>
           <Button colorScheme="gray" onClick={onHelpModalOpen}>
