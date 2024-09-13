@@ -9,5 +9,6 @@ import type { BackendRouter } from './routers';
 export const backendTrpcReact = createTRPCReact<BackendRouter>();
 
 export const backendTrpcReactClient = backendTrpcReact.createClient({
+  // Date型を扱えるようにするため、 superjson を導入する。
   links: [httpBatchLink({ url: '/api/trpc', transformer: superjson })],
 });
