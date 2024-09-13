@@ -256,10 +256,10 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
               key={'character' + character.x + character.y}
               borderColor={selectedCharacter?.color === character.color ? 'black' : 'transparent'}
               borderWidth="2px"
-              bottom={character.y * GRID_SIZE + 'px'}
               h={GRID_SIZE + 'px'}
               left={character.x * GRID_SIZE + 'px'}
               position="absolute"
+              top={(GRID_ROWS - character.y - 1) * GRID_SIZE + 'px'}
               w={GRID_SIZE + 'px'}
               onClick={() => handleClickCharacter(character)}
               onContextMenu={(e) => handleContextMenu(e, character.x, character.y)}
@@ -273,19 +273,19 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
               </Box>
             </Box>
           ))}
+          {isEnableOperation && (
+            <TurtleGraphicsController
+              handleAddCharacterButton={handleAddCharacterButton}
+              handleClickCharacterMoveBackwardButton={handleClickCharacterMoveBackwardButton}
+              handleClickCharacterMoveForwardButton={handleClickCharacterMoveForwardButton}
+              handleClickCharacterTurnLeftButton={handleClickCharacterTurnLeftButton}
+              handleClickCharacterTurnRightButton={handleClickCharacterTurnRightButton}
+              handleRemoveCharacterButton={handleRemoveCharacterButton}
+              selectedCell={selectedCell}
+              selectedCharacter={selectedCharacter}
+            />
+          )}
         </Grid>
-        {isEnableOperation && (
-          <TurtleGraphicsController
-            handleAddCharacterButton={handleAddCharacterButton}
-            handleClickCharacterMoveBackwardButton={handleClickCharacterMoveBackwardButton}
-            handleClickCharacterMoveForwardButton={handleClickCharacterMoveForwardButton}
-            handleClickCharacterTurnLeftButton={handleClickCharacterTurnLeftButton}
-            handleClickCharacterTurnRightButton={handleClickCharacterTurnRightButton}
-            handleRemoveCharacterButton={handleRemoveCharacterButton}
-            selectedCell={selectedCell}
-            selectedCharacter={selectedCharacter}
-          />
-        )}
       </Box>
     );
   }
