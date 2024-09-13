@@ -1,12 +1,20 @@
 'use client';
 
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 
 import { CustomModal } from '../../../../../../components/molecules/CustomModal';
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
-import { Box, Button, Flex, HStack, useDisclosure, VStack } from '../../../../../../infrastructures/useClient/chakra';
+import {
+  Box,
+  Button,
+  Flex,
+  HStack,
+  Tooltip,
+  useDisclosure,
+  VStack,
+} from '../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../problems/generateProblem';
 import type { ProblemType } from '../../../../../../types';
 
@@ -66,20 +74,51 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
     }
   };
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        event.preventDefault();
+        handleClickAnswerButton();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
   return (
     <Flex gap="6" w="100%">
-      <VStack spacing="10">
-        <Box>プログラムの実行後の結果を解答してください。</Box>
+      <VStack align="start" spacing="4" w="100%">
         <Box>
-          <TurtleGraphics
-            ref={turtleGraphicsRef}
-            beforeTraceItem={problem.traceItems.at(0)}
-            currentTraceItem={problem.traceItems.at(-1)}
-            isEnableOperation={true}
-            problem={problem}
-          />
+          <Box>プログラムの実行後の結果を解答してください。</Box>
+          <HStack>
+            <Tooltip
+              hasArrow
+              fontSize="xs"
+              label={`${navigator.platform.toLowerCase().includes('mac') ? 'Cmd+Enter' : 'Ctrl+Enter'}`}
+              placement="bottom"
+            >
+              <Button onClick={() => handleClickAnswerButton()}>解答</Button>
+            </Tooltip>
+            <Button onClick={() => handleClickResetButton()}>リセット</Button>
+          </HStack>
         </Box>
+        <VStack align="center" w="100%">
+          <Box>
+            <TurtleGraphics
+              ref={turtleGraphicsRef}
+              beforeTraceItem={problem.traceItems.at(0)}
+              currentTraceItem={problem.traceItems.at(-1)}
+              isEnableOperation={true}
+              problem={problem}
+            />
+          </Box>
+        </VStack>
       </VStack>
+
       <VStack align="end" minW="50%" overflow="hidden">
         <HStack>
           <Button colorScheme="gray" onClick={onHelpModalOpen}>
@@ -109,10 +148,6 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
         <Box h="calc(100vh - 370px)" w="100%">
           <SyntaxHighlighter code={problem.displayProgram} programmingLanguageId={selectedLanguageId} />
         </Box>
-        <HStack>
-          <Button onClick={() => handleClickResetButton()}>リセット</Button>
-          <Button onClick={() => handleClickAnswerButton()}>解答</Button>
-        </HStack>
       </VStack>
     </Flex>
   );
