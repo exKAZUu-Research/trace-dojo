@@ -5,6 +5,7 @@ import superjson from 'superjson';
 import type { Context } from './context';
 
 const t = initTRPC.context<Context>().create({
+  // Date型を扱えるようにするため、 superjson を導入する。
   transformer: superjson,
 });
 
