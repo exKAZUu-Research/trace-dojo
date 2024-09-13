@@ -57,26 +57,6 @@ export async function upsertUserProblemSession(
   }
 }
 
-export async function createUserCompletedProblem(
-  userId: string,
-  courseId: string,
-  programId: string,
-  languageId: string
-): Promise<void> {
-  try {
-    await prisma.userCompletedProblem.create({
-      data: {
-        userId,
-        courseId,
-        programId,
-        languageId,
-      },
-    });
-  } catch (error) {
-    console.error(error);
-  }
-}
-
 export async function createUserAnswer(
   programId: string,
   problemType: string,

@@ -11,7 +11,7 @@ import type { Problem } from '../../../../../../problems/generateProblem';
 import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
 import { getExplanation, programIdToName } from '../../../../../../problems/problemData';
 import type { ProblemType } from '../../../../../../types';
-import { createUserAnswer, createUserCompletedProblem } from '../../../../../lib/actions';
+import { createUserAnswer } from '../../../../../lib/actions';
 
 import { CheckpointProblem } from './CheckpointProblem';
 import { ExecutionResultProblem } from './ExecutionResultProblem';
@@ -39,6 +39,7 @@ export const BaseProblem: React.FC<{
 
   const updatedSessionQuery = backendTrpcReact.upsertUserProblemSession.useMutation();
   const updateUserProblemSessionQuery = backendTrpcReact.updateUserProblemSession.useMutation();
+  const createUserCompletedProblemQuery = backendTrpcReact.createUserCompletedProblem.useMutation();
 
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -96,7 +97,12 @@ export const BaseProblem: React.FC<{
 
   const handleSolveProblem = async (): Promise<void> => {
     if (userId && suspendedSession) {
-      await createUserCompletedProblem(userId, courseId, programId, languageId);
+      await createUserCompletedProblemQuery.mutateAsync({
+        userId,
+        courseId,
+        programId,
+        languageId,
+      });
       await updatedSessionQuery.mutateAsync({
         id: suspendedSession.id,
         userId,

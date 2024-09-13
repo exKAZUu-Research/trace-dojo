@@ -96,6 +96,26 @@ export const backendRouter = router({
       });
       return userProblemSession;
     }),
+  createUserCompletedProblem: procedure
+    .use(authorize)
+    .input(
+      z.object({
+        userId: z.string(),
+        courseId: z.string(),
+        programId: z.string(),
+        languageId: z.string(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      await prisma.userCompletedProblem.create({
+        data: {
+          userId: input.userId,
+          courseId: input.courseId,
+          programId: input.programId,
+          languageId: input.languageId,
+        },
+      });
+    }),
 });
 
 // export type definition of API
