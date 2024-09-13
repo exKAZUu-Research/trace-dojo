@@ -38,8 +38,9 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
           // チェックポイント問題・ステップ問題のハイライト
           if (lineNumber === beforeCheckpointLine) {
             style.backgroundColor = '#2E3D9F';
-          } else if (lineNumber === currentCheckpointLine) {
-            style.backgroundColor = '#800000';
+          }
+          if (lineNumber === currentCheckpointLine) {
+            style.border = '3px solid #b3191c';
           }
           return { style };
         }}

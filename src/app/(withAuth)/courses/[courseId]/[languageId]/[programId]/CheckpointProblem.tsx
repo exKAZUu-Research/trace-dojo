@@ -84,8 +84,8 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
   return (
     <Flex gap="6" w="100%">
       <VStack spacing="10">
-        <Box>赤色にハイライトされている行における盤面を作成してください。</Box>
-        <Box>赤色のハイライト時点の実行結果</Box>
+        <Box>赤線で囲まれている行における盤面を作成してください。</Box>
+        <Box>赤線で囲まれた時点の実行結果</Box>
         <Box>
           <TurtleGraphics
             ref={turtleGraphicsRef}
