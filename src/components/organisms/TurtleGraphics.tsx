@@ -1,6 +1,7 @@
 'use client';
 
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
+import { FaArrowRotateLeft, FaArrowRotateRight, FaTrashCan } from 'react-icons/fa6';
 
 import {
   TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR,
@@ -8,7 +9,7 @@ import {
   TURTLE_GRAPHICS_GRID_ROWS as GRID_ROWS,
   TURTLE_GRAPHICS_GRID_SIZE as GRID_SIZE,
 } from '../../constants';
-import { Box, Grid, GridItem, Image } from '../../infrastructures/useClient/chakra';
+import { Box, Button, Grid, GridItem, HStack, IconButton, Image, VStack } from '../../infrastructures/useClient/chakra';
 import type { Problem } from '../../problems/generateProblem';
 import { type CharacterTrace, charToColor, type TraceItem } from '../../problems/traceProgram';
 import type { ColorChar, SelectedCell } from '../../types';
@@ -148,9 +149,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       }
 
       const updatedCharacter = { ...selectedCharacter, x: updatedX, y: updatedY };
-      if (selectedCharacter.pen) {
-        updateCellColor(updatedCharacter.color as ColorChar, updatedCharacter.x, updatedCharacter.y);
-      }
+      updateCellColor(updatedCharacter.color as ColorChar, updatedCharacter.x, updatedCharacter.y);
       updateCharacters(updatedCharacter);
     };
 
@@ -166,9 +165,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       }
 
       const updatedCharacter = { ...selectedCharacter, x: updatedX, y: updatedY };
-      if (selectedCharacter.pen) {
-        updateCellColor('.' as ColorChar, selectedCharacter.x, selectedCharacter.y);
-      }
+      updateCellColor('.' as ColorChar, selectedCharacter.x, selectedCharacter.y);
       updateCharacters(updatedCharacter);
     };
 
@@ -192,21 +189,6 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       updateCharacters(updatedCharacter);
     };
 
-    const handleClickCharacterPenUpButton = (): void => {
-      if (!selectedCharacter) return;
-
-      selectedCharacter.pen = false;
-      updateCharacters(selectedCharacter);
-    };
-
-    const handleClickCharacterPenDownButton = (): void => {
-      if (!selectedCharacter) return;
-
-      selectedCharacter.pen = true;
-      updateCellColor(selectedCharacter.color as ColorChar, selectedCharacter.x, selectedCharacter.y);
-      updateCharacters(selectedCharacter);
-    };
-
     const handleAddCharacterButton = (): void => {
       if (!selectedCell) return;
 
@@ -215,7 +197,6 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
         y: selectedCell.y,
         color: DEFAULT_COLOR,
         dir: 'N',
-        pen: true,
       };
 
       setCharacters((prevCharacters) => [...prevCharacters, newTurtle]);
@@ -248,67 +229,90 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     };
 
     return (
-      <Box className="turtle-graphics-container">
-        <Grid
-          position="relative"
-          templateColumns={`repeat(${GRID_COLUMNS}, ${GRID_SIZE}px)`}
-          templateRows={`repeat(${GRID_ROWS}, ${GRID_SIZE}px)`}
-        >
-          {[...board]
-            .reverse()
-            .map((columns, rowIndex) =>
-              columns.map((color, columnIndex) => (
-                <GridItem
-                  key={columnIndex}
-                  backgroundColor={charToColor[color]}
-                  borderColor="black"
-                  borderWidth={
-                    selectedCell?.x === columnIndex && selectedCell?.y === GRID_ROWS - rowIndex - 1 ? '2px' : '0.5px'
-                  }
-                  className="grid-cell"
-                  onClick={() => handleClickCell(columnIndex, GRID_ROWS - rowIndex - 1)}
-                  onContextMenu={(e) => handleContextMenu(e, columnIndex, GRID_ROWS - rowIndex - 1)}
-                />
-              ))
-            )}
-          {characters.map((character) => (
-            <Box
-              key={'character' + character.x + character.y}
-              borderColor={selectedCharacter?.color === character.color ? 'black' : 'transparent'}
-              borderWidth="2px"
-              bottom={character.y * GRID_SIZE + 'px'}
-              h={GRID_SIZE + 'px'}
-              left={character.x * GRID_SIZE + 'px'}
-              position="absolute"
-              w={GRID_SIZE + 'px'}
-              onClick={() => handleClickCharacter(character)}
-              onContextMenu={(e) => handleContextMenu(e, character.x, character.y)}
-            >
-              <Box p="0.2rem" transform={charToRotateStyle[character.dir as keyof typeof charToRotateStyle]}>
-                <Image
-                  alt={'character' + character.x + character.y}
-                  src={`/character/${charToColor[character.color as keyof typeof charToColor]}.png`}
-                  width={GRID_SIZE}
-                />
-              </Box>
-            </Box>
-          ))}
-        </Grid>
-        {isEnableOperation && (
-          <TurtleGraphicsController
-            handleAddCharacterButton={handleAddCharacterButton}
-            handleClickCharacterMoveBackwardButton={handleClickCharacterMoveBackwardButton}
-            handleClickCharacterMoveForwardButton={handleClickCharacterMoveForwardButton}
-            handleClickCharacterPenDownButton={handleClickCharacterPenDownButton}
-            handleClickCharacterPenUpButton={handleClickCharacterPenUpButton}
-            handleClickCharacterTurnLeftButton={handleClickCharacterTurnLeftButton}
-            handleClickCharacterTurnRightButton={handleClickCharacterTurnRightButton}
-            handleRemoveCharacterButton={handleRemoveCharacterButton}
-            selectedCell={selectedCell}
-            selectedCharacter={selectedCharacter}
-          />
+      <VStack>
+        {selectedCharacter && (
+          <HStack>
+            <IconButton
+              aria-label="Turn Left"
+              icon={<FaArrowRotateLeft />}
+              onClick={() => handleClickCharacterTurnLeftButton()}
+            />
+            <IconButton
+              aria-label="Turn Right"
+              icon={<FaArrowRotateRight />}
+              onClick={() => handleClickCharacterTurnRightButton()}
+            />
+            <Button onClick={() => handleClickCharacterMoveForwardButton()}>前に進む</Button>
+            <Button onClick={() => handleClickCharacterMoveBackwardButton()}>後に戻る</Button>
+            {/* <Button onClick={() => handleRemoveCharacterButton(selectedCharacter)}>削除する</Button> */}
+            <IconButton
+              aria-label="Remove"
+              colorScheme="red"
+              icon={<FaTrashCan />}
+              onClick={() => handleRemoveCharacterButton(selectedCharacter)}
+            />
+          </HStack>
         )}
-      </Box>
+        <Box className="turtle-graphics-container">
+          <Grid
+            position="relative"
+            templateColumns={`repeat(${GRID_COLUMNS}, ${GRID_SIZE}px)`}
+            templateRows={`repeat(${GRID_ROWS}, ${GRID_SIZE}px)`}
+          >
+            {[...board]
+              .reverse()
+              .map((columns, rowIndex) =>
+                columns.map((color, columnIndex) => (
+                  <GridItem
+                    key={columnIndex}
+                    backgroundColor={charToColor[color]}
+                    borderColor="black"
+                    borderWidth={
+                      selectedCell?.x === columnIndex && selectedCell?.y === GRID_ROWS - rowIndex - 1 ? '2px' : '0.5px'
+                    }
+                    className="grid-cell"
+                    onClick={() => handleClickCell(columnIndex, GRID_ROWS - rowIndex - 1)}
+                    onContextMenu={(e) => handleContextMenu(e, columnIndex, GRID_ROWS - rowIndex - 1)}
+                  />
+                ))
+              )}
+            {characters.map((character) => (
+              <Box
+                key={'character' + character.x + character.y}
+                borderColor={selectedCharacter?.color === character.color ? 'black' : 'transparent'}
+                borderWidth="2px"
+                h={GRID_SIZE + 'px'}
+                left={character.x * GRID_SIZE + 'px'}
+                position="absolute"
+                top={(GRID_ROWS - character.y - 1) * GRID_SIZE + 'px'}
+                w={GRID_SIZE + 'px'}
+                onClick={() => handleClickCharacter(character)}
+                onContextMenu={(e) => handleContextMenu(e, character.x, character.y)}
+              >
+                <Box p="0.2rem" transform={charToRotateStyle[character.dir as keyof typeof charToRotateStyle]}>
+                  <Image
+                    alt={'character' + character.x + character.y}
+                    src={`/character/${charToColor[character.color as keyof typeof charToColor]}.png`}
+                    width={GRID_SIZE}
+                  />
+                </Box>
+              </Box>
+            ))}
+            {isEnableOperation && (
+              <TurtleGraphicsController
+                handleAddCharacterButton={handleAddCharacterButton}
+                handleClickCharacterMoveBackwardButton={handleClickCharacterMoveBackwardButton}
+                handleClickCharacterMoveForwardButton={handleClickCharacterMoveForwardButton}
+                handleClickCharacterTurnLeftButton={handleClickCharacterTurnLeftButton}
+                handleClickCharacterTurnRightButton={handleClickCharacterTurnRightButton}
+                handleRemoveCharacterButton={handleRemoveCharacterButton}
+                selectedCell={selectedCell}
+                selectedCharacter={selectedCharacter}
+              />
+            )}
+          </Grid>
+        </Box>
+      </VStack>
     );
   }
 );

@@ -16,8 +16,6 @@ export interface CharacterTrace {
   color: string;
   /** 方向を表現する1文字 */
   dir: string;
-  /** ペンが床に触れているか否か */
-  pen: boolean;
 }
 
 export interface TraceItem {
@@ -61,14 +59,11 @@ export function traceProgram(instrumented: string, rawDisplayProgram: string, la
     let replaced = false;
     const newLine = line
       .replace(/for\s*\(([^;]*);\s*([^;]*);/, (_, init, cond) => `for (${init}; checkForCond(${cond}, ${statementId});`)
-      .replaceAll(
-        /\.(set|forward|penDown|penUp|turnRight|turnLeft)\(([^\n;]*)\)(;|\)\s*{)/g,
-        (_, methodName, args, tail) => {
-          replaced = true;
-          const delimiter = args === '' ? '' : ', ';
-          return `.${methodName}(${args}${delimiter}${statementId})${tail}`;
-        }
-      )
+      .replaceAll(/\.(set|forward|turnRight|turnLeft)\(([^\n;]*)\)(;|\)\s*{)/g, (_, methodName, args, tail) => {
+        replaced = true;
+        const delimiter = args === '' ? '' : ', ';
+        return `.${methodName}(${args}${delimiter}${statementId})${tail}`;
+      })
       .replace(/\/\/\s*CP.*/, () => {
         checkpointSids.push(statementId);
         return '';
@@ -126,7 +121,6 @@ class Character {
     this.y = y;
     this.color = color;
     this.dir = 'N';
-    this.pen = true;
     board[this.y][this.x] = this.color;
   }
   forward(sid) {
@@ -136,15 +130,7 @@ class Character {
     if (this.x < 0 || ${GRID_COLUMNS} <= this.x || this.y < 0 || ${GRID_ROWS} <= this.y) {
       throw new Error('Out of bounds');
     }
-    if (this.pen) board[this.y][this.x] = this.color;
-    addTrace(sid);
-  }
-  penDown(sid) {
-    this.pen = true;
-    addTrace(sid);
-  }
-  penUp(sid) {
-    this.pen = false;
+	  board[this.y][this.x] = this.color;
     addTrace(sid);
   }
   turnRight(sid) {
