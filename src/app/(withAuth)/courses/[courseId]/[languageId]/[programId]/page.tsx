@@ -1,7 +1,6 @@
-import type { UserProblemSession } from '@prisma/client';
 import type { NextPage } from 'next';
 
-import { generateProblem, type Problem } from '../../../../../../problems/generateProblem';
+import { generateProblem } from '../../../../../../problems/generateProblem';
 import type { CourseId, LanguageId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
 import { getSuspendedUserProblemSession } from '../../../../../../utils/fetch';
 import { getNonNullableSessionOnServer } from '../../../../../../utils/session';
@@ -18,15 +17,7 @@ const ProblemPage: NextPage<{
   const languageId = params.languageId;
   const programId = params.programId;
 
-  const suspendedSession: UserProblemSession | undefined = await getSuspendedUserProblemSession(
-    userId,
-    courseId,
-    programId,
-    languageId
-  );
-
-  let userProblemSession = suspendedSession;
-
+  let userProblemSession = await getSuspendedUserProblemSession(userId, courseId, programId, languageId);
   if (!userProblemSession) {
     const problemVariableSeed = Date.now().toString();
     const problemType = 'executionResult';
@@ -50,7 +41,7 @@ const ProblemPage: NextPage<{
     );
   }
 
-  const problem: Problem | undefined = userProblemSession
+  const problem = userProblemSession
     ? generateProblem(
         userProblemSession.programId as ProgramId,
         userProblemSession.languageId as LanguageId,
@@ -58,17 +49,18 @@ const ProblemPage: NextPage<{
       )
     : undefined;
 
-  return userProblemSession && problem ? (
-    <BaseProblem
-      courseId={params.courseId}
-      languageId={languageId}
-      problem={problem}
-      programId={params.programId}
-      userId={session.superTokensUserId}
-      userProblemSession={userProblemSession}
-    />
-  ) : (
-    <></>
+  return (
+    userProblemSession &&
+    problem && (
+      <BaseProblem
+        courseId={params.courseId}
+        languageId={languageId}
+        problem={problem}
+        programId={params.programId}
+        userId={session.superTokensUserId}
+        userProblemSession={userProblemSession}
+      />
+    )
   );
 };
 

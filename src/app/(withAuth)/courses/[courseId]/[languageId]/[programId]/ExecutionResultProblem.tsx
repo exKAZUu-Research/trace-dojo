@@ -52,7 +52,6 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
   const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
   const { isOpen: isAlertOpen, onClose: onAlertClose, onOpen: onAlertOpen } = useDisclosure();
   const cancelRef = useRef(null);
-  console.log('isAlertOpen:', isAlertOpen);
 
   const [alertTitle, setAlertTitle] = useState('');
   const [alertMessage, setAlertMessage] = useState('');
