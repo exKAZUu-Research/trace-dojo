@@ -151,7 +151,7 @@ class Character {
     const nx = this.x + dx[index];
     const ny = this.y + dy[index];
     return nx >= 0 && nx < ${GRID_COLUMNS} && ny >= 0 && ny < ${GRID_ROWS};
-	}
+  }
   turnRight(sid) {
     this.dir = dirs[(dirs.indexOf(this.dir) + 1) % 4];
     addTrace(sid);
