@@ -41,7 +41,9 @@ export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
     <VStack>
       <TableContainer w="100%">
         <Table variant="simple">
-          <TableCaption placement="top">青色の行の実行後のキャラクター</TableCaption>
+          <TableCaption placement="top">
+            青色の行の<strong>実行後</strong>のキャラクター
+          </TableCaption>
           <Thead>
             <Tr>
               <Th>変数名</Th>
@@ -64,7 +66,9 @@ export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
       </TableContainer>
       <TableContainer mb="4" w="100%">
         <Table variant="simple">
-          <TableCaption placement="top">青色の行の実行後の変数</TableCaption>
+          <TableCaption placement="top">
+            青色の行の<strong>実行後</strong>の変数
+          </TableCaption>
           <Thead>
             <Tr>
               <Th>変数名</Th>

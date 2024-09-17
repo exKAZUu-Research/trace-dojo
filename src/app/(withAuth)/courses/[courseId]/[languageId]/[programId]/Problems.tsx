@@ -256,7 +256,7 @@ const ProblemComponent: React.FC<ProblemProps & { type: 'executionResult' | 'che
         <VStack align="center" w="100%">
           {type !== 'executionResult' && (
             <Box textAlign="center" w="100%">
-              赤線の行の実行後の結果（注意：実行前ではなく実行後！）
+              赤線の行の<strong>実行後</strong>の結果（注意：実行前ではなく<strong>実行後</strong>！）
             </Box>
           )}
           <TurtleGraphics
@@ -268,7 +268,9 @@ const ProblemComponent: React.FC<ProblemProps & { type: 'executionResult' | 'che
           />
           {type !== 'executionResult' && problem.sidToLineIndex.get(problem.traceItems[beforeTraceItemIndex].sid) && (
             <>
-              <Box>青色の行の実行後の結果（注意：実行前ではなく実行後！）</Box>
+              <Box>
+                青色の行の<strong>実行後</strong>の結果（注意：実行前ではなく<strong>実行後</strong>！）
+              </Box>
               <TurtleGraphics
                 ref={turtleGraphicsRef}
                 beforeTraceItem={problem.traceItems[beforeTraceItemIndex]}
