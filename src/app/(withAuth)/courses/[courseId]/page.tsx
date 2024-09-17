@@ -25,6 +25,8 @@ const CoursePage: NextPage<{ params: { courseId: CourseId } }> = async ({ params
   const courseId = params.courseId;
   const userCompletedProblems = await fetchUserCompletedProblems(user.id, courseId);
   const userProblemSessions = await fetchUserProblemSessionsWithUserAnswer(user.id);
+  console.log('userCompletedProblems:', userCompletedProblems);
+  console.log('userProblemSessions:', userProblemSessions);
 
   return (
     <Course

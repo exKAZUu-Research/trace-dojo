@@ -123,7 +123,7 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         </VStack>
         <VStack align="center">
           <Box textAlign="center" w="100%">
-            赤線で囲われた時点の実行結果
+            赤線で囲われた行の実行後の結果（注意：実行前ではなく実行後！）
           </Box>
           <Box>
             <TurtleGraphics
@@ -135,18 +135,20 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
             />
           </Box>
         </VStack>
-        <VStack>
-          <Box>青色のハイライト時点の実行結果</Box>
-          <Box>
-            <TurtleGraphics
-              ref={turtleGraphicsRef}
-              beforeTraceItem={beforeCheckpointTraceItem}
-              currentTraceItem={currentCheckpointTraceItem}
-              isEnableOperation={false}
-              problem={problem}
-            />
-          </Box>
-        </VStack>
+        {problem.sidToLineIndex.get(beforeCheckpointTraceItem.sid) && (
+          <VStack>
+            <Box>青色のハイライト行の実行後の結果（注意：実行前ではなく実行後！）</Box>
+            <Box>
+              <TurtleGraphics
+                ref={turtleGraphicsRef}
+                beforeTraceItem={beforeCheckpointTraceItem}
+                currentTraceItem={currentCheckpointTraceItem}
+                isEnableOperation={false}
+                problem={problem}
+              />
+            </Box>
+          </VStack>
+        )}
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">
         <HStack>

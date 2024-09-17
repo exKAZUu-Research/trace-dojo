@@ -1,3 +1,4 @@
+import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
 import { upsertUserProblemSession } from '../../../utils/upsertUserProblemSession';
@@ -67,6 +68,8 @@ export const backendRouter = router({
         },
         data,
       });
+      revalidatePath('/courses', 'layout');
+      console.log('revalidatePath()');
       return userProblemSession;
     }),
   createUserCompletedProblem: procedure
@@ -88,6 +91,8 @@ export const backendRouter = router({
           languageId: input.languageId,
         },
       });
+      revalidatePath('/courses', 'layout');
+      console.log('revalidatePath()');
     }),
   createUserAnswer: procedure
     .use(authorize)
