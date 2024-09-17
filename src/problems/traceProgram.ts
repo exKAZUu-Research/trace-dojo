@@ -88,26 +88,17 @@ class Scope {
     if (this.vars[varName] !== undefined) {
       return this.vars[varName];
     }
-    if (this.parent) {
-      return this.parent.get(varName);
-    }
     throw new Error();
   }
   set(varName, value, sid) {
-    if (!this.update(varName, value)) {
-      this.vars[varName] = value;
-    }
+    this.vars[varName] = value;
     addTrace(sid);
   }
-  update(varName, value) {
-    if (this.vars[varName] !== undefined) {
-      this.vars[varName] = value;
-      return true;
-    }
-    return this.parent && this.parent.update(varName, value);
-  }
-  enterNewScope() {
+  enterNewScope(params) {
     s = new Scope(this);
+    for (const [k, v] of params) {
+      s.vars[k] = v;
+    }
   }
   leaveScope() {
     if (!this.parent) throw new Error();

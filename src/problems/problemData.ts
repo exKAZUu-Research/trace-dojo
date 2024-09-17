@@ -908,7 +908,7 @@ s.set('x', double(<2-3>)); // CP
 forwardGivenSteps(s.get('c'), s.get('x'));
 
 function forwardGivenSteps(c, n) {
-for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
+  for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
     c.forward();
   }
 }
@@ -974,10 +974,10 @@ public class Main {
 s.set('c', new Character());
 for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < 3; s.set('j', s.get('j') + 1)) {
-      if (isEqual(s.get('i'), s.get('j')))
-        s.get('c').turnRight(); // CP
-      else
-        forwardTwoSteps(s.get('c'));
+    if (isEqual(s.get('i'), s.get('j')))
+      s.get('c').turnRight(); // CP
+    else
+      forwardTwoSteps(s.get('c'));
   }
   s.get('c').turnLeft();
 }
@@ -1025,7 +1025,7 @@ for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)
 }
 
 function forwardGivenSteps(c, n) {
-for (s.set('j', 0); s.get('j') < n; s.set('j', s.get('j') + 1)) {
+  for (s.set('j', 0); s.get('j') < n; s.set('j', s.get('j') + 1)) {
     c.forward();
   }
 }
@@ -1274,9 +1274,9 @@ s.set('c', s.get('a') * 2);
 
 function f(x, y) {
   try {
-    s.enterNewScope();
-s.set('ret', x * y);
-    return s.get('ret');
+    s.enterNewScope([['x', x], ['y', y]]);
+    s.set('a', x * y);
+    return s.get('a');
   } finally {
     s.leaveScope();
   }
@@ -1293,10 +1293,11 @@ public class Main {
       a = f(a, b); // sid: 3
     }
     int c = a * 2; // sid: 4
+  }
 
-    public static int f(int x, int y) {
-      return x * y; // sid: 5
-    }
+  public static int f(int x, int y) {
+    int a = x * y; // sid: 5
+    return a;
   }
 }
 `.trim(),
@@ -1305,8 +1306,7 @@ public class Main {
     instrumented: `
 s.set('c1', new Character());
 s.get('c1').forward();
-s.get('c1').turnLeft();
-s.get('c1').penUp();
+s.get('c1').turnRight();
 s.set('i', 0);
 s.get('c1').forward();
 
@@ -1323,8 +1323,7 @@ public class Main {
   public static void main(String[] args) {
     Character c1 = new Character(); // sid
     c1.forward(); // sid
-    c1.turnLeft(); // sid
-    c1.penUp(); // sid
+    c1.turnRight(); // sid
     int i = 0; // sid
     c1.forward(); // sid
 

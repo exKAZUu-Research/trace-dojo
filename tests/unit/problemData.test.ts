@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { generateProblem } from '../src/problems/generateProblem';
+import { generateProblem } from '../../src/problems/generateProblem';
 
 test.each([
   {
