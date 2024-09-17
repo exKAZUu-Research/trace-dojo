@@ -165,7 +165,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
       }
 
       const updatedCharacter = { ...selectedCharacter, x: updatedX, y: updatedY };
-      updateCellColor('.' as ColorChar, selectedCharacter.x, selectedCharacter.y);
+      updateCellColor(updatedCharacter.color as ColorChar, updatedCharacter.x, updatedCharacter.y);
       updateCharacters(updatedCharacter);
     };
 

@@ -5,10 +5,18 @@ import { generateProblem } from '../src/problems/generateProblem';
 test.each([
   {
     programId: 'straight',
-    languageId: 'js',
+    languageId: 'java',
   },
   {
-    programId: 'curve',
+    programId: 'stepBack',
+    languageId: 'java',
+  },
+  {
+    programId: 'turnRight',
+    languageId: 'java',
+  },
+  {
+    programId: 'turnRightAndTurnLeft',
     languageId: 'java',
   },
 ] as const)('Get a program by program and language ids', ({ languageId, programId }) => {

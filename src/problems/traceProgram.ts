@@ -47,7 +47,7 @@ export function traceProgram(instrumented: string, rawDisplayProgram: string, la
   if (instrumented.includes(' = ')) {
     throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
   }
-  if (instrumented.includes('const ') || instrumented.includes('let ') || instrumented.includes('var ')) {
+  if (instrumented.includes('let ') || instrumented.includes('var ') || /(?<!for\s\()const\s/.test(instrumented)) {
     throw new Error('Instrumented program MUST NOT contain variable declarations.');
   }
 
@@ -59,11 +59,14 @@ export function traceProgram(instrumented: string, rawDisplayProgram: string, la
     let replaced = false;
     const newLine = line
       .replace(/for\s*\(([^;]*);\s*([^;]*);/, (_, init, cond) => `for (${init}; checkForCond(${cond}, ${statementId});`)
-      .replaceAll(/\.(set|forward|turnRight|turnLeft)\(([^\n;]*)\)(;|\)\s*{)/g, (_, methodName, args, tail) => {
-        replaced = true;
-        const delimiter = args === '' ? '' : ', ';
-        return `.${methodName}(${args}${delimiter}${statementId})${tail}`;
-      })
+      .replaceAll(
+        /\.(set|forward|backward|turnRight|turnLeft)\(([^\n;]*)\)(;|\)\s*{)/g,
+        (_, methodName, args, tail) => {
+          replaced = true;
+          const delimiter = args === '' ? '' : ', ';
+          return `.${methodName}(${args}${delimiter}${statementId})${tail}`;
+        }
+      )
       .replace(/\/\/\s*CP.*/, () => {
         checkpointSids.push(statementId);
         return '';
@@ -130,8 +133,24 @@ class Character {
     if (this.x < 0 || ${GRID_COLUMNS} <= this.x || this.y < 0 || ${GRID_ROWS} <= this.y) {
       throw new Error('Out of bounds');
     }
-	  board[this.y][this.x] = this.color;
+    board[this.y][this.x] = this.color;
     addTrace(sid);
+  }
+  backward(sid) {
+    const index = dirs.indexOf(this.dir);
+    this.x -= dx[index];
+    this.y -= dy[index];
+    if (this.x < 0 || ${GRID_COLUMNS} <= this.x || this.y < 0 || ${GRID_ROWS} <= this.y) {
+      throw new Error('Out of bounds');
+    }
+    board[this.y][this.x] = this.color;
+    addTrace(sid);
+  }
+  canMoveForward() {
+    const index = dirs.indexOf(this.dir);
+    const nx = this.x + dx[index];
+    const ny = this.y + dy[index];
+    return nx >= 0 && nx < ${GRID_COLUMNS} && ny >= 0 && ny < ${GRID_ROWS};
   }
   turnRight(sid) {
     this.dir = dirs[(dirs.indexOf(this.dir) + 1) % 4];
