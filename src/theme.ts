@@ -1,4 +1,4 @@
-import { defineStyleConfig, extendTheme, theme as defaultTheme } from './infrastructures/useClient/chakra';
+import { defineStyleConfig, extendTheme, theme as defaultTheme } from '@chakra-ui/react';
 
 const sansSerif = [
   // English

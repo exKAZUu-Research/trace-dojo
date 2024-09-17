@@ -12,9 +12,7 @@ import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../../p
 import { getExplanation, programIdToName } from '../../../../../../problems/problemData';
 import type { ProblemType } from '../../../../../../types';
 
-import { CheckpointProblem } from './CheckpointProblem';
-import { ExecutionResultProblem } from './ExecutionResultProblem';
-import { StepProblem } from './StepProblem';
+import { CheckpointProblem, ExecutionResultProblem, StepProblem } from './Problems';
 
 export const BaseProblem: React.FC<{
   courseId: CourseId;
@@ -95,29 +93,30 @@ export const BaseProblem: React.FC<{
   }, [currentTraceItemIndex, problemType]);
 
   const handleSolveProblem = async (): Promise<void> => {
-    if (userId && suspendedSession) {
-      await createUserCompletedProblemQuery.mutateAsync({
-        userId,
-        courseId,
-        programId,
-        languageId,
-      });
-      await updatedSessionQuery.mutateAsync({
-        id: suspendedSession.id,
-        userId,
-        courseId,
-        programId,
-        languageId,
-        problemVariablesSeed: suspendedSession.problemVariablesSeed,
-        currentProblemType: problemType,
-        beforeTraceItemIndex: problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
-        currentTraceItemIndex: problemType === 'executionResult' ? 0 : currentTraceItemIndex,
-        timeSpent: suspendedSession.timeSpent,
-        startedAt: suspendedSession.startedAt,
-        finishedAt: new Date(),
-        isCompleted: true,
-      });
-    }
+    console.log('handleSolveProblem:', userId, suspendedSession);
+    if (!userId || !suspendedSession) return;
+
+    await createUserCompletedProblemQuery.mutateAsync({
+      userId,
+      courseId,
+      programId,
+      languageId,
+    });
+    await updatedSessionQuery.mutateAsync({
+      id: suspendedSession.id,
+      userId,
+      courseId,
+      programId,
+      languageId,
+      problemVariablesSeed: suspendedSession.problemVariablesSeed,
+      currentProblemType: problemType,
+      beforeTraceItemIndex: problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
+      currentTraceItemIndex: problemType === 'executionResult' ? 0 : currentTraceItemIndex,
+      timeSpent: suspendedSession.timeSpent,
+      startedAt: suspendedSession.startedAt,
+      finishedAt: new Date(),
+      isCompleted: true,
+    });
   };
 
   const createAnswerLog = async (isPassed: boolean): Promise<void> => {

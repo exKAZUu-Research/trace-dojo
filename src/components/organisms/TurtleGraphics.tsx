@@ -27,25 +27,26 @@ const charToRotateStyle = {
 } as const;
 
 interface TurtleGraphicsProps {
-  isEnableOperation?: boolean;
+  isEditable?: boolean;
   problem: Problem;
   currentTraceItem?: TraceItem;
   beforeTraceItem?: TraceItem;
 }
 
 export interface TurtleGraphicsHandle {
-  init(): void;
+  initialize(): void;
   isPassed(): boolean;
 }
 
 export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
-  ({ beforeTraceItem, currentTraceItem, isEnableOperation = false, problem }, ref) => {
+  ({ beforeTraceItem, currentTraceItem, isEditable = false, problem }, ref) => {
     const [board, setBoard] = useState<ColorChar[][]>([]);
     const [characters, setCharacters] = useState<CharacterTrace[]>([]);
     const [selectedCharacter, setSelectedCharacter] = useState<CharacterTrace>();
     const [selectedCell, setSelectedCell] = useState<SelectedCell>();
 
-    const init = useCallback((): void => {
+    const initialize = useCallback((): void => {
+      console.log('initialize:', problem, beforeTraceItem);
       if (!problem || !beforeTraceItem) return;
 
       const initBoard = beforeTraceItem.board
@@ -74,13 +75,13 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
 
     useImperativeHandle(ref, () => ({
       // 親コンポーネントから関数を呼び出せるようにする
-      init,
+      initialize,
       isPassed,
     }));
 
     useEffect(() => {
-      init();
-    }, [beforeTraceItem, init, problem]);
+      initialize();
+    }, [beforeTraceItem, initialize, problem]);
 
     const updateCharacters = (character: CharacterTrace): void => {
       setSelectedCharacter(character);
@@ -211,7 +212,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
     };
 
     const handleClickCell = (x: number, y: number): void => {
-      if (!isEnableOperation) return;
+      if (!isEditable) return;
 
       setSelectedCharacter(undefined);
       setSelectedCell({ x, y });
@@ -230,7 +231,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
 
     return (
       <VStack>
-        {selectedCharacter && (
+        {isEditable && selectedCharacter && (
           <HStack>
             <IconButton
               aria-label="Turn Left"
@@ -298,7 +299,7 @@ export const TurtleGraphics = forwardRef<TurtleGraphicsHandle, TurtleGraphicsPro
                 </Box>
               </Box>
             ))}
-            {isEnableOperation && (
+            {isEditable && (
               <TurtleGraphicsController
                 handleAddCharacterButton={handleAddCharacterButton}
                 handleClickCharacterMoveBackwardButton={handleClickCharacterMoveBackwardButton}
