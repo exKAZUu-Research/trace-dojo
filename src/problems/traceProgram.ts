@@ -1,8 +1,8 @@
 import {
+  TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR,
+  TURTLE_GRAPHICS_EMPTY_COLOR as EMPTY_COLOR,
   TURTLE_GRAPHICS_GRID_COLUMNS as GRID_COLUMNS,
   TURTLE_GRAPHICS_GRID_ROWS as GRID_ROWS,
-  TURTLE_GRAPHICS_EMPTY_COLOR as EMPTY_COLOR,
-  TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR,
 } from '../constants';
 import type { CellColor, ColorChar } from '../types';
 
@@ -16,8 +16,6 @@ export interface CharacterTrace {
   color: string;
   /** 方向を表現する1文字 */
   dir: string;
-  /** ペンが床に触れているか否か */
-  pen: boolean;
 }
 
 export interface TraceItem {
@@ -62,7 +60,7 @@ export function traceProgram(instrumented: string, rawDisplayProgram: string, la
     const newLine = line
       .replace(/for\s*\(([^;]*);\s*([^;]*);/, (_, init, cond) => `for (${init}; checkForCond(${cond}, ${statementId});`)
       .replaceAll(
-        /\.(set|forward|backward|penDown|penUp|turnRight|turnLeft)\(([^\n;]*)\)(;|\)\s*{)/g,
+        /\.(set|forward|backward|turnRight|turnLeft)\(([^\n;]*)\)(;|\)\s*{)/g,
         (_, methodName, args, tail) => {
           replaced = true;
           const delimiter = args === '' ? '' : ', ';
@@ -126,7 +124,6 @@ class Character {
     this.y = y;
     this.color = color;
     this.dir = 'N';
-    this.pen = true;
     board[this.y][this.x] = this.color;
   }
   forward(sid) {
@@ -136,33 +133,25 @@ class Character {
     if (this.x < 0 || ${GRID_COLUMNS} <= this.x || this.y < 0 || ${GRID_ROWS} <= this.y) {
       throw new Error('Out of bounds');
     }
-    if (this.pen) board[this.y][this.x] = this.color;
+    board[this.y][this.x] = this.color;
     addTrace(sid);
   }
   backward(sid) {
-	const index = dirs.indexOf(this.dir);
-	this.x -= dx[index];
-	this.y -= dy[index];
-	if (this.x < 0 || ${GRID_COLUMNS} <= this.x || this.y < 0 || ${GRID_ROWS} <= this.y) {
-	  throw new Error('Out of bounds');
-	}
-	if (this.pen) board[this.y][this.x] = this.color;
-	addTrace(sid);
+    const index = dirs.indexOf(this.dir);
+    this.x -= dx[index];
+    this.y -= dy[index];
+    if (this.x < 0 || ${GRID_COLUMNS} <= this.x || this.y < 0 || ${GRID_ROWS} <= this.y) {
+      throw new Error('Out of bounds');
+    }
+    board[this.y][this.x] = this.color;
+    addTrace(sid);
   }
   canMoveForward() {
     const index = dirs.indexOf(this.dir);
-	const nx = this.x + dx[index];
-	const ny = this.y + dy[index];
-	return nx >= 0 && nx < ${GRID_COLUMNS} && ny >= 0 && ny < ${GRID_ROWS};
+    const nx = this.x + dx[index];
+    const ny = this.y + dy[index];
+    return nx >= 0 && nx < ${GRID_COLUMNS} && ny >= 0 && ny < ${GRID_ROWS};
 	}
-  penDown(sid) {
-    this.pen = true;
-    addTrace(sid);
-  }
-  penUp(sid) {
-    this.pen = false;
-    addTrace(sid);
-  }
   turnRight(sid) {
     this.dir = dirs[(dirs.indexOf(this.dir) + 1) % 4];
     addTrace(sid);

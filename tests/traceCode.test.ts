@@ -12,7 +12,6 @@ const defaultCharacter: CharacterTrace = {
   y: cy,
   color: '#',
   dir: 'N',
-  pen: true,
 };
 
 test.each([

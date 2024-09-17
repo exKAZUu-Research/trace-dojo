@@ -7,6 +7,9 @@ import { verify } from 'jsonwebtoken';
 import jwksClient from 'jwks-rsa';
 import SuperTokensNode from 'supertokens-node';
 
+import { ensureSuperTokensInit } from '../infrastructures/supertokens/backendConfig';
+
+ensureSuperTokensInit();
 const client = jwksClient({
   jwksUri: `${process.env.SUPERTOKENS_URI}/.well-known/jwks.json`,
 });

@@ -1,12 +1,20 @@
 'use client';
 
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 
 import { CustomModal } from '../../../../../../components/molecules/CustomModal';
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
-import { Box, Button, Flex, HStack, useDisclosure, VStack } from '../../../../../../infrastructures/useClient/chakra';
+import {
+  Box,
+  Button,
+  Flex,
+  HStack,
+  Tooltip,
+  useDisclosure,
+  VStack,
+} from '../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../problems/generateProblem';
 
 import { Variables } from './Variables';
@@ -69,30 +77,64 @@ export const StepProblem: React.FC<StepProblemProps> = ({
     }
   };
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        event.preventDefault();
+        handleClickAnswerButton();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
   return (
     <Flex gap="6" w="100%">
-      <VStack spacing="10">
-        <Box>赤色にハイライトされている行における盤面を作成してください。</Box>
-        <Box>赤色のハイライト時点の実行結果</Box>
-        <Box>
-          <TurtleGraphics
-            ref={turtleGraphicsRef}
-            beforeTraceItem={beforeCheckpointTraceItem}
-            currentTraceItem={currentCheckpointTraceItem}
-            isEnableOperation={true}
-            problem={problem}
-          />
-        </Box>
-        <Box>青色のハイライト時点の実行結果</Box>
-        <Box>
-          <TurtleGraphics
-            ref={turtleGraphicsRef}
-            beforeTraceItem={beforeCheckpointTraceItem}
-            currentTraceItem={currentCheckpointTraceItem}
-            isEnableOperation={false}
-            problem={problem}
-          />
-        </Box>
+      <VStack spacing="4">
+        <VStack align="start">
+          <Box>赤色にハイライトされている行における盤面を作成してください。</Box>
+          <HStack>
+            <Tooltip
+              hasArrow
+              fontSize="xs"
+              label={`${navigator.platform.toLowerCase().includes('mac') ? 'Cmd+Enter' : 'Ctrl+Enter'}`}
+              placement="bottom"
+            >
+              <Button onClick={() => handleClickAnswerButton()}>解答</Button>
+            </Tooltip>
+            <Button onClick={() => handleClickResetButton()}>リセット</Button>
+          </HStack>
+        </VStack>
+        <VStack align="center">
+          <Box textAlign="center" w="100%">
+            赤線で囲われた時点の実行結果
+          </Box>
+          <Box>
+            <TurtleGraphics
+              ref={turtleGraphicsRef}
+              beforeTraceItem={beforeCheckpointTraceItem}
+              currentTraceItem={currentCheckpointTraceItem}
+              isEnableOperation={true}
+              problem={problem}
+            />
+          </Box>
+        </VStack>
+        <VStack>
+          <Box>青色のハイライト時点の実行結果</Box>
+          <Box>
+            <TurtleGraphics
+              ref={turtleGraphicsRef}
+              beforeTraceItem={beforeCheckpointTraceItem}
+              currentTraceItem={currentCheckpointTraceItem}
+              isEnableOperation={false}
+              problem={problem}
+            />
+          </Box>
+        </VStack>
       </VStack>
       <VStack align="end" minW="50%" overflow="hidden">
         <HStack>
@@ -128,10 +170,6 @@ export const StepProblem: React.FC<StepProblemProps> = ({
           />
         </Box>
         <Variables traceItemVars={beforeCheckpointTraceItem?.vars} />
-        <HStack>
-          <Button onClick={() => handleClickResetButton()}>リセット</Button>
-          <Button onClick={() => handleClickAnswerButton()}>解答</Button>
-        </HStack>
       </VStack>
     </Flex>
   );

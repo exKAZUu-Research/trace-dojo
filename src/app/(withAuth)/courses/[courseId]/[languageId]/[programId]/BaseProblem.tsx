@@ -5,17 +5,12 @@ import { useEffect, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
 
 import { INTERVAL_MS_OF_IDLE_TIMER } from '../../../../../../constants';
+import { backendTrpcReact } from '../../../../../../infrastructures/trpcBackend/client';
 import { Heading, VStack } from '../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../problems/generateProblem';
 import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
 import { getExplanation, programIdToName } from '../../../../../../problems/problemData';
 import type { ProblemType } from '../../../../../../types';
-import {
-  createUserAnswer,
-  createUserCompletedProblem,
-  updateUserProblemSession,
-  upsertUserProblemSession,
-} from '../../../../../lib/actions';
 
 import { CheckpointProblem } from './CheckpointProblem';
 import { ExecutionResultProblem } from './ExecutionResultProblem';
@@ -41,11 +36,19 @@ export const BaseProblem: React.FC<{
     throttle: 500,
   });
 
+  const updatedSessionQuery = backendTrpcReact.upsertUserProblemSession.useMutation();
+  const updateUserProblemSessionQuery = backendTrpcReact.updateUserProblemSession.useMutation();
+  const createUserCompletedProblemQuery = backendTrpcReact.createUserCompletedProblem.useMutation();
+  const createUserAnswerQuery = backendTrpcReact.createUserAnswer.useMutation();
+
   useEffect(() => {
     const interval = setInterval(async () => {
       if (suspendedSession && !isIdle()) {
-        await updateUserProblemSession(suspendedSession.id, {
-          timeSpent: lastTimeSpent + getActiveTime(),
+        await updateUserProblemSessionQuery.mutateAsync({
+          id: suspendedSession.id,
+          data: {
+            timeSpent: lastTimeSpent + getActiveTime(),
+          },
         });
       }
     }, INTERVAL_MS_OF_IDLE_TIMER);
@@ -68,21 +71,21 @@ export const BaseProblem: React.FC<{
     if (!userId || !courseId || !programId || !languageId || !suspendedSession) return;
 
     (async () => {
-      const updatedSession = await upsertUserProblemSession(
-        suspendedSession.id,
+      const updatedSession = await updatedSessionQuery.mutateAsync({
+        id: suspendedSession.id,
         userId,
         courseId,
         programId,
         languageId,
-        suspendedSession.problemVariablesSeed,
-        problemType,
-        problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
-        problemType === 'executionResult' ? 0 : currentTraceItemIndex,
-        suspendedSession.timeSpent,
-        suspendedSession.startedAt,
-        undefined,
-        false
-      );
+        problemVariablesSeed: suspendedSession.problemVariablesSeed,
+        currentProblemType: problemType,
+        beforeTraceItemIndex: problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
+        currentTraceItemIndex: problemType === 'executionResult' ? 0 : currentTraceItemIndex,
+        timeSpent: suspendedSession.timeSpent,
+        startedAt: suspendedSession.startedAt,
+        finishedAt: undefined,
+        isCompleted: false,
+      });
       if (updatedSession) {
         setSuspendedSession(updatedSession);
         setLastTimeSpent(updatedSession.timeSpent);
@@ -93,22 +96,27 @@ export const BaseProblem: React.FC<{
 
   const handleSolveProblem = async (): Promise<void> => {
     if (userId && suspendedSession) {
-      await createUserCompletedProblem(userId, courseId, programId, languageId);
-      await upsertUserProblemSession(
-        suspendedSession.id,
+      await createUserCompletedProblemQuery.mutateAsync({
         userId,
         courseId,
         programId,
         languageId,
-        suspendedSession.problemVariablesSeed,
-        problemType,
-        problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
-        problemType === 'executionResult' ? 0 : currentTraceItemIndex,
-        suspendedSession.timeSpent,
-        suspendedSession.startedAt,
-        new Date(),
-        true
-      );
+      });
+      await updatedSessionQuery.mutateAsync({
+        id: suspendedSession.id,
+        userId,
+        courseId,
+        programId,
+        languageId,
+        problemVariablesSeed: suspendedSession.problemVariablesSeed,
+        currentProblemType: problemType,
+        beforeTraceItemIndex: problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
+        currentTraceItemIndex: problemType === 'executionResult' ? 0 : currentTraceItemIndex,
+        timeSpent: suspendedSession.timeSpent,
+        startedAt: suspendedSession.startedAt,
+        finishedAt: new Date(),
+        isCompleted: true,
+      });
     }
   };
 
@@ -119,21 +127,24 @@ export const BaseProblem: React.FC<{
     const now = new Date();
     const startedAt = new Date(now.getTime() - activeTime);
 
-    await createUserAnswer(
+    await createUserAnswerQuery.mutateAsync({
       programId,
       problemType,
       languageId,
       userId,
-      suspendedSession.id,
-      currentTraceItemIndex,
+      userProblemSessionId: suspendedSession.id,
+      step: currentTraceItemIndex,
       isPassed,
-      activeTime,
-      startedAt
-    );
+      timeSpent: activeTime,
+      startedAt,
+    });
 
     if (suspendedSession) {
-      const userProblemSession = await updateUserProblemSession(suspendedSession.id, {
-        timeSpent: lastTimeSpent + activeTime,
+      const userProblemSession = await updateUserProblemSessionQuery.mutateAsync({
+        id: suspendedSession.id,
+        data: {
+          timeSpent: lastTimeSpent + activeTime,
+        },
       });
 
       if (userProblemSession) {

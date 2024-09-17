@@ -1,11 +1,8 @@
 import { logger } from '../infrastructures/pino';
 import { prisma } from '../infrastructures/prisma';
-import { ensureSuperTokensInit } from '../infrastructures/supertokens/backendConfig';
 
 import type { SessionOnNode } from './sessionOnNode';
 import { getSessionOnServer } from './sessionOnServer';
-
-ensureSuperTokensInit();
 
 export interface SessionOnServer {
   session: SessionOnNode | undefined;
