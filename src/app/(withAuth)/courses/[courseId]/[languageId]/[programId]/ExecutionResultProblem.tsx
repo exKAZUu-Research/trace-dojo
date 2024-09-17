@@ -1,12 +1,16 @@
-'use client';
-
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { CustomModal } from '../../../../../../components/molecules/CustomModal';
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
 import {
+  AlertDialog,
+  AlertDialogBody,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogOverlay,
   Box,
   Button,
   Flex,
@@ -37,6 +41,8 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
   setCurrentTraceItemIndex,
   setProblemType,
 }) => {
+  console.log('ExecutionResultProblem');
+
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
   const {
     isOpen: isExplanationModalOpen,
@@ -44,6 +50,12 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
     onOpen: onExplanationModalOpen,
   } = useDisclosure();
   const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
+  const { isOpen: isAlertOpen, onClose: onAlertClose, onOpen: onAlertOpen } = useDisclosure();
+  const cancelRef = useRef(null);
+  console.log('isAlertOpen:', isAlertOpen);
+
+  const [alertTitle, setAlertTitle] = useState('');
+  const [alertMessage, setAlertMessage] = useState('');
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -54,20 +66,25 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
 
     createAnswerLog(isPassed);
 
-    // TODO: 一旦アラートで表示
     if (isPassed) {
-      alert('正解です。この問題は終了です');
+      setAlertTitle('正解');
+      setAlertMessage('正解です。この問題は終了です');
+      onAlertOpen();
       handleComplete();
     } else {
       if (problem.checkpointSids.length > 0) {
-        alert('不正解です。チェックポイントごとに回答してください');
+        setAlertTitle('不正解');
+        setAlertMessage('不正解です。チェックポイントごとに回答してください');
+        onAlertOpen();
         const nextCheckpointTraceItemIndex = problem.traceItems.findIndex(
           (traceItem) => traceItem.sid === problem.checkpointSids.at(0)
         );
         setCurrentTraceItemIndex(nextCheckpointTraceItemIndex);
         setProblemType('checkpoint');
       } else {
-        alert('不正解です。ステップごとに回答してください');
+        setAlertTitle('不正解');
+        setAlertMessage('不正解です。ステップごとに回答してください');
+        onAlertOpen();
         setCurrentTraceItemIndex(1);
         setProblemType('step');
       }
@@ -149,6 +166,27 @@ export const ExecutionResultProblem: React.FC<ExecutionResultProblemProps> = ({
           <SyntaxHighlighter code={problem.displayProgram} programmingLanguageId={selectedLanguageId} />
         </Box>
       </VStack>
+      <AlertDialog
+        closeOnEsc={false}
+        closeOnOverlayClick={false}
+        isOpen={isAlertOpen}
+        leastDestructiveRef={cancelRef}
+        onClose={onAlertClose}
+      >
+        <AlertDialogOverlay>
+          <AlertDialogContent>
+            <AlertDialogHeader fontSize="lg" fontWeight="bold">
+              {alertTitle}
+            </AlertDialogHeader>
+            <AlertDialogBody>{alertMessage}</AlertDialogBody>
+            <AlertDialogFooter>
+              <Button ref={cancelRef} onClick={onAlertClose}>
+                閉じる
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
     </Flex>
   );
 };

@@ -10,17 +10,14 @@ import { Course } from './Course';
 
 const CoursePage: NextPage<{ params: { courseId: CourseId } }> = async ({ params }) => {
   const { session } = await getNullableSessionOnServer();
-  const user =
-    session &&
-    (await prisma.user.findUnique({
-      where: {
-        id: session.superTokensUserId,
-      },
-    }));
+  if (!session) return redirect('/auth');
 
-  if (!user) {
-    return redirect('/auth');
-  }
+  const user = await prisma.user.findUnique({
+    where: {
+      id: session.superTokensUserId,
+    },
+  });
+  if (!user) return redirect('/auth');
 
   const courseId = params.courseId;
   const userCompletedProblems = await fetchUserCompletedProblems(user.id, courseId);

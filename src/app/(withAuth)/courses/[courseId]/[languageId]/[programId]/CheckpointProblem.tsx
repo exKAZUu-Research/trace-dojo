@@ -1,12 +1,16 @@
-'use client';
-
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { CustomModal } from '../../../../../../components/molecules/CustomModal';
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
 import {
+  AlertDialog,
+  AlertDialogBody,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogOverlay,
   Box,
   Button,
   Flex,
@@ -43,6 +47,8 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
   setCurrentTraceItemIndex,
   setProblemType,
 }) => {
+  console.log('CheckpointProblem');
+
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
   const {
     isOpen: isExplanationModalOpen,
@@ -50,9 +56,14 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
     onOpen: onExplanationModalOpen,
   } = useDisclosure();
   const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
+  const { isOpen: isAlertOpen, onClose: onAlertClose, onOpen: onAlertOpen } = useDisclosure();
+  const cancelRef = useRef(null);
 
   const beforeCheckpointTraceItem = problem.traceItems[beforeTraceItemIndex];
   const currentCheckpointTraceItem = problem.traceItems[currentTraceItemIndex];
+
+  const [alertTitle, setAlertTitle] = useState('');
+  const [alertMessage, setAlertMessage] = useState('');
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -63,17 +74,19 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
 
     createAnswerLog(isPassed);
 
-    // TODO: 一旦アラートで表示
     if (isPassed) {
       setBeforeTraceItemIndex(currentTraceItemIndex);
 
       if (currentCheckpointTraceItem.sid === problem.checkpointSids.at(-1)) {
-        // 最終チェックポイントを正解した場合はその次の行からステップ問題に移行
-        alert('正解です。このチェックポイントから1行ずつ回答してください');
+        setAlertTitle('正解');
+        setAlertMessage('正解です。このチェックポイントから1行ずつ回答してください');
+        onAlertOpen();
         setCurrentTraceItemIndex(currentTraceItemIndex + 1);
         setProblemType('step');
       } else {
-        alert('正解です。次のチェックポイントに進みます');
+        setAlertTitle('正解');
+        setAlertMessage('正解です。次のチェックポイントに進みます');
+        onAlertOpen();
         const nextCheckpointTraceItemIndex = problem.traceItems.findIndex(
           (traceItem) =>
             traceItem.sid ===
@@ -82,8 +95,9 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         setCurrentTraceItemIndex(nextCheckpointTraceItemIndex);
       }
     } else {
-      // 不正解の場合は最後に正解したチェックポイントからステップ問題に移行
-      alert('不正解です。最後に正解したチェックポイントから1行ずつ回答してください');
+      setAlertTitle('不正解');
+      setAlertMessage('不正解です。最後に正解したチェックポイントから1行ずつ回答してください');
+      onAlertOpen();
       setCurrentTraceItemIndex(beforeTraceItemIndex + 1);
       setProblemType('step');
     }
@@ -185,6 +199,27 @@ export const CheckpointProblem: React.FC<CheckpointProblemProps> = ({
         </Box>
         <Variables traceItemVars={beforeCheckpointTraceItem?.vars} />
       </VStack>
+      <AlertDialog
+        closeOnEsc={false}
+        closeOnOverlayClick={false}
+        isOpen={isAlertOpen}
+        leastDestructiveRef={cancelRef}
+        onClose={onAlertClose}
+      >
+        <AlertDialogOverlay>
+          <AlertDialogContent>
+            <AlertDialogHeader fontSize="lg" fontWeight="bold">
+              {alertTitle}
+            </AlertDialogHeader>
+            <AlertDialogBody>{alertMessage}</AlertDialogBody>
+            <AlertDialogFooter>
+              <Button ref={cancelRef} onClick={onAlertClose}>
+                閉じる
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
     </Flex>
   );
 };

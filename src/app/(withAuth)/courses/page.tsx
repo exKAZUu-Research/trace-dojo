@@ -1,17 +1,13 @@
 import type { NextPage } from 'next';
 import NextLink from 'next/link';
 
-import { Box, Heading, LinkBox, LinkOverlay, List, ListItem, Text } from '../../../infrastructures/useClient/chakra';
+import { Box, Heading, LinkBox, LinkOverlay, List, ListItem } from '../../../infrastructures/useClient/chakra';
 import { courseIds, courseIdToName } from '../../../problems/problemData';
-import { getNonNullableSessionOnServer } from '../../../utils/session';
 
 const CoursesPage: NextPage = async () => {
-  const session = await getNonNullableSessionOnServer();
-
   return (
     <main>
       <Box>
-        <Text>User ID: {session.superTokensUserId}</Text>
         <Heading as="h1" size="xl">
           Courses
         </Heading>

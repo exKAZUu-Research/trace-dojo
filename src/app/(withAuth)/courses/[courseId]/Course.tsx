@@ -6,7 +6,6 @@ import NextLink from 'next/link';
 import React, { useEffect } from 'react';
 import { useLocalStorage } from 'usehooks-ts';
 
-import { backendTrpcReact } from '../../../../infrastructures/trpcBackend/client';
 import {
   Accordion,
   AccordionButton,
@@ -61,15 +60,10 @@ export const Course: React.FC<{
   userCompletedProblems: { programId: string; languageId: VisibleLanguageId }[];
   userProblemSessions: UserProblemSessionWithUserAnswers[];
 }> = ({ courseId, userCompletedProblems, userProblemSessions }) => {
-  // TODO: remove the following example code
-  const getSessionQuery = backendTrpcReact.getSession.useQuery();
-  console.log('getSessionQuery:', getSessionQuery.isLoading, getSessionQuery.data, getSessionQuery.error);
-
   const [selectedLanguageId, setSelectedLanguageId] = useLocalStorage<VisibleLanguageId>(
     selectedLanguageIdKey,
     defaultLanguageId
   );
-
   useEffect(() => {
     // 念の為、未知の言語が指定された場合、デフォルト言語に設定し直す。
     if (!visibleLanguageIds.includes(selectedLanguageId)) {
@@ -99,7 +93,7 @@ export const Course: React.FC<{
     return count;
   };
 
-  const SuspendedSession = (programId: string): UserProblemSessionWithUserAnswers | undefined => {
+  const getSuspendedSession = (programId: string): UserProblemSessionWithUserAnswers | undefined => {
     return userProblemSessions.find(
       (session) =>
         session.courseId === courseId &&
@@ -110,7 +104,7 @@ export const Course: React.FC<{
     ) as UserProblemSessionWithUserAnswers | undefined;
   };
 
-  const firstSession = (programId: string): UserProblemSessionWithUserAnswers | undefined => {
+  const getFirstSession = (programId: string): UserProblemSessionWithUserAnswers | undefined => {
     return userProblemSessions.find(
       (session) =>
         session.courseId === courseId && session.programId === programId && session.languageId === selectedLanguageId
@@ -186,7 +180,7 @@ export const Course: React.FC<{
                                 {programIdToName[programId]}
                               </NextLink>
                             </Td>
-                            <Td>{SuspendedSession(programId) && <Tag>挑戦中</Tag>}</Td>
+                            <Td>{getSuspendedSession(programId) && <Tag>挑戦中</Tag>}</Td>
                             <Td>
                               <Flex>
                                 <p>
@@ -201,10 +195,10 @@ export const Course: React.FC<{
                                 )}
                               </Flex>
                             </Td>
-                            <Td>{countFailedAnswers(firstSession(programId))}</Td>
+                            <Td>{countFailedAnswers(getFirstSession(programId))}</Td>
                             <Td>
-                              {typeof firstSession(programId)?.timeSpent === 'number'
-                                ? Math.floor(totalAnswerTimeSpent(firstSession(programId)) / 1000)
+                              {typeof getFirstSession(programId)?.timeSpent === 'number'
+                                ? Math.floor(totalAnswerTimeSpent(getFirstSession(programId)) / 1000)
                                 : 0}
                             </Td>
                           </Tr>

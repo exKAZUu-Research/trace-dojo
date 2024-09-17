@@ -68,8 +68,8 @@ export const backendRouter = router({
         },
         data,
       });
-      revalidatePath('/courses', 'layout');
-      console.log('revalidatePath()');
+      revalidatePath('/courses/[courseId]/[languageId]', 'page');
+      console.log(`revalidatePath('/courses/[courseId]/[languageId]', 'page');`);
       return userProblemSession;
     }),
   createUserCompletedProblem: procedure
@@ -91,8 +91,8 @@ export const backendRouter = router({
           languageId: input.languageId,
         },
       });
-      revalidatePath('/courses', 'layout');
-      console.log('revalidatePath()');
+      revalidatePath('/courses/[courseId]/[languageId]', 'page');
+      console.log(`revalidatePath('/courses/[courseId]/[languageId]', 'page');`);
     }),
   createUserAnswer: procedure
     .use(authorize)

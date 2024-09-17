@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { FaArrowRotateRight, FaArrowRotateLeft, FaTrashCan } from 'react-icons/fa6';
+import { FaArrowRotateLeft, FaArrowRotateRight, FaTrashCan } from 'react-icons/fa6';
 
 import { TURTLE_GRAPHICS_GRID_ROWS as GRID_ROWS, TURTLE_GRAPHICS_GRID_SIZE as GRID_SIZE } from '../../constants';
 import { Box, Button, HStack, IconButton, VStack } from '../../infrastructures/useClient/chakra';

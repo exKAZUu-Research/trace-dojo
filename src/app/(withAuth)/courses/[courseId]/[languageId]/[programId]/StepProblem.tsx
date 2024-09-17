@@ -1,12 +1,16 @@
-'use client';
-
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { CustomModal } from '../../../../../../components/molecules/CustomModal';
 import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
 import {
+  AlertDialog,
+  AlertDialogBody,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogOverlay,
   Box,
   Button,
   Flex,
@@ -42,6 +46,8 @@ export const StepProblem: React.FC<StepProblemProps> = ({
   setBeforeTraceItemIndex,
   setCurrentTraceItemIndex,
 }) => {
+  console.log('StepProblem');
+
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
   const {
     isOpen: isExplanationModalOpen,
@@ -49,9 +55,14 @@ export const StepProblem: React.FC<StepProblemProps> = ({
     onOpen: onExplanationModalOpen,
   } = useDisclosure();
   const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
+  const { isOpen: isAlertOpen, onClose: onAlertClose, onOpen: onAlertOpen } = useDisclosure();
+  const cancelRef = useRef(null);
 
   const beforeCheckpointTraceItem = problem.traceItems[beforeTraceItemIndex];
   const currentCheckpointTraceItem = problem.traceItems[currentTraceItemIndex];
+
+  const [alertTitle, setAlertTitle] = useState('');
+  const [alertMessage, setAlertMessage] = useState('');
 
   const handleClickResetButton = (): void => {
     turtleGraphicsRef.current?.init();
@@ -62,18 +73,23 @@ export const StepProblem: React.FC<StepProblemProps> = ({
 
     createAnswerLog(isPassed);
 
-    // TODO: 一旦アラートで表示
     if (isPassed) {
       if (currentCheckpointTraceItem === problem.traceItems.at(-1)) {
-        alert('正解です。この問題は終了です');
+        setAlertTitle('正解');
+        setAlertMessage('正解です。この問題は終了です');
+        onAlertOpen();
         handleComplete();
       } else {
-        alert('正解です。次の行に進みます');
+        setAlertTitle('正解');
+        setAlertMessage('正解です。次の行に進みます');
+        onAlertOpen();
         setBeforeTraceItemIndex(currentTraceItemIndex);
         setCurrentTraceItemIndex(currentTraceItemIndex + 1);
       }
     } else {
-      alert('不正解です。もう一度回答してください');
+      setAlertTitle('不正解');
+      setAlertMessage('不正解です。もう一度回答してください');
+      onAlertOpen();
     }
   };
 
@@ -173,6 +189,27 @@ export const StepProblem: React.FC<StepProblemProps> = ({
         </Box>
         <Variables traceItemVars={beforeCheckpointTraceItem?.vars} />
       </VStack>
+      <AlertDialog
+        closeOnEsc={false}
+        closeOnOverlayClick={false}
+        isOpen={isAlertOpen}
+        leastDestructiveRef={cancelRef}
+        onClose={onAlertClose}
+      >
+        <AlertDialogOverlay>
+          <AlertDialogContent>
+            <AlertDialogHeader fontSize="lg" fontWeight="bold">
+              {alertTitle}
+            </AlertDialogHeader>
+            <AlertDialogBody>{alertMessage}</AlertDialogBody>
+            <AlertDialogFooter>
+              <Button ref={cancelRef} onClick={onAlertClose}>
+                閉じる
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
     </Flex>
   );
 };

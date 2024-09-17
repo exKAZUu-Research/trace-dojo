@@ -156,10 +156,11 @@ export const BaseProblem: React.FC<{
 
   const explanation = getExplanation(programId, languageId);
 
-  const ProblemComponent: React.FC = () => {
-    switch (problemType) {
-      case 'executionResult': {
-        return (
+  return (
+    <main>
+      <VStack spacing="4">
+        <Heading as="h1">{programIdToName[programId]}</Heading>
+        {problemType === 'executionResult' ? (
           <ExecutionResultProblem
             createAnswerLog={createAnswerLog}
             explanation={explanation}
@@ -169,10 +170,7 @@ export const BaseProblem: React.FC<{
             setCurrentTraceItemIndex={setCurrentTraceItemIndex}
             setProblemType={setProblemType}
           />
-        );
-      }
-      case 'checkpoint': {
-        return (
+        ) : problemType === 'checkpoint' ? (
           <CheckpointProblem
             beforeTraceItemIndex={beforeTraceItemIndex}
             createAnswerLog={createAnswerLog}
@@ -184,10 +182,7 @@ export const BaseProblem: React.FC<{
             setCurrentTraceItemIndex={setCurrentTraceItemIndex}
             setProblemType={setProblemType}
           />
-        );
-      }
-      case 'step': {
-        return (
+        ) : (
           <StepProblem
             beforeTraceItemIndex={beforeTraceItemIndex}
             createAnswerLog={createAnswerLog}
@@ -199,16 +194,7 @@ export const BaseProblem: React.FC<{
             setBeforeTraceItemIndex={setBeforeTraceItemIndex}
             setCurrentTraceItemIndex={setCurrentTraceItemIndex}
           />
-        );
-      }
-    }
-  };
-
-  return (
-    <main>
-      <VStack spacing="4">
-        <Heading as="h1">{programIdToName[programId]}</Heading>
-        <ProblemComponent />
+        )}
       </VStack>
     </main>
   );
