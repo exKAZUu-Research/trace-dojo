@@ -28,6 +28,8 @@ import { getNullableSessionOnServer } from '../../utils/session';
 
 import { SignOutMenuItem } from './SignOutMenuItem';
 
+const MENU_ITEMS: readonly [string, string][] = [['/usage', '使い方']];
+
 export const DefaultHeader: NextPage = async () => {
   const { session } = await getNullableSessionOnServer();
   const superTokensUser = session && (await SuperTokensNode.getUser(session.superTokensUserId));
@@ -47,6 +49,13 @@ export const DefaultHeader: NextPage = async () => {
           <Icon as={MdOutlineHome} color="brand.500" mr={1} />
           {APP_NAME}
         </Heading>
+        <HStack flexGrow={0} flexShrink={0} spacing={0}>
+          {MENU_ITEMS.map(([href, label]) => (
+            <Button key={href} as={NextLink} href={href} variant="ghost">
+              {label}
+            </Button>
+          ))}
+        </HStack>
       </HStack>
 
       <Box flexGrow={0} flexShrink={0}>
@@ -70,9 +79,14 @@ export const DefaultHeader: NextPage = async () => {
             </MenuList>
           </Menu>
         ) : (
-          <Button as={NextLink} colorScheme="brand" href="/auth">
-            サインイン
-          </Button>
+          <>
+            <Button as={NextLink} colorScheme="brand" href="/auth" mr={2} variant="outline">
+              サインイン
+            </Button>
+            <Button as={NextLink} colorScheme="brand" href="/auth?show=signup">
+              新規登録
+            </Button>
+          </>
         )}
       </Box>
     </HStack>
