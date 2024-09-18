@@ -19,6 +19,7 @@ export {
   AlertDialogOverlay,
   AlertIcon,
   AlertTitle,
+  Avatar,
   Badge,
   Box,
   Breadcrumb,

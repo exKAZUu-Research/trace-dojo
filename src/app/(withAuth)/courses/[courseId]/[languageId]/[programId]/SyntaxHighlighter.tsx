@@ -1,51 +1,51 @@
+'use client';
+
+import type { BoxProps } from '@chakra-ui/react';
 import React from 'react';
 import { Prism } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism';
+import { oneLight } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 
-import { Box } from '../../infrastructures/useClient/chakra';
+import { Box } from '../../../../../../infrastructures/useClient/chakra';
 
-interface SyntaxHighlighterProps {
+type SyntaxHighlighterProps = BoxProps & {
   beforeCheckpointLine?: number;
   code: string;
   programmingLanguageId: string;
   currentCheckpointLine?: number;
-}
+};
 
 export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
   beforeCheckpointLine,
   code,
   currentCheckpointLine,
   programmingLanguageId,
+  ...boxProps
 }) => {
   return (
-    <Box h="100%">
+    <Box bg="white" overflow="auto" {...boxProps}>
       <Prism
-        codeTagProps={{ style: { fontSize: '1rem' } }}
+        codeTagProps={{ style: { display: 'flex', flexDirection: 'column', fontSize: '1rem' } }}
         customStyle={{
-          backgroundColor: '#011627',
-          marginTop: 0,
-          overflow: 'auto',
-          padding: 10,
-          height: '100%',
+          background: 'unset',
+          margin: 0,
+          padding: '1rem 0',
+          minWidth: 'max-content',
         }}
         language={programmingLanguageId === 'c' ? 'cpp' : programmingLanguageId}
-        lineNumberStyle={{ paddingRight: 0, marginRight: 16, minWidth: '1rem' }}
+        lineNumberStyle={{ minWidth: '1rem', marginRight: '2rem', paddingRight: 0 }}
         lineProps={(lineNumber) => {
-          const style: React.CSSProperties = {
-            padding: 0,
-            backgroundColor: '',
-          };
+          const style: React.CSSProperties = { padding: '0 1rem', backgroundColor: '' };
           // チェックポイント問題・ステップ問題のハイライト
           if (lineNumber === beforeCheckpointLine) {
-            style.backgroundColor = '#2E3D9F';
+            style.backgroundColor = '#feebc8' /* orange.100 */;
           }
           if (lineNumber === currentCheckpointLine) {
-            style.border = '3px solid #b3191c';
+            style.backgroundColor = '#fed7d7' /* red.100 */;
           }
           return { style };
         }}
         showLineNumbers={true}
-        style={vscDarkPlus}
+        style={oneLight}
         wrapLines={true}
       >
         {code ?? ''}

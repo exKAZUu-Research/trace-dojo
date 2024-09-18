@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { MdOutlineCheckCircleOutline, MdOutlineInfo } from 'react-icons/md';
 
 import { CustomModal } from '../../../../../../components/molecules/CustomModal';
-import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
 import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
 import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
 import {
@@ -15,8 +15,11 @@ import {
   AlertDialogOverlay,
   Box,
   Button,
+  Card,
   Flex,
+  Heading,
   HStack,
+  Icon,
   Tooltip,
   useDisclosure,
   VStack,
@@ -25,6 +28,8 @@ import type { Problem } from '../../../../../../problems/generateProblem';
 import type { ProblemType } from '../../../../../../types';
 import { isMacOS } from '../../../../../../utils/platform';
 
+import { BoardViewer } from './BoardViewer';
+import { SyntaxHighlighter } from './SyntaxHighlighter';
 import { Variables } from './Variables';
 
 interface ExecutionResultProblemProps {
@@ -230,134 +235,161 @@ const ProblemComponent: React.FC<ProblemProps & { type: 'executionResult' | 'che
   }, []);
 
   return (
-    <Flex gap="6" w="100%">
-      <VStack align="start" spacing="4" w="100%">
-        <Box>
-          <Box>
-            {type === 'executionResult'
-              ? 'プログラムの実行後の結果を解答してください。'
-              : type === 'checkpoint'
-                ? '赤色でハイライトされている行を初めて実行した後の盤面を作成してください。'
-                : '赤色でハイライトされている行を実行した後の盤面を作成してください。'}
-            マスを右クリックすると白色に戻せます。
-          </Box>
-          <HStack>
-            <Tooltip
-              hasArrow
-              fontSize="xs"
-              label={`ショートカットキーは ${isMacOS() ? 'Cmd+Enter' : 'Ctrl+Enter'}`}
-              placement="bottom"
-            >
-              <Button onClick={() => handleClickAnswerButton()}>解答</Button>
-            </Tooltip>
-            <Button onClick={() => handleClickResetButton()}>リセット</Button>
-          </HStack>
-        </Box>
-        <VStack align="center" w="100%">
+    <>
+      <Flex gap={4}>
+        <VStack align="stretch" flexBasis={0} flexGrow={1} minW={0} spacing={4}>
+          <VStack align="stretch" as={Card} overflow="hidden" spacing={0}>
+            <VStack align="stretch" borderBottomWidth="1px" p={5}>
+              <Heading size="md">問題</Heading>
+
+              <div>
+                <Box as="span" fontWeight="bold">
+                  {type === 'executionResult' ? (
+                    'プログラムを実行した後'
+                  ) : (
+                    <>
+                      <Box as="span" bgColor="red.100" px={0.5} rounded="sm">
+                        {problem.sidToLineIndex.get(problem.traceItems[currentTraceItemIndex].sid)}行目
+                      </Box>
+                      を{type === 'checkpoint' ? '初めて' : ''}実行した後
+                    </>
+                  )}
+                </Box>
+                の盤面を作成してください。 マスを右クリックすると白色に戻せます。
+              </div>
+
+              <HStack spacing={4}>
+                <Button leftIcon={<Icon as={MdOutlineInfo} />} size="sm" variant="outline" onClick={onHelpModalOpen}>
+                  解答方法
+                </Button>
+                <CustomModal
+                  body={`${type === 'executionResult' ? '実行結果問題' : type === 'checkpoint' ? 'チェックポイント問題' : 'ステップ問題'}の解答方法の説明`}
+                  isOpen={isHelpModalOpen}
+                  title={`${type === 'executionResult' ? '実行結果問題' : type === 'checkpoint' ? 'チェックポイント問題' : 'ステップ問題'}について`}
+                  onClose={onHelpModalClose}
+                />
+
+                {explanation && (
+                  <>
+                    <Button
+                      leftIcon={<Icon as={MdOutlineCheckCircleOutline} />}
+                      size="sm"
+                      variant="outline"
+                      onClick={onExplanationModalOpen}
+                    >
+                      解説
+                    </Button>
+                    <CustomModal
+                      body={explanation.body}
+                      isOpen={isExplanationModalOpen}
+                      title={explanation.title}
+                      onClose={onExplanationModalClose}
+                    />
+                  </>
+                )}
+              </HStack>
+            </VStack>
+
+            <SyntaxHighlighter
+              beforeCheckpointLine={
+                type === 'executionResult'
+                  ? undefined
+                  : problem.sidToLineIndex.get(problem.traceItems[beforeTraceItemIndex].sid)
+              }
+              code={problem.displayProgram}
+              currentCheckpointLine={
+                type === 'executionResult'
+                  ? undefined
+                  : problem.sidToLineIndex.get(problem.traceItems[currentTraceItemIndex].sid)
+              }
+              programmingLanguageId={selectedLanguageId}
+            />
+          </VStack>
+
           {type !== 'executionResult' && (
-            <Box textAlign="center" w="100%">
-              赤線の行の<strong>実行後</strong>の結果（注意：実行前ではなく<strong>実行後</strong>！）
-            </Box>
-          )}
-          <TurtleGraphics
-            ref={turtleGraphicsRef}
-            beforeTraceItem={problem.traceItems[beforeTraceItemIndex]}
-            currentTraceItem={problem.traceItems[currentTraceItemIndex]}
-            isEditable={true}
-            problem={problem}
-          />
-          {type !== 'executionResult' && problem.sidToLineIndex.get(problem.traceItems[beforeTraceItemIndex].sid) && (
-            <>
-              <Box>
-                青色の行の<strong>実行後</strong>の結果（注意：実行前ではなく<strong>実行後</strong>！）
-              </Box>
-              <TurtleGraphics
-                ref={turtleGraphicsRef}
-                beforeTraceItem={problem.traceItems[beforeTraceItemIndex]}
-                currentTraceItem={problem.traceItems[currentTraceItemIndex]}
-                isEditable={false}
-                problem={problem}
-              />
-            </>
+            <VStack align="stretch" as={Card} bg="gray.50" p={5} spacing={6}>
+              <VStack align="stretch">
+                <Heading size="md">
+                  <Box as="span" bgColor="orange.100" px={0.5} rounded="sm">
+                    {problem.sidToLineIndex.get(problem.traceItems[beforeTraceItemIndex].sid)}行目
+                  </Box>
+                  を実行した後の盤面
+                </Heading>
+                <Box color="gray.600" fontSize="sm">
+                  実行前ではなく<strong>実行後</strong>！
+                </Box>
+              </VStack>
+
+              <BoardViewer alignSelf="center" traceItem={problem.traceItems[beforeTraceItemIndex]} />
+
+              <Variables traceItemVars={problem.traceItems[beforeTraceItemIndex]?.vars} />
+            </VStack>
           )}
         </VStack>
-      </VStack>
 
-      <VStack align="end" minW="50%" overflow="hidden">
-        <HStack>
-          <Button colorScheme="gray" onClick={onHelpModalOpen}>
-            解答方法
-          </Button>
-          <CustomModal
-            body={`${type === 'executionResult' ? '実行結果問題' : type === 'checkpoint' ? 'チェックポイント問題' : 'ステップ問題'}の解答方法の説明`}
-            isOpen={isHelpModalOpen}
-            title={`${type === 'executionResult' ? '実行結果問題' : type === 'checkpoint' ? 'チェックポイント問題' : 'ステップ問題'}について`}
-            onClose={onHelpModalClose}
-          />
-          {explanation && (
-            <>
-              <Button colorScheme="gray" onClick={onExplanationModalOpen}>
-                解説
-              </Button>
-              <CustomModal
-                body={explanation.body}
-                isOpen={isExplanationModalOpen}
-                title={explanation.title}
-                onClose={onExplanationModalClose}
-              />
-            </>
-          )}
-        </HStack>
-        <Box h={type === 'executionResult' ? 'calc(100vh - 370px)' : '640px'} w="100%">
-          <SyntaxHighlighter
-            beforeCheckpointLine={
-              type === 'executionResult'
-                ? undefined
-                : problem.sidToLineIndex.get(problem.traceItems[beforeTraceItemIndex].sid)
-            }
-            code={problem.displayProgram}
-            currentCheckpointLine={
-              type === 'executionResult'
-                ? undefined
-                : problem.sidToLineIndex.get(problem.traceItems[currentTraceItemIndex].sid)
-            }
-            programmingLanguageId={selectedLanguageId}
-          />
-        </Box>
-        {type !== 'executionResult' && <Variables traceItemVars={problem.traceItems[beforeTraceItemIndex]?.vars} />}
-      </VStack>
-      <AlertDialog
-        closeOnEsc={true}
-        closeOnOverlayClick={false}
-        isOpen={isAlertOpen}
-        leastDestructiveRef={cancelRef}
-        onClose={() => {
-          postAlertAction?.();
-          onAlertClose();
-        }}
-      >
-        <AlertDialogOverlay>
-          <AlertDialogContent>
-            <AlertDialogHeader fontSize="lg" fontWeight="bold">
-              {alertTitle}
-            </AlertDialogHeader>
-            <AlertDialogBody>{alertMessage}</AlertDialogBody>
-            <AlertDialogFooter>
-              <Tooltip hasArrow fontSize="xs" label={`ショートカットキーは Esc`} placement="bottom">
-                <Button
-                  ref={cancelRef}
-                  onClick={() => {
-                    postAlertAction?.();
-                    onAlertClose();
-                  }}
-                >
-                  閉じる
-                </Button>
-              </Tooltip>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialogOverlay>
-      </AlertDialog>
-    </Flex>
+        <VStack align="stretch" flexBasis={0} flexGrow={1} spacing="4">
+          <VStack align="center" w="100%">
+            <TurtleGraphics
+              ref={turtleGraphicsRef}
+              beforeTraceItem={problem.traceItems[beforeTraceItemIndex]}
+              currentTraceItem={problem.traceItems[currentTraceItemIndex]}
+              isEditable={true}
+              problem={problem}
+            />
+          </VStack>
+
+          <HStack justify="flex-end">
+            <Button colorScheme="brand" variant="outline" onClick={() => handleClickResetButton()}>
+              リセット
+            </Button>
+
+            <Button
+              colorScheme="brand"
+              rightIcon={
+                <Box as="span" color="whiteAlpha.800" fontSize="sm" fontWeight="bold">
+                  {isMacOS() ? 'Cmd + Enter' : 'Ctrl + Enter'}
+                </Box>
+              }
+              onClick={() => handleClickAnswerButton()}
+            >
+              解答
+            </Button>
+          </HStack>
+        </VStack>
+
+        <AlertDialog
+          closeOnEsc={true}
+          closeOnOverlayClick={false}
+          isOpen={isAlertOpen}
+          leastDestructiveRef={cancelRef}
+          onClose={() => {
+            postAlertAction?.();
+            onAlertClose();
+          }}
+        >
+          <AlertDialogOverlay>
+            <AlertDialogContent>
+              <AlertDialogHeader fontSize="lg" fontWeight="bold">
+                {alertTitle}
+              </AlertDialogHeader>
+              <AlertDialogBody>{alertMessage}</AlertDialogBody>
+              <AlertDialogFooter>
+                <Tooltip hasArrow fontSize="xs" label={`ショートカットキーは Esc`} placement="bottom">
+                  <Button
+                    ref={cancelRef}
+                    onClick={() => {
+                      postAlertAction?.();
+                      onAlertClose();
+                    }}
+                  >
+                    閉じる
+                  </Button>
+                </Tooltip>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialogOverlay>
+        </AlertDialog>
+      </Flex>
+    </>
   );
 };

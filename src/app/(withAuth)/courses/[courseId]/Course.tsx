@@ -29,6 +29,7 @@ import {
 } from '../../../../infrastructures/useClient/chakra';
 import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../problems/problemData';
 import {
+  courseIdToName,
   courseIdToProgramIdLists,
   defaultLanguageId,
   languageIdToName,
@@ -78,13 +79,13 @@ export const Course: React.FC<{
   };
 
   return (
-    <main>
-      <Heading as="h1" marginBottom="4">
-        Lessons
-      </Heading>
+    <VStack align="stretch" spacing={6}>
+      <Heading as="h1">{courseIdToName[courseId]}</Heading>
+
+      {/* TODO: Styling. */}
       <Select
-        marginBottom="4"
-        maxW="300"
+        bg="white"
+        maxW="xs"
         placeholder="Select language"
         value={selectedLanguageId}
         onChange={(e) => handleSelectLanguage(e)}
@@ -95,7 +96,8 @@ export const Course: React.FC<{
           </option>
         ))}
       </Select>
-      <VStack align="stretch">
+
+      <VStack align="stretch" bg="white" rounded="md">
         {courseIdToProgramIdLists[courseId].map((programIds, iLesson) => {
           const completedProblemCount = programIds.filter(
             (programId) =>
@@ -205,7 +207,7 @@ export const Course: React.FC<{
           );
         })}
       </VStack>
-    </main>
+    </VStack>
   );
 };
 

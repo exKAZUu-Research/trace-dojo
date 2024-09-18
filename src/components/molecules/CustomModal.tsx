@@ -26,7 +26,7 @@ export const CustomModal: React.FC<CustomModalProps> = ({ body, isOpen, onClose,
           <ModalCloseButton />
           <ModalBody>{body}</ModalBody>
           <ModalFooter>
-            <Button colorScheme="blue" onClick={onClose}>
+            <Button colorScheme="brand" onClick={onClose}>
               閉じる
             </Button>
           </ModalFooter>

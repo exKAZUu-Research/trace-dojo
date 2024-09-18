@@ -3,14 +3,12 @@ import React from 'react';
 import {
   Box,
   Table,
-  TableCaption,
   TableContainer,
   Tbody,
   Td,
   Th,
   Thead,
   Tr,
-  VStack,
 } from '../../../../../../infrastructures/useClient/chakra';
 import { charToColor, type TraceItemVar } from '../../../../../../problems/traceProgram';
 
@@ -38,25 +36,27 @@ export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
   }
 
   return (
-    <VStack>
-      <TableContainer w="100%">
-        <Table variant="simple">
-          <TableCaption placement="top">
-            青色の行の<strong>実行後</strong>のキャラクター
-          </TableCaption>
+    <>
+      <TableContainer maxW="unset" mx={-5}>
+        <Table>
           <Thead>
             <Tr>
-              <Th>変数名</Th>
-              <Th>線の色</Th>
-              <Th>向き</Th>
+              <Th>タートル名</Th>
+              <Th w="0">線の色</Th>
+              <Th w="0">向き</Th>
             </Tr>
           </Thead>
           <Tbody>
             {characterVars?.map((variable) => (
               <Tr key={variable.key}>
                 <Td>{variable.key}</Td>
-                <Td>
-                  <Box bg={charToColor[variable.value.color as keyof typeof charToColor]} h="20px" w="20px" />
+                <Td py={0}>
+                  <Box
+                    bg={charToColor[variable.value.color as keyof typeof charToColor]}
+                    h="1.5em"
+                    rounded="md"
+                    w="1.5em"
+                  />
                 </Td>
                 <Td>{dirCharToJapanese[variable.value.dir as keyof typeof dirCharToJapanese]}</Td>
               </Tr>
@@ -64,27 +64,27 @@ export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
           </Tbody>
         </Table>
       </TableContainer>
-      <TableContainer mb="4" w="100%">
-        <Table variant="simple">
-          <TableCaption placement="top">
-            青色の行の<strong>実行後</strong>の変数
-          </TableCaption>
+
+      <TableContainer maxW="unset" mx={-5}>
+        <Table>
           <Thead>
             <Tr>
               <Th>変数名</Th>
-              <Th>値</Th>
+              <Th isNumeric w="0">
+                値
+              </Th>
             </Tr>
           </Thead>
           <Tbody>
             {otherVars?.map((variable) => (
               <Tr key={variable.key}>
                 <Td>{variable.key}</Td>
-                <Td>{variable.value}</Td>
+                <Td isNumeric>{variable.value}</Td>
               </Tr>
             ))}
           </Tbody>
         </Table>
       </TableContainer>
-    </VStack>
+    </>
   );
 };

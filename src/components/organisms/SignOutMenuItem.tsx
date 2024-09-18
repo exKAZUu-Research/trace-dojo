@@ -1,17 +1,18 @@
 'use client';
+
 import { useRouter } from 'next/navigation';
 import React from 'react';
-import { FaSignOutAlt } from 'react-icons/fa';
+import { MdOutlineLogout } from 'react-icons/md';
 import { signOut } from 'supertokens-auth-react/recipe/session';
 
 import { clearAllCaches } from '../../asyncFunctions/cache/actions';
-import { MenuItem } from '../../infrastructures/useClient/chakra';
+import { Icon, MenuItem } from '../../infrastructures/useClient/chakra';
 
 export const SignOutMenuItem: React.FC = () => {
   const router = useRouter();
   return (
     <MenuItem
-      icon={<FaSignOutAlt size="1.5em" />}
+      icon={<Icon as={MdOutlineLogout} />}
       onClick={async () => {
         await signOut();
         router.push('/');
