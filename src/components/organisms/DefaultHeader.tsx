@@ -21,7 +21,10 @@ import { getNullableSessionOnServer } from '../../utils/session';
 
 import { SignOutMenuItem } from './SignOutMenuItem';
 
-const MENU_ITEMS: readonly [string, string][] = [['/courses', '科目一覧']];
+const MENU_ITEMS: readonly [string, string][] = [
+  ['/courses', '科目一覧'],
+  ['/usage', '使い方'],
+];
 
 export const DefaultHeader: NextPage = async () => {
   const { session } = await getNullableSessionOnServer();
@@ -64,9 +67,14 @@ export const DefaultHeader: NextPage = async () => {
             </MenuList>
           </Menu>
         ) : (
-          <Button as={NextLink} colorScheme="brand" href="/auth">
-            サインイン
-          </Button>
+          <>
+            <Button as={NextLink} colorScheme="brand" href="/auth" mr={2}>
+              サインイン
+            </Button>
+            <Button as={NextLink} colorScheme="brand" href="/auth?show=signup">
+              新規登録
+            </Button>
+          </>
         )}
       </Box>
     </HStack>
