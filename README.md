@@ -5,6 +5,11 @@
 
 An educational web app for training program tracing skills.
 
+## Releases
+
+- Staging: https://trace-dojo-staging.fly.dev/
+- Production: https://trace-dojo.fly.dev/
+
 ## Getting Started
 
 ### Installation
