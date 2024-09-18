@@ -17,13 +17,7 @@ export function setRouter(router: ReturnType<typeof useRouter>, pathName: string
 export const frontendConfig = (): SuperTokensConfig => {
   return {
     appInfo,
-    recipeList: [
-      EmailPasswordReact.init(),
-      ...(process.env.NEXT_PUBLIC_WB_VERSION === 'staging' || process.env.NEXT_PUBLIC_WB_VERSION === 'production'
-        ? [EmailVerificationReact.init({ mode: 'REQUIRED' })]
-        : []),
-      SessionReact.init(),
-    ],
+    recipeList: [EmailPasswordReact.init(), EmailVerificationReact.init({ mode: 'REQUIRED' }), SessionReact.init()],
     windowHandler: (original) => ({
       ...original,
       location: {

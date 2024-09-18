@@ -1,6 +1,7 @@
 import SuperTokens from 'supertokens-node';
 import DashboardNode from 'supertokens-node/recipe/dashboard';
 import EmailPasswordNode from 'supertokens-node/recipe/emailpassword';
+import EmailVerificationNode from 'supertokens-node/recipe/emailverification';
 import SessionNode from 'supertokens-node/recipe/session';
 import UserRolesNode from 'supertokens-node/recipe/userroles';
 import type { TypeInput } from 'supertokens-node/types';
@@ -34,6 +35,9 @@ export const backendConfig = (): TypeInput => {
             };
           },
         },
+      }),
+      EmailVerificationNode.init({
+        mode: process.env.NEXT_PUBLIC_WB_ENV === 'test' ? 'OPTIONAL' : 'REQUIRED',
       }),
       SessionNode.init(),
       UserRolesNode.init(),
