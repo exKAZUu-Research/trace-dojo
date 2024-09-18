@@ -3,8 +3,6 @@
 import type { UserAnswer } from '@prisma/client';
 import Image from 'next/image';
 import NextLink from 'next/link';
-import React, { useEffect } from 'react';
-import { useLocalStorage } from 'usehooks-ts';
 
 import {
   Accordion,
@@ -16,7 +14,6 @@ import {
   Flex,
   Heading,
   HStack,
-  Select,
   Table,
   TableContainer,
   Tag,
@@ -28,15 +25,8 @@ import {
   VStack,
 } from '../../../../infrastructures/useClient/chakra';
 import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../problems/problemData';
-import {
-  courseIdToProgramIdLists,
-  defaultLanguageId,
-  languageIdToName,
-  programIdToName,
-  visibleLanguageIds,
-} from '../../../../problems/problemData';
+import { courseIdToProgramIdLists, programIdToName } from '../../../../problems/problemData';
 import type { UserProblemSessionWithUserAnswers } from '../../../../utils/fetch';
-import { selectedLanguageIdKey } from '../../../lib/sessionStorage';
 
 const SPECIFIED_COMPLETION_COUNT = 2;
 
@@ -60,47 +50,17 @@ export const Course: React.FC<{
   userCompletedProblems: { programId: string; languageId: VisibleLanguageId }[];
   userProblemSessions: UserProblemSessionWithUserAnswers[];
 }> = ({ courseId, userCompletedProblems, userProblemSessions }) => {
-  const [selectedLanguageId, setSelectedLanguageId] = useLocalStorage<VisibleLanguageId>(
-    selectedLanguageIdKey,
-    defaultLanguageId
-  );
-  useEffect(() => {
-    // 念の為、未知の言語が指定された場合、デフォルト言語に設定し直す。
-    if (!visibleLanguageIds.includes(selectedLanguageId)) {
-      setSelectedLanguageId(defaultLanguageId);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLanguageId]);
-
-  const handleSelectLanguage = (event: React.ChangeEvent<HTMLSelectElement>): void => {
-    const inputValue = event.target.value;
-    setSelectedLanguageId(inputValue as VisibleLanguageId);
-  };
-
   return (
     <main>
       <Heading as="h1" marginBottom="4">
         Lessons
       </Heading>
-      <Select
-        marginBottom="4"
-        maxW="300"
-        placeholder="Select language"
-        value={selectedLanguageId}
-        onChange={(e) => handleSelectLanguage(e)}
-      >
-        {visibleLanguageIds.map((languageId) => (
-          <option key={languageId} value={languageId}>
-            {languageIdToName[languageId]}
-          </option>
-        ))}
-      </Select>
+
       <VStack align="stretch">
         {courseIdToProgramIdLists[courseId].map((programIds, iLesson) => {
           const completedProblemCount = programIds.filter(
             (programId) =>
-              countUserCompletedProblems(userCompletedProblems, programId, selectedLanguageId) >=
-              SPECIFIED_COMPLETION_COUNT
+              countUserCompletedProblems(userCompletedProblems, programId, 'java') >= SPECIFIED_COMPLETION_COUNT
           ).length;
 
           return (
@@ -151,25 +111,21 @@ export const Course: React.FC<{
                               (session) =>
                                 session.courseId === courseId &&
                                 session.programId === programId &&
-                                session.languageId === selectedLanguageId &&
                                 !session.finishedAt &&
                                 !session.isCompleted
                             );
                             const firstSession = userProblemSessions.find(
-                              (session) =>
-                                session.courseId === courseId &&
-                                session.programId === programId &&
-                                session.languageId === selectedLanguageId
+                              (session) => session.courseId === courseId && session.programId === programId
                             );
                             const completedProblemCount = countUserCompletedProblems(
                               userCompletedProblems,
                               programId,
-                              selectedLanguageId
+                              'java'
                             );
                             return (
                               <Tr key={programId}>
                                 <Td>
-                                  <NextLink passHref href={`${courseId}/${selectedLanguageId}/${programId}`}>
+                                  <NextLink passHref href={`${courseId}/${programId}`}>
                                     {programIdToName[programId]}
                                   </NextLink>
                                 </Td>

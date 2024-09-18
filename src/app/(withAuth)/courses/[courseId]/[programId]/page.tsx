@@ -1,23 +1,22 @@
 import type { NextPage } from 'next';
 
-import { generateProblem } from '../../../../../../problems/generateProblem';
-import type { CourseId, LanguageId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
-import { getSuspendedUserProblemSession } from '../../../../../../utils/fetch';
-import { getNonNullableSessionOnServer } from '../../../../../../utils/session';
-import { upsertUserProblemSession } from '../../../../../../utils/upsertUserProblemSession';
+import { generateProblem } from '../../../../../problems/generateProblem';
+import type { CourseId, LanguageId, ProgramId } from '../../../../../problems/problemData';
+import { getSuspendedUserProblemSession } from '../../../../../utils/fetch';
+import { getNonNullableSessionOnServer } from '../../../../../utils/session';
+import { upsertUserProblemSession } from '../../../../../utils/upsertUserProblemSession';
 
 import { BaseProblem } from './BaseProblem';
 
 const ProblemPage: NextPage<{
-  params: { courseId: CourseId; languageId: VisibleLanguageId; programId: ProgramId };
+  params: { courseId: CourseId; programId: ProgramId };
 }> = async ({ params }) => {
   const session = await getNonNullableSessionOnServer();
   const userId = session.superTokensUserId;
   const courseId = params.courseId;
-  const languageId = params.languageId;
   const programId = params.programId;
 
-  let userProblemSession = await getSuspendedUserProblemSession(userId, courseId, programId, languageId);
+  let userProblemSession = await getSuspendedUserProblemSession(userId, courseId, programId, 'java');
   if (!userProblemSession) {
     const problemVariableSeed = Date.now().toString();
     const problemType = 'executionResult';
@@ -29,7 +28,7 @@ const ProblemPage: NextPage<{
       userId,
       courseId,
       programId,
-      languageId,
+      'java',
       problemVariableSeed,
       problemType,
       0,
@@ -54,7 +53,7 @@ const ProblemPage: NextPage<{
     problem && (
       <BaseProblem
         courseId={params.courseId}
-        languageId={languageId}
+        languageId="java"
         problem={problem}
         programId={params.programId}
         userId={session.superTokensUserId}

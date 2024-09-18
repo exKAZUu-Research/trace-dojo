@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import { CustomModal } from '../../../../../../components/molecules/CustomModal';
-import { SyntaxHighlighter } from '../../../../../../components/organisms/SyntaxHighlighter';
-import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
-import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
+import { CustomModal } from '../../../../../components/molecules/CustomModal';
+import { SyntaxHighlighter } from '../../../../../components/organisms/SyntaxHighlighter';
+import type { TurtleGraphicsHandle } from '../../../../../components/organisms/TurtleGraphics';
+import { TurtleGraphics } from '../../../../../components/organisms/TurtleGraphics';
 import {
   AlertDialog,
   AlertDialogBody,
@@ -20,10 +20,10 @@ import {
   Tooltip,
   useDisclosure,
   VStack,
-} from '../../../../../../infrastructures/useClient/chakra';
-import type { Problem } from '../../../../../../problems/generateProblem';
-import type { ProblemType } from '../../../../../../types';
-import { isMacOS } from '../../../../../../utils/platform';
+} from '../../../../../infrastructures/useClient/chakra';
+import type { Problem } from '../../../../../problems/generateProblem';
+import type { ProblemType } from '../../../../../types';
+import { isMacOS } from '../../../../../utils/platform';
 
 import { Variables } from './Variables';
 

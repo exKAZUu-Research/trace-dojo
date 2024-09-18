@@ -4,13 +4,13 @@ import type { UserProblemSession } from '@prisma/client';
 import { useEffect, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
 
-import { INTERVAL_MS_OF_IDLE_TIMER } from '../../../../../../constants';
-import { backendTrpcReact } from '../../../../../../infrastructures/trpcBackend/client';
-import { Heading, VStack } from '../../../../../../infrastructures/useClient/chakra';
-import type { Problem } from '../../../../../../problems/generateProblem';
-import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
-import { getExplanation, programIdToName } from '../../../../../../problems/problemData';
-import type { ProblemType } from '../../../../../../types';
+import { INTERVAL_MS_OF_IDLE_TIMER } from '../../../../../constants';
+import { backendTrpcReact } from '../../../../../infrastructures/trpcBackend/client';
+import { Heading, VStack } from '../../../../../infrastructures/useClient/chakra';
+import type { Problem } from '../../../../../problems/generateProblem';
+import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../problems/problemData';
+import { getExplanation, programIdToName } from '../../../../../problems/problemData';
+import type { ProblemType } from '../../../../../types';
 
 import { CheckpointProblem, ExecutionResultProblem, StepProblem } from './Problems';
 
