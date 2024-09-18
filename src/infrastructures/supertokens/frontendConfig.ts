@@ -2,6 +2,7 @@ import type { useRouter } from 'next/navigation';
 import SuperTokensReact from 'supertokens-auth-react';
 import type { SuperTokensConfig } from 'supertokens-auth-react/lib/build/types';
 import EmailPasswordReact from 'supertokens-auth-react/recipe/emailpassword';
+import EmailVerificationReact from 'supertokens-auth-react/recipe/emailverification';
 import SessionReact from 'supertokens-auth-react/recipe/session';
 
 import { appInfo } from './appInfo';
@@ -16,7 +17,13 @@ export function setRouter(router: ReturnType<typeof useRouter>, pathName: string
 export const frontendConfig = (): SuperTokensConfig => {
   return {
     appInfo,
-    recipeList: [EmailPasswordReact.init(), SessionReact.init()],
+    recipeList: [
+      EmailPasswordReact.init(),
+      ...(process.env.NEXT_PUBLIC_WB_VERSION === 'staging' || process.env.NEXT_PUBLIC_WB_VERSION === 'production'
+        ? [EmailVerificationReact.init({ mode: 'REQUIRED' })]
+        : []),
+      SessionReact.init(),
+    ],
     windowHandler: (original) => ({
       ...original,
       location: {
