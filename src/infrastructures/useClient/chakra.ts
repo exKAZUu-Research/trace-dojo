@@ -86,6 +86,7 @@ export {
   PopoverContent,
   PopoverTrigger,
   Portal,
+  Progress,
   Radio,
   RadioGroup,
   Select,

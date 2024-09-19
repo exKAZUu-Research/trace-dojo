@@ -1,25 +1,24 @@
 'use client';
 
 import type { UserAnswer } from '@prisma/client';
-import Image from 'next/image';
 import NextLink from 'next/link';
 import React, { useEffect } from 'react';
+import { MdCheckCircle, MdCheckCircleOutline, MdOutlineVerified, MdVerified } from 'react-icons/md';
 import { useLocalStorage } from 'usehooks-ts';
 
 import {
-  Accordion,
-  AccordionButton,
-  AccordionIcon,
-  AccordionItem,
-  AccordionPanel,
   Box,
-  Flex,
+  Card,
+  CardBody,
+  CardHeader,
   Heading,
   HStack,
+  Icon,
   Link,
+  Progress,
   Select,
+  SimpleGrid,
   Table,
-  TableContainer,
   Tag,
   Tbody,
   Td,
@@ -40,7 +39,7 @@ import {
 import type { UserProblemSessionWithUserAnswers } from '../../../../utils/fetch';
 import { selectedLanguageIdKey } from '../../../lib/sessionStorage';
 
-const SPECIFIED_COMPLETION_COUNT = 2;
+const SPECIFIED_COMPLETION_COUNT = 1;
 
 const countFailedAnswers = (userProblemSession: UserProblemSessionWithUserAnswers | undefined): number => {
   if (!userProblemSession) return 0;
@@ -98,114 +97,127 @@ export const Course: React.FC<{
         ))}
       </Select>
 
-      <VStack align="stretch" bg="white" rounded="md">
-        <Accordion allowMultiple allowToggle>
-          {courseIdToProgramIdLists[courseId].map((programIds, iLesson) => {
-            const completedProblemCount = programIds.filter(
-              (programId) =>
-                countUserCompletedProblems(userCompletedProblems, programId, selectedLanguageId) >=
-                SPECIFIED_COMPLETION_COUNT
-            ).length;
+      <SimpleGrid columnGap={4} columns={{ base: 1, lg: 2, xl: 3 }} rowGap={6}>
+        {courseIdToProgramIdLists[courseId].map((programIds, lessonIndex) => {
+          const completedProblemCount = programIds.filter(
+            (programId) =>
+              countUserCompletedProblems(userCompletedProblems, programId, selectedLanguageId) >=
+              SPECIFIED_COMPLETION_COUNT
+          ).length;
 
-            return (
-              <AccordionItem key={iLesson}>
-                <AccordionButton>
-                  <Box flex="1">
-                    <HStack spacing="50%">
-                      <Box>第{iLesson + 1}回</Box>
-                      <HStack>
-                        <Box>
-                          Completed {completedProblemCount} / {programIds.length}
-                        </Box>
-                        {completedProblemCount >= programIds.length && (
-                          <Box h={4} ml={2} position={'relative'} w={4}>
-                            <Image fill alt="完了の王冠" src="/crown.png" />
-                          </Box>
-                        )}
-                      </HStack>
-                    </HStack>
-                  </Box>
-                  <AccordionIcon />
-                </AccordionButton>
-                <AccordionPanel pb={4}>
-                  <TableContainer>
-                    <Table>
-                      <Thead>
-                        <Tr>
-                          <Th textAlign="left">プログラム</Th>
-                          <Th></Th>
-                          <Th align="left">進捗</Th>
-                          <Th align="left">
-                            初回セッションの
-                            <br />
-                            不正解回数
-                          </Th>
-                          <Th align="left">
-                            初回セッションの
-                            <br />
-                            所要時間（秒）
-                          </Th>
+          const isLessonCompleted = completedProblemCount >= programIds.length;
+
+          return (
+            <Card key={lessonIndex}>
+              <CardHeader as={HStack} gap={3} pb={0}>
+                <Icon
+                  as={isLessonCompleted ? MdVerified : MdOutlineVerified}
+                  color={isLessonCompleted ? 'brand.500' : 'gray.200'}
+                  fontSize="3xl"
+                  mx="-0.125em"
+                />
+                <Heading size="md">第{lessonIndex + 1}回</Heading>
+              </CardHeader>
+
+              <CardBody align="stretch" as={VStack} pb={2}>
+                <Progress
+                  colorScheme="brand"
+                  max={programIds.length}
+                  rounded="sm"
+                  size="sm"
+                  value={completedProblemCount}
+                />
+
+                <Table
+                  mx={-5}
+                  sx={{
+                    'td:not(:first-of-type), th:not(:first-of-type)': { ps: 1.5 },
+                    'td:not(:last-of-type), th:not(:last-of-type)': { pe: 1.5 },
+                  }}
+                  w="unset"
+                >
+                  <Thead>
+                    <Tr whiteSpace="nowrap">
+                      <Th w="0" />
+                      <Th w="0" />
+                      <Th isNumeric w="0">
+                        初回不正解
+                      </Th>
+                      <Th isNumeric w="0">
+                        初回所要時間
+                      </Th>
+                    </Tr>
+                  </Thead>
+
+                  <Tbody>
+                    {programIds.map((programId) => {
+                      const suspendedSession = userProblemSessions.find(
+                        (session) =>
+                          session.courseId === courseId &&
+                          session.programId === programId &&
+                          session.languageId === selectedLanguageId &&
+                          !session.finishedAt &&
+                          !session.isCompleted
+                      );
+                      const firstSession = userProblemSessions.find(
+                        (session) =>
+                          session.courseId === courseId &&
+                          session.programId === programId &&
+                          session.languageId === selectedLanguageId
+                      );
+                      const completedProblemCount = countUserCompletedProblems(
+                        userCompletedProblems,
+                        programId,
+                        selectedLanguageId
+                      );
+                      const isProgramCompleted = completedProblemCount >= SPECIFIED_COMPLETION_COUNT;
+
+                      return (
+                        <Tr key={programId}>
+                          <Td>
+                            <Icon
+                              as={isProgramCompleted ? MdCheckCircle : MdCheckCircleOutline}
+                              color={isProgramCompleted ? 'brand.500' : 'gray.200'}
+                              fontSize="lg"
+                              mx="-0.125em"
+                            />
+                          </Td>
+                          <Td textOverflow="ellipsis" whiteSpace="nowrap">
+                            <VStack align="flex-start">
+                              {suspendedSession && (
+                                <Tag colorScheme="brand" fontWeight="bold" size="sm" variant="solid">
+                                  挑戦中
+                                </Tag>
+                              )}
+                              <Link as={NextLink} href={`${courseId}/${selectedLanguageId}/${programId}`}>
+                                {programIdToName[programId]}
+                              </Link>
+                            </VStack>
+                          </Td>
+                          <Td isNumeric color="gray.600">
+                            {countFailedAnswers(firstSession)}
+                            <Box as="span" fontSize="xs" ms={1}>
+                              回
+                            </Box>
+                          </Td>
+                          <Td isNumeric color="gray.600">
+                            {typeof firstSession?.timeSpent === 'number'
+                              ? Math.floor(totalAnswerTimeSpent(firstSession) / 1000)
+                              : 0}
+                            <Box as="span" fontSize="xs" ms={1}>
+                              秒
+                            </Box>
+                          </Td>
                         </Tr>
-                      </Thead>
-                      <Tbody>
-                        {programIds.map((programId) => {
-                          const suspendedSession = userProblemSessions.find(
-                            (session) =>
-                              session.courseId === courseId &&
-                              session.programId === programId &&
-                              session.languageId === selectedLanguageId &&
-                              !session.finishedAt &&
-                              !session.isCompleted
-                          );
-                          const firstSession = userProblemSessions.find(
-                            (session) =>
-                              session.courseId === courseId &&
-                              session.programId === programId &&
-                              session.languageId === selectedLanguageId
-                          );
-                          const completedProblemCount = countUserCompletedProblems(
-                            userCompletedProblems,
-                            programId,
-                            selectedLanguageId
-                          );
-                          return (
-                            <Tr key={programId}>
-                              <Td>
-                                <Link as={NextLink} href={`${courseId}/${selectedLanguageId}/${programId}`}>
-                                  {programIdToName[programId]}
-                                </Link>
-                              </Td>
-                              <Td>{suspendedSession && <Tag>挑戦中</Tag>}</Td>
-                              <Td>
-                                <Flex>
-                                  <p>
-                                    {completedProblemCount} / {SPECIFIED_COMPLETION_COUNT}
-                                  </p>
-                                  {completedProblemCount >= SPECIFIED_COMPLETION_COUNT && (
-                                    <Box h={4} ml={2} position={'relative'} w={4}>
-                                      <Image fill alt="完了の王冠" src="/crown.png" />
-                                    </Box>
-                                  )}
-                                </Flex>
-                              </Td>
-                              <Td>{countFailedAnswers(firstSession)}</Td>
-                              <Td>
-                                {typeof firstSession?.timeSpent === 'number'
-                                  ? Math.floor(totalAnswerTimeSpent(firstSession) / 1000)
-                                  : 0}
-                              </Td>
-                            </Tr>
-                          );
-                        })}
-                      </Tbody>
-                    </Table>
-                  </TableContainer>
-                </AccordionPanel>
-              </AccordionItem>
-            );
-          })}
-        </Accordion>
-      </VStack>
+                      );
+                    })}
+                  </Tbody>
+                </Table>
+              </CardBody>
+            </Card>
+          );
+        })}
+      </SimpleGrid>
     </VStack>
   );
 };
