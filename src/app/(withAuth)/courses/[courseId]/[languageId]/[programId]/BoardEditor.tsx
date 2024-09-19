@@ -1,7 +1,7 @@
 'use client';
 
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { FaArrowRotateLeft, FaArrowRotateRight, FaTrashCan } from 'react-icons/fa6';
+import { MdOutlineDelete, MdTurnLeft, MdTurnRight } from 'react-icons/md';
 
 import {
   TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR,
@@ -15,6 +15,7 @@ import {
   Grid,
   Heading,
   HStack,
+  Icon,
   IconButton,
   Spacer,
   VStack,
@@ -302,7 +303,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                     colorScheme="brand"
                     gridColumnStart={1}
                     gridRowStart={2}
-                    icon={<FaArrowRotateLeft />}
+                    icon={<Icon as={MdTurnLeft} />}
                     size="sm"
                     variant="outline"
                     onClick={() => void handleClickCharacterTurnLeftButton()}
@@ -312,7 +313,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                     colorScheme="brand"
                     gridColumnStart={3}
                     gridRowStart={2}
-                    icon={<FaArrowRotateRight />}
+                    icon={<Icon as={MdTurnRight} />}
                     size="sm"
                     variant="outline"
                     onClick={() => void handleClickCharacterTurnRightButton()}
@@ -321,7 +322,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                 <HStack justify="flex-end">
                   <Button
                     colorScheme="brand"
-                    leftIcon={<FaTrashCan />}
+                    leftIcon={<Icon as={MdOutlineDelete} />}
                     size="sm"
                     variant="outline"
                     onClick={() => void handleRemoveCharacterButton(selectedCharacter)}
