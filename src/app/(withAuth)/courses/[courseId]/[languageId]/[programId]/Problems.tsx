@@ -4,8 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import { MdOutlineCheckCircleOutline, MdOutlineInfo } from 'react-icons/md';
 
 import { CustomModal } from '../../../../../../components/molecules/CustomModal';
-import type { TurtleGraphicsHandle } from '../../../../../../components/organisms/TurtleGraphics';
-import { TurtleGraphics } from '../../../../../../components/organisms/TurtleGraphics';
 import {
   AlertDialog,
   AlertDialogBody,
@@ -28,6 +26,8 @@ import type { Problem } from '../../../../../../problems/generateProblem';
 import type { ProblemType } from '../../../../../../types';
 import { isMacOS } from '../../../../../../utils/platform';
 
+import { BoardEditor } from './BoardEditor';
+import type { TurtleGraphicsHandle } from './BoardEditor';
 import { BoardViewer } from './BoardViewer';
 import { SyntaxHighlighter } from './SyntaxHighlighter';
 import { Variables } from './Variables';
@@ -255,7 +255,7 @@ const ProblemComponent: React.FC<ProblemProps & { type: 'executionResult' | 'che
                     </>
                   )}
                 </Box>
-                の盤面を作成してください。 マスを右クリックすると白色に戻せます。
+                の盤面を作成してください。
               </div>
 
               <HStack spacing={4}>
@@ -306,12 +306,12 @@ const ProblemComponent: React.FC<ProblemProps & { type: 'executionResult' | 'che
             />
           </VStack>
 
-          {type !== 'executionResult' && (
+          {type !== 'executionResult' && problem.sidToLineIndex.get(problem.traceItems[beforeTraceItemIndex]?.sid) && (
             <VStack align="stretch" as={Card} bg="gray.50" p={5} spacing={6}>
               <VStack align="stretch">
                 <Heading size="md">
                   <Box as="span" bgColor="orange.100" px={0.5} rounded="sm">
-                    {problem.sidToLineIndex.get(problem.traceItems[beforeTraceItemIndex].sid)}行目
+                    {problem.sidToLineIndex.get(problem.traceItems[beforeTraceItemIndex]?.sid)}行目
                   </Box>
                   を実行した後の盤面
                 </Heading>
@@ -320,7 +320,11 @@ const ProblemComponent: React.FC<ProblemProps & { type: 'executionResult' | 'che
                 </Box>
               </VStack>
 
-              <BoardViewer alignSelf="center" traceItem={problem.traceItems[beforeTraceItemIndex]} />
+              <BoardViewer
+                alignSelf="center"
+                board={problem.traceItems[beforeTraceItemIndex]?.board}
+                vars={problem.traceItems[beforeTraceItemIndex]?.vars}
+              />
 
               <Variables traceItemVars={problem.traceItems[beforeTraceItemIndex]?.vars} />
             </VStack>
@@ -328,17 +332,15 @@ const ProblemComponent: React.FC<ProblemProps & { type: 'executionResult' | 'che
         </VStack>
 
         <VStack align="stretch" flexBasis={0} flexGrow={1} spacing="4">
-          <VStack align="center" w="100%">
-            <TurtleGraphics
-              ref={turtleGraphicsRef}
-              beforeTraceItem={problem.traceItems[beforeTraceItemIndex]}
-              currentTraceItem={problem.traceItems[currentTraceItemIndex]}
-              isEditable={true}
-              problem={problem}
-            />
-          </VStack>
+          <BoardEditor
+            ref={turtleGraphicsRef}
+            beforeTraceItem={problem.traceItems[beforeTraceItemIndex]}
+            currentTraceItem={problem.traceItems[currentTraceItemIndex]}
+            isEditable={true}
+            problem={problem}
+          />
 
-          <HStack justify="flex-end">
+          <HStack justify="space-between">
             <Button colorScheme="brand" variant="outline" onClick={() => handleClickResetButton()}>
               リセット
             </Button>

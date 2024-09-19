@@ -1,8 +1,8 @@
 import { expect, test } from 'vitest';
 
 import {
-  TURTLE_GRAPHICS_GRID_COLUMNS as GRID_COLUMNS,
-  TURTLE_GRAPHICS_GRID_ROWS as GRID_ROWS,
+  TURTLE_GRAPHICS_BOARD_COLUMNS as GRID_COLUMNS,
+  TURTLE_GRAPHICS_BOARD_ROWS as GRID_ROWS,
 } from '../../src/constants';
 import { generateProblem } from '../../src/problems/generateProblem';
 import type { TraceItem, CharacterTrace } from '../../src/problems/traceProgram';
