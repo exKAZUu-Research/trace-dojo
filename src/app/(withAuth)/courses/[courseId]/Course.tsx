@@ -25,7 +25,7 @@ import {
   VStack,
 } from '../../../../infrastructures/useClient/chakra';
 import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../problems/problemData';
-import { courseIdToProgramIdLists, programIdToName } from '../../../../problems/problemData';
+import { courseIdToProgramIdLists, programIdToName, ProgramIdToUUIDLists } from '../../../../problems/problemData';
 import type { UserProblemSessionWithUserAnswers } from '../../../../utils/fetch';
 
 const SPECIFIED_COMPLETION_COUNT = 2;
@@ -129,7 +129,10 @@ export const Course: React.FC<{
                             return (
                               <Tr key={programId}>
                                 <Td>
-                                  <NextLink passHref href={`${courseId}/${programId}`}>
+                                  <NextLink
+                                    passHref
+                                    href={`${courseId}/lecture${iLesson + 1}-${ProgramIdToUUIDLists[programId]}`}
+                                  >
                                     {programIdToName[programId]}
                                   </NextLink>
                                 </Td>

@@ -1,7 +1,12 @@
 import type { NextPage } from 'next';
 
 import { generateProblem } from '../../../../../problems/generateProblem';
-import type { CourseId, LanguageId, ProgramId } from '../../../../../problems/problemData';
+import {
+  UUIDToProgramIdLists,
+  type CourseId,
+  type LanguageId,
+  type ProgramId,
+} from '../../../../../problems/problemData';
 import { getSuspendedUserProblemSession } from '../../../../../utils/fetch';
 import { getNonNullableSessionOnServer } from '../../../../../utils/session';
 import { upsertUserProblemSession } from '../../../../../utils/upsertUserProblemSession';
@@ -9,12 +14,13 @@ import { upsertUserProblemSession } from '../../../../../utils/upsertUserProblem
 import { BaseProblem } from './BaseProblem';
 
 const ProblemPage: NextPage<{
-  params: { courseId: CourseId; programId: ProgramId };
+  params: { courseId: CourseId; uuid: string };
 }> = async ({ params }) => {
   const session = await getNonNullableSessionOnServer();
   const userId = session.superTokensUserId;
   const courseId = params.courseId;
-  const programId = params.programId;
+  const uuid = params.uuid.split('-').slice(1).join('-');
+  const programId = UUIDToProgramIdLists[uuid];
 
   let userProblemSession = await getSuspendedUserProblemSession(userId, courseId, programId, 'java');
   if (!userProblemSession) {
@@ -55,7 +61,7 @@ const ProblemPage: NextPage<{
         courseId={params.courseId}
         languageId="java"
         problem={problem}
-        programId={params.programId}
+        programId={programId as ProgramId}
         userId={session.superTokensUserId}
         userProblemSession={userProblemSession}
       />
