@@ -232,11 +232,12 @@ const ProblemComponent: React.FC<ProblemProps & { type: 'executionResult' | 'che
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
     <>
-      <Flex gap={4}>
+      <Flex gap={6}>
         <VStack align="stretch" flexBasis={0} flexGrow={1} minW={0} spacing={4}>
           <VStack align="stretch" as={Card} overflow="hidden" spacing={0}>
             <VStack align="stretch" borderBottomWidth="1px" p={5}>
@@ -269,7 +270,7 @@ const ProblemComponent: React.FC<ProblemProps & { type: 'executionResult' | 'che
                   onClose={onHelpModalClose}
                 />
 
-                {explanation && (
+                {explanation && explanation.title && (
                   <>
                     <Button
                       leftIcon={<Icon as={MdOutlineCheckCircleOutline} />}

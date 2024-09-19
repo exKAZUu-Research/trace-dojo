@@ -2,6 +2,8 @@ import React from 'react';
 
 import {
   Box,
+  HStack,
+  StackDivider,
   Table,
   TableContainer,
   Tbody,
@@ -36,8 +38,8 @@ export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
   }
 
   return (
-    <>
-      <TableContainer maxW="unset" mx={-5}>
+    <HStack align="flex-start" divider={<StackDivider />} mx={-5}>
+      <TableContainer flexBasis={0} flexGrow={1} maxW="unset">
         <Table>
           <Thead>
             <Tr>
@@ -49,7 +51,7 @@ export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
           <Tbody>
             {characterVars?.map((variable) => (
               <Tr key={variable.key}>
-                <Td>{variable.key}</Td>
+                <Td fontFamily="mono">{variable.key}</Td>
                 <Td py={0}>
                   <Box
                     bg={charToColor[variable.value.color as keyof typeof charToColor]}
@@ -65,7 +67,7 @@ export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
         </Table>
       </TableContainer>
 
-      <TableContainer maxW="unset" mx={-5}>
+      <TableContainer flexBasis={0} flexGrow={1} maxW="unset">
         <Table>
           <Thead>
             <Tr>
@@ -78,13 +80,15 @@ export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
           <Tbody>
             {otherVars?.map((variable) => (
               <Tr key={variable.key}>
-                <Td>{variable.key}</Td>
-                <Td isNumeric>{variable.value}</Td>
+                <Td fontFamily="mono">{variable.key}</Td>
+                <Td isNumeric fontFamily="mono">
+                  {variable.value}
+                </Td>
               </Tr>
             ))}
           </Tbody>
         </Table>
       </TableContainer>
-    </>
+    </HStack>
   );
 };

@@ -32,7 +32,7 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
           minWidth: 'max-content',
         }}
         language={programmingLanguageId === 'c' ? 'cpp' : programmingLanguageId}
-        lineNumberStyle={{ minWidth: '1rem', marginRight: '2rem', paddingRight: 0 }}
+        lineNumberStyle={{ minWidth: '1.5rem', marginRight: '2rem', paddingRight: 0 }}
         lineProps={(lineNumber) => {
           const style: React.CSSProperties = { padding: '0 1rem', backgroundColor: '' };
           // チェックポイント問題・ステップ問題のハイライト

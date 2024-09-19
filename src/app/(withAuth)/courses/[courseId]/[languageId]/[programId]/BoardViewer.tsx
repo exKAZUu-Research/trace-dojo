@@ -15,13 +15,23 @@ import { charToColor } from '../../../../../../problems/traceProgram';
 import type { CharacterTrace, TraceItemVar } from '../../../../../../problems/traceProgram';
 
 const CHAR_TO_BG_COLOR = {
-  '#': 'gray.800',
+  '#': 'gray.600',
   '.': 'white',
   R: 'red.500',
   G: 'green.500',
   B: 'blue.500',
   Y: 'yellow.500',
   P: 'purple.500',
+} as const;
+
+const CHAR_TO_HOVERED_BG_COLOR = {
+  '#': 'gray.900',
+  '.': 'gray.100',
+  R: 'red.600',
+  G: 'green.600',
+  B: 'blue.600',
+  Y: 'yellow.600',
+  P: 'purple.600',
 } as const;
 
 const DIR_TO_TRANSFORM_FUNCTION = {
@@ -75,7 +85,7 @@ export const BoardViewer: React.FC<Props> = ({
 
   return (
     <Grid
-      bg="gray.100"
+      bg="gray.200"
       gap={`${GAP_PX}px`}
       p={`${PADDING_PX}px`}
       position="relative"
@@ -90,13 +100,15 @@ export const BoardViewer: React.FC<Props> = ({
         row.map((cell, columnIndex) => (
           <GridItem
             key={`${rowIndex} ${columnIndex}`}
+            _hover={
+              onCellClick || onCellRightClick
+                ? { bgColor: CHAR_TO_HOVERED_BG_COLOR[cell as keyof typeof CHAR_TO_BG_COLOR] }
+                : undefined
+            }
             bgColor={CHAR_TO_BG_COLOR[cell as keyof typeof CHAR_TO_BG_COLOR]}
             gridColumnStart={columnIndex + 1}
             gridRowStart={ROWS - rowIndex}
             rounded="sm"
-            transitionDuration={enableTransitions ? 'normal' : undefined}
-            transitionProperty={enableTransitions ? 'background-color' : undefined}
-            willChange={enableTransitions ? 'background-color' : undefined}
             onClick={() => void onCellClick?.(columnIndex, rowIndex)}
             onContextMenu={(event) => {
               event.preventDefault();
@@ -139,6 +151,7 @@ export const BoardViewer: React.FC<Props> = ({
           borderWidth="4px"
           h={`${CELL_SIZE_PX + 12}px`}
           left={`${PADDING_PX}px`}
+          pointerEvents="none"
           position="absolute"
           rounded="md"
           style={{
