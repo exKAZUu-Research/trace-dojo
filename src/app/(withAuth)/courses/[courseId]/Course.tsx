@@ -50,6 +50,7 @@ export const Course: React.FC<{
   userCompletedProblems: { programId: string; languageId: VisibleLanguageId }[];
   userProblemSessions: UserProblemSessionWithUserAnswers[];
 }> = ({ courseId, userCompletedProblems, userProblemSessions }) => {
+  const openedProblemIds = new Set(userProblemSessions.map((session) => session.programId));
   return (
     <main>
       <Heading as="h1" marginBottom="4">
@@ -62,6 +63,9 @@ export const Course: React.FC<{
             (programId) =>
               countUserCompletedProblems(userCompletedProblems, programId, 'java') >= SPECIFIED_COMPLETION_COUNT
           ).length;
+
+          const openedProblems = programIds.filter((programId) => openedProblemIds.has(programId));
+          if (openedProblems.length === 0) return;
 
           return (
             <Box key={iLesson}>
@@ -106,7 +110,7 @@ export const Course: React.FC<{
                           </Tr>
                         </Thead>
                         <Tbody>
-                          {programIds.map((programId) => {
+                          {openedProblems.map((programId) => {
                             const suspendedSession = userProblemSessions.find(
                               (session) =>
                                 session.courseId === courseId &&
