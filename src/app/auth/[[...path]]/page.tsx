@@ -4,6 +4,7 @@ import type { NextPage } from 'next';
 import { useEffect, useState } from 'react';
 import { redirectToAuth } from 'supertokens-auth-react';
 import { EmailPasswordPreBuiltUI } from 'supertokens-auth-react/recipe/emailpassword/prebuiltui';
+import { EmailVerificationPreBuiltUI } from 'supertokens-auth-react/recipe/emailverification/prebuiltui';
 import SuperTokens from 'supertokens-auth-react/ui';
 
 import { clearAllCaches } from '../../../asyncFunctions/cache/actions';
@@ -16,7 +17,7 @@ const AuthPage: NextPage = () => {
     // サインイン/アップに伴う画面表示の変更を反映するために、全ページのキャッシュを削除する。
     void clearAllCaches();
 
-    if (SuperTokens.canHandleRoute([EmailPasswordPreBuiltUI])) {
+    if (SuperTokens.canHandleRoute([EmailPasswordPreBuiltUI, EmailVerificationPreBuiltUI])) {
       setLoaded(true);
     } else {
       void redirectToAuth({ redirectBack: false });
@@ -24,7 +25,7 @@ const AuthPage: NextPage = () => {
   }, []);
 
   if (loaded) {
-    return SuperTokens.getRoutingComponent([EmailPasswordPreBuiltUI]);
+    return SuperTokens.getRoutingComponent([EmailPasswordPreBuiltUI, EmailVerificationPreBuiltUI]);
   }
 };
 

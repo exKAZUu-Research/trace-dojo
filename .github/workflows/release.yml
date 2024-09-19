@@ -1,0 +1,15 @@
+name: Release
+on:
+  push:
+    branches:
+      - release
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+jobs:
+  release:
+    uses: exKAZUu-Research/reusable-workflows/.github/workflows/release.yml@main
+    with:
+      skip_build: true
+    secrets:
+      GH_TOKEN: ${{ secrets.GH_BOT_PAT }}

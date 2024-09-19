@@ -29,7 +29,7 @@ type Props = {
 
 export const ProblemPageOnClient: React.FC<Props> = (props) => {
   const uuid = props.params.uuid.split('-').slice(1).join('-');
-  const programId = UUIDToProgramIdLists[uuid];
+  const programId = UUIDToProgramIdLists[uuid] as ProgramId;
   const [suspendedSession, setSuspendedSession] = useState<UserProblemSession>(props.userProblemSession);
   const [problemType, setProblemType] = useState<ProblemType>(
     props.userProblemSession.currentProblemType as ProblemType
@@ -164,7 +164,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     }
   };
 
-  const explanation = getExplanation(programId as ProgramId, 'java');
+  const explanation = getExplanation(programId, 'java');
 
   return (
     <VStack align="stretch" spacing={8}>
@@ -172,7 +172,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
         <Link as={NextLink} color="gray.600" fontWeight="bold" href={`/courses/${props.params.courseId}`}>
           {courseIdToName[props.params.courseId]}
         </Link>
-        <Heading as="h1">{programIdToName[programId as ProgramId]}</Heading>
+        <Heading as="h1">{programIdToName[programId]}</Heading>
       </VStack>
 
       {problemType === 'executionResult' ? (

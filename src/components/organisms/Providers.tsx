@@ -3,12 +3,13 @@
 import { CacheProvider } from '@chakra-ui/next-js';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { usePathname, useRouter } from 'next/navigation';
+import NextTopLoader from 'nextjs-toploader';
 import React from 'react';
 import { SuperTokensWrapper } from 'supertokens-auth-react';
 
 import { ensureSuperTokensReactInit, setRouter } from '../../infrastructures/supertokens/frontendConfig';
 import { backendTrpcReact, backendTrpcReactClient } from '../../infrastructures/trpcBackend/client';
-import { ChakraProvider } from '../../infrastructures/useClient/chakra';
+import { ChakraProvider, useTheme } from '../../infrastructures/useClient/chakra';
 import { theme } from '../../theme';
 
 ensureSuperTokensReactInit();
@@ -24,10 +25,19 @@ export const Providers: React.FC<{ children: React.ReactNode }> = ({ children })
         <QueryClientProvider client={queryClient}>
           {/* Chakra UI */}
           <CacheProvider>
-            <ChakraProvider theme={theme}>{children}</ChakraProvider>
+            <ChakraProvider theme={theme}>
+              <PageTransitionProgressBar />
+              {children}
+            </ChakraProvider>
           </CacheProvider>
         </QueryClientProvider>
       </backendTrpcReact.Provider>
     </SuperTokensWrapper>
   );
+};
+
+const PageTransitionProgressBar: React.FC = () => {
+  const theme = useTheme();
+
+  return <NextTopLoader color={theme.colors.brand[500]} shadow={false} showSpinner={false} />;
 };

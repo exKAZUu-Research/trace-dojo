@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { zfd } from 'zod-form-data';
 
 import { prisma } from '../../../infrastructures/prisma';
-import { Box, Button, FormControl, FormLabel, Input } from '../../../infrastructures/useClient/chakra';
+import { Button, FormControl, FormLabel, Input, VStack } from '../../../infrastructures/useClient/chakra';
 import { getNonNullableSessionOnServer } from '../../../utils/session';
 
 const SettingsPage: NextPage = async () => {
@@ -16,17 +16,18 @@ const SettingsPage: NextPage = async () => {
   });
 
   return (
-    <Box>
-      <form action={updateDisplayName}>
+    <form action={updateDisplayName}>
+      <VStack align="stretch" spacing={4}>
         <FormControl>
           <FormLabel>あなたの表示名</FormLabel>
-          <Input defaultValue={user?.displayName} name="displayName" type="text" />
+          <Input bg="white" defaultValue={user?.displayName} maxW="sm" name="displayName" type="text" />
         </FormControl>
-        <Button colorScheme="blue" mt={4} type="submit">
-          更新
+
+        <Button alignSelf="flex-start" colorScheme="brand" type="submit">
+          保存
         </Button>
-      </form>
-    </Box>
+      </VStack>
+    </form>
   );
 };
 
