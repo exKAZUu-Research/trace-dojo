@@ -2,15 +2,15 @@ import React from 'react';
 
 import {
   Box,
+  HStack,
+  StackDivider,
   Table,
-  TableCaption,
   TableContainer,
   Tbody,
   Td,
   Th,
   Thead,
   Tr,
-  VStack,
 } from '../../../../../../infrastructures/useClient/chakra';
 import { charToColor, type TraceItemVar } from '../../../../../../problems/traceProgram';
 
@@ -38,25 +38,27 @@ export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
   }
 
   return (
-    <VStack>
-      <TableContainer w="100%">
-        <Table variant="simple">
-          <TableCaption placement="top">
-            青色の行の<strong>実行後</strong>のキャラクター
-          </TableCaption>
+    <HStack align="flex-start" divider={<StackDivider />} mx={-5}>
+      <TableContainer flexBasis={0} flexGrow={1} maxW="unset">
+        <Table>
           <Thead>
             <Tr>
-              <Th>変数名</Th>
-              <Th>線の色</Th>
-              <Th>向き</Th>
+              <Th>タートル名</Th>
+              <Th w="0">線の色</Th>
+              <Th w="0">向き</Th>
             </Tr>
           </Thead>
           <Tbody>
             {characterVars?.map((variable) => (
               <Tr key={variable.key}>
-                <Td>{variable.key}</Td>
-                <Td>
-                  <Box bg={charToColor[variable.value.color as keyof typeof charToColor]} h="20px" w="20px" />
+                <Td fontFamily="mono">{variable.key}</Td>
+                <Td py={0}>
+                  <Box
+                    bg={charToColor[variable.value.color as keyof typeof charToColor]}
+                    h="1.5em"
+                    rounded="md"
+                    w="1.5em"
+                  />
                 </Td>
                 <Td>{dirCharToJapanese[variable.value.dir as keyof typeof dirCharToJapanese]}</Td>
               </Tr>
@@ -64,27 +66,29 @@ export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
           </Tbody>
         </Table>
       </TableContainer>
-      <TableContainer mb="4" w="100%">
-        <Table variant="simple">
-          <TableCaption placement="top">
-            青色の行の<strong>実行後</strong>の変数
-          </TableCaption>
+
+      <TableContainer flexBasis={0} flexGrow={1} maxW="unset">
+        <Table>
           <Thead>
             <Tr>
               <Th>変数名</Th>
-              <Th>値</Th>
+              <Th isNumeric w="0">
+                値
+              </Th>
             </Tr>
           </Thead>
           <Tbody>
             {otherVars?.map((variable) => (
               <Tr key={variable.key}>
-                <Td>{variable.key}</Td>
-                <Td>{variable.value}</Td>
+                <Td fontFamily="mono">{variable.key}</Td>
+                <Td isNumeric fontFamily="mono">
+                  {variable.value}
+                </Td>
               </Tr>
             ))}
           </Tbody>
         </Table>
       </TableContainer>
-    </VStack>
+    </HStack>
   );
 };

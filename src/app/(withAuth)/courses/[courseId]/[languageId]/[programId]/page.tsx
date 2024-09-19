@@ -2,22 +2,27 @@ import type { NextPage } from 'next';
 
 import { generateProblem } from '../../../../../../problems/generateProblem';
 import type { CourseId, LanguageId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
-import { getSuspendedUserProblemSession } from '../../../../../../utils/fetch';
+import { findSuspendedUserProblemSession } from '../../../../../../utils/fetch';
 import { getNonNullableSessionOnServer } from '../../../../../../utils/session';
 import { upsertUserProblemSession } from '../../../../../../utils/upsertUserProblemSession';
 
-import { BaseProblem } from './BaseProblem';
+import { ProblemPageOnClient } from './pageOnClient';
 
-const ProblemPage: NextPage<{
+type Props = {
   params: { courseId: CourseId; languageId: VisibleLanguageId; programId: ProgramId };
-}> = async ({ params }) => {
+};
+
+const ProblemPage: NextPage<Props> = async (props) => {
   const session = await getNonNullableSessionOnServer();
   const userId = session.superTokensUserId;
-  const courseId = params.courseId;
-  const languageId = params.languageId;
-  const programId = params.programId;
 
-  let userProblemSession = await getSuspendedUserProblemSession(userId, courseId, programId, languageId);
+  let userProblemSession = await findSuspendedUserProblemSession(
+    userId,
+    props.params.courseId,
+    props.params.programId,
+    props.params.languageId
+  );
+
   if (!userProblemSession) {
     const problemVariableSeed = Date.now().toString();
     const problemType = 'executionResult';
@@ -27,9 +32,9 @@ const ProblemPage: NextPage<{
       // createするためにidに0を指定
       0,
       userId,
-      courseId,
-      programId,
-      languageId,
+      props.params.courseId,
+      props.params.programId,
+      props.params.languageId,
       problemVariableSeed,
       problemType,
       0,
@@ -41,26 +46,23 @@ const ProblemPage: NextPage<{
     );
   }
 
-  const problem = userProblemSession
-    ? generateProblem(
-        userProblemSession.programId as ProgramId,
-        userProblemSession.languageId as LanguageId,
-        userProblemSession.problemVariablesSeed
-      )
-    : undefined;
+  if (!userProblemSession) return;
+
+  const problem = generateProblem(
+    userProblemSession.programId as ProgramId,
+    userProblemSession.languageId as LanguageId,
+    userProblemSession.problemVariablesSeed
+  );
+
+  if (!problem) return;
 
   return (
-    userProblemSession &&
-    problem && (
-      <BaseProblem
-        courseId={params.courseId}
-        languageId={languageId}
-        problem={problem}
-        programId={params.programId}
-        userId={session.superTokensUserId}
-        userProblemSession={userProblemSession}
-      />
-    )
+    <ProblemPageOnClient
+      params={props.params}
+      problem={problem}
+      userId={session.superTokensUserId}
+      userProblemSession={userProblemSession}
+    />
   );
 };
 

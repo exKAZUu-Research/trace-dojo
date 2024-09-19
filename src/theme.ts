@@ -1,4 +1,7 @@
-import { defineStyleConfig, extendTheme, theme as defaultTheme } from '@chakra-ui/react';
+import { cardAnatomy } from '@chakra-ui/anatomy';
+import { defineStyleConfig, extendTheme, theme as defaultTheme, createMultiStyleConfigHelpers } from '@chakra-ui/react';
+
+const cardStyleConfigHelpers = createMultiStyleConfigHelpers(cardAnatomy.keys);
 
 const sansSerif = [
   // English
@@ -26,7 +29,7 @@ const monospace = [
 
 export const theme = extendTheme({
   colors: {
-    brand: defaultTheme.colors.green,
+    brand: defaultTheme.colors.red,
   },
   fonts: {
     body: sansSerif,
@@ -34,14 +37,21 @@ export const theme = extendTheme({
     mono: monospace,
   },
   components: {
-    Card: defineStyleConfig({
-      defaultProps: {
-        variant: 'outline',
-      },
+    Card: cardStyleConfigHelpers.defineMultiStyleConfig({
+      baseStyle: cardStyleConfigHelpers.definePartsStyle({
+        container: {
+          shadow: 'none',
+        },
+      }),
     }),
     Container: defineStyleConfig({
       baseStyle: {
-        maxW: 'container.lg',
+        maxW: 'container.xl',
+      },
+    }),
+    FormLabel: defineStyleConfig({
+      baseStyle: {
+        fontWeight: 'bold',
       },
     }),
     Heading: defineStyleConfig({
@@ -49,9 +59,10 @@ export const theme = extendTheme({
         size: 'lg',
       },
     }),
-    FormLabel: defineStyleConfig({
+    Icon: defineStyleConfig({
       baseStyle: {
-        fontWeight: 'bold',
+        boxSize: '1.5em',
+        verticalAlign: '-0.375em',
       },
     }),
     Link: defineStyleConfig({
@@ -73,6 +84,7 @@ export const theme = extendTheme({
   styles: {
     global: {
       body: {
+        bg: 'gray.100',
         lineHeight: 1.75,
         touchAction: 'manipulation',
       },

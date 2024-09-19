@@ -27,7 +27,7 @@ export async function fetchUserProblemSessionsWithUserAnswer(
   }
 }
 
-export async function getSuspendedUserProblemSession(
+export async function findSuspendedUserProblemSession(
   userId: string,
   courseId: string,
   programId: string,

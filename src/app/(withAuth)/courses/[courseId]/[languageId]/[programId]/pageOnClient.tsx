@@ -1,29 +1,32 @@
 'use client';
 
 import type { UserProblemSession } from '@prisma/client';
+import NextLink from 'next/link';
 import { useEffect, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
 
 import { INTERVAL_MS_OF_IDLE_TIMER } from '../../../../../../constants';
 import { backendTrpcReact } from '../../../../../../infrastructures/trpcBackend/client';
-import { Heading, VStack } from '../../../../../../infrastructures/useClient/chakra';
+import { Heading, Link, VStack } from '../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../problems/generateProblem';
 import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
-import { getExplanation, programIdToName } from '../../../../../../problems/problemData';
+import { courseIdToName, getExplanation, programIdToName } from '../../../../../../problems/problemData';
 import type { ProblemType } from '../../../../../../types';
 
 import { CheckpointProblem, ExecutionResultProblem, StepProblem } from './Problems';
 
-export const BaseProblem: React.FC<{
-  courseId: CourseId;
-  programId: ProgramId;
-  userId: string;
-  languageId: VisibleLanguageId;
-  userProblemSession: UserProblemSession;
+type Props = {
+  params: { courseId: CourseId; languageId: VisibleLanguageId; programId: ProgramId };
   problem: Problem;
-}> = ({ courseId, languageId, problem, programId, userId, userProblemSession }) => {
-  const [suspendedSession, setSuspendedSession] = useState<UserProblemSession>(userProblemSession);
-  const [problemType, setProblemType] = useState<ProblemType>(userProblemSession.currentProblemType as ProblemType);
+  userId: string;
+  userProblemSession: UserProblemSession;
+};
+
+export const ProblemPageOnClient: React.FC<Props> = (props) => {
+  const [suspendedSession, setSuspendedSession] = useState<UserProblemSession>(props.userProblemSession);
+  const [problemType, setProblemType] = useState<ProblemType>(
+    props.userProblemSession.currentProblemType as ProblemType
+  );
 
   const [beforeTraceItemIndex, setBeforeTraceItemIndex] = useState(0);
   const [currentTraceItemIndex, setCurrentTraceItemIndex] = useState(0);
@@ -40,7 +43,7 @@ export const BaseProblem: React.FC<{
   const createUserAnswerQuery = backendTrpcReact.createUserAnswer.useMutation();
 
   useEffect(() => {
-    const interval = setInterval(async () => {
+    const interval = window.setInterval(async () => {
       if (suspendedSession && !isIdle()) {
         await updateUserProblemSessionQuery.mutateAsync({
           id: suspendedSession.id,
@@ -52,9 +55,9 @@ export const BaseProblem: React.FC<{
     }, INTERVAL_MS_OF_IDLE_TIMER);
 
     return () => {
-      clearInterval(interval);
+      window.clearInterval(interval);
     };
-  }, [isIdle, getActiveTime, suspendedSession, lastTimeSpent]);
+  }, [isIdle, getActiveTime, suspendedSession, lastTimeSpent, updateUserProblemSessionQuery]);
 
   useEffect(() => {
     // 中断中のセッションを再開する
@@ -63,18 +66,26 @@ export const BaseProblem: React.FC<{
     setProblemType(suspendedSession.currentProblemType as ProblemType);
     setBeforeTraceItemIndex(suspendedSession.beforeTraceItemIndex);
     setCurrentTraceItemIndex(suspendedSession.currentTraceItemIndex);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!userId || !courseId || !programId || !languageId || !suspendedSession) return;
+    if (
+      !props.userId ||
+      !props.params.courseId ||
+      !props.params.programId ||
+      !props.params.languageId ||
+      !suspendedSession
+    )
+      return;
 
     (async () => {
       const updatedSession = await updatedSessionQuery.mutateAsync({
         id: suspendedSession.id,
-        userId,
-        courseId,
-        programId,
-        languageId,
+        userId: props.userId,
+        courseId: props.params.courseId,
+        programId: props.params.programId,
+        languageId: props.params.languageId,
         problemVariablesSeed: suspendedSession.problemVariablesSeed,
         currentProblemType: problemType,
         beforeTraceItemIndex: problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
@@ -93,21 +104,21 @@ export const BaseProblem: React.FC<{
   }, [currentTraceItemIndex, problemType]);
 
   const handleSolveProblem = async (): Promise<void> => {
-    console.log('handleSolveProblem:', userId, suspendedSession);
-    if (!userId || !suspendedSession) return;
+    console.log('handleSolveProblem:', props.userId, suspendedSession);
+    if (!props.userId || !suspendedSession) return;
 
     await createUserCompletedProblemQuery.mutateAsync({
-      userId,
-      courseId,
-      programId,
-      languageId,
+      userId: props.userId,
+      courseId: props.params.courseId,
+      programId: props.params.programId,
+      languageId: props.params.languageId,
     });
     await updatedSessionQuery.mutateAsync({
       id: suspendedSession.id,
-      userId,
-      courseId,
-      programId,
-      languageId,
+      userId: props.userId,
+      courseId: props.params.courseId,
+      programId: props.params.programId,
+      languageId: props.params.languageId,
       problemVariablesSeed: suspendedSession.problemVariablesSeed,
       currentProblemType: problemType,
       beforeTraceItemIndex: problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
@@ -120,17 +131,17 @@ export const BaseProblem: React.FC<{
   };
 
   const createAnswerLog = async (isPassed: boolean): Promise<void> => {
-    if (!userId || !suspendedSession) return;
+    if (!props.userId || !suspendedSession) return;
 
     const activeTime = getActiveTime();
     const now = new Date();
     const startedAt = new Date(now.getTime() - activeTime);
 
     await createUserAnswerQuery.mutateAsync({
-      programId,
+      programId: props.params.programId,
       problemType,
-      languageId,
-      userId,
+      languageId: props.params.languageId,
+      userId: props.userId,
       userProblemSessionId: suspendedSession.id,
       step: currentTraceItemIndex,
       isPassed,
@@ -153,48 +164,52 @@ export const BaseProblem: React.FC<{
     }
   };
 
-  const explanation = getExplanation(programId, languageId);
+  const explanation = getExplanation(props.params.programId, props.params.languageId);
 
   return (
-    <main>
-      <VStack spacing="4">
-        <Heading as="h1">{programIdToName[programId]}</Heading>
-        {problemType === 'executionResult' ? (
-          <ExecutionResultProblem
-            createAnswerLog={createAnswerLog}
-            explanation={explanation}
-            handleComplete={handleSolveProblem}
-            problem={problem}
-            selectedLanguageId={languageId}
-            setCurrentTraceItemIndex={setCurrentTraceItemIndex}
-            setProblemType={setProblemType}
-          />
-        ) : problemType === 'checkpoint' ? (
-          <CheckpointProblem
-            beforeTraceItemIndex={beforeTraceItemIndex}
-            createAnswerLog={createAnswerLog}
-            currentTraceItemIndex={currentTraceItemIndex}
-            explanation={explanation}
-            problem={problem}
-            selectedLanguageId={languageId}
-            setBeforeTraceItemIndex={setBeforeTraceItemIndex}
-            setCurrentTraceItemIndex={setCurrentTraceItemIndex}
-            setProblemType={setProblemType}
-          />
-        ) : (
-          <StepProblem
-            beforeTraceItemIndex={beforeTraceItemIndex}
-            createAnswerLog={createAnswerLog}
-            currentTraceItemIndex={currentTraceItemIndex}
-            explanation={explanation}
-            handleComplete={handleSolveProblem}
-            problem={problem}
-            selectedLanguageId={languageId}
-            setBeforeTraceItemIndex={setBeforeTraceItemIndex}
-            setCurrentTraceItemIndex={setCurrentTraceItemIndex}
-          />
-        )}
+    <VStack align="stretch" spacing={8}>
+      <VStack align="stretch" spacing={1}>
+        <Link as={NextLink} color="gray.600" fontWeight="bold" href={`/courses/${props.params.courseId}`}>
+          {courseIdToName[props.params.courseId]}
+        </Link>
+        <Heading as="h1">{programIdToName[props.params.programId]}</Heading>
       </VStack>
-    </main>
+
+      {problemType === 'executionResult' ? (
+        <ExecutionResultProblem
+          createAnswerLog={createAnswerLog}
+          explanation={explanation}
+          handleComplete={handleSolveProblem}
+          problem={props.problem}
+          selectedLanguageId={props.params.languageId}
+          setCurrentTraceItemIndex={setCurrentTraceItemIndex}
+          setProblemType={setProblemType}
+        />
+      ) : problemType === 'checkpoint' ? (
+        <CheckpointProblem
+          beforeTraceItemIndex={beforeTraceItemIndex}
+          createAnswerLog={createAnswerLog}
+          currentTraceItemIndex={currentTraceItemIndex}
+          explanation={explanation}
+          problem={props.problem}
+          selectedLanguageId={props.params.languageId}
+          setBeforeTraceItemIndex={setBeforeTraceItemIndex}
+          setCurrentTraceItemIndex={setCurrentTraceItemIndex}
+          setProblemType={setProblemType}
+        />
+      ) : (
+        <StepProblem
+          beforeTraceItemIndex={beforeTraceItemIndex}
+          createAnswerLog={createAnswerLog}
+          currentTraceItemIndex={currentTraceItemIndex}
+          explanation={explanation}
+          handleComplete={handleSolveProblem}
+          problem={props.problem}
+          selectedLanguageId={props.params.languageId}
+          setBeforeTraceItemIndex={setBeforeTraceItemIndex}
+          setCurrentTraceItemIndex={setCurrentTraceItemIndex}
+        />
+      )}
+    </VStack>
   );
 };

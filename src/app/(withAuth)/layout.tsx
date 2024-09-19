@@ -42,7 +42,7 @@ const DefaultLayout: NextPage<LayoutProps> = async ({ children }) => {
 
       <DefaultHeader />
       <Suspense fallback={<Spinner left="50%" position="fixed" top="50%" transform="translate(-50%, -50%)" />}>
-        <Container pb={16} pt={8}>
+        <Container pb={16} pt={12}>
           {children}
         </Container>
       </Suspense>
