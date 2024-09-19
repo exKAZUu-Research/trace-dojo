@@ -129,6 +129,7 @@ export const frontendConfig = (): SuperTokensConfig => {
           ERROR_NON_OPTIONAL: 'このフィールドは必須です',
         },
       },
+      defaultLanguage: 'ja',
     },
   };
 };
