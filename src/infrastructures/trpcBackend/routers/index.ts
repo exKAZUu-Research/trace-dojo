@@ -1,7 +1,6 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
-import { upsertUserProblemSession } from '../../../utils/upsertUserProblemSession';
 import { prisma } from '../../prisma';
 import { authorize } from '../middlewares';
 import { procedure, router } from '../trpc';
@@ -11,42 +10,33 @@ export const backendRouter = router({
     .use(authorize)
     .output(z.object({ userId: z.string().uuid() }))
     .query(({ ctx }) => ({ userId: ctx.session.superTokensUserId })),
-  upsertUserProblemSession: procedure
+
+  upsertProblemSession: procedure
     .use(authorize)
     .input(
       z.object({
-        id: z.number(),
-        userId: z.string(),
-        courseId: z.string(),
-        programId: z.string(),
-        languageId: z.string(),
-        problemVariablesSeed: z.string(),
-        currentProblemType: z.string(),
-        beforeTraceItemIndex: z.number().nonnegative(),
-        currentTraceItemIndex: z.number().nonnegative(),
-        timeSpent: z.number().optional(),
-        startedAt: z.date(),
-        finishedAt: z.date().optional(),
-        isCompleted: z.boolean(),
+        id: z.number().int().nonnegative().optional(),
+        userId: z.string().min(1),
+        courseId: z.string().min(1),
+        programId: z.string().min(1),
+        languageId: z.string().min(1),
+        problemVariablesSeed: z.string().min(1),
+        currentProblemType: z.string().min(1),
+        currentTraceItemIndex: z.number().int().nonnegative(),
+        previousTraceItemIndex: z.number().int().nonnegative(),
+        elapsedMilliseconds: z.number().nonnegative().optional(),
+        completedAt: z.date().optional(),
       })
     )
-    .mutation(async ({ input }) => {
-      return await upsertUserProblemSession(
-        input.id,
-        input.userId,
-        input.courseId,
-        input.programId,
-        input.languageId,
-        input.problemVariablesSeed,
-        input.currentProblemType,
-        input.beforeTraceItemIndex,
-        input.currentTraceItemIndex,
-        input.timeSpent,
-        input.startedAt,
-        input.finishedAt,
-        input.isCompleted
-      );
+    .mutation(async ({ input: { id, ...data } }) => {
+      return await prisma.problemSession.upsert({
+        // Since no record has `id: 0`, `create` will always be executed.
+        where: { id: id ?? 0 },
+        update: data,
+        create: data,
+      });
     }),
+
   updateUserProblemSession: procedure
     .use(authorize)
     .input(
@@ -72,6 +62,7 @@ export const backendRouter = router({
       console.log(`revalidatePath('/courses/[courseId]/[languageId]', 'page');`);
       return userProblemSession;
     }),
+
   createUserCompletedProblem: procedure
     .use(authorize)
     .input(

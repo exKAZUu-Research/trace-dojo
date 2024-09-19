@@ -37,7 +37,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     throttle: 500,
   });
 
-  const updatedSessionQuery = backendTrpcReact.upsertUserProblemSession.useMutation();
+  const upsertProblemSessionMutation = backendTrpcReact.upsertProblemSession.useMutation();
   const updateUserProblemSessionQuery = backendTrpcReact.updateUserProblemSession.useMutation();
   const createUserCompletedProblemQuery = backendTrpcReact.createUserCompletedProblem.useMutation();
   const createUserAnswerQuery = backendTrpcReact.createUserAnswer.useMutation();
@@ -80,7 +80,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
       return;
 
     (async () => {
-      const updatedSession = await updatedSessionQuery.mutateAsync({
+      const updatedSession = await upsertProblemSessionMutation.mutateAsync({
         id: suspendedSession.id,
         userId: props.userId,
         courseId: props.params.courseId,
@@ -113,7 +113,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
       programId: props.params.programId,
       languageId: props.params.languageId,
     });
-    await updatedSessionQuery.mutateAsync({
+    await upsertProblemSessionMutation.mutateAsync({
       id: suspendedSession.id,
       userId: props.userId,
       courseId: props.params.courseId,
