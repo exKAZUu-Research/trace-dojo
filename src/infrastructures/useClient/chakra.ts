@@ -62,6 +62,7 @@ export {
   InputGroup,
   InputLeftElement,
   InputRightElement,
+  keyframes,
   Link,
   LinkBox,
   LinkOverlay,

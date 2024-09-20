@@ -267,7 +267,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                   <div>y = {selectedPosition.y}</div>
                 </>
               ) : (
-                <div>なし</div>
+                <Box color="gray.600">なし</Box>
               )}
             </HStack>
           </VStack>
@@ -331,12 +331,13 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                   </Button>
                 </HStack>
               </>
-            ) : selectedPosition ? (
+            ) : (
+              <Box color="gray.600">なし</Box>
+            )}
+            {!selectedCharacter && selectedPosition && (
               <Button colorScheme="brand" size="sm" variant="outline" onClick={() => void handleAddCharacterButton()}>
                 タートルを追加
               </Button>
-            ) : (
-              <div>なし</div>
             )}
           </VStack>
 
