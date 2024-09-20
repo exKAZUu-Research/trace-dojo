@@ -27,30 +27,6 @@ export async function fetchUserProblemSessionsWithUserAnswer(
   }
 }
 
-export async function findSuspendedUserProblemSession(
-  userId: string,
-  courseId: string,
-  programId: string,
-  languageId: string
-): Promise<UserProblemSession | undefined> {
-  try {
-    const suspendedUserProblemSession = await prisma.userProblemSession.findFirst({
-      where: {
-        userId,
-        courseId,
-        programId,
-        languageId,
-        finishedAt: undefined,
-        isCompleted: false,
-      },
-    });
-    return suspendedUserProblemSession || undefined;
-  } catch (error) {
-    console.error(error);
-    return undefined;
-  }
-}
-
 export async function fetchUserCompletedProblems(
   userId: string,
   courseId: string

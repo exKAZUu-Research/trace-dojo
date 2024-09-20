@@ -1,10 +1,9 @@
 import type { NextPage } from 'next';
 
+import { prisma } from '../../../../../../infrastructures/prisma';
 import { generateProblem } from '../../../../../../problems/generateProblem';
 import type { CourseId, LanguageId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
-import { findSuspendedUserProblemSession } from '../../../../../../utils/fetch';
 import { getNonNullableSessionOnServer } from '../../../../../../utils/session';
-import { upsertUserProblemSession } from '../../../../../../utils/upsertUserProblemSession';
 
 import { ProblemPageOnClient } from './pageOnClient';
 
@@ -16,52 +15,44 @@ const ProblemPage: NextPage<Props> = async (props) => {
   const session = await getNonNullableSessionOnServer();
   const userId = session.superTokensUserId;
 
-  let userProblemSession = await findSuspendedUserProblemSession(
-    userId,
-    props.params.courseId,
-    props.params.programId,
-    props.params.languageId
-  );
-
-  if (!userProblemSession) {
-    const problemVariableSeed = Date.now().toString();
-    const problemType = 'executionResult';
-    const startedAt = new Date();
-
-    userProblemSession = await upsertUserProblemSession(
-      // createするためにidに0を指定
-      0,
+  let problemSession = await prisma.problemSession.findFirst({
+    where: {
       userId,
-      props.params.courseId,
-      props.params.programId,
-      props.params.languageId,
-      problemVariableSeed,
-      problemType,
-      0,
-      0,
-      undefined,
-      startedAt,
-      undefined,
-      false
-    );
+      courseId: props.params.courseId,
+      programId: props.params.programId,
+      languageId: props.params.languageId,
+      // eslint-disable-next-line unicorn/no-null
+      completedAt: null,
+    },
+  });
+
+  if (!problemSession) {
+    problemSession = await prisma.problemSession.create({
+      data: {
+        userId,
+        courseId: props.params.courseId,
+        programId: props.params.programId,
+        languageId: props.params.languageId,
+        problemVariablesSeed: Date.now().toString(),
+        currentProblemType: 'executionResult',
+        currentTraceItemIndex: 0,
+        previousTraceItemIndex: 0,
+      },
+    });
   }
 
-  if (!userProblemSession) return;
-
   const problem = generateProblem(
-    userProblemSession.programId as ProgramId,
-    userProblemSession.languageId as LanguageId,
-    userProblemSession.problemVariablesSeed
+    problemSession.programId as ProgramId,
+    problemSession.languageId as LanguageId,
+    problemSession.problemVariablesSeed
   );
-
-  if (!problem) return;
 
   return (
     <ProblemPageOnClient
+      initialProblemSession={problemSession}
       params={props.params}
       problem={problem}
       userId={session.superTokensUserId}
-      userProblemSession={userProblemSession}
     />
   );
 };

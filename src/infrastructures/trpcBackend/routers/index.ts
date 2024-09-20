@@ -11,56 +11,23 @@ export const backendRouter = router({
     .output(z.object({ userId: z.string().uuid() }))
     .query(({ ctx }) => ({ userId: ctx.session.superTokensUserId })),
 
-  upsertProblemSession: procedure
+  updateProblemSession: procedure
     .use(authorize)
     .input(
       z.object({
-        id: z.number().int().nonnegative().optional(),
-        userId: z.string().min(1),
-        courseId: z.string().min(1),
-        programId: z.string().min(1),
-        languageId: z.string().min(1),
-        problemVariablesSeed: z.string().min(1),
-        currentProblemType: z.string().min(1),
-        currentTraceItemIndex: z.number().int().nonnegative(),
-        previousTraceItemIndex: z.number().int().nonnegative(),
+        id: z.number().int().nonnegative(),
+        currentProblemType: z.string().min(1).optional(),
+        currentTraceItemIndex: z.number().int().nonnegative().optional(),
+        previousTraceItemIndex: z.number().int().nonnegative().optional(),
         elapsedMilliseconds: z.number().nonnegative().optional(),
         completedAt: z.date().optional(),
       })
     )
     .mutation(async ({ input: { id, ...data } }) => {
-      return await prisma.problemSession.upsert({
-        // Since no record has `id: 0`, `create` will always be executed.
-        where: { id: id ?? 0 },
-        update: data,
-        create: data,
-      });
-    }),
-
-  updateUserProblemSession: procedure
-    .use(authorize)
-    .input(
-      z.object({
-        id: z.number(),
-        data: z.object({
-          currentStep: z.number().optional(),
-          timeSpent: z.number().optional(),
-          finishedAt: z.date().optional(),
-          isCompleted: z.boolean().optional(),
-        }),
-      })
-    )
-    .mutation(async ({ input }) => {
-      const { data, id } = input;
-      const userProblemSession = await prisma.userProblemSession.update({
-        where: {
-          id,
-        },
-        data,
-      });
+      const problemSession = await prisma.problemSession.update({ where: { id }, data });
       revalidatePath('/courses/[courseId]/[languageId]', 'page');
       console.log(`revalidatePath('/courses/[courseId]/[languageId]', 'page');`);
-      return userProblemSession;
+      return problemSession;
     }),
 
   createUserCompletedProblem: procedure
@@ -85,6 +52,7 @@ export const backendRouter = router({
       revalidatePath('/courses/[courseId]/[languageId]', 'page');
       console.log(`revalidatePath('/courses/[courseId]/[languageId]', 'page');`);
     }),
+
   createUserAnswer: procedure
     .use(authorize)
     .input(
