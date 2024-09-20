@@ -38,7 +38,6 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   });
 
   const updateProblemSessionMutation = backendTrpcReact.updateProblemSession.useMutation();
-  const createUserCompletedProblemQuery = backendTrpcReact.createUserCompletedProblem.useMutation();
   const createUserAnswerQuery = backendTrpcReact.createUserAnswer.useMutation();
 
   useEffect(() => {
@@ -96,12 +95,6 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     console.log('handleSolveProblem:', props.userId, suspendedSession);
     if (!props.userId || !suspendedSession) return;
 
-    await createUserCompletedProblemQuery.mutateAsync({
-      userId: props.userId,
-      courseId: props.params.courseId,
-      programId: props.params.programId,
-      languageId: props.params.languageId,
-    });
     await updateProblemSessionMutation.mutateAsync({
       id: suspendedSession.id,
       currentProblemType: problemType,
