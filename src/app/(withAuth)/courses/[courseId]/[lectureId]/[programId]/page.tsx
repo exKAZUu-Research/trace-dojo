@@ -9,13 +9,14 @@ import { upsertUserProblemSession } from '../../../../../../utils/upsertUserProb
 import { ProblemPageOnClient } from './pageOnClient';
 
 type Props = {
-  params: { courseId: CourseId; programId: ProgramId };
+  params: { courseId: CourseId; lectureId: string; programId: ProgramId };
 };
 
 const ProblemPage: NextPage<Props> = async (props) => {
   const session = await getNonNullableSessionOnServer();
   const userId = session.superTokensUserId;
   const courseId = props.params.courseId;
+  const lectureId = props.params.lectureId;
   const programId = props.params.programId;
 
   let userProblemSession = await findSuspendedUserProblemSession(userId, courseId, programId, 'java');
@@ -30,6 +31,7 @@ const ProblemPage: NextPage<Props> = async (props) => {
       0,
       userId,
       courseId,
+      lectureId,
       programId,
       'java',
       problemVariableSeed,

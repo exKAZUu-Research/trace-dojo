@@ -18,6 +18,7 @@ export const backendRouter = router({
         id: z.number(),
         userId: z.string(),
         courseId: z.string(),
+        lectureId: z.string(),
         programId: z.string(),
         languageId: z.string(),
         problemVariablesSeed: z.string(),
@@ -36,6 +37,7 @@ export const backendRouter = router({
         input.userId,
         input.courseId,
         input.programId,
+        input.lectureId,
         input.languageId,
         input.problemVariablesSeed,
         input.currentProblemType,
@@ -78,6 +80,7 @@ export const backendRouter = router({
       z.object({
         userId: z.string(),
         courseId: z.string(),
+        lectureId: z.string(),
         programId: z.string(),
         languageId: z.string(),
       })
@@ -87,6 +90,7 @@ export const backendRouter = router({
         data: {
           userId: input.userId,
           courseId: input.courseId,
+          lectureId: input.lectureId,
           programId: input.programId,
           languageId: input.languageId,
         },

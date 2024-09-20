@@ -27,6 +27,30 @@ export async function fetchUserProblemSessionsWithUserAnswer(
   }
 }
 
+export async function fetchUserLectureProblemSessionWithAnswer(
+  userId: string,
+  lectureId: string
+): Promise<UserProblemSessionWithUserAnswers[]> {
+  try {
+    const userProblemSessions = await prisma.userProblemSession.findMany({
+      where: {
+        userId,
+        lectureId,
+      },
+      include: {
+        userAnswers: true,
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    });
+    return userProblemSessions;
+  } catch (error) {
+    console.error(error);
+    return [];
+  }
+}
+
 export async function findSuspendedUserProblemSession(
   userId: string,
   courseId: string,
@@ -60,6 +84,30 @@ export async function fetchUserCompletedProblems(
       where: {
         userId,
         courseId,
+      },
+      select: {
+        programId: true,
+        languageId: true,
+      },
+    });
+    return userCompletedProblems as { programId: ProgramId; languageId: VisibleLanguageId }[];
+  } catch (error) {
+    console.error(error);
+    return [];
+  }
+}
+
+export async function fetchUserLectureCompletedProblems(
+  userId: string,
+  courseId: string,
+  lectureId: string
+): Promise<{ programId: ProgramId; languageId: VisibleLanguageId }[]> {
+  try {
+    const userCompletedProblems = await prisma.userCompletedProblem.findMany({
+      where: {
+        userId,
+        courseId,
+        lectureId,
       },
       select: {
         programId: true,

@@ -6,6 +6,7 @@ export async function upsertUserProblemSession(
   id: number,
   userId: string,
   courseId: string,
+  lectureId: string,
   programId: string,
   languageId: string,
   problemVariablesSeed: string,
@@ -34,6 +35,7 @@ export async function upsertUserProblemSession(
       create: {
         userId,
         courseId,
+        lectureId,
         programId,
         languageId,
         problemVariablesSeed,

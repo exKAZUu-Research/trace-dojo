@@ -16,7 +16,7 @@ import type { ProblemType } from '../../../../../../types';
 import { CheckpointProblem, ExecutionResultProblem, StepProblem } from './Problems';
 
 type Props = {
-  params: { courseId: CourseId; programId: ProgramId };
+  params: { courseId: CourseId; lectureId: string; programId: ProgramId };
   problem: Problem;
   userId: string;
   userProblemSession: UserProblemSession;
@@ -77,6 +77,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
         id: suspendedSession.id,
         userId: props.userId,
         courseId: props.params.courseId,
+        lectureId: props.params.lectureId,
         programId: props.params.programId,
         languageId: 'java',
         problemVariablesSeed: suspendedSession.problemVariablesSeed,
@@ -103,6 +104,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     await createUserCompletedProblemQuery.mutateAsync({
       userId: props.userId,
       courseId: props.params.courseId,
+      lectureId: props.params.lectureId,
       programId: props.params.programId,
       languageId: 'java',
     });
@@ -110,6 +112,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
       id: suspendedSession.id,
       userId: props.userId,
       courseId: props.params.courseId,
+      lectureId: props.params.lectureId,
       programId: props.params.programId,
       languageId: 'java',
       problemVariablesSeed: suspendedSession.problemVariablesSeed,
