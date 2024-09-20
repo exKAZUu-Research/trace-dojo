@@ -129,67 +129,16 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
   tuBeginner2: [['test1', 'test2', 'test3', 'test4', 'test5']],
 };
 
-export const ProgramIdToUUIDLists: Record<ProgramId, string> = {
-  // tuBeginner1
-  straight: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
-  stepBack: 'd4de75e2-758b-4500-b38e-96213c360527',
-  turnRight: '99045fdf-6cb5-4947-b934-8b1bc5831bbd',
-  turnRightAndTurnLeft: '37632776-e3ab-4cc5-ae08-934caf2ada53',
-
-  square1: '8fbc94d3-d20c-4457-8997-61e85b3516d9',
-  square2: '35957643-c106-4a97-8073-6705c39ab9a6',
-  variable: '045094ae-1f5c-4caf-bc33-a86af985f13b',
-  variable2: '84805179-12cf-4871-969e-fb39e6ad767a',
-  variable3: 'caf737c6-a3e5-4555-8e7c-f2de9cceef76',
-
-  while1: '5ba06885-2044-4c1e-bd65-2a9c5e9c9e39',
-  while2: '51a9f0fd-fe0e-41a8-82ab-95c76aa70bee',
-  for1: 'bbc9741a-0245-46af-bbfb-9fa804ff4e5f',
-  for2: '0681e735-e570-4549-b6f9-6d7cd6ac1c76',
-  for3: '6067e03b-7855-4bd9-8e56-81bb4c49d9b9',
-
-  doubleLoop1: '336ce0e0-51d5-4eec-9b2b-6acceb157df2',
-  doubleLoop2: '88e23736-a492-44a4-b930-dad05228ee17',
-  if1: 'c31a8a01-bfca-4fcc-bf3e-7d52632a93bd',
-  if2: '6913ff70-17ee-4685-9aff-6a42e31bf7ef',
-
-  elseIf1: '31cebf2f-f2a9-4830-9a3c-a4448c4e1ed7',
-  elseIf2: '3b0a1b3b-2b49-4b4c-9f58-9e336bbe8b0f',
-  switch1: 'e07344bd-4ed0-47ea-8309-0d80fdc62d28',
-  switch2: '1de91a18-556b-43de-9a69-f89fc0129bbf',
-
-  break1: '28e759dc-ee66-4090-bd8b-1b744a4e37bf',
-  break2: '3af88683-0693-488d-96c2-f536900dc1f6',
-  break3: '5b6312ce-7061-461f-9978-deb02bcf210a',
-  continue1: '84ca366e-ef20-4c46-9d4c-4b339b26c048',
-  continue2: 'af6c8588-f457-4720-a123-ad4bed46b426',
-  continue3: 'b5ac3d53-c09f-4db5-9799-87eab7227f20',
-
-  method1: '4389eeff-c5bf-4075-91ab-c166e3c1d689',
-  method2: '075ebfa6-0c3c-4a51-9e3e-1ce05ef4744f',
-  method3: '3fcd4ac0-95e6-48fb-98af-36f310fc74b8',
-  return1: 'cc072d1c-d026-48d5-9087-dadbc403c353',
-  return2: '69f721a6-0f06-4ddc-a16b-d71a54c7e218',
-  return3: '6c510ae2-331b-490b-891a-7d4e1664e49a',
-
-  array1: 'f7c3e710-c7d4-470e-b08e-e3923b50911a',
-  array2: '3e0d0cdb-31c5-4374-9f68-0c53b3001f83',
-  array3: '649afc3e-3a7a-47a6-92b1-9d71fb0acdd6',
-  string1: '70f8fe9d-9b73-4f75-917e-7c941f3db149',
-  string2: '0b3ed2e3-46cb-4f77-83cc-3ac2218aac86',
-  string3: '3066f31a-1ae6-40ab-bf36-8ddfae00463c',
-
-  // tuBeginner2
-  test1: 'd6dc5da0-0496-4b6f-b55d-c6f9ee5e00b4',
-  test2: 'c4e29eaf-afe1-460c-89e6-e5d0b4eebe1c',
-  test3: '6ba4a55a-1c42-407f-8ba4-7b72b4150875',
-  test4: '21eed27f-a177-4971-a515-4f5010d58ac3',
-  test5: '88f3c7ae-5b4f-46d2-a8a1-810e22900ab1',
-};
-
-export const UUIDToProgramIdLists: Record<string, string> = Object.fromEntries(
-  Object.entries(ProgramIdToUUIDLists).map(([programId, uuid]) => [uuid, programId])
-);
+export const UUIDs = [
+  '8d692b48-8c19-4679-8d8f-3f27a051d44d',
+  'd4de75e2-758b-4500-b38e-96213c360527',
+  '99045fdf-6cb5-4947-b934-8b1bc5831bbd',
+  '37632776-e3ab-4cc5-ae08-934caf2ada53',
+  '8fbc94d3-d20c-4457-8997-61e85b3516d9',
+  '35957643-c106-4a97-8073-6705c39ab9a6',
+  '045094ae-1f5c-4caf-bc33-a86af985f13b',
+  '84805179-12cf-4871-969e-fb39e6ad767a',
+];
 
 export function getExplanation(programId: ProgramId, languageId: VisibleLanguageId): Record<'title' | 'body', string> {
   return programIdToLanguageIdToExplanation[programId]?.[languageId];

@@ -1,26 +1,24 @@
 import type { NextPage } from 'next';
 
-import { generateProblem } from '../../../../../problems/generateProblem';
-import type { CourseId, LanguageId, ProgramId } from '../../../../../problems/problemData';
-import { UUIDToProgramIdLists } from '../../../../../problems/problemData';
-import { findSuspendedUserProblemSession } from '../../../../../utils/fetch';
-import { getNonNullableSessionOnServer } from '../../../../../utils/session';
-import { upsertUserProblemSession } from '../../../../../utils/upsertUserProblemSession';
+import { generateProblem } from '../../../../../../problems/generateProblem';
+import type { CourseId, LanguageId, ProgramId } from '../../../../../../problems/problemData';
+import { findSuspendedUserProblemSession } from '../../../../../../utils/fetch';
+import { getNonNullableSessionOnServer } from '../../../../../../utils/session';
+import { upsertUserProblemSession } from '../../../../../../utils/upsertUserProblemSession';
 
 import { ProblemPageOnClient } from './pageOnClient';
 
 type Props = {
-  params: { courseId: CourseId; uuid: string };
+  params: { courseId: CourseId; programId: ProgramId };
 };
 
 const ProblemPage: NextPage<Props> = async (props) => {
   const session = await getNonNullableSessionOnServer();
   const userId = session.superTokensUserId;
   const courseId = props.params.courseId;
-  const uuid = props.params.uuid.split('-').slice(1).join('-');
-  const programId = UUIDToProgramIdLists[uuid];
+  const programId = props.params.programId;
 
-  let userProblemSession = await findSuspendedUserProblemSession(userId, courseId, programId as ProgramId, 'java');
+  let userProblemSession = await findSuspendedUserProblemSession(userId, courseId, programId, 'java');
 
   if (!userProblemSession) {
     const problemVariableSeed = Date.now().toString();

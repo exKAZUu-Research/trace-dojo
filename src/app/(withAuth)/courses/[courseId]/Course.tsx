@@ -26,15 +26,10 @@ import {
   VStack,
 } from '../../../../infrastructures/useClient/chakra';
 import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../problems/problemData';
-import {
-  courseIdToProgramIdLists,
-  programIdToName,
-  ProgramIdToUUIDLists,
-  courseIdToName,
-} from '../../../../problems/problemData';
+import { courseIdToProgramIdLists, programIdToName, courseIdToName, UUIDs } from '../../../../problems/problemData';
 import type { UserProblemSessionWithUserAnswers } from '../../../../utils/fetch';
 
-const SPECIFIED_COMPLETION_COUNT = 1;
+export const SPECIFIED_COMPLETION_COUNT = 1;
 
 const countFailedAnswers = (userProblemSession: UserProblemSessionWithUserAnswers | undefined): number => {
   if (!userProblemSession) return 0;
@@ -81,7 +76,9 @@ export const Course: React.FC<{
                   fontSize="3xl"
                   mx="-0.125em"
                 />
-                <Heading size="md">第{lessonIndex + 1}回</Heading>
+                <Link href={`${courseId}/lecture${lessonIndex + 1}-${UUIDs[lessonIndex]}`}>
+                  <Heading size="md">第{lessonIndex + 1}回</Heading>
+                </Link>
               </CardHeader>
 
               <CardBody align="stretch" as={VStack} pb={2}>
@@ -115,7 +112,7 @@ export const Course: React.FC<{
                   </Thead>
 
                   <Tbody>
-                    {openedProblems.map((programId) => {
+                    {programIds.map((programId) => {
                       const suspendedSession = userProblemSessions.find(
                         (session) =>
                           session.courseId === courseId &&
@@ -152,7 +149,7 @@ export const Course: React.FC<{
                               )}
                               <Link
                                 as={NextLink}
-                                href={`${courseId}/lecture${lessonIndex + 1}-${ProgramIdToUUIDLists[programId]}`}
+                                href={`${courseId}/lecture${lessonIndex + 1}-${UUIDs[lessonIndex]}/${programId}`}
                               >
                                 {programIdToName[programId]}
                               </Link>
