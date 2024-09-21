@@ -1,7 +1,7 @@
 import type { NextPage } from 'next';
 
 import { generateProblem } from '../../../../../../../../problems/generateProblem';
-import type { CourseId, ProgramId } from '../../../../../../../../problems/problemData';
+import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
 import { findSuspendedUserProblemSession } from '../../../../../../../../utils/fetch';
 import { getNonNullableSessionOnServer } from '../../../../../../../../utils/session';
 import { upsertUserProblemSession } from '../../../../../../../../utils/upsertUserProblemSession';
@@ -9,7 +9,7 @@ import { upsertUserProblemSession } from '../../../../../../../../utils/upsertUs
 import { ProblemPageOnClient } from './pageOnClient';
 
 type Props = {
-  params: { courseId: CourseId; lectureId: string; problemId: ProgramId };
+  params: { courseId: CourseId; lectureId: string; problemId: ProblemId };
 };
 
 const ProblemPage: NextPage<Props> = async (props) => {
@@ -47,7 +47,7 @@ const ProblemPage: NextPage<Props> = async (props) => {
   if (!userProblemSession) return;
 
   const problem = generateProblem(
-    userProblemSession.programId as ProgramId,
+    userProblemSession.problemId as ProblemId,
     'java',
     userProblemSession.problemVariablesSeed
   );

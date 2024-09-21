@@ -1,7 +1,7 @@
 import { Random } from '../app/lib/random';
 
-import type { LanguageId, ProgramId } from './problemData';
-import { programIdToLanguageIdToProgram } from './problemData';
+import type { LanguageId, ProblemId } from './problemData';
+import { problemIdToLanguageIdToProgram } from './problemData';
 import { type TraceItem, traceProgram } from './traceProgram';
 
 export type Problem = {
@@ -33,9 +33,9 @@ export type Problem = {
 
 const randomNumberRegex = /<(\d+)-(\d+)>/g;
 
-export function generateProblem(programId: ProgramId, languageId: LanguageId, variableSeed: string): Problem {
+export function generateProblem(problemId: ProblemId, languageId: LanguageId, variableSeed: string): Problem {
   const random = new Random(variableSeed);
-  const template = programIdToLanguageIdToProgram[programId];
+  const template = problemIdToLanguageIdToProgram[problemId];
   const generatedNumbers: number[] = [];
 
   const instrumented = template.instrumented.replaceAll(randomNumberRegex, (match, min, max) => {

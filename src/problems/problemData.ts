@@ -1,7 +1,7 @@
 export const courseIds = ['tuBeginner1', 'tuBeginner2'] as const;
 export type CourseId = (typeof courseIds)[number];
 
-export const programIds = [
+export const problemIds = [
   'straight',
   'stepBack',
   'turnRight',
@@ -48,7 +48,7 @@ export const programIds = [
   'test4',
   'test5',
 ] as const;
-export type ProgramId = (typeof programIds)[number];
+export type ProblemId = (typeof problemIds)[number];
 
 export const languageIds = ['instrumented', 'java'] as const;
 export type LanguageId = (typeof languageIds)[number];
@@ -60,7 +60,7 @@ export const courseIdToName: Record<CourseId, string> = {
   tuBeginner2: '初級プログラミングⅡ',
 };
 
-export const programIdToName: Record<ProgramId, string> = {
+export const problemIdToName: Record<ProblemId, string> = {
   straight: '線を描こう(1)',
   stepBack: '線を描こう(2)',
   turnRight: '線を描こう(3)',
@@ -108,7 +108,7 @@ export const programIdToName: Record<ProgramId, string> = {
   test5: 'チェックポイント取得のテスト用問題',
 };
 
-export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
+export const courseIdToProblemIdLists: Record<CourseId, ProblemId[][]> = {
   tuBeginner1: [
     ['straight', 'stepBack', 'turnRight', 'turnRightAndTurnLeft'],
     ['square1', 'square2', 'variable', 'variable2', 'variable3'],
@@ -136,11 +136,11 @@ export const UUIDs: Record<CourseId, string[]> = {
   tuBeginner2: ['5ba06885-2044-4c1e-bd65-2a9c5e9c9e39'],
 };
 
-export function getExplanation(programId: ProgramId): Record<'title' | 'body', string> {
-  return programIdToLanguageIdToExplanation[programId];
+export function getExplanation(problemId: ProblemId): Record<'title' | 'body', string> {
+  return problemIdToLanguageIdToExplanation[problemId];
 }
 
-export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId, string>> = {
+export const problemIdToLanguageIdToProgram: Record<ProblemId, Record<LanguageId, string>> = {
   straight: {
     instrumented: `
 s.set('亀', new Character());
@@ -1378,7 +1378,7 @@ const defaultExplanation = {
   body: '',
 };
 
-export const programIdToLanguageIdToExplanation: Record<ProgramId, Record<'title' | 'body', string>> = {
+export const problemIdToLanguageIdToExplanation: Record<ProblemId, Record<'title' | 'body', string>> = {
   straight: defaultExplanation,
   stepBack: defaultExplanation,
   turnRight: defaultExplanation,

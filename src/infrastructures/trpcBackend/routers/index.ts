@@ -19,7 +19,7 @@ export const backendRouter = router({
         userId: z.string(),
         courseId: z.string(),
         lectureId: z.string(),
-        programId: z.string(),
+        problemId: z.string(),
         problemVariablesSeed: z.string(),
         currentProblemType: z.string(),
         beforeTraceItemIndex: z.number().nonnegative(),
@@ -35,7 +35,7 @@ export const backendRouter = router({
         input.id,
         input.userId,
         input.courseId,
-        input.programId,
+        input.problemId,
         input.lectureId,
         input.problemVariablesSeed,
         input.currentProblemType,
@@ -79,7 +79,7 @@ export const backendRouter = router({
         userId: z.string(),
         courseId: z.string(),
         lectureId: z.string(),
-        programId: z.string(),
+        problemId: z.string(),
       })
     )
     .mutation(async ({ input }) => {
@@ -88,7 +88,7 @@ export const backendRouter = router({
           userId: input.userId,
           courseId: input.courseId,
           lectureId: input.lectureId,
-          programId: input.programId,
+          problemId: input.problemId,
         },
       });
       revalidatePath('/courses/[courseId]/[lectureId]', 'page');
@@ -98,7 +98,7 @@ export const backendRouter = router({
     .use(authorize)
     .input(
       z.object({
-        programId: z.string(),
+        problemId: z.string(),
         problemType: z.string(),
         userId: z.string(),
         userProblemSessionId: z.number(),
@@ -111,7 +111,7 @@ export const backendRouter = router({
     .mutation(async ({ input }) => {
       await prisma.userAnswer.create({
         data: {
-          programId: input.programId,
+          problemId: input.problemId,
           problemType: input.problemType,
           userId: input.userId,
           userProblemSessionId: input.userProblemSessionId,

@@ -1,7 +1,7 @@
 import type { UserAnswer, UserProblemSession } from '@prisma/client';
 
 import { prisma } from '../infrastructures/prisma';
-import type { ProgramId } from '../problems/problemData';
+import type { ProblemId } from '../problems/problemData';
 
 export type UserProblemSessionWithUserAnswers = UserProblemSession & { userAnswers: UserAnswer[] };
 
@@ -54,14 +54,14 @@ export async function fetchUserLectureProblemSessionWithAnswer(
 export async function findSuspendedUserProblemSession(
   userId: string,
   courseId: string,
-  programId: string
+  problemId: string
 ): Promise<UserProblemSession | undefined> {
   try {
     const suspendedUserProblemSession = await prisma.userProblemSession.findFirst({
       where: {
         userId,
         courseId,
-        programId,
+        problemId,
         finishedAt: undefined,
         isCompleted: false,
       },
@@ -76,7 +76,7 @@ export async function findSuspendedUserProblemSession(
 export async function fetchUserCompletedProblems(
   userId: string,
   courseId: string
-): Promise<{ programId: ProgramId }[]> {
+): Promise<{ problemId: ProblemId }[]> {
   try {
     const userCompletedProblems = await prisma.userCompletedProblem.findMany({
       where: {
@@ -84,10 +84,10 @@ export async function fetchUserCompletedProblems(
         courseId,
       },
       select: {
-        programId: true,
+        problemId: true,
       },
     });
-    return userCompletedProblems as { programId: ProgramId }[];
+    return userCompletedProblems as { problemId: ProblemId }[];
   } catch (error) {
     console.error(error);
     return [];
@@ -98,7 +98,7 @@ export async function fetchUserLectureCompletedProblems(
   userId: string,
   courseId: string,
   lectureId: string
-): Promise<{ programId: ProgramId }[]> {
+): Promise<{ problemId: ProblemId }[]> {
   try {
     const userCompletedProblems = await prisma.userCompletedProblem.findMany({
       where: {
@@ -107,10 +107,10 @@ export async function fetchUserLectureCompletedProblems(
         lectureId,
       },
       select: {
-        programId: true,
+        problemId: true,
       },
     });
-    return userCompletedProblems as { programId: ProgramId }[];
+    return userCompletedProblems as { problemId: ProblemId }[];
   } catch (error) {
     console.error(error);
     return [];

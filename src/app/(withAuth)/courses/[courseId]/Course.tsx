@@ -16,31 +16,31 @@ import {
   Spacer,
   VStack,
 } from '../../../../infrastructures/useClient/chakra';
-import type { CourseId, ProgramId } from '../../../../problems/problemData';
-import { courseIdToProgramIdLists, courseIdToName, UUIDs } from '../../../../problems/problemData';
+import type { CourseId, ProblemId } from '../../../../problems/problemData';
+import { courseIdToProblemIdLists, courseIdToName, UUIDs } from '../../../../problems/problemData';
 import type { UserProblemSessionWithUserAnswers } from '../../../../utils/fetch';
 
 export const SPECIFIED_COMPLETION_COUNT = 1;
 
 export const Course: React.FC<{
   courseId: CourseId;
-  userCompletedProblems: { programId: string }[];
+  userCompletedProblems: { problemId: string }[];
   userProblemSessions: UserProblemSessionWithUserAnswers[];
 }> = ({ courseId, userCompletedProblems, userProblemSessions }) => {
-  const openedProblemIds = new Set(userProblemSessions.map((session) => session.programId));
+  const openedProblemIds = new Set(userProblemSessions.map((session) => session.problemId));
   return (
     <VStack align="stretch" spacing={6}>
       <Heading as="h1">{courseIdToName[courseId]}</Heading>
 
       <SimpleGrid columnGap={4} columns={{ base: 1, lg: 2 }} rowGap={6}>
-        {courseIdToProgramIdLists[courseId].map((programIds, lessonIndex) => {
-          const completedProblemCount = programIds.filter(
-            (programId) => countUserCompletedProblems(userCompletedProblems, programId) >= SPECIFIED_COMPLETION_COUNT
+        {courseIdToProblemIdLists[courseId].map((problemIds, lessonIndex) => {
+          const completedProblemCount = problemIds.filter(
+            (problemId) => countUserCompletedProblems(userCompletedProblems, problemId) >= SPECIFIED_COMPLETION_COUNT
           ).length;
 
-          const openedProblems = programIds.filter((programId) => openedProblemIds.has(programId));
+          const openedProblems = problemIds.filter((problemId) => openedProblemIds.has(problemId));
           if (openedProblems.length === 0) return;
-          const isLessonCompleted = completedProblemCount >= programIds.length;
+          const isLessonCompleted = completedProblemCount >= problemIds.length;
 
           return (
             <Card key={lessonIndex} p={2}>
@@ -63,7 +63,7 @@ export const Course: React.FC<{
               <CardBody align="stretch" as={VStack}>
                 <Progress
                   colorScheme="brand"
-                  max={programIds.length}
+                  max={problemIds.length}
                   rounded="sm"
                   size="sm"
                   value={completedProblemCount}
@@ -77,6 +77,6 @@ export const Course: React.FC<{
   );
 };
 
-function countUserCompletedProblems(userCompletedProblems: { programId: string }[], programId: ProgramId): number {
-  return userCompletedProblems.filter((userCompletedProblem) => userCompletedProblem.programId === programId).length;
+function countUserCompletedProblems(userCompletedProblems: { problemId: string }[], problemId: ProblemId): number {
+  return userCompletedProblems.filter((userCompletedProblem) => userCompletedProblem.problemId === problemId).length;
 }

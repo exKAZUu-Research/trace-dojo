@@ -25,8 +25,8 @@ import {
   Tr,
   VStack,
 } from '../../../../../../infrastructures/useClient/chakra';
-import type { CourseId, ProgramId } from '../../../../../../problems/problemData';
-import { courseIdToProgramIdLists, programIdToName, courseIdToName } from '../../../../../../problems/problemData';
+import type { CourseId, ProblemId } from '../../../../../../problems/problemData';
+import { courseIdToProblemIdLists, problemIdToName, courseIdToName } from '../../../../../../problems/problemData';
 import { type UserProblemSessionWithUserAnswers } from '../../../../../../utils/fetch';
 import { SPECIFIED_COMPLETION_COUNT } from '../../Course';
 
@@ -49,14 +49,14 @@ export const LectureCard: React.FC<{
   courseId: CourseId;
   lectureId: string;
   lectureNumber: number;
-  userCompletedProblems: { programId: string }[];
+  userCompletedProblems: { problemId: string }[];
   userProblemSessions: UserProblemSessionWithUserAnswers[];
 }> = async ({ courseId, lectureId, lectureNumber, userCompletedProblems, userProblemSessions }) => {
-  const programIds = courseIdToProgramIdLists[courseId][lectureNumber - 1];
-  const completedProblemCount = programIds.filter(
-    (programId) => countUserCompletedProblems(userCompletedProblems, programId) >= SPECIFIED_COMPLETION_COUNT
+  const problemIds = courseIdToProblemIdLists[courseId][lectureNumber - 1];
+  const completedProblemCount = problemIds.filter(
+    (problemId) => countUserCompletedProblems(userCompletedProblems, problemId) >= SPECIFIED_COMPLETION_COUNT
   ).length;
-  const isLessonCompleted = completedProblemCount >= programIds.length;
+  const isLessonCompleted = completedProblemCount >= problemIds.length;
   return (
     <VStack align="stretch" spacing={6}>
       <Heading as="h1">{courseIdToName[courseId]}</Heading>
@@ -76,7 +76,7 @@ export const LectureCard: React.FC<{
           <CardBody align="stretch" as={VStack} pb={2}>
             <Progress
               colorScheme="brand"
-              max={programIds.length}
+              max={problemIds.length}
               rounded="sm"
               size="sm"
               value={completedProblemCount}
@@ -104,26 +104,26 @@ export const LectureCard: React.FC<{
               </Thead>
 
               <Tbody>
-                {programIds.map((programId) => {
+                {problemIds.map((problemId) => {
                   const suspendedSession = userProblemSessions.find(
                     (session) =>
                       session.courseId === courseId &&
-                      session.programId === programId &&
+                      session.problemId === problemId &&
                       !session.finishedAt &&
                       !session.isCompleted
                   );
                   const firstSession = userProblemSessions.find(
-                    (session) => session.courseId === courseId && session.programId === programId
+                    (session) => session.courseId === courseId && session.problemId === problemId
                   );
-                  const completedProblemCount = countUserCompletedProblems(userCompletedProblems, programId);
-                  const isProgramCompleted = completedProblemCount >= SPECIFIED_COMPLETION_COUNT;
+                  const completedProblemCount = countUserCompletedProblems(userCompletedProblems, problemId);
+                  const isProblemCompleted = completedProblemCount >= SPECIFIED_COMPLETION_COUNT;
 
                   return (
-                    <Tr key={programId}>
+                    <Tr key={problemId}>
                       <Td>
                         <Icon
-                          as={isProgramCompleted ? MdCheckCircle : MdCheckCircleOutline}
-                          color={isProgramCompleted ? 'brand.500' : 'gray.200'}
+                          as={isProblemCompleted ? MdCheckCircle : MdCheckCircleOutline}
+                          color={isProblemCompleted ? 'brand.500' : 'gray.200'}
                           fontSize="lg"
                           mx="-0.125em"
                         />
@@ -135,8 +135,8 @@ export const LectureCard: React.FC<{
                               挑戦中
                             </Tag>
                           )}
-                          <Link as={NextLink} href={`${lectureId}/problems/${programId}`}>
-                            {programIdToName[programId]}
+                          <Link as={NextLink} href={`${lectureId}/problems/${problemId}`}>
+                            {problemIdToName[problemId]}
                           </Link>
                         </VStack>
                       </Td>
@@ -166,6 +166,6 @@ export const LectureCard: React.FC<{
   );
 };
 
-function countUserCompletedProblems(userCompletedProblems: { programId: string }[], programId: ProgramId): number {
-  return userCompletedProblems.filter((userCompletedProblem) => userCompletedProblem.programId === programId).length;
+function countUserCompletedProblems(userCompletedProblems: { problemId: string }[], problemId: ProblemId): number {
+  return userCompletedProblems.filter((userCompletedProblem) => userCompletedProblem.problemId === problemId).length;
 }
