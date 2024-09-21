@@ -11,8 +11,8 @@ import {
   Th,
   Thead,
   Tr,
-} from '../../../../../../../infrastructures/useClient/chakra';
-import { charToColor, type TraceItemVar } from '../../../../../../../problems/traceProgram';
+} from '../../../../../../../../infrastructures/useClient/chakra';
+import { charToColor, type TraceItemVar } from '../../../../../../../../problems/traceProgram';
 
 interface VariablesProps {
   traceItemVars?: TraceItemVar;

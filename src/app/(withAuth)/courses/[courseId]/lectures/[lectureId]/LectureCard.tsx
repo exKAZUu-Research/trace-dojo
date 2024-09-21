@@ -135,7 +135,7 @@ export const LectureCard: React.FC<{
                               挑戦中
                             </Tag>
                           )}
-                          <Link as={NextLink} href={`lectures/${lectureId}/${programId}`}>
+                          <Link as={NextLink} href={`${lectureId}/problems/${programId}`}>
                             {programIdToName[programId]}
                           </Link>
                         </VStack>

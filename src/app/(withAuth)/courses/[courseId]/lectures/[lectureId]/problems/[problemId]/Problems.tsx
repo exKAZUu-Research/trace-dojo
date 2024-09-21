@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { MdOutlineCheckCircleOutline, MdOutlineInfo } from 'react-icons/md';
 
-import { CustomModal } from '../../../../../../../components/molecules/CustomModal';
+import { CustomModal } from '../../../../../../../../components/molecules/CustomModal';
 import {
   AlertDialog,
   AlertDialogBody,
@@ -21,10 +21,10 @@ import {
   Tooltip,
   useDisclosure,
   VStack,
-} from '../../../../../../../infrastructures/useClient/chakra';
-import type { Problem } from '../../../../../../../problems/generateProblem';
-import type { ProblemType } from '../../../../../../../types';
-import { isMacOS } from '../../../../../../../utils/platform';
+} from '../../../../../../../../infrastructures/useClient/chakra';
+import type { Problem } from '../../../../../../../../problems/generateProblem';
+import type { ProblemType } from '../../../../../../../../types';
+import { isMacOS } from '../../../../../../../../utils/platform';
 
 import { BoardEditor } from './BoardEditor';
 import type { TurtleGraphicsHandle } from './BoardEditor';

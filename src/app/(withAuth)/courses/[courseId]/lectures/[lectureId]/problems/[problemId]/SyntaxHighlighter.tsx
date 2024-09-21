@@ -5,7 +5,7 @@ import React from 'react';
 import { Prism } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 
-import { Box } from '../../../../../../../infrastructures/useClient/chakra';
+import { Box } from '../../../../../../../../infrastructures/useClient/chakra';
 
 type SyntaxHighlighterProps = BoxProps & {
   beforeCheckpointLine?: number;

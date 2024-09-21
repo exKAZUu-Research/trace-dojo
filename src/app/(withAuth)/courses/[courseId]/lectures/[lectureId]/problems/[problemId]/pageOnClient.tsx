@@ -5,18 +5,18 @@ import NextLink from 'next/link';
 import { useEffect, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
 
-import { INTERVAL_MS_OF_IDLE_TIMER } from '../../../../../../../constants';
-import { backendTrpcReact } from '../../../../../../../infrastructures/trpcBackend/client';
-import { Heading, Link, VStack } from '../../../../../../../infrastructures/useClient/chakra';
-import type { Problem } from '../../../../../../../problems/generateProblem';
-import type { CourseId, ProgramId } from '../../../../../../../problems/problemData';
-import { courseIdToName, getExplanation, programIdToName } from '../../../../../../../problems/problemData';
-import type { ProblemType } from '../../../../../../../types';
+import { INTERVAL_MS_OF_IDLE_TIMER } from '../../../../../../../../constants';
+import { backendTrpcReact } from '../../../../../../../../infrastructures/trpcBackend/client';
+import { Heading, Link, VStack } from '../../../../../../../../infrastructures/useClient/chakra';
+import type { Problem } from '../../../../../../../../problems/generateProblem';
+import type { CourseId, ProgramId } from '../../../../../../../../problems/problemData';
+import { courseIdToName, getExplanation, programIdToName } from '../../../../../../../../problems/problemData';
+import type { ProblemType } from '../../../../../../../../types';
 
 import { CheckpointProblem, ExecutionResultProblem, StepProblem } from './Problems';
 
 type Props = {
-  params: { courseId: CourseId; lectureId: string; programId: ProgramId };
+  params: { courseId: CourseId; lectureId: string; problemId: ProgramId };
   problem: Problem;
   userId: string;
   userProblemSession: UserProblemSession;
@@ -70,7 +70,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   }, []);
 
   useEffect(() => {
-    if (!props.userId || !props.params.courseId || !props.params.programId || !suspendedSession) return;
+    if (!props.userId || !props.params.courseId || !props.params.problemId || !suspendedSession) return;
 
     (async () => {
       const updatedSession = await updatedSessionQuery.mutateAsync({
@@ -78,7 +78,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
         userId: props.userId,
         courseId: props.params.courseId,
         lectureId: props.params.lectureId,
-        programId: props.params.programId,
+        programId: props.params.problemId,
         problemVariablesSeed: suspendedSession.problemVariablesSeed,
         currentProblemType: problemType,
         beforeTraceItemIndex: problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
@@ -104,14 +104,14 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
       userId: props.userId,
       courseId: props.params.courseId,
       lectureId: props.params.lectureId,
-      programId: props.params.programId,
+      programId: props.params.problemId,
     });
     await updatedSessionQuery.mutateAsync({
       id: suspendedSession.id,
       userId: props.userId,
       courseId: props.params.courseId,
       lectureId: props.params.lectureId,
-      programId: props.params.programId,
+      programId: props.params.problemId,
       problemVariablesSeed: suspendedSession.problemVariablesSeed,
       currentProblemType: problemType,
       beforeTraceItemIndex: problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
@@ -131,7 +131,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     const startedAt = new Date(now.getTime() - activeTime);
 
     await createUserAnswerQuery.mutateAsync({
-      programId: props.params.programId,
+      programId: props.params.problemId,
       problemType,
       userId: props.userId,
       userProblemSessionId: suspendedSession.id,
@@ -156,7 +156,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     }
   };
 
-  const explanation = getExplanation(props.params.programId);
+  const explanation = getExplanation(props.params.problemId);
 
   return (
     <VStack align="stretch" spacing={8}>
@@ -164,7 +164,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
         <Link as={NextLink} color="gray.600" fontWeight="bold" href={`/courses/${props.params.courseId}`}>
           {courseIdToName[props.params.courseId]}
         </Link>
-        <Heading as="h1">{programIdToName[props.params.programId]}</Heading>
+        <Heading as="h1">{programIdToName[props.params.problemId]}</Heading>
       </VStack>
 
       {problemType === 'executionResult' ? (
