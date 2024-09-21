@@ -5,7 +5,7 @@ import React from 'react';
 import { MdOutlineLogout } from 'react-icons/md';
 import { signOut } from 'supertokens-auth-react/recipe/session';
 
-import { clearAllCaches } from '../../asyncFunctions/cache/actions';
+import { clearAllCaches } from '../../actions';
 import { Icon, MenuItem } from '../../infrastructures/useClient/chakra';
 
 export const SignOutMenuItem: React.FC = () => {
