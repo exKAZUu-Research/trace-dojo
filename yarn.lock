@@ -6186,9 +6186,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"babel-plugin-react-compiler@npm:0.0.0-experimental-23b8160-20240916":
-  version: 0.0.0-experimental-23b8160-20240916
-  resolution: "babel-plugin-react-compiler@npm:0.0.0-experimental-23b8160-20240916"
+"babel-plugin-react-compiler@npm:0.0.0-experimental-6067d4e-20240919":
+  version: 0.0.0-experimental-6067d4e-20240919
+  resolution: "babel-plugin-react-compiler@npm:0.0.0-experimental-6067d4e-20240919"
   dependencies:
     "@babel/generator": "npm:7.2.0"
     "@babel/types": "npm:^7.19.0"
@@ -6197,7 +6197,7 @@ __metadata:
     pretty-format: "npm:^24"
     zod: "npm:^3.22.4"
     zod-validation-error: "npm:^2.1.0"
-  checksum: 10c0/00a207facdda13febf93ec92ddb35683a25539cb848b07bd78504027e3a9502442f7d161ddca7762a4e67c6ae303849ea7539950ca107f36bd81c322826e6556
+  checksum: 10c0/9196a4741dd31115c6f69360c948bf90a52908df14ab007e22ebffe4e607944f42c1e1ac32c5f36c762131e99b5e647e2443ec9dd52a5cda17a9366df6ee0dd1
   languageName: node
   linkType: hard
 
@@ -15067,7 +15067,7 @@ __metadata:
     "@willbooster/prettier-config": "npm:9.1.2"
     "@willbooster/shared-lib-react": "npm:3.2.9"
     "@willbooster/wb": "npm:8.0.2"
-    babel-plugin-react-compiler: "npm:0.0.0-experimental-23b8160-20240916"
+    babel-plugin-react-compiler: "npm:0.0.0-experimental-6067d4e-20240919"
     build-ts: "npm:13.1.8"
     concurrently: "npm:9.0.1"
     conventional-changelog-conventionalcommits: "npm:8.0.0"

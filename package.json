@@ -88,7 +88,7 @@
     "@typescript-eslint/parser": "8.6.0",
     "@willbooster/eslint-config-next": "1.2.0",
     "@willbooster/prettier-config": "9.1.2",
-    "babel-plugin-react-compiler": "0.0.0-experimental-23b8160-20240916",
+    "babel-plugin-react-compiler": "0.0.0-experimental-6067d4e-20240919",
     "concurrently": "9.0.1",
     "conventional-changelog-conventionalcommits": "8.0.0",
     "eslint": "8.57.0",
