@@ -28,7 +28,7 @@ const LecturePage: NextPage<{ params: { courseId: CourseId; lectureId: string } 
   const uuid = lectureId.split('-').slice(1).join('-');
   const lectureNumberMatch = lectureId.match(/lecture(\d+)/);
   const lectureNumber = lectureNumberMatch ? Number(lectureNumberMatch[1]) : undefined;
-  if (!lectureNumber || UUIDs[lectureNumber - 1] !== uuid) return notFound();
+  if (!lectureNumber || UUIDs[courseId][lectureNumber - 1] !== uuid) return notFound();
 
   const userCompletedProblems = await fetchUserLectureCompletedProblems(user.id, courseId, lectureId);
   const userProblemSessions = await fetchUserLectureProblemSessionWithAnswer(user.id, lectureId);

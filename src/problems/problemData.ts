@@ -129,16 +129,19 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
   tuBeginner2: [['test1', 'test2', 'test3', 'test4', 'test5']],
 };
 
-export const UUIDs = [
-  '8d692b48-8c19-4679-8d8f-3f27a051d44d',
-  'd4de75e2-758b-4500-b38e-96213c360527',
-  '99045fdf-6cb5-4947-b934-8b1bc5831bbd',
-  '37632776-e3ab-4cc5-ae08-934caf2ada53',
-  '8fbc94d3-d20c-4457-8997-61e85b3516d9',
-  '35957643-c106-4a97-8073-6705c39ab9a6',
-  '045094ae-1f5c-4caf-bc33-a86af985f13b',
-  '84805179-12cf-4871-969e-fb39e6ad767a',
-];
+export const UUIDs: Record<CourseId, string[]> = {
+  tuBeginner1: [
+    '8d692b48-8c19-4679-8d8f-3f27a051d44d',
+    'd4de75e2-758b-4500-b38e-96213c360527',
+    '99045fdf-6cb5-4947-b934-8b1bc5831bbd',
+    '37632776-e3ab-4cc5-ae08-934caf2ada53',
+    '8fbc94d3-d20c-4457-8997-61e85b3516d9',
+    '35957643-c106-4a97-8073-6705c39ab9a6',
+    '045094ae-1f5c-4caf-bc33-a86af985f13b',
+    '84805179-12cf-4871-969e-fb39e6ad767a',
+  ],
+  tuBeginner2: ['5ba06885-2044-4c1e-bd65-2a9c5e9c9e39'],
+};
 
 export function getExplanation(programId: ProgramId, languageId: VisibleLanguageId): Record<'title' | 'body', string> {
   return programIdToLanguageIdToExplanation[programId]?.[languageId];
