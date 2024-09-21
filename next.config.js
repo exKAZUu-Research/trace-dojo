@@ -12,6 +12,7 @@ const nextConfig = {
       static: 0,
     },
   },
+  productionBrowserSourceMaps: true,
   reactStrictMode: true,
   serverExternalPackages: ['pino'],
   typescript: {
