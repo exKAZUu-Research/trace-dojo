@@ -24,11 +24,11 @@ import {
   Thead,
   Tr,
   VStack,
-} from '../../../../../infrastructures/useClient/chakra';
-import type { CourseId, ProgramId } from '../../../../../problems/problemData';
-import { courseIdToProgramIdLists, programIdToName, courseIdToName } from '../../../../../problems/problemData';
-import { type UserProblemSessionWithUserAnswers } from '../../../../../utils/fetch';
-import { SPECIFIED_COMPLETION_COUNT } from '../Course';
+} from '../../../../../../infrastructures/useClient/chakra';
+import type { CourseId, ProgramId } from '../../../../../../problems/problemData';
+import { courseIdToProgramIdLists, programIdToName, courseIdToName } from '../../../../../../problems/problemData';
+import { type UserProblemSessionWithUserAnswers } from '../../../../../../utils/fetch';
+import { SPECIFIED_COMPLETION_COUNT } from '../../Course';
 
 const countFailedAnswers = (userProblemSession: UserProblemSessionWithUserAnswers | undefined): number => {
   if (!userProblemSession) return 0;
@@ -135,7 +135,7 @@ export const LectureCard: React.FC<{
                               挑戦中
                             </Tag>
                           )}
-                          <Link as={NextLink} href={`${lectureId}/${programId}`}>
+                          <Link as={NextLink} href={`lectures/${lectureId}/${programId}`}>
                             {programIdToName[programId]}
                           </Link>
                         </VStack>

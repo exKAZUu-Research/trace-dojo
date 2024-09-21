@@ -9,10 +9,10 @@ import {
   TURTLE_GRAPHICS_BOARD_CELL_SIZE_PX as CELL_SIZE_PX,
   TURTLE_GRAPHICS_BOARD_GAP_PX as GAP_PX,
   TURTLE_GRAPHICS_BOARD_PADDING_PX as PADDING_PX,
-} from '../../../../../../constants';
-import { Box, Grid, GridItem, Img, keyframes } from '../../../../../../infrastructures/useClient/chakra';
-import { charToColor } from '../../../../../../problems/traceProgram';
-import type { CharacterTrace, TraceItemVar } from '../../../../../../problems/traceProgram';
+} from '../../../../../../../constants';
+import { Box, Grid, GridItem, Img, keyframes } from '../../../../../../../infrastructures/useClient/chakra';
+import { charToColor } from '../../../../../../../problems/traceProgram';
+import type { CharacterTrace, TraceItemVar } from '../../../../../../../problems/traceProgram';
 
 const CHAR_TO_BG_COLOR = {
   '#': 'gray.600',

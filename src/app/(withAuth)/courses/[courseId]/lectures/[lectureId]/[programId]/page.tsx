@@ -1,10 +1,10 @@
 import type { NextPage } from 'next';
 
-import { generateProblem } from '../../../../../../problems/generateProblem';
-import type { CourseId, ProgramId } from '../../../../../../problems/problemData';
-import { findSuspendedUserProblemSession } from '../../../../../../utils/fetch';
-import { getNonNullableSessionOnServer } from '../../../../../../utils/session';
-import { upsertUserProblemSession } from '../../../../../../utils/upsertUserProblemSession';
+import { generateProblem } from '../../../../../../../problems/generateProblem';
+import type { CourseId, ProgramId } from '../../../../../../../problems/problemData';
+import { findSuspendedUserProblemSession } from '../../../../../../../utils/fetch';
+import { getNonNullableSessionOnServer } from '../../../../../../../utils/session';
+import { upsertUserProblemSession } from '../../../../../../../utils/upsertUserProblemSession';
 
 import { ProblemPageOnClient } from './pageOnClient';
 

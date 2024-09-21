@@ -53,7 +53,7 @@ export const Course: React.FC<{
                 />
                 <Heading size="md">第{lessonIndex + 1}回</Heading>
                 <Spacer />
-                <Link href={`${courseId}/lecture${lessonIndex + 1}-${UUIDs[courseId][lessonIndex]}`}>
+                <Link href={`${courseId}/lectures/lecture${lessonIndex + 1}-${UUIDs[courseId][lessonIndex]}`}>
                   <Button colorScheme="brand" mt={4}>
                     レッスンを始める
                   </Button>

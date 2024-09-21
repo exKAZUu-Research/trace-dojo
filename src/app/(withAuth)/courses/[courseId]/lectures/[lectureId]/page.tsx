@@ -2,14 +2,14 @@ import type { NextPage } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import React from 'react';
 
-import { prisma } from '../../../../../infrastructures/prisma';
-import type { CourseId } from '../../../../../problems/problemData';
-import { UUIDs } from '../../../../../problems/problemData';
+import { prisma } from '../../../../../../infrastructures/prisma';
+import type { CourseId } from '../../../../../../problems/problemData';
+import { UUIDs } from '../../../../../../problems/problemData';
 import {
   fetchUserLectureCompletedProblems,
   fetchUserLectureProblemSessionWithAnswer,
-} from '../../../../../utils/fetch';
-import { getNullableSessionOnServer } from '../../../../../utils/session';
+} from '../../../../../../utils/fetch';
+import { getNullableSessionOnServer } from '../../../../../../utils/session';
 
 import { LectureCard } from './LectureCard';
 
