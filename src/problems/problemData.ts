@@ -343,7 +343,7 @@ public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // sid
         int i = 0; // sid
-        while (i < 2) {
+        while (i < <2-3>) {
             i++; // sid
             亀.前に進む(); // sid
             亀.右を向く(); // sid
@@ -535,7 +535,7 @@ for (s.set('i', 0); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
-        for (int i = 0; i < <4-6>, i++) { // sid
+        for (int i = 0; i < <4-6>; i++) { // sid
             if (i < <2-3>)            t.前に進む(); // sid
             else if (i == <2-3>)    t.左を向く(); // sid
             else                     t.後に戻る(); // sid
@@ -563,7 +563,7 @@ for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
-        for (int i = 0; i < <5-7>, i++) { // sid
+        for (int i = 0; i < <5-7>; i++) { // sid
             if (i % 4 == 0)            t.前に進む(); // sid
             else if (i % 4 == 1)    t.右を向く(); // sid
             else if (i % 4 == 2)    t.前に進む(); // sid
@@ -921,7 +921,7 @@ function double(a) {
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
-        int x = 二倍する(<2-3>) // sid
+        int x = 二倍する(<2-3>); // sid
         N歩前に進める(t, x);
     }
     static void N歩前に進める(Turtle t, int n) {
@@ -1000,7 +1000,7 @@ public class Main {
                 if (等しいか(i, j))
                     t.右を向く(); // sid
                 else
-                    t.二歩前に進める(t);
+                    二歩前に進める(t);
             }
             t.左を向く(); // sid
         }
@@ -1067,7 +1067,7 @@ for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
-        int [] arr = { 0, 1, 0, 2, 0 }; // sid
+        int[] arr = { 0, 1, 0, 2, 0 }; // sid
         for (int i = 0; i < arr.length; i++) { // sid
             switch (arr[i]) {
                 case 0:
@@ -1102,8 +1102,8 @@ for (const cmd of [0, 1, 0, 2, 0]) {
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
-        int [] arr = { 0, 1, 0, 2, 0 }; // sid
-        for (int cmd : array) { // sid
+        int[] arr = { 0, 1, 0, 2, 0 }; // sid
+        for (int cmd : arr) { // sid
             switch (cmd) {
                 case 0:
                     t.前に進む(); break; // sid
