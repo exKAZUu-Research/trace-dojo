@@ -79,7 +79,6 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
         courseId: props.params.courseId,
         lectureId: props.params.lectureId,
         programId: props.params.programId,
-        languageId: 'java',
         problemVariablesSeed: suspendedSession.problemVariablesSeed,
         currentProblemType: problemType,
         beforeTraceItemIndex: problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
@@ -106,7 +105,6 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
       courseId: props.params.courseId,
       lectureId: props.params.lectureId,
       programId: props.params.programId,
-      languageId: 'java',
     });
     await updatedSessionQuery.mutateAsync({
       id: suspendedSession.id,
@@ -114,7 +112,6 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
       courseId: props.params.courseId,
       lectureId: props.params.lectureId,
       programId: props.params.programId,
-      languageId: 'java',
       problemVariablesSeed: suspendedSession.problemVariablesSeed,
       currentProblemType: problemType,
       beforeTraceItemIndex: problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
@@ -136,7 +133,6 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     await createUserAnswerQuery.mutateAsync({
       programId: props.params.programId,
       problemType,
-      languageId: 'java',
       userId: props.userId,
       userProblemSessionId: suspendedSession.id,
       step: currentTraceItemIndex,
@@ -160,7 +156,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     }
   };
 
-  const explanation = getExplanation(props.params.programId, 'java');
+  const explanation = getExplanation(props.params.programId);
 
   return (
     <VStack align="stretch" spacing={8}>
@@ -177,7 +173,6 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
           explanation={explanation}
           handleComplete={handleSolveProblem}
           problem={props.problem}
-          selectedLanguageId="java"
           setCurrentTraceItemIndex={setCurrentTraceItemIndex}
           setProblemType={setProblemType}
         />
@@ -188,7 +183,6 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
           currentTraceItemIndex={currentTraceItemIndex}
           explanation={explanation}
           problem={props.problem}
-          selectedLanguageId="java"
           setBeforeTraceItemIndex={setBeforeTraceItemIndex}
           setCurrentTraceItemIndex={setCurrentTraceItemIndex}
           setProblemType={setProblemType}
@@ -201,7 +195,6 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
           explanation={explanation}
           handleComplete={handleSolveProblem}
           problem={props.problem}
-          selectedLanguageId="java"
           setBeforeTraceItemIndex={setBeforeTraceItemIndex}
           setCurrentTraceItemIndex={setCurrentTraceItemIndex}
         />

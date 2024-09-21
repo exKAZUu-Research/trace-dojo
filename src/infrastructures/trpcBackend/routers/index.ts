@@ -20,7 +20,6 @@ export const backendRouter = router({
         courseId: z.string(),
         lectureId: z.string(),
         programId: z.string(),
-        languageId: z.string(),
         problemVariablesSeed: z.string(),
         currentProblemType: z.string(),
         beforeTraceItemIndex: z.number().nonnegative(),
@@ -38,7 +37,6 @@ export const backendRouter = router({
         input.courseId,
         input.programId,
         input.lectureId,
-        input.languageId,
         input.problemVariablesSeed,
         input.currentProblemType,
         input.beforeTraceItemIndex,
@@ -70,8 +68,8 @@ export const backendRouter = router({
         },
         data,
       });
-      revalidatePath('/courses/[courseId]/[languageId]', 'page');
-      console.log(`revalidatePath('/courses/[courseId]/[languageId]', 'page');`);
+      revalidatePath('/courses/[courseId]/[lectureId]', 'page');
+      console.log(`revalidatePath('/courses/[courseId]/[lectureId]', 'page');`);
       return userProblemSession;
     }),
   createUserCompletedProblem: procedure
@@ -82,7 +80,6 @@ export const backendRouter = router({
         courseId: z.string(),
         lectureId: z.string(),
         programId: z.string(),
-        languageId: z.string(),
       })
     )
     .mutation(async ({ input }) => {
@@ -92,11 +89,10 @@ export const backendRouter = router({
           courseId: input.courseId,
           lectureId: input.lectureId,
           programId: input.programId,
-          languageId: input.languageId,
         },
       });
-      revalidatePath('/courses/[courseId]/[languageId]', 'page');
-      console.log(`revalidatePath('/courses/[courseId]/[languageId]', 'page');`);
+      revalidatePath('/courses/[courseId]/[lectureId]', 'page');
+      console.log(`revalidatePath('/courses/[courseId]/[lectureId]', 'page');`);
     }),
   createUserAnswer: procedure
     .use(authorize)
@@ -104,7 +100,6 @@ export const backendRouter = router({
       z.object({
         programId: z.string(),
         problemType: z.string(),
-        languageId: z.string(),
         userId: z.string(),
         userProblemSessionId: z.number(),
         step: z.number().nonnegative(),
@@ -118,7 +113,6 @@ export const backendRouter = router({
         data: {
           programId: input.programId,
           problemType: input.problemType,
-          languageId: input.languageId,
           userId: input.userId,
           userProblemSessionId: input.userProblemSessionId,
           step: input.step,

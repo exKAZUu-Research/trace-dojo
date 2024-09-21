@@ -1,7 +1,7 @@
 import type { NextPage } from 'next';
 
 import { generateProblem } from '../../../../../../problems/generateProblem';
-import type { CourseId, LanguageId, ProgramId } from '../../../../../../problems/problemData';
+import type { CourseId, ProgramId } from '../../../../../../problems/problemData';
 import { findSuspendedUserProblemSession } from '../../../../../../utils/fetch';
 import { getNonNullableSessionOnServer } from '../../../../../../utils/session';
 import { upsertUserProblemSession } from '../../../../../../utils/upsertUserProblemSession';
@@ -19,7 +19,7 @@ const ProblemPage: NextPage<Props> = async (props) => {
   const lectureId = props.params.lectureId;
   const programId = props.params.programId;
 
-  let userProblemSession = await findSuspendedUserProblemSession(userId, courseId, programId, 'java');
+  let userProblemSession = await findSuspendedUserProblemSession(userId, courseId, programId);
 
   if (!userProblemSession) {
     const problemVariableSeed = Date.now().toString();
@@ -33,7 +33,6 @@ const ProblemPage: NextPage<Props> = async (props) => {
       courseId,
       lectureId,
       programId,
-      'java',
       problemVariableSeed,
       problemType,
       0,
@@ -49,7 +48,7 @@ const ProblemPage: NextPage<Props> = async (props) => {
 
   const problem = generateProblem(
     userProblemSession.programId as ProgramId,
-    userProblemSession.languageId as LanguageId,
+    'java',
     userProblemSession.problemVariablesSeed
   );
 

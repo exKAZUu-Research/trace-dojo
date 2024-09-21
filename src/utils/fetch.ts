@@ -1,7 +1,7 @@
 import type { UserAnswer, UserProblemSession } from '@prisma/client';
 
 import { prisma } from '../infrastructures/prisma';
-import type { ProgramId, VisibleLanguageId } from '../problems/problemData';
+import type { ProgramId } from '../problems/problemData';
 
 export type UserProblemSessionWithUserAnswers = UserProblemSession & { userAnswers: UserAnswer[] };
 
@@ -54,8 +54,7 @@ export async function fetchUserLectureProblemSessionWithAnswer(
 export async function findSuspendedUserProblemSession(
   userId: string,
   courseId: string,
-  programId: string,
-  languageId: string
+  programId: string
 ): Promise<UserProblemSession | undefined> {
   try {
     const suspendedUserProblemSession = await prisma.userProblemSession.findFirst({
@@ -63,7 +62,6 @@ export async function findSuspendedUserProblemSession(
         userId,
         courseId,
         programId,
-        languageId,
         finishedAt: undefined,
         isCompleted: false,
       },
@@ -78,7 +76,7 @@ export async function findSuspendedUserProblemSession(
 export async function fetchUserCompletedProblems(
   userId: string,
   courseId: string
-): Promise<{ programId: ProgramId; languageId: VisibleLanguageId }[]> {
+): Promise<{ programId: ProgramId }[]> {
   try {
     const userCompletedProblems = await prisma.userCompletedProblem.findMany({
       where: {
@@ -87,10 +85,9 @@ export async function fetchUserCompletedProblems(
       },
       select: {
         programId: true,
-        languageId: true,
       },
     });
-    return userCompletedProblems as { programId: ProgramId; languageId: VisibleLanguageId }[];
+    return userCompletedProblems as { programId: ProgramId }[];
   } catch (error) {
     console.error(error);
     return [];
@@ -101,7 +98,7 @@ export async function fetchUserLectureCompletedProblems(
   userId: string,
   courseId: string,
   lectureId: string
-): Promise<{ programId: ProgramId; languageId: VisibleLanguageId }[]> {
+): Promise<{ programId: ProgramId }[]> {
   try {
     const userCompletedProblems = await prisma.userCompletedProblem.findMany({
       where: {
@@ -111,10 +108,9 @@ export async function fetchUserLectureCompletedProblems(
       },
       select: {
         programId: true,
-        languageId: true,
       },
     });
-    return userCompletedProblems as { programId: ProgramId; languageId: VisibleLanguageId }[];
+    return userCompletedProblems as { programId: ProgramId }[];
   } catch (error) {
     console.error(error);
     return [];

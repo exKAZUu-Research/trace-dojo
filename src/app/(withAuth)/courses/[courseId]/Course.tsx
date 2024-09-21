@@ -16,7 +16,7 @@ import {
   Spacer,
   VStack,
 } from '../../../../infrastructures/useClient/chakra';
-import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../problems/problemData';
+import type { CourseId, ProgramId } from '../../../../problems/problemData';
 import { courseIdToProgramIdLists, courseIdToName, UUIDs } from '../../../../problems/problemData';
 import type { UserProblemSessionWithUserAnswers } from '../../../../utils/fetch';
 
@@ -24,7 +24,7 @@ export const SPECIFIED_COMPLETION_COUNT = 1;
 
 export const Course: React.FC<{
   courseId: CourseId;
-  userCompletedProblems: { programId: string; languageId: VisibleLanguageId }[];
+  userCompletedProblems: { programId: string }[];
   userProblemSessions: UserProblemSessionWithUserAnswers[];
 }> = ({ courseId, userCompletedProblems, userProblemSessions }) => {
   const openedProblemIds = new Set(userProblemSessions.map((session) => session.programId));
@@ -35,8 +35,7 @@ export const Course: React.FC<{
       <SimpleGrid columnGap={4} columns={{ base: 1, lg: 2 }} rowGap={6}>
         {courseIdToProgramIdLists[courseId].map((programIds, lessonIndex) => {
           const completedProblemCount = programIds.filter(
-            (programId) =>
-              countUserCompletedProblems(userCompletedProblems, programId, 'java') >= SPECIFIED_COMPLETION_COUNT
+            (programId) => countUserCompletedProblems(userCompletedProblems, programId) >= SPECIFIED_COMPLETION_COUNT
           ).length;
 
           const openedProblems = programIds.filter((programId) => openedProblemIds.has(programId));
@@ -78,13 +77,6 @@ export const Course: React.FC<{
   );
 };
 
-function countUserCompletedProblems(
-  userCompletedProblems: { programId: string; languageId: VisibleLanguageId }[],
-  programId: ProgramId,
-  languageId: VisibleLanguageId
-): number {
-  return userCompletedProblems.filter(
-    (userCompletedProblem) =>
-      userCompletedProblem.programId === programId && userCompletedProblem.languageId === languageId
-  ).length;
+function countUserCompletedProblems(userCompletedProblems: { programId: string }[], programId: ProgramId): number {
+  return userCompletedProblems.filter((userCompletedProblem) => userCompletedProblem.programId === programId).length;
 }

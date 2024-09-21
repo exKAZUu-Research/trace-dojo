@@ -37,7 +37,6 @@ interface ExecutionResultProblemProps {
   createAnswerLog: (isPassed: boolean) => void;
   explanation?: Record<'title' | 'body', string>;
   handleComplete: () => void;
-  selectedLanguageId: string;
   setCurrentTraceItemIndex: (line: number) => void;
   setProblemType: (step: ProblemType) => void;
 }
@@ -61,7 +60,6 @@ interface CheckpointProblemProps {
   createAnswerLog: (isPassed: boolean) => void;
   currentTraceItemIndex: number;
   explanation?: Record<'title' | 'body', string>;
-  selectedLanguageId: string;
   setBeforeTraceItemIndex: (line: number) => void;
   setCurrentTraceItemIndex: (line: number) => void;
 }
@@ -78,7 +76,6 @@ interface StepProblemProps {
   problem: Problem;
   explanation?: Record<'title' | 'body', string>;
   handleComplete: () => void;
-  selectedLanguageId: string;
   setBeforeTraceItemIndex: (line: number) => void;
   setCurrentTraceItemIndex: (line: number) => void;
 }
@@ -92,7 +89,6 @@ interface ProblemProps {
   problem: Problem;
   createAnswerLog: (isPassed: boolean) => void;
   explanation?: Record<'title' | 'body', string>;
-  selectedLanguageId: string;
   setCurrentTraceItemIndex: (line: number) => void;
   setProblemType?: (step: ProblemType) => void;
   handleComplete?: () => void;
@@ -108,7 +104,6 @@ const ProblemComponent: React.FC<ProblemProps & { type: 'executionResult' | 'che
   explanation,
   handleComplete,
   problem,
-  selectedLanguageId,
   setBeforeTraceItemIndex,
   setCurrentTraceItemIndex,
   setProblemType,
@@ -303,7 +298,7 @@ const ProblemComponent: React.FC<ProblemProps & { type: 'executionResult' | 'che
                   ? undefined
                   : problem.sidToLineIndex.get(problem.traceItems[currentTraceItemIndex].sid)
               }
-              programmingLanguageId={selectedLanguageId}
+              programmingLanguageId="java"
             />
           </VStack>
 

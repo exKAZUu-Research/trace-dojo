@@ -25,7 +25,7 @@ import {
   Tr,
   VStack,
 } from '../../../../../infrastructures/useClient/chakra';
-import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../problems/problemData';
+import type { CourseId, ProgramId } from '../../../../../problems/problemData';
 import { courseIdToProgramIdLists, programIdToName, courseIdToName } from '../../../../../problems/problemData';
 import { type UserProblemSessionWithUserAnswers } from '../../../../../utils/fetch';
 import { SPECIFIED_COMPLETION_COUNT } from '../Course';
@@ -49,12 +49,12 @@ export const LectureCard: React.FC<{
   courseId: CourseId;
   lectureId: string;
   lectureNumber: number;
-  userCompletedProblems: { programId: string; languageId: VisibleLanguageId }[];
+  userCompletedProblems: { programId: string }[];
   userProblemSessions: UserProblemSessionWithUserAnswers[];
 }> = async ({ courseId, lectureId, lectureNumber, userCompletedProblems, userProblemSessions }) => {
   const programIds = courseIdToProgramIdLists[courseId][lectureNumber - 1];
   const completedProblemCount = programIds.filter(
-    (programId) => countUserCompletedProblems(userCompletedProblems, programId, 'java') >= SPECIFIED_COMPLETION_COUNT
+    (programId) => countUserCompletedProblems(userCompletedProblems, programId) >= SPECIFIED_COMPLETION_COUNT
   ).length;
   const isLessonCompleted = completedProblemCount >= programIds.length;
   return (
@@ -115,7 +115,7 @@ export const LectureCard: React.FC<{
                   const firstSession = userProblemSessions.find(
                     (session) => session.courseId === courseId && session.programId === programId
                   );
-                  const completedProblemCount = countUserCompletedProblems(userCompletedProblems, programId, 'java');
+                  const completedProblemCount = countUserCompletedProblems(userCompletedProblems, programId);
                   const isProgramCompleted = completedProblemCount >= SPECIFIED_COMPLETION_COUNT;
 
                   return (
@@ -166,13 +166,6 @@ export const LectureCard: React.FC<{
   );
 };
 
-function countUserCompletedProblems(
-  userCompletedProblems: { programId: string; languageId: VisibleLanguageId }[],
-  programId: ProgramId,
-  languageId: VisibleLanguageId
-): number {
-  return userCompletedProblems.filter(
-    (userCompletedProblem) =>
-      userCompletedProblem.programId === programId && userCompletedProblem.languageId === languageId
-  ).length;
+function countUserCompletedProblems(userCompletedProblems: { programId: string }[], programId: ProgramId): number {
+  return userCompletedProblems.filter((userCompletedProblem) => userCompletedProblem.programId === programId).length;
 }

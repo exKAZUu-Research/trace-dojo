@@ -53,14 +53,7 @@ export type ProgramId = (typeof programIds)[number];
 export const languageIds = ['instrumented', 'java'] as const;
 export type LanguageId = (typeof languageIds)[number];
 
-export const visibleLanguageIds = ['java'] as const;
-export type VisibleLanguageId = (typeof visibleLanguageIds)[number];
-
 export const defaultLanguageId = 'java' as const;
-
-export const languageIdToName: Record<VisibleLanguageId, string> = {
-  java: 'Java',
-};
 
 export const courseIdToName: Record<CourseId, string> = {
   tuBeginner1: '初級プログラミングⅠ',
@@ -143,8 +136,8 @@ export const UUIDs: Record<CourseId, string[]> = {
   tuBeginner2: ['5ba06885-2044-4c1e-bd65-2a9c5e9c9e39'],
 };
 
-export function getExplanation(programId: ProgramId, languageId: VisibleLanguageId): Record<'title' | 'body', string> {
-  return programIdToLanguageIdToExplanation[programId]?.[languageId];
+export function getExplanation(programId: ProgramId): Record<'title' | 'body', string> {
+  return programIdToLanguageIdToExplanation[programId];
 }
 
 export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId, string>> = {
@@ -1381,16 +1374,11 @@ public class Straight {
 };
 
 const defaultExplanation = {
-  java: {
-    title: '',
-    body: '',
-  },
+  title: '',
+  body: '',
 };
 
-export const programIdToLanguageIdToExplanation: Record<
-  ProgramId,
-  Record<VisibleLanguageId, Record<'title' | 'body', string>>
-> = {
+export const programIdToLanguageIdToExplanation: Record<ProgramId, Record<'title' | 'body', string>> = {
   straight: defaultExplanation,
   stepBack: defaultExplanation,
   turnRight: defaultExplanation,
