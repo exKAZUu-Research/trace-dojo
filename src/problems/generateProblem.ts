@@ -1,7 +1,7 @@
 import { Random } from '../app/lib/random';
 
 import type { LanguageId, ProblemId } from './problemData';
-import { problemIdToLanguageIdToProgram } from './problemData';
+import { problemIdToLanguageIdToCode } from './problemData';
 import { type TraceItem, traceProgram } from './traceProgram';
 
 export type Problem = {
@@ -35,7 +35,7 @@ const randomNumberRegex = /<(\d+)-(\d+)>/g;
 
 export function generateProblem(problemId: ProblemId, languageId: LanguageId, variableSeed: string): Problem {
   const random = new Random(variableSeed);
-  const template = problemIdToLanguageIdToProgram[problemId];
+  const template = problemIdToLanguageIdToCode[problemId];
   const generatedNumbers: number[] = [];
 
   const instrumented = template.instrumented.replaceAll(randomNumberRegex, (match, min, max) => {
@@ -45,9 +45,8 @@ export function generateProblem(problemId: ProblemId, languageId: LanguageId, va
   });
 
   let index = 0;
-  const rawDisplayProgram = languageId
-    ? template[languageId].replaceAll(randomNumberRegex, () => generatedNumbers[index++].toString())
-    : '';
-
+  const rawDisplayProgram = template[languageId].replaceAll(randomNumberRegex, () =>
+    generatedNumbers[index++].toString()
+  );
   return traceProgram(instrumented, rawDisplayProgram, languageId);
 }

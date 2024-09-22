@@ -53,8 +53,6 @@ export type ProblemId = (typeof problemIds)[number];
 export const languageIds = ['instrumented', 'java'] as const;
 export type LanguageId = (typeof languageIds)[number];
 
-export const defaultLanguageId = 'java' as const;
-
 export const courseIdToName: Record<CourseId, string> = {
   tuBeginner1: '初級プログラミングⅠ',
   tuBeginner2: '初級プログラミングⅡ',
@@ -136,11 +134,7 @@ export const UUIDs: Record<CourseId, string[]> = {
   tuBeginner2: ['5ba06885-2044-4c1e-bd65-2a9c5e9c9e39'],
 };
 
-export function getExplanation(problemId: ProblemId): Record<'title' | 'body', string> {
-  return problemIdToLanguageIdToExplanation[problemId];
-}
-
-export const problemIdToLanguageIdToProgram: Record<ProblemId, Record<LanguageId, string>> = {
+export const problemIdToLanguageIdToCode: Record<ProblemId, Record<LanguageId, string>> = {
   straight: {
     instrumented: `
 s.set('亀', new Character());
@@ -1371,57 +1365,4 @@ public class Straight {
 }
 `.trim(),
   },
-};
-
-const defaultExplanation = {
-  title: '',
-  body: '',
-};
-
-export const problemIdToLanguageIdToExplanation: Record<ProblemId, Record<'title' | 'body', string>> = {
-  straight: defaultExplanation,
-  stepBack: defaultExplanation,
-  turnRight: defaultExplanation,
-  turnRightAndTurnLeft: defaultExplanation,
-  square1: defaultExplanation,
-  square2: defaultExplanation,
-  variable: defaultExplanation,
-  variable2: defaultExplanation,
-  variable3: defaultExplanation,
-  while1: defaultExplanation,
-  while2: defaultExplanation,
-  for1: defaultExplanation,
-  for2: defaultExplanation,
-  for3: defaultExplanation,
-  doubleLoop1: defaultExplanation,
-  doubleLoop2: defaultExplanation,
-  if1: defaultExplanation,
-  if2: defaultExplanation,
-  elseIf1: defaultExplanation,
-  elseIf2: defaultExplanation,
-  switch1: defaultExplanation,
-  switch2: defaultExplanation,
-  break1: defaultExplanation,
-  break2: defaultExplanation,
-  break3: defaultExplanation,
-  continue1: defaultExplanation,
-  continue2: defaultExplanation,
-  continue3: defaultExplanation,
-  method1: defaultExplanation,
-  method2: defaultExplanation,
-  method3: defaultExplanation,
-  return1: defaultExplanation,
-  return2: defaultExplanation,
-  return3: defaultExplanation,
-  array1: defaultExplanation,
-  array2: defaultExplanation,
-  array3: defaultExplanation,
-  string1: defaultExplanation,
-  string2: defaultExplanation,
-  string3: defaultExplanation,
-  test1: defaultExplanation,
-  test2: defaultExplanation,
-  test3: defaultExplanation,
-  test4: defaultExplanation,
-  test5: defaultExplanation,
 };

@@ -10,7 +10,7 @@ import { backendTrpcReact } from '../../../../../../../../infrastructures/trpcBa
 import { Heading, Link, VStack } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../../../problems/generateProblem';
 import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
-import { courseIdToName, getExplanation, problemIdToName } from '../../../../../../../../problems/problemData';
+import { courseIdToName, problemIdToName } from '../../../../../../../../problems/problemData';
 import type { ProblemType } from '../../../../../../../../types';
 
 import { CheckpointProblem, ExecutionResultProblem, StepProblem } from './Problems';
@@ -156,8 +156,6 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     }
   };
 
-  const explanation = getExplanation(props.params.problemId);
-
   return (
     <VStack align="stretch" spacing={8}>
       <VStack align="stretch" spacing={1}>
@@ -170,7 +168,6 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
       {problemType === 'executionResult' ? (
         <ExecutionResultProblem
           createAnswerLog={createAnswerLog}
-          explanation={explanation}
           handleComplete={handleSolveProblem}
           problem={props.problem}
           setCurrentTraceItemIndex={setCurrentTraceItemIndex}
@@ -181,7 +178,6 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
           beforeTraceItemIndex={beforeTraceItemIndex}
           createAnswerLog={createAnswerLog}
           currentTraceItemIndex={currentTraceItemIndex}
-          explanation={explanation}
           problem={props.problem}
           setBeforeTraceItemIndex={setBeforeTraceItemIndex}
           setCurrentTraceItemIndex={setCurrentTraceItemIndex}
@@ -192,7 +188,6 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
           beforeTraceItemIndex={beforeTraceItemIndex}
           createAnswerLog={createAnswerLog}
           currentTraceItemIndex={currentTraceItemIndex}
-          explanation={explanation}
           handleComplete={handleSolveProblem}
           problem={props.problem}
           setBeforeTraceItemIndex={setBeforeTraceItemIndex}

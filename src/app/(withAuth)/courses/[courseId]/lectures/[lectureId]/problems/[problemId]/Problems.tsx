@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { MdOutlineCheckCircleOutline, MdOutlineInfo } from 'react-icons/md';
+import { MdOutlineInfo } from 'react-icons/md';
 
 import { CustomModal } from '../../../../../../../../components/molecules/CustomModal';
 import {
@@ -35,7 +35,6 @@ import { Variables } from './Variables';
 interface ExecutionResultProblemProps {
   problem: Problem;
   createAnswerLog: (isPassed: boolean) => void;
-  explanation?: Record<'title' | 'body', string>;
   handleComplete: () => void;
   setCurrentTraceItemIndex: (line: number) => void;
   setProblemType: (step: ProblemType) => void;
@@ -59,7 +58,6 @@ interface CheckpointProblemProps {
   beforeTraceItemIndex: number;
   createAnswerLog: (isPassed: boolean) => void;
   currentTraceItemIndex: number;
-  explanation?: Record<'title' | 'body', string>;
   setBeforeTraceItemIndex: (line: number) => void;
   setCurrentTraceItemIndex: (line: number) => void;
 }
@@ -74,7 +72,6 @@ interface StepProblemProps {
   createAnswerLog: (isPassed: boolean) => void;
   currentTraceItemIndex: number;
   problem: Problem;
-  explanation?: Record<'title' | 'body', string>;
   handleComplete: () => void;
   setBeforeTraceItemIndex: (line: number) => void;
   setCurrentTraceItemIndex: (line: number) => void;
@@ -88,7 +85,6 @@ export const StepProblem: React.FC<StepProblemProps> = (props) => {
 interface ProblemProps {
   problem: Problem;
   createAnswerLog: (isPassed: boolean) => void;
-  explanation?: Record<'title' | 'body', string>;
   setCurrentTraceItemIndex: (line: number) => void;
   setProblemType?: (step: ProblemType) => void;
   handleComplete?: () => void;
@@ -101,7 +97,6 @@ const ProblemComponent: React.FC<ProblemProps & { type: 'executionResult' | 'che
   beforeTraceItemIndex,
   createAnswerLog,
   currentTraceItemIndex,
-  explanation,
   handleComplete,
   problem,
   setBeforeTraceItemIndex,
@@ -110,11 +105,6 @@ const ProblemComponent: React.FC<ProblemProps & { type: 'executionResult' | 'che
   type,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
-  const {
-    isOpen: isExplanationModalOpen,
-    onClose: onExplanationModalClose,
-    onOpen: onExplanationModalOpen,
-  } = useDisclosure();
   const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
   const { isOpen: isAlertOpen, onClose: onAlertClose, onOpen: onAlertOpen } = useDisclosure();
   const cancelRef = useRef(null);
@@ -264,25 +254,6 @@ const ProblemComponent: React.FC<ProblemProps & { type: 'executionResult' | 'che
                   title={`${type === 'executionResult' ? '実行結果問題' : type === 'checkpoint' ? 'チェックポイント問題' : 'ステップ問題'}について`}
                   onClose={onHelpModalClose}
                 />
-
-                {explanation && explanation.title && (
-                  <>
-                    <Button
-                      leftIcon={<Icon as={MdOutlineCheckCircleOutline} />}
-                      size="sm"
-                      variant="outline"
-                      onClick={onExplanationModalOpen}
-                    >
-                      解説
-                    </Button>
-                    <CustomModal
-                      body={explanation.body}
-                      isOpen={isExplanationModalOpen}
-                      title={explanation.title}
-                      onClose={onExplanationModalClose}
-                    />
-                  </>
-                )}
               </HStack>
             </VStack>
 
