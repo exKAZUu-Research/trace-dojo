@@ -35,7 +35,7 @@ const randomNumberRegex = /<(\d+)-(\d+)>/g;
 
 export function generateProblem(problemId: string, languageId: LanguageId, variableSeed: string): Problem | undefined {
   const template = problemIdToLanguageIdToProgram[problemId as ProblemId];
-  if (!template) return;
+  if (!template || !template[languageId]) return;
 
   const random = new Random(variableSeed);
   const generatedNumbers: number[] = [];

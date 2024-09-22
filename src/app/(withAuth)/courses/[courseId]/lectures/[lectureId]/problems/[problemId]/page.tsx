@@ -20,7 +20,6 @@ const ProblemPage: NextPage<Props> = async (props) => {
   const problemId = props.params.problemId;
 
   let userProblemSession = await findSuspendedUserProblemSession(userId, courseId, problemId);
-
   if (!userProblemSession) {
     const problemVariableSeed = Date.now().toString();
     const problemType = 'executionResult';
@@ -42,16 +41,14 @@ const ProblemPage: NextPage<Props> = async (props) => {
       undefined,
       false
     );
+    if (!userProblemSession) return;
   }
-
-  if (!userProblemSession) return;
 
   const problem = generateProblem(
     userProblemSession.problemId as ProblemId,
     'java',
     userProblemSession.problemVariablesSeed
   );
-
   if (!problem) return;
 
   return (
