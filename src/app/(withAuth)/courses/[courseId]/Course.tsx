@@ -71,7 +71,7 @@ export const Course: React.FC<{
                   title={`${completedProblemCount}/${problemIds.length} 問題完了`}
                   value={completedProblemCount}
                 />
-                <Box>
+                <Box textAlign="right">
                   解答状況: {completedProblemCount}/{problemIds.length} 問 (
                   {Math.round((completedProblemCount / problemIds.length) * 100)}%)
                 </Box>
