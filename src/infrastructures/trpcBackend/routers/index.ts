@@ -18,8 +18,8 @@ export const backendRouter = router({
         id: z.number(),
         userId: z.string(),
         courseId: z.string(),
-        programId: z.string(),
-        languageId: z.string(),
+        lectureId: z.string(),
+        problemId: z.string(),
         problemVariablesSeed: z.string(),
         currentProblemType: z.string(),
         beforeTraceItemIndex: z.number().nonnegative(),
@@ -35,8 +35,8 @@ export const backendRouter = router({
         input.id,
         input.userId,
         input.courseId,
-        input.programId,
-        input.languageId,
+        input.problemId,
+        input.lectureId,
         input.problemVariablesSeed,
         input.currentProblemType,
         input.beforeTraceItemIndex,
@@ -68,8 +68,8 @@ export const backendRouter = router({
         },
         data,
       });
-      revalidatePath('/courses/[courseId]/[languageId]', 'page');
-      console.log(`revalidatePath('/courses/[courseId]/[languageId]', 'page');`);
+      revalidatePath('/courses/[courseId]/[lectureId]', 'page');
+      console.log(`revalidatePath('/courses/[courseId]/[lectureId]', 'page');`);
       return userProblemSession;
     }),
   createUserCompletedProblem: procedure
@@ -78,8 +78,8 @@ export const backendRouter = router({
       z.object({
         userId: z.string(),
         courseId: z.string(),
-        programId: z.string(),
-        languageId: z.string(),
+        lectureId: z.string(),
+        problemId: z.string(),
       })
     )
     .mutation(async ({ input }) => {
@@ -87,20 +87,19 @@ export const backendRouter = router({
         data: {
           userId: input.userId,
           courseId: input.courseId,
-          programId: input.programId,
-          languageId: input.languageId,
+          lectureId: input.lectureId,
+          problemId: input.problemId,
         },
       });
-      revalidatePath('/courses/[courseId]/[languageId]', 'page');
-      console.log(`revalidatePath('/courses/[courseId]/[languageId]', 'page');`);
+      revalidatePath('/courses/[courseId]/[lectureId]', 'page');
+      console.log(`revalidatePath('/courses/[courseId]/[lectureId]', 'page');`);
     }),
   createUserAnswer: procedure
     .use(authorize)
     .input(
       z.object({
-        programId: z.string(),
+        problemId: z.string(),
         problemType: z.string(),
-        languageId: z.string(),
         userId: z.string(),
         userProblemSessionId: z.number(),
         step: z.number().nonnegative(),
@@ -112,9 +111,8 @@ export const backendRouter = router({
     .mutation(async ({ input }) => {
       await prisma.userAnswer.create({
         data: {
-          programId: input.programId,
+          problemId: input.problemId,
           problemType: input.problemType,
-          languageId: input.languageId,
           userId: input.userId,
           userProblemSessionId: input.userProblemSessionId,
           step: input.step,

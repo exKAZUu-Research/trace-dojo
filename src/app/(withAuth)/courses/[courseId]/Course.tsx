@@ -1,13 +1,10 @@
 'use client';
 
-import type { UserAnswer } from '@prisma/client';
-import NextLink from 'next/link';
-import React, { useEffect } from 'react';
-import { MdCheckCircle, MdCheckCircleOutline, MdOutlineVerified, MdVerified } from 'react-icons/md';
-import { useLocalStorage } from 'usehooks-ts';
+import { MdOutlineVerified, MdVerified } from 'react-icons/md';
 
 import {
   Box,
+  Button,
   Card,
   CardBody,
   CardHeader,
@@ -16,100 +13,39 @@ import {
   Icon,
   Link,
   Progress,
-  Select,
   SimpleGrid,
-  Table,
-  Tag,
-  Tbody,
-  Td,
-  Th,
-  Thead,
-  Tr,
+  Spacer,
+  Tooltip,
   VStack,
 } from '../../../../infrastructures/useClient/chakra';
-import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../problems/problemData';
-import {
-  courseIdToName,
-  courseIdToProgramIdLists,
-  defaultLanguageId,
-  languageIdToName,
-  programIdToName,
-  visibleLanguageIds,
-} from '../../../../problems/problemData';
+import type { CourseId, ProblemId } from '../../../../problems/problemData';
+import { courseIdToLectureIds, courseIdToName, courseIdToProblemIdLists } from '../../../../problems/problemData';
 import type { UserProblemSessionWithUserAnswers } from '../../../../utils/fetch';
-import { selectedLanguageIdKey } from '../../../lib/sessionStorage';
 
-const SPECIFIED_COMPLETION_COUNT = 1;
-
-const countFailedAnswers = (userProblemSession: UserProblemSessionWithUserAnswers | undefined): number => {
-  if (!userProblemSession) return 0;
-
-  return userProblemSession.userAnswers.filter((userAnswer: UserAnswer) => !userAnswer.isPassed).length;
-};
-
-const totalAnswerTimeSpent = (userProblemSession: UserProblemSessionWithUserAnswers | undefined): number => {
-  if (!userProblemSession) return 0;
-
-  return userProblemSession.userAnswers.reduce(
-    (totalTimeSpent: number, userAnswer: UserAnswer) => totalTimeSpent + (userAnswer.timeSpent || 0),
-    0
-  );
-};
+export const SPECIFIED_COMPLETION_COUNT = 1;
 
 export const Course: React.FC<{
   courseId: CourseId;
-  userCompletedProblems: { programId: string; languageId: VisibleLanguageId }[];
+  userCompletedProblems: { problemId: string }[];
   userProblemSessions: UserProblemSessionWithUserAnswers[];
 }> = ({ courseId, userCompletedProblems, userProblemSessions }) => {
-  const [selectedLanguageId, setSelectedLanguageId] = useLocalStorage<VisibleLanguageId>(
-    selectedLanguageIdKey,
-    defaultLanguageId
-  );
-  useEffect(() => {
-    // 念の為、未知の言語が指定された場合、デフォルト言語に設定し直す。
-    if (!visibleLanguageIds.includes(selectedLanguageId)) {
-      setSelectedLanguageId(defaultLanguageId);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLanguageId]);
-
-  const handleSelectLanguage = (event: React.ChangeEvent<HTMLSelectElement>): void => {
-    const inputValue = event.target.value;
-    setSelectedLanguageId(inputValue as VisibleLanguageId);
-  };
-
+  const openedProblemIds = new Set(userProblemSessions.map((session) => session.problemId));
   return (
     <VStack align="stretch" spacing={6}>
       <Heading as="h1">{courseIdToName[courseId]}</Heading>
 
-      {/* TODO: Styling. */}
-      <Select
-        bg="white"
-        maxW="xs"
-        placeholder="Select language"
-        value={selectedLanguageId}
-        onChange={(e) => handleSelectLanguage(e)}
-      >
-        {visibleLanguageIds.map((languageId) => (
-          <option key={languageId} value={languageId}>
-            {languageIdToName[languageId]}
-          </option>
-        ))}
-      </Select>
-
-      <SimpleGrid columnGap={4} columns={{ base: 1, lg: 2, xl: 3 }} rowGap={6}>
-        {courseIdToProgramIdLists[courseId].map((programIds, lessonIndex) => {
-          const completedProblemCount = programIds.filter(
-            (programId) =>
-              countUserCompletedProblems(userCompletedProblems, programId, selectedLanguageId) >=
-              SPECIFIED_COMPLETION_COUNT
+      <SimpleGrid columnGap={4} columns={{ base: 1, lg: 2 }} rowGap={6}>
+        {courseIdToProblemIdLists[courseId].map((problemIds, lessonIndex) => {
+          const isDisabled = problemIds.filter((problemId) => openedProblemIds.has(problemId)).length === 0;
+          const completedProblemCount = problemIds.filter(
+            (problemId) => countUserCompletedProblems(userCompletedProblems, problemId) >= SPECIFIED_COMPLETION_COUNT
           ).length;
-
-          const isLessonCompleted = completedProblemCount >= programIds.length;
+          const isLessonCompleted = completedProblemCount >= problemIds.length;
+          const url = isDisabled ? '#' : `${courseId}/lectures/${courseIdToLectureIds[courseId][lessonIndex]}`;
 
           return (
-            <Card key={lessonIndex}>
-              <CardHeader as={HStack} gap={3} pb={0}>
+            <Card key={lessonIndex} p={2}>
+              <CardHeader as={HStack} gap={3}>
                 <Icon
                   as={isLessonCompleted ? MdVerified : MdOutlineVerified}
                   color={isLessonCompleted ? 'brand.500' : 'gray.200'}
@@ -117,102 +53,32 @@ export const Course: React.FC<{
                   mx="-0.125em"
                 />
                 <Heading size="md">第{lessonIndex + 1}回</Heading>
+                <Spacer />
+                <Tooltip
+                  isDisabled={!isDisabled}
+                  label={`第${lessonIndex + 1}回の配布資料のURLから問題を一度開くと、ボタンが有効になります。`}
+                >
+                  <Link href={url}>
+                    <Button colorScheme="brand" isDisabled={isDisabled} mt={4}>
+                      課題を解く
+                    </Button>
+                  </Link>
+                </Tooltip>
               </CardHeader>
 
-              <CardBody align="stretch" as={VStack} pb={2}>
+              <CardBody align="stretch" as={VStack}>
                 <Progress
                   colorScheme="brand"
-                  max={programIds.length}
+                  max={problemIds.length}
                   rounded="sm"
                   size="sm"
+                  title={`${completedProblemCount}/${problemIds.length} 問題完了`}
                   value={completedProblemCount}
                 />
-
-                <Table
-                  mx={-5}
-                  sx={{
-                    'td:not(:first-of-type), th:not(:first-of-type)': { ps: 1.5 },
-                    'td:not(:last-of-type), th:not(:last-of-type)': { pe: 1.5 },
-                  }}
-                  w="unset"
-                >
-                  <Thead>
-                    <Tr whiteSpace="nowrap">
-                      <Th w="0" />
-                      <Th w="0" />
-                      <Th isNumeric w="0">
-                        初回不正解
-                      </Th>
-                      <Th isNumeric w="0">
-                        初回所要時間
-                      </Th>
-                    </Tr>
-                  </Thead>
-
-                  <Tbody>
-                    {programIds.map((programId) => {
-                      const suspendedSession = userProblemSessions.find(
-                        (session) =>
-                          session.courseId === courseId &&
-                          session.programId === programId &&
-                          session.languageId === selectedLanguageId &&
-                          !session.finishedAt &&
-                          !session.isCompleted
-                      );
-                      const firstSession = userProblemSessions.find(
-                        (session) =>
-                          session.courseId === courseId &&
-                          session.programId === programId &&
-                          session.languageId === selectedLanguageId
-                      );
-                      const completedProblemCount = countUserCompletedProblems(
-                        userCompletedProblems,
-                        programId,
-                        selectedLanguageId
-                      );
-                      const isProgramCompleted = completedProblemCount >= SPECIFIED_COMPLETION_COUNT;
-
-                      return (
-                        <Tr key={programId}>
-                          <Td>
-                            <Icon
-                              as={isProgramCompleted ? MdCheckCircle : MdCheckCircleOutline}
-                              color={isProgramCompleted ? 'brand.500' : 'gray.200'}
-                              fontSize="lg"
-                              mx="-0.125em"
-                            />
-                          </Td>
-                          <Td textOverflow="ellipsis" whiteSpace="nowrap">
-                            <VStack align="flex-start">
-                              {suspendedSession && (
-                                <Tag colorScheme="brand" fontWeight="bold" size="sm" variant="solid">
-                                  挑戦中
-                                </Tag>
-                              )}
-                              <Link as={NextLink} href={`${courseId}/${selectedLanguageId}/${programId}`}>
-                                {programIdToName[programId]}
-                              </Link>
-                            </VStack>
-                          </Td>
-                          <Td isNumeric color="gray.600">
-                            {countFailedAnswers(firstSession)}
-                            <Box as="span" fontSize="xs" ms={1}>
-                              回
-                            </Box>
-                          </Td>
-                          <Td isNumeric color="gray.600">
-                            {typeof firstSession?.timeSpent === 'number'
-                              ? Math.floor(totalAnswerTimeSpent(firstSession) / 1000)
-                              : 0}
-                            <Box as="span" fontSize="xs" ms={1}>
-                              秒
-                            </Box>
-                          </Td>
-                        </Tr>
-                      );
-                    })}
-                  </Tbody>
-                </Table>
+                <Box textAlign="right">
+                  解答状況: {completedProblemCount}/{problemIds.length} 問 (
+                  {Math.round((completedProblemCount / problemIds.length) * 100)}%)
+                </Box>
               </CardBody>
             </Card>
           );
@@ -222,13 +88,6 @@ export const Course: React.FC<{
   );
 };
 
-function countUserCompletedProblems(
-  userCompletedProblems: { programId: string; languageId: VisibleLanguageId }[],
-  programId: ProgramId,
-  languageId: VisibleLanguageId
-): number {
-  return userCompletedProblems.filter(
-    (userCompletedProblem) =>
-      userCompletedProblem.programId === programId && userCompletedProblem.languageId === languageId
-  ).length;
+function countUserCompletedProblems(userCompletedProblems: { problemId: string }[], problemId: ProblemId): number {
+  return userCompletedProblems.filter((userCompletedProblem) => userCompletedProblem.problemId === problemId).length;
 }

@@ -1,28 +1,26 @@
 import type { NextPage } from 'next';
 
-import { generateProblem } from '../../../../../../problems/generateProblem';
-import type { CourseId, LanguageId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
-import { findSuspendedUserProblemSession } from '../../../../../../utils/fetch';
-import { getNonNullableSessionOnServer } from '../../../../../../utils/session';
-import { upsertUserProblemSession } from '../../../../../../utils/upsertUserProblemSession';
+import { DEFAULT_LANGUAGE_ID } from '../../../../../../../../constants';
+import { generateProblem } from '../../../../../../../../problems/generateProblem';
+import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
+import { findSuspendedUserProblemSession } from '../../../../../../../../utils/fetch';
+import { getNonNullableSessionOnServer } from '../../../../../../../../utils/session';
+import { upsertUserProblemSession } from '../../../../../../../../utils/upsertUserProblemSession';
 
 import { ProblemPageOnClient } from './pageOnClient';
 
 type Props = {
-  params: { courseId: CourseId; languageId: VisibleLanguageId; programId: ProgramId };
+  params: { courseId: CourseId; lectureId: string; problemId: ProblemId };
 };
 
 const ProblemPage: NextPage<Props> = async (props) => {
   const session = await getNonNullableSessionOnServer();
   const userId = session.superTokensUserId;
+  const courseId = props.params.courseId;
+  const lectureId = props.params.lectureId;
+  const problemId = props.params.problemId;
 
-  let userProblemSession = await findSuspendedUserProblemSession(
-    userId,
-    props.params.courseId,
-    props.params.programId,
-    props.params.languageId
-  );
-
+  let userProblemSession = await findSuspendedUserProblemSession(userId, courseId, problemId);
   if (!userProblemSession) {
     const problemVariableSeed = Date.now().toString();
     const problemType = 'executionResult';
@@ -32,9 +30,9 @@ const ProblemPage: NextPage<Props> = async (props) => {
       // createするためにidに0を指定
       0,
       userId,
-      props.params.courseId,
-      props.params.programId,
-      props.params.languageId,
+      courseId,
+      lectureId,
+      problemId,
       problemVariableSeed,
       problemType,
       0,
@@ -44,16 +42,14 @@ const ProblemPage: NextPage<Props> = async (props) => {
       undefined,
       false
     );
+    if (!userProblemSession) return;
   }
 
-  if (!userProblemSession) return;
-
   const problem = generateProblem(
-    userProblemSession.programId as ProgramId,
-    userProblemSession.languageId as LanguageId,
+    userProblemSession.problemId as ProblemId,
+    DEFAULT_LANGUAGE_ID,
     userProblemSession.problemVariablesSeed
   );
-
   if (!problem) return;
 
   return (

@@ -4,21 +4,21 @@ import { generateProblem } from '../../src/problems/generateProblem';
 
 test.each([
   {
-    programId: 'straight',
+    problemId: 'straight',
     languageId: 'java',
   },
   {
-    programId: 'stepBack',
+    problemId: 'stepBack',
     languageId: 'java',
   },
   {
-    programId: 'turnRight',
+    problemId: 'turnRight',
     languageId: 'java',
   },
   {
-    programId: 'turnRightAndTurnLeft',
+    problemId: 'turnRightAndTurnLeft',
     languageId: 'java',
   },
-] as const)('Get a program by program and language ids', ({ languageId, programId }) => {
-  expect(generateProblem(programId, languageId, Date.now().toString())).not.toBeFalsy();
+] as const)('Get a program by program and language ids', ({ languageId, problemId }) => {
+  expect(generateProblem(problemId, languageId, Date.now().toString())).not.toBeFalsy();
 });

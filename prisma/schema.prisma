@@ -28,11 +28,11 @@ model UserProblemSession {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user       User   @relation(fields: [userId], references: [id])
-  userId     String
-  courseId   String
-  programId  String
-  languageId String
+  user      User   @relation(fields: [userId], references: [id])
+  userId    String
+  courseId  String
+  lectureId String
+  problemId String
 
   problemVariablesSeed  String
   currentProblemType    String
@@ -50,11 +50,11 @@ model UserCompletedProblem {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user       User   @relation(fields: [userId], references: [id])
-  userId     String
-  courseId   String
-  programId  String
-  languageId String
+  user      User   @relation(fields: [userId], references: [id])
+  userId    String
+  courseId  String
+  problemId String
+  lectureId String
 }
 
 model UserAnswer {
@@ -69,8 +69,7 @@ model UserAnswer {
   userProblemSession   UserProblemSession @relation(fields: [userProblemSessionId], references: [id])
   userProblemSessionId Int
 
-  programId   String
-  languageId  String
+  problemId   String
   problemType String
 
   timeSpent Int     @default(0)
