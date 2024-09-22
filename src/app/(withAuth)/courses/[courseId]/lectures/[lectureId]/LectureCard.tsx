@@ -30,21 +30,6 @@ import { courseIdToProblemIdLists, problemIdToName, courseIdToName } from '../..
 import { type UserProblemSessionWithUserAnswers } from '../../../../../../utils/fetch';
 import { SPECIFIED_COMPLETION_COUNT } from '../../Course';
 
-const countFailedAnswers = (userProblemSession: UserProblemSessionWithUserAnswers | undefined): number => {
-  if (!userProblemSession) return 0;
-
-  return userProblemSession.userAnswers.filter((userAnswer: UserAnswer) => !userAnswer.isPassed).length;
-};
-
-const totalAnswerTimeSpent = (userProblemSession: UserProblemSessionWithUserAnswers | undefined): number => {
-  if (!userProblemSession) return 0;
-
-  return userProblemSession.userAnswers.reduce(
-    (totalTimeSpent: number, userAnswer: UserAnswer) => totalTimeSpent + (userAnswer.timeSpent || 0),
-    0
-  );
-};
-
 export const LectureCard: React.FC<{
   courseId: CourseId;
   lectureId: string;
@@ -168,4 +153,19 @@ export const LectureCard: React.FC<{
 
 function countUserCompletedProblems(userCompletedProblems: { problemId: string }[], problemId: ProblemId): number {
   return userCompletedProblems.filter((userCompletedProblem) => userCompletedProblem.problemId === problemId).length;
+}
+
+function countFailedAnswers(userProblemSession?: UserProblemSessionWithUserAnswers): number {
+  if (!userProblemSession) return 0;
+
+  return userProblemSession.userAnswers.filter((userAnswer: UserAnswer) => !userAnswer.isPassed).length;
+}
+
+function totalAnswerTimeSpent(userProblemSession?: UserProblemSessionWithUserAnswers): number {
+  if (!userProblemSession) return 0;
+
+  return userProblemSession.userAnswers.reduce(
+    (totalTimeSpent: number, userAnswer: UserAnswer) => totalTimeSpent + (userAnswer.timeSpent || 0),
+    0
+  );
 }

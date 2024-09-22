@@ -27,7 +27,7 @@ const CoursePage: NextPage<{ params: { courseId: CourseId } }> = async ({ params
 
   return (
     <Course
-      courseId={params.courseId}
+      courseId={courseId}
       userCompletedProblems={userCompletedProblems}
       userProblemSessions={userProblemSessions}
     />

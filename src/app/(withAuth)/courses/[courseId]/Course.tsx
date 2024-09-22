@@ -3,6 +3,7 @@
 import { MdOutlineVerified, MdVerified } from 'react-icons/md';
 
 import {
+  Box,
   Button,
   Card,
   CardBody,
@@ -34,12 +35,10 @@ export const Course: React.FC<{
 
       <SimpleGrid columnGap={4} columns={{ base: 1, lg: 2 }} rowGap={6}>
         {courseIdToProblemIdLists[courseId].map((problemIds, lessonIndex) => {
+          const isDisabled = problemIds.filter((problemId) => openedProblemIds.has(problemId)).length === 0;
           const completedProblemCount = problemIds.filter(
             (problemId) => countUserCompletedProblems(userCompletedProblems, problemId) >= SPECIFIED_COMPLETION_COUNT
           ).length;
-
-          const openedProblems = problemIds.filter((problemId) => openedProblemIds.has(problemId));
-          if (openedProblems.length === 0) return;
           const isLessonCompleted = completedProblemCount >= problemIds.length;
 
           return (
@@ -51,11 +50,14 @@ export const Course: React.FC<{
                   fontSize="3xl"
                   mx="-0.125em"
                 />
-                <Heading size="md">第{lessonIndex + 1}回</Heading>
+                <Heading size="md">
+                  第{lessonIndex + 1}回
+                  {isDisabled ? '（配布資料のURLから問題を一度開くと、ボタンが有効になります。）' : ''}
+                </Heading>
                 <Spacer />
                 <Link href={`${courseId}/lectures/lecture${lessonIndex + 1}-${UUIDs[courseId][lessonIndex]}`}>
-                  <Button colorScheme="brand" mt={4}>
-                    レッスンを始める
+                  <Button colorScheme="brand" isDisabled={isDisabled} mt={4}>
+                    課題を解く
                   </Button>
                 </Link>
               </CardHeader>
@@ -66,8 +68,13 @@ export const Course: React.FC<{
                   max={problemIds.length}
                   rounded="sm"
                   size="sm"
+                  title={`${completedProblemCount}/${problemIds.length} 問題完了`}
                   value={completedProblemCount}
                 />
+                <Box>
+                  解答状況: {completedProblemCount}/{problemIds.length} 問 (
+                  {Math.round((completedProblemCount / problemIds.length) * 100)}%)
+                </Box>
               </CardBody>
             </Card>
           );
