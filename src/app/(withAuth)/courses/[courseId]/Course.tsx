@@ -18,7 +18,7 @@ import {
   VStack,
 } from '../../../../infrastructures/useClient/chakra';
 import type { CourseId, ProblemId } from '../../../../problems/problemData';
-import { courseIdToProblemIdLists, courseIdToName, UUIDs } from '../../../../problems/problemData';
+import { courseIdToLectureIds, courseIdToName, courseIdToProblemIdLists } from '../../../../problems/problemData';
 import type { UserProblemSessionWithUserAnswers } from '../../../../utils/fetch';
 
 export const SPECIFIED_COMPLETION_COUNT = 1;
@@ -35,7 +35,9 @@ export const Course: React.FC<{
 
       <SimpleGrid columnGap={4} columns={{ base: 1, lg: 2 }} rowGap={6}>
         {courseIdToProblemIdLists[courseId].map((problemIds, lessonIndex) => {
-          const isDisabled = problemIds.filter((problemId) => openedProblemIds.has(problemId)).length === 0;
+          const isDisabled =
+            problemIds.filter((problemId) => openedProblemIds.has(problemId)).length === 0 &&
+            (process.env.NEXT_PUBLIC_WB_ENV === 'staging' || process.env.NEXT_PUBLIC_WB_ENV === 'production');
           const completedProblemCount = problemIds.filter(
             (problemId) => countUserCompletedProblems(userCompletedProblems, problemId) >= SPECIFIED_COMPLETION_COUNT
           ).length;
@@ -55,7 +57,7 @@ export const Course: React.FC<{
                   {isDisabled ? '（配布資料のURLから問題を一度開くと、ボタンが有効になります。）' : ''}
                 </Heading>
                 <Spacer />
-                <Link href={`${courseId}/lectures/lecture${lessonIndex + 1}-${UUIDs[courseId][lessonIndex]}`}>
+                <Link href={`${courseId}/lectures/${courseIdToLectureIds[courseId][lessonIndex]}`}>
                   <Button colorScheme="brand" isDisabled={isDisabled} mt={4}>
                     課題を解く
                   </Button>

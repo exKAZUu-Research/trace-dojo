@@ -4,9 +4,9 @@ import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef,
 import { MdOutlineDelete, MdTurnLeft, MdTurnRight } from 'react-icons/md';
 
 import {
-  TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR,
   TURTLE_GRAPHICS_BOARD_COLUMNS as COLUMNS,
   TURTLE_GRAPHICS_BOARD_ROWS as ROWS,
+  TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR,
 } from '../../../../../../../../constants';
 import {
   Box,

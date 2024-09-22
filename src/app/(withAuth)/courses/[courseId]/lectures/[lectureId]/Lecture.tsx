@@ -26,18 +26,18 @@ import {
   VStack,
 } from '../../../../../../infrastructures/useClient/chakra';
 import type { CourseId, ProblemId } from '../../../../../../problems/problemData';
-import { courseIdToProblemIdLists, problemIdToName, courseIdToName } from '../../../../../../problems/problemData';
+import { courseIdToName, courseIdToProblemIdLists, problemIdToName } from '../../../../../../problems/problemData';
 import { type UserProblemSessionWithUserAnswers } from '../../../../../../utils/fetch';
 import { SPECIFIED_COMPLETION_COUNT } from '../../Course';
 
-export const LectureCard: React.FC<{
+export const Lecture: React.FC<{
   courseId: CourseId;
   lectureId: string;
-  lectureNumber: number;
+  lectureIndex: number;
   userCompletedProblems: { problemId: string }[];
   userProblemSessions: UserProblemSessionWithUserAnswers[];
-}> = async ({ courseId, lectureId, lectureNumber, userCompletedProblems, userProblemSessions }) => {
-  const problemIds = courseIdToProblemIdLists[courseId][lectureNumber - 1];
+}> = async ({ courseId, lectureId, lectureIndex, userCompletedProblems, userProblemSessions }) => {
+  const problemIds = courseIdToProblemIdLists[courseId][lectureIndex];
   const completedProblemCount = problemIds.filter(
     (problemId) => countUserCompletedProblems(userCompletedProblems, problemId) >= SPECIFIED_COMPLETION_COUNT
   ).length;
@@ -55,7 +55,7 @@ export const LectureCard: React.FC<{
               fontSize="3xl"
               mx="-0.125em"
             />
-            <Heading size="md">第{lectureNumber}回</Heading>
+            <Heading size="md">第{lectureIndex + 1}回</Heading>
           </CardHeader>
 
           <CardBody align="stretch" as={VStack} pb={2}>

@@ -4,15 +4,15 @@ import type { BoxProps } from '@chakra-ui/react';
 import React, { useMemo } from 'react';
 
 import {
-  TURTLE_GRAPHICS_BOARD_COLUMNS as COLUMNS,
-  TURTLE_GRAPHICS_BOARD_ROWS as ROWS,
   TURTLE_GRAPHICS_BOARD_CELL_SIZE_PX as CELL_SIZE_PX,
+  TURTLE_GRAPHICS_BOARD_COLUMNS as COLUMNS,
   TURTLE_GRAPHICS_BOARD_GAP_PX as GAP_PX,
   TURTLE_GRAPHICS_BOARD_PADDING_PX as PADDING_PX,
+  TURTLE_GRAPHICS_BOARD_ROWS as ROWS,
 } from '../../../../../../../../constants';
 import { Box, Grid, GridItem, Img, keyframes } from '../../../../../../../../infrastructures/useClient/chakra';
-import { charToColor } from '../../../../../../../../problems/traceProgram';
 import type { CharacterTrace, TraceItemVar } from '../../../../../../../../problems/traceProgram';
+import { charToColor } from '../../../../../../../../problems/traceProgram';
 
 const CHAR_TO_BG_COLOR = {
   '#': 'gray.600',

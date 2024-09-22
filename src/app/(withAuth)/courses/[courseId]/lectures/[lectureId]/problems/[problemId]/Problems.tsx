@@ -26,8 +26,8 @@ import type { Problem } from '../../../../../../../../problems/generateProblem';
 import type { ProblemType } from '../../../../../../../../types';
 import { isMacOS } from '../../../../../../../../utils/platform';
 
-import { BoardEditor } from './BoardEditor';
 import type { TurtleGraphicsHandle } from './BoardEditor';
+import { BoardEditor } from './BoardEditor';
 import { BoardViewer } from './BoardViewer';
 import { SyntaxHighlighter } from './SyntaxHighlighter';
 import { Variables } from './Variables';
