@@ -134,7 +134,7 @@ export const UUIDs: Record<CourseId, string[]> = {
   tuBeginner2: ['5ba06885-2044-4c1e-bd65-2a9c5e9c9e39'],
 };
 
-export const problemIdToLanguageIdToCode: Record<ProblemId, Record<LanguageId, string>> = {
+export const problemIdToLanguageIdToProgram: Record<ProblemId, Record<LanguageId, string>> = {
   straight: {
     instrumented: `
 s.set('亀', new Character());
