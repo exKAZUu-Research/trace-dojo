@@ -1,5 +1,6 @@
 import type { NextPage } from 'next';
 
+import { DEFAULT_LANGUAGE_ID } from '../../../../../../../../constants';
 import { generateProblem } from '../../../../../../../../problems/generateProblem';
 import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
 import { findSuspendedUserProblemSession } from '../../../../../../../../utils/fetch';
@@ -46,7 +47,7 @@ const ProblemPage: NextPage<Props> = async (props) => {
 
   const problem = generateProblem(
     userProblemSession.problemId as ProblemId,
-    'java',
+    DEFAULT_LANGUAGE_ID,
     userProblemSession.problemVariablesSeed
   );
   if (!problem) return;

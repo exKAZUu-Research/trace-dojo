@@ -15,6 +15,7 @@ import {
   Progress,
   SimpleGrid,
   Spacer,
+  Tooltip,
   VStack,
 } from '../../../../infrastructures/useClient/chakra';
 import type { CourseId, ProblemId } from '../../../../problems/problemData';
@@ -35,13 +36,12 @@ export const Course: React.FC<{
 
       <SimpleGrid columnGap={4} columns={{ base: 1, lg: 2 }} rowGap={6}>
         {courseIdToProblemIdLists[courseId].map((problemIds, lessonIndex) => {
-          const isDisabled =
-            problemIds.filter((problemId) => openedProblemIds.has(problemId)).length === 0 &&
-            (process.env.NEXT_PUBLIC_WB_ENV === 'staging' || process.env.NEXT_PUBLIC_WB_ENV === 'production');
+          const isDisabled = problemIds.filter((problemId) => openedProblemIds.has(problemId)).length === 0;
           const completedProblemCount = problemIds.filter(
             (problemId) => countUserCompletedProblems(userCompletedProblems, problemId) >= SPECIFIED_COMPLETION_COUNT
           ).length;
           const isLessonCompleted = completedProblemCount >= problemIds.length;
+          const url = isDisabled ? '#' : `${courseId}/lectures/${courseIdToLectureIds[courseId][lessonIndex]}`;
 
           return (
             <Card key={lessonIndex} p={2}>
@@ -52,16 +52,18 @@ export const Course: React.FC<{
                   fontSize="3xl"
                   mx="-0.125em"
                 />
-                <Heading size="md">
-                  第{lessonIndex + 1}回
-                  {isDisabled ? '（配布資料のURLから問題を一度開くと、ボタンが有効になります。）' : ''}
-                </Heading>
+                <Heading size="md">第{lessonIndex + 1}回</Heading>
                 <Spacer />
-                <Link href={`${courseId}/lectures/${courseIdToLectureIds[courseId][lessonIndex]}`}>
-                  <Button colorScheme="brand" isDisabled={isDisabled} mt={4}>
-                    課題を解く
-                  </Button>
-                </Link>
+                <Tooltip
+                  isDisabled={!isDisabled}
+                  label={`第${lessonIndex + 1}回の配布資料のURLから問題を一度開くと、ボタンが有効になります。`}
+                >
+                  <Link href={url}>
+                    <Button colorScheme="brand" isDisabled={isDisabled} mt={4}>
+                      課題を解く
+                    </Button>
+                  </Link>
+                </Tooltip>
               </CardHeader>
 
               <CardBody align="stretch" as={VStack}>

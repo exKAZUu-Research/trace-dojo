@@ -121,7 +121,7 @@ export const courseIdToProblemIdLists: Record<CourseId, ProblemId[][]> = {
 };
 
 export const courseIdToLectureIds: Record<CourseId, string[]> = JSON.parse(
-  process.env.NEXT_PIBLIC_COURSE_ID_TO_LECTURE_IDS_JSON ?? '{}'
+  process.env.NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON ?? '{}'
 );
 
 export const problemIdToLanguageIdToProgram: Record<ProblemId, Record<LanguageId, string>> = {

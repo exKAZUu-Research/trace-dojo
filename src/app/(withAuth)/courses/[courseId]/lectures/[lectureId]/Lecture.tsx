@@ -36,7 +36,7 @@ export const Lecture: React.FC<{
   lectureIndex: number;
   userCompletedProblems: { problemId: string }[];
   userProblemSessions: UserProblemSessionWithUserAnswers[];
-}> = async ({ courseId, lectureId, lectureIndex, userCompletedProblems, userProblemSessions }) => {
+}> = ({ courseId, lectureId, lectureIndex, userCompletedProblems, userProblemSessions }) => {
   const problemIds = courseIdToProblemIdLists[courseId][lectureIndex];
   const completedProblemCount = problemIds.filter(
     (problemId) => countUserCompletedProblems(userCompletedProblems, problemId) >= SPECIFIED_COMPLETION_COUNT
