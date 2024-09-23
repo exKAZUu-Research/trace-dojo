@@ -1,7 +1,7 @@
 export const courseIds = ['tuBeginner1', 'tuBeginner2'] as const;
 export type CourseId = (typeof courseIds)[number];
 
-export const programIds = [
+export const problemIds = [
   'straight',
   'stepBack',
   'turnRight',
@@ -48,26 +48,17 @@ export const programIds = [
   'test4',
   'test5',
 ] as const;
-export type ProgramId = (typeof programIds)[number];
+export type ProblemId = (typeof problemIds)[number];
 
 export const languageIds = ['instrumented', 'java'] as const;
 export type LanguageId = (typeof languageIds)[number];
-
-export const visibleLanguageIds = ['java'] as const;
-export type VisibleLanguageId = (typeof visibleLanguageIds)[number];
-
-export const defaultLanguageId = 'java' as const;
-
-export const languageIdToName: Record<VisibleLanguageId, string> = {
-  java: 'Java',
-};
 
 export const courseIdToName: Record<CourseId, string> = {
   tuBeginner1: '初級プログラミングⅠ',
   tuBeginner2: '初級プログラミングⅡ',
 };
 
-export const programIdToName: Record<ProgramId, string> = {
+export const problemIdToName: Record<ProblemId, string> = {
   straight: '線を描こう(1)',
   stepBack: '線を描こう(2)',
   turnRight: '線を描こう(3)',
@@ -115,7 +106,7 @@ export const programIdToName: Record<ProgramId, string> = {
   test5: 'チェックポイント取得のテスト用問題',
 };
 
-export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
+export const courseIdToProblemIdLists: Record<CourseId, ProblemId[][]> = {
   tuBeginner1: [
     ['straight', 'stepBack', 'turnRight', 'turnRightAndTurnLeft'],
     ['square1', 'square2', 'variable', 'variable2', 'variable3'],
@@ -129,11 +120,11 @@ export const courseIdToProgramIdLists: Record<CourseId, ProgramId[][]> = {
   tuBeginner2: [['test1', 'test2', 'test3', 'test4', 'test5']],
 };
 
-export function getExplanation(programId: ProgramId, languageId: VisibleLanguageId): Record<'title' | 'body', string> {
-  return programIdToLanguageIdToExplanation[programId]?.[languageId];
-}
+export const courseIdToLectureIds: Record<CourseId, string[]> = JSON.parse(
+  process.env.NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON ?? '{}'
+);
 
-export const programIdToLanguageIdToProgram: Record<ProgramId, Record<LanguageId, string>> = {
+export const problemIdToLanguageIdToProgram: Record<ProblemId, Record<LanguageId, string>> = {
   straight: {
     instrumented: `
 s.set('亀', new Character());
@@ -343,7 +334,7 @@ public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // sid
         int i = 0; // sid
-        while (i < 2) {
+        while (i < <2-3>) {
             i++; // sid
             亀.前に進む(); // sid
             亀.右を向く(); // sid
@@ -535,7 +526,7 @@ for (s.set('i', 0); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
-        for (int i = 0; i < <4-6>, i++) { // sid
+        for (int i = 0; i < <4-6>; i++) { // sid
             if (i < <2-3>)            t.前に進む(); // sid
             else if (i == <2-3>)    t.左を向く(); // sid
             else                     t.後に戻る(); // sid
@@ -563,7 +554,7 @@ for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
-        for (int i = 0; i < <5-7>, i++) { // sid
+        for (int i = 0; i < <5-7>; i++) { // sid
             if (i % 4 == 0)            t.前に進む(); // sid
             else if (i % 4 == 1)    t.右を向く(); // sid
             else if (i % 4 == 2)    t.前に進む(); // sid
@@ -921,7 +912,7 @@ function double(a) {
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
-        int x = 二倍する(<2-3>) // sid
+        int x = 二倍する(<2-3>); // sid
         N歩前に進める(t, x);
     }
     static void N歩前に進める(Turtle t, int n) {
@@ -1000,7 +991,7 @@ public class Main {
                 if (等しいか(i, j))
                     t.右を向く(); // sid
                 else
-                    t.二歩前に進める(t);
+                    二歩前に進める(t);
             }
             t.左を向く(); // sid
         }
@@ -1067,7 +1058,7 @@ for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
-        int [] arr = { 0, 1, 0, 2, 0 }; // sid
+        int[] arr = { 0, 1, 0, 2, 0 }; // sid
         for (int i = 0; i < arr.length; i++) { // sid
             switch (arr[i]) {
                 case 0:
@@ -1102,8 +1093,8 @@ for (const cmd of [0, 1, 0, 2, 0]) {
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
-        int [] arr = { 0, 1, 0, 2, 0 }; // sid
-        for (int cmd : array) { // sid
+        int[] arr = { 0, 1, 0, 2, 0 }; // sid
+        for (int cmd : arr) { // sid
             switch (cmd) {
                 case 0:
                     t.前に進む(); break; // sid
@@ -1364,62 +1355,4 @@ public class Straight {
 }
 `.trim(),
   },
-};
-
-const defaultExplanation = {
-  java: {
-    title: '',
-    body: '',
-  },
-};
-
-export const programIdToLanguageIdToExplanation: Record<
-  ProgramId,
-  Record<VisibleLanguageId, Record<'title' | 'body', string>>
-> = {
-  straight: defaultExplanation,
-  stepBack: defaultExplanation,
-  turnRight: defaultExplanation,
-  turnRightAndTurnLeft: defaultExplanation,
-  square1: defaultExplanation,
-  square2: defaultExplanation,
-  variable: defaultExplanation,
-  variable2: defaultExplanation,
-  variable3: defaultExplanation,
-  while1: defaultExplanation,
-  while2: defaultExplanation,
-  for1: defaultExplanation,
-  for2: defaultExplanation,
-  for3: defaultExplanation,
-  doubleLoop1: defaultExplanation,
-  doubleLoop2: defaultExplanation,
-  if1: defaultExplanation,
-  if2: defaultExplanation,
-  elseIf1: defaultExplanation,
-  elseIf2: defaultExplanation,
-  switch1: defaultExplanation,
-  switch2: defaultExplanation,
-  break1: defaultExplanation,
-  break2: defaultExplanation,
-  break3: defaultExplanation,
-  continue1: defaultExplanation,
-  continue2: defaultExplanation,
-  continue3: defaultExplanation,
-  method1: defaultExplanation,
-  method2: defaultExplanation,
-  method3: defaultExplanation,
-  return1: defaultExplanation,
-  return2: defaultExplanation,
-  return3: defaultExplanation,
-  array1: defaultExplanation,
-  array2: defaultExplanation,
-  array3: defaultExplanation,
-  string1: defaultExplanation,
-  string2: defaultExplanation,
-  string3: defaultExplanation,
-  test1: defaultExplanation,
-  test2: defaultExplanation,
-  test3: defaultExplanation,
-  test4: defaultExplanation,
-  test5: defaultExplanation,
 };

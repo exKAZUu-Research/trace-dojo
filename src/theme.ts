@@ -1,5 +1,5 @@
 import { cardAnatomy } from '@chakra-ui/anatomy';
-import { defineStyleConfig, extendTheme, theme as defaultTheme, createMultiStyleConfigHelpers } from '@chakra-ui/react';
+import { createMultiStyleConfigHelpers, defineStyleConfig, extendTheme, theme as defaultTheme } from '@chakra-ui/react';
 
 const cardStyleConfigHelpers = createMultiStyleConfigHelpers(cardAnatomy.keys);
 

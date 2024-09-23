@@ -20,7 +20,7 @@ const DefaultLayout: NextPage<LayoutProps> = async ({ children }) => {
        * This means that the user is not logged in. If you want to display some other UI in this
        * case, you can do so here.
        */
-      return redirect('/auth');
+      redirect('/auth');
     }
 
     /**

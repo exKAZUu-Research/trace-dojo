@@ -1,26 +1,26 @@
 import type { NextPage } from 'next';
 
-import { prisma } from '../../../../../../infrastructures/prisma';
-import { generateProblem } from '../../../../../../problems/generateProblem';
-import type { CourseId, LanguageId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
-import { getNonNullableSessionOnServer } from '../../../../../../utils/session';
+import { DEFAULT_LANGUAGE_ID } from '../../../../../../../../constants';
+import { prisma } from '../../../../../../../../infrastructures/prisma';
+import { generateProblem } from '../../../../../../../../problems/generateProblem';
+import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
+import { getNonNullableSessionOnServer } from '../../../../../../../../utils/session';
 
 import { ProblemPageOnClient } from './pageOnClient';
 
 type Props = {
-  params: { courseId: CourseId; languageId: VisibleLanguageId; programId: ProgramId };
+  params: { courseId: CourseId; lectureId: string; problemId: ProblemId };
 };
 
 const ProblemPage: NextPage<Props> = async (props) => {
   const session = await getNonNullableSessionOnServer();
-  const userId = session.superTokensUserId;
 
   let problemSession = await prisma.problemSession.findFirst({
     where: {
-      userId,
+      userId: session.superTokensUserId,
       courseId: props.params.courseId,
-      programId: props.params.programId,
-      languageId: props.params.languageId,
+      lectureId: props.params.lectureId,
+      problemId: props.params.problemId,
       // eslint-disable-next-line unicorn/no-null
       completedAt: null,
     },
@@ -29,10 +29,10 @@ const ProblemPage: NextPage<Props> = async (props) => {
   if (!problemSession) {
     problemSession = await prisma.problemSession.create({
       data: {
-        userId,
+        userId: session.superTokensUserId,
         courseId: props.params.courseId,
-        programId: props.params.programId,
-        languageId: props.params.languageId,
+        lectureId: props.params.lectureId,
+        problemId: props.params.problemId,
         problemVariablesSeed: Date.now().toString(),
         currentProblemType: 'executionResult',
         currentTraceItemIndex: 0,
@@ -42,10 +42,11 @@ const ProblemPage: NextPage<Props> = async (props) => {
   }
 
   const problem = generateProblem(
-    problemSession.programId as ProgramId,
-    problemSession.languageId as LanguageId,
+    problemSession.problemId as ProblemId,
+    DEFAULT_LANGUAGE_ID,
     problemSession.problemVariablesSeed
   );
+  if (!problem) throw new Error('Failed to generate problem.');
 
   return (
     <ProblemPageOnClient

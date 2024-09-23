@@ -1,222 +1,93 @@
 'use client';
 
-import type { UserAnswer } from '@prisma/client';
-import Image from 'next/image';
-import NextLink from 'next/link';
-import React, { useEffect } from 'react';
-import { useLocalStorage } from 'usehooks-ts';
+import { MdOutlineVerified, MdVerified } from 'react-icons/md';
 
 import {
-  Accordion,
-  AccordionButton,
-  AccordionIcon,
-  AccordionItem,
-  AccordionPanel,
   Box,
-  Flex,
+  Button,
+  Card,
+  CardBody,
+  CardHeader,
   Heading,
   HStack,
+  Icon,
   Link,
-  Select,
-  Table,
-  TableContainer,
-  Tag,
-  Tbody,
-  Td,
-  Th,
-  Thead,
-  Tr,
+  Progress,
+  SimpleGrid,
+  Spacer,
+  Tooltip,
   VStack,
 } from '../../../../infrastructures/useClient/chakra';
-import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../problems/problemData';
-import {
-  courseIdToName,
-  courseIdToProgramIdLists,
-  defaultLanguageId,
-  languageIdToName,
-  programIdToName,
-  visibleLanguageIds,
-} from '../../../../problems/problemData';
+import type { CourseId, ProblemId } from '../../../../problems/problemData';
+import { courseIdToLectureIds, courseIdToName, courseIdToProblemIdLists } from '../../../../problems/problemData';
 import type { UserProblemSessionWithUserAnswers } from '../../../../utils/fetch';
-import { selectedLanguageIdKey } from '../../../lib/sessionStorage';
 
-const SPECIFIED_COMPLETION_COUNT = 2;
-
-const countFailedAnswers = (userProblemSession: UserProblemSessionWithUserAnswers | undefined): number => {
-  if (!userProblemSession) return 0;
-
-  return userProblemSession.userAnswers.filter((userAnswer: UserAnswer) => !userAnswer.isPassed).length;
-};
-
-const totalAnswerTimeSpent = (userProblemSession: UserProblemSessionWithUserAnswers | undefined): number => {
-  if (!userProblemSession) return 0;
-
-  return userProblemSession.userAnswers.reduce(
-    (totalTimeSpent: number, userAnswer: UserAnswer) => totalTimeSpent + (userAnswer.timeSpent || 0),
-    0
-  );
-};
+export const SPECIFIED_COMPLETION_COUNT = 1;
 
 export const Course: React.FC<{
   courseId: CourseId;
-  userCompletedProblems: { programId: string; languageId: VisibleLanguageId }[];
+  userCompletedProblems: { problemId: string }[];
   userProblemSessions: UserProblemSessionWithUserAnswers[];
 }> = ({ courseId, userCompletedProblems, userProblemSessions }) => {
-  const [selectedLanguageId, setSelectedLanguageId] = useLocalStorage<VisibleLanguageId>(
-    selectedLanguageIdKey,
-    defaultLanguageId
-  );
-  useEffect(() => {
-    // 念の為、未知の言語が指定された場合、デフォルト言語に設定し直す。
-    if (!visibleLanguageIds.includes(selectedLanguageId)) {
-      setSelectedLanguageId(defaultLanguageId);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLanguageId]);
-
-  const handleSelectLanguage = (event: React.ChangeEvent<HTMLSelectElement>): void => {
-    const inputValue = event.target.value;
-    setSelectedLanguageId(inputValue as VisibleLanguageId);
-  };
-
+  const openedProblemIds = new Set(userProblemSessions.map((session) => session.problemId));
   return (
     <VStack align="stretch" spacing={6}>
       <Heading as="h1">{courseIdToName[courseId]}</Heading>
 
-      {/* TODO: Styling. */}
-      <Select
-        bg="white"
-        maxW="xs"
-        placeholder="Select language"
-        value={selectedLanguageId}
-        onChange={(e) => handleSelectLanguage(e)}
-      >
-        {visibleLanguageIds.map((languageId) => (
-          <option key={languageId} value={languageId}>
-            {languageIdToName[languageId]}
-          </option>
-        ))}
-      </Select>
+      <SimpleGrid columnGap={4} columns={{ base: 1, lg: 2 }} rowGap={6}>
+        {courseIdToProblemIdLists[courseId].map((problemIds, lessonIndex) => {
+          const isDisabled = problemIds.filter((problemId) => openedProblemIds.has(problemId)).length === 0;
+          const completedProblemCount = problemIds.filter(
+            (problemId) => countUserCompletedProblems(userCompletedProblems, problemId) >= SPECIFIED_COMPLETION_COUNT
+          ).length;
+          const isLessonCompleted = completedProblemCount >= problemIds.length;
+          const url = isDisabled ? '#' : `${courseId}/lectures/${courseIdToLectureIds[courseId][lessonIndex]}`;
 
-      <VStack align="stretch" bg="white" rounded="md">
-        <Accordion allowMultiple allowToggle>
-          {courseIdToProgramIdLists[courseId].map((programIds, iLesson) => {
-            const completedProblemCount = programIds.filter(
-              (programId) =>
-                countUserCompletedProblems(userCompletedProblems, programId, selectedLanguageId) >=
-                SPECIFIED_COMPLETION_COUNT
-            ).length;
+          return (
+            <Card key={lessonIndex} p={2}>
+              <CardHeader as={HStack} gap={3}>
+                <Icon
+                  as={isLessonCompleted ? MdVerified : MdOutlineVerified}
+                  color={isLessonCompleted ? 'brand.500' : 'gray.200'}
+                  fontSize="3xl"
+                  mx="-0.125em"
+                />
+                <Heading size="md">第{lessonIndex + 1}回</Heading>
+                <Spacer />
+                <Tooltip
+                  isDisabled={!isDisabled}
+                  label={`第${lessonIndex + 1}回の配布資料のURLから問題を一度開くと、ボタンが有効になります。`}
+                >
+                  <Link href={url}>
+                    <Button colorScheme="brand" isDisabled={isDisabled} mt={4}>
+                      課題を解く
+                    </Button>
+                  </Link>
+                </Tooltip>
+              </CardHeader>
 
-            return (
-              <AccordionItem key={iLesson}>
-                <AccordionButton>
-                  <Box flex="1">
-                    <HStack spacing="50%">
-                      <Box>第{iLesson + 1}回</Box>
-                      <HStack>
-                        <Box>
-                          Completed {completedProblemCount} / {programIds.length}
-                        </Box>
-                        {completedProblemCount >= programIds.length && (
-                          <Box h={4} ml={2} position={'relative'} w={4}>
-                            <Image fill alt="完了の王冠" src="/crown.png" />
-                          </Box>
-                        )}
-                      </HStack>
-                    </HStack>
-                  </Box>
-                  <AccordionIcon />
-                </AccordionButton>
-                <AccordionPanel pb={4}>
-                  <TableContainer>
-                    <Table>
-                      <Thead>
-                        <Tr>
-                          <Th textAlign="left">プログラム</Th>
-                          <Th></Th>
-                          <Th align="left">進捗</Th>
-                          <Th align="left">
-                            初回セッションの
-                            <br />
-                            不正解回数
-                          </Th>
-                          <Th align="left">
-                            初回セッションの
-                            <br />
-                            所要時間（秒）
-                          </Th>
-                        </Tr>
-                      </Thead>
-                      <Tbody>
-                        {programIds.map((programId) => {
-                          const suspendedSession = userProblemSessions.find(
-                            (session) =>
-                              session.courseId === courseId &&
-                              session.programId === programId &&
-                              session.languageId === selectedLanguageId &&
-                              !session.finishedAt &&
-                              !session.isCompleted
-                          );
-                          const firstSession = userProblemSessions.find(
-                            (session) =>
-                              session.courseId === courseId &&
-                              session.programId === programId &&
-                              session.languageId === selectedLanguageId
-                          );
-                          const completedProblemCount = countUserCompletedProblems(
-                            userCompletedProblems,
-                            programId,
-                            selectedLanguageId
-                          );
-                          return (
-                            <Tr key={programId}>
-                              <Td>
-                                <Link as={NextLink} href={`${courseId}/${selectedLanguageId}/${programId}`}>
-                                  {programIdToName[programId]}
-                                </Link>
-                              </Td>
-                              <Td>{suspendedSession && <Tag>挑戦中</Tag>}</Td>
-                              <Td>
-                                <Flex>
-                                  <p>
-                                    {completedProblemCount} / {SPECIFIED_COMPLETION_COUNT}
-                                  </p>
-                                  {completedProblemCount >= SPECIFIED_COMPLETION_COUNT && (
-                                    <Box h={4} ml={2} position={'relative'} w={4}>
-                                      <Image fill alt="完了の王冠" src="/crown.png" />
-                                    </Box>
-                                  )}
-                                </Flex>
-                              </Td>
-                              <Td>{countFailedAnswers(firstSession)}</Td>
-                              <Td>
-                                {typeof firstSession?.timeSpent === 'number'
-                                  ? Math.floor(totalAnswerTimeSpent(firstSession) / 1000)
-                                  : 0}
-                              </Td>
-                            </Tr>
-                          );
-                        })}
-                      </Tbody>
-                    </Table>
-                  </TableContainer>
-                </AccordionPanel>
-              </AccordionItem>
-            );
-          })}
-        </Accordion>
-      </VStack>
+              <CardBody align="stretch" as={VStack}>
+                <Progress
+                  colorScheme="brand"
+                  max={problemIds.length}
+                  rounded="sm"
+                  size="sm"
+                  title={`${completedProblemCount}/${problemIds.length} 問題完了`}
+                  value={completedProblemCount}
+                />
+                <Box textAlign="right">
+                  解答状況: {completedProblemCount}/{problemIds.length} 問 (
+                  {Math.round((completedProblemCount / problemIds.length) * 100)}%)
+                </Box>
+              </CardBody>
+            </Card>
+          );
+        })}
+      </SimpleGrid>
     </VStack>
   );
 };
 
-function countUserCompletedProblems(
-  userCompletedProblems: { programId: string; languageId: VisibleLanguageId }[],
-  programId: ProgramId,
-  languageId: VisibleLanguageId
-): number {
-  return userCompletedProblems.filter(
-    (userCompletedProblem) =>
-      userCompletedProblem.programId === programId && userCompletedProblem.languageId === languageId
-  ).length;
+function countUserCompletedProblems(userCompletedProblems: { problemId: string }[], problemId: ProblemId): number {
+  return userCompletedProblems.filter((userCompletedProblem) => userCompletedProblem.problemId === problemId).length;
 }

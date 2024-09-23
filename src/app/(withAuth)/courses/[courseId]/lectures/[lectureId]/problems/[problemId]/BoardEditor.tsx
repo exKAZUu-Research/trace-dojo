@@ -4,10 +4,10 @@ import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef,
 import { MdOutlineDelete, MdTurnLeft, MdTurnRight } from 'react-icons/md';
 
 import {
-  TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR,
   TURTLE_GRAPHICS_BOARD_COLUMNS as COLUMNS,
   TURTLE_GRAPHICS_BOARD_ROWS as ROWS,
-} from '../../../../../../constants';
+  TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR,
+} from '../../../../../../../../constants';
 import {
   Box,
   Button,
@@ -19,10 +19,10 @@ import {
   IconButton,
   Spacer,
   VStack,
-} from '../../../../../../infrastructures/useClient/chakra';
-import type { Problem } from '../../../../../../problems/generateProblem';
-import { type CharacterTrace, type TraceItem } from '../../../../../../problems/traceProgram';
-import type { ColorChar, SelectedCell } from '../../../../../../types';
+} from '../../../../../../../../infrastructures/useClient/chakra';
+import type { Problem } from '../../../../../../../../problems/generateProblem';
+import { type CharacterTrace, type TraceItem } from '../../../../../../../../problems/traceProgram';
+import type { ColorChar, SelectedCell } from '../../../../../../../../types';
 
 import { BoardViewer } from './BoardViewer';
 
@@ -267,7 +267,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                   <div>y = {selectedPosition.y}</div>
                 </>
               ) : (
-                <div>なし</div>
+                <Box color="gray.600">なし</Box>
               )}
             </HStack>
           </VStack>
@@ -331,12 +331,13 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                   </Button>
                 </HStack>
               </>
-            ) : selectedPosition ? (
+            ) : (
+              <Box color="gray.600">なし</Box>
+            )}
+            {!selectedCharacter && selectedPosition && (
               <Button colorScheme="brand" size="sm" variant="outline" onClick={() => void handleAddCharacterButton()}>
                 タートルを追加
               </Button>
-            ) : (
-              <div>なし</div>
             )}
           </VStack>
 

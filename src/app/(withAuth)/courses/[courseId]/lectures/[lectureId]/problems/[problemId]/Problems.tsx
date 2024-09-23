@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { MdOutlineCheckCircleOutline, MdOutlineInfo } from 'react-icons/md';
+import { MdOutlineInfo } from 'react-icons/md';
 
-import { CustomModal } from '../../../../../../components/molecules/CustomModal';
+import { CustomModal } from '../../../../../../../../components/molecules/CustomModal';
 import {
   AlertDialog,
   AlertDialogBody,
@@ -21,13 +21,13 @@ import {
   Tooltip,
   useDisclosure,
   VStack,
-} from '../../../../../../infrastructures/useClient/chakra';
-import type { Problem } from '../../../../../../problems/generateProblem';
-import type { ProblemType } from '../../../../../../types';
-import { isMacOS } from '../../../../../../utils/platform';
+} from '../../../../../../../../infrastructures/useClient/chakra';
+import type { Problem } from '../../../../../../../../problems/generateProblem';
+import type { ProblemType } from '../../../../../../../../types';
+import { isMacOS } from '../../../../../../../../utils/platform';
 
-import { BoardEditor } from './BoardEditor';
 import type { TurtleGraphicsHandle } from './BoardEditor';
+import { BoardEditor } from './BoardEditor';
 import { BoardViewer } from './BoardViewer';
 import { SyntaxHighlighter } from './SyntaxHighlighter';
 import { Variables } from './Variables';
@@ -35,9 +35,7 @@ import { Variables } from './Variables';
 interface ExecutionResultProblemProps {
   problem: Problem;
   createAnswerLog: (isPassed: boolean) => void;
-  explanation?: Record<'title' | 'body', string>;
   handleComplete: () => void;
-  selectedLanguageId: string;
   setCurrentTraceItemIndex: (line: number) => void;
   setProblemType: (step: ProblemType) => void;
 }
@@ -60,8 +58,6 @@ interface CheckpointProblemProps {
   beforeTraceItemIndex: number;
   createAnswerLog: (isPassed: boolean) => void;
   currentTraceItemIndex: number;
-  explanation?: Record<'title' | 'body', string>;
-  selectedLanguageId: string;
   setBeforeTraceItemIndex: (line: number) => void;
   setCurrentTraceItemIndex: (line: number) => void;
 }
@@ -76,9 +72,7 @@ interface StepProblemProps {
   createAnswerLog: (isPassed: boolean) => void;
   currentTraceItemIndex: number;
   problem: Problem;
-  explanation?: Record<'title' | 'body', string>;
   handleComplete: () => void;
-  selectedLanguageId: string;
   setBeforeTraceItemIndex: (line: number) => void;
   setCurrentTraceItemIndex: (line: number) => void;
 }
@@ -91,8 +85,6 @@ export const StepProblem: React.FC<StepProblemProps> = (props) => {
 interface ProblemProps {
   problem: Problem;
   createAnswerLog: (isPassed: boolean) => void;
-  explanation?: Record<'title' | 'body', string>;
-  selectedLanguageId: string;
   setCurrentTraceItemIndex: (line: number) => void;
   setProblemType?: (step: ProblemType) => void;
   handleComplete?: () => void;
@@ -105,21 +97,14 @@ const ProblemComponent: React.FC<ProblemProps & { type: 'executionResult' | 'che
   beforeTraceItemIndex,
   createAnswerLog,
   currentTraceItemIndex,
-  explanation,
   handleComplete,
   problem,
-  selectedLanguageId,
   setBeforeTraceItemIndex,
   setCurrentTraceItemIndex,
   setProblemType,
   type,
 }) => {
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
-  const {
-    isOpen: isExplanationModalOpen,
-    onClose: onExplanationModalClose,
-    onOpen: onExplanationModalOpen,
-  } = useDisclosure();
   const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
   const { isOpen: isAlertOpen, onClose: onAlertClose, onOpen: onAlertOpen } = useDisclosure();
   const cancelRef = useRef(null);
@@ -269,25 +254,6 @@ const ProblemComponent: React.FC<ProblemProps & { type: 'executionResult' | 'che
                   title={`${type === 'executionResult' ? '実行結果問題' : type === 'checkpoint' ? 'チェックポイント問題' : 'ステップ問題'}について`}
                   onClose={onHelpModalClose}
                 />
-
-                {explanation && explanation.title && (
-                  <>
-                    <Button
-                      leftIcon={<Icon as={MdOutlineCheckCircleOutline} />}
-                      size="sm"
-                      variant="outline"
-                      onClick={onExplanationModalOpen}
-                    >
-                      解説
-                    </Button>
-                    <CustomModal
-                      body={explanation.body}
-                      isOpen={isExplanationModalOpen}
-                      title={explanation.title}
-                      onClose={onExplanationModalClose}
-                    />
-                  </>
-                )}
               </HStack>
             </VStack>
 
@@ -303,7 +269,7 @@ const ProblemComponent: React.FC<ProblemProps & { type: 'executionResult' | 'che
                   ? undefined
                   : problem.sidToLineIndex.get(problem.traceItems[currentTraceItemIndex].sid)
               }
-              programmingLanguageId={selectedLanguageId}
+              programmingLanguageId="java"
             />
           </VStack>
 

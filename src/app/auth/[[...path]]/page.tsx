@@ -7,16 +7,11 @@ import { EmailPasswordPreBuiltUI } from 'supertokens-auth-react/recipe/emailpass
 import { EmailVerificationPreBuiltUI } from 'supertokens-auth-react/recipe/emailverification/prebuiltui';
 import SuperTokens from 'supertokens-auth-react/ui';
 
-import { clearAllCaches } from '../../../asyncFunctions/cache/actions';
-
 const AuthPage: NextPage = () => {
   // if the user visits a page that is not handled by us (like /auth/random), then we redirect them back to the auth page.
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    // サインイン/アップに伴う画面表示の変更を反映するために、全ページのキャッシュを削除する。
-    void clearAllCaches();
-
     if (SuperTokens.canHandleRoute([EmailPasswordPreBuiltUI, EmailVerificationPreBuiltUI])) {
       setLoaded(true);
     } else {

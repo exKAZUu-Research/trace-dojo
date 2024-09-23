@@ -23,8 +23,8 @@ CREATE TABLE "ProblemSession" (
     "updatedAt" DATETIME NOT NULL,
     "userId" TEXT NOT NULL,
     "courseId" TEXT NOT NULL,
-    "programId" TEXT NOT NULL,
-    "languageId" TEXT NOT NULL,
+    "lectureId" TEXT NOT NULL,
+    "problemId" TEXT NOT NULL,
     "problemVariablesSeed" TEXT NOT NULL,
     "currentProblemType" TEXT NOT NULL,
     "currentTraceItemIndex" INTEGER NOT NULL,
@@ -47,4 +47,4 @@ CREATE TABLE "ProblemSessionAnswer" (
 );
 
 -- CreateIndex
-CREATE INDEX "ProblemSession_userId_courseId_programId_languageId_completedAt_idx" ON "ProblemSession"("userId", "courseId", "programId", "languageId", "completedAt");
+CREATE INDEX "ProblemSession_userId_courseId_lectureId_problemId_completedAt_idx" ON "ProblemSession"("userId", "courseId", "lectureId", "problemId", "completedAt");

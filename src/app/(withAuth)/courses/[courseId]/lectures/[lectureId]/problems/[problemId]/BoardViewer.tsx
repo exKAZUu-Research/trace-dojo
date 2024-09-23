@@ -4,15 +4,15 @@ import type { BoxProps } from '@chakra-ui/react';
 import React, { useMemo } from 'react';
 
 import {
-  TURTLE_GRAPHICS_BOARD_COLUMNS as COLUMNS,
-  TURTLE_GRAPHICS_BOARD_ROWS as ROWS,
   TURTLE_GRAPHICS_BOARD_CELL_SIZE_PX as CELL_SIZE_PX,
+  TURTLE_GRAPHICS_BOARD_COLUMNS as COLUMNS,
   TURTLE_GRAPHICS_BOARD_GAP_PX as GAP_PX,
   TURTLE_GRAPHICS_BOARD_PADDING_PX as PADDING_PX,
-} from '../../../../../../constants';
-import { Box, Grid, GridItem, Img } from '../../../../../../infrastructures/useClient/chakra';
-import { charToColor } from '../../../../../../problems/traceProgram';
-import type { CharacterTrace, TraceItemVar } from '../../../../../../problems/traceProgram';
+  TURTLE_GRAPHICS_BOARD_ROWS as ROWS,
+} from '../../../../../../../../constants';
+import { Box, Grid, GridItem, Img, keyframes } from '../../../../../../../../infrastructures/useClient/chakra';
+import type { CharacterTrace, TraceItemVar } from '../../../../../../../../problems/traceProgram';
+import { charToColor } from '../../../../../../../../problems/traceProgram';
 
 const CHAR_TO_BG_COLOR = {
   '#': 'gray.600',
@@ -40,6 +40,15 @@ const DIR_TO_TRANSFORM_FUNCTION = {
   W: 'rotate(90deg)',
   E: 'rotate(270deg)',
 } as const;
+
+const focusRingKeyframes = keyframes({
+  '0%': {
+    borderColor: '#d69e2e' /* yellow.500 */,
+  },
+  '100%': {
+    borderColor: '#f6e05e' /* yellow.300 */,
+  },
+});
 
 type Props = BoxProps & {
   board: string | undefined;
@@ -147,8 +156,8 @@ export const BoardViewer: React.FC<Props> = ({
 
       {focusedCell && (
         <Box
-          borderColor="yellow.500"
           borderWidth="4px"
+          css={{ animation: `${focusRingKeyframes} 0.5s linear infinite alternate both` }}
           h={`${CELL_SIZE_PX + 12}px`}
           left={`${PADDING_PX}px`}
           pointerEvents="none"

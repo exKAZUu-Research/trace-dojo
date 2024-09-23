@@ -25,8 +25,8 @@ export const backendRouter = router({
     )
     .mutation(async ({ input: { id, ...data } }) => {
       const problemSession = await prisma.problemSession.update({ where: { id }, data });
-      revalidatePath('/courses/[courseId]/[languageId]', 'page');
-      console.log(`revalidatePath('/courses/[courseId]/[languageId]', 'page');`);
+      revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');
+      console.log(`revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');`);
       return problemSession;
     }),
 
@@ -34,9 +34,8 @@ export const backendRouter = router({
     .use(authorize)
     .input(
       z.object({
-        programId: z.string(),
+        problemId: z.string(),
         problemType: z.string(),
-        languageId: z.string(),
         userId: z.string(),
         userProblemSessionId: z.number(),
         step: z.number().nonnegative(),
@@ -48,9 +47,8 @@ export const backendRouter = router({
     .mutation(async ({ input }) => {
       await prisma.userAnswer.create({
         data: {
-          programId: input.programId,
+          problemId: input.problemId,
           problemType: input.problemType,
-          languageId: input.languageId,
           userId: input.userId,
           userProblemSessionId: input.userProblemSessionId,
           step: input.step,

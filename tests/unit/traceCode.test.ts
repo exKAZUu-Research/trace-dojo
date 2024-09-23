@@ -547,7 +547,10 @@ public class Straight {
     languageId,
     problemId,
   }) => {
-    const { checkpointSids, displayProgram, sidToLineIndex, traceItems } = generateProblem(problemId, languageId, '');
+    const problem = generateProblem(problemId, languageId, '');
+    if (!problem) throw new Error('Failed to generate problem.');
+
+    const { checkpointSids, displayProgram, sidToLineIndex, traceItems } = problem;
     expect(displayProgram).toEqual(expectedDisplayProgram);
     expect(sidToLineIndex).toEqual(
       new Map(Object.entries(expectedSidToLineIndex).map(([sid, lineIndex]) => [Number(sid), lineIndex]))

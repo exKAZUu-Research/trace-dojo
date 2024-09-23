@@ -5,18 +5,18 @@ import NextLink from 'next/link';
 import { useEffect, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
 
-import { INTERVAL_MS_OF_IDLE_TIMER } from '../../../../../../constants';
-import { backendTrpcReact } from '../../../../../../infrastructures/trpcBackend/client';
-import { Heading, Link, VStack } from '../../../../../../infrastructures/useClient/chakra';
-import type { Problem } from '../../../../../../problems/generateProblem';
-import type { CourseId, ProgramId, VisibleLanguageId } from '../../../../../../problems/problemData';
-import { courseIdToName, getExplanation, programIdToName } from '../../../../../../problems/problemData';
-import type { ProblemType } from '../../../../../../types';
+import { INTERVAL_MS_OF_IDLE_TIMER } from '../../../../../../../../constants';
+import { backendTrpcReact } from '../../../../../../../../infrastructures/trpcBackend/client';
+import { Heading, Link, VStack } from '../../../../../../../../infrastructures/useClient/chakra';
+import type { Problem } from '../../../../../../../../problems/generateProblem';
+import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
+import { courseIdToName, problemIdToName } from '../../../../../../../../problems/problemData';
+import type { ProblemType } from '../../../../../../../../types';
 
 import { CheckpointProblem, ExecutionResultProblem, StepProblem } from './Problems';
 
 type Props = {
-  params: { courseId: CourseId; languageId: VisibleLanguageId; programId: ProgramId };
+  params: { courseId: CourseId; lectureId: string; problemId: ProblemId };
   problem: Problem;
   userId: string;
   initialProblemSession: ProblemSession;
@@ -66,14 +66,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   }, []);
 
   useEffect(() => {
-    if (
-      !props.userId ||
-      !props.params.courseId ||
-      !props.params.programId ||
-      !props.params.languageId ||
-      !suspendedSession
-    )
-      return;
+    if (!props.userId || !props.params.courseId || !props.params.problemId || !suspendedSession) return;
 
     (async () => {
       const updated = await updateProblemSessionMutation.mutateAsync({
@@ -113,9 +106,8 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     const startedAt = new Date(now.getTime() - activeTime);
 
     await createUserAnswerQuery.mutateAsync({
-      programId: props.params.programId,
+      problemId: props.params.problemId,
       problemType,
-      languageId: props.params.languageId,
       userId: props.userId,
       userProblemSessionId: suspendedSession.id,
       step: currentTraceItemIndex,
@@ -137,24 +129,20 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     }
   };
 
-  const explanation = getExplanation(props.params.programId, props.params.languageId);
-
   return (
     <VStack align="stretch" spacing={8}>
       <VStack align="stretch" spacing={1}>
         <Link as={NextLink} color="gray.600" fontWeight="bold" href={`/courses/${props.params.courseId}`}>
           {courseIdToName[props.params.courseId]}
         </Link>
-        <Heading as="h1">{programIdToName[props.params.programId]}</Heading>
+        <Heading as="h1">{problemIdToName[props.params.problemId]}</Heading>
       </VStack>
 
       {problemType === 'executionResult' ? (
         <ExecutionResultProblem
           createAnswerLog={createAnswerLog}
-          explanation={explanation}
           handleComplete={handleSolveProblem}
           problem={props.problem}
-          selectedLanguageId={props.params.languageId}
           setCurrentTraceItemIndex={setCurrentTraceItemIndex}
           setProblemType={setProblemType}
         />
@@ -163,9 +151,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
           beforeTraceItemIndex={previousTraceItemIndex}
           createAnswerLog={createAnswerLog}
           currentTraceItemIndex={currentTraceItemIndex}
-          explanation={explanation}
           problem={props.problem}
-          selectedLanguageId={props.params.languageId}
           setBeforeTraceItemIndex={setPreviousTraceItemIndex}
           setCurrentTraceItemIndex={setCurrentTraceItemIndex}
           setProblemType={setProblemType}
@@ -175,10 +161,8 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
           beforeTraceItemIndex={previousTraceItemIndex}
           createAnswerLog={createAnswerLog}
           currentTraceItemIndex={currentTraceItemIndex}
-          explanation={explanation}
           handleComplete={handleSolveProblem}
           problem={props.problem}
-          selectedLanguageId={props.params.languageId}
           setBeforeTraceItemIndex={setPreviousTraceItemIndex}
           setCurrentTraceItemIndex={setCurrentTraceItemIndex}
         />
