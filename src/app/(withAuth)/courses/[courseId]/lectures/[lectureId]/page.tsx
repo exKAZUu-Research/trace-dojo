@@ -5,40 +5,40 @@ import React from 'react';
 import { prisma } from '../../../../../../infrastructures/prisma';
 import type { CourseId } from '../../../../../../problems/problemData';
 import { courseIdToLectureIds } from '../../../../../../problems/problemData';
-import {
-  fetchUserLectureCompletedProblems,
-  fetchUserLectureProblemSessionWithAnswer,
-} from '../../../../../../utils/fetch';
 import { getNullableSessionOnServer } from '../../../../../../utils/session';
 
-import { Lecture } from './Lecture';
+import { Lecture } from './pageOnClient';
 
-const LecturePage: NextPage<{ params: { courseId: CourseId; lectureId: string } }> = async ({ params }) => {
+type Props = { params: { courseId: CourseId; lectureId: string } };
+
+const LecturePage: NextPage<Props> = async (props) => {
   const { session } = await getNullableSessionOnServer();
   if (!session) redirect('/auth');
 
-  const user = await prisma.user.findUnique({
-    where: {
-      id: session.superTokensUserId,
-    },
-  });
-  if (!user) redirect('/auth');
+  if (!(props.params.courseId in courseIdToLectureIds)) notFound();
 
-  const { courseId, lectureId } = params;
-  if (!(courseId in courseIdToLectureIds)) notFound();
-  const lectureIndex = courseIdToLectureIds[courseId].indexOf(lectureId);
+  const lectureIndex = courseIdToLectureIds[props.params.courseId].indexOf(props.params.lectureId);
   if (lectureIndex === -1) notFound();
 
-  const userCompletedProblems = await fetchUserLectureCompletedProblems(user.id, courseId, lectureId);
-  const userProblemSessions = await fetchUserLectureProblemSessionWithAnswer(user.id, lectureId);
+  const currentUserProblemSessions = await prisma.problemSession.findMany({
+    orderBy: { createdAt: 'asc' },
+    select: {
+      problemId: true,
+      completedAt: true,
+      elapsedMilliseconds: true,
+      answers: { select: { elapsedMilliseconds: true, isCorrect: true } },
+    },
+    where: { userId: session.superTokensUserId, courseId: props.params.courseId, lectureId: props.params.lectureId },
+  });
 
   return (
     <Lecture
-      courseId={courseId}
-      lectureId={lectureId}
+      currentUserCompletedProblemIdSet={
+        new Set(currentUserProblemSessions.filter((s) => s.completedAt).map((s) => s.problemId))
+      }
+      currentUserProblemSessions={currentUserProblemSessions}
       lectureIndex={lectureIndex}
-      userCompletedProblems={userCompletedProblems}
-      userProblemSessions={userProblemSessions}
+      params={props.params}
     />
   );
 };

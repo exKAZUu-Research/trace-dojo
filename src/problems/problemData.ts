@@ -106,7 +106,7 @@ export const problemIdToName: Record<ProblemId, string> = {
   test5: 'チェックポイント取得のテスト用問題',
 };
 
-export const courseIdToProblemIdLists: Record<CourseId, ProblemId[][]> = {
+export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]> = {
   tuBeginner1: [
     ['straight', 'stepBack', 'turnRight', 'turnRightAndTurnLeft'],
     ['square1', 'square2', 'variable', 'variable2', 'variable3'],
