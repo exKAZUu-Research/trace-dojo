@@ -19,7 +19,7 @@ const SettingsPage: NextPage = async () => {
     <form action={updateDisplayName}>
       <VStack align="stretch" spacing={4}>
         <FormControl>
-          <FormLabel>あなたの表示名</FormLabel>
+          <FormLabel>あなたの表示名（現在は未使用のため、設定する必要はありません。）</FormLabel>
           <Input bg="white" defaultValue={user?.displayName} maxW="sm" name="displayName" type="text" />
         </FormControl>
 
