@@ -257,7 +257,7 @@ public class Main {
   },
   variable2: {
     instrumented: `
-s.set('x', <1-5>);
+s.set('x', <1-4>);
 s.set('x', s.get('x') + 1);
 s.set('y', s.get('x') + 1);
 s.set('亀', new Character(s.get('x'), s.get('y'))); // CP
@@ -266,7 +266,7 @@ s.get('亀').forward();
     java: `
 public class Main {
     public static void main(String[] args) {
-        int x = <1-5>; // sid
+        int x = <1-4>; // sid
         x = x + 1; // sid
         int y = x + 1; // sid
         Turtle 亀 = new Turtle(x, y); // sid

@@ -122,7 +122,7 @@ class Character {
     this.x += dx[index];
     this.y += dy[index];
     if (this.x < 0 || ${GRID_COLUMNS} <= this.x || this.y < 0 || ${GRID_ROWS} <= this.y) {
-      throw new Error('Out of bounds');
+      throw new Error(\`Out of bounds: (\${this.x}, \${this.y})\`);
     }
     board[this.y][this.x] = this.color;
     addTrace(sid);
@@ -132,7 +132,7 @@ class Character {
     this.x -= dx[index];
     this.y -= dy[index];
     if (this.x < 0 || ${GRID_COLUMNS} <= this.x || this.y < 0 || ${GRID_ROWS} <= this.y) {
-      throw new Error('Out of bounds');
+      throw new Error(\`Out of bounds: (\${this.x}, \${this.y})\`);
     }
     board[this.y][this.x] = this.color;
     addTrace(sid);
