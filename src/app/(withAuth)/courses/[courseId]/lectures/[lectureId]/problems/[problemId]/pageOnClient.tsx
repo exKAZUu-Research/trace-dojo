@@ -32,20 +32,17 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   const [previousTraceItemIndex, setPreviousTraceItemIndex] = useState(0);
   const [lastTimeSpent, setLastTimeSpent] = useState(0);
 
-  const { getActiveTime, isIdle, reset } = useIdleTimer({
-    timeout: 10_000,
-    throttle: 500,
-  });
+  const idleTimer = useIdleTimer({ timeout: 10_000, throttle: 500 });
 
   const updateProblemSessionMutation = backendTrpcReact.updateProblemSession.useMutation();
-  const createUserAnswerQuery = backendTrpcReact.createUserAnswer.useMutation();
+  const createProblemSessionAnswerMutation = backendTrpcReact.createProblemSessionAnswer.useMutation();
 
   useEffect(() => {
     const interval = window.setInterval(async () => {
-      if (suspendedSession && !isIdle()) {
+      if (suspendedSession && !idleTimer.isIdle()) {
         await updateProblemSessionMutation.mutateAsync({
           id: suspendedSession.id,
-          elapsedMilliseconds: lastTimeSpent + getActiveTime(),
+          elapsedMilliseconds: lastTimeSpent + idleTimer.getActiveTime(),
         });
       }
     }, INTERVAL_MS_OF_IDLE_TIMER);
@@ -53,7 +50,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     return () => {
       window.clearInterval(interval);
     };
-  }, [isIdle, getActiveTime, suspendedSession, lastTimeSpent, updateProblemSessionMutation]);
+  }, [suspendedSession, lastTimeSpent, updateProblemSessionMutation, idleTimer]);
 
   useEffect(() => {
     // 中断中のセッションを再開する
@@ -98,35 +95,26 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     });
   };
 
-  const createAnswerLog = async (isPassed: boolean): Promise<void> => {
+  const createAnswerLog = async (isCorrect: boolean): Promise<void> => {
     if (!props.userId || !suspendedSession) return;
 
-    const activeTime = getActiveTime();
-    const now = new Date();
-    const startedAt = new Date(now.getTime() - activeTime);
+    const activeTime = idleTimer.getActiveTime();
 
-    await createUserAnswerQuery.mutateAsync({
-      problemId: props.params.problemId,
+    await createProblemSessionAnswerMutation.mutateAsync({
+      sessionId: suspendedSession.id,
       problemType,
-      userId: props.userId,
-      userProblemSessionId: suspendedSession.id,
-      step: currentTraceItemIndex,
-      isPassed,
-      timeSpent: activeTime,
-      startedAt,
+      traceItemIndex: currentTraceItemIndex,
+      elapsedMilliseconds: activeTime,
+      isCorrect,
     });
 
-    if (suspendedSession) {
-      const updated = await updateProblemSessionMutation.mutateAsync({
-        id: suspendedSession.id,
-        elapsedMilliseconds: lastTimeSpent + activeTime,
-      });
+    const updated = await updateProblemSessionMutation.mutateAsync({
+      id: suspendedSession.id,
+      elapsedMilliseconds: lastTimeSpent + activeTime,
+    });
 
-      if (updated) {
-        setLastTimeSpent(updated.elapsedMilliseconds);
-        reset(); // Reset activeTime
-      }
-    }
+    setLastTimeSpent(updated.elapsedMilliseconds);
+    idleTimer.reset();
   };
 
   return (

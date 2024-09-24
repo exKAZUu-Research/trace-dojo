@@ -1,3 +1,4 @@
+import { TRPCError } from '@trpc/server';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
@@ -15,7 +16,7 @@ export const backendRouter = router({
     .use(authorize)
     .input(
       z.object({
-        id: z.number().int().nonnegative(),
+        id: z.number().int().positive(),
         currentProblemType: z.string().min(1).optional(),
         currentTraceItemIndex: z.number().int().nonnegative().optional(),
         previousTraceItemIndex: z.number().int().nonnegative().optional(),
@@ -30,33 +31,23 @@ export const backendRouter = router({
       return problemSession;
     }),
 
-  createUserAnswer: procedure
+  createProblemSessionAnswer: procedure
     .use(authorize)
     .input(
       z.object({
-        problemId: z.string(),
+        sessionId: z.number().int().positive(),
         problemType: z.string(),
-        userId: z.string(),
-        userProblemSessionId: z.number(),
-        step: z.number().nonnegative(),
-        isPassed: z.boolean(),
-        timeSpent: z.number().optional(),
-        startedAt: z.date().optional(),
+        traceItemIndex: z.number().int().nonnegative(),
+        elapsedMilliseconds: z.number().nonnegative(),
+        isCorrect: z.boolean(),
       })
     )
-    .mutation(async ({ input }) => {
-      await prisma.userAnswer.create({
-        data: {
-          problemId: input.problemId,
-          problemType: input.problemType,
-          userId: input.userId,
-          userProblemSessionId: input.userProblemSessionId,
-          step: input.step,
-          isPassed: input.isPassed,
-          timeSpent: input.timeSpent,
-          startedAt: input.startedAt,
-        },
-      });
+    .mutation(async ({ ctx, input }) => {
+      const session = await prisma.problemSession.findUnique({ where: { id: input.sessionId } });
+      if (!session) throw new TRPCError({ code: 'NOT_FOUND' });
+      if (session.userId !== ctx.session.superTokensUserId) throw new TRPCError({ code: 'UNAUTHORIZED' });
+
+      await prisma.problemSessionAnswer.create({ data: input });
     }),
 });
 
