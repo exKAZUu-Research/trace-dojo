@@ -17,13 +17,12 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  displayName        String                 @unique
-  userSolvedAnswers  UserCompletedProblem[]
-  ProblemAnswerLog   UserAnswer[]
-  UserProblemSession UserProblemSession[]
+  displayName String
+
+  problemSessions ProblemSession[]
 }
 
-model UserProblemSession {
+model ProblemSession {
   id        Int      @id @default(autoincrement())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -34,45 +33,29 @@ model UserProblemSession {
   lectureId String
   problemId String
 
-  problemVariablesSeed  String
-  currentProblemType    String
-  beforeTraceItemIndex  Int
-  currentTraceItemIndex Int
-  timeSpent             Int          @default(0)
-  startedAt             DateTime
-  finishedAt            DateTime?
-  isCompleted           Boolean
-  userAnswers           UserAnswer[]
+  problemVariablesSeed   String
+  currentProblemType     String
+  currentTraceItemIndex  Int
+  previousTraceItemIndex Int
+
+  elapsedMilliseconds Int       @default(0)
+  completedAt         DateTime?
+
+  answers ProblemSessionAnswer[]
+
+  @@index([userId, courseId, lectureId, problemId, completedAt])
 }
 
-model UserCompletedProblem {
+model ProblemSessionAnswer {
   id        Int      @id @default(autoincrement())
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 
-  user      User   @relation(fields: [userId], references: [id])
-  userId    String
-  courseId  String
-  problemId String
-  lectureId String
-}
+  session   ProblemSession @relation(fields: [sessionId], references: [id])
+  sessionId Int
 
-model UserAnswer {
-  id        Int       @id @default(autoincrement())
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  startedAt DateTime?
+  problemType    String
+  traceItemIndex Int
 
-  user   User   @relation(fields: [userId], references: [id])
-  userId String
-
-  userProblemSession   UserProblemSession @relation(fields: [userProblemSessionId], references: [id])
-  userProblemSessionId Int
-
-  problemId   String
-  problemType String
-
-  timeSpent Int     @default(0)
-  step      Int
-  isPassed  Boolean
+  elapsedMilliseconds Int
+  isCorrect           Boolean
 }

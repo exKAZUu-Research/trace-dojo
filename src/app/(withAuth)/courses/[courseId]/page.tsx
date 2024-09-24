@@ -4,35 +4,34 @@ import { notFound, redirect } from 'next/navigation';
 import { prisma } from '../../../../infrastructures/prisma';
 import type { CourseId } from '../../../../problems/problemData';
 import { courseIdToLectureIds } from '../../../../problems/problemData';
-import { fetchUserCompletedProblems, fetchUserProblemSessionsWithUserAnswer } from '../../../../utils/fetch';
 import { getNullableSessionOnServer } from '../../../../utils/session';
 
-import { Course } from './Course';
+import { CoursePageOnClient } from './pageOnClient';
 
-const CoursePage: NextPage<{ params: { courseId: CourseId } }> = async ({ params }) => {
+type Props = { params: { courseId: CourseId } };
+
+const CoursePage: NextPage<Props> = async (props) => {
   const { session } = await getNullableSessionOnServer();
   if (!session) redirect('/auth');
 
-  const user = await prisma.user.findUnique({
-    where: {
-      id: session.superTokensUserId,
-    },
+  if (!(props.params.courseId in courseIdToLectureIds)) notFound();
+
+  const currentUserProblemSessions = await prisma.problemSession.findMany({
+    distinct: ['problemId'],
+    orderBy: { completedAt: 'desc' },
+    select: { problemId: true, completedAt: true },
+    where: { userId: session.superTokensUserId, courseId: props.params.courseId },
   });
-  if (!user) redirect('/auth');
 
-  const courseId = params.courseId;
-  if (!(courseId in courseIdToLectureIds)) notFound();
-
-  const userCompletedProblems = await fetchUserCompletedProblems(user.id, courseId);
-  const userProblemSessions = await fetchUserProblemSessionsWithUserAnswer(user.id);
-  console.log('userCompletedProblems:', userCompletedProblems);
-  console.log('userProblemSessions:', userProblemSessions);
+  console.trace('currentUserProblemSessions:', currentUserProblemSessions);
 
   return (
-    <Course
-      courseId={courseId}
-      userCompletedProblems={userCompletedProblems}
-      userProblemSessions={userProblemSessions}
+    <CoursePageOnClient
+      currentUserCompletedProblemIdSet={
+        new Set(currentUserProblemSessions.filter((s) => s.completedAt).map((s) => s.problemId))
+      }
+      currentUserStartedProblemIdSet={new Set(currentUserProblemSessions.map((s) => s.problemId))}
+      params={props.params}
     />
   );
 };

@@ -1,6 +1,6 @@
 'use client';
 
-import type { UserProblemSession } from '@prisma/client';
+import type { ProblemSession } from '@prisma/client';
 import NextLink from 'next/link';
 import { useEffect, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
@@ -19,37 +19,30 @@ type Props = {
   params: { courseId: CourseId; lectureId: string; problemId: ProblemId };
   problem: Problem;
   userId: string;
-  userProblemSession: UserProblemSession;
+  initialProblemSession: ProblemSession;
 };
 
 export const ProblemPageOnClient: React.FC<Props> = (props) => {
-  const [suspendedSession, setSuspendedSession] = useState<UserProblemSession>(props.userProblemSession);
+  const [suspendedSession, setSuspendedSession] = useState<ProblemSession>(props.initialProblemSession);
   const [problemType, setProblemType] = useState<ProblemType>(
-    props.userProblemSession.currentProblemType as ProblemType
+    props.initialProblemSession.currentProblemType as ProblemType
   );
 
-  const [beforeTraceItemIndex, setBeforeTraceItemIndex] = useState(0);
   const [currentTraceItemIndex, setCurrentTraceItemIndex] = useState(0);
+  const [previousTraceItemIndex, setPreviousTraceItemIndex] = useState(0);
   const [lastTimeSpent, setLastTimeSpent] = useState(0);
 
-  const { getActiveTime, isIdle, reset } = useIdleTimer({
-    timeout: 10_000,
-    throttle: 500,
-  });
+  const idleTimer = useIdleTimer({ timeout: 10_000, throttle: 500 });
 
-  const updatedSessionQuery = backendTrpcReact.upsertUserProblemSession.useMutation();
-  const updateUserProblemSessionQuery = backendTrpcReact.updateUserProblemSession.useMutation();
-  const createUserCompletedProblemQuery = backendTrpcReact.createUserCompletedProblem.useMutation();
-  const createUserAnswerQuery = backendTrpcReact.createUserAnswer.useMutation();
+  const updateProblemSessionMutation = backendTrpcReact.updateProblemSession.useMutation();
+  const createProblemSessionAnswerMutation = backendTrpcReact.createProblemSessionAnswer.useMutation();
 
   useEffect(() => {
     const interval = window.setInterval(async () => {
-      if (suspendedSession && !isIdle()) {
-        await updateUserProblemSessionQuery.mutateAsync({
+      if (suspendedSession && !idleTimer.isIdle()) {
+        await updateProblemSessionMutation.mutateAsync({
           id: suspendedSession.id,
-          data: {
-            timeSpent: lastTimeSpent + getActiveTime(),
-          },
+          elapsedMilliseconds: lastTimeSpent + idleTimer.getActiveTime(),
         });
       }
     }, INTERVAL_MS_OF_IDLE_TIMER);
@@ -57,14 +50,14 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     return () => {
       window.clearInterval(interval);
     };
-  }, [isIdle, getActiveTime, suspendedSession, lastTimeSpent, updateUserProblemSessionQuery]);
+  }, [suspendedSession, lastTimeSpent, updateProblemSessionMutation, idleTimer]);
 
   useEffect(() => {
     // 中断中のセッションを再開する
     if (!suspendedSession) return;
 
     setProblemType(suspendedSession.currentProblemType as ProblemType);
-    setBeforeTraceItemIndex(suspendedSession.beforeTraceItemIndex);
+    setPreviousTraceItemIndex(suspendedSession.previousTraceItemIndex);
     setCurrentTraceItemIndex(suspendedSession.currentTraceItemIndex);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -73,24 +66,16 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     if (!props.userId || !props.params.courseId || !props.params.problemId || !suspendedSession) return;
 
     (async () => {
-      const updatedSession = await updatedSessionQuery.mutateAsync({
+      const updated = await updateProblemSessionMutation.mutateAsync({
         id: suspendedSession.id,
-        userId: props.userId,
-        courseId: props.params.courseId,
-        lectureId: props.params.lectureId,
-        problemId: props.params.problemId,
-        problemVariablesSeed: suspendedSession.problemVariablesSeed,
         currentProblemType: problemType,
-        beforeTraceItemIndex: problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
         currentTraceItemIndex: problemType === 'executionResult' ? 0 : currentTraceItemIndex,
-        timeSpent: suspendedSession.timeSpent,
-        startedAt: suspendedSession.startedAt,
-        finishedAt: undefined,
-        isCompleted: false,
+        previousTraceItemIndex: problemType === 'executionResult' ? 0 : previousTraceItemIndex,
+        elapsedMilliseconds: suspendedSession.elapsedMilliseconds,
       });
-      if (updatedSession) {
-        setSuspendedSession(updatedSession);
-        setLastTimeSpent(updatedSession.timeSpent);
+      if (updated) {
+        setSuspendedSession(updated);
+        setLastTimeSpent(updated.elapsedMilliseconds);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -100,60 +85,36 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     console.log('handleSolveProblem:', props.userId, suspendedSession);
     if (!props.userId || !suspendedSession) return;
 
-    await createUserCompletedProblemQuery.mutateAsync({
-      userId: props.userId,
-      courseId: props.params.courseId,
-      lectureId: props.params.lectureId,
-      problemId: props.params.problemId,
-    });
-    await updatedSessionQuery.mutateAsync({
+    await updateProblemSessionMutation.mutateAsync({
       id: suspendedSession.id,
-      userId: props.userId,
-      courseId: props.params.courseId,
-      lectureId: props.params.lectureId,
-      problemId: props.params.problemId,
-      problemVariablesSeed: suspendedSession.problemVariablesSeed,
       currentProblemType: problemType,
-      beforeTraceItemIndex: problemType === 'executionResult' ? 0 : beforeTraceItemIndex,
       currentTraceItemIndex: problemType === 'executionResult' ? 0 : currentTraceItemIndex,
-      timeSpent: suspendedSession.timeSpent,
-      startedAt: suspendedSession.startedAt,
-      finishedAt: new Date(),
-      isCompleted: true,
+      previousTraceItemIndex: problemType === 'executionResult' ? 0 : previousTraceItemIndex,
+      elapsedMilliseconds: suspendedSession.elapsedMilliseconds,
+      completedAt: new Date(),
     });
   };
 
-  const createAnswerLog = async (isPassed: boolean): Promise<void> => {
+  const createAnswerLog = async (isCorrect: boolean): Promise<void> => {
     if (!props.userId || !suspendedSession) return;
 
-    const activeTime = getActiveTime();
-    const now = new Date();
-    const startedAt = new Date(now.getTime() - activeTime);
+    const activeTime = idleTimer.getActiveTime();
 
-    await createUserAnswerQuery.mutateAsync({
-      problemId: props.params.problemId,
+    await createProblemSessionAnswerMutation.mutateAsync({
+      sessionId: suspendedSession.id,
       problemType,
-      userId: props.userId,
-      userProblemSessionId: suspendedSession.id,
-      step: currentTraceItemIndex,
-      isPassed,
-      timeSpent: activeTime,
-      startedAt,
+      traceItemIndex: currentTraceItemIndex,
+      elapsedMilliseconds: activeTime,
+      isCorrect,
     });
 
-    if (suspendedSession) {
-      const userProblemSession = await updateUserProblemSessionQuery.mutateAsync({
-        id: suspendedSession.id,
-        data: {
-          timeSpent: lastTimeSpent + activeTime,
-        },
-      });
+    const updated = await updateProblemSessionMutation.mutateAsync({
+      id: suspendedSession.id,
+      elapsedMilliseconds: lastTimeSpent + activeTime,
+    });
 
-      if (userProblemSession) {
-        setLastTimeSpent(userProblemSession.timeSpent);
-        reset(); // Reset activeTime
-      }
-    }
+    setLastTimeSpent(updated.elapsedMilliseconds);
+    idleTimer.reset();
   };
 
   return (
@@ -175,22 +136,22 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
         />
       ) : problemType === 'checkpoint' ? (
         <CheckpointProblem
-          beforeTraceItemIndex={beforeTraceItemIndex}
+          beforeTraceItemIndex={previousTraceItemIndex}
           createAnswerLog={createAnswerLog}
           currentTraceItemIndex={currentTraceItemIndex}
           problem={props.problem}
-          setBeforeTraceItemIndex={setBeforeTraceItemIndex}
+          setBeforeTraceItemIndex={setPreviousTraceItemIndex}
           setCurrentTraceItemIndex={setCurrentTraceItemIndex}
           setProblemType={setProblemType}
         />
       ) : (
         <StepProblem
-          beforeTraceItemIndex={beforeTraceItemIndex}
+          beforeTraceItemIndex={previousTraceItemIndex}
           createAnswerLog={createAnswerLog}
           currentTraceItemIndex={currentTraceItemIndex}
           handleComplete={handleSolveProblem}
           problem={props.problem}
-          setBeforeTraceItemIndex={setBeforeTraceItemIndex}
+          setBeforeTraceItemIndex={setPreviousTraceItemIndex}
           setCurrentTraceItemIndex={setCurrentTraceItemIndex}
         />
       )}

@@ -1,6 +1,6 @@
 'use client';
 
-import type { UserAnswer } from '@prisma/client';
+import type { ProblemSession, ProblemSessionAnswer } from '@prisma/client';
 import NextLink from 'next/link';
 import React from 'react';
 import { MdCheckCircle, MdCheckCircleOutline, MdOutlineVerified, MdVerified } from 'react-icons/md';
@@ -25,26 +25,33 @@ import {
   Tr,
   VStack,
 } from '../../../../../../infrastructures/useClient/chakra';
-import type { CourseId, ProblemId } from '../../../../../../problems/problemData';
-import { courseIdToName, courseIdToProblemIdLists, problemIdToName } from '../../../../../../problems/problemData';
-import { type UserProblemSessionWithUserAnswers } from '../../../../../../utils/fetch';
-import { SPECIFIED_COMPLETION_COUNT } from '../../Course';
+import type { CourseId } from '../../../../../../problems/problemData';
+import {
+  courseIdToName,
+  courseIdToLectureIndexToProblemIds,
+  problemIdToName,
+} from '../../../../../../problems/problemData';
 
-export const Lecture: React.FC<{
-  courseId: CourseId;
-  lectureId: string;
+type Props = {
+  params: { courseId: CourseId; lectureId: string };
   lectureIndex: number;
-  userCompletedProblems: { problemId: string }[];
-  userProblemSessions: UserProblemSessionWithUserAnswers[];
-}> = ({ courseId, lectureId, lectureIndex, userCompletedProblems, userProblemSessions }) => {
-  const problemIds = courseIdToProblemIdLists[courseId][lectureIndex];
-  const completedProblemCount = problemIds.filter(
-    (problemId) => countUserCompletedProblems(userCompletedProblems, problemId) >= SPECIFIED_COMPLETION_COUNT
+  currentUserCompletedProblemIdSet: ReadonlySet<string>;
+  currentUserProblemSessions: (Pick<ProblemSession, 'problemId' | 'completedAt' | 'elapsedMilliseconds'> & {
+    answers: Pick<ProblemSessionAnswer, 'elapsedMilliseconds' | 'isCorrect'>[];
+  })[];
+};
+
+export const Lecture: React.FC<Props> = (props) => {
+  const lectureProblemIds = courseIdToLectureIndexToProblemIds[props.params.courseId][props.lectureIndex];
+
+  const completedProblemCount = lectureProblemIds.filter((problemId) =>
+    props.currentUserCompletedProblemIdSet.has(problemId)
   ).length;
-  const isLessonCompleted = completedProblemCount >= problemIds.length;
+  const isLessonCompleted = completedProblemCount >= lectureProblemIds.length;
+
   return (
     <VStack align="stretch" spacing={6}>
-      <Heading as="h1">{courseIdToName[courseId]}</Heading>
+      <Heading as="h1">{courseIdToName[props.params.courseId]}</Heading>
 
       <SimpleGrid columnGap={4} mx="auto" rowGap={6} w={{ base: '100%', lg: '80%' }}>
         <Card>
@@ -55,13 +62,13 @@ export const Lecture: React.FC<{
               fontSize="3xl"
               mx="-0.125em"
             />
-            <Heading size="md">第{lectureIndex + 1}回</Heading>
+            <Heading size="md">第{props.lectureIndex + 1}回</Heading>
           </CardHeader>
 
           <CardBody align="stretch" as={VStack} pb={2}>
             <Progress
               colorScheme="brand"
-              max={problemIds.length}
+              max={lectureProblemIds.length}
               rounded="sm"
               size="sm"
               value={completedProblemCount}
@@ -89,19 +96,14 @@ export const Lecture: React.FC<{
               </Thead>
 
               <Tbody>
-                {problemIds.map((problemId) => {
-                  const suspendedSession = userProblemSessions.find(
-                    (session) =>
-                      session.courseId === courseId &&
-                      session.problemId === problemId &&
-                      !session.finishedAt &&
-                      !session.isCompleted
+                {lectureProblemIds.map((problemId) => {
+                  const firstSession = props.currentUserProblemSessions.find((s) => s.problemId === problemId);
+
+                  const suspendedSession = props.currentUserProblemSessions.find(
+                    (s) => s.problemId === problemId && !s.completedAt
                   );
-                  const firstSession = userProblemSessions.find(
-                    (session) => session.courseId === courseId && session.problemId === problemId
-                  );
-                  const completedProblemCount = countUserCompletedProblems(userCompletedProblems, problemId);
-                  const isProblemCompleted = completedProblemCount >= SPECIFIED_COMPLETION_COUNT;
+
+                  const isProblemCompleted = props.currentUserCompletedProblemIdSet.has(problemId);
 
                   return (
                     <Tr key={problemId}>
@@ -120,20 +122,23 @@ export const Lecture: React.FC<{
                               挑戦中
                             </Tag>
                           )}
-                          <Link as={NextLink} href={`${lectureId}/problems/${problemId}`}>
+                          <Link as={NextLink} href={`${props.params.lectureId}/problems/${problemId}`}>
                             {problemIdToName[problemId]}
                           </Link>
                         </VStack>
                       </Td>
                       <Td isNumeric color="gray.600">
-                        {countFailedAnswers(firstSession)}
+                        {firstSession?.answers.filter((a) => !a.isCorrect).length ?? 0}
                         <Box as="span" fontSize="xs" ms={1}>
                           回
                         </Box>
                       </Td>
                       <Td isNumeric color="gray.600">
-                        {typeof firstSession?.timeSpent === 'number'
-                          ? Math.floor(totalAnswerTimeSpent(firstSession) / 1000)
+                        {/* TODO: なぜ`firstSession?.elapsedMilliseconds`をそのまま表示しない実装になっているのか確認する。 */}
+                        {typeof firstSession?.elapsedMilliseconds === 'number'
+                          ? Math.floor(
+                              firstSession.answers.reduce((sum, answer) => sum + answer.elapsedMilliseconds, 0) / 1000
+                            )
                           : 0}
                         <Box as="span" fontSize="xs" ms={1}>
                           秒
@@ -150,22 +155,3 @@ export const Lecture: React.FC<{
     </VStack>
   );
 };
-
-function countUserCompletedProblems(userCompletedProblems: { problemId: string }[], problemId: ProblemId): number {
-  return userCompletedProblems.filter((userCompletedProblem) => userCompletedProblem.problemId === problemId).length;
-}
-
-function countFailedAnswers(userProblemSession?: UserProblemSessionWithUserAnswers): number {
-  if (!userProblemSession) return 0;
-
-  return userProblemSession.userAnswers.filter((userAnswer: UserAnswer) => !userAnswer.isPassed).length;
-}
-
-function totalAnswerTimeSpent(userProblemSession?: UserProblemSessionWithUserAnswers): number {
-  if (!userProblemSession) return 0;
-
-  return userProblemSession.userAnswers.reduce(
-    (totalTimeSpent: number, userAnswer: UserAnswer) => totalTimeSpent + (userAnswer.timeSpent || 0),
-    0
-  );
-}
