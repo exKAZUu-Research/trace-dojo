@@ -248,7 +248,7 @@ public class Main {
     Character c2 = new Character(2, 3, "green");
     c2.forward();
     String foo = "あいうえお";
-    int bar = 79;
+    int bar = 23;
     i = bar + 1;
     c2.forward();
     c2.forward();
@@ -362,7 +362,7 @@ public class Main {
           c2: { ...defaultCharacter, x: 2, y: 4, color: 'G' },
           i: 0,
           foo: 'あいうえお',
-          bar: 79,
+          bar: 23,
         },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
@@ -377,9 +377,9 @@ public class Main {
         vars: {
           c1: { ...defaultCharacter, x: sx + 1, y: sy + 1, dir: 'E' },
           c2: { ...defaultCharacter, x: 2, y: 4, color: 'G' },
-          i: 80,
+          i: 24,
           foo: 'あいうえお',
-          bar: 79,
+          bar: 23,
         },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
@@ -394,9 +394,9 @@ public class Main {
         vars: {
           c1: { ...defaultCharacter, x: sx + 1, y: sy + 1, dir: 'E' },
           c2: { ...defaultCharacter, x: 2, y: 5, color: 'G' },
-          i: 80,
+          i: 24,
           foo: 'あいうえお',
-          bar: 79,
+          bar: 23,
         },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
@@ -412,9 +412,9 @@ public class Main {
         vars: {
           c1: { ...defaultCharacter, x: sx + 1, y: sy + 1, dir: 'E' },
           c2: { ...defaultCharacter, x: 2, y: 6, color: 'G' },
-          i: 80,
+          i: 24,
           foo: 'あいうえお',
-          bar: 79,
+          bar: 23,
         },
         board: getBoard([
           { x: sx, y: sy, color: '#' },

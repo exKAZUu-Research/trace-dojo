@@ -1301,7 +1301,7 @@ s.get('c1').turnRight();
 s.set('i', 0);
 s.get('c1').forward();
 
-s.set('c2', new Character(<2-5>, <3-5>, 'G'));
+s.set('c2', new Character(2, 3, 'G'));
 s.get('c2').forward();
 s.set('foo', 'あいうえお');
 s.set('bar', <1-100>);
@@ -1318,7 +1318,7 @@ public class Main {
     int i = 0; // sid
     c1.forward(); // sid
 
-    Character c2 = new Character(<2-5>, <3-5>, "green"); // sid
+    Character c2 = new Character(2, 3, "green"); // sid
     c2.forward(); // sid
     String foo = "あいうえお"; // sid
     int bar = <1-100>; // sid
