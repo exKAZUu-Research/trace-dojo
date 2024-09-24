@@ -28,7 +28,7 @@ import {
 import type { CourseId, ProblemId } from '../../../../../../problems/problemData';
 import { courseIdToName, courseIdToProblemIdLists, problemIdToName } from '../../../../../../problems/problemData';
 import { type UserProblemSessionWithUserAnswers } from '../../../../../../utils/fetch';
-import { SPECIFIED_COMPLETION_COUNT } from '../../Course';
+import { SPECIFIED_COMPLETION_COUNT } from '../../pageOnClient';
 
 export const Lecture: React.FC<{
   courseId: CourseId;

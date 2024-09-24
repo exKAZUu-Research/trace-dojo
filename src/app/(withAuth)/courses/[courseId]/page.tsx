@@ -4,35 +4,40 @@ import { notFound, redirect } from 'next/navigation';
 import { prisma } from '../../../../infrastructures/prisma';
 import type { CourseId } from '../../../../problems/problemData';
 import { courseIdToLectureIds } from '../../../../problems/problemData';
-import { fetchUserCompletedProblems, fetchUserProblemSessionsWithUserAnswer } from '../../../../utils/fetch';
 import { getNullableSessionOnServer } from '../../../../utils/session';
 
-import { Course } from './Course';
+import { CoursePageOnClient } from './pageOnClient';
 
-const CoursePage: NextPage<{ params: { courseId: CourseId } }> = async ({ params }) => {
+type Props = { params: { courseId: CourseId } };
+
+const CoursePage: NextPage<Props> = async (props) => {
   const { session } = await getNullableSessionOnServer();
   if (!session) redirect('/auth');
 
-  const user = await prisma.user.findUnique({
-    where: {
-      id: session.superTokensUserId,
-    },
+  if (!(props.params.courseId in courseIdToLectureIds)) notFound();
+
+  const currentUserCompletedProblemSessions = await prisma.problemSession.findMany({
+    distinct: ['problemId'],
+    // eslint-disable-next-line unicorn/no-null
+    where: { userId: session.superTokensUserId, courseId: props.params.courseId, completedAt: { not: null } },
+    select: { problemId: true },
   });
-  if (!user) redirect('/auth');
+  const currentUserCompletedProblemIdSet = new Set(currentUserCompletedProblemSessions.map((s) => s.problemId));
 
-  const courseId = params.courseId;
-  if (!(courseId in courseIdToLectureIds)) notFound();
+  const currentUserProblemSessions = await prisma.problemSession.findMany({
+    orderBy: { createdAt: 'asc' },
+    select: { answers: true },
+    where: { userId: session.superTokensUserId },
+  });
 
-  const userCompletedProblems = await fetchUserCompletedProblems(user.id, courseId);
-  const userProblemSessions = await fetchUserProblemSessionsWithUserAnswer(user.id);
-  console.log('userCompletedProblems:', userCompletedProblems);
-  console.log('userProblemSessions:', userProblemSessions);
+  console.trace('currentUserCompletedProblemIdSet:', currentUserCompletedProblemIdSet.values());
+  console.trace('currentUserProblemSessions:', currentUserProblemSessions);
 
   return (
-    <Course
-      courseId={courseId}
-      userCompletedProblems={userCompletedProblems}
-      userProblemSessions={userProblemSessions}
+    <CoursePageOnClient
+      currentUserCompletedProblemIdSet={currentUserCompletedProblemIdSet}
+      currentUserProblemSessions={currentUserProblemSessions}
+      params={props.params}
     />
   );
 };

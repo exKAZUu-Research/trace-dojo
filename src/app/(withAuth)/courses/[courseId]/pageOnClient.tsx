@@ -18,30 +18,34 @@ import {
   Tooltip,
   VStack,
 } from '../../../../infrastructures/useClient/chakra';
-import type { CourseId, ProblemId } from '../../../../problems/problemData';
+import type { CourseId } from '../../../../problems/problemData';
 import { courseIdToLectureIds, courseIdToName, courseIdToProblemIdLists } from '../../../../problems/problemData';
 import type { UserProblemSessionWithUserAnswers } from '../../../../utils/fetch';
 
-export const SPECIFIED_COMPLETION_COUNT = 1;
+type Props = {
+  params: { courseId: CourseId };
+  currentUserCompletedProblemIdSet: ReadonlySet<string>;
+  currentUserProblemSessions: UserProblemSessionWithUserAnswers[];
+};
 
-export const Course: React.FC<{
-  courseId: CourseId;
-  userCompletedProblems: { problemId: string }[];
-  userProblemSessions: UserProblemSessionWithUserAnswers[];
-}> = ({ courseId, userCompletedProblems, userProblemSessions }) => {
-  const openedProblemIds = new Set(userProblemSessions.map((session) => session.problemId));
+export const CoursePageOnClient: React.FC<Props> = (props) => {
+  const openedProblemIds = new Set(props.currentUserProblemSessions.map((session) => session.problemId));
   return (
     <VStack align="stretch" spacing={6}>
-      <Heading as="h1">{courseIdToName[courseId]}</Heading>
+      <Heading as="h1">{courseIdToName[props.params.courseId]}</Heading>
 
       <SimpleGrid columnGap={4} columns={{ base: 1, lg: 2 }} rowGap={6}>
-        {courseIdToProblemIdLists[courseId].map((problemIds, lessonIndex) => {
+        {courseIdToProblemIdLists[props.params.courseId].map((problemIds, lessonIndex) => {
           const isDisabled = problemIds.filter((problemId) => openedProblemIds.has(problemId)).length === 0;
-          const completedProblemCount = problemIds.filter(
-            (problemId) => countUserCompletedProblems(userCompletedProblems, problemId) >= SPECIFIED_COMPLETION_COUNT
+
+          const completedProblemCount = problemIds.filter((problemId) =>
+            props.currentUserCompletedProblemIdSet.has(problemId)
           ).length;
           const isLessonCompleted = completedProblemCount >= problemIds.length;
-          const url = isDisabled ? '#' : `${courseId}/lectures/${courseIdToLectureIds[courseId][lessonIndex]}`;
+
+          const url = isDisabled
+            ? '#'
+            : `${props.params.courseId}/lectures/${courseIdToLectureIds[props.params.courseId][lessonIndex]}`;
 
           return (
             <Card key={lessonIndex} p={2}>
@@ -87,7 +91,3 @@ export const Course: React.FC<{
     </VStack>
   );
 };
-
-function countUserCompletedProblems(userCompletedProblems: { problemId: string }[], problemId: ProblemId): number {
-  return userCompletedProblems.filter((userCompletedProblem) => userCompletedProblem.problemId === problemId).length;
-}
