@@ -795,15 +795,25 @@ forwardTwoSteps(s.get('t'));
 s.get('t').turnRight(); // CP
 threeStepsForward(s.get('t'));
 
-function forwardTwoSteps(c) {
-  c.forward();
-  c.forward();
+function forwardTwoSteps(t) {
+  try {
+    s.enterNewScope([['t', t]]);
+    t.forward();
+    t.forward();
+  } finally {
+    s.leaveScope();
+  }
 }
 
-function threeStepsForward(c) {
-  c.forward();
-  c.forward();
-  c.forward();
+function threeStepsForward(t) {
+  try {
+    s.enterNewScope([['t', t]]);
+    t.forward();
+    t.forward();
+    t.forward();
+  } finally {
+    s.leaveScope();
+  }
 }
     `.trim(),
     java: `
@@ -833,9 +843,14 @@ forwardGivenSteps(s.get('t'), <3-4>);
 s.get('t').turnRight(); // CP
 forwardGivenSteps(s.get('t'), 2);
 
-function forwardGivenSteps(c, n) {
-for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
-    c.forward();
+function forwardGivenSteps(t, n) {
+  try {
+    s.enterNewScope([['t', t], ['n', n]]);
+    for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
+      t.forward();
+    }
+  } finally {
+    s.leaveScope();
   }
 }
     `.trim(),
@@ -863,14 +878,24 @@ forwardTwoSteps(s.get('t'));
 s.get('t').turnRight(); // CP
 forwardFourSteps(s.get('t'));
 
-function forwardTwoSteps(c) {
-  c.forward();
-  c.forward();
+function forwardTwoSteps(t) {
+  try {
+    s.enterNewScope([['t', t]]);
+    t.forward();
+    t.forward();
+  } finally {
+    s.leaveScope();
+  }
 }
 
-function forwardFourSteps(c) {
-  forwardTwoSteps(c);
-  forwardTwoSteps(c);
+function forwardFourSteps(t) {
+  try {
+    s.enterNewScope([['t', t]]);
+    forwardTwoSteps(t);
+    forwardTwoSteps(t);
+  } finally {
+    s.leaveScope();
+  }
 }
     `.trim(),
     java: `
@@ -898,14 +923,24 @@ s.set('t', new Character());
 s.set('x', double(<2-3>)); // CP
 forwardGivenSteps(s.get('t'), s.get('x'));
 
-function forwardGivenSteps(c, n) {
-  for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
-    c.forward();
+function forwardGivenSteps(t, n) {
+  try {
+    s.enterNewScope([['t', t], ['n', n]]);
+    for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
+      t.forward();
+    }
+  } finally {
+    s.leaveScope();
   }
 }
 
 function double(a) {
-  return a * 2;
+  try {
+    s.enterNewScope([['a', a]]);
+    return a * 2;
+  } finally {
+    s.leaveScope();
+  }
 }
     `.trim(),
     java: `
@@ -932,14 +967,24 @@ s.set('t', new Character());
 forwardGivenSteps(s.get('t'), add(1, 1));
 forwardGivenSteps(s.get('t'), add(1, 2));
 
-function forwardGivenSteps(c, n) {
-  for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
-    c.forward();
+function forwardGivenSteps(t, n) {
+  try {
+    s.enterNewScope([['t', t], ['n', n]]);
+    for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
+      t.forward();
+    }
+  } finally {
+    s.leaveScope();
   }
 }
 
 function add(a, b) {
-  return a + b;
+  try {
+    s.enterNewScope([['a', a], ['b', b]]);
+    return a + b;
+  } finally {
+    s.leaveScope();
+  }
 }
     `.trim(),
     java: `
@@ -973,13 +1018,23 @@ for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   s.get('t').turnLeft();
 }
 
-function forwardTwoSteps(c) {
-  c.forward();
-  c.forward();
+function forwardTwoSteps(t) {
+  try {
+    s.enterNewScope([['t', t]]);
+    t.forward();
+    t.forward();
+  } finally {
+    s.leaveScope();
+  }
 }
 
 function isEqual(a, b) {
-  return a == b;
+  try {
+    s.enterNewScope([['a', a], ['b', b]]);
+    return a == b;
+  } finally {
+    s.leaveScope();
+  }
 }
     `.trim(),
     java: `
@@ -1015,9 +1070,14 @@ for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)
   s.get('t').turnRight(); // CP
 }
 
-function forwardGivenSteps(c, n) {
-  for (s.set('j', 0); s.get('j') < n; s.set('j', s.get('j') + 1)) {
-    c.forward();
+function forwardGivenSteps(t, n) {
+  try {
+    s.enterNewScope([['t', t], ['n', n]]);
+    for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
+      t.forward();
+    }
+  } finally {
+    s.leaveScope();
   }
 }
     `.trim(),
@@ -1032,7 +1092,7 @@ public class Main {
         }
     }
     static void N歩前に進める(Turtle t, int n) {
-        for (int j = 0; j < n; j++) { // sid
+        for (int i = 0; i < n; i++) { // sid
             t.前に進む(); // sid
         }
     }
@@ -1187,8 +1247,13 @@ for (const cmd of ['ri', 'aa', 'fo']) {
 }
 
 function parse(t, c) {
-  if (c === 'fo') t.forward();
-  else if (c === 'ri') t.turnRight();
+  try {
+    s.enterNewScope([['t', t], ['c', c]]);
+    if (c === 'fo') t.forward();
+    else if (c === 'ri') t.turnRight();
+  } finally {
+    s.leaveScope();
+  }
 }
     `.trim(),
     java: `
