@@ -7,10 +7,10 @@ import { useIdleTimer } from 'react-idle-timer';
 
 import { INTERVAL_MS_OF_IDLE_TIMER } from '../../../../../../../../constants';
 import { backendTrpcReact } from '../../../../../../../../infrastructures/trpcBackend/client';
-import { Heading, Link, VStack } from '../../../../../../../../infrastructures/useClient/chakra';
+import { Heading, HStack, Link, Text, VStack } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../../../problems/generateProblem';
 import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
-import { courseIdToName, problemIdToName } from '../../../../../../../../problems/problemData';
+import { courseIdToLectureIds, courseIdToName, problemIdToName } from '../../../../../../../../problems/problemData';
 import type { ProblemType } from '../../../../../../../../types';
 
 import { CheckpointProblem, ExecutionResultProblem, StepProblem } from './Problems';
@@ -27,6 +27,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   const [problemType, setProblemType] = useState<ProblemType>(
     props.initialProblemSession.currentProblemType as ProblemType
   );
+  const lectureIndex = courseIdToLectureIds[props.params.courseId].indexOf(props.params.lectureId);
 
   const [currentTraceItemIndex, setCurrentTraceItemIndex] = useState(0);
   const [previousTraceItemIndex, setPreviousTraceItemIndex] = useState(0);
@@ -120,9 +121,20 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   return (
     <VStack align="stretch" spacing={8}>
       <VStack align="stretch" spacing={1}>
-        <Link as={NextLink} color="gray.600" fontWeight="bold" href={`/courses/${props.params.courseId}`}>
-          {courseIdToName[props.params.courseId]}
-        </Link>
+        <HStack spacing={2}>
+          <Link as={NextLink} color="gray.600" fontWeight="bold" href={`/courses/${props.params.courseId}`}>
+            {courseIdToName[props.params.courseId]}
+          </Link>
+          <Text color="gray.600">{'>'}</Text>
+          <Link
+            as={NextLink}
+            color="gray.600"
+            fontWeight="bold"
+            href={`/courses/${props.params.courseId}/lectures/${props.params.lectureId}`}
+          >
+            第{lectureIndex + 1}回
+          </Link>
+        </HStack>
         <Heading as="h1">{problemIdToName[props.params.problemId]}</Heading>
       </VStack>
 

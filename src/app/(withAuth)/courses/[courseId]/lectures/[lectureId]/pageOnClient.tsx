@@ -51,7 +51,11 @@ export const Lecture: React.FC<Props> = (props) => {
 
   return (
     <VStack align="stretch" spacing={6}>
-      <Heading as="h1">{courseIdToName[props.params.courseId]}</Heading>
+      <Heading as="h1">
+        <Link as={NextLink} href={`/courses/${props.params.courseId}`}>
+          {courseIdToName[props.params.courseId]}
+        </Link>
+      </Heading>
 
       <SimpleGrid columnGap={4} mx="auto" rowGap={6} w={{ base: '100%', lg: '80%' }}>
         <Card>
@@ -116,16 +120,16 @@ export const Lecture: React.FC<Props> = (props) => {
                         />
                       </Td>
                       <Td textOverflow="ellipsis" whiteSpace="nowrap">
-                        <VStack align="flex-start">
+                        <HStack align="center" spacing={2}>
+                          <Link as={NextLink} href={`${props.params.lectureId}/problems/${problemId}`}>
+                            {problemIdToName[problemId]}
+                          </Link>
                           {suspendedSession && (
                             <Tag colorScheme="brand" fontWeight="bold" size="sm" variant="solid">
                               挑戦中
                             </Tag>
                           )}
-                          <Link as={NextLink} href={`${props.params.lectureId}/problems/${problemId}`}>
-                            {problemIdToName[problemId]}
-                          </Link>
-                        </VStack>
+                        </HStack>
                       </Td>
                       <Td isNumeric color="gray.600">
                         {firstSession?.answers.filter((a) => !a.isCorrect).length ?? 0}
