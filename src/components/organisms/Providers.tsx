@@ -12,8 +12,6 @@ import { backendTrpcReact, backendTrpcReactClient } from '../../infrastructures/
 import { ChakraProvider, useTheme } from '../../infrastructures/useClient/chakra';
 import { theme } from '../../theme';
 
-import { ErrorBoundary } from './ErrorBoundary';
-
 ensureSuperTokensReactInit();
 
 const queryClient = new QueryClient();
@@ -22,20 +20,18 @@ export const Providers: React.FC<{ children: React.ReactNode }> = ({ children })
   setRouter(useRouter(), usePathname() || window.location.pathname);
 
   return (
-    <CacheProvider>
-      <ChakraProvider theme={theme}>
-        <ErrorBoundary>
-          <SuperTokensWrapper>
-            <backendTrpcReact.Provider client={backendTrpcReactClient} queryClient={queryClient}>
-              <QueryClientProvider client={queryClient}>
-                <PageTransitionProgressBar />
-                {children}
-              </QueryClientProvider>
-            </backendTrpcReact.Provider>
-          </SuperTokensWrapper>
-        </ErrorBoundary>
-      </ChakraProvider>
-    </CacheProvider>
+    <SuperTokensWrapper>
+      <backendTrpcReact.Provider client={backendTrpcReactClient} queryClient={queryClient}>
+        <QueryClientProvider client={queryClient}>
+          <CacheProvider>
+            <ChakraProvider theme={theme}>
+              <PageTransitionProgressBar />
+              {children}
+            </ChakraProvider>
+          </CacheProvider>
+        </QueryClientProvider>
+      </backendTrpcReact.Provider>
+    </SuperTokensWrapper>
   );
 };
 
