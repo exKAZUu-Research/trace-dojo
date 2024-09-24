@@ -1,24 +1,8 @@
 import { expect, test } from 'vitest';
 
 import { generateProblem } from '../../src/problems/generateProblem';
+import { problemIdToLanguageIdToProgram } from '../../src/problems/problemData';
 
-test.each([
-  {
-    problemId: 'straight',
-    languageId: 'java',
-  },
-  {
-    problemId: 'stepBack',
-    languageId: 'java',
-  },
-  {
-    problemId: 'turnRight',
-    languageId: 'java',
-  },
-  {
-    problemId: 'turnRightAndTurnLeft',
-    languageId: 'java',
-  },
-] as const)('Get a program by program and language ids', ({ languageId, problemId }) => {
-  expect(generateProblem(problemId, languageId, Date.now().toString())).not.toBeFalsy();
+test.each(Object.keys(problemIdToLanguageIdToProgram))('Trace the program of %s', (problemId) => {
+  expect(generateProblem(problemId, 'java', Date.now().toString())).not.toBeFalsy();
 });
