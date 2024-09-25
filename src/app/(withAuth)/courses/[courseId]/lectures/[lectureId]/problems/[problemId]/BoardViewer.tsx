@@ -103,7 +103,7 @@ export const BoardViewer: React.FC<Props> = ({
             gridColumnStart={columnIndex + 1}
             gridRowStart={ROWS - rowIndex}
             rounded="sm"
-            onClick={() => void onCellClick?.(columnIndex, rowIndex)}
+            onClick={() => onCellClick?.(columnIndex, rowIndex)}
             onContextMenu={(event) => {
               event.preventDefault();
               onCellRightClick?.(columnIndex, rowIndex);
