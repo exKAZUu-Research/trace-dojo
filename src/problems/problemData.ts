@@ -1401,7 +1401,7 @@ s.get('c').forward();
 s.get('c').forward();
 s.get('c').turnRight();
 s.get('c').forward();
-s.get('c').forward(); character at end: OK
+s.get('c').forward();
 s.get('c').forward();
 s.get('c').forward();
 `.trim(),
