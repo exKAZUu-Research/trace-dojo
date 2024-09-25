@@ -9,7 +9,7 @@ import type { CellColor, ColorChar } from '../types';
 import type { Problem } from './generateProblem';
 import type { LanguageId } from './problemData';
 
-export interface CharacterTrace {
+export interface TurtleTrace {
   x: number;
   y: number;
   /** 色を表現する1文字 */
@@ -27,7 +27,7 @@ export interface TraceItem {
 }
 
 // できる限り、可能性のある型を具体的に列挙していきたい。
-export type TraceItemVariable = Record<string, number | string | CharacterTrace>;
+export type TraceItemVariable = Record<string, number | string | TurtleTrace>;
 
 export const charToColor = {
   '#': 'black',
@@ -103,7 +103,7 @@ const dirs = ['N', 'E', 'S', 'W'];
 const dx = [0, 1, 0, -1];
 const dy = [1, 0, -1, 0];
 const board = Array.from({ length: ${GRID_ROWS} }, () => Array.from({ length: ${GRID_COLUMNS} }, () => '${EMPTY_COLOR}'));
-class Character {
+class Turtle {
   constructor(x = 0, y = 0, color = '${DEFAULT_COLOR}') {
     this.x = x;
     this.y = y;
@@ -149,7 +149,7 @@ class Character {
 function addTrace(sid) {
   const vars = { ...s.vars };
   for (const key in vars) {
-    if (vars[key] instanceof Character) vars[key] = { ...vars[key] };
+    if (vars[key] instanceof Turtle) vars[key] = { ...vars[key] };
   }
   trace.push({ sid, vars, board: board.map(r => r.join('')).join('\\n') });
 }

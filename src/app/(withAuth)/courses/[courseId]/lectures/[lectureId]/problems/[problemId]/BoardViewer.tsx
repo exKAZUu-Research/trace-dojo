@@ -11,7 +11,7 @@ import {
   TURTLE_GRAPHICS_BOARD_ROWS as ROWS,
 } from '../../../../../../../../constants';
 import { Box, Grid, GridItem, Img, keyframes } from '../../../../../../../../infrastructures/useClient/chakra';
-import type { CharacterTrace, TraceItemVariable } from '../../../../../../../../problems/traceProgram';
+import type { TurtleTrace, TraceItemVariable } from '../../../../../../../../problems/traceProgram';
 import { charToColor } from '../../../../../../../../problems/traceProgram';
 
 const CHAR_TO_BG_COLOR = {
@@ -80,7 +80,7 @@ export const BoardViewer: React.FC<Props> = ({
   );
 
   const characters = useMemo(() => {
-    const characters: (CharacterTrace & { key: string })[] = [];
+    const characters: (TurtleTrace & { key: string })[] = [];
     if (vars) {
       for (const [key, v] of Object.entries(vars)) {
         if (typeof v === 'number' || typeof v === 'string') continue;

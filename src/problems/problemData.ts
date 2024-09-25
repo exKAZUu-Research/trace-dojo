@@ -127,7 +127,7 @@ export const courseIdToLectureIds: Record<CourseId, string[]> = JSON.parse(
 export const problemIdToLanguageIdToProgram: Record<ProblemId, Record<LanguageId, string>> = {
   straight: {
     instrumented: `
-s.set('亀', new Character());
+s.set('亀', new Turtle());
 s.get('亀').forward();
 s.get('亀').forward();
     `.trim(),
@@ -143,7 +143,7 @@ public class Main {
   },
   stepBack: {
     instrumented: `
-s.set('亀', new Character());
+s.set('亀', new Turtle());
 s.get('亀').forward();
 s.get('亀').backward();
     `.trim(),
@@ -159,7 +159,7 @@ public class Main {
   },
   turnRight: {
     instrumented: `
-s.set('亀', new Character());
+s.set('亀', new Turtle());
 s.get('亀').forward();
 s.get('亀').turnRight();
 s.get('亀').forward();
@@ -177,7 +177,7 @@ public class Main {
   },
   turnRightAndTurnLeft: {
     instrumented: `
-s.set('亀', new Character());
+s.set('亀', new Turtle());
 s.get('亀').turnRight();
 s.get('亀').forward();
 s.get('亀').turnLeft();
@@ -197,7 +197,7 @@ public class Main {
   },
   square1: {
     instrumented: `
-s.set('亀', new Character());
+s.set('亀', new Turtle());
 s.get('亀').forward();
 s.get('亀').turnRight();
 s.get('亀').forward();
@@ -219,7 +219,7 @@ public class Main {
   },
   square2: {
     instrumented: `
-s.set('亀', new Character(<1-5>, <1-4>));
+s.set('亀', new Turtle(<1-5>, <1-4>));
 s.get('亀').forward();
 s.get('亀').turnRight();
 s.get('亀').forward();
@@ -242,7 +242,7 @@ public class Main {
   variable: {
     instrumented: `
 s.set('x', <1-5>);
-s.set('亀', new Character(s.get('x'), <1-5>));
+s.set('亀', new Turtle(s.get('x'), <1-5>));
 s.get('亀').forward();
  `.trim(),
     java: `
@@ -260,7 +260,7 @@ public class Main {
 s.set('x', <1-4>);
 s.set('x', s.get('x') + 1);
 s.set('y', s.get('x') + 1);
-s.set('亀', new Character(s.get('x'), s.get('y')));
+s.set('亀', new Turtle(s.get('x'), s.get('y')));
 s.get('亀').forward();
 `.trim(),
     java: `
@@ -281,7 +281,7 @@ s.set('x', <1-5>);
 s.set('x', s.get('x') - 1);
 s.set('y', s.get('x') * 2);
 s.set('y', Math.floor(s.get('y') / 3));
-s.set('亀', new Character(s.get('x'), s.get('y')));
+s.set('亀', new Turtle(s.get('x'), s.get('y')));
 s.get('亀').forward();
 `.trim(),
     java: `
@@ -299,7 +299,7 @@ public class Main {
   },
   while1: {
     instrumented: `
-s.set('亀', new Character());
+s.set('亀', new Turtle());
 s.set('i', 0);
 while (s.get('i') < <3-5>) {
   s.get('亀').forward();
@@ -321,7 +321,7 @@ public class Main {
   },
   while2: {
     instrumented: `
-s.set('亀', new Character());
+s.set('亀', new Turtle());
 s.set('i', 0);
 while (s.get('i') < <2-3>) {
   s.set('i', s.get('i') + 1);
@@ -345,7 +345,7 @@ public class Main {
   },
   for1: {
     instrumented: `
-s.set('亀', new Character());
+s.set('亀', new Turtle());
 for (s.set('i', 0); s.get('i') < <3-5>; s.set('i', s.get('i') + 1)) {
   s.get('亀').forward();
 }
@@ -363,7 +363,7 @@ public class Main {
   },
   for2: {
     instrumented: `
-s.set('亀', new Character());
+s.set('亀', new Turtle());
 s.set('i', 0);
 for (s.set('i', s.get('i')) ; s.get('i') < <2-3>; s.set('i', s.get('i'))) {
   s.get('亀').forward();
@@ -392,7 +392,7 @@ for (s.set('i', 2); s.get('i') <= <4-5>; s.set('i', s.get('i') + 1)) {
   s.set('x', s.get('x') + s.get('i'));
 }
 s.set('x', Math.floor(s.get('x') / 3));
-s.set('亀', new Character(s.get('x'), 0));
+s.set('亀', new Turtle(s.get('x'), 0));
 s.get('亀').forward();
     `.trim(),
     java: `
@@ -411,7 +411,7 @@ public class Main {
   },
   doubleLoop1: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 for (s.set('i', 0); s.get('i') < <2-3>; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < <2-3>; s.set('j', s.get('j') + 1)) {
       s.get('t').forward();
@@ -435,7 +435,7 @@ public class Main {
   },
   doubleLoop2: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 for (s.set('i', <3-4>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
   for (s.set('j', 0); s.get('j') < s.get('i'); s.set('j', s.get('j') + 1)) {
     s.get('t').forward();
@@ -459,7 +459,7 @@ public class Main {
   },
   if1: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 for (s.set('i', 0); s.get('i') < <7-9>; s.set('i', s.get('i') + 1)) {
   s.get('t').forward();
   if (s.get('i') % 3 === 2) {
@@ -483,7 +483,7 @@ public class Main {
   },
   if2: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
   s.get('t').forward();
   if (s.get('i') % 2 === 0) {
@@ -511,7 +511,7 @@ public class Main {
   },
   elseIf1: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 for (s.set('i', 0); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') < <2-3>) {
     s.get('t').forward();
@@ -537,7 +537,7 @@ public class Main {
   },
   elseIf2: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') % 4 === 0) {
     s.get('t').forward();
@@ -566,7 +566,7 @@ public class Main {
   },
   switch1: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   switch (s.get('i')) {
     case 0: case 1:
@@ -598,7 +598,7 @@ public class Main {
   },
   switch2: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   switch (s.get('i') % 4) {
     case 1:
@@ -630,7 +630,7 @@ public class Main {
   },
   break1: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 while (true) {
   if (!s.get('t').canMoveForward()) break;
   s.get('t').forward();
@@ -650,7 +650,7 @@ public class Main {
   },
   break2: {
     instrumented: `
-s.set('t', new Character(<3-4>,<3-4>));
+s.set('t', new Turtle(<3-4>,<3-4>));
 while (true) {
   if (!s.get('t').canMoveForward()) break;
   s.get('t').forward();
@@ -680,7 +680,7 @@ public class Main {
   },
   break3: {
     instrumented: `
-s.set('t', new Character(<4-6>, <4-6>));
+s.set('t', new Turtle(<4-6>, <4-6>));
 for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
   while (true) {
     s.get('t').forward();
@@ -706,7 +706,7 @@ public class Main {
   },
   continue1: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
   for (s.set('i', 0); s.get('i') < <3-5>; s.set('i', s.get('i') + 1)) {
     if (s.get('i') == 0) {
       continue;
@@ -730,7 +730,7 @@ public class Main {
   },
   continue2: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') % <2-3> == 1) {
     s.get('t').turnRight();
@@ -756,7 +756,7 @@ public class Main {
   },
   continue3: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
   for (s.set('j', s.get('i') * 4); s.get('j') < 8; s.set('j', s.get('j') + 1)) {
     if (s.get('j') % 4 == 1) {
@@ -790,7 +790,7 @@ public class Main {
   },
   method1: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 forwardTwoSteps(s.get('t'));
 s.get('t').turnRight();
 threeStepsForward(s.get('t'));
@@ -838,7 +838,7 @@ public class Main {
   },
   method2: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 forwardGivenSteps(s.get('t'), <3-4>);
 s.get('t').turnRight();
 forwardGivenSteps(s.get('t'), 2);
@@ -873,7 +873,7 @@ public class Main {
   },
   method3: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 forwardTwoSteps(s.get('t'));
 s.get('t').turnRight();
 forwardFourSteps(s.get('t'));
@@ -919,7 +919,7 @@ public class Main {
   },
   return1: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 s.set('x', double(<2-3>));
 forwardGivenSteps(s.get('t'), s.get('x'));
 
@@ -963,7 +963,7 @@ public class Main {
   },
   return2: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 forwardGivenSteps(s.get('t'), add(1, 1));
 forwardGivenSteps(s.get('t'), add(1, 2));
 
@@ -1007,7 +1007,7 @@ public class Main {
   },
   return3: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < 3; s.set('j', s.get('j') + 1)) {
     if (isEqual(s.get('i'), s.get('j')))
@@ -1063,7 +1063,7 @@ public class Main {
   },
   array1: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 s.set('arr', [2, <1-2>, <1-2>]);
 for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
   forwardGivenSteps(s.get('t'), s.get('arr')[s.get('i')]);
@@ -1101,7 +1101,7 @@ public class Main {
   },
   array2: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 s.set('arr', [0, 1, 0, 2, 0]);
 for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
   switch (s.get('arr')[s.get('i')]) {
@@ -1135,7 +1135,7 @@ public class Main {
   },
   array3: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 s.set('arr', [0, 1, 0, 2, 0]);
 for (const cmd of [0, 1, 0, 2, 0]) {
   s.set('cmd', cmd);
@@ -1170,7 +1170,7 @@ public class Main {
   },
   string1: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 s.set('s', 'frflf');
 for (s.set('i', 0); s.get('i') < s.get('s').length; s.set('i', s.get('i') + 1)) {
   switch (s.get('s').charAt(s.get('i'))) {
@@ -1204,7 +1204,7 @@ public class Main {
   },
   string2: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 s.set('s', 'frflf');
 for (const ch of 'frflf') {
   s.set('ch', ch);
@@ -1239,7 +1239,7 @@ public class Main {
   },
   string3: {
     instrumented: `
-s.set('t', new Character());
+s.set('t', new Turtle());
 s.set('cmds', ['ri', 'aa', 'fo']);
 for (const cmd of ['ri', 'aa', 'fo']) {
   s.set('cmd', cmd);
@@ -1276,7 +1276,7 @@ public class Main {
   },
   test1: {
     instrumented: `
-s.set('c', new Character());
+s.set('c', new Turtle());
 s.get('c').forward();
 s.get('c').forward();
 s.get('c').forward();
@@ -1287,7 +1287,7 @@ import net.exkazuu.Character;
 
 public class Main {
   public static void main(String[] args) {
-    Character c = new Character(); // sid
+    Character c = new Turtle(); // sid
     c.forward(); // sid
     c.forward(); // sid
     c.forward(); // sid
@@ -1297,7 +1297,7 @@ public class Main {
   },
   test2: {
     instrumented: `
-s.set('c', new Character());
+s.set('c', new Turtle());
 for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
   s.get('c').forward();
   s.get('c').forward();
@@ -1309,7 +1309,7 @@ import net.exkazuu.Character;
 
 public class Main {
   public static void main(String[] args) {
-    Character c = new Character(); // sid
+    Character c = new Turtle(); // sid
     for (let i = 0; i < 2; i++) { // sid
       c.forward(); // sid
       c.forward(); // sid
@@ -1360,13 +1360,13 @@ public class Main {
   },
   test4: {
     instrumented: `
-s.set('c1', new Character());
+s.set('c1', new Turtle());
 s.get('c1').forward();
 s.get('c1').turnRight();
 s.set('i', 0);
 s.get('c1').forward();
 
-s.set('c2', new Character(2, 3, 'G'));
+s.set('c2', new Turtle(2, 3, 'G'));
 s.get('c2').forward();
 s.set('foo', 'あいうえお');
 s.set('bar', <1-100>);
@@ -1377,13 +1377,13 @@ s.get('c2').forward();
     java: `
 public class Main {
   public static void main(String[] args) {
-    Character c1 = new Character(); // sid
+    Character c1 = new Turtle(); // sid
     c1.forward(); // sid
     c1.turnRight(); // sid
     int i = 0; // sid
     c1.forward(); // sid
 
-    Character c2 = new Character(2, 3, "green"); // sid
+    Character c2 = new Turtle(2, 3, "green"); // sid
     c2.forward(); // sid
     String foo = "あいうえお"; // sid
     int bar = <1-100>; // sid
@@ -1396,7 +1396,7 @@ public class Main {
   },
   test5: {
     instrumented: `
-s.set('c', new Character());
+s.set('c', new Turtle());
 s.get('c').forward();
 s.get('c').forward();
 s.get('c').turnRight();
@@ -1408,7 +1408,7 @@ s.get('c').forward();
     java: `
 public class Straight {
   public static void main(String[] args) {
-    var c = new Character(); // sid
+    var c = new Turtle(); // sid
     c.forward(); // sid
     c.forward(); // sid
     c.turnRight(); // sid

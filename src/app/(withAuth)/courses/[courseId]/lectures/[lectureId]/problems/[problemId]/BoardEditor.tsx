@@ -1,5 +1,3 @@
-'use client';
-
 import fastDeepEqual from 'fast-deep-equal';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { MdOutlineDelete, MdTurnLeft, MdTurnRight } from 'react-icons/md';
@@ -22,12 +20,12 @@ import {
   VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../../../problems/generateProblem';
-import { type CharacterTrace, type TraceItem } from '../../../../../../../../problems/traceProgram';
+import { type TurtleTrace, type TraceItem } from '../../../../../../../../problems/traceProgram';
 import type { ColorChar, SelectedCell } from '../../../../../../../../types';
 
 import { BoardViewer } from './BoardViewer';
 
-const CHARACTER_DIRS = ['N', 'E', 'S', 'W'];
+const DIRECTIONS = ['N', 'E', 'S', 'W'];
 const DX = [0, 1, 0, -1];
 const DY = [1, 0, -1, 0];
 
@@ -46,8 +44,8 @@ export interface TurtleGraphicsHandle {
 export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
   ({ currentTraceItem, isEditable = false, previousTraceItem, problem }, ref) => {
     const [actualBoard, setActualBoard] = useState<ColorChar[][]>([]);
-    const [characters, setCharacters] = useState<(CharacterTrace & { key: string })[]>([]);
-    const [selectedCharacter, setSelectedCharacter] = useState<CharacterTrace & { key: string }>();
+    const [characters, setCharacters] = useState<(TurtleTrace & { key: string })[]>([]);
+    const [selectedCharacter, setSelectedCharacter] = useState<TurtleTrace & { key: string }>();
     const [selectedCell, setSelectedCell] = useState<SelectedCell>();
 
     const initialize = useCallback((): void => {
@@ -88,7 +86,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
       initialize();
     }, [previousTraceItem, initialize, problem]);
 
-    const updateCharacters = (character: CharacterTrace & { key: string }): void => {
+    const updateCharacters = (character: TurtleTrace & { key: string }): void => {
       setSelectedCharacter(character);
       setCharacters((prevCharacters) =>
         prevCharacters.map((prevCharacter) => {
@@ -137,7 +135,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
       return fastDeepEqual(expectedTurtles, actualTurtles) && fastDeepEqual(expectedBoard, actualBoard);
     };
 
-    const handleClickCharacter = (character: CharacterTrace & { key: string }): void => {
+    const handleClickCharacter = (character: TurtleTrace & { key: string }): void => {
       setSelectedCell(undefined);
       setSelectedCharacter(character);
     };
@@ -145,13 +143,12 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     const handleClickCharacterMoveForwardButton = (): void => {
       if (!selectedCharacter) return;
 
-      const index = CHARACTER_DIRS.indexOf(selectedCharacter.dir);
+      const index = DIRECTIONS.indexOf(selectedCharacter.dir);
       const updatedX = selectedCharacter.x + DX[index];
       const updatedY = selectedCharacter.y + DY[index];
 
-      if (updatedX < 0 || COLUMNS <= updatedX || updatedY < 0 || ROWS <= updatedY) {
-        return;
-      }
+      if (updatedX < 0 || COLUMNS <= updatedX || updatedY < 0 || ROWS <= updatedY) return;
+      if (checkNoTurtle(characters, updatedX, updatedY)) return;
 
       const updatedCharacter = { ...selectedCharacter, x: updatedX, y: updatedY };
       updateCellColor(updatedCharacter.color as ColorChar, updatedCharacter.x, updatedCharacter.y);
@@ -161,13 +158,12 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     const handleClickCharacterMoveBackwardButton = (): void => {
       if (!selectedCharacter) return;
 
-      const index = CHARACTER_DIRS.indexOf(selectedCharacter.dir);
+      const index = DIRECTIONS.indexOf(selectedCharacter.dir);
       const updatedX = selectedCharacter.x - DX[index];
       const updatedY = selectedCharacter.y - DY[index];
 
-      if (updatedX < 0 || COLUMNS <= updatedX || updatedY < 0 || ROWS <= updatedY) {
-        return;
-      }
+      if (updatedX < 0 || COLUMNS <= updatedX || updatedY < 0 || ROWS <= updatedY) return;
+      if (checkNoTurtle(characters, updatedX, updatedY)) return;
 
       const updatedCharacter = { ...selectedCharacter, x: updatedX, y: updatedY };
       updateCellColor(updatedCharacter.color as ColorChar, updatedCharacter.x, updatedCharacter.y);
@@ -179,7 +175,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
       const updatedCharacter = {
         ...selectedCharacter,
-        dir: CHARACTER_DIRS[(CHARACTER_DIRS.indexOf(selectedCharacter.dir) + 3) % 4],
+        dir: DIRECTIONS[(DIRECTIONS.indexOf(selectedCharacter.dir) + 3) % 4],
       };
       updateCharacters(updatedCharacter);
     };
@@ -189,7 +185,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
       const updatedCharacter = {
         ...selectedCharacter,
-        dir: CHARACTER_DIRS[(CHARACTER_DIRS.indexOf(selectedCharacter.dir) + 1) % 4],
+        dir: DIRECTIONS[(DIRECTIONS.indexOf(selectedCharacter.dir) + 1) % 4],
       };
       updateCharacters(updatedCharacter);
     };
@@ -198,6 +194,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
     const handleAddCharacterButton = (): void => {
       if (!selectedCell) return;
+      if (checkNoTurtle(characters, selectedCell.x, selectedCell.y)) return;
 
       const newTurtle = {
         key: `亀${autoIncrementedNextCharacterIdRef.current}`,
@@ -214,7 +211,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
       setSelectedCell(undefined);
     };
 
-    const handleRemoveCharacterButton = (character: CharacterTrace): void => {
+    const handleRemoveCharacterButton = (character: TurtleTrace): void => {
       setCharacters((prevCharacters) => prevCharacters.filter((prevCharacter) => prevCharacter !== character));
       setSelectedCharacter(undefined);
     };
@@ -348,5 +345,9 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     );
   }
 );
+
+function checkNoTurtle(turtlesTraces: TurtleTrace[], x: number, y: number): boolean {
+  return turtlesTraces.some((char) => char.x === x && char.y === y);
+}
 
 BoardEditor.displayName = 'BoardEditor';
