@@ -17,9 +17,8 @@ export const backendRouter = router({
     .input(
       z.object({
         id: z.number().int().positive(),
-        currentProblemType: z.string().min(1).optional(),
-        currentTraceItemIndex: z.number().int().nonnegative().optional(),
-        previousTraceItemIndex: z.number().int().nonnegative().optional(),
+        problemType: z.string().min(1).optional(),
+        traceItemIndex: z.number().int().nonnegative().optional(),
         incrementalElapsedMilliseconds: z.number().nonnegative().optional(),
         completedAt: z.date().optional(),
       })
@@ -28,7 +27,9 @@ export const backendRouter = router({
       const problemSession = await prisma.problemSession.update({
         where: { id },
         data: {
-          elapsedMilliseconds: { increment: incrementalElapsedMilliseconds },
+          ...(incrementalElapsedMilliseconds
+            ? { elapsedMilliseconds: { increment: incrementalElapsedMilliseconds } }
+            : {}),
           ...data,
         },
       });

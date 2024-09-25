@@ -34,9 +34,8 @@ const ProblemPage: NextPage<Props> = async (props) => {
         lectureId: props.params.lectureId,
         problemId: props.params.problemId,
         problemVariablesSeed: Date.now().toString(),
-        currentProblemType: 'executionResult',
-        currentTraceItemIndex: 0,
-        previousTraceItemIndex: 0,
+        problemType: 'executionResult',
+        traceItemIndex: 0,
       },
     });
   }
