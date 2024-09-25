@@ -1,5 +1,3 @@
-'use client';
-
 import type { BoxProps } from '@chakra-ui/react';
 import React from 'react';
 import { Prism } from 'react-syntax-highlighter';

@@ -43,7 +43,7 @@ export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
         <Table>
           <Thead>
             <Tr>
-              <Th>タートル名</Th>
+              <Th>タートルの変数名</Th>
               <Th w="0">線の色</Th>
               <Th w="0">向き</Th>
             </Tr>

@@ -1,7 +1,7 @@
-'use client';
-
-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import fastDeepEqual from 'fast-deep-equal';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
 import { MdOutlineDelete, MdTurnLeft, MdTurnRight } from 'react-icons/md';
+import { useImmer } from 'use-immer';
 
 import {
   TURTLE_GRAPHICS_BOARD_COLUMNS as COLUMNS,
@@ -21,20 +21,19 @@ import {
   VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../../../problems/generateProblem';
-import { type CharacterTrace, type TraceItem } from '../../../../../../../../problems/traceProgram';
+import { isTurtleTrace, type TurtleTrace } from '../../../../../../../../problems/traceProgram';
 import type { ColorChar, SelectedCell } from '../../../../../../../../types';
 
 import { BoardViewer } from './BoardViewer';
 
-const CHARACTER_DIRS = ['N', 'E', 'S', 'W'];
+const DIRECTIONS = ['N', 'E', 'S', 'W'];
 const DX = [0, 1, 0, -1];
 const DY = [1, 0, -1, 0];
 
 interface TurtleGraphicsProps {
-  isEditable?: boolean;
   problem: Problem;
-  currentTraceItem?: TraceItem;
-  previousTraceItem?: TraceItem;
+  currentTraceItemIndex: number;
+  previousTraceItemIndex: number;
 }
 
 export interface TurtleGraphicsHandle {
@@ -43,202 +42,122 @@ export interface TurtleGraphicsHandle {
 }
 
 export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
-  ({ currentTraceItem, isEditable = false, previousTraceItem, problem }, ref) => {
-    const [board, setBoard] = useState<ColorChar[][]>([]);
-    const [characters, setCharacters] = useState<(CharacterTrace & { key: string })[]>([]);
-    const [selectedCharacter, setSelectedCharacter] = useState<CharacterTrace & { key: string }>();
+  ({ currentTraceItemIndex, previousTraceItemIndex, problem }, ref) => {
+    const [board, updateBoard] = useImmer<ColorChar[][]>([]);
+    const [turtles, updateTurtles] = useImmer<TurtleTrace[]>([]);
     const [selectedCell, setSelectedCell] = useState<SelectedCell>();
+    const selectedTurtle = turtles.find((char) => char.x === selectedCell?.x && char.y === selectedCell?.y);
+    const previousTraceItem = problem.traceItems[previousTraceItemIndex];
+    const currentTraceItem = problem.traceItems[currentTraceItemIndex];
 
-    const initialize = useCallback((): void => {
-      console.log('initialize:', problem, previousTraceItem);
-      if (!problem || !previousTraceItem) return;
-
-      const initBoard = previousTraceItem.board
-        .trim()
-        .split('\n')
-        .filter((line) => line.trim() !== '')
-        .map((line) => [...line.trim()]);
-
-      const variables = previousTraceItem.vars;
-      const initCharacters = [];
-      const initOtherVars = [];
-      for (const key in variables) {
-        const value = variables[key];
-        if (typeof value === 'string' || typeof value === 'number') {
-          initOtherVars.push(value);
-        } else if (value.dir && value.color) {
-          initCharacters.push({ ...value, key });
-        }
-      }
-
-      setBoard(initBoard as ColorChar[][]);
-      setCharacters(initCharacters || []);
-      setSelectedCharacter(undefined);
-      setSelectedCell(undefined);
-    }, [previousTraceItem, problem]);
+    const initialize = useCallback(
+      (keepSelectedCell = false): void => {
+        console.log('initialize:', problem, previousTraceItem);
+        const initialBoard = parseBoard(previousTraceItem.board);
+        updateBoard(initialBoard);
+        updateTurtles(Object.values(previousTraceItem.vars ?? {}).filter(isTurtleTrace));
+        if (!keepSelectedCell) setSelectedCell(undefined);
+      },
+      [previousTraceItem, problem]
+    );
 
     useImperativeHandle(ref, () => ({
-      // 親コンポーネントから関数を呼び出せるようにする
       initialize,
       isCorrect,
     }));
 
     useEffect(() => {
-      initialize();
-    }, [previousTraceItem, initialize, problem]);
+      initialize(previousTraceItemIndex >= 1);
+    }, [currentTraceItemIndex, problem]);
 
-    const updateCharacters = (character: CharacterTrace & { key: string }): void => {
-      setSelectedCharacter(character);
-      setCharacters((prevCharacters) =>
-        prevCharacters.map((prevCharacter) => {
-          if (prevCharacter === selectedCharacter) {
-            return character;
-          }
-          return prevCharacter;
-        })
-      );
+    const updateTurtle = (currentTurtle: TurtleTrace, newTurtle: Partial<TurtleTrace>): void => {
+      updateTurtles((draft) => {
+        const index = draft.findIndex((t) => t.x === currentTurtle.x && t.y === currentTurtle.y);
+        if (index !== -1) {
+          draft[index] = { ...currentTurtle, ...newTurtle };
+        }
+      });
     };
 
     const updateCellColor = (color: ColorChar, columnIndex: number, rowIndex: number): void => {
-      setBoard((prevBoard) => {
-        const newBoard = prevBoard.map((row) => [...row]);
-        newBoard[rowIndex][columnIndex] = color;
-        return newBoard;
+      updateBoard((draft) => {
+        draft[rowIndex][columnIndex] = color;
       });
     };
 
     const isCorrect = (): boolean => {
       if (!currentTraceItem) return false;
 
-      const variables = currentTraceItem.vars;
-      const correctCharacters = [];
-      for (const key in variables) {
-        const value = variables[key];
-        if (typeof value !== 'string' && typeof value !== 'number' && value.dir && value.color) {
-          correctCharacters.push(value);
-        }
-      }
-
-      const correctBoard = currentTraceItem.board
-        .trim()
-        .split('\n')
-        .filter((line) => line.trim() !== '')
-        .map((line) => [...line.trim()]);
-
-      const userCharacters = characters.map(({ key, ...rest }) => rest);
-
-      // TODO: remove this later
-      console.log('correctCharacters', correctCharacters);
-      console.log('userCharacters', userCharacters);
-      console.log('correctBoard', correctBoard);
-      console.log('userBoard', board);
-
-      // TODO: Implement a compare function without using JSON.
-      return (
-        JSON.stringify(correctCharacters) === JSON.stringify(userCharacters) &&
-        JSON.stringify(correctBoard) === JSON.stringify(board)
-      );
+      const expectedTurtles = Object.values(currentTraceItem.vars ?? {}).filter(isTurtleTrace);
+      const expectedBoard = parseBoard(currentTraceItem.board);
+      return fastDeepEqual(expectedTurtles, turtles) && fastDeepEqual(expectedBoard, board);
     };
 
-    const handleClickCharacter = (character: CharacterTrace & { key: string }): void => {
-      setSelectedCell(undefined);
-      setSelectedCharacter(character);
+    const handleClickTurtle = (turtle: TurtleTrace): void => {
+      setSelectedCell({ x: turtle.x, y: turtle.y });
     };
 
-    const handleClickCharacterMoveForwardButton = (): void => {
-      if (!selectedCharacter) return;
+    const handleMoveTurtle = (forward: boolean): void => {
+      if (!selectedTurtle) return;
 
-      const index = CHARACTER_DIRS.indexOf(selectedCharacter.dir);
-      const updatedX = selectedCharacter.x + DX[index];
-      const updatedY = selectedCharacter.y + DY[index];
+      const index = DIRECTIONS.indexOf(selectedTurtle.dir);
+      const multiplier = forward ? 1 : -1;
+      const newX = selectedTurtle.x + DX[index] * multiplier;
+      const newY = selectedTurtle.y + DY[index] * multiplier;
+      if (!canPutTurtle(turtles, newX, newY)) return;
 
-      if (updatedX < 0 || COLUMNS <= updatedX || updatedY < 0 || ROWS <= updatedY) {
-        return;
-      }
-
-      const updatedCharacter = { ...selectedCharacter, x: updatedX, y: updatedY };
-      updateCellColor(updatedCharacter.color as ColorChar, updatedCharacter.x, updatedCharacter.y);
-      updateCharacters(updatedCharacter);
+      updateCellColor(selectedTurtle.color as ColorChar, newX, newY);
+      updateTurtle(selectedTurtle, { x: newX, y: newY });
+      setSelectedCell({ x: newX, y: newY });
     };
 
-    const handleClickCharacterMoveBackwardButton = (): void => {
-      if (!selectedCharacter) return;
+    const handleTurnTurtle = (left: boolean): void => {
+      if (!selectedTurtle) return;
 
-      const index = CHARACTER_DIRS.indexOf(selectedCharacter.dir);
-      const updatedX = selectedCharacter.x - DX[index];
-      const updatedY = selectedCharacter.y - DY[index];
-
-      if (updatedX < 0 || COLUMNS <= updatedX || updatedY < 0 || ROWS <= updatedY) {
-        return;
-      }
-
-      const updatedCharacter = { ...selectedCharacter, x: updatedX, y: updatedY };
-      updateCellColor(updatedCharacter.color as ColorChar, updatedCharacter.x, updatedCharacter.y);
-      updateCharacters(updatedCharacter);
+      const directionChange = left ? 3 : 1;
+      updateTurtle(selectedTurtle, {
+        dir: DIRECTIONS[(DIRECTIONS.indexOf(selectedTurtle.dir) + directionChange) % 4],
+      });
     };
-
-    const handleClickCharacterTurnLeftButton = (): void => {
-      if (!selectedCharacter) return;
-
-      const updatedCharacter = {
-        ...selectedCharacter,
-        dir: CHARACTER_DIRS[(CHARACTER_DIRS.indexOf(selectedCharacter.dir) + 3) % 4],
-      };
-      updateCharacters(updatedCharacter);
-    };
-
-    const handleClickCharacterTurnRightButton = (): void => {
-      if (!selectedCharacter) return;
-
-      const updatedCharacter = {
-        ...selectedCharacter,
-        dir: CHARACTER_DIRS[(CHARACTER_DIRS.indexOf(selectedCharacter.dir) + 1) % 4],
-      };
-      updateCharacters(updatedCharacter);
-    };
-
-    const autoIncrementedNextCharacterIdRef = useRef(1);
 
     const handleAddCharacterButton = (): void => {
       if (!selectedCell) return;
+      if (!canPutTurtle(turtles, selectedCell.x, selectedCell.y)) return;
 
       const newTurtle = {
-        key: `亀${autoIncrementedNextCharacterIdRef.current}`,
         x: selectedCell.x,
         y: selectedCell.y,
         color: DEFAULT_COLOR,
         dir: 'N',
       };
-      autoIncrementedNextCharacterIdRef.current++;
-
-      setCharacters((prevCharacters) => [...prevCharacters, newTurtle]);
+      updateTurtles((draft) => {
+        draft.push(newTurtle);
+      });
       updateCellColor(newTurtle.color as ColorChar, newTurtle.x, newTurtle.y);
-      setSelectedCharacter(newTurtle);
+    };
+
+    const handleRemoveCharacterButton = (): void => {
+      if (!selectedCell) return;
+
+      updateTurtles((draft) => {
+        const index = draft.findIndex((t) => t.x === selectedCell.x && t.y === selectedCell.y);
+        if (index !== -1) {
+          draft.splice(index, 1);
+        }
+      });
       setSelectedCell(undefined);
     };
 
-    const handleRemoveCharacterButton = (character: CharacterTrace): void => {
-      setCharacters((prevCharacters) => prevCharacters.filter((prevCharacter) => prevCharacter !== character));
-      setSelectedCharacter(undefined);
-    };
-
-    const handleClickCell = (x: number, y: number): void => {
-      if (!isEditable) return;
-
-      setSelectedCharacter(undefined);
+    const onCellClick = (x: number, y: number): void => {
       setSelectedCell({ x, y });
     };
 
-    const handleContextMenu = (columnIndex: number, rowIndex: number): void => {
-      handleClickCell(columnIndex, rowIndex);
-      updateCellColor('.', columnIndex, rowIndex);
+    const onCellRightClick = (x: number, y: number): void => {
+      onCellClick(x, y);
+      updateCellColor('.', x, y);
     };
 
-    const selectedPosition = selectedCell
-      ? { x: selectedCell.x, y: selectedCell.y }
-      : selectedCharacter
-        ? { x: selectedCharacter.x, y: selectedCharacter.y }
-        : undefined;
+    const selectedPosition = selectedCell ? { x: selectedCell.x, y: selectedCell.y } : undefined;
 
     return (
       <HStack align="stretch" bgColor="gray.50" overflow="hidden" rounded="md">
@@ -247,12 +166,12 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
             enableTransitions
             board={board.map((cells) => cells.join('')).join('\n')}
             focusedCell={selectedPosition}
-            vars={Object.fromEntries(characters.map((character) => [character.key, character]))}
-            onCellClick={handleClickCell}
-            onCellRightClick={handleContextMenu}
-            onCharacterClick={(key) => {
-              const c = characters.find((c) => c.key === key);
-              if (c) handleClickCharacter(c);
+            turtles={turtles}
+            onCellClick={onCellClick}
+            onCellRightClick={onCellRightClick}
+            onTurtleClick={(x, y) => {
+              const turtle = turtles.find((t) => t.x === x && t.y === y);
+              if (turtle) handleClickTurtle(turtle);
             }}
           />
         </Center>
@@ -274,9 +193,8 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
           <VStack align="stretch">
             <Heading size="sm">選択したタートル</Heading>
-            {selectedCharacter ? (
+            {selectedTurtle ? (
               <>
-                <div>{selectedCharacter.key}</div>
                 <Grid gap={2} gridTemplateColumns="repeat(3, auto)">
                   <Button
                     colorScheme="brand"
@@ -284,7 +202,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                     gridRowStart={1}
                     size="sm"
                     variant="outline"
-                    onClick={() => void handleClickCharacterMoveForwardButton()}
+                    onClick={() => handleMoveTurtle(true)}
                   >
                     前に進む
                   </Button>
@@ -294,7 +212,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                     gridRowStart={2}
                     size="sm"
                     variant="outline"
-                    onClick={() => void handleClickCharacterMoveBackwardButton()}
+                    onClick={() => handleMoveTurtle(false)}
                   >
                     後に戻る
                   </Button>
@@ -306,7 +224,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                     icon={<Icon as={MdTurnLeft} />}
                     size="sm"
                     variant="outline"
-                    onClick={() => void handleClickCharacterTurnLeftButton()}
+                    onClick={() => handleTurnTurtle(true)}
                   />
                   <IconButton
                     aria-label="Turn right"
@@ -316,7 +234,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                     icon={<Icon as={MdTurnRight} />}
                     size="sm"
                     variant="outline"
-                    onClick={() => void handleClickCharacterTurnRightButton()}
+                    onClick={() => handleTurnTurtle(false)}
                   />
                 </Grid>
                 <HStack justify="flex-end">
@@ -325,7 +243,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                     leftIcon={<Icon as={MdOutlineDelete} />}
                     size="sm"
                     variant="outline"
-                    onClick={() => void handleRemoveCharacterButton(selectedCharacter)}
+                    onClick={() => handleRemoveCharacterButton()}
                   >
                     削除
                   </Button>
@@ -334,8 +252,8 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
             ) : (
               <Box color="gray.600">なし</Box>
             )}
-            {!selectedCharacter && selectedPosition && (
-              <Button colorScheme="brand" size="sm" variant="outline" onClick={() => void handleAddCharacterButton()}>
+            {!selectedTurtle && selectedPosition && (
+              <Button colorScheme="brand" size="sm" variant="outline" onClick={() => handleAddCharacterButton()}>
                 タートルを配置
               </Button>
             )}
@@ -351,5 +269,17 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     );
   }
 );
+
+function canPutTurtle(turtlesTraces: TurtleTrace[], x: number, y: number): boolean {
+  return 0 <= x && x < COLUMNS && 0 <= y && y < ROWS && !turtlesTraces.some((t) => t.x === x && t.y === y);
+}
+
+function parseBoard(boardString: string): ColorChar[][] {
+  return boardString
+    .trim()
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => [...line.trim()]) as ColorChar[][];
+}
 
 BoardEditor.displayName = 'BoardEditor';
