@@ -221,6 +221,7 @@ const ProblemComponent: React.FC<ProblemProps & { type: 'executionResult' | 'ste
               <VStack align="stretch" as={Card} bg="gray.50" p={5} spacing={6}>
                 <VStack align="stretch">
                   <Heading size="md">
+                    参考：
                     <Box as="span" bgColor="orange.100" px={0.5} rounded="sm">
                       {problem.sidToLineIndex.get(problem.traceItems[previousTraceItemIndex]?.sid)}行目
                     </Box>
