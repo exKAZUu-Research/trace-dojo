@@ -1,4 +1,4 @@
-import { Random } from '../app/lib/random';
+import { Random } from '../app/utils/random';
 
 import type { LanguageId, ProblemId } from './problemData';
 import { problemIdToLanguageIdToProgram } from './problemData';
@@ -24,11 +24,6 @@ export type Problem = {
    * The mapping from statement ID to line index.
    */
   sidToLineIndex: Map<number, number>;
-
-  /**
-   * The statement IDs of the checkpoints.
-   */
-  checkpointSids: number[];
 };
 
 const randomNumberRegex = /<(\d+)-(\d+)>/g;

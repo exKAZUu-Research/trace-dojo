@@ -20,14 +20,14 @@ export interface CharacterTrace {
 
 export interface TraceItem {
   sid: number;
-  vars: TraceItemVar;
+  vars: TraceItemVariable;
   board: string;
   /** Pythonなどの拡張for文しかない言語において、削除すべき更新式か否か。 */
   last?: boolean;
 }
 
 // できる限り、可能性のある型を具体的に列挙していきたい。
-export type TraceItemVar = Record<string, number | string | CharacterTrace>;
+export type TraceItemVariable = Record<string, number | string | CharacterTrace>;
 
 export const charToColor = {
   '#': 'black',
@@ -51,8 +51,6 @@ export function traceProgram(instrumented: string, rawDisplayProgram: string, la
     throw new Error('Instrumented program MUST NOT contain variable declarations.');
   }
 
-  const checkpointSids: number[] = [];
-
   let statementId = 1;
   const modifiedCodeLines = [];
   for (const line of instrumented.split('\n')) {
@@ -66,11 +64,7 @@ export function traceProgram(instrumented: string, rawDisplayProgram: string, la
           const delimiter = args === '' ? '' : ', ';
           return `.${methodName}(${args}${delimiter}${statementId})${tail}`;
         }
-      )
-      .replace(/\/\/\s*CP.*/, () => {
-        checkpointSids.push(statementId);
-        return '';
-      });
+      );
     if (replaced) statementId++;
     modifiedCodeLines.push(newLine);
   }
@@ -170,7 +164,6 @@ s = new Scope();
 ${modifiedCode.trim()}
 trace;
 `;
-  console.log(executableCode); // TODO: remove this later
 
   let trace = eval(executableCode) as TraceItem[];
   if ((languageId as string) === 'python') {
@@ -194,5 +187,5 @@ trace;
     refinedLines.push(refinedLine);
   }
 
-  return { languageId, displayProgram: refinedLines.join('\n'), traceItems: trace, sidToLineIndex, checkpointSids };
+  return { languageId, displayProgram: refinedLines.join('\n'), traceItems: trace, sidToLineIndex };
 }

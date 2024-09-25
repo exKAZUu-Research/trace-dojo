@@ -12,10 +12,10 @@ import {
   Thead,
   Tr,
 } from '../../../../../../../../infrastructures/useClient/chakra';
-import { charToColor, type TraceItemVar } from '../../../../../../../../problems/traceProgram';
+import { charToColor, type TraceItemVariable } from '../../../../../../../../problems/traceProgram';
 
 interface VariablesProps {
-  traceItemVars?: TraceItemVar;
+  traceItemVars?: TraceItemVariable;
 }
 
 export const dirCharToJapanese = {

@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers.js';
 
-import { SUPERTOKENS_ACCESS_TOKEN_COOKIE_NAME } from './constants';
+import { SUPERTOKENS_ACCESS_TOKEN_COOKIE_NAME } from '../constants';
+
 import type { SessionOnNode } from './sessionOnNode';
 import { getSessionOnNode } from './sessionOnNode';
 

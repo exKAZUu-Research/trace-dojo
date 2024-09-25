@@ -14,4 +14,4 @@ export type SelectedCell = {
   y: number;
 };
 
-export type ProblemType = 'executionResult' | 'checkpoint' | 'step';
+export type ProblemType = 'executionResult' | 'step';

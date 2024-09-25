@@ -128,7 +128,7 @@ export const problemIdToLanguageIdToProgram: Record<ProblemId, Record<LanguageId
   straight: {
     instrumented: `
 s.set('亀', new Character());
-s.get('亀').forward(); // CP
+s.get('亀').forward();
 s.get('亀').forward();
     `.trim(),
     java: `
@@ -144,7 +144,7 @@ public class Main {
   stepBack: {
     instrumented: `
 s.set('亀', new Character());
-s.get('亀').forward(); // CP
+s.get('亀').forward();
 s.get('亀').backward();
     `.trim(),
     java: `
@@ -161,7 +161,7 @@ public class Main {
     instrumented: `
 s.set('亀', new Character());
 s.get('亀').forward();
-s.get('亀').turnRight(); // CP
+s.get('亀').turnRight();
 s.get('亀').forward();
     `.trim(),
     java: `
@@ -180,7 +180,7 @@ public class Main {
 s.set('亀', new Character());
 s.get('亀').turnRight();
 s.get('亀').forward();
-s.get('亀').turnLeft(); // CP
+s.get('亀').turnLeft();
 s.get('亀').forward();
     `.trim(),
     java: `
@@ -200,7 +200,7 @@ public class Main {
 s.set('亀', new Character());
 s.get('亀').forward();
 s.get('亀').turnRight();
-s.get('亀').forward(); // CP
+s.get('亀').forward();
 s.get('亀').turnRight();
 s.get('亀').forward();
 `.trim(),
@@ -222,7 +222,7 @@ public class Main {
 s.set('亀', new Character(<1-5>, <1-4>));
 s.get('亀').forward();
 s.get('亀').turnRight();
-s.get('亀').forward(); // CP
+s.get('亀').forward();
 s.get('亀').turnRight();
 s.get('亀').forward();
 `.trim(),
@@ -242,7 +242,7 @@ public class Main {
   variable: {
     instrumented: `
 s.set('x', <1-5>);
-s.set('亀', new Character(s.get('x'), <1-5>)); // CP
+s.set('亀', new Character(s.get('x'), <1-5>));
 s.get('亀').forward();
  `.trim(),
     java: `
@@ -260,7 +260,7 @@ public class Main {
 s.set('x', <1-4>);
 s.set('x', s.get('x') + 1);
 s.set('y', s.get('x') + 1);
-s.set('亀', new Character(s.get('x'), s.get('y'))); // CP
+s.set('亀', new Character(s.get('x'), s.get('y')));
 s.get('亀').forward();
 `.trim(),
     java: `
@@ -281,7 +281,7 @@ s.set('x', <1-5>);
 s.set('x', s.get('x') - 1);
 s.set('y', s.get('x') * 2);
 s.set('y', Math.floor(s.get('y') / 3));
-s.set('亀', new Character(s.get('x'), s.get('y'))); // CP
+s.set('亀', new Character(s.get('x'), s.get('y')));
 s.get('亀').forward();
 `.trim(),
     java: `
@@ -302,7 +302,7 @@ public class Main {
 s.set('亀', new Character());
 s.set('i', 0);
 while (s.get('i') < <3-5>) {
-  s.get('亀').forward(); // CP
+  s.get('亀').forward();
   s.set('i', s.get('i') + 1);
 }
     `.trim(),
@@ -325,7 +325,7 @@ s.set('亀', new Character());
 s.set('i', 0);
 while (s.get('i') < <2-3>) {
   s.set('i', s.get('i') + 1);
-  s.get('亀').forward(); // CP
+  s.get('亀').forward();
   s.get('亀').turnRight();
 }
     `.trim(),
@@ -347,7 +347,7 @@ public class Main {
     instrumented: `
 s.set('亀', new Character());
 for (s.set('i', 0); s.get('i') < <3-5>; s.set('i', s.get('i') + 1)) {
-  s.get('亀').forward(); // CP
+  s.get('亀').forward();
 }
        `.trim(),
     java: `
@@ -366,7 +366,7 @@ public class Main {
 s.set('亀', new Character());
 s.set('i', 0);
 for (s.set('i', s.get('i')) ; s.get('i') < <2-3>; s.set('i', s.get('i'))) {
-  s.get('亀').forward(); // CP
+  s.get('亀').forward();
   s.get('亀').turnRight();
   s.set('i', s.get('i') + 1);
 }
@@ -392,7 +392,7 @@ for (s.set('i', 2); s.get('i') <= <4-5>; s.set('i', s.get('i') + 1)) {
   s.set('x', s.get('x') + s.get('i'));
 }
 s.set('x', Math.floor(s.get('x') / 3));
-s.set('亀', new Character(s.get('x'), 0)); // CP
+s.set('亀', new Character(s.get('x'), 0));
 s.get('亀').forward();
     `.trim(),
     java: `
@@ -414,7 +414,7 @@ public class Main {
 s.set('t', new Character());
 for (s.set('i', 0); s.get('i') < <2-3>; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < <2-3>; s.set('j', s.get('j') + 1)) {
-      s.get('t').forward(); // CP
+      s.get('t').forward();
   }
   s.get('t').turnRight();
 }
@@ -438,7 +438,7 @@ public class Main {
 s.set('t', new Character());
 for (s.set('i', <3-4>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
   for (s.set('j', 0); s.get('j') < s.get('i'); s.set('j', s.get('j') + 1)) {
-    s.get('t').forward(); // CP
+    s.get('t').forward();
   }
   s.get('t').turnRight();
 }
@@ -463,7 +463,7 @@ s.set('t', new Character());
 for (s.set('i', 0); s.get('i') < <7-9>; s.set('i', s.get('i') + 1)) {
   s.get('t').forward();
   if (s.get('i') % 3 === 2) {
-    s.get('t').turnRight(); // CP
+    s.get('t').turnRight();
   }
 }
     `.trim(),
@@ -487,9 +487,9 @@ s.set('t', new Character());
 for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
   s.get('t').forward();
   if (s.get('i') % 2 === 0) {
-    s.get('t').turnRight(); // CP
+    s.get('t').turnRight();
   } else {
-    s.get('t').turnLeft(); // CP
+    s.get('t').turnLeft();
   }
 }
     `.trim(),
@@ -516,9 +516,9 @@ for (s.set('i', 0); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') < <2-3>) {
     s.get('t').forward();
   } else if (s.get('i') === <2-3>) {
-    s.get('t').turnLeft(); // CP
+    s.get('t').turnLeft();
   } else {
-    s.get('t').backward(); // CP
+    s.get('t').backward();
   }
 }
     `.trim(),
@@ -542,11 +542,11 @@ for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') % 4 === 0) {
     s.get('t').forward();
   } else if (s.get('i') % 4 === 1) {
-    s.get('t').turnRight(); // CP
+    s.get('t').turnRight();
   } else if (s.get('i') % 4 === 2) {
-    s.get('t').forward(); // CP
+    s.get('t').forward();
   } else {
-    s.get('t').turnLeft(); // CP
+    s.get('t').turnLeft();
   }
 }
     `.trim(),
@@ -572,9 +572,9 @@ for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
     case 0: case 1:
       s.get('t').forward(); break;
     case 2:
-      s.get('t').turnLeft(); break; // CP
+      s.get('t').turnLeft(); break;
     default:
-      s.get('t').backward(); break; // CP
+      s.get('t').backward(); break;
   }
 }
     `.trim(),
@@ -602,11 +602,11 @@ s.set('t', new Character());
 for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   switch (s.get('i') % 4) {
     case 1:
-      s.get('t').turnRight(); break; // CP
+      s.get('t').turnRight(); break;
     case 3:
-      s.get('t').turnLeft(); break; // CP
+      s.get('t').turnLeft(); break;
     default:
-      s.get('t').forward(); break; // CP
+      s.get('t').forward(); break;
   }
 }
     `.trim(),
@@ -633,7 +633,7 @@ public class Main {
 s.set('t', new Character());
 while (true) {
   if (!s.get('t').canMoveForward()) break;
-  s.get('t').forward(); // CP
+  s.get('t').forward();
 }
     `.trim(),
     java: `
@@ -654,11 +654,11 @@ s.set('t', new Character(<3-4>,<3-4>));
 while (true) {
   if (!s.get('t').canMoveForward()) break;
   s.get('t').forward();
-  s.get('t').turnRight(); // CP
+  s.get('t').turnRight();
 
   if (!s.get('t').canMoveForward()) break;
   s.get('t').forward();
-  s.get('t').turnLeft(); // CP
+  s.get('t').turnLeft();
 }
     `.trim(),
     java: `
@@ -686,7 +686,7 @@ for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
     s.get('t').forward();
     if (!s.get('t').canMoveForward()) break;
   }
-  s.get('t').turnRight(); // CP
+  s.get('t').turnRight();
 }
     `.trim(),
     java: `
@@ -711,7 +711,7 @@ s.set('t', new Character());
     if (s.get('i') == 0) {
       continue;
     }
-  s.get('t').forward(); // CP
+  s.get('t').forward();
 }
     `.trim(),
     java: `
@@ -733,7 +733,7 @@ public class Main {
 s.set('t', new Character());
 for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') % <2-3> == 1) {
-    s.get('t').turnRight(); // CP
+    s.get('t').turnRight();
     continue;
   }
   s.get('t').forward();
@@ -760,9 +760,9 @@ s.set('t', new Character());
 for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
   for (s.set('j', s.get('i') * 4); s.get('j') < 8; s.set('j', s.get('j') + 1)) {
     if (s.get('j') % 4 == 1) {
-      s.get('t').turnRight(); continue; // CP
+      s.get('t').turnRight(); continue;
     } else if (s.get('j') % 4 == 3) {
-      s.get('t').turnLeft(); continue; // CP
+      s.get('t').turnLeft(); continue;
     }
     s.get('t').forward();
   }
@@ -792,7 +792,7 @@ public class Main {
     instrumented: `
 s.set('t', new Character());
 forwardTwoSteps(s.get('t'));
-s.get('t').turnRight(); // CP
+s.get('t').turnRight();
 threeStepsForward(s.get('t'));
 
 function forwardTwoSteps(t) {
@@ -840,7 +840,7 @@ public class Main {
     instrumented: `
 s.set('t', new Character());
 forwardGivenSteps(s.get('t'), <3-4>);
-s.get('t').turnRight(); // CP
+s.get('t').turnRight();
 forwardGivenSteps(s.get('t'), 2);
 
 function forwardGivenSteps(t, n) {
@@ -875,7 +875,7 @@ public class Main {
     instrumented: `
 s.set('t', new Character());
 forwardTwoSteps(s.get('t'));
-s.get('t').turnRight(); // CP
+s.get('t').turnRight();
 forwardFourSteps(s.get('t'));
 
 function forwardTwoSteps(t) {
@@ -920,7 +920,7 @@ public class Main {
   return1: {
     instrumented: `
 s.set('t', new Character());
-s.set('x', double(<2-3>)); // CP
+s.set('x', double(<2-3>));
 forwardGivenSteps(s.get('t'), s.get('x'));
 
 function forwardGivenSteps(t, n) {
@@ -1011,7 +1011,7 @@ s.set('t', new Character());
 for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < 3; s.set('j', s.get('j') + 1)) {
     if (isEqual(s.get('i'), s.get('j')))
-      s.get('t').turnRight(); // CP
+      s.get('t').turnRight();
     else
       forwardTwoSteps(s.get('t'));
   }
@@ -1064,10 +1064,10 @@ public class Main {
   array1: {
     instrumented: `
 s.set('t', new Character());
-s.set('arr', [2, <1-2>, <1-2>]); // CP
+s.set('arr', [2, <1-2>, <1-2>]);
 for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
   forwardGivenSteps(s.get('t'), s.get('arr')[s.get('i')]);
-  s.get('t').turnRight(); // CP
+  s.get('t').turnRight();
 }
 
 function forwardGivenSteps(t, n) {
@@ -1106,7 +1106,7 @@ s.set('arr', [0, 1, 0, 2, 0]);
 for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
   switch (s.get('arr')[s.get('i')]) {
     case 0:
-      s.get('t').forward(); break; // CP
+      s.get('t').forward(); break;
     case 1:
       s.get('t').turnRight(); break;
     case 2:
@@ -1141,7 +1141,7 @@ for (const cmd of [0, 1, 0, 2, 0]) {
   s.set('cmd', cmd);
   switch (s.get('cmd')) {
     case 0:
-      s.get('t').forward(); break; // CP
+      s.get('t').forward(); break;
     case 1:
       s.get('t').turnRight(); break;
     case 2:
@@ -1175,7 +1175,7 @@ s.set('s', 'frflf');
 for (s.set('i', 0); s.get('i') < s.get('s').length; s.set('i', s.get('i') + 1)) {
   switch (s.get('s').charAt(s.get('i'))) {
     case 'f':
-      s.get('t').forward(); break; // CP
+      s.get('t').forward(); break;
     case 'r':
       s.get('t').turnRight(); break;
     case 'l':
@@ -1210,7 +1210,7 @@ for (const ch of 'frflf') {
   s.set('ch', ch);
   switch (s.get('ch')) {
     case 'f':
-      s.get('t').forward(); break; // CP
+      s.get('t').forward(); break;
     case 'r':
       s.get('t').turnRight(); break;
     case 'l':
@@ -1240,7 +1240,7 @@ public class Main {
   string3: {
     instrumented: `
 s.set('t', new Character());
-s.set('cmds', ['ri', 'aa', 'fo']); // CP
+s.set('cmds', ['ri', 'aa', 'fo']);
 for (const cmd of ['ri', 'aa', 'fo']) {
   s.set('cmd', cmd);
   parse(s.get('t'), s.get('cmd'));
@@ -1278,7 +1278,7 @@ public class Main {
     instrumented: `
 s.set('c', new Character());
 s.get('c').forward();
-s.get('c').forward(); // CP
+s.get('c').forward();
 s.get('c').forward();
 `.trim(),
     // sidがただの連番である場合、番号を省略できる。
@@ -1300,7 +1300,7 @@ public class Main {
 s.set('c', new Character());
 for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
   s.get('c').forward();
-  s.get('c').forward(); // CP
+  s.get('c').forward();
   s.get('c').turnRight();
 }
 `.trim(),
@@ -1397,11 +1397,11 @@ public class Main {
   test5: {
     instrumented: `
 s.set('c', new Character());
-s.get('c').forward(); // CP
+s.get('c').forward();
 s.get('c').forward();
 s.get('c').turnRight();
-s.get('c').forward(); // CP
-s.get('c').forward(); // CP character at end: OK
+s.get('c').forward();
+s.get('c').forward(); character at end: OK
 s.get('c').forward();
 s.get('c').forward();
 `.trim(),

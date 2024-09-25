@@ -8,16 +8,16 @@ import { oneLight } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 import { Box } from '../../../../../../../../infrastructures/useClient/chakra';
 
 type SyntaxHighlighterProps = BoxProps & {
-  beforeCheckpointLine?: number;
+  previousFocusLine?: number;
   code: string;
   programmingLanguageId: string;
-  currentCheckpointLine?: number;
+  currentFocusLine?: number;
 };
 
 export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
-  beforeCheckpointLine,
   code,
-  currentCheckpointLine,
+  currentFocusLine,
+  previousFocusLine,
   programmingLanguageId,
   ...boxProps
 }) => {
@@ -35,11 +35,11 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
         lineNumberStyle={{ minWidth: '1.5rem', marginRight: '2rem', paddingRight: 0 }}
         lineProps={(lineNumber) => {
           const style: React.CSSProperties = { padding: '0 1rem', backgroundColor: '' };
-          // チェックポイント問題・ステップ問題のハイライト
-          if (lineNumber === beforeCheckpointLine) {
+          // ステップ問題のハイライト
+          if (lineNumber === previousFocusLine) {
             style.backgroundColor = '#feebc8' /* orange.100 */;
           }
-          if (lineNumber === currentCheckpointLine) {
+          if (lineNumber === currentFocusLine) {
             style.backgroundColor = '#fed7d7' /* red.100 */;
           }
           return { style };

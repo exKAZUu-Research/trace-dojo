@@ -20,18 +20,25 @@ export const backendRouter = router({
         currentProblemType: z.string().min(1).optional(),
         currentTraceItemIndex: z.number().int().nonnegative().optional(),
         previousTraceItemIndex: z.number().int().nonnegative().optional(),
-        elapsedMilliseconds: z.number().nonnegative().optional(),
+        incrementalElapsedMilliseconds: z.number().nonnegative().optional(),
         completedAt: z.date().optional(),
       })
     )
-    .mutation(async ({ input: { id, ...data } }) => {
-      const problemSession = await prisma.problemSession.update({ where: { id }, data });
+    .mutation(async ({ input: { id, incrementalElapsedMilliseconds, ...data } }) => {
+      const problemSession = await prisma.problemSession.update({
+        where: { id },
+        data: {
+          elapsedMilliseconds: { increment: incrementalElapsedMilliseconds },
+          ...data,
+        },
+      });
+      // 開発環境ではページが更新されないので注意すること。
       revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');
       console.log(`revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');`);
       return problemSession;
     }),
 
-  createProblemSessionAnswer: procedure
+  createProblemSubmission: procedure
     .use(authorize)
     .input(
       z.object({
@@ -47,7 +54,7 @@ export const backendRouter = router({
       if (!session) throw new TRPCError({ code: 'NOT_FOUND' });
       if (session.userId !== ctx.session.superTokensUserId) throw new TRPCError({ code: 'UNAUTHORIZED' });
 
-      await prisma.problemSessionAnswer.create({ data: input });
+      await prisma.problemSubmission.create({ data: input });
     }),
 });
 
