@@ -1,5 +1,3 @@
-'use client';
-
 import type { BoxProps } from '@chakra-ui/react';
 import React, { useMemo } from 'react';
 
@@ -11,7 +9,7 @@ import {
   TURTLE_GRAPHICS_BOARD_ROWS as ROWS,
 } from '../../../../../../../../constants';
 import { Box, Grid, GridItem, Img, keyframes } from '../../../../../../../../infrastructures/useClient/chakra';
-import type { TurtleTrace, TraceItemVariable } from '../../../../../../../../problems/traceProgram';
+import type { TurtleTrace } from '../../../../../../../../problems/traceProgram';
 import { charToColor } from '../../../../../../../../problems/traceProgram';
 
 const CHAR_TO_BG_COLOR = {
@@ -52,12 +50,12 @@ const focusRingKeyframes = keyframes({
 
 type Props = BoxProps & {
   board: string | undefined;
-  vars: TraceItemVariable | undefined;
+  turtles: TurtleTrace[];
   focusedCell?: { x: number; y: number };
   enableTransitions?: boolean;
   onCellClick?: (x: number, y: number) => void;
   onCellRightClick?: (x: number, y: number) => void;
-  onCharacterClick?: (key: string) => void;
+  onTurtleClick?: (x: number, y: number) => void;
 };
 
 export const BoardViewer: React.FC<Props> = ({
@@ -66,8 +64,8 @@ export const BoardViewer: React.FC<Props> = ({
   focusedCell,
   onCellClick,
   onCellRightClick,
-  onCharacterClick,
-  vars,
+  onTurtleClick,
+  turtles,
   ...boxProps
 }) => {
   const rows = useMemo(
@@ -78,19 +76,6 @@ export const BoardViewer: React.FC<Props> = ({
         .map((row) => [...row]) ?? [],
     [board]
   );
-
-  const characters = useMemo(() => {
-    const characters: (TurtleTrace & { key: string })[] = [];
-    if (vars) {
-      for (const [key, v] of Object.entries(vars)) {
-        if (typeof v === 'number' || typeof v === 'string') continue;
-        characters.push({ ...v, key });
-      }
-    }
-    return characters;
-  }, [vars]);
-
-  console.debug('characters', characters);
 
   return (
     <Grid
@@ -105,10 +90,10 @@ export const BoardViewer: React.FC<Props> = ({
       w="min-content"
       {...boxProps}
     >
-      {[...rows].map((row, rowIndex) =>
+      {rows.map((row, rowIndex) =>
         row.map((cell, columnIndex) => (
           <GridItem
-            key={`${rowIndex} ${columnIndex}`}
+            key={`${rowIndex},${columnIndex}`}
             _hover={
               onCellClick || onCellRightClick
                 ? { bgColor: CHAR_TO_HOVERED_BG_COLOR[cell as keyof typeof CHAR_TO_BG_COLOR] }
@@ -127,28 +112,28 @@ export const BoardViewer: React.FC<Props> = ({
         ))
       )}
 
-      {characters.map((character) => (
+      {turtles.map((turtle) => (
         <Box
-          key={character.key}
+          key={`${turtle.x},${turtle.y}`}
           left={`${PADDING_PX}px`}
           position="absolute"
           style={{
-            transform: `translate(${CELL_SIZE_PX / 2 + character.x * (CELL_SIZE_PX + GAP_PX)}px, ${CELL_SIZE_PX / 2 + (ROWS - character.y - 1) * (CELL_SIZE_PX + GAP_PX)}px) translate(-50%, -50%)`,
+            transform: `translate(${CELL_SIZE_PX / 2 + turtle.x * (CELL_SIZE_PX + GAP_PX)}px, ${CELL_SIZE_PX / 2 + (ROWS - turtle.y - 1) * (CELL_SIZE_PX + GAP_PX)}px) translate(-50%, -50%)`,
           }}
           top={`${PADDING_PX}px`}
           transitionDuration={enableTransitions ? 'normal' : undefined}
           transitionProperty={enableTransitions ? 'transform' : undefined}
           willChange={enableTransitions ? 'transform' : undefined}
-          onClick={() => void onCharacterClick?.(character.key)}
+          onClick={() => onTurtleClick?.(turtle.x, turtle.y)}
           onContextMenu={(event) => {
             event.preventDefault();
-            onCellRightClick?.(character.x, character.y);
+            onCellRightClick?.(turtle.x, turtle.y);
           }}
         >
           <Img
-            alt={'character' + character.x + character.y}
-            src={`/character/${charToColor[character.color as keyof typeof charToColor]}.png`}
-            transform={DIR_TO_TRANSFORM_FUNCTION[character.dir as keyof typeof DIR_TO_TRANSFORM_FUNCTION]}
+            alt={'turtle' + turtle.x + turtle.y}
+            src={`/character/${charToColor[turtle.color as keyof typeof charToColor]}.png`}
+            transform={DIR_TO_TRANSFORM_FUNCTION[turtle.dir as keyof typeof DIR_TO_TRANSFORM_FUNCTION]}
             w={`${(0.75 * CELL_SIZE_PX).toFixed(3)}px`}
           />
         </Box>

@@ -9217,6 +9217,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"immer@npm:10.1.1":
+  version: 10.1.1
+  resolution: "immer@npm:10.1.1"
+  checksum: 10c0/b749e10d137ccae91788f41bd57e9387f32ea6d6ea8fd7eb47b23fd7766681575efc7f86ceef7fe24c3bc9d61e38ff5d2f49c2663b2b0c056e280a4510923653
+  languageName: node
+  linkType: hard
+
 "import-fresh@npm:^3.2.1, import-fresh@npm:^3.3.0":
   version: 3.3.0
   resolution: "import-fresh@npm:3.3.0"
@@ -14593,6 +14600,7 @@ __metadata:
     fast-deep-equal: "npm:3.1.3"
     framer-motion: "npm:11.5.6"
     husky: "npm:9.1.6"
+    immer: "npm:10.1.1"
     jsonwebtoken: "npm:9.0.2"
     jwks-rsa: "npm:3.1.0"
     lint-staged: "npm:15.2.10"
@@ -14621,6 +14629,7 @@ __metadata:
     supertokens-web-js: "npm:0.13.0"
     typescript: "npm:5.6.2"
     use-context-selector: "npm:2.0.0"
+    use-immer: "npm:0.10.0"
     usehooks-ts: "npm:3.1.0"
     uuid: "npm:10.0.0"
     vitest: "npm:2.1.1"
@@ -15100,6 +15109,16 @@ __metadata:
     react: ">=18.0.0"
     scheduler: ">=0.19.0"
   checksum: 10c0/4eb6054ab8996ae8b3f87f9d102e576066e5a8b9db5db2c891128ae920bd64bcdcb4e93a13bc99658ef16280929a8331fc8ac45177f4acd716c425b1bc31135a
+  languageName: node
+  linkType: hard
+
+"use-immer@npm:0.10.0":
+  version: 0.10.0
+  resolution: "use-immer@npm:0.10.0"
+  peerDependencies:
+    immer: ">=8.0.0"
+    react: ^16.8.0 || ^17.0.1 || ^18.0.0
+  checksum: 10c0/67dcae179c97819c5dba3c598f28d3118ce88ea1fe7bdd5e07fcce945e468125786a20bdfaa90c429374a1cc8f6edd4b3900b3e5726ccd35ea12696a7505436b
   languageName: node
   linkType: hard
 

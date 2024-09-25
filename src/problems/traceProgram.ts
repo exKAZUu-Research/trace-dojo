@@ -29,6 +29,10 @@ export interface TraceItem {
 // できる限り、可能性のある型を具体的に列挙していきたい。
 export type TraceItemVariable = Record<string, number | string | TurtleTrace>;
 
+export function isTurtleTrace(trace: number | string | TurtleTrace): trace is TurtleTrace {
+  return typeof trace === 'object' && 'x' in trace && 'y' in trace && 'color' in trace && 'dir' in trace;
+}
+
 export const charToColor = {
   '#': 'black',
   '.': 'white',

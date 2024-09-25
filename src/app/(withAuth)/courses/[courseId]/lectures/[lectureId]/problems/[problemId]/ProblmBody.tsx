@@ -23,6 +23,7 @@ import {
 } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../../../problems/generateProblem';
 import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
+import { isTurtleTrace } from '../../../../../../../../problems/traceProgram';
 import { useIsMacOS } from '../../../../../../../../utils/platform';
 
 import type { TurtleGraphicsHandle } from './BoardEditor';
@@ -185,7 +186,9 @@ export const ProblemBody: React.FC<Props> = (props) => {
               <BoardViewer
                 alignSelf="center"
                 board={props.problem.traceItems[previousTraceItemIndex]?.board}
-                vars={props.problem.traceItems[previousTraceItemIndex]?.vars}
+                turtles={Object.values(props.problem.traceItems[previousTraceItemIndex]?.vars ?? {}).filter(
+                  isTurtleTrace
+                )}
               />
 
               <Variables traceItemVars={props.problem.traceItems[previousTraceItemIndex]?.vars} />
