@@ -167,17 +167,17 @@ export const ProblemBody: React.FC<Props> = (props) => {
         </VStack>
 
         {problemType !== 'executionResult' &&
-          props.problem.sidToLineIndex.get(props.problem.traceItems[previousTraceItemIndex]?.sid) && (
+          props.problem.sidToLineIndex.get(props.problem.traceItems[previousTraceItemIndex].sid) && (
             <VStack align="stretch" as={Card} bg="gray.50" p={5} spacing={6}>
               <VStack align="stretch">
                 <Heading size="md">
                   参考：
                   <Box as="span" bgColor="orange.100" px={0.5} rounded="sm">
-                    {props.problem.sidToLineIndex.get(props.problem.traceItems[previousTraceItemIndex]?.sid)}行目
+                    {props.problem.sidToLineIndex.get(props.problem.traceItems[previousTraceItemIndex].sid)}行目
                   </Box>
                   を実行した後（
                   <Box as="span" bgColor="red.100" px={0.5} rounded="sm">
-                    {props.problem.sidToLineIndex.get(props.problem.traceItems[currentTraceItemIndex]?.sid)}行目
+                    {props.problem.sidToLineIndex.get(props.problem.traceItems[currentTraceItemIndex].sid)}行目
                   </Box>
                   を実行する前）の盤面
                 </Heading>
@@ -186,12 +186,12 @@ export const ProblemBody: React.FC<Props> = (props) => {
               <BoardViewer
                 alignSelf="center"
                 board={props.problem.traceItems[previousTraceItemIndex]?.board}
-                turtles={Object.values(props.problem.traceItems[previousTraceItemIndex]?.vars ?? {}).filter(
+                turtles={Object.values(props.problem.traceItems[previousTraceItemIndex].vars ?? {}).filter(
                   isTurtleTrace
                 )}
               />
 
-              <Variables traceItemVars={props.problem.traceItems[previousTraceItemIndex]?.vars} />
+              <Variables traceItemVars={props.problem.traceItems[previousTraceItemIndex].vars} />
             </VStack>
           )}
       </VStack>
@@ -199,9 +199,8 @@ export const ProblemBody: React.FC<Props> = (props) => {
       <VStack align="stretch" flexBasis={0} flexGrow={1} spacing="4">
         <BoardEditor
           ref={turtleGraphicsRef}
-          currentTraceItem={props.problem.traceItems[currentTraceItemIndex]}
-          isEditable={true}
-          previousTraceItem={props.problem.traceItems[previousTraceItemIndex]}
+          currentTraceItemIndex={currentTraceItemIndex}
+          previousTraceItemIndex={previousTraceItemIndex}
           problem={props.problem}
         />
 
