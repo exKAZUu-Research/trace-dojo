@@ -1,6 +1,7 @@
 import type { NextPage } from 'next';
 
 import { DEFAULT_LANGUAGE_ID } from '../../../../../../../../constants';
+import { logger } from '../../../../../../../../infrastructures/pino';
 import { prisma } from '../../../../../../../../infrastructures/prisma';
 import { generateProblem } from '../../../../../../../../problems/generateProblem';
 import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
@@ -15,7 +16,7 @@ type Props = {
 const ProblemPage: NextPage<Props> = async (props) => {
   const session = await getNonNullableSessionOnServer();
 
-  let problemSession = await prisma.problemSession.findFirst({
+  let incompleteProblemSession = await prisma.problemSession.findFirst({
     where: {
       userId: session.superTokensUserId,
       courseId: props.params.courseId,
@@ -25,9 +26,8 @@ const ProblemPage: NextPage<Props> = async (props) => {
       completedAt: null,
     },
   });
-
-  if (!problemSession) {
-    problemSession = await prisma.problemSession.create({
+  if (!incompleteProblemSession) {
+    incompleteProblemSession = await prisma.problemSession.create({
       data: {
         userId: session.superTokensUserId,
         courseId: props.params.courseId,
@@ -40,17 +40,18 @@ const ProblemPage: NextPage<Props> = async (props) => {
       },
     });
   }
+  logger.debug('incompleteProblemSession: %o', incompleteProblemSession);
 
   const problem = generateProblem(
-    problemSession.problemId as ProblemId,
+    incompleteProblemSession.problemId as ProblemId,
     DEFAULT_LANGUAGE_ID,
-    problemSession.problemVariablesSeed
+    incompleteProblemSession.problemVariablesSeed
   );
   if (!problem) throw new Error('Failed to generate problem.');
 
   return (
     <ProblemPageOnClient
-      initialProblemSession={problemSession}
+      initialProblemSession={incompleteProblemSession}
       params={props.params}
       problem={problem}
       userId={session.superTokensUserId}

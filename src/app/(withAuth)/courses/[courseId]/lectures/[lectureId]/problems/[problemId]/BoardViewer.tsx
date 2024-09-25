@@ -11,7 +11,7 @@ import {
   TURTLE_GRAPHICS_BOARD_ROWS as ROWS,
 } from '../../../../../../../../constants';
 import { Box, Grid, GridItem, Img, keyframes } from '../../../../../../../../infrastructures/useClient/chakra';
-import type { CharacterTrace, TraceItemVar } from '../../../../../../../../problems/traceProgram';
+import type { CharacterTrace, TraceItemVariable } from '../../../../../../../../problems/traceProgram';
 import { charToColor } from '../../../../../../../../problems/traceProgram';
 
 const CHAR_TO_BG_COLOR = {
@@ -52,7 +52,7 @@ const focusRingKeyframes = keyframes({
 
 type Props = BoxProps & {
   board: string | undefined;
-  vars: TraceItemVar | undefined;
+  vars: TraceItemVariable | undefined;
   focusedCell?: { x: number; y: number };
   enableTransitions?: boolean;
   onCellClick?: (x: number, y: number) => void;

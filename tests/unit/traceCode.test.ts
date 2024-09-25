@@ -39,7 +39,6 @@ public class Main {
       3: 7,
       4: 8,
     },
-    expectedCheckpointSids: [3],
     expectedTrace: [
       { sid: 0, vars: {}, board: defaultBoard },
       {
@@ -100,7 +99,6 @@ public class Main {
       4: 8,
       5: 9,
     },
-    expectedCheckpointSids: [4],
     expectedTrace: [
       { sid: 0, vars: {}, board: defaultBoard },
       {
@@ -223,7 +221,6 @@ public class Main {
       4: 10,
       5: 14,
     },
-    expectedCheckpointSids: [],
     expectedTrace: [
       { sid: 0, vars: {}, board: defaultBoard },
       { sid: 1, vars: { a: 1 }, board: defaultBoard },
@@ -269,7 +266,6 @@ public class Main {
       11: 14,
       12: 15,
     },
-    expectedCheckpointSids: [],
     expectedTrace: [
       { sid: 0, vars: {}, board: defaultBoard },
       {
@@ -455,7 +451,6 @@ public class Straight {
       7: 9,
       8: 10,
     },
-    expectedCheckpointSids: [2, 5, 6],
     expectedTrace: [
       { sid: 0, vars: {}, board: defaultBoard },
       {
@@ -539,23 +534,15 @@ public class Straight {
   },
 ] as const)(
   'Trace a program',
-  ({
-    expectedCheckpointSids,
-    expectedDisplayProgram,
-    expectedSidToLineIndex,
-    expectedTrace,
-    languageId,
-    problemId,
-  }) => {
+  ({ expectedDisplayProgram, expectedSidToLineIndex, expectedTrace, languageId, problemId }) => {
     const problem = generateProblem(problemId, languageId, '');
     if (!problem) throw new Error('Failed to generate problem.');
 
-    const { checkpointSids, displayProgram, sidToLineIndex, traceItems } = problem;
+    const { displayProgram, sidToLineIndex, traceItems } = problem;
     expect(displayProgram).toEqual(expectedDisplayProgram);
     expect(sidToLineIndex).toEqual(
       new Map(Object.entries(expectedSidToLineIndex).map(([sid, lineIndex]) => [Number(sid), lineIndex]))
     );
-    expect(checkpointSids).toEqual(expectedCheckpointSids);
     expect(stringifyObjects(traceItems)).toEqual(stringifyObjects(expectedTrace));
   }
 );

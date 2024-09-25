@@ -26,21 +26,12 @@ const LecturePage: NextPage<Props> = async (props) => {
       problemId: true,
       completedAt: true,
       elapsedMilliseconds: true,
-      answers: { select: { elapsedMilliseconds: true, isCorrect: true } },
+      submissions: { select: { elapsedMilliseconds: true, isCorrect: true } },
     },
     where: { userId: session.superTokensUserId, courseId: props.params.courseId, lectureId: props.params.lectureId },
   });
 
-  return (
-    <Lecture
-      currentUserCompletedProblemIdSet={
-        new Set(currentUserProblemSessions.filter((s) => s.completedAt).map((s) => s.problemId))
-      }
-      currentUserProblemSessions={currentUserProblemSessions}
-      lectureIndex={lectureIndex}
-      params={props.params}
-    />
-  );
+  return <Lecture lectureIndex={lectureIndex} params={props.params} problemSessions={currentUserProblemSessions} />;
 };
 
 export default LecturePage;

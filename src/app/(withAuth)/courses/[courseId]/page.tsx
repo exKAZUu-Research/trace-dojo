@@ -22,7 +22,6 @@ const CoursePage: NextPage<Props> = async (props) => {
     select: { problemId: true, completedAt: true },
     where: { userId: session.superTokensUserId, courseId: props.params.courseId },
   });
-
   console.trace('currentUserProblemSessions:', currentUserProblemSessions);
 
   return (

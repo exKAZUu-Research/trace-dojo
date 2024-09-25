@@ -1,8 +1,8 @@
 'use client';
 
-import type { ProblemSession, ProblemSessionAnswer } from '@prisma/client';
+import type { ProblemSession, ProblemSubmission } from '@prisma/client';
 import NextLink from 'next/link';
-import React from 'react';
+import React, { useMemo } from 'react';
 import { MdCheckCircle, MdCheckCircleOutline, MdOutlineVerified, MdVerified } from 'react-icons/md';
 
 import {
@@ -35,18 +35,19 @@ import {
 type Props = {
   params: { courseId: CourseId; lectureId: string };
   lectureIndex: number;
-  currentUserCompletedProblemIdSet: ReadonlySet<string>;
-  currentUserProblemSessions: (Pick<ProblemSession, 'problemId' | 'completedAt' | 'elapsedMilliseconds'> & {
-    answers: Pick<ProblemSessionAnswer, 'elapsedMilliseconds' | 'isCorrect'>[];
+  problemSessions: (Pick<ProblemSession, 'problemId' | 'completedAt' | 'elapsedMilliseconds'> & {
+    submissions: Pick<ProblemSubmission, 'elapsedMilliseconds' | 'isCorrect'>[];
   })[];
 };
 
 export const Lecture: React.FC<Props> = (props) => {
-  const lectureProblemIds = courseIdToLectureIndexToProblemIds[props.params.courseId][props.lectureIndex];
+  const completedProblemIdSet = useMemo(
+    () => new Set(props.problemSessions.filter((s) => s.completedAt).map((s) => s.problemId)),
+    [props.problemSessions]
+  );
 
-  const completedProblemCount = lectureProblemIds.filter((problemId) =>
-    props.currentUserCompletedProblemIdSet.has(problemId)
-  ).length;
+  const lectureProblemIds = courseIdToLectureIndexToProblemIds[props.params.courseId][props.lectureIndex];
+  const completedProblemCount = lectureProblemIds.filter((problemId) => completedProblemIdSet.has(problemId)).length;
   const isLessonCompleted = completedProblemCount >= lectureProblemIds.length;
 
   return (
@@ -91,23 +92,21 @@ export const Lecture: React.FC<Props> = (props) => {
                   <Th w="0" />
                   <Th w="0" />
                   <Th isNumeric w="0">
-                    初回不正解
+                    初回の不正解
                   </Th>
                   <Th isNumeric w="0">
-                    初回所要時間
+                    初回の完了日時
                   </Th>
                 </Tr>
               </Thead>
 
               <Tbody>
                 {lectureProblemIds.map((problemId) => {
-                  const firstSession = props.currentUserProblemSessions.find((s) => s.problemId === problemId);
-
-                  const suspendedSession = props.currentUserProblemSessions.find(
+                  const firstSession = props.problemSessions.find((s) => s.problemId === problemId);
+                  const suspendedSession = props.problemSessions.find(
                     (s) => s.problemId === problemId && !s.completedAt
                   );
-
-                  const isProblemCompleted = props.currentUserCompletedProblemIdSet.has(problemId);
+                  const isProblemCompleted = completedProblemIdSet.has(problemId);
 
                   return (
                     <Tr key={problemId}>
@@ -132,21 +131,13 @@ export const Lecture: React.FC<Props> = (props) => {
                         </HStack>
                       </Td>
                       <Td isNumeric color="gray.600">
-                        {firstSession?.answers.filter((a) => !a.isCorrect).length ?? 0}
+                        {firstSession?.submissions.filter((a) => !a.isCorrect).length ?? 0}
                         <Box as="span" fontSize="xs" ms={1}>
                           回
                         </Box>
                       </Td>
                       <Td isNumeric color="gray.600">
-                        {/* TODO: なぜ`firstSession?.elapsedMilliseconds`をそのまま表示しない実装になっているのか確認する。 */}
-                        {typeof firstSession?.elapsedMilliseconds === 'number'
-                          ? Math.floor(
-                              firstSession.answers.reduce((sum, answer) => sum + answer.elapsedMilliseconds, 0) / 1000
-                            )
-                          : 0}
-                        <Box as="span" fontSize="xs" ms={1}>
-                          秒
-                        </Box>
+                        {firstSession?.completedAt?.toLocaleString() ?? '未完了'}
                       </Td>
                     </Tr>
                   );

@@ -34,32 +34,32 @@ interface TurtleGraphicsProps {
   isEditable?: boolean;
   problem: Problem;
   currentTraceItem?: TraceItem;
-  beforeTraceItem?: TraceItem;
+  previousTraceItem?: TraceItem;
 }
 
 export interface TurtleGraphicsHandle {
   initialize(): void;
-  isPassed(): boolean;
+  isCorrect(): boolean;
 }
 
 export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
-  ({ beforeTraceItem, currentTraceItem, isEditable = false, problem }, ref) => {
+  ({ currentTraceItem, isEditable = false, previousTraceItem, problem }, ref) => {
     const [board, setBoard] = useState<ColorChar[][]>([]);
     const [characters, setCharacters] = useState<(CharacterTrace & { key: string })[]>([]);
     const [selectedCharacter, setSelectedCharacter] = useState<CharacterTrace & { key: string }>();
     const [selectedCell, setSelectedCell] = useState<SelectedCell>();
 
     const initialize = useCallback((): void => {
-      console.log('initialize:', problem, beforeTraceItem);
-      if (!problem || !beforeTraceItem) return;
+      console.log('initialize:', problem, previousTraceItem);
+      if (!problem || !previousTraceItem) return;
 
-      const initBoard = beforeTraceItem.board
+      const initBoard = previousTraceItem.board
         .trim()
         .split('\n')
         .filter((line) => line.trim() !== '')
         .map((line) => [...line.trim()]);
 
-      const variables = beforeTraceItem.vars;
+      const variables = previousTraceItem.vars;
       const initCharacters = [];
       const initOtherVars = [];
       for (const key in variables) {
@@ -75,17 +75,17 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
       setCharacters(initCharacters || []);
       setSelectedCharacter(undefined);
       setSelectedCell(undefined);
-    }, [beforeTraceItem, problem]);
+    }, [previousTraceItem, problem]);
 
     useImperativeHandle(ref, () => ({
       // 親コンポーネントから関数を呼び出せるようにする
       initialize,
-      isPassed,
+      isCorrect,
     }));
 
     useEffect(() => {
       initialize();
-    }, [beforeTraceItem, initialize, problem]);
+    }, [previousTraceItem, initialize, problem]);
 
     const updateCharacters = (character: CharacterTrace & { key: string }): void => {
       setSelectedCharacter(character);
@@ -107,7 +107,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
       });
     };
 
-    const isPassed = (): boolean => {
+    const isCorrect = (): boolean => {
       if (!currentTraceItem) return false;
 
       const variables = currentTraceItem.vars;
@@ -336,7 +336,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
             )}
             {!selectedCharacter && selectedPosition && (
               <Button colorScheme="brand" size="sm" variant="outline" onClick={() => void handleAddCharacterButton()}>
-                タートルを追加
+                タートルを配置
               </Button>
             )}
           </VStack>
