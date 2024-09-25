@@ -59,7 +59,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
         .filter((line) => line.trim() !== '')
         .map((line) => [...line.trim()]);
       updateBoard(initialBoard as ColorChar[][]);
-      updateTurtles(Object.values(previousTraceItem.vars).filter(isTurtleTrace));
+      updateTurtles(Object.values(previousTraceItem.vars ?? {}).filter(isTurtleTrace));
       setSelectedCell(undefined);
     }, [previousTraceItem, problem]);
 
@@ -91,7 +91,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     const isCorrect = (): boolean => {
       if (!currentTraceItem) return false;
 
-      const expectedTurtles = Object.values(currentTraceItem.vars).filter(isTurtleTrace);
+      const expectedTurtles = Object.values(currentTraceItem.vars ?? {}).filter(isTurtleTrace);
       const expectedBoard = currentTraceItem.board
         .trim()
         .split('\n')
@@ -123,6 +123,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
       updateCellColor(selectedTurtle.color as ColorChar, newX, newY);
       updateTurtle(selectedTurtle, { x: newX, y: newY });
+      setSelectedCell({ x: newX, y: newY });
     };
 
     const handleClickCharacterMoveBackwardButton = (): void => {
@@ -137,6 +138,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
       updateCellColor(selectedTurtle.color as ColorChar, newX, newY);
       updateTurtle(selectedTurtle, { x: newX, y: newY });
+      setSelectedCell({ x: newX, y: newY });
     };
 
     const handleClickCharacterTurnLeftButton = (): void => {
@@ -170,7 +172,6 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
         draft.push(newTurtle);
       });
       updateCellColor(newTurtle.color as ColorChar, newTurtle.x, newTurtle.y);
-      setSelectedCell(undefined);
     };
 
     const handleRemoveCharacterButton = (): void => {
