@@ -2,7 +2,7 @@
 
 import type { ProblemSession } from '@prisma/client';
 import NextLink from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
 
 import {
@@ -10,13 +10,12 @@ import {
   MIN_INTERVAL_MS_OF_ACTIVE_EVENTS,
 } from '../../../../../../../../constants';
 import { backendTrpcReact } from '../../../../../../../../infrastructures/trpcBackend/client';
-import { Heading, HStack, Link, Text, VStack } from '../../../../../../../../infrastructures/useClient/chakra';
+import { Flex, Heading, HStack, Link, Text, VStack } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../../../problems/generateProblem';
 import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
 import { courseIdToLectureIds, courseIdToName, problemIdToName } from '../../../../../../../../problems/problemData';
-import type { ProblemType } from '../../../../../../../../types';
 
-import { ExecutionResultProblem, StepProblem } from './Problems';
+import { ProblemBody } from './ProblmBody';
 
 type Props = {
   params: { courseId: CourseId; lectureId: string; problemId: ProblemId };
@@ -28,61 +27,36 @@ type Props = {
 export const ProblemPageOnClient: React.FC<Props> = (props) => {
   const lectureIndex = courseIdToLectureIds[props.params.courseId].indexOf(props.params.lectureId);
 
-  const [problemType, setProblemType] = useState(props.initialProblemSession.currentProblemType as ProblemType);
-  const [currentTraceItemIndex, setCurrentTraceItemIndex] = useState(props.initialProblemSession.currentTraceItemIndex);
-  const [previousTraceItemIndex, setPreviousTraceItemIndex] = useState(
-    props.initialProblemSession.previousTraceItemIndex
-  );
+  const [problemSession, setProblemSession] = useState(props.initialProblemSession);
+
+  const lastActionTimeRef = useRef(Date.now());
+  useMonitorUserActivity(props, lastActionTimeRef);
 
   const updateProblemSessionMutation = backendTrpcReact.updateProblemSession.useMutation();
   const createProblemSubmissionMutation = backendTrpcReact.createProblemSubmission.useMutation();
 
-  const lastActionTimeRef = useRef(Date.now());
-  useIdleTimer({
-    async onAction() {
-      await updateProblemSessionMutation.mutateAsync({
-        id: props.initialProblemSession.id,
-        incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
-      });
-    },
-    // Events within the throttle period are ignored.
-    throttle: MIN_INTERVAL_MS_OF_ACTIVE_EVENTS,
-  });
-
-  useEffect(() => {
-    // ステップ実行中に以下の式は成り立たない。不整合を起こさないように、念の為チェックする。
-    if (currentTraceItemIndex === previousTraceItemIndex) return;
-
-    void updateProblemSessionMutation.mutateAsync({
-      id: props.initialProblemSession.id,
+  const createSubmissionUpdatingProblemSession = async (isCorrect: boolean, isCompleted: boolean): Promise<void> => {
+    const newProblemSession = await updateProblemSessionMutation.mutateAsync({
+      id: problemSession.id,
       incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
-      currentProblemType: problemType,
-      currentTraceItemIndex,
-      previousTraceItemIndex,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTraceItemIndex]);
-
-  const createSubmission = async (isCorrect: boolean): Promise<void> => {
-    const { elapsedMilliseconds } = await updateProblemSessionMutation.mutateAsync({
-      id: props.initialProblemSession.id,
-      incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
+      completedAt: isCompleted ? new Date() : undefined,
     });
     await createProblemSubmissionMutation.mutateAsync({
-      sessionId: props.initialProblemSession.id,
-      problemType,
-      traceItemIndex: currentTraceItemIndex,
-      elapsedMilliseconds,
+      sessionId: problemSession.id,
+      problemType: problemSession.problemType,
+      traceItemIndex: problemSession.traceItemIndex,
+      elapsedMilliseconds: newProblemSession.elapsedMilliseconds,
       isCorrect,
     });
   };
 
-  const handleSolveProblem = async (): Promise<void> => {
-    await updateProblemSessionMutation.mutateAsync({
-      id: props.initialProblemSession.id,
-      incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
-      completedAt: new Date(),
+  const updateProblemSession = async (problemType: string, traceItemIndex: number): Promise<void> => {
+    const newProblemSession = await updateProblemSessionMutation.mutateAsync({
+      id: problemSession.id,
+      problemType,
+      traceItemIndex,
     });
+    setProblemSession(newProblemSession);
   };
 
   return (
@@ -105,28 +79,33 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
         <Heading as="h1">{problemIdToName[props.params.problemId]}</Heading>
       </VStack>
 
-      {problemType === 'executionResult' ? (
-        <ExecutionResultProblem
-          createSubmission={createSubmission}
-          handleComplete={handleSolveProblem}
+      <Flex gap={6}>
+        <ProblemBody
+          createSubmissionUpdatingProblemSession={createSubmissionUpdatingProblemSession}
+          params={props.params}
           problem={props.problem}
-          setCurrentTraceItemIndex={setCurrentTraceItemIndex}
-          setProblemType={setProblemType}
+          problemSession={problemSession}
+          updateProblemSession={updateProblemSession}
         />
-      ) : (
-        <StepProblem
-          createSubmission={createSubmission}
-          currentTraceItemIndex={currentTraceItemIndex}
-          handleComplete={handleSolveProblem}
-          previousTraceItemIndex={previousTraceItemIndex}
-          problem={props.problem}
-          setCurrentTraceItemIndex={setCurrentTraceItemIndex}
-          setPreviousTraceItemIndex={setPreviousTraceItemIndex}
-        />
-      )}
+      </Flex>
     </VStack>
   );
 };
+
+function useMonitorUserActivity(props: Props, lastActionTimeRef: React.MutableRefObject<number>): void {
+  const updateProblemSessionMutation = backendTrpcReact.updateProblemSession.useMutation();
+
+  useIdleTimer({
+    async onAction() {
+      await updateProblemSessionMutation.mutateAsync({
+        id: props.initialProblemSession.id,
+        incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
+      });
+    },
+    // Events within the throttle period are ignored.
+    throttle: MIN_INTERVAL_MS_OF_ACTIVE_EVENTS,
+  });
+}
 
 function getIncrementalElapsedMilliseconds(lastActionTimeRef: React.MutableRefObject<number>): number {
   const nowTime = Date.now();
