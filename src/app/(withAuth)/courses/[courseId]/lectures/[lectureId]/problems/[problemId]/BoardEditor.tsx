@@ -1,5 +1,6 @@
 'use client';
 
+import fastDeepEqual from 'fast-deep-equal';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { MdOutlineDelete, MdTurnLeft, MdTurnRight } from 'react-icons/md';
 
@@ -44,7 +45,7 @@ export interface TurtleGraphicsHandle {
 
 export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
   ({ currentTraceItem, isEditable = false, previousTraceItem, problem }, ref) => {
-    const [board, setBoard] = useState<ColorChar[][]>([]);
+    const [actualBoard, setActualBoard] = useState<ColorChar[][]>([]);
     const [characters, setCharacters] = useState<(CharacterTrace & { key: string })[]>([]);
     const [selectedCharacter, setSelectedCharacter] = useState<CharacterTrace & { key: string }>();
     const [selectedCell, setSelectedCell] = useState<SelectedCell>();
@@ -71,7 +72,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
         }
       }
 
-      setBoard(initBoard as ColorChar[][]);
+      setActualBoard(initBoard as ColorChar[][]);
       setCharacters(initCharacters || []);
       setSelectedCharacter(undefined);
       setSelectedCell(undefined);
@@ -100,7 +101,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     };
 
     const updateCellColor = (color: ColorChar, columnIndex: number, rowIndex: number): void => {
-      setBoard((prevBoard) => {
+      setActualBoard((prevBoard) => {
         const newBoard = prevBoard.map((row) => [...row]);
         newBoard[rowIndex][columnIndex] = color;
         return newBoard;
@@ -111,33 +112,29 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
       if (!currentTraceItem) return false;
 
       const variables = currentTraceItem.vars;
-      const correctCharacters = [];
+      const expectedTurtles = [];
       for (const key in variables) {
         const value = variables[key];
         if (typeof value !== 'string' && typeof value !== 'number' && value.dir && value.color) {
-          correctCharacters.push(value);
+          expectedTurtles.push(value);
         }
       }
 
-      const correctBoard = currentTraceItem.board
+      const expectedBoard = currentTraceItem.board
         .trim()
         .split('\n')
         .filter((line) => line.trim() !== '')
         .map((line) => [...line.trim()]);
 
-      const userCharacters = characters.map(({ key, ...rest }) => rest);
+      const actualTurtles = characters.map(({ key, ...rest }) => rest);
 
       // TODO: remove this later
-      console.log('correctCharacters', correctCharacters);
-      console.log('userCharacters', userCharacters);
-      console.log('correctBoard', correctBoard);
-      console.log('userBoard', board);
+      console.log('expectedTurtles', expectedTurtles);
+      console.log('actualTurtles', actualTurtles);
+      console.log('expectedBoard', expectedBoard);
+      console.log('actualBoard', actualBoard);
 
-      // TODO: Implement a compare function without using JSON.
-      return (
-        JSON.stringify(correctCharacters) === JSON.stringify(userCharacters) &&
-        JSON.stringify(correctBoard) === JSON.stringify(board)
-      );
+      return fastDeepEqual(expectedTurtles, actualTurtles) && fastDeepEqual(expectedBoard, actualBoard);
     };
 
     const handleClickCharacter = (character: CharacterTrace & { key: string }): void => {
@@ -245,7 +242,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
         <Center flexBasis={0} flexGrow={2} minW={0} px={4} py={16}>
           <BoardViewer
             enableTransitions
-            board={board.map((cells) => cells.join('')).join('\n')}
+            board={actualBoard.map((cells) => cells.join('')).join('\n')}
             focusedCell={selectedPosition}
             vars={Object.fromEntries(characters.map((character) => [character.key, character]))}
             onCellClick={handleClickCell}
