@@ -53,12 +53,8 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     const initialize = useCallback(
       (keepSelectedCell = false): void => {
         console.log('initialize:', problem, previousTraceItem);
-        const initialBoard = previousTraceItem.board
-          .trim()
-          .split('\n')
-          .filter((line) => line.trim() !== '')
-          .map((line) => [...line.trim()]);
-        updateBoard(initialBoard as ColorChar[][]);
+        const initialBoard = parseBoard(previousTraceItem.board);
+        updateBoard(initialBoard);
         updateTurtles(Object.values(previousTraceItem.vars ?? {}).filter(isTurtleTrace));
         if (!keepSelectedCell) setSelectedCell(undefined);
       },
@@ -66,7 +62,6 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     );
 
     useImperativeHandle(ref, () => ({
-      // 親コンポーネントから関数を呼び出せるようにする
       initialize,
       isCorrect,
     }));
@@ -94,11 +89,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
       if (!currentTraceItem) return false;
 
       const expectedTurtles = Object.values(currentTraceItem.vars ?? {}).filter(isTurtleTrace);
-      const expectedBoard = currentTraceItem.board
-        .trim()
-        .split('\n')
-        .filter((line) => line.trim() !== '')
-        .map((line) => [...line.trim()]);
+      const expectedBoard = parseBoard(currentTraceItem.board);
       return fastDeepEqual(expectedTurtles, turtles) && fastDeepEqual(expectedBoard, board);
     };
 
@@ -106,12 +97,13 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
       setSelectedCell({ x: turtle.x, y: turtle.y });
     };
 
-    const handleClickCharacterMoveForwardButton = (): void => {
+    const handleMoveTurtle = (forward: boolean): void => {
       if (!selectedTurtle) return;
 
       const index = DIRECTIONS.indexOf(selectedTurtle.dir);
-      const newX = selectedTurtle.x + DX[index];
-      const newY = selectedTurtle.y + DY[index];
+      const multiplier = forward ? 1 : -1;
+      const newX = selectedTurtle.x + DX[index] * multiplier;
+      const newY = selectedTurtle.y + DY[index] * multiplier;
       if (!canPutTurtle(turtles, newX, newY)) return;
 
       updateCellColor(selectedTurtle.color as ColorChar, newX, newY);
@@ -119,32 +111,12 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
       setSelectedCell({ x: newX, y: newY });
     };
 
-    const handleClickCharacterMoveBackwardButton = (): void => {
+    const handleTurnTurtle = (left: boolean): void => {
       if (!selectedTurtle) return;
 
-      const index = DIRECTIONS.indexOf(selectedTurtle.dir);
-      const newX = selectedTurtle.x - DX[index];
-      const newY = selectedTurtle.y - DY[index];
-      if (!canPutTurtle(turtles, newX, newY)) return;
-
-      updateCellColor(selectedTurtle.color as ColorChar, newX, newY);
-      updateTurtle(selectedTurtle, { x: newX, y: newY });
-      setSelectedCell({ x: newX, y: newY });
-    };
-
-    const handleClickCharacterTurnLeftButton = (): void => {
-      if (!selectedTurtle) return;
-
+      const directionChange = left ? 3 : 1;
       updateTurtle(selectedTurtle, {
-        dir: DIRECTIONS[(DIRECTIONS.indexOf(selectedTurtle.dir) + 3) % 4],
-      });
-    };
-
-    const handleClickCharacterTurnRightButton = (): void => {
-      if (!selectedTurtle) return;
-
-      updateTurtle(selectedTurtle, {
-        dir: DIRECTIONS[(DIRECTIONS.indexOf(selectedTurtle.dir) + 1) % 4],
+        dir: DIRECTIONS[(DIRECTIONS.indexOf(selectedTurtle.dir) + directionChange) % 4],
       });
     };
 
@@ -230,7 +202,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                     gridRowStart={1}
                     size="sm"
                     variant="outline"
-                    onClick={() => handleClickCharacterMoveForwardButton()}
+                    onClick={() => handleMoveTurtle(true)}
                   >
                     前に進む
                   </Button>
@@ -240,7 +212,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                     gridRowStart={2}
                     size="sm"
                     variant="outline"
-                    onClick={() => handleClickCharacterMoveBackwardButton()}
+                    onClick={() => handleMoveTurtle(false)}
                   >
                     後に戻る
                   </Button>
@@ -252,7 +224,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                     icon={<Icon as={MdTurnLeft} />}
                     size="sm"
                     variant="outline"
-                    onClick={() => handleClickCharacterTurnLeftButton()}
+                    onClick={() => handleTurnTurtle(true)}
                   />
                   <IconButton
                     aria-label="Turn right"
@@ -262,7 +234,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                     icon={<Icon as={MdTurnRight} />}
                     size="sm"
                     variant="outline"
-                    onClick={() => handleClickCharacterTurnRightButton()}
+                    onClick={() => handleTurnTurtle(false)}
                   />
                 </Grid>
                 <HStack justify="flex-end">
@@ -300,6 +272,14 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
 function canPutTurtle(turtlesTraces: TurtleTrace[], x: number, y: number): boolean {
   return 0 <= x && x < COLUMNS && 0 <= y && y < ROWS && !turtlesTraces.some((t) => t.x === x && t.y === y);
+}
+
+function parseBoard(boardString: string): ColorChar[][] {
+  return boardString
+    .trim()
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => [...line.trim()]) as ColorChar[][];
 }
 
 BoardEditor.displayName = 'BoardEditor';
