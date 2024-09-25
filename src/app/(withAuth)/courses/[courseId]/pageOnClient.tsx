@@ -21,8 +21,8 @@ import {
 import type { CourseId } from '../../../../problems/problemData';
 import {
   courseIdToLectureIds,
-  courseIdToName,
   courseIdToLectureIndexToProblemIds,
+  courseIdToName,
 } from '../../../../problems/problemData';
 
 type Props = {

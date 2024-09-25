@@ -27,8 +27,8 @@ import {
 } from '../../../../../../infrastructures/useClient/chakra';
 import type { CourseId } from '../../../../../../problems/problemData';
 import {
-  courseIdToName,
   courseIdToLectureIndexToProblemIds,
+  courseIdToName,
   problemIdToName,
 } from '../../../../../../problems/problemData';
 

@@ -23,7 +23,7 @@ import {
 } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../../../problems/generateProblem';
 import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
-import { isMacOS } from '../../../../../../../../utils/platform';
+import { useIsMacOS } from '../../../../../../../../utils/platform';
 
 import type { TurtleGraphicsHandle } from './BoardEditor';
 import { BoardEditor } from './BoardEditor';
@@ -64,7 +64,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
     onAlertOpen();
   };
 
-  const handleClickAnswerButton = async (): Promise<void> => {
+  const handleClickSubmitButton = async (): Promise<void> => {
     const isCorrect = turtleGraphicsRef.current?.isCorrect() || false;
 
     switch (problemType) {
@@ -110,7 +110,8 @@ export const ProblemBody: React.FC<Props> = (props) => {
     }
   };
 
-  useShortcutKeys(handleClickAnswerButton);
+  const isMacOS = useIsMacOS();
+  useShortcutKeys(handleClickSubmitButton);
 
   return (
     <>
@@ -210,10 +211,10 @@ export const ProblemBody: React.FC<Props> = (props) => {
             colorScheme="brand"
             rightIcon={
               <Box as="span" color="whiteAlpha.800" fontSize="sm" fontWeight="bold">
-                {isMacOS() ? 'Cmd + Enter' : 'Ctrl + Enter'}
+                {isMacOS ? 'Cmd + Enter' : 'Ctrl + Enter'}
               </Box>
             }
-            onClick={() => handleClickAnswerButton()}
+            onClick={() => handleClickSubmitButton()}
           >
             提出
           </Button>
