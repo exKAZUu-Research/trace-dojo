@@ -1,7 +1,9 @@
 import type { ProblemSession } from '@prisma/client';
 import { useRouter } from 'next/navigation';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
+import { MAX_CHALLENGE_COUNT } from '../../../../../../../../constants';
+import { backendTrpcReact } from '../../../../../../../../infrastructures/trpcBackend/client';
 import {
   AlertDialog,
   AlertDialogBody,
@@ -62,23 +64,41 @@ export const ProblemBody: React.FC<Props> = (props) => {
     onAlertOpen();
   };
 
+  const { refetch: fetchIncorrectSubmissionsCount } = backendTrpcReact.countIncorrectSubmissions.useQuery(
+    { sessionId: props.problemSession.id },
+    { enabled: false }
+  );
+
   const handleClickSubmitButton = async (): Promise<void> => {
     const isCorrect = turtleGraphicsRef.current?.isCorrect() || false;
 
     switch (problemType) {
       case 'executionResult': {
-        void props.createSubmissionUpdatingProblemSession(isCorrect, isCorrect);
         if (isCorrect) {
+          void props.createSubmissionUpdatingProblemSession(true, true);
           openAlertDialog(
             '正解',
-            '一発正解です！この問題は完了です。問題一覧ページに戻って、次の問題に挑戦してください。',
+            '一発正解です！この問題は完了です。問題一覧ページに戻りますので、次の問題に挑戦してください。',
             () => {
               router.push(`/courses/${props.params.courseId}/lectures/${props.params.lectureId}`);
             }
           );
         } else {
-          void props.updateProblemSession('step', 1);
-          openAlertDialog('不正解', '不正解です。ステップごとに問題を解いてみましょう。');
+          const response = await fetchIncorrectSubmissionsCount();
+          const incorrectCount = (response.data ?? 0) + 1;
+          void props.createSubmissionUpdatingProblemSession(false, false);
+          if (incorrectCount < MAX_CHALLENGE_COUNT) {
+            openAlertDialog(
+              '不正解',
+              `不正解です。あと${MAX_CHALLENGE_COUNT - incorrectCount}回間違えたら、ステップ実行モードに移ります。一発正解を目指しましょう！`
+            );
+          } else {
+            void props.updateProblemSession('step', 1);
+            openAlertDialog(
+              '不正解',
+              `不正解です。${MAX_CHALLENGE_COUNT}回間違えたので、ステップ実行モードに移ります。ステップごとに問題を解いてください。`
+            );
+          }
         }
         break;
       }
@@ -91,7 +111,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
           if (currentTraceItemIndex === props.problem.traceItems.length - 1) {
             openAlertDialog(
               '正解',
-              '正解です。この問題は完了です。問題一覧ページに戻って、次の問題に挑戦してください。',
+              '正解です。この問題は完了です。問題一覧ページに戻りますので、次の問題に挑戦してください。',
               () => {
                 router.push(`/courses/${props.params.courseId}/lectures/${props.params.lectureId}`);
               }
@@ -108,22 +128,37 @@ export const ProblemBody: React.FC<Props> = (props) => {
     }
   };
 
+  useShortcutKeys(handleClickSubmitButton);
+
   return (
     <>
       <Flex gap={6}>
         <VStack align="stretch" flexBasis={0} flexGrow={1} minW={0} spacing={4}>
           <VStack align="stretch" as={Card} overflow="hidden" spacing={0}>
             <VStack align="stretch" borderBottomWidth="1px" p={5}>
-              <HStack>
+              <HStack justifyContent="space-between">
                 <Heading size="md">問題</Heading>
                 {problemType === 'step' && (
                   <Tag colorScheme="brand" fontWeight="bold" size="sm" variant="solid">
                     ステップ実行モード
                   </Tag>
                 )}
+                {problemType === 'executionResult' && (
+                  <Tooltip label="減点になりますが、確実に問題を解けます。">
+                    <Button
+                      colorScheme="brand"
+                      variant="outline"
+                      onClick={() => {
+                        void props.updateProblemSession('step', 1);
+                      }}
+                    >
+                      諦めてステップ実行モードに移る
+                    </Button>
+                  </Tooltip>
+                )}
               </HStack>
 
-              <div>
+              <Box>
                 <Box as="span" fontWeight="bold">
                   {problemType === 'executionResult' ? (
                     'プログラムを実行した後'
@@ -137,24 +172,40 @@ export const ProblemBody: React.FC<Props> = (props) => {
                   )}
                 </Box>
                 の盤面を作成し、提出ボタンを押してください。
-              </div>
+              </Box>
             </VStack>
 
-            <SyntaxHighlighter
-              code={props.problem.displayProgram}
-              currentFocusLine={
-                problemType === 'executionResult'
-                  ? undefined
-                  : props.problem.sidToLineIndex.get(props.problem.traceItems[currentTraceItemIndex].sid)
-              }
-              previousFocusLine={
-                problemType === 'executionResult'
-                  ? undefined
-                  : props.problem.sidToLineIndex.get(props.problem.traceItems[previousTraceItemIndex].sid)
-              }
-              programmingLanguageId="java"
-            />
+            <div>
+              <Box as="span" fontWeight="bold">
+                {problemType === 'executionResult' ? (
+                  'プログラムを実行した後'
+                ) : (
+                  <>
+                    <Box as="span" border="2px solid #f56565" px={0.5} rounded="sm">
+                      {props.problem.sidToLineIndex.get(props.problem.traceItems[currentTraceItemIndex].sid)}行目
+                    </Box>
+                    を実行した後
+                  </>
+                )}
+              </Box>
+              の盤面を作成し、提出ボタンを押してください。
+            </div>
           </VStack>
+
+          <SyntaxHighlighter
+            code={props.problem.displayProgram}
+            currentFocusLine={
+              problemType === 'executionResult'
+                ? undefined
+                : props.problem.sidToLineIndex.get(props.problem.traceItems[currentTraceItemIndex].sid)
+            }
+            previousFocusLine={
+              problemType === 'executionResult'
+                ? undefined
+                : props.problem.sidToLineIndex.get(props.problem.traceItems[previousTraceItemIndex].sid)
+            }
+            programmingLanguageId="java"
+          />
         </VStack>
 
         <VStack align="stretch" flexBasis={0} flexGrow={1} spacing="4">
@@ -236,3 +287,17 @@ export const ProblemBody: React.FC<Props> = (props) => {
     </>
   );
 };
+
+function useShortcutKeys(handleClickAnswerButton: () => Promise<void>): void {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        void handleClickAnswerButton();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}

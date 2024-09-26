@@ -246,12 +246,13 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                     onClick={() => handleTurnTurtle(false)}
                   />
                 </Grid>
-                <HStack justify="flex-end">
+                <HStack justify="space-between" width="100%">
                   <Button
                     colorScheme="brand"
                     leftIcon={<Icon as={MdOutlineDelete} />}
                     size="sm"
                     variant="outline"
+                    width="100%"
                     onClick={() => handleRemoveCharacterButton()}
                   >
                     タートルを削除

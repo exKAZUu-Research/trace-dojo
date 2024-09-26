@@ -16,6 +16,8 @@ export const SUPERTOKENS_ACCESS_TOKEN_COOKIE_NAME = 'sAccessToken';
 export const SUPERTOKENS_REFRESH_TOKEN_COOKIE_NAME = 'sRefreshToken';
 export const SERVICE_ADMIN_ROLE = 'admin';
 
+export const MAX_CHALLENGE_COUNT = 3;
+
 /**
  * 最後のイベントから今回のイベント発生時の期間において、アクティブと解釈される最大時間。
  */

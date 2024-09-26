@@ -24,6 +24,10 @@ export const backendRouter = router({
       })
     )
     .mutation(async ({ input: { id, incrementalElapsedMilliseconds, ...data } }) => {
+      if (data.problemType === 'step' && data.traceItemIndex === 0) {
+        throw new TRPCError({ code: 'BAD_REQUEST' });
+      }
+
       const problemSession = await prisma.problemSession.update({
         where: { id },
         data: {
@@ -56,6 +60,22 @@ export const backendRouter = router({
       if (session.userId !== ctx.session.superTokensUserId) throw new TRPCError({ code: 'UNAUTHORIZED' });
 
       await prisma.problemSubmission.create({ data: input });
+    }),
+
+  countIncorrectSubmissions: procedure
+    .use(authorize)
+    .input(
+      z.object({
+        sessionId: z.number().int().positive(),
+      })
+    )
+    .query(async ({ input }) => {
+      return await prisma.problemSubmission.count({
+        where: {
+          sessionId: input.sessionId,
+          isCorrect: false,
+        },
+      });
     }),
 });
 
