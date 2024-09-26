@@ -1,4 +1,4 @@
-import { Card, Heading, HStack, VStack, Box, Button } from '@chakra-ui/react';
+import { Box, Button, Card, Heading, HStack, VStack } from '@chakra-ui/react';
 import React from 'react';
 
 import type { Problem } from '../../../../../../../../problems/generateProblem';
@@ -26,18 +26,18 @@ export const TraceViewer: React.FC<Props> = (props: Props) => {
                 <Box as="span" bgColor="orange.100" px={0.5} rounded="sm">
                   {props.problem.sidToLineIndex.get(props.problem.traceItems[props.previousTraceItemIndex].sid)}行目
                 </Box>
-                を実行した後（
+                の実行後（
                 <Box as="span" border="2px solid #f56565" px={0.5} rounded="sm">
                   {props.problem.sidToLineIndex.get(props.problem.traceItems[props.currentTraceItemIndex].sid)}行目
                 </Box>
-                を実行する前）の盤面
+                の実行前）の盤面
               </>
             ) : (
               <>
                 <Box as="span" bgColor="orange.100" px={0.5} rounded="sm">
                   {props.problem.sidToLineIndex.get(props.problem.traceItems[props.focusTraceItemIndex].sid)}行目
                 </Box>
-                を実行した後の盤面
+                の実行後の盤面
               </>
             )}
           </Heading>
@@ -53,8 +53,7 @@ export const TraceViewer: React.FC<Props> = (props: Props) => {
         <Button
           colorScheme="brand"
           isDisabled={props.focusTraceItemIndex <= 1}
-          mr="5%"
-          mx="auto"
+          mx="5%"
           variant="outline"
           w="40%"
           onClick={() => props.setFocusTraceItemIndex((prev) => prev - 1)}
@@ -64,8 +63,7 @@ export const TraceViewer: React.FC<Props> = (props: Props) => {
         <Button
           colorScheme="brand"
           isDisabled={props.previousTraceItemIndex <= props.focusTraceItemIndex}
-          ml="5%"
-          mx="auto"
+          mx="5%"
           variant="outline"
           w="40%"
           onClick={() => props.setFocusTraceItemIndex((prev) => prev + 1)}
