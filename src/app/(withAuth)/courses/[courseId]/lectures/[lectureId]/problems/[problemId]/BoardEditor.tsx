@@ -17,7 +17,6 @@ import {
   HStack,
   Icon,
   IconButton,
-  Spacer,
   VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../../../problems/generateProblem';
@@ -245,7 +244,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                     variant="outline"
                     onClick={() => handleRemoveCharacterButton()}
                   >
-                    削除
+                    タートルを削除
                   </Button>
                 </HStack>
               </>
@@ -257,13 +256,12 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                 タートルを配置
               </Button>
             )}
+            {selectedPosition && (
+              <Box color="brand.600" fontSize="sm">
+                右クリックでマスを白色に戻せます。
+              </Box>
+            )}
           </VStack>
-
-          <Spacer />
-
-          <Box color="gray.600" fontSize="sm">
-            右クリックでマスを白色に戻せます。
-          </Box>
         </VStack>
       </HStack>
     );
