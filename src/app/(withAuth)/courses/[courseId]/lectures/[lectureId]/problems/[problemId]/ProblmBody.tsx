@@ -174,22 +174,6 @@ export const ProblemBody: React.FC<Props> = (props) => {
                 の盤面を作成し、提出ボタンを押してください。
               </Box>
             </VStack>
-
-            <div>
-              <Box as="span" fontWeight="bold">
-                {problemType === 'executionResult' ? (
-                  'プログラムを実行した後'
-                ) : (
-                  <>
-                    <Box as="span" border="2px solid #f56565" px={0.5} rounded="sm">
-                      {props.problem.sidToLineIndex.get(props.problem.traceItems[currentTraceItemIndex].sid)}行目
-                    </Box>
-                    を実行した後
-                  </>
-                )}
-              </Box>
-              の盤面を作成し、提出ボタンを押してください。
-            </div>
           </VStack>
 
           <SyntaxHighlighter
