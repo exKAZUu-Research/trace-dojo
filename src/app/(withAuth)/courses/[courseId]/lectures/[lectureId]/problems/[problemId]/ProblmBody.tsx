@@ -1,6 +1,6 @@
 import type { ProblemSession } from '@prisma/client';
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 
 import { MAX_CHALLENGE_COUNT } from '../../../../../../../../constants';
 import { backendTrpcReact } from '../../../../../../../../infrastructures/trpcBackend/client';
@@ -18,7 +18,6 @@ import {
   Heading,
   HStack,
   Tag,
-  Tooltip,
   useDisclosure,
   VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
@@ -129,8 +128,6 @@ export const ProblemBody: React.FC<Props> = (props) => {
     }
   };
 
-  useShortcutKeys(handleClickSubmitButton);
-
   return (
     <>
       <Flex gap={6}>
@@ -147,7 +144,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
               </HStack>
 
               <Box>
-                {problemType === 'step' && (
+                {problemType === 'step' && previousTraceItemIndex >= 1 && (
                   <>
                     画面下部にある
                     <Box as="span" bgColor="orange.100" px={0.5} rounded="sm">
@@ -200,7 +197,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
         </VStack>
       </Flex>
 
-      {problemType !== 'executionResult' && previousTraceItemIndex >= 1 && (
+      {problemType === 'step' && previousTraceItemIndex >= 1 && (
         <TraceViewer
           currentTraceItemIndex={currentTraceItemIndex}
           focusTraceItemIndex={focusTraceItemIndex}
@@ -227,17 +224,20 @@ export const ProblemBody: React.FC<Props> = (props) => {
             </AlertDialogHeader>
             <AlertDialogBody>{alertMessage}</AlertDialogBody>
             <AlertDialogFooter>
-              <Tooltip hasArrow fontSize="xs" label={`ショートカットキーは Esc`} placement="bottom">
-                <Button
-                  ref={cancelRef}
-                  onClick={() => {
-                    postAlertAction?.();
-                    onAlertClose();
-                  }}
-                >
-                  閉じる
-                </Button>
-              </Tooltip>
+              <Button
+                ref={cancelRef}
+                rightIcon={
+                  <Box as="span" fontSize="sm" fontWeight="bold">
+                    (Esc)
+                  </Box>
+                }
+                onClick={() => {
+                  postAlertAction?.();
+                  onAlertClose();
+                }}
+              >
+                閉じる
+              </Button>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialogOverlay>
@@ -245,17 +245,3 @@ export const ProblemBody: React.FC<Props> = (props) => {
     </>
   );
 };
-
-function useShortcutKeys(handleClickAnswerButton: () => Promise<void>): void {
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        void handleClickAnswerButton();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-}
