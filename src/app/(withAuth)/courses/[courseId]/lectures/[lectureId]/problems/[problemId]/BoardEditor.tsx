@@ -18,6 +18,7 @@ import {
   Icon,
   IconButton,
   Spacer,
+  Spinner,
   VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../../../problems/generateProblem';
@@ -33,7 +34,7 @@ const DY = [1, 0, -1, 0];
 interface TurtleGraphicsProps {
   currentTraceItemIndex: number;
   focusTraceItemIndex: number;
-  handleClickSubmitButton: () => Promise<void>;
+  handleSubmit: () => Promise<void>;
   problem: Problem;
 }
 
@@ -42,10 +43,11 @@ export interface TurtleGraphicsHandle {
 }
 
 export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
-  ({ currentTraceItemIndex, focusTraceItemIndex, handleClickSubmitButton, problem }, ref) => {
+  ({ currentTraceItemIndex, focusTraceItemIndex, handleSubmit, problem }, ref) => {
     const [board, updateBoard] = useImmer<ColorChar[][]>([]);
     const [turtles, updateTurtles] = useImmer<TurtleTrace[]>([]);
     const [selectedCell, setSelectedCell] = useState<SelectedCell>();
+    const [isSubmitting, setIsSubmitting] = useState(false);
     const selectedTurtle = turtles.find((char) => char.x === selectedCell?.x && char.y === selectedCell?.y);
     const focusTraceItem = problem.traceItems[focusTraceItemIndex];
     const currentTraceItem = problem.traceItems[currentTraceItemIndex];
@@ -152,13 +154,21 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     };
 
     const onCellRightClick = (x: number, y: number): void => {
+      if (isSubmitting) return;
+
       onCellClick(x, y);
       updateCellColor('.', x, y);
     };
 
-    const selectedPosition = selectedCell ? { x: selectedCell.x, y: selectedCell.y } : undefined;
-
-    useShortcutKeys(handleClickSubmitButton);
+    const handleSubmitAndToggleSubmitting = useCallback(async () => {
+      setIsSubmitting(true);
+      try {
+        await handleSubmit();
+      } finally {
+        setIsSubmitting(false);
+      }
+    }, [handleSubmit]);
+    useShortcutKeys(handleSubmitAndToggleSubmitting, isSubmitting);
 
     return (
       <HStack align="stretch" bgColor="gray.50" overflow="hidden" rounded="md">
@@ -166,7 +176,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
           <BoardViewer
             enableTransitions
             board={board.map((cells) => cells.join('')).join('\n')}
-            focusedCell={selectedPosition}
+            focusedCell={selectedCell}
             turtles={turtles}
             onCellClick={onCellClick}
             onCellRightClick={onCellRightClick}
@@ -181,10 +191,10 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
           <VStack align="stretch">
             <Heading size="sm">選択したマス</Heading>
             <HStack spacing={4}>
-              {selectedPosition ? (
+              {selectedCell ? (
                 <>
-                  <div>x = {selectedPosition.x}</div>
-                  <div>y = {selectedPosition.y}</div>
+                  <div>x = {selectedCell.x}</div>
+                  <div>y = {selectedCell.y}</div>
                 </>
               ) : (
                 <Box color="gray.600">なし</Box>
@@ -201,6 +211,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                     colorScheme="brand"
                     gridColumnStart={2}
                     gridRowStart={1}
+                    isDisabled={isSubmitting}
                     size="sm"
                     variant="outline"
                     onClick={() => handleMoveTurtle(true)}
@@ -211,6 +222,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                     colorScheme="brand"
                     gridColumnStart={2}
                     gridRowStart={2}
+                    isDisabled={isSubmitting}
                     size="sm"
                     variant="outline"
                     onClick={() => handleMoveTurtle(false)}
@@ -223,6 +235,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                     gridColumnStart={1}
                     gridRowStart={2}
                     icon={<Icon as={MdTurnLeft} />}
+                    isDisabled={isSubmitting}
                     size="sm"
                     variant="outline"
                     onClick={() => handleTurnTurtle(true)}
@@ -233,6 +246,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                     gridColumnStart={3}
                     gridRowStart={2}
                     icon={<Icon as={MdTurnRight} />}
+                    isDisabled={isSubmitting}
                     size="sm"
                     variant="outline"
                     onClick={() => handleTurnTurtle(false)}
@@ -241,6 +255,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                 <HStack justify="space-between" width="100%">
                   <Button
                     colorScheme="brand"
+                    isDisabled={isSubmitting}
                     leftIcon={<Icon as={MdOutlineDelete} />}
                     size="sm"
                     variant="outline"
@@ -254,30 +269,41 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
             ) : (
               <Box color="gray.600">なし</Box>
             )}
-            {!selectedTurtle && selectedPosition && (
-              <Button colorScheme="brand" size="sm" variant="outline" onClick={() => handleAddCharacterButton()}>
+            {!selectedTurtle && selectedCell && (
+              <Button
+                colorScheme="brand"
+                isDisabled={isSubmitting}
+                size="sm"
+                variant="outline"
+                onClick={() => handleAddCharacterButton()}
+              >
                 タートルを配置
               </Button>
             )}
-            {selectedPosition && (
+            {selectedCell && (
               <Box color="brand.600" fontSize="sm">
                 右クリックでマスを白色に戻せます。
               </Box>
             )}
           </VStack>
           <Spacer />
-          <Button colorScheme="brand" variant="outline" onClick={() => initialize()}>
+          <Button colorScheme="brand" isDisabled={isSubmitting} variant="outline" onClick={() => initialize()}>
             盤面をリセット
           </Button>
 
           <Button
             colorScheme="brand"
+            isDisabled={isSubmitting}
             rightIcon={
-              <Box as="span" color="whiteAlpha.800" fontSize="sm" fontWeight="bold">
-                (Enter)
-              </Box>
+              isSubmitting ? (
+                <Spinner size="sm" />
+              ) : (
+                <Box as="span" color="whiteAlpha.800" fontSize="sm" fontWeight="bold">
+                  (Enter)
+                </Box>
+              )
             }
-            onClick={() => handleClickSubmitButton()}
+            onClick={handleSubmitAndToggleSubmitting}
           >
             提出
           </Button>
@@ -301,15 +327,17 @@ function parseBoard(boardString: string): ColorChar[][] {
     .map((line) => [...line.trim()]) as ColorChar[][];
 }
 
-function useShortcutKeys(handleClickSubmitButton: () => Promise<void>): void {
+function useShortcutKeys(handleSubmit: () => Promise<void>, isSubmitting: boolean): void {
   useEffect(() => {
+    if (isSubmitting) return;
+
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Enter') {
         event.preventDefault();
-        void handleClickSubmitButton();
+        void handleSubmit();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleClickSubmitButton]);
+  }, [handleSubmit, isSubmitting]);
 }

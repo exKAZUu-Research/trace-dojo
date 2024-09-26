@@ -70,7 +70,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
     { enabled: false }
   );
 
-  const handleClickSubmitButton = useCallback(async (): Promise<void> => {
+  const handleSubmit = useCallback(async (): Promise<void> => {
     if (isAlertOpen) return;
 
     const isCorrect = turtleGraphicsRef.current?.isCorrect() || false;
@@ -78,7 +78,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
     switch (problemType) {
       case 'executionResult': {
         if (isCorrect) {
-          void props.createSubmissionUpdatingProblemSession(true, true);
+          await props.createSubmissionUpdatingProblemSession(true, true);
           openAlertDialog(
             '正解',
             '一発正解です！この問題は完了です。問題一覧ページに戻りますので、次の問題に挑戦してください。',
@@ -89,14 +89,14 @@ export const ProblemBody: React.FC<Props> = (props) => {
         } else {
           const response = await fetchIncorrectSubmissionsCount();
           const incorrectCount = (response.data ?? 0) + 1;
-          void props.createSubmissionUpdatingProblemSession(false, false);
+          await props.createSubmissionUpdatingProblemSession(false, false);
           if (incorrectCount < MAX_CHALLENGE_COUNT) {
             openAlertDialog(
               '不正解',
               `不正解です。あと${MAX_CHALLENGE_COUNT - incorrectCount}回間違えたら、ステップ実行モードに移ります。一発正解を目指しましょう！`
             );
           } else {
-            void props.updateProblemSession('step', 1);
+            await props.updateProblemSession('step', 1);
             openAlertDialog(
               '不正解',
               `不正解です。${MAX_CHALLENGE_COUNT}回間違えたので、ステップ実行モードに移ります。ステップごとに問題を解いてください。`
@@ -106,7 +106,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
         break;
       }
       case 'step': {
-        void props.createSubmissionUpdatingProblemSession(
+        await props.createSubmissionUpdatingProblemSession(
           isCorrect,
           isCorrect && currentTraceItemIndex === props.problem.traceItems.length - 1
         );
@@ -120,7 +120,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
               }
             );
           } else {
-            void props.updateProblemSession('step', currentTraceItemIndex + 1);
+            await props.updateProblemSession('step', currentTraceItemIndex + 1);
             openAlertDialog('正解', '正解です。次のステップに進みます。');
             setFocusTraceItemIndex(currentTraceItemIndex);
           }
@@ -205,7 +205,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
             ref={turtleGraphicsRef}
             currentTraceItemIndex={currentTraceItemIndex}
             focusTraceItemIndex={focusTraceItemIndex}
-            handleClickSubmitButton={handleClickSubmitButton}
+            handleSubmit={handleSubmit}
             problem={props.problem}
           />
         </VStack>
