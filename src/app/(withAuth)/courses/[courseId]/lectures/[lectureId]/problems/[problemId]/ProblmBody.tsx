@@ -200,7 +200,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
           />
         </VStack>
 
-        <VStack align="stretch" flexBasis={0} flexGrow={1} spacing="4">
+        <VStack align="stretch" flexBasis={0} flexGrow={1} mt="auto" spacing="4">
           <BoardEditor
             ref={turtleGraphicsRef}
             currentTraceItemIndex={currentTraceItemIndex}
