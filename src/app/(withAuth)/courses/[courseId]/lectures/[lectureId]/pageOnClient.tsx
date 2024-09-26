@@ -35,8 +35,8 @@ import {
 type Props = {
   params: { courseId: CourseId; lectureId: string };
   lectureIndex: number;
-  problemSessions: (Pick<ProblemSession, 'problemId' | 'completedAt' | 'elapsedMilliseconds'> & {
-    submissions: Pick<ProblemSubmission, 'elapsedMilliseconds' | 'isCorrect'>[];
+  problemSessions: (Pick<ProblemSession, 'problemId' | 'completedAt'> & {
+    submissions: Pick<ProblemSubmission, 'isCorrect'>[];
   })[];
 };
 

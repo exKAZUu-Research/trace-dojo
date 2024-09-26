@@ -25,8 +25,7 @@ const LecturePage: NextPage<Props> = async (props) => {
     select: {
       problemId: true,
       completedAt: true,
-      elapsedMilliseconds: true,
-      submissions: { select: { elapsedMilliseconds: true, isCorrect: true } },
+      submissions: { select: { isCorrect: true } },
     },
     where: { userId: session.superTokensUserId, courseId: props.params.courseId, lectureId: props.params.lectureId },
   });
