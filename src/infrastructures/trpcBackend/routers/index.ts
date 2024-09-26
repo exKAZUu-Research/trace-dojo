@@ -57,6 +57,22 @@ export const backendRouter = router({
 
       await prisma.problemSubmission.create({ data: input });
     }),
+
+  countIncorrectSubmissions: procedure
+    .use(authorize)
+    .input(
+      z.object({
+        sessionId: z.number().int().positive(),
+      })
+    )
+    .query(async ({ input }) => {
+      return await prisma.problemSubmission.count({
+        where: {
+          sessionId: input.sessionId,
+          isCorrect: false,
+        },
+      });
+    }),
 });
 
 // export type definition of API

@@ -2,6 +2,7 @@ import type { ProblemSession } from '@prisma/client';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
+import { backendTrpcReact } from '../../../../../../../../infrastructures/trpcBackend/client';
 import {
   AlertDialog,
   AlertDialogBody,
@@ -61,13 +62,18 @@ export const ProblemBody: React.FC<Props> = (props) => {
     onAlertOpen();
   };
 
+  const { refetch: fetchIncorrectSubmissionsCount } = backendTrpcReact.countIncorrectSubmissions.useQuery(
+    { sessionId: props.problemSession.id },
+    { enabled: false }
+  );
+
   const handleClickSubmitButton = async (): Promise<void> => {
     const isCorrect = turtleGraphicsRef.current?.isCorrect() || false;
 
     switch (problemType) {
       case 'executionResult': {
-        void props.createSubmissionUpdatingProblemSession(isCorrect, isCorrect);
         if (isCorrect) {
+          void props.createSubmissionUpdatingProblemSession(true, true);
           openAlertDialog(
             '正解',
             '一発正解です！この問題は完了です。問題一覧ページに戻って、次の問題に挑戦してください。',
@@ -76,6 +82,10 @@ export const ProblemBody: React.FC<Props> = (props) => {
             }
           );
         } else {
+          const response = await fetchIncorrectSubmissionsCount();
+          const count = (response.data ?? 0) + 1;
+          console.log(count);
+          void props.createSubmissionUpdatingProblemSession(false, false);
           void props.updateProblemSession('step', 1);
           openAlertDialog('不正解', '不正解です。ステップごとに問題を解いてみましょう。');
         }
