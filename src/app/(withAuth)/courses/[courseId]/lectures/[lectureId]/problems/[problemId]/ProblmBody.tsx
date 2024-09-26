@@ -196,9 +196,6 @@ export const ProblemBody: React.FC<Props> = (props) => {
           <BoardEditor
             ref={turtleGraphicsRef}
             currentTraceItemIndex={currentTraceItemIndex}
-            handleClickResetButton={() => {
-              turtleGraphicsRef.current?.initialize();
-            }}
             handleClickSubmitButton={handleClickSubmitButton}
             previousTraceItemIndex={previousTraceItemIndex}
             problem={props.problem}

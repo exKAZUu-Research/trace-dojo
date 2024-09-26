@@ -35,19 +35,14 @@ interface TurtleGraphicsProps {
   currentTraceItemIndex: number;
   previousTraceItemIndex: number;
   handleClickSubmitButton: () => Promise<void>;
-  handleClickResetButton: () => void;
 }
 
 export interface TurtleGraphicsHandle {
-  initialize(): void;
   isCorrect(): boolean;
 }
 
 export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
-  (
-    { currentTraceItemIndex, handleClickResetButton, handleClickSubmitButton, previousTraceItemIndex, problem },
-    ref
-  ) => {
+  ({ currentTraceItemIndex, handleClickSubmitButton, previousTraceItemIndex, problem }, ref) => {
     const [board, updateBoard] = useImmer<ColorChar[][]>([]);
     const [turtles, updateTurtles] = useImmer<TurtleTrace[]>([]);
     const [selectedCell, setSelectedCell] = useState<SelectedCell>();
@@ -57,7 +52,6 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
     const initialize = useCallback(
       (keepSelectedCell = false): void => {
-        console.log('initialize:', problem, previousTraceItem);
         const initialBoard = parseBoard(previousTraceItem.board);
         updateBoard(initialBoard);
         updateTurtles(Object.values(previousTraceItem.vars ?? {}).filter(isTurtleTrace));
@@ -67,7 +61,6 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     );
 
     useImperativeHandle(ref, () => ({
-      initialize,
       isCorrect,
     }));
 
@@ -272,7 +265,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
             )}
           </VStack>
           <Spacer />
-          <Button colorScheme="brand" variant="outline" onClick={handleClickResetButton}>
+          <Button colorScheme="brand" variant="outline" onClick={() => initialize()}>
             盤面をリセット
           </Button>
 
