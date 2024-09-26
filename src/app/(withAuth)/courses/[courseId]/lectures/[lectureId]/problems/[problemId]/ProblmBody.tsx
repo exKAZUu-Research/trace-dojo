@@ -143,19 +143,6 @@ export const ProblemBody: React.FC<Props> = (props) => {
                     ステップ実行モード
                   </Tag>
                 )}
-                {problemType === 'executionResult' && (
-                  <Tooltip label="減点になりますが、確実に問題を解けます。">
-                    <Button
-                      colorScheme="brand"
-                      variant="outline"
-                      onClick={() => {
-                        void props.updateProblemSession('step', 1);
-                      }}
-                    >
-                      諦めてステップ実行モードに移る
-                    </Button>
-                  </Tooltip>
-                )}
               </HStack>
 
               <Box>
@@ -228,7 +215,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
                 )}
               />
             </VStack>
-            <Box flexBasis={0} flexGrow={3} pt={8}>
+            <Box flexBasis={0} flexGrow={3}>
               <Variables traceItemVars={props.problem.traceItems[currentTraceItemIndex].vars} />
             </Box>
           </HStack>

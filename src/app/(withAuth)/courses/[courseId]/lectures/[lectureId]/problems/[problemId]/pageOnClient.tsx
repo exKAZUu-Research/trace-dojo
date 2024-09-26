@@ -10,7 +10,15 @@ import {
   MIN_INTERVAL_MS_OF_ACTIVE_EVENTS,
 } from '../../../../../../../../constants';
 import { backendTrpcReact } from '../../../../../../../../infrastructures/trpcBackend/client';
-import { Heading, HStack, Link, Text, VStack } from '../../../../../../../../infrastructures/useClient/chakra';
+import {
+  Button,
+  Heading,
+  HStack,
+  Link,
+  Text,
+  Tooltip,
+  VStack,
+} from '../../../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../../../problems/generateProblem';
 import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
 import { courseIdToLectureIds, courseIdToName, problemIdToName } from '../../../../../../../../problems/problemData';
@@ -50,33 +58,50 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     });
   };
 
-  const updateProblemSession = async (problemType: string, traceItemIndex: number): Promise<void> => {
+  const updateProblemSession = async (newProblemType: string, newTraceItemIndex: number): Promise<void> => {
     const newProblemSession = await updateProblemSessionMutation.mutateAsync({
       id: problemSession.id,
-      problemType,
-      traceItemIndex,
+      problemType: newProblemType,
+      traceItemIndex: newTraceItemIndex,
     });
     setProblemSession(newProblemSession);
   };
 
   return (
-    <VStack align="stretch" spacing={8}>
+    <VStack align="stretch" spacing={4}>
       <VStack align="stretch" spacing={1}>
-        <HStack spacing={2}>
-          <Link as={NextLink} color="gray.600" fontWeight="bold" href={`/courses/${props.params.courseId}`}>
-            {courseIdToName[props.params.courseId]}
-          </Link>
-          <Text color="gray.600">{'>'}</Text>
-          <Link
-            as={NextLink}
-            color="gray.600"
-            fontWeight="bold"
-            href={`/courses/${props.params.courseId}/lectures/${props.params.lectureId}`}
-          >
-            第{lectureIndex + 1}回
-          </Link>
+        <HStack justify="space-between" spacing={2}>
+          <HStack spacing={2}>
+            <Link as={NextLink} color="gray.600" fontWeight="bold" href={`/courses/${props.params.courseId}`}>
+              {courseIdToName[props.params.courseId]}
+            </Link>
+            <Text color="gray.600">{'>'}</Text>
+            <Link
+              as={NextLink}
+              color="gray.600"
+              fontWeight="bold"
+              href={`/courses/${props.params.courseId}/lectures/${props.params.lectureId}`}
+            >
+              第{lectureIndex + 1}回
+            </Link>
+          </HStack>
         </HStack>
-        <Heading as="h1">{problemIdToName[props.params.problemId]}</Heading>
+        <HStack justify="space-between" spacing={2}>
+          <Heading as="h1">{problemIdToName[props.params.problemId]}</Heading>
+          {problemSession.problemType === 'executionResult' && (
+            <Tooltip label="減点になりますが、確実に問題を解けます。">
+              <Button
+                colorScheme="blue"
+                variant="outline"
+                onClick={() => {
+                  void updateProblemSession('step', 1);
+                }}
+              >
+                諦めてステップ実行モードに移る
+              </Button>
+            </Tooltip>
+          )}
+        </HStack>
       </VStack>
 
       <ProblemBody
