@@ -378,10 +378,11 @@ public class Main {
   while4: {
     instrumented: `
 s.set('亀', new Turtle());
+s.get('亀').turnRight();
 s.set('i', <1-2>);
 while (s.get('i') < <4-5>) {
   s.get('亀').forward();
-  s.get('亀').turnRight();
+  s.get('亀').forward();
   s.get('亀').turnLeft();
   s.set('i', s.get('i') + 1);
 }
@@ -390,10 +391,11 @@ while (s.get('i') < <4-5>) {
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // sid
+        亀.右を向く(); // sid
         int i = <1-2>; // sid
         while (i < <4-5>) {
             亀.前に進む(); // sid
-            亀.右を向く(); // sid
+            亀.前に進む(); // sid
             亀.左を向く(); // sid
             i++; // sid
         }
