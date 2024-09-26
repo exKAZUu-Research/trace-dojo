@@ -1,6 +1,6 @@
 import type { ProblemSession } from '@prisma/client';
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 
 import {
   AlertDialog,
@@ -22,7 +22,6 @@ import {
 import type { Problem } from '../../../../../../../../problems/generateProblem';
 import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
 import { isTurtleTrace } from '../../../../../../../../problems/traceProgram';
-import { useIsMacOS } from '../../../../../../../../utils/platform';
 
 import type { TurtleGraphicsHandle } from './BoardEditor';
 import { BoardEditor } from './BoardEditor';
@@ -108,9 +107,6 @@ export const ProblemBody: React.FC<Props> = (props) => {
     }
   };
 
-  const isMacOS = useIsMacOS();
-  useShortcutKeys(handleClickSubmitButton);
-
   return (
     <>
       <VStack align="stretch" flexBasis={0} flexGrow={1} minW={0} spacing={4}>
@@ -192,27 +188,13 @@ export const ProblemBody: React.FC<Props> = (props) => {
         <BoardEditor
           ref={turtleGraphicsRef}
           currentTraceItemIndex={currentTraceItemIndex}
+          handleClickResetButton={() => {
+            turtleGraphicsRef.current?.initialize();
+          }}
+          handleClickSubmitButton={handleClickSubmitButton}
           previousTraceItemIndex={previousTraceItemIndex}
           problem={props.problem}
         />
-
-        <HStack justify="space-between">
-          <Button colorScheme="brand" variant="outline" onClick={() => turtleGraphicsRef.current?.initialize()}>
-            盤面をリセット
-          </Button>
-
-          <Button
-            colorScheme="brand"
-            rightIcon={
-              <Box as="span" color="whiteAlpha.800" fontSize="sm" fontWeight="bold">
-                {isMacOS ? 'Cmd + Enter' : 'Ctrl + Enter'}
-              </Box>
-            }
-            onClick={() => handleClickSubmitButton()}
-          >
-            提出
-          </Button>
-        </HStack>
       </VStack>
 
       <AlertDialog
@@ -250,17 +232,3 @@ export const ProblemBody: React.FC<Props> = (props) => {
     </>
   );
 };
-
-function useShortcutKeys(handleClickAnswerButton: () => Promise<void>): void {
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-        event.preventDefault();
-        void handleClickAnswerButton();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-}

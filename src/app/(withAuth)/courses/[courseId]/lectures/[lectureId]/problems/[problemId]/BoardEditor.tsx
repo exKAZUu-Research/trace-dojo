@@ -17,11 +17,13 @@ import {
   HStack,
   Icon,
   IconButton,
+  Spacer,
   VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../../../problems/generateProblem';
 import { isTurtleTrace, type TurtleTrace } from '../../../../../../../../problems/traceProgram';
 import type { ColorChar, SelectedCell } from '../../../../../../../../types';
+import { useIsMacOS } from '../../../../../../../../utils/platform';
 
 import { BoardViewer } from './BoardViewer';
 
@@ -33,6 +35,8 @@ interface TurtleGraphicsProps {
   problem: Problem;
   currentTraceItemIndex: number;
   previousTraceItemIndex: number;
+  handleClickSubmitButton: () => Promise<void>;
+  handleClickResetButton: () => void;
 }
 
 export interface TurtleGraphicsHandle {
@@ -41,7 +45,10 @@ export interface TurtleGraphicsHandle {
 }
 
 export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
-  ({ currentTraceItemIndex, previousTraceItemIndex, problem }, ref) => {
+  (
+    { currentTraceItemIndex, handleClickResetButton, handleClickSubmitButton, previousTraceItemIndex, problem },
+    ref
+  ) => {
     const [board, updateBoard] = useImmer<ColorChar[][]>([]);
     const [turtles, updateTurtles] = useImmer<TurtleTrace[]>([]);
     const [selectedCell, setSelectedCell] = useState<SelectedCell>();
@@ -158,9 +165,12 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
     const selectedPosition = selectedCell ? { x: selectedCell.x, y: selectedCell.y } : undefined;
 
+    const isMacOS = useIsMacOS();
+    useShortcutKeys(handleClickSubmitButton);
+
     return (
       <HStack align="stretch" bgColor="gray.50" overflow="hidden" rounded="md">
-        <Center flexBasis={0} flexGrow={2} minW={0} px={4} py={16}>
+        <Center flexBasis={0} flexGrow={2} minW={0} px={4} py={20}>
           <BoardViewer
             enableTransitions
             board={board.map((cells) => cells.join('')).join('\n')}
@@ -262,6 +272,22 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
               </Box>
             )}
           </VStack>
+          <Spacer />
+          <Button colorScheme="brand" variant="outline" onClick={handleClickResetButton}>
+            盤面をリセット
+          </Button>
+
+          <Button
+            colorScheme="brand"
+            rightIcon={
+              <Box as="span" color="whiteAlpha.800" fontSize="sm" fontWeight="bold">
+                {isMacOS ? 'Cmd + Enter' : 'Ctrl + Enter'}
+              </Box>
+            }
+            onClick={() => handleClickSubmitButton()}
+          >
+            提出
+          </Button>
         </VStack>
       </HStack>
     );
@@ -281,3 +307,17 @@ function parseBoard(boardString: string): ColorChar[][] {
 }
 
 BoardEditor.displayName = 'BoardEditor';
+
+function useShortcutKeys(handleClickAnswerButton: () => Promise<void>): void {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        event.preventDefault();
+        void handleClickAnswerButton();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}
