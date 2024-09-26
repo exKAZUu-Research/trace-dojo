@@ -17,6 +17,7 @@ import {
   Heading,
   HStack,
   Icon,
+  Tag,
   Tooltip,
   useDisclosure,
   VStack,
@@ -119,7 +120,14 @@ export const ProblemBody: React.FC<Props> = (props) => {
       <VStack align="stretch" flexBasis={0} flexGrow={1} minW={0} spacing={4}>
         <VStack align="stretch" as={Card} overflow="hidden" spacing={0}>
           <VStack align="stretch" borderBottomWidth="1px" p={5}>
-            <Heading size="md">問題</Heading>
+            <HStack>
+              <Heading size="md">問題</Heading>
+              {problemType === 'step' && (
+                <Tag colorScheme="brand" fontWeight="bold" size="sm" variant="solid">
+                  ステップ実行モード
+                </Tag>
+              )}
+            </HStack>
 
             <div>
               <Box as="span" fontWeight="bold">
