@@ -1,6 +1,6 @@
 import type { ProblemSession } from '@prisma/client';
 import { useRouter } from 'next/navigation';
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 
 import { MAX_CHALLENGE_COUNT } from '../../../../../../../../constants';
 import { backendTrpcReact } from '../../../../../../../../infrastructures/trpcBackend/client';
@@ -55,19 +55,24 @@ export const ProblemBody: React.FC<Props> = (props) => {
   const [alertMessage, setAlertMessage] = useState('');
   const [postAlertAction, setPostAlertAction] = useState<() => void>();
 
-  const openAlertDialog = (title: string, message: string, action?: () => void): void => {
-    setAlertTitle(title);
-    setAlertMessage(message);
-    setPostAlertAction(() => action);
-    onAlertOpen();
-  };
+  const openAlertDialog = useCallback(
+    (title: string, message: string, action?: () => void): void => {
+      setAlertTitle(title);
+      setAlertMessage(message);
+      setPostAlertAction(() => action);
+      onAlertOpen();
+    },
+    [onAlertOpen]
+  );
 
   const { refetch: fetchIncorrectSubmissionsCount } = backendTrpcReact.countIncorrectSubmissions.useQuery(
     { sessionId: props.problemSession.id },
     { enabled: false }
   );
 
-  const handleClickSubmitButton = async (): Promise<void> => {
+  const handleClickSubmitButton = useCallback(async (): Promise<void> => {
+    if (isAlertOpen) return;
+
     const isCorrect = turtleGraphicsRef.current?.isCorrect() || false;
 
     switch (problemType) {
@@ -126,7 +131,16 @@ export const ProblemBody: React.FC<Props> = (props) => {
         break;
       }
     }
-  };
+  }, [
+    currentTraceItemIndex,
+    fetchIncorrectSubmissionsCount,
+    isAlertOpen,
+    openAlertDialog,
+    previousTraceItemIndex,
+    problemType,
+    props,
+    router,
+  ]);
 
   return (
     <>
