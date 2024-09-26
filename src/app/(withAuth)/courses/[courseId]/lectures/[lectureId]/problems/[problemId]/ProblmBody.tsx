@@ -1,9 +1,7 @@
 import type { ProblemSession } from '@prisma/client';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { MdOutlineInfo } from 'react-icons/md';
 
-import { CustomModal } from '../../../../../../../../components/molecules/CustomModal';
 import {
   AlertDialog,
   AlertDialogBody,
@@ -47,7 +45,6 @@ export const ProblemBody: React.FC<Props> = (props) => {
     problemType === 'executionResult' ? props.problem.traceItems.length - 1 : props.problemSession.traceItemIndex;
   const previousTraceItemIndex = problemType === 'executionResult' ? 0 : currentTraceItemIndex - 1;
 
-  const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
   const { isOpen: isAlertOpen, onClose: onAlertClose, onOpen: onAlertOpen } = useDisclosure();
   const cancelRef = useRef(null);
 
@@ -135,7 +132,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
                   'プログラムを実行した後'
                 ) : (
                   <>
-                    <Box as="span" bgColor="red.100" px={0.5} rounded="sm">
+                    <Box as="span" border="2px solid #f56565" px={0.5} rounded="sm">
                       {props.problem.sidToLineIndex.get(props.problem.traceItems[currentTraceItemIndex].sid)}行目
                     </Box>
                     を実行した後
@@ -144,18 +141,6 @@ export const ProblemBody: React.FC<Props> = (props) => {
               </Box>
               の盤面を作成してください。
             </div>
-
-            <HStack spacing={4}>
-              <Button leftIcon={<Icon as={MdOutlineInfo} />} size="sm" variant="outline" onClick={onHelpModalOpen}>
-                解答方法
-              </Button>
-              <CustomModal
-                body={`${problemType === 'executionResult' ? '実行結果問題' : 'ステップ問題'}の解答方法の説明`}
-                isOpen={isHelpModalOpen}
-                title={`${problemType === 'executionResult' ? '実行結果問題' : 'ステップ問題'}について`}
-                onClose={onHelpModalClose}
-              />
-            </HStack>
           </VStack>
 
           <SyntaxHighlighter
@@ -184,7 +169,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
                     {props.problem.sidToLineIndex.get(props.problem.traceItems[previousTraceItemIndex].sid)}行目
                   </Box>
                   を実行した後（
-                  <Box as="span" bgColor="red.100" px={0.5} rounded="sm">
+                  <Box as="span" border="2px solid #f56565" px={0.5} rounded="sm">
                     {props.problem.sidToLineIndex.get(props.problem.traceItems[currentTraceItemIndex].sid)}行目
                   </Box>
                   を実行する前）の盤面
