@@ -2,6 +2,7 @@ import type { ProblemSession } from '@prisma/client';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
+import { MAX_CHALLENGE_COUNT } from '../../../../../../../../constants';
 import { backendTrpcReact } from '../../../../../../../../infrastructures/trpcBackend/client';
 import {
   AlertDialog,
@@ -23,7 +24,6 @@ import {
 import type { Problem } from '../../../../../../../../problems/generateProblem';
 import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
 import { isTurtleTrace } from '../../../../../../../../problems/traceProgram';
-import { useIsMacOS } from '../../../../../../../../utils/platform';
 
 import type { TurtleGraphicsHandle } from './BoardEditor';
 import { BoardEditor } from './BoardEditor';
@@ -77,18 +77,27 @@ export const ProblemBody: React.FC<Props> = (props) => {
           void props.createSubmissionUpdatingProblemSession(true, true);
           openAlertDialog(
             '正解',
-            '一発正解です！この問題は完了です。問題一覧ページに戻って、次の問題に挑戦してください。',
+            '一発正解です！この問題は完了です。問題一覧ページに戻りますので、次の問題に挑戦してください。',
             () => {
               router.push(`/courses/${props.params.courseId}/lectures/${props.params.lectureId}`);
             }
           );
         } else {
           const response = await fetchIncorrectSubmissionsCount();
-          const count = (response.data ?? 0) + 1;
-          console.log(count);
+          const incorrectCount = (response.data ?? 0) + 1;
           void props.createSubmissionUpdatingProblemSession(false, false);
-          void props.updateProblemSession('step', 1);
-          openAlertDialog('不正解', '不正解です。ステップごとに問題を解いてみましょう。');
+          if (incorrectCount === MAX_CHALLENGE_COUNT) {
+            void props.updateProblemSession('step', 1);
+            openAlertDialog(
+              '不正解',
+              `不正解です。${MAX_CHALLENGE_COUNT}回間違えたので、ステップ実行モードに移ります。ステップごとに問題を解いてください。`
+            );
+          } else {
+            openAlertDialog(
+              '不正解',
+              `不正解です。あと${MAX_CHALLENGE_COUNT - incorrectCount}回間違えたら、ステップ実行モードに移ります。一発正解を目指しましょう！`
+            );
+          }
         }
         break;
       }
@@ -101,7 +110,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
           if (currentTraceItemIndex === props.problem.traceItems.length - 1) {
             openAlertDialog(
               '正解',
-              '正解です。この問題は完了です。問題一覧ページに戻って、次の問題に挑戦してください。',
+              '正解です。この問題は完了です。問題一覧ページに戻りますので、次の問題に挑戦してください。',
               () => {
                 router.push(`/courses/${props.params.courseId}/lectures/${props.params.lectureId}`);
               }
@@ -118,7 +127,6 @@ export const ProblemBody: React.FC<Props> = (props) => {
     }
   };
 
-  const isMacOS = useIsMacOS();
   useShortcutKeys(handleClickSubmitButton);
 
   return (
@@ -126,16 +134,29 @@ export const ProblemBody: React.FC<Props> = (props) => {
       <VStack align="stretch" flexBasis={0} flexGrow={1} minW={0} spacing={4}>
         <VStack align="stretch" as={Card} overflow="hidden" spacing={0}>
           <VStack align="stretch" borderBottomWidth="1px" p={5}>
-            <HStack>
+            <HStack justifyContent="space-between">
               <Heading size="md">問題</Heading>
               {problemType === 'step' && (
                 <Tag colorScheme="brand" fontWeight="bold" size="sm" variant="solid">
                   ステップ実行モード
                 </Tag>
               )}
+              {problemType === 'executionResult' && (
+                <Tooltip label="減点になりますが、確実に問題を解けます。">
+                  <Button
+                    colorScheme="brand"
+                    variant="outline"
+                    onClick={() => {
+                      void props.updateProblemSession('step', 1);
+                    }}
+                  >
+                    諦めてステップ実行モードに移る
+                  </Button>
+                </Tooltip>
+              )}
             </HStack>
 
-            <div>
+            <Box>
               <Box as="span" fontWeight="bold">
                 {problemType === 'executionResult' ? (
                   'プログラムを実行した後'
@@ -149,7 +170,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
                 )}
               </Box>
               の盤面を作成し、提出ボタンを押してください。
-            </div>
+            </Box>
           </VStack>
 
           <SyntaxHighlighter
@@ -215,7 +236,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
             colorScheme="brand"
             rightIcon={
               <Box as="span" color="whiteAlpha.800" fontSize="sm" fontWeight="bold">
-                {isMacOS ? 'Cmd + Enter' : 'Ctrl + Enter'}
+                (Enter)
               </Box>
             }
             onClick={() => handleClickSubmitButton()}
@@ -264,7 +285,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
 function useShortcutKeys(handleClickAnswerButton: () => Promise<void>): void {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      if (event.key === 'Enter') {
         event.preventDefault();
         void handleClickAnswerButton();
       }
