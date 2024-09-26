@@ -533,18 +533,18 @@ public class Main {
   },
   variable4: {
     instrumented: `
-s.set('x', <1-4>);
-s.set('x', s.get('x') + 1);
-s.set('y', s.get('x') - 2);
+s.set('y', <1-4>);
+s.set('y', s.get('y') + 1);
+s.set('x', s.get('y') - 2);
 s.set('亀', new Turtle(s.get('x'), s.get('y')));
 s.get('亀').forward();
 `.trim(),
     java: `
 public class Main {
     public static void main(String[] args) {
-        int x = <1-4>; // sid
-        x = x + 1; // sid
-        int y = x - 2; // sid
+        int y = <1-4>; // sid
+        y = y + 1; // sid
+        int x = y - 2; // sid
         Turtle 亀 = new Turtle(x, y); // sid
         亀.前に進む(); // sid
     }
@@ -573,6 +573,43 @@ public class Main {
 }
     `.trim(),
   },
+  variable6: {
+    instrumented: `
+s.set('a', <1-3>);
+s.set('b', s.get('a') * 2);
+s.set('c', s.get('b') - 2);
+s.set('亀', new Turtle(s.get('c'), s.get('b')));
+s.get('亀').forward();
+`.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+        int a = <1-3>; // sid
+        int b = a * 2; // sid
+        int c = b - 2; // sid
+        Turtle 亀 = new Turtle(c, b); // sid
+        亀.前に進む(); // sid
+    }
+}
+    `.trim(),
+  },
+  variable7: {
+    instrumented: `
+s.set('x', (<0-3> * 2));
+s.set('y', (s.get('x') + 1) * 2);
+s.set('z', (s.get('y') * 3) + (s.get('x') / 2));
+s.set('x', (<0-3> * 2));
+s.set('亀', new Turtle(s.get('x'), s.get('y')));
+s.get('亀').forward();
+    `.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+    }
+}
+    `.trim(),
+  },
+
   while1: {
     instrumented: `
 s.set('亀', new Turtle());
