@@ -146,6 +146,15 @@ export const ProblemBody: React.FC<Props> = (props) => {
               </HStack>
 
               <Box>
+                {problemType === 'step' && (
+                  <>
+                    画面下部にある
+                    <Box as="span" bgColor="orange.100" px={0.5} rounded="sm">
+                      {props.problem.sidToLineIndex.get(props.problem.traceItems[previousTraceItemIndex].sid)}行目
+                    </Box>
+                    を実行した後の盤面と変数の一覧表を参考に、
+                  </>
+                )}
                 <Box as="span" fontWeight="bold">
                   {problemType === 'executionResult' ? (
                     'プログラムを実行した後'
@@ -199,11 +208,11 @@ export const ProblemBody: React.FC<Props> = (props) => {
                   <Box as="span" bgColor="orange.100" px={0.5} rounded="sm">
                     {props.problem.sidToLineIndex.get(props.problem.traceItems[previousTraceItemIndex].sid)}行目
                   </Box>
-                  を実行した後（
+                  の実行後（
                   <Box as="span" border="2px solid #f56565" px={0.5} rounded="sm">
                     {props.problem.sidToLineIndex.get(props.problem.traceItems[currentTraceItemIndex].sid)}行目
                   </Box>
-                  を実行する前）の盤面
+                  の実行前）の盤面
                 </Heading>
               </VStack>
 
