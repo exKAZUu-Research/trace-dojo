@@ -33,7 +33,7 @@ const DY = [1, 0, -1, 0];
 interface TurtleGraphicsProps {
   problem: Problem;
   currentTraceItemIndex: number;
-  previousTraceItemIndex: number;
+  focusTraceItemIndex: number;
   handleClickSubmitButton: () => Promise<void>;
 }
 
@@ -42,12 +42,12 @@ export interface TurtleGraphicsHandle {
 }
 
 export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
-  ({ currentTraceItemIndex, handleClickSubmitButton, previousTraceItemIndex, problem }, ref) => {
+  ({ currentTraceItemIndex, focusTraceItemIndex, handleClickSubmitButton, problem }, ref) => {
     const [board, updateBoard] = useImmer<ColorChar[][]>([]);
     const [turtles, updateTurtles] = useImmer<TurtleTrace[]>([]);
     const [selectedCell, setSelectedCell] = useState<SelectedCell>();
     const selectedTurtle = turtles.find((char) => char.x === selectedCell?.x && char.y === selectedCell?.y);
-    const previousTraceItem = problem.traceItems[previousTraceItemIndex];
+    const previousTraceItem = problem.traceItems[focusTraceItemIndex];
     const currentTraceItem = problem.traceItems[currentTraceItemIndex];
 
     const initialize = useCallback(
@@ -65,7 +65,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     }));
 
     useEffect(() => {
-      initialize(previousTraceItemIndex >= 1);
+      initialize(focusTraceItemIndex >= 1);
     }, [currentTraceItemIndex, problem]);
 
     const updateTurtle = (currentTurtle: TurtleTrace, newTurtle: Partial<TurtleTrace>): void => {
