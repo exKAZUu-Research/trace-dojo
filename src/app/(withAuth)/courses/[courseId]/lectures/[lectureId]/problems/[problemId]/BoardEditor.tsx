@@ -245,7 +245,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                     variant="outline"
                     onClick={() => handleRemoveCharacterButton()}
                   >
-                    削除
+                    タートルを削除
                   </Button>
                 </HStack>
               </>
