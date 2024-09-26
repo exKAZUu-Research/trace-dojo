@@ -127,7 +127,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
                   'プログラムを実行した後'
                 ) : (
                   <>
-                    <Box as="span" bgColor="red.100" px={0.5} rounded="sm">
+                    <Box as="span" border="2px solid #f56565" px={0.5} rounded="sm">
                       {props.problem.sidToLineIndex.get(props.problem.traceItems[currentTraceItemIndex].sid)}行目
                     </Box>
                     を実行した後
@@ -176,7 +176,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
                     {props.problem.sidToLineIndex.get(props.problem.traceItems[previousTraceItemIndex].sid)}行目
                   </Box>
                   を実行した後（
-                  <Box as="span" bgColor="red.100" px={0.5} rounded="sm">
+                  <Box as="span" border="2px solid #f56565" px={0.5} rounded="sm">
                     {props.problem.sidToLineIndex.get(props.problem.traceItems[currentTraceItemIndex].sid)}行目
                   </Box>
                   を実行する前）の盤面
