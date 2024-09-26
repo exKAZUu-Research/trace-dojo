@@ -1197,7 +1197,7 @@ public class Main {
   },
   if2: {
     instrumented: `
-s.set('t', new Turtle(2, 2));
+s.set('t', new Turtle(<1-2>, <1-2>));
 s.get('t').turnRight();
 for (s.set('i', 0); s.get('i') < <6-8>; s.set('i', s.get('i') + 1)) {
   s.get('t').forward();
@@ -1209,7 +1209,7 @@ for (s.set('i', 0); s.get('i') < <6-8>; s.set('i', s.get('i') + 1)) {
     java: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // sid
+        Turtle t = new Turtle(<1-2>, <1-2>); // sid
         t.右を向く(); // sid
         for (int i = 0; i < <7-9>; i++) { // sid
             t.前に進む(); // sid
