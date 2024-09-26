@@ -14,7 +14,6 @@ import {
   Card,
   Heading,
   HStack,
-  Icon,
   Tag,
   Tooltip,
   useDisclosure,
