@@ -954,34 +954,29 @@ public class Main {
   },
   for6: {
     instrumented: `
-s.set('sum', 0);
-s.set('亀', new Turtle());
-for (s.set('i', 1); s.get('i') <= <5-6>; s.set('i', s.get('i') + 1)) {
-  s.set('sum', s.get('sum') + s.get('i'));
-  s.get('亀').forward();
-  s.get('亀').turnLeft();
+s.set('x', 0);
+s.set('y', 100);
+for (s.set('i', <4-5>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
+  s.set('x', s.get('x') + s.get('i'));
+  s.set('y', s.get('y') + s.get('i'));
 }
-for (s.set('i', s.get('sum') / 3); s.get('i') <= <5-6>; s.set('i', s.get('i') + 1)) {
-  s.set('sum', s.get('sum') + s.get('i'));
-  s.get('亀').forward();
-  s.get('亀').turnLeft();
-}
-s.set('average', s.get('sum') / 3);
-s.get('亀').turnRight();
+s.set('x', s.get('x') / 4);
+s.set('x', s.get('y') / 5);
+s.set('亀', new Turtle(s.get('x') % 6, s.get('y') % 6));
 s.get('亀').forward();
     `.trim(),
     java: `
 public class Main {
     public static void main(String[] args) {
-        int sum = 0; // sid
-        Turtle 亀 = new Turtle(); // sid
-        for (int i = 1; i <= <5-6>; i++) { // sid
-            sum += i; // sid
-            亀.前に進む(); // sid
-            亀.左を向く(); // sid
+        int x = 0; // sid
+        int y = 100; // sid
+        for (int i = <4-5>; i > 0; i--) { // sid
+            x += i; // sid
+            y += i; // sid
         }
-        int average = sum / 3; // sid
-        亀.右を向く(); // sid
+        x /= 4; // sid
+        y /= 5; // sid
+        Turtle 亀 = new Turtle(x % 6, y % 6); // sid
         亀.前に進む(); // sid
     }
 }
@@ -989,35 +984,34 @@ public class Main {
   },
   for7: {
     instrumented: `
+s.set('亀', new Turtle(3, 3));
 s.set('sum', 0);
-s.set('亀', new Turtle());
-for (s.set('i', 1); s.get('i') <= <5-6>; s.set('i', s.get('i') + 1)) {
+for (s.set('i', 1); s.get('i') <= <4-6>; s.set('i', s.get('i') + 1)) {
   s.set('sum', s.get('sum') + s.get('i'));
   s.get('亀').forward();
   s.get('亀').turnLeft();
 }
-for (s.set('i', s.get('sum') / 3); s.get('i') <= <5-6>; s.set('i', s.get('i') + 1)) {
-  s.set('sum', s.get('sum') + s.get('i'));
+for (s.set('i', s.get('sum') / 4); s.get('i') >= 0; s.set('i', s.get('i') - 1)) {
   s.get('亀').forward();
-  s.get('亀').turnLeft();
+  s.get('亀').forward();
+  s.get('亀').turnRight();
 }
-s.set('average', s.get('sum') / 3);
-s.get('亀').turnRight();
-s.get('亀').forward();
     `.trim(),
     java: `
 public class Main {
     public static void main(String[] args) {
+        Turtle 亀 = new Turtle(3, 3); // sid
         int sum = 0; // sid
-        Turtle 亀 = new Turtle(); // sid
-        for (int i = 1; i <= <5-6>; i++) { // sid
+        for (int i = 1; i <= <4-6>; i++) { // sid
             sum += i; // sid
             亀.前に進む(); // sid
             亀.左を向く(); // sid
         }
-        int average = sum / 3; // sid
-        亀.右を向く(); // sid
-        亀.前に進む(); // sid
+        for (int i = sum / 4; i >= 0; i--) { // sid
+            亀.前に進む(); // sid
+            亀.前に進む(); // sid
+            亀.右を向く(); // sid
+        }
     }
 }
     `.trim(),
