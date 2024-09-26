@@ -144,22 +144,18 @@ export const ProblemBody: React.FC<Props> = (props) => {
                     ステップ実行モード
                   </Tag>
                 )}
-                {problemType === 'executionResult' && (
-                  <Tooltip label="減点になりますが、確実に問題を解けます。">
-                    <Button
-                      colorScheme="brand"
-                      variant="outline"
-                      onClick={() => {
-                        void props.updateProblemSession('step', 1);
-                      }}
-                    >
-                      諦めてステップ実行モードに移る
-                    </Button>
-                  </Tooltip>
-                )}
               </HStack>
 
               <Box>
+                {problemType === 'step' && (
+                  <>
+                    画面下部にある
+                    <Box as="span" bgColor="orange.100" px={0.5} rounded="sm">
+                      {props.problem.sidToLineIndex.get(props.problem.traceItems[previousTraceItemIndex].sid)}行目
+                    </Box>
+                    を実行した後の盤面と変数の一覧表を参考に、
+                  </>
+                )}
                 <Box as="span" fontWeight="bold">
                   {problemType === 'executionResult' ? (
                     'プログラムを実行した後'
