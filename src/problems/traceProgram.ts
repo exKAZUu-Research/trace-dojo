@@ -89,7 +89,7 @@ class Scope {
     throw new Error();
   }
   set(varName, value, sid) {
-    this.vars[varName] = value;
+    this.vars[varName] = typeof value === 'number' ? Math.floor(value) : value;
     addTrace(sid);
   }
   enterNewScope(params) {
