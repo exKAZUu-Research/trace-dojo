@@ -57,7 +57,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
         updateTurtles(Object.values(focusTraceItem.vars ?? {}).filter(isTurtleTrace));
         if (!keepSelectedCell) setSelectedCell(undefined);
       },
-      [focusTraceItem, problem]
+      [focusTraceItem, updateBoard, updateTurtles]
     );
 
     useImperativeHandle(ref, () => ({
@@ -66,6 +66,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
     useEffect(() => {
       initialize(focusTraceItemIndex >= 1);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentTraceItemIndex, problem]);
 
     const updateTurtle = (currentTurtle: TurtleTrace, newTurtle: Partial<TurtleTrace>): void => {
@@ -300,16 +301,15 @@ function parseBoard(boardString: string): ColorChar[][] {
     .map((line) => [...line.trim()]) as ColorChar[][];
 }
 
-function useShortcutKeys(handleClickAnswerButton: () => Promise<void>): void {
+function useShortcutKeys(handleClickSubmitButton: () => Promise<void>): void {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Enter') {
         event.preventDefault();
-        void handleClickAnswerButton();
+        void handleClickSubmitButton();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [handleClickSubmitButton]);
 }

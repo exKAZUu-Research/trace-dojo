@@ -2,7 +2,7 @@
 
 import type { ProblemSession } from '@prisma/client';
 import NextLink from 'next/link';
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
 
 import {
@@ -43,29 +43,35 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   const updateProblemSessionMutation = backendTrpcReact.updateProblemSession.useMutation();
   const createProblemSubmissionMutation = backendTrpcReact.createProblemSubmission.useMutation();
 
-  const createSubmissionUpdatingProblemSession = async (isCorrect: boolean, isCompleted: boolean): Promise<void> => {
-    const newProblemSession = await updateProblemSessionMutation.mutateAsync({
-      id: problemSession.id,
-      incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
-      completedAt: isCompleted ? new Date() : undefined,
-    });
-    await createProblemSubmissionMutation.mutateAsync({
-      sessionId: problemSession.id,
-      problemType: problemSession.problemType,
-      traceItemIndex: problemSession.traceItemIndex,
-      elapsedMilliseconds: newProblemSession.elapsedMilliseconds,
-      isCorrect,
-    });
-  };
+  const createSubmissionUpdatingProblemSession = useCallback(
+    async (isCorrect: boolean, isCompleted: boolean): Promise<void> => {
+      const newProblemSession = await updateProblemSessionMutation.mutateAsync({
+        id: problemSession.id,
+        incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
+        completedAt: isCompleted ? new Date() : undefined,
+      });
+      await createProblemSubmissionMutation.mutateAsync({
+        sessionId: problemSession.id,
+        problemType: problemSession.problemType,
+        traceItemIndex: problemSession.traceItemIndex,
+        elapsedMilliseconds: newProblemSession.elapsedMilliseconds,
+        isCorrect,
+      });
+    },
+    [problemSession, updateProblemSessionMutation, createProblemSubmissionMutation, lastActionTimeRef]
+  );
 
-  const updateProblemSession = async (newProblemType: string, newTraceItemIndex: number): Promise<void> => {
-    const newProblemSession = await updateProblemSessionMutation.mutateAsync({
-      id: problemSession.id,
-      problemType: newProblemType,
-      traceItemIndex: newTraceItemIndex,
-    });
-    setProblemSession(newProblemSession);
-  };
+  const updateProblemSession = useCallback(
+    async (newProblemType: string, newTraceItemIndex: number): Promise<void> => {
+      const newProblemSession = await updateProblemSessionMutation.mutateAsync({
+        id: problemSession.id,
+        problemType: newProblemType,
+        traceItemIndex: newTraceItemIndex,
+      });
+      setProblemSession(newProblemSession);
+    },
+    [problemSession.id, updateProblemSessionMutation]
+  );
 
   return (
     <VStack align="stretch" spacing={4}>
