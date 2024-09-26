@@ -754,7 +754,7 @@ public class Main {
   },
   while2: {
     instrumented: `
-s.set('亀', new Turtle());
+s.set('亀', new Turtle(<0-1>, <0-1>));
 s.set('i', <1-2>);
 while (s.get('i') < <4-6>) {
   s.get('亀').forward();
@@ -764,7 +764,7 @@ while (s.get('i') < <4-6>) {
     java: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // sid
+        Turtle 亀 = new Turtle(<0-1>, <0-1>); // sid
         int i = <1-2>; // sid
         while (i < <4-6>) {
             亀.前に進む(); // sid
@@ -800,7 +800,7 @@ public class Main {
   },
   while4: {
     instrumented: `
-s.set('亀', new Turtle());
+s.set('亀', new Turtle(<0-1>, <0-1>));
 s.get('亀').turnRight();
 s.set('i', <1-2>);
 while (s.get('i') < <4-5>) {
@@ -813,7 +813,7 @@ while (s.get('i') < <4-5>) {
     java: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // sid
+        Turtle 亀 = new Turtle(<0-1>, <0-1>); // sid
         亀.右を向く(); // sid
         int i = <1-2>; // sid
         while (i < <4-5>) {
@@ -874,7 +874,7 @@ public class Main {
   },
   for2: {
     instrumented: `
-s.set('亀', new Turtle());
+s.set('亀', new Turtle(<1-2>, <1-2>));
 for (s.set('i', <1-2>); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
   s.get('亀').forward();
 }
@@ -882,7 +882,7 @@ for (s.set('i', <1-2>); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
     java: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // sid
+        Turtle 亀 = new Turtle(<1-2>, <1-2>); // sid
         for (int i = <1-2>; i < <4-6>; i++) { // sid
             亀.前に進む(); // sid
         }
@@ -916,7 +916,7 @@ public class Main {
   },
   for4: {
     instrumented: `
-s.set('亀', new Turtle(1, 1));
+s.set('亀', new Turtle(<1-2>, <1-2>));
 s.set('i', 1);
 for (; s.get('i') < <3-4>;) {
   s.get('亀').forward();
@@ -929,9 +929,9 @@ s.get('亀').backward();
     java: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(1, 1); // sid
+        Turtle 亀 = new Turtle(<1-2>, <1-2>); // sid
         int i = 1; // sid
-        for (; i < <3-4>;) { // sid
+        for (; i < <3-4>;) {
             亀.前に進む(); // sid
             亀.右を向く(); // sid
             i++; // sid
