@@ -33,10 +33,11 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
         lineNumberStyle={{ minWidth: '1.5rem', marginRight: '2rem', paddingRight: 0 }}
         lineProps={(lineNumber) => {
           const style: React.CSSProperties = { padding: '0 1rem', backgroundColor: '', border: '' };
-          // ステップ実行問題のハイライト
+          // previousFocusLine と currentFocusLine が等しくなるケースがある。
           if (lineNumber === previousFocusLine) {
             style.backgroundColor = '#feebc8' /* orange.100 */;
-          } else if (lineNumber === currentFocusLine) {
+          }
+          if (lineNumber === currentFocusLine) {
             style.border = '4px solid #f56565' /* red.500 */;
             style.padding = '0 calc(1rem - 4px)'; // Adjust margin to compensate for border width
           }
