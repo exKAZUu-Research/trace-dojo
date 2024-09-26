@@ -976,7 +976,7 @@ for (s.set('i', <4-5>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
 }
 delete s.vars['i'];
 s.set('x', s.get('x') / 4);
-s.set('x', s.get('y') / 5);
+s.set('y', s.get('y') / 5);
 s.set('亀', new Turtle(s.get('x') % 6, s.get('y') % 6));
 s.get('亀').forward();
     `.trim(),
