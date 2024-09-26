@@ -39,19 +39,20 @@ export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
 
   return (
     <HStack align="flex-start" divider={<StackDivider />} mx={-5}>
-      <TableContainer flexBasis={0} flexGrow={1} maxW="unset">
+      <TableContainer flexBasis={0} flexGrow={1} maxW="unset" overflowX="visible">
         <Table>
           <Thead>
             <Tr>
               <Th>タートルの変数名</Th>
-              <Th w="0">線の色</Th>
               <Th w="0">向き</Th>
+              <Th w="0">線の色</Th>
             </Tr>
           </Thead>
           <Tbody>
             {characterVars?.map((variable) => (
               <Tr key={variable.key}>
                 <Td fontFamily="mono">{variable.key}</Td>
+                <Td>{dirCharToJapanese[variable.value.dir as keyof typeof dirCharToJapanese]}</Td>
                 <Td py={0}>
                   <Box
                     bg={charToColor[variable.value.color as keyof typeof charToColor]}
@@ -60,7 +61,6 @@ export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
                     w="1.5em"
                   />
                 </Td>
-                <Td>{dirCharToJapanese[variable.value.dir as keyof typeof dirCharToJapanese]}</Td>
               </Tr>
             ))}
           </Tbody>

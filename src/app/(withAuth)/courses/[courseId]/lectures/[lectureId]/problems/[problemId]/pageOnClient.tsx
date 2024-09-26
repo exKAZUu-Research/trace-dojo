@@ -10,7 +10,7 @@ import {
   MIN_INTERVAL_MS_OF_ACTIVE_EVENTS,
 } from '../../../../../../../../constants';
 import { backendTrpcReact } from '../../../../../../../../infrastructures/trpcBackend/client';
-import { Flex, Heading, HStack, Link, Text, VStack } from '../../../../../../../../infrastructures/useClient/chakra';
+import { Heading, HStack, Link, Text, VStack } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../../../problems/generateProblem';
 import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
 import { courseIdToLectureIds, courseIdToName, problemIdToName } from '../../../../../../../../problems/problemData';
@@ -79,15 +79,13 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
         <Heading as="h1">{problemIdToName[props.params.problemId]}</Heading>
       </VStack>
 
-      <Flex gap={6}>
-        <ProblemBody
-          createSubmissionUpdatingProblemSession={createSubmissionUpdatingProblemSession}
-          params={props.params}
-          problem={props.problem}
-          problemSession={problemSession}
-          updateProblemSession={updateProblemSession}
-        />
-      </Flex>
+      <ProblemBody
+        createSubmissionUpdatingProblemSession={createSubmissionUpdatingProblemSession}
+        params={props.params}
+        problem={props.problem}
+        problemSession={problemSession}
+        updateProblemSession={updateProblemSession}
+      />
     </VStack>
   );
 };
