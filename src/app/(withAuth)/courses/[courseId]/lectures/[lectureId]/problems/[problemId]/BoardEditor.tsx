@@ -164,7 +164,6 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
     const selectedPosition = selectedCell ? { x: selectedCell.x, y: selectedCell.y } : undefined;
 
-    const isMacOS = useIsMacOS();
     useShortcutKeys(handleClickSubmitButton);
 
     return (
