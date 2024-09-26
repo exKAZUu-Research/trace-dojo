@@ -13,9 +13,14 @@ export const problemIds = [
   'variable3',
   'while1',
   'while2',
+  'while3',
+  'while4',
+  'while5',
   'for1',
   'for2',
   'for3',
+  'for4',
+  'for5',
   'doubleLoop1',
   'doubleLoop2',
   'if1',
@@ -70,9 +75,14 @@ export const problemIdToName: Record<ProblemId, string> = {
   variable3: '変数を使おう(3)',
   while1: 'while文を使おう(1)',
   while2: 'while文を使おう(2)',
+  while3: 'while文を使おう(3)',
+  while4: 'while文を使おう(4)',
+  while5: 'while文を使おう(5)',
   for1: 'for文を使おう(1)',
   for2: 'for文を使おう(2)',
   for3: 'for文を使おう(3)',
+  for4: 'for文を使おう(4)',
+  for5: 'for文を使おう(5)',
   doubleLoop1: '二重ループ(1)',
   doubleLoop2: '二重ループ(2)',
   if1: 'if文を使おう(1)',
@@ -110,7 +120,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
   tuBeginner1: [
     ['straight', 'stepBack', 'turnRight', 'turnRightAndTurnLeft'],
     ['square1', 'square2', 'variable', 'variable2', 'variable3'],
-    ['while1', 'while2', 'for1', 'for2', 'for3'],
+    ['while1', 'while2', 'while3', 'while4', 'while5', 'for1', 'for2', 'for3', 'for4', 'for5'],
     ['doubleLoop1', 'doubleLoop2', 'if1', 'if2'],
     ['elseIf1', 'elseIf2', 'switch1', 'switch2'],
     ['break1', 'break2', 'break3', 'continue1', 'continue2', 'continue3'],
@@ -322,6 +332,28 @@ public class Main {
   while2: {
     instrumented: `
 s.set('亀', new Turtle());
+s.set('i', <1-2>);
+while (s.get('i') < <4-6>) {
+  s.get('亀').forward();
+  s.set('i', s.get('i') + 1);
+}
+    `.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+        Turtle 亀 = new Turtle(); // sid
+        int i = <1-2>; // sid
+        while (i < <4-6>) {
+            亀.前に進む(); // sid
+            i++; // sid
+        }
+    }
+}
+    `.trim(),
+  },
+  while3: {
+    instrumented: `
+s.set('亀', new Turtle());
 s.set('i', 0);
 while (s.get('i') < <2-3>) {
   s.set('i', s.get('i') + 1);
@@ -343,6 +375,33 @@ public class Main {
 }
     `.trim(),
   },
+  while4: {
+    instrumented: `
+s.set('亀', new Turtle());
+s.set('i', <1-2>);
+while (s.get('i') < <4-5>) {
+  s.get('亀').forward();
+  s.get('亀').turnRight();
+  s.get('亀').turnLeft();
+  s.set('i', s.get('i') + 1);
+}
+    `.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+        Turtle 亀 = new Turtle(); // sid
+        int i = <1-2>; // sid
+        while (i < <4-5>) {
+            亀.前に進む(); // sid
+            亀.右を向く(); // sid
+            亀.左を向く(); // sid
+            i++; // sid
+        }
+    }
+}
+    `.trim(),
+  },
+
   for1: {
     instrumented: `
 s.set('亀', new Turtle());
