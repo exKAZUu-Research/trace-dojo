@@ -31,10 +31,10 @@ const DX = [0, 1, 0, -1];
 const DY = [1, 0, -1, 0];
 
 interface TurtleGraphicsProps {
-  problem: Problem;
   currentTraceItemIndex: number;
   focusTraceItemIndex: number;
   handleClickSubmitButton: () => Promise<void>;
+  problem: Problem;
 }
 
 export interface TurtleGraphicsHandle {
