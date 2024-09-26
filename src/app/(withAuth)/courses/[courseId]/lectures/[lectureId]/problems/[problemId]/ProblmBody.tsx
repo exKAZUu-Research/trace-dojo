@@ -205,6 +205,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
           />
         </VStack>
       </Flex>
+
       {problemType !== 'executionResult' &&
         props.problem.sidToLineIndex.get(props.problem.traceItems[previousTraceItemIndex].sid) && (
           <HStack alignItems="flex-start" as={Card} bg="gray.50" p={5}>
