@@ -810,7 +810,34 @@ public class Main {
 }
     `.trim(),
   },
-
+  while5: {
+    instrumented: `
+s.set('亀', new Turtle());
+s.set('i', <1-2>);
+while (s.get('i') < <3-4>) {
+  s.get('亀').forward();
+  s.get('亀').turnRight();
+  s.get('亀').forward();
+  s.get('亀').turnLeft();
+  s.set('i', s.get('i') + 1);
+}
+    `.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+        Turtle 亀 = new Turtle(); // sid
+        int i = <1-2>; // sid
+        while (i < <3-4>) {
+            亀.前に進む(); // sid
+            亀.右を向く(); // sid
+            亀.前に進む(); // sid
+            亀.左を向く(); // sid
+            i++; // sid
+        }
+    }
+}
+    `.trim(),
+  },
   for1: {
     instrumented: `
 s.set('亀', new Turtle());
@@ -832,8 +859,26 @@ public class Main {
   for2: {
     instrumented: `
 s.set('亀', new Turtle());
+for (s.set('i', <1-2>); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
+  s.get('亀').forward();
+}
+       `.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+        Turtle 亀 = new Turtle(); // sid
+        for (int i = <1-2>; i < <4-6>; i++) { // sid
+            亀.前に進む(); // sid
+        }
+    }
+}
+    `.trim(),
+  },
+  for3: {
+    instrumented: `
+s.set('亀', new Turtle());
 s.set('i', 0);
-for (s.set('i', s.get('i')) ; s.get('i') < <2-3>; s.set('i', s.get('i'))) {
+for (; s.get('i') < <2-3>;) {
   s.get('亀').forward();
   s.get('亀').turnRight();
   s.set('i', s.get('i') + 1);
@@ -844,7 +889,7 @@ public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // sid
         int i = 0; // sid
-        for (; i < <2-3>;) { // sid
+        for (; i < <2-3>;) {
             亀.前に進む(); // sid
             亀.右を向く(); // sid
             i++; // sid
@@ -853,7 +898,33 @@ public class Main {
 }
     `.trim(),
   },
-  for3: {
+  for4: {
+    instrumented: `
+s.set('亀', new Turtle(1, 1));
+s.set('i', 1);
+for (; s.get('i') < <3-4>;) {
+  s.get('亀').forward();
+  s.get('亀').turnRight();
+  s.set('i', s.get('i') + 1);
+}
+s.get('亀').backward();
+    `.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+        Turtle 亀 = new Turtle(1, 1); // sid
+        int i = 1; // sid
+        for (; i < <3-4>;) { // sid
+            亀.前に進む(); // sid
+            亀.右を向く(); // sid
+            i++; // sid
+        }
+        亀.後ろに進む(); // sid
+    }
+}
+    `.trim(),
+  },
+  for5: {
     instrumented: `
 s.set('x', 0);
 for (s.set('i', 2); s.get('i') <= <4-5>; s.set('i', s.get('i') + 1)) {
