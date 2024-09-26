@@ -130,7 +130,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
                   </>
                 )}
               </Box>
-              の盤面を作成してください。
+              の盤面を作成し、提出ボタンを押してください。
             </div>
           </VStack>
 
