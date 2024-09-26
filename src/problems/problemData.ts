@@ -1289,6 +1289,7 @@ for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
     }
   }
   delete s.vars['j'];
+  s.get('t').forward();
   s.get('t').turnLeft();
 }
     `.trim(),
@@ -1304,6 +1305,7 @@ public class Main {
                     t.右を向く(); // sid
                 }
             }
+            t.前に進む(); // sid
             t.左を向く(); // sid
         }
     }
