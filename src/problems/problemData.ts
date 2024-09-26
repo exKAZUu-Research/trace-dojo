@@ -556,7 +556,7 @@ public class Main {
 s.set('x', <1-5>);
 s.set('x', s.get('x') - 1);
 s.set('y', s.get('x') * 2);
-s.set('y', Math.floor(s.get('y') / 3));
+s.set('y', s.get('y') / 3);
 s.set('亀', new Turtle(s.get('x'), s.get('y')));
 s.get('亀').forward();
 `.trim(),
@@ -595,21 +595,100 @@ public class Main {
   },
   variable7: {
     instrumented: `
-s.set('x', (<0-3> * 2));
-s.set('y', (s.get('x') + 1) * 2);
-s.set('z', (s.get('y') * 3) + (s.get('x') / 2));
-s.set('x', (<0-3> * 2));
+s.set('x', <0-2>);
+s.set('y', (s.get('x') * 2) + 1);
+s.set('z', (s.get('y') * 2) + (s.get('x') / 2));
+s.set('x', s.get('z') / 3);
 s.set('亀', new Turtle(s.get('x'), s.get('y')));
 s.get('亀').forward();
     `.trim(),
     java: `
 public class Main {
     public static void main(String[] args) {
+        int x = <0-2>; // sid
+        int y = (x * 2) + 1; // sid
+        int z = (y * 2) + (x / 2); // sid
+        x = z / 3; // sid
+        Turtle 亀 = new Turtle(x, y); // sid
+        亀.前に進む(); // sid
     }
 }
     `.trim(),
   },
-
+  variable8: {
+    instrumented: `
+s.set('x', <0-2>);
+s.set('y', (s.get('x') * 3) + 2);
+s.set('z', (s.get('y') * 2) - (s.get('x') * 3));
+s.set('x', (s.get('z') / 4) % 7);
+s.set('y', (s.get('x') + s.get('y')) % 7);
+s.set('亀', new Turtle(s.get('x'), s.get('y')));
+s.get('亀').forward();
+    `.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+        int x = <0-2>; // sid
+        int y = (x * 3) + 2; // sid
+        int z = (y * 2) - (x * 3); // sid
+        x = (z / 4) % 7; // sid
+        y = (x + y) % 7; // sid
+        Turtle 亀 = new Turtle(x, y); // sid
+        亀.前に進む(); // sid
+    }
+}
+    `.trim(),
+  },
+  variable9: {
+    instrumented: `
+s.set('x', <0-3>);
+s.set('y', (s.get('x') * 4) + 3);
+s.set('z', (s.get('y') * 3) - (s.get('x') * 2));
+s.set('x', ((s.get('z') / 5) + s.get('x')) % 7);
+s.set('y', ((s.get('x') * 2) + s.get('y')) % 7);
+s.set('亀', new Turtle(s.get('x'), s.get('y')));
+s.get('亀').forward();
+    `.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+        int x = <0-3>; // sid
+        int y = (x * 4) + 3; // sid
+        int z = (y * 3) - (x * 2); // sid
+        x = ((z / 5) + x) % 7; // sid
+        y = ((x * 2) + y) % 7; // sid
+        Turtle 亀 = new Turtle(x, y); // sid
+        亀.前に進む(); // sid
+    }
+}
+    `.trim(),
+  },
+  variable10: {
+    instrumented: `
+s.set('x', <0-3>);
+s.set('y', (s.get('x') * 5) + 4);
+s.set('z', (s.get('y') * 2) - (s.get('x') * 3));
+s.set('w', (s.get('z') + s.get('x')) % 5);
+s.set('x', ((s.get('z') / 6) + s.get('w')) % 7);
+s.set('y', ((s.get('x') * 3) + s.get('y')) % 7);
+s.set('亀', new Turtle(s.get('x'), s.get('y')));
+s.get('亀').forward();
+    `.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+        int x = <0-3>; // sid
+        int y = (x * 5) + 4; // sid
+        int z = (y * 2) - (x * 3); // sid
+        int w = (z + x) % 5; // sid
+        x = ((z / 6) + w) % 7; // sid
+        y = ((x * 3) + y) % 7; // sid
+        Turtle 亀 = new Turtle(x, y); // sid
+        亀.前に進む(); // sid
+    }
+}
+    `.trim(),
+  },
   while1: {
     instrumented: `
 s.set('亀', new Turtle());
@@ -704,7 +783,7 @@ s.set('x', 0);
 for (s.set('i', 2); s.get('i') <= <4-5>; s.set('i', s.get('i') + 1)) {
   s.set('x', s.get('x') + s.get('i'));
 }
-s.set('x', Math.floor(s.get('x') / 3));
+s.set('x', s.get('x') / 3);
 s.set('亀', new Turtle(s.get('x'), 0));
 s.get('亀').forward();
     `.trim(),
