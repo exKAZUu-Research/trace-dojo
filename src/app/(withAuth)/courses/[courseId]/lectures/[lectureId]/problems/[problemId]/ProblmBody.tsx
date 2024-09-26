@@ -1,9 +1,7 @@
 import type { ProblemSession } from '@prisma/client';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { MdOutlineInfo } from 'react-icons/md';
 
-import { CustomModal } from '../../../../../../../../components/molecules/CustomModal';
 import {
   AlertDialog,
   AlertDialogBody,
@@ -16,7 +14,6 @@ import {
   Card,
   Heading,
   HStack,
-  Icon,
   Tooltip,
   useDisclosure,
   VStack,
@@ -46,7 +43,6 @@ export const ProblemBody: React.FC<Props> = (props) => {
     problemType === 'executionResult' ? props.problem.traceItems.length - 1 : props.problemSession.traceItemIndex;
   const previousTraceItemIndex = problemType === 'executionResult' ? 0 : currentTraceItemIndex - 1;
 
-  const { isOpen: isHelpModalOpen, onClose: onHelpModalClose, onOpen: onHelpModalOpen } = useDisclosure();
   const { isOpen: isAlertOpen, onClose: onAlertClose, onOpen: onAlertOpen } = useDisclosure();
   const cancelRef = useRef(null);
 
@@ -136,18 +132,6 @@ export const ProblemBody: React.FC<Props> = (props) => {
               </Box>
               の盤面を作成してください。
             </div>
-
-            <HStack spacing={4}>
-              <Button leftIcon={<Icon as={MdOutlineInfo} />} size="sm" variant="outline" onClick={onHelpModalOpen}>
-                解答方法
-              </Button>
-              <CustomModal
-                body={`${problemType === 'executionResult' ? '実行結果問題' : 'ステップ問題'}の解答方法の説明`}
-                isOpen={isHelpModalOpen}
-                title={`${problemType === 'executionResult' ? '実行結果問題' : 'ステップ問題'}について`}
-                onClose={onHelpModalClose}
-              />
-            </HStack>
           </VStack>
 
           <SyntaxHighlighter
