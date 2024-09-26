@@ -47,17 +47,17 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     const [turtles, updateTurtles] = useImmer<TurtleTrace[]>([]);
     const [selectedCell, setSelectedCell] = useState<SelectedCell>();
     const selectedTurtle = turtles.find((char) => char.x === selectedCell?.x && char.y === selectedCell?.y);
-    const previousTraceItem = problem.traceItems[focusTraceItemIndex];
+    const focusTraceItem = problem.traceItems[focusTraceItemIndex];
     const currentTraceItem = problem.traceItems[currentTraceItemIndex];
 
     const initialize = useCallback(
       (keepSelectedCell = false): void => {
-        const initialBoard = parseBoard(previousTraceItem.board);
+        const initialBoard = parseBoard(focusTraceItem.board);
         updateBoard(initialBoard);
-        updateTurtles(Object.values(previousTraceItem.vars ?? {}).filter(isTurtleTrace));
+        updateTurtles(Object.values(focusTraceItem.vars ?? {}).filter(isTurtleTrace));
         if (!keepSelectedCell) setSelectedCell(undefined);
       },
-      [previousTraceItem, problem]
+      [focusTraceItem, problem]
     );
 
     useImperativeHandle(ref, () => ({
