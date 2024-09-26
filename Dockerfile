@@ -55,7 +55,11 @@ CMD if [ "$RESTORE_BACKUP" -eq 1 ] && [ -s gcp-sa-key.json ] && [ "$WB_ENV" != "
     && node node_modules/.bin/wb prisma litestream \
     && if [ -s gcp-sa-key.json ] && [ "$WB_ENV" != "" ] && [ "$WB_ENV" != "development" ] && [ "$WB_ENV" != "test" ]; then \
            echo "Executing litestream replication with pm2-runtime"; \
-           bash -c "litestream replicate -exec 'node node_modules/.bin/pm2-runtime start ecosystem.config.cjs' prisma/mount/prod.sqlite3 gcs://wb-online-judge/trace-dojo-${WB_ENV}/prod.sqlite3"; \
+           if ! node -e "JSON.parse(require('fs').readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'utf8'))"; then \
+               echo "Invalid JSON in $GOOGLE_APPLICATION_CREDENTIALS"; \
+               exit 1; \
+           fi; \
+           litestream replicate -exec 'node node_modules/.bin/pm2-runtime start ecosystem.config.cjs' prisma/mount/prod.sqlite3 gcs://wb-online-judge/trace-dojo-${WB_ENV}/prod.sqlite3; \
        else \
            echo "Starting pm2-runtime without litestream replication"; \
            bash -c "node node_modules/.bin/pm2-runtime start ecosystem.config.cjs"; \
