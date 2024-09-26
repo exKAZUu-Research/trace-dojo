@@ -24,6 +24,10 @@ export const backendRouter = router({
       })
     )
     .mutation(async ({ input: { id, incrementalElapsedMilliseconds, ...data } }) => {
+      if (data.problemType === 'step' && data.traceItemIndex === 0) {
+        throw new TRPCError({ code: 'BAD_REQUEST' });
+      }
+
       const problemSession = await prisma.problemSession.update({
         where: { id },
         data: {

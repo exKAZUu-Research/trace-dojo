@@ -86,16 +86,16 @@ export const ProblemBody: React.FC<Props> = (props) => {
           const response = await fetchIncorrectSubmissionsCount();
           const incorrectCount = (response.data ?? 0) + 1;
           void props.createSubmissionUpdatingProblemSession(false, false);
-          if (incorrectCount === MAX_CHALLENGE_COUNT) {
+          if (incorrectCount < MAX_CHALLENGE_COUNT) {
+            openAlertDialog(
+              '不正解',
+              `不正解です。あと${MAX_CHALLENGE_COUNT - incorrectCount}回間違えたら、ステップ実行モードに移ります。一発正解を目指しましょう！`
+            );
+          } else {
             void props.updateProblemSession('step', 1);
             openAlertDialog(
               '不正解',
               `不正解です。${MAX_CHALLENGE_COUNT}回間違えたので、ステップ実行モードに移ります。ステップごとに問題を解いてください。`
-            );
-          } else {
-            openAlertDialog(
-              '不正解',
-              `不正解です。あと${MAX_CHALLENGE_COUNT - incorrectCount}回間違えたら、ステップ実行モードに移ります。一発正解を目指しましょう！`
             );
           }
         }
