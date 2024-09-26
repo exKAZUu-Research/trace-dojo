@@ -36,6 +36,8 @@ export const problemIds = [
   'for3',
   'for4',
   'for5',
+  'for6',
+  'for7',
   'doubleLoop1',
   'doubleLoop2',
   'if1',
@@ -113,6 +115,8 @@ export const problemIdToName: Record<ProblemId, string> = {
   for3: 'for文を使おう(3)',
   for4: 'for文を使おう(4)',
   for5: 'for文を使おう(5)',
+  for6: 'for文を使おう(6)',
+  for7: 'for文を使おう(7)',
   doubleLoop1: '二重ループ(1)',
   doubleLoop2: '二重ループ(2)',
   if1: 'if文を使おう(1)',
@@ -176,7 +180,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
       'variable9',
       'variable10',
     ],
-    ['while1', 'while2', 'while3', 'while4', 'while5', 'for1', 'for2', 'for3', 'for4', 'for5'],
+    ['while1', 'while2', 'while3', 'while4', 'while5', 'for1', 'for2', 'for3', 'for4', 'for5', 'for6', 'for7'],
     ['doubleLoop1', 'doubleLoop2', 'if1', 'if2'],
     ['elseIf1', 'elseIf2', 'switch1', 'switch2'],
     ['break1', 'break2', 'break3', 'continue1', 'continue2', 'continue3'],
@@ -943,6 +947,76 @@ public class Main {
         }
         x /= 3; // sid
         Turtle 亀 = new Turtle(x, 0); // sid
+        亀.前に進む(); // sid
+    }
+}
+    `.trim(),
+  },
+  for6: {
+    instrumented: `
+s.set('sum', 0);
+s.set('亀', new Turtle());
+for (s.set('i', 1); s.get('i') <= <5-6>; s.set('i', s.get('i') + 1)) {
+  s.set('sum', s.get('sum') + s.get('i'));
+  s.get('亀').forward();
+  s.get('亀').turnLeft();
+}
+for (s.set('i', s.get('sum') / 3); s.get('i') <= <5-6>; s.set('i', s.get('i') + 1)) {
+  s.set('sum', s.get('sum') + s.get('i'));
+  s.get('亀').forward();
+  s.get('亀').turnLeft();
+}
+s.set('average', s.get('sum') / 3);
+s.get('亀').turnRight();
+s.get('亀').forward();
+    `.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+        int sum = 0; // sid
+        Turtle 亀 = new Turtle(); // sid
+        for (int i = 1; i <= <5-6>; i++) { // sid
+            sum += i; // sid
+            亀.前に進む(); // sid
+            亀.左を向く(); // sid
+        }
+        int average = sum / 3; // sid
+        亀.右を向く(); // sid
+        亀.前に進む(); // sid
+    }
+}
+    `.trim(),
+  },
+  for7: {
+    instrumented: `
+s.set('sum', 0);
+s.set('亀', new Turtle());
+for (s.set('i', 1); s.get('i') <= <5-6>; s.set('i', s.get('i') + 1)) {
+  s.set('sum', s.get('sum') + s.get('i'));
+  s.get('亀').forward();
+  s.get('亀').turnLeft();
+}
+for (s.set('i', s.get('sum') / 3); s.get('i') <= <5-6>; s.set('i', s.get('i') + 1)) {
+  s.set('sum', s.get('sum') + s.get('i'));
+  s.get('亀').forward();
+  s.get('亀').turnLeft();
+}
+s.set('average', s.get('sum') / 3);
+s.get('亀').turnRight();
+s.get('亀').forward();
+    `.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+        int sum = 0; // sid
+        Turtle 亀 = new Turtle(); // sid
+        for (int i = 1; i <= <5-6>; i++) { // sid
+            sum += i; // sid
+            亀.前に進む(); // sid
+            亀.左を向く(); // sid
+        }
+        int average = sum / 3; // sid
+        亀.右を向く(); // sid
         亀.前に進む(); // sid
     }
 }
