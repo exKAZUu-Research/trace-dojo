@@ -17,6 +17,7 @@ import {
   HStack,
   Icon,
   IconButton,
+  Spacer,
   VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../../../problems/generateProblem';
@@ -33,15 +34,15 @@ interface TurtleGraphicsProps {
   problem: Problem;
   currentTraceItemIndex: number;
   previousTraceItemIndex: number;
+  handleClickSubmitButton: () => Promise<void>;
 }
 
 export interface TurtleGraphicsHandle {
-  initialize(): void;
   isCorrect(): boolean;
 }
 
 export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
-  ({ currentTraceItemIndex, previousTraceItemIndex, problem }, ref) => {
+  ({ currentTraceItemIndex, handleClickSubmitButton, previousTraceItemIndex, problem }, ref) => {
     const [board, updateBoard] = useImmer<ColorChar[][]>([]);
     const [turtles, updateTurtles] = useImmer<TurtleTrace[]>([]);
     const [selectedCell, setSelectedCell] = useState<SelectedCell>();
@@ -51,7 +52,6 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
     const initialize = useCallback(
       (keepSelectedCell = false): void => {
-        console.log('initialize:', problem, previousTraceItem);
         const initialBoard = parseBoard(previousTraceItem.board);
         updateBoard(initialBoard);
         updateTurtles(Object.values(previousTraceItem.vars ?? {}).filter(isTurtleTrace));
@@ -61,7 +61,6 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     );
 
     useImperativeHandle(ref, () => ({
-      initialize,
       isCorrect,
     }));
 
@@ -158,9 +157,11 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
     const selectedPosition = selectedCell ? { x: selectedCell.x, y: selectedCell.y } : undefined;
 
+    useShortcutKeys(handleClickSubmitButton);
+
     return (
       <HStack align="stretch" bgColor="gray.50" overflow="hidden" rounded="md">
-        <Center flexBasis={0} flexGrow={2} minW={0} px={4} py={16}>
+        <Center flexBasis={0} flexGrow={2} minW={0} px={4} py={20}>
           <BoardViewer
             enableTransitions
             board={board.map((cells) => cells.join('')).join('\n')}
@@ -263,11 +264,29 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
               </Box>
             )}
           </VStack>
+          <Spacer />
+          <Button colorScheme="brand" variant="outline" onClick={() => initialize()}>
+            盤面をリセット
+          </Button>
+
+          <Button
+            colorScheme="brand"
+            rightIcon={
+              <Box as="span" color="whiteAlpha.800" fontSize="sm" fontWeight="bold">
+                (Enter)
+              </Box>
+            }
+            onClick={() => handleClickSubmitButton()}
+          >
+            提出
+          </Button>
         </VStack>
       </HStack>
     );
   }
 );
+
+BoardEditor.displayName = 'BoardEditor';
 
 function canPutTurtle(turtlesTraces: TurtleTrace[], x: number, y: number): boolean {
   return 0 <= x && x < COLUMNS && 0 <= y && y < ROWS && !turtlesTraces.some((t) => t.x === x && t.y === y);
@@ -281,4 +300,16 @@ function parseBoard(boardString: string): ColorChar[][] {
     .map((line) => [...line.trim()]) as ColorChar[][];
 }
 
-BoardEditor.displayName = 'BoardEditor';
+function useShortcutKeys(handleClickAnswerButton: () => Promise<void>): void {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        void handleClickAnswerButton();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}

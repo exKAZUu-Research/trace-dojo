@@ -14,6 +14,7 @@ import {
   Box,
   Button,
   Card,
+  Flex,
   Heading,
   HStack,
   Tag,
@@ -131,46 +132,48 @@ export const ProblemBody: React.FC<Props> = (props) => {
 
   return (
     <>
-      <VStack align="stretch" flexBasis={0} flexGrow={1} minW={0} spacing={4}>
-        <VStack align="stretch" as={Card} overflow="hidden" spacing={0}>
-          <VStack align="stretch" borderBottomWidth="1px" p={5}>
-            <HStack justifyContent="space-between">
-              <Heading size="md">問題</Heading>
-              {problemType === 'step' && (
-                <Tag colorScheme="brand" fontWeight="bold" size="sm" variant="solid">
-                  ステップ実行モード
-                </Tag>
-              )}
-              {problemType === 'executionResult' && (
-                <Tooltip label="減点になりますが、確実に問題を解けます。">
-                  <Button
-                    colorScheme="brand"
-                    variant="outline"
-                    onClick={() => {
-                      void props.updateProblemSession('step', 1);
-                    }}
-                  >
-                    諦めてステップ実行モードに移る
-                  </Button>
-                </Tooltip>
-              )}
-            </HStack>
-
-            <Box>
-              <Box as="span" fontWeight="bold">
-                {problemType === 'executionResult' ? (
-                  'プログラムを実行した後'
-                ) : (
-                  <>
-                    <Box as="span" border="2px solid #f56565" px={0.5} rounded="sm">
-                      {props.problem.sidToLineIndex.get(props.problem.traceItems[currentTraceItemIndex].sid)}行目
-                    </Box>
-                    を実行した後
-                  </>
+      <Flex gap={6}>
+        <VStack align="stretch" flexBasis={0} flexGrow={1} minW={0} spacing={4}>
+          <VStack align="stretch" as={Card} overflow="hidden" spacing={0}>
+            <VStack align="stretch" borderBottomWidth="1px" p={5}>
+              <HStack justifyContent="space-between">
+                <Heading size="md">問題</Heading>
+                {problemType === 'step' && (
+                  <Tag colorScheme="brand" fontWeight="bold" size="sm" variant="solid">
+                    ステップ実行モード
+                  </Tag>
                 )}
+                {problemType === 'executionResult' && (
+                  <Tooltip label="減点になりますが、確実に問題を解けます。">
+                    <Button
+                      colorScheme="brand"
+                      variant="outline"
+                      onClick={() => {
+                        void props.updateProblemSession('step', 1);
+                      }}
+                    >
+                      諦めてステップ実行モードに移る
+                    </Button>
+                  </Tooltip>
+                )}
+              </HStack>
+
+              <Box>
+                <Box as="span" fontWeight="bold">
+                  {problemType === 'executionResult' ? (
+                    'プログラムを実行した後'
+                  ) : (
+                    <>
+                      <Box as="span" border="2px solid #f56565" px={0.5} rounded="sm">
+                        {props.problem.sidToLineIndex.get(props.problem.traceItems[currentTraceItemIndex].sid)}行目
+                      </Box>
+                      を実行した後
+                    </>
+                  )}
+                </Box>
+                の盤面を作成し、提出ボタンを押してください。
               </Box>
-              の盤面を作成し、提出ボタンを押してください。
-            </Box>
+            </VStack>
           </VStack>
 
           <SyntaxHighlighter
@@ -189,12 +192,23 @@ export const ProblemBody: React.FC<Props> = (props) => {
           />
         </VStack>
 
-        {problemType !== 'executionResult' &&
-          props.problem.sidToLineIndex.get(props.problem.traceItems[previousTraceItemIndex].sid) && (
-            <VStack align="stretch" as={Card} bg="gray.50" p={5} spacing={6}>
+        <VStack align="stretch" flexBasis={0} flexGrow={1} spacing="4">
+          <BoardEditor
+            ref={turtleGraphicsRef}
+            currentTraceItemIndex={currentTraceItemIndex}
+            handleClickSubmitButton={handleClickSubmitButton}
+            previousTraceItemIndex={previousTraceItemIndex}
+            problem={props.problem}
+          />
+        </VStack>
+      </Flex>
+
+      {problemType !== 'executionResult' &&
+        props.problem.sidToLineIndex.get(props.problem.traceItems[previousTraceItemIndex].sid) && (
+          <HStack alignItems="flex-start" as={Card} bg="gray.50" p={5}>
+            <VStack align="stretch" flexBasis={0} flexGrow={2} spacing={6}>
               <VStack align="stretch">
                 <Heading size="md">
-                  参考：
                   <Box as="span" bgColor="orange.100" px={0.5} rounded="sm">
                     {props.problem.sidToLineIndex.get(props.problem.traceItems[previousTraceItemIndex].sid)}行目
                   </Box>
@@ -213,38 +227,12 @@ export const ProblemBody: React.FC<Props> = (props) => {
                   isTurtleTrace
                 )}
               />
-
-              <Variables traceItemVars={props.problem.traceItems[previousTraceItemIndex].vars} />
             </VStack>
-          )}
-      </VStack>
-
-      <VStack align="stretch" flexBasis={0} flexGrow={1} spacing="4">
-        <BoardEditor
-          ref={turtleGraphicsRef}
-          currentTraceItemIndex={currentTraceItemIndex}
-          previousTraceItemIndex={previousTraceItemIndex}
-          problem={props.problem}
-        />
-
-        <HStack justify="space-between">
-          <Button colorScheme="brand" variant="outline" onClick={() => turtleGraphicsRef.current?.initialize()}>
-            盤面をリセット
-          </Button>
-
-          <Button
-            colorScheme="brand"
-            rightIcon={
-              <Box as="span" color="whiteAlpha.800" fontSize="sm" fontWeight="bold">
-                (Enter)
-              </Box>
-            }
-            onClick={() => handleClickSubmitButton()}
-          >
-            提出
-          </Button>
-        </HStack>
-      </VStack>
+            <Box flexBasis={0} flexGrow={3} pt={8}>
+              <Variables traceItemVars={props.problem.traceItems[currentTraceItemIndex].vars} />
+            </Box>
+          </HStack>
+        )}
 
       <AlertDialog
         closeOnEsc={true}
