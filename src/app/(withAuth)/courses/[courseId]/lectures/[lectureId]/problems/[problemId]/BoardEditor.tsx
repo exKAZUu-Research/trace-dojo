@@ -23,7 +23,6 @@ import {
 import type { Problem } from '../../../../../../../../problems/generateProblem';
 import { isTurtleTrace, type TurtleTrace } from '../../../../../../../../problems/traceProgram';
 import type { ColorChar, SelectedCell } from '../../../../../../../../types';
-import { useIsMacOS } from '../../../../../../../../utils/platform';
 
 import { BoardViewer } from './BoardViewer';
 
@@ -282,7 +281,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
             colorScheme="brand"
             rightIcon={
               <Box as="span" color="whiteAlpha.800" fontSize="sm" fontWeight="bold">
-                {isMacOS ? 'Cmd + Enter' : 'Ctrl + Enter'}
+                (Enter)
               </Box>
             }
             onClick={() => handleClickSubmitButton()}
@@ -294,6 +293,8 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     );
   }
 );
+
+BoardEditor.displayName = 'BoardEditor';
 
 function canPutTurtle(turtlesTraces: TurtleTrace[], x: number, y: number): boolean {
   return 0 <= x && x < COLUMNS && 0 <= y && y < ROWS && !turtlesTraces.some((t) => t.x === x && t.y === y);
@@ -307,12 +308,10 @@ function parseBoard(boardString: string): ColorChar[][] {
     .map((line) => [...line.trim()]) as ColorChar[][];
 }
 
-BoardEditor.displayName = 'BoardEditor';
-
 function useShortcutKeys(handleClickAnswerButton: () => Promise<void>): void {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      if (event.key === 'Enter') {
         event.preventDefault();
         void handleClickAnswerButton();
       }
