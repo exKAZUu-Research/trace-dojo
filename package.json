@@ -28,6 +28,7 @@
     "start": "wb start",
     "start-stg": "wb start --mode staging",
     "test": "wb test",
+    "test-unit": "wb test --unit",
     "test/ci-setup": "wb prisma reset",
     "typecheck": "wb typecheck"
   },

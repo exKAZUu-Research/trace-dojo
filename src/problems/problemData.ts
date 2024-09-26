@@ -638,7 +638,7 @@ s.set('z', (s.get('y') * 2) - (s.get('x') * 3));
 s.set('x', (s.get('z') / 4) % 7);
 s.set('y', (s.get('x') + s.get('y')) % 7);
 s.set('亀', new Turtle(s.get('x'), s.get('y')));
-s.get('亀').forward();
+s.get('亀').backward();
     `.trim(),
     java: `
 public class Main {
@@ -649,7 +649,7 @@ public class Main {
         x = (z / 4) % 7; // sid
         y = (x + y) % 7; // sid
         Turtle 亀 = new Turtle(x, y); // sid
-        亀.前に進む(); // sid
+        亀.後に戻る(); // sid
     }
 }
     `.trim(),
