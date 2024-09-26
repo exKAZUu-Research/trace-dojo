@@ -972,7 +972,7 @@ s.set('x', 0);
 s.set('y', 100);
 for (s.set('i', <4-5>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
   s.set('x', s.get('x') + s.get('i'));
-  s.set('y', s.get('y') + s.get('i'));
+  s.set('y', s.get('y') - s.get('i'));
 }
 delete s.vars['i'];
 s.set('x', s.get('x') / 4);
@@ -987,7 +987,7 @@ public class Main {
         int y = 100; // sid
         for (int i = <4-5>; i > 0; i--) { // sid
             x += i; // sid
-            y += i; // sid
+            y -= i; // sid
         }
         x /= 4; // sid
         y /= 5; // sid
