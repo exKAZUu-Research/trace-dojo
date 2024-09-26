@@ -24,13 +24,11 @@ import {
 } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../../../problems/generateProblem';
 import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
-import { isTurtleTrace } from '../../../../../../../../problems/traceProgram';
 
 import type { TurtleGraphicsHandle } from './BoardEditor';
 import { BoardEditor } from './BoardEditor';
-import { BoardViewer } from './BoardViewer';
 import { SyntaxHighlighter } from './SyntaxHighlighter';
-import { Variables } from './Variables';
+import { TraceViewer } from './TraceViewer';
 
 type Props = {
   params: { courseId: CourseId; lectureId: string; problemId: ProblemId };
@@ -45,6 +43,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
   const currentTraceItemIndex =
     problemType === 'executionResult' ? props.problem.traceItems.length - 1 : props.problemSession.traceItemIndex;
   const previousTraceItemIndex = problemType === 'executionResult' ? 0 : currentTraceItemIndex - 1;
+  const [focusTraceItemIndex, setFocusTraceItemIndex] = useState(previousTraceItemIndex);
 
   const { isOpen: isAlertOpen, onClose: onAlertClose, onOpen: onAlertOpen } = useDisclosure();
   const cancelRef = useRef(null);
@@ -119,9 +118,11 @@ export const ProblemBody: React.FC<Props> = (props) => {
           } else {
             void props.updateProblemSession('step', currentTraceItemIndex + 1);
             openAlertDialog('正解', '正解です。次のステップに進みます。');
+            setFocusTraceItemIndex(currentTraceItemIndex);
           }
         } else {
           openAlertDialog('不正解', '不正解です。もう一度解答してください。');
+          setFocusTraceItemIndex(previousTraceItemIndex);
         }
         break;
       }
@@ -182,7 +183,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
             previousFocusLine={
               problemType === 'executionResult'
                 ? undefined
-                : props.problem.sidToLineIndex.get(props.problem.traceItems[previousTraceItemIndex].sid)
+                : props.problem.sidToLineIndex.get(props.problem.traceItems[focusTraceItemIndex].sid)
             }
             programmingLanguageId="java"
           />
@@ -192,43 +193,22 @@ export const ProblemBody: React.FC<Props> = (props) => {
           <BoardEditor
             ref={turtleGraphicsRef}
             currentTraceItemIndex={currentTraceItemIndex}
+            focusTraceItemIndex={focusTraceItemIndex}
             handleClickSubmitButton={handleClickSubmitButton}
-            previousTraceItemIndex={previousTraceItemIndex}
             problem={props.problem}
           />
         </VStack>
       </Flex>
 
-      {problemType !== 'executionResult' &&
-        props.problem.sidToLineIndex.get(props.problem.traceItems[previousTraceItemIndex].sid) && (
-          <HStack alignItems="flex-start" as={Card} bg="gray.50" p={5}>
-            <VStack align="stretch" flexBasis={0} flexGrow={2} spacing={6}>
-              <VStack align="stretch">
-                <Heading size="md">
-                  <Box as="span" bgColor="orange.100" px={0.5} rounded="sm">
-                    {props.problem.sidToLineIndex.get(props.problem.traceItems[previousTraceItemIndex].sid)}行目
-                  </Box>
-                  の実行後（
-                  <Box as="span" border="2px solid #f56565" px={0.5} rounded="sm">
-                    {props.problem.sidToLineIndex.get(props.problem.traceItems[currentTraceItemIndex].sid)}行目
-                  </Box>
-                  の実行前）の盤面
-                </Heading>
-              </VStack>
-
-              <BoardViewer
-                alignSelf="center"
-                board={props.problem.traceItems[previousTraceItemIndex]?.board}
-                turtles={Object.values(props.problem.traceItems[previousTraceItemIndex].vars ?? {}).filter(
-                  isTurtleTrace
-                )}
-              />
-            </VStack>
-            <Box flexBasis={0} flexGrow={3}>
-              <Variables traceItemVars={props.problem.traceItems[currentTraceItemIndex].vars} />
-            </Box>
-          </HStack>
-        )}
+      {problemType !== 'executionResult' && previousTraceItemIndex >= 1 && (
+        <TraceViewer
+          currentTraceItemIndex={currentTraceItemIndex}
+          focusTraceItemIndex={focusTraceItemIndex}
+          previousTraceItemIndex={previousTraceItemIndex}
+          problem={props.problem}
+          setFocusTraceItemIndex={setFocusTraceItemIndex}
+        />
+      )}
 
       <AlertDialog
         closeOnEsc={true}
