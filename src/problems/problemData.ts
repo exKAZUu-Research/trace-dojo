@@ -936,7 +936,7 @@ public class Main {
             亀.右を向く(); // sid
             i++; // sid
         }
-        亀.後ろに進む(); // sid
+        亀.後に戻る(); // sid
     }
 }
     `.trim(),
@@ -1330,9 +1330,12 @@ public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
         for (int i = 0; i < <4-6>; i++) { // sid
-            if (i < <2-3>)            t.前に進む(); // sid
-            else if (i == <2-3>)    t.左を向く(); // sid
-            else                     t.後に戻る(); // sid
+            if (i < <2-3>)
+                t.前に進む(); // sid
+            else if (i == <2-3>)
+                t.左を向く(); // sid
+            else
+                t.後に戻る(); // sid
         }
     }
 }
@@ -1358,10 +1361,14 @@ public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
         for (int i = 0; i < <5-7>; i++) { // sid
-            if (i % 4 == 0)            t.前に進む(); // sid
-            else if (i % 4 == 1)    t.右を向く(); // sid
-            else if (i % 4 == 2)    t.前に進む(); // sid
-            else                        t.左を向く(); // sid
+            if (i % 4 == 0)
+                t.前に進む(); // sid
+            else if (i % 4 == 1)
+                t.右を向く(); // sid
+            else if (i % 4 == 2)
+                t.前に進む(); // sid
+            else
+                t.左を向く(); // sid
         }
     }
 }
