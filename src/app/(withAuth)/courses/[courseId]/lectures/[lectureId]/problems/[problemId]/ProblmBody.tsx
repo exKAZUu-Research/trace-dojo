@@ -42,7 +42,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
   const currentTraceItemIndex =
     problemType === 'executionResult' ? props.problem.traceItems.length - 1 : props.problemSession.traceItemIndex;
   const previousTraceItemIndex = problemType === 'executionResult' ? 0 : currentTraceItemIndex - 1;
-  const [focusTraceItemIndex, setFocusTraceItemIndex] = useState(previousTraceItemIndex);
+  const [viewingTraceItemIndex, setViewingTraceItemIndex] = useState(previousTraceItemIndex);
 
   const { isOpen: isAlertOpen, onClose: onAlertClose, onOpen: onAlertOpen } = useDisclosure();
   const cancelRef = useRef(null);
@@ -122,11 +122,11 @@ export const ProblemBody: React.FC<Props> = (props) => {
           } else {
             await props.updateProblemSession('step', currentTraceItemIndex + 1);
             openAlertDialog('正解', '正解です。次のステップに進みます。');
-            setFocusTraceItemIndex(currentTraceItemIndex);
+            setViewingTraceItemIndex(currentTraceItemIndex);
           }
         } else {
           openAlertDialog('不正解', '不正解です。もう一度解答してください。');
-          setFocusTraceItemIndex(previousTraceItemIndex);
+          setViewingTraceItemIndex(previousTraceItemIndex);
         }
         break;
       }
@@ -194,7 +194,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
             previousFocusLine={
               problemType === 'executionResult'
                 ? undefined
-                : props.problem.sidToLineIndex.get(props.problem.traceItems[focusTraceItemIndex].sid)
+                : props.problem.sidToLineIndex.get(props.problem.traceItems[viewingTraceItemIndex].sid)
             }
             programmingLanguageId="java"
           />
@@ -204,8 +204,8 @@ export const ProblemBody: React.FC<Props> = (props) => {
           <BoardEditor
             ref={turtleGraphicsRef}
             currentTraceItemIndex={currentTraceItemIndex}
-            focusTraceItemIndex={focusTraceItemIndex}
             handleSubmit={handleSubmit}
+            previousTraceItemIndex={previousTraceItemIndex}
             problem={props.problem}
           />
         </VStack>
@@ -214,10 +214,10 @@ export const ProblemBody: React.FC<Props> = (props) => {
       {problemType === 'step' && previousTraceItemIndex >= 1 && (
         <TraceViewer
           currentTraceItemIndex={currentTraceItemIndex}
-          focusTraceItemIndex={focusTraceItemIndex}
           previousTraceItemIndex={previousTraceItemIndex}
           problem={props.problem}
-          setFocusTraceItemIndex={setFocusTraceItemIndex}
+          setViewingTraceItemIndex={setViewingTraceItemIndex}
+          viewingTraceItemIndex={viewingTraceItemIndex}
         />
       )}
 

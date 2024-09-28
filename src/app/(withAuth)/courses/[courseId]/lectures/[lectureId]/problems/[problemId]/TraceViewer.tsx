@@ -9,19 +9,19 @@ import { Variables } from './Variables';
 
 type Props = {
   currentTraceItemIndex: number;
-  focusTraceItemIndex: number;
+  viewingTraceItemIndex: number;
   previousTraceItemIndex: number;
   problem: Problem;
-  setFocusTraceItemIndex: React.Dispatch<React.SetStateAction<number>>;
+  setViewingTraceItemIndex: React.Dispatch<React.SetStateAction<number>>;
 };
 
 export const TraceViewer: React.FC<Props> = (props: Props) => {
   return (
     <HStack alignItems="flex-start" as={Card} bg="gray.50" p={5}>
-      <VStack align="stretch" flexBasis={0} flexGrow={2} spacing={6}>
-        <VStack align="stretch">
-          <Heading size="md">
-            {props.previousTraceItemIndex === props.focusTraceItemIndex ? (
+      <VStack align="center" flexBasis={0} flexGrow={3} spacing={6}>
+        <VStack align="center">
+          <Heading size="md" textAlign="center">
+            {props.previousTraceItemIndex === props.viewingTraceItemIndex ? (
               <>
                 <Box as="span" bgColor="orange.100" px={0.5} rounded="sm">
                   {props.problem.sidToLineIndex.get(props.problem.traceItems[props.previousTraceItemIndex].sid)}行目
@@ -35,7 +35,7 @@ export const TraceViewer: React.FC<Props> = (props: Props) => {
             ) : (
               <>
                 <Box as="span" bgColor="orange.100" px={0.5} rounded="sm">
-                  {props.problem.sidToLineIndex.get(props.problem.traceItems[props.focusTraceItemIndex].sid)}行目
+                  {props.problem.sidToLineIndex.get(props.problem.traceItems[props.viewingTraceItemIndex].sid)}行目
                 </Box>
                 の実行後の盤面
               </>
@@ -44,34 +44,33 @@ export const TraceViewer: React.FC<Props> = (props: Props) => {
         </VStack>
 
         <BoardViewer
-          alignSelf="center"
-          board={props.problem.traceItems[props.focusTraceItemIndex]?.board}
-          turtles={Object.values(props.problem.traceItems[props.focusTraceItemIndex].vars ?? {}).filter(isTurtleTrace)}
+          board={props.problem.traceItems[props.viewingTraceItemIndex]?.board}
+          turtles={Object.values(props.problem.traceItems[props.viewingTraceItemIndex].vars ?? {}).filter(
+            isTurtleTrace
+          )}
         />
       </VStack>
-      <Box flexBasis={0} flexGrow={3} textAlign="center">
-        <Button
-          colorScheme="brand"
-          isDisabled={props.focusTraceItemIndex <= 1}
-          mx="5%"
-          variant="outline"
-          w="40%"
-          onClick={() => props.setFocusTraceItemIndex((prev) => prev - 1)}
-        >
-          1ステップ前を表示
-        </Button>
-        <Button
-          colorScheme="brand"
-          isDisabled={props.previousTraceItemIndex <= props.focusTraceItemIndex}
-          mx="5%"
-          variant="outline"
-          w="40%"
-          onClick={() => props.setFocusTraceItemIndex((prev) => prev + 1)}
-        >
-          1ステップ後を表示
-        </Button>
-        <Box mt={4}>
-          <Variables traceItemVars={props.problem.traceItems[props.focusTraceItemIndex].vars} />
+      <Box alignItems="center" display="flex" flexBasis={0} flexDirection="column" flexGrow={2} textAlign="center">
+        <HStack mb={4} spacing={4}>
+          <Button
+            colorScheme="brand"
+            isDisabled={props.viewingTraceItemIndex <= 1}
+            variant="outline"
+            onClick={() => props.setViewingTraceItemIndex((prev) => prev - 1)}
+          >
+            1ステップ前を表示
+          </Button>
+          <Button
+            colorScheme="brand"
+            isDisabled={props.previousTraceItemIndex <= props.viewingTraceItemIndex}
+            variant="outline"
+            onClick={() => props.setViewingTraceItemIndex((prev) => prev + 1)}
+          >
+            1ステップ後を表示
+          </Button>
+        </HStack>
+        <Box mt={4} w="100%">
+          <Variables traceItemVars={props.problem.traceItems[props.viewingTraceItemIndex].vars} />
         </Box>
       </Box>
     </HStack>

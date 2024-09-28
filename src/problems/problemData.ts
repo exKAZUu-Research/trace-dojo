@@ -860,6 +860,7 @@ s.set('亀', new Turtle());
 for (s.set('i', 0); s.get('i') < <3-5>; s.set('i', s.get('i') + 1)) {
   s.get('亀').forward();
 }
+delete s.vars['i'];
        `.trim(),
     java: `
 public class Main {
@@ -878,6 +879,7 @@ s.set('亀', new Turtle(<1-2>, <1-2>));
 for (s.set('i', <1-2>); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
   s.get('亀').forward();
 }
+delete s.vars['i'];
        `.trim(),
     java: `
 public class Main {
@@ -923,7 +925,6 @@ for (; s.get('i') < <3-4>;) {
   s.get('亀').turnRight();
   s.set('i', s.get('i') + 1);
 }
-delete s.vars['i'];
 s.get('亀').backward();
     `.trim(),
     java: `
@@ -1006,11 +1007,13 @@ for (s.set('i', 1); s.get('i') <= <4-6>; s.set('i', s.get('i') + 1)) {
   s.get('亀').forward();
   s.get('亀').turnLeft();
 }
+delete s.vars['i'];
 for (s.set('i', s.get('sum') / 4); s.get('i') >= 0; s.set('i', s.get('i') - 1)) {
   s.get('亀').forward();
   s.get('亀').forward();
   s.get('亀').turnRight();
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1041,6 +1044,7 @@ for (s.set('i', 0); s.get('i') < <2-3>; s.set('i', s.get('i') + 1)) {
   delete s.vars['j'];
   s.get('t').turnRight();
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1067,6 +1071,7 @@ for (s.set('i', 0); s.get('i') < <2-3>; s.set('i', s.get('i') + 1)) {
   delete s.vars['j'];
   s.get('t').turnLeft();
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1093,6 +1098,7 @@ for (s.set('i', <3-4>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
   delete s.vars['j'];
   s.get('t').turnRight();
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1120,6 +1126,7 @@ for (s.set('i', <3-4>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
   s.get('t').turnRight();
   delete s.vars['j'];
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1152,6 +1159,7 @@ for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
   delete s.vars['k'];
   s.get('t').turnLeft();
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1180,6 +1188,7 @@ for (s.set('i', 0); s.get('i') < <7-9>; s.set('i', s.get('i') + 1)) {
     s.get('t').turnRight();
   }
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1205,6 +1214,7 @@ for (s.set('i', 0); s.get('i') < <6-8>; s.set('i', s.get('i') + 1)) {
     s.get('t').turnLeft();
   }
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1232,6 +1242,7 @@ for (s.set('i', 0); s.get('i') < <4-5>; s.set('i', s.get('i') + 1)) {
     s.get('t').turnLeft();
   }
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1260,6 +1271,7 @@ for (s.set('i', 0); s.get('i') < <4-5>; s.set('i', s.get('i') + 1)) {
     s.get('t').turnLeft();
   }
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1292,6 +1304,7 @@ for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
   s.get('t').forward();
   s.get('t').turnLeft();
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1324,6 +1337,7 @@ for (s.set('i', 0); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
     s.get('t').backward();
   }
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1355,6 +1369,7 @@ for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
     s.get('t').turnLeft();
   }
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1387,6 +1402,7 @@ for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
       s.get('t').backward(); break;
   }
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1419,6 +1435,7 @@ for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
       s.get('t').forward(); break;
   }
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1498,6 +1515,7 @@ for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
   }
   s.get('t').turnRight();
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1517,12 +1535,13 @@ public class Main {
   continue1: {
     instrumented: `
 s.set('t', new Turtle());
-  for (s.set('i', 0); s.get('i') < <3-5>; s.set('i', s.get('i') + 1)) {
-    if (s.get('i') == 0) {
-      continue;
-    }
+for (s.set('i', 0); s.get('i') < <3-5>; s.set('i', s.get('i') + 1)) {
+  if (s.get('i') == 0) {
+    continue;
+  }
   s.get('t').forward();
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1548,6 +1567,7 @@ for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   }
   s.get('t').forward();
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1576,8 +1596,10 @@ for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
     }
     s.get('t').forward();
   }
+  delete s.vars['j'];
   s.get('t').turnLeft();
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1659,6 +1681,7 @@ function forwardGivenSteps(t, n) {
     for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
       t.forward();
     }
+    delete s.vars['i'];
   } finally {
     s.leaveScope();
   }
@@ -1739,6 +1762,7 @@ function forwardGivenSteps(t, n) {
     for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
       t.forward();
     }
+    delete s.vars['i'];
   } finally {
     s.leaveScope();
   }
@@ -1783,6 +1807,7 @@ function forwardGivenSteps(t, n) {
     for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
       t.forward();
     }
+    delete s.vars['i'];
   } finally {
     s.leaveScope();
   }
@@ -1825,8 +1850,10 @@ for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
     else
       forwardTwoSteps(s.get('t'));
   }
+  delete s.vars['j'];
   s.get('t').turnLeft();
 }
+delete s.vars['i'];
 
 function forwardTwoSteps(t) {
   try {
@@ -1879,6 +1906,7 @@ for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)
   forwardGivenSteps(s.get('t'), s.get('arr')[s.get('i')]);
   s.get('t').turnRight();
 }
+delete s.vars['i'];
 
 function forwardGivenSteps(t, n) {
   try {
@@ -1886,6 +1914,7 @@ function forwardGivenSteps(t, n) {
     for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
       t.forward();
     }
+    delete s.vars['i'];
   } finally {
     s.leaveScope();
   }
@@ -1923,6 +1952,7 @@ for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)
       s.get('t').turnLeft(); break;
   }
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -1992,6 +2022,7 @@ for (s.set('i', 0); s.get('i') < s.get('s').length; s.set('i', s.get('i') + 1)) 
       s.get('t').turnLeft(); break;
   }
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -2113,6 +2144,7 @@ for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
   s.get('c').forward();
   s.get('c').turnRight();
 }
+delete s.vars['i'];
 `.trim(),
     java: `
 import net.exkazuu.Character;

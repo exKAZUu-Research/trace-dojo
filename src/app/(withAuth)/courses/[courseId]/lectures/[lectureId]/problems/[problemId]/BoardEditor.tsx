@@ -17,12 +17,21 @@ import {
   HStack,
   Icon,
   IconButton,
+  Input,
   Spacer,
   Spinner,
+  Table,
+  TableContainer,
+  Tbody,
+  Td,
+  Th,
+  Thead,
+  Tooltip,
+  Tr,
   VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../../../problems/generateProblem';
-import { isTurtleTrace, type TurtleTrace } from '../../../../../../../../problems/traceProgram';
+import { isTurtleTrace, type TraceItem, type TurtleTrace } from '../../../../../../../../problems/traceProgram';
 import type { ColorChar, SelectedCell } from '../../../../../../../../types';
 
 import { BoardViewer } from './BoardViewer';
@@ -33,7 +42,7 @@ const DY = [1, 0, -1, 0];
 
 interface TurtleGraphicsProps {
   currentTraceItemIndex: number;
-  focusTraceItemIndex: number;
+  previousTraceItemIndex: number;
   handleSubmit: () => Promise<void>;
   problem: Problem;
 }
@@ -43,23 +52,27 @@ export interface TurtleGraphicsHandle {
 }
 
 export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>(
-  ({ currentTraceItemIndex, focusTraceItemIndex, handleSubmit, problem }, ref) => {
+  ({ currentTraceItemIndex, handleSubmit, previousTraceItemIndex, problem }, ref) => {
     const [board, updateBoard] = useImmer<ColorChar[][]>([]);
     const [turtles, updateTurtles] = useImmer<TurtleTrace[]>([]);
     const [selectedCell, setSelectedCell] = useState<SelectedCell>();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const selectedTurtle = turtles.find((char) => char.x === selectedCell?.x && char.y === selectedCell?.y);
-    const focusTraceItem = problem.traceItems[focusTraceItemIndex];
+    const previousTraceItem = problem.traceItems[previousTraceItemIndex];
     const currentTraceItem = problem.traceItems[currentTraceItemIndex];
+    const [variables, updateVariables] = useImmer<Record<string, string>>(() =>
+      getInitialVariables(currentTraceItem, previousTraceItem)
+    );
 
     const initialize = useCallback(
       (keepSelectedCell = false): void => {
-        const initialBoard = parseBoard(focusTraceItem.board);
+        const initialBoard = parseBoard(previousTraceItem.board);
         updateBoard(initialBoard);
-        updateTurtles(Object.values(focusTraceItem.vars ?? {}).filter(isTurtleTrace));
+        updateTurtles(Object.values(previousTraceItem.vars).filter(isTurtleTrace));
+        updateVariables(getInitialVariables(currentTraceItem, previousTraceItem));
         if (!keepSelectedCell) setSelectedCell(undefined);
       },
-      [focusTraceItem, updateBoard, updateTurtles]
+      [currentTraceItem, previousTraceItem, updateBoard, updateTurtles]
     );
 
     useImperativeHandle(ref, () => ({
@@ -67,7 +80,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     }));
 
     useEffect(() => {
-      initialize(focusTraceItemIndex >= 1);
+      initialize(previousTraceItemIndex >= 1);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentTraceItemIndex, problem]);
 
@@ -89,7 +102,11 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     const isCorrect = (): boolean => {
       if (!currentTraceItem) return false;
 
-      const expectedTurtles = Object.values(currentTraceItem.vars ?? {}).filter(isTurtleTrace);
+      for (const [name, value] of Object.entries(variables)) {
+        if (value !== currentTraceItem.vars[name].toString()) return false;
+      }
+
+      const expectedTurtles = Object.values(currentTraceItem.vars).filter(isTurtleTrace);
       const expectedBoard = parseBoard(currentTraceItem.board);
       return fastDeepEqual(expectedTurtles, turtles) && fastDeepEqual(expectedBoard, board);
     };
@@ -160,32 +177,68 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
       updateCellColor('.', x, y);
     };
 
+    const areAllVariablesFilled = Object.values(variables).every((value) => value.trim() !== '');
     const handleSubmitAndToggleSubmitting = useCallback(async () => {
+      if (isSubmitting || !areAllVariablesFilled) return;
+
       setIsSubmitting(true);
       try {
         await handleSubmit();
       } finally {
         setIsSubmitting(false);
       }
-    }, [handleSubmit]);
+    }, [isSubmitting, areAllVariablesFilled, handleSubmit]);
     useShortcutKeys(handleSubmitAndToggleSubmitting, isSubmitting);
 
     return (
       <HStack align="stretch" bgColor="gray.50" overflow="hidden" rounded="md">
-        <Center flexBasis={0} flexGrow={2} minW={0} px={4} py={20}>
-          <BoardViewer
-            enableTransitions
-            board={board.map((cells) => cells.join('')).join('\n')}
-            focusedCell={selectedCell}
-            turtles={turtles}
-            onCellClick={onCellClick}
-            onCellRightClick={onCellRightClick}
-            onTurtleClick={(x, y) => {
-              const turtle = turtles.find((t) => t.x === x && t.y === y);
-              if (turtle) handleClickTurtle(turtle);
-            }}
-          />
-        </Center>
+        <VStack flexBasis={0} flexGrow={2} minW={0} px={4} py={4} spacing={4}>
+          <Center>
+            <BoardViewer
+              enableTransitions
+              board={board.map((cells) => cells.join('')).join('\n')}
+              focusedCell={selectedCell}
+              turtles={turtles}
+              onCellClick={onCellClick}
+              onCellRightClick={onCellRightClick}
+              onTurtleClick={(x, y) => {
+                const turtle = turtles.find((t) => t.x === x && t.y === y);
+                if (turtle) handleClickTurtle(turtle);
+              }}
+            />
+          </Center>
+          {Object.keys(variables).length > 0 && (
+            <TableContainer bgColor="white" width="100%">
+              <Table size="sm">
+                <Thead>
+                  <Tr>
+                    <Th>変数名</Th>
+                    <Th>値</Th>
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {Object.entries(variables).map(([variableKey, variableValue]) => (
+                    <Tr key={variableKey}>
+                      <Td fontFamily="mono">{variableKey}</Td>
+                      <Td fontFamily="mono">
+                        <Input
+                          fontFamily="mono"
+                          size="sm"
+                          value={variableValue}
+                          onChange={(e) => {
+                            updateVariables((draft) => {
+                              draft[variableKey] = e.target.value.trim();
+                            });
+                          }}
+                        />
+                      </Td>
+                    </Tr>
+                  ))}
+                </Tbody>
+              </Table>
+            </TableContainer>
+          )}
+        </VStack>
 
         <VStack align="stretch" bgColor="white" flexBasis={0} flexGrow={1} minW={0} p={5} shadow="xs" spacing={4}>
           <VStack align="stretch">
@@ -291,22 +344,27 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
             盤面をリセット
           </Button>
 
-          <Button
-            colorScheme="brand"
-            isDisabled={isSubmitting}
-            rightIcon={
-              isSubmitting ? (
-                <Spinner size="sm" />
-              ) : (
-                <Box as="span" color="whiteAlpha.800" fontSize="sm" fontWeight="bold">
-                  (Enter)
-                </Box>
-              )
-            }
-            onClick={handleSubmitAndToggleSubmitting}
+          <Tooltip
+            isDisabled={areAllVariablesFilled}
+            label={areAllVariablesFilled ? '' : 'すべての変数の値を入力してください。'}
           >
-            提出
-          </Button>
+            <Button
+              colorScheme="brand"
+              isDisabled={isSubmitting || !areAllVariablesFilled}
+              rightIcon={
+                isSubmitting ? (
+                  <Spinner size="sm" />
+                ) : (
+                  <Box as="span" color="whiteAlpha.800" fontSize="sm" fontWeight="bold">
+                    (Enter)
+                  </Box>
+                )
+              }
+              onClick={handleSubmitAndToggleSubmitting}
+            >
+              提出
+            </Button>
+          </Tooltip>
         </VStack>
       </HStack>
     );
@@ -314,6 +372,14 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 );
 
 BoardEditor.displayName = 'BoardEditor';
+
+function getInitialVariables(currentTraceItem: TraceItem, previousTraceItem: TraceItem): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(currentTraceItem.vars)
+      .filter(([_, value]) => !isTurtleTrace(value))
+      .map(([key]) => [key, previousTraceItem.vars[key]?.toString() ?? ''])
+  );
+}
 
 function canPutTurtle(turtlesTraces: TurtleTrace[], x: number, y: number): boolean {
   return 0 <= x && x < COLUMNS && 0 <= y && y < ROWS && !turtlesTraces.some((t) => t.x === x && t.y === y);
@@ -329,8 +395,6 @@ function parseBoard(boardString: string): ColorChar[][] {
 
 function useShortcutKeys(handleSubmit: () => Promise<void>, isSubmitting: boolean): void {
   useEffect(() => {
-    if (isSubmitting) return;
-
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Enter') {
         event.preventDefault();
