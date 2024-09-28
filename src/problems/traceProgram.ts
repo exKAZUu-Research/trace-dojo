@@ -86,7 +86,7 @@ class Scope {
     if (this.vars[varName] !== undefined) {
       return this.vars[varName];
     }
-    throw new Error();
+    throw new Error(\`\${varName} is not defined.\`);
   }
   set(varName, value, sid) {
     this.vars[varName] = typeof value === 'number' ? Math.floor(value) : value;
