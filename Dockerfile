@@ -1,4 +1,4 @@
-FROM node:22.9.0-slim@sha256:903eaf1ae555002624d07066b7ce506dc2fb67b6da3121255b40ff4dc8e7e1b8
+FROM node:22.9.0-slim@sha256:6e6df5c992a4b2ca100d9f99f2fff6e1bc7a978c60c39630a2390adbbc7b332b
 WORKDIR /app
 
 EXPOSE 8080
@@ -54,7 +54,13 @@ CMD if [ "$RESTORE_BACKUP" -eq 1 ] && [ -s gcp-sa-key.json ] && [ "$WB_ENV" != "
     && node node_modules/.bin/wb prisma seed \
     && node node_modules/.bin/wb prisma litestream \
     && if [ -s gcp-sa-key.json ] && [ "$WB_ENV" != "" ] && [ "$WB_ENV" != "development" ] && [ "$WB_ENV" != "test" ]; then \
-           bash -c "litestream replicate -exec 'node node_modules/.bin/pm2-runtime start ecosystem.config.cjs' prisma/mount/prod.sqlite3 gcs://wb-online-judge/trace-dojo-${WB_ENV}/prod.sqlite3"; \
+           echo "Executing litestream replication with pm2-runtime"; \
+           if ! node -e "JSON.parse(require('fs').readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'utf8'))"; then \
+               echo "Invalid JSON in $GOOGLE_APPLICATION_CREDENTIALS"; \
+               exit 1; \
+           fi; \
+           litestream replicate -exec 'node node_modules/.bin/pm2-runtime start ecosystem.config.cjs' prisma/mount/prod.sqlite3 gcs://wb-online-judge/trace-dojo-${WB_ENV}/prod.sqlite3; \
        else \
+           echo "Starting pm2-runtime without litestream replication"; \
            bash -c "node node_modules/.bin/pm2-runtime start ecosystem.config.cjs"; \
        fi

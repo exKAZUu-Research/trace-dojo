@@ -89,7 +89,7 @@ class Scope {
     throw new Error();
   }
   set(varName, value, sid) {
-    this.vars[varName] = value;
+    this.vars[varName] = typeof value === 'number' ? Math.floor(value) : value;
     addTrace(sid);
   }
   enterNewScope(params) {
@@ -163,7 +163,7 @@ function checkForCond(cond, sid) {
   }
   return cond;
 }
-trace.push({sid: 0, board: board.map(r => r.join('')).join('\\n') });
+trace.push({sid: 0, vars: {}, board: board.map(r => r.join('')).join('\\n') });
 s = new Scope();
 ${modifiedCode.trim()}
 trace;

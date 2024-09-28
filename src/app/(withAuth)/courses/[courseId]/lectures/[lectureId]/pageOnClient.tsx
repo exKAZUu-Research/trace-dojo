@@ -123,11 +123,16 @@ export const Lecture: React.FC<Props> = (props) => {
                           <Link as={NextLink} href={`${props.params.lectureId}/problems/${problemId}`}>
                             {problemIdToName[problemId]}
                           </Link>
-                          {suspendedSession && (
-                            <Tag colorScheme="brand" fontWeight="bold" size="sm" variant="solid">
-                              挑戦中
-                            </Tag>
-                          )}
+                          {suspendedSession &&
+                            (isProblemCompleted ? (
+                              <Tag colorScheme="brand" fontWeight="bold" size="sm" variant="outline">
+                                再挑戦中
+                              </Tag>
+                            ) : (
+                              <Tag colorScheme="brand" fontWeight="bold" size="sm" variant="solid">
+                                挑戦中
+                              </Tag>
+                            ))}
                         </HStack>
                       </Td>
                       <Td isNumeric color="gray.600">

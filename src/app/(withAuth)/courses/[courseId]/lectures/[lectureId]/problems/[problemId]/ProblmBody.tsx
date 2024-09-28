@@ -1,6 +1,6 @@
 import type { ProblemSession } from '@prisma/client';
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 
 import { MAX_CHALLENGE_COUNT } from '../../../../../../../../constants';
 import { backendTrpcReact } from '../../../../../../../../infrastructures/trpcBackend/client';
@@ -18,7 +18,6 @@ import {
   Heading,
   HStack,
   Tag,
-  Tooltip,
   useDisclosure,
   VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
@@ -43,7 +42,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
   const currentTraceItemIndex =
     problemType === 'executionResult' ? props.problem.traceItems.length - 1 : props.problemSession.traceItemIndex;
   const previousTraceItemIndex = problemType === 'executionResult' ? 0 : currentTraceItemIndex - 1;
-  const [focusTraceItemIndex, setFocusTraceItemIndex] = useState(previousTraceItemIndex);
+  const [viewingTraceItemIndex, setViewingTraceItemIndex] = useState(previousTraceItemIndex);
 
   const { isOpen: isAlertOpen, onClose: onAlertClose, onOpen: onAlertOpen } = useDisclosure();
   const cancelRef = useRef(null);
@@ -56,25 +55,30 @@ export const ProblemBody: React.FC<Props> = (props) => {
   const [alertMessage, setAlertMessage] = useState('');
   const [postAlertAction, setPostAlertAction] = useState<() => void>();
 
-  const openAlertDialog = (title: string, message: string, action?: () => void): void => {
-    setAlertTitle(title);
-    setAlertMessage(message);
-    setPostAlertAction(() => action);
-    onAlertOpen();
-  };
+  const openAlertDialog = useCallback(
+    (title: string, message: string, action?: () => void): void => {
+      setAlertTitle(title);
+      setAlertMessage(message);
+      setPostAlertAction(() => action);
+      onAlertOpen();
+    },
+    [onAlertOpen]
+  );
 
   const { refetch: fetchIncorrectSubmissionsCount } = backendTrpcReact.countIncorrectSubmissions.useQuery(
     { sessionId: props.problemSession.id },
     { enabled: false }
   );
 
-  const handleClickSubmitButton = async (): Promise<void> => {
+  const handleSubmit = useCallback(async (): Promise<void> => {
+    if (isAlertOpen) return;
+
     const isCorrect = turtleGraphicsRef.current?.isCorrect() || false;
 
     switch (problemType) {
       case 'executionResult': {
         if (isCorrect) {
-          void props.createSubmissionUpdatingProblemSession(true, true);
+          await props.createSubmissionUpdatingProblemSession(true, true);
           openAlertDialog(
             '正解',
             '一発正解です！この問題は完了です。問題一覧ページに戻りますので、次の問題に挑戦してください。',
@@ -85,14 +89,14 @@ export const ProblemBody: React.FC<Props> = (props) => {
         } else {
           const response = await fetchIncorrectSubmissionsCount();
           const incorrectCount = (response.data ?? 0) + 1;
-          void props.createSubmissionUpdatingProblemSession(false, false);
+          await props.createSubmissionUpdatingProblemSession(false, false);
           if (incorrectCount < MAX_CHALLENGE_COUNT) {
             openAlertDialog(
               '不正解',
               `不正解です。あと${MAX_CHALLENGE_COUNT - incorrectCount}回間違えたら、ステップ実行モードに移ります。一発正解を目指しましょう！`
             );
           } else {
-            void props.updateProblemSession('step', 1);
+            await props.updateProblemSession('step', 1);
             openAlertDialog(
               '不正解',
               `不正解です。${MAX_CHALLENGE_COUNT}回間違えたので、ステップ実行モードに移ります。ステップごとに問題を解いてください。`
@@ -102,7 +106,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
         break;
       }
       case 'step': {
-        void props.createSubmissionUpdatingProblemSession(
+        await props.createSubmissionUpdatingProblemSession(
           isCorrect,
           isCorrect && currentTraceItemIndex === props.problem.traceItems.length - 1
         );
@@ -116,20 +120,27 @@ export const ProblemBody: React.FC<Props> = (props) => {
               }
             );
           } else {
-            void props.updateProblemSession('step', currentTraceItemIndex + 1);
+            await props.updateProblemSession('step', currentTraceItemIndex + 1);
             openAlertDialog('正解', '正解です。次のステップに進みます。');
-            setFocusTraceItemIndex(currentTraceItemIndex);
+            setViewingTraceItemIndex(currentTraceItemIndex);
           }
         } else {
           openAlertDialog('不正解', '不正解です。もう一度解答してください。');
-          setFocusTraceItemIndex(previousTraceItemIndex);
+          setViewingTraceItemIndex(previousTraceItemIndex);
         }
         break;
       }
     }
-  };
-
-  useShortcutKeys(handleClickSubmitButton);
+  }, [
+    currentTraceItemIndex,
+    fetchIncorrectSubmissionsCount,
+    isAlertOpen,
+    openAlertDialog,
+    previousTraceItemIndex,
+    problemType,
+    props,
+    router,
+  ]);
 
   return (
     <>
@@ -147,7 +158,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
               </HStack>
 
               <Box>
-                {problemType === 'step' && (
+                {problemType === 'step' && previousTraceItemIndex >= 1 && (
                   <>
                     画面下部にある
                     <Box as="span" bgColor="orange.100" px={0.5} rounded="sm">
@@ -183,30 +194,30 @@ export const ProblemBody: React.FC<Props> = (props) => {
             previousFocusLine={
               problemType === 'executionResult'
                 ? undefined
-                : props.problem.sidToLineIndex.get(props.problem.traceItems[focusTraceItemIndex].sid)
+                : props.problem.sidToLineIndex.get(props.problem.traceItems[viewingTraceItemIndex].sid)
             }
             programmingLanguageId="java"
           />
         </VStack>
 
-        <VStack align="stretch" flexBasis={0} flexGrow={1} spacing="4">
+        <VStack align="stretch" flexBasis={0} flexGrow={1} mt="auto" spacing="4">
           <BoardEditor
             ref={turtleGraphicsRef}
             currentTraceItemIndex={currentTraceItemIndex}
-            focusTraceItemIndex={focusTraceItemIndex}
-            handleClickSubmitButton={handleClickSubmitButton}
+            handleSubmit={handleSubmit}
+            previousTraceItemIndex={previousTraceItemIndex}
             problem={props.problem}
           />
         </VStack>
       </Flex>
 
-      {problemType !== 'executionResult' && previousTraceItemIndex >= 1 && (
+      {problemType === 'step' && previousTraceItemIndex >= 1 && (
         <TraceViewer
           currentTraceItemIndex={currentTraceItemIndex}
-          focusTraceItemIndex={focusTraceItemIndex}
           previousTraceItemIndex={previousTraceItemIndex}
           problem={props.problem}
-          setFocusTraceItemIndex={setFocusTraceItemIndex}
+          setViewingTraceItemIndex={setViewingTraceItemIndex}
+          viewingTraceItemIndex={viewingTraceItemIndex}
         />
       )}
 
@@ -227,17 +238,20 @@ export const ProblemBody: React.FC<Props> = (props) => {
             </AlertDialogHeader>
             <AlertDialogBody>{alertMessage}</AlertDialogBody>
             <AlertDialogFooter>
-              <Tooltip hasArrow fontSize="xs" label={`ショートカットキーは Esc`} placement="bottom">
-                <Button
-                  ref={cancelRef}
-                  onClick={() => {
-                    postAlertAction?.();
-                    onAlertClose();
-                  }}
-                >
-                  閉じる
-                </Button>
-              </Tooltip>
+              <Button
+                ref={cancelRef}
+                rightIcon={
+                  <Box as="span" fontSize="sm" fontWeight="bold">
+                    (Esc)
+                  </Box>
+                }
+                onClick={() => {
+                  postAlertAction?.();
+                  onAlertClose();
+                }}
+              >
+                閉じる
+              </Button>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialogOverlay>
@@ -245,17 +259,3 @@ export const ProblemBody: React.FC<Props> = (props) => {
     </>
   );
 };
-
-function useShortcutKeys(handleClickAnswerButton: () => Promise<void>): void {
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        void handleClickAnswerButton();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-}
