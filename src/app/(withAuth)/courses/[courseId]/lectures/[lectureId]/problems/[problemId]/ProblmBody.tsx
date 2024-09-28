@@ -40,7 +40,10 @@ type Props = {
 export const ProblemBody: React.FC<Props> = (props) => {
   const problemType = props.problemSession.problemType;
   const currentTraceItemIndex =
-    problemType === 'executionResult' ? props.problem.traceItems.length - 1 : props.problemSession.traceItemIndex;
+    problemType === 'executionResult'
+      ? props.problem.traceItems.length - 1
+      : // ProblemSession作成後の問題の改変に対応するため。
+        Math.min(props.problemSession.traceItemIndex, props.problem.traceItems.length - 1);
   const previousTraceItemIndex = problemType === 'executionResult' ? 0 : currentTraceItemIndex - 1;
   const [viewingTraceItemIndex, setViewingTraceItemIndex] = useState(previousTraceItemIndex);
 
@@ -144,7 +147,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
 
   return (
     <>
-      <Flex gap={6}>
+      <Flex alignItems="stretch" gap={6}>
         <VStack align="stretch" flexBasis={0} flexGrow={1} minW={0} spacing={4}>
           <VStack align="stretch" as={Card} overflow="hidden" spacing={0}>
             <VStack align="stretch" borderBottomWidth="1px" p={5}>
@@ -200,7 +203,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
           />
         </VStack>
 
-        <VStack align="stretch" flexBasis={0} flexGrow={1} mt="auto" spacing="4">
+        <VStack align="stretch" bgColor="gray.50" flexBasis={0} flexGrow={1} spacing="4">
           <BoardEditor
             ref={turtleGraphicsRef}
             currentTraceItemIndex={currentTraceItemIndex}

@@ -191,8 +191,8 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     useShortcutKeys(handleSubmitAndToggleSubmitting, isSubmitting);
 
     return (
-      <HStack align="stretch" bgColor="gray.50" overflow="hidden" rounded="md">
-        <VStack flexBasis={0} flexGrow={2} minW={0} px={4} py={4} spacing={4}>
+      <HStack align="stretch" height="100%" overflow="hidden" rounded="md">
+        <VStack flexBasis={0} flexGrow={2} justifyContent="center" minW={0} px={4} py={4} spacing={4}>
           <Center>
             <BoardViewer
               enableTransitions
