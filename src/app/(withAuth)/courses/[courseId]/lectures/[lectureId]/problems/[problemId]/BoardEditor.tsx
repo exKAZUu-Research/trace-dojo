@@ -31,7 +31,7 @@ import {
   VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { Problem } from '../../../../../../../../problems/generateProblem';
-import { isTurtleTrace, type TraceItem, type TurtleTrace } from '../../../../../../../../problems/traceProgram';
+import { type TraceItem, type TurtleTrace } from '../../../../../../../../problems/traceProgram';
 import type { ColorChar, SelectedCell } from '../../../../../../../../types';
 
 import { BoardViewer } from './BoardViewer';
@@ -68,7 +68,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
       (keepSelectedCell = false): void => {
         const initialBoard = parseBoard(previousTraceItem.board);
         updateBoard(initialBoard);
-        updateTurtles(Object.values(previousTraceItem.vars).filter(isTurtleTrace));
+        updateTurtles(previousTraceItem.turtles);
         updateVariables(getInitialVariables(currentTraceItem, previousTraceItem));
         if (!keepSelectedCell) setSelectedCell(undefined);
       },
@@ -106,7 +106,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
         if (value !== currentTraceItem.vars[name].toString()) return false;
       }
 
-      const expectedTurtles = Object.values(currentTraceItem.vars).filter(isTurtleTrace);
+      const expectedTurtles = currentTraceItem.turtles;
       const expectedBoard = parseBoard(currentTraceItem.board);
       return fastDeepEqual(expectedTurtles, turtles) && fastDeepEqual(expectedBoard, board);
     };
@@ -375,9 +375,7 @@ BoardEditor.displayName = 'BoardEditor';
 
 function getInitialVariables(currentTraceItem: TraceItem, previousTraceItem: TraceItem): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(currentTraceItem.vars)
-      .filter(([_, value]) => !isTurtleTrace(value))
-      .map(([key]) => [key, previousTraceItem.vars[key]?.toString() ?? ''])
+    Object.entries(currentTraceItem.vars).map(([key]) => [key, previousTraceItem.vars[key]?.toString() ?? ''])
   );
 }
 

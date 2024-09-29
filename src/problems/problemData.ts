@@ -209,9 +209,9 @@ export const courseIdToLectureIds: Record<CourseId, string[]> = JSON.parse(
 export const problemIdToLanguageIdToProgram: Record<ProblemId, Record<LanguageId, string>> = {
   straight: {
     instrumented: `
-s.set('亀', new Turtle());
-s.get('亀').forward();
-s.get('亀').forward();
+const t = new Turtle();
+t.forward();
+t.forward();
     `.trim(),
     java: `
 public class Main {
@@ -225,10 +225,10 @@ public class Main {
   },
   straight2: {
     instrumented: `
-s.set('亀', new Turtle());
-s.get('亀').forward();
-s.get('亀').forward();
-s.get('亀').forward();
+const t = new Turtle();
+t.forward();
+t.forward();
+t.forward();
     `.trim(),
     java: `
 public class Main {
@@ -243,9 +243,9 @@ public class Main {
   },
   stepBack: {
     instrumented: `
-s.set('亀', new Turtle());
-s.get('亀').forward();
-s.get('亀').backward();
+const t = new Turtle();
+t.forward();
+t.backward();
     `.trim(),
     java: `
 public class Main {
@@ -259,12 +259,12 @@ public class Main {
   },
   stepBack2: {
     instrumented: `
-s.set('亀', new Turtle());
-s.get('亀').forward();
-s.get('亀').forward();
-s.get('亀').backward();
-s.get('亀').forward();
-s.get('亀').forward();
+const t = new Turtle();
+t.forward();
+t.forward();
+t.backward();
+t.forward();
+t.forward();
     `.trim(),
     java: `
 public class Main {
@@ -281,10 +281,10 @@ public class Main {
   },
   turnRight: {
     instrumented: `
-s.set('亀', new Turtle());
-s.get('亀').forward();
-s.get('亀').turnRight();
-s.get('亀').forward();
+const t = new Turtle();
+t.forward();
+t.turnRight();
+t.forward();
     `.trim(),
     java: `
 public class Main {
@@ -299,12 +299,12 @@ public class Main {
   },
   turnRight2: {
     instrumented: `
-s.set('亀', new Turtle());
-s.get('亀').forward();
-s.get('亀').forward();
-s.get('亀').turnRight();
-s.get('亀').forward();
-s.get('亀').forward();
+const t = new Turtle();
+t.forward();
+t.forward();
+t.turnRight();
+t.forward();
+t.forward();
     `.trim(),
     java: `
 public class Main {
@@ -321,11 +321,11 @@ public class Main {
   },
   turnLeftAndRight: {
     instrumented: `
-s.set('亀', new Turtle());
-s.get('亀').turnRight();
-s.get('亀').forward();
-s.get('亀').turnLeft();
-s.get('亀').forward();
+const t = new Turtle();
+t.turnRight();
+t.forward();
+t.turnLeft();
+t.forward();
     `.trim(),
     java: `
 public class Main {
@@ -341,12 +341,12 @@ public class Main {
   },
   turnLeftAndRight2: {
     instrumented: `
-s.set('亀', new Turtle());
-s.get('亀').forward();
-s.get('亀').turnRight();
-s.get('亀').forward();
-s.get('亀').turnLeft();
-s.get('亀').forward();
+const t = new Turtle();
+t.forward();
+t.turnRight();
+t.forward();
+t.turnLeft();
+t.forward();
     `.trim(),
     java: `
 public class Main {
@@ -363,13 +363,13 @@ public class Main {
   },
   turnLeftAndRight3: {
     instrumented: `
-s.set('亀', new Turtle());
-s.get('亀').turnRight();
-s.get('亀').forward();
-s.get('亀').turnLeft();
-s.get('亀').forward();
-s.get('亀').turnRight();
-s.get('亀').forward();
+const t = new Turtle();
+t.turnRight();
+t.forward();
+t.turnLeft();
+t.forward();
+t.turnRight();
+t.forward();
     `.trim(),
     java: `
 public class Main {
@@ -387,15 +387,15 @@ public class Main {
   },
   turnLeftAndRight4: {
     instrumented: `
-s.set('亀', new Turtle());
-s.get('亀').forward();
-s.get('亀').forward();
-s.get('亀').turnRight();
-s.get('亀').forward();
-s.get('亀').forward();
-s.get('亀').turnLeft();
-s.get('亀').forward();
-s.get('亀').forward();
+const t = new Turtle();
+t.forward();
+t.forward();
+t.turnRight();
+t.forward();
+t.forward();
+t.turnLeft();
+t.forward();
+t.forward();
     `.trim(),
     java: `
 public class Main {
@@ -415,12 +415,12 @@ public class Main {
   },
   square1: {
     instrumented: `
-s.set('亀', new Turtle());
-s.get('亀').forward();
-s.get('亀').turnRight();
-s.get('亀').forward();
-s.get('亀').turnRight();
-s.get('亀').forward();
+const t = new Turtle();
+t.forward();
+t.turnRight();
+t.forward();
+t.turnRight();
+t.forward();
 `.trim(),
     java: `
 public class Main {
@@ -437,12 +437,12 @@ public class Main {
   },
   square2: {
     instrumented: `
-s.set('亀', new Turtle(<1-5>, <1-4>));
-s.get('亀').forward();
-s.get('亀').turnRight();
-s.get('亀').forward();
-s.get('亀').turnRight();
-s.get('亀').forward();
+const t = new Turtle(<1-5>, <1-4>);
+t.forward();
+t.turnRight();
+t.forward();
+t.turnRight();
+t.forward();
 `.trim(),
     java: `
 public class Main {
@@ -459,14 +459,14 @@ public class Main {
   },
   square3: {
     instrumented: `
-s.set('亀', new Turtle(<2-5>, <2-5>));
-s.get('亀').forward();
-s.get('亀').turnLeft();
-s.get('亀').forward();
-s.get('亀').turnLeft();
-s.get('亀').forward();
-s.get('亀').turnLeft();
-s.get('亀').forward();
+const t = new Turtle(<2-5>, <2-5>);
+t.forward();
+t.turnLeft();
+t.forward();
+t.turnLeft();
+t.forward();
+t.turnLeft();
+t.forward();
     `.trim(),
     java: `
 public class Main {
@@ -485,18 +485,18 @@ public class Main {
   },
   square4: {
     instrumented: `
-s.set('亀', new Turtle());
-s.get('亀').forward();
-s.get('亀').forward();
-s.get('亀').turnRight();
-s.get('亀').forward();
-s.get('亀').forward();
-s.get('亀').turnRight();
-s.get('亀').forward();
-s.get('亀').forward();
-s.get('亀').turnRight();
-s.get('亀').forward();
-s.get('亀').forward();
+const t = new Turtle();
+t.forward();
+t.forward();
+t.turnRight();
+t.forward();
+t.forward();
+t.turnRight();
+t.forward();
+t.forward();
+t.turnRight();
+t.forward();
+t.forward();
     `.trim(),
     java: `
 public class Main {
@@ -521,8 +521,8 @@ public class Main {
   variable: {
     instrumented: `
 s.set('x', <1-5>);
-s.set('亀', new Turtle(s.get('x'), <1-5>));
-s.get('亀').forward();
+const t = new Turtle(s.get('x'), <1-5>);
+t.forward();
  `.trim(),
     java: `
 public class Main {
@@ -538,8 +538,8 @@ public class Main {
     instrumented: `
 s.set('y', <2-6>);
 s.set('y', s.get('y') - 1);
-s.set('亀', new Turtle(<1-5>, s.get('y')));
-s.get('亀').forward();
+const t = new Turtle(<1-5>, s.get('y'));
+t.forward();
  `.trim(),
     java: `
 public class Main {
@@ -557,8 +557,8 @@ public class Main {
 s.set('x', <1-4>);
 s.set('x', s.get('x') + 1);
 s.set('y', s.get('x') + 1);
-s.set('亀', new Turtle(s.get('x'), s.get('y')));
-s.get('亀').forward();
+const t = new Turtle(s.get('x'), s.get('y'));
+t.forward();
 `.trim(),
     java: `
 public class Main {
@@ -577,8 +577,8 @@ public class Main {
 s.set('y', <1-4>);
 s.set('y', s.get('y') + 1);
 s.set('x', s.get('y') - 2);
-s.set('亀', new Turtle(s.get('x'), s.get('y')));
-s.get('亀').forward();
+const t = new Turtle(s.get('x'), s.get('y'));
+t.forward();
 `.trim(),
     java: `
 public class Main {
@@ -598,8 +598,8 @@ s.set('x', <1-5>);
 s.set('x', s.get('x') - 1);
 s.set('y', s.get('x') * 2);
 s.set('y', s.get('y') / 3);
-s.set('亀', new Turtle(s.get('x'), s.get('y')));
-s.get('亀').forward();
+const t = new Turtle(s.get('x'), s.get('y'));
+t.forward();
 `.trim(),
     java: `
 public class Main {
@@ -619,8 +619,8 @@ public class Main {
 s.set('a', <1-3>);
 s.set('b', s.get('a') * 2);
 s.set('c', s.get('b') - 2);
-s.set('亀', new Turtle(s.get('c'), s.get('b')));
-s.get('亀').forward();
+const t = new Turtle(s.get('c'), s.get('b'));
+t.forward();
 `.trim(),
     java: `
 public class Main {
@@ -640,8 +640,8 @@ s.set('x', <0-2>);
 s.set('y', (s.get('x') * 2) + 1);
 s.set('z', (s.get('y') * 2) + (s.get('x') / 2));
 s.set('x', s.get('z') / 3);
-s.set('亀', new Turtle(s.get('x'), s.get('y')));
-s.get('亀').forward();
+const t = new Turtle(s.get('x'), s.get('y'));
+t.forward();
     `.trim(),
     java: `
 public class Main {
@@ -663,8 +663,8 @@ s.set('y', (s.get('x') * 3) + 2);
 s.set('z', (s.get('y') * 2) - (s.get('x') * 3));
 s.set('x', (s.get('z') / 4) % 7);
 s.set('y', (s.get('x') + s.get('y')) % 7);
-s.set('亀', new Turtle(s.get('x'), s.get('y')));
-s.get('亀').backward();
+const t = new Turtle(s.get('x'), s.get('y'));
+t.backward();
     `.trim(),
     java: `
 public class Main {
@@ -687,8 +687,8 @@ s.set('y', (s.get('x') * 4) + 3);
 s.set('z', (s.get('y') * 3) - (s.get('x') * 2));
 s.set('x', ((s.get('z') / 5) + s.get('x')) % 7);
 s.set('y', ((s.get('x') * 2) + s.get('y')) % 7);
-s.set('亀', new Turtle(s.get('x'), s.get('y')));
-s.get('亀').forward();
+const t = new Turtle(s.get('x'), s.get('y'));
+t.forward();
     `.trim(),
     java: `
 public class Main {
@@ -712,8 +712,8 @@ s.set('z', (s.get('y') * 2) - (s.get('x') * 3));
 s.set('w', (s.get('z') + s.get('x')) % 5);
 s.set('x', ((s.get('z') / 6) + s.get('w')) % 7);
 s.set('y', ((s.get('x') * 3) + s.get('y')) % 7);
-s.set('亀', new Turtle(s.get('x'), s.get('y')));
-s.get('亀').forward();
+const t = new Turtle(s.get('x'), s.get('y'));
+t.forward();
     `.trim(),
     java: `
 public class Main {
@@ -732,10 +732,10 @@ public class Main {
   },
   while1: {
     instrumented: `
-s.set('亀', new Turtle());
+const t = new Turtle();
 s.set('i', 0);
 while (s.get('i') < <3-5>) {
-  s.get('亀').forward();
+  t.forward();
   s.set('i', s.get('i') + 1);
 }
     `.trim(),
@@ -754,10 +754,10 @@ public class Main {
   },
   while2: {
     instrumented: `
-s.set('亀', new Turtle(<0-1>, <0-1>));
+const t = new Turtle(<0-1>, <0-1>);
 s.set('i', <1-2>);
 while (s.get('i') < <4-6>) {
-  s.get('亀').forward();
+  t.forward();
   s.set('i', s.get('i') + 1);
 }
     `.trim(),
@@ -776,12 +776,12 @@ public class Main {
   },
   while3: {
     instrumented: `
-s.set('亀', new Turtle());
+const t = new Turtle();
 s.set('i', 0);
 while (s.get('i') < <2-3>) {
   s.set('i', s.get('i') + 1);
-  s.get('亀').forward();
-  s.get('亀').turnRight();
+  t.forward();
+  t.turnRight();
 }
     `.trim(),
     java: `
@@ -800,13 +800,13 @@ public class Main {
   },
   while4: {
     instrumented: `
-s.set('亀', new Turtle(<0-1>, <0-1>));
-s.get('亀').turnRight();
+const t = new Turtle(<0-1>, <0-1>);
+t.turnRight();
 s.set('i', <1-2>);
 while (s.get('i') < <4-5>) {
-  s.get('亀').forward();
-  s.get('亀').forward();
-  s.get('亀').turnLeft();
+  t.forward();
+  t.forward();
+  t.turnLeft();
   s.set('i', s.get('i') + 1);
 }
     `.trim(),
@@ -828,13 +828,13 @@ public class Main {
   },
   while5: {
     instrumented: `
-s.set('亀', new Turtle());
+const t = new Turtle();
 s.set('i', <1-2>);
 while (s.get('i') < <3-4>) {
-  s.get('亀').forward();
-  s.get('亀').turnRight();
-  s.get('亀').forward();
-  s.get('亀').turnLeft();
+  t.forward();
+  t.turnRight();
+  t.forward();
+  t.turnLeft();
   s.set('i', s.get('i') + 1);
 }
     `.trim(),
@@ -856,9 +856,9 @@ public class Main {
   },
   for1: {
     instrumented: `
-s.set('亀', new Turtle());
+const t = new Turtle();
 for (s.set('i', 0); s.get('i') < <3-5>; s.set('i', s.get('i') + 1)) {
-  s.get('亀').forward();
+  t.forward();
 }
 delete s.vars['i'];
        `.trim(),
@@ -875,9 +875,9 @@ public class Main {
   },
   for2: {
     instrumented: `
-s.set('亀', new Turtle(<1-2>, <1-2>));
+const t = new Turtle(<1-2>, <1-2>);
 for (s.set('i', <1-2>); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
-  s.get('亀').forward();
+  t.forward();
 }
 delete s.vars['i'];
        `.trim(),
@@ -894,11 +894,11 @@ public class Main {
   },
   for3: {
     instrumented: `
-s.set('亀', new Turtle());
+const t = new Turtle();
 s.set('i', 0);
 for (; s.get('i') < <2-3>;) {
-  s.get('亀').forward();
-  s.get('亀').turnRight();
+  t.forward();
+  t.turnRight();
   s.set('i', s.get('i') + 1);
 }
     `.trim(),
@@ -918,14 +918,14 @@ public class Main {
   },
   for4: {
     instrumented: `
-s.set('亀', new Turtle(<1-2>, <1-2>));
+const t = new Turtle(<1-2>, <1-2>);
 s.set('i', 1);
 for (; s.get('i') < <3-4>;) {
-  s.get('亀').forward();
-  s.get('亀').turnRight();
+  t.forward();
+  t.turnRight();
   s.set('i', s.get('i') + 1);
 }
-s.get('亀').backward();
+t.backward();
     `.trim(),
     java: `
 public class Main {
@@ -950,8 +950,8 @@ for (s.set('i', 2); s.get('i') <= <4-5>; s.set('i', s.get('i') + 1)) {
 }
 delete s.vars['i'];
 s.set('x', s.get('x') / 3);
-s.set('亀', new Turtle(s.get('x'), 0));
-s.get('亀').forward();
+const t = new Turtle(s.get('x'), 0);
+t.forward();
     `.trim(),
     java: `
 public class Main {
@@ -978,8 +978,8 @@ for (s.set('i', <4-5>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
 delete s.vars['i'];
 s.set('x', s.get('x') / 4);
 s.set('y', s.get('y') / 5);
-s.set('亀', new Turtle(s.get('x') % 6, s.get('y') % 6));
-s.get('亀').forward();
+const t = new Turtle(s.get('x') % 6, s.get('y') % 6);
+t.forward();
     `.trim(),
     java: `
 public class Main {
@@ -1000,18 +1000,18 @@ public class Main {
   },
   for7: {
     instrumented: `
-s.set('亀', new Turtle(3, 3));
+const t = new Turtle(3, 3);
 s.set('sum', 0);
 for (s.set('i', 1); s.get('i') <= <4-6>; s.set('i', s.get('i') + 1)) {
   s.set('sum', s.get('sum') + s.get('i'));
-  s.get('亀').forward();
-  s.get('亀').turnLeft();
+  t.forward();
+  t.turnLeft();
 }
 delete s.vars['i'];
 for (s.set('i', s.get('sum') / 4); s.get('i') >= 0; s.set('i', s.get('i') - 1)) {
-  s.get('亀').forward();
-  s.get('亀').forward();
-  s.get('亀').turnRight();
+  t.forward();
+  t.forward();
+  t.turnRight();
 }
 delete s.vars['i'];
     `.trim(),
@@ -1036,13 +1036,13 @@ public class Main {
   },
   doubleLoop1: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 for (s.set('i', 0); s.get('i') < <2-3>; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < <2-3>; s.set('j', s.get('j') + 1)) {
-      s.get('t').forward();
+      t.forward();
   }
   delete s.vars['j'];
-  s.get('t').turnRight();
+  t.turnRight();
 }
 delete s.vars['i'];
     `.trim(),
@@ -1062,14 +1062,14 @@ public class Main {
   },
   doubleLoop2: {
     instrumented: `
-s.set('t', new Turtle());
-s.get('t').turnRight();
+const t = new Turtle();
+t.turnRight();
 for (s.set('i', 0); s.get('i') < <2-3>; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < <2-3>; s.set('j', s.get('j') + 1)) {
-      s.get('t').forward();
+      t.forward();
   }
   delete s.vars['j'];
-  s.get('t').turnLeft();
+  t.turnLeft();
 }
 delete s.vars['i'];
     `.trim(),
@@ -1090,13 +1090,13 @@ public class Main {
   },
   doubleLoop3: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 for (s.set('i', <3-4>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
   for (s.set('j', 0); s.get('j') < s.get('i'); s.set('j', s.get('j') + 1)) {
-    s.get('t').forward();
+    t.forward();
   }
   delete s.vars['j'];
-  s.get('t').turnRight();
+  t.turnRight();
 }
 delete s.vars['i'];
     `.trim(),
@@ -1116,14 +1116,14 @@ public class Main {
   },
   doubleLoop4: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 for (s.set('i', <3-4>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
   s.set('j', s.get('i'));
   while (s.get('j') >= 0) {
-    s.get('t').forward();
+    t.forward();
     s.set('j', s.get('j') - 1);
   }
-  s.get('t').turnRight();
+  t.turnRight();
   delete s.vars['j'];
 }
 delete s.vars['i'];
@@ -1146,18 +1146,18 @@ public class Main {
   },
   doubleLoop5: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
   for (s.set('j', <0-1>); s.get('j') <= s.get('i'); s.set('j', s.get('j') + 1)) {
-    s.get('t').forward();
+    t.forward();
   }
   delete s.vars['j'];
-  s.get('t').turnRight();
+  t.turnRight();
   for (s.set('k', <0-1>); s.get('k') < s.get('i'); s.set('k', s.get('k') + 1)) {
-    s.get('t').forward();
+    t.forward();
   }
   delete s.vars['k'];
-  s.get('t').turnLeft();
+  t.turnLeft();
 }
 delete s.vars['i'];
     `.trim(),
@@ -1181,11 +1181,11 @@ public class Main {
   },
   if1: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 for (s.set('i', 0); s.get('i') < <7-9>; s.set('i', s.get('i') + 1)) {
-  s.get('t').forward();
+  t.forward();
   if (s.get('i') % 3 === 2) {
-    s.get('t').turnRight();
+    t.turnRight();
   }
 }
 delete s.vars['i'];
@@ -1206,12 +1206,12 @@ public class Main {
   },
   if2: {
     instrumented: `
-s.set('t', new Turtle(<1-2>, <1-2>));
-s.get('t').turnRight();
+const t = new Turtle(<1-2>, <1-2>);
+t.turnRight();
 for (s.set('i', 0); s.get('i') < <6-8>; s.set('i', s.get('i') + 1)) {
-  s.get('t').forward();
+  t.forward();
   if (s.get('i') % 3 === 1) {
-    s.get('t').turnLeft();
+    t.turnLeft();
   }
 }
 delete s.vars['i'];
@@ -1233,13 +1233,13 @@ public class Main {
   },
   if3: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 for (s.set('i', 0); s.get('i') < <4-5>; s.set('i', s.get('i') + 1)) {
-  s.get('t').forward();
+  t.forward();
   if (s.get('i') % 2 === 0) {
-    s.get('t').turnRight();
+    t.turnRight();
   } else {
-    s.get('t').turnLeft();
+    t.turnLeft();
   }
 }
 delete s.vars['i'];
@@ -1262,13 +1262,13 @@ public class Main {
   },
   if4: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 for (s.set('i', 0); s.get('i') < <4-5>; s.set('i', s.get('i') + 1)) {
-  s.get('t').forward();
+  t.forward();
   if (s.get('i') % 3 === 0) {
-    s.get('t').turnRight();
+    t.turnRight();
   } else {
-    s.get('t').turnLeft();
+    t.turnLeft();
   }
 }
 delete s.vars['i'];
@@ -1291,18 +1291,18 @@ public class Main {
   },
   if5: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < <2-3>; s.set('j', s.get('j') + 1)) {
     if (s.get('j') % 2 === 0) {
-      s.get('t').forward();
+      t.forward();
     } else {
-      s.get('t').turnRight();
+      t.turnRight();
     }
   }
   delete s.vars['j'];
-  s.get('t').forward();
-  s.get('t').turnLeft();
+  t.forward();
+  t.turnLeft();
 }
 delete s.vars['i'];
     `.trim(),
@@ -1327,14 +1327,14 @@ public class Main {
   },
   elseIf1: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 for (s.set('i', 0); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') < <2-3>) {
-    s.get('t').forward();
+    t.forward();
   } else if (s.get('i') === <2-3>) {
-    s.get('t').turnLeft();
+    t.turnLeft();
   } else {
-    s.get('t').backward();
+    t.backward();
   }
 }
 delete s.vars['i'];
@@ -1357,16 +1357,16 @@ public class Main {
   },
   elseIf2: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') % 4 === 0) {
-    s.get('t').forward();
+    t.forward();
   } else if (s.get('i') % 4 === 1) {
-    s.get('t').turnRight();
+    t.turnRight();
   } else if (s.get('i') % 4 === 2) {
-    s.get('t').forward();
+    t.forward();
   } else {
-    s.get('t').turnLeft();
+    t.turnLeft();
   }
 }
 delete s.vars['i'];
@@ -1391,15 +1391,15 @@ public class Main {
   },
   switch1: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   switch (s.get('i')) {
     case 0: case 1:
-      s.get('t').forward(); break;
+      t.forward(); break;
     case 2:
-      s.get('t').turnLeft(); break;
+      t.turnLeft(); break;
     default:
-      s.get('t').backward(); break;
+      t.backward(); break;
   }
 }
 delete s.vars['i'];
@@ -1424,15 +1424,15 @@ public class Main {
   },
   switch2: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   switch (s.get('i') % 4) {
     case 1:
-      s.get('t').turnRight(); break;
+      t.turnRight(); break;
     case 3:
-      s.get('t').turnLeft(); break;
+      t.turnLeft(); break;
     default:
-      s.get('t').forward(); break;
+      t.forward(); break;
   }
 }
 delete s.vars['i'];
@@ -1457,10 +1457,10 @@ public class Main {
   },
   break1: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 while (true) {
-  if (!s.get('t').canMoveForward()) break;
-  s.get('t').forward();
+  if (!t.canMoveForward()) break;
+  t.forward();
 }
     `.trim(),
     java: `
@@ -1477,15 +1477,15 @@ public class Main {
   },
   break2: {
     instrumented: `
-s.set('t', new Turtle(<3-4>,<3-4>));
+const t = new Turtle(<3-4>,<3-4>);
 while (true) {
-  if (!s.get('t').canMoveForward()) break;
-  s.get('t').forward();
-  s.get('t').turnRight();
+  if (!t.canMoveForward()) break;
+  t.forward();
+  t.turnRight();
 
-  if (!s.get('t').canMoveForward()) break;
-  s.get('t').forward();
-  s.get('t').turnLeft();
+  if (!t.canMoveForward()) break;
+  t.forward();
+  t.turnLeft();
 }
     `.trim(),
     java: `
@@ -1507,13 +1507,13 @@ public class Main {
   },
   break3: {
     instrumented: `
-s.set('t', new Turtle(<4-6>, <4-6>));
+const t = new Turtle(<4-6>, <4-6>);
 for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
   while (true) {
-    s.get('t').forward();
-    if (!s.get('t').canMoveForward()) break;
+    t.forward();
+    if (!t.canMoveForward()) break;
   }
-  s.get('t').turnRight();
+  t.turnRight();
 }
 delete s.vars['i'];
     `.trim(),
@@ -1534,12 +1534,12 @@ public class Main {
   },
   continue1: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 for (s.set('i', 0); s.get('i') < <3-5>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') == 0) {
     continue;
   }
-  s.get('t').forward();
+  t.forward();
 }
 delete s.vars['i'];
     `.trim(),
@@ -1559,13 +1559,13 @@ public class Main {
   },
   continue2: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') % <2-3> == 1) {
-    s.get('t').turnRight();
+    t.turnRight();
     continue;
   }
-  s.get('t').forward();
+  t.forward();
 }
 delete s.vars['i'];
     `.trim(),
@@ -1586,18 +1586,18 @@ public class Main {
   },
   continue3: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
   for (s.set('j', s.get('i') * 4); s.get('j') < 8; s.set('j', s.get('j') + 1)) {
     if (s.get('j') % 4 == 1) {
-      s.get('t').turnRight(); continue;
+      t.turnRight(); continue;
     } else if (s.get('j') % 4 == 3) {
-      s.get('t').turnLeft(); continue;
+      t.turnLeft(); continue;
     }
-    s.get('t').forward();
+    t.forward();
   }
   delete s.vars['j'];
-  s.get('t').turnLeft();
+  t.turnLeft();
 }
 delete s.vars['i'];
     `.trim(),
@@ -1622,10 +1622,10 @@ public class Main {
   },
   method1: {
     instrumented: `
-s.set('t', new Turtle());
-forwardTwoSteps(s.get('t'));
-s.get('t').turnRight();
-threeStepsForward(s.get('t'));
+const t = new Turtle();
+forwardTwoSteps(t);
+t.turnRight();
+threeStepsForward(t);
 
 function forwardTwoSteps(t) {
   try {
@@ -1670,10 +1670,10 @@ public class Main {
   },
   method2: {
     instrumented: `
-s.set('t', new Turtle());
-forwardGivenSteps(s.get('t'), <3-4>);
-s.get('t').turnRight();
-forwardGivenSteps(s.get('t'), 2);
+const t = new Turtle();
+forwardGivenSteps(t, <3-4>);
+t.turnRight();
+forwardGivenSteps(t, 2);
 
 function forwardGivenSteps(t, n) {
   try {
@@ -1706,10 +1706,10 @@ public class Main {
   },
   method3: {
     instrumented: `
-s.set('t', new Turtle());
-forwardTwoSteps(s.get('t'));
-s.get('t').turnRight();
-forwardFourSteps(s.get('t'));
+const t = new Turtle();
+forwardTwoSteps(t);
+t.turnRight();
+forwardFourSteps(t);
 
 function forwardTwoSteps(t) {
   try {
@@ -1752,9 +1752,9 @@ public class Main {
   },
   return1: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 s.set('x', double(<2-3>));
-forwardGivenSteps(s.get('t'), s.get('x'));
+forwardGivenSteps(t, s.get('x'));
 
 function forwardGivenSteps(t, n) {
   try {
@@ -1797,9 +1797,9 @@ public class Main {
   },
   return2: {
     instrumented: `
-s.set('t', new Turtle());
-forwardGivenSteps(s.get('t'), add(1, 1));
-forwardGivenSteps(s.get('t'), add(1, 2));
+const t = new Turtle();
+forwardGivenSteps(t, add(1, 1));
+forwardGivenSteps(t, add(1, 2));
 
 function forwardGivenSteps(t, n) {
   try {
@@ -1842,16 +1842,16 @@ public class Main {
   },
   return3: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < 3; s.set('j', s.get('j') + 1)) {
     if (isEqual(s.get('i'), s.get('j')))
-      s.get('t').turnRight();
+      t.turnRight();
     else
-      forwardTwoSteps(s.get('t'));
+      forwardTwoSteps(t);
   }
   delete s.vars['j'];
-  s.get('t').turnLeft();
+  t.turnLeft();
 }
 delete s.vars['i'];
 
@@ -1900,11 +1900,11 @@ public class Main {
   },
   array1: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 s.set('arr', [2, <1-2>, <1-2>]);
 for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
-  forwardGivenSteps(s.get('t'), s.get('arr')[s.get('i')]);
-  s.get('t').turnRight();
+  forwardGivenSteps(t, s.get('arr')[s.get('i')]);
+  t.turnRight();
 }
 delete s.vars['i'];
 
@@ -1940,16 +1940,16 @@ public class Main {
   },
   array2: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 s.set('arr', [0, 1, 0, 2, 0]);
 for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
   switch (s.get('arr')[s.get('i')]) {
     case 0:
-      s.get('t').forward(); break;
+      t.forward(); break;
     case 1:
-      s.get('t').turnRight(); break;
+      t.turnRight(); break;
     case 2:
-      s.get('t').turnLeft(); break;
+      t.turnLeft(); break;
   }
 }
 delete s.vars['i'];
@@ -1975,17 +1975,17 @@ public class Main {
   },
   array3: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 s.set('arr', [0, 1, 0, 2, 0]);
 for (const cmd of [0, 1, 0, 2, 0]) {
   s.set('cmd', cmd);
   switch (s.get('cmd')) {
     case 0:
-      s.get('t').forward(); break;
+      t.forward(); break;
     case 1:
-      s.get('t').turnRight(); break;
+      t.turnRight(); break;
     case 2:
-      s.get('t').turnLeft(); break;
+      t.turnLeft(); break;
   }
 }
     `.trim(),
@@ -2010,16 +2010,16 @@ public class Main {
   },
   string1: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 s.set('s', 'frflf');
 for (s.set('i', 0); s.get('i') < s.get('s').length; s.set('i', s.get('i') + 1)) {
   switch (s.get('s').charAt(s.get('i'))) {
     case 'f':
-      s.get('t').forward(); break;
+      t.forward(); break;
     case 'r':
-      s.get('t').turnRight(); break;
+      t.turnRight(); break;
     case 'l':
-      s.get('t').turnLeft(); break;
+      t.turnLeft(); break;
   }
 }
 delete s.vars['i'];
@@ -2045,17 +2045,17 @@ public class Main {
   },
   string2: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 s.set('s', 'frflf');
 for (const ch of 'frflf') {
   s.set('ch', ch);
   switch (s.get('ch')) {
     case 'f':
-      s.get('t').forward(); break;
+      t.forward(); break;
     case 'r':
-      s.get('t').turnRight(); break;
+      t.turnRight(); break;
     case 'l':
-      s.get('t').turnLeft(); break;
+      t.turnLeft(); break;
   }
 }
     `.trim(),
@@ -2080,11 +2080,11 @@ public class Main {
   },
   string3: {
     instrumented: `
-s.set('t', new Turtle());
+const t = new Turtle();
 s.set('cmds', ['ri', 'aa', 'fo']);
 for (const cmd of ['ri', 'aa', 'fo']) {
   s.set('cmd', cmd);
-  parse(s.get('t'), s.get('cmd'));
+  parse(t, s.get('cmd'));
 }
 
 function parse(t, c) {
@@ -2117,18 +2117,16 @@ public class Main {
   },
   test1: {
     instrumented: `
-s.set('c', new Turtle());
-s.get('c').forward();
-s.get('c').forward();
-s.get('c').forward();
+const t = new Turtle();
+t.forward();
+t.forward();
+t.forward();
 `.trim(),
     // sidがただの連番である場合、番号を省略できる。
     java: `
-import net.exkazuu.Character;
-
 public class Main {
   public static void main(String[] args) {
-    Character c = new Turtle(); // sid
+    Turtle c = new Turtle(); // sid
     c.forward(); // sid
     c.forward(); // sid
     c.forward(); // sid
@@ -2138,20 +2136,18 @@ public class Main {
   },
   test2: {
     instrumented: `
-s.set('c', new Turtle());
+const t = new Turtle();
 for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
-  s.get('c').forward();
-  s.get('c').forward();
-  s.get('c').turnRight();
+  t.forward();
+  t.forward();
+  t.turnRight();
 }
 delete s.vars['i'];
 `.trim(),
     java: `
-import net.exkazuu.Character;
-
 public class Main {
   public static void main(String[] args) {
-    Character c = new Turtle(); // sid
+    Turtle c = new Turtle(); // sid
     for (let i = 0; i < 2; i++) { // sid
       c.forward(); // sid
       c.forward(); // sid
@@ -2181,8 +2177,6 @@ function f(x, y) {
 }
 `,
     java: `
-import net.exkazuu.Character;
-
 public class Main {
   public static void main(String[] args) {
     int a = 1; // sid: 1
@@ -2202,30 +2196,30 @@ public class Main {
   },
   test4: {
     instrumented: `
-s.set('c1', new Turtle());
-s.get('c1').forward();
-s.get('c1').turnRight();
+const t1 = new Turtle();
+t1.forward();
+t1.turnRight();
 s.set('i', 0);
-s.get('c1').forward();
+t1.forward();
 
-s.set('c2', new Turtle(2, 3, 'G'));
-s.get('c2').forward();
+const t2 = new Turtle(2, 3, 'G');
+t2.forward();
 s.set('foo', 'あいうえお');
 s.set('bar', <1-100>);
 s.set('i', s.get('bar') + 1);
-s.get('c2').forward();
-s.get('c2').forward();
+t2.forward();
+t2.forward();
 `.trim(),
     java: `
 public class Main {
   public static void main(String[] args) {
-    Character c1 = new Turtle(); // sid
+    Turtle c1 = new Turtle(); // sid
     c1.forward(); // sid
     c1.turnRight(); // sid
     int i = 0; // sid
     c1.forward(); // sid
 
-    Character c2 = new Turtle(2, 3, "green"); // sid
+    Turtle c2 = new Turtle(2, 3, "green"); // sid
     c2.forward(); // sid
     String foo = "あいうえお"; // sid
     int bar = <1-100>; // sid
@@ -2238,14 +2232,14 @@ public class Main {
   },
   test5: {
     instrumented: `
-s.set('c', new Turtle());
-s.get('c').forward();
-s.get('c').forward();
-s.get('c').turnRight();
-s.get('c').forward();
-s.get('c').forward();
-s.get('c').forward();
-s.get('c').forward();
+const t = new Turtle();
+t.forward();
+t.forward();
+t.turnRight();
+t.forward();
+t.forward();
+t.forward();
+t.forward();
 `.trim(),
     java: `
 public class Straight {

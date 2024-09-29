@@ -21,17 +21,14 @@ export interface TurtleTrace {
 export interface TraceItem {
   sid: number;
   vars: TraceItemVariable;
+  turtles: TurtleTrace[];
   board: string;
   /** Pythonなどの拡張for文しかない言語において、削除すべき更新式か否か。 */
   last?: boolean;
 }
 
 // できる限り、可能性のある型を具体的に列挙していきたい。
-export type TraceItemVariable = Record<string, number | string | TurtleTrace>;
-
-export function isTurtleTrace(trace: number | string | TurtleTrace): trace is TurtleTrace {
-  return typeof trace === 'object' && 'x' in trace && 'y' in trace && 'color' in trace && 'dir' in trace;
-}
+export type TraceItemVariable = Record<string, number | string>;
 
 export const charToColor = {
   '#': 'black',
@@ -48,11 +45,13 @@ export const colorToChar = Object.fromEntries(
 ) as Record<CellColor, ColorChar>;
 
 export function traceProgram(instrumented: string, rawDisplayProgram: string, languageId: LanguageId): Problem {
-  if (instrumented.includes(' = ')) {
-    throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
-  }
-  if (instrumented.includes('let ') || instrumented.includes('var ') || /(?<!for\s\()const\s/.test(instrumented)) {
-    throw new Error('Instrumented program MUST NOT contain variable declarations.');
+  if (!instrumented.includes('Turtle')) {
+    if (instrumented.includes(' = ')) {
+      throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
+    }
+    if (instrumented.includes('let ') || instrumented.includes('var ') || /(?<!for\s*\()const\s/.test(instrumented)) {
+      throw new Error('Instrumented program MUST NOT contain variable declarations.');
+    }
   }
 
   let statementId = 1;
@@ -62,11 +61,11 @@ export function traceProgram(instrumented: string, rawDisplayProgram: string, la
     const newLine = line
       .replace(/for\s*\(([^;]*);\s*([^;]*);/, (_, init, cond) => `for (${init}; checkForCond(${cond}, ${statementId});`)
       .replaceAll(
-        /\.(set|forward|backward|turnRight|turnLeft)\(([^\n;]*)\)(;|\)\s*{)/g,
-        (_, methodName, args, tail) => {
+        /(new\s+Turtle|\.set|\.forward|\.backward|\.turnRight|\.turnLeft)\(([^\n;]*)\)(;|\)\s*{)/g,
+        (_, newOrMethod, args, tail) => {
           replaced = true;
           const delimiter = args === '' ? '' : ', ';
-          return `.${methodName}(${args}${delimiter}${statementId})${tail}`;
+          return `${newOrMethod}(${statementId}${delimiter}${args})${tail}`;
         }
       );
     if (replaced) statementId++;
@@ -76,6 +75,7 @@ export function traceProgram(instrumented: string, rawDisplayProgram: string, la
   // 無理に難読化する必要はないが、コードの文量を減らす意識を持つ。
   const executableCode = `
 const trace = [];
+const turtles = [];
 let s;
 class Scope {
   constructor(parent) {
@@ -88,7 +88,7 @@ class Scope {
     }
     throw new Error(\`\${varName} is not defined.\`);
   }
-  set(varName, value, sid) {
+  set(sid, varName, value) {
     this.vars[varName] = typeof value === 'number' ? Math.floor(value) : value;
     addTrace(sid);
   }
@@ -108,12 +108,14 @@ const dx = [0, 1, 0, -1];
 const dy = [1, 0, -1, 0];
 const board = Array.from({ length: ${GRID_ROWS} }, () => Array.from({ length: ${GRID_COLUMNS} }, () => '${EMPTY_COLOR}'));
 class Turtle {
-  constructor(x = 0, y = 0, color = '${DEFAULT_COLOR}') {
+  constructor(sid, x = 0, y = 0, color = '${DEFAULT_COLOR}') {
     this.x = x;
     this.y = y;
     this.color = color;
     this.dir = 'N';
     board[this.y][this.x] = this.color;
+    turtles.push(this);
+    addTrace(sid);
   }
   forward(sid) {
     const index = dirs.indexOf(this.dir);
@@ -151,11 +153,7 @@ class Turtle {
   }
 }
 function addTrace(sid) {
-  const vars = { ...s.vars };
-  for (const key in vars) {
-    if (vars[key] instanceof Turtle) vars[key] = { ...vars[key] };
-  }
-  trace.push({ sid, vars, board: board.map(r => r.join('')).join('\\n') });
+  trace.push({ sid, turtles: turtles.map(t => ({ ...t })), vars: { ...s.vars }, board: board.map(r => r.join('')).join('\\n') });
 }
 function checkForCond(cond, sid) {
   if (!cond && trace.at(-1).sid === sid) {
@@ -163,7 +161,7 @@ function checkForCond(cond, sid) {
   }
   return cond;
 }
-trace.push({sid: 0, vars: {}, board: board.map(r => r.join('')).join('\\n') });
+trace.push({sid: 0, turtles: [], vars: {}, board: board.map(r => r.join('')).join('\\n') });
 s = new Scope();
 ${modifiedCode.trim()}
 trace;
