@@ -1,7 +1,7 @@
 import { Box, Button, Card, Heading, HStack, VStack } from '@chakra-ui/react';
 import React from 'react';
 
-import type { Problem } from '../../../../../../../../problems/generateProblem';
+import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateProblem';
 
 import { BoardViewer } from './BoardViewer';
 import { Variables } from './Variables';
@@ -10,7 +10,7 @@ type Props = {
   currentTraceItemIndex: number;
   viewingTraceItemIndex: number;
   previousTraceItemIndex: number;
-  problem: Problem;
+  problem: InstantiatedProblem;
   setViewingTraceItemIndex: React.Dispatch<React.SetStateAction<number>>;
 };
 

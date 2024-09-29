@@ -6,7 +6,7 @@ import {
 } from '../constants';
 import type { CellColor, ColorChar } from '../types';
 
-import type { Problem } from './generateProblem';
+import type { InstantiatedProblem } from './instantiateProblem';
 import type { LanguageId } from './problemData';
 
 export interface TurtleTrace {
@@ -44,7 +44,11 @@ export const colorToChar = Object.fromEntries(
   Object.entries(charToColor).map(([char, color]) => [color, char])
 ) as Record<CellColor, ColorChar>;
 
-export function traceProgram(instrumented: string, rawDisplayProgram: string, languageId: LanguageId): Problem {
+export function traceProgram(
+  instrumented: string,
+  rawDisplayProgram: string,
+  languageId: LanguageId
+): InstantiatedProblem {
   if (!instrumented.includes('Turtle')) {
     if (instrumented.includes(' = ')) {
       throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
@@ -164,13 +168,11 @@ function checkForCond(cond, sid) {
 trace.push({sid: 0, turtles: [], vars: {}, board: board.map(r => r.join('')).join('\\n') });
 s = new Scope();
 ${modifiedCode.trim()}
-trace;
+({ trace, finalVars: s.vars });
 `;
 
-  let trace = eval(executableCode) as TraceItem[];
-  if ((languageId as string) === 'python') {
-    trace = trace.filter((item: TraceItem) => !item.last);
-  }
+  const { finalVars, trace: rawTrace } = eval(executableCode) as { trace: TraceItem[]; finalVars: TraceItemVariable };
+  const trace = (languageId as string) === 'python' ? rawTrace.filter((item: TraceItem) => !item.last) : rawTrace;
 
   const lines = rawDisplayProgram.split('\n');
   const refinedLines = [];
@@ -189,5 +191,5 @@ trace;
     refinedLines.push(refinedLine);
   }
 
-  return { languageId, displayProgram: refinedLines.join('\n'), traceItems: trace, sidToLineIndex };
+  return { languageId, displayProgram: refinedLines.join('\n'), traceItems: trace, sidToLineIndex, finalVars };
 }

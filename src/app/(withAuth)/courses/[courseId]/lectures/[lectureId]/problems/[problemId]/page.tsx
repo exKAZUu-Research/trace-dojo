@@ -3,7 +3,7 @@ import type { NextPage } from 'next';
 import { DEFAULT_LANGUAGE_ID } from '../../../../../../../../constants';
 import { logger } from '../../../../../../../../infrastructures/pino';
 import { prisma } from '../../../../../../../../infrastructures/prisma';
-import { generateProblem } from '../../../../../../../../problems/generateProblem';
+import { instantiateProblem } from '../../../../../../../../problems/instantiateProblem';
 import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
 import { getNonNullableSessionOnServer } from '../../../../../../../../utils/session';
 
@@ -41,7 +41,7 @@ const ProblemPage: NextPage<Props> = async (props) => {
   }
   logger.debug('incompleteProblemSession: %o', incompleteProblemSession);
 
-  const problem = generateProblem(
+  const problem = instantiateProblem(
     incompleteProblemSession.problemId as ProblemId,
     DEFAULT_LANGUAGE_ID,
     incompleteProblemSession.problemVariablesSeed

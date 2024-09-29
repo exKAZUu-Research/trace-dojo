@@ -21,8 +21,9 @@ import {
   useDisclosure,
   VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
-import type { Problem } from '../../../../../../../../problems/generateProblem';
+import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateProblem';
 import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
+import type { ProblemType } from '../../../../../../../../types';
 
 import type { TurtleGraphicsHandle } from './BoardEditor';
 import { BoardEditor } from './BoardEditor';
@@ -31,14 +32,14 @@ import { TraceViewer } from './TraceViewer';
 
 type Props = {
   params: { courseId: CourseId; lectureId: string; problemId: ProblemId };
-  problem: Problem;
+  problem: InstantiatedProblem;
   problemSession: ProblemSession;
   createSubmissionUpdatingProblemSession: (isCorrect: boolean, isCompleted: boolean) => Promise<void>;
   updateProblemSession: (problemType: string, traceItemIndex: number) => Promise<void>;
 };
 
 export const ProblemBody: React.FC<Props> = (props) => {
-  const problemType = props.problemSession.problemType;
+  const problemType = props.problemSession.problemType as ProblemType;
   const currentTraceItemIndex =
     problemType === 'executionResult'
       ? props.problem.traceItems.length - 1
@@ -210,6 +211,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
             handleSubmit={handleSubmit}
             previousTraceItemIndex={previousTraceItemIndex}
             problem={props.problem}
+            problemType={problemType}
           />
         </VStack>
       </Flex>

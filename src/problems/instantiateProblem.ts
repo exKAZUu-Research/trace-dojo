@@ -2,9 +2,9 @@ import { Random } from '../app/utils/random';
 
 import type { LanguageId, ProblemId } from './problemData';
 import { problemIdToLanguageIdToProgram } from './problemData';
-import { type TraceItem, traceProgram } from './traceProgram';
+import { type TraceItemVariable, type TraceItem, traceProgram } from './traceProgram';
 
-export type Problem = {
+export type InstantiatedProblem = {
   /**
    * The language ID of the program.
    */
@@ -24,11 +24,20 @@ export type Problem = {
    * The mapping from statement ID to line index.
    */
   sidToLineIndex: Map<number, number>;
+
+  /**
+   * The variables of the final state
+   */
+  finalVars: TraceItemVariable;
 };
 
 const randomNumberRegex = /<(\d+)-(\d+)>/g;
 
-export function generateProblem(problemId: string, languageId: LanguageId, variableSeed: string): Problem | undefined {
+export function instantiateProblem(
+  problemId: string,
+  languageId: LanguageId,
+  variableSeed: string
+): InstantiatedProblem | undefined {
   const template = problemIdToLanguageIdToProgram[problemId as ProblemId];
   if (!template || !template[languageId]) return;
 

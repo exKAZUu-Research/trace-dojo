@@ -4,7 +4,7 @@ import {
   TURTLE_GRAPHICS_BOARD_COLUMNS as GRID_COLUMNS,
   TURTLE_GRAPHICS_BOARD_ROWS as GRID_ROWS,
 } from '../../src/constants';
-import { generateProblem } from '../../src/problems/generateProblem';
+import { instantiateProblem } from '../../src/problems/instantiateProblem';
 import type { TraceItem, TurtleTrace } from '../../src/problems/traceProgram';
 
 const defaultBoard = ('.'.repeat(GRID_COLUMNS) + '\n').repeat(GRID_ROWS).trim();
@@ -547,7 +547,7 @@ public class Straight {
 ] as const)(
   'Trace a program',
   ({ expectedDisplayProgram, expectedSidToLineIndex, expectedTrace, languageId, problemId }) => {
-    const problem = generateProblem(problemId, languageId, '');
+    const problem = instantiateProblem(problemId, languageId, '');
     if (!problem) throw new Error('Failed to generate problem.');
 
     const { displayProgram, sidToLineIndex, traceItems } = problem;

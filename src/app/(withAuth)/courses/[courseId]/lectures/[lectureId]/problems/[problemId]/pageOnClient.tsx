@@ -19,7 +19,7 @@ import {
   Tooltip,
   VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
-import type { Problem } from '../../../../../../../../problems/generateProblem';
+import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateProblem';
 import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
 import { courseIdToLectureIds, courseIdToName, problemIdToName } from '../../../../../../../../problems/problemData';
 
@@ -27,7 +27,7 @@ import { ProblemBody } from './ProblmBody';
 
 type Props = {
   params: { courseId: CourseId; lectureId: string; problemId: ProblemId };
-  problem: Problem;
+  problem: InstantiatedProblem;
   userId: string;
   initialProblemSession: ProblemSession;
 };
