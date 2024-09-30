@@ -28,7 +28,7 @@ export interface TraceItem {
 }
 
 // できる限り、可能性のある型を具体的に列挙していきたい。
-export type TraceItemVariable = Record<string, number | string>;
+export type TraceItemVariable = Record<string, number | string | number[] | string[]>;
 
 export const charToColor = {
   '#': 'black',
@@ -168,7 +168,7 @@ function checkForCond(cond, sid) {
 trace.push({sid: 0, turtles: [], vars: {}, board: board.map(r => r.join('')).join('\\n') });
 s = new Scope();
 ${modifiedCode.trim()}
-({ trace, finalVars: s.vars });
+({ trace, finalVars: { ...s.vars } });
 `;
 
   const { finalVars, trace: rawTrace } = eval(executableCode) as { trace: TraceItem[]; finalVars: TraceItemVariable };

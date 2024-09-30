@@ -565,13 +565,7 @@ public class Straight {
 function stringifyObjects(trace: TraceItem[]): TraceItem[] {
   // 目視で差異を確認しやすくするために文字列化する。
   for (const item of trace) {
-    const vars = { ...item.vars };
-    for (const key in vars) {
-      if (typeof vars[key] === 'object' && 'x' in (vars[key] as TurtleTrace)) {
-        vars[key] = JSON.stringify(vars[key]);
-      }
-    }
-    item.vars = vars;
+    item.vars = { ...item.vars };
   }
   console.log(trace); // TODO: remove this later
   return trace;

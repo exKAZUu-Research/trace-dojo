@@ -1629,7 +1629,7 @@ threeStepsForward(t);
 
 function forwardTwoSteps(t) {
   try {
-    s.enterNewScope([['t', t]]);
+    s.enterNewScope([]);
     t.forward();
     t.forward();
   } finally {
@@ -1639,7 +1639,7 @@ function forwardTwoSteps(t) {
 
 function threeStepsForward(t) {
   try {
-    s.enterNewScope([['t', t]]);
+    s.enterNewScope([]);
     t.forward();
     t.forward();
     t.forward();
@@ -1677,7 +1677,7 @@ forwardGivenSteps(t, 2);
 
 function forwardGivenSteps(t, n) {
   try {
-    s.enterNewScope([['t', t], ['n', n]]);
+    s.enterNewScope([['n', n]]);
     for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
       t.forward();
     }
@@ -1713,7 +1713,7 @@ forwardFourSteps(t);
 
 function forwardTwoSteps(t) {
   try {
-    s.enterNewScope([['t', t]]);
+    s.enterNewScope([]);
     t.forward();
     t.forward();
   } finally {
@@ -1723,7 +1723,7 @@ function forwardTwoSteps(t) {
 
 function forwardFourSteps(t) {
   try {
-    s.enterNewScope([['t', t]]);
+    s.enterNewScope([]);
     forwardTwoSteps(t);
     forwardTwoSteps(t);
   } finally {
@@ -1758,7 +1758,7 @@ forwardGivenSteps(t, s.get('x'));
 
 function forwardGivenSteps(t, n) {
   try {
-    s.enterNewScope([['t', t], ['n', n]]);
+    s.enterNewScope([['n', n]]);
     for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
       t.forward();
     }
@@ -1803,7 +1803,7 @@ forwardGivenSteps(t, add(1, 2));
 
 function forwardGivenSteps(t, n) {
   try {
-    s.enterNewScope([['t', t], ['n', n]]);
+    s.enterNewScope([['n', n]]);
     for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
       t.forward();
     }
@@ -1857,7 +1857,7 @@ delete s.vars['i'];
 
 function forwardTwoSteps(t) {
   try {
-    s.enterNewScope([['t', t]]);
+    s.enterNewScope([]);
     t.forward();
     t.forward();
   } finally {
@@ -1910,7 +1910,7 @@ delete s.vars['i'];
 
 function forwardGivenSteps(t, n) {
   try {
-    s.enterNewScope([['t', t], ['n', n]]);
+    s.enterNewScope([['n', n]]);
     for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
       t.forward();
     }
@@ -1988,6 +1988,7 @@ for (const cmd of [0, 1, 0, 2, 0]) {
       t.turnLeft(); break;
   }
 }
+delete s.vars['cmd'];
     `.trim(),
     java: `
 public class Main {
@@ -2058,6 +2059,7 @@ for (const ch of 'frflf') {
       t.turnLeft(); break;
   }
 }
+delete s.vars['ch'];
     `.trim(),
     java: `
 public class Main {
@@ -2086,10 +2088,11 @@ for (const cmd of ['ri', 'aa', 'fo']) {
   s.set('cmd', cmd);
   parse(t, s.get('cmd'));
 }
+delete s.vars['cmd'];
 
 function parse(t, c) {
   try {
-    s.enterNewScope([['t', t], ['c', c]]);
+    s.enterNewScope([['c', c]]);
     if (c === 'fo') t.forward();
     else if (c === 'ri') t.turnRight();
   } finally {

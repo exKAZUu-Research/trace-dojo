@@ -31,7 +31,7 @@ import {
   VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateProblem';
-import type { TraceItemVariable, TraceItem, TurtleTrace } from '../../../../../../../../problems/traceProgram';
+import type { TraceItem, TraceItemVariable, TurtleTrace } from '../../../../../../../../problems/traceProgram';
 import type { ColorChar, ProblemType, SelectedCell } from '../../../../../../../../types';
 
 import { BoardViewer } from './BoardViewer';
@@ -378,7 +378,9 @@ function getInitialVariables(
   previousTraceItem: TraceItem
 ): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(currentVariables).map(([key]) => [key, previousTraceItem.vars[key]?.toString() ?? ''])
+    Object.entries(currentVariables)
+      .filter(([_, value]) => typeof value === 'number' || typeof value === 'string')
+      .map(([key]) => [key, previousTraceItem.vars[key]?.toString() ?? ''])
   );
 }
 

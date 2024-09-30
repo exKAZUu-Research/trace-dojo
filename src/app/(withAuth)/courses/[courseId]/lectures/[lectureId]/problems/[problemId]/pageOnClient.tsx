@@ -2,10 +2,12 @@
 
 import type { ProblemSession } from '@prisma/client';
 import NextLink from 'next/link';
-import { useCallback, useRef, useState } from 'react';
+import { notFound } from 'next/navigation';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
 
 import {
+  DEFAULT_LANGUAGE_ID,
   MAX_ACTIVE_DURATION_MS_AFTER_LAST_EVENT,
   MIN_INTERVAL_MS_OF_ACTIVE_EVENTS,
 } from '../../../../../../../../constants';
@@ -19,7 +21,7 @@ import {
   Tooltip,
   VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
-import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateProblem';
+import { instantiateProblem } from '../../../../../../../../problems/instantiateProblem';
 import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
 import { courseIdToLectureIds, courseIdToName, problemIdToName } from '../../../../../../../../problems/problemData';
 
@@ -27,13 +29,21 @@ import { ProblemBody } from './ProblmBody';
 
 type Props = {
   params: { courseId: CourseId; lectureId: string; problemId: ProblemId };
-  problem: InstantiatedProblem;
   userId: string;
   initialProblemSession: ProblemSession;
 };
 
 export const ProblemPageOnClient: React.FC<Props> = (props) => {
   const lectureIndex = courseIdToLectureIds[props.params.courseId].indexOf(props.params.lectureId);
+  const problem = useMemo(
+    () =>
+      instantiateProblem(
+        props.params.problemId as ProblemId,
+        DEFAULT_LANGUAGE_ID,
+        props.initialProblemSession.problemVariablesSeed
+      ),
+    [props.params.problemId, props.initialProblemSession.problemVariablesSeed]
+  );
 
   const [problemSession, setProblemSession] = useState(props.initialProblemSession);
 
@@ -72,6 +82,8 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     },
     [problemSession.id, updateProblemSessionMutation]
   );
+
+  if (!problem) notFound();
 
   return (
     <VStack align="stretch" spacing={4}>
@@ -113,7 +125,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
       <ProblemBody
         createSubmissionUpdatingProblemSession={createSubmissionUpdatingProblemSession}
         params={props.params}
-        problem={props.problem}
+        problem={problem}
         problemSession={problemSession}
         updateProblemSession={updateProblemSession}
       />
