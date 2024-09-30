@@ -1,6 +1,6 @@
 import type { ProblemSession } from '@prisma/client';
 import { useRouter } from 'next/navigation';
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 
 import { MAX_CHALLENGE_COUNT } from '../../../../../../../../constants';
 import { backendTrpcReact } from '../../../../../../../../infrastructures/trpcBackend/client';
@@ -47,6 +47,17 @@ export const ProblemBody: React.FC<Props> = (props) => {
         Math.min(props.problemSession.traceItemIndex, props.problem.traceItems.length - 1);
   const previousTraceItemIndex = problemType === 'executionResult' ? 0 : currentTraceItemIndex - 1;
   const [viewingTraceItemIndex, setViewingTraceItemIndex] = useState(previousTraceItemIndex);
+  const currentVariables =
+    problemType === 'executionResult' ? props.problem.finalVars : props.problem.traceItems[currentTraceItemIndex].vars;
+  const emptyVariables = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(currentVariables)
+          .filter(([_, value]) => typeof value === 'number' || typeof value === 'string')
+          .map(([key]) => [key, props.problem.traceItems[previousTraceItemIndex].vars[key]?.toString() ?? ''])
+      ),
+    [currentVariables, previousTraceItemIndex, props.problem.traceItems]
+  );
 
   const { isOpen: isAlertOpen, onClose: onAlertClose, onOpen: onAlertOpen } = useDisclosure();
   const cancelRef = useRef(null);
@@ -183,7 +194,8 @@ export const ProblemBody: React.FC<Props> = (props) => {
                     </>
                   )}
                 </Box>
-                の盤面を作成し、提出ボタンを押してください。
+                の盤面{Object.keys(emptyVariables).length > 0 ? 'と変数の一覧表' : ''}
+                を作成し、提出ボタンを押してください。
               </Box>
             </VStack>
           </VStack>
@@ -208,6 +220,8 @@ export const ProblemBody: React.FC<Props> = (props) => {
           <BoardEditor
             ref={turtleGraphicsRef}
             currentTraceItemIndex={currentTraceItemIndex}
+            currentVariables={currentVariables}
+            emptyVariables={emptyVariables}
             handleSubmit={handleSubmit}
             previousTraceItemIndex={previousTraceItemIndex}
             problem={props.problem}

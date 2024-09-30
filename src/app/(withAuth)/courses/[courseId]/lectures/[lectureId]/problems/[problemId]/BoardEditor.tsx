@@ -31,7 +31,7 @@ import {
   VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateProblem';
-import type { TraceItem, TraceItemVariable, TurtleTrace } from '../../../../../../../../problems/traceProgram';
+import type { TraceItemVariable, TurtleTrace } from '../../../../../../../../problems/traceProgram';
 import type { ColorChar, ProblemType, SelectedCell } from '../../../../../../../../types';
 
 import { BoardViewer } from './BoardViewer';
@@ -42,6 +42,8 @@ const DY = [1, 0, -1, 0];
 
 interface TurtleGraphicsProps {
   currentTraceItemIndex: number;
+  currentVariables: TraceItemVariable;
+  emptyVariables: Record<string, string>;
   previousTraceItemIndex: number;
   handleSubmit: () => Promise<void>;
   problem: InstantiatedProblem;
@@ -60,20 +62,17 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
   const selectedTurtle = turtles.find((char) => char.x === selectedCell?.x && char.y === selectedCell?.y);
   const previousTraceItem = props.problem.traceItems[props.previousTraceItemIndex];
   const currentTraceItem = props.problem.traceItems[props.currentTraceItemIndex];
-  const currentVariables = props.problemType === 'executionResult' ? props.problem.finalVars : currentTraceItem.vars;
-  const [variables, updateVariables] = useImmer<Record<string, string>>(() =>
-    getInitialVariables(currentVariables, previousTraceItem)
-  );
+  const [variables, updateVariables] = useImmer<Record<string, string>>(props.emptyVariables);
 
   const initialize = useCallback(
     (keepSelectedCell = false): void => {
       const initialBoard = parseBoard(previousTraceItem.board);
       updateBoard(initialBoard);
       updateTurtles(previousTraceItem.turtles);
-      updateVariables(getInitialVariables(currentVariables, previousTraceItem));
+      updateVariables(props.emptyVariables);
       if (!keepSelectedCell) setSelectedCell(undefined);
     },
-    [currentTraceItem, previousTraceItem, updateBoard, updateTurtles]
+    [previousTraceItem, props.emptyVariables, updateBoard, updateTurtles]
   );
 
   useImperativeHandle(ref, () => ({
@@ -101,10 +100,8 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
   };
 
   const isCorrect = (): boolean => {
-    if (!currentTraceItem) return false;
-
     for (const [name, value] of Object.entries(variables)) {
-      if (value !== currentVariables[name].toString()) return false;
+      if (value !== props.currentVariables[name].toString()) return false;
     }
 
     const expectedTurtles = currentTraceItem.turtles;
@@ -239,6 +236,11 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
             </Table>
           </TableContainer>
         )}
+        {Object.values(props.currentVariables).some((value) => typeof value === 'string') && (
+          <Box color="red.500" fontSize="sm" mt={2}>
+            文字列や文字を入力する際にダブルクォーテーション(&quot;)やシングルクォーテーション(&apos;)は不要です。
+          </Box>
+        )}
       </VStack>
 
       <VStack align="stretch" bgColor="white" flexBasis={0} flexGrow={1} minW={0} p={5} shadow="xs" spacing={4}>
@@ -372,17 +374,6 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 });
 
 BoardEditor.displayName = 'BoardEditor';
-
-function getInitialVariables(
-  currentVariables: TraceItemVariable,
-  previousTraceItem: TraceItem
-): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(currentVariables)
-      .filter(([_, value]) => typeof value === 'number' || typeof value === 'string')
-      .map(([key]) => [key, previousTraceItem.vars[key]?.toString() ?? ''])
-  );
-}
 
 function canPutTurtle(turtlesTraces: TurtleTrace[], x: number, y: number): boolean {
   return 0 <= x && x < COLUMNS && 0 <= y && y < ROWS && !turtlesTraces.some((t) => t.x === x && t.y === y);
