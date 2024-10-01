@@ -4,7 +4,7 @@ import {
   TURTLE_GRAPHICS_BOARD_COLUMNS as GRID_COLUMNS,
   TURTLE_GRAPHICS_BOARD_ROWS as GRID_ROWS,
 } from '../../src/constants';
-import { generateProblem } from '../../src/problems/generateProblem';
+import { instantiateProblem } from '../../src/problems/instantiateProblem';
 import type { TraceItem, TurtleTrace } from '../../src/problems/traceProgram';
 
 const defaultBoard = ('.'.repeat(GRID_COLUMNS) + '\n').repeat(GRID_ROWS).trim();
@@ -22,11 +22,9 @@ test.each([
     languageId: 'java',
     problemId: 'test1',
     expectedDisplayProgram: `
-import net.exkazuu.Character;
-
 public class Main {
   public static void main(String[] args) {
-    Character c = new Turtle();
+    Turtle c = new Turtle();
     c.forward();
     c.forward();
     c.forward();
@@ -34,29 +32,35 @@ public class Main {
 }
 `.trim(),
     expectedSidToLineIndex: {
-      1: 5,
-      2: 6,
-      3: 7,
-      4: 8,
+      1: 3,
+      2: 4,
+      3: 5,
+      4: 6,
     },
     expectedTrace: [
-      { sid: 0, vars: {}, board: defaultBoard },
+      { depth: 0, sid: 0, turtles: [], vars: {}, board: defaultBoard },
       {
+        depth: 0,
         sid: 1,
-        vars: { c: defaultTurtle },
+        turtles: [defaultTurtle],
+        vars: {},
         board: getBoard([{ x: sx, y: sy, color: '#' }]),
       },
       {
+        depth: 0,
         sid: 2,
-        vars: { c: { ...defaultTurtle, y: sy + 1 } },
+        turtles: [{ ...defaultTurtle, y: sy + 1 }],
+        vars: {},
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
         ]),
       },
       {
+        depth: 0,
         sid: 3,
-        vars: { c: { ...defaultTurtle, y: sy + 2 } },
+        turtles: [{ ...defaultTurtle, y: sy + 2 }],
+        vars: {},
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -64,8 +68,10 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 4,
-        vars: { c: { ...defaultTurtle, y: sy + 3 } },
+        turtles: [{ ...defaultTurtle, y: sy + 3 }],
+        vars: {},
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -79,11 +85,9 @@ public class Main {
     languageId: 'java',
     problemId: 'test2',
     expectedDisplayProgram: `
-import net.exkazuu.Character;
-
 public class Main {
   public static void main(String[] args) {
-    Character c = new Turtle();
+    Turtle c = new Turtle();
     for (let i = 0; i < 2; i++) {
       c.forward();
       c.forward();
@@ -93,35 +97,43 @@ public class Main {
 }
   `.trim(),
     expectedSidToLineIndex: {
-      1: 5,
-      2: 6,
-      3: 7,
-      4: 8,
-      5: 9,
+      1: 3,
+      2: 4,
+      3: 5,
+      4: 6,
+      5: 7,
     },
     expectedTrace: [
-      { sid: 0, vars: {}, board: defaultBoard },
+      { depth: 0, sid: 0, turtles: [], vars: {}, board: defaultBoard },
       {
+        depth: 0,
         sid: 1,
-        vars: { c: defaultTurtle },
+        turtles: [defaultTurtle],
+        vars: {},
         board: getBoard([{ x: sx, y: sy, color: '#' }]),
       },
       {
+        depth: 0,
         sid: 2,
-        vars: { c: defaultTurtle, i: 0 },
+        turtles: [defaultTurtle],
+        vars: { i: 0 },
         board: getBoard([{ x: sx, y: sy, color: '#' }]),
       },
       {
+        depth: 0,
         sid: 3,
-        vars: { c: { ...defaultTurtle, y: sy + 1 }, i: 0 },
+        turtles: [{ ...defaultTurtle, y: sy + 1 }],
+        vars: { i: 0 },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
         ]),
       },
       {
+        depth: 0,
         sid: 4,
-        vars: { c: { ...defaultTurtle, y: sy + 2 }, i: 0 },
+        turtles: [{ ...defaultTurtle, y: sy + 2 }],
+        vars: { i: 0 },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -129,8 +141,10 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 5,
-        vars: { c: { ...defaultTurtle, y: sy + 2, dir: 'E' }, i: 0 },
+        turtles: [{ ...defaultTurtle, y: sy + 2, dir: 'E' }],
+        vars: { i: 0 },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -138,8 +152,10 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 2,
-        vars: { c: { ...defaultTurtle, y: sy + 2, dir: 'E' }, i: 1 },
+        turtles: [{ ...defaultTurtle, y: sy + 2, dir: 'E' }],
+        vars: { i: 1 },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -147,8 +163,10 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 3,
-        vars: { c: { ...defaultTurtle, x: sx + 1, y: sy + 2, dir: 'E' }, i: 1 },
+        turtles: [{ ...defaultTurtle, x: sx + 1, y: sy + 2, dir: 'E' }],
+        vars: { i: 1 },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -157,8 +175,10 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 4,
-        vars: { c: { ...defaultTurtle, x: sx + 2, y: sy + 2, dir: 'E' }, i: 1 },
+        turtles: [{ ...defaultTurtle, x: sx + 2, y: sy + 2, dir: 'E' }],
+        vars: { i: 1 },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -168,8 +188,10 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 5,
-        vars: { c: { ...defaultTurtle, x: sx + 2, y: sy + 2, dir: 'S' }, i: 1 },
+        turtles: [{ ...defaultTurtle, x: sx + 2, y: sy + 2, dir: 'S' }],
+        vars: { i: 1 },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -179,8 +201,10 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 2,
-        vars: { c: { ...defaultTurtle, x: sx + 2, y: sy + 2, dir: 'S' }, i: 2 },
+        turtles: [{ ...defaultTurtle, x: sx + 2, y: sy + 2, dir: 'S' }],
+        vars: { i: 2 },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -196,8 +220,6 @@ public class Main {
     languageId: 'java',
     problemId: 'test3',
     expectedDisplayProgram: `
-import net.exkazuu.Character;
-
 public class Main {
   public static void main(String[] args) {
     int a = 1;
@@ -215,19 +237,19 @@ public class Main {
 }
   `.trim(),
     expectedSidToLineIndex: {
-      1: 5,
-      2: 7,
-      3: 8,
-      4: 10,
-      5: 14,
+      1: 3,
+      2: 5,
+      3: 6,
+      4: 8,
+      5: 12,
     },
     expectedTrace: [
-      { sid: 0, vars: {}, board: defaultBoard },
-      { sid: 1, vars: { a: 1 }, board: defaultBoard },
-      { sid: 2, vars: { a: 1, b: 2 }, board: defaultBoard },
-      { sid: 5, vars: { a: 2, x: 1, y: 2 }, board: defaultBoard },
-      { sid: 3, vars: { a: 2, b: 2 }, board: defaultBoard },
-      { sid: 4, vars: { a: 2, b: 2, c: 4 }, board: defaultBoard },
+      { depth: 0, sid: 0, turtles: [], vars: {}, board: defaultBoard },
+      { depth: 0, sid: 1, turtles: [], vars: { a: 1 }, board: defaultBoard },
+      { depth: 0, sid: 2, turtles: [], vars: { a: 1, b: 2 }, board: defaultBoard },
+      { depth: 1, sid: 5, turtles: [], vars: { a: 2, x: 1, y: 2 }, board: defaultBoard },
+      { depth: 0, sid: 3, turtles: [], vars: { a: 2, b: 2 }, board: defaultBoard },
+      { depth: 0, sid: 4, turtles: [], vars: { a: 2, b: 2, c: 4 }, board: defaultBoard },
     ] as TraceItem[],
   },
   {
@@ -236,13 +258,13 @@ public class Main {
     expectedDisplayProgram: `
 public class Main {
   public static void main(String[] args) {
-    Character c1 = new Turtle();
+    Turtle c1 = new Turtle();
     c1.forward();
     c1.turnRight();
     int i = 0;
     c1.forward();
 
-    Character c2 = new Turtle(2, 3, "green");
+    Turtle c2 = new Turtle(2, 3, "green");
     c2.forward();
     String foo = "あいうえお";
     int bar = 23;
@@ -267,39 +289,49 @@ public class Main {
       12: 15,
     },
     expectedTrace: [
-      { sid: 0, vars: {}, board: defaultBoard },
+      { depth: 0, sid: 0, turtles: [], vars: {}, board: defaultBoard },
       {
+        depth: 0,
         sid: 1,
-        vars: { c1: defaultTurtle },
+        turtles: [defaultTurtle],
+        vars: {},
         board: getBoard([{ x: sx, y: sy, color: '#' }]),
       },
       {
+        depth: 0,
         sid: 2,
-        vars: { c1: { ...defaultTurtle, y: sy + 1 } },
+        turtles: [{ ...defaultTurtle, y: sy + 1 }],
+        vars: {},
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
         ]),
       },
       {
+        depth: 0,
         sid: 3,
-        vars: { c1: { ...defaultTurtle, y: sy + 1, dir: 'E' } },
+        turtles: [{ ...defaultTurtle, y: sy + 1, dir: 'E' }],
+        vars: {},
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
         ]),
       },
       {
+        depth: 0,
         sid: 4,
-        vars: { c1: { ...defaultTurtle, y: sy + 1, dir: 'E' }, i: 0 },
+        turtles: [{ ...defaultTurtle, y: sy + 1, dir: 'E' }],
+        vars: { i: 0 },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
         ]),
       },
       {
+        depth: 0,
         sid: 5,
-        vars: { c1: { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' }, i: 0 },
+        turtles: [{ ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' }],
+        vars: { i: 0 },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -307,12 +339,13 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 6,
-        vars: {
-          c1: { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
-          c2: { ...defaultTurtle, x: 2, y: 3, color: 'G' },
-          i: 0,
-        },
+        turtles: [
+          { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
+          { ...defaultTurtle, x: 2, y: 3, color: 'G' },
+        ],
+        vars: { i: 0 },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -321,12 +354,13 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 7,
-        vars: {
-          c1: { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
-          c2: { ...defaultTurtle, x: 2, y: 4, color: 'G' },
-          i: 0,
-        },
+        turtles: [
+          { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
+          { ...defaultTurtle, x: 2, y: 4, color: 'G' },
+        ],
+        vars: { i: 0 },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -336,13 +370,13 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 8,
-        vars: {
-          c1: { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
-          c2: { ...defaultTurtle, x: 2, y: 4, color: 'G' },
-          i: 0,
-          foo: 'あいうえお',
-        },
+        turtles: [
+          { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
+          { ...defaultTurtle, x: 2, y: 4, color: 'G' },
+        ],
+        vars: { i: 0, foo: 'あいうえお' },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -352,14 +386,13 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 9,
-        vars: {
-          c1: { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
-          c2: { ...defaultTurtle, x: 2, y: 4, color: 'G' },
-          i: 0,
-          foo: 'あいうえお',
-          bar: 23,
-        },
+        turtles: [
+          { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
+          { ...defaultTurtle, x: 2, y: 4, color: 'G' },
+        ],
+        vars: { i: 0, foo: 'あいうえお', bar: 23 },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -369,14 +402,13 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 10,
-        vars: {
-          c1: { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
-          c2: { ...defaultTurtle, x: 2, y: 4, color: 'G' },
-          i: 24,
-          foo: 'あいうえお',
-          bar: 23,
-        },
+        turtles: [
+          { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
+          { ...defaultTurtle, x: 2, y: 4, color: 'G' },
+        ],
+        vars: { i: 24, foo: 'あいうえお', bar: 23 },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -386,14 +418,13 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 11,
-        vars: {
-          c1: { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
-          c2: { ...defaultTurtle, x: 2, y: 5, color: 'G' },
-          i: 24,
-          foo: 'あいうえお',
-          bar: 23,
-        },
+        turtles: [
+          { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
+          { ...defaultTurtle, x: 2, y: 5, color: 'G' },
+        ],
+        vars: { i: 24, foo: 'あいうえお', bar: 23 },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -404,14 +435,13 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 12,
-        vars: {
-          c1: { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
-          c2: { ...defaultTurtle, x: 2, y: 6, color: 'G' },
-          i: 24,
-          foo: 'あいうえお',
-          bar: 23,
-        },
+        turtles: [
+          { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
+          { ...defaultTurtle, x: 2, y: 6, color: 'G' },
+        ],
+        vars: { i: 24, foo: 'あいうえお', bar: 23 },
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -452,23 +482,29 @@ public class Straight {
       8: 10,
     },
     expectedTrace: [
-      { sid: 0, vars: {}, board: defaultBoard },
+      { depth: 0, sid: 0, turtles: [], vars: {}, board: defaultBoard },
       {
+        depth: 0,
         sid: 1,
-        vars: { c: defaultTurtle },
+        turtles: [defaultTurtle],
+        vars: {},
         board: getBoard([{ x: sx, y: sy, color: '#' }]),
       },
       {
+        depth: 0,
         sid: 2,
-        vars: { c: { ...defaultTurtle, y: sy + 1 } },
+        turtles: [{ ...defaultTurtle, y: sy + 1 }],
+        vars: {},
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
         ]),
       },
       {
+        depth: 0,
         sid: 3,
-        vars: { c: { ...defaultTurtle, y: sy + 2 } },
+        turtles: [{ ...defaultTurtle, y: sy + 2 }],
+        vars: {},
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -476,8 +512,10 @@ public class Straight {
         ]),
       },
       {
+        depth: 0,
         sid: 4,
-        vars: { c: { ...defaultTurtle, y: sy + 2, dir: 'E' } },
+        turtles: [{ ...defaultTurtle, y: sy + 2, dir: 'E' }],
+        vars: {},
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -485,8 +523,10 @@ public class Straight {
         ]),
       },
       {
+        depth: 0,
         sid: 5,
-        vars: { c: { ...defaultTurtle, x: sx + 1, y: sy + 2, dir: 'E' } },
+        turtles: [{ ...defaultTurtle, x: sx + 1, y: sy + 2, dir: 'E' }],
+        vars: {},
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -495,8 +535,10 @@ public class Straight {
         ]),
       },
       {
+        depth: 0,
         sid: 6,
-        vars: { c: { ...defaultTurtle, x: sx + 2, y: sy + 2, dir: 'E' } },
+        turtles: [{ ...defaultTurtle, x: sx + 2, y: sy + 2, dir: 'E' }],
+        vars: {},
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -506,8 +548,10 @@ public class Straight {
         ]),
       },
       {
+        depth: 0,
         sid: 7,
-        vars: { c: { ...defaultTurtle, x: sx + 3, y: sy + 2, dir: 'E' } },
+        turtles: [{ ...defaultTurtle, x: sx + 3, y: sy + 2, dir: 'E' }],
+        vars: {},
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -518,8 +562,10 @@ public class Straight {
         ]),
       },
       {
+        depth: 0,
         sid: 8,
-        vars: { c: { ...defaultTurtle, x: sx + 4, y: sy + 2, dir: 'E' } },
+        turtles: [{ ...defaultTurtle, x: sx + 4, y: sy + 2, dir: 'E' }],
+        vars: {},
         board: getBoard([
           { x: sx, y: sy, color: '#' },
           { x: sx, y: sy + 1, color: '#' },
@@ -535,7 +581,7 @@ public class Straight {
 ] as const)(
   'Trace a program',
   ({ expectedDisplayProgram, expectedSidToLineIndex, expectedTrace, languageId, problemId }) => {
-    const problem = generateProblem(problemId, languageId, '');
+    const problem = instantiateProblem(problemId, languageId, '');
     if (!problem) throw new Error('Failed to generate problem.');
 
     const { displayProgram, sidToLineIndex, traceItems } = problem;
@@ -553,13 +599,7 @@ public class Straight {
 function stringifyObjects(trace: TraceItem[]): TraceItem[] {
   // 目視で差異を確認しやすくするために文字列化する。
   for (const item of trace) {
-    const vars = { ...item.vars };
-    for (const key in vars) {
-      if (typeof vars[key] === 'object' && 'x' in (vars[key] as TurtleTrace)) {
-        vars[key] = JSON.stringify(vars[key]);
-      }
-    }
-    item.vars = vars;
+    item.vars = { ...item.vars };
   }
   console.log(trace); // TODO: remove this later
   return trace;

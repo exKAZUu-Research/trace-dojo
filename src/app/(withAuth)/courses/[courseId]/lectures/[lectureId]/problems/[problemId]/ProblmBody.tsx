@@ -1,6 +1,6 @@
 import type { ProblemSession } from '@prisma/client';
 import { useRouter } from 'next/navigation';
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 
 import { MAX_CHALLENGE_COUNT } from '../../../../../../../../constants';
 import { backendTrpcReact } from '../../../../../../../../infrastructures/trpcBackend/client';
@@ -21,8 +21,10 @@ import {
   useDisclosure,
   VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
-import type { Problem } from '../../../../../../../../problems/generateProblem';
+import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateProblem';
 import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
+import type { TraceItem, TraceItemVariable } from '../../../../../../../../problems/traceProgram';
+import type { ProblemType } from '../../../../../../../../types';
 
 import type { TurtleGraphicsHandle } from './BoardEditor';
 import { BoardEditor } from './BoardEditor';
@@ -31,18 +33,34 @@ import { TraceViewer } from './TraceViewer';
 
 type Props = {
   params: { courseId: CourseId; lectureId: string; problemId: ProblemId };
-  problem: Problem;
+  problem: InstantiatedProblem;
   problemSession: ProblemSession;
   createSubmissionUpdatingProblemSession: (isCorrect: boolean, isCompleted: boolean) => Promise<void>;
   updateProblemSession: (problemType: string, traceItemIndex: number) => Promise<void>;
 };
 
 export const ProblemBody: React.FC<Props> = (props) => {
-  const problemType = props.problemSession.problemType;
+  const problemType = props.problemSession.problemType as ProblemType;
   const currentTraceItemIndex =
-    problemType === 'executionResult' ? props.problem.traceItems.length - 1 : props.problemSession.traceItemIndex;
+    problemType === 'executionResult'
+      ? props.problem.traceItems.length - 1
+      : // ProblemSession作成後の問題の改変に対応するため。
+        Math.min(props.problemSession.traceItemIndex, props.problem.traceItems.length - 1);
   const previousTraceItemIndex = problemType === 'executionResult' ? 0 : currentTraceItemIndex - 1;
   const [viewingTraceItemIndex, setViewingTraceItemIndex] = useState(previousTraceItemIndex);
+  const currentVariables =
+    problemType === 'executionResult' ? props.problem.finalVars : props.problem.traceItems[currentTraceItemIndex].vars;
+  const initialVariables = useMemo(
+    () =>
+      getInitialVariables(
+        problemType,
+        props.problem.traceItems,
+        previousTraceItemIndex,
+        currentTraceItemIndex,
+        currentVariables
+      ),
+    [problemType, props.problem.traceItems, previousTraceItemIndex, currentTraceItemIndex, currentVariables]
+  );
 
   const { isOpen: isAlertOpen, onClose: onAlertClose, onOpen: onAlertOpen } = useDisclosure();
   const cancelRef = useRef(null);
@@ -144,7 +162,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
 
   return (
     <>
-      <Flex gap={6}>
+      <Flex alignItems="stretch" gap={6}>
         <VStack align="stretch" flexBasis={0} flexGrow={1} minW={0} spacing={4}>
           <VStack align="stretch" as={Card} overflow="hidden" spacing={0}>
             <VStack align="stretch" borderBottomWidth="1px" p={5}>
@@ -179,7 +197,8 @@ export const ProblemBody: React.FC<Props> = (props) => {
                     </>
                   )}
                 </Box>
-                の盤面を作成し、提出ボタンを押してください。
+                の盤面{Object.keys(initialVariables).length > 0 ? 'と変数の一覧表' : ''}
+                を作成し、提出ボタンを押してください。
               </Box>
             </VStack>
           </VStack>
@@ -200,13 +219,16 @@ export const ProblemBody: React.FC<Props> = (props) => {
           />
         </VStack>
 
-        <VStack align="stretch" flexBasis={0} flexGrow={1} mt="auto" spacing="4">
+        <VStack align="stretch" bgColor="gray.50" flexBasis={0} flexGrow={1} spacing="4">
           <BoardEditor
             ref={turtleGraphicsRef}
             currentTraceItemIndex={currentTraceItemIndex}
+            currentVariables={currentVariables}
             handleSubmit={handleSubmit}
+            initialVariables={initialVariables}
             previousTraceItemIndex={previousTraceItemIndex}
             problem={props.problem}
+            problemType={problemType}
           />
         </VStack>
       </Flex>
@@ -259,3 +281,26 @@ export const ProblemBody: React.FC<Props> = (props) => {
     </>
   );
 };
+
+function getInitialVariables(
+  problemType: 'executionResult' | 'step',
+  traceItems: TraceItem[],
+  previousTraceItemIndex: number,
+  currentTraceItemIndex: number,
+  currentVariables: TraceItemVariable
+): Record<string, string> {
+  let adjustedPreviousTraceItemIndex = previousTraceItemIndex;
+  if (problemType === 'step') {
+    while (
+      adjustedPreviousTraceItemIndex > 0 &&
+      traceItems[currentTraceItemIndex].depth !== traceItems[adjustedPreviousTraceItemIndex].depth
+    ) {
+      adjustedPreviousTraceItemIndex--;
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(currentVariables)
+      .filter(([_, value]) => typeof value === 'number' || typeof value === 'string')
+      .map(([key]) => [key, traceItems[adjustedPreviousTraceItemIndex].vars[key]?.toString() ?? ''])
+  );
+}

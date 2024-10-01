@@ -1,8 +1,7 @@
 import { Box, Button, Card, Heading, HStack, VStack } from '@chakra-ui/react';
 import React from 'react';
 
-import type { Problem } from '../../../../../../../../problems/generateProblem';
-import { isTurtleTrace } from '../../../../../../../../problems/traceProgram';
+import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateProblem';
 
 import { BoardViewer } from './BoardViewer';
 import { Variables } from './Variables';
@@ -11,7 +10,7 @@ type Props = {
   currentTraceItemIndex: number;
   viewingTraceItemIndex: number;
   previousTraceItemIndex: number;
-  problem: Problem;
+  problem: InstantiatedProblem;
   setViewingTraceItemIndex: React.Dispatch<React.SetStateAction<number>>;
 };
 
@@ -45,9 +44,7 @@ export const TraceViewer: React.FC<Props> = (props: Props) => {
 
         <BoardViewer
           board={props.problem.traceItems[props.viewingTraceItemIndex]?.board}
-          turtles={Object.values(props.problem.traceItems[props.viewingTraceItemIndex].vars ?? {}).filter(
-            isTurtleTrace
-          )}
+          turtles={props.problem.traceItems[props.viewingTraceItemIndex]?.turtles}
         />
       </VStack>
       <Box alignItems="center" display="flex" flexBasis={0} flexDirection="column" flexGrow={2} textAlign="center">
