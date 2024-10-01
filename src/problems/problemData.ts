@@ -1827,6 +1827,7 @@ function drawSquare(t) {
       t.forward();
       t.turnRight();
     }
+	delete s.vars['i'];
   } finally {
     s.leaveScope();
   }
@@ -1909,6 +1910,7 @@ function forwardGivenSteps(t, n) {
     for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
       t.forward();
     }
+    delete s.vars['i'];
   } finally {
     s.leaveScope();
   }
@@ -1998,6 +2000,7 @@ for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
   else
     forwardTwoSteps(s.get('t'));
 }
+delete s.vars['i'];
 
 function forwardTwoSteps(t) {
   try {
@@ -2147,6 +2150,7 @@ for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)
   forwardGivenSteps(s.get('t'), s.get('arr')[s.get('i')]);
   s.get('t').turnRight();
 }
+delete s.vars['i'];
 
 function forwardGivenSteps(t, n) {
   try {
@@ -2154,6 +2158,7 @@ function forwardGivenSteps(t, n) {
     for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
       t.forward();
     }
+    delete s.vars['i'];
   } finally {
     s.leaveScope();
   }
@@ -2259,6 +2264,7 @@ for (const cmd of [0, 1, 0, 2, 0, 3, 0]) {
       for (s.set('i', 0); s.get('i') < s.get('steps'); s.set('i', s.get('i') + 1)) {
         s.get('t').forward();
       }
+      delete s.vars['i'];
       break;
     case 1:
       s.get('t').turnRight(); break;
@@ -2345,6 +2351,7 @@ for (s.set('i', 0); s.get('i') < s.get('s').length; s.set('i', s.get('i') + 1)) 
       s.get('t').backward(); break;
   }
 }
+delete s.vars['i'];
     `.trim(),
     java: `
 public class Main {
@@ -2469,6 +2476,7 @@ function forwardGivenSteps(t, n) {
     for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
       t.forward();
     }
+    delete s.vars['i'];
   } finally {
     s.leaveScope();
   }
