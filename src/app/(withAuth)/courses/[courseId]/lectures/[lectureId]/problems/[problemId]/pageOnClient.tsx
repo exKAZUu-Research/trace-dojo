@@ -106,19 +106,23 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
         </HStack>
         <HStack justify="space-between" spacing={2}>
           <Heading as="h1">{problemIdToName[props.params.problemId]}</Heading>
-          {problemSession.problemType === 'executionResult' && (
-            <Tooltip label="減点になりますが、確実に問題を解けます。">
-              <Button
-                colorScheme="blue"
-                variant="outline"
-                onClick={() => {
-                  void updateProblemSession('step', 1);
-                }}
-              >
-                諦めてステップ実行モードに移る
-              </Button>
-            </Tooltip>
-          )}
+          <Tooltip
+            label={
+              problemSession.problemType === 'executionResult' ? '減点になりますが、確実に問題を解けます。' : undefined
+            }
+          >
+            <Button
+              colorScheme="blue"
+              variant="outline"
+              onClick={() => {
+                void updateProblemSession('step', 1);
+              }}
+            >
+              {problemSession.problemType === 'executionResult'
+                ? '諦めてステップ実行モードに移る'
+                : 'ステップ実行モードで最初からやり直す'}
+            </Button>
+          </Tooltip>
         </HStack>
       </VStack>
 
