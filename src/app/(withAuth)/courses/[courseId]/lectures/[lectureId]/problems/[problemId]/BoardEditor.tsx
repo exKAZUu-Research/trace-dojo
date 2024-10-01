@@ -43,7 +43,7 @@ const DY = [1, 0, -1, 0];
 interface TurtleGraphicsProps {
   currentTraceItemIndex: number;
   currentVariables: TraceItemVariable;
-  emptyVariables: Record<string, string>;
+  initialVariables: Record<string, string>;
   previousTraceItemIndex: number;
   handleSubmit: () => Promise<void>;
   problem: InstantiatedProblem;
@@ -62,17 +62,17 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
   const selectedTurtle = turtles.find((char) => char.x === selectedCell?.x && char.y === selectedCell?.y);
   const previousTraceItem = props.problem.traceItems[props.previousTraceItemIndex];
   const currentTraceItem = props.problem.traceItems[props.currentTraceItemIndex];
-  const [variables, updateVariables] = useImmer<Record<string, string>>(props.emptyVariables);
+  const [variables, updateVariables] = useImmer<Record<string, string>>(props.initialVariables);
 
   const initialize = useCallback(
     (keepSelectedCell = false): void => {
       const initialBoard = parseBoard(previousTraceItem.board);
       updateBoard(initialBoard);
       updateTurtles(previousTraceItem.turtles);
-      updateVariables(props.emptyVariables);
+      updateVariables(props.initialVariables);
       if (!keepSelectedCell) setSelectedCell(undefined);
     },
-    [previousTraceItem, props.emptyVariables, updateBoard, updateTurtles]
+    [previousTraceItem, props.initialVariables, updateBoard, updateTurtles]
   );
 
   useImperativeHandle(ref, () => ({

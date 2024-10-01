@@ -19,6 +19,7 @@ export interface TurtleTrace {
 }
 
 export interface TraceItem {
+  depth: number;
   sid: number;
   vars: TraceItemVariable;
   turtles: TurtleTrace[];
@@ -106,11 +107,20 @@ class Scope {
     if (!this.parent) throw new Error();
     s = this.parent;
   }
+  getDepth() {
+    let depth = 0;
+    let currentScope = this;
+    while (currentScope.parent) {
+      depth++;
+      currentScope = currentScope.parent;
+    }
+    return depth;
+  }
 }
 const dirs = ['N', 'E', 'S', 'W'];
 const dx = [0, 1, 0, -1];
 const dy = [1, 0, -1, 0];
-const board = Array.from({ length: ${GRID_ROWS} }, () => Array.from({ length: ${GRID_COLUMNS} }, () => '${EMPTY_COLOR}'));
+const board = Array.from({length: ${GRID_ROWS}}, () => Array.from({length: ${GRID_COLUMNS}}, () => '${EMPTY_COLOR}'));
 class Turtle {
   constructor(sid, x = 0, y = 0, color = '${DEFAULT_COLOR}') {
     this.x = x;
@@ -157,7 +167,7 @@ class Turtle {
   }
 }
 function addTrace(sid) {
-  trace.push({ sid, turtles: turtles.map(t => ({ ...t })), vars: { ...s.vars }, board: board.map(r => r.join('')).join('\\n') });
+  trace.push({depth: s.getDepth(), sid, turtles: turtles.map(t => ({...t})), vars: {...s.vars}, board: board.map(r => r.join('')).join('\\n')});
 }
 function checkForCond(cond, sid) {
   if (!cond && trace.at(-1).sid === sid) {
@@ -165,10 +175,10 @@ function checkForCond(cond, sid) {
   }
   return cond;
 }
-trace.push({sid: 0, turtles: [], vars: {}, board: board.map(r => r.join('')).join('\\n') });
+trace.push({depth: 0, sid: 0, turtles: [], vars: {}, board: board.map(r => r.join('')).join('\\n')});
 s = new Scope();
 ${modifiedCode.trim()}
-({ trace, finalVars: { ...s.vars } });
+({trace, finalVars: {...s.vars}});
 `;
 
   const { finalVars, trace: rawTrace } = eval(executableCode) as { trace: TraceItem[]; finalVars: TraceItemVariable };

@@ -23,6 +23,7 @@ import {
 } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateProblem';
 import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
+import type { TraceItem, TraceItemVariable } from '../../../../../../../../problems/traceProgram';
 import type { ProblemType } from '../../../../../../../../types';
 
 import type { TurtleGraphicsHandle } from './BoardEditor';
@@ -49,14 +50,16 @@ export const ProblemBody: React.FC<Props> = (props) => {
   const [viewingTraceItemIndex, setViewingTraceItemIndex] = useState(previousTraceItemIndex);
   const currentVariables =
     problemType === 'executionResult' ? props.problem.finalVars : props.problem.traceItems[currentTraceItemIndex].vars;
-  const emptyVariables = useMemo(
+  const initialVariables = useMemo(
     () =>
-      Object.fromEntries(
-        Object.entries(currentVariables)
-          .filter(([_, value]) => typeof value === 'number' || typeof value === 'string')
-          .map(([key]) => [key, props.problem.traceItems[previousTraceItemIndex].vars[key]?.toString() ?? ''])
+      getInitialVariables(
+        problemType,
+        props.problem.traceItems,
+        previousTraceItemIndex,
+        currentTraceItemIndex,
+        currentVariables
       ),
-    [currentVariables, previousTraceItemIndex, props.problem.traceItems]
+    [problemType, props.problem.traceItems, previousTraceItemIndex, currentTraceItemIndex, currentVariables]
   );
 
   const { isOpen: isAlertOpen, onClose: onAlertClose, onOpen: onAlertOpen } = useDisclosure();
@@ -194,7 +197,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
                     </>
                   )}
                 </Box>
-                の盤面{Object.keys(emptyVariables).length > 0 ? 'と変数の一覧表' : ''}
+                の盤面{Object.keys(initialVariables).length > 0 ? 'と変数の一覧表' : ''}
                 を作成し、提出ボタンを押してください。
               </Box>
             </VStack>
@@ -221,8 +224,8 @@ export const ProblemBody: React.FC<Props> = (props) => {
             ref={turtleGraphicsRef}
             currentTraceItemIndex={currentTraceItemIndex}
             currentVariables={currentVariables}
-            emptyVariables={emptyVariables}
             handleSubmit={handleSubmit}
+            initialVariables={initialVariables}
             previousTraceItemIndex={previousTraceItemIndex}
             problem={props.problem}
             problemType={problemType}
@@ -278,3 +281,26 @@ export const ProblemBody: React.FC<Props> = (props) => {
     </>
   );
 };
+
+function getInitialVariables(
+  problemType: 'executionResult' | 'step',
+  traceItems: TraceItem[],
+  previousTraceItemIndex: number,
+  currentTraceItemIndex: number,
+  currentVariables: TraceItemVariable
+): Record<string, string> {
+  let adjustedPreviousTraceItemIndex = previousTraceItemIndex;
+  if (problemType === 'step') {
+    while (
+      adjustedPreviousTraceItemIndex > 0 &&
+      traceItems[currentTraceItemIndex].depth !== traceItems[adjustedPreviousTraceItemIndex].depth
+    ) {
+      adjustedPreviousTraceItemIndex--;
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(currentVariables)
+      .filter(([_, value]) => typeof value === 'number' || typeof value === 'string')
+      .map(([key]) => [key, traceItems[adjustedPreviousTraceItemIndex].vars[key]?.toString() ?? ''])
+  );
+}

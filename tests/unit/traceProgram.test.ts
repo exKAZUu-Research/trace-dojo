@@ -38,14 +38,16 @@ public class Main {
       4: 6,
     },
     expectedTrace: [
-      { sid: 0, turtles: [], vars: {}, board: defaultBoard },
+      { depth: 0, sid: 0, turtles: [], vars: {}, board: defaultBoard },
       {
+        depth: 0,
         sid: 1,
         turtles: [defaultTurtle],
         vars: {},
         board: getBoard([{ x: sx, y: sy, color: '#' }]),
       },
       {
+        depth: 0,
         sid: 2,
         turtles: [{ ...defaultTurtle, y: sy + 1 }],
         vars: {},
@@ -55,6 +57,7 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 3,
         turtles: [{ ...defaultTurtle, y: sy + 2 }],
         vars: {},
@@ -65,6 +68,7 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 4,
         turtles: [{ ...defaultTurtle, y: sy + 3 }],
         vars: {},
@@ -100,20 +104,23 @@ public class Main {
       5: 7,
     },
     expectedTrace: [
-      { sid: 0, turtles: [], vars: {}, board: defaultBoard },
+      { depth: 0, sid: 0, turtles: [], vars: {}, board: defaultBoard },
       {
+        depth: 0,
         sid: 1,
         turtles: [defaultTurtle],
         vars: {},
         board: getBoard([{ x: sx, y: sy, color: '#' }]),
       },
       {
+        depth: 0,
         sid: 2,
         turtles: [defaultTurtle],
         vars: { i: 0 },
         board: getBoard([{ x: sx, y: sy, color: '#' }]),
       },
       {
+        depth: 0,
         sid: 3,
         turtles: [{ ...defaultTurtle, y: sy + 1 }],
         vars: { i: 0 },
@@ -123,6 +130,7 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 4,
         turtles: [{ ...defaultTurtle, y: sy + 2 }],
         vars: { i: 0 },
@@ -133,6 +141,7 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 5,
         turtles: [{ ...defaultTurtle, y: sy + 2, dir: 'E' }],
         vars: { i: 0 },
@@ -143,6 +152,7 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 2,
         turtles: [{ ...defaultTurtle, y: sy + 2, dir: 'E' }],
         vars: { i: 1 },
@@ -153,6 +163,7 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 3,
         turtles: [{ ...defaultTurtle, x: sx + 1, y: sy + 2, dir: 'E' }],
         vars: { i: 1 },
@@ -164,6 +175,7 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 4,
         turtles: [{ ...defaultTurtle, x: sx + 2, y: sy + 2, dir: 'E' }],
         vars: { i: 1 },
@@ -176,6 +188,7 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 5,
         turtles: [{ ...defaultTurtle, x: sx + 2, y: sy + 2, dir: 'S' }],
         vars: { i: 1 },
@@ -188,6 +201,7 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 2,
         turtles: [{ ...defaultTurtle, x: sx + 2, y: sy + 2, dir: 'S' }],
         vars: { i: 2 },
@@ -230,12 +244,12 @@ public class Main {
       5: 12,
     },
     expectedTrace: [
-      { sid: 0, turtles: [], vars: {}, board: defaultBoard },
-      { sid: 1, turtles: [], vars: { a: 1 }, board: defaultBoard },
-      { sid: 2, turtles: [], vars: { a: 1, b: 2 }, board: defaultBoard },
-      { sid: 5, turtles: [], vars: { a: 2, x: 1, y: 2 }, board: defaultBoard },
-      { sid: 3, turtles: [], vars: { a: 2, b: 2 }, board: defaultBoard },
-      { sid: 4, turtles: [], vars: { a: 2, b: 2, c: 4 }, board: defaultBoard },
+      { depth: 0, sid: 0, turtles: [], vars: {}, board: defaultBoard },
+      { depth: 0, sid: 1, turtles: [], vars: { a: 1 }, board: defaultBoard },
+      { depth: 0, sid: 2, turtles: [], vars: { a: 1, b: 2 }, board: defaultBoard },
+      { depth: 1, sid: 5, turtles: [], vars: { a: 2, x: 1, y: 2 }, board: defaultBoard },
+      { depth: 0, sid: 3, turtles: [], vars: { a: 2, b: 2 }, board: defaultBoard },
+      { depth: 0, sid: 4, turtles: [], vars: { a: 2, b: 2, c: 4 }, board: defaultBoard },
     ] as TraceItem[],
   },
   {
@@ -275,14 +289,16 @@ public class Main {
       12: 15,
     },
     expectedTrace: [
-      { sid: 0, turtles: [], vars: {}, board: defaultBoard },
+      { depth: 0, sid: 0, turtles: [], vars: {}, board: defaultBoard },
       {
+        depth: 0,
         sid: 1,
         turtles: [defaultTurtle],
         vars: {},
         board: getBoard([{ x: sx, y: sy, color: '#' }]),
       },
       {
+        depth: 0,
         sid: 2,
         turtles: [{ ...defaultTurtle, y: sy + 1 }],
         vars: {},
@@ -292,6 +308,7 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 3,
         turtles: [{ ...defaultTurtle, y: sy + 1, dir: 'E' }],
         vars: {},
@@ -301,6 +318,7 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 4,
         turtles: [{ ...defaultTurtle, y: sy + 1, dir: 'E' }],
         vars: { i: 0 },
@@ -310,6 +328,7 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 5,
         turtles: [{ ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' }],
         vars: { i: 0 },
@@ -320,6 +339,7 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 6,
         turtles: [
           { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
@@ -334,6 +354,7 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 7,
         turtles: [
           { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
@@ -349,6 +370,7 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 8,
         turtles: [
           { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
@@ -364,6 +386,7 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 9,
         turtles: [
           { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
@@ -379,6 +402,7 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 10,
         turtles: [
           { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
@@ -394,6 +418,7 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 11,
         turtles: [
           { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
@@ -410,6 +435,7 @@ public class Main {
         ]),
       },
       {
+        depth: 0,
         sid: 12,
         turtles: [
           { ...defaultTurtle, x: sx + 1, y: sy + 1, dir: 'E' },
@@ -456,14 +482,16 @@ public class Straight {
       8: 10,
     },
     expectedTrace: [
-      { sid: 0, turtles: [], vars: {}, board: defaultBoard },
+      { depth: 0, sid: 0, turtles: [], vars: {}, board: defaultBoard },
       {
+        depth: 0,
         sid: 1,
         turtles: [defaultTurtle],
         vars: {},
         board: getBoard([{ x: sx, y: sy, color: '#' }]),
       },
       {
+        depth: 0,
         sid: 2,
         turtles: [{ ...defaultTurtle, y: sy + 1 }],
         vars: {},
@@ -473,6 +501,7 @@ public class Straight {
         ]),
       },
       {
+        depth: 0,
         sid: 3,
         turtles: [{ ...defaultTurtle, y: sy + 2 }],
         vars: {},
@@ -483,6 +512,7 @@ public class Straight {
         ]),
       },
       {
+        depth: 0,
         sid: 4,
         turtles: [{ ...defaultTurtle, y: sy + 2, dir: 'E' }],
         vars: {},
@@ -493,6 +523,7 @@ public class Straight {
         ]),
       },
       {
+        depth: 0,
         sid: 5,
         turtles: [{ ...defaultTurtle, x: sx + 1, y: sy + 2, dir: 'E' }],
         vars: {},
@@ -504,6 +535,7 @@ public class Straight {
         ]),
       },
       {
+        depth: 0,
         sid: 6,
         turtles: [{ ...defaultTurtle, x: sx + 2, y: sy + 2, dir: 'E' }],
         vars: {},
@@ -516,6 +548,7 @@ public class Straight {
         ]),
       },
       {
+        depth: 0,
         sid: 7,
         turtles: [{ ...defaultTurtle, x: sx + 3, y: sy + 2, dir: 'E' }],
         vars: {},
@@ -529,6 +562,7 @@ public class Straight {
         ]),
       },
       {
+        depth: 0,
         sid: 8,
         turtles: [{ ...defaultTurtle, x: sx + 4, y: sy + 2, dir: 'E' }],
         vars: {},
