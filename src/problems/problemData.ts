@@ -985,30 +985,30 @@ public class Main {
   },
   for6: {
     instrumented: `
-s.set('x', 0);
-s.set('y', 100);
+s.set('a', 0);
+s.set('b', 100);
 for (s.set('i', <4-5>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
-  s.set('x', s.get('x') + s.get('i'));
-  s.set('y', s.get('y') - s.get('i'));
+  s.set('a', s.get('a') + s.get('i'));
+  s.set('b', s.get('b') - s.get('i'));
 }
 delete s.vars['i'];
-s.set('x', s.get('x') / 4);
-s.set('y', s.get('y') / 5);
-const t = new Turtle(s.get('x') % 6, s.get('y') % 6);
+s.set('a', s.get('a') / 4);
+s.set('b', s.get('b') / 5);
+const t = new Turtle(s.get('a') % 6, s.get('b') % 6);
 t.forward();
     `.trim(),
     java: `
 public class Main {
     public static void main(String[] args) {
-        int x = 0; // sid
-        int y = 100; // sid
+        int a = 0; // sid
+        int b = 100; // sid
         for (int i = <4-5>; i > 0; i--) { // sid
-            x += i; // sid
-            y -= i; // sid
+            a += i; // sid
+            b -= i; // sid
         }
-        x /= 4; // sid
-        y /= 5; // sid
-        Turtle 亀 = new Turtle(x % 6, y % 6); // sid
+        a /= 4; // sid
+        b /= 5; // sid
+        Turtle 亀 = new Turtle(a % 6, b % 6); // sid
         亀.前に進む(); // sid
     }
 }
