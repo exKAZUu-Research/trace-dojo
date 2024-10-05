@@ -61,15 +61,23 @@ export const problemIds = [
   'method1',
   'method2',
   'method3',
+  'method4',
+  'method5',
   'return1',
   'return2',
   'return3',
+  'return4',
+  'return5',
   'array1',
   'array2',
   'array3',
+  'array4',
+  'array5',
   'string1',
   'string2',
   'string3',
+  'string4',
+  'string5',
   'test1',
   'test2',
   'test3',
@@ -146,15 +154,23 @@ export const problemIdToName: Record<ProblemId, string> = {
   method1: 'メソッドを使おう(1)',
   method2: 'メソッドを使おう(2)',
   method3: 'メソッドを使おう(3)',
+  method4: 'メソッドを使おう(4)',
+  method5: 'メソッドを使おう(5)',
   return1: 'return文を使おう(1)',
   return2: 'return文を使おう(2)',
   return3: 'return文を使おう(3)',
+  return4: 'return文を使おう(4)',
+  return5: 'return文を使おう(5)',
   array1: '配列を使おう(1)',
   array2: '配列を使おう(2)',
   array3: '配列を使おう(3)',
+  array4: '配列を使おう(4)',
+  array5: '配列を使おう(5)',
   string1: '文字列を使おう(1)',
   string2: '文字列を使おう(2)',
   string3: '文字列を使おう(3)',
+  string4: '文字列を使おう(4)',
+  string5: '文字列を使おう(5)',
   test1: 'ステップ実行のテスト用問題(1)',
   test2: 'ステップ実行のテスト用問題(2)',
   test3: 'ステップ実行のテスト用問題(3)',
@@ -196,8 +212,8 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     ['doubleLoop1', 'doubleLoop2', 'doubleLoop3', 'doubleLoop4', 'doubleLoop5', 'if1', 'if2', 'if3', 'if4', 'if5'],
     ['elseIf1', 'elseIf2', 'switch1', 'switch2'],
     ['break1', 'break2', 'break3', 'continue1', 'continue2', 'continue3'],
-    ['method1', 'method2', 'method3', 'return1', 'return2', 'return3'],
-    ['array1', 'array2', 'array3', 'string1', 'string2', 'string3'],
+    ['method1', 'method2', 'method3', 'method4', 'method5', 'return1', 'return2', 'return3', 'return4', 'return5'],
+    ['array1', 'array2', 'array3', 'array4', 'array5', 'string1', 'string2', 'string3', 'string4', 'string5'],
   ],
   tuBeginner2: [['test1', 'test2', 'test3', 'test4', 'test5']],
 };
@@ -1671,6 +1687,53 @@ public class Main {
   method2: {
     instrumented: `
 const t = new Turtle();
+forwardTwoSteps(t);
+turnAround(t);
+t.forward();
+
+function forwardTwoSteps(t) {
+  try {
+    s.enterNewScope([]);
+    t.forward();
+    t.forward();
+  } finally {
+    s.leaveScope();
+  }
+}
+
+function turnAround(t) {
+  try {
+    s.enterNewScope([]);
+    t.turnRight();
+    t.turnRight();
+  } finally {
+    s.leaveScope();
+  }
+}
+
+    `.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+        Turtle t = new Turtle(); // sid:
+        二歩前に進める(t);
+        後ろを向く(t);
+        t.前に進む(); // sid
+    }
+    static void 二歩前に進める(Turtle t) {
+        t.前に進む(); // sid
+        t.前に進む(); // sid
+    }
+    static void 後ろを向く(Turtle t) {
+        t.右を向く(); // sid
+        t.右を向く(); // sid
+    }
+}
+    `.trim(),
+  },
+  method3: {
+    instrumented: `
+const t = new Turtle();
 forwardGivenSteps(t, <3-4>);
 t.turnRight();
 forwardGivenSteps(t, 2);
@@ -1704,7 +1767,7 @@ public class Main {
 }
     `.trim(),
   },
-  method3: {
+  method4: {
     instrumented: `
 const t = new Turtle();
 forwardTwoSteps(t);
@@ -1746,6 +1809,43 @@ public class Main {
     static void 四歩前に進める(Turtle t) {
         二歩前に進める(t);
         二歩前に進める(t);
+    }
+}
+    `.trim(),
+  },
+  method5: {
+    instrumented: `
+const t = new Turtle();
+drawSquare(t);
+t.backward();
+drawSquare(t);
+
+function drawSquare(t) {
+  try {
+    s.enterNewScope([]);
+    for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
+      t.forward();
+      t.turnRight();
+    }
+	delete s.vars['i'];
+  } finally {
+    s.leaveScope();
+  }
+}
+    `.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+        Turtle t = new Turtle(); // sid
+        正方形を描く(t);
+        t.後に戻る(); // sid
+        正方形を描く(t);
+    }
+    static void 正方形を描く(Turtle t) {
+        for (int i = 0; i < 3; i++) { // sid
+            t.前に進む(); // sid
+            t.右を向く(); // sid
+        }
     }
 }
     `.trim(),
@@ -1798,6 +1898,57 @@ public class Main {
   return2: {
     instrumented: `
 const t = new Turtle();
+s.set('x', double(2));
+forwardGivenSteps(t, s.get('x'));
+t.turnRight();
+s.set('x', double(s.get('x') - 1));
+forwardGivenSteps(t, s.get('x'));
+
+function forwardGivenSteps(t, n) {
+  try {
+    s.enterNewScope([['n', n]]);
+    for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
+      t.forward();
+    }
+    delete s.vars['i'];
+  } finally {
+    s.leaveScope();
+  }
+}
+
+function double(a) {
+  try {
+    s.enterNewScope([['a', a]]);
+    return a * 2;
+  } finally {
+    s.leaveScope();
+  }
+}
+    `.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+        Turtle t = new Turtle(); // sid
+        int x = 二倍する(2); // sid
+        N歩前に進める(t, x);
+        t.右を向く(); // sid
+        x = 二倍する(x - 1); // sid
+        N歩前に進める(t, x);
+    }
+    static void N歩前に進める(Turtle t, int n) {
+        for (int i = 0; i < n; i++) { // sid
+            t.前に進む(); // sid
+        }
+    }
+    static int 二倍する(int a) {
+        return a * 2;
+    }
+}
+    `.trim(),
+  },
+  return3: {
+    instrumented: `
+const t = new Turtle();
 forwardGivenSteps(t, add(1, 1));
 forwardGivenSteps(t, add(1, 2));
 
@@ -1840,7 +1991,59 @@ public class Main {
 }
     `.trim(),
   },
-  return3: {
+  return4: {
+    instrumented: `
+const t = new Turtle();
+for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
+  if (isEven(s.get('i')))
+    t.turnRight();
+  else
+    forwardTwoSteps(t);
+}
+delete s.vars['i'];
+
+function forwardTwoSteps(t) {
+  try {
+    s.enterNewScope([]);
+    t.forward();
+    t.forward();
+  } finally {
+    s.leaveScope();
+  }
+}
+
+function isEven(a) {
+  try {
+    s.enterNewScope([['a', a]]);
+    return a % 2 == 0;
+  } finally {
+    s.leaveScope();
+  }
+}
+
+    `.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+        Turtle t = new Turtle(); // sid
+        for (int i = 0; i < <3-4>; i++) { // sid
+            if (偶数か(i))
+                t.右を向く(); // sid
+            else
+                二歩前に進める(t);
+        }
+    }
+    static void 二歩前に進める(Turtle t) {
+        t.前に進む(); // sid
+        t.前に進む(); // sid
+    }
+    static boolean 偶数か(int a) {
+        return a % 2 == 0; // sid
+    }
+}
+    `.trim(),
+  },
+  return5: {
     instrumented: `
 const t = new Turtle();
 for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
@@ -1898,6 +2101,7 @@ public class Main {
 }
     `.trim(),
   },
+
   array1: {
     instrumented: `
 const t = new Turtle();
@@ -1941,6 +2145,46 @@ public class Main {
   array2: {
     instrumented: `
 const t = new Turtle();
+s.set('arr', [<4-5>, <3-4>, <3-4>]);
+for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
+  forwardGivenSteps(t, s.get('arr')[s.get('i')]);
+  t.turnRight();
+}
+delete s.vars['i'];
+
+function forwardGivenSteps(t, n) {
+  try {
+    s.enterNewScope([['n', n]]);
+    for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
+      t.forward();
+    }
+    delete s.vars['i'];
+  } finally {
+    s.leaveScope();
+  }
+}
+    `.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+        Turtle t = new Turtle(); // sid
+        int[] arr = { <4-5>, <3-4>, <3-4> }; // sid
+        for (int i = 0; i < arr.length; i++) { // sid
+            N歩前に進める(t, arr[i]);
+            t.右を向く(); // sid
+        }
+    }
+    static void N歩前に進める(Turtle t, int n) {
+        for (int i = 0; i < n; i++) { // sid
+            t.前に進む(); // sid
+        }
+    }
+}
+    `.trim(),
+  },
+  array3: {
+    instrumented: `
+const t = new Turtle();
 s.set('arr', [0, 1, 0, 2, 0]);
 for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
   switch (s.get('arr')[s.get('i')]) {
@@ -1973,7 +2217,7 @@ public class Main {
 }
     `.trim(),
   },
-  array3: {
+  array4: {
     instrumented: `
 const t = new Turtle();
 s.set('arr', [0, 1, 0, 2, 0]);
@@ -2003,6 +2247,54 @@ public class Main {
                     t.右を向く(); break; // sid
                 case 2:
                     t.左を向く(); break; // sid
+            }
+        }
+    }
+}
+    `.trim(),
+  },
+  array5: {
+    instrumented: `
+const t = new Turtle();
+s.set('arr', [0, 1, 0, 2, 0, 3, 0]);
+s.set('steps', 1);
+for (const cmd of [0, 1, 0, 2, 0, 3, 0]) {
+  s.set('cmd', cmd);
+  switch (s.get('cmd')) {
+    case 0:
+      for (s.set('i', 0); s.get('i') < s.get('steps'); s.set('i', s.get('i') + 1)) {
+        t.forward();
+      }
+      delete s.vars['i'];
+      break;
+    case 1:
+      t.turnRight(); break;
+    case 2:
+      t.turnLeft(); break;
+    case 3:
+      s.set('steps', s.get('steps') + 1); break;
+  }
+}
+    `.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+        Turtle t = new Turtle(); // sid
+        int[] arr = { 0, 1, 0, 2, 0, 3, 0 }; // sid
+        int steps = 1; // sid
+        for (int cmd : arr) { // sid
+            switch (cmd) {
+                case 0:
+                    for (int i = 0; i < steps; i++) { // sid
+                        t.前に進む(); // sid
+                    }
+                    break;
+                case 1:
+                    t.右を向く(); break; // sid
+                case 2:
+                    t.左を向く(); break; // sid
+                case 3:
+                    steps++; break; // sid
             }
         }
     }
@@ -2047,6 +2339,45 @@ public class Main {
   string2: {
     instrumented: `
 const t = new Turtle();
+s.set('s', 'ffbrfl');
+for (s.set('i', 0); s.get('i') < s.get('s').length; s.set('i', s.get('i') + 1)) {
+  switch (s.get('s').charAt(s.get('i'))) {
+    case 'f':
+      t.forward(); break;
+    case 'r':
+      t.turnRight(); break;
+    case 'l':
+      t.turnLeft(); break;
+    case 'b':
+      t.backward(); break;
+  }
+}
+delete s.vars['i'];
+    `.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+        Turtle t = new Turtle(); // sid
+        String s = "ffbrfl"; // sid
+        for (int i = 0; i < s.length(); i++) { // sid
+            switch (s.charAt(i)) {
+                case 'f':
+                    t.前に進む(); break; // sid
+                case 'r':
+                    t.右を向く(); break; // sid
+                case 'l':
+                    t.左を向く(); break; // sid
+                case 'b':
+                    t.後に戻る(); break; // sid
+            }
+        }
+    }
+}
+    `.trim(),
+  },
+  string3: {
+    instrumented: `
+const t = new Turtle();
 s.set('s', 'frflf');
 for (const ch of 'frflf') {
   s.set('ch', ch);
@@ -2080,7 +2411,7 @@ public class Main {
 }
     `.trim(),
   },
-  string3: {
+  string4: {
     instrumented: `
 const t = new Turtle();
 s.set('cmds', ['ri', 'aa', 'fo']);
@@ -2114,6 +2445,71 @@ public class Main {
             t.前に進む(); // sid
         else if (c.equals("ri"))
             t.右を向く(); // sid
+    }
+}
+    `.trim(),
+  },
+  string5: {
+    instrumented: `
+const t = new Turtle();
+s.set('cmds', ['ri', 'add', 'fo', 'add', 'le', 'fo', 'fo']);
+s.set('x', 0);
+for (const cmd of ['ri', 'add', 'fo', 'add', 'le', 'fo', 'fo']) {
+  s.set('cmd', cmd);
+  parse(t, s.get('cmd'), s.get('x'));
+  if (cmd === 'add') {
+    s.set('x', s.get('x') + 1);
+  }
+}
+
+function parse(t, c, x) {
+  try {
+    s.enterNewScope([['c', c], ['x', x]]);
+    if (c === 'fo') forwardGivenSteps(t, s.get('x'));
+    else if (c === 'ri') t.turnRight();
+    else if (c === 'le') t.turnLeft();
+  } finally {
+    s.leaveScope();
+  }
+}
+
+function forwardGivenSteps(t, n) {
+  try {
+    s.enterNewScope([['n', n]]);
+    for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
+      t.forward();
+    }
+    delete s.vars['i'];
+  } finally {
+    s.leaveScope();
+  }
+}
+    `.trim(),
+    java: `
+public class Main {
+    public static void main(String[] args) {
+        Turtle t = new Turtle(); // sid
+        String[] cmds = { "ri", "add", "fo", "add", "le", "fo", "fo" }; // sid
+        int x = 0; // sid
+        for (String cmd : cmds) { // sid
+            parse(t, cmd, x);
+            if (cmd.equals("add")) {
+                x++; // sid
+            }
+        }
+    }
+    static void parse(Turtle t, String c, int x) {
+        if (c.equals("fo"))
+            forwardGivenSteps(t, x);
+        else if (c.equals("ri"))
+            t.turnRight(); // sid
+        else if (c.equals("le"))
+            t.turnLeft(); // sid
+    }
+    static void forwardGivenSteps(Turtle t, int n) {
+        for (int i = 0; i < n; i++) { // sid
+            t.forward(); // sid
+        }
     }
 }
     `.trim(),
