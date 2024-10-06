@@ -29,10 +29,12 @@ import { getNullableSessionOnServer } from '../../utils/session';
 import { SignOutMenuItem } from './SignOutMenuItem';
 
 const MENU_ITEMS: readonly [string, string][] = [['/usage', '使い方']];
+const ADMIN_MENU_ITEMS = [...MENU_ITEMS, ['/admin/statistics', '統計情報']];
 
 export const DefaultHeader: NextPage = async () => {
   const { session } = await getNullableSessionOnServer();
   const superTokensUser = session && (await SuperTokensNode.getUser(session.superTokensUserId));
+  const isAdmin = superTokensUser?.emails[0]?.endsWith('@internet.ac.jp');
 
   const user =
     session &&
@@ -50,7 +52,7 @@ export const DefaultHeader: NextPage = async () => {
           {APP_NAME}
         </Heading>
         <HStack flexGrow={0} flexShrink={0} spacing={0}>
-          {MENU_ITEMS.map(([href, label]) => (
+          {(isAdmin ? ADMIN_MENU_ITEMS : MENU_ITEMS).map(([href, label]) => (
             <Button key={href} as={NextLink} href={href} variant="ghost">
               {label}
             </Button>

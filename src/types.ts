@@ -1,7 +1,7 @@
 import type React from 'react';
 
 export interface LayoutProps {
-  children: React.ReactNode;
+  children: React.ReactElement;
 }
 
 export type LayoutComponent = React.FC<LayoutProps>;
