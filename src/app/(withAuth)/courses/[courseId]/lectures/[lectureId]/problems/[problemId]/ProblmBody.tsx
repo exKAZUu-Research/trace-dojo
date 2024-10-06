@@ -89,13 +89,29 @@ export const ProblemBody: React.FC<Props> = (props) => {
   );
 
   const handleSubmit = useCallback(async (): Promise<void> => {
-    if (isAlertOpen) return;
+    if (isAlertOpen || !turtleGraphicsRef.current) return;
 
-    const isCorrect = turtleGraphicsRef.current?.isCorrect() || false;
+    const incorrectLocationText = turtleGraphicsRef.current.findIncorrectLocations().join('、');
 
     switch (problemType) {
       case 'executionResult': {
-        if (isCorrect) {
+        if (incorrectLocationText) {
+          const response = await fetchIncorrectSubmissionsCount();
+          const incorrectCount = (response.data ?? 0) + 1;
+          await props.createSubmissionUpdatingProblemSession(false, false);
+          if (incorrectCount < MAX_CHALLENGE_COUNT) {
+            openAlertDialog(
+              '不正解',
+              `${incorrectLocationText}に誤りがあります。あと${MAX_CHALLENGE_COUNT - incorrectCount}回間違えたら、ステップ実行モードに移ります。一発正解を目指しましょう！`
+            );
+          } else {
+            await props.updateProblemSession('step', 1);
+            openAlertDialog(
+              '不正解',
+              `${incorrectLocationText}に誤りがあります。${MAX_CHALLENGE_COUNT}回間違えたので、ステップ実行モードに移ります。ステップごとに問題を解いてください。`
+            );
+          }
+        } else {
           await props.createSubmissionUpdatingProblemSession(true, true);
           openAlertDialog(
             '正解',
@@ -104,31 +120,18 @@ export const ProblemBody: React.FC<Props> = (props) => {
               router.push(`/courses/${props.params.courseId}/lectures/${props.params.lectureId}`);
             }
           );
-        } else {
-          const response = await fetchIncorrectSubmissionsCount();
-          const incorrectCount = (response.data ?? 0) + 1;
-          await props.createSubmissionUpdatingProblemSession(false, false);
-          if (incorrectCount < MAX_CHALLENGE_COUNT) {
-            openAlertDialog(
-              '不正解',
-              `不正解です。あと${MAX_CHALLENGE_COUNT - incorrectCount}回間違えたら、ステップ実行モードに移ります。一発正解を目指しましょう！`
-            );
-          } else {
-            await props.updateProblemSession('step', 1);
-            openAlertDialog(
-              '不正解',
-              `不正解です。${MAX_CHALLENGE_COUNT}回間違えたので、ステップ実行モードに移ります。ステップごとに問題を解いてください。`
-            );
-          }
         }
         break;
       }
       case 'step': {
         await props.createSubmissionUpdatingProblemSession(
-          isCorrect,
-          isCorrect && currentTraceItemIndex === props.problem.traceItems.length - 1
+          !incorrectLocationText,
+          !incorrectLocationText && currentTraceItemIndex === props.problem.traceItems.length - 1
         );
-        if (isCorrect) {
+        if (incorrectLocationText) {
+          openAlertDialog('不正解', `${incorrectLocationText}に誤りがあります。もう一度解答してください。`);
+          setViewingTraceItemIndex(previousTraceItemIndex);
+        } else {
           if (currentTraceItemIndex === props.problem.traceItems.length - 1) {
             openAlertDialog(
               '正解',
@@ -142,9 +145,6 @@ export const ProblemBody: React.FC<Props> = (props) => {
             openAlertDialog('正解', '正解です。次のステップに進みます。');
             setViewingTraceItemIndex(currentTraceItemIndex);
           }
-        } else {
-          openAlertDialog('不正解', '不正解です。もう一度解答してください。');
-          setViewingTraceItemIndex(previousTraceItemIndex);
         }
         break;
       }

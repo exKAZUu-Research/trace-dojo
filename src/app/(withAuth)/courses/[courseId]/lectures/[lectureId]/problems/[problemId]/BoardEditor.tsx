@@ -51,7 +51,7 @@ interface TurtleGraphicsProps {
 }
 
 export interface TurtleGraphicsHandle {
-  isCorrect(): boolean;
+  findIncorrectLocations(): string[];
 }
 
 export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>((props, ref) => {
@@ -76,7 +76,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
   );
 
   useImperativeHandle(ref, () => ({
-    isCorrect,
+    findIncorrectLocations,
   }));
 
   useEffect(() => {
@@ -99,14 +99,20 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     });
   };
 
-  const isCorrect = (): boolean => {
-    for (const [name, value] of Object.entries(variables)) {
-      if (value !== props.currentVariables[name].toString()) return false;
+  const findIncorrectLocations = (): string[] => {
+    const locations: string[] = [];
+    if (!fastDeepEqual(currentTraceItem.turtles, turtles)) {
+      locations.push('亀');
     }
-
-    const expectedTurtles = currentTraceItem.turtles;
-    const expectedBoard = parseBoard(currentTraceItem.board);
-    return fastDeepEqual(expectedTurtles, turtles) && fastDeepEqual(expectedBoard, board);
+    if (!fastDeepEqual(parseBoard(currentTraceItem.board), board)) {
+      locations.push('盤面（マスの色）');
+    }
+    for (const [name, value] of Object.entries(variables)) {
+      if (value !== props.currentVariables[name].toString()) {
+        locations.push(`変数${name}`);
+      }
+    }
+    return locations;
   };
 
   const handleClickTurtle = (turtle: TurtleTrace): void => {
