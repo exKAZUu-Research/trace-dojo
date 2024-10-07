@@ -17,7 +17,7 @@ ensureSuperTokensReactInit();
 const queryClient = new QueryClient();
 
 export const Providers: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  setRouter(useRouter(), usePathname() || window.location.pathname);
+  setRouter(useRouter(), usePathname() || globalThis.location.pathname);
 
   return (
     <SuperTokensWrapper>
