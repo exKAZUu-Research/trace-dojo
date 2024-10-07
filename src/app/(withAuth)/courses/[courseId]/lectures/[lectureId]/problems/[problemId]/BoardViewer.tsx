@@ -1,4 +1,5 @@
 import type { BoxProps } from '@chakra-ui/react';
+import { keyframes } from '@emotion/react';
 import React, { useMemo } from 'react';
 
 import {
@@ -8,7 +9,7 @@ import {
   TURTLE_GRAPHICS_BOARD_PADDING_PX as PADDING_PX,
   TURTLE_GRAPHICS_BOARD_ROWS as ROWS,
 } from '../../../../../../../../constants';
-import { Box, Grid, GridItem, Img, keyframes } from '../../../../../../../../infrastructures/useClient/chakra';
+import { Box, Grid, GridItem, Img } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { TurtleTrace } from '../../../../../../../../problems/traceProgram';
 import { charToColor } from '../../../../../../../../problems/traceProgram';
 
