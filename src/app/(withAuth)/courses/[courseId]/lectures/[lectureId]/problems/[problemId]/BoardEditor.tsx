@@ -1,3 +1,4 @@
+import { zenkakuAlphanumericalsToHankaku } from '@willbooster/shared-lib';
 import fastDeepEqual from 'fast-deep-equal';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
 import { MdOutlineDelete, MdTurnLeft, MdTurnRight } from 'react-icons/md';
@@ -108,7 +109,10 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
       locations.push('盤面（マスの色）');
     }
     for (const [name, value] of Object.entries(variables)) {
-      if (value !== props.currentVariables[name].toString()) {
+      if (
+        zenkakuAlphanumericalsToHankaku(value) !==
+        zenkakuAlphanumericalsToHankaku(props.currentVariables[name].toString())
+      ) {
         locations.push(`変数${name}`);
       }
     }
@@ -217,7 +221,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
               <Thead>
                 <Tr>
                   <Th>変数名</Th>
-                  <Th>値</Th>
+                  <Th>値（=や+=などで代入しないと変化しない）</Th>
                 </Tr>
               </Thead>
               <Tbody>

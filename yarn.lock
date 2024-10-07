@@ -4159,6 +4159,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@willbooster/shared-lib@npm:5.2.4":
+  version: 5.2.4
+  resolution: "@willbooster/shared-lib@npm:5.2.4"
+  checksum: 10c0/b684b7b0dfb0a87279b33f6754e117c8ab7c0e051ee46e6948a2c55aaa31218371a790f96f53b2d6bc2ff41eb7e50a9f8c3d0253ba1a889fbb65f5567d0f7f3e
+  languageName: node
+  linkType: hard
+
 "@willbooster/wb@npm:8.0.2":
   version: 8.0.2
   resolution: "@willbooster/wb@npm:8.0.2"
@@ -13892,6 +13899,7 @@ __metadata:
     "@typescript-eslint/parser": "npm:8.8.0"
     "@willbooster/eslint-config-next": "npm:1.2.0"
     "@willbooster/prettier-config": "npm:9.1.2"
+    "@willbooster/shared-lib": "npm:5.2.4"
     "@willbooster/shared-lib-react": "npm:3.2.9"
     "@willbooster/wb": "npm:8.0.2"
     build-ts: "npm:13.1.8"

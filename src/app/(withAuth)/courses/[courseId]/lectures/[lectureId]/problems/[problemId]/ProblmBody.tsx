@@ -197,7 +197,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
                     </>
                   )}
                 </Box>
-                の盤面{Object.keys(initialVariables).length > 0 ? 'と変数の一覧表' : ''}
+                の盤面{Object.keys(initialVariables).length > 0 ? 'と、変数に記録されている値の一覧表' : ''}
                 を作成し、提出ボタンを押してください。
               </Box>
             </VStack>
