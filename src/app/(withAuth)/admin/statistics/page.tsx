@@ -1,5 +1,6 @@
 import type { NextPage } from 'next';
 
+import { logger } from '../../../../infrastructures/pino';
 import { prisma } from '../../../../infrastructures/prisma';
 import { Box, Heading, VStack, Table, Thead, Tbody, Tr, Th, Td } from '../../../../infrastructures/useClient/chakra';
 import type { CourseId } from '../../../../problems/problemData';
@@ -17,58 +18,7 @@ interface ProblemStatistics {
 }
 
 const StatisticsPage: NextPage = async () => {
-  const statistics: ProblemStatistics[] = [];
-  for (const courseId of Object.keys(courseIdToLectureIndexToProblemIds) as CourseId[]) {
-    for (const [lectureIndex, problemIds] of courseIdToLectureIndexToProblemIds[courseId].entries()) {
-      for (const problemId of problemIds) {
-        const userCount = (
-          await prisma.problemSession.groupBy({
-            by: ['userId'],
-            where: { problemId },
-          })
-        ).length; // eslint-disable-line unicorn/no-await-expression-member
-        const completedUserCount = (
-          await prisma.problemSession.groupBy({
-            by: ['userId'],
-            // eslint-disable-next-line unicorn/no-null
-            where: { problemId, completedAt: { not: null } },
-          })
-        ).length; // eslint-disable-line unicorn/no-await-expression-member
-
-        const firstCompletedSessions = await prisma.problemSession.findMany({
-          // eslint-disable-next-line unicorn/no-null
-          where: { problemId, completedAt: { not: null } },
-          orderBy: { completedAt: 'asc' },
-          distinct: ['userId'] as const,
-          select: {
-            elapsedMilliseconds: true,
-            submissions: {
-              where: { isCorrect: false },
-              select: { id: true },
-            },
-          },
-        });
-
-        const totalElapsed = firstCompletedSessions.reduce((acc, session) => acc + session.elapsedMilliseconds, 0);
-        const avgElapsedMilliseconds =
-          firstCompletedSessions.length > 0 ? totalElapsed / firstCompletedSessions.length : 0;
-
-        const totalIncorrect = firstCompletedSessions.reduce((acc, session) => acc + session.submissions.length, 0);
-        const avgIncorrectCounts =
-          firstCompletedSessions.length > 0 ? totalIncorrect / firstCompletedSessions.length : 0;
-
-        statistics.push({
-          courseId,
-          lectureIndex,
-          problemId,
-          userCount,
-          completedUserCount,
-          avgElapsedMilliseconds,
-          avgIncorrectCounts,
-        });
-      }
-    }
-  }
+  const statistics = await calculateStatistics();
 
   return (
     <VStack align="stretch" spacing={6}>
@@ -104,5 +54,65 @@ const StatisticsPage: NextPage = async () => {
     </VStack>
   );
 };
+
+async function calculateStatistics(): Promise<ProblemStatistics[]> {
+  const statistics: ProblemStatistics[] = [];
+  for (const courseId of Object.keys(courseIdToLectureIndexToProblemIds) as CourseId[]) {
+    for (const [lectureIndex, problemIds] of courseIdToLectureIndexToProblemIds[courseId].entries()) {
+      for (const problemId of problemIds) {
+        try {
+          const userCount = (
+            await prisma.problemSession.groupBy({
+              by: ['userId'],
+              where: { problemId },
+            })
+          ).length; // eslint-disable-line unicorn/no-await-expression-member
+          const completedUserCount = (
+            await prisma.problemSession.groupBy({
+              by: ['userId'],
+              // eslint-disable-next-line unicorn/no-null
+              where: { problemId, completedAt: { not: null } },
+            })
+          ).length; // eslint-disable-line unicorn/no-await-expression-member
+
+          const firstCompletedSessions = await prisma.problemSession.findMany({
+            // eslint-disable-next-line unicorn/no-null
+            where: { problemId, completedAt: { not: null } },
+            orderBy: { completedAt: 'asc' },
+            distinct: ['userId'] as const,
+            select: {
+              elapsedMilliseconds: true,
+              submissions: {
+                where: { isCorrect: false },
+                select: { id: true },
+              },
+            },
+          });
+
+          const totalElapsed = firstCompletedSessions.reduce((acc, session) => acc + session.elapsedMilliseconds, 0);
+          const avgElapsedMilliseconds =
+            firstCompletedSessions.length > 0 ? totalElapsed / firstCompletedSessions.length : 0;
+
+          const totalIncorrect = firstCompletedSessions.reduce((acc, session) => acc + session.submissions.length, 0);
+          const avgIncorrectCounts =
+            firstCompletedSessions.length > 0 ? totalIncorrect / firstCompletedSessions.length : 0;
+
+          statistics.push({
+            courseId,
+            lectureIndex,
+            problemId,
+            userCount,
+            completedUserCount,
+            avgElapsedMilliseconds,
+            avgIncorrectCounts,
+          });
+        } catch (error) {
+          logger.error(`Failed to calculate statistics of ${problemId}: %o`, error);
+        }
+      }
+    }
+  }
+  return statistics;
+}
 
 export default StatisticsPage;
