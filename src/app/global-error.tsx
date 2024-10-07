@@ -40,7 +40,7 @@ ${error.stack}
               cursor: 'pointer',
               marginBottom: '10px',
             }}
-            onClick={() => window.location.reload()}
+            onClick={() => globalThis.location.reload()}
           >
             再試行
           </button>

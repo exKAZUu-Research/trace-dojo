@@ -137,6 +137,7 @@ export const frontendConfig = (): SuperTokensConfig => {
 let isInitialized = false;
 
 export function ensureSuperTokensReactInit(): void {
+  // eslint-disable-next-line unicorn/prefer-global-this
   if (typeof window === 'undefined') return;
   if (isInitialized) return;
   SuperTokensReact.init(frontendConfig());

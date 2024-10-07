@@ -405,7 +405,7 @@ function useShortcutKeys(handleSubmit: () => Promise<void>, isSubmitting: boolea
         void handleSubmit();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    globalThis.addEventListener('keydown', handleKeyDown);
+    return () => globalThis.removeEventListener('keydown', handleKeyDown);
   }, [handleSubmit, isSubmitting]);
 }
