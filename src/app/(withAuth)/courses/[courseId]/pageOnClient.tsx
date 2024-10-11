@@ -53,6 +53,7 @@ export const CoursePageOnClient: React.FC<Props> = (props) => {
     </VStack>
   );
 };
+
 type LectureCardProps = {
   courseId: CourseId;
   lectureIndex: number;
