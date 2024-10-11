@@ -2028,7 +2028,6 @@ public class Main {
 }
     `.trim(),
   },
-
   method1: {
     instrumented: `
 const t = new Turtle();
