@@ -28,9 +28,10 @@ import { courseIdToLectureIds, courseIdToName, problemIdToName } from '../../../
 import { ProblemBody } from './ProblmBody';
 
 type Props = {
+  initialProblemSession: ProblemSession;
+  isAdmin: boolean | undefined;
   params: { courseId: CourseId; lectureId: string; problemId: ProblemId };
   userId: string;
-  initialProblemSession: ProblemSession;
 };
 
 export const ProblemPageOnClient: React.FC<Props> = (props) => {
@@ -106,23 +107,41 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
         </HStack>
         <HStack justify="space-between" spacing={2}>
           <Heading as="h1">{problemIdToName[props.params.problemId]}</Heading>
-          <Tooltip
-            label={
-              problemSession.problemType === 'executionResult' ? '減点になりますが、確実に問題を解けます。' : undefined
-            }
-          >
-            <Button
-              colorScheme="blue"
-              variant="outline"
-              onClick={() => {
-                void updateProblemSession('step', 1);
-              }}
+          <HStack spacing={2}>
+            <Tooltip
+              label={
+                problemSession.problemType === 'executionResult'
+                  ? '減点になりますが、確実に問題を解けます。'
+                  : undefined
+              }
             >
-              {problemSession.problemType === 'executionResult'
-                ? '諦めてステップ実行モードに移る'
-                : 'ステップ実行モードで最初からやり直す'}
-            </Button>
-          </Tooltip>
+              <Button
+                colorScheme="blue"
+                variant="outline"
+                onClick={() => {
+                  void updateProblemSession('step', 1);
+                }}
+              >
+                {problemSession.problemType === 'executionResult'
+                  ? '諦めてステップ実行モードに移る'
+                  : 'ステップ実行モードで最初からやり直す'}
+              </Button>
+            </Tooltip>
+            {props.isAdmin && (
+              <Button
+                colorScheme="blue"
+                variant="outline"
+                onClick={() =>
+                  updateProblemSession(
+                    'step',
+                    Math.min(problemSession.traceItemIndex + 1, problem.traceItems.length - 1)
+                  )
+                }
+              >
+                次のステップに進む（管理者のみ）
+              </Button>
+            )}
+          </HStack>
         </HStack>
       </VStack>
 
