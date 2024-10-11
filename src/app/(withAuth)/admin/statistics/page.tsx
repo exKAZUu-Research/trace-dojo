@@ -2,7 +2,7 @@ import type { NextPage } from 'next';
 
 import { logger } from '../../../../infrastructures/pino';
 import { prisma } from '../../../../infrastructures/prisma';
-import { Box, Heading, VStack, Table, Thead, Tbody, Tr, Th, Td } from '../../../../infrastructures/useClient/chakra';
+import { Box, Heading, Table, Tbody, Td, Th, Thead, Tr, VStack } from '../../../../infrastructures/useClient/chakra';
 import type { CourseId } from '../../../../problems/problemData';
 import { courseIdToLectureIndexToProblemIds } from '../../../../problems/problemData';
 import { dayjs } from '../../../utils/dayjs';

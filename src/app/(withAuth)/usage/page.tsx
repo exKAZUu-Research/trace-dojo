@@ -1,6 +1,6 @@
 import type { NextPage } from 'next';
 
-import { Box, Heading, VStack, Image, Text, List, ListItem } from '../../../infrastructures/useClient/chakra';
+import { Box, Heading, Image, List, ListItem, Text, VStack } from '../../../infrastructures/useClient/chakra';
 
 const CoursesPage: NextPage = async () => {
   return (

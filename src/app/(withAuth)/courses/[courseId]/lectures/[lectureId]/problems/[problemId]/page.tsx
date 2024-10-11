@@ -1,5 +1,4 @@
 import type { NextPage } from 'next';
-import SuperTokensNode from 'supertokens-node';
 
 import { logger } from '../../../../../../../../infrastructures/pino';
 import { prisma } from '../../../../../../../../infrastructures/prisma';
@@ -14,8 +13,6 @@ type Props = {
 
 const ProblemPage: NextPage<Props> = async (props) => {
   const session = await getNonNullableSessionOnServer();
-  const superTokensUser = session && (await SuperTokensNode.getUser(session.superTokensUserId));
-  const isAdmin = superTokensUser?.emails[0]?.endsWith('@internet.ac.jp');
 
   let incompleteProblemSession = await prisma.problemSession.findFirst({
     where: {
@@ -45,7 +42,6 @@ const ProblemPage: NextPage<Props> = async (props) => {
   return (
     <ProblemPageOnClient
       initialProblemSession={incompleteProblemSession}
-      isAdmin={isAdmin}
       params={props.params}
       userId={session.superTokensUserId}
     />

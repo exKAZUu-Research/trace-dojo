@@ -6,9 +6,10 @@ import { SessionAuthForNextJs } from '../../components/molecules/SessionAuthForN
 import { TryRefreshComponent } from '../../components/molecules/TryRefreshComponent';
 import { DefaultFooter } from '../../components/organisms/DefaultFooter';
 import { DefaultHeader } from '../../components/organisms/DefaultHeader';
+import { AuthContextProvider } from '../../contexts/AuthContext';
 import { Container, Spinner } from '../../infrastructures/useClient/chakra';
 import type { LayoutProps } from '../../types';
-import { getNullableSessionOnServer } from '../../utils/session';
+import { getEmailFromSession, getNullableSessionOnServer } from '../../utils/session';
 
 const DefaultLayout: NextPage<LayoutProps> = async ({ children }) => {
   const { hasToken, session } = await getNullableSessionOnServer();
@@ -43,7 +44,12 @@ const DefaultLayout: NextPage<LayoutProps> = async ({ children }) => {
       <DefaultHeader />
       <Suspense fallback={<Spinner left="50%" position="fixed" top="50%" transform="translate(-50%, -50%)" />}>
         <Container pb={16} pt={6}>
-          {children}
+          <AuthContextProvider
+            currentEmail={await getEmailFromSession(session.superTokensUserId)}
+            currentUserId={session.superTokensUserId}
+          >
+            {children}
+          </AuthContextProvider>
         </Container>
       </Suspense>
       <DefaultFooter />

@@ -4598,6 +4598,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"at-decorators@npm:2.1.0":
+  version: 2.1.0
+  resolution: "at-decorators@npm:2.1.0"
+  checksum: 10c0/2870952e8b99d91db6d3875f607ac35012b3937f585e52ce5640313e31d4e4417da68510594b457ffd26e51525e046c804101ad80f255681d594f1f8325e4433
+  languageName: node
+  linkType: hard
+
 "atomic-sleep@npm:^1.0.0":
   version: 1.0.0
   resolution: "atomic-sleep@npm:1.0.0"
@@ -13902,6 +13909,7 @@ __metadata:
     "@willbooster/shared-lib": "npm:5.2.4"
     "@willbooster/shared-lib-react": "npm:3.2.9"
     "@willbooster/wb": "npm:8.0.2"
+    at-decorators: "npm:2.1.0"
     build-ts: "npm:13.1.8"
     concurrently: "npm:9.0.1"
     conventional-changelog-conventionalcommits: "npm:8.0.0"

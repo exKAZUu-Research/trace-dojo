@@ -2,7 +2,7 @@ import { Random } from '../app/utils/random';
 
 import type { LanguageId, ProblemId } from './problemData';
 import { problemIdToLanguageIdToProgram } from './problemData';
-import { type TraceItemVariable, type TraceItem, traceProgram } from './traceProgram';
+import { type TraceItem, type TraceItemVariable, traceProgram } from './traceProgram';
 
 export type InstantiatedProblem = {
   /**

@@ -1,3 +1,6 @@
+import { memoizeFactory } from 'at-decorators';
+import SuperTokensNode from 'supertokens-node';
+
 import { logger } from '../infrastructures/pino';
 import { prisma } from '../infrastructures/prisma';
 
@@ -48,3 +51,19 @@ async function upsertUserToPrisma(id: string): Promise<void> {
   });
   logger.debug('User upserted: %o', user);
 }
+
+const memoizeForEmails = memoizeFactory({
+  maxCachedArgsSize: Number.POSITIVE_INFINITY,
+  cacheDuration: 60 * 60 * 1000,
+});
+
+async function _getEmailFromSuperTokens(userId: string): Promise<string | undefined> {
+  try {
+    const user = await SuperTokensNode.getUser(userId);
+    return user?.emails[0];
+  } catch {
+    return undefined;
+  }
+}
+
+export const getEmailFromSession = memoizeForEmails(_getEmailFromSuperTokens);

@@ -11,6 +11,7 @@ import {
   MAX_ACTIVE_DURATION_MS_AFTER_LAST_EVENT,
   MIN_INTERVAL_MS_OF_ACTIVE_EVENTS,
 } from '../../../../../../../../constants';
+import { useAuthContextSelector } from '../../../../../../../../contexts/AuthContext';
 import { backendTrpcReact } from '../../../../../../../../infrastructures/trpcBackend/client';
 import {
   Button,
@@ -29,12 +30,13 @@ import { ProblemBody } from './ProblmBody';
 
 type Props = {
   initialProblemSession: ProblemSession;
-  isAdmin: boolean | undefined;
   params: { courseId: CourseId; lectureId: string; problemId: ProblemId };
   userId: string;
 };
 
 export const ProblemPageOnClient: React.FC<Props> = (props) => {
+  const isAdmin = useAuthContextSelector((c) => c.isAdmin);
+
   const lectureIndex = courseIdToLectureIds[props.params.courseId].indexOf(props.params.lectureId);
   const problem = useMemo(
     () =>
@@ -127,7 +129,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
                   : 'ステップ実行モードで最初からやり直す'}
               </Button>
             </Tooltip>
-            {props.isAdmin && (
+            {isAdmin && (
               <Button
                 colorScheme="blue"
                 variant="outline"

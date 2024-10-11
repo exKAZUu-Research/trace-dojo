@@ -1,10 +1,12 @@
 'use client';
 
 import type { ProblemSession, ProblemSubmission } from '@prisma/client';
+import { useLocalStorage } from '@willbooster/shared-lib-react';
 import NextLink from 'next/link';
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { MdCheckCircle, MdCheckCircleOutline, MdOutlineVerified, MdVerified } from 'react-icons/md';
 
+import { useAuthContextSelector } from '../../../../../../contexts/AuthContext';
 import {
   Box,
   Card,
@@ -49,6 +51,15 @@ export const Lecture: React.FC<Props> = (props) => {
   const lectureProblemIds = courseIdToLectureIndexToProblemIds[props.params.courseId][props.lectureIndex];
   const completedProblemCount = lectureProblemIds.filter((problemId) => completedProblemIdSet.has(problemId)).length;
   const isLessonCompleted = completedProblemCount >= lectureProblemIds.length;
+
+  const currentUserId = useAuthContextSelector((c) => c.currentUserId);
+  const [, setIsOpened] = useLocalStorage(
+    `trace-dojo.${props.params.courseId}.${props.lectureIndex}.${currentUserId}`,
+    false
+  );
+  useEffect(() => {
+    setIsOpened(true);
+  }, [setIsOpened]);
 
   return (
     <VStack align="stretch" spacing={6}>
