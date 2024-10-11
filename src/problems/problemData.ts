@@ -552,17 +552,17 @@ public class Main {
   },
   variable2: {
     instrumented: `
-s.set('y', <2-6>);
-s.set('y', s.get('y') - 1);
-const t = new Turtle(<1-5>, s.get('y'));
+s.set('a', <2-6>);
+s.set('a', s.get('a') - 1);
+const t = new Turtle(<1-5>, s.get('a'));
 t.forward();
  `.trim(),
     java: `
 public class Main {
     public static void main(String[] args) {
-        int y = <2-6>; // sid
-        y = y - 1; // sid
-        Turtle 亀 = new Turtle(<1-5>, y); // sid
+        int a = <2-6>; // sid
+        a = a - 1; // sid
+        Turtle 亀 = new Turtle(<1-5>, a); // sid
         亀.前に進む(); // sid
     }
 }
