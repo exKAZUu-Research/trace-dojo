@@ -91,7 +91,8 @@ export const ProblemBody: React.FC<Props> = (props) => {
   const handleSubmit = useCallback(async (): Promise<void> => {
     if (isAlertOpen || !turtleGraphicsRef.current) return;
 
-    const incorrectLocationText = turtleGraphicsRef.current.findIncorrectLocations().join('、');
+    const [incorrectLocations, hintText] = turtleGraphicsRef.current.findIncorrectLocationsAndHintText();
+    const incorrectLocationText = incorrectLocations.join('、');
 
     switch (problemType) {
       case 'executionResult': {
@@ -129,7 +130,10 @@ export const ProblemBody: React.FC<Props> = (props) => {
           !incorrectLocationText && currentTraceItemIndex === props.problem.traceItems.length - 1
         );
         if (incorrectLocationText) {
-          openAlertDialog('不正解', `${incorrectLocationText}に誤りがあります。もう一度解答してください。`);
+          openAlertDialog(
+            '不正解',
+            `${incorrectLocationText}に誤りがあります。もう一度解答してみましょう。${hintText}`
+          );
           setViewingTraceItemIndex(previousTraceItemIndex);
         } else {
           if (currentTraceItemIndex === props.problem.traceItems.length - 1) {
@@ -258,7 +262,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
             <AlertDialogHeader fontSize="lg" fontWeight="bold">
               {alertTitle}
             </AlertDialogHeader>
-            <AlertDialogBody>{alertMessage}</AlertDialogBody>
+            <AlertDialogBody whiteSpace="pre-wrap">{alertMessage}</AlertDialogBody>
             <AlertDialogFooter>
               <Button
                 ref={cancelRef}

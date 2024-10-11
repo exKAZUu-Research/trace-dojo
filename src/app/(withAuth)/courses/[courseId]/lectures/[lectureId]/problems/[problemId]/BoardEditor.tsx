@@ -52,7 +52,7 @@ interface TurtleGraphicsProps {
 }
 
 export interface TurtleGraphicsHandle {
-  findIncorrectLocations(): string[];
+  findIncorrectLocationsAndHintText(): [string[], string];
 }
 
 export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>((props, ref) => {
@@ -77,7 +77,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
   );
 
   useImperativeHandle(ref, () => ({
-    findIncorrectLocations,
+    findIncorrectLocationsAndHintText,
   }));
 
   useEffect(() => {
@@ -100,8 +100,9 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     });
   };
 
-  const findIncorrectLocations = (): string[] => {
+  const findIncorrectLocationsAndHintText = (): [string[], string] => {
     const locations: string[] = [];
+    let hintText = '';
     if (!fastDeepEqual(currentTraceItem.turtles, turtles)) {
       locations.push('亀');
     }
@@ -114,9 +115,13 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
         zenkakuAlphanumericalsToHankaku(props.currentVariables[name].toString())
       ) {
         locations.push(`変数${name}`);
+        if (props.initialVariables[name].toString() === props.currentVariables[name].toString()) {
+          hintText +=
+            '\n\nヒント: たとえ変数を参照する式があっても、変数を更新する演算子（=, +=, ++）などがなければ、変数の値が変化しないことに注意してください。';
+        }
       }
     }
-    return locations;
+    return [locations, hintText];
   };
 
   const handleClickTurtle = (turtle: TurtleTrace): void => {
@@ -221,7 +226,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
               <Thead>
                 <Tr>
                   <Th>変数名</Th>
-                  <Th>値（=や+=などで代入しないと変化しない）</Th>
+                  <Th>値（=や+=などの代入がないと変化しない）</Th>
                 </Tr>
               </Thead>
               <Tbody>
