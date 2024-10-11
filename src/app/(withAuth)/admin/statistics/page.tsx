@@ -2,7 +2,18 @@ import type { NextPage } from 'next';
 
 import { logger } from '../../../../infrastructures/pino';
 import { prisma } from '../../../../infrastructures/prisma';
-import { Box, Heading, Table, Tbody, Td, Th, Thead, Tr, VStack } from '../../../../infrastructures/useClient/chakra';
+import {
+  Box,
+  Heading,
+  Link,
+  Table,
+  Tbody,
+  Td,
+  Th,
+  Thead,
+  Tr,
+  VStack,
+} from '../../../../infrastructures/useClient/chakra';
 import type { CourseId } from '../../../../problems/problemData';
 import { courseIdToLectureIndexToProblemIds } from '../../../../problems/problemData';
 import { dayjs } from '../../../utils/dayjs';
@@ -41,7 +52,9 @@ const StatisticsPage: NextPage = async () => {
               <Tr key={`${stat.courseId}-${stat.lectureIndex}-${stat.problemId}`}>
                 <Td>{stat.courseId}</Td>
                 <Td>{stat.lectureIndex + 1}</Td>
-                <Td>{stat.problemId}</Td>
+                <Td>
+                  <Link href={`/admin/problems/${stat.problemId}`}>{stat.problemId}</Link>
+                </Td>
                 <Td>{stat.userCount}</Td>
                 <Td>{stat.completedUserCount}</Td>
                 <Td>{dayjs.duration(stat.avgElapsedMilliseconds).humanize()}</Td>
