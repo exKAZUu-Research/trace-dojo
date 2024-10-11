@@ -610,19 +610,19 @@ public class Main {
   },
   variable4: {
     instrumented: `
-s.set('y', <1-4>);
-s.set('y', s.get('y') + 1);
-s.set('x', s.get('y') - 2);
-const t = new Turtle(s.get('x') + 1, s.get('y'));
+s.set('b', <1-4>);
+s.set('b', s.get('b') + 1);
+s.set('a', s.get('b') - 2);
+const t = new Turtle(s.get('a') + 1, s.get('b'));
 t.forward();
 `.trim(),
     java: `
 public class Main {
     public static void main(String[] args) {
-        int y = <1-4>; // sid
-        y = y + 1; // sid
-        int x = y - 2; // sid
-        Turtle 亀 = new Turtle(x + 1, y); // sid
+        int b = <1-4>; // sid
+        b = b + 1; // sid
+        int a = b - 2; // sid
+        Turtle 亀 = new Turtle(a + 1, b); // sid
         亀.前に進む(); // sid
     }
 }
