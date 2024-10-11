@@ -1831,7 +1831,7 @@ public class Main {
   break5: {
     instrumented: `
 const t = new Turtle(<4-6>, <4-6>);
-for (s.set('i', 0); s.get('i') < 6; s.set('i', s.get('i') + 1)) {
+for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < 6; s.set('j', s.get('j') + 1)) {
     if (!t.canMoveForward()) break;
     t.forward();
@@ -1841,6 +1841,8 @@ for (s.set('i', 0); s.get('i') < 6; s.set('i', s.get('i') + 1)) {
       t.turnRight();
     }
   }
+  delete s.vars['j'];
+  t.turnRight();
 }
 delete s.vars['i'];
     `.trim(),
@@ -1848,7 +1850,7 @@ delete s.vars['i'];
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(<4-6>, <4-6>); // sid
-        for (int i = 0; i < 6; i++) { // sid
+        for (int i = 0; i < 3; i++) { // sid
             for (int j = 0; j < 6; j++) { // sid
                 if (!t.前に進めるか()) break;
                 t.前に進む(); // sid
@@ -1858,6 +1860,7 @@ public class Main {
                     t.右を向く(); // sid
                 }
             }
+            t.右を向く(); // sid
         }
     }
 }
@@ -1955,16 +1958,16 @@ public class Main {
     instrumented: `
 const t = new Turtle();
 for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
-  for (s.set('j', 0); s.get('j') < 5; s.set('j', s.get('j') + 1)) {
+  for (s.set('j', s.get('i')); s.get('j') < 6; s.set('j', s.get('j') + 1)) {
     if (s.get('j') % 2 == 0) {
-      t.turnLeft(); continue;
+      t.turnRight(); continue;
     }
     if (t.canMoveForward()) {
       t.forward();
     }
   }
   delete s.vars['j'];
-  t.turnRight();
+  t.turnLeft();
 }
 delete s.vars['i'];
     `.trim(),
@@ -1973,15 +1976,15 @@ public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
         for (int i = 0; i < 3; i++) { // sid
-            for (int j = 0; j < 5; j++) { // sid
+            for (int j = i; j < 6; j++) { // sid
                 if (j % 2 == 0) {
-                    t.左を向く(); continue; // sid
+                    t.右を向く(); continue; // sid
                 }
                 if (t.前に進めるか()) {
                     t.前に進む(); // sid
                 }
             }
-            t.右を向く(); // sid
+            t.左を向く(); // sid
         }
     }
 }
@@ -1990,12 +1993,12 @@ public class Main {
   continue5: {
     instrumented: `
 const t = new Turtle();
-for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
-  for (s.set('j', 0); s.get('j') < 6; s.set('j', s.get('j') + 1)) {
-    if (s.get('j') % 3 == 0) {
-      t.turnRight(); continue;
-    } else if (s.get('j') % 3 == 2) {
+for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
+  for (s.set('j', s.get('i') + 1); s.get('j') < 6; s.set('j', s.get('j') + 1)) {
+    if (s.get('j') % 4 == 0) {
       t.turnLeft(); continue;
+    } else if (s.get('j') % 3 == 2) {
+      t.turnRight(); continue;
     }
     if (t.canMoveForward()) {
       t.forward();
@@ -2009,12 +2012,12 @@ delete s.vars['i'];
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
-        for (int i = 0; i < 4; i++) { // sid
-            for (int j = 0; j < 6; j++) { // sid
-                if (j % 3 == 0) {
-                    t.右を向く(); continue; // sid
-                } else if (j % 3 == 2) {
+        for (int i = 0; i < 3; i++) { // sid
+            for (int j = i + 1; j < 6; j++) { // sid
+                if (j % 4 == 0) {
                     t.左を向く(); continue; // sid
+                } else if (j % 3 == 2) {
+                    t.右を向く(); continue; // sid
                 }
                 if (t.前に進めるか()) {
                     t.前に進む(); // sid
