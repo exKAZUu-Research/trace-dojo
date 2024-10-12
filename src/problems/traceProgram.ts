@@ -21,6 +21,7 @@ export interface TurtleTrace {
 export interface TraceItem {
   depth: number;
   sid: number;
+  callStack: number[];
   vars: TraceItemVariable;
   turtles: TurtleTrace[];
   board: string;
@@ -60,20 +61,27 @@ export function traceProgram(
   }
 
   let statementId = 1;
+  let callerId = 1;
   const modifiedCodeLines = [];
   for (const line of instrumented.split('\n')) {
-    let replaced = false;
+    let statementReplaced = false;
+    let callReplaced = false;
     const newLine = line
       .replace(/for\s*\(([^;]*);\s*([^;]*);/, (_, init, cond) => `for (${init}; checkForCond(${cond}, ${statementId});`)
       .replaceAll(
         /(new\s+Turtle|\.set|\.forward|\.backward|\.turnRight|\.turnLeft)\(([^\n;]*)\)(;|\)\s*{)/g,
         (_, newOrMethod, args, tail) => {
-          replaced = true;
+          statementReplaced = true;
           const delimiter = args === '' ? '' : ', ';
           return `${newOrMethod}(${statementId}${delimiter}${args})${tail}`;
         }
-      );
-    if (replaced) statementId++;
+      )
+      .replaceAll('call(', (_) => {
+        callReplaced = true;
+        return `call(${callerId}, `;
+      });
+    if (statementReplaced) statementId++;
+    if (callReplaced) callerId++;
     modifiedCodeLines.push(newLine);
   }
   const modifiedCode = modifiedCodeLines.join('\n');
@@ -81,6 +89,7 @@ export function traceProgram(
   const executableCode = `
 const trace = [];
 const turtles = [];
+const callStack = [];
 let s;
 class Scope {
   constructor(parent) {
@@ -91,7 +100,7 @@ class Scope {
     if (this.vars[varName] !== undefined) {
       return this.vars[varName];
     }
-    throw new Error(\`\${varName} is not defined.\`);
+    throw new Error(\`\${varName} is not defined: \${JSON.stringify(s)}\`);
   }
   set(sid, varName, value) {
     this.vars[varName] = typeof value === 'number' ? Math.floor(value) : value;
@@ -167,7 +176,7 @@ class Turtle {
   }
 }
 function addTrace(sid) {
-  trace.push({depth: s.getDepth(), sid, turtles: turtles.map(t => ({...t})), vars: {...s.vars}, board: board.map(r => r.join('')).join('\\n')});
+  trace.push({depth: s.getDepth(), sid, callStack: [...callStack], turtles: turtles.map(t => ({...t})), vars: {...s.vars}, board: board.map(r => r.join('')).join('\\n')});
 }
 function checkForCond(cond, sid) {
   if (!cond && trace.at(-1).sid === sid) {
@@ -175,7 +184,20 @@ function checkForCond(cond, sid) {
   }
   return cond;
 }
-trace.push({depth: 0, sid: 0, turtles: [], vars: {}, board: board.map(r => r.join('')).join('\\n')});
+function call(cid, f, ...argNames) {
+  return (...argValues) => {
+    if (argNames.length !== argValues.length) {
+      throw new Error(\`Expected \${argNames.length} arguments, got \${argValues.length}.\`);
+    }
+    try {
+      s.enterNewScope(argNames.map((n, i) => [n, argValues[i]]).filter(([n, v]) => !(v instanceof Turtle)));
+      return f(...argValues);
+    } finally {
+      s.leaveScope();
+    }
+  };
+}
+trace.push({depth: 0, sid: 0, callStack: [], turtles: [], vars: {}, board: board.map(r => r.join('')).join('\\n')});
 s = new Scope();
 ${modifiedCode.trim()}
 ({trace, finalVars: {...s.vars}});
@@ -187,17 +209,25 @@ ${modifiedCode.trim()}
   const lines = rawDisplayProgram.split('\n');
   const refinedLines = [];
   const sidToLineIndex = new Map<number, number>();
+  const callerIdToLineIndex = new Map<number, number>();
   let lastSid = 0;
+  let lastCallerId = 0;
   for (const [index, line] of lines.entries()) {
-    const refinedLine = line.replace(/\s*\/\/\s*sid\s*(:\s*\d+|)\s*/, (_, sid) => {
-      if (sid) {
-        lastSid = Number(sid.slice(1));
-      } else {
-        lastSid++;
-      }
-      sidToLineIndex.set(lastSid, index + 1);
-      return '';
-    });
+    const refinedLine = line
+      .replace(/\s*\/\/\s*sid\s*(:\s*\d+|)\s*/, (_, sid) => {
+        if (sid) {
+          lastSid = Number(sid.slice(1));
+        } else {
+          lastSid++;
+        }
+        sidToLineIndex.set(lastSid, index + 1);
+        return '';
+      })
+      .replace(/\s*\/\/\s*caller\s*/, (_) => {
+        lastCallerId++;
+        callerIdToLineIndex.set(lastCallerId, index + 1);
+        return '';
+      });
     refinedLines.push(refinedLine);
   }
 

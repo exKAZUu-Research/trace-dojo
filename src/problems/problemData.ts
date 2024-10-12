@@ -2031,29 +2031,19 @@ public class Main {
   method1: {
     instrumented: `
 const t = new Turtle();
-forwardTwoSteps(t);
+call(forwardTwoSteps, 't')(t);
 t.turnRight();
-threeStepsForward(t);
+call(threeStepsForward, 't')(t);
 
 function forwardTwoSteps(t) {
-  try {
-    s.enterNewScope([]);
-    t.forward();
-    t.forward();
-  } finally {
-    s.leaveScope();
-  }
+  t.forward();
+  t.forward();
 }
 
 function threeStepsForward(t) {
-  try {
-    s.enterNewScope([]);
-    t.forward();
-    t.forward();
-    t.forward();
-  } finally {
-    s.leaveScope();
-  }
+  t.forward();
+  t.forward();
+  t.forward();
 }
     `.trim(),
     java: `
@@ -2079,28 +2069,18 @@ public class Main {
   method2: {
     instrumented: `
 const t = new Turtle();
-forwardTwoSteps(t);
-turnAround(t);
+call(forwardTwoSteps, 't')(t);
+call(turnAround, 't')(t);
 t.forward();
 
 function forwardTwoSteps(t) {
-  try {
-    s.enterNewScope([]);
-    t.forward();
-    t.forward();
-  } finally {
-    s.leaveScope();
-  }
+  t.forward();
+  t.forward();
 }
 
 function turnAround(t) {
-  try {
-    s.enterNewScope([]);
-    t.turnRight();
-    t.turnRight();
-  } finally {
-    s.leaveScope();
-  }
+  t.turnRight();
+  t.turnRight();
 }
 
     `.trim(),
@@ -2126,20 +2106,15 @@ public class Main {
   method3: {
     instrumented: `
 const t = new Turtle();
-forwardGivenSteps(t, <3-4>);
+call(forwardGivenSteps, 't', 'n')(t, <3-4>);
 t.turnRight();
-forwardGivenSteps(t, 2);
+call(forwardGivenSteps, 't', 'n')(t, 2);
 
 function forwardGivenSteps(t, n) {
-  try {
-    s.enterNewScope([['n', n]]);
-    for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
-      t.forward();
-    }
-    delete s.vars['i'];
-  } finally {
-    s.leaveScope();
+  for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
+    t.forward();
   }
+  delete s.vars['i'];
 }
     `.trim(),
     java: `
@@ -2162,28 +2137,18 @@ public class Main {
   method4: {
     instrumented: `
 const t = new Turtle();
-forwardTwoSteps(t);
+call(forwardTwoSteps, 't')(t);
 t.turnRight();
-forwardFourSteps(t);
+call(forwardFourSteps, 't')(t);
 
 function forwardTwoSteps(t) {
-  try {
-    s.enterNewScope([]);
-    t.forward();
-    t.forward();
-  } finally {
-    s.leaveScope();
-  }
+  t.forward();
+  t.forward();
 }
 
 function forwardFourSteps(t) {
-  try {
-    s.enterNewScope([]);
-    forwardTwoSteps(t);
-    forwardTwoSteps(t);
-  } finally {
-    s.leaveScope();
-  }
+  call(forwardTwoSteps, 't')(t);
+  call(forwardTwoSteps, 't')(t);
 }
     `.trim(),
     java: `
@@ -2208,21 +2173,16 @@ public class Main {
   method5: {
     instrumented: `
 const t = new Turtle();
-drawSquare(t);
+call(drawSquare, 't')(t);
 t.backward();
-drawSquare(t);
+call(drawSquare, 't')(t);
 
 function drawSquare(t) {
-  try {
-    s.enterNewScope([]);
-    for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
-      t.forward();
-      t.turnRight();
-    }
-	delete s.vars['i'];
-  } finally {
-    s.leaveScope();
+  for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
+    t.forward();
+    t.turnRight();
   }
+  delete s.vars['i'];
 }
     `.trim(),
     java: `
@@ -2245,28 +2205,18 @@ public class Main {
   return1: {
     instrumented: `
 const t = new Turtle();
-s.set('x', double(<2-3>));
-forwardGivenSteps(t, s.get('x'));
+s.set('x', call(double, 'a')(<2-3>));
+call(forwardGivenSteps, 't', 'n')(t, s.get('x'));
 
 function forwardGivenSteps(t, n) {
-  try {
-    s.enterNewScope([['n', n]]);
-    for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
-      t.forward();
-    }
-    delete s.vars['i'];
-  } finally {
-    s.leaveScope();
+  for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
+    t.forward();
   }
+  delete s.vars['i'];
 }
 
 function double(a) {
-  try {
-    s.enterNewScope([['a', a]]);
-    return a * 2;
-  } finally {
-    s.leaveScope();
-  }
+  return a * 2;
 }
     `.trim(),
     java: `
@@ -2290,31 +2240,21 @@ public class Main {
   return2: {
     instrumented: `
 const t = new Turtle();
-s.set('x', double(2));
-forwardGivenSteps(t, s.get('x'));
+s.set('x', call(double, 'a')(2));
+call(forwardGivenSteps, 't', 'n')(t, s.get('x'));
 t.turnRight();
-s.set('x', double(s.get('x') - 1));
-forwardGivenSteps(t, s.get('x'));
+s.set('x', call(double, 'a')(s.get('x') - 1));
+call(forwardGivenSteps, 't', 'n')(t, s.get('x'));
 
 function forwardGivenSteps(t, n) {
-  try {
-    s.enterNewScope([['n', n]]);
-    for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
-      t.forward();
-    }
-    delete s.vars['i'];
-  } finally {
-    s.leaveScope();
+  for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
+    t.forward();
   }
+  delete s.vars['i'];
 }
 
 function double(a) {
-  try {
-    s.enterNewScope([['a', a]]);
-    return a * 2;
-  } finally {
-    s.leaveScope();
-  }
+  return a * 2;
 }
     `.trim(),
     java: `
@@ -2341,28 +2281,18 @@ public class Main {
   return3: {
     instrumented: `
 const t = new Turtle();
-forwardGivenSteps(t, add(1, 1));
-forwardGivenSteps(t, add(1, 2));
+call(forwardGivenSteps, 't', 'n')(t, call(add, 'a', 'b')(1, 1));
+call(forwardGivenSteps, 't', 'n')(t, call(add, 'a', 'b')(1, 2));
 
 function forwardGivenSteps(t, n) {
-  try {
-    s.enterNewScope([['n', n]]);
-    for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
-      t.forward();
-    }
-    delete s.vars['i'];
-  } finally {
-    s.leaveScope();
+  for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
+    t.forward();
   }
+  delete s.vars['i'];
 }
 
 function add(a, b) {
-  try {
-    s.enterNewScope([['a', a], ['b', b]]);
-    return a + b;
-  } finally {
-    s.leaveScope();
-  }
+  return a + b;
 }
     `.trim(),
     java: `
@@ -2387,30 +2317,20 @@ public class Main {
     instrumented: `
 const t = new Turtle();
 for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
-  if (isEven(s.get('i')))
+  if (call(isEven, 'a')(s.get('i')))
     t.turnRight();
   else
-    forwardTwoSteps(t);
+    call(forwardTwoSteps, 't')(t);
 }
 delete s.vars['i'];
 
 function forwardTwoSteps(t) {
-  try {
-    s.enterNewScope([]);
-    t.forward();
-    t.forward();
-  } finally {
-    s.leaveScope();
-  }
+  t.forward();
+  t.forward();
 }
 
 function isEven(a) {
-  try {
-    s.enterNewScope([['a', a]]);
-    return a % 2 == 0;
-  } finally {
-    s.leaveScope();
-  }
+  return a % 2 == 0;
 }
 
     `.trim(),
@@ -2440,10 +2360,10 @@ public class Main {
 const t = new Turtle();
 for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < 3; s.set('j', s.get('j') + 1)) {
-    if (isEqual(s.get('i'), s.get('j')))
+    if (call(isEqual, 'a', 'b')(s.get('i'), s.get('j')))
       t.turnRight();
     else
-      forwardTwoSteps(t);
+      call(forwardTwoSteps, 't')(t);
   }
   delete s.vars['j'];
   t.turnLeft();
@@ -2451,22 +2371,12 @@ for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
 delete s.vars['i'];
 
 function forwardTwoSteps(t) {
-  try {
-    s.enterNewScope([]);
-    t.forward();
-    t.forward();
-  } finally {
-    s.leaveScope();
-  }
+  t.forward();
+  t.forward();
 }
 
 function isEqual(a, b) {
-  try {
-    s.enterNewScope([['a', a], ['b', b]]);
-    return a == b;
-  } finally {
-    s.leaveScope();
-  }
+  return a == b;
 }
     `.trim(),
     java: `
@@ -2499,21 +2409,16 @@ public class Main {
 const t = new Turtle();
 s.set('arr', [2, <1-2>, <1-2>]);
 for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
-  forwardGivenSteps(t, s.get('arr')[s.get('i')]);
+  call(forwardGivenSteps, 't', 'n')(t, s.get('arr')[s.get('i')]);
   t.turnRight();
 }
 delete s.vars['i'];
 
 function forwardGivenSteps(t, n) {
-  try {
-    s.enterNewScope([['n', n]]);
-    for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
-      t.forward();
-    }
-    delete s.vars['i'];
-  } finally {
-    s.leaveScope();
+  for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
+    t.forward();
   }
+  delete s.vars['i'];
 }
     `.trim(),
     java: `
@@ -2539,21 +2444,16 @@ public class Main {
 const t = new Turtle();
 s.set('arr', [<4-5>, <3-4>, <3-4>]);
 for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
-  forwardGivenSteps(t, s.get('arr')[s.get('i')]);
+  call(forwardGivenSteps, 't', 'n')(t, s.get('arr')[s.get('i')]);
   t.turnRight();
 }
 delete s.vars['i'];
 
 function forwardGivenSteps(t, n) {
-  try {
-    s.enterNewScope([['n', n]]);
-    for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
-      t.forward();
-    }
-    delete s.vars['i'];
-  } finally {
-    s.leaveScope();
+  for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
+    t.forward();
   }
+  delete s.vars['i'];
 }
     `.trim(),
     java: `
@@ -2809,18 +2709,13 @@ const t = new Turtle();
 s.set('cmds', ['ri', 'aa', 'fo']);
 for (const cmd of ['ri', 'aa', 'fo']) {
   s.set('cmd', cmd);
-  parse(t, s.get('cmd'));
+  call(parse, 't', 'cmd')(t, s.get('cmd'));
 }
 delete s.vars['cmd'];
 
 function parse(t, c) {
-  try {
-    s.enterNewScope([['c', c]]);
-    if (c === 'fo') t.forward();
-    else if (c === 'ri') t.turnRight();
-  } finally {
-    s.leaveScope();
-  }
+  if (c === 'fo') t.forward();
+  else if (c === 'ri') t.turnRight();
 }
     `.trim(),
     java: `
@@ -2848,33 +2743,23 @@ s.set('cmds', ['ri', 'add', 'fo', 'add', 'le', 'fo', 'fo']);
 s.set('x', 0);
 for (const cmd of ['ri', 'add', 'fo', 'add', 'le', 'fo', 'fo']) {
   s.set('cmd', cmd);
-  parse(t, s.get('cmd'), s.get('x'));
+  call(parse, 't', 'cmd', 'x')(t, s.get('cmd'), s.get('x'));
   if (cmd === 'add') {
     s.set('x', s.get('x') + 1);
   }
 }
 
 function parse(t, c, x) {
-  try {
-    s.enterNewScope([['c', c], ['x', x]]);
-    if (c === 'fo') forwardGivenSteps(t, s.get('x'));
-    else if (c === 'ri') t.turnRight();
-    else if (c === 'le') t.turnLeft();
-  } finally {
-    s.leaveScope();
-  }
+  if (c === 'fo') call(forwardGivenSteps, 't', 'x')(t, x);
+  else if (c === 'ri') t.turnRight();
+  else if (c === 'le') t.turnLeft();
 }
 
 function forwardGivenSteps(t, n) {
-  try {
-    s.enterNewScope([['n', n]]);
-    for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
-      t.forward();
-    }
-    delete s.vars['i'];
-  } finally {
-    s.leaveScope();
+  for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
+    t.forward();
   }
+  delete s.vars['i'];
 }
     `.trim(),
     java: `
@@ -2953,18 +2838,13 @@ public class Main {
 s.set('a', 1);
 if (s.get('a') > 0) {
   s.set('b', 2);
-  s.set('a', f(s.get('a'), s.get('b')));
+  s.set('a', call(f, 'x', 'y')(s.get('a'), s.get('b')));
 }
 s.set('c', s.get('a') * 2);
 
 function f(x, y) {
-  try {
-    s.enterNewScope([['x', x], ['y', y]]);
-    s.set('a', x * y);
-    return s.get('a');
-  } finally {
-    s.leaveScope();
-  }
+  s.set('a', x * y);
+  return s.get('a');
 }
 `,
     java: `
@@ -2973,7 +2853,7 @@ public class Main {
     int a = 1; // sid: 1
     if (a > 0) {
       int b = 2; // sid: 2
-      a = f(a, b); // sid: 3
+      a = f(a, b); // sid: 3 // caller
     }
     int c = a * 2; // sid: 4
   }

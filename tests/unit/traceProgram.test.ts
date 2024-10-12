@@ -17,6 +17,8 @@ const defaultTurtle: TurtleTrace = {
   dir: 'N',
 };
 
+type TraceItemWithOptionalCallStack = Omit<TraceItem, 'callStack'> & { callStack?: number[] };
+
 test.each([
   {
     languageId: 'java',
@@ -79,7 +81,7 @@ public class Main {
           { x: sx, y: sy + 3, color: '#' },
         ]),
       },
-    ] as TraceItem[],
+    ] as TraceItemWithOptionalCallStack[],
   },
   {
     languageId: 'java',
@@ -214,7 +216,7 @@ public class Main {
         ]),
         last: true,
       },
-    ] as TraceItem[],
+    ] as TraceItemWithOptionalCallStack[],
   },
   {
     languageId: 'java',
@@ -250,7 +252,7 @@ public class Main {
       { depth: 1, sid: 5, turtles: [], vars: { a: 2, x: 1, y: 2 }, board: defaultBoard },
       { depth: 0, sid: 3, turtles: [], vars: { a: 2, b: 2 }, board: defaultBoard },
       { depth: 0, sid: 4, turtles: [], vars: { a: 2, b: 2, c: 4 }, board: defaultBoard },
-    ] as TraceItem[],
+    ] as TraceItemWithOptionalCallStack[],
   },
   {
     languageId: 'java',
@@ -452,7 +454,7 @@ public class Main {
           { x: 2, y: 6, color: 'G' },
         ]),
       },
-    ] as TraceItem[],
+    ] as TraceItemWithOptionalCallStack[],
   },
   {
     languageId: 'java',
@@ -576,7 +578,7 @@ public class Straight {
           { x: sx + 4, y: sy + 2, color: '#' },
         ]),
       },
-    ] as TraceItem[],
+    ] as TraceItemWithOptionalCallStack[],
   },
 ] as const)(
   'Trace a program',
@@ -596,13 +598,13 @@ public class Straight {
 /**
  * テストに失敗した際に、WebStorm上で期待値との差異を確認しやすくするために、文字列化しておく。
  */
-function stringifyObjects(trace: TraceItem[]): TraceItem[] {
+function stringifyObjects(trace: TraceItemWithOptionalCallStack[]): TraceItem[] {
   // 目視で差異を確認しやすくするために文字列化する。
   for (const item of trace) {
     item.vars = { ...item.vars };
+    item.callStack ??= [];
   }
-  console.log(trace); // TODO: remove this later
-  return trace;
+  return trace as TraceItem[];
 }
 
 function getBoard(dots: { x: number; y: number; color: string }[]): string {
