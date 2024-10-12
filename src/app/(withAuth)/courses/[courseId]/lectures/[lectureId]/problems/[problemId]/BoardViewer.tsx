@@ -1,3 +1,5 @@
+'use client';
+
 import type { BoxProps } from '@chakra-ui/react';
 import { keyframes } from '@emotion/react';
 import React, { useMemo } from 'react';

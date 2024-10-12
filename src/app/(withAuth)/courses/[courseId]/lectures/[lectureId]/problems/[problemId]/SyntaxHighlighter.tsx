@@ -6,13 +6,15 @@ import { oneLight } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 import { Box } from '../../../../../../../../infrastructures/useClient/chakra';
 
 type SyntaxHighlighterProps = BoxProps & {
-  previousFocusLine?: number;
   code: string;
-  programmingLanguageId: string;
+  callerLines?: (number | undefined)[];
   currentFocusLine?: number;
+  previousFocusLine?: number;
+  programmingLanguageId: string;
 };
 
 export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
+  callerLines,
   code,
   currentFocusLine,
   previousFocusLine,
@@ -33,6 +35,10 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
         lineNumberStyle={{ minWidth: '1.5rem', marginRight: '2rem', paddingRight: 0 }}
         lineProps={(lineNumber) => {
           const style: React.CSSProperties = { padding: '0 1rem', backgroundColor: '', border: '' };
+          // Show dotted border for callerLines
+          if (callerLines?.includes(lineNumber)) {
+            style.border = '2px dotted #f56565'; /* red.500 */
+          }
           // previousFocusLine と currentFocusLine が等しくなるケースがある。
           if (lineNumber === previousFocusLine) {
             style.backgroundColor = '#feebc8' /* orange.100 */;

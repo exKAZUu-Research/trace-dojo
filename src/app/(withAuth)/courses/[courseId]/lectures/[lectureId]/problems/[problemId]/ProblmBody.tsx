@@ -1,6 +1,8 @@
+'use client';
+
 import type { ProblemSession } from '@prisma/client';
 import { useRouter } from 'next/navigation';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { MAX_CHALLENGE_COUNT } from '../../../../../../../../constants';
 import { backendTrpcReact } from '../../../../../../../../infrastructures/trpcBackend/client';
@@ -47,7 +49,6 @@ export const ProblemBody: React.FC<Props> = (props) => {
       : // ProblemSession作成後の問題の改変に対応するため。
         Math.min(props.problemSession.traceItemIndex, props.problem.traceItems.length - 1);
   const previousTraceItemIndex = problemType === 'executionResult' ? 0 : currentTraceItemIndex - 1;
-  const [viewingTraceItemIndex, setViewingTraceItemIndex] = useState(previousTraceItemIndex);
   const currentVariables =
     problemType === 'executionResult' ? props.problem.finalVars : props.problem.traceItems[currentTraceItemIndex].vars;
   const initialVariables = useMemo(
@@ -61,6 +62,11 @@ export const ProblemBody: React.FC<Props> = (props) => {
       ),
     [problemType, props.problem.traceItems, previousTraceItemIndex, currentTraceItemIndex, currentVariables]
   );
+
+  const [viewingTraceItemIndex, setViewingTraceItemIndex] = useState(previousTraceItemIndex);
+  useEffect(() => {
+    setViewingTraceItemIndex(previousTraceItemIndex);
+  }, [previousTraceItemIndex]);
 
   const { isOpen: isAlertOpen, onClose: onAlertClose, onOpen: onAlertOpen } = useDisclosure();
   const cancelRef = useRef(null);
@@ -147,7 +153,6 @@ export const ProblemBody: React.FC<Props> = (props) => {
           } else {
             await props.updateProblemSession('step', currentTraceItemIndex + 1);
             openAlertDialog('正解', '正解です。次のステップに進みます。');
-            setViewingTraceItemIndex(currentTraceItemIndex);
           }
         }
         break;
@@ -208,6 +213,13 @@ export const ProblemBody: React.FC<Props> = (props) => {
           </VStack>
 
           <SyntaxHighlighter
+            callerLines={
+              problemType === 'executionResult'
+                ? undefined
+                : props.problem.traceItems[currentTraceItemIndex].callStack.map((id) =>
+                    props.problem.callerIdToLineIndex.get(id)
+                  )
+            }
             code={props.problem.displayProgram}
             currentFocusLine={
               problemType === 'executionResult'
@@ -294,17 +306,36 @@ function getInitialVariables(
   currentVariables: TraceItemVariable
 ): Record<string, string> {
   let adjustedPreviousTraceItemIndex = previousTraceItemIndex;
+
   if (problemType === 'step') {
     while (
       adjustedPreviousTraceItemIndex > 0 &&
       traceItems[currentTraceItemIndex].depth !== traceItems[adjustedPreviousTraceItemIndex].depth
     ) {
+      if (traceItems[currentTraceItemIndex].depth > traceItems[adjustedPreviousTraceItemIndex].depth) {
+        return getEmptyVariables(currentVariables);
+      }
       adjustedPreviousTraceItemIndex--;
     }
+
+    if (
+      traceItems[currentTraceItemIndex].callStack.at(-1) !== traceItems[adjustedPreviousTraceItemIndex].callStack.at(-1)
+    ) {
+      return getEmptyVariables(currentVariables);
+    }
   }
+
   return Object.fromEntries(
     Object.entries(currentVariables)
       .filter(([_, value]) => typeof value === 'number' || typeof value === 'string')
       .map(([key]) => [key, traceItems[adjustedPreviousTraceItemIndex].vars[key]?.toString() ?? ''])
+  );
+}
+
+function getEmptyVariables(currentVariables: TraceItemVariable): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(currentVariables)
+      .filter(([_, value]) => typeof value === 'number' || typeof value === 'string')
+      .map(([key]) => [key, ''])
   );
 }

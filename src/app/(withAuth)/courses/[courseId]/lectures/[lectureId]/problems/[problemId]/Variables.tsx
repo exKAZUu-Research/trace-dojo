@@ -36,7 +36,7 @@ export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
               <Tr key={variable.key}>
                 <Td fontFamily="mono">{variable.key}</Td>
                 <Td isNumeric fontFamily="mono">
-                  {variable.value}
+                  {Array.isArray(variable.value) ? variable.value.join(', ') : variable.value}
                 </Td>
               </Tr>
             ))}

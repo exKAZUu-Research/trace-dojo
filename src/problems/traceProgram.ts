@@ -190,9 +190,11 @@ function call(cid, f, ...argNames) {
       throw new Error(\`Expected \${argNames.length} arguments, got \${argValues.length}.\`);
     }
     try {
+      callStack.push(cid);
       s.enterNewScope(argNames.map((n, i) => [n, argValues[i]]).filter(([n, v]) => !(v instanceof Turtle)));
       return f(...argValues);
     } finally {
+      callStack.pop();
       s.leaveScope();
     }
   };
@@ -231,5 +233,12 @@ ${modifiedCode.trim()}
     refinedLines.push(refinedLine);
   }
 
-  return { languageId, displayProgram: refinedLines.join('\n'), traceItems: trace, sidToLineIndex, finalVars };
+  return {
+    languageId,
+    displayProgram: refinedLines.join('\n'),
+    traceItems: trace,
+    sidToLineIndex,
+    callerIdToLineIndex,
+    finalVars,
+  };
 }

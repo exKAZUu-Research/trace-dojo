@@ -80,7 +80,6 @@ async function fetchUserProblemInfo(problemId: ProblemId): Promise<UserProblemIn
         submissions: { where: { isCorrect: false }, select: { id: true } },
       },
     });
-    console.log('sessions:', sessions);
 
     return await Promise.all(
       sessions.map(async (session) => ({

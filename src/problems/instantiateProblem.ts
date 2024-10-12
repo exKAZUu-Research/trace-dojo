@@ -26,6 +26,11 @@ export type InstantiatedProblem = {
   sidToLineIndex: Map<number, number>;
 
   /**
+   * The mapping from caller ID to line index.
+   */
+  callerIdToLineIndex: Map<number, number>;
+
+  /**
    * The variables of the final state
    */
   finalVars: TraceItemVariable;

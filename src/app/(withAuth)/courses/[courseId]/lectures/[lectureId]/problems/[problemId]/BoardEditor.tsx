@@ -1,3 +1,5 @@
+'use client';
+
 import { zenkakuAlphanumericalsToHankaku } from '@willbooster/shared-lib';
 import fastDeepEqual from 'fast-deep-equal';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';

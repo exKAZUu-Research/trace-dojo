@@ -2050,9 +2050,9 @@ function threeStepsForward(t) {
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid: 1
-        二歩前に進める(t);
+        二歩前に進める(t); // caller
         t.右を向く(); // sid: 2
-        三歩前に進める(t);
+        三歩前に進める(t); // caller
     }
     static void 二歩前に進める(Turtle t) {
         t.前に進む(); // sid: 3
@@ -2088,8 +2088,8 @@ function turnAround(t) {
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid:
-        二歩前に進める(t);
-        後ろを向く(t);
+        二歩前に進める(t); // caller
+        後ろを向く(t); // caller
         t.前に進む(); // sid
     }
     static void 二歩前に進める(Turtle t) {
@@ -2121,9 +2121,9 @@ function forwardGivenSteps(t, n) {
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
-        N歩前に進める(t, <3-4>);
+        N歩前に進める(t, <3-4>); // caller
         t.右を向く(); // sid
-        N歩前に進める(t, 2);
+        N歩前に進める(t, 2); // caller
     }
 
     static void N歩前に進める(Turtle t, int n) {
@@ -2155,17 +2155,17 @@ function forwardFourSteps(t) {
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
-        二歩前に進める(t);
+        二歩前に進める(t); // caller
         t.右を向く(); // sid
-        四歩前に進める(t);
+        四歩前に進める(t); // caller
     }
     static void 二歩前に進める(Turtle t) {
         t.前に進む(); // sid
         t.前に進む(); // sid
     }
     static void 四歩前に進める(Turtle t) {
-        二歩前に進める(t);
-        二歩前に進める(t);
+        二歩前に進める(t); // caller
+        二歩前に進める(t); // caller
     }
 }
     `.trim(),
@@ -2174,6 +2174,7 @@ public class Main {
     instrumented: `
 const t = new Turtle();
 call(drawSquare, 't')(t);
+t.backward();
 t.backward();
 call(drawSquare, 't')(t);
 
@@ -2189,9 +2190,10 @@ function drawSquare(t) {
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
-        正方形を描く(t);
+        正方形を描く(t); // caller
         t.後に戻る(); // sid
-        正方形を描く(t);
+        t.後に戻る(); // sid
+        正方形を描く(t); // caller
     }
     static void 正方形を描く(Turtle t) {
         for (int i = 0; i < 3; i++) { // sid
@@ -2223,8 +2225,8 @@ function double(a) {
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
-        int x = 二倍する(<2-3>); // sid
-        N歩前に進める(t, x);
+        int x = 二倍する(<2-3>); // sid // caller
+        N歩前に進める(t, x); // caller
     }
     static void N歩前に進める(Turtle t, int n) {
         for (int i = 0; i < n; i++) { // sid
@@ -2261,11 +2263,11 @@ function double(a) {
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
-        int x = 二倍する(2); // sid
-        N歩前に進める(t, x);
+        int x = 二倍する(2); // sid // caller
+        N歩前に進める(t, x); // caller
         t.右を向く(); // sid
-        x = 二倍する(x - 1); // sid
-        N歩前に進める(t, x);
+        x = 二倍する(x - 1); // sid // caller
+        N歩前に進める(t, x); // caller
     }
     static void N歩前に進める(Turtle t, int n) {
         for (int i = 0; i < n; i++) { // sid
@@ -2299,8 +2301,8 @@ function add(a, b) {
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
-        N歩前に進める(t, 加算する(1, 1));
-        N歩前に進める(t, 加算する(1, 2));
+        N歩前に進める(t, 加算する(1, 1)); // caller
+        N歩前に進める(t, 加算する(1, 2)); // caller
     }
     static void N歩前に進める(Turtle t, int n) {
         for (int i = 0; i < n; i++) { // sid
@@ -2317,10 +2319,15 @@ public class Main {
     instrumented: `
 const t = new Turtle();
 for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
-  if (call(isEven, 'a')(s.get('i')))
+  if (call(isEven, 'a')(s.get('i'))) {
     t.turnRight();
-  else
     call(forwardTwoSteps, 't')(t);
+  }
+  else {
+    call(forwardTwoSteps, 't')(t);
+    t.turnRight();
+    t.turnRight();
+  }
 }
 delete s.vars['i'];
 
@@ -2330,7 +2337,7 @@ function forwardTwoSteps(t) {
 }
 
 function isEven(a) {
-  return a % 2 == 0;
+  return a % 2 === 0;
 }
 
     `.trim(),
@@ -2339,10 +2346,14 @@ public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // sid
         for (int i = 0; i < <3-4>; i++) { // sid
-            if (偶数か(i))
+            if (偶数か(i)) { // caller
                 t.右を向く(); // sid
-            else
-                二歩前に進める(t);
+                二歩前に進める(t); // caller
+            } else {
+                二歩前に進める(t); // caller
+                t.右を向く(); // sid
+                t.右を向く(); // sid
+            }
         }
     }
     static void 二歩前に進める(Turtle t) {
@@ -2350,7 +2361,7 @@ public class Main {
         t.前に進む(); // sid
     }
     static boolean 偶数か(int a) {
-        return a % 2 == 0; // sid
+        return a % 2 == 0;
     }
 }
     `.trim(),
@@ -2385,10 +2396,10 @@ public class Main {
         Turtle t = new Turtle(); // sid
         for (int i = 0; i < 3; i++) { // sid
             for (int j = 0; j < 3; j++) { // sid
-                if (等しいか(i, j))
+                if (等しいか(i, j)) // caller
                     t.右を向く(); // sid
                 else
-                    二歩前に進める(t);
+                    二歩前に進める(t); // caller
             }
             t.左を向く(); // sid
         }
@@ -2427,7 +2438,7 @@ public class Main {
         Turtle t = new Turtle(); // sid
         int[] arr = { 2, <1-2>, <1-2> }; // sid
         for (int i = 0; i < arr.length; i++) { // sid
-            N歩前に進める(t, arr[i]);
+            N歩前に進める(t, arr[i]); // caller
             t.右を向く(); // sid
         }
     }
@@ -2462,7 +2473,7 @@ public class Main {
         Turtle t = new Turtle(); // sid
         int[] arr = { <4-5>, <3-4>, <3-4> }; // sid
         for (int i = 0; i < arr.length; i++) { // sid
-            N歩前に進める(t, arr[i]);
+            N歩前に進める(t, arr[i]); // caller
             t.右を向く(); // sid
         }
     }
@@ -2567,6 +2578,7 @@ for (const cmd of [0, 1, 0, 2, 0, 3, 0]) {
       s.set('steps', s.get('steps') + 1); break;
   }
 }
+delete s.vars['cmd'];
     `.trim(),
     java: `
 public class Main {
@@ -2709,7 +2721,8 @@ const t = new Turtle();
 s.set('cmds', ['ri', 'aa', 'fo']);
 for (const cmd of ['ri', 'aa', 'fo']) {
   s.set('cmd', cmd);
-  call(parse, 't', 'cmd')(t, s.get('cmd'));
+  t.forward();
+  call(parse, 't', 'c')(t, s.get('cmd'));
 }
 delete s.vars['cmd'];
 
@@ -2724,7 +2737,8 @@ public class Main {
         Turtle t = new Turtle(); // sid
         String[] cmds = { "ri", "aa", "fo" }; // sid
         for (String cmd : cmds) { // sid
-            parse(t, cmd);
+            t.前に進む(); // sid
+            parse(t, cmd); // caller
         }
     }
     static void parse(Turtle t, String c) {
@@ -2743,14 +2757,15 @@ s.set('cmds', ['ri', 'add', 'fo', 'add', 'le', 'fo', 'fo']);
 s.set('x', 0);
 for (const cmd of ['ri', 'add', 'fo', 'add', 'le', 'fo', 'fo']) {
   s.set('cmd', cmd);
-  call(parse, 't', 'cmd', 'x')(t, s.get('cmd'), s.get('x'));
+  call(parse, 't', 'c', 'x')(t, s.get('cmd'), s.get('x'));
   if (cmd === 'add') {
     s.set('x', s.get('x') + 1);
   }
 }
+delete s.vars['cmd'];
 
 function parse(t, c, x) {
-  if (c === 'fo') call(forwardGivenSteps, 't', 'x')(t, x);
+  if (c === 'fo') call(forwardGivenSteps, 't', 'n')(t, x);
   else if (c === 'ri') t.turnRight();
   else if (c === 'le') t.turnLeft();
 }
@@ -2769,7 +2784,7 @@ public class Main {
         String[] cmds = { "ri", "add", "fo", "add", "le", "fo", "fo" }; // sid
         int x = 0; // sid
         for (String cmd : cmds) { // sid
-            parse(t, cmd, x);
+            parse(t, cmd, x); // caller
             if (cmd.equals("add")) {
                 x++; // sid
             }
@@ -2777,7 +2792,7 @@ public class Main {
     }
     static void parse(Turtle t, String c, int x) {
         if (c.equals("fo"))
-            forwardGivenSteps(t, x);
+            forwardGivenSteps(t, x); // caller
         else if (c.equals("ri"))
             t.turnRight(); // sid
         else if (c.equals("le"))
