@@ -249,7 +249,7 @@ public class Main {
       { depth: 0, sid: 0, turtles: [], vars: {}, board: defaultBoard },
       { depth: 0, sid: 1, turtles: [], vars: { a: 1 }, board: defaultBoard },
       { depth: 0, sid: 2, turtles: [], vars: { a: 1, b: 2 }, board: defaultBoard },
-      { depth: 1, sid: 5, turtles: [], vars: { a: 2, x: 1, y: 2 }, board: defaultBoard },
+      { depth: 1, sid: 5, callStack: [1], turtles: [], vars: { a: 2, x: 1, y: 2 }, board: defaultBoard },
       { depth: 0, sid: 3, turtles: [], vars: { a: 2, b: 2 }, board: defaultBoard },
       { depth: 0, sid: 4, turtles: [], vars: { a: 2, b: 2, c: 4 }, board: defaultBoard },
     ] as TraceItemWithOptionalCallStack[],
