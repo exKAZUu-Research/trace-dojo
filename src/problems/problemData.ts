@@ -2792,15 +2792,15 @@ public class Main {
     }
     static void parse(Turtle t, String c, int x) {
         if (c.equals("fo"))
-            forwardGivenSteps(t, x); // caller
+            N歩前に進める(t, x); // caller
         else if (c.equals("ri"))
-            t.turnRight(); // sid
+            t.右を向く(); // sid
         else if (c.equals("le"))
-            t.turnLeft(); // sid
+            t.左を向く(); // sid
     }
-    static void forwardGivenSteps(Turtle t, int n) {
+    static void N歩前に進める(Turtle t, int n) {
         for (int i = 0; i < n; i++) { // sid
-            t.forward(); // sid
+            t.前に進む(); // sid
         }
     }
 }
