@@ -137,7 +137,7 @@ export const Lecture: React.FC<Props> = (props) => {
                           {suspendedSession &&
                             (isProblemCompleted ? (
                               <Tag colorScheme="brand" fontWeight="bold" size="sm" variant="outline">
-                                再挑戦中
+                                復習中（成績評価の対象外）
                               </Tag>
                             ) : (
                               <Tag colorScheme="brand" fontWeight="bold" size="sm" variant="solid">
