@@ -1,6 +1,7 @@
 'use client';
 
 import { useLocalStorage } from '@willbooster/shared-lib-react';
+import { useParams } from 'next/navigation';
 import { MdOutlineVerified, MdVerified } from 'react-icons/md';
 
 import { useAuthContextSelector } from '../../../../contexts/AuthContext';
@@ -28,21 +29,21 @@ import {
 } from '../../../../problems/problemData';
 
 type Props = {
-  params: { courseId: CourseId };
   currentUserCompletedProblemIdSet: ReadonlySet<string>;
   currentUserStartedProblemIdSet: ReadonlySet<string>;
 };
 
 export const CoursePageOnClient: React.FC<Props> = (props) => {
+  const params = useParams<{ courseId: CourseId }>();
   return (
     <VStack align="stretch" spacing={6}>
-      <Heading as="h1">{courseIdToName[props.params.courseId]}</Heading>
+      <Heading as="h1">{courseIdToName[params.courseId]}</Heading>
 
       <SimpleGrid columnGap={4} columns={{ base: 1, lg: 2 }} rowGap={6}>
-        {courseIdToLectureIndexToProblemIds[props.params.courseId].map((problemIds, lectureIndex) => (
+        {courseIdToLectureIndexToProblemIds[params.courseId].map((problemIds, lectureIndex) => (
           <LectureCard
             key={lectureIndex}
-            courseId={props.params.courseId}
+            courseId={params.courseId}
             currentUserCompletedProblemIdSet={props.currentUserCompletedProblemIdSet}
             currentUserStartedProblemIdSet={props.currentUserStartedProblemIdSet}
             lectureIndex={lectureIndex}

@@ -20,15 +20,16 @@ interface UserProblemInfo {
 }
 
 type Props = {
-  params: { problemId: ProblemId };
+  params: Promise<{ problemId: ProblemId }>;
 };
 
 const StatisticsPage: NextPage<Props> = async (props) => {
-  const userInfos = await fetchUserProblemInfo(props.params.problemId);
+  const params = await props.params;
+  const userInfos = await fetchUserProblemInfo(params.problemId);
 
   return (
     <VStack align="stretch" spacing={6}>
-      <Heading as="h1">問題: {props.params.problemId}</Heading>
+      <Heading as="h1">問題: {params.problemId}</Heading>
       <Box overflowX="auto">
         <Table size="sm">
           <Thead>

@@ -1,7 +1,7 @@
 'use client';
 
 import type { ProblemSession } from '@prisma/client';
-import { useRouter } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { MAX_CHALLENGE_COUNT } from '../../../../../../../../constants';
@@ -34,7 +34,6 @@ import { SyntaxHighlighter } from './SyntaxHighlighter';
 import { TraceViewer } from './TraceViewer';
 
 type Props = {
-  params: { courseId: CourseId; lectureId: string; problemId: ProblemId };
   problem: InstantiatedProblem;
   problemSession: ProblemSession;
   createSubmissionUpdatingProblemSession: (isCorrect: boolean, isCompleted: boolean) => Promise<void>;
@@ -42,6 +41,8 @@ type Props = {
 };
 
 export const ProblemBody: React.FC<Props> = (props) => {
+  const params = useParams<{ courseId: CourseId; lectureId: string; problemId: ProblemId }>();
+
   const problemType = props.problemSession.problemType as ProblemType;
   const currentTraceItemIndex =
     problemType === 'executionResult'
@@ -124,7 +125,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
             '正解',
             '一発正解です！この問題は完了です。問題一覧ページに戻りますので、次の問題に挑戦してください。',
             () => {
-              router.push(`/courses/${props.params.courseId}/lectures/${props.params.lectureId}`);
+              router.push(`/courses/${params.courseId}/lectures/${params.lectureId}`);
             }
           );
         }
@@ -147,7 +148,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
               '正解',
               '正解です。この問題は完了です。問題一覧ページに戻りますので、次の問題に挑戦してください。',
               () => {
-                router.push(`/courses/${props.params.courseId}/lectures/${props.params.lectureId}`);
+                router.push(`/courses/${params.courseId}/lectures/${params.lectureId}`);
               }
             );
           } else {

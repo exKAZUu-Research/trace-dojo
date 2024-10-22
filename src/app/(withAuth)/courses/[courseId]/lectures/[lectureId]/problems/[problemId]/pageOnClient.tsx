@@ -2,7 +2,7 @@
 
 import type { ProblemSession } from '@prisma/client';
 import NextLink from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, useParams } from 'next/navigation';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
 
@@ -30,22 +30,22 @@ import { ProblemBody } from './ProblmBody';
 
 type Props = {
   initialProblemSession: ProblemSession;
-  params: { courseId: CourseId; lectureId: string; problemId: ProblemId };
   userId: string;
 };
 
 export const ProblemPageOnClient: React.FC<Props> = (props) => {
   const isAdmin = useAuthContextSelector((c) => c.isAdmin);
 
-  const lectureIndex = courseIdToLectureIds[props.params.courseId].indexOf(props.params.lectureId);
+  const params = useParams<{ courseId: CourseId; lectureId: string; problemId: ProblemId }>();
+  const lectureIndex = courseIdToLectureIds[params.courseId].indexOf(params.lectureId);
   const problem = useMemo(
     () =>
       instantiateProblem(
-        props.params.problemId as ProblemId,
+        params.problemId as ProblemId,
         DEFAULT_LANGUAGE_ID,
         props.initialProblemSession.problemVariablesSeed
       ),
-    [props.params.problemId, props.initialProblemSession.problemVariablesSeed]
+    [params.problemId, props.initialProblemSession.problemVariablesSeed]
   );
 
   const [problemSession, setProblemSession] = useState(props.initialProblemSession);
@@ -93,22 +93,22 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
       <VStack align="stretch" spacing={1}>
         <HStack justify="space-between" spacing={2}>
           <HStack spacing={2}>
-            <Link as={NextLink} color="gray.600" fontWeight="bold" href={`/courses/${props.params.courseId}`}>
-              {courseIdToName[props.params.courseId]}
+            <Link as={NextLink} color="gray.600" fontWeight="bold" href={`/courses/${params.courseId}`}>
+              {courseIdToName[params.courseId]}
             </Link>
             <Text color="gray.600">{'>'}</Text>
             <Link
               as={NextLink}
               color="gray.600"
               fontWeight="bold"
-              href={`/courses/${props.params.courseId}/lectures/${props.params.lectureId}`}
+              href={`/courses/${params.courseId}/lectures/${params.lectureId}`}
             >
               第{lectureIndex + 1}回
             </Link>
           </HStack>
         </HStack>
         <HStack justify="space-between" spacing={2}>
-          <Heading as="h1">{problemIdToName[props.params.problemId]}</Heading>
+          <Heading as="h1">{problemIdToName[params.problemId]}</Heading>
           <HStack spacing={2}>
             <Tooltip
               label={
@@ -149,7 +149,6 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
 
       <ProblemBody
         createSubmissionUpdatingProblemSession={createSubmissionUpdatingProblemSession}
-        params={props.params}
         problem={problem}
         problemSession={problemSession}
         updateProblemSession={updateProblemSession}

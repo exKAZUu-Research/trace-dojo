@@ -8,18 +8,19 @@ import { getNonNullableSessionOnServer } from '../../../../../../../../utils/ses
 import { ProblemPageOnClient } from './pageOnClient';
 
 type Props = {
-  params: { courseId: CourseId; lectureId: string; problemId: ProblemId };
+  params: Promise<{ courseId: CourseId; lectureId: string; problemId: ProblemId }>;
 };
 
 const ProblemPage: NextPage<Props> = async (props) => {
   const session = await getNonNullableSessionOnServer();
 
+  const params = await props.params;
   let incompleteProblemSession = await prisma.problemSession.findFirst({
     where: {
       userId: session.superTokensUserId,
-      courseId: props.params.courseId,
-      lectureId: props.params.lectureId,
-      problemId: props.params.problemId,
+      courseId: params.courseId,
+      lectureId: params.lectureId,
+      problemId: params.problemId,
       // eslint-disable-next-line unicorn/no-null
       completedAt: null,
     },
@@ -28,9 +29,9 @@ const ProblemPage: NextPage<Props> = async (props) => {
     incompleteProblemSession = await prisma.problemSession.create({
       data: {
         userId: session.superTokensUserId,
-        courseId: props.params.courseId,
-        lectureId: props.params.lectureId,
-        problemId: props.params.problemId,
+        courseId: params.courseId,
+        lectureId: params.lectureId,
+        problemId: params.problemId,
         problemVariablesSeed: Date.now().toString(),
         problemType: 'executionResult',
         traceItemIndex: 0,
@@ -39,13 +40,7 @@ const ProblemPage: NextPage<Props> = async (props) => {
   }
   logger.debug('incompleteProblemSession: %o', incompleteProblemSession);
 
-  return (
-    <ProblemPageOnClient
-      initialProblemSession={incompleteProblemSession}
-      params={props.params}
-      userId={session.superTokensUserId}
-    />
-  );
+  return <ProblemPageOnClient initialProblemSession={incompleteProblemSession} userId={session.superTokensUserId} />;
 };
 
 export default ProblemPage;

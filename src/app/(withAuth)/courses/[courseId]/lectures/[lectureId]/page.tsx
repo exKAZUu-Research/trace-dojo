@@ -9,15 +9,16 @@ import { getNullableSessionOnServer } from '../../../../../../utils/session';
 
 import { Lecture } from './pageOnClient';
 
-type Props = { params: { courseId: CourseId; lectureId: string } };
+type Props = { params: Promise<{ courseId: CourseId; lectureId: string }> };
 
 const LecturePage: NextPage<Props> = async (props) => {
   const { session } = await getNullableSessionOnServer();
   if (!session) redirect('/auth');
 
-  if (!(props.params.courseId in courseIdToLectureIds)) notFound();
+  const params = await props.params;
+  if (!(params.courseId in courseIdToLectureIds)) notFound();
 
-  const lectureIndex = courseIdToLectureIds[props.params.courseId].indexOf(props.params.lectureId);
+  const lectureIndex = courseIdToLectureIds[params.courseId].indexOf(params.lectureId);
   if (lectureIndex === -1) notFound();
 
   const currentUserProblemSessions = await prisma.problemSession.findMany({
@@ -27,10 +28,10 @@ const LecturePage: NextPage<Props> = async (props) => {
       completedAt: true,
       submissions: { select: { isCorrect: true } },
     },
-    where: { userId: session.superTokensUserId, courseId: props.params.courseId, lectureId: props.params.lectureId },
+    where: { userId: session.superTokensUserId, courseId: params.courseId, lectureId: params.lectureId },
   });
 
-  return <Lecture lectureIndex={lectureIndex} params={props.params} problemSessions={currentUserProblemSessions} />;
+  return <Lecture lectureIndex={lectureIndex} problemSessions={currentUserProblemSessions} />;
 };
 
 export default LecturePage;

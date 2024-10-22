@@ -3,6 +3,7 @@
 import type { ProblemSession, ProblemSubmission } from '@prisma/client';
 import { useLocalStorage } from '@willbooster/shared-lib-react';
 import NextLink from 'next/link';
+import { useParams } from 'next/navigation';
 import React, { useEffect, useMemo } from 'react';
 import { MdCheckCircle, MdCheckCircleOutline, MdOutlineVerified, MdVerified } from 'react-icons/md';
 
@@ -35,7 +36,6 @@ import {
 } from '../../../../../../problems/problemData';
 
 type Props = {
-  params: { courseId: CourseId; lectureId: string };
   lectureIndex: number;
   problemSessions: (Pick<ProblemSession, 'problemId' | 'completedAt'> & {
     submissions: Pick<ProblemSubmission, 'isCorrect'>[];
@@ -43,18 +43,19 @@ type Props = {
 };
 
 export const Lecture: React.FC<Props> = (props) => {
+  const params = useParams<{ courseId: CourseId; lectureId: string }>();
   const completedProblemIdSet = useMemo(
     () => new Set(props.problemSessions.filter((s) => s.completedAt).map((s) => s.problemId)),
     [props.problemSessions]
   );
 
-  const lectureProblemIds = courseIdToLectureIndexToProblemIds[props.params.courseId][props.lectureIndex];
+  const lectureProblemIds = courseIdToLectureIndexToProblemIds[params.courseId][props.lectureIndex];
   const completedProblemCount = lectureProblemIds.filter((problemId) => completedProblemIdSet.has(problemId)).length;
   const isLessonCompleted = completedProblemCount >= lectureProblemIds.length;
 
   const currentUserId = useAuthContextSelector((c) => c.currentUserId);
   const [, setIsOpened] = useLocalStorage(
-    `trace-dojo.${props.params.courseId}.${props.lectureIndex}.${currentUserId}`,
+    `trace-dojo.${params.courseId}.${props.lectureIndex}.${currentUserId}`,
     false
   );
   useEffect(() => {
@@ -64,8 +65,8 @@ export const Lecture: React.FC<Props> = (props) => {
   return (
     <VStack align="stretch" spacing={6}>
       <Heading as="h1">
-        <Link as={NextLink} href={`/courses/${props.params.courseId}`}>
-          {courseIdToName[props.params.courseId]}
+        <Link as={NextLink} href={`/courses/${params.courseId}`}>
+          {courseIdToName[params.courseId]}
         </Link>
       </Heading>
 
@@ -131,7 +132,7 @@ export const Lecture: React.FC<Props> = (props) => {
                       </Td>
                       <Td textOverflow="ellipsis" whiteSpace="nowrap">
                         <HStack align="center" spacing={2}>
-                          <Link as={NextLink} href={`${props.params.lectureId}/problems/${problemId}`}>
+                          <Link as={NextLink} href={`${params.lectureId}/problems/${problemId}`}>
                             {problemIdToName[problemId]}
                           </Link>
                           {suspendedSession &&

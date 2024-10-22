@@ -10,7 +10,7 @@ export async function getSessionOnServer(): Promise<{
   hasToken: boolean;
   error?: Error;
 }> {
-  const accessToken = getAccessToken();
+  const accessToken = await getAccessToken();
   const hasToken = !!accessToken;
   try {
     if (accessToken) {
@@ -24,6 +24,7 @@ export async function getSessionOnServer(): Promise<{
   return { hasToken };
 }
 
-function getAccessToken(): string | undefined {
-  return cookies().get(SUPERTOKENS_ACCESS_TOKEN_COOKIE_NAME)?.value;
+async function getAccessToken(): Promise<string | undefined> {
+  const allCookies = await cookies();
+  return allCookies.get(SUPERTOKENS_ACCESS_TOKEN_COOKIE_NAME)?.value;
 }
