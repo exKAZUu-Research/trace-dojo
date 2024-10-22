@@ -1,6 +1,5 @@
 'use client';
 
-import { CacheProvider } from '@chakra-ui/next-js';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { usePathname, useRouter } from 'next/navigation';
 import NextTopLoader from 'nextjs-toploader';
@@ -23,12 +22,10 @@ export const Providers: React.FC<{ children: React.ReactNode }> = ({ children })
     <SuperTokensWrapper>
       <backendTrpcReact.Provider client={backendTrpcReactClient} queryClient={queryClient}>
         <QueryClientProvider client={queryClient}>
-          <CacheProvider>
-            <ChakraProvider theme={theme}>
-              <PageTransitionProgressBar />
-              {children}
-            </ChakraProvider>
-          </CacheProvider>
+          <ChakraProvider theme={theme}>
+            <PageTransitionProgressBar />
+            {children}
+          </ChakraProvider>
         </QueryClientProvider>
       </backendTrpcReact.Provider>
     </SuperTokensWrapper>
