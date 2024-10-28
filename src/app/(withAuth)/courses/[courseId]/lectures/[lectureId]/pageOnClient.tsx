@@ -131,21 +131,21 @@ export const Lecture: React.FC<Props> = (props) => {
                         />
                       </Td>
                       <Td textOverflow="ellipsis" whiteSpace="nowrap">
-                        <HStack align="center" spacing={2}>
-                          <Link as={NextLink} href={`${params.lectureId}/problems/${problemId}`}>
-                            {problemIdToName[problemId]}
-                          </Link>
+                        <VStack align="start" spacing={2}>
                           {suspendedSession &&
                             (isProblemCompleted ? (
                               <Tag colorScheme="brand" fontWeight="bold" size="sm" variant="outline">
-                                復習中（成績評価の対象外）
+                                二回目以降の学習中（成績評価の対象外・不正解による減点なし）
                               </Tag>
                             ) : (
                               <Tag colorScheme="brand" fontWeight="bold" size="sm" variant="solid">
                                 挑戦中
                               </Tag>
                             ))}
-                        </HStack>
+                          <Link as={NextLink} href={`${params.lectureId}/problems/${problemId}`}>
+                            {problemIdToName[problemId]}
+                          </Link>
+                        </VStack>
                       </Td>
                       <Td isNumeric color="gray.600">
                         {firstSession?.submissions.filter((a) => !a.isCorrect).length ?? 0}
