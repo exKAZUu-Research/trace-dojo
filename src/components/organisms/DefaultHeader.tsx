@@ -1,3 +1,4 @@
+import { Box, Heading, HStack, Icon } from '@chakra-ui/react';
 import type { NextPage } from 'next';
 import NextLink from 'next/link';
 import React from 'react';
@@ -6,25 +7,15 @@ import SuperTokensNode from 'supertokens-node';
 import { APP_NAME } from '../../constants';
 import { prisma } from '../../infrastructures/prisma';
 import {
-  Avatar,
-  Box,
-  Button,
-  Heading,
-  HStack,
-  Icon,
-  Menu,
-  MenuButton,
-  MenuDivider,
-  MenuItem,
-  MenuList,
-} from '../../infrastructures/useClient/chakra';
-import {
   MdKeyboardArrowDown,
   MdOutlineHome,
   MdOutlinePerson,
   MdOutlineSettings,
 } from '../../infrastructures/useClient/icons';
 import { getNullableSessionOnServer } from '../../utils/session';
+import { Avatar } from '../ui/avatar';
+import { Button } from '../ui/button';
+import { MenuContent, MenuItem, MenuRoot, MenuSeparator, MenuTrigger } from '../ui/menu';
 
 import { SignOutMenuItem } from './SignOutMenuItem';
 
@@ -45,16 +36,18 @@ export const DefaultHeader: NextPage = async () => {
     }));
 
   return (
-    <HStack bg="white" h={16} px={4} spacing={4}>
-      <HStack flexGrow={1} flexShrink={1} spacing={8}>
-        <Heading as={NextLink} href="/" size="md">
-          <Icon as={MdOutlineHome} color="brand.500" mr={1} />
-          {APP_NAME}
+    <HStack bg="white" gap={4} h={16} px={4}>
+      <HStack flexGrow={1} flexShrink={1} gap={8}>
+        <Heading asChild size="md">
+          <NextLink href="/">
+            <Icon as={MdOutlineHome} color="brand.500" mr={1} />
+            {APP_NAME}
+          </NextLink>
         </Heading>
-        <HStack flexGrow={0} flexShrink={0} spacing={0}>
+        <HStack flexGrow={0} flexShrink={0} gap={0}>
           {(isAdmin ? ADMIN_MENU_ITEMS : MENU_ITEMS).map(([href, label]) => (
-            <Button key={href} as={NextLink} href={href} variant="ghost">
-              {label}
+            <Button key={href} asChild variant="ghost">
+              <NextLink href={href}>{label}</NextLink>
             </Button>
           ))}
         </HStack>
@@ -62,31 +55,33 @@ export const DefaultHeader: NextPage = async () => {
 
       <Box flexGrow={0} flexShrink={0}>
         {user?.displayName ? (
-          <Menu direction="rtl">
-            <MenuButton
-              as={Button}
-              leftIcon={<Avatar bg="gray.400" icon={<Icon as={MdOutlinePerson} />} size="sm" />}
-              rightIcon={<Icon as={MdKeyboardArrowDown} />}
-              variant="ghost"
-            >
-              {superTokensUser?.emails[0] ?? user.displayName}
-            </MenuButton>
+          <MenuRoot>
+            <MenuTrigger asChild>
+              <Button variant="ghost">
+                <Avatar bg="gray.400" icon={<MdOutlinePerson />} size="sm" />
+                {superTokensUser?.emails[0] ?? user.displayName}
+                <MdKeyboardArrowDown />
+              </Button>
+            </MenuTrigger>
 
-            <MenuList>
-              <MenuItem as={NextLink} href="/settings" icon={<Icon as={MdOutlineSettings} />}>
-                設定
+            <MenuContent>
+              <MenuItem asChild value="settings">
+                <NextLink href="/settings">
+                  <Icon as={MdOutlineSettings} mr={2} />
+                  設定
+                </NextLink>
               </MenuItem>
-              <MenuDivider />
+              <MenuSeparator />
               <SignOutMenuItem />
-            </MenuList>
-          </Menu>
+            </MenuContent>
+          </MenuRoot>
         ) : (
           <>
-            <Button as={NextLink} colorScheme="brand" href="/auth" mr={2} variant="outline">
-              サインイン
+            <Button asChild colorPalette="brand" mr={2} variant="outline">
+              <NextLink href="/auth">サインイン</NextLink>
             </Button>
-            <Button as={NextLink} colorScheme="brand" href="/auth?show=signup">
-              新規登録
+            <Button asChild colorPalette="brand">
+              <NextLink href="/auth?show=signup">新規登録</NextLink>
             </Button>
           </>
         )}

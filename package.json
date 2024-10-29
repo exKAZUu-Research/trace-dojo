@@ -39,6 +39,7 @@
     "react-dom": "19.0.0-rc-1631855f-20241023"
   },
   "dependencies": {
+    "@chakra-ui-v2/react": "npm:@chakra-ui/react@2.10.3",
     "@chakra-ui/next-js": "2.4.2",
     "@chakra-ui/react": "3.0.1",
     "@emotion/react": "11.13.3",

@@ -1,4 +1,4 @@
-import type { BoxProps } from '@chakra-ui/react';
+import type { BoxProps } from '@chakra-ui-v2/react';
 import React from 'react';
 import { Prism } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/cjs/styles/prism';

@@ -69,21 +69,23 @@ const customConfig = defineConfig({
         },
       },
       switch: {
-        // defaultVariant: 'brand',
+        defaultVariants: {
+          colorPalette: 'brand',
+        },
       },
       tabs: {
-        // defaultVariant: 'brand',
+        defaultVariants: {
+          colorPalette: 'brand',
+        },
       },
     },
-    // styles: {
-    //   global: {
-    //     body: {
-    //       bg: 'gray.100',
-    //       lineHeight: '1.75',
-    //       touchAction: 'manipulation',
-    //     },
-    //   },
-    // },
+  },
+  globalCss: {
+    body: {
+      bg: 'gray.100',
+      lineHeight: '1.75',
+      touchAction: 'manipulation',
+    },
   },
 });
 

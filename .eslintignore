@@ -22,7 +22,7 @@ test-fixtures/
 .devcontainer/
 dist/
 temp/
-stc/components/ui
+src/components/ui
 
 *.sqlite3*
 *.sqlite3-journal
