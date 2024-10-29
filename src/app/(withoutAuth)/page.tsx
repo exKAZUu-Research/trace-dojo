@@ -1,4 +1,4 @@
-import { Box, Card, Heading, LinkBox, LinkOverlay, SimpleGrid, VStack } from '@chakra-ui/react';
+import { Card, Heading, LinkBox, LinkOverlay, SimpleGrid, VStack, Text } from '@chakra-ui/react';
 import type { NextPage } from 'next';
 import NextLink from 'next/link';
 
@@ -7,10 +7,10 @@ import { courseIds, courseIdToName } from '../../problems/problemData';
 const HomePage: NextPage = async () => {
   return (
     <VStack align="stretch" gap={16}>
-      <Heading as="div" lineHeight={1.25} py={16} textStyle="4xl">
-        <Box asChild>
-          <span style={{ color: 'var(--chakra-colors-red-500)' }}>トレーシング力</span>
-        </Box>
+      <Heading as="div" lineHeight={1.25} py={16} size="6xl">
+        <Text as="span" color={'brand.solid'}>
+          トレーシング力
+        </Text>
         を<br />
         鍛えよう
       </Heading>
@@ -34,7 +34,7 @@ const HomePage: NextPage = async () => {
                   transitionProperty: 'box-shadow',
                 }}
               >
-                <Heading as="h3" textStyle="md">
+                <Heading as="h3" size="md">
                   <LinkOverlay asChild>
                     <NextLink href={`/courses/${id}`}>{courseIdToName[id]}</NextLink>
                   </LinkOverlay>

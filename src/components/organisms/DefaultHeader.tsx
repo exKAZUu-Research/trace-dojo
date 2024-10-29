@@ -1,23 +1,19 @@
-import { Box, Heading, HStack, Icon } from '@chakra-ui/react';
+import { AvatarFallback, AvatarRoot, Box, Heading, HStack, Icon } from '@chakra-ui/react';
 import type { NextPage } from 'next';
 import NextLink from 'next/link';
 import React from 'react';
+import { MdKeyboardArrowDown, MdOutlineHome, MdOutlinePerson, MdOutlineSettings } from 'react-icons/md';
 import SuperTokensNode from 'supertokens-node';
 
 import { APP_NAME } from '../../constants';
 import { prisma } from '../../infrastructures/prisma';
-import {
-  MdKeyboardArrowDown,
-  MdOutlineHome,
-  MdOutlinePerson,
-  MdOutlineSettings,
-} from '../../infrastructures/useClient/icons';
 import { getNullableSessionOnServer } from '../../utils/session';
-import { Avatar } from '../ui/avatar';
 import { Button } from '../ui/button';
-import { MenuContent, MenuItem, MenuRoot, MenuSeparator, MenuTrigger } from '../ui/menu';
 
-import { SignOutMenuItem } from './SignOutMenuItem';
+import { SignOutMenuItem } from '@/components/organisms/SignOutMenuItem';
+import { MenuContent, MenuItem, MenuRoot, MenuSeparator, MenuTrigger } from '@/components/ui/menu';
+
+export { MdOutlineHome, MdOutlinePerson, MdOutlineSettings, MdKeyboardArrowDown } from 'react-icons/md';
 
 const MENU_ITEMS: readonly [string, string][] = [['/usage', '使い方']];
 const ADMIN_MENU_ITEMS = [...MENU_ITEMS, ['/admin/statistics', '統計情報']];
@@ -38,10 +34,14 @@ export const DefaultHeader: NextPage = async () => {
   return (
     <HStack bg="white" gap={4} h={16} px={4}>
       <HStack flexGrow={1} flexShrink={1} gap={8}>
-        <Heading asChild size="md">
+        <Heading asChild>
           <NextLink href="/">
-            <Icon as={MdOutlineHome} color="brand.500" mr={1} />
-            {APP_NAME}
+            <HStack>
+              <Icon color="brand.500">
+                <MdOutlineHome />
+              </Icon>
+              {APP_NAME}
+            </HStack>
           </NextLink>
         </Heading>
         <HStack flexGrow={0} flexShrink={0} gap={0}>
@@ -58,7 +58,11 @@ export const DefaultHeader: NextPage = async () => {
           <MenuRoot>
             <MenuTrigger asChild>
               <Button variant="ghost">
-                <Avatar bg="gray.400" icon={<MdOutlinePerson />} size="sm" />
+                <AvatarRoot bg="gray.muted" size="sm">
+                  <AvatarFallback>
+                    <MdOutlinePerson />
+                  </AvatarFallback>
+                </AvatarRoot>
                 {superTokensUser?.emails[0] ?? user.displayName}
                 <MdKeyboardArrowDown />
               </Button>
@@ -67,7 +71,7 @@ export const DefaultHeader: NextPage = async () => {
             <MenuContent>
               <MenuItem asChild value="settings">
                 <NextLink href="/settings">
-                  <Icon as={MdOutlineSettings} mr={2} />
+                  <MdOutlineSettings />
                   設定
                 </NextLink>
               </MenuItem>

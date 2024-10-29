@@ -28,12 +28,17 @@ const customConfig = defineConfig({
   theme: {
     tokens: {
       colors: {
-        brand: { value: defaultConfig.theme!.tokens!.colors!.red },
+        brand: defaultConfig.theme!.tokens!.colors!.red,
       },
       fonts: {
         body: { value: sansSerif },
         heading: { value: sansSerif },
         mono: { value: monospace },
+      },
+    },
+    semanticTokens: {
+      colors: {
+        brand: defaultConfig.theme!.semanticTokens!.colors!.red,
       },
     },
     recipes: {
@@ -65,7 +70,7 @@ const customConfig = defineConfig({
       },
       link: {
         base: {
-          color: 'brand.500',
+          color: 'brand.solid',
         },
       },
       switch: {
@@ -82,7 +87,7 @@ const customConfig = defineConfig({
   },
   globalCss: {
     body: {
-      bg: 'gray.100',
+      bg: 'gray.subtle',
       lineHeight: '1.75',
       touchAction: 'manipulation',
     },

@@ -1,18 +1,18 @@
 'use client';
 
+import { MenuItem } from '@chakra-ui/react';
 import { useRouter } from 'next/navigation';
 import React from 'react';
 import { MdOutlineLogout } from 'react-icons/md';
 import { signOut } from 'supertokens-auth-react/recipe/session';
 
 import { clearAllCaches } from '../../actions';
-import { Icon, MenuItem } from '../../infrastructures/useClient/chakra';
 
 export const SignOutMenuItem: React.FC = () => {
   const router = useRouter();
   return (
     <MenuItem
-      icon={<Icon as={MdOutlineLogout} />}
+      value="signOut"
       onClick={async () => {
         await signOut();
         router.push('/');
@@ -20,6 +20,7 @@ export const SignOutMenuItem: React.FC = () => {
         void clearAllCaches();
       }}
     >
+      <MdOutlineLogout />
       サインアウト
     </MenuItem>
   );
