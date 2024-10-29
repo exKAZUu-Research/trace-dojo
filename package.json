@@ -17,7 +17,7 @@
     "deploy": "wb optimizeForDockerBuild --outside && fly deploy -c fly-${WB_ENV}.toml --build-arg ARCH=amd64 --build-arg WB_ENV=${WB_ENV} --build-arg WB_VERSION=${WB_VERSION}",
     "deploy/ci-setup": "echo ${GCP_SA_KEY_JSON} > gcp-sa-key.json",
     "format": "sort-package-json && yarn prettify",
-    "gen-code": "prisma generate && chakra-cli tokens src/theme.ts",
+    "gen-code": "prisma generate && chakra typegen src/system.ts",
     "postinstall": "husky || true",
     "lint": "eslint --color \"./{scripts,src,tests}/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}\"",
     "lint-fix": "yarn lint --fix --rule \"{ react-hooks/exhaustive-deps: 0 }\"",
@@ -34,6 +34,10 @@
     "typecheck": "wb typecheck"
   },
   "prettier": "@willbooster/prettier-config",
+  "resolutions": {
+    "react": "19.0.0-rc-1631855f-20241023",
+    "react-dom": "19.0.0-rc-1631855f-20241023"
+  },
   "dependencies": {
     "@chakra-ui/next-js": "2.4.2",
     "@chakra-ui/react": "3.0.1",
@@ -55,7 +59,7 @@
     "immer": "10.1.1",
     "jsonwebtoken": "9.0.2",
     "jwks-rsa": "3.1.0",
-    "next": "15.0.1",
+    "next": "15.0.2-canary.10",
     "next-themes": "0.3.0",
     "nextjs-cors": "2.2.0",
     "nextjs-toploader": "3.7.15",
@@ -63,8 +67,8 @@
     "pino-pretty": "11.3.0",
     "pm2": "5.4.2",
     "prisma": "5.21.1",
-    "react": "19.0.0-rc-fb9a90fa48-20240614",
-    "react-dom": "19.0.0-rc-fb9a90fa48-20240614",
+    "react": "19.0.0-rc-1631855f-20241023",
+    "react-dom": "19.0.0-rc-1631855f-20241023",
     "react-icons": "5.3.0",
     "react-idle-timer": "5.7.2",
     "react-syntax-highlighter": "15.6.1",
@@ -99,7 +103,7 @@
     "concurrently": "9.0.1",
     "conventional-changelog-conventionalcommits": "8.0.0",
     "eslint": "8.57.0",
-    "eslint-config-next": "15.0.1",
+    "eslint-config-next": "15.0.2-canary.10",
     "eslint-config-prettier": "9.1.0",
     "eslint-import-resolver-typescript": "3.6.3",
     "eslint-plugin-import": "2.31.0",

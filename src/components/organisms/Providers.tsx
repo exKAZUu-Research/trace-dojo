@@ -10,7 +10,7 @@ import { SuperTokensWrapper } from 'supertokens-auth-react';
 
 import { ensureSuperTokensReactInit, setRouter } from '../../infrastructures/supertokens/frontendConfig';
 import { backendTrpcReact, backendTrpcReactClient } from '../../infrastructures/trpcBackend/client';
-import { system } from '../../theme'; // Assuming theme.ts has been updated to export system
+import { system } from '@/system'; // Assuming system.ts has been updated to export system
 
 import { Provider } from '@/components/ui/provider';
 
