@@ -9,7 +9,8 @@ import { SuperTokensWrapper } from 'supertokens-auth-react';
 import { ensureSuperTokensReactInit, setRouter } from '../../infrastructures/supertokens/frontendConfig';
 import { backendTrpcReact, backendTrpcReactClient } from '../../infrastructures/trpcBackend/client';
 import { ChakraProvider, useTheme } from '../../infrastructures/useClient/chakra';
-import { theme } from '../../theme';
+
+import { theme } from '@/theme';
 
 ensureSuperTokensReactInit();
 

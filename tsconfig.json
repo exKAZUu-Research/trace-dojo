@@ -3,6 +3,10 @@
     "allowJs": true,
     "allowSyntheticDefaultImports": true,
     "alwaysStrict": true,
+    "baseUrl": "./",
+    "paths": {
+      "@/*": ["src/*"]
+    },
     "declaration": true,
     "esModuleInterop": true,
     "importHelpers": false,
