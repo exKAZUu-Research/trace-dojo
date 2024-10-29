@@ -1,7 +1,4 @@
-import { cardAnatomy } from '@chakra-ui/anatomy';
-import { createMultiStyleConfigHelpers, defineStyleConfig, extendTheme, theme as defaultTheme } from '@chakra-ui/react';
-
-const cardStyleConfigHelpers = createMultiStyleConfigHelpers(cardAnatomy.keys);
+import { createSystem, defaultConfig, defineConfig } from '@chakra-ui/react';
 
 const sansSerif = [
   // English
@@ -27,67 +24,67 @@ const monospace = [
   'monospace',
 ].join(',');
 
-export const theme = extendTheme({
-  colors: {
-    brand: defaultTheme.colors.red,
-  },
-  fonts: {
-    body: sansSerif,
-    heading: sansSerif,
-    mono: monospace,
-  },
-  components: {
-    Card: cardStyleConfigHelpers.defineMultiStyleConfig({
-      baseStyle: cardStyleConfigHelpers.definePartsStyle({
-        container: {
-          shadow: 'none',
-        },
-      }),
-    }),
-    Container: defineStyleConfig({
-      baseStyle: {
-        maxW: 'container.xl',
+const customConfig = defineConfig({
+  theme: {
+    tokens: {
+      colors: {
+        brand: { value: defaultConfig.theme!.tokens!.colors!.red },
       },
-    }),
-    FormLabel: defineStyleConfig({
-      baseStyle: {
-        fontWeight: 'bold',
-      },
-    }),
-    Heading: defineStyleConfig({
-      defaultProps: {
-        size: 'lg',
-      },
-    }),
-    Icon: defineStyleConfig({
-      baseStyle: {
-        boxSize: '1.5em',
-        verticalAlign: '-0.375em',
-      },
-    }),
-    Link: defineStyleConfig({
-      baseStyle: {
-        color: 'brand.500',
-      },
-    }),
-    Switch: defineStyleConfig({
-      defaultProps: {
-        colorScheme: 'brand',
-      },
-    }),
-    Tabs: defineStyleConfig({
-      defaultProps: {
-        colorScheme: 'brand',
-      },
-    }),
-  },
-  styles: {
-    global: {
-      body: {
-        bg: 'gray.100',
-        lineHeight: 1.75,
-        touchAction: 'manipulation',
+      fonts: {
+        body: { value: sansSerif },
+        heading: { value: sansSerif },
+        mono: { value: monospace },
       },
     },
+    recipes: {
+      card: {
+        base: {
+          container: {
+            // shadow: 'none',
+          },
+        },
+      },
+      container: {
+        base: {
+          maxW: 'container.xl',
+        },
+      },
+      formLabel: {
+        base: {
+          fontWeight: 'bold',
+        },
+      },
+      heading: {
+        // defaultVariants: { size: 'lg' },
+      },
+      icon: {
+        base: {
+          boxSize: '1.5em',
+          verticalAlign: '-0.375em',
+        },
+      },
+      link: {
+        base: {
+          color: 'brand.500',
+        },
+      },
+      switch: {
+        // defaultVariant: 'brand',
+      },
+      tabs: {
+        // defaultVariant: 'brand',
+      },
+    },
+    // styles: {
+    //   global: {
+    //     body: {
+    //       bg: 'gray.100',
+    //       lineHeight: '1.75',
+    //       touchAction: 'manipulation',
+    //     },
+    //   },
+    // },
   },
 });
+
+export const system = createSystem(defaultConfig, customConfig);
