@@ -119,7 +119,6 @@ export {
   Textarea,
   Th,
   Thead,
-  theme,
   Tooltip,
   Tr,
   UnorderedList,
@@ -134,4 +133,4 @@ export {
   VisuallyHidden,
   VisuallyHiddenInput,
   VStack,
-} from '@chakra-ui/react';
+} from '@chakra-ui-v2/react';

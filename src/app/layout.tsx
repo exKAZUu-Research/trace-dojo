@@ -18,7 +18,7 @@ export const viewport: Viewport = {
 
 const RootLayout: LayoutComponent = ({ children }) => {
   return (
-    <html lang="ja_JP">
+    <html suppressHydrationWarning lang="ja_JP">
       <body>
         <Providers>{children}</Providers>
 

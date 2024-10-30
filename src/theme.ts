@@ -1,5 +1,10 @@
 import { cardAnatomy } from '@chakra-ui/anatomy';
-import { createMultiStyleConfigHelpers, defineStyleConfig, extendTheme, theme as defaultTheme } from '@chakra-ui/react';
+import {
+  createMultiStyleConfigHelpers,
+  defineStyleConfig,
+  extendTheme,
+  theme as defaultTheme,
+} from '@chakra-ui-v2/react';
 
 const cardStyleConfigHelpers = createMultiStyleConfigHelpers(cardAnatomy.keys);
 
@@ -80,14 +85,5 @@ export const theme = extendTheme({
         colorScheme: 'brand',
       },
     }),
-  },
-  styles: {
-    global: {
-      body: {
-        bg: 'gray.100',
-        lineHeight: 1.75,
-        touchAction: 'manipulation',
-      },
-    },
   },
 });

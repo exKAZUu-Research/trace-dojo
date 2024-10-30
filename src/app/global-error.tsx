@@ -23,7 +23,7 @@ ${error.stack}
   };
 
   return (
-    <html>
+    <html suppressHydrationWarning>
       <body style={{ fontFamily: 'Arial, sans-serif', padding: '20px', backgroundColor: '#f8f8f8' }}>
         <div style={{ border: '1px solid #ccc', borderRadius: '8px', padding: '20px', backgroundColor: '#fff' }}>
           <p>
