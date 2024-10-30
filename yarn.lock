@@ -13830,10 +13830,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react-is@npm:^16.13.1, react-is@npm:^16.7.0, react-is@npm:^16.8.4":
-  version: 16.13.1
-  resolution: "react-is@npm:16.13.1"
-  checksum: 10c0/33977da7a5f1a287936a0c85639fec6ca74f4f15ef1e59a6bc20338fc73dc69555381e211f7a3529b8150a1f71e4225525b41b60b52965bda53ce7d47377ada1
+"react-is@npm:19.0.0-rc-1631855f-20241023":
+  version: 19.0.0-rc-1631855f-20241023
+  resolution: "react-is@npm:19.0.0-rc-1631855f-20241023"
+  checksum: 10c0/f44f7ed2d9815bce04aa47ea003d829b0d1b876a2fbe37354c398bb2337330bdf25bcc8488a83cd76384dbb6011defa2349bd32fe8de2e0207e92e141452282d
   languageName: node
   linkType: hard
 

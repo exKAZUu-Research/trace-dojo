@@ -36,7 +36,8 @@
   "prettier": "@willbooster/prettier-config",
   "resolutions": {
     "react": "19.0.0-rc-1631855f-20241023",
-    "react-dom": "19.0.0-rc-1631855f-20241023"
+    "react-dom": "19.0.0-rc-1631855f-20241023",
+    "react-is": "19.0.0-rc-1631855f-20241023"
   },
   "dependencies": {
     "@chakra-ui-v2/react": "npm:@chakra-ui/react@2.10.3",
