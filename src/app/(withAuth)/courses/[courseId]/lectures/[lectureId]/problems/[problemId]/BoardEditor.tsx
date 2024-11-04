@@ -126,7 +126,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
         if (props.problem.displayProgram.split('\n')[(currentLine ?? -1) - 1]?.includes(' % ')) {
           hintText += hintText ? '\n\n' : '\n\nヒント: ';
           hintText +=
-            '「%」は剰余算の演算子です。%の右側の数値で左側の数値を割った数の余りです。左右の数値が整数であれば、商も余りも整数になります。例えば、「1 % 7」は1を7で割った余りの数になるので1、「2 % 7」は2、「3 % 7」は3、「10 % 7」も3になります。';
+            '「%」は剰余算の演算子です。%の右側の数値で左側の数値を割った数の余りです。左右の数値が整数であれば、商も余りも整数になります。例えば、「1 % 7」は1を7で割った余りの数になるので1、「0 % 7」は0、「2 % 7」は2、「7 % 7」は0、「10 % 7」は3になります。';
         }
       }
     }
