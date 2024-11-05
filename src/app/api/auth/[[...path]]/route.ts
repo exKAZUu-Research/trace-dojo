@@ -1,13 +1,13 @@
 import type { NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
 import { getAppDirRequestHandler } from 'supertokens-node/nextjs';
 
 import { ensureSuperTokensInit } from '../../../../infrastructures/supertokens/backendConfig';
 
 ensureSuperTokensInit();
 
-const handleCall = getAppDirRequestHandler();
+const handleCall = getAppDirRequestHandler(NextResponse);
 
-// cf. https://supertokens.com/docs/emailpassword/nextjs/app-directory/setting-up-backend
 export async function GET(request: NextRequest): Promise<Response> {
   const res = await handleCall(request);
   if (!res.headers.has('Cache-Control')) {
