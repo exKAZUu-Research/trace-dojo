@@ -1,14 +1,15 @@
 import type { NextPage } from 'next';
 import { revalidatePath } from 'next/cache';
+import { cookies } from 'next/headers';
 import { z } from 'zod';
 import { zfd } from 'zod-form-data';
 
-import { prisma } from '../../../infrastructures/prisma';
-import { Button, FormControl, FormLabel, Input, VStack } from '../../../infrastructures/useClient/chakra';
-import { getNonNullableSessionOnServer } from '../../../utils/session';
+import { prisma } from '@/infrastructures/prisma';
+import { Button, FormControl, FormLabel, Input, VStack } from '@/infrastructures/useClient/chakra';
+import { getNonNullableSessionOnServer } from '@/utils/session';
 
 const SettingsPage: NextPage = async () => {
-  const session = await getNonNullableSessionOnServer();
+  const session = await getNonNullableSessionOnServer(await cookies());
   const user = await prisma.user.findUnique({
     where: {
       id: session.superTokensUserId,
@@ -38,7 +39,7 @@ const inputSchema = zfd.formData({
 async function updateDisplayName(formData: FormData): Promise<void> {
   'use server';
   const input = inputSchema.parse(formData);
-  const session = await getNonNullableSessionOnServer();
+  const session = await getNonNullableSessionOnServer(await cookies());
   await prisma.user.update({
     where: {
       id: session.superTokensUserId,

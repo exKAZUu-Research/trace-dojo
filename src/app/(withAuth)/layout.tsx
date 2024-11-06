@@ -1,18 +1,19 @@
 import type { NextPage } from 'next';
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import React, { Suspense } from 'react';
 
-import { SessionAuthForNextJs } from '../../components/molecules/SessionAuthForNextJs';
-import { TryRefreshComponent } from '../../components/molecules/TryRefreshComponent';
-import { DefaultFooter } from '../../components/organisms/DefaultFooter';
-import { DefaultHeader } from '../../components/organisms/DefaultHeader';
-import { AuthContextProvider } from '../../contexts/AuthContext';
-import { Container, Spinner } from '../../infrastructures/useClient/chakra';
-import type { LayoutProps } from '../../types';
-import { getEmailFromSession, getNullableSessionOnServer } from '../../utils/session';
+import { SessionAuthForNextJs } from '@/components/molecules/SessionAuthForNextJs';
+import { TryRefreshComponent } from '@/components/molecules/TryRefreshComponent';
+import { DefaultFooter } from '@/components/organisms/DefaultFooter';
+import { DefaultHeader } from '@/components/organisms/DefaultHeader';
+import { AuthContextProvider } from '@/contexts/AuthContext';
+import { Container, Spinner } from '@/infrastructures/useClient/chakra';
+import type { LayoutProps } from '@/types';
+import { getEmailFromSession, getNullableSessionOnServer } from '@/utils/session';
 
 const DefaultLayout: NextPage<LayoutProps> = async ({ children }) => {
-  const { hasToken, session } = await getNullableSessionOnServer();
+  const { hasToken, session } = await getNullableSessionOnServer(await cookies());
 
   // `session` will be undefined if it does not exist or has expired
   if (!session) {

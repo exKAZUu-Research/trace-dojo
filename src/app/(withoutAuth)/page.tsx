@@ -1,8 +1,8 @@
 import type { NextPage } from 'next';
 import NextLink from 'next/link';
 
-import { Box, Card, Heading, LinkBox, LinkOverlay, SimpleGrid, VStack } from '../../infrastructures/useClient/chakra';
-import { courseIds, courseIdToName } from '../../problems/problemData';
+import { Box, Card, Heading, LinkBox, LinkOverlay, SimpleGrid, VStack } from '@/infrastructures/useClient/chakra';
+import { courseIds, courseIdToName } from '@/problems/problemData';
 
 const HomePage: NextPage = async () => {
   return (

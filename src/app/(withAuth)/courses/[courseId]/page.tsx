@@ -1,19 +1,19 @@
 import type { NextPage } from 'next';
-import { notFound, redirect } from 'next/navigation';
-
-import { logger } from '../../../../infrastructures/pino';
-import { prisma } from '../../../../infrastructures/prisma';
-import type { CourseId } from '../../../../problems/problemData';
-import { courseIdToLectureIds } from '../../../../problems/problemData';
-import { getNullableSessionOnServer } from '../../../../utils/session';
+import { cookies } from 'next/headers';
+import { notFound } from 'next/navigation';
 
 import { CoursePageOnClient } from './pageOnClient';
+
+import { logger } from '@/infrastructures/pino';
+import { prisma } from '@/infrastructures/prisma';
+import type { CourseId } from '@/problems/problemData';
+import { courseIdToLectureIds } from '@/problems/problemData';
+import { getNonNullableSessionOnServer } from '@/utils/session';
 
 type Props = { params: Promise<{ courseId: CourseId }> };
 
 const CoursePage: NextPage<Props> = async (props) => {
-  const { session } = await getNullableSessionOnServer();
-  if (!session) redirect('/auth');
+  const session = await getNonNullableSessionOnServer(await cookies());
 
   const params = await props.params;
   if (!(params.courseId in courseIdToLectureIds)) notFound();

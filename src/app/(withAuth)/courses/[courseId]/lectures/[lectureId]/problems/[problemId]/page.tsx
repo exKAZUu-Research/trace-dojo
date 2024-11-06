@@ -1,18 +1,19 @@
 import type { NextPage } from 'next';
-
-import { logger } from '../../../../../../../../infrastructures/pino';
-import { prisma } from '../../../../../../../../infrastructures/prisma';
-import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
-import { getNonNullableSessionOnServer } from '../../../../../../../../utils/session';
+import { cookies } from 'next/headers';
 
 import { ProblemPageOnClient } from './pageOnClient';
+
+import { logger } from '@/infrastructures/pino';
+import { prisma } from '@/infrastructures/prisma';
+import type { CourseId, ProblemId } from '@/problems/problemData';
+import { getNonNullableSessionOnServer } from '@/utils/session';
 
 type Props = {
   params: Promise<{ courseId: CourseId; lectureId: string; problemId: ProblemId }>;
 };
 
 const ProblemPage: NextPage<Props> = async (props) => {
-  const session = await getNonNullableSessionOnServer();
+  const session = await getNonNullableSessionOnServer(await cookies());
 
   const params = await props.params;
   let incompleteProblemSession = await prisma.problemSession.findFirst({

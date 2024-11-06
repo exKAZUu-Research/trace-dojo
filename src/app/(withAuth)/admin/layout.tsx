@@ -1,12 +1,13 @@
 import type { NextPage } from 'next';
+import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
 import SuperTokensNode from 'supertokens-node';
 
-import type { LayoutProps } from '../../../types';
-import { getNullableSessionOnServer } from '../../../utils/session';
+import type { LayoutProps } from '@/types';
+import { getNullableSessionOnServer } from '@/utils/session';
 
 const DefaultLayout: NextPage<LayoutProps> = async ({ children }) => {
-  const { session } = await getNullableSessionOnServer();
+  const { session } = await getNullableSessionOnServer(await cookies());
   if (!session) notFound();
 
   const userInfo = await SuperTokensNode.getUser(session.superTokensUserId);

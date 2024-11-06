@@ -1,14 +1,15 @@
+import { cookies } from 'next/headers';
 import React, { Suspense } from 'react';
 
-import { TryRefreshComponent } from '../../components/molecules/TryRefreshComponent';
-import { DefaultFooter } from '../../components/organisms/DefaultFooter';
-import { DefaultHeader } from '../../components/organisms/DefaultHeader';
-import { Container, Spinner } from '../../infrastructures/useClient/chakra';
-import type { LayoutComponent } from '../../types';
-import { getNullableSessionOnServer } from '../../utils/session';
+import { TryRefreshComponent } from '@/components/molecules/TryRefreshComponent';
+import { DefaultFooter } from '@/components/organisms/DefaultFooter';
+import { DefaultHeader } from '@/components/organisms/DefaultHeader';
+import { Container, Spinner } from '@/infrastructures/useClient/chakra';
+import type { LayoutComponent } from '@/types';
+import { getNullableSessionOnServer } from '@/utils/session';
 
 const DefaultLayout: LayoutComponent = async ({ children }) => {
-  const { hasToken, session } = await getNullableSessionOnServer();
+  const { hasToken, session } = await getNullableSessionOnServer(await cookies());
   if (!session && hasToken) return <TryRefreshComponent key={Date.now()} />;
 
   return (

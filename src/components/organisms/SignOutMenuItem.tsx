@@ -6,7 +6,8 @@ import { MdOutlineLogout } from 'react-icons/md';
 import { signOut } from 'supertokens-auth-react/recipe/session';
 
 import { clearAllCaches } from '../../actions';
-import { Icon, MenuItem } from '../../infrastructures/useClient/chakra';
+
+import { Icon, MenuItem } from '@/infrastructures/useClient/chakra';
 
 export const SignOutMenuItem: React.FC = () => {
   const router = useRouter();

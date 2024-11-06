@@ -1,10 +1,13 @@
 import type { NextPage } from 'next';
+import { cookies } from 'next/headers';
 import NextLink from 'next/link';
 import React from 'react';
 import SuperTokensNode from 'supertokens-node';
 
-import { APP_NAME } from '../../constants';
-import { prisma } from '../../infrastructures/prisma';
+import { SignOutMenuItem } from './SignOutMenuItem';
+
+import { APP_NAME } from '@/constants';
+import { prisma } from '@/infrastructures/prisma';
 import {
   Avatar,
   Box,
@@ -17,22 +20,20 @@ import {
   MenuDivider,
   MenuItem,
   MenuList,
-} from '../../infrastructures/useClient/chakra';
+} from '@/infrastructures/useClient/chakra';
 import {
   MdKeyboardArrowDown,
   MdOutlineHome,
   MdOutlinePerson,
   MdOutlineSettings,
-} from '../../infrastructures/useClient/icons';
-import { getNullableSessionOnServer } from '../../utils/session';
-
-import { SignOutMenuItem } from './SignOutMenuItem';
+} from '@/infrastructures/useClient/icons';
+import { getNullableSessionOnServer } from '@/utils/session';
 
 const MENU_ITEMS: readonly [string, string][] = [['/usage', '使い方']];
 const ADMIN_MENU_ITEMS = [...MENU_ITEMS, ['/admin/statistics', '統計情報']];
 
 export const DefaultHeader: NextPage = async () => {
-  const { session } = await getNullableSessionOnServer();
+  const { session } = await getNullableSessionOnServer(await cookies());
   const superTokensUser = session && (await SuperTokensNode.getUser(session.superTokensUserId));
   const isAdmin = superTokensUser?.emails[0]?.endsWith('@internet.ac.jp');
 

@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { MdContentCopy } from 'react-icons/md';
 
-import { Box, Button, Code, Heading, Text, useToast, VStack } from '../../infrastructures/useClient/chakra';
+import { Box, Button, Code, Heading, Text, useToast, VStack } from '@/infrastructures/useClient/chakra';
 
 export const ErrorBoundaryContent: React.FC<{ error: Error & { digest?: string }; reset: () => void }> = ({
   error,

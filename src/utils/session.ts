@@ -1,11 +1,14 @@
-import { memoizeFactory } from 'at-decorators';
-import SuperTokensNode from 'supertokens-node';
+import 'server-only';
 
-import { logger } from '../infrastructures/pino';
-import { prisma } from '../infrastructures/prisma';
+import { memoizeFactory } from 'at-decorators';
+import type { ReadonlyRequestCookies } from 'next/dist/server/web/spec-extension/adapters/request-cookies';
+import SuperTokensNode from 'supertokens-node';
 
 import type { SessionOnNode } from './sessionOnNode';
 import { getSessionOnServer } from './sessionOnServer';
+
+import { logger } from '@/infrastructures/pino';
+import { prisma } from '@/infrastructures/prisma';
 
 export interface SessionOnServer {
   session: SessionOnNode | undefined;
@@ -13,13 +16,13 @@ export interface SessionOnServer {
   error: unknown | undefined;
 }
 
-export async function getNullableSessionOnServer(): Promise<SessionOnServer> {
+export async function getNullableSessionOnServer(cookies: ReadonlyRequestCookies): Promise<SessionOnServer> {
   let session: SessionOnNode | undefined;
   let hasToken = false;
   let error: unknown | undefined = undefined;
 
   try {
-    ({ hasToken, session } = await getSessionOnServer());
+    ({ hasToken, session } = await getSessionOnServer(cookies));
     if (session) {
       void upsertUserToPrisma(session.superTokensUserId);
     }
@@ -29,8 +32,8 @@ export async function getNullableSessionOnServer(): Promise<SessionOnServer> {
   return { session, hasToken, error };
 }
 
-export async function getNonNullableSessionOnServer(): Promise<SessionOnNode> {
-  const { session } = await getSessionOnServer();
+export async function getNonNullableSessionOnServer(cookies: ReadonlyRequestCookies): Promise<SessionOnNode> {
+  const { session } = await getSessionOnServer(cookies);
   if (!session) {
     throw new Error('Failed to get a session.');
   }

@@ -1,16 +1,18 @@
-import { cookies } from 'next/headers.js';
+import 'server-only';
 
-import { SUPERTOKENS_ACCESS_TOKEN_COOKIE_NAME } from '../constants';
+import type { ReadonlyRequestCookies } from 'next/dist/server/web/spec-extension/adapters/request-cookies';
 
 import type { SessionOnNode } from './sessionOnNode';
 import { getSessionOnNode } from './sessionOnNode';
 
-export async function getSessionOnServer(): Promise<{
+import { SUPERTOKENS_ACCESS_TOKEN_COOKIE_NAME } from '@/constants';
+
+export async function getSessionOnServer(cookies: ReadonlyRequestCookies): Promise<{
   session?: SessionOnNode;
   hasToken: boolean;
   error?: Error;
 }> {
-  const accessToken = await getAccessToken();
+  const accessToken = cookies.get(SUPERTOKENS_ACCESS_TOKEN_COOKIE_NAME)?.value;
   const hasToken = !!accessToken;
   try {
     if (accessToken) {
@@ -22,9 +24,4 @@ export async function getSessionOnServer(): Promise<{
     }
   }
   return { hasToken };
-}
-
-async function getAccessToken(): Promise<string | undefined> {
-  const allCookies = await cookies();
-  return allCookies.get(SUPERTOKENS_ACCESS_TOKEN_COOKIE_NAME)?.value;
 }
