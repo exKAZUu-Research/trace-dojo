@@ -4367,13 +4367,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@willbooster/shared-lib-react@npm:3.2.12":
-  version: 3.2.12
-  resolution: "@willbooster/shared-lib-react@npm:3.2.12"
+"@willbooster/shared-lib-react@npm:3.2.13":
+  version: 3.2.13
+  resolution: "@willbooster/shared-lib-react@npm:3.2.13"
   peerDependencies:
     react: ~18.2.0 || ~18.3.0
     react-dom: ~18.2.0 || ~18.3.0
-  checksum: 10c0/718d8cf993fbbe003f868cac63b36fe7d8556a78dbf93f1ff59ea25e011cfb77e60263a57a4a15639894f32d723680036a36a7a848a759c1aba24b35c96e7945
+  checksum: 10c0/49164525a97b03aa21e6d6fe76ef3253b016f52dec61778a896dc22edd5411034ba4fb911dd4ce15e4b534c4205fa26e73a8a320bf41310e83eb13df9368b410
   languageName: node
   linkType: hard
 
@@ -4384,9 +4384,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@willbooster/wb@npm:8.0.8":
-  version: 8.0.8
-  resolution: "@willbooster/wb@npm:8.0.8"
+"@willbooster/wb@npm:8.0.9":
+  version: 8.0.9
+  resolution: "@willbooster/wb@npm:8.0.9"
   dependencies:
     chalk: "npm:5.3.0"
     dotenv: "npm:16.4.5"
@@ -4397,7 +4397,7 @@ __metadata:
     yargs: "npm:17.7.2"
   bin:
     wb: bin/index.js
-  checksum: 10c0/c4b7968c34aa175ee406de9953c9dac15d8edaf88ba45a1252cd442fb0b21004430cba554ecb17ec227192fa1170fc73679bbfa9fac92b9eeae1e2505ea38c74
+  checksum: 10c0/ee050128922a0c5f4739a4524959444b026d44e0bcbb7365ad7a7a49af0e03ac4d9d1748f1aff3dcf4d5f8993c5d841016394231c049a7dc97b3bfad3bb38d5c
   languageName: node
   linkType: hard
 
@@ -14171,8 +14171,8 @@ __metadata:
     "@willbooster/eslint-config-next": "npm:1.2.1"
     "@willbooster/prettier-config": "npm:9.1.3"
     "@willbooster/shared-lib": "npm:5.2.6"
-    "@willbooster/shared-lib-react": "npm:3.2.12"
-    "@willbooster/wb": "npm:8.0.8"
+    "@willbooster/shared-lib-react": "npm:3.2.13"
+    "@willbooster/wb": "npm:8.0.9"
     at-decorators: "npm:2.1.0"
     babel-plugin-react-compiler: "npm:19.0.0-beta-63b359f-20241101"
     build-ts: "npm:13.1.8"
