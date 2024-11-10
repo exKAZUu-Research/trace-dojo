@@ -66,7 +66,7 @@
     "nextjs-cors": "2.2.0",
     "nextjs-toploader": "3.7.15",
     "pino": "9.5.0",
-    "pino-pretty": "11.3.0",
+    "pino-pretty": "12.1.0",
     "pm2": "5.4.2",
     "prisma": "5.22.0",
     "react": "19.0.0-rc-fb9a90fa48-20240614",
