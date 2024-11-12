@@ -4,10 +4,11 @@ import {
   TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR,
   TURTLE_GRAPHICS_EMPTY_COLOR as EMPTY_COLOR,
 } from '../constants';
-import type { CellColor, ColorChar } from '../types';
 
 import type { InstantiatedProblem } from './instantiateProblem';
 import type { LanguageId } from './problemData';
+
+import type { CellColor, ColorChar } from '@/types';
 
 export interface TurtleTrace {
   x: number;
@@ -21,6 +22,7 @@ export interface TurtleTrace {
 export interface TraceItem {
   depth: number;
   sid: number;
+  /** caller id のスタック。 `// caller` のある行に caller id が付与される。 */
   callStack: number[];
   vars: TraceItemVariable;
   turtles: TurtleTrace[];
@@ -59,31 +61,7 @@ export function traceProgram(
       throw new Error('Instrumented program MUST NOT contain variable declarations.');
     }
   }
-
-  let statementId = 1;
-  let callerId = 1;
-  const modifiedCodeLines = [];
-  for (const line of instrumented.split('\n')) {
-    let statementReplaced = false;
-    let callReplaced = false;
-    const newLine = line
-      .replace(/for\s*\(([^;]*);\s*([^;]*);/, (_, init, cond) => `for (${init}; checkForCond(${cond}, ${statementId});`)
-      .replaceAll(
-        /(new\s+Turtle|\.set|\.forward|\.backward|\.turnRight|\.turnLeft)\(([^\n;]*)\)(;|\)\s*{)/g,
-        (_, newOrMethod, args, tail) => {
-          statementReplaced = true;
-          const delimiter = args === '' ? '' : ', ';
-          return `${newOrMethod}(${statementId}${delimiter}${args})${tail}`;
-        }
-      )
-      .replaceAll('call(', (_) => {
-        callReplaced = true;
-        return `call(${callerId}, `;
-      });
-    if (statementReplaced) statementId++;
-    if (callReplaced) callerId++;
-    modifiedCodeLines.push(newLine);
-  }
+  const modifiedCodeLines = modifyCode(instrumented);
   const modifiedCode = modifiedCodeLines.join('\n');
   // 無理に難読化する必要はないが、コードの文量を減らす意識を持つ。
   const executableCode = `
@@ -131,16 +109,15 @@ const dx = [0, 1, 0, -1];
 const dy = [1, 0, -1, 0];
 const board = Array.from({length: ${GRID_ROWS}}, () => Array.from({length: ${GRID_COLUMNS}}, () => '${EMPTY_COLOR}'));
 class Turtle {
-  constructor(sid, x = 0, y = 0, color = '${DEFAULT_COLOR}') {
+  constructor(x = 0, y = 0, color = '${DEFAULT_COLOR}') {
     this.x = x;
     this.y = y;
     this.color = color;
     this.dir = 'N';
     board[this.y][this.x] = this.color;
     turtles.push(this);
-    addTrace(sid);
   }
-  forward(sid) {
+  forward() {
     const index = dirs.indexOf(this.dir);
     this.x += dx[index];
     this.y += dy[index];
@@ -148,9 +125,8 @@ class Turtle {
       throw new Error(\`Out of bounds: (\${this.x}, \${this.y})\`);
     }
     board[this.y][this.x] = this.color;
-    addTrace(sid);
   }
-  backward(sid) {
+  backward() {
     const index = dirs.indexOf(this.dir);
     this.x -= dx[index];
     this.y -= dy[index];
@@ -158,7 +134,6 @@ class Turtle {
       throw new Error(\`Out of bounds: (\${this.x}, \${this.y})\`);
     }
     board[this.y][this.x] = this.color;
-    addTrace(sid);
   }
   canMoveForward() {
     const index = dirs.indexOf(this.dir);
@@ -166,17 +141,29 @@ class Turtle {
     const ny = this.y + dy[index];
     return nx >= 0 && nx < ${GRID_COLUMNS} && ny >= 0 && ny < ${GRID_ROWS};
   }
-  turnRight(sid) {
+  turnRight() {
     this.dir = dirs[(dirs.indexOf(this.dir) + 1) % 4];
-    addTrace(sid);
   }
-  turnLeft(sid) {
+  turnLeft() {
     this.dir = dirs[(dirs.indexOf(this.dir) + 3) % 4];
-    addTrace(sid);
   }
 }
-function addTrace(sid) {
-  trace.push({depth: s.getDepth(), sid, callStack: [...callStack], turtles: turtles.map(t => ({...t})), vars: {...s.vars}, board: board.map(r => r.join('')).join('\\n')});
+function addTrace(sid, self) {
+  const vars = {...s.vars};
+  if (self && self !== globalThis) vars['this'] = {...self};
+  flattenObjects(vars);
+  trace.push({depth: s.getDepth(), sid, callStack: [...callStack], turtles: turtles.map(t => ({...t})), vars, board: board.map(r => r.join('')).join('\\n')});
+}
+function flattenObjects(obj) {
+  for (const [key, value] of Object.entries(obj)) {
+    if (value instanceof Turtle) delete obj[key];
+    else if (value && typeof value === 'object' && !Array.isArray(value)) {
+      delete obj[key];
+      for (const [nestKey, nestValue] of Object.entries(value)) {
+        if (!(nestValue instanceof Turtle)) obj[\`\${key}.\${nestKey}\`] = nestValue;
+      }
+    }
+  }
 }
 function checkForCond(cond, sid) {
   if (!cond && trace.at(-1).sid === sid) {
@@ -192,12 +179,15 @@ function call(cid, f, ...argNames) {
     try {
       callStack.push(cid);
       s.enterNewScope(argNames.map((n, i) => [n, argValues[i]]).filter(([n, v]) => !(v instanceof Turtle)));
-      return f(...argValues);
+      return isClass(f) ? new f(...argValues) : f(...argValues);
     } finally {
       callStack.pop();
       s.leaveScope();
     }
   };
+}
+function isClass(obj) {
+  return typeof obj === 'function' && /^class\\s/.test(obj.toString());
 }
 trace.push({depth: 0, sid: 0, callStack: [], turtles: [], vars: {}, board: board.map(r => r.join('')).join('\\n')});
 s = new Scope();
@@ -241,4 +231,31 @@ ${modifiedCode.trim()}
     callerIdToLineIndex,
     finalVars,
   };
+}
+
+function modifyCode(instrumented: string): string[] {
+  const modifiedCodeLines = [];
+  let statementId = 0;
+  let callerId = 1;
+  for (const line of instrumented.split('\n')) {
+    let callReplaced = false;
+    const newLine = line
+      // Python向けに最後のループの処理かどうかを判定するために checkForCond を挿入する。
+      .replace(/for\s*\(([^;]*);\s*([^;]*);/, (_, init, cond) => `for (${init}; checkForCond(${cond}, ${statementId});`)
+      .replace(/\s*\/\/\s*sid\s*(:\s*\d+|)\s*/, (_, sid) => {
+        if (sid) {
+          statementId = Number(sid.slice(1));
+        } else {
+          statementId++;
+        }
+        return `addTrace(${statementId}, this);`;
+      })
+      .replaceAll('call(', (_) => {
+        callReplaced = true;
+        return `call(${callerId}, `;
+      });
+    if (callReplaced) callerId++;
+    modifiedCodeLines.push(newLine);
+  }
+  return modifiedCodeLines;
 }

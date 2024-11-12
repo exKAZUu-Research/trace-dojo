@@ -2095,7 +2095,7 @@ function turnAround(t) {
     java: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // sid:
+        Turtle t = new Turtle(); // sid
         二歩前に進める(t); // caller
         後ろを向く(t); // caller
         t.前に進む(); // sid
@@ -2816,12 +2816,12 @@ public class Main {
   },
   oop1: {
     instrumented: `
-const t1 = new Turtle(1, 1);
-const t2 = new Turtle(3, 3);
-t1.forward();
-t2.forward();
-t1.forward();
-t2.forward();
+const t1 = new Turtle(1, 1); // sid
+const t2 = new Turtle(3, 3); // sid
+t1.forward(); // sid
+t2.forward(); // sid
+t1.forward(); // sid
+t2.forward(); // sid
 `.trim(),
     java: `
 public class Main {
@@ -2839,18 +2839,19 @@ public class Main {
   oop2: {
     instrumented: `
 function main() {
-  const m = new MyTurtle(0, 0, 2);
-  m.forward();
+  const m = call(MyTurtle, 'x', 'y', 'speed')(0, 0, 2);
+  call(m.forward.bind(m))();
 }
 
 class MyTurtle {
   constructor(x, y, speed) {
-    this.speed = speed;
-    this.c = new Turtle(x, y);
+    this.speed = speed; // sid
+    this.c = new Turtle(x, y); // sid
   }
   forward() {
+    console.info(s.vars);
     for (let i = 0; i < this.speed; i++) {
-      this.c.forward();
+      this.c.forward(); // sid
     }
   }
 }
@@ -2860,8 +2861,8 @@ main();
     java: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle m = new MyTurtle(0, 0, 2); // sid
-    m.forward(); // sid
+    MyTurtle m = new MyTurtle(0, 0, 2); // caller
+    m.forward(); // caller
   }
 }
 

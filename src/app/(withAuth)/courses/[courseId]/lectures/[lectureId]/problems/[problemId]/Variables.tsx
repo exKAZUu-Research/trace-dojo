@@ -25,7 +25,7 @@ export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
         <Table>
           <Thead>
             <Tr>
-              <Th>変数名</Th>
+              <Th>変数/式</Th>
               <Th isNumeric w="0">
                 値
               </Th>
