@@ -85,7 +85,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
   useEffect(() => {
     initialize(props.previousTraceItemIndex >= 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.currentTraceItemIndex, props.problem]);
+  }, [props.previousTraceItemIndex, props.problem]);
 
   const updateTurtle = (currentTurtle: TurtleTrace, newTurtle: Partial<TurtleTrace>): void => {
     updateTurtles((draft) => {

@@ -2816,27 +2816,69 @@ public class Main {
   },
   oop1: {
     instrumented: `
-const t = new Turtle();
-`,
+const t1 = new Turtle(1, 1);
+const t2 = new Turtle(3, 3);
+t1.forward();
+t2.forward();
+t1.forward();
+t2.forward();
+`.trim(),
     java: `
 public class Main {
   public static void main(String[] args) {
-    Turtle c = new Turtle(); // sid
+    Turtle t1 = new Turtle(1, 1); // sid
+    Turtle t2 = new Turtle(3, 3); // sid
+    t1.前に進む(); // sid
+    t2.前に進む(); // sid
+    t1.前に進む(); // sid
+    t2.前に進む(); // sid
   }
 }
-`,
+`.trim(),
   },
   oop2: {
     instrumented: `
-const t = new Turtle();
-`,
+function main() {
+  const m = new MyTurtle(0, 0, 2);
+  m.forward();
+}
+
+class MyTurtle {
+  constructor(x, y, speed) {
+    this.speed = speed;
+    this.c = new Turtle(x, y);
+  }
+  forward() {
+    for (let i = 0; i < this.speed; i++) {
+      this.c.forward();
+    }
+  }
+}
+
+main();
+`.trim(),
     java: `
 public class Main {
   public static void main(String[] args) {
-    Turtle c = new Turtle(); // sid
+    MyTurtle m = new MyTurtle(0, 0, 2); // sid
+    m.forward(); // sid
   }
 }
-`,
+
+class MyTurtle {
+  private int speed;
+  private Turtle c;
+  public MyTurtle(int x, int y, int speed) {
+    this.speed = speed; // sid
+    this.c = new Turtle(x, y); // sid
+  }
+  public void forward() {
+    for (int i = 0; i < this.speed; i++) {
+      this.c.前に進む(); // sid
+    }
+  }
+}
+`.trim(),
   },
   oop3: {
     instrumented: `

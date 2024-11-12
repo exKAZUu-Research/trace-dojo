@@ -4,8 +4,14 @@ import type { ProblemSession } from '@prisma/client';
 import { useParams, useRouter } from 'next/navigation';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { MAX_CHALLENGE_COUNT } from '../../../../../../../../constants';
-import { backendTrpcReact } from '../../../../../../../../infrastructures/trpcBackend/client';
+import type { TurtleGraphicsHandle } from './BoardEditor';
+import { BoardEditor } from './BoardEditor';
+import { SyntaxHighlighter } from './SyntaxHighlighter';
+import { TraceViewer } from './TraceViewer';
+
+import { MAX_CHALLENGE_COUNT } from '@/constants';
+import { useAuthContextSelector } from '@/contexts/AuthContext';
+import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
 import {
   AlertDialog,
   AlertDialogBody,
@@ -22,16 +28,11 @@ import {
   Tag,
   useDisclosure,
   VStack,
-} from '../../../../../../../../infrastructures/useClient/chakra';
-import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateProblem';
-import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
-import type { TraceItem, TraceItemVariable } from '../../../../../../../../problems/traceProgram';
-import type { ProblemType } from '../../../../../../../../types';
-
-import type { TurtleGraphicsHandle } from './BoardEditor';
-import { BoardEditor } from './BoardEditor';
-import { SyntaxHighlighter } from './SyntaxHighlighter';
-import { TraceViewer } from './TraceViewer';
+} from '@/infrastructures/useClient/chakra';
+import type { InstantiatedProblem } from '@/problems/instantiateProblem';
+import type { CourseId, ProblemId } from '@/problems/problemData';
+import type { TraceItem, TraceItemVariable } from '@/problems/traceProgram';
+import type { ProblemType } from '@/types';
 
 type Props = {
   problem: InstantiatedProblem;
@@ -42,6 +43,7 @@ type Props = {
 
 export const ProblemBody: React.FC<Props> = (props) => {
   const params = useParams<{ courseId: CourseId; lectureId: string; problemId: ProblemId }>();
+  const isAdmin = useAuthContextSelector((c) => c.isAdmin);
 
   const problemType = props.problemSession.problemType as ProblemType;
   const currentTraceItemIndex =
@@ -49,7 +51,13 @@ export const ProblemBody: React.FC<Props> = (props) => {
       ? props.problem.traceItems.length - 1
       : // ProblemSession作成後の問題の改変に対応するため。
         Math.min(props.problemSession.traceItemIndex, props.problem.traceItems.length - 1);
-  const previousTraceItemIndex = problemType === 'executionResult' ? 0 : currentTraceItemIndex - 1;
+  const previousTraceItemIndex =
+    problemType === 'executionResult'
+      ? 0
+      : isAdmin
+        ? // 管理者は最後の盤面の状態も確認できるようにするため。
+          Math.min(props.problemSession.traceItemIndex - 1, props.problem.traceItems.length - 1)
+        : currentTraceItemIndex - 1;
   const currentVariables =
     problemType === 'executionResult' ? props.problem.finalVars : props.problem.traceItems[currentTraceItemIndex].vars;
   const initialVariables = useMemo(

@@ -6,27 +6,19 @@ import { notFound, useParams } from 'next/navigation';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
 
+import { ProblemBody } from './ProblmBody';
+
 import {
   DEFAULT_LANGUAGE_ID,
   MAX_ACTIVE_DURATION_MS_AFTER_LAST_EVENT,
   MIN_INTERVAL_MS_OF_ACTIVE_EVENTS,
-} from '../../../../../../../../constants';
-import { useAuthContextSelector } from '../../../../../../../../contexts/AuthContext';
-import { backendTrpcReact } from '../../../../../../../../infrastructures/trpcBackend/client';
-import {
-  Button,
-  Heading,
-  HStack,
-  Link,
-  Text,
-  Tooltip,
-  VStack,
-} from '../../../../../../../../infrastructures/useClient/chakra';
-import { instantiateProblem } from '../../../../../../../../problems/instantiateProblem';
-import type { CourseId, ProblemId } from '../../../../../../../../problems/problemData';
-import { courseIdToLectureIds, courseIdToName, problemIdToName } from '../../../../../../../../problems/problemData';
-
-import { ProblemBody } from './ProblmBody';
+} from '@/constants';
+import { useAuthContextSelector } from '@/contexts/AuthContext';
+import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
+import { Button, Heading, HStack, Link, Text, Tooltip, VStack } from '@/infrastructures/useClient/chakra';
+import { instantiateProblem } from '@/problems/instantiateProblem';
+import type { CourseId, ProblemId } from '@/problems/problemData';
+import { courseIdToLectureIds, courseIdToName, problemIdToName } from '@/problems/problemData';
 
 type Props = {
   initialProblemSession: ProblemSession;
@@ -134,10 +126,8 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
                 colorScheme="blue"
                 variant="outline"
                 onClick={() =>
-                  updateProblemSession(
-                    'step',
-                    Math.min(problemSession.traceItemIndex + 1, problem.traceItems.length - 1)
-                  )
+                  // 管理者は最後の盤面を確認できるように、 problem.traceItems.length まで進める。
+                  updateProblemSession('step', Math.min(problemSession.traceItemIndex + 1, problem.traceItems.length))
                 }
               >
                 次のステップに進む（管理者のみ）
