@@ -1,4 +1,4 @@
-export const courseIds = ['tuBeginner1', 'tuBeginner2'] as const;
+export const courseIds = ['tuBeginner1', 'tuBeginner2', 'test'] as const;
 export type CourseId = (typeof courseIds)[number];
 
 export const problemIds = [
@@ -88,6 +88,9 @@ export const problemIds = [
   'string3',
   'string4',
   'string5',
+  'oop1',
+  'oop2',
+  'oop3',
   'test1',
   'test2',
   'test3',
@@ -102,6 +105,7 @@ export type LanguageId = (typeof languageIds)[number];
 export const courseIdToName: Record<CourseId, string> = {
   tuBeginner1: '初級プログラミングⅠ',
   tuBeginner2: '初級プログラミングⅡ',
+  test: '動作確認用',
 };
 
 export const problemIdToName: Record<ProblemId, string> = {
@@ -191,6 +195,9 @@ export const problemIdToName: Record<ProblemId, string> = {
   string3: '文字列を使おう(3)',
   string4: '文字列を使おう(4)',
   string5: '文字列を使おう(5)',
+  oop1: 'オブジェクト指向プログラミング(1)',
+  oop2: 'オブジェクト指向プログラミング(2)',
+  oop3: 'オブジェクト指向プログラミング(3)',
   test1: 'ステップ実行のテスト用問題(1)',
   test2: 'ステップ実行のテスト用問題(2)',
   test3: 'ステップ実行のテスト用問題(3)',
@@ -235,7 +242,8 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     ['method1', 'method2', 'method3', 'method4', 'method5', 'return1', 'return2', 'return3', 'return4', 'return5'],
     ['array1', 'array2', 'array3', 'array4', 'array5', 'string1', 'string2', 'string3', 'string4', 'string5'],
   ],
-  tuBeginner2: [['test1', 'test2', 'test3', 'test4', 'test5']],
+  tuBeginner2: [['oop1', 'oop2', 'oop3']],
+  test: [['test1', 'test2', 'test3', 'test4', 'test5']],
 };
 
 export const courseIdToLectureIds: Record<CourseId, string[]> = JSON.parse(
@@ -2805,6 +2813,42 @@ public class Main {
     }
 }
     `.trim(),
+  },
+  oop1: {
+    instrumented: `
+const t = new Turtle();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle c = new Turtle(); // sid
+  }
+}
+`,
+  },
+  oop2: {
+    instrumented: `
+const t = new Turtle();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle c = new Turtle(); // sid
+  }
+}
+`,
+  },
+  oop3: {
+    instrumented: `
+const t = new Turtle();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle c = new Turtle(); // sid
+  }
+}
+`,
   },
   test1: {
     instrumented: `
