@@ -595,6 +595,16 @@ public class Straight {
   }
 );
 
+test('Trace a specific program', () => {
+  const problem = instantiateProblem('oop2', 'java', '');
+  if (!problem) throw new Error('Failed to generate problem.');
+
+  const { displayProgram, sidToLineIndex, traceItems } = problem;
+  console.info('displayProgram:', JSON.stringify(displayProgram, undefined, 2));
+  console.info('sidToLineIndex:', JSON.stringify(Object.fromEntries(sidToLineIndex), undefined, 2));
+  console.info('traceItems:', JSON.stringify(traceItems, undefined, 2));
+});
+
 /**
  * テストに失敗した際に、WebStorm上で期待値との差異を確認しやすくするために、文字列化しておく。
  */
