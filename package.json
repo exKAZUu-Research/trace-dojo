@@ -53,7 +53,7 @@
     "@willbooster/shared-lib": "5.2.7",
     "@willbooster/shared-lib-react": "3.2.13",
     "@willbooster/wb": "8.0.12",
-    "at-decorators": "2.2.1",
+    "at-decorators": "3.0.0",
     "build-ts": "13.1.8",
     "dayjs": "1.11.13",
     "dotenv-cli": "7.4.4",
