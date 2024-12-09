@@ -37,6 +37,8 @@ async function main(): Promise<void> {
   console.log(header.trim());
   writeFileSync('grading.csv', header);
 
+  const records: { studentId: string; row: string; solvedProblems: number }[] = [];
+
   for (const user of users) {
     let email = user.displayName;
     try {
@@ -108,8 +110,16 @@ async function main(): Promise<void> {
     const atIndex = email.indexOf('@');
     const studentId = atIndex > 0 ? email.slice(0, Math.max(0, email.indexOf('@'))) : email;
     const row = `${studentId.toUpperCase()},${Math.round(totalScore)},0,0,0,0,0,0,0,0,0,0,0,\n`;
-    console.log(row.trim() + ': ' + solvedProblems);
-    writeFileSync('grading.csv', row, { flag: 'a' });
+    records.push({ studentId: studentId.toUpperCase(), row, solvedProblems });
+  }
+
+  // Sort records by studentId
+  records.sort((a, b) => a.studentId.localeCompare(b.studentId));
+
+  // Write sorted records to file
+  for (const record of records) {
+    console.log(record.row.trim() + ': ' + record.solvedProblems);
+    writeFileSync('grading.csv', record.row, { flag: 'a' });
   }
 }
 
