@@ -6,11 +6,13 @@ async function main(): Promise<void> {
   // do nothing
 }
 
-try {
-  await main();
-} catch (error) {
-  console.error(error);
-} finally {
-  await prisma.$disconnect();
-  process.exit(1);
-}
+// eslint-disable-next-line unicorn/prefer-top-level-await
+void (async () => {
+  try {
+    await main();
+    process.exit(0);
+  } catch (error) {
+    console.error(error);
+    process.exit(1);
+  }
+})();

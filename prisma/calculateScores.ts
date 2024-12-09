@@ -123,13 +123,13 @@ async function main(): Promise<void> {
   }
 }
 
+// eslint-disable-next-line unicorn/prefer-top-level-await
 void (async () => {
   try {
     await main();
+    process.exit(0);
   } catch (error) {
     console.error(error);
-  } finally {
-    await prisma.$disconnect();
-    process.exit(0);
+    process.exit(1);
   }
 })();
