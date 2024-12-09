@@ -40,7 +40,7 @@ const CoursesPage: NextPage = async () => {
         <Image alt="Turtle Movement" my={4} src="/images/usage_03.png" />
 
         <Text mt={16}>
-          ④盤面の下に「変数名」「値」と書かれたフォームがある場合は、プログラムを実行した時の最終的な変数の値を入力してください。
+          ④盤面の下に「変数/式」「値」と書かれたフォームがある場合は、プログラムを実行した時の最終的な変数の値を入力してください。
         </Text>
         <Image alt="Variable Input" my={4} src="/images/usage_04.png" />
 
