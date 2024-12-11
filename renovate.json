@@ -1,5 +1,10 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["github>WillBooster/willbooster-configs:renovate.json5"],
-  "packageRules": [{ "packageNames": [], "enabled": false }]
+  "packageRules": [
+    {
+      "matchPackageNames": ["react", "react-dom", "react-is"],
+      "enabled": false
+    }
+  ]
 }
