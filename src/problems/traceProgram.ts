@@ -49,6 +49,7 @@ export const colorToChar = Object.fromEntries(
 ) as Record<CellColor, ColorChar>;
 
 export function traceProgram(
+  this: unknown,
   instrumented: string,
   rawDisplayProgram: string,
   languageId: LanguageId
@@ -63,7 +64,8 @@ export function traceProgram(
   }
   const modifiedCodeLines = modifyCode(instrumented);
   const modifiedCode = modifiedCodeLines.join('\n');
-  const thisPropNames = Object.keys(this);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const thisPropNames = Object.keys((this as any) || {});
   // 無理に難読化する必要はないが、コードの文量を減らす意識を持つ。
   const executableCode = `
 let myGlobal = {};
