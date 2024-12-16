@@ -69,13 +69,15 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
   const initialize = useCallback(
     (keepSelectedCell = false): void => {
+      console.log('props.initialVariables:', props.initialVariables);
+
       const initialBoard = parseBoard(previousTraceItem.board);
       updateBoard(initialBoard);
       updateTurtles(previousTraceItem.turtles);
       updateVariables(props.initialVariables);
       if (!keepSelectedCell) setSelectedCell(undefined);
     },
-    [previousTraceItem, props.initialVariables, updateBoard, updateTurtles]
+    [previousTraceItem, props.initialVariables, updateBoard, updateTurtles, updateVariables]
   );
 
   useImperativeHandle(ref, () => ({
@@ -84,8 +86,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
   useEffect(() => {
     initialize(props.previousTraceItemIndex >= 1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.previousTraceItemIndex, props.problem]);
+  }, [props.previousTraceItemIndex, initialize]);
 
   const updateTurtle = (currentTurtle: TurtleTrace, newTurtle: Partial<TurtleTrace>): void => {
     updateTurtles((draft) => {

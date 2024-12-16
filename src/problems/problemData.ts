@@ -2818,12 +2818,12 @@ public class Main {
   },
   oop1: {
     instrumented: `
-const t1 = new Turtle(1, 1); // sid
-const t2 = new Turtle(3, 3); // sid
-t1.forward(); // sid
-t2.forward(); // sid
-t1.forward(); // sid
-t2.forward(); // sid
+const t1 = new Turtle(1, 1); // trace
+const t2 = new Turtle(3, 3); // trace
+t1.forward();
+t2.forward();
+t1.forward();
+t2.forward();
 `.trim(),
     java: `
 public class Main {
@@ -2848,12 +2848,12 @@ function main() {
 
 class MyTurtle {
   constructor(x, y, speed) {
-    this.speed = speed; // sid
-    this.c = new Turtle(x, y); // sid
+    this.speed = speed; // trace
+    this.c = new Turtle(x, y); // trace
   }
   forward() {
     for (s.set('i', 0); s.get('i') < this.speed; s.set('i', s.get('i') + 1)) {
-      this.c.forward(); // sid
+      this.c.forward();
     }
     delete s.vars['i'];
   }
@@ -2901,10 +2901,10 @@ class MyTurtle {
 myGlobal = { Settings: { speed: 3 } };
 
 function main() {
-  const t1 = call(MyTurtle)(); // sid
+  const t1 = call(MyTurtle)(); // trace
   call(t1.moveForward.bind(t1))();
-  myGlobal.Settings.speed = 2; // sid
-  const t2 = call(MyTurtle)(); // sid
+  myGlobal.Settings.speed = 2; // trace
+  const t2 = call(MyTurtle)(); // trace
   call(t1.moveForward.bind(t1))();
   call(t2.moveForward.bind(t2))();
 }
@@ -2915,7 +2915,7 @@ class MyTurtle {
   }
   moveForward() {
     for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) {
-      this.t.forward(); // sid
+      this.t.forward();
     }
     delete s.vars['i'];
   }
@@ -2943,7 +2943,7 @@ class MyTurtle {
   private Turtle t = new Turtle();
 
   void moveForward(Turtle t) {
-    for (int i = 0; i < Settings.speed; i++) {
+    for (int i = 0; i < Settings.speed; i++) { // sid
       t.前に進む(); // sid
     }
   }
@@ -2956,7 +2956,7 @@ class MyTurtle {
   polymorphism1: {
     instrumented: `
 function main() {
-  const ts = [call(MyTurtle, 'x', 'y')(0, 0), call(FastTurtle, 'p')(1)]; // sid
+  const ts = [call(MyTurtle, 'x', 'y')(0, 0), call(FastTurtle, 'p')(1)]; // trace
   for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) {
     call(ts[s.get('i')].drawLine.bind(ts[s.get('i')]))();
   }
@@ -2968,7 +2968,7 @@ class MyTurtle {
   }
   drawLine() {
     for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) {
-      this.t.forward(); // sid
+      this.t.forward();
     }
     delete s.vars['i'];
   }
@@ -3006,7 +3006,7 @@ class MyTurtle {
     this.t = new Turtle(x, y);
   }
   void drawLine() {
-    for (int i = 0; i < this.length(); i++) {
+    for (int i = 0; i < this.length(); i++) { // sid
       this.t.前に進む(); // sid
     }
   }

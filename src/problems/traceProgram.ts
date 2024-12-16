@@ -80,8 +80,9 @@ class Scope {
     }
     throw new Error(\`\${varName} is not defined: \${JSON.stringify(s)}\`);
   }
-  set(varName, value) {
+  set(sid, self, varName, value) {
     this.vars[varName] = typeof value === 'number' ? Math.floor(value) : value;
+    addTrace(sid, self);
   }
   enterNewScope(params) {
     s = new Scope(this);
@@ -116,7 +117,7 @@ class Turtle {
     board[this.y][this.x] = this.color;
     turtles.push(this);
   }
-  forward() {
+  forward(sid, self) {
     const index = dirs.indexOf(this.dir);
     this.x += dx[index];
     this.y += dy[index];
@@ -124,8 +125,9 @@ class Turtle {
       throw new Error(\`Out of bounds: (\${this.x}, \${this.y})\`);
     }
     board[this.y][this.x] = this.color;
+    addTrace(sid, self);
   }
-  backward() {
+  backward(sid, self) {
     const index = dirs.indexOf(this.dir);
     this.x -= dx[index];
     this.y -= dy[index];
@@ -133,6 +135,7 @@ class Turtle {
       throw new Error(\`Out of bounds: (\${this.x}, \${this.y})\`);
     }
     board[this.y][this.x] = this.color;
+    addTrace(sid, self);
   }
   canMoveForward() {
     const index = dirs.indexOf(this.dir);
@@ -140,11 +143,13 @@ class Turtle {
     const ny = this.y + dy[index];
     return nx >= 0 && nx < ${GRID_COLUMNS} && ny >= 0 && ny < ${GRID_ROWS};
   }
-  turnRight() {
+  turnRight(sid, self) {
     this.dir = dirs[(dirs.indexOf(this.dir) + 1) % 4];
+    addTrace(sid, self);
   }
-  turnLeft() {
+  turnLeft(sid, self) {
     this.dir = dirs[(dirs.indexOf(this.dir) + 3) % 4];
+    addTrace(sid, self);
   }
 }
 function addTrace(sid, self) {
@@ -237,25 +242,31 @@ ${modifiedCode.trim()}
 
 function modifyCode(instrumented: string): string[] {
   const modifiedCodeLines = [];
-  let statementId = 0;
+  let statementId = 1;
   let callerId = 1;
   for (const line of instrumented.split('\n')) {
+    let statementReplaced = false;
     let callReplaced = false;
     const newLine = line
       // Python向けに最後のループの処理かどうかを判定するために checkForCond を挿入する。
       .replace(/for\s*\(([^;]*);\s*([^;]*);/, (_, init, cond) => `for (${init}; checkForCond(${cond}, ${statementId});`)
-      .replace(/\s*\/\/\s*sid\s*(:\s*\d+|)\s*/, (_, sid) => {
-        if (sid) {
-          statementId = Number(sid.slice(1));
-        } else {
-          statementId++;
+      .replaceAll(
+        /(\.set|\.forward|\.backward|\.turnRight|\.turnLeft)\(([^\n;]*)\)(;|\)\s*{)/g,
+        (_, newOrMethod, args, tail) => {
+          statementReplaced = true;
+          const delimiter = args === '' ? '' : ', ';
+          return `${newOrMethod}(${statementId}, this${delimiter}${args})${tail}`;
         }
+      )
+      .replace(/\s*\/\/\s*trace\s*/, (_) => {
+        statementReplaced = true;
         return `addTrace(${statementId}, this);`;
       })
       .replaceAll('call(', (_) => {
         callReplaced = true;
         return `call(${callerId}, `;
       });
+    if (statementReplaced) statementId++;
     if (callReplaced) callerId++;
     modifiedCodeLines.push(newLine);
   }
