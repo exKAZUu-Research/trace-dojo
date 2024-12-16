@@ -41,6 +41,7 @@ An educational web app for training program tracing skills.
    ```
 
 2. Open lectures via the following URLs:
+
    - 初級プログラミングⅠ
      1. http://localhost:3000/courses/tuBeginner1/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d
      2. http://localhost:3000/courses/tuBeginner1/lectures/d4de75e2-758b-4500-b38e-96213c360527
@@ -51,7 +52,9 @@ An educational web app for training program tracing skills.
      7. http://localhost:3000/courses/tuBeginner1/lectures/045094ae-1f5c-4caf-bc33-a86af985f13b
      8. http://localhost:3000/courses/tuBeginner1/lectures/84805179-12cf-4871-969e-fb39e6ad767a
    - 初級プログラミングⅡ
-     1. http://localhost:3000/courses/tuBeginner2/lectures/5ba06885-2044-4c1e-bd65-2a9c5e9c9e39
+     1. http://localhost:3000/courses/tuBeginner2/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d
+   - 動作確認用
+     1. http://localhost:3000/courses/test/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d
 
    The URL format is as follows.
    You can find parameter values from `NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON` in the `.env` file.
