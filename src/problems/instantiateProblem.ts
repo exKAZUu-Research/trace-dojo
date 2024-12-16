@@ -16,6 +16,11 @@ export type InstantiatedProblem = {
   displayProgram: string;
 
   /**
+   * The program to be executable via `eval()`. For debugging.
+   */
+  executableCode: string;
+
+  /**
    * The trace items of the program.
    */
   traceItems: TraceItem[];

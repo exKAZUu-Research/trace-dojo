@@ -90,7 +90,8 @@ export const problemIds = [
   'string5',
   'oop1',
   'oop2',
-  'oop3',
+  'static2',
+  'polymorphism1',
   'test1',
   'test2',
   'test3',
@@ -197,7 +198,8 @@ export const problemIdToName: Record<ProblemId, string> = {
   string5: '文字列を使おう(5)',
   oop1: 'オブジェクト指向プログラミング(1)',
   oop2: 'オブジェクト指向プログラミング(2)',
-  oop3: 'オブジェクト指向プログラミング(3)',
+  static2: '静的フィールド(2)',
+  polymorphism1: 'ポリモルフィズム(1)',
   test1: 'ステップ実行のテスト用問題(1)',
   test2: 'ステップ実行のテスト用問題(2)',
   test3: 'ステップ実行のテスト用問題(3)',
@@ -242,8 +244,8 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     ['method1', 'method2', 'method3', 'method4', 'method5', 'return1', 'return2', 'return3', 'return4', 'return5'],
     ['array1', 'array2', 'array3', 'array4', 'array5', 'string1', 'string2', 'string3', 'string4', 'string5'],
   ],
-  tuBeginner2: [['oop1', 'oop2', 'oop3']],
-  test: [['test1', 'test2', 'test3', 'test4', 'test5']],
+  tuBeginner2: [],
+  test: [['test1', 'test2', 'test3', 'test4', 'test5', 'oop1', 'oop2', 'static2', 'polymorphism1']],
 };
 
 export const courseIdToLectureIds: Record<CourseId, string[]> = JSON.parse(
@@ -253,7 +255,7 @@ export const courseIdToLectureIds: Record<CourseId, string[]> = JSON.parse(
 export const problemIdToLanguageIdToProgram: Record<ProblemId, Record<LanguageId, string>> = {
   straight: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 t.forward();
 t.forward();
     `.trim(),
@@ -269,7 +271,7 @@ public class Main {
   },
   straight2: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 t.forward();
 t.forward();
 t.forward();
@@ -287,7 +289,7 @@ public class Main {
   },
   stepBack: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 t.forward();
 t.backward();
     `.trim(),
@@ -303,7 +305,7 @@ public class Main {
   },
   stepBack2: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 t.forward();
 t.forward();
 t.backward();
@@ -325,7 +327,7 @@ public class Main {
   },
   turnRight: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 t.forward();
 t.turnRight();
 t.forward();
@@ -343,7 +345,7 @@ public class Main {
   },
   turnRight2: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 t.forward();
 t.forward();
 t.turnRight();
@@ -365,7 +367,7 @@ public class Main {
   },
   turnLeftAndRight: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 t.turnRight();
 t.forward();
 t.turnLeft();
@@ -385,7 +387,7 @@ public class Main {
   },
   turnLeftAndRight2: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 t.forward();
 t.turnRight();
 t.forward();
@@ -407,7 +409,7 @@ public class Main {
   },
   turnLeftAndRight3: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 t.turnRight();
 t.forward();
 t.turnLeft();
@@ -431,7 +433,7 @@ public class Main {
   },
   turnLeftAndRight4: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 t.forward();
 t.forward();
 t.turnRight();
@@ -459,7 +461,7 @@ public class Main {
   },
   square1: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 t.forward();
 t.turnRight();
 t.forward();
@@ -481,7 +483,7 @@ public class Main {
   },
   square2: {
     instrumented: `
-const t = new Turtle(<1-5>, <1-4>);
+const t = new Turtle(<1-5>, <1-4>); // trace
 t.forward();
 t.turnRight();
 t.forward();
@@ -503,7 +505,7 @@ public class Main {
   },
   square3: {
     instrumented: `
-const t = new Turtle(<2-5>, <2-5>);
+const t = new Turtle(<2-5>, <2-5>); // trace
 t.forward();
 t.turnLeft();
 t.forward();
@@ -529,7 +531,7 @@ public class Main {
   },
   square4: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 t.forward();
 t.forward();
 t.turnRight();
@@ -565,7 +567,7 @@ public class Main {
   variable: {
     instrumented: `
 s.set('x', <1-5>);
-const t = new Turtle(s.get('x'), <1-5>);
+const t = new Turtle(s.get('x'), <1-5>); // trace
 t.forward();
  `.trim(),
     java: `
@@ -582,7 +584,7 @@ public class Main {
     instrumented: `
 s.set('a', <2-6>);
 s.set('a', s.get('a') - 1);
-const t = new Turtle(<1-5>, s.get('a'));
+const t = new Turtle(<1-5>, s.get('a')); // trace
 t.forward();
  `.trim(),
     java: `
@@ -601,7 +603,7 @@ public class Main {
 s.set('x', <1-4>);
 s.set('x', s.get('x') + 1);
 s.set('y', s.get('x') + 1);
-const t = new Turtle(s.get('x'), s.get('y'));
+const t = new Turtle(s.get('x'), s.get('y')); // trace
 t.forward();
 `.trim(),
     java: `
@@ -621,7 +623,7 @@ public class Main {
 s.set('b', <1-4>);
 s.set('b', s.get('b') + 1);
 s.set('a', s.get('b') - 2);
-const t = new Turtle(s.get('a') + 1, s.get('b'));
+const t = new Turtle(s.get('a') + 1, s.get('b')); // trace
 t.forward();
 `.trim(),
     java: `
@@ -642,7 +644,7 @@ s.set('x', <1-5>);
 s.set('x', s.get('x') - 1);
 s.set('y', s.get('x') * 2);
 s.set('y', s.get('y') / 3);
-const t = new Turtle(s.get('x') + 1, s.get('y') + 1);
+const t = new Turtle(s.get('x') + 1, s.get('y') + 1); // trace
 t.forward();
 `.trim(),
     java: `
@@ -663,7 +665,7 @@ public class Main {
 s.set('a', <1-3>);
 s.set('b', s.get('a') * 2);
 s.set('c', s.get('b') - 2);
-const t = new Turtle(s.get('c'), s.get('b'));
+const t = new Turtle(s.get('c'), s.get('b')); // trace
 t.forward();
 `.trim(),
     java: `
@@ -684,7 +686,7 @@ s.set('x', <0-2>);
 s.set('y', (s.get('x') * 2) + 1);
 s.set('z', (s.get('y') * 2) + (s.get('x') / 2));
 s.set('x', s.get('z') / 3);
-const t = new Turtle(s.get('x'), s.get('y'));
+const t = new Turtle(s.get('x'), s.get('y')); // trace
 t.forward();
     `.trim(),
     java: `
@@ -707,7 +709,7 @@ s.set('y', (s.get('x') * 3) + 2);
 s.set('z', (s.get('y') * 2) - (s.get('x') * 3));
 s.set('x', (s.get('z') / 4) % 7);
 s.set('y', (s.get('x') + s.get('y')) % 7);
-const t = new Turtle(s.get('x'), s.get('y'));
+const t = new Turtle(s.get('x'), s.get('y')); // trace
 t.backward();
     `.trim(),
     java: `
@@ -731,7 +733,7 @@ s.set('y', (s.get('x') * 4) + 3);
 s.set('z', (s.get('y') * 3) - (s.get('x') * 2));
 s.set('x', ((s.get('z') / 5) + s.get('x')) % 7);
 s.set('y', ((s.get('x') * 2) + s.get('y')) % 7);
-const t = new Turtle(s.get('x'), s.get('y'));
+const t = new Turtle(s.get('x'), s.get('y')); // trace
 t.forward();
     `.trim(),
     java: `
@@ -756,7 +758,7 @@ s.set('z', (s.get('y') * 2) - (s.get('x') * 3));
 s.set('w', (s.get('z') + s.get('x')) % 5);
 s.set('x', ((s.get('z') / 6) + s.get('w')) % 7);
 s.set('y', ((s.get('x') * 3) + s.get('y')) % 7);
-const t = new Turtle(s.get('x'), s.get('y'));
+const t = new Turtle(s.get('x'), s.get('y')); // trace
 t.forward();
     `.trim(),
     java: `
@@ -776,7 +778,7 @@ public class Main {
   },
   while1: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 s.set('i', 0);
 while (s.get('i') < <3-5>) {
   t.forward();
@@ -798,7 +800,7 @@ public class Main {
   },
   while2: {
     instrumented: `
-const t = new Turtle(<0-1>, <0-1>);
+const t = new Turtle(<0-1>, <0-1>); // trace
 s.set('i', <1-2>);
 while (s.get('i') < <4-6>) {
   t.forward();
@@ -820,7 +822,7 @@ public class Main {
   },
   while3: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 s.set('i', 0);
 while (s.get('i') < <2-3>) {
   s.set('i', s.get('i') + 1);
@@ -844,7 +846,7 @@ public class Main {
   },
   while4: {
     instrumented: `
-const t = new Turtle(<0-1>, <0-1>);
+const t = new Turtle(<0-1>, <0-1>); // trace
 t.turnRight();
 s.set('i', <1-2>);
 while (s.get('i') < <4-5>) {
@@ -872,7 +874,7 @@ public class Main {
   },
   while5: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 s.set('i', <1-2>);
 while (s.get('i') < <3-4>) {
   t.forward();
@@ -900,7 +902,7 @@ public class Main {
   },
   for1: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < <3-5>; s.set('i', s.get('i') + 1)) {
   t.forward();
 }
@@ -919,7 +921,7 @@ public class Main {
   },
   for2: {
     instrumented: `
-const t = new Turtle(<1-2>, <1-2>);
+const t = new Turtle(<1-2>, <1-2>); // trace
 for (s.set('i', <1-2>); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
   t.forward();
 }
@@ -938,7 +940,7 @@ public class Main {
   },
   for3: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 s.set('i', 0);
 for (; s.get('i') < <2-3>;) {
   t.forward();
@@ -962,7 +964,7 @@ public class Main {
   },
   for4: {
     instrumented: `
-const t = new Turtle(<1-2>, <1-2>);
+const t = new Turtle(<1-2>, <1-2>); // trace
 s.set('i', 1);
 for (; s.get('i') < <3-4>;) {
   t.forward();
@@ -994,7 +996,7 @@ for (s.set('i', 2); s.get('i') <= <4-5>; s.set('i', s.get('i') + 1)) {
 }
 delete s.vars['i'];
 s.set('x', s.get('x') / 3);
-const t = new Turtle(s.get('x') + 1, 0);
+const t = new Turtle(s.get('x') + 1, 0); // trace
 t.forward();
     `.trim(),
     java: `
@@ -1022,7 +1024,7 @@ for (s.set('i', <4-5>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
 delete s.vars['i'];
 s.set('a', s.get('a') / 4);
 s.set('b', s.get('b') / 5);
-const t = new Turtle(s.get('a') % 6, s.get('b') % 6);
+const t = new Turtle(s.get('a') % 6, s.get('b') % 6); // trace
 t.forward();
     `.trim(),
     java: `
@@ -1044,7 +1046,7 @@ public class Main {
   },
   for7: {
     instrumented: `
-const t = new Turtle(3, 3);
+const t = new Turtle(3, 3); // trace
 s.set('sum', 0);
 for (s.set('i', 1); s.get('i') <= <4-6>; s.set('i', s.get('i') + 1)) {
   s.set('sum', s.get('sum') + s.get('i'));
@@ -1080,7 +1082,7 @@ public class Main {
   },
   doubleLoop1: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < <2-3>; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < <2-3>; s.set('j', s.get('j') + 1)) {
       t.forward();
@@ -1106,7 +1108,7 @@ public class Main {
   },
   doubleLoop2: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 t.turnRight();
 for (s.set('i', 0); s.get('i') < <2-3>; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < <2-3>; s.set('j', s.get('j') + 1)) {
@@ -1134,7 +1136,7 @@ public class Main {
   },
   doubleLoop3: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', <3-4>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
   for (s.set('j', 0); s.get('j') < s.get('i'); s.set('j', s.get('j') + 1)) {
     t.forward();
@@ -1160,7 +1162,7 @@ public class Main {
   },
   doubleLoop4: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', <3-4>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
   s.set('j', s.get('i'));
   while (s.get('j') >= 0) {
@@ -1190,7 +1192,7 @@ public class Main {
   },
   doubleLoop5: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
   for (s.set('j', <0-1>); s.get('j') <= s.get('i'); s.set('j', s.get('j') + 1)) {
     t.forward();
@@ -1225,7 +1227,7 @@ public class Main {
   },
   if1: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < <7-9>; s.set('i', s.get('i') + 1)) {
   t.forward();
   if (s.get('i') % 3 === 2) {
@@ -1250,7 +1252,7 @@ public class Main {
   },
   if2: {
     instrumented: `
-const t = new Turtle(<1-2>, <1-2>);
+const t = new Turtle(<1-2>, <1-2>); // trace
 t.turnRight();
 for (s.set('i', 0); s.get('i') < <6-8>; s.set('i', s.get('i') + 1)) {
   t.forward();
@@ -1277,7 +1279,7 @@ public class Main {
   },
   if3: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < <4-5>; s.set('i', s.get('i') + 1)) {
   t.forward();
   if (s.get('i') % 2 === 0) {
@@ -1306,7 +1308,7 @@ public class Main {
   },
   if4: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < <4-5>; s.set('i', s.get('i') + 1)) {
   t.forward();
   if (s.get('i') % 3 === 0) {
@@ -1335,7 +1337,7 @@ public class Main {
   },
   if5: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < <2-3>; s.set('j', s.get('j') + 1)) {
     if (s.get('j') % 2 === 0) {
@@ -1371,7 +1373,7 @@ public class Main {
   },
   elseIf1: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') < 2) {
     t.forward();
@@ -1401,7 +1403,7 @@ public class Main {
   },
   elseIf2: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') % 4 === 0) {
     t.forward();
@@ -1435,7 +1437,7 @@ public class Main {
   },
   elseIf3: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < 7; s.set('i', s.get('i') + 1)) {
   if (s.get('i') < 2) {
     t.forward();
@@ -1469,7 +1471,7 @@ public class Main {
   },
   elseIf4: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < <6-7>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') % 5 === 0) {
     t.forward();
@@ -1503,7 +1505,7 @@ public class Main {
   },
   elseIf5: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < <7-8>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') % 5 === 1) {
     t.turnRight();
@@ -1533,7 +1535,7 @@ public class Main {
   },
   switch1: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   switch (s.get('i')) {
     case 0: case 1:
@@ -1566,7 +1568,7 @@ public class Main {
   },
   switch2: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   switch (s.get('i') % 4) {
     case 1:
@@ -1599,7 +1601,7 @@ public class Main {
   },
   switch3: {
     instrumented: `
-const t = new Turtle(2, 2);
+const t = new Turtle(2, 2); // trace
 for (s.set('i', 0); s.get('i') < <6-7>; s.set('i', s.get('i') + 1)) {
   switch (s.get('i')) {
     case 0:
@@ -1646,7 +1648,7 @@ public class Main {
   },
   switch4: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < <7-8>; s.set('i', s.get('i') + 1)) {
   switch (s.get('i') % 5) {
     case 0:
@@ -1689,7 +1691,7 @@ public class Main {
   },
   switch5: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < <9-10>; s.set('i', s.get('i') + 1)) {
   switch (s.get('i') % 6) {
     case 0:
@@ -1734,7 +1736,7 @@ public class Main {
   },
   break1: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 while (true) {
   if (!t.canMoveForward()) break;
   t.forward();
@@ -1754,7 +1756,7 @@ public class Main {
   },
   break2: {
     instrumented: `
-const t = new Turtle(<3-4>,<3-4>);
+const t = new Turtle(<3-4>,<3-4>); // trace
 while (true) {
   if (!t.canMoveForward()) break;
   t.forward();
@@ -1784,7 +1786,7 @@ public class Main {
   },
   break3: {
     instrumented: `
-const t = new Turtle(<4-6>, <4-6>);
+const t = new Turtle(<4-6>, <4-6>); // trace
 for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
   while (true) {
     t.forward();
@@ -1811,7 +1813,7 @@ public class Main {
   },
   break4: {
     instrumented: `
-const t = new Turtle(<3-5>, <3-5>);
+const t = new Turtle(<3-5>, <3-5>); // trace
 for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   while (true) {
     if (!t.canMoveForward()) break;
@@ -1838,7 +1840,7 @@ public class Main {
   },
   break5: {
     instrumented: `
-const t = new Turtle(<4-6>, <4-6>);
+const t = new Turtle(<4-6>, <4-6>); // trace
 for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < 6; s.set('j', s.get('j') + 1)) {
     if (!t.canMoveForward()) break;
@@ -1876,7 +1878,7 @@ public class Main {
   },
   continue1: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < <3-5>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') == 0) {
     continue;
@@ -1901,7 +1903,7 @@ public class Main {
   },
   continue2: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') % <2-3> == 1) {
     t.turnRight();
@@ -1928,7 +1930,7 @@ public class Main {
   },
   continue3: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
   for (s.set('j', s.get('i') * 4); s.get('j') < 8; s.set('j', s.get('j') + 1)) {
     if (s.get('j') % 4 == 1) {
@@ -1964,7 +1966,7 @@ public class Main {
   },
   continue4: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   for (s.set('j', s.get('i')); s.get('j') < 6; s.set('j', s.get('j') + 1)) {
     if (s.get('j') % 2 == 0) {
@@ -2000,7 +2002,7 @@ public class Main {
   },
   continue5: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   for (s.set('j', s.get('i') + 1); s.get('j') < 6; s.set('j', s.get('j') + 1)) {
     if (s.get('j') % 4 == 0) {
@@ -2038,7 +2040,7 @@ public class Main {
   },
   method1: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 call(forwardTwoSteps, 't')(t);
 t.turnRight();
 call(threeStepsForward, 't')(t);
@@ -2076,7 +2078,7 @@ public class Main {
   },
   method2: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 call(forwardTwoSteps, 't')(t);
 call(turnAround, 't')(t);
 t.forward();
@@ -2095,7 +2097,7 @@ function turnAround(t) {
     java: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // sid:
+        Turtle t = new Turtle(); // sid
         二歩前に進める(t); // caller
         後ろを向く(t); // caller
         t.前に進む(); // sid
@@ -2113,7 +2115,7 @@ public class Main {
   },
   method3: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 call(forwardGivenSteps, 't', 'n')(t, <3-4>);
 t.turnRight();
 call(forwardGivenSteps, 't', 'n')(t, 2);
@@ -2144,7 +2146,7 @@ public class Main {
   },
   method4: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 call(forwardTwoSteps, 't')(t);
 t.turnRight();
 call(forwardFourSteps, 't')(t);
@@ -2180,7 +2182,7 @@ public class Main {
   },
   method5: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 call(drawSquare, 't')(t);
 t.backward();
 t.backward();
@@ -2214,7 +2216,7 @@ public class Main {
   },
   return1: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 s.set('x', call(double, 'a')(<2-3>));
 call(forwardGivenSteps, 't', 'n')(t, s.get('x'));
 
@@ -2249,7 +2251,7 @@ public class Main {
   },
   return2: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 s.set('x', call(double, 'a')(2));
 call(forwardGivenSteps, 't', 'n')(t, s.get('x'));
 t.turnRight();
@@ -2290,7 +2292,7 @@ public class Main {
   },
   return3: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 call(forwardGivenSteps, 't', 'n')(t, call(add, 'a', 'b')(1, 1));
 call(forwardGivenSteps, 't', 'n')(t, call(add, 'a', 'b')(1, 2));
 
@@ -2325,7 +2327,7 @@ public class Main {
   },
   return4: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
   if (call(isEven, 'a')(s.get('i'))) {
     t.turnRight();
@@ -2376,7 +2378,7 @@ public class Main {
   },
   return5: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < 3; s.set('j', s.get('j') + 1)) {
     if (call(isEqual, 'a', 'b')(s.get('i'), s.get('j')))
@@ -2425,7 +2427,7 @@ public class Main {
 
   array1: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 s.set('arr', [2, <1-2>, <1-2>]);
 for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
   call(forwardGivenSteps, 't', 'n')(t, s.get('arr')[s.get('i')]);
@@ -2460,7 +2462,7 @@ public class Main {
   },
   array2: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 s.set('arr', [<4-5>, <3-4>, <3-4>]);
 for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
   call(forwardGivenSteps, 't', 'n')(t, s.get('arr')[s.get('i')]);
@@ -2495,7 +2497,7 @@ public class Main {
   },
   array3: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 s.set('arr', [0, 1, 0, 2, 0]);
 for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
   switch (s.get('arr')[s.get('i')]) {
@@ -2530,7 +2532,7 @@ public class Main {
   },
   array4: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 s.set('arr', [0, 1, 0, 2, 0]);
 for (const cmd of [0, 1, 0, 2, 0]) {
   s.set('cmd', cmd);
@@ -2566,7 +2568,7 @@ public class Main {
   },
   array5: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 s.set('arr', [0, 1, 0, 2, 0, 3, 0]);
 s.set('steps', 1);
 for (const cmd of [0, 1, 0, 2, 0, 3, 0]) {
@@ -2615,7 +2617,7 @@ public class Main {
   },
   string1: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 s.set('s', 'frflf');
 for (s.set('i', 0); s.get('i') < s.get('s').length; s.set('i', s.get('i') + 1)) {
   switch (s.get('s').charAt(s.get('i'))) {
@@ -2650,7 +2652,7 @@ public class Main {
   },
   string2: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 s.set('s', 'ffbrfl');
 for (s.set('i', 0); s.get('i') < s.get('s').length; s.set('i', s.get('i') + 1)) {
   switch (s.get('s').charAt(s.get('i'))) {
@@ -2689,7 +2691,7 @@ public class Main {
   },
   string3: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 s.set('s', 'frflf');
 for (const ch of 'frflf') {
   s.set('ch', ch);
@@ -2725,7 +2727,7 @@ public class Main {
   },
   string4: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 s.set('cmds', ['ri', 'aa', 'fo']);
 for (const cmd of ['ri', 'aa', 'fo']) {
   s.set('cmd', cmd);
@@ -2760,7 +2762,7 @@ public class Main {
   },
   string5: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 s.set('cmds', ['ri', 'add', 'fo', 'add', 'le', 'fo', 'fo']);
 s.set('x', 0);
 for (const cmd of ['ri', 'add', 'fo', 'add', 'le', 'fo', 'fo']) {
@@ -2816,8 +2818,8 @@ public class Main {
   },
   oop1: {
     instrumented: `
-const t1 = new Turtle(1, 1);
-const t2 = new Turtle(3, 3);
+const t1 = new Turtle(1, 1); // trace
+const t2 = new Turtle(3, 3); // trace
 t1.forward();
 t2.forward();
 t1.forward();
@@ -2837,21 +2839,23 @@ public class Main {
 `.trim(),
   },
   oop2: {
+    // 上のコードから下にあるクラスを参照するためには、main()関数を定義しないといけない。
     instrumented: `
 function main() {
-  const m = new MyTurtle(0, 0, 2);
-  m.forward();
+  const m = call(MyTurtle, 'x', 'y', 'speed')(0, 0, 2);
+  call(m.forward.bind(m))();
 }
 
 class MyTurtle {
   constructor(x, y, speed) {
-    this.speed = speed;
-    this.c = new Turtle(x, y);
+    this.speed = speed; // trace
+    this.c = new Turtle(x, y); // trace
   }
   forward() {
-    for (let i = 0; i < this.speed; i++) {
+    for (s.set('i', 0); s.get('i') < this.speed; s.set('i', s.get('i') + 1)) {
       this.c.forward();
     }
+    delete s.vars['i'];
   }
 }
 
@@ -2860,8 +2864,8 @@ main();
     java: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle m = new MyTurtle(0, 0, 2); // sid
-    m.forward(); // sid
+    MyTurtle m = new MyTurtle(0, 0, 2); // caller
+    m.forward(); // caller
   }
 }
 
@@ -2880,21 +2884,160 @@ class MyTurtle {
 }
 `.trim(),
   },
-  oop3: {
+  // ----------- 初級プログラミングⅡ 第1回 ここから -----------
+  // ----------- 初級プログラミングⅡ 第1回 ここまで -----------
+
+  // ----------- 初級プログラミングⅡ 第2回 ここから -----------
+  // ----------- 初級プログラミングⅡ 第2回 ここまで -----------
+
+  // ----------- 初級プログラミングⅡ 第3回 ここから -----------
+  // ----------- 初級プログラミングⅡ 第3回 ここまで -----------
+
+  // ----------- 初級プログラミングⅡ 第4回 ここから -----------
+  static2: {
+    // グローバル変数を扱う際は、 `myGlobal` という名前のオブジェクトを使うこと。
+    // 上のコードから下にあるクラスを参照するためには、main()関数を定義しないといけない。
     instrumented: `
-const t = new Turtle();
-`,
+myGlobal.Settings = { speed: 3 };
+
+function main() {
+  const t1 = call(MyTurtle)(); // trace
+  call(t1.moveForward.bind(t1))();
+  myGlobal.Settings.speed = 2; // trace
+  const t2 = call(MyTurtle)(); // trace
+  call(t1.moveForward.bind(t1))();
+  call(t2.moveForward.bind(t2))();
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle();
+  }
+  moveForward() {
+    for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) {
+      this.t.forward();
+    }
+    delete s.vars['i'];
+  }
+}
+
+main();
+`.trim(),
     java: `
 public class Main {
   public static void main(String[] args) {
-    Turtle c = new Turtle(); // sid
+    MyTurtle t1 = new MyTurtle(); // caller // sid
+    t1.moveForward(); // caller
+    Settings.speed = 2; // sid
+    MyTurtle t2 = new MyTurtle(); // caller // sid
+    t1.moveForward(); // caller
+    t2.moveForward(); // caller
   }
 }
-`,
+
+class Settings {
+  static public int speed = 3;
+}
+
+class MyTurtle {
+  private Turtle t = new Turtle();
+
+  void moveForward(Turtle t) {
+    for (int i = 0; i < Settings.speed; i++) { // sid
+      t.前に進む(); // sid
+    }
+  }
+}
+`.trim(),
   },
+  // ----------- 初級プログラミングⅡ 第4回 ここまで -----------
+
+  // ----------- 初級プログラミングⅡ 第5回 ここから -----------
+  polymorphism1: {
+    instrumented: `
+function main() {
+  const ts = [call(MyTurtle, 'x', 'y')(0, 0), call(FastTurtle, 'p')(1)]; // trace
+  for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) {
+    call(ts[s.get('i')].drawLine.bind(ts[s.get('i')]))();
+  }
+}
+
+class MyTurtle {
+  constructor(x, y) {
+    this.t = new Turtle(x, y);
+  }
+  drawLine() {
+    for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) {
+      this.t.forward();
+    }
+    delete s.vars['i'];
+  }
+  length() {
+    return 2;
+  }
+}
+
+class FastTurtle extends MyTurtle {
+  constructor(p) {
+    super(p, p);
+  }
+  length() {
+    return 3;
+  }
+}
+
+main();
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle[] ts = {
+        new MyTurtle(0, 0), new FastTurtle(1) };  // caller // sid
+    for (int i = 0; i < ts.length; i++) {
+      ts[i].drawLine(); // caller
+    }
+  }
+}
+
+class MyTurtle {
+  Turtle t;
+
+  MyTurtle(int x, int y) {
+    this.t = new Turtle(x, y);
+  }
+  void drawLine() {
+    for (int i = 0; i < this.length(); i++) { // sid
+      this.t.前に進む(); // sid
+    }
+  }
+  int length() {
+    return 2;
+  }
+}
+
+class FastTurtle extends MyTurtle {
+  FastTurtle(int p) {
+    super(p, p);
+  }
+  @Override int length() {
+    return 3;
+  }
+}
+`.trim(),
+  },
+  // ----------- 初級プログラミングⅡ 第5回 ここまで -----------
+
+  // ----------- 初級プログラミングⅡ 第6回 ここから -----------
+  // ----------- 初級プログラミングⅡ 第6回 ここまで -----------
+
+  // ----------- 初級プログラミングⅡ 第7回 ここから -----------
+  // ----------- 初級プログラミングⅡ 第7回 ここまで -----------
+
+  // ----------- 初級プログラミングⅡ 第8回 ここから -----------
+  // ----------- 初級プログラミングⅡ 第8回 ここまで -----------
   test1: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 t.forward();
 t.forward();
 t.forward();
@@ -2913,7 +3056,7 @@ public class Main {
   },
   test2: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
   t.forward();
   t.forward();
@@ -2968,13 +3111,13 @@ public class Main {
   },
   test4: {
     instrumented: `
-const t1 = new Turtle();
+const t1 = new Turtle(); // trace
 t1.forward();
 t1.turnRight();
 s.set('i', 0);
 t1.forward();
 
-const t2 = new Turtle(2, 3, 'G');
+const t2 = new Turtle(2, 3, 'G'); // trace
 t2.forward();
 s.set('foo', 'あいうえお');
 s.set('bar', <1-100>);
@@ -3004,7 +3147,7 @@ public class Main {
   },
   test5: {
     instrumented: `
-const t = new Turtle();
+const t = new Turtle(); // trace
 t.forward();
 t.forward();
 t.turnRight();

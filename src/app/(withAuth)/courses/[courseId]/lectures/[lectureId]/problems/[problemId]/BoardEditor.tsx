@@ -75,7 +75,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
       updateVariables(props.initialVariables);
       if (!keepSelectedCell) setSelectedCell(undefined);
     },
-    [previousTraceItem, props.initialVariables, updateBoard, updateTurtles]
+    [previousTraceItem, props.initialVariables, updateBoard, updateTurtles, updateVariables]
   );
 
   useImperativeHandle(ref, () => ({
@@ -84,8 +84,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
   useEffect(() => {
     initialize(props.previousTraceItemIndex >= 1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.previousTraceItemIndex, props.problem]);
+  }, [props.previousTraceItemIndex, initialize]); // We should include initialize because it depends on props.initialVariables
 
   const updateTurtle = (currentTurtle: TurtleTrace, newTurtle: Partial<TurtleTrace>): void => {
     updateTurtles((draft) => {
@@ -116,7 +115,8 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
         zenkakuAlphanumericalsToHankaku(value) !==
         zenkakuAlphanumericalsToHankaku(props.currentVariables[name].toString())
       ) {
-        locations.push(`変数${name}`);
+        const isExpression = /[+\-*/%()[\]\\.]/.test(name);
+        locations.push(isExpression ? `式「${name}」` : `変数${name}`);
         if (props.initialVariables[name].toString() === props.currentVariables[name].toString()) {
           hintText += hintText ? '\n\n' : '\n\nヒント: ';
           hintText +=
@@ -234,7 +234,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
             <Table size="sm">
               <Thead>
                 <Tr>
-                  <Th>変数名</Th>
+                  <Th>変数/式</Th>
                   <Th>値（=や+=などの代入がないと変化しない）</Th>
                 </Tr>
               </Thead>
