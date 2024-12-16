@@ -596,11 +596,14 @@ public class Straight {
 );
 
 test('Trace a specific program', () => {
-  const problem = instantiateProblem('oop2', 'java', '');
+  const problem = instantiateProblem('polymorphism1', 'java', '');
   if (!problem) throw new Error('Failed to generate problem.');
 
-  const { displayProgram, sidToLineIndex, traceItems } = problem;
-  console.info('displayProgram:', JSON.stringify(displayProgram, undefined, 2));
+  const { displayProgram, executableCode, sidToLineIndex, traceItems } = problem;
+  console.info('---------------------- displayProgram ----------------------\n', displayProgram);
+  console.info('------------------------------------------------------------\n');
+  console.info('---------------------- executableCode ----------------------\n', executableCode);
+  console.info('------------------------------------------------------------\n');
   console.info('sidToLineIndex:', JSON.stringify(Object.fromEntries(sidToLineIndex), undefined, 2));
   console.info('traceItems:', JSON.stringify(traceItems, undefined, 2));
 });

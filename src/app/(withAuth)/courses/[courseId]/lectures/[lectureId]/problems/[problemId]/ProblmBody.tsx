@@ -317,11 +317,10 @@ function getInitialVariables(
   let adjustedPreviousTraceItemIndex = previousTraceItemIndex;
 
   if (problemType === 'step') {
-    while (
-      adjustedPreviousTraceItemIndex > 0 &&
-      traceItems[currentTraceItemIndex].depth !== traceItems[adjustedPreviousTraceItemIndex].depth
-    ) {
-      if (traceItems[currentTraceItemIndex].depth > traceItems[adjustedPreviousTraceItemIndex].depth) {
+    const currentDepth = traceItems[currentTraceItemIndex].depth;
+    while (adjustedPreviousTraceItemIndex > 0 && currentDepth !== traceItems[adjustedPreviousTraceItemIndex].depth) {
+      if (currentDepth > traceItems[adjustedPreviousTraceItemIndex].depth) {
+        // 過去のトレースの方が現在のトレースよりも深いため。
         return getEmptyVariables(currentVariables);
       }
       adjustedPreviousTraceItemIndex--;
@@ -330,6 +329,7 @@ function getInitialVariables(
     if (
       traceItems[currentTraceItemIndex].callStack.at(-1) !== traceItems[adjustedPreviousTraceItemIndex].callStack.at(-1)
     ) {
+      // 過去のトレースと現在のトレースのスタックトレースが別であるため。
       return getEmptyVariables(currentVariables);
     }
   }

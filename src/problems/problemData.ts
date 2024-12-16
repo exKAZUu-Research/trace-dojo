@@ -90,7 +90,8 @@ export const problemIds = [
   'string5',
   'oop1',
   'oop2',
-  'oop3',
+  'static2',
+  'polymorphism1',
   'test1',
   'test2',
   'test3',
@@ -197,7 +198,8 @@ export const problemIdToName: Record<ProblemId, string> = {
   string5: '文字列を使おう(5)',
   oop1: 'オブジェクト指向プログラミング(1)',
   oop2: 'オブジェクト指向プログラミング(2)',
-  oop3: 'オブジェクト指向プログラミング(3)',
+  static2: '静的フィールド(2)',
+  polymorphism1: 'ポリモルフィズム(1)',
   test1: 'ステップ実行のテスト用問題(1)',
   test2: 'ステップ実行のテスト用問題(2)',
   test3: 'ステップ実行のテスト用問題(3)',
@@ -242,8 +244,8 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     ['method1', 'method2', 'method3', 'method4', 'method5', 'return1', 'return2', 'return3', 'return4', 'return5'],
     ['array1', 'array2', 'array3', 'array4', 'array5', 'string1', 'string2', 'string3', 'string4', 'string5'],
   ],
-  tuBeginner2: [['oop1', 'oop2', 'oop3']],
-  test: [['test1', 'test2', 'test3', 'test4', 'test5']],
+  tuBeginner2: [],
+  test: [['test1', 'test2', 'test3', 'test4', 'test5', 'oop1', 'oop2', 'static2', 'polymorphism1']],
 };
 
 export const courseIdToLectureIds: Record<CourseId, string[]> = JSON.parse(
@@ -2837,6 +2839,7 @@ public class Main {
 `.trim(),
   },
   oop2: {
+    // 上のコードから下にあるクラスを参照するためには、main()関数を定義しないといけない。
     instrumented: `
 function main() {
   const m = call(MyTurtle, 'x', 'y', 'speed')(0, 0, 2);
@@ -2849,10 +2852,10 @@ class MyTurtle {
     this.c = new Turtle(x, y); // sid
   }
   forward() {
-    console.info(s.vars);
-    for (let i = 0; i < this.speed; i++) {
+    for (s.set('i', 0); s.get('i') < this.speed; s.set('i', s.get('i') + 1)) {
       this.c.forward(); // sid
     }
+    delete s.vars['i'];
   }
 }
 
@@ -2881,18 +2884,6 @@ class MyTurtle {
 }
 `.trim(),
   },
-  oop3: {
-    instrumented: `
-const t = new Turtle();
-`,
-    java: `
-public class Main {
-  public static void main(String[] args) {
-    Turtle c = new Turtle(); // sid
-  }
-}
-`,
-  },
   // ----------- 初級プログラミングⅡ 第1回 ここから -----------
   // ----------- 初級プログラミングⅡ 第1回 ここまで -----------
 
@@ -2903,9 +2894,137 @@ public class Main {
   // ----------- 初級プログラミングⅡ 第3回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第4回 ここから -----------
+  static2: {
+    // グローバル変数を扱う際は、 `myGlobal` という名前の変数を使うこと。
+    // 上のコードから下にあるクラスを参照するためには、main()関数を定義しないといけない。
+    instrumented: `
+myGlobal = { Settings: { speed: 3 } };
+
+function main() {
+  const t1 = call(MyTurtle)(); // sid
+  call(t1.moveForward.bind(t1))();
+  myGlobal.Settings.speed = 2; // sid
+  const t2 = call(MyTurtle)(); // sid
+  call(t1.moveForward.bind(t1))();
+  call(t2.moveForward.bind(t2))();
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle();
+  }
+  moveForward() {
+    for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) {
+      this.t.forward(); // sid
+    }
+    delete s.vars['i'];
+  }
+}
+
+main();
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle t1 = new MyTurtle(); // caller // sid
+    t1.moveForward(); // caller
+    Settings.speed = 2; // sid
+    MyTurtle t2 = new MyTurtle(); // caller // sid
+    t1.moveForward(); // caller
+    t2.moveForward(); // caller
+  }
+}
+
+class Settings {
+  static public int speed = 3;
+}
+
+class MyTurtle {
+  private Turtle t = new Turtle();
+
+  void moveForward(Turtle t) {
+    for (int i = 0; i < Settings.speed; i++) {
+      t.前に進む(); // sid
+    }
+  }
+}
+`.trim(),
+  },
   // ----------- 初級プログラミングⅡ 第4回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第5回 ここから -----------
+  polymorphism1: {
+    instrumented: `
+function main() {
+  const ts = [call(MyTurtle, 'x', 'y')(0, 0), call(FastTurtle, 'p')(1)]; // sid
+  for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) {
+    call(ts[s.get('i')].drawLine.bind(ts[s.get('i')]))();
+  }
+}
+
+class MyTurtle {
+  constructor(x, y) {
+    this.t = new Turtle(x, y);
+  }
+  drawLine() {
+    for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) {
+      this.t.forward(); // sid
+    }
+    delete s.vars['i'];
+  }
+  length() {
+    return 2;
+  }
+}
+
+class FastTurtle extends MyTurtle {
+  constructor(p) {
+    super(p, p);
+  }
+  length() {
+    return 3;
+  }
+}
+
+main();
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle[] ts = {
+        new MyTurtle(0, 0), new FastTurtle(1) };  // caller // sid
+    for (int i = 0; i < ts.length; i++) {
+      ts[i].drawLine(); // caller
+    }
+  }
+}
+
+class MyTurtle {
+  Turtle t;
+
+  MyTurtle(int x, int y) {
+    this.t = new Turtle(x, y);
+  }
+  void drawLine() {
+    for (int i = 0; i < this.length(); i++) {
+      this.t.前に進む(); // sid
+    }
+  }
+  int length() {
+    return 2;
+  }
+}
+
+class FastTurtle extends MyTurtle {
+  FastTurtle(int p) {
+    super(p, p);
+  }
+  @Override int length() {
+    return 3;
+  }
+}
+`.trim(),
+  },
   // ----------- 初級プログラミングⅡ 第5回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第6回 ここから -----------

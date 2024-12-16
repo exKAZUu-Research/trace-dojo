@@ -80,9 +80,8 @@ class Scope {
     }
     throw new Error(\`\${varName} is not defined: \${JSON.stringify(s)}\`);
   }
-  set(sid, varName, value) {
+  set(varName, value) {
     this.vars[varName] = typeof value === 'number' ? Math.floor(value) : value;
-    addTrace(sid);
   }
   enterNewScope(params) {
     s = new Scope(this);
@@ -149,7 +148,7 @@ class Turtle {
   }
 }
 function addTrace(sid, self) {
-  const vars = {...s.vars};
+  const vars = {...s.vars, ...(typeof myGlobal !== 'undefined' && myGlobal)};
   if (self && self !== globalThis) vars['this'] = {...self};
   flattenObjects(vars);
   trace.push({depth: s.getDepth(), sid, callStack: [...callStack], turtles: turtles.map(t => ({...t})), vars, board: board.map(r => r.join('')).join('\\n')});
@@ -174,7 +173,7 @@ function checkForCond(cond, sid) {
 function call(cid, f, ...argNames) {
   return (...argValues) => {
     if (argNames.length !== argValues.length) {
-      throw new Error(\`Expected \${argNames.length} arguments, got \${argValues.length}.\`);
+      throw new Error(\`Expected \${argNames.length} arguments (\${argNames}), got \${argValues.length} (\${argValues}). Fix call() in instrumented code.\`);
     }
     try {
       callStack.push(cid);
@@ -194,6 +193,8 @@ s = new Scope();
 ${modifiedCode.trim()}
 ({trace, finalVars: {...s.vars}});
 `;
+
+  console.log(executableCode);
 
   const { finalVars, trace: rawTrace } = eval(executableCode) as { trace: TraceItem[]; finalVars: TraceItemVariable };
   const trace = (languageId as string) === 'python' ? rawTrace.filter((item: TraceItem) => !item.last) : rawTrace;
@@ -226,6 +227,7 @@ ${modifiedCode.trim()}
   return {
     languageId,
     displayProgram: refinedLines.join('\n'),
+    executableCode,
     traceItems: trace,
     sidToLineIndex,
     callerIdToLineIndex,
