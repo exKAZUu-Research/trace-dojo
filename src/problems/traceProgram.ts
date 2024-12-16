@@ -63,11 +63,14 @@ export function traceProgram(
   }
   const modifiedCodeLines = modifyCode(instrumented);
   const modifiedCode = modifiedCodeLines.join('\n');
+  const thisPropNames = Object.keys(this);
   // 無理に難読化する必要はないが、コードの文量を減らす意識を持つ。
   const executableCode = `
+let myGlobal = {};
 const trace = [];
 const turtles = [];
 const callStack = [];
+const thisPropNames = ${JSON.stringify(thisPropNames)};
 let s;
 class Scope {
   constructor(parent) {
@@ -153,8 +156,11 @@ class Turtle {
   }
 }
 function addTrace(sid, self) {
-  const vars = {...s.vars, ...(typeof myGlobal !== 'undefined' && myGlobal)};
-  if (self && self !== globalThis) vars['this'] = {...self};
+  const vars = {...s.vars, ...myGlobal};
+  if (self && self !== globalThis) {
+    vars['this'] = {...self};
+    for (const name of thisPropNames) delete vars['this'][name];
+  }
   flattenObjects(vars);
   trace.push({depth: s.getDepth(), sid, callStack: [...callStack], turtles: turtles.map(t => ({...t})), vars, board: board.map(r => r.join('')).join('\\n')});
 }
