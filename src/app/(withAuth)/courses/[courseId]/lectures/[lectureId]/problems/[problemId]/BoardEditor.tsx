@@ -69,8 +69,6 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
   const initialize = useCallback(
     (keepSelectedCell = false): void => {
-      console.log('props.initialVariables:', props.initialVariables);
-
       const initialBoard = parseBoard(previousTraceItem.board);
       updateBoard(initialBoard);
       updateTurtles(previousTraceItem.turtles);
@@ -86,7 +84,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
   useEffect(() => {
     initialize(props.previousTraceItemIndex >= 1);
-  }, [props.previousTraceItemIndex, initialize]);
+  }, [props.previousTraceItemIndex, initialize]); // We should include initialize because it depends on props.initialVariables
 
   const updateTurtle = (currentTurtle: TurtleTrace, newTurtle: Partial<TurtleTrace>): void => {
     updateTurtles((draft) => {

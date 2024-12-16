@@ -199,8 +199,6 @@ ${modifiedCode.trim()}
 ({trace, finalVars: {...s.vars}});
 `;
 
-  console.log(executableCode);
-
   const { finalVars, trace: rawTrace } = eval(executableCode) as { trace: TraceItem[]; finalVars: TraceItemVariable };
   const trace = (languageId as string) === 'python' ? rawTrace.filter((item: TraceItem) => !item.last) : rawTrace;
 
