@@ -2911,8 +2911,46 @@ class MyTurtle {
   // ----------- 初級プログラミングⅡ 第2回 ここから -----------
   makeClass1: {
     instrumented: `
+function main() {
+  const t = new MyTurtle();// trace
+  t.moveForward();
+  t.speed = 1;
+  t.moveForward();
+}
+
+class MyTurtle {
+  const t = new Turtle(); // trace
+  speed = 2;
+  moveForward() {
+    for (s.set('i', 0); s.get('i') < this.speed; s.set('i', s.get('i') + 1)) {
+      this.t.forward();
+    }
+    delete s.vars['i'];
+  }
+}
+
+main();
     `.trim(),
     java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle t = new MyTurtle();// sid
+    t.moveForward();// sid
+    t.speed = 1;// sid
+    t.moveForward();// sid
+  }
+}
+
+class MyTurtle {
+  Turtle t = new Turtle();
+  int speed = 2;
+
+  void moveForward() {
+    for (int i = 0; i < this.speed; i++){
+      this.t.前に進む();
+    }
+  }
+}
     `.trim(),
   },
   makeClass2: {
