@@ -90,6 +90,9 @@ export const problemIds = [
   'string5',
   'oop1',
   'oop2',
+  'encapsulate',
+  'withoutEncapsulate',
+  'withEncapsulate',
   'garbageCollection1',
   'static2',
   'polymorphism1',
@@ -199,6 +202,9 @@ export const problemIdToName: Record<ProblemId, string> = {
   string5: '文字列を使おう(5)',
   oop1: 'オブジェクト指向プログラミング(1)',
   oop2: 'オブジェクト指向プログラミング(2)',
+  encapsulate: 'カプセル化',
+  withoutEncapsulate: 'カプセル化なし',
+  withEncapsulate: 'カプセル化あり',
   garbageCollection1: 'ガベージコレクション(1)',
   static2: '静的フィールド(2)',
   polymorphism1: 'ポリモルフィズム(1)',
@@ -252,7 +258,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     // 第2回
     ['oop1'],
     // 第3回
-    ['oop1'],
+    ['encapsulate', 'withoutEncapsulate', 'withEncapsulate'],
     // 第4回
     ['oop1'],
     // 第5回
@@ -2937,7 +2943,85 @@ public class Main {
   // ----------- 初級プログラミングⅡ 第2回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第3回 ここから -----------
-  // やります(まなべ)
+  encapsulate: {
+    instrumented: `
+  かく
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle t = new MyTurtle();
+    t.moveForward();
+    t.changeSpeed(1);
+    t.moveForward();
+  }
+}
+
+class MyTurtle {
+  private Turtle t = new Turtle();
+  private int speed = 2;
+
+  public void moveForward() {
+    for (int i = 0; i < this.speed; i++) {
+      this.t.前に進む();
+    }
+  }
+  public void changeSpeed(int speed) {
+    this.speed = speed;
+  }
+}
+`.trim(),
+  },
+  withoutEncapsulate: {
+    instrumented: `
+    かく
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle t = new Turtle();
+    drawSquare(t, 2);
+    drawSquare(t, 3);
+  }
+
+  static void drawSquare(Turtle t, int speed) {
+    for (int i = 0; i < 4; i++) {
+      for (int j = 0; j < speed - 1; j++) {
+        t.前に進む();
+      }
+      t.右を向く();
+    }
+  }
+}
+`.trim(),
+  },
+  withEncapsulate: {
+    instrumented: `
+  かく
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    SquareTurtle t = new SquareTurtle();
+    t.draw(2);
+    t.draw(3);
+  }
+}
+
+class SquareTurtle {
+  private Turtle t = new Turtle(0, 0);
+
+  void draw(int s) {
+    for (int i = 0; i < 4; i++) {
+      for (int j = 0; j < speed - 1; j++) {
+        this.t.前に進む();
+      }
+      this.t.右を向く();
+    }
+  }
+}
+`.trim(),
+  },
   // ----------- 初級プログラミングⅡ 第3回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第4回 ここから -----------
