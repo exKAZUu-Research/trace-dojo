@@ -88,9 +88,12 @@ export const problemIds = [
   'string3',
   'string4',
   'string5',
+  // 初級プログラミングII 第1回
+  'multiObject1',
+  'multiObject2',
+  'garbageCollection1',
   'oop1',
   'oop2',
-  'garbageCollection1',
   'static2',
   'polymorphism1',
   'test1',
@@ -197,9 +200,12 @@ export const problemIdToName: Record<ProblemId, string> = {
   string3: '文字列を使おう(3)',
   string4: '文字列を使おう(4)',
   string5: '文字列を使おう(5)',
+  // 初級プログラミングII 第1回
+  multiObject1: '複数のオブジェクトを使おう(1)',
+  multiObject2: '複数のオブジェクトを使おう(2)',
+  garbageCollection1: 'ガベージコレクション(1)',
   oop1: 'オブジェクト指向プログラミング(1)',
   oop2: 'オブジェクト指向プログラミング(2)',
-  garbageCollection1: 'ガベージコレクション(1)',
   static2: '静的フィールド(2)',
   polymorphism1: 'ポリモルフィズム(1)',
   test1: 'ステップ実行のテスト用問題(1)',
@@ -248,7 +254,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
   ],
   tuBeginner2: [
     // 第1回
-    ['oop1', 'garbageCollection1'],
+    ['multiObject1', 'multiObject2', 'garbageCollection1'],
     // 第2回
     ['oop1'],
     // 第3回
@@ -2906,6 +2912,52 @@ class MyTurtle {
 `.trim(),
   },
   // ----------- 初級プログラミングⅡ 第1回 ここから -----------
+  multiObject1: {
+    instrumented: `
+const t1 = new Turtle(1, 1); //trace
+const t2 = new Turtle(3, 3); //trace
+t1.forward();
+t1.turnRight();
+t2.forward();
+t2.turnLeft();
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle t1 = new Turtle(1, 1); //sid
+    Turtle t2 = new Turtle(3, 3); //sid
+    t1.前に進む(); //sid
+    t1.右を向く(); //sid
+    t2.前に進む(); //sid
+    t2.左を向く(); //sid
+  }
+}
+`.trim(),
+  },
+  multiObject2: {
+    instrumented: `
+const t1 = new Turtle(1, 1); //trace
+t1.forward();
+t1.turnRight();
+const t2 = new Turtle(3, 3); //trace
+t2.forward();
+t2.turnLeft();
+t2.forward();
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle t1 = new Turtle(1, 1); //sid
+    t1.前に進む(); //sid
+    t1.右を向く(); //sid
+    Turtle t2 = new Turtle(3, 3); //sid
+    t2.前に進む(); //sid
+    t2.左を向く(); //sid
+    t2.前に進む(); //sid
+  }
+}
+`.trim(),
+  },
   garbageCollection1: {
     instrumented: `
 let t1 = new Turtle(1, 1); // trace
