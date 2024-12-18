@@ -91,7 +91,16 @@ export const problemIds = [
   // 初級プログラミングII 第1回
   'multiObject1',
   'multiObject2',
+  'multiObject3',
+  'multiObject4',
+  'multiObject5',
+  'multiObject6',
   'garbageCollection1',
+  'garbageCollection2',
+  'garbageCollection3',
+  'garbageCollection4',
+  'garbageCollection5',
+  'garbageCollection6',
   'oop1',
   'oop2',
   'static2',
@@ -203,7 +212,16 @@ export const problemIdToName: Record<ProblemId, string> = {
   // 初級プログラミングII 第1回
   multiObject1: '複数のオブジェクトを使おう(1)',
   multiObject2: '複数のオブジェクトを使おう(2)',
+  multiObject3: '複数のオブジェクトを使おう(3)',
+  multiObject4: '複数のオブジェクトを使おう(4)',
+  multiObject5: '複数のオブジェクトを使おう(5)',
+  multiObject6: '複数のオブジェクトを使おう(6)',
   garbageCollection1: 'ガベージコレクション(1)',
+  garbageCollection2: 'ガベージコレクション(2)',
+  garbageCollection3: 'ガベージコレクション(3)',
+  garbageCollection4: 'ガベージコレクション(4)',
+  garbageCollection5: 'ガベージコレクション(5)',
+  garbageCollection6: 'ガベージコレクション(6)',
   oop1: 'オブジェクト指向プログラミング(1)',
   oop2: 'オブジェクト指向プログラミング(2)',
   static2: '静的フィールド(2)',
@@ -254,7 +272,20 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
   ],
   tuBeginner2: [
     // 第1回
-    ['multiObject1', 'multiObject2', 'garbageCollection1'],
+    [
+      'multiObject1',
+      'multiObject2',
+      'multiObject3',
+      'multiObject4',
+      'multiObject5',
+      'multiObject6',
+      'garbageCollection1',
+      'garbageCollection2',
+      'garbageCollection3',
+      'garbageCollection4',
+      'garbageCollection5',
+      'garbageCollection6',
+    ],
     // 第2回
     ['oop1'],
     // 第3回
@@ -2958,6 +2989,22 @@ public class Main {
 }
 `.trim(),
   },
+  multiObject3: {
+    instrumented: ``.trim(),
+    java: ``.trim(),
+  },
+  multiObject4: {
+    instrumented: ``.trim(),
+    java: ``.trim(),
+  },
+  multiObject5: {
+    instrumented: ``.trim(),
+    java: ``.trim(),
+  },
+  multiObject6: {
+    instrumented: ``.trim(),
+    java: ``.trim(),
+  },
   garbageCollection1: {
     instrumented: `
 let t1 = new Turtle(1, 1); // trace
@@ -2982,6 +3029,26 @@ public class Main {
   }
 }
 `.trim(),
+  },
+  garbageCollection2: {
+    instrumented: ``.trim(),
+    java: ``.trim(),
+  },
+  garbageCollection3: {
+    instrumented: ``.trim(),
+    java: ``.trim(),
+  },
+  garbageCollection4: {
+    instrumented: ``.trim(),
+    java: ``.trim(),
+  },
+  garbageCollection5: {
+    instrumented: ``.trim(),
+    java: ``.trim(),
+  },
+  garbageCollection6: {
+    instrumented: ``.trim(),
+    java: ``.trim(),
   },
   // ----------- 初級プログラミングⅡ 第1回 ここまで -----------
 
