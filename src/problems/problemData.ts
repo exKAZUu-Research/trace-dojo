@@ -98,6 +98,10 @@ export const problemIds = [
   'test3',
   'test4',
   'test5',
+  'staticMethod1',
+  'staticMethod2',
+  'staticField1',
+  'staticField2',
 ] as const;
 export type ProblemId = (typeof problemIds)[number];
 
@@ -207,6 +211,10 @@ export const problemIdToName: Record<ProblemId, string> = {
   test3: 'ステップ実行のテスト用問題(3)',
   test4: 'ステップ実行のテスト用問題(4)',
   test5: 'チェックポイント取得のテスト用問題',
+  staticMethod1: '静的メソッド(1)',
+  staticMethod2: '静的メソッド(2)',
+  staticField1: '静的フィールド(1)',
+  staticField2: '静的フィールド(2)',
 };
 
 export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]> = {
@@ -254,7 +262,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     // 第3回
     ['oop1'],
     // 第4回
-    ['oop1'],
+    ['oop1', 'staticMethod1', 'staticMethod2', 'staticField1', 'staticField2'],
     // 第5回
     ['oop1'],
     // 第6回
@@ -2997,6 +3005,48 @@ class MyTurtle {
 `.trim(),
   },
   // ----------- 初級プログラミングⅡ 第4回 ここまで -----------
+  staticMethod1: {
+    instrumented: `
+const t = new Turtle(<1-2>, <1-2>);
+for (s.set('i', <1-2>); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
+  t.forward();
+}
+delete s.vars['i'];
+
+    main();
+  `.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle 亀 = new Turtle(<1-2>, <1-2>);
+    for (int i = <1-2>; i < <4-6>; i++) {
+        亀.前に進む();
+    }
+  }
+}
+    `.trim(),
+  },
+  staticMethod2: {
+    instrumented: `
+    main();
+  `.trim(),
+    java: `
+    `.trim(),
+  },
+  staticField1: {
+    instrumented: `
+    main();
+  `.trim(),
+    java: `
+    `.trim(),
+  },
+  staticField2: {
+    instrumented: `
+    main();
+  `.trim(),
+    java: `
+    `.trim(),
+  },
 
   // ----------- 初級プログラミングⅡ 第5回 ここから -----------
   polymorphism1: {
