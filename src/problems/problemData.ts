@@ -90,6 +90,7 @@ export const problemIds = [
   'string5',
   'oop1',
   'oop2',
+  'garbageCollection1',
   'static2',
   'polymorphism1',
   'test1',
@@ -198,6 +199,7 @@ export const problemIdToName: Record<ProblemId, string> = {
   string5: '文字列を使おう(5)',
   oop1: 'オブジェクト指向プログラミング(1)',
   oop2: 'オブジェクト指向プログラミング(2)',
+  garbageCollection1: 'ガベージコレクション(1)',
   static2: '静的フィールド(2)',
   polymorphism1: 'ポリモルフィズム(1)',
   test1: 'ステップ実行のテスト用問題(1)',
@@ -246,7 +248,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
   ],
   tuBeginner2: [
     // 第1回
-    ['oop1'],
+    ['oop1', 'garbageCollection1'],
     // 第2回
     ['oop1'],
     // 第3回
@@ -262,7 +264,9 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     // 第8回
     ['oop1'],
   ],
-  test: [['test1', 'test2', 'test3', 'test4', 'test5', 'oop1', 'oop2', 'static2', 'polymorphism1']],
+  test: [
+    ['test1', 'test2', 'test3', 'test4', 'test5', 'oop1', 'oop2', 'garbageCollection1', 'static2', 'polymorphism1'],
+  ],
 };
 
 export const courseIdToLectureIds: Record<CourseId, string[]> = JSON.parse(
@@ -2902,6 +2906,31 @@ class MyTurtle {
 `.trim(),
   },
   // ----------- 初級プログラミングⅡ 第1回 ここから -----------
+  garbageCollection1: {
+    instrumented: `
+let t1 = new Turtle(1, 1); // trace
+t1.forward();
+t1.turnRight();
+let t2 = new Turtle(3, 3); // trace
+t2.forward();
+t2.remove();
+t2 = t1;
+t2.forward();
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle t1 = new Turtle(1, 1); // sid
+    t1.前に進む(); // sid
+    t1.右を向く(); // sid
+    Turtle t2 = new Turtle(3, 3); // sid
+    t2.前に進む(); // sid
+    t2 = t1; // sid
+    t2.前に進む(); // sid
+  }
+}
+`.trim(),
+  },
   // ----------- 初級プログラミングⅡ 第1回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第2回 ここから -----------
