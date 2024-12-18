@@ -78,7 +78,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
   }, [previousTraceItemIndex]);
 
   const { isOpen: isAlertOpen, onClose: onAlertClose, onOpen: onAlertOpen } = useDisclosure();
-  const cancelRef = useRef(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
 
@@ -272,7 +272,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
         closeOnEsc={true}
         closeOnOverlayClick={false}
         isOpen={isAlertOpen}
-        leastDestructiveRef={cancelRef}
+        leastDestructiveRef={cancelRef as React.RefObject<HTMLElement>}
         onClose={() => {
           postAlertAction?.();
           onAlertClose();

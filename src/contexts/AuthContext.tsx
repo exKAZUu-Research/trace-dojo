@@ -27,7 +27,9 @@ export const AuthContextProvider: React.FC<Props> = (props) => {
       value={{
         currentUserId: props.currentUserId,
         currentEmail: props.currentEmail,
-        isAdmin: !!props.currentEmail?.endsWith('@internet.ac.jp'),
+        isAdmin:
+          (process.env.NEXT_PUBLIC_BASE_URL ?? '').includes('//localhost:') ||
+          !!props.currentEmail?.endsWith('@internet.ac.jp'),
       }}
     >
       {props.children}
