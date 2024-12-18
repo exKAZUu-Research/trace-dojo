@@ -244,7 +244,24 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     ['method1', 'method2', 'method3', 'method4', 'method5', 'return1', 'return2', 'return3', 'return4', 'return5'],
     ['array1', 'array2', 'array3', 'array4', 'array5', 'string1', 'string2', 'string3', 'string4', 'string5'],
   ],
-  tuBeginner2: [],
+  tuBeginner2: [
+    // 第1回
+    ['oop1'],
+    // 第2回
+    ['oop1'],
+    // 第3回
+    ['oop1'],
+    // 第4回
+    ['oop1'],
+    // 第5回
+    ['oop1'],
+    // 第6回
+    ['oop1'],
+    // 第7回
+    ['oop1'],
+    // 第8回
+    ['oop1'],
+  ],
   test: [['test1', 'test2', 'test3', 'test4', 'test5', 'oop1', 'oop2', 'static2', 'polymorphism1']],
 };
 
