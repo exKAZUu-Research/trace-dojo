@@ -148,6 +148,10 @@ class Turtle {
     const ny = this.y + dy[index];
     return nx >= 0 && nx < ${GRID_COLUMNS} && ny >= 0 && ny < ${GRID_ROWS};
   }
+  remove(sid, self) {
+    turtles.splice(turtles.indexOf(this), 1);
+    addTrace(sid, self);
+  }
   turnRight(sid, self) {
     this.dir = dirs[(dirs.indexOf(this.dir) + 1) % 4];
     addTrace(sid, self);
@@ -257,7 +261,7 @@ function modifyCode(instrumented: string): string[] {
       // Python向けに最後のループの処理かどうかを判定するために checkForCond を挿入する。
       .replace(/for\s*\(([^;]*);\s*([^;]*);/, (_, init, cond) => `for (${init}; checkForCond(${cond}, ${statementId});`)
       .replaceAll(
-        /(\.set|\.forward|\.backward|\.turnRight|\.turnLeft)\(([^\n;]*)\)(;|\)\s*{)/g,
+        /(\.set|\.forward|\.backward|\.turnRight|\.turnLeft|\.remove)\(([^\n;]*)\)(;|\)\s*{)/g,
         (_, newOrMethod, args, tail) => {
           statementReplaced = true;
           const delimiter = args === '' ? '' : ', ';

@@ -203,7 +203,7 @@ export const problemIdToName: Record<ProblemId, string> = {
   // 初級プログラミングII 第1回
   multiObject1: '複数のオブジェクトを使おう(1)',
   multiObject2: '複数のオブジェクトを使おう(2)',
-  garbageCollection1: 'ガベージコレクション',
+  garbageCollection1: 'ガベージコレクション(1)',
   oop1: 'オブジェクト指向プログラミング(1)',
   oop2: 'オブジェクト指向プログラミング(2)',
   static2: '静的フィールド(2)',
@@ -270,7 +270,9 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     // 第8回
     ['oop1'],
   ],
-  test: [['test1', 'test2', 'test3', 'test4', 'test5', 'oop1', 'oop2', 'static2', 'polymorphism1']],
+  test: [
+    ['test1', 'test2', 'test3', 'test4', 'test5', 'oop1', 'oop2', 'garbageCollection1', 'static2', 'polymorphism1'],
+  ],
 };
 
 export const courseIdToLectureIds: Record<CourseId, string[]> = JSON.parse(
@@ -2970,13 +2972,13 @@ t2.forward();
     java: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t1 = new Turtle(1, 1); //sid
-    t1.前に進む(); //sid
-    t1.右を向く(); //sid
-    Turtle t2 = new Turtle(3, 3); //sid
-    t2.前に進む(); //sid
-    t2 = t1; //sid
-    t2.前に進む(); //sid
+    Turtle t1 = new Turtle(1, 1); // sid
+    t1.前に進む(); // sid
+    t1.右を向く(); // sid
+    Turtle t2 = new Turtle(3, 3); // sid
+    t2.前に進む(); // sid
+    t2 = t1; // sid
+    t2.前に進む(); // sid
   }
 }
 `.trim(),
