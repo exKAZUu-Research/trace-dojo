@@ -2912,17 +2912,19 @@ class MyTurtle {
   makeClass1: {
     instrumented: `
 function main() {
-  const t = new MyTurtle();// trace
+  const t = new MyTurtle();
   t.moveForward();
-  t.speed = 1;
+  s.set('speed', 1);
   t.moveForward();
 }
 
 class MyTurtle {
-  const t = new Turtle(); // trace
-  speed = 2;
+  constructor() {
+    this.t = new Turtle();// trace
+	s.set('speed', 2);
+  }
   moveForward() {
-    for (s.set('i', 0); s.get('i') < this.speed; s.set('i', s.get('i') + 1)) {
+    for (s.set('i', 0); s.get('i') < s.get('speed'); s.set('i', s.get('i') + 1)) {
       this.t.forward();
     }
     delete s.vars['i'];
@@ -2934,20 +2936,20 @@ main();
     java: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t = new MyTurtle();// sid
-    t.moveForward();// sid
+    MyTurtle t = new MyTurtle();// caller
+    t.moveForward();// caller
     t.speed = 1;// sid
-    t.moveForward();// sid
+    t.moveForward();// caller
   }
 }
 
 class MyTurtle {
-  Turtle t = new Turtle();
-  int speed = 2;
+  Turtle t = new Turtle();// sid
+  int speed = 2;// sid
 
   void moveForward() {
     for (int i = 0; i < this.speed; i++){
-      this.t.前に進む();
+      this.t.前に進む();// sid
     }
   }
 }
