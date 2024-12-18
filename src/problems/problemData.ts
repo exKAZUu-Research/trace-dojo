@@ -97,6 +97,8 @@ export const problemIds = [
   'test3',
   'test4',
   'test5',
+  'makeClass1',
+  'makeClass2',
 ] as const;
 export type ProblemId = (typeof problemIds)[number];
 
@@ -205,6 +207,8 @@ export const problemIdToName: Record<ProblemId, string> = {
   test3: 'ステップ実行のテスト用問題(3)',
   test4: 'ステップ実行のテスト用問題(4)',
   test5: 'チェックポイント取得のテスト用問題',
+  makeClass1: 'クラスを作ろう(1)',
+  makeClass2: 'クラスを作ろう(2)',
 };
 
 export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]> = {
@@ -248,7 +252,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     // 第1回
     ['oop1'],
     // 第2回
-    ['oop1'],
+    ['makeClass1', 'makeClass2'],
     // 第3回
     ['oop1'],
     // 第4回
@@ -2905,6 +2909,18 @@ class MyTurtle {
   // ----------- 初級プログラミングⅡ 第1回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第2回 ここから -----------
+  makeClass1: {
+    instrumented: `
+    `.trim(),
+    java: `
+    `.trim(),
+  },
+  makeClass2: {
+    instrumented: `
+    `.trim(),
+    java: `
+    `.trim(),
+  },
   // ----------- 初級プログラミングⅡ 第2回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第3回 ここから -----------
