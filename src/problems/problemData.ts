@@ -3364,8 +3364,38 @@ public class Main {
 `,
   },
   garbageCollection6: {
+    // TODO: instrumented を完成させる。
     instrumented: ``,
-    java: ``,
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		正方形を描く(0, 0, 7); // caller
+		正方形を描く(3, 3, 3); // caller
+	}
+
+  // このメソッドは、(x, y)を始点として、dir方向に長さlenの線を描く。
+  // dirは0から3までの整数で、0が上、1が右、2が下、3が左を示す。
+  static void 線を描く(int x, int y, int dir, int len) {
+		Turtle t = new Turtle(x, y);
+		for (int i = 0; i < dir; i++) {
+			t.右を向く();
+		}
+
+		// lenは長さなので、前に進む回数はlen - 1回
+		for (int i = 0; i < len - 1; i++) {
+			t.前に進む();
+		}
+  }
+
+  // このメソッドは、(x, y)を左下の点として、sizeの正方形を描く。
+  static void 正方形を描く(int x, int y, int size) {
+		線を描く(x, y, 0, size); // step
+		線を描く(x, y + size, 1, size); // step
+		線を描く(x + size, y + size, 2, size); // step
+		線を描く(x + size, y, 3, size); // step
+	}
+}
+`,
   },
   // ----------- 初級プログラミングⅡ 第1回 ここまで -----------
 
