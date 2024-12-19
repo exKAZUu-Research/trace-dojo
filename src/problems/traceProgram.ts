@@ -233,7 +233,7 @@ ${modifiedCode.trim()}
   let lastCallerId = 0;
   for (const [index, line] of lines.entries()) {
     const refinedLine = line
-      .replace(/\s*\/\/\s*(?:sid|step)\s*(:\s*\d+|)\s*/, (_, sid) => {
+      .replace(/\s*\/\/\s*step\s*(:\s*\d+|)\s*/, (_, sid) => {
         if (sid) {
           lastSid = Number(sid.slice(1));
         } else {
