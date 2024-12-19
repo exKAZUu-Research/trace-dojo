@@ -4037,33 +4037,30 @@ public class Main {
   test5: {
     instrumented: `
 const t = new Turtle(); // step
-t.forward();
-t.forward();
-t.turnRight();
-t.forward();
-t.forward();
-t.forward();
-t.forward();
+t.前に進む(); // step
+t.前に進む(); // step
+t.右を向く(); // step
+t.前に進む(); // step
+t.前に進む(); // step
+t.前に進む(); // step
+t.前に進む(); // step
 `,
     java: `
 public class Straight {
   public static void main(String[] args) {
     var c = new Turtle(); // step
-    c.forward(); // step
-    c.forward(); // step
-    c.turnRight(); // step
-    c.forward(); // step
-    c.forward(); // step
-    c.forward(); // step
-    c.forward(); // step
+    c.前に進む(); // step
+    c.前に進む(); // step
+    c.右を向く(); // step
+    c.前に進む(); // step
+    c.前に進む(); // step
+    c.前に進む(); // step
+    c.前に進む(); // step
   }
 }
 `,
   },
   test9: {
-    // Javaの静的フィールド（つまり、グローバル変数）を扱う場合、 `myGlobal` を使うこと。
-    // 静的メソッドは普通の関数で代替すること。
-    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 myGlobal.Settings = { speed: 0 };
 
