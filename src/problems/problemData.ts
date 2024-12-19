@@ -3220,8 +3220,45 @@ public class Main {
 `,
   },
   garbageCollection2: {
-    instrumented: ``,
-    java: ``,
+    // FIXME: このコードは正しくステップしない。
+    instrumented: `
+let t1 = new Turtle(1, 1); // step
+let t2 = new Turtle(3, 3); // step
+let t3 = new Turtle(5, 5); // step
+
+t1.前に進む(); // step
+t2.前に進む(); // step
+t3.前に進む(); // step
+
+t2.remove(); // step
+t2 = t1;
+t3.remove(); // step
+t3 = t2;
+
+t3.前に進む(); // step
+t2.前に進む(); // step
+t1.前に進む(); // step
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+	Turtle t1 = new Turtle(1, 1); // step
+	Turtle t2 = new Turtle(3, 3); // step
+	Turtle t3 = new Turtle(5, 5); // step
+
+	t1.前に進む(); // step
+	t2.前に進む(); // step
+	t3.前に進む(); // step
+
+	t2 = t1; // step
+	t3 = t2; // step
+
+	t3.前に進む(); // step
+	t2.前に進む(); // step
+	t1.前に進む(); // step
+  }
+}
+`,
   },
   garbageCollection3: {
     instrumented: ``,
