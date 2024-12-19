@@ -95,6 +95,8 @@ export const problemIds = [
   // 初級プログラミングⅡ 第2回
   'makeClass1',
   'makeClass2',
+  'makeClass3',
+  'makeClass4',
   'constructor1',
   // 初級プログラミングⅡ 第3回
   'encapsulate',
@@ -118,11 +120,6 @@ export const problemIds = [
   'test3',
   'test4',
   'test5',
-  'makeClass1',
-  'makeClass2',
-  'makeClass3',
-  'makeClass4',
-  'constructor1',
 ] as const;
 export type ProblemId = (typeof problemIds)[number];
 
@@ -226,19 +223,22 @@ export const problemIdToName: Record<ProblemId, string> = {
   multiObject1: '複数のオブジェクトを使おう(1)',
   multiObject2: '複数のオブジェクトを使おう(2)',
   // 初級プログラミングⅡ 第2回
+
+  makeClass1: 'クラスを作ろう(1)',
+  makeClass2: 'クラスを作ろう(2)',
+  makeClass3: 'クラスを作ろう(3)',
+  makeClass4: 'クラスを作ろう(4)',
+  // 初級プログラミングⅡ 第3回
+  constructor1: 'コンストラクタ(1)',
   encapsulate: 'カプセル化',
   withoutEncapsulate: 'カプセル化なし',
   withEncapsulate: 'カプセル化あり',
   garbageCollection1: 'ガベージコレクション(1)',
-  // 初級プログラミングⅡ 第3回
+  // 初級プログラミングⅡ 第4回
   staticMethod1: '静的メソッド(1)',
   staticMethod2: '静的メソッド(2)',
   staticField1: '静的フィールド(1)',
   staticField2: '静的フィールド(2)',
-  // 初級プログラミングⅡ 第4回
-  makeClass1: 'クラスを作ろう(1)',
-  makeClass2: 'クラスを作ろう(2)',
-  constructor1: 'コンストラクタ(1)',
   // 初級プログラミングⅡ 第5回
   polymorphism1: 'ポリモルフィズム(1)',
   // 初級プログラミングⅡ 第6回
@@ -251,11 +251,6 @@ export const problemIdToName: Record<ProblemId, string> = {
   test3: 'ステップ実行のテスト用問題(3)',
   test4: 'ステップ実行のテスト用問題(4)',
   test5: 'チェックポイント取得のテスト用問題',
-  makeClass1: 'クラスを作ろう(1)',
-  makeClass2: 'クラスを作ろう(2)',
-  makeClass3: 'クラスを作ろう(3)',
-  makeClass4: 'クラスを作ろう(4)',
-  constructor1: 'コンストラクタ(1)',
 };
 
 export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]> = {
