@@ -3194,7 +3194,6 @@ public class Main {
 `,
   },
   garbageCollection1: {
-    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 let t1 = new Turtle(1, 1); // step
 t1.前に進む(); // step
@@ -3328,8 +3327,23 @@ public class Main {
 `,
   },
   garbageCollection4: {
-    // TODO: instrumented を完成させる。
-    instrumented: ``,
+    instrumented: `
+const turtles = new Array(5);
+for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
+  turtles[s.get('i')] = new Turtle(s.get('i'), 0); // step
+}
+
+for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
+  turtles[s.get('i')].remove(); // step
+  turtles[s.get('i')] = null;
+
+  for (const t of turtles) {
+    if (t !== null) {
+      t.前に進む(); // step
+    }
+  }
+}
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
@@ -3338,8 +3352,8 @@ public class Main {
       turtles[i] = new Turtle(i, 0); // step
     }
 
-    for (int i = 0; i < 7; i++) { // step
-      // nullとは、何も参照していないことを示す特別な値です。
+    for (int i = 0; i < turtles.length; i++) { // step
+      // nullは、何も参照していないことを示す特別な値です。
       turtles[i] = null; // step
 
       for (Turtle t : turtles) {
@@ -3353,61 +3367,91 @@ public class Main {
 `,
   },
   garbageCollection5: {
-    // TODO: instrumented を完成させる。
-    instrumented: ``,
+    instrumented: `
+call(線を描く, 'x', 'y', 'dir', 'len')(1, 1, 1, 5);
+call(線を描く, 'x', 'y', 'dir', 'len')(1, 5, 2, 5);
+const t = new Turtle(3, 3); // step
+
+function 線を描く(x, y, dir, len) {
+  const t = new Turtle(x, y); // step
+  for (s.set('i', 0); s.get('i') < dir; s.set('i', s.get('i') + 1)) { // step
+    t.右を向く(); // step
+  }
+  for (s.set('i', 0); s.get('i') < len - 1; s.set('i', s.get('i') + 1)) { // step
+    t.前に進む(); // step
+  }
+  t.remove();
+}
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
     線を描く(1, 1, 1, 5); // caller
     線を描く(1, 5, 2, 5); // caller
+    Turtle t = new Turtle(3, 3); // step
   }
 
-  // このメソッドは、(x, y)を始点として、dir方向に長さlenの線を描く。
-  // dirは0から3までの整数で、0が上、1が右、2が下、3が左を示す。
   static void 線を描く(int x, int y, int dir, int len) {
     Turtle t = new Turtle(x, y); // step
     for (int i = 0; i < dir; i++) { // step
       t.右を向く(); // step
     }
-
-    // lenは長さなので、前に進む回数はlen - 1回
     for (int i = 0; i < len - 1; i++) { // step
       t.前に進む(); // step
     }
+    // 線を描く()メソッドが終わると変数tはなくなり、亀も消えることとする！
   }
 }
 `,
   },
   garbageCollection6: {
-    // TODO: instrumented を完成させる。
-    instrumented: ``,
+    instrumented: `
+call(正方形を描く, 'x', 'y', 'size')(0, 0, 6);
+call(正方形を描く, 'x', 'y', 'size')(3, 3, 3);
+const t = new Turtle(3, 3); // step
+
+function 正方形を描く(x, y, size) {
+  線を描く(x, y, 0, size); // step
+  線を描く(x, y + size, 1, size); // step
+  線を描く(x + size, y + size, 2, size); // step
+  線を描く(x + size, y, 3, size); // step
+}
+
+function 線を描く(x, y, dir, len) {
+  const t = new Turtle(x, y);
+  for (let i = 0; i < dir; i++) {
+    t.右を向く();
+  }
+  for (let i = 0; i < len - 1; i++) {
+    t.前に進む();
+  }
+  t.remove();
+}
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
     正方形を描く(0, 0, 7); // caller
     正方形を描く(3, 3, 3); // caller
+    Turtle t = new Turtle(3, 3); // step
   }
 
-  // このメソッドは、(x, y)を始点として、dir方向に長さlenの線を描く。
-  // dirは0から3までの整数で、0が上、1が右、2が下、3が左を示す。
-  static void 線を描く(int x, int y, int dir, int len) {
-    Turtle t = new Turtle(x, y);
-    for (int i = 0; i < dir; i++) {
-      t.右を向く();
-    }
-
-    // lenは長さなので、前に進む回数はlen - 1回
-    for (int i = 0; i < len - 1; i++) {
-      t.前に進む();
-    }
-  }
-
-  // このメソッドは、(x, y)を左下の点として、sizeの正方形を描く。
   static void 正方形を描く(int x, int y, int size) {
     線を描く(x, y, 0, size); // step
     線を描く(x, y + size, 1, size); // step
     線を描く(x + size, y + size, 2, size); // step
     線を描く(x + size, y, 3, size); // step
+  }
+
+  static void 線を描く(int x, int y, int dir, int len) {
+    Turtle t = new Turtle(x, y);
+    for (int i = 0; i < dir; i++) {
+      t.右を向く();
+    }
+    for (int i = 0; i < len - 1; i++) {
+      t.前に進む();
+    }
+    // 線を描く()メソッドが終わると変数tはなくなり、亀も消えることとする！
   }
 }
 `,

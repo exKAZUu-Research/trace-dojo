@@ -117,6 +117,9 @@ class Turtle {
   constructor(x = 0, y = 0, color = '${DEFAULT_COLOR}') {
     this.x = x;
     this.y = y;
+    if (this.x < 0 || ${GRID_COLUMNS} <= this.x || this.y < 0 || ${GRID_ROWS} <= this.y) {
+      throw new Error(\`Out of bounds: (\${this.x}, \${this.y})\`);
+    }
     this.color = color;
     this.dir = 'N';
     board[this.y][this.x] = this.color;

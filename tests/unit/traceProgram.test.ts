@@ -596,7 +596,7 @@ public class Straight {
 );
 
 test('Trace a specific program', () => {
-  const problem = instantiateProblem('staticField2', 'java', '');
+  const problem = instantiateProblem('garbageCollection6', 'java', '');
   if (!problem) throw new Error('Failed to generate problem.');
 
   const { displayProgram, executableCode, sidToLineIndex, traceItems } = problem;
