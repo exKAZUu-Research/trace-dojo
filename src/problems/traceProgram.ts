@@ -152,7 +152,8 @@ class Turtle {
     const index = dirs.indexOf(this.dir);
     const nx = this.x + dx[index];
     const ny = this.y + dy[index];
-    return nx >= 0 && nx < ${GRID_COLUMNS} && ny >= 0 && ny < ${GRID_ROWS};
+    const isNoTurtle = !turtles.some(t => t.x === nx && t.y === ny);
+    return nx >= 0 && nx < ${GRID_COLUMNS} && ny >= 0 && ny < ${GRID_ROWS} && isNoTurtle;
   }
   remove() {
     turtles.splice(turtles.indexOf(this), 1);
