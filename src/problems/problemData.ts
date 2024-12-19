@@ -2945,46 +2945,46 @@ class MyTurtle {
   // ----------- 初級プログラミングⅡ 第1回 ここから -----------
   multiObject1: {
     instrumented: `
-const t1 = new Turtle(1, 1); //trace
-const t2 = new Turtle(3, 3); //trace
-t1.forward();
-t1.turnRight();
-t2.forward();
-t2.turnLeft();
+const t1 = new Turtle(1, 1); // step
+const t2 = new Turtle(3, 3); // step
+t1.前に進む(); // step
+t1.右を向く(); // step
+t2.前に進む(); // step
+t2.左を向く(); // step
 `.trim(),
     java: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t1 = new Turtle(1, 1); //sid
-    Turtle t2 = new Turtle(3, 3); //sid
-    t1.前に進む(); //sid
-    t1.右を向く(); //sid
-    t2.前に進む(); //sid
-    t2.左を向く(); //sid
+    Turtle t1 = new Turtle(1, 1); // step
+    Turtle t2 = new Turtle(3, 3); // step
+    t1.前に進む(); // step
+    t1.右を向く(); // step
+    t2.前に進む(); // step
+    t2.左を向く(); // step
   }
 }
 `.trim(),
   },
   multiObject2: {
     instrumented: `
-const t1 = new Turtle(1, 1); //trace
-t1.forward();
-t1.turnRight();
-const t2 = new Turtle(3, 3); //trace
-t2.forward();
-t2.turnLeft();
-t2.forward();
+const t1 = new Turtle(1, 1); // step
+t1.前に進む(); // step
+t1.右を向く(); // step
+const t2 = new Turtle(3, 3); // step
+t2.前に進む(); // step
+t2.左を向く(); // step
+t2.前に進む(); // step
 `.trim(),
     java: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t1 = new Turtle(1, 1); //sid
-    t1.前に進む(); //sid
-    t1.右を向く(); //sid
-    Turtle t2 = new Turtle(3, 3); //sid
-    t2.前に進む(); //sid
-    t2.左を向く(); //sid
-    t2.前に進む(); //sid
+    Turtle t1 = new Turtle(1, 1); // step
+    t1.前に進む(); // step
+    t1.右を向く(); // step
+    Turtle t2 = new Turtle(3, 3); // step
+    t2.前に進む(); // step
+    t2.左を向く(); // step
+    t2.前に進む(); // step
   }
 }
 `.trim(),
@@ -3007,25 +3007,25 @@ public class Main {
   },
   garbageCollection1: {
     instrumented: `
-let t1 = new Turtle(1, 1); // trace
-t1.forward();
-t1.turnRight();
-let t2 = new Turtle(3, 3); // trace
-t2.forward();
-t2.remove();
+let t1 = new Turtle(1, 1); // step
+t1.前に進む(); // step
+t1.右を向く(); // step
+let t2 = new Turtle(3, 3); // step
+t2.前に進む(); // step
+t2.remove(); // step
 t2 = t1;
-t2.forward();
+t2.前に進む(); // step
 `.trim(),
     java: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t1 = new Turtle(1, 1); // sid
-    t1.前に進む(); // sid
-    t1.右を向く(); // sid
-    Turtle t2 = new Turtle(3, 3); // sid
-    t2.前に進む(); // sid
-    t2 = t1; // sid
-    t2.前に進む(); // sid
+    Turtle t1 = new Turtle(1, 1); // step
+    t1.前に進む(); // step
+    t1.右を向く(); // step
+    Turtle t2 = new Turtle(3, 3); // step
+    t2.前に進む(); // step
+    t2 = t1; // step
+    t2.前に進む(); // step
   }
 }
 `.trim(),
