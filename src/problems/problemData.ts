@@ -88,6 +88,10 @@ export const problemIds = [
   'string3',
   'string4',
   'string5',
+  // 初級プログラミングII 第1回
+  'multiObject1',
+  'multiObject2',
+  'garbageCollection1',
   'oop1',
   'oop2',
   'static2',
@@ -198,6 +202,10 @@ export const problemIdToName: Record<ProblemId, string> = {
   string3: '文字列を使おう(3)',
   string4: '文字列を使おう(4)',
   string5: '文字列を使おう(5)',
+  // 初級プログラミングII 第1回
+  multiObject1: '複数のオブジェクトを使おう(1)',
+  multiObject2: '複数のオブジェクトを使おう(2)',
+  garbageCollection1: 'ガベージコレクション(1)',
   oop1: 'オブジェクト指向プログラミング(1)',
   oop2: 'オブジェクト指向プログラミング(2)',
   static2: '静的フィールド(2)',
@@ -250,7 +258,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
   ],
   tuBeginner2: [
     // 第1回
-    ['oop1'],
+    ['multiObject1', 'multiObject2', 'garbageCollection1'],
     // 第2回
     ['makeClass1', 'makeClass2'],
     // 第3回
@@ -266,7 +274,9 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     // 第8回
     ['oop1'],
   ],
-  test: [['test1', 'test2', 'test3', 'test4', 'test5', 'oop1', 'oop2', 'static2', 'polymorphism1']],
+  test: [
+    ['test1', 'test2', 'test3', 'test4', 'test5', 'oop1', 'oop2', 'garbageCollection1', 'static2', 'polymorphism1'],
+  ],
 };
 
 export const courseIdToLectureIds: Record<CourseId, string[]> = JSON.parse(
@@ -2906,6 +2916,77 @@ class MyTurtle {
 `.trim(),
   },
   // ----------- 初級プログラミングⅡ 第1回 ここから -----------
+  multiObject1: {
+    instrumented: `
+const t1 = new Turtle(1, 1); // step
+const t2 = new Turtle(3, 3); // step
+t1.前に進む(); // step
+t1.右を向く(); // step
+t2.前に進む(); // step
+t2.左を向く(); // step
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle t1 = new Turtle(1, 1); // step
+    Turtle t2 = new Turtle(3, 3); // step
+    t1.前に進む(); // step
+    t1.右を向く(); // step
+    t2.前に進む(); // step
+    t2.左を向く(); // step
+  }
+}
+`.trim(),
+  },
+  multiObject2: {
+    instrumented: `
+const t1 = new Turtle(1, 1); // step
+t1.前に進む(); // step
+t1.右を向く(); // step
+const t2 = new Turtle(3, 3); // step
+t2.前に進む(); // step
+t2.左を向く(); // step
+t2.前に進む(); // step
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle t1 = new Turtle(1, 1); // step
+    t1.前に進む(); // step
+    t1.右を向く(); // step
+    Turtle t2 = new Turtle(3, 3); // step
+    t2.前に進む(); // step
+    t2.左を向く(); // step
+    t2.前に進む(); // step
+  }
+}
+`.trim(),
+  },
+  garbageCollection1: {
+    instrumented: `
+let t1 = new Turtle(1, 1); // step
+t1.前に進む(); // step
+t1.右を向く(); // step
+let t2 = new Turtle(3, 3); // step
+t2.前に進む(); // step
+t2.remove(); // step
+t2 = t1;
+t2.前に進む(); // step
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle t1 = new Turtle(1, 1); // step
+    t1.前に進む(); // step
+    t1.右を向く(); // step
+    Turtle t2 = new Turtle(3, 3); // step
+    t2.前に進む(); // step
+    t2 = t1; // step
+    t2.前に進む(); // step
+  }
+}
+`.trim(),
+  },
   // ----------- 初級プログラミングⅡ 第1回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第2回 ここから -----------
