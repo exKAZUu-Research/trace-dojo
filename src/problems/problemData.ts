@@ -2945,15 +2945,40 @@ public class Main {
   // ----------- 初級プログラミングⅡ 第3回 ここから -----------
   encapsulate: {
     instrumented: `
-  かく
+function main() {
+  const t = call(MyTurtle, 'x', 'y', 'speed')(0, 0, 2); // trace
+  call(t.moveForward.bind(t))();
+  call(t.changeSpeed.bind(t),'speed')(1);
+  call(t.moveForward.bind(t))();
+}
+
+class MyTurtle {
+  constructor(x, y, speed) {
+    this.t = new Turtle();
+    this.speed = 2;
+  }
+
+  moveForward() {
+    for (s.set('i', 0); s.get('i') < this.speed; s.set('i', s.get('i') + 1)) {
+      this.t.forward();
+    }
+    delete s.vars['i'];
+  }
+
+  changeSpeed(speed) {
+    this.speed = speed; // trace
+  }
+}
+
+main();
 `.trim(),
     java: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t = new MyTurtle();
-    t.moveForward();
-    t.changeSpeed(1);
-    t.moveForward();
+    MyTurtle t = new MyTurtle(); // caller // sid
+    t.moveForward(); // caller
+    t.changeSpeed(1); // caller
+    t.moveForward(); // caller
   }
 }
 
@@ -2961,13 +2986,13 @@ class MyTurtle {
   private Turtle t = new Turtle();
   private int speed = 2;
 
-  public void moveForward() {
-    for (int i = 0; i < this.speed; i++) {
-      this.t.前に進む();
+  public void moveForward() { 
+    for (int i = 0; i < this.speed; i++) { // sid
+      this.t.前に進む(); // sid
     }
   }
   public void changeSpeed(int speed) {
-    this.speed = speed;
+    this.speed = speed; // sid
   }
 }
 `.trim(),
