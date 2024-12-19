@@ -3313,8 +3313,29 @@ public class Main {
 `,
   },
   garbageCollection4: {
+    // TODO: instrumented を完成させる。
     instrumented: ``,
-    java: ``,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+		Turtle[] turtles = new Turtle[7];
+		for (int i = 0; i < turtles.length; i++) { // step
+			turtles[i] = new Turtle(i, 0); // step
+		}
+
+		for (int i = 0; i < 7; i++) { // step
+		  // nullとは、何も参照していないことを示す特別な値です。
+			turtles[i] = null; // step
+
+		  for (Turtle t : turtles) {
+				if (t != null) {
+				  t.前に進む(); // step
+				}
+		  }
+		}
+  }
+}
+`,
   },
   garbageCollection5: {
     instrumented: ``,
