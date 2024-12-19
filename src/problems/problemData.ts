@@ -3338,6 +3338,7 @@ public class Main {
 `,
   },
   garbageCollection5: {
+    // TODO: instrumented を完成させる。
     instrumented: ``,
     java: `
 public class Main {
