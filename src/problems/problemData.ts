@@ -3153,8 +3153,31 @@ class SquareTurtle {
   },
   withoutEncapsulate2: {
     instrumented: `
+const t = new Turtle(); // trace
+call(drawLine, 't', 'speed')(t, 2);
+t.turnRight();
+call(drawLine, 't', 'speed')(t, 3);
+function drawLine(t, speed) {
+  for (s.set('i', 0); s.get('i') < speed; s.set('i', s.get('i') + 1)) {
+    t.forward();
+  }
+}
 `.trim(),
     java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle t = new Turtle(); // sid
+    drawLine(t, 2); // caller
+    t.turnRight(); // sid
+    drawLine(t, 3); // caller
+  }
+
+  static void drawSquare(Turtle t, int speed) {
+    for (int i = 0; i < speed; i++) { // sid
+      t.前に進む(); // sid
+    }
+  }
+}
 `.trim(),
   },
   withEncapsulate2: {
