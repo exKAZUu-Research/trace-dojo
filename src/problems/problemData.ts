@@ -96,6 +96,12 @@ export const problemIds = [
   'encapsulate',
   'withoutEncapsulate',
   'withEncapsulate',
+  'withoutEncapsulate2',
+  'withEncapsulate2',
+  'withoutEncapsulate3',
+  'withEncapsulate3',
+  'withoutEncapsulate4',
+  'withEncapsulate4',
   'garbageCollection1',
   'static2',
   'polymorphism1',
@@ -212,6 +218,12 @@ export const problemIdToName: Record<ProblemId, string> = {
   encapsulate: 'カプセル化',
   withoutEncapsulate: 'カプセル化なし',
   withEncapsulate: 'カプセル化あり',
+  withoutEncapsulate2: 'カプセル化なし(2)',
+  withEncapsulate2: 'カプセル化あり(2)',
+  withoutEncapsulate3: 'カプセル化なし(3)',
+  withEncapsulate3: 'カプセル化あり(3)',
+  withoutEncapsulate4: 'カプセル化なし(4)',
+  withEncapsulate4: 'カプセル化あり(4)',
   static2: '静的フィールド(2)',
   polymorphism1: 'ポリモルフィズム(1)',
   test1: 'ステップ実行のテスト用問題(1)',
@@ -264,7 +276,17 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     // 第2回
     ['oop1'],
     // 第3回
-    ['encapsulate', 'withoutEncapsulate', 'withEncapsulate'],
+    [
+      'encapsulate',
+      'withoutEncapsulate',
+      'withEncapsulate',
+      'withoutEncapsulate2',
+      'withEncapsulate2',
+      'withoutEncapsulate3',
+      'withEncapsulate3',
+      'withoutEncapsulate4',
+      'withEncapsulate4',
+    ],
     // 第4回
     ['oop1'],
     // 第5回
@@ -3127,6 +3149,42 @@ class SquareTurtle {
     }
   }
 }
+`.trim(),
+  },
+  withoutEncapsulate2: {
+    instrumented: `
+`.trim(),
+    java: `
+`.trim(),
+  },
+  withEncapsulate2: {
+    instrumented: `
+`.trim(),
+    java: `
+`.trim(),
+  },
+  withoutEncapsulate3: {
+    instrumented: `
+`.trim(),
+    java: `
+`.trim(),
+  },
+  withEncapsulate3: {
+    instrumented: `
+`.trim(),
+    java: `
+`.trim(),
+  },
+  withoutEncapsulate4: {
+    instrumented: `
+`.trim(),
+    java: `
+`.trim(),
+  },
+  withEncapsulate4: {
+    instrumented: `
+`.trim(),
+    java: `
 `.trim(),
   },
   // ----------- 初級プログラミングⅡ 第3回 ここまで -----------
