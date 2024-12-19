@@ -3032,24 +3032,34 @@ public class Main {
   },
   withEncapsulate: {
     instrumented: `
-const t = new Turtle();
-drawSquare(t, 2);
-drawSquare(t, 3);
-function drawSquare(t, speed) {
-  for (let i = 0; i < 4; i++) {
-    for (let j = 0; j < speed - 1; j++) {
-      t.moveForward();
+function main() {
+  const t = call(SquareTurtle)(); // trace
+  call(t.draw.bind(t),'speed')(2);
+  call(t.draw.bind(t),'speed')(3);
+}
+
+class SquareTurtle {
+  constructor() {
+    this.t = new Turtle();
+  }
+
+  draw(speed) {
+    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
+      for (s.set('j', 0); s.get('j') < speed; s.set('j', s.get('j') + 1)) {
+        this.t.forward();
+      }
+      this.t.turnRight();
     }
-    t.turnRight();
   }
 }
+main();
 `.trim(),
     java: `
 public class Main {
   public static void main(String[] args) {
-    SquareTurtle t = new SquareTurtle();
-    t.draw(2);
-    t.draw(3);
+    SquareTurtle t = new SquareTurtle(); // caller // sid
+    t.draw(2); // caller
+    t.draw(3); // caller
   }
 }
 
@@ -3057,11 +3067,11 @@ class SquareTurtle {
   private Turtle t = new Turtle(0, 0);
 
   void draw(int s) {
-    for (int i = 0; i < 4; i++) {
-      for (int j = 0; j < speed - 1; j++) {
-        this.t.前に進む();
+    for (int i = 0; i < 4; i++) { // sid
+      for (int j = 0; j < speed - 1; j++) { // sid
+        this.t.前に進む(); // sid
       }
-      this.t.右を向く();
+      this.t.右を向く(); // sid
     }
   }
 }
