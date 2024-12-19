@@ -279,7 +279,9 @@ function modifyCode(instrumented: string): string[] {
           return `${newOrMethod}(${statementId}, this${delimiter}${args})${tail}`;
         }
       )
-      .replace(/\s*\/\/\s*(?:trace|step)\s*/, (_) => {
+      .replace(/\s*\/\/\s*step\s*/, (_) => {
+        if (statementReplaced) return '';
+
         statementReplaced = true;
         return `addTrace(${statementId}, this);`;
       })
