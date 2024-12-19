@@ -3043,26 +3043,56 @@ class MyTurtle {
     instrumented: `
 function main() {
   const t = call(MyTurtle)();
+  call(t.moveDiagonally.bind(t))();
+  t.speed = 2; // step
+  call(t.moveDiagonally.bind(t))();
 }
 
 class MyTurtle {
   constructor() {
     this.t = new Turtle(); // step
+    this.speed = 1; // step
+  }
+  moveDiagonally() {
+    for (s.vars.i = 0; s.vars.i < this.speed; s.vars.i++) { // step
+      this.t.前に進む(); // step
+      this.t.右を向く(); // step
+      this.t.前に進む(); // step
+      this.t.左を向く(); // step
+    }
+    delete s.vars.i;
   }
 }
 
 main();
+
+
     `,
     java: `
+
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(); // caller
+    t.moveDiagonally(); // caller
+    t.speed = 2; // step
+    t.moveDiagonally(); // caller
   }
 }
 
 class MyTurtle {
   Turtle t = new Turtle(); // step
+  int speed = 1; // step
+
+  void moveDiagonally() {
+    for (int i = 0; i < this.speed; i++) { // step
+      this.t.前に進む(); // step
+      this.t.右を向く(); // step
+      this.t.前に進む(); // step
+      this.t.左を向く(); // step
+    }
+  }
 }
+
     `,
   },
   constructor1: {
