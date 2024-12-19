@@ -79,3 +79,7 @@ An educational web app for training program tracing skills.
    ```
    yarn db-migrate-create
    ```
+
+### How to Create Problems
+
+[新問題の作問手順](./HOW_TO_CREATE_PROBLEMS.md)を読んでください。
