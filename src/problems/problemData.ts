@@ -3261,8 +3261,56 @@ public class Main {
 `,
   },
   garbageCollection3: {
+    // TODO: instrumented を完成させる。
     instrumented: ``,
-    java: ``,
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle[] turtles = new Turtle[4];
+		turtles[0] = new Turtle(2, 3); // step
+		turtles[1] = new Turtle(3, 4); // step
+		turtles[2] = new Turtle(4, 3); // step
+		turtles[3] = new Turtle(3, 2); // step
+
+		for (int i = 0; i < turtles.length; i++) {
+			N回右を向く(turtles[i], i); // step
+		}
+
+		for (int i = 0; i < turtles.length; i++) {
+			N回前に進む(turtles[i], 3); // step
+		}
+
+		turtles[0] = new Turtle(6, 1); // step
+		turtles[1] = new Turtle(5, 6); // step
+		turtles[2] = new Turtle(0, 5); // step
+		turtles[3] = new Turtle(1, 0); // step
+
+		for (int i = 0; i < turtles.length; i++) {
+			N回左を向く(turtles[i], i); // step
+		}
+
+		for (int i = 0; i < turtles.length; i++) {
+			N回前に進む(turtles[i], 3); // step
+		}
+	}
+
+	static void N回前に進む(Turtle t, int n) {
+		for (int i = 0; i < n; i++) {
+			t.前に進む();
+		}
+	}
+	static void N回右を向く(Turtle t, int n) {
+		for (int i = 0; i < n; i++) {
+			t.右を向く();
+		}
+	}
+	static void N回左を向く(Turtle t, int n) {
+		for (int i = 0; i < n; i++) {
+			t.左を向く();
+		}
+	}
+}
+`,
   },
   garbageCollection4: {
     instrumented: ``,
