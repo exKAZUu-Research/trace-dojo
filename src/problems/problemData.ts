@@ -3356,25 +3356,48 @@ class Controller {
     `,
   },
   staticField1: {
+    // Javaの静的フィールド（つまり、グローバル変数）を扱う場合、 `myGlobal` を使うこと。
+    // 静的メソッドは普通の関数で代替すること。
+    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
-    main();
+myGlobal.Controller = { stepCount: 0 };
+
+function main() {
+  const t1 = new Turtle(1, 1); // step
+  call(moveTwoSteps, 't')(t1);
+  const t2 = new Turtle(3, 3); // step
+  call(moveTwoSteps, 't')(t2);
+  s.set('count', myGlobal.Controller.stepCount); // step
+}
+
+function moveTwoSteps(t) {
+  t.前に進む(); // step
+  myGlobal.Controller.stepCount++; // step
+  t.前に進む(); // step
+  myGlobal.Controller.stepCount++; // step
+}
+
+main();
   `,
     java: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t1 = new Turtle(1, 1);
-    Controller.moveTwoSteps(t1);
-    Turtle t2 = new Turtle(3, 3);
-    Controller.moveTwoSteps(t2);
-    System.out.print(Controller.stepCount);
+    Turtle t1 = new Turtle(1, 1); // step
+    Controller.moveTwoSteps(t1); // caller
+    Turtle t2 = new Turtle(3, 3); // step
+    Controller.moveTwoSteps(t2); // caller
+    int count = myGlobal.Controller.stepCount; // step
   }
 }
 
 class Controller {
   static int stepCount;
+
   static void moveTwoSteps(Turtle t) {
-    t.前に進む(); stepCount++;
-    t.前に進む(); stepCount++;
+    t.前に進む(); // step
+    stepCount++; // step
+    t.前に進む(); // step
+    stepCount++; // step
   }
 }
     `,
@@ -3386,21 +3409,21 @@ class Controller {
 myGlobal.Settings = { speed: 3 };
 
 function main() {
-  const t1 = call(MyTurtle)(); // step
+  const t1 = call(MyTurtle)();
   call(t1.moveForward.bind(t1))();
   myGlobal.Settings.speed = 2; // step
-  const t2 = call(MyTurtle)(); // step
+  const t2 = call(MyTurtle)();
   call(t1.moveForward.bind(t1))();
   call(t2.moveForward.bind(t2))();
 }
 
 class MyTurtle {
   constructor() {
-    this.t = new Turtle();
+    this.t = new Turtle(); // step
   }
   moveForward() {
-    for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) {
-      this.t.forward();
+    for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) { // step
+      this.t.前に進む(); // step
     }
     delete s.vars['i'];
   }
@@ -3411,10 +3434,10 @@ main();
     java: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t1 = new MyTurtle(); // caller // step
+    MyTurtle t1 = new MyTurtle(); // caller
     t1.moveForward(); // caller
     Settings.speed = 2; // step
-    MyTurtle t2 = new MyTurtle(); // caller // step
+    MyTurtle t2 = new MyTurtle(); // caller
     t1.moveForward(); // caller
     t2.moveForward(); // caller
   }
@@ -3425,7 +3448,7 @@ class Settings {
 }
 
 class MyTurtle {
-  private Turtle t = new Turtle();
+  private Turtle t = new Turtle(); // step
 
   void moveForward(Turtle t) {
     for (int i = 0; i < Settings.speed; i++) { // step
