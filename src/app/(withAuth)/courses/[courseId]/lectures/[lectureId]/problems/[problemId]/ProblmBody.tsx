@@ -316,35 +316,36 @@ function getInitialVariables(
 ): Record<string, string> {
   let adjustedPreviousTraceItemIndex = previousTraceItemIndex;
 
+  let nonGlobalVariableShouldBeEmpty = false;
   if (problemType === 'step') {
     const currentDepth = traceItems[currentTraceItemIndex].depth;
     while (adjustedPreviousTraceItemIndex > 0 && currentDepth !== traceItems[adjustedPreviousTraceItemIndex].depth) {
       if (currentDepth > traceItems[adjustedPreviousTraceItemIndex].depth) {
         // 過去のトレースの方が現在のトレースよりも深いため。
-        return getEmptyVariables(currentVariables);
+        nonGlobalVariableShouldBeEmpty = true;
+        break;
       }
       adjustedPreviousTraceItemIndex--;
     }
-
-    if (
-      traceItems[currentTraceItemIndex].callStack.at(-1) !== traceItems[adjustedPreviousTraceItemIndex].callStack.at(-1)
-    ) {
-      // 過去のトレースと現在のトレースのスタックトレースが別であるため。
-      return getEmptyVariables(currentVariables);
-    }
+    // 過去のトレースと現在のトレースのスタックトレースが別であるかどうか。
+    nonGlobalVariableShouldBeEmpty ||=
+      traceItems[currentTraceItemIndex].callStack.at(-1) !==
+      traceItems[adjustedPreviousTraceItemIndex].callStack.at(-1);
   }
 
   return Object.fromEntries(
     Object.entries(currentVariables)
       .filter(([_, value]) => typeof value === 'number' || typeof value === 'string')
-      .map(([key]) => [key, traceItems[adjustedPreviousTraceItemIndex].vars[key]?.toString() ?? ''])
+      .map(([key]) => {
+        const isGlobalVariable = isUpperCase(key.slice(0, 1));
+        console.log(key, isGlobalVariable);
+        if (isGlobalVariable) return [key, traceItems[previousTraceItemIndex].vars[key]?.toString() ?? ''];
+        if (nonGlobalVariableShouldBeEmpty) return [key, ''];
+        return [key, traceItems[adjustedPreviousTraceItemIndex].vars[key]?.toString() ?? ''];
+      })
   );
 }
 
-function getEmptyVariables(currentVariables: TraceItemVariable): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(currentVariables)
-      .filter(([_, value]) => typeof value === 'number' || typeof value === 'string')
-      .map(([key]) => [key, ''])
-  );
+function isUpperCase(str: string): boolean {
+  return str === str.toUpperCase() && str !== str.toLowerCase();
 }

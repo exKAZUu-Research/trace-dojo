@@ -118,6 +118,7 @@ export const problemIds = [
   'test3',
   'test4',
   'test5',
+  'test9',
 ] as const;
 export type ProblemId = (typeof problemIds)[number];
 
@@ -246,6 +247,7 @@ export const problemIdToName: Record<ProblemId, string> = {
   test3: 'ステップ実行のテスト用問題(3)',
   test4: 'ステップ実行のテスト用問題(4)',
   test5: 'チェックポイント取得のテスト用問題',
+  test9: 'ステップ実行のテスト用問題(9)',
 };
 
 export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]> = {
@@ -303,7 +305,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     // 第8回
     ['oop1'],
   ],
-  test: [['test1', 'test2', 'test3', 'test4', 'test5', 'oop1', 'oop2', 'garbageCollection1', 'polymorphism1']],
+  test: [['test1', 'test2', 'test3', 'test4', 'test5', 'test9', 'oop1', 'oop2', 'garbageCollection1', 'polymorphism1']],
 };
 
 export const courseIdToLectureIds: Record<CourseId, string[]> = JSON.parse(
@@ -3676,6 +3678,100 @@ public class Straight {
     c.forward(); // step
     c.forward(); // step
     c.forward(); // step
+  }
+}
+`,
+  },
+  test9: {
+    // Javaの静的フィールド（つまり、グローバル変数）を扱う場合、 `myGlobal` を使うこと。
+    // 静的メソッドは普通の関数で代替すること。
+    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
+    instrumented: `
+myGlobal.Settings = { speed: 0 };
+
+function main() {
+  const t1 = call(MyTurtle)();
+  myGlobal.Settings.speed = 2; // step
+  call(t1.moveForward.bind(t1))();
+
+  const t2 = call(MyTurtle2, 'x', 'y')(2, 2);
+  call(increaseSpeed)();
+  call(t1.moveForward.bind(t1))();
+  call(t2.moveForward.bind(t2))();
+}
+
+function increaseSpeed() {
+  myGlobal.Settings.speed++; // step
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+
+  moveForward() {
+    for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) { // step
+      this.t.前に進む(); // step
+    }
+  }
+}
+
+class MyTurtle2 {
+  constructor(x, y) {
+    this.t = new Turtle(x, y); // step
+  }
+
+  moveForward() {
+    for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) { // step
+      this.t.前に進む(); // step
+    }
+  }
+}
+
+main();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle t1 = new MyTurtle(); // caller
+    Settings.speed = 2; // step
+    t1.moveForward(); // caller
+
+    MyTurtle t2 = new MyTurtle2(2, 2); // caller
+    Settings.increaseSpeed(); // caller
+    t1.moveForward(); // caller
+    t2.moveForward(); // caller
+  }
+}
+
+class Settings {
+  static public int speed;
+
+  public increaseSpeed() {
+    speed++; // step
+  }
+}
+
+class MyTurtle {
+  private Turtle t = new Turtle(); // step
+
+  void moveForward(Turtle t) {
+    for (int i = 0; i < Settings.speed; i++) { // step
+      t.前に進む(); // step
+    }
+  }
+}
+
+class MyTurtle2 {
+  private Turtle t;
+
+  MyTurtle2(int x, int y) {
+    t = new Turtle(x, y); // step
+  }
+  void moveForward(Turtle t) {
+    for (int i = 0; i < Settings.speed; i++) { // step
+      t.前に進む(); // step
+    }
   }
 }
 `,
