@@ -2996,8 +2996,44 @@ public class Main {
 `,
   },
   multiObject3: {
-    instrumented: ``.trim(),
-    java: ``.trim(),
+    instrumented: `
+const t1 = new Turtle(1, 4); // step
+const t2 = new Turtle(5, 4); // step
+const t3 = new Turtle(2, 1); // step
+
+t1.右を向く(); // step
+t1.右を向く(); // step
+t1.前に進む(); // step
+
+t2.左を向く(); // step
+t2.左を向く(); // step
+t2.前に進む(); // step
+
+t3.右を向く(); // step
+t3.前に進む(); // step
+t3.前に進む(); // step
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+	  Turtle t1 = new Turtle(1, 4); // step
+	  Turtle t2 = new Turtle(5, 4); // step
+	  Turtle t3 = new Turtle(2, 1); // step
+
+		t1.右を向く(); // step
+		t1.右を向く(); // step
+		t1.前に進む(); // step
+
+		t2.左を向く(); // step
+		t2.左を向く(); // step
+		t2.前に進む(); // step
+
+		t3.右を向く(); // step
+		t3.前に進む(); // step
+		t3.前に進む(); // step
+  }
+}
+`,
   },
   multiObject4: {
     instrumented: ``.trim(),
