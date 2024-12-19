@@ -101,6 +101,9 @@ export const problemIds = [
   'test3',
   'test4',
   'test5',
+  'makeClass1',
+  'makeClass2',
+  'constructor1',
 ] as const;
 export type ProblemId = (typeof problemIds)[number];
 
@@ -213,6 +216,9 @@ export const problemIdToName: Record<ProblemId, string> = {
   test3: 'ステップ実行のテスト用問題(3)',
   test4: 'ステップ実行のテスト用問題(4)',
   test5: 'チェックポイント取得のテスト用問題',
+  makeClass1: 'クラスを作ろう(1)',
+  makeClass2: 'クラスを作ろう(2)',
+  constructor1: 'コンストラクタ(1)',
 };
 
 export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]> = {
@@ -256,7 +262,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     // 第1回
     ['multiObject1', 'multiObject2', 'garbageCollection1'],
     // 第2回
-    ['oop1'],
+    ['makeClass1', 'makeClass2', 'constructor1'],
     // 第3回
     ['oop1'],
     // 第4回
@@ -285,7 +291,7 @@ export const problemIdToLanguageIdToProgram: Record<ProblemId, Record<LanguageId
 const t = new Turtle(); // trace
 t.forward();
 t.forward();
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -294,7 +300,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   straight2: {
     instrumented: `
@@ -302,7 +308,7 @@ const t = new Turtle(); // trace
 t.forward();
 t.forward();
 t.forward();
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -312,14 +318,14 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   stepBack: {
     instrumented: `
 const t = new Turtle(); // trace
 t.forward();
 t.backward();
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -328,7 +334,7 @@ public class Main {
         亀.後に戻る(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   stepBack2: {
     instrumented: `
@@ -338,7 +344,7 @@ t.forward();
 t.backward();
 t.forward();
 t.forward();
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -350,7 +356,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   turnRight: {
     instrumented: `
@@ -358,7 +364,7 @@ const t = new Turtle(); // trace
 t.forward();
 t.turnRight();
 t.forward();
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -368,7 +374,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   turnRight2: {
     instrumented: `
@@ -378,7 +384,7 @@ t.forward();
 t.turnRight();
 t.forward();
 t.forward();
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -390,7 +396,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   turnLeftAndRight: {
     instrumented: `
@@ -399,7 +405,7 @@ t.turnRight();
 t.forward();
 t.turnLeft();
 t.forward();
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -410,7 +416,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   turnLeftAndRight2: {
     instrumented: `
@@ -420,7 +426,7 @@ t.turnRight();
 t.forward();
 t.turnLeft();
 t.forward();
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -432,7 +438,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   turnLeftAndRight3: {
     instrumented: `
@@ -443,7 +449,7 @@ t.turnLeft();
 t.forward();
 t.turnRight();
 t.forward();
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -456,7 +462,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   turnLeftAndRight4: {
     instrumented: `
@@ -469,7 +475,7 @@ t.forward();
 t.turnLeft();
 t.forward();
 t.forward();
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -484,7 +490,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   square1: {
     instrumented: `
@@ -494,7 +500,7 @@ t.turnRight();
 t.forward();
 t.turnRight();
 t.forward();
-`.trim(),
+`,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -506,7 +512,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   square2: {
     instrumented: `
@@ -516,7 +522,7 @@ t.turnRight();
 t.forward();
 t.turnRight();
 t.forward();
-`.trim(),
+`,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -528,7 +534,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   square3: {
     instrumented: `
@@ -540,7 +546,7 @@ t.turnLeft();
 t.forward();
 t.turnLeft();
 t.forward();
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -554,7 +560,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   square4: {
     instrumented: `
@@ -570,7 +576,7 @@ t.forward();
 t.turnRight();
 t.forward();
 t.forward();
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -588,7 +594,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
 
   variable: {
@@ -596,7 +602,7 @@ public class Main {
 s.set('x', <1-5>);
 const t = new Turtle(s.get('x'), <1-5>); // trace
 t.forward();
- `.trim(),
+ `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -605,7 +611,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   variable2: {
     instrumented: `
@@ -613,7 +619,7 @@ s.set('a', <2-6>);
 s.set('a', s.get('a') - 1);
 const t = new Turtle(<1-5>, s.get('a')); // trace
 t.forward();
- `.trim(),
+ `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -623,7 +629,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   variable3: {
     instrumented: `
@@ -632,7 +638,7 @@ s.set('x', s.get('x') + 1);
 s.set('y', s.get('x') + 1);
 const t = new Turtle(s.get('x'), s.get('y')); // trace
 t.forward();
-`.trim(),
+`,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -643,7 +649,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   variable4: {
     instrumented: `
@@ -652,7 +658,7 @@ s.set('b', s.get('b') + 1);
 s.set('a', s.get('b') - 2);
 const t = new Turtle(s.get('a') + 1, s.get('b')); // trace
 t.forward();
-`.trim(),
+`,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -663,7 +669,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   variable5: {
     instrumented: `
@@ -673,7 +679,7 @@ s.set('y', s.get('x') * 2);
 s.set('y', s.get('y') / 3);
 const t = new Turtle(s.get('x') + 1, s.get('y') + 1); // trace
 t.forward();
-`.trim(),
+`,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -685,7 +691,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   variable6: {
     instrumented: `
@@ -694,7 +700,7 @@ s.set('b', s.get('a') * 2);
 s.set('c', s.get('b') - 2);
 const t = new Turtle(s.get('c'), s.get('b')); // trace
 t.forward();
-`.trim(),
+`,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -705,7 +711,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   variable7: {
     instrumented: `
@@ -715,7 +721,7 @@ s.set('z', (s.get('y') * 2) + (s.get('x') / 2));
 s.set('x', s.get('z') / 3);
 const t = new Turtle(s.get('x'), s.get('y')); // trace
 t.forward();
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -727,7 +733,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   variable8: {
     instrumented: `
@@ -738,7 +744,7 @@ s.set('x', (s.get('z') / 4) % 7);
 s.set('y', (s.get('x') + s.get('y')) % 7);
 const t = new Turtle(s.get('x'), s.get('y')); // trace
 t.backward();
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -751,7 +757,7 @@ public class Main {
         亀.後に戻る(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   variable9: {
     instrumented: `
@@ -762,7 +768,7 @@ s.set('x', ((s.get('z') / 5) + s.get('x')) % 7);
 s.set('y', ((s.get('x') * 2) + s.get('y')) % 7);
 const t = new Turtle(s.get('x'), s.get('y')); // trace
 t.forward();
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -775,7 +781,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   variable10: {
     instrumented: `
@@ -787,7 +793,7 @@ s.set('x', ((s.get('z') / 6) + s.get('w')) % 7);
 s.set('y', ((s.get('x') * 3) + s.get('y')) % 7);
 const t = new Turtle(s.get('x'), s.get('y')); // trace
 t.forward();
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -801,7 +807,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   while1: {
     instrumented: `
@@ -811,7 +817,7 @@ while (s.get('i') < <3-5>) {
   t.forward();
   s.set('i', s.get('i') + 1);
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -823,7 +829,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   while2: {
     instrumented: `
@@ -833,7 +839,7 @@ while (s.get('i') < <4-6>) {
   t.forward();
   s.set('i', s.get('i') + 1);
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -845,7 +851,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   while3: {
     instrumented: `
@@ -856,7 +862,7 @@ while (s.get('i') < <2-3>) {
   t.forward();
   t.turnRight();
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -869,7 +875,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   while4: {
     instrumented: `
@@ -882,7 +888,7 @@ while (s.get('i') < <4-5>) {
   t.turnLeft();
   s.set('i', s.get('i') + 1);
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -897,7 +903,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   while5: {
     instrumented: `
@@ -910,7 +916,7 @@ while (s.get('i') < <3-4>) {
   t.turnLeft();
   s.set('i', s.get('i') + 1);
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -925,7 +931,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   for1: {
     instrumented: `
@@ -934,7 +940,7 @@ for (s.set('i', 0); s.get('i') < <3-5>; s.set('i', s.get('i') + 1)) {
   t.forward();
 }
 delete s.vars['i'];
-       `.trim(),
+       `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -944,7 +950,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   for2: {
     instrumented: `
@@ -953,7 +959,7 @@ for (s.set('i', <1-2>); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
   t.forward();
 }
 delete s.vars['i'];
-       `.trim(),
+       `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -963,7 +969,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   for3: {
     instrumented: `
@@ -974,7 +980,7 @@ for (; s.get('i') < <2-3>;) {
   t.turnRight();
   s.set('i', s.get('i') + 1);
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -987,7 +993,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   for4: {
     instrumented: `
@@ -999,7 +1005,7 @@ for (; s.get('i') < <3-4>;) {
   s.set('i', s.get('i') + 1);
 }
 t.backward();
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1013,7 +1019,7 @@ public class Main {
         亀.後に戻る(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   for5: {
     instrumented: `
@@ -1025,7 +1031,7 @@ delete s.vars['i'];
 s.set('x', s.get('x') / 3);
 const t = new Turtle(s.get('x') + 1, 0); // trace
 t.forward();
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1038,7 +1044,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   for6: {
     instrumented: `
@@ -1053,7 +1059,7 @@ s.set('a', s.get('a') / 4);
 s.set('b', s.get('b') / 5);
 const t = new Turtle(s.get('a') % 6, s.get('b') % 6); // trace
 t.forward();
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1069,7 +1075,7 @@ public class Main {
         亀.前に進む(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   for7: {
     instrumented: `
@@ -1087,7 +1093,7 @@ for (s.set('i', s.get('sum') / 4); s.get('i') >= 0; s.set('i', s.get('i') - 1)) 
   t.turnRight();
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1105,7 +1111,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   doubleLoop1: {
     instrumented: `
@@ -1118,7 +1124,7 @@ for (s.set('i', 0); s.get('i') < <2-3>; s.set('i', s.get('i') + 1)) {
   t.turnRight();
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1131,7 +1137,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   doubleLoop2: {
     instrumented: `
@@ -1145,7 +1151,7 @@ for (s.set('i', 0); s.get('i') < <2-3>; s.set('i', s.get('i') + 1)) {
   t.turnLeft();
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1159,7 +1165,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   doubleLoop3: {
     instrumented: `
@@ -1172,7 +1178,7 @@ for (s.set('i', <3-4>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
   t.turnRight();
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1185,7 +1191,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   doubleLoop4: {
     instrumented: `
@@ -1200,7 +1206,7 @@ for (s.set('i', <3-4>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
   delete s.vars['j'];
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1215,7 +1221,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   doubleLoop5: {
     instrumented: `
@@ -1233,7 +1239,7 @@ for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
   t.turnLeft();
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1250,7 +1256,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   if1: {
     instrumented: `
@@ -1262,7 +1268,7 @@ for (s.set('i', 0); s.get('i') < <7-9>; s.set('i', s.get('i') + 1)) {
   }
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1275,7 +1281,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   if2: {
     instrumented: `
@@ -1288,7 +1294,7 @@ for (s.set('i', 0); s.get('i') < <6-8>; s.set('i', s.get('i') + 1)) {
   }
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1302,7 +1308,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   if3: {
     instrumented: `
@@ -1316,7 +1322,7 @@ for (s.set('i', 0); s.get('i') < <4-5>; s.set('i', s.get('i') + 1)) {
   }
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1331,7 +1337,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   if4: {
     instrumented: `
@@ -1345,7 +1351,7 @@ for (s.set('i', 0); s.get('i') < <4-5>; s.set('i', s.get('i') + 1)) {
   }
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1360,7 +1366,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   if5: {
     instrumented: `
@@ -1378,7 +1384,7 @@ for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
   t.turnLeft();
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1396,7 +1402,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   elseIf1: {
     instrumented: `
@@ -1411,7 +1417,7 @@ for (s.set('i', 0); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
   }
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1426,7 +1432,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   elseIf2: {
     instrumented: `
@@ -1443,7 +1449,7 @@ for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   }
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1460,7 +1466,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   elseIf3: {
     instrumented: `
@@ -1477,7 +1483,7 @@ for (s.set('i', 0); s.get('i') < 7; s.set('i', s.get('i') + 1)) {
   }
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1494,7 +1500,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   elseIf4: {
     instrumented: `
@@ -1511,7 +1517,7 @@ for (s.set('i', 0); s.get('i') < <6-7>; s.set('i', s.get('i') + 1)) {
   }
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1528,7 +1534,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   elseIf5: {
     instrumented: `
@@ -1543,7 +1549,7 @@ for (s.set('i', 0); s.get('i') < <7-8>; s.set('i', s.get('i') + 1)) {
   }
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1558,7 +1564,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   switch1: {
     instrumented: `
@@ -1574,7 +1580,7 @@ for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   }
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1591,7 +1597,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   switch2: {
     instrumented: `
@@ -1607,7 +1613,7 @@ for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   }
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1624,7 +1630,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   switch3: {
     instrumented: `
@@ -1647,7 +1653,7 @@ for (s.set('i', 0); s.get('i') < <6-7>; s.set('i', s.get('i') + 1)) {
   }
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1671,7 +1677,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   switch4: {
     instrumented: `
@@ -1692,7 +1698,7 @@ for (s.set('i', 0); s.get('i') < <7-8>; s.set('i', s.get('i') + 1)) {
   }
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1714,7 +1720,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   switch5: {
     instrumented: `
@@ -1736,7 +1742,7 @@ for (s.set('i', 0); s.get('i') < <9-10>; s.set('i', s.get('i') + 1)) {
   }
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1759,7 +1765,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   break1: {
     instrumented: `
@@ -1768,7 +1774,7 @@ while (true) {
   if (!t.canMoveForward()) break;
   t.forward();
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1779,7 +1785,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   break2: {
     instrumented: `
@@ -1793,7 +1799,7 @@ while (true) {
   t.forward();
   t.turnLeft();
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1809,7 +1815,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   break3: {
     instrumented: `
@@ -1822,7 +1828,7 @@ for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
   t.turnRight();
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1836,7 +1842,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   break4: {
     instrumented: `
@@ -1849,7 +1855,7 @@ for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   t.turnLeft();
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1863,7 +1869,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   break5: {
     instrumented: `
@@ -1882,7 +1888,7 @@ for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   t.turnRight();
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1901,7 +1907,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   continue1: {
     instrumented: `
@@ -1913,7 +1919,7 @@ for (s.set('i', 0); s.get('i') < <3-5>; s.set('i', s.get('i') + 1)) {
   t.forward();
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1926,7 +1932,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   continue2: {
     instrumented: `
@@ -1939,7 +1945,7 @@ for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   t.forward();
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1953,7 +1959,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   continue3: {
     instrumented: `
@@ -1971,7 +1977,7 @@ for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
   t.turnLeft();
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -1989,7 +1995,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   continue4: {
     instrumented: `
@@ -2007,7 +2013,7 @@ for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   t.turnLeft();
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2025,7 +2031,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   continue5: {
     instrumented: `
@@ -2044,7 +2050,7 @@ for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   delete s.vars['j'];
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2063,7 +2069,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   method1: {
     instrumented: `
@@ -2082,7 +2088,7 @@ function threeStepsForward(t) {
   t.forward();
   t.forward();
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2101,7 +2107,7 @@ public class Main {
         t.前に進む(); // sid: 7
     }
 }
-    `.trim(),
+    `,
   },
   method2: {
     instrumented: `
@@ -2120,7 +2126,7 @@ function turnAround(t) {
   t.turnRight();
 }
 
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2138,7 +2144,7 @@ public class Main {
         t.右を向く(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   method3: {
     instrumented: `
@@ -2153,7 +2159,7 @@ function forwardGivenSteps(t, n) {
   }
   delete s.vars['i'];
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2169,7 +2175,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   method4: {
     instrumented: `
@@ -2187,7 +2193,7 @@ function forwardFourSteps(t) {
   call(forwardTwoSteps, 't')(t);
   call(forwardTwoSteps, 't')(t);
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2205,7 +2211,7 @@ public class Main {
         二歩前に進める(t); // caller
     }
 }
-    `.trim(),
+    `,
   },
   method5: {
     instrumented: `
@@ -2222,7 +2228,7 @@ function drawSquare(t) {
   }
   delete s.vars['i'];
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2239,7 +2245,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   return1: {
     instrumented: `
@@ -2257,7 +2263,7 @@ function forwardGivenSteps(t, n) {
 function double(a) {
   return a * 2;
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2274,7 +2280,7 @@ public class Main {
         return a * 2;
     }
 }
-    `.trim(),
+    `,
   },
   return2: {
     instrumented: `
@@ -2295,7 +2301,7 @@ function forwardGivenSteps(t, n) {
 function double(a) {
   return a * 2;
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2315,7 +2321,7 @@ public class Main {
         return a * 2;
     }
 }
-    `.trim(),
+    `,
   },
   return3: {
     instrumented: `
@@ -2333,7 +2339,7 @@ function forwardGivenSteps(t, n) {
 function add(a, b) {
   return a + b;
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2350,7 +2356,7 @@ public class Main {
         return a + b; // sid
     }
 }
-    `.trim(),
+    `,
   },
   return4: {
     instrumented: `
@@ -2377,7 +2383,7 @@ function isEven(a) {
   return a % 2 === 0;
 }
 
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2401,7 +2407,7 @@ public class Main {
         return a % 2 == 0;
     }
 }
-    `.trim(),
+    `,
   },
   return5: {
     instrumented: `
@@ -2426,7 +2432,7 @@ function forwardTwoSteps(t) {
 function isEqual(a, b) {
   return a == b;
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2449,7 +2455,7 @@ public class Main {
         return a == b;
     }
 }
-    `.trim(),
+    `,
   },
 
   array1: {
@@ -2468,7 +2474,7 @@ function forwardGivenSteps(t, n) {
   }
   delete s.vars['i'];
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2485,7 +2491,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   array2: {
     instrumented: `
@@ -2503,7 +2509,7 @@ function forwardGivenSteps(t, n) {
   }
   delete s.vars['i'];
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2520,7 +2526,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   array3: {
     instrumented: `
@@ -2537,7 +2543,7 @@ for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)
   }
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2555,7 +2561,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   array4: {
     instrumented: `
@@ -2573,7 +2579,7 @@ for (const cmd of [0, 1, 0, 2, 0]) {
   }
 }
 delete s.vars['cmd'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2591,7 +2597,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   array5: {
     instrumented: `
@@ -2616,7 +2622,7 @@ for (const cmd of [0, 1, 0, 2, 0, 3, 0]) {
   }
 }
 delete s.vars['cmd'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2640,7 +2646,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   string1: {
     instrumented: `
@@ -2657,7 +2663,7 @@ for (s.set('i', 0); s.get('i') < s.get('s').length; s.set('i', s.get('i') + 1)) 
   }
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2675,7 +2681,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   string2: {
     instrumented: `
@@ -2694,7 +2700,7 @@ for (s.set('i', 0); s.get('i') < s.get('s').length; s.set('i', s.get('i') + 1)) 
   }
 }
 delete s.vars['i'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2714,7 +2720,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   string3: {
     instrumented: `
@@ -2732,7 +2738,7 @@ for (const ch of 'frflf') {
   }
 }
 delete s.vars['ch'];
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2750,7 +2756,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   string4: {
     instrumented: `
@@ -2767,7 +2773,7 @@ function parse(t, c) {
   if (c === 'fo') t.forward();
   else if (c === 'ri') t.turnRight();
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2785,7 +2791,7 @@ public class Main {
             t.右を向く(); // sid
     }
 }
-    `.trim(),
+    `,
   },
   string5: {
     instrumented: `
@@ -2813,7 +2819,7 @@ function forwardGivenSteps(t, n) {
   }
   delete s.vars['i'];
 }
-    `.trim(),
+    `,
     java: `
 public class Main {
     public static void main(String[] args) {
@@ -2841,7 +2847,7 @@ public class Main {
         }
     }
 }
-    `.trim(),
+    `,
   },
   oop1: {
     instrumented: `
@@ -2851,7 +2857,7 @@ t1.forward();
 t2.forward();
 t1.forward();
 t2.forward();
-`.trim(),
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
@@ -2863,7 +2869,7 @@ public class Main {
     t2.前に進む(); // sid
   }
 }
-`.trim(),
+`,
   },
   oop2: {
     // 上のコードから下にあるクラスを参照するためには、main()関数を定義しないといけない。
@@ -2887,7 +2893,7 @@ class MyTurtle {
 }
 
 main();
-`.trim(),
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
@@ -2909,7 +2915,7 @@ class MyTurtle {
     }
   }
 }
-`.trim(),
+`,
   },
   // ----------- 初級プログラミングⅡ 第1回 ここから -----------
   multiObject1: {
@@ -2920,7 +2926,7 @@ t1.前に進む(); // step
 t1.右を向く(); // step
 t2.前に進む(); // step
 t2.左を向く(); // step
-`.trim(),
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
@@ -2932,7 +2938,7 @@ public class Main {
     t2.左を向く(); // step
   }
 }
-`.trim(),
+`,
   },
   multiObject2: {
     instrumented: `
@@ -2943,7 +2949,7 @@ const t2 = new Turtle(3, 3); // step
 t2.前に進む(); // step
 t2.左を向く(); // step
 t2.前に進む(); // step
-`.trim(),
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
@@ -2956,7 +2962,7 @@ public class Main {
     t2.前に進む(); // step
   }
 }
-`.trim(),
+`,
   },
   garbageCollection1: {
     instrumented: `
@@ -2968,7 +2974,7 @@ t2.前に進む(); // step
 t2.remove(); // step
 t2 = t1;
 t2.前に進む(); // step
-`.trim(),
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
@@ -2981,11 +2987,134 @@ public class Main {
     t2.前に進む(); // step
   }
 }
-`.trim(),
+`,
   },
   // ----------- 初級プログラミングⅡ 第1回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第2回 ここから -----------
+  makeClass1: {
+    instrumented: `
+function main() {
+  const t = call(MyTurtle)();
+  call(t.moveForward.bind(t))();
+  t.speed = 1; // step
+  call(t.moveForward.bind(t))();
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+    this.speed = 2; // step
+  }
+  moveForward() {
+    for (s.vars.i = 0; s.vars.i < this.speed; s.vars.i++) { // step
+      this.t.前に進む(); // step
+    }
+    delete s.vars.i;
+  }
+}
+
+main();
+    `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle t = new MyTurtle(); // caller
+    t.moveForward(); // caller
+    t.speed = 1; // step
+    t.moveForward(); // caller
+  }
+}
+
+class MyTurtle {
+  Turtle t = new Turtle(); // step
+  int speed = 2; // step
+
+  void moveForward() {
+    for (int i = 0; i < this.speed; i++) { // step
+      this.t.前に進む(); // step
+    }
+  }
+}
+    `,
+  },
+  makeClass2: {
+    // TODO: 完成させる。
+    instrumented: `
+function main() {
+  const t = call(MyTurtle)();
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+}
+
+main();
+    `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle t = new MyTurtle(); // caller
+  }
+}
+
+class MyTurtle {
+  Turtle t = new Turtle(); // step
+}
+    `,
+  },
+  constructor1: {
+    instrumented: `
+function main() {
+  const t = call(MyTurtle, 'x', 'y', 'speed')(0, 1, 2);
+  call(t.moveForward.bind(t))();
+  t.speed = 1; // step
+  call(t.moveForward.bind(t))();
+}
+
+class MyTurtle {
+  constructor(x, y, speed) {
+    this.t = new Turtle(x, y); // step
+    this.speed = speed; // step
+  }
+  moveForward() {
+    for (s.vars.i = 0; s.vars.i < this.speed; s.vars.i++) { // step
+      this.t.前に進む(); // step
+    }
+    delete s.vars.i;
+  }
+}
+
+main();
+    `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle t = new MyTurtle(0, 1, 2); // caller
+    t.moveForward(); // caller
+    t.speed = 1; // step
+    t.moveForward(); // caller
+  }
+}
+
+class MyTurtle {
+  Turtle t;
+  int speed;
+
+  MyTurtle(int x, int y, int speed) {
+    this.t = new Turtle(x, y); // step
+    this.speed = speed; // step
+  }
+  void moveForward() {
+    for (int i = 0; i < this.speed; i++) { // step
+      this.t.前に進む(); // step
+    }
+  }
+}
+    `,
+  },
   // ----------- 初級プログラミングⅡ 第2回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第3回 ここから -----------
@@ -3020,7 +3149,7 @@ class MyTurtle {
 }
 
 main();
-`.trim(),
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
@@ -3046,7 +3175,7 @@ class MyTurtle {
     }
   }
 }
-`.trim(),
+`,
   },
   // ----------- 初級プログラミングⅡ 第4回 ここまで -----------
 
@@ -3085,7 +3214,7 @@ class FastTurtle extends MyTurtle {
 }
 
 main();
-`.trim(),
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
@@ -3121,7 +3250,7 @@ class FastTurtle extends MyTurtle {
     return 3;
   }
 }
-`.trim(),
+`,
   },
   // ----------- 初級プログラミングⅡ 第5回 ここまで -----------
 
@@ -3139,7 +3268,7 @@ const t = new Turtle(); // trace
 t.forward();
 t.forward();
 t.forward();
-`.trim(),
+`,
     // sidがただの連番である場合、番号を省略できる。
     java: `
 public class Main {
@@ -3150,7 +3279,7 @@ public class Main {
     c.forward(); // sid
   }
 }
-`.trim(),
+`,
   },
   test2: {
     instrumented: `
@@ -3161,7 +3290,7 @@ for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
   t.turnRight();
 }
 delete s.vars['i'];
-`.trim(),
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
@@ -3173,7 +3302,7 @@ public class Main {
     }
   }
 }
-`.trim(),
+`,
   },
   test3: {
     instrumented: `
@@ -3205,7 +3334,7 @@ public class Main {
     return a;
   }
 }
-`.trim(),
+`,
   },
   test4: {
     instrumented: `
@@ -3222,7 +3351,7 @@ s.set('bar', <1-100>);
 s.set('i', s.get('bar') + 1);
 t2.forward();
 t2.forward();
-`.trim(),
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
@@ -3241,7 +3370,7 @@ public class Main {
     c2.forward(); // sid
   }
 }
-`.trim(),
+`,
   },
   test5: {
     instrumented: `
@@ -3253,7 +3382,7 @@ t.forward();
 t.forward();
 t.forward();
 t.forward();
-`.trim(),
+`,
     java: `
 public class Straight {
   public static void main(String[] args) {
@@ -3267,6 +3396,12 @@ public class Straight {
     c.forward(); // sid
   }
 }
-`.trim(),
+`,
   },
 };
+
+for (const problem of Object.values(problemIdToLanguageIdToProgram)) {
+  for (const languageId of languageIds) {
+    problem[languageId] = problem[languageId].trim();
+  }
+}
