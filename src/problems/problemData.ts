@@ -3036,8 +3036,49 @@ public class Main {
 `,
   },
   multiObject4: {
-    instrumented: ``.trim(),
-    java: ``.trim(),
+    instrumented: `
+const t1 = new Turtle(0, 6); // step
+const t2 = new Turtle(6, 0); // step
+
+t1.右を向く(); // step
+t1.右を向く(); // step
+
+for (s.set('i', 0); s.get('i') < 5; s.set('i', s.get('i') + 1)) {
+  t1.前に進む(); // step
+  t2.前に進む(); // step
+  if (s.get('i') % 2 === 0) {
+    t1.左を向く(); // step
+    t2.左を向く(); // step
+  } else {
+    t1.右を向く(); // step
+    t2.右を向く(); // step
+  }
+}
+delete s.vars['i'];
+`,
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle t1 = new Turtle(0, 6); // step
+		Turtle t2 = new Turtle(6, 0); // step
+
+		t1.右を向く(); // step
+		t1.右を向く(); // step
+
+		for (int i = 0; i < 5; i++) { //step
+			t1.前に進む(); // step
+			t2.前に進む(); // step
+			if (i % 2 == 0) {
+				t1.左を向く(); // step
+				t2.左を向く(); // step
+			} else {
+				t1.右を向く(); // step
+				t2.右を向く(); // step
+			}
+		}
+	}
+}
+`,
   },
   multiObject5: {
     instrumented: ``.trim(),
