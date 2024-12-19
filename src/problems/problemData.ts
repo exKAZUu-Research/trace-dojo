@@ -88,18 +88,31 @@ export const problemIds = [
   'string3',
   'string4',
   'string5',
-  // 初級プログラミングII 第1回
+  // 初級プログラミングⅡ 第1回
   'multiObject1',
   'multiObject2',
   'garbageCollection1',
-  'oop1',
-  'oop2',
+  // 初級プログラミングⅡ 第2回
+  'makeClass1',
+  'makeClass2',
+  'constructor1',
+  // 初級プログラミングⅡ 第3回
   'encapsulate',
   'withoutEncapsulate',
   'withEncapsulate',
   'garbageCollection1',
-  'static2',
+  // 初級プログラミングⅡ 第4回
+  'staticMethod1',
+  'staticMethod2',
+  'staticField1',
+  'staticField2',
+  // 初級プログラミングⅡ 第5回
   'polymorphism1',
+  // 初級プログラミングⅡ 第6回
+  // 初級プログラミングⅡ 第7回
+  // 初級プログラミングⅡ 第8回
+  'oop1',
+  'oop2',
   'test1',
   'test2',
   'test3',
@@ -209,17 +222,30 @@ export const problemIdToName: Record<ProblemId, string> = {
   string3: '文字列を使おう(3)',
   string4: '文字列を使おう(4)',
   string5: '文字列を使おう(5)',
-  // 初級プログラミングII 第1回
+  // 初級プログラミングⅡ 第1回
   multiObject1: '複数のオブジェクトを使おう(1)',
   multiObject2: '複数のオブジェクトを使おう(2)',
-  oop1: 'オブジェクト指向プログラミング(1)',
-  oop2: 'オブジェクト指向プログラミング(2)',
+  // 初級プログラミングⅡ 第2回
   encapsulate: 'カプセル化',
   withoutEncapsulate: 'カプセル化なし',
   withEncapsulate: 'カプセル化あり',
   garbageCollection1: 'ガベージコレクション(1)',
-  static2: '静的フィールド(2)',
+  // 初級プログラミングⅡ 第3回
+  staticMethod1: '静的メソッド(1)',
+  staticMethod2: '静的メソッド(2)',
+  staticField1: '静的フィールド(1)',
+  staticField2: '静的フィールド(2)',
+  // 初級プログラミングⅡ 第4回
+  makeClass1: 'クラスを作ろう(1)',
+  makeClass2: 'クラスを作ろう(2)',
+  constructor1: 'コンストラクタ(1)',
+  // 初級プログラミングⅡ 第5回
   polymorphism1: 'ポリモルフィズム(1)',
+  // 初級プログラミングⅡ 第6回
+  // 初級プログラミングⅡ 第7回
+  // 初級プログラミングⅡ 第8回
+  oop1: 'オブジェクト指向プログラミング(1)',
+  oop2: 'オブジェクト指向プログラミング(2)',
   test1: 'ステップ実行のテスト用問題(1)',
   test2: 'ステップ実行のテスト用問題(2)',
   test3: 'ステップ実行のテスト用問題(3)',
@@ -277,7 +303,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     // 第3回
     ['encapsulate', 'withoutEncapsulate', 'withEncapsulate'],
     // 第4回
-    ['static2'],
+    ['staticMethod1', 'staticMethod2', 'staticField1', 'staticField2'],
     // 第5回
     ['polymorphism1'],
     // 第6回
@@ -287,9 +313,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     // 第8回
     ['oop1'],
   ],
-  test: [
-    ['test1', 'test2', 'test3', 'test4', 'test5', 'oop1', 'oop2', 'garbageCollection1', 'static2', 'polymorphism1'],
-  ],
+  test: [['test1', 'test2', 'test3', 'test4', 'test5', 'oop1', 'oop2', 'garbageCollection1', 'polymorphism1']],
 };
 
 export const courseIdToLectureIds: Record<CourseId, string[]> = JSON.parse(
@@ -3421,28 +3445,139 @@ class SquareTurtle {
   // ----------- 初級プログラミングⅡ 第3回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第4回 ここから -----------
-  static2: {
+  staticMethod1: {
+    // 静的メソッドは普通の関数で代替すること。
+    instrumented: `
+const t1 = new Turtle(1, 1); // step
+call(moveTwoSteps, 't')(t1);
+const t2 = new Turtle(3, 3); // step
+call(moveTwoSteps, 't')(t2);
+
+function moveTwoSteps(t) {
+  t.前に進む(); // step
+  t.前に進む(); // step
+}
+  `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle t1 = new Turtle(1, 1); // step
+    Controller.moveTwoSteps(t1); // caller
+    Turtle t2 = new Turtle(3, 3); // step
+    Controller.moveTwoSteps(t2); // caller
+  }
+}
+
+class Controller {
+  static void moveTwoSteps(Turtle t) {
+    t.前に進む(); // step
+    t.前に進む(); // step
+  }
+}
+    `,
+  },
+  staticMethod2: {
+    // 静的メソッドは普通の関数で代替すること。
+    instrumented: `
+const t1 = new Turtle(1, 1); // step
+const t2 = new Turtle(3, 3); // step
+call(moveTwoSteps, 't')(t1);
+call(moveTwoSteps, 't')(t2);
+t1.前に進む(); // step
+
+function moveTwoSteps(t) {
+  t.前に進む(); // step
+  t.前に進む(); // step
+}
+  `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle t1 = new Turtle(1, 1); // step
+    Turtle t2 = new Turtle(3, 3); // step
+    Controller.moveTwoSteps(t1); // caller
+    Controller.moveTwoSteps(t2); // caller
+    t1.前に進む(); // step
+  }
+}
+
+class Controller {
+  static void moveTwoSteps(Turtle t) {
+    t.前に進む(); // step
+    t.前に進む(); // step
+  }
+}
+    `,
+  },
+  staticField1: {
+    // Javaの静的フィールド（つまり、グローバル変数）を扱う場合、 `myGlobal` を使うこと。
+    // 静的メソッドは普通の関数で代替すること。
+    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
+    instrumented: `
+myGlobal.Controller = { stepCount: 0 };
+
+function main() {
+  const t1 = new Turtle(1, 1); // step
+  call(moveTwoSteps, 't')(t1);
+  const t2 = new Turtle(3, 3); // step
+  call(moveTwoSteps, 't')(t2);
+  s.set('count', myGlobal.Controller.stepCount); // step
+}
+
+function moveTwoSteps(t) {
+  t.前に進む(); // step
+  myGlobal.Controller.stepCount++; // step
+  t.前に進む(); // step
+  myGlobal.Controller.stepCount++; // step
+}
+
+main();
+  `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle t1 = new Turtle(1, 1); // step
+    Controller.moveTwoSteps(t1); // caller
+    Turtle t2 = new Turtle(3, 3); // step
+    Controller.moveTwoSteps(t2); // caller
+    int count = myGlobal.Controller.stepCount; // step
+  }
+}
+
+class Controller {
+  static int stepCount;
+
+  static void moveTwoSteps(Turtle t) {
+    t.前に進む(); // step
+    stepCount++; // step
+    t.前に進む(); // step
+    stepCount++; // step
+  }
+}
+    `,
+  },
+  staticField2: {
     // Javaの静的フィールド（つまり、グローバル変数）を扱う場合、 `myGlobal` を使うこと。
     // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 myGlobal.Settings = { speed: 3 };
 
 function main() {
-  const t1 = call(MyTurtle)(); // step
+  const t1 = call(MyTurtle)();
   call(t1.moveForward.bind(t1))();
   myGlobal.Settings.speed = 2; // step
-  const t2 = call(MyTurtle)(); // step
+  const t2 = call(MyTurtle)();
   call(t1.moveForward.bind(t1))();
   call(t2.moveForward.bind(t2))();
 }
 
 class MyTurtle {
   constructor() {
-    this.t = new Turtle();
+    this.t = new Turtle(); // step
   }
   moveForward() {
-    for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) {
-      this.t.forward();
+    for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) { // step
+      this.t.前に進む(); // step
     }
     delete s.vars['i'];
   }
@@ -3453,10 +3588,10 @@ main();
     java: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t1 = new MyTurtle(); // caller // step
+    MyTurtle t1 = new MyTurtle(); // caller
     t1.moveForward(); // caller
     Settings.speed = 2; // step
-    MyTurtle t2 = new MyTurtle(); // caller // step
+    MyTurtle t2 = new MyTurtle(); // caller
     t1.moveForward(); // caller
     t2.moveForward(); // caller
   }
@@ -3467,7 +3602,7 @@ class Settings {
 }
 
 class MyTurtle {
-  private Turtle t = new Turtle();
+  private Turtle t = new Turtle(); // step
 
   void moveForward(Turtle t) {
     for (int i = 0; i < Settings.speed; i++) { // step
