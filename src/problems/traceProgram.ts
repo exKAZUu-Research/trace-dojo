@@ -70,7 +70,7 @@ export function traceProgram(
   const executableCode = `
 let myGlobal = {};
 const trace = [];
-const turtles = [];
+const _turtles = [];
 const callStack = [];
 const thisPropNames = ${JSON.stringify(thisPropNames)};
 let s;
@@ -120,7 +120,7 @@ class Turtle {
     this.color = color;
     this.dir = 'N';
     board[this.y][this.x] = this.color;
-    turtles.push(this);
+    _turtles.push(this);
   }
   前に進む() {
     const index = dirs.indexOf(this.dir);
@@ -152,12 +152,11 @@ class Turtle {
     const index = dirs.indexOf(this.dir);
     const nx = this.x + dx[index];
     const ny = this.y + dy[index];
-    const isNoTurtle = !turtles.some(t => t.x === nx && t.y === ny);
+    const isNoTurtle = !_turtles.some(t => t.x === nx && t.y === ny);
     return nx >= 0 && nx < ${GRID_COLUMNS} && ny >= 0 && ny < ${GRID_ROWS} && isNoTurtle;
   }
-  remove(sid, self) {
-    turtles.splice(turtles.indexOf(this), 1);
-    addTrace(sid, self);
+  remove() {
+    _turtles.splice(_turtles.indexOf(this), 1);
   }
   右を向く() {
     this.dir = dirs[(dirs.indexOf(this.dir) + 1) % 4];
@@ -181,7 +180,7 @@ function addTrace(sid, self) {
     for (const name of thisPropNames) delete vars['this'][name];
   }
   flattenObjects(vars);
-  trace.push({depth: s.getDepth(), sid, callStack: [...callStack], turtles: turtles.map(t => ({...t})), vars, board: board.map(r => r.join('')).join('\\n')});
+  trace.push({depth: s.getDepth(), sid, callStack: [...callStack], turtles: _turtles.map(t => ({...t})), vars, board: board.map(r => r.join('')).join('\\n')});
 }
 function flattenObjects(obj) {
   for (const [key, value] of Object.entries(obj)) {
@@ -274,7 +273,7 @@ function modifyCode(instrumented: string): string[] {
       // Python向けに最後のループの処理かどうかを判定するために checkForCond を挿入する。
       .replace(/for\s*\(([^;]*);\s*([^;]*);/, (_, init, cond) => `for (${init}; checkForCond(${cond}, ${statementId});`)
       .replaceAll(
-        /(\.set|\.forward|\.backward|\.turnRight|\.turnLeft|\.remove)\(([^\n;]*)\)(;|\)\s*{)/g,
+        /(\.set|\.forward|\.backward|\.turnRight|\.turnLeft)\(([^\n;]*)\)(;|\)\s*{)/g,
         (_, newOrMethod, args, tail) => {
           statementReplaced = true;
           const delimiter = args === '' ? '' : ', ';

@@ -3220,7 +3220,6 @@ public class Main {
 `,
   },
   garbageCollection2: {
-    // FIXME: このコードは正しくステップしない。
     instrumented: `
 let t1 = new Turtle(1, 1); // step
 let t2 = new Turtle(3, 3); // step
@@ -3261,53 +3260,69 @@ public class Main {
 `,
   },
   garbageCollection3: {
-    // TODO: instrumented を完成させる。
-    instrumented: ``,
+    instrumented: `
+const turtles = [];
+turtles[0] = new Turtle(2, 3); // step
+turtles[1] = new Turtle(3, 4); // step
+
+for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
+  call(N回右を向く, 't', 'n')(turtles[s.get('i')], s.get('i')); // step
+}
+for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
+  call(N回前に進む, 't', 'n')(turtles[s.get('i')], 3); // step
+}
+
+turtles[0].remove();
+turtles[0] = new Turtle(4, 3); // step
+turtles[1].remove();
+turtles[1] = new Turtle(3, 2); // step
+
+for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
+  call(N回左を向く, 't', 'n')(turtles[s.get('i')], s.get('i')); // step
+}
+for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
+  call(N回前に進む, 't', 'n')(turtles[s.get('i')], 3); // step
+}
+
+function N回前に進む(t, n) {
+  for (let i = 0; i < n; i++) t.前に進む();
+}
+function N回右を向く(t, n) {
+  for (let i = 0; i < n; i++) t.右を向く();
+}
+function N回左を向く(t, n) {
+  for (let i = 0; i < n; i++) t.左を向く();
+}
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
-    Turtle[] turtles = new Turtle[4];
+    Turtle[] turtles = new Turtle[2];
     turtles[0] = new Turtle(2, 3); // step
     turtles[1] = new Turtle(3, 4); // step
-    turtles[2] = new Turtle(4, 3); // step
-    turtles[3] = new Turtle(3, 2); // step
 
-    for (int i = 0; i < turtles.length; i++) {
+    for (int i = 0; i < turtles.length; i++) // step
       N回右を向く(turtles[i], i); // step
-    }
-
-    for (int i = 0; i < turtles.length; i++) {
+    for (int i = 0; i < turtles.length; i++) // step
       N回前に進む(turtles[i], 3); // step
-    }
 
-    turtles[0] = new Turtle(6, 1); // step
-    turtles[1] = new Turtle(5, 6); // step
-    turtles[2] = new Turtle(0, 5); // step
-    turtles[3] = new Turtle(1, 0); // step
+    turtles[0] = new Turtle(4, 3); // step
+    turtles[1] = new Turtle(3, 2); // step
 
-    for (int i = 0; i < turtles.length; i++) {
+    for (int i = 0; i < turtles.length; i++) // step
       N回左を向く(turtles[i], i); // step
-    }
-
-    for (int i = 0; i < turtles.length; i++) {
+    for (int i = 0; i < turtles.length; i++) // step
       N回前に進む(turtles[i], 3); // step
-    }
   }
 
   static void N回前に進む(Turtle t, int n) {
-    for (int i = 0; i < n; i++) {
-      t.前に進む();
-    }
+    for (int i = 0; i < n; i++) t.前に進む();
   }
   static void N回右を向く(Turtle t, int n) {
-    for (int i = 0; i < n; i++) {
-      t.右を向く();
-    }
+    for (int i = 0; i < n; i++) t.右を向く();
   }
   static void N回左を向く(Turtle t, int n) {
-    for (int i = 0; i < n; i++) {
-      t.左を向く();
-    }
+    for (int i = 0; i < n; i++) t.左を向く();
   }
 }
 `,
