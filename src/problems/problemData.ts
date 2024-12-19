@@ -2926,6 +2926,7 @@ class MyTurtle {
   },
   // ----------- 初級プログラミングⅡ 第1回 ここから -----------
   multiObject1: {
+    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 const t1 = new Turtle(1, 1); // step
 const t2 = new Turtle(3, 3); // step
@@ -2948,6 +2949,7 @@ public class Main {
 `,
   },
   multiObject2: {
+    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 const t1 = new Turtle(1, 1); // step
 t1.前に進む(); // step
@@ -2972,6 +2974,7 @@ public class Main {
 `,
   },
   garbageCollection1: {
+    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 let t1 = new Turtle(1, 1); // step
 t1.前に進む(); // step
@@ -3000,6 +3003,7 @@ public class Main {
 
   // ----------- 初級プログラミングⅡ 第2回 ここから -----------
   makeClass1: {
+    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 function main() {
   const t = call(MyTurtle)();
@@ -3047,6 +3051,7 @@ class MyTurtle {
   },
   makeClass2: {
     // TODO: 完成させる。
+    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 function main() {
   const t = call(MyTurtle)();
@@ -3073,6 +3078,7 @@ class MyTurtle {
     `,
   },
   constructor1: {
+    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 function main() {
   const t = call(MyTurtle, 'x', 'y', 'speed')(0, 1, 2);
@@ -3126,6 +3132,7 @@ class MyTurtle {
 
   // ----------- 初級プログラミングⅡ 第3回 ここから -----------
   encapsulate: {
+    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 function main() {
   const t = call(MyTurtle, 'x', 'y', 'speed')(0, 0, 2);
@@ -3214,6 +3221,7 @@ public class Main {
 `,
   },
   withEncapsulate: {
+    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 function main() {
   const t = call(SquareTurtle)();
@@ -3266,8 +3274,8 @@ class SquareTurtle {
 
   // ----------- 初級プログラミングⅡ 第4回 ここから -----------
   static2: {
-    // グローバル変数を扱う際は、 `myGlobal` という名前のオブジェクトを使うこと。
-    // 上のコードから下にあるクラスを参照するためには、main()関数を定義しないといけない。
+    // Javaの静的フィールド（つまり、グローバル変数）を扱う場合、 `myGlobal` を使うこと。
+    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 myGlobal.Settings = { speed: 3 };
 
@@ -3325,6 +3333,7 @@ class MyTurtle {
 
   // ----------- 初級プログラミングⅡ 第5回 ここから -----------
   polymorphism1: {
+    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 function main() {
   const ts = [new MyTurtle(0, 0), new FastTurtle(1)]; // step
