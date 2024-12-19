@@ -3182,8 +3182,45 @@ public class Main {
   },
   withEncapsulate2: {
     instrumented: `
+function main() {
+  const t = call(LineTurtle)(); // trace
+  call(t.draw.bind(t),'speed')(2);
+  call(t.t.turnRight.bind(t))();
+  call(t.draw.bind(t),'speed')(3);
+}
+
+class LineTurtle {
+  constructor() {
+    this.t = new Turtle();
+  }
+
+  draw(speed) {
+    for (s.set('i', 0); s.get('i') < speed; s.set('i', s.get('i') + 1))  {
+      this.t.forward();
+    }
+  }
+}
+main();
 `.trim(),
     java: `
+public class Main {
+  public static void main(String[] args) {
+    LineTurtle t = new LineTurtle(); // caller // sid
+    t.draw(2); // caller
+    t.t.右を向く(); // sid
+    t.draw(3); // caller
+  }
+}
+
+class LineTurtle {
+  private Turtle t = new Turtle(0, 0);
+
+  void draw(int s) {
+    for (int i = 0; i < speed; i++) { // sid
+      this.t.前に進む(); // sid
+    }
+  }
+}
 `.trim(),
   },
   withoutEncapsulate3: {
