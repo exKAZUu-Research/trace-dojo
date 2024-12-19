@@ -155,8 +155,9 @@ class Turtle {
     const isNoTurtle = !turtles.some(t => t.x === nx && t.y === ny);
     return nx >= 0 && nx < ${GRID_COLUMNS} && ny >= 0 && ny < ${GRID_ROWS} && isNoTurtle;
   }
-  remove() {
+  remove(sid, self) {
     turtles.splice(turtles.indexOf(this), 1);
+    addTrace(sid, self);
   }
   右を向く() {
     this.dir = dirs[(dirs.indexOf(this.dir) + 1) % 4];
