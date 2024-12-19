@@ -88,12 +88,21 @@ export const problemIds = [
   'string3',
   'string4',
   'string5',
-  // 初級プログラミングII 第1回
   'multiObject1',
   'multiObject2',
   'garbageCollection1',
   'oop1',
   'oop2',
+  'encapsulate',
+  'withoutEncapsulate',
+  'withEncapsulate',
+  'withoutEncapsulate2',
+  'withEncapsulate2',
+  'withoutEncapsulate3',
+  'withEncapsulate3',
+  'withoutEncapsulate4',
+  'withEncapsulate4',
+  'garbageCollection1',
   'static2',
   'polymorphism1',
   'test1',
@@ -209,6 +218,15 @@ export const problemIdToName: Record<ProblemId, string> = {
   garbageCollection1: 'ガベージコレクション(1)',
   oop1: 'オブジェクト指向プログラミング(1)',
   oop2: 'オブジェクト指向プログラミング(2)',
+  encapsulate: 'カプセル化',
+  withoutEncapsulate: 'カプセル化なし',
+  withEncapsulate: 'カプセル化あり',
+  withoutEncapsulate2: 'カプセル化なし(2)',
+  withEncapsulate2: 'カプセル化あり(2)',
+  withoutEncapsulate3: 'カプセル化なし(3)',
+  withEncapsulate3: 'カプセル化あり(3)',
+  withoutEncapsulate4: 'カプセル化なし(4)',
+  withEncapsulate4: 'カプセル化あり(4)',
   static2: '静的フィールド(2)',
   polymorphism1: 'ポリモルフィズム(1)',
   test1: 'ステップ実行のテスト用問題(1)',
@@ -264,7 +282,17 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     // 第2回
     ['makeClass1', 'makeClass2', 'constructor1'],
     // 第3回
-    ['oop1'],
+    [
+      'encapsulate',
+      'withoutEncapsulate',
+      'withEncapsulate',
+      'withoutEncapsulate2',
+      'withEncapsulate2',
+      'withoutEncapsulate3',
+      'withEncapsulate3',
+      'withoutEncapsulate4',
+      'withEncapsulate4',
+    ],
     // 第4回
     ['oop1'],
     // 第5回
@@ -3118,6 +3146,236 @@ class MyTurtle {
   // ----------- 初級プログラミングⅡ 第2回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第3回 ここから -----------
+  encapsulate: {
+    instrumented: `
+function main() {
+  const t = call(MyTurtle, 'x', 'y', 'speed')(0, 0, 2); // trace
+  call(t.moveForward.bind(t))();
+  call(t.changeSpeed.bind(t),'speed')(1);
+  call(t.moveForward.bind(t))();
+}
+
+class MyTurtle {
+  constructor(x, y, speed) {
+    this.t = new Turtle();
+    this.speed = 2;
+  }
+
+  moveForward() {
+    for (s.set('i', 0); s.get('i') < this.speed; s.set('i', s.get('i') + 1)) {
+      this.t.forward();
+    }
+    delete s.vars['i'];
+  }
+
+  changeSpeed(speed) {
+    this.speed = speed; // trace
+  }
+}
+
+main();
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle t = new MyTurtle(); // caller // sid
+    t.moveForward(); // caller
+    t.changeSpeed(1); // caller
+    t.moveForward(); // caller
+  }
+}
+
+class MyTurtle {
+  private Turtle t = new Turtle();
+  private int speed = 2;
+
+  public void moveForward() { 
+    for (int i = 0; i < this.speed; i++) { // sid
+      this.t.前に進む(); // sid
+    }
+  }
+  public void changeSpeed(int speed) {
+    this.speed = speed; // sid
+  }
+}
+`.trim(),
+  },
+  withoutEncapsulate: {
+    instrumented: `
+const t = new Turtle(); // trace
+call(drawSquare, 't', 'speed')(t, 2);
+call(drawSquare, 't', 'speed')(t, 3);
+function drawSquare(t, speed) {
+  for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
+    for (s.set('j', 0); s.get('j') < speed; s.set('j', s.get('j') + 1)) {
+      t.forward();
+    }
+    t.turnRight();
+  }
+}
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle t = new Turtle(); // sid
+    drawSquare(t, 2); // caller
+    drawSquare(t, 3); // caller
+  }
+
+  static void drawSquare(Turtle t, int speed) {
+    for (int i = 0; i < 4; i++) { // sid
+      for (int j = 0; j < speed - 1; j++) { // sid
+        t.前に進む(); // sid
+      }
+      t.右を向く(); // sid
+    }
+  }
+}
+`.trim(),
+  },
+  withEncapsulate: {
+    instrumented: `
+function main() {
+  const t = call(SquareTurtle)(); // trace
+  call(t.draw.bind(t),'speed')(2);
+  call(t.draw.bind(t),'speed')(3);
+}
+
+class SquareTurtle {
+  constructor() {
+    this.t = new Turtle();
+  }
+
+  draw(speed) {
+    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
+      for (s.set('j', 0); s.get('j') < speed; s.set('j', s.get('j') + 1)) {
+        this.t.forward();
+      }
+      this.t.turnRight();
+    }
+  }
+}
+main();
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    SquareTurtle t = new SquareTurtle(); // caller // sid
+    t.draw(2); // caller
+    t.draw(3); // caller
+  }
+}
+
+class SquareTurtle {
+  private Turtle t = new Turtle(0, 0);
+
+  void draw(int s) {
+    for (int i = 0; i < 4; i++) { // sid
+      for (int j = 0; j < speed - 1; j++) { // sid
+        this.t.前に進む(); // sid
+      }
+      this.t.右を向く(); // sid
+    }
+  }
+}
+`.trim(),
+  },
+  withoutEncapsulate2: {
+    instrumented: `
+const t = new Turtle(); // trace
+call(drawLine, 't', 'speed')(t, 2);
+t.turnRight();
+call(drawLine, 't', 'speed')(t, 3);
+function drawLine(t, speed) {
+  for (s.set('i', 0); s.get('i') < speed; s.set('i', s.get('i') + 1)) {
+    t.forward();
+  }
+}
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle t = new Turtle(); // sid
+    drawLine(t, 2); // caller
+    t.turnRight(); // sid
+    drawLine(t, 3); // caller
+  }
+
+  static void drawSquare(Turtle t, int speed) {
+    for (int i = 0; i < speed; i++) { // sid
+      t.前に進む(); // sid
+    }
+  }
+}
+`.trim(),
+  },
+  withEncapsulate2: {
+    instrumented: `
+function main() {
+  const t = call(LineTurtle)(); // trace
+  call(t.draw.bind(t),'speed')(2);
+  call(t.t.turnRight.bind(t))();
+  call(t.draw.bind(t),'speed')(3);
+}
+
+class LineTurtle {
+  constructor() {
+    this.t = new Turtle();
+  }
+
+  draw(speed) {
+    for (s.set('i', 0); s.get('i') < speed; s.set('i', s.get('i') + 1))  {
+      this.t.forward();
+    }
+  }
+}
+main();
+`.trim(),
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    LineTurtle t = new LineTurtle(); // caller // sid
+    t.draw(2); // caller
+    t.t.右を向く(); // sid
+    t.draw(3); // caller
+  }
+}
+
+class LineTurtle {
+  private Turtle t = new Turtle(0, 0);
+
+  void draw(int s) {
+    for (int i = 0; i < speed; i++) { // sid
+      this.t.前に進む(); // sid
+    }
+  }
+}
+`.trim(),
+  },
+  withoutEncapsulate3: {
+    instrumented: `
+`.trim(),
+    java: `
+`.trim(),
+  },
+  withEncapsulate3: {
+    instrumented: `
+`.trim(),
+    java: `
+`.trim(),
+  },
+  withoutEncapsulate4: {
+    instrumented: `
+`.trim(),
+    java: `
+`.trim(),
+  },
+  withEncapsulate4: {
+    instrumented: `
+`.trim(),
+    java: `
+`.trim(),
+  },
   // ----------- 初級プログラミングⅡ 第3回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第4回 ここから -----------
