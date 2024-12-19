@@ -3153,7 +3153,7 @@ class MyTurtle {
 }
 
 main();
-`.trim(),
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
@@ -3177,7 +3177,7 @@ class MyTurtle {
     this.speed = speed; // step
   }
 }
-`.trim(),
+`,
   },
   withoutEncapsulate: {
     instrumented: `
@@ -3193,7 +3193,7 @@ function drawSquare(t, speed) {
     t.右を向く(); // step
   }
 }
-`.trim(),
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
@@ -3211,7 +3211,7 @@ public class Main {
     }
   }
 }
-`.trim(),
+`,
   },
   withEncapsulate: {
     instrumented: `
@@ -3238,7 +3238,7 @@ class SquareTurtle {
 }
 
 main();
-`.trim(),
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
@@ -3260,7 +3260,7 @@ class SquareTurtle {
     }
   }
 }
-`.trim(),
+`,
   },
   // ----------- 初級プログラミングⅡ 第3回 ここまで -----------
 
@@ -3327,8 +3327,8 @@ class MyTurtle {
   polymorphism1: {
     instrumented: `
 function main() {
-  const ts = [call(MyTurtle, 'x', 'y')(0, 0), call(FastTurtle, 'p')(1)]; // step
-  for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) {
+  const ts = [new MyTurtle(0, 0), new FastTurtle(1)]; // step
+  for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) { // step
     call(ts[s.get('i')].drawLine.bind(ts[s.get('i')]))();
   }
 }
@@ -3338,8 +3338,8 @@ class MyTurtle {
     this.t = new Turtle(x, y);
   }
   drawLine() {
-    for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) {
-      this.t.forward();
+    for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
+      this.t.前に進む(); // step
     }
     delete s.vars['i'];
   }
@@ -3363,8 +3363,8 @@ main();
 public class Main {
   public static void main(String[] args) {
     MyTurtle[] ts = {
-        new MyTurtle(0, 0), new FastTurtle(1) };  // caller // step
-    for (int i = 0; i < ts.length; i++) {
+        new MyTurtle(0, 0), new FastTurtle(1) }; // step
+    for (int i = 0; i < ts.length; i++) { // step
       ts[i].drawLine(); // caller
     }
   }
