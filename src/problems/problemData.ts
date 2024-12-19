@@ -2999,22 +2999,32 @@ class MyTurtle {
   },
   withoutEncapsulate: {
     instrumented: `
-    かく
+const t = new Turtle(); // trace
+call(drawSquare, 't', 'speed')(t, 2);
+call(drawSquare, 't', 'speed')(t, 3);
+function drawSquare(t, speed) {
+  for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
+    for (s.set('j', 0); s.get('j') < speed; s.set('j', s.get('j') + 1)) {
+      t.forward();
+    }
+    t.turnRight();
+  }
+}
 `.trim(),
     java: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t = new Turtle();
-    drawSquare(t, 2);
-    drawSquare(t, 3);
+    Turtle t = new Turtle(); // sid
+    drawSquare(t, 2); // caller
+    drawSquare(t, 3); // caller
   }
 
   static void drawSquare(Turtle t, int speed) {
-    for (int i = 0; i < 4; i++) {
-      for (int j = 0; j < speed - 1; j++) {
-        t.前に進む();
+    for (int i = 0; i < 4; i++) { // sid
+      for (int j = 0; j < speed - 1; j++) { // sid
+        t.前に進む(); // sid
       }
-      t.右を向く();
+      t.右を向く(); // sid
     }
   }
 }
@@ -3022,7 +3032,17 @@ public class Main {
   },
   withEncapsulate: {
     instrumented: `
-  かく
+const t = new Turtle();
+drawSquare(t, 2);
+drawSquare(t, 3);
+function drawSquare(t, speed) {
+  for (let i = 0; i < 4; i++) {
+    for (let j = 0; j < speed - 1; j++) {
+      t.moveForward();
+    }
+    t.turnRight();
+  }
+}
 `.trim(),
     java: `
 public class Main {
