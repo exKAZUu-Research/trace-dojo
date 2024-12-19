@@ -3039,9 +3039,30 @@ class MyTurtle {
     `,
   },
   makeClass2: {
+    // TODO: 完成させる。
     instrumented: `
+function main() {
+  const t = call(MyTurtle)();
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+}
+
+main();
     `,
     java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle t = new MyTurtle(); // caller
+  }
+}
+
+class MyTurtle {
+  Turtle t = new Turtle(); // step
+}
     `,
   },
   constructor1: {
