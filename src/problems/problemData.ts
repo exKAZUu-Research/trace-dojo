@@ -3119,8 +3119,50 @@ public class Main {
 `,
   },
   multiObject6: {
-    instrumented: ``,
-    java: ``,
+    instrumented: `
+const ts = [null, null, null];
+for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) {
+  ts[s.get('i')] = new Turtle(1 + s.get('i') * 2, 0); //step
+}
+delete s.vars['i'];
+
+for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
+  for (s.set('j', 0); s.get('j') < ts.length; s.set('j', s.get('j') + 1)) {
+    N歩前に進める(ts[s.get('j')], s.get('j')); //step
+    // call(N歩前に進める, 't', 'n')(ts[s.get('j')], s.get('j')); //caller
+  }
+}
+delete s.vars['i'];
+delete s.vars['j'];
+
+function N歩前に進める(t, n) {
+  for (let i = 0; i < n; i++) {
+    t.前に進む();
+  }
+}
+`,
+    java: `
+public class Main {
+	public static void main(String[] args) {
+		Turtle[] turtles = new Turtle[3];
+		for (int i = 0; i < turtles.length; i++) { //step
+			turtles[i] = new Turtle(1 + i * 2, 0); //step
+		}
+
+		for (int i = 0; i < 3; i++) { //step
+			for (int j = 0; j < turtles.length; j++) { //step
+				N歩前に進める(turtles[j], j); //step
+			}
+		}
+	}
+
+	static void N歩前に進める(Turtle t, int n) {
+		for (int i = 0; i < n; i++) {
+			t.前に進む();
+		}
+	}
+}
+`,
   },
   garbageCollection1: {
     instrumented: `
