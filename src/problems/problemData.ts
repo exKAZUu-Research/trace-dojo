@@ -107,6 +107,8 @@ export const problemIds = [
   'test5',
   'makeClass1',
   'makeClass2',
+  'makeClass3',
+  'makeClass4',
   'constructor1',
 ] as const;
 export type ProblemId = (typeof problemIds)[number];
@@ -225,6 +227,8 @@ export const problemIdToName: Record<ProblemId, string> = {
   test5: 'チェックポイント取得のテスト用問題',
   makeClass1: 'クラスを作ろう(1)',
   makeClass2: 'クラスを作ろう(2)',
+  makeClass3: 'クラスを作ろう(3)',
+  makeClass4: 'クラスを作ろう(4)',
   constructor1: 'コンストラクタ(1)',
 };
 
@@ -269,7 +273,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     // 第1回
     ['multiObject1', 'multiObject2', 'garbageCollection1'],
     // 第2回
-    ['makeClass1', 'makeClass2', 'constructor1'],
+    ['makeClass1', 'makeClass2', 'makeClass3', 'makeClass4', 'constructor1'],
     // 第3回
     ['encapsulate', 'withoutEncapsulate', 'withEncapsulate'],
     // 第4回
@@ -3050,8 +3054,6 @@ class MyTurtle {
     `,
   },
   makeClass2: {
-    // TODO: 完成させる。
-    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 function main() {
   const t = call(MyTurtle)();
@@ -3077,8 +3079,6 @@ class MyTurtle {
 }
 
 main();
-
-
     `,
     java: `
 
@@ -3105,6 +3105,124 @@ class MyTurtle {
   }
 }
 
+    `,
+  },
+  makeClass3: {
+    instrumented: `
+function main() {
+  const t = call(MyTurtle)();
+  call(t.writeSquare.bind(t))();
+  t.size = 4; // step
+  call(t.writeSquare.bind(t))();
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+    this.size = 2; // step
+  }
+  writeSquare() {
+    for (s.set('i', 0); s.get('i') < this.size * 4; s.set('i', s.get('i') + 1)) { // step
+      if (s.get('i') % this.size === this.size - 1) {
+        this.t.右を向く(); // step
+      } else {
+        this.t.前に進む(); // step
+      }
+    }
+    delete s.vars['i'];
+  }
+}
+
+main();
+    `,
+    java: `
+
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle t = new MyTurtle(); // caller
+    t.writeSquare(); // caller
+    t.size = 4; // step
+    t.writeSquare(); // caller
+  }
+}
+
+class MyTurtle {
+  Turtle t = new Turtle(); // step
+  int size = 2; // step
+
+  void writeSquare() {
+    for (int i = 0; i < this.size*4; i++) { // step
+      if (i % this.size == this.size - 1) {
+        this.t.右を向く(); // step
+      } else {
+        this.t.前に進む(); // step
+      }
+    }
+  }
+}
+    `,
+  },
+  makeClass4: {
+    instrumented: `
+function main() {
+  const t = call(MyTurtle)();
+  call(t.moveForward.bind(t))();
+  t.speed = 1; // step
+  call(t.turnRight.bind(t))();
+  call(t.moveForward.bind(t))();
+}
+
+class MyTurtle {
+  constructor() {
+    this.fast = new Turtle(1, 1); // step
+    this.slow = new Turtle(5, 1); // step
+    this.speed = 2; // step
+  }
+  moveForward() {
+    for (s.set('i', 0); s.get('i') < this.speed; s.set('i', s.get('i') + 1)) { // step
+      this.fast.前に進む(); // step
+	  this.fast.前に進む(); // step
+      this.slow.前に進む(); // step
+    }
+    delete s.vars['i'];
+  }
+  turnRight() {
+    this.fast.右を向く(); // step
+    this.slow.右を向く(); // step
+  }
+}
+
+main();
+    `,
+    java: `
+
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle t = new MyTurtle(); // caller
+    t.moveForward(); // caller
+    t.speed = 1; // step
+    t.turnRight(); // caller
+    t.moveForward(); // caller
+  }
+}
+
+class MyTurtle {
+  Turtle fast = new Turtle(1,1); // step
+  Turtle slow = new Turtle(5,1); // step
+  int speed = 2; // step
+
+  void moveForward() {
+    for (int i = 0; i < this.speed; i++) { // step
+      this.fast.前に進む(); // step
+      this.fast.前に進む(); // step
+      this.slow.前に進む(); // step
+    }
+  }
+  void turnRight() {
+    this.fast.右を向く(); // step
+    this.slow.右を向く(); // step
+  }
+}
     `,
   },
   constructor1: {
