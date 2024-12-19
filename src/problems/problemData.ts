@@ -3119,8 +3119,8 @@ public class Main {
 `,
   },
   multiObject6: {
-    instrumented: ``.trim(),
-    java: ``.trim(),
+    instrumented: ``,
+    java: ``,
   },
   garbageCollection1: {
     instrumented: `
@@ -3148,24 +3148,24 @@ public class Main {
 `,
   },
   garbageCollection2: {
-    instrumented: ``.trim(),
-    java: ``.trim(),
+    instrumented: ``,
+    java: ``,
   },
   garbageCollection3: {
-    instrumented: ``.trim(),
-    java: ``.trim(),
+    instrumented: ``,
+    java: ``,
   },
   garbageCollection4: {
-    instrumented: ``.trim(),
-    java: ``.trim(),
+    instrumented: ``,
+    java: ``,
   },
   garbageCollection5: {
-    instrumented: ``.trim(),
-    java: ``.trim(),
+    instrumented: ``,
+    java: ``,
   },
   garbageCollection6: {
-    instrumented: ``.trim(),
-    java: ``.trim(),
+    instrumented: ``,
+    java: ``,
   },
   // ----------- 初級プログラミングⅡ 第1回 ここまで -----------
 
