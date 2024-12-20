@@ -3804,8 +3804,8 @@ public class Main {
   }
 }
 class MyTurtle {
-  private Turtle t = new Turtle(); // step
-  private int speed = 1; // step
+  Turtle t = new Turtle(); // step
+  int speed = 1; // step
   void moveForward() {
     for (int i = 0; i < this.speed; i++) // step
       this.t.前に進む(); // step
@@ -3909,14 +3909,14 @@ public class Main {
   }
 }
 class MyTurtle {
-  private Turtle t;
-  private String operation;
+  Turtle t;
+  String operation;
 
-  public MyTurtle(int x, int y, String operation) {
+  MyTurtle(int x, int y, String operation) {
     this.t = new Turtle(x, y); // step
     this.operation = operation; // step
   }
-  public void operate() {
+  void operate() {
     for (int i = 0; i < this.operation.length(); i++) { // step
       switch (this.operation.charAt(i)) {
       case 'F':
@@ -3975,8 +3975,8 @@ public class Main {
   }
 }
 class MyTurtle {
-  private Turtle t;
-  private int speed;
+  Turtle t;
+  int speed;
 
   MyTurtle(int speed) {
     this.t = new Turtle(); // step
@@ -4005,15 +4005,14 @@ function main() {
   call(mover.moveSquare.bind(mover), 'size')(3);
   mover.t = new Turtle(3, 1); // step
   call(mover.moveSquare.bind(mover), 'size')(3);
+  mover.t.remove();
   mover.t = t2; // step
   call(mover.moveSquare.bind(mover), 'size')(2);
 }
-
 class TurtleMover {
   constructor(t) {
     this.t = t; // step
   }
-
   moveSquare(size) {
     for (s.set('i', 0); s.get('i') < size * 4; s.set('i', s.get('i') + 1)) { // step
       if (s.get('i') % size === size - 1) {
@@ -4037,19 +4036,16 @@ public class Main {
     mover.moveSquare(3); // caller
     mover.t = new Turtle(3, 1); // step
     mover.moveSquare(3); // caller
-    mover.t = t2; // step
-    // ガベージコレクション
+    mover.t = t2; // ガベージコレクションにより亀が消えることとする。 // step
     mover.moveSquare(2); // caller
   }
 }
-
 class TurtleMover {
   Turtle t;
 
   TurtleMover(Turtle t) {
     this.t = t; // step
   }
-
   void moveSquare(int size) {
     for (int i = 0; i < size * 4; i++) { // step
       if (i % size == size - 1) {
