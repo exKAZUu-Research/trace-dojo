@@ -3347,7 +3347,7 @@ for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { /
     java: `
 public class Main {
   public static void main(String[] args) {
-    Turtle[] turtles = new Turtle[7];
+    Turtle[] turtles = new Turtle[5];
     for (int i = 0; i < turtles.length; i++) { // step
       turtles[i] = new Turtle(i, 0); // step
     }
