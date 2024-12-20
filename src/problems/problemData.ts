@@ -3941,13 +3941,11 @@ function main() {
   call(t.moveForward.bind(t))();
   call(t.turnLeft.bind(t))();
 }
-
 class MyTurtle {
   constructor(speed) {
     this.t = new Turtle(); // step
     this.speed = speed; // step
   }
-
   moveForward() {
     for (s.set('i', 0); s.get('i') < this.speed; s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
@@ -3955,11 +3953,9 @@ class MyTurtle {
     delete s.vars['i'];
     this.speed--; // step
   }
-
   turnRight() {
     this.t.右を向く(); // step
   }
-
   turnLeft() {
     this.t.左を向く(); // step
   }
@@ -3978,7 +3974,6 @@ public class Main {
     t.turnLeft(); // caller
   }
 }
-
 class MyTurtle {
   private Turtle t;
   private int speed;
@@ -3987,18 +3982,14 @@ class MyTurtle {
     this.t = new Turtle(); // step
     this.speed = speed; // step
   }
-
   void moveForward() {
-    for (int i = 0; i < this.speed; i++) { // step
+    for (int i = 0; i < this.speed; i++) // step
       this.t.前に進む(); // step
-    }
-    speed--; // step
+    this.speed--; // step
   }
-
   void turnRight() {
     this.t.右を向く(); // step
   }
-
   void turnLeft() {
     this.t.左を向く(); // step
   }
