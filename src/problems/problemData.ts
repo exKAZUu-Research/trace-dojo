@@ -3558,7 +3558,6 @@ class MyTurtle {
 main();
     `,
     java: `
-
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(); // caller
@@ -3581,16 +3580,15 @@ class MyTurtle {
     }
   }
 }
-
     `,
   },
   makeClass3: {
     instrumented: `
 function main() {
   const t = call(MyTurtle)();
-  call(t.writeSquare.bind(t))();
+  call(t.drawSquare.bind(t))();
   t.size = 4; // step
-  call(t.writeSquare.bind(t))();
+  call(t.drawSquare.bind(t))();
 }
 
 class MyTurtle {
@@ -3598,7 +3596,7 @@ class MyTurtle {
     this.t = new Turtle(); // step
     this.size = 2; // step
   }
-  writeSquare() {
+  drawSquare() {
     for (s.set('i', 0); s.get('i') < this.size * 4; s.set('i', s.get('i') + 1)) { // step
       if (s.get('i') % this.size === this.size - 1) {
         this.t.右を向く(); // step
@@ -3613,13 +3611,12 @@ class MyTurtle {
 main();
     `,
     java: `
-
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(); // caller
-    t.writeSquare(); // caller
+    t.drawSquare(); // caller
     t.size = 4; // step
-    t.writeSquare(); // caller
+    t.drawSquare(); // caller
   }
 }
 
@@ -3627,8 +3624,8 @@ class MyTurtle {
   Turtle t = new Turtle(); // step
   int size = 2; // step
 
-  void writeSquare() {
-    for (int i = 0; i < this.size*4; i++) { // step
+  void drawSquare() {
+    for (int i = 0; i < this.size * 4; i++) { // step
       if (i % this.size == this.size - 1) {
         this.t.右を向く(); // step
       } else {
@@ -3681,10 +3678,9 @@ public class Main {
     t.moveForward(); // caller
   }
 }
-
 class MyTurtle {
-  Turtle fast = new Turtle(1,1); // step
-  Turtle slow = new Turtle(5,1); // step
+  Turtle fast = new Turtle(1, 1); // step
+  Turtle slow = new Turtle(5, 1); // step
   int speed = 2; // step
 
   void moveForward() {
@@ -3745,7 +3741,6 @@ public class Main {
     t.operate(); // caller
   }
 }
-
 class MyTurtle {
   Turtle t = new Turtle(); // step
   String operation = "FFRFF"; // step
@@ -3881,13 +3876,11 @@ function main() {
   const t = call(MyTurtle, 'x', 'y', 'operation')(1, 1, "FRFLFFF");
   call(t.operate.bind(t))();
 }
-
 class MyTurtle {
   constructor(x, y, operation) {
     this.t = new Turtle(x, y); // step
     this.operation = operation; // step
   }
-
   operate() {
     for (s.set('i', 0); s.get('i') < this.operation.length; s.set('i', s.get('i') + 1)) { // step
       switch (this.operation.charAt(s.get('i'))) {
@@ -3915,7 +3908,6 @@ public class Main {
     t.operate(); // caller
   }
 }
-
 class MyTurtle {
   private Turtle t;
   private String operation;
@@ -3924,19 +3916,15 @@ class MyTurtle {
     this.t = new Turtle(x, y); // step
     this.operation = operation; // step
   }
-
   public void operate() {
     for (int i = 0; i < this.operation.length(); i++) { // step
       switch (this.operation.charAt(i)) {
       case 'F':
-        this.t.前に進む(); // step
-        break;
+        this.t.前に進む(); break; // step
       case 'R':
-        this.t.右を向く(); // step
-        break;
+        this.t.右を向く(); break; // step
       case 'L':
-        this.t.左を向く(); // step
-        break;
+        this.t.左を向く(); break; // step
       }
     }
   }
