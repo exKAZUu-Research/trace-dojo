@@ -3705,7 +3705,6 @@ class MyTurtle {
     instrumented: `
 function main() {
   const t = call(MyTurtle)();
-  t.operation = "FFRFF"; // step
   call(t.operate.bind(t))();
   t.operation = "LFFRFF"; // step
   call(t.operate.bind(t))();
@@ -3714,7 +3713,7 @@ function main() {
 class MyTurtle {
   constructor() {
     this.t = new Turtle(); // step
-    this.operation = ""; // step
+    this.operation = "FFRFF"; // step
   }
 
   operate() {
@@ -3741,7 +3740,6 @@ main();
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(); //caller
-    t.operation = "FFRFF"; // step
     t.operate(); // caller
     t.operation = "LFFRFF"; // step
     t.operate(); // caller
@@ -3750,20 +3748,17 @@ public class Main {
 
 class MyTurtle {
   Turtle t = new Turtle(); // step
-  String operation = ""; // step
+  String operation = "FFRFF"; // step
 
   void operate() {
     for (int i = 0; i < this.operation.length(); i++) { // step
       switch (this.operation.charAt(i)) {
-      case 'F':
-        this.t.前に進む(); // step
-        break;
-      case 'R':
-        this.t.右を向く(); // step
-        break;
-      case 'L':
-        this.t.左を向く(); // step
-        break;
+        case 'F':
+          this.t.前に進む(); break; // step
+        case 'R':
+          this.t.右を向く(); break; // step
+        case 'L':
+          this.t.左を向く(); break; // step
       }
     }
   }
