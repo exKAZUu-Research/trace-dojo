@@ -3431,7 +3431,7 @@ function 線を描く(x, y, dir, len) {
     java: `
 public class Main {
   public static void main(String[] args) {
-    正方形を描く(0, 0, 7); // caller
+    正方形を描く(0, 0, 6); // caller
     正方形を描く(3, 3, 3); // caller
     Turtle t = new Turtle(3, 3); // step
   }
