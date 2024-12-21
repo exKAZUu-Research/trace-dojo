@@ -3366,6 +3366,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@rvf/set-get@npm:7.0.0":
+  version: 7.0.0
+  resolution: "@rvf/set-get@npm:7.0.0"
+  checksum: 10c0/1a4f2878508f4088ba2910fe80316c3a75d79109b26a6a4e35a533012f2bc8cccbbaa2c3d9546f06b3e49ddc67bdd1dc2a853cac0372be76df089ee02cdd2757
+  languageName: node
+  linkType: hard
+
 "@sec-ant/readable-stream@npm:^0.4.1":
   version: 0.4.1
   resolution: "@sec-ant/readable-stream@npm:0.4.1"
@@ -14068,6 +14075,7 @@ __metadata:
     "@emotion/react": "npm:11.14.0"
     "@emotion/styled": "npm:11.14.0"
     "@prisma/client": "npm:6.1.0"
+    "@rvf/set-get": "npm:7.0.0"
     "@tanstack/react-query": "npm:5.62.8"
     "@trpc/client": "npm:11.0.0-rc.666"
     "@trpc/next": "npm:11.0.0-rc.666"
