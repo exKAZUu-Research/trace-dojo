@@ -285,9 +285,6 @@ export const problemIdToName: Record<ProblemId, string> = {
   // staticField5: '静的フィールド(5)',
   // staticField6: '静的フィールド(6)',
   // 初級プログラミングⅡ 第4回
-  makeClass1: 'クラスを作ろう(1)',
-  makeClass2: 'クラスを作ろう(2)',
-  constructor1: 'コンストラクタ(1)',
   // 初級プログラミングⅡ 第5回
   polymorphism1: 'ポリモルフィズム(1)',
   // 初級プログラミングⅡ 第6回
