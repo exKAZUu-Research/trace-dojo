@@ -136,7 +136,6 @@ export const problemIds = [
   // 初級プログラミングⅡ 第8回
   'oop1',
   'oop2',
-  'polymorphism1',
   'test1',
   'test2',
   'test3',
