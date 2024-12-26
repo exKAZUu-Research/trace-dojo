@@ -113,10 +113,9 @@ export const problemIds = [
   'constructor3',
   'constructor4',
   // 初級プログラミングⅡ 第3回
-  'encapsulate',
-  'withoutEncapsulate',
-  'withEncapsulate',
-  'garbageCollection1',
+  'encapsulation',
+  'withoutEncapsulation',
+  'withEncapsulation',
   // 初級プログラミングⅡ 第4回
   'staticMethod1',
   'staticMethod2',
@@ -268,9 +267,9 @@ export const problemIdToName: Record<ProblemId, string> = {
   constructor3: 'コンストラクタ(3)',
   constructor4: 'コンストラクタ(4)',
   // 初級プログラミングⅡ 第3回
-  encapsulate: 'カプセル化',
-  withoutEncapsulate: 'カプセル化なし',
-  withEncapsulate: 'カプセル化あり',
+  encapsulation: 'カプセル化',
+  withoutEncapsulation: 'カプセル化なし',
+  withEncapsulation: 'カプセル化あり',
   // 初級プログラミングⅡ 第3回
   staticMethod1: '静的メソッド(1)',
   staticMethod2: '静的メソッド(2)',
@@ -367,7 +366,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
       'constructor4',
     ],
     // 第3回
-    ['encapsulate', 'withoutEncapsulate', 'withEncapsulate'],
+    ['encapsulation', 'withoutEncapsulation', 'withEncapsulation'],
     // 第4回
     [
       'staticMethod1',
@@ -4032,7 +4031,7 @@ class TurtleMover {
   // ----------- 初級プログラミングⅡ 第2回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第3回 ここから -----------
-  encapsulate: {
+  encapsulation: {
     // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 function main() {
@@ -4087,15 +4086,15 @@ class MyTurtle {
 }
 `,
   },
-  withoutEncapsulate: {
+  withoutEncapsulation: {
     instrumented: `
 const t = new Turtle(); // step
-call(drawSquare, 't', 'speed')(t, 2);
-call(drawSquare, 't', 'speed')(t, 3);
+call(drawSquare, 't', 'size')(t, 2);
+call(drawSquare, 't', 'size')(t, 3);
 
-function drawSquare(t, speed) {
+function drawSquare(t, size) {
   for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
-    for (s.set('j', 0); s.get('j') < speed; s.set('j', s.get('j') + 1)) {
+    for (s.set('j', 0); s.get('j') < size - 1; s.set('j', s.get('j') + 1)) {
       t.前に進む(); // step
     }
     t.右を向く(); // step
@@ -4110,9 +4109,9 @@ public class Main {
     drawSquare(t, 3); // caller
   }
 
-  static void drawSquare(Turtle t, int speed) {
+  static void drawSquare(Turtle t, int size) {
     for (int i = 0; i < 4; i++) { // step
-      for (int j = 0; j < speed - 1; j++) { // step
+      for (int j = 0; j < size - 1; j++) { // step
         t.前に進む(); // step
       }
       t.右を向く(); // step
@@ -4121,22 +4120,22 @@ public class Main {
 }
 `,
   },
-  withEncapsulate: {
+  withEncapsulation: {
     // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 function main() {
   const t = call(SquareTurtle)();
-  call(t.draw.bind(t), 'speed')(2);
-  call(t.draw.bind(t), 'speed')(3);
+  call(t.draw.bind(t), 'size')(2);
+  call(t.draw.bind(t), 'size')(3);
 }
 
 class SquareTurtle {
   constructor() {
     this.t = new Turtle(0, 0); // step
   }
-  draw(speed) {
+  draw(size) {
     for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
-      for (s.set('j', 0); s.get('j') < speed; s.set('j', s.get('j') + 1)) { // step
+      for (s.set('j', 0); s.get('j') < size - 1; s.set('j', s.get('j') + 1)) { // step
         this.t.前に進む(); // step
       }
       delete s.vars['j'];
@@ -4160,9 +4159,9 @@ public class Main {
 class SquareTurtle {
   private Turtle t = new Turtle(0, 0); // step
 
-  void draw(int speed) {
+  void draw(int size) {
     for (int i = 0; i < 4; i++) { // step
-      for (int j = 0; j < speed - 1; j++) { // step
+      for (int j = 0; j < size - 1; j++) { // step
         this.t.前に進む(); // step
       }
       this.t.右を向く(); // step
@@ -4360,7 +4359,7 @@ public class Main {
     Controller.moveTwoSteps(t1); // caller
     Turtle t2 = new Turtle(3, 3); // step
     Controller.moveTwoSteps(t2); // caller
-    int count = myGlobal.Controller.stepCount; // step
+    int count = Controller.stepCount; // step
   }
 }
 
