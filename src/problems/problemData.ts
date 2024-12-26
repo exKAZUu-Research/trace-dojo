@@ -4243,7 +4243,7 @@ function drawLine(t, speed) {
     t.前に進む(); // step
   }
 }
-`.trim(),
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
@@ -4261,7 +4261,7 @@ public class Main {
     }
   }
 }
-`.trim(),
+`,
   },
   withEncapsulation2: {
     instrumented: `
@@ -4286,7 +4286,7 @@ class CurveTurtle {
   }
 }
 main();
-`.trim(),
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
@@ -4307,7 +4307,7 @@ class CurveTurtle {
     }
   }
 }
-`.trim(),
+`,
   },
   // ----------- 初級プログラミングⅡ 第3回 ここまで -----------
 
