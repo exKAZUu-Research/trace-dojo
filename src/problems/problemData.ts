@@ -4719,7 +4719,7 @@ function main() {
 
 class MyTurtle {
   constructor(x, y) {
-    this.turtle = new Turtle(0, 0); // step
+    this.turtle = new Turtle(x, y); // step
     this.base = 1; // step
   }
   moveForward() {
@@ -4753,7 +4753,7 @@ class MyTurtle {
   public int base;
 
   MyTurtle(int x, int y) {
-    this.turtle = new Turtle(0, 0); // step
+    this.turtle = new Turtle(x, y); // step
     this.base = 1; // step
   }
   void moveForward() {
