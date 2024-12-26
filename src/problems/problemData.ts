@@ -121,15 +121,12 @@ export const problemIds = [
   'staticMethod2',
   'staticMethod3',
   'staticMethod4',
-  'staticMethod5',
-  'staticMethod6',
   'staticField1',
   'staticField2',
-  // 'staticField3',
-  // 'staticField4',
-  // 'staticField5',
-  // 'staticField6',
-
+  'staticField3',
+  'staticField4',
+  'staticField5',
+  'staticField6',
   // 初級プログラミングⅡ 第5回
   'polymorphism1',
   // 初級プログラミングⅡ 第6回
@@ -275,14 +272,12 @@ export const problemIdToName: Record<ProblemId, string> = {
   staticMethod2: '静的メソッド(2)',
   staticMethod3: '静的メソッド(3)',
   staticMethod4: '静的メソッド(4)',
-  staticMethod5: '静的メソッド(5)',
-  staticMethod6: '静的メソッド(6)',
   staticField1: '静的フィールド(1)',
   staticField2: '静的フィールド(2)',
-  // staticField3: '静的フィールド(3)',
-  // staticField4: '静的フィールド(4)',
-  // staticField5: '静的フィールド(5)',
-  // staticField6: '静的フィールド(6)',
+  staticField3: '静的フィールド(3)',
+  staticField4: '静的フィールド(4)',
+  staticField5: '静的フィールド(5)',
+  staticField6: '静的フィールド(6)',
   // 初級プログラミングⅡ 第4回
   // 初級プログラミングⅡ 第5回
   polymorphism1: 'ポリモルフィズム(1)',
@@ -373,10 +368,12 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
       'staticMethod2',
       'staticMethod3',
       'staticMethod4',
-      'staticMethod5',
-      'staticMethod6',
       'staticField1',
       'staticField2',
+      'staticField3',
+      'staticField4',
+      'staticField5',
+      'staticField6',
     ],
     // 第5回
     ['polymorphism1'],
@@ -4301,17 +4298,21 @@ class Controller {
     java: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t1 = new Turtle(2, 2); // step
-        Controller.moveThreeSteps(t1); // caller
-    }
+    Turtle t1 = new Turtle(0, 0); // step
+    Controller.moveThreeSteps(t1); // caller
+    Turtle t2 = new Turtle(3, 3); // step
+    Turtle t3 = new Turtle(6, 6); // step
+    Controller.moveThreeSteps(t2); // caller
+    Controller.moveThreeSteps(t3); // caller
+  }
 }
 
 class Controller {
-    static void moveThreeSteps(Turtle t) {
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-    }
+  static void moveThreeSteps(Turtle t) {
+    t.前に進む(); // step
+    t.前に進む(); // step
+    t.前に進む(); // step
+  }
 }
     `,
   },
@@ -4321,74 +4322,31 @@ class Controller {
   `,
     java: `
 public class Main {
-    public static void main(String[] args) {
-        Turtle t1 = new Turtle(0, 0); // step
-        Turtle t2 = new Turtle(1, 1); // step
-        Controller.moveTwoSteps(t1); // caller
-        Controller.moveTwoSteps(t2); // caller
-    }
+  public static void main(String[] args) {
+    Turtle t1 = new Turtle(0, 0); // step
+    Turtle t2 = new Turtle(1, 1); // step
+    Controller.drawSquare(t1, 4); // caller
+    Turtle t3 = new Turtle(2, 2); // step
+    Controller.drawSquare(t2, 3); // caller
+    Controller.drawSquare(t3, 2); // caller
+  }
 }
 
 class Controller {
-    static void moveTwoSteps(Turtle t) {
-        t.前に進む(); // step
-        t.前に進む(); // step
+  static void drawSquare(Turtle t, int size) {
+    for (int i = 0; i < 4; i++) { // step
+      Controller.drawLine(t, size - 1); // caller
+      t.右を向く(); // step
     }
+  }
+  static void drawLine(Turtle t, int n) {
+    for (int i = 0; i < n; i++) // step
+      t.前に進む(); // step
+  }
 }
-    `,
-  },
-  staticMethod5: {
-    // 静的メソッドは普通の関数で代替すること。
-    instrumented: `
-  `,
-    java: `
-public class Main {
-    public static void main(String[] args) {
-        Turtle t = new Turtle(0, 0); // step
-        Controller.moveWithSteps(t, 5); // caller
-    }
-}
-
-class Controller {
-    static void moveWithSteps(Turtle t, int steps) {
-        for (int i = 1; i <= steps; i++) {
-            t.前に進む(); // step
-        }
-    }
-}
-    `,
-  },
-  staticMethod6: {
-    // 静的メソッドは普通の関数で代替すること。
-    instrumented: `
-  `,
-    java: `
-public class Main {
-    public static void main(String[] args) {
-        Turtle t1 = new Turtle(1, 1); // step
-        Turtle t2 = new Turtle(2, 2); // step
-        Turtle t3 = new Turtle(3, 3); // step
-        Controller.moveSequentially(new Turtle[] {t1, t2, t3}, 3); // caller
-    }
-}
-
-class Controller {
-    static void moveSequentially(Turtle[] turtles, int steps) {
-        for (int i = 0; i < turtles.length; i++) {
-            Turtle t = turtles[i];
-            for (int j = 1; j <= steps; j++) {
-                t.前に進む(); // step
-            }
-        }
-    }
-}
-
     `,
   },
   staticField1: {
-    // Javaの静的フィールド（つまり、グローバル変数）を扱う場合、 `myGlobal` を使うこと。
-    // 静的メソッドは普通の関数で代替すること。
-    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 myGlobal.Controller = { stepCount: 0 };
 
@@ -4433,8 +4391,6 @@ class Controller {
     `,
   },
   staticField2: {
-    // Javaの静的フィールド（つまり、グローバル変数）を扱う場合、 `myGlobal` を使うこと。
-    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 myGlobal.Settings = { speed: 3 };
 
@@ -4480,13 +4436,156 @@ class Settings {
 class MyTurtle {
   private Turtle t = new Turtle(); // step
 
-  void moveForward(Turtle t) {
+  void moveForward() {
     for (int i = 0; i < Settings.speed; i++) { // step
-      t.前に進む(); // step
+      this.t.前に進む(); // step
     }
   }
 }
 `,
+  },
+  staticField3: {
+    instrumented: `
+    `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    LineTurtle t1 = new LineTurtle(); // caller
+    SquareTurtle t2 = new SquareTurtle(); // caller
+    t1.drawLine(); // caller
+    t2.drawSquare(); // caller
+    Settings.speed = 3; // step
+    t1.drawLine(); // caller
+  }
+}
+class Settings {
+  static public int speed = 2;
+}
+class LineTurtle {
+  private Turtle t = new Turtle(0, 0); // step
+  void drawLine() {
+    for (int i = 0; i < Settings.speed; i++) // step
+      t.前に進む(); // step
+  }
+}
+class SquareTurtle {
+  private Turtle t = new Turtle(1, 1); // step
+  void drawSquare() {
+    for (int i = 0; i < 4; i++) { // step
+      for (int j = 0; j < Settings.speed; j++) // step
+        t.前に進む(); // step
+      t.右を向く(); // step
+    }
+  }
+}
+    `,
+  },
+  staticField4: {
+    instrumented: `
+    `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    AcceleratedTurtle t1 = new AcceleratedTurtle(); // caller
+    SquareTurtle t2 = new SquareTurtle(); // caller
+    t1.drawLine(); // caller
+    t2.drawSquare(); // caller
+    Settings.speed = 2; // step
+    t1.drawLine(); // caller
+  }
+}
+class Settings {
+  static public int speed = 2;
+}
+class AcceleratedTurtle {
+  private Turtle t = new Turtle(0, 0); // step
+  void drawLine() {
+    for (int i = 0; i < Settings.speed; i++) // step
+      t.前に進む(); // step
+    Settings.speed++; // step
+  }
+}
+class SquareTurtle {
+  private Turtle t = new Turtle(1, 1); // step
+  void drawSquare() {
+    for (int i = 0; i < 4; i++) { // step
+      for (int j = 0; j < Settings.speed; j++) // step
+        t.前に進む(); // step
+      t.右を向く(); // step
+    }
+  }
+}
+    `,
+  },
+  staticField5: {
+    instrumented: `
+    `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    SlowTurtle t1 = new SlowTurtle(); // caller
+    FastTurtle t2 = new FastTurtle(); // caller
+    t1.moveForward(); // caller
+    t2.moveForward(); // caller
+    Settings.additionalSpeed++; // step
+    t1.moveForward(); // caller
+    t2.moveForward(); // caller
+  }
+}
+class Settings {
+  static public int additionalSpeed = 0;
+}
+class SlowTurtle {
+  private Turtle t = new Turtle(0, 0); // step
+  private int base = 1; // step
+  void moveForward() {
+    for (int i = 0; i < this.base + Settings.additionalSpeed; i++) // step
+      t.前に進む(); // step
+  }
+}
+class FastTurtle {
+  private Turtle t = new Turtle(6, 0); // step
+  private int base = 2; // step
+  void moveForward() {
+    for (int i = 0; i < this.base + Settings.additionalSpeed; i++) // step
+      t.前に進む(); // step
+  }
+}
+    `,
+  },
+  staticField6: {
+    instrumented: `
+    `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle t1 = new MyTurtle(0, 0); // caller
+    MyTurtle t2 = new MyTurtle(3, 0); // caller
+    t1.moveForward(); // caller
+    t2.moveForward(); // caller
+    t1.base++; // step
+    Settings.additionalSpeed++; // step
+    t1.moveForward(); // caller
+    t2.moveForward(); // caller
+  }
+}
+class Settings {
+  static public int additionalSpeed = 0;
+}
+class MyTurtle {
+  private Turtle t;
+  public int base;
+
+  MyTurtle(int x, int y) {
+    this.turtle = new Turtle(0, 0); // step
+    this.base = 1; // step
+  }
+  void moveForward() {
+    for (int i = 0; i < this.base + Settings.additionalSpeed; i++) // step
+      this.turtle.前に進む(); // step
+  }
+}
+    `,
   },
   // ----------- 初級プログラミングⅡ 第4回 ここまで -----------
 
