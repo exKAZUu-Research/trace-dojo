@@ -4336,7 +4336,8 @@ function main() {
   let t = call(MyTurtle, 'x', 'y', 'speed')(0, 0, 1);
   call(t.moveForward.bind(t))();
   call(t.moveForward.bind(t))();
-  t = call(MyTurtle, 'x', 'y', 'speed')(0, 2, t.getSpeed() * 2);
+  t.t.remove();
+  t = call(MyTurtle, 'x', 'y', 'speed')(2, 2, t.getSpeed() * 2);
   call(t.moveForward.bind(t))();
 }
 class MyTurtle {
@@ -4362,7 +4363,8 @@ public class Main {
     MyTurtle t = new MyTurtle(0, 0, 1); // caller
     t.moveForward(); // caller
     t.moveForward(); // caller
-    t = new MyTurtle(0, 2, t.getSpeed() * 2); // ガベージコレクションで亀が消える。 // caller
+    // 以下ではガベージコレクションで亀が消えることとする。
+    t = new MyTurtle(2, 2, t.getSpeed() * 2); // caller
     t.moveForward(); // caller
   }
 }
@@ -4456,12 +4458,9 @@ class MyTurtle {
     return this.speed;
   }
   public void setSpeed(int speed) {
-    if (speed < 0)
-      this.speed = 0; // step
-    else if (5 < speed)
-      this.speed = 5; // step
-    else
-      this.speed = speed; // step
+    if (speed < 0)      this.speed = 0; // step
+    else if (5 < speed) this.speed = 5; // step
+    else                this.speed = speed; // step
   }
   public void moveForward() {
     for (int i = 0; i < this.speed; i++) // step
@@ -4587,7 +4586,8 @@ class MyTurtle {
     this.t.前に進む(); // step
   }
   public void teleport(int x, int y) {
-    this.t = new Turtle(x, y); // ガベージコレクションで元々の亀が消えることとする。 // step
+    // ガベージコレクションで元々の亀が消えることとする。
+    this.t = new Turtle(x, y); // step
   }
 }
 `,
@@ -4606,7 +4606,7 @@ function main() {
 class MyTurtle {
   constructor(x, y) {
     this.t = new Turtle(x, y); // step
-    this.operation = ""; // step
+    this.operation = "F"; // step
   }
   setOperation(op) {
     this.operation = op; // step
@@ -4640,18 +4640,17 @@ public class Main {
     MyTurtle t = new MyTurtle(0, 0); // caller
     t.setOperation("FFRFR"); // caller
     t.operate(); // caller
-
     t.setOperation("ABC"); // caller
     t.operate(); // caller
   }
 }
-
 class MyTurtle {
   private Turtle t;
-  private String operation = ""; // step
+  private String operation;
 
   MyTurtle(int x, int y) {
     this.t = new Turtle(x, y); // step
+    this.operation = "F"; // step
   }
   public void setOperation(String op) {
     this.operation = op; // step
@@ -4660,17 +4659,13 @@ class MyTurtle {
     for (int i = 0; i < this.operation.length(); i++) { // step
       switch (this.operation.charAt(i)) {
         case 'F':
-          this.t.前に進む(); // step
-          break;
+          this.t.前に進む(); break; // step
         case 'B':
-          this.t.後に戻る(); // step
-          break;
+          this.t.後に戻る(); break; // step
         case 'R':
-          this.t.右を向く(); // step
-          break;
+          this.t.右を向く(); break; // step
         case 'L':
-          this.t.左を向く(); // step
-          break;
+          this.t.左を向く(); break; // step
       }
     }
   }
