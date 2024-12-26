@@ -70,7 +70,7 @@ export function traceProgram(
   const executableCode = `
 let myGlobal = {};
 const trace = [];
-const turtles = [];
+const _turtles = [];
 const callStack = [];
 const thisPropNames = ${JSON.stringify(thisPropNames)};
 let s;
@@ -117,12 +117,15 @@ class Turtle {
   constructor(x = 0, y = 0, color = '${DEFAULT_COLOR}') {
     this.x = x;
     this.y = y;
+    if (this.x < 0 || ${GRID_COLUMNS} <= this.x || this.y < 0 || ${GRID_ROWS} <= this.y) {
+      throw new Error(\`Out of bounds: (\${this.x}, \${this.y})\`);
+    }
     this.color = color;
     this.dir = 'N';
     board[this.y][this.x] = this.color;
-    turtles.push(this);
+    _turtles.push(this);
   }
-  forward(sid, self) {
+  前に進む() {
     const index = dirs.indexOf(this.dir);
     this.x += dx[index];
     this.y += dy[index];
@@ -130,9 +133,12 @@ class Turtle {
       throw new Error(\`Out of bounds: (\${this.x}, \${this.y})\`);
     }
     board[this.y][this.x] = this.color;
+  }
+  forward(sid, self) {
+    this.前に進む();
     addTrace(sid, self);
   }
-  backward(sid, self) {
+  後に戻る() {
     const index = dirs.indexOf(this.dir);
     this.x -= dx[index];
     this.y -= dy[index];
@@ -140,24 +146,33 @@ class Turtle {
       throw new Error(\`Out of bounds: (\${this.x}, \${this.y})\`);
     }
     board[this.y][this.x] = this.color;
+  }
+  backward(sid, self) {
+    this.後に戻る();
     addTrace(sid, self);
   }
   canMoveForward() {
     const index = dirs.indexOf(this.dir);
     const nx = this.x + dx[index];
     const ny = this.y + dy[index];
-    return nx >= 0 && nx < ${GRID_COLUMNS} && ny >= 0 && ny < ${GRID_ROWS};
+    const isNoTurtle = !_turtles.some(t => t.x === nx && t.y === ny);
+    return nx >= 0 && nx < ${GRID_COLUMNS} && ny >= 0 && ny < ${GRID_ROWS} && isNoTurtle;
   }
-  remove(sid, self) {
-    turtles.splice(turtles.indexOf(this), 1);
-    addTrace(sid, self);
+  remove() {
+    _turtles.splice(_turtles.indexOf(this), 1);
+  }
+  右を向く() {
+    this.dir = dirs[(dirs.indexOf(this.dir) + 1) % 4];
   }
   turnRight(sid, self) {
-    this.dir = dirs[(dirs.indexOf(this.dir) + 1) % 4];
+    this.右を向く();
     addTrace(sid, self);
   }
-  turnLeft(sid, self) {
+  左を向く() {
     this.dir = dirs[(dirs.indexOf(this.dir) + 3) % 4];
+  }
+  turnLeft(sid, self) {
+    this.左を向く();
     addTrace(sid, self);
   }
 }
@@ -168,7 +183,7 @@ function addTrace(sid, self) {
     for (const name of thisPropNames) delete vars['this'][name];
   }
   flattenObjects(vars);
-  trace.push({depth: s.getDepth(), sid, callStack: [...callStack], turtles: turtles.map(t => ({...t})), vars, board: board.map(r => r.join('')).join('\\n')});
+  trace.push({depth: s.getDepth(), sid, callStack: [...callStack], turtles: _turtles.map(t => ({...t})), vars, board: board.map(r => r.join('')).join('\\n')});
 }
 function flattenObjects(obj) {
   for (const [key, value] of Object.entries(obj)) {
@@ -222,7 +237,7 @@ ${modifiedCode.trim()}
   let lastCallerId = 0;
   for (const [index, line] of lines.entries()) {
     const refinedLine = line
-      .replace(/\s*\/\/\s*sid\s*(:\s*\d+|)\s*/, (_, sid) => {
+      .replace(/\s*\/\/\s*step\s*(:\s*\d+|)\s*/, (_, sid) => {
         if (sid) {
           lastSid = Number(sid.slice(1));
         } else {
@@ -261,14 +276,16 @@ function modifyCode(instrumented: string): string[] {
       // Python向けに最後のループの処理かどうかを判定するために checkForCond を挿入する。
       .replace(/for\s*\(([^;]*);\s*([^;]*);/, (_, init, cond) => `for (${init}; checkForCond(${cond}, ${statementId});`)
       .replaceAll(
-        /(\.set|\.forward|\.backward|\.turnRight|\.turnLeft|\.remove)\(([^\n;]*)\)(;|\)\s*{)/g,
+        /(\.set|\.forward|\.backward|\.turnRight|\.turnLeft)\(([^\n;]*)\)(;|\)\s*{)/g,
         (_, newOrMethod, args, tail) => {
           statementReplaced = true;
           const delimiter = args === '' ? '' : ', ';
           return `${newOrMethod}(${statementId}, this${delimiter}${args})${tail}`;
         }
       )
-      .replace(/\s*\/\/\s*trace\s*/, (_) => {
+      .replace(/\s*\/\/\s*step\s*/, (_) => {
+        if (statementReplaced) return '';
+
         statementReplaced = true;
         return `addTrace(${statementId}, this);`;
       })

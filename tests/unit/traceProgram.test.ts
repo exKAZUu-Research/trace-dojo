@@ -463,13 +463,13 @@ public class Main {
 public class Straight {
   public static void main(String[] args) {
     var c = new Turtle();
-    c.forward();
-    c.forward();
-    c.turnRight();
-    c.forward();
-    c.forward();
-    c.forward();
-    c.forward();
+    c.前に進む();
+    c.前に進む();
+    c.右を向く();
+    c.前に進む();
+    c.前に進む();
+    c.前に進む();
+    c.前に進む();
   }
 }
   `.trim(),
@@ -596,7 +596,7 @@ public class Straight {
 );
 
 test('Trace a specific program', () => {
-  const problem = instantiateProblem('static2', 'java', '');
+  const problem = instantiateProblem('staticMethod4', 'java', '');
   if (!problem) throw new Error('Failed to generate problem.');
 
   const { displayProgram, executableCode, sidToLineIndex, traceItems } = problem;
