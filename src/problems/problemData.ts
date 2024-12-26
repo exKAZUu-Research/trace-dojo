@@ -4711,9 +4711,6 @@ public class Straight {
 `,
   },
   test9: {
-    // Javaの静的フィールド（つまり、グローバル変数）を扱う場合、 `myGlobal` を使うこと。
-    // 静的メソッドは普通の関数で代替すること。
-    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 myGlobal.Settings = { speed: 0 };
 
