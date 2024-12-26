@@ -119,8 +119,14 @@ export const problemIds = [
   // 初級プログラミングⅡ 第4回
   'staticMethod1',
   'staticMethod2',
+  'staticMethod3',
+  'staticMethod4',
   'staticField1',
   'staticField2',
+  'staticField3',
+  'staticField4',
+  'staticField5',
+  'staticField6',
   // 初級プログラミングⅡ 第5回
   'polymorphism1',
   // 初級プログラミングⅡ 第6回
@@ -264,8 +270,15 @@ export const problemIdToName: Record<ProblemId, string> = {
   // 初級プログラミングⅡ 第3回
   staticMethod1: '静的メソッド(1)',
   staticMethod2: '静的メソッド(2)',
+  staticMethod3: '静的メソッド(3)',
+  staticMethod4: '静的メソッド(4)',
   staticField1: '静的フィールド(1)',
   staticField2: '静的フィールド(2)',
+  staticField3: '静的フィールド(3)',
+  staticField4: '静的フィールド(4)',
+  staticField5: '静的フィールド(5)',
+  staticField6: '静的フィールド(6)',
+  // 初級プログラミングⅡ 第4回
   // 初級プログラミングⅡ 第5回
   polymorphism1: 'ポリモルフィズム(1)',
   // 初級プログラミングⅡ 第6回
@@ -350,7 +363,18 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     // 第3回
     ['encapsulation', 'withoutEncapsulation', 'withEncapsulation'],
     // 第4回
-    ['staticMethod1', 'staticMethod2', 'staticField1', 'staticField2'],
+    [
+      'staticMethod1',
+      'staticMethod2',
+      'staticMethod3',
+      'staticMethod4',
+      'staticField1',
+      'staticField2',
+      'staticField3',
+      'staticField4',
+      'staticField5',
+      'staticField6',
+    ],
     // 第5回
     ['polymorphism1'],
     // 第6回
@@ -4267,10 +4291,91 @@ class Controller {
 }
     `,
   },
+  staticMethod3: {
+    instrumented: `
+const t1 = new Turtle(0, 0); // step
+call(moveThreeSteps, 't')(t1);
+const t2 = new Turtle(3, 0); // step
+const t3 = new Turtle(6, 0); // step
+call(moveThreeSteps, 't')(t2);
+call(moveThreeSteps, 't')(t3);
+
+function moveThreeSteps(t) {
+  t.前に進む(); // step
+  t.前に進む(); // step
+  t.前に進む(); // step
+}
+    `,
+    java: `
+public class Main {
+    public static void main(String[] args) {
+    Turtle t1 = new Turtle(0, 0); // step
+    Controller.moveThreeSteps(t1); // caller
+    Turtle t2 = new Turtle(3, 0); // step
+    Turtle t3 = new Turtle(6, 0); // step
+    Controller.moveThreeSteps(t2); // caller
+    Controller.moveThreeSteps(t3); // caller
+  }
+}
+
+class Controller {
+  static void moveThreeSteps(Turtle t) {
+    t.前に進む(); // step
+    t.前に進む(); // step
+    t.前に進む(); // step
+  }
+}
+    `,
+  },
+  staticMethod4: {
+    instrumented: `
+const t1 = new Turtle(0, 0); // step
+const t2 = new Turtle(1, 1); // step
+call(drawSquare, 't', 'size')(t1, 4);
+const t3 = new Turtle(2, 2); // step
+call(drawSquare, 't', 'size')(t2, 3);
+call(drawSquare, 't', 'size')(t3, 2);
+
+function drawSquare(t, size) {
+  for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
+    call(drawLine, 't', 'n')(t, size - 1);
+    t.右を向く(); // step
+  }
+}
+
+function drawLine(t, n) {
+  for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) { // step
+    t.前に進む(); // step
+  }
+}
+    `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle t1 = new Turtle(0, 0); // step
+    Turtle t2 = new Turtle(1, 1); // step
+    Controller.drawSquare(t1, 4); // caller
+    Turtle t3 = new Turtle(2, 2); // step
+    Controller.drawSquare(t2, 3); // caller
+    Controller.drawSquare(t3, 2); // caller
+  }
+}
+
+class Controller {
+  static void drawSquare(Turtle t, int size) {
+    for (int i = 0; i < 4; i++) { // step
+      Controller.drawLine(t, size - 1); // caller
+      t.右を向く(); // step
+    }
+  }
+  static void drawLine(Turtle t, int n) {
+    for (int i = 0; i < n; i++) // step
+      t.前に進む(); // step
+  }
+}
+    `,
+  },
   staticField1: {
-    // Javaの静的フィールド（つまり、グローバル変数）を扱う場合、 `myGlobal` を使うこと。
-    // 静的メソッドは普通の関数で代替すること。
-    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 myGlobal.Controller = { stepCount: 0 };
 
@@ -4315,8 +4420,6 @@ class Controller {
     `,
   },
   staticField2: {
-    // Javaの静的フィールド（つまり、グローバル変数）を扱う場合、 `myGlobal` を使うこと。
-    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 myGlobal.Settings = { speed: 3 };
 
@@ -4362,13 +4465,303 @@ class Settings {
 class MyTurtle {
   private Turtle t = new Turtle(); // step
 
-  void moveForward(Turtle t) {
+  void moveForward() {
     for (int i = 0; i < Settings.speed; i++) { // step
-      t.前に進む(); // step
+      this.t.前に進む(); // step
     }
   }
 }
 `,
+  },
+  staticField3: {
+    instrumented: `
+myGlobal.Settings = { speed: 2 };
+
+function main() {
+  const t1 = call(LineTurtle)();
+  const t2 = call(SquareTurtle)();
+  call(t1.drawLine.bind(t1))();
+  call(t2.drawSquare.bind(t2))();
+  myGlobal.Settings.speed = 3; // step
+  call(t1.drawLine.bind(t1))();
+}
+
+class LineTurtle {
+  constructor() {
+    this.t = new Turtle(0, 0); // step
+  }
+  drawLine() {
+    for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) { // step
+      this.t.前に進む(); // step
+    }
+    delete s.vars['i'];
+  }
+}
+
+class SquareTurtle {
+  constructor() {
+    this.t = new Turtle(2, 0); // step
+  }
+  drawSquare() {
+    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
+      for (s.set('j', 0); s.get('j') < myGlobal.Settings.speed; s.set('j', s.get('j') + 1)) { // step
+        this.t.前に進む(); // step
+      }
+      this.t.右を向く(); // step
+      delete s.vars['j'];
+    }
+    delete s.vars['i'];
+  }
+}
+
+main();
+    `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    LineTurtle t1 = new LineTurtle(); // caller
+    SquareTurtle t2 = new SquareTurtle(); // caller
+    t1.drawLine(); // caller
+    t2.drawSquare(); // caller
+    Settings.speed = 3; // step
+    t1.drawLine(); // caller
+  }
+}
+class Settings {
+  static public int speed = 2;
+}
+class LineTurtle {
+  private Turtle t = new Turtle(0, 0); // step
+  void drawLine() {
+    for (int i = 0; i < Settings.speed; i++) // step
+      t.前に進む(); // step
+  }
+}
+class SquareTurtle {
+  private Turtle t = new Turtle(1, 1); // step
+  void drawSquare() {
+    for (int i = 0; i < 4; i++) { // step
+      for (int j = 0; j < Settings.speed; j++) // step
+        t.前に進む(); // step
+      t.右を向く(); // step
+    }
+  }
+}
+    `,
+  },
+  staticField4: {
+    instrumented: `
+myGlobal.Settings = { speed: 2 };
+
+function main() {
+  const t1 = call(AcceleratedTurtle)();
+  const t2 = call(SquareTurtle)();
+  call(t1.drawLine.bind(t1))();
+  call(t2.drawSquare.bind(t2))();
+  myGlobal.Settings.speed = 2; // step
+  call(t1.drawLine.bind(t1))();
+}
+
+class AcceleratedTurtle {
+  constructor() {
+    this.t = new Turtle(0, 0); // step
+  }
+  drawLine() {
+    for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) { // step
+      this.t.前に進む(); // step
+    }
+    myGlobal.Settings.speed++; // step
+    delete s.vars['i'];
+  }
+}
+
+class SquareTurtle {
+  constructor() {
+    this.t = new Turtle(1, 1); // step
+  }
+  drawSquare() {
+    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
+      for (s.set('j', 0); s.get('j') < myGlobal.Settings.speed; s.set('j', s.get('j') + 1)) { // step
+        this.t.前に進む(); // step
+      }
+      this.t.右を向く(); // step
+      delete s.vars['j'];
+    }
+    delete s.vars['i'];
+  }
+}
+
+main();
+    `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    AcceleratedTurtle t1 = new AcceleratedTurtle(); // caller
+    SquareTurtle t2 = new SquareTurtle(); // caller
+    t1.drawLine(); // caller
+    t2.drawSquare(); // caller
+    Settings.speed = 2; // step
+    t1.drawLine(); // caller
+  }
+}
+class Settings {
+  static public int speed = 2;
+}
+class AcceleratedTurtle {
+  private Turtle t = new Turtle(0, 0); // step
+  void drawLine() {
+    for (int i = 0; i < Settings.speed; i++) // step
+      t.前に進む(); // step
+    Settings.speed++; // step
+  }
+}
+class SquareTurtle {
+  private Turtle t = new Turtle(1, 1); // step
+  void drawSquare() {
+    for (int i = 0; i < 4; i++) { // step
+      for (int j = 0; j < Settings.speed; j++) // step
+        t.前に進む(); // step
+      t.右を向く(); // step
+    }
+  }
+}
+    `,
+  },
+  staticField5: {
+    instrumented: `
+myGlobal.Settings = { additionalSpeed: 0 };
+
+function main() {
+  const t1 = call(SlowTurtle)();
+  const t2 = call(FastTurtle)();
+  call(t1.moveForward.bind(t1))();
+  call(t2.moveForward.bind(t2))();
+  myGlobal.Settings.additionalSpeed++; // step
+  call(t1.moveForward.bind(t1))();
+  call(t2.moveForward.bind(t2))();
+}
+
+class SlowTurtle {
+  constructor() {
+    this.t = new Turtle(0, 0); // step
+    this.base = 1; // step
+  }
+  moveForward() {
+    for (s.set('i', 0); s.get('i') < this.base + myGlobal.Settings.additionalSpeed; s.set('i', s.get('i') + 1)) { // step
+      this.t.前に進む(); // step
+    }
+    delete s.vars['i'];
+  }
+}
+
+class FastTurtle {
+  constructor() {
+    this.t = new Turtle(6, 0); // step
+    this.base = 2; // step
+  }
+  moveForward() {
+    for (s.set('i', 0); s.get('i') < this.base + myGlobal.Settings.additionalSpeed; s.set('i', s.get('i') + 1)) { // step
+      this.t.前に進む(); // step
+    }
+    delete s.vars['i'];
+  }
+}
+
+main();
+    `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    SlowTurtle t1 = new SlowTurtle(); // caller
+    FastTurtle t2 = new FastTurtle(); // caller
+    t1.moveForward(); // caller
+    t2.moveForward(); // caller
+    Settings.additionalSpeed++; // step
+    t1.moveForward(); // caller
+    t2.moveForward(); // caller
+  }
+}
+class Settings {
+  static public int additionalSpeed = 0;
+}
+class SlowTurtle {
+  private Turtle t = new Turtle(0, 0); // step
+  private int base = 1; // step
+  void moveForward() {
+    for (int i = 0; i < this.base + Settings.additionalSpeed; i++) // step
+      t.前に進む(); // step
+  }
+}
+class FastTurtle {
+  private Turtle t = new Turtle(6, 0); // step
+  private int base = 2; // step
+  void moveForward() {
+    for (int i = 0; i < this.base + Settings.additionalSpeed; i++) // step
+      t.前に進む(); // step
+  }
+}
+    `,
+  },
+  staticField6: {
+    instrumented: `
+myGlobal.Settings = { additionalSpeed: 0 };
+
+function main() {
+  const t1 = call(MyTurtle, 'x', 'y')(0, 0);
+  const t2 = call(MyTurtle, 'x', 'y')(3, 0);
+  call(t1.moveForward.bind(t1))();
+  call(t2.moveForward.bind(t2))();
+  t1.base++; // step
+  myGlobal.Settings.additionalSpeed++; // step
+  call(t1.moveForward.bind(t1))();
+  call(t2.moveForward.bind(t2))();
+}
+
+class MyTurtle {
+  constructor(x, y) {
+    this.turtle = new Turtle(x, y); // step
+    this.base = 1; // step
+  }
+  moveForward() {
+    for (s.set('i', 0); s.get('i') < this.base + myGlobal.Settings.additionalSpeed; s.set('i', s.get('i') + 1)) { // step
+      this.turtle.前に進む(); // step
+    }
+    delete s.vars['i'];
+  }
+}
+
+main();
+    `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle t1 = new MyTurtle(0, 0); // caller
+    MyTurtle t2 = new MyTurtle(3, 0); // caller
+    t1.moveForward(); // caller
+    t2.moveForward(); // caller
+    t1.base++; // step
+    Settings.additionalSpeed++; // step
+    t1.moveForward(); // caller
+    t2.moveForward(); // caller
+  }
+}
+class Settings {
+  static public int additionalSpeed = 0;
+}
+class MyTurtle {
+  private Turtle t;
+  public int base;
+
+  MyTurtle(int x, int y) {
+    this.turtle = new Turtle(x, y); // step
+    this.base = 1; // step
+  }
+  void moveForward() {
+    for (int i = 0; i < this.base + Settings.additionalSpeed; i++) // step
+      this.turtle.前に進む(); // step
+  }
+}
+    `,
   },
   // ----------- 初級プログラミングⅡ 第4回 ここまで -----------
 
