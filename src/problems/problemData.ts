@@ -4132,7 +4132,6 @@ class MyTurtle {
     }
     delete s.vars['i'];
   }
-
   changeSpeed(speed) {
     this.speed = speed; // step
   }
@@ -4176,7 +4175,7 @@ function drawSquare(t, size) {
     for (s.set('j', 0); s.get('j') < size - 1; s.set('j', s.get('j') + 1)) {
       t.前に進む(); // step
     }
-	delete s.vars['j'];
+    delete s.vars['j'];
     t.右を向く(); // step
   }
   delete s.vars['i'];
@@ -4393,7 +4392,7 @@ class MyTurtle {
   withEncapsulation4: {
     instrumented: `
 function main() {
-  const t = call(MyTurtle, 'sx', 'sy', 'speed')(0, 0, 2);
+  const t = call(MyTurtle, 'x', 'y', 'speed')(0, 0, 2);
   call(t.moveForward.bind(t))();
   call(t.setSpeed.bind(t), 'speed')(Math.floor(t.getSpeed() * 3 / 2));
   call(t.moveForward.bind(t))();
@@ -4403,8 +4402,8 @@ function main() {
   call(t.moveBackward.bind(t))();
 }
 class MyTurtle {
-  constructor(sx, sy, speed) {
-    this.t = new Turtle(sx, sy); // step
+  constructor(x, y, speed) {
+    this.t = new Turtle(x, y); // step
     call(this.setSpeed.bind(this), 'speed')(speed);
   }
   getSpeed() {
@@ -4452,8 +4451,8 @@ class MyTurtle {
   private Turtle t;
   private int speed;
 
-  MyTurtle(int sx, int sy, int speed) {
-    this.t = new Turtle(sx, sy); // step
+  MyTurtle(int x, int y, int speed) {
+    this.t = new Turtle(x, y); // step
     this.setSpeed(speed); // caller
   }
   public int getSpeed() {
@@ -4465,12 +4464,12 @@ class MyTurtle {
     else                this.speed = speed; // step
   }
   public void moveForward() {
-    for (int i = 0; i < this.speed; i++){ // step
+    for (int i = 0; i < this.speed; i++) { // step
       this.t.前に進む(); // step
     }
   }
   public void moveBackward() {
-    for (int i = 0; i < this.speed; i++){ // step
+    for (int i = 0; i < this.speed; i++) { // step
       this.t.後に戻る(); // step
     }
   }
