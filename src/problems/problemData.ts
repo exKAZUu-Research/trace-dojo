@@ -4464,14 +4464,12 @@ class MyTurtle {
     else                this.speed = speed; // step
   }
   public void moveForward() {
-    for (int i = 0; i < this.speed; i++) { // step
+    for (int i = 0; i < this.speed; i++) // step
       this.t.前に進む(); // step
-    }
   }
   public void moveBackward() {
-    for (int i = 0; i < this.speed; i++) { // step
+    for (int i = 0; i < this.speed; i++) // step
       this.t.後に戻る(); // step
-    }
   }
 }
 `,
