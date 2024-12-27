@@ -4957,7 +4957,7 @@ class SquareTurtle {
         this.t.前に進む(); // step
       }
       delete s.vars['j'];
-	  this.t.右を向く(); // step
+      this.t.右を向く(); // step
     }
     delete s.vars['i'];
   }
@@ -5020,7 +5020,7 @@ class AcceleratedTurtle {
       this.t.前に進む(); // step
     }
     delete s.vars['i'];
-	myGlobal.Settings.speed++; // step
+    myGlobal.Settings.speed++; // step
   }
 }
 
@@ -5034,7 +5034,7 @@ class SquareTurtle {
         this.t.前に進む(); // step
       }
       delete s.vars['j'];
-	  this.t.右を向く(); // step
+      this.t.右を向く(); // step
     }
     delete s.vars['i'];
   }
