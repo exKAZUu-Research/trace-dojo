@@ -4949,15 +4949,15 @@ class LineTurtle {
 
 class SquareTurtle {
   constructor() {
-    this.t = new Turtle(2, 0); // step
+    this.t = new Turtle(1, 1); // step
   }
   drawSquare() {
     for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
       for (s.set('j', 0); s.get('j') < myGlobal.Settings.speed; s.set('j', s.get('j') + 1)) { // step
         this.t.前に進む(); // step
       }
-      this.t.右を向く(); // step
       delete s.vars['j'];
+      this.t.右を向く(); // step
     }
     delete s.vars['i'];
   }
@@ -5019,8 +5019,8 @@ class AcceleratedTurtle {
     for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
-    myGlobal.Settings.speed++; // step
     delete s.vars['i'];
+    myGlobal.Settings.speed++; // step
   }
 }
 
@@ -5033,8 +5033,8 @@ class SquareTurtle {
       for (s.set('j', 0); s.get('j') < myGlobal.Settings.speed; s.set('j', s.get('j') + 1)) { // step
         this.t.前に進む(); // step
       }
-      this.t.右を向く(); // step
       delete s.vars['j'];
+      this.t.右を向く(); // step
     }
     delete s.vars['i'];
   }
