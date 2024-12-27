@@ -4114,14 +4114,14 @@ class TurtleMover {
     // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 function main() {
-  const t = call(MyTurtle, 'x', 'y', 'speed')(0, 0, 2);
+  const t = call(MyTurtle)();
   call(t.moveForward.bind(t))();
   call(t.changeSpeed.bind(t), 'speed')(1);
   call(t.moveForward.bind(t))();
 }
 
 class MyTurtle {
-  constructor(x, y, speed) {
+  constructor() {
     this.t = new Turtle(); // step
     this.speed = 2; // step
   }
@@ -4132,7 +4132,6 @@ class MyTurtle {
     }
     delete s.vars['i'];
   }
-
   changeSpeed(speed) {
     this.speed = speed; // step
   }
@@ -4176,8 +4175,10 @@ function drawSquare(t, size) {
     for (s.set('j', 0); s.get('j') < size - 1; s.set('j', s.get('j') + 1)) {
       t.前に進む(); // step
     }
+    delete s.vars['j'];
     t.右を向く(); // step
   }
+  delete s.vars['i'];
 }
 `,
     java: `
@@ -4450,8 +4451,8 @@ class MyTurtle {
   private Turtle t;
   private int speed;
 
-  MyTurtle(int sx, int sy, int speed) {
-    this.t = new Turtle(sx, sy); // step
+  MyTurtle(int x, int y, int speed) {
+    this.t = new Turtle(x, y); // step
     this.setSpeed(speed); // caller
   }
   public int getSpeed() {
@@ -4463,12 +4464,14 @@ class MyTurtle {
     else                this.speed = speed; // step
   }
   public void moveForward() {
-    for (int i = 0; i < this.speed; i++) // step
+    for (int i = 0; i < this.speed; i++) { // step
       this.t.前に進む(); // step
+    }
   }
   public void moveBackward() {
-    for (int i = 0; i < this.speed; i++) // step
+    for (int i = 0; i < this.speed; i++) { // step
       this.t.後に戻る(); // step
+    }
   }
 }
 `,
