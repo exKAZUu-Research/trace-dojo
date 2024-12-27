@@ -284,6 +284,9 @@ function modifyCode(instrumented: string): string[] {
         }
       )
       .replace(/\s*\/\/\s*step\s*/, (_) => {
+        if ((line.includes('for ') || line.includes('for(')) && !line.includes('{')) {
+          throw new Error('for statement must have {');
+        }
         if (statementReplaced) return '';
 
         statementReplaced = true;
