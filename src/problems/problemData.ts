@@ -297,10 +297,10 @@ export const problemIdToName: Record<ProblemId, string> = {
   staticField6: '静的フィールド(6)',
   // 初級プログラミングⅡ 第4回
   // 初級プログラミングⅡ 第5回
-  inheritance1: 'ポリモルフィズム(1)',
-  inheritance2: 'ポリモルフィズム(2)',
-  override: 'オーバーライド(1)',
-  polymorphism: 'オーバーライド(2)',
+  inheritance1: '継承(1)',
+  inheritance2: '継承(2)',
+  override: 'オーバーライド',
+  polymorphism: 'ポリモルフィズム',
   // 初級プログラミングⅡ 第6回
   // 初級プログラミングⅡ 第7回
   // 初級プログラミングⅡ 第8回
@@ -5231,71 +5231,51 @@ class MyTurtle {
     // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 function main() {
-  const ts = [new MyTurtle(0, 0), new FastTurtle(1)]; // step
-  for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) { // step
-    call(ts[s.get('i')].drawLine.bind(ts[s.get('i')]))();
-  }
+  const t = call(CurveTurtle)(); // caller
+  call(t.drawCurve.bind(t))(); // caller
 }
 
 class MyTurtle {
-  constructor(x, y) {
-    this.t = new Turtle(x, y);
+  constructor() {
+    this.t = new Turtle(); // step
   }
   drawLine() {
-    for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-  length() {
-    return 2;
+    this.t.前に進む(); // step
+    this.t.前に進む(); // step
   }
 }
 
-class FastTurtle extends MyTurtle {
-  constructor(p) {
-    super(p, p);
-  }
-  length() {
-    return 3;
+class CurveTurtle extends MyTurtle {
+  drawCurve() {
+    this.drawLine(); // caller
+    this.t.右を向く(); // step
+    this.drawLine(); // caller
   }
 }
-
 main();
 `,
     java: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle[] ts = {
-        new MyTurtle(0, 0), new FastTurtle(1) }; // step
-    for (int i = 0; i < ts.length; i++) { // step
-      ts[i].drawLine(); // caller
-    }
+    CurveTurtle t = new CurveTurtle(); // caller
+    t.drawCurve(); // caller
   }
 }
 
 class MyTurtle {
-  Turtle t;
+  Turtle t = new Turtle(); // step
 
-  MyTurtle(int x, int y) {
-    this.t = new Turtle(x, y);
-  }
   void drawLine() {
-    for (int i = 0; i < this.length(); i++) { // step
-      this.t.前に進む(); // step
-    }
-  }
-  int length() {
-    return 2;
+    this.t.前に進む(); // step
+    this.t.前に進む(); // step
   }
 }
 
-class FastTurtle extends MyTurtle {
-  FastTurtle(int p) {
-    super(p, p);
-  }
-  @Override int length() {
-    return 3;
+class CurveTurtle extends MyTurtle {
+  void drawCurve() {
+    this.drawLine(); // caller
+    this.t.右を向く(); // step
+    this.drawLine(); // caller
   }
 }
 `,
