@@ -135,7 +135,10 @@ export const problemIds = [
   'staticField5',
   'staticField6',
   // 初級プログラミングⅡ 第5回
-  'polymorphism1',
+  'inheritance1',
+  'inheritance2',
+  'override',
+  'polymorphism',
   // 初級プログラミングⅡ 第6回
   // 初級プログラミングⅡ 第7回
   // 初級プログラミングⅡ 第8回
@@ -294,7 +297,10 @@ export const problemIdToName: Record<ProblemId, string> = {
   staticField6: '静的フィールド(6)',
   // 初級プログラミングⅡ 第4回
   // 初級プログラミングⅡ 第5回
-  polymorphism1: 'ポリモルフィズム(1)',
+  inheritance1: 'ポリモルフィズム(1)',
+  inheritance2: 'ポリモルフィズム(2)',
+  override: 'オーバーライド(1)',
+  polymorphism: 'オーバーライド(2)',
   // 初級プログラミングⅡ 第6回
   // 初級プログラミングⅡ 第7回
   // 初級プログラミングⅡ 第8回
@@ -401,7 +407,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
       'staticField6',
     ],
     // 第5回
-    ['polymorphism1'],
+    ['inheritance1', 'inheritance2', 'override', 'polymorphism'],
     // 第6回
     ['oop1'],
     // 第7回
@@ -5221,7 +5227,7 @@ class MyTurtle {
   // ----------- 初級プログラミングⅡ 第4回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第5回 ここから -----------
-  polymorphism1: {
+  inheritance1: {
     // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 function main() {
@@ -5294,8 +5300,112 @@ class FastTurtle extends MyTurtle {
 }
 `,
   },
+  inheritance2: {
+    instrumented: `
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    CurveTurtle t = new CurveTurtle(2);
+    t.drawCurve();
+  }
+}
+
+class MyTurtle {
+  Turtle t;
+
+  MyTurtle(int x, int y) {
+    this.t = new Turtle(x, y);
+  }
+  void drawLine() {
+    this.t.前に進む();
+    this.t.前に進む();
+  }
+}
+
+class CurveTurtle extends MyTurtle {
+  CurveTurtle(int p) {
+    super(p, p);
+  }
+  void drawCurve() {
+    this.drawLine();
+    this.t.右を向く();
+    this.drawLine();
+  }
+}
+`,
+  },
+  override: {
+    instrumented: `
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    FastTurtle t = new FastTurtle();
+    t.drawLine();
+  }
+}
+class MyTurtle {
+  Turtle t = new Turtle();
+
+  void drawLine() {
+    for (int i = 0; i < this.length(); i++) {
+      this.t.前に進む(); 
+    }
+  }
+  int length() {
+    return 2;
+  }
+}
+
+class FastTurtle extends MyTurtle {
+  @Override int length() {
+    return 3;
+  }
+}
+`,
+  },
+  polymorphism: {
+    instrumented: `
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle[] ts = { new MyTurtle(0, 0), new FastTurtle(1) };
+    for (int i = 0; i < ts.length; i++) {
+      ts[i].drawLine();
+    }
+  }
+}
+class MyTurtle {
+  Turtle t;
+
+  MyTurtle(int x, int y) {
+    this.t = new Turtle(x, y);
+  }
+  void drawLine() {
+    for (int i = 0; i < this.length(); i++) {
+      this.t.前に進む(); 
+    }
+  }
+  int length() {
+    return 2;
+  }
+}
+
+class FastTurtle extends MyTurtle {
+  FastTurtle(int p) {
+    super (p, p);
+  }
+  @Override int length() {
+    return 3;
+  }
+}
+`,
+  },
+
   // ----------- 初級プログラミングⅡ 第5回 ここまで -----------
-  // やります
+
   // ----------- 初級プログラミングⅡ 第6回 ここから -----------
   // ----------- 初級プログラミングⅡ 第6回 ここまで -----------
 
