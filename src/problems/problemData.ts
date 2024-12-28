@@ -3285,6 +3285,7 @@ public class Main {
     t1.右を向く(); // step
     Turtle t2 = new Turtle(3, 3); // step
     t2.前に進む(); // step
+    // ガベージコレクションで亀が消えることとする。
     t2 = t1; // step
     t2.前に進む(); // step
   }
@@ -3321,7 +3322,9 @@ public class Main {
   t2.前に進む(); // step
   t3.前に進む(); // step
 
+  // ガベージコレクションで亀が消えることとする。
   t2 = t1; // step
+  // ガベージコレクションで亀が消えることとする。
   t3 = t2; // step
 
   t3.前に進む(); // step
@@ -3378,7 +3381,9 @@ public class Main {
     for (int i = 0; i < turtles.length; i++) // step
       N回前に進む(turtles[i], 3); // step
 
+    // ガベージコレクションで亀が消えることとする。
     turtles[0] = new Turtle(4, 3); // step
+    // ガベージコレクションで亀が消えることとする。
     turtles[1] = new Turtle(3, 2); // step
 
     for (int i = 0; i < turtles.length; i++) // step
@@ -3426,7 +3431,8 @@ public class Main {
     }
 
     for (int i = 0; i < turtles.length; i++) { // step
-      // nullは、何も参照していないことを示す特別な値です。
+      // nullは、何も参照していないことを示す特別な値。
+      // ガベージコレクションで亀が消えることとする。
       turtles[i] = null; // step
 
       for (Turtle t : turtles) {
@@ -3472,7 +3478,7 @@ public class Main {
     for (int i = 0; i < len - 1; i++) { // step
       t.前に進む(); // step
     }
-    // 線を描く()メソッドが終わると変数tはなくなり、亀も消えることとする！
+    // 線を描く()メソッドが終わると変数tはなくなり、亀も消えることとする。
   }
 }
 `,
@@ -3484,19 +3490,19 @@ call(正方形を描く, 'x', 'y', 'size')(3, 3, 3);
 const t = new Turtle(3, 3); // step
 
 function 正方形を描く(x, y, size) {
-  線を描く(x, y, 0, size); // step
-  線を描く(x, y + size, 1, size); // step
-  線を描く(x + size, y + size, 2, size); // step
-  線を描く(x + size, y, 3, size); // step
+  call(線を描く, 'x', 'y', 'dir', 'len')(x, y, 0, size);
+  call(線を描く, 'x', 'y', 'dir', 'len')(x, y + size, 1, size);
+  call(線を描く, 'x', 'y', 'dir', 'len')(x + size, y + size, 2, size);
+  call(線を描く, 'x', 'y', 'dir', 'len')(x + size, y, 3, size);
 }
 
 function 線を描く(x, y, dir, len) {
-  const t = new Turtle(x, y);
-  for (let i = 0; i < dir; i++) {
-    t.右を向く();
+  const t = new Turtle(x, y); // step
+  for (let i = 0; i < dir; i++) { // step
+    t.右を向く(); // step
   }
-  for (let i = 0; i < len - 1; i++) {
-    t.前に進む();
+  for (let i = 0; i < len - 1; i++) { // step
+    t.前に進む(); // step
   }
   t.remove();
 }
@@ -3510,21 +3516,21 @@ public class Main {
   }
 
   static void 正方形を描く(int x, int y, int size) {
-    線を描く(x, y, 0, size); // step
-    線を描く(x, y + size, 1, size); // step
-    線を描く(x + size, y + size, 2, size); // step
-    線を描く(x + size, y, 3, size); // step
+    線を描く(x, y, 0, size); // caller
+    線を描く(x, y + size, 1, size); // caller
+    線を描く(x + size, y + size, 2, size); // caller
+    線を描く(x + size, y, 3, size); // caller
   }
 
   static void 線を描く(int x, int y, int dir, int len) {
-    Turtle t = new Turtle(x, y);
-    for (int i = 0; i < dir; i++) {
-      t.右を向く();
+    Turtle t = new Turtle(x, y); // step
+    for (int i = 0; i < dir; i++) { // step
+      t.右を向く(); // step
     }
-    for (int i = 0; i < len - 1; i++) {
-      t.前に進む();
+    for (int i = 0; i < len - 1; i++) { // step
+      t.前に進む(); // step
     }
-    // 線を描く()メソッドが終わると変数tはなくなり、亀も消えることとする！
+    // 線を描く()メソッドが終わると変数tはなくなり、亀も消えることとする。
   }
 }
 `,
@@ -4085,7 +4091,7 @@ public class Main {
     mover.moveSquare(3); // caller
     mover.t = new Turtle(3, 1); // step
     mover.moveSquare(3); // caller
-    mover.t = t2; // ガベージコレクションにより亀が消えることとする。 // step
+    mover.t = t2; // ガベージコレクションで亀が消えることとする。 // step
     mover.moveSquare(2); // caller
   }
 }
