@@ -5282,12 +5282,38 @@ class CurveTurtle extends MyTurtle {
   },
   inheritance2: {
     instrumented: `
+function main() {
+  const t = call(CurveTurtle)(); // caller
+  call(t.drawCurve.bind(t))(); // caller
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(2,2); // step
+  }
+  drawLine() {
+    this.t.前に進む(); // step
+    this.t.前に進む(); // step
+  }
+}
+
+class CurveTurtle extends MyTurtle {
+  constructor() {
+    super(); // caller
+  }
+  drawCurve() {
+    this.drawLine(); // caller
+    this.t.右を向く(); // step
+    this.drawLine(); // caller
+  }
+}
+main();
 `,
     java: `
 public class Main {
   public static void main(String[] args) {
-    CurveTurtle t = new CurveTurtle(2);
-    t.drawCurve();
+    CurveTurtle t = new CurveTurtle(2); // caller
+    t.drawCurve(); // caller
   }
 }
 
@@ -5295,22 +5321,22 @@ class MyTurtle {
   Turtle t;
 
   MyTurtle(int x, int y) {
-    this.t = new Turtle(x, y);
+    this.t = new Turtle(x, y); // step
   }
   void drawLine() {
-    this.t.前に進む();
-    this.t.前に進む();
+    this.t.前に進む(); // step
+    this.t.前に進む(); // step
   }
 }
 
 class CurveTurtle extends MyTurtle {
   CurveTurtle(int p) {
-    super(p, p);
+    super(p, p); // caller
   }
   void drawCurve() {
-    this.drawLine();
-    this.t.右を向く();
-    this.drawLine();
+    this.drawLine(); // caller
+    this.t.右を向く(); // step
+    this.drawLine(); // caller
   }
 }
 `,
