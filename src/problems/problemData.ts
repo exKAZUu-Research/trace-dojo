@@ -5343,20 +5343,47 @@ class CurveTurtle extends MyTurtle {
   },
   override: {
     instrumented: `
+function main() {
+  const t = call(FastTurtle)(); // caller
+  call(t.drawLine.bind(t))(); // caller
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+
+  drawLine() {
+    for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step // caller
+      this.t.前に進む(); // step
+    }
+  }
+
+  length() {
+    return 2;
+  }
+}
+
+class FastTurtle extends MyTurtle {
+  length() {
+    return 3; // step
+  }
+}
+main();
 `,
     java: `
 public class Main {
   public static void main(String[] args) {
-    FastTurtle t = new FastTurtle();
-    t.drawLine();
+    FastTurtle t = new FastTurtle(); // caller
+    t.drawLine(); // caller
   }
 }
 class MyTurtle {
-  Turtle t = new Turtle();
+  Turtle t = new Turtle(); // step
 
   void drawLine() {
-    for (int i = 0; i < this.length(); i++) {
-      this.t.前に進む(); 
+    for (int i = 0; i < this.length(); i++) { // step
+      this.t.前に進む();  // step
     }
   }
   int length() {
@@ -5366,7 +5393,7 @@ class MyTurtle {
 
 class FastTurtle extends MyTurtle {
   @Override int length() {
-    return 3;
+    return 3; // step
   }
 }
 `,
