@@ -5400,11 +5400,44 @@ class FastTurtle extends MyTurtle {
   },
   polymorphism: {
     instrumented: `
+function main() {
+
+  const ts1 = call(MyTurtle,'x','y')(0,0)
+  const ts2 = call(FastTurtle,'p')(1)
+  call(ts1.drawLine.bind(ts1))(); 
+  call(ts2.drawLine.bind(ts2))();
+}
+
+class MyTurtle {
+  constructor(x, y) {
+    this.t = new Turtle(x, y); // step
+  }
+
+  drawLine() {
+    for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step // caller
+      this.t.前に進む(); // step
+    }
+  }
+
+  length() {
+    return 2;
+  }
+}
+
+class FastTurtle extends MyTurtle {
+  constructor() {
+    super(1,1); // caller
+  }
+  length() {
+    return 3; // step
+  }
+}
+main();
 `,
     java: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle[] ts = { new MyTurtle(0, 0), new FastTurtle(1) };
+    MyTurtle[] ts = { new MyTurtle(0, 0), new FastTurtle(1) }; // caller
     for (int i = 0; i < ts.length; i++) {
       ts[i].drawLine();
     }
@@ -5414,24 +5447,24 @@ class MyTurtle {
   Turtle t;
 
   MyTurtle(int x, int y) {
-    this.t = new Turtle(x, y);
+    this.t = new Turtle(x, y); // step
   }
   void drawLine() {
-    for (int i = 0; i < this.length(); i++) {
-      this.t.前に進む(); 
+    for (int i = 0; i < this.length(); i++) { // step
+      this.t.前に進む();  // step
     }
   }
   int length() {
-    return 2;
+    return 2; // step
   }
 }
 
 class FastTurtle extends MyTurtle {
   FastTurtle(int p) {
-    super (p, p);
+    super (p, p); // step
   }
   @Override int length() {
-    return 3;
+    return 3; // step
   }
 }
 `,
