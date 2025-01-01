@@ -137,8 +137,14 @@ export const problemIds = [
   // 初級プログラミングⅡ 第5回
   'inheritance1',
   'inheritance2',
-  'override',
-  'polymorphism',
+  'inheritance3',
+  'inheritance4',
+  'override1',
+  'override2',
+  'override3',
+  'polymorphism1',
+  'polymorphism2',
+  'polymorphism3',
   // 初級プログラミングⅡ 第6回
   // 初級プログラミングⅡ 第7回
   // 初級プログラミングⅡ 第8回
@@ -299,8 +305,14 @@ export const problemIdToName: Record<ProblemId, string> = {
   // 初級プログラミングⅡ 第5回
   inheritance1: '継承(1)',
   inheritance2: '継承(2)',
-  override: 'オーバーライド',
-  polymorphism: 'ポリモルフィズム',
+  inheritance3: '継承(3)',
+  inheritance4: '継承(4)',
+  override1: 'オーバーライド(1)',
+  override2: 'オーバーライド(2)',
+  override3: 'オーバーライド(3)',
+  polymorphism1: 'ポリモルフィズム(1)',
+  polymorphism2: 'ポリモルフィズム(2)',
+  polymorphism3: 'ポリモルフィズム(3)',
   // 初級プログラミングⅡ 第6回
   // 初級プログラミングⅡ 第7回
   // 初級プログラミングⅡ 第8回
@@ -407,7 +419,18 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
       'staticField6',
     ],
     // 第5回
-    ['inheritance1', 'inheritance2', 'override', 'polymorphism'],
+    [
+      'inheritance1',
+      'inheritance2',
+      'inheritance3',
+      'inheritance4',
+      'override1',
+      'override2',
+      'override3',
+      'polymorphism1',
+      'polymorphism2',
+      'polymorphism3',
+    ],
     // 第6回
     ['oop1'],
     // 第7回
@@ -5341,7 +5364,15 @@ class CurveTurtle extends MyTurtle {
 }
 `,
   },
-  override: {
+  inheritance3: {
+    instrumented: ``,
+    java: ``,
+  },
+  inheritance4: {
+    instrumented: ``,
+    java: ``,
+  },
+  override1: {
     instrumented: `
 function main() {
   const t = call(FastTurtle)(); // caller
@@ -5398,7 +5429,15 @@ class FastTurtle extends MyTurtle {
 }
 `,
   },
-  polymorphism: {
+  override2: {
+    instrumented: ``,
+    java: ``,
+  },
+  override3: {
+    instrumented: ``,
+    java: ``,
+  },
+  polymorphism1: {
     instrumented: `
 function main() {
 
@@ -5468,6 +5507,14 @@ class FastTurtle extends MyTurtle {
   }
 }
 `,
+  },
+  polymorphism2: {
+    instrumented: ``,
+    java: ``,
+  },
+  polymorphism3: {
+    instrumented: ``,
+    java: ``,
   },
 
   // ----------- 初級プログラミングⅡ 第5回 ここまで -----------
