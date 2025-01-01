@@ -5580,7 +5580,51 @@ class FastTurtle extends MyTurtle {
   },
   polymorphism2: {
     instrumented: ``,
-    java: ``,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle[] ts = { new CurveTurtle(0), new FastTurtle(2) };
+    for (int i = 0; i < ts.length; i++) {
+      ts[i].draw();
+    }
+  }
+}
+class MyTurtle {
+  Turtle t;
+
+  MyTurtle(int x, int y) {
+    this.t = new Turtle(x, y);
+  }
+  void draw() {
+    for (int i = 0; i < this.length(); i++) {
+      this.t.前に進む(); 
+    }
+  }
+  int length() {
+    return 2;
+  }
+}
+
+class FastTurtle extends MyTurtle {
+  FastTurtle(int p) {
+    super (p, p);
+  }
+  @Override int length() {
+    return 3;
+  }
+}
+
+class CurveTurtle extends MyTurtle {
+  CurveTurtle(int p) {
+    super(p, p);
+  }
+  @Override void draw() {
+    this.drawLine();
+    this.t.右を向く();
+    this.drawLine();
+  }
+}
+`,
   },
   polymorphism3: {
     instrumented: ``,
