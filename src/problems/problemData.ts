@@ -5431,7 +5431,38 @@ class FastTurtle extends MyTurtle {
   },
   override2: {
     instrumented: ``,
-    java: ``,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    FastTurtle t = new MoreFastTurtle();
+    t.drawLine();
+  }
+}
+class MyTurtle {
+  Turtle t = new Turtle();
+
+  void drawLine() {
+    for (int i = 0; i < this.length(); i++) {
+      this.t.前に進む(); 
+    }
+  }
+  int length() {
+    return 2;
+  }
+}
+
+class FastTurtle extends MyTurtle {
+  @Override int length() {
+    return 3;
+  }
+}
+
+class MoreFastTurtle extends FastTurtle {
+  @Override int length() {
+    return 4;
+  }
+}
+`,
   },
   override3: {
     instrumented: ``,
