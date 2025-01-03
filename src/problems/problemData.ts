@@ -5667,7 +5667,7 @@ class MyTurtle {
 
 class FastTurtle extends MyTurtle {
   FastTurtle(int p) {
-    super (p, p);
+    super(p, p);
   }
   @Override int length() {
     return 3;
@@ -5688,7 +5688,48 @@ class CurveTurtle extends MyTurtle {
   },
   polymorphism3: {
     instrumented: ``,
-    java: ``,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle[] ts = { new MyTurtle(0, 0), new CurveTurtle() }; // caller
+    for (int i = 0; i < ts.length; i++) {
+      ts[i].draw();
+    }
+  }
+}
+
+class MyTurtle {
+  Turtle t;
+
+  MyTurtle(int x, int y) {
+    this.t = new Turtle(x, y); // step
+  }
+  void draw() {
+    for (int i = 0; i < this.length(); i++) { // step
+      this.t.前に進む();  // step
+    }
+  }
+  int length() {
+    return 3; // step
+  }
+}
+
+class CurveTurtle {
+  private Turtle t = new Turtle(0, 0); // step
+
+  void draw(int speed) {
+    this.drawLine(); // caller
+    this.t.右を向く(); // step
+    this.drawLine(); // caller
+  }
+
+  void drawLine(int speed) {
+      this.t.前に進む(); // step
+      this.t.前に進む(); // step
+    }
+  }
+}
+    `,
   },
 
   // ----------- 初級プログラミングⅡ 第5回 ここまで -----------
