@@ -5367,7 +5367,7 @@ class CurveTurtle extends MyTurtle {
   inheritance3: {
     instrumented: ``,
     java: `
-  public class Main {
+public class Main {
   public static void main(String[] args) {
     CurveTurtle t = new CurveTurtle(2); // caller
     t.drawLine(); // caller
@@ -5400,7 +5400,37 @@ class CurveTurtle extends MyTurtle {
   },
   inheritance4: {
     instrumented: ``,
-    java: ``,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    CurveTurtle t = new CurveTurtle(1); // caller
+    t.drawLine(); // caller
+  }
+}
+
+class MyTurtle {
+  Turtle t;
+
+  MyTurtle(int x, int y) {
+    this.t = new Turtle(x, y); // step
+  }
+  void drawLine() {
+    this.t.前に進む(); // step
+    this.t.前に進む(); // step
+  }
+}
+
+class CurveTurtle extends MyTurtle {
+  CurveTurtle(int p) {
+    super(p+1, p+2); // caller
+  }
+  void drawCurve() {
+    this.drawLine(); // caller
+    this.t.右を向く(); // step
+    this.drawLine(); // caller
+  }
+}
+    `,
   },
   override1: {
     instrumented: `
