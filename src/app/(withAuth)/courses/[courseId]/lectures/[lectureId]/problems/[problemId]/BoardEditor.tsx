@@ -104,7 +104,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
   const findIncorrectLocationsAndHintText = (): [string[], string] => {
     const locations: string[] = [];
     let hintText = '';
-    if (!fastDeepEqual(currentTraceItem.turtles, turtles)) {
+    if (!fastDeepEqual(new Set(currentTraceItem.turtles), new Set(turtles))) {
       locations.push('亀');
     }
     if (!fastDeepEqual(parseBoard(currentTraceItem.board), board)) {
