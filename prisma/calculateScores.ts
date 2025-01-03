@@ -5,10 +5,12 @@ import { writeFileSync } from 'node:fs';
 import { PrismaClient } from '@prisma/client';
 import SuperTokensNode from 'supertokens-node';
 
-import { ensureSuperTokensInit } from '../src/infrastructures/supertokens/backendConfig';
-import { courseIdToLectureIndexToProblemIds } from '../src/problems/problemData';
+import { ensureSuperTokensInit } from '@/infrastructures/supertokens/backendConfig';
+import { courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
 
 const prisma = new PrismaClient();
+
+// 1/3 9:30まで一発正解の採点考慮
 
 const deadLines = {
   tuBeginner1: [
