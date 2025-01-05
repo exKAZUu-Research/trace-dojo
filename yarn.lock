@@ -4706,10 +4706,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"at-decorators@npm:3.0.3":
-  version: 3.0.3
-  resolution: "at-decorators@npm:3.0.3"
-  checksum: 10c0/2091dd1dbc2dde333915f2c3de1b68ced7cc9515c1e027f0d774c01256a8acce83509b69594e0e09b8b1b29ca7312a250eb6d586ab17cbb8bb5e9e1063c57372
+"at-decorators@npm:4.1.3":
+  version: 4.1.3
+  resolution: "at-decorators@npm:4.1.3"
+  checksum: 10c0/b846dc4d77140e80669c362caf381cef0e4d766371e9d62bdf8e0d83dde374a86a0b6958d164bcd72b40e28ab236a209d5678bbc814cfbc878519f8d09bf794d
   languageName: node
   linkType: hard
 
@@ -14205,7 +14205,7 @@ __metadata:
     "@willbooster/shared-lib": "npm:5.2.7"
     "@willbooster/shared-lib-react": "npm:3.2.15"
     "@willbooster/wb": "npm:8.0.18"
-    at-decorators: "npm:3.0.3"
+    at-decorators: "npm:4.1.3"
     babel-plugin-react-compiler: "npm:19.0.0-beta-201e55d-20241215"
     build-ts: "npm:13.1.9"
     concurrently: "npm:9.1.2"
