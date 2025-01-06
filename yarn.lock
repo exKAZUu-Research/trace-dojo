@@ -4271,13 +4271,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@willbooster/shared-lib-react@npm:3.2.15":
-  version: 3.2.15
-  resolution: "@willbooster/shared-lib-react@npm:3.2.15"
+"@willbooster/shared-lib-react@npm:3.2.16":
+  version: 3.2.16
+  resolution: "@willbooster/shared-lib-react@npm:3.2.16"
   peerDependencies:
-    react: ~18.2.0 || ~18.3.0
-    react-dom: ~18.2.0 || ~18.3.0
-  checksum: 10c0/f3e154fb8404b037f98bdab117af3a538a2439f76d51d34db384476a7a64d8eb95573fa33050a3ae252afcc273bd5050d88145444d6d15f628aac32ffd0db6c1
+    react: ~18.2.0 || ~18.3.0 || ~19.0.0
+    react-dom: ~18.2.0 || ~18.3.0 || ~19.0.0
+  checksum: 10c0/80968d750c220341ca6d520be012af7d25f8e90105608392600b650339e17f6c7940dffc64a682d551e22adc24fc660e113cc74eae091cef24d8e66aa2d9d993
   languageName: node
   linkType: hard
 
@@ -4288,9 +4288,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@willbooster/wb@npm:8.0.18":
-  version: 8.0.18
-  resolution: "@willbooster/wb@npm:8.0.18"
+"@willbooster/wb@npm:8.0.19":
+  version: 8.0.19
+  resolution: "@willbooster/wb@npm:8.0.19"
   dependencies:
     chalk: "npm:5.4.1"
     dotenv: "npm:16.4.7"
@@ -4301,7 +4301,7 @@ __metadata:
     yargs: "npm:17.7.2"
   bin:
     wb: bin/index.js
-  checksum: 10c0/2c88628ba667c0a9bb25b71291a0cc2aebb26b8b6d17d55e2550f0953ef61b01bf5cca43c6d05ed57b7ca7ef4e786aae02b11d713ca7235f3404f5db0d6482a9
+  checksum: 10c0/728db996eb4834d1f49ea23f11ed23467a95fc191e1b5584217e8c494a74aa1db858d7daffab6d72a23ee6cbd6e5423d789e8c9b3b4195ee028b55f965379371
   languageName: node
   linkType: hard
 
@@ -4706,10 +4706,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"at-decorators@npm:3.0.3":
-  version: 3.0.3
-  resolution: "at-decorators@npm:3.0.3"
-  checksum: 10c0/2091dd1dbc2dde333915f2c3de1b68ced7cc9515c1e027f0d774c01256a8acce83509b69594e0e09b8b1b29ca7312a250eb6d586ab17cbb8bb5e9e1063c57372
+"at-decorators@npm:4.1.3":
+  version: 4.1.3
+  resolution: "at-decorators@npm:4.1.3"
+  checksum: 10c0/b846dc4d77140e80669c362caf381cef0e4d766371e9d62bdf8e0d83dde374a86a0b6958d164bcd72b40e28ab236a209d5678bbc814cfbc878519f8d09bf794d
   languageName: node
   linkType: hard
 
@@ -4813,12 +4813,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"babel-plugin-react-compiler@npm:19.0.0-beta-201e55d-20241215":
-  version: 19.0.0-beta-201e55d-20241215
-  resolution: "babel-plugin-react-compiler@npm:19.0.0-beta-201e55d-20241215"
+"babel-plugin-react-compiler@npm:19.0.0-beta-63e3235-20250105":
+  version: 19.0.0-beta-63e3235-20250105
+  resolution: "babel-plugin-react-compiler@npm:19.0.0-beta-63e3235-20250105"
   dependencies:
     "@babel/types": "npm:^7.19.0"
-  checksum: 10c0/bf9894c7e58d4df1f0e646d57cd81a99168b9e3b02ebfcdd918b2933ec8a08d53b9f0f1a6873f6d6adbf03f8119a15b8e808bb6040783328e37c175529cd2ffa
+  checksum: 10c0/83a32adc51488b3ed8d5c0ff94ed00b4f3f0058ef8a1ab9008fb2ba80da9cbeb357ee2c05a3d42f6582de7f92d75319f1d9ef66791b4e02ba7ce969ffc668693
   languageName: node
   linkType: hard
 
@@ -14203,10 +14203,10 @@ __metadata:
     "@willbooster/eslint-config-next": "npm:1.2.1"
     "@willbooster/prettier-config": "npm:9.1.3"
     "@willbooster/shared-lib": "npm:5.2.7"
-    "@willbooster/shared-lib-react": "npm:3.2.15"
-    "@willbooster/wb": "npm:8.0.18"
-    at-decorators: "npm:3.0.3"
-    babel-plugin-react-compiler: "npm:19.0.0-beta-201e55d-20241215"
+    "@willbooster/shared-lib-react": "npm:3.2.16"
+    "@willbooster/wb": "npm:8.0.19"
+    at-decorators: "npm:4.1.3"
+    babel-plugin-react-compiler: "npm:19.0.0-beta-63e3235-20250105"
     build-ts: "npm:13.1.9"
     concurrently: "npm:9.1.2"
     conventional-changelog-conventionalcommits: "npm:8.0.0"
@@ -14257,7 +14257,7 @@ __metadata:
     use-context-selector: "npm:2.0.0"
     use-immer: "npm:0.11.0"
     usehooks-ts: "npm:3.1.0"
-    uuid: "npm:11.0.3"
+    uuid: "npm:11.0.4"
     vitest: "npm:2.1.8"
     wait-on: "npm:8.0.1"
     zod: "npm:3.24.1"
@@ -14794,12 +14794,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"uuid@npm:11.0.3":
-  version: 11.0.3
-  resolution: "uuid@npm:11.0.3"
+"uuid@npm:11.0.4":
+  version: 11.0.4
+  resolution: "uuid@npm:11.0.4"
   bin:
     uuid: dist/esm/bin/uuid
-  checksum: 10c0/cee762fc76d949a2ff9205770334699e0043d52bb766472593a25f150077c9deed821230251ea3d6ab3943a5ea137d2826678797f1d5f6754c7ce5ce27e9f7a6
+  checksum: 10c0/3c13591c4dedaa3741f925e284df5974e3d6e0b1cb0f6f75f98c36f9c01d2a414350364fd067613ef600a21c6973dab0506530d4f499ff878f32a06f84569ead
   languageName: node
   linkType: hard
 

@@ -56,7 +56,7 @@ async function upsertUserToPrisma(id: string): Promise<void> {
 }
 
 const memoizeForEmails = memoizeFactory({
-  maxCachedArgsSize: Number.POSITIVE_INFINITY,
+  maxCacheSizePerTarget: Number.POSITIVE_INFINITY,
   cacheDuration: 60 * 60 * 1000,
 });
 
