@@ -5892,14 +5892,15 @@ public class MyTurtle {
 // ------- turtle/ZigZagTurtle.java ここから -------
 package turtle;
 public class ZigZagTurtle extends MyTurtle {
-  @Override protected void forward() { 
-  	this.t.右を向く(); //step
-    this.t.前に進む(); //step
-	this.t.左を向く(); //step
-    this.t.前に進む(); //step
-	this.t.左を向く(); //step
-    this.t.前に進む(); //step
-	this.t.右を向く(); //step	
+  @Override 
+  protected void forward() { 
+		this.t.右を向く(); //step
+		this.t.前に進む(); //step
+		this.t.左を向く(); //step
+		this.t.前に進む(); //step
+		this.t.左を向く(); //step
+		this.t.前に進む(); //step
+		this.t.右を向く(); //step	
   }
 }
 // ------- turtle/ZigZagTurtle.java ここまで -------
