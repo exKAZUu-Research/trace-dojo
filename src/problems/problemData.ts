@@ -5915,11 +5915,11 @@ import turtle.*;
 public class Main {
   public static void main(String[] a) {
     MyTurtle[] t = { 
-      new MyTurtle(0,0),
-      new TeleportTurtle(3,1)
+      new MyTurtle(0,0), // caller
+      new TeleportTurtle(3,1) // caller
     }
-    t[0].move(1,3);
-    t[1].move(6,6);
+    t[0].move(1,3); // caller
+    t[1].move(6,6); // caller
   }
 }
 // -------------- Main.java ここまで --------------
@@ -6018,7 +6018,52 @@ class CurveTurtle extends MyTurtle {
     instrumented: `
 `,
     java: `
-`,
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle t = new MyTurtle(); // caller
+    t.operate(0); // caller
+    t.operate("left"); // caller
+    t.operate(2); // caller
+    t.operate("down"); // caller
+    t.operate("right"); // caller
+    t.operate(2); // caller
+    t.operate("0"); // caller
+  }
+}
+class MyTurtle {
+  Turtle t = new Turtle(3,3); // step
+  void operate(int n) {
+    if(n==0){
+      this.t.前に進む(); // step
+    }else if(n==1){
+      this.t.右を向く(); // step
+      this.t.前に進む(); // step
+      this.t.左を向く(); // step
+    }else if(n==2){
+      this.t.後に戻る(); // step
+    }else{
+      this.t.左を向く(); // step
+      this.t.前に進む(); // step
+      this.t.右を向く(); // step
+    }
+  }
+  void operate(string s){
+    if(s.equals("up")){
+      this.t.前に進む(); // step
+    }else if(s.equals("right")){
+      this.t.右を向く(); // step
+      this.t.前に進む(); // step
+      this.t.左を向く(); // step
+    }else if(s.equals("down")){
+      this.t.後に戻る(); // step
+    }else{
+      this.t.左を向く(); // step
+      this.t.前に進む(); // step
+      this.t.右を向く(); // step
+    }
+  }
+}
+    `,
   },
 
   overload3: {
