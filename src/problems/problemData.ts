@@ -6112,6 +6112,37 @@ class MaxTurtle extends Max {
     instrumented: `
 `,
     java: `
+public class Main {
+  public static void main(String[] a) {
+    MyTurtle t = new MyTurtle(5,1) // caller
+    t.move(2); // caller
+    t.move(1,3); // caller
+    t.move(-2); // caller
+    t.move(3,3); // caller
+    t.move(-1); // caller
+    t.move(2); // caller
+    t.move(6,6); // caller
+    t.move(0,6); // caller
+  }
+}
+public class MyTurtle {
+  int x,y;
+  private Turtle t;
+  MyTurtle(int x,int y){
+    this.t = new Turtle(x,y); // step
+    this.x = x; // step
+    this.y = y; // step
+  }
+  public void move(int y) {
+    while(y>0)y--,this.t.前に進む(); // step
+    while(y<0)y++,this.t.後に戻る(); // step
+  }
+  public void move(int x,int y) {
+    this.t = new Turtle(x,y); // step
+    this.x = x; // step
+    this.y = y; // step
+  }
+}
 `,
   },
 
