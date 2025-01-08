@@ -5907,6 +5907,13 @@ public class ZigZagTurtle extends MyTurtle {
 `,
   },
 
+  package3: {
+    instrumented: `
+`,
+    java: `
+`,
+  },
+
   overload1: {
     instrumented: `
 function main() {
@@ -5964,6 +5971,28 @@ class CurveTurtle extends MyTurtle {
 }
     `,
   },
+
+  overload2: {
+    instrumented: `
+`,
+    java: `
+`,
+  },
+
+  overload3: {
+    instrumented: `
+`,
+    java: `
+`,
+  },
+
+  overload4: {
+    instrumented: `
+`,
+    java: `
+`,
+  },
+
   overloadAndOverride1: {
     instrumented: `
 function main() {
