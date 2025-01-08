@@ -6049,17 +6049,13 @@ class MyTurtle {
   }
   void operate(string s){
     if(s.equals("up")){
-      this.t.前に進む(); // step
+      operate(0); //caller
     }else if(s.equals("right")){
-      this.t.右を向く(); // step
-      this.t.前に進む(); // step
-      this.t.左を向く(); // step
+      operate(1); //caller
     }else if(s.equals("down")){
-      this.t.後に戻る(); // step
+      operate(2); //caller
     }else{
-      this.t.左を向く(); // step
-      this.t.前に進む(); // step
-      this.t.右を向く(); // step
+      operate(3); //caller
     }
   }
 }
@@ -6070,7 +6066,46 @@ class MyTurtle {
     instrumented: `
 `,
     java: `
-`,
+public class Main {
+  public static void main(String[] args) {
+    MaxTurtle t = new MaxTurtle(); // caller
+    t.draw(); // caller
+  }
+}
+class Max {
+  int max(int a){return a;}
+  int max(int a,int b){
+    if(a>b)return a;
+    else return b;
+  }
+  int max(int a,int b,int c){
+    if(a>=b&&a>=c)return a;
+    else if(b>=c)return b;
+    else return c;
+  }
+}
+class MaxTurtle extends Max {
+  Turtle t = new Turtle(); // step
+  void drawLine(int steps) {
+    for (int i = 0; i < steps; i++) // step
+      this.t.前に進む(); // step
+  }
+  void draw() {
+    int n = max(2,3); // step
+    drawLine(n); // caller
+    this.t.右を向く // step
+    n = max(4); // step
+    drawLine(n); // caller
+    this.t.右を向く // step
+    n = max(2,2); // step
+    drawLine(n); // caller
+    this.t.右を向く // step
+    n = max(4,3,1); // step
+    drawLine(n); // caller
+    this.t.右を向く // step
+  }
+}
+    `,
   },
 
   overload4: {
