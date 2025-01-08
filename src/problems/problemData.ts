@@ -131,7 +131,7 @@ export const problemIdToName = {
   withEncapsulation5: 'カプセル化あり(5)',
   withEncapsulation6: 'カプセル化あり(6)',
   withEncapsulation7: 'カプセル化あり(7)',
-  // 初級プログラミングⅡ 第3回
+  // 初級プログラミングⅡ 第4回
   staticMethod1: '静的メソッド(1)',
   staticMethod2: '静的メソッド(2)',
   staticMethod3: '静的メソッド(3)',
@@ -142,7 +142,6 @@ export const problemIdToName = {
   staticField4: '静的フィールド(4)',
   staticField5: '静的フィールド(5)',
   staticField6: '静的フィールド(6)',
-  // 初級プログラミングⅡ 第4回
   // 初級プログラミングⅡ 第5回
   inheritance1: '継承(1)',
   inheritance2: '継承(2)',
@@ -156,7 +155,12 @@ export const problemIdToName = {
   polymorphism3: 'ポリモルフィズム(3)',
   // 初級プログラミングⅡ 第6回
   package1: 'パッケージ(1)',
+  package2: 'パッケージ(2)',
+  package3: 'パッケージ(3)',
   overload1: 'オーバーロード(1)',
+  overload2: 'オーバーロード(2)',
+  overload3: 'オーバーロード(3)',
+  overload4: 'オーバーロード(4)',
   overloadAndOverride1: 'オーバーロードとオーバーライド(1)',
   // 初級プログラミングⅡ 第7回
   // 初級プログラミングⅡ 第8回
@@ -277,7 +281,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
       'polymorphism3',
     ],
     // 第6回
-    ['package1', 'overload1', 'overloadAndOverride1'],
+    ['package1', 'package2', 'package3', 'overload1', 'overload2', 'overload3', 'overload4', 'overloadAndOverride1'],
     // 第7回
     ['oop1'],
     // 第8回
@@ -5856,6 +5860,52 @@ public class FastTurtle extends MyTurtle {
 // ------- turtle/FastTurtle.java ここまで -------
 `,
   },
+
+  package2: {
+    instrumented: `
+`,
+    java: `
+// -------------- Main.java ここから --------------
+import turtle.FastTurtle;
+public class Main {
+  public static void main(String[] a) {
+    ZigZagTurtle z = new ZigZagTurtle(); // caller
+    z.drawLine(); // caller
+  }
+}
+// -------------- Main.java ここまで --------------
+
+// -------- turtle/MyTurtle.java ここから --------
+package turtle;
+public class MyTurtle {
+  private Turtle t = new Turtle(); // step
+  public void draw() {
+    for (int i = 0; i < 3; i++) // step
+      this.forward(); // caller
+  }
+  protected void forward() { 
+  	this.t.前に進む(); //step
+  }
+}
+// -------- turtle/MyTurtle.java ここまで --------
+
+// ------- turtle/ZigZagTurtle.java ここから -------
+package turtle;
+public class ZigZagTurtle extends MyTurtle {
+  @Override protected void forward() { 
+  	this.t.右を向く(); //step
+    this.t.前に進む(); //step
+	this.t.左を向く(); //step
+    this.t.前に進む(); //step
+	this.t.左を向く(); //step
+    this.t.前に進む(); //step
+	this.t.右を向く(); //step	
+  }
+}
+// ------- turtle/ZigZagTurtle.java ここまで -------
+`,
+  },
+
   overload1: {
     instrumented: `
 function main() {
