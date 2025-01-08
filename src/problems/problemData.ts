@@ -1,174 +1,15 @@
-export const courseIds = ['tuBeginner1', 'tuBeginner2', 'test'] as const;
-export type CourseId = (typeof courseIds)[number];
-
-export const problemIds = [
-  'straight',
-  'straight2',
-  'stepBack',
-  'stepBack2',
-  'turnRight',
-  'turnRight2',
-  'turnLeftAndRight',
-  'turnLeftAndRight2',
-  'turnLeftAndRight3',
-  'turnLeftAndRight4',
-  'square1',
-  'square2',
-  'square3',
-  'square4',
-  'variable',
-  'variable2',
-  'variable3',
-  'variable4',
-  'variable5',
-  'variable6',
-  'variable7',
-  'variable8',
-  'variable9',
-  'variable10',
-  'while1',
-  'while2',
-  'while3',
-  'while4',
-  'while5',
-  'for1',
-  'for2',
-  'for3',
-  'for4',
-  'for5',
-  'for6',
-  'for7',
-  'doubleLoop1',
-  'doubleLoop2',
-  'doubleLoop3',
-  'doubleLoop4',
-  'doubleLoop5',
-  'if1',
-  'if2',
-  'if3',
-  'if4',
-  'if5',
-  'elseIf1',
-  'elseIf2',
-  'elseIf3',
-  'elseIf4',
-  'elseIf5',
-  'switch1',
-  'switch2',
-  'switch3',
-  'switch4',
-  'switch5',
-  'break1',
-  'break2',
-  'break3',
-  'break4',
-  'break5',
-  'continue1',
-  'continue2',
-  'continue3',
-  'continue4',
-  'continue5',
-  'method1',
-  'method2',
-  'method3',
-  'method4',
-  'method5',
-  'return1',
-  'return2',
-  'return3',
-  'return4',
-  'return5',
-  'array1',
-  'array2',
-  'array3',
-  'array4',
-  'array5',
-  'string1',
-  'string2',
-  'string3',
-  'string4',
-  'string5',
-  // 初級プログラミングⅡ 第1回
-  'multiObject1',
-  'multiObject2',
-  'multiObject3',
-  'multiObject4',
-  'multiObject5',
-  'multiObject6',
-  'garbageCollection1',
-  'garbageCollection2',
-  'garbageCollection3',
-  'garbageCollection4',
-  'garbageCollection5',
-  'garbageCollection6',
-  // 初級プログラミングⅡ 第2回
-  'makeClass1',
-  'makeClass2',
-  'makeClass3',
-  'makeClass4',
-  'makeClass5',
-  'makeClass6',
-  'constructor1',
-  'constructor2',
-  'constructor3',
-  'constructor4',
-  // 初級プログラミングⅡ 第3回
-  'encapsulation',
-  'withoutEncapsulation',
-  'withEncapsulation',
-  'withoutEncapsulation2',
-  'withEncapsulation2',
-  'withEncapsulation3',
-  'withEncapsulation4',
-  'withEncapsulation5',
-  'withEncapsulation6',
-  'withEncapsulation7',
-  // 初級プログラミングⅡ 第4回
-  'staticMethod1',
-  'staticMethod2',
-  'staticMethod3',
-  'staticMethod4',
-  'staticField1',
-  'staticField2',
-  'staticField3',
-  'staticField4',
-  'staticField5',
-  'staticField6',
-  // 初級プログラミングⅡ 第5回
-  'inheritance1',
-  'inheritance2',
-  'inheritance3',
-  'inheritance4',
-  'override1',
-  'override2',
-  'override3',
-  'polymorphism1',
-  'polymorphism2',
-  'polymorphism3',
-  // 初級プログラミングⅡ 第6回
-  // 初級プログラミングⅡ 第7回
-  // 初級プログラミングⅡ 第8回
-  'oop1',
-  'oop2',
-  'test1',
-  'test2',
-  'test3',
-  'test4',
-  'test5',
-  'test9',
-] as const;
-export type ProblemId = (typeof problemIds)[number];
-
 export const languageIds = ['instrumented', 'java'] as const;
 export type LanguageId = (typeof languageIds)[number];
 
-export const courseIdToName: Record<CourseId, string> = {
+export const courseIdToName = {
   tuBeginner1: '初級プログラミングⅠ',
   tuBeginner2: '初級プログラミングⅡ',
   test: '動作確認用',
-};
+} as const;
+export type CourseId = keyof typeof courseIdToName;
+export const courseIds = Object.keys(courseIdToName) as CourseId[];
 
-export const problemIdToName: Record<ProblemId, string> = {
+export const problemIdToName = {
   straight: '線を描こう(1)',
   straight2: '線を描こう(2)',
   stepBack: '線を描こう(3)',
@@ -314,6 +155,9 @@ export const problemIdToName: Record<ProblemId, string> = {
   polymorphism2: 'ポリモルフィズム(2)',
   polymorphism3: 'ポリモルフィズム(3)',
   // 初級プログラミングⅡ 第6回
+  package1: 'パッケージ(1)',
+  overload1: 'オーバーロード(1)',
+  overloadAndOverride1: 'オーバーロードとオーバーライド(1)',
   // 初級プログラミングⅡ 第7回
   // 初級プログラミングⅡ 第8回
   oop1: 'オブジェクト指向プログラミング(1)',
@@ -324,7 +168,8 @@ export const problemIdToName: Record<ProblemId, string> = {
   test4: 'ステップ実行のテスト用問題(4)',
   test5: 'チェックポイント取得のテスト用問題',
   test9: 'ステップ実行のテスト用問題(9)',
-};
+} as const;
+export type ProblemId = keyof typeof problemIdToName;
 
 export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]> = {
   tuBeginner1: [
@@ -432,7 +277,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
       'polymorphism3',
     ],
     // 第6回
-    ['oop1'],
+    ['package1', 'overload1', 'overloadAndOverride1'],
     // 第7回
     ['oop1'],
     // 第8回
@@ -5951,7 +5796,199 @@ class CurveTurtle extends MyTurtle {
   },
 
   // ----------- 初級プログラミングⅡ 第5回 ここまで -----------
+  package1: {
+    instrumented: `
+function main() {
+  const fast = call(FastTurtle)();
+  call(fast.drawLine.bind(fast))();
+}
 
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+  drawLine() {
+    for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
+      this.t.前に進む(); // step
+    }
+  }
+  length() { return 2; }
+}
+
+class FastTurtle extends MyTurtle {
+  length() { return 3; }
+}
+
+main();
+`,
+    java: `
+// トレース道場では、複数ファイルの内容をまとめて表示する。
+
+// -------------- Main.java ここから --------------
+import turtle.FastTurtle;
+public class Main {
+  public static void main(String[] a) {
+    FastTurtle fast = new FastTurtle(); // caller
+    fast.drawLine(); // caller
+  }
+}
+// -------------- Main.java ここまで --------------
+
+// -------- turtle/MyTurtle.java ここから --------
+package turtle;
+public class MyTurtle {
+  private Turtle t = new Turtle(); // step
+  public void drawLine() {
+    for (int i = 0; i < this.length(); i++) // step
+      this.t.前に進む(); // step
+  }
+  protected int length() { return 2; }
+}
+// -------- turtle/MyTurtle.java ここまで --------
+
+// ------- turtle/FastTurtle.java ここから -------
+package turtle;
+public class FastTurtle extends MyTurtle {
+  @Override protected int length() { return 3; }
+}
+// ------- turtle/FastTurtle.java ここまで -------
+`,
+  },
+  overload1: {
+    instrumented: `
+function main() {
+  const t = call(CurveTurtle)();
+  call(t.drawCurve.bind(t))();
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+  drawLine(steps) {
+    for (s.set('i', 0); s.get('i') < steps; s.set('i', s.get('i') + 1)) { // step
+      this.t.前に進む(); // step
+    }
+  }
+  drawLine2() {
+    call(this.drawLine.bind(this), 'steps')(2);
+  }
+}
+
+class CurveTurtle extends MyTurtle {
+  drawCurve() {
+    call(this.drawLine.bind(this), 'steps')(3);
+    this.t.右を向く(); // step
+    call(this.drawLine2.bind(this))();
+  }
+}
+
+main();
+    `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    CurveTurtle t = new CurveTurtle(); // caller
+    t.drawCurve(); // caller
+  }
+}
+class MyTurtle {
+  Turtle t = new Turtle(); // step
+  void drawLine(int steps) {
+    for (int i = 0; i < steps; i++) // step
+      this.t.前に進む(); // step
+  }
+  void drawLine() {
+    this.drawLine(2); // caller
+  }
+}
+class CurveTurtle extends MyTurtle {
+  void drawCurve() {
+    this.drawLine(3); // caller
+    this.t.右を向く(); // step
+    this.drawLine(); // caller
+  }
+}
+    `,
+  },
+  overloadAndOverride1: {
+    instrumented: `
+function main() {
+  const m2 = call(MyTurtle2)();
+  call(m2.drawLine2.bind(m2))();
+  const m3 = call(MyTurtle3)();
+  call(m3.drawLine2.bind(m3))();
+  const ms = [m2, m3];
+  for (const m of ms) {
+    m.t.右を向く(); // step
+    call(m.drawLine2.bind(m))();
+  }
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+  drawLine(steps) {
+    for (s.set('i', 0); s.get('i') < steps; s.set('i', s.get('i') + 1)) { // step
+      this.t.前に進む(); // step
+    }
+  }
+  drawLine2() {
+    call(this.drawLine.bind(this), 'steps')(2);
+  }
+}
+
+class MyTurtle2 extends MyTurtle {
+  drawLine2() {
+    call(this.drawLine.bind(this), 'steps')(4);
+  }
+}
+
+class MyTurtle3 extends MyTurtle {
+  drawLine2() {
+    call(this.drawLine.bind(this), 'steps')(3);
+  }
+}
+
+main();
+    `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m2 = new MyTurtle2(); // caller
+    m2.drawLine(); // caller
+    MyTurtle m3 = new MyTurtle3(); // caller
+    m3.drawLine(); // caller
+    MyTurtle[] ms = { m2, m3 };
+    for (MyTurtle m : ms) {
+      m.t.右を向く(); // step
+      m.drawLine(); // caller
+    }
+  }
+}
+class MyTurtle {
+  Turtle t = new Turtle(); // step
+  void drawLine(int steps) {
+    for (int i = 0; i < steps; i++) // step
+      this.t.前に進む(); // step
+  }
+  void drawLine() {
+    this.drawLine(2); // caller
+  }
+}
+class MyTurtle2 extends MyTurtle {
+  @Override void drawLine() {
+    this.drawLine(4); // caller
+  }
+}
+class MyTurtle3 extends MyTurtle {
+  @Override void drawLine() {
+    this.drawLine(3); // caller
+  }
+}
+    `,
+  },
   // ----------- 初級プログラミングⅡ 第6回 ここから -----------
   // ----------- 初級プログラミングⅡ 第6回 ここまで -----------
 
