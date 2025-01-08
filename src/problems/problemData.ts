@@ -5866,7 +5866,7 @@ public class FastTurtle extends MyTurtle {
 `,
     java: `
 // -------------- Main.java ここから --------------
-import turtle.FastTurtle;
+import turtle.ZigZagTurtle;
 public class Main {
   public static void main(String[] a) {
     ZigZagTurtle z = new ZigZagTurtle(); // caller
@@ -5892,8 +5892,7 @@ public class MyTurtle {
 // ------- turtle/ZigZagTurtle.java ここから -------
 package turtle;
 public class ZigZagTurtle extends MyTurtle {
-  @Override 
-  protected void forward() { 
+  @Override protected void forward() { 
 		this.t.右を向く(); //step
 		this.t.前に進む(); //step
 		this.t.左を向く(); //step
@@ -5911,6 +5910,49 @@ public class ZigZagTurtle extends MyTurtle {
     instrumented: `
 `,
     java: `
+// -------------- Main.java ここから --------------
+import turtle.*;
+public class Main {
+  public static void main(String[] a) {
+    MyTurtle[] t = { 
+      new MyTurtle(0,0),
+      new TeleportTurtle(3,1)
+    }
+    t[0].move(1,3);
+    t[1].move(6,6);
+  }
+}
+// -------------- Main.java ここまで --------------
+
+// -------- turtle/MyTurtle.java ここから --------
+package turtle;
+public class MyTurtle {
+  int x,y;
+  private Turtle t;
+  MyTurtle(int x,int y){
+    this.t = new Turtle(x,y); // step
+    this.x = x; // step
+    this.y = y; // step
+  }
+  public void move(int x,int y) {
+    while(y<this.y)y++,this.t.前に進む(); // step
+    this.t.右を向く(); // step
+    while(x<this.x)x++,this.t.前に進む(); // step
+    this.t.左を向く(); // step
+  }
+}
+// -------- turtle/MyTurtle.java ここまで --------
+
+// ------- turtle/TeleportTurtle.java ここから -------
+package turtle;
+public class TeleportTurtle extends MyTurtle {
+  @Override public void move(int x,int y) {
+    this.t = new Turtle(x,y); // step
+    this.x = x; // step
+    this.y = y; // step
+  }
+}
+// ------- turtle/TeleportTurtle.java ここまで -------
 `,
   },
 
