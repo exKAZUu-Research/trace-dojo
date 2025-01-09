@@ -6232,40 +6232,91 @@ class MyTurtle {
 }
     `,
   },
-
   overload4: {
     instrumented: `
+function main() {
+  const t = call(MyTurtle)();
+  call(t.move.bind(t), 'dy')(2);
+  call(t.move2.bind(t), 'dx', 'dy')(1, 3);
+  call(t.move.bind(t), 'dy')(-3);
+  call(t.move2.bind(t), 'dx', 'dy')(-1, 0);
+  call(t.move2.bind(t), 'dx', 'dy')(4, 2);
+  call(t.move2.bind(t), 'dx', 'dy')(0, -4);
+}
+
+class MyTurtle {
+  constructor(x, y) {
+    this.t = new Turtle(x, y); // step
+  }
+
+  move(dy) {
+    while (s.get('dy') > 0) {
+      s.set('dy', s.get('dy') - 1); // step
+      this.t.前に進む(); // step
+    }
+    while (s.get('dy') < 0) {
+      s.set('dy', s.get('dy') + 1); // step
+      this.t.後に戻る(); // step
+    }
+  }
+
+  move2(dx, dy) {
+    call(this.move.bind(this), 'dy')(dy);
+    if (s.get('dx') != 0) {
+      this.t.右を向く(); // step
+      while (s.get('dx') > 0) {
+        s.set('dx', s.get('dx') - 1); // step
+        this.t.前に進む(); // step
+      }
+      while (s.get('dx') < 0) {
+        s.set('dx', s.get('dx') + 1); // step
+        this.t.後に戻る(); // step
+      }
+      this.t.左を向く(); // step
+    }
+  }
+}
+
+main();
 `,
     java: `
 public class Main {
   public static void main(String[] a) {
-    MyTurtle t = new MyTurtle(5,1) // caller
+    MyTurtle t = new MyTurtle(); // caller
     t.move(2); // caller
-    t.move(1,3); // caller
-    t.move(-2); // caller
-    t.move(3,3); // caller
-    t.move(-1); // caller
-    t.move(2); // caller
-    t.move(6,6); // caller
-    t.move(0,6); // caller
+    t.move(1, 3); // caller
+    t.move(-3); // caller
+    t.move(-1, 0); // caller
+    t.move(4, 2); // caller
+    t.move(0, -4); // caller
   }
 }
 public class MyTurtle {
-  int x,y;
-  private Turtle t;
-  MyTurtle(int x,int y){
-    this.t = new Turtle(x,y); // step
-    this.x = x; // step
-    this.y = y; // step
+  private Turtle t = new Turtle(0, 0); // step
+  public void move(int dy) {
+    while (dy > 0) {
+      dy--; // step
+      this.t.前に進む(); // step
+    }
+    while (dy < 0) {
+      dy++; // step
+      this.t.後に戻る(); // step
+    }
   }
-  public void move(int y) {
-    while(y>0)y--,this.t.前に進む(); // step
-    while(y<0)y++,this.t.後に戻る(); // step
-  }
-  public void move(int x,int y) {
-    this.t = new Turtle(x,y); // step
-    this.x = x; // step
-    this.y = y; // step
+  public void move(int dx, int dy) {
+    move(dy); // caller
+    if (dx != 0) {
+      this.t.右を向く(); // step
+      while (dx > 0) {
+        dx--; // step
+        this.t.前に進む(); // step
+      }
+      while (dx < 0) {
+        dx++; // step
+        this.t.後に戻る(); // step
+      }
+      this.t.左を向く(); // step
+    }
   }
 }
 `,
