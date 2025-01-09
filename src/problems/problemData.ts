@@ -6415,14 +6415,165 @@ class MyTurtle3 extends MyTurtle {
   },
   overloadAndOverride2: {
     instrumented: `
+function main() {
+  const m2 = call(MyTurtle2)();
+  call(m2.drawLine.bind(m2), 'steps')(2);
+  const m3 = call(MyTurtle3)();
+  call(m3.drawLine.bind(m3), 'steps')(1);
+  const ms = [m2, m3];
+  for (const m of ms) {
+    m.t.右を向く(); // step
+    call(m.drawLine2.bind(m))();
+  }
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+
+  drawLine(steps) {
+    for (s.set('i', 0); s.get('i') < steps; s.set('i', s.get('i') + 1)) { // step
+      this.t.前に進む(); // step
+    }
+  }
+
+  drawLine2() {
+    call(this.drawLine.bind(this), 'steps')(2);
+  }
+}
+
+class MyTurtle2 extends MyTurtle {
+  drawLine2() {
+    call(this.drawLine.bind(this), 'steps')(3);
+  }
+}
+
+class MyTurtle3 extends MyTurtle {
+  drawLine2() {
+    call(this.drawLine.bind(this), 'steps')(4);
+  }
+}
+
+main();
     `,
     java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m2 = new MyTurtle2(); // caller
+    m2.drawLine(2); // caller
+    MyTurtle m3 = new MyTurtle3(); // caller
+    m3.drawLine(1); // caller
+    MyTurtle[] ms = { m2, m3 };
+    for (MyTurtle m : ms) {
+      m.t.右を向く(); // step
+      m.drawLine(); // caller
+    }
+  }
+}
+class MyTurtle {
+  Turtle t = new Turtle(); // step
+  void drawLine(int steps) {
+    for (int i = 0; i < steps; i++) // step
+      this.t.前に進む(); // step
+  }
+  void drawLine() {
+    this.drawLine(2); // caller
+  }
+}
+class MyTurtle2 extends MyTurtle {
+  @Override void drawLine() {
+    this.drawLine(3); // caller
+  }
+}
+class MyTurtle3 extends MyTurtle {
+  @Override void drawLine() {
+    this.drawLine(4); // caller
+  }
+}
     `,
   },
   overloadAndOverride3: {
     instrumented: `
+function main() {
+  const m1 = call(MyTurtle)();
+  call(m1.drawLine.bind(m1), 'steps')(4);
+  const m2 = call(MyTurtle2)();
+  call(m2.drawLine.bind(m2), 'steps')(3);
+  const m3 = call(MyTurtle3)();
+  call(m3.drawLine.bind(m3), 'steps')(1);
+  const ms = [m1, m2, m3];
+  for (const m of ms) {
+    m.t.右を向く(); // step
+    call(m.drawLine2.bind(m))();
+  }
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+  drawLine(steps) {
+    for (s.set('i', 0); s.get('i') < steps; s.set('i', s.get('i') + 1)) { // step
+      this.t.前に進む(); // step
+    }
+  }
+  drawLine2() {
+    call(this.drawLine.bind(this), 'steps')(2);
+  }
+}
+
+class MyTurtle2 extends MyTurtle {
+  drawLine2() {
+    call(this.drawLine.bind(this), 'steps')(3);
+  }
+}
+
+class MyTurtle3 extends MyTurtle2 {
+  drawLine(steps) {
+    call(super.drawLine.bind(this), 'steps')(steps * 2);
+  }
+}
+
+main();
     `,
     java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m1 = new MyTurtle(); // caller
+    m1.drawLine(4); // caller
+    MyTurtle m2 = new MyTurtle2(); // caller
+    m2.drawLine(3); // caller
+    MyTurtle m3 = new MyTurtle3(); // caller
+    m3.drawLine(1); // caller
+    MyTurtle[] ms = { m1, m2, m3 };
+    for (MyTurtle m : ms) {
+      m.t.右を向く(); // step
+      m.drawLine(); // caller
+    }
+  }
+}
+class MyTurtle {
+  Turtle t = new Turtle(); // step
+  void drawLine(int steps) {
+    for (int i = 0; i < steps; i++) // step
+      this.t.前に進む(); // step
+  }
+  void drawLine() {
+    this.drawLine(2); // caller
+  }
+}
+class MyTurtle2 extends MyTurtle {
+  @Override void drawLine() {
+    this.drawLine(3); // caller
+  }
+}
+class MyTurtle3 extends MyTurtle2 {
+  @Override void drawLine(int steps) {
+    // MyTurtleクラスの "drawLine(int steps)" を呼ぶ。
+    super.drawLine(steps * 2); // caller
+  }
+}
     `,
   },
   // ----------- 初級プログラミングⅡ 第6回 ここまで -----------
