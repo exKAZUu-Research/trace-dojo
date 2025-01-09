@@ -162,6 +162,8 @@ export const problemIdToName = {
   overload3: 'オーバーロード(3)',
   overload4: 'オーバーロード(4)',
   overloadAndOverride1: 'オーバーロードとオーバーライド(1)',
+  overloadAndOverride2: 'オーバーロードとオーバーライド(2)',
+  overloadAndOverride3: 'オーバーロードとオーバーライド(3)',
   // 初級プログラミングⅡ 第7回
   // 初級プログラミングⅡ 第8回
   oop1: 'オブジェクト指向プログラミング(1)',
@@ -281,7 +283,18 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
       'polymorphism3',
     ],
     // 第6回
-    ['package1', 'package2', 'package3', 'overload1', 'overload2', 'overload3', 'overload4', 'overloadAndOverride1'],
+    [
+      'package1',
+      'package2',
+      'package3',
+      'overload1',
+      'overload2',
+      'overload3',
+      'overload4',
+      'overloadAndOverride1',
+      'overloadAndOverride2',
+      'overloadAndOverride3',
+    ],
     // 第7回
     ['oop1'],
     // 第8回
@@ -6321,7 +6334,6 @@ public class MyTurtle {
 }
 `,
   },
-
   overloadAndOverride1: {
     instrumented: `
 function main() {
@@ -6399,6 +6411,18 @@ class MyTurtle3 extends MyTurtle {
     this.drawLine(3); // caller
   }
 }
+    `,
+  },
+  overloadAndOverride2: {
+    instrumented: `
+    `,
+    java: `
+    `,
+  },
+  overloadAndOverride3: {
+    instrumented: `
+    `,
+    java: `
     `,
   },
   // ----------- 初級プログラミングⅡ 第6回 ここまで -----------
