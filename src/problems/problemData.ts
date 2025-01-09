@@ -131,7 +131,7 @@ export const problemIdToName = {
   withEncapsulation5: 'カプセル化あり(5)',
   withEncapsulation6: 'カプセル化あり(6)',
   withEncapsulation7: 'カプセル化あり(7)',
-  // 初級プログラミングⅡ 第3回
+  // 初級プログラミングⅡ 第4回
   staticMethod1: '静的メソッド(1)',
   staticMethod2: '静的メソッド(2)',
   staticMethod3: '静的メソッド(3)',
@@ -142,7 +142,6 @@ export const problemIdToName = {
   staticField4: '静的フィールド(4)',
   staticField5: '静的フィールド(5)',
   staticField6: '静的フィールド(6)',
-  // 初級プログラミングⅡ 第4回
   // 初級プログラミングⅡ 第5回
   inheritance1: '継承(1)',
   inheritance2: '継承(2)',
@@ -156,7 +155,12 @@ export const problemIdToName = {
   polymorphism3: 'ポリモルフィズム(3)',
   // 初級プログラミングⅡ 第6回
   package1: 'パッケージ(1)',
+  package2: 'パッケージ(2)',
+  package3: 'パッケージ(3)',
   overload1: 'オーバーロード(1)',
+  overload2: 'オーバーロード(2)',
+  overload3: 'オーバーロード(3)',
+  overload4: 'オーバーロード(4)',
   overloadAndOverride1: 'オーバーロードとオーバーライド(1)',
   // 初級プログラミングⅡ 第7回
   // 初級プログラミングⅡ 第8回
@@ -277,7 +281,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
       'polymorphism3',
     ],
     // 第6回
-    ['package1', 'overload1', 'overloadAndOverride1'],
+    ['package1', 'package2', 'package3', 'overload1', 'overload2', 'overload3', 'overload4', 'overloadAndOverride1'],
     // 第7回
     ['oop1'],
     // 第8回
@@ -3041,7 +3045,7 @@ public class Main {
     t1.右を向く(); // step
     t1.右を向く(); // step
 
-    for (int i = 0; i < 5; i++) { //step
+    for (int i = 0; i < 5; i++) { // step
       t1.前に進む(); // step
       t2.前に進む(); // step
       if (i % 2 == 0) {
@@ -3098,13 +3102,13 @@ public class Main {
     instrumented: `
 const ts = [null, null, null];
 for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) {
-  ts[s.get('i')] = new Turtle(1 + s.get('i') * 2, 0); //step
+  ts[s.get('i')] = new Turtle(1 + s.get('i') * 2, 0); // step
 }
 delete s.vars['i'];
 
 for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < ts.length; s.set('j', s.get('j') + 1)) {
-    N歩前に進める(ts[s.get('j')], s.get('j')); //step
+    N歩前に進める(ts[s.get('j')], s.get('j')); // step
     // call(N歩前に進める, 't', 'n')(ts[s.get('j')], s.get('j')); //caller
   }
 }
@@ -3121,13 +3125,13 @@ function N歩前に進める(t, n) {
 public class Main {
   public static void main(String[] args) {
     Turtle[] turtles = new Turtle[3];
-    for (int i = 0; i < turtles.length; i++) { //step
-      turtles[i] = new Turtle(1 + i * 2, 0); //step
+    for (int i = 0; i < turtles.length; i++) { // step
+      turtles[i] = new Turtle(1 + i * 2, 0); // step
     }
 
-    for (int i = 0; i < 3; i++) { //step
-      for (int j = 0; j < turtles.length; j++) { //step
-        N歩前に進める(turtles[j], j); //step
+    for (int i = 0; i < 3; i++) { // step
+      for (int j = 0; j < turtles.length; j++) { // step
+        N歩前に進める(turtles[j], j); // step
       }
     }
   }
@@ -4144,6 +4148,7 @@ function drawLine(t, speed) {
   for (s.set('i', 0); s.get('i') < speed; s.set('i', s.get('i') + 1)) { // step
     t.前に進む(); // step
   }
+  delete s.vars['i'];
 }
 `,
     java: `
@@ -4509,6 +4514,7 @@ class MyTurtle {
           break;
       }
     }
+    delete s.vars['i'];
   }
 }
 
@@ -4670,12 +4676,14 @@ function drawSquare(t, size) {
     call(drawLine, 't', 'n')(t, size - 1);
     t.右を向く(); // step
   }
+  delete s.vars['i'];
 }
 
 function drawLine(t, n) {
   for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) { // step
     t.前に進む(); // step
   }
+  delete s.vars['i'];
 }
     `,
     java: `
@@ -5345,6 +5353,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step // caller
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 
   length() {
@@ -5401,6 +5410,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 
   length() {
@@ -5470,6 +5480,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 
   length() {
@@ -5534,6 +5545,7 @@ function main() {
   for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) { // step
     call(ts[s.get('i')].drawLine.bind(ts[s.get('i')]))(); // caller
   }
+  delete s.vars['i'];
 }
 
 class MyTurtle {
@@ -5545,6 +5557,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 
   length() {
@@ -5606,6 +5619,7 @@ function main() {
   for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) { // step
     call(ts[s.get('i')].draw.bind(ts[s.get('i')]))();
   }
+  delete s.vars['i'];
 }
 
 class MyTurtle {
@@ -5617,6 +5631,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 
   length() {
@@ -5705,6 +5720,7 @@ function main() {
     ts[s.get('i')].t.右を向く(); // step
     call(ts[s.get('i')].draw.bind(ts[s.get('i')]))();
   }
+  delete s.vars['i'];
 }
 
 class MyTurtle {
@@ -5716,6 +5732,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 
   length() {
@@ -5813,6 +5830,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
   length() { return 2; }
 }
@@ -5856,6 +5874,166 @@ public class FastTurtle extends MyTurtle {
 // ------- turtle/FastTurtle.java ここまで -------
 `,
   },
+  package2: {
+    instrumented: `
+function main() {
+  const t = call(BoldLineTurtle)();
+  call(t.draw.bind(t))();
+}
+
+class LineTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+  draw() {
+    for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) { // step
+      call(this.forward.bind(this))();
+    }
+    delete s.vars['i'];
+  }
+  forward() {
+    this.t.前に進む(); // step
+  }
+}
+
+class BoldLineTurtle extends LineTurtle {
+  forward() {
+    this.t.右を向く(); // step
+    this.t.前に進む(); // step
+    this.t.左を向く(); // step
+    this.t.前に進む(); // step
+    this.t.左を向く(); // step
+    this.t.前に進む(); // step
+    this.t.右を向く(); // step
+  }
+}
+
+main();
+`,
+    java: `
+// トレース道場では、複数ファイルの内容をまとめて表示する。
+
+// -------------- Main.java ここから --------------
+import turtle.BoldLineTurtle;
+public class Main {
+  public static void main(String[] a) {
+    BoldLineTurtle t = new BoldLineTurtle(); // caller
+    t.draw(); // caller
+  }
+}
+// -------------- Main.java ここまで --------------
+
+// -------- turtle/LineTurtle.java ここから --------
+package turtle;
+public class LineTurtle {
+  private Turtle t = new Turtle(); // step
+  public void draw() {
+    for (int i = 0; i < 3; i++) // step
+      this.forward(); // caller
+  }
+  protected void forward() {
+  	this.t.前に進む(); // step
+  }
+}
+// -------- turtle/LineTurtle.java ここまで --------
+
+// ------- turtle/BoldLineTurtle.java ここから -------
+package turtle;
+public class BoldLineTurtle extends LineTurtle {
+  @Override protected void forward() {
+		this.t.右を向く(); // step
+		this.t.前に進む(); // step
+		this.t.左を向く(); // step
+		this.t.前に進む(); // step
+		this.t.左を向く(); // step
+		this.t.前に進む(); // step
+		this.t.右を向く(); // step
+  }
+}
+// ------- turtle/BoldLineTurtle.java ここまで -------
+`,
+  },
+  package3: {
+    instrumented: `
+function main() {
+  const ts = [
+    call(LineTurtle, 'x', 'y')(0, 0),
+    call(LongLineTurtle, 'x', 'y')(3, 0)
+  ];
+  for (const t of ts) {
+    call(t.draw.bind(t))();
+  }
+}
+
+class LineTurtle {
+  constructor(x, y) {
+    this.t = new Turtle(x, y); // step
+  }
+  draw() {
+    for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) { // step
+      call(this.forward.bind(this))();
+    }
+    delete s.vars['i'];
+  }
+  forward() {
+    this.t.前に進む(); // step
+  }
+}
+
+class LongLineTurtle extends LineTurtle {
+  forward() {
+    this.t.前に進む(); // step
+    this.t.前に進む(); // step
+  }
+}
+
+main();
+`,
+    java: `
+// トレース道場では、複数ファイルの内容をまとめて表示する。
+
+// -------------- Main.java ここから --------------
+import turtle.*;
+public class Main {
+  public static void main(String[] a) {
+    LineTurtle[] ts = {
+      new LineTurtle(0, 0), // caller
+      new LongLineTurtle(3, 0) // caller
+    };
+    for (LineTurtle t : ts)
+      t.draw(); // caller
+  }
+}
+// -------------- Main.java ここまで --------------
+
+// -------- turtle/LineTurtle.java ここから --------
+package turtle;
+public class LineTurtle {
+  protected Turtle t;
+  public LineTurtle(int x, int y) {
+    this.t = new Turtle(x, y); // step
+  }
+  public void draw() {
+    for (int i = 0; i < 3; i++) // step
+      this.forward(); // caller
+  }
+  protected void forward() {
+  	this.t.前に進む(); // step
+  }
+}
+// -------- turtle/LineTurtle.java ここまで --------
+
+// ------- turtle/LongLineTurtle.java ここから -------
+package turtle;
+public class LongLineTurtle extends LineTurtle {
+  @Override protected void forward() {
+		this.t.前に進む(); // step
+		this.t.前に進む(); // step
+  }
+}
+// ------- turtle/LongLineTurtle.java ここまで -------
+`,
+  },
   overload1: {
     instrumented: `
 function main() {
@@ -5871,6 +6049,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < steps; s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
   drawLine2() {
     call(this.drawLine.bind(this), 'steps')(2);
@@ -5913,6 +6092,236 @@ class CurveTurtle extends MyTurtle {
 }
     `,
   },
+  overload2: {
+    instrumented: `
+function main() {
+  const t = call(MyTurtle, 'x', 'y')(0, 0);
+  call(t.operate.bind(t), 'n')(0);
+  call(t.operate2.bind(t), 's')("right");
+  call(t.operate2.bind(t), 's')("up");
+  call(t.operate.bind(t), 'n')(1);
+  call(t.operate.bind(t), 'n')(0);
+}
+
+class MyTurtle {
+  constructor(x, y) {
+    this.t = new Turtle(x, y); // step
+  }
+
+  operate(n) {
+    if (n === 0) {
+      this.t.前に進む(); // step
+    } else if (n === 1) {
+      this.t.右を向く(); // step
+      this.t.前に進む(); // step
+      this.t.左を向く(); // step
+    }
+  }
+
+  operate2(s) {
+    if (s === "up") {
+      call(this.operate.bind(this), 'n')(0);
+    } else if (s === "right") {
+      call(this.operate.bind(this), 'n')(1);
+    }
+  }
+}
+
+main();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle t = new MyTurtle(); // caller
+    t.operate(0); // caller
+    t.operate("right"); // caller
+    t.operate("up"); // caller
+    t.operate(1); // caller
+    t.operate(0); // caller
+  }
+}
+class MyTurtle {
+  private Turtle t = new Turtle(0, 0); // step
+  public void operate(int n) {
+    if (n == 0) {
+      this.t.前に進む(); // step
+    } else if (n == 1) {
+      this.t.右を向く(); // step
+      this.t.前に進む(); // step
+      this.t.左を向く(); // step
+    }
+  }
+  public void operate(String s) {
+    if (s.equals("up")) {
+      operate(0); // caller
+    } else if (s.equals("right")) {
+      operate(1); // caller
+    }
+  }
+}
+    `,
+  },
+  overload3: {
+    instrumented: `
+function main() {
+  const t = call(MyTurtle)();
+  call(t.drawLine.bind(t), 'steps')(max(2, 3));
+  t.t.右を向く(); // step
+  call(t.drawLine.bind(t), 'steps')(max3(2, 3, 4));
+  t.t.右を向く(); // step
+  call(t.drawLine.bind(t), 'steps')(max(2, 1));
+  t.t.右を向く(); // step
+  call(t.drawLine.bind(t), 'steps')(max3(3, 2, 1));
+  t.t.右を向く(); // step
+}
+
+function max(a, b) {
+  if (a > b) return a;
+  else return b;
+}
+
+function max3(a, b, c) {
+  if (a >= b && a >= c) return a;
+  else if (b >= c) return b;
+  else return c;
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+
+  drawLine(steps) {
+    for (s.set('i', 0); s.get('i') < steps; s.set('i', s.get('i') + 1)) { // step
+      this.t.前に進む(); // step
+    }
+    delete s.vars['i'];
+  }
+}
+main();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MaxTurtle t = new MaxTurtle(); // caller
+    drawLine(max(2, 3)); // caller
+    this.t.右を向く(); // step
+    drawLine(max(2, 3, 4)); // caller
+    this.t.右を向く(); // step
+    drawLine(max(2, 1)); // caller
+    this.t.右を向く(); // step
+    drawLine(max(3, 2, 1)); // caller
+    this.t.右を向く(); // step
+  }
+  public static int max(int a, int b) {
+    if (a > b) return a;
+    else return b;
+  }
+  public static int max(int a, int b, int c) {
+    if (a >= b && a >= c) return a;
+    else if (b >= c) return b;
+    else return c;
+  }
+}
+class MyTurtle {
+  public Turtle t = new Turtle(); // step
+  public void drawLine(int steps) {
+    for (int i = 0; i < steps; i++) // step
+      this.t.前に進む(); // step
+  }
+}
+    `,
+  },
+  overload4: {
+    instrumented: `
+function main() {
+  const t = call(MyTurtle)();
+  call(t.move.bind(t), 'dy')(2);
+  call(t.move2.bind(t), 'dx', 'dy')(1, 3);
+  call(t.move.bind(t), 'dy')(-3);
+  call(t.move2.bind(t), 'dx', 'dy')(-1, 0);
+  call(t.move2.bind(t), 'dx', 'dy')(4, 2);
+  call(t.move2.bind(t), 'dx', 'dy')(0, -4);
+}
+
+class MyTurtle {
+  constructor(x, y) {
+    this.t = new Turtle(x, y); // step
+  }
+
+  move(dy) {
+    while (s.get('dy') > 0) {
+      s.set('dy', s.get('dy') - 1); // step
+      this.t.前に進む(); // step
+    }
+    while (s.get('dy') < 0) {
+      s.set('dy', s.get('dy') + 1); // step
+      this.t.後に戻る(); // step
+    }
+  }
+
+  move2(dx, dy) {
+    call(this.move.bind(this), 'dy')(dy);
+    if (s.get('dx') != 0) {
+      this.t.右を向く(); // step
+      while (s.get('dx') > 0) {
+        s.set('dx', s.get('dx') - 1); // step
+        this.t.前に進む(); // step
+      }
+      while (s.get('dx') < 0) {
+        s.set('dx', s.get('dx') + 1); // step
+        this.t.後に戻る(); // step
+      }
+      this.t.左を向く(); // step
+    }
+  }
+}
+
+main();
+`,
+    java: `
+public class Main {
+  public static void main(String[] a) {
+    MyTurtle t = new MyTurtle(); // caller
+    t.move(2); // caller
+    t.move(1, 3); // caller
+    t.move(-3); // caller
+    t.move(-1, 0); // caller
+    t.move(4, 2); // caller
+    t.move(0, -4); // caller
+  }
+}
+public class MyTurtle {
+  private Turtle t = new Turtle(0, 0); // step
+  public void move(int dy) {
+    while (dy > 0) {
+      dy--; // step
+      this.t.前に進む(); // step
+    }
+    while (dy < 0) {
+      dy++; // step
+      this.t.後に戻る(); // step
+    }
+  }
+  public void move(int dx, int dy) {
+    move(dy); // caller
+    if (dx != 0) {
+      this.t.右を向く(); // step
+      while (dx > 0) {
+        dx--; // step
+        this.t.前に進む(); // step
+      }
+      while (dx < 0) {
+        dx++; // step
+        this.t.後に戻る(); // step
+      }
+      this.t.左を向く(); // step
+    }
+  }
+}
+`,
+  },
+
   overloadAndOverride1: {
     instrumented: `
 function main() {
@@ -5935,6 +6344,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < steps; s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
   drawLine2() {
     call(this.drawLine.bind(this), 'steps')(2);
@@ -6162,6 +6572,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 }
 
@@ -6174,6 +6585,7 @@ class MyTurtle2 {
     for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 }
 
