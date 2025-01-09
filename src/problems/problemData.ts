@@ -5940,51 +5940,82 @@ public class BoldLineTurtle extends LineTurtle {
   },
   package3: {
     instrumented: `
+function main() {
+  const ts = [
+    call(LineTurtle, 'x', 'y')(0, 0),
+    call(LongLineTurtle, 'x', 'y')(3, 0)
+  ];
+  for (const t of ts) {
+    call(t.draw.bind(t))();
+  }
+}
+
+class LineTurtle {
+  constructor(x, y) {
+    this.t = new Turtle(x, y); // step
+  }
+  draw() {
+    for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) { // step
+      call(this.forward.bind(this))();
+    }
+  }
+  forward() {
+    this.t.前に進む(); // step
+  }
+}
+
+class LongLineTurtle extends LineTurtle {
+  forward() {
+    this.t.前に進む(); // step
+    this.t.前に進む(); // step
+  }
+}
+
+main();
 `,
     java: `
+// トレース道場では、複数ファイルの内容をまとめて表示する。
+
 // -------------- Main.java ここから --------------
 import turtle.*;
 public class Main {
   public static void main(String[] a) {
-    MyTurtle[] t = {
-      new MyTurtle(0,0), // caller
-      new TeleportTurtle(3,1) // caller
-    }
-    t[0].move(1,3); // caller
-    t[1].move(6,6); // caller
+    LineTurtle[] ts = {
+      new LineTurtle(0, 0), // caller
+      new LongLineTurtle(3, 0) // caller
+    };
+    for (LineTurtle t : ts)
+      t.draw(); // caller
   }
 }
 // -------------- Main.java ここまで --------------
 
-// -------- turtle/MyTurtle.java ここから --------
+// -------- turtle/LineTurtle.java ここから --------
 package turtle;
-public class MyTurtle {
-  int x,y;
-  private Turtle t;
-  MyTurtle(int x,int y){
-    this.t = new Turtle(x,y); // step
-    this.x = x; // step
-    this.y = y; // step
+public class LineTurtle {
+  protected Turtle t;
+  public LineTurtle(int x, int y) {
+    this.t = new Turtle(x, y); // step
   }
-  public void move(int x,int y) {
-    while(y<this.y)y++,this.t.前に進む(); // step
-    this.t.右を向く(); // step
-    while(x<this.x)x++,this.t.前に進む(); // step
-    this.t.左を向く(); // step
+  public void draw() {
+    for (int i = 0; i < 3; i++) // step
+      this.forward(); // caller
+  }
+  protected void forward() {
+  	this.t.前に進む(); // step
   }
 }
-// -------- turtle/MyTurtle.java ここまで --------
+// -------- turtle/LineTurtle.java ここまで --------
 
-// ------- turtle/TeleportTurtle.java ここから -------
+// ------- turtle/LongLineTurtle.java ここから -------
 package turtle;
-public class TeleportTurtle extends MyTurtle {
-  @Override public void move(int x,int y) {
-    this.t = new Turtle(x,y); // step
-    this.x = x; // step
-    this.y = y; // step
+public class LongLineTurtle extends LineTurtle {
+  @Override protected void forward() {
+		this.t.前に進む(); // step
+		this.t.前に進む(); // step
   }
 }
-// ------- turtle/TeleportTurtle.java ここまで -------
+// ------- turtle/LongLineTurtle.java ここまで -------
 `,
   },
 
