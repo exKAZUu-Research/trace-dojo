@@ -3045,7 +3045,7 @@ public class Main {
     t1.右を向く(); // step
     t1.右を向く(); // step
 
-    for (int i = 0; i < 5; i++) { //step
+    for (int i = 0; i < 5; i++) { // step
       t1.前に進む(); // step
       t2.前に進む(); // step
       if (i % 2 == 0) {
@@ -3102,13 +3102,13 @@ public class Main {
     instrumented: `
 const ts = [null, null, null];
 for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) {
-  ts[s.get('i')] = new Turtle(1 + s.get('i') * 2, 0); //step
+  ts[s.get('i')] = new Turtle(1 + s.get('i') * 2, 0); // step
 }
 delete s.vars['i'];
 
 for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < ts.length; s.set('j', s.get('j') + 1)) {
-    N歩前に進める(ts[s.get('j')], s.get('j')); //step
+    N歩前に進める(ts[s.get('j')], s.get('j')); // step
     // call(N歩前に進める, 't', 'n')(ts[s.get('j')], s.get('j')); //caller
   }
 }
@@ -3125,13 +3125,13 @@ function N歩前に進める(t, n) {
 public class Main {
   public static void main(String[] args) {
     Turtle[] turtles = new Turtle[3];
-    for (int i = 0; i < turtles.length; i++) { //step
-      turtles[i] = new Turtle(1 + i * 2, 0); //step
+    for (int i = 0; i < turtles.length; i++) { // step
+      turtles[i] = new Turtle(1 + i * 2, 0); // step
     }
 
-    for (int i = 0; i < 3; i++) { //step
-      for (int j = 0; j < turtles.length; j++) { //step
-        N歩前に進める(turtles[j], j); //step
+    for (int i = 0; i < 3; i++) { // step
+      for (int j = 0; j < turtles.length; j++) { // step
+        N歩前に進める(turtles[j], j); // step
       }
     }
   }
@@ -5860,52 +5860,84 @@ public class FastTurtle extends MyTurtle {
 // ------- turtle/FastTurtle.java ここまで -------
 `,
   },
-
   package2: {
     instrumented: `
+function main() {
+  const t = call(BoldLineTurtle)();
+  call(t.draw.bind(t))();
+}
+
+class LineTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+  draw() {
+    for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) { // step
+      call(this.forward.bind(this))();
+    }
+  }
+  forward() {
+    this.t.前に進む(); // step
+  }
+}
+
+class BoldLineTurtle extends LineTurtle {
+  forward() {
+    this.t.右を向く(); // step
+    this.t.前に進む(); // step
+    this.t.左を向く(); // step
+    this.t.前に進む(); // step
+    this.t.左を向く(); // step
+    this.t.前に進む(); // step
+    this.t.右を向く(); // step
+  }
+}
+
+main();
 `,
     java: `
+// トレース道場では、複数ファイルの内容をまとめて表示する。
+
 // -------------- Main.java ここから --------------
-import turtle.ZigZagTurtle;
+import turtle.BoldLineTurtle;
 public class Main {
   public static void main(String[] a) {
-    ZigZagTurtle z = new ZigZagTurtle(); // caller
-    z.drawLine(); // caller
+    BoldLineTurtle t = new BoldLineTurtle(); // caller
+    t.draw(); // caller
   }
 }
 // -------------- Main.java ここまで --------------
 
-// -------- turtle/MyTurtle.java ここから --------
+// -------- turtle/LineTurtle.java ここから --------
 package turtle;
-public class MyTurtle {
+public class LineTurtle {
   private Turtle t = new Turtle(); // step
   public void draw() {
     for (int i = 0; i < 3; i++) // step
       this.forward(); // caller
   }
-  protected void forward() { 
-  	this.t.前に進む(); //step
+  protected void forward() {
+  	this.t.前に進む(); // step
   }
 }
-// -------- turtle/MyTurtle.java ここまで --------
+// -------- turtle/LineTurtle.java ここまで --------
 
-// ------- turtle/ZigZagTurtle.java ここから -------
+// ------- turtle/BoldLineTurtle.java ここから -------
 package turtle;
-public class ZigZagTurtle extends MyTurtle {
-  @Override protected void forward() { 
-		this.t.右を向く(); //step
-		this.t.前に進む(); //step
-		this.t.左を向く(); //step
-		this.t.前に進む(); //step
-		this.t.左を向く(); //step
-		this.t.前に進む(); //step
-		this.t.右を向く(); //step	
+public class BoldLineTurtle extends LineTurtle {
+  @Override protected void forward() {
+		this.t.右を向く(); // step
+		this.t.前に進む(); // step
+		this.t.左を向く(); // step
+		this.t.前に進む(); // step
+		this.t.左を向く(); // step
+		this.t.前に進む(); // step
+		this.t.右を向く(); // step
   }
 }
-// ------- turtle/ZigZagTurtle.java ここまで -------
+// ------- turtle/BoldLineTurtle.java ここまで -------
 `,
   },
-
   package3: {
     instrumented: `
 `,
@@ -5914,7 +5946,7 @@ public class ZigZagTurtle extends MyTurtle {
 import turtle.*;
 public class Main {
   public static void main(String[] a) {
-    MyTurtle[] t = { 
+    MyTurtle[] t = {
       new MyTurtle(0,0), // caller
       new TeleportTurtle(3,1) // caller
     }
