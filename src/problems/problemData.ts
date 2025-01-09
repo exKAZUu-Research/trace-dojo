@@ -6018,7 +6018,6 @@ public class LongLineTurtle extends LineTurtle {
 // ------- turtle/LongLineTurtle.java ここまで -------
 `,
   },
-
   overload1: {
     instrumented: `
 function main() {
@@ -6076,49 +6075,70 @@ class CurveTurtle extends MyTurtle {
 }
     `,
   },
-
   overload2: {
     instrumented: `
+function main() {
+  const t = call(MyTurtle, 'x', 'y')(0, 0);
+  call(t.operate.bind(t), 'n')(0);
+  call(t.operate2.bind(t), 's')("right");
+  call(t.operate2.bind(t), 's')("up");
+  call(t.operate.bind(t), 'n')(1);
+  call(t.operate.bind(t), 'n')(0);
+}
+
+class MyTurtle {
+  constructor(x, y) {
+    this.t = new Turtle(x, y); // step
+  }
+
+  operate(n) {
+    if (n === 0) {
+      this.t.前に進む(); // step
+    } else if (n === 1) {
+      this.t.右を向く(); // step
+      this.t.前に進む(); // step
+      this.t.左を向く(); // step
+    }
+  }
+
+  operate2(s) {
+    if (s === "up") {
+      call(this.operate.bind(this), 'n')(0);
+    } else if (s === "right") {
+      call(this.operate.bind(this), 'n')(1);
+    }
+  }
+}
+
+main();
 `,
     java: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(); // caller
     t.operate(0); // caller
-    t.operate("left"); // caller
-    t.operate(2); // caller
-    t.operate("down"); // caller
     t.operate("right"); // caller
-    t.operate(2); // caller
-    t.operate("0"); // caller
+    t.operate("up"); // caller
+    t.operate(1); // caller
+    t.operate(0); // caller
   }
 }
 class MyTurtle {
-  Turtle t = new Turtle(3,3); // step
-  void operate(int n) {
-    if(n==0){
+  private Turtle t = new Turtle(0, 0); // step
+  public void operate(int n) {
+    if (n == 0) {
       this.t.前に進む(); // step
-    }else if(n==1){
+    } else if (n == 1) {
       this.t.右を向く(); // step
       this.t.前に進む(); // step
       this.t.左を向く(); // step
-    }else if(n==2){
-      this.t.後に戻る(); // step
-    }else{
-      this.t.左を向く(); // step
-      this.t.前に進む(); // step
-      this.t.右を向く(); // step
     }
   }
-  void operate(string s){
-    if(s.equals("up")){
-      operate(0); //caller
-    }else if(s.equals("right")){
-      operate(1); //caller
-    }else if(s.equals("down")){
-      operate(2); //caller
-    }else{
-      operate(3); //caller
+  public void operate(String s) {
+    if (s.equals("up")) {
+      operate(0); // caller
+    } else if (s.equals("right")) {
+      operate(1); // caller
     }
   }
 }
