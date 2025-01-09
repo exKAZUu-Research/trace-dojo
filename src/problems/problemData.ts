@@ -4148,6 +4148,7 @@ function drawLine(t, speed) {
   for (s.set('i', 0); s.get('i') < speed; s.set('i', s.get('i') + 1)) { // step
     t.前に進む(); // step
   }
+  delete s.vars['i'];
 }
 `,
     java: `
@@ -4513,6 +4514,7 @@ class MyTurtle {
           break;
       }
     }
+    delete s.vars['i'];
   }
 }
 
@@ -4674,12 +4676,14 @@ function drawSquare(t, size) {
     call(drawLine, 't', 'n')(t, size - 1);
     t.右を向く(); // step
   }
+  delete s.vars['i'];
 }
 
 function drawLine(t, n) {
   for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) { // step
     t.前に進む(); // step
   }
+  delete s.vars['i'];
 }
     `,
     java: `
@@ -5349,6 +5353,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step // caller
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 
   length() {
@@ -5405,6 +5410,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 
   length() {
@@ -5474,6 +5480,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 
   length() {
@@ -5538,6 +5545,7 @@ function main() {
   for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) { // step
     call(ts[s.get('i')].drawLine.bind(ts[s.get('i')]))(); // caller
   }
+  delete s.vars['i'];
 }
 
 class MyTurtle {
@@ -5549,6 +5557,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 
   length() {
@@ -5610,6 +5619,7 @@ function main() {
   for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) { // step
     call(ts[s.get('i')].draw.bind(ts[s.get('i')]))();
   }
+  delete s.vars['i'];
 }
 
 class MyTurtle {
@@ -5621,6 +5631,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 
   length() {
@@ -5709,6 +5720,7 @@ function main() {
     ts[s.get('i')].t.右を向く(); // step
     call(ts[s.get('i')].draw.bind(ts[s.get('i')]))();
   }
+  delete s.vars['i'];
 }
 
 class MyTurtle {
@@ -5720,6 +5732,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 
   length() {
@@ -5817,6 +5830,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
   length() { return 2; }
 }
@@ -5875,6 +5889,7 @@ class LineTurtle {
     for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) { // step
       call(this.forward.bind(this))();
     }
+    delete s.vars['i'];
   }
   forward() {
     this.t.前に進む(); // step
@@ -5958,6 +5973,7 @@ class LineTurtle {
     for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) { // step
       call(this.forward.bind(this))();
     }
+    delete s.vars['i'];
   }
   forward() {
     this.t.前に進む(); // step
@@ -6033,6 +6049,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < steps; s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
   drawLine2() {
     call(this.drawLine.bind(this), 'steps')(2);
@@ -6144,48 +6161,73 @@ class MyTurtle {
 }
     `,
   },
-
   overload3: {
     instrumented: `
+function main() {
+  const t = call(MyTurtle)();
+  call(t.drawLine.bind(t), 'steps')(max(2, 3));
+  t.t.右を向く(); // step
+  call(t.drawLine.bind(t), 'steps')(max3(2, 3, 4));
+  t.t.右を向く(); // step
+  call(t.drawLine.bind(t), 'steps')(max(2, 1));
+  t.t.右を向く(); // step
+  call(t.drawLine.bind(t), 'steps')(max3(3, 2, 1));
+  t.t.右を向く(); // step
+}
+
+function max(a, b) {
+  if (a > b) return a;
+  else return b;
+}
+
+function max3(a, b, c) {
+  if (a >= b && a >= c) return a;
+  else if (b >= c) return b;
+  else return c;
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+
+  drawLine(steps) {
+    for (s.set('i', 0); s.get('i') < steps; s.set('i', s.get('i') + 1)) { // step
+      this.t.前に進む(); // step
+    }
+    delete s.vars['i'];
+  }
+}
+main();
 `,
     java: `
 public class Main {
   public static void main(String[] args) {
     MaxTurtle t = new MaxTurtle(); // caller
-    t.draw(); // caller
+    drawLine(max(2, 3)); // caller
+    this.t.右を向く(); // step
+    drawLine(max(2, 3, 4)); // caller
+    this.t.右を向く(); // step
+    drawLine(max(2, 1)); // caller
+    this.t.右を向く(); // step
+    drawLine(max(3, 2, 1)); // caller
+    this.t.右を向く(); // step
   }
-}
-class Max {
-  int max(int a){return a;}
-  int max(int a,int b){
-    if(a>b)return a;
+  public static int max(int a, int b) {
+    if (a > b) return a;
     else return b;
   }
-  int max(int a,int b,int c){
-    if(a>=b&&a>=c)return a;
-    else if(b>=c)return b;
+  public static int max(int a, int b, int c) {
+    if (a >= b && a >= c) return a;
+    else if (b >= c) return b;
     else return c;
   }
 }
-class MaxTurtle extends Max {
-  Turtle t = new Turtle(); // step
-  void drawLine(int steps) {
+class MyTurtle {
+  public Turtle t = new Turtle(); // step
+  public void drawLine(int steps) {
     for (int i = 0; i < steps; i++) // step
       this.t.前に進む(); // step
-  }
-  void draw() {
-    int n = max(2,3); // step
-    drawLine(n); // caller
-    this.t.右を向く // step
-    n = max(4); // step
-    drawLine(n); // caller
-    this.t.右を向く // step
-    n = max(2,2); // step
-    drawLine(n); // caller
-    this.t.右を向く // step
-    n = max(4,3,1); // step
-    drawLine(n); // caller
-    this.t.右を向く // step
   }
 }
     `,
@@ -6251,6 +6293,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < steps; s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
   drawLine2() {
     call(this.drawLine.bind(this), 'steps')(2);
@@ -6478,6 +6521,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 }
 
@@ -6490,6 +6534,7 @@ class MyTurtle2 {
     for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 }
 
