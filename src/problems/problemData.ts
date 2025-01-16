@@ -7118,8 +7118,77 @@ class MyTurtle {
 `,
   },
   originalException4: {
-    instrumented: ``,
-    java: ``,
+    instrumented: `
+function main() {
+  const m = call(MyTurtle)();
+  try {
+    call(m.drawSquare.bind(m))();
+  } catch (e) {
+    m.t.左を向く(); // step
+    m.t.左を向く(); // step
+    m.t.前に進む(); // step
+  }
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(5, 4); // step
+  }
+
+  drawSquare() {
+    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
+      for (s.set('j', 0); s.get('j') < 2; s.set('j', s.get('j') + 1)) { // step
+        if (!this.t.前に進めるか()) {
+          throw new OutOfBoardException();
+        }
+        if (this.t.前のマスが塗られているか()) {
+          throw new ColoredException();
+        }
+        this.t.前に進む(); // step
+      }
+      this.t.右を向く(); // step
+    }
+  }
+}
+
+main();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m = new MyTurtle(); // caller
+    try {
+      m.drawSquare(); // caller
+    } catch (Exception e) {
+      m.t.左を向く(); // step
+      m.t.左を向く(); // step
+      m.t.前に進む(); // step
+    }
+  }
+}
+
+class OutOfBoardException extends Exception { }
+class ColoredException extends Exception { }
+
+class MyTurtle {
+  public Turtle t = new Turtle(5, 4); // step
+
+  public void drawSquare() throws OutOfBoardException, ColoredException {
+    for (int i = 0; i < 4; i++) { // step
+      for (int j = 0; j < 2; j++) { // step
+        if (!this.t.前に進めるか()) {
+          throw new OutOfBoardException();
+        }
+        if (this.t.前のマスが塗られているか()) {
+          throw new ColoredException();
+        }
+        this.t.前に進む(); // step
+      }
+      this.t.右を向く(); // step
+    }
+  }
+}
+`,
   },
   originalException5: {
     instrumented: ``,
