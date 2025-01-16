@@ -7123,7 +7123,8 @@ class ColoredException extends Exception { }
 class MyTurtle {
   public Turtle t = new Turtle(); // step
 
-  public void drawSquare() throws OutOfBoardException, ColoredException {
+  public void drawSquare()
+        throws OutOfBoardException, ColoredException {
     for (int i = 0; i < 4; i++) { // step
       if (!this.t.前に進めるか()) {
         throw new OutOfBoardException();
@@ -7200,7 +7201,8 @@ class ColoredException extends Exception { }
 class MyTurtle {
   public Turtle t = new Turtle(5, 4); // step
 
-  public void drawSquare() throws OutOfBoardException, ColoredException {
+  public void drawSquare()
+        throws OutOfBoardException, ColoredException {
     for (int i = 0; i < 4; i++) { // step
       for (int j = 0; j < 2; j++) { // step
         if (!this.t.前に進めるか()) {
@@ -7293,7 +7295,8 @@ class ColoredException extends Exception { }
 class MyTurtle {
   public Turtle t = new Turtle(5, 5); // step
 
-  public void drawSquare(int size) throws OutOfBoardException, ColoredException {
+  public void drawSquare(int size)
+        throws OutOfBoardException, ColoredException {
     for (int i = 0; i < 4; i++) { // step
       for (int j = 0; j < size; j++) { // step
         if (!this.t.前に進めるか()) {
