@@ -6707,26 +6707,162 @@ class MyTurtle {
   },
   originalException1: {
     instrumented: ``,
-    java: ``,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m = new MyTurtle();
+    m.drawLine();
+    m.drawLine();
+  }
+}
+
+class MyTurtle {
+  public Turtle t = new Turtle();
+
+  public void drawLine() {
+    try {
+      for (int i = 0; i < 4; i++) {
+        if (!this.t.前に進めるか()) {
+          throw new OutOfBoardException();
+        }
+        this.t.前に進む();
+      }
+    } catch (Exception e) {
+      this.t.右を向く(); this.t.前に進む();
+    }
+  }
+}
+
+class OutOfBoardException extends Exception { }
+`,
   },
   originalException2: {
     instrumented: ``,
-    java: ``,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m = new MyTurtle();
+    try {
+      m.drawLine();
+      m.drawLine();
+    } catch (OutOfBoardException e) {
+      m.t.右を向く();
+      m.t.前に進む();
+    }
+  }
+}
+
+class MyTurtle {
+  public Turtle t = new Turtle();
+
+  public void drawLine() throws OutOfBoardException {
+    for (int i = 0; i < 4; i++) {
+      if (!this.t.前に進めるか()) {
+        throw new OutOfBoardException();
+      }
+      this.t.前に進む();
+    }
+  }
+}
+
+class OutOfBoardException extends Exception { }
+`,
   },
   // ----------- 初級プログラミングⅡ 第7回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第8回 ここから -----------
   twoDimensionalArray1: {
     instrumented: ``,
-    java: ``,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    int [][] arr = { { 0, 3 }, { 1, 1 }, { 0, 2 },
+                     { 2, 3 }, { 0, 1 }, };
+    Turtle t = new Turtle();
+    for (int i = 0; i < arr.length; i++) {
+      int c = arr[i][1];
+      switch (arr[i][0]) {
+        case 0:
+          for (int j = 0; j < c; j++) {
+            t.前に進む();
+          }
+          break;
+        case 1:
+          for (int j = 0; j < c; j++) {
+            t.右を向く();
+          }
+          break;
+        case 2:
+          for (int j = 0; j < c; j++) {
+            t.左を向く();
+          }
+          break;
+      }
+    }
+  }
+}
+  `,
   },
   twoDimensionalArray2: {
     instrumented: ``,
-    java: ``,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    int [][] arr = { { 0, 3 }, { 1 }, { 0, 2 },
+                     { 2 }, { 0, 1 }, };
+    Turtle t = new Turtle();
+    for (int i = 0; i < arr.length; i++) {
+      switch (arr[i][0]) {
+        case 0:
+          int c = arr[i][1];
+          for (int j = 0; j < c; j++) {
+            t.前に進む();
+          }
+          break;
+        case 1:
+          t.右を向く();
+          break;
+        case 2:
+          t.左を向く();
+          break;
+      }
+    }
+  }
+}
+  `,
   },
   threeDimensionalArray1: {
     instrumented: ``,
-    java: ``,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    int[][][] a = { { {0,0}, {1,1}, {0,3} },
+                    { {5,2}, {2,1}, {0,4} } };
+    for (int i = 0; i < a.length; i++) {
+      Turtle t = new Turtle(a[i][0][0], a[i][0][1]);
+      for (int j = 1; j < a[i].length; j++) {
+        int c = a[i][j][1];
+        switch (a[i][j][0]) {
+          case 0:
+            for (int k = 0; k < c; k++) {
+              t.前に進む();
+            }
+            break;
+          case 1:
+            for (int k = 0; k < c; k++) {
+              t.右を向く();
+            }
+            break;
+          case 2:
+            for (int k = 0; k < c; k++) {
+              t.左を向く();
+            }
+            break;
+      }
+    }
+  }
+}
+  `,
   },
   // ----------- 初級プログラミングⅡ 第8回 ここまで -----------
 
