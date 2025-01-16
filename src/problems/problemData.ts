@@ -6706,7 +6706,35 @@ class MyTurtle {
 `,
   },
   originalException1: {
-    instrumented: ``,
+    instrumented: `
+function main() {
+  const m = call(MyTurtle)();
+  call(m.drawLine.bind(m))();
+  call(m.drawLine.bind(m))();
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+
+  drawLine() {
+    try {
+      for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
+        if (!this.t.前に進めるか()) {
+          throw new Error();
+        }
+        this.t.前に進む(); // step
+      }
+    } catch (e) {
+      this.t.右を向く(); // step
+      this.t.前に進む(); // step
+    }
+  }
+}
+
+main();
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
@@ -6738,7 +6766,35 @@ class OutOfBoardException extends Exception { }
 `,
   },
   originalException2: {
-    instrumented: ``,
+    instrumented: `
+function main() {
+  const m = call(MyTurtle)();
+  try {
+    call(m.drawLine.bind(m))();
+    call(m.drawLine.bind(m))();
+  } catch (e) {
+    m.t.右を向く(); // step
+    m.t.前に進む(); // step
+  }
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+
+  drawLine() {
+    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
+      if (!this.t.前に進めるか()) {
+        throw new Error();
+      }
+      this.t.前に進む(); // step
+    }
+  }
+}
+
+main();
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
