@@ -167,7 +167,13 @@ export const problemIdToName = {
   // 初級プログラミングⅡ 第7回
   exception1: '例外(1)',
   exception2: '例外(2)',
+  originalException1: '独自に定義した例外(1)',
+  originalException2: '独自に定義した例外(2)',
   // 初級プログラミングⅡ 第8回
+  twoDimensionalArray1: '二次元配列(1)',
+  twoDimensionalArray2: '二次元配列(2)',
+  threeDimensionalArray1: '三次元配列(1)',
+  // 動作確認用
   oop1: 'オブジェクト指向プログラミング(1)',
   oop2: 'オブジェクト指向プログラミング(2)',
   test1: 'ステップ実行のテスト用問題(1)',
@@ -298,9 +304,9 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
       'overloadAndOverride3',
     ],
     // 第7回
-    ['exception1', 'exception2'],
+    ['exception1', 'exception2', 'originalException1', 'originalException2'],
     // 第8回
-    ['oop1'],
+    ['twoDimensionalArray1', 'twoDimensionalArray2', 'threeDimensionalArray1'],
   ],
   test: [['test1', 'test2', 'test3', 'test4', 'test5', 'test9', 'oop1', 'oop2']],
 };
@@ -6699,10 +6705,31 @@ class MyTurtle {
 }
 `,
   },
+  originalException1: {
+    instrumented: ``,
+    java: ``,
+  },
+  originalException2: {
+    instrumented: ``,
+    java: ``,
+  },
   // ----------- 初級プログラミングⅡ 第7回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第8回 ここから -----------
+  twoDimensionalArray1: {
+    instrumented: ``,
+    java: ``,
+  },
+  twoDimensionalArray2: {
+    instrumented: ``,
+    java: ``,
+  },
+  threeDimensionalArray1: {
+    instrumented: ``,
+    java: ``,
+  },
   // ----------- 初級プログラミングⅡ 第8回 ここまで -----------
+
   test1: {
     instrumented: `
 const t = new Turtle(); // step
