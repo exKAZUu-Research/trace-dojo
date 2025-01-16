@@ -6710,25 +6710,26 @@ class MyTurtle {
     java: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle m = new MyTurtle();
-    m.drawLine();
-    m.drawLine();
+    MyTurtle m = new MyTurtle(); // caller
+    m.drawLine(); // caller
+    m.drawLine(); // caller
   }
 }
 
 class MyTurtle {
-  public Turtle t = new Turtle();
+  public Turtle t = new Turtle(); // step
 
   public void drawLine() {
     try {
-      for (int i = 0; i < 4; i++) {
+      for (int i = 0; i < 4; i++) { // step
         if (!this.t.前に進めるか()) {
           throw new OutOfBoardException();
         }
-        this.t.前に進む();
+        this.t.前に進む(); // step
       }
     } catch (Exception e) {
-      this.t.右を向く(); this.t.前に進む();
+      this.t.右を向く(); // step
+      this.t.前に進む(); // step
     }
   }
 }
@@ -6741,26 +6742,26 @@ class OutOfBoardException extends Exception { }
     java: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle m = new MyTurtle();
+    MyTurtle m = new MyTurtle(); // caller
     try {
-      m.drawLine();
-      m.drawLine();
+      m.drawLine(); // caller
+      m.drawLine(); // caller
     } catch (OutOfBoardException e) {
-      m.t.右を向く();
-      m.t.前に進む();
+      m.t.右を向く(); // step
+      m.t.前に進む(); // step
     }
   }
 }
 
 class MyTurtle {
-  public Turtle t = new Turtle();
+  public Turtle t = new Turtle(); // step
 
   public void drawLine() throws OutOfBoardException {
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 4; i++) { // step
       if (!this.t.前に進めるか()) {
         throw new OutOfBoardException();
       }
-      this.t.前に進む();
+      this.t.前に進む(); // step
     }
   }
 }
@@ -6778,23 +6779,23 @@ public class Main {
   public static void main(String[] args) {
     int [][] arr = { { 0, 3 }, { 1, 1 }, { 0, 2 },
                      { 2, 3 }, { 0, 1 }, };
-    Turtle t = new Turtle();
-    for (int i = 0; i < arr.length; i++) {
-      int c = arr[i][1];
+    Turtle t = new Turtle(); // step
+    for (int i = 0; i < arr.length; i++) { // step
+      int c = arr[i][1]; // step
       switch (arr[i][0]) {
         case 0:
-          for (int j = 0; j < c; j++) {
-            t.前に進む();
+          for (int j = 0; j < c; j++) { // step
+            t.前に進む(); // step
           }
           break;
         case 1:
-          for (int j = 0; j < c; j++) {
-            t.右を向く();
+          for (int j = 0; j < c; j++) { // step
+            t.右を向く(); // step
           }
           break;
         case 2:
-          for (int j = 0; j < c; j++) {
-            t.左を向く();
+          for (int j = 0; j < c; j++) { // step
+            t.左を向く(); // step
           }
           break;
       }
@@ -6810,20 +6811,20 @@ public class Main {
   public static void main(String[] args) {
     int [][] arr = { { 0, 3 }, { 1 }, { 0, 2 },
                      { 2 }, { 0, 1 }, };
-    Turtle t = new Turtle();
-    for (int i = 0; i < arr.length; i++) {
+    Turtle t = new Turtle(); // step
+    for (int i = 0; i < arr.length; i++) { // step
       switch (arr[i][0]) {
         case 0:
-          int c = arr[i][1];
-          for (int j = 0; j < c; j++) {
-            t.前に進む();
+          int c = arr[i][1]; // step
+          for (int j = 0; j < c; j++) { // step
+            t.前に進む(); // step
           }
           break;
         case 1:
-          t.右を向く();
+          t.右を向く(); // step
           break;
         case 2:
-          t.左を向く();
+          t.左を向く(); // step
           break;
       }
     }
@@ -6836,28 +6837,29 @@ public class Main {
     java: `
 public class Main {
   public static void main(String[] args) {
-    int[][][] a = { { {0,0}, {1,1}, {0,3} },
-                    { {5,2}, {2,1}, {0,4} } };
-    for (int i = 0; i < a.length; i++) {
-      Turtle t = new Turtle(a[i][0][0], a[i][0][1]);
-      for (int j = 1; j < a[i].length; j++) {
-        int c = a[i][j][1];
+    int[][][] a = { { {0, 0}, {1, 1}, {0, 3} },
+                    { {5, 2}, {2, 1}, {0, 4} } };
+    for (int i = 0; i < a.length; i++) { // step
+      Turtle t = new Turtle(a[i][0][0], a[i][0][1]); // step
+      for (int j = 1; j < a[i].length; j++) { // step
+        int c = a[i][j][1]; // step
         switch (a[i][j][0]) {
           case 0:
-            for (int k = 0; k < c; k++) {
-              t.前に進む();
+            for (int k = 0; k < c; k++) { // step
+              t.前に進む(); // step
             }
             break;
           case 1:
-            for (int k = 0; k < c; k++) {
-              t.右を向く();
+            for (int k = 0; k < c; k++) { // step
+              t.右を向く(); // step
             }
             break;
           case 2:
-            for (int k = 0; k < c; k++) {
-              t.左を向く();
+            for (int k = 0; k < c; k++) { // step
+              t.左を向く(); // step
             }
             break;
+        }
       }
     }
   }
