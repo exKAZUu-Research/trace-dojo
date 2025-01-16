@@ -156,10 +156,16 @@ class Turtle {
     const nx = this.x + dx[index];
     const ny = this.y + dy[index];
     const isNoTurtle = !_turtles.some(t => t.x === nx && t.y === ny);
-    return nx >= 0 && nx < ${GRID_COLUMNS} && ny >= 0 && ny < ${GRID_ROWS} && isNoTurtle;
+    return isNoTurtle && nx >= 0 && nx < ${GRID_COLUMNS} && ny >= 0 && ny < ${GRID_ROWS};
   }
   canMoveForward() {
     return this.前に進めるか();
+  }
+  前のマスが塗られているか() {
+    const index = dirs.indexOf(this.dir);
+    const nx = this.x + dx[index];
+    const ny = this.y + dy[index];
+    return board[ny][nx] && board[ny][nx] !== '${EMPTY_COLOR}';
   }
   remove() {
     _turtles.splice(_turtles.indexOf(this), 1);
