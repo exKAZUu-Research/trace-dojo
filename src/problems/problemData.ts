@@ -167,8 +167,14 @@ export const problemIdToName = {
   // 初級プログラミングⅡ 第7回
   exception1: '例外(1)',
   exception2: '例外(2)',
+  exception3: '例外(3)',
+  exception4: '例外(4)',
+  exception5: '例外(5)',
   originalException1: '独自に定義した例外(1)',
   originalException2: '独自に定義した例外(2)',
+  originalException3: '独自に定義した例外(3)',
+  originalException4: '独自に定義した例外(4)',
+  originalException5: '独自に定義した例外(5)',
   // 初級プログラミングⅡ 第8回
   twoDimensionalArray1: '二次元配列(1)',
   twoDimensionalArray2: '二次元配列(2)',
@@ -304,7 +310,18 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
       'overloadAndOverride3',
     ],
     // 第7回
-    ['exception1', 'exception2', 'originalException1', 'originalException2'],
+    [
+      'exception1',
+      'exception2',
+      'exception3',
+      'exception4',
+      'exception5',
+      'originalException1',
+      'originalException2',
+      'originalException3',
+      'originalException4',
+      'originalException5',
+    ],
     // 第8回
     ['twoDimensionalArray1', 'twoDimensionalArray2', 'threeDimensionalArray1'],
   ],
@@ -6606,12 +6623,14 @@ class MyTurtle {
   }
 
   drawLine() {
-    for (let i = 0; i < 4; i++) { // step
+    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
       if (!this.t.前に進めるか()) {
+        delete s.vars['i'];
         throw new Error("前に進めない！");
       }
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 }
 
@@ -6653,6 +6672,7 @@ function main() {
     call(m.drawLine.bind(m))();
     call(m.drawLine.bind(m))();
   } catch (e) {
+    // Uncaught exception!
     if (false) {
       m.t.右を向く(); // step
       m.t.前に進む(); // step
@@ -6666,12 +6686,14 @@ class MyTurtle {
   }
 
   drawLine() {
-    for (let i = 0; i < 4; i++) { // step
+    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
       if (!this.t.前に進めるか()) {
+        delete s.vars['i'];
         throw new RuntimeException("前に進めない！");
       }
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 }
 
@@ -6705,6 +6727,212 @@ class MyTurtle {
 }
 `,
   },
+  exception3: {
+    instrumented: `
+function main() {
+  const m = call(MyTurtle)();
+  try {
+    call(m.drawLine.bind(m))();
+    call(m.drawLine.bind(m))();
+  } catch (e) {
+    m.t.右を向く(); // step
+    m.t.前に進む(); // step
+    m.t.左を向く(); // step
+  }
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+
+  drawLine() {
+    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
+      if (!this.t.前に進めるか()) {
+        delete s.vars['i'];
+        throw new Error("前に進めない！");
+      }
+      this.t.前に進む(); // step
+    }
+    delete s.vars['i'];
+  }
+}
+
+main();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m = new MyTurtle(); // caller
+    try {
+      m.drawLine(); // caller
+      m.drawLine(); // caller
+    } catch (Exception e) {
+      m.t.右を向く(); // step
+      m.t.前に進む(); // step
+      m.t.左を向く(); // step
+    }
+  }
+}
+
+class MyTurtle {
+  public Turtle t = new Turtle(); // step
+
+  public void drawLine() {
+    for (int i = 0; i < 4; i++) { // step
+      if (!t.前に進めるか()) {
+        throw new RuntimeException("前に進めない！");
+      }
+      this.t.前に進む(); // step
+    }
+  }
+}
+`,
+  },
+  exception4: {
+    instrumented: `
+function main() {
+  const m = call(MyTurtle)();
+  try {
+    call(m.drawLine.bind(m))();
+    call(m.drawLine.bind(m))();
+  } catch (e) {
+    m.t.前に進む(); // step
+    m.t.右を向く(); // step
+  }
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+
+  drawLine() {
+    try {
+      for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
+        if (!this.t.前に進めるか()) {
+          delete s.vars['i'];
+          throw new Error("前に進めない！");
+        }
+        this.t.前に進む(); // step
+      }
+      delete s.vars['i'];
+    } catch (e) {
+      this.t.右を向く(); // step
+      throw e;
+    }
+  }
+}
+
+main();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m = new MyTurtle(); // caller
+    try {
+      m.drawLine(); // caller
+      m.drawLine(); // caller
+    } catch (Exception e) {
+      m.t.前に進む(); // step
+      m.t.右を向く(); // step
+    }
+  }
+}
+
+class MyTurtle {
+  public Turtle t = new Turtle(); // step
+
+  public void drawLine() {
+    try {
+      for (int i = 0; i < 4; i++) { // step
+        if (!t.前に進めるか()) {
+          throw new RuntimeException("前に進めない！");
+        }
+        this.t.前に進む(); // step
+      }
+    } catch (RuntimeException e) {
+      t.右を向く(); // step
+      throw e; // catchした例外をもう一度throwする。
+    }
+  }
+}
+`,
+  },
+  exception5: {
+    instrumented: `
+function main() {
+  const m = call(MyTurtle)();
+  try {
+    call(m.drawLine.bind(m))();
+    call(m.drawLine.bind(m))();
+  } catch (e) {
+    m.t.前に進む(); // step
+    // Uncaught exception!
+    if (false) {
+      m.t.右を向く(); // step
+    }
+  }
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+
+  drawLine() {
+    try {
+      for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
+        if (!this.t.前に進めるか()) {
+          delete s.vars['i'];
+          throw new Error("前に進めない！");
+        }
+        this.t.前に進む(); // step
+      }
+      delete s.vars['i'];
+    } catch (e) {
+      this.t.右を向く(); // step
+      throw e;
+    }
+  }
+}
+
+main();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m = new MyTurtle(); // caller
+    try {
+      m.drawLine(); // caller
+      m.drawLine(); // caller
+    } catch (RuntimeException e) {
+      m.t.前に進む(); // step
+      throw e; // catchした例外をもう一度throwする。
+      m.t.前に進む(); // step
+    }
+  }
+}
+
+class MyTurtle {
+  public Turtle t = new Turtle(); // step
+
+  public void drawLine() {
+    try {
+      for (int i = 0; i < 4; i++) { // step
+        if (!t.前に進めるか()) {
+          throw new RuntimeException("前に進めない！");
+        }
+        this.t.前に進む(); // step
+      }
+    } catch (RuntimeException e) {
+      t.右を向く(); // step
+      throw e; // catchした例外をもう一度throwする。
+    }
+  }
+}
+`,
+  },
   originalException1: {
     instrumented: `
 function main() {
@@ -6722,10 +6950,12 @@ class MyTurtle {
     try {
       for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
         if (!this.t.前に進めるか()) {
+          delete s.vars['i'];
           throw new Error();
         }
         this.t.前に進む(); // step
       }
+      delete s.vars['i'];
     } catch (e) {
       this.t.右を向く(); // step
       this.t.前に進む(); // step
@@ -6744,6 +6974,8 @@ public class Main {
   }
 }
 
+class OutOfBoardException extends Exception { }
+
 class MyTurtle {
   public Turtle t = new Turtle(); // step
 
@@ -6761,8 +6993,6 @@ class MyTurtle {
     }
   }
 }
-
-class OutOfBoardException extends Exception { }
 `,
   },
   originalException2: {
@@ -6786,10 +7016,12 @@ class MyTurtle {
   drawLine() {
     for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
       if (!this.t.前に進めるか()) {
+        delete s.vars['i'];
         throw new Error();
       }
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 }
 
@@ -6824,6 +7056,262 @@ class MyTurtle {
 
 class OutOfBoardException extends Exception { }
 `,
+  },
+  originalException3: {
+    instrumented: `
+function main() {
+  const m = call(MyTurtle)();
+  try {
+    call(m.drawSquare.bind(m))();
+  } catch (e) {
+    if (e instanceof OutOfBoardException) {
+      m.t.右を向く(); // step
+      m.t.前に進む(); // step
+    } else if (e instanceof ColoredException) {
+      m.t.前に進む(); // step
+      m.t.左を向く(); // step
+    }
+  }
+}
+
+class OutOfBoardException extends Error { }
+class ColoredException extends Error { }
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+
+  drawSquare() {
+    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
+      if (!this.t.前に進めるか()) {
+        delete s.vars['i'];
+        throw new OutOfBoardException();
+      }
+      if (this.t.前のマスが塗られているか()) {
+        delete s.vars['i'];
+        throw new ColoredException();
+      }
+      this.t.前に進む(); // step
+      this.t.右を向く(); // step
+    }
+    delete s.vars['i'];
+  }
+}
+
+main();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m = new MyTurtle(); // caller
+    try {
+      m.drawSquare(); // caller
+    } catch (OutOfBoardException e) {
+      m.t.右を向く(); // step
+      m.t.前に進む(); // step
+    } catch (ColoredException e) {
+      m.t.前に進む(); // step
+      m.t.左を向く(); // step
+    }
+  }
+}
+
+class OutOfBoardException extends Exception { }
+class ColoredException extends Exception { }
+
+class MyTurtle {
+  public Turtle t = new Turtle(); // step
+
+  public void drawSquare()
+        throws OutOfBoardException, ColoredException {
+    for (int i = 0; i < 4; i++) { // step
+      if (!this.t.前に進めるか()) {
+        throw new OutOfBoardException();
+      }
+      if (this.t.前のマスが塗られているか()) {
+        throw new ColoredException();
+      }
+      this.t.前に進む(); // step
+      this.t.右を向く(); // step
+    }
+  }
+}
+`,
+  },
+  originalException4: {
+    instrumented: `
+function main() {
+  const m = call(MyTurtle)();
+  try {
+    call(m.drawSquare.bind(m))();
+  } catch (e) {
+    m.t.左を向く(); // step
+    m.t.左を向く(); // step
+    m.t.前に進む(); // step
+  }
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(5, 4); // step
+  }
+
+  drawSquare() {
+    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
+      for (s.set('j', 0); s.get('j') < 2; s.set('j', s.get('j') + 1)) { // step
+        if (!this.t.前に進めるか()) {
+          delete s.vars['j'];
+          delete s.vars['i'];
+          throw new OutOfBoardException();
+        }
+        if (this.t.前のマスが塗られているか()) {
+          delete s.vars['j'];
+          delete s.vars['i'];
+          throw new ColoredException();
+        }
+        this.t.前に進む(); // step
+      }
+      this.t.右を向く(); // step
+      delete s.vars['j'];
+    }
+    delete s.vars['i'];
+  }
+}
+
+main();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m = new MyTurtle(); // caller
+    try {
+      m.drawSquare(); // caller
+    } catch (Exception e) {
+      m.t.左を向く(); // step
+      m.t.左を向く(); // step
+      m.t.前に進む(); // step
+    }
+  }
+}
+
+class OutOfBoardException extends Exception { }
+class ColoredException extends Exception { }
+
+class MyTurtle {
+  public Turtle t = new Turtle(5, 4); // step
+
+  public void drawSquare()
+        throws OutOfBoardException, ColoredException {
+    for (int i = 0; i < 4; i++) { // step
+      for (int j = 0; j < 2; j++) { // step
+        if (!this.t.前に進めるか()) {
+          throw new OutOfBoardException();
+        }
+        if (this.t.前のマスが塗られているか()) {
+          throw new ColoredException();
+        }
+        this.t.前に進む(); // step
+      }
+      this.t.右を向く(); // step
+    }
+  }
+}
+`,
+  },
+  originalException5: {
+    instrumented: `
+function main() {
+  const m = call(MyTurtle)();
+  for (s.set('n', 0); s.get('n') < 3; s.set('n', s.get('n') + 1)) { // step
+    try {
+      call(m.drawSquare.bind(m), 'size')(1 + s.get('n'));
+    } catch (e) {
+      if (e instanceof OutOfBoardException) {
+        m.t.右を向く(); // step
+        m.t.右を向く(); // step
+      } else if (e instanceof ColoredException) {
+        m.t.前に進む(); // step
+        m.t.前に進む(); // step
+      }
+    }
+  }
+  delete s.vars['n'];
+}
+
+class OutOfBoardException extends Error { }
+class ColoredException extends Error { }
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(5, 5); // step
+  }
+
+  drawSquare(size) {
+    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
+      for (s.set('j', 0); s.get('j') < size; s.set('j', s.get('j') + 1)) { // step
+        if (!this.t.前に進めるか()) {
+          delete s.vars['j'];
+          delete s.vars['i'];
+          throw new OutOfBoardException();
+        }
+        if (this.t.前のマスが塗られているか()) {
+          delete s.vars['j'];
+          delete s.vars['i'];
+          throw new ColoredException();
+        }
+        this.t.前に進む(); // step
+      }
+      this.t.右を向く(); // step
+      delete s.vars['j'];
+    }
+    delete s.vars['i'];
+  }
+}
+
+main();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m = new MyTurtle(); // caller
+    for (int n = 0; n < 3; i++) { // step
+      try {
+        m.drawSquare(1 + n); // caller
+      } catch (OutOfBoardException e) {
+        m.t.右を向く(); // step
+        m.t.右を向く(); // step
+      } catch (ColoredException e) {
+        m.t.前に進む(); // step
+        m.t.前に進む(); // step
+      }
+    }
+  }
+}
+
+class OutOfBoardException extends Exception { }
+class ColoredException extends Exception { }
+
+class MyTurtle {
+  public Turtle t = new Turtle(5, 5); // step
+
+  public void drawSquare(int size)
+        throws OutOfBoardException, ColoredException {
+    for (int i = 0; i < 4; i++) { // step
+      for (int j = 0; j < size; j++) { // step
+        if (!this.t.前に進めるか()) {
+          throw new OutOfBoardException();
+        }
+        if (this.t.前のマスが塗られているか()) {
+          throw new ColoredException();
+        }
+        this.t.前に進む(); // step
+      }
+      this.t.右を向く(); // step
+    }
+  }
+}
+  `,
   },
   // ----------- 初級プログラミングⅡ 第7回 ここまで -----------
 
