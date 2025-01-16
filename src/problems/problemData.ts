@@ -165,7 +165,15 @@ export const problemIdToName = {
   overloadAndOverride2: 'オーバーロードとオーバーライド(2)',
   overloadAndOverride3: 'オーバーロードとオーバーライド(3)',
   // 初級プログラミングⅡ 第7回
+  exception1: '例外(1)',
+  exception2: '例外(2)',
+  originalException1: '独自に定義した例外(1)',
+  originalException2: '独自に定義した例外(2)',
   // 初級プログラミングⅡ 第8回
+  twoDimensionalArray1: '二次元配列(1)',
+  twoDimensionalArray2: '二次元配列(2)',
+  threeDimensionalArray1: '三次元配列(1)',
+  // 動作確認用
   oop1: 'オブジェクト指向プログラミング(1)',
   oop2: 'オブジェクト指向プログラミング(2)',
   test1: 'ステップ実行のテスト用問題(1)',
@@ -296,9 +304,9 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
       'overloadAndOverride3',
     ],
     // 第7回
-    ['oop1'],
+    ['exception1', 'exception2', 'originalException1', 'originalException2'],
     // 第8回
-    ['oop1'],
+    ['twoDimensionalArray1', 'twoDimensionalArray2', 'threeDimensionalArray1'],
   ],
   test: [['test1', 'test2', 'test3', 'test4', 'test5', 'test9', 'oop1', 'oop2']],
 };
@@ -6579,10 +6587,421 @@ class MyTurtle3 extends MyTurtle2 {
   // ----------- 初級プログラミングⅡ 第6回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第7回 ここから -----------
+  exception1: {
+    instrumented: `
+function main() {
+  const m = call(MyTurtle)();
+  try {
+    call(m.drawLine.bind(m))();
+    call(m.drawLine.bind(m))();
+  } catch (e) {
+    m.t.右を向く(); // step
+    m.t.前に進む(); // step
+  }
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+
+  drawLine() {
+    for (let i = 0; i < 4; i++) { // step
+      if (!this.t.前に進めるか()) {
+        throw new Error("前に進めない！");
+      }
+      this.t.前に進む(); // step
+    }
+  }
+}
+
+main();
+    `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m = new MyTurtle(); // caller
+    try {
+      m.drawLine(); // caller
+      m.drawLine(); // caller
+    } catch (Exception e) {
+      m.t.右を向く(); // step
+      m.t.前に進む(); // step
+    }
+  }
+}
+
+class MyTurtle {
+  public Turtle t = new Turtle(); // step
+
+  public void drawLine() {
+    for (int i = 0; i < 4; i++) { // step
+      if (!t.前に進めるか()) {
+        throw new RuntimeException("前に進めない！");
+      }
+      this.t.前に進む(); // step
+    }
+  }
+}
+    `,
+  },
+  exception2: {
+    instrumented: `
+function main() {
+  const m = call(MyTurtle)();
+  try {
+    call(m.drawLine.bind(m))();
+    call(m.drawLine.bind(m))();
+  } catch (e) {
+    if (false) {
+      m.t.右を向く(); // step
+      m.t.前に進む(); // step
+    }
+  }
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+
+  drawLine() {
+    for (let i = 0; i < 4; i++) { // step
+      if (!this.t.前に進めるか()) {
+        throw new RuntimeException("前に進めない！");
+      }
+      this.t.前に進む(); // step
+    }
+  }
+}
+
+main();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m = new MyTurtle(); // caller
+    try {
+      m.drawLine(); // caller
+      m.drawLine(); // caller
+    } catch (ArithmeticException e) {
+      m.t.右を向く(); // step
+      m.t.前に進む(); // step
+    }
+  }
+}
+
+class MyTurtle {
+  public Turtle t = new Turtle(); // step
+
+  public void drawLine() {
+    for (int i = 0; i < 4; i++) { // step
+      if (!t.前に進めるか()) {
+        throw new RuntimeException("前に進めない！");
+      }
+      this.t.前に進む(); // step
+    }
+  }
+}
+`,
+  },
+  originalException1: {
+    instrumented: `
+function main() {
+  const m = call(MyTurtle)();
+  call(m.drawLine.bind(m))();
+  call(m.drawLine.bind(m))();
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+
+  drawLine() {
+    try {
+      for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
+        if (!this.t.前に進めるか()) {
+          throw new Error();
+        }
+        this.t.前に進む(); // step
+      }
+    } catch (e) {
+      this.t.右を向く(); // step
+      this.t.前に進む(); // step
+    }
+  }
+}
+
+main();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m = new MyTurtle(); // caller
+    m.drawLine(); // caller
+    m.drawLine(); // caller
+  }
+}
+
+class MyTurtle {
+  public Turtle t = new Turtle(); // step
+
+  public void drawLine() {
+    try {
+      for (int i = 0; i < 4; i++) { // step
+        if (!this.t.前に進めるか()) {
+          throw new OutOfBoardException();
+        }
+        this.t.前に進む(); // step
+      }
+    } catch (Exception e) {
+      this.t.右を向く(); // step
+      this.t.前に進む(); // step
+    }
+  }
+}
+
+class OutOfBoardException extends Exception { }
+`,
+  },
+  originalException2: {
+    instrumented: `
+function main() {
+  const m = call(MyTurtle)();
+  try {
+    call(m.drawLine.bind(m))();
+    call(m.drawLine.bind(m))();
+  } catch (e) {
+    m.t.右を向く(); // step
+    m.t.前に進む(); // step
+  }
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+
+  drawLine() {
+    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
+      if (!this.t.前に進めるか()) {
+        throw new Error();
+      }
+      this.t.前に進む(); // step
+    }
+  }
+}
+
+main();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m = new MyTurtle(); // caller
+    try {
+      m.drawLine(); // caller
+      m.drawLine(); // caller
+    } catch (OutOfBoardException e) {
+      m.t.右を向く(); // step
+      m.t.前に進む(); // step
+    }
+  }
+}
+
+class MyTurtle {
+  public Turtle t = new Turtle(); // step
+
+  public void drawLine() throws OutOfBoardException {
+    for (int i = 0; i < 4; i++) { // step
+      if (!this.t.前に進めるか()) {
+        throw new OutOfBoardException();
+      }
+      this.t.前に進む(); // step
+    }
+  }
+}
+
+class OutOfBoardException extends Exception { }
+`,
+  },
   // ----------- 初級プログラミングⅡ 第7回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第8回 ここから -----------
+  twoDimensionalArray1: {
+    instrumented: `
+s.set('arr', [[0, 3], [1, 1], [0, 2], [2, 3], [0, 1]]);
+const t = new Turtle(); // step
+for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) { // step
+  s.set('c', s.get('arr')[s.get('i')][1]); // step
+  switch (s.get('arr')[s.get('i')][0]) {
+    case 0:
+      for (s.set('j', 0); s.get('j') < s.get('c'); s.set('j', s.get('j') + 1)) { // step
+        t.前に進む(); // step
+      }
+      break;
+    case 1:
+      for (s.set('j', 0); s.get('j') < s.get('c'); s.set('j', s.get('j') + 1)) { // step
+        t.右を向く(); // step
+      }
+      break;
+    case 2:
+      for (s.set('j', 0); s.get('j') < s.get('c'); s.set('j', s.get('j') + 1)) { // step
+        t.左を向く(); // step
+      }
+      break;
+  }
+  delete s.vars['c'];
+}
+delete s.vars['i'];
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    int [][] arr = { { 0, 3 }, { 1, 1 }, { 0, 2 },
+                     { 2, 3 }, { 0, 1 }, };
+    Turtle t = new Turtle(); // step
+    for (int i = 0; i < arr.length; i++) { // step
+      int c = arr[i][1]; // step
+      switch (arr[i][0]) {
+        case 0:
+          for (int j = 0; j < c; j++) { // step
+            t.前に進む(); // step
+          }
+          break;
+        case 1:
+          for (int j = 0; j < c; j++) { // step
+            t.右を向く(); // step
+          }
+          break;
+        case 2:
+          for (int j = 0; j < c; j++) { // step
+            t.左を向く(); // step
+          }
+          break;
+      }
+    }
+  }
+}
+  `,
+  },
+  twoDimensionalArray2: {
+    instrumented: `
+const t = new Turtle(); // step
+s.set('arr', [[0, 3], [1], [0, 2], [2], [0, 1]]);
+for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) { // step
+  switch (s.get('arr')[s.get('i')][0]) {
+    case 0:
+      s.set('c', s.get('arr')[s.get('i')][1]); // step
+      for (s.set('j', 0); s.get('j') < s.get('c'); s.set('j', s.get('j') + 1)) { // step
+        t.forward(); // step
+      }
+      delete s.vars['j'];
+      delete s.vars['c'];
+      break;
+    case 1:
+      t.turnRight(); // step
+      break;
+    case 2:
+      t.turnLeft(); // step
+      break;
+  }
+}
+delete s.vars['i'];
+    `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    int [][] arr = { { 0, 3 }, { 1 }, { 0, 2 },
+                     { 2 }, { 0, 1 }, };
+    Turtle t = new Turtle(); // step
+    for (int i = 0; i < arr.length; i++) { // step
+      switch (arr[i][0]) {
+        case 0:
+          int c = arr[i][1]; // step
+          for (int j = 0; j < c; j++) { // step
+            t.前に進む(); // step
+          }
+          break;
+        case 1:
+          t.右を向く(); // step
+          break;
+        case 2:
+          t.左を向く(); // step
+          break;
+      }
+    }
+  }
+}
+  `,
+  },
+  threeDimensionalArray1: {
+    instrumented: `
+s.set('a', [ [ [0, 0], [1, 1], [0, 3] ], [ [5, 2], [2, 1], [0, 4] ] ]);
+for (s.set('i', 0); s.get('i') < s.get('a').length; s.set('i', s.get('i') + 1)) { // step
+  const t = new Turtle(s.get('a')[s.get('i')][0][0], s.get('a')[s.get('i')][0][1]); // step
+  for (s.set('j', 1); s.get('j') < s.get('a')[s.get('i')].length; s.set('j', s.get('j') + 1)) { // step
+    s.set('c', s.get('a')[s.get('i')][s.get('j')][1]); // step
+    switch (s.get('a')[s.get('i')][s.get('j')][0]) {
+      case 0:
+        for (s.set('k', 0); s.get('k') < s.get('c'); s.set('k', s.get('k') + 1)) { // step
+          t.forward(); // step
+        }
+        delete s.vars['k'];
+        break;
+      case 1:
+        for (s.set('k', 0); s.get('k') < s.get('c'); s.set('k', s.get('k') + 1)) { // step
+          t.turnRight(); // step
+        }
+        delete s.vars['k'];
+        break;
+      case 2:
+        for (s.set('k', 0); s.get('k') < s.get('c'); s.set('k', s.get('k') + 1)) { // step
+          t.turnLeft(); // step
+        }
+        delete s.vars['k'];
+        break;
+    }
+    delete s.vars['c'];
+  }
+  delete s.vars['j'];
+}
+delete s.vars['i'];
+    `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    int[][][] a = { { {0, 0}, {1, 1}, {0, 3} },
+                    { {5, 2}, {2, 1}, {0, 4} } };
+    for (int i = 0; i < a.length; i++) { // step
+      Turtle t = new Turtle(a[i][0][0], a[i][0][1]); // step
+      for (int j = 1; j < a[i].length; j++) { // step
+        int c = a[i][j][1]; // step
+        switch (a[i][j][0]) {
+          case 0:
+            for (int k = 0; k < c; k++) { // step
+              t.前に進む(); // step
+            }
+            break;
+          case 1:
+            for (int k = 0; k < c; k++) { // step
+              t.右を向く(); // step
+            }
+            break;
+          case 2:
+            for (int k = 0; k < c; k++) { // step
+              t.左を向く(); // step
+            }
+            break;
+        }
+      }
+    }
+  }
+}
+  `,
+  },
   // ----------- 初級プログラミングⅡ 第8回 ここまで -----------
+
   test1: {
     instrumented: `
 const t = new Turtle(); // step
