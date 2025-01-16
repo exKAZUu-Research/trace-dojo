@@ -7039,6 +7039,18 @@ class MyTurtle {
 class OutOfBoardException extends Exception { }
 `,
   },
+  originalException3: {
+    instrumented: ``,
+    java: ``,
+  },
+  originalException4: {
+    instrumented: ``,
+    java: ``,
+  },
+  originalException5: {
+    instrumented: ``,
+    java: ``,
+  },
   // ----------- 初級プログラミングⅡ 第7回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第8回 ここから -----------
