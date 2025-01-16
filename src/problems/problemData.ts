@@ -165,6 +165,7 @@ export const problemIdToName = {
   overloadAndOverride2: 'オーバーロードとオーバーライド(2)',
   overloadAndOverride3: 'オーバーロードとオーバーライド(3)',
   // 初級プログラミングⅡ 第7回
+  exception1: '例外(1)',
   // 初級プログラミングⅡ 第8回
   oop1: 'オブジェクト指向プログラミング(1)',
   oop2: 'オブジェクト指向プログラミング(2)',
@@ -296,7 +297,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
       'overloadAndOverride3',
     ],
     // 第7回
-    ['oop1'],
+    ['exception1'],
     // 第8回
     ['oop1'],
   ],
@@ -6579,6 +6580,64 @@ class MyTurtle3 extends MyTurtle2 {
   // ----------- 初級プログラミングⅡ 第6回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第7回 ここから -----------
+  exception1: {
+    instrumented: `
+function main() {
+  const m = call(MyTurtle)();
+  try {
+    call(m.drawLine.bind(m))();
+    call(m.drawLine.bind(m))();
+  } catch (e) {
+    m.t.右を向く(); // step
+    m.t.前に進む(); // step
+  }
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+
+  drawLine() {
+    for (let i = 0; i < 4; i++) { // step
+      if (!this.t.前に進めるか()) {
+        throw new Error("前に進めない！");
+      }
+      this.t.前に進む(); // step
+    }
+  }
+}
+
+main();
+    `,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m = new MyTurtle(); // caller
+    try {
+      m.drawLine(); // caller
+      m.drawLine(); // caller
+    } catch (Exception e) {
+      m.t.右を向く(); // step
+      m.t.前に進む(); // step
+    }
+  }
+}
+
+class MyTurtle {
+  public Turtle t = new Turtle(); // step
+
+  public void drawLine() {
+    for (int i = 0; i < 4; i++) { // step
+      if (!t.前に進めるか()) {
+        throw new RuntimeException("前に進めない！");
+      }
+      this.t.前に進む(); // step
+    }
+  }
+}
+    `,
+  },
   // ----------- 初級プログラミングⅡ 第7回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第8回 ここから -----------
