@@ -6829,7 +6829,32 @@ class OutOfBoardException extends Exception { }
 
   // ----------- 初級プログラミングⅡ 第8回 ここから -----------
   twoDimensionalArray1: {
-    instrumented: ``,
+    instrumented: `
+s.set('arr', [[0, 3], [1, 1], [0, 2], [2, 3], [0, 1]]);
+const t = new Turtle(); // step
+for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) { // step
+  s.set('c', s.get('arr')[s.get('i')][1]); // step
+  switch (s.get('arr')[s.get('i')][0]) {
+    case 0:
+      for (s.set('j', 0); s.get('j') < s.get('c'); s.set('j', s.get('j') + 1)) { // step
+        t.前に進む(); // step
+      }
+      break;
+    case 1:
+      for (s.set('j', 0); s.get('j') < s.get('c'); s.set('j', s.get('j') + 1)) { // step
+        t.右を向く(); // step
+      }
+      break;
+    case 2:
+      for (s.set('j', 0); s.get('j') < s.get('c'); s.set('j', s.get('j') + 1)) { // step
+        t.左を向く(); // step
+      }
+      break;
+  }
+  delete s.vars['c'];
+}
+delete s.vars['i'];
+`,
     java: `
 public class Main {
   public static void main(String[] args) {
@@ -6861,7 +6886,29 @@ public class Main {
   `,
   },
   twoDimensionalArray2: {
-    instrumented: ``,
+    instrumented: `
+const t = new Turtle(); // step
+s.set('arr', [[0, 3], [1], [0, 2], [2], [0, 1]]);
+for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) { // step
+  switch (s.get('arr')[s.get('i')][0]) {
+    case 0:
+      s.set('c', s.get('arr')[s.get('i')][1]); // step
+      for (s.set('j', 0); s.get('j') < s.get('c'); s.set('j', s.get('j') + 1)) { // step
+        t.forward(); // step
+      }
+      delete s.vars['j'];
+      delete s.vars['c'];
+      break;
+    case 1:
+      t.turnRight(); // step
+      break;
+    case 2:
+      t.turnLeft(); // step
+      break;
+  }
+}
+delete s.vars['i'];
+    `,
     java: `
 public class Main {
   public static void main(String[] args) {
@@ -6889,7 +6936,38 @@ public class Main {
   `,
   },
   threeDimensionalArray1: {
-    instrumented: ``,
+    instrumented: `
+s.set('a', [ [ [0, 0], [1, 1], [0, 3] ], [ [5, 2], [2, 1], [0, 4] ] ]);
+for (s.set('i', 0); s.get('i') < s.get('a').length; s.set('i', s.get('i') + 1)) { // step
+  const t = new Turtle(s.get('a')[s.get('i')][0][0], s.get('a')[s.get('i')][0][1]); // step
+  for (s.set('j', 1); s.get('j') < s.get('a')[s.get('i')].length; s.set('j', s.get('j') + 1)) { // step
+    s.set('c', s.get('a')[s.get('i')][s.get('j')][1]); // step
+    switch (s.get('a')[s.get('i')][s.get('j')][0]) {
+      case 0:
+        for (s.set('k', 0); s.get('k') < s.get('c'); s.set('k', s.get('k') + 1)) { // step
+          t.forward(); // step
+        }
+        delete s.vars['k'];
+        break;
+      case 1:
+        for (s.set('k', 0); s.get('k') < s.get('c'); s.set('k', s.get('k') + 1)) { // step
+          t.turnRight(); // step
+        }
+        delete s.vars['k'];
+        break;
+      case 2:
+        for (s.set('k', 0); s.get('k') < s.get('c'); s.set('k', s.get('k') + 1)) { // step
+          t.turnLeft(); // step
+        }
+        delete s.vars['k'];
+        break;
+    }
+    delete s.vars['c'];
+  }
+  delete s.vars['j'];
+}
+delete s.vars['i'];
+    `,
     java: `
 public class Main {
   public static void main(String[] args) {
