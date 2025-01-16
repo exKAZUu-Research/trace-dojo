@@ -167,8 +167,14 @@ export const problemIdToName = {
   // 初級プログラミングⅡ 第7回
   exception1: '例外(1)',
   exception2: '例外(2)',
+  exception3: '例外(3)',
+  exception4: '例外(4)',
+  exception5: '例外(5)',
   originalException1: '独自に定義した例外(1)',
   originalException2: '独自に定義した例外(2)',
+  originalException3: '独自に定義した例外(3)',
+  originalException4: '独自に定義した例外(4)',
+  originalException5: '独自に定義した例外(5)',
   // 初級プログラミングⅡ 第8回
   twoDimensionalArray1: '二次元配列(1)',
   twoDimensionalArray2: '二次元配列(2)',
@@ -304,7 +310,18 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
       'overloadAndOverride3',
     ],
     // 第7回
-    ['exception1', 'exception2', 'originalException1', 'originalException2'],
+    [
+      'exception1',
+      'exception2',
+      'exception3',
+      'exception4',
+      'exception5',
+      'originalException1',
+      'originalException2',
+      'originalException3',
+      'originalException4',
+      'originalException5',
+    ],
     // 第8回
     ['twoDimensionalArray1', 'twoDimensionalArray2', 'threeDimensionalArray1'],
   ],
@@ -6700,6 +6717,203 @@ class MyTurtle {
         throw new RuntimeException("前に進めない！");
       }
       this.t.前に進む(); // step
+    }
+  }
+}
+`,
+  },
+  exception3: {
+    instrumented: `
+function main() {
+  const m = call(MyTurtle)();
+  try {
+    call(m.drawLine.bind(m))();
+    call(m.drawLine.bind(m))();
+  } catch (e) {
+    m.t.右を向く(); // step
+    m.t.前に進む(); // step
+    m.t.左を向く(); // step
+  }
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+
+  drawLine() {
+    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
+      if (!this.t.前に進めるか()) {
+        throw new Error("前に進めない！");
+      }
+      this.t.前に進む(); // step
+    }
+  }
+}
+
+main();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m = new MyTurtle(); // caller
+    try {
+      m.drawLine(); // caller
+      m.drawLine(); // caller
+    } catch (Exception e) {
+      m.t.右を向く(); // step
+      m.t.前に進む(); // step
+      m.t.左を向く(); // step
+    }
+  }
+}
+
+class MyTurtle {
+  public Turtle t = new Turtle(); // step
+
+  public void drawLine() {
+    for (int i = 0; i < 4; i++) { // step
+      if (!t.前に進めるか()) {
+        throw new RuntimeException("前に進めない！");
+      }
+      this.t.前に進む(); // step
+    }
+  }
+}
+`,
+  },
+  exception4: {
+    instrumented: `
+function main() {
+  const m = call(MyTurtle)();
+  try {
+    call(m.drawLine.bind(m))();
+    call(m.drawLine.bind(m))();
+  } catch (e) {
+    m.t.前に進む(); // step
+    m.t.右を向く(); // step
+  }
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+
+  drawLine() {
+    try {
+      for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
+        if (!this.t.前に進めるか()) {
+          throw new Error("前に進めない！");
+        }
+        this.t.前に進む(); // step
+      }
+    } catch (e) {
+      this.t.右を向く(); // step
+      throw e;
+    }
+  }
+}
+
+main();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m = new MyTurtle(); // caller
+    try {
+      m.drawLine(); // caller
+      m.drawLine(); // caller
+    } catch (Exception e) {
+      m.t.前に進む(); // step
+      m.t.右を向く(); // step
+    }
+  }
+}
+
+class MyTurtle {
+  public Turtle t = new Turtle(); // step
+
+  public void drawLine() {
+    try {
+      for (int i = 0; i < 4; i++) { // step
+        if (!t.前に進めるか()) {
+          throw new RuntimeException("前に進めない！");
+        }
+        this.t.前に進む(); // step
+      }
+    } catch (RuntimeException e) {
+      t.右を向く(); // step
+      throw e; // catchした例外をもう一度throwする。
+    }
+  }
+}
+`,
+  },
+  exception5: {
+    instrumented: `
+function main() {
+  const m = call(MyTurtle)();
+  try {
+    call(m.drawLine.bind(m))();
+    call(m.drawLine.bind(m))();
+  } catch (e) {
+    m.t.前に進む(); // step
+    // Uncaught exception!
+  }
+}
+
+class MyTurtle {
+  constructor() {
+    this.t = new Turtle(); // step
+  }
+
+  drawLine() {
+    try {
+      for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
+        if (!this.t.前に進めるか()) {
+          throw new Error("前に進めない！");
+        }
+        this.t.前に進む(); // step
+      }
+    } catch (e) {
+      this.t.右を向く(); // step
+      throw e;
+    }
+  }
+}
+
+main();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    MyTurtle m = new MyTurtle(); // caller
+    try {
+      m.drawLine(); // caller
+      m.drawLine(); // caller
+    } catch (RuntimeException e) {
+      m.t.前に進む(); // step
+      throw e; // catchした例外をもう一度throwする。
+      m.t.前に進む(); // step
+    }
+  }
+}
+
+class MyTurtle {
+  public Turtle t = new Turtle(); // step
+
+  public void drawLine() {
+    try {
+      for (int i = 0; i < 4; i++) { // step
+        if (!t.前に進めるか()) {
+          throw new RuntimeException("前に進めない！");
+        }
+        this.t.前に進む(); // step
+      }
+    } catch (RuntimeException e) {
+      t.右を向く(); // step
+      throw e; // catchした例外をもう一度throwする。
     }
   }
 }
