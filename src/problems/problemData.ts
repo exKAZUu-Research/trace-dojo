@@ -179,6 +179,13 @@ export const problemIdToName = {
   twoDimensionalArray1: '二次元配列(1)',
   twoDimensionalArray2: '二次元配列(2)',
   threeDimensionalArray1: '三次元配列(1)',
+  twoDimensionalArray3: '二次元配列(3)',
+  twoDimensionalArray4: '二次元配列(4)',
+  twoDimensionalArray5: '二次元配列(5)',
+  twoDimensionalArray6: '二次元配列(6)',
+  twoDimensionalArray7: '二次元配列(7)',
+  twoDimensionalArray8: '二次元配列(8)',
+  threeDimensionalArray2: '三次元配列(2)',
   // 動作確認用
   oop1: 'オブジェクト指向プログラミング(1)',
   oop2: 'オブジェクト指向プログラミング(2)',
@@ -323,7 +330,18 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
       'originalException5',
     ],
     // 第8回
-    ['twoDimensionalArray1', 'twoDimensionalArray2', 'threeDimensionalArray1'],
+    [
+      'twoDimensionalArray1',
+      'twoDimensionalArray2',
+      'threeDimensionalArray1',
+      'twoDimensionalArray3',
+      'twoDimensionalArray4',
+      'twoDimensionalArray5',
+      'twoDimensionalArray6',
+      'twoDimensionalArray7',
+      'twoDimensionalArray8',
+      'threeDimensionalArray2',
+    ],
   ],
   test: [['test1', 'test2', 'test3', 'test4', 'test5', 'test9', 'oop1', 'oop2']],
 };
@@ -7487,6 +7505,72 @@ public class Main {
   }
 }
   `,
+  },
+  twoDimensionalArray3: {
+    instrumented: ``,
+    java: `
+public class Main {
+  private static final int FORWARD = 0;
+  private static final int TURN_RIGHT = 1;
+  private static final int TURN_LEFT = 2;
+
+  private static void moveTurtle(Turtle t, int[] command) { // step
+    switch (command[0]) {
+      case FORWARD:
+        int steps = command[1]; // step
+        for (int j = 0; j < steps; j++) { // step
+          t.前に進む(); // step
+        }
+        break;
+      case TURN_RIGHT:
+        t.右を向く(); // step
+        break;
+      case TURN_LEFT:
+        t.左を向く(); // step
+        break;
+    }
+  }
+
+  public static void main(String[] args) {
+    int[][] arr = {
+      { FORWARD, 3 },
+      { TURN_RIGHT },
+      { FORWARD, 2 },
+      { TURN_LEFT },
+      { FORWARD, 1 }
+    };
+    Turtle t = new Turtle(); // step
+    
+    for (int i = 0; i < arr.length; i++) { // step
+      moveTurtle(t, arr[i]); // step
+    }
+  }
+}
+  `,
+  },
+  twoDimensionalArray4: {
+    instrumented: ``,
+    java: ``,
+  },
+  twoDimensionalArray5: {
+    instrumented: ``,
+    java: ``,
+  },
+  twoDimensionalArray6: {
+    instrumented: ``,
+    java: ``,
+  },
+  twoDimensionalArray7: {
+    instrumented: ``,
+    java: ``,
+  },
+  twoDimensionalArray8: {
+    instrumented: ``,
+    java: ``,
+  },
+  threeDimensionalArray2: {
+    instrumented: ``,
+    java: ``,
   },
   // ----------- 初級プログラミングⅡ 第8回 ここまで -----------
 
