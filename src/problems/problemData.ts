@@ -184,8 +184,8 @@ export const problemIdToName = {
   twoDimensionalArray6: '二次元配列(6)',
   threeDimensionalArray1: '三次元配列(1)',
   threeDimensionalArray2: '三次元配列(2)',
-  threeDimensionalArray3: '二次元配列(3)',
-  threeDimensionalArray4: '二次元配列(4)',
+  threeDimensionalArray3: '三次元配列(3)',
+  threeDimensionalArray4: '三次元配列(4)',
   // 動作確認用
   oop1: 'オブジェクト指向プログラミング(1)',
   oop2: 'オブジェクト指向プログラミング(2)',
@@ -7587,14 +7587,14 @@ public class Main {
         case FORWARD:
           int steps = arr[i][1]; // step
           for (int j = 0; j < steps; j++) { // step
-            t.前に進む(); // step
+            turtle.前に進む(); // step
           }
           break;
         case TURN_RIGHT:
-          t.右を向く(); // step
+          turtle.右を向く(); // step
           break;
         case TURN_LEFT:
-          t.左を向く(); // step
+          turtle.左を向く(); // step
           break;
       }
     }
@@ -7676,14 +7676,14 @@ public class Main {
         case FORWARD:
           int steps = arr[i][1]; // step
           for (int j = 0; j < steps; j++) { // step
-            t.前に進む(); // step
+            turtle.前に進む(); // step
           }
           break;
         case TURN_RIGHT:
-          t.右を向く(); // step
+          turtle.右を向く(); // step
           break;
         case TURN_LEFT:
-          t.左を向く(); // step
+          turtle.左を向く(); // step
           break;
       }
     }
