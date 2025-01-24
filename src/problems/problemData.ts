@@ -7692,8 +7692,79 @@ public class Main {
   `,
   },
   twoDimensionalArray6: {
-    instrumented: ``,
-    java: ``,
+    instrumented: `
+const FORWARD = 0;
+const TURN_RIGHT = 1;
+const TURN_LEFT = 2;
+
+const commands = [
+  [FORWARD, FORWARD, FORWARD, FORWARD],
+  [FORWARD, FORWARD, TURN_RIGHT, FORWARD, FORWARD],
+  [TURN_LEFT, FORWARD, TURN_RIGHT, FORWARD]
+];
+
+const turtles = new Array(commands.length);
+for (s.set('nthTurtle', 0); s.get('nthTurtle') < commands.length; s.set('nthTurtle', s.get('nthTurtle') + 1)) { // step
+  turtles[s.get('nthTurtle')] = new Turtle(s.get('nthTurtle'), 0); // step
+}
+
+for (s.set('nthTurtle', 0); s.get('nthTurtle') < commands.length; s.set('nthTurtle', s.get('nthTurtle') + 1)) { // step
+  for (s.set('i', 0); s.get('i') < commands[s.get('nthTurtle')].length; s.set('i', s.get('i') + 1)) { // step
+    s.set('command', commands[s.get('nthTurtle')][s.get('i')]); // step
+    switch (s.get('command')) {
+      case FORWARD:
+        turtles[s.get('nthTurtle')].前に進む(); // step
+        break;
+      case TURN_RIGHT:
+        turtles[s.get('nthTurtle')].右を向く(); // step
+        break;
+      case TURN_LEFT:
+        turtles[s.get('nthTurtle')].左を向く(); // step
+        break;
+    }
+    delete s.vars['command'];
+  }
+  delete s.vars['i'];
+}
+delete s.vars['nthTurtle'];
+`,
+    java: `
+public class Main {
+  private static final int FORWARD = 0;
+  private static final int TURN_RIGHT = 1;
+  private static final int TURN_LEFT = 2;
+
+  public static void main(String[] args) {
+    String[][] commands = {
+      { FORWARD, FORWARD, FORWARD, FORWARD },
+      { FORWARD, FORWARD, TURN_RIGHT, FORWARD, FORWARD },
+      { TURN_LEFT, , FORWARD, TURN_RIGHT, FORWARD }
+    };
+
+    Turtle[] turtles = new Turtle[commands.length];
+    for (int nthTurtle = 0; nthTurtle < commands.length; nthTurtle++) { // step
+      turtles[nthTurtle] = new Turtle(nthTurtle, 0); // step
+    }
+
+    for (int nthTurtle = 0; nthTurtle < commands.length; nthTurtle++) { // step
+      for (int i = 0; i < commands[nthTurtle].length; i++) { // step
+        int command = commands[nthTurtle][i]; // step
+        switch (command) {
+          case FORWARD:
+            turtles[nthTurtle].前に進む(); // step
+            break;
+          case TURN_RIGHT:
+            turtles[nthTurtle].右を向く(); // step
+            break;
+          case TURN_LEFT:
+            turtles[nthTurtle].左を向く(); // step
+            break;
+        }
+      }
+    }
+  }
+}
+  `,
   },
   twoDimensionalArray7: {
     instrumented: ``,
