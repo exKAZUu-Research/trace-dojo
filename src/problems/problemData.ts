@@ -7507,14 +7507,63 @@ public class Main {
   `,
   },
   twoDimensionalArray3: {
-    instrumented: ``,
+    instrumented: `
+const FORWARD = 0;
+const TURN_RIGHT = 1;
+const TURN_LEFT = 2;
+
+const arr = [
+  [FORWARD, 3],
+  [TURN_RIGHT],
+  [FORWARD, 2],
+  [TURN_LEFT],
+  [FORWARD, 1]
+];
+const t = new Turtle(); // step
+
+for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
+  call(moveTurtle, 't', 'command')(t, arr[s.get('i')]);
+}
+
+function moveTurtle(t, command) {
+  switch (command[0]) {
+    case FORWARD:
+      s.set('steps', command[1]); // step
+      for (s.set('j', 0); s.get('j') < s.get('steps'); s.set('j', s.get('j') + 1)) { // step
+        t.前に進む(); // step
+      }
+      break;
+    case TURN_RIGHT:
+      t.右を向く(); // step
+      break;
+    case TURN_LEFT:
+      t.左を向く(); // step
+      break;
+  }
+}
+`,
     java: `
 public class Main {
   private static final int FORWARD = 0;
   private static final int TURN_RIGHT = 1;
   private static final int TURN_LEFT = 2;
 
-  private static void moveTurtle(Turtle t, int[] command) { // step
+  public static void main(String[] args) {
+    int[][] arr = {
+      { FORWARD, 3 },
+      { TURN_RIGHT },
+      { FORWARD, 2 },
+      { TURN_LEFT },
+      { FORWARD, 1 }
+    };
+    Turtle t = new Turtle(); // step
+
+    for (int i = 0; i < arr.length; i++) { // step
+      moveTurtle(t, arr[i]); // caller
+    }
+  }
+
+  private static void moveTurtle(Turtle t, int[] command) {
     switch (command[0]) {
       case FORWARD:
         int steps = command[1]; // step
@@ -7528,21 +7577,6 @@ public class Main {
       case TURN_LEFT:
         t.左を向く(); // step
         break;
-    }
-  }
-
-  public static void main(String[] args) {
-    int[][] arr = {
-      { FORWARD, 3 },
-      { TURN_RIGHT },
-      { FORWARD, 2 },
-      { TURN_LEFT },
-      { FORWARD, 1 }
-    };
-    Turtle t = new Turtle(); // step
-    
-    for (int i = 0; i < arr.length; i++) { // step
-      moveTurtle(t, arr[i]); // step
     }
   }
 }
