@@ -178,14 +178,14 @@ export const problemIdToName = {
   // 初級プログラミングⅡ 第8回
   twoDimensionalArray1: '二次元配列(1)',
   twoDimensionalArray2: '二次元配列(2)',
-  threeDimensionalArray1: '三次元配列(1)',
   twoDimensionalArray3: '二次元配列(3)',
   twoDimensionalArray4: '二次元配列(4)',
   twoDimensionalArray5: '二次元配列(5)',
   twoDimensionalArray6: '二次元配列(6)',
-  twoDimensionalArray7: '二次元配列(7)',
-  twoDimensionalArray8: '二次元配列(8)',
+  threeDimensionalArray1: '三次元配列(1)',
   threeDimensionalArray2: '三次元配列(2)',
+  threeDimensionalArray3: '二次元配列(3)',
+  threeDimensionalArray4: '二次元配列(4)',
   // 動作確認用
   oop1: 'オブジェクト指向プログラミング(1)',
   oop2: 'オブジェクト指向プログラミング(2)',
@@ -333,13 +333,13 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
     [
       'twoDimensionalArray1',
       'twoDimensionalArray2',
-      'threeDimensionalArray1',
       'twoDimensionalArray3',
       'twoDimensionalArray4',
       'twoDimensionalArray5',
       'twoDimensionalArray6',
-      'twoDimensionalArray7',
-      'twoDimensionalArray8',
+      'threeDimensionalArray1',
+      'threeDimensionalArray2',
+      'threeDimensionalArray3',
       'threeDimensionalArray2',
     ],
   ],
@@ -7766,14 +7766,6 @@ public class Main {
 }
   `,
   },
-  twoDimensionalArray7: {
-    instrumented: ``,
-    java: ``,
-  },
-  twoDimensionalArray8: {
-    instrumented: ``,
-    java: ``,
-  },
   threeDimensionalArray1: {
     instrumented: `
 s.set('a', [ [ [0, 0], [1, 1], [0, 3] ], [ [5, 2], [2, 1], [0, 4] ] ]);
@@ -7841,6 +7833,14 @@ public class Main {
   `,
   },
   threeDimensionalArray2: {
+    instrumented: ``,
+    java: ``,
+  },
+  threeDimensionalArray3: {
+    instrumented: ``,
+    java: ``,
+  },
+  threeDimensionalArray4: {
     instrumented: ``,
     java: ``,
   },
