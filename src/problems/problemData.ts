@@ -7833,8 +7833,69 @@ public class Main {
   `,
   },
   threeDimensionalArray2: {
-    instrumented: ``,
-    java: ``,
+    instrumented: `
+const FORWARD = 0;
+const TURN_RIGHT = 1;
+const TURN_LEFT = 2;
+
+const arr = [
+  [ [0, 0], [FORWARD, FORWARD, TURN_RIGHT, FORWARD] ],
+  [ [2, 3], [TURN_LEFT, FORWARD, FORWARD] ]
+];
+const turtles = new Array(arr.length);
+for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
+  turtles[s.get('i')] = new Turtle(arr[s.get('i')][0][0], arr[s.get('i')][0][1]); // step
+  for (s.set('j', 0); s.get('j') < arr[s.get('i')][1].length; s.set('j', s.get('j') + 1)) { // step
+    s.set('command', arr[s.get('i')][1][s.get('j')]); // step
+    switch (s.get('command')) {
+      case FORWARD:
+        turtles[s.get('i')].forward(); // step
+        break;
+      case TURN_RIGHT:
+        turtles[s.get('i')].turnRight(); // step
+        break;
+      case TURN_LEFT:
+        turtles[s.get('i')].turnLeft(); // step
+        break;
+    }
+    delete s.vars['command'];
+  }
+  delete s.vars['j'];
+}
+delete s.vars['i'];
+    `,
+    java: `
+public class Main {
+  private static final int FORWARD = 0;
+  private static final int TURN_RIGHT = 1;
+  private static final int TURN_LEFT = 2;
+
+  public static void main(String[] args) {
+    int[][][] arr = {
+      { {0, 0}, {FORWARD, FORWARD, TURN_RIGHT, FORWARD} },
+      { {2, 3}, {TURN_LEFT, FORWARD, FORWARD} }
+    };
+    Turtle[] turtles = new Turtle[arr.length];
+    for (int i = 0; i < arr.length; i++) { // step
+      turtles[i] = new Turtle(arr[i][0][0], arr[i][0][1]); // step
+      for (int j = 0; j < arr[i][1].length; j++) { // step
+        int command = arr[i][1][j]; // step
+        switch (command) {
+          case FORWARD:
+            turtles[i].前に進む(); // step
+            break;
+          case TURN_RIGHT:
+            turtles[i].右を向く(); // step
+            break;
+          case TURN_LEFT:
+            turtles[i].左を向く(); // step
+            break;
+        }
+      }
+    }
+  }
+}
+  `,
   },
   threeDimensionalArray3: {
     instrumented: ``,
