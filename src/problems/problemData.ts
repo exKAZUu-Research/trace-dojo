@@ -7738,7 +7738,7 @@ public class Main {
     String[][] commands = {
       { FORWARD, FORWARD, FORWARD, FORWARD },
       { FORWARD, FORWARD, TURN_RIGHT, FORWARD, FORWARD },
-      { TURN_LEFT, , FORWARD, TURN_RIGHT, FORWARD }
+      { TURN_LEFT, FORWARD, TURN_RIGHT, FORWARD }
     };
 
     Turtle[] turtles = new Turtle[commands.length];
