@@ -43,7 +43,7 @@
   },
   "dependencies": {
     "@chakra-ui/next-js": "2.4.2",
-    "@chakra-ui/react": "2.10.5",
+    "@chakra-ui/react": "3.8.0",
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.0",
     "@prisma/client": "6.3.1",
@@ -91,7 +91,7 @@
     "zod-form-data": "2.0.5"
   },
   "devDependencies": {
-    "@chakra-ui/cli": "2.5.6",
+    "@chakra-ui/cli": "3.8.0",
     "@types/eslint": "9.6.1",
     "@types/jsonwebtoken": "9.0.8",
     "@types/micromatch": "4.0.9",
