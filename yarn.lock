@@ -3673,24 +3673,24 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@trpc/client@npm:11.0.0-rc.798":
-  version: 11.0.0-rc.798
-  resolution: "@trpc/client@npm:11.0.0-rc.798"
+"@trpc/client@npm:11.0.0-rc.802":
+  version: 11.0.0-rc.802
+  resolution: "@trpc/client@npm:11.0.0-rc.802"
   peerDependencies:
-    "@trpc/server": 11.0.0-rc.798+5cf2f3e17
+    "@trpc/server": 11.0.0-rc.802+1eccc1171
     typescript: ">=5.7.2"
-  checksum: 10c0/770f47612540168d5d58724dde1952cc8cb84c77b97483c794ad5702aebd0c3f3142b5c95cefc9e6c5479f1f8aa86d2256b9d39ee62bdfed8ee79bffe59f7623
+  checksum: 10c0/429c2f5197c0f38e341d30a0a5adb33ce8328e2bceb966c023354da0eb2a23fde5951782a0af9feaa98cdbc6cb39181d11e718bf40c7f45831603e39fa1ff7f7
   languageName: node
   linkType: hard
 
-"@trpc/next@npm:11.0.0-rc.798":
-  version: 11.0.0-rc.798
-  resolution: "@trpc/next@npm:11.0.0-rc.798"
+"@trpc/next@npm:11.0.0-rc.802":
+  version: 11.0.0-rc.802
+  resolution: "@trpc/next@npm:11.0.0-rc.802"
   peerDependencies:
     "@tanstack/react-query": ^5.59.15
-    "@trpc/client": 11.0.0-rc.798+5cf2f3e17
-    "@trpc/react-query": 11.0.0-rc.798+5cf2f3e17
-    "@trpc/server": 11.0.0-rc.798+5cf2f3e17
+    "@trpc/client": 11.0.0-rc.802+1eccc1171
+    "@trpc/react-query": 11.0.0-rc.802+1eccc1171
+    "@trpc/server": 11.0.0-rc.802+1eccc1171
     next: "*"
     react: ">=16.8.0"
     react-dom: ">=16.8.0"
@@ -3700,30 +3700,30 @@ __metadata:
       optional: true
     "@trpc/react-query":
       optional: true
-  checksum: 10c0/8860bc023a412acbb93d9a493912e331fdbdb7f04120000a3d5b1701ba569469b2488796f336adc9e7cac52b34a47148612023e0019dd2de8b6555c4823f2c66
+  checksum: 10c0/14be0ac0a1a35dc33e53bf6013ee2d29b9b7fee6ffee45e8799911bd7d582cea0945dc777915fe4e798f31eddc8ee1bef0d19fffcfd261f0532d4bade302c035
   languageName: node
   linkType: hard
 
-"@trpc/react-query@npm:11.0.0-rc.798":
-  version: 11.0.0-rc.798
-  resolution: "@trpc/react-query@npm:11.0.0-rc.798"
+"@trpc/react-query@npm:11.0.0-rc.802":
+  version: 11.0.0-rc.802
+  resolution: "@trpc/react-query@npm:11.0.0-rc.802"
   peerDependencies:
     "@tanstack/react-query": ^5.62.8
-    "@trpc/client": 11.0.0-rc.798+5cf2f3e17
-    "@trpc/server": 11.0.0-rc.798+5cf2f3e17
+    "@trpc/client": 11.0.0-rc.802+1eccc1171
+    "@trpc/server": 11.0.0-rc.802+1eccc1171
     react: ">=18.2.0"
     react-dom: ">=18.2.0"
     typescript: ">=5.7.2"
-  checksum: 10c0/dcfacc76c142857b338763bf2182777054a555f869be42e1dcfae0ad2ff99d50121ca5545dda0047fe3e374cf5c51058b28f5dd62550ca72725027a543756a01
+  checksum: 10c0/18cada6e4eb46273d08557d6d1c3f1c26f3672196d1930249343a4d43277bd88dd7dea6d25bd6bd4aec1148db99820f3ad2d25ba5ff7396a21fc1cb208c85a5f
   languageName: node
   linkType: hard
 
-"@trpc/server@npm:11.0.0-rc.798":
-  version: 11.0.0-rc.798
-  resolution: "@trpc/server@npm:11.0.0-rc.798"
+"@trpc/server@npm:11.0.0-rc.802":
+  version: 11.0.0-rc.802
+  resolution: "@trpc/server@npm:11.0.0-rc.802"
   peerDependencies:
     typescript: ">=5.7.2"
-  checksum: 10c0/29dac738872dcb6d43b6bed0d73865819a0fbc06c9bd9adcd9839f9f9cd5aa82363704761eec866bec7435c5f99a37b435735995b2da516b2a5dc1f499ee96ab
+  checksum: 10c0/7543436e7b335cdea6d133183767be565d2d25da6932b41deb23b1cafee02be3f970d4e2f353cc9ff923b561d81b137cb5e676ab2f588ae80807a93d4a389dd9
   languageName: node
   linkType: hard
 
@@ -4433,13 +4433,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@willbooster/shared-lib-node@npm:6.1.8":
-  version: 6.1.8
-  resolution: "@willbooster/shared-lib-node@npm:6.1.8"
+"@willbooster/shared-lib-node@npm:6.1.9":
+  version: 6.1.9
+  resolution: "@willbooster/shared-lib-node@npm:6.1.9"
   dependencies:
     dotenv: "npm:16.4.7"
     tree-kill: "npm:1.2.2"
-  checksum: 10c0/c7c2bcd167206c844e52f1cd5ff6ef31eddc96283be149a886adf4f0a1fbb79aefe59f3b780a8bd841b29d95377401859fead5292a52f96a0b84e2fdfbf86ced
+  checksum: 10c0/522f21b15e646019277d3e74398b67c3cd929da23a9254d29cd72ea4de4c906bf39fc26dd4a8b1e6fee1be9740bacefc9f591a8acf763111aba7c002f88d28da
   languageName: node
   linkType: hard
 
@@ -4460,9 +4460,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@willbooster/wb@npm:8.0.33":
-  version: 8.0.33
-  resolution: "@willbooster/wb@npm:8.0.33"
+"@willbooster/wb@npm:8.0.34":
+  version: 8.0.34
+  resolution: "@willbooster/wb@npm:8.0.34"
   dependencies:
     chalk: "npm:5.4.1"
     dotenv: "npm:16.4.7"
@@ -4473,7 +4473,7 @@ __metadata:
     yargs: "npm:17.7.2"
   bin:
     wb: bin/index.js
-  checksum: 10c0/8ad00dcb460f4a8311ab56adf4f56e2cc12125c6286822652141d57a92d15dad7b7cf6175b632bc9bb1c91dbb465776fb5e15f68b01389ae4753e74889786594
+  checksum: 10c0/5458d1cff9b41632f8a337635398ceac89c87797b3acce6d9886a21111dd35e2e98b4d17ca5eeb78a14036d37d200492fc3ac45ffb48f837b7cccc5e79251de1
   languageName: node
   linkType: hard
 
@@ -5210,9 +5210,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"build-ts@npm:13.1.23":
-  version: 13.1.23
-  resolution: "build-ts@npm:13.1.23"
+"build-ts@npm:13.1.24":
+  version: 13.1.24
+  resolution: "build-ts@npm:13.1.24"
   dependencies:
     "@babel/core": "npm:7.26.9"
     "@babel/plugin-proposal-decorators": "npm:7.25.9"
@@ -5229,7 +5229,7 @@ __metadata:
     "@rollup/plugin-replace": "npm:6.0.2"
     "@rollup/plugin-terser": "npm:0.4.4"
     "@rollup/pluginutils": "npm:5.1.4"
-    "@willbooster/shared-lib-node": "npm:6.1.8"
+    "@willbooster/shared-lib-node": "npm:6.1.9"
     babel-plugin-polyfill-corejs3: "npm:0.11.1"
     babel-plugin-transform-remove-console: "npm:6.9.4"
     chalk: "npm:5.4.1"
@@ -5250,7 +5250,7 @@ __metadata:
     yargs: "npm:17.7.2"
   bin:
     build-ts: bin/index.js
-  checksum: 10c0/41dbcd9ef6a6da20688404f52f74708991a20edcc0e66d1d0f0a2923abe946906b7a4411f901925158d27b7163d9351bb6ea6bbdf36a61bdcea3079323bd3807
+  checksum: 10c0/0e4d4bf8d7634770f77f25e18d917fc4407863ca9a404fcd43b94b8df3977c1bbfe4ed14f17d33bc974666c4d920ce52b7fecf8276f1d614eaa7dd6f636a0f5a
   languageName: node
   linkType: hard
 
@@ -14551,10 +14551,10 @@ __metadata:
     "@prisma/client": "npm:6.4.1"
     "@rvf/set-get": "npm:7.0.0"
     "@tanstack/react-query": "npm:5.66.9"
-    "@trpc/client": "npm:11.0.0-rc.798"
-    "@trpc/next": "npm:11.0.0-rc.798"
-    "@trpc/react-query": "npm:11.0.0-rc.798"
-    "@trpc/server": "npm:11.0.0-rc.798"
+    "@trpc/client": "npm:11.0.0-rc.802"
+    "@trpc/next": "npm:11.0.0-rc.802"
+    "@trpc/react-query": "npm:11.0.0-rc.802"
+    "@trpc/server": "npm:11.0.0-rc.802"
     "@types/eslint": "npm:9.6.1"
     "@types/jsonwebtoken": "npm:9.0.8"
     "@types/micromatch": "npm:4.0.9"
@@ -14569,10 +14569,10 @@ __metadata:
     "@willbooster/prettier-config": "npm:9.1.3"
     "@willbooster/shared-lib": "npm:5.2.14"
     "@willbooster/shared-lib-react": "npm:3.3.6"
-    "@willbooster/wb": "npm:8.0.33"
+    "@willbooster/wb": "npm:8.0.34"
     at-decorators: "npm:4.2.0"
     babel-plugin-react-compiler: "npm:19.0.0-beta-63e3235-20250105"
-    build-ts: "npm:13.1.23"
+    build-ts: "npm:13.1.24"
     concurrently: "npm:9.1.2"
     conventional-changelog-conventionalcommits: "npm:8.0.0"
     dayjs: "npm:1.11.13"
