@@ -93,7 +93,7 @@
   "devDependencies": {
     "@chakra-ui/cli": "2.5.7",
     "@types/eslint": "9.6.1",
-    "@types/jsonwebtoken": "9.0.8",
+    "@types/jsonwebtoken": "9.0.9",
     "@types/micromatch": "4.0.9",
     "@types/node": "22.13.5",
     "@types/react-dom": "19.0.4",
