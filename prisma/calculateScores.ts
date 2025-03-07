@@ -13,23 +13,27 @@ const prisma = new PrismaClient();
 // 1/3 9:30まで一発正解の採点考慮
 
 const deadLines = {
-  tuBeginner1: [
-    new Date('2024-10-17T11:59:59+09:00'), // 1st: 10/17
-    new Date('2024-10-17T11:59:59+09:00'), // 2nd: 10/17
-    new Date('2024-10-24T11:59:59+09:00'), // 3rd: 10/24
-    new Date('2024-10-24T11:59:59+09:00'), // 4th: 10/24
-    new Date('2024-10-31T11:59:59+09:00'), // 5th: 10/31
-    new Date('2024-11-07T11:59:59+09:00'), // 6th: 11/07
-    new Date('2024-11-14T11:59:59+09:00'), // 7th: 11/14
-    new Date('2024-11-21T11:59:59+09:00'), // 8th: 11/21
-    new Date('2024-12-02T11:59:59+09:00'), // final deadline: 12/02
+  tuBeginner2: [
+    new Date('2025-01-14T11:59:59+09:00'), // 1st: 1/14
+    new Date('2025-01-14T11:59:59+09:00'), // 2nd: 1/14
+    new Date('2025-01-16T11:59:59+09:00'), // 3rd: 1/16
+    new Date('2025-01-16T11:59:59+09:00'), // 4th: 1/16
+    new Date('2025-01-27T11:59:59+09:00'), // 5th: 1/27
+    new Date('2025-01-30T11:59:59+09:00'), // 6th: 1/30
+    new Date('2025-02-06T11:59:59+09:00'), // 7th: 2/6
+    new Date('2025-02-13T11:59:59+09:00'), // 8th: 2/13
+    new Date('2025-02-25T11:59:59+09:00'), // final deadline: 2/25
   ],
 };
+
+const validStudentIds = `
+<ここに学籍番号の一覧を記載する。>
+`;
 
 async function main(): Promise<void> {
   ensureSuperTokensInit();
 
-  const courseId = 'tuBeginner1';
+  const courseId = 'tuBeginner2';
   const users = await prisma.user.findMany();
   const finalDeadline = deadLines[courseId][8];
 
@@ -53,6 +57,10 @@ async function main(): Promise<void> {
     }
 
     if (!email.toLowerCase().endsWith('@s.internet.ac.jp')) continue;
+
+    const atIndex = email.indexOf('@');
+    const studentId = (atIndex > 0 ? email.slice(0, Math.max(0, email.indexOf('@'))) : email).toUpperCase();
+    if (!validStudentIds.includes(studentId)) continue;
 
     let totalScore = 0;
     let solvedProblems = 0;
@@ -109,10 +117,8 @@ async function main(): Promise<void> {
     totalScore = (totalScore / 80) * 100;
 
     // Print CSV row, escape email if it contains commas
-    const atIndex = email.indexOf('@');
-    const studentId = atIndex > 0 ? email.slice(0, Math.max(0, email.indexOf('@'))) : email;
-    const row = `${studentId.toUpperCase()},${Math.round(totalScore)},0,0,0,0,0,0,0,0,0,0,0,\n`;
-    records.push({ studentId: studentId.toUpperCase(), row, solvedProblems });
+    const row = `${studentId},${Math.round(totalScore)},,,,,,,,,,,,\n`;
+    records.push({ studentId, row, solvedProblems });
   }
 
   // Sort records by studentId
