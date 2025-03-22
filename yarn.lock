@@ -5031,9 +5031,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"build-ts@npm:13.1.30":
-  version: 13.1.30
-  resolution: "build-ts@npm:13.1.30"
+"build-ts@npm:13.1.32":
+  version: 13.1.32
+  resolution: "build-ts@npm:13.1.32"
   dependencies:
     "@babel/core": "npm:7.26.10"
     "@babel/plugin-proposal-decorators": "npm:7.25.9"
@@ -5071,7 +5071,7 @@ __metadata:
     yargs: "npm:17.7.2"
   bin:
     build-ts: bin/index.js
-  checksum: 10c0/e77b834da8218a81fac7184f4e7ac0b66b141c825ef5182e425924259a330fe135023e3a6247d0574d6c3786cd8080ae4f38071c3a81c0bcd8048cc9e18b0c0c
+  checksum: 10c0/212938e56fcfebca436605a60a1c09881fcf746874ee12f119d01ac1f808de7f4f128c184ecc353423fd4364a5961d422a4ed691fe5526b19ff1c935da738c72
   languageName: node
   linkType: hard
 
@@ -14212,7 +14212,7 @@ __metadata:
     "@willbooster/wb": "npm:8.0.37"
     at-decorators: "npm:4.2.0"
     babel-plugin-react-compiler: "npm:19.0.0-beta-63e3235-20250105"
-    build-ts: "npm:13.1.30"
+    build-ts: "npm:13.1.32"
     concurrently: "npm:9.1.2"
     conventional-changelog-conventionalcommits: "npm:8.0.0"
     dayjs: "npm:1.11.13"
