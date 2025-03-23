@@ -81,7 +81,7 @@
     "server-only": "0.0.1",
     "superjson": "2.2.2",
     "supertokens-auth-react": "0.49.0",
-    "supertokens-node": "21.1.1",
+    "supertokens-node": "22.0.0",
     "supertokens-web-js": "0.15.0",
     "use-context-selector": "2.0.0",
     "use-immer": "0.11.0",
