@@ -5057,9 +5057,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"build-ts@npm:13.1.35":
-  version: 13.1.35
-  resolution: "build-ts@npm:13.1.35"
+"build-ts@npm:13.1.36":
+  version: 13.1.36
+  resolution: "build-ts@npm:13.1.36"
   dependencies:
     "@babel/core": "npm:7.26.10"
     "@babel/plugin-proposal-decorators": "npm:7.25.9"
@@ -5093,11 +5093,11 @@ __metadata:
     rollup-plugin-ts: "npm:3.4.5"
     signal-exit: "npm:4.1.0"
     tsx: "npm:4.19.3"
-    typescript: "npm:5.8.2"
+    typescript: "npm:5.8.3"
     yargs: "npm:17.7.2"
   bin:
     build-ts: bin/index.js
-  checksum: 10c0/9e0f2285c30a0ed0c3bb69f0e62a1b1c5a046a87a753ae9a24df93e09924b6ea54f97f5752a270abe2f96a157bb55bc0d7ee3fbae4e23f5a346aa6b83cc32e56
+  checksum: 10c0/2204e61516cb61e4ce75cba31b98ae61762e019c597f0df98d92e7b74b55ff6e6b497803602d6a57f3e4fefd607f5e672c7981c2c13c10755335ce49573140b3
   languageName: node
   linkType: hard
 
@@ -14206,7 +14206,7 @@ __metadata:
     "@willbooster/wb": "npm:8.0.38"
     at-decorators: "npm:4.2.0"
     babel-plugin-react-compiler: "npm:19.0.0-beta-63e3235-20250105"
-    build-ts: "npm:13.1.35"
+    build-ts: "npm:13.1.36"
     concurrently: "npm:9.1.2"
     conventional-changelog-conventionalcommits: "npm:8.0.0"
     dayjs: "npm:1.11.13"
@@ -14252,7 +14252,7 @@ __metadata:
     supertokens-auth-react: "npm:0.49.1"
     supertokens-node: "npm:22.0.1"
     supertokens-web-js: "npm:0.15.0"
-    typescript: "npm:5.8.2"
+    typescript: "npm:5.8.3"
     use-context-selector: "npm:2.0.0"
     use-immer: "npm:0.11.0"
     usehooks-ts: "npm:3.1.1"
@@ -14512,23 +14512,23 @@ __metadata:
   languageName: node
   linkType: hard
 
-"typescript@npm:5.8.2":
-  version: 5.8.2
-  resolution: "typescript@npm:5.8.2"
+"typescript@npm:5.8.3":
+  version: 5.8.3
+  resolution: "typescript@npm:5.8.3"
   bin:
     tsc: bin/tsc
     tsserver: bin/tsserver
-  checksum: 10c0/5c4f6fbf1c6389b6928fe7b8fcd5dc73bb2d58cd4e3883f1d774ed5bd83b151cbac6b7ecf11723de56d4676daeba8713894b1e9af56174f2f9780ae7848ec3c6
+  checksum: 10c0/5f8bb01196e542e64d44db3d16ee0e4063ce4f3e3966df6005f2588e86d91c03e1fb131c2581baf0fb65ee79669eea6e161cd448178986587e9f6844446dbb48
   languageName: node
   linkType: hard
 
-"typescript@patch:typescript@npm%3A5.8.2#optional!builtin<compat/typescript>":
-  version: 5.8.2
-  resolution: "typescript@patch:typescript@npm%3A5.8.2#optional!builtin<compat/typescript>::version=5.8.2&hash=5786d5"
+"typescript@patch:typescript@npm%3A5.8.3#optional!builtin<compat/typescript>":
+  version: 5.8.3
+  resolution: "typescript@patch:typescript@npm%3A5.8.3#optional!builtin<compat/typescript>::version=5.8.3&hash=5786d5"
   bin:
     tsc: bin/tsc
     tsserver: bin/tsserver
-  checksum: 10c0/5448a08e595cc558ab321e49d4cac64fb43d1fa106584f6ff9a8d8e592111b373a995a1d5c7f3046211c8a37201eb6d0f1566f15cdb7a62a5e3be01d087848e2
+  checksum: 10c0/39117e346ff8ebd87ae1510b3a77d5d92dae5a89bde588c747d25da5c146603a99c8ee588c7ef80faaf123d89ed46f6dbd918d534d641083177d5fac38b8a1cb
   languageName: node
   linkType: hard
 
