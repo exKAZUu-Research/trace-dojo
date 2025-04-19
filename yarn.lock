@@ -4160,13 +4160,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@willbooster/shared-lib-node@npm:6.1.15":
-  version: 6.1.15
-  resolution: "@willbooster/shared-lib-node@npm:6.1.15"
+"@willbooster/shared-lib-node@npm:6.1.16":
+  version: 6.1.16
+  resolution: "@willbooster/shared-lib-node@npm:6.1.16"
   dependencies:
     dotenv: "npm:16.5.0"
     tree-kill: "npm:1.2.2"
-  checksum: 10c0/b8adb77db4a26692c28dfbff74953028e9f5693eddda5aa79439de74e18818819681f6c7338ab96c0160945005d5ff5443e16efde568a700ae8282924183a3dd
+  checksum: 10c0/2b9546cb5b78e8350b43ec12937926c63cdd7b4454b6918112e48bb51754c1328385fce32791d1284b5278e0899087549701b970e7f0e72e6352922d04308839
   languageName: node
   linkType: hard
 
@@ -4187,9 +4187,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@willbooster/wb@npm:8.0.40":
-  version: 8.0.40
-  resolution: "@willbooster/wb@npm:8.0.40"
+"@willbooster/wb@npm:8.0.41":
+  version: 8.0.41
+  resolution: "@willbooster/wb@npm:8.0.41"
   dependencies:
     chalk: "npm:5.4.1"
     dotenv: "npm:16.5.0"
@@ -4200,7 +4200,7 @@ __metadata:
     yargs: "npm:17.7.2"
   bin:
     wb: bin/index.js
-  checksum: 10c0/bf8f8f9f8933679111a63c05d35c6dc83b2891df9c1b5e71777dea20c7d51625b92e38c4282df53437a6081703dc20aa2942764189335f8dc739154bb2d5db08
+  checksum: 10c0/98d323a83038b65fd33e759a42a83d89c91d86e60ca368dfaa2c8cdfd56fb18f3ce021bc21a9c073b7f9394e352509a113ab99d7abb2a86b7d72dcee3b3b2c7d
   languageName: node
   linkType: hard
 
@@ -4938,9 +4938,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"build-ts@npm:13.1.39":
-  version: 13.1.39
-  resolution: "build-ts@npm:13.1.39"
+"build-ts@npm:13.1.40":
+  version: 13.1.40
+  resolution: "build-ts@npm:13.1.40"
   dependencies:
     "@babel/core": "npm:7.26.10"
     "@babel/plugin-proposal-decorators": "npm:7.25.9"
@@ -4957,7 +4957,7 @@ __metadata:
     "@rollup/plugin-replace": "npm:6.0.2"
     "@rollup/plugin-terser": "npm:0.4.4"
     "@rollup/pluginutils": "npm:5.1.4"
-    "@willbooster/shared-lib-node": "npm:6.1.15"
+    "@willbooster/shared-lib-node": "npm:6.1.16"
     babel-plugin-polyfill-corejs3: "npm:0.12.0"
     babel-plugin-transform-remove-console: "npm:6.9.4"
     chalk: "npm:5.4.1"
@@ -4978,7 +4978,7 @@ __metadata:
     yargs: "npm:17.7.2"
   bin:
     build-ts: bin/index.js
-  checksum: 10c0/d12d7a3666a170fdbe2385d67219ca273e2ecb585b2f34972ca10f96a26a996556a0596c0928d68f59645d012b7c4ad88e246c99ba3b6d9ae3c04deaff3503f9
+  checksum: 10c0/bcc2b9fa946a72cf4d3963026abd65984dfc4e5b3324ade6b47cb611d8c02d2db243e613215b51d1093a0a0784480288be1916351963c5ef99ec3cd8381db577
   languageName: node
   linkType: hard
 
@@ -13972,10 +13972,10 @@ __metadata:
     "@willbooster/prettier-config": "npm:9.1.3"
     "@willbooster/shared-lib": "npm:5.2.22"
     "@willbooster/shared-lib-react": "npm:3.3.13"
-    "@willbooster/wb": "npm:8.0.40"
+    "@willbooster/wb": "npm:8.0.41"
     at-decorators: "npm:4.2.0"
     babel-plugin-react-compiler: "npm:19.0.0-beta-63e3235-20250105"
-    build-ts: "npm:13.1.39"
+    build-ts: "npm:13.1.40"
     concurrently: "npm:9.1.2"
     conventional-changelog-conventionalcommits: "npm:8.0.0"
     dayjs: "npm:1.11.13"
