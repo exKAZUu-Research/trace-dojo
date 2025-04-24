@@ -1,7 +1,7 @@
 import type { NextPage } from 'next';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import React, { Suspense } from 'react';
+import { Suspense } from 'react';
 
 import { SessionAuthForNextJs } from '@/components/molecules/SessionAuthForNextJs';
 import { TryRefreshComponent } from '@/components/molecules/TryRefreshComponent';

@@ -1,4 +1,5 @@
-import React, { useEffect } from 'react';
+import type React from 'react';
+import { useEffect } from 'react';
 import { MdContentCopy } from 'react-icons/md';
 
 import { Box, Button, Code, Heading, Text, useToast, VStack } from '@/infrastructures/useClient/chakra';

@@ -4,7 +4,8 @@ import type { ProblemSession, ProblemSubmission } from '@prisma/client';
 import { useLocalStorage } from '@willbooster/shared-lib-react';
 import NextLink from 'next/link';
 import { useParams } from 'next/navigation';
-import React, { useEffect, useMemo } from 'react';
+import type React from 'react';
+import { useEffect, useMemo } from 'react';
 import { MdCheckCircle, MdCheckCircleOutline, MdOutlineVerified, MdVerified } from 'react-icons/md';
 
 import { useAuthContextSelector } from '../../../../../../contexts/AuthContext';

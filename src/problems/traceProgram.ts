@@ -64,8 +64,8 @@ export function traceProgram(
   }
   const modifiedCodeLines = modifyCode(instrumented);
   const modifiedCode = modifiedCodeLines.join('\n');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const thisPropNames = Object.keys((this as any) || {});
+
+  const thisPropNames = Object.keys((this as Record<string, unknown>) || {});
   // 無理に難読化する必要はないが、コードの文量を減らす意識を持つ。
   const executableCode = `
 let myGlobal = {};
@@ -246,7 +246,7 @@ ${modifiedCode.trim()}
   let lastCallerId = 0;
   for (const [index, line] of lines.entries()) {
     const refinedLine = line
-      .replace(/\s*\/\/\s*step\s*(:\s*\d+|)\s*/, (_, sid) => {
+      .replace(/\s*\/\/\s*step\s*(:\s*\d+|)\s*/, (_, sid: string) => {
         if (sid) {
           lastSid = Number(sid.slice(1));
         } else {

@@ -1,7 +1,6 @@
 import type { NextPage } from 'next';
 import { cookies } from 'next/headers';
 import NextLink from 'next/link';
-import React from 'react';
 import SuperTokensNode from 'supertokens-node';
 
 import { DefaultHeaderMenu } from '@/components/organisms/DefaultHeaderMenu';

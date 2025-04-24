@@ -1,6 +1,5 @@
 import { VersionOverlay } from '@willbooster/shared-lib-react';
 import type { Metadata, Viewport } from 'next';
-import React from 'react';
 
 import { Providers } from '../components/organisms/Providers';
 import { APP_DESCRIPTION, APP_NAME } from '../constants';

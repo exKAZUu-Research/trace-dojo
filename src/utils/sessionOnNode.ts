@@ -34,7 +34,13 @@ export async function getSessionOnNode(accessToken: string): Promise<SessionOnNo
   const superTokensUserId = sanitizeStringInput(decoded.sub);
   const superTokensRecipeUserId = sanitizeStringInput(decoded.rsub);
   const tenantId = sanitizeStringInput(decoded.tId);
-  const roles = decoded['st-role']?.v;
+  const roles = (
+    decoded as {
+      'st-role'?: {
+        v: string[];
+      };
+    }
+  )['st-role']?.v;
   return superTokensUserId && superTokensRecipeUserId && tenantId
     ? {
         superTokensUserId,

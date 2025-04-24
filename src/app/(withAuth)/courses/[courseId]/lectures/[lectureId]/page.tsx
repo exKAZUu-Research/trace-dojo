@@ -1,7 +1,6 @@
 import type { NextPage } from 'next';
 import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
-import React from 'react';
 
 import { Lecture } from './pageOnClient';
 

@@ -1,7 +1,7 @@
 'use client';
 
 import NextLink from 'next/link';
-import React from 'react';
+import type React from 'react';
 import { MdKeyboardArrowDown, MdOutlinePerson, MdOutlineSettings } from 'react-icons/md';
 
 import { SignOutMenuItem } from './SignOutMenuItem';

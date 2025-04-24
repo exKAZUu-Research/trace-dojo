@@ -1,7 +1,7 @@
 'use client';
 
 import { Box, Button, Card, Heading, HStack, VStack } from '@chakra-ui/react';
-import React from 'react';
+import type React from 'react';
 
 import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateProblem';
 

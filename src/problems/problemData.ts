@@ -346,9 +346,10 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
   test: [['test1', 'test2', 'test3', 'test4', 'test5', 'test9', 'oop1', 'oop2']],
 };
 
-export const courseIdToLectureIds: Record<CourseId, string[]> = JSON.parse(
-  process.env.NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON ?? '{}'
-);
+export const courseIdToLectureIds = JSON.parse(process.env.NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON ?? '{}') as Record<
+  CourseId,
+  string[]
+>;
 
 export const problemIdToLanguageIdToProgram: Record<ProblemId, Record<LanguageId, string>> = {
   straight: {

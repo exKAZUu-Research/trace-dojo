@@ -20,6 +20,7 @@ const AuthPage: NextPage = () => {
   }, []);
 
   if (loaded) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
     return SuperTokens.getRoutingComponent([EmailPasswordPreBuiltUI, EmailVerificationPreBuiltUI]);
   }
 };

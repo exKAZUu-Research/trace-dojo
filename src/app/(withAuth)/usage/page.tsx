@@ -2,7 +2,7 @@ import type { NextPage } from 'next';
 
 import { Box, Heading, Image, List, ListItem, Text, VStack } from '@/infrastructures/useClient/chakra';
 
-const CoursesPage: NextPage = async () => {
+const CoursesPage: NextPage = () => {
   return (
     <VStack align="stretch" spacing={6}>
       <Heading as="h1">トレース道場の使い方</Heading>

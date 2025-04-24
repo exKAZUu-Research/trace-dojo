@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import React, { Suspense } from 'react';
+import { Suspense } from 'react';
 
 import { TryRefreshComponent } from '@/components/molecules/TryRefreshComponent';
 import { DefaultFooter } from '@/components/organisms/DefaultFooter';

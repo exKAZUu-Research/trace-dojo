@@ -2,6 +2,8 @@
 
 [![Test](https://github.com/exKAZUu-Research/trace-dojo/actions/workflows/test.yml/badge.svg)](https://github.com/exKAZUu-Research/trace-dojo/actions/workflows/test.yml)
 [![Deploy staging](https://github.com/exKAZUu-Research/trace-dojo/actions/workflows/deploy-staging.yml/badge.svg)](https://github.com/exKAZUu-Research/trace-dojo/actions/workflows/deploy-staging.yml)
+[![Deploy production](https://github.com/exKAZUu-Research/trace-dojo/actions/workflows/deploy-production.yml/badge.svg)](https://github.com/exKAZUu-Research/trace-dojo/actions/workflows/deploy-production.yml)
+[![semantic-release](https://img.shields.io/badge/%20%20%F0%9F%93%A6%F0%9F%9A%80-semantic--release-e10079.svg)](https://github.com/semantic-release/semantic-release)
 
 An educational web app for training program tracing skills.
 

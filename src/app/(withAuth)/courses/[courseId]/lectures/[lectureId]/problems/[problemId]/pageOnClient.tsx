@@ -33,7 +33,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   const problem = useMemo(
     () =>
       instantiateProblem(
-        params.problemId as ProblemId,
+        params.problemId,
         DEFAULT_LANGUAGE_ID,
         props.initialProblemSession.problemVariablesSeed
       ),

@@ -4,7 +4,7 @@ import NextLink from 'next/link';
 import { Box, Card, Heading, LinkBox, LinkOverlay, SimpleGrid, VStack } from '@/infrastructures/useClient/chakra';
 import { courseIds, courseIdToName } from '@/problems/problemData';
 
-const HomePage: NextPage = async () => {
+const HomePage: NextPage = () => {
   return (
     <VStack align="stretch" spacing={16}>
       <Heading as="div" lineHeight={1.25} py={16} size="4xl">

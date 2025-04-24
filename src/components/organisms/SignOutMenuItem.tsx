@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import React from 'react';
+import type React from 'react';
 import { MdOutlineLogout } from 'react-icons/md';
 import { signOut } from 'supertokens-auth-react/recipe/session';
 

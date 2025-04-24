@@ -3,7 +3,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { usePathname, useRouter } from 'next/navigation';
 import NextTopLoader from 'nextjs-toploader';
-import React from 'react';
+import type React from 'react';
 import { SuperTokensWrapper } from 'supertokens-auth-react';
 
 import { ensureSuperTokensReactInit, setRouter } from '../../infrastructures/supertokens/frontendConfig';
@@ -34,7 +34,7 @@ export const Providers: React.FC<{ children: React.ReactNode }> = ({ children })
 };
 
 const PageTransitionProgressBar: React.FC = () => {
-  const theme = useTheme();
+  const theme = useTheme() as { colors: { brand: Record<number, string> } };
 
   return <NextTopLoader color={theme.colors.brand[500]} shadow={false} showSpinner={false} />;
 };

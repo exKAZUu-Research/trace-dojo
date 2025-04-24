@@ -1,5 +1,6 @@
 import type { BoxProps } from '@chakra-ui/react';
-import React, { useState } from 'react';
+import type React from 'react';
+import { useState } from 'react';
 import { MdOutlineZoomIn, MdOutlineZoomOut } from 'react-icons/md';
 import { Prism } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/cjs/styles/prism';

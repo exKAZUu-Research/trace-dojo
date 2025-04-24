@@ -2,7 +2,8 @@
 
 import type { BoxProps } from '@chakra-ui/react';
 import { keyframes } from '@emotion/react';
-import React, { useMemo } from 'react';
+import type React from 'react';
+import { useMemo } from 'react';
 
 import {
   TURTLE_GRAPHICS_BOARD_CELL_SIZE_PX as CELL_SIZE_PX,

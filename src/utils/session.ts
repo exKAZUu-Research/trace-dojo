@@ -13,13 +13,13 @@ import { prisma } from '@/infrastructures/prisma';
 export interface SessionOnServer {
   session: SessionOnNode | undefined;
   hasToken: boolean;
-  error: unknown | undefined;
+  error: unknown;
 }
 
 export async function getNullableSessionOnServer(cookies: ReadonlyRequestCookies): Promise<SessionOnServer> {
   let session: SessionOnNode | undefined;
   let hasToken = false;
-  let error: unknown | undefined = undefined;
+  let error: unknown = undefined;
 
   try {
     ({ hasToken, session } = await getSessionOnServer(cookies));

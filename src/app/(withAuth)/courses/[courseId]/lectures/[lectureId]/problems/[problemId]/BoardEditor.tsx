@@ -2,7 +2,7 @@
 
 import { zenkakuAlphanumericalsToHankaku } from '@willbooster/shared-lib';
 import fastDeepEqual from 'fast-deep-equal';
-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
 import { MdOutlineDelete, MdTurnLeft, MdTurnRight } from 'react-icons/md';
 import { useImmer } from 'use-immer';
 

@@ -1,7 +1,8 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import React, { useEffect, useState } from 'react';
+import type React from 'react';
+import { useEffect, useState } from 'react';
 import SuperTokens from 'supertokens-auth-react';
 import Session from 'supertokens-auth-react/recipe/session';
 
@@ -23,7 +24,7 @@ export const TryRefreshComponent: React.FC = () => {
         if (hasSession) {
           router.refresh();
         } else {
-          SuperTokens.redirectToAuth();
+          void SuperTokens.redirectToAuth();
         }
       })
       .catch(() => {

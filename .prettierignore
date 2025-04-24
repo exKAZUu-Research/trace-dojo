@@ -12,6 +12,9 @@ test-fixtures/
 *.min.js
 .yarn/
 .pnp.js
+*.csv
+test.js
+
 !.keep
 .env.production
 */mount/*.hash
@@ -19,10 +22,9 @@ test-fixtures/
 .devcontainer/
 dist/
 temp/
-
 *.sqlite3*
-*.sqlite3-journal
 gcp-sa-key.json
+
 # Created by https://www.toptal.com/developers/gitignore/api/windows
 # Edit at https://www.toptal.com/developers/gitignore?templates=windows
 

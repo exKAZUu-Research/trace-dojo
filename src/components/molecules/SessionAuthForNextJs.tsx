@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import type React from 'react';
 import { SessionAuth } from 'supertokens-auth-react/recipe/session';
 
 type Props = Parameters<typeof SessionAuth>[0];
