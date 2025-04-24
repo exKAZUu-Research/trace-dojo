@@ -120,7 +120,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
         if (props.initialVariables[name].toString() === props.currentVariables[name].toString()) {
           hintText += hintText ? '\n\n' : '\n\nヒント: ';
           hintText +=
-            'たとえ変数を参照する式があっても、変数を更新する演算子（=, +=, ++）などがなければ、変数の値が変化しないことに注意してください。';
+            '変数を更新する代入演算子（=, +=, ++）などがなければ、変数の値が変わらないことに注意してください。';
         }
         const currentLine = props.problem.sidToLineIndex.get(props.problem.traceItems[props.currentTraceItemIndex].sid);
         if (props.problem.displayProgram.split('\n')[(currentLine ?? -1) - 1]?.includes(' % ')) {
