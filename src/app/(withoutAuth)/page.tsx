@@ -1,6 +1,6 @@
 import type { NextPage } from 'next';
-import NextLink from 'next/link';
 
+import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefetch';
 import { Box, Card, Heading, LinkBox, LinkOverlay, SimpleGrid, VStack } from '@/infrastructures/useClient/chakra';
 import { courseIds, courseIdToName } from '@/problems/problemData';
 
@@ -29,7 +29,7 @@ const HomePage: NextPage = () => {
               transitionProperty="box-shadow"
             >
               <Heading as="h3" size="md">
-                <LinkOverlay passHref as={NextLink} href={`/courses/${id}`}>
+                <LinkOverlay passHref as={NextLinkWithoutPrefetch} href={`/courses/${id}`}>
                   {courseIdToName[id]}
                 </LinkOverlay>
               </Heading>

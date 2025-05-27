@@ -30,6 +30,14 @@
       }
     ]
   },
-  "include": ["next-env.d.ts", "next.config.ts", "prisma/**/*", "scripts/**/*", "src/**/*", "tests/**/*", ".next/types/**/*.ts"],
+  "include": [
+    "next-env.d.ts",
+    "next.config.ts",
+    "prisma/**/*",
+    "scripts/**/*",
+    "src/**/*",
+    "tests/**/*",
+    ".next/types/**/*.ts"
+  ],
   "exclude": ["node_modules"]
 }

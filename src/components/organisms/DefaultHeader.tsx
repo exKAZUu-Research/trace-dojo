@@ -1,7 +1,8 @@
 import type { NextPage } from 'next';
 import { cookies } from 'next/headers';
-import NextLink from 'next/link';
 import SuperTokensNode from 'supertokens-node';
+
+import { NextLinkWithoutPrefetch } from '../atoms/NextLinkWithoutPrefetch';
 
 import { DefaultHeaderMenu } from '@/components/organisms/DefaultHeaderMenu';
 import { APP_NAME } from '@/constants';
@@ -29,13 +30,13 @@ export const DefaultHeader: NextPage = async () => {
   return (
     <HStack bg="white" h={16} px={4} spacing={4}>
       <HStack flexGrow={1} flexShrink={1} spacing={8}>
-        <Heading as={NextLink} href="/" size="md">
+        <Heading as={NextLinkWithoutPrefetch} href="/" size="md">
           <Icon as={MdOutlineHome} color="brand.500" mr={1} />
           {APP_NAME}
         </Heading>
         <HStack flexGrow={0} flexShrink={0} spacing={0}>
           {(isAdmin ? ADMIN_MENU_ITEMS : MENU_ITEMS).map(([href, label]) => (
-            <Button key={href} as={NextLink} href={href} variant="ghost">
+            <Button key={href} as={NextLinkWithoutPrefetch} href={href} variant="ghost">
               {label}
             </Button>
           ))}
@@ -47,10 +48,10 @@ export const DefaultHeader: NextPage = async () => {
           <DefaultHeaderMenu displayName={superTokensUser?.emails[0] ?? user.displayName} />
         ) : (
           <>
-            <Button as={NextLink} colorScheme="brand" href="/auth" mr={2} variant="outline">
+            <Button as={NextLinkWithoutPrefetch} colorScheme="brand" href="/auth" mr={2} variant="outline">
               サインイン
             </Button>
-            <Button as={NextLink} colorScheme="brand" href="/auth?show=signup">
+            <Button as={NextLinkWithoutPrefetch} colorScheme="brand" href="/auth?show=signup">
               新規登録
             </Button>
           </>

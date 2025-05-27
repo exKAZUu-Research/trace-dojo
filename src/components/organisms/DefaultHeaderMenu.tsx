@@ -1,11 +1,10 @@
 'use client';
 
-import NextLink from 'next/link';
-import type React from 'react';
 import { MdKeyboardArrowDown, MdOutlinePerson, MdOutlineSettings } from 'react-icons/md';
 
 import { SignOutMenuItem } from './SignOutMenuItem';
 
+import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefetch';
 import {
   Avatar,
   Button,
@@ -34,7 +33,7 @@ export const DefaultHeaderMenu: React.FC<Props> = (props) => {
       </MenuButton>
 
       <MenuList>
-        <MenuItem as={NextLink} href="/settings" icon={<Icon as={MdOutlineSettings} />}>
+        <MenuItem as={NextLinkWithoutPrefetch} href="/settings" icon={<Icon as={MdOutlineSettings} />}>
           設定
         </MenuItem>
         <MenuDivider />

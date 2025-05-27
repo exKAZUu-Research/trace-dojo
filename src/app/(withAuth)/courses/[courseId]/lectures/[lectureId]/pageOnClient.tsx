@@ -2,13 +2,12 @@
 
 import type { ProblemSession, ProblemSubmission } from '@prisma/client';
 import { useLocalStorage } from '@willbooster/shared-lib-react';
-import NextLink from 'next/link';
 import { useParams } from 'next/navigation';
-import type React from 'react';
 import { useEffect, useMemo } from 'react';
 import { MdCheckCircle, MdCheckCircleOutline, MdOutlineVerified, MdVerified } from 'react-icons/md';
 
-import { useAuthContextSelector } from '../../../../../../contexts/AuthContext';
+import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefetch';
+import { useAuthContextSelector } from '@/contexts/AuthContext';
 import {
   Box,
   Card,
@@ -28,13 +27,9 @@ import {
   Thead,
   Tr,
   VStack,
-} from '../../../../../../infrastructures/useClient/chakra';
-import type { CourseId } from '../../../../../../problems/problemData';
-import {
-  courseIdToLectureIndexToProblemIds,
-  courseIdToName,
-  problemIdToName,
-} from '../../../../../../problems/problemData';
+} from '@/infrastructures/useClient/chakra';
+import type { CourseId } from '@/problems/problemData';
+import { courseIdToLectureIndexToProblemIds, courseIdToName, problemIdToName } from '@/problems/problemData';
 
 type Props = {
   lectureIndex: number;
@@ -66,7 +61,7 @@ export const Lecture: React.FC<Props> = (props) => {
   return (
     <VStack align="stretch" spacing={6}>
       <Heading as="h1">
-        <Link as={NextLink} href={`/courses/${params.courseId}`}>
+        <Link as={NextLinkWithoutPrefetch} href={`/courses/${params.courseId}`}>
           {courseIdToName[params.courseId]}
         </Link>
       </Heading>
@@ -143,7 +138,7 @@ export const Lecture: React.FC<Props> = (props) => {
                                 挑戦中
                               </Tag>
                             ))}
-                          <Link as={NextLink} href={`${params.lectureId}/problems/${problemId}`}>
+                          <Link as={NextLinkWithoutPrefetch} href={`${params.lectureId}/problems/${problemId}`}>
                             {problemIdToName[problemId]}
                           </Link>
                         </VStack>

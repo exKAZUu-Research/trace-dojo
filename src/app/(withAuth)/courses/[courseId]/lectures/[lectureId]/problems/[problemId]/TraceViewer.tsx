@@ -1,12 +1,13 @@
 'use client';
 
-import { Box, Button, Card, Heading, HStack, VStack } from '@chakra-ui/react';
 import type React from 'react';
 
 import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateProblem';
 
 import { BoardViewer } from './BoardViewer';
 import { Variables } from './Variables';
+
+import { Box, Button, Card, Heading, HStack, VStack } from '@/infrastructures/useClient/chakra';
 
 type Props = {
   currentTraceItemIndex: number;

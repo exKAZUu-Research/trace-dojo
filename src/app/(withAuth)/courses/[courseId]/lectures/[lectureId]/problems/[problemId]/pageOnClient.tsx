@@ -1,13 +1,13 @@
 'use client';
 
 import type { ProblemSession } from '@prisma/client';
-import NextLink from 'next/link';
 import { notFound, useParams } from 'next/navigation';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
 
 import { ProblemBody } from './ProblmBody';
 
+import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefetch';
 import {
   DEFAULT_LANGUAGE_ID,
   MAX_ACTIVE_DURATION_MS_AFTER_LAST_EVENT,
@@ -31,12 +31,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   const params = useParams<{ courseId: CourseId; lectureId: string; problemId: ProblemId }>();
   const lectureIndex = courseIdToLectureIds[params.courseId].indexOf(params.lectureId);
   const problem = useMemo(
-    () =>
-      instantiateProblem(
-        params.problemId,
-        DEFAULT_LANGUAGE_ID,
-        props.initialProblemSession.problemVariablesSeed
-      ),
+    () => instantiateProblem(params.problemId, DEFAULT_LANGUAGE_ID, props.initialProblemSession.problemVariablesSeed),
     [params.problemId, props.initialProblemSession.problemVariablesSeed]
   );
 
@@ -85,12 +80,12 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
       <VStack align="stretch" spacing={1}>
         <HStack justify="space-between" spacing={2}>
           <HStack spacing={2}>
-            <Link as={NextLink} color="gray.600" fontWeight="bold" href={`/courses/${params.courseId}`}>
+            <Link as={NextLinkWithoutPrefetch} color="gray.600" fontWeight="bold" href={`/courses/${params.courseId}`}>
               {courseIdToName[params.courseId]}
             </Link>
             <Text color="gray.600">{'>'}</Text>
             <Link
-              as={NextLink}
+              as={NextLinkWithoutPrefetch}
               color="gray.600"
               fontWeight="bold"
               href={`/courses/${params.courseId}/lectures/${params.lectureId}`}
