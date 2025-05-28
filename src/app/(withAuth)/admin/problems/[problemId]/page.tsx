@@ -20,7 +20,7 @@ interface UserProblemInfo {
   incorrectSubmissionCount: number;
 }
 
-const StatisticsPage: MyAuthorizedNextPageOrLayout<{ problemId: ProblemId }> = async ({ params, session }) => {
+const StatisticsPage: MyAuthorizedNextPageOrLayout<{ problemId: ProblemId }> = async ({ params }) => {
   const userInfos = await fetchUserProblemInfo(params.problemId);
 
   return (

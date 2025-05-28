@@ -9,7 +9,7 @@ import { prisma } from '@/infrastructures/prisma';
 import { Button, FormControl, FormLabel, Input, VStack } from '@/infrastructures/useClient/chakra';
 import { getNonNullableSessionOnServer } from '@/utils/session';
 
-const SettingsPage: MyAuthorizedNextPageOrLayout = async ({ params, searchParams, session }) => {
+const SettingsPage: MyAuthorizedNextPageOrLayout = async ({ session }) => {
   const user = await prisma.user.findUnique({
     where: {
       id: session.superTokensUserId,

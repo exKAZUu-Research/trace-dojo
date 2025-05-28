@@ -29,7 +29,7 @@ interface ProblemStatistics {
   avgIncorrectCounts: number;
 }
 
-const StatisticsPage: MyAuthorizedNextPageOrLayout = async ({ session }) => {
+const StatisticsPage: MyAuthorizedNextPageOrLayout = async () => {
   const statistics = await calculateStatistics();
 
   return (
