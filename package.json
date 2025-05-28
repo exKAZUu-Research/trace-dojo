@@ -105,7 +105,7 @@
     "@willbooster/prettier-config": "10.0.0",
     "babel-plugin-react-compiler": "19.0.0-beta-63e3235-20250105",
     "concurrently": "9.1.2",
-    "conventional-changelog-conventionalcommits": "8.0.0",
+    "conventional-changelog-conventionalcommits": "9.0.0",
     "eslint": "9.25.1",
     "eslint-config-flat-gitignore": "2.1.0",
     "eslint-config-next": "15.3.2",
