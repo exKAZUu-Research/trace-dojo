@@ -1,21 +1,16 @@
-import type { NextPage } from 'next';
-import { cookies } from 'next/headers';
-
 import { ProblemPageOnClient } from './pageOnClient';
 
+import { withAuthorizationOnServer } from '@/app/utils/withAuth';
+import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { logger } from '@/infrastructures/pino';
 import { prisma } from '@/infrastructures/prisma';
 import type { CourseId, ProblemId } from '@/problems/problemData';
-import { getNonNullableSessionOnServer } from '@/utils/session';
 
-type Props = {
-  params: Promise<{ courseId: CourseId; lectureId: string; problemId: ProblemId }>;
-};
-
-const ProblemPage: NextPage<Props> = async (props) => {
-  const session = await getNonNullableSessionOnServer(await cookies());
-
-  const params = await props.params;
+const ProblemPage: MyAuthorizedNextPageOrLayout<{
+  courseId: CourseId;
+  lectureId: string;
+  problemId: ProblemId;
+}> = async ({ params, session }) => {
   let incompleteProblemSession = await prisma.problemSession.findFirst({
     where: {
       userId: session.superTokensUserId,
@@ -44,4 +39,4 @@ const ProblemPage: NextPage<Props> = async (props) => {
   return <ProblemPageOnClient initialProblemSession={incompleteProblemSession} userId={session.superTokensUserId} />;
 };
 
-export default ProblemPage;
+export default withAuthorizationOnServer(ProblemPage);

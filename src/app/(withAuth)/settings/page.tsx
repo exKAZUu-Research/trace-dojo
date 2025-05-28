@@ -1,15 +1,15 @@
-import type { NextPage } from 'next';
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import { z } from 'zod';
 import { zfd } from 'zod-form-data';
 
+import { withAuthorizationOnServer } from '@/app/utils/withAuth';
+import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { prisma } from '@/infrastructures/prisma';
 import { Button, FormControl, FormLabel, Input, VStack } from '@/infrastructures/useClient/chakra';
 import { getNonNullableSessionOnServer } from '@/utils/session';
 
-const SettingsPage: NextPage = async () => {
-  const session = await getNonNullableSessionOnServer(await cookies());
+const SettingsPage: MyAuthorizedNextPageOrLayout = async ({ session }) => {
   const user = await prisma.user.findUnique({
     where: {
       id: session.superTokensUserId,
@@ -53,4 +53,4 @@ async function updateDisplayName(formData: FormData): Promise<void> {
   revalidatePath('/', 'layout');
 }
 
-export default SettingsPage;
+export default withAuthorizationOnServer(SettingsPage);

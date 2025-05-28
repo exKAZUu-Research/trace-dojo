@@ -1,10 +1,16 @@
 import type { NextPage } from 'next';
+import { cookies } from 'next/headers';
 
 import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefetch';
+import { TryRefreshComponent } from '@/components/molecules/TryRefreshComponent';
 import { Box, Card, Heading, LinkBox, LinkOverlay, SimpleGrid, VStack } from '@/infrastructures/useClient/chakra';
 import { courseIds, courseIdToName } from '@/problems/problemData';
+import { getNullableSessionOnServer } from '@/utils/session';
 
-const HomePage: NextPage = () => {
+const HomePage: NextPage = async () => {
+  const { hasToken, session } = await getNullableSessionOnServer(await cookies());
+  if (!session && hasToken) return <TryRefreshComponent key={Date.now()} />;
+
   return (
     <VStack align="stretch" spacing={16}>
       <Heading as="div" lineHeight={1.25} py={16} size="4xl">

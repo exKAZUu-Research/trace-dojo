@@ -1,20 +1,17 @@
-import type { NextPage } from 'next';
-import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
 
 import { Lecture } from './pageOnClient';
 
+import { withAuthorizationOnServer } from '@/app/utils/withAuth';
+import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { prisma } from '@/infrastructures/prisma';
 import type { CourseId } from '@/problems/problemData';
 import { courseIdToLectureIds } from '@/problems/problemData';
-import { getNonNullableSessionOnServer } from '@/utils/session';
 
-type Props = { params: Promise<{ courseId: CourseId; lectureId: string }> };
-
-const LecturePage: NextPage<Props> = async (props) => {
-  const session = await getNonNullableSessionOnServer(await cookies());
-
-  const params = await props.params;
+const LecturePage: MyAuthorizedNextPageOrLayout<{ courseId: CourseId; lectureId: string }> = async ({
+  params,
+  session,
+}) => {
   if (!(params.courseId in courseIdToLectureIds)) notFound();
 
   const lectureIndex = courseIdToLectureIds[params.courseId].indexOf(params.lectureId);
@@ -33,4 +30,4 @@ const LecturePage: NextPage<Props> = async (props) => {
   return <Lecture lectureIndex={lectureIndex} problemSessions={currentUserProblemSessions} />;
 };
 
-export default LecturePage;
+export default withAuthorizationOnServer(LecturePage);
