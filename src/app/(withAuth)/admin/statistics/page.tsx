@@ -1,5 +1,3 @@
-import type { NextPage } from 'next';
-
 import { logger } from '../../../../infrastructures/pino';
 import { prisma } from '../../../../infrastructures/prisma';
 import {
@@ -18,6 +16,9 @@ import type { CourseId } from '../../../../problems/problemData';
 import { courseIdToLectureIndexToProblemIds } from '../../../../problems/problemData';
 import { dayjs } from '../../../utils/dayjs';
 
+import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
+import { withAuthorizationOnServer } from '@/app/utils/withAuth';
+
 interface ProblemStatistics {
   courseId: string;
   lectureIndex: number;
@@ -28,7 +29,7 @@ interface ProblemStatistics {
   avgIncorrectCounts: number;
 }
 
-const StatisticsPage: NextPage = async () => {
+const StatisticsPage: MyAuthorizedNextPageOrLayout = async ({ session }) => {
   const statistics = await calculateStatistics();
 
   return (
@@ -128,4 +129,4 @@ async function calculateStatistics(): Promise<ProblemStatistics[]> {
   return statistics;
 }
 
-export default StatisticsPage;
+export default withAuthorizationOnServer(StatisticsPage, { admin: true });

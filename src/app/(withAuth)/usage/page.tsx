@@ -1,8 +1,8 @@
-import type { NextPage } from 'next';
-
+import { withAuthorizationOnServer } from '@/app/utils/withAuth';
+import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { Box, Heading, Image, List, ListItem, Text, VStack } from '@/infrastructures/useClient/chakra';
 
-const CoursesPage: NextPage = () => {
+const CoursesPage: MyAuthorizedNextPageOrLayout = ({ session }) => {
   return (
     <VStack align="stretch" spacing={6}>
       <Heading as="h1">トレース道場の使い方</Heading>
@@ -101,4 +101,4 @@ const CoursesPage: NextPage = () => {
   );
 };
 
-export default CoursesPage;
+export default withAuthorizationOnServer(CoursesPage);

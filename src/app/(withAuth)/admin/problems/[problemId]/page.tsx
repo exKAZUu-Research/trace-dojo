@@ -1,5 +1,3 @@
-import type { NextPage } from 'next';
-
 import { logger } from '../../../../../infrastructures/pino';
 import { prisma } from '../../../../../infrastructures/prisma';
 import { Box, Heading, Table, Tbody, Td, Th, Thead, Tr, VStack } from '../../../../../infrastructures/useClient/chakra';
@@ -7,6 +5,9 @@ import type { CourseId, ProblemId } from '../../../../../problems/problemData';
 import { courseIdToLectureIds } from '../../../../../problems/problemData';
 import { getEmailFromSession } from '../../../../../utils/session';
 import { dayjs } from '../../../../utils/dayjs';
+
+import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
+import { withAuthorizationOnServer } from '@/app/utils/withAuth';
 
 interface UserProblemInfo {
   userId: string;
@@ -19,12 +20,7 @@ interface UserProblemInfo {
   incorrectSubmissionCount: number;
 }
 
-type Props = {
-  params: Promise<{ problemId: ProblemId }>;
-};
-
-const StatisticsPage: NextPage<Props> = async (props) => {
-  const params = await props.params;
+const StatisticsPage: MyAuthorizedNextPageOrLayout<{ problemId: ProblemId }> = async ({ params, session }) => {
   const userInfos = await fetchUserProblemInfo(params.problemId);
 
   return (
@@ -115,4 +111,4 @@ function getLectureIndex(courseId: string, lectureId: string): number {
   return -1;
 }
 
-export default StatisticsPage;
+export default withAuthorizationOnServer(StatisticsPage, { admin: true });
