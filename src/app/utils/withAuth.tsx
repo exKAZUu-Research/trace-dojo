@@ -1,6 +1,7 @@
 import type { NextPage } from 'next';
 import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
+import SuperTokensNode from 'supertokens-node';
 
 import { SessionAuthForNextJs } from '@/components/molecules/SessionAuthForNextJs';
 import { TryRefreshComponent } from '@/components/molecules/TryRefreshComponent';
@@ -48,7 +49,10 @@ export function withAuthorizationOnServer<Props = Record<string, never>, Params 
     }
 
     // https://supertokens.com/docs/thirdpartyemailpassword/user-roles/protecting-routes
-    if (options?.admin && !session.roles.includes('admin')) return 'User is not an admin.';
+    if (options?.admin) {
+      const userInfo = await SuperTokensNode.getUser(session.superTokensUserId);
+      if (!userInfo?.emails[0].endsWith('@internet.ac.jp')) notFound();
+    }
 
     const [params, searchParams] = await Promise.all([props.params, props.searchParams]);
 
