@@ -4539,9 +4539,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@willbooster/eslint-config-next@npm:2.2.0":
-  version: 2.2.0
-  resolution: "@willbooster/eslint-config-next@npm:2.2.0"
+"@willbooster/eslint-config-next@npm:2.3.0":
+  version: 2.3.0
+  resolution: "@willbooster/eslint-config-next@npm:2.3.0"
   peerDependencies:
     "@eslint/eslintrc": ">=3"
     "@eslint/js": ">=9"
@@ -4558,7 +4558,7 @@ __metadata:
     globals: ">=16"
     typescript: ">=5"
     typescript-eslint: ">=8"
-  checksum: 10c0/dbc3408bca053e742f307ac9feaf574448fcb279cc6cee034252da0a153de52d9bcec068b05349578e93d9ba8e15887baf885fe0001a0dd93892bd3bb6fb3b6b
+  checksum: 10c0/b9519f702f605c3483d4348ca44c5f1ed04b1b48fe717e33b4bdfb3a62b623eeed3e000da3a8c8dacdd47a7c31f942d3a233f53df4bf1684a081587a512537d4
   languageName: node
   linkType: hard
 
@@ -14370,7 +14370,7 @@ __metadata:
     "@types/react-syntax-highlighter": "npm:15.5.13"
     "@types/seedrandom": "npm:3.0.8"
     "@types/uuid": "npm:10.0.0"
-    "@willbooster/eslint-config-next": "npm:2.2.0"
+    "@willbooster/eslint-config-next": "npm:2.3.0"
     "@willbooster/prettier-config": "npm:10.0.0"
     "@willbooster/shared-lib": "npm:5.4.2"
     "@willbooster/shared-lib-react": "npm:3.4.1"
