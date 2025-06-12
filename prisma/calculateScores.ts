@@ -13,33 +13,44 @@ const prisma = new PrismaClient();
 // 1/3 9:30まで一発正解の採点考慮
 
 const deadLines = {
-  tuBeginner2: [
-    new Date('2025-01-14T11:59:59+09:00'), // 1st: 1/14
-    new Date('2025-01-14T11:59:59+09:00'), // 2nd: 1/14
-    new Date('2025-01-16T11:59:59+09:00'), // 3rd: 1/16
-    new Date('2025-01-16T11:59:59+09:00'), // 4th: 1/16
-    new Date('2025-01-27T11:59:59+09:00'), // 5th: 1/27
-    new Date('2025-01-30T11:59:59+09:00'), // 6th: 1/30
-    new Date('2025-02-06T11:59:59+09:00'), // 7th: 2/6
-    new Date('2025-02-13T11:59:59+09:00'), // 8th: 2/13
-    new Date('2025-02-25T11:59:59+09:00'), // final deadline: 2/25
+  tuBeginner1: [
+    new Date('2025-04-29T11:59:59+09:00'), // 1st: 4/29
+    new Date('2025-04-30T11:59:59+09:00'), // 2nd: 4/30
+    new Date('2025-05-08T11:59:59+09:00'), // 3rd: 5/8
+    new Date('2025-05-08T11:59:59+09:00'), // 4th: 5/8
+    new Date('2025-05-15T11:59:59+09:00'), // 5th: 5/15
+    new Date('2025-05-15T11:59:59+09:00'), // 6th: 5/15
+    new Date('2025-05-18T11:59:59+09:00'), // 7th: 5/18
+    new Date('2025-05-29T11:59:59+09:00'), // 8th: 5/29
+    new Date('2025-06-09T11:59:59+09:00'), // final deadline: 6/9
   ],
+  // tuBeginner2: [
+  //   new Date('2025-01-14T11:59:59+09:00'), // 1st: 1/14
+  //   new Date('2025-01-14T11:59:59+09:00'), // 2nd: 1/14
+  //   new Date('2025-01-16T11:59:59+09:00'), // 3rd: 1/16
+  //   new Date('2025-01-16T11:59:59+09:00'), // 4th: 1/16
+  //   new Date('2025-01-27T11:59:59+09:00'), // 5th: 1/27
+  //   new Date('2025-01-30T11:59:59+09:00'), // 6th: 1/30
+  //   new Date('2025-02-06T11:59:59+09:00'), // 7th: 2/6
+  //   new Date('2025-02-13T11:59:59+09:00'), // 8th: 2/13
+  //   new Date('2025-02-25T11:59:59+09:00'), // final deadline: 2/25
+  // ],
 };
 
 const validStudentIds = `
-<ここに学籍番号の一覧を記載する。>
-`;
+<ここに改行区切りで学籍番号の一覧を記載する。>
+`.split(/\s+/);
 
 async function main(): Promise<void> {
   ensureSuperTokensInit();
 
-  const courseId = 'tuBeginner2';
+  const courseId = 'tuBeginner1';
   const users = await prisma.user.findMany();
   const finalDeadline = deadLines[courseId][8];
 
-  // Print CSV header
+  // 「雛形ダウンロード」を押して、最新のヘッダーを反映させること。
   const header =
-    '管理ID,単位認定試験_最終点,小テスト_最終点,ディスカッション_最終点,レポート_最終点,英語_最終点,相互評価_最終点,プログラミング_最終点,その他1_最終点,その他2_最終点,その他3_最終点,その他4_最終点,その他5_最終点,備考\n';
+    '管理ID,単位認定試験_最終点,小テスト_最終点,ディスカッション_最終点,レポート_最終点,英語_最終点,相互評価_最終点,プログラミング_最終点,LTI_最終点,その他1_最終点,その他2_最終点,その他3_最終点,その他4_最終点,その他5_最終点,備考\n';
   console.log(header.trim());
   writeFileSync('grading.csv', header);
 
@@ -117,7 +128,7 @@ async function main(): Promise<void> {
     totalScore = (totalScore / 80) * 100;
 
     // Print CSV row, escape email if it contains commas
-    const row = `${studentId},${Math.round(totalScore)},,,,,,,,,,,,\n`;
+    const row = `${studentId},,,,,,,${Math.round(totalScore)},,,,,,,\n`;
     records.push({ studentId, row, solvedProblems });
   }
 
