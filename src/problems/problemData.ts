@@ -3278,9 +3278,11 @@ turtles[1] = new Turtle(3, 4); // step
 for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
   call(N回右を向く, 't', 'n')(turtles[s.get('i')], s.get('i')); // step
 }
+delete s.vars['i'];
 for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
   call(N回前に進む, 't', 'n')(turtles[s.get('i')], 3); // step
 }
+delete s.vars['i'];
 
 turtles[0].remove();
 turtles[0] = new Turtle(4, 3); // step
@@ -3290,9 +3292,11 @@ turtles[1] = new Turtle(3, 2); // step
 for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
   call(N回左を向く, 't', 'n')(turtles[s.get('i')], s.get('i')); // step
 }
+delete s.vars['i'];
 for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
   call(N回前に進む, 't', 'n')(turtles[s.get('i')], 3); // step
 }
+delete s.vars['i'];
 
 function N回前に進む(t, n) {
   for (let i = 0; i < n; i++) t.前に進む();
@@ -3345,6 +3349,7 @@ const turtles = new Array(5);
 for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
   turtles[s.get('i')] = new Turtle(s.get('i'), 0); // step
 }
+delete s.vars['i'];
 
 for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
   turtles[s.get('i')].remove(); // step
@@ -3356,6 +3361,7 @@ for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { /
     }
   }
 }
+delete s.vars['i'];
 `,
     java: `
 public class Main {
@@ -3391,9 +3397,11 @@ function 線を描く(x, y, dir, len) {
   for (s.set('i', 0); s.get('i') < dir; s.set('i', s.get('i') + 1)) { // step
     t.右を向く(); // step
   }
+  delete s.vars['i'];
   for (s.set('i', 0); s.get('i') < len - 1; s.set('i', s.get('i') + 1)) { // step
     t.前に進む(); // step
   }
+  delete s.vars['i'];
   t.remove();
 }
 `,
@@ -6480,6 +6488,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < steps; s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
 
   drawLine2() {
@@ -6561,6 +6570,7 @@ class MyTurtle {
     for (s.set('i', 0); s.get('i') < steps; s.set('i', s.get('i') + 1)) { // step
       this.t.前に進む(); // step
     }
+    delete s.vars['i'];
   }
   drawLine2() {
     call(this.drawLine.bind(this), 'steps')(2);
@@ -7460,6 +7470,7 @@ const t = new Turtle(); // step
 for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
   call(moveTurtle, 't', 'command')(t, arr[s.get('i')]);
 }
+delete s.vars['i'];
 
 function moveTurtle(t, command) {
   switch (command[0]) {
