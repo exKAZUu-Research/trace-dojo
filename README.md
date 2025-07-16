@@ -43,7 +43,6 @@ An educational web app for training program tracing skills.
    ```
 
 2. Open lectures via the following URLs:
-
    - 初級プログラミングⅠ
      1. http://localhost:3000/courses/tuBeginner1/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d
      2. http://localhost:3000/courses/tuBeginner1/lectures/d4de75e2-758b-4500-b38e-96213c360527
