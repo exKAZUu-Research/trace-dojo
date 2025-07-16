@@ -4130,9 +4130,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@willbooster/eslint-config-next@npm:2.2.0":
-  version: 2.2.0
-  resolution: "@willbooster/eslint-config-next@npm:2.2.0"
+"@willbooster/eslint-config-next@npm:2.5.1":
+  version: 2.5.1
+  resolution: "@willbooster/eslint-config-next@npm:2.5.1"
   peerDependencies:
     "@eslint/eslintrc": ">=3"
     "@eslint/js": ">=9"
@@ -4140,25 +4140,29 @@ __metadata:
     eslint-config-flat-gitignore: ">=2.1"
     eslint-config-next: ">=15"
     eslint-config-prettier: ">=10"
-    eslint-import-resolver-typescript: ">=3"
+    eslint-import-resolver-typescript: ">=4"
     eslint-plugin-import-x: ">=4"
+    eslint-plugin-react: ">=7"
+    eslint-plugin-react-compiler: ">=19.1.0-rc.2"
+    eslint-plugin-react-hooks: ">=5"
     eslint-plugin-sort-class-members: ">=1.21"
     eslint-plugin-sort-destructure-keys: ">=2"
-    eslint-plugin-unicorn: ">=57"
+    eslint-plugin-unicorn: ">=59"
     eslint-plugin-unused-imports: ">=4"
     globals: ">=16"
     typescript: ">=5"
     typescript-eslint: ">=8"
-  checksum: 10c0/dbc3408bca053e742f307ac9feaf574448fcb279cc6cee034252da0a153de52d9bcec068b05349578e93d9ba8e15887baf885fe0001a0dd93892bd3bb6fb3b6b
+  checksum: 10c0/01e660f86608f1341cc06e767c499156a69defc4aff3c6c108b71466be880bade88746f84702f22f7d0477db991554157df68e874daf7b7f5ee51a2e2d91a3b2
   languageName: node
   linkType: hard
 
-"@willbooster/prettier-config@npm:10.0.0":
-  version: 10.0.0
-  resolution: "@willbooster/prettier-config@npm:10.0.0"
+"@willbooster/prettier-config@npm:10.2.0":
+  version: 10.2.0
+  resolution: "@willbooster/prettier-config@npm:10.2.0"
   peerDependencies:
-    prettier: ">=2"
-  checksum: 10c0/3895e78b9ba5eef3c1ac279ac1eec75abf7c40cc2877fe58fcee4841c9357f91dc4709bcaf71361cf29f7b0dd24b331b08add67f3a9ea1fa30232d3b6db13396
+    prettier: ">=3"
+    prettier-plugin-java: ">=2.6"
+  checksum: 10c0/c9a4fd669df01373870471e7e2e1d9f67faeddd8edc68db02d7ae5e138baaf05497b736d4733dd8a2a6164c634416f60fecbf0685874311e026e75b97de3e4d3
   languageName: node
   linkType: hard
 
@@ -13925,8 +13929,8 @@ __metadata:
     "@types/react-syntax-highlighter": "npm:15.5.13"
     "@types/seedrandom": "npm:3.0.8"
     "@types/uuid": "npm:10.0.0"
-    "@willbooster/eslint-config-next": "npm:2.2.0"
-    "@willbooster/prettier-config": "npm:10.0.0"
+    "@willbooster/eslint-config-next": "npm:2.5.1"
+    "@willbooster/prettier-config": "npm:10.2.0"
     "@willbooster/shared-lib": "npm:5.4.3"
     "@willbooster/shared-lib-react": "npm:3.4.2"
     "@willbooster/wb": "npm:8.1.12"
