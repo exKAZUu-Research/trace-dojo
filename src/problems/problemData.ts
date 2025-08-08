@@ -7304,9 +7304,9 @@ main();
 public class Main {
   public static void main(String[] args) {
     MyTurtle m = new MyTurtle(); // caller
-    for (int n = 0; n < 3; i++) { // step
+    for (int n = 0; n < 3; n++) { // step
       try {
-        m.drawSquare(1 + n); // caller
+        m.drawSquare(n + 1); // caller
       } catch (OutOfBoardException e) {
         m.t.右を向く(); // step
         m.t.右を向く(); // step
