@@ -14040,9 +14040,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"supertokens-node@npm:22.1.1":
-  version: 22.1.1
-  resolution: "supertokens-node@npm:22.1.1"
+"supertokens-node@npm:23.0.1":
+  version: 23.0.1
+  resolution: "supertokens-node@npm:23.0.1"
   dependencies:
     buffer: "npm:^6.0.3"
     content-type: "npm:^1.0.5"
@@ -14059,7 +14059,7 @@ __metadata:
     supertokens-js-override: "npm:^0.0.4"
     tldts: "npm:^6.1.48"
     twilio: "npm:^4.19.3"
-  checksum: 10c0/8586a6ff0540c17d2857997de5c8ef0b387727a3608aa12d46f9e9bc4d84977a4b77a0986805287108aaa6428cb04cd2a76559636267fbcbc04f01ccd7d2126e
+  checksum: 10c0/3dd69455febba12f753b506875e83e78d9a2b47c019f272fa1c7782c6eef0c7672dbdd369e7fc3bfc0b4870d97c074a1572601b7b32a61a96f17f4f44d8c13b9
   languageName: node
   linkType: hard
 
@@ -14448,7 +14448,7 @@ __metadata:
     sort-package-json: "npm:3.4.0"
     superjson: "npm:2.2.2"
     supertokens-auth-react: "npm:0.49.1"
-    supertokens-node: "npm:22.1.1"
+    supertokens-node: "npm:23.0.1"
     supertokens-web-js: "npm:0.15.0"
     typescript: "npm:5.8.3"
     typescript-eslint: "npm:8.37.0"
