@@ -10,8 +10,6 @@ import { courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
 
 const prisma = new PrismaClient();
 
-// 1/3 9:30まで一発正解の採点考慮
-
 const deadLines = {
   // tuBeginner1: [
   //   new Date('2025-04-29T11:59:59+09:00'), // 1st: 4/29
@@ -25,15 +23,15 @@ const deadLines = {
   //   new Date('2025-06-09T11:59:59+09:00'), // final deadline: 6/9
   // ],
   tuBeginner2: [
-    new Date('2025-01-14T11:59:59+09:00'), // 1st: 7/17
-    new Date('2025-01-14T11:59:59+09:00'), // 2nd: 7/17
-    new Date('2025-01-16T11:59:59+09:00'), // 3rd: 7/24
-    new Date('2025-01-16T11:59:59+09:00'), // 4th: 7/24
-    new Date('2025-01-27T11:59:59+09:00'), // 5th: 7/31
-    new Date('2025-01-30T11:59:59+09:00'), // 6th: 8/7
-    new Date('2025-02-06T11:59:59+09:00'), // 7th: 8/14
-    new Date('2025-02-13T11:59:59+09:00'), // 8th: 8/21
-    new Date('2025-02-25T11:59:59+09:00'), // final deadline: 9/1
+    new Date('2025-07-17T11:59:59+09:00'), // 1st: 7/17
+    new Date('2025-07-17T11:59:59+09:00'), // 2nd: 7/17
+    new Date('2025-07-24T11:59:59+09:00'), // 3rd: 7/24
+    new Date('2025-07-24T11:59:59+09:00'), // 4th: 7/24
+    new Date('2025-07-31T11:59:59+09:00'), // 5th: 7/31
+    new Date('2025-08-07T11:59:59+09:00'), // 6th: 8/7
+    new Date('2025-08-14T11:59:59+09:00'), // 7th: 8/14
+    new Date('2025-08-21T11:59:59+09:00'), // 8th: 8/21
+    new Date('2025-09-01T11:59:59+09:00'), // final deadline: 9/1
   ],
 };
 
@@ -44,7 +42,7 @@ const validStudentIds = `
 async function main(): Promise<void> {
   ensureSuperTokensInit();
 
-  const courseId = 'tuBeginner1';
+  const courseId = Object.keys(deadLines)[0] as keyof typeof deadLines;
   const users = await prisma.user.findMany();
   const finalDeadline = deadLines[courseId][8];
 
