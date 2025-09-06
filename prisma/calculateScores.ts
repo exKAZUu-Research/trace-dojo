@@ -126,7 +126,7 @@ async function main(): Promise<void> {
     totalScore = (totalScore / 80) * 100;
 
     // Print CSV row, escape email if it contains commas
-    const row = `${studentId},,,,,,,${Math.round(totalScore)},,,,,,,\n`;
+    const row = `${studentId},${Math.round(totalScore)},,,,,,,,,,,,,\n`;
     records.push({ studentId, row, solvedProblems });
   }
 
@@ -135,7 +135,7 @@ async function main(): Promise<void> {
 
   // Write sorted records to file
   for (const record of records) {
-    console.log(record.row.trim() + ': ' + record.solvedProblems);
+    console.log(`${record.row.trim()}: ${record.solvedProblems} problems solved`);
     writeFileSync('grading.csv', record.row, { flag: 'a' });
   }
 }
