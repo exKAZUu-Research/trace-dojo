@@ -25,7 +25,7 @@ export ALLOW_TO_SKIP_SEED=1
 export RESTORE_BACKUP=0
 
 if [ "$RESTORE_BACKUP" -eq 1 ] && [ -s gcp-sa-key.json ] && [ "$WB_ENV" != "" ] && [ "$WB_ENV" != "development" ] && [ "$WB_ENV" != "test" ] && [ "$WB_VERSION" != "development" ]; then
-  node node_modules/.bin/wb prisma deploy-force gcs://wb-education-services/trace-dojo-${WB_ENV}/prod.sqlite3
+  node node_modules/.bin/wb prisma deploy-force gs://wb-education-services/trace-dojo-${WB_ENV}/prod.sqlite3
 else
   node node_modules/.bin/wb prisma deploy
 fi
@@ -39,7 +39,7 @@ else
 fi
 
 if [ -s gcp-sa-key.json ] && [ "$WB_ENV" != "" ] && [ "$WB_ENV" != "development" ] && [ "$WB_ENV" != "test" ] && [ "$WB_VERSION" != "development" ]; then
-  generate_litestream_config "gcs://wb-education-services/trace-dojo-${WB_ENV}/prod.sqlite3"
+  generate_litestream_config "gs://wb-education-services/trace-dojo-${WB_ENV}/prod.sqlite3"
   litestream replicate -exec 'node node_modules/.bin/pm2-runtime start ecosystem.config.cjs'
 else
   node node_modules/.bin/pm2-runtime start ecosystem.config.cjs
