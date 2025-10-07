@@ -19,4 +19,3 @@ jobs:
       DOT_ENV: ${{ secrets.DOT_ENV_STAGING }}
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       GCP_SA_KEY_JSON: ${{ secrets.GCP_SA_KEY }}
-      GH_TOKEN: ${{ secrets.GH_BOT_PAT }}
