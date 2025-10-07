@@ -15,7 +15,7 @@ import { type TraceItemVariable } from '../../../../../../../../problems/tracePr
 
 type VariablesProps = {
   traceItemVars: TraceItemVariable;
-}
+};
 
 export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
   const variables = Object.entries(traceItemVars).map(([key, value]) => ({ key, value }));

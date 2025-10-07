@@ -14,7 +14,7 @@ export type SessionOnServer = {
   session: SessionOnNode | undefined;
   hasToken: boolean;
   error: unknown;
-}
+};
 
 export async function getNullableSessionOnServer(cookies: ReadonlyRequestCookies): Promise<SessionOnServer> {
   let session: SessionOnNode | undefined;

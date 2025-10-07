@@ -2,7 +2,7 @@ import type React from 'react';
 
 export type LayoutProps = {
   children: React.ReactElement;
-}
+};
 
 export type LayoutComponent = React.FC<LayoutProps>;
 
