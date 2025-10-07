@@ -15,6 +15,7 @@ jobs:
   test:
     uses: exKAZUu-Research/reusable-workflows/.github/workflows/test.yml@main
     with:
+      ci_label: large
       github_hosted_runner: true
     secrets:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -49,7 +49,8 @@ export function instantiateProblem(
   variableSeed: string
 ): InstantiatedProblem | undefined {
   const template = problemIdToLanguageIdToProgram[problemId as ProblemId];
-  if (!template || !template[languageId]) return;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (!template?.[languageId]) return;
 
   const random = new Random(variableSeed);
   const generatedNumbers: number[] = [];

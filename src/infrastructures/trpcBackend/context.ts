@@ -9,7 +9,11 @@ export type Context = FetchCreateContextFnOptions;
 
 // cf. https://trpc.io/docs/server/adapters/fastify#create-the-context
 export function createContext(options: FetchCreateContextFnOptions): inferRouterContext<BackendRouter> {
-  logger.debug(`%s %s` + (options.req.body ? `\n%o` : ''), options.req.method, options.req.url, options.req.body);
+  if (options.req.body) {
+    logger.debug(`%s %s\n%o`, options.req.method, options.req.url, options.req.body);
+  } else {
+    logger.debug(`%s %s`, options.req.method, options.req.url);
+  }
 
   return options;
 }

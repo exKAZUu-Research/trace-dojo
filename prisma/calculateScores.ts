@@ -95,9 +95,9 @@ async function main(): Promise<void> {
           },
         });
 
-        if (!session) continue; // No completed session
+        if (!session?.completedAt) continue; // No completed session
 
-        const completedAt = session.completedAt!;
+        const completedAt = session.completedAt;
 
         // Skip if completed after final deadline
         if (completedAt > finalDeadline) continue;

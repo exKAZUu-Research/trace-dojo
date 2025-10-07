@@ -19,7 +19,7 @@ import { dayjs } from '../../../utils/dayjs';
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { withAuthorizationOnServer } from '@/app/utils/withAuth';
 
-interface ProblemStatistics {
+type ProblemStatistics = {
   courseId: string;
   lectureIndex: number;
   problemId: string;
@@ -27,7 +27,7 @@ interface ProblemStatistics {
   completedUserCount: number;
   avgElapsedMilliseconds: number;
   avgIncorrectCounts: number;
-}
+};
 
 const StatisticsPage: MyAuthorizedNextPageOrLayout = async () => {
   const statistics = await calculateStatistics();
@@ -121,7 +121,7 @@ async function calculateStatistics(): Promise<ProblemStatistics[]> {
             avgIncorrectCounts,
           });
         } catch (error) {
-          logger.error(`Failed to calculate statistics of ${problemId}: %o`, error);
+          logger.error(`Failed to calculate statistics of ${problemId}: %o`, error as object);
         }
       }
     }

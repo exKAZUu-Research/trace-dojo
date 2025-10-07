@@ -9,7 +9,7 @@ import { dayjs } from '../../../../utils/dayjs';
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { withAuthorizationOnServer } from '@/app/utils/withAuth';
 
-interface UserProblemInfo {
+type UserProblemInfo = {
   userId: string;
   email?: string;
   courseId: string;
@@ -18,7 +18,7 @@ interface UserProblemInfo {
   completedAt: Date | null;
   elapsedMilliseconds: number;
   incorrectSubmissionCount: number;
-}
+};
 
 const StatisticsPage: MyAuthorizedNextPageOrLayout<{ problemId: ProblemId }> = async ({ params }) => {
   const userInfos = await fetchUserProblemInfo(params.problemId);
@@ -91,14 +91,15 @@ async function fetchUserProblemInfo(problemId: ProblemId): Promise<UserProblemIn
       }))
     );
   } catch (error) {
-    logger.error(`Failed to fetch user problem info for ${problemId}: %o`, error);
+    logger.error(`Failed to fetch user problem info for ${problemId}: %o`, error as object);
     return [];
   }
 }
 
 function getLectureIndex(courseId: string, lectureId: string): number {
   const lectureIds = courseIdToLectureIds[courseId as CourseId];
-  if (!lectureIds) {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (!lectureIds || lectureIds.length === 0) {
     logger.warn(`Course (${courseId}) not found.`);
     return -1;
   }

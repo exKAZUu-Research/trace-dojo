@@ -142,7 +142,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   );
 };
 
-function useMonitorUserActivity(props: Props, lastActionTimeRef: React.MutableRefObject<number>): void {
+function useMonitorUserActivity(props: Props, lastActionTimeRef: React.RefObject<number>): void {
   const updateProblemSessionMutation = backendTrpcReact.updateProblemSession.useMutation();
 
   useIdleTimer({
@@ -157,7 +157,7 @@ function useMonitorUserActivity(props: Props, lastActionTimeRef: React.MutableRe
   });
 }
 
-function getIncrementalElapsedMilliseconds(lastActionTimeRef: React.MutableRefObject<number>): number {
+function getIncrementalElapsedMilliseconds(lastActionTimeRef: React.RefObject<number>): number {
   const nowTime = Date.now();
   const incrementalElapsedMilliseconds = Math.min(
     nowTime - lastActionTimeRef.current,

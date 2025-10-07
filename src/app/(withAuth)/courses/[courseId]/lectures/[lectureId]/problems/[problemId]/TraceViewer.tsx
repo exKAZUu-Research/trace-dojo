@@ -56,7 +56,9 @@ export const TraceViewer: React.FC<Props> = (props: Props) => {
             colorScheme="brand"
             isDisabled={props.viewingTraceItemIndex <= 1}
             variant="outline"
-            onClick={() => props.setViewingTraceItemIndex((prev) => prev - 1)}
+            onClick={() => {
+              props.setViewingTraceItemIndex((prev) => prev - 1);
+            }}
           >
             1ステップ前を表示
           </Button>
@@ -64,7 +66,9 @@ export const TraceViewer: React.FC<Props> = (props: Props) => {
             colorScheme="brand"
             isDisabled={props.previousTraceItemIndex <= props.viewingTraceItemIndex}
             variant="outline"
-            onClick={() => props.setViewingTraceItemIndex((prev) => prev + 1)}
+            onClick={() => {
+              props.setViewingTraceItemIndex((prev) => prev + 1);
+            }}
           >
             1ステップ後を表示
           </Button>

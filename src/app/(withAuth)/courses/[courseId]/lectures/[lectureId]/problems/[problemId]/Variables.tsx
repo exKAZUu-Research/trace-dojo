@@ -13,9 +13,9 @@ import {
 } from '../../../../../../../../infrastructures/useClient/chakra';
 import { type TraceItemVariable } from '../../../../../../../../problems/traceProgram';
 
-interface VariablesProps {
+type VariablesProps = {
   traceItemVars: TraceItemVariable;
-}
+};
 
 export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
   const variables = Object.entries(traceItemVars).map(([key, value]) => ({ key, value }));

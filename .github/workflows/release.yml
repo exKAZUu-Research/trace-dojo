@@ -12,6 +12,7 @@ jobs:
   release:
     uses: exKAZUu-Research/reusable-workflows/.github/workflows/release.yml@main
     with:
+      github_hosted_runner: true
       skip_build: true
     secrets:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,8 +1,8 @@
 import type React from 'react';
 
-export interface LayoutProps {
+export type LayoutProps = {
   children: React.ReactElement;
-}
+};
 
 export type LayoutComponent = React.FC<LayoutProps>;
 

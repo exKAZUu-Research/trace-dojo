@@ -621,7 +621,10 @@ function stringifyObjects(trace: TraceItemWithOptionalCallStack[]): TraceItem[] 
 }
 
 function getBoard(dots: { x: number; y: number; color: string }[]): string {
-  const board = defaultBoard.split('\n').map((row) => [...row]);
+  const board = defaultBoard
+    .split('\n')
+    // eslint-disable-next-line @typescript-eslint/no-misused-spread
+    .map((row) => [...row]);
   for (const dot of dots) {
     board[dot.y][dot.x] = dot.color;
   }

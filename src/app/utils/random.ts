@@ -23,7 +23,7 @@ export class Random {
         ret.push(candidate);
       }
     }
-    return sorting ? ret.sort((a, b) => a - b) : ret;
+    return sorting ? ret.toSorted((a, b) => a - b) : ret;
   }
 
   pick<T>(array: T[]): T {

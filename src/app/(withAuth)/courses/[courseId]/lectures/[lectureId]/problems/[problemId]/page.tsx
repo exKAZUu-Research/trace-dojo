@@ -21,19 +21,17 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
       completedAt: null,
     },
   });
-  if (!incompleteProblemSession) {
-    incompleteProblemSession = await prisma.problemSession.create({
-      data: {
-        userId: session.superTokensUserId,
-        courseId: params.courseId,
-        lectureId: params.lectureId,
-        problemId: params.problemId,
-        problemVariablesSeed: Date.now().toString(),
-        problemType: 'executionResult',
-        traceItemIndex: 0,
-      },
-    });
-  }
+  incompleteProblemSession ??= await prisma.problemSession.create({
+    data: {
+      userId: session.superTokensUserId,
+      courseId: params.courseId,
+      lectureId: params.lectureId,
+      problemId: params.problemId,
+      problemVariablesSeed: Date.now().toString(),
+      problemType: 'executionResult',
+      traceItemIndex: 0,
+    },
+  });
   logger.debug('incompleteProblemSession: %o', incompleteProblemSession);
 
   return <ProblemPageOnClient initialProblemSession={incompleteProblemSession} userId={session.superTokensUserId} />;

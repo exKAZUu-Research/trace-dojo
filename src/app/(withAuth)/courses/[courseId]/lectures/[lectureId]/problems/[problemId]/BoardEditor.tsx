@@ -43,7 +43,7 @@ const DIRECTIONS = ['N', 'E', 'S', 'W'];
 const DX = [0, 1, 0, -1];
 const DY = [1, 0, -1, 0];
 
-interface TurtleGraphicsProps {
+type TurtleGraphicsProps = {
   currentTraceItemIndex: number;
   currentVariables: TraceItemVariable;
   initialVariables: Record<string, string>;
@@ -51,18 +51,18 @@ interface TurtleGraphicsProps {
   handleSubmit: () => Promise<void>;
   problem: InstantiatedProblem;
   problemType: ProblemType;
-}
+};
 
-export interface TurtleGraphicsHandle {
+export type TurtleGraphicsHandle = {
   findIncorrectLocationsAndHintText(): [string[], string];
-}
+};
 
 export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>((props, ref) => {
   const [board, updateBoard] = useImmer<ColorChar[][]>([]);
   const [turtles, updateTurtles] = useImmer<TurtleTrace[]>([]);
   const [selectedCell, setSelectedCell] = useState<SelectedCell>();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const selectedTurtle = turtles.find((char) => char.x === selectedCell?.x && char.y === selectedCell?.y);
+  const selectedTurtle = turtles.find((char) => selectedCell && char.x === selectedCell.x && char.y === selectedCell.y);
   const previousTraceItem = props.problem.traceItems[props.previousTraceItemIndex];
   const currentTraceItem = props.problem.traceItems[props.currentTraceItemIndex];
   const [variables, updateVariables] = useImmer<Record<string, string>>(props.initialVariables);
@@ -112,12 +112,11 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     }
     for (const [name, value] of Object.entries(variables)) {
       if (
-        zenkakuAlphanumericalsToHankaku(value) !==
-        zenkakuAlphanumericalsToHankaku(props.currentVariables[name].toString())
+        zenkakuAlphanumericalsToHankaku(value) !== zenkakuAlphanumericalsToHankaku(String(props.currentVariables[name]))
       ) {
         const isExpression = /[+\-*/%()[\]\\.]/.test(name);
         locations.push(isExpression ? `式「${name}」` : `変数${name}`);
-        if (props.initialVariables[name].toString() === props.currentVariables[name].toString()) {
+        if (props.initialVariables[name] === String(props.currentVariables[name])) {
           hintText += hintText ? '\n\n' : '\n\nヒント: ';
           hintText +=
             '変数を更新する代入演算子（=, +=, ++）などがなければ、変数の値が変わらないことに注意してください。';
@@ -294,7 +293,9 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                   isDisabled={isSubmitting}
                   size="sm"
                   variant="outline"
-                  onClick={() => handleMoveTurtle(true)}
+                  onClick={() => {
+                    handleMoveTurtle(true);
+                  }}
                 >
                   前に進む
                 </Button>
@@ -305,7 +306,9 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                   isDisabled={isSubmitting}
                   size="sm"
                   variant="outline"
-                  onClick={() => handleMoveTurtle(false)}
+                  onClick={() => {
+                    handleMoveTurtle(false);
+                  }}
                 >
                   後に戻る
                 </Button>
@@ -318,7 +321,9 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                   isDisabled={isSubmitting}
                   size="sm"
                   variant="outline"
-                  onClick={() => handleTurnTurtle(true)}
+                  onClick={() => {
+                    handleTurnTurtle(true);
+                  }}
                 />
                 <IconButton
                   aria-label="Turn right"
@@ -329,7 +334,9 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                   isDisabled={isSubmitting}
                   size="sm"
                   variant="outline"
-                  onClick={() => handleTurnTurtle(false)}
+                  onClick={() => {
+                    handleTurnTurtle(false);
+                  }}
                 />
               </Grid>
               <HStack justify="space-between" width="100%">
@@ -340,7 +347,9 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
                   size="sm"
                   variant="outline"
                   width="100%"
-                  onClick={() => handleRemoveCharacterButton()}
+                  onClick={() => {
+                    handleRemoveCharacterButton();
+                  }}
                 >
                   タートルを削除
                 </Button>
@@ -355,7 +364,9 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
               isDisabled={isSubmitting}
               size="sm"
               variant="outline"
-              onClick={() => handleAddCharacterButton()}
+              onClick={() => {
+                handleAddCharacterButton();
+              }}
             >
               タートルを配置
             </Button>
@@ -367,7 +378,14 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
           )}
         </VStack>
         <Spacer />
-        <Button colorScheme="brand" isDisabled={isSubmitting} variant="outline" onClick={() => initialize()}>
+        <Button
+          colorScheme="brand"
+          isDisabled={isSubmitting}
+          variant="outline"
+          onClick={() => {
+            initialize();
+          }}
+        >
           盤面をリセット
         </Button>
 
@@ -404,11 +422,14 @@ function canPutTurtle(turtlesTraces: TurtleTrace[], x: number, y: number): boole
 }
 
 function parseBoard(boardString: string): ColorChar[][] {
-  return boardString
-    .trim()
-    .split('\n')
-    .filter((line) => line.trim() !== '')
-    .map((line) => [...line.trim()]) as ColorChar[][];
+  return (
+    boardString
+      .trim()
+      .split('\n')
+      .filter((line) => line.trim() !== '')
+      // eslint-disable-next-line @typescript-eslint/no-misused-spread
+      .map((line) => [...line.trim()]) as ColorChar[][]
+  );
 }
 
 function useShortcutKeys(handleSubmit: () => Promise<void>, isSubmitting: boolean): void {
@@ -420,6 +441,8 @@ function useShortcutKeys(handleSubmit: () => Promise<void>, isSubmitting: boolea
       }
     };
     globalThis.addEventListener('keydown', handleKeyDown);
-    return () => globalThis.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      globalThis.removeEventListener('keydown', handleKeyDown);
+    };
   }, [handleSubmit, isSubmitting]);
 }

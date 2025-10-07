@@ -77,6 +77,7 @@ export const BoardViewer: React.FC<Props> = ({
       board
         ?.trim()
         .split(/\s+/)
+        // eslint-disable-next-line @typescript-eslint/no-misused-spread
         .map((row) => [...row]) ?? [],
     [board]
   );
@@ -135,7 +136,7 @@ export const BoardViewer: React.FC<Props> = ({
           }}
         >
           <Img
-            alt={'turtle' + turtle.x + turtle.y}
+            alt={`turtle${turtle.x}${turtle.y}`}
             src={`/character/${charToColor[turtle.color as keyof typeof charToColor]}.png`}
             transform={DIR_TO_TRANSFORM_FUNCTION[turtle.dir as keyof typeof DIR_TO_TRANSFORM_FUNCTION]}
             w={`${(0.75 * CELL_SIZE_PX).toFixed(3)}px`}

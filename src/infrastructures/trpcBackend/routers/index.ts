@@ -9,7 +9,7 @@ import { procedure, router } from '../trpc';
 export const backendRouter = router({
   getSession: procedure
     .use(authorize)
-    .output(z.object({ userId: z.string().uuid() }))
+    .output(z.object({ userId: z.string() }))
     .query(({ ctx }) => ({ userId: ctx.session.superTokensUserId })),
 
   updateProblemSession: procedure
