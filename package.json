@@ -101,7 +101,7 @@
     "@types/react-syntax-highlighter": "15.5.13",
     "@types/seedrandom": "3.0.8",
     "@types/uuid": "10.0.0",
-    "@willbooster/eslint-config-next": "2.5.1",
+    "@willbooster/eslint-config-next": "2.5.8",
     "@willbooster/prettier-config": "10.2.0",
     "babel-plugin-react-compiler": "19.1.0-rc.2",
     "concurrently": "9.2.0",
