@@ -91,7 +91,7 @@ async function fetchUserProblemInfo(problemId: ProblemId): Promise<UserProblemIn
       }))
     );
   } catch (error) {
-    logger.error(`Failed to fetch user problem info for ${problemId}: %o`, error);
+    logger.error(`Failed to fetch user problem info for ${problemId}: %o`, error as object);
     return [];
   }
 }
