@@ -13,7 +13,7 @@ import {
 } from '../../../../../../../../infrastructures/useClient/chakra';
 import { type TraceItemVariable } from '../../../../../../../../problems/traceProgram';
 
-interface VariablesProps {
+type VariablesProps = {
   traceItemVars: TraceItemVariable;
 }
 

@@ -24,8 +24,12 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
   ...boxProps
 }) => {
   const [fontSize, setFontSize] = useState(1); // 1rem is default
-  const handleZoomIn = (): void => setFontSize((prev) => Math.min(prev + 0.1, 2)); // Max 2rem
-  const handleZoomOut = (): void => setFontSize((prev) => Math.max(prev - 0.1, 0.5)); // Min 0.5rem
+  const handleZoomIn = (): void => {
+    setFontSize((prev) => Math.min(prev + 0.1, 2));
+  }; // Max 2rem
+  const handleZoomOut = (): void => {
+    setFontSize((prev) => Math.max(prev - 0.1, 0.5));
+  }; // Min 0.5rem
 
   return (
     <Box position="relative" {...boxProps}>
@@ -70,7 +74,7 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
           style={oneLight}
           wrapLines={true}
         >
-          {code ?? ''}
+          {code || ''}
         </Prism>
       </Box>
     </Box>

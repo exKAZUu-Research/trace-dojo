@@ -19,7 +19,7 @@ import { dayjs } from '../../../utils/dayjs';
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { withAuthorizationOnServer } from '@/app/utils/withAuth';
 
-interface ProblemStatistics {
+type ProblemStatistics = {
   courseId: string;
   lectureIndex: number;
   problemId: string;

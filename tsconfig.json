@@ -23,6 +23,7 @@
     "sourceMap": true,
     "strict": true,
     "target": "ESNext",
+    "types": [],
     "typeRoots": ["./node_modules/@types", "./@types"],
     "plugins": [
       {
@@ -36,7 +37,7 @@
     "prisma/**/*",
     "scripts/**/*",
     "src/**/*",
-    "tests/**/*",
+    "test/**/*",
     ".next/types/**/*.ts"
   ],
   "exclude": ["node_modules"]

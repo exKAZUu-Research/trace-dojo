@@ -10,16 +10,16 @@ import type { LanguageId } from './problemData';
 
 import type { CellColor, ColorChar } from '@/types';
 
-export interface TurtleTrace {
+export type TurtleTrace = {
   x: number;
   y: number;
   /** 色を表現する1文字 */
   color: string;
   /** 方向を表現する1文字 */
   dir: string;
-}
+};
 
-export interface TraceItem {
+export type TraceItem = {
   depth: number;
   sid: number;
   /** caller id のスタック。 `// caller` のある行に caller id が付与される。 */
@@ -29,7 +29,7 @@ export interface TraceItem {
   board: string;
   /** Pythonなどの拡張for文しかない言語において、削除すべき更新式か否か。 */
   last?: boolean;
-}
+};
 
 // できる限り、可能性のある型を具体的に列挙していきたい。
 export type TraceItemVariable = Record<string, number | string | number[] | string[]>;
@@ -65,7 +65,7 @@ export function traceProgram(
   const modifiedCodeLines = modifyCode(instrumented);
   const modifiedCode = modifiedCodeLines.join('\n');
 
-  const thisPropNames = Object.keys((this as Record<string, unknown>) || {});
+  const thisPropNames = Object.keys(this as Record<string, unknown>);
   // 無理に難読化する必要はないが、コードの文量を減らす意識を持つ。
   const executableCode = `
 let myGlobal = {};
@@ -279,8 +279,8 @@ function modifyCode(instrumented: string): string[] {
   let statementId = 1;
   let callerId = 1;
   for (const line of instrumented.split('\n')) {
-    let statementReplaced = false;
-    let callReplaced = false;
+    let statementReplaced = false as boolean;
+    let callReplaced = false as boolean;
     const newLine = line
       // Python向けに最後のループの処理かどうかを判定するために checkForCond を挿入する。
       .replace(/for\s*\(([^;]*);\s*([^;]*);/, (_, init, cond) => `for (${init}; checkForCond(${cond}, ${statementId});`)

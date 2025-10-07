@@ -340,9 +340,9 @@ function getInitialVariables(
       .map(([key]) => {
         const isGlobalVariable = isUpperCase(key.slice(0, 1));
         console.log(key, isGlobalVariable);
-        if (isGlobalVariable) return [key, traceItems[previousTraceItemIndex].vars[key]?.toString() ?? ''];
+        if (isGlobalVariable) return [key, String(traceItems[previousTraceItemIndex].vars[key] ?? '')];
         if (nonGlobalVariableShouldBeEmpty) return [key, ''];
-        return [key, traceItems[adjustedPreviousTraceItemIndex].vars[key]?.toString() ?? ''];
+        return [key, String(traceItems[adjustedPreviousTraceItemIndex].vars[key] ?? '')];
       })
   );
 }

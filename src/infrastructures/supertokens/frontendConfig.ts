@@ -22,9 +22,18 @@ export const frontendConfig = (): SuperTokensConfig => {
       ...original,
       location: {
         ...original.location,
-        getPathName: () => routerInfo.pathName!,
-        assign: (url) => routerInfo.router!.push(url.toString()),
-        setHref: (url) => routerInfo.router!.push(url.toString()),
+        getPathName: () => {
+          if (!routerInfo.pathName) throw new Error('pathName is not set');
+          return routerInfo.pathName;
+        },
+        assign: (url) => {
+          if (!routerInfo.router) throw new Error('router is not set');
+          routerInfo.router.push(url as string);
+        },
+        setHref: (url) => {
+          if (!routerInfo.router) throw new Error('router is not set');
+          routerInfo.router.push(url);
+        },
       },
     }),
     // https://supertokens.com/docs/thirdpartyemailpassword/common-customizations/translations
