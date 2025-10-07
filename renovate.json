@@ -1,5 +1,10 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["github>WillBooster/willbooster-configs:renovate.json5"],
-  "packageRules": [{ "matchPackageNames": ["react", "react-dom", "react-is"], "enabled": false }]
+  "packageRules": [
+    {
+      "packageNames": ["@chakra-ui/cli", "@chakra-ui/react"],
+      "enabled": false
+    }
+  ]
 }
