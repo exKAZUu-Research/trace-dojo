@@ -15,7 +15,7 @@
     "db-migrate-apply": "wb prisma migrate",
     "db-migrate-create": "wb prisma migrate-dev",
     "db-reset": "wb prisma reset",
-    "db-restore": "wb prisma restore gs://wb-education-services/trace-dojo-${WB_ENV}/prod.sqlite3",
+    "db-restore": "wb prisma restore gcs://wb-education-services/trace-dojo-${WB_ENV}/prod.sqlite3",
     "db-view": "wb prisma studio",
     "db-view-restored": "wb prisma studio --restored",
     "deploy": "wb optimizeForDockerBuild --outside && fly deploy -c fly-${WB_ENV}.toml --build-arg ARCH=x86_64 --build-arg WB_ENV=${WB_ENV} --build-arg WB_VERSION=${WB_VERSION}",
