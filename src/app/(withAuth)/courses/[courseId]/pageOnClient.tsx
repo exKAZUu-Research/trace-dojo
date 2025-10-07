@@ -18,7 +18,7 @@ import {
   Progress,
   SimpleGrid,
   Spacer,
-  Tooltip,
+  Text,
   VStack,
 } from '../../../../infrastructures/useClient/chakra';
 import type { CourseId } from '../../../../problems/problemData';
@@ -91,19 +91,19 @@ const LectureCard: React.FC<LectureCardProps> = ({
         />
         <Heading size="md">第{lectureIndex + 1}回</Heading>
         <Spacer />
-        <Tooltip
-          isDisabled={!isDisabled}
-          label={`第${lectureIndex + 1}回の配布資料のURLから問題を一度開くと、ボタンが有効になります。`}
-        >
-          <Link href={url}>
-            <Button colorScheme="brand" isDisabled={isDisabled} mt={4}>
-              課題を解く
-            </Button>
-          </Link>
-        </Tooltip>
+        <Link href={url}>
+          <Button colorScheme="brand" isDisabled={isDisabled} mt={4}>
+            課題を解く
+          </Button>
+        </Link>
       </CardHeader>
 
       <CardBody align="stretch" as={VStack}>
+        {isDisabled && (
+          <Text color="red.500" fontSize="sm">
+            第{lectureIndex + 1}回の配布資料のURLから問題を一度開くと、ボタンが有効になります。
+          </Text>
+        )}
         <Progress
           colorScheme="brand"
           max={problemIds.length}
