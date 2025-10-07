@@ -11,10 +11,7 @@ jobs:
   deploy:
     uses: exKAZUu-Research/reusable-workflows/.github/workflows/deploy.yml@main
     with:
-      ci_label: large
-      cpu_arch: X64
       environment: production
-      github_hosted_runner: true
     secrets:
       DOT_ENV: ${{ secrets.DOT_ENV_PRODUCTION }}
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
