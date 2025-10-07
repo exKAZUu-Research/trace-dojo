@@ -65,7 +65,7 @@ export function traceProgram(
   const modifiedCodeLines = modifyCode(instrumented);
   const modifiedCode = modifiedCodeLines.join('\n');
 
-  const thisPropNames = Object.keys(this as Record<string, unknown>);
+  const thisPropNames = Object.keys((this as Record<string, unknown> | undefined) ?? {});
   // 無理に難読化する必要はないが、コードの文量を減らす意識を持つ。
   const executableCode = `
 let myGlobal = {};
