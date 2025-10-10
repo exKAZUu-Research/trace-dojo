@@ -1,4 +1,4 @@
-FROM node:24.9.0-slim
+FROM node:24.9.0-slim@sha256:3e69116c924bfcba6c6979aff60d966c37aef56d488ce091c69d442ebec9f103
 WORKDIR /app
 
 EXPOSE 8080
