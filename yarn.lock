@@ -4287,9 +4287,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@willbooster/eslint-config-next@npm:2.5.8":
-  version: 2.5.8
-  resolution: "@willbooster/eslint-config-next@npm:2.5.8"
+"@willbooster/eslint-config-next@npm:2.5.9":
+  version: 2.5.9
+  resolution: "@willbooster/eslint-config-next@npm:2.5.9"
   peerDependencies:
     "@eslint/eslintrc": ">=3"
     "@eslint/js": ">=9"
@@ -4301,7 +4301,7 @@ __metadata:
     eslint-plugin-import-x: ">=4"
     eslint-plugin-react: ">=7"
     eslint-plugin-react-compiler: ">=19.1.0-rc.2"
-    eslint-plugin-react-hooks: ">=5"
+    eslint-plugin-react-hooks: ">=6"
     eslint-plugin-sort-class-members: ">=1.21"
     eslint-plugin-sort-destructure-keys: ">=2"
     eslint-plugin-unicorn: ">=59"
@@ -4309,7 +4309,7 @@ __metadata:
     globals: ">=16"
     typescript: ">=5"
     typescript-eslint: ">=8"
-  checksum: 10c0/9792ddfdb39bc417cfc6e27891d243e62100a5b5bbf0920c34d58c339a185b5edc3888ba94a707e3342de9ee620d9d7f268dbfa3af0360e3bab1d8af0bfc9ecc
+  checksum: 10c0/53271c345a13bbe9c9afa32bd70c8cdffa1ee8b9383ed43ab44b15750456417c9cf7ead36806be1ad4d43d5973c3396abb9b8ba4c10d83af5379b2ab2a3c9a74
   languageName: node
   linkType: hard
 
@@ -14350,7 +14350,7 @@ __metadata:
     "@types/react-syntax-highlighter": "npm:15.5.13"
     "@types/seedrandom": "npm:3.0.8"
     "@types/uuid": "npm:11.0.0"
-    "@willbooster/eslint-config-next": "npm:2.5.8"
+    "@willbooster/eslint-config-next": "npm:2.5.9"
     "@willbooster/prettier-config": "npm:10.2.0"
     "@willbooster/shared-lib": "npm:6.1.0"
     "@willbooster/shared-lib-react": "npm:4.2.0"
