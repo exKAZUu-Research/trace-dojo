@@ -1,7 +1,3 @@
-import { PrismaClient } from '@prisma/client';
-
-const _prisma = new PrismaClient();
-
 async function main(): Promise<void> {
   // do nothing
 }

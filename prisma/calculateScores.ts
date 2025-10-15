@@ -78,10 +78,12 @@ async function main(): Promise<void> {
       const lectureDeadline = deadLines[courseId][lectureIndex];
 
       for (const problemId of problemIds) {
-        const sessions = await prisma.problemSession.findMany({
+        const session = await prisma.problemSession.findFirst({
           where: {
             problemId,
             userId: user.id,
+            // eslint-disable-next-line unicorn/no-null
+            completedAt: { not: null },
           },
           orderBy: { completedAt: 'asc' },
           select: {
@@ -93,8 +95,6 @@ async function main(): Promise<void> {
             },
           },
         });
-
-        const session = sessions.find((candidate) => candidate.completedAt);
 
         if (!session?.completedAt) continue; // No completed session
 
