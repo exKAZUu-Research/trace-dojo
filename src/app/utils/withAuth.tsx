@@ -32,7 +32,8 @@ export function withAuthorizationOnServer<Props = Record<string, never>, Params 
   options?: { admin: boolean }
 ): MyAuthorizedNextPageOrLayoutWrapper<Props, Params> {
   return async function WithAuthorizationOnServer(props) {
-    const { error, hasToken, session } = await getSessionOnServer(await cookies());
+    const requestCookies = await cookies();
+    const { error, hasToken, session } = await getSessionOnServer(requestCookies);
 
     // To recover from an error, use  `redirect(await getRedirectionUrlToAuthOnServer(), RedirectType.replace)` or `RefreshSessionOnClient`.
     if (error) console.warn('Failed to get session due to %o', error);

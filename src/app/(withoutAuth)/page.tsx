@@ -8,8 +8,12 @@ import { courseIds, courseIdToName } from '@/problems/problemData';
 import { getNullableSessionOnServer } from '@/utils/session';
 
 const HomePage: NextPage = async () => {
-  const { hasToken, session } = await getNullableSessionOnServer(await cookies());
-  if (!session && hasToken) return <TryRefreshComponent key={Date.now()} />;
+  const requestCookies = await cookies();
+  const { hasToken, session } = await getNullableSessionOnServer(requestCookies);
+  if (!session && hasToken) {
+    // eslint-disable-next-line react-hooks/purity
+    return <TryRefreshComponent key={Date.now()} />;
+  }
 
   return (
     <VStack align="stretch" spacing={16}>

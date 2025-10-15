@@ -82,6 +82,7 @@ async function main(): Promise<void> {
           where: {
             problemId,
             userId: user.id,
+            // eslint-disable-next-line unicorn/no-null
             completedAt: { not: null },
           },
           orderBy: { completedAt: 'asc' },
