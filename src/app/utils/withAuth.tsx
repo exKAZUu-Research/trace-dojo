@@ -6,7 +6,7 @@ import SuperTokensNode from 'supertokens-node';
 import { SessionAuthForNextJs } from '@/components/molecules/SessionAuthForNextJs';
 import { TryRefreshComponent } from '@/components/molecules/TryRefreshComponent';
 import { AuthContextProvider } from '@/contexts/AuthContext';
-import { getEmailFromSession, getRefreshAttemptKey } from '@/utils/session';
+import { getEmailFromSession } from '@/utils/session';
 import type { SessionOnNode } from '@/utils/sessionOnNode';
 import { getSessionOnServer } from '@/utils/sessionOnServer';
 
@@ -46,7 +46,7 @@ export function withAuthorizationOnServer<Props = Record<string, never>, Params 
        *
        * To learn about why the 'key' attribute is required refer to: https://github.com/supertokens/supertokens-node/issues/826#issuecomment-2092144048
        */
-      return <TryRefreshComponent key={getRefreshAttemptKey(requestCookies)} />;
+      return <TryRefreshComponent key={Date.now()} />;
     }
 
     // https://supertokens.com/docs/thirdpartyemailpassword/user-roles/protecting-routes

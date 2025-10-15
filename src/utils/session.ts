@@ -7,7 +7,6 @@ import SuperTokensNode from 'supertokens-node';
 import type { SessionOnNode } from './sessionOnNode';
 import { getSessionOnServer } from './sessionOnServer';
 
-import { SUPERTOKENS_ACCESS_TOKEN_COOKIE_NAME, SUPERTOKENS_REFRESH_TOKEN_COOKIE_NAME } from '@/constants';
 import { logger } from '@/infrastructures/pino';
 import { prisma } from '@/infrastructures/prisma';
 
@@ -71,9 +70,3 @@ async function _getEmailFromSuperTokens(userId: string): Promise<string | undefi
 }
 
 export const getEmailFromSession = memoizeForEmails(_getEmailFromSuperTokens);
-
-export function getRefreshAttemptKey(cookies: ReadonlyRequestCookies): string {
-  const accessTokenTail = cookies.get(SUPERTOKENS_ACCESS_TOKEN_COOKIE_NAME)?.value.slice(-8) ?? 'no-access';
-  const refreshTokenTail = cookies.get(SUPERTOKENS_REFRESH_TOKEN_COOKIE_NAME)?.value.slice(-8) ?? 'no-refresh';
-  return `${accessTokenTail}:${refreshTokenTail}`;
-}

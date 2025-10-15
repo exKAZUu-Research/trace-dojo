@@ -2,7 +2,7 @@
 
 import type { ProblemSession } from '@prisma/client';
 import { notFound, useParams } from 'next/navigation';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
 
 import { ProblemBody } from './ProblmBody';
@@ -37,7 +37,10 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
 
   const [problemSession, setProblemSession] = useState(props.initialProblemSession);
 
-  const lastActionTimeRef = useRef(props.initialProblemSession.updatedAt.getTime());
+  const lastActionTimeRef = useRef(0);
+  useLayoutEffect(() => {
+    lastActionTimeRef.current = Date.now();
+  }, []);
   useMonitorUserActivity(props, lastActionTimeRef);
 
   const updateProblemSessionMutation = backendTrpcReact.updateProblemSession.useMutation();
@@ -144,7 +147,6 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
 
 function useMonitorUserActivity(props: Props, lastActionTimeRef: React.RefObject<number>): void {
   const updateProblemSessionMutation = backendTrpcReact.updateProblemSession.useMutation();
-
   useIdleTimer({
     async onAction() {
       await updateProblemSessionMutation.mutateAsync({
@@ -160,7 +162,7 @@ function useMonitorUserActivity(props: Props, lastActionTimeRef: React.RefObject
 function getIncrementalElapsedMilliseconds(lastActionTimeRef: React.RefObject<number>): number {
   const nowTime = Date.now();
   const incrementalElapsedMilliseconds = Math.min(
-    nowTime - lastActionTimeRef.current,
+    nowTime - (lastActionTimeRef.current || nowTime),
     MAX_ACTIVE_DURATION_MS_AFTER_LAST_EVENT
   );
   lastActionTimeRef.current = nowTime;
