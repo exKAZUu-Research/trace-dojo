@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 
-const prisma = new PrismaClient();
+const _prisma = new PrismaClient();
 
 async function main(): Promise<void> {
   // do nothing

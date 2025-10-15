@@ -99,7 +99,7 @@ async function fetchUserProblemInfo(problemId: ProblemId): Promise<UserProblemIn
 function getLectureIndex(courseId: string, lectureId: string): number {
   const lectureIds = courseIdToLectureIds[courseId as CourseId];
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  if (!lectureIds || lectureIds.length === 0) {
+  if (lectureIds?.length === 0) {
     logger.warn(`Course (${courseId}) not found.`);
     return -1;
   }

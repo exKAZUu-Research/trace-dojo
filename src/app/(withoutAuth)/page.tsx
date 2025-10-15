@@ -5,11 +5,14 @@ import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefe
 import { TryRefreshComponent } from '@/components/molecules/TryRefreshComponent';
 import { Box, Card, Heading, LinkBox, LinkOverlay, SimpleGrid, VStack } from '@/infrastructures/useClient/chakra';
 import { courseIds, courseIdToName } from '@/problems/problemData';
-import { getNullableSessionOnServer } from '@/utils/session';
+import { getNullableSessionOnServer, getRefreshAttemptKey } from '@/utils/session';
 
 const HomePage: NextPage = async () => {
-  const { hasToken, session } = await getNullableSessionOnServer(await cookies());
-  if (!session && hasToken) return <TryRefreshComponent key={Date.now()} />;
+  const requestCookies = await cookies();
+  const { hasToken, session } = await getNullableSessionOnServer(requestCookies);
+  if (!session && hasToken) {
+    return <TryRefreshComponent key={getRefreshAttemptKey(requestCookies)} />;
+  }
 
   return (
     <VStack align="stretch" spacing={16}>

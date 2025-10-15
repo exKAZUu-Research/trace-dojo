@@ -6,7 +6,7 @@ import SuperTokensNode from 'supertokens-node';
 import { SessionAuthForNextJs } from '@/components/molecules/SessionAuthForNextJs';
 import { TryRefreshComponent } from '@/components/molecules/TryRefreshComponent';
 import { AuthContextProvider } from '@/contexts/AuthContext';
-import { getEmailFromSession } from '@/utils/session';
+import { getEmailFromSession, getRefreshAttemptKey } from '@/utils/session';
 import type { SessionOnNode } from '@/utils/sessionOnNode';
 import { getSessionOnServer } from '@/utils/sessionOnServer';
 
@@ -32,7 +32,8 @@ export function withAuthorizationOnServer<Props = Record<string, never>, Params 
   options?: { admin: boolean }
 ): MyAuthorizedNextPageOrLayoutWrapper<Props, Params> {
   return async function WithAuthorizationOnServer(props) {
-    const { error, hasToken, session } = await getSessionOnServer(await cookies());
+    const requestCookies = await cookies();
+    const { error, hasToken, session } = await getSessionOnServer(requestCookies);
 
     // To recover from an error, use  `redirect(await getRedirectionUrlToAuthOnServer(), RedirectType.replace)` or `RefreshSessionOnClient`.
     if (error) console.warn('Failed to get session due to %o', error);
@@ -45,7 +46,7 @@ export function withAuthorizationOnServer<Props = Record<string, never>, Params 
        *
        * To learn about why the 'key' attribute is required refer to: https://github.com/supertokens/supertokens-node/issues/826#issuecomment-2092144048
        */
-      return <TryRefreshComponent key={Date.now()} />;
+      return <TryRefreshComponent key={getRefreshAttemptKey(requestCookies)} />;
     }
 
     // https://supertokens.com/docs/thirdpartyemailpassword/user-roles/protecting-routes

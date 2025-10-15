@@ -37,7 +37,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
 
   const [problemSession, setProblemSession] = useState(props.initialProblemSession);
 
-  const lastActionTimeRef = useRef(Date.now());
+  const lastActionTimeRef = useRef(props.initialProblemSession.updatedAt.getTime());
   useMonitorUserActivity(props, lastActionTimeRef);
 
   const updateProblemSessionMutation = backendTrpcReact.updateProblemSession.useMutation();
