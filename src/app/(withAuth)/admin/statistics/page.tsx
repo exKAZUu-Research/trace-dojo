@@ -19,7 +19,7 @@ import { dayjs } from '../../../utils/dayjs';
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { withAuthorizationOnServer } from '@/app/utils/withAuth';
 
-type ProblemStatistics = {
+interface ProblemStatistics {
   courseId: string;
   lectureIndex: number;
   problemId: string;
@@ -27,7 +27,7 @@ type ProblemStatistics = {
   completedUserCount: number;
   avgElapsedMilliseconds: number;
   avgIncorrectCounts: number;
-};
+}
 
 const StatisticsPage: MyAuthorizedNextPageOrLayout = async () => {
   const statistics = await calculateStatistics();

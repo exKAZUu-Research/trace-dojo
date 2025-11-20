@@ -3,11 +3,11 @@
 import type React from 'react';
 import { createContext, useContextSelector } from 'use-context-selector';
 
-type Value = {
+interface Value {
   currentUserId: string;
   currentEmail?: string;
   isAdmin: boolean;
-};
+}
 
 const Context = createContext<Value>(undefined as unknown as Value);
 
@@ -15,11 +15,11 @@ export function useAuthContextSelector<Selected>(selector: (value: Value) => Sel
   return useContextSelector(Context, selector);
 }
 
-export type Props = {
+export interface Props {
   children: React.ReactNode;
   currentUserId: string;
   currentEmail?: string;
-};
+}
 
 export const AuthContextProvider: React.FC<Props> = (props) => {
   return (

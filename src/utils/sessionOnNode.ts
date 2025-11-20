@@ -14,12 +14,12 @@ const client = jwksClient({
   jwksUri: `${process.env.SUPERTOKENS_URI}/.well-known/jwks.json`,
 });
 
-export type SessionOnNode = {
+export interface SessionOnNode {
   superTokensUserId: string;
   superTokensRecipeUserId: SuperTokensNode.RecipeUserId;
   roles: string[];
   tenantId: string;
-};
+}
 
 /**
  * A helper function to retrieve session details on the server side.

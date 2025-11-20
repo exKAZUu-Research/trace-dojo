@@ -35,12 +35,12 @@ import type { CourseId, ProblemId } from '@/problems/problemData';
 import type { TraceItem, TraceItemVariable } from '@/problems/traceProgram';
 import type { ProblemType } from '@/types';
 
-type Props = {
+interface Props {
   problem: InstantiatedProblem;
   problemSession: ProblemSession;
   createSubmissionUpdatingProblemSession: (isCorrect: boolean, isCompleted: boolean) => Promise<void>;
   updateProblemSession: (problemType: string, traceItemIndex: number) => Promise<void>;
-};
+}
 
 export const ProblemBody: React.FC<Props> = (props) => {
   const params = useParams<{ courseId: CourseId; lectureId: string; problemId: ProblemId }>();

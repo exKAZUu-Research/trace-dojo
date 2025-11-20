@@ -20,10 +20,10 @@ import { instantiateProblem } from '@/problems/instantiateProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import { courseIdToLectureIds, courseIdToName, problemIdToName } from '@/problems/problemData';
 
-type Props = {
+interface Props {
   initialProblemSession: ProblemSession;
   userId: string;
-};
+}
 
 export const ProblemPageOnClient: React.FC<Props> = (props) => {
   const isAdmin = useAuthContextSelector((c) => c.isAdmin);
@@ -148,8 +148,8 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
 function useMonitorUserActivity(props: Props, lastActionTimeRef: React.RefObject<number>): void {
   const updateProblemSessionMutation = backendTrpcReact.updateProblemSession.useMutation();
   useIdleTimer({
-    async onAction() {
-      await updateProblemSessionMutation.mutateAsync({
+    onAction() {
+      void updateProblemSessionMutation.mutateAsync({
         id: props.initialProblemSession.id,
         incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
       });

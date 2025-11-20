@@ -4,7 +4,7 @@ import type { LanguageId, ProblemId } from './problemData';
 import { problemIdToLanguageIdToProgram } from './problemData';
 import { type TraceItem, type TraceItemVariable, traceProgram } from './traceProgram';
 
-export type InstantiatedProblem = {
+export interface InstantiatedProblem {
   /**
    * The language ID of the program.
    */
@@ -39,7 +39,7 @@ export type InstantiatedProblem = {
    * The variables of the final state
    */
   finalVars: TraceItemVariable;
-};
+}
 
 const randomNumberRegex = /<(\d+)-(\d+)>/g;
 

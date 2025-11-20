@@ -10,16 +10,16 @@ import type { LanguageId } from './problemData';
 
 import type { CellColor, ColorChar } from '@/types';
 
-export type TurtleTrace = {
+export interface TurtleTrace {
   x: number;
   y: number;
   /** 色を表現する1文字 */
   color: string;
   /** 方向を表現する1文字 */
   dir: string;
-};
+}
 
-export type TraceItem = {
+export interface TraceItem {
   depth: number;
   sid: number;
   /** caller id のスタック。 `// caller` のある行に caller id が付与される。 */
@@ -29,7 +29,7 @@ export type TraceItem = {
   board: string;
   /** Pythonなどの拡張for文しかない言語において、削除すべき更新式か否か。 */
   last?: boolean;
-};
+}
 
 // できる限り、可能性のある型を具体的に列挙していきたい。
 export type TraceItemVariable = Record<string, number | string | number[] | string[]>;

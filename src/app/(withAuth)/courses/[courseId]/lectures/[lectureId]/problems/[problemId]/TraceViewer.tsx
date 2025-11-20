@@ -9,13 +9,13 @@ import { Variables } from './Variables';
 
 import { Box, Button, Card, Heading, HStack, VStack } from '@/infrastructures/useClient/chakra';
 
-type Props = {
+interface Props {
   currentTraceItemIndex: number;
   viewingTraceItemIndex: number;
   previousTraceItemIndex: number;
   problem: InstantiatedProblem;
   setViewingTraceItemIndex: React.Dispatch<React.SetStateAction<number>>;
-};
+}
 
 export const TraceViewer: React.FC<Props> = (props: Props) => {
   return (

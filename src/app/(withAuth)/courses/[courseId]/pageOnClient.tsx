@@ -28,10 +28,10 @@ import {
   courseIdToName,
 } from '../../../../problems/problemData';
 
-type Props = {
+interface Props {
   currentUserCompletedProblemIdSet: ReadonlySet<string>;
   currentUserStartedProblemIdSet: ReadonlySet<string>;
-};
+}
 
 export const CoursePageOnClient: React.FC<Props> = (props) => {
   const params = useParams<{ courseId: CourseId }>();
@@ -55,13 +55,13 @@ export const CoursePageOnClient: React.FC<Props> = (props) => {
   );
 };
 
-type LectureCardProps = {
+interface LectureCardProps {
   courseId: CourseId;
   lectureIndex: number;
   problemIds: string[];
   currentUserCompletedProblemIdSet: ReadonlySet<string>;
   currentUserStartedProblemIdSet: ReadonlySet<string>;
-};
+}
 
 const LectureCard: React.FC<LectureCardProps> = ({
   courseId,

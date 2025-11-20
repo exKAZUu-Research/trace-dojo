@@ -9,7 +9,7 @@ import { dayjs } from '../../../../utils/dayjs';
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { withAuthorizationOnServer } from '@/app/utils/withAuth';
 
-type UserProblemInfo = {
+interface UserProblemInfo {
   userId: string;
   email?: string;
   courseId: string;
@@ -18,7 +18,7 @@ type UserProblemInfo = {
   completedAt: Date | null;
   elapsedMilliseconds: number;
   incorrectSubmissionCount: number;
-};
+}
 
 const StatisticsPage: MyAuthorizedNextPageOrLayout<{ problemId: ProblemId }> = async ({ params }) => {
   const userInfos = await fetchUserProblemInfo(params.problemId);

@@ -16,9 +16,9 @@ import {
   MenuList,
 } from '@/infrastructures/useClient/chakra';
 
-type Props = {
+interface Props {
   displayName: string;
-};
+}
 
 export const DefaultHeaderMenu: React.FC<Props> = (props) => {
   return (

@@ -10,11 +10,11 @@ import { getSessionOnServer } from './sessionOnServer';
 import { logger } from '@/infrastructures/pino';
 import { prisma } from '@/infrastructures/prisma';
 
-export type SessionOnServer = {
+export interface SessionOnServer {
   session: SessionOnNode | undefined;
   hasToken: boolean;
   error: unknown;
-};
+}
 
 export async function getNullableSessionOnServer(cookies: ReadonlyRequestCookies): Promise<SessionOnServer> {
   let session: SessionOnNode | undefined;

@@ -43,7 +43,7 @@ const DIRECTIONS = ['N', 'E', 'S', 'W'];
 const DX = [0, 1, 0, -1];
 const DY = [1, 0, -1, 0];
 
-type TurtleGraphicsProps = {
+interface TurtleGraphicsProps {
   currentTraceItemIndex: number;
   currentVariables: TraceItemVariable;
   initialVariables: Record<string, string>;
@@ -51,11 +51,11 @@ type TurtleGraphicsProps = {
   handleSubmit: () => Promise<void>;
   problem: InstantiatedProblem;
   problemType: ProblemType;
-};
+}
 
-export type TurtleGraphicsHandle = {
+export interface TurtleGraphicsHandle {
   findIncorrectLocationsAndHintText(): [string[], string];
-};
+}
 
 export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>((props, ref) => {
   const [board, updateBoard] = useImmer<ColorChar[][]>([]);

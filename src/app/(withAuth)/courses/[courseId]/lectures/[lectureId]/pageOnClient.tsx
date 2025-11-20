@@ -31,12 +31,12 @@ import {
 import type { CourseId } from '@/problems/problemData';
 import { courseIdToLectureIndexToProblemIds, courseIdToName, problemIdToName } from '@/problems/problemData';
 
-type Props = {
+interface Props {
   lectureIndex: number;
   problemSessions: (Pick<ProblemSession, 'problemId' | 'completedAt'> & {
     submissions: Pick<ProblemSubmission, 'isCorrect'>[];
   })[];
-};
+}
 
 export const Lecture: React.FC<Props> = (props) => {
   const params = useParams<{ courseId: CourseId; lectureId: string }>();
