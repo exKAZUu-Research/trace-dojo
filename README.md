@@ -9,6 +9,8 @@ An educational web app for training program tracing skills.
 
 ## Releases
 
+!!! We should manually run deployment workflow (`deploy-production.yml`) to deploy new version. !!!
+
 - Staging: https://trace-dojo-staging.fly.dev/
 - Production: https://trace-dojo.fly.dev/
 
