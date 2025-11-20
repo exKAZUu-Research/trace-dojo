@@ -7,8 +7,6 @@ ENV NODE_ENV=production
 ENV HUSKY=0
 ENV TZ=Asia/Tokyo
 
-ENV GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-sa-key.json
-
 ARG ARCH
 ENV ARCH=$ARCH
 
@@ -21,7 +19,7 @@ COPY .yarn/ ./.yarn
 COPY src/ ./src
 COPY prisma/ ./prisma
 COPY public/ ./public
-COPY .env* .yarnrc.yml blitz* ecosystem* gcp-sa-key.* next* tsconfig.json yarn.lock ./
+COPY .env* .yarnrc.yml blitz* ecosystem* next* tsconfig.json yarn.lock ./
 COPY dist/package.json ./
 
 ARG WB_VERSION
@@ -39,6 +37,7 @@ RUN node -e 'fetch("https://raw.githubusercontent.com/WillBooster/docker-utils/m
     && yarn run build/core \
     && cat .next/BUILD_ID \
     && yarn wb optimizeForDockerBuild \
+    && yarn wb prisma create-litestream-config \
     # Avoid overwriting existing db files
     && rm -Rf db/mount \
     && rm -Rf .yarn/cache
