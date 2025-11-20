@@ -19,7 +19,7 @@ COPY .yarn/ ./.yarn
 COPY src/ ./src
 COPY prisma/ ./prisma
 COPY public/ ./public
-COPY .env* .yarnrc.yml blitz* ecosystem* next* tsconfig.json yarn.lock ./
+COPY .env* .yarnrc.yml ecosystem* next* tsconfig.json yarn.lock ./
 COPY dist/package.json ./
 
 ARG WB_VERSION
