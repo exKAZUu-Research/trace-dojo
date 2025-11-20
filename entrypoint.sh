@@ -20,7 +20,6 @@ else
 fi
 
 if [ "$WB_ENV" != "" ] && [ "$WB_ENV" != "development" ] && [ "$WB_ENV" != "test" ] && [ "$WB_VERSION" != "development" ]; then
-  cat /etc/litestream.yml
   litestream replicate -exec 'node node_modules/.bin/pm2-runtime start ecosystem.config.cjs'
 else
   node node_modules/.bin/pm2-runtime start ecosystem.config.cjs
