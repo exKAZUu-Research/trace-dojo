@@ -11,28 +11,28 @@ import { courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
 const prisma = new PrismaClient();
 
 const deadLines = {
-  // tuBeginner1: [
-  //   new Date('2025-04-29T11:59:59+09:00'), // 1st: 4/29
-  //   new Date('2025-04-30T11:59:59+09:00'), // 2nd: 4/30
-  //   new Date('2025-05-08T11:59:59+09:00'), // 3rd: 5/8
-  //   new Date('2025-05-08T11:59:59+09:00'), // 4th: 5/8
-  //   new Date('2025-05-15T11:59:59+09:00'), // 5th: 5/15
-  //   new Date('2025-05-15T11:59:59+09:00'), // 6th: 5/15
-  //   new Date('2025-05-18T11:59:59+09:00'), // 7th: 5/18
-  //   new Date('2025-05-29T11:59:59+09:00'), // 8th: 5/29
-  //   new Date('2025-06-09T11:59:59+09:00'), // final deadline: 6/9
-  // ],
-  tuBeginner2: [
-    new Date('2025-07-17T11:59:59+09:00'), // 1st: 7/17
-    new Date('2025-07-17T11:59:59+09:00'), // 2nd: 7/17
-    new Date('2025-07-24T11:59:59+09:00'), // 3rd: 7/24
-    new Date('2025-07-24T11:59:59+09:00'), // 4th: 7/24
-    new Date('2025-07-31T11:59:59+09:00'), // 5th: 7/31
-    new Date('2025-08-07T11:59:59+09:00'), // 6th: 8/7
-    new Date('2025-08-14T11:59:59+09:00'), // 7th: 8/14
-    new Date('2025-08-21T11:59:59+09:00'), // 8th: 8/21
-    new Date('2025-09-01T11:59:59+09:00'), // final deadline: 9/1
+  tuBeginner1: [
+    new Date('2025-10-16T11:59:59+09:00'), // 1st: 10/16
+    new Date('2025-10-16T11:59:59+09:00'), // 2nd: 10/16
+    new Date('2025-10-23T11:59:59+09:00'), // 3rd: 10/23
+    new Date('2025-10-23T11:59:59+09:00'), // 4th: 10/23
+    new Date('2025-10-30T11:59:59+09:00'), // 5th: 10/30
+    new Date('2025-11-06T11:59:59+09:00'), // 6th: 11/6
+    new Date('2025-11-13T11:59:59+09:00'), // 7th: 11/13
+    new Date('2025-11-20T11:59:59+09:00'), // 8th: 11/20
+    new Date('2025-12-01T11:59:59+09:00'), // final deadline: 12/1
   ],
+  // tuBeginner2: [
+  //   new Date('2025-07-17T11:59:59+09:00'), // 1st: 7/17
+  //   new Date('2025-07-17T11:59:59+09:00'), // 2nd: 7/17
+  //   new Date('2025-07-24T11:59:59+09:00'), // 3rd: 7/24
+  //   new Date('2025-07-24T11:59:59+09:00'), // 4th: 7/24
+  //   new Date('2025-07-31T11:59:59+09:00'), // 5th: 7/31
+  //   new Date('2025-08-07T11:59:59+09:00'), // 6th: 8/7
+  //   new Date('2025-08-14T11:59:59+09:00'), // 7th: 8/14
+  //   new Date('2025-08-21T11:59:59+09:00'), // 8th: 8/21
+  //   new Date('2025-09-01T11:59:59+09:00'), // final deadline: 9/1
+  // ],
 };
 
 const validStudentIds = `
@@ -44,6 +44,7 @@ async function main(): Promise<void> {
 
   const courseId = Object.keys(deadLines)[0] as keyof typeof deadLines;
   const users = await prisma.user.findMany();
+  console.info('Fetched users:', users.length);
   const finalDeadline = deadLines[courseId][8];
 
   // 「雛形ダウンロード」を押して、最新のヘッダーを反映させること。
@@ -64,7 +65,6 @@ async function main(): Promise<void> {
     } catch (error) {
       console.error(`Failed to get email for user ${user.id}:`, error);
     }
-
     if (!email.toLowerCase().endsWith('@s.internet.ac.jp')) continue;
 
     const atIndex = email.indexOf('@');
@@ -129,6 +129,7 @@ async function main(): Promise<void> {
     // Print CSV row, escape email if it contains commas
     const row = `${studentId},${Math.round(totalScore)},,,,,,,,,,,,,\n`;
     records.push({ studentId, row, solvedProblems });
+    process.stdout.write('.');
   }
 
   // Sort records by studentId
