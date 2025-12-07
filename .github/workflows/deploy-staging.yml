@@ -14,6 +14,7 @@ jobs:
   deploy:
     uses: exKAZUu-Research/reusable-workflows/.github/workflows/deploy.yml@main
     with:
+      dot_env_path: .env.staging
       environment: staging
     secrets:
       DOT_ENV: ${{ secrets.DOT_ENV_STAGING }}
