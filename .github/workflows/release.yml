@@ -8,11 +8,12 @@ concurrency:
   cancel-in-progress: false
 permissions:
   contents: write
+  actions: write
 jobs:
   release:
     uses: exKAZUu-Research/reusable-workflows/.github/workflows/release.yml@main
     with:
-      github_hosted_runner: true
       skip_build: true
+      trigger_deploy_workflow: deploy-production.yml
     secrets:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
