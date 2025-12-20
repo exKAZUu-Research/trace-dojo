@@ -4,15 +4,27 @@
 - Description: undefined
 - Package Manager: yarn
 
-## General Instructions
+## Development Workflow
 
-- Do not write tests unless explicitly requested.
-- After making code changes, run `yarn check-all-for-ai` to execute all tests (note: this may take up to 30 minutes), or run `yarn check-for-ai` for type checking and linting only.
-  - If you are confident your changes will not break any tests, you may use `check-for-ai`.
-- Once you have verified your changes, commit them to the current branch using the `--no-verify` option and push to the current branch.
-  - Follow conventional commits, i.e., your commit message should start with `feat:`, `fix:`, etc.
-  - Make sure to add a new line at the end of your commit message.
-  - Always create new commits. Avoid using `--amend`.
+1. If the current branch is `main`, create a new branch.
+   - Include unexpected changes since they are mine.
+2. Make code changes as needed.
+3. If possible, write e2e tests for your changes.
+4. Run `yarn check-all-for-ai` to execute all tests (note: this may take up to 30 minutes), or run `yarn check-for-ai` for type checking and linting only.
+   - If you are confident your changes will not break any tests, you may use `check-for-ai`.
+5. Commit your changes to the current branch and push.
+   - Follow conventional commits, i.e., your commit message should start with `feat:`, `fix:`, `test:`, etc.
+   - Make sure to add a new line at the end of your commit message.
+   - When pre-commit hooks prevent your changes, fix your code, then re-commit and re-push.
+6. Create a pull request using `gh`.
+   - The pull request title should match your commit message.
+7. Repeat the following steps until all tests pass:
+   1. Wait for CI to run all tests.
+   2. If tests fail, identify the root causes by gathering debug information through logging and screenshots, then fix the code and/or tests.
+   3. Fetch unresolved review comments from the pull request using `gh` and address them.
+      - e.g., `gh api graphql -f query='{ repository(owner: "exKAZUu-Research", name: "trace-dojo") { pullRequest(number: 24) { reviewThreads(first: 100) { nodes { isResolved comments(first: 100) { nodes { body author { login } path line } } } } } } }' | jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)'`
+   4. Commit your changes and push.
+   5. Write `/gemini review` in the pull request.
 
 ## Coding Style
 
