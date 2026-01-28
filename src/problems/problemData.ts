@@ -7347,7 +7347,7 @@ class MyTurtle {
   // ----------- 初級プログラミングⅡ 第8回 ここから -----------
   twoDimensionalArray1: {
     instrumented: `
-s.set('arr', [[0, 3], [1, 1], [0, 2], [2, 3], [0, 1]]);
+s.vars['arr'] = [[0, 3], [1, 1], [0, 2], [2, 3], [0, 1]];
 const t = new Turtle(); // step
 for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) { // step
   s.set('c', s.get('arr')[s.get('i')][1]); // step
