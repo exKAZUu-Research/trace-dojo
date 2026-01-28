@@ -221,7 +221,7 @@
       <option name="workingDir" value="$ProjectFileDir$" />
       <envs />
     </TaskOptions>
-    <TaskOptions isEnabled="true">
+    <TaskOptions isEnabled="false">
       <option name="arguments" value="node_modules/.bin/prettier --cache --write $FilePathRelativeToProjectRoot$" />
       <option name="checkSyntaxErrors" value="false" />
       <option name="description" />
@@ -401,6 +401,5 @@
       <option name="workingDir" value="$ProjectFileDir$" />
       <envs />
     </TaskOptions>
-
   </component>
 </project>
