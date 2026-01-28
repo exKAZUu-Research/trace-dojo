@@ -17,16 +17,6 @@ const defaultTurtle: TurtleTrace = {
   dir: 'N',
 };
 
-const twoDimensionalArray1Arr = [
-  [0, 3],
-  [1, 1],
-  [0, 2],
-  [2, 3],
-  [0, 1],
-] as unknown as number[];
-
-const twoDimensionalArray2Arr = [[0, 3], [1], [0, 2], [2], [0, 1]] as unknown as number[];
-
 type TraceItemWithOptionalCallStack = Omit<TraceItem, 'callStack'> & { callStack?: number[] };
 
 test.each([
