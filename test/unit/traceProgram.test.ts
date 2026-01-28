@@ -17,6 +17,14 @@ const defaultTurtle: TurtleTrace = {
   dir: 'N',
 };
 
+const twoDimensionalArray1Arr = [
+  [0, 3],
+  [1, 1],
+  [0, 2],
+  [2, 3],
+  [0, 1],
+] as unknown as number[];
+
 type TraceItemWithOptionalCallStack = Omit<TraceItem, 'callStack'> & { callStack?: number[] };
 
 test.each([
@@ -453,6 +461,331 @@ public class Main {
           { x: 2, y: 5, color: 'G' },
           { x: 2, y: 6, color: 'G' },
         ]),
+      },
+    ] as TraceItemWithOptionalCallStack[],
+  },
+  {
+    languageId: 'java',
+    problemId: 'twoDimensionalArray1',
+    expectedDisplayProgram: `
+public class Main {
+  public static void main(String[] args) {
+    int [][] arr = { { 0, 3 }, { 1, 1 }, { 0, 2 },
+                     { 2, 3 }, { 0, 1 }, };
+    Turtle t = new Turtle();
+    for (int i = 0; i < arr.length; i++) {
+      int c = arr[i][1];
+      switch (arr[i][0]) {
+        case 0:
+          for (int j = 0; j < c; j++) {
+            t.前に進む();
+          }
+          break;
+        case 1:
+          for (int j = 0; j < c; j++) {
+            t.右を向く();
+          }
+          break;
+        case 2:
+          for (int j = 0; j < c; j++) {
+            t.左を向く();
+          }
+          break;
+      }
+    }
+  }
+}
+`.trim(),
+    expectedSidToLineIndex: {
+      1: 5,
+      2: 6,
+      3: 7,
+      4: 10,
+      5: 11,
+      6: 15,
+      7: 16,
+      8: 20,
+      9: 21,
+    },
+    expectedTrace: [
+      {
+        depth: 0,
+        sid: 0,
+        turtles: [],
+        vars: {},
+        board: '.......\n.......\n.......\n.......\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 1,
+        turtles: [],
+        vars: { arr: twoDimensionalArray1Arr },
+        board: '.......\n.......\n.......\n.......\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 2,
+        turtles: [{ x: 0, y: 0, color: '#', dir: 'N' }],
+        vars: { arr: twoDimensionalArray1Arr },
+        board: '#......\n.......\n.......\n.......\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 3,
+        turtles: [{ x: 0, y: 0, color: '#', dir: 'N' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 0 },
+        board: '#......\n.......\n.......\n.......\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 4,
+        turtles: [{ x: 0, y: 0, color: '#', dir: 'N' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 0, c: 3 },
+        board: '#......\n.......\n.......\n.......\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 5,
+        turtles: [{ x: 0, y: 0, color: '#', dir: 'N' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 0, c: 3, j: 0 },
+        board: '#......\n.......\n.......\n.......\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 6,
+        turtles: [{ x: 0, y: 1, color: '#', dir: 'N' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 0, c: 3, j: 0 },
+        board: '#......\n#......\n.......\n.......\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 5,
+        turtles: [{ x: 0, y: 1, color: '#', dir: 'N' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 0, c: 3, j: 1 },
+        board: '#......\n#......\n.......\n.......\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 6,
+        turtles: [{ x: 0, y: 2, color: '#', dir: 'N' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 0, c: 3, j: 1 },
+        board: '#......\n#......\n#......\n.......\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 5,
+        turtles: [{ x: 0, y: 2, color: '#', dir: 'N' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 0, c: 3, j: 2 },
+        board: '#......\n#......\n#......\n.......\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 6,
+        turtles: [{ x: 0, y: 3, color: '#', dir: 'N' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 0, c: 3, j: 2 },
+        board: '#......\n#......\n#......\n#......\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 5,
+        turtles: [{ x: 0, y: 3, color: '#', dir: 'N' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 0, c: 3, j: 3 },
+        board: '#......\n#......\n#......\n#......\n.......\n.......\n.......',
+        last: true,
+      },
+      {
+        depth: 0,
+        sid: 3,
+        turtles: [{ x: 0, y: 3, color: '#', dir: 'N' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 1, j: 3 },
+        board: '#......\n#......\n#......\n#......\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 4,
+        turtles: [{ x: 0, y: 3, color: '#', dir: 'N' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 1, j: 3, c: 1 },
+        board: '#......\n#......\n#......\n#......\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 7,
+        turtles: [{ x: 0, y: 3, color: '#', dir: 'N' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 1, j: 0, c: 1 },
+        board: '#......\n#......\n#......\n#......\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 8,
+        turtles: [{ x: 0, y: 3, color: '#', dir: 'E' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 1, j: 0, c: 1 },
+        board: '#......\n#......\n#......\n#......\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 7,
+        turtles: [{ x: 0, y: 3, color: '#', dir: 'E' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 1, j: 1, c: 1 },
+        board: '#......\n#......\n#......\n#......\n.......\n.......\n.......',
+        last: true,
+      },
+      {
+        depth: 0,
+        sid: 3,
+        turtles: [{ x: 0, y: 3, color: '#', dir: 'E' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 2, j: 1 },
+        board: '#......\n#......\n#......\n#......\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 4,
+        turtles: [{ x: 0, y: 3, color: '#', dir: 'E' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 2, j: 1, c: 2 },
+        board: '#......\n#......\n#......\n#......\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 5,
+        turtles: [{ x: 0, y: 3, color: '#', dir: 'E' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 2, j: 0, c: 2 },
+        board: '#......\n#......\n#......\n#......\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 6,
+        turtles: [{ x: 1, y: 3, color: '#', dir: 'E' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 2, j: 0, c: 2 },
+        board: '#......\n#......\n#......\n##.....\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 5,
+        turtles: [{ x: 1, y: 3, color: '#', dir: 'E' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 2, j: 1, c: 2 },
+        board: '#......\n#......\n#......\n##.....\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 6,
+        turtles: [{ x: 2, y: 3, color: '#', dir: 'E' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 2, j: 1, c: 2 },
+        board: '#......\n#......\n#......\n###....\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 5,
+        turtles: [{ x: 2, y: 3, color: '#', dir: 'E' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 2, j: 2, c: 2 },
+        board: '#......\n#......\n#......\n###....\n.......\n.......\n.......',
+        last: true,
+      },
+      {
+        depth: 0,
+        sid: 3,
+        turtles: [{ x: 2, y: 3, color: '#', dir: 'E' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 3, j: 2 },
+        board: '#......\n#......\n#......\n###....\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 4,
+        turtles: [{ x: 2, y: 3, color: '#', dir: 'E' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 3, j: 2, c: 3 },
+        board: '#......\n#......\n#......\n###....\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 9,
+        turtles: [{ x: 2, y: 3, color: '#', dir: 'E' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 3, j: 0, c: 3 },
+        board: '#......\n#......\n#......\n###....\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 10,
+        turtles: [{ x: 2, y: 3, color: '#', dir: 'N' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 3, j: 0, c: 3 },
+        board: '#......\n#......\n#......\n###....\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 9,
+        turtles: [{ x: 2, y: 3, color: '#', dir: 'N' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 3, j: 1, c: 3 },
+        board: '#......\n#......\n#......\n###....\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 10,
+        turtles: [{ x: 2, y: 3, color: '#', dir: 'W' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 3, j: 1, c: 3 },
+        board: '#......\n#......\n#......\n###....\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 9,
+        turtles: [{ x: 2, y: 3, color: '#', dir: 'W' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 3, j: 2, c: 3 },
+        board: '#......\n#......\n#......\n###....\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 10,
+        turtles: [{ x: 2, y: 3, color: '#', dir: 'S' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 3, j: 2, c: 3 },
+        board: '#......\n#......\n#......\n###....\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 9,
+        turtles: [{ x: 2, y: 3, color: '#', dir: 'S' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 3, j: 3, c: 3 },
+        board: '#......\n#......\n#......\n###....\n.......\n.......\n.......',
+        last: true,
+      },
+      {
+        depth: 0,
+        sid: 3,
+        turtles: [{ x: 2, y: 3, color: '#', dir: 'S' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 4, j: 3 },
+        board: '#......\n#......\n#......\n###....\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 4,
+        turtles: [{ x: 2, y: 3, color: '#', dir: 'S' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 4, j: 3, c: 1 },
+        board: '#......\n#......\n#......\n###....\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 5,
+        turtles: [{ x: 2, y: 3, color: '#', dir: 'S' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 4, j: 0, c: 1 },
+        board: '#......\n#......\n#......\n###....\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 6,
+        turtles: [{ x: 2, y: 2, color: '#', dir: 'S' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 4, j: 0, c: 1 },
+        board: '#......\n#......\n#.#....\n###....\n.......\n.......\n.......',
+      },
+      {
+        depth: 0,
+        sid: 5,
+        turtles: [{ x: 2, y: 2, color: '#', dir: 'S' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 4, j: 1, c: 1 },
+        board: '#......\n#......\n#.#....\n###....\n.......\n.......\n.......',
+        last: true,
+      },
+      {
+        depth: 0,
+        sid: 3,
+        turtles: [{ x: 2, y: 2, color: '#', dir: 'S' }],
+        vars: { arr: twoDimensionalArray1Arr, i: 5, j: 1 },
+        board: '#......\n#......\n#.#....\n###....\n.......\n.......\n.......',
+        last: true,
       },
     ] as TraceItemWithOptionalCallStack[],
   },
