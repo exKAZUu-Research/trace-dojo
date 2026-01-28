@@ -25,6 +25,8 @@ const twoDimensionalArray1Arr = [
   [0, 1],
 ] as unknown as number[];
 
+const twoDimensionalArray2Arr = [[0, 3], [1], [0, 2], [2], [0, 1]] as unknown as number[];
+
 type TraceItemWithOptionalCallStack = Omit<TraceItem, 'callStack'> & { callStack?: number[] };
 
 test.each([
@@ -778,6 +780,368 @@ public class Main {
         turtles: [{ x: 2, y: 2, color: '#', dir: 'S' }],
         vars: { arr: twoDimensionalArray1Arr, i: 5, j: 1 },
         board: '#......\n#......\n#.#....\n###....\n.......\n.......\n.......',
+        last: true,
+      },
+    ] as TraceItemWithOptionalCallStack[],
+  },
+  {
+    languageId: 'java',
+    problemId: 'twoDimensionalArray2',
+    expectedDisplayProgram: `
+public class Main {
+  public static void main(String[] args) {
+    int [][] arr = { { 0, 3 }, { 1 }, { 0, 2 },
+                     { 2 }, { 0, 1 }, };
+    Turtle t = new Turtle();
+    for (int i = 0; i < arr.length; i++) {
+      switch (arr[i][0]) {
+        case 0:
+          int c = arr[i][1];
+          for (int j = 0; j < c; j++) {
+            t.前に進む();
+          }
+          break;
+        case 1:
+          t.右を向く();
+          break;
+        case 2:
+          t.左を向く();
+          break;
+      }
+    }
+  }
+}
+`.trim(),
+    expectedSidToLineIndex: {
+      1: 5,
+      2: 6,
+      3: 9,
+      4: 10,
+      5: 11,
+      6: 15,
+      7: 18,
+    },
+    expectedTrace: [
+      { depth: 0, sid: 0, turtles: [], vars: {}, board: defaultBoard },
+      { depth: 0, sid: 1, turtles: [defaultTurtle], vars: {}, board: getBoard([{ x: 0, y: 0, color: '#' }]) },
+      {
+        depth: 0,
+        sid: 2,
+        turtles: [defaultTurtle],
+        vars: { arr: twoDimensionalArray2Arr, i: 0 },
+        board: getBoard([{ x: 0, y: 0, color: '#' }]),
+      },
+      {
+        depth: 0,
+        sid: 3,
+        turtles: [defaultTurtle],
+        vars: { arr: twoDimensionalArray2Arr, i: 0, c: 3 },
+        board: getBoard([{ x: 0, y: 0, color: '#' }]),
+      },
+      {
+        depth: 0,
+        sid: 4,
+        turtles: [defaultTurtle],
+        vars: { arr: twoDimensionalArray2Arr, i: 0, c: 3, j: 0 },
+        board: getBoard([{ x: 0, y: 0, color: '#' }]),
+      },
+      {
+        depth: 0,
+        sid: 5,
+        turtles: [{ ...defaultTurtle, y: 1 }],
+        vars: { arr: twoDimensionalArray2Arr, i: 0, c: 3, j: 0 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+        ]),
+      },
+      {
+        depth: 0,
+        sid: 4,
+        turtles: [{ ...defaultTurtle, y: 1 }],
+        vars: { arr: twoDimensionalArray2Arr, i: 0, c: 3, j: 1 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+        ]),
+      },
+      {
+        depth: 0,
+        sid: 5,
+        turtles: [{ ...defaultTurtle, y: 2 }],
+        vars: { arr: twoDimensionalArray2Arr, i: 0, c: 3, j: 1 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+        ]),
+      },
+      {
+        depth: 0,
+        sid: 4,
+        turtles: [{ ...defaultTurtle, y: 2 }],
+        vars: { arr: twoDimensionalArray2Arr, i: 0, c: 3, j: 2 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+        ]),
+      },
+      {
+        depth: 0,
+        sid: 5,
+        turtles: [{ ...defaultTurtle, y: 3 }],
+        vars: { arr: twoDimensionalArray2Arr, i: 0, c: 3, j: 2 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+          { x: 0, y: 3, color: '#' },
+        ]),
+      },
+      {
+        depth: 0,
+        sid: 4,
+        turtles: [{ ...defaultTurtle, y: 3 }],
+        vars: { arr: twoDimensionalArray2Arr, i: 0, c: 3, j: 3 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+          { x: 0, y: 3, color: '#' },
+        ]),
+        last: true,
+      },
+      {
+        depth: 0,
+        sid: 2,
+        turtles: [{ ...defaultTurtle, y: 3 }],
+        vars: { arr: twoDimensionalArray2Arr, i: 1 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+          { x: 0, y: 3, color: '#' },
+        ]),
+      },
+      {
+        depth: 0,
+        sid: 6,
+        turtles: [{ ...defaultTurtle, y: 3, dir: 'E' }],
+        vars: { arr: twoDimensionalArray2Arr, i: 1 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+          { x: 0, y: 3, color: '#' },
+        ]),
+      },
+      {
+        depth: 0,
+        sid: 2,
+        turtles: [{ ...defaultTurtle, y: 3, dir: 'E' }],
+        vars: { arr: twoDimensionalArray2Arr, i: 2 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+          { x: 0, y: 3, color: '#' },
+        ]),
+      },
+      {
+        depth: 0,
+        sid: 3,
+        turtles: [{ ...defaultTurtle, y: 3, dir: 'E' }],
+        vars: { arr: twoDimensionalArray2Arr, i: 2, c: 2 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+          { x: 0, y: 3, color: '#' },
+        ]),
+      },
+      {
+        depth: 0,
+        sid: 4,
+        turtles: [{ ...defaultTurtle, y: 3, dir: 'E' }],
+        vars: { arr: twoDimensionalArray2Arr, i: 2, c: 2, j: 0 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+          { x: 0, y: 3, color: '#' },
+        ]),
+      },
+      {
+        depth: 0,
+        sid: 5,
+        turtles: [{ ...defaultTurtle, x: 1, y: 3, dir: 'E' }],
+        vars: { arr: twoDimensionalArray2Arr, i: 2, c: 2, j: 0 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+          { x: 0, y: 3, color: '#' },
+          { x: 1, y: 3, color: '#' },
+        ]),
+      },
+      {
+        depth: 0,
+        sid: 4,
+        turtles: [{ ...defaultTurtle, x: 1, y: 3, dir: 'E' }],
+        vars: { arr: twoDimensionalArray2Arr, i: 2, c: 2, j: 1 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+          { x: 0, y: 3, color: '#' },
+          { x: 1, y: 3, color: '#' },
+        ]),
+      },
+      {
+        depth: 0,
+        sid: 5,
+        turtles: [{ ...defaultTurtle, x: 2, y: 3, dir: 'E' }],
+        vars: { arr: twoDimensionalArray2Arr, i: 2, c: 2, j: 1 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+          { x: 0, y: 3, color: '#' },
+          { x: 1, y: 3, color: '#' },
+          { x: 2, y: 3, color: '#' },
+        ]),
+      },
+      {
+        depth: 0,
+        sid: 4,
+        turtles: [{ ...defaultTurtle, x: 2, y: 3, dir: 'E' }],
+        vars: { arr: twoDimensionalArray2Arr, i: 2, c: 2, j: 2 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+          { x: 0, y: 3, color: '#' },
+          { x: 1, y: 3, color: '#' },
+          { x: 2, y: 3, color: '#' },
+        ]),
+        last: true,
+      },
+      {
+        depth: 0,
+        sid: 2,
+        turtles: [{ ...defaultTurtle, x: 2, y: 3, dir: 'E' }],
+        vars: { arr: twoDimensionalArray2Arr, i: 3 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+          { x: 0, y: 3, color: '#' },
+          { x: 1, y: 3, color: '#' },
+          { x: 2, y: 3, color: '#' },
+        ]),
+      },
+      {
+        depth: 0,
+        sid: 7,
+        turtles: [{ ...defaultTurtle, x: 2, y: 3 }],
+        vars: { arr: twoDimensionalArray2Arr, i: 3 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+          { x: 0, y: 3, color: '#' },
+          { x: 1, y: 3, color: '#' },
+          { x: 2, y: 3, color: '#' },
+        ]),
+      },
+      {
+        depth: 0,
+        sid: 2,
+        turtles: [{ ...defaultTurtle, x: 2, y: 3 }],
+        vars: { arr: twoDimensionalArray2Arr, i: 4 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+          { x: 0, y: 3, color: '#' },
+          { x: 1, y: 3, color: '#' },
+          { x: 2, y: 3, color: '#' },
+        ]),
+      },
+      {
+        depth: 0,
+        sid: 3,
+        turtles: [{ ...defaultTurtle, x: 2, y: 3 }],
+        vars: { arr: twoDimensionalArray2Arr, i: 4, c: 1 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+          { x: 0, y: 3, color: '#' },
+          { x: 1, y: 3, color: '#' },
+          { x: 2, y: 3, color: '#' },
+        ]),
+      },
+      {
+        depth: 0,
+        sid: 4,
+        turtles: [{ ...defaultTurtle, x: 2, y: 3 }],
+        vars: { arr: twoDimensionalArray2Arr, i: 4, c: 1, j: 0 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+          { x: 0, y: 3, color: '#' },
+          { x: 1, y: 3, color: '#' },
+          { x: 2, y: 3, color: '#' },
+        ]),
+      },
+      {
+        depth: 0,
+        sid: 5,
+        turtles: [{ ...defaultTurtle, x: 2, y: 4 }],
+        vars: { arr: twoDimensionalArray2Arr, i: 4, c: 1, j: 0 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+          { x: 0, y: 3, color: '#' },
+          { x: 1, y: 3, color: '#' },
+          { x: 2, y: 3, color: '#' },
+          { x: 2, y: 4, color: '#' },
+        ]),
+      },
+      {
+        depth: 0,
+        sid: 4,
+        turtles: [{ ...defaultTurtle, x: 2, y: 4 }],
+        vars: { arr: twoDimensionalArray2Arr, i: 4, c: 1, j: 1 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+          { x: 0, y: 3, color: '#' },
+          { x: 1, y: 3, color: '#' },
+          { x: 2, y: 3, color: '#' },
+          { x: 2, y: 4, color: '#' },
+        ]),
+        last: true,
+      },
+      {
+        depth: 0,
+        sid: 2,
+        turtles: [{ ...defaultTurtle, x: 2, y: 4 }],
+        vars: { arr: twoDimensionalArray2Arr, i: 5 },
+        board: getBoard([
+          { x: 0, y: 0, color: '#' },
+          { x: 0, y: 1, color: '#' },
+          { x: 0, y: 2, color: '#' },
+          { x: 0, y: 3, color: '#' },
+          { x: 1, y: 3, color: '#' },
+          { x: 2, y: 3, color: '#' },
+          { x: 2, y: 4, color: '#' },
+        ]),
         last: true,
       },
     ] as TraceItemWithOptionalCallStack[],

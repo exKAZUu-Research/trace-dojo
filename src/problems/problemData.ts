@@ -7405,7 +7405,7 @@ public class Main {
   twoDimensionalArray2: {
     instrumented: `
 const t = new Turtle(); // step
-s.set('arr', [[0, 3], [1], [0, 2], [2], [0, 1]]);
+s.vars['arr'] = [[0, 3], [1], [0, 2], [2], [0, 1]];
 for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) { // step
   switch (s.get('arr')[s.get('i')][0]) {
     case 0:
