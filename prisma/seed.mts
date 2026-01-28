@@ -1,5 +1,10 @@
+import { getConnectionLevelSqlitePragmas, getPersistentSqlitePragmas } from '@willbooster/shared-lib';
+
+import { prisma } from './prisma.mjs';
+
 async function main(): Promise<void> {
-  // do nothing
+  // Initialize persistent PRAGMA (journal_mode) and connection-level SQLite PRAGMAs.
+  await prisma.$queryRawUnsafe(`${getPersistentSqlitePragmas()} ${getConnectionLevelSqlitePragmas()}`);
 }
 
 // eslint-disable-next-line unicorn/prefer-top-level-await

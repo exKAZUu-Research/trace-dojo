@@ -62,7 +62,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
   const [turtles, updateTurtles] = useImmer<TurtleTrace[]>([]);
   const [selectedCell, setSelectedCell] = useState<SelectedCell>();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const selectedTurtle = turtles.find((char) => selectedCell && char.x === selectedCell.x && char.y === selectedCell.y);
+  const selectedTurtle = turtles.find((char) => char.x === selectedCell?.x && char.y === selectedCell.y);
   const previousTraceItem = props.problem.traceItems[props.previousTraceItemIndex];
   const currentTraceItem = props.problem.traceItems[props.currentTraceItemIndex];
   const [variables, updateVariables] = useImmer<Record<string, string>>(props.initialVariables);
