@@ -1,4 +1,8 @@
-/** `yarn calculate-score` to run this script. */
+/**
+ * 1. `WB_ENV=production yarn db-restore`
+ * 2. Update `header` variable via `CSVインポート` -> `雛形ダウンロード`.
+ * 3. `yarn calculate-score`
+ * */
 
 import { writeFileSync } from 'node:fs';
 
@@ -11,28 +15,28 @@ import { courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
 const prisma = new PrismaClient();
 
 const deadLines = {
-  tuBeginner1: [
-    new Date('2025-10-16T11:59:59+09:00'), // 1st: 10/16
-    new Date('2025-10-16T11:59:59+09:00'), // 2nd: 10/16
-    new Date('2025-10-23T11:59:59+09:00'), // 3rd: 10/23
-    new Date('2025-10-23T11:59:59+09:00'), // 4th: 10/23
-    new Date('2025-10-30T11:59:59+09:00'), // 5th: 10/30
-    new Date('2025-11-06T11:59:59+09:00'), // 6th: 11/6
-    new Date('2025-11-13T11:59:59+09:00'), // 7th: 11/13
-    new Date('2025-11-20T11:59:59+09:00'), // 8th: 11/20
-    new Date('2025-12-01T11:59:59+09:00'), // final deadline: 12/1
-  ],
-  // tuBeginner2: [
-  //   new Date('2025-07-17T11:59:59+09:00'), // 1st: 7/17
-  //   new Date('2025-07-17T11:59:59+09:00'), // 2nd: 7/17
-  //   new Date('2025-07-24T11:59:59+09:00'), // 3rd: 7/24
-  //   new Date('2025-07-24T11:59:59+09:00'), // 4th: 7/24
-  //   new Date('2025-07-31T11:59:59+09:00'), // 5th: 7/31
-  //   new Date('2025-08-07T11:59:59+09:00'), // 6th: 8/7
-  //   new Date('2025-08-14T11:59:59+09:00'), // 7th: 8/14
-  //   new Date('2025-08-21T11:59:59+09:00'), // 8th: 8/21
-  //   new Date('2025-09-01T11:59:59+09:00'), // final deadline: 9/1
+  // tuBeginner1: [
+  //   new Date('2025-10-16T11:59:59+09:00'), // 1st: 10/16
+  //   new Date('2025-10-16T11:59:59+09:00'), // 2nd: 10/16
+  //   new Date('2025-10-23T11:59:59+09:00'), // 3rd: 10/23
+  //   new Date('2025-10-23T11:59:59+09:00'), // 4th: 10/23
+  //   new Date('2025-10-30T11:59:59+09:00'), // 5th: 10/30
+  //   new Date('2025-11-06T11:59:59+09:00'), // 6th: 11/6
+  //   new Date('2025-11-13T11:59:59+09:00'), // 7th: 11/13
+  //   new Date('2025-11-20T11:59:59+09:00'), // 8th: 11/20
+  //   new Date('2025-12-01T11:59:59+09:00'), // final deadline: 12/1
   // ],
+  tuBeginner2: [
+    new Date('2026-01-08T11:59:59+09:00'), // 1st: 1/8
+    new Date('2026-01-08T11:59:59+09:00'), // 2nd: 1/8
+    new Date('2026-01-14T11:59:59+09:00'), // 3rd: 1/14
+    new Date('2026-01-14T11:59:59+09:00'), // 4th: 1/14
+    new Date('2026-01-27T11:59:59+09:00'), // 5th: 1/27
+    new Date('2026-01-29T11:59:59+09:00'), // 6th: 1/29
+    new Date('2026-02-05T11:59:59+09:00'), // 7th: 2/5
+    new Date('2026-02-12T11:59:59+09:00'), // 8th: 2/12
+    new Date('2026-02-24T11:59:59+09:00'), // final deadline: 2/24
+  ],
 };
 
 const validStudentIds = `
