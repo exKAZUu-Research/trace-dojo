@@ -1,4 +1,8 @@
-/** `yarn calculate-score` to run this script. */
+/**
+ * 1. `WB_ENV=production yarn db-restore`
+ * 2. Update `header` variable via `CSVインポート` -> `雛形ダウンロード`.
+ * 3. `yarn calculate-score`
+ * */
 
 import { writeFileSync } from 'node:fs';
 
