@@ -39,9 +39,11 @@ const deadLines = {
   ],
 };
 
-const validStudentIds = `
+const validStudentIds = new Set(
+  `
 <ここに改行区切りで学籍番号の一覧を記載する。>
-`.split(/\s+/);
+`.split(/\s+/)
+);
 
 async function main(): Promise<void> {
   ensureSuperTokensInit();
@@ -73,7 +75,7 @@ async function main(): Promise<void> {
 
     const atIndex = email.indexOf('@');
     const studentId = (atIndex > 0 ? email.slice(0, Math.max(0, email.indexOf('@'))) : email).toUpperCase();
-    if (!validStudentIds.includes(studentId)) continue;
+    if (!validStudentIds.has(studentId)) continue;
 
     let totalScore = 0;
     let solvedProblems = 0;
