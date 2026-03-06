@@ -39,9 +39,11 @@ const deadLines = {
   ],
 };
 
-const validStudentIds = new Set(`
+const validStudentIds = new Set(
+  `
 <ここに改行区切りで学籍番号の一覧を記載する。>
-`.split(/\s+/));
+`.split(/\s+/)
+);
 
 async function main(): Promise<void> {
   ensureSuperTokensInit();
