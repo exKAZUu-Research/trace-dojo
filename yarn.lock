@@ -4397,12 +4397,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/node@npm:25.3.3":
-  version: 25.3.3
-  resolution: "@types/node@npm:25.3.3"
+"@types/node@npm:25.3.5":
+  version: 25.3.5
+  resolution: "@types/node@npm:25.3.5"
   dependencies:
     undici-types: "npm:~7.18.0"
-  checksum: 10c0/63e1d3816a9f4a706ab5d588d18cb98aa824b97748ff585537d327528e9438f58f69f45c7762e7cd3a1ab32c1619f551aabe8075d13172f9273cf10f6d83ab91
+  checksum: 10c0/4cf0834a6f6933bf0aca6afead117ae3db3b8f02a5f7187a24f871db0fb9344e5e46573ba387bc53b7505e1e219c4c535cbe67221ced95bb5ad98573223b19d0
   languageName: node
   linkType: hard
 
@@ -5047,31 +5047,30 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@willbooster/shared-lib-node@npm:8.1.6":
-  version: 8.1.6
-  resolution: "@willbooster/shared-lib-node@npm:8.1.6"
+"@willbooster/shared-lib-node@npm:8.2.0":
+  version: 8.2.0
+  resolution: "@willbooster/shared-lib-node@npm:8.2.0"
   dependencies:
     dotenv: "npm:17.3.1"
     dotenv-expand: "npm:12.0.3"
-    tree-kill: "npm:1.2.2"
-  checksum: 10c0/c36cf953dcf0237c874b02a77b018b2779e0bc5e0cfdcc203873d5332092679374d4ced313314008a53c528fed10909406c8eb5944e8e15f06e16128c8235a0d
+  checksum: 10c0/bbce1f20aca4f0475021d79f0549aa6b79d1dfa15698bc0de4bb384854fc2d49f803afb9ad0facc3141de0d44fe1da3b2fb4ed85605bc60e686af506a736bf96
   languageName: node
   linkType: hard
 
-"@willbooster/shared-lib-react@npm:5.0.11":
-  version: 5.0.11
-  resolution: "@willbooster/shared-lib-react@npm:5.0.11"
+"@willbooster/shared-lib-react@npm:5.0.12":
+  version: 5.0.12
+  resolution: "@willbooster/shared-lib-react@npm:5.0.12"
   peerDependencies:
     react: ~19.2.0
     react-dom: ~19.2.0
-  checksum: 10c0/273e7d3653f043a0822e2a72ce4916a5b0589ffd2919d72d2e03ca47c217d270bafa69fc69195b4bdbc17e1220f5a392a535914e9bf26832049d7f8678168486
+  checksum: 10c0/fb2eb5a5b5396f9e544e797b7074042321ce6bdeb17cd0db66972d7e285f4d6224a455ec3c98ce313ea0758bac8a5dd721e28e104b705bf3ac0139f6152c5ffc
   languageName: node
   linkType: hard
 
-"@willbooster/shared-lib@npm:7.1.6":
-  version: 7.1.6
-  resolution: "@willbooster/shared-lib@npm:7.1.6"
-  checksum: 10c0/9367382500b601e46327931839781365fb6894bb7e0a6a3a0a155eeed7c70c38495445a29795d57fc225508576c2001331f18b164cec49bafe3b5180b1573541
+"@willbooster/shared-lib@npm:7.1.7":
+  version: 7.1.7
+  resolution: "@willbooster/shared-lib@npm:7.1.7"
+  checksum: 10c0/459d46b9e63c6e68fc5233284e4c6906f72f47ffb0527cc8e40333b2b62cf254e32110188cf1b95d3ea133337f985ae13676a27d5ca94b7d5d60085f4bd75504
   languageName: node
   linkType: hard
 
@@ -5891,9 +5890,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"build-ts@npm:17.0.20":
-  version: 17.0.20
-  resolution: "build-ts@npm:17.0.20"
+"build-ts@npm:17.0.21":
+  version: 17.0.21
+  resolution: "build-ts@npm:17.0.21"
   dependencies:
     "@babel/core": "npm:7.29.0"
     "@babel/plugin-proposal-decorators": "npm:7.29.0"
@@ -5910,7 +5909,7 @@ __metadata:
     "@rollup/plugin-replace": "npm:6.0.3"
     "@rollup/plugin-terser": "npm:0.4.4"
     "@rollup/pluginutils": "npm:5.3.0"
-    "@willbooster/shared-lib-node": "npm:8.1.6"
+    "@willbooster/shared-lib-node": "npm:8.2.0"
     babel-plugin-polyfill-corejs3: "npm:0.14.0"
     babel-plugin-transform-remove-console: "npm:6.9.4"
     chalk: "npm:5.6.2"
@@ -5931,7 +5930,7 @@ __metadata:
     yargs: "npm:18.0.0"
   bin:
     build-ts: bin/index.js
-  checksum: 10c0/b39e781560238fa9032e2639c1ef59a01a828ad5a13bf45364f7fb9765a9c1ca08c800cd53666be87fffdf192112edd1543931c07b59f1418bef3ef7d6ce555d
+  checksum: 10c0/1bc74a5421c03fdb83e688960c97a7e963dd46fc17ecd4791ab85ce23e60db01804363ec8bb7c5906419efa76e6447ab24c6c168bdf18ed5cba26383d9d5974a
   languageName: node
   linkType: hard
 
@@ -10612,9 +10611,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"lint-staged@npm:16.3.1":
-  version: 16.3.1
-  resolution: "lint-staged@npm:16.3.1"
+"lint-staged@npm:16.3.2":
+  version: 16.3.2
+  resolution: "lint-staged@npm:16.3.2"
   dependencies:
     commander: "npm:^14.0.3"
     listr2: "npm:^9.0.5"
@@ -10624,7 +10623,7 @@ __metadata:
     yaml: "npm:^2.8.2"
   bin:
     lint-staged: bin/lint-staged.js
-  checksum: 10c0/9aed98ab759c7acdcfb969c3c09b24597bd6717771ab1f1eec571038713bd0d0ad80304d0a737e5b7b7c64141e4ff9489022448492353f5d1b476223c43f40bc
+  checksum: 10c0/4cbaa85904a912215660ac3c69400b71beabe3fe7e82969cd32c726dbfb04b0f651d0660906215f955c1446ac6b520319e1c7a03c707353a5f038c3d0441a8c3
   languageName: node
   linkType: hard
 
@@ -15214,18 +15213,18 @@ __metadata:
     "@types/eslint": "npm:9.6.1"
     "@types/jsonwebtoken": "npm:9.0.10"
     "@types/micromatch": "npm:4.0.10"
-    "@types/node": "npm:25.3.3"
+    "@types/node": "npm:25.3.5"
     "@types/react-dom": "npm:19.2.3"
     "@types/react-syntax-highlighter": "npm:15.5.13"
     "@types/seedrandom": "npm:3.0.8"
     "@willbooster/eslint-config-next": "npm:2.5.14"
     "@willbooster/prettier-config": "npm:10.2.4"
-    "@willbooster/shared-lib": "npm:7.1.6"
-    "@willbooster/shared-lib-react": "npm:5.0.11"
+    "@willbooster/shared-lib": "npm:7.1.7"
+    "@willbooster/shared-lib-react": "npm:5.0.12"
     "@willbooster/wb": "npm:13.3.3"
     at-decorators: "npm:7.0.2"
     babel-plugin-react-compiler: "npm:1.0.0"
-    build-ts: "npm:17.0.20"
+    build-ts: "npm:17.0.21"
     concurrently: "npm:9.2.1"
     conventional-changelog-conventionalcommits: "npm:9.2.0"
     dayjs: "npm:1.11.19"
@@ -15250,7 +15249,7 @@ __metadata:
     immer: "npm:11.1.4"
     jsonwebtoken: "npm:9.0.3"
     jwks-rsa: "npm:4.0.1"
-    lint-staged: "npm:16.3.1"
+    lint-staged: "npm:16.3.2"
     micromatch: "npm:4.0.8"
     next: "npm:16.1.6"
     nextjs-cors: "npm:2.2.1"
