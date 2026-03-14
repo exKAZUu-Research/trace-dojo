@@ -4186,24 +4186,24 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@trpc/client@npm:11.11.0":
-  version: 11.11.0
-  resolution: "@trpc/client@npm:11.11.0"
+"@trpc/client@npm:11.12.0":
+  version: 11.12.0
+  resolution: "@trpc/client@npm:11.12.0"
   peerDependencies:
-    "@trpc/server": 11.11.0
+    "@trpc/server": 11.12.0
     typescript: ">=5.7.2"
-  checksum: 10c0/0e8d4e385260c08e85cd84e41d9ade0f862d235e17030843b7ae31b3074636176aa877dbca462f065d1bcf0814696f86d2c3cfd903703c5196e268899370be1e
+  checksum: 10c0/ee58de0a2781bebd608795483587213669487f237e396b95fb1c3d75d48ab7f9794f508e80f2053c6f8bfd1aae865b4280b83b19f2e9c58052c0d95e85351512
   languageName: node
   linkType: hard
 
-"@trpc/next@npm:11.11.0":
-  version: 11.11.0
-  resolution: "@trpc/next@npm:11.11.0"
+"@trpc/next@npm:11.12.0":
+  version: 11.12.0
+  resolution: "@trpc/next@npm:11.12.0"
   peerDependencies:
     "@tanstack/react-query": ^5.59.15
-    "@trpc/client": 11.11.0
-    "@trpc/react-query": 11.11.0
-    "@trpc/server": 11.11.0
+    "@trpc/client": 11.12.0
+    "@trpc/react-query": 11.12.0
+    "@trpc/server": 11.12.0
     next: "*"
     react: ">=16.8.0"
     react-dom: ">=16.8.0"
@@ -4213,29 +4213,29 @@ __metadata:
       optional: true
     "@trpc/react-query":
       optional: true
-  checksum: 10c0/08562eb1e18b2d59597090eb02c3c114d5faa7302b46a25eb1eba3a192f8b2f87c56d349a57c792c49f302c5d166ab08073d0b86d5c0d0be6a017d1489fdcf8d
+  checksum: 10c0/9668228f9f16607249916aec41d150e10de6f394d978378cffde073e780fdc1ce071968404d34cfea54400cd261374b13b84e5d2b3b75ee83b72cd2363925c77
   languageName: node
   linkType: hard
 
-"@trpc/react-query@npm:11.11.0":
-  version: 11.11.0
-  resolution: "@trpc/react-query@npm:11.11.0"
+"@trpc/react-query@npm:11.12.0":
+  version: 11.12.0
+  resolution: "@trpc/react-query@npm:11.12.0"
   peerDependencies:
     "@tanstack/react-query": ^5.80.3
-    "@trpc/client": 11.11.0
-    "@trpc/server": 11.11.0
+    "@trpc/client": 11.12.0
+    "@trpc/server": 11.12.0
     react: ">=18.2.0"
     typescript: ">=5.7.2"
-  checksum: 10c0/bd60ca4639f1370f62a0c6181f15f78ca12c5c1b312287b8ead01660ade01e9d992f2bbe953305e23a760f02e69e8a4a05f11c2301f11e7ee21d8b73ddc9f168
+  checksum: 10c0/0c69556b9c850614e07f43c72846aa1af3c2926bd19b1ac8deae01e2edf47e799aaa9df723a74bf929d4069b581f386cc94565e796889a3bc94c1dd3cc75a1fe
   languageName: node
   linkType: hard
 
-"@trpc/server@npm:11.11.0":
-  version: 11.11.0
-  resolution: "@trpc/server@npm:11.11.0"
+"@trpc/server@npm:11.12.0":
+  version: 11.12.0
+  resolution: "@trpc/server@npm:11.12.0"
   peerDependencies:
     typescript: ">=5.7.2"
-  checksum: 10c0/784e8ba7fe504b0bed0914ae3cbe9dd1e07c4c1255588503dabbe29a9102093419a28ebd2fdd5ffe04dfe407cc2693d9668048e642dd9ed24e9aa6fbc8d0b0e8
+  checksum: 10c0/bed52792455120589575f1004162623c1a42f44aa512a30ae007e23d3317f11a2729ab7bc17cdd5a7166e7b3ce5ae01814dcd720f9374e5710bd0cd8d1359ae2
   languageName: node
   linkType: hard
 
@@ -5074,9 +5074,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@willbooster/wb@npm:13.3.3":
-  version: 13.3.3
-  resolution: "@willbooster/wb@npm:13.3.3"
+"@willbooster/wb@npm:13.4.2":
+  version: 13.4.2
+  resolution: "@willbooster/wb@npm:13.4.2"
   dependencies:
     chalk: "npm:5.6.2"
     dotenv: "npm:17.3.1"
@@ -5087,7 +5087,7 @@ __metadata:
     yargs: "npm:18.0.0"
   bin:
     wb: bin/index.js
-  checksum: 10c0/08b5cc4021677573a7df45379e715323d7ba4b113857ac07335c31b4f1710065cb60eee841c8c179b3f827fb03a2045ca1bb263561ffaea484180aee02456ab3
+  checksum: 10c0/020d54909cc8e5848af2c5f9d95a924987e36e84fbc85791bfcdcad844b77fc10e8bb73c6f7fa824b0970abbed431193a949a04eab838b64665bd6c9dbfcdf8f
   languageName: node
   linkType: hard
 
@@ -6641,12 +6641,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"conventional-changelog-conventionalcommits@npm:9.2.0":
-  version: 9.2.0
-  resolution: "conventional-changelog-conventionalcommits@npm:9.2.0"
+"conventional-changelog-conventionalcommits@npm:9.3.0":
+  version: 9.3.0
+  resolution: "conventional-changelog-conventionalcommits@npm:9.3.0"
   dependencies:
     compare-func: "npm:^2.0.0"
-  checksum: 10c0/1ea8f1b9a9044680c3faf9d7a963a95d65bcec45815426ebdd00f1bd2bfa26aa26c454ebaa3fb67f3dd2c1b69ad48f25f20dd7837b535210576d3e18d5e8f3a7
+  checksum: 10c0/36be9435bb1f6e97bc729a1e69471851b6621054980617dc9a82c03221de5f9c21cd2369308c364f89b2383bd596071f90c8c71efdbe7a2908f91a935685fc76
   languageName: node
   linkType: hard
 
@@ -8673,11 +8673,11 @@ __metadata:
   languageName: node
   linkType: hard
 
-"framer-motion@npm:12.34.3":
-  version: 12.34.3
-  resolution: "framer-motion@npm:12.34.3"
+"framer-motion@npm:12.35.1":
+  version: 12.35.1
+  resolution: "framer-motion@npm:12.35.1"
   dependencies:
-    motion-dom: "npm:^12.34.3"
+    motion-dom: "npm:^12.35.1"
     motion-utils: "npm:^12.29.2"
     tslib: "npm:^2.4.0"
   peerDependencies:
@@ -8691,7 +8691,7 @@ __metadata:
       optional: true
     react-dom:
       optional: true
-  checksum: 10c0/e36d8d2b33200c6d8ad8af6508090276674dcd239da8026ab19ec4f739b8943197c7b1777f28f96c7149f65ccd35efb5905cbdfdaf6e75017bcd7cc4eb69328b
+  checksum: 10c0/81186f06f01c674b6b544a8d29b3fcde61f9aa7d02181b55a0af478611c0996e3c4aaf7bd0f6a7d80ba9c2d5cb4756ee9634198771416fd160208dfdf7ca5941
   languageName: node
   linkType: hard
 
@@ -11210,12 +11210,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"motion-dom@npm:^12.34.3":
-  version: 12.34.3
-  resolution: "motion-dom@npm:12.34.3"
+"motion-dom@npm:^12.35.1":
+  version: 12.35.1
+  resolution: "motion-dom@npm:12.35.1"
   dependencies:
     motion-utils: "npm:^12.29.2"
-  checksum: 10c0/9a336be96dbb24a2ea3cafe401043553bc326274d118b86d6414e505cd394f26c071cd420d2e71c2cf19e76abc89bfdac4a7c5c1b3842eca56b11d6b8687dfdc
+  checksum: 10c0/086ff5ea3b566e8838fc4210270714e1b6bb45e6595c3472e74e1dbf5a669c7d2101061c95dec63919d623554617ede74d62ec428f8b1121806d159beb0feae6
   languageName: node
   linkType: hard
 
@@ -13022,12 +13022,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react-icons@npm:5.5.0":
-  version: 5.5.0
-  resolution: "react-icons@npm:5.5.0"
+"react-icons@npm:5.6.0":
+  version: 5.6.0
+  resolution: "react-icons@npm:5.6.0"
   peerDependencies:
     react: "*"
-  checksum: 10c0/a24309bfc993c19cbcbfc928157e53a137851822779977b9588f6dd41ffc4d11ebc98b447f4039b0d309a858f0a42980f6bfb4477fb19f9f2d1bc2e190fcf79c
+  checksum: 10c0/addba1ebfd45cdf7f69291d0c93df64fca1271cfdb66df657abd223e3451c73356b035f50e75858627dd182b02129596c79eaaaa45d32eb52658e443a992645c
   languageName: node
   linkType: hard
 
@@ -15206,10 +15206,10 @@ __metadata:
     "@prisma/client": "npm:6.19.2"
     "@rvf/set-get": "npm:7.0.1"
     "@tanstack/react-query": "npm:5.90.21"
-    "@trpc/client": "npm:11.11.0"
-    "@trpc/next": "npm:11.11.0"
-    "@trpc/react-query": "npm:11.11.0"
-    "@trpc/server": "npm:11.11.0"
+    "@trpc/client": "npm:11.12.0"
+    "@trpc/next": "npm:11.12.0"
+    "@trpc/react-query": "npm:11.12.0"
+    "@trpc/server": "npm:11.12.0"
     "@types/eslint": "npm:9.6.1"
     "@types/jsonwebtoken": "npm:9.0.10"
     "@types/micromatch": "npm:4.0.10"
@@ -15221,12 +15221,12 @@ __metadata:
     "@willbooster/prettier-config": "npm:10.2.4"
     "@willbooster/shared-lib": "npm:7.1.7"
     "@willbooster/shared-lib-react": "npm:5.0.12"
-    "@willbooster/wb": "npm:13.3.3"
+    "@willbooster/wb": "npm:13.4.2"
     at-decorators: "npm:7.0.2"
     babel-plugin-react-compiler: "npm:1.0.0"
     build-ts: "npm:17.0.21"
     concurrently: "npm:9.2.1"
-    conventional-changelog-conventionalcommits: "npm:9.2.0"
+    conventional-changelog-conventionalcommits: "npm:9.3.0"
     dayjs: "npm:1.11.19"
     dotenv-cli: "npm:11.0.0"
     eslint: "npm:9.39.2"
@@ -15243,7 +15243,7 @@ __metadata:
     eslint-plugin-unicorn: "npm:63.0.0"
     eslint-plugin-unused-imports: "npm:4.4.1"
     fast-deep-equal: "npm:3.1.3"
-    framer-motion: "npm:12.34.3"
+    framer-motion: "npm:12.35.1"
     globals: "npm:17.4.0"
     husky: "npm:9.1.7"
     immer: "npm:11.1.4"
@@ -15264,7 +15264,7 @@ __metadata:
     prisma: "npm:6.19.2"
     react: "npm:19.2.4"
     react-dom: "npm:19.2.4"
-    react-icons: "npm:5.5.0"
+    react-icons: "npm:5.6.0"
     react-idle-timer: "npm:5.7.2"
     react-syntax-highlighter: "npm:16.1.1"
     seedrandom: "npm:3.0.5"
