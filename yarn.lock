@@ -2926,12 +2926,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@next/eslint-plugin-next@npm:16.1.6":
-  version: 16.1.6
-  resolution: "@next/eslint-plugin-next@npm:16.1.6"
+"@next/eslint-plugin-next@npm:16.2.1":
+  version: 16.2.1
+  resolution: "@next/eslint-plugin-next@npm:16.2.1"
   dependencies:
     fast-glob: "npm:3.3.1"
-  checksum: 10c0/1498ded3421326738411eb11e794a5ef6aa01daeff0d89a12d05f360984527ccce2cc9588cc11477ee0e4b09a7570a640e7b6ff79ee3eb49c8cf0fc6b105a24b
+  checksum: 10c0/cb6870ee6846d1a683393bdb303ce0bfcd0f60389ac976c019bca90818bc1adba55c3c2d2896541f7607f92dfa348111fd04440042036ae6ba888329ceb17abe
   languageName: node
   linkType: hard
 
@@ -4196,21 +4196,21 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@tanstack/query-core@npm:5.90.20":
-  version: 5.90.20
-  resolution: "@tanstack/query-core@npm:5.90.20"
-  checksum: 10c0/70637dfcecd5ed9d810629aa27f1632af8a4bcd083e75cf29408d058c32f8234704a3231ec280e2c4016ea0485b16124fdf70ab97793b5a7b670f43f7659e9fe
+"@tanstack/query-core@npm:5.95.0":
+  version: 5.95.0
+  resolution: "@tanstack/query-core@npm:5.95.0"
+  checksum: 10c0/ccd53d42748f654c2ad203efd76b4e6a654bc960096e5a10377938b8ee7600bf1d82c2062ffc75eb6320915e9943cf646183c291ff91a64716f76904d2a1fc97
   languageName: node
   linkType: hard
 
-"@tanstack/react-query@npm:5.90.21":
-  version: 5.90.21
-  resolution: "@tanstack/react-query@npm:5.90.21"
+"@tanstack/react-query@npm:5.95.0":
+  version: 5.95.0
+  resolution: "@tanstack/react-query@npm:5.95.0"
   dependencies:
-    "@tanstack/query-core": "npm:5.90.20"
+    "@tanstack/query-core": "npm:5.95.0"
   peerDependencies:
     react: ^18 || ^19
-  checksum: 10c0/e8994c57f6ceb2c886a4d6486a8c6a3f89bc6b1220de3e732448d7fcbeb386e9358f03c73804de72004c6ac2668d0bf1b44cedbb273d3e4b33afcbaee7b7d24d
+  checksum: 10c0/67025fa88de906a7b5511c6ac09f953904f0c3f72976ca2af578b63a005b27320d95fe05e1f01dcefae9bfeb3db11b190a06908c32014009c363f363cb0eb0ad
   languageName: node
   linkType: hard
 
@@ -4228,24 +4228,26 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@trpc/client@npm:11.13.4":
-  version: 11.13.4
-  resolution: "@trpc/client@npm:11.13.4"
+"@trpc/client@npm:11.14.1":
+  version: 11.14.1
+  resolution: "@trpc/client@npm:11.14.1"
   peerDependencies:
-    "@trpc/server": 11.13.4
+    "@trpc/server": 11.14.1
     typescript: ">=5.7.2"
-  checksum: 10c0/e9aec01d20805d284459e54d45827f55e6594f3b61a1b226b84342c668cd97a4553bc43d975901974ddfb66f074b15711b9890c452c2ce95e27b1cc089308c02
+  bin:
+    intent: bin/intent.js
+  checksum: 10c0/5b9a51c1bf4f2fa06aa3f1b9b783a1e09208c305280f5049cd77e990daed9d61673fbf8ee1cf52dea8232c63d6119eb8a9b3628c58fe2bc636cddddf0f5c1601
   languageName: node
   linkType: hard
 
-"@trpc/next@npm:11.13.4":
-  version: 11.13.4
-  resolution: "@trpc/next@npm:11.13.4"
+"@trpc/next@npm:11.14.1":
+  version: 11.14.1
+  resolution: "@trpc/next@npm:11.14.1"
   peerDependencies:
     "@tanstack/react-query": ^5.59.15
-    "@trpc/client": 11.13.4
-    "@trpc/react-query": 11.13.4
-    "@trpc/server": 11.13.4
+    "@trpc/client": 11.14.1
+    "@trpc/react-query": 11.14.1
+    "@trpc/server": 11.14.1
     next: "*"
     react: ">=16.8.0"
     react-dom: ">=16.8.0"
@@ -4255,29 +4257,33 @@ __metadata:
       optional: true
     "@trpc/react-query":
       optional: true
-  checksum: 10c0/983bfc96d576431a1b097ca7dc524716b7028059798a2b7774c9531d926885f0549afb0eeb8b6eacfe03130f719f36c806201a00ea87536f3add7e27577f494b
+  bin:
+    intent: bin/intent.js
+  checksum: 10c0/3c09ab20f0f14eb764c0e0f7d495cff5be51957237a2485df96171b715cac35e8e5dfe779a4adeb6bfe42479eda09d47e3c870f468408c41e8fc7975b326af1e
   languageName: node
   linkType: hard
 
-"@trpc/react-query@npm:11.13.4":
-  version: 11.13.4
-  resolution: "@trpc/react-query@npm:11.13.4"
+"@trpc/react-query@npm:11.14.1":
+  version: 11.14.1
+  resolution: "@trpc/react-query@npm:11.14.1"
   peerDependencies:
     "@tanstack/react-query": ^5.80.3
-    "@trpc/client": 11.13.4
-    "@trpc/server": 11.13.4
+    "@trpc/client": 11.14.1
+    "@trpc/server": 11.14.1
     react: ">=18.2.0"
     typescript: ">=5.7.2"
-  checksum: 10c0/f4588beb6dd6ab41ca11190c56fe17ecd721fea5c14d799f989590588528598ba48dcf8d125b6c511c4ec17ad0f302950eba98e552500ebc9443d84417f050ef
+  checksum: 10c0/5f64b31f123b76b1d66d096c867a947c7553ee69ba7e9a790aa51210fd86095b77e64aaaaad7fa7599793d2a9bc465d9140ba8fa804354af13391574f34b3f6a
   languageName: node
   linkType: hard
 
-"@trpc/server@npm:11.13.4":
-  version: 11.13.4
-  resolution: "@trpc/server@npm:11.13.4"
+"@trpc/server@npm:11.14.1":
+  version: 11.14.1
+  resolution: "@trpc/server@npm:11.14.1"
   peerDependencies:
     typescript: ">=5.7.2"
-  checksum: 10c0/46de6f8d4fa66efcf422315f8567a46b33a2efbb77c257c3453e361988e4a58ada3c226faddae9c083712c3124079a32ac99b46d18d3a579f1bb175aa82c7249
+  bin:
+    intent: bin/intent.js
+  checksum: 10c0/953debfa2d13e24115364608d29d9bc8a1bfde7188154997d0d5284d340b6412d7f935ed9874d39a871ac7dc507f32fc498c59a2246f5edf7e738ea69589daa3
   languageName: node
   linkType: hard
 
@@ -7862,11 +7868,11 @@ __metadata:
   languageName: node
   linkType: hard
 
-"eslint-config-next@npm:16.1.6":
-  version: 16.1.6
-  resolution: "eslint-config-next@npm:16.1.6"
+"eslint-config-next@npm:16.2.1":
+  version: 16.2.1
+  resolution: "eslint-config-next@npm:16.2.1"
   dependencies:
-    "@next/eslint-plugin-next": "npm:16.1.6"
+    "@next/eslint-plugin-next": "npm:16.2.1"
     eslint-import-resolver-node: "npm:^0.3.6"
     eslint-import-resolver-typescript: "npm:^3.5.2"
     eslint-plugin-import: "npm:^2.32.0"
@@ -7881,7 +7887,7 @@ __metadata:
   peerDependenciesMeta:
     typescript:
       optional: true
-  checksum: 10c0/2b4c13c3d556daf7b559d032276cd4ac2454413a574946cf1a689844784523ad44dd3bca525d4530e2cef5f5ecc036643e562792aea0a9140276b84866775bf2
+  checksum: 10c0/f2a538bbf97aa73224b332f22f6fb86f83925722497bedef1e0b4ebd153f998224877e2c6696a9611fc366f1c32435b68141022caa5b9bc91a50c2e4aa170097
   languageName: node
   linkType: hard
 
@@ -8746,11 +8752,11 @@ __metadata:
   languageName: node
   linkType: hard
 
-"framer-motion@npm:12.36.0":
-  version: 12.36.0
-  resolution: "framer-motion@npm:12.36.0"
+"framer-motion@npm:12.38.0":
+  version: 12.38.0
+  resolution: "framer-motion@npm:12.38.0"
   dependencies:
-    motion-dom: "npm:^12.36.0"
+    motion-dom: "npm:^12.38.0"
     motion-utils: "npm:^12.36.0"
     tslib: "npm:^2.4.0"
   peerDependencies:
@@ -8764,7 +8770,7 @@ __metadata:
       optional: true
     react-dom:
       optional: true
-  checksum: 10c0/3acbb210d374ab80f4b086bcb8e7f722271f5d8e5d3e9f643ee0b5e7641bf34e100aaead68c99a4d478e67ccdda4b3ff89779bc0c9e5fe9aab8a955a5a6cfaa4
+  checksum: 10c0/bca830d85606ba49e84a1b12fb2b5353622a992809a4ae302084f06fd142e21d790f07ca3678c27e4fb75a8b8e687f42f2ae0cbb13345f2e5730a3fa2c4a5ecf
   languageName: node
   linkType: hard
 
@@ -11412,12 +11418,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"motion-dom@npm:^12.36.0":
-  version: 12.36.0
-  resolution: "motion-dom@npm:12.36.0"
+"motion-dom@npm:^12.38.0":
+  version: 12.38.0
+  resolution: "motion-dom@npm:12.38.0"
   dependencies:
     motion-utils: "npm:^12.36.0"
-  checksum: 10c0/7f97b1e310310b44e6144f7303604d7c3f37f1e278b41ac5b57dca2abe082213d40a9f59cf5a2cb3442d27b8fd82e29f17f31d7b24d4b240f9b908fc97b42d80
+  checksum: 10c0/ce41da75c240568abd9708cc859cbffb7d6aa490913619e20d23df57abe232ad6cce961c129933535c92b64bfb886958d73e5d162bcd5ddf174378f869977bbe
   languageName: node
   linkType: hard
 
@@ -15391,11 +15397,11 @@ __metadata:
     "@emotion/styled": "npm:11.14.1"
     "@prisma/client": "npm:6.19.2"
     "@rvf/set-get": "npm:7.0.1"
-    "@tanstack/react-query": "npm:5.90.21"
-    "@trpc/client": "npm:11.13.4"
-    "@trpc/next": "npm:11.13.4"
-    "@trpc/react-query": "npm:11.13.4"
-    "@trpc/server": "npm:11.13.4"
+    "@tanstack/react-query": "npm:5.95.0"
+    "@trpc/client": "npm:11.14.1"
+    "@trpc/next": "npm:11.14.1"
+    "@trpc/react-query": "npm:11.14.1"
+    "@trpc/server": "npm:11.14.1"
     "@types/eslint": "npm:9.6.1"
     "@types/jsonwebtoken": "npm:9.0.10"
     "@types/micromatch": "npm:4.0.10"
@@ -15417,7 +15423,7 @@ __metadata:
     dotenv-cli: "npm:11.0.0"
     eslint: "npm:9.39.2"
     eslint-config-flat-gitignore: "npm:2.2.1"
-    eslint-config-next: "npm:16.1.6"
+    eslint-config-next: "npm:16.2.1"
     eslint-config-prettier: "npm:10.1.8"
     eslint-import-resolver-typescript: "npm:4.4.4"
     eslint-plugin-import-x: "npm:4.16.2"
@@ -15429,7 +15435,7 @@ __metadata:
     eslint-plugin-unicorn: "npm:63.0.0"
     eslint-plugin-unused-imports: "npm:4.4.1"
     fast-deep-equal: "npm:3.1.3"
-    framer-motion: "npm:12.36.0"
+    framer-motion: "npm:12.38.0"
     globals: "npm:17.4.0"
     husky: "npm:9.1.7"
     immer: "npm:11.1.4"
