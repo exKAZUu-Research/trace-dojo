@@ -9,7 +9,7 @@ interface Value {
   isAdmin: boolean;
 }
 
-const Context = createContext<Value>(undefined as unknown as Value);
+const Context = createContext(undefined as unknown as Value);
 
 export function useAuthContextSelector<Selected>(selector: (value: Value) => Selected): Selected {
   return useContextSelector(Context, selector);

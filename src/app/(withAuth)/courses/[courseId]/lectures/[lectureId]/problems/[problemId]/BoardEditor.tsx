@@ -65,7 +65,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
   const selectedTurtle = turtles.find((char) => char.x === selectedCell?.x && char.y === selectedCell.y);
   const previousTraceItem = props.problem.traceItems[props.previousTraceItemIndex];
   const currentTraceItem = props.problem.traceItems[props.currentTraceItemIndex];
-  const [variables, updateVariables] = useImmer<Record<string, string>>(props.initialVariables);
+  const [variables, updateVariables] = useImmer(props.initialVariables);
 
   const initialize = useCallback(
     (keepSelectedCell = false): void => {
