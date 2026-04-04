@@ -2400,17 +2400,17 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@eslint/compat@npm:^2.0.2":
-  version: 2.0.2
-  resolution: "@eslint/compat@npm:2.0.2"
+"@eslint/compat@npm:^2.0.3":
+  version: 2.0.3
+  resolution: "@eslint/compat@npm:2.0.3"
   dependencies:
-    "@eslint/core": "npm:^1.1.0"
+    "@eslint/core": "npm:^1.1.1"
   peerDependencies:
     eslint: ^8.40 || 9 || 10
   peerDependenciesMeta:
     eslint:
       optional: true
-  checksum: 10c0/176df611bcb54ff7d9c3ac440df6844e552a4ed5de30eba28edbeebb68ccc7f19111fdd4c10780101ee5f871bd03ec0457f38c67834c285751c2bdb37d8ae73c
+  checksum: 10c0/e7b1a1bdf366759f9a7c3f09fe35cdd0f45208a6ca789be1357895869e546d0c3185ec92b29996141fdd1173103c3408a81ba2ecb86219bd15671ae65af6595b
   languageName: node
   linkType: hard
 
@@ -2443,12 +2443,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@eslint/core@npm:^1.1.0":
-  version: 1.1.0
-  resolution: "@eslint/core@npm:1.1.0"
+"@eslint/core@npm:^1.1.1":
+  version: 1.1.1
+  resolution: "@eslint/core@npm:1.1.1"
   dependencies:
     "@types/json-schema": "npm:^7.0.15"
-  checksum: 10c0/0f875d6f24fbf67cc796e01c2ca82884f755488052ed84183e56377c5b90fe10b491a26e600642db4daea1d5d8ab7906ec12f2bd5cbdb5004b0ef73c802bdb57
+  checksum: 10c0/129c654c78afc1f6d61dccb0ce841be667f09f052f7d5642614b6ba5eeebd579ca6cc336d7b750d88625e61f7aad22fdd62bf83847fbfc10cc3e58cfe6c5072e
   languageName: node
   linkType: hard
 
@@ -4221,26 +4221,26 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@trpc/client@npm:11.15.0":
-  version: 11.15.0
-  resolution: "@trpc/client@npm:11.15.0"
+"@trpc/client@npm:11.16.0":
+  version: 11.16.0
+  resolution: "@trpc/client@npm:11.16.0"
   peerDependencies:
-    "@trpc/server": 11.15.0
+    "@trpc/server": 11.16.0
     typescript: ">=5.7.2"
   bin:
     intent: bin/intent.js
-  checksum: 10c0/ad18431c832647ec915f1b37f8510ec3b3d15d985c2b2a34524ff8efcd64c7d0de830a54646baef03cb13061143b7e29e939a819b5b80e888223fd7ae84a242a
+  checksum: 10c0/6e3c4d7bc452980e26bd8baecbf08efcd24e53c419254aa805ee490ca9e1f0af99258a8c6a870e4a985d82b77daa74b62f7c87e3814c25ce8287fd9b63ab27ae
   languageName: node
   linkType: hard
 
-"@trpc/next@npm:11.15.0":
-  version: 11.15.0
-  resolution: "@trpc/next@npm:11.15.0"
+"@trpc/next@npm:11.16.0":
+  version: 11.16.0
+  resolution: "@trpc/next@npm:11.16.0"
   peerDependencies:
     "@tanstack/react-query": ^5.59.15
-    "@trpc/client": 11.15.0
-    "@trpc/react-query": 11.15.0
-    "@trpc/server": 11.15.0
+    "@trpc/client": 11.16.0
+    "@trpc/react-query": 11.16.0
+    "@trpc/server": 11.16.0
     next: "*"
     react: ">=16.8.0"
     react-dom: ">=16.8.0"
@@ -4252,31 +4252,31 @@ __metadata:
       optional: true
   bin:
     intent: bin/intent.js
-  checksum: 10c0/5666ea8c20cf48342855dea56f7f0a3bf54748f131cb456a541ada7d549ac41b8061fbf89c6a6cdfa9587d9ad7e830a92e0a7e84ec6741361865daac61427ceb
+  checksum: 10c0/bdae3defd65c43ebb53a39f7ab8ef391a2f12f2c7d5c415eec80669cf10341c26bdd3c516d6b506ef06dc64394df0b1e4780d315b51530cf9f3db070e528b8d8
   languageName: node
   linkType: hard
 
-"@trpc/react-query@npm:11.15.0":
-  version: 11.15.0
-  resolution: "@trpc/react-query@npm:11.15.0"
+"@trpc/react-query@npm:11.16.0":
+  version: 11.16.0
+  resolution: "@trpc/react-query@npm:11.16.0"
   peerDependencies:
     "@tanstack/react-query": ^5.80.3
-    "@trpc/client": 11.15.0
-    "@trpc/server": 11.15.0
+    "@trpc/client": 11.16.0
+    "@trpc/server": 11.16.0
     react: ">=18.2.0"
     typescript: ">=5.7.2"
-  checksum: 10c0/77fc7ce28b0641a00bec6c63389ea7fb238222fabd15d8062df8cc75598a38f57007bb0f6f71966f6f709159f62ab7f1b6b91a5e2530bafe0d6edffcab72e095
+  checksum: 10c0/e1b46a5c95a5b2a575044e0735bbb220bb3cf0f9ed807f0ad6d0aa2a0651f55edb46001556cecd0348ec37ed1156b9a8681c7197bd63e15d2013cdc3e57b36b0
   languageName: node
   linkType: hard
 
-"@trpc/server@npm:11.15.0":
-  version: 11.15.0
-  resolution: "@trpc/server@npm:11.15.0"
+"@trpc/server@npm:11.16.0":
+  version: 11.16.0
+  resolution: "@trpc/server@npm:11.16.0"
   peerDependencies:
     typescript: ">=5.7.2"
   bin:
     intent: bin/intent.js
-  checksum: 10c0/85495fbf7474b4eed18599244d42443ef53153029fb1d6f95e412ec142e073423a2c03a092111ef4e8e596757efb77f02536b4ae668440dd6f4de56370b73f5a
+  checksum: 10c0/926b01b8f9af451de38d9f92b8ec8b2311be2d0aa06c59a9e40af5fa1930284194963d02059223aa26702d1ba29841855528377aa9c07d194b15195c4cd70ace
   languageName: node
   linkType: hard
 
@@ -5123,9 +5123,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@willbooster/wb@npm:13.4.2":
-  version: 13.4.2
-  resolution: "@willbooster/wb@npm:13.4.2"
+"@willbooster/wb@npm:13.5.0":
+  version: 13.5.0
+  resolution: "@willbooster/wb@npm:13.5.0"
   dependencies:
     chalk: "npm:5.6.2"
     dotenv: "npm:17.3.1"
@@ -5136,7 +5136,7 @@ __metadata:
     yargs: "npm:18.0.0"
   bin:
     wb: bin/index.js
-  checksum: 10c0/020d54909cc8e5848af2c5f9d95a924987e36e84fbc85791bfcdcad844b77fc10e8bb73c6f7fa824b0970abbed431193a949a04eab838b64665bd6c9dbfcdf8f
+  checksum: 10c0/e96bb194459a9ec457c742fa5e98c4361865819804f42bbc18fb55a521a09547e0985e206bc641d2ca2a8a6d7c5340b76d74fdba95c2b9e8a6dfef2d510deb9e
   languageName: node
   linkType: hard
 
@@ -7856,14 +7856,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"eslint-config-flat-gitignore@npm:2.2.1":
-  version: 2.2.1
-  resolution: "eslint-config-flat-gitignore@npm:2.2.1"
+"eslint-config-flat-gitignore@npm:2.3.0":
+  version: 2.3.0
+  resolution: "eslint-config-flat-gitignore@npm:2.3.0"
   dependencies:
-    "@eslint/compat": "npm:^2.0.2"
+    "@eslint/compat": "npm:^2.0.3"
   peerDependencies:
     eslint: ^9.5.0 || ^10.0.0
-  checksum: 10c0/e2d9069c87b5355ba8d46e9f3b516eac04bbfd76c73b00aced6eb39834b2973cbabbef3dbb5a80a2b638b50d59fa577b6e058daee8fd60d4b57e0d6b930d9bad
+  checksum: 10c0/31aac4524c2bb9f4fb9532674570f93540f4c24e71a19a07898f9f418d7c5b245284105062faf185dbfd6f54eeddf64ad3b68a66651050d61315a9a17e8a1983
   languageName: node
   linkType: hard
 
@@ -15404,10 +15404,10 @@ __metadata:
     "@prisma/client": "npm:6.19.2"
     "@rvf/set-get": "npm:7.0.1"
     "@tanstack/react-query": "npm:5.95.2"
-    "@trpc/client": "npm:11.15.0"
-    "@trpc/next": "npm:11.15.0"
-    "@trpc/react-query": "npm:11.15.0"
-    "@trpc/server": "npm:11.15.0"
+    "@trpc/client": "npm:11.16.0"
+    "@trpc/next": "npm:11.16.0"
+    "@trpc/react-query": "npm:11.16.0"
+    "@trpc/server": "npm:11.16.0"
     "@types/eslint": "npm:9.6.1"
     "@types/jsonwebtoken": "npm:9.0.10"
     "@types/micromatch": "npm:4.0.10"
@@ -15419,7 +15419,7 @@ __metadata:
     "@willbooster/prettier-config": "npm:10.3.0"
     "@willbooster/shared-lib": "npm:7.1.7"
     "@willbooster/shared-lib-react": "npm:5.0.12"
-    "@willbooster/wb": "npm:13.4.2"
+    "@willbooster/wb": "npm:13.5.0"
     at-decorators: "npm:7.0.2"
     babel-plugin-react-compiler: "npm:1.0.0"
     build-ts: "npm:17.0.24"
@@ -15428,7 +15428,7 @@ __metadata:
     dayjs: "npm:1.11.20"
     dotenv-cli: "npm:11.0.0"
     eslint: "npm:9.39.2"
-    eslint-config-flat-gitignore: "npm:2.2.1"
+    eslint-config-flat-gitignore: "npm:2.3.0"
     eslint-config-next: "npm:16.2.1"
     eslint-config-prettier: "npm:10.1.8"
     eslint-import-resolver-typescript: "npm:4.4.4"
