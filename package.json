@@ -122,7 +122,7 @@
     "husky": "9.1.7",
     "lint-staged": "16.4.0",
     "micromatch": "4.0.8",
-    "open-cli": "8.0.0",
+    "open-cli": "9.0.0",
     "pinst": "3.0.0",
     "prettier": "3.8.1",
     "prettier-plugin-java": "2.8.1",
