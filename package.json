@@ -96,7 +96,7 @@
     "@types/eslint": "9.6.1",
     "@types/jsonwebtoken": "9.0.10",
     "@types/micromatch": "4.0.10",
-    "@types/node": "25.5.0",
+    "@types/node": "25.6.0",
     "@types/react-dom": "19.2.3",
     "@types/react-syntax-highlighter": "15.5.13",
     "@types/seedrandom": "3.0.8",
