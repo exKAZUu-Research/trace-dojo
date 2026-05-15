@@ -65,6 +65,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
   const selectedTurtle = turtles.find((char) => char.x === selectedCell?.x && char.y === selectedCell.y);
   const previousTraceItem = props.problem.traceItems[props.previousTraceItemIndex];
   const currentTraceItem = props.problem.traceItems[props.currentTraceItemIndex];
+  const handleSubmit = props.handleSubmit;
   const [variables, updateVariables] = useImmer(props.initialVariables);
 
   const initialize = useCallback(
@@ -204,11 +205,11 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
     setIsSubmitting(true);
     try {
-      await props.handleSubmit();
+      await handleSubmit();
     } finally {
       setIsSubmitting(false);
     }
-  }, [isSubmitting, areAllVariablesFilled, props.handleSubmit]);
+  }, [isSubmitting, areAllVariablesFilled, handleSubmit]);
   useShortcutKeys(handleSubmitAndToggleSubmitting, isSubmitting);
 
   return (

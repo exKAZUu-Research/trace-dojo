@@ -14,11 +14,14 @@ test.js
 .idea/AugmentWebviewStateStore.xml
 .idea/copilot.*
 .idea/copilot/chatSessions/
+.playwright-cli/
 .serena/
 .tmp/
+.wb/
 __generated__/
 @willbooster/
 dist/
+drizzle/mount/
 temp/
 tmp/
 *.sqlite3*

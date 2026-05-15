@@ -24,8 +24,9 @@ export const TryRefreshComponent: React.FC = () => {
         if (hasSession) {
           router.refresh();
         } else {
-          void SuperTokens.redirectToAuth();
+          return SuperTokens.redirectToAuth();
         }
+        return;
       })
       .catch(() => {
         setDidError(true);

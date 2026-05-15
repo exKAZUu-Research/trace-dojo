@@ -1,37 +1,51 @@
 ## Project Information
 
-- Name: trace-dojo
+- Name: `trace-dojo`
 - Description: undefined
 - Package Manager: yarn
 
-## Development Workflow
+## General Instructions
 
-1. If the current branch is `main`, create a new branch.
-   - Include unexpected changes since they are mine.
-2. Make code changes as needed.
-3. If possible, write e2e tests for your changes.
-4. Run `yarn check-all-for-ai` to execute all tests (note: this may take up to 30 minutes), or run `yarn check-for-ai` for type checking and linting only.
-   - If you are confident your changes will not break any tests, you may use `check-for-ai`.
-5. Commit your changes to the current branch and push.
-   - Follow conventional commits, i.e., your commit message should start with `feat:`, `fix:`, `test:`, etc.
-   - Make sure to add a new line at the end of your commit message.
-   - When pre-commit hooks prevent your changes, fix your code, then re-commit and re-push.
-6. Create a pull request using `gh`.
-   - The pull request title should match your commit message.
-7. Repeat the following steps until all tests pass:
-   1. Wait for CI to run all tests.
-   2. If tests fail, identify the root causes by gathering debug information through logging and screenshots, then fix the code and/or tests.
-   3. Fetch unresolved review comments from the pull request using `gh` and address them.
-      - e.g., `gh api graphql -f query='{ repository(owner: "exKAZUu-Research", name: "trace-dojo") { pullRequest(number: 24) { reviewThreads(first: 100) { nodes { isResolved comments(first: 100) { nodes { body author { login } path line } } } } } } }' | jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)'`
-   4. Commit your changes and push.
-   5. Write `/gemini review` in the pull request.
+- Create a new branch if the current branch is `main`.
+- Run any `git` commands sequentially.
+- Write tests ONLY if explicitly requested. If requested, follow these rules:
+  - Continue modifying tests and/or code until all tests pass.
+  - Ensure tests are idempotent and independent (e.g., reset persistent data) so they can run repeatedly or in parallel.
+  - Prefer actual API calls over mocks, unless actual calls are impractical, have unintended side effects, or mocks are explicitly requested.
+  - Always investigate the root cause of a test failure before fixing it.
+  - Avoid adding wait functions in E2E tests unless strictly necessary.
+- When fixing issues, follow these rules:
+  - Investigate the root cause first (e.g., by gathering debug logs, taking screenshots, etc.).
+  - Fix the actual root cause instead of applying workarounds.
+- After making code changes, run `yarn verify-full` to execute all tests (takes up to 1 hour), or `yarn verify` for only type checking and linting (takes up to 10 minutes).
+  - If you are confident that your changes will not break any tests, you may use `verify`.
+  - Use `oxlint` ignore comments with reasons (e.g., `// oxlint-disable-next-line <rule> -- <reason>`) if lint errors or warnings cannot be fixed.
+- Once you have verified your changes, commit and push them to the current (non-main) branch, then create a PR via `gh`.
+  - Follow the conventional commits; your commit message should start with `feat:`, `fix:`, etc.
+  - If not specified, make sure to add a new line at the end of your commit message.
+  - Always create new commits. Avoid using `--amend`.
+- Always use heredoc syntax when passing multi-line content to any command.
+- Put temporary files in the `.tmp` or `/tmp` directory.
 
 ## Coding Style
 
-- Write comments that explain "why" rather than "what". Avoid explanations that can be understood from the code itself.
-- Use stderr for logging debug messages temporarily since stdout output is sometimes omitted.
-- When adding new functions or classes, define them below any functions or classes that call them to maintain clear call order.
-- Prefer `undefined` over `null` unless explicitly dealing with APIs or libraries that require `null`.
-- Always perform existence checks on array due to `noUncheckedIndexedAccess: true`.
+- Use camelCase for JavaScript and TypeScript files (or PascalCase for React components).
+- Simplify code as much as possible to eliminate redundancy.
+- Design each module with high cohesion, grouping related functionality together.
+  - Refactor existing large modules into smaller, focused modules when necessary.
+  - Create well-organized directory structures with low coupling and high cohesion.
+- Place calling functions above the functions they call to maintain a clear top-down order.
+  - e.g., `function caller() { callee(); } function callee() { ... }`
+  - Unlike functions, place variable and type declarations ABOVE their usage.
+- Write comments and JSDoc for complex or hard-to-understand code.
+  - Explain "why" in comments and "what" in JSDoc.
+  - Avoid stating what can be easily understood from the code itself.
+- Prefer `undefined` over `null` unless explicitly required by APIs or libraries.
+- Prefer using a single template literal for prompts instead of `join()` with a pre-computable array literal of strings.
+- Assume that all environment variables are properly defined.
+  - If validation is required, use `assert` to fail fast (e.g., during startup).
+- Prefer lambda over `function` for React components, e.g., `const Button: React.FC = () => {`.
 - Prefer `useImmer` for storing an array or an object to `useState`.
+- Allow `autoFocus` to minimize user effort.
 - Since this project uses the React Compiler, you do not need to use `useCallback` or `useMemo` for performance optimization.
+- Assume there is only a single server instance.

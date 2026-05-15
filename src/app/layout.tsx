@@ -17,7 +17,7 @@ export const viewport: Viewport = {
 
 const RootLayout: LayoutComponent = ({ children }) => {
   return (
-    <html lang="ja_JP">
+    <html lang="ja-JP">
       <body>
         <Providers>{children}</Providers>
 

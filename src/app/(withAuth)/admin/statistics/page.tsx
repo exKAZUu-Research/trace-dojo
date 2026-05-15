@@ -75,19 +75,17 @@ async function calculateStatistics(): Promise<ProblemStatistics[]> {
     for (const [lectureIndex, problemIds] of courseIdToLectureIndexToProblemIds[courseId].entries()) {
       for (const problemId of problemIds) {
         try {
-          const userCount = (
-            await prisma.problemSession.groupBy({
-              by: ['userId'],
-              where: { problemId },
-            })
-          ).length; // eslint-disable-line unicorn/no-await-expression-member
-          const completedUserCount = (
-            await prisma.problemSession.groupBy({
-              by: ['userId'],
-              // eslint-disable-next-line unicorn/no-null
-              where: { problemId, completedAt: { not: null } },
-            })
-          ).length; // eslint-disable-line unicorn/no-await-expression-member
+          const userGroups = await prisma.problemSession.groupBy({
+            by: ['userId'],
+            where: { problemId },
+          });
+          const userCount = userGroups.length;
+          const completedUserGroups = await prisma.problemSession.groupBy({
+            by: ['userId'],
+            // eslint-disable-next-line unicorn/no-null
+            where: { problemId, completedAt: { not: null } },
+          });
+          const completedUserCount = completedUserGroups.length;
 
           const firstCompletedSessions = await prisma.problemSession.findMany({
             // eslint-disable-next-line unicorn/no-null

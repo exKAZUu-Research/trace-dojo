@@ -1,3 +1,5 @@
+#!/bin/bash
+
 changed_files="$(git diff-tree -r --name-only --no-commit-id ORIG_HEAD HEAD)"
 
 run_if_changed() {
@@ -6,9 +8,7 @@ run_if_changed() {
   fi
 }
 
-run_if_changed "\..+-version" "awk '{print \$1}' .tool-versions | xargs -I{} asdf plugin add {}"
-run_if_changed "\..+-version" "asdf plugin update --all"
-run_if_changed "\..+-version" "asdf install"
+run_if_changed "(mise\.toml|\.mise\.toml|\.tool-versions|\..+-version)" "mise install"
 run_if_changed "package\.json" "yarn && rm -Rf .next"
 run_if_changed ".*\.prisma" "node node_modules/.bin/dotenv -c development -- node node_modules/.bin/prisma migrate deploy"
 run_if_changed ".*\.prisma" "node node_modules/.bin/dotenv -c development -- node node_modules/.bin/prisma generate"
