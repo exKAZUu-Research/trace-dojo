@@ -39,7 +39,7 @@
   "resolutions": {
     "react": "19.2.6",
     "react-dom": "19.2.6",
-    "react-is": "19.2.5"
+    "react-is": "19.2.6"
   },
   "dependencies": {
     "@chakra-ui/next-js": "2.4.2",
