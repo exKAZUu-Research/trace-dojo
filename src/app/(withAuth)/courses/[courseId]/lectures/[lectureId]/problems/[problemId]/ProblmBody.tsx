@@ -173,6 +173,8 @@ export const ProblemBody: React.FC<Props> = (props) => {
     fetchIncorrectSubmissionsCount,
     isAlertOpen,
     openAlertDialog,
+    params.courseId,
+    params.lectureId,
     previousTraceItemIndex,
     problemType,
     props,
