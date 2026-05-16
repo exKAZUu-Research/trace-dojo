@@ -4530,13 +4530,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@typescript/native-preview-darwin-arm64@npm:7.0.0-dev.20260421.2":
-  version: 7.0.0-dev.20260421.2
-  resolution: "@typescript/native-preview-darwin-arm64@npm:7.0.0-dev.20260421.2"
-  conditions: os=darwin & cpu=arm64
-  languageName: node
-  linkType: hard
-
 "@typescript/native-preview-darwin-arm64@npm:7.0.0-dev.20260504.1":
   version: 7.0.0-dev.20260504.1
   resolution: "@typescript/native-preview-darwin-arm64@npm:7.0.0-dev.20260504.1"
@@ -4544,10 +4537,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@typescript/native-preview-darwin-x64@npm:7.0.0-dev.20260421.2":
-  version: 7.0.0-dev.20260421.2
-  resolution: "@typescript/native-preview-darwin-x64@npm:7.0.0-dev.20260421.2"
-  conditions: os=darwin & cpu=x64
+"@typescript/native-preview-darwin-arm64@npm:7.0.0-dev.20260510.1":
+  version: 7.0.0-dev.20260510.1
+  resolution: "@typescript/native-preview-darwin-arm64@npm:7.0.0-dev.20260510.1"
+  conditions: os=darwin & cpu=arm64
   languageName: node
   linkType: hard
 
@@ -4558,10 +4551,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@typescript/native-preview-linux-arm64@npm:7.0.0-dev.20260421.2":
-  version: 7.0.0-dev.20260421.2
-  resolution: "@typescript/native-preview-linux-arm64@npm:7.0.0-dev.20260421.2"
-  conditions: os=linux & cpu=arm64
+"@typescript/native-preview-darwin-x64@npm:7.0.0-dev.20260510.1":
+  version: 7.0.0-dev.20260510.1
+  resolution: "@typescript/native-preview-darwin-x64@npm:7.0.0-dev.20260510.1"
+  conditions: os=darwin & cpu=x64
   languageName: node
   linkType: hard
 
@@ -4572,10 +4565,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@typescript/native-preview-linux-arm@npm:7.0.0-dev.20260421.2":
-  version: 7.0.0-dev.20260421.2
-  resolution: "@typescript/native-preview-linux-arm@npm:7.0.0-dev.20260421.2"
-  conditions: os=linux & cpu=arm
+"@typescript/native-preview-linux-arm64@npm:7.0.0-dev.20260510.1":
+  version: 7.0.0-dev.20260510.1
+  resolution: "@typescript/native-preview-linux-arm64@npm:7.0.0-dev.20260510.1"
+  conditions: os=linux & cpu=arm64
   languageName: node
   linkType: hard
 
@@ -4586,10 +4579,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@typescript/native-preview-linux-x64@npm:7.0.0-dev.20260421.2":
-  version: 7.0.0-dev.20260421.2
-  resolution: "@typescript/native-preview-linux-x64@npm:7.0.0-dev.20260421.2"
-  conditions: os=linux & cpu=x64
+"@typescript/native-preview-linux-arm@npm:7.0.0-dev.20260510.1":
+  version: 7.0.0-dev.20260510.1
+  resolution: "@typescript/native-preview-linux-arm@npm:7.0.0-dev.20260510.1"
+  conditions: os=linux & cpu=arm
   languageName: node
   linkType: hard
 
@@ -4600,10 +4593,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@typescript/native-preview-win32-arm64@npm:7.0.0-dev.20260421.2":
-  version: 7.0.0-dev.20260421.2
-  resolution: "@typescript/native-preview-win32-arm64@npm:7.0.0-dev.20260421.2"
-  conditions: os=win32 & cpu=arm64
+"@typescript/native-preview-linux-x64@npm:7.0.0-dev.20260510.1":
+  version: 7.0.0-dev.20260510.1
+  resolution: "@typescript/native-preview-linux-x64@npm:7.0.0-dev.20260510.1"
+  conditions: os=linux & cpu=x64
   languageName: node
   linkType: hard
 
@@ -4614,10 +4607,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@typescript/native-preview-win32-x64@npm:7.0.0-dev.20260421.2":
-  version: 7.0.0-dev.20260421.2
-  resolution: "@typescript/native-preview-win32-x64@npm:7.0.0-dev.20260421.2"
-  conditions: os=win32 & cpu=x64
+"@typescript/native-preview-win32-arm64@npm:7.0.0-dev.20260510.1":
+  version: 7.0.0-dev.20260510.1
+  resolution: "@typescript/native-preview-win32-arm64@npm:7.0.0-dev.20260510.1"
+  conditions: os=win32 & cpu=arm64
   languageName: node
   linkType: hard
 
@@ -4628,35 +4621,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@typescript/native-preview@npm:7.0.0-dev.20260421.2":
-  version: 7.0.0-dev.20260421.2
-  resolution: "@typescript/native-preview@npm:7.0.0-dev.20260421.2"
-  dependencies:
-    "@typescript/native-preview-darwin-arm64": "npm:7.0.0-dev.20260421.2"
-    "@typescript/native-preview-darwin-x64": "npm:7.0.0-dev.20260421.2"
-    "@typescript/native-preview-linux-arm": "npm:7.0.0-dev.20260421.2"
-    "@typescript/native-preview-linux-arm64": "npm:7.0.0-dev.20260421.2"
-    "@typescript/native-preview-linux-x64": "npm:7.0.0-dev.20260421.2"
-    "@typescript/native-preview-win32-arm64": "npm:7.0.0-dev.20260421.2"
-    "@typescript/native-preview-win32-x64": "npm:7.0.0-dev.20260421.2"
-  dependenciesMeta:
-    "@typescript/native-preview-darwin-arm64":
-      optional: true
-    "@typescript/native-preview-darwin-x64":
-      optional: true
-    "@typescript/native-preview-linux-arm":
-      optional: true
-    "@typescript/native-preview-linux-arm64":
-      optional: true
-    "@typescript/native-preview-linux-x64":
-      optional: true
-    "@typescript/native-preview-win32-arm64":
-      optional: true
-    "@typescript/native-preview-win32-x64":
-      optional: true
-  bin:
-    tsgo: bin/tsgo.js
-  checksum: 10c0/79dbb7e5204c5906bcb3a2946209162efbaac9c8fa78ffeccb8b6718661a5b40f988d60b27350ad538cc1a4143524e5fc97b04fa4767bd42a036000f226438db
+"@typescript/native-preview-win32-x64@npm:7.0.0-dev.20260510.1":
+  version: 7.0.0-dev.20260510.1
+  resolution: "@typescript/native-preview-win32-x64@npm:7.0.0-dev.20260510.1"
+  conditions: os=win32 & cpu=x64
   languageName: node
   linkType: hard
 
@@ -4689,6 +4657,38 @@ __metadata:
   bin:
     tsgo: bin/tsgo.js
   checksum: 10c0/f39137d17197e7c35fd9f2e4fbb0b829b2568ff8f34496cb5f06933fe4706c00ec525e86719546ddad4e996bfa2ccd1c00cbf689fd651629019372e03038f63a
+  languageName: node
+  linkType: hard
+
+"@typescript/native-preview@npm:7.0.0-dev.20260510.1":
+  version: 7.0.0-dev.20260510.1
+  resolution: "@typescript/native-preview@npm:7.0.0-dev.20260510.1"
+  dependencies:
+    "@typescript/native-preview-darwin-arm64": "npm:7.0.0-dev.20260510.1"
+    "@typescript/native-preview-darwin-x64": "npm:7.0.0-dev.20260510.1"
+    "@typescript/native-preview-linux-arm": "npm:7.0.0-dev.20260510.1"
+    "@typescript/native-preview-linux-arm64": "npm:7.0.0-dev.20260510.1"
+    "@typescript/native-preview-linux-x64": "npm:7.0.0-dev.20260510.1"
+    "@typescript/native-preview-win32-arm64": "npm:7.0.0-dev.20260510.1"
+    "@typescript/native-preview-win32-x64": "npm:7.0.0-dev.20260510.1"
+  dependenciesMeta:
+    "@typescript/native-preview-darwin-arm64":
+      optional: true
+    "@typescript/native-preview-darwin-x64":
+      optional: true
+    "@typescript/native-preview-linux-arm":
+      optional: true
+    "@typescript/native-preview-linux-arm64":
+      optional: true
+    "@typescript/native-preview-linux-x64":
+      optional: true
+    "@typescript/native-preview-win32-arm64":
+      optional: true
+    "@typescript/native-preview-win32-x64":
+      optional: true
+  bin:
+    tsgo: bin/tsgo.js
+  checksum: 10c0/5cf8a56fa75403ad6c400e1279499ba47ff99e74deb5ca79eeac2bbe94fcacd3141226d80eabe2313192ca9e1c2417c1d94f5ca5055598cffa503c3885cedf3c
   languageName: node
   linkType: hard
 
@@ -5136,7 +5136,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"axios@npm:^1.15.0":
+"axios@npm:^1.16.0":
   version: 1.16.0
   resolution: "axios@npm:1.16.0"
   dependencies:
@@ -8034,10 +8034,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"immer@npm:11.1.4":
-  version: 11.1.4
-  resolution: "immer@npm:11.1.4"
-  checksum: 10c0/77beca6b0a4e361b30414189d63c64beb7df40ac1d8cbf524308fcbabe755e9aa49db3c6e95a6e412911416fec621f2c8470be5ec79feedc6abd6e4f7f18a9ce
+"immer@npm:11.1.8":
+  version: 11.1.8
+  resolution: "immer@npm:11.1.8"
+  checksum: 10c0/df971d8a8f6a5312c6dca4a8437e20b3185d6c9cd6830ad526c18ffd50f4037ef8db4f332b0adbcb9f8c5ee2fbe117cf0623e8554e24777105b3cc9faf866d34
   languageName: node
   linkType: hard
 
@@ -8479,9 +8479,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"joi@npm:^18.1.2":
-  version: 18.1.2
-  resolution: "joi@npm:18.1.2"
+"joi@npm:^18.2.1":
+  version: 18.2.1
+  resolution: "joi@npm:18.2.1"
   dependencies:
     "@hapi/address": "npm:^5.1.1"
     "@hapi/formula": "npm:^3.0.2"
@@ -8490,7 +8490,7 @@ __metadata:
     "@hapi/tlds": "npm:^1.1.1"
     "@hapi/topo": "npm:^6.0.2"
     "@standard-schema/spec": "npm:^1.1.0"
-  checksum: 10c0/67d6fcbd81c017adf31ae6e0e6cd9d82ba25d6835d2981970ec0ea3198f2e8223aded756cdb8d5ed14fff3d6da2e2684a0767a770bcc544ce00fdcf9748e104a
+  checksum: 10c0/d74f8b382de107f8bcc376ed3a2206971760176e167c7b69ff5b1dfe47a0de01e4a171f07bf4783f9bd240fb1e75f7b2d514eed175f3326e681c3572c0990ecc
   languageName: node
   linkType: hard
 
@@ -13240,7 +13240,7 @@ __metadata:
     "@types/react-dom": "npm:19.2.3"
     "@types/react-syntax-highlighter": "npm:15.5.13"
     "@types/seedrandom": "npm:3.0.8"
-    "@typescript/native-preview": "npm:7.0.0-dev.20260421.2"
+    "@typescript/native-preview": "npm:7.0.0-dev.20260510.1"
     "@willbooster/oxfmt-config": "npm:1.2.2"
     "@willbooster/oxlint-config": "npm:1.4.6"
     "@willbooster/shared-lib": "npm:7.4.14"
@@ -13255,7 +13255,7 @@ __metadata:
     dotenv-cli: "npm:11.0.0"
     fast-deep-equal: "npm:3.1.3"
     framer-motion: "npm:12.38.0"
-    immer: "npm:11.1.4"
+    immer: "npm:11.1.8"
     jsonwebtoken: "npm:9.0.3"
     jwks-rsa: "npm:4.0.1"
     lefthook: "npm:2.1.6"
@@ -13287,9 +13287,9 @@ __metadata:
     use-context-selector: "npm:2.0.0"
     use-immer: "npm:0.11.0"
     usehooks-ts: "npm:3.1.1"
-    uuid: "npm:13.0.1"
+    uuid: "npm:13.0.2"
     vitest: "npm:4.1.5"
-    wait-on: "npm:9.0.5"
+    wait-on: "npm:9.0.6"
     zod: "npm:4.4.3"
     zod-form-data: "npm:3.0.1"
   languageName: unknown
@@ -13739,12 +13739,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"uuid@npm:13.0.1":
-  version: 13.0.1
-  resolution: "uuid@npm:13.0.1"
+"uuid@npm:13.0.2":
+  version: 13.0.2
+  resolution: "uuid@npm:13.0.2"
   bin:
     uuid: dist-node/bin/uuid
-  checksum: 10c0/7bb8ad18b11871b7bd1b9161a60610c2b6ce8f7300d93932f92117a2ab9b40479dd23e81929ac848e8a7c45f78b8ed3333f88694b71c17ff3265e443f8684642
+  checksum: 10c0/32c7ee84fa7c7966cc09b3a1514a752a8e2f609f15c00033fbaedc0255d577d1877b839f11ee537f37e587bbc620bbb98c3b3a1482931b8ed47d79497cd7a7cd
   languageName: node
   linkType: hard
 
@@ -13909,18 +13909,18 @@ __metadata:
   languageName: node
   linkType: hard
 
-"wait-on@npm:9.0.5":
-  version: 9.0.5
-  resolution: "wait-on@npm:9.0.5"
+"wait-on@npm:9.0.6":
+  version: 9.0.6
+  resolution: "wait-on@npm:9.0.6"
   dependencies:
-    axios: "npm:^1.15.0"
-    joi: "npm:^18.1.2"
+    axios: "npm:^1.16.0"
+    joi: "npm:^18.2.1"
     lodash: "npm:^4.18.1"
     minimist: "npm:^1.2.8"
     rxjs: "npm:^7.8.2"
   bin:
     wait-on: bin/wait-on
-  checksum: 10c0/79823ebda9bb08ae341abb49d298d001039071ac103f6557da69371ae92a6b35ea8faca0b1c349f08c7b6db0ea527705bea9044a6a41e5a0e4470ee9d95fdcd1
+  checksum: 10c0/968ab8580228f06f8295fb4103d733f1ebc148580a4083351645badcaaafc22a34d5cece4a9fcd15c8d494745ca0f309efeef79ce2b3759e78ae9951a57405fe
   languageName: node
   linkType: hard
 
