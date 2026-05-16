@@ -21,7 +21,7 @@ COPY .yarn/ ./.yarn
 COPY src/ ./src
 COPY prisma/ ./prisma
 COPY public/ ./public
-COPY .env* .yarnrc.yml ecosystem* next* tsconfig.json yarn.lock ./
+COPY .env* .yarnrc.yml next* tsconfig.json yarn.lock ./
 COPY dist/package.json ./
 
 ARG WB_VERSION
@@ -44,5 +44,6 @@ RUN node -e 'fetch("https://raw.githubusercontent.com/WillBooster/docker-utils/m
     && rm -Rf db/mount \
     && rm -Rf .yarn/cache
 
-COPY entrypoint.sh ./
-CMD ./entrypoint.sh
+COPY scripts/docker-entrypoint.sh scripts/start-production.sh ./scripts/
+RUN chmod +x scripts/*.sh
+CMD ["./scripts/docker-entrypoint.sh"]
