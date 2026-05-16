@@ -12600,7 +12600,7 @@ __metadata:
     usehooks-ts: "npm:3.1.1"
     uuid: "npm:13.0.2"
     vitest: "npm:4.1.5"
-    wait-on: "npm:9.0.6"
+    wait-on: "npm:9.0.10"
     zod: "npm:4.4.3"
     zod-form-data: "npm:3.0.1"
   languageName: unknown
@@ -13185,9 +13185,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"wait-on@npm:9.0.6":
-  version: 9.0.6
-  resolution: "wait-on@npm:9.0.6"
+"wait-on@npm:9.0.10":
+  version: 9.0.10
+  resolution: "wait-on@npm:9.0.10"
   dependencies:
     axios: "npm:^1.16.0"
     joi: "npm:^18.2.1"
@@ -13196,7 +13196,7 @@ __metadata:
     rxjs: "npm:^7.8.2"
   bin:
     wait-on: bin/wait-on
-  checksum: 10c0/968ab8580228f06f8295fb4103d733f1ebc148580a4083351645badcaaafc22a34d5cece4a9fcd15c8d494745ca0f309efeef79ce2b3759e78ae9951a57405fe
+  checksum: 10c0/f5a1e940fe8efa6ad4b52efabad46925bfddea191d895a7f87e1c364975e7b095b0849f2f37549aea6a9dabacbf3c8ab14e818ba1182e370f060b7f6c8da0cf2
   languageName: node
   linkType: hard
 
