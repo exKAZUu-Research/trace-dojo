@@ -24,7 +24,7 @@ fi
 
 if [[ "$isProduction" == true ]]; then
   "${wbCommand[@]}" prisma seed &
-  exec litestream replicate -exec './scripts/start-production.sh'
+  exec run-litestream.sh './scripts/start-production.sh'
 else
   "${wbCommand[@]}" prisma seed
 fi
