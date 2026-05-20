@@ -12,10 +12,12 @@ ENV WB_DOCKER=1
 ARG ARCH
 ENV ARCH=$ARCH
 
+COPY dist/bash/ ./bash/
+
 RUN apt-get -qq update \
-    && node -e 'fetch("https://raw.githubusercontent.com/WillBooster/docker-utils/main/bash/prepare-node-web.sh").then(r => r.text()).then(t => process.stdout.write(t))' | bash \
-    && node -e 'fetch("https://raw.githubusercontent.com/WillBooster/docker-utils/main/bash/install-litestream.sh").then(r => r.text()).then(t => process.stdout.write(t))' | bash \
-    && node -e 'fetch("https://raw.githubusercontent.com/WillBooster/docker-utils/main/bash/cleanup-apt.sh").then(r => r.text()).then(t => process.stdout.write(t))' | bash
+    && bash ./bash/prepare-node-web.sh \
+    && bash ./bash/install-litestream.sh \
+    && bash ./bash/cleanup.sh --keep-scripts
 
 COPY .yarn/ ./.yarn
 COPY src/ ./src
@@ -32,7 +34,7 @@ ARG WB_ENV
 ENV WB_ENV=$WB_ENV
 ENV NEXT_PUBLIC_WB_ENV=$WB_ENV
 
-RUN node -e 'fetch("https://raw.githubusercontent.com/WillBooster/docker-utils/main/bash/configure-yarn.sh").then(r => r.text()).then(t => process.stdout.write(t))' | bash \
+RUN bash ./bash/configure-yarn.sh \
     && yarn \
     # yarn install fails for some reason, so run it twice.
     && yarn \
@@ -42,7 +44,8 @@ RUN node -e 'fetch("https://raw.githubusercontent.com/WillBooster/docker-utils/m
     && yarn wb prisma create-litestream-config \
     # Avoid overwriting existing db files
     && rm -Rf db/mount \
-    && rm -Rf .yarn/cache
+    && rm -Rf .yarn/cache \
+    && bash ./bash/cleanup.sh
 
 COPY scripts/docker-entrypoint.sh scripts/start-production.sh ./scripts/
 RUN chmod +x scripts/*.sh
