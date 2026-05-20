@@ -4746,9 +4746,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@willbooster/wb@npm:13.14.0":
-  version: 13.14.0
-  resolution: "@willbooster/wb@npm:13.14.0"
+"@willbooster/wb@npm:13.19.1":
+  version: 13.19.1
+  resolution: "@willbooster/wb@npm:13.19.1"
   dependencies:
     chalk: "npm:5.6.2"
     dotenv: "npm:17.4.2"
@@ -4760,7 +4760,7 @@ __metadata:
     yargs: "npm:18.0.0"
   bin:
     wb: bin/index.js
-  checksum: 10c0/847a159d1114ae7b73d5fada160927d1425b1ae020193cbcf0c670906da2892502ace1a149e3412dcb52ac481ca04e50cbd8ee2ffd8cdd82668808b0589b1c02
+  checksum: 10c0/da8127b1bb558e4cacc794bac761d011d74148c4589258f14ab6ebd0bcfb55b8eea88bf7d8c94f1c0aea7bf573a8f2344719aa3c5e7dc0bb5ad2f24ab76c624b
   languageName: node
   linkType: hard
 
@@ -12557,7 +12557,7 @@ __metadata:
     "@willbooster/oxlint-config": "npm:1.4.6"
     "@willbooster/shared-lib": "npm:7.4.14"
     "@willbooster/shared-lib-react": "npm:5.3.12"
-    "@willbooster/wb": "npm:13.14.0"
+    "@willbooster/wb": "npm:13.19.1"
     at-decorators: "npm:7.1.0"
     babel-plugin-react-compiler: "npm:1.0.0"
     build-ts: "npm:17.1.13"
