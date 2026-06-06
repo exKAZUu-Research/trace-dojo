@@ -97,7 +97,7 @@
     "@typescript/native-preview": "7.0.0-dev.20260527.2",
     "@willbooster/oxfmt-config": "1.2.2",
     "@willbooster/oxlint-config": "1.4.8",
-    "@willbooster/wb": "13.20.1",
+    "@willbooster/wb": "13.22.7",
     "babel-plugin-react-compiler": "1.0.0",
     "build-ts": "17.1.21",
     "concurrently": "9.2.1",
