@@ -2,12 +2,12 @@
  * 1. `WB_ENV=production yarn db-restore`.
  * 2. Update `deadLines`.
  * 3. Update `header` via `CSVインポート` -> `雛形ダウンロード`.
- * 4. Update `validStudentIds` via `CSVエクスポート`.
+ * 4. Put the `CSVエクスポート` result at `prisma/validStudentIds.csv`.
  * 5. Create `.env.restored` based on `.env.production`.
  * 6. `yarn calculate-score`.
  * */
 
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 import { PrismaClient } from '@prisma/client';
 import SuperTokensNode from 'supertokens-node';
@@ -16,6 +16,7 @@ import { ensureSuperTokensInit } from '@/infrastructures/supertokens/backendConf
 import { courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
 
 const prisma = new PrismaClient();
+const defaultValidStudentIdsCsvPath = 'prisma/validStudentIds.csv';
 
 const deadLines = {
   tuBeginner1: [
@@ -42,14 +43,12 @@ const deadLines = {
   ],
 };
 
-const validStudentIds = new Set(
-  `
-<ここに改行区切りで学籍番号の一覧を記載する。>
-`.split(/\s+/)
-);
-
 async function main(): Promise<void> {
   ensureSuperTokensInit();
+
+  const validStudentIdsCsvPath = process.argv[2] ?? defaultValidStudentIdsCsvPath;
+  const validStudentIds = loadValidStudentIds(validStudentIdsCsvPath);
+  console.info(`Loaded valid student IDs from ${validStudentIdsCsvPath}:`, validStudentIds.size);
 
   const courseId = Object.keys(deadLines)[0] as keyof typeof deadLines;
   const users = await prisma.user.findMany();
@@ -152,6 +151,104 @@ async function main(): Promise<void> {
     );
     writeFileSync('grading.csv', record.row, { flag: 'a' });
   }
+}
+
+function loadValidStudentIds(csvPath: string): Set<string> {
+  const rows = parseCsv(readFileSync(csvPath, 'utf8'));
+  if (rows.length === 0) {
+    throw new Error(`No rows found in ${csvPath}`);
+  }
+
+  const header = rows[0] ?? [];
+  const studentIdColumnIndex = findStudentIdColumnIndex(header);
+  const dataRows = studentIdColumnIndex === undefined ? rows : rows.slice(1);
+  const columnIndex = studentIdColumnIndex ?? 0;
+
+  const studentIds = new Set<string>();
+  for (const row of dataRows) {
+    const studentId = normalizeStudentId(row[columnIndex]);
+    if (studentId) {
+      studentIds.add(studentId);
+    }
+  }
+
+  if (studentIds.size === 0) {
+    throw new Error(`No valid student IDs found in ${csvPath}`);
+  }
+  return studentIds;
+}
+
+function findStudentIdColumnIndex(header: string[]): number | undefined {
+  const normalizedHeader = header.map((cell) =>
+    cell
+      .trim()
+      .replace(/^\uFEFF/, '')
+      .replaceAll(/\s+/g, '')
+      .toLowerCase()
+  );
+  const exactMatchIndex = normalizedHeader.findIndex((cell) => ['管理id', 'studentid', 'student_id'].includes(cell));
+  if (exactMatchIndex !== -1) {
+    return exactMatchIndex;
+  }
+
+  const partialMatchIndex = normalizedHeader.findIndex((cell) => cell.includes('学籍番号'));
+  return partialMatchIndex !== -1 ? partialMatchIndex : undefined;
+}
+
+function normalizeStudentId(value: string | undefined): string {
+  return (
+    value
+      ?.trim()
+      .replace(/^\uFEFF/, '')
+      .toUpperCase() ?? ''
+  );
+}
+
+function parseCsv(content: string): string[][] {
+  const rows: string[][] = [];
+  let currentRow: string[] = [];
+  let currentCell = '';
+  let isQuoted = false;
+
+  for (let index = 0; index < content.length; index++) {
+    const character = content[index];
+
+    if (character === '"') {
+      if (isQuoted && content[index + 1] === '"') {
+        currentCell += '"';
+        index++;
+      } else {
+        isQuoted = !isQuoted;
+      }
+      continue;
+    }
+
+    if (character === ',' && !isQuoted) {
+      currentRow.push(currentCell);
+      currentCell = '';
+      continue;
+    }
+
+    if ((character === '\n' || character === '\r') && !isQuoted) {
+      currentRow.push(currentCell);
+      rows.push(currentRow);
+      currentRow = [];
+      currentCell = '';
+      if (character === '\r' && content[index + 1] === '\n') {
+        index++;
+      }
+      continue;
+    }
+
+    currentCell += character;
+  }
+
+  if (currentCell || currentRow.length > 0) {
+    currentRow.push(currentCell);
+    rows.push(currentRow);
+  }
+
+  return rows.filter((row) => row.some((cell) => cell.trim()));
 }
 
 // eslint-disable-next-line unicorn/prefer-top-level-await
