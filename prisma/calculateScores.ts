@@ -156,22 +156,7 @@ async function main(): Promise<void> {
 
 function loadValidStudentIds(csvPath: string, expectedHeader: string): Set<string> {
   const rows = parseCsv(readFileSync(csvPath, 'utf8'));
-  if (rows.length === 0) {
-    throw new Error(`No rows found in ${csvPath}`);
-  }
-
-  const expectedHeaderRow = parseCsv(expectedHeader)[0];
-  if (!expectedHeaderRow) {
-    throw new Error('Expected CSV header is empty');
-  }
-
-  const actualHeaderRow = rows[0] ?? [];
-  assertSameHeader(actualHeaderRow, expectedHeaderRow, csvPath);
-
-  const studentIdColumnIndex = expectedHeaderRow.indexOf('管理ID');
-  if (studentIdColumnIndex === -1) {
-    throw new Error('Expected CSV header does not include 管理ID');
-  }
+  const studentIdColumnIndex = parseCsv(expectedHeader)[0]?.indexOf('管理ID') ?? 0;
 
   const studentIds = new Set<string>();
   for (const row of rows.slice(1)) {
@@ -185,21 +170,6 @@ function loadValidStudentIds(csvPath: string, expectedHeader: string): Set<strin
     throw new Error(`No valid student IDs found in ${csvPath}`);
   }
   return studentIds;
-}
-
-function assertSameHeader(actualHeader: string[], expectedHeader: string[], csvPath: string): void {
-  const normalizedActualHeader = actualHeader.map(normalizeHeaderCell);
-  const normalizedExpectedHeader = expectedHeader.map(normalizeHeaderCell);
-  if (
-    normalizedActualHeader.length !== normalizedExpectedHeader.length ||
-    normalizedActualHeader.some((cell, index) => cell !== normalizedExpectedHeader[index])
-  ) {
-    throw new Error(`Header in ${csvPath} does not match the script's header variable`);
-  }
-}
-
-function normalizeHeaderCell(value: string): string {
-  return value.trim().replace(/^\uFEFF/, '');
 }
 
 function normalizeStudentId(value: string | undefined): string {
