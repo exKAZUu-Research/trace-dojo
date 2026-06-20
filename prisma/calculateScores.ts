@@ -18,6 +18,10 @@ import { courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
 const prisma = new PrismaClient();
 const defaultValidStudentIdsCsvPath = 'prisma/validStudentIds.csv';
 
+// 「雛形ダウンロード」を押して、最新のヘッダーを反映させること。
+const header =
+  '管理ID,単位認定試験_最終点,小テスト_最終点,ディスカッション_最終点,レポート_最終点,英語_最終点,相互評価_最終点,プログラミング_最終点,LTI_最終点,その他1_最終点,その他2_最終点,その他3_最終点,その他4_最終点,その他5_最終点,備考\n';
+
 const deadLines = {
   tuBeginner1: [
     new Date('2026-04-30T11:59:59+09:00'), // 1st: 4/30
@@ -47,7 +51,7 @@ async function main(): Promise<void> {
   ensureSuperTokensInit();
 
   const validStudentIdsCsvPath = process.argv[2] ?? defaultValidStudentIdsCsvPath;
-  const validStudentIds = loadValidStudentIds(validStudentIdsCsvPath);
+  const validStudentIds = loadValidStudentIds(validStudentIdsCsvPath, header);
   console.info(`Loaded valid student IDs from ${validStudentIdsCsvPath}:`, validStudentIds.size);
 
   const courseId = Object.keys(deadLines)[0] as keyof typeof deadLines;
@@ -55,9 +59,6 @@ async function main(): Promise<void> {
   console.info('Fetched users:', users.length);
   const finalDeadline = deadLines[courseId][8];
 
-  // 「雛形ダウンロード」を押して、最新のヘッダーを反映させること。
-  const header =
-    '管理ID,単位認定試験_最終点,小テスト_最終点,ディスカッション_最終点,レポート_最終点,英語_最終点,相互評価_最終点,プログラミング_最終点,LTI_最終点,その他1_最終点,その他2_最終点,その他3_最終点,その他4_最終点,その他5_最終点,備考\n';
   console.log(header.trim());
   writeFileSync('grading.csv', header);
 
@@ -153,20 +154,28 @@ async function main(): Promise<void> {
   }
 }
 
-function loadValidStudentIds(csvPath: string): Set<string> {
+function loadValidStudentIds(csvPath: string, expectedHeader: string): Set<string> {
   const rows = parseCsv(readFileSync(csvPath, 'utf8'));
   if (rows.length === 0) {
     throw new Error(`No rows found in ${csvPath}`);
   }
 
-  const header = rows[0] ?? [];
-  const studentIdColumnIndex = findStudentIdColumnIndex(header);
-  const dataRows = studentIdColumnIndex === undefined ? rows : rows.slice(1);
-  const columnIndex = studentIdColumnIndex ?? 0;
+  const expectedHeaderRow = parseCsv(expectedHeader)[0];
+  if (!expectedHeaderRow) {
+    throw new Error('Expected CSV header is empty');
+  }
+
+  const actualHeaderRow = rows[0] ?? [];
+  assertSameHeader(actualHeaderRow, expectedHeaderRow, csvPath);
+
+  const studentIdColumnIndex = expectedHeaderRow.indexOf('管理ID');
+  if (studentIdColumnIndex === -1) {
+    throw new Error('Expected CSV header does not include 管理ID');
+  }
 
   const studentIds = new Set<string>();
-  for (const row of dataRows) {
-    const studentId = normalizeStudentId(row[columnIndex]);
+  for (const row of rows.slice(1)) {
+    const studentId = normalizeStudentId(row[studentIdColumnIndex]);
     if (studentId) {
       studentIds.add(studentId);
     }
@@ -178,21 +187,19 @@ function loadValidStudentIds(csvPath: string): Set<string> {
   return studentIds;
 }
 
-function findStudentIdColumnIndex(header: string[]): number | undefined {
-  const normalizedHeader = header.map((cell) =>
-    cell
-      .trim()
-      .replace(/^\uFEFF/, '')
-      .replaceAll(/\s+/g, '')
-      .toLowerCase()
-  );
-  const exactMatchIndex = normalizedHeader.findIndex((cell) => ['管理id', 'studentid', 'student_id'].includes(cell));
-  if (exactMatchIndex !== -1) {
-    return exactMatchIndex;
+function assertSameHeader(actualHeader: string[], expectedHeader: string[], csvPath: string): void {
+  const normalizedActualHeader = actualHeader.map(normalizeHeaderCell);
+  const normalizedExpectedHeader = expectedHeader.map(normalizeHeaderCell);
+  if (
+    normalizedActualHeader.length !== normalizedExpectedHeader.length ||
+    normalizedActualHeader.some((cell, index) => cell !== normalizedExpectedHeader[index])
+  ) {
+    throw new Error(`Header in ${csvPath} does not match the script's header variable`);
   }
+}
 
-  const partialMatchIndex = normalizedHeader.findIndex((cell) => cell.includes('学籍番号'));
-  return partialMatchIndex !== -1 ? partialMatchIndex : undefined;
+function normalizeHeaderCell(value: string): string {
+  return value.trim().replace(/^\uFEFF/, '');
 }
 
 function normalizeStudentId(value: string | undefined): string {
