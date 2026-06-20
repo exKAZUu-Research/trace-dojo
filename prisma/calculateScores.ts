@@ -1,9 +1,10 @@
 /**
- * 1. `WB_ENV=production yarn db-restore`
+ * 1. `WB_ENV=production yarn db-restore`.
  * 2. Update `deadLines`.
  * 3. Update `header` via `CSVインポート` -> `雛形ダウンロード`.
  * 4. Update `validStudentIds` via `CSVエクスポート`.
- * 5. `yarn calculate-score`
+ * 5. Create `.env.restored` based on `.env.production`.
+ * 6. `yarn calculate-score`.
  * */
 
 import { writeFileSync } from 'node:fs';
@@ -17,17 +18,17 @@ import { courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
 const prisma = new PrismaClient();
 
 const deadLines = {
-  // tuBeginner1: [
-  //   new Date('2026-04-30T11:59:59+09:00'), // 1st: 4/30
-  //   new Date('2026-05-01T11:59:59+09:00'), // 2nd: 5/1
-  //   new Date('2026-05-07T11:59:59+09:00'), // 3rd: 5/7
-  //   new Date('2026-05-07T11:59:59+09:00'), // 4th: 5/7
-  //   new Date('2026-05-14T11:59:59+09:00'), // 5th: 5/14
-  //   new Date('2026-05-21T11:59:59+09:00'), // 6th: 5/21
-  //   new Date('2026-05-28T11:59:59+09:00'), // 7th: 5/28
-  //   new Date('2026-06-05T11:59:59+09:00'), // 8th: 6/5
-  //   new Date('2026-06-15T11:59:59+09:00'), // final deadline: 6/15
-  // ],
+  tuBeginner1: [
+    new Date('2026-04-30T11:59:59+09:00'), // 1st: 4/30
+    new Date('2026-05-01T11:59:59+09:00'), // 2nd: 5/1
+    new Date('2026-05-07T11:59:59+09:00'), // 3rd: 5/7
+    new Date('2026-05-07T11:59:59+09:00'), // 4th: 5/7
+    new Date('2026-05-14T11:59:59+09:00'), // 5th: 5/14
+    new Date('2026-05-21T11:59:59+09:00'), // 6th: 5/21
+    new Date('2026-05-28T11:59:59+09:00'), // 7th: 5/28
+    new Date('2026-06-05T11:59:59+09:00'), // 8th: 6/5
+    new Date('2026-06-15T11:59:59+09:00'), // final deadline: 6/15
+  ],
   tuBeginner2: [
     new Date('2026-07-23T11:59:59+09:00'), // 1st: 7/23
     new Date('2026-07-23T11:59:59+09:00'), // 2nd: 7/23
@@ -61,7 +62,7 @@ async function main(): Promise<void> {
   console.log(header.trim());
   writeFileSync('grading.csv', header);
 
-  const records: { studentId: string; row: string; solvedProblems: number }[] = [];
+  const records: { shouldWarn: boolean; studentId: string; row: string; solvedProblems: number }[] = [];
 
   for (const user of users) {
     let email = user.displayName;
@@ -135,8 +136,9 @@ async function main(): Promise<void> {
     totalScore = (totalScore / 80) * 100;
 
     // Print CSV row, escape email if it contains commas
-    const row = `${studentId},${Math.round(totalScore)},,,,,,,,,,,,,\n`;
-    records.push({ studentId, row, solvedProblems });
+    const roundedScore = Math.round(totalScore);
+    const row = `${studentId},${roundedScore},,,,,,,,,,,,,\n`;
+    records.push({ shouldWarn: roundedScore < 60, studentId, row, solvedProblems });
     process.stdout.write('.');
   }
 
@@ -145,7 +147,9 @@ async function main(): Promise<void> {
 
   // Write sorted records to file
   for (const record of records) {
-    console.log(`${record.row.trim()}: ${record.solvedProblems} problems solved`);
+    console.log(
+      `${record.shouldWarn ? '!!! ' : ''}${record.row.trim()}: ${record.solvedProblems} problems solved${record.shouldWarn ? ' !!!' : ''}`
+    );
     writeFileSync('grading.csv', record.row, { flag: 'a' });
   }
 }
