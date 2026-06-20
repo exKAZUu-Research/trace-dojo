@@ -59,7 +59,7 @@ async function main(): Promise<void> {
   console.log(header.trim());
   writeFileSync('grading.csv', header);
 
-  const records: { studentId: string; row: string; solvedProblems: number }[] = [];
+  const records: { shouldWarn: boolean; studentId: string; row: string; solvedProblems: number }[] = [];
 
   for (const user of users) {
     let email = user.displayName;
@@ -133,8 +133,9 @@ async function main(): Promise<void> {
     totalScore = (totalScore / 80) * 100;
 
     // Print CSV row, escape email if it contains commas
-    const row = `${studentId},${Math.round(totalScore)},,,,,,,,,,,,,\n`;
-    records.push({ studentId, row, solvedProblems });
+    const roundedScore = Math.round(totalScore);
+    const row = `${studentId},${roundedScore},,,,,,,,,,,,,\n`;
+    records.push({ shouldWarn: roundedScore < 60, studentId, row, solvedProblems });
     process.stdout.write('.');
   }
 
@@ -143,7 +144,7 @@ async function main(): Promise<void> {
 
   // Write sorted records to file
   for (const record of records) {
-    console.log(`${record.row.trim()}: ${record.solvedProblems} problems solved`);
+    console.log(`${record.shouldWarn ? '!!!' : ''}${record.row.trim()}: ${record.solvedProblems} problems solved`);
     writeFileSync('grading.csv', record.row, { flag: 'a' });
   }
 }
