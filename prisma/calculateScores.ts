@@ -1,7 +1,10 @@
 /**
- * 1. `WB_ENV=production yarn db-restore`
- * 2. Update `header` variable via `CSVインポート` -> `雛形ダウンロード`.
- * 3. `yarn calculate-score`
+ * 1. `WB_ENV=production yarn db-restore`.
+ * 2. Update `deadLines`.
+ * 3. Update `header` via `CSVインポート` -> `雛形ダウンロード`.
+ * 4. Update `validStudentIds` via `CSVエクスポート`.
+ * 5. Create `.env.restored` based on `.env.production`.
+ * 6. `yarn calculate-score`.
  * */
 
 import { writeFileSync } from 'node:fs';
@@ -15,27 +18,27 @@ import { courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
 const prisma = new PrismaClient();
 
 const deadLines = {
-  // tuBeginner1: [
-  //   new Date('2025-10-16T11:59:59+09:00'), // 1st: 10/16
-  //   new Date('2025-10-16T11:59:59+09:00'), // 2nd: 10/16
-  //   new Date('2025-10-23T11:59:59+09:00'), // 3rd: 10/23
-  //   new Date('2025-10-23T11:59:59+09:00'), // 4th: 10/23
-  //   new Date('2025-10-30T11:59:59+09:00'), // 5th: 10/30
-  //   new Date('2025-11-06T11:59:59+09:00'), // 6th: 11/6
-  //   new Date('2025-11-13T11:59:59+09:00'), // 7th: 11/13
-  //   new Date('2025-11-20T11:59:59+09:00'), // 8th: 11/20
-  //   new Date('2025-12-01T11:59:59+09:00'), // final deadline: 12/1
-  // ],
+  tuBeginner1: [
+    new Date('2026-04-30T11:59:59+09:00'), // 1st: 4/30
+    new Date('2026-05-01T11:59:59+09:00'), // 2nd: 5/1
+    new Date('2026-05-07T11:59:59+09:00'), // 3rd: 5/7
+    new Date('2026-05-07T11:59:59+09:00'), // 4th: 5/7
+    new Date('2026-05-14T11:59:59+09:00'), // 5th: 5/14
+    new Date('2026-05-21T11:59:59+09:00'), // 6th: 5/21
+    new Date('2026-05-28T11:59:59+09:00'), // 7th: 5/28
+    new Date('2026-06-05T11:59:59+09:00'), // 8th: 6/5
+    new Date('2026-06-15T11:59:59+09:00'), // final deadline: 6/15
+  ],
   tuBeginner2: [
-    new Date('2026-01-08T11:59:59+09:00'), // 1st: 1/8
-    new Date('2026-01-08T11:59:59+09:00'), // 2nd: 1/8
-    new Date('2026-01-14T11:59:59+09:00'), // 3rd: 1/14
-    new Date('2026-01-14T11:59:59+09:00'), // 4th: 1/14
-    new Date('2026-01-27T11:59:59+09:00'), // 5th: 1/27
-    new Date('2026-01-29T11:59:59+09:00'), // 6th: 1/29
-    new Date('2026-02-05T11:59:59+09:00'), // 7th: 2/5
-    new Date('2026-02-12T11:59:59+09:00'), // 8th: 2/12
-    new Date('2026-02-24T11:59:59+09:00'), // final deadline: 2/24
+    new Date('2026-07-23T11:59:59+09:00'), // 1st: 7/23
+    new Date('2026-07-23T11:59:59+09:00'), // 2nd: 7/23
+    new Date('2026-07-30T11:59:59+09:00'), // 3rd: 7/30
+    new Date('2026-07-30T11:59:59+09:00'), // 4th: 7/30
+    new Date('2026-08-06T11:59:59+09:00'), // 5th: 8/6
+    new Date('2026-08-17T11:59:59+09:00'), // 6th: 8/17
+    new Date('2026-08-20T11:59:59+09:00'), // 7th: 8/20
+    new Date('2026-08-27T11:59:59+09:00'), // 8th: 8/27
+    new Date('2026-09-07T11:59:59+09:00'), // final deadline: 9/7
   ],
 };
 
@@ -144,7 +147,9 @@ async function main(): Promise<void> {
 
   // Write sorted records to file
   for (const record of records) {
-    console.log(`${record.shouldWarn ? '!!!' : ''}${record.row.trim()}: ${record.solvedProblems} problems solved`);
+    console.log(
+      `${record.shouldWarn ? '!!! ' : ''}${record.row.trim()}: ${record.solvedProblems} problems solved${record.shouldWarn ? ' !!!' : ''}`
+    );
     writeFileSync('grading.csv', record.row, { flag: 'a' });
   }
 }
