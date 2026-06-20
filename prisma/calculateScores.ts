@@ -1,8 +1,9 @@
 /**
  * 1. `WB_ENV=production yarn db-restore`
  * 2. Update `deadLines`.
- * 3. Update `header` variable via `CSVインポート` -> `雛形ダウンロード`.
- * 4. `yarn calculate-score`
+ * 3. Update `header` via `CSVインポート` -> `雛形ダウンロード`.
+ * 4. Update `validStudentIds` via `CSVエクスポート`.
+ * 5. `yarn calculate-score`
  * */
 
 import { writeFileSync } from 'node:fs';
