@@ -10,6 +10,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 import { PrismaClient } from '@prisma/client';
+import { parse } from 'csv-parse/sync';
 import SuperTokensNode from 'supertokens-node';
 
 import { ensureSuperTokensInit } from '@/infrastructures/supertokens/backendConfig';
@@ -155,8 +156,8 @@ async function main(): Promise<void> {
 }
 
 function loadValidStudentIds(csvPath: string, expectedHeader: string): Set<string> {
-  const rows = parseCsv(readFileSync(csvPath, 'utf8'));
-  const studentIdColumnIndex = parseCsv(expectedHeader)[0]?.indexOf('管理ID') ?? 0;
+  const rows = parseCsvRows(readFileSync(csvPath, 'utf8'));
+  const studentIdColumnIndex = parseCsvRows(expectedHeader)[0]?.indexOf('管理ID') ?? 0;
 
   const studentIds = new Set<string>();
   for (const row of rows.slice(1)) {
@@ -181,51 +182,11 @@ function normalizeStudentId(value: string | undefined): string {
   );
 }
 
-function parseCsv(content: string): string[][] {
-  const rows: string[][] = [];
-  let currentRow: string[] = [];
-  let currentCell = '';
-  let isQuoted = false;
-
-  for (let index = 0; index < content.length; index++) {
-    const character = content[index];
-
-    if (character === '"') {
-      if (isQuoted && content[index + 1] === '"') {
-        currentCell += '"';
-        index++;
-      } else {
-        isQuoted = !isQuoted;
-      }
-      continue;
-    }
-
-    if (character === ',' && !isQuoted) {
-      currentRow.push(currentCell);
-      currentCell = '';
-      continue;
-    }
-
-    if ((character === '\n' || character === '\r') && !isQuoted) {
-      currentRow.push(currentCell);
-      rows.push(currentRow);
-      currentRow = [];
-      currentCell = '';
-      if (character === '\r' && content[index + 1] === '\n') {
-        index++;
-      }
-      continue;
-    }
-
-    currentCell += character;
-  }
-
-  if (currentCell || currentRow.length > 0) {
-    currentRow.push(currentCell);
-    rows.push(currentRow);
-  }
-
-  return rows.filter((row) => row.some((cell) => cell.trim()));
+function parseCsvRows(content: string): string[][] {
+  return parse(content, {
+    bom: true,
+    skip_empty_lines: true,
+  }) as string[][];
 }
 
 // eslint-disable-next-line unicorn/prefer-top-level-await
