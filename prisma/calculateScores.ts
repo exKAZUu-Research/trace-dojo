@@ -16,7 +16,7 @@ import { ensureSuperTokensInit } from '@/infrastructures/supertokens/backendConf
 import { courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
 
 const prisma = new PrismaClient();
-const defaultValidStudentIdsCsvPath = 'prisma/validStudentIds.csv';
+const defaultValidStudentIdsCsvPath = 'students.csv';
 
 // 「雛形ダウンロード」を押して、最新のヘッダーを反映させること。
 const header =
