@@ -100,7 +100,7 @@
     "@willbooster/wb": "13.22.7",
     "babel-plugin-react-compiler": "1.0.0",
     "build-ts": "17.1.21",
-    "concurrently": "9.2.1",
+    "concurrently": "10.0.3",
     "conventional-changelog-conventionalcommits": "9.3.1",
     "lefthook": "2.1.9",
     "open-cli": "9.0.0",
