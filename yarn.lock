@@ -2205,21 +2205,21 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@tanstack/query-core@npm:5.100.14":
-  version: 5.100.14
-  resolution: "@tanstack/query-core@npm:5.100.14"
-  checksum: 10c0/947942b1499169b279faf4eddd570719db5d6863c89db4ec2d54e1eb3fb66a679cfa87a15c9f2e9d5de523e4bcc1782c020fba913ead461b73ecec4fdd986c59
+"@tanstack/query-core@npm:5.101.2":
+  version: 5.101.2
+  resolution: "@tanstack/query-core@npm:5.101.2"
+  checksum: 10c0/c3288757bfd563ca35cee21bf6ed0edb2f4425a8c92f75d84dcb36a0580a59e48bd97fcdbbc7c8d8e95a4c40376edfc5772b14665b85d183079a0ba7e17793b2
   languageName: node
   linkType: hard
 
-"@tanstack/react-query@npm:5.100.14":
-  version: 5.100.14
-  resolution: "@tanstack/react-query@npm:5.100.14"
+"@tanstack/react-query@npm:5.101.2":
+  version: 5.101.2
+  resolution: "@tanstack/react-query@npm:5.101.2"
   dependencies:
-    "@tanstack/query-core": "npm:5.100.14"
+    "@tanstack/query-core": "npm:5.101.2"
   peerDependencies:
     react: ^18 || ^19
-  checksum: 10c0/f124e7671f5731a88241a71a6ce7da54f0bafb960ec4107d1eb24d0fc25136d10cd02ebd68956eb0605a29e60d925e82bfb52386b25cbe2e1cb4c166017cbf2a
+  checksum: 10c0/076b2db0d85a6dc96d461789715ae0df2e439d9a20a41e629446275f8177a856c3b89d242ad3d31eadaf421f080b9834bcd9f94e5143f4cd7f947a10af9e42b3
   languageName: node
   linkType: hard
 
@@ -2240,26 +2240,26 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@trpc/client@npm:11.17.0":
-  version: 11.17.0
-  resolution: "@trpc/client@npm:11.17.0"
+"@trpc/client@npm:11.18.0":
+  version: 11.18.0
+  resolution: "@trpc/client@npm:11.18.0"
   peerDependencies:
-    "@trpc/server": 11.17.0
+    "@trpc/server": 11.18.0
     typescript: ">=5.7.2"
   bin:
     intent: bin/intent.js
-  checksum: 10c0/f18061128f28a5a5e27551d5facf11e10a591a2e8e28d93601cebf541025f3aee459500d252343e25e4d7e913623cdd3455e1fab23979cb83e174cecd40e3163
+  checksum: 10c0/5f508ef927f8d2fb86016d367c1368e9a628b24088a366db6d2b806e1fd481e3a6791411053afc3985067bf651d39fe91d9fb10e40acab3ec625d6820071fa67
   languageName: node
   linkType: hard
 
-"@trpc/next@npm:11.17.0":
-  version: 11.17.0
-  resolution: "@trpc/next@npm:11.17.0"
+"@trpc/next@npm:11.18.0":
+  version: 11.18.0
+  resolution: "@trpc/next@npm:11.18.0"
   peerDependencies:
     "@tanstack/react-query": ^5.59.15
-    "@trpc/client": 11.17.0
-    "@trpc/react-query": 11.17.0
-    "@trpc/server": 11.17.0
+    "@trpc/client": 11.18.0
+    "@trpc/react-query": 11.18.0
+    "@trpc/server": 11.18.0
     next: "*"
     react: ">=16.8.0"
     react-dom: ">=16.8.0"
@@ -2271,31 +2271,31 @@ __metadata:
       optional: true
   bin:
     intent: bin/intent.js
-  checksum: 10c0/b24c75116e5fcba185b122985f4e9c40784d88e4b83f17b1db40822ef28d9c7102e89ca74977c7c995f7d449f6453a688b9e43e904cfeb599c77d97f000f8a7e
+  checksum: 10c0/5c2b5eca9cd09912cb2121ce74494580cb8c3914ccb4b70f467b9e3ad925f7be62b510e2bda1a0ae577b941f71b4fb402ebbb2447cc511af84b3f10343164558
   languageName: node
   linkType: hard
 
-"@trpc/react-query@npm:11.17.0":
-  version: 11.17.0
-  resolution: "@trpc/react-query@npm:11.17.0"
+"@trpc/react-query@npm:11.18.0":
+  version: 11.18.0
+  resolution: "@trpc/react-query@npm:11.18.0"
   peerDependencies:
     "@tanstack/react-query": ^5.80.3
-    "@trpc/client": 11.17.0
-    "@trpc/server": 11.17.0
+    "@trpc/client": 11.18.0
+    "@trpc/server": 11.18.0
     react: ">=18.2.0"
     typescript: ">=5.7.2"
-  checksum: 10c0/4ab1c3c124a832b00b5d6acc4c1a53b80cdcbe3b6d192508cd588fe2a3c03441f196b0c18341b2f4b5baefa4986e4d2ebc6ded11011ac3a7972671fe790002f9
+  checksum: 10c0/ff5df9eaa41afafd78004ddc18ae7279c337305a55b649d0a4f0096f3b35f1ac732b3456531570640b2000d29922fc9b10244091765657d56b18d0d1428d1111
   languageName: node
   linkType: hard
 
-"@trpc/server@npm:11.17.0":
-  version: 11.17.0
-  resolution: "@trpc/server@npm:11.17.0"
+"@trpc/server@npm:11.18.0":
+  version: 11.18.0
+  resolution: "@trpc/server@npm:11.18.0"
   peerDependencies:
     typescript: ">=5.7.2"
   bin:
     intent: bin/intent.js
-  checksum: 10c0/84c1a1db748d69f248ef52631e75d4f0fe029f60990b6fdca28356a52d73f8881ab6c0e1ea56026e5a1ab7bbd97d710bc99351290407f5601620bafdfeacf06f
+  checksum: 10c0/4cf53c786c4c0c2c15e11d8ea3c05093ad27c40c8663fc0d23b31ecdbbb58a2003e528c15661058526b15079f9612bf561daf79ef3f4f87f43ef22fa7af23640
   languageName: node
   linkType: hard
 
@@ -2703,21 +2703,22 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@willbooster/wb@npm:13.22.7":
-  version: 13.22.7
-  resolution: "@willbooster/wb@npm:13.22.7"
+"@willbooster/wb@npm:13.28.8":
+  version: 13.28.8
+  resolution: "@willbooster/wb@npm:13.28.8"
   dependencies:
     chalk: "npm:5.6.2"
     dotenv: "npm:17.4.2"
     dotenv-expand: "npm:13.0.0"
     fastest-levenshtein: "npm:1.0.16"
     globby: "npm:16.2.0"
+    jsonc-parser: "npm:3.3.1"
     kill-port: "npm:2.0.1"
     minimal-promise-pool: "npm:6.0.2"
     yargs: "npm:18.0.0"
   bin:
     wb: bin/index.js
-  checksum: 10c0/0f42fd53caecd6b3dbeb61a47e6fa1042f2b2dc0b483bf68b8b27ffcc027c14fcaa6307c00f81233ffcd5518a3ec58c1c7c60eb19e08c43320c150c18523d5b5
+  checksum: 10c0/96866e0d70829b55fa94ccb69c048907b035b20bced61e17dfe526929d18d1db7dbf8f1e9f1fd1ea229f5f4b4de255cfcdcde3cb960ba35f7a886dd516ced687
   languageName: node
   linkType: hard
 
@@ -4699,11 +4700,11 @@ __metadata:
   languageName: node
   linkType: hard
 
-"framer-motion@npm:12.40.0":
-  version: 12.40.0
-  resolution: "framer-motion@npm:12.40.0"
+"framer-motion@npm:12.42.2":
+  version: 12.42.2
+  resolution: "framer-motion@npm:12.42.2"
   dependencies:
-    motion-dom: "npm:^12.40.0"
+    motion-dom: "npm:^12.42.2"
     motion-utils: "npm:^12.39.0"
     tslib: "npm:^2.4.0"
   peerDependencies:
@@ -4717,7 +4718,7 @@ __metadata:
       optional: true
     react-dom:
       optional: true
-  checksum: 10c0/a1d26908d6661028fcdba0cf200fca18927a4d4eae0b1e64c37dfb7fdea9da66a8991abd0007079e98687060ba9c83db55620c238bc363106a24ff411d22f533
+  checksum: 10c0/2e514e0e303c0c01bc7d6a1028f7722ec17fc307922c6770a8dc5f7782521c60254f9c265329b887a29b32e2c730742328ecae468be626406afa5db1e6c0aa01
   languageName: node
   linkType: hard
 
@@ -5780,6 +5781,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"jsonc-parser@npm:3.3.1":
+  version: 3.3.1
+  resolution: "jsonc-parser@npm:3.3.1"
+  checksum: 10c0/269c3ae0a0e4f907a914bf334306c384aabb9929bd8c99f909275ebd5c2d3bc70b9bcd119ad794f339dec9f24b6a4ee9cd5a8ab2e6435e730ad4075388fc2ab6
+  languageName: node
+  linkType: hard
+
 "jsonfile@npm:^6.0.1":
   version: 6.2.0
   resolution: "jsonfile@npm:6.2.0"
@@ -5843,16 +5851,17 @@ __metadata:
   languageName: node
   linkType: hard
 
-"jwks-rsa@npm:4.0.1":
-  version: 4.0.1
-  resolution: "jwks-rsa@npm:4.0.1"
+"jwks-rsa@npm:4.1.0":
+  version: 4.1.0
+  resolution: "jwks-rsa@npm:4.1.0"
   dependencies:
     "@types/jsonwebtoken": "npm:^9.0.4"
     debug: "npm:^4.3.4"
     jose: "npm:^6.1.3"
     limiter: "npm:^1.1.5"
+    lru-cache: "npm:^11.0.0"
     lru-memoizer: "npm:^3.0.0"
-  checksum: 10c0/aeca4b1de959707002150556f4f08ed3677fe9dd12bd0be0aa01220a86b88867357c7d2241f4975de9f53125d41cc3f5e4c5e929a8922f257b61634b208d7e3c
+  checksum: 10c0/09d03901705fdaaec4ef4dbfdabdcdd91c669b667e1bf10ac765bde3ef4c90f91d53e60ce4e7bfbec715f2490d25f6e0c58c6f75dff800399a2e1b9140e317b2
   languageName: node
   linkType: hard
 
@@ -6764,12 +6773,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"motion-dom@npm:^12.40.0":
-  version: 12.40.0
-  resolution: "motion-dom@npm:12.40.0"
+"motion-dom@npm:^12.42.2":
+  version: 12.42.2
+  resolution: "motion-dom@npm:12.42.2"
   dependencies:
     motion-utils: "npm:^12.39.0"
-  checksum: 10c0/79da846a36fd5f6762a0fcfa6e0b7128e4d58f7c07d1467a9f789a9cd0b5adbef9bfbde75760901a13cf2bddd9b31e93e4348a714f570c45ca1e2bfabd22859e
+  checksum: 10c0/1bcee88df706e3aaa4e5b8e7d2ba0efd8e2304c142e7541411bbd6f03b0fbe8d25883ec157905fdebf284f51db02008245f6d4653d20a97de9acf44bbb7be79f
   languageName: node
   linkType: hard
 
@@ -9174,9 +9183,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"sort-package-json@npm:3.6.1":
-  version: 3.6.1
-  resolution: "sort-package-json@npm:3.6.1"
+"sort-package-json@npm:3.7.1":
+  version: 3.7.1
+  resolution: "sort-package-json@npm:3.7.1"
   dependencies:
     detect-indent: "npm:^7.0.2"
     detect-newline: "npm:^4.0.1"
@@ -9187,7 +9196,7 @@ __metadata:
     tinyglobby: "npm:^0.2.15"
   bin:
     sort-package-json: cli.js
-  checksum: 10c0/169ea6b8fa233b77ff93f928c73392cbd53573b1faec24692b7b5afdd3487f1b1c3f390467628385dd64e3e01632b7be0c6b380fbb471c70d00c4c7884f44916
+  checksum: 10c0/2403faf859439c10a0562b02c34ff28480171fa8f3991bac6fe8652c8996cfe04f97409e220185f64eefb4c05a5fd83ba43a92d1c8d52a4cdb635bc81113faba
   languageName: node
   linkType: hard
 
@@ -9817,11 +9826,11 @@ __metadata:
     "@emotion/styled": "npm:11.14.1"
     "@prisma/client": "npm:6.19.2"
     "@rvf/set-get": "npm:7.0.3"
-    "@tanstack/react-query": "npm:5.100.14"
-    "@trpc/client": "npm:11.17.0"
-    "@trpc/next": "npm:11.17.0"
-    "@trpc/react-query": "npm:11.17.0"
-    "@trpc/server": "npm:11.17.0"
+    "@tanstack/react-query": "npm:5.101.2"
+    "@trpc/client": "npm:11.18.0"
+    "@trpc/next": "npm:11.18.0"
+    "@trpc/react-query": "npm:11.18.0"
+    "@trpc/server": "npm:11.18.0"
     "@types/jsonwebtoken": "npm:9.0.10"
     "@types/node": "npm:25.9.5"
     "@types/react-dom": "npm:19.2.3"
@@ -9832,7 +9841,7 @@ __metadata:
     "@willbooster/oxlint-config": "npm:1.4.8"
     "@willbooster/shared-lib": "npm:7.4.21"
     "@willbooster/shared-lib-react": "npm:5.3.19"
-    "@willbooster/wb": "npm:13.22.7"
+    "@willbooster/wb": "npm:13.28.8"
     at-decorators: "npm:7.1.2"
     babel-plugin-react-compiler: "npm:1.0.0"
     concurrently: "npm:10.0.3"
@@ -9840,10 +9849,10 @@ __metadata:
     dayjs: "npm:1.11.21"
     dotenv-cli: "npm:11.0.0"
     fast-deep-equal: "npm:3.1.3"
-    framer-motion: "npm:12.40.0"
+    framer-motion: "npm:12.42.2"
     immer: "npm:11.1.15"
     jsonwebtoken: "npm:9.0.3"
-    jwks-rsa: "npm:4.0.1"
+    jwks-rsa: "npm:4.1.0"
     lefthook: "npm:2.1.10"
     next: "npm:16.2.11"
     nextjs-cors: "npm:2.2.1"
@@ -9863,7 +9872,7 @@ __metadata:
     seedrandom: "npm:3.0.5"
     semantic-release: "npm:25.0.7"
     server-only: "npm:0.0.1"
-    sort-package-json: "npm:3.6.1"
+    sort-package-json: "npm:3.7.1"
     superjson: "npm:2.2.6"
     supertokens-auth-react: "npm:0.51.2"
     supertokens-node: "npm:24.0.2"
