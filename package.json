@@ -19,7 +19,7 @@
     "db-restore": "wb prisma restore",
     "db-view": "wb prisma studio",
     "db-view-restored": "wb prisma studio --restored",
-    "deploy": "wb optimizeForDockerBuild --outside && fly deploy -c fly-${WB_ENV}.toml --build-arg ARCH=x86_64 --build-arg WB_ENV=${WB_ENV} --build-arg WB_VERSION=${WB_VERSION}",
+    "deploy": "wb optimizeForDockerBuild --outside && fly deploy --local-only -c fly-${WB_ENV}.toml --build-arg ARCH=x86_64 --build-arg WB_ENV=${WB_ENV} --build-arg WB_VERSION=${WB_VERSION}",
     "format": "sort-package-json && yarn format-code",
     "format-code": "oxfmt --write --no-error-on-unmatched-pattern . '!**/package.json'",
     "gen-code": "prisma generate && chakra-cli tokens src/theme.ts",
