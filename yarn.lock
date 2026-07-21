@@ -9183,9 +9183,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"sort-package-json@npm:3.7.1":
-  version: 3.7.1
-  resolution: "sort-package-json@npm:3.7.1"
+"sort-package-json@npm:4.0.0":
+  version: 4.0.0
+  resolution: "sort-package-json@npm:4.0.0"
   dependencies:
     detect-indent: "npm:^7.0.2"
     detect-newline: "npm:^4.0.1"
@@ -9196,7 +9196,7 @@ __metadata:
     tinyglobby: "npm:^0.2.15"
   bin:
     sort-package-json: cli.js
-  checksum: 10c0/2403faf859439c10a0562b02c34ff28480171fa8f3991bac6fe8652c8996cfe04f97409e220185f64eefb4c05a5fd83ba43a92d1c8d52a4cdb635bc81113faba
+  checksum: 10c0/81173fc152581f0c64846a651b5fc838b3660e422519bda34336845e3111f0d9744e8e24fa0a73e281c1ec9090c793ab25ebd7fdce0bfa404ae3607a2192eb1f
   languageName: node
   linkType: hard
 
@@ -9872,7 +9872,7 @@ __metadata:
     seedrandom: "npm:3.0.5"
     semantic-release: "npm:25.0.7"
     server-only: "npm:0.0.1"
-    sort-package-json: "npm:3.7.1"
+    sort-package-json: "npm:4.0.0"
     superjson: "npm:2.2.6"
     supertokens-auth-react: "npm:0.51.2"
     supertokens-node: "npm:24.0.2"
