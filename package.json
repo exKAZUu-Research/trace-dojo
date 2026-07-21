@@ -53,7 +53,7 @@
     "@trpc/next": "11.18.0",
     "@trpc/react-query": "11.18.0",
     "@trpc/server": "11.18.0",
-    "@willbooster/shared-lib": "7.4.21",
+    "@willbooster/shared-lib": "8.2.0",
     "@willbooster/shared-lib-react": "5.3.19",
     "at-decorators": "7.1.2",
     "dayjs": "1.11.21",
