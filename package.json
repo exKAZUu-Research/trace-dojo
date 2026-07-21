@@ -99,7 +99,6 @@
     "@willbooster/oxlint-config": "1.4.8",
     "@willbooster/wb": "13.22.7",
     "babel-plugin-react-compiler": "1.0.0",
-    "build-ts": "17.1.21",
     "concurrently": "10.0.3",
     "conventional-changelog-conventionalcommits": "9.3.1",
     "lefthook": "2.1.9",
@@ -118,6 +117,6 @@
     "access": "public"
   },
   "prisma": {
-    "seed": "build-ts run prisma/seed.mts"
+    "seed": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON prisma/seed.mts"
   }
 }
