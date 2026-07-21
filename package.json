@@ -54,7 +54,7 @@
     "@trpc/react-query": "11.18.0",
     "@trpc/server": "11.18.0",
     "@willbooster/shared-lib": "8.2.0",
-    "@willbooster/shared-lib-react": "5.3.19",
+    "@willbooster/shared-lib-react": "6.2.0",
     "at-decorators": "7.1.2",
     "dayjs": "1.11.21",
     "dotenv-cli": "11.0.0",
