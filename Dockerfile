@@ -38,6 +38,7 @@ RUN bash ./bash/configure-yarn.sh \
     && yarn \
     # yarn install fails for some reason, so run it twice.
     && yarn \
+    && yarn prisma generate \
     && yarn run build/core \
     && cat .next/BUILD_ID \
     && yarn wb optimizeForDockerBuild \
