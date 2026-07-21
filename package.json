@@ -39,7 +39,7 @@
   "resolutions": {
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "react-is": "19.2.6"
+    "react-is": "19.2.8"
   },
   "dependencies": {
     "@chakra-ui/next-js": "2.4.2",
@@ -113,7 +113,7 @@
     "vitest": "4.1.8",
     "wait-on": "9.0.10"
   },
-  "packageManager": "yarn@4.15.0",
+  "packageManager": "yarn@4.17.1",
   "publishConfig": {
     "access": "public"
   },
