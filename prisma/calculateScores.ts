@@ -2,20 +2,26 @@
  * 1. `WB_ENV=production yarn db-restore`.
  * 2. Update `deadLines`.
  * 3. Update `header` via `CSVインポート` -> `雛形ダウンロード`.
- * 4. Update `validStudentIds` via `CSVエクスポート`.
+ * 4. Put the `CSVエクスポート` result at `prisma/validStudentIds.csv`.
  * 5. Create `.env.restored` based on `.env.production`.
  * 6. `yarn calculate-score`.
  * */
 
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 import { PrismaClient } from '@prisma/client';
+import { parse } from 'csv-parse/sync';
 import SuperTokensNode from 'supertokens-node';
 
 import { ensureSuperTokensInit } from '@/infrastructures/supertokens/backendConfig';
 import { courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
 
 const prisma = new PrismaClient();
+const defaultValidStudentIdsCsvPath = 'students.csv';
+
+// 「雛形ダウンロード」を押して、最新のヘッダーを反映させること。
+const header =
+  '管理ID,単位認定試験_最終点,小テスト_最終点,ディスカッション_最終点,レポート_最終点,英語_最終点,相互評価_最終点,プログラミング_最終点,LTI_最終点,その他1_最終点,その他2_最終点,その他3_最終点,その他4_最終点,その他5_最終点,備考\n';
 
 const deadLines = {
   tuBeginner1: [
@@ -42,23 +48,18 @@ const deadLines = {
   ],
 };
 
-const validStudentIds = new Set(
-  `
-<ここに改行区切りで学籍番号の一覧を記載する。>
-`.split(/\s+/)
-);
-
 async function main(): Promise<void> {
   ensureSuperTokensInit();
+
+  const validStudentIdsCsvPath = process.argv[2] ?? defaultValidStudentIdsCsvPath;
+  const validStudentIds = loadValidStudentIds(validStudentIdsCsvPath, header);
+  console.info(`Loaded valid student IDs from ${validStudentIdsCsvPath}:`, validStudentIds.size);
 
   const courseId = Object.keys(deadLines)[0] as keyof typeof deadLines;
   const users = await prisma.user.findMany();
   console.info('Fetched users:', users.length);
   const finalDeadline = deadLines[courseId][8];
 
-  // 「雛形ダウンロード」を押して、最新のヘッダーを反映させること。
-  const header =
-    '管理ID,単位認定試験_最終点,小テスト_最終点,ディスカッション_最終点,レポート_最終点,英語_最終点,相互評価_最終点,プログラミング_最終点,LTI_最終点,その他1_最終点,その他2_最終点,その他3_最終点,その他4_最終点,その他5_最終点,備考\n';
   console.log(header.trim());
   writeFileSync('grading.csv', header);
 
@@ -152,6 +153,40 @@ async function main(): Promise<void> {
     );
     writeFileSync('grading.csv', record.row, { flag: 'a' });
   }
+}
+
+function loadValidStudentIds(csvPath: string, expectedHeader: string): Set<string> {
+  const rows = parseCsvRows(readFileSync(csvPath, 'utf8'));
+  const studentIdColumnIndex = parseCsvRows(expectedHeader)[0]?.indexOf('管理ID') ?? 0;
+
+  const studentIds = new Set<string>();
+  for (const row of rows.slice(1)) {
+    const studentId = normalizeStudentId(row[studentIdColumnIndex]);
+    if (studentId) {
+      studentIds.add(studentId);
+    }
+  }
+
+  if (studentIds.size === 0) {
+    throw new Error(`No valid student IDs found in ${csvPath}`);
+  }
+  return studentIds;
+}
+
+function normalizeStudentId(value: string | undefined): string {
+  return (
+    value
+      ?.trim()
+      .replace(/^\uFEFF/, '')
+      .toUpperCase() ?? ''
+  );
+}
+
+function parseCsvRows(content: string): string[][] {
+  return parse(content, {
+    bom: true,
+    skip_empty_lines: true,
+  }) as string[][];
 }
 
 // eslint-disable-next-line unicorn/prefer-top-level-await
