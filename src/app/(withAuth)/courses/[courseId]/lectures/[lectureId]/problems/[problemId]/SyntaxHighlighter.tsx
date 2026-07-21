@@ -62,10 +62,10 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
             }
             // previousFocusLine と currentFocusLine が等しくなるケースがある。
             if (lineNumber === previousFocusLine) {
-              style.backgroundColor = '#feebc8' /* orange.100 */;
+              style.backgroundColor = '#feebc8'; /* orange.100 */
             }
             if (lineNumber === currentFocusLine) {
-              style.border = '4px solid #f56565' /* red.500 */;
+              style.border = '4px solid #f56565'; /* red.500 */
               style.padding = '0 calc(1rem - 4px)'; // Adjust margin to compensate for border width
             }
             return { style };
