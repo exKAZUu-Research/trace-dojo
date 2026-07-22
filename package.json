@@ -108,7 +108,7 @@
     "oxlint-tsgolint": "0.24.0",
     "semantic-release": "25.0.7",
     "sort-package-json": "4.0.0",
-    "typescript": "6.0.3",
+    "typescript": "7.0.2",
     "vitest": "4.1.10",
     "wait-on": "9.0.10"
   },
