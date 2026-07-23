@@ -2843,22 +2843,24 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@willbooster/wb@npm:13.28.8":
-  version: 13.28.8
-  resolution: "@willbooster/wb@npm:13.28.8"
+"@willbooster/wb@npm:16.1.1":
+  version: 16.1.1
+  resolution: "@willbooster/wb@npm:16.1.1"
   dependencies:
     chalk: "npm:5.6.2"
     dotenv: "npm:17.4.2"
     dotenv-expand: "npm:13.0.0"
+    fast-glob: "npm:3.3.3"
     fastest-levenshtein: "npm:1.0.16"
     globby: "npm:16.2.0"
     jsonc-parser: "npm:3.3.1"
     kill-port: "npm:2.0.1"
     minimal-promise-pool: "npm:6.0.2"
+    semver: "npm:7.8.5"
     yargs: "npm:18.0.0"
   bin:
     wb: bin/index.js
-  checksum: 10c0/96866e0d70829b55fa94ccb69c048907b035b20bced61e17dfe526929d18d1db7dbf8f1e9f1fd1ea229f5f4b4de255cfcdcde3cb960ba35f7a886dd516ced687
+  checksum: 10c0/32dfabfe103b76b0d3b8cfa9b4a7a3526b7f84933644e15803a0fae210446bfc8aa4760aea2084f4ee3b98eb58fd71348e043e2127ff90738cab572f022287ba
   languageName: node
   linkType: hard
 
@@ -4638,7 +4640,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"fast-glob@npm:^3.3.3":
+"fast-glob@npm:3.3.3, fast-glob@npm:^3.3.3":
   version: 3.3.3
   resolution: "fast-glob@npm:3.3.3"
   dependencies:
@@ -9053,6 +9055,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"semver@npm:7.8.5":
+  version: 7.8.5
+  resolution: "semver@npm:7.8.5"
+  bin:
+    semver: bin/semver.js
+  checksum: 10c0/b1f3127a5be8125a94f37188b361c212466c292c6910adce3ec106cff5dc211ccaedc4739c11bb70fda59d6fc1f040a9bca289f4e093451521a2372e5231fe0c
+  languageName: node
+  linkType: hard
+
 "semver@npm:^7.1.1, semver@npm:^7.1.2, semver@npm:^7.3.2, semver@npm:^7.3.5, semver@npm:^7.3.7, semver@npm:^7.5.2, semver@npm:^7.5.3, semver@npm:^7.5.4, semver@npm:^7.7.2, semver@npm:^7.7.3":
   version: 7.7.3
   resolution: "semver@npm:7.7.3"
@@ -10002,7 +10013,7 @@ __metadata:
     "@willbooster/oxlint-config": "npm:1.4.8"
     "@willbooster/shared-lib": "npm:8.2.0"
     "@willbooster/shared-lib-react": "npm:6.2.0"
-    "@willbooster/wb": "npm:13.28.8"
+    "@willbooster/wb": "npm:16.1.1"
     at-decorators: "npm:7.1.2"
     babel-plugin-react-compiler: "npm:1.0.0"
     concurrently: "npm:10.0.3"
