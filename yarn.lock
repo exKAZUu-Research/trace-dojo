@@ -2836,10 +2836,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@willbooster/shared-lib@npm:8.3.0":
-  version: 8.3.0
-  resolution: "@willbooster/shared-lib@npm:8.3.0"
-  checksum: 10c0/720dae8937c164733ad3c0a0367c1f0c75dbc5051df8be436ee4f24f74abd997db64a51d3d9c95625f85031785b35a842f6e5500fc91e79a10ea96fa7e5d8eff
+"@willbooster/shared-lib@npm:10.0.0":
+  version: 10.0.0
+  resolution: "@willbooster/shared-lib@npm:10.0.0"
+  checksum: 10c0/d6bc8a2ee9b23ef0b74e2299af695d21697076d49b0d94d193d4c5b6e5a6ac5cac0224d5c91642e654cf4065589e1d6ea637b86b33eeebcf81ae64c36a694be1
   languageName: node
   linkType: hard
 
@@ -10000,7 +10000,7 @@ __metadata:
     "@typescript/native-preview": "npm:7.0.0-dev.20260707.2"
     "@willbooster/oxfmt-config": "npm:1.2.2"
     "@willbooster/oxlint-config": "npm:1.4.8"
-    "@willbooster/shared-lib": "npm:8.3.0"
+    "@willbooster/shared-lib": "npm:10.0.0"
     "@willbooster/shared-lib-react": "npm:6.3.0"
     "@willbooster/wb": "npm:13.28.8"
     at-decorators: "npm:7.1.2"
