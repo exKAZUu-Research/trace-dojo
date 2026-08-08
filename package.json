@@ -54,7 +54,7 @@
     "@trpc/react-query": "11.18.0",
     "@trpc/server": "11.18.0",
     "@willbooster/shared-lib": "10.0.0",
-    "@willbooster/shared-lib-react": "6.3.0",
+    "@willbooster/shared-lib-react": "7.0.3",
     "@willbooster/wb": "13.28.8",
     "at-decorators": "7.1.2",
     "dayjs": "1.11.21",

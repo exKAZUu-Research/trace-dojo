@@ -2826,13 +2826,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@willbooster/shared-lib-react@npm:6.3.0":
-  version: 6.3.0
-  resolution: "@willbooster/shared-lib-react@npm:6.3.0"
+"@willbooster/shared-lib-react@npm:7.0.3":
+  version: 7.0.3
+  resolution: "@willbooster/shared-lib-react@npm:7.0.3"
   peerDependencies:
     react: ~19.2.0
     react-dom: ~19.2.0
-  checksum: 10c0/a147bf2b14c5bfd30d20d3521fee9185d93c2a5312514d2aa969fbc510c43b92942f6f7b2a0095ee78fb712e380e580cd28fbbbb5c7412d56b5de142e8e3e584
+  checksum: 10c0/a99fcf51619677072600071e5f02980b7b9cfb9cec259ae90167aa05fb8abbcd0a22a8b8e21c7151b92af309aeedba5ef604d0092542dd9c186958e31d9fb625
   languageName: node
   linkType: hard
 
@@ -10001,7 +10001,7 @@ __metadata:
     "@willbooster/oxfmt-config": "npm:1.2.2"
     "@willbooster/oxlint-config": "npm:1.4.8"
     "@willbooster/shared-lib": "npm:10.0.0"
-    "@willbooster/shared-lib-react": "npm:6.3.0"
+    "@willbooster/shared-lib-react": "npm:7.0.3"
     "@willbooster/wb": "npm:13.28.8"
     at-decorators: "npm:7.1.2"
     babel-plugin-react-compiler: "npm:1.0.0"
