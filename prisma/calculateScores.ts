@@ -49,6 +49,7 @@ const deadLines = {
 };
 
 async function main(): Promise<void> {
+  writeFileSync('grading.csv', header);
   ensureSuperTokensInit();
 
   const validStudentIdsCsvPath = process.env.STUDENTS_CSV_PATH ?? defaultValidStudentIdsCsvPath;
@@ -145,7 +146,6 @@ async function main(): Promise<void> {
   }
 
   console.log(header.trim());
-  writeFileSync('grading.csv', header);
 
   // Sort records by studentId
   records.sort((a, b) => a.studentId.localeCompare(b.studentId));
