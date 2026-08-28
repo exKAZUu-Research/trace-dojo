@@ -7,7 +7,7 @@
  * 6. `yarn calculate-score`.
  * */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 
 import { PrismaClient } from '@prisma/client';
 import { parse } from 'csv-parse/sync';
@@ -18,6 +18,9 @@ import { courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
 
 const prisma = new PrismaClient();
 const defaultValidStudentIdsCsvPath = 'students.csv';
+const gradingCsvPath = 'grading.csv';
+const previousGradingCsvPath = 'grading.previous.csv';
+const temporaryGradingCsvPath = 'grading.tmp.csv';
 
 // 「雛形ダウンロード」を押して、最新のヘッダーを反映させること。
 const header =
@@ -48,8 +51,10 @@ const deadLines = {
   ],
 };
 
+interface ScoreRecord { shouldWarn: boolean; studentId: string; row: string; solvedProblems: number }
+
 async function main(): Promise<void> {
-  writeFileSync('grading.csv', header);
+  preservePreviousGradingCsv();
   ensureSuperTokensInit();
 
   const validStudentIdsCsvPath = process.env.STUDENTS_CSV_PATH ?? defaultValidStudentIdsCsvPath;
@@ -61,7 +66,7 @@ async function main(): Promise<void> {
   console.info('Fetched users:', users.length);
   const finalDeadline = deadLines[courseId][8];
 
-  const records: { shouldWarn: boolean; studentId: string; row: string; solvedProblems: number }[] = [];
+  const records: ScoreRecord[] = [];
 
   for (const user of users) {
     let email = user.displayName;
@@ -141,22 +146,36 @@ async function main(): Promise<void> {
     process.stdout.write('.');
   }
 
-  if (records.length === 0) {
-    throw new Error(`No students from ${validStudentIdsCsvPath} matched any user`);
+  const matchedStudentIds = new Set(records.map(({ studentId }) => studentId));
+  const unmatchedStudentIds = [...validStudentIds].filter((studentId) => !matchedStudentIds.has(studentId));
+  if (unmatchedStudentIds.length > 0) {
+    throw new Error(
+      `No users matched the following student IDs from ${validStudentIdsCsvPath}: ${unmatchedStudentIds.join(', ')}`
+    );
   }
 
   console.log(header.trim());
 
   // Sort records by studentId
   records.sort((a, b) => a.studentId.localeCompare(b.studentId));
+  writeGradingCsv(records);
 
-  // Write sorted records to file
   for (const record of records) {
     console.log(
       `${record.shouldWarn ? '!!! ' : ''}${record.row.trim()}: ${record.solvedProblems} problems solved${record.shouldWarn ? ' !!!' : ''}`
     );
-    writeFileSync('grading.csv', record.row, { flag: 'a' });
   }
+}
+
+function preservePreviousGradingCsv(): void {
+  if (existsSync(gradingCsvPath)) {
+    renameSync(gradingCsvPath, previousGradingCsvPath);
+  }
+}
+
+function writeGradingCsv(records: ScoreRecord[]): void {
+  writeFileSync(temporaryGradingCsvPath, `${header}${records.map(({ row }) => row).join('')}`);
+  renameSync(temporaryGradingCsvPath, gradingCsvPath);
 }
 
 function loadValidStudentIds(csvPath: string): Set<string> {
