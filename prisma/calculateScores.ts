@@ -2,7 +2,7 @@
  * 1. `WB_ENV=production yarn db-restore`.
  * 2. Update `deadLines`.
  * 3. Update `header` via `CSVインポート` -> `雛形ダウンロード`.
- * 4. Put the `CSVエクスポート` result at `prisma/validStudentIds.csv`.
+ * 4. Put the `CSVエクスポート` result at `students.csv`.
  * 5. Create `.env.restored` based on `.env.production`.
  * 6. `yarn calculate-score`.
  * */
