@@ -74,6 +74,7 @@ async function main(): Promise<void> {
 
   const records: ScoreRecord[] = [];
   const ambiguousStudentIds = new Set<string>();
+  const unexpectedActiveStudentIds = new Set<string>();
 
   for (const user of users) {
     const email = await resolveUserEmail(user.id);
@@ -86,7 +87,11 @@ async function main(): Promise<void> {
       console.warn(`Skipping course-active user ${user.id} with unsupported email domain: ${email}`);
       continue;
     }
-    if (!validStudentIds.has(studentId)) continue;
+    if (!validStudentIds.has(studentId)) {
+      unexpectedActiveStudentIds.add(studentId);
+      console.warn(`Skipping course-active student ID not found in the roster: ${studentId}`);
+      continue;
+    }
 
     let totalScore = 0;
     let solvedProblems = 0;
@@ -149,11 +154,8 @@ async function main(): Promise<void> {
     process.stdout.write('.');
   }
 
-  if (records.length === 0) {
-    throw new Error(`No users with course activity matched student IDs from ${validStudentIdsCsvPath}`);
-  }
-
   const matchedStudentIds = new Set(records.map(({ studentId }) => studentId));
+  const unmatchedStudentIds = [...validStudentIds].filter((studentId) => !matchedStudentIds.has(studentId));
   const ambiguousUnmatchedStudentIds = [...ambiguousStudentIds].filter(
     (studentId) => !matchedStudentIds.has(studentId)
   );
@@ -163,7 +165,16 @@ async function main(): Promise<void> {
     );
   }
 
-  const unmatchedStudentIds = [...validStudentIds].filter((studentId) => !matchedStudentIds.has(studentId));
+  if (unexpectedActiveStudentIds.size > 0 && unmatchedStudentIds.length > 0) {
+    throw new Error(
+      `Cannot safely match course-active student IDs outside the roster (${[...unexpectedActiveStudentIds].join(', ')}) while roster IDs lack activity (${unmatchedStudentIds.join(', ')})`
+    );
+  }
+
+  if (records.length === 0) {
+    throw new Error(`No users with course activity matched student IDs from ${validStudentIdsCsvPath}`);
+  }
+
   for (const studentId of unmatchedStudentIds) {
     console.warn(`No user matched ${studentId}; writing a zero score`);
     records.push({ shouldWarn: true, studentId, row: createScoreRow(studentId, 0), solvedProblems: 0 });
