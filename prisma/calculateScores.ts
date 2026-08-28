@@ -7,7 +7,7 @@
  * 6. `yarn calculate-score`.
  * */
 
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 
 import { PrismaClient } from '@prisma/client';
 import { parse } from 'csv-parse/sync';
@@ -66,26 +66,24 @@ async function main(): Promise<void> {
   console.info(`Loaded valid student IDs from ${validStudentIdsCsvPath}:`, validStudentIds.size);
 
   const courseId = Object.keys(deadLines)[0] as keyof typeof deadLines;
-  const users = await prisma.user.findMany();
-  console.info('Fetched users:', users.length);
+  const users = await prisma.user.findMany({
+    where: { problemSessions: { some: { courseId } } },
+  });
+  console.info('Fetched users with course activity:', users.length);
   const finalDeadline = deadLines[courseId][8];
 
   const records: ScoreRecord[] = [];
 
   for (const user of users) {
-    let email = user.displayName;
-    try {
-      const superTokensUser = await SuperTokensNode.getUser(user.id);
-      if (superTokensUser?.emails[0]) {
-        email = superTokensUser.emails[0];
-      }
-    } catch (error) {
-      throw new Error(`Failed to get email for user ${user.id}`, { cause: error });
-    }
-    if (!email.toLowerCase().endsWith('@s.internet.ac.jp')) continue;
-
+    const email = await resolveUserEmail(user.id);
     const atIndex = email.indexOf('@');
     const studentId = (atIndex > 0 ? email.slice(0, Math.max(0, email.indexOf('@'))) : email).toUpperCase();
+    if (!email.toLowerCase().endsWith('@s.internet.ac.jp')) {
+      if (validStudentIds.has(studentId)) {
+        throw new Error(`Roster student ${studentId} has an unsupported email domain: ${email}`);
+      }
+      continue;
+    }
     if (!validStudentIds.has(studentId)) continue;
 
     let totalScore = 0;
@@ -149,6 +147,10 @@ async function main(): Promise<void> {
     process.stdout.write('.');
   }
 
+  if (records.length === 0) {
+    throw new Error(`No users with course activity matched student IDs from ${validStudentIdsCsvPath}`);
+  }
+
   const matchedStudentIds = new Set(records.map(({ studentId }) => studentId));
   const unmatchedStudentIds = [...validStudentIds].filter((studentId) => !matchedStudentIds.has(studentId));
   for (const studentId of unmatchedStudentIds) {
@@ -169,20 +171,39 @@ async function main(): Promise<void> {
   }
 }
 
+async function resolveUserEmail(userId: string): Promise<string> {
+  let superTokensUser;
+  try {
+    superTokensUser = await SuperTokensNode.getUser(userId);
+  } catch (error) {
+    throw new Error(`Failed to get email for user ${userId}`, { cause: error });
+  }
+
+  const email = superTokensUser?.emails[0];
+  if (!email) {
+    throw new Error(`No email found for user ${userId}`);
+  }
+  return email;
+}
+
 function createScoreRow(studentId: string, score: number): string {
   return `${studentId},${score},,,,,,,,,,,,,\n`;
 }
 
 function preservePreviousGradingCsv(): void {
   if (existsSync(gradingCsvPath)) {
-    renameSync(gradingCsvPath, previousGradingCsvPath);
+    copyFileSync(gradingCsvPath, previousGradingCsvPath);
   }
 }
 
 function writeGradingCsv(records: ScoreRecord[]): void {
-  writeFileSync(temporaryGradingCsvPath, `${header}${records.map(({ row }) => row).join('')}`);
-  preservePreviousGradingCsv();
-  renameSync(temporaryGradingCsvPath, gradingCsvPath);
+  try {
+    writeFileSync(temporaryGradingCsvPath, `${header}${records.map(({ row }) => row).join('')}`);
+    preservePreviousGradingCsv();
+    renameSync(temporaryGradingCsvPath, gradingCsvPath);
+  } finally {
+    rmSync(temporaryGradingCsvPath, { force: true });
+  }
 }
 
 function loadValidStudentIds(csvPath: string): Set<string> {
