@@ -2,7 +2,7 @@
  * 1. `WB_ENV=production yarn db-restore`.
  * 2. Update `deadLines`.
  * 3. Update `header` via `CSVインポート` -> `雛形ダウンロード`.
- * 4. Put the `CSVエクスポート` result at `students.csv`.
+ * 4. Put the `CSVエクスポート` result at `students.csv`, or set `STUDENTS_CSV_PATH` to another path.
  * 5. Create `.env.restored` based on `.env.production`.
  * 6. `yarn calculate-score`.
  * */
@@ -51,17 +51,14 @@ const deadLines = {
 async function main(): Promise<void> {
   ensureSuperTokensInit();
 
-  const validStudentIdsCsvPath = process.argv[2] ?? defaultValidStudentIdsCsvPath;
-  const validStudentIds = loadValidStudentIds(validStudentIdsCsvPath, header);
+  const validStudentIdsCsvPath = process.env.STUDENTS_CSV_PATH ?? defaultValidStudentIdsCsvPath;
+  const validStudentIds = loadValidStudentIds(validStudentIdsCsvPath);
   console.info(`Loaded valid student IDs from ${validStudentIdsCsvPath}:`, validStudentIds.size);
 
   const courseId = Object.keys(deadLines)[0] as keyof typeof deadLines;
   const users = await prisma.user.findMany();
   console.info('Fetched users:', users.length);
   const finalDeadline = deadLines[courseId][8];
-
-  console.log(header.trim());
-  writeFileSync('grading.csv', header);
 
   const records: { shouldWarn: boolean; studentId: string; row: string; solvedProblems: number }[] = [];
 
@@ -143,6 +140,13 @@ async function main(): Promise<void> {
     process.stdout.write('.');
   }
 
+  if (records.length === 0) {
+    throw new Error(`No students from ${validStudentIdsCsvPath} matched any user`);
+  }
+
+  console.log(header.trim());
+  writeFileSync('grading.csv', header);
+
   // Sort records by studentId
   records.sort((a, b) => a.studentId.localeCompare(b.studentId));
 
@@ -155,9 +159,12 @@ async function main(): Promise<void> {
   }
 }
 
-function loadValidStudentIds(csvPath: string, expectedHeader: string): Set<string> {
+function loadValidStudentIds(csvPath: string): Set<string> {
   const rows = parseCsvRows(readFileSync(csvPath, 'utf8'));
-  const studentIdColumnIndex = parseCsvRows(expectedHeader)[0]?.indexOf('管理ID') ?? 0;
+  const studentIdColumnIndex = rows[0]?.findIndex((value) => normalizeStudentId(value) === '管理ID') ?? -1;
+  if (studentIdColumnIndex < 0) {
+    throw new Error(`No 管理ID column found in ${csvPath}`);
+  }
 
   const studentIds = new Set<string>();
   for (const row of rows.slice(1)) {
