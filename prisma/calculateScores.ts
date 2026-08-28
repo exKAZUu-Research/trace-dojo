@@ -51,10 +51,14 @@ const deadLines = {
   ],
 };
 
-interface ScoreRecord { shouldWarn: boolean; studentId: string; row: string; solvedProblems: number }
+interface ScoreRecord {
+  shouldWarn: boolean;
+  studentId: string;
+  row: string;
+  solvedProblems: number;
+}
 
 async function main(): Promise<void> {
-  preservePreviousGradingCsv();
   ensureSuperTokensInit();
 
   const validStudentIdsCsvPath = process.env.STUDENTS_CSV_PATH ?? defaultValidStudentIdsCsvPath;
@@ -76,7 +80,7 @@ async function main(): Promise<void> {
         email = superTokensUser.emails[0];
       }
     } catch (error) {
-      console.error(`Failed to get email for user ${user.id}:`, error);
+      throw new Error(`Failed to get email for user ${user.id}`, { cause: error });
     }
     if (!email.toLowerCase().endsWith('@s.internet.ac.jp')) continue;
 
@@ -139,19 +143,17 @@ async function main(): Promise<void> {
     }
     totalScore = (totalScore / 80) * 100;
 
-    // Print CSV row, escape email if it contains commas
     const roundedScore = Math.round(totalScore);
-    const row = `${studentId},${roundedScore},,,,,,,,,,,,,\n`;
+    const row = createScoreRow(studentId, roundedScore);
     records.push({ shouldWarn: roundedScore < 60, studentId, row, solvedProblems });
     process.stdout.write('.');
   }
 
   const matchedStudentIds = new Set(records.map(({ studentId }) => studentId));
   const unmatchedStudentIds = [...validStudentIds].filter((studentId) => !matchedStudentIds.has(studentId));
-  if (unmatchedStudentIds.length > 0) {
-    throw new Error(
-      `No users matched the following student IDs from ${validStudentIdsCsvPath}: ${unmatchedStudentIds.join(', ')}`
-    );
+  for (const studentId of unmatchedStudentIds) {
+    console.warn(`No user matched ${studentId}; writing a zero score`);
+    records.push({ shouldWarn: true, studentId, row: createScoreRow(studentId, 0), solvedProblems: 0 });
   }
 
   console.log(header.trim());
@@ -167,6 +169,10 @@ async function main(): Promise<void> {
   }
 }
 
+function createScoreRow(studentId: string, score: number): string {
+  return `${studentId},${score},,,,,,,,,,,,,\n`;
+}
+
 function preservePreviousGradingCsv(): void {
   if (existsSync(gradingCsvPath)) {
     renameSync(gradingCsvPath, previousGradingCsvPath);
@@ -175,6 +181,7 @@ function preservePreviousGradingCsv(): void {
 
 function writeGradingCsv(records: ScoreRecord[]): void {
   writeFileSync(temporaryGradingCsvPath, `${header}${records.map(({ row }) => row).join('')}`);
+  preservePreviousGradingCsv();
   renameSync(temporaryGradingCsvPath, gradingCsvPath);
 }
 
