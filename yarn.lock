@@ -3997,6 +3997,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"csv-parse@npm:7.0.0":
+  version: 7.0.0
+  resolution: "csv-parse@npm:7.0.0"
+  checksum: 10c0/89bf952fcb762d3e8c806041eefc2887b852c837bc0c3c8db57ef9983ffe3925eb5d5675a0e78a032a5b78caa1e0bfb272a5534525780398ff06daa0c730c755
+  languageName: node
+  linkType: hard
+
 "dateformat@npm:^4.6.3":
   version: 4.6.3
   resolution: "dateformat@npm:4.6.3"
@@ -10007,6 +10014,7 @@ __metadata:
     babel-plugin-react-compiler: "npm:1.0.0"
     concurrently: "npm:10.0.3"
     conventional-changelog-conventionalcommits: "npm:10.2.1"
+    csv-parse: "npm:7.0.0"
     dayjs: "npm:1.11.21"
     dotenv-cli: "npm:11.0.0"
     fast-deep-equal: "npm:3.1.3"

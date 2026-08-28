@@ -2,20 +2,29 @@
  * 1. `WB_ENV=production yarn db-restore`.
  * 2. Update `deadLines`.
  * 3. Update `header` via `CSVインポート` -> `雛形ダウンロード`.
- * 4. Update `validStudentIds` via `CSVエクスポート`.
+ * 4. Put the `CSVエクスポート` result at `students.csv`, or set `STUDENTS_CSV_PATH` to another path.
  * 5. Create `.env.restored` based on `.env.production`.
  * 6. `yarn calculate-score`.
  * */
 
-import { writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 
 import { PrismaClient } from '@prisma/client';
+import { parse } from 'csv-parse/sync';
 import SuperTokensNode from 'supertokens-node';
 
 import { ensureSuperTokensInit } from '@/infrastructures/supertokens/backendConfig';
 import { courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
 
 const prisma = new PrismaClient();
+const defaultValidStudentIdsCsvPath = 'students.csv';
+const gradingCsvPath = 'grading.csv';
+const previousGradingCsvPath = 'grading.previous.csv';
+const temporaryGradingCsvPath = 'grading.tmp.csv';
+
+// 「雛形ダウンロード」を押して、最新のヘッダーを反映させること。
+const header =
+  '管理ID,単位認定試験_最終点,小テスト_最終点,ディスカッション_最終点,レポート_最終点,英語_最終点,相互評価_最終点,プログラミング_最終点,LTI_最終点,その他1_最終点,その他2_最終点,その他3_最終点,その他4_最終点,その他5_最終点,備考\n';
 
 const deadLines = {
   tuBeginner1: [
@@ -42,43 +51,47 @@ const deadLines = {
   ],
 };
 
-const validStudentIds = new Set(
-  `
-<ここに改行区切りで学籍番号の一覧を記載する。>
-`.split(/\s+/)
-);
+interface ScoreRecord {
+  shouldWarn: boolean;
+  studentId: string;
+  row: string;
+  solvedProblems: number;
+}
 
 async function main(): Promise<void> {
   ensureSuperTokensInit();
 
+  const validStudentIdsCsvPath = process.env.STUDENTS_CSV_PATH ?? defaultValidStudentIdsCsvPath;
+  const validStudentIds = loadValidStudentIds(validStudentIdsCsvPath);
+  console.info(`Loaded valid student IDs from ${validStudentIdsCsvPath}:`, validStudentIds.size);
+
   const courseId = Object.keys(deadLines)[0] as keyof typeof deadLines;
-  const users = await prisma.user.findMany();
-  console.info('Fetched users:', users.length);
+  const users = await prisma.user.findMany({
+    where: { problemSessions: { some: { courseId } } },
+  });
+  console.info('Fetched users with course activity:', users.length);
   const finalDeadline = deadLines[courseId][8];
 
-  // 「雛形ダウンロード」を押して、最新のヘッダーを反映させること。
-  const header =
-    '管理ID,単位認定試験_最終点,小テスト_最終点,ディスカッション_最終点,レポート_最終点,英語_最終点,相互評価_最終点,プログラミング_最終点,LTI_最終点,その他1_最終点,その他2_最終点,その他3_最終点,その他4_最終点,その他5_最終点,備考\n';
-  console.log(header.trim());
-  writeFileSync('grading.csv', header);
-
-  const records: { shouldWarn: boolean; studentId: string; row: string; solvedProblems: number }[] = [];
+  const records: ScoreRecord[] = [];
+  const ambiguousStudentIds = new Set<string>();
+  const unexpectedActiveStudentIds = new Set<string>();
 
   for (const user of users) {
-    let email = user.displayName;
-    try {
-      const superTokensUser = await SuperTokensNode.getUser(user.id);
-      if (superTokensUser?.emails[0]) {
-        email = superTokensUser.emails[0];
-      }
-    } catch (error) {
-      console.error(`Failed to get email for user ${user.id}:`, error);
-    }
-    if (!email.toLowerCase().endsWith('@s.internet.ac.jp')) continue;
-
+    const email = await resolveUserEmail(user.id);
     const atIndex = email.indexOf('@');
     const studentId = (atIndex > 0 ? email.slice(0, Math.max(0, email.indexOf('@'))) : email).toUpperCase();
-    if (!validStudentIds.has(studentId)) continue;
+    if (!email.toLowerCase().endsWith('@s.internet.ac.jp')) {
+      if (validStudentIds.has(studentId)) {
+        ambiguousStudentIds.add(studentId);
+      }
+      console.warn(`Skipping course-active user ${user.id} with unsupported email domain: ${email}`);
+      continue;
+    }
+    if (!validStudentIds.has(studentId)) {
+      unexpectedActiveStudentIds.add(studentId);
+      console.warn(`Skipping course-active student ID not found in the roster: ${studentId}`);
+      continue;
+    }
 
     let totalScore = 0;
     let solvedProblems = 0;
@@ -135,23 +148,119 @@ async function main(): Promise<void> {
     }
     totalScore = (totalScore / 80) * 100;
 
-    // Print CSV row, escape email if it contains commas
     const roundedScore = Math.round(totalScore);
-    const row = `${studentId},${roundedScore},,,,,,,,,,,,,\n`;
+    const row = createScoreRow(studentId, roundedScore);
     records.push({ shouldWarn: roundedScore < 60, studentId, row, solvedProblems });
     process.stdout.write('.');
   }
 
+  const matchedStudentIds = new Set(records.map(({ studentId }) => studentId));
+  const unmatchedStudentIds = [...validStudentIds].filter((studentId) => !matchedStudentIds.has(studentId));
+  if (ambiguousStudentIds.size > 0) {
+    throw new Error(
+      `Cannot safely score roster IDs with course activity under unsupported email domains: ${[...ambiguousStudentIds].join(', ')}`
+    );
+  }
+
+  if (unexpectedActiveStudentIds.size > 0 && unmatchedStudentIds.length > 0) {
+    throw new Error(
+      `Cannot safely match course-active student IDs outside the roster (${[...unexpectedActiveStudentIds].join(', ')}) while roster IDs lack activity (${unmatchedStudentIds.join(', ')})`
+    );
+  }
+
+  if (records.length === 0) {
+    throw new Error(`No users with course activity matched student IDs from ${validStudentIdsCsvPath}`);
+  }
+
+  for (const studentId of unmatchedStudentIds) {
+    console.warn(`No user matched ${studentId}; writing a zero score`);
+    records.push({ shouldWarn: true, studentId, row: createScoreRow(studentId, 0), solvedProblems: 0 });
+  }
+
+  console.log(header.trim());
+
   // Sort records by studentId
   records.sort((a, b) => a.studentId.localeCompare(b.studentId));
 
-  // Write sorted records to file
   for (const record of records) {
     console.log(
       `${record.shouldWarn ? '!!! ' : ''}${record.row.trim()}: ${record.solvedProblems} problems solved${record.shouldWarn ? ' !!!' : ''}`
     );
-    writeFileSync('grading.csv', record.row, { flag: 'a' });
   }
+
+  writeGradingCsv(records);
+}
+
+async function resolveUserEmail(userId: string): Promise<string> {
+  let superTokensUser;
+  try {
+    superTokensUser = await SuperTokensNode.getUser(userId);
+  } catch (error) {
+    throw new Error(`Failed to get email for user ${userId}`, { cause: error });
+  }
+
+  const email = superTokensUser?.emails[0];
+  if (!email) {
+    throw new Error(`No email found for user ${userId}`);
+  }
+  return email;
+}
+
+function createScoreRow(studentId: string, score: number): string {
+  return `${studentId},${score},,,,,,,,,,,,,\n`;
+}
+
+function preservePreviousGradingCsv(): void {
+  if (existsSync(gradingCsvPath)) {
+    copyFileSync(gradingCsvPath, previousGradingCsvPath);
+  }
+}
+
+function writeGradingCsv(records: ScoreRecord[]): void {
+  try {
+    writeFileSync(temporaryGradingCsvPath, `${header}${records.map(({ row }) => row).join('')}`);
+    preservePreviousGradingCsv();
+    renameSync(temporaryGradingCsvPath, gradingCsvPath);
+  } finally {
+    rmSync(temporaryGradingCsvPath, { force: true });
+  }
+}
+
+function loadValidStudentIds(csvPath: string): Set<string> {
+  const rows = parseCsvRows(readFileSync(csvPath, 'utf8'));
+  const studentIdColumnIndex = rows[0]?.findIndex((value) => normalizeStudentId(value) === '管理ID') ?? -1;
+  if (studentIdColumnIndex < 0) {
+    throw new Error(`No 管理ID column found in ${csvPath}`);
+  }
+
+  const studentIds = new Set<string>();
+  for (const row of rows.slice(1)) {
+    const studentId = normalizeStudentId(row[studentIdColumnIndex]);
+    if (studentId) {
+      studentIds.add(studentId);
+    }
+  }
+
+  if (studentIds.size === 0) {
+    throw new Error(`No valid student IDs found in ${csvPath}`);
+  }
+  return studentIds;
+}
+
+function normalizeStudentId(value: string | undefined): string {
+  return (
+    value
+      ?.trim()
+      .replace(/^\uFEFF/, '')
+      .toUpperCase() ?? ''
+  );
+}
+
+function parseCsvRows(content: string): string[][] {
+  return parse(content, {
+    bom: true,
+    skip_empty_lines: true,
+  }) as string[][];
 }
 
 // eslint-disable-next-line unicorn/prefer-top-level-await
