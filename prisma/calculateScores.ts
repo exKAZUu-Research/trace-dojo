@@ -156,12 +156,9 @@ async function main(): Promise<void> {
 
   const matchedStudentIds = new Set(records.map(({ studentId }) => studentId));
   const unmatchedStudentIds = [...validStudentIds].filter((studentId) => !matchedStudentIds.has(studentId));
-  const ambiguousUnmatchedStudentIds = [...ambiguousStudentIds].filter(
-    (studentId) => !matchedStudentIds.has(studentId)
-  );
-  if (ambiguousUnmatchedStudentIds.length > 0) {
+  if (ambiguousStudentIds.size > 0) {
     throw new Error(
-      `Cannot safely score roster IDs with course activity under unsupported email domains: ${ambiguousUnmatchedStudentIds.join(', ')}`
+      `Cannot safely score roster IDs with course activity under unsupported email domains: ${[...ambiguousStudentIds].join(', ')}`
     );
   }
 
