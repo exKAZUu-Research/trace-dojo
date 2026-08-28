@@ -79,9 +79,7 @@ async function main(): Promise<void> {
     const atIndex = email.indexOf('@');
     const studentId = (atIndex > 0 ? email.slice(0, Math.max(0, email.indexOf('@'))) : email).toUpperCase();
     if (!email.toLowerCase().endsWith('@s.internet.ac.jp')) {
-      if (validStudentIds.has(studentId)) {
-        throw new Error(`Roster student ${studentId} has an unsupported email domain: ${email}`);
-      }
+      console.warn(`Skipping course-active user ${user.id} with unsupported email domain: ${email}`);
       continue;
     }
     if (!validStudentIds.has(studentId)) continue;
@@ -162,13 +160,14 @@ async function main(): Promise<void> {
 
   // Sort records by studentId
   records.sort((a, b) => a.studentId.localeCompare(b.studentId));
-  writeGradingCsv(records);
 
   for (const record of records) {
     console.log(
       `${record.shouldWarn ? '!!! ' : ''}${record.row.trim()}: ${record.solvedProblems} problems solved${record.shouldWarn ? ' !!!' : ''}`
     );
   }
+
+  writeGradingCsv(records);
 }
 
 async function resolveUserEmail(userId: string): Promise<string> {
