@@ -73,12 +73,16 @@ async function main(): Promise<void> {
   const finalDeadline = deadLines[courseId][8];
 
   const records: ScoreRecord[] = [];
+  const ambiguousStudentIds = new Set<string>();
 
   for (const user of users) {
     const email = await resolveUserEmail(user.id);
     const atIndex = email.indexOf('@');
     const studentId = (atIndex > 0 ? email.slice(0, Math.max(0, email.indexOf('@'))) : email).toUpperCase();
     if (!email.toLowerCase().endsWith('@s.internet.ac.jp')) {
+      if (validStudentIds.has(studentId)) {
+        ambiguousStudentIds.add(studentId);
+      }
       console.warn(`Skipping course-active user ${user.id} with unsupported email domain: ${email}`);
       continue;
     }
@@ -150,6 +154,15 @@ async function main(): Promise<void> {
   }
 
   const matchedStudentIds = new Set(records.map(({ studentId }) => studentId));
+  const ambiguousUnmatchedStudentIds = [...ambiguousStudentIds].filter(
+    (studentId) => !matchedStudentIds.has(studentId)
+  );
+  if (ambiguousUnmatchedStudentIds.length > 0) {
+    throw new Error(
+      `Cannot safely score roster IDs with course activity under unsupported email domains: ${ambiguousUnmatchedStudentIds.join(', ')}`
+    );
+  }
+
   const unmatchedStudentIds = [...validStudentIds].filter((studentId) => !matchedStudentIds.has(studentId));
   for (const studentId of unmatchedStudentIds) {
     console.warn(`No user matched ${studentId}; writing a zero score`);
