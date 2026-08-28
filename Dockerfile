@@ -1,4 +1,4 @@
-FROM node:24.16.0-slim@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf
+FROM node:24.18.0-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
 WORKDIR /app
 
 EXPOSE 8080
@@ -35,13 +35,14 @@ ENV WB_ENV=$WB_ENV
 ENV NEXT_PUBLIC_WB_ENV=$WB_ENV
 
 RUN bash ./bash/configure-yarn.sh \
-    && yarn \
+    && NODE_ENV=development yarn \
     # yarn install fails for some reason, so run it twice.
-    && yarn \
+    && NODE_ENV=development yarn \
+    && yarn prisma generate \
     && yarn run build/core \
     && cat .next/BUILD_ID \
-    && yarn wb optimizeForDockerBuild \
     && yarn wb prisma create-litestream-config \
+    && yarn wb optimizeForDockerBuild \
     # Avoid overwriting existing db files
     && rm -Rf db/mount \
     && rm -Rf .yarn/cache \

@@ -14,7 +14,7 @@ if [[ -n "${WB_ENV:-}" && "${WB_ENV:-}" != "development" && "${WB_ENV:-}" != "te
   isProduction=true
 fi
 
-"${wbCommand[@]}" prisma cleanup-litestream &
+"${wbCommand[@]}" prisma cleanup-litestream
 
 if [[ "$RESTORE_BACKUP" == "1" && "$isProduction" == true ]]; then
   "${wbCommand[@]}" prisma deploy-force
