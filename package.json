@@ -47,6 +47,7 @@
     "react-is": "19.2.8"
   },
   "dependencies": {
+    "@chakra-ui/anatomy": "2.3.6",
     "@chakra-ui/next-js": "2.4.2",
     "@chakra-ui/react": "2.10.9",
     "@emotion/react": "11.14.0",
