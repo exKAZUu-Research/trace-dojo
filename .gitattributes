@@ -1,5 +1,7 @@
 * text=auto
 
+.gitignore -text
+
 *.lockb binary diff=lockb
 *.vcproj text eol=crlf
 

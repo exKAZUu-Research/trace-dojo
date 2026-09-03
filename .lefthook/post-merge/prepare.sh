@@ -8,7 +8,8 @@ run_if_changed() {
   fi
 }
 
-run_if_changed "(mise\.toml|\.mise\.toml|\.tool-versions|\..+-version)" "mise install"
-run_if_changed "package\.json" "yarn && rm -Rf .next"
-run_if_changed ".*\.prisma" "node node_modules/.bin/dotenv -c development -- node node_modules/.bin/prisma migrate deploy"
-run_if_changed ".*\.prisma" "node node_modules/.bin/dotenv -c development -- node node_modules/.bin/prisma generate"
+run_if_changed "(mise\.toml|\.mise\.toml)" "mise install"
+if git diff --no-color -U0 ORIG_HEAD HEAD -- '*bunfig.toml' | grep --quiet -E '^[+-] *(globalStore|linker|publicHoistPattern)'; then rm -Rf -- 'node_modules'; fi
+run_if_changed "(package\.json|bun\.lock|bunfig\.toml|\.npmrc|patches/)" "bun install && rm -Rf -- '.next'"
+run_if_changed ".*\.prisma" "bun wb prisma deploy"
+run_if_changed ".*\.prisma" "bun wb prisma generate"
