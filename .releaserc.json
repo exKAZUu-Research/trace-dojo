@@ -1,7 +1,5 @@
 {
-  "branches": [
-    "release"
-  ],
+  "branches": ["release"],
   "plugins": [
     [
       "@semantic-release/commit-analyzer",
@@ -13,12 +11,8 @@
     [
       "@semantic-release/github",
       {
-        "labels": [
-          "r: semantic-release"
-        ],
-        "releasedLabels": [
-          "released :bookmark:"
-        ],
+        "labels": ["r: semantic-release"],
+        "releasedLabels": ["released :bookmark:"],
         "successCommentCondition": false,
         "failCommentCondition": false
       }

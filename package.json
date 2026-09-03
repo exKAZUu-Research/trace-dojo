@@ -11,6 +11,7 @@
     "build": "wb buildIfNeeded -c 'yarn run build/core'",
     "build/core": "next build",
     "calculate-score": "WB_ENV=restored yarn wb prisma seed -f prisma/calculateScores.ts",
+    "chakra": "sh -c 'chakra-cli tokens \"$2\"' --",
     "cleanup": "bun wb lint --fix --format",
     "db-create-migration": "bun wb prisma migrate-dev",
     "db-help": "wb prisma --help",
@@ -95,9 +96,11 @@
   },
   "devDependencies": {
     "@chakra-ui/cli": "2.5.8",
+    "@chakra-ui/styled-system": "2.12.4",
     "@types/bun": "1.4.0",
     "@types/jsonwebtoken": "9.0.10",
     "@types/node": "25.9.5",
+    "@types/react": "19.2.18",
     "@types/react-dom": "19.2.3",
     "@types/react-syntax-highlighter": "15.5.13",
     "@types/seedrandom": "3.0.8",
@@ -123,5 +126,8 @@
   },
   "prisma": {
     "seed": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON prisma/seed.mts"
-  }
+  },
+  "trustedDependencies": [
+    "@chakra-ui/styled-system"
+  ]
 }
