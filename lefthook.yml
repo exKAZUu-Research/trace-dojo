@@ -13,15 +13,12 @@ pre-commit:
   jobs:
     - name: cleanup
       glob: '**/*.{astro,cjs,css,cts,gql,graphql,hbs,htm,html,java,js,json,json5,jsonc,jsx,less,md,mdx,mjs,mts,scss,svelte,toml,ts,tsx,vue,yaml,yml}'
-      run: |-
-        # Lefthook expands {staged_files} as shell-escaped args, so paths with spaces stay intact.
-        yarn wb lint --fix --format -- {staged_files}
+      run: bun wb lint --fix --format -- {staged_files}
       stage_fixed: true
     - name: check-migrations
       glob: '**/migration.sql'
       run: |-
         failed=0
-        # Lefthook expands {staged_files} as shell-escaped args, so paths with spaces stay intact.
         for file in {staged_files}; do
           if grep -q 'Warnings:' "$file"; then
             echo "Migration SQL file ($file) contains warnings! Please solve the warnings and commit again."
@@ -29,3 +26,7 @@ pre-commit:
           fi
         done
         exit "$failed"
+    - name: normalize-bun-lockfile
+      glob: bun.lock
+      run: bash .lefthook/normalize-bun-lockfile.sh {staged_files}
+      stage_fixed: true

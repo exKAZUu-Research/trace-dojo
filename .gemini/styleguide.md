@@ -1,24 +1,22 @@
-Review in English based on the following coding standards.
+以下のコーディング規約を踏まえて、日本語でレビューしてください。
 
 ## Coding Style
 
-- Use camelCase for JavaScript and TypeScript files (or PascalCase for React components).
+- Use camelCase file names for JavaScript/TypeScript (PascalCase for React components).
 - Simplify code as much as possible to eliminate redundancy.
-- Design each module with high cohesion, grouping related functionality together.
-  - Refactor existing large modules into smaller, focused modules when necessary.
-  - Create well-organized directory structures with low coupling and high cohesion.
-- Place calling functions above the functions they call to maintain a clear top-down order.
-  - e.g., `function caller() { callee(); } function callee() { ... }`
-  - Unlike functions, place variable and type declarations ABOVE their usage.
-- Write comments and JSDoc for complex or hard-to-understand code.
-  - Explain "why" in comments and "what" in JSDoc.
-  - Avoid stating what can be easily understood from the code itself.
-- Prefer `undefined` over `null` unless explicitly required by APIs or libraries.
-- Prefer using a single template literal for prompts instead of `join()` with a pre-computable array literal of strings.
-- Assume that all environment variables are properly defined.
-  - If validation is required, use `assert` to fail fast (e.g., during startup).
+- Design modules and directories with high cohesion and low coupling; split large modules when needed.
+- Place calling functions above the functions they call (top-down order); place variable and type declarations above their usage.
+- Write comments and JSDoc only for hard-to-understand code: explain "why" in comments and "what" in JSDoc.
+- Never explain how WillBooster's in-house tools (e.g., `wb`, `wbfy`) work in code comments or documents outside the tool's own package, except in instructions for AI agents; e.g., do not note that `PORT` is unset because `wb` picks a free port.
+- If lint errors or warnings cannot be fixed, use ignore comments with reasons (e.g., `// oxlint-disable-next-line <rule> -- <reason>`).
+- Prefer `undefined` over `null` unless required by APIs or libraries.
+- When validating JavaScript objects (e.g., parsed JSON, API responses), always use `zod` if possible instead of hand-written checks or type assertions.
+- Build prompts as a single template literal instead of `join()` on a pre-computable array of strings.
+- Assume all environment variables are defined; if validation is needed, `assert` at startup to fail fast.
+- Assume local tools such as `git`, `gh`, and `ghq` are installed and authenticated.
+- Ensure compatibility only with macOS and Linux; do not include Windows-specific code.
 - Prefer lambda over `function` for React components, e.g., `const Button: React.FC = () => {`.
-- Prefer `useImmer` for storing an array or an object to `useState`.
-- Allow `autoFocus` to minimize user effort.
-- Since this project uses the React Compiler, you do not need to use `useCallback` or `useMemo` for performance optimization.
-- Assume there is only a single server instance.
+- Prefer `useImmer` over `useState` for arrays and objects.
+- Use `autoFocus` where it reduces user effort.
+- This project uses the React Compiler, so `useCallback` and `useMemo` are unnecessary for performance.
+- Assume a single server instance.

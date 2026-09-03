@@ -1,51 +1,48 @@
 ## Project Information
 
 - Name: `trace-dojo`
-- Description: undefined
-- Package Manager: yarn
+- Package Manager: bun
 
 ## General Instructions
 
-- Create a new branch if the current branch is `main`.
-- Run any `git` commands sequentially.
-- Write tests ONLY if explicitly requested. If requested, follow these rules:
-  - Continue modifying tests and/or code until all tests pass.
-  - Ensure tests are idempotent and independent (e.g., reset persistent data) so they can run repeatedly or in parallel.
+- If on `main`, create a new branch; otherwise work on the current branch.
+- Run `git` commands one at a time to avoid `index.lock` conflicts.
+- Write a test only when explicitly requested, or when a behavior is both likely to regress AND has no other automatic safeguard (type checking, linting, or an existing test/CI check would not catch the breakage). Skip the test when an existing signal already catches the regression, when the implementation merely maps conditions to constant outputs so a test would restate that mapping and fail only on intentional edits (a change detector), or when you are only confirming an external fact (a library's behavior, whether a version fixes an issue); verify the latter two once manually instead of adding a permanent test.
+- When writing tests, follow these rules:
+  - Test externally observable behavior (e.g., emitted files, CLI output, rendered results) at the system boundary, not implementation details: do not mirror production logic, assert that a branch is taken, or feed hand-assembled internal objects to internal functions.
   - Prefer actual API calls over mocks, unless actual calls are impractical, have unintended side effects, or mocks are explicitly requested.
-  - Always investigate the root cause of a test failure before fixing it.
-  - Avoid adding wait functions in E2E tests unless strictly necessary.
-- When fixing issues, follow these rules:
-  - Investigate the root cause first (e.g., by gathering debug logs, taking screenshots, etc.).
-  - Fix the actual root cause instead of applying workarounds.
-- After making code changes, run `yarn verify-full` to execute all tests (takes up to 1 hour), or `yarn verify` for only type checking and linting (takes up to 10 minutes).
-  - If you are confident that your changes will not break any tests, you may use `verify`.
-  - Use `oxlint` ignore comments with reasons (e.g., `// oxlint-disable-next-line <rule> -- <reason>`) if lint errors or warnings cannot be fixed.
-- Once you have verified your changes, commit and push them to the current (non-main) branch, then create a PR via `gh`.
-  - Follow the conventional commits; your commit message should start with `feat:`, `fix:`, etc.
-  - If not specified, make sure to add a new line at the end of your commit message.
-  - Always create new commits. Avoid using `--amend`.
-- Always use heredoc syntax when passing multi-line content to any command.
-- Put temporary files in the `.tmp` or `/tmp` directory.
+  - Ensure tests are idempotent and independent (e.g., reset persistent data) so they can run repeatedly or in parallel.
+  - Avoid fixed waits in E2E tests; wait for conditions instead.
+  - Continue modifying tests and/or code until all tests pass.
+- When fixing issues (including test failures), investigate the root cause first (e.g., via debug logs or screenshots) and fix it instead of applying workarounds.
+- After making changes, run `bun run verify` (type checking and linting; takes up to 10 minutes), or `bun run verify-full` (all tests; takes up to 1 hour) if you changed runtime behavior or tests. Fix errors and re-run until it passes.
+  - Agent shells may terminate tracked commands (including background ones) at time limits, often minutes, so run commands that can exceed your shell-call timeout (e.g., `bun run verify` and `bun run verify-full`) detached via nohup, from a shell call that returns immediately: `mkdir -p .tmp; rm -f .tmp/verify-full.exit; nohup sh -c 'bun run verify-full; echo $? > .tmp/verify-full.exit' > .tmp/verify-full.log 2>&1 &` (the redirects are required: an inherited stdout/stderr pipe would keep the call waiting). Poll from separate calls, each shorter than your shell-call timeout: `for i in 1 2 3; do test -f .tmp/verify-full.exit && break; sleep 20; done; cat .tmp/verify-full.exit 2>/dev/null || echo still running`. Repeat until the exit file appears (its content is the exit code), then read the log; if it never appears while the log stops growing, the run itself died.
+- Once verified, commit and push to the current (non-main) branch, and create a PR via `gh` if none exists for the branch.
+  - Follow the Conventional Commits format (e.g., `feat:`, `fix:`).
+  - Always create new commits; avoid `--amend`.
+- In any explanatory text (commit messages, PR descriptions, documentation, code comments, etc.), describe only what exists in the final snapshot: never mention symbols or concepts that were added and later removed or renamed along the way, even if they mattered during the work. If you cannot confirm that an identifier or feature name you are about to write exists in the final diff or the current codebase, drop that statement.
+- Use heredoc for multi-line command input (e.g., `git commit -F -`, `gh pr create --body-file -`).
+- Put temporary files in `.tmp`; use `/tmp` only for files that must live outside the repo.
+- Tool versions (e.g., node) are pinned in `mise.toml`; run `mise install` after changing it, and never install those tools globally instead.
+- `bunfig.toml` uses Bun's isolated linker, so only declared dependencies resolve. If an import fails to resolve, declare that package in the `package.json` that imports it; never switch `linker` to `hoisted` or add to `publicHoistPattern` to work around it.
 
 ## Coding Style
 
-- Use camelCase for JavaScript and TypeScript files (or PascalCase for React components).
+- Use camelCase file names for JavaScript/TypeScript (PascalCase for React components).
 - Simplify code as much as possible to eliminate redundancy.
-- Design each module with high cohesion, grouping related functionality together.
-  - Refactor existing large modules into smaller, focused modules when necessary.
-  - Create well-organized directory structures with low coupling and high cohesion.
-- Place calling functions above the functions they call to maintain a clear top-down order.
-  - e.g., `function caller() { callee(); } function callee() { ... }`
-  - Unlike functions, place variable and type declarations ABOVE their usage.
-- Write comments and JSDoc for complex or hard-to-understand code.
-  - Explain "why" in comments and "what" in JSDoc.
-  - Avoid stating what can be easily understood from the code itself.
-- Prefer `undefined` over `null` unless explicitly required by APIs or libraries.
-- Prefer using a single template literal for prompts instead of `join()` with a pre-computable array literal of strings.
-- Assume that all environment variables are properly defined.
-  - If validation is required, use `assert` to fail fast (e.g., during startup).
+- Design modules and directories with high cohesion and low coupling; split large modules when needed.
+- Place calling functions above the functions they call (top-down order); place variable and type declarations above their usage.
+- Write comments and JSDoc only for hard-to-understand code: explain "why" in comments and "what" in JSDoc.
+- Never explain how WillBooster's in-house tools (e.g., `wb`, `wbfy`) work in code comments or documents outside the tool's own package, except in instructions for AI agents; e.g., do not note that `PORT` is unset because `wb` picks a free port.
+- If lint errors or warnings cannot be fixed, use ignore comments with reasons (e.g., `// oxlint-disable-next-line <rule> -- <reason>`).
+- Prefer `undefined` over `null` unless required by APIs or libraries.
+- When validating JavaScript objects (e.g., parsed JSON, API responses), always use `zod` if possible instead of hand-written checks or type assertions.
+- Build prompts as a single template literal instead of `join()` on a pre-computable array of strings.
+- Assume all environment variables are defined; if validation is needed, `assert` at startup to fail fast.
+- Assume local tools such as `git`, `gh`, and `ghq` are installed and authenticated.
+- Ensure compatibility only with macOS and Linux; do not include Windows-specific code.
 - Prefer lambda over `function` for React components, e.g., `const Button: React.FC = () => {`.
-- Prefer `useImmer` for storing an array or an object to `useState`.
-- Allow `autoFocus` to minimize user effort.
-- Since this project uses the React Compiler, you do not need to use `useCallback` or `useMemo` for performance optimization.
-- Assume there is only a single server instance.
+- Prefer `useImmer` over `useState` for arrays and objects.
+- Use `autoFocus` where it reduces user effort.
+- This project uses the React Compiler, so `useCallback` and `useMemo` are unnecessary for performance.
+- Assume a single server instance.
