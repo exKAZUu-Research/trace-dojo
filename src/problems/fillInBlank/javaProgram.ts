@@ -26,8 +26,6 @@ export type JavaTurtleState = z.infer<typeof javaExecutionResultSchema>;
  * under the JVM security manager with an empty policy, and Wandbox provides its own isolation.
  */
 const forbiddenPatterns = [
-  // javac decodes Unicode escapes before lexing, which would let them hide any of the names below.
-  /\\u/,
   /\bimport\b/,
   /\bpackage\b/,
   /\bnative\b/,
@@ -39,7 +37,12 @@ const forbiddenPatterns = [
 ];
 
 export function findForbiddenJavaPattern(userProgram: string): string | undefined {
-  return forbiddenPatterns.find((pattern) => pattern.test(userProgram))?.source;
+  // Unicode escapes are checked on the raw text; the other names only matter in code, not in literals or comments.
+  if (userProgram.includes(String.raw`\u`)) return String.raw`\u`;
+  const code = userProgram
+    .replaceAll(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g, '""')
+    .replaceAll(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+  return forbiddenPatterns.find((pattern) => pattern.test(code))?.source;
 }
 
 export function extractPublicClassName(program: string): string | undefined {
@@ -75,9 +78,9 @@ ${userProgram.trim()}
 class Turtle {
   static final int COLUMNS = ${GRID_COLUMNS};
   static final int ROWS = ${GRID_ROWS};
-  static final char[] DIRS = {'N', 'E', 'S', 'W'};
-  static final int[] DX = {0, 1, 0, -1};
-  static final int[] DY = {1, 0, -1, 0};
+  private static final char[] DIRS = {'N', 'E', 'S', 'W'};
+  private static final int[] DX = {0, 1, 0, -1};
+  private static final int[] DY = {1, 0, -1, 0};
   private static final char[][] board = new char[ROWS][COLUMNS];
   private static final java.util.List<Turtle> turtles = new java.util.ArrayList<>();
   static {

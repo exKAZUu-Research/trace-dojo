@@ -186,7 +186,8 @@ class Turtle {
     return board[ny][nx] && board[ny][nx] !== '${EMPTY_COLOR}';
   }
   remove() {
-    _turtles.splice(_turtles.indexOf(this), 1);
+    const index = _turtles.indexOf(this);
+    if (index >= 0) _turtles.splice(index, 1);
   }
   右を向く() {
     spend();

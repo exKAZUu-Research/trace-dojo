@@ -80,8 +80,15 @@ function gradeByInstrumentedProgram(
       ? { status: 'correct', stage: 2 }
       : { status: 'incorrect', stage: 2, detail: 'The final state differs from the expected one.' };
   } catch (error) {
-    // A syntax error or an exhausted budget may be a translator limitation, so let real Java judge the answer.
-    if (error instanceof SyntaxError || (error instanceof Error && error.message === TRACE_BUDGET_EXCEEDED_MESSAGE)) {
+    // A JavaScript engine error or an exhausted budget may be a translator limitation, so let real Java judge the answer.
+    // Errors thrown by the turtle runtime itself (e.g. out of bounds) mirror Java behavior and stay authoritative.
+    if (
+      error instanceof SyntaxError ||
+      error instanceof TypeError ||
+      error instanceof ReferenceError ||
+      error instanceof RangeError ||
+      (error instanceof Error && error.message === TRACE_BUDGET_EXCEEDED_MESSAGE)
+    ) {
       return;
     }
     return { status: 'incorrect', stage: 2, detail: `The program failed: ${String(error)}` };

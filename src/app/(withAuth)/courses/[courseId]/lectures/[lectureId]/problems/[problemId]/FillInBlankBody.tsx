@@ -129,7 +129,8 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
                     });
                   }}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter') void handleSubmit();
+                    // Enter also confirms a Japanese IME conversion, which must not submit.
+                    if (event.key === 'Enter' && !event.nativeEvent.isComposing) void handleSubmit();
                   }}
                 />
               </HStack>

@@ -127,13 +127,22 @@ async function executeOnLocalJvm(
   entryClassName: string,
   settings: LocalJvmSettings
 ): Promise<JavaExecutionResult> {
-  const directoryPath = await mkdtemp(path.join(tmpdir(), 'trace-dojo-java-'));
+  let directoryPath: string;
+  try {
+    directoryPath = await mkdtemp(path.join(tmpdir(), 'trace-dojo-java-'));
+  } catch (error) {
+    return { kind: 'unavailable', reason: `Failed to create a working directory: ${String(error)}` };
+  }
   try {
     // javac requires the file to be named after the public class.
     const sourcePath = path.join(directoryPath, `${extractPublicClassName(program) ?? entryClassName}.java`);
     const classesPath = path.join(directoryPath, 'classes');
     const policyPath = path.join(directoryPath, 'judge.policy');
-    await Promise.all([writeFile(sourcePath, program), writeFile(policyPath, 'grant {};\n')]);
+    try {
+      await Promise.all([writeFile(sourcePath, program), writeFile(policyPath, 'grant {};\n')]);
+    } catch (error) {
+      return { kind: 'unavailable', reason: `Failed to write the program: ${String(error)}` };
+    }
 
     const compilation = await runCommand(
       settings.javacCommand,
@@ -142,7 +151,12 @@ async function executeOnLocalJvm(
       settings.timeoutMs
     );
     if (compilation.kind !== 'executed') return compilation;
-    if (compilation.exitCode !== 0) return { kind: 'compileError', message: compilation.stderr };
+    if (compilation.exitCode !== 0) {
+      // Only javac diagnostics are the student's fault; anything else means the toolchain itself failed.
+      return /\.java:\d+: /.test(compilation.stderr)
+        ? { kind: 'compileError', message: compilation.stderr }
+        : { kind: 'unavailable', reason: `javac failed: ${compilation.stderr}` };
+    }
 
     return await runCommand(
       settings.javaCommand,
@@ -174,13 +188,19 @@ function runCommand(command: string, args: string[], cwd: string, timeoutMs: num
       args,
       { cwd, timeout: timeoutMs, maxBuffer: 1024 * 1024, killSignal: 'SIGKILL' },
       (error, stdout, stderr) => {
-        if (error && 'code' in error && error.code === 'ENOENT') {
-          resolve({ kind: 'unavailable', reason: `Command not found: ${command}` });
-        } else if (error && 'killed' in error && error.killed) {
+        if (!error) {
+          resolve({ kind: 'executed', stdout, stderr, exitCode: 0 });
+        } else if (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+          resolve({ kind: 'executed', stdout: '', stderr: 'The program printed too much output.', exitCode: 1 });
+        } else if (error.killed) {
           resolve({ kind: 'timeout' });
+        } else if (typeof error.code === 'number') {
+          resolve({ kind: 'executed', stdout, stderr, exitCode: error.code });
+        } else if (error.signal) {
+          resolve({ kind: 'executed', stdout, stderr: `${stderr}\nKilled by ${error.signal}`, exitCode: 1 });
         } else {
-          const exitCode = error && 'code' in error && typeof error.code === 'number' ? error.code : 0;
-          resolve({ kind: 'executed', stdout, stderr, exitCode });
+          // Spawn-level failures such as ENOENT, EACCES, or ENOMEM are the environment's fault, not the student's.
+          resolve({ kind: 'unavailable', reason: `Failed to run ${command}: ${error.message}` });
         }
       }
     );

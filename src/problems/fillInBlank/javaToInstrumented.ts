@@ -36,7 +36,8 @@ const turtleMemberMap = new Map([
 ]);
 // Only the members whose semantics are identical between Java and JavaScript for int arguments.
 const mathMembers = new Set(['max', 'min', 'abs']);
-const primitiveTypeNames = new Set(['int', 'long', 'short', 'byte', 'boolean', 'char', 'var']);
+const primitiveTypeNames = new Set(['int', 'long', 'short', 'byte', 'boolean', 'char']);
+const MAX_INT = 2_147_483_647;
 const literalNames = new Set(['true', 'false']);
 const operatorRegex = /^(?:\+\+|--|==|!=|<=|>=|&&|\|\||[+\-*%<>!=(),.;])/;
 const identifierRegex = /^[\p{L}_$][\p{L}\p{N}_$]*/u;
@@ -75,14 +76,16 @@ export function translateJavaFragment(fragment: string, nativeNames: ReadonlySet
   const endsWithSemicolon = current.length === 0 && segments.length > 0;
   if (current.length > 0) segments.push(current);
 
-  const translated = segments.map((segment) => translateSegment(segment, nativeNames));
+  // Turtle variables declared earlier in the same fragment are plain JavaScript bindings too.
+  const scopedNativeNames = new Set(nativeNames);
+  const translated = segments.map((segment) => translateSegment(segment, scopedNativeNames));
   return translated.join('; ') + (endsWithSemicolon ? ';' : '');
 }
 
-function translateSegment(tokens: Token[], nativeNames: ReadonlySet<string>): string {
+function translateSegment(tokens: Token[], nativeNames: Set<string>): string {
   if (tokens.length === 0) return '';
 
-  // Declaration: `int x = expr` or `Turtle t = expr`
+  // Declaration: `int x = expr`, `Turtle t = expr`, or `var t = expr`
   if (
     tokens.length >= 3 &&
     tokens[0].type === 'identifier' &&
@@ -91,17 +94,25 @@ function translateSegment(tokens: Token[], nativeNames: ReadonlySet<string>): st
   ) {
     const typeName = tokens[0].value;
     const name = tokens[1].value;
+    // `var` holds a turtle when initialized from `new` or another turtle binding, and a scope value otherwise.
+    const isInstantiation = tokens[3]?.value === 'new' || (tokens.length === 4 && nativeNames.has(tokens[3].value));
     const value = translateExpression(tokens.slice(3), nativeNames);
-    if (primitiveTypeNames.has(typeName)) return `s.set('${name}', ${value})`;
-    if (typeName === 'Turtle' || nativeNames.has(typeName) || nativeNames.has(name)) return `const ${name} = ${value}`;
+    if (primitiveTypeNames.has(typeName) || (typeName === 'var' && !isInstantiation)) {
+      return `s.set('${name}', ${value})`;
+    }
+    if (typeName === 'Turtle' || typeName === 'var' || nativeNames.has(typeName)) {
+      nativeNames.add(name);
+      return `const ${name} = ${value}`;
+    }
     throw new UnsupportedJavaError(`declaration of type ${typeName}`);
   }
 
   // Assignment: `x = expr`
   if (tokens.length >= 2 && tokens[0].type === 'identifier' && isOperator(tokens[1], '=')) {
     const name = tokens[0].value;
-    const value = translateExpression(tokens.slice(2), nativeNames);
-    return nativeNames.has(name) ? `${name} = ${value}` : `s.set('${name}', ${value})`;
+    // Native bindings are `const` in the instrumented program, so reassigning them is left to Java.
+    if (nativeNames.has(name)) throw new UnsupportedJavaError(`assignment to ${name}`);
+    return `s.set('${name}', ${translateExpression(tokens.slice(2), nativeNames)})`;
   }
 
   // Increment / decrement: `i++`, `++i`, `i--`, `--i`
@@ -111,7 +122,7 @@ function translateSegment(tokens: Token[], nativeNames: ReadonlySet<string>): st
     const identifier = first.type === 'identifier' ? first : second.type === 'identifier' ? second : undefined;
     if (incrementOperator && identifier) {
       const name = identifier.value;
-      if (nativeNames.has(name)) return `${name}${incrementOperator.value}`;
+      if (nativeNames.has(name)) throw new UnsupportedJavaError(`assignment to ${name}`);
       const binaryOperator = incrementOperator.value === '++' ? '+' : '-';
       return `s.set('${name}', (s.get('${name}') ${binaryOperator} 1) | 0)`;
     }
@@ -156,22 +167,18 @@ class ExpressionTranslator {
     return left;
   }
 
+  // Chained comparisons such as `a < b > c` compare a boolean in Java and do not compile, so only one is allowed.
   private parseEquality(): string {
-    let left = this.parseRelational();
-    for (;;) {
-      if (this.consumeOperator('==')) left = `${left} === ${this.parseRelational()}`;
-      else if (this.consumeOperator('!=')) left = `${left} !== ${this.parseRelational()}`;
-      else return left;
-    }
+    const left = this.parseRelational();
+    if (this.consumeOperator('==')) return `${left} === ${this.parseRelational()}`;
+    if (this.consumeOperator('!=')) return `${left} !== ${this.parseRelational()}`;
+    return left;
   }
 
   private parseRelational(): string {
-    let left = this.parseAdditive();
-    for (;;) {
-      const operator = ['<', '>', '<=', '>='].find((op) => this.consumeOperator(op));
-      if (!operator) return left;
-      left = `${left} ${operator} ${this.parseAdditive()}`;
-    }
+    const left = this.parseAdditive();
+    const operator = ['<', '>', '<=', '>='].find((op) => this.consumeOperator(op));
+    return operator ? `${left} ${operator} ${this.parseAdditive()}` : left;
   }
 
   private parseAdditive(): string {
@@ -187,8 +194,12 @@ class ExpressionTranslator {
     let left = this.parseUnary();
     for (;;) {
       if (this.consumeOperator('*')) left = `Math.imul(${left}, ${this.parseUnary()})`;
-      else if (this.consumeOperator('%')) left = `(${left} % ${this.parseUnary()})`;
-      else return left;
+      else if (this.consumeOperator('%')) {
+        // Java throws on a zero divisor while JavaScript yields NaN, so only nonzero literal divisors are translated.
+        const divisor = this.parseUnary();
+        if (!/^[1-9]\d*$/.test(divisor)) throw new UnsupportedJavaError(`remainder by ${divisor}`);
+        left = `(${left} % ${divisor})`;
+      } else return left;
     }
   }
 
@@ -206,13 +217,14 @@ class ExpressionTranslator {
       if (member.type !== 'identifier') throw new UnsupportedJavaError(`member ${member.value}`);
       if (result === 'Math') {
         if (!mathMembers.has(member.value)) throw new UnsupportedJavaError(`Math.${member.value}`);
-        result = `Math.${member.value}${this.parseArguments()}`;
+        // `| 0` reproduces Java's `Math.abs(Integer.MIN_VALUE) == Integer.MIN_VALUE`.
+        result = `(Math.${member.value}${this.parseArguments(member.value === 'abs' ? 1 : 2)} | 0)`;
       } else if (member.value === 'length' && !this.peekOperator('(')) {
         result = `${result}.length`;
       } else {
         const turtleMember = turtleMemberMap.get(member.value);
         if (!turtleMember || !this.peekOperator('(')) throw new UnsupportedJavaError(`member ${member.value}`);
-        result = `${result}.${turtleMember}${this.parseArguments()}`;
+        result = `${result}.${turtleMember}${this.parseArguments(0)}`;
       }
     }
     return result;
@@ -220,7 +232,10 @@ class ExpressionTranslator {
 
   private parsePrimary(): string {
     const token = this.next();
-    if (token.type === 'number') return token.value;
+    if (token.type === 'number') {
+      if (Number(token.value) > MAX_INT) throw new UnsupportedJavaError(`int literal ${token.value}`);
+      return token.value;
+    }
     if (token.type === 'operator') {
       if (token.value !== '(') throw new UnsupportedJavaError(`operator ${token.value}`);
       const inner = this.parseOr();
@@ -234,7 +249,7 @@ class ExpressionTranslator {
       if (className.type !== 'identifier' || (className.value !== 'Turtle' && !this.nativeNames.has(className.value))) {
         throw new UnsupportedJavaError(`instantiation of ${className.value}`);
       }
-      return `new ${className.value}${this.parseArguments()}`;
+      return `new ${className.value}${this.parseArguments(className.value === 'Turtle' ? [0, 2, 3] : undefined)}`;
     }
     if (name === 'Math') {
       if (!this.peekOperator('.')) throw new UnsupportedJavaError('Math without member');
@@ -244,13 +259,20 @@ class ExpressionTranslator {
       return this.peekOperator('(') ? `${name}${this.parseArguments()}` : name;
     }
     if (this.peekOperator('(')) throw new UnsupportedJavaError(`call of unknown function ${name}`);
-    if (primitiveTypeNames.has(name) || /^\p{Lu}/u.test(name) || name === 'this' || name === 'super') {
+    if (
+      primitiveTypeNames.has(name) ||
+      name === 'var' ||
+      /^\p{Lu}/u.test(name) ||
+      name === 'this' ||
+      name === 'super'
+    ) {
       throw new UnsupportedJavaError(`identifier ${name}`);
     }
     return `s.get('${name}')`;
   }
 
-  private parseArguments(): string {
+  /** Parses an argument list; `arity` restricts the accepted argument counts because JavaScript ignores extras. */
+  private parseArguments(arity?: number | number[]): string {
     if (!this.consumeOperator('(')) throw new UnsupportedJavaError('missing (');
     const args: string[] = [];
     if (!this.consumeOperator(')')) {
@@ -259,6 +281,8 @@ class ExpressionTranslator {
       } while (this.consumeOperator(','));
       if (!this.consumeOperator(')')) throw new UnsupportedJavaError('missing )');
     }
+    const arities = typeof arity === 'number' ? [arity] : arity;
+    if (arities && !arities.includes(args.length)) throw new UnsupportedJavaError(`${args.length} arguments`);
     return `(${args.join(', ')})`;
   }
 

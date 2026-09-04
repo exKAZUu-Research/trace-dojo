@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -130,7 +130,24 @@ describe('stage 2: Java semantics and safety', () => {
   });
 
   test.each([
+    { problemId: 'fillInBlank3', answers: ['Turtle u = t; u.右を向く();'] },
+    { problemId: 'fillInBlank3', answers: ['var u = t; u.右を向く();'] },
+    { problemId: 'fillInBlank3', answers: ['new Turtle(2, 1).右を向く(); t.remove(); t.remove(); t.右を向く();'] },
+    { problemId: 'fillInBlank1', answers: ['i < Math.abs(-4)'] },
+    { problemId: 'fillInBlank1', answers: ['i % 5 < 4'] },
+  ] as const)('accepts $answers for $problemId with Java scoping', async ({ answers, problemId }) => {
+    expect(await gradeFillInBlankAnswers(instantiate(problemId), [...answers], withoutJava)).toEqual({
+      status: 'correct',
+      stage: 2,
+    });
+  });
+
+  test.each([
     { problemId: 'fillInBlank1', answers: ['i < 0x4'] },
+    { problemId: 'fillInBlank1', answers: ['Math.abs(-2147483648) < 0 && i < 4'] },
+    { problemId: 'fillInBlank3', answers: ['t = t; t.右を向く();'] },
+    { problemId: 'fillInBlank3', answers: ['String s = "Thread"; t.右を向く();'] },
+    { problemId: 'fillInBlank3', answers: ['/* Runtime */ t.右を向く(); // Thread'] },
     { problemId: 'fillInBlank1', answers: ['i < 4L'] },
     { problemId: 'fillInBlank3', answers: ['t.hashCode(); t.右を向く();'] },
   ] as const)('leaves $answers for $problemId to Java', { timeout: 60_000 }, async ({ answers, problemId }) => {
@@ -154,6 +171,21 @@ describe('stage 2: Java semantics and safety', () => {
       await gradeFillInBlankAnswers(instantiate('fillInBlank3'), ['t.toString(); t.右を向く();'], withLocalJvm)
     ).toEqual({ status: 'correct', stage: 4 });
   });
+
+  test.each([
+    { problemId: 'fillInBlank1', answers: ['i < 4 > false'], detail: 'Compile error' },
+    { problemId: 'fillInBlank2', answers: ['x + 4294967297'], detail: 'Compile error' },
+    { problemId: 'fillInBlank3', answers: ['t.右を向く(1);'], detail: 'Compile error' },
+    { problemId: 'fillInBlank2', answers: ['x + (1 % 0) + x + 1'], detail: 'exception' },
+  ] as const)(
+    'does not accept $answers for $problemId that Java rejects',
+    { timeout: 60_000 },
+    async ({ answers, detail, problemId }) => {
+      const result = await gradeFillInBlankAnswers(instantiate(problemId), [...answers], withLocalJvm);
+      expect(result).toMatchObject({ status: 'incorrect', stage: 4 });
+      expect(result.status === 'incorrect' && result.detail).toContain(detail);
+    }
+  );
 
   test('aborts unbounded loops instead of hanging', { timeout: 60_000 }, async () => {
     const startedAt = Date.now();
@@ -288,6 +320,30 @@ describe('stage 4: local JVM', () => {
       )
     );
     expect(results.map((r) => r.status)).toEqual(['correct', 'ungradable', 'ungradable']);
+  });
+
+  test('rejects programs that flood stdout without misreporting the drawing', { timeout: 60_000 }, async () => {
+    const answer =
+      'for (int i = 0; i < 60000; i++) System.out.println("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); t.右を向く();';
+    const result = await gradeFillInBlankAnswers(instantiate('fillInBlank3'), [answer], withLocalJvm);
+    expect(result).toMatchObject({ status: 'incorrect', stage: 4 });
+    expect(result.status === 'incorrect' && result.detail).toContain('too much output');
+  });
+
+  test('reports a broken toolchain as unavailable rather than a compile error', { timeout: 60_000 }, async () => {
+    const javaHome = mkdtempSync(path.join(tmpdir(), 'trace-dojo-broken-jdk-'));
+    mkdirSync(path.join(javaHome, 'bin'));
+    writeFileSync(
+      path.join(javaHome, 'bin', 'javac'),
+      '#!/bin/sh\necho "Unable to locate a Java Runtime." >&2\nexit 1\n',
+      {
+        mode: 0o755,
+      }
+    );
+    const result = await gradeFillInBlankAnswers(instantiate('fillInBlank1'), ['i < 8 / 2'], {
+      javaExecutors: [createLocalJvmExecutor({ javaHome })],
+    });
+    expect(result).toMatchObject({ status: 'ungradable' });
   });
 
   test('reports ungradable when no executor is available', async () => {
