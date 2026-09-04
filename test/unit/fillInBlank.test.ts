@@ -23,7 +23,7 @@ describe('problem instantiation', () => {
   });
 
   test('replaces blanks with placeholders and keeps model answers', () => {
-    const problem = instantiate('fillInBlank5');
+    const problem = instantiate('fillInBlank4');
     expect(problem.displayProgram).toContain('i < 【1】');
     expect(problem.displayProgram).toContain('【2】');
     expect(problem.displayProgram).not.toContain('@[');
@@ -47,9 +47,8 @@ describe('stage 1: exact match', () => {
     { problemId: 'fillInBlank2', answers: ['x+1'] },
     { problemId: 'fillInBlank3', answers: ['t.右を向く();'] },
     { problemId: 'fillInBlank3', answers: ['t . 右を向く ( ) ;'] },
-    { problemId: 'fillInBlank4', answers: ['x * 2'] },
-    { problemId: 'fillInBlank5', answers: ['3', 't.右を向く();'] },
-    { problemId: 'fillInBlank5', answers: [' 3 ', 't.右を向く( );'] },
+    { problemId: 'fillInBlank4', answers: ['3', 't.右を向く();'] },
+    { problemId: 'fillInBlank4', answers: [' 3 ', 't.右を向く( );'] },
   ] as const)('accepts $answers for $problemId', async ({ answers, problemId }) => {
     expect(await gradeFillInBlankAnswers(instantiate(problemId), [...answers], withoutJava)).toEqual({
       status: 'correct',
@@ -58,7 +57,7 @@ describe('stage 1: exact match', () => {
   });
 
   test('rejects a wrong number of answers', async () => {
-    const result = await gradeFillInBlankAnswers(instantiate('fillInBlank5'), ['3'], withoutJava);
+    const result = await gradeFillInBlankAnswers(instantiate('fillInBlank4'), ['3'], withoutJava);
     expect(result).toMatchObject({ status: 'incorrect', stage: 1 });
   });
 });
@@ -79,10 +78,8 @@ describe('stage 2: re-execution with the instrumented program', () => {
     { problemId: 'fillInBlank3', answers: ['t.左を向く(); t.左を向く(); t.左を向く();'] },
     { problemId: 'fillInBlank3', answers: ['t.turnRight();'] },
     { problemId: 'fillInBlank3', answers: ['t.右を向く()'] },
-    { problemId: 'fillInBlank4', answers: ['x + x'] },
-    { problemId: 'fillInBlank4', answers: ['2 * x'] },
-    { problemId: 'fillInBlank5', answers: ['1 + 2', 't.turnRight();'] },
-    { problemId: 'fillInBlank5', answers: ['3', 't.左を向く(); t.左を向く(); t.左を向く();'] },
+    { problemId: 'fillInBlank4', answers: ['1 + 2', 't.turnRight();'] },
+    { problemId: 'fillInBlank4', answers: ['3', 't.左を向く(); t.左を向く(); t.左を向く();'] },
   ] as const)('accepts $answers for $problemId', async ({ answers, problemId }) => {
     expect(await gradeFillInBlankAnswers(instantiate(problemId), [...answers], withoutJava)).toEqual({
       status: 'correct',
@@ -100,19 +97,12 @@ describe('stage 2: re-execution with the instrumented program', () => {
     { problemId: 'fillInBlank2', answers: ['y'] },
     { problemId: 'fillInBlank3', answers: ['t.左を向く();'] },
     { problemId: 'fillInBlank3', answers: ['t.前に進む();'] },
-    { problemId: 'fillInBlank4', answers: ['x * 3'] },
-    { problemId: 'fillInBlank5', answers: ['2', 't.右を向く();'] },
-    { problemId: 'fillInBlank5', answers: ['3', 't.左を向く();'] },
+    { problemId: 'fillInBlank4', answers: ['2', 't.右を向く();'] },
+    { problemId: 'fillInBlank4', answers: ['3', 't.左を向く();'] },
   ] as const)('rejects $answers for $problemId', async ({ answers, problemId }) => {
     expect(await gradeFillInBlankAnswers(instantiate(problemId), [...answers], withoutJava)).toMatchObject({
       status: 'incorrect',
       stage: 2,
-    });
-  });
-
-  test('cannot grade untranslatable answers of problems without turtles', async () => {
-    expect(await gradeFillInBlankAnswers(instantiate('fillInBlank4'), ['x * 4 / 2'], withLocalJvm)).toMatchObject({
-      status: 'ungradable',
     });
   });
 
@@ -150,7 +140,7 @@ describe('stage 4: local JVM', () => {
     { problemId: 'fillInBlank2', answers: ['(int) (x + 1.0)'] },
     { problemId: 'fillInBlank3', answers: ['if (true) { t.右を向く(); }'] },
     { problemId: 'fillInBlank3', answers: ['for (int i = 0; i < 5; i++) { t.右を向く(); }'] },
-    { problemId: 'fillInBlank5', answers: ['9 / 3', 't.右を向く();'] },
+    { problemId: 'fillInBlank4', answers: ['9 / 3', 't.右を向く();'] },
   ] as const)('accepts $answers for $problemId', { timeout: 60_000 }, async ({ answers, problemId }) => {
     expect(await gradeFillInBlankAnswers(instantiate(problemId), [...answers], withLocalJvm)).toEqual({
       status: 'correct',
@@ -173,7 +163,7 @@ describe('stage 4: local JVM', () => {
     { problemId: 'fillInBlank3', answers: ['new Thread(() -> {}).start();'], detail: 'forbidden' },
     { problemId: 'fillInBlank3', answers: ['java.nio.file.Files.readString(null);'], detail: 'forbidden' },
     { problemId: 'fillInBlank3', answers: ['if (true) { t.左を向く(); }'], detail: 'exception' },
-    { problemId: 'fillInBlank5', answers: ['4 / 2', 't.右を向く();'], detail: 'final state differs' },
+    { problemId: 'fillInBlank4', answers: ['4 / 2', 't.右を向く();'], detail: 'final state differs' },
   ] as const)('rejects $answers for $problemId', { timeout: 60_000 }, async ({ answers, detail, problemId }) => {
     const result = await gradeFillInBlankAnswers(instantiate(problemId), [...answers], withLocalJvm);
     expect(result).toMatchObject({ status: 'incorrect' });

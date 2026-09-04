@@ -199,7 +199,6 @@ export const problemIdToName = {
   fillInBlank2: '穴埋めのテスト用問題(2)',
   fillInBlank3: '穴埋めのテスト用問題(3)',
   fillInBlank4: '穴埋めのテスト用問題(4)',
-  fillInBlank5: '穴埋めのテスト用問題(5)',
 } as const;
 export type ProblemId = keyof typeof problemIdToName;
 
@@ -362,7 +361,6 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
       'fillInBlank2',
       'fillInBlank3',
       'fillInBlank4',
-      'fillInBlank5',
     ],
   ],
 };
@@ -8373,20 +8371,6 @@ public class Main {
 `,
   },
   fillInBlank4: {
-    instrumented: `
-s.set('x', <1-3>); // step
-s.set('y', @[s.get('x') * 2]@); // step
-`,
-    java: `
-public class Main {
-  public static void main(String[] args) {
-    int x = <1-3>;
-    int y = @[x * 2]@;
-  }
-}
-`,
-  },
-  fillInBlank5: {
     instrumented: `
 const t = new Turtle(); // step
 for (s.set('i', 0); s.get('i') < @[3]@; s.set('i', s.get('i') + 1)) {

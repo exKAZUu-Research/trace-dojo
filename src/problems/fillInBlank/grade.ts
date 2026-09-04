@@ -49,13 +49,6 @@ export async function gradeFillInBlankAnswers(
 
   const stage2Result = gradeByInstrumentedProgram(problem, answers);
   if (stage2Result) return stage2Result;
-
-  if (!problem.instrumentedTemplate.includes('Turtle')) {
-    return {
-      status: 'ungradable',
-      detail: 'The answer cannot be translated and the problem has no turtle to compare.',
-    };
-  }
   return await gradeByJavaExecution(problem, answers, options?.javaExecutors ?? defaultJavaExecutors);
 }
 
