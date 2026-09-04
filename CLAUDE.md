@@ -40,7 +40,6 @@
 - Build prompts as a single template literal instead of `join()` on a pre-computable array of strings.
 - Assume all environment variables are defined; if validation is needed, `assert` at startup to fail fast.
 - Assume local tools such as `git`, `gh`, and `ghq` are installed and authenticated.
-- Ensure compatibility only with macOS and Linux; do not include Windows-specific code.
 - Prefer lambda over `function` for React components, e.g., `const Button: React.FC = () => {`.
 - Prefer `useImmer` over `useState` for arrays and objects.
 - Use `autoFocus` where it reduces user effort.
