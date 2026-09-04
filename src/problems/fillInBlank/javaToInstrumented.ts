@@ -298,6 +298,7 @@ class ExpressionTranslator {
     if (
       primitiveTypeNames.has(name) ||
       name === 'var' ||
+      name === 'null' ||
       /^\p{Lu}/u.test(name) ||
       name === 'this' ||
       name === 'super'

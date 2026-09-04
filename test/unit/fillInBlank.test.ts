@@ -81,7 +81,6 @@ describe('stage 2: re-execution with the instrumented program', () => {
     { problemId: 'fillInBlank2', answers: ['x - -1'] },
     { problemId: 'fillInBlank3', answers: ['t.左を向く(); t.左を向く(); t.左を向く();'] },
     { problemId: 'fillInBlank3', answers: ['t.turnRight();'] },
-    { problemId: 'fillInBlank3', answers: ['t.右を向く()'] },
     { problemId: 'fillInBlank4', answers: ['1 + 2', 't.turnRight();'] },
     { problemId: 'fillInBlank4', answers: ['3', 't.左を向く(); t.左を向く(); t.左を向く();'] },
   ] as const)('accepts $answers for $problemId', async ({ answers, problemId }) => {
@@ -97,7 +96,6 @@ describe('stage 2: re-execution with the instrumented program', () => {
     { problemId: 'fillInBlank1', answers: ['true'] },
     { problemId: 'fillInBlank2', answers: ['x'] },
     { problemId: 'fillInBlank2', answers: ['x + 2'] },
-    { problemId: 'fillInBlank2', answers: ['y'] },
     { problemId: 'fillInBlank3', answers: ['t.左を向く();'] },
     { problemId: 'fillInBlank3', answers: ['t.前に進む();'] },
     { problemId: 'fillInBlank4', answers: ['2', 't.右を向く();'] },
@@ -145,6 +143,8 @@ describe('stage 2: Java semantics and safety', () => {
   test.each([
     { problemId: 'fillInBlank1', answers: ['i < 0x4'] },
     { problemId: 'fillInBlank1', answers: ['Math.abs(-2147483648) < 0 && i < 4'] },
+    { problemId: 'fillInBlank1', answers: ['i < 4 && t != null'] },
+    { problemId: 'fillInBlank1', answers: ['i < 4 + args.length'] },
     { problemId: 'fillInBlank3', answers: ['t = t; t.右を向く();'] },
     { problemId: 'fillInBlank3', answers: ['String s = "Thread"; t.右を向く();'] },
     { problemId: 'fillInBlank3', answers: ['/* Runtime */ t.右を向く(); // Thread'] },
@@ -184,6 +184,12 @@ describe('stage 2: Java semantics and safety', () => {
     { problemId: 'fillInBlank1', answers: ['t.右を向く() == t.右を向く()'], detail: 'Compile error' },
     { problemId: 'fillInBlank2', answers: ['x + true'], detail: 'Compile error' },
     { problemId: 'fillInBlank2', answers: ['x + t.前に進めるか()'], detail: 'Compile error' },
+    { problemId: 'fillInBlank3', answers: ['t.右を向く()'], detail: 'Compile error' },
+    { problemId: 'fillInBlank3', answers: ['1; t.右を向く();'], detail: 'Compile error' },
+    { problemId: 'fillInBlank1', answers: ['i == true || i < 4'], detail: 'Compile error' },
+    { problemId: 'fillInBlank1', answers: ['i < 4 || (false && missing)'], detail: 'Compile error' },
+    { problemId: 'fillInBlank4', answers: ['3', 'int i = i; t.右を向く();'], detail: 'Compile error' },
+    { problemId: 'fillInBlank2', answers: ['y'], detail: 'Compile error' },
   ] as const)(
     'does not accept $answers for $problemId that Java rejects',
     { timeout: 60_000 },
@@ -193,6 +199,21 @@ describe('stage 2: Java semantics and safety', () => {
       expect(result.status === 'incorrect' && result.detail).toContain(detail);
     }
   );
+
+  test('confirms a provisional stage 2 verdict with Java', { timeout: 60_000 }, async () => {
+    expect(await gradeFillInBlankAnswers(instantiate('fillInBlank1'), ['i <= 3'], withLocalJvm)).toEqual({
+      status: 'correct',
+      stage: 4,
+    });
+  });
+
+  test('bounds the cost of growing the turtle list inside a loop', { timeout: 60_000 }, async () => {
+    const startedAt = Date.now();
+    const answers = ['1000000', `${'new Turtle(0, 0); '.repeat(50)}t.後に戻る();`];
+    const result = await gradeFillInBlankAnswers(instantiate('fillInBlank4'), answers, withLocalJvm);
+    expect(Date.now() - startedAt).toBeLessThan(20_000);
+    expect(result).toMatchObject({ status: 'incorrect' });
+  });
 
   test('aborts unbounded loops instead of hanging', { timeout: 60_000 }, async () => {
     const startedAt = Date.now();

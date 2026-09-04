@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
 import type { InstantiatedProblem } from '../instantiateProblem';
-import { TRACE_BUDGET_EXCEEDED_MESSAGE, traceProgram } from '../traceProgram';
+import { SCOPE_ERROR_NAME, TRACE_BUDGET_EXCEEDED_MESSAGE, traceProgram } from '../traceProgram';
+import { logger } from '../../infrastructures/pino';
 
 import { fillBlanks, normalizeAnswer } from './blanks';
 import type { JavaExecutor } from './javaExecutors';
@@ -50,9 +51,16 @@ export async function gradeFillInBlankAnswers(
     return { status: 'correct', stage: 1 };
   }
 
+  // Stage 2 is authoritative for wrong answers, but its "correct" is provisional: the translator mirrors Java
+  // semantics for what it accepts, yet only javac can confirm that the answer is valid Java at all.
   const stage2Result = gradeByInstrumentedProgram(problem, answers);
-  if (stage2Result) return stage2Result;
-  return await gradeByJavaExecution(problem, answers, options?.javaExecutors ?? defaultJavaExecutors);
+  if (stage2Result?.status === 'incorrect') return stage2Result;
+  const javaResult = await gradeByJavaExecution(problem, answers, options?.javaExecutors ?? defaultJavaExecutors);
+  if (javaResult.status === 'ungradable' && stage2Result) {
+    logger.warn('No Java executor was available; accepting the stage 2 verdict: %s', javaResult.detail);
+    return stage2Result;
+  }
+  return javaResult;
 }
 
 function gradeByInstrumentedProgram(
@@ -72,7 +80,8 @@ function gradeByInstrumentedProgram(
     const actual = traceProgram(
       fillBlanks(problem.instrumentedTemplate, translatedAnswers),
       fillBlanks(problem.displayProgramTemplate, answers),
-      problem.languageId
+      problem.languageId,
+      { collectTrace: false }
     );
     const isCorrect =
       isSameTurtleState(
@@ -90,7 +99,7 @@ function gradeByInstrumentedProgram(
       error instanceof TypeError ||
       error instanceof ReferenceError ||
       error instanceof RangeError ||
-      (error instanceof Error && error.message === TRACE_BUDGET_EXCEEDED_MESSAGE)
+      (error instanceof Error && (error.name === SCOPE_ERROR_NAME || error.message === TRACE_BUDGET_EXCEEDED_MESSAGE))
     ) {
       return;
     }
@@ -132,6 +141,9 @@ async function gradeByJavaExecution(
       }
       case 'timeout': {
         return { status: 'incorrect', stage, detail: 'Time limit exceeded.' };
+      }
+      case 'outputLimitExceeded': {
+        return { status: 'incorrect', stage, detail: 'The program printed too much output.' };
       }
       case 'executed': {
         const actual = parseJavaJudgeOutput(result.stdout, resultMarker);

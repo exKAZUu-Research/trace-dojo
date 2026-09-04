@@ -11,6 +11,7 @@ export type JavaExecutionResult =
   | { kind: 'executed'; stdout: string; stderr: string; exitCode: number }
   | { kind: 'compileError'; message: string }
   | { kind: 'timeout' }
+  | { kind: 'outputLimitExceeded' }
   /** The executor itself is broken or busy (network failure, rate limit, missing JDK), so another executor should be tried. */
   | { kind: 'unavailable'; reason: string };
 
@@ -20,7 +21,8 @@ export interface JavaExecutor {
 }
 
 export const DEFAULT_WANDBOX_COMPILE_URL = 'https://wandbox.org/api/compile.json';
-export const DEFAULT_WANDBOX_COMPILER = 'openjdk-jdk-22+36';
+// Matches the JDK 21 installed for the local executor so both Java stages accept the same language level.
+export const DEFAULT_WANDBOX_COMPILER = 'openjdk-jdk-21+35';
 export const DEFAULT_JAVA_TIMEOUT_MS = 10_000;
 
 const wandboxResponseSchema = z.object({
@@ -162,7 +164,7 @@ async function executeOnLocalJvm(
         : { kind: 'unavailable', reason: `javac failed: ${compilation.stderr}` };
     }
 
-    return await runCommand(
+    const execution = await runCommand(
       settings.javaCommand,
       [
         `-Xmx${settings.maxHeapMb}m`,
@@ -180,6 +182,11 @@ async function executeOnLocalJvm(
       directoryPath,
       settings.timeoutMs
     );
+    // The judge always prints something once it runs, so a silent non-zero exit means the JVM itself failed to start.
+    if (execution.kind === 'executed' && execution.exitCode !== 0 && !execution.stdout) {
+      return { kind: 'unavailable', reason: `The JVM did not start: ${execution.stderr}` };
+    }
+    return execution;
   } finally {
     await rm(directoryPath, { recursive: true, force: true });
   }
@@ -195,7 +202,7 @@ function runCommand(command: string, args: string[], cwd: string, timeoutMs: num
         if (!error) {
           resolve({ kind: 'executed', stdout, stderr, exitCode: 0 });
         } else if (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
-          resolve({ kind: 'executed', stdout: '', stderr: 'The program printed too much output.', exitCode: 1 });
+          resolve({ kind: 'outputLimitExceeded' });
         } else if (error.killed) {
           resolve({ kind: 'timeout' });
         } else if (typeof error.code === 'number') {

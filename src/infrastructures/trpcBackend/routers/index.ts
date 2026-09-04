@@ -77,6 +77,8 @@ export const backendRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      // Grading may take tens of seconds, so the completion time is the time the answer arrived.
+      const receivedAt = new Date();
       const session = await prisma.problemSession.findUnique({ where: { id: input.sessionId } });
       if (!session) throw new TRPCError({ code: 'NOT_FOUND' });
       if (session.userId !== ctx.session.superTokensUserId) throw new TRPCError({ code: 'UNAUTHORIZED' });
@@ -101,7 +103,7 @@ export const backendRouter = router({
         },
       });
       if (result.status === 'correct') {
-        await prisma.problemSession.update({ where: { id: session.id }, data: { completedAt: new Date() } });
+        await prisma.problemSession.update({ where: { id: session.id }, data: { completedAt: receivedAt } });
         revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');
       }
       return result;

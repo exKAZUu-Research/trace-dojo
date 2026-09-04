@@ -60,12 +60,20 @@ export type TracedProgram = Omit<
   'blankAnswers' | 'displayProgramTemplate' | 'instrumentedTemplate'
 >;
 
+/** Thrown by the instrumented runtime when a name is not in scope, i.e. a translation gap rather than Java semantics. */
+export const SCOPE_ERROR_NAME = 'ScopeError';
+
 export function traceProgram(
   this: unknown,
   instrumented: string,
   rawDisplayProgram: string,
-  languageId: LanguageId
+  languageId: LanguageId,
+  options?: {
+    /** Set to false when only the final state matters, so no per-step snapshots are retained. */
+    collectTrace?: boolean;
+  }
 ): TracedProgram {
+  const collectTrace = options?.collectTrace ?? true;
   if (!instrumented.includes('Turtle')) {
     if (instrumented.includes(' = ')) {
       throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
@@ -81,9 +89,17 @@ export function traceProgram(
   // 無理に難読化する必要はないが、コードの文量を減らす意識を持つ。
   const executableCode = `
 let myGlobal = {};
+class ScopeError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = '${SCOPE_ERROR_NAME}';
+  }
+}
+const collectTrace = ${collectTrace};
 let remainingOperations = ${MAX_TRACE_OPERATIONS};
-function spend() {
-  if (--remainingOperations < 0) throw new Error('${TRACE_BUDGET_EXCEEDED_MESSAGE}');
+function spend(cost = 1) {
+  remainingOperations -= cost;
+  if (remainingOperations < 0) throw new Error('${TRACE_BUDGET_EXCEEDED_MESSAGE}');
 }
 const trace = [];
 const _turtles = [];
@@ -99,7 +115,7 @@ class Scope {
     if (this.vars[varName] !== undefined) {
       return this.vars[varName];
     }
-    throw new Error(\`\${varName} is not defined: \${JSON.stringify(s)}\`);
+    throw new ScopeError(\`\${varName} is not defined: \${JSON.stringify(s)}\`);
   }
   set(sid, self, varName, value) {
     this.vars[varName] = typeof value === 'number' ? Math.floor(value) : value;
@@ -112,7 +128,7 @@ class Scope {
     }
   }
   leaveScope() {
-    if (!this.parent) throw new Error();
+    if (!this.parent) throw new ScopeError('No scope to leave');
     s = this.parent;
   }
   getDepth() {
@@ -131,6 +147,7 @@ const dy = [1, 0, -1, 0];
 const board = Array.from({length: ${GRID_ROWS}}, () => Array.from({length: ${GRID_COLUMNS}}, () => '${EMPTY_COLOR}'));
 class Turtle {
   constructor(x = 0, y = 0, color = '${DEFAULT_COLOR}') {
+    spend();
     this.x = x;
     this.y = y;
     if (this.x < 0 || ${GRID_COLUMNS} <= this.x || this.y < 0 || ${GRID_ROWS} <= this.y) {
@@ -207,7 +224,9 @@ class Turtle {
   }
 }
 function addTrace(sid, self) {
-  spend();
+  // Each snapshot copies every turtle, so the cost grows with the number of turtles.
+  spend(1 + _turtles.length);
+  if (!collectTrace) return;
   const vars = {...s.vars, ...myGlobal};
   if (self && self !== globalThis) {
     vars['this'] = {...self};
