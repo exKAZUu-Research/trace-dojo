@@ -59,7 +59,8 @@ class ${JAVA_JUDGE_CLASS_NAME} {
   public static void main(String[] args) {
     String exception = null;
     try {
-      ${mainClassName}.main(args);
+      // Launchers may append their own arguments (Wandbox passes the class name), so the program gets none.
+      ${mainClassName}.main(new String[0]);
     } catch (Throwable e) {
       exception = e.toString();
     }
