@@ -48,6 +48,13 @@ export const colorToChar = Object.fromEntries(
   Object.entries(charToColor).map(([char, color]) => [color, char])
 ) as Record<CellColor, ColorChar>;
 
+/**
+ * The maximum number of traced operations before execution aborts.
+ * Student-written blanks run through this tracer, so unbounded loops must not hang the server.
+ */
+export const MAX_TRACE_OPERATIONS = 20_000;
+export const TRACE_BUDGET_EXCEEDED_MESSAGE = 'Execution budget exceeded';
+
 export type TracedProgram = Omit<
   InstantiatedProblem,
   'blankAnswers' | 'displayProgramTemplate' | 'instrumentedTemplate'
@@ -74,6 +81,10 @@ export function traceProgram(
   // 無理に難読化する必要はないが、コードの文量を減らす意識を持つ。
   const executableCode = `
 let myGlobal = {};
+let remainingOperations = ${MAX_TRACE_OPERATIONS};
+function spend() {
+  if (--remainingOperations < 0) throw new Error('${TRACE_BUDGET_EXCEEDED_MESSAGE}');
+}
 const trace = [];
 const _turtles = [];
 const callStack = [];
@@ -131,6 +142,7 @@ class Turtle {
     _turtles.push(this);
   }
   前に進む() {
+    spend();
     const index = dirs.indexOf(this.dir);
     this.x += dx[index];
     this.y += dy[index];
@@ -144,6 +156,7 @@ class Turtle {
     addTrace(sid, self);
   }
   後に戻る() {
+    spend();
     const index = dirs.indexOf(this.dir);
     this.x -= dx[index];
     this.y -= dy[index];
@@ -176,6 +189,7 @@ class Turtle {
     _turtles.splice(_turtles.indexOf(this), 1);
   }
   右を向く() {
+    spend();
     this.dir = dirs[(dirs.indexOf(this.dir) + 1) % 4];
   }
   turnRight(sid, self) {
@@ -183,6 +197,7 @@ class Turtle {
     addTrace(sid, self);
   }
   左を向く() {
+    spend();
     this.dir = dirs[(dirs.indexOf(this.dir) + 3) % 4];
   }
   turnLeft(sid, self) {
@@ -191,6 +206,7 @@ class Turtle {
   }
 }
 function addTrace(sid, self) {
+  spend();
   const vars = {...s.vars, ...myGlobal};
   if (self && self !== globalThis) {
     vars['this'] = {...self};
@@ -211,6 +227,7 @@ function flattenObjects(obj) {
   }
 }
 function checkForCond(cond, sid) {
+  spend();
   if (!cond && trace.at(-1).sid === sid) {
     trace.at(-1).last = true;
   }

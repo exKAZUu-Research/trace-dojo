@@ -45,12 +45,24 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
   const [alert, setAlert] = useState<{ title: string; message: string; isCompleted: boolean }>();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const hasVariables = Object.keys(props.problem.finalVars).length > 0;
+  const isIncomplete = answers.some((answer) => answer.trim() === '');
 
   const handleSubmit = async (): Promise<void> => {
-    if (isSubmitting || alert) return;
+    if (isSubmitting || alert || isIncomplete) return;
     setIsSubmitting(true);
     try {
-      const result = await props.gradeAnswers(answers);
+      let result: FillInBlankGradingResult;
+      try {
+        result = await props.gradeAnswers(answers);
+      } catch (error) {
+        console.error(error);
+        setAlert({
+          title: '提出できませんでした',
+          message: '通信に失敗しました。ネットワークの状態を確認して、もう一度提出してください。',
+          isCompleted: false,
+        });
+        return;
+      }
       switch (result.status) {
         case 'correct': {
           setAlert({
@@ -104,6 +116,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
                   {toBlankPlaceholder(index + 1)}
                 </Text>
                 <Input
+                  aria-label={`空欄${toBlankPlaceholder(index + 1)}`}
                   // oxlint-disable-next-line jsx-a11y/no-autofocus -- 空欄の入力がこのページの主目的のため。
                   autoFocus={index === 0}
                   bg="white"
@@ -124,7 +137,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
             <Button
               alignSelf="flex-end"
               colorScheme="brand"
-              isDisabled={answers.some((answer) => answer.trim() === '')}
+              isDisabled={isIncomplete}
               isLoading={isSubmitting}
               onClick={() => void handleSubmit()}
             >

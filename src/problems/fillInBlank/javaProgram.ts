@@ -6,7 +6,9 @@ import {
   TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR,
   TURTLE_GRAPHICS_EMPTY_COLOR as EMPTY_COLOR,
 } from '../../constants';
-import type { TurtleTrace } from '../traceProgram';
+import { charToColor, type TurtleTrace } from '../traceProgram';
+
+const validColorChars = Object.keys(charToColor).join('');
 
 export const JAVA_JUDGE_CLASS_NAME = 'TraceDojoJudge';
 export const JAVA_RESULT_MARKER = '__TRACE_DOJO_RESULT__';
@@ -19,8 +21,13 @@ const javaExecutionResultSchema = z.object({
 });
 export type JavaTurtleState = z.infer<typeof javaExecutionResultSchema>;
 
-// Only a closed set of turtle-graphics programs is expected, so anything touching the JDK beyond the basics is rejected.
+/**
+ * A cheap pre-filter for obviously hostile programs. It is not a sandbox: the local executor runs programs
+ * under the JVM security manager with an empty policy, and Wandbox provides its own isolation.
+ */
 const forbiddenPatterns = [
+  // javac decodes Unicode escapes before lexing, which would let them hide any of the names below.
+  /\\u/,
   /\bimport\b/,
   /\bpackage\b/,
   /\bnative\b/,
@@ -58,6 +65,8 @@ class ${JAVA_JUDGE_CLASS_NAME} {
     System.out.println();
     System.out.println("${JAVA_RESULT_MARKER}");
     System.out.println(Turtle.dump(exception));
+    // Nothing may be printed after the result, e.g. by a thread the program left behind.
+    System.out.close();
   }
 }
 
@@ -69,25 +78,28 @@ class Turtle {
   static final char[] DIRS = {'N', 'E', 'S', 'W'};
   static final int[] DX = {0, 1, 0, -1};
   static final int[] DY = {1, 0, -1, 0};
-  static final char[][] board = new char[ROWS][COLUMNS];
-  static final java.util.List<Turtle> turtles = new java.util.ArrayList<>();
+  private static final char[][] board = new char[ROWS][COLUMNS];
+  private static final java.util.List<Turtle> turtles = new java.util.ArrayList<>();
   static {
     for (char[] row : board) java.util.Arrays.fill(row, '${EMPTY_COLOR}');
   }
 
-  int x;
-  int y;
-  String color;
-  char dir = 'N';
+  private int x;
+  private int y;
+  private final char color;
+  private char dir = 'N';
 
   Turtle() { this(0, 0, "${DEFAULT_COLOR}"); }
   Turtle(int x, int y) { this(x, y, "${DEFAULT_COLOR}"); }
   Turtle(int x, int y, String color) {
+    if (color == null || color.length() != 1 || "${validColorChars}".indexOf(color.charAt(0)) < 0) {
+      throw new RuntimeException("Invalid color: " + color);
+    }
     this.x = x;
     this.y = y;
-    this.color = color;
+    this.color = color.charAt(0);
     checkBounds();
-    board[y][x] = color.charAt(0);
+    board[y][x] = this.color;
     turtles.add(this);
   }
 
@@ -102,14 +114,14 @@ class Turtle {
     x += DX[dirIndex()];
     y += DY[dirIndex()];
     checkBounds();
-    board[y][x] = color.charAt(0);
+    board[y][x] = color;
   }
   void forward() { 前に進む(); }
   void 後に戻る() {
     x -= DX[dirIndex()];
     y -= DY[dirIndex()];
     checkBounds();
-    board[y][x] = color.charAt(0);
+    board[y][x] = color;
   }
   void backward() { 後に戻る(); }
   boolean 前に進めるか() {

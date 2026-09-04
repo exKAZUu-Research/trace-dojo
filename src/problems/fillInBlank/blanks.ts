@@ -32,8 +32,17 @@ export function toBlankPlaceholder(blankNumber: number): string {
  * Normalizes an answer so that differences in whitespace do not matter.
  */
 export function normalizeAnswer(answer: string): string {
+  // String and char literals keep their contents; only the code around them is normalized.
   return answer
-    .trim()
-    .replaceAll(/\s+/g, ' ')
-    .replaceAll(/\s?([^\p{L}\p{N}_$])\s?/gu, '$1');
+    .split(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/)
+    .map((part, index) =>
+      index % 2 === 1
+        ? part
+        : part
+            .trim()
+            .replaceAll(/\s+/g, ' ')
+            .replaceAll(/\s?([^\p{L}\p{N}_$])\s?/gu, '$1')
+    )
+    .join('')
+    .trim();
 }

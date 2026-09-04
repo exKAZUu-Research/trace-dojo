@@ -5,6 +5,8 @@ import path from 'node:path';
 
 import { z } from 'zod';
 
+import { extractPublicClassName } from './javaProgram';
+
 export type JavaExecutionResult =
   | { kind: 'executed'; stdout: string; stderr: string; exitCode: number }
   | { kind: 'compileError'; message: string }
@@ -72,66 +74,115 @@ export function createWandboxExecutor(options?: {
   };
 }
 
-export function createLocalJvmExecutor(options?: {
-  javaCommand?: string;
+export const DEFAULT_MAX_PENDING_LOCAL_EXECUTIONS = 5;
+
+export interface LocalJvmExecutorOptions {
+  /** Directory containing `bin/javac` and `bin/java`. Defaults to `JAVA_HOME`, else the commands on `PATH`. */
+  javaHome?: string;
   timeoutMs?: number;
   maxHeapMb?: number;
-}): JavaExecutor {
-  const javaCommand =
-    options?.javaCommand ?? (process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, 'bin', 'java') : 'java');
-  const timeoutMs = options?.timeoutMs ?? DEFAULT_JAVA_TIMEOUT_MS;
-  const maxHeapMb = options?.maxHeapMb ?? 128;
+  /** Executions beyond this queue length are reported as unavailable instead of waiting. */
+  maxPendingExecutions?: number;
+}
+
+export function createLocalJvmExecutor(options?: LocalJvmExecutorOptions): JavaExecutor {
+  const javaHome = options?.javaHome ?? process.env.JAVA_HOME;
+  const settings = {
+    javacCommand: javaHome ? path.join(javaHome, 'bin', 'javac') : 'javac',
+    javaCommand: javaHome ? path.join(javaHome, 'bin', 'java') : 'java',
+    timeoutMs: options?.timeoutMs ?? DEFAULT_JAVA_TIMEOUT_MS,
+    maxHeapMb: options?.maxHeapMb ?? 128,
+  };
+  const maxPendingExecutions = options?.maxPendingExecutions ?? DEFAULT_MAX_PENDING_LOCAL_EXECUTIONS;
   // The single Fly machine is small, so Java programs are executed one at a time.
   let queue: Promise<unknown> = Promise.resolve();
+  let pendingExecutions = 0;
   return {
     name: 'localJvm',
     execute(program, entryClassName) {
-      const run = queue.then(() => executeOnLocalJvm(program, entryClassName, javaCommand, timeoutMs, maxHeapMb));
-      queue = run.catch(() => {});
+      if (pendingExecutions >= maxPendingExecutions) {
+        return Promise.resolve({ kind: 'unavailable', reason: 'The local JVM executor is busy.' });
+      }
+      pendingExecutions++;
+      const run = queue.then(() => executeOnLocalJvm(program, entryClassName, settings));
+      queue = run.catch(() => {}).finally(() => pendingExecutions--);
       return run;
     },
   };
 }
 
+interface LocalJvmSettings {
+  javacCommand: string;
+  javaCommand: string;
+  timeoutMs: number;
+  maxHeapMb: number;
+}
+
+/**
+ * Compiles with `javac`, then runs under the JVM security manager with an empty policy so that the program
+ * cannot touch files, processes, the network, or reflection internals even if it evades the static pre-filter.
+ */
 async function executeOnLocalJvm(
   program: string,
   entryClassName: string,
-  javaCommand: string,
-  timeoutMs: number,
-  maxHeapMb: number
+  settings: LocalJvmSettings
 ): Promise<JavaExecutionResult> {
   const directoryPath = await mkdtemp(path.join(tmpdir(), 'trace-dojo-java-'));
   try {
-    const filePath = path.join(directoryPath, `${entryClassName}.java`);
-    await writeFile(filePath, program);
-    return await new Promise((resolve) => {
-      execFile(
-        javaCommand,
-        [
-          `-Xmx${maxHeapMb}m`,
-          '-XX:+UseSerialGC',
-          '-XX:TieredStopAtLevel=1',
-          '-Xshare:auto',
-          '-Duser.language=en',
-          '-Duser.country=US',
-          filePath,
-        ],
-        { cwd: directoryPath, timeout: timeoutMs, maxBuffer: 1024 * 1024, killSignal: 'SIGKILL' },
-        (error, stdout, stderr) => {
-          if (error && 'code' in error && error.code === 'ENOENT') {
-            resolve({ kind: 'unavailable', reason: `Java command not found: ${javaCommand}` });
-          } else if (error && 'killed' in error && error.killed) {
-            resolve({ kind: 'timeout' });
-          } else if (error && !stdout && /\.java:\d+: /.test(stderr)) {
-            resolve({ kind: 'compileError', message: stderr });
-          } else {
-            const exitCode = error && 'code' in error && typeof error.code === 'number' ? error.code : 0;
-            resolve({ kind: 'executed', stdout, stderr, exitCode });
-          }
-        }
-      );
-    });
+    // javac requires the file to be named after the public class.
+    const sourcePath = path.join(directoryPath, `${extractPublicClassName(program) ?? entryClassName}.java`);
+    const classesPath = path.join(directoryPath, 'classes');
+    const policyPath = path.join(directoryPath, 'judge.policy');
+    await Promise.all([writeFile(sourcePath, program), writeFile(policyPath, 'grant {};\n')]);
+
+    const compilation = await runCommand(
+      settings.javacCommand,
+      ['-J-Xshare:auto', '-J-XX:TieredStopAtLevel=1', '-encoding', 'utf8', '-d', classesPath, sourcePath],
+      directoryPath,
+      settings.timeoutMs
+    );
+    if (compilation.kind !== 'executed') return compilation;
+    if (compilation.exitCode !== 0) return { kind: 'compileError', message: compilation.stderr };
+
+    return await runCommand(
+      settings.javaCommand,
+      [
+        `-Xmx${settings.maxHeapMb}m`,
+        '-XX:+UseSerialGC',
+        '-XX:TieredStopAtLevel=1',
+        '-Xshare:auto',
+        '-Duser.language=en',
+        '-Duser.country=US',
+        '-Djava.security.manager',
+        `-Djava.security.policy==${policyPath}`,
+        '-cp',
+        classesPath,
+        entryClassName,
+      ],
+      directoryPath,
+      settings.timeoutMs
+    );
   } finally {
     await rm(directoryPath, { recursive: true, force: true });
   }
+}
+
+function runCommand(command: string, args: string[], cwd: string, timeoutMs: number): Promise<JavaExecutionResult> {
+  return new Promise((resolve) => {
+    execFile(
+      command,
+      args,
+      { cwd, timeout: timeoutMs, maxBuffer: 1024 * 1024, killSignal: 'SIGKILL' },
+      (error, stdout, stderr) => {
+        if (error && 'code' in error && error.code === 'ENOENT') {
+          resolve({ kind: 'unavailable', reason: `Command not found: ${command}` });
+        } else if (error && 'killed' in error && error.killed) {
+          resolve({ kind: 'timeout' });
+        } else {
+          const exitCode = error && 'code' in error && typeof error.code === 'number' ? error.code : 0;
+          resolve({ kind: 'executed', stdout, stderr, exitCode });
+        }
+      }
+    );
+  });
 }

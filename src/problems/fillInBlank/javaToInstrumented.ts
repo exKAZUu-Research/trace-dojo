@@ -2,6 +2,9 @@
  * Translates a Java fragment written in a blank into the instrumented (JavaScript) dialect used by `traceProgram`.
  * Only a conservative subset of Java is supported; anything else throws `UnsupportedJavaError`,
  * which tells the grader to fall back to real Java execution.
+ *
+ * The translated code is evaluated inside the server process, so this module is a privilege boundary:
+ * it must never emit an identifier, member name, or index expression that it does not understand.
  */
 
 export class UnsupportedJavaError extends Error {
@@ -12,47 +15,30 @@ export class UnsupportedJavaError extends Error {
 }
 
 interface Token {
-  type: 'number' | 'string' | 'identifier' | 'operator';
+  type: 'number' | 'identifier' | 'operator';
   value: string;
 }
 
-const turtleMethodNameMap: Record<string, string> = {
-  前に進む: 'forward',
-  後に戻る: 'backward',
-  右を向く: 'turnRight',
-  左を向く: 'turnLeft',
-  前に進めるか: 'canMoveForward',
-};
-
-const primitiveTypeNames = new Set(['int', 'long', 'short', 'byte', 'boolean', 'char', 'String', 'var']);
-const javaBuiltinNames = new Set(['true', 'false', 'null', 'new', 'return', 'Turtle', 'Math']);
-// Only the members whose semantics are identical between Java and JavaScript.
-const supportedMathMembers = new Set(['max', 'min', 'abs']);
-const unsupportedKeywords = new Set([
-  'this',
-  'super',
-  'if',
-  'else',
-  'for',
-  'while',
-  'do',
-  'switch',
-  'case',
-  'break',
-  'continue',
-  'instanceof',
-  'static',
-  'void',
-  'public',
-  'private',
-  'protected',
-  'final',
-  'throw',
-  'try',
-  'catch',
-  'class',
+/** Turtle members whose JavaScript counterparts have identical semantics, keyed by Java name. */
+const turtleMemberMap = new Map([
+  ['前に進む', 'forward'],
+  ['forward', 'forward'],
+  ['後に戻る', 'backward'],
+  ['backward', 'backward'],
+  ['右を向く', 'turnRight'],
+  ['turnRight', 'turnRight'],
+  ['左を向く', 'turnLeft'],
+  ['turnLeft', 'turnLeft'],
+  ['前に進めるか', 'canMoveForward'],
+  ['canMoveForward', 'canMoveForward'],
+  ['前のマスが塗られているか', '前のマスが塗られているか'],
+  ['remove', 'remove'],
 ]);
-const operatorRegex = /^(?:\+\+|--|==|!=|<=|>=|&&|\|\||[+\-*%<>!=(),.[\];])/;
+// Only the members whose semantics are identical between Java and JavaScript for int arguments.
+const mathMembers = new Set(['max', 'min', 'abs']);
+const primitiveTypeNames = new Set(['int', 'long', 'short', 'byte', 'boolean', 'char', 'var']);
+const literalNames = new Set(['true', 'false']);
+const operatorRegex = /^(?:\+\+|--|==|!=|<=|>=|&&|\|\||[+\-*%<>!=(),.;])/;
 const identifierRegex = /^[\p{L}_$][\p{L}\p{N}_$]*/u;
 const numberRegex = /^\d+/;
 
@@ -127,7 +113,7 @@ function translateSegment(tokens: Token[], nativeNames: ReadonlySet<string>): st
       const name = identifier.value;
       if (nativeNames.has(name)) return `${name}${incrementOperator.value}`;
       const binaryOperator = incrementOperator.value === '++' ? '+' : '-';
-      return `s.set('${name}', s.get('${name}') ${binaryOperator} 1)`;
+      return `s.set('${name}', (s.get('${name}') ${binaryOperator} 1) | 0)`;
     }
   }
 
@@ -135,75 +121,165 @@ function translateSegment(tokens: Token[], nativeNames: ReadonlySet<string>): st
 }
 
 function translateExpression(tokens: Token[], nativeNames: ReadonlySet<string>): string {
-  if (tokens.length === 0) throw new UnsupportedJavaError('empty expression');
-
-  const parts: string[] = [];
-  for (const [index, token] of tokens.entries()) {
-    const previous = tokens[index - 1];
-    const next = tokens[index + 1];
-    switch (token.type) {
-      case 'number':
-      case 'string': {
-        parts.push(token.value);
-        break;
-      }
-      case 'operator': {
-        if (token.value === '=' || isIncrementOperator(token)) {
-          throw new UnsupportedJavaError(`operator ${token.value} inside an expression`);
-        }
-        parts.push(token.value === '==' ? '===' : token.value === '!=' ? '!==' : token.value);
-        break;
-      }
-      case 'identifier': {
-        const name = token.value;
-        const isMemberName = previous && isOperator(previous, '.');
-        if (unsupportedKeywords.has(name)) {
-          throw new UnsupportedJavaError(`keyword ${name}`);
-        } else if (isMemberName) {
-          const owner = tokens[index - 2];
-          if (owner && owner.type === 'identifier' && owner.value === 'Math' && !supportedMathMembers.has(name)) {
-            throw new UnsupportedJavaError(`Math.${name}`);
-          }
-          parts.push(turtleMethodNameMap[name] ?? name);
-        } else if (javaBuiltinNames.has(name) || nativeNames.has(name)) {
-          if (
-            name === 'new' &&
-            next &&
-            next.type === 'identifier' &&
-            next.value !== 'Turtle' &&
-            !nativeNames.has(next.value)
-          ) {
-            throw new UnsupportedJavaError(`instantiation of ${next.value}`);
-          }
-          parts.push(name);
-        } else if (next && isOperator(next, '(')) {
-          throw new UnsupportedJavaError(`call of unknown function ${name}`);
-        } else if (next && isOperator(next, '.') && tokens[index + 2]?.value !== 'length') {
-          throw new UnsupportedJavaError(`member access on unknown variable ${name}`);
-        } else if (primitiveTypeNames.has(name)) {
-          throw new UnsupportedJavaError(`type name ${name}`);
-        } else {
-          parts.push(`s.get('${name}')`);
-        }
-        break;
-      }
-    }
-  }
-  return joinTokens(parts);
+  return new ExpressionTranslator(tokens, nativeNames).translate();
 }
 
-function joinTokens(parts: string[]): string {
-  let result = '';
-  for (const [index, part] of parts.entries()) {
-    const previous = parts[index - 1];
-    const needsSpace =
-      index > 0 &&
-      !/^[.,)\]]$/.test(part) &&
-      !/[.([]$/.test(previous) &&
-      !(part === '(' && /[\p{L}\p{N}_$]$/u.test(previous));
-    result += (needsSpace ? ' ' : '') + part;
+/**
+ * A precedence-climbing parser that emits JavaScript with Java `int` semantics (32-bit wrap-around).
+ */
+class ExpressionTranslator {
+  private index = 0;
+
+  constructor(
+    private readonly tokens: Token[],
+    private readonly nativeNames: ReadonlySet<string>
+  ) {}
+
+  translate(): string {
+    if (this.tokens.length === 0) throw new UnsupportedJavaError('empty expression');
+    const result = this.parseOr();
+    if (this.index < this.tokens.length) {
+      throw new UnsupportedJavaError(`unexpected token ${this.tokens[this.index].value}`);
+    }
+    return result;
   }
-  return result;
+
+  private parseOr(): string {
+    let left = this.parseAnd();
+    while (this.consumeOperator('||')) left = `${left} || ${this.parseAnd()}`;
+    return left;
+  }
+
+  private parseAnd(): string {
+    let left = this.parseEquality();
+    while (this.consumeOperator('&&')) left = `${left} && ${this.parseEquality()}`;
+    return left;
+  }
+
+  private parseEquality(): string {
+    let left = this.parseRelational();
+    for (;;) {
+      if (this.consumeOperator('==')) left = `${left} === ${this.parseRelational()}`;
+      else if (this.consumeOperator('!=')) left = `${left} !== ${this.parseRelational()}`;
+      else return left;
+    }
+  }
+
+  private parseRelational(): string {
+    let left = this.parseAdditive();
+    for (;;) {
+      const operator = ['<', '>', '<=', '>='].find((op) => this.consumeOperator(op));
+      if (!operator) return left;
+      left = `${left} ${operator} ${this.parseAdditive()}`;
+    }
+  }
+
+  private parseAdditive(): string {
+    let left = this.parseMultiplicative();
+    for (;;) {
+      if (this.consumeOperator('+')) left = `((${left} + ${this.parseMultiplicative()}) | 0)`;
+      else if (this.consumeOperator('-')) left = `((${left} - ${this.parseMultiplicative()}) | 0)`;
+      else return left;
+    }
+  }
+
+  private parseMultiplicative(): string {
+    let left = this.parseUnary();
+    for (;;) {
+      if (this.consumeOperator('*')) left = `Math.imul(${left}, ${this.parseUnary()})`;
+      else if (this.consumeOperator('%')) left = `(${left} % ${this.parseUnary()})`;
+      else return left;
+    }
+  }
+
+  private parseUnary(): string {
+    if (this.consumeOperator('!')) return `!${this.parseUnary()}`;
+    if (this.consumeOperator('-')) return `((-${this.parseUnary()}) | 0)`;
+    if (this.consumeOperator('+')) return this.parseUnary();
+    return this.parsePostfix();
+  }
+
+  private parsePostfix(): string {
+    let result = this.parsePrimary();
+    while (this.consumeOperator('.')) {
+      const member = this.next();
+      if (member.type !== 'identifier') throw new UnsupportedJavaError(`member ${member.value}`);
+      if (result === 'Math') {
+        if (!mathMembers.has(member.value)) throw new UnsupportedJavaError(`Math.${member.value}`);
+        result = `Math.${member.value}${this.parseArguments()}`;
+      } else if (member.value === 'length' && !this.peekOperator('(')) {
+        result = `${result}.length`;
+      } else {
+        const turtleMember = turtleMemberMap.get(member.value);
+        if (!turtleMember || !this.peekOperator('(')) throw new UnsupportedJavaError(`member ${member.value}`);
+        result = `${result}.${turtleMember}${this.parseArguments()}`;
+      }
+    }
+    return result;
+  }
+
+  private parsePrimary(): string {
+    const token = this.next();
+    if (token.type === 'number') return token.value;
+    if (token.type === 'operator') {
+      if (token.value !== '(') throw new UnsupportedJavaError(`operator ${token.value}`);
+      const inner = this.parseOr();
+      if (!this.consumeOperator(')')) throw new UnsupportedJavaError('missing )');
+      return `(${inner})`;
+    }
+    const name = token.value;
+    if (literalNames.has(name)) return name;
+    if (name === 'new') {
+      const className = this.next();
+      if (className.type !== 'identifier' || (className.value !== 'Turtle' && !this.nativeNames.has(className.value))) {
+        throw new UnsupportedJavaError(`instantiation of ${className.value}`);
+      }
+      return `new ${className.value}${this.parseArguments()}`;
+    }
+    if (name === 'Math') {
+      if (!this.peekOperator('.')) throw new UnsupportedJavaError('Math without member');
+      return 'Math';
+    }
+    if (this.nativeNames.has(name)) {
+      return this.peekOperator('(') ? `${name}${this.parseArguments()}` : name;
+    }
+    if (this.peekOperator('(')) throw new UnsupportedJavaError(`call of unknown function ${name}`);
+    if (primitiveTypeNames.has(name) || /^\p{Lu}/u.test(name) || name === 'this' || name === 'super') {
+      throw new UnsupportedJavaError(`identifier ${name}`);
+    }
+    return `s.get('${name}')`;
+  }
+
+  private parseArguments(): string {
+    if (!this.consumeOperator('(')) throw new UnsupportedJavaError('missing (');
+    const args: string[] = [];
+    if (!this.consumeOperator(')')) {
+      do {
+        args.push(this.parseOr());
+      } while (this.consumeOperator(','));
+      if (!this.consumeOperator(')')) throw new UnsupportedJavaError('missing )');
+    }
+    return `(${args.join(', ')})`;
+  }
+
+  private next(): Token {
+    const token = this.tokens[this.index++];
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (!token) throw new UnsupportedJavaError('unexpected end of expression');
+    return token;
+  }
+
+  private peekOperator(value: string): boolean {
+    const token = this.tokens[this.index];
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    return token !== undefined && isOperator(token, value);
+  }
+
+  private consumeOperator(value: string): boolean {
+    if (!this.peekOperator(value)) return false;
+    this.index++;
+    return true;
+  }
 }
 
 function tokenize(fragment: string): Token[] {
@@ -215,21 +291,17 @@ function tokenize(fragment: string): Token[] {
       rest = rest.slice(whitespace[0].length);
       continue;
     }
-    const string = /^"(?:[^"\\]|\\.)*"/.exec(rest);
-    if (string) {
-      tokens.push({ type: 'string', value: string[0] });
-      rest = rest.slice(string[0].length);
-      continue;
-    }
-    const char = /^'(?:[^'\\]|\\.)'/.exec(rest);
+    // Java promotes chars to their code points in arithmetic, so a plain char literal becomes a number.
+    const char = /^'([^'\\])'/.exec(rest);
     if (char) {
-      tokens.push({ type: 'string', value: `"${char[0].slice(1, -1).replaceAll('"', String.raw`\"`)}"` });
+      tokens.push({ type: 'number', value: char[1].codePointAt(0)!.toString() });
       rest = rest.slice(char[0].length);
       continue;
     }
     const number = numberRegex.exec(rest);
     if (number) {
-      if (/^[\d.]/.test(rest.slice(number[0].length))) {
+      // Reject radix prefixes, type suffixes, digit separators and decimals, which JavaScript would misread.
+      if (/^[\p{L}\p{N}_.]/u.test(rest.slice(number[0].length))) {
         throw new UnsupportedJavaError(`number literal ${rest.slice(0, 10)}`);
       }
       tokens.push({ type: 'number', value: number[0] });

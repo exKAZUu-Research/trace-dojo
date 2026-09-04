@@ -1,5 +1,5 @@
 import type { InstantiatedProblem } from '../instantiateProblem';
-import { traceProgram } from '../traceProgram';
+import { TRACE_BUDGET_EXCEEDED_MESSAGE, traceProgram } from '../traceProgram';
 
 import { fillBlanks, normalizeAnswer } from './blanks';
 import type { JavaExecutor } from './javaExecutors';
@@ -80,6 +80,10 @@ function gradeByInstrumentedProgram(
       ? { status: 'correct', stage: 2 }
       : { status: 'incorrect', stage: 2, detail: 'The final state differs from the expected one.' };
   } catch (error) {
+    // A syntax error or an exhausted budget may be a translator limitation, so let real Java judge the answer.
+    if (error instanceof SyntaxError || (error instanceof Error && error.message === TRACE_BUDGET_EXCEEDED_MESSAGE)) {
+      return;
+    }
     return { status: 'incorrect', stage: 2, detail: `The program failed: ${String(error)}` };
   }
 }
