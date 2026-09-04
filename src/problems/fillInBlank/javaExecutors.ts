@@ -42,6 +42,8 @@ export function createWandboxExecutor(options?: {
   return {
     name: 'wandbox',
     async execute(program, entryClassName) {
+      // javac requires the file to be named after the public class.
+      const fileName = `${extractPublicClassName(program) ?? entryClassName}.java`;
       let response: Response;
       try {
         response = await fetch(compileUrl, {
@@ -50,9 +52,10 @@ export function createWandboxExecutor(options?: {
           body: JSON.stringify({
             compiler,
             code: '',
-            codes: [{ file: 'Main.java', code: program }],
-            'compiler-option-raw': 'Main.java',
-            'runtime-option-raw': entryClassName,
+            codes: [{ file: fileName, code: program }],
+            'compiler-option-raw': fileName,
+            // The security manager keeps the program from reflecting into the judge's state (options are newline-separated).
+            'runtime-option-raw': `-Djava.security.manager\n${entryClassName}`,
           }),
           signal: AbortSignal.timeout(timeoutMs),
         });
@@ -67,7 +70,8 @@ export function createWandboxExecutor(options?: {
         return { kind: 'unavailable', reason: 'Wandbox responded with an unexpected body' };
       }
       const { compiler_error, program_error, program_output, signal, status } = parsed.data;
-      if (compiler_error) return { kind: 'compileError', message: compiler_error };
+      // `compiler_error` also carries warnings of successful compilations, so only a run that never started counts.
+      if (status !== '0' && !program_output && compiler_error) return { kind: 'compileError', message: compiler_error };
       if (signal) return { kind: 'timeout' };
       return { kind: 'executed', stdout: program_output ?? '', stderr: program_error ?? '', exitCode: Number(status) };
     },
@@ -154,7 +158,7 @@ async function executeOnLocalJvm(
     if (compilation.exitCode !== 0) {
       // Only javac diagnostics are the student's fault; anything else means the toolchain itself failed.
       return /\.java:\d+: /.test(compilation.stderr)
-        ? { kind: 'compileError', message: compilation.stderr }
+        ? { kind: 'compileError', message: compilation.stderr.replaceAll(`${directoryPath}${path.sep}`, '') }
         : { kind: 'unavailable', reason: `javac failed: ${compilation.stderr}` };
     }
 

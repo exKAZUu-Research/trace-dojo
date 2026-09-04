@@ -86,7 +86,8 @@ export const backendRouter = router({
       const result = await gradeFillInBlankAnswers(problem, input.answers);
       if (result.status === 'ungradable') {
         logger.warn('Failed to grade fill-in-the-blank answers of session %d: %s', session.id, result.detail);
-        return result;
+        // The detail describes server infrastructure, so it stays in the log.
+        return { status: result.status, detail: '' };
       }
       await prisma.problemSubmission.create({
         data: {

@@ -132,11 +132,20 @@ function translateSegment(tokens: Token[], nativeNames: Set<string>): string {
 }
 
 function translateExpression(tokens: Token[], nativeNames: ReadonlySet<string>): string {
-  return new ExpressionTranslator(tokens, nativeNames).translate();
+  return new ExpressionTranslator(tokens, nativeNames).translate().code;
+}
+
+/** A coarse Java type; `unknown` is a scope variable or function result whose type the translator cannot see. */
+type JavaType = 'int' | 'boolean' | 'turtle' | 'void' | 'unknown';
+
+interface TypedCode {
+  code: string;
+  type: JavaType;
 }
 
 /**
  * A precedence-climbing parser that emits JavaScript with Java `int` semantics (32-bit wrap-around).
+ * Operand types are checked coarsely so that JavaScript coercion cannot accept what javac rejects.
  */
 class ExpressionTranslator {
   private index = 0;
@@ -146,7 +155,7 @@ class ExpressionTranslator {
     private readonly nativeNames: ReadonlySet<string>
   ) {}
 
-  translate(): string {
+  translate(): TypedCode {
     if (this.tokens.length === 0) throw new UnsupportedJavaError('empty expression');
     const result = this.parseOr();
     if (this.index < this.tokens.length) {
@@ -155,108 +164,135 @@ class ExpressionTranslator {
     return result;
   }
 
-  private parseOr(): string {
+  private parseOr(): TypedCode {
     let left = this.parseAnd();
-    while (this.consumeOperator('||')) left = `${left} || ${this.parseAnd()}`;
+    while (this.consumeOperator('||')) {
+      left = { code: `${expect(left, 'boolean')} || ${expect(this.parseAnd(), 'boolean')}`, type: 'boolean' };
+    }
     return left;
   }
 
-  private parseAnd(): string {
+  private parseAnd(): TypedCode {
     let left = this.parseEquality();
-    while (this.consumeOperator('&&')) left = `${left} && ${this.parseEquality()}`;
+    while (this.consumeOperator('&&')) {
+      left = { code: `${expect(left, 'boolean')} && ${expect(this.parseEquality(), 'boolean')}`, type: 'boolean' };
+    }
     return left;
   }
 
   // Chained comparisons such as `a < b > c` compare a boolean in Java and do not compile, so only one is allowed.
-  private parseEquality(): string {
+  private parseEquality(): TypedCode {
     const left = this.parseRelational();
-    if (this.consumeOperator('==')) return `${left} === ${this.parseRelational()}`;
-    if (this.consumeOperator('!=')) return `${left} !== ${this.parseRelational()}`;
-    return left;
+    const operator = this.consumeOperator('==') ? '===' : this.consumeOperator('!=') ? '!==' : undefined;
+    if (!operator) return left;
+    const right = this.parseRelational();
+    if (
+      left.type === 'void' ||
+      right.type === 'void' ||
+      (isKnown(left) && isKnown(right) && left.type !== right.type)
+    ) {
+      throw new UnsupportedJavaError(`comparison of ${left.type} with ${right.type}`);
+    }
+    return { code: `${left.code} ${operator} ${right.code}`, type: 'boolean' };
   }
 
-  private parseRelational(): string {
+  private parseRelational(): TypedCode {
     const left = this.parseAdditive();
     const operator = ['<', '>', '<=', '>='].find((op) => this.consumeOperator(op));
-    return operator ? `${left} ${operator} ${this.parseAdditive()}` : left;
+    if (!operator) return left;
+    return { code: `${expect(left, 'int')} ${operator} ${expect(this.parseAdditive(), 'int')}`, type: 'boolean' };
   }
 
-  private parseAdditive(): string {
+  private parseAdditive(): TypedCode {
     let left = this.parseMultiplicative();
     for (;;) {
-      if (this.consumeOperator('+')) left = `((${left} + ${this.parseMultiplicative()}) | 0)`;
-      else if (this.consumeOperator('-')) left = `((${left} - ${this.parseMultiplicative()}) | 0)`;
-      else return left;
+      const operator = this.consumeOperator('+') ? '+' : this.consumeOperator('-') ? '-' : undefined;
+      if (!operator) return left;
+      left = {
+        code: `((${expect(left, 'int')} ${operator} ${expect(this.parseMultiplicative(), 'int')}) | 0)`,
+        type: 'int',
+      };
     }
   }
 
-  private parseMultiplicative(): string {
+  private parseMultiplicative(): TypedCode {
     let left = this.parseUnary();
     for (;;) {
-      if (this.consumeOperator('*')) left = `Math.imul(${left}, ${this.parseUnary()})`;
-      else if (this.consumeOperator('%')) {
+      if (this.consumeOperator('*')) {
+        left = { code: `Math.imul(${expect(left, 'int')}, ${expect(this.parseUnary(), 'int')})`, type: 'int' };
+      } else if (this.consumeOperator('%')) {
         // Java throws on a zero divisor while JavaScript yields NaN, so only nonzero literal divisors are translated.
         const divisor = this.parseUnary();
-        if (!/^[1-9]\d*$/.test(divisor)) throw new UnsupportedJavaError(`remainder by ${divisor}`);
-        left = `(${left} % ${divisor})`;
-      } else return left;
+        if (!/^[1-9]\d*$/.test(divisor.code)) throw new UnsupportedJavaError(`remainder by ${divisor.code}`);
+        left = { code: `(${expect(left, 'int')} % ${divisor.code})`, type: 'int' };
+      } else {
+        return left;
+      }
     }
   }
 
-  private parseUnary(): string {
-    if (this.consumeOperator('!')) return `!${this.parseUnary()}`;
-    if (this.consumeOperator('-')) return `((-${this.parseUnary()}) | 0)`;
-    if (this.consumeOperator('+')) return this.parseUnary();
+  private parseUnary(): TypedCode {
+    if (this.consumeOperator('!')) return { code: `!${expect(this.parseUnary(), 'boolean')}`, type: 'boolean' };
+    if (this.consumeOperator('-')) return { code: `((-${expect(this.parseUnary(), 'int')}) | 0)`, type: 'int' };
+    if (this.consumeOperator('+')) return { code: expect(this.parseUnary(), 'int'), type: 'int' };
     return this.parsePostfix();
   }
 
-  private parsePostfix(): string {
+  private parsePostfix(): TypedCode {
     let result = this.parsePrimary();
     while (this.consumeOperator('.')) {
       const member = this.next();
       if (member.type !== 'identifier') throw new UnsupportedJavaError(`member ${member.value}`);
-      if (result === 'Math') {
+      if (result.code === 'Math') {
         if (!mathMembers.has(member.value)) throw new UnsupportedJavaError(`Math.${member.value}`);
         // `| 0` reproduces Java's `Math.abs(Integer.MIN_VALUE) == Integer.MIN_VALUE`.
-        result = `(Math.${member.value}${this.parseArguments(member.value === 'abs' ? 1 : 2)} | 0)`;
-      } else if (member.value === 'length' && !this.peekOperator('(')) {
-        result = `${result}.length`;
-      } else {
+        const args = this.parseArguments(member.value === 'abs' ? 1 : 2, 'int');
+        result = { code: `(Math.${member.value}${args} | 0)`, type: 'int' };
+      } else if (member.value === 'length' && !this.peekOperator('(') && result.type === 'unknown') {
+        result = { code: `${result.code}.length`, type: 'int' };
+      } else if (result.type === 'turtle' || result.type === 'unknown') {
         const turtleMember = turtleMemberMap.get(member.value);
         if (!turtleMember || !this.peekOperator('(')) throw new UnsupportedJavaError(`member ${member.value}`);
-        result = `${result}.${turtleMember}${this.parseArguments(0)}`;
+        const type: JavaType = turtleMember.endsWith('か') || turtleMember === 'canMoveForward' ? 'boolean' : 'void';
+        result = { code: `${result.code}.${turtleMember}${this.parseArguments(0)}`, type };
+      } else {
+        throw new UnsupportedJavaError(`member ${member.value} of ${result.type}`);
       }
     }
     return result;
   }
 
-  private parsePrimary(): string {
+  private parsePrimary(): TypedCode {
     const token = this.next();
     if (token.type === 'number') {
       if (Number(token.value) > MAX_INT) throw new UnsupportedJavaError(`int literal ${token.value}`);
-      return token.value;
+      return { code: token.value, type: 'int' };
     }
     if (token.type === 'operator') {
       if (token.value !== '(') throw new UnsupportedJavaError(`operator ${token.value}`);
       const inner = this.parseOr();
       if (!this.consumeOperator(')')) throw new UnsupportedJavaError('missing )');
-      return `(${inner})`;
+      return { code: `(${inner.code})`, type: inner.type };
     }
     const name = token.value;
-    if (literalNames.has(name)) return name;
+    if (literalNames.has(name)) return { code: name, type: 'boolean' };
     if (name === 'new') {
       const className = this.next();
-      if (className.type !== 'identifier' || (className.value !== 'Turtle' && !this.nativeNames.has(className.value))) {
-        throw new UnsupportedJavaError(`instantiation of ${className.value}`);
+      if (className.type !== 'identifier') throw new UnsupportedJavaError('instantiation without a class');
+      if (className.value === 'Turtle') {
+        return { code: `new Turtle${this.parseArguments([0, 2, 3], 'int')}`, type: 'turtle' };
       }
-      return `new ${className.value}${this.parseArguments(className.value === 'Turtle' ? [0, 2, 3] : undefined)}`;
+      if (!this.nativeNames.has(className.value)) throw new UnsupportedJavaError(`instantiation of ${className.value}`);
+      return { code: `new ${className.value}${this.parseArguments()}`, type: 'unknown' };
     }
     if (name === 'Math') {
       if (!this.peekOperator('.')) throw new UnsupportedJavaError('Math without member');
-      return 'Math';
+      return { code: 'Math', type: 'unknown' };
     }
     if (this.nativeNames.has(name)) {
-      return this.peekOperator('(') ? `${name}${this.parseArguments()}` : name;
+      return this.peekOperator('(')
+        ? { code: `${name}${this.parseArguments()}`, type: 'unknown' }
+        : { code: name, type: 'unknown' };
     }
     if (this.peekOperator('(')) throw new UnsupportedJavaError(`call of unknown function ${name}`);
     if (
@@ -268,16 +304,20 @@ class ExpressionTranslator {
     ) {
       throw new UnsupportedJavaError(`identifier ${name}`);
     }
-    return `s.get('${name}')`;
+    return { code: `s.get('${name}')`, type: 'unknown' };
   }
 
-  /** Parses an argument list; `arity` restricts the accepted argument counts because JavaScript ignores extras. */
-  private parseArguments(arity?: number | number[]): string {
+  /**
+   * Parses an argument list; `arity` restricts the accepted argument counts because JavaScript ignores extras,
+   * and `argumentType` the accepted operand type.
+   */
+  private parseArguments(arity?: number | number[], argumentType?: JavaType): string {
     if (!this.consumeOperator('(')) throw new UnsupportedJavaError('missing (');
     const args: string[] = [];
     if (!this.consumeOperator(')')) {
       do {
-        args.push(this.parseOr());
+        const arg = this.parseOr();
+        args.push(argumentType ? expect(arg, argumentType) : arg.code);
       } while (this.consumeOperator(','));
       if (!this.consumeOperator(')')) throw new UnsupportedJavaError('missing )');
     }
@@ -304,6 +344,18 @@ class ExpressionTranslator {
     this.index++;
     return true;
   }
+}
+
+function isKnown(typed: TypedCode): boolean {
+  return typed.type !== 'unknown';
+}
+
+/** Returns the code if its type may be `expected`; a provably different type is left to Java. */
+function expect(typed: TypedCode, expected: JavaType): string {
+  if (typed.type !== expected && typed.type !== 'unknown') {
+    throw new UnsupportedJavaError(`${typed.type} used as ${expected}`);
+  }
+  return typed.code;
 }
 
 function tokenize(fragment: string): Token[] {

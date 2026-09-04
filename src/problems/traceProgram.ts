@@ -229,6 +229,8 @@ function flattenObjects(obj) {
 }
 function checkForCond(cond, sid) {
   spend();
+  // Java only accepts boolean conditions; a coerced value means a blank was filled with an ill-typed expression.
+  if (typeof cond !== 'boolean') throw new TypeError('Loop condition is not a boolean');
   if (!cond && trace.at(-1).sid === sid) {
     trace.at(-1).last = true;
   }

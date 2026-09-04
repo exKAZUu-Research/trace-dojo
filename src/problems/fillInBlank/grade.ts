@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type { InstantiatedProblem } from '../instantiateProblem';
 import { TRACE_BUDGET_EXCEEDED_MESSAGE, traceProgram } from '../traceProgram';
 
@@ -15,12 +17,13 @@ import {
 import { extractNativeNames, translateJavaFragment, UnsupportedJavaError } from './javaToInstrumented';
 
 /**
+ * 0: rejected by the static pre-filter before any Java execution,
  * 1: exact match with the model answers,
  * 2: re-execution with the instrumented (JavaScript) program,
  * 3: execution on Wandbox,
  * 4: execution on the local JVM.
  */
-export type GradingStage = 1 | 2 | 3 | 4;
+export type GradingStage = 0 | 1 | 2 | 3 | 4;
 
 export type FillInBlankGradingResult =
   | { status: 'correct'; stage: GradingStage }
@@ -107,11 +110,12 @@ async function gradeByJavaExecution(
   const userProgram = fillBlanks(problem.displayProgramTemplate, answers);
   const forbiddenPattern = findForbiddenJavaPattern(userProgram);
   if (forbiddenPattern) {
-    return { status: 'incorrect', stage: 3, detail: `The program uses a forbidden feature: ${forbiddenPattern}` };
+    return { status: 'incorrect', stage: 0, detail: `The program uses a forbidden feature: ${forbiddenPattern}` };
   }
-  const program = buildJavaJudgeProgram(userProgram);
+  const resultMarker = `__TRACE_DOJO_RESULT_${randomUUID().replaceAll('-', '')}__`;
+  const program = buildJavaJudgeProgram(userProgram, resultMarker);
   if (program.length > MAX_JAVA_PROGRAM_LENGTH) {
-    return { status: 'incorrect', stage: 3, detail: 'The program is too long.' };
+    return { status: 'incorrect', stage: 0, detail: 'The program is too long.' };
   }
 
   const reasons: string[] = [];
@@ -130,7 +134,7 @@ async function gradeByJavaExecution(
         return { status: 'incorrect', stage, detail: 'Time limit exceeded.' };
       }
       case 'executed': {
-        const actual = parseJavaJudgeOutput(result.stdout);
+        const actual = parseJavaJudgeOutput(result.stdout, resultMarker);
         if (!actual) {
           return { status: 'incorrect', stage, detail: `The program did not finish normally: ${result.stderr}` };
         }

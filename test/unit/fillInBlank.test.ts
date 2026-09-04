@@ -177,6 +177,13 @@ describe('stage 2: Java semantics and safety', () => {
     { problemId: 'fillInBlank2', answers: ['x + 4294967297'], detail: 'Compile error' },
     { problemId: 'fillInBlank3', answers: ['t.右を向く(1);'], detail: 'Compile error' },
     { problemId: 'fillInBlank2', answers: ['x + (1 % 0) + x + 1'], detail: 'exception' },
+    { problemId: 'fillInBlank1', answers: ['i - 4'], detail: 'Compile error' },
+    { problemId: 'fillInBlank1', answers: ['4 - i'], detail: 'Compile error' },
+    { problemId: 'fillInBlank1', answers: ['i < 4 && 1'], detail: 'Compile error' },
+    { problemId: 'fillInBlank1', answers: ['!0 && i < 4'], detail: 'Compile error' },
+    { problemId: 'fillInBlank1', answers: ['t.右を向く() == t.右を向く()'], detail: 'Compile error' },
+    { problemId: 'fillInBlank2', answers: ['x + true'], detail: 'Compile error' },
+    { problemId: 'fillInBlank2', answers: ['x + t.前に進めるか()'], detail: 'Compile error' },
   ] as const)(
     'does not accept $answers for $problemId that Java rejects',
     { timeout: 60_000 },
@@ -278,7 +285,7 @@ describe('stage 4: local JVM', () => {
   test('rejects Unicode escapes that could hide forbidden names', async () => {
     const answer = String.raw`jav\u0061.lang.Runtime.getRuntime().exec("ls"); t.右を向く();`;
     const result = await gradeFillInBlankAnswers(instantiate('fillInBlank3'), [answer], withLocalJvm);
-    expect(result).toMatchObject({ status: 'incorrect', stage: 3 });
+    expect(result).toMatchObject({ status: 'incorrect', stage: 0 });
     expect(result.status === 'incorrect' && result.detail).toContain('forbidden');
   });
 
@@ -290,6 +297,18 @@ describe('stage 4: local JVM', () => {
     const result = await gradeFillInBlankAnswers(instantiate('fillInBlank3'), [answer], withLocalJvm);
     expect(result).toMatchObject({ status: 'incorrect', stage: 4 });
     expect(result.status === 'incorrect' && result.detail).toContain('Compile error');
+  });
+
+  test('ignores a fake result printed before closing stdout', { timeout: 60_000 }, async () => {
+    const problem = instantiate('fillInBlank3');
+    const fakeResult = JSON.stringify({ board: problem.finalBoard, turtles: problem.finalTurtles });
+    const answer = `
+      System.out.println("__TRACE_DOJO_RESULT__");
+      System.out.println(${JSON.stringify(fakeResult)});
+      System.out.close();
+      t.左を向く();`;
+    const result = await gradeFillInBlankAnswers(problem, [answer], withLocalJvm);
+    expect(result).toMatchObject({ status: 'incorrect', stage: 4 });
   });
 
   test('ignores a fake result printed by a thread that outlives the program', { timeout: 60_000 }, async () => {

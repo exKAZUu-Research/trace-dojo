@@ -11,7 +11,6 @@ import { charToColor, type TurtleTrace } from '../traceProgram';
 const validColorChars = Object.keys(charToColor).join('');
 
 export const JAVA_JUDGE_CLASS_NAME = 'TraceDojoJudge';
-export const JAVA_RESULT_MARKER = '__TRACE_DOJO_RESULT__';
 export const MAX_JAVA_PROGRAM_LENGTH = 20_000;
 
 const javaExecutionResultSchema = z.object({
@@ -50,10 +49,10 @@ export function extractPublicClassName(program: string): string | undefined {
 }
 
 /**
- * Builds a single-file Java program that runs the user's program and then prints the final turtle-graphics state.
- * The judge class is declared first so that `java <file>` (source-file mode) launches it.
+ * Builds a single-file Java program that runs the user's program and then prints the final turtle-graphics state
+ * after `resultMarker`. The marker must be unpredictable per execution so the program cannot forge the result.
  */
-export function buildJavaJudgeProgram(userProgram: string): string {
+export function buildJavaJudgeProgram(userProgram: string, resultMarker: string): string {
   const mainClassName = extractPublicClassName(userProgram) ?? 'Main';
   return `
 class ${JAVA_JUDGE_CLASS_NAME} {
@@ -66,7 +65,7 @@ class ${JAVA_JUDGE_CLASS_NAME} {
     }
     System.out.flush();
     System.out.println();
-    System.out.println("${JAVA_RESULT_MARKER}");
+    System.out.println("${resultMarker}");
     System.out.println(Turtle.dump(exception));
     // Nothing may be printed after the result, e.g. by a thread the program left behind.
     System.out.close();
@@ -168,10 +167,10 @@ class Turtle {
 `.trim();
 }
 
-export function parseJavaJudgeOutput(stdout: string): JavaTurtleState | undefined {
-  const markerIndex = stdout.lastIndexOf(JAVA_RESULT_MARKER);
+export function parseJavaJudgeOutput(stdout: string, resultMarker: string): JavaTurtleState | undefined {
+  const markerIndex = stdout.lastIndexOf(resultMarker);
   if (markerIndex === -1) return;
-  const json = stdout.slice(markerIndex + JAVA_RESULT_MARKER.length).trim();
+  const json = stdout.slice(markerIndex + resultMarker.length).trim();
   try {
     return javaExecutionResultSchema.parse(JSON.parse(json));
   } catch {
