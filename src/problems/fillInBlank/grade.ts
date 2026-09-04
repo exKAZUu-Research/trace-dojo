@@ -108,10 +108,8 @@ function gradeByInstrumentedProgram(
 }
 
 function stringifyVariables(variables: Record<string, unknown>): string {
-  // Turtle bindings are not variables the student is asked about, so only primitive and array values count.
-  const entries = Object.entries(variables).filter(
-    ([, value]) => typeof value === 'number' || typeof value === 'string' || Array.isArray(value)
-  );
+  // Turtle bindings are not variables the student is asked about, so objects other than arrays are ignored.
+  const entries = Object.entries(variables).filter(([, value]) => typeof value !== 'object' || Array.isArray(value));
   return JSON.stringify(entries.toSorted(([a], [b]) => a.localeCompare(b)));
 }
 

@@ -1,4 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -106,6 +108,8 @@ describe('stage 2: re-execution with the instrumented program', () => {
     { problemId: 'fillInBlank3', answers: ['t.前に進む();'] },
     { problemId: 'fillInBlank4', answers: ['2', 't.右を向く();'] },
     { problemId: 'fillInBlank4', answers: ['3', 't.左を向く();'] },
+    { problemId: 'fillInBlank3', answers: ['int b = 1; t.右を向く();'] },
+    { problemId: 'fillInBlank3', answers: ['boolean b = t.前に進めるか(); t.右を向く();'] },
   ] as const)('rejects $answers for $problemId', async ({ answers, problemId }) => {
     expect(await gradeFillInBlankAnswers(instantiate(problemId), [...answers], withoutJava)).toMatchObject({
       status: 'incorrect',
@@ -240,6 +244,32 @@ describe('stage 3: Wandbox', () => {
       javaExecutors: [createWandboxExecutor()],
     });
     expect(result).toEqual({ status: 'correct', stage: 3 });
+  });
+
+  test('falls back to the local JVM when the Wandbox run does not start', { timeout: 60_000 }, async () => {
+    // Wandbox reports a JVM that could not start with status "1", no compiler error and no program output.
+    const server = createServer((_, response) => {
+      response.setHeader('Content-Type', 'application/json');
+      response.end(
+        JSON.stringify({
+          status: '1',
+          signal: '',
+          compiler_error: '',
+          program_output: '',
+          program_error: 'Error: Could not find or load main class TraceDojoJudge',
+        })
+      );
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const { port } = server.address() as AddressInfo;
+      const result = await gradeFillInBlankAnswers(instantiate('fillInBlank1'), ['i < 8 / 2'], {
+        javaExecutors: [createWandboxExecutor({ compileUrl: `http://127.0.0.1:${port}/api/compile.json` }), localJvm],
+      });
+      expect(result).toEqual({ status: 'correct', stage: 4 });
+    } finally {
+      server.close();
+    }
   });
 
   test('falls back to the local JVM when Wandbox is unavailable', { timeout: 60_000 }, async () => {

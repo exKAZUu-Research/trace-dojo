@@ -73,7 +73,12 @@ export function createWandboxExecutor(options?: {
       }
       const { compiler_error, program_error, program_output, signal, status } = parsed.data;
       // `compiler_error` also carries warnings of successful compilations, so only a run that never started counts.
-      if (status !== '0' && !program_output && compiler_error) return { kind: 'compileError', message: compiler_error };
+      if (status !== '0' && !program_output) {
+        // The judge always prints once it runs, so a silent failure is either javac or a run that never started.
+        return compiler_error
+          ? { kind: 'compileError', message: compiler_error }
+          : { kind: 'unavailable', reason: `The Wandbox run did not start: ${program_error ?? ''}` };
+      }
       if (signal) return { kind: 'timeout' };
       return { kind: 'executed', stdout: program_output ?? '', stderr: program_error ?? '', exitCode: Number(status) };
     },
