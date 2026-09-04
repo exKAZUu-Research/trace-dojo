@@ -311,7 +311,7 @@ export const ProblemBody: React.FC<Props> = (props) => {
 };
 
 function getInitialVariables(
-  problemType: 'executionResult' | 'step',
+  problemType: ProblemType,
   traceItems: TraceItem[],
   previousTraceItemIndex: number,
   currentTraceItemIndex: number,

@@ -1,0 +1,227 @@
+import { execFile } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+import { z } from 'zod';
+
+import { extractPublicClassName } from './javaProgram';
+
+export type JavaExecutionResult =
+  | { kind: 'executed'; stdout: string; stderr: string; exitCode: number }
+  | { kind: 'compileError'; message: string }
+  | { kind: 'timeout' }
+  | { kind: 'outputLimitExceeded' }
+  /** The executor itself is broken or busy (network failure, rate limit, missing JDK), so another executor should be tried. */
+  | { kind: 'unavailable'; reason: string };
+
+export interface JavaExecutor {
+  name: string;
+  execute: (program: string, entryClassName: string) => Promise<JavaExecutionResult>;
+}
+
+export const DEFAULT_WANDBOX_COMPILE_URL = 'https://wandbox.org/api/compile.json';
+// Matches the JDK 21 installed for the local executor so both Java stages accept the same language level.
+export const DEFAULT_WANDBOX_COMPILER = 'openjdk-jdk-21+35';
+export const DEFAULT_JAVA_TIMEOUT_MS = 10_000;
+
+const wandboxResponseSchema = z.object({
+  status: z.string(),
+  signal: z.string().optional(),
+  compiler_error: z.string().optional(),
+  program_output: z.string().optional(),
+  program_error: z.string().optional(),
+});
+
+export function createWandboxExecutor(options?: {
+  compileUrl?: string;
+  compiler?: string;
+  timeoutMs?: number;
+}): JavaExecutor {
+  const compileUrl = options?.compileUrl ?? DEFAULT_WANDBOX_COMPILE_URL;
+  const compiler = options?.compiler ?? DEFAULT_WANDBOX_COMPILER;
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_JAVA_TIMEOUT_MS * 3;
+  return {
+    name: 'wandbox',
+    async execute(program, entryClassName) {
+      // javac requires the file to be named after the public class.
+      const fileName = `${extractPublicClassName(program) ?? entryClassName}.java`;
+      let response: Response;
+      try {
+        response = await fetch(compileUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            compiler,
+            code: '',
+            codes: [{ file: fileName, code: program }],
+            'compiler-option-raw': fileName,
+            // The security manager keeps the program from reflecting into the judge's state (options are newline-separated).
+            'runtime-option-raw': `-Djava.security.manager\n${entryClassName}`,
+          }),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      } catch (error) {
+        return { kind: 'unavailable', reason: `Failed to call Wandbox: ${String(error)}` };
+      }
+      if (!response.ok) {
+        return { kind: 'unavailable', reason: `Wandbox responded with ${response.status}` };
+      }
+      const parsed = wandboxResponseSchema.safeParse(await response.json().catch(() => {}));
+      if (!parsed.success) {
+        return { kind: 'unavailable', reason: 'Wandbox responded with an unexpected body' };
+      }
+      const { compiler_error, program_error, program_output, signal, status } = parsed.data;
+      // `compiler_error` also carries warnings of successful compilations, so only a run that never started counts.
+      // Wandbox kills a program that exceeds its time limit with exit status 137 and reports no signal.
+      if (signal || (status !== '0' && (status === '137' || /\bKilled\b/.test(program_error ?? '')))) {
+        return { kind: 'timeout' };
+      }
+      if (status !== '0' && !program_output) {
+        // The judge always prints once it runs, so a silent failure is either javac or a run that never started.
+        return compiler_error
+          ? { kind: 'compileError', message: compiler_error }
+          : { kind: 'unavailable', reason: `The Wandbox run did not start: ${program_error ?? ''}` };
+      }
+      return { kind: 'executed', stdout: program_output ?? '', stderr: program_error ?? '', exitCode: Number(status) };
+    },
+  };
+}
+
+export const DEFAULT_MAX_PENDING_LOCAL_EXECUTIONS = 5;
+
+export interface LocalJvmExecutorOptions {
+  /** Directory containing `bin/javac` and `bin/java`. Defaults to `JAVA_HOME`, else the commands on `PATH`. */
+  javaHome?: string;
+  timeoutMs?: number;
+  maxHeapMb?: number;
+  /** Executions beyond this queue length are reported as unavailable instead of waiting. */
+  maxPendingExecutions?: number;
+}
+
+export function createLocalJvmExecutor(options?: LocalJvmExecutorOptions): JavaExecutor {
+  const javaHome = options?.javaHome ?? process.env.JAVA_HOME;
+  const settings = {
+    javacCommand: javaHome ? path.join(javaHome, 'bin', 'javac') : 'javac',
+    javaCommand: javaHome ? path.join(javaHome, 'bin', 'java') : 'java',
+    timeoutMs: options?.timeoutMs ?? DEFAULT_JAVA_TIMEOUT_MS,
+    maxHeapMb: options?.maxHeapMb ?? 128,
+  };
+  const maxPendingExecutions = options?.maxPendingExecutions ?? DEFAULT_MAX_PENDING_LOCAL_EXECUTIONS;
+  // The single Fly machine is small, so Java programs are executed one at a time.
+  let queue: Promise<unknown> = Promise.resolve();
+  let pendingExecutions = 0;
+  return {
+    name: 'localJvm',
+    execute(program, entryClassName) {
+      if (pendingExecutions >= maxPendingExecutions) {
+        return Promise.resolve({ kind: 'unavailable', reason: 'The local JVM executor is busy.' });
+      }
+      pendingExecutions++;
+      const run = queue.then(() => executeOnLocalJvm(program, entryClassName, settings));
+      queue = run.catch(() => {}).finally(() => pendingExecutions--);
+      return run;
+    },
+  };
+}
+
+interface LocalJvmSettings {
+  javacCommand: string;
+  javaCommand: string;
+  timeoutMs: number;
+  maxHeapMb: number;
+}
+
+/**
+ * Compiles with `javac`, then runs under the JVM security manager with an empty policy so that the program
+ * cannot touch files, processes, the network, or reflection internals even if it evades the static pre-filter.
+ */
+async function executeOnLocalJvm(
+  program: string,
+  entryClassName: string,
+  settings: LocalJvmSettings
+): Promise<JavaExecutionResult> {
+  let directoryPath: string;
+  try {
+    directoryPath = await mkdtemp(path.join(tmpdir(), 'trace-dojo-java-'));
+  } catch (error) {
+    return { kind: 'unavailable', reason: `Failed to create a working directory: ${String(error)}` };
+  }
+  try {
+    // javac requires the file to be named after the public class.
+    const sourcePath = path.join(directoryPath, `${extractPublicClassName(program) ?? entryClassName}.java`);
+    const classesPath = path.join(directoryPath, 'classes');
+    const policyPath = path.join(directoryPath, 'judge.policy');
+    try {
+      await Promise.all([writeFile(sourcePath, program), writeFile(policyPath, 'grant {};\n')]);
+    } catch (error) {
+      return { kind: 'unavailable', reason: `Failed to write the program: ${String(error)}` };
+    }
+
+    const compilation = await runCommand(
+      settings.javacCommand,
+      ['-J-Xshare:auto', '-J-XX:TieredStopAtLevel=1', '-encoding', 'utf8', '-d', classesPath, sourcePath],
+      directoryPath,
+      settings.timeoutMs
+    );
+    if (compilation.kind !== 'executed') return compilation;
+    if (compilation.exitCode !== 0) {
+      // Only javac diagnostics are the student's fault; anything else means the toolchain itself failed.
+      return /\.java:\d+: /.test(compilation.stderr)
+        ? { kind: 'compileError', message: compilation.stderr.replaceAll(`${directoryPath}${path.sep}`, '') }
+        : { kind: 'unavailable', reason: `javac failed: ${compilation.stderr}` };
+    }
+
+    const execution = await runCommand(
+      settings.javaCommand,
+      [
+        `-Xmx${settings.maxHeapMb}m`,
+        '-XX:+UseSerialGC',
+        '-XX:TieredStopAtLevel=1',
+        '-Xshare:auto',
+        '-Duser.language=en',
+        '-Duser.country=US',
+        '-Djava.security.manager',
+        `-Djava.security.policy==${policyPath}`,
+        '-cp',
+        classesPath,
+        entryClassName,
+      ],
+      directoryPath,
+      settings.timeoutMs
+    );
+    // The judge always prints something once it runs, so a silent non-zero exit means the JVM itself failed to start.
+    if (execution.kind === 'executed' && execution.exitCode !== 0 && !execution.stdout) {
+      return { kind: 'unavailable', reason: `The JVM did not start: ${execution.stderr}` };
+    }
+    return execution;
+  } finally {
+    await rm(directoryPath, { recursive: true, force: true });
+  }
+}
+
+function runCommand(command: string, args: string[], cwd: string, timeoutMs: number): Promise<JavaExecutionResult> {
+  return new Promise((resolve) => {
+    execFile(
+      command,
+      args,
+      { cwd, timeout: timeoutMs, maxBuffer: 1024 * 1024, killSignal: 'SIGKILL' },
+      (error, stdout, stderr) => {
+        if (!error) {
+          resolve({ kind: 'executed', stdout, stderr, exitCode: 0 });
+        } else if (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+          resolve({ kind: 'outputLimitExceeded' });
+        } else if (error.killed) {
+          resolve({ kind: 'timeout' });
+        } else if (typeof error.code === 'number') {
+          resolve({ kind: 'executed', stdout, stderr, exitCode: error.code });
+        } else if (error.signal) {
+          resolve({ kind: 'executed', stdout, stderr: `${stderr}\nKilled by ${error.signal}`, exitCode: 1 });
+        } else {
+          // Spawn-level failures such as ENOENT, EACCES, or ENOMEM are the environment's fault, not the student's.
+          resolve({ kind: 'unavailable', reason: `Failed to run ${command}: ${error.message}` });
+        }
+      }
+    );
+  });
+}

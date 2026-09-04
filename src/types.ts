@@ -14,4 +14,4 @@ export interface SelectedCell {
   y: number;
 }
 
-export type ProblemType = 'executionResult' | 'step';
+export type ProblemType = 'executionResult' | 'step' | 'fillInBlank';

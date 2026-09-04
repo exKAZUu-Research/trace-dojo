@@ -5,6 +5,7 @@ import { notFound, useParams } from 'next/navigation';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
 
+import { FillInBlankBody } from './FillInBlankBody';
 import { ProblemBody } from './ProblmBody';
 
 import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefetch';
@@ -16,6 +17,7 @@ import {
 import { useAuthContextSelector } from '@/contexts/AuthContext';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
 import { Button, Heading, HStack, Link, Text, Tooltip, VStack } from '@/infrastructures/useClient/chakra';
+import type { FillInBlankGradingResult } from '@/problems/fillInBlank/grade';
 import { instantiateProblem } from '@/problems/instantiateProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import { courseIdToLectureIds, courseIdToName, problemIdToName } from '@/problems/problemData';
@@ -64,6 +66,22 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     [problemSession, updateProblemSessionMutation, createProblemSubmissionMutation, lastActionTimeRef]
   );
 
+  const gradeFillInBlankAnswersMutation = backendTrpcReact.gradeFillInBlankAnswers.useMutation();
+  const gradeAnswers = useCallback(
+    async (answers: string[]): Promise<FillInBlankGradingResult> => {
+      const newProblemSession = await updateProblemSessionMutation.mutateAsync({
+        id: problemSession.id,
+        incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
+      });
+      return await gradeFillInBlankAnswersMutation.mutateAsync({
+        sessionId: problemSession.id,
+        answers,
+        elapsedMilliseconds: newProblemSession.elapsedMilliseconds,
+      });
+    },
+    [problemSession.id, updateProblemSessionMutation, gradeFillInBlankAnswersMutation, lastActionTimeRef]
+  );
+
   const updateProblemSession = useCallback(
     async (newProblemType: string, newTraceItemIndex: number): Promise<void> => {
       const newProblemSession = await updateProblemSessionMutation.mutateAsync({
@@ -77,6 +95,8 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   );
 
   if (!problem) notFound();
+
+  const isFillInBlank = problemSession.problemType === 'fillInBlank';
 
   return (
     <VStack align="stretch" spacing={4}>
@@ -99,7 +119,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
         </HStack>
         <HStack justify="space-between" spacing={2}>
           <Heading as="h1">{problemIdToName[params.problemId]}</Heading>
-          <HStack spacing={2}>
+          <HStack hidden={isFillInBlank} spacing={2}>
             <Tooltip
               label={
                 problemSession.problemType === 'executionResult'
@@ -135,12 +155,16 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
         </HStack>
       </VStack>
 
-      <ProblemBody
-        createSubmissionUpdatingProblemSession={createSubmissionUpdatingProblemSession}
-        problem={problem}
-        problemSession={problemSession}
-        updateProblemSession={updateProblemSession}
-      />
+      {isFillInBlank ? (
+        <FillInBlankBody gradeAnswers={gradeAnswers} problem={problem} />
+      ) : (
+        <ProblemBody
+          createSubmissionUpdatingProblemSession={createSubmissionUpdatingProblemSession}
+          problem={problem}
+          problemSession={problemSession}
+          updateProblemSession={updateProblemSession}
+        />
+      )}
     </VStack>
   );
 };

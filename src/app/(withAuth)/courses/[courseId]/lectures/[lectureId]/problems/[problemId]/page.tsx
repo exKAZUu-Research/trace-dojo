@@ -4,6 +4,7 @@ import { withAuthorizationOnServer } from '@/app/utils/withAuth';
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { logger } from '@/infrastructures/pino';
 import { prisma } from '@/infrastructures/prisma';
+import { isFillInBlankProblem } from '@/problems/instantiateProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 
 const ProblemPage: MyAuthorizedNextPageOrLayout<{
@@ -28,7 +29,7 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
       lectureId: params.lectureId,
       problemId: params.problemId,
       problemVariablesSeed: Date.now().toString(),
-      problemType: 'executionResult',
+      problemType: isFillInBlankProblem(params.problemId) ? 'fillInBlank' : 'executionResult',
       traceItemIndex: 0,
     },
   });

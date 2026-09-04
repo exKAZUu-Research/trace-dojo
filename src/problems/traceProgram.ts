@@ -48,12 +48,32 @@ export const colorToChar = Object.fromEntries(
   Object.entries(charToColor).map(([char, color]) => [color, char])
 ) as Record<CellColor, ColorChar>;
 
+/**
+ * The maximum number of traced operations before execution aborts.
+ * Student-written blanks run through this tracer, so unbounded loops must not hang the server.
+ */
+export const MAX_TRACE_OPERATIONS = 20_000;
+export const TRACE_BUDGET_EXCEEDED_MESSAGE = 'Execution budget exceeded';
+
+export type TracedProgram = Omit<
+  InstantiatedProblem,
+  'blankAnswers' | 'displayProgramTemplate' | 'instrumentedTemplate'
+>;
+
+/** Thrown by the instrumented runtime when a name is not in scope, i.e. a translation gap rather than Java semantics. */
+export const SCOPE_ERROR_NAME = 'ScopeError';
+
 export function traceProgram(
   this: unknown,
   instrumented: string,
   rawDisplayProgram: string,
-  languageId: LanguageId
-): InstantiatedProblem {
+  languageId: LanguageId,
+  options?: {
+    /** Set to false when only the final state matters, so no per-step snapshots are retained. */
+    collectTrace?: boolean;
+  }
+): TracedProgram {
+  const collectTrace = options?.collectTrace ?? true;
   if (!instrumented.includes('Turtle')) {
     if (instrumented.includes(' = ')) {
       throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
@@ -69,6 +89,18 @@ export function traceProgram(
   // 無理に難読化する必要はないが、コードの文量を減らす意識を持つ。
   const executableCode = `
 let myGlobal = {};
+class ScopeError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = '${SCOPE_ERROR_NAME}';
+  }
+}
+const collectTrace = ${collectTrace};
+let remainingOperations = ${MAX_TRACE_OPERATIONS};
+function spend(cost = 1) {
+  remainingOperations -= cost;
+  if (remainingOperations < 0) throw new Error('${TRACE_BUDGET_EXCEEDED_MESSAGE}');
+}
 const trace = [];
 const _turtles = [];
 const callStack = [];
@@ -83,7 +115,7 @@ class Scope {
     if (this.vars[varName] !== undefined) {
       return this.vars[varName];
     }
-    throw new Error(\`\${varName} is not defined: \${JSON.stringify(s)}\`);
+    throw new ScopeError(\`\${varName} is not defined: \${JSON.stringify(s)}\`);
   }
   set(sid, self, varName, value) {
     this.vars[varName] = typeof value === 'number' ? Math.floor(value) : value;
@@ -96,7 +128,7 @@ class Scope {
     }
   }
   leaveScope() {
-    if (!this.parent) throw new Error();
+    if (!this.parent) throw new ScopeError('No scope to leave');
     s = this.parent;
   }
   getDepth() {
@@ -115,6 +147,7 @@ const dy = [1, 0, -1, 0];
 const board = Array.from({length: ${GRID_ROWS}}, () => Array.from({length: ${GRID_COLUMNS}}, () => '${EMPTY_COLOR}'));
 class Turtle {
   constructor(x = 0, y = 0, color = '${DEFAULT_COLOR}') {
+    spend();
     this.x = x;
     this.y = y;
     if (this.x < 0 || ${GRID_COLUMNS} <= this.x || this.y < 0 || ${GRID_ROWS} <= this.y) {
@@ -126,6 +159,7 @@ class Turtle {
     _turtles.push(this);
   }
   前に進む() {
+    spend();
     const index = dirs.indexOf(this.dir);
     this.x += dx[index];
     this.y += dy[index];
@@ -139,6 +173,7 @@ class Turtle {
     addTrace(sid, self);
   }
   後に戻る() {
+    spend();
     const index = dirs.indexOf(this.dir);
     this.x -= dx[index];
     this.y -= dy[index];
@@ -165,12 +200,14 @@ class Turtle {
     const index = dirs.indexOf(this.dir);
     const nx = this.x + dx[index];
     const ny = this.y + dy[index];
-    return board[ny][nx] && board[ny][nx] !== '${EMPTY_COLOR}';
+    return nx >= 0 && nx < ${GRID_COLUMNS} && ny >= 0 && ny < ${GRID_ROWS} && board[ny][nx] !== '${EMPTY_COLOR}';
   }
   remove() {
-    _turtles.splice(_turtles.indexOf(this), 1);
+    const index = _turtles.indexOf(this);
+    if (index >= 0) _turtles.splice(index, 1);
   }
   右を向く() {
+    spend();
     this.dir = dirs[(dirs.indexOf(this.dir) + 1) % 4];
   }
   turnRight(sid, self) {
@@ -178,6 +215,7 @@ class Turtle {
     addTrace(sid, self);
   }
   左を向く() {
+    spend();
     this.dir = dirs[(dirs.indexOf(this.dir) + 3) % 4];
   }
   turnLeft(sid, self) {
@@ -186,6 +224,9 @@ class Turtle {
   }
 }
 function addTrace(sid, self) {
+  // Each snapshot copies every turtle, so the cost grows with the number of turtles.
+  spend(1 + _turtles.length);
+  if (!collectTrace) return;
   const vars = {...s.vars, ...myGlobal};
   if (self && self !== globalThis) {
     vars['this'] = {...self};
@@ -206,6 +247,9 @@ function flattenObjects(obj) {
   }
 }
 function checkForCond(cond, sid) {
+  spend();
+  // Java only accepts boolean conditions; a coerced value means a blank was filled with an ill-typed expression.
+  if (typeof cond !== 'boolean') throw new TypeError('Loop condition is not a boolean');
   if (!cond && trace.at(-1).sid === sid) {
     trace.at(-1).last = true;
   }
@@ -232,10 +276,20 @@ function isClass(obj) {
 trace.push({depth: 0, sid: 0, callStack: [], turtles: [], vars: {}, board: board.map(r => r.join('')).join('\\n')});
 s = new Scope();
 ${modifiedCode.trim()}
-({trace, finalVars: {...s.vars}});
+({trace, finalVars: {...s.vars}, finalBoard: board.map(r => r.join('')).join('\\n'), finalTurtles: _turtles.map(t => ({...t}))});
 `;
 
-  const { finalVars, trace: rawTrace } = eval(executableCode) as { trace: TraceItem[]; finalVars: TraceItemVariable };
+  const {
+    finalBoard,
+    finalTurtles,
+    finalVars,
+    trace: rawTrace,
+  } = eval(executableCode) as {
+    trace: TraceItem[];
+    finalVars: TraceItemVariable;
+    finalBoard: string;
+    finalTurtles: TurtleTrace[];
+  };
   const trace = (languageId as string) === 'python' ? rawTrace.filter((item: TraceItem) => !item.last) : rawTrace;
 
   const lines = rawDisplayProgram.split('\n');
@@ -271,6 +325,8 @@ ${modifiedCode.trim()}
     sidToLineIndex,
     callerIdToLineIndex,
     finalVars,
+    finalBoard,
+    finalTurtles,
   };
 }
 

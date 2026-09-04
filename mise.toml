@@ -1,3 +1,4 @@
 [tools]
 bun = "1.4.0"
+java = "temurin-21"
 node = "24.20.0"
