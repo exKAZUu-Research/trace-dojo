@@ -200,7 +200,7 @@ class Turtle {
     const index = dirs.indexOf(this.dir);
     const nx = this.x + dx[index];
     const ny = this.y + dy[index];
-    return board[ny][nx] && board[ny][nx] !== '${EMPTY_COLOR}';
+    return nx >= 0 && nx < ${GRID_COLUMNS} && ny >= 0 && ny < ${GRID_ROWS} && board[ny][nx] !== '${EMPTY_COLOR}';
   }
   remove() {
     const index = _turtles.indexOf(this);

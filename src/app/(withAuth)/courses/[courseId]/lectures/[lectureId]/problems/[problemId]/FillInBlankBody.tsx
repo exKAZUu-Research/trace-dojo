@@ -205,5 +205,11 @@ function toIncorrectMessage(detail: string): string {
   if (detail.startsWith('Time limit'))
     return 'プログラムが終了しませんでした。無限ループになっていないか確認してください。';
   if (detail.includes('forbidden')) return '使用できない機能が含まれています。';
+  if (detail.startsWith('The program threw an exception') || detail.startsWith('The program failed')) {
+    return 'プログラムが実行中にエラーで停止しました。亀が盤面の外に出ていないか確認してください。';
+  }
+  if (detail.includes('too much output') || detail.includes('too long') || detail.includes('did not finish')) {
+    return 'プログラムを最後まで実行できませんでした。出力や入力の量を減らしてください。';
+  }
   return '実行結果が期待した盤面と異なります。もう一度考えてみましょう。';
 }

@@ -5,7 +5,13 @@ import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { gradeFillInBlankAnswers } from '../../src/problems/fillInBlank/grade';
+import { fillBlanks } from '../../src/problems/fillInBlank/blanks';
 import { createLocalJvmExecutor, createWandboxExecutor } from '../../src/problems/fillInBlank/javaExecutors';
+import {
+  buildJavaJudgeProgram,
+  JAVA_JUDGE_CLASS_NAME,
+  parseJavaJudgeOutput,
+} from '../../src/problems/fillInBlank/javaProgram';
 import type { InstantiatedProblem } from '../../src/problems/instantiateProblem';
 import { instantiateProblem, isFillInBlankProblem } from '../../src/problems/instantiateProblem';
 import type { ProblemId } from '../../src/problems/problemData';
@@ -130,6 +136,7 @@ describe('stage 2: Java semantics and safety', () => {
   test.each([
     { problemId: 'fillInBlank3', answers: ['Turtle u = t; u.右を向く();'] },
     { problemId: 'fillInBlank3', answers: ['var u = t; u.右を向く();'] },
+    { problemId: 'fillInBlank3', answers: ['var u = (t); u.右を向く();'] },
     { problemId: 'fillInBlank3', answers: ['new Turtle(2, 1).右を向く(); t.remove(); t.remove(); t.右を向く();'] },
     { problemId: 'fillInBlank1', answers: ['i < Math.abs(-4)'] },
     { problemId: 'fillInBlank1', answers: ['i % 5 < 4'] },
@@ -304,7 +311,7 @@ describe('stage 4: local JVM', () => {
   });
 
   test('rejects Unicode escapes that could hide forbidden names', async () => {
-    const answer = String.raw`jav\u0061.lang.Runtime.getRuntime().exec("ls"); t.右を向く();`;
+    const answer = String.raw`jav\u0061.lang.Runtime.getRuntime().exec("ls"); t.turnRight();`;
     const result = await gradeFillInBlankAnswers(instantiate('fillInBlank3'), [answer], withLocalJvm);
     expect(result).toMatchObject({ status: 'incorrect', stage: 0 });
     expect(result.status === 'incorrect' && result.detail).toContain('forbidden');
@@ -313,7 +320,7 @@ describe('stage 4: local JVM', () => {
   test.each([
     "Turtle.board[0][0] = '#'; t.右を向く();",
     't.x = 3; t.右を向く();',
-    String.raw`t.color = "\""; t.右を向く();`,
+    String.raw`t.color = "\""; t.turnRight();`,
   ])('does not let %s tamper with the judged state', { timeout: 60_000 }, async (answer) => {
     const result = await gradeFillInBlankAnswers(instantiate('fillInBlank3'), [answer], withLocalJvm);
     expect(result).toMatchObject({ status: 'incorrect', stage: 4 });
@@ -334,12 +341,13 @@ describe('stage 4: local JVM', () => {
 
   test('ignores a fake result printed by a thread that outlives the program', { timeout: 60_000 }, async () => {
     const problem = instantiate('fillInBlank3');
+    const marker = '__TEST_MARKER__';
     const fakeResult = JSON.stringify({ board: problem.finalBoard, turtles: problem.finalTurtles });
     const answer = `
       Runnable r = () -> {
         for (long i = 0; i < 400000000L; i++) {}
         System.out.println();
-        System.out.println("__TRACE_DOJO_RESULT__");
+        System.out.println("${marker}");
         System.out.println(${JSON.stringify(fakeResult)});
       };
       try {
@@ -347,8 +355,13 @@ describe('stage 4: local JVM', () => {
         c.getMethod("start").invoke(c.getConstructor(Runnable.class).newInstance(r));
       } catch (Exception e) {}
       t.左を向く();`;
-    const result = await gradeFillInBlankAnswers(problem, [answer], withLocalJvm);
-    expect(result).toMatchObject({ status: 'incorrect', stage: 4 });
+    const program = buildJavaJudgeProgram(fillBlanks(problem.displayProgramTemplate, [answer]), marker);
+    const execution = await localJvm.execute(program, JAVA_JUDGE_CLASS_NAME);
+    expect(execution.kind).toBe('executed');
+    const actual = execution.kind === 'executed' ? parseJavaJudgeOutput(execution.stdout, marker) : undefined;
+    // The genuine result reflects the wrong turn (the turtle then walks off the board), not the forged one.
+    expect(actual?.turtles[0]?.dir).toBe('W');
+    expect(actual?.exception).toContain('Out of bounds');
   });
 
   test('reports busy instead of queueing without bound', { timeout: 120_000 }, async () => {

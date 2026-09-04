@@ -95,9 +95,9 @@ function translateSegment(tokens: Token[], nativeNames: Set<string>): string {
     const typeName = tokens[0].value;
     const name = tokens[1].value;
     // `var` holds a turtle when initialized from `new` or another turtle binding, and a scope value otherwise.
-    const isInstantiation = tokens[3]?.value === 'new' || (tokens.length === 4 && nativeNames.has(tokens[3].value));
-    const value = translateExpression(tokens.slice(3), nativeNames);
-    if (primitiveTypeNames.has(typeName) || (typeName === 'var' && !isInstantiation)) {
+    const typedValue = new ExpressionTranslator(tokens.slice(3), nativeNames).translate();
+    const value = typedValue.code;
+    if (primitiveTypeNames.has(typeName) || (typeName === 'var' && typedValue.type !== 'turtle')) {
       return `s.set('${name}', ${value})`;
     }
     if (typeName === 'Turtle' || typeName === 'var' || nativeNames.has(typeName)) {
@@ -290,9 +290,10 @@ class ExpressionTranslator {
       return { code: 'Math', type: 'unknown' };
     }
     if (this.nativeNames.has(name)) {
+      // Native bindings in the instrumented programs are turtles (or functions and classes, which are called).
       return this.peekOperator('(')
         ? { code: `${name}${this.parseArguments()}`, type: 'unknown' }
-        : { code: name, type: 'unknown' };
+        : { code: name, type: 'turtle' };
     }
     if (this.peekOperator('(')) throw new UnsupportedJavaError(`call of unknown function ${name}`);
     if (

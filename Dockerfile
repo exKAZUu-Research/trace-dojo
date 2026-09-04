@@ -26,6 +26,7 @@ RUN apt-get -qq update \
     && echo "deb [signed-by=/etc/apt/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(. /etc/os-release && echo "$VERSION_CODENAME") main" > /etc/apt/sources.list.d/adoptium.list \
     && apt-get -qq update \
     && apt-get -qq install -y --no-install-recommends temurin-21-jdk \
+    && apt-get -qq purge -y --auto-remove curl gnupg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY .yarn/ ./.yarn
