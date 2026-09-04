@@ -123,12 +123,10 @@
     "wait-on": "9.0.10"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "prisma": {
     "seed": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON prisma/seed.mts"
-  },
-  "trustedDependencies": [
-    "@chakra-ui/styled-system"
-  ]
+  }
 }
