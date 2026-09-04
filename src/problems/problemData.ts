@@ -195,6 +195,11 @@ export const problemIdToName = {
   test4: 'ステップ実行のテスト用問題(4)',
   test5: 'チェックポイント取得のテスト用問題',
   test9: 'ステップ実行のテスト用問題(9)',
+  fillInBlank1: '穴埋めのテスト用問題(1)',
+  fillInBlank2: '穴埋めのテスト用問題(2)',
+  fillInBlank3: '穴埋めのテスト用問題(3)',
+  fillInBlank4: '穴埋めのテスト用問題(4)',
+  fillInBlank5: '穴埋めのテスト用問題(5)',
 } as const;
 export type ProblemId = keyof typeof problemIdToName;
 
@@ -343,7 +348,23 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
       'threeDimensionalArray4',
     ],
   ],
-  test: [['test1', 'test2', 'test3', 'test4', 'test5', 'test9', 'oop1', 'oop2']],
+  test: [
+    [
+      'test1',
+      'test2',
+      'test3',
+      'test4',
+      'test5',
+      'test9',
+      'oop1',
+      'oop2',
+      'fillInBlank1',
+      'fillInBlank2',
+      'fillInBlank3',
+      'fillInBlank4',
+      'fillInBlank5',
+    ],
+  ],
 };
 
 export const courseIdToLectureIds = JSON.parse(process.env.NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON ?? '{}') as Record<
@@ -8289,6 +8310,98 @@ class MyTurtle2 {
   void moveForward(Turtle t) {
     for (int i = 0; i < Settings.speed; i++) { // step
       t.前に進む(); // step
+    }
+  }
+}
+`,
+  },
+  fillInBlank1: {
+    instrumented: `
+const t = new Turtle(); // step
+for (s.set('i', 0); @[s.get('i') < 4]@; s.set('i', s.get('i') + 1)) {
+  t.forward();
+}
+delete s.vars['i'];
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle t = new Turtle();
+    for (int i = 0; @[i < 4]@; i++) {
+      t.前に進む();
+    }
+  }
+}
+`,
+  },
+  fillInBlank2: {
+    instrumented: `
+s.set('x', <1-4>);
+s.set('y', @[s.get('x') + 1]@);
+const t = new Turtle(s.get('x'), s.get('y')); // step
+t.forward();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    int x = <1-4>;
+    int y = @[x + 1]@;
+    Turtle t = new Turtle(x, y);
+    t.前に進む();
+  }
+}
+`,
+  },
+  fillInBlank3: {
+    instrumented: `
+const t = new Turtle(); // step
+t.forward();
+@[t.turnRight();]@
+t.forward();
+t.forward();
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle t = new Turtle();
+    t.前に進む();
+    @[t.右を向く();]@
+    t.前に進む();
+    t.前に進む();
+  }
+}
+`,
+  },
+  fillInBlank4: {
+    instrumented: `
+s.set('x', <1-3>); // step
+s.set('y', @[s.get('x') * 2]@); // step
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    int x = <1-3>;
+    int y = @[x * 2]@;
+  }
+}
+`,
+  },
+  fillInBlank5: {
+    instrumented: `
+const t = new Turtle(); // step
+for (s.set('i', 0); s.get('i') < @[3]@; s.set('i', s.get('i') + 1)) {
+  t.forward();
+  @[t.turnRight();]@
+}
+delete s.vars['i'];
+`,
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle t = new Turtle();
+    for (int i = 0; i < @[3]@; i++) {
+      t.前に進む();
+      @[t.右を向く();]@
     }
   }
 }

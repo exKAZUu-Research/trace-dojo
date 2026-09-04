@@ -48,12 +48,17 @@ export const colorToChar = Object.fromEntries(
   Object.entries(charToColor).map(([char, color]) => [color, char])
 ) as Record<CellColor, ColorChar>;
 
+export type TracedProgram = Omit<
+  InstantiatedProblem,
+  'blankAnswers' | 'displayProgramTemplate' | 'instrumentedTemplate'
+>;
+
 export function traceProgram(
   this: unknown,
   instrumented: string,
   rawDisplayProgram: string,
   languageId: LanguageId
-): InstantiatedProblem {
+): TracedProgram {
   if (!instrumented.includes('Turtle')) {
     if (instrumented.includes(' = ')) {
       throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
@@ -232,10 +237,20 @@ function isClass(obj) {
 trace.push({depth: 0, sid: 0, callStack: [], turtles: [], vars: {}, board: board.map(r => r.join('')).join('\\n')});
 s = new Scope();
 ${modifiedCode.trim()}
-({trace, finalVars: {...s.vars}});
+({trace, finalVars: {...s.vars}, finalBoard: board.map(r => r.join('')).join('\\n'), finalTurtles: _turtles.map(t => ({...t}))});
 `;
 
-  const { finalVars, trace: rawTrace } = eval(executableCode) as { trace: TraceItem[]; finalVars: TraceItemVariable };
+  const {
+    finalBoard,
+    finalTurtles,
+    finalVars,
+    trace: rawTrace,
+  } = eval(executableCode) as {
+    trace: TraceItem[];
+    finalVars: TraceItemVariable;
+    finalBoard: string;
+    finalTurtles: TurtleTrace[];
+  };
   const trace = (languageId as string) === 'python' ? rawTrace.filter((item: TraceItem) => !item.last) : rawTrace;
 
   const lines = rawDisplayProgram.split('\n');
@@ -271,6 +286,8 @@ ${modifiedCode.trim()}
     sidToLineIndex,
     callerIdToLineIndex,
     finalVars,
+    finalBoard,
+    finalTurtles,
   };
 }
 

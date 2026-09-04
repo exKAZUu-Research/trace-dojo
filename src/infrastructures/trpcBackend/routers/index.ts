@@ -2,9 +2,14 @@ import { TRPCError } from '@trpc/server';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
+import { logger } from '../../pino';
 import { prisma } from '../../prisma';
 import { authorize } from '../middlewares';
 import { procedure, router } from '../trpc';
+
+import { DEFAULT_LANGUAGE_ID } from '@/constants';
+import { gradeFillInBlankAnswers } from '@/problems/fillInBlank/grade';
+import { instantiateProblem } from '@/problems/instantiateProblem';
 
 export const backendRouter = router({
   getSession: procedure
@@ -60,6 +65,45 @@ export const backendRouter = router({
       if (session.userId !== ctx.session.superTokensUserId) throw new TRPCError({ code: 'UNAUTHORIZED' });
 
       await prisma.problemSubmission.create({ data: input });
+    }),
+
+  gradeFillInBlankAnswers: procedure
+    .use(authorize)
+    .input(
+      z.object({
+        sessionId: z.number().int().positive(),
+        answers: z.array(z.string().max(1000)).max(50),
+        elapsedMilliseconds: z.number().nonnegative(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const session = await prisma.problemSession.findUnique({ where: { id: input.sessionId } });
+      if (!session) throw new TRPCError({ code: 'NOT_FOUND' });
+      if (session.userId !== ctx.session.superTokensUserId) throw new TRPCError({ code: 'UNAUTHORIZED' });
+      const problem = instantiateProblem(session.problemId, DEFAULT_LANGUAGE_ID, session.problemVariablesSeed);
+      if (!problem || problem.blankAnswers.length === 0) throw new TRPCError({ code: 'BAD_REQUEST' });
+
+      const result = await gradeFillInBlankAnswers(problem, input.answers);
+      if (result.status === 'ungradable') {
+        logger.warn('Failed to grade fill-in-the-blank answers of session %d: %s', session.id, result.detail);
+        return result;
+      }
+      await prisma.problemSubmission.create({
+        data: {
+          sessionId: session.id,
+          problemType: session.problemType,
+          traceItemIndex: session.traceItemIndex,
+          elapsedMilliseconds: input.elapsedMilliseconds,
+          isCorrect: result.status === 'correct',
+          answers: JSON.stringify(input.answers),
+          gradingStage: result.stage,
+        },
+      });
+      if (result.status === 'correct') {
+        await prisma.problemSession.update({ where: { id: session.id }, data: { completedAt: new Date() } });
+        revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');
+      }
+      return result;
     }),
 
   countIncorrectSubmissions: procedure
