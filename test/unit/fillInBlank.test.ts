@@ -8,7 +8,11 @@ import { describe, expect, test } from 'vitest';
 
 import { gradeFillInBlankAnswers } from '../../src/problems/fillInBlank/grade';
 import { fillBlanks } from '../../src/problems/fillInBlank/blanks';
-import { createLocalJvmExecutor, createWandboxExecutor } from '../../src/problems/fillInBlank/javaExecutors';
+import {
+  createLocalJvmExecutor,
+  createWandboxExecutor,
+  DEFAULT_WANDBOX_COMPILER,
+} from '../../src/problems/fillInBlank/javaExecutors';
 import {
   buildJavaJudgeProgram,
   JAVA_JUDGE_CLASS_NAME,
@@ -246,8 +250,14 @@ interface WandboxResponse {
   program_error?: string;
 }
 
+interface WandboxRequest {
+  compiler: string;
+  codes: { file: string; code: string }[];
+  'runtime-option-raw': string;
+}
+
 async function withWandboxStub<T>(
-  respond: (request: { codes: { file: string; code: string }[] }) => Promise<WandboxResponse>,
+  respond: (request: WandboxRequest) => Promise<WandboxResponse>,
   run: (compileUrl: string) => Promise<T>
 ): Promise<T> {
   // A responder failure aborts the request so the test reports it instead of waiting for the executor's fetch timeout.
@@ -280,10 +290,13 @@ async function withWandboxStub<T>(
 
 describe('stage 3: Wandbox', () => {
   test('accepts an untranslatable but correct answer', { timeout: 60_000 }, async () => {
-    // The stub runs the submitted program on the local JVM and reports it the way wandbox.org does.
+    // The stub runs the submitted program on the local JVM, launched the way wandbox.org would, and reports it in Wandbox's format.
     const result = await withWandboxStub(
-      async ({ codes }) => {
-        const execution = await localJvm.execute(codes[0].code, JAVA_JUDGE_CLASS_NAME);
+      async (request) => {
+        expect(request.compiler).toBe(DEFAULT_WANDBOX_COMPILER);
+        expect(request.codes).toMatchObject([{ file: 'Main.java' }]);
+        const entryClassName = request['runtime-option-raw'].split('\n').at(-1) ?? '';
+        const execution = await localJvm.execute(request.codes[0].code, entryClassName);
         if (execution.kind !== 'executed') throw new Error(`Unexpected execution result: ${execution.kind}`);
         return {
           status: String(execution.exitCode),
