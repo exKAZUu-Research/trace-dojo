@@ -28,13 +28,13 @@ An educational web app for training program tracing skills.
 1. Install dependencies
 
    ```
-   yarn install
+   bun install
    ```
 
 1. Reset local database by applying migration files and adding initial records
 
    ```
-   yarn db-reset
+   bun run db-reset
    ```
 
 ### Start Development
@@ -42,7 +42,7 @@ An educational web app for training program tracing skills.
 1. Start Next server
 
    ```
-   yarn start
+   bun run start
    ```
 
 2. Open lectures via the following URLs:
@@ -68,7 +68,7 @@ An educational web app for training program tracing skills.
      1. http://localhost:3500/courses/test/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d
 
    The URL format is as follows.
-   You can find parameter values from `NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON` in the `.env` file.
+   You can find parameter values from `NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON` in `fnox.toml`.
 
    ```
    http://localhost:3500/courses/[courseId]/lectures/[lectureId]
@@ -81,7 +81,7 @@ An educational web app for training program tracing skills.
 1. Create migration files on the basis of `prisma/schema.prisma`
 
    ```
-   yarn db-migrate-create
+   bun run db-migrate-create
    ```
 
 ### How to Create Problems
