@@ -28,12 +28,15 @@ for (const key of SYNCED_KEYS) {
     console.error(`${key} is missing or empty in the ${wbEnv} profile of fnox.toml; refusing to deploy.`);
     process.exit(1);
   }
-  // `fly secrets import` parses raw KEY=VALUE lines, so a newline would split the value.
-  if (value.includes('\n')) {
-    console.error(`${key} contains a newline, which \`fly secrets import\` cannot represent.`);
+  // `fly secrets import` reinterprets its input: it cuts a value at `#` unless the text before it
+  // holds an odd number of double quotes, strips a wrapping quote pair, and trims leading spaces.
+  // The single-line triple-quoted form `KEY="""value"""` keeps every byte except double quotes
+  // and newlines, which are therefore refused.
+  if (value.includes('"') || value.includes('\n')) {
+    console.error(`${key} contains a double quote or a newline, which \`fly secrets import\` cannot represent.`);
     process.exit(1);
   }
-  lines.push(`${key}=${value}`);
+  lines.push(`${key}="""${value}"""`);
 }
 
 // --stage records the secrets without restarting machines; the subsequent `fly deploy` applies them.
