@@ -5,7 +5,14 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 
-const SYNCED_KEYS = ['SUPERTOKENS_URI', 'SUPERTOKENS_API_KEY'];
+const SYNCED_KEYS = [
+  'CLOUDFLARE_R2_LITESTREAM_ACCESS_KEY_ID',
+  'CLOUDFLARE_R2_LITESTREAM_ACCOUNT_ID',
+  'CLOUDFLARE_R2_LITESTREAM_BUCKET_NAME',
+  'CLOUDFLARE_R2_LITESTREAM_SECRET_ACCESS_KEY',
+  'SUPERTOKENS_API_KEY',
+  'SUPERTOKENS_URI',
+];
 
 const wbEnv = process.env.WB_ENV;
 const appName = fs.readFileSync(`fly-${wbEnv}.toml`, 'utf8').match(/^app\s*=\s*['"]([^'"]+)['"]/m)?.[1];

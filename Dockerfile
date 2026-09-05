@@ -67,7 +67,8 @@ RUN mise trust --yes --all \
     && bun run prisma generate \
     && bash ./bash/apply-docker-env.sh bun run build/core \
     && cat .next/BUILD_ID \
-    && bash ./bash/apply-docker-env.sh bun wb prisma create-litestream-config \
+    # --env-refs keeps the R2 credentials out of the image; Litestream expands them from Fly.io secrets.
+    && bash ./bash/apply-docker-env.sh bun wb prisma create-litestream-config --env-refs \
     && bun wb optimizeForDockerBuild \
     # Avoid overwriting existing db files
     && rm -Rf db/mount \
