@@ -34,7 +34,7 @@ PORT = { default = "8500" }
 NEXT_PUBLIC_BASE_URL = { default = "http://localhost:8500" }
 
 # Deployed profiles pin PORT and NEXT_PUBLIC_BASE_URL because the Docker image receives only the
-# values declared here (baked via `wb gen-docker-env`) plus the secrets synced to Fly.io.
+# values declared here plus the secrets synced to Fly.io.
 [profiles.staging.secrets]
 WB_ENV = { default = "staging" }
 NEXT_PUBLIC_WB_ENV = { default = "staging" }

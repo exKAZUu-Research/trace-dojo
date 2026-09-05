@@ -16,7 +16,7 @@ jobs:
   autofix:
     runs-on: ubuntu-latest
     env:
-      # wb requires WB_ENV on CI; the test profile has no encrypted values, so no age key is needed.
+      # WB_ENV selects the fnox profile; the test profile has no encrypted values, so no age key is needed.
       WB_ENV: test
     steps:
       - uses: actions/checkout@v7.0.1

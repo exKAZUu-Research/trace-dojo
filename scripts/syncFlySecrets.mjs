@@ -1,6 +1,6 @@
 // Pushes the secrets of the selected fnox profile to Fly.io before `fly deploy`: the image bakes
 // only non-secret values (.docker.env), and Fly injects nothing else at runtime.
-// Run under `wb dotenv` so process.env holds the profile selected by WB_ENV. Values are piped to
+// Expects process.env to hold the fnox profile selected by WB_ENV (see the deploy script). Values are piped to
 // `fly secrets import` via stdin and never appear in argv or logs.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';

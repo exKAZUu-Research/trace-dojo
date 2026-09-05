@@ -46,8 +46,8 @@ ARG WB_ENV
 ENV WB_ENV=$WB_ENV
 ENV NEXT_PUBLIC_WB_ENV=$WB_ENV
 
-# .docker.env holds only the non-secret values of the selected fnox profile; `wb optimizeForDockerBuild
-# --outside` generates it via `wb gen-docker-env`.
+# .docker.env holds only the non-secret values of the selected fnox profile; secrets are injected at
+# runtime from Fly.io secrets (scripts/syncFlySecrets.mjs).
 # secrets are injected at runtime from Fly.io secrets (scripts/syncFlySecrets.mjs).
 COPY .docker.env mise.toml bunfig.toml bun.lock next.config.ts tsconfig.json ./
 COPY dist/package.json ./
@@ -60,8 +60,8 @@ RUN bash ./bash/generate-package-manager-configs.sh
 
 # Only node is installed, not every tool mise.toml pins: fnox.toml is never copied into the image and
 # the age key never enters it, so the container can never use fnox.
-# The optimized dist/package.json drops build-irrelevant devDependencies, so the lockfile is not
-# frozen. apply-docker-env.sh exports the baked values so `next build` inlines NEXT_PUBLIC_*.
+# The lockfile is not frozen because dist/package.json omits dependencies the image does not need.
+# apply-docker-env.sh exports the baked values so `next build` inlines NEXT_PUBLIC_*.
 RUN mise trust --yes --all \
     && mise install node \
     && bun install \
