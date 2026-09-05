@@ -18,6 +18,9 @@ NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON = { default = '{"tuBeginner1":["8d692b
 WB_ENV = { default = "development" }
 NEXT_PUBLIC_WB_ENV = { default = "development" }
 DATABASE_URL = { default = "file:./dev.sqlite3?connection_limit=1" }
+# Pinned because `next build` needs a base URL (SuperTokens rejects an empty domain).
+PORT = { default = "3500" }
+NEXT_PUBLIC_BASE_URL = { default = "http://localhost:3500" }
 # Shared development instance, kept plaintext so contributors without an age identity can run the app.
 SUPERTOKENS_URI = { default = "https://st-dev-9ecbdd10-5f8e-11ef-a204-f3d2d26d900f.aws.supertokens.io" }
 SUPERTOKENS_API_KEY = { default = "Si4e5YY3MM2UH=pQ7Hf5KqKapY" }
