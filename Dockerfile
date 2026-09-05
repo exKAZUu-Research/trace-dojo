@@ -53,7 +53,7 @@ COPY dist/package.json ./
 COPY prisma/ ./prisma
 COPY public/ ./public
 COPY src/ ./src
-COPY scripts/ ./scripts
+COPY scripts/docker-entrypoint.sh scripts/start-production.sh ./scripts/
 
 RUN bash ./bash/generate-package-manager-configs.sh
 
