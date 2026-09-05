@@ -15,6 +15,10 @@ const SYNCED_KEYS = [
 ];
 
 const wbEnv = process.env.WB_ENV;
+if (!wbEnv) {
+  console.error('WB_ENV is not set; export it to select the fnox profile and the fly-*.toml to deploy.');
+  process.exit(1);
+}
 const appName = fs.readFileSync(`fly-${wbEnv}.toml`, 'utf8').match(/^app\s*=\s*['"]([^'"]+)['"]/m)?.[1];
 if (!appName) {
   console.error(`Failed to read the app name from fly-${wbEnv}.toml.`);
