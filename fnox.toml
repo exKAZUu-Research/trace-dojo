@@ -29,7 +29,8 @@ SUPERTOKENS_API_KEY = { default = "Si4e5YY3MM2UH=pQ7Hf5KqKapY" }
 WB_ENV = { default = "test" }
 NEXT_PUBLIC_WB_ENV = { default = "test" }
 DATABASE_URL = { default = "file:./test.sqlite3?connection_limit=1" }
-# Pinned because the test profile also runs the Docker image, and `next build` needs a base URL.
+# Pinned because this profile also serves local production-mode runs (`start-docker`, `start-stg`) on
+# http://localhost:8500, and `next build` needs a base URL.
 PORT = { default = "8500" }
 NEXT_PUBLIC_BASE_URL = { default = "http://localhost:8500" }
 
