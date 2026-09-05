@@ -61,8 +61,7 @@ RUN bash ./bash/generate-package-manager-configs.sh
 # the age key never enters it, so the container can never use fnox.
 # The lockfile is not frozen because dist/package.json omits dependencies the image does not need.
 # apply-docker-env.sh exports the baked values so `next build` inlines NEXT_PUBLIC_*.
-RUN mise trust --yes --all \
-    && mise install node \
+RUN mise install node \
     && bun install \
     && bun run prisma generate \
     && bash ./bash/apply-docker-env.sh bun run build/core \
