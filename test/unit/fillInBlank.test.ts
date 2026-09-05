@@ -238,38 +238,76 @@ describe('stage 2: Java semantics and safety', () => {
   });
 });
 
+interface WandboxResponse {
+  status: string;
+  signal?: string;
+  compiler_error?: string;
+  program_output?: string;
+  program_error?: string;
+}
+
+async function withWandboxStub<T>(
+  respond: (request: { codes: { file: string; code: string }[] }) => Promise<WandboxResponse>,
+  run: (compileUrl: string) => Promise<T>
+): Promise<T> {
+  const server = createServer((request, response) => {
+    let body = '';
+    request.setEncoding('utf8');
+    request.on('data', (chunk: string) => (body += chunk));
+    request.on('end', async () => {
+      const wandboxResponse = await respond(JSON.parse(body));
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify(wandboxResponse));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const { port } = server.address() as AddressInfo;
+    return await run(`http://127.0.0.1:${port}/api/compile.json`);
+  } finally {
+    server.close();
+  }
+}
+
 describe('stage 3: Wandbox', () => {
   test('accepts an untranslatable but correct answer', { timeout: 60_000 }, async () => {
-    const result = await gradeFillInBlankAnswers(instantiate('fillInBlank1'), ['i < 8 / 2'], {
-      javaExecutors: [createWandboxExecutor()],
-    });
+    // The stub runs the submitted program on the local JVM and reports it the way wandbox.org does.
+    const result = await withWandboxStub(
+      async ({ codes }) => {
+        const execution = await localJvm.execute(codes[0].code, JAVA_JUDGE_CLASS_NAME);
+        if (execution.kind !== 'executed') throw new Error(`Unexpected execution result: ${execution.kind}`);
+        return {
+          status: String(execution.exitCode),
+          signal: '',
+          compiler_error: '',
+          program_output: execution.stdout,
+          program_error: execution.stderr,
+        };
+      },
+      (compileUrl) =>
+        gradeFillInBlankAnswers(instantiate('fillInBlank1'), ['i < 8 / 2'], {
+          javaExecutors: [createWandboxExecutor({ compileUrl })],
+        })
+    );
     expect(result).toEqual({ status: 'correct', stage: 3 });
   });
 
   test('falls back to the local JVM when the Wandbox run does not start', { timeout: 60_000 }, async () => {
     // Wandbox reports a JVM that could not start with status "1", no compiler error and no program output.
-    const server = createServer((_, response) => {
-      response.setHeader('Content-Type', 'application/json');
-      response.end(
-        JSON.stringify({
-          status: '1',
-          signal: '',
-          compiler_error: '',
-          program_output: '',
-          program_error: 'Error: Could not find or load main class TraceDojoJudge',
+    const result = await withWandboxStub(
+      async () => ({
+        status: '1',
+        signal: '',
+        compiler_error: '',
+        program_output: '',
+        program_error: 'Error: Could not find or load main class TraceDojoJudge',
+      }),
+      (compileUrl) =>
+        gradeFillInBlankAnswers(instantiate('fillInBlank1'), ['i < 8 / 2'], {
+          javaExecutors: [createWandboxExecutor({ compileUrl }), localJvm],
         })
-      );
-    });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    try {
-      const { port } = server.address() as AddressInfo;
-      const result = await gradeFillInBlankAnswers(instantiate('fillInBlank1'), ['i < 8 / 2'], {
-        javaExecutors: [createWandboxExecutor({ compileUrl: `http://127.0.0.1:${port}/api/compile.json` }), localJvm],
-      });
-      expect(result).toEqual({ status: 'correct', stage: 4 });
-    } finally {
-      server.close();
-    }
+    );
+    expect(result).toEqual({ status: 'correct', stage: 4 });
   });
 
   test('falls back to the local JVM when Wandbox is unavailable', { timeout: 60_000 }, async () => {
