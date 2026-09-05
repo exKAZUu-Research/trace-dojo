@@ -10,7 +10,7 @@
   "scripts": {
     "build": "wb buildIfNeeded -c 'bun run build/core'",
     "build/core": "next build",
-    "calculate-score": "WB_ENV=restored bun wb prisma seed -f prisma/calculateScores.ts",
+    "calculate-score": "WB_ENV=production bun wb dotenv -- env DATABASE_URL=file:./restored.sqlite3?connection_limit=1 bun prisma/calculateScores.ts",
     "chakra": "sh -c 'chakra-cli tokens \"$2\"' --",
     "cleanup": "bun wb lint --fix --format",
     "db-create-migration": "bun wb prisma migrate-dev",

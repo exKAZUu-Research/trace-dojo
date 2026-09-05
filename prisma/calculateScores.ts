@@ -3,8 +3,7 @@
  * 2. Update `deadLines`.
  * 3. Update `header` via `CSVインポート` -> `雛形ダウンロード`.
  * 4. Put the `CSVエクスポート` result at `students.csv`, or set `STUDENTS_CSV_PATH` to another path.
- * 5. Create `.env.restored` based on `.env.production`.
- * 6. `bun run calculate-score`.
+ * 5. `bun run calculate-score` (runs against `prisma/restored.sqlite3` with the production profile).
  * */
 
 import { copyFileSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
