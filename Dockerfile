@@ -73,7 +73,6 @@ RUN mise trust --yes --all \
     && bun wb optimizeForDockerBuild \
     # Avoid overwriting existing db files
     && rm -Rf db/mount \
-    && rm -Rf .next/cache \
     && bash ./bash/cleanup.sh --keep-scripts
 
 RUN chmod +x scripts/*.sh
