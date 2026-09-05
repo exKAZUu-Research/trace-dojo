@@ -16,4 +16,5 @@ jobs:
       skip_build: true
       trigger_deploy_workflow: deploy-production.yml
     secrets:
+      FNOX_AGE_KEY: ${{ secrets.FNOX_AGE_KEY }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
