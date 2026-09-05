@@ -250,20 +250,29 @@ async function withWandboxStub<T>(
   respond: (request: { codes: { file: string; code: string }[] }) => Promise<WandboxResponse>,
   run: (compileUrl: string) => Promise<T>
 ): Promise<T> {
+  // A responder failure aborts the request so the test reports it instead of waiting for the executor's fetch timeout.
+  let responderError: unknown;
   const server = createServer((request, response) => {
     let body = '';
     request.setEncoding('utf8');
     request.on('data', (chunk: string) => (body += chunk));
     request.on('end', async () => {
-      const wandboxResponse = await respond(JSON.parse(body));
-      response.setHeader('Content-Type', 'application/json');
-      response.end(JSON.stringify(wandboxResponse));
+      try {
+        const wandboxResponse = await respond(JSON.parse(body));
+        response.setHeader('Content-Type', 'application/json');
+        response.end(JSON.stringify(wandboxResponse));
+      } catch (error) {
+        responderError ??= error;
+        response.destroy();
+      }
     });
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   try {
     const { port } = server.address() as AddressInfo;
-    return await run(`http://127.0.0.1:${port}/api/compile.json`);
+    const result = await run(`http://127.0.0.1:${port}/api/compile.json`);
+    if (responderError !== undefined) throw responderError;
+    return result;
   } finally {
     server.close();
   }
