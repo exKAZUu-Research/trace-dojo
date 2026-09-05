@@ -48,7 +48,6 @@ ENV NEXT_PUBLIC_WB_ENV=$WB_ENV
 
 # .docker.env holds only the non-secret values of the selected fnox profile; secrets are injected at
 # runtime from Fly.io secrets (scripts/syncFlySecrets.mjs).
-# secrets are injected at runtime from Fly.io secrets (scripts/syncFlySecrets.mjs).
 COPY .docker.env mise.toml bunfig.toml bun.lock next.config.ts tsconfig.json ./
 COPY dist/package.json ./
 COPY prisma/ ./prisma

@@ -14,9 +14,10 @@ const SYNCED_KEYS = [
   'SUPERTOKENS_URI',
 ];
 
+// `wb dotenv` fills in WB_ENV from the default profile, so check for a deployable profile explicitly.
 const wbEnv = process.env.WB_ENV;
-if (!wbEnv) {
-  console.error('WB_ENV is not set; export it to select the fnox profile and the fly-*.toml to deploy.');
+if (wbEnv !== 'staging' && wbEnv !== 'production') {
+  console.error(`WB_ENV is ${JSON.stringify(wbEnv)}; export WB_ENV=staging or WB_ENV=production before deploying.`);
   process.exit(1);
 }
 const appName = fs.readFileSync(`fly-${wbEnv}.toml`, 'utf8').match(/^app\s*=\s*['"]([^'"]+)['"]/m)?.[1];

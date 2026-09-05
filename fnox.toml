@@ -33,6 +33,9 @@ DATABASE_URL = { default = "file:./test.sqlite3?connection_limit=1" }
 # http://localhost:8500, and `next build` needs a base URL.
 PORT = { default = "8500" }
 NEXT_PUBLIC_BASE_URL = { default = "http://localhost:8500" }
+# Shared development instance, kept plaintext so contributors without an age identity can run the app.
+SUPERTOKENS_URI = { default = "https://st-dev-9ecbdd10-5f8e-11ef-a204-f3d2d26d900f.aws.supertokens.io" }
+SUPERTOKENS_API_KEY = { default = "Si4e5YY3MM2UH=pQ7Hf5KqKapY" }
 
 # Deployed profiles pin PORT and NEXT_PUBLIC_BASE_URL because the Docker image receives only the
 # values declared here plus the secrets synced to Fly.io.
