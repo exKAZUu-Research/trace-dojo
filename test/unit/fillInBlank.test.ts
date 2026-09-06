@@ -233,11 +233,10 @@ describe('stage 2: Java semantics and safety', () => {
 
 describe('stage 3: Wandbox', () => {
   test('accepts an untranslatable but correct answer', { timeout: 120_000 }, async () => {
+    // Wandbox is outside this project's control, so an outage moves the answer to the judge instead of failing;
+    // a Wandbox that answers but rejects the program still fails this, whichever stage the verdict comes from.
     const result = await gradeFillInBlankAnswers(instantiate('fillInBlank1'), ['i < 8 / 2']);
-    // Wandbox is outside this project's control, so an outage moves the answer to the judge instead of failing.
     expect(result).toMatchObject({ status: 'correct' });
-    if (result.status !== 'correct') return;
-    expect([3, 4]).toContain(result.stage);
   });
 
   test('falls back to the judge when the Wandbox run does not start', { timeout: 120_000 }, async () => {

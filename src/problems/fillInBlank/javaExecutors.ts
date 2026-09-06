@@ -20,10 +20,13 @@ export const DEFAULT_WANDBOX_COMPILE_URL = 'https://wandbox.org/api/compile.json
 // Wandbox offers no JDK newer than 22, while the judge tracks its own (currently 25), so this pin is the
 // language level a stage 3 answer must satisfy; a newer feature compiles only once Wandbox is unavailable.
 export const DEFAULT_WANDBOX_COMPILER = 'openjdk-jdk-21+35';
-/** Each service stops a program well before its ceiling, so these only bound a hung connection. */
+/** Wandbox stops a program well before this, so the ceiling only bounds a hung connection. */
 const WANDBOX_TIMEOUT_MS = 30_000;
-/** The judge allows 10 s to build and 30 s to run, so a longer wait than this is a stuck request. */
-const JUDGE_TIMEOUT_MS = 45_000;
+/**
+ * The judge allows 10 s to build and 30 s to run, and needs a little more to start a sandbox (or a sleeping
+ * instance), so a wait longer than this is a stuck request rather than a program using its whole time limit.
+ */
+const JUDGE_TIMEOUT_MS = 60_000;
 
 const wandboxResponseSchema = z.object({
   status: z.string(),
