@@ -21,10 +21,12 @@ DATABASE_URL = { default = "file:./dev.sqlite3?connection_limit=1" }
 # Pinned because `next build` needs a base URL (SuperTokens rejects an empty domain).
 PORT = { default = "3500" }
 NEXT_PUBLIC_BASE_URL = { default = "http://localhost:3500" }
-# Shared development instance, kept plaintext so contributors without an age identity can run the app.
+# Shared development instance, kept plaintext because it holds nothing worth protecting.
 SUPERTOKENS_URI = { default = "https://st-dev-9ecbdd10-5f8e-11ef-a204-f3d2d26d900f.aws.supertokens.io" }
 SUPERTOKENS_API_KEY = { default = "Si4e5YY3MM2UH=pQ7Hf5KqKapY" }
-# The judge service (https://github.com/WillBooster/judge) executes the Java programs of fill-in-the-blank answers.
+# The judge service (https://github.com/WillBooster/judge) executes the Java programs of fill-in-the-blank
+# answers. Its key grants arbitrary code execution, so it is encrypted even in this profile, which therefore
+# resolves only with an age identity (locally) or FNOX_AGE_KEY (in CI).
 JUDGE_URL = { default = "https://judge-staging.willbooster.dev" }
 JUDGE_API_KEY = { provider = "age", value = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBTZ0trUTZHNGsydVBGUUs5cUprNG52a2JibWE5Y3RFRm5Qa0pUSS9UblhJCnZlbjc1aTREMWVnd2U2TWRna1NNNkRpZldhTDhEMVJTWlg2ckxYbzNrTVEKLT4gWDI1NTE5IHhZMVJ2VGVKK1Iya1RWSDIzR0U2SlowQTZLcXJpMVJpQm52a3V5YnNyU1EKMUpoYzlsSnBzeU1kNVZoRGZtK1Z1b1RHUFF1TVpaaXpuMm8zSkQvM2NtVQotPiBYMjU1MTkgWmxxY0J4cWw4RThsNlFmbVpKeHBBblRvRlZ1dUxwendRR0t2M3NxL2tpNApETzBkRWhDSDUrRjNha0hUbzlUWEtHTE1ESGhKQk5LRjZ0WGFMeEFTbW0wCi0+IFgyNTUxOSBQaXhRQ1BndGFVa1RpZEZCckdTMGhhZ3RrczUvT0tTL2doZC84eEViOWpFClAyTUM3bXN2RmFIOGliUno2YnhSeC9BVzByVjBUbm9UamlHdzlhZmlIdncKLT4gWDI1NTE5IFA0R3U0ZXZCNzk4dUxYc3pMTXlpWU9SQkkreitFdkVuY2ZtV1Fxd1gwRlUKRkZweGR5RWxUOW1JR1Y5NlJVSXZUWjhrRjVuRmhMdG8vV2xFMW9MSDBkRQotPiBnPGo0VS1ncmVhc2UgfUR2IDdnIFNZP2xCCkdqQ2w5WVRjZjJpbjhOZU0vYkZVMTZwZ0J5Ukp0UGhxYlpmbm93SEZUL3FrM1NPVkhnUlN1L2xjYWFnCi0tLSA1VHhseFpGenJQRFZ6S1UyM3dTYzFXN2VXTGVLZkREQmRTNUJuYXp4SCtZCiPEp4kpjv2DhMBC+9ykqLSBgUI6IB3PMb2PJlE7u/tHM3pY4t8mwZKUFb/WOOud75nqnc7YkMABrM/AcvwXN3wrRKYzPLuG7UIYa1RiX2ghEgSdsws4VgMimw5DJRZdgw==" }
 
@@ -36,10 +38,12 @@ DATABASE_URL = { default = "file:./test.sqlite3?connection_limit=1" }
 # http://localhost:8500, and `next build` needs a base URL.
 PORT = { default = "8500" }
 NEXT_PUBLIC_BASE_URL = { default = "http://localhost:8500" }
-# Shared development instance, kept plaintext so contributors without an age identity can run the app.
+# Shared development instance, kept plaintext because it holds nothing worth protecting.
 SUPERTOKENS_URI = { default = "https://st-dev-9ecbdd10-5f8e-11ef-a204-f3d2d26d900f.aws.supertokens.io" }
 SUPERTOKENS_API_KEY = { default = "Si4e5YY3MM2UH=pQ7Hf5KqKapY" }
-# The judge service (https://github.com/WillBooster/judge) executes the Java programs of fill-in-the-blank answers.
+# The judge service (https://github.com/WillBooster/judge) executes the Java programs of fill-in-the-blank
+# answers. Its key grants arbitrary code execution, so it is encrypted even in this profile, which therefore
+# resolves only with an age identity (locally) or FNOX_AGE_KEY (in CI).
 JUDGE_URL = { default = "https://judge-staging.willbooster.dev" }
 JUDGE_API_KEY = { provider = "age", value = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBJODNSM3N5RWxUTkZRUCszeE9oMGNheGJ0dTJYZk9odkVuVzg1U0VBOFNNCnFUNmcvN3JoRm1UZkI0TXJUVnRhWVBsNEVvdVFTc3dHTTdSQUMvbFFyeFkKLT4gWDI1NTE5IDhpR25IRlFJSDNwZlBCdGdQOXQyUHJaSGFMZ0xjNk1rR0hodEVGOWFmbXcKQTQwWHE0bTZ4Q1RLbDBNaUVLSGFnSytJUk0ra05tTEU0c0pVY0pKS0dxWQotPiBYMjU1MTkgaXpUWjJFR0dpR1FpejhuNld6TWtKQTE0Z0FXMFJPN0JENCtVbjhIeU1VOApoWTk2SEF5MWtKcGsxcHdDdEZZUUgzUjJ1Nk50RkJwWTlrKzB2Qno0dnFFCi0+IFgyNTUxOSBweU9ZMzNWZDFKbXplMUx6cHNkR2ZIQWdaVjdoKzVhMm5ZRm5naEhiY0V3CkczaWEzNGRJUC9CRGxTaXQxVFAzRUhucmFTdElIdVlTOFg5a0JCMThzcmMKLT4gWDI1NTE5IGIzNklOWlV5MW9oa3FFQ1UvWWk0UDFmMlJBTGVnTXRUMFArYm9jemVzbEEKMFVKdHYwQkhkZFc1RUg3MFI2bFJ1c3doWWlTSzBjcHowMXowaG1hR1dxdwotPiBKdjJLQl4tZ3JlYXNlIHB7CnZZVFNMbWwvMnNNUzZMWUpTSzM5R053bUdiM3gyWFJMZkl2TTFWMXVOTFFCVGNkVHdzdHV4Y00vbzBNZAotLS0gMVYrcDJZUmxOS2tOTmY3ZXlReHpEVzMyVlpld0RGSFBsRDM2YlRMbG05OAoQNIeSBcBKAIoHBbhIZdE9TxWkfHRnVDxxdy3YCkLo1WVC4EnEMZlJoNgf12jYxfjmiUbGk44YAQTParahYhsyA1LtrjlM3/fm8tHccZqqx6fBFDt5YveD3lO7EIq5tsI=" }
 

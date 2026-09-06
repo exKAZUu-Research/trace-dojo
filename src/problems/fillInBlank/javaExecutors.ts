@@ -3,7 +3,7 @@ import { RPCLink } from '@orpc/client/fetch';
 import { z } from 'zod';
 
 export type JavaExecutionResult =
-  | { kind: 'executed'; stdout: string; stderr: string; exitCode: number }
+  | { kind: 'executed'; stdout: string; stderr: string }
   | { kind: 'compileError'; message: string }
   | { kind: 'timeout' }
   | { kind: 'memoryLimitExceeded' }
@@ -17,7 +17,8 @@ export interface JavaExecutor {
 }
 
 export const DEFAULT_WANDBOX_COMPILE_URL = 'https://wandbox.org/api/compile.json';
-// Matches the JDK the judge runs so both Java stages accept the same language level.
+// Wandbox offers no JDK newer than 22, while the judge tracks its own (currently 25), so this pin is the
+// language level a stage 3 answer must satisfy; a newer feature compiles only once Wandbox is unavailable.
 export const DEFAULT_WANDBOX_COMPILER = 'openjdk-jdk-21+35';
 /** Both services stop a program well before this, so the ceiling only bounds a hung connection. */
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -80,7 +81,7 @@ export function createWandboxExecutor(options?: {
           ? { kind: 'compileError', message: compiler_error }
           : { kind: 'unavailable', reason: `The Wandbox run did not start: ${program_error ?? ''}` };
       }
-      return { kind: 'executed', stdout: program_output ?? '', stderr: program_error ?? '', exitCode: Number(status) };
+      return { kind: 'executed', stdout: program_output ?? '', stderr: program_error ?? '' };
     },
   };
 }
@@ -102,7 +103,6 @@ const JUDGE_DECISION_CODE = {
 
 const judgeResponseSchema = z.object({
   decisionCode: z.number(),
-  exitStatus: z.number(),
   stdout: z.string(),
   stderr: z.string(),
 });
@@ -110,6 +110,7 @@ const judgeResponseSchema = z.object({
 interface JudgeExecuteInput {
   files: { path: string; data: string }[];
 }
+type JudgeExecute = Client<Record<never, never>, JudgeExecuteInput, unknown, Error>;
 
 /**
  * Runs the program on the judge service (https://github.com/WillBooster/judge), which compiles and runs it
@@ -120,27 +121,20 @@ export function createJudgeExecutor(options?: { url?: string; apiKey?: string; t
   const apiKey = options?.apiKey ?? process.env.JUDGE_API_KEY;
   const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS;
   // The judge publishes no client package, so the single procedure this executor calls is typed here.
-  const client = createORPCClient<{ v2Execute: Client<Record<never, never>, JudgeExecuteInput, unknown, Error> }>(
+  const client = createORPCClient<{ v2Execute: JudgeExecute }>(
     new RPCLink({ url: `${url}/api/orpc`, headers: apiKey ? { 'x-api-key': apiKey } : {} })
   );
   return {
     name: 'judge',
     async execute(program, entryClassName) {
       // The judge renames the file after its public class and runs the class of that name.
-      let response: unknown;
-      try {
-        response = await client.v2Execute(
-          { files: [{ path: `${entryClassName}.java`, data: program }] },
-          { signal: AbortSignal.timeout(timeoutMs) }
-        );
-      } catch (error) {
-        return { kind: 'unavailable', reason: `Failed to call the judge: ${String(error)}` };
-      }
-      const parsed = judgeResponseSchema.safeParse(response);
+      const call = await callJudge(client, { files: [{ path: `${entryClassName}.java`, data: program }] }, timeoutMs);
+      if ('reason' in call) return { kind: 'unavailable', reason: call.reason };
+      const parsed = judgeResponseSchema.safeParse(call.response);
       if (!parsed.success) {
         return { kind: 'unavailable', reason: 'The judge responded with an unexpected body' };
       }
-      const { decisionCode, exitStatus, stderr, stdout } = parsed.data;
+      const { decisionCode, stderr, stdout } = parsed.data;
       switch (decisionCode) {
         case JUDGE_DECISION_CODE.waitingJudge:
         case JUDGE_DECISION_CODE.judgeNotAvailable: {
@@ -165,7 +159,24 @@ export function createJudgeExecutor(options?: { url?: string; apiKey?: string; t
       // Truncated output would hide the result rather than falsify it, but the program is at fault either way.
       return stdout.length >= JUDGE_MAX_OUTPUT_LENGTH
         ? { kind: 'outputLimitExceeded' }
-        : { kind: 'executed', stdout, stderr, exitCode: exitStatus };
+        : { kind: 'executed', stdout, stderr };
     },
   };
+}
+
+/** Retries once because a connection to the service can drop, and running the program again has no side effect. */
+async function callJudge(
+  client: { v2Execute: JudgeExecute },
+  input: JudgeExecuteInput,
+  timeoutMs: number
+): Promise<{ response: unknown } | { reason: string }> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return { response: await client.v2Execute(input, { signal: AbortSignal.timeout(timeoutMs) }) };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  return { reason: `Failed to call the judge: ${String(lastError)}` };
 }
