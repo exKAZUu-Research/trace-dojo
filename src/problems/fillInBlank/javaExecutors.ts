@@ -129,7 +129,8 @@ export function createJudgeExecutor(options?: { url?: string; apiKey?: string; t
     async execute(program, entryClassName) {
       // The judge renames the file after its public class and runs the class of that name.
       const call = await callJudge(client, { files: [{ path: `${entryClassName}.java`, data: program }] }, timeoutMs);
-      if ('reason' in call) return { kind: 'unavailable', reason: call.reason };
+      // The URL names which judge rejected the call, e.g. when an unresolved JUDGE_URL fell back to the default.
+      if ('reason' in call) return { kind: 'unavailable', reason: `${call.reason} (${url})` };
       const parsed = judgeResponseSchema.safeParse(call.response);
       if (!parsed.success) {
         return { kind: 'unavailable', reason: 'The judge responded with an unexpected body' };
