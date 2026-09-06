@@ -6,7 +6,7 @@ import { logger } from '../../infrastructures/pino';
 
 import { fillBlanks, normalizeAnswer } from './blanks';
 import type { JavaExecutor } from './javaExecutors';
-import { createLocalJvmExecutor, createWandboxExecutor } from './javaExecutors';
+import { createJudgeExecutor, createWandboxExecutor } from './javaExecutors';
 import {
   buildJavaJudgeProgram,
   findForbiddenJavaPattern,
@@ -22,7 +22,7 @@ import { extractNativeNames, translateJavaFragment, UnsupportedJavaError } from 
  * 1: exact match with the model answers,
  * 2: re-execution with the instrumented (JavaScript) program,
  * 3: execution on Wandbox,
- * 4: execution on the local JVM.
+ * 4: execution on the judge service.
  */
 export type GradingStage = 0 | 1 | 2 | 3 | 4;
 
@@ -33,11 +33,11 @@ export type FillInBlankGradingResult =
   | { status: 'ungradable'; detail: string };
 
 export interface GradingOptions {
-  /** Executors used for stages 3 and 4, in order. Defaults to Wandbox followed by the local JVM. */
+  /** Executors used for stages 3 and 4, in order. Defaults to Wandbox followed by the judge service. */
   javaExecutors?: JavaExecutor[];
 }
 
-const defaultJavaExecutors: JavaExecutor[] = [createWandboxExecutor(), createLocalJvmExecutor()];
+const defaultJavaExecutors: JavaExecutor[] = [createWandboxExecutor(), createJudgeExecutor()];
 
 export async function gradeFillInBlankAnswers(
   problem: InstantiatedProblem,

@@ -21,8 +21,8 @@ const javaExecutionResultSchema = z.object({
 export type JavaTurtleState = z.infer<typeof javaExecutionResultSchema>;
 
 /**
- * A cheap pre-filter for obviously hostile programs. It is not a sandbox: the local executor runs programs
- * under the JVM security manager with an empty policy, and Wandbox provides its own isolation.
+ * A cheap pre-filter for obviously hostile programs. It is not a sandbox: Wandbox and the judge service
+ * each isolate the programs they run.
  */
 const forbiddenPatterns = [
   /\bimport\b/,
@@ -54,8 +54,10 @@ export function extractPublicClassName(program: string): string | undefined {
  */
 export function buildJavaJudgeProgram(userProgram: string, resultMarker: string): string {
   const mainClassName = extractPublicClassName(userProgram) ?? 'Main';
+  // Both executors run the class named after the source file, and javac allows a single public class per file,
+  // so the wrapper is the public one and the user's classes lose their `public` modifier.
   return `
-class ${JAVA_JUDGE_CLASS_NAME} {
+public class ${JAVA_JUDGE_CLASS_NAME} {
   public static void main(String[] args) {
     String exception = null;
     try {
@@ -73,7 +75,7 @@ class ${JAVA_JUDGE_CLASS_NAME} {
   }
 }
 
-${userProgram.trim()}
+${userProgram.trim().replaceAll(/^public\s+(?=(?:abstract\s+|final\s+)*class\b)/gm, '')}
 
 class Turtle {
   static final int COLUMNS = ${GRID_COLUMNS};

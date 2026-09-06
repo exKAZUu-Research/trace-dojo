@@ -1,18 +1,13 @@
-import { execFile } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-
+import { createORPCClient, type Client } from '@orpc/client';
+import { RPCLink } from '@orpc/client/fetch';
 import { z } from 'zod';
-
-import { extractPublicClassName } from './javaProgram';
 
 export type JavaExecutionResult =
   | { kind: 'executed'; stdout: string; stderr: string; exitCode: number }
   | { kind: 'compileError'; message: string }
   | { kind: 'timeout' }
   | { kind: 'outputLimitExceeded' }
-  /** The executor itself is broken or busy (network failure, rate limit, missing JDK), so another executor should be tried. */
+  /** The executor itself is broken or busy (network failure, rate limit, outage), so another executor should be tried. */
   | { kind: 'unavailable'; reason: string };
 
 export interface JavaExecutor {
@@ -21,9 +16,10 @@ export interface JavaExecutor {
 }
 
 export const DEFAULT_WANDBOX_COMPILE_URL = 'https://wandbox.org/api/compile.json';
-// Matches the JDK 21 installed for the local executor so both Java stages accept the same language level.
+// Matches the JDK the judge runs so both Java stages accept the same language level.
 export const DEFAULT_WANDBOX_COMPILER = 'openjdk-jdk-21+35';
-export const DEFAULT_JAVA_TIMEOUT_MS = 10_000;
+/** Both services stop a program well before this, so the ceiling only bounds a hung connection. */
+const REQUEST_TIMEOUT_MS = 60_000;
 
 const wandboxResponseSchema = z.object({
   status: z.string(),
@@ -40,12 +36,12 @@ export function createWandboxExecutor(options?: {
 }): JavaExecutor {
   const compileUrl = options?.compileUrl ?? DEFAULT_WANDBOX_COMPILE_URL;
   const compiler = options?.compiler ?? DEFAULT_WANDBOX_COMPILER;
-  const timeoutMs = options?.timeoutMs ?? DEFAULT_JAVA_TIMEOUT_MS * 3;
+  const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS;
   return {
     name: 'wandbox',
     async execute(program, entryClassName) {
-      // javac requires the file to be named after the public class.
-      const fileName = `${extractPublicClassName(program) ?? entryClassName}.java`;
+      // javac requires the file to be named after the public class, which is the judge wrapper.
+      const fileName = `${entryClassName}.java`;
       let response: Response;
       try {
         response = await fetch(compileUrl, {
@@ -88,140 +84,79 @@ export function createWandboxExecutor(options?: {
   };
 }
 
-export const DEFAULT_MAX_PENDING_LOCAL_EXECUTIONS = 5;
+export const DEFAULT_JUDGE_URL = 'https://judge.willbooster.com';
+/** The judge truncates each stream at this length instead of reporting the limit as exceeded. */
+const JUDGE_MAX_OUTPUT_LENGTH = 50_000;
+const JUDGE_DECISION_CODE = {
+  waitingJudge: 0,
+  judgeNotAvailable: 1,
+  timeLimitExceeded: 1002,
+  outputSizeLimitExceeded: 1004,
+  buildError: 1100,
+  buildTimeLimitExceeded: 1101,
+};
 
-export interface LocalJvmExecutorOptions {
-  /** Directory containing `bin/javac` and `bin/java`. Defaults to `JAVA_HOME`, else the commands on `PATH`. */
-  javaHome?: string;
-  timeoutMs?: number;
-  maxHeapMb?: number;
-  /** Executions beyond this queue length are reported as unavailable instead of waiting. */
-  maxPendingExecutions?: number;
-}
+const judgeResponseSchema = z.object({
+  decisionCode: z.number(),
+  exitStatus: z.number(),
+  stdout: z.string(),
+  stderr: z.string(),
+});
 
-export function createLocalJvmExecutor(options?: LocalJvmExecutorOptions): JavaExecutor {
-  const javaHome = options?.javaHome ?? process.env.JAVA_HOME;
-  const settings = {
-    javacCommand: javaHome ? path.join(javaHome, 'bin', 'javac') : 'javac',
-    javaCommand: javaHome ? path.join(javaHome, 'bin', 'java') : 'java',
-    timeoutMs: options?.timeoutMs ?? DEFAULT_JAVA_TIMEOUT_MS,
-    maxHeapMb: options?.maxHeapMb ?? 128,
-  };
-  const maxPendingExecutions = options?.maxPendingExecutions ?? DEFAULT_MAX_PENDING_LOCAL_EXECUTIONS;
-  // The single Fly machine is small, so Java programs are executed one at a time.
-  let queue: Promise<unknown> = Promise.resolve();
-  let pendingExecutions = 0;
-  return {
-    name: 'localJvm',
-    execute(program, entryClassName) {
-      if (pendingExecutions >= maxPendingExecutions) {
-        return Promise.resolve({ kind: 'unavailable', reason: 'The local JVM executor is busy.' });
-      }
-      pendingExecutions++;
-      const run = queue.then(() => executeOnLocalJvm(program, entryClassName, settings));
-      queue = run.catch(() => {}).finally(() => pendingExecutions--);
-      return run;
-    },
-  };
-}
-
-interface LocalJvmSettings {
-  javacCommand: string;
-  javaCommand: string;
-  timeoutMs: number;
-  maxHeapMb: number;
+interface JudgeExecuteInput {
+  files: { path: string; data: string }[];
 }
 
 /**
- * Compiles with `javac`, then runs under the JVM security manager with an empty policy so that the program
- * cannot touch files, processes, the network, or reflection internals even if it evades the static pre-filter.
+ * Runs the program on the judge service (https://github.com/WillBooster/judge), which compiles and runs it
+ * as an unprivileged sandbox user under OS-level time, memory, and output limits on its own machines.
  */
-async function executeOnLocalJvm(
-  program: string,
-  entryClassName: string,
-  settings: LocalJvmSettings
-): Promise<JavaExecutionResult> {
-  let directoryPath: string;
-  try {
-    directoryPath = await mkdtemp(path.join(tmpdir(), 'trace-dojo-java-'));
-  } catch (error) {
-    return { kind: 'unavailable', reason: `Failed to create a working directory: ${String(error)}` };
-  }
-  try {
-    // javac requires the file to be named after the public class.
-    const sourcePath = path.join(directoryPath, `${extractPublicClassName(program) ?? entryClassName}.java`);
-    const classesPath = path.join(directoryPath, 'classes');
-    const policyPath = path.join(directoryPath, 'judge.policy');
-    try {
-      await Promise.all([writeFile(sourcePath, program), writeFile(policyPath, 'grant {};\n')]);
-    } catch (error) {
-      return { kind: 'unavailable', reason: `Failed to write the program: ${String(error)}` };
-    }
-
-    const compilation = await runCommand(
-      settings.javacCommand,
-      ['-J-Xshare:auto', '-J-XX:TieredStopAtLevel=1', '-encoding', 'utf8', '-d', classesPath, sourcePath],
-      directoryPath,
-      settings.timeoutMs
-    );
-    if (compilation.kind !== 'executed') return compilation;
-    if (compilation.exitCode !== 0) {
-      // Only javac diagnostics are the student's fault; anything else means the toolchain itself failed.
-      return /\.java:\d+: /.test(compilation.stderr)
-        ? { kind: 'compileError', message: compilation.stderr.replaceAll(`${directoryPath}${path.sep}`, '') }
-        : { kind: 'unavailable', reason: `javac failed: ${compilation.stderr}` };
-    }
-
-    const execution = await runCommand(
-      settings.javaCommand,
-      [
-        `-Xmx${settings.maxHeapMb}m`,
-        '-XX:+UseSerialGC',
-        '-XX:TieredStopAtLevel=1',
-        '-Xshare:auto',
-        '-Duser.language=en',
-        '-Duser.country=US',
-        '-Djava.security.manager',
-        `-Djava.security.policy==${policyPath}`,
-        '-cp',
-        classesPath,
-        entryClassName,
-      ],
-      directoryPath,
-      settings.timeoutMs
-    );
-    // The judge always prints something once it runs, so a silent non-zero exit means the JVM itself failed to start.
-    if (execution.kind === 'executed' && execution.exitCode !== 0 && !execution.stdout) {
-      return { kind: 'unavailable', reason: `The JVM did not start: ${execution.stderr}` };
-    }
-    return execution;
-  } finally {
-    await rm(directoryPath, { recursive: true, force: true });
-  }
-}
-
-function runCommand(command: string, args: string[], cwd: string, timeoutMs: number): Promise<JavaExecutionResult> {
-  return new Promise((resolve) => {
-    execFile(
-      command,
-      args,
-      { cwd, timeout: timeoutMs, maxBuffer: 1024 * 1024, killSignal: 'SIGKILL' },
-      (error, stdout, stderr) => {
-        if (!error) {
-          resolve({ kind: 'executed', stdout, stderr, exitCode: 0 });
-        } else if (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
-          resolve({ kind: 'outputLimitExceeded' });
-        } else if (error.killed) {
-          resolve({ kind: 'timeout' });
-        } else if (typeof error.code === 'number') {
-          resolve({ kind: 'executed', stdout, stderr, exitCode: error.code });
-        } else if (error.signal) {
-          resolve({ kind: 'executed', stdout, stderr: `${stderr}\nKilled by ${error.signal}`, exitCode: 1 });
-        } else {
-          // Spawn-level failures such as ENOENT, EACCES, or ENOMEM are the environment's fault, not the student's.
-          resolve({ kind: 'unavailable', reason: `Failed to run ${command}: ${error.message}` });
+export function createJudgeExecutor(options?: { url?: string; apiKey?: string; timeoutMs?: number }): JavaExecutor {
+  const url = options?.url ?? process.env.JUDGE_URL ?? DEFAULT_JUDGE_URL;
+  const apiKey = options?.apiKey ?? process.env.JUDGE_API_KEY;
+  const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  // The judge publishes no client package, so the single procedure this executor calls is typed here.
+  const client = createORPCClient<{ v2Execute: Client<Record<never, never>, JudgeExecuteInput, unknown, Error> }>(
+    new RPCLink({ url: `${url}/api/orpc`, headers: apiKey ? { 'x-api-key': apiKey } : {} })
+  );
+  return {
+    name: 'judge',
+    async execute(program, entryClassName) {
+      // The judge renames the file after its public class and runs the class of that name.
+      let response: unknown;
+      try {
+        response = await client.v2Execute(
+          { files: [{ path: `${entryClassName}.java`, data: program }] },
+          { signal: AbortSignal.timeout(timeoutMs) }
+        );
+      } catch (error) {
+        return { kind: 'unavailable', reason: `Failed to call the judge: ${String(error)}` };
+      }
+      const parsed = judgeResponseSchema.safeParse(response);
+      if (!parsed.success) {
+        return { kind: 'unavailable', reason: 'The judge responded with an unexpected body' };
+      }
+      const { decisionCode, exitStatus, stderr, stdout } = parsed.data;
+      switch (decisionCode) {
+        case JUDGE_DECISION_CODE.waitingJudge:
+        case JUDGE_DECISION_CODE.judgeNotAvailable: {
+          return { kind: 'unavailable', reason: `The judge did not run the program: ${stderr}` };
+        }
+        case JUDGE_DECISION_CODE.buildError: {
+          return { kind: 'compileError', message: stderr };
+        }
+        case JUDGE_DECISION_CODE.buildTimeLimitExceeded:
+        case JUDGE_DECISION_CODE.timeLimitExceeded: {
+          return { kind: 'timeout' };
+        }
+        case JUDGE_DECISION_CODE.outputSizeLimitExceeded: {
+          return { kind: 'outputLimitExceeded' };
         }
       }
-    );
-  });
+      // Truncated output would hide the result rather than falsify it, but the program is at fault either way.
+      return stdout.length >= JUDGE_MAX_OUTPUT_LENGTH
+        ? { kind: 'outputLimitExceeded' }
+        : { kind: 'executed', stdout, stderr, exitCode: exitStatus };
+    },
+  };
 }
