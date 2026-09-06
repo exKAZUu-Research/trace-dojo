@@ -42,10 +42,42 @@ const forbiddenPatterns = [
 export function findForbiddenJavaPattern(userProgram: string): string | undefined {
   // Unicode escapes are checked on the raw text; the other names only matter in code, not in literals or comments.
   if (userProgram.includes(String.raw`\u`)) return String.raw`\u`;
-  const code = userProgram
-    .replaceAll(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g, '""')
-    .replaceAll(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+  const code = removeLiteralsAndComments(userProgram);
   return forbiddenPatterns.find((pattern) => pattern.test(code))?.source;
+}
+
+/**
+ * Replaces every string and character literal with `""` and every comment with a space. One left-to-right scan
+ * is what makes this safe: matching literals and comments separately would let a quote inside a comment open a
+ * literal that swallows the code up to the next comment, hiding it from the patterns above.
+ */
+function removeLiteralsAndComments(program: string): string {
+  let code = '';
+  let index = 0;
+  while (index < program.length) {
+    const character = program[index];
+    const pair = program.slice(index, index + 2);
+    if (pair === '//') {
+      const end = program.indexOf('\n', index);
+      index = end === -1 ? program.length : end;
+      code += ' ';
+    } else if (pair === '/*') {
+      const end = program.indexOf('*/', index + 2);
+      index = end === -1 ? program.length : end + 2;
+      code += ' ';
+    } else if (character === '"' || character === "'") {
+      index++;
+      while (index < program.length && program[index] !== character) {
+        index += program[index] === '\\' ? 2 : 1;
+      }
+      index++;
+      code += '""';
+    } else {
+      index++;
+      code += character;
+    }
+  }
+  return code;
 }
 
 function extractPublicClassName(program: string): string | undefined {

@@ -318,6 +318,8 @@ describe('stage 4: judge service', () => {
     'var c = Main.class.getClassLoader().loadClass("ja" + "va.lang.Runt" + "ime"); t.右を向く();',
     'Object o = t.getClass().getMethod("toString").invoke(t); t.右を向く();',
     `var f = t.getClass().getDeclaredField("bo" + "ard"); f.setAccessible(true); t.右を向く();`,
+    // A quote inside a comment must not open a literal that hides the code up to the next comment.
+    '/* " */ var f = t.getClass().getDeclaredField("board"); f.setAccessible(true); /* " */ t.右を向く();',
   ])('rejects %s, which reflection could use to forge the result', async (answer) => {
     // The judge runs on a JDK without a security manager, so reflection into the judged state is stopped here.
     const result = await gradeFillInBlankAnswers(instantiate('fillInBlank3'), [answer], withJudge);
