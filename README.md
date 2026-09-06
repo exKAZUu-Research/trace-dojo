@@ -25,7 +25,7 @@ An educational web app for training program tracing skills.
    git clone git@github.com:exKAZUu-Research/trace-dojo.git
    ```
 
-1. Install the pinned tools (Bun, Node.js, Java, and fnox) with [mise](https://mise.jdx.dev/)
+1. Install the pinned tools (Bun, Node.js, and fnox) with [mise](https://mise.jdx.dev/)
 
    ```
    mise install
