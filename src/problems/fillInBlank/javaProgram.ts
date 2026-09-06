@@ -44,7 +44,7 @@ export function findForbiddenJavaPattern(userProgram: string): string | undefine
   return forbiddenPatterns.find((pattern) => pattern.test(code))?.source;
 }
 
-export function extractPublicClassName(program: string): string | undefined {
+function extractPublicClassName(program: string): string | undefined {
   return /\bpublic\s+(?:final\s+)?class\s+([\p{L}_$][\p{L}\p{N}_$]*)/u.exec(program)?.[1];
 }
 
