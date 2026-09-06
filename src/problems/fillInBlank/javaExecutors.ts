@@ -172,8 +172,8 @@ export function createJudgeExecutor(options?: { url?: string; apiKey?: string; t
 }
 
 /**
- * Retries once after a pause, because a connection to the service can drop for a second or two and running the
- * program again has no side effect.
+ * Retries after a pause, because a connection to the service can drop for a few seconds at a time and running
+ * the program again has no side effect.
  */
 async function callJudge(
   client: { v2Execute: JudgeExecute },
@@ -181,7 +181,7 @@ async function callJudge(
   timeoutMs: number
 ): Promise<{ response: unknown } | { reason: string }> {
   let lastError: unknown;
-  for (const waitMs of [0, 2000]) {
+  for (const waitMs of [0, 2000, 6000]) {
     if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
     try {
       return { response: await client.v2Execute(input, { signal: AbortSignal.timeout(timeoutMs) }) };

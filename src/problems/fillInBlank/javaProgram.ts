@@ -59,7 +59,8 @@ function extractPublicClassName(program: string): string | undefined {
 export function buildJavaJudgeProgram(userProgram: string, resultMarker: string): string {
   const mainClassName = extractPublicClassName(userProgram) ?? 'Main';
   // Both executors run the class named after the source file, and javac allows a single public class per file,
-  // so the wrapper is the public one and the user's classes lose their `public` modifier.
+  // so the wrapper is the public one and the template's own declaration — the first one, before the blanks —
+  // loses its `public` modifier. Later lines are left alone: they may be inside a text block of an answer.
   return `
 public class ${JAVA_JUDGE_CLASS_NAME} {
   public static void main(String[] args) {
@@ -79,7 +80,7 @@ public class ${JAVA_JUDGE_CLASS_NAME} {
   }
 }
 
-${userProgram.trim().replaceAll(/^public\s+(?=(?:abstract\s+|final\s+)*class\b)/gm, '')}
+${userProgram.trim().replace(/^public\s+(?=(?:abstract\s+|final\s+)*class\b)/m, '')}
 
 class Turtle {
   static final int COLUMNS = ${GRID_COLUMNS};
