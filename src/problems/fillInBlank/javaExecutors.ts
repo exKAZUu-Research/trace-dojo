@@ -20,8 +20,10 @@ export const DEFAULT_WANDBOX_COMPILE_URL = 'https://wandbox.org/api/compile.json
 // Wandbox offers no JDK newer than 22, while the judge tracks its own (currently 25), so this pin is the
 // language level a stage 3 answer must satisfy; a newer feature compiles only once Wandbox is unavailable.
 export const DEFAULT_WANDBOX_COMPILER = 'openjdk-jdk-21+35';
-/** Both services stop a program well before this, so the ceiling only bounds a hung connection. */
-const REQUEST_TIMEOUT_MS = 60_000;
+/** Each service stops a program well before its ceiling, so these only bound a hung connection. */
+const WANDBOX_TIMEOUT_MS = 30_000;
+/** The judge allows 10 s to build and 30 s to run, so a longer wait than this is a stuck request. */
+const JUDGE_TIMEOUT_MS = 45_000;
 
 const wandboxResponseSchema = z.object({
   status: z.string(),
@@ -38,7 +40,7 @@ export function createWandboxExecutor(options?: {
 }): JavaExecutor {
   const compileUrl = options?.compileUrl ?? DEFAULT_WANDBOX_COMPILE_URL;
   const compiler = options?.compiler ?? DEFAULT_WANDBOX_COMPILER;
-  const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const timeoutMs = options?.timeoutMs ?? WANDBOX_TIMEOUT_MS;
   return {
     name: 'wandbox',
     async execute(program, entryClassName) {
@@ -119,7 +121,7 @@ type JudgeExecute = Client<Record<never, never>, JudgeExecuteInput, unknown, Err
 export function createJudgeExecutor(options?: { url?: string; apiKey?: string; timeoutMs?: number }): JavaExecutor {
   const url = options?.url ?? process.env.JUDGE_URL ?? DEFAULT_JUDGE_URL;
   const apiKey = options?.apiKey ?? process.env.JUDGE_API_KEY;
-  const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const timeoutMs = options?.timeoutMs ?? JUDGE_TIMEOUT_MS;
   // The judge publishes no client package, so the single procedure this executor calls is typed here.
   const client = createORPCClient<{ v2Execute: JudgeExecute }>(
     new RPCLink({ url: `${url}/api/orpc`, headers: apiKey ? { 'x-api-key': apiKey } : {} })
@@ -169,14 +171,18 @@ export function createJudgeExecutor(options?: { url?: string; apiKey?: string; t
   };
 }
 
-/** Retries once because a connection to the service can drop, and running the program again has no side effect. */
+/**
+ * Retries once after a pause, because a connection to the service can drop for a second or two and running the
+ * program again has no side effect.
+ */
 async function callJudge(
   client: { v2Execute: JudgeExecute },
   input: JudgeExecuteInput,
   timeoutMs: number
 ): Promise<{ response: unknown } | { reason: string }> {
   let lastError: unknown;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (const waitMs of [0, 2000]) {
+    if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
     try {
       return { response: await client.v2Execute(input, { signal: AbortSignal.timeout(timeoutMs) }) };
     } catch (error) {

@@ -21,8 +21,10 @@ const javaExecutionResultSchema = z.object({
 export type JavaTurtleState = z.infer<typeof javaExecutionResultSchema>;
 
 /**
- * A cheap pre-filter for obviously hostile programs. It is not a sandbox: Wandbox and the judge service
- * each isolate the programs they run.
+ * A pre-filter for hostile programs. Wandbox and the judge service each isolate the programs they run from
+ * their own machines, but the judge's JDK has no security manager, so this filter is also what keeps a program
+ * from reflecting into the judged turtle state and forging the result. Reflection always starts from one of
+ * these names, which no answer to a turtle-graphics blank has any use for.
  */
 const forbiddenPatterns = [
   /\bimport\b/,
@@ -33,6 +35,8 @@ const forbiddenPatterns = [
   /\bjdk\./,
   /\b(?:Runtime|ProcessBuilder|Process|Thread|ThreadGroup|Class|ClassLoader|Reflect|Unsafe|File|Files|Path|Paths|Socket|URL|URI|Scanner|Console)\b/,
   /\bSystem\s*\.\s*(?!out\b)/,
+  /\b(?:getClass|getClassLoader|loadClass|forName|getDeclared\w*|getMethods?|getFields?|getConstructors?|setAccessible|newInstance|invoke|MethodHandles?|VarHandle|Lookup)\b/,
+  /\.\s*class\b/,
 ];
 
 export function findForbiddenJavaPattern(userProgram: string): string | undefined {
