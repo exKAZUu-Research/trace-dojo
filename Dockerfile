@@ -28,16 +28,6 @@ RUN apt-get -qq update \
     && curl https://mise.run | sh \
     && bash ./bash/cleanup.sh --keep-scripts
 
-# JDK for grading fill-in-the-blank problems on this machine.
-RUN apt-get -qq update \
-    && apt-get -qq install -y --no-install-recommends ca-certificates curl gnupg \
-    && curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public | gpg --dearmor -o /etc/apt/keyrings/adoptium.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(. /etc/os-release && echo "$VERSION_CODENAME") main" > /etc/apt/sources.list.d/adoptium.list \
-    && apt-get -qq update \
-    && apt-get -qq install -y --no-install-recommends temurin-21-jdk \
-    && apt-get -qq purge -y --auto-remove curl gnupg \
-    && rm -rf /var/lib/apt/lists/*
-
 ARG WB_VERSION
 ENV WB_VERSION=$WB_VERSION
 ENV NEXT_PUBLIC_WB_VERSION=$WB_VERSION

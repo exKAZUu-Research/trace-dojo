@@ -25,11 +25,16 @@ An educational web app for training program tracing skills.
    git clone git@github.com:exKAZUu-Research/trace-dojo.git
    ```
 
-1. Install the pinned tools (Bun, Node.js, Java, and fnox) with [mise](https://mise.jdx.dev/)
+1. Install the pinned tools (Bun, Node.js, and fnox) with [mise](https://mise.jdx.dev/)
 
    ```
    mise install
    ```
+
+1. Ask a maintainer to add your [age](https://github.com/FiloSottile/age) public key to the recipients in `fnox.toml`
+
+   Every command reads its environment from `fnox.toml`, whose `development` profile holds the encrypted key of
+   the judge service, so without an identity no environment variable resolves at all.
 
 1. Install dependencies
 
