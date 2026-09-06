@@ -118,8 +118,8 @@ interface JudgeExecuteInput {
 type JudgeExecute = Client<Record<never, never>, JudgeExecuteInput, unknown, Error>;
 
 /**
- * Runs the program on the judge service (https://github.com/WillBooster/judge), which compiles and runs it
- * as an unprivileged sandbox user under OS-level time, memory, and output limits on its own machines.
+ * Runs the program on the judge service (https://github.com/WillBooster/judge), which compiles and runs it on
+ * its own machines as an unprivileged sandbox user, under a time limit, an output limit, and a fixed JVM heap.
  */
 export function createJudgeExecutor(options?: { url?: string; apiKey?: string; timeoutMs?: number }): JavaExecutor {
   const url = options?.url ?? process.env.JUDGE_URL ?? DEFAULT_JUDGE_URL;
