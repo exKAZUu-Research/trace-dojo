@@ -239,10 +239,12 @@ describe('stage 2: Java semantics and safety', () => {
 });
 
 describe('stage 3: Wandbox', () => {
-  test('accepts an untranslatable but correct answer', { timeout: 60_000 }, async () => {
+  test('accepts an untranslatable but correct answer', { timeout: 60_000 }, async ({ skip }) => {
     const result = await gradeFillInBlankAnswers(instantiate('fillInBlank1'), ['i < 8 / 2'], {
       javaExecutors: [createWandboxExecutor()],
     });
+    // The live service is outside this project's control, so its outages skip the check instead of failing it.
+    if (result.status === 'ungradable') skip(`Wandbox is unavailable: ${result.detail}`);
     expect(result).toEqual({ status: 'correct', stage: 3 });
   });
 
