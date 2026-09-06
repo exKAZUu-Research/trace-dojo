@@ -144,6 +144,9 @@ async function gradeByJavaExecution(
       case 'timeout': {
         return { status: 'incorrect', stage, detail: 'Time limit exceeded.' };
       }
+      case 'memoryLimitExceeded': {
+        return { status: 'incorrect', stage, detail: 'The program used too much memory.' };
+      }
       case 'outputLimitExceeded': {
         return { status: 'incorrect', stage, detail: 'The program printed too much output.' };
       }

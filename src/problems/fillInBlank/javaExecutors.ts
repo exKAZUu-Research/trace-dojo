@@ -6,6 +6,7 @@ export type JavaExecutionResult =
   | { kind: 'executed'; stdout: string; stderr: string; exitCode: number }
   | { kind: 'compileError'; message: string }
   | { kind: 'timeout' }
+  | { kind: 'memoryLimitExceeded' }
   | { kind: 'outputLimitExceeded' }
   /** The executor itself is broken or busy (network failure, rate limit, outage), so another executor should be tried. */
   | { kind: 'unavailable'; reason: string };
@@ -91,9 +92,12 @@ const JUDGE_DECISION_CODE = {
   waitingJudge: 0,
   judgeNotAvailable: 1,
   timeLimitExceeded: 1002,
+  memoryLimitExceeded: 1003,
   outputSizeLimitExceeded: 1004,
   buildError: 1100,
   buildTimeLimitExceeded: 1101,
+  buildMemoryLimitExceeded: 1102,
+  buildOutputSizeLimitExceeded: 1103,
 };
 
 const judgeResponseSchema = z.object({
@@ -149,6 +153,11 @@ export function createJudgeExecutor(options?: { url?: string; apiKey?: string; t
         case JUDGE_DECISION_CODE.timeLimitExceeded: {
           return { kind: 'timeout' };
         }
+        case JUDGE_DECISION_CODE.buildMemoryLimitExceeded:
+        case JUDGE_DECISION_CODE.memoryLimitExceeded: {
+          return { kind: 'memoryLimitExceeded' };
+        }
+        case JUDGE_DECISION_CODE.buildOutputSizeLimitExceeded:
         case JUDGE_DECISION_CODE.outputSizeLimitExceeded: {
           return { kind: 'outputLimitExceeded' };
         }
