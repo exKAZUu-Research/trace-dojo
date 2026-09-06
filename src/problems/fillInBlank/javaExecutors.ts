@@ -173,18 +173,22 @@ export function createJudgeExecutor(options?: { url?: string; apiKey?: string; t
 
 /**
  * Retries after a pause, because a connection to the service can drop for a few seconds at a time and running
- * the program again has no side effect.
+ * the program again has no side effect. The attempts share one deadline, so a service that accepts connections
+ * and then stops answering costs a submission `timeoutMs` in total rather than that much per attempt.
  */
 async function callJudge(
   client: { v2Execute: JudgeExecute },
   input: JudgeExecuteInput,
   timeoutMs: number
 ): Promise<{ response: unknown } | { reason: string }> {
+  const deadline = Date.now() + timeoutMs;
   let lastError: unknown;
   for (const waitMs of [0, 2000, 6000]) {
     if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) break;
     try {
-      return { response: await client.v2Execute(input, { signal: AbortSignal.timeout(timeoutMs) }) };
+      return { response: await client.v2Execute(input, { signal: AbortSignal.timeout(remainingMs) }) };
     } catch (error) {
       lastError = error;
     }
