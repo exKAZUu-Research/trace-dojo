@@ -142,7 +142,11 @@ export function createJudgeExecutor(options?: { url?: string; apiKey?: string; t
           return { kind: 'unavailable', reason: `The judge did not run the program: ${stderr}` };
         }
         case JUDGE_DECISION_CODE.buildError: {
-          return { kind: 'compileError', message: stderr };
+          // The judge reports a build it could not even run with the same code, so only javac diagnostics are
+          // the student's fault.
+          return /\.java:\d+: /.test(stderr)
+            ? { kind: 'compileError', message: stderr }
+            : { kind: 'unavailable', reason: `The judge failed to build the program: ${stderr}` };
         }
         case JUDGE_DECISION_CODE.buildTimeLimitExceeded:
         case JUDGE_DECISION_CODE.timeLimitExceeded: {
