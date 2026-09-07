@@ -35,7 +35,7 @@ An educational web app for training program tracing skills.
    to the recipients in `fnox.toml`
 
    ```
-   age-keygen -o ~/.config/fnox/age.txt
+   mkdir -p ~/.config/fnox && age-keygen -o ~/.config/fnox/age.txt
    ```
 
    Every command reads its environment from `fnox.toml`, whose `development` profile holds the encrypted key of
