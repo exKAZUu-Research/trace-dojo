@@ -35,7 +35,11 @@ An educational web app for training program tracing skills.
 
    Every command reads its environment from `fnox.toml`, whose `development` profile holds the encrypted key of
    the judge service, so without such an identity no environment variable resolves at all. A recipient added to
-   the list reads nothing until the stored values are rewritten for it (`fnox reencrypt --provider age`).
+   the list reads nothing until each profile's stored values are rewritten for it:
+
+   ```
+   for profile in development test staging production; do fnox reencrypt --provider age --profile $profile; done
+   ```
 
 1. Install dependencies
 
