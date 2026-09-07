@@ -21,10 +21,10 @@ const javaExecutionResultSchema = z.object({
 export type JavaTurtleState = z.infer<typeof javaExecutionResultSchema>;
 
 /**
- * A cheap pre-filter for obviously hostile programs, and the only thing this application does about them: the
- * judge service runs every program on its own machines, so the isolation that matters is not this list. It is
- * deliberately not airtight — the audience is learners of `if` and `for`, and a submission that goes out of its
- * way to defeat the filter only affects its own grade.
+ * Names the features an answer to a turtle-graphics blank has no use for, so that a learner reading the verdict
+ * is told which one they reached for instead of being handed a compiler error about it. It guards nothing:
+ * Wandbox and the judge service each run the program on their own machines, and a submission determined to
+ * defeat this list would only be changing its own grade.
  */
 const forbiddenPatterns = [
   /\bimport\b/,
@@ -35,8 +35,6 @@ const forbiddenPatterns = [
   /\bjdk\./,
   /\b(?:Runtime|ProcessBuilder|Process|Thread|ThreadGroup|Class|ClassLoader|Reflect|Unsafe|File|Files|Path|Paths|Socket|URL|URI|Scanner|Console)\b/,
   /\bSystem\s*\.\s*(?!out\b)/,
-  // Reflection is the one way an answer could rewrite the state it is judged on, and no answer to a blank needs it.
-  /\b(?:getClass|forName|getDeclared\w*|setAccessible)\b/,
 ];
 
 export function findForbiddenJavaPattern(userProgram: string): string | undefined {

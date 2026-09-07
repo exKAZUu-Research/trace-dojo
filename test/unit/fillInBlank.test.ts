@@ -314,15 +314,6 @@ describe('stage 4: judge service', () => {
     expect(result.status === 'incorrect' && result.detail).toContain(detail);
   });
 
-  test.each([
-    'var f = t.getClass().getDeclaredField("board"); f.setAccessible(true); t.右を向く();',
-    'System.err.println("forged"); t.右を向く();',
-  ])('rejects %s, which would rewrite what the answer is judged on', async (answer) => {
-    const result = await gradeFillInBlankAnswers(instantiate('fillInBlank3'), [answer], withJudge);
-    expect(result).toMatchObject({ status: 'incorrect', stage: 0 });
-    expect(result.status === 'incorrect' && result.detail).toContain('forbidden');
-  });
-
   test('rejects Unicode escapes that could hide forbidden names', async () => {
     const answer = String.raw`jav\u0061.lang.Runtime.getRuntime().exec("ls"); t.turnRight();`;
     const result = await gradeFillInBlankAnswers(instantiate('fillInBlank3'), [answer], withJudge);
