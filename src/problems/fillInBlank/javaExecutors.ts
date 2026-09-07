@@ -3,7 +3,8 @@ import { RPCLink } from '@orpc/client/fetch';
 import { z } from 'zod';
 
 export type JavaExecutionResult =
-  | { kind: 'executed'; stdout: string; stderr: string }
+  /** `stderr` is the stream the judge program reports the state on; the answer's own output is dropped. */
+  | { kind: 'executed'; stderr: string }
   | { kind: 'compileError'; message: string }
   | { kind: 'timeout' }
   | { kind: 'memoryLimitExceeded' }
@@ -32,7 +33,6 @@ const wandboxResponseSchema = z.object({
   status: z.string(),
   signal: z.string().optional(),
   compiler_error: z.string().optional(),
-  program_output: z.string().optional(),
   program_error: z.string().optional(),
 });
 
@@ -74,27 +74,25 @@ export function createWandboxExecutor(options?: {
       if (!parsed.success) {
         return { kind: 'unavailable', reason: 'Wandbox responded with an unexpected body' };
       }
-      const { compiler_error, program_error, program_output, signal, status } = parsed.data;
+      const { compiler_error, program_error, signal, status } = parsed.data;
       // `compiler_error` also carries warnings of successful compilations, so only a run that never started counts.
       // Wandbox kills a program that exceeds its time limit with exit status 137 and reports no signal.
       if (signal || (status !== '0' && (status === '137' || /\bKilled\b/.test(program_error ?? '')))) {
         return { kind: 'timeout' };
       }
-      if (status !== '0' && !program_output) {
-        // Only the program writes to standard output, so a failure that produced none of it is either javac or
-        // a run that never started.
-        return compiler_error
-          ? { kind: 'compileError', message: compiler_error }
+      // The judge program catches everything the answer throws, so a run that reached it exits 0; a non-zero
+      // status is javac's when it reports a diagnostic and the toolchain's otherwise.
+      if (status !== '0') {
+        return /\.java:\d+: error: /.test(compiler_error ?? '')
+          ? { kind: 'compileError', message: compiler_error ?? '' }
           : { kind: 'unavailable', reason: `The Wandbox run did not start: ${program_error ?? ''}` };
       }
-      return { kind: 'executed', stdout: program_output ?? '', stderr: program_error ?? '' };
+      return { kind: 'executed', stderr: program_error ?? '' };
     },
   };
 }
 
 export const DEFAULT_JUDGE_URL = 'https://judge.willbooster.com';
-/** The judge truncates each stream at this length instead of reporting the limit as exceeded. */
-const JUDGE_MAX_OUTPUT_LENGTH = 50_000;
 const JUDGE_DECISION_CODE = {
   waitingJudge: 0,
   judgeNotAvailable: 1,
@@ -106,6 +104,9 @@ const JUDGE_DECISION_CODE = {
   buildMemoryLimitExceeded: 1102,
   buildOutputSizeLimitExceeded: 1103,
 };
+
+/** A run that floods standard output loses the state the judge program reports, so its length is read too. */
+const JUDGE_MAX_OUTPUT_LENGTH = 50_000;
 
 const judgeResponseSchema = z.object({
   decisionCode: z.number(),
@@ -167,10 +168,7 @@ export function createJudgeExecutor(options?: { url?: string; apiKey?: string; t
           return { kind: 'outputLimitExceeded' };
         }
       }
-      // Truncated output would hide the result rather than falsify it, but the program is at fault either way.
-      return stdout.length >= JUDGE_MAX_OUTPUT_LENGTH
-        ? { kind: 'outputLimitExceeded' }
-        : { kind: 'executed', stdout, stderr };
+      return stdout.length >= JUDGE_MAX_OUTPUT_LENGTH ? { kind: 'outputLimitExceeded' } : { kind: 'executed', stderr };
     },
   };
 }
