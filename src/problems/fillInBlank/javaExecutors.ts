@@ -81,7 +81,8 @@ export function createWandboxExecutor(options?: {
         return { kind: 'timeout' };
       }
       if (status !== '0' && !program_output) {
-        // The judge always prints once it runs, so a silent failure is either javac or a run that never started.
+        // Only the program writes to standard output, so a failure that produced none of it is either javac or
+        // a run that never started.
         return compiler_error
           ? { kind: 'compileError', message: compiler_error }
           : { kind: 'unavailable', reason: `The Wandbox run did not start: ${program_error ?? ''}` };

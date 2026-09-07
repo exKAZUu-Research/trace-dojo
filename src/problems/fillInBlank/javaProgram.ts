@@ -100,7 +100,8 @@ export function buildJavaJudgeProgram(userProgram: string, resultMarker: string)
   const mainClassName = extractPublicClassName(userProgram) ?? 'Main';
   // Both executors run the class named after the source file, and javac allows a single public class per file,
   // so the wrapper is the public one and the template's own declaration — the first one, before the blanks —
-  // loses its `public` modifier. Later lines are left alone: they may be inside a text block of an answer.
+  // loses its `public` modifier. A `public class` an answer declares keeps its modifier and fails to compile,
+  // which is a verdict of its own.
   return `
 public class ${JAVA_JUDGE_CLASS_NAME} {
   public static void main(String[] args) {
