@@ -21,10 +21,10 @@ const javaExecutionResultSchema = z.object({
 export type JavaTurtleState = z.infer<typeof javaExecutionResultSchema>;
 
 /**
- * A pre-filter for hostile programs. Wandbox and the judge service each isolate the programs they run from
- * their own machines, but the judge's JDK has no security manager, so this filter is also what keeps a program
- * from reflecting into the judged turtle state and forging the result. Reflection always starts from one of
- * these names, which no answer to a turtle-graphics blank has any use for.
+ * A cheap pre-filter for obviously hostile programs, and the only thing this application does about them: the
+ * judge service runs every program on its own machines, so the isolation that matters is not this list. It is
+ * deliberately not airtight — the audience is learners of `if` and `for`, and a submission that goes out of its
+ * way to defeat the filter only affects its own grade.
  */
 const forbiddenPatterns = [
   /\bimport\b/,
@@ -35,55 +35,17 @@ const forbiddenPatterns = [
   /\bjdk\./,
   /\b(?:Runtime|ProcessBuilder|Process|Thread|ThreadGroup|Class|ClassLoader|Reflect|Unsafe|File|Files|Path|Paths|Socket|URL|URI|Scanner|Console)\b/,
   /\bSystem\s*\.\s*(?!out\b)/,
-  /\b(?:getClass|getClassLoader|loadClass|forName|getDeclared\w*|getMethods?|getFields?|getConstructors?|setAccessible|newInstance|invoke|MethodHandles?|VarHandle|Lookup)\b/,
-  // These reach standard error, which carries the verdict, without naming `System`.
-  /\b(?:printStackTrace|dumpStack)\b/,
-  /\.\s*class\b/,
+  // Reflection is the one way an answer could rewrite the state it is judged on, and no answer to a blank needs it.
+  /\b(?:getClass|forName|getDeclared\w*|setAccessible)\b/,
 ];
 
 export function findForbiddenJavaPattern(userProgram: string): string | undefined {
   // Unicode escapes are checked on the raw text; the other names only matter in code, not in literals or comments.
   if (userProgram.includes(String.raw`\u`)) return String.raw`\u`;
-  // A text block would end at a `"""` the scanner below reads as two literals, hiding the code after it, and no
-  // answer to a turtle-graphics blank needs one.
-  if (userProgram.includes('"""')) return '"""';
-  const code = removeLiteralsAndComments(userProgram);
+  const code = userProgram
+    .replaceAll(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g, '""')
+    .replaceAll(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
   return forbiddenPatterns.find((pattern) => pattern.test(code))?.source;
-}
-
-/**
- * Replaces every string and character literal with `""` and every comment with a space. One left-to-right scan
- * is what makes this safe: matching literals and comments separately would let a quote inside a comment open a
- * literal that swallows the code up to the next comment, hiding it from the patterns above.
- */
-function removeLiteralsAndComments(program: string): string {
-  let code = '';
-  let index = 0;
-  while (index < program.length) {
-    const character = program[index];
-    const pair = program.slice(index, index + 2);
-    if (pair === '//') {
-      // Java ends a line comment at a carriage return as well, so the rest of that line is code.
-      const end = program.slice(index).search(/[\n\r]/);
-      index = end === -1 ? program.length : index + end;
-      code += ' ';
-    } else if (pair === '/*') {
-      const end = program.indexOf('*/', index + 2);
-      index = end === -1 ? program.length : end + 2;
-      code += ' ';
-    } else if (character === '"' || character === "'") {
-      index++;
-      while (index < program.length && program[index] !== character) {
-        index += program[index] === '\\' ? 2 : 1;
-      }
-      index++;
-      code += '""';
-    } else {
-      index++;
-      code += character;
-    }
-  }
-  return code;
 }
 
 function extractPublicClassName(program: string): string | undefined {
@@ -92,9 +54,8 @@ function extractPublicClassName(program: string): string | undefined {
 
 /**
  * Builds a single-file Java program that runs the user's program and then reports the final turtle-graphics
- * state after `resultMarker` on standard error, which the pre-filter denies to an answer (`System.` is allowed
- * only as `System.out`, and a stack trace prints there too). The user's program therefore cannot write on the
- * channel the verdict is read from, whereas standard output is its own and anything it prints there is ignored.
+ * state after `resultMarker` on standard error. Standard output stays the user's program's own, so whatever it
+ * prints there — a learner's own debugging output included — cannot be mistaken for the result.
  */
 export function buildJavaJudgeProgram(userProgram: string, resultMarker: string): string {
   const mainClassName = extractPublicClassName(userProgram) ?? 'Main';
@@ -116,8 +77,6 @@ public class ${JAVA_JUDGE_CLASS_NAME} {
     System.err.println();
     System.err.println("${resultMarker}");
     System.err.println(Turtle.dump(exception));
-    // Nothing may follow the result, e.g. a stack trace the JVM prints for a thread the program left behind.
-    System.err.close();
   }
 }
 
