@@ -158,7 +158,7 @@ describe('stage 2: Java semantics and safety', () => {
     { problemId: 'fillInBlank3', answers: ['/* Runtime */ t.右を向く(); // Thread'] },
     { problemId: 'fillInBlank1', answers: ['i < 4L'] },
     { problemId: 'fillInBlank3', answers: ['t.hashCode(); t.右を向く();'] },
-  ] as const)('leaves $answers for $problemId to Java', { timeout: 120_000 }, async ({ answers, problemId }) => {
+  ] as const)('leaves $answers for $problemId to Java', { timeout: 180_000 }, async ({ answers, problemId }) => {
     expect(await gradeFillInBlankAnswers(instantiate(problemId), [...answers], withJudge)).toEqual({
       status: 'correct',
       stage: 4,
@@ -168,13 +168,13 @@ describe('stage 2: Java semantics and safety', () => {
   test.each([
     't["constructor"]["constructor"]("globalThis.__traceDojoPwned = true")(); t.右を向く();',
     't.constructor.constructor("globalThis.__traceDojoPwned = true")(); t.右を向く();',
-  ])('never evaluates %s as JavaScript', { timeout: 120_000 }, async (answer) => {
+  ])('never evaluates %s as JavaScript', { timeout: 180_000 }, async (answer) => {
     const result = await gradeFillInBlankAnswers(instantiate('fillInBlank3'), [answer], withJudge);
     expect((globalThis as { __traceDojoPwned?: boolean }).__traceDojoPwned).toBeUndefined();
     expect(result).toMatchObject({ status: 'incorrect', stage: 4 });
   });
 
-  test('leaves unknown members to Java instead of JavaScript', { timeout: 120_000 }, async () => {
+  test('leaves unknown members to Java instead of JavaScript', { timeout: 180_000 }, async () => {
     expect(
       await gradeFillInBlankAnswers(instantiate('fillInBlank3'), ['t.toString(); t.右を向く();'], withJudge)
     ).toEqual({ status: 'correct', stage: 4 });
@@ -200,7 +200,7 @@ describe('stage 2: Java semantics and safety', () => {
     { problemId: 'fillInBlank2', answers: ['y'], detail: 'Compile error' },
   ] as const)(
     'does not accept $answers for $problemId that Java rejects',
-    { timeout: 120_000 },
+    { timeout: 180_000 },
     async ({ answers, detail, problemId }) => {
       const result = await gradeFillInBlankAnswers(instantiate(problemId), [...answers], withJudge);
       expect(result).toMatchObject({ status: 'incorrect', stage: 4 });
@@ -208,38 +208,38 @@ describe('stage 2: Java semantics and safety', () => {
     }
   );
 
-  test('confirms a provisional stage 2 verdict with Java', { timeout: 120_000 }, async () => {
+  test('confirms a provisional stage 2 verdict with Java', { timeout: 180_000 }, async () => {
     expect(await gradeFillInBlankAnswers(instantiate('fillInBlank1'), ['i <= 3'], withJudge)).toEqual({
       status: 'correct',
       stage: 4,
     });
   });
 
-  test('bounds the cost of growing the turtle list inside a loop', { timeout: 120_000 }, async () => {
+  test('bounds the cost of growing the turtle list inside a loop', { timeout: 180_000 }, async () => {
     const startedAt = Date.now();
     const answers = ['1000000', `${'new Turtle(0, 0); '.repeat(50)}t.後に戻る();`];
     const result = await gradeFillInBlankAnswers(instantiate('fillInBlank4'), answers, withJudge);
-    expect(Date.now() - startedAt).toBeLessThan(50_000);
+    expect(Date.now() - startedAt).toBeLessThan(100_000);
     expect(result).toMatchObject({ status: 'incorrect' });
   });
 
-  test('aborts unbounded loops instead of hanging', { timeout: 120_000 }, async () => {
+  test('aborts unbounded loops instead of hanging', { timeout: 180_000 }, async () => {
     const startedAt = Date.now();
     const result = await gradeFillInBlankAnswers(instantiate('fillInBlank4'), ['1000000', 't.後に戻る();'], withJudge);
-    expect(Date.now() - startedAt).toBeLessThan(50_000);
+    expect(Date.now() - startedAt).toBeLessThan(100_000);
     expect(result).toMatchObject({ status: 'incorrect', stage: 4 });
   });
 });
 
 describe('stage 3: Wandbox', () => {
-  test('accepts an untranslatable but correct answer', { timeout: 120_000 }, async () => {
+  test('accepts an untranslatable but correct answer', { timeout: 180_000 }, async () => {
     // Wandbox is outside this project's control, so an outage moves the answer to the judge instead of failing;
     // a Wandbox that answers but rejects the program still fails this, whichever stage the verdict comes from.
     const result = await gradeFillInBlankAnswers(instantiate('fillInBlank1'), ['i < 8 / 2']);
     expect(result).toMatchObject({ status: 'correct' });
   });
 
-  test('falls back to the judge when the Wandbox run does not start', { timeout: 120_000 }, async () => {
+  test('falls back to the judge when the Wandbox run does not start', { timeout: 180_000 }, async () => {
     // Wandbox reports a JVM that could not start with status "1", no compiler error and no program output.
     const server = createServer((_, response) => {
       response.setHeader('Content-Type', 'application/json');
@@ -265,7 +265,7 @@ describe('stage 3: Wandbox', () => {
     }
   });
 
-  test('falls back to the judge when Wandbox is unavailable', { timeout: 120_000 }, async () => {
+  test('falls back to the judge when Wandbox is unavailable', { timeout: 180_000 }, async () => {
     const result = await gradeFillInBlankAnswers(instantiate('fillInBlank1'), ['i < 8 / 2'], {
       javaExecutors: [createWandboxExecutor({ compileUrl: 'http://127.0.0.1:9/api/compile.json' }), judge],
     });
@@ -284,7 +284,7 @@ describe('stage 4: judge service', () => {
     { problemId: 'fillInBlank3', answers: ['if (true) { t.右を向く(); }'] },
     { problemId: 'fillInBlank3', answers: ['for (int i = 0; i < 5; i++) { t.右を向く(); }'] },
     { problemId: 'fillInBlank4', answers: ['9 / 3', 't.右を向く();'] },
-  ] as const)('accepts $answers for $problemId', { timeout: 120_000 }, async ({ answers, problemId }) => {
+  ] as const)('accepts $answers for $problemId', { timeout: 180_000 }, async ({ answers, problemId }) => {
     expect(await gradeFillInBlankAnswers(instantiate(problemId), [...answers], withJudge)).toEqual({
       status: 'correct',
       stage: 4,
@@ -308,7 +308,7 @@ describe('stage 4: judge service', () => {
     { problemId: 'fillInBlank3', answers: ['java.nio.file.Files.readString(null);'], detail: 'forbidden' },
     { problemId: 'fillInBlank3', answers: ['if (true) { t.左を向く(); }'], detail: 'exception' },
     { problemId: 'fillInBlank4', answers: ['4 / 2', 't.右を向く();'], detail: 'final state differs' },
-  ] as const)('rejects $answers for $problemId', { timeout: 120_000 }, async ({ answers, detail, problemId }) => {
+  ] as const)('rejects $answers for $problemId', { timeout: 180_000 }, async ({ answers, detail, problemId }) => {
     const result = await gradeFillInBlankAnswers(instantiate(problemId), [...answers], withJudge);
     expect(result).toMatchObject({ status: 'incorrect' });
     expect(result.status === 'incorrect' && result.detail).toContain(detail);
@@ -320,8 +320,11 @@ describe('stage 4: judge service', () => {
     `var f = t.getClass().getDeclaredField("bo" + "ard"); f.setAccessible(true); t.右を向く();`,
     // A quote inside a comment must not open a literal that hides the code up to the next comment.
     '/* " */ var f = t.getClass().getDeclaredField("board"); f.setAccessible(true); /* " */ t.右を向く();',
-  ])('rejects %s, which reflection could use to forge the result', async (answer) => {
-    // The judge runs on a JDK without a security manager, so reflection into the judged state is stopped here.
+    // Standard error carries the verdict, so an answer must not reach it.
+    'System.err.println("forged"); t.右を向く();',
+  ])('rejects %s, which could forge the result', async (answer) => {
+    // The judge runs on a JDK without a security manager, so the pre-filter is what keeps an answer away from
+    // the judged state and from the stream the verdict is read from.
     const result = await gradeFillInBlankAnswers(instantiate('fillInBlank3'), [answer], withJudge);
     expect(result).toMatchObject({ status: 'incorrect', stage: 0 });
     expect(result.status === 'incorrect' && result.detail).toContain('forbidden');
@@ -338,13 +341,13 @@ describe('stage 4: judge service', () => {
     "Turtle.board[0][0] = '#'; t.右を向く();",
     't.x = 3; t.右を向く();',
     String.raw`t.color = "\""; t.turnRight();`,
-  ])('does not let %s tamper with the judged state', { timeout: 120_000 }, async (answer) => {
+  ])('does not let %s tamper with the judged state', { timeout: 180_000 }, async (answer) => {
     const result = await gradeFillInBlankAnswers(instantiate('fillInBlank3'), [answer], withJudge);
     expect(result).toMatchObject({ status: 'incorrect', stage: 4 });
     expect(result.status === 'incorrect' && result.detail).toContain('Compile error');
   });
 
-  test('ignores a fake result printed before closing stdout', { timeout: 120_000 }, async () => {
+  test('ignores a fake result printed before closing stdout', { timeout: 180_000 }, async () => {
     const problem = instantiate('fillInBlank3');
     const fakeResult = JSON.stringify({ board: problem.finalBoard, turtles: problem.finalTurtles });
     const answer = `
@@ -356,32 +359,27 @@ describe('stage 4: judge service', () => {
     expect(result).toMatchObject({ status: 'incorrect', stage: 4 });
   });
 
-  test('ignores a fake result printed by a thread that outlives the program', { timeout: 120_000 }, async () => {
+  test('ignores a result the answer prints on standard output', { timeout: 180_000 }, async () => {
     const problem = instantiate('fillInBlank3');
     const marker = '__TEST_MARKER__';
     const fakeResult = JSON.stringify({ board: problem.finalBoard, turtles: problem.finalTurtles });
+    // The answer is given the marker, which a real one could read out of the compiled wrapper's own bytes.
     const answer = `
-      Runnable r = () -> {
-        for (long i = 0; i < 400000000L; i++) {}
-        System.out.println();
-        System.out.println("${marker}");
-        System.out.println(${JSON.stringify(fakeResult)});
-      };
-      try {
-        var c = t.getClass().forName("jav" + "a.lang.Thr" + "ead");
-        c.getMethod("start").invoke(c.getConstructor(Runnable.class).newInstance(r));
-      } catch (Exception e) {}
+      System.out.println();
+      System.out.println("${marker}");
+      System.out.println(${JSON.stringify(fakeResult)});
+      System.out.close();
       t.左を向く();`;
     const program = buildJavaJudgeProgram(fillBlanks(problem.displayProgramTemplate, [answer]), marker);
     const execution = await judge.execute(program, JAVA_JUDGE_CLASS_NAME);
     expect(execution.kind).toBe('executed');
-    const actual = execution.kind === 'executed' ? parseJavaJudgeOutput(execution.stdout, marker) : undefined;
+    const actual = execution.kind === 'executed' ? parseJavaJudgeOutput(execution.stderr, marker) : undefined;
     // The genuine result reflects the wrong turn (the turtle then walks off the board), not the forged one.
     expect(actual?.turtles[0]?.dir).toBe('W');
     expect(actual?.exception).toContain('Out of bounds');
   });
 
-  test('rejects programs that flood stdout without misreporting the drawing', { timeout: 120_000 }, async () => {
+  test('rejects programs that flood stdout without misreporting the drawing', { timeout: 180_000 }, async () => {
     const answer =
       'for (int i = 0; i < 60000; i++) System.out.println("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); t.右を向く();';
     const result = await gradeFillInBlankAnswers(instantiate('fillInBlank3'), [answer], withJudge);
@@ -389,14 +387,14 @@ describe('stage 4: judge service', () => {
     expect(result.status === 'incorrect' && result.detail).toContain('too much output');
   });
 
-  test('reports ungradable when the judge cannot be reached', { timeout: 120_000 }, async () => {
+  test('reports ungradable when the judge cannot be reached', { timeout: 180_000 }, async () => {
     const result = await gradeFillInBlankAnswers(instantiate('fillInBlank1'), ['i < 8 / 2'], {
       javaExecutors: [createJudgeExecutor({ url: 'http://127.0.0.1:9' })],
     });
     expect(result).toMatchObject({ status: 'ungradable' });
   });
 
-  test('handles concurrent submissions', { timeout: 120_000 }, async () => {
+  test('handles concurrent submissions', { timeout: 180_000 }, async () => {
     const problem = instantiate('fillInBlank1');
     const results = await Promise.all(
       ['i < 8 / 2', 'i < 10 / 2', 'i < 8 / 2'].map((answer) => gradeFillInBlankAnswers(problem, [answer], withJudge))

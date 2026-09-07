@@ -23,10 +23,10 @@ export const DEFAULT_WANDBOX_COMPILER = 'openjdk-jdk-21+35';
 /** Wandbox stops a program well before this, so the ceiling only bounds a hung connection. */
 const WANDBOX_TIMEOUT_MS = 30_000;
 /**
- * The judge allows 10 s to build and 30 s to run, and needs a little more to start a sandbox (or a sleeping
- * instance), so a wait longer than this is a stuck request rather than a program using its whole time limit.
+ * The judge allows 10 s to build and 30 s to run, but reporting a run it had to kill costs it about a minute
+ * altogether (measured against the production instance), so the budget clears that with room for a cold start.
  */
-const JUDGE_TIMEOUT_MS = 60_000;
+const JUDGE_TIMEOUT_MS = 150_000;
 
 const wandboxResponseSchema = z.object({
   status: z.string(),

@@ -85,8 +85,10 @@ function extractPublicClassName(program: string): string | undefined {
 }
 
 /**
- * Builds a single-file Java program that runs the user's program and then prints the final turtle-graphics state
- * after `resultMarker`. The marker must be unpredictable per execution so the program cannot forge the result.
+ * Builds a single-file Java program that runs the user's program and then reports the final turtle-graphics
+ * state after `resultMarker` on standard error, which the pre-filter denies to an answer (`System.` is allowed
+ * only as `System.out`). The user's program therefore cannot write on the channel the verdict is read from,
+ * whereas standard output is its own and anything it prints there is ignored.
  */
 export function buildJavaJudgeProgram(userProgram: string, resultMarker: string): string {
   const mainClassName = extractPublicClassName(userProgram) ?? 'Main';
@@ -104,11 +106,9 @@ public class ${JAVA_JUDGE_CLASS_NAME} {
       exception = e.toString();
     }
     System.out.flush();
-    System.out.println();
-    System.out.println("${resultMarker}");
-    System.out.println(Turtle.dump(exception));
-    // Nothing may be printed after the result, e.g. by a thread the program left behind.
-    System.out.close();
+    System.err.println();
+    System.err.println("${resultMarker}");
+    System.err.println(Turtle.dump(exception));
   }
 }
 
@@ -207,10 +207,14 @@ class Turtle {
 `.trim();
 }
 
-export function parseJavaJudgeOutput(stdout: string, resultMarker: string): JavaTurtleState | undefined {
-  const markerIndex = stdout.lastIndexOf(resultMarker);
+export function parseJavaJudgeOutput(output: string, resultMarker: string): JavaTurtleState | undefined {
+  const markerIndex = output.lastIndexOf(resultMarker);
   if (markerIndex === -1) return;
-  const json = stdout.slice(markerIndex + resultMarker.length).trim();
+  // `Turtle.dump` writes one line, so a thread that outlives the program cannot append to the result.
+  const json = output
+    .slice(markerIndex + resultMarker.length)
+    .trimStart()
+    .split('\n')[0];
   try {
     return javaExecutionResultSchema.parse(JSON.parse(json));
   } catch {

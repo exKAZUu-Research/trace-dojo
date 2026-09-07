@@ -151,7 +151,7 @@ async function gradeByJavaExecution(
         return { status: 'incorrect', stage, detail: 'The program printed too much output.' };
       }
       case 'executed': {
-        const actual = parseJavaJudgeOutput(result.stdout, resultMarker);
+        const actual = parseJavaJudgeOutput(result.stderr, resultMarker);
         if (!actual) {
           return { status: 'incorrect', stage, detail: `The program did not finish normally: ${result.stderr}` };
         }
