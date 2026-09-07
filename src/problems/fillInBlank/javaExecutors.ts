@@ -187,11 +187,11 @@ async function callJudge(
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown;
   for (const waitMs of [0, 2000, 6000]) {
+    // Waiting out time the deadline no longer has would only delay the answer's verdict.
+    if (deadline - Date.now() <= waitMs) break;
     if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
-    const remainingMs = deadline - Date.now();
-    if (remainingMs <= 0) break;
     try {
-      return { response: await client.v2Execute(input, { signal: AbortSignal.timeout(remainingMs) }) };
+      return { response: await client.v2Execute(input, { signal: AbortSignal.timeout(deadline - Date.now()) }) };
     } catch (error) {
       lastError = error;
     }

@@ -42,6 +42,9 @@ const forbiddenPatterns = [
 export function findForbiddenJavaPattern(userProgram: string): string | undefined {
   // Unicode escapes are checked on the raw text; the other names only matter in code, not in literals or comments.
   if (userProgram.includes(String.raw`\u`)) return String.raw`\u`;
+  // A text block would end at a `"""` the scanner below reads as two literals, hiding the code after it, and no
+  // answer to a turtle-graphics blank needs one.
+  if (userProgram.includes('"""')) return '"""';
   const code = removeLiteralsAndComments(userProgram);
   return forbiddenPatterns.find((pattern) => pattern.test(code))?.source;
 }
