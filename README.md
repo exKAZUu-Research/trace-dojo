@@ -31,11 +31,17 @@ An educational web app for training program tracing skills.
    mise install
    ```
 
-1. Ask a maintainer for an [age](https://github.com/FiloSottile/age) identity that `fnox.toml` is encrypted for
+1. Create your own [age](https://github.com/FiloSottile/age) identity and ask a maintainer to add its public key
+   to the recipients in `fnox.toml`
+
+   ```
+   age-keygen -o ~/.config/fnox/age.txt
+   ```
 
    Every command reads its environment from `fnox.toml`, whose `development` profile holds the encrypted key of
-   the judge service, so without such an identity no environment variable resolves at all. A recipient added to
-   the list reads nothing until each profile's stored values are rewritten for it:
+   the judge service, so without an identity of your own no environment variable resolves at all. Keep it to
+   yourself: each identity decrypts every profile, and a shared one cannot be revoked for one person. A recipient
+   on the list reads nothing until a maintainer rewrites each profile's stored values for it:
 
    ```
    for profile in development test staging production; do fnox reencrypt --provider age --profile $profile; done
