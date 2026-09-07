@@ -237,6 +237,8 @@ describe('stage 3: Wandbox', () => {
     // a Wandbox that answers but rejects the program still fails this, whichever stage the verdict comes from.
     const result = await gradeFillInBlankAnswers(instantiate('fillInBlank1'), ['i < 8 / 2']);
     expect(result).toMatchObject({ status: 'correct' });
+    // An earlier stage accepting this answer would leave no test running it as Java at all.
+    expect([3, 4]).toContain(result.status === 'correct' && result.stage);
   });
 
   test('falls back to the judge when the Wandbox run does not start', { timeout: 180_000 }, async () => {
