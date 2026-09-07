@@ -320,8 +320,9 @@ describe('stage 4: judge service', () => {
     `var f = t.getClass().getDeclaredField("bo" + "ard"); f.setAccessible(true); t.右を向く();`,
     // A quote inside a comment must not open a literal that hides the code up to the next comment.
     '/* " */ var f = t.getClass().getDeclaredField("board"); f.setAccessible(true); /* " */ t.右を向く();',
-    // Standard error carries the verdict, so an answer must not reach it.
+    // Standard error carries the verdict, so an answer must not reach it, by name or through a stack trace.
     'System.err.println("forged"); t.右を向く();',
+    'new RuntimeException("forged").printStackTrace(); t.右を向く();',
     // Java ends a line comment at a carriage return, so the code after one is not hidden by the comment.
     '// hidden\r var f = t.getClass().getDeclaredField("board"); f.setAccessible(true); t.右を向く();',
     // A text block ends where javac says it does, not where pairing quotes one by one would put it.

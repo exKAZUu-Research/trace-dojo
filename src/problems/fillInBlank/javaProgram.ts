@@ -36,6 +36,8 @@ const forbiddenPatterns = [
   /\b(?:Runtime|ProcessBuilder|Process|Thread|ThreadGroup|Class|ClassLoader|Reflect|Unsafe|File|Files|Path|Paths|Socket|URL|URI|Scanner|Console)\b/,
   /\bSystem\s*\.\s*(?!out\b)/,
   /\b(?:getClass|getClassLoader|loadClass|forName|getDeclared\w*|getMethods?|getFields?|getConstructors?|setAccessible|newInstance|invoke|MethodHandles?|VarHandle|Lookup)\b/,
+  // These reach standard error, which carries the verdict, without naming `System`.
+  /\b(?:printStackTrace|dumpStack)\b/,
   /\.\s*class\b/,
 ];
 
@@ -91,8 +93,8 @@ function extractPublicClassName(program: string): string | undefined {
 /**
  * Builds a single-file Java program that runs the user's program and then reports the final turtle-graphics
  * state after `resultMarker` on standard error, which the pre-filter denies to an answer (`System.` is allowed
- * only as `System.out`). The user's program therefore cannot write on the channel the verdict is read from,
- * whereas standard output is its own and anything it prints there is ignored.
+ * only as `System.out`, and a stack trace prints there too). The user's program therefore cannot write on the
+ * channel the verdict is read from, whereas standard output is its own and anything it prints there is ignored.
  */
 export function buildJavaJudgeProgram(userProgram: string, resultMarker: string): string {
   const mainClassName = extractPublicClassName(userProgram) ?? 'Main';
@@ -113,6 +115,8 @@ public class ${JAVA_JUDGE_CLASS_NAME} {
     System.err.println();
     System.err.println("${resultMarker}");
     System.err.println(Turtle.dump(exception));
+    // Nothing may follow the result, e.g. a stack trace the JVM prints for a thread the program left behind.
+    System.err.close();
   }
 }
 
