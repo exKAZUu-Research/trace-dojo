@@ -21,8 +21,10 @@ const javaExecutionResultSchema = z.object({
 export type JavaTurtleState = z.infer<typeof javaExecutionResultSchema>;
 
 /**
- * A cheap pre-filter for obviously hostile programs. It is not a sandbox: the local executor runs programs
- * under the JVM security manager with an empty policy, and Wandbox provides its own isolation.
+ * Names the features an answer to a turtle-graphics blank has no use for, so that a learner reading the verdict
+ * is told which one they reached for instead of being handed a compiler error about it. It guards nothing:
+ * Wandbox and the judge service each run the program on their own machines, and a submission determined to
+ * defeat this list would only be changing its own grade.
  */
 const forbiddenPatterns = [
   /\bimport\b/,
@@ -44,18 +46,23 @@ export function findForbiddenJavaPattern(userProgram: string): string | undefine
   return forbiddenPatterns.find((pattern) => pattern.test(code))?.source;
 }
 
-export function extractPublicClassName(program: string): string | undefined {
+function extractPublicClassName(program: string): string | undefined {
   return /\bpublic\s+(?:final\s+)?class\s+([\p{L}_$][\p{L}\p{N}_$]*)/u.exec(program)?.[1];
 }
 
 /**
- * Builds a single-file Java program that runs the user's program and then prints the final turtle-graphics state
- * after `resultMarker`. The marker must be unpredictable per execution so the program cannot forge the result.
+ * Builds a single-file Java program that runs the user's program and then reports the final turtle-graphics
+ * state after `resultMarker` on standard error. Standard output stays the user's program's own, so whatever it
+ * prints there — a learner's own debugging output included — cannot be mistaken for the result.
  */
 export function buildJavaJudgeProgram(userProgram: string, resultMarker: string): string {
   const mainClassName = extractPublicClassName(userProgram) ?? 'Main';
+  // Both executors run the class named after the source file, and javac allows a single public class per file,
+  // so the wrapper is the public one and the template's own declaration — the first one, before the blanks —
+  // loses its `public` modifier. A `public class` an answer declares keeps its modifier and fails to compile,
+  // which is a verdict of its own.
   return `
-class ${JAVA_JUDGE_CLASS_NAME} {
+public class ${JAVA_JUDGE_CLASS_NAME} {
   public static void main(String[] args) {
     String exception = null;
     try {
@@ -65,15 +72,13 @@ class ${JAVA_JUDGE_CLASS_NAME} {
       exception = e.toString();
     }
     System.out.flush();
-    System.out.println();
-    System.out.println("${resultMarker}");
-    System.out.println(Turtle.dump(exception));
-    // Nothing may be printed after the result, e.g. by a thread the program left behind.
-    System.out.close();
+    System.err.println();
+    System.err.println("${resultMarker}");
+    System.err.println(Turtle.dump(exception));
   }
 }
 
-${userProgram.trim()}
+${userProgram.trim().replace(/^public\s+(?=(?:abstract\s+|final\s+)*class\b)/m, '')}
 
 class Turtle {
   static final int COLUMNS = ${GRID_COLUMNS};
@@ -168,10 +173,14 @@ class Turtle {
 `.trim();
 }
 
-export function parseJavaJudgeOutput(stdout: string, resultMarker: string): JavaTurtleState | undefined {
-  const markerIndex = stdout.lastIndexOf(resultMarker);
+export function parseJavaJudgeOutput(output: string, resultMarker: string): JavaTurtleState | undefined {
+  const markerIndex = output.lastIndexOf(resultMarker);
   if (markerIndex === -1) return;
-  const json = stdout.slice(markerIndex + resultMarker.length).trim();
+  // `Turtle.dump` writes one line, so a thread that outlives the program cannot append to the result.
+  const json = output
+    .slice(markerIndex + resultMarker.length)
+    .trimStart()
+    .split('\n')[0];
   try {
     return javaExecutionResultSchema.parse(JSON.parse(json));
   } catch {

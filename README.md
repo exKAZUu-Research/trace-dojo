@@ -25,10 +25,26 @@ An educational web app for training program tracing skills.
    git clone git@github.com:exKAZUu-Research/trace-dojo.git
    ```
 
-1. Install the pinned tools (Bun, Node.js, Java, and fnox) with [mise](https://mise.jdx.dev/)
+1. Install the pinned tools (age, Bun, Node.js, and fnox) with [mise](https://mise.jdx.dev/)
 
    ```
    mise install
+   ```
+
+1. Create your own [age](https://github.com/FiloSottile/age) identity and ask a maintainer to add its public key
+   to the recipients in `fnox.toml`
+
+   ```
+   mkdir -p ~/.config/fnox && age-keygen -o ~/.config/fnox/age.txt
+   ```
+
+   Every command reads its environment from `fnox.toml`, whose `development` profile holds the encrypted key of
+   the judge service, so without an identity of your own no environment variable resolves at all. Keep it to
+   yourself: each identity decrypts every profile, and a shared one cannot be revoked for one person. A recipient
+   on the list reads nothing until a maintainer rewrites each profile's stored values for it:
+
+   ```
+   for profile in development test staging production; do fnox reencrypt --provider age --profile $profile; done
    ```
 
 1. Install dependencies

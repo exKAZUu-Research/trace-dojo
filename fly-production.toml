@@ -13,6 +13,11 @@ auto_start_machines = false
 min_machines_running = 1
 processes = ['app']
 
+# Grading an answer that never stops waits for the judge to kill it, which takes longer than the 60 s the proxy
+# would otherwise hold the connection for, and the learner would see a network error instead of the verdict.
+[http_service.http_options]
+idle_timeout = 300
+
 [[vm]]
 size = 'shared-cpu-2x'
 memory = '1024mb'
