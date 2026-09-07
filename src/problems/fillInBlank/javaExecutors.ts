@@ -190,8 +190,11 @@ async function callJudge(
     // Waiting out time the deadline no longer has would only delay the answer's verdict.
     if (deadline - Date.now() <= waitMs) break;
     if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    // A timer overshoots, so the remaining time is measured again rather than assumed to still be positive.
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) break;
     try {
-      return { response: await client.v2Execute(input, { signal: AbortSignal.timeout(deadline - Date.now()) }) };
+      return { response: await client.v2Execute(input, { signal: AbortSignal.timeout(remainingMs) }) };
     } catch (error) {
       lastError = error;
     }
