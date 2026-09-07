@@ -31,10 +31,11 @@ An educational web app for training program tracing skills.
    mise install
    ```
 
-1. Ask a maintainer to add your [age](https://github.com/FiloSottile/age) public key to the recipients in `fnox.toml`
+1. Ask a maintainer for an [age](https://github.com/FiloSottile/age) identity that `fnox.toml` is encrypted for
 
    Every command reads its environment from `fnox.toml`, whose `development` profile holds the encrypted key of
-   the judge service, so without an identity no environment variable resolves at all.
+   the judge service, so without such an identity no environment variable resolves at all. A recipient added to
+   the list reads nothing until the stored values are rewritten for it (`fnox reencrypt --provider age`).
 
 1. Install dependencies
 
