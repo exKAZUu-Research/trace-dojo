@@ -322,6 +322,8 @@ describe('stage 4: judge service', () => {
     '/* " */ var f = t.getClass().getDeclaredField("board"); f.setAccessible(true); /* " */ t.右を向く();',
     // Standard error carries the verdict, so an answer must not reach it.
     'System.err.println("forged"); t.右を向く();',
+    // Java ends a line comment at a carriage return, so the code after one is not hidden by the comment.
+    '// hidden\r var f = t.getClass().getDeclaredField("board"); f.setAccessible(true); t.右を向く();',
   ])('rejects %s, which could forge the result', async (answer) => {
     // The judge runs on a JDK without a security manager, so the pre-filter is what keeps an answer away from
     // the judged state and from the stream the verdict is read from.

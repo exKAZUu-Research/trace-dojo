@@ -58,8 +58,9 @@ function removeLiteralsAndComments(program: string): string {
     const character = program[index];
     const pair = program.slice(index, index + 2);
     if (pair === '//') {
-      const end = program.indexOf('\n', index);
-      index = end === -1 ? program.length : end;
+      // Java ends a line comment at a carriage return as well, so the rest of that line is code.
+      const end = program.slice(index).search(/[\n\r]/);
+      index = end === -1 ? program.length : index + end;
       code += ' ';
     } else if (pair === '/*') {
       const end = program.indexOf('*/', index + 2);
