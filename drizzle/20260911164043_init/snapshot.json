@@ -1,0 +1,344 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "id": "9ff0e5da-64ca-43aa-8377-0b56329f5cd2",
+  "prevIds": ["00000000-0000-0000-0000-000000000000"],
+  "ddl": [
+    {
+      "name": "ProblemSession",
+      "entityType": "tables"
+    },
+    {
+      "name": "ProblemSubmission",
+      "entityType": "tables"
+    },
+    {
+      "name": "User",
+      "entityType": "tables"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": true,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "ProblemSession"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "(unixepoch('subsec') * 1000)",
+      "generated": null,
+      "name": "createdAt",
+      "entityType": "columns",
+      "table": "ProblemSession"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updatedAt",
+      "entityType": "columns",
+      "table": "ProblemSession"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "userId",
+      "entityType": "columns",
+      "table": "ProblemSession"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "courseId",
+      "entityType": "columns",
+      "table": "ProblemSession"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "lectureId",
+      "entityType": "columns",
+      "table": "ProblemSession"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "problemId",
+      "entityType": "columns",
+      "table": "ProblemSession"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "problemVariablesSeed",
+      "entityType": "columns",
+      "table": "ProblemSession"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "problemType",
+      "entityType": "columns",
+      "table": "ProblemSession"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "traceItemIndex",
+      "entityType": "columns",
+      "table": "ProblemSession"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "elapsedMilliseconds",
+      "entityType": "columns",
+      "table": "ProblemSession"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "completedAt",
+      "entityType": "columns",
+      "table": "ProblemSession"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": true,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "ProblemSubmission"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "(unixepoch('subsec') * 1000)",
+      "generated": null,
+      "name": "createdAt",
+      "entityType": "columns",
+      "table": "ProblemSubmission"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "sessionId",
+      "entityType": "columns",
+      "table": "ProblemSubmission"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "problemType",
+      "entityType": "columns",
+      "table": "ProblemSubmission"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "traceItemIndex",
+      "entityType": "columns",
+      "table": "ProblemSubmission"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "elapsedMilliseconds",
+      "entityType": "columns",
+      "table": "ProblemSubmission"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "isCorrect",
+      "entityType": "columns",
+      "table": "ProblemSubmission"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "answers",
+      "entityType": "columns",
+      "table": "ProblemSubmission"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "gradingStage",
+      "entityType": "columns",
+      "table": "ProblemSubmission"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "User"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "(unixepoch('subsec') * 1000)",
+      "generated": null,
+      "name": "createdAt",
+      "entityType": "columns",
+      "table": "User"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updatedAt",
+      "entityType": "columns",
+      "table": "User"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "displayName",
+      "entityType": "columns",
+      "table": "User"
+    },
+    {
+      "columns": ["userId"],
+      "tableTo": "User",
+      "columnsTo": ["id"],
+      "onUpdate": "CASCADE",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_ProblemSession_userId_User_id_fk",
+      "entityType": "fks",
+      "table": "ProblemSession"
+    },
+    {
+      "columns": ["sessionId"],
+      "tableTo": "ProblemSession",
+      "columnsTo": ["id"],
+      "onUpdate": "CASCADE",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_ProblemSubmission_sessionId_ProblemSession_id_fk",
+      "entityType": "fks",
+      "table": "ProblemSubmission"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "ProblemSession_pk",
+      "table": "ProblemSession",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "ProblemSubmission_pk",
+      "table": "ProblemSubmission",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "User_pk",
+      "table": "User",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "userId",
+          "isExpression": false
+        },
+        {
+          "value": "courseId",
+          "isExpression": false
+        },
+        {
+          "value": "lectureId",
+          "isExpression": false
+        },
+        {
+          "value": "problemId",
+          "isExpression": false
+        },
+        {
+          "value": "completedAt",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "ProblemSession_userId_courseId_lectureId_problemId_completedAt_idx",
+      "entityType": "indexes",
+      "table": "ProblemSession"
+    }
+  ],
+  "renames": []
+}

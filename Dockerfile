@@ -40,7 +40,9 @@ ENV NEXT_PUBLIC_WB_ENV=$WB_ENV
 # runtime from Fly.io secrets (scripts/syncFlySecrets.mjs).
 COPY .docker.env mise.toml bunfig.toml bun.lock next.config.ts tsconfig.json ./
 COPY dist/package.json ./
-COPY prisma/ ./prisma
+COPY db/ ./db
+COPY drizzle/ ./drizzle
+COPY drizzle.config.ts ./
 COPY public/ ./public
 COPY src/ ./src
 COPY scripts/docker-entrypoint.sh scripts/start-production.sh ./scripts/
@@ -53,14 +55,13 @@ RUN bash ./bash/generate-package-manager-configs.sh
 # apply-docker-env.sh exports the baked values so `next build` inlines NEXT_PUBLIC_*.
 RUN mise install node \
     && bun install \
-    && bun run prisma generate \
     && bash ./bash/apply-docker-env.sh bun run build/core \
     && cat .next/BUILD_ID \
     # --env-refs keeps the R2 credentials out of the image; Litestream expands them from Fly.io secrets.
-    && bash ./bash/apply-docker-env.sh bun wb prisma create-litestream-config --env-refs \
+    && bash ./bash/apply-docker-env.sh bun wb db create-litestream-config --env-refs \
     && bun wb optimizeForDockerBuild \
     # Avoid overwriting existing db files
-    && rm -Rf db/mount \
+    && rm -Rf prisma/mount \
     && bash ./bash/cleanup.sh --keep-scripts
 
 RUN chmod +x scripts/*.sh

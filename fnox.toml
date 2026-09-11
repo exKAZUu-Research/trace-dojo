@@ -17,7 +17,7 @@ NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON = { default = '{"tuBeginner1":["8d692b
 [profiles.development.secrets]
 WB_ENV = { default = "development" }
 NEXT_PUBLIC_WB_ENV = { default = "development" }
-DATABASE_URL = { default = "file:./dev.sqlite3?connection_limit=1" }
+DATABASE_URL = { default = "file:./prisma/dev.sqlite3" }
 # Pinned because `next build` needs a base URL (SuperTokens rejects an empty domain).
 PORT = { default = "3500" }
 NEXT_PUBLIC_BASE_URL = { default = "http://localhost:3500" }
@@ -34,7 +34,7 @@ JUDGE_API_KEY = { provider = "age", value = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFg
 [profiles.test.secrets]
 WB_ENV = { default = "test" }
 NEXT_PUBLIC_WB_ENV = { default = "test" }
-DATABASE_URL = { default = "file:./test.sqlite3?connection_limit=1" }
+DATABASE_URL = { default = "file:./prisma/test.sqlite3" }
 # Pinned because this profile also serves local production-mode runs (`start-docker`, `start-stg`) on
 # http://localhost:8500, and `next build` needs a base URL.
 PORT = { default = "8500" }
@@ -54,7 +54,7 @@ JUDGE_API_KEY = { provider = "age", value = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFg
 [profiles.staging.secrets]
 WB_ENV = { default = "staging" }
 NEXT_PUBLIC_WB_ENV = { default = "staging" }
-DATABASE_URL = { default = "file:./mount/prod.sqlite3?connection_limit=1" }
+DATABASE_URL = { default = "file:./prisma/mount/prod.sqlite3" }
 PORT = { default = "8080" }
 NEXT_PUBLIC_BASE_URL = { default = "https://trace-dojo-staging.fly.dev" }
 NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON = { default = '{"tuBeginner1":["8d692b48-8c19-4679-8d8f-3f27a051d44d","d4de75e2-758b-4500-b38e-96213c360527","99045fdf-6cb5-4947-b934-8b1bc5831bbd","37632776-e3ab-4cc5-ae08-934caf2ada53","8fbc94d3-d20c-4457-8997-61e85b3516d9","35957643-c106-4a97-8073-6705c39ab9a6","045094ae-1f5c-4caf-bc33-a86af985f13b","84805179-12cf-4871-969e-fb39e6ad767a"],"tuBeginner2":["5ba06885-2044-4c1e-bd65-2a9c5e9c9e39"]}' }
@@ -71,7 +71,7 @@ JUDGE_API_KEY = { provider = "age", value = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFg
 [profiles.production.secrets]
 WB_ENV = { default = "production" }
 NEXT_PUBLIC_WB_ENV = { default = "production" }
-DATABASE_URL = { default = "file:./mount/prod.sqlite3?connection_limit=1" }
+DATABASE_URL = { default = "file:./prisma/mount/prod.sqlite3" }
 PORT = { default = "8080" }
 NEXT_PUBLIC_BASE_URL = { default = "https://trace-dojo.fly.dev" }
 NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON = { default = '{"tuBeginner1":["aa96e57c-cb4e-4edb-bcf6-493a6cde8873","0b7c06cf-a7dd-405e-8adf-abf1d49be57f","7fb1bb19-a539-4267-841e-739a31e894c4","f6475012-5727-4561-8066-0c61acc25f3f","6e546f51-735b-4af4-918a-a0b5c0205ce1","b5fcda1d-f7ca-4b9e-8615-fd2e847ce3a5","d921bfaa-c0be-4b81-b280-bcd71de5bd00","b2b8c50e-04c5-454f-961b-b410135a7c09"],"tuBeginner2":["8da4c805-118f-4eeb-8401-9f4af4ddb129","73554a36-1dd6-40f1-bc45-65fe6efb5759","455bfe4e-684b-4992-81b8-702c2d97ffba","1777b54d-d5fb-4453-ae40-ccc7a95ffff3","7c0a5489-000e-4ebf-883f-fae6c7c3b0c5","24860fb1-de2f-41dc-90a1-902623ea91ac","17646210-9678-4c4e-a5a4-f8596d652568","57445084-a486-4216-a974-a2c70ccd79ed"]}' }

@@ -1,9 +1,10 @@
+import { problemSessions } from '../../../../../../../../../db/schema';
 import { ProblemPageOnClient } from './pageOnClient';
 
 import { withAuthorizationOnServer } from '@/app/utils/withAuth';
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { logger } from '@/infrastructures/pino';
-import { prisma } from '@/infrastructures/prisma';
+import { db } from '@/infrastructures/database';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import { isFillInBlankProblem } from '@/problems/instantiateProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
@@ -13,19 +14,19 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
   lectureId: string;
   problemId: ProblemId;
 }> = async ({ params, session }) => {
-  let incompleteProblemSession = await prisma.problemSession.findFirst({
+  let incompleteProblemSession = await db.query.problemSessions.findFirst({
     where: {
       ...getLearningPeriodFilter(),
       userId: session.superTokensUserId,
       courseId: params.courseId,
       lectureId: params.lectureId,
       problemId: params.problemId,
-      // eslint-disable-next-line unicorn/no-null
-      completedAt: null,
+      completedAt: { isNull: true },
     },
   });
-  incompleteProblemSession ??= await prisma.problemSession.create({
-    data: {
+  incompleteProblemSession ??= db
+    .insert(problemSessions)
+    .values({
       userId: session.superTokensUserId,
       courseId: params.courseId,
       lectureId: params.lectureId,
@@ -33,8 +34,9 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
       problemVariablesSeed: Date.now().toString(),
       problemType: isFillInBlankProblem(params.problemId) ? 'fillInBlank' : 'executionResult',
       traceItemIndex: 0,
-    },
-  });
+    })
+    .returning()
+    .get()!;
   logger.debug('incompleteProblemSession: %o', incompleteProblemSession);
 
   return (

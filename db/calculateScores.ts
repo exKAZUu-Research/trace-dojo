@@ -3,21 +3,20 @@
  * 2. Update `deadLines`.
  * 3. Update `header` via `CSVインポート` -> `雛形ダウンロード`.
  * 4. Put the `CSVエクスポート` result at `students.csv`, or set `STUDENTS_CSV_PATH` to another path.
- * 5. `bun run calculate-score` (runs against `prisma/restored.sqlite3` with the production profile).
+ * 5. `bun run calculate-score` (runs against `drizzle/restored.sqlite3` with the production profile).
  * */
 
 import { copyFileSync, existsSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 
-import { PrismaClient } from '@prisma/client';
 import SuperTokensNode from 'supertokens-node';
 
+import { db } from '../src/infrastructures/database';
 import { ensureSuperTokensInit } from '@/infrastructures/supertokens/backendConfig';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import { courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
 
 import { loadValidStudentIds } from './loadValidStudentIds';
 
-const prisma = new PrismaClient();
 const defaultValidStudentIdsCsvPath = 'students.csv';
 const gradingCsvPath = 'grading.csv';
 const previousGradingCsvPath = 'grading.previous.csv';
@@ -68,8 +67,8 @@ async function main(): Promise<void> {
 
   const courseId = Object.keys(deadLines)[0] as keyof typeof deadLines;
   const periodFilter = getLearningPeriodFilter();
-  const users = await prisma.user.findMany({
-    where: { problemSessions: { some: { courseId, ...periodFilter } } },
+  const users = await db.query.users.findMany({
+    where: { problemSessions: { courseId, ...periodFilter } },
   });
   console.info('Fetched users with course activity:', users.length);
   const finalDeadline = deadLines[courseId][8];
@@ -102,23 +101,18 @@ async function main(): Promise<void> {
       const lectureDeadline = deadLines[courseId][lectureIndex];
 
       for (const problemId of problemIds) {
-        const session = await prisma.problemSession.findFirst({
+        const session = await db.query.problemSessions.findFirst({
           where: {
             ...periodFilter,
             courseId,
             problemId,
             userId: user.id,
-            // eslint-disable-next-line unicorn/no-null
-            completedAt: { not: null },
+            completedAt: { isNotNull: true },
           },
           orderBy: { completedAt: 'asc' },
-          select: {
+          with: { submissions: { columns: { isCorrect: true } } },
+          columns: {
             completedAt: true,
-            submissions: {
-              select: {
-                isCorrect: true,
-              },
-            },
           },
         });
 

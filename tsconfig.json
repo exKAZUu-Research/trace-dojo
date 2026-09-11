@@ -38,7 +38,7 @@
     "*.config.ts",
     "next-env.d.ts",
     "next.config.ts",
-    "prisma/**/*",
+    "db/**/*",
     "scripts/**/*",
     "src/**/*",
     "test/**/*"

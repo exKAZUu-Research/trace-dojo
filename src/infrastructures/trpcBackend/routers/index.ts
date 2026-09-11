@@ -1,10 +1,11 @@
-import { Prisma, type ProblemSession } from '@prisma/client';
 import { TRPCError } from '@trpc/server';
+import { and, eq, gte, sql } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
+import { problemSessions, problemSubmissions, type ProblemSession } from '../../../../db/schema';
 import { logger } from '../../pino';
-import { prisma } from '../../prisma';
+import { db } from '../../database';
 import { authorize } from '../middlewares';
 import { procedure, router } from '../trpc';
 
@@ -41,22 +42,26 @@ export const backendRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST' });
       }
 
-      const problemSession = await prisma.problemSession
-        .update({
-          where: { id, userId: ctx.session.superTokensUserId, ...getLearningPeriodFilter() },
-          data: {
-            ...(incrementalElapsedMilliseconds
-              ? { elapsedMilliseconds: { increment: incrementalElapsedMilliseconds } }
-              : {}),
-            ...data,
-          },
+      const start = getLearningPeriodFilter().createdAt?.gte;
+      const problemSession = db
+        .update(problemSessions)
+        .set({
+          ...data,
+          updatedAt: new Date(),
+          elapsedMilliseconds: incrementalElapsedMilliseconds
+            ? sql`${problemSessions.elapsedMilliseconds} + ${incrementalElapsedMilliseconds}`
+            : undefined,
         })
-        .catch((error: unknown) => {
-          if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-            throw new TRPCError({ code: 'NOT_FOUND', cause: error });
-          }
-          throw error;
-        });
+        .where(
+          and(
+            eq(problemSessions.id, id),
+            eq(problemSessions.userId, ctx.session.superTokensUserId),
+            start ? gte(problemSessions.createdAt, start) : undefined
+          )
+        )
+        .returning()
+        .get();
+      if (!problemSession) throw new TRPCError({ code: 'NOT_FOUND' });
       // 開発環境ではページが更新されないので注意すること。
       revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');
       console.log(`revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');`);
@@ -77,34 +82,39 @@ export const backendRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const receivedAt = new Date();
-      await prisma.$transaction(async (tx) => {
-        const session = await tx.problemSession.findUnique({
-          where: { id: input.sessionId, ...getLearningPeriodFilter(receivedAt) },
-        });
+      db.transaction((tx) => {
+        const session = tx.query.problemSessions
+          .findFirst({
+            where: { id: input.sessionId, ...getLearningPeriodFilter(receivedAt) },
+          })
+          .sync();
         if (!session) throw new TRPCError({ code: 'NOT_FOUND' });
         if (session.userId !== ctx.session.superTokensUserId) throw new TRPCError({ code: 'UNAUTHORIZED' });
 
         const isCompleted = 'isCompleted' in input ? input.isCompleted : isLegacySubmissionComplete(input, session);
-        const updatedSession = await tx.problemSession.update({
-          where: { id: session.id },
-          data: {
+        const updatedSession = tx
+          .update(problemSessions)
+          .set({
+            updatedAt: receivedAt,
             elapsedMilliseconds:
               'incrementalElapsedMilliseconds' in input
-                ? { increment: input.incrementalElapsedMilliseconds }
+                ? sql`${problemSessions.elapsedMilliseconds} + ${input.incrementalElapsedMilliseconds}`
                 : undefined,
             completedAt: isCompleted ? receivedAt : undefined,
-          },
-        });
-        await tx.problemSubmission.create({
-          data: {
+          })
+          .where(eq(problemSessions.id, session.id))
+          .returning()
+          .get()!;
+        tx.insert(problemSubmissions)
+          .values({
             sessionId: session.id,
             problemType: input.problemType,
             traceItemIndex: input.traceItemIndex,
             isCorrect: input.isCorrect,
             elapsedMilliseconds:
               'elapsedMilliseconds' in input ? input.elapsedMilliseconds : updatedSession.elapsedMilliseconds,
-          },
-        });
+          })
+          .run();
       });
       revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');
     }),
@@ -121,7 +131,7 @@ export const backendRouter = router({
     .mutation(async ({ ctx, input }) => {
       // Grading may take tens of seconds, so the completion time is the time the answer arrived.
       const receivedAt = new Date();
-      const session = await prisma.problemSession.findUnique({
+      const session = await db.query.problemSessions.findFirst({
         where: { id: input.sessionId, ...getLearningPeriodFilter(receivedAt) },
       });
       if (!session) throw new TRPCError({ code: 'NOT_FOUND' });
@@ -135,8 +145,8 @@ export const backendRouter = router({
         // The detail describes server infrastructure, so it stays in the log.
         return { status: result.status, detail: '' };
       }
-      await prisma.problemSubmission.create({
-        data: {
+      db.insert(problemSubmissions)
+        .values({
           sessionId: session.id,
           problemType: session.problemType,
           traceItemIndex: session.traceItemIndex,
@@ -144,10 +154,10 @@ export const backendRouter = router({
           isCorrect: result.status === 'correct',
           answers: JSON.stringify(input.answers),
           gradingStage: result.stage,
-        },
-      });
+        })
+        .run();
       if (result.status === 'correct') {
-        await prisma.problemSession.update({ where: { id: session.id }, data: { completedAt: receivedAt } });
+        db.update(problemSessions).set({ completedAt: receivedAt }).where(eq(problemSessions.id, session.id)).run();
         revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');
       }
       return result;
@@ -161,13 +171,15 @@ export const backendRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
-      return await prisma.problemSubmission.count({
+      const submissions = await db.query.problemSubmissions.findMany({
+        columns: { id: true },
         where: {
           sessionId: input.sessionId,
           session: { userId: ctx.session.superTokensUserId, ...getLearningPeriodFilter() },
           isCorrect: false,
         },
       });
+      return submissions.length;
     }),
 });
 

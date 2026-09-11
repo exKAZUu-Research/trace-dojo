@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { expect, test } from 'vitest';
 
-import { loadValidStudentIds } from '../../prisma/loadValidStudentIds';
+import { loadValidStudentIds } from '../../db/loadValidStudentIds';
 
 const csv = '氏名,管理ID\r\n"Example, Student", ab123 \r\nAnother,CD456\r\nDuplicate,AB123\r\nEmpty,\r\n';
 const shiftJisCsv = Buffer.concat([
