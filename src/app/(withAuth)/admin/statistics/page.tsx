@@ -18,6 +18,7 @@ import { dayjs } from '../../../utils/dayjs';
 
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { withAuthorizationOnServer } from '@/app/utils/withAuth';
+import { getLearningPeriodFilter } from '@/learningPeriod';
 
 interface ProblemStatistics {
   courseId: string;
@@ -71,25 +72,26 @@ const StatisticsPage: MyAuthorizedNextPageOrLayout = async () => {
 
 async function calculateStatistics(): Promise<ProblemStatistics[]> {
   const statistics: ProblemStatistics[] = [];
+  const periodFilter = getLearningPeriodFilter();
   for (const courseId of Object.keys(courseIdToLectureIndexToProblemIds) as CourseId[]) {
     for (const [lectureIndex, problemIds] of courseIdToLectureIndexToProblemIds[courseId].entries()) {
       for (const problemId of problemIds) {
         try {
           const userGroups = await prisma.problemSession.groupBy({
             by: ['userId'],
-            where: { problemId },
+            where: { ...periodFilter, problemId },
           });
           const userCount = userGroups.length;
           const completedUserGroups = await prisma.problemSession.groupBy({
             by: ['userId'],
             // eslint-disable-next-line unicorn/no-null
-            where: { problemId, completedAt: { not: null } },
+            where: { ...periodFilter, problemId, completedAt: { not: null } },
           });
           const completedUserCount = completedUserGroups.length;
 
           const firstCompletedSessions = await prisma.problemSession.findMany({
             // eslint-disable-next-line unicorn/no-null
-            where: { problemId, completedAt: { not: null } },
+            where: { ...periodFilter, problemId, completedAt: { not: null } },
             orderBy: { completedAt: 'asc' },
             distinct: ['userId'] as const,
             select: {

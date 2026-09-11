@@ -6,22 +6,25 @@ import { withAuthorizationOnServer } from '@/app/utils/withAuth';
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { logger } from '@/infrastructures/pino';
 import { prisma } from '@/infrastructures/prisma';
+import { getLearningPeriodFilter } from '@/learningPeriod';
 import type { CourseId } from '@/problems/problemData';
 import { courseIdToLectureIds } from '@/problems/problemData';
 
 const CoursePage: MyAuthorizedNextPageOrLayout<{ courseId: CourseId }> = async ({ params, session }) => {
   if (!(params.courseId in courseIdToLectureIds)) notFound();
 
+  const periodFilter = getLearningPeriodFilter();
   const currentUserProblemSessions = await prisma.problemSession.findMany({
     distinct: ['problemId'],
     orderBy: { completedAt: 'desc' },
     select: { problemId: true, completedAt: true },
-    where: { userId: session.superTokensUserId, courseId: params.courseId },
+    where: { ...periodFilter, userId: session.superTokensUserId, courseId: params.courseId },
   });
   logger.trace('currentUserProblemSessions: %o', currentUserProblemSessions);
 
   return (
     <CoursePageOnClient
+      learningPeriodStart={periodFilter.createdAt?.gte.toISOString()}
       currentUserCompletedProblemIdSet={
         new Set(currentUserProblemSessions.filter((s) => s.completedAt).map((s) => s.problemId))
       }

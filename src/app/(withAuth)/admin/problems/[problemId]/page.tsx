@@ -8,6 +8,7 @@ import { dayjs } from '../../../../utils/dayjs';
 
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { withAuthorizationOnServer } from '@/app/utils/withAuth';
+import { getLearningPeriodFilter } from '@/learningPeriod';
 
 interface UserProblemInfo {
   userId: string;
@@ -62,6 +63,7 @@ async function fetchUserProblemInfo(problemId: ProblemId): Promise<UserProblemIn
   try {
     const sessions = await prisma.problemSession.findMany({
       where: {
+        ...getLearningPeriodFilter(),
         problemId,
         // eslint-disable-next-line unicorn/no-null
         completedAt: { not: null },

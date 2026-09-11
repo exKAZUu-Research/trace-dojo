@@ -4,6 +4,7 @@ import { withAuthorizationOnServer } from '@/app/utils/withAuth';
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { logger } from '@/infrastructures/pino';
 import { prisma } from '@/infrastructures/prisma';
+import { getLearningPeriodFilter } from '@/learningPeriod';
 import { isFillInBlankProblem } from '@/problems/instantiateProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 
@@ -14,6 +15,7 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
 }> = async ({ params, session }) => {
   let incompleteProblemSession = await prisma.problemSession.findFirst({
     where: {
+      ...getLearningPeriodFilter(),
       userId: session.superTokensUserId,
       courseId: params.courseId,
       lectureId: params.lectureId,
@@ -35,7 +37,13 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
   });
   logger.debug('incompleteProblemSession: %o', incompleteProblemSession);
 
-  return <ProblemPageOnClient initialProblemSession={incompleteProblemSession} userId={session.superTokensUserId} />;
+  return (
+    <ProblemPageOnClient
+      key={incompleteProblemSession.id}
+      initialProblemSession={incompleteProblemSession}
+      userId={session.superTokensUserId}
+    />
+  );
 };
 
 export default withAuthorizationOnServer(ProblemPage);
