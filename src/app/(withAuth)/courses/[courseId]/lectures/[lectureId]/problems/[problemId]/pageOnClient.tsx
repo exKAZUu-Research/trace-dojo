@@ -21,6 +21,7 @@ import type { FillInBlankGradingResult } from '@/problems/fillInBlank/grade';
 import { instantiateProblem } from '@/problems/instantiateProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import { courseIdToLectureIds, courseIdToName, problemIdToName } from '@/problems/problemData';
+import { isProblemSessionExpired } from '@/utils/problemSessionError';
 
 interface Props {
   initialProblemSession: ProblemSession;
@@ -43,10 +44,16 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   useLayoutEffect(() => {
     lastActionTimeRef.current = Date.now();
   }, []);
-  useMonitorUserActivity(props, lastActionTimeRef);
+  const [isSessionExpired, setIsSessionExpired] = useState(false);
+  const onSessionError = (error: unknown): void => {
+    if (isProblemSessionExpired(error)) setIsSessionExpired(true);
+  };
+  useMonitorUserActivity(props, lastActionTimeRef, onSessionError, isSessionExpired);
 
-  const updateProblemSessionMutation = backendTrpcReact.updateProblemSession.useMutation();
-  const createProblemSubmissionMutation = backendTrpcReact.createProblemSubmission.useMutation();
+  const updateProblemSessionMutation = backendTrpcReact.updateProblemSession.useMutation({ onError: onSessionError });
+  const createProblemSubmissionMutation = backendTrpcReact.createProblemSubmission.useMutation({
+    onError: onSessionError,
+  });
 
   const createSubmissionUpdatingProblemSession = useCallback(
     async (isCorrect: boolean, isCompleted: boolean): Promise<void> => {
@@ -62,7 +69,9 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     [problemSession, createProblemSubmissionMutation, lastActionTimeRef]
   );
 
-  const gradeFillInBlankAnswersMutation = backendTrpcReact.gradeFillInBlankAnswers.useMutation();
+  const gradeFillInBlankAnswersMutation = backendTrpcReact.gradeFillInBlankAnswers.useMutation({
+    onError: onSessionError,
+  });
   const gradeAnswers = useCallback(
     async (answers: string[]): Promise<FillInBlankGradingResult> => {
       const newProblemSession = await updateProblemSessionMutation.mutateAsync({
@@ -80,17 +89,33 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
 
   const updateProblemSession = useCallback(
     async (newProblemType: string, newTraceItemIndex: number): Promise<void> => {
-      const newProblemSession = await updateProblemSessionMutation.mutateAsync({
-        id: problemSession.id,
-        problemType: newProblemType,
-        traceItemIndex: newTraceItemIndex,
-      });
-      setProblemSession(newProblemSession);
+      try {
+        const newProblemSession = await updateProblemSessionMutation.mutateAsync({
+          id: problemSession.id,
+          problemType: newProblemType,
+          traceItemIndex: newTraceItemIndex,
+        });
+        setProblemSession(newProblemSession);
+      } catch (error) {
+        if (!isProblemSessionExpired(error)) throw error;
+      }
     },
     [problemSession.id, updateProblemSessionMutation]
   );
 
   if (!problem) notFound();
+
+  if (isSessionExpired) {
+    return (
+      <VStack align="stretch" role="alert" spacing={4}>
+        <Heading size="md">学習セッションの有効期限が切れました</Heading>
+        <Text>ページを再読み込みして、現在の学習期間の問題を開いてください。</Text>
+        <Button alignSelf="start" colorScheme="brand" onClick={() => globalThis.location.reload()}>
+          ページを再読み込み
+        </Button>
+      </VStack>
+    );
+  }
 
   const isFillInBlank = problemSession.problemType === 'fillInBlank';
 
@@ -165,11 +190,17 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   );
 };
 
-function useMonitorUserActivity(props: Props, lastActionTimeRef: React.RefObject<number>): void {
-  const updateProblemSessionMutation = backendTrpcReact.updateProblemSession.useMutation();
+function useMonitorUserActivity(
+  props: Props,
+  lastActionTimeRef: React.RefObject<number>,
+  onSessionError: (error: unknown) => void,
+  isSessionExpired: boolean
+): void {
+  const updateProblemSessionMutation = backendTrpcReact.updateProblemSession.useMutation({ onError: onSessionError });
   useIdleTimer({
+    disabled: isSessionExpired,
     onAction() {
-      void updateProblemSessionMutation.mutateAsync({
+      updateProblemSessionMutation.mutate({
         id: props.initialProblemSession.id,
         incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
       });

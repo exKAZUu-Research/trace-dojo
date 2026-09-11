@@ -252,7 +252,17 @@ export const ProblemBody: React.FC<Props> = (props) => {
             ref={turtleGraphicsRef}
             currentTraceItemIndex={currentTraceItemIndex}
             currentVariables={currentVariables}
-            handleSubmit={handleSubmit}
+            handleSubmit={async () => {
+              try {
+                await handleSubmit();
+              } catch (error) {
+                console.error(error);
+                openAlertDialog(
+                  '提出できませんでした',
+                  '通信に失敗しました。ネットワークの状態を確認して、もう一度提出してください。'
+                );
+              }
+            }}
             initialVariables={initialVariables}
             previousTraceItemIndex={previousTraceItemIndex}
             problem={props.problem}

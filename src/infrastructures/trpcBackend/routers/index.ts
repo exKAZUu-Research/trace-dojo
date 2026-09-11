@@ -27,7 +27,6 @@ export const backendRouter = router({
         problemType: z.string().min(1).optional(),
         traceItemIndex: z.number().int().nonnegative().optional(),
         incrementalElapsedMilliseconds: z.number().nonnegative().optional(),
-        completedAt: z.date().optional(),
       })
     )
     .mutation(async ({ ctx, input: { id, incrementalElapsedMilliseconds, ...data } }) => {
@@ -105,7 +104,7 @@ export const backendRouter = router({
       // Grading may take tens of seconds, so the completion time is the time the answer arrived.
       const receivedAt = new Date();
       const session = await prisma.problemSession.findUnique({
-        where: { id: input.sessionId, ...getLearningPeriodFilter() },
+        where: { id: input.sessionId, ...getLearningPeriodFilter(receivedAt) },
       });
       if (!session) throw new TRPCError({ code: 'NOT_FOUND' });
       if (session.userId !== ctx.session.superTokensUserId) throw new TRPCError({ code: 'UNAUTHORIZED' });
