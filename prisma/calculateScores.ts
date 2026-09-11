@@ -6,14 +6,15 @@
  * 5. `bun run calculate-score` (runs against `prisma/restored.sqlite3` with the production profile).
  * */
 
-import { copyFileSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 
 import { PrismaClient } from '@prisma/client';
-import { parse } from 'csv-parse/sync';
 import SuperTokensNode from 'supertokens-node';
 
 import { ensureSuperTokensInit } from '@/infrastructures/supertokens/backendConfig';
 import { courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
+
+import { loadValidStudentIds } from './loadValidStudentIds';
 
 const prisma = new PrismaClient();
 const defaultValidStudentIdsCsvPath = 'students.csv';
@@ -223,43 +224,6 @@ function writeGradingCsv(records: ScoreRecord[]): void {
   } finally {
     rmSync(temporaryGradingCsvPath, { force: true });
   }
-}
-
-function loadValidStudentIds(csvPath: string): Set<string> {
-  const rows = parseCsvRows(readFileSync(csvPath, 'utf8'));
-  const studentIdColumnIndex = rows[0]?.findIndex((value) => normalizeStudentId(value) === '管理ID') ?? -1;
-  if (studentIdColumnIndex < 0) {
-    throw new Error(`No 管理ID column found in ${csvPath}`);
-  }
-
-  const studentIds = new Set<string>();
-  for (const row of rows.slice(1)) {
-    const studentId = normalizeStudentId(row[studentIdColumnIndex]);
-    if (studentId) {
-      studentIds.add(studentId);
-    }
-  }
-
-  if (studentIds.size === 0) {
-    throw new Error(`No valid student IDs found in ${csvPath}`);
-  }
-  return studentIds;
-}
-
-function normalizeStudentId(value: string | undefined): string {
-  return (
-    value
-      ?.trim()
-      .replace(/^\uFEFF/, '')
-      .toUpperCase() ?? ''
-  );
-}
-
-function parseCsvRows(content: string): string[][] {
-  return parse(content, {
-    bom: true,
-    skip_empty_lines: true,
-  }) as string[][];
 }
 
 // eslint-disable-next-line unicorn/prefer-top-level-await
