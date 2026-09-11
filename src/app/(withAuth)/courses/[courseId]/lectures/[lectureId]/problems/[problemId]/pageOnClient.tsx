@@ -50,20 +50,16 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
 
   const createSubmissionUpdatingProblemSession = useCallback(
     async (isCorrect: boolean, isCompleted: boolean): Promise<void> => {
-      const newProblemSession = await updateProblemSessionMutation.mutateAsync({
-        id: problemSession.id,
-        incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
-        completedAt: isCompleted ? new Date() : undefined,
-      });
       await createProblemSubmissionMutation.mutateAsync({
         sessionId: problemSession.id,
         problemType: problemSession.problemType,
         traceItemIndex: problemSession.traceItemIndex,
-        elapsedMilliseconds: newProblemSession.elapsedMilliseconds,
+        incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
         isCorrect,
+        isCompleted,
       });
     },
-    [problemSession, updateProblemSessionMutation, createProblemSubmissionMutation, lastActionTimeRef]
+    [problemSession, createProblemSubmissionMutation, lastActionTimeRef]
   );
 
   const gradeFillInBlankAnswersMutation = backendTrpcReact.gradeFillInBlankAnswers.useMutation();

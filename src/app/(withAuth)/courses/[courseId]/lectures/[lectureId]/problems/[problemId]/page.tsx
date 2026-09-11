@@ -37,7 +37,13 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
   });
   logger.debug('incompleteProblemSession: %o', incompleteProblemSession);
 
-  return <ProblemPageOnClient initialProblemSession={incompleteProblemSession} userId={session.superTokensUserId} />;
+  return (
+    <ProblemPageOnClient
+      key={incompleteProblemSession.id}
+      initialProblemSession={incompleteProblemSession}
+      userId={session.superTokensUserId}
+    />
+  );
 };
 
 export default withAuthorizationOnServer(ProblemPage);

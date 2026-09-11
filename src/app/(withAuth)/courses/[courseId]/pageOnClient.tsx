@@ -28,7 +28,10 @@ import {
   courseIdToName,
 } from '../../../../problems/problemData';
 
+import { getLectureStorageKey } from '@/utils/lectureStorage';
+
 interface Props {
+  learningPeriodStart?: string;
   currentUserCompletedProblemIdSet: ReadonlySet<string>;
   currentUserStartedProblemIdSet: ReadonlySet<string>;
 }
@@ -42,10 +45,11 @@ export const CoursePageOnClient: React.FC<Props> = (props) => {
       <SimpleGrid columnGap={4} columns={{ base: 1, lg: 2 }} rowGap={6}>
         {courseIdToLectureIndexToProblemIds[params.courseId].map((problemIds, lectureIndex) => (
           <LectureCard
-            key={lectureIndex}
+            key={`${lectureIndex}.${props.learningPeriodStart ?? ''}`}
             courseId={params.courseId}
             currentUserCompletedProblemIdSet={props.currentUserCompletedProblemIdSet}
             currentUserStartedProblemIdSet={props.currentUserStartedProblemIdSet}
+            learningPeriodStart={props.learningPeriodStart}
             lectureIndex={lectureIndex}
             problemIds={problemIds}
           />
@@ -56,6 +60,7 @@ export const CoursePageOnClient: React.FC<Props> = (props) => {
 };
 
 interface LectureCardProps {
+  learningPeriodStart?: string;
   courseId: CourseId;
   lectureIndex: number;
   problemIds: string[];
@@ -67,6 +72,7 @@ const LectureCard: React.FC<LectureCardProps> = ({
   courseId,
   currentUserCompletedProblemIdSet,
   currentUserStartedProblemIdSet,
+  learningPeriodStart,
   lectureIndex,
   problemIds,
 }) => {
@@ -76,7 +82,10 @@ const LectureCard: React.FC<LectureCardProps> = ({
   const isLectureCompleted = completedProblemCount >= problemIds.length;
 
   const currentUserId = useAuthContextSelector((c) => c.currentUserId);
-  const [isOpened] = useLocalStorage(`trace-dojo.${courseId}.${lectureIndex}.${currentUserId}`, false);
+  const [isOpened] = useLocalStorage(
+    getLectureStorageKey(courseId, lectureIndex, currentUserId, learningPeriodStart),
+    false
+  );
   const isDisabled = !isOpened && problemIds.every((problemId) => !currentUserStartedProblemIdSet.has(problemId));
   const url = isDisabled ? '#' : `${courseId}/lectures/${courseIdToLectureIds[courseId][lectureIndex]}`;
 

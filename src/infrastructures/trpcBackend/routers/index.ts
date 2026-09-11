@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { TRPCError } from '@trpc/server';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
@@ -34,15 +35,22 @@ export const backendRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST' });
       }
 
-      const problemSession = await prisma.problemSession.update({
-        where: { id, userId: ctx.session.superTokensUserId, ...getLearningPeriodFilter() },
-        data: {
-          ...(incrementalElapsedMilliseconds
-            ? { elapsedMilliseconds: { increment: incrementalElapsedMilliseconds } }
-            : {}),
-          ...data,
-        },
-      });
+      const problemSession = await prisma.problemSession
+        .update({
+          where: { id, userId: ctx.session.superTokensUserId, ...getLearningPeriodFilter() },
+          data: {
+            ...(incrementalElapsedMilliseconds
+              ? { elapsedMilliseconds: { increment: incrementalElapsedMilliseconds } }
+              : {}),
+            ...data,
+          },
+        })
+        .catch((error: unknown) => {
+          if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+            throw new TRPCError({ code: 'NOT_FOUND', cause: error });
+          }
+          throw error;
+        });
       // 開発環境ではページが更新されないので注意すること。
       revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');
       console.log(`revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');`);
@@ -56,18 +64,32 @@ export const backendRouter = router({
         sessionId: z.number().int().positive(),
         problemType: z.string(),
         traceItemIndex: z.number().int().nonnegative(),
-        elapsedMilliseconds: z.number().nonnegative(),
+        incrementalElapsedMilliseconds: z.number().nonnegative(),
         isCorrect: z.boolean(),
+        isCompleted: z.boolean(),
       })
     )
-    .mutation(async ({ ctx, input }) => {
-      const session = await prisma.problemSession.findUnique({
-        where: { id: input.sessionId, ...getLearningPeriodFilter() },
-      });
-      if (!session) throw new TRPCError({ code: 'NOT_FOUND' });
-      if (session.userId !== ctx.session.superTokensUserId) throw new TRPCError({ code: 'UNAUTHORIZED' });
+    .mutation(async ({ ctx, input: { incrementalElapsedMilliseconds, isCompleted, ...submission } }) => {
+      const receivedAt = new Date();
+      await prisma.$transaction(async (tx) => {
+        const session = await tx.problemSession.findUnique({
+          where: { id: submission.sessionId, ...getLearningPeriodFilter(receivedAt) },
+        });
+        if (!session) throw new TRPCError({ code: 'NOT_FOUND' });
+        if (session.userId !== ctx.session.superTokensUserId) throw new TRPCError({ code: 'UNAUTHORIZED' });
 
-      await prisma.problemSubmission.create({ data: input });
+        const updatedSession = await tx.problemSession.update({
+          where: { id: session.id },
+          data: {
+            elapsedMilliseconds: { increment: incrementalElapsedMilliseconds },
+            completedAt: isCompleted ? receivedAt : undefined,
+          },
+        });
+        await tx.problemSubmission.create({
+          data: { ...submission, elapsedMilliseconds: updatedSession.elapsedMilliseconds },
+        });
+      });
+      revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');
     }),
 
   gradeFillInBlankAnswers: procedure

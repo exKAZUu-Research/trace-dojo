@@ -30,8 +30,10 @@ import {
 } from '@/infrastructures/useClient/chakra';
 import type { CourseId } from '@/problems/problemData';
 import { courseIdToLectureIndexToProblemIds, courseIdToName, problemIdToName } from '@/problems/problemData';
+import { getLectureStorageKey } from '@/utils/lectureStorage';
 
 interface Props {
+  learningPeriodStart?: string;
   lectureIndex: number;
   problemSessions: (Pick<ProblemSession, 'problemId' | 'completedAt'> & {
     submissions: Pick<ProblemSubmission, 'isCorrect'>[];
@@ -51,7 +53,7 @@ export const Lecture: React.FC<Props> = (props) => {
 
   const currentUserId = useAuthContextSelector((c) => c.currentUserId);
   const [, setIsOpened] = useLocalStorage(
-    `trace-dojo.${params.courseId}.${props.lectureIndex}.${currentUserId}`,
+    getLectureStorageKey(params.courseId, props.lectureIndex, currentUserId, props.learningPeriodStart),
     false
   );
   useEffect(() => {

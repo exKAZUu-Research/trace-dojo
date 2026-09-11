@@ -18,6 +18,7 @@ const LecturePage: MyAuthorizedNextPageOrLayout<{ courseId: CourseId; lectureId:
   const lectureIndex = courseIdToLectureIds[params.courseId].indexOf(params.lectureId);
   if (lectureIndex === -1) notFound();
 
+  const periodFilter = getLearningPeriodFilter();
   const currentUserProblemSessions = await prisma.problemSession.findMany({
     orderBy: { createdAt: 'asc' },
     select: {
@@ -26,14 +27,21 @@ const LecturePage: MyAuthorizedNextPageOrLayout<{ courseId: CourseId; lectureId:
       submissions: { select: { isCorrect: true } },
     },
     where: {
-      ...getLearningPeriodFilter(),
+      ...periodFilter,
       userId: session.superTokensUserId,
       courseId: params.courseId,
       lectureId: params.lectureId,
     },
   });
 
-  return <Lecture lectureIndex={lectureIndex} problemSessions={currentUserProblemSessions} />;
+  return (
+    <Lecture
+      key={periodFilter.createdAt?.gte.toISOString()}
+      learningPeriodStart={periodFilter.createdAt?.gte.toISOString()}
+      lectureIndex={lectureIndex}
+      problemSessions={currentUserProblemSessions}
+    />
+  );
 };
 
 export default withAuthorizationOnServer(LecturePage);
