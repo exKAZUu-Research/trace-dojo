@@ -1,6 +1,6 @@
 'use client';
 
-import type { ProblemSession } from '@prisma/client';
+import type { ProblemSession } from '../../../../../../../../../db/schema';
 import { useParams, useRouter } from 'next/navigation';
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';

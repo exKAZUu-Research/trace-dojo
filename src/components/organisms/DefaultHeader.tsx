@@ -6,7 +6,7 @@ import { NextLinkWithoutPrefetch } from '../atoms/NextLinkWithoutPrefetch';
 
 import { DefaultHeaderMenu } from '@/components/organisms/DefaultHeaderMenu';
 import { APP_NAME } from '@/constants';
-import { prisma } from '@/infrastructures/prisma';
+import { db } from '@/infrastructures/database';
 import { Box, Button, Heading, HStack, Icon } from '@/infrastructures/useClient/chakra';
 import { MdOutlineHome } from '@/infrastructures/useClient/icons';
 import { getNullableSessionOnServer } from '@/utils/session';
@@ -21,7 +21,7 @@ export const DefaultHeader: NextPage = async () => {
 
   const user =
     session &&
-    (await prisma.user.findUnique({
+    (await db.query.users.findFirst({
       where: {
         id: session.superTokensUserId,
       },

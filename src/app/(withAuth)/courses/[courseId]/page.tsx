@@ -5,7 +5,7 @@ import { CoursePageOnClient } from './pageOnClient';
 import { withAuthorizationOnServer } from '@/app/utils/withAuth';
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { logger } from '@/infrastructures/pino';
-import { prisma } from '@/infrastructures/prisma';
+import { db } from '@/infrastructures/database';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import type { CourseId } from '@/problems/problemData';
 import { courseIdToLectureIds } from '@/problems/problemData';
@@ -14,10 +14,9 @@ const CoursePage: MyAuthorizedNextPageOrLayout<{ courseId: CourseId }> = async (
   if (!(params.courseId in courseIdToLectureIds)) notFound();
 
   const periodFilter = getLearningPeriodFilter();
-  const currentUserProblemSessions = await prisma.problemSession.findMany({
-    distinct: ['problemId'],
+  const currentUserProblemSessions = await db.query.problemSessions.findMany({
     orderBy: { completedAt: 'desc' },
-    select: { problemId: true, completedAt: true },
+    columns: { problemId: true, completedAt: true },
     where: { ...periodFilter, userId: session.superTokensUserId, courseId: params.courseId },
   });
   logger.trace('currentUserProblemSessions: %o', currentUserProblemSessions);

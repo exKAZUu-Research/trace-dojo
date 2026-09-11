@@ -1,16 +1,18 @@
+import { eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import { z } from 'zod';
 import { zfd } from 'zod-form-data';
 
+import { users } from '../../../../db/schema';
 import { withAuthorizationOnServer } from '@/app/utils/withAuth';
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
-import { prisma } from '@/infrastructures/prisma';
+import { db } from '@/infrastructures/database';
 import { Button, FormControl, FormLabel, Input, VStack } from '@/infrastructures/useClient/chakra';
 import { getNonNullableSessionOnServer } from '@/utils/session';
 
 const SettingsPage: MyAuthorizedNextPageOrLayout = async ({ session }) => {
-  const user = await prisma.user.findUnique({
+  const user = await db.query.users.findFirst({
     where: {
       id: session.superTokensUserId,
     },
@@ -40,14 +42,7 @@ async function updateDisplayName(formData: FormData): Promise<void> {
   'use server';
   const input = inputSchema.parse(formData);
   const session = await getNonNullableSessionOnServer(await cookies());
-  await prisma.user.update({
-    where: {
-      id: session.superTokensUserId,
-    },
-    data: {
-      displayName: input.displayName,
-    },
-  });
+  db.update(users).set({ displayName: input.displayName }).where(eq(users.id, session.superTokensUserId)).run();
 
   // ユーザ名の変更を全ページに反映する。
   revalidatePath('/', 'layout');

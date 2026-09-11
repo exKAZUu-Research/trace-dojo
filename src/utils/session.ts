@@ -4,11 +4,12 @@ import { memoizeFactory } from 'at-decorators';
 import type { ReadonlyRequestCookies } from 'next/dist/server/web/spec-extension/adapters/request-cookies';
 import SuperTokensNode from 'supertokens-node';
 
+import { users } from '../../db/schema';
 import type { SessionOnNode } from './sessionOnNode';
 import { getSessionOnServer } from './sessionOnServer';
 
 import { logger } from '@/infrastructures/pino';
-import { prisma } from '@/infrastructures/prisma';
+import { db } from '@/infrastructures/database';
 
 export interface SessionOnServer {
   session: SessionOnNode | undefined;
@@ -24,7 +25,7 @@ export async function getNullableSessionOnServer(cookies: ReadonlyRequestCookies
   try {
     ({ hasToken, session } = await getSessionOnServer(cookies));
     if (session) {
-      void upsertUserToPrisma(session.superTokensUserId);
+      void upsertUser(session.superTokensUserId);
     }
   } catch (error_: unknown) {
     error = error_;
@@ -37,21 +38,17 @@ export async function getNonNullableSessionOnServer(cookies: ReadonlyRequestCook
   if (!session) {
     throw new Error('Failed to get a session.');
   }
-  void upsertUserToPrisma(session.superTokensUserId);
+  void upsertUser(session.superTokensUserId);
   return session;
 }
 
 const upsertedUserIds = new Set<string>();
 
-async function upsertUserToPrisma(id: string): Promise<void> {
+async function upsertUser(id: string): Promise<void> {
   if (upsertedUserIds.has(id)) return;
 
   upsertedUserIds.add(id);
-  const user = await prisma.user.upsert({
-    create: { id, displayName: id },
-    update: {},
-    where: { id },
-  });
+  const user = db.insert(users).values({ id, displayName: id }).onConflictDoNothing().returning().get();
   logger.debug('User upserted: %o', user);
 }
 

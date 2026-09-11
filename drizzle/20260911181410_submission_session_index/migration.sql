@@ -1,0 +1,1 @@
+CREATE INDEX `ProblemSubmission_sessionId_idx` ON `ProblemSubmission` (`sessionId`);

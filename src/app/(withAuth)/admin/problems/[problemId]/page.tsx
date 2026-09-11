@@ -1,5 +1,5 @@
 import { logger } from '../../../../../infrastructures/pino';
-import { prisma } from '../../../../../infrastructures/prisma';
+import { db } from '../../../../../infrastructures/database';
 import { Box, Heading, Table, Tbody, Td, Th, Thead, Tr, VStack } from '../../../../../infrastructures/useClient/chakra';
 import type { CourseId, ProblemId } from '../../../../../problems/problemData';
 import { courseIdToLectureIds } from '../../../../../problems/problemData';
@@ -61,36 +61,34 @@ const StatisticsPage: MyAuthorizedNextPageOrLayout<{ problemId: ProblemId }> = a
 
 async function fetchUserProblemInfo(problemId: ProblemId): Promise<UserProblemInfo[]> {
   try {
-    const sessions = await prisma.problemSession.findMany({
+    const sessions = await db.query.problemSessions.findMany({
       where: {
         ...getLearningPeriodFilter(),
         problemId,
-        // eslint-disable-next-line unicorn/no-null
-        completedAt: { not: null },
-        submissions: {
-          some: { isCorrect: true },
-        },
+        completedAt: { isNotNull: true },
+        submissions: { isCorrect: true },
       },
       orderBy: {
         completedAt: 'asc',
       },
-      distinct: ['userId'],
-      include: {
-        submissions: { where: { isCorrect: false }, select: { id: true } },
+      with: {
+        submissions: { where: { isCorrect: false }, columns: { id: true } },
       },
     });
 
     return await Promise.all(
-      sessions.map(async (session) => ({
-        userId: session.userId,
-        email: await getEmailFromSession(session.userId),
-        courseId: session.courseId,
-        lectureIndex: getLectureIndex(session.courseId, session.lectureId),
-        problemId: session.problemId,
-        completedAt: session.completedAt,
-        elapsedMilliseconds: session.elapsedMilliseconds,
-        incorrectSubmissionCount: session.submissions.length,
-      }))
+      sessions
+        .filter((session, index) => sessions.findIndex((candidate) => candidate.userId === session.userId) === index)
+        .map(async (session) => ({
+          userId: session.userId,
+          email: await getEmailFromSession(session.userId),
+          courseId: session.courseId,
+          lectureIndex: getLectureIndex(session.courseId, session.lectureId),
+          problemId: session.problemId,
+          completedAt: session.completedAt,
+          elapsedMilliseconds: session.elapsedMilliseconds,
+          incorrectSubmissionCount: session.submissions.length,
+        }))
     );
   } catch (error) {
     logger.error(`Failed to fetch user problem info for ${problemId}: %o`, error as object);

@@ -14,19 +14,19 @@ if [[ -n "${WB_ENV:-}" && "${WB_ENV:-}" != "development" && "${WB_ENV:-}" != "te
   isProduction=true
 fi
 
-"${wbCommand[@]}" prisma cleanup-litestream
+"${wbCommand[@]}" db cleanup-litestream
 
 if [[ "$RESTORE_BACKUP" == "1" && "$isProduction" == true ]]; then
-  "${wbCommand[@]}" prisma deploy-force
+  "${wbCommand[@]}" db deploy-force
 else
-  "${wbCommand[@]}" prisma deploy
+  "${wbCommand[@]}" db deploy
 fi
 
 if [[ "$isProduction" == true ]]; then
-  "${wbCommand[@]}" prisma seed &
+  "${wbCommand[@]}" db seed &
   exec run-litestream.sh './scripts/start-production.sh'
 else
-  "${wbCommand[@]}" prisma seed
+  "${wbCommand[@]}" db seed
 fi
 
 exec ./scripts/start-production.sh "$@"

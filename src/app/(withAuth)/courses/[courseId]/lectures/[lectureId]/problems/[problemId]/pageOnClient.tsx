@@ -1,6 +1,6 @@
 'use client';
 
-import type { ProblemSession } from '@prisma/client';
+import type { ProblemSession } from '../../../../../../../../../db/schema';
 import { notFound, useParams } from 'next/navigation';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';

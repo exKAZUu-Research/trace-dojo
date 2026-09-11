@@ -1,6 +1,6 @@
 'use client';
 
-import type { ProblemSession, ProblemSubmission } from '@prisma/client';
+import type { ProblemSession, ProblemSubmission } from '../../../../../../../db/schema';
 import { useLocalStorage } from '@willbooster/shared-lib-react';
 import { useParams } from 'next/navigation';
 import { useEffect, useMemo } from 'react';

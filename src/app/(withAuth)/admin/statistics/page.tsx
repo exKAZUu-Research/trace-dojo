@@ -1,5 +1,5 @@
 import { logger } from '../../../../infrastructures/pino';
-import { prisma } from '../../../../infrastructures/prisma';
+import { db } from '../../../../infrastructures/database';
 import {
   Box,
   Heading,
@@ -77,31 +77,19 @@ async function calculateStatistics(): Promise<ProblemStatistics[]> {
     for (const [lectureIndex, problemIds] of courseIdToLectureIndexToProblemIds[courseId].entries()) {
       for (const problemId of problemIds) {
         try {
-          const userGroups = await prisma.problemSession.groupBy({
-            by: ['userId'],
+          const sessions = await db.query.problemSessions.findMany({
             where: { ...periodFilter, problemId },
-          });
-          const userCount = userGroups.length;
-          const completedUserGroups = await prisma.problemSession.groupBy({
-            by: ['userId'],
-            // eslint-disable-next-line unicorn/no-null
-            where: { ...periodFilter, problemId, completedAt: { not: null } },
-          });
-          const completedUserCount = completedUserGroups.length;
-
-          const firstCompletedSessions = await prisma.problemSession.findMany({
-            // eslint-disable-next-line unicorn/no-null
-            where: { ...periodFilter, problemId, completedAt: { not: null } },
             orderBy: { completedAt: 'asc' },
-            distinct: ['userId'] as const,
-            select: {
-              elapsedMilliseconds: true,
-              submissions: {
-                where: { isCorrect: false },
-                select: { id: true },
-              },
-            },
+            columns: { userId: true, completedAt: true, elapsedMilliseconds: true },
+            with: { submissions: { where: { isCorrect: false }, columns: { id: true } } },
           });
+          const userCount = new Set(sessions.map((session) => session.userId)).size;
+          const completedSessions = sessions.filter((session) => session.completedAt);
+          const completedUserCount = new Set(completedSessions.map((session) => session.userId)).size;
+          const firstCompletedSessions = completedSessions.filter(
+            (session, index) =>
+              completedSessions.findIndex((candidate) => candidate.userId === session.userId) === index
+          );
 
           const totalElapsed = firstCompletedSessions.reduce((acc, session) => acc + session.elapsedMilliseconds, 0);
           const avgElapsedMilliseconds =

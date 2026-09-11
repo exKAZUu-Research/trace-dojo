@@ -98,9 +98,9 @@ An educational web app for training program tracing skills.
 
 ### Change Database Schema
 
-1. Change `prisma/schema.prisma`
+1. Change `db/schema.ts`
 
-1. Create migration files on the basis of `prisma/schema.prisma`
+1. Create migration files on the basis of `db/schema.ts`
 
    ```
    bun run db-migrate-create
@@ -109,3 +109,19 @@ An educational web app for training program tracing skills.
 ### How to Create Problems
 
 [新問題の作問手順](./HOW_TO_CREATE_PROBLEMS.md)を読んでください。
+
+### Database storage and deployment
+
+Drizzle ORM and Drizzle Kit are pinned to `1.0.0-rc.3`. Edit `db/schema.ts`, run
+`bun run db-migrate-create`, review the SQL in `drizzle/`, then run `bun run db-migrate`.
+The initial Drizzle migration supports an empty database or an existing database with
+all historical migrations through `20260904131352_add_fill_in_blank_columns` applied.
+It preserves existing rows and converts text timestamps to Unix milliseconds.
+Take a backup before the first deployment; older database snapshots must first be
+upgraded using the previous application release.
+
+SQLite files remain under `prisma/` to preserve the deployed volume and backup paths.
+`DATABASE_URL` file paths are relative to the repository root. The previous schema
+is retained in `test/fixtures/prismaSchema.sql` for upgrade verification.
+`bun run db-restore` and `bun run db-view-restored` operate on restored backups;
+`bun run calculate-score` reads `drizzle/restored.sqlite3`.

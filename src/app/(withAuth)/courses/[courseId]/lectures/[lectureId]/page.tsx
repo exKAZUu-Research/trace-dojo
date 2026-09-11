@@ -4,7 +4,7 @@ import { Lecture } from './pageOnClient';
 
 import { withAuthorizationOnServer } from '@/app/utils/withAuth';
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
-import { prisma } from '@/infrastructures/prisma';
+import { db } from '@/infrastructures/database';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import type { CourseId } from '@/problems/problemData';
 import { courseIdToLectureIds } from '@/problems/problemData';
@@ -19,12 +19,12 @@ const LecturePage: MyAuthorizedNextPageOrLayout<{ courseId: CourseId; lectureId:
   if (lectureIndex === -1) notFound();
 
   const periodFilter = getLearningPeriodFilter();
-  const currentUserProblemSessions = await prisma.problemSession.findMany({
+  const currentUserProblemSessions = await db.query.problemSessions.findMany({
     orderBy: { createdAt: 'asc' },
-    select: {
+    with: { submissions: { columns: { isCorrect: true } } },
+    columns: {
       problemId: true,
       completedAt: true,
-      submissions: { select: { isCorrect: true } },
     },
     where: {
       ...periodFilter,
