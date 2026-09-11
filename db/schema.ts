@@ -1,5 +1,5 @@
 import { defineRelations, sql } from 'drizzle-orm';
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 const createdAt = () =>
   integer({ mode: 'timestamp_ms' })
@@ -12,12 +12,16 @@ const updatedAt = () =>
     .$defaultFn(() => new Date())
     .$onUpdate(() => new Date());
 
-export const users = sqliteTable('User', {
-  id: text().primaryKey().notNull(),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-  displayName: text().notNull(),
-});
+export const users = sqliteTable(
+  'User',
+  {
+    id: text().notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    displayName: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.id] })]
+);
 
 export const problemSessions = sqliteTable(
   'ProblemSession',

@@ -76,3 +76,20 @@ test('upgrades existing learning activity without losing timestamps, answers, or
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('requires a user ID in a freshly migrated database', () => {
+  const sqlite = new DatabaseSync(':memory:');
+  try {
+    migrate(drizzle({ client: sqlite }), { migrationsFolder: 'drizzle' });
+    expect(() => sqlite.exec("INSERT INTO User (updatedAt, displayName) VALUES (0, 'Missing ID')")).toThrow(/NOT NULL/);
+    expect(() => sqlite.exec("INSERT INTO User (id, updatedAt, displayName) VALUES (NULL, 0, 'Null ID')")).toThrow(
+      /NOT NULL/
+    );
+    sqlite.exec("INSERT INTO User (id, updatedAt, displayName) VALUES ('student', 0, 'Student')");
+    expect(sqlite.prepare('SELECT id, displayName FROM User').all()).toEqual([
+      { id: 'student', displayName: 'Student' },
+    ]);
+  } finally {
+    sqlite.close();
+  }
+});

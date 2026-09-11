@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS `ProblemSubmission` (
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS `User` (
-	`id` text PRIMARY KEY,
+	`id` text PRIMARY KEY NOT NULL,
 	`createdAt` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
 	`updatedAt` integer NOT NULL,
 	`displayName` text NOT NULL
