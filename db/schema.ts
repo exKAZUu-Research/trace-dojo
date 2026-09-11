@@ -52,19 +52,23 @@ export const problemSessions = sqliteTable(
   ]
 );
 
-export const problemSubmissions = sqliteTable('ProblemSubmission', {
-  id: integer().primaryKey({ autoIncrement: true }),
-  createdAt: createdAt(),
-  sessionId: integer()
-    .notNull()
-    .references(() => problemSessions.id, { onDelete: 'restrict', onUpdate: 'cascade' }),
-  problemType: text().notNull(),
-  traceItemIndex: integer().notNull(),
-  elapsedMilliseconds: integer().notNull(),
-  isCorrect: integer({ mode: 'boolean' }).notNull(),
-  answers: text(),
-  gradingStage: integer(),
-});
+export const problemSubmissions = sqliteTable(
+  'ProblemSubmission',
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    createdAt: createdAt(),
+    sessionId: integer()
+      .notNull()
+      .references(() => problemSessions.id, { onDelete: 'restrict', onUpdate: 'cascade' }),
+    problemType: text().notNull(),
+    traceItemIndex: integer().notNull(),
+    elapsedMilliseconds: integer().notNull(),
+    isCorrect: integer({ mode: 'boolean' }).notNull(),
+    answers: text(),
+    gradingStage: integer(),
+  },
+  (table) => [index('ProblemSubmission_sessionId_idx').on(table.sessionId)]
+);
 
 export const relations = defineRelations({ users, problemSessions, problemSubmissions }, (r) => ({
   users: { problemSessions: r.many.problemSessions({ from: r.users.id, to: r.problemSessions.userId }) },
