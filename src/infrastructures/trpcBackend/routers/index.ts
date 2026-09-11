@@ -8,6 +8,7 @@ import { authorize } from '../middlewares';
 import { procedure, router } from '../trpc';
 
 import { DEFAULT_LANGUAGE_ID } from '@/constants';
+import { getLearningPeriodFilter } from '@/learningPeriod';
 import { gradeFillInBlankAnswers } from '@/problems/fillInBlank/grade';
 import { instantiateProblem } from '@/problems/instantiateProblem';
 
@@ -28,13 +29,13 @@ export const backendRouter = router({
         completedAt: z.date().optional(),
       })
     )
-    .mutation(async ({ input: { id, incrementalElapsedMilliseconds, ...data } }) => {
+    .mutation(async ({ ctx, input: { id, incrementalElapsedMilliseconds, ...data } }) => {
       if (data.problemType === 'step' && data.traceItemIndex === 0) {
         throw new TRPCError({ code: 'BAD_REQUEST' });
       }
 
       const problemSession = await prisma.problemSession.update({
-        where: { id },
+        where: { id, userId: ctx.session.superTokensUserId, ...getLearningPeriodFilter() },
         data: {
           ...(incrementalElapsedMilliseconds
             ? { elapsedMilliseconds: { increment: incrementalElapsedMilliseconds } }
@@ -60,7 +61,9 @@ export const backendRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const session = await prisma.problemSession.findUnique({ where: { id: input.sessionId } });
+      const session = await prisma.problemSession.findUnique({
+        where: { id: input.sessionId, ...getLearningPeriodFilter() },
+      });
       if (!session) throw new TRPCError({ code: 'NOT_FOUND' });
       if (session.userId !== ctx.session.superTokensUserId) throw new TRPCError({ code: 'UNAUTHORIZED' });
 
@@ -79,7 +82,9 @@ export const backendRouter = router({
     .mutation(async ({ ctx, input }) => {
       // Grading may take tens of seconds, so the completion time is the time the answer arrived.
       const receivedAt = new Date();
-      const session = await prisma.problemSession.findUnique({ where: { id: input.sessionId } });
+      const session = await prisma.problemSession.findUnique({
+        where: { id: input.sessionId, ...getLearningPeriodFilter() },
+      });
       if (!session) throw new TRPCError({ code: 'NOT_FOUND' });
       if (session.userId !== ctx.session.superTokensUserId) throw new TRPCError({ code: 'UNAUTHORIZED' });
       const problem = instantiateProblem(session.problemId, DEFAULT_LANGUAGE_ID, session.problemVariablesSeed);
@@ -116,10 +121,11 @@ export const backendRouter = router({
         sessionId: z.number().int().positive(),
       })
     )
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       return await prisma.problemSubmission.count({
         where: {
           sessionId: input.sessionId,
+          session: { userId: ctx.session.superTokensUserId, ...getLearningPeriodFilter() },
           isCorrect: false,
         },
       });

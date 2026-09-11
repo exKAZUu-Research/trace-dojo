@@ -12,6 +12,7 @@ import { PrismaClient } from '@prisma/client';
 import SuperTokensNode from 'supertokens-node';
 
 import { ensureSuperTokensInit } from '@/infrastructures/supertokens/backendConfig';
+import { getLearningPeriodFilter } from '@/learningPeriod';
 import { courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
 
 import { loadValidStudentIds } from './loadValidStudentIds';
@@ -66,8 +67,9 @@ async function main(): Promise<void> {
   console.info(`Loaded valid student IDs from ${validStudentIdsCsvPath}:`, validStudentIds.size);
 
   const courseId = Object.keys(deadLines)[0] as keyof typeof deadLines;
+  const periodFilter = getLearningPeriodFilter();
   const users = await prisma.user.findMany({
-    where: { problemSessions: { some: { courseId } } },
+    where: { problemSessions: { some: { courseId, ...periodFilter } } },
   });
   console.info('Fetched users with course activity:', users.length);
   const finalDeadline = deadLines[courseId][8];
@@ -102,6 +104,8 @@ async function main(): Promise<void> {
       for (const problemId of problemIds) {
         const session = await prisma.problemSession.findFirst({
           where: {
+            ...periodFilter,
+            courseId,
             problemId,
             userId: user.id,
             // eslint-disable-next-line unicorn/no-null

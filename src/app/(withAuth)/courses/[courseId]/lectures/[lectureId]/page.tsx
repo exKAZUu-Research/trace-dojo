@@ -5,6 +5,7 @@ import { Lecture } from './pageOnClient';
 import { withAuthorizationOnServer } from '@/app/utils/withAuth';
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { prisma } from '@/infrastructures/prisma';
+import { getLearningPeriodFilter } from '@/learningPeriod';
 import type { CourseId } from '@/problems/problemData';
 import { courseIdToLectureIds } from '@/problems/problemData';
 
@@ -24,7 +25,12 @@ const LecturePage: MyAuthorizedNextPageOrLayout<{ courseId: CourseId; lectureId:
       completedAt: true,
       submissions: { select: { isCorrect: true } },
     },
-    where: { userId: session.superTokensUserId, courseId: params.courseId, lectureId: params.lectureId },
+    where: {
+      ...getLearningPeriodFilter(),
+      userId: session.superTokensUserId,
+      courseId: params.courseId,
+      lectureId: params.lectureId,
+    },
   });
 
   return <Lecture lectureIndex={lectureIndex} problemSessions={currentUserProblemSessions} />;
