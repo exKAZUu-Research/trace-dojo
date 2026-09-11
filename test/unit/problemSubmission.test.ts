@@ -87,16 +87,53 @@ test('rolls back completion and elapsed time when saving the submission fails', 
   }
 });
 
-async function createSession(): Promise<ProblemSession> {
+test.each(['executionResult', 'step'])(
+  'accepts the pre-deployment %s submission flow without double-counting time',
+  async (problemType) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-11T12:00:00+09:00'));
+    const session = await createSession(problemType);
+    const legacyUpdate = {
+      id: session.id,
+      incrementalElapsedMilliseconds: 100,
+      completedAt: new Date('2000-01-01T00:00:00Z'),
+    };
+    const updated = await caller.updateProblemSession(legacyUpdate);
+    expect(updated.completedAt).toBeNull();
+    const submission = {
+      sessionId: session.id,
+      problemType,
+      traceItemIndex: 0,
+      elapsedMilliseconds: updated.elapsedMilliseconds,
+      isCorrect: true,
+    };
+    if (problemType === 'step') {
+      await caller.createProblemSubmission({ ...submission, traceItemIndex: 1 });
+      const inProgress = await prisma.problemSession.findUniqueOrThrow({ where: { id: session.id } });
+      expect(inProgress.completedAt).toBeNull();
+    }
+    await caller.createProblemSubmission({ ...submission, traceItemIndex: problemType === 'step' ? 4 : 0 });
+    const completed = await prisma.problemSession.findUniqueOrThrow({
+      where: { id: session.id },
+      include: { submissions: true },
+    });
+    expect(completed.completedAt).toEqual(new Date());
+    expect(completed.elapsedMilliseconds).toBe(100);
+    expect(completed.submissions).toHaveLength(problemType === 'step' ? 2 : 1);
+    expect(completed.submissions.every((answer) => answer.elapsedMilliseconds === 100)).toBe(true);
+  }
+);
+
+async function createSession(problemType = 'executionResult'): Promise<ProblemSession> {
   return await prisma.problemSession.create({
     data: {
       userId: 'student',
       courseId: 'test',
       lectureId: 'test',
-      problemId: 'test',
+      problemId: 'test1',
       createdAt: new Date(),
       problemVariablesSeed: '1',
-      problemType: 'executionResult',
+      problemType,
       traceItemIndex: 0,
     },
   });

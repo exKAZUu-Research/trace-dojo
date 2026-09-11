@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, type ProblemSession } from '@prisma/client';
 import { TRPCError } from '@trpc/server';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
@@ -12,6 +12,13 @@ import { DEFAULT_LANGUAGE_ID } from '@/constants';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import { gradeFillInBlankAnswers } from '@/problems/fillInBlank/grade';
 import { instantiateProblem } from '@/problems/instantiateProblem';
+
+const problemSubmissionSchema = z.object({
+  sessionId: z.number().int().positive(),
+  problemType: z.string(),
+  traceItemIndex: z.number().int().nonnegative(),
+  isCorrect: z.boolean(),
+});
 
 export const backendRouter = router({
   getSession: procedure
@@ -59,33 +66,44 @@ export const backendRouter = router({
   createProblemSubmission: procedure
     .use(authorize)
     .input(
-      z.object({
-        sessionId: z.number().int().positive(),
-        problemType: z.string(),
-        traceItemIndex: z.number().int().nonnegative(),
-        incrementalElapsedMilliseconds: z.number().nonnegative(),
-        isCorrect: z.boolean(),
-        isCompleted: z.boolean(),
-      })
+      z.union([
+        problemSubmissionSchema.extend({
+          incrementalElapsedMilliseconds: z.number().nonnegative(),
+          isCompleted: z.boolean(),
+        }),
+        // Pages opened before deployment send the total after a separate activity update.
+        problemSubmissionSchema.extend({ elapsedMilliseconds: z.number().nonnegative() }),
+      ])
     )
-    .mutation(async ({ ctx, input: { incrementalElapsedMilliseconds, isCompleted, ...submission } }) => {
+    .mutation(async ({ ctx, input }) => {
       const receivedAt = new Date();
       await prisma.$transaction(async (tx) => {
         const session = await tx.problemSession.findUnique({
-          where: { id: submission.sessionId, ...getLearningPeriodFilter(receivedAt) },
+          where: { id: input.sessionId, ...getLearningPeriodFilter(receivedAt) },
         });
         if (!session) throw new TRPCError({ code: 'NOT_FOUND' });
         if (session.userId !== ctx.session.superTokensUserId) throw new TRPCError({ code: 'UNAUTHORIZED' });
 
+        const isCompleted = 'isCompleted' in input ? input.isCompleted : isLegacySubmissionComplete(input, session);
         const updatedSession = await tx.problemSession.update({
           where: { id: session.id },
           data: {
-            elapsedMilliseconds: { increment: incrementalElapsedMilliseconds },
+            elapsedMilliseconds:
+              'incrementalElapsedMilliseconds' in input
+                ? { increment: input.incrementalElapsedMilliseconds }
+                : undefined,
             completedAt: isCompleted ? receivedAt : undefined,
           },
         });
         await tx.problemSubmission.create({
-          data: { ...submission, elapsedMilliseconds: updatedSession.elapsedMilliseconds },
+          data: {
+            sessionId: session.id,
+            problemType: input.problemType,
+            traceItemIndex: input.traceItemIndex,
+            isCorrect: input.isCorrect,
+            elapsedMilliseconds:
+              'elapsedMilliseconds' in input ? input.elapsedMilliseconds : updatedSession.elapsedMilliseconds,
+          },
         });
       });
       revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');
@@ -155,3 +173,12 @@ export const backendRouter = router({
 
 // export type definition of API
 export type BackendRouter = typeof backendRouter;
+
+function isLegacySubmissionComplete(input: z.infer<typeof problemSubmissionSchema>, session: ProblemSession): boolean {
+  if (!input.isCorrect) return false;
+  if (input.problemType === 'executionResult') return true;
+  if (input.problemType !== 'step') return false;
+  const problem = instantiateProblem(session.problemId, DEFAULT_LANGUAGE_ID, session.problemVariablesSeed);
+  if (!problem) throw new TRPCError({ code: 'BAD_REQUEST' });
+  return input.traceItemIndex >= problem.traceItems.length - 1;
+}
