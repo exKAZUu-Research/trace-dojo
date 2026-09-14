@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM oven/bun:1.4.2-slim@sha256:cb3bbbb08e13a4a2ff400f24c7a2a1d5efa83f6ef8544d52d95a519631e2fc61
 WORKDIR /app
 
@@ -56,10 +57,14 @@ RUN bash ./bash/generate-package-manager-configs.sh
 RUN mise install node \
     && bun install \
     && bash ./bash/apply-docker-env.sh bun run build/core \
-    && cat .next/BUILD_ID \
-    # --env-refs keeps the R2 credentials out of the image; Litestream expands them from Fly.io secrets.
-    && bash ./bash/apply-docker-env.sh bun wb db create-litestream-config --env-refs \
-    && bun wb optimizeForDockerBuild \
+    && cat .next/BUILD_ID
+
+# Mount the database defaults only for configuration generation; keep fnox.toml out of image layers.
+# --env-refs keeps the R2 credentials out of the image; Litestream expands them from Fly.io secrets.
+RUN --mount=type=bind,source=fnox.toml,target=/app/fnox.toml \
+    bash ./bash/apply-docker-env.sh bun wb db create-litestream-config --env-refs
+
+RUN bun wb optimizeForDockerBuild \
     # Avoid overwriting existing db files
     && rm -Rf prisma/mount \
     && bash ./bash/cleanup.sh --keep-scripts
