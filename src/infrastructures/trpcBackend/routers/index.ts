@@ -13,6 +13,7 @@ import { DEFAULT_LANGUAGE_ID } from '@/constants';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import { gradeFillInBlankAnswers } from '@/problems/fillInBlank/grade';
 import { instantiateProblem } from '@/problems/instantiateProblem';
+import { exerciseProcedures } from './exercises';
 
 const problemSubmissionSchema = z.object({
   sessionId: z.number().int().positive(),
@@ -22,6 +23,7 @@ const problemSubmissionSchema = z.object({
 });
 
 export const backendRouter = router({
+  ...exerciseProcedures,
   getSession: procedure
     .use(authorize)
     .output(z.object({ userId: z.string() }))
