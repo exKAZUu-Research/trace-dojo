@@ -6,6 +6,7 @@ import { problemIdToLanguageIdToProgram } from './problemData';
 import { type TraceItem, type TraceItemVariable, traceProgram, type TurtleTrace } from './traceProgram';
 
 export interface InstantiatedProblem {
+  generatedNumbers: number[];
   /**
    * The language ID of the program.
    */
@@ -106,6 +107,7 @@ export function instantiateProblem(
   );
   return {
     ...problem,
+    generatedNumbers,
     blankAnswers: displayBlanks.answers,
     displayProgramTemplate,
     instrumentedTemplate,

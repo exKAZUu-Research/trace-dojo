@@ -57,7 +57,7 @@ export const TRACE_BUDGET_EXCEEDED_MESSAGE = 'Execution budget exceeded';
 
 export type TracedProgram = Omit<
   InstantiatedProblem,
-  'blankAnswers' | 'displayProgramTemplate' | 'instrumentedTemplate'
+  'blankAnswers' | 'displayProgramTemplate' | 'instrumentedTemplate' | 'generatedNumbers'
 >;
 
 /** Thrown by the instrumented runtime when a name is not in scope, i.e. a translation gap rather than Java semantics. */
