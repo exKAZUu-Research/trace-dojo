@@ -28,30 +28,38 @@ import {
   VStack,
 } from '@/infrastructures/useClient/chakra';
 import { toBlankPlaceholder } from '@/problems/fillInBlank/blanks';
-import type { FillInBlankGradingResult } from '@/problems/fillInBlank/grade';
-import type { InstantiatedProblem } from '@/problems/instantiateProblem';
+import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
+import type { TraceItemVariable, TurtleTrace } from '@/problems/traceProgram';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 
 interface Props {
-  problem: InstantiatedProblem;
-  gradeAnswers: (answers: string[]) => Promise<FillInBlankGradingResult>;
+  problem: {
+    displayProgram: string;
+    blankCount: number;
+    finalBoard: string;
+    finalTurtles: TurtleTrace[];
+    finalVars?: TraceItemVariable;
+  };
+  gradeAnswers: (answers: string[]) => Promise<FillInBlankVerdict>;
+  onCorrect?: () => void;
+  completionMessage?: string;
 }
 
 export const FillInBlankBody: React.FC<Props> = (props) => {
   const params = useParams<{ courseId: CourseId; lectureId: string; problemId: ProblemId }>();
   const router = useRouter();
-  const [answers, updateAnswers] = useImmer<string[]>(props.problem.blankAnswers.map(() => ''));
+  const [answers, updateAnswers] = useImmer<string[]>(Array.from({ length: props.problem.blankCount }, () => ''));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [alert, setAlert] = useState<{ title: string; message: string; isCompleted: boolean }>();
   const cancelRef = useRef<HTMLButtonElement>(null);
-  const hasVariables = Object.keys(props.problem.finalVars).length > 0;
+  const hasVariables = Object.keys(props.problem.finalVars ?? {}).length > 0;
   const isIncomplete = answers.some((answer) => answer.trim() === '');
 
   const handleSubmit = async (): Promise<void> => {
     if (isSubmitting || alert || isIncomplete) return;
     setIsSubmitting(true);
     try {
-      let result: FillInBlankGradingResult;
+      let result: FillInBlankVerdict;
       try {
         result = await props.gradeAnswers(answers);
       } catch (error) {
@@ -67,7 +75,9 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
         case 'correct': {
           setAlert({
             title: '正解',
-            message: '正解です！この問題は完了です。問題一覧ページに戻りますので、次の問題に挑戦してください。',
+            message:
+              props.completionMessage ??
+              '正解です！この問題は完了です。問題一覧ページに戻りますので、次の問題に挑戦してください。',
             isCompleted: true,
           });
           break;
@@ -100,7 +110,10 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
               <Box>
                 プログラムを実行した後の盤面{hasVariables ? 'と変数の値' : ''}が右側のようになるように、
                 <Box as="span" fontWeight="bold">
-                  空欄{props.problem.blankAnswers.map((_, index) => toBlankPlaceholder(index + 1)).join('、')}
+                  空欄
+                  {Array.from({ length: props.problem.blankCount }, (_, index) => toBlankPlaceholder(index + 1)).join(
+                    '、'
+                  )}
                 </Box>
                 に入るJavaのコードを入力し、提出ボタンを押してください。
               </Box>
@@ -155,7 +168,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
           {hasVariables && (
             <>
               <Heading size="md">実行後の変数の値</Heading>
-              <Variables traceItemVars={props.problem.finalVars} />
+              <Variables traceItemVars={props.problem.finalVars ?? {}} />
             </>
           )}
         </VStack>
@@ -167,7 +180,10 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
         isOpen={alert !== undefined}
         leastDestructiveRef={cancelRef as React.RefObject<HTMLElement>}
         onClose={() => {
-          if (alert?.isCompleted) router.push(`/courses/${params.courseId}/lectures/${params.lectureId}`);
+          if (alert?.isCompleted) {
+            if (props.onCorrect) props.onCorrect();
+            else router.push(`/courses/${params.courseId}/lectures/${params.lectureId}`);
+          }
           setAlert(undefined);
         }}
       >
@@ -186,7 +202,10 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
                   </Box>
                 }
                 onClick={() => {
-                  if (alert?.isCompleted) router.push(`/courses/${params.courseId}/lectures/${params.lectureId}`);
+                  if (alert?.isCompleted) {
+                    if (props.onCorrect) props.onCorrect();
+                    else router.push(`/courses/${params.courseId}/lectures/${params.lectureId}`);
+                  }
                   setAlert(undefined);
                 }}
               >

@@ -31,6 +31,7 @@ import {
 import type { CourseId } from '@/problems/problemData';
 import { courseIdToLectureIndexToProblemIds, courseIdToName, problemIdToName } from '@/problems/problemData';
 import { getLectureStorageKey } from '@/utils/lectureStorage';
+import { Button } from '@/infrastructures/useClient/chakra';
 
 interface Props {
   learningPeriodStart?: string;
@@ -81,6 +82,9 @@ export const Lecture: React.FC<Props> = (props) => {
           </CardHeader>
 
           <CardBody align="stretch" as={VStack} pb={2}>
+            <Button as={NextLinkWithoutPrefetch} colorScheme="brand" href={`${params.lectureId}/challenge`} alignSelf="start">
+              チャレンジモード
+            </Button>
             <Progress
               colorScheme="brand"
               max={lectureProblemIds.length}

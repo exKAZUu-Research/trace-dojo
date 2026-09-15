@@ -177,7 +177,16 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
       </VStack>
 
       {isFillInBlank ? (
-        <FillInBlankBody gradeAnswers={gradeAnswers} problem={problem} />
+        <FillInBlankBody
+          gradeAnswers={gradeAnswers}
+          problem={{
+            displayProgram: problem.displayProgram,
+            blankCount: problem.blankAnswers.length,
+            finalBoard: problem.finalBoard,
+            finalTurtles: problem.finalTurtles,
+            finalVars: problem.finalVars,
+          }}
+        />
       ) : (
         <ProblemBody
           createSubmissionUpdatingProblemSession={createSubmissionUpdatingProblemSession}
