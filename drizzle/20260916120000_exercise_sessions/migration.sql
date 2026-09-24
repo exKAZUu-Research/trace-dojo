@@ -6,13 +6,8 @@ CREATE TABLE `ExerciseSession` (
   `lectureId` text NOT NULL,
   `learningMode` text NOT NULL,
   `problemFormat` text NOT NULL,
-  `exerciseProblemId` text NOT NULL,
-  `baseProblemId` text NOT NULL,
-  `programTemplate` text NOT NULL,
-  `displayProgram` text NOT NULL,
-  `blankCount` integer NOT NULL,
-  `expectedBoard` text NOT NULL,
-  `expectedTurtles` text NOT NULL,
+  `problemId` text NOT NULL,
+  `seed` text NOT NULL,
   `completedAt` integer,
   CONSTRAINT `fk_ExerciseSession_userId_User_id_fk` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON UPDATE CASCADE ON DELETE RESTRICT
 );

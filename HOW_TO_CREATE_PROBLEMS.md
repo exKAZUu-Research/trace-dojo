@@ -1,8 +1,10 @@
-## チャレンジ用の穴埋め問題
+## Challenge fill-in-the-blank problems
 
-チャレンジ用の手動穴埋め問題は `src/problems/fillInBlank/problemData.ts` に定義します。各定義には独立した問題ID、元になる基本問題の `baseProblemId`、Javaコード全体を記述します。穴にしたいJavaコードを `@[模範解答]@` で囲んでください。マーカーを元のコードへ戻したとき、外側の空白を除いて基本問題のJavaコードと完全に一致する必要があります。数値の `<最小-最大>` は元問題と同じ順序で残します。
+Define paired Java and instrumented templates in `src/problems/fillInBlank/definitions.ts` or `challengeDefinitions.ts`. Put `@[model answer]@` markers in the same order in both templates, and keep `<min-max>` placeholders in the same order so an ID and seed reproduce the complete generated problem.
 
-問題は元問題が属する授業回の候補になります。チャレンジの出題・提出は `ExerciseSession` と `ExerciseSubmission` に保存され、通常課題の履歴や成績には反映されません。出題時のJavaコードと期待する盤面・亀の状態を保存するため、問題定義を更新しても未完了の出題を再開できます。
+Register the name in `problemIdToName`. Add the ID explicitly to `courseIdToLectureIndexToProblemIds` for ordinary lectures or `courseIdToLectureIndexToExerciseProblemIds` for challenge mode. Membership in either list does not imply membership in the other.
+
+Challenge sessions persist the problem ID and seed. Displays and grading regenerate from the current definition, so editing a definition also changes an active session when it is next loaded. Challenge submissions stay in `ExerciseSession` and `ExerciseSubmission` and do not affect ordinary progress or grades.
 
 ## 新問題の作問手順
 

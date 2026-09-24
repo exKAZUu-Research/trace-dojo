@@ -147,19 +147,8 @@ export const backendRouter = router({
         // The detail describes server infrastructure, so it stays in the log.
         return { status: result.status, detail: '' };
       }
-      db.insert(problemSubmissions)
-        .values({
-          sessionId: session.id,
-          problemType: session.problemType,
-          traceItemIndex: session.traceItemIndex,
-          elapsedMilliseconds: input.elapsedMilliseconds,
-          isCorrect: result.status === 'correct',
-          answers: JSON.stringify(input.answers),
-          gradingStage: result.stage,
-        })
-        .run();
+      saveFillInBlankSubmission(session, input.answers, input.elapsedMilliseconds, result, receivedAt);
       if (result.status === 'correct') {
-        db.update(problemSessions).set({ completedAt: receivedAt }).where(eq(problemSessions.id, session.id)).run();
         revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');
       }
       return result;
@@ -187,6 +176,31 @@ export const backendRouter = router({
 
 // export type definition of API
 export type BackendRouter = typeof backendRouter;
+
+const saveFillInBlankSubmission = (
+  session: ProblemSession,
+  answers: string[],
+  elapsedMilliseconds: number,
+  result: Exclude<Awaited<ReturnType<typeof gradeFillInBlankAnswers>>, { status: 'ungradable' }>,
+  receivedAt: Date
+): void => {
+  db.transaction((tx) => {
+    tx.insert(problemSubmissions)
+      .values({
+        sessionId: session.id,
+        problemType: session.problemType,
+        traceItemIndex: session.traceItemIndex,
+        elapsedMilliseconds,
+        isCorrect: result.status === 'correct',
+        answers: JSON.stringify(answers),
+        gradingStage: result.stage,
+      })
+      .run();
+    if (result.status === 'correct') {
+      tx.update(problemSessions).set({ completedAt: receivedAt }).where(eq(problemSessions.id, session.id)).run();
+    }
+  });
+};
 
 function isLegacySubmissionComplete(input: z.infer<typeof problemSubmissionSchema>, session: ProblemSession): boolean {
   if (!input.isCorrect) return false;

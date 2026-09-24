@@ -2,9 +2,7 @@
   "version": "7",
   "dialect": "sqlite",
   "id": "c3c565a7-8114-4f9b-a3ea-84da00e39eb4",
-  "prevIds": [
-    "5517d569-2b2f-4a52-83d1-6f9e95bb4d8f"
-  ],
+  "prevIds": ["5517d569-2b2f-4a52-83d1-6f9e95bb4d8f"],
   "ddl": [
     {
       "name": "ProblemSession",
@@ -269,13 +267,9 @@
       "table": "User"
     },
     {
-      "columns": [
-        "userId"
-      ],
+      "columns": ["userId"],
       "tableTo": "User",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "CASCADE",
       "onDelete": "RESTRICT",
       "nameExplicit": false,
@@ -284,13 +278,9 @@
       "table": "ProblemSession"
     },
     {
-      "columns": [
-        "sessionId"
-      ],
+      "columns": ["sessionId"],
       "tableTo": "ProblemSession",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "CASCADE",
       "onDelete": "RESTRICT",
       "nameExplicit": false,
@@ -299,27 +289,21 @@
       "table": "ProblemSubmission"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "User_pk",
       "entityType": "pks",
       "table": "User"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "ProblemSession_pk",
       "table": "ProblemSession",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "ProblemSubmission_pk",
       "table": "ProblemSubmission",
@@ -449,7 +433,7 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "exerciseProblemId",
+      "name": "problemId",
       "entityType": "columns",
       "table": "ExerciseSession"
     },
@@ -459,57 +443,7 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
-      "name": "baseProblemId",
-      "entityType": "columns",
-      "table": "ExerciseSession"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "programTemplate",
-      "entityType": "columns",
-      "table": "ExerciseSession"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "displayProgram",
-      "entityType": "columns",
-      "table": "ExerciseSession"
-    },
-    {
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "blankCount",
-      "entityType": "columns",
-      "table": "ExerciseSession"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "expectedBoard",
-      "entityType": "columns",
-      "table": "ExerciseSession"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "expectedTurtles",
+      "name": "seed",
       "entityType": "columns",
       "table": "ExerciseSession"
     },
@@ -524,9 +458,7 @@
       "table": "ExerciseSession"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "ExerciseSession_pk",
       "entityType": "pks",
@@ -597,22 +529,16 @@
       "table": "ExerciseSubmission"
     },
     {
-      "columns": [
-        "id"
-      ],
+      "columns": ["id"],
       "nameExplicit": false,
       "name": "ExerciseSubmission_pk",
       "entityType": "pks",
       "table": "ExerciseSubmission"
     },
     {
-      "columns": [
-        "userId"
-      ],
+      "columns": ["userId"],
       "tableTo": "User",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "CASCADE",
       "onDelete": "RESTRICT",
       "nameExplicit": false,
@@ -621,13 +547,9 @@
       "table": "ExerciseSession"
     },
     {
-      "columns": [
-        "sessionId"
-      ],
+      "columns": ["sessionId"],
       "tableTo": "ExerciseSession",
-      "columnsTo": [
-        "id"
-      ],
+      "columnsTo": ["id"],
       "onUpdate": "CASCADE",
       "onDelete": "RESTRICT",
       "nameExplicit": false,

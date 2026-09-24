@@ -27,9 +27,10 @@ export const ChallengePageOnClient: React.FC = () => {
     void startExercise({ courseId, lectureId })
       .then((display) => {
         if (active) {
-          setExercise(display);
-          setNoCandidates(display === undefined);
+          if ('status' in display) setNoCandidates(true);
+          else setExercise(display);
         }
+        return display;
       })
       .catch(() => {
         if (active) setError('問題を取得できませんでした。');
@@ -44,7 +45,7 @@ export const ChallengePageOnClient: React.FC = () => {
     setError('');
     try {
       const display = await next.mutateAsync({ courseId, lectureId, sessionId: exercise.sessionId });
-      if (display) {
+      if (!('status' in display)) {
         setExercise(display);
       } else {
         setError('この授業回には現在出題できる問題がありません。');
@@ -58,12 +59,15 @@ export const ChallengePageOnClient: React.FC = () => {
     if (!exercise) throw new Error('No active exercise');
     const result = await submit.mutateAsync({ courseId, lectureId, sessionId: exercise.sessionId, answers });
     switch (result.status) {
-      case 'correct':
+      case 'correct': {
         return { status: 'correct' };
-      case 'incorrect':
+      }
+      case 'incorrect': {
         return { status: 'incorrect', detail: result.detail };
-      case 'ungradable':
+      }
+      case 'ungradable': {
         return { status: 'ungradable', detail: '' };
+      }
     }
   };
 
@@ -79,9 +83,7 @@ export const ChallengePageOnClient: React.FC = () => {
           {error}
         </Text>
       )}
-      {noCandidates && !exercise && (
-        <Text>この授業回には現在出題できる問題がありません。授業回に戻ってください。</Text>
-      )}
+      {noCandidates && !exercise && <Text>この授業回には現在出題できる問題がありません。授業回に戻ってください。</Text>}
       {!exercise && !noCandidates && (
         <Button
           alignSelf="start"
@@ -90,8 +92,9 @@ export const ChallengePageOnClient: React.FC = () => {
             setError('');
             void startExercise({ courseId, lectureId })
               .then((display) => {
-                setExercise(display);
-                setNoCandidates(display === undefined);
+                if ('status' in display) setNoCandidates(true);
+                else setExercise(display);
+                return display;
               })
               .catch(() => setError('問題を取得できませんでした。'));
           }}
@@ -115,6 +118,7 @@ export const ChallengePageOnClient: React.FC = () => {
             blankCount: exercise.blankCount,
             finalBoard: exercise.expectedBoard,
             finalTurtles: exercise.expectedTurtles,
+            finalVars: exercise.finalVars,
           }}
           gradeAnswers={gradeAnswers}
           completionMessage="正解です！次の問題へ進めます。"

@@ -60,7 +60,12 @@ export async function gradeFillInBlankAnswers(
   // semantics for what it accepts, yet only javac can confirm that the answer is valid Java at all.
   const stage2Result = gradeByInstrumentedProgram(problem, answers);
   if (stage2Result?.status === 'incorrect') return stage2Result;
-  const javaResult = await gradeByJavaExecution(problem.displayProgramTemplate, { board: problem.finalBoard, turtles: problem.finalTurtles }, answers, options?.javaExecutors ?? defaultJavaExecutors);
+  const javaResult = await gradeByJavaExecution(
+    problem.displayProgramTemplate,
+    { board: problem.finalBoard, turtles: problem.finalTurtles },
+    answers,
+    options?.javaExecutors ?? defaultJavaExecutors
+  );
   if (javaResult.status === 'ungradable' && stage2Result) {
     logger.warn('No Java executor was available; accepting the stage 2 verdict: %s', javaResult.detail);
     return stage2Result;

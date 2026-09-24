@@ -75,21 +75,26 @@ export const exerciseSessions = sqliteTable(
   {
     id: integer().primaryKey({ autoIncrement: true }),
     createdAt: createdAt(),
-    userId: text().notNull().references(() => users.id, { onDelete: 'restrict', onUpdate: 'cascade' }),
+    userId: text()
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict', onUpdate: 'cascade' }),
     courseId: text().notNull(),
     lectureId: text().notNull(),
     learningMode: text().notNull(),
     problemFormat: text().notNull(),
-    exerciseProblemId: text().notNull(),
-    baseProblemId: text().notNull(),
-    programTemplate: text().notNull(),
-    displayProgram: text().notNull(),
-    blankCount: integer().notNull(),
-    expectedBoard: text().notNull(),
-    expectedTurtles: text().notNull(),
+    problemId: text().notNull(),
+    seed: text().notNull(),
     completedAt: integer({ mode: 'timestamp_ms' }),
   },
-  (table) => [index('ExerciseSession_user_lecture_mode_created_idx').on(table.userId, table.courseId, table.lectureId, table.learningMode, table.createdAt)]
+  (table) => [
+    index('ExerciseSession_user_lecture_mode_created_idx').on(
+      table.userId,
+      table.courseId,
+      table.lectureId,
+      table.learningMode,
+      table.createdAt
+    ),
+  ]
 );
 
 export const exerciseSubmissions = sqliteTable(
@@ -97,7 +102,9 @@ export const exerciseSubmissions = sqliteTable(
   {
     id: integer().primaryKey({ autoIncrement: true }),
     createdAt: createdAt(),
-    sessionId: integer().notNull().references(() => exerciseSessions.id, { onDelete: 'restrict', onUpdate: 'cascade' }),
+    sessionId: integer()
+      .notNull()
+      .references(() => exerciseSessions.id, { onDelete: 'restrict', onUpdate: 'cascade' }),
     answers: text().notNull(),
     status: text().notNull(),
     gradingStage: integer(),
@@ -105,26 +112,37 @@ export const exerciseSubmissions = sqliteTable(
   (table) => [index('ExerciseSubmission_sessionId_idx').on(table.sessionId)]
 );
 
-export const relations = defineRelations({ users, problemSessions, problemSubmissions, exerciseSessions, exerciseSubmissions }, (r) => ({
-  users: {
-    problemSessions: r.many.problemSessions({ from: r.users.id, to: r.problemSessions.userId }),
-    exerciseSessions: r.many.exerciseSessions({ from: r.users.id, to: r.exerciseSessions.userId }),
-  },
-  problemSessions: {
-    user: r.one.users({ from: r.problemSessions.userId, to: r.users.id, optional: false }),
-    submissions: r.many.problemSubmissions({ from: r.problemSessions.id, to: r.problemSubmissions.sessionId }),
-  },
-  problemSubmissions: {
-    session: r.one.problemSessions({ from: r.problemSubmissions.sessionId, to: r.problemSessions.id, optional: false }),
-  },
-  exerciseSessions: {
-    user: r.one.users({ from: r.exerciseSessions.userId, to: r.users.id, optional: false }),
-    submissions: r.many.exerciseSubmissions({ from: r.exerciseSessions.id, to: r.exerciseSubmissions.sessionId }),
-  },
-  exerciseSubmissions: {
-    session: r.one.exerciseSessions({ from: r.exerciseSubmissions.sessionId, to: r.exerciseSessions.id, optional: false }),
-  },
-}));
+export const relations = defineRelations(
+  { users, problemSessions, problemSubmissions, exerciseSessions, exerciseSubmissions },
+  (r) => ({
+    users: {
+      problemSessions: r.many.problemSessions({ from: r.users.id, to: r.problemSessions.userId }),
+      exerciseSessions: r.many.exerciseSessions({ from: r.users.id, to: r.exerciseSessions.userId }),
+    },
+    problemSessions: {
+      user: r.one.users({ from: r.problemSessions.userId, to: r.users.id, optional: false }),
+      submissions: r.many.problemSubmissions({ from: r.problemSessions.id, to: r.problemSubmissions.sessionId }),
+    },
+    problemSubmissions: {
+      session: r.one.problemSessions({
+        from: r.problemSubmissions.sessionId,
+        to: r.problemSessions.id,
+        optional: false,
+      }),
+    },
+    exerciseSessions: {
+      user: r.one.users({ from: r.exerciseSessions.userId, to: r.users.id, optional: false }),
+      submissions: r.many.exerciseSubmissions({ from: r.exerciseSessions.id, to: r.exerciseSubmissions.sessionId }),
+    },
+    exerciseSubmissions: {
+      session: r.one.exerciseSessions({
+        from: r.exerciseSubmissions.sessionId,
+        to: r.exerciseSessions.id,
+        optional: false,
+      }),
+    },
+  })
+);
 
 export type ProblemSession = typeof problemSessions.$inferSelect;
 
