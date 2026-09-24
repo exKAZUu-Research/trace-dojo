@@ -41,8 +41,14 @@ interface Props {
     finalVars?: TraceItemVariable;
   };
   gradeAnswers: (answers: string[]) => Promise<FillInBlankVerdict>;
-  onCorrect?: () => void;
+  completionActions?: CompletionAction[];
   completionMessage?: string;
+}
+
+export interface CompletionAction {
+  label: string;
+  onClick: () => void | Promise<void>;
+  colorScheme?: string;
 }
 
 export const FillInBlankBody: React.FC<Props> = (props) => {
@@ -51,7 +57,6 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
   const [answers, updateAnswers] = useImmer<string[]>(Array.from({ length: props.problem.blankCount }, () => ''));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [alert, setAlert] = useState<{ title: string; message: string; isCompleted: boolean }>();
-  const cancelRef = useRef<HTMLButtonElement>(null);
   const hasVariables = Object.keys(props.problem.finalVars ?? {}).length > 0;
   const isIncomplete = answers.some((answer) => answer.trim() === '');
 
@@ -174,26 +179,92 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
         </VStack>
       </Flex>
 
-      <AlertDialog
-        closeOnEsc={true}
-        closeOnOverlayClick={false}
+      <ResultAlertDialog
+        actions={alert?.isCompleted ? props.completionActions : undefined}
         isOpen={alert !== undefined}
-        leastDestructiveRef={cancelRef as React.RefObject<HTMLElement>}
+        message={alert?.message ?? ''}
+        title={alert?.title ?? ''}
         onClose={() => {
-          if (alert?.isCompleted) {
-            if (props.onCorrect) props.onCorrect();
-            else router.push(`/courses/${params.courseId}/lectures/${params.lectureId}`);
-          }
+          if (alert?.isCompleted) router.push(`/courses/${params.courseId}/lectures/${params.lectureId}`);
           setAlert(undefined);
         }}
-      >
-        <AlertDialogOverlay>
-          <AlertDialogContent>
-            <AlertDialogHeader fontSize="lg" fontWeight="bold">
-              {alert?.title}
-            </AlertDialogHeader>
-            <AlertDialogBody whiteSpace="pre-wrap">{alert?.message}</AlertDialogBody>
-            <AlertDialogFooter>
+      />
+    </>
+  );
+};
+
+interface ResultAlertDialogProps {
+  actions?: CompletionAction[];
+  isOpen: boolean;
+  message: string;
+  title: string;
+  onClose?: () => void;
+}
+
+export const ResultAlertDialog: React.FC<ResultAlertDialogProps> = (props) => {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const actionPendingRef = useRef(false);
+  const [isActionPending, setIsActionPending] = useState(false);
+  const [pendingActionLabel, setPendingActionLabel] = useState('');
+  const [actionError, setActionError] = useState('');
+
+  const handleAction = async (action: CompletionAction): Promise<void> => {
+    if (actionPendingRef.current) return;
+    actionPendingRef.current = true;
+    setIsActionPending(true);
+    setPendingActionLabel(action.label);
+    setActionError('');
+    try {
+      await action.onClick();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '操作に失敗しました。もう一度お試しください。');
+    } finally {
+      actionPendingRef.current = false;
+      setIsActionPending(false);
+      setPendingActionLabel('');
+    }
+  };
+
+  const canDismiss = props.actions === undefined;
+
+  return (
+    <AlertDialog
+      closeOnEsc={canDismiss && !isActionPending}
+      closeOnOverlayClick={false}
+      isOpen={props.isOpen}
+      leastDestructiveRef={cancelRef as React.RefObject<HTMLElement>}
+      onClose={() => {
+        if (canDismiss && !actionPendingRef.current) props.onClose?.();
+      }}
+    >
+      <AlertDialogOverlay>
+        <AlertDialogContent>
+          <AlertDialogHeader fontSize="lg" fontWeight="bold">
+            {props.title}
+          </AlertDialogHeader>
+          <AlertDialogBody whiteSpace="pre-wrap">
+            {props.message}
+            {actionError && (
+              <Text color="red.600" mt={3} role="alert">
+                {actionError}
+              </Text>
+            )}
+          </AlertDialogBody>
+          <AlertDialogFooter gap={3}>
+            {props.actions ? (
+              props.actions.map((action, index, actions) => (
+                <Button
+                  key={action.label}
+                  ref={index === actions.length - 1 ? cancelRef : undefined}
+                  colorScheme={action.colorScheme}
+                  isDisabled={isActionPending}
+                  isLoading={pendingActionLabel === action.label}
+                  onClick={() => void handleAction(action)}
+                >
+                  {action.label}
+                </Button>
+              ))
+            ) : (
               <Button
                 ref={cancelRef}
                 rightIcon={
@@ -201,21 +272,15 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
                     (Esc)
                   </Box>
                 }
-                onClick={() => {
-                  if (alert?.isCompleted) {
-                    if (props.onCorrect) props.onCorrect();
-                    else router.push(`/courses/${params.courseId}/lectures/${params.lectureId}`);
-                  }
-                  setAlert(undefined);
-                }}
+                onClick={props.onClose}
               >
                 閉じる
               </Button>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialogOverlay>
-      </AlertDialog>
-    </>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialogOverlay>
+    </AlertDialog>
   );
 };
 

@@ -1,10 +1,10 @@
 'use client';
 
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useImmer } from 'use-immer';
 
-import { FillInBlankBody } from '../problems/[problemId]/FillInBlankBody';
+import { FillInBlankBody, ResultAlertDialog, type CompletionAction } from '../problems/[problemId]/FillInBlankBody';
 
 import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefetch';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
@@ -15,6 +15,7 @@ import type { CourseId } from '@/problems/problemData';
 
 export const ChallengePageOnClient: React.FC = () => {
   const { courseId, lectureId } = useParams<{ courseId: CourseId; lectureId: string }>();
+  const router = useRouter();
   const [exercise, setExercise] = useImmer<ExerciseDisplay | undefined>(undefined);
   const [noCandidates, setNoCandidates] = useState(false);
   const [error, setError] = useState('');
@@ -41,19 +42,24 @@ export const ChallengePageOnClient: React.FC = () => {
   }, [courseId, lectureId, startExercise, setExercise]);
 
   const handleNext = async (): Promise<void> => {
-    if (!exercise || next.isPending) return;
-    setError('');
+    if (!exercise) throw new Error('問題を取得できませんでした。もう一度お試しください。');
+    let display: ExerciseDisplay | { status: 'noProblems' };
     try {
-      const display = await next.mutateAsync({ courseId, lectureId, sessionId: exercise.sessionId });
-      if (!('status' in display)) {
-        setExercise(display);
-      } else {
-        setError('この授業回には現在出題できる問題がありません。');
-      }
+      display = await next.mutateAsync({ courseId, lectureId, sessionId: exercise.sessionId });
     } catch {
-      setError('次の問題を取得できませんでした。もう一度お試しください。');
+      throw new Error('次の問題を取得できませんでした。もう一度お試しください。');
     }
+    if ('status' in display) throw new Error('この授業回には現在出題できる問題がありません。');
+    setExercise(display);
   };
+
+  const completionActions: CompletionAction[] = [
+    { label: '次の問題へ', colorScheme: 'brand', onClick: handleNext },
+    {
+      label: '戻る',
+      onClick: () => router.push(`/courses/${courseId}/lectures/${lectureId}`),
+    },
+  ];
 
   const gradeAnswers = async (answers: string[]): Promise<FillInBlankVerdict> => {
     if (!exercise) throw new Error('No active exercise');
@@ -103,12 +109,12 @@ export const ChallengePageOnClient: React.FC = () => {
         </Button>
       )}
       {exercise?.completed && (
-        <VStack align="stretch" spacing={4}>
-          <Text>正解です。次の問題に進めます。</Text>
-          <Button alignSelf="start" colorScheme="brand" isLoading={next.isPending} onClick={() => void handleNext()}>
-            次の問題へ
-          </Button>
-        </VStack>
+        <ResultAlertDialog
+          actions={completionActions}
+          isOpen={true}
+          message="正解です！次の問題へ進めます。"
+          title="正解"
+        />
       )}
       {exercise && !exercise.completed && (
         <FillInBlankBody
@@ -121,12 +127,8 @@ export const ChallengePageOnClient: React.FC = () => {
             finalVars: exercise.finalVars,
           }}
           gradeAnswers={gradeAnswers}
+          completionActions={completionActions}
           completionMessage="正解です！次の問題へ進めます。"
-          onCorrect={() =>
-            setExercise((draft) => {
-              if (draft) draft.completed = true;
-            })
-          }
         />
       )}
     </VStack>
