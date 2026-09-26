@@ -53,7 +53,7 @@
     "@chakra-ui/react": "2.10.9",
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",
-    "@orpc/client": "1.15.1",
+    "@orpc/client": "1.15.2",
     "@rvf/set-get": "7.0.3",
     "@tanstack/react-query": "5.103.1",
     "@trpc/client": "11.19.0",
