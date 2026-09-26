@@ -53,7 +53,7 @@
     "@chakra-ui/react": "2.10.9",
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",
-    "@orpc/client": "1.15.0",
+    "@orpc/client": "1.15.1",
     "@rvf/set-get": "7.0.3",
     "@tanstack/react-query": "5.102.8",
     "@trpc/client": "11.18.0",
@@ -93,7 +93,7 @@
     "use-immer": "0.11.0",
     "usehooks-ts": "3.1.1",
     "uuid": "14.0.2",
-    "zod": "4.6.2",
+    "zod": "4.6.5",
     "zod-form-data": "3.0.3"
   },
   "devDependencies": {
@@ -112,7 +112,7 @@
     "babel-plugin-react-compiler": "1.0.0",
     "concurrently": "10.0.5",
     "conventional-changelog-conventionalcommits": "10.4.0",
-    "lefthook": "2.1.12",
+    "lefthook": "2.1.14",
     "open-cli": "9.0.0",
     "oxfmt": "0.68.0",
     "oxlint": "1.83.0",
