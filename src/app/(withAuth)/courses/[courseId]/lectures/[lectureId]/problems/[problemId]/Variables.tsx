@@ -1,4 +1,5 @@
 import type React from 'react';
+import { useImmer } from 'use-immer';
 
 import {
   Box,
@@ -9,7 +10,6 @@ import {
   Th,
   Thead,
   Tr,
-  VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { DisplayNode, TraceItemVariable } from '../../../../../../../../problems/traceProgram';
 
@@ -18,97 +18,132 @@ interface VariablesProps {
   referenceVars?: Record<string, DisplayNode>;
 }
 
-interface ReferenceNodeProps {
-  path: string;
-  node: DisplayNode;
-}
+type DisplayRow =
+  | { kind: 'scalar'; path: string; depth: number; text: string }
+  | {
+      kind: 'reference';
+      path: string;
+      depth: number;
+      node: Extract<DisplayNode, { kind: 'object' | 'array' }>;
+      expanded: boolean;
+    };
 
 export const Variables: React.FC<VariablesProps> = ({ traceItemVars, referenceVars = {} }) => {
-  const references = Object.entries(referenceVars);
-  const referencePaths = new Set(references.flatMap(([name, node]) => collectPaths(name, node)));
-  const variables = Object.entries(traceItemVars).filter(([name]) => !referencePaths.has(name));
+  const [expandedPaths, updateExpandedPaths] = useImmer<Record<string, boolean>>({});
+  const rows = buildDisplayRows(traceItemVars, referenceVars, expandedPaths);
+
+  if (rows.length === 0) return <></>;
 
   return (
-    <VStack align="stretch" spacing={3} textAlign="left">
-      {variables.length > 0 && (
-        <TableContainer>
-          <Table>
-            <Thead>
-              <Tr>
-                <Th>変数/式</Th>
-                <Th isNumeric w="0">
-                  値
-                </Th>
+    <TableContainer textAlign="left">
+      <Table>
+        <Thead>
+          <Tr>
+            <Th pl="32px">変数/式</Th>
+            <Th isNumeric w="0">
+              値
+            </Th>
+          </Tr>
+        </Thead>
+        <Tbody>
+          {rows.map((row) =>
+            row.kind === 'reference' ? (
+              <Tr key={row.path}>
+                <Td colSpan={2} p={0}>
+                  <Box
+                    _focusVisible={{ outline: '2px solid', outlineColor: 'blue.500', outlineOffset: '2px' }}
+                    _hover={{ bg: 'gray.100' }}
+                    alignItems="baseline"
+                    aria-expanded={row.expanded}
+                    as="button"
+                    bg="transparent"
+                    border="0"
+                    borderRadius="sm"
+                    color="inherit"
+                    cursor="pointer"
+                    display="flex"
+                    fontFamily="mono"
+                    fontSize="inherit"
+                    lineHeight="inherit"
+                    pl={`${16 + row.depth * 16}px`}
+                    pr="16px"
+                    py="8px"
+                    textAlign="left"
+                    type="button"
+                    w="100%"
+                    onClick={() => {
+                      updateExpandedPaths((draft) => {
+                        draft[row.path] = !row.expanded;
+                      });
+                    }}
+                  >
+                    <Box aria-hidden="true" as="span" flexShrink={0} w="16px">
+                      {row.expanded ? '▾' : '▸'}
+                    </Box>
+                    <Box as="span" flexShrink={0}>
+                      {row.path}
+                    </Box>
+                    <Box as="span" color="gray.400" minW={0} ml="16px" overflowWrap="anywhere" whiteSpace="normal">
+                      {formatSummary(row.node)}
+                    </Box>
+                  </Box>
+                </Td>
               </Tr>
-            </Thead>
-            <Tbody>
-              {variables.map(([name, value]) => (
-                <Tr key={name}>
-                  <Td fontFamily="mono">{name}</Td>
-                  <Td isNumeric fontFamily="mono">
-                    {Array.isArray(value) ? value.join(', ') : value}
-                  </Td>
-                </Tr>
-              ))}
-            </Tbody>
-          </Table>
-        </TableContainer>
-      )}
-      {references.map(([name, node]) => (
-        <ReferenceNode key={name} node={node} path={name} />
-      ))}
-    </VStack>
+            ) : (
+              <Tr key={row.path}>
+                <Td fontFamily="mono" pl={`${32 + row.depth * 16}px`} py="8px">
+                  {row.path}
+                </Td>
+                <Td isNumeric fontFamily="mono" py="8px">
+                  {row.text}
+                </Td>
+              </Tr>
+            )
+          )}
+        </Tbody>
+      </Table>
+    </TableContainer>
   );
 };
 
-const ReferenceNode: React.FC<ReferenceNodeProps> = ({ path, node }) => {
+const buildDisplayRows = (
+  traceItemVars: TraceItemVariable,
+  referenceVars: Record<string, DisplayNode>,
+  expandedPaths: Record<string, boolean>
+): DisplayRow[] => {
+  const references = Object.entries(referenceVars);
+  const referencePaths = new Set(references.flatMap(([name, node]) => collectPaths(name, node)));
+  const rows: DisplayRow[] = Object.entries(traceItemVars)
+    .filter(([name]) => !referencePaths.has(name))
+    .map(([path, value]) => ({
+      kind: 'scalar',
+      path,
+      text: Array.isArray(value) ? value.join(', ') : String(value),
+      depth: 0,
+    }));
+
+  for (const [path, node] of references) appendReferenceRows(rows, path, node, 0, expandedPaths);
+  return rows;
+};
+
+const appendReferenceRows = (
+  rows: DisplayRow[],
+  path: string,
+  node: DisplayNode,
+  depth: number,
+  expandedPaths: Record<string, boolean>
+): void => {
   if (node.kind === 'value') {
-    return (
-      <Box fontFamily="mono">
-        {path}: {formatScalar(node.value)}
-      </Box>
-    );
+    rows.push({ kind: 'scalar', path, text: formatScalar(node.value), depth });
+    return;
   }
 
-  const children = Object.entries(node.entries);
-  const values = children.filter(([, child]) => child.kind === 'value');
-  const nested = children.filter(([, child]) => child.kind !== 'value');
-
-  return (
-    <details open={path === 'this'}>
-      <summary>
-        <Box as="span" fontFamily="mono">
-          {path}
-        </Box>{' '}
-        <Box as="span" color="gray.600" overflowWrap="anywhere" whiteSpace="normal">
-          {formatSummary(node)}
-        </Box>
-      </summary>
-      <VStack align="stretch" pl={4} spacing={2}>
-        {values.length > 0 && (
-          <TableContainer>
-            <Table size="sm">
-              <Tbody>
-                {values.map(([key, child]) => (
-                  <Tr key={key}>
-                    <Td fontFamily="mono">
-                      <Box as="span">{childPath(path, node.kind, key)}</Box>
-                    </Td>
-                    <Td isNumeric fontFamily="mono">
-                      {child.kind === 'value' && formatScalar(child.value)}
-                    </Td>
-                  </Tr>
-                ))}
-              </Tbody>
-            </Table>
-          </TableContainer>
-        )}
-        {nested.map(([key, child]) => (
-          <ReferenceNode key={key} node={child} path={childPath(path, node.kind, key)} />
-        ))}
-      </VStack>
-    </details>
-  );
+  const expanded = expandedPaths[path] ?? path === 'this';
+  rows.push({ kind: 'reference', path, node, depth, expanded });
+  if (!expanded) return;
+  for (const [key, child] of Object.entries(node.entries)) {
+    appendReferenceRows(rows, childPath(path, node.kind, key), child, depth + 1, expandedPaths);
+  }
 };
 
 const collectPaths = (path: string, node: DisplayNode): string[] => {

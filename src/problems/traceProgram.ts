@@ -258,7 +258,11 @@ function captureDisplayNode(value, seen) {
   if (value === null || typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean') {
     return {kind: 'value', value};
   }
-  if (typeof value !== 'object' || seen.has(value) || (value instanceof Turtle && !_turtles.includes(value))) return;
+  if (typeof value !== 'object' || seen.has(value)) return;
+  if (value instanceof Turtle) {
+    if (!_turtles.includes(value)) return;
+    return {kind: 'object', entries: {x: {kind: 'value', value: value.x}, y: {kind: 'value', value: value.y}}};
+  }
   seen.add(value);
   const entries = {};
   for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {

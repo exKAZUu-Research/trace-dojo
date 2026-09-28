@@ -53,19 +53,24 @@ test('Java turtle names show their selected-step coordinates apart from answer v
 
   expect(referenceVars(instantiated.traceItems[0])).toEqual({});
   expect(referenceVars(beforeCreation)).toEqual({});
-  expect(referenceVars(afterCreation)).toMatchObject({ 亀: object({ x: scalar(2), y: scalar(3) }) });
+  expect(referenceVars(afterCreation)).toEqual({ 亀: object({ x: scalar(2), y: scalar(3) }) });
   expect(referenceVars(afterMoving)).toMatchObject({ 亀: object({ x: scalar(2), y: scalar(4) }) });
   expect(afterMoving!.vars).toEqual({ x: 2, y: 3 });
   expect(instantiated.finalVars).toEqual(afterMoving!.vars);
 
   const viewingTraceItemIndex = instantiated.traceItems.indexOf(afterCreation!);
   const html = renderViewer(instantiated, viewingTraceItemIndex, viewingTraceItemIndex + 1);
-  expect(html).toContain('亀.x');
-  expect(html).toContain('亀.y');
-  expect(html).toMatch(/亀\.y<\/span><\/td><td[^>]*>3<\/td>/);
+  expect(html).toContain('x=2, y=3');
+  expect(html).toMatch(/<button[^>]*aria-expanded="false"[^>]*>[\s\S]*?亀[\s\S]*?<\/button>/);
+  expect(html).not.toContain('亀.x');
+  expect(html).not.toContain('亀.y');
+  expect(html).not.toContain('亀.color');
+  expect(html).not.toContain('亀.dir');
   expect(html).not.toContain('t.x');
   expect(html).toContain('>x<');
   expect(html).toContain('>y<');
+  expect(html.match(/<table\b/g)).toHaveLength(1);
+  expect(html.match(/<thead\b/g)).toHaveLength(1);
 });
 
 test('multiple turtles and arrays retain Java reference paths', () => {
@@ -77,7 +82,7 @@ test('multiple turtles and arrays retain Java reference paths', () => {
 
   const indexed = problem('multiObject6');
   const afterThreeCreations = indexed.traceItems.find((item) => item.turtles.length === 3);
-  expect(referenceVars(afterThreeCreations)).toMatchObject({
+  expect(referenceVars(afterThreeCreations)).toEqual({
     turtles: array({
       '0': object({ x: scalar(1), y: scalar(0) }),
       '1': object({ x: scalar(3), y: scalar(0) }),
@@ -126,9 +131,11 @@ test('class fields are captured in the active scope with immutable past values',
   const insideMethod = instantiated.traceItems.find((item) => item.sid === 5 && item.depth === 1);
   const inMain = instantiated.traceItems.find((item) => item.sid === 1 && item.depth === 0);
 
-  expect(referenceVars(insideConstructor)).toMatchObject({
+  expect(referenceVars(insideConstructor)).toEqual({
     this: object({ speed: scalar(2), t: object({ x: scalar(0), y: scalar(0) }) }),
   });
+  expect(insideConstructor!.turtles[0]).toHaveProperty('color');
+  expect(insideConstructor!.turtles[0]).toHaveProperty('dir');
   expect(referenceVars(insideMethod)).toMatchObject({
     this: object({ speed: scalar(2), t: object({ x: scalar(0), y: scalar(1) }) }),
   });
@@ -161,25 +168,40 @@ test('viewer opens this, folds other instances, and keeps all direct fields in a
   const methodHtml = renderViewer(instantiated, inMethodIndex, inMethodIndex + 1);
   const mainHtml = renderViewer(instantiated, inMainIndex, inMainIndex);
 
-  expect(methodHtml).toMatch(/<details[^>]*\bopen(?:="")?[^>]*>/);
-  expect(methodHtml).toMatch(/<summary[^>]*>[\s\S]*?speed=2[\s\S]*?<\/summary>/);
+  expect(methodHtml).toMatch(/<button[^>]*aria-expanded="true"[^>]*>[\s\S]*?this[\s\S]*?speed=2[\s\S]*?<\/button>/);
   expect(methodHtml).toContain('this.speed');
-  expect(methodHtml).toContain('this.t.x');
-  expect(mainHtml).toMatch(/<details(?![^>]*\bopen)[^>]*>/);
-  expect(mainHtml).toMatch(/<summary[^>]*>[\s\S]*?speed=1[\s\S]*?<\/summary>/);
-  expect(mainHtml).toContain('t.t.x');
+  expect(methodHtml).toMatch(
+    /<button[^>]*aria-expanded="false"[^>]*>[\s\S]*?this\.t[\s\S]*?x=0, y=1[\s\S]*?<\/button>/
+  );
+  expect(methodHtml).not.toContain('this.t.x');
+  expect(methodHtml).not.toContain('this.t.color');
+  expect(methodHtml).not.toContain('this.t.dir');
+  expect(methodHtml.match(/<table\b/g)).toHaveLength(1);
+  const rows = [...methodHtml.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)].map((match) => match[1]);
+  const localRow = rows.find((row) => />i<\/td>/.test(row));
+  const fieldRow = rows.find((row) => row.includes('this.speed'));
+  expect(localRow?.match(/<td\b/g)).toHaveLength(2);
+  expect(fieldRow?.match(/<td\b/g)).toHaveLength(2);
+  expect(localRow).toContain('data-is-numeric="true"');
+  expect(fieldRow).toContain('data-is-numeric="true"');
+  expect(mainHtml).toMatch(/<button[^>]*aria-expanded="false"[^>]*>[\s\S]*?t[\s\S]*?speed=1[\s\S]*?<\/button>/);
+  expect(mainHtml).not.toContain('t.t.x');
 });
 
-test('nested turtle instances have their own closed disclosure inside the open this instance', () => {
+test('nested turtle instances have their own closed row inside the open this instance', () => {
   const instantiated = problem('makeClass1');
   const inMethodIndex = instantiated.traceItems.findIndex((item) => item.sid === 5 && item.depth === 1);
   const html = renderViewer(instantiated, inMethodIndex, inMethodIndex + 1);
-  const details = [...html.matchAll(/<details([^>]*)>/g)];
+  const buttons = [...html.matchAll(/<button[^>]*aria-expanded="(true|false)"[^>]*>/g)];
 
-  expect(details).toHaveLength(2);
-  expect(details[0][1]).toMatch(/\bopen(?:="")?/);
-  expect(details[1][1]).not.toMatch(/\bopen(?:="")?/);
-  expect(html).toMatch(/<details[^>]*>[\s\S]*?<summary[^>]*>[\s\S]*?this\.t[\s\S]*?<\/summary>/);
+  expect(buttons).toHaveLength(2);
+  expect(buttons[0][1]).toBe('true');
+  expect(buttons[1][1]).toBe('false');
+  expect(html.match(/<table\b/g)).toHaveLength(1);
+  const nestedRow = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)].find((match) => match[1].includes('this.t'));
+  expect(nestedRow?.[1]).toMatch(/<td[^>]*colspan="2"/i);
+  expect(nestedRow?.[1]).toMatch(/<button(?=[^>]*type="button")(?=[^>]*aria-expanded="false")[^>]*>/);
+  expect(html).not.toContain('this.t.x');
 });
 
 test('a class field appears once inside its instance without answer annotations', () => {
@@ -188,7 +210,7 @@ test('a class field appears once inside its instance without answer annotations'
   const html = renderViewer(instantiated, viewingTraceItemIndex, viewingTraceItemIndex + 1);
 
   expect(html.match(/>this\.speed</g)).toHaveLength(1);
-  expect(html).toMatch(/<summary[^>]*>[\s\S]*?speed=2[\s\S]*?<\/summary>/);
+  expect(html).toMatch(/<button[^>]*>[\s\S]*?speed=2[\s\S]*?<\/button>/);
 });
 
 test('the viewed past instance remains unchanged when the current step is elsewhere', () => {
@@ -199,9 +221,9 @@ test('the viewed past instance remains unchanged when the current step is elsewh
   const mainHtml = renderViewer(instantiated, currentMainIndex, currentMainIndex);
 
   expect(pastHtml).toContain('this.speed');
-  expect(pastHtml).toMatch(/<summary[^>]*>[\s\S]*?speed=2[\s\S]*?<\/summary>/);
-  expect(mainHtml).toContain('t.speed');
-  expect(mainHtml).toMatch(/<summary[^>]*>[\s\S]*?speed=1[\s\S]*?<\/summary>/);
+  expect(pastHtml).toMatch(/<button[^>]*>[\s\S]*?speed=2[\s\S]*?<\/button>/);
+  expect(mainHtml).toMatch(/<button[^>]*>[\s\S]*?speed=1[\s\S]*?<\/button>/);
+  expect(mainHtml).not.toContain('t.speed');
 });
 
 test('fill in blank grading variables remain separate from references', () => {
@@ -221,6 +243,8 @@ class Counter {
     this.label = 'a full label with all of its text';
     this.numericString = '2';
     this.active = true;
+    this.color = 'ordinary color';
+    this.dir = 'ordinary direction';
     this.missing = null;
     this.values = [1, undefined, 'last'];
     this.empty = {};
@@ -250,6 +274,8 @@ public class Main {
       label: scalar('a full label with all of its text'),
       numericString: scalar('2'),
       active: scalar(true),
+      color: scalar('ordinary color'),
+      dir: scalar('ordinary direction'),
       // oxlint-disable-next-line unicorn/no-null -- Java null is displayed as a scalar field.
       missing: scalar(null),
       values: array({ '0': scalar(1), '2': scalar('last') }),
@@ -266,7 +292,7 @@ public class Main {
   const html = renderToStaticMarkup(
     createElement(Variables, { traceItemVars: {}, referenceVars: traced.traceItems[1].referenceVars })
   );
-  const summaries = [...html.matchAll(/<summary[^>]*>([\s\S]*?)<\/summary>/g)];
+  const summaries = [...html.matchAll(/<button[^>]*aria-expanded="false"[^>]*>([\s\S]*?)<\/button>/g)];
   expect(summaries.some((match) => match[1].includes('a full label with all of its text'))).toBe(true);
   expect(
     summaries.some((match) => /label=(?:&quot;|")a full label with all of its text(?:&quot;|")/.test(match[1]))
@@ -274,18 +300,13 @@ public class Main {
   expect(summaries.some((match) => /numericString=(?:&quot;|")2(?:&quot;|")/.test(match[1]))).toBe(true);
   expect(summaries.some((match) => match[1].includes('count=1'))).toBe(true);
   expect(summaries.some((match) => match[1].includes('missing=null'))).toBe(true);
-  expect(html).toContain('counter.values');
-  expect(html).toContain('counter.empty');
-  expect(html).toContain('counter.emptyValues');
-  const disclosures = [...html.matchAll(/<details([^>]*)><summary[^>]*>([\s\S]*?)<\/summary>/g)];
-  const emptyObject = disclosures.find((match) => match[2].includes('counter.empty'));
-  const emptyArray = disclosures.find((match) => match[2].includes('counter.emptyValues'));
-  expect(emptyObject).toBeDefined();
-  expect(emptyArray).toBeDefined();
-  expect(emptyObject?.[1]).not.toMatch(/\bopen(?:="")?/);
-  expect(emptyArray?.[1]).not.toMatch(/\bopen(?:="")?/);
-  expect(emptyObject?.[2]).toContain('{}');
-  expect(emptyArray?.[2]).toContain('[]');
+  expect(summaries.some((match) => match[1].includes('color=&quot;ordinary color&quot;'))).toBe(true);
+  expect(summaries.some((match) => match[1].includes('dir=&quot;ordinary direction&quot;'))).toBe(true);
+  expect(summaries.some((match) => match[1].includes('empty={}'))).toBe(true);
+  expect(summaries.some((match) => match[1].includes('emptyValues=[]'))).toBe(true);
+  expect(html).not.toContain('counter.values');
+  expect(html).not.toContain('counter.empty');
+  expect(html.match(/<table\b/g)).toHaveLength(1);
 });
 
 test('nested class objects render once when the legacy answer snapshot has an object value', () => {
@@ -318,10 +339,27 @@ class Counter {
   const html = renderToStaticMarkup(
     createElement(Variables, { traceItemVars: snapshot!.vars, referenceVars: snapshot!.referenceVars })
   );
-  expect(html).toContain('this.inner.label');
-  expect(html).not.toMatch(/<td[^>]*>(?:<span[^>]*>)?this\.inner(?:<\/span>)?<\/td>/);
+  expect(html).toContain('this.inner');
+  expect(html).toContain('label=&quot;nested&quot;');
+  expect(html).not.toContain('this.inner.label');
+  expect(html.match(/>this\.inner</g)).toHaveLength(1);
   expect(html.match(/>this\.count</g)).toHaveLength(1);
-  expect(html).not.toContain('変数/式');
+  expect(html.match(/<table\b/g)).toHaveLength(1);
+  expect(html.match(/変数\/式/g)).toHaveLength(1);
+});
+
+test('the variable table appears for references alone and disappears when the snapshot is empty', () => {
+  const instantiated = problem('makeClass1');
+  const constructorItem = instantiated.traceItems.find((item) => item.sid === 3 && item.depth === 1);
+  const referenceOnlyHtml = renderToStaticMarkup(
+    createElement(Variables, { traceItemVars: {}, referenceVars: constructorItem!.referenceVars })
+  );
+  const emptyHtml = renderToStaticMarkup(createElement(Variables, { traceItemVars: {} }));
+
+  expect(referenceOnlyHtml.match(/<table\b/g)).toHaveLength(1);
+  expect(referenceOnlyHtml.match(/<thead\b/g)).toHaveLength(1);
+  expect(referenceOnlyHtml).toMatch(/<button(?=[^>]*type="button")(?=[^>]*aria-expanded="true")[^>]*>/);
+  expect(emptyHtml).not.toContain('<table');
 });
 
 test('unregistered numeric-only programs still reject native assignments', () => {
