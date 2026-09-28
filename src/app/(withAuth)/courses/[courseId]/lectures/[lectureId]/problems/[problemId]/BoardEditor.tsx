@@ -85,7 +85,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 
   useEffect(() => {
     initialize(props.previousTraceItemIndex >= 1);
-  }, [props.previousTraceItemIndex, initialize]); // We should include initialize because it depends on props.initialVariables
+  }, [props.previousTraceItemIndex, initialize]);
 
   const updateTurtle = (currentTurtle: TurtleTrace, newTurtle: Partial<TurtleTrace>): void => {
     updateTurtles((draft) => {
@@ -105,7 +105,12 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
   const findIncorrectLocationsAndHintText = (): [string[], string] => {
     const locations: string[] = [];
     let hintText = '';
-    if (!fastDeepEqual(new Set(currentTraceItem.turtles), new Set(turtles))) {
+    if (
+      !fastDeepEqual(
+        currentTraceItem.turtles.toSorted(compareTurtlePositions),
+        turtles.toSorted(compareTurtlePositions)
+      )
+    ) {
       locations.push('亀');
     }
     if (!fastDeepEqual(parseBoard(currentTraceItem.board), board)) {
@@ -417,6 +422,10 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
 });
 
 BoardEditor.displayName = 'BoardEditor';
+
+function compareTurtlePositions(a: TurtleTrace, b: TurtleTrace): number {
+  return a.x - b.x || a.y - b.y;
+}
 
 function canPutTurtle(turtlesTraces: TurtleTrace[], x: number, y: number): boolean {
   return 0 <= x && x < COLUMNS && 0 <= y && y < ROWS && !turtlesTraces.some((t) => t.x === x && t.y === y);
