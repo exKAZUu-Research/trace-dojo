@@ -17,9 +17,9 @@ const defaultTurtle: TurtleTrace = {
   dir: 'N',
 };
 
-type TraceItemWithOptionalCallStack = Omit<TraceItem, 'callStack' | 'turtleVars'> & {
+type TraceItemWithOptionalCallStack = Omit<TraceItem, 'callStack' | 'referenceVars'> & {
   callStack?: number[];
-  turtleVars?: TraceItem['turtleVars'];
+  referenceVars?: TraceItem['referenceVars'];
 };
 
 test.each([
@@ -614,7 +614,7 @@ test('Trace a specific program', () => {
 function normalizeLegacyTrace(trace: TraceItemWithOptionalCallStack[]): TraceItemWithOptionalCallStack[] {
   return trace.map((item) => {
     const legacyItem = { ...item, vars: { ...item.vars }, callStack: item.callStack ?? [] };
-    delete legacyItem.turtleVars;
+    delete legacyItem.referenceVars;
     return legacyItem;
   });
 }

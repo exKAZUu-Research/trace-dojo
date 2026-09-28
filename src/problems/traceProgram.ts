@@ -19,13 +19,17 @@ export interface TurtleTrace {
   dir: string;
 }
 
+export type DisplayNode =
+  | { kind: 'value'; value: number | string | boolean | null }
+  | { kind: 'object' | 'array'; entries: Record<string, DisplayNode> };
+
 export interface TraceItem {
   depth: number;
   sid: number;
   /** caller id のスタック。 `// caller` のある行に caller id が付与される。 */
   callStack: number[];
   vars: TraceItemVariable;
-  turtleVars: Record<string, { x: number; y: number }>;
+  referenceVars: Record<string, DisplayNode>;
   turtles: TurtleTrace[];
   board: string;
   /** Pythonなどの拡張for文しかない言語において、削除すべき更新式か否か。 */
@@ -74,7 +78,7 @@ export function traceProgram(
   }
 ): TracedProgram {
   const collectTrace = options?.collectTrace ?? true;
-  if (!instrumented.includes('Turtle')) {
+  if (!instrumented.includes('Turtle') && !/registerDisplayRef\s*\(/.test(instrumented)) {
     if (instrumented.includes(' = ')) {
       throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
     }
@@ -109,7 +113,7 @@ class Scope {
   constructor(parent) {
     this.parent = parent;
     this.vars = {};
-    this.turtleRefs = {};
+    this.displayRefs = {};
   }
   get(varName) {
     if (this.vars[varName] !== undefined) {
@@ -124,7 +128,7 @@ class Scope {
   enterNewScope(params) {
     s = new Scope(this);
     for (const [k, v] of params) {
-      if (v && typeof v === 'object') s.turtleRefs[k] = () => v;
+      if (v && typeof v === 'object') s.displayRefs[k] = () => v;
       if (!(v instanceof Turtle)) s.vars[k] = v;
     }
   }
@@ -142,11 +146,11 @@ class Scope {
     return depth;
   }
 }
-function registerTurtleRef(name, getter) {
-  s.turtleRefs[name] = getter;
+function registerDisplayRef(name, getter) {
+  s.displayRefs[name] = getter;
 }
-function unregisterTurtleRef(name) {
-  delete s.turtleRefs[name];
+function unregisterDisplayRef(name) {
+  delete s.displayRefs[name];
 }
 const dirs = ['N', 'E', 'S', 'W'];
 const dx = [0, 1, 0, -1];
@@ -239,24 +243,31 @@ function addTrace(sid, self) {
     for (const name of thisPropNames) delete vars['this'][name];
   }
   flattenObjects(vars);
-  const turtleVars = {};
-  for (const [name, getter] of Object.entries(s.turtleRefs)) {
-    collectTurtleCoordinates(name, getter(), turtleVars, new Set());
+  const referenceVars = {};
+  for (const [name, getter] of Object.entries(s.displayRefs)) {
+    const node = captureDisplayNode(getter(), new Set());
+    if (node !== undefined) referenceVars[name] = node;
   }
-  if (self && self !== globalThis) collectTurtleCoordinates('this', self, turtleVars, new Set());
-  trace.push({depth: s.getDepth(), sid, callStack: [...callStack], turtles: _turtles.map(t => ({...t})), vars, turtleVars, board: board.map(r => r.join('')).join('\\n')});
+  if (self && self !== globalThis) {
+    const node = captureDisplayNode(self, new Set());
+    if (node !== undefined) referenceVars['this'] = node;
+  }
+  trace.push({depth: s.getDepth(), sid, callStack: [...callStack], turtles: _turtles.map(t => ({...t})), vars, referenceVars, board: board.map(r => r.join('')).join('\\n')});
 }
-function collectTurtleCoordinates(path, value, turtleVars, seen) {
-  if (!value || typeof value !== 'object' || seen.has(value)) return;
-  if (value instanceof Turtle) {
-    if (_turtles.includes(value)) turtleVars[path] = {x: value.x, y: value.y};
-    return;
+function captureDisplayNode(value, seen) {
+  if (value === null || typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean') {
+    return {kind: 'value', value};
   }
+  if (typeof value !== 'object' || seen.has(value) || (value instanceof Turtle && !_turtles.includes(value))) return;
   seen.add(value);
-  for (const [key, child] of Object.entries(value)) {
-    collectTurtleCoordinates(Array.isArray(value) ? \`\${path}[\${key}]\` : \`\${path}.\${key}\`, child, turtleVars, seen);
+  const entries = {};
+  for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+    if (!descriptor.enumerable || !('value' in descriptor)) continue;
+    const child = captureDisplayNode(descriptor.value, seen);
+    if (child !== undefined) entries[key] = child;
   }
   seen.delete(value);
+  return {kind: Array.isArray(value) ? 'array' : 'object', entries};
 }
 function flattenObjects(obj) {
   for (const [key, value] of Object.entries(obj)) {
@@ -296,7 +307,7 @@ function call(cid, f, ...argNames) {
 function isClass(obj) {
   return typeof obj === 'function' && /^class\\s/.test(obj.toString());
 }
-trace.push({depth: 0, sid: 0, callStack: [], turtles: [], vars: {}, turtleVars: {}, board: board.map(r => r.join('')).join('\\n')});
+trace.push({depth: 0, sid: 0, callStack: [], turtles: [], vars: {}, referenceVars: {}, board: board.map(r => r.join('')).join('\\n')});
 s = new Scope();
 ${modifiedCode.trim()}
 ({trace, finalVars: {...s.vars}, finalBoard: board.map(r => r.join('')).join('\\n'), finalTurtles: _turtles.map(t => ({...t}))});

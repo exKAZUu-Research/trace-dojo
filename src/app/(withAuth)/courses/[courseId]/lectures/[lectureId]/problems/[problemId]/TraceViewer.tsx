@@ -76,7 +76,7 @@ export const TraceViewer: React.FC<Props> = (props: Props) => {
         <Box mt={4} w="100%">
           <Variables
             traceItemVars={props.problem.traceItems[props.viewingTraceItemIndex].vars}
-            turtleVars={props.problem.traceItems[props.viewingTraceItemIndex].turtleVars}
+            referenceVars={props.problem.traceItems[props.viewingTraceItemIndex].referenceVars}
           />
         </Box>
       </Box>
