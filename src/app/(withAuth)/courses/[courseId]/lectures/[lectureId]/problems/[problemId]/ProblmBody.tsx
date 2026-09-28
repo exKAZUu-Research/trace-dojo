@@ -107,12 +107,13 @@ export const ProblemBody: React.FC<Props> = (props) => {
   const handleSubmit = useCallback(async (): Promise<void> => {
     if (isAlertOpen || !turtleGraphicsRef.current) return;
 
-    const [incorrectLocations, hintText] = turtleGraphicsRef.current.findIncorrectLocationsAndHintText();
-    const incorrectLocationText = incorrectLocations.join('、');
+    const gradingResult = turtleGraphicsRef.current.gradeAnswers();
+    const isCorrect = gradingResult.status === 'correct';
+    const incorrectLocationText = gradingResult.incorrectLocations.join('、');
 
     switch (problemType) {
       case 'executionResult': {
-        if (incorrectLocationText) {
+        if (!isCorrect) {
           const response = await fetchIncorrectSubmissionsCount();
           const incorrectCount = (response.data ?? 0) + 1;
           await props.createSubmissionUpdatingProblemSession(false, false);
@@ -142,13 +143,13 @@ export const ProblemBody: React.FC<Props> = (props) => {
       }
       case 'step': {
         await props.createSubmissionUpdatingProblemSession(
-          !incorrectLocationText,
-          !incorrectLocationText && currentTraceItemIndex === props.problem.traceItems.length - 1
+          isCorrect,
+          isCorrect && currentTraceItemIndex === props.problem.traceItems.length - 1
         );
-        if (incorrectLocationText) {
+        if (!isCorrect) {
           openAlertDialog(
             '不正解',
-            `${incorrectLocationText}に誤りがあります。もう一度解答してみましょう。${hintText}`
+            `${incorrectLocationText}に誤りがあります。もう一度解答してみましょう。${gradingResult.hintText}`
           );
           setViewingTraceItemIndex(previousTraceItemIndex);
         } else {
