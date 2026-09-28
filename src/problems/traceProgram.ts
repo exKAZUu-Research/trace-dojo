@@ -25,13 +25,13 @@ export interface TraceItem {
   /** caller id のスタック。 `// caller` のある行に caller id が付与される。 */
   callStack: number[];
   vars: TraceItemVariable;
+  turtleVars: Record<string, { x: number; y: number }>;
   turtles: TurtleTrace[];
   board: string;
   /** Pythonなどの拡張for文しかない言語において、削除すべき更新式か否か。 */
   last?: boolean;
 }
 
-// できる限り、可能性のある型を具体的に列挙していきたい。
 export type TraceItemVariable = Record<string, number | string | number[] | string[]>;
 
 export const charToColor = {
@@ -86,7 +86,6 @@ export function traceProgram(
   const modifiedCode = modifiedCodeLines.join('\n');
 
   const thisPropNames = Object.keys((this as Record<string, unknown> | undefined) ?? {});
-  // 無理に難読化する必要はないが、コードの文量を減らす意識を持つ。
   const executableCode = `
 let myGlobal = {};
 class ScopeError extends Error {
@@ -110,6 +109,7 @@ class Scope {
   constructor(parent) {
     this.parent = parent;
     this.vars = {};
+    this.turtleRefs = {};
   }
   get(varName) {
     if (this.vars[varName] !== undefined) {
@@ -124,7 +124,8 @@ class Scope {
   enterNewScope(params) {
     s = new Scope(this);
     for (const [k, v] of params) {
-      s.vars[k] = v;
+      if (v && typeof v === 'object') s.turtleRefs[k] = () => v;
+      if (!(v instanceof Turtle)) s.vars[k] = v;
     }
   }
   leaveScope() {
@@ -140,6 +141,12 @@ class Scope {
     }
     return depth;
   }
+}
+function registerTurtleRef(name, getter) {
+  s.turtleRefs[name] = getter;
+}
+function unregisterTurtleRef(name) {
+  delete s.turtleRefs[name];
 }
 const dirs = ['N', 'E', 'S', 'W'];
 const dx = [0, 1, 0, -1];
@@ -224,7 +231,6 @@ class Turtle {
   }
 }
 function addTrace(sid, self) {
-  // Each snapshot copies every turtle, so the cost grows with the number of turtles.
   spend(1 + _turtles.length);
   if (!collectTrace) return;
   const vars = {...s.vars, ...myGlobal};
@@ -233,7 +239,24 @@ function addTrace(sid, self) {
     for (const name of thisPropNames) delete vars['this'][name];
   }
   flattenObjects(vars);
-  trace.push({depth: s.getDepth(), sid, callStack: [...callStack], turtles: _turtles.map(t => ({...t})), vars, board: board.map(r => r.join('')).join('\\n')});
+  const turtleVars = {};
+  for (const [name, getter] of Object.entries(s.turtleRefs)) {
+    collectTurtleCoordinates(name, getter(), turtleVars, new Set());
+  }
+  if (self && self !== globalThis) collectTurtleCoordinates('this', self, turtleVars, new Set());
+  trace.push({depth: s.getDepth(), sid, callStack: [...callStack], turtles: _turtles.map(t => ({...t})), vars, turtleVars, board: board.map(r => r.join('')).join('\\n')});
+}
+function collectTurtleCoordinates(path, value, turtleVars, seen) {
+  if (!value || typeof value !== 'object' || seen.has(value)) return;
+  if (value instanceof Turtle) {
+    if (_turtles.includes(value)) turtleVars[path] = {x: value.x, y: value.y};
+    return;
+  }
+  seen.add(value);
+  for (const [key, child] of Object.entries(value)) {
+    collectTurtleCoordinates(Array.isArray(value) ? \`\${path}[\${key}]\` : \`\${path}.\${key}\`, child, turtleVars, seen);
+  }
+  seen.delete(value);
 }
 function flattenObjects(obj) {
   for (const [key, value] of Object.entries(obj)) {
@@ -262,7 +285,7 @@ function call(cid, f, ...argNames) {
     }
     try {
       callStack.push(cid);
-      s.enterNewScope(argNames.map((n, i) => [n, argValues[i]]).filter(([n, v]) => !(v instanceof Turtle)));
+      s.enterNewScope(argNames.map((n, i) => [n, argValues[i]]));
       return isClass(f) ? new f(...argValues) : f(...argValues);
     } finally {
       callStack.pop();
@@ -273,23 +296,20 @@ function call(cid, f, ...argNames) {
 function isClass(obj) {
   return typeof obj === 'function' && /^class\\s/.test(obj.toString());
 }
-trace.push({depth: 0, sid: 0, callStack: [], turtles: [], vars: {}, board: board.map(r => r.join('')).join('\\n')});
+trace.push({depth: 0, sid: 0, callStack: [], turtles: [], vars: {}, turtleVars: {}, board: board.map(r => r.join('')).join('\\n')});
 s = new Scope();
 ${modifiedCode.trim()}
 ({trace, finalVars: {...s.vars}, finalBoard: board.map(r => r.join('')).join('\\n'), finalTurtles: _turtles.map(t => ({...t}))});
 `;
 
-  const {
-    finalBoard,
-    finalTurtles,
-    finalVars,
-    trace: rawTrace,
-  } = eval(executableCode) as {
+  // oxlint-disable-next-line no-eval -- Instrumented programs need access to the runtime's lexical bindings.
+  const evaluation = eval(executableCode) as {
     trace: TraceItem[];
     finalVars: TraceItemVariable;
     finalBoard: string;
     finalTurtles: TurtleTrace[];
   };
+  const { finalBoard, finalTurtles, finalVars, trace: rawTrace } = evaluation;
   const trace = (languageId as string) === 'python' ? rawTrace.filter((item: TraceItem) => !item.last) : rawTrace;
 
   const lines = rawDisplayProgram.split('\n');

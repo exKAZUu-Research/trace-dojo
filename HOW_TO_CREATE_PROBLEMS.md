@@ -149,11 +149,11 @@ test9: {
 myGlobal.Settings = { speed: 0 }; // <- ルール1
 
 function main() { // <- ルール3
-  const t1 = call(MyTurtle)(); // <- ルール4
+  const t1 = call(MyTurtle)(); registerTurtleRef('t1', () => t1); // <- ルール4
   myGlobal.Settings.speed = 2; // step
   call(t1.moveForward.bind(t1))(); // <- ルール6
 
-  const t2 = call(MyTurtle2, 'x', 'y')(2, 2); // <- ルール4
+  const t2 = call(MyTurtle2, 'x', 'y')(2, 2); registerTurtleRef('t2', () => t2); // <- ルール4
   call(increaseSpeed)(); // <- ルール2 & 5
   call(t1.moveForward.bind(t1))(); // <- ルール6
   call(t2.moveForward.bind(t2))(); // <- ルール6
@@ -236,6 +236,16 @@ class MyTurtle2 {
 ```
 
 9. `instrumented`と`java`の`// step`の個数が一致することを確認する。
+
+Register Java-visible turtle references in `instrumented` after initialization and before the next trace step. Use the name shown in `java`, even when the JavaScript binding has a different name:
+
+```js
+const t = new Turtle();
+registerTurtleRef('亀', () => t); // step
+```
+
+Register arrays and objects containing turtles in the same way; their indexed elements and fields appear under paths such as `turtles[0].x` and `mover.t.y`. The getter follows later assignments to the binding or its fields. `call()` registers object arguments in the active method scope, and turtle fields on `this` appear automatically. For a direct loop variable that is traced inside the loop, register it at the start of each iteration and call `unregisterTurtleRef` before leaving that iteration. These references are for the step viewer; answer variables remain in `s.vars`.
+
 10. 以下の手順で動作確認する。
     1. `bun run start` でWebサーバーを起動すると、ブラウザが勝手に立ち上がる。
     2. 右上の新規登録でTUのメアドでアカウントを作る。アカウントを作ると、 迷惑メール にメールが届くので、そこでアカウント認証を完了させる。
@@ -250,7 +260,7 @@ class MyTurtle2 {
 ```js
 fillInBlank1: {
   instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerTurtleRef('t', () => t); // step
 for (s.set('i', 0); @[s.get('i') < 4]@; s.set('i', s.get('i') + 1)) {
   t.forward();
 }

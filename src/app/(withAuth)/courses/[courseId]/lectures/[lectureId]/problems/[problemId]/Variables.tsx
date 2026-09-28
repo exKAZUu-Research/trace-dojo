@@ -15,10 +15,17 @@ import { type TraceItemVariable } from '../../../../../../../../problems/tracePr
 
 interface VariablesProps {
   traceItemVars: TraceItemVariable;
+  turtleVars?: Record<string, { x: number; y: number }>;
 }
 
-export const Variables: React.FC<VariablesProps> = ({ traceItemVars }) => {
-  const variables = Object.entries(traceItemVars).map(([key, value]) => ({ key, value }));
+export const Variables: React.FC<VariablesProps> = ({ traceItemVars, turtleVars }) => {
+  const variables = [
+    ...Object.entries(traceItemVars).map(([key, value]) => ({ key, value })),
+    ...Object.entries(turtleVars ?? {}).flatMap(([name, value]) => [
+      { key: `${name}.x`, value: value.x },
+      { key: `${name}.y`, value: value.y },
+    ]),
+  ];
   return (
     <HStack align="flex-start" divider={<StackDivider />} justify="center" mx={-5}>
       <TableContainer flexBasis={0} flexGrow={1} maxW="80%">
