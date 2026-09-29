@@ -43,6 +43,8 @@ let caller: ReturnType<BackendRouter['createCaller']>;
 let instantiateProblem: typeof instantiateProblemType;
 let challengeMap: ChallengeMap;
 let originalChallengeTestLectures: string[][] | undefined;
+let regularMap: ChallengeMap;
+let originalRegularTestLectures: string[][] | undefined;
 
 beforeAll(async () => {
   mkdirSync('.tmp', { recursive: true });
@@ -62,9 +64,12 @@ beforeAll(async () => {
   });
   const problemData = (await import('../../src/problems/problemData')) as unknown as {
     courseIdToLectureIndexToExerciseProblemIds?: ChallengeMap;
+    courseIdToLectureIndexToProblemIds: ChallengeMap;
   };
   challengeMap = problemData.courseIdToLectureIndexToExerciseProblemIds ?? {};
   originalChallengeTestLectures = challengeMap.test;
+  regularMap = problemData.courseIdToLectureIndexToProblemIds;
+  originalRegularTestLectures = regularMap.test;
 });
 
 beforeEach(() => {
@@ -79,11 +84,14 @@ beforeEach(() => {
     ])
     .run();
   challengeMap.test = [['fillInBlank2'], ['fillInBlank1']];
+  regularMap.test = [['test1'], ['test2']];
 });
 
 afterEach(() => {
   if (originalChallengeTestLectures) challengeMap.test = originalChallengeTestLectures;
   else delete challengeMap.test;
+  if (originalRegularTestLectures) regularMap.test = originalRegularTestLectures;
+  else delete regularMap.test;
   vi.restoreAllMocks();
 });
 
@@ -397,10 +405,378 @@ test('normal fill-in-the-blank submissions never create exercise history', async
   expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSubmission').count).toBe(0);
 });
 
+test('creates and resumes regular and blank sessions independently with creation-time trace metadata', async () => {
+  const blank = await start();
+  const regular = await startRegular();
+  expect(await start()).toEqual(blank);
+  expect(await startRegular()).toEqual(regular);
+  expect(regular).toMatchObject({
+    problemFormat: 'regular',
+    problemId: 'test1',
+    seed: expect.any(String),
+    problemType: 'executionResult',
+    traceItemIndex: 0,
+    completed: false,
+  });
+  const instantiated = instantiateProblem(regular.problemId, 'java', regular.seed as string);
+  if (!instantiated) throw new Error('stored regular problem must instantiate');
+  expect(
+    one(
+      z.object({ traceItemCount: z.number(), count: z.number() }),
+      "SELECT traceItemCount, COUNT(*) AS count FROM ExerciseSession WHERE problemFormat = 'regular'"
+    )
+  ).toEqual({ traceItemCount: instantiated.traceItems.length, count: 1 });
+  expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSession').count).toBe(2);
+});
+
+test('derives regular candidates from normal membership without blank fallback', async () => {
+  regularMap.test = [['fillInBlank1']];
+  await expect(regularCaller().startExercise({ ...locationOnly(), problemFormat: 'regular' })).resolves.toEqual({
+    status: 'noProblems',
+  });
+  regularMap.test = [['notRegistered']];
+  await expect(regularCaller().startExercise({ ...locationOnly(), problemFormat: 'regular' })).rejects.toMatchObject({
+    code: 'INTERNAL_SERVER_ERROR',
+  });
+  expect(sqlite.prepare('SELECT * FROM ExerciseSession').all()).toEqual([]);
+});
+
+test('keeps regular incorrect verdicts in execution-result mode and derives completion from stored state', async () => {
+  const regular = await startRegular();
+  for (let index = 0; index < 4; index += 1) {
+    const result = await submitRegular(regular, `wrong-${index}`, false);
+    expect(result).toMatchObject({ problemType: 'executionResult', traceItemIndex: 0, completed: false });
+  }
+  sqlite.prepare("UPDATE ExerciseSession SET problemId = 'does-not-exist' WHERE id = ?").run(regular.sessionId);
+  expect(await submitRegular(regular, 'correct', true)).toMatchObject({ completed: true });
+  const submissions = z
+    .array(
+      z.object({
+        problemType: z.literal('executionResult'),
+        traceItemIndex: z.literal(0),
+        status: z.enum(['correct', 'incorrect']),
+        answers: z.string(),
+        gradingStage: z.null(),
+      })
+    )
+    .parse(
+      sqlite
+        .prepare(
+          'SELECT problemType, traceItemIndex, status, answers, gradingStage FROM ExerciseSubmission ORDER BY id'
+        )
+        .all()
+    );
+  for (const submission of submissions) expect(submission.gradingStage).toBeNull();
+  expect(
+    submissions.map(({ answers, problemType, status, traceItemIndex }) => ({
+      problemType,
+      traceItemIndex,
+      status,
+      answers: z
+        .object({ kind: z.literal('regularVerdict'), isCorrect: z.boolean() })
+        .strict()
+        .parse(JSON.parse(answers)),
+    }))
+  ).toEqual([
+    ...Array.from({ length: 4 }, () => ({
+      problemType: 'executionResult',
+      traceItemIndex: 0,
+      status: 'incorrect',
+      answers: { kind: 'regularVerdict', isCorrect: false },
+    })),
+    {
+      problemType: 'executionResult',
+      traceItemIndex: 0,
+      status: 'correct',
+      answers: { kind: 'regularVerdict', isCorrect: true },
+    },
+  ]);
+});
+
+test('switches regular exercise one way, resumes step 1, then advances and completes by stored trace count', async () => {
+  const regular = await startRegular();
+  const switched = await regularCaller().switchRegularExerciseToStep({
+    ...locationOnly(),
+    sessionId: regular.sessionId,
+  });
+  expect(switched).toMatchObject({ sessionId: regular.sessionId, problemType: 'step', traceItemIndex: 1 });
+  expect(
+    await regularCaller().switchRegularExerciseToStep({ ...locationOnly(), sessionId: regular.sessionId })
+  ).toEqual(switched);
+  expect(await startRegular()).toEqual(switched);
+
+  let current = switched;
+  while (!current.completed) {
+    current = await submitRegular(current, `step-${current.traceItemIndex}`, true);
+  }
+  const count = z
+    .object({ traceItemCount: z.number() })
+    .parse(sqlite.prepare('SELECT traceItemCount FROM ExerciseSession WHERE id = ?').get(regular.sessionId));
+  expect(current.traceItemIndex).toBe(count.traceItemCount - 1);
+  await expect(
+    regularCaller().switchRegularExerciseToStep({ ...locationOnly(), sessionId: regular.sessionId })
+  ).rejects.toMatchObject({ code: 'CONFLICT' });
+});
+
+test('deduplicates an exact regular replay and rejects changed or stale request payloads without mutation', async () => {
+  const regular = await startRegular();
+  const switched = await regularCaller().switchRegularExerciseToStep({
+    ...locationOnly(),
+    sessionId: regular.sessionId,
+  });
+  const input = regularSubmission(switched, 'same-request', true);
+  const [first, replay] = await Promise.all([
+    regularCaller().submitRegularExercise(input),
+    regularCaller().submitRegularExercise(input),
+  ]);
+  expect(replay).toEqual(first);
+  expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSubmission').count).toBe(1);
+  const before = exerciseRows();
+  await expect(regularCaller().submitRegularExercise({ ...input, isCorrect: false })).rejects.toMatchObject({
+    code: 'CONFLICT',
+  });
+  await expect(
+    regularCaller().submitRegularExercise({
+      ...input,
+      context: { problemType: 'step', traceItemIndex: input.context.traceItemIndex + 1 },
+    })
+  ).rejects.toMatchObject({ code: 'CONFLICT' });
+  await expect(
+    regularCaller().submitRegularExercise(regularSubmission(switched, 'stale-request', true))
+  ).rejects.toMatchObject({ code: 'CONFLICT' });
+  expect(exerciseRows()).toEqual(before);
+});
+
+test('serializes different regular request IDs so a newly stale request is not inserted', async () => {
+  const regular = await startRegular();
+  const switched = await regularCaller().switchRegularExerciseToStep({
+    ...locationOnly(),
+    sessionId: regular.sessionId,
+  });
+  const results = await Promise.allSettled([
+    submitRegular(switched, 'concurrent-a', true),
+    submitRegular(switched, 'concurrent-b', true),
+  ]);
+  expect(results.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+  expect(results.filter(({ status }) => status === 'rejected')).toHaveLength(1);
+  expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSubmission').count).toBe(1);
+  expect(sqlite.prepare('SELECT traceItemIndex FROM ExerciseSession WHERE id = ?').get(regular.sessionId)).toEqual({
+    traceItemIndex: 2,
+  });
+});
+
+test.each([{ isCompleted: true }, { problemType: 'step' }, { traceItemIndex: 1 }, { nextTraceItemIndex: 1 }])(
+  'rejects a client-selected regular transition field: %s',
+  async (extra) => {
+    const regular = await startRegular();
+    await expect(
+      regularCaller().submitRegularExercise({ ...regularSubmission(regular, 'strict', true), ...extra })
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(sqlite.prepare('SELECT * FROM ExerciseSubmission').all()).toEqual([]);
+    expect(completion(regular.sessionId)).toBeNull();
+  }
+);
+
+test.each([{ problemType: 'step' }, { traceItemIndex: 1 }, { isCompleted: true }])(
+  'rejects an unknown explicit-regular start field: %s',
+  async (extra) => {
+    await expect(
+      regularCaller().startExercise({ ...locationOnly(), problemFormat: 'regular', ...extra })
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(sqlite.prepare('SELECT * FROM ExerciseSession').all()).toEqual([]);
+  }
+);
+
+test('keeps omitted-format blank start/Next compatible while explicit regular Next is strict', async () => {
+  const blank = await start();
+  expect(blank.problemId).toBe('fillInBlank2');
+  await caller.submitExercise(submission(blank.sessionId, modelAnswers(blank.sessionId)));
+  await expect(caller.nextExercise({ ...locationOnly(), sessionId: blank.sessionId })).resolves.toMatchObject({
+    completed: false,
+  });
+
+  sqlite.exec('DELETE FROM ExerciseSubmission; DELETE FROM ExerciseSession');
+  const regular = await startRegular();
+  const completed = await submitRegular(regular, 'complete-before-strict-next', true);
+  await expect(
+    regularCaller().nextExercise({
+      ...locationOnly(),
+      sessionId: completed.sessionId,
+      problemFormat: 'regular',
+      nextTraceItemIndex: 1,
+    })
+  ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSession').count).toBe(1);
+});
+
+test('rolls back regular submission and transition together', async () => {
+  const regular = await startRegular();
+  sqlite.exec(
+    "CREATE TRIGGER reject_regular_completion BEFORE UPDATE OF completedAt ON ExerciseSession BEGIN SELECT RAISE(ABORT, 'rejected'); END"
+  );
+  try {
+    await expect(submitRegular(regular, 'rollback', true)).rejects.toThrow();
+    expect(sqlite.prepare('SELECT * FROM ExerciseSubmission').all()).toEqual([]);
+    expect(completion(regular.sessionId)).toBeNull();
+  } finally {
+    sqlite.exec('DROP TRIGGER reject_regular_completion');
+  }
+});
+
+test('authorizes regular format and location and keeps Next in regular execution-result mode', async () => {
+  const regular = await startRegular();
+  await expect(
+    regularCaller().nextExercise({ ...locationOnly(), sessionId: regular.sessionId, problemFormat: 'regular' })
+  ).rejects.toMatchObject({ code: 'CONFLICT' });
+  const before = exerciseRows();
+  auth.userId = 'other';
+  await expect(submitRegular(regular, 'other-user', true)).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  auth.userId = 'student';
+  await expect(
+    regularCaller().submitRegularExercise({
+      ...regularSubmission(regular, 'other-location', true),
+      lectureId: 'other',
+    })
+  ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  expect(exerciseRows()).toEqual(before);
+
+  const completed = await submitRegular(regular, 'complete', true);
+  regularMap.test = [['test1', 'test2']];
+  const next = await regularCaller().nextExercise({
+    ...locationOnly(),
+    sessionId: completed.sessionId,
+    problemFormat: 'regular',
+  });
+  expect(next).toMatchObject({ problemFormat: 'regular', problemType: 'executionResult', traceItemIndex: 0 });
+  expect(next.problemId).not.toBe(regular.problemId);
+});
+
+test('rejects cross-format and expired regular access without mutation', async () => {
+  const blank = await start();
+  await expect(
+    regularCaller().submitRegularExercise({
+      ...locationOnly(),
+      sessionId: blank.sessionId,
+      requestId: 'wrong-format',
+      context: { problemType: 'executionResult', traceItemIndex: 0 },
+      isCorrect: true,
+    })
+  ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+
+  const regular = await startRegular();
+  sqlite.prepare('UPDATE ExerciseSession SET createdAt = 0 WHERE id = ?').run(regular.sessionId);
+  const before = exerciseRows();
+  await expect(submitRegular(regular, 'expired', true)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  expect(exerciseRows()).toEqual(before);
+});
+
+test('rejects switching blank, later-step, and corrupt regular states', async () => {
+  const blank = await start();
+  await expect(
+    regularCaller().switchRegularExerciseToStep({ ...locationOnly(), sessionId: blank.sessionId })
+  ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+
+  const regular = await startRegular();
+  sqlite
+    .prepare("UPDATE ExerciseSession SET problemType = 'step', traceItemIndex = 2 WHERE id = ?")
+    .run(regular.sessionId);
+  await expect(
+    regularCaller().switchRegularExerciseToStep({ ...locationOnly(), sessionId: regular.sessionId })
+  ).rejects.toMatchObject({ code: 'CONFLICT' });
+  sqlite.prepare('UPDATE ExerciseSession SET traceItemIndex = traceItemCount WHERE id = ?').run(regular.sessionId);
+  await expect(
+    regularCaller().switchRegularExerciseToStep({ ...locationOnly(), sessionId: regular.sessionId })
+  ).rejects.toMatchObject({ code: 'CONFLICT' });
+});
+
+test('leaves normal session and submission rows unchanged during regular challenge transitions', async () => {
+  const normal = db
+    .insert(problemSessions)
+    .values({
+      userId: 'student',
+      courseId: 'test',
+      lectureId: 'test',
+      problemId: 'test1',
+      problemVariablesSeed: 'normal-regular-invariant',
+      problemType: 'executionResult',
+      traceItemIndex: 0,
+      elapsedMilliseconds: 10,
+    })
+    .returning()
+    .get()!;
+  db.insert(problemSubmissions)
+    .values({
+      sessionId: normal.id,
+      problemType: 'executionResult',
+      traceItemIndex: 0,
+      elapsedMilliseconds: 10,
+      isCorrect: false,
+    })
+    .run();
+  const before = normalRows();
+  const regular = await startRegular();
+  await submitRegular(regular, 'normal-invariant-wrong', false);
+  await regularCaller().switchRegularExerciseToStep({ ...locationOnly(), sessionId: regular.sessionId });
+  expect(normalRows()).toEqual(before);
+});
+
+test('leaves a regular session unchanged when the step switch update fails', async () => {
+  const regular = await startRegular();
+  sqlite.exec(
+    "CREATE TRIGGER reject_regular_switch BEFORE UPDATE OF problemType ON ExerciseSession BEGIN SELECT RAISE(ABORT, 'rejected'); END"
+  );
+  try {
+    await expect(
+      regularCaller().switchRegularExerciseToStep({ ...locationOnly(), sessionId: regular.sessionId })
+    ).rejects.toThrow();
+    expect(
+      sqlite.prepare('SELECT problemType, traceItemIndex FROM ExerciseSession WHERE id = ?').get(regular.sessionId)
+    ).toEqual({
+      problemType: 'executionResult',
+      traceItemIndex: 0,
+    });
+  } finally {
+    sqlite.exec('DROP TRIGGER reject_regular_switch');
+  }
+});
+
 const start = async (): Promise<Exercise> => {
   const value = await caller.startExercise(locationOnly());
   return asExercise(value);
 };
+type RegularExercise = Exercise & {
+  problemFormat: 'regular';
+  seed: string;
+  problemType: 'executionResult' | 'step';
+  traceItemIndex: number;
+};
+interface RegularSubmissionInput extends Location {
+  [key: string]: unknown;
+  sessionId: number;
+  requestId: string;
+  context: { problemType: RegularExercise['problemType']; traceItemIndex: number };
+  isCorrect: boolean;
+}
+const regularCaller = (): Record<string, (input: Record<string, unknown>) => Promise<RegularExercise>> =>
+  caller as never;
+const startRegular = async (): Promise<RegularExercise> =>
+  (await regularCaller().startExercise({ ...locationOnly(), problemFormat: 'regular' })) as RegularExercise;
+const regularSubmission = (
+  exercise: RegularExercise,
+  requestId: string,
+  isCorrect: boolean
+): RegularSubmissionInput => ({
+  ...locationOnly(),
+  sessionId: exercise.sessionId,
+  requestId,
+  context: { problemType: exercise.problemType, traceItemIndex: exercise.traceItemIndex },
+  isCorrect,
+});
+const submitRegular = async (
+  exercise: RegularExercise,
+  requestId: string,
+  isCorrect: boolean
+): Promise<RegularExercise> => regularCaller().submitRegularExercise(regularSubmission(exercise, requestId, isCorrect));
 const asExercise = (value: unknown): Exercise => exerciseSchema.parse(value);
 const unavailable = (name: string): JavaExecutors.JavaExecutor => ({
   name,
