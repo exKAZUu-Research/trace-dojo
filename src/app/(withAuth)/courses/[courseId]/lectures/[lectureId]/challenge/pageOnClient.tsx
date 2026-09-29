@@ -1,80 +1,69 @@
 'use client';
 
 import { useParams, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import { useImmer } from 'use-immer';
-
+import { useState } from 'react';
+import { ChallengeSelection, type ChallengeProblemFormat } from './ChallengeSelection';
+import { RegularChallengeBody, type RegularChallengeDisplay } from './RegularChallengeBody';
 import { FillInBlankBody, ResultAlertDialog, type CompletionAction } from '../problems/[problemId]/FillInBlankBody';
-
 import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefetch';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
-import { Button, Heading, Link, Text, VStack } from '@/infrastructures/useClient/chakra';
+import { Heading, Link, Text, VStack } from '@/infrastructures/useClient/chakra';
 import type { ExerciseDisplay } from '@/problems/fillInBlank/exerciseProblem';
 import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
 import type { CourseId } from '@/problems/problemData';
 
+type Display = ExerciseDisplay | RegularChallengeDisplay;
 export const ChallengePageOnClient: React.FC = () => {
   const { courseId, lectureId } = useParams<{ courseId: CourseId; lectureId: string }>();
   const router = useRouter();
-  const [exercise, setExercise] = useImmer<ExerciseDisplay | undefined>(undefined);
-  const [noCandidates, setNoCandidates] = useState(false);
+  const [exercise, setExercise] = useState<Display>();
+  const [format, setFormat] = useState<ChallengeProblemFormat>();
+  const [emptyFormat, setEmptyFormat] = useState<ChallengeProblemFormat>();
   const [error, setError] = useState('');
-  const { mutateAsync: startExercise, isPending: isStarting } = backendTrpcReact.startExercise.useMutation();
+  const start = backendTrpcReact.startExercise.useMutation();
   const next = backendTrpcReact.nextExercise.useMutation();
-  const submit = backendTrpcReact.submitExercise.useMutation();
+  const submitBlank = backendTrpcReact.submitExercise.useMutation();
+  const submitRegular = backendTrpcReact.submitRegularExercise.useMutation();
+  const switchRegular = backendTrpcReact.switchRegularExerciseToStep.useMutation();
+  const back = (): void => router.push(`/courses/${courseId}/lectures/${lectureId}`);
 
-  useEffect(() => {
-    let active = true;
-    void startExercise({ courseId, lectureId })
-      .then((display) => {
-        if (active) {
-          if ('status' in display) setNoCandidates(true);
-          else setExercise(display);
-        }
-        return display;
-      })
-      .catch(() => {
-        if (active) setError('問題を取得できませんでした。');
-      });
-    return () => {
-      active = false;
-    };
-  }, [courseId, lectureId, startExercise, setExercise]);
-
-  const handleNext = async (): Promise<void> => {
-    if (!exercise) throw new Error('問題を取得できませんでした。もう一度お試しください。');
-    let display: ExerciseDisplay | { status: 'noProblems' };
+  const select = async (selected: ChallengeProblemFormat): Promise<void> => {
+    setError('');
+    setEmptyFormat(undefined);
     try {
-      display = await next.mutateAsync({ courseId, lectureId, sessionId: exercise.sessionId });
+      const display = await start.mutateAsync({ courseId, lectureId, problemFormat: selected });
+      if ('status' in display) setEmptyFormat(selected);
+      else {
+        setFormat(selected);
+        setExercise(display as Display);
+      }
     } catch {
-      throw new Error('次の問題を取得できませんでした。もう一度お試しください。');
+      setError('問題を取得できませんでした。');
     }
-    if ('status' in display) throw new Error('この授業回には現在出題できる問題がありません。');
-    setExercise(display);
   };
-
-  const completionActions: CompletionAction[] = [
-    { label: '次の問題へ', colorScheme: 'brand', onClick: handleNext },
-    {
-      label: '戻る',
-      onClick: () => router.push(`/courses/${courseId}/lectures/${lectureId}`),
-    },
+  const nextBlank = async (): Promise<void> => {
+    if (!exercise) throw new Error('問題を取得できませんでした。');
+    const display = await next.mutateAsync({
+      courseId,
+      lectureId,
+      sessionId: exercise.sessionId,
+      problemFormat: 'fillInBlank',
+    });
+    if ('status' in display) throw new Error('この授業回には現在出題できる問題がありません。');
+    setExercise(display as ExerciseDisplay);
+  };
+  const actions: CompletionAction[] = [
+    { label: '次の問題へ', colorScheme: 'brand', onClick: nextBlank },
+    { label: '戻る', onClick: back },
   ];
-
-  const gradeAnswers = async (answers: string[]): Promise<FillInBlankVerdict> => {
+  const gradeBlank = async (answers: string[]): Promise<FillInBlankVerdict> => {
     if (!exercise) throw new Error('No active exercise');
-    const result = await submit.mutateAsync({ courseId, lectureId, sessionId: exercise.sessionId, answers });
-    switch (result.status) {
-      case 'correct': {
-        return { status: 'correct' };
-      }
-      case 'incorrect': {
-        return { status: 'incorrect', detail: result.detail };
-      }
-      case 'ungradable': {
-        return { status: 'ungradable', detail: '' };
-      }
-    }
+    const result = await submitBlank.mutateAsync({ courseId, lectureId, sessionId: exercise.sessionId, answers });
+    return result.status === 'incorrect'
+      ? { status: 'incorrect', detail: result.detail }
+      : result.status === 'ungradable'
+        ? { status: 'ungradable', detail: '' }
+        : { status: 'correct' };
   };
 
   return (
@@ -89,45 +78,51 @@ export const ChallengePageOnClient: React.FC = () => {
           {error}
         </Text>
       )}
-      {noCandidates && !exercise && <Text>この授業回には現在出題できる問題がありません。授業回に戻ってください。</Text>}
-      {!exercise && !noCandidates && (
-        <Button
-          alignSelf="start"
-          isLoading={isStarting}
-          onClick={() => {
-            setError('');
-            void startExercise({ courseId, lectureId })
-              .then((display) => {
-                if ('status' in display) setNoCandidates(true);
-                else setExercise(display);
-                return display;
-              })
-              .catch(() => setError('問題を取得できませんでした。'));
-          }}
-        >
-          問題を取得
-        </Button>
+      {emptyFormat && (
+        <Text as="output">
+          {emptyFormat === 'regular' ? '実行結果・ステップ実行' : '穴埋め問題'}
+          は現在出題できません。別の形式を選んでください。
+        </Text>
       )}
-      {exercise?.completed && (
-        <ResultAlertDialog
-          actions={completionActions}
-          isOpen={true}
-          message="正解です！次の問題へ進めます。"
-          title="正解"
+      {!exercise && (
+        <ChallengeSelection courseId={courseId} lectureId={lectureId} isPending={start.isPending} onSelect={select} />
+      )}
+      {exercise && format === 'regular' && (
+        <RegularChallengeBody
+          courseId={courseId}
+          lectureId={lectureId}
+          display={exercise as RegularChallengeDisplay}
+          back={back}
+          transport={{
+            submit: async (input) => {
+              const value = await submitRegular.mutateAsync(input);
+              return { exercise: value, status: input.isCorrect ? 'correct' : 'incorrect' };
+            },
+            switchToStep: async ({ sessionId }) => await switchRegular.mutateAsync({ courseId, lectureId, sessionId }),
+            next: async ({ sessionId, problemFormat }) => {
+              const value = await next.mutateAsync({ courseId, lectureId, sessionId, problemFormat });
+              if ('status' in value || !('problemFormat' in value))
+                throw new Error('この授業回には現在出題できる問題がありません。');
+              return value;
+            },
+          }}
         />
       )}
-      {exercise && !exercise.completed && (
+      {exercise && format === 'fillInBlank' && exercise.completed && (
+        <ResultAlertDialog actions={actions} isOpen={true} message="正解です！次の問題へ進めます。" title="正解" />
+      )}
+      {exercise && format === 'fillInBlank' && !exercise.completed && (
         <FillInBlankBody
           key={exercise.sessionId}
           problem={{
-            displayProgram: exercise.displayProgram,
-            blankCount: exercise.blankCount,
-            finalBoard: exercise.expectedBoard,
-            finalTurtles: exercise.expectedTurtles,
-            finalVars: exercise.finalVars,
+            displayProgram: (exercise as ExerciseDisplay).displayProgram,
+            blankCount: (exercise as ExerciseDisplay).blankCount,
+            finalBoard: (exercise as ExerciseDisplay).expectedBoard,
+            finalTurtles: (exercise as ExerciseDisplay).expectedTurtles,
+            finalVars: (exercise as ExerciseDisplay).finalVars,
           }}
-          gradeAnswers={gradeAnswers}
-          completionActions={completionActions}
+          gradeAnswers={gradeBlank}
+          completionActions={actions}
           completionMessage="正解です！次の問題へ進めます。"
         />
       )}

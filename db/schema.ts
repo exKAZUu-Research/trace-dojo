@@ -1,5 +1,5 @@
 import { defineRelations, sql } from 'drizzle-orm';
-import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 const createdAt = () =>
   integer({ mode: 'timestamp_ms' })
@@ -84,6 +84,9 @@ export const exerciseSessions = sqliteTable(
     problemFormat: text().notNull(),
     problemId: text().notNull(),
     seed: text().notNull(),
+    problemType: text().notNull().default('executionResult'),
+    traceItemIndex: integer().notNull().default(0),
+    traceItemCount: integer(),
     completedAt: integer({ mode: 'timestamp_ms' }),
   },
   (table) => [
@@ -108,8 +111,16 @@ export const exerciseSubmissions = sqliteTable(
     answers: text().notNull(),
     status: text().notNull(),
     gradingStage: integer(),
+    problemType: text(),
+    traceItemIndex: integer(),
+    requestId: text(),
   },
-  (table) => [index('ExerciseSubmission_sessionId_idx').on(table.sessionId)]
+  (table) => [
+    index('ExerciseSubmission_sessionId_idx').on(table.sessionId),
+    uniqueIndex('ExerciseSubmission_sessionId_requestId_unique')
+      .on(table.sessionId, table.requestId)
+      .where(sql`${table.requestId} IS NOT NULL`),
+  ]
 );
 
 export const relations = defineRelations(
