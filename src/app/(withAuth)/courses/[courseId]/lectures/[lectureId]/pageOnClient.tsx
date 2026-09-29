@@ -5,6 +5,7 @@ import { useLocalStorage } from '@willbooster/shared-lib-react';
 import { useParams } from 'next/navigation';
 import { useEffect, useMemo } from 'react';
 import { MdCheckCircle, MdCheckCircleOutline, MdOutlineVerified, MdVerified } from 'react-icons/md';
+import { ChallengeModeButton } from './ChallengeModeButton';
 
 import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefetch';
 import { useAuthContextSelector } from '@/contexts/AuthContext';
@@ -27,7 +28,6 @@ import {
   Thead,
   Tr,
   VStack,
-  Button,
 } from '@/infrastructures/useClient/chakra';
 import type { CourseId } from '@/problems/problemData';
 import { courseIdToLectureIndexToProblemIds, courseIdToName, problemIdToName } from '@/problems/problemData';
@@ -82,14 +82,7 @@ export const Lecture: React.FC<Props> = (props) => {
           </CardHeader>
 
           <CardBody align="stretch" as={VStack} pb={2}>
-            <Button
-              as={NextLinkWithoutPrefetch}
-              colorScheme="brand"
-              href={`${params.lectureId}/challenge`}
-              alignSelf="start"
-            >
-              チャレンジモード
-            </Button>
+            <ChallengeModeButton courseId={params.courseId} lectureId={params.lectureId} />
             <Progress
               colorScheme="brand"
               max={lectureProblemIds.length}

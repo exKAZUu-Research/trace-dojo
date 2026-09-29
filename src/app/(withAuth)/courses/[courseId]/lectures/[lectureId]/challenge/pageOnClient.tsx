@@ -1,8 +1,9 @@
 'use client';
 
 import { useParams, useRouter } from 'next/navigation';
-import { useState } from 'react';
-import { ChallengeSelection, type ChallengeProblemFormat } from './ChallengeSelection';
+import { useEffect, useRef, useState } from 'react';
+import { type ChallengeProblemFormat } from './ChallengeSelection';
+import { ChallengeSelectionModal } from './ChallengeSelectionModal';
 import { RegularChallengeBody, type RegularChallengeDisplay } from './RegularChallengeBody';
 import { FillInBlankBody, ResultAlertDialog, type CompletionAction } from '../problems/[problemId]/FillInBlankBody';
 import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefetch';
@@ -13,33 +14,113 @@ import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
 import type { CourseId } from '@/problems/problemData';
 
 type Display = ExerciseDisplay | RegularChallengeDisplay;
-export const ChallengePageOnClient: React.FC = () => {
+interface Props {
+  initialFormat?: ChallengeProblemFormat;
+}
+
+export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
   const { courseId, lectureId } = useParams<{ courseId: CourseId; lectureId: string }>();
   const router = useRouter();
   const [exercise, setExercise] = useState<Display>();
-  const [format, setFormat] = useState<ChallengeProblemFormat>();
-  const [emptyFormat, setEmptyFormat] = useState<ChallengeProblemFormat>();
-  const [error, setError] = useState('');
-  const start = backendTrpcReact.startExercise.useMutation();
+  const [format, setFormat] = useState<ChallengeProblemFormat | undefined>(initialFormat);
+  const [retryGeneration, setRetryGeneration] = useState(0);
+  const [message, setMessage] = useState<{ text: string; role: 'alert' | 'status' }>();
+  const [isModalOpen, setIsModalOpen] = useState(!initialFormat);
+  const [isPending, setIsPending] = useState(false);
+  const pendingRef = useRef(false);
+  const requestRef = useRef<{ key: string; promise: Promise<Display | { status: 'noProblems' }> } | undefined>(
+    undefined
+  );
+  const activeRequestRef = useRef(0);
+  const previousInitialFormatRef = useRef(initialFormat);
+  const { mutateAsync: start } = backendTrpcReact.startExercise.useMutation();
   const next = backendTrpcReact.nextExercise.useMutation();
   const submitBlank = backendTrpcReact.submitExercise.useMutation();
   const submitRegular = backendTrpcReact.submitRegularExercise.useMutation();
   const switchRegular = backendTrpcReact.switchRegularExerciseToStep.useMutation();
   const back = (): void => router.push(`/courses/${courseId}/lectures/${lectureId}`);
 
-  const select = async (selected: ChallengeProblemFormat): Promise<void> => {
-    setError('');
-    setEmptyFormat(undefined);
-    try {
-      const display = await start.mutateAsync({ courseId, lectureId, problemFormat: selected });
-      if ('status' in display) setEmptyFormat(selected);
-      else {
-        setFormat(selected);
-        setExercise(display as Display);
-      }
-    } catch {
-      setError('問題を取得できませんでした。');
+  useEffect(() => {
+    if (initialFormat === previousInitialFormatRef.current) return;
+    previousInitialFormatRef.current = initialFormat;
+    if (initialFormat === format) return;
+    activeRequestRef.current += 1;
+    requestRef.current = undefined;
+    pendingRef.current = false;
+    // URL changes are external input and must reset the active challenge view.
+    // oxlint-disable-next-line react/set-state-in-effect -- synchronize client state with server search params
+    setIsPending(false);
+    setMessage(undefined);
+    setExercise(undefined);
+    setFormat(initialFormat);
+    setIsModalOpen(!initialFormat);
+  }, [format, initialFormat]);
+
+  useEffect(() => {
+    if (!format) return;
+    let cancelled = false;
+    const requestId = ++activeRequestRef.current;
+    const key = `${courseId}:${lectureId}:${format}:${retryGeneration}`;
+    if (requestRef.current?.key !== key) {
+      requestRef.current = {
+        key,
+        promise: start({ courseId, lectureId, problemFormat: format }) as Promise<Display | { status: 'noProblems' }>,
+      };
     }
+    pendingRef.current = true;
+    // Starting is an external request whose pending state is reflected in the modal.
+    // oxlint-disable-next-line react/set-state-in-effect -- synchronize UI with the active request
+    setIsPending(true);
+    const promise = requestRef.current.promise;
+    void promise
+      .then((display) => {
+        if (cancelled || activeRequestRef.current !== requestId) return display;
+        if ('status' in display) {
+          setMessage({
+            text: `${format === 'regular' ? '実行結果・ステップ実行' : '穴埋め問題'}は現在出題できません。別の形式を選んでください。`,
+            role: 'status',
+          });
+          setIsModalOpen(true);
+          return display;
+        }
+        setExercise(display);
+        setIsModalOpen(false);
+        return display;
+      })
+      .catch(() => {
+        if (cancelled || activeRequestRef.current !== requestId) return;
+        setMessage({ text: '問題を取得できませんでした。', role: 'alert' });
+        setIsModalOpen(true);
+      })
+      .finally(() => {
+        if (cancelled || activeRequestRef.current !== requestId) return;
+        pendingRef.current = false;
+        setIsPending(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [courseId, format, lectureId, retryGeneration, start]);
+
+  const select = (selected: ChallengeProblemFormat): void => {
+    if (pendingRef.current) return;
+    pendingRef.current = true;
+    setIsPending(true);
+    setMessage(undefined);
+    setExercise(undefined);
+    if (selected !== format) {
+      setFormat(selected);
+      router.push(`/courses/${courseId}/lectures/${lectureId}/challenge?format=${selected}`);
+    } else setRetryGeneration((generation) => generation + 1);
+  };
+  const closeSelection = (): void => {
+    activeRequestRef.current += 1;
+    requestRef.current = undefined;
+    pendingRef.current = false;
+    setIsPending(false);
+    setIsModalOpen(false);
+    setFormat(undefined);
+    back();
   };
   const nextBlank = async (): Promise<void> => {
     if (!exercise) throw new Error('問題を取得できませんでした。');
@@ -73,20 +154,14 @@ export const ChallengePageOnClient: React.FC = () => {
       </Link>
       <Heading as="h1">チャレンジモード</Heading>
       <Text color="gray.600">チャレンジの履歴は成績や通常課題の進捗には反映されません。</Text>
-      {error && (
-        <Text color="red.600" role="alert">
-          {error}
-        </Text>
-      )}
-      {emptyFormat && (
-        <Text as="output">
-          {emptyFormat === 'regular' ? '実行結果・ステップ実行' : '穴埋め問題'}
-          は現在出題できません。別の形式を選んでください。
-        </Text>
-      )}
-      {!exercise && (
-        <ChallengeSelection courseId={courseId} lectureId={lectureId} isPending={start.isPending} onSelect={select} />
-      )}
+      <ChallengeSelectionModal
+        isOpen={isModalOpen}
+        isPending={isPending}
+        message={message?.text}
+        messageRole={message?.role}
+        onClose={closeSelection}
+        onSelect={select}
+      />
       {exercise && format === 'regular' && (
         <RegularChallengeBody
           courseId={courseId}

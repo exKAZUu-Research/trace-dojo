@@ -19,8 +19,6 @@ test('mounts without starting, uses native buttons, and suppresses activation wh
     const [isPending, setIsPending] = useState(false);
     return (
       <ChallengeSelection
-        courseId="test"
-        lectureId="test"
         isPending={isPending}
         onSelect={async (format) => {
           setIsPending(true);
