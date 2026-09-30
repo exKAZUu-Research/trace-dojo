@@ -251,10 +251,9 @@ const createFromCandidates = (
   const problemId = candidates[Math.floor(Math.random() * candidates.length)];
   const seed = randomUUID();
   // Generate before inserting: a session whose problem cannot be generated would be resumed and fail forever.
-  if (format === 'regular') {
-    if (instantiateRegular(problemId, seed).traceItems.length <= 1)
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
-  } else instantiateBlank(problemId, seed);
+  const problem = format === 'regular' ? instantiateRegular(problemId, seed) : instantiateBlank(problemId, seed);
+  if (format === 'regular' && problem.traceItems.length <= 1)
+    throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Too few trace items: ${problemId}` });
   const row = db
     .insert(exerciseSessions)
     .values({
@@ -270,7 +269,7 @@ const createFromCandidates = (
     })
     .returning()
     .get();
-  return toDisplay(row, format);
+  return toDisplay(row, format, problem);
 };
 const instantiateRegular = (problemId: string, seed: string): InstantiatedProblem => {
   const problem = instantiateProblem(problemId, 'java', seed);
@@ -293,21 +292,26 @@ const toRegularDisplay = (row: ExerciseSession): RegularExerciseDisplay => ({
   traceItemIndex: row.traceItemIndex,
   completed: Boolean(row.completedAt),
 });
-const toDisplay = (row: ExerciseSession, format: ProblemFormat): ExerciseDisplay | RegularExerciseDisplay => {
+const toDisplay = (
+  row: ExerciseSession,
+  format: ProblemFormat,
+  problem?: InstantiatedProblem
+): ExerciseDisplay | RegularExerciseDisplay => {
   if (format === 'regular') {
     validateRegularState(row);
     return toRegularDisplay(row);
   }
-  const problem = instantiateBlank(row.problemId, row.seed);
+  const { displayProgram, blankAnswers, finalBoard, finalTurtles, finalVars } =
+    problem ?? instantiateBlank(row.problemId, row.seed);
   return {
     problemFormat: 'fillInBlank',
     sessionId: row.id,
     problemId: row.problemId,
-    displayProgram: problem.displayProgram,
-    blankCount: problem.blankAnswers.length,
-    finalBoard: problem.finalBoard,
-    finalTurtles: problem.finalTurtles,
-    finalVars: problem.finalVars,
+    displayProgram,
+    blankCount: blankAnswers.length,
+    finalBoard,
+    finalTurtles,
+    finalVars,
     completed: Boolean(row.completedAt),
   };
 };
