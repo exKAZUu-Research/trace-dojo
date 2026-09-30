@@ -4,7 +4,7 @@ import type { InstantiatedProblem } from '../instantiateProblem';
 import { SCOPE_ERROR_NAME, TRACE_BUDGET_EXCEEDED_MESSAGE, traceProgram } from '../traceProgram';
 import { logger } from '../../infrastructures/pino';
 
-import { extractBlanks, fillBlanks, normalizeAnswer } from './blanks';
+import { fillBlanks, normalizeAnswer } from './blanks';
 import type { JavaExecutor } from './javaExecutors';
 import { createJudgeExecutor, createWandboxExecutor } from './javaExecutors';
 import {
@@ -60,12 +60,7 @@ export async function gradeFillInBlankAnswers(
   // semantics for what it accepts, yet only javac can confirm that the answer is valid Java at all.
   const stage2Result = gradeByInstrumentedProgram(problem, answers);
   if (stage2Result?.status === 'incorrect') return stage2Result;
-  const javaResult = await gradeByJavaExecution(
-    problem.displayProgramTemplate,
-    { board: problem.finalBoard, turtles: problem.finalTurtles },
-    answers,
-    options?.javaExecutors ?? defaultJavaExecutors
-  );
+  const javaResult = await gradeByJavaExecution(problem, answers, options?.javaExecutors ?? defaultJavaExecutors);
   if (javaResult.status === 'ungradable' && stage2Result) {
     logger.warn('No Java executor was available; accepting the stage 2 verdict: %s', javaResult.detail);
     return stage2Result;
@@ -123,16 +118,12 @@ function stringifyVariables(variables: Record<string, unknown>): string {
   return JSON.stringify(entries.toSorted(([a], [b]) => a.localeCompare(b)));
 }
 
-export async function gradeByJavaExecution(
-  programTemplate: string,
-  expected: { board: string; turtles: InstantiatedProblem['finalTurtles'] },
+async function gradeByJavaExecution(
+  problem: InstantiatedProblem,
   answers: readonly string[],
-  executors: JavaExecutor[] = defaultJavaExecutors
+  executors: JavaExecutor[]
 ): Promise<FillInBlankGradingResult> {
-  if (answers.length !== extractBlanks(programTemplate).answers.length) {
-    return { status: 'incorrect', stage: 0, detail: 'The number of answers differs from the number of blanks.' };
-  }
-  const userProgram = fillBlanks(programTemplate, answers);
+  const userProgram = fillBlanks(problem.displayProgramTemplate, answers);
   const forbiddenPattern = findForbiddenJavaPattern(userProgram);
   if (forbiddenPattern) {
     return { status: 'incorrect', stage: 0, detail: `The program uses a forbidden feature: ${forbiddenPattern}` };
@@ -172,7 +163,7 @@ export async function gradeByJavaExecution(
         if (actual.exception) {
           return { status: 'incorrect', stage, detail: `The program threw an exception: ${actual.exception}` };
         }
-        return isSameTurtleState(expected, actual)
+        return isSameTurtleState({ board: problem.finalBoard, turtles: problem.finalTurtles }, actual)
           ? { status: 'correct', stage }
           : { status: 'incorrect', stage, detail: 'The final state differs from the expected one.' };
       }

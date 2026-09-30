@@ -1,9 +1,17 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "c3c565a7-8114-4f9b-a3ea-84da00e39eb4",
+  "id": "e8b3482a-c6da-4009-aaaa-4c0e307cfcc6",
   "prevIds": ["5517d569-2b2f-4a52-83d1-6f9e95bb4d8f"],
   "ddl": [
+    {
+      "name": "ExerciseSession",
+      "entityType": "tables"
+    },
+    {
+      "name": "ExerciseSubmission",
+      "entityType": "tables"
+    },
     {
       "name": "ProblemSession",
       "entityType": "tables"
@@ -15,6 +23,216 @@
     {
       "name": "User",
       "entityType": "tables"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": true,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "ExerciseSession"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "(unixepoch('subsec') * 1000)",
+      "generated": null,
+      "name": "createdAt",
+      "entityType": "columns",
+      "table": "ExerciseSession"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "userId",
+      "entityType": "columns",
+      "table": "ExerciseSession"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "courseId",
+      "entityType": "columns",
+      "table": "ExerciseSession"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "lectureId",
+      "entityType": "columns",
+      "table": "ExerciseSession"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "learningMode",
+      "entityType": "columns",
+      "table": "ExerciseSession"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "problemFormat",
+      "entityType": "columns",
+      "table": "ExerciseSession"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "problemId",
+      "entityType": "columns",
+      "table": "ExerciseSession"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "seed",
+      "entityType": "columns",
+      "table": "ExerciseSession"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'executionResult'",
+      "generated": null,
+      "name": "problemType",
+      "entityType": "columns",
+      "table": "ExerciseSession"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "traceItemIndex",
+      "entityType": "columns",
+      "table": "ExerciseSession"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "completedAt",
+      "entityType": "columns",
+      "table": "ExerciseSession"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": true,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "ExerciseSubmission"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "(unixepoch('subsec') * 1000)",
+      "generated": null,
+      "name": "createdAt",
+      "entityType": "columns",
+      "table": "ExerciseSubmission"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "sessionId",
+      "entityType": "columns",
+      "table": "ExerciseSubmission"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "answers",
+      "entityType": "columns",
+      "table": "ExerciseSubmission"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "ExerciseSubmission"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "gradingStage",
+      "entityType": "columns",
+      "table": "ExerciseSubmission"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "problemType",
+      "entityType": "columns",
+      "table": "ExerciseSubmission"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "traceItemIndex",
+      "entityType": "columns",
+      "table": "ExerciseSubmission"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "requestId",
+      "entityType": "columns",
+      "table": "ExerciseSubmission"
     },
     {
       "type": "integer",
@@ -273,6 +491,28 @@
       "onUpdate": "CASCADE",
       "onDelete": "RESTRICT",
       "nameExplicit": false,
+      "name": "fk_ExerciseSession_userId_User_id_fk",
+      "entityType": "fks",
+      "table": "ExerciseSession"
+    },
+    {
+      "columns": ["sessionId"],
+      "tableTo": "ExerciseSession",
+      "columnsTo": ["id"],
+      "onUpdate": "CASCADE",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
+      "name": "fk_ExerciseSubmission_sessionId_ExerciseSession_id_fk",
+      "entityType": "fks",
+      "table": "ExerciseSubmission"
+    },
+    {
+      "columns": ["userId"],
+      "tableTo": "User",
+      "columnsTo": ["id"],
+      "onUpdate": "CASCADE",
+      "onDelete": "RESTRICT",
+      "nameExplicit": false,
       "name": "fk_ProblemSession_userId_User_id_fk",
       "entityType": "fks",
       "table": "ProblemSession"
@@ -298,6 +538,20 @@
     {
       "columns": ["id"],
       "nameExplicit": false,
+      "name": "ExerciseSession_pk",
+      "table": "ExerciseSession",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
+      "name": "ExerciseSubmission_pk",
+      "table": "ExerciseSubmission",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["id"],
+      "nameExplicit": false,
       "name": "ProblemSession_pk",
       "table": "ProblemSession",
       "entityType": "pks"
@@ -308,254 +562,6 @@
       "name": "ProblemSubmission_pk",
       "table": "ProblemSubmission",
       "entityType": "pks"
-    },
-    {
-      "columns": [
-        {
-          "value": "userId",
-          "isExpression": false
-        },
-        {
-          "value": "courseId",
-          "isExpression": false
-        },
-        {
-          "value": "lectureId",
-          "isExpression": false
-        },
-        {
-          "value": "problemId",
-          "isExpression": false
-        },
-        {
-          "value": "completedAt",
-          "isExpression": false
-        }
-      ],
-      "isUnique": false,
-      "where": null,
-      "origin": "manual",
-      "name": "ProblemSession_userId_courseId_lectureId_problemId_completedAt_idx",
-      "entityType": "indexes",
-      "table": "ProblemSession"
-    },
-    {
-      "columns": [
-        {
-          "value": "sessionId",
-          "isExpression": false
-        }
-      ],
-      "isUnique": false,
-      "where": null,
-      "origin": "manual",
-      "name": "ProblemSubmission_sessionId_idx",
-      "entityType": "indexes",
-      "table": "ProblemSubmission"
-    },
-    {
-      "name": "ExerciseSession",
-      "entityType": "tables"
-    },
-    {
-      "type": "integer",
-      "notNull": false,
-      "autoincrement": true,
-      "default": null,
-      "generated": null,
-      "name": "id",
-      "entityType": "columns",
-      "table": "ExerciseSession"
-    },
-    {
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": "(unixepoch('subsec') * 1000)",
-      "generated": null,
-      "name": "createdAt",
-      "entityType": "columns",
-      "table": "ExerciseSession"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "userId",
-      "entityType": "columns",
-      "table": "ExerciseSession"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "courseId",
-      "entityType": "columns",
-      "table": "ExerciseSession"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "lectureId",
-      "entityType": "columns",
-      "table": "ExerciseSession"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "learningMode",
-      "entityType": "columns",
-      "table": "ExerciseSession"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "problemFormat",
-      "entityType": "columns",
-      "table": "ExerciseSession"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "problemId",
-      "entityType": "columns",
-      "table": "ExerciseSession"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "seed",
-      "entityType": "columns",
-      "table": "ExerciseSession"
-    },
-    {
-      "type": "integer",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "completedAt",
-      "entityType": "columns",
-      "table": "ExerciseSession"
-    },
-    {
-      "columns": ["id"],
-      "nameExplicit": false,
-      "name": "ExerciseSession_pk",
-      "entityType": "pks",
-      "table": "ExerciseSession"
-    },
-    {
-      "name": "ExerciseSubmission",
-      "entityType": "tables"
-    },
-    {
-      "type": "integer",
-      "notNull": false,
-      "autoincrement": true,
-      "default": null,
-      "generated": null,
-      "name": "id",
-      "entityType": "columns",
-      "table": "ExerciseSubmission"
-    },
-    {
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": "(unixepoch('subsec') * 1000)",
-      "generated": null,
-      "name": "createdAt",
-      "entityType": "columns",
-      "table": "ExerciseSubmission"
-    },
-    {
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "sessionId",
-      "entityType": "columns",
-      "table": "ExerciseSubmission"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "answers",
-      "entityType": "columns",
-      "table": "ExerciseSubmission"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "status",
-      "entityType": "columns",
-      "table": "ExerciseSubmission"
-    },
-    {
-      "type": "integer",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "gradingStage",
-      "entityType": "columns",
-      "table": "ExerciseSubmission"
-    },
-    {
-      "columns": ["id"],
-      "nameExplicit": false,
-      "name": "ExerciseSubmission_pk",
-      "entityType": "pks",
-      "table": "ExerciseSubmission"
-    },
-    {
-      "columns": ["userId"],
-      "tableTo": "User",
-      "columnsTo": ["id"],
-      "onUpdate": "CASCADE",
-      "onDelete": "RESTRICT",
-      "nameExplicit": false,
-      "name": "fk_ExerciseSession_userId_User_id_fk",
-      "entityType": "fks",
-      "table": "ExerciseSession"
-    },
-    {
-      "columns": ["sessionId"],
-      "tableTo": "ExerciseSession",
-      "columnsTo": ["id"],
-      "onUpdate": "CASCADE",
-      "onDelete": "RESTRICT",
-      "nameExplicit": false,
-      "name": "fk_ExerciseSubmission_sessionId_ExerciseSession_id_fk",
-      "entityType": "fks",
-      "table": "ExerciseSubmission"
     },
     {
       "columns": [
@@ -600,6 +606,68 @@
       "name": "ExerciseSubmission_sessionId_idx",
       "entityType": "indexes",
       "table": "ExerciseSubmission"
+    },
+    {
+      "columns": [
+        {
+          "value": "sessionId",
+          "isExpression": false
+        },
+        {
+          "value": "requestId",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": "\"ExerciseSubmission\".\"requestId\" IS NOT NULL",
+      "origin": "manual",
+      "name": "ExerciseSubmission_sessionId_requestId_unique",
+      "entityType": "indexes",
+      "table": "ExerciseSubmission"
+    },
+    {
+      "columns": [
+        {
+          "value": "userId",
+          "isExpression": false
+        },
+        {
+          "value": "courseId",
+          "isExpression": false
+        },
+        {
+          "value": "lectureId",
+          "isExpression": false
+        },
+        {
+          "value": "problemId",
+          "isExpression": false
+        },
+        {
+          "value": "completedAt",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "ProblemSession_userId_courseId_lectureId_problemId_completedAt_idx",
+      "entityType": "indexes",
+      "table": "ProblemSession"
+    },
+    {
+      "columns": [
+        {
+          "value": "sessionId",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "ProblemSubmission_sessionId_idx",
+      "entityType": "indexes",
+      "table": "ProblemSubmission"
     }
   ],
   "renames": []

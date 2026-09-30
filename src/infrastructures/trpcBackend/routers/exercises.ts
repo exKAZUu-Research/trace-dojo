@@ -196,13 +196,10 @@ const checkedLecture = (courseId: string, lectureId: string): void => {
 };
 const periodStart = (at = new Date()): Date | undefined => getLearningPeriodFilter(at).createdAt?.gte;
 const validateRegularState = (session: ExerciseSession): void => {
-  const count = session.traceItemCount;
   if (
-    !Number.isInteger(count) ||
-    (count ?? 0) <= 1 ||
     !(
       (session.problemType === 'executionResult' && session.traceItemIndex === 0) ||
-      (session.problemType === 'step' && session.traceItemIndex >= 1 && session.traceItemIndex < (count ?? 0))
+      (session.problemType === 'step' && session.traceItemIndex >= 1)
     )
   )
     throw new TRPCError({ code: 'CONFLICT' });
@@ -274,8 +271,8 @@ const createFromCandidates = (
   const candidates = configured.length > 1 ? configured.filter((id) => id !== previousId) : configured;
   const problemId = candidates[Math.floor(Math.random() * candidates.length)];
   const seed = randomUUID();
-  const traceItemCount = format === 'regular' ? instantiateRegular(problemId, seed).traceItems.length : undefined;
-  if (format === 'regular' && (traceItemCount ?? 0) <= 1) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+  if (format === 'regular' && instantiateRegular(problemId, seed).traceItems.length <= 1)
+    throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
   const row = db
     .insert(exerciseSessions)
     .values({
@@ -288,7 +285,6 @@ const createFromCandidates = (
       seed,
       problemType: 'executionResult',
       traceItemIndex: 0,
-      traceItemCount,
     })
     .returning()
     .get();
@@ -332,34 +328,29 @@ const toDisplay = (row: ExerciseSession, format: ProblemFormat): ExerciseDisplay
     completed: Boolean(row.completedAt),
   };
 };
-const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmissionSchema>): RegularExerciseDisplay => {
-  const session = ownedSession(input.sessionId, userId, input.courseId, input.lectureId, 'regular');
-  const previous = db
-    .select()
-    .from(exerciseSubmissions)
-    .where(and(eq(exerciseSubmissions.sessionId, input.sessionId), eq(exerciseSubmissions.requestId, input.requestId)))
-    .get();
-  if (previous) {
-    const event = z
-      .object({ kind: z.literal('regularVerdict'), isCorrect: z.boolean() })
-      .strict()
-      .parse(JSON.parse(previous.answers));
-    if (
-      previous.problemType !== input.context.problemType ||
-      previous.traceItemIndex !== input.context.traceItemIndex ||
-      event.isCorrect !== input.isCorrect
-    )
-      throw new TRPCError({ code: 'CONFLICT' });
-    return toRegularDisplay(session);
-  }
-  if (
-    session.completedAt ||
-    session.problemType !== input.context.problemType ||
-    session.traceItemIndex !== input.context.traceItemIndex
-  )
-    throw new TRPCError({ code: 'CONFLICT' });
-  return db.transaction((tx) => {
+const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmissionSchema>): RegularExerciseDisplay =>
+  db.transaction((tx) => {
     const current = ownedSession(input.sessionId, userId, input.courseId, input.lectureId, 'regular');
+    const previous = tx
+      .select()
+      .from(exerciseSubmissions)
+      .where(
+        and(eq(exerciseSubmissions.sessionId, input.sessionId), eq(exerciseSubmissions.requestId, input.requestId))
+      )
+      .get();
+    if (previous) {
+      const event = z
+        .object({ kind: z.literal('regularVerdict'), isCorrect: z.boolean() })
+        .strict()
+        .parse(JSON.parse(previous.answers));
+      if (
+        previous.problemType !== input.context.problemType ||
+        previous.traceItemIndex !== input.context.traceItemIndex ||
+        event.isCorrect !== input.isCorrect
+      )
+        throw new TRPCError({ code: 'CONFLICT' });
+      return toRegularDisplay(current);
+    }
     if (
       current.completedAt ||
       current.problemType !== input.context.problemType ||
@@ -378,8 +369,10 @@ const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmiss
       })
       .run();
     if (!input.isCorrect) return toRegularDisplay(current);
+    // The trace comes from the current definition, as the client's does, so an edited definition moves the final step.
     const completed =
-      current.problemType === 'executionResult' || current.traceItemIndex === current.traceItemCount! - 1;
+      current.problemType === 'executionResult' ||
+      current.traceItemIndex >= instantiateRegular(current.problemId, current.seed).traceItems.length - 1;
     const updated = tx
       .update(exerciseSessions)
       .set(completed ? { completedAt: new Date() } : { traceItemIndex: current.traceItemIndex + 1 })
@@ -389,7 +382,6 @@ const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmiss
     if (!updated) throw new TRPCError({ code: 'CONFLICT' });
     return toRegularDisplay(updated);
   });
-};
 const gradeAndSave = async (
   id: number,
   userId: string,

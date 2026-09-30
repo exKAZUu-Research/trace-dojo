@@ -405,7 +405,7 @@ test('normal fill-in-the-blank submissions never create exercise history', async
   expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSubmission').count).toBe(0);
 });
 
-test('creates and resumes regular and blank sessions independently with creation-time trace metadata', async () => {
+test('creates and resumes regular and blank sessions independently', async () => {
   const blank = await start();
   const regular = await startRegular();
   expect(await start()).toEqual(blank);
@@ -418,14 +418,12 @@ test('creates and resumes regular and blank sessions independently with creation
     traceItemIndex: 0,
     completed: false,
   });
-  const instantiated = instantiateProblem(regular.problemId, 'java', regular.seed as string);
-  if (!instantiated) throw new Error('stored regular problem must instantiate');
   expect(
     one(
-      z.object({ traceItemCount: z.number(), count: z.number() }),
-      "SELECT traceItemCount, COUNT(*) AS count FROM ExerciseSession WHERE problemFormat = 'regular'"
-    )
-  ).toEqual({ traceItemCount: instantiated.traceItems.length, count: 1 });
+      z.object({ count: z.number() }),
+      "SELECT COUNT(*) AS count FROM ExerciseSession WHERE problemFormat = 'regular'"
+    ).count
+  ).toBe(1);
   expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSession').count).toBe(2);
 });
 
@@ -493,7 +491,7 @@ test('keeps regular incorrect verdicts in execution-result mode and derives comp
   ]);
 });
 
-test('switches regular exercise one way, resumes step 1, then advances and completes by stored trace count', async () => {
+test('switches regular exercise one way, resumes step 1, then advances and completes at the final trace item', async () => {
   const regular = await startRegular();
   const switched = await regularCaller().switchRegularExerciseToStep({
     ...locationOnly(),
@@ -509,10 +507,9 @@ test('switches regular exercise one way, resumes step 1, then advances and compl
   while (!current.completed) {
     current = await submitRegular(current, `step-${current.traceItemIndex}`, true);
   }
-  const count = z
-    .object({ traceItemCount: z.number() })
-    .parse(sqlite.prepare('SELECT traceItemCount FROM ExerciseSession WHERE id = ?').get(regular.sessionId));
-  expect(current.traceItemIndex).toBe(count.traceItemCount - 1);
+  const instantiated = instantiateProblem(regular.problemId, 'java', regular.seed as string);
+  if (!instantiated) throw new Error('stored regular problem must instantiate');
+  expect(current.traceItemIndex).toBe(instantiated.traceItems.length - 1);
   await expect(
     regularCaller().switchRegularExerciseToStep({ ...locationOnly(), sessionId: regular.sessionId })
   ).rejects.toMatchObject({ code: 'CONFLICT' });
@@ -670,6 +667,18 @@ test('rejects cross-format and expired regular access without mutation', async (
   expect(exerciseRows()).toEqual(before);
 });
 
+test('completes a step session whose stored index is past the final trace item of the current definition', async () => {
+  const regular = await startRegular();
+  const instantiated = instantiateProblem(regular.problemId, 'java', regular.seed as string);
+  if (!instantiated) throw new Error('stored regular problem must instantiate');
+  // A definition edited to have fewer steps leaves an active session beyond the regenerated trace.
+  sqlite
+    .prepare("UPDATE ExerciseSession SET problemType = 'step', traceItemIndex = ? WHERE id = ?")
+    .run(instantiated.traceItems.length + 1, regular.sessionId);
+  const resumed = await startRegular();
+  expect(await submitRegular(resumed, 'past-final', true)).toMatchObject({ completed: true });
+});
+
 test('rejects switching blank, later-step, and corrupt regular states', async () => {
   const blank = await start();
   await expect(
@@ -683,7 +692,9 @@ test('rejects switching blank, later-step, and corrupt regular states', async ()
   await expect(
     regularCaller().switchRegularExerciseToStep({ ...locationOnly(), sessionId: regular.sessionId })
   ).rejects.toMatchObject({ code: 'CONFLICT' });
-  sqlite.prepare('UPDATE ExerciseSession SET traceItemIndex = traceItemCount WHERE id = ?').run(regular.sessionId);
+  sqlite
+    .prepare("UPDATE ExerciseSession SET problemType = 'executionResult', traceItemIndex = 1 WHERE id = ?")
+    .run(regular.sessionId);
   await expect(
     regularCaller().switchRegularExerciseToStep({ ...locationOnly(), sessionId: regular.sessionId })
   ).rejects.toMatchObject({ code: 'CONFLICT' });

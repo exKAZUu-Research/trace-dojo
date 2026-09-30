@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -110,96 +110,5 @@ test('requires a user ID in a freshly migrated database', () => {
     ]);
   } finally {
     sqlite.close();
-  }
-});
-
-test('additively upgrades legacy exercise rows and accepts both challenge formats', () => {
-  mkdirSync('.tmp', { recursive: true });
-  const directory = mkdtempSync(resolve('.tmp/exercise-migration-'));
-  const legacyMigrations = resolve(directory, 'legacy-migrations');
-  mkdirSync(legacyMigrations);
-  for (const entry of readdirSync('drizzle').filter((name) => name <= '20260916120000_exercise_sessions')) {
-    cpSync(resolve('drizzle', entry), resolve(legacyMigrations, entry), { recursive: true });
-  }
-  const sqlite = new DatabaseSync(resolve(directory, 'existing.sqlite3'));
-  try {
-    const db = drizzle({ client: sqlite });
-    migrate(db, { migrationsFolder: legacyMigrations });
-    sqlite.exec(`
-      INSERT INTO User (id, updatedAt, displayName) VALUES ('student', 0, 'Student');
-      INSERT INTO ExerciseSession
-        (id, userId, courseId, lectureId, learningMode, problemId, seed, problemFormat, completedAt)
-      VALUES (51, 'student', 'test', 'test', 'challenge', 'fillInBlank2', 'legacy-seed', 'fillInBlank', NULL);
-      INSERT INTO ExerciseSubmission (id, sessionId, answers, status, gradingStage)
-      VALUES (61, 51, '["x + 1"]', 'incorrect', 2);
-    `);
-
-    migrate(db, { migrationsFolder: 'drizzle' });
-    migrate(db, { migrationsFolder: 'drizzle' });
-
-    const legacySession = sqlite.prepare('SELECT * FROM ExerciseSession WHERE id = 51').get() as Record<
-      string,
-      unknown
-    >;
-    expect(legacySession).toMatchObject({
-      id: 51,
-      problemFormat: 'fillInBlank',
-      problemType: 'executionResult',
-      traceItemIndex: 0,
-      problemId: 'fillInBlank2',
-      seed: 'legacy-seed',
-    });
-    expect(legacySession.traceItemCount).toBeNull();
-    const legacySubmission = sqlite.prepare('SELECT * FROM ExerciseSubmission WHERE id = 61').get() as Record<
-      string,
-      unknown
-    >;
-    expect(legacySubmission).toMatchObject({
-      id: 61,
-      answers: '["x + 1"]',
-    });
-    expect(legacySubmission.problemType).toBeNull();
-    expect(legacySubmission.traceItemIndex).toBeNull();
-    expect(legacySubmission.requestId).toBeNull();
-    sqlite.exec(`
-      INSERT INTO ExerciseSession
-        (userId, courseId, lectureId, learningMode, problemId, seed, problemFormat, problemType, traceItemIndex, traceItemCount)
-      VALUES ('student', 'test', 'test', 'challenge', 'test1', 'new-seed', 'regular', 'step', 1, 4);
-      INSERT INTO ExerciseSubmission
-        (sessionId, answers, status, problemType, traceItemIndex, requestId)
-      VALUES (last_insert_rowid(), '{"kind":"regularVerdict","isCorrect":false}', 'incorrect', 'step', 1, 'request-1');
-    `);
-    const indexes = sqlite.prepare("PRAGMA index_list('ExerciseSubmission')").all() as {
-      name: string;
-      partial: number;
-    }[];
-    expect(indexes).toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: expect.stringMatching(/request/i), partial: 1 })])
-    );
-    expect(sqlite.prepare("SELECT traceItemCount FROM ExerciseSession WHERE problemFormat = 'regular'").get()).toEqual({
-      traceItemCount: 4,
-    });
-    expect(sqlite.prepare("SELECT answers FROM ExerciseSubmission WHERE requestId = 'request-1'").get()).toEqual({
-      answers: '{"kind":"regularVerdict","isCorrect":false}',
-    });
-    expect(() =>
-      sqlite.exec(`
-        INSERT INTO ExerciseSubmission (sessionId, answers, status, problemType, traceItemIndex, requestId)
-        VALUES ((SELECT id FROM ExerciseSession WHERE problemFormat = 'regular'), '{}', 'incorrect', 'step', 1, 'request-1')
-      `)
-    ).toThrow(/unique/i);
-    sqlite.exec(`
-      INSERT INTO ExerciseSubmission (sessionId, answers, status) VALUES (51, '["legacy-2"]', 'incorrect');
-      INSERT INTO ExerciseSubmission (sessionId, answers, status) VALUES (51, '["legacy-3"]', 'incorrect');
-    `);
-    expect(sqlite.prepare('SELECT answers FROM ExerciseSubmission WHERE sessionId = 51 ORDER BY id').all()).toEqual([
-      { answers: '["x + 1"]' },
-      { answers: '["legacy-2"]' },
-      { answers: '["legacy-3"]' },
-    ]);
-    expect(sqlite.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-  } finally {
-    sqlite.close();
-    rmSync(directory, { recursive: true, force: true });
   }
 });
