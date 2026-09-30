@@ -51,6 +51,15 @@ test('uses the real editor local grader and sends only verdict with stored conte
   expect(payload).not.toHaveProperty('variables');
 });
 
+test('Enter activates the focused completion action instead of being taken by the board shortcut', async () => {
+  const back = vi.fn();
+  const user = userEvent.setup();
+  renderBody({ display: { ...executionDisplay, completed: true }, back });
+  await waitFor(() => expect(screen.getByRole('button', { name: '終わる' })).toHaveFocus());
+  await user.keyboard('{Enter}');
+  expect(back).toHaveBeenCalledTimes(1);
+});
+
 test('ignores Enter while a result dialog is open', async () => {
   const user = userEvent.setup();
   const submit = vi.fn<RegularChallengeTransport['submit']>().mockResolvedValue(executionDisplay);
