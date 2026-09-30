@@ -106,9 +106,8 @@ test('renders the normal step instruction with concrete current and previous lin
     </ChakraProvider>
   );
   expect(screen.getByText('ステップ実行モード')).toBeVisible();
-  expect(screen.getByText(/画面下部にある/)).toHaveTextContent(/\d+行目.*実行した後の盤面と変数の一覧表を参考に/);
   expect(screen.getByText(/画面下部にある/)).toHaveTextContent(
-    /\d+行目.*実行した後の盤面と、変数に記録されている値の一覧表/
+    '画面下部にある3行目を実行した後の盤面と変数の一覧表を参考に、5行目を実行した後の盤面と、変数に記録されている値の一覧表を作成し、提出ボタンを押してください。'
   );
 });
 
