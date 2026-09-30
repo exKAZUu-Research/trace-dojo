@@ -7,6 +7,7 @@ import { ChallengeSelectionModal } from './ChallengeSelectionModal';
 import { RegularChallengeBody } from './RegularChallengeBody';
 import { FillInBlankBody } from '../problems/[problemId]/FillInBlankBody';
 import { ProblemPageHeader } from '../problems/[problemId]/ProblemPageHeader';
+import { ReloadNotice } from '../problems/[problemId]/ReloadNotice';
 import type { CompletionAction } from '../problems/[problemId]/ResultAlertDialog';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
 import { VStack } from '@/infrastructures/useClient/chakra';
@@ -14,6 +15,7 @@ import type { ExerciseDisplay } from '@/problems/fillInBlank/exerciseProblem';
 import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
+import { isChallengeSessionStale } from '@/utils/problemSessionError';
 
 type Display = ExerciseDisplay | RegularExerciseDisplay;
 interface Props {
@@ -29,6 +31,7 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
   const [message, setMessage] = useState<{ text: string; role: 'alert' | 'status' }>();
   const [isModalOpen, setIsModalOpen] = useState(!initialFormat);
   const [isPending, setIsPending] = useState(false);
+  const [isSessionStale, setIsSessionStale] = useState(false);
   const pendingRef = useRef(false);
   const requestRef = useRef<{ key: string; promise: Promise<Display | { status: 'noProblems' }> } | undefined>(
     undefined
@@ -124,14 +127,19 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
     setFormat(undefined);
     back();
   };
+  const detectStaleSession = async <T,>(request: Promise<T>): Promise<T> => {
+    try {
+      return await request;
+    } catch (error) {
+      if (isChallengeSessionStale(error)) setIsSessionStale(true);
+      throw error;
+    }
+  };
   const nextBlank = async (): Promise<void> => {
     if (!exercise) throw new Error('問題を取得できませんでした。');
-    const display = await next.mutateAsync({
-      courseId,
-      lectureId,
-      sessionId: exercise.sessionId,
-      problemFormat: 'fillInBlank',
-    });
+    const display = await detectStaleSession(
+      next.mutateAsync({ courseId, lectureId, sessionId: exercise.sessionId, problemFormat: 'fillInBlank' })
+    );
     if ('status' in display) throw new Error('この授業回には現在出題できる問題がありません。');
     setExercise(display as ExerciseDisplay);
   };
@@ -141,8 +149,19 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
   ];
   const gradeBlank = async (answers: string[]): Promise<FillInBlankVerdict> => {
     if (!exercise) throw new Error('No active exercise');
-    return await submitBlank.mutateAsync({ courseId, lectureId, sessionId: exercise.sessionId, answers });
+    return await detectStaleSession(
+      submitBlank.mutateAsync({ courseId, lectureId, sessionId: exercise.sessionId, answers })
+    );
   };
+
+  if (isSessionStale) {
+    return (
+      <ReloadNotice
+        message="学習期間が切り替わったか、別の画面で問題が進みました。ページを再読み込みして続きから解いてください。"
+        title="問題の進み具合が画面と一致しません"
+      />
+    );
+  }
 
   return (
     <VStack align="stretch" spacing={5}>
@@ -162,10 +181,13 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
           display={exercise as RegularExerciseDisplay}
           back={back}
           transport={{
-            submit: async (input) => await submitRegular.mutateAsync(input),
-            switchToStep: async ({ sessionId }) => await switchRegular.mutateAsync({ courseId, lectureId, sessionId }),
+            submit: async (input) => await detectStaleSession(submitRegular.mutateAsync(input)),
+            switchToStep: async ({ sessionId }) =>
+              await detectStaleSession(switchRegular.mutateAsync({ courseId, lectureId, sessionId })),
             next: async ({ sessionId, problemFormat }) => {
-              const value = await next.mutateAsync({ courseId, lectureId, sessionId, problemFormat });
+              const value = await detectStaleSession(
+                next.mutateAsync({ courseId, lectureId, sessionId, problemFormat })
+              );
               if ('status' in value || !('problemFormat' in value))
                 throw new Error('この授業回には現在出題できる問題がありません。');
               return value;

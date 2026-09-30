@@ -1,8 +1,6 @@
 'use client';
 
-import { TRPCClientError } from '@trpc/client';
 import { useMemo, useRef, useState } from 'react';
-import { z } from 'zod';
 import { ProblemPageHeader } from '../problems/[problemId]/ProblemPageHeader';
 import {
   deriveRegularProblemView,
@@ -44,8 +42,6 @@ interface Props {
   transport: RegularChallengeTransport;
   back: () => void;
 }
-
-const STALE_SESSION_MESSAGE = 'この問題の進み具合が画面と一致しません。ページを再読み込みしてください。';
 
 export const RegularChallengeBody: React.FC<Props> = ({
   courseId,
@@ -106,12 +102,7 @@ export const RegularChallengeBody: React.FC<Props> = ({
       }
       setDisplay(result);
       if (!result.completed) setAlert({ title: '正解', message: '正解です。次のステップに進みます。' });
-    } catch (error) {
-      if (isStaleSessionError(error)) {
-        request.current = undefined;
-        setAlert({ title: '提出できませんでした', message: STALE_SESSION_MESSAGE });
-        return;
-      }
+    } catch {
       setAlert({ title: '提出できませんでした', message: '通信に失敗しました。もう一度提出してください。' });
     }
   };
@@ -122,11 +113,9 @@ export const RegularChallengeBody: React.FC<Props> = ({
       setDisplay(next);
       setSwitchOpen(false);
       setError('');
-    } catch (error) {
+    } catch {
       setSwitchOpen(false);
-      setError(
-        isStaleSessionError(error) ? STALE_SESSION_MESSAGE : '切り替えに失敗しました。下書きは保持されています。'
-      );
+      setError('切り替えに失敗しました。下書きは保持されています。');
     }
   };
   const nextProblem = async (): Promise<void> => {
@@ -214,13 +203,4 @@ export const RegularChallengeBody: React.FC<Props> = ({
       </AlertDialog>
     </>
   );
-};
-
-const staleSessionErrorCodes = new Set(['CONFLICT', 'NOT_FOUND', 'UNAUTHORIZED']);
-
-/** The server refuses these on session state (completed, advanced, or expired), so retrying the same view cannot succeed. */
-const isStaleSessionError = (error: unknown): boolean => {
-  if (!(error instanceof TRPCClientError)) return false;
-  const data = z.object({ code: z.string() }).safeParse(error.data);
-  return data.success && staleSessionErrorCodes.has(data.data.code);
 };

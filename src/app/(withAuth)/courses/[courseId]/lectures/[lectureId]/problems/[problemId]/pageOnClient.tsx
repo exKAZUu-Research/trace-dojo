@@ -8,6 +8,7 @@ import { useIdleTimer } from 'react-idle-timer';
 import { FillInBlankBody } from './FillInBlankBody';
 import { ProblemBody } from './ProblmBody';
 import { ProblemPageHeader } from './ProblemPageHeader';
+import { ReloadNotice } from './ReloadNotice';
 
 import {
   DEFAULT_LANGUAGE_ID,
@@ -16,7 +17,7 @@ import {
 } from '@/constants';
 import { useAuthContextSelector } from '@/contexts/AuthContext';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
-import { Button, Heading, HStack, Text, Tooltip, VStack } from '@/infrastructures/useClient/chakra';
+import { Button, HStack, Tooltip, VStack } from '@/infrastructures/useClient/chakra';
 import type { FillInBlankGradingResult } from '@/problems/fillInBlank/grade';
 import { instantiateProblem } from '@/problems/instantiateProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
@@ -105,13 +106,10 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
 
   if (isSessionExpired) {
     return (
-      <VStack align="stretch" role="alert" spacing={4}>
-        <Heading size="md">学習セッションの有効期限が切れました</Heading>
-        <Text>ページを再読み込みして、現在の学習期間の問題を開いてください。</Text>
-        <Button alignSelf="start" colorScheme="brand" onClick={() => globalThis.location.reload()}>
-          ページを再読み込み
-        </Button>
-      </VStack>
+      <ReloadNotice
+        message="ページを再読み込みして、現在の学習期間の問題を開いてください。"
+        title="学習セッションの有効期限が切れました"
+      />
     );
   }
 

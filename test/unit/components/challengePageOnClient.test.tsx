@@ -196,6 +196,31 @@ test('an empty regular format can recover by choosing fill-in-blank', async () =
   });
 });
 
+test('a regular submission refused on a stale session state replaces the exercise with a reload notice', async () => {
+  transport.start.mockResolvedValue(regularDisplay);
+  transport.submitRegular.mockRejectedValue({ data: { code: 'CONFLICT' } });
+  const user = userEvent.setup();
+  renderPage('regular');
+  const inputs = await screen.findAllByRole('textbox');
+  for (const [input, value] of inputs.map((input, index) => [input, ['2', '2', '4'][index]] as const)) {
+    await user.type(input, value);
+  }
+  await user.click(screen.getByRole('button', { name: /提出/ }));
+  expect(await screen.findByRole('button', { name: 'ページを再読み込み' })).toBeVisible();
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+}, 15_000);
+
+test('a fill-in-blank submission in an expired learning period shows a reload notice instead of a retry', async () => {
+  transport.start.mockResolvedValue(blankDisplay);
+  transport.submitBlank.mockRejectedValue({ data: { code: 'NOT_FOUND' } });
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  await user.type(await screen.findByRole('textbox', { name: '空欄【1】' }), 'x + 1');
+  await user.click(screen.getByRole('button', { name: /提出/ }));
+  expect(await screen.findByRole('button', { name: 'ページを再読み込み' })).toBeVisible();
+  expect(screen.queryByText(/もう一度提出してください/)).not.toBeInTheDocument();
+});
+
 test('completed fill-in-blank next keeps the active format and renders the returned exercise', async () => {
   transport.start.mockResolvedValue({ ...blankDisplay, completed: true });
   transport.next.mockResolvedValue({ ...blankDisplay, sessionId: 24 });
