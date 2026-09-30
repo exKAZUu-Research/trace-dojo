@@ -3,21 +3,21 @@ import type { LanguageId } from '../problemData';
 export const challengeFillInBlankProblemDefinitions = {
   straightBlank: {
     java: 'public class Main {\n    public static void main(String[] args) {\n        Turtle 亀 = new Turtle(); // step\n        @[亀.前に進む();]@ // step\n        亀.前に進む(); // step\n    }\n}',
-    instrumented: 'const t = new Turtle(); // step\n@[t.forward();]@\nt.forward();',
+    instrumented: 'const 亀 = new Turtle(); // step\n@[亀.forward();]@\n亀.forward();',
   },
   straightSecondBlank: {
     java: 'public class Main {\n    public static void main(String[] args) {\n        Turtle 亀 = new Turtle(); // step\n        亀.前に進む(); // step\n        @[亀.前に進む();]@ // step\n    }\n}',
-    instrumented: 'const t = new Turtle(); // step\nt.forward();\n@[t.forward();]@',
+    instrumented: 'const 亀 = new Turtle(); // step\n亀.forward();\n@[亀.forward();]@',
   },
   square1Blank: {
     java: 'public class Main {\n    public static void main(String[] args) {\n        Turtle 亀 = new Turtle(); // step\n        亀.前に進む(); // step\n        @[亀.右を向く();]@ // step\n        亀.前に進む(); // step\n        亀.右を向く(); // step\n        亀.前に進む(); // step\n    }\n}',
     instrumented:
-      'const t = new Turtle(); // step\nt.forward();\n@[t.turnRight();]@\nt.forward();\nt.turnRight();\nt.forward();',
+      'const 亀 = new Turtle(); // step\n亀.forward();\n@[亀.turnRight();]@\n亀.forward();\n亀.turnRight();\n亀.forward();',
   },
   while1Blank: {
     java: 'public class Main {\n    public static void main(String[] args) {\n        Turtle 亀 = new Turtle(); // step\n        int i = 0; // step\n        while (i < <3-5>) {\n            亀.前に進む(); // step\n            @[i++;]@ // step\n        }\n    }\n}',
     instrumented:
-      "const t = new Turtle(); // step\ns.set('i', 0);\nwhile (s.get('i') < <3-5>) {\n  t.forward();\n  @[s.set('i', s.get('i') + 1);]@\n}",
+      "const 亀 = new Turtle(); // step\ns.set('i', 0);\nwhile (s.get('i') < <3-5>) {\n  亀.forward();\n  @[s.set('i', s.get('i') + 1);]@\n}",
   },
   doubleLoop1Blank: {
     java: 'public class Main {\n    public static void main(String[] args) {\n        Turtle t = new Turtle(); // step\n        for (int i = 0; i < <2-3>; i++) { // step\n            for (int j = 0; j < <2-3>; j++) { // step\n                t.前に進む(); // step\n            }\n            @[t.右を向く();]@ // step\n        }\n    }\n}',
@@ -81,7 +81,7 @@ export const challengeFillInBlankProblemDefinitions = {
   },
   test1Blank: {
     java: 'public class Main {\n  public static void main(String[] args) {\n    Turtle c = new Turtle(); // step\n    @[c.forward();]@ // step\n    c.forward(); // step\n    c.forward(); // step\n  }\n}',
-    instrumented: 'const t = new Turtle(); // step\n@[t.forward();]@\nt.forward();\nt.forward();',
+    instrumented: 'const c = new Turtle(); // step\n@[c.forward();]@\nc.forward();\nc.forward();',
   },
   overload1Blank: {
     java: 'public class Main {\n  public static void main(String[] args) {\n    CurveTurtle t = new CurveTurtle(); // caller\n    @[t.drawCurve();]@ // caller\n  }\n}\nclass MyTurtle {\n  Turtle t = new Turtle(); // step\n  void drawLine(int steps) {\n    for (int i = 0; i < steps; i++) // step\n      this.t.前に進む(); // step\n  }\n  void drawLine() {\n    this.drawLine(2); // caller\n  }\n}\nclass CurveTurtle extends MyTurtle {\n  void drawCurve() {\n    this.drawLine(3); // caller\n    this.t.右を向く(); // step\n    this.drawLine(); // caller\n  }\n}',

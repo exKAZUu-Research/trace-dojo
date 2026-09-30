@@ -39,7 +39,7 @@ interface SubmitInput {
   isCorrect: boolean;
 }
 export interface RegularChallengeTransport {
-  submit: (input: SubmitInput) => Promise<{ exercise: RegularChallengeDisplay; status: string }>;
+  submit: (input: SubmitInput) => Promise<RegularChallengeDisplay>;
   switchToStep: (input: { sessionId: number }) => Promise<RegularChallengeDisplay>;
   next: (input: { sessionId: number; problemFormat: 'regular' }) => Promise<RegularChallengeDisplay>;
 }
@@ -59,7 +59,7 @@ export const RegularChallengeBody: React.FC<Props> = ({
   back,
 }) => {
   const [display, setDisplay] = useState(initialDisplay);
-  const [alert, setAlert] = useState<{ title: string; message: string; after?: () => void }>();
+  const [alert, setAlert] = useState<{ title: string; message: string }>();
   const [switchOpen, setSwitchOpen] = useState(false);
   const [error, setError] = useState('');
   const request = useRef<{ context: string; id: string } | undefined>(undefined);
@@ -75,8 +75,15 @@ export const RegularChallengeBody: React.FC<Props> = ({
     [problem, display.problemType, display.traceItemIndex]
   );
   const { currentTraceItemIndex: currentIndex, previousTraceItemIndex: previousIndex } = view;
-  const [viewingIndex, setViewingIndex] = useState(previousIndex);
   const contextKey = `${display.sessionId}:${display.problemId}:${display.seed}:${display.problemType}:${currentIndex}`;
+  // A viewing position chosen for an earlier step or problem falls back to the current step's previous trace item.
+  const [viewing, setViewing] = useState({ contextKey, index: previousIndex });
+  const viewingIndex = viewing.contextKey === contextKey ? viewing.index : previousIndex;
+  const setViewingIndex: React.Dispatch<React.SetStateAction<number>> = (action) =>
+    setViewing((prev) => {
+      const index = prev.contextKey === contextKey ? prev.index : previousIndex;
+      return { contextKey, index: typeof action === 'function' ? action(index) : action };
+    });
 
   const submit = async (): Promise<void> => {
     if (display.completed || !editor.current) return;
@@ -101,9 +108,8 @@ export const RegularChallengeBody: React.FC<Props> = ({
         });
         return;
       }
-      setViewingIndex(result.exercise.problemType === 'executionResult' ? 0 : result.exercise.traceItemIndex - 1);
-      setDisplay(result.exercise);
-      if (!result.exercise.completed) setAlert({ title: '正解', message: '正解です。次のステップに進みます。' });
+      setDisplay(result);
+      if (!result.completed) setAlert({ title: '正解', message: '正解です。次のステップに進みます。' });
     } catch {
       setAlert({ title: '提出できませんでした', message: '通信に失敗しました。もう一度提出してください。' });
     }
@@ -112,7 +118,6 @@ export const RegularChallengeBody: React.FC<Props> = ({
     if (display.completed) return;
     try {
       const next = await transport.switchToStep({ sessionId: display.sessionId });
-      setViewingIndex(0);
       setDisplay(next);
       setSwitchOpen(false);
       setError('');
@@ -123,10 +128,8 @@ export const RegularChallengeBody: React.FC<Props> = ({
   };
   const nextProblem = async (): Promise<void> => {
     const next = await transport.next({ sessionId: display.sessionId, problemFormat: 'regular' });
-    const nextProblemValue = instantiateProblem(next.problemId as ProblemId, 'java', next.seed);
-    if (!nextProblemValue) throw new Error('問題を取得できませんでした。');
-    const nextView = deriveRegularProblemView(nextProblemValue, next.problemType, next.traceItemIndex);
-    setViewingIndex(nextView.previousTraceItemIndex);
+    if (!instantiateProblem(next.problemId as ProblemId, 'java', next.seed))
+      throw new Error('問題を取得できませんでした。');
     setAlert(undefined);
     setSwitchOpen(false);
     setError('');
@@ -177,7 +180,6 @@ export const RegularChallengeBody: React.FC<Props> = ({
         message={alert?.message ?? ''}
         title={alert?.title ?? ''}
         onClose={() => {
-          alert?.after?.();
           setAlert(undefined);
         }}
       />

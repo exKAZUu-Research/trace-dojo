@@ -5,8 +5,8 @@ export interface ExerciseDisplay {
   problemId: string;
   displayProgram: string;
   blankCount: number;
-  expectedBoard: string;
-  expectedTurtles: TurtleTrace[];
+  finalBoard: string;
+  finalTurtles: TurtleTrace[];
   finalVars: TraceItemVariable;
   completed: boolean;
 }

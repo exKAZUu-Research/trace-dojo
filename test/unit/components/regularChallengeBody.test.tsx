@@ -23,10 +23,7 @@ const executionDisplay: RegularChallengeDisplay = {
 
 test('uses the real editor local grader and sends only verdict with stored context', async () => {
   const user = userEvent.setup();
-  const submit = vi.fn<RegularChallengeTransport['submit']>().mockImplementation(async (input) => ({
-    exercise: executionDisplay,
-    status: input.isCorrect ? 'correct' : 'incorrect',
-  }));
+  const submit = vi.fn<RegularChallengeTransport['submit']>().mockResolvedValue(executionDisplay);
   renderBody({ submit });
 
   const problemCard = getProblemCard();
@@ -56,9 +53,7 @@ test('uses the real editor local grader and sends only verdict with stored conte
 
 test('keeps an incorrect draft mounted across repeated attempts and never switches automatically', async () => {
   const user = userEvent.setup();
-  const submit = vi
-    .fn<RegularChallengeTransport['submit']>()
-    .mockResolvedValue({ exercise: executionDisplay, status: 'incorrect' });
+  const submit = vi.fn<RegularChallengeTransport['submit']>().mockResolvedValue(executionDisplay);
   const switchToStep = vi.fn();
   renderBody({ submit, switchToStep });
   const inputs = screen.getAllByRole('textbox');
@@ -139,9 +134,7 @@ test('locally grades a correct non-final step and resets to the authoritative ne
   const user = userEvent.setup();
   const stepOne = { ...executionDisplay, problemType: 'step' as const, traceItemIndex: 1 };
   const stepTwo = { ...stepOne, traceItemIndex: 2 };
-  const submit = vi
-    .fn<RegularChallengeTransport['submit']>()
-    .mockResolvedValue({ exercise: stepTwo, status: 'correct' });
+  const submit = vi.fn<RegularChallengeTransport['submit']>().mockResolvedValue(stepTwo);
   renderBody({ display: stepOne, submit });
   await user.type(screen.getByRole('textbox'), '1');
   await user.click(screen.getByRole('button', { name: /提出/ }));
@@ -159,9 +152,7 @@ test('locally grades the final step and exposes completion actions', async () =>
   const user = userEvent.setup();
   const finalStep = { ...executionDisplay, problemType: 'step' as const, traceItemIndex: 5 };
   const completed = { ...finalStep, completed: true };
-  const submit = vi
-    .fn<RegularChallengeTransport['submit']>()
-    .mockResolvedValue({ exercise: completed, status: 'correct' });
+  const submit = vi.fn<RegularChallengeTransport['submit']>().mockResolvedValue(completed);
   renderBody({ display: finalStep, submit });
   const problemCard = getProblemCard();
   expect(problemCard).toHaveTextContent(
@@ -207,9 +198,7 @@ test('deduplicates synchronous Back and resets the action guard for a later comp
   const nextDisplay = { ...executionDisplay, sessionId: 18 };
   const completedNextDisplay = { ...nextDisplay, completed: true };
   const next = vi.fn(async () => nextDisplay);
-  const submit = vi
-    .fn<RegularChallengeTransport['submit']>()
-    .mockResolvedValue({ exercise: completedNextDisplay, status: 'correct' });
+  const submit = vi.fn<RegularChallengeTransport['submit']>().mockResolvedValue(completedNextDisplay);
   const back = vi.fn();
   const user = userEvent.setup();
   renderBody({ display: { ...executionDisplay, completed: true }, next, submit, back });
@@ -246,7 +235,7 @@ const renderBody = (
   overrides: Partial<RegularChallengeTransport> & { display?: RegularChallengeDisplay; back?: () => void }
 ): ReturnType<typeof render> => {
   const transport: RegularChallengeTransport = {
-    submit: async () => ({ exercise: executionDisplay, status: 'incorrect' }),
+    submit: async () => executionDisplay,
     switchToStep: async () => ({ ...executionDisplay, problemType: 'step', traceItemIndex: 1 }),
     next: async () => executionDisplay,
     ...overrides,

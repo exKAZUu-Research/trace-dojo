@@ -385,7 +385,7 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
   ],
 };
 
-export const courseIdToLectureIndexToExerciseProblemIds: Record<string, string[][]> = {
+export const courseIdToLectureIndexToExerciseProblemIds: Record<CourseId, ProblemId[][]> = {
   tuBeginner1: [
     ['straightBlank', 'straightSecondBlank'],
     ['square1Blank'],

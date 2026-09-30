@@ -35,8 +35,8 @@ const blankDisplay = {
   problemId: 'fillInBlank2',
   displayProgram: 'class Main { int x = 【1】; }',
   blankCount: 1,
-  expectedBoard: '.......\n.......\n.......\n.......\n.......\n.......\n.......',
-  expectedTurtles: [],
+  finalBoard: '.......\n.......\n.......\n.......\n.......\n.......\n.......',
+  finalTurtles: [],
   finalVars: {},
   completed: false,
 };

@@ -116,8 +116,8 @@ test('stores identity and seed without snapshots, then regenerates a safe DTO', 
     'programTemplate',
     'displayProgram',
     'blankCount',
-    'expectedBoard',
-    'expectedTurtles',
+    'finalBoard',
+    'finalTurtles',
     'finalVars',
   ]) {
     expect(names.has(forbidden)).toBe(false);
@@ -146,8 +146,8 @@ test('stores identity and seed without snapshots, then regenerates a safe DTO', 
       'blankCount',
       'completed',
       'displayProgram',
-      'expectedBoard',
-      'expectedTurtles',
+      'finalBoard',
+      'finalTurtles',
       'finalVars',
       'problemId',
       'sessionId',
@@ -174,6 +174,11 @@ test('uses explicit challenge membership and distinguishes empty and invalid con
   });
   challengeMap.test = [['notRegistered']];
   await expect(caller.startExercise(locationOnly())).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
+  challengeMap.test = [['test1']];
+  await expect(caller.startExercise(locationOnly())).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
+  expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSession').count).toBe(0);
+  challengeMap.test = [['fillInBlank2']];
+  expect(await start()).toMatchObject({ problemId: 'fillInBlank2', completed: false });
 });
 
 test('normal and challenge boundaries share variable-sensitive grading', async () => {

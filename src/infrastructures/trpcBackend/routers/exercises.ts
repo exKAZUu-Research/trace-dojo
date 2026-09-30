@@ -17,7 +17,6 @@ import {
   courseIdToLectureIndexToProblemIds,
   problemIdToLanguageIdToProgram,
   type CourseId,
-  type ProblemId,
 } from '@/problems/problemData';
 
 type ProblemFormat = 'fillInBlank' | 'regular';
@@ -230,12 +229,15 @@ const candidatesFor = (courseId: string, lectureId: string, format: ProblemForma
   const lectureIndex = courseIdToLectureIds[courseId as CourseId].indexOf(lectureId);
   const configured =
     format === 'fillInBlank'
-      ? courseIdToLectureIndexToExerciseProblemIds[courseId]?.[lectureIndex]
+      ? courseIdToLectureIndexToExerciseProblemIds[courseId as CourseId]?.[lectureIndex]
       : courseIdToLectureIndexToProblemIds[courseId as CourseId]?.[lectureIndex];
   if (!configured) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Missing challenge configuration' });
-  for (const id of configured)
-    if (!problemIdToLanguageIdToProgram[id as ProblemId])
+  for (const id of configured) {
+    if (!problemIdToLanguageIdToProgram[id])
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Unknown challenge problem: ${id}` });
+    if (format === 'fillInBlank' && !isFillInBlankProblem(id))
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Challenge problem without blanks: ${id}` });
+  }
   return format === 'regular' ? configured.filter((id) => !isFillInBlankProblem(id)) : configured;
 };
 type DisplayResult = ExerciseDisplay | RegularExerciseDisplay | { status: 'noProblems' };
@@ -322,8 +324,8 @@ const toDisplay = (row: ExerciseSession, format: ProblemFormat): ExerciseDisplay
     problemId: row.problemId,
     displayProgram: problem.displayProgram,
     blankCount: problem.blankAnswers.length,
-    expectedBoard: problem.finalBoard,
-    expectedTurtles: problem.finalTurtles,
+    finalBoard: problem.finalBoard,
+    finalTurtles: problem.finalTurtles,
     finalVars: problem.finalVars,
     completed: Boolean(row.completedAt),
   };

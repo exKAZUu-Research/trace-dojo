@@ -125,7 +125,8 @@ export const deriveRegularProblemView = (
   const currentTraceItemIndex =
     problemType === 'executionResult'
       ? problem.traceItems.length - 1
-      : Math.min(traceItemIndex, problem.traceItems.length - 1);
+      : // The definition may have changed after the session stored this index.
+        Math.min(traceItemIndex, problem.traceItems.length - 1);
   const previousTraceItemIndex =
     problemType === 'executionResult'
       ? 0

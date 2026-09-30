@@ -1,8 +1,8 @@
 ## Challenge fill-in-the-blank problems
 
-Define paired Java and instrumented templates in `src/problems/fillInBlank/definitions.ts` or `challengeDefinitions.ts`. Put `@[model answer]@` markers in the same order in both templates, and keep `<min-max>` placeholders in the same order so an ID and seed reproduce the complete generated problem.
+Define paired Java and instrumented templates in `src/problems/fillInBlank/definitions.ts` or `challengeDefinitions.ts`. Put `@[model answer]@` markers in the same order in both templates, and keep `<min-max>` placeholders in the same order so an ID and seed reproduce the complete generated problem. Use the same variable names (including the turtle's) in both templates: local grading translates a Java answer and runs it in the instrumented template.
 
-Register the name in `problemIdToName`. Add the ID explicitly to `courseIdToLectureIndexToProblemIds` for ordinary lectures or `courseIdToLectureIndexToExerciseProblemIds` for challenge mode. Membership in either list does not imply membership in the other.
+Register the name in `problemIdToName`. Add the ID explicitly to `courseIdToLectureIndexToProblemIds` for ordinary lectures or `courseIdToLectureIndexToExerciseProblemIds` for the fill-in-the-blank challenge, which accepts only problems with blanks. Membership in either list does not imply membership in the other. The regular challenge has no list of its own: it draws from the problems without blanks in the lecture's `courseIdToLectureIndexToProblemIds` entry.
 
 Challenge sessions persist the problem ID and seed. Displays and grading regenerate from the current definition, so editing a definition also changes an active session when it is next loaded. Challenge submissions stay in `ExerciseSession` and `ExerciseSubmission` and do not affect ordinary progress or grades.
 

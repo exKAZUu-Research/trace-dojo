@@ -166,10 +166,7 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
           display={exercise as RegularChallengeDisplay}
           back={back}
           transport={{
-            submit: async (input) => {
-              const value = await submitRegular.mutateAsync(input);
-              return { exercise: value, status: input.isCorrect ? 'correct' : 'incorrect' };
-            },
+            submit: async (input) => await submitRegular.mutateAsync(input),
             switchToStep: async ({ sessionId }) => await switchRegular.mutateAsync({ courseId, lectureId, sessionId }),
             next: async ({ sessionId, problemFormat }) => {
               const value = await next.mutateAsync({ courseId, lectureId, sessionId, problemFormat });
@@ -184,13 +181,7 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
         <VStack key={exercise.sessionId} align="stretch" spacing={4}>
           <ProblemPageHeader courseId={courseId} lectureId={lectureId} problemId={exercise.problemId as ProblemId} />
           <FillInBlankBody
-            problem={{
-              displayProgram: (exercise as ExerciseDisplay).displayProgram,
-              blankCount: (exercise as ExerciseDisplay).blankCount,
-              finalBoard: (exercise as ExerciseDisplay).expectedBoard,
-              finalTurtles: (exercise as ExerciseDisplay).expectedTurtles,
-              finalVars: (exercise as ExerciseDisplay).finalVars,
-            }}
+            problem={exercise as ExerciseDisplay}
             gradeAnswers={gradeBlank}
             completionActions={actions}
             completionMessage="正解です！次の問題へ進めます。"
