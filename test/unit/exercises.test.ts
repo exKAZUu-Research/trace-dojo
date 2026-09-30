@@ -680,6 +680,12 @@ test('completes a step session whose stored index is past the final trace item o
   expect(await submitRegular(resumed, 'past-final', true)).toMatchObject({ completed: true });
 });
 
+test('refuses to resume a regular session whose problem definition no longer exists', async () => {
+  const regular = await startRegular();
+  sqlite.prepare("UPDATE ExerciseSession SET problemId = 'removedProblem' WHERE id = ?").run(regular.sessionId);
+  await expect(startRegular()).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
+});
+
 test('rejects switching blank, later-step, and corrupt regular states', async () => {
   const blank = await start();
   await expect(

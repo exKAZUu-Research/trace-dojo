@@ -299,6 +299,8 @@ const toDisplay = (
 ): ExerciseDisplay | RegularExerciseDisplay => {
   if (format === 'regular') {
     validateRegularState(row);
+    // The client regenerates the problem while rendering, so a resumed row whose definition no longer generates must fail here.
+    if (!problem) instantiateRegular(row.problemId, row.seed);
     return toRegularDisplay(row);
   }
   const { displayProgram, blankAnswers, finalBoard, finalTurtles, finalVars } =
