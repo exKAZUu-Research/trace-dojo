@@ -69,7 +69,7 @@ test('does not resubmit on Enter while a result dialog is open', async () => {
     await user.type(input, value);
   }
   await user.click(screen.getByRole('button', { name: /提出/ }));
-  await screen.findByRole('alertdialog');
+  expect(await screen.findByRole('alertdialog')).toHaveTextContent('不正解');
   fireEvent.keyDown(document.body, { key: 'Enter' });
   expect(submit).toHaveBeenCalledTimes(1);
   await user.keyboard('{Enter}');
@@ -88,12 +88,16 @@ test('keeps an incorrect draft mounted across repeated attempts and never switch
   await user.type(inputs[2], '4');
   for (let attempt = 0; attempt < 4; attempt += 1) {
     await user.click(screen.getByRole('button', { name: /提出/ }));
-    await screen.findByRole('alertdialog');
+    const alert = await screen.findByRole('alertdialog');
+    expect(alert).toHaveTextContent('不正解');
+    expect(alert).toHaveTextContent('変数aに誤りがあります');
     await user.click(screen.getByRole('button', { name: /閉じる|もう一度/ }));
   }
-  expect(inputs[0]).toHaveValue('999');
-  expect(inputs[1]).toHaveValue('2');
-  expect(inputs[2]).toHaveValue('4');
+  const liveInputs = screen.getAllByRole('textbox');
+  expect(liveInputs).toHaveLength(3);
+  expect(liveInputs[0]).toHaveValue('999');
+  expect(liveInputs[1]).toHaveValue('2');
+  expect(liveInputs[2]).toHaveValue('4');
   expect(submit).toHaveBeenCalledTimes(4);
   expect(switchToStep).not.toHaveBeenCalled();
   expect(submit.mock.calls.every(([input]) => input.isCorrect === false)).toBe(true);
