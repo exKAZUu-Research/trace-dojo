@@ -373,7 +373,7 @@ export const courseIdToLectureIds = JSON.parse(process.env.NEXT_PUBLIC_COURSE_ID
 export const problemIdToLanguageIdToProgram: Record<ProblemId, Record<LanguageId, string>> = {
   straight: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('亀', () => t); // step
 t.forward();
 t.forward();
     `,
@@ -389,7 +389,7 @@ public class Main {
   },
   straight2: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('亀', () => t); // step
 t.forward();
 t.forward();
 t.forward();
@@ -407,7 +407,7 @@ public class Main {
   },
   stepBack: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('亀', () => t); // step
 t.forward();
 t.backward();
     `,
@@ -423,7 +423,7 @@ public class Main {
   },
   stepBack2: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('亀', () => t); // step
 t.forward();
 t.forward();
 t.backward();
@@ -445,7 +445,7 @@ public class Main {
   },
   turnRight: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('亀', () => t); // step
 t.forward();
 t.turnRight();
 t.forward();
@@ -463,7 +463,7 @@ public class Main {
   },
   turnRight2: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('亀', () => t); // step
 t.forward();
 t.forward();
 t.turnRight();
@@ -485,7 +485,7 @@ public class Main {
   },
   turnLeftAndRight: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('亀', () => t); // step
 t.turnRight();
 t.forward();
 t.turnLeft();
@@ -505,7 +505,7 @@ public class Main {
   },
   turnLeftAndRight2: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('亀', () => t); // step
 t.forward();
 t.turnRight();
 t.forward();
@@ -527,7 +527,7 @@ public class Main {
   },
   turnLeftAndRight3: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('亀', () => t); // step
 t.turnRight();
 t.forward();
 t.turnLeft();
@@ -551,7 +551,7 @@ public class Main {
   },
   turnLeftAndRight4: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('亀', () => t); // step
 t.forward();
 t.forward();
 t.turnRight();
@@ -579,7 +579,7 @@ public class Main {
   },
   square1: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('亀', () => t); // step
 t.forward();
 t.turnRight();
 t.forward();
@@ -601,7 +601,7 @@ public class Main {
   },
   square2: {
     instrumented: `
-const t = new Turtle(<1-5>, <1-4>); // step
+const t = new Turtle(<1-5>, <1-4>); registerDisplayRef('亀', () => t); // step
 t.forward();
 t.turnRight();
 t.forward();
@@ -623,7 +623,7 @@ public class Main {
   },
   square3: {
     instrumented: `
-const t = new Turtle(<2-5>, <2-5>); // step
+const t = new Turtle(<2-5>, <2-5>); registerDisplayRef('亀', () => t); // step
 t.forward();
 t.turnLeft();
 t.forward();
@@ -649,7 +649,7 @@ public class Main {
   },
   square4: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('亀', () => t); // step
 t.forward();
 t.forward();
 t.turnRight();
@@ -685,7 +685,7 @@ public class Main {
   variable: {
     instrumented: `
 s.set('x', <1-5>);
-const t = new Turtle(s.get('x'), <1-5>); // step
+const t = new Turtle(s.get('x'), <1-5>); registerDisplayRef('亀', () => t); // step
 t.forward();
  `,
     java: `
@@ -702,7 +702,7 @@ public class Main {
     instrumented: `
 s.set('a', <2-6>);
 s.set('a', s.get('a') - 1);
-const t = new Turtle(<1-5>, s.get('a')); // step
+const t = new Turtle(<1-5>, s.get('a')); registerDisplayRef('亀', () => t); // step
 t.forward();
  `,
     java: `
@@ -721,7 +721,7 @@ public class Main {
 s.set('x', <1-4>);
 s.set('x', s.get('x') + 1);
 s.set('y', s.get('x') + 1);
-const t = new Turtle(s.get('x'), s.get('y')); // step
+const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('亀', () => t); // step
 t.forward();
 `,
     java: `
@@ -741,7 +741,7 @@ public class Main {
 s.set('b', <1-4>);
 s.set('b', s.get('b') + 1);
 s.set('a', s.get('b') - 2);
-const t = new Turtle(s.get('a') + 1, s.get('b')); // step
+const t = new Turtle(s.get('a') + 1, s.get('b')); registerDisplayRef('亀', () => t); // step
 t.forward();
 `,
     java: `
@@ -762,7 +762,7 @@ s.set('x', <1-5>);
 s.set('x', s.get('x') - 1);
 s.set('y', s.get('x') * 2);
 s.set('y', s.get('y') / 3);
-const t = new Turtle(s.get('x') + 1, s.get('y') + 1); // step
+const t = new Turtle(s.get('x') + 1, s.get('y') + 1); registerDisplayRef('亀', () => t); // step
 t.forward();
 `,
     java: `
@@ -783,7 +783,7 @@ public class Main {
 s.set('a', <1-3>);
 s.set('b', s.get('a') * 2);
 s.set('c', s.get('b') - 2);
-const t = new Turtle(s.get('c'), s.get('b')); // step
+const t = new Turtle(s.get('c'), s.get('b')); registerDisplayRef('亀', () => t); // step
 t.forward();
 `,
     java: `
@@ -804,7 +804,7 @@ s.set('x', <0-2>);
 s.set('y', (s.get('x') * 2) + 1);
 s.set('z', (s.get('y') * 2) + (s.get('x') / 2));
 s.set('x', s.get('z') / 3);
-const t = new Turtle(s.get('x'), s.get('y')); // step
+const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('亀', () => t); // step
 t.forward();
     `,
     java: `
@@ -827,7 +827,7 @@ s.set('y', (s.get('x') * 3) + 2);
 s.set('z', (s.get('y') * 2) - (s.get('x') * 3));
 s.set('x', (s.get('z') / 4) % 7);
 s.set('y', (s.get('x') + s.get('y')) % 7);
-const t = new Turtle(s.get('x'), s.get('y')); // step
+const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('亀', () => t); // step
 t.backward();
     `,
     java: `
@@ -851,7 +851,7 @@ s.set('y', (s.get('x') * 4) + 3);
 s.set('z', (s.get('y') * 3) - (s.get('x') * 2));
 s.set('x', ((s.get('z') / 5) + s.get('x')) % 7);
 s.set('y', ((s.get('x') * 2) + s.get('y')) % 7);
-const t = new Turtle(s.get('x'), s.get('y')); // step
+const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('亀', () => t); // step
 t.forward();
     `,
     java: `
@@ -876,7 +876,7 @@ s.set('z', (s.get('y') * 2) - (s.get('x') * 3));
 s.set('w', (s.get('z') + s.get('x')) % 5);
 s.set('x', ((s.get('z') / 6) + s.get('w')) % 7);
 s.set('y', ((s.get('x') * 3) + s.get('y')) % 7);
-const t = new Turtle(s.get('x'), s.get('y')); // step
+const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('亀', () => t); // step
 t.forward();
     `,
     java: `
@@ -896,7 +896,7 @@ public class Main {
   },
   while1: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('亀', () => t); // step
 s.set('i', 0);
 while (s.get('i') < <3-5>) {
   t.forward();
@@ -918,7 +918,7 @@ public class Main {
   },
   while2: {
     instrumented: `
-const t = new Turtle(<0-1>, <0-1>); // step
+const t = new Turtle(<0-1>, <0-1>); registerDisplayRef('亀', () => t); // step
 s.set('i', <1-2>);
 while (s.get('i') < <4-6>) {
   t.forward();
@@ -940,7 +940,7 @@ public class Main {
   },
   while3: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('亀', () => t); // step
 s.set('i', 0);
 while (s.get('i') < <2-3>) {
   s.set('i', s.get('i') + 1);
@@ -964,7 +964,7 @@ public class Main {
   },
   while4: {
     instrumented: `
-const t = new Turtle(<0-1>, <0-1>); // step
+const t = new Turtle(<0-1>, <0-1>); registerDisplayRef('亀', () => t); // step
 t.turnRight();
 s.set('i', <1-2>);
 while (s.get('i') < <4-5>) {
@@ -992,7 +992,7 @@ public class Main {
   },
   while5: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('亀', () => t); // step
 s.set('i', <1-2>);
 while (s.get('i') < <3-4>) {
   t.forward();
@@ -1020,7 +1020,7 @@ public class Main {
   },
   for1: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('亀', () => t); // step
 for (s.set('i', 0); s.get('i') < <3-5>; s.set('i', s.get('i') + 1)) {
   t.forward();
 }
@@ -1039,7 +1039,7 @@ public class Main {
   },
   for2: {
     instrumented: `
-const t = new Turtle(<1-2>, <1-2>); // step
+const t = new Turtle(<1-2>, <1-2>); registerDisplayRef('亀', () => t); // step
 for (s.set('i', <1-2>); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
   t.forward();
 }
@@ -1058,7 +1058,7 @@ public class Main {
   },
   for3: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('亀', () => t); // step
 s.set('i', 0);
 for (; s.get('i') < <2-3>;) {
   t.forward();
@@ -1082,7 +1082,7 @@ public class Main {
   },
   for4: {
     instrumented: `
-const t = new Turtle(<1-2>, <1-2>); // step
+const t = new Turtle(<1-2>, <1-2>); registerDisplayRef('亀', () => t); // step
 s.set('i', 1);
 for (; s.get('i') < <3-4>;) {
   t.forward();
@@ -1114,7 +1114,7 @@ for (s.set('i', 2); s.get('i') <= <4-5>; s.set('i', s.get('i') + 1)) {
 }
 delete s.vars['i'];
 s.set('x', s.get('x') / 3);
-const t = new Turtle(s.get('x') + 1, 0); // step
+const t = new Turtle(s.get('x') + 1, 0); registerDisplayRef('亀', () => t); // step
 t.forward();
     `,
     java: `
@@ -1142,7 +1142,7 @@ for (s.set('i', <4-5>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
 delete s.vars['i'];
 s.set('a', s.get('a') / 4);
 s.set('b', s.get('b') / 5);
-const t = new Turtle(s.get('a') % 6, s.get('b') % 6); // step
+const t = new Turtle(s.get('a') % 6, s.get('b') % 6); registerDisplayRef('亀', () => t); // step
 t.forward();
     `,
     java: `
@@ -1164,7 +1164,7 @@ public class Main {
   },
   for7: {
     instrumented: `
-const t = new Turtle(3, 3); // step
+const t = new Turtle(3, 3); registerDisplayRef('亀', () => t); // step
 s.set('sum', 0);
 for (s.set('i', 1); s.get('i') <= <4-6>; s.set('i', s.get('i') + 1)) {
   s.set('sum', s.get('sum') + s.get('i'));
@@ -1200,7 +1200,7 @@ public class Main {
   },
   doubleLoop1: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < <2-3>; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < <2-3>; s.set('j', s.get('j') + 1)) {
       t.forward();
@@ -1226,7 +1226,7 @@ public class Main {
   },
   doubleLoop2: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 t.turnRight();
 for (s.set('i', 0); s.get('i') < <2-3>; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < <2-3>; s.set('j', s.get('j') + 1)) {
@@ -1254,7 +1254,7 @@ public class Main {
   },
   doubleLoop3: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', <3-4>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
   for (s.set('j', 0); s.get('j') < s.get('i'); s.set('j', s.get('j') + 1)) {
     t.forward();
@@ -1280,7 +1280,7 @@ public class Main {
   },
   doubleLoop4: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', <3-4>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
   s.set('j', s.get('i'));
   while (s.get('j') >= 0) {
@@ -1310,7 +1310,7 @@ public class Main {
   },
   doubleLoop5: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
   for (s.set('j', <0-1>); s.get('j') <= s.get('i'); s.set('j', s.get('j') + 1)) {
     t.forward();
@@ -1345,7 +1345,7 @@ public class Main {
   },
   if1: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < <7-9>; s.set('i', s.get('i') + 1)) {
   t.forward();
   if (s.get('i') % 3 === 2) {
@@ -1370,7 +1370,7 @@ public class Main {
   },
   if2: {
     instrumented: `
-const t = new Turtle(<1-2>, <1-2>); // step
+const t = new Turtle(<1-2>, <1-2>); registerDisplayRef('t', () => t); // step
 t.turnRight();
 for (s.set('i', 0); s.get('i') < <6-8>; s.set('i', s.get('i') + 1)) {
   t.forward();
@@ -1397,7 +1397,7 @@ public class Main {
   },
   if3: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < <4-5>; s.set('i', s.get('i') + 1)) {
   t.forward();
   if (s.get('i') % 2 === 0) {
@@ -1426,7 +1426,7 @@ public class Main {
   },
   if4: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < <4-5>; s.set('i', s.get('i') + 1)) {
   t.forward();
   if (s.get('i') % 3 === 0) {
@@ -1455,7 +1455,7 @@ public class Main {
   },
   if5: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < <2-3>; s.set('j', s.get('j') + 1)) {
     if (s.get('j') % 2 === 0) {
@@ -1491,7 +1491,7 @@ public class Main {
   },
   elseIf1: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') < 2) {
     t.forward();
@@ -1521,7 +1521,7 @@ public class Main {
   },
   elseIf2: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') % 4 === 0) {
     t.forward();
@@ -1555,7 +1555,7 @@ public class Main {
   },
   elseIf3: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < 7; s.set('i', s.get('i') + 1)) {
   if (s.get('i') < 2) {
     t.forward();
@@ -1589,7 +1589,7 @@ public class Main {
   },
   elseIf4: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < <6-7>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') % 5 === 0) {
     t.forward();
@@ -1623,7 +1623,7 @@ public class Main {
   },
   elseIf5: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < <7-8>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') % 5 === 1) {
     t.turnRight();
@@ -1653,7 +1653,7 @@ public class Main {
   },
   switch1: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   switch (s.get('i')) {
     case 0: case 1:
@@ -1686,7 +1686,7 @@ public class Main {
   },
   switch2: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   switch (s.get('i') % 4) {
     case 1:
@@ -1719,7 +1719,7 @@ public class Main {
   },
   switch3: {
     instrumented: `
-const t = new Turtle(2, 2); // step
+const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < <6-7>; s.set('i', s.get('i') + 1)) {
   switch (s.get('i')) {
     case 0:
@@ -1766,7 +1766,7 @@ public class Main {
   },
   switch4: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < <7-8>; s.set('i', s.get('i') + 1)) {
   switch (s.get('i') % 5) {
     case 0:
@@ -1809,7 +1809,7 @@ public class Main {
   },
   switch5: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < <9-10>; s.set('i', s.get('i') + 1)) {
   switch (s.get('i') % 6) {
     case 0:
@@ -1854,7 +1854,7 @@ public class Main {
   },
   break1: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 while (true) {
   if (!t.canMoveForward()) break;
   t.forward();
@@ -1874,7 +1874,7 @@ public class Main {
   },
   break2: {
     instrumented: `
-const t = new Turtle(<3-4>,<3-4>); // step
+const t = new Turtle(<3-4>,<3-4>); registerDisplayRef('t', () => t); // step
 while (true) {
   if (!t.canMoveForward()) break;
   t.forward();
@@ -1904,7 +1904,7 @@ public class Main {
   },
   break3: {
     instrumented: `
-const t = new Turtle(<4-6>, <4-6>); // step
+const t = new Turtle(<4-6>, <4-6>); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
   while (true) {
     t.forward();
@@ -1931,7 +1931,7 @@ public class Main {
   },
   break4: {
     instrumented: `
-const t = new Turtle(<3-5>, <3-5>); // step
+const t = new Turtle(<3-5>, <3-5>); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   while (true) {
     if (!t.canMoveForward()) break;
@@ -1958,7 +1958,7 @@ public class Main {
   },
   break5: {
     instrumented: `
-const t = new Turtle(<4-6>, <4-6>); // step
+const t = new Turtle(<4-6>, <4-6>); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < 6; s.set('j', s.get('j') + 1)) {
     if (!t.canMoveForward()) break;
@@ -1996,7 +1996,7 @@ public class Main {
   },
   continue1: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < <3-5>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') == 0) {
     continue;
@@ -2021,7 +2021,7 @@ public class Main {
   },
   continue2: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
   if (s.get('i') % <2-3> == 1) {
     t.turnRight();
@@ -2048,7 +2048,7 @@ public class Main {
   },
   continue3: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
   for (s.set('j', s.get('i') * 4); s.get('j') < 8; s.set('j', s.get('j') + 1)) {
     if (s.get('j') % 4 == 1) {
@@ -2084,7 +2084,7 @@ public class Main {
   },
   continue4: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   for (s.set('j', s.get('i')); s.get('j') < 6; s.set('j', s.get('j') + 1)) {
     if (s.get('j') % 2 == 0) {
@@ -2120,7 +2120,7 @@ public class Main {
   },
   continue5: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   for (s.set('j', s.get('i') + 1); s.get('j') < 6; s.set('j', s.get('j') + 1)) {
     if (s.get('j') % 4 == 0) {
@@ -2158,7 +2158,7 @@ public class Main {
   },
   method1: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 call(forwardTwoSteps, 't')(t);
 t.turnRight();
 call(threeStepsForward, 't')(t);
@@ -2196,7 +2196,7 @@ public class Main {
   },
   method2: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 call(forwardTwoSteps, 't')(t);
 call(turnAround, 't')(t);
 t.forward();
@@ -2233,7 +2233,7 @@ public class Main {
   },
   method3: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 call(forwardGivenSteps, 't', 'n')(t, <3-4>);
 t.turnRight();
 call(forwardGivenSteps, 't', 'n')(t, 2);
@@ -2264,7 +2264,7 @@ public class Main {
   },
   method4: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 call(forwardTwoSteps, 't')(t);
 t.turnRight();
 call(forwardFourSteps, 't')(t);
@@ -2300,7 +2300,7 @@ public class Main {
   },
   method5: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 call(drawSquare, 't')(t);
 t.backward();
 t.backward();
@@ -2334,7 +2334,7 @@ public class Main {
   },
   return1: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 s.set('x', call(double, 'a')(<2-3>));
 call(forwardGivenSteps, 't', 'n')(t, s.get('x'));
 
@@ -2369,7 +2369,7 @@ public class Main {
   },
   return2: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 s.set('x', call(double, 'a')(2));
 call(forwardGivenSteps, 't', 'n')(t, s.get('x'));
 t.turnRight();
@@ -2410,7 +2410,7 @@ public class Main {
   },
   return3: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 call(forwardGivenSteps, 't', 'n')(t, call(add, 'a', 'b')(1, 1));
 call(forwardGivenSteps, 't', 'n')(t, call(add, 'a', 'b')(1, 2));
 
@@ -2445,7 +2445,7 @@ public class Main {
   },
   return4: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
   if (call(isEven, 'a')(s.get('i'))) {
     t.turnRight();
@@ -2496,7 +2496,7 @@ public class Main {
   },
   return5: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   for (s.set('j', 0); s.get('j') < 3; s.set('j', s.get('j') + 1)) {
     if (call(isEqual, 'a', 'b')(s.get('i'), s.get('j')))
@@ -2545,7 +2545,7 @@ public class Main {
 
   array1: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 s.set('arr', [2, <1-2>, <1-2>]);
 for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
   call(forwardGivenSteps, 't', 'n')(t, s.get('arr')[s.get('i')]);
@@ -2580,7 +2580,7 @@ public class Main {
   },
   array2: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 s.set('arr', [<4-5>, <3-4>, <3-4>]);
 for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
   call(forwardGivenSteps, 't', 'n')(t, s.get('arr')[s.get('i')]);
@@ -2615,7 +2615,7 @@ public class Main {
   },
   array3: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 s.set('arr', [0, 1, 0, 2, 0]);
 for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
   switch (s.get('arr')[s.get('i')]) {
@@ -2650,7 +2650,7 @@ public class Main {
   },
   array4: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 s.set('arr', [0, 1, 0, 2, 0]);
 for (const cmd of [0, 1, 0, 2, 0]) {
   s.set('cmd', cmd);
@@ -2686,7 +2686,7 @@ public class Main {
   },
   array5: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 s.set('arr', [0, 1, 0, 2, 0, 3, 0]);
 s.set('steps', 1);
 for (const cmd of [0, 1, 0, 2, 0, 3, 0]) {
@@ -2735,7 +2735,7 @@ public class Main {
   },
   string1: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 s.set('s', 'frflf');
 for (s.set('i', 0); s.get('i') < s.get('s').length; s.set('i', s.get('i') + 1)) {
   switch (s.get('s').charAt(s.get('i'))) {
@@ -2770,7 +2770,7 @@ public class Main {
   },
   string2: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 s.set('s', 'ffbrfl');
 for (s.set('i', 0); s.get('i') < s.get('s').length; s.set('i', s.get('i') + 1)) {
   switch (s.get('s').charAt(s.get('i'))) {
@@ -2809,7 +2809,7 @@ public class Main {
   },
   string3: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 s.set('s', 'frflf');
 for (const ch of 'frflf') {
   s.set('ch', ch);
@@ -2845,7 +2845,7 @@ public class Main {
   },
   string4: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 s.set('cmds', ['ri', 'aa', 'fo']);
 for (const cmd of ['ri', 'aa', 'fo']) {
   s.set('cmd', cmd);
@@ -2880,7 +2880,7 @@ public class Main {
   },
   string5: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 s.set('cmds', ['ri', 'add', 'fo', 'add', 'le', 'fo', 'fo']);
 s.set('x', 0);
 for (const cmd of ['ri', 'add', 'fo', 'add', 'le', 'fo', 'fo']) {
@@ -2936,8 +2936,8 @@ public class Main {
   },
   oop1: {
     instrumented: `
-const t1 = new Turtle(1, 1); // step
-const t2 = new Turtle(3, 3); // step
+const t1 = new Turtle(1, 1); registerDisplayRef('t1', () => t1); // step
+const t2 = new Turtle(3, 3); registerDisplayRef('t2', () => t2); // step
 t1.forward();
 t2.forward();
 t1.forward();
@@ -2960,7 +2960,7 @@ public class Main {
     // 上のコードから下にあるクラスを参照するためには、main()関数を定義しないといけない。
     instrumented: `
 function main() {
-  const m = call(MyTurtle, 'x', 'y', 'speed')(0, 0, 2);
+  const m = call(MyTurtle, 'x', 'y', 'speed')(0, 0, 2); registerDisplayRef('m', () => m);
   call(m.forward.bind(m))();
 }
 
@@ -3006,8 +3006,8 @@ class MyTurtle {
   multiObject1: {
     // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
-const t1 = new Turtle(1, 1); // step
-const t2 = new Turtle(3, 3); // step
+const t1 = new Turtle(1, 1); registerDisplayRef('t1', () => t1); // step
+const t2 = new Turtle(3, 3); registerDisplayRef('t2', () => t2); // step
 t1.前に進む(); // step
 t1.右を向く(); // step
 t2.前に進む(); // step
@@ -3029,10 +3029,10 @@ public class Main {
   multiObject2: {
     // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
-const t1 = new Turtle(1, 1); // step
+const t1 = new Turtle(1, 1); registerDisplayRef('t1', () => t1); // step
 t1.前に進む(); // step
 t1.右を向く(); // step
-const t2 = new Turtle(3, 3); // step
+const t2 = new Turtle(3, 3); registerDisplayRef('t2', () => t2); // step
 t2.前に進む(); // step
 t2.左を向く(); // step
 t2.前に進む(); // step
@@ -3053,9 +3053,9 @@ public class Main {
   },
   multiObject3: {
     instrumented: `
-const t1 = new Turtle(1, 4); // step
-const t2 = new Turtle(5, 4); // step
-const t3 = new Turtle(2, 1); // step
+const t1 = new Turtle(1, 4); registerDisplayRef('t1', () => t1); // step
+const t2 = new Turtle(5, 4); registerDisplayRef('t2', () => t2); // step
+const t3 = new Turtle(2, 1); registerDisplayRef('t3', () => t3); // step
 
 t1.右を向く(); // step
 t1.右を向く(); // step
@@ -3093,8 +3093,8 @@ public class Main {
   },
   multiObject4: {
     instrumented: `
-const t1 = new Turtle(0, 6); // step
-const t2 = new Turtle(6, 0); // step
+const t1 = new Turtle(0, 6); registerDisplayRef('t1', () => t1); // step
+const t2 = new Turtle(6, 0); registerDisplayRef('t2', () => t2); // step
 
 t1.右を向く(); // step
 t1.右を向く(); // step
@@ -3138,11 +3138,11 @@ public class Main {
   },
   multiObject5: {
     instrumented: `
-    const t1 = new Turtle(0, 3); // step
-    const t2 = new Turtle(4, 3); // step
-    const t3 = new Turtle(0, 0); // step
-    const t4 = new Turtle(1, 6); // step
-    const t5 = new Turtle(6, 4); // step
+    const t1 = new Turtle(0, 3); registerDisplayRef('t1', () => t1); // step
+    const t2 = new Turtle(4, 3); registerDisplayRef('t2', () => t2); // step
+    const t3 = new Turtle(0, 0); registerDisplayRef('t3', () => t3); // step
+    const t4 = new Turtle(1, 6); registerDisplayRef('t4', () => t4); // step
+    const t5 = new Turtle(6, 4); registerDisplayRef('t5', () => t5); // step
 
     t1.右を向く(); // step
 
@@ -3176,7 +3176,7 @@ public class Main {
   },
   multiObject6: {
     instrumented: `
-const ts = [null, null, null];
+const ts = [null, null, null]; registerDisplayRef('turtles', () => ts);
 for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) {
   ts[s.get('i')] = new Turtle(1 + s.get('i') * 2, 0); // step
 }
@@ -3222,13 +3222,13 @@ public class Main {
   },
   garbageCollection1: {
     instrumented: `
-let t1 = new Turtle(1, 1); // step
+let t1 = new Turtle(1, 1); registerDisplayRef('t1', () => t1); // step
 t1.前に進む(); // step
 t1.右を向く(); // step
-let t2 = new Turtle(3, 3); // step
+let t2 = new Turtle(3, 3); registerDisplayRef('t2', () => t2); // step
 t2.前に進む(); // step
-t2.remove(); // step
-t2 = t1;
+t2.remove();
+t2 = t1; // step
 t2.前に進む(); // step
 `,
     java: `
@@ -3248,18 +3248,18 @@ public class Main {
   },
   garbageCollection2: {
     instrumented: `
-let t1 = new Turtle(1, 1); // step
-let t2 = new Turtle(3, 3); // step
-let t3 = new Turtle(5, 5); // step
+let t1 = new Turtle(1, 1); registerDisplayRef('t1', () => t1); // step
+let t2 = new Turtle(3, 3); registerDisplayRef('t2', () => t2); // step
+let t3 = new Turtle(5, 5); registerDisplayRef('t3', () => t3); // step
 
 t1.前に進む(); // step
 t2.前に進む(); // step
 t3.前に進む(); // step
 
-t2.remove(); // step
-t2 = t1;
-t3.remove(); // step
-t3 = t2;
+t2.remove();
+t2 = t1; // step
+t3.remove();
+t3 = t2; // step
 
 t3.前に進む(); // step
 t2.前に進む(); // step
@@ -3290,7 +3290,7 @@ public class Main {
   },
   garbageCollection3: {
     instrumented: `
-const turtles = [];
+const turtles = new Array(2); registerDisplayRef('turtles', () => turtles);
 turtles[0] = new Turtle(2, 3); // step
 turtles[1] = new Turtle(3, 4); // step
 
@@ -3364,20 +3364,22 @@ public class Main {
   },
   garbageCollection4: {
     instrumented: `
-const turtles = new Array(5);
+const turtles = new Array(5); registerDisplayRef('turtles', () => turtles);
 for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
   turtles[s.get('i')] = new Turtle(s.get('i'), 0); // step
 }
 delete s.vars['i'];
 
 for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
-  turtles[s.get('i')].remove(); // step
-  turtles[s.get('i')] = null;
+  turtles[s.get('i')].remove();
+  turtles[s.get('i')] = null; // step
 
   for (const t of turtles) {
+    registerDisplayRef('t', () => t);
     if (t !== null) {
       t.前に進む(); // step
     }
+    unregisterDisplayRef('t');
   }
 }
 delete s.vars['i'];
@@ -3409,10 +3411,10 @@ public class Main {
     instrumented: `
 call(線を描く, 'x', 'y', 'dir', 'len')(1, 1, 1, 5);
 call(線を描く, 'x', 'y', 'dir', 'len')(1, 5, 2, 5);
-const t = new Turtle(3, 3); // step
+const t = new Turtle(3, 3); registerDisplayRef('t', () => t); // step
 
 function 線を描く(x, y, dir, len) {
-  const t = new Turtle(x, y); // step
+  const t = new Turtle(x, y); registerDisplayRef('t', () => t); // step
   for (s.set('i', 0); s.get('i') < dir; s.set('i', s.get('i') + 1)) { // step
     t.右を向く(); // step
   }
@@ -3449,7 +3451,7 @@ public class Main {
     instrumented: `
 call(正方形を描く, 'x', 'y', 'size')(0, 0, 6);
 call(正方形を描く, 'x', 'y', 'size')(3, 3, 3);
-const t = new Turtle(3, 3); // step
+const t = new Turtle(3, 3); registerDisplayRef('t', () => t); // step
 
 function 正方形を描く(x, y, size) {
   call(線を描く, 'x', 'y', 'dir', 'len')(x, y, 0, size);
@@ -3459,7 +3461,7 @@ function 正方形を描く(x, y, size) {
 }
 
 function 線を描く(x, y, dir, len) {
-  const t = new Turtle(x, y); // step
+  const t = new Turtle(x, y); registerDisplayRef('t', () => t); // step
   for (let i = 0; i < dir; i++) { // step
     t.右を向く(); // step
   }
@@ -3504,7 +3506,7 @@ public class Main {
     // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 function main() {
-  const t = call(MyTurtle)();
+  const t = call(MyTurtle)(); registerDisplayRef('t', () => t);
   call(t.moveForward.bind(t))();
   t.speed = 1; // step
   call(t.moveForward.bind(t))();
@@ -3550,7 +3552,7 @@ class MyTurtle {
   makeClass2: {
     instrumented: `
 function main() {
-  const t = call(MyTurtle)();
+  const t = call(MyTurtle)(); registerDisplayRef('t', () => t);
   call(t.moveDiagonally.bind(t))();
   t.speed = 2; // step
   call(t.moveDiagonally.bind(t))();
@@ -3602,7 +3604,7 @@ class MyTurtle {
   makeClass3: {
     instrumented: `
 function main() {
-  const t = call(MyTurtle)();
+  const t = call(MyTurtle)(); registerDisplayRef('t', () => t);
   call(t.drawSquare.bind(t))();
   t.size = 4; // step
   call(t.drawSquare.bind(t))();
@@ -3656,7 +3658,7 @@ class MyTurtle {
   makeClass4: {
     instrumented: `
 function main() {
-  const t = call(MyTurtle)();
+  const t = call(MyTurtle)(); registerDisplayRef('t', () => t);
   call(t.moveForward.bind(t))();
   t.speed = 1; // step
   call(t.turnRight.bind(t))();
@@ -3717,7 +3719,7 @@ class MyTurtle {
   makeClass5: {
     instrumented: `
 function main() {
-  const t = call(MyTurtle)();
+  const t = call(MyTurtle)(); registerDisplayRef('t', () => t);
   call(t.operate.bind(t))();
   t.operation = "LFFRFF"; // step
   call(t.operate.bind(t))();
@@ -3780,7 +3782,7 @@ class MyTurtle {
   makeClass6: {
     instrumented: `
 function main() {
-  const t = call(MyTurtle)();
+  const t = call(MyTurtle)(); registerDisplayRef('t', () => t);
   call(t.turnRight.bind(t))();
   call(t.moveForward.bind(t))();
   call(t.turnLeft.bind(t))();
@@ -3840,7 +3842,7 @@ class MyTurtle {
   constructor1: {
     instrumented: `
 function main() {
-  const t = call(MyTurtle, 'x', 'y', 'speed')(0, 1, 2);
+  const t = call(MyTurtle, 'x', 'y', 'speed')(0, 1, 2); registerDisplayRef('t', () => t);
   call(t.moveForward.bind(t))();
   t.speed = 1; // step
   call(t.moveForward.bind(t))();
@@ -3890,7 +3892,7 @@ class MyTurtle {
   constructor2: {
     instrumented: `
 function main() {
-  const t = call(MyTurtle, 'x', 'y', 'operation')(1, 1, "FRFLFFF");
+  const t = call(MyTurtle, 'x', 'y', 'operation')(1, 1, "FRFLFFF"); registerDisplayRef('t', () => t);
   call(t.operate.bind(t))();
 }
 class MyTurtle {
@@ -3951,7 +3953,7 @@ class MyTurtle {
   constructor3: {
     instrumented: `
 function main() {
-  const t = call(MyTurtle, 'speed')(2);
+  const t = call(MyTurtle, 'speed')(2); registerDisplayRef('t', () => t);
   call(t.moveForward.bind(t))();
   call(t.turnRight.bind(t))();
   call(t.moveForward.bind(t))();
@@ -4016,9 +4018,9 @@ class MyTurtle {
   constructor4: {
     instrumented: `
 function main() {
-  const t1 = new Turtle(3, 4); // step
-  const t2 = new Turtle(0, 0); // step
-  const mover = call(TurtleMover, 't')(t1);
+  const t1 = new Turtle(3, 4); registerDisplayRef('t1', () => t1); // step
+  const t2 = new Turtle(0, 0); registerDisplayRef('t2', () => t2); // step
+  const mover = call(TurtleMover, 't')(t1); registerDisplayRef('mover', () => mover);
   call(mover.moveSquare.bind(mover), 'size')(3);
   mover.t = new Turtle(3, 1); // step
   call(mover.moveSquare.bind(mover), 'size')(3);
@@ -4082,7 +4084,7 @@ class TurtleMover {
     // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 function main() {
-  const t = call(MyTurtle)();
+  const t = call(MyTurtle)(); registerDisplayRef('t', () => t);
   call(t.moveForward.bind(t))();
   call(t.changeSpeed.bind(t), 'speed')(1);
   call(t.moveForward.bind(t))();
@@ -4134,7 +4136,7 @@ class MyTurtle {
   },
   withoutEncapsulation: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 call(drawSquare, 't', 'size')(t, 2);
 call(drawSquare, 't', 'size')(t, 3);
 
@@ -4172,7 +4174,7 @@ public class Main {
     // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 function main() {
-  const t = call(SquareTurtle)();
+  const t = call(SquareTurtle)(); registerDisplayRef('t', () => t);
   call(t.draw.bind(t), 'size')(2);
   call(t.draw.bind(t), 'size')(3);
 }
@@ -4220,7 +4222,7 @@ class SquareTurtle {
   },
   withoutEncapsulation2: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 call(drawCurve, 't', 'speed')(t, 3);
 
 function drawCurve(t, speed) {
@@ -4257,7 +4259,7 @@ public class Main {
   withEncapsulation2: {
     instrumented: `
 function main() {
-  const t = call(CurveTurtle)();
+  const t = call(CurveTurtle)(); registerDisplayRef('t', () => t);
   call(t.draw.bind(t),'speed')(2);
 }
 class CurveTurtle {
@@ -4303,7 +4305,7 @@ class CurveTurtle {
   withEncapsulation3: {
     instrumented: `
 function main() {
-  let t = call(MyTurtle, 'x', 'y', 'speed')(0, 0, 1);
+  let t = call(MyTurtle, 'x', 'y', 'speed')(0, 0, 1); registerDisplayRef('t', () => t);
   call(t.moveForward.bind(t))();
   call(t.moveForward.bind(t))();
   t.t.remove();
@@ -4361,7 +4363,7 @@ class MyTurtle {
   withEncapsulation4: {
     instrumented: `
 function main() {
-  const t = call(MyTurtle, 'x', 'y', 'speed')(0, 0, 2);
+  const t = call(MyTurtle, 'x', 'y', 'speed')(0, 0, 2); registerDisplayRef('t', () => t);
   call(t.moveForward.bind(t))();
   call(t.setSpeed.bind(t), 'speed')(Math.floor(t.getSpeed() * 3 / 2));
   call(t.moveForward.bind(t))();
@@ -4446,7 +4448,7 @@ class MyTurtle {
   withEncapsulation5: {
     instrumented: `
 function main() {
-  const t = call(MyTurtle, 'x', 'y', 'speed')(3, 0, 3);
+  const t = call(MyTurtle, 'x', 'y', 'speed')(3, 0, 3); registerDisplayRef('t', () => t);
   call(t.moveForward.bind(t))();
   call(t.changeSpeed.bind(t), 'speed')(-2);
   call(t.moveForward.bind(t))();
@@ -4513,7 +4515,7 @@ class MyTurtle {
   withEncapsulation6: {
     instrumented: `
 function main() {
-  const t = call(MyTurtle, 'x', 'y')(3, 3);
+  const t = call(MyTurtle, 'x', 'y')(3, 3); registerDisplayRef('t', () => t);
   call(t.moveForward.bind(t))();
   call(t.moveForward.bind(t))();
   call(t.teleport.bind(t), 'x', 'y')(0, 0);
@@ -4565,7 +4567,7 @@ class MyTurtle {
   withEncapsulation7: {
     instrumented: `
 function main() {
-  const t = call(MyTurtle, 'x', 'y')(0, 0);
+  const t = call(MyTurtle, 'x', 'y')(0, 0); registerDisplayRef('t', () => t);
   call(t.setOperation.bind(t), 'op')("FFRFR");
   call(t.operate.bind(t))();
 
@@ -4649,9 +4651,9 @@ class MyTurtle {
   staticMethod1: {
     // 静的メソッドは普通の関数で代替すること。
     instrumented: `
-const t1 = new Turtle(1, 1); // step
+const t1 = new Turtle(1, 1); registerDisplayRef('t1', () => t1); // step
 call(moveTwoSteps, 't')(t1);
-const t2 = new Turtle(3, 3); // step
+const t2 = new Turtle(3, 3); registerDisplayRef('t2', () => t2); // step
 call(moveTwoSteps, 't')(t2);
 
 function moveTwoSteps(t) {
@@ -4680,8 +4682,8 @@ class Controller {
   staticMethod2: {
     // 静的メソッドは普通の関数で代替すること。
     instrumented: `
-const t1 = new Turtle(1, 1); // step
-const t2 = new Turtle(3, 3); // step
+const t1 = new Turtle(1, 1); registerDisplayRef('t1', () => t1); // step
+const t2 = new Turtle(3, 3); registerDisplayRef('t2', () => t2); // step
 call(moveTwoSteps, 't')(t1);
 call(moveTwoSteps, 't')(t2);
 t1.前に進む(); // step
@@ -4712,10 +4714,10 @@ class Controller {
   },
   staticMethod3: {
     instrumented: `
-const t1 = new Turtle(0, 0); // step
+const t1 = new Turtle(0, 0); registerDisplayRef('t1', () => t1); // step
 call(moveThreeSteps, 't')(t1);
-const t2 = new Turtle(3, 0); // step
-const t3 = new Turtle(6, 0); // step
+const t2 = new Turtle(3, 0); registerDisplayRef('t2', () => t2); // step
+const t3 = new Turtle(6, 0); registerDisplayRef('t3', () => t3); // step
 call(moveThreeSteps, 't')(t2);
 call(moveThreeSteps, 't')(t3);
 
@@ -4748,10 +4750,10 @@ class Controller {
   },
   staticMethod4: {
     instrumented: `
-const t1 = new Turtle(0, 0); // step
-const t2 = new Turtle(1, 1); // step
+const t1 = new Turtle(0, 0); registerDisplayRef('t1', () => t1); // step
+const t2 = new Turtle(1, 1); registerDisplayRef('t2', () => t2); // step
 call(drawSquare, 't', 'size')(t1, 4);
-const t3 = new Turtle(2, 2); // step
+const t3 = new Turtle(2, 2); registerDisplayRef('t3', () => t3); // step
 call(drawSquare, 't', 'size')(t2, 3);
 call(drawSquare, 't', 'size')(t3, 2);
 
@@ -4801,9 +4803,9 @@ class Controller {
 myGlobal.Controller = { stepCount: 0 };
 
 function main() {
-  const t1 = new Turtle(1, 1); // step
+  const t1 = new Turtle(1, 1); registerDisplayRef('t1', () => t1); // step
   call(moveTwoSteps, 't')(t1);
-  const t2 = new Turtle(3, 3); // step
+  const t2 = new Turtle(3, 3); registerDisplayRef('t2', () => t2); // step
   call(moveTwoSteps, 't')(t2);
   s.set('count', myGlobal.Controller.stepCount); // step
 }
@@ -4845,10 +4847,10 @@ class Controller {
 myGlobal.Settings = { speed: 3 };
 
 function main() {
-  const t1 = call(MyTurtle)();
+  const t1 = call(MyTurtle)(); registerDisplayRef('t1', () => t1);
   call(t1.moveForward.bind(t1))();
   myGlobal.Settings.speed = 2; // step
-  const t2 = call(MyTurtle)();
+  const t2 = call(MyTurtle)(); registerDisplayRef('t2', () => t2);
   call(t1.moveForward.bind(t1))();
   call(t2.moveForward.bind(t2))();
 }
@@ -4899,8 +4901,8 @@ class MyTurtle {
 myGlobal.Settings = { speed: 2 };
 
 function main() {
-  const t1 = call(LineTurtle)();
-  const t2 = call(SquareTurtle)();
+  const t1 = call(LineTurtle)(); registerDisplayRef('t1', () => t1);
+  const t2 = call(SquareTurtle)(); registerDisplayRef('t2', () => t2);
   call(t1.drawLine.bind(t1))();
   call(t2.drawSquare.bind(t2))();
   myGlobal.Settings.speed = 3; // step
@@ -4975,8 +4977,8 @@ class SquareTurtle {
 myGlobal.Settings = { speed: 2 };
 
 function main() {
-  const t1 = call(AcceleratedTurtle)();
-  const t2 = call(SquareTurtle)();
+  const t1 = call(AcceleratedTurtle)(); registerDisplayRef('t1', () => t1);
+  const t2 = call(SquareTurtle)(); registerDisplayRef('t2', () => t2);
   call(t1.drawLine.bind(t1))();
   call(t2.drawSquare.bind(t2))();
   myGlobal.Settings.speed = 2; // step
@@ -5053,8 +5055,8 @@ class SquareTurtle {
 myGlobal.Settings = { additionalSpeed: 0 };
 
 function main() {
-  const t1 = call(SlowTurtle)();
-  const t2 = call(FastTurtle)();
+  const t1 = call(SlowTurtle)(); registerDisplayRef('t1', () => t1);
+  const t2 = call(FastTurtle)(); registerDisplayRef('t2', () => t2);
   call(t1.moveForward.bind(t1))();
   call(t2.moveForward.bind(t2))();
   myGlobal.Settings.additionalSpeed++; // step
@@ -5128,8 +5130,8 @@ class FastTurtle {
 myGlobal.Settings = { additionalSpeed: 0 };
 
 function main() {
-  const t1 = call(MyTurtle, 'x', 'y')(0, 0);
-  const t2 = call(MyTurtle, 'x', 'y')(3, 0);
+  const t1 = call(MyTurtle, 'x', 'y')(0, 0); registerDisplayRef('t1', () => t1);
+  const t2 = call(MyTurtle, 'x', 'y')(3, 0); registerDisplayRef('t2', () => t2);
   call(t1.moveForward.bind(t1))();
   call(t2.moveForward.bind(t2))();
   t1.base++; // step
@@ -5191,7 +5193,7 @@ class MyTurtle {
     // 独自クラスを定義するコードでは `main()` 関数を定義すること。
     instrumented: `
 function main() {
-  const t = call(CurveTurtle)();
+  const t = call(CurveTurtle)(); registerDisplayRef('t', () => t);
   call(t.drawCurve.bind(t))();
 }
 
@@ -5241,7 +5243,7 @@ class CurveTurtle extends MyTurtle {
   inheritance2: {
     instrumented: `
 function main() {
-  const t = call(CurveTurtle, 'p')(2);
+  const t = call(CurveTurtle, 'p')(2); registerDisplayRef('t', () => t);
   call(t.drawCurve.bind(t))();
 }
 
@@ -5299,7 +5301,7 @@ class CurveTurtle extends MyTurtle {
   inheritance3: {
     instrumented: `
 function main() {
-  const t = call(CurveTurtle, 'p')(0);
+  const t = call(CurveTurtle, 'p')(0); registerDisplayRef('t', () => t);
   call(t.drawCurve.bind(t))();
   call(t.drawLine.bind(t))();
 }
@@ -5359,7 +5361,7 @@ class CurveTurtle extends MyTurtle {
   inheritance4: {
     instrumented: `
 function main() {
-  const t = call(SquareTurtle)();
+  const t = call(SquareTurtle)(); registerDisplayRef('t', () => t);
   call(t.drawSquare.bind(t))();
 }
 
@@ -5424,7 +5426,7 @@ class SquareTurtle extends CurveTurtle {
   override1: {
     instrumented: `
 function main() {
-  const t = call(FastTurtle)(); // caller
+  const t = call(FastTurtle)(); registerDisplayRef('t', () => t); // caller
   call(t.drawLine.bind(t))(); // caller
 }
 
@@ -5481,7 +5483,7 @@ class FastTurtle extends MyTurtle {
   override2: {
     instrumented: `
 function main() {
-  const t = call(SuperFastTurtle)();
+  const t = call(SuperFastTurtle)(); registerDisplayRef('t', () => t);
   call(t.drawLine.bind(t))();
 }
 
@@ -5551,7 +5553,7 @@ class SuperFastTurtle extends FastTurtle {
   override3: {
     instrumented: `
 function main() {
-  const t = call(FastCurveTurtle)();
+  const t = call(FastCurveTurtle)(); registerDisplayRef('t', () => t);
   call(t.draw.bind(t))();
 }
 
@@ -5625,7 +5627,7 @@ function main() {
   const ts = [
     call(MyTurtle, 'x', 'y')(0, 0),
     call(FastTurtle, 'p')(1)
-  ];
+  ]; registerDisplayRef('ts', () => ts);
   for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) { // step
     call(ts[s.get('i')].drawLine.bind(ts[s.get('i')]))(); // caller
   }
@@ -5699,7 +5701,7 @@ function main() {
   const ts = [
     call(FastTurtle, 'p')(3),
     call(CurveTurtle, 'p')(0)
-  ];
+  ]; registerDisplayRef('ts', () => ts);
   for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) { // step
     call(ts[s.get('i')].draw.bind(ts[s.get('i')]))();
   }
@@ -5798,7 +5800,7 @@ function main() {
     call(MyTurtle, 'x', 'y')(0, 0),
     call(FastTurtle, 'p')(3),
     call(CurveTurtle, 'p')(2)
-  ];
+  ]; registerDisplayRef('ts', () => ts);
   for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) { // step
     call(ts[s.get('i')].draw.bind(ts[s.get('i')]))();
     ts[s.get('i')].t.右を向く(); // step
@@ -5902,7 +5904,7 @@ class CurveTurtle extends MyTurtle {
   package1: {
     instrumented: `
 function main() {
-  const fast = call(FastTurtle)();
+  const fast = call(FastTurtle)(); registerDisplayRef('fast', () => fast);
   call(fast.drawLine.bind(fast))();
 }
 
@@ -5961,7 +5963,7 @@ public class FastTurtle extends MyTurtle {
   package2: {
     instrumented: `
 function main() {
-  const t = call(BoldLineTurtle)();
+  const t = call(BoldLineTurtle)(); registerDisplayRef('t', () => t);
   call(t.draw.bind(t))();
 }
 
@@ -6043,7 +6045,7 @@ function main() {
   const ts = [
     call(LineTurtle, 'x', 'y')(0, 0),
     call(LongLineTurtle, 'x', 'y')(3, 0)
-  ];
+  ]; registerDisplayRef('ts', () => ts);
   for (const t of ts) {
     call(t.draw.bind(t))();
   }
@@ -6121,7 +6123,7 @@ public class LongLineTurtle extends LineTurtle {
   overload1: {
     instrumented: `
 function main() {
-  const t = call(CurveTurtle)();
+  const t = call(CurveTurtle)(); registerDisplayRef('t', () => t);
   call(t.drawCurve.bind(t))();
 }
 
@@ -6179,7 +6181,7 @@ class CurveTurtle extends MyTurtle {
   overload2: {
     instrumented: `
 function main() {
-  const t = call(MyTurtle, 'x', 'y')(0, 0);
+  const t = call(MyTurtle, 'x', 'y')(0, 0); registerDisplayRef('t', () => t);
   call(t.operate.bind(t), 'n')(0);
   call(t.operate2.bind(t), 's')("right");
   call(t.operate2.bind(t), 's')("up");
@@ -6248,7 +6250,7 @@ class MyTurtle {
   overload3: {
     instrumented: `
 function main() {
-  const t = call(MyTurtle)();
+  const t = call(MyTurtle)(); registerDisplayRef('t', () => t);
   call(t.drawLine.bind(t), 'steps')(max(2, 3));
   t.t.右を向く(); // step
   call(t.drawLine.bind(t), 'steps')(max3(2, 3, 4));
@@ -6319,7 +6321,7 @@ class MyTurtle {
   overload4: {
     instrumented: `
 function main() {
-  const t = call(MyTurtle)();
+  const t = call(MyTurtle)(); registerDisplayRef('t', () => t);
   call(t.move.bind(t), 'dy')(2);
   call(t.move2.bind(t), 'dx', 'dy')(1, 3);
   call(t.move.bind(t), 'dy')(-3);
@@ -6408,14 +6410,16 @@ public class MyTurtle {
   overloadAndOverride1: {
     instrumented: `
 function main() {
-  const m2 = call(MyTurtle2)();
+  const m2 = call(MyTurtle2)(); registerDisplayRef('m2', () => m2);
   call(m2.drawLine2.bind(m2))();
-  const m3 = call(MyTurtle3)();
+  const m3 = call(MyTurtle3)(); registerDisplayRef('m3', () => m3);
   call(m3.drawLine2.bind(m3))();
-  const ms = [m2, m3];
+  const ms = [m2, m3]; registerDisplayRef('ms', () => ms);
   for (const m of ms) {
+    registerDisplayRef('m', () => m);
     m.t.右を向く(); // step
     call(m.drawLine2.bind(m))();
+    unregisterDisplayRef('m');
   }
 }
 
@@ -6487,14 +6491,16 @@ class MyTurtle3 extends MyTurtle {
   overloadAndOverride2: {
     instrumented: `
 function main() {
-  const m2 = call(MyTurtle2)();
+  const m2 = call(MyTurtle2)(); registerDisplayRef('m2', () => m2);
   call(m2.drawLine.bind(m2), 'steps')(2);
-  const m3 = call(MyTurtle3)();
+  const m3 = call(MyTurtle3)(); registerDisplayRef('m3', () => m3);
   call(m3.drawLine.bind(m3), 'steps')(1);
-  const ms = [m2, m3];
+  const ms = [m2, m3]; registerDisplayRef('ms', () => ms);
   for (const m of ms) {
+    registerDisplayRef('m', () => m);
     m.t.右を向く(); // step
     call(m.drawLine2.bind(m))();
+    unregisterDisplayRef('m');
   }
 }
 
@@ -6568,16 +6574,18 @@ class MyTurtle3 extends MyTurtle {
   overloadAndOverride3: {
     instrumented: `
 function main() {
-  const m1 = call(MyTurtle)();
+  const m1 = call(MyTurtle)(); registerDisplayRef('m1', () => m1);
   call(m1.drawLine.bind(m1), 'steps')(4);
-  const m2 = call(MyTurtle2)();
+  const m2 = call(MyTurtle2)(); registerDisplayRef('m2', () => m2);
   call(m2.drawLine.bind(m2), 'steps')(3);
-  const m3 = call(MyTurtle3)();
+  const m3 = call(MyTurtle3)(); registerDisplayRef('m3', () => m3);
   call(m3.drawLine.bind(m3), 'steps')(1);
-  const ms = [m1, m2, m3];
+  const ms = [m1, m2, m3]; registerDisplayRef('ms', () => ms);
   for (const m of ms) {
+    registerDisplayRef('m', () => m);
     m.t.右を向く(); // step
     call(m.drawLine2.bind(m))();
+    unregisterDisplayRef('m');
   }
 }
 
@@ -6655,7 +6663,7 @@ class MyTurtle3 extends MyTurtle2 {
   exception1: {
     instrumented: `
 function main() {
-  const m = call(MyTurtle)();
+  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
   try {
     call(m.drawLine.bind(m))();
     call(m.drawLine.bind(m))();
@@ -6715,7 +6723,7 @@ class MyTurtle {
   exception2: {
     instrumented: `
 function main() {
-  const m = call(MyTurtle)();
+  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
   try {
     call(m.drawLine.bind(m))();
     call(m.drawLine.bind(m))();
@@ -6778,7 +6786,7 @@ class MyTurtle {
   exception3: {
     instrumented: `
 function main() {
-  const m = call(MyTurtle)();
+  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
   try {
     call(m.drawLine.bind(m))();
     call(m.drawLine.bind(m))();
@@ -6840,7 +6848,7 @@ class MyTurtle {
   exception4: {
     instrumented: `
 function main() {
-  const m = call(MyTurtle)();
+  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
   try {
     call(m.drawLine.bind(m))();
     call(m.drawLine.bind(m))();
@@ -6910,7 +6918,7 @@ class MyTurtle {
   exception5: {
     instrumented: `
 function main() {
-  const m = call(MyTurtle)();
+  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
   try {
     call(m.drawLine.bind(m))();
     call(m.drawLine.bind(m))();
@@ -6984,7 +6992,7 @@ class MyTurtle {
   originalException1: {
     instrumented: `
 function main() {
-  const m = call(MyTurtle)();
+  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
   call(m.drawLine.bind(m))();
   call(m.drawLine.bind(m))();
 }
@@ -7046,7 +7054,7 @@ class MyTurtle {
   originalException2: {
     instrumented: `
 function main() {
-  const m = call(MyTurtle)();
+  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
   try {
     call(m.drawLine.bind(m))();
     call(m.drawLine.bind(m))();
@@ -7108,7 +7116,7 @@ class OutOfBoardException extends Exception { }
   originalException3: {
     instrumented: `
 function main() {
-  const m = call(MyTurtle)();
+  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
   try {
     call(m.drawSquare.bind(m))();
   } catch (e) {
@@ -7190,7 +7198,7 @@ class MyTurtle {
   originalException4: {
     instrumented: `
 function main() {
-  const m = call(MyTurtle)();
+  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
   try {
     call(m.drawSquare.bind(m))();
   } catch (e) {
@@ -7270,7 +7278,7 @@ class MyTurtle {
   originalException5: {
     instrumented: `
 function main() {
-  const m = call(MyTurtle)();
+  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
   for (s.set('n', 0); s.get('n') < 3; s.set('n', s.get('n') + 1)) { // step
     try {
       call(m.drawSquare.bind(m), 'size')(1 + s.get('n'));
@@ -7367,7 +7375,7 @@ class MyTurtle {
   twoDimensionalArray1: {
     instrumented: `
 const arr = [[0, 3], [1, 1], [0, 2], [2, 3], [0, 1]];
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
   s.set('c', arr[s.get('i')][1]); // step
   switch (arr[s.get('i')][0]) {
@@ -7424,7 +7432,7 @@ public class Main {
   twoDimensionalArray2: {
     instrumented: `
 const arr = [[0, 3], [1], [0, 2], [2], [0, 1]];
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
   switch (arr[s.get('i')][0]) {
     case 0:
@@ -7484,7 +7492,7 @@ const arr = [
   [TURN_LEFT],
   [FORWARD, 1]
 ];
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 
 for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
   call(moveTurtle, 't', 'command')(t, arr[s.get('i')]);
@@ -7565,7 +7573,7 @@ const arr = [
   [FORWARD, 1]
 ];
 
-let turtle;
+let turtle = null; registerDisplayRef('turtle', () => turtle);
 for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
   s.set('command', arr[s.get('i')][0]); // step
   switch (s.get('command')) {
@@ -7650,7 +7658,7 @@ const arr = [
   [FORWARD, 2]
 ];
 
-let turtle = null;
+let turtle = null; registerDisplayRef('turtle', () => turtle);
 for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
   s.set('command', arr[s.get('i')][0]); // step
   switch (s.get('command')) {
@@ -7734,7 +7742,7 @@ const commands = [
   [TURN_LEFT, FORWARD, TURN_RIGHT, FORWARD]
 ];
 
-const turtles = new Array(commands.length);
+const turtles = new Array(commands.length); registerDisplayRef('turtles', () => turtles);
 for (s.set('nthTurtle', 0); s.get('nthTurtle') < commands.length; s.set('nthTurtle', s.get('nthTurtle') + 1)) { // step
   turtles[s.get('nthTurtle')] = new Turtle(s.get('nthTurtle'), 0); // step
 }
@@ -7800,8 +7808,9 @@ public class Main {
   threeDimensionalArray1: {
     instrumented: `
 s.set('a', [ [ [0, 0], [1, 1], [0, 3] ], [ [5, 2], [2, 1], [0, 4] ] ]);
+const turtles = new Array(s.get('a').length); registerDisplayRef('turtles', () => turtles);
 for (s.set('i', 0); s.get('i') < s.get('a').length; s.set('i', s.get('i') + 1)) { // step
-  const t = new Turtle(s.get('a')[s.get('i')][0][0], s.get('a')[s.get('i')][0][1]); // step
+  const t = new Turtle(s.get('a')[s.get('i')][0][0], s.get('a')[s.get('i')][0][1]); turtles[s.get('i')] = t; // step
   for (s.set('j', 1); s.get('j') < s.get('a')[s.get('i')].length; s.set('j', s.get('j') + 1)) { // step
     s.set('c', s.get('a')[s.get('i')][s.get('j')][1]); // step
     switch (s.get('a')[s.get('i')][s.get('j')][0]) {
@@ -7874,7 +7883,7 @@ const arr = [
   [ [3, 1], [FORWARD, 3], [RIGHT, 2], [FORWARD, 1] ],
   [ [4, 5], [LEFT, 3], [FORWARD, 2] ],
 ];
-const turtles = new Array(arr.length);
+const turtles = new Array(arr.length); registerDisplayRef('turtles', () => turtles);
 for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
   turtles[s.get('i')] = new Turtle(arr[s.get('i')][0][0], arr[s.get('i')][0][1]); // step
   for (s.set('j', 1); s.get('j') < arr[s.get('i')].length; s.set('j', s.get('j') + 1)) { // step
@@ -7958,7 +7967,7 @@ const arr = [
   [ [0, 0], [FORWARD, FORWARD, TURN_RIGHT, FORWARD] ],
   [ [2, 3], [TURN_LEFT, FORWARD, FORWARD] ]
 ];
-const turtles = new Array(arr.length);
+const turtles = new Array(arr.length); registerDisplayRef('turtles', () => turtles);
 for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
   turtles[s.get('i')] = new Turtle(arr[s.get('i')][0][0], arr[s.get('i')][0][1]); // step
   for (s.set('j', 0); s.get('j') < arr[s.get('i')][1].length; s.set('j', s.get('j') + 1)) { // step
@@ -8025,7 +8034,7 @@ const arr = [
   [ [1, 3], [FORWARD, FORWARD, TURN_LEFT, FORWARD, TURN_LEFT] ],
   [ [3, 3], [TURN_RIGHT, FORWARD, FORWARD, TURN_RIGHT, FORWARD] ]
 ];
-const turtles = new Array(arr.length);
+const turtles = new Array(arr.length); registerDisplayRef('turtles', () => turtles);
 for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
   turtles[s.get('i')] = new Turtle(arr[s.get('i')][0][0], arr[s.get('i')][0][1]); // step
   for (s.set('j', 0); s.get('j') < arr[s.get('i')][1].length; s.set('j', s.get('j') + 1)) { // step
@@ -8086,7 +8095,7 @@ public class Main {
 
   test1: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('c', () => t); // step
 t.forward();
 t.forward();
 t.forward();
@@ -8105,7 +8114,7 @@ public class Main {
   },
   test2: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('c', () => t); // step
 for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
   t.forward();
   t.forward();
@@ -8160,13 +8169,13 @@ public class Main {
   },
   test4: {
     instrumented: `
-const t1 = new Turtle(); // step
+const t1 = new Turtle(); registerDisplayRef('c1', () => t1); // step
 t1.forward();
 t1.turnRight();
 s.set('i', 0);
 t1.forward();
 
-const t2 = new Turtle(2, 3, 'G'); // step
+const t2 = new Turtle(2, 3, 'G'); registerDisplayRef('c2', () => t2); // step
 t2.forward();
 s.set('foo', 'あいうえお');
 s.set('bar', <1-100>);
@@ -8196,7 +8205,7 @@ public class Main {
   },
   test5: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('c', () => t); // step
 t.前に進む(); // step
 t.前に進む(); // step
 t.右を向く(); // step
@@ -8225,11 +8234,11 @@ public class Straight {
 myGlobal.Settings = { speed: 0 };
 
 function main() {
-  const t1 = call(MyTurtle)();
+  const t1 = call(MyTurtle)(); registerDisplayRef('t1', () => t1);
   myGlobal.Settings.speed = 2; // step
   call(t1.moveForward.bind(t1))();
 
-  const t2 = call(MyTurtle2, 'x', 'y')(2, 2);
+  const t2 = call(MyTurtle2, 'x', 'y')(2, 2); registerDisplayRef('t2', () => t2);
   call(increaseSpeed)();
   call(t1.moveForward.bind(t1))();
   call(t2.moveForward.bind(t2))();
@@ -8315,7 +8324,7 @@ class MyTurtle2 {
   },
   fillInBlank1: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); @[s.get('i') < 4]@; s.set('i', s.get('i') + 1)) {
   t.forward();
 }
@@ -8336,7 +8345,7 @@ public class Main {
     instrumented: `
 s.set('x', <1-4>);
 s.set('y', @[s.get('x') + 1]@);
-const t = new Turtle(s.get('x'), s.get('y')); // step
+const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
 t.forward();
 `,
     java: `
@@ -8352,7 +8361,7 @@ public class Main {
   },
   fillInBlank3: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 t.forward();
 @[t.turnRight();]@
 t.forward();
@@ -8372,7 +8381,7 @@ public class Main {
   },
   fillInBlank4: {
     instrumented: `
-const t = new Turtle(); // step
+const t = new Turtle(); registerDisplayRef('t', () => t); // step
 for (s.set('i', 0); s.get('i') < @[3]@; s.set('i', s.get('i') + 1)) {
   t.forward();
   @[t.turnRight();]@

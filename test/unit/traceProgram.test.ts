@@ -17,7 +17,10 @@ const defaultTurtle: TurtleTrace = {
   dir: 'N',
 };
 
-type TraceItemWithOptionalCallStack = Omit<TraceItem, 'callStack'> & { callStack?: number[] };
+type TraceItemWithOptionalCallStack = Omit<TraceItem, 'callStack' | 'referenceVars'> & {
+  callStack?: number[];
+  referenceVars?: TraceItem['referenceVars'];
+};
 
 test.each([
   {
@@ -591,7 +594,7 @@ public class Straight {
     expect(sidToLineIndex).toEqual(
       new Map(Object.entries(expectedSidToLineIndex).map(([sid, lineIndex]) => [Number(sid), lineIndex]))
     );
-    expect(stringifyObjects(traceItems)).toEqual(stringifyObjects(expectedTrace));
+    expect(normalizeLegacyTrace(traceItems)).toEqual(normalizeLegacyTrace(expectedTrace));
   }
 );
 
@@ -608,16 +611,12 @@ test('Trace a specific program', () => {
   console.info('traceItems:', JSON.stringify(traceItems, undefined, 2));
 });
 
-/**
- * テストに失敗した際に、WebStorm上で期待値との差異を確認しやすくするために、文字列化しておく。
- */
-function stringifyObjects(trace: TraceItemWithOptionalCallStack[]): TraceItem[] {
-  // 目視で差異を確認しやすくするために文字列化する。
-  for (const item of trace) {
-    item.vars = { ...item.vars };
-    item.callStack ??= [];
-  }
-  return trace as TraceItem[];
+function normalizeLegacyTrace(trace: TraceItemWithOptionalCallStack[]): TraceItemWithOptionalCallStack[] {
+  return trace.map((item) => {
+    const legacyItem = { ...item, vars: { ...item.vars }, callStack: item.callStack ?? [] };
+    delete legacyItem.referenceVars;
+    return legacyItem;
+  });
 }
 
 function getBoard(dots: { x: number; y: number; color: string }[]): string {
