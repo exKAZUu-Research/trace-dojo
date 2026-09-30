@@ -318,6 +318,7 @@ test('deduplicates concurrent start, correct replay, and Next while isolating or
   const results = await Promise.all([caller.submitExercise(answer), caller.submitExercise(answer)]);
   expect(results.map(({ status }) => status)).toEqual(['correct', 'correct']);
   expect(await caller.submitExercise(answer)).toMatchObject({ status: 'correct' });
+  expect(await caller.submitExercise(submission(exercise.sessionId, ['x']))).toMatchObject({ status: 'incorrect' });
   expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSubmission').count).toBe(1);
   const nextInput = { ...locationOnly(), sessionId: exercise.sessionId };
   const [next, duplicateNext] = await Promise.all([caller.nextExercise(nextInput), caller.nextExercise(nextInput)]);

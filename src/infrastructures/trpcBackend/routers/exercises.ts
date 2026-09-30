@@ -380,7 +380,6 @@ const gradeAndSave = async (
   receivedAt: Date
 ): Promise<FillInBlankVerdict> => {
   const session = ownedSession(id, userId, courseId, lectureId, 'fillInBlank', receivedAt);
-  if (session.completedAt) return { status: 'correct' };
   const result = await gradeFillInBlankAnswers(instantiateBlank(session.problemId, session.seed), answers);
   if (result.status === 'ungradable') logger.warn('Failed to grade exercise %d: %s', id, result.detail);
   db.transaction((tx) => {
