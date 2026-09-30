@@ -7573,7 +7573,7 @@ const arr = [
   [FORWARD, 1]
 ];
 
-let turtle; registerDisplayRef('turtle', () => turtle);
+let turtle = null; registerDisplayRef('turtle', () => turtle);
 for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
   s.set('command', arr[s.get('i')][0]); // step
   switch (s.get('command')) {
