@@ -6,16 +6,12 @@ import userEvent from '@testing-library/user-event';
 import { expect, test, vi } from 'vitest';
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }));
-const startExercise = vi.hoisted(() => vi.fn());
 vi.mock('next/navigation', () => ({
   useParams: () => ({ courseId: 'test', lectureId: 'lecture-1' }),
   useRouter: () => navigation,
 }));
 vi.mock('@willbooster/shared-lib-react', () => ({ useLocalStorage: () => [false, vi.fn()] }));
 vi.mock('../../../src/contexts/AuthContext', () => ({ useAuthContextSelector: () => 'user-1' }));
-vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
-  backendTrpcReact: { startExercise: { useMutation: () => ({ mutateAsync: startExercise }) } },
-}));
 
 import { ChallengeModeButton } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/ChallengeModeButton';
 import { ChallengeSelectionModal } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/ChallengeSelectionModal';
