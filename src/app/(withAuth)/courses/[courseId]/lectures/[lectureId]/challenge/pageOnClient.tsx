@@ -135,7 +135,7 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
     setExercise(display as ExerciseDisplay);
   };
   const actions: CompletionAction[] = [
-    { label: '戻る', onClick: back },
+    { label: '終わる', onClick: back },
     { label: '次の問題へ', colorScheme: 'brand', onClick: nextBlank },
   ];
   const gradeBlank = async (answers: string[]): Promise<FillInBlankVerdict> => {

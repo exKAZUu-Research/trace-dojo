@@ -186,7 +186,7 @@ export const RegularChallengeBody: React.FC<Props> = ({
         message="正解です！次の問題へ進めます。"
         title="正解"
         actions={[
-          { label: '戻る', onClick: back },
+          { label: '終わる', onClick: back },
           { label: '次の問題へ', colorScheme: 'brand', onClick: nextProblem },
         ]}
       />

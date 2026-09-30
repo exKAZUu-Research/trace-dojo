@@ -120,7 +120,7 @@ test('shows completion actions and delegates Next and lecture Back', async () =>
     within(screen.getByRole('alertdialog'))
       .getAllByRole('button')
       .map((button) => button.textContent)
-  ).toEqual(['戻る', '次の問題へ']);
+  ).toEqual(['終わる', '次の問題へ']);
   await user.keyboard('{Escape}');
   expect(screen.getByRole('alertdialog')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /次の問題/ })).toBeEnabled();
@@ -131,7 +131,7 @@ test('shows completion actions and delegates Next and lecture Back', async () =>
 
   unmount();
   renderBody({ display: { ...executionDisplay, completed: true }, next, back });
-  await user.click(screen.getByRole('button', { name: /戻る/ }));
+  await user.click(screen.getByRole('button', { name: /終わる/ }));
   expect(back).toHaveBeenCalledTimes(1);
 });
 
@@ -177,7 +177,7 @@ test('locally grades the final step and exposes completion actions', async () =>
     isCorrect: true,
   });
   await waitFor(() => expect(screen.getByRole('button', { name: /次の問題/ })).toBeVisible());
-  expect(screen.getByRole('button', { name: /戻る/ })).toBeVisible();
+  expect(screen.getByRole('button', { name: /終わる/ })).toBeVisible();
   expect(inputs[2]).toHaveValue('4');
   expect(problemCard).toBeInTheDocument();
   expect(problemCard).toHaveTextContent('6行目');
@@ -221,7 +221,7 @@ test('deduplicates synchronous Back and resets the action guard for a later comp
     await user.type(input, value);
   }
   await user.click(screen.getByRole('button', { name: /提出/ }));
-  const backButton = await screen.findByRole('button', { name: '戻る' });
+  const backButton = await screen.findByRole('button', { name: '終わる' });
   fireEvent.click(backButton);
   fireEvent.click(backButton);
   expect(back).toHaveBeenCalledTimes(1);

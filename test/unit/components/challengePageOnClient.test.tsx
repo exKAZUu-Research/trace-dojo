@@ -262,7 +262,7 @@ test('completed fill-in-blank orders Back before Next and reports a failed actio
     within(dialog)
       .getAllByRole('button')
       .map((button) => button.textContent)
-  ).toEqual(['戻る', '次の問題へ']);
+  ).toEqual(['終わる', '次の問題へ']);
   await user.click(screen.getByRole('button', { name: '次の問題へ' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('次の問題を取得できませんでした。');
   expect(dialog).toBeVisible();
@@ -272,7 +272,7 @@ test('completed fill-in-blank back returns to the lecture', async () => {
   transport.start.mockResolvedValue({ ...blankDisplay, completed: true });
   const user = userEvent.setup();
   renderPage('fillInBlank');
-  await user.click(await screen.findByRole('button', { name: '戻る' }));
+  await user.click(await screen.findByRole('button', { name: '終わる' }));
   expect(navigation.push).toHaveBeenCalledWith('/courses/test/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d');
 });
 
