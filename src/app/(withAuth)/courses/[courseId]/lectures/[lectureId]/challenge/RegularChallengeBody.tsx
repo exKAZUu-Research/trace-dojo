@@ -182,6 +182,7 @@ export const RegularChallengeBody: React.FC<Props> = ({
         }}
       />
       <ResultAlertDialog
+        key={display.sessionId}
         isOpen={display.completed}
         message="正解です！次の問題へ進めます。"
         title="正解"

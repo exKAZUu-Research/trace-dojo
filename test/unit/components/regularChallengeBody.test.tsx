@@ -227,6 +227,21 @@ test('deduplicates synchronous Back and resets the action guard for a later comp
   expect(back).toHaveBeenCalledTimes(1);
 }, 15_000);
 
+test('keeps completion actions usable after advancing to an already completed session', async () => {
+  const next = vi
+    .fn<RegularChallengeTransport['next']>()
+    .mockResolvedValueOnce({ ...executionDisplay, sessionId: 18, completed: true })
+    .mockResolvedValueOnce({ ...executionDisplay, sessionId: 19 });
+  const user = userEvent.setup();
+  renderBody({ display: { ...executionDisplay, completed: true }, next });
+
+  await user.click(screen.getByRole('button', { name: '次の問題へ' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '次の問題へ' })).toBeEnabled());
+  await user.click(screen.getByRole('button', { name: '次の問題へ' }));
+  expect(next).toHaveBeenLastCalledWith({ sessionId: 18, problemFormat: 'regular' });
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+});
+
 const renderBody = (
   overrides: Partial<RegularChallengeTransport> & { display?: RegularChallengeDisplay; back?: () => void }
 ): ReturnType<typeof render> => {
