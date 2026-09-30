@@ -74,7 +74,10 @@ export const TraceViewer: React.FC<Props> = (props: Props) => {
           </Button>
         </HStack>
         <Box mt={4} w="100%">
-          <Variables traceItemVars={props.problem.traceItems[props.viewingTraceItemIndex].vars} />
+          <Variables
+            traceItemVars={props.problem.traceItems[props.viewingTraceItemIndex].vars}
+            referenceVars={props.problem.traceItems[props.viewingTraceItemIndex].referenceVars}
+          />
         </Box>
       </Box>
     </HStack>

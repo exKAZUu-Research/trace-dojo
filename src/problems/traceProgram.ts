@@ -19,19 +19,23 @@ export interface TurtleTrace {
   dir: string;
 }
 
+export type DisplayNode =
+  | { kind: 'value'; value: number | string | boolean | null }
+  | { kind: 'object' | 'array'; entries: Record<string, DisplayNode> };
+
 export interface TraceItem {
   depth: number;
   sid: number;
   /** caller id のスタック。 `// caller` のある行に caller id が付与される。 */
   callStack: number[];
   vars: TraceItemVariable;
+  referenceVars: Record<string, DisplayNode>;
   turtles: TurtleTrace[];
   board: string;
   /** Pythonなどの拡張for文しかない言語において、削除すべき更新式か否か。 */
   last?: boolean;
 }
 
-// できる限り、可能性のある型を具体的に列挙していきたい。
 export type TraceItemVariable = Record<string, number | string | number[] | string[]>;
 
 export const charToColor = {
@@ -74,7 +78,7 @@ export function traceProgram(
   }
 ): TracedProgram {
   const collectTrace = options?.collectTrace ?? true;
-  if (!instrumented.includes('Turtle')) {
+  if (!instrumented.includes('Turtle') && !/registerDisplayRef\s*\(/.test(instrumented)) {
     if (instrumented.includes(' = ')) {
       throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
     }
@@ -86,7 +90,6 @@ export function traceProgram(
   const modifiedCode = modifiedCodeLines.join('\n');
 
   const thisPropNames = Object.keys((this as Record<string, unknown> | undefined) ?? {});
-  // 無理に難読化する必要はないが、コードの文量を減らす意識を持つ。
   const executableCode = `
 let myGlobal = {};
 class ScopeError extends Error {
@@ -110,6 +113,7 @@ class Scope {
   constructor(parent) {
     this.parent = parent;
     this.vars = {};
+    this.displayRefs = {};
   }
   get(varName) {
     if (this.vars[varName] !== undefined) {
@@ -124,7 +128,8 @@ class Scope {
   enterNewScope(params) {
     s = new Scope(this);
     for (const [k, v] of params) {
-      s.vars[k] = v;
+      if (v && typeof v === 'object') s.displayRefs[k] = () => v;
+      if (!(v instanceof Turtle)) s.vars[k] = v;
     }
   }
   leaveScope() {
@@ -140,6 +145,12 @@ class Scope {
     }
     return depth;
   }
+}
+function registerDisplayRef(name, getter) {
+  s.displayRefs[name] = getter;
+}
+function unregisterDisplayRef(name) {
+  delete s.displayRefs[name];
 }
 const dirs = ['N', 'E', 'S', 'W'];
 const dx = [0, 1, 0, -1];
@@ -224,7 +235,6 @@ class Turtle {
   }
 }
 function addTrace(sid, self) {
-  // Each snapshot copies every turtle, so the cost grows with the number of turtles.
   spend(1 + _turtles.length);
   if (!collectTrace) return;
   const vars = {...s.vars, ...myGlobal};
@@ -233,7 +243,40 @@ function addTrace(sid, self) {
     for (const name of thisPropNames) delete vars['this'][name];
   }
   flattenObjects(vars);
-  trace.push({depth: s.getDepth(), sid, callStack: [...callStack], turtles: _turtles.map(t => ({...t})), vars, board: board.map(r => r.join('')).join('\\n')});
+  const referenceVars = {};
+  for (const [name, getter] of Object.entries(s.displayRefs)) {
+    const node = captureDisplayNode(getter(), new Set());
+    if (node !== undefined) referenceVars[name] = node;
+  }
+  if (self && self !== globalThis) {
+    const node = captureDisplayNode(self, new Set());
+    if (node !== undefined) referenceVars['this'] = node;
+  }
+  trace.push({depth: s.getDepth(), sid, callStack: [...callStack], turtles: _turtles.map(t => ({...t})), vars, referenceVars, board: board.map(r => r.join('')).join('\\n')});
+}
+function captureDisplayNode(value, seen) {
+  if (value === null || typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean') {
+    return {kind: 'value', value};
+  }
+  if (typeof value !== 'object' || seen.has(value)) return;
+  if (value instanceof Turtle) {
+    if (!_turtles.includes(value)) return;
+    return {kind: 'object', entries: {x: {kind: 'value', value: value.x}, y: {kind: 'value', value: value.y}}};
+  }
+  seen.add(value);
+  const entries = {};
+  if (Array.isArray(value)) {
+    // Java arrays start with null slots, whereas the holes of new Array(n) are skipped by Object.entries.
+    for (let i = 0; i < value.length; i++) entries[i] = captureDisplayNode(value[i], seen) ?? {kind: 'value', value: null};
+  } else {
+    for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+      if (!descriptor.enumerable || !('value' in descriptor)) continue;
+      const child = captureDisplayNode(descriptor.value, seen);
+      if (child !== undefined) entries[key] = child;
+    }
+  }
+  seen.delete(value);
+  return {kind: Array.isArray(value) ? 'array' : 'object', entries};
 }
 function flattenObjects(obj) {
   for (const [key, value] of Object.entries(obj)) {
@@ -262,7 +305,7 @@ function call(cid, f, ...argNames) {
     }
     try {
       callStack.push(cid);
-      s.enterNewScope(argNames.map((n, i) => [n, argValues[i]]).filter(([n, v]) => !(v instanceof Turtle)));
+      s.enterNewScope(argNames.map((n, i) => [n, argValues[i]]));
       return isClass(f) ? new f(...argValues) : f(...argValues);
     } finally {
       callStack.pop();
@@ -273,23 +316,20 @@ function call(cid, f, ...argNames) {
 function isClass(obj) {
   return typeof obj === 'function' && /^class\\s/.test(obj.toString());
 }
-trace.push({depth: 0, sid: 0, callStack: [], turtles: [], vars: {}, board: board.map(r => r.join('')).join('\\n')});
+trace.push({depth: 0, sid: 0, callStack: [], turtles: [], vars: {}, referenceVars: {}, board: board.map(r => r.join('')).join('\\n')});
 s = new Scope();
 ${modifiedCode.trim()}
 ({trace, finalVars: {...s.vars}, finalBoard: board.map(r => r.join('')).join('\\n'), finalTurtles: _turtles.map(t => ({...t}))});
 `;
 
-  const {
-    finalBoard,
-    finalTurtles,
-    finalVars,
-    trace: rawTrace,
-  } = eval(executableCode) as {
+  // oxlint-disable-next-line no-eval -- Instrumented programs need access to the runtime's lexical bindings.
+  const evaluation = eval(executableCode) as {
     trace: TraceItem[];
     finalVars: TraceItemVariable;
     finalBoard: string;
     finalTurtles: TurtleTrace[];
   };
+  const { finalBoard, finalTurtles, finalVars, trace: rawTrace } = evaluation;
   const trace = (languageId as string) === 'python' ? rawTrace.filter((item: TraceItem) => !item.last) : rawTrace;
 
   const lines = rawDisplayProgram.split('\n');
