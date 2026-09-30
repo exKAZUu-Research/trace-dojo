@@ -28,7 +28,6 @@ export const ResultAlertDialog: React.FC<Props> = (props) => {
   const closeHandledRef = useRef(false);
   const actionPendingRef = useRef(false);
   const lifecycleRef = useRef(0);
-  const [isActionPending, setIsActionPending] = useState(false);
   const [pendingActionLabel, setPendingActionLabel] = useState('');
   const [actionError, setActionError] = useState('');
   const canDismiss = props.actions === undefined;
@@ -38,14 +37,13 @@ export const ResultAlertDialog: React.FC<Props> = (props) => {
     closeHandledRef.current = false;
     actionPendingRef.current = false;
     lifecycleRef.current += 1;
-    setIsActionPending(false);
     setPendingActionLabel('');
     setActionError('');
   }, [props.isOpen]);
   /* oxlint-enable react/set-state-in-effect */
 
   const close = (): void => {
-    if (!props.isOpen || !canDismiss || actionPendingRef.current || closeHandledRef.current) return;
+    if (!props.isOpen || !canDismiss || closeHandledRef.current) return;
     closeHandledRef.current = true;
     props.onClose();
   };
@@ -53,7 +51,6 @@ export const ResultAlertDialog: React.FC<Props> = (props) => {
     if (actionPendingRef.current) return;
     actionPendingRef.current = true;
     const lifecycle = lifecycleRef.current;
-    setIsActionPending(true);
     setPendingActionLabel(action.label);
     setActionError('');
     try {
@@ -61,7 +58,6 @@ export const ResultAlertDialog: React.FC<Props> = (props) => {
     } catch (error) {
       if (lifecycleRef.current !== lifecycle) return;
       actionPendingRef.current = false;
-      setIsActionPending(false);
       setPendingActionLabel('');
       setActionError(error instanceof Error ? error.message : '操作に失敗しました。もう一度お試しください。');
     }
@@ -69,7 +65,7 @@ export const ResultAlertDialog: React.FC<Props> = (props) => {
 
   return (
     <AlertDialog
-      closeOnEsc={canDismiss && !isActionPending}
+      closeOnEsc={canDismiss}
       closeOnOverlayClick={false}
       isOpen={props.isOpen}
       leastDestructiveRef={cancelRef as React.RefObject<HTMLElement>}

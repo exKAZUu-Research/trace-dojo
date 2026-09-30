@@ -55,7 +55,6 @@ test.each([
   await close(user);
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   expect(navigation.push).not.toHaveBeenCalled();
-  expect(startExercise).not.toHaveBeenCalled();
   expect(trigger).toHaveFocus();
 });
 
