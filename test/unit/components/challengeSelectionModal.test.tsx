@@ -28,7 +28,7 @@ test('the lecture trigger opens a labelled dialog, focuses the regular native ca
   navigation.push.mockReset();
   const user = userEvent.setup();
   renderInChakra(<Lecture lectureIndex={0} problemSessions={[]} />);
-  await user.click(screen.getByRole('button', { name: 'チャレンジモード' }));
+  await user.click(screen.getByRole('button', { name: 'チャレンジモード（任意）' }));
   const dialog = await screen.findByRole('dialog', { name: 'チャレンジ形式を選択' });
   await waitFor(() => expect(dialog).toBeVisible());
   const regular = screen.getByRole('button', { name: /通常問題/ });
@@ -50,7 +50,7 @@ test.each([
   navigation.push.mockReset();
   const user = userEvent.setup();
   renderInChakra(<ChallengeModeButton courseId="test-course" lectureId="lecture-1" />);
-  const trigger = screen.getByRole('button', { name: 'チャレンジモード' });
+  const trigger = screen.getByRole('button', { name: 'チャレンジモード（任意）' });
   await user.click(trigger);
   await close(user);
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
@@ -63,7 +63,7 @@ test('fill-in-blank card navigates with its format', async () => {
   navigation.push.mockReset();
   const user = userEvent.setup();
   renderInChakra(<ChallengeModeButton courseId="test-course" lectureId="lecture-1" />);
-  await user.click(screen.getByRole('button', { name: 'チャレンジモード' }));
+  await user.click(screen.getByRole('button', { name: 'チャレンジモード（任意）' }));
   await user.click(screen.getByRole('button', { name: /穴埋め問題/ }));
   expect(navigation.push).toHaveBeenCalledWith('/courses/test-course/lectures/lecture-1/challenge?format=fillInBlank');
 });
@@ -72,7 +72,7 @@ test('suppresses two format activations in the same event turn', async () => {
   navigation.push.mockReset();
   const user = userEvent.setup();
   renderInChakra(<ChallengeModeButton courseId="test-course" lectureId="lecture-1" />);
-  await user.click(screen.getByRole('button', { name: 'チャレンジモード' }));
+  await user.click(screen.getByRole('button', { name: 'チャレンジモード（任意）' }));
   const regular = await screen.findByRole('button', { name: /通常問題/ });
   const blank = screen.getByRole('button', { name: /穴埋め問題/ });
 

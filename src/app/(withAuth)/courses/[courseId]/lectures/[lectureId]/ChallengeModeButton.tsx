@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
 import { ChallengeSelectionModal } from './challenge/ChallengeSelectionModal';
 import type { ChallengeProblemFormat } from './challenge/ChallengeSelection';
-import { Button } from '@/infrastructures/useClient/chakra';
+import { Button, Text, VStack } from '@/infrastructures/useClient/chakra';
 
 interface ChallengeModeButtonProps {
   courseId: string;
@@ -26,9 +26,14 @@ export const ChallengeModeButton: React.FC<ChallengeModeButtonProps> = ({ course
 
   return (
     <>
-      <Button alignSelf="start" colorScheme="brand" onClick={() => setIsOpen(true)}>
-        チャレンジモード
-      </Button>
+      <VStack align="start" pt={4} spacing={1}>
+        <Button colorScheme="brand" onClick={() => setIsOpen(true)}>
+          チャレンジモード（任意）
+        </Button>
+        <Text color="gray.600" fontSize="sm">
+          チャレンジモードの取り組みは成績に反映されません。
+        </Text>
+      </VStack>
       <ChallengeSelectionModal
         isOpen={isOpen}
         isPending={isPending}

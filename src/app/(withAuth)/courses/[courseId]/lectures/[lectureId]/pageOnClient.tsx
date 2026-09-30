@@ -82,7 +82,6 @@ export const Lecture: React.FC<Props> = (props) => {
           </CardHeader>
 
           <CardBody align="stretch" as={VStack} pb={2}>
-            <ChallengeModeButton courseId={params.courseId} lectureId={params.lectureId} />
             <Progress
               colorScheme="brand"
               max={lectureProblemIds.length}
@@ -161,6 +160,8 @@ export const Lecture: React.FC<Props> = (props) => {
                 })}
               </Tbody>
             </Table>
+
+            <ChallengeModeButton courseId={params.courseId} lectureId={params.lectureId} />
           </CardBody>
         </Card>
       </SimpleGrid>
