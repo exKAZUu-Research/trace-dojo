@@ -89,6 +89,12 @@ test('multiple turtles and arrays retain Java reference paths', () => {
       '2': object({ x: scalar(5), y: scalar(0) }),
     }),
   });
+
+  const unassigned = problem('garbageCollection4');
+  expect(referenceVars(unassigned.traceItems.find((item) => item.sid === 1))).toEqual({
+    // oxlint-disable-next-line unicorn/no-null -- Snapshots represent unassigned Java array slots as null.
+    turtles: array(Object.fromEntries(Array.from({ length: 5 }, (_, i) => [String(i), scalar(null)]))),
+  });
 });
 
 test('alias assignment and removal update reference values at their Java steps', () => {

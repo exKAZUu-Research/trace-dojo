@@ -265,10 +265,15 @@ function captureDisplayNode(value, seen) {
   }
   seen.add(value);
   const entries = {};
-  for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
-    if (!descriptor.enumerable || !('value' in descriptor)) continue;
-    const child = captureDisplayNode(descriptor.value, seen);
-    if (child !== undefined) entries[key] = child;
+  if (Array.isArray(value)) {
+    // Java arrays start with null slots, whereas the holes of new Array(n) are skipped by Object.entries.
+    for (let i = 0; i < value.length; i++) entries[i] = captureDisplayNode(value[i], seen) ?? {kind: 'value', value: null};
+  } else {
+    for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+      if (!descriptor.enumerable || !('value' in descriptor)) continue;
+      const child = captureDisplayNode(descriptor.value, seen);
+      if (child !== undefined) entries[key] = child;
+    }
   }
   seen.delete(value);
   return {kind: Array.isArray(value) ? 'array' : 'object', entries};
