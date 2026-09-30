@@ -1,17 +1,27 @@
 Close #<IssueNumber>
 
-## Self Check
+<!-- Write for a reviewer who has not followed the work. Write in English, except text whose language is part of what the code handles (e.g., UI strings, test inputs). Scale each section to the change: a sentence for a small change, numbered subsections for a large one. Delete this comment and the placeholder comments below. -->
 
-- [ ] I've confirmed `All checks have passed` on PR page. (You may leave this box unchecked due to long workflows.)
-  - PR title follows [Angular's commit message format](https://github.com/angular/angular/blob/main/CONTRIBUTING.md#-commit-message-format).
-    - PR title doesn't have `WIP:`.
-  - All tests are passed.
-    - Test command (e.g., `bun run test`) is passed.
-    - Lint command (e.g., `bun run lint`) is passed.
-- [ ] I've reviewed my changes on PR's diff view.
+## Why
 
-<!-- Please add screenshots if you modify the UI.
-| Current                  | In coming                |
-| ------------------------ | ------------------------ |
-| <img src="" width="400"> | <img src="" width="400"> |
--->
+<!-- The problem, with the numbers or observations behind it, and why this approach over the alternatives. -->
+
+## Requirements
+
+<!-- The requirements the change must satisfy and the guarantees it must keep as they stand now, one per line, each marked `required` (asked for by the requester, or an existing contract callers depend on) or `chosen` (the implementer's own decision with the reason that decided it, which a simpler design may replace); state the requester's instructions in the requester's terms, whether they came from an issue or a conversation, and keep each line as it is until the requester overrides or withdraws the instruction behind it or the decision behind it changes, and then rewrite or remove that line instead of adding one beside it. -->
+
+## Customer Summary
+
+<!-- Behavior, workflow, or user-visible changes, written for readers who know nothing about the implementation. -->
+
+## Technical Summary
+
+<!-- Decisions and their reasons, data flow, where to look (the files that matter most), and what to check hardest: the parts whose correctness is argued rather than proven. -->
+
+## Testing
+
+<!-- Commands run, tests added, and what was NOT exercised and why. -->
+
+## Notes
+
+<!-- Known limitations, compatibility and migration, follow-up work; delete this section if there is none. -->
