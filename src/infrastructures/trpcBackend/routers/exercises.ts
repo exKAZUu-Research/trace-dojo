@@ -10,7 +10,7 @@ import { procedure } from '../trpc';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import type { ExerciseDisplay } from '@/problems/fillInBlank/exerciseProblem';
 import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
-import { gradeFillInBlankAnswers } from '@/problems/fillInBlank/grade';
+import { gradeFillInBlankAnswers, type FillInBlankVerdict } from '@/problems/fillInBlank/grade';
 import { instantiateProblem, isFillInBlankProblem, type InstantiatedProblem } from '@/problems/instantiateProblem';
 import {
   courseIdToLectureIds,
@@ -21,10 +21,6 @@ import {
 } from '@/problems/problemData';
 
 type ProblemFormat = 'fillInBlank' | 'regular';
-export interface SubmissionResult {
-  status: 'correct' | 'incorrect' | 'ungradable';
-  detail: string;
-}
 const locationSchema = z.object({ courseId: z.string(), lectureId: z.string() });
 const startSchema = z.union([
   locationSchema.extend({ problemFormat: z.literal('regular') }).strict(),
@@ -54,7 +50,7 @@ const regularSubmissionSchema = locationSchema
 const switchSchema = locationSchema.extend({ sessionId: z.number().int().positive() }).strict();
 const startLocks = new Map<string, Promise<unknown>>();
 const sessionQueues = new Map<number, Promise<unknown>>();
-const gradingLocks = new Map<string, Promise<SubmissionResult>>();
+const gradingLocks = new Map<string, Promise<FillInBlankVerdict>>();
 
 export const exerciseProcedures = {
   startExercise: procedure
@@ -382,9 +378,9 @@ const gradeAndSave = async (
   lectureId: string,
   answers: string[],
   receivedAt: Date
-): Promise<SubmissionResult> => {
+): Promise<FillInBlankVerdict> => {
   const session = ownedSession(id, userId, courseId, lectureId, 'fillInBlank', receivedAt);
-  if (session.completedAt) return { status: 'correct', detail: '' };
+  if (session.completedAt) return { status: 'correct' };
   const result = await gradeFillInBlankAnswers(instantiateBlank(session), answers);
   if (result.status === 'ungradable') logger.warn('Failed to grade exercise %d: %s', id, result.detail);
   db.transaction((tx) => {
@@ -402,5 +398,7 @@ const gradeAndSave = async (
     if (result.status === 'correct')
       tx.update(exerciseSessions).set({ completedAt: receivedAt }).where(eq(exerciseSessions.id, id)).run();
   });
-  return { status: result.status, detail: result.status === 'incorrect' ? result.detail : '' };
+  if (result.status === 'correct') return { status: 'correct' };
+  if (result.status === 'ungradable') return { status: 'ungradable', detail: '' };
+  return { status: 'incorrect', detail: result.detail };
 };

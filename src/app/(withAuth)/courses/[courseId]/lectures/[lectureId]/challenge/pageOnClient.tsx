@@ -141,12 +141,7 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
   ];
   const gradeBlank = async (answers: string[]): Promise<FillInBlankVerdict> => {
     if (!exercise) throw new Error('No active exercise');
-    const result = await submitBlank.mutateAsync({ courseId, lectureId, sessionId: exercise.sessionId, answers });
-    return result.status === 'incorrect'
-      ? { status: 'incorrect', detail: result.detail }
-      : result.status === 'ungradable'
-        ? { status: 'ungradable', detail: '' }
-        : { status: 'correct' };
+    return await submitBlank.mutateAsync({ courseId, lectureId, sessionId: exercise.sessionId, answers });
   };
 
   return (
