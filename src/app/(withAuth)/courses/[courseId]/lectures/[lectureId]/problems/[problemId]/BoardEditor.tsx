@@ -1,7 +1,5 @@
 'use client';
 
-import { zenkakuAlphanumericalsToHankaku } from '@willbooster/shared-lib';
-import fastDeepEqual from 'fast-deep-equal';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from 'react';
 import { MdOutlineDelete, MdTurnLeft, MdTurnRight } from 'react-icons/md';
 import { useImmer } from 'use-immer';
@@ -34,6 +32,11 @@ import {
   VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateProblem';
+import {
+  gradeRegularAnswers,
+  parseBoard,
+  type RegularGradingResult,
+} from '../../../../../../../../problems/regular/grade';
 import type { TraceItemVariable, TurtleTrace } from '../../../../../../../../problems/traceProgram';
 import type { ColorChar, ProblemType, SelectedCell } from '../../../../../../../../types';
 
@@ -54,7 +57,7 @@ interface TurtleGraphicsProps {
 }
 
 export interface TurtleGraphicsHandle {
-  findIncorrectLocationsAndHintText(): [string[], string];
+  gradeAnswers(): RegularGradingResult;
 }
 
 export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>((props, ref) => {
@@ -79,13 +82,9 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     [previousTraceItem, props.initialVariables, updateBoard, updateTurtles, updateVariables]
   );
 
-  useImperativeHandle(ref, () => ({
-    findIncorrectLocationsAndHintText,
-  }));
-
   useEffect(() => {
     initialize(props.previousTraceItemIndex >= 1);
-  }, [props.previousTraceItemIndex, initialize]); // We should include initialize because it depends on props.initialVariables
+  }, [props.previousTraceItemIndex, initialize]);
 
   const updateTurtle = (currentTurtle: TurtleTrace, newTurtle: Partial<TurtleTrace>): void => {
     updateTurtles((draft) => {
@@ -102,36 +101,23 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
     });
   };
 
-  const findIncorrectLocationsAndHintText = (): [string[], string] => {
-    const locations: string[] = [];
-    let hintText = '';
-    if (!fastDeepEqual(new Set(currentTraceItem.turtles), new Set(turtles))) {
-      locations.push('亀');
-    }
-    if (!fastDeepEqual(parseBoard(currentTraceItem.board), board)) {
-      locations.push('盤面（マスの色）');
-    }
-    for (const [name, value] of Object.entries(variables)) {
-      if (
-        zenkakuAlphanumericalsToHankaku(value) !== zenkakuAlphanumericalsToHankaku(String(props.currentVariables[name]))
-      ) {
-        const isExpression = /[+\-*/%()[\]\\.]/.test(name);
-        locations.push(isExpression ? `式「${name}」` : `変数${name}`);
-        if (props.initialVariables[name] === String(props.currentVariables[name])) {
-          hintText += hintText ? '\n\n' : '\n\nヒント: ';
-          hintText +=
-            '変数を更新する代入演算子（=, +=, ++）などがなければ、計算が行われても変数の値は更新されません。代入されない限り、変数の値が変わらないことに注意してください';
-        }
-        const currentLine = props.problem.sidToLineIndex.get(props.problem.traceItems[props.currentTraceItemIndex].sid);
-        if (props.problem.displayProgram.split('\n')[(currentLine ?? -1) - 1]?.includes(' % ')) {
-          hintText += hintText ? '\n\n' : '\n\nヒント: ';
-          hintText +=
-            '「%」は剰余算の演算子です。%の右側の数値で左側の数値を割った数の余りです。左右の数値が整数であれば、商も余りも整数になります。例えば、「1 % 7」は1を7で割った余りの数になるので1、「0 % 7」は0、「2 % 7」は2、「7 % 7」は0、「10 % 7」は3になります。';
-        }
-      }
-    }
-    return [locations, hintText];
+  const gradeAnswers = (): RegularGradingResult => {
+    const currentLine = props.problem.sidToLineIndex.get(currentTraceItem.sid);
+    return gradeRegularAnswers({
+      expectedBoard: currentTraceItem.board,
+      expectedTurtles: currentTraceItem.turtles,
+      expectedVariables: props.currentVariables,
+      answerBoard: board,
+      answerTurtles: turtles,
+      answerVariables: variables,
+      initialVariables: props.initialVariables,
+      sourceLine: props.problem.displayProgram.split('\n')[(currentLine ?? -1) - 1],
+    });
   };
+
+  useImperativeHandle(ref, () => ({
+    gradeAnswers,
+  }));
 
   const handleClickTurtle = (turtle: TurtleTrace): void => {
     setSelectedCell({ x: turtle.x, y: turtle.y });
@@ -420,17 +406,6 @@ BoardEditor.displayName = 'BoardEditor';
 
 function canPutTurtle(turtlesTraces: TurtleTrace[], x: number, y: number): boolean {
   return 0 <= x && x < COLUMNS && 0 <= y && y < ROWS && !turtlesTraces.some((t) => t.x === x && t.y === y);
-}
-
-function parseBoard(boardString: string): ColorChar[][] {
-  return (
-    boardString
-      .trim()
-      .split('\n')
-      .filter((line) => line.trim() !== '')
-      // eslint-disable-next-line @typescript-eslint/no-misused-spread
-      .map((line) => [...line.trim()]) as ColorChar[][]
-  );
 }
 
 function useShortcutKeys(handleSubmit: () => Promise<void>, isSubmitting: boolean): void {
