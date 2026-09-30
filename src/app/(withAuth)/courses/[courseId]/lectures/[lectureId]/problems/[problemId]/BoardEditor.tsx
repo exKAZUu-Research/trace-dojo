@@ -32,7 +32,11 @@ import {
   VStack,
 } from '../../../../../../../../infrastructures/useClient/chakra';
 import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateProblem';
-import { gradeRegularAnswers, type RegularGradingResult } from '../../../../../../../../problems/regular/grade';
+import {
+  gradeRegularAnswers,
+  parseBoard,
+  type RegularGradingResult,
+} from '../../../../../../../../problems/regular/grade';
 import type { TraceItemVariable, TurtleTrace } from '../../../../../../../../problems/traceProgram';
 import type { ColorChar, ProblemType, SelectedCell } from '../../../../../../../../types';
 
@@ -402,17 +406,6 @@ BoardEditor.displayName = 'BoardEditor';
 
 function canPutTurtle(turtlesTraces: TurtleTrace[], x: number, y: number): boolean {
   return 0 <= x && x < COLUMNS && 0 <= y && y < ROWS && !turtlesTraces.some((t) => t.x === x && t.y === y);
-}
-
-function parseBoard(boardString: string): ColorChar[][] {
-  return (
-    boardString
-      .trim()
-      .split('\n')
-      .filter((line) => line.trim() !== '')
-      // oxlint-disable-next-line typescript/no-misused-spread -- Board cells are single ASCII color markers.
-      .map((line) => [...line.trim()]) as ColorChar[][]
-  );
 }
 
 function useShortcutKeys(handleSubmit: () => Promise<void>, isSubmitting: boolean): void {

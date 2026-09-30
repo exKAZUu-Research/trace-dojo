@@ -64,7 +64,7 @@ function compareTurtlePositions(a: TurtleTrace, b: TurtleTrace): number {
   return a.x - b.x || a.y - b.y;
 }
 
-function parseBoard(boardString: string): ColorChar[][] {
+export function parseBoard(boardString: string): ColorChar[][] {
   return (
     boardString
       .trim()
