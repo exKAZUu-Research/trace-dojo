@@ -3290,7 +3290,7 @@ public class Main {
   },
   garbageCollection3: {
     instrumented: `
-const turtles = []; registerDisplayRef('turtles', () => turtles);
+const turtles = new Array(2); registerDisplayRef('turtles', () => turtles);
 turtles[0] = new Turtle(2, 3); // step
 turtles[1] = new Turtle(3, 4); // step
 
@@ -7808,7 +7808,7 @@ public class Main {
   threeDimensionalArray1: {
     instrumented: `
 s.set('a', [ [ [0, 0], [1, 1], [0, 3] ], [ [5, 2], [2, 1], [0, 4] ] ]);
-const turtles = []; registerDisplayRef('turtles', () => turtles);
+const turtles = new Array(s.get('a').length); registerDisplayRef('turtles', () => turtles);
 for (s.set('i', 0); s.get('i') < s.get('a').length; s.set('i', s.get('i') + 1)) { // step
   const t = new Turtle(s.get('a')[s.get('i')][0][0], s.get('a')[s.get('i')][0][1]); turtles[s.get('i')] = t; // step
   for (s.set('j', 1); s.get('j') < s.get('a')[s.get('i')].length; s.set('j', s.get('j') + 1)) { // step
