@@ -120,8 +120,6 @@ export const RegularChallengeBody: React.FC<Props> = ({
   };
   const nextProblem = async (): Promise<void> => {
     const next = await transport.next({ sessionId: display.sessionId, problemFormat: 'regular' });
-    if (!instantiateProblem(next.problemId as ProblemId, 'java', next.seed))
-      throw new Error('問題を取得できませんでした。');
     setAlert(undefined);
     setSwitchOpen(false);
     setError('');
