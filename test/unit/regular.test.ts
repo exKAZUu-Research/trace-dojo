@@ -89,6 +89,15 @@ describe('regular problem grading', () => {
     expect(answerBoard).toEqual(boardCells(finalTraceItem.board));
   });
 
+  test('accepts co-located turtles in a different insertion order', () => {
+    const first = finalTraceItem.turtles[0];
+    const second = { ...first, dir: 'E', color: 'R' };
+
+    expect(
+      gradeRegularAnswers({ ...answerFor(), expectedTurtles: [first, second], answerTurtles: [second, first] })
+    ).toEqual({ status: 'correct', incorrectLocations: [], hintText: '' });
+  });
+
   test('reports turtle, board, variable, and expression errors in display order', () => {
     const input = answerFor();
     input.answerBoard[0][0] = 'R';

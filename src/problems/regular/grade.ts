@@ -23,12 +23,7 @@ export function gradeRegularAnswers(input: {
   const incorrectLocations: string[] = [];
   let hintText = '';
 
-  if (
-    !fastDeepEqual(
-      input.expectedTurtles.toSorted(compareTurtlePositions),
-      input.answerTurtles.toSorted(compareTurtlePositions)
-    )
-  ) {
+  if (!fastDeepEqual(input.expectedTurtles.toSorted(compareTurtles), input.answerTurtles.toSorted(compareTurtles))) {
     incorrectLocations.push('亀');
   }
   if (!fastDeepEqual(parseBoard(input.expectedBoard), input.answerBoard)) {
@@ -60,8 +55,8 @@ export function gradeRegularAnswers(input: {
   };
 }
 
-function compareTurtlePositions(a: TurtleTrace, b: TurtleTrace): number {
-  return a.x - b.x || a.y - b.y;
+function compareTurtles(a: TurtleTrace, b: TurtleTrace): number {
+  return a.x - b.x || a.y - b.y || a.dir.localeCompare(b.dir) || a.color.localeCompare(b.color);
 }
 
 export function parseBoard(boardString: string): ColorChar[][] {
