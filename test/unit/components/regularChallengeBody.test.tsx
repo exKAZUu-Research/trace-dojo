@@ -60,7 +60,7 @@ test('Enter activates the focused completion action instead of being taken by th
   expect(back).toHaveBeenCalledTimes(1);
 });
 
-test('ignores Enter while a result dialog is open', async () => {
+test('does not resubmit on Enter while a result dialog is open', async () => {
   const user = userEvent.setup();
   const submit = vi.fn<RegularChallengeTransport['submit']>().mockResolvedValue(executionDisplay);
   renderBody({ submit });
@@ -70,8 +70,10 @@ test('ignores Enter while a result dialog is open', async () => {
   }
   await user.click(screen.getByRole('button', { name: /提出/ }));
   await screen.findByRole('alertdialog');
+  fireEvent.keyDown(document.body, { key: 'Enter' });
+  expect(submit).toHaveBeenCalledTimes(1);
   await user.keyboard('{Enter}');
-  await user.keyboard('{Enter}');
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   expect(submit).toHaveBeenCalledTimes(1);
 });
 
