@@ -83,7 +83,7 @@ test.each([
     const inputs = screen.getAllByRole('textbox');
     await user.type(inputs.at(-1)!, typedValue);
     await user.click(screen.getByRole('button', { name: /提出/ }));
-    expect(await screen.findByRole('alertdialog')).toHaveTextContent('正解');
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent('正解です');
     expect(createSubmission).toHaveBeenCalledWith(true, isCompleted);
     if (nextIndex === undefined) expect(updateSession).not.toHaveBeenCalled();
     else expect(updateSession).toHaveBeenCalledWith('step', nextIndex);
