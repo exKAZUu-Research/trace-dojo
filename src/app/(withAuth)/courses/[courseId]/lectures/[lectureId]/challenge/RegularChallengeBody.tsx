@@ -1,10 +1,13 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import { ResultAlertDialog } from '../problems/[problemId]/FillInBlankBody';
+import { ProblemPageHeader } from '../problems/[problemId]/ProblemPageHeader';
+import {
+  deriveRegularProblemView,
+  RegularProblemPresentation,
+} from '../problems/[problemId]/RegularProblemPresentation';
+import { ResultAlertDialog } from '../problems/[problemId]/ResultAlertDialog';
 import { BoardEditor, type TurtleGraphicsHandle } from '../problems/[problemId]/BoardEditor';
-import { SyntaxHighlighter } from '../problems/[problemId]/SyntaxHighlighter';
-import { TraceViewer } from '../problems/[problemId]/TraceViewer';
 import {
   AlertDialog,
   AlertDialogBody,
@@ -13,16 +16,10 @@ import {
   AlertDialogHeader,
   AlertDialogOverlay,
   Button,
-  Card,
-  Flex,
-  Heading,
-  HStack,
-  Tag,
   Text,
-  VStack,
 } from '@/infrastructures/useClient/chakra';
 import { instantiateProblem } from '@/problems/instantiateProblem';
-import type { TraceItem, TraceItemVariable } from '@/problems/traceProgram';
+import type { CourseId, ProblemId } from '@/problems/problemData';
 
 export interface RegularChallengeDisplay {
   problemFormat: 'regular';
@@ -73,22 +70,16 @@ export const RegularChallengeBody: React.FC<Props> = ({
     if (!value) throw new Error(`Unknown regular problem: ${display.problemId}`);
     return value;
   }, [display.problemId, display.seed]);
-  const currentIndex =
-    display.problemType === 'executionResult'
-      ? problem.traceItems.length - 1
-      : Math.min(display.traceItemIndex, problem.traceItems.length - 1);
-  const previousIndex = display.problemType === 'executionResult' ? 0 : currentIndex - 1;
-  const currentVariables =
-    display.problemType === 'executionResult' ? problem.finalVars : problem.traceItems[currentIndex].vars;
-  const initialVariables = useMemo(
-    () => getInitialVariables(display.problemType, problem.traceItems, previousIndex, currentIndex, currentVariables),
-    [display.problemType, problem.traceItems, previousIndex, currentIndex, currentVariables]
+  const view = useMemo(
+    () => deriveRegularProblemView(problem, display.problemType, display.traceItemIndex),
+    [problem, display.problemType, display.traceItemIndex]
   );
+  const { currentTraceItemIndex: currentIndex, previousTraceItemIndex: previousIndex } = view;
   const [viewingIndex, setViewingIndex] = useState(previousIndex);
-  const contextKey = `${display.sessionId}:${display.problemType}:${display.traceItemIndex}`;
+  const contextKey = `${display.sessionId}:${display.problemId}:${display.seed}:${display.problemType}:${currentIndex}`;
 
   const submit = async (): Promise<void> => {
-    if (!editor.current) return;
+    if (display.completed || !editor.current) return;
     const [locations, hint] = editor.current.findIncorrectLocationsAndHintText();
     const isCorrect = locations.length === 0;
     const requestKey = `${contextKey}:${isCorrect}`;
@@ -118,6 +109,7 @@ export const RegularChallengeBody: React.FC<Props> = ({
     }
   };
   const switchMode = async (): Promise<void> => {
+    if (display.completed) return;
     try {
       const next = await transport.switchToStep({ sessionId: display.sessionId });
       setViewingIndex(0);
@@ -131,114 +123,73 @@ export const RegularChallengeBody: React.FC<Props> = ({
   };
   const nextProblem = async (): Promise<void> => {
     const next = await transport.next({ sessionId: display.sessionId, problemFormat: 'regular' });
+    const nextProblemValue = instantiateProblem(next.problemId as ProblemId, 'java', next.seed);
+    if (!nextProblemValue) throw new Error('問題を取得できませんでした。');
+    const nextView = deriveRegularProblemView(nextProblemValue, next.problemType, next.traceItemIndex);
+    setViewingIndex(nextView.previousTraceItemIndex);
+    setAlert(undefined);
+    setSwitchOpen(false);
+    setError('');
+    request.current = undefined;
     setDisplay(next);
   };
-
-  if (display.completed)
-    return (
-      <ResultAlertDialog
-        isOpen={true}
-        title="正解"
-        message="正解です！次の問題へ進めます。"
-        actions={[
-          { label: '次の問題へ', colorScheme: 'brand', onClick: nextProblem },
-          { label: '戻る', onClick: back },
-        ]}
-      />
-    );
   return (
     <>
+      <ProblemPageHeader
+        courseId={courseId as CourseId}
+        lectureId={lectureId}
+        problemId={display.problemId as ProblemId}
+        actions={
+          display.problemType === 'executionResult' && !display.completed ? (
+            <Button colorScheme="blue" variant="outline" onClick={() => setSwitchOpen(true)}>
+              ステップ実行モードに移る
+            </Button>
+          ) : undefined
+        }
+      />
       {error && (
         <Text role="alert" color="red.600">
           {error}
         </Text>
       )}
-      <Flex alignItems="stretch" gap={6}>
-        <VStack align="stretch" flexBasis={0} flexGrow={1} minW={0} spacing={4}>
-          <VStack align="stretch" as={Card} p={5}>
-            <HStack justifyContent="space-between">
-              <Heading size="md">問題</Heading>
-              {display.problemType === 'step' && <Tag colorScheme="brand">ステップ実行モード</Tag>}
-            </HStack>
-            <Text>
-              {display.problemType === 'executionResult' ? 'プログラムを実行した後' : '現在の行を実行した後'}
-              の盤面と変数を作成してください。
-            </Text>
-            {display.problemType === 'executionResult' && (
-              <Button alignSelf="start" onClick={() => setSwitchOpen(true)}>
-                ステップ実行モードへ切り替える
-              </Button>
-            )}
-          </VStack>
-          <SyntaxHighlighter
-            code={problem.displayProgram}
-            programmingLanguageId="java"
-            currentFocusLine={
-              display.problemType === 'step'
-                ? problem.sidToLineIndex.get(problem.traceItems[currentIndex].sid)
-                : undefined
-            }
-            previousFocusLine={
-              display.problemType === 'step'
-                ? problem.sidToLineIndex.get(problem.traceItems[viewingIndex].sid)
-                : undefined
-            }
-            callerLines={
-              display.problemType === 'step'
-                ? problem.traceItems[currentIndex].callStack.map((id) => problem.callerIdToLineIndex.get(id))
-                : undefined
-            }
-          />
-        </VStack>
-        <VStack align="stretch" bgColor="gray.50" flexBasis={0} flexGrow={1}>
+      <RegularProblemPresentation
+        problem={problem}
+        view={view}
+        viewingTraceItemIndex={viewingIndex}
+        setViewingTraceItemIndex={setViewingIndex}
+        editor={
           <BoardEditor
             key={contextKey}
             ref={editor}
             currentTraceItemIndex={currentIndex}
-            currentVariables={currentVariables}
-            initialVariables={initialVariables}
+            currentVariables={view.currentVariables}
+            initialVariables={view.initialVariables}
             previousTraceItemIndex={previousIndex}
             problem={problem}
             problemType={display.problemType}
+            isDisabled={display.completed}
             handleSubmit={submit}
           />
-        </VStack>
-      </Flex>
-      {display.problemType === 'step' && previousIndex >= 1 && (
-        <TraceViewer
-          currentTraceItemIndex={currentIndex}
-          previousTraceItemIndex={previousIndex}
-          problem={problem}
-          setViewingTraceItemIndex={setViewingIndex}
-          viewingTraceItemIndex={viewingIndex}
-        />
-      )}
-      <AlertDialog
+        }
+      />
+      <ResultAlertDialog
         isOpen={Boolean(alert)}
-        leastDestructiveRef={cancelRef}
+        message={alert?.message ?? ''}
+        title={alert?.title ?? ''}
         onClose={() => {
           alert?.after?.();
           setAlert(undefined);
         }}
-      >
-        <AlertDialogOverlay>
-          <AlertDialogContent>
-            <AlertDialogHeader>{alert?.title}</AlertDialogHeader>
-            <AlertDialogBody whiteSpace="pre-wrap">{alert?.message}</AlertDialogBody>
-            <AlertDialogFooter>
-              <Button
-                ref={cancelRef}
-                onClick={() => {
-                  alert?.after?.();
-                  setAlert(undefined);
-                }}
-              >
-                閉じる
-              </Button>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialogOverlay>
-      </AlertDialog>
+      />
+      <ResultAlertDialog
+        isOpen={display.completed}
+        message="正解です！次の問題へ進めます。"
+        title="正解"
+        actions={[
+          { label: '戻る', onClick: back },
+          { label: '次の問題へ', colorScheme: 'brand', onClick: nextProblem },
+        ]}
+      />
       <AlertDialog isOpen={switchOpen} leastDestructiveRef={cancelRef} onClose={() => setSwitchOpen(false)}>
         <AlertDialogOverlay>
           <AlertDialogContent>
@@ -256,38 +207,5 @@ export const RegularChallengeBody: React.FC<Props> = ({
         </AlertDialogOverlay>
       </AlertDialog>
     </>
-  );
-};
-const getInitialVariables = (
-  problemType: 'executionResult' | 'step',
-  traceItems: TraceItem[],
-  previousIndex: number,
-  currentIndex: number,
-  current: TraceItemVariable
-): Record<string, string> => {
-  let adjustedPreviousIndex = previousIndex;
-  let emptyNonGlobals = false;
-  if (problemType === 'step') {
-    const depth = traceItems[currentIndex].depth;
-    while (adjustedPreviousIndex > 0 && depth !== traceItems[adjustedPreviousIndex].depth) {
-      if (depth > traceItems[adjustedPreviousIndex].depth) {
-        emptyNonGlobals = true;
-        break;
-      }
-      adjustedPreviousIndex -= 1;
-    }
-    emptyNonGlobals ||=
-      traceItems[currentIndex].callStack.at(-1) !== traceItems[adjustedPreviousIndex].callStack.at(-1);
-  }
-  return Object.fromEntries(
-    Object.entries(current)
-      .filter(([, value]) => typeof value === 'number' || typeof value === 'string')
-      .map(([key]) => {
-        const isGlobal =
-          key.slice(0, 1) === key.slice(0, 1).toUpperCase() && key.slice(0, 1) !== key.slice(0, 1).toLowerCase();
-        if (isGlobal) return [key, String(traceItems[previousIndex].vars[key] ?? '')];
-        if (emptyNonGlobals) return [key, ''];
-        return [key, String(traceItems[adjustedPreviousIndex].vars[key] ?? '')];
-      })
   );
 };

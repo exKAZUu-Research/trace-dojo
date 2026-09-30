@@ -31,7 +31,7 @@ test('the lecture trigger opens a labelled dialog, focuses the regular native ca
   await user.click(screen.getByRole('button', { name: 'チャレンジモード' }));
   const dialog = await screen.findByRole('dialog', { name: 'チャレンジ形式を選択' });
   await waitFor(() => expect(dialog).toBeVisible());
-  const regular = screen.getByRole('button', { name: /実行結果・ステップ実行/ });
+  const regular = screen.getByRole('button', { name: /通常問題/ });
   const blank = screen.getByRole('button', { name: /穴埋め問題/ });
   await waitFor(() => expect(regular).toHaveFocus());
   expect(regular.querySelector('button')).toBeNull();
@@ -73,7 +73,7 @@ test('suppresses two format activations in the same event turn', async () => {
   const user = userEvent.setup();
   renderInChakra(<ChallengeModeButton courseId="test-course" lectureId="lecture-1" />);
   await user.click(screen.getByRole('button', { name: 'チャレンジモード' }));
-  const regular = await screen.findByRole('button', { name: /実行結果・ステップ実行/ });
+  const regular = await screen.findByRole('button', { name: /通常問題/ });
   const blank = screen.getByRole('button', { name: /穴埋め問題/ });
 
   fireEvent.click(regular);
@@ -95,6 +95,6 @@ test('shows recovery feedback inside the modal while preserving both choices', a
   );
   const dialog = await screen.findByRole('dialog');
   expect(dialog).toContainElement(screen.getByRole('alert'));
-  expect(screen.getByRole('button', { name: /実行結果・ステップ実行/ })).toBeEnabled();
+  expect(screen.getByRole('button', { name: /通常問題/ })).toBeEnabled();
   expect(screen.getByRole('button', { name: /穴埋め問題/ })).toBeEnabled();
 });

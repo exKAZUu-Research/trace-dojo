@@ -2,7 +2,7 @@
 
 import { ChakraProvider } from '@chakra-ui/react';
 import { StrictMode } from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, test, vi } from 'vitest';
 
@@ -15,7 +15,7 @@ const transport = vi.hoisted(() => ({
 }));
 const navigation = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock('next/navigation', () => ({
-  useParams: () => ({ courseId: 'test', lectureId: 'lecture-1' }),
+  useParams: () => ({ courseId: 'test', lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d' }),
   useRouter: () => navigation,
 }));
 vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
@@ -72,7 +72,7 @@ test('a valid URL format starts exactly once under StrictMode and renders the ex
   expect(transport.start).toHaveBeenCalledTimes(1);
   expect(transport.start).toHaveBeenCalledWith({
     courseId: 'test',
-    lectureId: 'lecture-1',
+    lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
     problemFormat: 'fillInBlank',
   });
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -86,9 +86,13 @@ test('a regular URL format starts once and renders the regular exercise', async 
   expect(transport.start).toHaveBeenCalledTimes(1);
   expect(transport.start).toHaveBeenCalledWith({
     courseId: 'test',
-    lectureId: 'lecture-1',
+    lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
     problemFormat: 'regular',
   });
+  expect(screen.getByRole('link', { name: '動作確認用' })).toBeVisible();
+  expect(screen.getByRole('link', { name: '第1回' })).toBeVisible();
+  expect(screen.getByRole('heading', { level: 1, name: 'ステップ実行のテスト用問題(3)' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'ステップ実行モードに移る' })).toBeVisible();
 });
 
 test('a browser format change starts the new format and ignores the stale previous response', async () => {
@@ -104,7 +108,7 @@ test('a browser format change starts the new format and ignores the stale previo
   expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeVisible();
   expect(transport.start).toHaveBeenNthCalledWith(2, {
     courseId: 'test',
-    lectureId: 'lecture-1',
+    lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
     problemFormat: 'fillInBlank',
   });
   await act(async () => resolveRegular(regularDisplay));
@@ -125,7 +129,7 @@ test('returning to the same valid format after a missing format starts a fresh r
   await waitFor(() => expect(transport.start).toHaveBeenCalledTimes(2));
   expect(transport.start).toHaveBeenNthCalledWith(2, {
     courseId: 'test',
-    lectureId: 'lecture-1',
+    lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
     problemFormat: 'regular',
   });
 });
@@ -166,7 +170,7 @@ test('a missing format opens the selector without starting and close returns to 
   await waitFor(() => expect(dialog).toBeVisible());
   expect(transport.start).not.toHaveBeenCalled();
   await user.click(screen.getByRole('button', { name: /閉じる/ }));
-  expect(navigation.push).toHaveBeenCalledWith('/courses/test/lectures/lecture-1');
+  expect(navigation.push).toHaveBeenCalledWith('/courses/test/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d');
 });
 
 test('no-problems feedback stays inside the modal and the same format can be retried', async () => {
@@ -185,12 +189,12 @@ test('an empty regular format can recover by choosing fill-in-blank', async () =
   transport.start.mockResolvedValueOnce({ status: 'noProblems' }).mockResolvedValueOnce(blankDisplay);
   const user = userEvent.setup();
   renderPage('regular');
-  expect(await screen.findByRole('status')).toHaveTextContent(/実行結果・ステップ実行.*出題できません/);
+  expect(await screen.findByRole('status')).toHaveTextContent(/通常問題.*出題できません/);
   await user.click(screen.getByRole('button', { name: /穴埋め問題/ }));
   expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeVisible();
   expect(transport.start).toHaveBeenNthCalledWith(2, {
     courseId: 'test',
-    lectureId: 'lecture-1',
+    lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
     problemFormat: 'fillInBlank',
   });
 });
@@ -200,14 +204,68 @@ test('completed fill-in-blank next keeps the active format and renders the retur
   transport.next.mockResolvedValue({ ...blankDisplay, sessionId: 24 });
   const user = userEvent.setup();
   renderPage('fillInBlank');
-  await user.click(await screen.findByRole('button', { name: '次の問題へ' }));
+  const input = await screen.findByRole('textbox', { hidden: true, name: '空欄【1】' });
+  expect(input).toBeDisabled();
+  expect(screen.getByText(/プログラムを実行した後の盤面/)).toBeVisible();
+  expect(screen.getByRole('button', { hidden: true, name: '提出' })).toBeDisabled();
+  await user.keyboard('{Escape}');
+  expect(screen.getByRole('alertdialog')).toBeVisible();
+  await user.click(screen.getByRole('button', { name: '次の問題へ' }));
   expect(transport.next).toHaveBeenCalledWith({
     courseId: 'test',
-    lectureId: 'lecture-1',
+    lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
     sessionId: 23,
     problemFormat: 'fillInBlank',
   });
-  expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeVisible();
+  expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeEnabled();
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+});
+
+test('a just-completed fill-in-blank keeps its answer, deduplicates Next, and resets for the fresh session', async () => {
+  let resolveNext!: (display: typeof blankDisplay) => void;
+  transport.start.mockResolvedValue(blankDisplay);
+  transport.submitBlank.mockResolvedValue({ status: 'correct' });
+  transport.next.mockReturnValue(new Promise((resolve) => (resolveNext = resolve)));
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const input = await screen.findByRole('textbox', { name: '空欄【1】' });
+  await user.type(input, 'x + 1');
+  await user.click(screen.getByRole('button', { name: '提出' }));
+  const dialog = await screen.findByRole('alertdialog');
+  expect(input).toHaveValue('x + 1');
+  expect(dialog).toBeInTheDocument();
+  await user.keyboard('{Escape}');
+  expect(dialog).toBeInTheDocument();
+
+  await user.dblClick(screen.getByRole('button', { name: '次の問題へ' }));
+  expect(transport.next).toHaveBeenCalledTimes(1);
+  expect(transport.next).toHaveBeenCalledWith({
+    courseId: 'test',
+    lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
+    sessionId: 23,
+    problemFormat: 'fillInBlank',
+  });
+  await act(async () => resolveNext({ ...blankDisplay, sessionId: 24 }));
+  const freshInput = await screen.findByRole('textbox', { name: '空欄【1】' });
+  expect(freshInput).toBeEnabled();
+  expect(freshInput).toHaveValue('');
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+});
+
+test('completed fill-in-blank orders Back before Next and reports a failed action without dismissing', async () => {
+  transport.start.mockResolvedValue({ ...blankDisplay, completed: true });
+  transport.next.mockRejectedValue(new Error('次の問題を取得できませんでした。'));
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const dialog = await screen.findByRole('alertdialog');
+  expect(
+    within(dialog)
+      .getAllByRole('button')
+      .map((button) => button.textContent)
+  ).toEqual(['戻る', '次の問題へ']);
+  await user.click(screen.getByRole('button', { name: '次の問題へ' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('次の問題を取得できませんでした。');
+  expect(dialog).toBeVisible();
 });
 
 test('completed fill-in-blank back returns to the lecture', async () => {
@@ -215,7 +273,7 @@ test('completed fill-in-blank back returns to the lecture', async () => {
   const user = userEvent.setup();
   renderPage('fillInBlank');
   await user.click(await screen.findByRole('button', { name: '戻る' }));
-  expect(navigation.push).toHaveBeenCalledWith('/courses/test/lectures/lecture-1');
+  expect(navigation.push).toHaveBeenCalledWith('/courses/test/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d');
 });
 
 test('an error stays inside the modal and choosing the other format updates the URL and retries', async () => {
@@ -226,11 +284,13 @@ test('an error stays inside the modal and choosing the other format updates the 
   expect(screen.getByRole('dialog')).toContainElement(alert);
   expect(alert).toHaveTextContent('問題を取得できませんでした。');
   await user.click(screen.getByRole('button', { name: /穴埋め問題/ }));
-  expect(navigation.push).toHaveBeenCalledWith('/courses/test/lectures/lecture-1/challenge?format=fillInBlank');
+  expect(navigation.push).toHaveBeenCalledWith(
+    '/courses/test/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d/challenge?format=fillInBlank'
+  );
   expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeVisible();
   expect(transport.start).toHaveBeenNthCalledWith(2, {
     courseId: 'test',
-    lectureId: 'lecture-1',
+    lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
     problemFormat: 'fillInBlank',
   });
 });
@@ -240,7 +300,7 @@ test('suppresses rapid competing selections while a start is pending', async () 
   transport.start.mockReturnValue(new Promise((_resolve) => (resolve = _resolve)));
   const user = userEvent.setup();
   renderPage();
-  await user.click(screen.getByRole('button', { name: /実行結果・ステップ実行/ }));
+  await user.click(screen.getByRole('button', { name: /通常問題/ }));
   await user.click(screen.getByRole('button', { name: /穴埋め問題/ }));
   expect(transport.start).toHaveBeenCalledTimes(1);
   expect(navigation.push).toHaveBeenCalledTimes(1);
@@ -255,7 +315,9 @@ test('ignores a deferred result after close', async () => {
   await user.click(screen.getByRole('button', { name: /穴埋め問題/ }));
   await user.click(screen.getByRole('button', { name: /閉じる/ }));
   await act(async () => resolve(blankDisplay));
-  await waitFor(() => expect(navigation.push).toHaveBeenCalledWith('/courses/test/lectures/lecture-1'));
+  await waitFor(() =>
+    expect(navigation.push).toHaveBeenCalledWith('/courses/test/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d')
+  );
   expect(screen.queryByRole('textbox', { name: '空欄【1】' })).not.toBeInTheDocument();
 });
 

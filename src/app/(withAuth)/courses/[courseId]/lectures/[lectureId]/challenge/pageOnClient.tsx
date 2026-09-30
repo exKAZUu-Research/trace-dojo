@@ -5,13 +5,14 @@ import { useEffect, useRef, useState } from 'react';
 import { type ChallengeProblemFormat } from './ChallengeSelection';
 import { ChallengeSelectionModal } from './ChallengeSelectionModal';
 import { RegularChallengeBody, type RegularChallengeDisplay } from './RegularChallengeBody';
-import { FillInBlankBody, ResultAlertDialog, type CompletionAction } from '../problems/[problemId]/FillInBlankBody';
-import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefetch';
+import { FillInBlankBody } from '../problems/[problemId]/FillInBlankBody';
+import { ProblemPageHeader } from '../problems/[problemId]/ProblemPageHeader';
+import type { CompletionAction } from '../problems/[problemId]/ResultAlertDialog';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
-import { Heading, Link, Text, VStack } from '@/infrastructures/useClient/chakra';
+import { VStack } from '@/infrastructures/useClient/chakra';
 import type { ExerciseDisplay } from '@/problems/fillInBlank/exerciseProblem';
 import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
-import type { CourseId } from '@/problems/problemData';
+import type { CourseId, ProblemId } from '@/problems/problemData';
 
 type Display = ExerciseDisplay | RegularChallengeDisplay;
 interface Props {
@@ -77,7 +78,7 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
         if (cancelled || activeRequestRef.current !== requestId) return display;
         if ('status' in display) {
           setMessage({
-            text: `${format === 'regular' ? '実行結果・ステップ実行' : '穴埋め問題'}は現在出題できません。別の形式を選んでください。`,
+            text: `${format === 'regular' ? '通常問題' : '穴埋め問題'}は現在出題できません。別の形式を選んでください。`,
             role: 'status',
           });
           setIsModalOpen(true);
@@ -134,8 +135,8 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
     setExercise(display as ExerciseDisplay);
   };
   const actions: CompletionAction[] = [
-    { label: '次の問題へ', colorScheme: 'brand', onClick: nextBlank },
     { label: '戻る', onClick: back },
+    { label: '次の問題へ', colorScheme: 'brand', onClick: nextBlank },
   ];
   const gradeBlank = async (answers: string[]): Promise<FillInBlankVerdict> => {
     if (!exercise) throw new Error('No active exercise');
@@ -149,11 +150,6 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
 
   return (
     <VStack align="stretch" spacing={5}>
-      <Link as={NextLinkWithoutPrefetch} href={`/courses/${courseId}/lectures/${lectureId}`} alignSelf="start">
-        授業回へ戻る
-      </Link>
-      <Heading as="h1">チャレンジモード</Heading>
-      <Text color="gray.600">チャレンジの履歴は成績や通常課題の進捗には反映されません。</Text>
       <ChallengeSelectionModal
         isOpen={isModalOpen}
         isPending={isPending}
@@ -164,6 +160,7 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
       />
       {exercise && format === 'regular' && (
         <RegularChallengeBody
+          key={exercise.sessionId}
           courseId={courseId}
           lectureId={lectureId}
           display={exercise as RegularChallengeDisplay}
@@ -183,23 +180,23 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
           }}
         />
       )}
-      {exercise && format === 'fillInBlank' && exercise.completed && (
-        <ResultAlertDialog actions={actions} isOpen={true} message="正解です！次の問題へ進めます。" title="正解" />
-      )}
-      {exercise && format === 'fillInBlank' && !exercise.completed && (
-        <FillInBlankBody
-          key={exercise.sessionId}
-          problem={{
-            displayProgram: (exercise as ExerciseDisplay).displayProgram,
-            blankCount: (exercise as ExerciseDisplay).blankCount,
-            finalBoard: (exercise as ExerciseDisplay).expectedBoard,
-            finalTurtles: (exercise as ExerciseDisplay).expectedTurtles,
-            finalVars: (exercise as ExerciseDisplay).finalVars,
-          }}
-          gradeAnswers={gradeBlank}
-          completionActions={actions}
-          completionMessage="正解です！次の問題へ進めます。"
-        />
+      {exercise && format === 'fillInBlank' && (
+        <VStack key={exercise.sessionId} align="stretch" spacing={4}>
+          <ProblemPageHeader courseId={courseId} lectureId={lectureId} problemId={exercise.problemId as ProblemId} />
+          <FillInBlankBody
+            problem={{
+              displayProgram: (exercise as ExerciseDisplay).displayProgram,
+              blankCount: (exercise as ExerciseDisplay).blankCount,
+              finalBoard: (exercise as ExerciseDisplay).expectedBoard,
+              finalTurtles: (exercise as ExerciseDisplay).expectedTurtles,
+              finalVars: (exercise as ExerciseDisplay).finalVars,
+            }}
+            gradeAnswers={gradeBlank}
+            completionActions={actions}
+            completionMessage="正解です！次の問題へ進めます。"
+            isCompleted={exercise.completed}
+          />
+        </VStack>
       )}
     </VStack>
   );

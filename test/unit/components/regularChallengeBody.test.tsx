@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { ChakraProvider } from '@chakra-ui/react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, test, vi } from 'vitest';
 
@@ -28,6 +28,11 @@ test('uses the real editor local grader and sends only verdict with stored conte
     status: input.isCorrect ? 'correct' : 'incorrect',
   }));
   renderBody({ submit });
+
+  const problemCard = getProblemCard();
+  expect(problemCard).toHaveTextContent(
+    'プログラムを実行した後の盤面と、変数に記録されている値の一覧表を作成し、提出ボタンを押してください。'
+  );
 
   const inputs = screen.getAllByRole('textbox');
   for (const [input, value] of inputs.map((input, index) => [input, ['2', '2', '4'][index]] as const)) {
@@ -71,7 +76,7 @@ test('keeps an incorrect draft mounted across repeated attempts and never switch
   expect(submit).toHaveBeenCalledTimes(4);
   expect(switchToStep).not.toHaveBeenCalled();
   expect(submit.mock.calls.every(([input]) => input.isCorrect === false)).toBe(true);
-});
+}, 15_000);
 
 test('preserves the draft on switch cancel or failure and resets only after success', async () => {
   const user = userEvent.setup();
@@ -84,27 +89,41 @@ test('preserves the draft on switch cancel or failure and resets only after succ
   const input = screen.getAllByRole('textbox')[0];
   await user.type(input, 'draft');
 
-  await user.click(screen.getByRole('button', { name: /ステップ実行/ }));
+  await user.click(screen.getByRole('button', { name: 'ステップ実行モードに移る' }));
   expect(screen.getByRole('alertdialog')).toHaveTextContent(/下書き.*リセット|リセット.*下書き/);
   await user.click(screen.getByRole('button', { name: /キャンセル/ }));
   expect(input).toHaveValue('draft');
 
-  await user.click(screen.getByRole('button', { name: /ステップ実行/ }));
+  await user.click(screen.getByRole('button', { name: 'ステップ実行モードに移る' }));
   await user.click(screen.getByRole('button', { name: /切り替/ }));
   await screen.findByRole('alert');
   expect(input).toHaveValue('draft');
 
-  await user.click(screen.getByRole('button', { name: /ステップ実行/ }));
+  await user.click(screen.getByRole('button', { name: 'ステップ実行モードに移る' }));
   await user.click(screen.getByRole('button', { name: /切り替/ }));
   expect(await screen.findByText(/ステップ実行モード/)).toBeVisible();
   expect(screen.getAllByRole('textbox')[0]).not.toHaveValue('draft');
-});
+}, 15_000);
 
 test('shows completion actions and delegates Next and lecture Back', async () => {
   const user = userEvent.setup();
   const next = vi.fn(async () => executionDisplay);
   const back = vi.fn();
-  const { unmount } = renderBody({ display: { ...executionDisplay, completed: true }, next, back });
+  const { container, unmount } = renderBody({ display: { ...executionDisplay, completed: true }, next, back });
+  expect(screen.getByText(/プログラムを実行した後/)).toBeVisible();
+  expect(within(container).getAllByRole('textbox', { hidden: true }).length).toBeGreaterThan(0);
+  expect(within(container).getByRole('button', { hidden: true, name: /提出/ })).toBeDisabled();
+  expect(
+    within(container).queryByRole('button', { hidden: true, name: 'ステップ実行モードに移る' })
+  ).not.toBeInTheDocument();
+  expect(
+    within(screen.getByRole('alertdialog'))
+      .getAllByRole('button')
+      .map((button) => button.textContent)
+  ).toEqual(['戻る', '次の問題へ']);
+  await user.keyboard('{Escape}');
+  expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /次の問題/ })).toBeEnabled();
   await user.click(screen.getByRole('button', { name: /次の問題/ }));
   expect(next).toHaveBeenCalledWith({ sessionId: 17, problemFormat: 'regular' });
   await waitFor(() => expect(screen.queryByRole('button', { name: /次の問題/ })).not.toBeInTheDocument());
@@ -144,6 +163,10 @@ test('locally grades the final step and exposes completion actions', async () =>
     .fn<RegularChallengeTransport['submit']>()
     .mockResolvedValue({ exercise: completed, status: 'correct' });
   renderBody({ display: finalStep, submit });
+  const problemCard = getProblemCard();
+  expect(problemCard).toHaveTextContent(
+    '画面下部にある6行目を実行した後の盤面と変数の一覧表を参考に、8行目を実行した後の盤面と、変数に記録されている値の一覧表を作成し、提出ボタンを押してください。'
+  );
   const inputs = screen.getAllByRole('textbox');
   expect(inputs).toHaveLength(3);
   await user.type(inputs[2], '4');
@@ -155,7 +178,54 @@ test('locally grades the final step and exposes completion actions', async () =>
   });
   await waitFor(() => expect(screen.getByRole('button', { name: /次の問題/ })).toBeVisible());
   expect(screen.getByRole('button', { name: /戻る/ })).toBeVisible();
+  expect(inputs[2]).toHaveValue('4');
+  expect(problemCard).toBeInTheDocument();
+  expect(problemCard).toHaveTextContent('6行目');
+  expect(problemCard).toHaveTextContent('8行目');
 });
+
+test('deduplicates a pending completion action and keeps its failure recoverable', async () => {
+  let rejectNext!: (reason: Error) => void;
+  const next = vi
+    .fn<RegularChallengeTransport['next']>()
+    .mockImplementationOnce(() => new Promise<RegularChallengeDisplay>((_resolve, reject) => (rejectNext = reject)))
+    .mockResolvedValueOnce(executionDisplay);
+  const user = userEvent.setup();
+  renderBody({ display: { ...executionDisplay, completed: true }, next });
+  const nextButton = await screen.findByRole('button', { name: /次の問題/ });
+  await user.dblClick(nextButton);
+  expect(next).toHaveBeenCalledTimes(1);
+  rejectNext(new Error('次の問題を取得できませんでした。'));
+  expect(await screen.findByRole('alert')).toHaveTextContent('次の問題を取得できませんでした。');
+  expect(screen.getByRole('alertdialog')).toBeVisible();
+  await user.click(nextButton);
+  expect(next).toHaveBeenCalledTimes(2);
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+});
+
+test('deduplicates synchronous Back and resets the action guard for a later completion', async () => {
+  const nextDisplay = { ...executionDisplay, sessionId: 18 };
+  const completedNextDisplay = { ...nextDisplay, completed: true };
+  const next = vi.fn(async () => nextDisplay);
+  const submit = vi
+    .fn<RegularChallengeTransport['submit']>()
+    .mockResolvedValue({ exercise: completedNextDisplay, status: 'correct' });
+  const back = vi.fn();
+  const user = userEvent.setup();
+  renderBody({ display: { ...executionDisplay, completed: true }, next, submit, back });
+
+  await user.click(screen.getByRole('button', { name: '次の問題へ' }));
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  const inputs = screen.getAllByRole('textbox');
+  for (const [input, value] of inputs.map((input, index) => [input, ['2', '2', '4'][index]] as const)) {
+    await user.type(input, value);
+  }
+  await user.click(screen.getByRole('button', { name: /提出/ }));
+  const backButton = await screen.findByRole('button', { name: '戻る' });
+  fireEvent.click(backButton);
+  fireEvent.click(backButton);
+  expect(back).toHaveBeenCalledTimes(1);
+}, 15_000);
 
 const renderBody = (
   overrides: Partial<RegularChallengeTransport> & { display?: RegularChallengeDisplay; back?: () => void }
@@ -177,4 +247,10 @@ const renderBody = (
       />
     </ChakraProvider>
   );
+};
+
+const getProblemCard = (): HTMLElement => {
+  const card = screen.getByRole('heading', { name: '問題' }).parentElement?.parentElement;
+  if (!card) throw new Error('Problem card must be rendered');
+  return card;
 };

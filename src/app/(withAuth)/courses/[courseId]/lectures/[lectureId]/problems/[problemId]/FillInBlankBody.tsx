@@ -2,20 +2,15 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import type React from 'react';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { useImmer } from 'use-immer';
 
 import { BoardViewer } from './BoardViewer';
 import { SyntaxHighlighter } from './SyntaxHighlighter';
 import { Variables } from './Variables';
+import { ResultAlertDialog, type CompletionAction } from './ResultAlertDialog';
 
 import {
-  AlertDialog,
-  AlertDialogBody,
-  AlertDialogContent,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogOverlay,
   Box,
   Button,
   Card,
@@ -43,12 +38,7 @@ interface Props {
   gradeAnswers: (answers: string[]) => Promise<FillInBlankVerdict>;
   completionActions?: CompletionAction[];
   completionMessage?: string;
-}
-
-export interface CompletionAction {
-  label: string;
-  onClick: () => void | Promise<void>;
-  colorScheme?: string;
+  isCompleted?: boolean;
 }
 
 export const FillInBlankBody: React.FC<Props> = (props) => {
@@ -59,9 +49,10 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
   const [alert, setAlert] = useState<{ title: string; message: string; isCompleted: boolean }>();
   const hasVariables = Object.keys(props.problem.finalVars ?? {}).length > 0;
   const isIncomplete = answers.some((answer) => answer.trim() === '');
+  const isCompleted = props.isCompleted || alert?.isCompleted === true;
 
   const handleSubmit = async (): Promise<void> => {
-    if (isSubmitting || alert || isIncomplete) return;
+    if (isSubmitting || alert || isIncomplete || isCompleted) return;
     setIsSubmitting(true);
     try {
       let result: FillInBlankVerdict;
@@ -140,6 +131,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
                   bg="white"
                   fontFamily="mono"
                   spellCheck={false}
+                  isDisabled={isCompleted}
                   value={answer}
                   onChange={(event) => {
                     updateAnswers((draft) => {
@@ -156,7 +148,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
             <Button
               alignSelf="flex-end"
               colorScheme="brand"
-              isDisabled={isIncomplete}
+              isDisabled={isIncomplete || isCompleted}
               isLoading={isSubmitting}
               onClick={() => void handleSubmit()}
             >
@@ -180,107 +172,21 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
       </Flex>
 
       <ResultAlertDialog
-        actions={alert?.isCompleted ? props.completionActions : undefined}
-        isOpen={alert !== undefined}
-        message={alert?.message ?? ''}
-        title={alert?.title ?? ''}
-        onClose={() => {
-          if (alert?.isCompleted) router.push(`/courses/${params.courseId}/lectures/${params.lectureId}`);
-          setAlert(undefined);
-        }}
+        {...(isCompleted && props.completionActions
+          ? { actions: props.completionActions }
+          : {
+              onClose: () => {
+                if (isCompleted) router.push(`/courses/${params.courseId}/lectures/${params.lectureId}`);
+                setAlert(undefined);
+              },
+            })}
+        isOpen={Boolean(alert) || Boolean(props.isCompleted)}
+        message={
+          alert?.message ?? (props.isCompleted ? (props.completionMessage ?? '正解です！次の問題へ進めます。') : '')
+        }
+        title={alert?.title ?? (props.isCompleted ? '正解' : '')}
       />
     </>
-  );
-};
-
-interface ResultAlertDialogProps {
-  actions?: CompletionAction[];
-  isOpen: boolean;
-  message: string;
-  title: string;
-  onClose?: () => void;
-}
-
-export const ResultAlertDialog: React.FC<ResultAlertDialogProps> = (props) => {
-  const cancelRef = useRef<HTMLButtonElement>(null);
-  const actionPendingRef = useRef(false);
-  const [isActionPending, setIsActionPending] = useState(false);
-  const [pendingActionLabel, setPendingActionLabel] = useState('');
-  const [actionError, setActionError] = useState('');
-
-  const handleAction = async (action: CompletionAction): Promise<void> => {
-    if (actionPendingRef.current) return;
-    actionPendingRef.current = true;
-    setIsActionPending(true);
-    setPendingActionLabel(action.label);
-    setActionError('');
-    try {
-      await action.onClick();
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : '操作に失敗しました。もう一度お試しください。');
-    } finally {
-      actionPendingRef.current = false;
-      setIsActionPending(false);
-      setPendingActionLabel('');
-    }
-  };
-
-  const canDismiss = props.actions === undefined;
-
-  return (
-    <AlertDialog
-      closeOnEsc={canDismiss && !isActionPending}
-      closeOnOverlayClick={false}
-      isOpen={props.isOpen}
-      leastDestructiveRef={cancelRef as React.RefObject<HTMLElement>}
-      onClose={() => {
-        if (canDismiss && !actionPendingRef.current) props.onClose?.();
-      }}
-    >
-      <AlertDialogOverlay>
-        <AlertDialogContent>
-          <AlertDialogHeader fontSize="lg" fontWeight="bold">
-            {props.title}
-          </AlertDialogHeader>
-          <AlertDialogBody whiteSpace="pre-wrap">
-            {props.message}
-            {actionError && (
-              <Text color="red.600" mt={3} role="alert">
-                {actionError}
-              </Text>
-            )}
-          </AlertDialogBody>
-          <AlertDialogFooter gap={3}>
-            {props.actions ? (
-              props.actions.map((action, index, actions) => (
-                <Button
-                  key={action.label}
-                  ref={index === actions.length - 1 ? cancelRef : undefined}
-                  colorScheme={action.colorScheme}
-                  isDisabled={isActionPending}
-                  isLoading={pendingActionLabel === action.label}
-                  onClick={() => void handleAction(action)}
-                >
-                  {action.label}
-                </Button>
-              ))
-            ) : (
-              <Button
-                ref={cancelRef}
-                rightIcon={
-                  <Box as="span" fontSize="sm" fontWeight="bold">
-                    (Esc)
-                  </Box>
-                }
-                onClick={props.onClose}
-              >
-                閉じる
-              </Button>
-            )}
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialogOverlay>
-    </AlertDialog>
   );
 };
 

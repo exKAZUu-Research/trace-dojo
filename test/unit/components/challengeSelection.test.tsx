@@ -38,8 +38,8 @@ test('mounts without starting, uses native buttons, and suppresses activation wh
   );
 
   expect(onSelect).not.toHaveBeenCalled();
-  const regular = screen.getByRole('button', { name: /実行結果/ });
-  const blank = screen.getByRole('button', { name: /穴埋め/ });
+  const regular = screen.getByRole('button', { name: /通常問題/ });
+  const blank = screen.getByRole('button', { name: /穴埋め問題/ });
   expect(regular.querySelector('button')).toBeNull();
   expect(blank.querySelector('button')).toBeNull();
   expect(container.querySelectorAll('button')).toHaveLength(2);

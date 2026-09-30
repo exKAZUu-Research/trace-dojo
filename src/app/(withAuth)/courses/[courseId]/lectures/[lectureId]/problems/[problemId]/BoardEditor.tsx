@@ -51,6 +51,7 @@ interface TurtleGraphicsProps {
   handleSubmit: () => Promise<void>;
   problem: InstantiatedProblem;
   problemType: ProblemType;
+  isDisabled?: boolean;
 }
 
 export interface TurtleGraphicsHandle {
@@ -396,7 +397,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
         >
           <Button
             colorScheme="brand"
-            isDisabled={isSubmitting || !areAllVariablesFilled}
+            isDisabled={props.isDisabled || isSubmitting || !areAllVariablesFilled}
             rightIcon={
               isSubmitting ? (
                 <Spinner size="sm" />
