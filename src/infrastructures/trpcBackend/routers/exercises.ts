@@ -48,8 +48,7 @@ const regularSubmissionSchema = locationSchema
   })
   .strict();
 const switchSchema = locationSchema.extend({ sessionId: z.number().int().positive() }).strict();
-const startLocks = new Map<string, Promise<unknown>>();
-const sessionQueues = new Map<number, Promise<unknown>>();
+const queues = new Map<string, Promise<unknown>>();
 const gradingLocks = new Map<string, Promise<FillInBlankVerdict>>();
 
 export const exerciseProcedures = {
@@ -150,30 +149,21 @@ export const exerciseProcedures = {
     }),
 };
 
-const enqueue = async <T>(id: number, action: () => T | Promise<T>): Promise<T> => {
-  const pending = (sessionQueues.get(id) ?? Promise.resolve()).then(action);
+const enqueue = async <T>(sessionId: number, action: () => T | Promise<T>): Promise<T> =>
+  await serialize(`session:${sessionId}`, action);
+const lockedStart = async <T>(key: string, action: () => T | Promise<T>): Promise<T> =>
+  await serialize(`start:${key}`, action);
+const serialize = async <T>(key: string, action: () => T | Promise<T>): Promise<T> => {
+  const pending = (queues.get(key) ?? Promise.resolve()).then(action);
   const queued = pending.then(
     () => false,
     () => false
   );
-  sessionQueues.set(id, queued);
+  queues.set(key, queued);
   try {
     return await pending;
   } finally {
-    if (sessionQueues.get(id) === queued) sessionQueues.delete(id);
-  }
-};
-const lockedStart = async <T>(key: string, action: () => T | Promise<T>): Promise<T> => {
-  const pending = (startLocks.get(key) ?? Promise.resolve()).then(action);
-  const queued = pending.then(
-    () => false,
-    () => false
-  );
-  startLocks.set(key, queued);
-  try {
-    return await pending;
-  } finally {
-    if (startLocks.get(key) === queued) startLocks.delete(key);
+    if (queues.get(key) === queued) queues.delete(key);
   }
 };
 const checkedLecture = (courseId: string, lectureId: string): void => {
@@ -260,8 +250,11 @@ const createFromCandidates = (
   const candidates = configured.length > 1 ? configured.filter((id) => id !== previousId) : configured;
   const problemId = candidates[Math.floor(Math.random() * candidates.length)];
   const seed = randomUUID();
-  if (format === 'regular' && instantiateRegular(problemId, seed).traceItems.length <= 1)
-    throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+  // Generate before inserting: a session whose problem cannot be generated would be resumed and fail forever.
+  if (format === 'regular') {
+    if (instantiateRegular(problemId, seed).traceItems.length <= 1)
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+  } else instantiateBlank(problemId, seed);
   const row = db
     .insert(exerciseSessions)
     .values({
@@ -285,10 +278,10 @@ const instantiateRegular = (problemId: string, seed: string): InstantiatedProble
     throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Invalid regular problem: ${problemId}` });
   return problem;
 };
-const instantiateBlank = (row: ExerciseSession): InstantiatedProblem => {
-  const problem = instantiateProblem(row.problemId, 'java', row.seed);
+const instantiateBlank = (problemId: string, seed: string): InstantiatedProblem => {
+  const problem = instantiateProblem(problemId, 'java', seed);
   if (!problem || problem.blankAnswers.length === 0)
-    throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Invalid challenge problem: ${row.problemId}` });
+    throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Invalid challenge problem: ${problemId}` });
   return problem;
 };
 const toRegularDisplay = (row: ExerciseSession): RegularExerciseDisplay => ({
@@ -305,7 +298,7 @@ const toDisplay = (row: ExerciseSession, format: ProblemFormat): ExerciseDisplay
     validateRegularState(row);
     return toRegularDisplay(row);
   }
-  const problem = instantiateBlank(row);
+  const problem = instantiateBlank(row.problemId, row.seed);
   return {
     problemFormat: 'fillInBlank',
     sessionId: row.id,
@@ -382,7 +375,7 @@ const gradeAndSave = async (
 ): Promise<FillInBlankVerdict> => {
   const session = ownedSession(id, userId, courseId, lectureId, 'fillInBlank', receivedAt);
   if (session.completedAt) return { status: 'correct' };
-  const result = await gradeFillInBlankAnswers(instantiateBlank(session), answers);
+  const result = await gradeFillInBlankAnswers(instantiateBlank(session.problemId, session.seed), answers);
   if (result.status === 'ungradable') logger.warn('Failed to grade exercise %d: %s', id, result.detail);
   db.transaction((tx) => {
     const current = tx.select().from(exerciseSessions).where(eq(exerciseSessions.id, id)).get();

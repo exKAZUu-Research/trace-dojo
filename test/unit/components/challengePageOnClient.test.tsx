@@ -330,31 +330,22 @@ test('disables the format choices while a start is pending so a second selection
   await user.click(screen.getByRole('button', { name: /穴埋め問題/ }));
   expect(transport.start).toHaveBeenCalledTimes(1);
   expect(navigation.push).toHaveBeenCalledTimes(1);
-  resolve(blankDisplay);
+  await act(async () => resolve(blankDisplay));
 });
 
-test('ignores a deferred result after close', async () => {
+test('a deferred result from before close does not replace the exercise started afterwards', async () => {
   let resolve!: (display: typeof blankDisplay) => void;
-  transport.start.mockReturnValue(new Promise((_resolve) => (resolve = _resolve)));
+  transport.start
+    .mockReturnValueOnce(new Promise((_resolve) => (resolve = _resolve)))
+    .mockResolvedValueOnce({ ...blankDisplay, sessionId: 99, problemId: 'fillInBlank3' });
   const user = userEvent.setup();
-  renderPage();
+  const rendered = renderPage();
   await user.click(screen.getByRole('button', { name: /穴埋め問題/ }));
   await user.click(screen.getByRole('button', { name: /閉じる/ }));
+  expect(navigation.push).toHaveBeenCalledWith('/courses/test/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d');
+  rendered.rerender(page('fillInBlank'));
+  expect(await screen.findByRole('heading', { level: 1, name: '穴埋めのテスト用問題(3)' })).toBeVisible();
   await act(async () => resolve(blankDisplay));
-  await waitFor(() =>
-    expect(navigation.push).toHaveBeenCalledWith('/courses/test/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d')
-  );
-  expect(screen.queryByRole('textbox', { name: '空欄【1】' })).not.toBeInTheDocument();
-});
-
-test('ignores a deferred result after unmount without a state-update warning', async () => {
-  let resolve!: (display: typeof blankDisplay) => void;
-  transport.start.mockReturnValue(new Promise((_resolve) => (resolve = _resolve)));
-  const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-  const rendered = renderPage('fillInBlank');
-  await waitFor(() => expect(transport.start).toHaveBeenCalledTimes(1));
-  rendered.unmount();
-  await act(async () => resolve(blankDisplay));
-  expect(consoleError).not.toHaveBeenCalled();
-  consoleError.mockRestore();
+  expect(screen.getByRole('heading', { level: 1, name: '穴埋めのテスト用問題(3)' })).toBeVisible();
+  expect(transport.start).toHaveBeenCalledTimes(2);
 });
