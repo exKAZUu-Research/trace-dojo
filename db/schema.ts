@@ -84,8 +84,8 @@ export const exerciseSessions = sqliteTable(
     problemFormat: text().notNull(),
     problemId: text().notNull(),
     seed: text().notNull(),
-    problemType: text().notNull().default('executionResult'),
-    traceItemIndex: integer().notNull().default(0),
+    problemType: text().notNull(),
+    traceItemIndex: integer().notNull(),
     completedAt: integer({ mode: 'timestamp_ms' }),
   },
   (table) => [

@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "e8b3482a-c6da-4009-aaaa-4c0e307cfcc6",
+  "id": "2d6ea6fb-f85e-4eef-919d-e54b63595ac7",
   "prevIds": ["5517d569-2b2f-4a52-83d1-6f9e95bb4d8f"],
   "ddl": [
     {
@@ -118,7 +118,7 @@
       "type": "text",
       "notNull": true,
       "autoincrement": false,
-      "default": "'executionResult'",
+      "default": null,
       "generated": null,
       "name": "problemType",
       "entityType": "columns",
@@ -128,7 +128,7 @@
       "type": "integer",
       "notNull": true,
       "autoincrement": false,
-      "default": "0",
+      "default": null,
       "generated": null,
       "name": "traceItemIndex",
       "entityType": "columns",

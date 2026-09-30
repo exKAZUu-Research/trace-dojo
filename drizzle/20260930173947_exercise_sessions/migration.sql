@@ -8,8 +8,8 @@ CREATE TABLE `ExerciseSession` (
 	`problemFormat` text NOT NULL,
 	`problemId` text NOT NULL,
 	`seed` text NOT NULL,
-	`problemType` text DEFAULT 'executionResult' NOT NULL,
-	`traceItemIndex` integer DEFAULT 0 NOT NULL,
+	`problemType` text NOT NULL,
+	`traceItemIndex` integer NOT NULL,
 	`completedAt` integer,
 	CONSTRAINT `fk_ExerciseSession_userId_User_id_fk` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON UPDATE CASCADE ON DELETE RESTRICT
 );
