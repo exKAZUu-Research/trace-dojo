@@ -7,7 +7,7 @@ export const challengeFillInBlankProblemDefinitions = {
   },
   straightSecondBlank: {
     java: 'public class Main {\n    public static void main(String[] args) {\n        Turtle 亀 = new Turtle(); // step\n        亀.前に進む(); // step\n        @[亀.前に進む();]@ // step\n    }\n}',
-    instrumented: 'const t = new Turtle(); // step\n@[t.forward();]@\nt.forward();',
+    instrumented: 'const t = new Turtle(); // step\nt.forward();\n@[t.forward();]@',
   },
   square1Blank: {
     java: 'public class Main {\n    public static void main(String[] args) {\n        Turtle 亀 = new Turtle(); // step\n        亀.前に進む(); // step\n        @[亀.右を向く();]@ // step\n        亀.前に進む(); // step\n        亀.右を向く(); // step\n        亀.前に進む(); // step\n    }\n}',
@@ -77,7 +77,7 @@ export const challengeFillInBlankProblemDefinitions = {
   twoDimensionalArray1Blank: {
     java: 'public class Main {\n  public static void main(String[] args) {\n    int [][] arr = { { 0, 3 }, { 1, 1 }, { 0, 2 },\n                     { 2, 3 }, { 0, 1 }, };\n    Turtle t = new Turtle(); // step\n    for (int i = 0; i < arr.length; i++) { // step\n      @[int c = arr[i][1];]@ // step\n      switch (arr[i][0]) {\n        case 0:\n          for (int j = 0; j < c; j++) { // step\n            t.前に進む(); // step\n          }\n          break;\n        case 1:\n          for (int j = 0; j < c; j++) { // step\n            t.右を向く(); // step\n          }\n          break;\n        case 2:\n          for (int j = 0; j < c; j++) { // step\n            t.左を向く(); // step\n          }\n          break;\n      }\n    }\n  }\n}',
     instrumented:
-      "const arr = [[0, 3], [1, 1], [0, 2], [2, 3], [0, 1]];\nconst t = new Turtle(); // step\nfor (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step\n  @[s.set('c', arr[s.get('i')][1]);]@ // step\n  switch (arr[s.get('i')][0]) {\n    case 0:\n      for (s.set('j', 0); s.get('j') < s.get('c'); s.set('j', s.get('j') + 1)) { // step\n        t.前に進む(); // step\n      }\n      break;\n    case 1:\n      for (s.set('j', 0); s.get('j') < s.get('c'); s.set('j', s.get('j') + 1)) { // step\n        t.右を向く(); // step\n      }\n      break;\n    case 2:\n      for (s.set('j', 0); s.get('j') < s.get('c'); s.set('j', s.get('j') + 1)) { // step\n        t.左を向く(); // step\n      }\n      break;\n  }\n  delete s.vars['c'];\n}\ndelete s.vars['i'];",
+      "const arr = [[0, 3], [1, 1], [0, 2], [2, 3], [0, 1]];\nconst t = new Turtle(); // step\nfor (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step\n  @[s.set('c', arr[s.get('i')][1]);]@ // step\n  switch (arr[s.get('i')][0]) {\n    case 0:\n      for (s.set('j', 0); s.get('j') < s.get('c'); s.set('j', s.get('j') + 1)) { // step\n        t.前に進む(); // step\n      }\n      break;\n    case 1:\n      for (s.set('j', 0); s.get('j') < s.get('c'); s.set('j', s.get('j') + 1)) { // step\n        t.右を向く(); // step\n      }\n      break;\n    case 2:\n      for (s.set('j', 0); s.get('j') < s.get('c'); s.set('j', s.get('j') + 1)) { // step\n        t.左を向く(); // step\n      }\n      break;\n  }\n  delete s.vars['j'];\n  delete s.vars['c'];\n}\ndelete s.vars['i'];",
   },
   test1Blank: {
     java: 'public class Main {\n  public static void main(String[] args) {\n    Turtle c = new Turtle(); // step\n    @[c.forward();]@ // step\n    c.forward(); // step\n    c.forward(); // step\n  }\n}',
