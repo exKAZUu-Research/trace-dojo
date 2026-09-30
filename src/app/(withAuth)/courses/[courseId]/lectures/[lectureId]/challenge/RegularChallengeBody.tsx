@@ -87,8 +87,8 @@ export const RegularChallengeBody: React.FC<Props> = ({
 
   const submit = async (): Promise<void> => {
     if (display.completed || !editor.current) return;
-    const [locations, hint] = editor.current.findIncorrectLocationsAndHintText();
-    const isCorrect = locations.length === 0;
+    const grading = editor.current.gradeAnswers();
+    const isCorrect = grading.status === 'correct';
     const requestKey = `${contextKey}:${isCorrect}`;
     if (request.current?.context !== requestKey) request.current = { context: requestKey, id: crypto.randomUUID() };
     try {
@@ -104,7 +104,7 @@ export const RegularChallengeBody: React.FC<Props> = ({
       if (!isCorrect) {
         setAlert({
           title: '不正解',
-          message: `${locations.join('、')}に誤りがあります。もう一度解答してみましょう。${hint}`,
+          message: `${grading.incorrectLocations.join('、')}に誤りがあります。もう一度解答してみましょう。${grading.hintText}`,
         });
         return;
       }
