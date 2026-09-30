@@ -148,6 +148,7 @@ test('stores identity and seed without snapshots, then regenerates a safe DTO', 
       'finalBoard',
       'finalTurtles',
       'finalVars',
+      'problemFormat',
       'problemId',
       'sessionId',
     ].toSorted()

@@ -69,7 +69,7 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
     if (requestRef.current?.key !== key) {
       requestRef.current = {
         key,
-        promise: start({ courseId, lectureId, problemFormat: format }) as Promise<Display | { status: 'noProblems' }>,
+        promise: start({ courseId, lectureId, problemFormat: format }),
       };
     }
     pendingRef.current = true;
@@ -135,13 +135,19 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
       throw error;
     }
   };
-  const nextBlank = async (): Promise<void> => {
-    if (!exercise) throw new Error('問題を取得できませんでした。');
-    const display = await detectStaleSession(
-      next.mutateAsync({ courseId, lectureId, sessionId: exercise.sessionId, problemFormat: 'fillInBlank' })
-    );
+  const fetchNext = async (sessionId: number, problemFormat: ChallengeProblemFormat): Promise<Display> => {
+    let display: Display | { status: 'noProblems' };
+    try {
+      display = await detectStaleSession(next.mutateAsync({ courseId, lectureId, sessionId, problemFormat }));
+    } catch {
+      throw new Error('次の問題を取得できませんでした。');
+    }
     if ('status' in display) throw new Error('この授業回には現在出題できる問題がありません。');
-    setExercise(display as ExerciseDisplay);
+    return display;
+  };
+  const nextBlank = async (): Promise<void> => {
+    if (!exercise) throw new Error('次の問題を取得できませんでした。');
+    setExercise(await fetchNext(exercise.sessionId, 'fillInBlank'));
   };
   const actions: CompletionAction[] = [
     { label: '終わる', onClick: back },
@@ -173,33 +179,30 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
         onClose={closeSelection}
         onSelect={select}
       />
-      {exercise && format === 'regular' && (
+      {exercise?.problemFormat === 'regular' && format === 'regular' && (
         <RegularChallengeBody
           key={exercise.sessionId}
           courseId={courseId}
           lectureId={lectureId}
-          display={exercise as RegularExerciseDisplay}
+          display={exercise}
           back={back}
           transport={{
             submit: async (input) => await detectStaleSession(submitRegular.mutateAsync(input)),
             switchToStep: async ({ sessionId }) =>
               await detectStaleSession(switchRegular.mutateAsync({ courseId, lectureId, sessionId })),
             next: async ({ sessionId, problemFormat }) => {
-              const value = await detectStaleSession(
-                next.mutateAsync({ courseId, lectureId, sessionId, problemFormat })
-              );
-              if ('status' in value || !('problemFormat' in value))
-                throw new Error('この授業回には現在出題できる問題がありません。');
+              const value = await fetchNext(sessionId, problemFormat);
+              if (value.problemFormat !== 'regular') throw new Error('次の問題を取得できませんでした。');
               return value;
             },
           }}
         />
       )}
-      {exercise && format === 'fillInBlank' && (
+      {exercise?.problemFormat === 'fillInBlank' && format === 'fillInBlank' && (
         <VStack key={exercise.sessionId} align="stretch" spacing={4}>
           <ProblemPageHeader courseId={courseId} lectureId={lectureId} problemId={exercise.problemId as ProblemId} />
           <FillInBlankBody
-            problem={exercise as ExerciseDisplay}
+            problem={exercise}
             gradeAnswers={gradeBlank}
             completionActions={actions}
             completionMessage="正解です！次の問題へ進めます。"

@@ -307,6 +307,7 @@ const toDisplay = (row: ExerciseSession, format: ProblemFormat): ExerciseDisplay
   }
   const problem = instantiateBlank(row);
   return {
+    problemFormat: 'fillInBlank',
     sessionId: row.id,
     problemId: row.problemId,
     displayProgram: problem.displayProgram,

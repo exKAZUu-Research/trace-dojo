@@ -31,6 +31,7 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
 import { ChallengePageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/pageOnClient';
 
 const blankDisplay = {
+  problemFormat: 'fillInBlank' as const,
   sessionId: 23,
   problemId: 'fillInBlank2',
   displayProgram: 'class Main { int x = 【1】; }',
@@ -276,7 +277,7 @@ test('a just-completed fill-in-blank keeps its answer, deduplicates Next, and re
 
 test('completed fill-in-blank orders Back before Next and reports a failed action without dismissing', async () => {
   transport.start.mockResolvedValue({ ...blankDisplay, completed: true });
-  transport.next.mockRejectedValue(new Error('次の問題を取得できませんでした。'));
+  transport.next.mockRejectedValue(new Error('Invalid challenge problem: fillInBlank2'));
   const user = userEvent.setup();
   renderPage('fillInBlank');
   const dialog = await screen.findByRole('alertdialog');
@@ -287,6 +288,7 @@ test('completed fill-in-blank orders Back before Next and reports a failed actio
   ).toEqual(['終わる', '次の問題へ']);
   await user.click(screen.getByRole('button', { name: '次の問題へ' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('次の問題を取得できませんでした。');
+  expect(dialog).not.toHaveTextContent('Invalid challenge problem');
   expect(dialog).toBeVisible();
 });
 
