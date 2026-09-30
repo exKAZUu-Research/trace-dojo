@@ -2,6 +2,7 @@
 
 import { ChakraProvider } from '@chakra-ui/react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { TRPCClientError } from '@trpc/client';
 import userEvent from '@testing-library/user-event';
 import { expect, test, vi } from 'vitest';
 
@@ -50,6 +51,29 @@ test('uses the real editor local grader and sends only verdict with stored conte
   expect(payload).not.toHaveProperty('turtles');
   expect(payload).not.toHaveProperty('variables');
 });
+
+test('asks for a reload instead of a retry when the server refuses a stale session state', async () => {
+  const user = userEvent.setup();
+  const submit = vi
+    .fn<RegularChallengeTransport['submit']>()
+    .mockRejectedValue(
+      new TRPCClientError('CONFLICT', {
+        result: { error: { code: -32_009, message: 'CONFLICT', data: { code: 'CONFLICT' } } },
+      })
+    )
+    .mockRejectedValueOnce(new Error('network'));
+  renderBody({ submit });
+  const inputs = screen.getAllByRole('textbox');
+  for (const [input, value] of inputs.map((input, index) => [input, ['2', '2', '4'][index]] as const)) {
+    await user.type(input, value);
+  }
+  await user.click(screen.getByRole('button', { name: /提出/ }));
+  expect(await screen.findByRole('alertdialog')).toHaveTextContent('もう一度提出してください');
+  await user.click(screen.getByRole('button', { name: /閉じる/ }));
+  await user.click(screen.getByRole('button', { name: /提出/ }));
+  expect(await screen.findByRole('alertdialog')).toHaveTextContent('ページを再読み込みしてください');
+  expect(submit.mock.calls[1][0].requestId).toBe(submit.mock.calls[0][0].requestId);
+}, 15_000);
 
 test('ignores Enter while a result dialog is open', async () => {
   const user = userEvent.setup();
