@@ -113,12 +113,12 @@ test('preserves the draft on switch cancel or failure and resets only after succ
   await user.click(screen.getByRole('button', { name: 'ステップ実行モードに移る' }));
   expect(screen.getByRole('alertdialog')).toHaveTextContent(/下書き.*リセット|リセット.*下書き/);
   await user.click(screen.getByRole('button', { name: /キャンセル/ }));
-  expect(input).toHaveValue('draft');
+  expect(screen.getAllByRole('textbox')[0]).toHaveValue('draft');
 
   await user.click(screen.getByRole('button', { name: 'ステップ実行モードに移る' }));
   await user.click(screen.getByRole('button', { name: /切り替/ }));
   await screen.findByRole('alert');
-  expect(input).toHaveValue('draft');
+  expect(screen.getAllByRole('textbox')[0]).toHaveValue('draft');
 
   await user.click(screen.getByRole('button', { name: 'ステップ実行モードに移る' }));
   await user.click(screen.getByRole('button', { name: /切り替/ }));
@@ -195,7 +195,7 @@ test('locally grades the final step and exposes completion actions', async () =>
   });
   await waitFor(() => expect(screen.getByRole('button', { name: /次の問題/ })).toBeVisible());
   expect(screen.getByRole('button', { name: /終わる/ })).toBeVisible();
-  expect(inputs[2]).toHaveValue('4');
+  expect(screen.getAllByRole('textbox', { hidden: true })[2]).toHaveValue('4');
   expect(problemCard).toBeInTheDocument();
   expect(problemCard).toHaveTextContent('6行目');
   expect(problemCard).toHaveTextContent('8行目');
