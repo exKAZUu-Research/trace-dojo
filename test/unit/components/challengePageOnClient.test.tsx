@@ -81,8 +81,7 @@ test('a valid URL format starts exactly once under StrictMode and renders the ex
 test('a regular URL format starts once and renders the regular exercise', async () => {
   transport.start.mockResolvedValue(regularDisplay);
   renderPage('regular');
-  const inputs = await screen.findAllByRole('textbox');
-  expect(inputs.length).toBeGreaterThan(0);
+  await screen.findAllByRole('textbox');
   expect(transport.start).toHaveBeenCalledTimes(1);
   expect(transport.start).toHaveBeenCalledWith({
     courseId: 'test',
@@ -118,8 +117,7 @@ test('a browser format change starts the new format and ignores the stale previo
 test('returning to the same valid format after a missing format starts a fresh request', async () => {
   transport.start.mockResolvedValueOnce(regularDisplay).mockResolvedValueOnce({ ...regularDisplay, sessionId: 18 });
   const rendered = renderPage('regular');
-  const inputs = await screen.findAllByRole('textbox');
-  expect(inputs.length).toBeGreaterThan(0);
+  await screen.findAllByRole('textbox');
 
   rendered.rerender(page());
   const dialog = await screen.findByRole('dialog', { name: 'チャレンジ形式を選択' });
@@ -137,8 +135,7 @@ test('returning to the same valid format after a missing format starts a fresh r
 test('removing the URL format clears the exercise and opens the selector without another start', async () => {
   transport.start.mockResolvedValue(regularDisplay);
   const rendered = renderPage('regular');
-  const inputs = await screen.findAllByRole('textbox');
-  expect(inputs.length).toBeGreaterThan(0);
+  await screen.findAllByRole('textbox');
 
   rendered.rerender(page());
 
@@ -295,12 +292,14 @@ test('an error stays inside the modal and choosing the other format updates the 
   });
 });
 
-test('suppresses rapid competing selections while a start is pending', async () => {
+test('disables the format choices while a start is pending so a second selection cannot fire', async () => {
   let resolve!: (display: typeof blankDisplay) => void;
   transport.start.mockReturnValue(new Promise((_resolve) => (resolve = _resolve)));
   const user = userEvent.setup();
   renderPage();
   await user.click(screen.getByRole('button', { name: /通常問題/ }));
+  expect(screen.getByRole('button', { name: /通常問題/ })).toBeDisabled();
+  expect(screen.getByRole('button', { name: /穴埋め問題/ })).toBeDisabled();
   await user.click(screen.getByRole('button', { name: /穴埋め問題/ }));
   expect(transport.start).toHaveBeenCalledTimes(1);
   expect(navigation.push).toHaveBeenCalledTimes(1);

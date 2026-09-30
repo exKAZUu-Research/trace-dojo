@@ -54,26 +54,20 @@ export const RegularProblemPresentation: React.FC<Props> = ({
                   を実行した後の盤面と変数の一覧表を参考に、
                 </>
               )}
-              {view.problemType === 'executionResult' ? (
-                <Box as="span">
-                  <Box as="span" fontWeight="bold">
-                    プログラムを実行した後
-                  </Box>
-                  の盤面{Object.keys(view.initialVariables).length > 0 ? 'と、変数に記録されている値の一覧表' : ''}
-                  を作成し、提出ボタンを押してください。
-                </Box>
-              ) : (
-                <>
-                  <Box as="span" fontWeight="bold">
+              <Box as="span" fontWeight="bold">
+                {view.problemType === 'executionResult' ? (
+                  'プログラムを実行した後'
+                ) : (
+                  <>
                     <Box as="span" border="2px solid #f56565" px={0.5} rounded="sm">
                       {problem.sidToLineIndex.get(problem.traceItems[view.currentTraceItemIndex].sid)}行目
                     </Box>
                     を実行した後
-                  </Box>
-                  の盤面{Object.keys(view.initialVariables).length > 0 ? 'と、変数に記録されている値の一覧表' : ''}
-                  を作成し、提出ボタンを押してください。
-                </>
-              )}
+                  </>
+                )}
+              </Box>
+              の盤面{Object.keys(view.initialVariables).length > 0 ? 'と、変数に記録されている値の一覧表' : ''}
+              を作成し、提出ボタンを押してください。
             </Box>
           </VStack>
         </VStack>
