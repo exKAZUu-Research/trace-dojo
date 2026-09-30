@@ -9,6 +9,7 @@ import { authorize } from '../middlewares';
 import { procedure } from '../trpc';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import type { ExerciseDisplay } from '@/problems/fillInBlank/exerciseProblem';
+import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
 import { gradeFillInBlankAnswers } from '@/problems/fillInBlank/grade';
 import { instantiateProblem, isFillInBlankProblem, type InstantiatedProblem } from '@/problems/instantiateProblem';
 import {
@@ -20,16 +21,6 @@ import {
 } from '@/problems/problemData';
 
 type ProblemFormat = 'fillInBlank' | 'regular';
-type RegularProblemType = 'executionResult' | 'step';
-export interface RegularExerciseDisplay {
-  problemFormat: 'regular';
-  sessionId: number;
-  problemId: string;
-  seed: string;
-  problemType: RegularProblemType;
-  traceItemIndex: number;
-  completed: boolean;
-}
 export interface SubmissionResult {
   status: 'correct' | 'incorrect' | 'ungradable';
   detail: string;
@@ -309,7 +300,7 @@ const toRegularDisplay = (row: ExerciseSession): RegularExerciseDisplay => ({
   sessionId: row.id,
   problemId: row.problemId,
   seed: row.seed,
-  problemType: row.problemType as RegularProblemType,
+  problemType: row.problemType as RegularExerciseDisplay['problemType'],
   traceItemIndex: row.traceItemIndex,
   completed: Boolean(row.completedAt),
 });

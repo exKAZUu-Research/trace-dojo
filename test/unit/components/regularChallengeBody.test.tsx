@@ -7,11 +7,11 @@ import { expect, test, vi } from 'vitest';
 
 import {
   RegularChallengeBody,
-  type RegularChallengeDisplay,
   type RegularChallengeTransport,
 } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/RegularChallengeBody';
+import type { RegularExerciseDisplay } from '../../../src/problems/regular/exerciseProblem';
 
-const executionDisplay: RegularChallengeDisplay = {
+const executionDisplay: RegularExerciseDisplay = {
   problemFormat: 'regular',
   sessionId: 17,
   problemId: 'test3',
@@ -49,6 +49,21 @@ test('uses the real editor local grader and sends only verdict with stored conte
   expect(payload).not.toHaveProperty('board');
   expect(payload).not.toHaveProperty('turtles');
   expect(payload).not.toHaveProperty('variables');
+});
+
+test('ignores Enter while a result dialog is open', async () => {
+  const user = userEvent.setup();
+  const submit = vi.fn<RegularChallengeTransport['submit']>().mockResolvedValue(executionDisplay);
+  renderBody({ submit });
+  const inputs = screen.getAllByRole('textbox');
+  for (const [input, value] of inputs.map((input, index) => [input, ['999', '2', '4'][index]] as const)) {
+    await user.type(input, value);
+  }
+  await user.click(screen.getByRole('button', { name: /提出/ }));
+  await screen.findByRole('alertdialog');
+  await user.keyboard('{Enter}');
+  await user.keyboard('{Enter}');
+  expect(submit).toHaveBeenCalledTimes(1);
 });
 
 test('keeps an incorrect draft mounted across repeated attempts and never switches automatically', async () => {
@@ -179,7 +194,7 @@ test('deduplicates a pending completion action and keeps its failure recoverable
   let rejectNext!: (reason: Error) => void;
   const next = vi
     .fn<RegularChallengeTransport['next']>()
-    .mockImplementationOnce(() => new Promise<RegularChallengeDisplay>((_resolve, reject) => (rejectNext = reject)))
+    .mockImplementationOnce(() => new Promise<RegularExerciseDisplay>((_resolve, reject) => (rejectNext = reject)))
     .mockResolvedValueOnce(executionDisplay);
   const user = userEvent.setup();
   renderBody({ display: { ...executionDisplay, completed: true }, next });
@@ -232,7 +247,7 @@ test('keeps completion actions usable after advancing to an already completed se
 });
 
 const renderBody = (
-  overrides: Partial<RegularChallengeTransport> & { display?: RegularChallengeDisplay; back?: () => void }
+  overrides: Partial<RegularChallengeTransport> & { display?: RegularExerciseDisplay; back?: () => void }
 ): ReturnType<typeof render> => {
   const transport: RegularChallengeTransport = {
     submit: async () => executionDisplay,

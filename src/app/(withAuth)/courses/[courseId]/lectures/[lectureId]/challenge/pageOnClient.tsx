@@ -4,7 +4,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { type ChallengeProblemFormat } from './ChallengeSelection';
 import { ChallengeSelectionModal } from './ChallengeSelectionModal';
-import { RegularChallengeBody, type RegularChallengeDisplay } from './RegularChallengeBody';
+import { RegularChallengeBody } from './RegularChallengeBody';
 import { FillInBlankBody } from '../problems/[problemId]/FillInBlankBody';
 import { ProblemPageHeader } from '../problems/[problemId]/ProblemPageHeader';
 import type { CompletionAction } from '../problems/[problemId]/ResultAlertDialog';
@@ -13,8 +13,9 @@ import { VStack } from '@/infrastructures/useClient/chakra';
 import type { ExerciseDisplay } from '@/problems/fillInBlank/exerciseProblem';
 import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
 import type { CourseId, ProblemId } from '@/problems/problemData';
+import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
 
-type Display = ExerciseDisplay | RegularChallengeDisplay;
+type Display = ExerciseDisplay | RegularExerciseDisplay;
 interface Props {
   initialFormat?: ChallengeProblemFormat;
 }
@@ -163,7 +164,7 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
           key={exercise.sessionId}
           courseId={courseId}
           lectureId={lectureId}
-          display={exercise as RegularChallengeDisplay}
+          display={exercise as RegularExerciseDisplay}
           back={back}
           transport={{
             submit: async (input) => await submitRegular.mutateAsync(input),

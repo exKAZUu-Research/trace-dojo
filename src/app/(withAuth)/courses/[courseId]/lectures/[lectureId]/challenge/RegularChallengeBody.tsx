@@ -20,16 +20,8 @@ import {
 } from '@/infrastructures/useClient/chakra';
 import { instantiateProblem } from '@/problems/instantiateProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
+import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
 
-export interface RegularChallengeDisplay {
-  problemFormat: 'regular';
-  sessionId: number;
-  problemId: string;
-  seed: string;
-  problemType: 'executionResult' | 'step';
-  traceItemIndex: number;
-  completed: boolean;
-}
 interface SubmitInput {
   courseId: string;
   lectureId: string;
@@ -39,14 +31,14 @@ interface SubmitInput {
   isCorrect: boolean;
 }
 export interface RegularChallengeTransport {
-  submit: (input: SubmitInput) => Promise<RegularChallengeDisplay>;
-  switchToStep: (input: { sessionId: number }) => Promise<RegularChallengeDisplay>;
-  next: (input: { sessionId: number; problemFormat: 'regular' }) => Promise<RegularChallengeDisplay>;
+  submit: (input: SubmitInput) => Promise<RegularExerciseDisplay>;
+  switchToStep: (input: { sessionId: number }) => Promise<RegularExerciseDisplay>;
+  next: (input: { sessionId: number; problemFormat: 'regular' }) => Promise<RegularExerciseDisplay>;
 }
 interface Props {
   courseId: string;
   lectureId: string;
-  display: RegularChallengeDisplay;
+  display: RegularExerciseDisplay;
   transport: RegularChallengeTransport;
   back: () => void;
 }
@@ -86,7 +78,7 @@ export const RegularChallengeBody: React.FC<Props> = ({
     });
 
   const submit = async (): Promise<void> => {
-    if (display.completed || !editor.current) return;
+    if (display.completed || alert || switchOpen || !editor.current) return;
     const grading = editor.current.gradeAnswers();
     const isCorrect = grading.status === 'correct';
     const requestKey = `${contextKey}:${isCorrect}`;
