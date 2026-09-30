@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { ChakraProvider } from '@chakra-ui/react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, test, vi } from 'vitest';
 
@@ -197,8 +197,12 @@ test('runs a completed normal post-alert action only once when close and Escape 
   await user.type(screen.getAllByRole('textbox').at(-1)!, '4');
   await user.click(screen.getByRole('button', { name: /提出/ }));
   const close = await screen.findByRole('button', { name: /閉じる/ });
-  fireEvent.click(close);
-  fireEvent.keyDown(document, { key: 'Escape' });
+  const dialog = screen.getByRole('alertdialog');
+  // One act batch keeps the dialog open for both closers, so only the dialog's close guard can stop the second one.
+  act(() => {
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    fireEvent.click(close);
+  });
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   expect(navigation.push).toHaveBeenCalledTimes(1);
 });
