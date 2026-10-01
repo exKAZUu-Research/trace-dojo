@@ -115,8 +115,11 @@ test('a browser format change starts the new format and ignores the stale previo
   expect(screen.getByRole('textbox', { name: '空欄【1】' })).toBeVisible();
 });
 
-test('returning to the same valid format after a missing format starts a fresh request', async () => {
-  transport.start.mockResolvedValueOnce(regularDisplay).mockResolvedValueOnce({ ...regularDisplay, sessionId: 18 });
+test('returning to the same valid format after a missing format drops the old exercise and starts a fresh request', async () => {
+  let resolveSecond!: (display: typeof regularDisplay) => void;
+  transport.start
+    .mockResolvedValueOnce(regularDisplay)
+    .mockReturnValueOnce(new Promise((resolve) => (resolveSecond = resolve)));
   const rendered = renderPage('regular');
   await screen.findAllByRole('textbox');
 
@@ -126,6 +129,9 @@ test('returning to the same valid format after a missing format starts a fresh r
   rendered.rerender(page('regular'));
 
   await waitFor(() => expect(transport.start).toHaveBeenCalledTimes(2));
+  expect(rendered.container.querySelectorAll('input')).toHaveLength(0);
+  await act(async () => resolveSecond({ ...regularDisplay, sessionId: 18 }));
+  expect(rendered.container.querySelectorAll('input').length).toBeGreaterThan(0);
   expect(transport.start).toHaveBeenNthCalledWith(2, {
     courseId: 'test',
     lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
@@ -133,7 +139,7 @@ test('returning to the same valid format after a missing format starts a fresh r
   });
 });
 
-test('removing the URL format clears the exercise and opens the selector without another start', async () => {
+test('removing the URL format hides the exercise and opens the selector without another start', async () => {
   transport.start.mockResolvedValue(regularDisplay);
   const rendered = renderPage('regular');
   await screen.findAllByRole('textbox');
@@ -142,7 +148,7 @@ test('removing the URL format clears the exercise and opens the selector without
 
   const dialog = await screen.findByRole('dialog', { name: 'チャレンジ形式を選択' });
   await waitFor(() => expect(dialog).toBeVisible());
-  expect(screen.queryAllByRole('textbox')).toHaveLength(0);
+  expect(rendered.container.querySelectorAll('input')).toHaveLength(0);
   expect(transport.start).toHaveBeenCalledTimes(1);
 });
 
@@ -230,7 +236,6 @@ test('completed fill-in-blank next keeps the active format and renders the retur
   const input = await screen.findByRole('textbox', { hidden: true, name: '空欄【1】' });
   expect(input).toBeDisabled();
   expect(screen.getByText(/プログラムを実行した後の盤面/)).toBeVisible();
-  expect(screen.getByRole('button', { hidden: true, name: '提出' })).toBeDisabled();
   await user.keyboard('{Escape}');
   expect(screen.getByRole('alertdialog')).toBeVisible();
   await user.click(screen.getByRole('button', { name: '次の問題へ' }));
@@ -256,6 +261,7 @@ test('a just-completed fill-in-blank keeps its answer, deduplicates Next, and re
   await user.click(screen.getByRole('button', { name: '提出' }));
   const dialog = await screen.findByRole('alertdialog');
   expect(input).toHaveValue('x + 1');
+  expect(screen.getByRole('button', { hidden: true, name: '提出' })).toBeDisabled();
   expect(dialog).toBeInTheDocument();
   await user.keyboard('{Escape}');
   expect(dialog).toBeInTheDocument();
