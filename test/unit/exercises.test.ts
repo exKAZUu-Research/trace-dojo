@@ -73,6 +73,8 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  // Learning-period visibility is evaluated per request, so a test must not straddle a period boundary.
+  vi.useFakeTimers({ toFake: ['Date'], now: Date.now() });
   auth.userId = 'student';
   sqlite.exec(
     'DELETE FROM ExerciseSubmission; DELETE FROM ExerciseSession; DELETE FROM ProblemSubmission; DELETE FROM ProblemSession; DELETE FROM User'
@@ -88,6 +90,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   if (originalChallengeTestLectures) challengeMap.test = originalChallengeTestLectures;
   else delete challengeMap.test;
   if (originalRegularTestLectures) regularMap.test = originalRegularTestLectures;
@@ -677,6 +680,7 @@ test('rejects cross-format and expired regular access without mutation', async (
 
   const regular = await startRegular();
   sqlite.prepare('UPDATE ExerciseSession SET createdAt = 0 WHERE id = ?').run(regular.sessionId);
+  vi.setSystemTime(new Date('2026-07-15T12:00:00+09:00'));
   const before = exerciseRows();
   await expect(submitRegular(regular, 'expired', true)).rejects.toMatchObject({ code: 'NOT_FOUND' });
   expect(exerciseRows()).toEqual(before);
