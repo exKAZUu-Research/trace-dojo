@@ -20,7 +20,7 @@ vi.mock('next/navigation', () => ({
 }));
 vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
   backendTrpcReact: {
-    startExercise: { useMutation: () => ({ mutateAsync: transport.start, isPending: false }) },
+    startExercise: { useMutation: () => ({ mutateAsync: transport.start }) },
     nextExercise: { useMutation: () => ({ mutateAsync: transport.next }) },
     submitExercise: { useMutation: () => ({ mutateAsync: transport.submitBlank }) },
     submitRegularExercise: { useMutation: () => ({ mutateAsync: transport.submitRegular }) },
@@ -272,7 +272,6 @@ test('a just-completed fill-in-blank keeps its answer, deduplicates Next, and re
   const dialog = await screen.findByRole('alertdialog');
   expect(input).toHaveValue('x + 1');
   expect(screen.getByRole('button', { hidden: true, name: '提出' })).toBeDisabled();
-  expect(dialog).toBeInTheDocument();
   await user.keyboard('{Escape}');
   expect(dialog).toBeInTheDocument();
 
