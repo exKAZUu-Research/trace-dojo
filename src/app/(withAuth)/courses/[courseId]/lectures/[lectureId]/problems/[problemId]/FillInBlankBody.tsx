@@ -33,7 +33,7 @@ interface Props {
     blankCount: number;
     finalBoard: string;
     finalTurtles: TurtleTrace[];
-    finalVars?: TraceItemVariable;
+    finalVars: TraceItemVariable;
   };
   gradeAnswers: (answers: string[]) => Promise<FillInBlankVerdict>;
   completionActions?: CompletionAction[];
@@ -47,7 +47,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
   const [answers, updateAnswers] = useImmer<string[]>(Array.from({ length: props.problem.blankCount }, () => ''));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [alert, setAlert] = useState<{ title: string; message: string; isCompleted: boolean }>();
-  const hasVariables = Object.keys(props.problem.finalVars ?? {}).length > 0;
+  const hasVariables = Object.keys(props.problem.finalVars).length > 0;
   const isIncomplete = answers.some((answer) => answer.trim() === '');
   const isCompleted = props.isCompleted || alert?.isCompleted === true;
 
@@ -165,7 +165,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
           {hasVariables && (
             <>
               <Heading size="md">実行後の変数の値</Heading>
-              <Variables traceItemVars={props.problem.finalVars ?? {}} />
+              <Variables traceItemVars={props.problem.finalVars} />
             </>
           )}
         </VStack>
