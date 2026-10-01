@@ -7,8 +7,9 @@ import { useIdleTimer } from 'react-idle-timer';
 
 import { FillInBlankBody } from './FillInBlankBody';
 import { ProblemBody } from './ProblmBody';
+import { ProblemPageHeader } from './ProblemPageHeader';
+import { ReloadNotice } from './ReloadNotice';
 
-import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefetch';
 import {
   DEFAULT_LANGUAGE_ID,
   MAX_ACTIVE_DURATION_MS_AFTER_LAST_EVENT,
@@ -16,11 +17,10 @@ import {
 } from '@/constants';
 import { useAuthContextSelector } from '@/contexts/AuthContext';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
-import { Button, Heading, HStack, Link, Text, Tooltip, VStack } from '@/infrastructures/useClient/chakra';
+import { Button, HStack, Tooltip, VStack } from '@/infrastructures/useClient/chakra';
 import type { FillInBlankGradingResult } from '@/problems/fillInBlank/grade';
 import { instantiateProblem } from '@/problems/instantiateProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
-import { courseIdToLectureIds, courseIdToName, problemIdToName } from '@/problems/problemData';
 import { isProblemSessionExpired } from '@/utils/problemSessionError';
 
 interface Props {
@@ -32,7 +32,6 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   const isAdmin = useAuthContextSelector((c) => c.isAdmin);
 
   const params = useParams<{ courseId: CourseId; lectureId: string; problemId: ProblemId }>();
-  const lectureIndex = courseIdToLectureIds[params.courseId].indexOf(params.lectureId);
   const problem = useMemo(
     () => instantiateProblem(params.problemId, DEFAULT_LANGUAGE_ID, props.initialProblemSession.problemVariablesSeed),
     [params.problemId, props.initialProblemSession.problemVariablesSeed]
@@ -107,13 +106,10 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
 
   if (isSessionExpired) {
     return (
-      <VStack align="stretch" role="alert" spacing={4}>
-        <Heading size="md">学習セッションの有効期限が切れました</Heading>
-        <Text>ページを再読み込みして、現在の学習期間の問題を開いてください。</Text>
-        <Button alignSelf="start" colorScheme="brand" onClick={() => globalThis.location.reload()}>
-          ページを再読み込み
-        </Button>
-      </VStack>
+      <ReloadNotice
+        message="ページを再読み込みして、現在の学習期間の問題を開いてください。"
+        title="学習セッションの有効期限が切れました"
+      />
     );
   }
 
@@ -121,25 +117,11 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
 
   return (
     <VStack align="stretch" spacing={4}>
-      <VStack align="stretch" spacing={1}>
-        <HStack justify="space-between" spacing={2}>
-          <HStack spacing={2}>
-            <Link as={NextLinkWithoutPrefetch} color="gray.600" fontWeight="bold" href={`/courses/${params.courseId}`}>
-              {courseIdToName[params.courseId]}
-            </Link>
-            <Text color="gray.600">{'>'}</Text>
-            <Link
-              as={NextLinkWithoutPrefetch}
-              color="gray.600"
-              fontWeight="bold"
-              href={`/courses/${params.courseId}/lectures/${params.lectureId}`}
-            >
-              第{lectureIndex + 1}回
-            </Link>
-          </HStack>
-        </HStack>
-        <HStack justify="space-between" spacing={2}>
-          <Heading as="h1">{problemIdToName[params.problemId]}</Heading>
+      <ProblemPageHeader
+        courseId={params.courseId}
+        lectureId={params.lectureId}
+        problemId={params.problemId}
+        actions={
           <HStack hidden={isFillInBlank} spacing={2}>
             <Tooltip
               label={
@@ -173,11 +155,20 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
               </Button>
             )}
           </HStack>
-        </HStack>
-      </VStack>
+        }
+      />
 
       {isFillInBlank ? (
-        <FillInBlankBody gradeAnswers={gradeAnswers} problem={problem} />
+        <FillInBlankBody
+          gradeAnswers={gradeAnswers}
+          problem={{
+            displayProgram: problem.displayProgram,
+            blankCount: problem.blankAnswers.length,
+            finalBoard: problem.finalBoard,
+            finalTurtles: problem.finalTurtles,
+            finalVars: problem.finalVars,
+          }}
+        />
       ) : (
         <ProblemBody
           createSubmissionUpdatingProblemSession={createSubmissionUpdatingProblemSession}

@@ -2,20 +2,15 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import type React from 'react';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { useImmer } from 'use-immer';
 
 import { BoardViewer } from './BoardViewer';
 import { SyntaxHighlighter } from './SyntaxHighlighter';
 import { Variables } from './Variables';
+import { ResultAlertDialog, type CompletionAction } from './ResultAlertDialog';
 
 import {
-  AlertDialog,
-  AlertDialogBody,
-  AlertDialogContent,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogOverlay,
   Box,
   Button,
   Card,
@@ -28,30 +23,39 @@ import {
   VStack,
 } from '@/infrastructures/useClient/chakra';
 import { toBlankPlaceholder } from '@/problems/fillInBlank/blanks';
-import type { FillInBlankGradingResult } from '@/problems/fillInBlank/grade';
-import type { InstantiatedProblem } from '@/problems/instantiateProblem';
+import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
+import type { TraceItemVariable, TurtleTrace } from '@/problems/traceProgram';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 
 interface Props {
-  problem: InstantiatedProblem;
-  gradeAnswers: (answers: string[]) => Promise<FillInBlankGradingResult>;
+  problem: {
+    displayProgram: string;
+    blankCount: number;
+    finalBoard: string;
+    finalTurtles: TurtleTrace[];
+    finalVars: TraceItemVariable;
+  };
+  gradeAnswers: (answers: string[]) => Promise<FillInBlankVerdict>;
+  completionActions?: CompletionAction[];
+  completionMessage?: string;
+  isCompleted?: boolean;
 }
 
 export const FillInBlankBody: React.FC<Props> = (props) => {
   const params = useParams<{ courseId: CourseId; lectureId: string; problemId: ProblemId }>();
   const router = useRouter();
-  const [answers, updateAnswers] = useImmer<string[]>(props.problem.blankAnswers.map(() => ''));
+  const [answers, updateAnswers] = useImmer<string[]>(Array.from({ length: props.problem.blankCount }, () => ''));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [alert, setAlert] = useState<{ title: string; message: string; isCompleted: boolean }>();
-  const cancelRef = useRef<HTMLButtonElement>(null);
   const hasVariables = Object.keys(props.problem.finalVars).length > 0;
   const isIncomplete = answers.some((answer) => answer.trim() === '');
+  const isCompleted = props.isCompleted || alert?.isCompleted === true;
 
   const handleSubmit = async (): Promise<void> => {
-    if (isSubmitting || alert || isIncomplete) return;
+    if (isSubmitting || alert || isIncomplete || isCompleted) return;
     setIsSubmitting(true);
     try {
-      let result: FillInBlankGradingResult;
+      let result: FillInBlankVerdict;
       try {
         result = await props.gradeAnswers(answers);
       } catch (error) {
@@ -67,7 +71,9 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
         case 'correct': {
           setAlert({
             title: '正解',
-            message: '正解です！この問題は完了です。問題一覧ページに戻りますので、次の問題に挑戦してください。',
+            message:
+              props.completionMessage ??
+              '正解です！この問題は完了です。問題一覧ページに戻りますので、次の問題に挑戦してください。',
             isCompleted: true,
           });
           break;
@@ -100,7 +106,10 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
               <Box>
                 プログラムを実行した後の盤面{hasVariables ? 'と変数の値' : ''}が右側のようになるように、
                 <Box as="span" fontWeight="bold">
-                  空欄{props.problem.blankAnswers.map((_, index) => toBlankPlaceholder(index + 1)).join('、')}
+                  空欄
+                  {Array.from({ length: props.problem.blankCount }, (_, index) => toBlankPlaceholder(index + 1)).join(
+                    '、'
+                  )}
                 </Box>
                 に入るJavaのコードを入力し、提出ボタンを押してください。
               </Box>
@@ -122,6 +131,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
                   bg="white"
                   fontFamily="mono"
                   spellCheck={false}
+                  isDisabled={isCompleted}
                   value={answer}
                   onChange={(event) => {
                     updateAnswers((draft) => {
@@ -138,7 +148,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
             <Button
               alignSelf="flex-end"
               colorScheme="brand"
-              isDisabled={isIncomplete}
+              isDisabled={isIncomplete || isCompleted}
               isLoading={isSubmitting}
               onClick={() => void handleSubmit()}
             >
@@ -161,41 +171,21 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
         </VStack>
       </Flex>
 
-      <AlertDialog
-        closeOnEsc={true}
-        closeOnOverlayClick={false}
-        isOpen={alert !== undefined}
-        leastDestructiveRef={cancelRef as React.RefObject<HTMLElement>}
-        onClose={() => {
-          if (alert?.isCompleted) router.push(`/courses/${params.courseId}/lectures/${params.lectureId}`);
-          setAlert(undefined);
-        }}
-      >
-        <AlertDialogOverlay>
-          <AlertDialogContent>
-            <AlertDialogHeader fontSize="lg" fontWeight="bold">
-              {alert?.title}
-            </AlertDialogHeader>
-            <AlertDialogBody whiteSpace="pre-wrap">{alert?.message}</AlertDialogBody>
-            <AlertDialogFooter>
-              <Button
-                ref={cancelRef}
-                rightIcon={
-                  <Box as="span" fontSize="sm" fontWeight="bold">
-                    (Esc)
-                  </Box>
-                }
-                onClick={() => {
-                  if (alert?.isCompleted) router.push(`/courses/${params.courseId}/lectures/${params.lectureId}`);
-                  setAlert(undefined);
-                }}
-              >
-                閉じる
-              </Button>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialogOverlay>
-      </AlertDialog>
+      <ResultAlertDialog
+        {...(isCompleted && props.completionActions
+          ? { actions: props.completionActions }
+          : {
+              onClose: () => {
+                if (isCompleted) router.push(`/courses/${params.courseId}/lectures/${params.lectureId}`);
+                setAlert(undefined);
+              },
+            })}
+        isOpen={Boolean(alert) || Boolean(props.isCompleted)}
+        message={
+          alert?.message ?? (props.isCompleted ? (props.completionMessage ?? '正解です！次の問題へ進めます。') : '')
+        }
+        title={alert?.title ?? (props.isCompleted ? '正解' : '')}
+      />
     </>
   );
 };

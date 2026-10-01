@@ -1,3 +1,3 @@
 'use client';
 
-export { MdOutlineHome } from 'react-icons/md';
+export { MdCode, MdEditNote, MdOutlineHome } from 'react-icons/md';

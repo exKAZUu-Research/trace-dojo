@@ -1,3 +1,5 @@
+import { fillInBlankProblemDefinitions } from './fillInBlank/definitions';
+
 export const languageIds = ['instrumented', 'java'] as const;
 export type LanguageId = (typeof languageIds)[number];
 
@@ -199,6 +201,24 @@ export const problemIdToName = {
   fillInBlank2: '穴埋めのテスト用問題(2)',
   fillInBlank3: '穴埋めのテスト用問題(3)',
   fillInBlank4: '穴埋めのテスト用問題(4)',
+  straightBlank: '穴埋めチャレンジ：線を描こう(1)',
+  straightSecondBlank: '穴埋めチャレンジ：線を描こう(2)',
+  square1Blank: '穴埋めチャレンジ：図形を描こう',
+  while1Blank: '穴埋めチャレンジ：while文を使おう',
+  doubleLoop1Blank: '穴埋めチャレンジ：二重ループ',
+  elseIf1Blank: '穴埋めチャレンジ：else if文を使おう',
+  break1Blank: '穴埋めチャレンジ：break文を使おう',
+  method1Blank: '穴埋めチャレンジ：メソッドを使おう',
+  array1Blank: '穴埋めチャレンジ：配列を使おう',
+  multiObject1Blank: '穴埋めチャレンジ：複数のオブジェクトを使おう',
+  makeClass1Blank: '穴埋めチャレンジ：クラスを作ろう',
+  encapsulationBlank: '穴埋めチャレンジ：カプセル化',
+  staticMethod1Blank: '穴埋めチャレンジ：静的メソッド',
+  inheritance1Blank: '穴埋めチャレンジ：継承',
+  exception1Blank: '穴埋めチャレンジ：例外',
+  twoDimensionalArray1Blank: '穴埋めチャレンジ：二次元配列',
+  test1Blank: '穴埋めチャレンジのテスト用問題',
+  overload1Blank: '穴埋めチャレンジ：オーバーロード',
 } as const;
 export type ProblemId = keyof typeof problemIdToName;
 
@@ -363,6 +383,30 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
       'fillInBlank4',
     ],
   ],
+};
+
+export const courseIdToLectureIndexToExerciseProblemIds: Record<CourseId, ProblemId[][]> = {
+  tuBeginner1: [
+    ['straightBlank', 'straightSecondBlank'],
+    ['square1Blank'],
+    ['while1Blank'],
+    ['doubleLoop1Blank'],
+    ['elseIf1Blank'],
+    ['break1Blank'],
+    ['method1Blank'],
+    ['array1Blank'],
+  ],
+  tuBeginner2: [
+    ['multiObject1Blank'],
+    ['makeClass1Blank'],
+    ['encapsulationBlank'],
+    ['staticMethod1Blank'],
+    ['inheritance1Blank'],
+    ['overload1Blank'],
+    ['exception1Blank'],
+    ['twoDimensionalArray1Blank'],
+  ],
+  test: [['test1Blank']],
 };
 
 export const courseIdToLectureIds = JSON.parse(process.env.NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON ?? '{}') as Record<
@@ -8322,84 +8366,7 @@ class MyTurtle2 {
 }
 `,
   },
-  fillInBlank1: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); @[s.get('i') < 4]@; s.set('i', s.get('i') + 1)) {
-  t.forward();
-}
-delete s.vars['i'];
-`,
-    java: `
-public class Main {
-  public static void main(String[] args) {
-    Turtle t = new Turtle();
-    for (int i = 0; @[i < 4]@; i++) {
-      t.前に進む();
-    }
-  }
-}
-`,
-  },
-  fillInBlank2: {
-    instrumented: `
-s.set('x', <1-4>);
-s.set('y', @[s.get('x') + 1]@);
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
-t.forward();
-`,
-    java: `
-public class Main {
-  public static void main(String[] args) {
-    int x = <1-4>;
-    int y = @[x + 1]@;
-    Turtle t = new Turtle(x, y);
-    t.前に進む();
-  }
-}
-`,
-  },
-  fillInBlank3: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-t.forward();
-@[t.turnRight();]@
-t.forward();
-t.forward();
-`,
-    java: `
-public class Main {
-  public static void main(String[] args) {
-    Turtle t = new Turtle();
-    t.前に進む();
-    @[t.右を向く();]@
-    t.前に進む();
-    t.前に進む();
-  }
-}
-`,
-  },
-  fillInBlank4: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < @[3]@; s.set('i', s.get('i') + 1)) {
-  t.forward();
-  @[t.turnRight();]@
-}
-delete s.vars['i'];
-`,
-    java: `
-public class Main {
-  public static void main(String[] args) {
-    Turtle t = new Turtle();
-    for (int i = 0; i < @[3]@; i++) {
-      t.前に進む();
-      @[t.右を向く();]@
-    }
-  }
-}
-`,
-  },
+  ...fillInBlankProblemDefinitions,
 };
 
 for (const problem of Object.values(problemIdToLanguageIdToProgram)) {

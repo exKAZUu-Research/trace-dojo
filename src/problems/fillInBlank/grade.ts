@@ -32,6 +32,11 @@ export type FillInBlankGradingResult =
   /** No grader could judge the answer (e.g., every Java executor was unavailable). */
   | { status: 'ungradable'; detail: string };
 
+export type FillInBlankVerdict =
+  | { status: 'correct' }
+  | { status: 'incorrect'; detail: string }
+  | { status: 'ungradable'; detail: string };
+
 export interface GradingOptions {
   /** Executors used for stages 3 and 4, in order. Defaults to Wandbox followed by the judge service. */
   javaExecutors?: JavaExecutor[];

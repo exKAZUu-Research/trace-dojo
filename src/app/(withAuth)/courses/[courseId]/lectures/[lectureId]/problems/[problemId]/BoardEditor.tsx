@@ -54,6 +54,7 @@ interface TurtleGraphicsProps {
   handleSubmit: () => Promise<void>;
   problem: InstantiatedProblem;
   problemType: ProblemType;
+  isDisabled?: boolean;
 }
 
 export interface TurtleGraphicsHandle {
@@ -382,7 +383,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
         >
           <Button
             colorScheme="brand"
-            isDisabled={isSubmitting || !areAllVariablesFilled}
+            isDisabled={props.isDisabled || isSubmitting || !areAllVariablesFilled}
             rightIcon={
               isSubmitting ? (
                 <Spinner size="sm" />
@@ -411,10 +412,11 @@ function canPutTurtle(turtlesTraces: TurtleTrace[], x: number, y: number): boole
 function useShortcutKeys(handleSubmit: () => Promise<void>, isSubmitting: boolean): void {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        void handleSubmit();
-      }
+      if (event.key !== 'Enter') return;
+      // Enter on a dialog must keep activating its focused button instead of submitting the board.
+      if (event.target instanceof Element && event.target.closest('[role="dialog"], [role="alertdialog"]')) return;
+      event.preventDefault();
+      void handleSubmit();
     };
     globalThis.addEventListener('keydown', handleKeyDown);
     return () => {

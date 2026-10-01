@@ -1,3 +1,11 @@
+## Challenge fill-in-the-blank problems
+
+Define paired Java and instrumented templates in `src/problems/fillInBlank/definitions.ts` or `challengeDefinitions.ts`, following [穴埋め問題の作問手順](#穴埋め問題の作問手順) for the `@[model answer]@` markers (the same number, in the same order, in both templates). Keep `<min-max>` placeholders in the same order so an ID and seed reproduce the complete generated problem. Use the same variable names (including the turtle's) in both templates: local grading translates a Java answer and runs it in the instrumented template.
+
+Register the name in `problemIdToName`. Add the ID explicitly to `courseIdToLectureIndexToProblemIds` for ordinary lectures or `courseIdToLectureIndexToExerciseProblemIds` for the fill-in-the-blank challenge, which accepts only problems with blanks. Membership in either list does not imply membership in the other. The regular challenge has no list of its own: it draws from the problems without blanks in the lecture's `courseIdToLectureIndexToProblemIds` entry.
+
+Challenge sessions persist the problem ID and seed. Displays and grading regenerate from the current definition, so editing a definition also changes an active session when it is next loaded. Challenge submissions stay in `ExerciseSession` and `ExerciseSubmission` and do not affect ordinary progress or grades.
+
 ## 新問題の作問手順
 
 1. `problemIds` に問題IDを追加する。例: `test9`

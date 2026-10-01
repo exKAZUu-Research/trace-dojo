@@ -7,32 +7,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { TurtleGraphicsHandle } from './BoardEditor';
 import { BoardEditor } from './BoardEditor';
-import { SyntaxHighlighter } from './SyntaxHighlighter';
-import { TraceViewer } from './TraceViewer';
+import { deriveRegularProblemView, RegularProblemPresentation } from './RegularProblemPresentation';
+import { ResultAlertDialog } from './ResultAlertDialog';
 
 import { MAX_CHALLENGE_COUNT } from '@/constants';
 import { useAuthContextSelector } from '@/contexts/AuthContext';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
-import {
-  AlertDialog,
-  AlertDialogBody,
-  AlertDialogContent,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogOverlay,
-  Box,
-  Button,
-  Card,
-  Flex,
-  Heading,
-  HStack,
-  Tag,
-  useDisclosure,
-  VStack,
-} from '@/infrastructures/useClient/chakra';
+import { useDisclosure } from '@/infrastructures/useClient/chakra';
 import type { InstantiatedProblem } from '@/problems/instantiateProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
-import type { TraceItem, TraceItemVariable } from '@/problems/traceProgram';
 import type { ProblemType } from '@/types';
 
 interface Props {
@@ -47,31 +30,12 @@ export const ProblemBody: React.FC<Props> = (props) => {
   const isAdmin = useAuthContextSelector((c) => c.isAdmin);
 
   const problemType = props.problemSession.problemType as ProblemType;
-  const currentTraceItemIndex =
-    problemType === 'executionResult'
-      ? props.problem.traceItems.length - 1
-      : // ProblemSession作成後の問題の改変に対応するため。
-        Math.min(props.problemSession.traceItemIndex, props.problem.traceItems.length - 1);
-  const previousTraceItemIndex =
-    problemType === 'executionResult'
-      ? 0
-      : isAdmin
-        ? // 管理者は最後の盤面の状態も確認できるようにするため。
-          Math.min(props.problemSession.traceItemIndex - 1, props.problem.traceItems.length - 1)
-        : currentTraceItemIndex - 1;
-  const currentVariables =
-    problemType === 'executionResult' ? props.problem.finalVars : props.problem.traceItems[currentTraceItemIndex].vars;
-  const initialVariables = useMemo(
-    () =>
-      getInitialVariables(
-        problemType,
-        props.problem.traceItems,
-        previousTraceItemIndex,
-        currentTraceItemIndex,
-        currentVariables
-      ),
-    [problemType, props.problem.traceItems, previousTraceItemIndex, currentTraceItemIndex, currentVariables]
+  if (problemType === 'fillInBlank') throw new Error('Regular problem body cannot render a fill-in-blank session.');
+  const view = useMemo(
+    () => deriveRegularProblemView(props.problem, problemType, props.problemSession.traceItemIndex, isAdmin),
+    [props.problem, problemType, props.problemSession.traceItemIndex, isAdmin]
   );
+  const { currentTraceItemIndex, previousTraceItemIndex, currentVariables, initialVariables } = view;
 
   const [viewingTraceItemIndex, setViewingTraceItemIndex] = useState(previousTraceItemIndex);
   useEffect(() => {
@@ -79,8 +43,6 @@ export const ProblemBody: React.FC<Props> = (props) => {
   }, [previousTraceItemIndex]);
 
   const { isOpen: isAlertOpen, onClose: onAlertClose, onOpen: onAlertOpen } = useDisclosure();
-  const cancelRef = useRef<HTMLButtonElement>(null);
-
   const turtleGraphicsRef = useRef<TurtleGraphicsHandle>(null);
 
   const router = useRouter();
@@ -184,71 +146,12 @@ export const ProblemBody: React.FC<Props> = (props) => {
 
   return (
     <>
-      <Flex alignItems="stretch" gap={6}>
-        <VStack align="stretch" flexBasis={0} flexGrow={1} minW={0} spacing={4}>
-          <VStack align="stretch" as={Card} overflow="hidden" spacing={0}>
-            <VStack align="stretch" borderBottomWidth="1px" p={5}>
-              <HStack justifyContent="space-between">
-                <Heading size="md">問題</Heading>
-                {problemType === 'step' && (
-                  <Tag colorScheme="brand" fontWeight="bold" size="sm" variant="solid">
-                    ステップ実行モード
-                  </Tag>
-                )}
-              </HStack>
-
-              <Box>
-                {problemType === 'step' && previousTraceItemIndex >= 1 && (
-                  <>
-                    画面下部にある
-                    <Box as="span" bgColor="orange.100" px={0.5} rounded="sm">
-                      {props.problem.sidToLineIndex.get(props.problem.traceItems[previousTraceItemIndex].sid)}行目
-                    </Box>
-                    を実行した後の盤面と変数の一覧表を参考に、
-                  </>
-                )}
-                <Box as="span" fontWeight="bold">
-                  {problemType === 'executionResult' ? (
-                    'プログラムを実行した後'
-                  ) : (
-                    <>
-                      <Box as="span" border="2px solid #f56565" px={0.5} rounded="sm">
-                        {props.problem.sidToLineIndex.get(props.problem.traceItems[currentTraceItemIndex].sid)}行目
-                      </Box>
-                      を実行した後
-                    </>
-                  )}
-                </Box>
-                の盤面{Object.keys(initialVariables).length > 0 ? 'と、変数に記録されている値の一覧表' : ''}
-                を作成し、提出ボタンを押してください。
-              </Box>
-            </VStack>
-          </VStack>
-
-          <SyntaxHighlighter
-            callerLines={
-              problemType === 'executionResult'
-                ? undefined
-                : props.problem.traceItems[currentTraceItemIndex].callStack.map((id) =>
-                    props.problem.callerIdToLineIndex.get(id)
-                  )
-            }
-            code={props.problem.displayProgram}
-            currentFocusLine={
-              problemType === 'executionResult'
-                ? undefined
-                : props.problem.sidToLineIndex.get(props.problem.traceItems[currentTraceItemIndex].sid)
-            }
-            previousFocusLine={
-              problemType === 'executionResult'
-                ? undefined
-                : props.problem.sidToLineIndex.get(props.problem.traceItems[viewingTraceItemIndex].sid)
-            }
-            programmingLanguageId="java"
-          />
-        </VStack>
-
-        <VStack align="stretch" bgColor="gray.50" flexBasis={0} flexGrow={1} spacing="4">
+      <RegularProblemPresentation
+        problem={props.problem}
+        view={view}
+        viewingTraceItemIndex={viewingTraceItemIndex}
+        setViewingTraceItemIndex={setViewingTraceItemIndex}
+        editor={
           <BoardEditor
             ref={turtleGraphicsRef}
             currentTraceItemIndex={currentTraceItemIndex}
@@ -269,97 +172,17 @@ export const ProblemBody: React.FC<Props> = (props) => {
             problem={props.problem}
             problemType={problemType}
           />
-        </VStack>
-      </Flex>
-
-      {problemType === 'step' && previousTraceItemIndex >= 1 && (
-        <TraceViewer
-          currentTraceItemIndex={currentTraceItemIndex}
-          previousTraceItemIndex={previousTraceItemIndex}
-          problem={props.problem}
-          setViewingTraceItemIndex={setViewingTraceItemIndex}
-          viewingTraceItemIndex={viewingTraceItemIndex}
-        />
-      )}
-
-      <AlertDialog
-        closeOnEsc={true}
-        closeOnOverlayClick={false}
+        }
+      />
+      <ResultAlertDialog
         isOpen={isAlertOpen}
-        leastDestructiveRef={cancelRef as React.RefObject<HTMLElement>}
+        title={alertTitle}
+        message={alertMessage}
         onClose={() => {
           postAlertAction?.();
           onAlertClose();
         }}
-      >
-        <AlertDialogOverlay>
-          <AlertDialogContent>
-            <AlertDialogHeader fontSize="lg" fontWeight="bold">
-              {alertTitle}
-            </AlertDialogHeader>
-            <AlertDialogBody whiteSpace="pre-wrap">{alertMessage}</AlertDialogBody>
-            <AlertDialogFooter>
-              <Button
-                ref={cancelRef}
-                rightIcon={
-                  <Box as="span" fontSize="sm" fontWeight="bold">
-                    (Esc)
-                  </Box>
-                }
-                onClick={() => {
-                  postAlertAction?.();
-                  onAlertClose();
-                }}
-              >
-                閉じる
-              </Button>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialogOverlay>
-      </AlertDialog>
+      />
     </>
   );
 };
-
-function getInitialVariables(
-  problemType: ProblemType,
-  traceItems: TraceItem[],
-  previousTraceItemIndex: number,
-  currentTraceItemIndex: number,
-  currentVariables: TraceItemVariable
-): Record<string, string> {
-  let adjustedPreviousTraceItemIndex = previousTraceItemIndex;
-
-  let nonGlobalVariableShouldBeEmpty = false;
-  if (problemType === 'step') {
-    const currentDepth = traceItems[currentTraceItemIndex].depth;
-    while (adjustedPreviousTraceItemIndex > 0 && currentDepth !== traceItems[adjustedPreviousTraceItemIndex].depth) {
-      if (currentDepth > traceItems[adjustedPreviousTraceItemIndex].depth) {
-        // 過去のトレースの方が現在のトレースよりも深いため。
-        nonGlobalVariableShouldBeEmpty = true;
-        break;
-      }
-      adjustedPreviousTraceItemIndex--;
-    }
-    // 過去のトレースと現在のトレースのスタックトレースが別であるかどうか。
-    nonGlobalVariableShouldBeEmpty ||=
-      traceItems[currentTraceItemIndex].callStack.at(-1) !==
-      traceItems[adjustedPreviousTraceItemIndex].callStack.at(-1);
-  }
-
-  return Object.fromEntries(
-    Object.entries(currentVariables)
-      .filter(([_, value]) => typeof value === 'number' || typeof value === 'string')
-      .map(([key]) => {
-        const isGlobalVariable = isUpperCase(key.slice(0, 1));
-        console.log(key, isGlobalVariable);
-        if (isGlobalVariable) return [key, String(traceItems[previousTraceItemIndex].vars[key] ?? '')];
-        if (nonGlobalVariableShouldBeEmpty) return [key, ''];
-        return [key, String(traceItems[adjustedPreviousTraceItemIndex].vars[key] ?? '')];
-      })
-  );
-}
-
-function isUpperCase(str: string): boolean {
-  return str === str.toUpperCase() && str !== str.toLowerCase();
-}

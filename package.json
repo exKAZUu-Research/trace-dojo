@@ -99,6 +99,9 @@
   "devDependencies": {
     "@chakra-ui/cli": "2.5.8",
     "@chakra-ui/styled-system": "2.12.5",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.0",
+    "@testing-library/user-event": "14.6.1",
     "@types/bun": "1.4.2",
     "@types/jsonwebtoken": "9.0.10",
     "@types/node": "26.6.2",
@@ -112,6 +115,7 @@
     "babel-plugin-react-compiler": "1.0.0",
     "concurrently": "10.0.5",
     "conventional-changelog-conventionalcommits": "10.4.0",
+    "jsdom": "27.0.0",
     "lefthook": "2.1.14",
     "open-cli": "9.0.0",
     "oxfmt": "0.70.0",

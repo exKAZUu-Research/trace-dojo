@@ -5,6 +5,7 @@ import { useLocalStorage } from '@willbooster/shared-lib-react';
 import { useParams } from 'next/navigation';
 import { useEffect, useMemo } from 'react';
 import { MdCheckCircle, MdCheckCircleOutline, MdOutlineVerified, MdVerified } from 'react-icons/md';
+import { ChallengeModeButton } from './ChallengeModeButton';
 
 import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefetch';
 import { useAuthContextSelector } from '@/contexts/AuthContext';
@@ -159,6 +160,8 @@ export const Lecture: React.FC<Props> = (props) => {
                 })}
               </Tbody>
             </Table>
+
+            <ChallengeModeButton courseId={params.courseId} lectureId={params.lectureId} />
           </CardBody>
         </Card>
       </SimpleGrid>

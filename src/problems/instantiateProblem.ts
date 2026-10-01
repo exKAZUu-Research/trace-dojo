@@ -99,6 +99,10 @@ export function instantiateProblem(
   );
   const displayBlanks = extractBlanks(displayProgramTemplate);
   const instrumentedBlanks = extractBlanks(instrumentedTemplate);
+  // Grading fills the student's answers into the instrumented template by position, so the counts must match.
+  if (displayBlanks.answers.length !== instrumentedBlanks.answers.length) {
+    throw new Error(`Blank counts differ between the ${languageId} and instrumented templates of ${problemId}`);
+  }
   const problem = traceProgram(
     fillBlanks(instrumentedTemplate, instrumentedBlanks.answers),
     displayBlanks.answers.length > 0 ? displayBlanks.programWithPlaceholders : displayProgramTemplate,
