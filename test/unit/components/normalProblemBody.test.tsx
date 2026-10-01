@@ -56,6 +56,7 @@ test('keeps the normal three-wrong automatic fallback through the real editor', 
   }
   expect(createSubmission).toHaveBeenCalledTimes(3);
   expect(createSubmission).toHaveBeenLastCalledWith(false, false);
+  expect(updateSession).toHaveBeenCalledTimes(1);
   expect(updateSession).toHaveBeenCalledWith('step', 1);
 }, 15_000);
 
