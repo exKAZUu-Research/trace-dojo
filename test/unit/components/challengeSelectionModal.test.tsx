@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { ChakraProvider } from '@chakra-ui/react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, test, vi } from 'vitest';
 
@@ -71,8 +71,10 @@ test('suppresses two format activations in the same event turn', async () => {
   const regular = await screen.findByRole('button', { name: /通常問題/ });
   const blank = screen.getByRole('button', { name: /穴埋め問題/ });
 
-  fireEvent.click(regular);
-  fireEvent.click(blank);
+  act(() => {
+    fireEvent.click(regular);
+    fireEvent.click(blank);
+  });
 
   expect(navigation.push).toHaveBeenCalledTimes(1);
   expect(navigation.push).toHaveBeenCalledWith('/courses/test-course/lectures/lecture-1/challenge?format=regular');
