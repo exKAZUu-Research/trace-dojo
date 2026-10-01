@@ -408,6 +408,19 @@ test('normal fill-in-the-blank submissions never create exercise history', async
   expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSubmission').count).toBe(0);
 });
 
+test('advances a regular session to a regular successor while a newer blank session exists', async () => {
+  const regular = await startRegular();
+  const blank = await start();
+  await submitRegular(regular, 'cross-format-next', true);
+  const next = await regularCaller().nextExercise({
+    ...locationOnly(),
+    sessionId: regular.sessionId,
+    problemFormat: 'regular',
+  });
+  expect(next).toMatchObject({ problemFormat: 'regular', completed: false });
+  expect(next.sessionId).toBeGreaterThan(blank.sessionId);
+});
+
 test('creates and resumes regular and blank sessions independently', async () => {
   const blank = await start();
   const regular = await startRegular();
