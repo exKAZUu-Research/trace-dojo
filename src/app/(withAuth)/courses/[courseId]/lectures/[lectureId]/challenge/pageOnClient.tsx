@@ -10,7 +10,7 @@ import { ProblemPageHeader } from '../problems/[problemId]/ProblemPageHeader';
 import { ReloadNotice } from '../problems/[problemId]/ReloadNotice';
 import type { CompletionAction } from '../problems/[problemId]/ResultAlertDialog';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
-import { VStack } from '@/infrastructures/useClient/chakra';
+import { Center, Spinner, VStack } from '@/infrastructures/useClient/chakra';
 import type { ExerciseDisplay } from '@/problems/fillInBlank/exerciseProblem';
 import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
 import type { CourseId, ProblemId } from '@/problems/problemData';
@@ -179,6 +179,11 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
         onClose={closeSelection}
         onSelect={select}
       />
+      {!isModalOpen && !exercise && isPending && (
+        <Center py={10}>
+          <Spinner label="問題を準備しています" />
+        </Center>
+      )}
       {exercise?.problemFormat === 'regular' && format === 'regular' && (
         <RegularChallengeBody
           key={exercise.sessionId}

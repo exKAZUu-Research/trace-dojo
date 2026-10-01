@@ -79,6 +79,16 @@ test('a valid URL format starts exactly once under StrictMode and renders the ex
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 
+test('a URL format shows a loading indicator until the first exercise arrives', async () => {
+  let resolve!: (display: typeof blankDisplay) => void;
+  transport.start.mockReturnValue(new Promise((_resolve) => (resolve = _resolve)));
+  renderPage('fillInBlank');
+  expect(await screen.findByText('問題を準備しています')).toBeInTheDocument();
+  await act(async () => resolve(blankDisplay));
+  expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeVisible();
+  expect(screen.queryByText('問題を準備しています')).not.toBeInTheDocument();
+});
+
 test('a regular URL format starts once and renders the regular exercise', async () => {
   transport.start.mockResolvedValue(regularDisplay);
   renderPage('regular');
