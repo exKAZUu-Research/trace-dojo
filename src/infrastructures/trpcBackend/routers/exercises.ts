@@ -264,7 +264,7 @@ const createFromCandidates = (
       problemFormat: format,
       problemId,
       seed,
-      problemType: 'executionResult',
+      problemType: format === 'regular' ? 'executionResult' : 'fillInBlank',
       traceItemIndex: 0,
     })
     .returning()
