@@ -472,7 +472,7 @@ test('keeps regular incorrect verdicts in execution-result mode and derives comp
         problemType: z.literal('executionResult'),
         traceItemIndex: z.literal(0),
         status: z.enum(['correct', 'incorrect']),
-        answers: z.string(),
+        answers: z.null(),
         gradingStage: z.null(),
       })
     )
@@ -483,30 +483,7 @@ test('keeps regular incorrect verdicts in execution-result mode and derives comp
         )
         .all()
     );
-  expect(
-    submissions.map(({ answers, problemType, status, traceItemIndex }) => ({
-      problemType,
-      traceItemIndex,
-      status,
-      answers: z
-        .object({ kind: z.literal('regularVerdict'), isCorrect: z.boolean() })
-        .strict()
-        .parse(JSON.parse(answers)),
-    }))
-  ).toEqual([
-    ...Array.from({ length: 4 }, () => ({
-      problemType: 'executionResult',
-      traceItemIndex: 0,
-      status: 'incorrect',
-      answers: { kind: 'regularVerdict', isCorrect: false },
-    })),
-    {
-      problemType: 'executionResult',
-      traceItemIndex: 0,
-      status: 'correct',
-      answers: { kind: 'regularVerdict', isCorrect: true },
-    },
-  ]);
+  expect(submissions.map(({ status }) => status)).toEqual([...Array.from({ length: 4 }, () => 'incorrect'), 'correct']);
 });
 
 test('switches regular exercise one way, resumes step 1, then advances and completes at the final trace item', async () => {

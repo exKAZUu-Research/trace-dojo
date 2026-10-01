@@ -327,15 +327,12 @@ const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmiss
         and(eq(exerciseSubmissions.sessionId, input.sessionId), eq(exerciseSubmissions.requestId, input.requestId))
       )
       .get();
+    const status = input.isCorrect ? 'correct' : 'incorrect';
     if (previous) {
-      const event = z
-        .object({ kind: z.literal('regularVerdict'), isCorrect: z.boolean() })
-        .strict()
-        .parse(JSON.parse(previous.answers));
       if (
         previous.problemType !== input.context.problemType ||
         previous.traceItemIndex !== input.context.traceItemIndex ||
-        event.isCorrect !== input.isCorrect
+        previous.status !== status
       )
         throw new TRPCError({ code: 'CONFLICT' });
       return toRegularDisplay(current);
@@ -349,9 +346,7 @@ const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmiss
     tx.insert(exerciseSubmissions)
       .values({
         sessionId: current.id,
-        answers: JSON.stringify({ kind: 'regularVerdict', isCorrect: input.isCorrect }),
-        status: input.isCorrect ? 'correct' : 'incorrect',
-        gradingStage: undefined,
+        status,
         problemType: current.problemType,
         traceItemIndex: current.traceItemIndex,
         requestId: input.requestId,

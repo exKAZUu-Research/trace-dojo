@@ -107,7 +107,7 @@ export const exerciseSubmissions = sqliteTable(
     sessionId: integer()
       .notNull()
       .references(() => exerciseSessions.id, { onDelete: 'restrict', onUpdate: 'cascade' }),
-    answers: text().notNull(),
+    answers: text(),
     status: text().notNull(),
     gradingStage: integer(),
     problemType: text(),

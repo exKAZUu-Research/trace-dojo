@@ -18,7 +18,7 @@ CREATE TABLE `ExerciseSubmission` (
 	`id` integer PRIMARY KEY AUTOINCREMENT,
 	`createdAt` integer DEFAULT (unixepoch('subsec') * 1000) NOT NULL,
 	`sessionId` integer NOT NULL,
-	`answers` text NOT NULL,
+	`answers` text,
 	`status` text NOT NULL,
 	`gradingStage` integer,
 	`problemType` text,
