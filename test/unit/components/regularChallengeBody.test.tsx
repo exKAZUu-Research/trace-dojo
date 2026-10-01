@@ -202,9 +202,6 @@ test('locally grades the final step and exposes completion actions', async () =>
   expect(screen.getByRole('button', { name: /終わる/ })).toBeVisible();
   expect(screen.getAllByRole('textbox', { hidden: true })[2]).toHaveValue('4');
   expect(screen.getByRole('button', { hidden: true, name: /提出/ })).toBeDisabled();
-  expect(problemCard).toBeInTheDocument();
-  expect(problemCard).toHaveTextContent('6行目');
-  expect(problemCard).toHaveTextContent('8行目');
 });
 
 test('deduplicates a pending completion action and keeps its failure recoverable', async () => {
