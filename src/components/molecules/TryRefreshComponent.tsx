@@ -6,18 +6,18 @@ import { useEffect, useState } from 'react';
 import SuperTokens from 'supertokens-auth-react';
 import Session from 'supertokens-auth-react/recipe/session';
 
-export const TryRefreshComponent: React.FC = () => {
+export const TryRefreshComponent: React.FC<{ hasToken: boolean }> = ({ hasToken }) => {
   const router = useRouter();
   const [didError, setDidError] = useState(false);
 
   useEffect(() => {
     // Captured before awaiting: once a redirect to the auth page has started, the current URL is no longer the requested one.
-    const redirectToPath = `${globalThis.location.pathname}${globalThis.location.search}`;
+    const redirectToPath = `${globalThis.location.pathname}${globalThis.location.search}${globalThis.location.hash}`;
     /**
      * `attemptRefreshingSession` will call the refresh token endpoint to try and
      * refresh the session. This will throw an error if the session cannot be refreshed.
      */
-    void Session.attemptRefreshingSession()
+    void (hasToken ? Session.attemptRefreshingSession() : Promise.resolve(false))
       .then((hasSession) => {
         /**
          * If the user has a valid session, we reload the page to restart the flow
@@ -33,7 +33,7 @@ export const TryRefreshComponent: React.FC = () => {
       .catch(() => {
         setDidError(true);
       });
-  }, [router]);
+  }, [router, hasToken]);
 
   /**
    * We add this check to make sure we handle the case where the refresh API fails with

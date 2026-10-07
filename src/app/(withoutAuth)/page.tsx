@@ -12,7 +12,7 @@ const HomePage: NextPage = async () => {
   const { hasToken, session } = await getNullableSessionOnServer(requestCookies);
   if (!session && hasToken) {
     // eslint-disable-next-line react-hooks/purity
-    return <TryRefreshComponent key={Date.now()} />;
+    return <TryRefreshComponent key={Date.now()} hasToken />;
   }
 
   return (

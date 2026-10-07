@@ -33,7 +33,7 @@ export function withAuthorizationOnServer<Props = Record<string, never>, Params 
 ): MyAuthorizedNextPageOrLayoutWrapper<Props, Params> {
   return async function WithAuthorizationOnServer(props) {
     const requestCookies = await cookies();
-    const { error, session } = await getSessionOnServer(requestCookies);
+    const { error, hasToken, session } = await getSessionOnServer(requestCookies);
 
     if (error) console.warn('Failed to get session due to %o', error);
 
@@ -44,7 +44,7 @@ export function withAuthorizationOnServer<Props = Record<string, never>, Params 
        *
        * To learn about why the 'key' attribute is required refer to: https://github.com/supertokens/supertokens-node/issues/826#issuecomment-2092144048
        */
-      return <TryRefreshComponent key={Date.now()} />;
+      return <TryRefreshComponent key={Date.now()} hasToken={hasToken} />;
     }
 
     // https://supertokens.com/docs/thirdpartyemailpassword/user-roles/protecting-routes
