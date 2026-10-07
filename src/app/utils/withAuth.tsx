@@ -39,8 +39,9 @@ export function withAuthorizationOnServer<Props = Record<string, never>, Params 
 
     if (!session) {
       /**
-       * The `TryRefreshComponent` tries to refresh the session and otherwise redirects to the auth page on the
-       * client, because only the client knows the requested URL to come back to after signing in.
+       * The `TryRefreshComponent` redirects to the auth page on the client, because only the client knows the
+       * requested URL to come back to after signing in. With a token, it first tries to refresh the session;
+       * without one, there is no session to refresh and the redirect must not depend on the refresh endpoint.
        *
        * To learn about why the 'key' attribute is required refer to: https://github.com/supertokens/supertokens-node/issues/826#issuecomment-2092144048
        */
