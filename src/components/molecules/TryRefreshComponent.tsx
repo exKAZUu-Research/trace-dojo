@@ -12,7 +12,7 @@ export const TryRefreshComponent: React.FC<{ hasToken: boolean }> = ({ hasToken 
 
   useEffect(() => {
     // Captured before awaiting: once a redirect to the auth page has started, the current URL is no longer the requested one.
-    const redirectToPath = `${globalThis.location.pathname}${globalThis.location.search}${globalThis.location.hash}`;
+    const redirectToPath = `${globalThis.location.pathname}${globalThis.location.search}`;
     /**
      * `attemptRefreshingSession` will call the refresh token endpoint to try and
      * refresh the session. This will throw an error if the session cannot be refreshed.
