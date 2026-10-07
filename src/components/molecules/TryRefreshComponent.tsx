@@ -11,6 +11,8 @@ export const TryRefreshComponent: React.FC = () => {
   const [didError, setDidError] = useState(false);
 
   useEffect(() => {
+    // Captured before awaiting: once a redirect to the auth page has started, the current URL is no longer the requested one.
+    const redirectToPath = `${globalThis.location.pathname}${globalThis.location.search}`;
     /**
      * `attemptRefreshingSession` will call the refresh token endpoint to try and
      * refresh the session. This will throw an error if the session cannot be refreshed.
@@ -24,7 +26,7 @@ export const TryRefreshComponent: React.FC = () => {
         if (hasSession) {
           router.refresh();
         } else {
-          return SuperTokens.redirectToAuth();
+          return SuperTokens.redirectToAuth({ redirectBack: false, queryParams: { redirectToPath } });
         }
         return;
       })

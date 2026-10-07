@@ -1,6 +1,6 @@
 import type { NextPage } from 'next';
 import { cookies } from 'next/headers';
-import { notFound, redirect } from 'next/navigation';
+import { notFound } from 'next/navigation';
 import SuperTokensNode from 'supertokens-node';
 
 import { SessionAuthForNextJs } from '@/components/molecules/SessionAuthForNextJs';
@@ -33,16 +33,14 @@ export function withAuthorizationOnServer<Props = Record<string, never>, Params 
 ): MyAuthorizedNextPageOrLayoutWrapper<Props, Params> {
   return async function WithAuthorizationOnServer(props) {
     const requestCookies = await cookies();
-    const { error, hasToken, session } = await getSessionOnServer(requestCookies);
+    const { error, session } = await getSessionOnServer(requestCookies);
 
-    // To recover from an error, use  `redirect(await getRedirectionUrlToAuthOnServer(), RedirectType.replace)` or `RefreshSessionOnClient`.
     if (error) console.warn('Failed to get session due to %o', error);
 
     if (!session) {
-      if (!hasToken) redirect('/auth');
       /**
-       * This means that the session does not exist but we have session tokens for the user. In this case
-       * the `TryRefreshComponent` will try to refresh the session.
+       * The `TryRefreshComponent` tries to refresh the session and otherwise redirects to the auth page on the
+       * client, because only the client knows the requested URL to come back to after signing in.
        *
        * To learn about why the 'key' attribute is required refer to: https://github.com/supertokens/supertokens-node/issues/826#issuecomment-2092144048
        */
