@@ -3,7 +3,6 @@
 import { useRouter } from 'next/navigation';
 import type React from 'react';
 import { useEffect, useState } from 'react';
-import SuperTokens from 'supertokens-auth-react';
 import Session from 'supertokens-auth-react/recipe/session';
 
 export const TryRefreshComponent: React.FC<{ hasToken: boolean }> = ({ hasToken }) => {
@@ -26,7 +25,8 @@ export const TryRefreshComponent: React.FC<{ hasToken: boolean }> = ({ hasToken 
         if (hasSession) {
           router.refresh();
         } else {
-          return SuperTokens.redirectToAuth({ redirectBack: false, queryParams: { redirectToPath } });
+          // `replace` keeps this page out of the history: going back to it would redirect to the auth page again.
+          router.replace(`/auth?${new URLSearchParams({ redirectToPath })}`);
         }
         return;
       })
