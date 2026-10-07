@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import SuperTokensNode from 'supertokens-node';
 
 import { NextLinkWithoutPrefetch } from '../atoms/NextLinkWithoutPrefetch';
+import { AuthButtons } from '../molecules/AuthButtons';
 
 import { DefaultHeaderMenu } from '@/components/organisms/DefaultHeaderMenu';
 import { APP_NAME } from '@/constants';
@@ -47,14 +48,7 @@ export const DefaultHeader: NextPage = async () => {
         {user?.displayName ? (
           <DefaultHeaderMenu displayName={superTokensUser?.emails[0] ?? user.displayName} />
         ) : (
-          <>
-            <Button as={NextLinkWithoutPrefetch} colorScheme="brand" href="/auth" mr={2} variant="outline">
-              サインイン
-            </Button>
-            <Button as={NextLinkWithoutPrefetch} colorScheme="brand" href="/auth?show=signup">
-              新規登録
-            </Button>
-          </>
+          <AuthButtons />
         )}
       </Box>
     </HStack>
