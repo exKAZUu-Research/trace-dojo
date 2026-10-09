@@ -11,18 +11,12 @@ import { isJavaComposing } from './javaEditorDiagnostics';
 
 const identifier = /[\p{L}\p{N}\p{M}_$]*/u;
 const methods: Completion[] = [
-  ['前に進む', 'void', '亀を前に進める'],
-  ['forward', 'void', '亀を前に進める'],
-  ['後に戻る', 'void', '亀を後ろに戻す'],
-  ['backward', 'void', '亀を後ろに戻す'],
-  ['右を向く', 'void', '右に向きを変える'],
-  ['turnRight', 'void', '右に向きを変える'],
-  ['左を向く', 'void', '左に向きを変える'],
-  ['turnLeft', 'void', '左に向きを変える'],
-  ['前に進めるか', 'boolean', '前のマスに進めるか調べる'],
-  ['canMoveForward', 'boolean', '前のマスに進めるか調べる'],
-  ['前のマスが塗られているか', 'boolean', '前のマスの色を調べる'],
-  ['remove', 'void', '亀を取り除く'],
+  ['前に進む', 'void', '向いている方向に1マス進む'],
+  ['後に戻る', 'void', '向きを変えずに後ろに1マス戻る'],
+  ['右を向く', 'void', '右に90度向きを変える'],
+  ['左を向く', 'void', '左に90度向きを変える'],
+  ['前に進めるか', 'boolean', '盤面の外や別の亀のいるマスでなければtrue'],
+  ['前のマスが塗られているか', 'boolean', '前のマスが塗られていればtrue'],
 ].map(([label, result, info]) => ({
   label,
   type: 'method',
@@ -62,11 +56,6 @@ const snippets = [
   snippetCompletion('Turtle ${turtle} = new Turtle(${x}, ${y});', {
     label: 'Turtle(x, y)',
     detail: '位置を指定して亀を作る',
-    type: 'class',
-  }),
-  snippetCompletion('Turtle ${turtle} = new Turtle(${x}, ${y}, "${color}");', {
-    label: 'Turtle(x, y, color)',
-    detail: '位置と色を指定して亀を作る',
     type: 'class',
   }),
 ];
@@ -148,11 +137,6 @@ export function javaCompletion(context: CompletionContext): CompletionResult | n
       });
       if (found !== undefined) return found ? { from, options: methods } : null;
     }
-    if (receiver[1] === 'Turtle')
-      return {
-        from,
-        options: ['COLUMNS', 'ROWS'].map((label) => ({ label, type: 'constant', detail: 'int 盤面の大きさ' })),
-      };
     return null;
   }
   if (before.endsWith('.') || (!context.explicit && !word?.text)) return null;

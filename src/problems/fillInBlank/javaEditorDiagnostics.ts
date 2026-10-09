@@ -74,7 +74,7 @@ function combinedDiagnostics(state: EditorState): Diagnostic[] {
         to: Math.min(line.to, Math.max(from + 1, node.to)),
         severity: 'error',
         source: '構文のヒント',
-        message: '構文を確認してください。記号や式が不足している可能性があります。',
+        message: 'この付近のコードの書き方を確認してください。',
       });
     },
   });

@@ -15,6 +15,7 @@ import { useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { MdOutlineZoomIn, MdOutlineZoomOut } from 'react-icons/md';
 
 import styles from './JavaCodeEditor.module.css';
+import { javaAssistanceTheme } from '@/problems/fillInBlank/javaAssistanceTheme';
 import { javaCompletion } from '@/problems/fillInBlank/javaCompletion';
 import { compilerFeedback, javaComposition, javaEditorDiagnostics } from '@/problems/fillInBlank/javaEditorDiagnostics';
 import type { JavaDiagnostic } from '@/problems/fillInBlank/javaDiagnostics';
@@ -95,6 +96,7 @@ export const JavaCodeEditor: React.FC<Props> = ({
         basicSetup,
         java(),
         javaEditorDiagnostics,
+        javaAssistanceTheme,
         javaLanguage.data.of({ autocomplete: javaCompletion }),
         EditorView.domEventHandlers({
           compositionstart: (_event, view) => {

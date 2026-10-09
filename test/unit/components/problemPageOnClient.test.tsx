@@ -417,7 +417,7 @@ test('local syntax hints appear and clear without grading or pretending to check
 
 test('compiler feedback persists after dismissal and clears immediately on edit without undo resurrection', async () => {
   infrastructure.problemId = 'fillInBlank2';
-  const message = '変数やメソッドの名前と宣言を確認してください。';
+  const message = 'cannot find symbol\nsymbol: method missing()';
   infrastructure.grade.mockResolvedValue({
     status: 'incorrect',
     detail: 'Compile error.',
@@ -429,17 +429,17 @@ test('compiler feedback persists after dismissal and clears immediately on edit 
   await replaceJavaSource(editor, 'class Main {\n public static void main(String[] args) {\n  missing();\n }\n}');
   await user.click(screen.getByRole('button', { name: '提出' }));
   await waitFor(() => expect(screen.getByRole('alertdialog')).toBeVisible());
-  expect(screen.getAllByText(message).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(message, { exact: true, normalizer: (text) => text }).length).toBeGreaterThan(0);
   await user.keyboard('{Escape}');
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
-  expect(screen.getByText(message)).toBeVisible();
+  expect(screen.getByText(message, { exact: true, normalizer: (text) => text })).toBeVisible();
   await waitFor(() => expect(document.querySelector('.cm-lintRange-error')).toBeInTheDocument());
   await user.click(editor);
   await user.keyboard('{Control>}{End}{/Control} ');
-  expect(screen.queryByText(message)).not.toBeInTheDocument();
+  expect(screen.queryByText(message, { exact: true, normalizer: (text) => text })).not.toBeInTheDocument();
   expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: '元に戻す' }));
-  expect(screen.queryByText(message)).not.toBeInTheDocument();
+  expect(screen.queryByText(message, { exact: true, normalizer: (text) => text })).not.toBeInTheDocument();
   expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
   expect(infrastructure.grade).toHaveBeenCalledTimes(1);
 });
@@ -458,6 +458,27 @@ test('Japanese Turtle completion inserts literal source, supports undo, and neve
   expect(readRenderedJavaSource(editor)).not.toMatch(/&|<span/);
   await user.click(screen.getByRole('button', { name: '元に戻す' }));
   expect(readRenderedJavaSource(editor)).toBe(prefix);
+  expect(infrastructure.grade).not.toHaveBeenCalled();
+});
+
+test.each([
+  { option: /^Turtle亀を作る$/, suffix: 'Turtle learner = new Turtle();', inputs: ['learner'] },
+  { option: /Turtle\(x, y\)/, suffix: 'Turtle learner = new Turtle(2, 3);', inputs: ['learner', '2', '3'] },
+])('Turtle creation completion inserts editable taught arguments: $suffix', async ({ option, suffix, inputs }) => {
+  infrastructure.problemId = 'fillInBlank2';
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = screen.getByRole('textbox', { name: /Java/ });
+  const prefix = 'class Main { void draw() { ';
+  await replaceJavaSource(editor, `${prefix}Tur`);
+  await user.keyboard('{Control>} {/Control}');
+  await user.click(await screen.findByRole('option', { name: option }));
+  for (const [index, input] of inputs.entries()) {
+    if (index > 0) await user.keyboard('{Tab}');
+    await user.paste(input);
+  }
+  expect(readRenderedJavaSource(editor)).toBe(prefix + suffix);
+  expect(editor).toHaveFocus();
   expect(infrastructure.grade).not.toHaveBeenCalled();
 });
 

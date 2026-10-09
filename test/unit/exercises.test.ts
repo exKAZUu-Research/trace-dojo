@@ -1007,9 +1007,7 @@ test.each(['ordinary', 'challenge'] as const)(
           const result = await submit();
           expect(JSON.stringify(result)).not.toMatch(/SECRET_API|private|TraceDojo|script/);
           expect(diagnosticVerdictSchema.parse(result).diagnostics).toEqual(
-            expect.arrayContaining([
-              expect.objectContaining({ line: 3, message: expect.stringMatching(/名前|宣言|変数|メソッド/) }),
-            ])
+            expect.arrayContaining([expect.objectContaining({ line: 3, message: 'cannot find symbol' })])
           );
         }
         expect(execution.requests).toHaveBeenCalledTimes(2);

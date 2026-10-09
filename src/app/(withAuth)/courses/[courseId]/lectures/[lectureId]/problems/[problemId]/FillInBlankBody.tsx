@@ -182,7 +182,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
               {feedback.diagnostics.map((item, index) => (
                 <Box key={index}>
                   {item.line && <span>{item.line}行目: </span>}
-                  <span>{item.message}</span>
+                  <span style={{ whiteSpace: 'pre-wrap' }}>{item.message}</span>
                 </Box>
               ))}
             </Box>

@@ -277,19 +277,25 @@ test.each([
     source:
       '\r\n\r\npublic class Main {\r\n\tpublic static void main(String[] args) {\r\n\t\tint 亀の数 = true;\r\n\t}\r\n}\r\n',
     line: 5,
-    category: /型/,
+    category: /^incompatible types: boolean cannot be converted to int$/,
   },
   {
     name: 'unresolved method',
-    source: 'class Main {\n public static void main(String[] args) {\n  秘密の未定義呼び出し();\n }\n}',
+    source: 'class Main {\n public static void main(String[] args) {\n  missing();\n }\n}',
     line: 3,
-    category: /名前|宣言|変数|メソッド/,
+    category: /^cannot find symbol\nsymbol: method missing\(\)$/,
   },
   {
     name: 'missing semicolon',
     source: 'class Main {\n public static void main(String[] args) {\n  int count = 1\n }\n}',
     line: 3,
-    category: /記号|セミコロン|構文/,
+    category: /^';' expected$/,
+  },
+  {
+    name: 'untaught constructor overload',
+    source: 'class Main {\n public static void main(String[] args) {\n  Turtle t = new Turtle(true);\n }\n}',
+    line: 3,
+    category: /^no suitable constructor found for Turtle\(boolean\)$/,
   },
   { name: 'missing main', source: 'class Main {}', line: undefined, category: /main/ },
   {
@@ -311,7 +317,9 @@ test.each([
     ])
   );
   if (!line) expect(verdict.diagnostics.every((diagnostic) => diagnostic.line === undefined)).toBe(true);
-  expect(JSON.stringify(result)).not.toMatch(/TraceDojoJudge|\.java|__TRACE_DOJO_RESULT_|亀の数|秘密の未定義呼び出し/);
+  expect(JSON.stringify(result)).not.toMatch(
+    /TraceDojoJudge|\.java|__TRACE_DOJO_RESULT_|constructor Turtle|actual and formal argument lists/
+  );
 });
 
 test.each([
@@ -354,9 +362,10 @@ test.each([
   );
   const verdict = diagnosticVerdictSchema.parse(result);
   if (scenario === 'recognized header')
-    expect(verdict.diagnostics).toEqual(
-      expect.arrayContaining([expect.objectContaining({ line: 3, message: expect.stringMatching(/型/) })])
-    );
+    expect(verdict.diagnostics).toContainEqual({
+      line: 3,
+      message: 'コンパイルエラーです。入力したコードを確認してください。',
+    });
   expect(new Set(verdict.diagnostics.map((diagnostic) => JSON.stringify(diagnostic))).size).toBe(
     verdict.diagnostics.length
   );
@@ -370,6 +379,81 @@ test.each([
   } else {
     expect(verdict.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ line: 3 })]));
   }
+});
+
+test.each([
+  { name: 'forged symbol', declaration: '', symbol: 'providerSecret' },
+  {
+    name: 'NUL-delimited identifier fragment',
+    declaration: 'int prefix\u0000providerSecret;',
+    symbol: 'providerSecret',
+  },
+  {
+    name: 'DEL-delimited identifier fragment',
+    declaration: 'int prefix\u007FproviderSecret;',
+    symbol: 'providerSecret',
+  },
+  { name: 'comment-only symbol', declaration: '// commentSecret', symbol: 'commentSecret' },
+  { name: 'string-only symbol', declaration: 'String text = "stringSecret";', symbol: 'stringSecret' },
+  { name: 'unfinished string', declaration: 'String text = "brokenSecret', symbol: 'brokenSecret' },
+  {
+    name: 'unfinished character',
+    declaration: "int brokenCharacter; char text = 'unterminated",
+    symbol: 'brokenCharacter',
+  },
+  { name: 'reserved helper', declaration: 'int dump;', symbol: 'dump' },
+  { name: 'reserved wrapper', declaration: 'int TraceDojoJudge;', symbol: 'TraceDojoJudge' },
+  {
+    name: 'reserved marker prefix',
+    declaration: 'int __TRACE_DOJO_RESULT_forged;',
+    symbol: '__TRACE_DOJO_RESULT_forged',
+  },
+  { name: 'bidi continuation', declaration: 'int visible;', symbol: 'visible\u202E' },
+  { name: 'control continuation', declaration: 'int visible;', symbol: 'visible\u001B[31m' },
+])('compiler diagnostics retain safe information while rejecting $name provenance', async ({ declaration, symbol }) => {
+  const source = `class Main {\n public static void main(String[] args) {\n  ${declaration}\n  missing();\n }\n}`;
+  const grade = await loadGrade();
+  const result = await withCompilerTransport(
+    (file, program) => {
+      const line = program.split(/\r\n|\r|\n/).findIndex((text) => text.includes('missing();')) + 1;
+      return {
+        status: '1',
+        compiler_error: `${file}:${line}: error: cannot find symbol\n  symbol: variable ${symbol}\n  location: class ProviderLocationSecret\n${file}:${line}: error: incompatible types: boolean cannot be converted to int`,
+      };
+    },
+    async (executor) => grade(instantiate('fillInBlank1'), source, { javaExecutors: [executor] })
+  );
+  const verdict = diagnosticVerdictSchema.parse(result);
+  expect(verdict.diagnostics).toEqual([
+    { line: 4, message: 'cannot find symbol' },
+    { line: 4, message: 'incompatible types: boolean cannot be converted to int' },
+  ]);
+  expect(JSON.stringify(result)).not.toContain(symbol);
+  expect(JSON.stringify(result)).not.toContain('ProviderLocationSecret');
+});
+
+test('compiler diagnostics require the whole header grammar and independently validate continuations', async () => {
+  const source = 'class Main {\n public static void main(String[] args) {\n\tint 亀の数; int\tcafé; missing();\n }\n}';
+  const grade = await loadGrade();
+  const result = await withCompilerTransport(
+    (file, program) => {
+      const line = program.split(/\r\n|\r|\n/).findIndex((text) => text.includes('missing();')) + 1;
+      return {
+        status: '1',
+        compiler_error: `${file}:${line}: error: illegal start of expression /private/headerSecret\n${file}:${line}: error: incompatible types: boolean cannot be converted to int HEADER_SECRET\n${file}:${line}: error: cannot find symbol\n  symbol: variable 亀の数\n  location: class /private/locationSecret\n${file}:${line}: error: cannot find symbol\n  symbol: variable café`,
+      };
+    },
+    async (executor) => grade(instantiate('fillInBlank1'), source, { javaExecutors: [executor] })
+  );
+  const verdict = diagnosticVerdictSchema.parse(result);
+  expect(verdict.diagnostics).toEqual(
+    expect.arrayContaining([
+      { line: 3, message: 'コンパイルエラーです。入力したコードを確認してください。' },
+      { line: 3, message: 'cannot find symbol\nsymbol: variable 亀の数' },
+      { line: 3, message: 'cannot find symbol\nsymbol: variable café' },
+    ])
+  );
+  expect(JSON.stringify(result)).not.toMatch(/private|Secret|HEADER_SECRET|illegal start|incompatible types/);
 });
 
 test('foreign compiler transport remains unavailable instead of blaming the learner', async () => {
