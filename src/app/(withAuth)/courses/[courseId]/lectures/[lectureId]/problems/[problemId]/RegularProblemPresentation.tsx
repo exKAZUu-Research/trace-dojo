@@ -22,6 +22,7 @@ interface Props {
   viewingTraceItemIndex: number;
   setViewingTraceItemIndex: Dispatch<SetStateAction<number>>;
   editor: ReactNode;
+  enableSyntaxHints?: boolean;
 }
 
 export const RegularProblemPresentation: React.FC<Props> = ({
@@ -30,6 +31,7 @@ export const RegularProblemPresentation: React.FC<Props> = ({
   viewingTraceItemIndex,
   setViewingTraceItemIndex,
   editor,
+  enableSyntaxHints = false,
 }) => (
   <>
     <Flex alignItems="stretch" gap={6}>
@@ -73,6 +75,7 @@ export const RegularProblemPresentation: React.FC<Props> = ({
         </VStack>
         <SyntaxHighlighter
           code={problem.displayProgram}
+          enableSyntaxHints={enableSyntaxHints}
           programmingLanguageId="java"
           callerLines={
             view.problemType === 'step'

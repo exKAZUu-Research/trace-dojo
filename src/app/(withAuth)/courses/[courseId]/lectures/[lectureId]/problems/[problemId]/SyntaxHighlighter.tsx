@@ -1,14 +1,17 @@
 import type { BoxProps } from '@chakra-ui/react';
 import type React from 'react';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { MdOutlineZoomIn, MdOutlineZoomOut } from 'react-icons/md';
 import { Prism } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/cjs/styles/prism';
+
+import { JavaSyntaxHints } from './JavaSyntaxHints';
 
 import { Box, IconButton } from '../../../../../../../../infrastructures/useClient/chakra';
 
 type SyntaxHighlighterProps = BoxProps & {
   code: string;
+  enableSyntaxHints?: boolean;
   callerLines?: (number | undefined)[];
   currentFocusLine?: number;
   previousFocusLine?: number;
@@ -19,17 +22,20 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
   callerLines,
   code,
   currentFocusLine,
+  enableSyntaxHints = false,
   previousFocusLine,
   programmingLanguageId,
   ...boxProps
 }) => {
-  const [fontSize, setFontSize] = useState(1); // 1rem is default
+  const [fontSize, setFontSize] = useState(1);
+  const instructionsId = useId();
+  const hintsEnabled = enableSyntaxHints && programmingLanguageId === 'java';
   const handleZoomIn = (): void => {
     setFontSize((prev) => Math.min(prev + 0.1, 2));
-  }; // Max 2rem
+  };
   const handleZoomOut = (): void => {
     setFontSize((prev) => Math.max(prev - 0.1, 0.5));
-  }; // Min 0.5rem
+  };
 
   return (
     <Box position="relative" {...boxProps}>
@@ -37,7 +43,27 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
         <IconButton aria-label="Zoom out" icon={<MdOutlineZoomOut size={24} />} mr={2} onClick={handleZoomOut} />
         <IconButton aria-label="Zoom in" icon={<MdOutlineZoomIn size={24} />} onClick={handleZoomIn} />
       </Box>
-      <Box bg="white" overflow="auto">
+      {hintsEnabled && (
+        <Box id={instructionsId} fontSize="sm" px={4} pt={3} pr="7rem">
+          下線のある記号や語にカーソルを合わせると説明が出ます。クリック・タップで固定／解除。 キーボードでは Tab
+          で入り、← →・Home・End で移動、Enter・Space で固定／解除、Esc で閉じます。
+        </Box>
+      )}
+      <Box
+        sx={{
+          '.java-syntax-hint': {
+            cursor: 'help',
+            textDecoration: 'underline dotted',
+            textUnderlineOffset: '3px',
+            _focusVisible: { outline: '2px solid', outlineColor: 'blue.600', outlineOffset: '2px' },
+          },
+        }}
+        bg="white"
+        overflow="auto"
+        role={hintsEnabled ? 'group' : undefined}
+        aria-label={hintsEnabled ? 'Java の構文ヒント' : undefined}
+        aria-describedby={hintsEnabled ? instructionsId : undefined}
+      >
         <Prism
           codeTagProps={{
             style: {
@@ -56,20 +82,19 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
           lineNumberStyle={{ minWidth: '1.5rem', marginRight: '2rem', paddingRight: 0 }}
           lineProps={(lineNumber) => {
             const style: React.CSSProperties = { padding: '0 1rem', backgroundColor: '', border: '' };
-            // Show dotted border for callerLines
             if (callerLines?.includes(lineNumber)) {
-              style.border = '2px dotted #f56565'; /* red.500 */
+              style.border = '2px dotted #f56565';
             }
-            // previousFocusLine と currentFocusLine が等しくなるケースがある。
             if (lineNumber === previousFocusLine) {
-              style.backgroundColor = '#feebc8'; /* orange.100 */
+              style.backgroundColor = '#feebc8';
             }
             if (lineNumber === currentFocusLine) {
-              style.border = '4px solid #f56565'; /* red.500 */
-              style.padding = '0 calc(1rem - 4px)'; // Adjust margin to compensate for border width
+              style.border = '4px solid #f56565';
+              style.padding = '0 calc(1rem - 4px)';
             }
             return { style };
           }}
+          renderer={hintsEnabled ? (props) => <JavaSyntaxHints key={code} {...props} /> : undefined}
           showLineNumbers={true}
           style={oneLight}
           wrapLines={true}

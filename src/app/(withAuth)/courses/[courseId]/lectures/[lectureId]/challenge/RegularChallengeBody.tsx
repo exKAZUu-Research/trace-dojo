@@ -146,6 +146,7 @@ export const RegularChallengeBody: React.FC<Props> = ({
         </Text>
       )}
       <RegularProblemPresentation
+        enableSyntaxHints
         problem={problem}
         view={view}
         viewingTraceItemIndex={viewingIndex}
