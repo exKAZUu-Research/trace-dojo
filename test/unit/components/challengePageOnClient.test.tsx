@@ -513,3 +513,25 @@ test('challenge Reset restores the exact starter without submitting or changing 
   expect(transport.start).toHaveBeenCalledTimes(1);
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
 });
+
+test('challenge compiler feedback reaches the editor and survives result dismissal', async () => {
+  const message = '代入する値や引数の型を確認してください。';
+  transport.start.mockResolvedValue(blankDisplay);
+  transport.submitBlank.mockResolvedValue({
+    status: 'incorrect',
+    detail: 'Compile error.',
+    diagnostics: [{ line: 2, message }],
+  });
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
+  await replaceJavaSource(editor, 'class Main {\n public static void main(String[] args) { int x = true; }\n}');
+  await user.click(screen.getByRole('button', { name: '提出' }));
+  await waitFor(() => expect(screen.getByRole('alertdialog')).toBeVisible());
+  expect(screen.getAllByText(message).length).toBeGreaterThan(0);
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  expect(screen.getByText(message)).toBeVisible();
+  await waitFor(() => expect(document.querySelector('.cm-lintRange-error')).toBeInTheDocument());
+  expect(transport.submitBlank).toHaveBeenCalledTimes(1);
+});

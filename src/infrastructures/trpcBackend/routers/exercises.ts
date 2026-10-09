@@ -392,5 +392,5 @@ const gradeAndSave = async (
   });
   if (result.status === 'correct') return { status: 'correct' };
   if (result.status === 'ungradable') return { status: 'ungradable', detail: '' };
-  return { status: 'incorrect', detail: result.detail };
+  return { status: 'incorrect', detail: result.detail, diagnostics: result.diagnostics };
 };

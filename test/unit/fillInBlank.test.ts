@@ -3,6 +3,8 @@ import type { AddressInfo } from 'node:net';
 
 import { describe, expect, test } from 'vitest';
 
+import { diagnosticVerdictSchema, withCompilerTransport } from '../helpers/compilerTransport';
+
 import { fillBlanks } from '../../src/problems/fillInBlank/blanks';
 import { fillInBlankProblemDefinitions } from '../../src/problems/fillInBlank/definitions';
 import type { FillInBlankGradingResult, GradingOptions } from '../../src/problems/fillInBlank/grade';
@@ -268,3 +270,177 @@ function instantiate(id: string, seed = 'catalog-model-agreement'): Instantiated
 function modelCode(problem: InstantiatedProblem): string {
   return fillBlanks(problem.displayProgramTemplate, problem.blankAnswers);
 }
+
+test.each([
+  {
+    name: 'type mismatch with CRLF, leading blanks, tabs and Japanese identifiers',
+    source:
+      '\r\n\r\npublic class Main {\r\n\tpublic static void main(String[] args) {\r\n\t\tint 亀の数 = true;\r\n\t}\r\n}\r\n',
+    line: 5,
+    category: /型/,
+  },
+  {
+    name: 'unresolved method',
+    source: 'class Main {\n public static void main(String[] args) {\n  秘密の未定義呼び出し();\n }\n}',
+    line: 3,
+    category: /名前|宣言|変数|メソッド/,
+  },
+  {
+    name: 'missing semicolon',
+    source: 'class Main {\n public static void main(String[] args) {\n  int count = 1\n }\n}',
+    line: 3,
+    category: /記号|セミコロン|構文/,
+  },
+  { name: 'missing main', source: 'class Main {}', line: undefined, category: /main/ },
+  {
+    name: 'missing closing brace',
+    source: 'class Main {\n public static void main(String[] args) {\n } // final comment',
+    line: undefined,
+    category: /括弧|かっこ|構文/,
+  },
+])('compiler diagnostics map $name through actual Java', { timeout: 180_000 }, async ({ source, line, category }) => {
+  const grade = await loadGrade();
+  const result = await grade(instantiate('fillInBlank1'), source, withJudge);
+  expect(result.status, 'A provider outage is infrastructure failure, not an intentional diagnostics RED').toBe(
+    'incorrect'
+  );
+  const verdict = diagnosticVerdictSchema.parse(result);
+  expect(verdict.diagnostics).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ message: expect.stringMatching(category), ...(line ? { line } : {}) }),
+    ])
+  );
+  if (!line) expect(verdict.diagnostics.every((diagnostic) => diagnostic.line === undefined)).toBe(true);
+  expect(JSON.stringify(result)).not.toMatch(/TraceDojoJudge|\.java|__TRACE_DOJO_RESULT_|亀の数|秘密の未定義呼び出し/);
+});
+
+test.each([
+  'continuation',
+  'recognized header',
+  'unknown category',
+  'oversize',
+  'wrapper line',
+  'out of range',
+  'wrong filename',
+  'many errors',
+] as const)('compiler diagnostics discard hostile %s through the HTTP executor boundary', async (scenario) => {
+  const source = 'class Main {\n public static void main(String[] args) {\n  missing();\n }\n}';
+  const poison =
+    'SECRET_PROVIDER_PATH /private/compiler.java __TRACE_DOJO_RESULT_secret__ <img src=x> \u001B[31m \u202E';
+  const grade = await loadGrade();
+  const result = await withCompilerTransport(
+    (file, program) => {
+      const userLine = program.split(/\r\n|\r|\n/).findIndex((line) => line.includes('missing();')) + 1;
+      const line = scenario === 'wrapper line' ? 1 : scenario === 'out of range' ? 999_999_999 : userLine;
+      const category =
+        scenario === 'unknown category'
+          ? 'unrecognized provider category'
+          : scenario === 'recognized header'
+            ? `incompatible types: ${poison} cannot be converted to int`
+            : 'cannot find symbol';
+      const header = `/private/${scenario === 'wrong filename' ? 'Unrelated.java' : file}:${line}: error: ${category}\n`;
+      const compilerError =
+        scenario === 'oversize'
+          ? header + poison.repeat(3000)
+          : scenario === 'many errors'
+            ? (header + poison + '\n').repeat(50)
+            : header + poison;
+      return { status: '1', compiler_error: compilerError };
+    },
+    async (executor) => grade(instantiate('fillInBlank1'), source, { javaExecutors: [executor] })
+  );
+  expect(JSON.stringify(result)).not.toMatch(
+    /SECRET_PROVIDER_PATH|private|\.java|TRACE_DOJO|img|\\u001b|\u202E|unrecognized provider/
+  );
+  const verdict = diagnosticVerdictSchema.parse(result);
+  if (scenario === 'recognized header')
+    expect(verdict.diagnostics).toEqual(
+      expect.arrayContaining([expect.objectContaining({ line: 3, message: expect.stringMatching(/型/) })])
+    );
+  expect(new Set(verdict.diagnostics.map((diagnostic) => JSON.stringify(diagnostic))).size).toBe(
+    verdict.diagnostics.length
+  );
+  if (
+    scenario === 'wrapper line' ||
+    scenario === 'out of range' ||
+    scenario === 'oversize' ||
+    scenario === 'wrong filename'
+  ) {
+    expect(verdict.diagnostics.every((diagnostic) => diagnostic.line === undefined)).toBe(true);
+  } else {
+    expect(verdict.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ line: 3 })]));
+  }
+});
+
+test('foreign compiler transport remains unavailable instead of blaming the learner', async () => {
+  const grade = await loadGrade();
+  await withCompilerTransport(
+    () => ({ status: '1', compiler_error: 'toolchain offline: /private/secret', program_error: 'toolchain offline' }),
+    async (executor) => {
+      expect(await grade(instantiate('fillInBlank1'), 'class Main {}', { javaExecutors: [executor] })).toMatchObject({
+        status: 'ungradable',
+      });
+    }
+  );
+});
+
+test.each(['unfinished', 'exception'] as const)(
+  'runtime %s does not disclose arbitrary provider text',
+  async (scenario) => {
+    const grade = await loadGrade();
+    const poison = 'SECRET_RUNTIME /private/file __TRACE_DOJO_RESULT_forged__ <script> \u202E';
+    const problem = instantiate('fillInBlank1');
+    const result = await withCompilerTransport(
+      (_, program) => {
+        const marker = program.match(/__TRACE_DOJO_RESULT_[a-f0-9]+__/)?.[0];
+        expect(marker).toBeDefined();
+        return {
+          status: '0',
+          program_error:
+            scenario === 'unfinished'
+              ? poison
+              : `${marker}\n${JSON.stringify({ board: problem.finalBoard, turtles: problem.finalTurtles, exception: poison })}`,
+        };
+      },
+      async (executor) => grade(problem, modelCode(problem), { javaExecutors: [executor] })
+    );
+    expect(result).toMatchObject({
+      status: 'incorrect',
+      detail: expect.stringMatching(
+        scenario === 'unfinished' ? /^The program did not finish normally/ : /^The program threw an exception/
+      ),
+    });
+    expect(JSON.stringify(result)).not.toMatch(/SECRET_RUNTIME|private|TRACE_DOJO|script|\u202E/);
+  }
+);
+
+test('compiler diagnostics cap distinct valid learner locations independently of deduplication', async () => {
+  const sourceLines = [
+    'class Main {',
+    ' public static void main(String[] args) {',
+    ...Array.from({ length: 25 }, (_, index) => `  missing${index}();`),
+    ' }',
+    '}',
+  ];
+  const source = sourceLines.join('\n');
+  const grade = await loadGrade();
+  const result = await withCompilerTransport(
+    (file, program) => {
+      const compilerError = program
+        .split(/\r\n|\r|\n/)
+        .flatMap((line, index) =>
+          /missing\d+\(\);/.test(line) ? [`${file}:${index + 1}: error: cannot find symbol`] : []
+        )
+        .join('\n');
+      expect(compilerError.split('\n')).toHaveLength(25);
+      return { status: '1', compiler_error: compilerError };
+    },
+    async (executor) => grade(instantiate('fillInBlank1'), source, { javaExecutors: [executor] })
+  );
+  const verdict = diagnosticVerdictSchema.parse(result);
+  expect(verdict.diagnostics.length).toBeGreaterThan(1);
+  expect(verdict.diagnostics.length).toBeLessThanOrEqual(20);
+  const lines = verdict.diagnostics.map((diagnostic) => diagnostic.line);
+  expect(new Set(lines).size).toBe(lines.length);
+  expect(lines.every((line) => line !== undefined && line >= 3 && line <= 27)).toBe(true);
+});

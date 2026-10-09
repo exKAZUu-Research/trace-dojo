@@ -2,7 +2,9 @@
 
 import { Box, HStack, IconButton } from '@chakra-ui/react';
 import { indentWithTab, isolateHistory, redo, redoDepth, undo, undoDepth } from '@codemirror/commands';
-import { java } from '@codemirror/lang-java';
+import { closeCompletion } from '@codemirror/autocomplete';
+import { java, javaLanguage } from '@codemirror/lang-java';
+import { forceLinting } from '@codemirror/lint';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
@@ -13,6 +15,9 @@ import { useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { MdOutlineZoomIn, MdOutlineZoomOut } from 'react-icons/md';
 
 import styles from './JavaCodeEditor.module.css';
+import { javaCompletion } from '@/problems/fillInBlank/javaCompletion';
+import { compilerFeedback, javaComposition, javaEditorDiagnostics } from '@/problems/fillInBlank/javaEditorDiagnostics';
+import type { JavaDiagnostic } from '@/problems/fillInBlank/javaDiagnostics';
 
 export interface JavaCodeEditorHandle {
   undo: () => void;
@@ -30,15 +35,26 @@ interface Props {
   value: string;
   disabled: boolean;
   onChange: (value: string) => void;
+  diagnostics?: JavaDiagnostic[];
+  onInvalidate?: () => void;
 }
 
-export const JavaCodeEditor: React.FC<Props> = ({ ref, value, disabled, onChange, onHistoryChange }) => {
+export const JavaCodeEditor: React.FC<Props> = ({
+  ref,
+  value,
+  disabled,
+  onChange,
+  onHistoryChange,
+  diagnostics,
+  onInvalidate,
+}) => {
   const [fontSize, setFontSize] = useState(8);
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView>(undefined);
   const editing = useRef(new Compartment());
   const fontSizeTheme = useRef(new Compartment());
   const onChangeRef = useRef(onChange);
+  const onInvalidateRef = useRef(onInvalidate);
   const initialValue = useRef(value);
   const onHistoryChangeRef = useRef(onHistoryChange);
 
@@ -67,7 +83,8 @@ export const JavaCodeEditor: React.FC<Props> = ({ ref, value, disabled, onChange
 
   useEffect(() => {
     onChangeRef.current = onChange;
-  }, [onChange]);
+    onInvalidateRef.current = onInvalidate;
+  }, [onChange, onInvalidate]);
 
   useEffect(() => {
     if (!host.current) return;
@@ -77,6 +94,18 @@ export const JavaCodeEditor: React.FC<Props> = ({ ref, value, disabled, onChange
       extensions: [
         basicSetup,
         java(),
+        javaEditorDiagnostics,
+        javaLanguage.data.of({ autocomplete: javaCompletion }),
+        EditorView.domEventHandlers({
+          compositionstart: (_event, view) => {
+            closeCompletion(view);
+            view.dispatch({ effects: javaComposition.of(true) });
+            onInvalidateRef.current?.();
+          },
+          compositionend: (_event, view) => {
+            view.dispatch({ effects: javaComposition.of(false) });
+          },
+        }),
         syntaxHighlighting(
           HighlightStyle.define([
             { tag: tags.comment, color: '#6e7781' },
@@ -126,6 +155,14 @@ export const JavaCodeEditor: React.FC<Props> = ({ ref, value, disabled, onChange
   }, []);
 
   useEffect(() => {
+    const view = editor.current;
+    if (!view) return;
+    view.dispatch({ effects: compilerFeedback.of(diagnostics ?? []) });
+    forceLinting(view);
+  }, [diagnostics]);
+
+  useEffect(() => {
+    if (disabled && editor.current) closeCompletion(editor.current);
     editor.current?.dispatch({
       effects: editing.current.reconfigure([
         EditorState.readOnly.of(disabled),

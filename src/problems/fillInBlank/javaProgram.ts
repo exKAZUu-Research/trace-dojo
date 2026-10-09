@@ -46,16 +46,17 @@ export function findForbiddenJavaPattern(userProgram: string): string | undefine
   return forbiddenPatterns.find((pattern) => pattern.test(code))?.source;
 }
 
-/**
- * Builds a single-file Java program that runs the user's program and then reports the final turtle-graphics
- * state after `resultMarker` on standard error. Standard output stays the user's program's own, so whatever it
- * prints there — a learner's own debugging output included — cannot be mistaken for the result.
- */
-export function buildJavaJudgeProgram(userProgram: string, resultMarker: string): string {
-  const { className: mainClassName, source } = prepareJavaEntry(userProgram);
+export interface JavaJudgeProgram {
+  program: string;
+  userStartLine: number;
+  userLineCount: number;
+  entryInvocationLine: number;
+}
+
+export function buildJavaJudgeProgram(userProgram: string, resultMarker: string): JavaJudgeProgram {
+  const { className: mainClassName, source } = prepareJavaEntry(userProgram.replaceAll(/\r\n?/g, '\n'));
   // Both providers name the source file after the public wrapper class.
-  return `
-public class ${JAVA_JUDGE_CLASS_NAME} {
+  const prefix = `public class ${JAVA_JUDGE_CLASS_NAME} {
   public static void main(String[] args) {
     String exception = null;
     try {
@@ -71,7 +72,8 @@ public class ${JAVA_JUDGE_CLASS_NAME} {
   }
 }
 
-${source}
+`;
+  const suffix = `
 
 class Turtle {
   static final int COLUMNS = ${GRID_COLUMNS};
@@ -163,7 +165,14 @@ class Turtle {
     return sb.append('}').toString();
   }
 }
-`.trim();
+`;
+  return {
+    program: `${prefix}${source}${suffix}`,
+    userStartLine: prefix.split('\n').length,
+    userLineCount: source.split('\n').length,
+    entryInvocationLine:
+      prefix.split('\n').findIndex((line) => line.includes(`${mainClassName}.main(new String[0]);`)) + 1,
+  };
 }
 
 export function parseJavaJudgeOutput(output: string, resultMarker: string): JavaTurtleState | undefined {

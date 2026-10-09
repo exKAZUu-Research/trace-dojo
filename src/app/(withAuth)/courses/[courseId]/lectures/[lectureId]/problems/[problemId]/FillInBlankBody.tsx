@@ -2,7 +2,7 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import type React from 'react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MdRedo, MdUndo } from 'react-icons/md';
 import { useImmer } from 'use-immer';
 
@@ -27,6 +27,7 @@ import {
   IconButton,
   VStack,
 } from '@/infrastructures/useClient/chakra';
+import { readJavaDiagnostics, type JavaDiagnostic } from '@/problems/fillInBlank/javaDiagnostics';
 import { hasIncompleteJavaPlaceholders } from '@/problems/fillInBlank/javaSource';
 import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
 import type { TurtleTrace } from '@/problems/traceProgram';
@@ -47,11 +48,26 @@ interface Props {
 export const FillInBlankBody: React.FC<Props> = (props) => {
   const params = useParams<{ courseId: CourseId; lectureId: string; problemId: ProblemId }>();
   const router = useRouter();
-  const [code, setCode] = useState(props.problem.displayProgram);
+  const [code, setCode] = useState(props.problem.displayProgram.replaceAll(/\r\n?/g, '\n'));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [alert, setAlert] = useState<{ title: string; message: string; isCompleted: boolean }>();
   const [isResetOpen, setIsResetOpen] = useState(false);
   const [history, setHistory] = useImmer<EditorHistoryAvailability>({ canUndo: false, canRedo: false });
+  const [feedback, setFeedback] = useImmer<{ diagnostics: JavaDiagnostic[] } | undefined>(undefined);
+  const revision = useRef(0);
+  const request = useRef(0);
+  useEffect(
+    () => () => {
+      request.current += 1;
+    },
+    []
+  );
+  const invalidate = (): void => {
+    revision.current += 1;
+    request.current += 1;
+    setIsSubmitting(false);
+    setFeedback(undefined);
+  };
   const editor = useRef<JavaCodeEditorHandle>(null);
   const cancelReset = useRef<HTMLButtonElement>(null);
   const resetButton = useRef<HTMLButtonElement>(null);
@@ -71,12 +87,17 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
       });
       return;
     }
+    setFeedback(undefined);
+    const token = ++request.current;
+    const submittedRevision = revision.current;
+    const isCurrent = (): boolean => token === request.current && submittedRevision === revision.current;
     setIsSubmitting(true);
     try {
       let result: FillInBlankVerdict;
       try {
         result = await props.gradeCode(code);
       } catch (error) {
+        if (!isCurrent()) return;
         console.error(error);
         setAlert({
           title: '提出できませんでした',
@@ -85,6 +106,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
         });
         return;
       }
+      if (!isCurrent()) return;
       switch (result.status) {
         case 'correct': {
           setAlert({
@@ -97,7 +119,17 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
           break;
         }
         case 'incorrect': {
-          setAlert({ title: '不正解', message: toIncorrectMessage(result.detail), isCompleted: false });
+          const diagnostics = result.detail.startsWith('Compile error')
+            ? readJavaDiagnostics(result.diagnostics, code.split('\n').length)
+            : undefined;
+          if (diagnostics) setFeedback({ diagnostics });
+          setAlert({
+            title: '不正解',
+            message: diagnostics
+              ? `コンパイルエラーになりました。\n${diagnostics.map((item) => `${item.line ? `${item.line}行目: ` : ''}${item.message}`).join('\n')}`
+              : toIncorrectMessage(result.detail),
+            isCompleted: false,
+          });
           break;
         }
         case 'ungradable': {
@@ -110,7 +142,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
         }
       }
     } finally {
-      setIsSubmitting(false);
+      if (isCurrent()) setIsSubmitting(false);
     }
   };
 
@@ -132,7 +164,12 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
             ref={editor}
             value={code}
             disabled={isEditorLocked}
-            onChange={setCode}
+            onChange={(value) => {
+              invalidate();
+              setCode(value);
+            }}
+            onInvalidate={invalidate}
+            diagnostics={feedback?.diagnostics}
             onHistoryChange={(availability) =>
               setHistory((draft) => {
                 draft.canUndo = availability.canUndo;
@@ -140,6 +177,16 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
               })
             }
           />
+          {feedback && (
+            <Box aria-label="コンパイル結果">
+              {feedback.diagnostics.map((item, index) => (
+                <Box key={index}>
+                  {item.line && <span>{item.line}行目: </span>}
+                  <span>{item.message}</span>
+                </Box>
+              ))}
+            </Box>
+          )}
           <VStack align="stretch" as={Card} p={5} spacing={3}>
             <HStack justify="flex-end" spacing={3}>
               <IconButton
@@ -216,7 +263,8 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
                 isDisabled={isLocked}
                 onClick={() => {
                   if (isLocked) return;
-                  setCode(props.problem.displayProgram);
+                  invalidate();
+                  setCode(props.problem.displayProgram.replaceAll(/\r\n?/g, '\n'));
                   setIsResetOpen(false);
                 }}
               >

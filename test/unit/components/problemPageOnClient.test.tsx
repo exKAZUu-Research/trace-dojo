@@ -400,3 +400,124 @@ test('ordinary editor shares keyboard and toolbar history and confirms an isolat
   expect(infrastructure.grade).not.toHaveBeenCalled();
   expect(infrastructure.update).not.toHaveBeenCalled();
 });
+
+test('local syntax hints appear and clear without grading or pretending to check Java types', async () => {
+  infrastructure.problemId = 'fillInBlank2';
+  renderPage('fillInBlank');
+  const editor = screen.getByRole('textbox', { name: /Java/ });
+  expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
+  await replaceJavaSource(editor, 'class Main { void draw() { int x = ; } }');
+  await waitFor(() => expect(document.querySelector('.cm-lintRange-error')).toBeInTheDocument());
+  await replaceJavaSource(editor, 'class Main { void draw() { int x = true; missing(); } }');
+  await waitFor(() => expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument());
+  await replaceJavaSource(editor, 'class Main { void draw() { int x = 【1】; } }');
+  expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
+  expect(infrastructure.grade).not.toHaveBeenCalled();
+});
+
+test('compiler feedback persists after dismissal and clears immediately on edit without undo resurrection', async () => {
+  infrastructure.problemId = 'fillInBlank2';
+  const message = '変数やメソッドの名前と宣言を確認してください。';
+  infrastructure.grade.mockResolvedValue({
+    status: 'incorrect',
+    detail: 'Compile error.',
+    diagnostics: [{ line: 3, message }],
+  });
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await replaceJavaSource(editor, 'class Main {\n public static void main(String[] args) {\n  missing();\n }\n}');
+  await user.click(screen.getByRole('button', { name: '提出' }));
+  await waitFor(() => expect(screen.getByRole('alertdialog')).toBeVisible());
+  expect(screen.getAllByText(message).length).toBeGreaterThan(0);
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  expect(screen.getByText(message)).toBeVisible();
+  await waitFor(() => expect(document.querySelector('.cm-lintRange-error')).toBeInTheDocument());
+  await user.click(editor);
+  await user.keyboard('{Control>}{End}{/Control} ');
+  expect(screen.queryByText(message)).not.toBeInTheDocument();
+  expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: '元に戻す' }));
+  expect(screen.queryByText(message)).not.toBeInTheDocument();
+  expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
+  expect(infrastructure.grade).toHaveBeenCalledTimes(1);
+});
+
+test('Japanese Turtle completion inserts literal source, supports undo, and never grades', async () => {
+  infrastructure.problemId = 'fillInBlank2';
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = screen.getByRole('textbox', { name: /Java/ });
+  const prefix = 'class Main { void draw() { Turtle 亀 = new Turtle(); 亀.前';
+  await replaceJavaSource(editor, prefix);
+  await user.keyboard('{Control>} {/Control}');
+  const option = await screen.findByRole('option', { name: /前に進む/ });
+  await user.click(option);
+  expect(readRenderedJavaSource(editor)).toContain('亀.前に進む(');
+  expect(readRenderedJavaSource(editor)).not.toMatch(/&|<span/);
+  await user.click(screen.getByRole('button', { name: '元に戻す' }));
+  expect(readRenderedJavaSource(editor)).toBe(prefix);
+  expect(infrastructure.grade).not.toHaveBeenCalled();
+});
+
+test.each([
+  'class Main { void draw() { String text = "前',
+  'class Main { void draw() { // Turtle 亀 = new Turtle(); 亀.前',
+  'class Main { void draw() { int 亀 = 1; 亀.前',
+  'class Main { void draw() { { Turtle 亀 = new Turtle(); } 亀.前',
+  'class Main { void draw() { Turtle 亀 = new Turtle(); { int 亀 = 1; 亀.前',
+])('does not suggest Turtle members outside a visible explicit Turtle local: %s', async (source) => {
+  infrastructure.problemId = 'fillInBlank2';
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await replaceJavaSource(editor, 'class Main { void draw(Turtle 亀) { 亀.前');
+  await user.keyboard('{Control>} {/Control}');
+  await screen.findByRole('option', { name: /前に進む/ });
+  await user.keyboard('{Escape}');
+  await replaceJavaSource(editor, source);
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  try {
+    await act(async () => {
+      fireEvent.keyDown(editor, { key: ' ', code: 'Space', ctrlKey: true });
+      fireEvent.keyUp(editor, { key: ' ', code: 'Space', ctrlKey: true });
+      await vi.runAllTimersAsync();
+    });
+    expect(vi.getTimerCount()).toBe(0);
+    expect(screen.queryByRole('option', { name: /前に進む/ })).not.toBeInTheDocument();
+    expect(infrastructure.grade).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('Java snippet completion accepts with Enter and Tab navigates source placeholders without grading', async () => {
+  infrastructure.problemId = 'fillInBlank2';
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await replaceJavaSource(editor, 'class Main { void draw() { fo');
+  await user.keyboard('{Control>} {/Control}');
+  await screen.findByRole('option', { name: /for/ });
+  // CodeMirror ignores acceptance immediately after opening; model elapsed user time without a wall-clock wait.
+  const readyTime = Date.now() + 1000;
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(readyTime);
+  try {
+    await user.keyboard('{Enter}');
+  } finally {
+    clock.mockRestore();
+  }
+  expect(readRenderedJavaSource(editor)).toMatch(/for\s*\(/);
+  expect(readRenderedJavaSource(editor)).not.toMatch(/\$\{|<span/);
+  await user.paste('cursor');
+  await user.keyboard('{Tab}');
+  await user.paste('7');
+  const inserted = readRenderedJavaSource(editor);
+  expect(inserted).toMatch(/for\s*\(\s*int\s+cursor\s*=\s*0\s*;\s*cursor\s*<\s*7\s*;\s*cursor\+\+/);
+  expect(inserted).not.toContain('\t');
+  expect(editor).toHaveFocus();
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  expect(infrastructure.grade).not.toHaveBeenCalled();
+});

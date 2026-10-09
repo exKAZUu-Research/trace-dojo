@@ -7,6 +7,8 @@ import { migrate } from 'drizzle-orm/node-sqlite/migrator';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import { z } from 'zod';
 
+import { diagnosticVerdictSchema, withCompilerTransport } from '../helpers/compilerTransport';
+
 import { problemSessions, problemSubmissions, users } from '../../db/schema';
 import type { db as databaseClient } from '../../src/infrastructures/database';
 import type { BackendRouter } from '../../src/infrastructures/trpcBackend/routers';
@@ -964,3 +966,61 @@ test('ordinary provider outage preserves completion and history and rejects unau
   await expect(caller.gradeFillInBlankAnswers(input)).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
   expect(execution.requests).toHaveBeenCalledTimes(1);
 });
+
+test.each(['ordinary', 'challenge'] as const)(
+  '%s API forwards safe compiler diagnostics and preserves retry history',
+  async (context) => {
+    const original = await vi.importActual<typeof JavaExecutors>('../../src/problems/fillInBlank/javaExecutors');
+    const code = 'class Main {\n public static void main(String[] args) {\n  missing();\n }\n}';
+    await withCompilerTransport(
+      (file, program) => {
+        const line = program.split(/\r\n|\r|\n/).findIndex((text) => text.includes('missing();')) + 1;
+        return {
+          status: '1',
+          compiler_error: `/private/${file}:${line}: error: cannot find symbol\nSECRET_API __TRACE_DOJO_RESULT_private__ <script>\n`,
+        };
+      },
+      async (executor) => {
+        execution.run = executor.execute;
+        const exercise = context === 'challenge' ? await start() : undefined;
+        const normal =
+          context === 'ordinary'
+            ? db
+                .insert(problemSessions)
+                .values({
+                  userId: 'student',
+                  courseId: 'test',
+                  lectureId: 'test',
+                  problemId: 'fillInBlank1',
+                  problemVariablesSeed: 'diagnostics',
+                  problemType: 'fillInBlank',
+                  traceItemIndex: 0,
+                })
+                .returning()
+                .get()
+            : undefined;
+        const submit = async (): Promise<unknown> =>
+          exercise
+            ? caller.submitExercise({ ...locationOnly(), sessionId: exercise.sessionId, code })
+            : caller.gradeFillInBlankAnswers({ sessionId: normal!.id, code, elapsedMilliseconds: 12 });
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const result = await submit();
+          expect(JSON.stringify(result)).not.toMatch(/SECRET_API|private|TraceDojo|script/);
+          expect(diagnosticVerdictSchema.parse(result).diagnostics).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ line: 3, message: expect.stringMatching(/名前|宣言|変数|メソッド/) }),
+            ])
+          );
+        }
+        expect(execution.requests).toHaveBeenCalledTimes(2);
+        expect(
+          sqlite.prepare(`SELECT code FROM ${exercise ? 'ExerciseSubmission' : 'ProblemSubmission'}`).all()
+        ).toEqual([{ code }, { code }]);
+        const table = exercise ? 'ExerciseSession' : 'ProblemSession';
+        const id = exercise?.sessionId ?? normal!.id;
+        expect(sqlite.prepare(`SELECT completedAt FROM ${table} WHERE id = ?`).get(id)).toEqual({ completedAt: null });
+      },
+      original.createWandboxExecutor
+    );
+  }
+);
