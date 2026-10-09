@@ -42,7 +42,8 @@ export function normalizeCompilerDiagnostics(output: string, source: JavaJudgePr
   const identifiers = new Set(
     /["']/.test(learnerCode)
       ? []
-      : learnerCode.match(/[\p{L}\p{Nl}\p{Sc}\p{Pc}\p{N}\p{M}\p{Cf}\u0000-\u0008\u000E-\u001B\u007F-\u009F]+/gu)
+      : // oxlint-disable-next-line eslint/no-control-regex -- Java identifier-ignorable controls must preserve whole token boundaries.
+        learnerCode.match(/[\p{L}\p{Nl}\p{Sc}\p{Pc}\p{N}\p{M}\p{Cf}\u0000-\u0008\u000E-\u001B\u007F-\u009F]+/gu)
   );
   const seen = new Set<string>();
   for (let index = 0; index < lines.length; index += 1) {
