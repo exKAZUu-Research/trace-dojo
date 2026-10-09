@@ -7,5 +7,19 @@
 }
 
 .editor {
+  position: relative;
+  min-width: 0;
+  padding-top: 48px;
+  overflow: hidden;
+  background: white;
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+}
+
+.editor:focus-within {
+  outline: 2px solid #3182ce;
+}
+
+.host {
   min-width: 0;
 }

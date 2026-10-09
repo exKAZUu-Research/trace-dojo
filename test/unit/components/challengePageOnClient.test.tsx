@@ -404,7 +404,7 @@ test('a deferred result from before close does not replace the exercise started 
   expect(transport.start).toHaveBeenCalledTimes(2);
 });
 
-test('full-source edits and Enter/IME do not execute, and pending submission freezes the editor', async () => {
+test('full-source edits, Enter/IME, and zoom do not execute, and pending submission locks editing but permits zoom', async () => {
   let finish!: (result: { status: string; detail: string }) => void;
   transport.start.mockResolvedValue(blankDisplay);
   transport.submitBlank.mockReturnValue(
@@ -423,6 +423,12 @@ test('full-source edits and Enter/IME do not execute, and pending submission fre
   composeWithoutSubmitting(editor);
   expect(transport.submitBlank).not.toHaveBeenCalled();
   await replaceJavaSource(editor, code);
+  const zoomOut = screen.getByRole('button', { name: 'コードを縮小' });
+  const zoomIn = screen.getByRole('button', { name: 'コードを拡大' });
+  await user.click(zoomIn);
+  await user.click(zoomOut);
+  expect(readRenderedJavaSource(editor)).toBe(code);
+  expect(transport.submitBlank).not.toHaveBeenCalled();
   await user.dblClick(screen.getByRole('button', { name: '提出' }));
   expect(transport.submitBlank).toHaveBeenCalledTimes(1);
   expect(transport.submitBlank).toHaveBeenCalledWith({
@@ -438,6 +444,14 @@ test('full-source edits and Enter/IME do not execute, and pending submission fre
   const redo = screen.getByRole('button', { name: 'やり直す' });
   expect(undo).toBeDisabled();
   expect(redo).toBeDisabled();
+  expect(zoomIn).toBeEnabled();
+  expect(zoomOut).toBeEnabled();
+  await user.click(zoomIn);
+  await user.click(zoomOut);
+  expect(editor).toHaveAttribute('contenteditable', 'false');
+  expect(undo).toBeDisabled();
+  expect(redo).toBeDisabled();
+  expect(reset).toBeDisabled();
   await user.click(undo);
   await user.click(redo);
   fireEvent.keyDown(editor, { key: 'z', code: 'KeyZ', keyCode: 90, ctrlKey: true });

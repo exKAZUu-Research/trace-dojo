@@ -1,12 +1,16 @@
 'use client';
 
+import { Box, HStack, IconButton } from '@chakra-ui/react';
 import { indentWithTab, isolateHistory, redo, redoDepth, undo, undoDepth } from '@codemirror/commands';
 import { java } from '@codemirror/lang-java';
+import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
+import { tags } from '@lezer/highlight';
 import { basicSetup } from 'codemirror';
 import type React from 'react';
-import { useEffect, useImperativeHandle, useRef } from 'react';
+import { useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { MdOutlineZoomIn, MdOutlineZoomOut } from 'react-icons/md';
 
 import styles from './JavaCodeEditor.module.css';
 
@@ -29,6 +33,7 @@ interface Props {
 }
 
 export const JavaCodeEditor: React.FC<Props> = ({ ref, value, disabled, onChange, onHistoryChange }) => {
+  const [fontSize, setFontSize] = useState(8);
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView>(undefined);
   const editing = useRef(new Compartment());
@@ -71,6 +76,16 @@ export const JavaCodeEditor: React.FC<Props> = ({ ref, value, disabled, onChange
       extensions: [
         basicSetup,
         java(),
+        syntaxHighlighting(
+          HighlightStyle.define([
+            { tag: tags.comment, color: '#6e7781' },
+            { tag: [tags.keyword, tags.operator], color: '#cf222e' },
+            { tag: tags.string, color: '#0a3069' },
+            { tag: [tags.number, tags.bool, tags.null, tags.constant(tags.variableName)], color: '#0550ae' },
+            { tag: tags.function(tags.variableName), color: '#8250df' },
+            { tag: [tags.typeName, tags.className], color: '#953800' },
+          ])
+        ),
         keymap.of([indentWithTab]),
         editing.current.of([]),
         EditorView.contentAttributes.of({ 'aria-label': 'Javaコード' }),
@@ -79,14 +94,23 @@ export const JavaCodeEditor: React.FC<Props> = ({ ref, value, disabled, onChange
           onHistoryChangeRef.current({ canUndo: undoDepth(update.state) > 0, canRedo: redoDepth(update.state) > 0 });
         }),
         EditorView.theme({
-          '&': { backgroundColor: 'white', border: '1px solid #CBD5E0', borderRadius: '6px' },
-          '&.cm-focused': { outline: '2px solid #3182CE' },
+          '&': { backgroundColor: 'white', color: '#1f2328' },
+          '&.cm-focused': { outline: 'none' },
           '.cm-scroller': {
             fontFamily: '"JetBrains Mono", var(--chakra-fonts-mono, monospace)',
             fontVariantLigatures: 'none',
+            fontSize: 'var(--editor-font-size)',
+            lineHeight: '1.4',
             overflow: 'auto',
           },
           '.cm-content': { minHeight: '280px' },
+          '.cm-gutters': { backgroundColor: 'white', color: '#6e7781', border: 'none' },
+          '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: '#f6f8fa' },
+          '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection':
+            {
+              backgroundColor: '#b6e3ff',
+            },
+          '.cm-cursor, .cm-dropCursor': { borderLeftColor: '#1f2328' },
         }),
       ],
     });
@@ -119,5 +143,39 @@ export const JavaCodeEditor: React.FC<Props> = ({ ref, value, disabled, onChange
     }
   }, [value]);
 
-  return <div ref={host} className={styles.editor} />;
+  useEffect(() => {
+    editor.current?.requestMeasure();
+  }, [fontSize]);
+
+  return (
+    <Box className={styles.editor} sx={{ '--editor-font-size': `${fontSize / 8}rem` }}>
+      <div ref={host} className={styles.host} />
+      <HStack position="absolute" top="8px" right="8px" spacing="4px">
+        <IconButton
+          aria-label="コードを縮小"
+          title="コードを縮小"
+          type="button"
+          icon={<MdOutlineZoomOut />}
+          size="sm"
+          width="32px"
+          height="32px"
+          variant="ghost"
+          isDisabled={fontSize === 6}
+          onClick={() => setFontSize((size) => Math.max(6, size - 1))}
+        />
+        <IconButton
+          aria-label="コードを拡大"
+          title="コードを拡大"
+          type="button"
+          icon={<MdOutlineZoomIn />}
+          size="sm"
+          width="32px"
+          height="32px"
+          variant="ghost"
+          isDisabled={fontSize === 16}
+          onClick={() => setFontSize((size) => Math.min(16, size + 1))}
+        />
+      </HStack>
+    </Box>
+  );
 };

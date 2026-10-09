@@ -245,7 +245,7 @@ test.each(['edited', 'empty'] as const)(
     expect(readRenderedJavaSource(editor)).not.toBe(starter);
     const draft = readRenderedJavaSource(editor);
     await user.click(screen.getByRole('button', { name: 'リセット' }));
-    expect(await screen.findByRole('alertdialog')).toBeVisible();
+    await waitFor(() => expect(screen.getByRole('alertdialog')).toBeVisible());
     expect(readRenderedJavaSource(editor)).toBe(draft);
     await user.click(screen.getByRole('button', { name: 'リセットする' }));
     await waitFor(() => expect(readRenderedJavaSource(editor)).toBe(starter));
@@ -254,6 +254,70 @@ test.each(['edited', 'empty'] as const)(
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   }
 );
+
+test('ordinary editor zoom preserves source and both undo and redo history without grading', async () => {
+  infrastructure.problemId = 'fillInBlank2';
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = screen.getByRole('textbox', { name: /Java/ });
+  const starter = readRenderedJavaSource(editor);
+  const draft = 'class Draft {\n  // 日本語のコメント\n  int value = 42;\n}\n';
+  await replaceJavaSource(editor, draft);
+  const zoomOut = screen.getByRole('button', { name: 'コードを縮小' });
+  const zoomIn = screen.getByRole('button', { name: 'コードを拡大' });
+  const undo = screen.getByRole('button', { name: '元に戻す' });
+  const redo = screen.getByRole('button', { name: 'やり直す' });
+  for (const control of [zoomOut, zoomIn]) expect(control).toHaveAttribute('type', 'button');
+
+  await user.click(zoomIn);
+  await user.click(zoomOut);
+  expect(readRenderedJavaSource(editor)).toBe(draft);
+  expect(undo).toBeEnabled();
+  expect(redo).toBeDisabled();
+  await user.click(undo);
+  expect(readRenderedJavaSource(editor)).toBe(starter);
+  expect(undo).toBeDisabled();
+  expect(redo).toBeEnabled();
+
+  await user.click(zoomOut);
+  await user.click(zoomIn);
+  expect(readRenderedJavaSource(editor)).toBe(starter);
+  expect(undo).toBeDisabled();
+  expect(redo).toBeEnabled();
+  await user.click(redo);
+  expect(readRenderedJavaSource(editor)).toBe(draft);
+  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(infrastructure.update).not.toHaveBeenCalled();
+});
+
+test('ordinary editor zoom reaches each bound and permits reversing direction', async () => {
+  infrastructure.problemId = 'fillInBlank2';
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = screen.getByRole('textbox', { name: /Java/ });
+  const starter = readRenderedJavaSource(editor);
+  const zoomOut = screen.getByRole<HTMLButtonElement>('button', { name: 'コードを縮小' });
+  const zoomIn = screen.getByRole<HTMLButtonElement>('button', { name: 'コードを拡大' });
+  expect(zoomOut).toBeEnabled();
+  expect(zoomIn).toBeEnabled();
+  for (const [towardBound, reverse] of [
+    [zoomIn, zoomOut],
+    [zoomOut, zoomIn],
+  ] as const) {
+    for (let attempts = 0; attempts < 32 && !towardBound.disabled; attempts++) await user.click(towardBound);
+    expect(towardBound).toBeDisabled();
+    expect(reverse).toBeEnabled();
+    await user.click(towardBound);
+    expect(towardBound).toBeDisabled();
+    await user.click(reverse);
+    expect(towardBound).toBeEnabled();
+    expect(readRenderedJavaSource(editor)).toBe(starter);
+  }
+  expect(screen.getByRole('button', { name: '元に戻す' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'やり直す' })).toBeDisabled();
+  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(infrastructure.update).not.toHaveBeenCalled();
+});
 
 test('ordinary editor shares keyboard and toolbar history and confirms an isolated undoable reset', async () => {
   infrastructure.problemId = 'fillInBlank2';
