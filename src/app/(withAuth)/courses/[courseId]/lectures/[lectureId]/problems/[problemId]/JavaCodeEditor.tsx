@@ -37,6 +37,7 @@ export const JavaCodeEditor: React.FC<Props> = ({ ref, value, disabled, onChange
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView>(undefined);
   const editing = useRef(new Compartment());
+  const fontSizeTheme = useRef(new Compartment());
   const onChangeRef = useRef(onChange);
   const initialValue = useRef(value);
   const onHistoryChangeRef = useRef(onHistoryChange);
@@ -88,6 +89,7 @@ export const JavaCodeEditor: React.FC<Props> = ({ ref, value, disabled, onChange
         ),
         keymap.of([indentWithTab]),
         editing.current.of([]),
+        fontSizeTheme.current.of([]),
         EditorView.contentAttributes.of({ 'aria-label': 'Javaコード' }),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) onChangeRef.current(update.state.doc.toString());
@@ -99,13 +101,13 @@ export const JavaCodeEditor: React.FC<Props> = ({ ref, value, disabled, onChange
           '.cm-scroller': {
             fontFamily: '"JetBrains Mono", var(--chakra-fonts-mono, monospace)',
             fontVariantLigatures: 'none',
-            fontSize: 'var(--editor-font-size)',
             lineHeight: '1.4',
             overflow: 'auto',
           },
           '.cm-content': { minHeight: '280px' },
           '.cm-gutters': { backgroundColor: 'white', color: '#6e7781', border: 'none' },
-          '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: '#f6f8fa' },
+          '.cm-activeLine': { backgroundColor: 'rgba(165, 185, 205, 0.1)' },
+          '.cm-activeLineGutter': { backgroundColor: '#f6f8fa' },
           '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection':
             {
               backgroundColor: '#b6e3ff',
@@ -144,11 +146,15 @@ export const JavaCodeEditor: React.FC<Props> = ({ ref, value, disabled, onChange
   }, [value]);
 
   useEffect(() => {
-    editor.current?.requestMeasure();
+    editor.current?.dispatch({
+      effects: fontSizeTheme.current.reconfigure(
+        EditorView.theme({ '.cm-scroller': { fontSize: `${fontSize / 8}rem` } })
+      ),
+    });
   }, [fontSize]);
 
   return (
-    <Box className={styles.editor} sx={{ '--editor-font-size': `${fontSize / 8}rem` }}>
+    <Box className={styles.editor}>
       <div ref={host} className={styles.host} />
       <HStack position="absolute" top="8px" right="8px" spacing="4px" zIndex={1} pointerEvents="none">
         <IconButton
