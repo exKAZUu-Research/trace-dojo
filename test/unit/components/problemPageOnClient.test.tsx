@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { ChakraProvider } from '@chakra-ui/react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, test, vi } from 'vitest';
 
@@ -98,6 +98,8 @@ test('ordinary full-source editing submits exact multiline code only on explicit
   renderPage('fillInBlank');
   const editor = screen.getByRole('textbox', { name: /Java/ });
   expect(editor).toHaveAttribute('aria-multiline', 'true');
+  expect(editor).not.toHaveAttribute('aria-describedby');
+  expect(screen.queryByText(/Tab.*(?:Escape|Esc|インデント)/)).not.toBeInTheDocument();
   expect(editor.textContent).toContain('【1】');
   expect(screen.queryByText('実行後の変数の値')).not.toBeInTheDocument();
   expect(screen.getByRole('heading', { name: '実行後の盤面' })).toBeVisible();
@@ -121,7 +123,8 @@ test('unfinished code-context placeholders show local feedback only when Submit 
   screen.getByRole('textbox', { name: /Java/ });
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: '提出' }));
-  expect(await screen.findByText(/未入力|未完成|空欄.*(?:残|入力)/)).toBeVisible();
+  const header = await screen.findByText(/未入力|未完成|空欄.*(?:残|入力)/);
+  await waitFor(() => expect(header).toBeVisible());
   expect(infrastructure.grade).not.toHaveBeenCalled();
   expect(infrastructure.update).not.toHaveBeenCalled();
 });
@@ -149,7 +152,16 @@ test('marker-looking comments, strings, character literals, and text blocks are 
     expect(infrastructure.grade).toHaveBeenCalledWith({ sessionId: 10, code, elapsedMilliseconds: 123 })
   );
   expect(await screen.findByRole('alertdialog')).toHaveTextContent('採点できませんでした');
-  expectJavaSource(editor, code);
+  expect(readRenderedJavaSource(editor)).toBe(code);
+  expect(editor).toHaveAttribute('contenteditable', 'false');
+  expect(screen.getByRole('button', { hidden: true, name: '元に戻す' })).toBeDisabled();
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  await user.click(screen.getByRole('button', { name: '元に戻す' }));
+  expect(readRenderedJavaSource(editor)).not.toBe(code);
+  await user.click(screen.getByRole('button', { name: 'やり直す' }));
+  expect(readRenderedJavaSource(editor)).toBe(code);
+  expect(infrastructure.grade).toHaveBeenCalledTimes(1);
 });
 
 test('a network failure preserves edited source and releases the pending state', async () => {
@@ -164,15 +176,23 @@ test('a network failure preserves edited source and releases the pending state',
   renderPage('fillInBlank');
   const editor = screen.getByRole('textbox', { name: /Java/ });
   const code = 'class MyProgram { public static void main(String[] args) {} }';
+  const starter = readRenderedJavaSource(editor);
   await replaceJavaSource(editor, code);
   await user.click(screen.getByRole('button', { name: '提出' }));
   await waitFor(() => expect(infrastructure.grade).toHaveBeenCalledTimes(1));
+  expect(screen.getByRole('button', { name: '元に戻す' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'やり直す' })).toBeDisabled();
   expect(editor).toHaveAttribute('contenteditable', 'false');
   await act(async () => reject(new Error('controlled offline transport')));
   expect(await screen.findByRole('alertdialog')).toHaveTextContent('提出できませんでした');
   expectJavaSource(editor, code);
   await user.keyboard('{Escape}');
   await waitFor(() => expect(editor).toHaveAttribute('contenteditable', 'true'));
+  await user.click(screen.getByRole('button', { name: '元に戻す' }));
+  expect(readRenderedJavaSource(editor)).toBe(starter);
+  await user.click(screen.getByRole('button', { name: 'やり直す' }));
+  expect(readRenderedJavaSource(editor)).toBe(code);
+  expect(infrastructure.grade).toHaveBeenCalledTimes(1);
 });
 
 test('ordinary session identity changes replace edited code with the new starter', async () => {
@@ -199,6 +219,8 @@ test('ordinary session identity changes replace edited code with the new starter
     const fresh = screen.getByRole('textbox', { name: /Java/ });
     expect(fresh.textContent).toContain('【1】');
     expect(fresh.textContent).not.toContain('PreviousAttempt');
+    expect(screen.getByRole('button', { name: '元に戻す' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'やり直す' })).toBeDisabled();
   });
 });
 
@@ -221,10 +243,96 @@ test.each(['edited', 'empty'] as const)(
       await waitFor(() => expect(readRenderedJavaSource(editor)).toBe(''));
     }
     expect(readRenderedJavaSource(editor)).not.toBe(starter);
+    const draft = readRenderedJavaSource(editor);
     await user.click(screen.getByRole('button', { name: 'リセット' }));
+    expect(await screen.findByRole('alertdialog')).toBeVisible();
+    expect(readRenderedJavaSource(editor)).toBe(draft);
+    await user.click(screen.getByRole('button', { name: 'リセットする' }));
     await waitFor(() => expect(readRenderedJavaSource(editor)).toBe(starter));
     expect(infrastructure.grade).not.toHaveBeenCalled();
     expect(infrastructure.update).not.toHaveBeenCalled();
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   }
 );
+
+test('ordinary editor shares keyboard and toolbar history and confirms an isolated undoable reset', async () => {
+  infrastructure.problemId = 'fillInBlank2';
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = screen.getByRole('textbox', { name: /Java/ });
+  const starter = readRenderedJavaSource(editor);
+  const undo = screen.getByRole('button', { name: '元に戻す' });
+  const redo = screen.getByRole('button', { name: 'やり直す' });
+  const reset = screen.getByRole('button', { name: 'リセット' });
+  const submit = screen.getByRole('button', { name: '提出' });
+  const controls = screen.getAllByRole('button');
+  expect(controls.slice(controls.indexOf(undo), controls.indexOf(submit) + 1)).toEqual([undo, redo, reset, submit]);
+  expect(undo).toBeDisabled();
+  expect(redo).toBeDisabled();
+  await user.click(reset);
+  await user.click(await screen.findByRole('button', { name: 'リセットする' }));
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  expect(undo).toBeDisabled();
+  expect(redo).toBeDisabled();
+
+  const draft = 'class Draft {\n  int value = 42;\n}\n';
+  await replaceJavaSource(editor, draft);
+  expect(undo).toBeEnabled();
+  await user.click(undo);
+  expect(readRenderedJavaSource(editor)).toBe(starter);
+  expect(redo).toBeEnabled();
+  await user.click(reset);
+  const cancel = await screen.findByRole('button', { name: 'キャンセル' });
+  await waitFor(() => expect(cancel).toHaveFocus());
+  expect(editor).toHaveAttribute('contenteditable', 'false');
+  for (const control of [undo, redo, reset, submit]) expect(control).toBeDisabled();
+  fireEvent.keyDown(editor, { key: 'y', code: 'KeyY', keyCode: 89, ctrlKey: true });
+  expect(readRenderedJavaSource(editor)).toBe(starter);
+  await user.click(cancel);
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  await waitFor(() => expect(reset).toHaveFocus());
+  expect(redo).toBeEnabled();
+  await user.click(redo);
+  expect(readRenderedJavaSource(editor)).toBe(draft);
+
+  await user.click(editor);
+  fireEvent.keyDown(editor, { key: 'z', code: 'KeyZ', keyCode: 90, ctrlKey: true });
+  expect(readRenderedJavaSource(editor)).toBe(starter);
+  expect(undo).toBeDisabled();
+  expect(redo).toBeEnabled();
+  await user.click(reset);
+  await screen.findByRole('alertdialog');
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  expect(readRenderedJavaSource(editor)).toBe(starter);
+  expect(redo).toBeEnabled();
+  await user.click(editor);
+  fireEvent.keyDown(editor, { key: 'y', code: 'KeyY', keyCode: 89, ctrlKey: true });
+  expect(readRenderedJavaSource(editor)).toBe(draft);
+  expect(undo).toBeEnabled();
+  expect(redo).toBeDisabled();
+
+  await user.click(reset);
+  await screen.findByRole('alertdialog');
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  expect(readRenderedJavaSource(editor)).toBe(draft);
+  await user.click(reset);
+  await user.click(await screen.findByRole('button', { name: 'リセットする' }));
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  expect(readRenderedJavaSource(editor)).toBe(starter);
+  await user.click(undo);
+  expect(readRenderedJavaSource(editor)).toBe(draft);
+  await user.click(redo);
+  expect(readRenderedJavaSource(editor)).toBe(starter);
+  await user.click(undo);
+  await user.click(undo);
+  expect(readRenderedJavaSource(editor)).toBe(starter);
+  expect(undo).toBeDisabled();
+  const replacement = 'class Replacement {\n  int other = 7;\n}\n';
+  await replaceJavaSource(editor, replacement);
+  expect(readRenderedJavaSource(editor)).toBe(replacement);
+  expect(redo).toBeDisabled();
+  expect(infrastructure.grade).not.toHaveBeenCalled();
+  expect(infrastructure.update).not.toHaveBeenCalled();
+});

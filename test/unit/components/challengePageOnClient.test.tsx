@@ -8,7 +8,7 @@ import {
   replaceJavaSource,
 } from '../../helpers/javaEditor';
 import { StrictMode } from 'react';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, test, vi } from 'vitest';
 
@@ -255,6 +255,8 @@ test('completed fill-in-blank next keeps the active format and renders the retur
   const input = await screen.findByRole('textbox', { hidden: true, name: /Java/ });
   expect(input).toHaveAttribute('contenteditable', 'false');
   expect(screen.getByRole('button', { hidden: true, name: 'リセット' })).toBeDisabled();
+  expect(screen.getByRole('button', { hidden: true, name: '元に戻す' })).toBeDisabled();
+  expect(screen.getByRole('button', { hidden: true, name: 'やり直す' })).toBeDisabled();
   expect(screen.getByText(/プログラムを実行した後の盤面/)).toBeVisible();
   await user.keyboard('{Escape}');
   expect(screen.getByRole('alertdialog')).toBeVisible();
@@ -290,7 +292,11 @@ test('a just-completed fill-in-blank keeps its answer, deduplicates Next, and re
   });
   expect(input).toHaveAttribute('contenteditable', 'false');
   expect(screen.getByRole('button', { hidden: true, name: 'リセット' })).toBeDisabled();
+  expect(screen.getByRole('button', { hidden: true, name: '元に戻す' })).toBeDisabled();
+  expect(screen.getByRole('button', { hidden: true, name: 'やり直す' })).toBeDisabled();
   expect(screen.getByRole('button', { hidden: true, name: '提出' })).toBeDisabled();
+  fireEvent.keyDown(input, { key: 'z', code: 'KeyZ', keyCode: 90, ctrlKey: true });
+  expect(readRenderedJavaSource(input)).toBe(code);
   await user.keyboard('{Escape}');
   expect(dialog).toBeInTheDocument();
 
@@ -307,11 +313,16 @@ test('a just-completed fill-in-blank keeps its answer, deduplicates Next, and re
   const freshInput = await screen.findByRole('textbox', { name: /Java/ });
   expect(freshInput).toHaveAttribute('contenteditable', 'true');
   expect(readRenderedJavaSource(freshInput)).toBe(nextStarter);
+  expect(screen.getByRole('button', { name: '元に戻す' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'やり直す' })).toBeDisabled();
+  fireEvent.keyDown(freshInput, { key: 'z', code: 'KeyZ', keyCode: 90, ctrlKey: true });
+  expect(readRenderedJavaSource(freshInput)).toBe(nextStarter);
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   await replaceJavaSource(freshInput, code);
   expect(readRenderedJavaSource(freshInput)).toBe(code);
   expect(readRenderedJavaSource(freshInput)).not.toBe(nextStarter);
   await user.click(screen.getByRole('button', { name: 'リセット' }));
+  await user.click(await screen.findByRole('button', { name: 'リセットする' }));
   await waitFor(() => expect(readRenderedJavaSource(freshInput)).toBe(nextStarter));
   expect(transport.start).toHaveBeenCalledTimes(1);
   expect(transport.next).toHaveBeenCalledTimes(1);
@@ -423,6 +434,13 @@ test('full-source edits and Enter/IME do not execute, and pending submission fre
   expect(editor).toHaveAttribute('contenteditable', 'false');
   const reset = screen.getByRole('button', { name: 'リセット' });
   expect(reset).toBeDisabled();
+  const undo = screen.getByRole('button', { name: '元に戻す' });
+  const redo = screen.getByRole('button', { name: 'やり直す' });
+  expect(undo).toBeDisabled();
+  expect(redo).toBeDisabled();
+  await user.click(undo);
+  await user.click(redo);
+  fireEvent.keyDown(editor, { key: 'z', code: 'KeyZ', keyCode: 90, ctrlKey: true });
   await user.click(reset);
   expect(readRenderedJavaSource(editor)).toBe(code);
   expect(transport.submitBlank).toHaveBeenCalledTimes(1);
@@ -430,10 +448,18 @@ test('full-source edits and Enter/IME do not execute, and pending submission fre
   expect(await screen.findByRole('alertdialog')).toHaveTextContent('不正解');
   expect(readRenderedJavaSource(editor)).toBe(code);
   expect(screen.getByRole('button', { hidden: true, name: 'リセット' })).toBeDisabled();
+  expect(screen.getByRole('button', { hidden: true, name: '元に戻す' })).toBeDisabled();
+  expect(screen.getByRole('button', { hidden: true, name: 'やり直す' })).toBeDisabled();
   await user.keyboard('{Escape}');
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   expect(reset).toBeEnabled();
+  expect(undo).toBeEnabled();
+  await user.click(undo);
+  expect(readRenderedJavaSource(editor)).not.toBe(code);
+  await user.click(redo);
+  expect(readRenderedJavaSource(editor)).toBe(code);
   await user.click(reset);
+  await user.click(await screen.findByRole('button', { name: 'リセットする' }));
   await waitFor(() => expect(readRenderedJavaSource(editor)).toBe(blankDisplay.displayProgram));
   expect(transport.submitBlank).toHaveBeenCalledTimes(1);
   expect(transport.start).toHaveBeenCalledTimes(1);
@@ -451,10 +477,25 @@ test('challenge Reset restores the exact starter without submitting or changing 
   await replaceJavaSource(editor, edited);
   expect(readRenderedJavaSource(editor)).toBe(edited);
   expect(readRenderedJavaSource(editor)).not.toBe(starter);
-  await user.click(screen.getByRole('button', { name: 'リセット' }));
+  const reset = screen.getByRole('button', { name: 'リセット' });
+  await user.click(reset);
+  const cancel = await screen.findByRole('button', { name: 'キャンセル' });
+  await waitFor(() => expect(cancel).toHaveFocus());
+  expect(readRenderedJavaSource(editor)).toBe(edited);
+  await user.click(cancel);
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  expect(readRenderedJavaSource(editor)).toBe(edited);
+  await user.click(reset);
+  await screen.findByRole('alertdialog');
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  expect(readRenderedJavaSource(editor)).toBe(edited);
+  await user.click(reset);
+  await user.click(await screen.findByRole('button', { name: 'リセットする' }));
   await waitFor(() => expect(readRenderedJavaSource(editor)).toBe(starter));
   expect(transport.submitBlank).not.toHaveBeenCalled();
+  expect(navigation.push).not.toHaveBeenCalled();
   expect(transport.next).not.toHaveBeenCalled();
   expect(transport.start).toHaveBeenCalledTimes(1);
-  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
 });

@@ -2,13 +2,31 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import type React from 'react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { MdRedo, MdUndo } from 'react-icons/md';
+import { useImmer } from 'use-immer';
 
 import { BoardViewer } from './BoardViewer';
-import { JavaCodeEditor } from './JavaCodeEditor';
+import { JavaCodeEditor, type EditorHistoryAvailability, type JavaCodeEditorHandle } from './JavaCodeEditor';
 import { ResultAlertDialog, type CompletionAction } from './ResultAlertDialog';
 
-import { Box, Button, Card, Center, Flex, Heading, HStack, Text, VStack } from '@/infrastructures/useClient/chakra';
+import {
+  AlertDialog,
+  AlertDialogBody,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogOverlay,
+  Box,
+  Button,
+  Card,
+  Center,
+  Flex,
+  Heading,
+  HStack,
+  IconButton,
+  VStack,
+} from '@/infrastructures/useClient/chakra';
 import { hasIncompleteJavaPlaceholders } from '@/problems/fillInBlank/javaSource';
 import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
 import type { TurtleTrace } from '@/problems/traceProgram';
@@ -32,11 +50,19 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
   const [code, setCode] = useState(props.problem.displayProgram);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [alert, setAlert] = useState<{ title: string; message: string; isCompleted: boolean }>();
+  const [isResetOpen, setIsResetOpen] = useState(false);
+  const [history, setHistory] = useImmer<EditorHistoryAvailability>({ canUndo: false, canRedo: false });
+  const editor = useRef<JavaCodeEditorHandle>(null);
+  const cancelReset = useRef<HTMLButtonElement>(null);
+  const resetButton = useRef<HTMLButtonElement>(null);
   const isIncomplete = code.trim() === '';
   const isCompleted = props.isCompleted || alert?.isCompleted === true;
 
+  const isLocked = isSubmitting || isCompleted || Boolean(alert);
+  const isEditorLocked = isLocked || isResetOpen;
+
   const handleSubmit = async (): Promise<void> => {
-    if (isSubmitting || alert || isIncomplete || isCompleted) return;
+    if (isEditorLocked || isIncomplete) return;
     if (hasIncompleteJavaPlaceholders(code)) {
       setAlert({
         title: 'コードが未完成です',
@@ -102,23 +128,56 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
             </VStack>
           </VStack>
 
-          <JavaCodeEditor value={code} disabled={isSubmitting || isCompleted} onChange={setCode} />
-          <Text id="java-editor-help" fontSize="sm">
-            Tabでインデントできます。エディターから移動するにはEscを押してからTabを押してください。実行は提出時のみ行います。
-          </Text>
+          <JavaCodeEditor
+            ref={editor}
+            value={code}
+            disabled={isEditorLocked}
+            onChange={setCode}
+            onHistoryChange={(availability) =>
+              setHistory((draft) => {
+                draft.canUndo = availability.canUndo;
+                draft.canRedo = availability.canRedo;
+              })
+            }
+          />
           <VStack align="stretch" as={Card} p={5} spacing={3}>
             <HStack justify="flex-end" spacing={3}>
+              <IconButton
+                type="button"
+                variant="outline"
+                aria-label="元に戻す"
+                title="元に戻す"
+                icon={<MdUndo />}
+                isDisabled={isEditorLocked || !history.canUndo}
+                onClick={() => {
+                  if (!isEditorLocked) editor.current?.undo();
+                }}
+              />
+              <IconButton
+                type="button"
+                variant="outline"
+                aria-label="やり直す"
+                title="やり直す"
+                icon={<MdRedo />}
+                isDisabled={isEditorLocked || !history.canRedo}
+                onClick={() => {
+                  if (!isEditorLocked) editor.current?.redo();
+                }}
+              />
               <Button
                 type="button"
                 variant="outline"
-                isDisabled={isSubmitting || isCompleted || Boolean(alert)}
-                onClick={() => setCode(props.problem.displayProgram)}
+                ref={resetButton}
+                isDisabled={isEditorLocked}
+                onClick={() => {
+                  if (!isEditorLocked) setIsResetOpen(true);
+                }}
               >
                 リセット
               </Button>
               <Button
                 colorScheme="brand"
-                isDisabled={isIncomplete || isCompleted}
+                isDisabled={isIncomplete || isEditorLocked}
                 isLoading={isSubmitting}
                 onClick={() => void handleSubmit()}
               >
@@ -135,6 +194,38 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
           </Center>
         </VStack>
       </Flex>
+
+      <AlertDialog
+        isOpen={isResetOpen}
+        leastDestructiveRef={cancelReset}
+        finalFocusRef={resetButton}
+        onClose={() => setIsResetOpen(false)}
+      >
+        <AlertDialogOverlay>
+          <AlertDialogContent>
+            <AlertDialogHeader>コードをリセットしますか？</AlertDialogHeader>
+            <AlertDialogBody>編集内容を問題の初期コードに戻します。</AlertDialogBody>
+            <AlertDialogFooter>
+              <Button ref={cancelReset} type="button" onClick={() => setIsResetOpen(false)}>
+                キャンセル
+              </Button>
+              <Button
+                type="button"
+                colorScheme="red"
+                ml={3}
+                isDisabled={isLocked}
+                onClick={() => {
+                  if (isLocked) return;
+                  setCode(props.problem.displayProgram);
+                  setIsResetOpen(false);
+                }}
+              >
+                リセットする
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
 
       <ResultAlertDialog
         {...(isCompleted && props.completionActions
