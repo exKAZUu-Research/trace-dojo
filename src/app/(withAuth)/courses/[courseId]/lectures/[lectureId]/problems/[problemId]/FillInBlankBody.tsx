@@ -187,7 +187,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
               <Heading id={feedbackHeadingId} size="sm" mb={3}>
                 {feedback.isStale ? '前回提出したコードの確認結果' : '提出したコードの確認結果'}
               </Heading>
-              <Box role="status" aria-live="polite" mb={feedback.isStale ? 3 : 0}>
+              <Box as="output" display="block" aria-live="polite" mb={feedback.isStale ? 3 : 0}>
                 {feedback.isStale &&
                   'これは前回提出したコードの確認結果です。修正を確認するには、もう一度提出してください。'}
               </Box>
