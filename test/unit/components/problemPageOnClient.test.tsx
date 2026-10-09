@@ -773,6 +773,71 @@ test.each(['invalid JSON', 'unsupported version'] as const)(
   }
 );
 
+test.each([
+  { prefix: 'a', name: 'a' },
+  { prefix: 'm', name: 'main' },
+])(
+  'source-word completion accepts $name literally despite an unfinished method and never grades',
+  async ({ prefix, name }) => {
+    infrastructure.problemId = 'fillInBlank2';
+    const user = userEvent.setup();
+    renderPage('fillInBlank');
+    const editor = await screen.findByRole('textbox', { name: /Java/ });
+    const before = `class Main { public static int a(){return 1} public static void main(String[] args) { Turtle turtle = new Turtle(); turtle.前に進む(); ${prefix}`;
+    const after = '; } }';
+    await replaceJavaSource(editor, before + after);
+    await user.keyboard(`{ArrowLeft>${after.length}}`);
+    await user.keyboard('{Control>} {/Control}');
+    const option = await screen.findByRole('option', { name: `${name}コード内の単語` });
+    if (prefix === 'a') {
+      expect(screen.getAllByRole('option', { name: /^args/ })).toHaveLength(1);
+      expect(screen.getByRole('option', { name: 'args' })).toBeVisible();
+    }
+    await user.click(option);
+    expect(readRenderedJavaSource(editor)).toBe(before.slice(0, -prefix.length) + name + after);
+    if (name !== prefix) {
+      await user.click(screen.getByRole('button', { name: '元に戻す' }));
+      expect(readRenderedJavaSource(editor)).toBe(before + after);
+    }
+    expect(infrastructure.grade).not.toHaveBeenCalled();
+  }
+);
+
+test('source-word completion refreshes edited code and excludes comments, literals and the caret occurrence', async () => {
+  infrastructure.problemId = 'fillInBlank2';
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
+  const before = `class Main { void wordOld() {} void draw() {
+    // wordComment
+    /* wordBlock */
+    String text = "wordString";
+    String block = """
+    wordTextBlock
+    """;
+    char letter = 'w';
+    word`;
+  const after = 'CaretOnly; } }';
+  await replaceJavaSource(editor, before + after);
+  await user.keyboard(`{ArrowLeft>${after.length}}`);
+  await user.keyboard('{Control>} {/Control}');
+  await screen.findByRole('option', { name: 'wordOldコード内の単語' });
+  for (const name of ['wordComment', 'wordBlock', 'wordString', 'wordTextBlock', 'wordCaretOnly']) {
+    expect(screen.queryByRole('option', { name: new RegExp(`^${name}`) })).not.toBeInTheDocument();
+  }
+  await user.keyboard('{Escape}');
+  const edited = before.replace('wordOld', 'word新$名');
+  await replaceJavaSource(editor, edited + after);
+  await user.keyboard(`{ArrowLeft>${after.length}}`);
+  await user.keyboard('{Control>} {/Control}');
+  const renamed = await screen.findByRole('option', { name: 'word新$名コード内の単語' });
+  expect(screen.queryByRole('option', { name: /^wordOld/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('option', { name: /^wordCaretOnly/ })).not.toBeInTheDocument();
+  await user.click(renamed);
+  expect(readRenderedJavaSource(editor)).toBe(edited.slice(0, -4) + 'word新$名' + after);
+  expect(infrastructure.grade).not.toHaveBeenCalled();
+});
+
 test('variable completion inserts a Unicode parameter literally and undo restores the prefix without grading', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
@@ -807,7 +872,7 @@ test('variable completion updates its own visible locals after typing and backsp
   expect(infrastructure.grade).not.toHaveBeenCalled();
 });
 
-test('variable completion observes lexical scope and excludes later locals, siblings, methods and classes', async () => {
+test('variable completion preserves richer scoped candidates alongside neutral source words', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
   renderPage('fillInBlank');
@@ -818,12 +883,17 @@ test('variable completion observes lexical scope and excludes later locals, sibl
   await replaceJavaSource(editor, before + after);
   await user.keyboard(`{ArrowLeft>${after.length}}`);
   await user.keyboard('{Control>} {/Control}');
-  await screen.findByRole('option', { name: /^scopeLocal/ });
-  await screen.findByRole('option', { name: /^scopeParameter/ });
-  await screen.findByRole('option', { name: /^scopeIndex/ });
-  for (const name of ['scopeSibling', 'scopeLater', 'scopeMethod', 'ScopeClass']) {
-    expect(screen.queryByRole('option', { name: new RegExp(`^${name}`) })).not.toBeInTheDocument();
+  await screen.findByRole('option', { name: 'scopeLocal' });
+  for (const name of ['scopeLocal', 'scopeParameter', 'scopeIndex']) {
+    expect(screen.getByRole('option', { name })).toBeVisible();
+    expect(screen.getAllByRole('option', { name: new RegExp(`^${name}`) })).toHaveLength(1);
   }
+  for (const name of ['scopeSibling', 'scopeLater', 'scopeMethod', 'ScopeClass']) {
+    expect(screen.getByRole('option', { name: `${name}コード内の単語` })).toBeVisible();
+    expect(screen.queryByRole('option', { name })).not.toBeInTheDocument();
+  }
+  await user.click(screen.getByRole('option', { name: 'scopeSiblingコード内の単語' }));
+  expect(readRenderedJavaSource(editor)).toBe(before.slice(0, -3) + 'scopeSibling' + after);
 });
 
 test('variable completion includes later fields and constructor locals while respecting static context', async () => {
@@ -836,10 +906,10 @@ test('variable completion includes later fields and constructor locals while res
   await replaceJavaSource(editor, before + after);
   await user.keyboard(`{ArrowLeft>${after.length}}`);
   await user.keyboard('{Control>} {/Control}');
-  await screen.findByRole('option', { name: /^speedLocal/ });
-  await screen.findByRole('option', { name: /^speedParameter/ });
-  await screen.findByRole('option', { name: /^speedShared/ });
-  await user.click(await screen.findByRole('option', { name: /^speedField/ }));
+  await screen.findByRole('option', { name: 'speedLocal' });
+  await screen.findByRole('option', { name: 'speedParameter' });
+  await screen.findByRole('option', { name: 'speedShared' });
+  await user.click(await screen.findByRole('option', { name: 'speedField' }));
   expect(readRenderedJavaSource(editor)).toBe(before.slice(0, -3) + 'speedField' + after);
   await user.click(screen.getByRole('button', { name: '元に戻す' }));
   expect(readRenderedJavaSource(editor)).toBe(before + after);
@@ -848,11 +918,12 @@ test('variable completion includes later fields and constructor locals while res
   await replaceJavaSource(editor, staticBefore + staticAfter);
   await user.keyboard(`{ArrowLeft>${staticAfter.length}}`);
   await user.keyboard('{Control>} {/Control}');
-  await screen.findByRole('option', { name: /^speedShared/ });
-  expect(screen.queryByRole('option', { name: /^speedField/ })).not.toBeInTheDocument();
+  await screen.findByRole('option', { name: 'speedShared' });
+  expect(screen.getByRole('option', { name: 'speedFieldコード内の単語' })).toBeVisible();
+  expect(screen.queryByRole('option', { name: 'speedField' })).not.toBeInTheDocument();
 });
 
-test('variable completion excludes an enhanced-loop variable from its iterable and includes it inside the body', async () => {
+test('variable completion distinguishes enhanced-loop scope from neutral source words', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
   renderPage('fillInBlank');
@@ -863,11 +934,12 @@ test('variable completion excludes an enhanced-loop variable from its iterable a
   await user.keyboard(`{ArrowLeft>${after.length}}`);
   await user.keyboard('{Control>} {/Control}');
   await screen.findByRole('option', { name: /^itemValues/ });
-  expect(screen.queryByRole('option', { name: /^itemValue(?:$|\s)/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('option', { name: 'itemValueコード内の単語' })).toBeVisible();
+  expect(screen.queryByRole('option', { name: 'itemValue' })).not.toBeInTheDocument();
   await user.keyboard('{Escape}');
   await replaceJavaSource(editor, 'class Main { void draw(int[] itemValues) { for (int itemValue : itemValues) { item');
   await user.keyboard('{Control>} {/Control}');
-  await user.click(await screen.findByRole('option', { name: /^itemValue(?:$|\s)/ }));
+  await user.click(await screen.findByRole('option', { name: 'itemValue' }));
   expect(readRenderedJavaSource(editor)).toMatch(/\{ itemValue$/);
 });
 
@@ -927,18 +999,20 @@ test('variable completion offers catch and lambda parameters without leaking com
     'class Main { void draw() { int visibleOuter = 1; try {} catch (Exception visibleError) { use(visibleArgument -> { vis'
   );
   await user.keyboard('{Control>} {/Control}');
-  await screen.findByRole('option', { name: /^visibleOuter/ });
-  await screen.findByRole('option', { name: /^visibleError/ });
-  await user.click(await screen.findByRole('option', { name: /^visibleArgument/ }));
+  await screen.findByRole('option', { name: 'visibleOuter' });
+  await screen.findByRole('option', { name: 'visibleError' });
+  await user.click(await screen.findByRole('option', { name: 'visibleArgument' }));
   expect(readRenderedJavaSource(editor)).toMatch(/\{ visibleArgument$/);
   await replaceJavaSource(
     editor,
     'class Main { void draw() { int visibleOuter = 1; try {} catch (Exception visibleError) { use(visibleArgument -> {}); } vis'
   );
   await user.keyboard('{Control>} {/Control}');
-  await screen.findByRole('option', { name: /^visibleOuter/ });
-  expect(screen.queryByRole('option', { name: /^visibleError/ })).not.toBeInTheDocument();
-  expect(screen.queryByRole('option', { name: /^visibleArgument/ })).not.toBeInTheDocument();
+  await screen.findByRole('option', { name: 'visibleOuter' });
+  for (const name of ['visibleError', 'visibleArgument']) {
+    expect(screen.getByRole('option', { name: `${name}コード内の単語` })).toBeVisible();
+    expect(screen.queryByRole('option', { name })).not.toBeInTheDocument();
+  }
 });
 
 test('variable completion respects local field shadowing before offering Turtle members', async () => {

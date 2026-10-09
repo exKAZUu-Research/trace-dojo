@@ -75,9 +75,8 @@ export function javaCompletion(context: CompletionContext): CompletionResult | n
   if (state.readOnly || isJavaComposing(state) || state.doc.length > 20_000) return null;
   if (!maskJavaNonCode(state.sliceDoc(0, pos) + 'x').endsWith('x')) return null;
   const tree = ensureSyntaxTree(state, pos, 20);
-  if (!tree) return null;
-  const node = tree.resolveInner(pos, -1);
-  for (let current: typeof node | null = node; current; current = current.parent) {
+  const node = tree?.resolveInner(pos, -1);
+  for (let current: SyntaxNode | null | undefined = node; current; current = current.parent) {
     if (/Comment|StringLiteral|CharacterLiteral|TextBlock/.test(current.name)) return null;
   }
   const word = context.matchBefore(identifier);
@@ -85,16 +84,30 @@ export function javaCompletion(context: CompletionContext): CompletionResult | n
   const before = state.sliceDoc(Math.max(0, from - 200), from);
   const receiver = /([\p{L}_$][\p{L}\p{N}\p{M}_$]*)\.$/u.exec(before);
   if (receiver) {
+    if (!node) return null;
     if (/[.\p{L}\p{N}\p{M}_$]$/u.test(before.slice(0, receiver.index).trimEnd())) return null;
     const variable = visibleVariables(context, node, from).find((entry) => entry.name === receiver[1]);
     return variable?.turtle ? { from, options: methods } : null;
   }
   if (before.endsWith('.') || (!context.explicit && !word?.text)) return null;
-  const variables = node.name === 'Definition' ? [] : visibleVariables(context, node, from);
-  return {
-    from,
-    options: [...variables.map(({ name }) => ({ label: name, type: 'variable' })), ...snippets, ...keywords],
-  };
+  const variables = !node || node.name === 'Definition' ? [] : visibleVariables(context, node, from);
+  const options: Completion[] = [
+    ...variables.map(({ name }) => ({ label: name, type: 'variable' })),
+    ...snippets,
+    ...keywords,
+  ];
+  if (word?.text) {
+    const seen = new Set(options.map(({ label }) => label));
+    const source = maskJavaNonCode(state.doc.toString());
+    for (const match of source.matchAll(/[\p{L}_$][\p{L}\p{N}\p{M}_$]*/gu)) {
+      if (match.index <= from && match.index + match[0].length >= pos) continue;
+      const label = match[0];
+      if (seen.has(label)) continue;
+      seen.add(label);
+      options.push({ label, type: 'text', detail: 'コード内の単語' });
+    }
+  }
+  return { from, options };
 }
 
 function visibleVariables(context: CompletionContext, node: SyntaxNode, from: number): VisibleVariable[] {
