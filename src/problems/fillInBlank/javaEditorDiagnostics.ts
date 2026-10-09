@@ -21,17 +21,12 @@ const feedbackState = StateField.define<{ diagnostics: JavaDiagnostic[]; composi
 
 export const javaEditorDiagnostics: Extension = [
   feedbackState,
-  linter(
-    (view) => {
-      if (view.state.doc.length <= 20_000) ensureSyntaxTree(view.state, view.state.doc.length, 20);
-      return combinedDiagnostics(view.state);
-    },
-    {
-      delay: 250,
-      needsRefresh: (update) =>
-        update.startState.field(feedbackState).composing !== update.state.field(feedbackState).composing,
-    }
-  ),
+  linter((view) => combinedDiagnostics(view.state), {
+    delay: 250,
+    needsRefresh: (update) =>
+      update.startState.field(feedbackState).composing !== update.state.field(feedbackState).composing ||
+      syntaxTree(update.startState) !== syntaxTree(update.state),
+  }),
   EditorState.transactionExtender.of((transaction) => {
     if (
       transaction.docChanged ||
@@ -67,10 +62,18 @@ function combinedDiagnostics(state: EditorState): Diagnostic[] {
     });
     occupiedLines.add(line.number);
   }
-  if (state.doc.length > 20_000 || hasIncompleteJavaPlaceholders(state.doc.toString())) return diagnostics;
-  syntaxTree(state).iterate({
+  if (state.doc.length > 20_000) return diagnostics;
+  const source = state.doc.toString();
+  if (hasIncompleteJavaPlaceholders(source)) return diagnostics;
+  const completeTree = ensureSyntaxTree(state, state.doc.length, 20);
+  const allowContext = Boolean(completeTree) && !/\\u/.test(source);
+  let isFirstError = true;
+  (completeTree ?? syntaxTree(state)).iterate({
     enter(node) {
-      if (!node.type.isError || diagnostics.length >= 20) return;
+      if (!node.type.isError) return;
+      const useContext = isFirstError && allowContext;
+      isFirstError = false;
+      if (diagnostics.length >= 20) return;
       const line = state.doc.lineAt(node.from);
       if (occupiedLines.has(line.number)) return;
       occupiedLines.add(line.number);
@@ -80,9 +83,33 @@ function combinedDiagnostics(state: EditorState): Diagnostic[] {
         to: Math.min(line.to, Math.max(from + 1, node.to)),
         severity: 'error',
         source: '入力中のヒント（構文）',
-        message: 'この付近の書き方を確認してください。括弧や記号の抜けがないか、直前の行も見てみましょう。',
+        message:
+          (useContext ? contextualHint(node.node, source) : undefined) ??
+          'この付近の書き方を確認してください。括弧や記号の抜けがないか、直前の行も見てみましょう。',
       });
     },
   });
   return diagnostics;
+}
+
+function contextualHint(node: ReturnType<typeof syntaxTree>['topNode'], source: string): string | undefined {
+  const operator = node.prevSibling;
+  if (
+    node.from !== node.to ||
+    !operator ||
+    !/^\s*$/.test(source.slice(operator.to, node.from)) ||
+    !/^\s*(?:[;,)\]}]|$)/.test(source.slice(node.from))
+  )
+    return undefined;
+  const spelling = source.slice(operator.from, operator.to);
+  if (
+    (node.parent?.name === 'VariableDeclarator' || node.parent?.name === 'AssignmentExpression') &&
+    operator.name === 'AssignOp' &&
+    spelling === '='
+  )
+    return '「=」の右側に、代入する値や計算式が書かれているか確認してください。';
+  if (node.parent?.name === 'BinaryExpression' && operator.name === 'ArithOp' && /^[+*/%-]$/.test(spelling)) {
+    return `「${spelling}」の右側に、計算する値や式が書かれているか確認してください。`;
+  }
+  return undefined;
 }

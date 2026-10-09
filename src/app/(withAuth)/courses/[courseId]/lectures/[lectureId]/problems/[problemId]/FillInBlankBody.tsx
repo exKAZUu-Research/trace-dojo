@@ -2,11 +2,12 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import type React from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { MdRedo, MdUndo } from 'react-icons/md';
 import { useImmer } from 'use-immer';
 
 import { BoardViewer } from './BoardViewer';
+import { JavaDiagnosticList } from './JavaDiagnosticList';
 import { JavaCodeEditor, type EditorHistoryAvailability, type JavaCodeEditorHandle } from './JavaCodeEditor';
 import { ResultAlertDialog, type CompletionAction } from './ResultAlertDialog';
 
@@ -27,13 +28,7 @@ import {
   IconButton,
   VStack,
 } from '@/infrastructures/useClient/chakra';
-import {
-  formatJavaDiagnostic,
-  javaFeedbackSummary,
-  javaOriginalMessageLabel,
-  readJavaDiagnostics,
-  type JavaDiagnostic,
-} from '@/problems/fillInBlank/javaDiagnostics';
+import { javaFeedbackSummary, readJavaDiagnostics, type JavaDiagnostic } from '@/problems/fillInBlank/javaDiagnostics';
 import { hasIncompleteJavaPlaceholders } from '@/problems/fillInBlank/javaSource';
 import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
 import type { TurtleTrace } from '@/problems/traceProgram';
@@ -56,10 +51,13 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
   const router = useRouter();
   const [code, setCode] = useState(props.problem.displayProgram.replaceAll(/\r\n?/g, '\n'));
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [alert, setAlert] = useState<{ title: string; message: string; isCompleted: boolean }>();
+  const [alert, setAlert] = useImmer<
+    { title: string; message: string; isCompleted: boolean; diagnostics?: JavaDiagnostic[] } | undefined
+  >(undefined);
   const [isResetOpen, setIsResetOpen] = useState(false);
   const [history, setHistory] = useImmer<EditorHistoryAvailability>({ canUndo: false, canRedo: false });
-  const [feedback, setFeedback] = useImmer<{ diagnostics: JavaDiagnostic[] } | undefined>(undefined);
+  const [feedback, setFeedback] = useImmer<{ diagnostics: JavaDiagnostic[]; isStale: boolean } | undefined>(undefined);
+  const feedbackHeadingId = useId();
   const revision = useRef(0);
   const request = useRef(0);
   useEffect(
@@ -72,7 +70,9 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
     revision.current += 1;
     request.current += 1;
     setIsSubmitting(false);
-    setFeedback(undefined);
+    setFeedback((draft) => {
+      if (draft) draft.isStale = true;
+    });
   };
   const editor = useRef<JavaCodeEditorHandle>(null);
   const cancelReset = useRef<HTMLButtonElement>(null);
@@ -128,12 +128,11 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
           const diagnostics = result.detail.startsWith('Compile error')
             ? readJavaDiagnostics(result.diagnostics, code.split('\n').length)
             : undefined;
-          if (diagnostics) setFeedback({ diagnostics });
+          if (diagnostics) setFeedback({ diagnostics, isStale: false });
           setAlert({
             title: '不正解',
-            message: diagnostics
-              ? `${javaFeedbackSummary}\n${diagnostics.map((item) => `${item.line ? `${item.line}行目付近: ` : ''}${formatJavaDiagnostic(item)}`).join('\n\n')}`
-              : toIncorrectMessage(result.detail),
+            message: toIncorrectMessage(result.detail),
+            diagnostics,
             isCompleted: false,
           });
           break;
@@ -175,7 +174,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
               setCode(value);
             }}
             onInvalidate={invalidate}
-            diagnostics={feedback?.diagnostics}
+            diagnostics={feedback?.isStale ? undefined : feedback?.diagnostics}
             onHistoryChange={(availability) =>
               setHistory((draft) => {
                 draft.canUndo = availability.canUndo;
@@ -184,20 +183,15 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
             }
           />
           {feedback && (
-            <Box as="section" aria-label="提出したコードの確認結果">
-              {feedback.diagnostics.map((item, index) => (
-                <Box key={index} mb={3} overflowWrap="anywhere">
-                  {item.line && <span>{item.line}行目付近: </span>}
-                  <span style={{ whiteSpace: 'pre-wrap' }}>{item.message}</span>
-                  {item.originalMessage && (
-                    <Box color="gray.600" fontSize="sm" mt={1} whiteSpace="pre-wrap">
-                      {javaOriginalMessageLabel}
-                      {'\n'}
-                      {item.originalMessage}
-                    </Box>
-                  )}
-                </Box>
-              ))}
+            <Box as="section" aria-labelledby={feedbackHeadingId}>
+              <Heading id={feedbackHeadingId} size="sm" mb={3}>
+                {feedback.isStale ? '前回提出したコードの確認結果' : '提出したコードの確認結果'}
+              </Heading>
+              <Box role="status" aria-live="polite" mb={feedback.isStale ? 3 : 0}>
+                {feedback.isStale &&
+                  'これは前回提出したコードの確認結果です。修正を確認するには、もう一度提出してください。'}
+              </Box>
+              <JavaDiagnosticList diagnostics={feedback.diagnostics} />
             </Box>
           )}
           <VStack align="stretch" as={Card} p={5} spacing={3}>
@@ -299,7 +293,19 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
             })}
         isOpen={Boolean(alert) || Boolean(props.isCompleted)}
         message={
-          alert?.message ?? (props.isCompleted ? (props.completionMessage ?? '正解です！次の問題へ進めます。') : '')
+          alert?.diagnostics ? (
+            <Box whiteSpace="normal" maxH="60dvh" overflowY="auto">
+              <Box as="p" mb={4}>
+                {javaFeedbackSummary}
+              </Box>
+              <JavaDiagnosticList diagnostics={alert.diagnostics} />
+              <Box as="p" mt={4}>
+                閉じてコードを修正し、もう一度提出してください。
+              </Box>
+            </Box>
+          ) : (
+            (alert?.message ?? (props.isCompleted ? (props.completionMessage ?? '正解です！次の問題へ進めます。') : ''))
+          )
         }
         title={alert?.title ?? (props.isCompleted ? '正解' : '')}
       />

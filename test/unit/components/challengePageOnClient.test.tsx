@@ -529,11 +529,17 @@ test('challenge compiler feedback reaches the editor and survives result dismiss
   await replaceJavaSource(editor, 'class Main {\n public static void main(String[] args) { int x = true; }\n}');
   await user.click(screen.getByRole('button', { name: '提出' }));
   await waitFor(() => expect(screen.getByRole('alertdialog')).toBeVisible());
-  expect(screen.getAllByText(message).length).toBeGreaterThan(0);
+  expect(within(screen.getByRole('alertdialog')).getByRole('listitem')).toHaveTextContent(message);
   await user.keyboard('{Escape}');
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   expect(screen.getByText(message)).toBeVisible();
   expect(screen.getByText(originalMessage, { exact: false })).toBeVisible();
   await waitFor(() => expect(document.querySelector('.cm-lintRange-error')).toBeInTheDocument());
+  await replaceJavaSource(editor, 'class Main {\n public static void main(String[] args) { int x = 1; }\n}');
+  expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
+  const report = screen.getByRole('region', { name: '前回提出したコードの確認結果' });
+  expect(report).toHaveTextContent(message);
+  expect(report).toHaveTextContent(originalMessage);
+  expect(within(report).getByRole('status')).toHaveTextContent(/もう一度提出/);
   expect(transport.submitBlank).toHaveBeenCalledTimes(1);
 });

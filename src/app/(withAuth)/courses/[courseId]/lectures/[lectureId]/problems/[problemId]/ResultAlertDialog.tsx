@@ -18,7 +18,7 @@ export interface CompletionAction {
   onClick: () => void | Promise<void>;
   colorScheme?: string;
 }
-type Props = { isOpen: boolean; title: string; message: string } & (
+type Props = { isOpen: boolean; title: string; message: React.ReactNode } & (
   | { onClose: () => void; actions?: never }
   | { actions: CompletionAction[]; onClose?: never }
 );

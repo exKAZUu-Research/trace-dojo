@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { ChakraProvider } from '@chakra-ui/react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, test, vi } from 'vitest';
 
@@ -401,13 +401,21 @@ test('ordinary editor shares keyboard and toolbar history and confirms an isolat
   expect(infrastructure.update).not.toHaveBeenCalled();
 });
 
-test('local syntax hints appear and clear without grading or pretending to check Java types', async () => {
+test('local hints identify a missing operand and disappear after a repair without grading', async () => {
   infrastructure.problemId = 'fillInBlank2';
   renderPage('fillInBlank');
   const editor = screen.getByRole('textbox', { name: /Java/ });
-  expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
   await replaceJavaSource(editor, 'class Main { void draw() { int x = ; } }');
   await waitFor(() => expect(document.querySelector('.cm-lintRange-error')).toBeInTheDocument());
+  fireEvent.keyDown(editor, { key: 'M', code: 'KeyM', keyCode: 77, ctrlKey: true, shiftKey: true });
+  const panel = await screen.findByRole('listbox', { name: 'Diagnostics' });
+  expect(await within(panel).findByText(/「=」.*代入する値/)).toBeVisible();
+  await replaceJavaSource(editor, 'class Main { void draw() { int x = 1 + ; } }');
+  expect(await within(panel).findByText(/「\+」.*計算する値/)).toBeVisible();
+  expect(within(panel).queryByText(/「=」.*代入する値/)).not.toBeInTheDocument();
+  await replaceJavaSource(editor, 'class Main { void draw() { int x = 1 + 2; } }');
+  await waitFor(() => expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument());
+  expect(within(panel).queryByText(/右側/)).not.toBeInTheDocument();
   await replaceJavaSource(editor, 'class Main { void draw() { int x = true; missing(); } }');
   await waitFor(() => expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument());
   await replaceJavaSource(editor, 'class Main { void draw() { int x = 【1】; } }');
@@ -415,7 +423,57 @@ test('local syntax hints appear and clear without grading or pretending to check
   expect(infrastructure.grade).not.toHaveBeenCalled();
 });
 
-test('compiler feedback persists after dismissal and clears immediately on edit without undo resurrection', async () => {
+test('local hints keep uncertain recovery generic without flagging valid literal and empty-expression forms', async () => {
+  infrastructure.problemId = 'fillInBlank2';
+  renderPage('fillInBlank');
+  const editor = screen.getByRole('textbox', { name: /Java/ });
+  const user = userEvent.setup();
+  await user.click(editor);
+  fireEvent.keyDown(editor, { key: 'M', code: 'KeyM', keyCode: 77, ctrlKey: true, shiftKey: true });
+  const panel = await screen.findByRole('listbox', { name: 'Diagnostics' });
+  const uncertainSources = [
+    'class Main { void f() { String s = "broken;\n int x = ; } }',
+    'class Main { void f() { /* broken\n int x = ; } }',
+    'class Main { void f() { int x = 1; x += ; } }',
+    'class Main { void f() { boolean x = true && ; } }',
+    'class Main { void f() { int x = -; } }',
+    'class Main { void f() { move(1; int x = ; } }',
+    String.raw`class Main { void f() { int x = ; } } // \u000a`,
+  ];
+  for (const code of uncertainSources) {
+    await replaceJavaSource(editor, code);
+    await waitFor(() => expect(panel, code).toHaveTextContent(/この付近の書き方/));
+    expect(panel).not.toHaveTextContent(/代入する値|計算する値/);
+  }
+  await replaceJavaSource(
+    editor,
+    `class Main {
+    void f() {
+      String 文字 = "= ; + ; /*";
+      char 記号 = '+';
+      String block = """
+        = ; + ; // /*
+        """;
+      /* = ; + ; */
+      for (;;) { break; }
+      return;
+    }
+  }
+  class Probe { void f() { move(1; } }`
+  );
+  expect(await within(panel).findAllByText(/この付近の書き方/)).toHaveLength(1);
+  expect(panel).not.toHaveTextContent(/代入する値|計算する値/);
+  const lines = [...editor.querySelectorAll('.cm-line')];
+  const probeLine = lines.at(-1);
+  expect(probeLine).toHaveTextContent('class Probe');
+  expect(probeLine?.querySelector('.cm-lintRange-error')).toBeInTheDocument();
+  for (const line of lines.slice(0, -1)) {
+    expect(line.querySelector('.cm-lintRange-error, .cm-lintPoint-error')).not.toBeInTheDocument();
+  }
+  expect(infrastructure.grade).not.toHaveBeenCalled();
+});
+
+test('compiler feedback becomes historical on edit and undo never restores compiler annotations', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const message = 'この呼び出し方に合う名前が見つかりません。';
   const originalMessage = 'cannot find symbol\nsymbol: method missing()';
@@ -438,12 +496,24 @@ test('compiler feedback persists after dismissal and clears immediately on edit 
   await waitFor(() => expect(document.querySelector('.cm-lintRange-error')).toBeInTheDocument());
   await user.click(editor);
   await user.keyboard('{Control>}{End}{/Control} ');
-  expect(screen.queryByText(message, { exact: true, normalizer: (text) => text })).not.toBeInTheDocument();
-  expect(screen.queryByText(/symbol: method missing/)).not.toBeInTheDocument();
   expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
+  const report = screen.getByRole('region', { name: '前回提出したコードの確認結果' });
+  expect(within(report).getByText(message)).toBeVisible();
+  expect(within(report).getByText(/symbol: method missing/)).toBeVisible();
+  const notice = within(report).getByRole('status');
+  expect(notice).toHaveTextContent(/前回提出.*もう一度提出/);
+  expect(notice).not.toHaveAttribute('aria-live', 'assertive');
+  expect(notice).not.toHaveAttribute('aria-live', 'off');
+  expect(within(report).getByRole('heading', { name: '前回提出したコードの確認結果' })).toBeVisible();
+  expect(notice).not.toHaveTextContent(message);
   await user.click(screen.getByRole('button', { name: '元に戻す' }));
-  expect(screen.queryByText(message, { exact: true, normalizer: (text) => text })).not.toBeInTheDocument();
-  expect(screen.queryByText(/symbol: method missing/)).not.toBeInTheDocument();
+  expect(readRenderedJavaSource(editor)).toBe(
+    'class Main {\n public static void main(String[] args) {\n  missing();\n }\n}'
+  );
+  expect(screen.getByRole('region', { name: '前回提出したコードの確認結果' })).toHaveTextContent(message);
+  expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'やり直す' }));
+  expect(screen.getByRole('region', { name: '前回提出したコードの確認結果' })).toHaveTextContent(message);
   expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
   expect(infrastructure.grade).toHaveBeenCalledTimes(1);
 });
