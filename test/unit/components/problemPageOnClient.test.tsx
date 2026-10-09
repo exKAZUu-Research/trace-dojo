@@ -410,6 +410,7 @@ test('local hints identify a missing operand and disappear after a repair withou
   fireEvent.keyDown(editor, { key: 'M', code: 'KeyM', keyCode: 77, ctrlKey: true, shiftKey: true });
   const panel = await screen.findByRole('listbox', { name: 'Diagnostics' });
   expect(await within(panel).findByText(/「=」.*代入する値/)).toBeVisible();
+  expect(panel.querySelector('.cm-diagnosticSource')).not.toBeInTheDocument();
   await replaceJavaSource(editor, 'class Main { void draw() { int x = 1 + ; } }');
   expect(await within(panel).findByText(/「\+」.*計算する値/)).toBeVisible();
   expect(within(panel).queryByText(/「=」.*代入する値/)).not.toBeInTheDocument();
@@ -442,7 +443,7 @@ test('local hints keep uncertain recovery generic without flagging valid literal
   ];
   for (const code of uncertainSources) {
     await replaceJavaSource(editor, code);
-    await waitFor(() => expect(panel, code).toHaveTextContent(/この付近の書き方/));
+    await waitFor(() => expect(panel, code).toHaveTextContent(/コード全体で/));
     expect(panel).not.toHaveTextContent(/代入する値|計算する値/);
   }
   await replaceJavaSource(
@@ -461,7 +462,7 @@ test('local hints keep uncertain recovery generic without flagging valid literal
   }
   class Probe { void f() { move(1; } }`
   );
-  expect(await within(panel).findAllByText(/この付近の書き方/)).toHaveLength(1);
+  expect(await within(panel).findAllByText(/コード全体で/)).toHaveLength(1);
   expect(panel).not.toHaveTextContent(/代入する値|計算する値/);
   const lines = [...editor.querySelectorAll('.cm-line')];
   const probeLine = lines.at(-1);

@@ -82,10 +82,9 @@ function combinedDiagnostics(state: EditorState): Diagnostic[] {
         from,
         to: Math.min(line.to, Math.max(from + 1, node.to)),
         severity: 'error',
-        source: '入力中のヒント（構文）',
         message:
           (useContext ? contextualHint(node.node, source) : undefined) ??
-          'この付近の書き方を確認してください。括弧や記号の抜けがないか、直前の行も見てみましょう。',
+          'コード全体で、括弧の対応や記号の抜けを確認してください。原因が表示位置より前にあることもあります。',
       });
     },
   });
