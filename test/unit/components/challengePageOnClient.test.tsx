@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 
 import { ChakraProvider } from '@chakra-ui/react';
-import { composeWithoutSubmitting, expectJavaSource, replaceJavaSource } from '../../helpers/javaEditor';
+import {
+  composeWithoutSubmitting,
+  expectJavaSource,
+  readRenderedJavaSource,
+  replaceJavaSource,
+} from '../../helpers/javaEditor';
 import { StrictMode } from 'react';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -249,6 +254,7 @@ test('completed fill-in-blank next keeps the active format and renders the retur
   renderPage('fillInBlank');
   const input = await screen.findByRole('textbox', { hidden: true, name: /Java/ });
   expect(input).toHaveAttribute('contenteditable', 'false');
+  expect(screen.getByRole('button', { hidden: true, name: 'リセット' })).toBeDisabled();
   expect(screen.getByText(/プログラムを実行した後の盤面/)).toBeVisible();
   await user.keyboard('{Escape}');
   expect(screen.getByRole('alertdialog')).toBeVisible();
@@ -283,6 +289,7 @@ test('a just-completed fill-in-blank keeps its answer, deduplicates Next, and re
     code,
   });
   expect(input).toHaveAttribute('contenteditable', 'false');
+  expect(screen.getByRole('button', { hidden: true, name: 'リセット' })).toBeDisabled();
   expect(screen.getByRole('button', { hidden: true, name: '提出' })).toBeDisabled();
   await user.keyboard('{Escape}');
   expect(dialog).toBeInTheDocument();
@@ -295,11 +302,20 @@ test('a just-completed fill-in-blank keeps its answer, deduplicates Next, and re
     sessionId: 23,
     problemFormat: 'fillInBlank',
   });
-  await act(async () => resolveNext({ ...blankDisplay, sessionId: 24 }));
+  const nextStarter = 'class NextProblem {\n  int nextValue = 【1】;\n}\n';
+  await act(async () => resolveNext({ ...blankDisplay, sessionId: 24, displayProgram: nextStarter }));
   const freshInput = await screen.findByRole('textbox', { name: /Java/ });
   expect(freshInput).toHaveAttribute('contenteditable', 'true');
-  expectJavaSource(freshInput, blankDisplay.displayProgram);
+  expect(readRenderedJavaSource(freshInput)).toBe(nextStarter);
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  await replaceJavaSource(freshInput, code);
+  expect(readRenderedJavaSource(freshInput)).toBe(code);
+  expect(readRenderedJavaSource(freshInput)).not.toBe(nextStarter);
+  await user.click(screen.getByRole('button', { name: 'リセット' }));
+  await waitFor(() => expect(readRenderedJavaSource(freshInput)).toBe(nextStarter));
+  expect(transport.start).toHaveBeenCalledTimes(1);
+  expect(transport.next).toHaveBeenCalledTimes(1);
+  expect(transport.submitBlank).toHaveBeenCalledTimes(1);
 });
 
 test('completed fill-in-blank orders Back before Next and reports a failed action without dismissing', async () => {
@@ -405,7 +421,40 @@ test('full-source edits and Enter/IME do not execute, and pending submission fre
     code,
   });
   expect(editor).toHaveAttribute('contenteditable', 'false');
+  const reset = screen.getByRole('button', { name: 'リセット' });
+  expect(reset).toBeDisabled();
+  await user.click(reset);
+  expect(readRenderedJavaSource(editor)).toBe(code);
+  expect(transport.submitBlank).toHaveBeenCalledTimes(1);
   await act(async () => finish({ status: 'incorrect', detail: 'The final state differs from the expected one.' }));
   expect(await screen.findByRole('alertdialog')).toHaveTextContent('不正解');
-  expectJavaSource(editor, code);
+  expect(readRenderedJavaSource(editor)).toBe(code);
+  expect(screen.getByRole('button', { hidden: true, name: 'リセット' })).toBeDisabled();
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  expect(reset).toBeEnabled();
+  await user.click(reset);
+  await waitFor(() => expect(readRenderedJavaSource(editor)).toBe(blankDisplay.displayProgram));
+  expect(transport.submitBlank).toHaveBeenCalledTimes(1);
+  expect(transport.start).toHaveBeenCalledTimes(1);
+  expect(transport.next).not.toHaveBeenCalled();
+});
+
+test('challenge Reset restores the exact starter without submitting or changing the session', async () => {
+  const starter = 'class Challenge {\n  int value = 【1】;\n}\n';
+  transport.start.mockResolvedValue({ ...blankDisplay, displayProgram: starter });
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
+  expect(readRenderedJavaSource(editor)).toBe(starter);
+  const edited = 'class Edited {\n  int value = 42;\n}\n';
+  await replaceJavaSource(editor, edited);
+  expect(readRenderedJavaSource(editor)).toBe(edited);
+  expect(readRenderedJavaSource(editor)).not.toBe(starter);
+  await user.click(screen.getByRole('button', { name: 'リセット' }));
+  await waitFor(() => expect(readRenderedJavaSource(editor)).toBe(starter));
+  expect(transport.submitBlank).not.toHaveBeenCalled();
+  expect(transport.next).not.toHaveBeenCalled();
+  expect(transport.start).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
 });

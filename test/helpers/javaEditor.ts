@@ -20,3 +20,7 @@ export function composeWithoutSubmitting(editor: HTMLElement): void {
   fireEvent.keyDown(editor, { key: 'Enter', code: 'Enter', isComposing: true, keyCode: 229 });
   fireEvent.compositionEnd(editor, { data: '亀' });
 }
+
+export function readRenderedJavaSource(editor: HTMLElement): string {
+  return [...editor.querySelectorAll('.cm-line')].map((line) => line.textContent).join('\n');
+}

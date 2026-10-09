@@ -5,7 +5,12 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, test, vi } from 'vitest';
 
-import { composeWithoutSubmitting, expectJavaSource, replaceJavaSource } from '../../helpers/javaEditor';
+import {
+  composeWithoutSubmitting,
+  expectJavaSource,
+  readRenderedJavaSource,
+  replaceJavaSource,
+} from '../../helpers/javaEditor';
 
 const infrastructure = vi.hoisted(() => ({ isAdmin: false, problemId: 'test3', grade: vi.fn(), update: vi.fn() }));
 vi.mock('next/navigation', () => ({
@@ -196,3 +201,30 @@ test('ordinary session identity changes replace edited code with the new starter
     expect(fresh.textContent).not.toContain('PreviousAttempt');
   });
 });
+
+test.each(['edited', 'empty'] as const)(
+  'ordinary Reset restores the exact starter from %s source without submitting',
+  async (source) => {
+    infrastructure.problemId = 'fillInBlank2';
+    const user = userEvent.setup();
+    renderPage('fillInBlank');
+    const editor = screen.getByRole('textbox', { name: /Java/ });
+    const starter = readRenderedJavaSource(editor);
+    expect(starter).toContain('【1】');
+    expect(starter).toContain('\n');
+    const edited = 'class Edited {\n  int value = 42;\n}\n';
+    await replaceJavaSource(editor, edited);
+    expect(readRenderedJavaSource(editor)).toBe(edited);
+    if (source === 'empty') {
+      await user.click(editor);
+      await user.keyboard('{Control>}a{/Control}{Backspace}');
+      await waitFor(() => expect(readRenderedJavaSource(editor)).toBe(''));
+    }
+    expect(readRenderedJavaSource(editor)).not.toBe(starter);
+    await user.click(screen.getByRole('button', { name: 'リセット' }));
+    await waitFor(() => expect(readRenderedJavaSource(editor)).toBe(starter));
+    expect(infrastructure.grade).not.toHaveBeenCalled();
+    expect(infrastructure.update).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  }
+);

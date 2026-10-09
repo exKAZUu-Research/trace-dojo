@@ -8,7 +8,7 @@ import { BoardViewer } from './BoardViewer';
 import { JavaCodeEditor } from './JavaCodeEditor';
 import { ResultAlertDialog, type CompletionAction } from './ResultAlertDialog';
 
-import { Box, Button, Card, Center, Flex, Heading, Text, VStack } from '@/infrastructures/useClient/chakra';
+import { Box, Button, Card, Center, Flex, Heading, HStack, Text, VStack } from '@/infrastructures/useClient/chakra';
 import { hasIncompleteJavaPlaceholders } from '@/problems/fillInBlank/javaSource';
 import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
 import type { TurtleTrace } from '@/problems/traceProgram';
@@ -107,15 +107,24 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
             Tabでインデントできます。エディターから移動するにはEscを押してからTabを押してください。実行は提出時のみ行います。
           </Text>
           <VStack align="stretch" as={Card} p={5} spacing={3}>
-            <Button
-              alignSelf="flex-end"
-              colorScheme="brand"
-              isDisabled={isIncomplete || isCompleted}
-              isLoading={isSubmitting}
-              onClick={() => void handleSubmit()}
-            >
-              提出
-            </Button>
+            <HStack justify="flex-end" spacing={3}>
+              <Button
+                type="button"
+                variant="outline"
+                isDisabled={isSubmitting || isCompleted || Boolean(alert)}
+                onClick={() => setCode(props.problem.displayProgram)}
+              >
+                リセット
+              </Button>
+              <Button
+                colorScheme="brand"
+                isDisabled={isIncomplete || isCompleted}
+                isLoading={isSubmitting}
+                onClick={() => void handleSubmit()}
+              >
+                提出
+              </Button>
+            </HStack>
           </VStack>
         </VStack>
 
