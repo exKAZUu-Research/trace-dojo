@@ -76,7 +76,7 @@ export const ResultAlertDialog: React.FC<Props> = (props) => {
           <AlertDialogHeader fontSize="lg" fontWeight="bold">
             {props.title}
           </AlertDialogHeader>
-          <AlertDialogBody whiteSpace="pre-wrap">
+          <AlertDialogBody overflowWrap="anywhere" whiteSpace="pre-wrap">
             {props.message}
             {actionError && (
               <Text color="red.600" mt={3} role="alert">

@@ -2,7 +2,7 @@ import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { linter, setDiagnosticsEffect, type Diagnostic } from '@codemirror/lint';
 import { EditorState, StateEffect, StateField, type Extension } from '@codemirror/state';
 
-import type { JavaDiagnostic } from './javaDiagnostics';
+import { formatJavaDiagnostic, type JavaDiagnostic } from './javaDiagnostics';
 import { hasIncompleteJavaPlaceholders } from './javaSource';
 
 export const compilerFeedback = StateEffect.define<JavaDiagnostic[]>();
@@ -58,7 +58,13 @@ function combinedDiagnostics(state: EditorState): Diagnostic[] {
   for (const item of feedback.diagnostics) {
     if (!item.line || item.line > state.doc.lines) continue;
     const line = state.doc.line(item.line);
-    diagnostics.push({ from: line.from, to: line.to, severity: 'error', message: item.message, source: 'コンパイル' });
+    diagnostics.push({
+      from: line.from,
+      to: line.to,
+      severity: 'error',
+      message: formatJavaDiagnostic(item),
+      source: '提出後の確認（コンパイル）',
+    });
     occupiedLines.add(line.number);
   }
   if (state.doc.length > 20_000 || hasIncompleteJavaPlaceholders(state.doc.toString())) return diagnostics;
@@ -73,8 +79,8 @@ function combinedDiagnostics(state: EditorState): Diagnostic[] {
         from,
         to: Math.min(line.to, Math.max(from + 1, node.to)),
         severity: 'error',
-        source: '構文のヒント',
-        message: 'この付近のコードの書き方を確認してください。',
+        source: '入力中のヒント（構文）',
+        message: 'この付近の書き方を確認してください。括弧や記号の抜けがないか、直前の行も見てみましょう。',
       });
     },
   });

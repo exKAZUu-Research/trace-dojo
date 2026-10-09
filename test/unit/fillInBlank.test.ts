@@ -313,9 +313,13 @@ test.each([
   const verdict = diagnosticVerdictSchema.parse(result);
   expect(verdict.diagnostics).toEqual(
     expect.arrayContaining([
-      expect.objectContaining({ message: expect.stringMatching(category), ...(line ? { line } : {}) }),
+      expect.objectContaining({
+        [line ? 'originalMessage' : 'message']: expect.stringMatching(category),
+        ...(line ? { line } : {}),
+      }),
     ])
   );
+  expect(verdict.diagnostics.every((diagnostic) => /[ぁ-ん]/.test(diagnostic.message))).toBe(true);
   if (!line) expect(verdict.diagnostics.every((diagnostic) => diagnostic.line === undefined)).toBe(true);
   expect(JSON.stringify(result)).not.toMatch(
     /TraceDojoJudge|\.java|__TRACE_DOJO_RESULT_|constructor Turtle|actual and formal argument lists/
@@ -361,11 +365,15 @@ test.each([
     /SECRET_PROVIDER_PATH|private|\.java|TRACE_DOJO|img|\\u001b|\u202E|unrecognized provider/
   );
   const verdict = diagnosticVerdictSchema.parse(result);
-  if (scenario === 'recognized header')
-    expect(verdict.diagnostics).toContainEqual({
-      line: 3,
-      message: 'コンパイルエラーです。入力したコードを確認してください。',
-    });
+  for (const diagnostic of verdict.diagnostics) {
+    expect(diagnostic.message).toMatch(/[ぁ-ん]/);
+    expect(diagnostic.message).not.toMatch(/^(?:コンパイル|構文)/);
+    if (scenario === 'continuation' || scenario === 'many errors') {
+      if (diagnostic.originalMessage !== undefined) expect(diagnostic.originalMessage).toBe('cannot find symbol');
+    } else {
+      expect(diagnostic.originalMessage).toBeUndefined();
+    }
+  }
   expect(new Set(verdict.diagnostics.map((diagnostic) => JSON.stringify(diagnostic))).size).toBe(
     verdict.diagnostics.length
   );
@@ -425,8 +433,16 @@ test.each([
   );
   const verdict = diagnosticVerdictSchema.parse(result);
   expect(verdict.diagnostics).toEqual([
-    { line: 4, message: 'cannot find symbol' },
-    { line: 4, message: 'incompatible types: boolean cannot be converted to int' },
+    expect.objectContaining({
+      line: 4,
+      message: expect.stringMatching(/[ぁ-ん]/),
+      originalMessage: 'cannot find symbol',
+    }),
+    expect.objectContaining({
+      line: 4,
+      message: expect.stringMatching(/[ぁ-ん]/),
+      originalMessage: 'incompatible types: boolean cannot be converted to int',
+    }),
   ]);
   expect(JSON.stringify(result)).not.toContain(symbol);
   expect(JSON.stringify(result)).not.toContain('ProviderLocationSecret');
@@ -448,9 +464,17 @@ test('compiler diagnostics require the whole header grammar and independently va
   const verdict = diagnosticVerdictSchema.parse(result);
   expect(verdict.diagnostics).toEqual(
     expect.arrayContaining([
-      { line: 3, message: 'コンパイルエラーです。入力したコードを確認してください。' },
-      { line: 3, message: 'cannot find symbol\nsymbol: variable 亀の数' },
-      { line: 3, message: 'cannot find symbol\nsymbol: variable café' },
+      expect.objectContaining({ line: 3, message: expect.stringMatching(/[ぁ-ん]/) }),
+      expect.objectContaining({
+        line: 3,
+        message: expect.stringMatching(/亀の数/),
+        originalMessage: 'cannot find symbol\nsymbol: variable 亀の数',
+      }),
+      expect.objectContaining({
+        line: 3,
+        message: expect.stringMatching(/café/),
+        originalMessage: 'cannot find symbol\nsymbol: variable café',
+      }),
     ])
   );
   expect(JSON.stringify(result)).not.toMatch(/private|Secret|HEADER_SECRET|illegal start|incompatible types/);

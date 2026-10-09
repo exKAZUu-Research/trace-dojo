@@ -10,7 +10,13 @@ export const diagnosticVerdictSchema = z.object({
   status: z.literal('incorrect'),
   detail: z.literal('Compile error.'),
   diagnostics: z
-    .array(z.object({ message: z.string().min(1).max(240), line: z.number().int().positive().optional() }))
+    .array(
+      z.object({
+        message: z.string().min(1).max(240),
+        originalMessage: z.string().min(1).max(240).optional(),
+        line: z.number().int().positive().optional(),
+      })
+    )
     .min(1)
     .max(20),
 });

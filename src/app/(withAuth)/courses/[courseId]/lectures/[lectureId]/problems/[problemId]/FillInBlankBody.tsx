@@ -27,7 +27,13 @@ import {
   IconButton,
   VStack,
 } from '@/infrastructures/useClient/chakra';
-import { readJavaDiagnostics, type JavaDiagnostic } from '@/problems/fillInBlank/javaDiagnostics';
+import {
+  formatJavaDiagnostic,
+  javaFeedbackSummary,
+  javaOriginalMessageLabel,
+  readJavaDiagnostics,
+  type JavaDiagnostic,
+} from '@/problems/fillInBlank/javaDiagnostics';
 import { hasIncompleteJavaPlaceholders } from '@/problems/fillInBlank/javaSource';
 import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
 import type { TurtleTrace } from '@/problems/traceProgram';
@@ -126,7 +132,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
           setAlert({
             title: '不正解',
             message: diagnostics
-              ? `コンパイルエラーになりました。\n${diagnostics.map((item) => `${item.line ? `${item.line}行目: ` : ''}${item.message}`).join('\n')}`
+              ? `${javaFeedbackSummary}\n${diagnostics.map((item) => `${item.line ? `${item.line}行目付近: ` : ''}${formatJavaDiagnostic(item)}`).join('\n\n')}`
               : toIncorrectMessage(result.detail),
             isCompleted: false,
           });
@@ -178,11 +184,18 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
             }
           />
           {feedback && (
-            <Box aria-label="コンパイル結果">
+            <Box as="section" aria-label="提出したコードの確認結果">
               {feedback.diagnostics.map((item, index) => (
-                <Box key={index}>
-                  {item.line && <span>{item.line}行目: </span>}
+                <Box key={index} mb={3} overflowWrap="anywhere">
+                  {item.line && <span>{item.line}行目付近: </span>}
                   <span style={{ whiteSpace: 'pre-wrap' }}>{item.message}</span>
+                  {item.originalMessage && (
+                    <Box color="gray.600" fontSize="sm" mt={1} whiteSpace="pre-wrap">
+                      {javaOriginalMessageLabel}
+                      {'\n'}
+                      {item.originalMessage}
+                    </Box>
+                  )}
                 </Box>
               ))}
             </Box>
@@ -295,7 +308,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
 };
 
 function toIncorrectMessage(detail: string): string {
-  if (detail.startsWith('Compile error')) return 'コンパイルエラーになりました。入力したコードを見直してください。';
+  if (detail.startsWith('Compile error')) return `${javaFeedbackSummary}入力したコードを見直してください。`;
   if (detail.startsWith('Time limit'))
     return 'プログラムが終了しませんでした。無限ループになっていないか確認してください。';
   if (detail.includes('forbidden')) return '使用できない機能が含まれています。';

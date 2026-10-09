@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { ChakraProvider } from '@chakra-ui/react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, test, vi } from 'vitest';
 
@@ -15,7 +15,12 @@ vi.mock('next/navigation', () => ({
 
 const source = 'class Main {\n public static void main(String[] args) {\n  missing();\n }\n}';
 const message = '変数やメソッドの名前と宣言を確認してください。';
-const verdict = { status: 'incorrect' as const, detail: 'Compile error.', diagnostics: [{ line: 3, message }] };
+const originalMessage = 'cannot find symbol\nsymbol: method missing()';
+const verdict = {
+  status: 'incorrect' as const,
+  detail: 'Compile error.',
+  diagnostics: [{ line: 3, message, originalMessage }],
+};
 const problem = {
   displayProgram: source,
   finalBoard: '.......\n.......\n.......\n.......\n.......\n.......\n.......',
@@ -50,6 +55,7 @@ test.each(['reset', 'composition'] as const)(
     }
     expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
     expect(screen.queryByText(message)).not.toBeInTheDocument();
+    expect(screen.queryByText(/symbol: method missing/)).not.toBeInTheDocument();
     expect(readRenderedJavaSource(editor)).toBe(source);
     if (action === 'composition') fireEvent.compositionEnd(editor, { data: '亀' });
     expect(grade).toHaveBeenCalledTimes(1);
@@ -97,6 +103,9 @@ test.each(
     [{ line: -1, message: 'INVALID_DIAGNOSTIC_LINE' }],
     [{ line: '3', message: 'INVALID_DIAGNOSTIC_LINE' }],
     [{ line: 3, message: 'INVALID_DIAGNOSTIC_MESSAGE'.repeat(30) }],
+    [{ line: 3, message: 'INVALID_DIAGNOSTIC_MESSAGE', originalMessage: 42 }],
+    [{ line: 3, message: 'INVALID_DIAGNOSTIC_MESSAGE', originalMessage: '' }],
+    [{ line: 3, message: 'INVALID_DIAGNOSTIC_MESSAGE', originalMessage: 'X'.repeat(241) }],
   ].map((diagnostics) => ({ diagnostics }))
 )(
   'invalid optional compiler payload falls back without rendering an invalid annotation: %j',
@@ -141,4 +150,27 @@ test('compiler diagnostic on the empty final CRLF learner line stays on that lin
   expect(lines[2].querySelector('.cm-lintPoint-error, .cm-lintRange-error')).not.toBeInTheDocument();
   expect(screen.getByText(finalLineMessage)).toBeVisible();
   expect(grade).toHaveBeenCalledOnce();
+});
+
+test('Japanese explanation precedes the optional plain-text compiler reference in dialog and inline feedback', async () => {
+  const user = userEvent.setup();
+  const secondary = 'cannot find symbol <img src=x onerror=alert(1)>';
+  const grade = vi
+    .fn()
+    .mockResolvedValue({ ...verdict, diagnostics: [{ line: 3, message, originalMessage: secondary }] });
+  render(body(grade));
+  await user.click(screen.getByRole('button', { name: '提出' }));
+  const dialog = await screen.findByRole('alertdialog');
+  expect(dialog.textContent).toMatch(/コード.*確認/);
+  expect(dialog.textContent?.indexOf(message)).toBeLessThan(dialog.textContent?.indexOf(secondary) ?? -1);
+  expect(dialog.textContent).toContain(secondary);
+  expect(dialog.querySelector('img')).not.toBeInTheDocument();
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  const region = screen.getByRole('region', { name: '提出したコードの確認結果' });
+  expect(within(region).getByText(message)).toBeVisible();
+  expect(within(region).getByText(/参考（Java のメッセージ）/)).toBeVisible();
+  expect(region.textContent?.indexOf(message)).toBeLessThan(region.textContent?.indexOf(secondary) ?? -1);
+  expect(region.textContent).toContain(secondary);
+  expect(region.querySelector('img')).not.toBeInTheDocument();
 });

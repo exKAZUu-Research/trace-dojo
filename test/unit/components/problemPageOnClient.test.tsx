@@ -417,11 +417,12 @@ test('local syntax hints appear and clear without grading or pretending to check
 
 test('compiler feedback persists after dismissal and clears immediately on edit without undo resurrection', async () => {
   infrastructure.problemId = 'fillInBlank2';
-  const message = 'cannot find symbol\nsymbol: method missing()';
+  const message = 'この呼び出し方に合う名前が見つかりません。';
+  const originalMessage = 'cannot find symbol\nsymbol: method missing()';
   infrastructure.grade.mockResolvedValue({
     status: 'incorrect',
     detail: 'Compile error.',
-    diagnostics: [{ line: 3, message }],
+    diagnostics: [{ line: 3, message, originalMessage }],
   });
   const user = userEvent.setup();
   renderPage('fillInBlank');
@@ -433,13 +434,16 @@ test('compiler feedback persists after dismissal and clears immediately on edit 
   await user.keyboard('{Escape}');
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   expect(screen.getByText(message, { exact: true, normalizer: (text) => text })).toBeVisible();
+  expect(screen.getByText(/symbol: method missing/)).toBeVisible();
   await waitFor(() => expect(document.querySelector('.cm-lintRange-error')).toBeInTheDocument());
   await user.click(editor);
   await user.keyboard('{Control>}{End}{/Control} ');
   expect(screen.queryByText(message, { exact: true, normalizer: (text) => text })).not.toBeInTheDocument();
+  expect(screen.queryByText(/symbol: method missing/)).not.toBeInTheDocument();
   expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: '元に戻す' }));
   expect(screen.queryByText(message, { exact: true, normalizer: (text) => text })).not.toBeInTheDocument();
+  expect(screen.queryByText(/symbol: method missing/)).not.toBeInTheDocument();
   expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
   expect(infrastructure.grade).toHaveBeenCalledTimes(1);
 });

@@ -1,31 +1,20 @@
+import {
+  delimiterCompilerMessage,
+  fixedCompilerMessages,
+  genericCompilerMessage,
+  translateCompilerMessage,
+} from './compilerMessages';
 import { javaDiagnosticsSchema, type JavaDiagnostic } from './javaDiagnostics';
 import { JAVA_JUDGE_CLASS_NAME, type JavaJudgeProgram } from './javaProgram';
 import { maskJavaNonCode } from './javaSource';
 
-const genericMessage = 'コンパイルエラーです。入力したコードを確認してください。';
-const delimiterMessage = '括弧や波括弧、セミコロンなどの記号が不足していないか確認してください。';
+const genericMessage = genericCompilerMessage;
+const delimiterMessage = delimiterCompilerMessage;
 const headerPattern = /^(?:[^\r\n]*[/\\])?TraceDojoJudge\.java:([0-9]{1,9}): error: (.*)$/;
 const identifierPattern = /^[\p{L}\p{Nl}\p{Sc}\p{Pc}][\p{L}\p{Nl}\p{Sc}\p{Pc}\p{N}\p{M}]*$/u;
 const reservedNames = new Set([JAVA_JUDGE_CLASS_NAME, 'dump', 'checkBounds', 'dirIndex', 'DIRS', 'DX', 'DY']);
 const knownTypes = new Set(['boolean', 'byte', 'short', 'int', 'long', 'char', 'float', 'double', 'String', 'Turtle']);
-const fixedMessages = new Set([
-  "';' expected",
-  "')' expected",
-  "'}' expected",
-  "']' expected",
-  "'(' expected",
-  "'{' expected",
-  'reached end of file while parsing',
-  'illegal start of expression',
-  'illegal start of type',
-  'not a statement',
-  'unclosed string literal',
-  'unclosed character literal',
-  'empty character literal',
-  'unclosed comment',
-  'missing return statement',
-  'unreachable statement',
-]);
+const fixedMessages = new Set(Object.keys(fixedCompilerMessages));
 
 export function normalizeCompilerDiagnostics(output: string, source: JavaJudgeProgram): JavaDiagnostic[] {
   const diagnostics: JavaDiagnostic[] = [];
@@ -55,28 +44,34 @@ export function normalizeCompilerDiagnostics(output: string, source: JavaJudgePr
     const category = match[2];
     const continuation: string[] = [];
     while (index + 1 < lines.length && !headerPattern.test(lines[index + 1])) continuation.push(lines[++index]);
-    let message = compilerMessage(category, continuation, identifiers);
+    let originalMessage = compilerMessage(category, continuation, identifiers);
+    let message = originalMessage ? translateCompilerMessage(originalMessage) : genericMessage;
     if (line === undefined) {
+      originalMessage = undefined;
       message =
         generatedLine === source.entryInvocationLine &&
         /^(cannot find symbol|method main |non-static method main)/.test(category)
-          ? '開始するメソッド public static void main(String[] args) を確認してください。'
+          ? 'プログラムを始める部分が見つからないか、書き方が合っていません。public static void main(String[] args) を確認してください。'
           : fixedMessages.has(category) &&
               (category.endsWith(' expected') || category === 'reached end of file while parsing')
             ? delimiterMessage
             : genericMessage;
     }
-    const key = `${line}:${message}`;
+    const key = `${line}:${message}:${originalMessage}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    diagnostics.push({ message, ...(line === undefined ? {} : { line }) });
+    diagnostics.push({
+      message,
+      ...(originalMessage ? { originalMessage } : {}),
+      ...(line === undefined ? {} : { line }),
+    });
     if (diagnostics.length === 20) break;
   }
   return javaDiagnosticsSchema.parse(diagnostics.length > 0 ? diagnostics : [{ message: genericMessage }]);
 }
 
-function compilerMessage(category: string, continuation: string[], identifiers: Set<string>): string {
-  if (!safeText(category)) return genericMessage;
+function compilerMessage(category: string, continuation: string[], identifiers: Set<string>): string | undefined {
+  if (!safeText(category)) return;
   if (fixedMessages.has(category)) return category;
   if (category === 'cannot find symbol') {
     const symbol = uniqueField(continuation, 'symbol');
@@ -111,7 +106,50 @@ function compilerMessage(category: string, continuation: string[], identifiers: 
   if (access && safeIdentifier(access[1], identifiers) && safeIdentifier(access[2], identifiers)) return category;
   const duplicate = /^(variable|method|class) (.+) is already defined in (method|class) (.+)$/.exec(category);
   if (duplicate && safeSymbol(duplicate[2], identifiers) && safeSymbol(duplicate[4], identifiers)) return category;
-  return genericMessage;
+
+  const narrowing = /^incompatible types: possible lossy conversion from (.+) to (.+)$/.exec(category);
+  if (narrowing && safeType(narrowing[1], identifiers) && safeType(narrowing[2], identifiers)) return category;
+  if (/^bad operand types for binary operator '(?:[+*/%&|^]|-|&&|\|\||<<|>>|>>>|<=|>=|<|>)'$/.test(category))
+    return category;
+  const unary = /^bad operand type (.+) for unary operator '(?:!|~|[+-]|\+\+|--)'$/.exec(category);
+  if (unary && safeType(unary[1], identifiers)) return category;
+  const incomparable = /^incomparable types: (.+) and (.+)$/.exec(category);
+  if (incomparable && safeType(incomparable[1], identifiers) && safeType(incomparable[2], identifiers)) return category;
+  const dereference = /^(.+) cannot be dereferenced$/.exec(category);
+  if (dereference && safeType(dereference[1], identifiers)) return category;
+  const final = /^cannot assign a value to final variable (.+)$/.exec(category);
+  if (final && safeIdentifier(final[1], identifiers)) return category;
+  if (
+    category === 'unexpected type' &&
+    uniqueField(continuation, 'required') === 'variable' &&
+    uniqueField(continuation, 'found') === 'value'
+  )
+    return 'unexpected type\nrequired: variable\nfound: value';
+  const nonstatic = /^non-static (method|variable) (.+) cannot be referenced from a static context$/.exec(category);
+  if (
+    nonstatic &&
+    (nonstatic[1] === 'method' ? safeSymbol(nonstatic[2], identifiers) : safeIdentifier(nonstatic[2], identifiers))
+  )
+    return category;
+  const uninitialized = /^variable (.+) might not have been initialized$/.exec(category);
+  if (uninitialized && safeIdentifier(uninitialized[1], identifiers)) return category;
+  const array = /^array required, but (.+) found$/.exec(category);
+  if (array && safeType(array[1], identifiers)) return category;
+  const duplicateClass = /^duplicate class: (.+)$/.exec(category);
+  if (duplicateClass && safeIdentifier(duplicateClass[1], identifiers)) return category;
+  const exception = /^unreported exception (.+); must be caught or declared to be thrown$/.exec(category);
+  if (exception && safeType(exception[1], identifiers)) return category;
+  const override = /^(.+\(.*\)) in (.+) cannot override (.+\(.*\)) in (.+)$/.exec(category);
+  if (
+    override &&
+    safeSymbol(override[1], identifiers) &&
+    safeIdentifier(override[2], identifiers) &&
+    safeSymbol(override[3], identifiers) &&
+    safeIdentifier(override[4], identifiers)
+  )
+    return category;
+  if (/^illegal character: '\\u[0-9a-fA-F]{4}'$/.test(category)) return category;
+  return;
 }
 
 function uniqueField(lines: string[], name: string): string | undefined {

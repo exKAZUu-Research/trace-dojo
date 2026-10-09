@@ -515,12 +515,13 @@ test('challenge Reset restores the exact starter without submitting or changing 
 });
 
 test('challenge compiler feedback reaches the editor and survives result dismissal', async () => {
-  const message = '代入する値や引数の型を確認してください。';
+  const message = '代入する値の種類を確認してください。';
+  const originalMessage = 'incompatible types: boolean cannot be converted to int';
   transport.start.mockResolvedValue(blankDisplay);
   transport.submitBlank.mockResolvedValue({
     status: 'incorrect',
     detail: 'Compile error.',
-    diagnostics: [{ line: 2, message }],
+    diagnostics: [{ line: 2, message, originalMessage }],
   });
   const user = userEvent.setup();
   renderPage('fillInBlank');
@@ -532,6 +533,7 @@ test('challenge compiler feedback reaches the editor and survives result dismiss
   await user.keyboard('{Escape}');
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   expect(screen.getByText(message)).toBeVisible();
+  expect(screen.getByText(originalMessage, { exact: false })).toBeVisible();
   await waitFor(() => expect(document.querySelector('.cm-lintRange-error')).toBeInTheDocument());
   expect(transport.submitBlank).toHaveBeenCalledTimes(1);
 });
