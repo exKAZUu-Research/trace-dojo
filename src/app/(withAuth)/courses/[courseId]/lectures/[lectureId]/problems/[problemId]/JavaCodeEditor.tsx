@@ -150,16 +150,18 @@ export const JavaCodeEditor: React.FC<Props> = ({ ref, value, disabled, onChange
   return (
     <Box className={styles.editor} sx={{ '--editor-font-size': `${fontSize / 8}rem` }}>
       <div ref={host} className={styles.host} />
-      <HStack position="absolute" top="8px" right="8px" spacing="4px">
+      <HStack position="absolute" top="8px" right="8px" spacing="4px" zIndex={1} pointerEvents="none">
         <IconButton
           aria-label="コードを縮小"
           title="コードを縮小"
           type="button"
-          icon={<MdOutlineZoomOut />}
+          icon={<MdOutlineZoomOut size={20} />}
           size="sm"
           width="32px"
           height="32px"
           variant="ghost"
+          bg="rgba(255, 255, 255, 0.8)"
+          pointerEvents="auto"
           isDisabled={fontSize === 6}
           onClick={() => setFontSize((size) => Math.max(6, size - 1))}
         />
@@ -167,11 +169,13 @@ export const JavaCodeEditor: React.FC<Props> = ({ ref, value, disabled, onChange
           aria-label="コードを拡大"
           title="コードを拡大"
           type="button"
-          icon={<MdOutlineZoomIn />}
+          icon={<MdOutlineZoomIn size={20} />}
           size="sm"
           width="32px"
           height="32px"
           variant="ghost"
+          bg="rgba(255, 255, 255, 0.8)"
+          pointerEvents="auto"
           isDisabled={fontSize === 16}
           onClick={() => setFontSize((size) => Math.min(16, size + 1))}
         />

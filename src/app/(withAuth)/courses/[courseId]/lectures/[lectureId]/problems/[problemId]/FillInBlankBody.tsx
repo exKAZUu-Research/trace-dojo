@@ -147,7 +147,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
                 variant="outline"
                 aria-label="元に戻す"
                 title="元に戻す"
-                icon={<MdUndo />}
+                icon={<MdUndo size={24} />}
                 isDisabled={isEditorLocked || !history.canUndo}
                 onClick={() => {
                   if (!isEditorLocked) editor.current?.undo();
@@ -158,7 +158,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
                 variant="outline"
                 aria-label="やり直す"
                 title="やり直す"
-                icon={<MdRedo />}
+                icon={<MdRedo size={24} />}
                 isDisabled={isEditorLocked || !history.canRedo}
                 onClick={() => {
                   if (!isEditorLocked) editor.current?.redo();
