@@ -98,16 +98,51 @@ export function javaCompletion(context: CompletionContext): CompletionResult | n
   ];
   if (word?.text) {
     const seen = new Set(options.map(({ label }) => label));
+    const methodNames = declaredMethodNames(context, from);
+    const seenMethods = new Set([...snippets, ...keywords].map(({ label }) => label));
     const source = maskJavaNonCode(state.doc.toString());
     for (const match of source.matchAll(/[\p{L}_$][\p{L}\p{N}\p{M}_$]*/gu)) {
       if (match.index <= from && match.index + match[0].length >= pos) continue;
       const label = match[0];
+      if (methodNames.has(label)) {
+        if (!seenMethods.has(label)) {
+          seenMethods.add(label);
+          options.push({ label, type: 'method', detail: 'コード内のメソッド' });
+        }
+        continue;
+      }
       if (seen.has(label)) continue;
       seen.add(label);
       options.push({ label, type: 'text', detail: 'コード内の単語' });
     }
   }
   return { from, options };
+}
+
+function declaredMethodNames(context: CompletionContext, from: number): Set<string> {
+  const { state, pos } = context;
+  const names = new Set<string>();
+  const tree = ensureSyntaxTree(state, state.doc.length, 20);
+  tree?.iterate({
+    enter(candidate) {
+      if (candidate.name !== 'MethodDeclaration') return;
+      const declaration = candidate.node;
+      const definition = declaration.getChild('Definition');
+      const parameters = declaration.getChild('FormalParameters');
+      if (!definition || !parameters?.getChild('(') || !parameters.getChild(')')) return;
+      if (definition.from <= from && definition.to >= pos) return;
+      const body = declaration.getChild('Block');
+      let headerError = false;
+      declaration.cursor().iterate((part) => {
+        if (body && part.from >= body.from && part.name === 'Block') return false;
+        if (body && part.from > body.from) return false;
+        if (part.type.isError) headerError = true;
+      });
+      const name = state.sliceDoc(definition.from, definition.to);
+      if (!headerError && /^[\p{L}_$][\p{L}\p{N}\p{M}_$]*$/u.test(name)) names.add(name);
+    },
+  });
+  return names;
 }
 
 function visibleVariables(context: CompletionContext, node: SyntaxNode, from: number): VisibleVariable[] {

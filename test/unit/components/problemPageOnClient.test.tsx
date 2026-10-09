@@ -777,7 +777,7 @@ test.each([
   { prefix: 'a', name: 'a' },
   { prefix: 'm', name: 'main' },
 ])(
-  'source-word completion accepts $name literally despite an unfinished method and never grades',
+  'method completion accepts $name literally despite an unfinished method and never grades',
   async ({ prefix, name }) => {
     infrastructure.problemId = 'fillInBlank2';
     const user = userEvent.setup();
@@ -788,7 +788,8 @@ test.each([
     await replaceJavaSource(editor, before + after);
     await user.keyboard(`{ArrowLeft>${after.length}}`);
     await user.keyboard('{Control>} {/Control}');
-    const option = await screen.findByRole('option', { name: `${name}コード内の単語` });
+    const option = await screen.findByRole('option', { name: `${name}コード内のメソッド` });
+    expect(option.querySelector('.cm-completionIcon-method')).toBeInTheDocument();
     if (prefix === 'a') {
       expect(screen.getAllByRole('option', { name: /^args/ })).toHaveLength(1);
       expect(screen.getByRole('option', { name: 'args' })).toBeVisible();
@@ -821,7 +822,8 @@ test('source-word completion refreshes edited code and excludes comments, litera
   await replaceJavaSource(editor, before + after);
   await user.keyboard(`{ArrowLeft>${after.length}}`);
   await user.keyboard('{Control>} {/Control}');
-  await screen.findByRole('option', { name: 'wordOldコード内の単語' });
+  const original = await screen.findByRole('option', { name: 'wordOldコード内のメソッド' });
+  expect(original.querySelector('.cm-completionIcon-method')).toBeInTheDocument();
   for (const name of ['wordComment', 'wordBlock', 'wordString', 'wordTextBlock', 'wordCaretOnly']) {
     expect(screen.queryByRole('option', { name: new RegExp(`^${name}`) })).not.toBeInTheDocument();
   }
@@ -830,11 +832,71 @@ test('source-word completion refreshes edited code and excludes comments, litera
   await replaceJavaSource(editor, edited + after);
   await user.keyboard(`{ArrowLeft>${after.length}}`);
   await user.keyboard('{Control>} {/Control}');
-  const renamed = await screen.findByRole('option', { name: 'word新$名コード内の単語' });
+  const renamed = await screen.findByRole('option', { name: 'word新$名コード内のメソッド' });
+  expect(renamed.querySelector('.cm-completionIcon-method')).toBeInTheDocument();
   expect(screen.queryByRole('option', { name: /^wordOld/ })).not.toBeInTheDocument();
   expect(screen.queryByRole('option', { name: /^wordCaretOnly/ })).not.toBeInTheDocument();
   await user.click(renamed);
   expect(readRenderedJavaSource(editor)).toBe(edited.slice(0, -4) + 'word新$名' + after);
+  expect(infrastructure.grade).not.toHaveBeenCalled();
+});
+
+test('method completion discovers document declarations and preserves a same-named variable without overload duplicates', async () => {
+  infrastructure.problemId = 'fillInBlank2';
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
+  const before = `interface Actions { void actionInterface(); }
+    class Base { void actionBase() {} }
+    class Main extends Base implements Actions {
+      void draw() { int actionShared = 1; action`;
+  const after = `; }
+      void actionLater() {}
+      void actionShared() {}
+      void actionShared(int amount) {}
+    }`;
+  await replaceJavaSource(editor, before + after);
+  await user.keyboard(`{ArrowLeft>${after.length}}`);
+  await user.keyboard('{Control>} {/Control}');
+  await screen.findByRole('option', { name: 'actionLaterコード内のメソッド' });
+  for (const name of ['actionInterface', 'actionBase', 'actionLater', 'actionShared']) {
+    const options = screen.getAllByRole('option', { name: `${name}コード内のメソッド` });
+    expect(options).toHaveLength(1);
+    expect(options[0].querySelector('.cm-completionIcon-method')).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: `${name}コード内の単語` })).not.toBeInTheDocument();
+  }
+  const variable = screen.getByRole('option', { name: 'actionShared' });
+  expect(variable.querySelector('.cm-completionIcon-variable')).toBeInTheDocument();
+  expect(screen.getAllByRole('option', { name: /^actionShared/ })).toHaveLength(2);
+  await user.click(screen.getByRole('option', { name: 'actionSharedコード内のメソッド' }));
+  expect(readRenderedJavaSource(editor)).toBe(before.slice(0, -6) + 'actionShared' + after);
+  expect(infrastructure.grade).not.toHaveBeenCalled();
+});
+
+test('method completion keeps malformed headers, invocation-only names and constructor-only names as neutral words', async () => {
+  infrastructure.problemId = 'fillInBlank2';
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
+  const before = `class candidateConstructor { candidateConstructor() {} }
+    class Broken { void candidateBroken( { value; } }
+    class InvalidThrows { void candidateHeaderError() throws {} }
+    class Main {
+      void candidateValid() {}
+      void draw() { candidateInvoked(); candidate`;
+  const after = '; } }';
+  await replaceJavaSource(editor, before + after);
+  await user.keyboard(`{ArrowLeft>${after.length}}`);
+  await user.keyboard('{Control>} {/Control}');
+  const valid = await screen.findByRole('option', { name: 'candidateValidコード内のメソッド' });
+  expect(valid.querySelector('.cm-completionIcon-method')).toBeInTheDocument();
+  for (const name of ['candidateBroken', 'candidateHeaderError', 'candidateInvoked', 'candidateConstructor']) {
+    const option = screen.getByRole('option', { name: `${name}コード内の単語` });
+    expect(option.querySelector('.cm-completionIcon-text')).toBeInTheDocument();
+    expect(screen.getAllByRole('option', { name: new RegExp(`^${name}`) })).toHaveLength(1);
+  }
+  await user.click(screen.getByRole('option', { name: 'candidateBrokenコード内の単語' }));
+  expect(readRenderedJavaSource(editor)).toBe(before.slice(0, -9) + 'candidateBroken' + after);
   expect(infrastructure.grade).not.toHaveBeenCalled();
 });
 
@@ -888,10 +950,11 @@ test('variable completion preserves richer scoped candidates alongside neutral s
     expect(screen.getByRole('option', { name })).toBeVisible();
     expect(screen.getAllByRole('option', { name: new RegExp(`^${name}`) })).toHaveLength(1);
   }
-  for (const name of ['scopeSibling', 'scopeLater', 'scopeMethod', 'ScopeClass']) {
+  for (const name of ['scopeSibling', 'scopeLater', 'ScopeClass']) {
     expect(screen.getByRole('option', { name: `${name}コード内の単語` })).toBeVisible();
     expect(screen.queryByRole('option', { name })).not.toBeInTheDocument();
   }
+  expect(screen.getByRole('option', { name: 'scopeMethodコード内のメソッド' })).toBeVisible();
   await user.click(screen.getByRole('option', { name: 'scopeSiblingコード内の単語' }));
   expect(readRenderedJavaSource(editor)).toBe(before.slice(0, -3) + 'scopeSibling' + after);
 });
