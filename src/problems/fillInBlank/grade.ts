@@ -1,10 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type { InstantiatedProblem } from '../instantiateProblem';
-import { SCOPE_ERROR_NAME, TRACE_BUDGET_EXCEEDED_MESSAGE, traceProgram } from '../traceProgram';
-import { logger } from '../../infrastructures/pino';
 
-import { fillBlanks, normalizeAnswer } from './blanks';
 import type { JavaExecutor } from './javaExecutors';
 import { createJudgeExecutor, createWandboxExecutor } from './javaExecutors';
 import {
@@ -15,15 +12,8 @@ import {
   MAX_JAVA_PROGRAM_LENGTH,
   parseJavaJudgeOutput,
 } from './javaProgram';
-import { extractNativeNames, translateJavaFragment, UnsupportedJavaError } from './javaToInstrumented';
 
-/**
- * 0: rejected by the static pre-filter before any Java execution,
- * 1: exact match with the model answers,
- * 2: re-execution with the instrumented (JavaScript) program,
- * 3: execution on Wandbox,
- * 4: execution on the judge service.
- */
+// Stages 1 and 2 remain valid in legacy submission history. New grading uses 0, 3, and 4.
 export type GradingStage = 0 | 1 | 2 | 3 | 4;
 
 export type FillInBlankGradingResult =
@@ -44,86 +34,12 @@ export interface GradingOptions {
 
 const defaultJavaExecutors: JavaExecutor[] = [createWandboxExecutor(), createJudgeExecutor()];
 
-export async function gradeFillInBlankAnswers(
+export async function gradeFillInBlankCode(
   problem: InstantiatedProblem,
-  answers: readonly string[],
+  userProgram: string,
   options?: GradingOptions
 ): Promise<FillInBlankGradingResult> {
-  if (answers.length !== problem.blankAnswers.length) {
-    return { status: 'incorrect', stage: 1, detail: 'The number of answers differs from the number of blanks.' };
-  }
-  if (answers.every((answer, index) => normalizeAnswer(answer) === normalizeAnswer(problem.blankAnswers[index]))) {
-    return { status: 'correct', stage: 1 };
-  }
-
-  // Stage 2 is authoritative for wrong answers, but its "correct" is provisional: the translator mirrors Java
-  // semantics for what it accepts, yet only javac can confirm that the answer is valid Java at all.
-  const stage2Result = gradeByInstrumentedProgram(problem, answers);
-  if (stage2Result?.status === 'incorrect') return stage2Result;
-  const javaResult = await gradeByJavaExecution(problem, answers, options?.javaExecutors ?? defaultJavaExecutors);
-  if (javaResult.status === 'ungradable' && stage2Result) {
-    logger.warn('No Java executor was available; accepting the stage 2 verdict: %s', javaResult.detail);
-    return stage2Result;
-  }
-  return javaResult;
-}
-
-function gradeByInstrumentedProgram(
-  problem: InstantiatedProblem,
-  answers: readonly string[]
-): FillInBlankGradingResult | undefined {
-  const nativeNames = extractNativeNames(problem.instrumentedTemplate);
-  let translatedAnswers: string[];
-  try {
-    translatedAnswers = answers.map((answer) => translateJavaFragment(answer, nativeNames));
-  } catch (error) {
-    if (error instanceof UnsupportedJavaError) return;
-    throw error;
-  }
-
-  try {
-    const actual = traceProgram(
-      fillBlanks(problem.instrumentedTemplate, translatedAnswers),
-      fillBlanks(problem.displayProgramTemplate, answers),
-      problem.languageId,
-      { collectTrace: false }
-    );
-    const isCorrect =
-      isSameTurtleState(
-        { board: problem.finalBoard, turtles: problem.finalTurtles },
-        { board: actual.finalBoard, turtles: actual.finalTurtles }
-      ) && stringifyVariables(problem.finalVars) === stringifyVariables(actual.finalVars);
-    return isCorrect
-      ? { status: 'correct', stage: 2 }
-      : { status: 'incorrect', stage: 2, detail: 'The final state differs from the expected one.' };
-  } catch (error) {
-    // A JavaScript engine error or an exhausted budget may be a translator limitation, so let real Java judge the answer.
-    // Errors thrown by the turtle runtime itself (e.g. out of bounds) mirror Java behavior and stay authoritative.
-    if (
-      error instanceof SyntaxError ||
-      error instanceof TypeError ||
-      error instanceof ReferenceError ||
-      error instanceof RangeError ||
-      (error instanceof Error && (error.name === SCOPE_ERROR_NAME || error.message === TRACE_BUDGET_EXCEEDED_MESSAGE))
-    ) {
-      return;
-    }
-    return { status: 'incorrect', stage: 2, detail: `The program failed: ${String(error)}` };
-  }
-}
-
-function stringifyVariables(variables: Record<string, unknown>): string {
-  // Turtle bindings are not variables the student is asked about, so objects other than arrays are ignored.
-  const entries = Object.entries(variables).filter(([, value]) => typeof value !== 'object' || Array.isArray(value));
-  return JSON.stringify(entries.toSorted(([a], [b]) => a.localeCompare(b)));
-}
-
-async function gradeByJavaExecution(
-  problem: InstantiatedProblem,
-  answers: readonly string[],
-  executors: JavaExecutor[]
-): Promise<FillInBlankGradingResult> {
-  const userProgram = fillBlanks(problem.displayProgramTemplate, answers);
+  const executors = options?.javaExecutors ?? defaultJavaExecutors;
   const forbiddenPattern = findForbiddenJavaPattern(userProgram);
   if (forbiddenPattern) {
     return { status: 'incorrect', stage: 0, detail: `The program uses a forbidden feature: ${forbiddenPattern}` };

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { ChakraProvider } from '@chakra-ui/react';
+import { composeWithoutSubmitting, expectJavaSource, replaceJavaSource } from '../../helpers/javaEditor';
 import { StrictMode } from 'react';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -34,11 +35,11 @@ const blankDisplay = {
   problemFormat: 'fillInBlank' as const,
   sessionId: 23,
   problemId: 'fillInBlank2',
-  displayProgram: 'class Main { int x = 【1】; }',
-  blankCount: 1,
+  displayProgram: 'class Main { public static void main(String[] args) { int x = 【1】; } }',
   finalBoard: '.......\n.......\n.......\n.......\n.......\n.......\n.......',
   finalTurtles: [],
-  finalVars: {},
+  blankCount: 1,
+  finalVars: { legacyVariable: 3 },
   completed: false,
 };
 const regularDisplay = {
@@ -69,7 +70,7 @@ beforeEach(() => vi.clearAllMocks());
 test('a valid URL format starts exactly once under StrictMode and renders the exercise', async () => {
   transport.start.mockResolvedValue(blankDisplay);
   renderPage('fillInBlank', true);
-  expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeVisible();
+  expect(await screen.findByRole('textbox', { name: /Java/ })).toBeVisible();
   expect(transport.start).toHaveBeenCalledTimes(1);
   expect(transport.start).toHaveBeenCalledWith({
     courseId: 'test',
@@ -85,7 +86,7 @@ test('a URL format shows a loading indicator until the first exercise arrives', 
   renderPage('fillInBlank');
   expect(await screen.findByText('問題を準備しています')).toBeInTheDocument();
   await act(async () => resolve(blankDisplay));
-  expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeVisible();
+  expect(await screen.findByRole('textbox', { name: /Java/ })).toBeVisible();
   expect(screen.queryByText('問題を準備しています')).not.toBeInTheDocument();
 });
 
@@ -115,14 +116,14 @@ test('a browser format change starts the new format and ignores the stale previo
 
   rendered.rerender(page('fillInBlank'));
 
-  expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeVisible();
+  expect(await screen.findByRole('textbox', { name: /Java/ })).toBeVisible();
   expect(transport.start).toHaveBeenNthCalledWith(2, {
     courseId: 'test',
     lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
     problemFormat: 'fillInBlank',
   });
   await act(async () => resolveRegular(regularDisplay));
-  expect(screen.getByRole('textbox', { name: '空欄【1】' })).toBeVisible();
+  expect(screen.getByRole('textbox', { name: /Java/ })).toBeVisible();
 });
 
 test('returning to the same valid format after a missing format drops the old exercise and starts a fresh request', async () => {
@@ -174,7 +175,7 @@ test('a URL prop update after selecting a format does not duplicate the start re
   await act(async () => resolveBlank(blankDisplay));
 
   expect(transport.start).toHaveBeenCalledTimes(1);
-  expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeVisible();
+  expect(await screen.findByRole('textbox', { name: /Java/ })).toBeVisible();
 });
 
 test('a missing format opens the selector without starting and close returns to the lecture', async () => {
@@ -195,7 +196,7 @@ test('no-problems feedback stays inside the modal and the same format can be ret
   expect(screen.getByRole('dialog')).toContainElement(status);
   expect(status).toHaveTextContent(/穴埋め問題.*出題できません/);
   await user.click(screen.getByRole('button', { name: /穴埋め問題/ }));
-  expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeVisible();
+  expect(await screen.findByRole('textbox', { name: /Java/ })).toBeVisible();
   expect(transport.start).toHaveBeenCalledTimes(2);
 });
 
@@ -205,7 +206,7 @@ test('an empty regular format can recover by choosing fill-in-blank', async () =
   renderPage('regular');
   expect(await screen.findByRole('status')).toHaveTextContent(/通常問題.*出題できません/);
   await user.click(screen.getByRole('button', { name: /穴埋め問題/ }));
-  expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeVisible();
+  expect(await screen.findByRole('textbox', { name: /Java/ })).toBeVisible();
   expect(transport.start).toHaveBeenNthCalledWith(2, {
     courseId: 'test',
     lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
@@ -232,7 +233,10 @@ test('a fill-in-blank submission in an expired learning period shows a reload no
   transport.submitBlank.mockRejectedValue({ data: { code: 'NOT_FOUND' } });
   const user = userEvent.setup();
   renderPage('fillInBlank');
-  await user.type(await screen.findByRole('textbox', { name: '空欄【1】' }), 'x + 1');
+  await replaceJavaSource(
+    await screen.findByRole('textbox', { name: /Java/ }),
+    'class Main { public static void main(String[] args) {} }'
+  );
   await user.click(screen.getByRole('button', { name: /提出/ }));
   expect(await screen.findByRole('button', { name: 'ページを再読み込み' })).toBeVisible();
   expect(screen.queryByText(/もう一度提出してください/)).not.toBeInTheDocument();
@@ -243,8 +247,8 @@ test('completed fill-in-blank next keeps the active format and renders the retur
   transport.next.mockResolvedValue({ ...blankDisplay, sessionId: 24 });
   const user = userEvent.setup();
   renderPage('fillInBlank');
-  const input = await screen.findByRole('textbox', { hidden: true, name: '空欄【1】' });
-  expect(input).toBeDisabled();
+  const input = await screen.findByRole('textbox', { hidden: true, name: /Java/ });
+  expect(input).toHaveAttribute('contenteditable', 'false');
   expect(screen.getByText(/プログラムを実行した後の盤面/)).toBeVisible();
   await user.keyboard('{Escape}');
   expect(screen.getByRole('alertdialog')).toBeVisible();
@@ -255,7 +259,7 @@ test('completed fill-in-blank next keeps the active format and renders the retur
     sessionId: 23,
     problemFormat: 'fillInBlank',
   });
-  expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeEnabled();
+  expect(await screen.findByRole('textbox', { name: /Java/ })).toHaveAttribute('contenteditable', 'true');
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
 });
 
@@ -266,11 +270,19 @@ test('a just-completed fill-in-blank keeps its answer, deduplicates Next, and re
   transport.next.mockReturnValue(new Promise((resolve) => (resolveNext = resolve)));
   const user = userEvent.setup();
   renderPage('fillInBlank');
-  const input = await screen.findByRole('textbox', { name: '空欄【1】' });
-  await user.type(input, 'x + 1');
+  const input = await screen.findByRole('textbox', { name: /Java/ });
+  const code = 'class Changed { public static void main(String[] args) { int x = 2; } }';
+  await replaceJavaSource(input, code);
   await user.click(screen.getByRole('button', { name: '提出' }));
   const dialog = await screen.findByRole('alertdialog');
-  expect(input).toHaveValue('x + 1');
+  expectJavaSource(input, code);
+  expect(transport.submitBlank).toHaveBeenCalledWith({
+    courseId: 'test',
+    lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
+    sessionId: 23,
+    code,
+  });
+  expect(input).toHaveAttribute('contenteditable', 'false');
   expect(screen.getByRole('button', { hidden: true, name: '提出' })).toBeDisabled();
   await user.keyboard('{Escape}');
   expect(dialog).toBeInTheDocument();
@@ -284,9 +296,9 @@ test('a just-completed fill-in-blank keeps its answer, deduplicates Next, and re
     problemFormat: 'fillInBlank',
   });
   await act(async () => resolveNext({ ...blankDisplay, sessionId: 24 }));
-  const freshInput = await screen.findByRole('textbox', { name: '空欄【1】' });
-  expect(freshInput).toBeEnabled();
-  expect(freshInput).toHaveValue('');
+  const freshInput = await screen.findByRole('textbox', { name: /Java/ });
+  expect(freshInput).toHaveAttribute('contenteditable', 'true');
+  expectJavaSource(freshInput, blankDisplay.displayProgram);
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
 });
 
@@ -326,7 +338,7 @@ test('an error stays inside the modal and choosing the other format updates the 
   expect(navigation.push).toHaveBeenCalledWith(
     '/courses/test/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d/challenge?format=fillInBlank'
   );
-  expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeVisible();
+  expect(await screen.findByRole('textbox', { name: /Java/ })).toBeVisible();
   expect(transport.start).toHaveBeenNthCalledWith(2, {
     courseId: 'test',
     lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
@@ -363,4 +375,37 @@ test('a deferred result from before close does not replace the exercise started 
   await act(async () => resolve(blankDisplay));
   expect(screen.getByRole('heading', { level: 1, name: '穴埋めのテスト用問題(3)' })).toBeVisible();
   expect(transport.start).toHaveBeenCalledTimes(2);
+});
+
+test('full-source edits and Enter/IME do not execute, and pending submission freezes the editor', async () => {
+  let finish!: (result: { status: string; detail: string }) => void;
+  transport.start.mockResolvedValue(blankDisplay);
+  transport.submitBlank.mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    })
+  );
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
+  expectJavaSource(editor, blankDisplay.displayProgram);
+  expect(editor).toHaveAttribute('aria-multiline', 'true');
+  const code = 'class EntirelyChanged {\n  public static void main(String[] args) {}\n}';
+  await replaceJavaSource(editor, code);
+  await user.keyboard('{End}{Enter}');
+  composeWithoutSubmitting(editor);
+  expect(transport.submitBlank).not.toHaveBeenCalled();
+  await replaceJavaSource(editor, code);
+  await user.dblClick(screen.getByRole('button', { name: '提出' }));
+  expect(transport.submitBlank).toHaveBeenCalledTimes(1);
+  expect(transport.submitBlank).toHaveBeenCalledWith({
+    courseId: 'test',
+    lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
+    sessionId: 23,
+    code,
+  });
+  expect(editor).toHaveAttribute('contenteditable', 'false');
+  await act(async () => finish({ status: 'incorrect', detail: 'The final state differs from the expected one.' }));
+  expect(await screen.findByRole('alertdialog')).toHaveTextContent('不正解');
+  expectJavaSource(editor, code);
 });

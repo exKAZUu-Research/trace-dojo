@@ -3,39 +3,24 @@
 import { useParams, useRouter } from 'next/navigation';
 import type React from 'react';
 import { useState } from 'react';
-import { useImmer } from 'use-immer';
 
 import { BoardViewer } from './BoardViewer';
-import { SyntaxHighlighter } from './SyntaxHighlighter';
-import { Variables } from './Variables';
+import { JavaCodeEditor } from './JavaCodeEditor';
 import { ResultAlertDialog, type CompletionAction } from './ResultAlertDialog';
 
-import {
-  Box,
-  Button,
-  Card,
-  Center,
-  Flex,
-  Heading,
-  HStack,
-  Input,
-  Text,
-  VStack,
-} from '@/infrastructures/useClient/chakra';
-import { toBlankPlaceholder } from '@/problems/fillInBlank/blanks';
+import { Box, Button, Card, Center, Flex, Heading, Text, VStack } from '@/infrastructures/useClient/chakra';
+import { hasIncompleteJavaPlaceholders } from '@/problems/fillInBlank/javaSource';
 import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
-import type { TraceItemVariable, TurtleTrace } from '@/problems/traceProgram';
+import type { TurtleTrace } from '@/problems/traceProgram';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 
 interface Props {
   problem: {
     displayProgram: string;
-    blankCount: number;
     finalBoard: string;
     finalTurtles: TurtleTrace[];
-    finalVars: TraceItemVariable;
   };
-  gradeAnswers: (answers: string[]) => Promise<FillInBlankVerdict>;
+  gradeCode: (code: string) => Promise<FillInBlankVerdict>;
   completionActions?: CompletionAction[];
   completionMessage?: string;
   isCompleted?: boolean;
@@ -44,20 +29,27 @@ interface Props {
 export const FillInBlankBody: React.FC<Props> = (props) => {
   const params = useParams<{ courseId: CourseId; lectureId: string; problemId: ProblemId }>();
   const router = useRouter();
-  const [answers, updateAnswers] = useImmer<string[]>(Array.from({ length: props.problem.blankCount }, () => ''));
+  const [code, setCode] = useState(props.problem.displayProgram);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [alert, setAlert] = useState<{ title: string; message: string; isCompleted: boolean }>();
-  const hasVariables = Object.keys(props.problem.finalVars).length > 0;
-  const isIncomplete = answers.some((answer) => answer.trim() === '');
+  const isIncomplete = code.trim() === '';
   const isCompleted = props.isCompleted || alert?.isCompleted === true;
 
   const handleSubmit = async (): Promise<void> => {
     if (isSubmitting || alert || isIncomplete || isCompleted) return;
+    if (hasIncompleteJavaPlaceholders(code)) {
+      setAlert({
+        title: 'コードが未完成です',
+        message: '【1】などの空欄をJavaのコードに書き換えてから提出してください。',
+        isCompleted: false,
+      });
+      return;
+    }
     setIsSubmitting(true);
     try {
       let result: FillInBlankVerdict;
       try {
-        result = await props.gradeAnswers(answers);
+        result = await props.gradeCode(code);
       } catch (error) {
         console.error(error);
         setAlert({
@@ -104,47 +96,17 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
             <VStack align="stretch" borderBottomWidth="1px" p={5}>
               <Heading size="md">問題</Heading>
               <Box>
-                プログラムを実行した後の盤面{hasVariables ? 'と変数の値' : ''}が右側のようになるように、
-                <Box as="span" fontWeight="bold">
-                  空欄
-                  {Array.from({ length: props.problem.blankCount }, (_, index) => toBlankPlaceholder(index + 1)).join(
-                    '、'
-                  )}
-                </Box>
-                に入るJavaのコードを入力し、提出ボタンを押してください。
+                プログラムを実行した後の盤面と亀の位置・向きが右側のようになるように、Javaのコードを編集して提出してください。
+                【1】などの空欄を含め、プログラム全体を書き換えられます。
               </Box>
             </VStack>
           </VStack>
 
-          <SyntaxHighlighter code={props.problem.displayProgram} programmingLanguageId="java" />
-
+          <JavaCodeEditor value={code} disabled={isSubmitting || isCompleted} onChange={setCode} />
+          <Text id="java-editor-help" fontSize="sm">
+            Tabでインデントできます。エディターから移動するにはEscを押してからTabを押してください。実行は提出時のみ行います。
+          </Text>
           <VStack align="stretch" as={Card} p={5} spacing={3}>
-            {answers.map((answer, index) => (
-              <HStack key={index} spacing={3}>
-                <Text flexShrink={0} fontWeight="bold">
-                  {toBlankPlaceholder(index + 1)}
-                </Text>
-                <Input
-                  aria-label={`空欄${toBlankPlaceholder(index + 1)}`}
-                  // oxlint-disable-next-line jsx-a11y/no-autofocus -- 空欄の入力がこのページの主目的のため。
-                  autoFocus={index === 0}
-                  bg="white"
-                  fontFamily="mono"
-                  spellCheck={false}
-                  isDisabled={isCompleted}
-                  value={answer}
-                  onChange={(event) => {
-                    updateAnswers((draft) => {
-                      draft[index] = event.target.value;
-                    });
-                  }}
-                  onKeyDown={(event) => {
-                    // Enter also confirms a Japanese IME conversion, which must not submit.
-                    if (event.key === 'Enter' && !event.nativeEvent.isComposing) void handleSubmit();
-                  }}
-                />
-              </HStack>
-            ))}
             <Button
               alignSelf="flex-end"
               colorScheme="brand"
@@ -162,12 +124,6 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
           <Center>
             <BoardViewer board={props.problem.finalBoard} turtles={props.problem.finalTurtles} />
           </Center>
-          {hasVariables && (
-            <>
-              <Heading size="md">実行後の変数の値</Heading>
-              <Variables traceItemVars={props.problem.finalVars} />
-            </>
-          )}
         </VStack>
       </Flex>
 

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { maskJavaNonCode, prepareJavaEntry } from './javaSource';
+
 import {
   TURTLE_GRAPHICS_BOARD_COLUMNS as GRID_COLUMNS,
   TURTLE_GRAPHICS_BOARD_ROWS as GRID_ROWS,
@@ -21,7 +23,7 @@ const javaExecutionResultSchema = z.object({
 export type JavaTurtleState = z.infer<typeof javaExecutionResultSchema>;
 
 /**
- * Names the features an answer to a turtle-graphics blank has no use for, so that a learner reading the verdict
+ * Names unsupported features in the educational compilation unit so that a learner reading the verdict
  * is told which one they reached for instead of being handed a compiler error about it. It guards nothing:
  * Wandbox and the judge service each run the program on their own machines, and a submission determined to
  * defeat this list would only be changing its own grade.
@@ -40,14 +42,8 @@ const forbiddenPatterns = [
 export function findForbiddenJavaPattern(userProgram: string): string | undefined {
   // Unicode escapes are checked on the raw text; the other names only matter in code, not in literals or comments.
   if (userProgram.includes(String.raw`\u`)) return String.raw`\u`;
-  const code = userProgram
-    .replaceAll(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g, '""')
-    .replaceAll(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+  const code = maskJavaNonCode(userProgram);
   return forbiddenPatterns.find((pattern) => pattern.test(code))?.source;
-}
-
-function extractPublicClassName(program: string): string | undefined {
-  return /\bpublic\s+(?:final\s+)?class\s+([\p{L}_$][\p{L}\p{N}_$]*)/u.exec(program)?.[1];
 }
 
 /**
@@ -56,11 +52,8 @@ function extractPublicClassName(program: string): string | undefined {
  * prints there — a learner's own debugging output included — cannot be mistaken for the result.
  */
 export function buildJavaJudgeProgram(userProgram: string, resultMarker: string): string {
-  const mainClassName = extractPublicClassName(userProgram) ?? 'Main';
-  // Both executors run the class named after the source file, and javac allows a single public class per file,
-  // so the wrapper is the public one and the template's own declaration — the first one, before the blanks —
-  // loses its `public` modifier. A `public class` an answer declares keeps its modifier and fails to compile,
-  // which is a verdict of its own.
+  const { className: mainClassName, source } = prepareJavaEntry(userProgram);
+  // Both providers name the source file after the public wrapper class.
   return `
 public class ${JAVA_JUDGE_CLASS_NAME} {
   public static void main(String[] args) {
@@ -78,7 +71,7 @@ public class ${JAVA_JUDGE_CLASS_NAME} {
   }
 }
 
-${userProgram.trim().replace(/^public\s+(?=(?:abstract\s+|final\s+)*class\b)/m, '')}
+${source}
 
 class Turtle {
   static final int COLUMNS = ${GRID_COLUMNS};

@@ -71,15 +71,15 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   const gradeFillInBlankAnswersMutation = backendTrpcReact.gradeFillInBlankAnswers.useMutation({
     onError: onSessionError,
   });
-  const gradeAnswers = useCallback(
-    async (answers: string[]): Promise<FillInBlankGradingResult> => {
+  const gradeCode = useCallback(
+    async (code: string): Promise<FillInBlankGradingResult> => {
       const newProblemSession = await updateProblemSessionMutation.mutateAsync({
         id: problemSession.id,
         incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
       });
       return await gradeFillInBlankAnswersMutation.mutateAsync({
         sessionId: problemSession.id,
-        answers,
+        code,
         elapsedMilliseconds: newProblemSession.elapsedMilliseconds,
       });
     },
@@ -160,13 +160,12 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
 
       {isFillInBlank ? (
         <FillInBlankBody
-          gradeAnswers={gradeAnswers}
+          key={`${problemSession.id}:${problem.displayProgram}`}
+          gradeCode={gradeCode}
           problem={{
             displayProgram: problem.displayProgram,
-            blankCount: problem.blankAnswers.length,
             finalBoard: problem.finalBoard,
             finalTurtles: problem.finalTurtles,
-            finalVars: problem.finalVars,
           }}
         />
       ) : (

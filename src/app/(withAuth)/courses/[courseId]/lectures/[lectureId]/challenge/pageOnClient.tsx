@@ -153,10 +153,10 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
     { label: '終わる', onClick: back },
     { label: '次の問題へ', colorScheme: 'brand', onClick: nextBlank },
   ];
-  const gradeBlank = async (answers: string[]): Promise<FillInBlankVerdict> => {
+  const gradeBlank = async (code: string): Promise<FillInBlankVerdict> => {
     if (!exercise) throw new Error('No active exercise');
     return await detectStaleSession(
-      submitBlank.mutateAsync({ courseId, lectureId, sessionId: exercise.sessionId, answers })
+      submitBlank.mutateAsync({ courseId, lectureId, sessionId: exercise.sessionId, code })
     );
   };
 
@@ -208,7 +208,7 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
           <ProblemPageHeader courseId={courseId} lectureId={lectureId} problemId={exercise.problemId as ProblemId} />
           <FillInBlankBody
             problem={exercise}
-            gradeAnswers={gradeBlank}
+            gradeCode={gradeBlank}
             completionActions={actions}
             completionMessage="正解です！次の問題へ進めます。"
             isCompleted={exercise.completed}
