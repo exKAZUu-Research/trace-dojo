@@ -8,6 +8,16 @@ import {
 import { ensureSyntaxTree } from '@codemirror/language';
 
 import { isJavaComposing } from './javaEditorDiagnostics';
+import { maskJavaNonCode } from './javaSource';
+
+type SyntaxNode = NonNullable<ReturnType<typeof ensureSyntaxTree>>['topNode'];
+interface VisibleVariable {
+  name: string;
+  turtle: boolean;
+  position: number;
+}
+const scopeNames =
+  /^(Block|ConstructorBody|SwitchBlock|ForStatement|EnhancedForStatement|MethodDeclaration|ConstructorDeclaration|LambdaExpression|CatchClause)$/;
 
 const identifier = /[\p{L}\p{N}\p{M}_$]*/u;
 const methods: Completion[] = [
@@ -63,9 +73,10 @@ const snippets = [
 export function javaCompletion(context: CompletionContext): CompletionResult | null {
   const { state, pos } = context;
   if (state.readOnly || isJavaComposing(state) || state.doc.length > 20_000) return null;
+  if (!maskJavaNonCode(state.sliceDoc(0, pos) + 'x').endsWith('x')) return null;
   const tree = ensureSyntaxTree(state, pos, 20);
   if (!tree) return null;
-  let node = tree.resolveInner(pos, -1);
+  const node = tree.resolveInner(pos, -1);
   for (let current: typeof node | null = node; current; current = current.parent) {
     if (/Comment|StringLiteral|CharacterLiteral|TextBlock/.test(current.name)) return null;
   }
@@ -75,70 +86,96 @@ export function javaCompletion(context: CompletionContext): CompletionResult | n
   const receiver = /([\p{L}_$][\p{L}\p{N}\p{M}_$]*)\.$/u.exec(before);
   if (receiver) {
     if (/[.\p{L}\p{N}\p{M}_$]$/u.test(before.slice(0, receiver.index).trimEnd())) return null;
-    const scopes: (typeof node)[] = [];
-    while (node.parent) {
-      if (node.name === 'ClassBody') break;
-      if (
-        /^(Block|SwitchBlock|ForStatement|EnhancedForStatement|MethodDeclaration|ConstructorDeclaration|LambdaExpression|CatchClause)$/.test(
-          node.name
-        )
-      )
-        scopes.push(node);
-      node = node.parent;
-    }
-    for (const scope of scopes) {
-      let found: boolean | undefined;
-      const cursor = scope.cursor();
-      cursor.iterate((candidate) => {
-        if (candidate.from >= from) return false;
-        if (
-          (candidate.from !== scope.from || candidate.to !== scope.to || candidate.name !== scope.name) &&
-          /^(Block|SwitchBlock|ClassBody|MethodDeclaration|ConstructorDeclaration|ForStatement|EnhancedForStatement|LambdaExpression|CatchClause)$/.test(
-            candidate.name
-          )
-        )
-          return false;
-        if (
-          (candidate.name === 'InferredParameters' || candidate.name === 'LambdaExpression') &&
-          candidate.node
-            .getChildren('Definition')
-            .some((definition) => state.sliceDoc(definition.from, definition.to) === receiver[1])
-        ) {
-          found = false;
-          return false;
-        }
-        if (
-          !/^(LocalVariableDeclaration|FormalParameter|SpreadParameter|CatchFormalParameter|ForSpec)$/.test(
-            candidate.name
-          )
-        )
-          return;
-        const declaration = candidate.node;
-        const definitions =
-          declaration.name === 'FormalParameter' ||
-          declaration.name === 'CatchFormalParameter' ||
-          declaration.name === 'ForSpec'
-            ? [declaration.getChild('Definition')]
-            : declaration.getChildren('VariableDeclarator').map((variable) => variable.getChild('Definition'));
-        if (
-          definitions.some((definition) => definition && state.sliceDoc(definition.from, definition.to) === receiver[1])
-        ) {
-          const type = declaration.getChild('TypeName');
-          found = Boolean(
-            type &&
-            state.sliceDoc(type.from, type.to) === 'Turtle' &&
-            declaration.name !== 'SpreadParameter' &&
-            !declaration.getChild('ArrayType') &&
-            !declaration.getChild('Dimension') &&
-            !declaration.getChildren('VariableDeclarator').some((variable) => variable.getChild('Dimension'))
-          );
-        }
-        return false;
-      });
-      if (found !== undefined) return found ? { from, options: methods } : null;
-    }
-    return null;
+    const variable = visibleVariables(context, node, from).find((entry) => entry.name === receiver[1]);
+    return variable?.turtle ? { from, options: methods } : null;
   }
   if (before.endsWith('.') || (!context.explicit && !word?.text)) return null;
-  return { from, options: [...snippets, ...keywords] };
+  const variables = node.name === 'Definition' ? [] : visibleVariables(context, node, from);
+  return {
+    from,
+    options: [...variables.map(({ name }) => ({ label: name, type: 'variable' })), ...snippets, ...keywords],
+  };
+}
+
+function visibleVariables(context: CompletionContext, node: SyntaxNode, from: number): VisibleVariable[] {
+  const visible = new Map<string, VisibleVariable>();
+  let method: SyntaxNode | undefined;
+  const merge = (variables: VisibleVariable[]): void => {
+    for (const variable of variables.toSorted((a, b) => b.position - a.position)) {
+      if (!visible.has(variable.name)) visible.set(variable.name, variable);
+    }
+  };
+  for (let scope: SyntaxNode | null = node; scope; scope = scope.parent) {
+    if (scope.name === 'ClassBody') {
+      if (method) {
+        const staticOnly = Boolean(method.getChild('Modifiers')?.getChild('static'));
+        for (const field of scope.getChildren('FieldDeclaration')) {
+          if (staticOnly && !field.getChild('Modifiers')?.getChild('static')) continue;
+          merge(declarationVariables(context, field, Number.POSITIVE_INFINITY));
+        }
+      }
+      break;
+    }
+    if (!scopeNames.test(scope.name)) continue;
+    if (/^(MethodDeclaration|ConstructorDeclaration)$/.test(scope.name)) method = scope;
+    const variables: VisibleVariable[] = [];
+    const root = scope;
+    scope.cursor().iterate((candidate) => {
+      if (candidate.from >= from) return false;
+      if (
+        (candidate.from !== root.from || candidate.to !== root.to || candidate.name !== root.name) &&
+        (scopeNames.test(candidate.name) || /^(ClassBody|ClassDeclaration)$/.test(candidate.name))
+      )
+        return false;
+      if (/^(InferredParameters|LambdaExpression)$/.test(candidate.name)) {
+        variables.push(...declarationVariables(context, candidate.node, from));
+        if (candidate.name === 'InferredParameters') return false;
+      }
+      if (
+        !/^(LocalVariableDeclaration|FormalParameter|SpreadParameter|CatchFormalParameter|ForSpec)$/.test(
+          candidate.name
+        )
+      )
+        return;
+      if (candidate.name === 'ForSpec') {
+        if (candidate.node.parent?.name !== 'EnhancedForStatement') return;
+        if (context.pos <= candidate.to) return false;
+      }
+      variables.push(...declarationVariables(context, candidate.node, from));
+      return false;
+    });
+    merge(variables);
+  }
+  return [...visible.values()];
+}
+
+function declarationVariables(context: CompletionContext, declaration: SyntaxNode, before: number): VisibleVariable[] {
+  const { state } = context;
+  const type = declaration.getChild('TypeName');
+  const scalarTurtle = Boolean(
+    type &&
+    state.sliceDoc(type.from, type.to) === 'Turtle' &&
+    declaration.name !== 'SpreadParameter' &&
+    !declaration.getChild('Dimension') &&
+    !declaration.getChild('ArrayType')
+  );
+  const declarators = declaration.getChildren('VariableDeclarator');
+  const definitions =
+    declarators.length > 0
+      ? declarators.map((variable) => ({
+          definition: variable.getChild('Definition'),
+          turtle: scalarTurtle && !variable.getChild('Dimension'),
+        }))
+      : declaration.getChildren('Definition').map((definition) => ({ definition, turtle: scalarTurtle }));
+  return definitions.flatMap(({ definition, turtle }) =>
+    definition && definition.to < before
+      ? [
+          {
+            name: state.sliceDoc(definition.from, definition.to),
+            turtle,
+            position: definition.from,
+          },
+        ]
+      : []
+  );
 }

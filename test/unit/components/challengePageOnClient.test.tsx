@@ -34,6 +34,8 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
   },
 }));
 
+import { AuthContextProvider } from '../../../src/contexts/AuthContext';
+
 import { ChallengePageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/pageOnClient';
 
 const blankDisplay = {
@@ -56,21 +58,28 @@ const regularDisplay = {
   traceItemIndex: 0,
   completed: false,
 };
-const page = (initialFormat?: 'regular' | 'fillInBlank', strict = false): React.ReactNode => (
+const page = (initialFormat?: 'regular' | 'fillInBlank', strict = false, account = 'user-1'): React.ReactNode => (
   <ChakraProvider>
-    {strict ? (
-      <StrictMode>
+    <AuthContextProvider currentUserId={account}>
+      {strict ? (
+        <StrictMode>
+          <ChallengePageOnClient initialFormat={initialFormat} />
+        </StrictMode>
+      ) : (
         <ChallengePageOnClient initialFormat={initialFormat} />
-      </StrictMode>
-    ) : (
-      <ChallengePageOnClient initialFormat={initialFormat} />
-    )}
+      )}
+    </AuthContextProvider>
   </ChakraProvider>
 );
 const renderPage = (initialFormat?: 'regular' | 'fillInBlank', strict = false): ReturnType<typeof render> =>
   render(page(initialFormat, strict));
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.restoreAllMocks();
+  vi.clearAllMocks();
+  for (const mutation of Object.values(transport)) mutation.mockReset();
+  localStorage.clear();
+});
 
 test('a valid URL format starts exactly once under StrictMode and renders the exercise', async () => {
   transport.start.mockResolvedValue(blankDisplay);
@@ -542,4 +551,124 @@ test('challenge compiler feedback reaches the editor and survives result dismiss
   expect(report).toHaveTextContent(originalMessage);
   expect(within(report).getByRole('status')).toHaveTextContent(/もう一度提出/);
   expect(transport.submitBlank).toHaveBeenCalledTimes(1);
+});
+
+test('local challenge draft restores on resume but a completed session bypasses it even when removal fails', async () => {
+  transport.start.mockResolvedValue(blankDisplay);
+  const rendered = renderPage('fillInBlank');
+  const code = 'class ChallengeDraft {\n int value = 4;\n}\n';
+  await replaceJavaSource(await screen.findByRole('textbox', { name: /Java/ }), code);
+  rendered.unmount();
+  const resumed = renderPage('fillInBlank');
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(code);
+  expect(transport.submitBlank).not.toHaveBeenCalled();
+  resumed.unmount();
+  transport.start.mockResolvedValue({ ...blankDisplay, completed: true });
+  const removal = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+    throw new DOMException('Storage denied', 'SecurityError');
+  });
+  try {
+    renderPage('fillInBlank');
+    const completed = await screen.findByRole('textbox', { hidden: true, name: /Java/ });
+    expect(readRenderedJavaSource(completed)).toBe(blankDisplay.displayProgram);
+    expect(completed).toHaveAttribute('contenteditable', 'false');
+    expect(screen.getByRole('button', { hidden: true, name: '提出' })).toBeDisabled();
+    expect(screen.getByText(/一時保存の処理に失敗/)).toBeInTheDocument();
+  } finally {
+    removal.mockRestore();
+  }
+});
+
+test('local challenge draft ownership follows AuthContext and ignores an old pending exercise response', async () => {
+  let resolveOld!: (display: typeof blankDisplay) => void;
+  let resolveNew!: (display: typeof blankDisplay) => void;
+  transport.start
+    .mockResolvedValueOnce(blankDisplay)
+    .mockReturnValueOnce(new Promise((resolve) => (resolveOld = resolve)))
+    .mockReturnValueOnce(new Promise((resolve) => (resolveNew = resolve)));
+  let rendered = renderPage('fillInBlank');
+  const firstCode = 'class AccountOneDraft {}';
+  await replaceJavaSource(await screen.findByRole('textbox', { name: /Java/ }), firstCode);
+  rendered.unmount();
+  rendered = renderPage('fillInBlank');
+  await waitFor(() => expect(transport.start).toHaveBeenCalledTimes(2));
+  rendered.rerender(page('fillInBlank', false, 'user-2'));
+  expect(screen.queryByRole('textbox', { name: /Java/ })).not.toBeInTheDocument();
+  await waitFor(() => expect(transport.start).toHaveBeenCalledTimes(3));
+  await act(async () => resolveOld({ ...blankDisplay, displayProgram: 'class LateOldAccount {}' }));
+  expect(screen.queryByRole('textbox', { name: /Java/ })).not.toBeInTheDocument();
+  await act(async () => resolveNew(blankDisplay));
+  const newEditor = await screen.findByRole('textbox', { name: /Java/ });
+  expect(readRenderedJavaSource(newEditor)).toBe(blankDisplay.displayProgram);
+  await replaceJavaSource(newEditor, 'class AccountTwoDraft {}');
+  transport.start.mockResolvedValue(blankDisplay);
+  rendered.rerender(page('fillInBlank', false, 'user-1'));
+  expect(newEditor).not.toBeInTheDocument();
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(firstCode);
+  expect(transport.submitBlank).not.toHaveBeenCalled();
+});
+
+test('local challenge draft baseline changes discard incompatible code and start with fresh history', async () => {
+  transport.start.mockResolvedValue(blankDisplay);
+  let rendered = renderPage('fillInBlank');
+  await replaceJavaSource(await screen.findByRole('textbox', { name: /Java/ }), 'class OldBaselineDraft {}');
+  rendered.unmount();
+  const changed = 'class RevisedStarter { int value = 【1】; }';
+  transport.start.mockResolvedValue({ ...blankDisplay, displayProgram: changed });
+  rendered = renderPage('fillInBlank');
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(changed);
+  expect(screen.getByRole('button', { name: '元に戻す' })).toBeDisabled();
+  await replaceJavaSource(screen.getByRole('textbox', { name: /Java/ }), 'class RevisedDraft {}');
+  rendered.unmount();
+  renderPage('fillInBlank');
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe('class RevisedDraft {}');
+});
+
+test.each(['incorrect', 'ungradable', 'network failure'] as const)(
+  'local challenge draft survives %s submission and resumes without feedback',
+  async (outcome) => {
+    transport.start.mockResolvedValue(blankDisplay);
+    if (outcome === 'network failure') transport.submitBlank.mockRejectedValue(new Error('Offline'));
+    else transport.submitBlank.mockResolvedValue({ status: outcome, detail: 'Try again.' });
+    const user = userEvent.setup();
+    const rendered = renderPage('fillInBlank');
+    const code = 'class UnfinishedAnswer {}';
+    await replaceJavaSource(await screen.findByRole('textbox', { name: /Java/ }), code);
+    await user.click(screen.getByRole('button', { name: '提出' }));
+    await screen.findByRole('alertdialog');
+    rendered.unmount();
+    renderPage('fillInBlank');
+    expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(code);
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(transport.submitBlank).toHaveBeenCalledTimes(1);
+  }
+);
+
+test('local challenge draft clears after correct grading and Next begins an independent attempt', async () => {
+  transport.start.mockResolvedValue(blankDisplay);
+  transport.submitBlank.mockResolvedValue({ status: 'correct' });
+  transport.next.mockResolvedValue({ ...blankDisplay, sessionId: 24 });
+  const user = userEvent.setup();
+  let rendered = renderPage('fillInBlank');
+  const code = 'class CorrectAnswer {}';
+  await replaceJavaSource(await screen.findByRole('textbox', { name: /Java/ }), code);
+  rendered.unmount();
+  rendered = renderPage('fillInBlank');
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(code);
+  await user.click(screen.getByRole('button', { name: '提出' }));
+  await screen.findByRole('alertdialog');
+  await user.click(screen.getByRole('button', { name: '次の問題へ' }));
+  const next = await screen.findByRole('textbox', { name: /Java/ });
+  expect(readRenderedJavaSource(next)).toBe(blankDisplay.displayProgram);
+  const nextCode = 'class NextAttemptDraft {}';
+  await replaceJavaSource(next, nextCode);
+  rendered.unmount();
+  rendered = renderPage('fillInBlank');
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(
+    blankDisplay.displayProgram
+  );
+  rendered.unmount();
+  transport.start.mockResolvedValue({ ...blankDisplay, sessionId: 24 });
+  renderPage('fillInBlank');
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(nextCode);
 });

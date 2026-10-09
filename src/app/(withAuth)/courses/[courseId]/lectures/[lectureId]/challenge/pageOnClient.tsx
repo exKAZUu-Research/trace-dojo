@@ -9,6 +9,7 @@ import { FillInBlankBody } from '../problems/[problemId]/FillInBlankBody';
 import { ProblemPageHeader } from '../problems/[problemId]/ProblemPageHeader';
 import { ReloadNotice } from '../problems/[problemId]/ReloadNotice';
 import type { CompletionAction } from '../problems/[problemId]/ResultAlertDialog';
+import { useAuthContextSelector } from '@/contexts/AuthContext';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
 import { Center, Spinner, VStack } from '@/infrastructures/useClient/chakra';
 import type { ExerciseDisplay } from '@/problems/fillInBlank/exerciseProblem';
@@ -24,6 +25,30 @@ interface Props {
 
 export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
   const { courseId, lectureId } = useParams<{ courseId: CourseId; lectureId: string }>();
+  const userId = useAuthContextSelector((context) => context.currentUserId);
+  if (!userId)
+    return (
+      <Center py={10}>
+        <Spinner label="問題を準備しています" />
+      </Center>
+    );
+  return (
+    <ChallengeAttempt
+      key={JSON.stringify([userId, courseId, lectureId])}
+      initialFormat={initialFormat}
+      userId={userId}
+      courseId={courseId}
+      lectureId={lectureId}
+    />
+  );
+};
+
+const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; lectureId: string }> = ({
+  initialFormat,
+  userId,
+  courseId,
+  lectureId,
+}) => {
   const router = useRouter();
   const [exercise, setExercise] = useState<Display>();
   const [format, setFormat] = useState<ChallengeProblemFormat | undefined>(initialFormat);
@@ -52,7 +77,6 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
     activeRequestRef.current += 1;
     requestRef.current = undefined;
     pendingRef.current = false;
-    // URL changes are external input and must reset the active challenge view.
     // oxlint-disable-next-line react/set-state-in-effect -- synchronize client state with server search params
     setIsPending(false);
     setMessage(undefined);
@@ -73,7 +97,6 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
       };
     }
     pendingRef.current = true;
-    // Starting is an external request whose pending state is reflected in the modal.
     // oxlint-disable-next-line react/set-state-in-effect -- synchronize UI with the active request
     setIsPending(true);
     const promise = requestRef.current.promise;
@@ -207,6 +230,14 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
         <VStack key={exercise.sessionId} align="stretch" spacing={4}>
           <ProblemPageHeader courseId={courseId} lectureId={lectureId} problemId={exercise.problemId as ProblemId} />
           <FillInBlankBody
+            draftContext={{
+              userId,
+              mode: 'challenge',
+              courseId,
+              lectureId,
+              problemId: exercise.problemId,
+              sessionId: exercise.sessionId,
+            }}
             problem={exercise}
             gradeCode={gradeBlank}
             completionActions={actions}

@@ -147,7 +147,6 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
                 colorScheme="blue"
                 variant="outline"
                 onClick={() =>
-                  // 管理者は最後の盤面を確認できるように、 problem.traceItems.length まで進める。
                   updateProblemSession('step', Math.min(problemSession.traceItemIndex + 1, problem.traceItems.length))
                 }
               >
@@ -161,6 +160,15 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
       {isFillInBlank ? (
         <FillInBlankBody
           key={`${problemSession.id}:${problem.displayProgram}`}
+          draftContext={{
+            userId: props.userId,
+            mode: 'ordinary',
+            courseId: params.courseId,
+            lectureId: params.lectureId,
+            problemId: params.problemId,
+            sessionId: problemSession.id,
+            seed: props.initialProblemSession.problemVariablesSeed,
+          }}
           gradeCode={gradeCode}
           problem={{
             displayProgram: problem.displayProgram,

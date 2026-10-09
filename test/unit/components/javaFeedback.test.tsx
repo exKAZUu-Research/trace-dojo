@@ -3,7 +3,7 @@
 import { ChakraProvider } from '@chakra-ui/react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { expect, test, vi } from 'vitest';
+import { beforeEach, expect, test, vi } from 'vitest';
 
 import { readRenderedJavaSource, replaceJavaSource } from '../../helpers/javaEditor';
 import type { FillInBlankVerdict } from '../../../src/problems/fillInBlank/grade';
@@ -13,6 +13,8 @@ vi.mock('next/navigation', () => ({
   useParams: () => ({ courseId: 'test', lectureId: 'test', problemId: 'fillInBlank1' }),
   useRouter: () => ({ push: vi.fn() }),
 }));
+
+beforeEach(() => localStorage.clear());
 
 const source = 'class Main {\n public static void main(String[] args) {\n  missing();\n }\n}';
 const message = '変数やメソッドの名前と宣言を確認してください。';
@@ -28,9 +30,21 @@ const problem = {
   finalTurtles: [],
 };
 
-const body = (grade: () => Promise<FillInBlankVerdict>, key = 'first'): React.ReactNode => (
+const body = (grade: () => Promise<FillInBlankVerdict>, key = 'first', displayProgram = source): React.ReactNode => (
   <ChakraProvider>
-    <FillInBlankBody key={key} problem={problem} gradeCode={grade} />
+    <FillInBlankBody
+      draftContext={{
+        userId: 'feedback-user',
+        mode: 'ordinary',
+        courseId: 'test',
+        lectureId: '1',
+        problemId: 'feedback',
+        sessionId: key === 'first' ? 1 : 2,
+      }}
+      key={key}
+      problem={{ ...problem, displayProgram }}
+      gradeCode={grade}
+    />
   </ChakraProvider>
 );
 
@@ -138,7 +152,18 @@ test('compiler diagnostic on the empty final CRLF learner line stays on that lin
   const user = userEvent.setup();
   render(
     <ChakraProvider>
-      <FillInBlankBody problem={{ ...problem, displayProgram: crlfSource }} gradeCode={grade} />
+      <FillInBlankBody
+        draftContext={{
+          userId: 'feedback-user',
+          mode: 'ordinary',
+          courseId: 'test',
+          lectureId: '1',
+          problemId: 'feedback',
+          sessionId: 1,
+        }}
+        problem={{ ...problem, displayProgram: crlfSource }}
+        gradeCode={grade}
+      />
     </ChakraProvider>
   );
   const editor = screen.getByRole('textbox', { name: /Java/ });
@@ -269,4 +294,46 @@ test('a new keyed session discards its predecessor’s visible compiler report',
   expect(screen.queryByRole('region', { name: /提出したコードの確認結果/ })).not.toBeInTheDocument();
   expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
   expect(grade).toHaveBeenCalledOnce();
+});
+
+test('an in-place starter change restores only its matching draft and starts fresh history', async () => {
+  const grade = vi.fn().mockResolvedValue(verdict);
+  const rendered = render(body(grade));
+  await replaceJavaSource(screen.getByRole('textbox', { name: /Java/ }), 'class Learner {}');
+  const revised = 'class RevisedStarter {}';
+  rendered.rerender(body(grade, 'first', revised));
+  expect(readRenderedJavaSource(screen.getByRole('textbox', { name: /Java/ }))).toBe(revised);
+  expect(screen.getByRole('button', { name: '元に戻す' })).toBeDisabled();
+  await replaceJavaSource(screen.getByRole('textbox', { name: /Java/ }), 'class RevisedLearner {}');
+  rendered.unmount();
+  render(body(grade, 'first', revised));
+  expect(readRenderedJavaSource(screen.getByRole('textbox', { name: /Java/ }))).toBe('class RevisedLearner {}');
+  expect(grade).not.toHaveBeenCalled();
+});
+
+test('a successful obsolete submission cannot clear either attempt draft', async () => {
+  const user = userEvent.setup();
+  let finish!: (value: FillInBlankVerdict) => void;
+  const grade = vi.fn(
+    () =>
+      new Promise<FillInBlankVerdict>((resolve) => {
+        finish = resolve;
+      })
+  );
+  const rendered = render(body(grade));
+  await replaceJavaSource(screen.getByRole('textbox', { name: /Java/ }), 'class FirstDraft {}');
+  await user.click(screen.getByRole('button', { name: '提出' }));
+  await waitFor(() => expect(grade).toHaveBeenCalledOnce());
+  rendered.rerender(body(grade, 'next'));
+  await replaceJavaSource(screen.getByRole('textbox', { name: /Java/ }), 'class NextDraft {}');
+  await act(async () => {
+    finish({ status: 'correct' });
+  });
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  rendered.unmount();
+  const next = render(body(grade, 'next'));
+  expect(readRenderedJavaSource(screen.getByRole('textbox', { name: /Java/ }))).toBe('class NextDraft {}');
+  next.unmount();
+  render(body(grade));
+  expect(readRenderedJavaSource(screen.getByRole('textbox', { name: /Java/ }))).toBe('class FirstDraft {}');
 });

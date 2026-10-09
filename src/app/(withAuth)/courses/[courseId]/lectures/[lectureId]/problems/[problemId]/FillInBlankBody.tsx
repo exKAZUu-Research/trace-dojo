@@ -29,12 +29,21 @@ import {
   VStack,
 } from '@/infrastructures/useClient/chakra';
 import { javaFeedbackSummary, readJavaDiagnostics, type JavaDiagnostic } from '@/problems/fillInBlank/javaDiagnostics';
+import {
+  javaDraftKey,
+  restoreJavaDraft,
+  saveJavaDraft,
+  removeJavaDraft,
+  type JavaDraftContext,
+  type JavaDraftRestoration,
+} from '@/problems/fillInBlank/javaDraft';
 import { hasIncompleteJavaPlaceholders } from '@/problems/fillInBlank/javaSource';
 import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
 import type { TurtleTrace } from '@/problems/traceProgram';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 
 interface Props {
+  draftContext: JavaDraftContext;
   problem: {
     displayProgram: string;
     finalBoard: string;
@@ -47,9 +56,36 @@ interface Props {
 }
 
 export const FillInBlankBody: React.FC<Props> = (props) => {
+  const baseline = props.problem.displayProgram.replaceAll(/\r\n?/g, '\n');
+  const draftKey = javaDraftKey(props.draftContext);
+  return (
+    <DraftRestoration
+      key={JSON.stringify([draftKey, baseline, Boolean(props.isCompleted)])}
+      {...props}
+      baseline={baseline}
+      draftKey={draftKey}
+    />
+  );
+};
+
+const DraftRestoration: React.FC<Props & { baseline: string; draftKey: string }> = (props) => {
+  const [restored, setRestored] = useImmer<JavaDraftRestoration | undefined>(undefined);
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- Browser storage is read only after hydration, before the editor mounts.
+    setRestored(restoreJavaDraft(props.draftKey, props.baseline, Boolean(props.isCompleted)));
+  }, [props.baseline, props.draftKey, props.isCompleted, setRestored]);
+  if (!restored) return <Box as="output">コードを準備しています</Box>;
+  return <EditingBody {...props} restored={restored} />;
+};
+
+const EditingBody: React.FC<Props & { baseline: string; draftKey: string; restored: JavaDraftRestoration }> = (
+  props
+) => {
   const params = useParams<{ courseId: CourseId; lectureId: string; problemId: ProblemId }>();
   const router = useRouter();
-  const [code, setCode] = useState(props.problem.displayProgram.replaceAll(/\r\n?/g, '\n'));
+  const [code, setCode] = useState(props.restored.code);
+  const [saveFailed, setSaveFailed] = useState(props.restored.failed);
+  const completedRef = useRef(Boolean(props.isCompleted));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [alert, setAlert] = useImmer<
     { title: string; message: string; isCompleted: boolean; diagnostics?: JavaDiagnostic[] } | undefined
@@ -115,6 +151,8 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
       if (!isCurrent()) return;
       switch (result.status) {
         case 'correct': {
+          completedRef.current = true;
+          setSaveFailed(!removeJavaDraft(props.draftKey));
           setAlert({
             title: '正解',
             message:
@@ -172,6 +210,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
             onChange={(value) => {
               invalidate();
               setCode(value);
+              if (!completedRef.current) setSaveFailed(!saveJavaDraft(props.draftContext, props.baseline, value));
             }}
             onInvalidate={invalidate}
             diagnostics={feedback?.isStale ? undefined : feedback?.diagnostics}
@@ -182,6 +221,9 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
               })
             }
           />
+          {saveFailed && (
+            <Box as="output">一時保存の処理に失敗しました。再読み込み前に必要なコードを控えてください。</Box>
+          )}
           {feedback && (
             <Box as="section" aria-labelledby={feedbackHeadingId}>
               <Heading id={feedbackHeadingId} size="sm" mb={3}>
@@ -271,7 +313,8 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
                 onClick={() => {
                   if (isLocked) return;
                   invalidate();
-                  setCode(props.problem.displayProgram.replaceAll(/\r\n?/g, '\n'));
+                  setSaveFailed(!removeJavaDraft(props.draftKey));
+                  setCode(props.baseline);
                   setIsResetOpen(false);
                 }}
               >
@@ -288,7 +331,7 @@ export const FillInBlankBody: React.FC<Props> = (props) => {
           : {
               onClose: () => {
                 if (isCompleted) router.push(`/courses/${params.courseId}/lectures/${params.lectureId}`);
-                setAlert(undefined);
+                else setAlert(undefined);
               },
             })}
         isOpen={Boolean(alert) || Boolean(props.isCompleted)}
