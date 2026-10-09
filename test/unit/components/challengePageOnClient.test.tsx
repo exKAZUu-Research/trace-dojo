@@ -1,8 +1,14 @@
 // @vitest-environment jsdom
 
 import { ChakraProvider } from '@chakra-ui/react';
+import {
+  composeWithoutSubmitting,
+  expectJavaSource,
+  readRenderedJavaSource,
+  replaceJavaSource,
+} from '../../helpers/javaEditor';
 import { StrictMode } from 'react';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, test, vi } from 'vitest';
 
@@ -28,17 +34,19 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
   },
 }));
 
+import { AuthContextProvider } from '../../../src/contexts/AuthContext';
+
 import { ChallengePageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/pageOnClient';
 
 const blankDisplay = {
   problemFormat: 'fillInBlank' as const,
   sessionId: 23,
   problemId: 'fillInBlank2',
-  displayProgram: 'class Main { int x = 【1】; }',
-  blankCount: 1,
+  displayProgram: 'class Main { public static void main(String[] args) { int x = 【1】; } }',
   finalBoard: '.......\n.......\n.......\n.......\n.......\n.......\n.......',
   finalTurtles: [],
-  finalVars: {},
+  blankCount: 1,
+  finalVars: { legacyVariable: 3 },
   completed: false,
 };
 const regularDisplay = {
@@ -50,26 +58,33 @@ const regularDisplay = {
   traceItemIndex: 0,
   completed: false,
 };
-const page = (initialFormat?: 'regular' | 'fillInBlank', strict = false): React.ReactNode => (
+const page = (initialFormat?: 'regular' | 'fillInBlank', strict = false, account = 'user-1'): React.ReactNode => (
   <ChakraProvider>
-    {strict ? (
-      <StrictMode>
+    <AuthContextProvider currentUserId={account}>
+      {strict ? (
+        <StrictMode>
+          <ChallengePageOnClient initialFormat={initialFormat} />
+        </StrictMode>
+      ) : (
         <ChallengePageOnClient initialFormat={initialFormat} />
-      </StrictMode>
-    ) : (
-      <ChallengePageOnClient initialFormat={initialFormat} />
-    )}
+      )}
+    </AuthContextProvider>
   </ChakraProvider>
 );
 const renderPage = (initialFormat?: 'regular' | 'fillInBlank', strict = false): ReturnType<typeof render> =>
   render(page(initialFormat, strict));
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.restoreAllMocks();
+  vi.clearAllMocks();
+  for (const mutation of Object.values(transport)) mutation.mockReset();
+  localStorage.clear();
+});
 
 test('a valid URL format starts exactly once under StrictMode and renders the exercise', async () => {
   transport.start.mockResolvedValue(blankDisplay);
   renderPage('fillInBlank', true);
-  expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeVisible();
+  expect(await screen.findByRole('textbox', { name: /Java/ })).toBeVisible();
   expect(transport.start).toHaveBeenCalledTimes(1);
   expect(transport.start).toHaveBeenCalledWith({
     courseId: 'test',
@@ -85,7 +100,7 @@ test('a URL format shows a loading indicator until the first exercise arrives', 
   renderPage('fillInBlank');
   expect(await screen.findByText('問題を準備しています')).toBeInTheDocument();
   await act(async () => resolve(blankDisplay));
-  expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeVisible();
+  expect(await screen.findByRole('textbox', { name: /Java/ })).toBeVisible();
   expect(screen.queryByText('問題を準備しています')).not.toBeInTheDocument();
 });
 
@@ -115,14 +130,14 @@ test('a browser format change starts the new format and ignores the stale previo
 
   rendered.rerender(page('fillInBlank'));
 
-  expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeVisible();
+  expect(await screen.findByRole('textbox', { name: /Java/ })).toBeVisible();
   expect(transport.start).toHaveBeenNthCalledWith(2, {
     courseId: 'test',
     lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
     problemFormat: 'fillInBlank',
   });
   await act(async () => resolveRegular(regularDisplay));
-  expect(screen.getByRole('textbox', { name: '空欄【1】' })).toBeVisible();
+  expect(screen.getByRole('textbox', { name: /Java/ })).toBeVisible();
 });
 
 test('returning to the same valid format after a missing format drops the old exercise and starts a fresh request', async () => {
@@ -174,7 +189,7 @@ test('a URL prop update after selecting a format does not duplicate the start re
   await act(async () => resolveBlank(blankDisplay));
 
   expect(transport.start).toHaveBeenCalledTimes(1);
-  expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeVisible();
+  expect(await screen.findByRole('textbox', { name: /Java/ })).toBeVisible();
 });
 
 test('a missing format opens the selector without starting and close returns to the lecture', async () => {
@@ -195,7 +210,7 @@ test('no-problems feedback stays inside the modal and the same format can be ret
   expect(screen.getByRole('dialog')).toContainElement(status);
   expect(status).toHaveTextContent(/穴埋め問題.*出題できません/);
   await user.click(screen.getByRole('button', { name: /穴埋め問題/ }));
-  expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeVisible();
+  expect(await screen.findByRole('textbox', { name: /Java/ })).toBeVisible();
   expect(transport.start).toHaveBeenCalledTimes(2);
 });
 
@@ -205,7 +220,7 @@ test('an empty regular format can recover by choosing fill-in-blank', async () =
   renderPage('regular');
   expect(await screen.findByRole('status')).toHaveTextContent(/通常問題.*出題できません/);
   await user.click(screen.getByRole('button', { name: /穴埋め問題/ }));
-  expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeVisible();
+  expect(await screen.findByRole('textbox', { name: /Java/ })).toBeVisible();
   expect(transport.start).toHaveBeenNthCalledWith(2, {
     courseId: 'test',
     lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
@@ -232,7 +247,10 @@ test('a fill-in-blank submission in an expired learning period shows a reload no
   transport.submitBlank.mockRejectedValue({ data: { code: 'NOT_FOUND' } });
   const user = userEvent.setup();
   renderPage('fillInBlank');
-  await user.type(await screen.findByRole('textbox', { name: '空欄【1】' }), 'x + 1');
+  await replaceJavaSource(
+    await screen.findByRole('textbox', { name: /Java/ }),
+    'class Main { public static void main(String[] args) {} }'
+  );
   await user.click(screen.getByRole('button', { name: /提出/ }));
   expect(await screen.findByRole('button', { name: 'ページを再読み込み' })).toBeVisible();
   expect(screen.queryByText(/もう一度提出してください/)).not.toBeInTheDocument();
@@ -243,8 +261,11 @@ test('completed fill-in-blank next keeps the active format and renders the retur
   transport.next.mockResolvedValue({ ...blankDisplay, sessionId: 24 });
   const user = userEvent.setup();
   renderPage('fillInBlank');
-  const input = await screen.findByRole('textbox', { hidden: true, name: '空欄【1】' });
-  expect(input).toBeDisabled();
+  const input = await screen.findByRole('textbox', { hidden: true, name: /Java/ });
+  expect(input).toHaveAttribute('contenteditable', 'false');
+  expect(screen.getByRole('button', { hidden: true, name: 'リセット' })).toBeDisabled();
+  expect(screen.getByRole('button', { hidden: true, name: '元に戻す' })).toBeDisabled();
+  expect(screen.getByRole('button', { hidden: true, name: 'やり直す' })).toBeDisabled();
   expect(screen.getByText(/プログラムを実行した後の盤面/)).toBeVisible();
   await user.keyboard('{Escape}');
   expect(screen.getByRole('alertdialog')).toBeVisible();
@@ -255,7 +276,7 @@ test('completed fill-in-blank next keeps the active format and renders the retur
     sessionId: 23,
     problemFormat: 'fillInBlank',
   });
-  expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeEnabled();
+  expect(await screen.findByRole('textbox', { name: /Java/ })).toHaveAttribute('contenteditable', 'true');
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
 });
 
@@ -266,12 +287,25 @@ test('a just-completed fill-in-blank keeps its answer, deduplicates Next, and re
   transport.next.mockReturnValue(new Promise((resolve) => (resolveNext = resolve)));
   const user = userEvent.setup();
   renderPage('fillInBlank');
-  const input = await screen.findByRole('textbox', { name: '空欄【1】' });
-  await user.type(input, 'x + 1');
+  const input = await screen.findByRole('textbox', { name: /Java/ });
+  const code = 'class Changed { public static void main(String[] args) { int x = 2; } }';
+  await replaceJavaSource(input, code);
   await user.click(screen.getByRole('button', { name: '提出' }));
   const dialog = await screen.findByRole('alertdialog');
-  expect(input).toHaveValue('x + 1');
+  expectJavaSource(input, code);
+  expect(transport.submitBlank).toHaveBeenCalledWith({
+    courseId: 'test',
+    lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
+    sessionId: 23,
+    code,
+  });
+  expect(input).toHaveAttribute('contenteditable', 'false');
+  expect(screen.getByRole('button', { hidden: true, name: 'リセット' })).toBeDisabled();
+  expect(screen.getByRole('button', { hidden: true, name: '元に戻す' })).toBeDisabled();
+  expect(screen.getByRole('button', { hidden: true, name: 'やり直す' })).toBeDisabled();
   expect(screen.getByRole('button', { hidden: true, name: '提出' })).toBeDisabled();
+  fireEvent.keyDown(input, { key: 'z', code: 'KeyZ', keyCode: 90, ctrlKey: true });
+  expect(readRenderedJavaSource(input)).toBe(code);
   await user.keyboard('{Escape}');
   expect(dialog).toBeInTheDocument();
 
@@ -283,11 +317,25 @@ test('a just-completed fill-in-blank keeps its answer, deduplicates Next, and re
     sessionId: 23,
     problemFormat: 'fillInBlank',
   });
-  await act(async () => resolveNext({ ...blankDisplay, sessionId: 24 }));
-  const freshInput = await screen.findByRole('textbox', { name: '空欄【1】' });
-  expect(freshInput).toBeEnabled();
-  expect(freshInput).toHaveValue('');
+  const nextStarter = 'class NextProblem {\n  int nextValue = 【1】;\n}\n';
+  await act(async () => resolveNext({ ...blankDisplay, sessionId: 24, displayProgram: nextStarter }));
+  const freshInput = await screen.findByRole('textbox', { name: /Java/ });
+  expect(freshInput).toHaveAttribute('contenteditable', 'true');
+  expect(readRenderedJavaSource(freshInput)).toBe(nextStarter);
+  expect(screen.getByRole('button', { name: '元に戻す' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'やり直す' })).toBeDisabled();
+  fireEvent.keyDown(freshInput, { key: 'z', code: 'KeyZ', keyCode: 90, ctrlKey: true });
+  expect(readRenderedJavaSource(freshInput)).toBe(nextStarter);
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  await replaceJavaSource(freshInput, code);
+  expect(readRenderedJavaSource(freshInput)).toBe(code);
+  expect(readRenderedJavaSource(freshInput)).not.toBe(nextStarter);
+  await user.click(screen.getByRole('button', { name: 'リセット' }));
+  await user.click(await screen.findByRole('button', { name: 'リセットする' }));
+  await waitFor(() => expect(readRenderedJavaSource(freshInput)).toBe(nextStarter));
+  expect(transport.start).toHaveBeenCalledTimes(1);
+  expect(transport.next).toHaveBeenCalledTimes(1);
+  expect(transport.submitBlank).toHaveBeenCalledTimes(1);
 });
 
 test('completed fill-in-blank orders Back before Next and reports a failed action without dismissing', async () => {
@@ -326,7 +374,7 @@ test('an error stays inside the modal and choosing the other format updates the 
   expect(navigation.push).toHaveBeenCalledWith(
     '/courses/test/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d/challenge?format=fillInBlank'
   );
-  expect(await screen.findByRole('textbox', { name: '空欄【1】' })).toBeVisible();
+  expect(await screen.findByRole('textbox', { name: /Java/ })).toBeVisible();
   expect(transport.start).toHaveBeenNthCalledWith(2, {
     courseId: 'test',
     lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
@@ -363,4 +411,264 @@ test('a deferred result from before close does not replace the exercise started 
   await act(async () => resolve(blankDisplay));
   expect(screen.getByRole('heading', { level: 1, name: '穴埋めのテスト用問題(3)' })).toBeVisible();
   expect(transport.start).toHaveBeenCalledTimes(2);
+});
+
+test('full-source edits, Enter/IME, and zoom do not execute, and pending submission locks editing but permits zoom', async () => {
+  let finish!: (result: { status: string; detail: string }) => void;
+  transport.start.mockResolvedValue(blankDisplay);
+  transport.submitBlank.mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    })
+  );
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
+  expectJavaSource(editor, blankDisplay.displayProgram);
+  expect(editor).toHaveAttribute('aria-multiline', 'true');
+  const code = 'class EntirelyChanged {\n  public static void main(String[] args) {}\n}';
+  await replaceJavaSource(editor, code);
+  await user.keyboard('{End}{Enter}');
+  composeWithoutSubmitting(editor);
+  expect(transport.submitBlank).not.toHaveBeenCalled();
+  await replaceJavaSource(editor, code);
+  const zoomOut = screen.getByRole('button', { name: 'コードを縮小' });
+  const zoomIn = screen.getByRole('button', { name: 'コードを拡大' });
+  await user.click(zoomIn);
+  await user.click(zoomOut);
+  expect(readRenderedJavaSource(editor)).toBe(code);
+  expect(transport.submitBlank).not.toHaveBeenCalled();
+  await user.dblClick(screen.getByRole('button', { name: '提出' }));
+  expect(transport.submitBlank).toHaveBeenCalledTimes(1);
+  expect(transport.submitBlank).toHaveBeenCalledWith({
+    courseId: 'test',
+    lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
+    sessionId: 23,
+    code,
+  });
+  expect(editor).toHaveAttribute('contenteditable', 'false');
+  const reset = screen.getByRole('button', { name: 'リセット' });
+  expect(reset).toBeDisabled();
+  const undo = screen.getByRole('button', { name: '元に戻す' });
+  const redo = screen.getByRole('button', { name: 'やり直す' });
+  expect(undo).toBeDisabled();
+  expect(redo).toBeDisabled();
+  expect(zoomIn).toBeEnabled();
+  expect(zoomOut).toBeEnabled();
+  await user.click(zoomIn);
+  await user.click(zoomOut);
+  expect(editor).toHaveAttribute('contenteditable', 'false');
+  expect(undo).toBeDisabled();
+  expect(redo).toBeDisabled();
+  expect(reset).toBeDisabled();
+  await user.click(undo);
+  await user.click(redo);
+  fireEvent.keyDown(editor, { key: 'z', code: 'KeyZ', keyCode: 90, ctrlKey: true });
+  await user.click(reset);
+  expect(readRenderedJavaSource(editor)).toBe(code);
+  expect(transport.submitBlank).toHaveBeenCalledTimes(1);
+  await act(async () => finish({ status: 'incorrect', detail: 'The final state differs from the expected one.' }));
+  expect(await screen.findByRole('alertdialog')).toHaveTextContent('不正解');
+  expect(readRenderedJavaSource(editor)).toBe(code);
+  expect(screen.getByRole('button', { hidden: true, name: 'リセット' })).toBeDisabled();
+  expect(screen.getByRole('button', { hidden: true, name: '元に戻す' })).toBeDisabled();
+  expect(screen.getByRole('button', { hidden: true, name: 'やり直す' })).toBeDisabled();
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  expect(reset).toBeEnabled();
+  expect(undo).toBeEnabled();
+  await user.click(undo);
+  expect(readRenderedJavaSource(editor)).not.toBe(code);
+  await user.click(redo);
+  expect(readRenderedJavaSource(editor)).toBe(code);
+  await user.click(reset);
+  await user.click(await screen.findByRole('button', { name: 'リセットする' }));
+  await waitFor(() => expect(readRenderedJavaSource(editor)).toBe(blankDisplay.displayProgram));
+  expect(transport.submitBlank).toHaveBeenCalledTimes(1);
+  expect(transport.start).toHaveBeenCalledTimes(1);
+  expect(transport.next).not.toHaveBeenCalled();
+});
+
+test('challenge Reset restores the exact starter without submitting or changing the session', async () => {
+  const starter = 'class Challenge {\n  int value = 【1】;\n}\n';
+  transport.start.mockResolvedValue({ ...blankDisplay, displayProgram: starter });
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
+  expect(readRenderedJavaSource(editor)).toBe(starter);
+  const edited = 'class Edited {\n  int value = 42;\n}\n';
+  await replaceJavaSource(editor, edited);
+  expect(readRenderedJavaSource(editor)).toBe(edited);
+  expect(readRenderedJavaSource(editor)).not.toBe(starter);
+  const reset = screen.getByRole('button', { name: 'リセット' });
+  await user.click(reset);
+  const cancel = await screen.findByRole('button', { name: 'キャンセル' });
+  await waitFor(() => expect(cancel).toHaveFocus());
+  expect(readRenderedJavaSource(editor)).toBe(edited);
+  await user.click(cancel);
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  expect(readRenderedJavaSource(editor)).toBe(edited);
+  await user.click(reset);
+  await screen.findByRole('alertdialog');
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  expect(readRenderedJavaSource(editor)).toBe(edited);
+  await user.click(reset);
+  await user.click(await screen.findByRole('button', { name: 'リセットする' }));
+  await waitFor(() => expect(readRenderedJavaSource(editor)).toBe(starter));
+  expect(transport.submitBlank).not.toHaveBeenCalled();
+  expect(navigation.push).not.toHaveBeenCalled();
+  expect(transport.next).not.toHaveBeenCalled();
+  expect(transport.start).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+});
+
+test('challenge compiler feedback reaches the editor and survives result dismissal', async () => {
+  const message = '代入する値の種類を確認してください。';
+  const originalMessage = 'incompatible types: boolean cannot be converted to int';
+  transport.start.mockResolvedValue(blankDisplay);
+  transport.submitBlank.mockResolvedValue({
+    status: 'incorrect',
+    detail: 'Compile error.',
+    diagnostics: [{ line: 2, message, originalMessage }],
+  });
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
+  await replaceJavaSource(editor, 'class Main {\n public static void main(String[] args) { int x = true; }\n}');
+  await user.click(screen.getByRole('button', { name: '提出' }));
+  await waitFor(() => expect(screen.getByRole('alertdialog')).toBeVisible());
+  expect(within(screen.getByRole('alertdialog')).getByRole('listitem')).toHaveTextContent(message);
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  expect(screen.getByText(message)).toBeVisible();
+  expect(screen.getByText(originalMessage, { exact: false })).toBeVisible();
+  await waitFor(() => expect(document.querySelector('.cm-lintRange-error')).toBeInTheDocument());
+  await replaceJavaSource(editor, 'class Main {\n public static void main(String[] args) { int x = 1; }\n}');
+  expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
+  const report = screen.getByRole('region', { name: '前回提出したコードの確認結果' });
+  expect(report).toHaveTextContent(message);
+  expect(report).toHaveTextContent(originalMessage);
+  expect(within(report).getByRole('status')).toHaveTextContent(/もう一度提出/);
+  expect(transport.submitBlank).toHaveBeenCalledTimes(1);
+});
+
+test('local challenge draft restores on resume but a completed session bypasses it even when removal fails', async () => {
+  transport.start.mockResolvedValue(blankDisplay);
+  const rendered = renderPage('fillInBlank');
+  const code = 'class ChallengeDraft {\n int value = 4;\n}\n';
+  await replaceJavaSource(await screen.findByRole('textbox', { name: /Java/ }), code);
+  rendered.unmount();
+  const resumed = renderPage('fillInBlank');
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(code);
+  expect(transport.submitBlank).not.toHaveBeenCalled();
+  resumed.unmount();
+  transport.start.mockResolvedValue({ ...blankDisplay, completed: true });
+  const removal = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+    throw new DOMException('Storage denied', 'SecurityError');
+  });
+  try {
+    renderPage('fillInBlank');
+    const completed = await screen.findByRole('textbox', { hidden: true, name: /Java/ });
+    expect(readRenderedJavaSource(completed)).toBe(blankDisplay.displayProgram);
+    expect(completed).toHaveAttribute('contenteditable', 'false');
+    expect(screen.getByRole('button', { hidden: true, name: '提出' })).toBeDisabled();
+    expect(screen.getByText(/一時保存の処理に失敗/)).toBeInTheDocument();
+  } finally {
+    removal.mockRestore();
+  }
+});
+
+test('local challenge draft ownership follows AuthContext and ignores an old pending exercise response', async () => {
+  let resolveOld!: (display: typeof blankDisplay) => void;
+  let resolveNew!: (display: typeof blankDisplay) => void;
+  transport.start
+    .mockResolvedValueOnce(blankDisplay)
+    .mockReturnValueOnce(new Promise((resolve) => (resolveOld = resolve)))
+    .mockReturnValueOnce(new Promise((resolve) => (resolveNew = resolve)));
+  let rendered = renderPage('fillInBlank');
+  const firstCode = 'class AccountOneDraft {}';
+  await replaceJavaSource(await screen.findByRole('textbox', { name: /Java/ }), firstCode);
+  rendered.unmount();
+  rendered = renderPage('fillInBlank');
+  await waitFor(() => expect(transport.start).toHaveBeenCalledTimes(2));
+  rendered.rerender(page('fillInBlank', false, 'user-2'));
+  expect(screen.queryByRole('textbox', { name: /Java/ })).not.toBeInTheDocument();
+  await waitFor(() => expect(transport.start).toHaveBeenCalledTimes(3));
+  await act(async () => resolveOld({ ...blankDisplay, displayProgram: 'class LateOldAccount {}' }));
+  expect(screen.queryByRole('textbox', { name: /Java/ })).not.toBeInTheDocument();
+  await act(async () => resolveNew(blankDisplay));
+  const newEditor = await screen.findByRole('textbox', { name: /Java/ });
+  expect(readRenderedJavaSource(newEditor)).toBe(blankDisplay.displayProgram);
+  await replaceJavaSource(newEditor, 'class AccountTwoDraft {}');
+  transport.start.mockResolvedValue(blankDisplay);
+  rendered.rerender(page('fillInBlank', false, 'user-1'));
+  expect(newEditor).not.toBeInTheDocument();
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(firstCode);
+  expect(transport.submitBlank).not.toHaveBeenCalled();
+});
+
+test('local challenge draft baseline changes discard incompatible code and start with fresh history', async () => {
+  transport.start.mockResolvedValue(blankDisplay);
+  let rendered = renderPage('fillInBlank');
+  await replaceJavaSource(await screen.findByRole('textbox', { name: /Java/ }), 'class OldBaselineDraft {}');
+  rendered.unmount();
+  const changed = 'class RevisedStarter { int value = 【1】; }';
+  transport.start.mockResolvedValue({ ...blankDisplay, displayProgram: changed });
+  rendered = renderPage('fillInBlank');
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(changed);
+  expect(screen.getByRole('button', { name: '元に戻す' })).toBeDisabled();
+  await replaceJavaSource(screen.getByRole('textbox', { name: /Java/ }), 'class RevisedDraft {}');
+  rendered.unmount();
+  renderPage('fillInBlank');
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe('class RevisedDraft {}');
+});
+
+test.each(['incorrect', 'ungradable', 'network failure'] as const)(
+  'local challenge draft survives %s submission and resumes without feedback',
+  async (outcome) => {
+    transport.start.mockResolvedValue(blankDisplay);
+    if (outcome === 'network failure') transport.submitBlank.mockRejectedValue(new Error('Offline'));
+    else transport.submitBlank.mockResolvedValue({ status: outcome, detail: 'Try again.' });
+    const user = userEvent.setup();
+    const rendered = renderPage('fillInBlank');
+    const code = 'class UnfinishedAnswer {}';
+    await replaceJavaSource(await screen.findByRole('textbox', { name: /Java/ }), code);
+    await user.click(screen.getByRole('button', { name: '提出' }));
+    await screen.findByRole('alertdialog');
+    rendered.unmount();
+    renderPage('fillInBlank');
+    expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(code);
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(transport.submitBlank).toHaveBeenCalledTimes(1);
+  }
+);
+
+test('local challenge draft clears after correct grading and Next begins an independent attempt', async () => {
+  transport.start.mockResolvedValue(blankDisplay);
+  transport.submitBlank.mockResolvedValue({ status: 'correct' });
+  transport.next.mockResolvedValue({ ...blankDisplay, sessionId: 24 });
+  const user = userEvent.setup();
+  let rendered = renderPage('fillInBlank');
+  const code = 'class CorrectAnswer {}';
+  await replaceJavaSource(await screen.findByRole('textbox', { name: /Java/ }), code);
+  rendered.unmount();
+  rendered = renderPage('fillInBlank');
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(code);
+  await user.click(screen.getByRole('button', { name: '提出' }));
+  await screen.findByRole('alertdialog');
+  await user.click(screen.getByRole('button', { name: '次の問題へ' }));
+  const next = await screen.findByRole('textbox', { name: /Java/ });
+  expect(readRenderedJavaSource(next)).toBe(blankDisplay.displayProgram);
+  const nextCode = 'class NextAttemptDraft {}';
+  await replaceJavaSource(next, nextCode);
+  rendered.unmount();
+  rendered = renderPage('fillInBlank');
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(
+    blankDisplay.displayProgram
+  );
+  rendered.unmount();
+  transport.start.mockResolvedValue({ ...blankDisplay, sessionId: 24 });
+  renderPage('fillInBlank');
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(nextCode);
 });

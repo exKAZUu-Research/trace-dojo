@@ -10,7 +10,8 @@ import { procedure } from '../trpc';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import type { ExerciseDisplay } from '@/problems/fillInBlank/exerciseProblem';
 import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
-import { gradeFillInBlankAnswers, type FillInBlankVerdict } from '@/problems/fillInBlank/grade';
+import { MAX_JAVA_PROGRAM_LENGTH } from '@/problems/fillInBlank/javaProgram';
+import { gradeFillInBlankCode, type FillInBlankVerdict } from '@/problems/fillInBlank/grade';
 import { instantiateProblem, isFillInBlankProblem, type InstantiatedProblem } from '@/problems/instantiateProblem';
 import {
   courseIdToLectureIds,
@@ -35,7 +36,7 @@ const nextSchema = z.union([
 ]);
 const submissionSchema = locationSchema.extend({
   sessionId: z.number().int().positive(),
-  answers: z.array(z.string().max(1000)).max(50),
+  code: z.string().min(1).max(MAX_JAVA_PROGRAM_LENGTH),
 });
 const regularSubmissionSchema = locationSchema
   .extend({
@@ -101,11 +102,11 @@ export const exerciseProcedures = {
       checkedLecture(input.courseId, input.lectureId);
       const userId = ctx.session.superTokensUserId;
       ownedSession(input.sessionId, userId, input.courseId, input.lectureId, 'fillInBlank', receivedAt);
-      const key = `${input.sessionId}:${JSON.stringify(input.answers)}`;
+      const key = `${input.sessionId}:${input.code}`;
       const existing = gradingLocks.get(key);
       if (existing) return await existing;
       const grading = enqueue(input.sessionId, () =>
-        gradeAndSave(input.sessionId, userId, input.courseId, input.lectureId, input.answers, receivedAt)
+        gradeAndSave(input.sessionId, userId, input.courseId, input.lectureId, input.code, receivedAt)
       );
       gradingLocks.set(key, grading);
       try {
@@ -303,17 +304,14 @@ const toDisplay = (
     if (!problem) instantiateRegular(row.problemId, row.seed);
     return toRegularDisplay(row);
   }
-  const { displayProgram, blankAnswers, finalBoard, finalTurtles, finalVars } =
-    problem ?? instantiateBlank(row.problemId, row.seed);
+  const { displayProgram, finalBoard, finalTurtles } = problem ?? instantiateBlank(row.problemId, row.seed);
   return {
     problemFormat: 'fillInBlank',
     sessionId: row.id,
     problemId: row.problemId,
     displayProgram,
-    blankCount: blankAnswers.length,
     finalBoard,
     finalTurtles,
-    finalVars,
     completed: Boolean(row.completedAt),
   };
 };
@@ -371,11 +369,11 @@ const gradeAndSave = async (
   userId: string,
   courseId: string,
   lectureId: string,
-  answers: string[],
+  code: string,
   receivedAt: Date
 ): Promise<FillInBlankVerdict> => {
   const session = ownedSession(id, userId, courseId, lectureId, 'fillInBlank', receivedAt);
-  const result = await gradeFillInBlankAnswers(instantiateBlank(session.problemId, session.seed), answers);
+  const result = await gradeFillInBlankCode(instantiateBlank(session.problemId, session.seed), code);
   if (result.status === 'ungradable') logger.warn('Failed to grade exercise %d: %s', id, result.detail);
   db.transaction((tx) => {
     const current = tx.select().from(exerciseSessions).where(eq(exerciseSessions.id, id)).get();
@@ -384,7 +382,7 @@ const gradeAndSave = async (
       .values({
         createdAt: receivedAt,
         sessionId: id,
-        answers: JSON.stringify(answers),
+        code,
         status: result.status,
         gradingStage: result.status === 'ungradable' ? undefined : result.stage,
       })
@@ -394,5 +392,5 @@ const gradeAndSave = async (
   });
   if (result.status === 'correct') return { status: 'correct' };
   if (result.status === 'ungradable') return { status: 'ungradable', detail: '' };
-  return { status: 'incorrect', detail: result.detail };
+  return { status: 'incorrect', detail: result.detail, diagnostics: result.diagnostics };
 };
