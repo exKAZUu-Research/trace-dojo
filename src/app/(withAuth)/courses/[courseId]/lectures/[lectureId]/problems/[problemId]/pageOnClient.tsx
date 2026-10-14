@@ -21,31 +21,56 @@ import { Button, HStack, Tooltip, VStack } from '@/infrastructures/useClient/cha
 import type { FillInBlankGradingResult } from '@/problems/fillInBlank/grade';
 import { instantiateProblem } from '@/problems/instantiateProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
+import type { OrdinaryJavaProblemData } from '@/types';
 import { isProblemSessionExpired } from '@/utils/problemSessionError';
 
 interface Props {
   initialProblemSession: ProblemSession;
   userId: string;
+  javaProblem?: OrdinaryJavaProblemData;
 }
 
 export const ProblemPageOnClient: React.FC<Props> = (props) => {
+  const params = useParams<{ courseId: CourseId; lectureId: string; problemId: ProblemId }>();
+  return (
+    <ProblemSessionPage
+      key={JSON.stringify([
+        props.userId,
+        params.courseId,
+        params.lectureId,
+        params.problemId,
+        props.initialProblemSession.id,
+      ])}
+      {...props}
+    />
+  );
+};
+
+const ProblemSessionPage: React.FC<Props> = (props) => {
   const isAdmin = useAuthContextSelector((c) => c.isAdmin);
 
   const params = useParams<{ courseId: CourseId; lectureId: string; problemId: ProblemId }>();
   const problem = useMemo(
-    () => instantiateProblem(params.problemId, DEFAULT_LANGUAGE_ID, props.initialProblemSession.problemVariablesSeed),
-    [params.problemId, props.initialProblemSession.problemVariablesSeed]
+    () =>
+      props.javaProblem ??
+      instantiateProblem(params.problemId, DEFAULT_LANGUAGE_ID, props.initialProblemSession.problemVariablesSeed),
+    [params.problemId, props.initialProblemSession.problemVariablesSeed, props.javaProblem]
   );
 
   const [problemSession, setProblemSession] = useState(props.initialProblemSession);
 
   const lastActionTimeRef = useRef(0);
+  const isCurrentSession = useRef(false);
   useLayoutEffect(() => {
     lastActionTimeRef.current = Date.now();
+    isCurrentSession.current = true;
+    return () => {
+      isCurrentSession.current = false;
+    };
   }, []);
   const [isSessionExpired, setIsSessionExpired] = useState(false);
   const onSessionError = (error: unknown): void => {
-    if (isProblemSessionExpired(error)) setIsSessionExpired(true);
+    if (isCurrentSession.current && isProblemSessionExpired(error)) setIsSessionExpired(true);
   };
   useMonitorUserActivity(props, lastActionTimeRef, onSessionError, isSessionExpired);
 
@@ -77,6 +102,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
         id: problemSession.id,
         incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
       });
+      if (!isCurrentSession.current) return { status: 'ungradable', detail: 'The problem session changed.' };
       return await gradeFillInBlankAnswersMutation.mutateAsync({
         sessionId: problemSession.id,
         code,
@@ -103,6 +129,14 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   );
 
   if (!problem) notFound();
+  if (
+    props.javaProblem &&
+    (props.javaProblem.problemId !== params.problemId ||
+      props.initialProblemSession.problemId !== params.problemId ||
+      problemSession.problemType !== props.javaProblem.problemFormat)
+  )
+    notFound();
+  if (problemSession.problemType === 'bugFix' && !props.javaProblem) notFound();
 
   if (isSessionExpired) {
     return (
@@ -113,7 +147,7 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
     );
   }
 
-  const isFillInBlank = problemSession.problemType === 'fillInBlank';
+  const isJavaEditor = problemSession.problemType === 'fillInBlank' || problemSession.problemType === 'bugFix';
 
   return (
     <VStack align="stretch" spacing={4}>
@@ -122,47 +156,50 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
         lectureId={params.lectureId}
         problemId={params.problemId}
         actions={
-          <HStack hidden={isFillInBlank} spacing={2}>
-            <Tooltip
-              label={
-                problemSession.problemType === 'executionResult'
-                  ? '減点になりますが、確実に問題を解けます。'
-                  : undefined
-              }
-            >
-              <Button
-                colorScheme="blue"
-                variant="outline"
-                onClick={() => {
-                  void updateProblemSession('step', 1);
-                }}
-              >
-                {problemSession.problemType === 'executionResult'
-                  ? '諦めてステップ実行モードに移る'
-                  : 'ステップ実行モードで最初からやり直す'}
-              </Button>
-            </Tooltip>
-            {isAdmin && (
-              <Button
-                colorScheme="blue"
-                variant="outline"
-                onClick={() =>
-                  updateProblemSession('step', Math.min(problemSession.traceItemIndex + 1, problem.traceItems.length))
+          !isJavaEditor && 'traceItems' in problem ? (
+            <HStack spacing={2}>
+              <Tooltip
+                label={
+                  problemSession.problemType === 'executionResult'
+                    ? '減点になりますが、確実に問題を解けます。'
+                    : undefined
                 }
               >
-                次のステップに進む（管理者のみ）
-              </Button>
-            )}
-          </HStack>
+                <Button
+                  colorScheme="blue"
+                  variant="outline"
+                  onClick={() => {
+                    void updateProblemSession('step', 1);
+                  }}
+                >
+                  {problemSession.problemType === 'executionResult'
+                    ? '諦めてステップ実行モードに移る'
+                    : 'ステップ実行モードで最初からやり直す'}
+                </Button>
+              </Tooltip>
+              {isAdmin && (
+                <Button
+                  colorScheme="blue"
+                  variant="outline"
+                  onClick={() =>
+                    updateProblemSession('step', Math.min(problemSession.traceItemIndex + 1, problem.traceItems.length))
+                  }
+                >
+                  次のステップに進む（管理者のみ）
+                </Button>
+              )}
+            </HStack>
+          ) : undefined
         }
       />
 
-      {isFillInBlank ? (
+      {isJavaEditor ? (
         <FillInBlankBody
           key={`${problemSession.id}:${problem.displayProgram}`}
           draftContext={{
             userId: props.userId,
             mode: 'ordinary',
+            ...(props.javaProblem ? { problemFormat: props.javaProblem.problemFormat } : {}),
             courseId: params.courseId,
             lectureId: params.lectureId,
             problemId: params.problemId,
@@ -171,19 +208,20 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
           }}
           gradeCode={gradeCode}
           problem={{
+            ...(props.javaProblem ? { problemFormat: props.javaProblem.problemFormat } : {}),
             displayProgram: problem.displayProgram,
             finalBoard: problem.finalBoard,
             finalTurtles: problem.finalTurtles,
           }}
         />
-      ) : (
+      ) : 'traceItems' in problem ? (
         <ProblemBody
           createSubmissionUpdatingProblemSession={createSubmissionUpdatingProblemSession}
           problem={problem}
           problemSession={problemSession}
           updateProblemSession={updateProblemSession}
         />
-      )}
+      ) : undefined}
     </VStack>
   );
 };
@@ -203,7 +241,6 @@ function useMonitorUserActivity(
         incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
       });
     },
-    // Events within the throttle period are ignored.
     throttle: MIN_INTERVAL_MS_OF_ACTIVE_EVENTS,
   });
 }

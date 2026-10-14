@@ -45,6 +45,7 @@ import type { CourseId, ProblemId } from '@/problems/problemData';
 interface Props {
   draftContext: JavaDraftContext;
   problem: {
+    problemFormat?: 'fillInBlank' | 'bugFix';
     displayProgram: string;
     finalBoard: string;
     finalTurtles: TurtleTrace[];
@@ -198,7 +199,9 @@ const EditingBody: React.FC<Props & { baseline: string; draftKey: string; restor
               <Heading size="md">問題</Heading>
               <Box>
                 プログラムを実行した後の盤面と亀の位置・向きが右側のようになるように、Javaのコードを編集して提出してください。
-                【1】などの空欄を含め、プログラム全体を書き換えられます。
+                {props.problem.problemFormat === 'bugFix'
+                  ? 'プログラムには誤りが1か所あります。授業で学んだ構文や処理を確認して修正してください。プログラム全体を書き換えられます。'
+                  : '【1】などの空欄を含め、プログラム全体を書き換えられます。'}
               </Box>
             </VStack>
           </VStack>

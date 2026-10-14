@@ -1,4 +1,5 @@
 import { fillInBlankProblemDefinitions } from './fillInBlank/definitions';
+import { javaChallengeMetadata } from './javaChallenges/metadata';
 
 export const languageIds = ['instrumented', 'java'] as const;
 export type LanguageId = (typeof languageIds)[number];
@@ -11,7 +12,8 @@ export const courseIdToName = {
 export type CourseId = keyof typeof courseIdToName;
 export const courseIds = Object.keys(courseIdToName) as CourseId[];
 
-export const problemIdToName = {
+export const problemIdToName: Record<string, string> = {
+  ...Object.fromEntries(Object.entries(javaChallengeMetadata).map(([id, metadata]) => [id, metadata.title])),
   straight: '線を描こう(1)',
   straight2: '線を描こう(2)',
   stepBack: '線を描こう(3)',
@@ -381,6 +383,8 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
       'fillInBlank2',
       'fillInBlank3',
       'fillInBlank4',
+      'testTurnBug',
+      'testForConditionBug',
     ],
   ],
 };
@@ -408,6 +412,10 @@ export const courseIdToLectureIndexToExerciseProblemIds: Record<CourseId, Proble
   ],
   test: [['test1Blank']],
 };
+
+for (const [id, { courseId, lectureIndex }] of Object.entries(javaChallengeMetadata)) {
+  courseIdToLectureIndexToExerciseProblemIds[courseId][lectureIndex].push(id);
+}
 
 export const courseIdToLectureIds = JSON.parse(process.env.NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON ?? '{}') as Record<
   CourseId,

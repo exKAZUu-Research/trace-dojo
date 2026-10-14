@@ -58,7 +58,11 @@ const regularDisplay = {
   traceItemIndex: 0,
   completed: false,
 };
-const page = (initialFormat?: 'regular' | 'fillInBlank', strict = false, account = 'user-1'): React.ReactNode => (
+const page = (
+  initialFormat?: 'regular' | 'fillInBlank' | 'bugFix',
+  strict = false,
+  account = 'user-1'
+): React.ReactNode => (
   <ChakraProvider>
     <AuthContextProvider currentUserId={account}>
       {strict ? (
@@ -71,7 +75,7 @@ const page = (initialFormat?: 'regular' | 'fillInBlank', strict = false, account
     </AuthContextProvider>
   </ChakraProvider>
 );
-const renderPage = (initialFormat?: 'regular' | 'fillInBlank', strict = false): ReturnType<typeof render> =>
+const renderPage = (initialFormat?: 'regular' | 'fillInBlank' | 'bugFix', strict = false): ReturnType<typeof render> =>
   render(page(initialFormat, strict));
 
 beforeEach(() => {
@@ -267,6 +271,8 @@ test('completed fill-in-blank next keeps the active format and renders the retur
   expect(screen.getByRole('button', { hidden: true, name: '元に戻す' })).toBeDisabled();
   expect(screen.getByRole('button', { hidden: true, name: 'やり直す' })).toBeDisabled();
   expect(screen.getByText(/プログラムを実行した後の盤面/)).toBeVisible();
+  const dialog = await screen.findByRole('alertdialog');
+  await waitFor(() => expect(dialog).toBeVisible());
   await user.keyboard('{Escape}');
   expect(screen.getByRole('alertdialog')).toBeVisible();
   await user.click(screen.getByRole('button', { name: '次の問題へ' }));
@@ -672,3 +678,188 @@ test('local challenge draft clears after correct grading and Next begins an inde
   renderPage('fillInBlank');
   expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(nextCode);
 });
+
+const syntaxBugDisplay = {
+  ...blankDisplay,
+  problemFormat: 'bugFix' as const,
+  displayProgram: `class Main {
+  public static void main(String[] args) {
+    Turtle t = new Turtle();
+    for (int i = 0; 3; i++) { t.前に進む(); }
+  }
+}`,
+  finalBoard: '#......\n#......\n#......\n#......\n.......\n.......\n.......',
+  finalTurtles: [{ x: 0, y: 3, color: '#', dir: 'N' }],
+};
+
+test('bug repair selection supports compiler feedback, full-source repair, completion and Next', async () => {
+  transport.start.mockResolvedValue(syntaxBugDisplay);
+  const message = '繰り返しの条件を確認してください。';
+  transport.submitBlank
+    .mockResolvedValueOnce({
+      status: 'incorrect',
+      detail: 'Compile error.',
+      diagnostics: [{ line: 4, message, originalMessage: 'int cannot be converted to boolean' }],
+    })
+    .mockResolvedValueOnce({ status: 'correct' });
+  transport.next.mockResolvedValue({ ...syntaxBugDisplay, sessionId: 24 });
+  const user = userEvent.setup();
+  const rendered = renderPage();
+  await user.click(await screen.findByRole('button', { name: /バグ修正/ }));
+  expect(navigation.push).toHaveBeenCalledWith(
+    '/courses/test/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d/challenge?format=bugFix'
+  );
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
+  expect(readRenderedJavaSource(editor)).toBe(syntaxBugDisplay.displayProgram);
+  expect(transport.submitBlank).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('button', { name: '提出' }));
+  expect(transport.submitBlank).toHaveBeenLastCalledWith({
+    courseId: 'test',
+    lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
+    sessionId: 23,
+    problemFormat: 'bugFix',
+    code: syntaxBugDisplay.displayProgram,
+  });
+  expect(await screen.findByRole('alertdialog')).toHaveTextContent(message);
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  expect(screen.getByText(message)).toBeVisible();
+  const repaired = syntaxBugDisplay.displayProgram.replace('; 3;', '; i < 3;');
+  await replaceJavaSource(editor, repaired);
+  rendered.unmount();
+  const resumed = renderPage('bugFix');
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(repaired);
+  await user.click(screen.getByRole('button', { name: '提出' }));
+  expect(transport.submitBlank).toHaveBeenLastCalledWith(
+    expect.objectContaining({ code: repaired, problemFormat: 'bugFix' })
+  );
+  await screen.findByRole('alertdialog');
+  await user.click(screen.getByRole('button', { name: '次の問題へ' }));
+  expect(transport.next).toHaveBeenCalledWith({
+    courseId: 'test',
+    lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
+    sessionId: 23,
+    problemFormat: 'bugFix',
+  });
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(
+    syntaxBugDisplay.displayProgram
+  );
+  expect(screen.getByRole('button', { name: '元に戻す' })).toBeDisabled();
+  resumed.unmount();
+  transport.start.mockResolvedValue({ ...syntaxBugDisplay, sessionId: 24 });
+  renderPage('bugFix');
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(
+    syntaxBugDisplay.displayProgram
+  );
+});
+
+test('bug repair Reset and draft resume keep format, user and session identities separate', async () => {
+  transport.start.mockResolvedValue(syntaxBugDisplay);
+  const user = userEvent.setup();
+  let rendered = renderPage('bugFix');
+  let editor = await screen.findByRole('textbox', { name: /Java/ });
+  await replaceJavaSource(editor, 'class BugDraft {}');
+  await user.click(screen.getByRole('button', { name: 'リセット' }));
+  await user.click(await screen.findByRole('button', { name: 'リセットする' }));
+  await waitFor(() => expect(readRenderedJavaSource(editor)).toBe(syntaxBugDisplay.displayProgram));
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  await replaceJavaSource(editor, 'class BugDraft {}');
+  rendered.unmount();
+  transport.start.mockResolvedValue({ ...syntaxBugDisplay, problemFormat: 'fillInBlank' });
+  rendered = renderPage('fillInBlank');
+  editor = await screen.findByRole('textbox', { name: /Java/ });
+  expect(readRenderedJavaSource(editor)).toBe(syntaxBugDisplay.displayProgram);
+  await replaceJavaSource(editor, 'class BlankDraft {}');
+  rendered.unmount();
+  transport.start.mockResolvedValue({ ...syntaxBugDisplay, sessionId: 24 });
+  rendered = renderPage('bugFix');
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(
+    syntaxBugDisplay.displayProgram
+  );
+  rendered.unmount();
+  transport.start.mockResolvedValue(syntaxBugDisplay);
+  rendered = render(page('bugFix', false, 'user-2'));
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(
+    syntaxBugDisplay.displayProgram
+  );
+  rendered.unmount();
+  renderPage('bugFix');
+  expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe('class BugDraft {}');
+  expect(transport.submitBlank).not.toHaveBeenCalled();
+  expect(transport.next).not.toHaveBeenCalled();
+});
+
+test('a delayed bug Next success cannot replace the healthy exercise selected by a later format change', async () => {
+  let resolveNext!: (display: typeof syntaxBugDisplay) => void;
+  transport.next.mockReturnValue(new Promise((resolve) => (resolveNext = resolve)));
+  const healthy = { ...blankDisplay, sessionId: 91, displayProgram: 'class HealthyBlank { int value = 【1】; }' };
+  transport.start.mockResolvedValueOnce({ ...syntaxBugDisplay, completed: true }).mockResolvedValueOnce(healthy);
+  const user = userEvent.setup();
+  const rendered = renderPage('bugFix');
+  await user.click(await screen.findByRole('button', { name: '次の問題へ' }));
+  await waitFor(() => expect(transport.next).toHaveBeenCalledTimes(1));
+
+  rendered.rerender(page('fillInBlank'));
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
+  expect(readRenderedJavaSource(editor)).toBe(healthy.displayProgram);
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+  await act(async () => resolveNext({ ...syntaxBugDisplay, sessionId: 24 }));
+
+  expect(screen.getByRole('textbox', { name: /Java/ })).toBe(editor);
+  expect(readRenderedJavaSource(editor)).toBe(healthy.displayProgram);
+  expect(editor).toHaveAttribute('contenteditable', 'true');
+  await replaceJavaSource(editor, 'class StillEditable {}');
+  expect(screen.getByRole('button', { name: '提出' })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: 'ページを再読み込み' })).not.toBeInTheDocument();
+});
+
+test.each(['bug submission', 'bug Next', 'regular submission'] as const)(
+  'an obsolete %s stale-session rejection cannot replace a healthy new format with a reload notice',
+  async (operation) => {
+    let rejectOld!: (error: unknown) => void;
+    const oldRequest = new Promise((_resolve, reject) => (rejectOld = reject));
+    const mutation =
+      operation === 'bug Next'
+        ? transport.next
+        : operation === 'regular submission'
+          ? transport.submitRegular
+          : transport.submitBlank;
+    mutation.mockReturnValueOnce(oldRequest);
+    const healthy = { ...blankDisplay, sessionId: 91, displayProgram: 'class HealthyBlank { int value = 【1】; }' };
+    transport.start
+      .mockResolvedValueOnce(
+        operation === 'regular submission'
+          ? regularDisplay
+          : { ...syntaxBugDisplay, completed: operation === 'bug Next' }
+      )
+      .mockResolvedValueOnce(healthy);
+    const user = userEvent.setup();
+    const rendered = renderPage(operation === 'regular submission' ? 'regular' : 'bugFix');
+    if (operation === 'bug Next') {
+      await user.click(await screen.findByRole('button', { name: '次の問題へ' }));
+    } else {
+      if (operation === 'regular submission') {
+        const inputs = await screen.findAllByRole('textbox');
+        for (const [index, input] of inputs.entries()) await user.type(input, ['2', '2', '4'][index]);
+      } else {
+        await screen.findByRole('textbox', { name: /Java/ });
+      }
+      await user.click(screen.getByRole('button', { name: /提出/ }));
+    }
+    await waitFor(() => expect(mutation).toHaveBeenCalledTimes(1));
+
+    rendered.rerender(page('fillInBlank'));
+    const editor = await screen.findByRole('textbox', { name: /Java/ });
+    expect(readRenderedJavaSource(editor)).toBe(healthy.displayProgram);
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+    await act(async () => rejectOld({ data: { code: 'CONFLICT' } }));
+
+    expect(screen.queryByRole('button', { name: 'ページを再読み込み' })).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /Java/ })).toBe(editor);
+    expect(readRenderedJavaSource(editor)).toBe(healthy.displayProgram);
+    expect(editor).toHaveAttribute('contenteditable', 'true');
+    await replaceJavaSource(editor, 'class HealthyDraft {}');
+    expect(screen.getByRole('button', { name: '提出' })).toBeEnabled();
+  },
+  15_000
+);

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import type { InstantiatedProblem } from '../instantiateProblem';
+import type { JavaChallengeTarget } from '../javaChallenges/types';
 
 import { normalizeCompilerDiagnostics } from './compilerDiagnostics';
 import type { JavaDiagnostic } from './javaDiagnostics';
@@ -37,7 +37,7 @@ export interface GradingOptions {
 const defaultJavaExecutors: JavaExecutor[] = [createWandboxExecutor(), createJudgeExecutor()];
 
 export async function gradeFillInBlankCode(
-  problem: InstantiatedProblem,
+  problem: JavaChallengeTarget,
   userProgram: string,
   options?: GradingOptions
 ): Promise<FillInBlankGradingResult> {

@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
 import { ChakraProvider } from '@chakra-ui/react';
+import { completionStatus } from '@codemirror/autocomplete';
+import { EditorView } from '@codemirror/view';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, test, vi } from 'vitest';
@@ -1122,6 +1124,9 @@ test('variable completion never offers source declarations in literals, comments
   const user = userEvent.setup();
   renderPage('fillInBlank');
   const editor = await screen.findByRole('textbox', { name: /Java/ });
+  const view = EditorView.findFromDOM(editor);
+  expect(view, 'The rendered textbox must belong to a mounted CodeMirror view').toBeDefined();
+  if (!view) throw new Error('Mounted CodeMirror view is unavailable');
   const prefix = 'class Main { void draw() { int visibleValue = 1; ';
   await replaceJavaSource(editor, `${prefix}vis`);
   await user.keyboard('{Control>} {/Control}');
@@ -1129,18 +1134,11 @@ test('variable completion never offers source declarations in literals, comments
   await user.keyboard('{Escape}');
   for (const suffix of ['// vis', 'String text = "vis', 'String text = """\nvis', 'object.vis']) {
     await replaceJavaSource(editor, prefix + suffix);
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-    try {
-      await act(async () => {
-        fireEvent.keyDown(editor, { key: ' ', code: 'Space', ctrlKey: true });
-        fireEvent.keyUp(editor, { key: ' ', code: 'Space', ctrlKey: true });
-        await vi.runAllTimersAsync();
-      });
-      expect(vi.getTimerCount()).toBe(0);
-      expect(screen.queryByRole('option', { name: /^visibleValue/ })).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
+    fireEvent.keyDown(editor, { key: ' ', code: 'Space', ctrlKey: true });
+    fireEvent.keyUp(editor, { key: ' ', code: 'Space', ctrlKey: true });
+    expect(completionStatus(view.state)).toBe('pending');
+    await waitFor(() => expect(completionStatus(view.state)).toBeNull());
+    expect(screen.queryByRole('option', { name: /^visibleValue/ })).not.toBeInTheDocument();
   }
 });
 

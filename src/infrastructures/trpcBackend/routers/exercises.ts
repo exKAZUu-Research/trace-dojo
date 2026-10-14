@@ -9,6 +9,9 @@ import { authorize } from '../middlewares';
 import { procedure } from '../trpc';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import type { ExerciseDisplay } from '@/problems/fillInBlank/exerciseProblem';
+import { javaChallengeDefinitions } from '@/problems/javaChallenges/definitions';
+import { instantiateJavaChallenge, type InstantiatedJavaChallenge } from '@/problems/javaChallenges/instantiate';
+import type { JavaChallengeFormat } from '@/problems/javaChallenges/types';
 import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
 import { MAX_JAVA_PROGRAM_LENGTH } from '@/problems/fillInBlank/javaProgram';
 import { gradeFillInBlankCode, type FillInBlankVerdict } from '@/problems/fillInBlank/grade';
@@ -21,20 +24,21 @@ import {
   type CourseId,
 } from '@/problems/problemData';
 
-type ProblemFormat = 'fillInBlank' | 'regular';
+type ProblemFormat = JavaChallengeFormat | 'regular';
 const locationSchema = z.object({ courseId: z.string(), lectureId: z.string() });
 const startSchema = z.union([
   locationSchema.extend({ problemFormat: z.literal('regular') }).strict(),
-  locationSchema.extend({ problemFormat: z.literal('fillInBlank').optional() }),
+  locationSchema.extend({ problemFormat: z.enum(['fillInBlank', 'bugFix']).optional() }),
 ]);
 const nextSchema = z.union([
   locationSchema.extend({ sessionId: z.number().int().positive(), problemFormat: z.literal('regular') }).strict(),
   locationSchema.extend({
     sessionId: z.number().int().positive(),
-    problemFormat: z.literal('fillInBlank').optional(),
+    problemFormat: z.enum(['fillInBlank', 'bugFix']).optional(),
   }),
 ]);
 const submissionSchema = locationSchema.extend({
+  problemFormat: z.enum(['fillInBlank', 'bugFix']).optional(),
   sessionId: z.number().int().positive(),
   code: z.string().min(1).max(MAX_JAVA_PROGRAM_LENGTH),
 });
@@ -101,12 +105,13 @@ export const exerciseProcedures = {
       const receivedAt = new Date();
       checkedLecture(input.courseId, input.lectureId);
       const userId = ctx.session.superTokensUserId;
-      ownedSession(input.sessionId, userId, input.courseId, input.lectureId, 'fillInBlank', receivedAt);
+      const format = input.problemFormat ?? 'fillInBlank';
+      ownedSession(input.sessionId, userId, input.courseId, input.lectureId, format, receivedAt);
       const key = `${input.sessionId}:${input.code}`;
       const existing = gradingLocks.get(key);
       if (existing) return await existing;
       const grading = enqueue(input.sessionId, () =>
-        gradeAndSave(input.sessionId, userId, input.courseId, input.lectureId, input.code, receivedAt)
+        gradeAndSave(input.sessionId, userId, input.courseId, input.lectureId, input.code, receivedAt, format)
       );
       gradingLocks.set(key, grading);
       try {
@@ -206,17 +211,27 @@ const ownedSession = (
 const candidatesFor = (courseId: string, lectureId: string, format: ProblemFormat): string[] => {
   const lectureIndex = courseIdToLectureIds[courseId as CourseId].indexOf(lectureId);
   const configured =
-    format === 'fillInBlank'
-      ? courseIdToLectureIndexToExerciseProblemIds[courseId as CourseId]?.[lectureIndex]
-      : courseIdToLectureIndexToProblemIds[courseId as CourseId]?.[lectureIndex];
+    format === 'regular'
+      ? courseIdToLectureIndexToProblemIds[courseId as CourseId]?.[lectureIndex]
+      : courseIdToLectureIndexToExerciseProblemIds[courseId as CourseId]?.[lectureIndex];
   if (!configured) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Missing challenge configuration' });
-  for (const id of configured) {
+  return configured.filter((id) => {
+    const fixed = javaChallengeDefinitions[id];
+    if (fixed) {
+      if (format === 'regular') {
+        if (fixed.courseId !== courseId || fixed.lectureIndex !== lectureIndex)
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Wrong Java problem location: ${id}` });
+        return false;
+      }
+      return fixed.problemFormat === format;
+    }
     if (!problemIdToLanguageIdToProgram[id])
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Unknown challenge problem: ${id}` });
-    if (format === 'fillInBlank' && !isFillInBlankProblem(id))
+    const blank = isFillInBlankProblem(id);
+    if (format !== 'regular' && !blank)
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Challenge problem without blanks: ${id}` });
-  }
-  return format === 'regular' ? configured.filter((id) => !isFillInBlankProblem(id)) : configured;
+    return format === 'regular' ? !blank : format === 'fillInBlank';
+  });
 };
 type DisplayResult = ExerciseDisplay | RegularExerciseDisplay | { status: 'noProblems' };
 const startOrResume = (userId: string, courseId: string, lectureId: string, format: ProblemFormat): DisplayResult => {
@@ -252,9 +267,8 @@ const createFromCandidates = (
   const problemId = candidates[Math.floor(Math.random() * candidates.length)];
   const seed = randomUUID();
   // Generate before inserting: a session whose problem cannot be generated would be resumed and fail forever.
-  const problem = format === 'regular' ? instantiateRegular(problemId, seed) : instantiateBlank(problemId, seed);
-  if (format === 'regular' && problem.traceItems.length <= 1)
-    throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Too few trace items: ${problemId}` });
+  const problem =
+    format === 'regular' ? instantiateRegular(problemId, seed) : instantiateChallenge(problemId, seed, format);
   const row = db
     .insert(exerciseSessions)
     .values({
@@ -265,7 +279,7 @@ const createFromCandidates = (
       problemFormat: format,
       problemId,
       seed,
-      problemType: format === 'regular' ? 'executionResult' : 'fillInBlank',
+      problemType: format === 'regular' ? 'executionResult' : format,
       traceItemIndex: 0,
     })
     .returning()
@@ -274,15 +288,28 @@ const createFromCandidates = (
 };
 const instantiateRegular = (problemId: string, seed: string): InstantiatedProblem => {
   const problem = instantiateProblem(problemId, 'java', seed);
-  if (!problem || problem.blankAnswers.length > 0)
+  if (!problem || problem.blankAnswers.length > 0 || problem.traceItems.length <= 1)
     throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Invalid regular problem: ${problemId}` });
   return problem;
 };
-const instantiateBlank = (problemId: string, seed: string): InstantiatedProblem => {
-  const problem = instantiateProblem(problemId, 'java', seed);
-  if (!problem || problem.blankAnswers.length === 0)
-    throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Invalid challenge problem: ${problemId}` });
-  return problem;
+const instantiateChallenge = (
+  problemId: string,
+  seed: string,
+  format: JavaChallengeFormat
+): InstantiatedJavaChallenge => {
+  try {
+    if (javaChallengeDefinitions[problemId]) return instantiateJavaChallenge(problemId, format);
+    const problem = instantiateProblem(problemId, 'java', seed);
+    if (format !== 'fillInBlank' || !problem || problem.blankAnswers.length === 0)
+      throw new Error(`Invalid challenge problem: ${problemId}`);
+    return problem;
+  } catch (error) {
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: `Invalid challenge problem: ${problemId}`,
+      cause: error,
+    });
+  }
 };
 const toRegularDisplay = (row: ExerciseSession): RegularExerciseDisplay => ({
   problemFormat: 'regular',
@@ -296,7 +323,7 @@ const toRegularDisplay = (row: ExerciseSession): RegularExerciseDisplay => ({
 const toDisplay = (
   row: ExerciseSession,
   format: ProblemFormat,
-  problem?: InstantiatedProblem
+  problem?: InstantiatedJavaChallenge
 ): ExerciseDisplay | RegularExerciseDisplay => {
   if (format === 'regular') {
     validateRegularState(row);
@@ -304,9 +331,9 @@ const toDisplay = (
     if (!problem) instantiateRegular(row.problemId, row.seed);
     return toRegularDisplay(row);
   }
-  const { displayProgram, finalBoard, finalTurtles } = problem ?? instantiateBlank(row.problemId, row.seed);
+  const { displayProgram, finalBoard, finalTurtles } = problem ?? instantiateChallenge(row.problemId, row.seed, format);
   return {
-    problemFormat: 'fillInBlank',
+    problemFormat: format,
     sessionId: row.id,
     problemId: row.problemId,
     displayProgram,
@@ -370,10 +397,11 @@ const gradeAndSave = async (
   courseId: string,
   lectureId: string,
   code: string,
-  receivedAt: Date
+  receivedAt: Date,
+  format: JavaChallengeFormat
 ): Promise<FillInBlankVerdict> => {
-  const session = ownedSession(id, userId, courseId, lectureId, 'fillInBlank', receivedAt);
-  const result = await gradeFillInBlankCode(instantiateBlank(session.problemId, session.seed), code);
+  const session = ownedSession(id, userId, courseId, lectureId, format, receivedAt);
+  const result = await gradeFillInBlankCode(instantiateChallenge(session.problemId, session.seed, format), code);
   if (result.status === 'ungradable') logger.warn('Failed to grade exercise %d: %s', id, result.detail);
   db.transaction((tx) => {
     const current = tx.select().from(exerciseSessions).where(eq(exerciseSessions.id, id)).get();

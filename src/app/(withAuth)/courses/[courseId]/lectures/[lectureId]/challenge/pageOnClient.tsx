@@ -62,10 +62,11 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
     undefined
   );
   const activeRequestRef = useRef(0);
+  const activeSessionRef = useRef<{ sessionId: number; problemFormat: ChallengeProblemFormat } | undefined>(undefined);
   const previousInitialFormatRef = useRef(initialFormat);
   const { mutateAsync: start } = backendTrpcReact.startExercise.useMutation();
   const next = backendTrpcReact.nextExercise.useMutation();
-  const submitBlank = backendTrpcReact.submitExercise.useMutation();
+  const submitJava = backendTrpcReact.submitExercise.useMutation();
   const submitRegular = backendTrpcReact.submitRegularExercise.useMutation();
   const switchRegular = backendTrpcReact.switchRegularExerciseToStep.useMutation();
   const back = (): void => router.push(`/courses/${courseId}/lectures/${lectureId}`);
@@ -75,11 +76,13 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
     previousInitialFormatRef.current = initialFormat;
     if (initialFormat === format) return;
     activeRequestRef.current += 1;
+    activeSessionRef.current = undefined;
     requestRef.current = undefined;
     pendingRef.current = false;
     // oxlint-disable-next-line react/set-state-in-effect -- synchronize client state with server search params
     setIsPending(false);
     setMessage(undefined);
+    setIsSessionStale(false);
     setExercise(undefined);
     setFormat(initialFormat);
     setIsModalOpen(!initialFormat);
@@ -105,12 +108,13 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
         if (cancelled || activeRequestRef.current !== requestId) return display;
         if ('status' in display) {
           setMessage({
-            text: `${format === 'regular' ? '通常問題' : '穴埋め問題'}は現在出題できません。別の形式を選んでください。`,
+            text: `${format === 'regular' ? '通常問題' : format === 'bugFix' ? 'バグ修正' : '穴埋め問題'}は現在出題できません。別の形式を選んでください。`,
             role: 'status',
           });
           setIsModalOpen(true);
           return display;
         }
+        activeSessionRef.current = { sessionId: display.sessionId, problemFormat: display.problemFormat };
         setExercise(display);
         setIsModalOpen(false);
         return display;
@@ -127,14 +131,19 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
       });
     return () => {
       cancelled = true;
+      activeRequestRef.current += 1;
+      activeSessionRef.current = undefined;
     };
   }, [courseId, format, lectureId, retryGeneration, start]);
 
   const select = (selected: ChallengeProblemFormat): void => {
     if (pendingRef.current) return;
+    activeRequestRef.current += 1;
+    activeSessionRef.current = undefined;
     pendingRef.current = true;
     setIsPending(true);
     setMessage(undefined);
+    setIsSessionStale(false);
     setExercise(undefined);
     if (selected !== format) {
       setFormat(selected);
@@ -143,6 +152,7 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
   };
   const closeSelection = (): void => {
     activeRequestRef.current += 1;
+    activeSessionRef.current = undefined;
     requestRef.current = undefined;
     pendingRef.current = false;
     setIsPending(false);
@@ -150,36 +160,61 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
     setFormat(undefined);
     back();
   };
-  const detectStaleSession = async <T,>(request: Promise<T>): Promise<T> => {
+  const currentAttempt = (sessionId: number, problemFormat: ChallengeProblemFormat): (() => boolean) => {
+    const generation = activeRequestRef.current;
+    const session = activeSessionRef.current;
+    return () =>
+      activeRequestRef.current === generation &&
+      activeSessionRef.current === session &&
+      session?.sessionId === sessionId &&
+      session.problemFormat === problemFormat;
+  };
+  const detectStaleSession = async <T,>(request: Promise<T>, isCurrent: () => boolean): Promise<T> => {
     try {
       return await request;
     } catch (error) {
-      if (isChallengeSessionStale(error)) setIsSessionStale(true);
+      if (isCurrent() && isChallengeSessionStale(error)) setIsSessionStale(true);
       throw error;
     }
   };
   const fetchNext = async (sessionId: number, problemFormat: ChallengeProblemFormat): Promise<Display> => {
+    const isCurrent = currentAttempt(sessionId, problemFormat);
     let display: Display | { status: 'noProblems' };
     try {
-      display = await detectStaleSession(next.mutateAsync({ courseId, lectureId, sessionId, problemFormat }));
+      display = await detectStaleSession(
+        next.mutateAsync({ courseId, lectureId, sessionId, problemFormat }),
+        isCurrent
+      );
     } catch {
       throw new Error('次の問題を取得できませんでした。');
     }
+    if (!isCurrent()) throw new Error('Exercise request is no longer active');
     if ('status' in display) throw new Error('この授業回には現在出題できる問題がありません。');
     return display;
   };
-  const nextBlank = async (): Promise<void> => {
-    if (!exercise) throw new Error('次の問題を取得できませんでした。');
-    setExercise(await fetchNext(exercise.sessionId, 'fillInBlank'));
+  const nextJava = async (): Promise<void> => {
+    if (!exercise || exercise.problemFormat === 'regular') throw new Error('次の問題を取得できませんでした。');
+    const isCurrent = currentAttempt(exercise.sessionId, exercise.problemFormat);
+    const display = await fetchNext(exercise.sessionId, exercise.problemFormat);
+    if (!isCurrent()) return;
+    activeSessionRef.current = { sessionId: display.sessionId, problemFormat: display.problemFormat };
+    setExercise(display);
   };
   const actions: CompletionAction[] = [
     { label: '終わる', onClick: back },
-    { label: '次の問題へ', colorScheme: 'brand', onClick: nextBlank },
+    { label: '次の問題へ', colorScheme: 'brand', onClick: nextJava },
   ];
-  const gradeBlank = async (code: string): Promise<FillInBlankVerdict> => {
-    if (!exercise) throw new Error('No active exercise');
+  const gradeJava = async (code: string): Promise<FillInBlankVerdict> => {
+    if (!exercise || exercise.problemFormat === 'regular') throw new Error('No active Java exercise');
     return await detectStaleSession(
-      submitBlank.mutateAsync({ courseId, lectureId, sessionId: exercise.sessionId, code })
+      submitJava.mutateAsync({
+        courseId,
+        lectureId,
+        sessionId: exercise.sessionId,
+        code,
+        ...(exercise.problemFormat === 'bugFix' ? { problemFormat: 'bugFix' as const } : {}),
+      }),
+      currentAttempt(exercise.sessionId, exercise.problemFormat)
     );
   };
 
@@ -215,31 +250,44 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
           display={exercise}
           back={back}
           transport={{
-            submit: async (input) => await detectStaleSession(submitRegular.mutateAsync(input)),
+            submit: async (input) =>
+              await detectStaleSession(submitRegular.mutateAsync(input), currentAttempt(input.sessionId, 'regular')),
             switchToStep: async ({ sessionId }) =>
-              await detectStaleSession(switchRegular.mutateAsync({ courseId, lectureId, sessionId })),
+              await detectStaleSession(
+                switchRegular.mutateAsync({ courseId, lectureId, sessionId }),
+                currentAttempt(sessionId, 'regular')
+              ),
             next: async ({ sessionId, problemFormat }) => {
+              const isCurrent = currentAttempt(sessionId, problemFormat);
               const value = await fetchNext(sessionId, problemFormat);
+              if (!isCurrent()) throw new Error('Exercise request is no longer active');
               if (value.problemFormat !== 'regular') throw new Error('次の問題を取得できませんでした。');
+              activeSessionRef.current = { sessionId: value.sessionId, problemFormat: value.problemFormat };
               return value;
             },
           }}
         />
       )}
-      {exercise?.problemFormat === 'fillInBlank' && format === 'fillInBlank' && (
-        <VStack key={exercise.sessionId} align="stretch" spacing={4}>
-          <ProblemPageHeader courseId={courseId} lectureId={lectureId} problemId={exercise.problemId as ProblemId} />
+      {exercise && exercise.problemFormat !== 'regular' && exercise.problemFormat === format && (
+        <VStack key={`${exercise.problemFormat}:${exercise.sessionId}`} align="stretch" spacing={4}>
+          <ProblemPageHeader
+            courseId={courseId}
+            lectureId={lectureId}
+            problemId={exercise.problemId as ProblemId}
+            fallbackTitle={exercise.problemFormat === 'bugFix' ? 'バグ修正' : '穴埋め問題'}
+          />
           <FillInBlankBody
             draftContext={{
               userId,
               mode: 'challenge',
+              ...(exercise.problemFormat === 'bugFix' ? { problemFormat: 'bugFix' as const } : {}),
               courseId,
               lectureId,
               problemId: exercise.problemId,
               sessionId: exercise.sessionId,
             }}
             problem={exercise}
-            gradeCode={gradeBlank}
+            gradeCode={gradeJava}
             completionActions={actions}
             completionMessage="正解です！次の問題へ進めます。"
             isCompleted={exercise.completed}

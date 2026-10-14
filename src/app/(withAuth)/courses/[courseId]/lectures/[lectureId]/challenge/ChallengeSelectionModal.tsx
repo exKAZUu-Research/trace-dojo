@@ -32,7 +32,7 @@ export const ChallengeSelectionModal: React.FC<ChallengeSelectionModalProps> = (
   const initialFocusRef = useRef<HTMLButtonElement>(null);
 
   return (
-    <Modal initialFocusRef={initialFocusRef} isOpen={isOpen} onClose={onClose} size="xl">
+    <Modal initialFocusRef={initialFocusRef} isOpen={isOpen} onClose={onClose} size="3xl">
       <ModalOverlay />
       <ModalContent>
         <ModalHeader>チャレンジ形式を選択</ModalHeader>

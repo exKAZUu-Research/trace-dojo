@@ -5,7 +5,7 @@ import type { IconType } from 'react-icons';
 import { MdCode, MdEditNote } from '@/infrastructures/useClient/icons';
 import { Button, Heading, Icon, SimpleGrid, Text, VStack } from '@/infrastructures/useClient/chakra';
 
-export type ChallengeProblemFormat = 'regular' | 'fillInBlank';
+export type ChallengeProblemFormat = 'regular' | 'fillInBlank' | 'bugFix';
 interface Props {
   isPending: boolean;
   onSelect: (format: ChallengeProblemFormat) => void | Promise<void>;
@@ -13,7 +13,7 @@ interface Props {
 }
 
 export const ChallengeSelection: React.FC<Props> = ({ isPending, onSelect, regularButtonRef }) => (
-  <SimpleGrid columns={{ base: 1, md: 2 }} gap={5}>
+  <SimpleGrid columns={{ base: 1, md: 3 }} gap={5}>
     <Choice
       disabled={isPending}
       title="通常問題"
@@ -28,6 +28,13 @@ export const ChallengeSelection: React.FC<Props> = ({ isPending, onSelect, regul
       description="プログラムの空欄を埋める問題です。"
       icon={MdEditNote}
       onClick={() => onSelect('fillInBlank')}
+    />
+    <Choice
+      disabled={isPending}
+      title="バグ修正"
+      description="プログラムの誤りを見つけて直す問題です。"
+      icon={MdCode}
+      onClick={() => onSelect('bugFix')}
     />
   </SimpleGrid>
 );

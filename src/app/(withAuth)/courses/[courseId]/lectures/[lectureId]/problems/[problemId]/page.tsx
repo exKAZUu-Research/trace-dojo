@@ -1,3 +1,4 @@
+import { notFound } from 'next/navigation';
 import { problemSessions } from '../../../../../../../../../db/schema';
 import { ProblemPageOnClient } from './pageOnClient';
 
@@ -7,6 +8,7 @@ import { logger } from '@/infrastructures/pino';
 import { db } from '@/infrastructures/database';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import { isFillInBlankProblem } from '@/problems/instantiateProblem';
+import { getOrdinaryJavaProblem, isOrdinaryBugProblem } from '@/problems/javaChallenges/ordinaryProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 
 const ProblemPage: MyAuthorizedNextPageOrLayout<{
@@ -14,6 +16,9 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
   lectureId: string;
   problemId: ProblemId;
 }> = async ({ params, session }) => {
+  const javaProblem = isOrdinaryBugProblem(params.problemId)
+    ? getOrdinaryJavaProblem(params.problemId, params.courseId, params.lectureId)
+    : undefined;
   let incompleteProblemSession = await db.query.problemSessions.findFirst({
     where: {
       ...getLearningPeriodFilter(),
@@ -24,6 +29,12 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
       completedAt: { isNull: true },
     },
   });
+  if (
+    incompleteProblemSession &&
+    javaProblem &&
+    (incompleteProblemSession.problemType !== 'bugFix' || incompleteProblemSession.traceItemIndex !== 0)
+  )
+    notFound();
   incompleteProblemSession ??= db
     .insert(problemSessions)
     .values({
@@ -32,7 +43,7 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
       lectureId: params.lectureId,
       problemId: params.problemId,
       problemVariablesSeed: Date.now().toString(),
-      problemType: isFillInBlankProblem(params.problemId) ? 'fillInBlank' : 'executionResult',
+      problemType: javaProblem ? 'bugFix' : isFillInBlankProblem(params.problemId) ? 'fillInBlank' : 'executionResult',
       traceItemIndex: 0,
     })
     .returning()
@@ -42,6 +53,7 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
   return (
     <ProblemPageOnClient
       key={incompleteProblemSession.id}
+      javaProblem={javaProblem}
       initialProblemSession={incompleteProblemSession}
       userId={session.superTokensUserId}
     />
