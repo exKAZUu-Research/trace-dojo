@@ -87,6 +87,7 @@ export const exerciseSessions = sqliteTable(
     problemType: text().notNull(),
     traceItemIndex: integer().notNull(),
     completedAt: integer({ mode: 'timestamp_ms' }),
+    endedAt: integer({ mode: 'timestamp_ms' }),
   },
   (table) => [
     index('ExerciseSession_user_lecture_mode_created_idx').on(
