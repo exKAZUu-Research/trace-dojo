@@ -11,7 +11,8 @@ import { procedure, router } from '../trpc';
 
 import { DEFAULT_LANGUAGE_ID } from '@/constants';
 import { getLearningPeriodFilter } from '@/learningPeriod';
-import { gradeFillInBlankAnswers } from '@/problems/fillInBlank/grade';
+import { MAX_JAVA_PROGRAM_LENGTH } from '@/problems/fillInBlank/javaProgram';
+import { gradeFillInBlankCode } from '@/problems/fillInBlank/grade';
 import { instantiateProblem } from '@/problems/instantiateProblem';
 import { exerciseProcedures } from './exercises';
 
@@ -126,7 +127,7 @@ export const backendRouter = router({
     .input(
       z.object({
         sessionId: z.number().int().positive(),
-        answers: z.array(z.string().max(1000)).max(50),
+        code: z.string().min(1).max(MAX_JAVA_PROGRAM_LENGTH),
         elapsedMilliseconds: z.number().nonnegative(),
       })
     )
@@ -141,13 +142,13 @@ export const backendRouter = router({
       const problem = instantiateProblem(session.problemId, DEFAULT_LANGUAGE_ID, session.problemVariablesSeed);
       if (!problem || problem.blankAnswers.length === 0) throw new TRPCError({ code: 'BAD_REQUEST' });
 
-      const result = await gradeFillInBlankAnswers(problem, input.answers);
+      const result = await gradeFillInBlankCode(problem, input.code);
       if (result.status === 'ungradable') {
         logger.warn('Failed to grade fill-in-the-blank answers of session %d: %s', session.id, result.detail);
         // The detail describes server infrastructure, so it stays in the log.
         return { status: result.status, detail: '' };
       }
-      saveFillInBlankSubmission(session, input.answers, input.elapsedMilliseconds, result, receivedAt);
+      saveFillInBlankSubmission(session, input.code, input.elapsedMilliseconds, result, receivedAt);
       if (result.status === 'correct') {
         revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');
       }
@@ -179,9 +180,9 @@ export type BackendRouter = typeof backendRouter;
 
 const saveFillInBlankSubmission = (
   session: ProblemSession,
-  answers: string[],
+  code: string,
   elapsedMilliseconds: number,
-  result: Exclude<Awaited<ReturnType<typeof gradeFillInBlankAnswers>>, { status: 'ungradable' }>,
+  result: Exclude<Awaited<ReturnType<typeof gradeFillInBlankCode>>, { status: 'ungradable' }>,
   receivedAt: Date
 ): void => {
   db.transaction((tx) => {
@@ -192,7 +193,7 @@ const saveFillInBlankSubmission = (
         traceItemIndex: session.traceItemIndex,
         elapsedMilliseconds,
         isCorrect: result.status === 'correct',
-        answers: JSON.stringify(answers),
+        code,
         gradingStage: result.stage,
       })
       .run();

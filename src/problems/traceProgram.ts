@@ -54,7 +54,7 @@ export const colorToChar = Object.fromEntries(
 
 /**
  * The maximum number of traced operations before execution aborts.
- * Student-written blanks run through this tracer, so unbounded loops must not hang the server.
+ * Model definitions run on the server, so an accidental unbounded loop must not hang it.
  */
 export const MAX_TRACE_OPERATIONS = 20_000;
 export const TRACE_BUDGET_EXCEEDED_MESSAGE = 'Execution budget exceeded';
@@ -64,7 +64,7 @@ export type TracedProgram = Omit<
   'blankAnswers' | 'displayProgramTemplate' | 'instrumentedTemplate'
 >;
 
-/** Thrown by the instrumented runtime when a name is not in scope, i.e. a translation gap rather than Java semantics. */
+/** Thrown by the instrumented runtime when a name is not in scope. */
 export const SCOPE_ERROR_NAME = 'ScopeError';
 
 export function traceProgram(
@@ -291,7 +291,7 @@ function flattenObjects(obj) {
 }
 function checkForCond(cond, sid) {
   spend();
-  // Java only accepts boolean conditions; a coerced value means a blank was filled with an ill-typed expression.
+  // The instrumented models use Java boolean condition semantics.
   if (typeof cond !== 'boolean') throw new TypeError('Loop condition is not a boolean');
   if (!cond && trace.at(-1).sid === sid) {
     trace.at(-1).last = true;

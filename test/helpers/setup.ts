@@ -23,3 +23,14 @@ if (!globalThis.matchMedia) {
       removeEventListener() {},
     }) as never;
 }
+
+// jsdom has no layout engine; CodeMirror still measures ranges while editing.
+if (typeof Range !== 'undefined') {
+  if (!Range.prototype.getClientRects) {
+    // oxlint-disable-next-line unicorn/no-null -- DOMRectList.item returns null for a missing rectangle.
+    Range.prototype.getClientRects = () => Object.assign([], { item: () => null });
+  }
+  if (!Range.prototype.getBoundingClientRect) {
+    Range.prototype.getBoundingClientRect = () => new DOMRect();
+  }
+}

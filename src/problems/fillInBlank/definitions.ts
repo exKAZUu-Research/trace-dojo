@@ -5,7 +5,7 @@ export const fillInBlankProblemDefinitions = {
   fillInBlank1: {
     instrumented: `
 const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); @[s.get('i') < 4]@; s.set('i', s.get('i') + 1)) {
+for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
   t.forward();
 }
 delete s.vars['i'];
@@ -24,7 +24,7 @@ public class Main {
   fillInBlank2: {
     instrumented: `
 s.set('x', <1-4>);
-s.set('y', @[s.get('x') + 1]@);
+s.set('y', s.get('x') + 1);
 const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
 t.forward();
 `,
@@ -43,7 +43,7 @@ public class Main {
     instrumented: `
 const t = new Turtle(); registerDisplayRef('t', () => t); // step
 t.forward();
-@[t.turnRight();]@
+t.turnRight();
 t.forward();
 t.forward();
 `,
@@ -62,9 +62,9 @@ public class Main {
   fillInBlank4: {
     instrumented: `
 const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < @[3]@; s.set('i', s.get('i') + 1)) {
+for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
   t.forward();
-  @[t.turnRight();]@
+  t.turnRight();
 }
 delete s.vars['i'];
 `,

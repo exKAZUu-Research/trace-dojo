@@ -65,6 +65,7 @@ export const problemSubmissions = sqliteTable(
     elapsedMilliseconds: integer().notNull(),
     isCorrect: integer({ mode: 'boolean' }).notNull(),
     answers: text(),
+    code: text(),
     gradingStage: integer(),
   },
   (table) => [index('ProblemSubmission_sessionId_idx').on(table.sessionId)]
@@ -108,6 +109,7 @@ export const exerciseSubmissions = sqliteTable(
       .notNull()
       .references(() => exerciseSessions.id, { onDelete: 'restrict', onUpdate: 'cascade' }),
     answers: text(),
+    code: text(),
     status: text().notNull(),
     gradingStage: integer(),
     problemType: text(),
