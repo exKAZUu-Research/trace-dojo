@@ -29,6 +29,8 @@ const definitionSchema = z.object({
   finalBoard: z.string().min(1),
   finalTurtles: z.array(z.object({ x: z.number(), y: z.number(), color: z.string(), dir: z.string() })),
   bugKind: z.enum(['logical', 'syntax']).optional(),
+  sourceProblemId: z.string().min(1).optional(),
+  authoringSeed: z.string().min(1).optional(),
 });
 const catalogSchema = z.record(z.string(), definitionSchema);
 const catalogPath = resolve('src/problems/javaChallenges/definitions.ts');
@@ -78,7 +80,7 @@ const independentCases = [
 ];
 
 test.each(lectures)(
-  '$courseId lecture $lectureIndex offers at least one playable challenge of each kind',
+  '$courseId lecture $lectureIndex offers at least 12 distinct playable challenges of each kind',
   ({ courseId, lectureIndex }) => {
     const ids = courseIdToLectureIndexToExerciseProblemIds[courseId][lectureIndex];
     expect(new Set(ids).size).toBe(ids.length);
@@ -90,7 +92,9 @@ test.each(lectures)(
             catalog[id].lectureIndex === lectureIndex) ||
           (!catalog[id] && format === 'fillInBlank' && isFillInBlankProblem(id))
       );
-      expect.soft(matching.length, `${courseId}/${lectureIndex + 1}: ${format} availability`).toBeGreaterThanOrEqual(1);
+      expect
+        .soft(matching.length, `${courseId}/${lectureIndex + 1}: ${format} availability`)
+        .toBeGreaterThanOrEqual(12);
     }
   }
 );

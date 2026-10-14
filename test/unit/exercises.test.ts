@@ -1254,3 +1254,43 @@ test('bugFix rejects wrong ownership, location, format and expired attempts with
   await expect(submitBug(bug.sessionId, fixture.correctProgram)).rejects.toMatchObject({ code: 'NOT_FOUND' });
   expect(exerciseRows()).toEqual(expired);
 });
+
+test.each(['fillInBlank', 'bugFix'] as const)(
+  'source-derived %s problems resume unchanged across session seeds without model execution',
+  async (format) => {
+    const { javaChallengeDefinitions } = await import('../../src/problems/javaChallenges/definitions');
+    const schema = catalogEntrySchema.extend({
+      sourceProblemId: z.string().optional(),
+      authoringSeed: z.string().optional(),
+    });
+    const entries = Object.entries(z.record(z.string(), schema).parse(javaChallengeDefinitions));
+    const fixture = entries.find(([, entry]) => entry.problemFormat === format && entry.sourceProblemId);
+    expect(fixture, `A registered source-derived ${format} problem is required`).toBeDefined();
+    if (!fixture) throw new Error(`No source-derived ${format} problem`);
+    const [id, definition] = fixture;
+    challengeMap.test = [[id]];
+    execution.unavailable = true;
+    const tracer = await import('../../src/problems/traceProgram');
+    const trace = vi.spyOn(tracer, 'traceProgram');
+    const startSource = format === 'bugFix' ? startBug : start;
+    try {
+      const first = await startSource();
+      expect(first.problemId).toBe(id);
+      expect(first).toMatchObject({ finalBoard: definition.finalBoard, finalTurtles: definition.finalTurtles });
+      expect(first).not.toHaveProperty('correctProgram');
+      expect(first).not.toHaveProperty('authoringSeed');
+      expect(first).not.toHaveProperty('sourceProblemId');
+      for (const seed of ['source-replay-a', 'source-replay-b']) {
+        sqlite.prepare('UPDATE ExerciseSession SET seed = ? WHERE id = ?').run(seed, first.sessionId);
+        expect(await startSource()).toEqual(first);
+        expect(await startSource()).toEqual(first);
+      }
+      expect(execution.requests).not.toHaveBeenCalled();
+      expect(trace).not.toHaveBeenCalled();
+      expect(exerciseRows().sessions).toHaveLength(1);
+      expect(exerciseRows().submissions).toHaveLength(0);
+    } finally {
+      trace.mockRestore();
+    }
+  }
+);

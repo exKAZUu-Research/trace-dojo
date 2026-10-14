@@ -15,6 +15,8 @@ export interface InstantiatedJavaChallenge extends JavaChallengeTarget {
 const boardRowPattern = new RegExp(`^[${Object.keys(charToColor).join('')}]{${TURTLE_GRAPHICS_BOARD_COLUMNS}}$`);
 const colorSchema = z.string().refine((color) => color.length === 1 && color in charToColor);
 const definitionSchema = z.object({
+  sourceProblemId: z.string().min(1).optional(),
+  authoringSeed: z.string().min(1).optional(),
   title: z.string().min(1),
   courseId: z.enum(['tuBeginner1', 'tuBeginner2', 'test']),
   lectureIndex: z.number().int().min(0).max(7),
