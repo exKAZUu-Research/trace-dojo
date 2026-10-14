@@ -192,6 +192,7 @@ test('Japanese explanation precedes the optional plain-text compiler reference i
   render(body(grade));
   await user.click(screen.getByRole('button', { name: '提出' }));
   const dialog = await screen.findByRole('alertdialog');
+  await waitFor(() => expect(dialog).toBeVisible());
   expect(dialog.textContent).toMatch(/コード.*確認/);
   const items = within(dialog).getAllByRole('listitem');
   expect(items).toHaveLength(2);
