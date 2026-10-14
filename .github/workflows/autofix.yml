@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       # Installs the tools pinned in mise.toml, including fnox so the test profile values load.
-      - uses: jdx/mise-action@v5.0.1
+      - uses: jdx/mise-action@v5.1.1
         with:
           cache: true
       - run: bun install
