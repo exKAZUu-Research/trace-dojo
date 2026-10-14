@@ -137,7 +137,7 @@ test('ordinary syntax demo submits exact source, shows compiler diagnostics, and
     })
   );
   const failure = await screen.findByRole('alertdialog');
-  expect(within(failure).getByText(diagnostic)).toBeVisible();
+  await waitFor(() => expect(within(failure).getByText(diagnostic)).toBeVisible());
   expect(failure).toHaveTextContent('不正解');
   expect(transport.push).not.toHaveBeenCalled();
   await user.keyboard('{Escape}');
