@@ -12,6 +12,7 @@ import type { BackendRouter } from '../../src/infrastructures/trpcBackend/router
 import type * as JavaExecutors from '../../src/problems/fillInBlank/javaExecutors';
 import type { instantiateProblem as instantiateProblemType } from '../../src/problems/instantiateProblem';
 
+const executorGate = vi.hoisted(() => ({ wait: undefined as (() => Promise<void>) | undefined }));
 const auth = vi.hoisted(() => ({ userId: 'student' }));
 vi.mock('../../src/utils/sessionOnNode', () => ({
   getSessionOnNode: async () => ({ superTokensUserId: auth.userId }),
@@ -76,6 +77,7 @@ beforeEach(() => {
   // Learning-period visibility is evaluated per request, so a test must not straddle a period boundary.
   vi.useFakeTimers({ toFake: ['Date'], now: Date.now() });
   auth.userId = 'student';
+  executorGate.wait = undefined;
   sqlite.exec(
     'DELETE FROM ExerciseSubmission; DELETE FROM ExerciseSession; DELETE FROM ProblemSubmission; DELETE FROM ProblemSession; DELETE FROM User'
   );
@@ -793,10 +795,10 @@ const submitRegular = async (
 const asExercise = (value: unknown): Exercise => exerciseSchema.parse(value);
 const unavailable = (name: string): JavaExecutors.JavaExecutor => ({
   name,
-  execute: async (): Promise<JavaExecutors.JavaExecutionResult> => ({
-    kind: 'unavailable',
-    reason: 'controlled outage',
-  }),
+  execute: async (): Promise<JavaExecutors.JavaExecutionResult> => {
+    await executorGate.wait?.();
+    return { kind: 'unavailable', reason: 'controlled outage' };
+  },
 });
 const locationOnly = (): Location => ({ courseId: 'test', lectureId: 'test' });
 const submission = (sessionId: number, answers: string[]): Submission => ({ ...locationOnly(), sessionId, answers });
@@ -820,4 +822,318 @@ const exerciseRows = (): { sessions: unknown[]; submissions: unknown[] } => ({
 const normalRows = (): { sessions: unknown[]; submissions: unknown[] } => ({
   sessions: sqlite.prepare('SELECT * FROM ProblemSession ORDER BY id').all(),
   submissions: sqlite.prepare('SELECT * FROM ProblemSubmission ORDER BY id').all(),
+});
+
+type EndFormat = 'regular' | 'fillInBlank';
+interface EndExercise {
+  sessionId: number;
+  problemId: string;
+  completed: boolean;
+}
+const endExerciseDisplay = z
+  .object({ sessionId: z.number(), problemId: z.string(), completed: z.boolean() })
+  .passthrough();
+const endInput = (sessionId: number, problemFormat: EndFormat): Record<string, unknown> => ({
+  ...locationOnly(),
+  sessionId,
+  problemFormat,
+});
+const endExercise = (sessionId: number, format: EndFormat): Promise<unknown> =>
+  regularCaller().endExercise(endInput(sessionId, format));
+const startFormat = async (format: EndFormat): Promise<EndExercise> =>
+  endExerciseDisplay.parse(await regularCaller().startExercise({ ...locationOnly(), problemFormat: format }));
+const completeFormat = async (exercise: EndExercise, format: EndFormat): Promise<void> => {
+  await (format === 'regular'
+    ? expect(
+        regularCaller().submitRegularExercise({
+          ...locationOnly(),
+          sessionId: exercise.sessionId,
+          requestId: `complete-${exercise.sessionId}`,
+          context: { problemType: 'executionResult', traceItemIndex: 0 },
+          isCorrect: true,
+        })
+      ).resolves.toMatchObject({ completed: true })
+    : expect(
+        caller.submitExercise(submission(exercise.sessionId, modelAnswers(exercise.sessionId)))
+      ).resolves.toMatchObject({ status: 'correct' }));
+};
+const nextFormat = async (exercise: EndExercise, format: EndFormat): Promise<EndExercise> =>
+  endExerciseDisplay.parse(await regularCaller().nextExercise(endInput(exercise.sessionId, format)));
+const endedRecord = (id: number): unknown => sqlite.prepare('SELECT * FROM ExerciseSession WHERE id = ?').get(id);
+
+test.each<EndFormat>(['regular', 'fillInBlank'])(
+  'explicit End %s preserves refresh and history but starts fresh once dismissed',
+  async (format) => {
+    const normal = db
+      .insert(problemSessions)
+      .values({
+        userId: 'student',
+        courseId: 'test',
+        lectureId: 'test',
+        problemId: 'fillInBlank2',
+        problemVariablesSeed: 'ordinary-end-isolation',
+        problemType: 'fillInBlank',
+        traceItemIndex: 0,
+      })
+      .returning()
+      .get()!;
+    await caller.gradeFillInBlankAnswers({ sessionId: normal.id, answers: ['x + 1'], elapsedMilliseconds: 7 });
+    const ordinaryBefore = normalRows();
+    const first = await startFormat(format);
+    const otherFormat = format === 'regular' ? 'fillInBlank' : 'regular';
+    const other = await startFormat(otherFormat);
+    await completeFormat(first, format);
+    expect(await startFormat(format)).toMatchObject({ sessionId: first.sessionId, completed: true });
+    const completedAt = completion(first.sessionId);
+    const submissionsBefore = exerciseRows().submissions;
+    await expect(endExercise(first.sessionId, format)).resolves.toEqual({ status: 'ended' });
+    const dismissed = endedRecord(first.sessionId);
+    expect(dismissed).toMatchObject({ completedAt, endedAt: expect.any(Number) });
+    vi.setSystemTime(Date.now() + 100);
+    await Promise.all([endExercise(first.sessionId, format), endExercise(first.sessionId, format)]);
+    expect(endedRecord(first.sessionId)).toEqual(dismissed);
+    const [fresh, duplicate] = await Promise.all([startFormat(format), startFormat(format)]);
+    expect(fresh).toEqual(duplicate);
+    expect(fresh.sessionId).not.toBe(first.sessionId);
+    expect(fresh).toMatchObject({ completed: false, problemId: first.problemId });
+    expect(await startFormat(otherFormat)).toEqual(other);
+    expect(exerciseRows().sessions).toHaveLength(3);
+    expect(exerciseRows().submissions).toEqual(submissionsBefore);
+    expect(normalRows()).toEqual(ordinaryBefore);
+  }
+);
+
+test.each<EndFormat>(['regular', 'fillInBlank'])(
+  'explicit End %s establishes a boundary and rejects stale Next and submissions',
+  async (format) => {
+    const a = await startFormat(format);
+    await completeFormat(a, format);
+    const b = await nextFormat(a, format);
+    await completeFormat(b, format);
+    await endExercise(b.sessionId, format);
+    const before = exerciseRows();
+    for (const old of [a, b]) {
+      await expect(nextFormat(old, format)).rejects.toMatchObject({ code: 'CONFLICT' });
+    }
+    if (format === 'regular') {
+      await expect(
+        regularCaller().submitRegularExercise({
+          ...locationOnly(),
+          sessionId: b.sessionId,
+          requestId: 'after-end',
+          context: { problemType: 'executionResult', traceItemIndex: 0 },
+          isCorrect: true,
+        })
+      ).rejects.toMatchObject({ code: 'CONFLICT' });
+      await expect(
+        regularCaller().switchRegularExerciseToStep({ ...locationOnly(), sessionId: b.sessionId })
+      ).rejects.toMatchObject({ code: 'CONFLICT' });
+    } else {
+      await expect(caller.submitExercise(submission(b.sessionId, modelAnswers(b.sessionId)))).rejects.toMatchObject({
+        code: 'CONFLICT',
+      });
+    }
+    expect(exerciseRows()).toEqual(before);
+    const fresh = await startFormat(format);
+    expect([a.sessionId, b.sessionId]).not.toContain(fresh.sessionId);
+    expect(fresh.completed).toBe(false);
+  }
+);
+
+test.each<EndFormat>(['regular', 'fillInBlank'])(
+  'explicit End %s arriving after Next never closes its successor',
+  async (format) => {
+    const a = await startFormat(format);
+    await completeFormat(a, format);
+    const b = await nextFormat(a, format);
+    const successorBefore = endedRecord(b.sessionId);
+    await endExercise(a.sessionId, format);
+    await endExercise(a.sessionId, format);
+    expect(await startFormat(format)).toEqual(b);
+    expect(endedRecord(b.sessionId)).toEqual(successorBefore);
+    expect(exerciseRows().sessions).toHaveLength(2);
+  }
+);
+
+test('explicit End validates ownership and unfinished state without changing history', async () => {
+  const pending = await startRegular();
+  const beforePending = exerciseRows();
+  await expect(endExercise(pending.sessionId, 'regular')).rejects.toMatchObject({ code: 'CONFLICT' });
+  expect(exerciseRows()).toEqual(beforePending);
+  expect(await startRegular()).toEqual(pending);
+  await submitRegular(pending, 'complete-end-auth', true);
+  const before = exerciseRows();
+  auth.userId = 'other';
+  await expect(endExercise(pending.sessionId, 'regular')).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  auth.userId = 'student';
+  await expect(endExercise(pending.sessionId, 'fillInBlank')).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  await expect(
+    regularCaller().endExercise({ ...endInput(pending.sessionId, 'regular'), lectureId: 'other' })
+  ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  await expect(
+    regularCaller().endExercise({ ...endInput(pending.sessionId, 'regular'), courseId: 'missing' })
+  ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  await expect(endExercise(999_999, 'regular')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  expect(exerciseRows()).toEqual(before);
+  await endExercise(pending.sessionId, 'regular');
+  const ended = exerciseRows();
+  auth.userId = 'other';
+  await expect(endExercise(pending.sessionId, 'regular')).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  expect(exerciseRows()).toEqual(ended);
+});
+
+test('explicit End succeeds without candidate generation after failed Next and refresh recovery', async () => {
+  const first = await start();
+  await completeFormat(first, 'fillInBlank');
+  challengeMap.test = [['notRegistered']];
+  await expect(nextFormat(first, 'fillInBlank')).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
+  expect(await start()).toMatchObject({ sessionId: first.sessionId, completed: true });
+  await endExercise(first.sessionId, 'fillInBlank');
+  const ended = exerciseRows();
+  await expect(start()).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
+  expect(exerciseRows()).toEqual(ended);
+  challengeMap.test = [['fillInBlank2']];
+  const fresh = await start();
+  expect(fresh.sessionId).not.toBe(first.sessionId);
+});
+
+test.each(['correct', 'ungradable'] as const)(
+  'explicit End waits for pending grading whose verdict is %s',
+  async (verdict) => {
+    const first = await start();
+    let release!: () => void;
+    let entered!: () => void;
+    const arrived = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    executorGate.wait = async () => {
+      entered();
+      await gate;
+    };
+    // Equivalent Java takes the executor path; malformed Java has no instrumented fallback.
+    const answers = verdict === 'correct' ? ['1 + x'] : ['new UnknownType()'];
+    const grading = caller.submitExercise(submission(first.sessionId, answers));
+    await arrived;
+    const ending = endExercise(first.sessionId, 'fillInBlank');
+    let endSettled = false;
+    const observedEnd = ending.then(
+      (value) => {
+        endSettled = true;
+        return { value };
+      },
+      (error: unknown) => {
+        endSettled = true;
+        return { error };
+      }
+    );
+    let settledBeforeRelease: boolean;
+    try {
+      await startRegular();
+      settledBeforeRelease = endSettled;
+    } finally {
+      release();
+    }
+    const result = await grading;
+    const outcome = await observedEnd;
+    expect(settledBeforeRelease).toBe(false);
+    if (verdict === 'correct') {
+      expect(result).toMatchObject({ status: 'correct' });
+      expect(outcome).toEqual({ value: { status: 'ended' } });
+      expect(endedRecord(first.sessionId)).toMatchObject({
+        completedAt: expect.any(Number),
+        endedAt: expect.any(Number),
+      });
+      const fresh = await start();
+      expect(fresh.sessionId).not.toBe(first.sessionId);
+    } else {
+      expect(result).toMatchObject({ status: 'ungradable' });
+      expect(outcome).toMatchObject({ error: { code: 'CONFLICT' } });
+      expect(await start()).toMatchObject({ sessionId: first.sessionId, completed: false });
+    }
+    expect(exerciseRows().submissions).toHaveLength(1);
+  }
+);
+
+test('explicit End refuses expired sessions and preserves unfinished step resume', async () => {
+  const regular = await startRegular();
+  const stepped = await regularCaller().switchRegularExerciseToStep({
+    ...locationOnly(),
+    sessionId: regular.sessionId,
+  });
+  await expect(endExercise(regular.sessionId, 'regular')).rejects.toMatchObject({ code: 'CONFLICT' });
+  expect(await startRegular()).toEqual(stepped);
+  sqlite.prepare('UPDATE ExerciseSession SET createdAt = 0 WHERE id = ?').run(regular.sessionId);
+  vi.setSystemTime(new Date('2026-07-15T12:00:00+09:00'));
+  const expired = exerciseRows();
+  await expect(endExercise(regular.sessionId, 'regular')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  expect(exerciseRows()).toEqual(expired);
+});
+
+test('explicit End reentry avoids the preceding candidate when alternatives exist', async () => {
+  challengeMap.test = [['fillInBlank1', 'fillInBlank2']];
+  const first = await start();
+  await completeFormat(first, 'fillInBlank');
+  await endExercise(first.sessionId, 'fillInBlank');
+  const second = await start();
+  expect(second.problemId).not.toBe(first.problemId);
+  expect(second.completed).toBe(false);
+});
+
+test('explicit End waiting on grading orders concurrent Start, Next and a different later answer', async () => {
+  const first = await start();
+  let release!: () => void;
+  let entered!: () => void;
+  const arrived = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  executorGate.wait = async () => {
+    entered();
+    await gate;
+  };
+  const grading = caller.submitExercise(submission(first.sessionId, ['1 + x']));
+  await arrived;
+  const ending = endExercise(first.sessionId, 'fillInBlank').then(
+    (value) => ({ value }),
+    (error: unknown) => ({ error })
+  );
+  // A different format can respond while End is queued behind this format's grader.
+  await startRegular();
+  const restarting = start();
+  const staleNext = nextFormat(first, 'fillInBlank').then(
+    (value) => ({ value }),
+    (error: unknown) => ({ error })
+  );
+  const lateSubmission = caller.submitExercise(submission(first.sessionId, ['x + 1'])).then(
+    (value) => ({ value }),
+    (error: unknown) => ({ error })
+  );
+  try {
+    await startRegular();
+  } finally {
+    release();
+  }
+  const [graded, ended, fresh, nextOutcome, submissionOutcome] = await Promise.all([
+    grading,
+    ending,
+    restarting,
+    staleNext,
+    lateSubmission,
+  ]);
+  expect(graded).toMatchObject({ status: 'correct' });
+  expect(ended).toEqual({ value: { status: 'ended' } });
+  expect(fresh).toMatchObject({ completed: false });
+  expect(fresh.sessionId).not.toBe(first.sessionId);
+  expect(nextOutcome).toMatchObject({ error: { code: 'CONFLICT' } });
+  expect(submissionOutcome).toMatchObject({ error: { code: 'CONFLICT' } });
+  expect(await start()).toEqual(fresh);
+  expect(exerciseRows().sessions).toHaveLength(3);
+  expect(sqlite.prepare('SELECT sessionId, answers, status FROM ExerciseSubmission ORDER BY id').all()).toEqual([
+    { sessionId: first.sessionId, answers: '["1 + x"]', status: 'correct' },
+  ]);
 });

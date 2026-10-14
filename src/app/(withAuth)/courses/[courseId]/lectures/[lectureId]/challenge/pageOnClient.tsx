@@ -40,6 +40,7 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
   const previousInitialFormatRef = useRef(initialFormat);
   const { mutateAsync: start } = backendTrpcReact.startExercise.useMutation();
   const next = backendTrpcReact.nextExercise.useMutation();
+  const end = backendTrpcReact.endExercise.useMutation();
   const submitBlank = backendTrpcReact.submitExercise.useMutation();
   const submitRegular = backendTrpcReact.submitRegularExercise.useMutation();
   const switchRegular = backendTrpcReact.switchRegularExerciseToStep.useMutation();
@@ -135,6 +136,14 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
       throw error;
     }
   };
+  const endExercise = async (sessionId: number, problemFormat: ChallengeProblemFormat): Promise<void> => {
+    try {
+      await detectStaleSession(end.mutateAsync({ courseId, lectureId, sessionId, problemFormat }));
+    } catch {
+      throw new Error('終了できませんでした。もう一度お試しください。');
+    }
+    back();
+  };
   const fetchNext = async (sessionId: number, problemFormat: ChallengeProblemFormat): Promise<Display> => {
     let display: Display | { status: 'noProblems' };
     try {
@@ -150,7 +159,13 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
     setExercise(await fetchNext(exercise.sessionId, 'fillInBlank'));
   };
   const actions: CompletionAction[] = [
-    { label: '終わる', onClick: back },
+    {
+      label: '終わる',
+      onClick: async () => {
+        if (!exercise) throw new Error('終了できませんでした。ページを再読み込みしてください。');
+        await endExercise(exercise.sessionId, 'fillInBlank');
+      },
+    },
     { label: '次の問題へ', colorScheme: 'brand', onClick: nextBlank },
   ];
   const gradeBlank = async (answers: string[]): Promise<FillInBlankVerdict> => {
@@ -190,7 +205,7 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
           courseId={courseId}
           lectureId={lectureId}
           display={exercise}
-          back={back}
+          back={async (sessionId) => await endExercise(sessionId, 'regular')}
           transport={{
             submit: async (input) => await detectStaleSession(submitRegular.mutateAsync(input)),
             switchToStep: async ({ sessionId }) =>
