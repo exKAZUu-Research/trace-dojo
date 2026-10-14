@@ -11,9 +11,16 @@ interface Props {
   lectureId: string;
   problemId: ProblemId;
   actions?: ReactNode;
+  fallbackTitle?: string;
 }
 
-export const ProblemPageHeader: React.FC<Props> = ({ courseId, lectureId, problemId, actions }) => {
+export const ProblemPageHeader: React.FC<Props> = ({
+  courseId,
+  lectureId,
+  problemId,
+  actions,
+  fallbackTitle = '問題',
+}) => {
   const lectureIndex = courseIdToLectureIds[courseId].indexOf(lectureId);
   return (
     <VStack align="stretch" spacing={1}>
@@ -32,7 +39,7 @@ export const ProblemPageHeader: React.FC<Props> = ({ courseId, lectureId, proble
         </Link>
       </HStack>
       <HStack justify="space-between" spacing={2}>
-        <Heading as="h1">{problemIdToName[problemId]}</Heading>
+        <Heading as="h1">{problemIdToName[problemId] ?? fallbackTitle}</Heading>
         {actions}
       </HStack>
     </VStack>

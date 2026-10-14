@@ -10,6 +10,7 @@ const contextSchema = z.object({
   problemId: z.string(),
   sessionId: z.number(),
   seed: z.string().optional(),
+  problemFormat: z.enum(['fillInBlank', 'bugFix']).optional(),
 });
 const draftSchema = z.object({
   version: z.literal(1),

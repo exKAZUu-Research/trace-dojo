@@ -14,7 +14,7 @@ test('mounts without starting, uses native buttons, and suppresses activation wh
   const pending = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const onSelect = vi.fn<(format: 'regular' | 'fillInBlank') => Promise<void>>(async () => pending);
+  const onSelect = vi.fn<(format: 'regular' | 'fillInBlank' | 'bugFix') => Promise<void>>(async () => pending);
   const Harness: React.FC = () => {
     const [isPending, setIsPending] = useState(false);
     return (
@@ -42,12 +42,16 @@ test('mounts without starting, uses native buttons, and suppresses activation wh
   const blank = screen.getByRole('button', { name: /穴埋め問題/ });
   expect(regular.querySelector('button')).toBeNull();
   expect(blank.querySelector('button')).toBeNull();
-  expect(container.querySelectorAll('button')).toHaveLength(2);
+  const bug = screen.getByRole('button', { name: /バグ修正/ });
+  expect(bug.querySelector('button')).toBeNull();
+  expect(container.querySelectorAll('button')).toHaveLength(3);
 
   regular.focus();
   await user.keyboard('{Enter}');
   expect(onSelect).toHaveBeenCalledWith('regular');
   await user.click(screen.getByRole('button', { name: /穴埋め/ }));
+  expect(bug).toBeDisabled();
+  await user.click(bug);
   expect(onSelect).toHaveBeenCalledTimes(1);
   release();
 });

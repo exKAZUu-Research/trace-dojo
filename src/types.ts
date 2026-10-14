@@ -1,4 +1,5 @@
 import type React from 'react';
+import type { TurtleTrace } from './problems/traceProgram';
 
 export interface LayoutProps {
   children: React.ReactNode;
@@ -14,4 +15,12 @@ export interface SelectedCell {
   y: number;
 }
 
-export type ProblemType = 'executionResult' | 'step' | 'fillInBlank';
+export type ProblemType = 'executionResult' | 'step' | 'fillInBlank' | 'bugFix';
+
+export interface OrdinaryJavaProblemData {
+  problemFormat: 'bugFix';
+  problemId: string;
+  displayProgram: string;
+  finalBoard: string;
+  finalTurtles: TurtleTrace[];
+}

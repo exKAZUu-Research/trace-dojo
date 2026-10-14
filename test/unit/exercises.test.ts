@@ -69,7 +69,7 @@ beforeAll(async () => {
   const path = `${directory}/test.sqlite3`;
   sqlite = new DatabaseSync(path);
   vi.stubEnv('DATABASE_URL', `file:${path}`);
-  vi.stubEnv('NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON', JSON.stringify({ test: ['test', 'other'] }));
+  vi.stubEnv('NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON', JSON.stringify({ test: ['test', 'other'], other: ['test'] }));
   ({ instantiateProblem } = await import('../../src/problems/instantiateProblem'));
   ({ db } = await import('../../src/infrastructures/database'));
   migrate(db, { migrationsFolder: 'drizzle' });
@@ -1028,3 +1028,229 @@ test.each(['ordinary', 'challenge'] as const)(
     );
   }
 );
+
+test('legacy multi-hole source and seeded targets survive session resume exactly', async () => {
+  challengeMap.test = [['fillInBlank4']];
+  const multi = await start();
+  expect(multi.displayProgram).toBe(`public class Main {
+  public static void main(String[] args) {
+    Turtle t = new Turtle();
+    for (int i = 0; i < 【1】; i++) {
+      t.前に進む();
+      【2】
+    }
+  }
+}`);
+  expect(multi).toMatchObject({
+    finalBoard: '##.....\n##.....\n.......\n.......\n.......\n.......\n.......',
+    finalTurtles: [{ x: 1, y: 0, color: '#', dir: 'W' }],
+  });
+  expect(await start()).toEqual(multi);
+  for (const fixture of [
+    { seed: 'compat-a', x: 3, y: 5, board: '.......\n.......\n.......\n.......\n...#...\n...#...\n.......' },
+    { seed: 'compat-b', x: 2, y: 4, board: '.......\n.......\n.......\n..#....\n..#....\n.......\n.......' },
+  ]) {
+    sqlite
+      .prepare("UPDATE ExerciseSession SET problemId = 'fillInBlank2', seed = ? WHERE id = ?")
+      .run(fixture.seed, multi.sessionId);
+    const resumed = await start();
+    expect(resumed.displayProgram).toBe(`public class Main {
+  public static void main(String[] args) {
+    int x = ${fixture.x};
+    int y = 【1】;
+    Turtle t = new Turtle(x, y);
+    t.前に進む();
+  }
+}`);
+    expect(resumed).toMatchObject({
+      sessionId: multi.sessionId,
+      finalBoard: fixture.board,
+      finalTurtles: [{ x: fixture.x, y: fixture.y, color: '#', dir: 'N' }],
+    });
+  }
+  expect(execution.requests).not.toHaveBeenCalled();
+});
+
+test('bugFix API accepts the format and starts without executing Java', async () => {
+  execution.unavailable = true;
+  challengeMap.test = [[]];
+  await expect(regularCaller().startExercise({ ...locationOnly(), problemFormat: 'bugFix' })).resolves.toEqual({
+    status: 'noProblems',
+  });
+  expect(execution.requests).not.toHaveBeenCalled();
+  expect(exerciseRows()).toEqual({ sessions: [], submissions: [] });
+});
+
+const catalogEntrySchema = z.object({
+  problemFormat: z.enum(['fillInBlank', 'bugFix']),
+  bugKind: z.enum(['logical', 'syntax']).optional(),
+  correctProgram: z.string(),
+  starterProgram: z.string(),
+  finalBoard: z.string(),
+  finalTurtles: z.array(z.object({ x: z.number(), y: z.number(), color: z.string(), dir: z.string() })),
+});
+
+const selectBugFixture = async (
+  kind: 'logical' | 'syntax'
+): Promise<z.infer<typeof catalogEntrySchema> & { id: string }> => {
+  const path = '../../src/problems/javaChallenges/definitions.ts';
+  const module = z
+    .object({ javaChallengeDefinitions: z.record(z.string(), catalogEntrySchema) })
+    .parse(await import(path));
+  const entry = Object.entries(module.javaChallengeDefinitions).find(
+    ([, definition]) => definition.problemFormat === 'bugFix' && definition.bugKind === kind
+  );
+  expect(entry, `a playable ${kind} bug fixture`).toBeDefined();
+  const [id, definition] = entry!;
+  challengeMap.test = [[id, 'fillInBlank2'], ['fillInBlank1']];
+  return { id, ...definition };
+};
+
+const startBug = async (): Promise<Exercise> =>
+  asExercise(await regularCaller().startExercise({ ...locationOnly(), problemFormat: 'bugFix' }));
+const submitBug = async (sessionId: number, code: string, extra: Record<string, unknown> = {}): Promise<unknown> =>
+  regularCaller().submitExercise({ ...locationOnly(), sessionId, code, problemFormat: 'bugFix', ...extra });
+const useLocalJava = async (): Promise<void> => {
+  const { localJavaExecutor } = await import('../helpers/localJavaExecutor');
+  execution.run = localJavaExecutor.execute;
+};
+
+test.each(['logical', 'syntax'] as const)(
+  'bugFix %s starter is retryable and exact full-source repair completes only its own session',
+  { timeout: 120_000 },
+  async (kind) => {
+    const fixture = await selectBugFixture(kind);
+    await useLocalJava();
+    const normal = db
+      .insert(problemSessions)
+      .values({
+        userId: 'student',
+        courseId: 'test',
+        lectureId: 'test',
+        problemId: 'test1',
+        problemVariablesSeed: 'bug-isolation',
+        problemType: 'executionResult',
+        traceItemIndex: 0,
+      })
+      .returning()
+      .get()!;
+    db.insert(problemSubmissions)
+      .values({
+        sessionId: normal.id,
+        problemType: 'executionResult',
+        traceItemIndex: 0,
+        elapsedMilliseconds: 19,
+        isCorrect: false,
+      })
+      .run();
+    const ordinaryBefore = normalRows();
+    const blank = await start();
+    const regular = await startRegular();
+    const [bug, duplicate] = await Promise.all([startBug(), startBug()]);
+    expect(duplicate).toEqual(bug);
+    expect(new Set([blank.sessionId, regular.sessionId, bug.sessionId]).size).toBe(3);
+    expect(bug).toMatchObject({
+      problemFormat: 'bugFix',
+      problemId: fixture.id,
+      displayProgram: fixture.starterProgram,
+      finalBoard: fixture.finalBoard,
+      finalTurtles: fixture.finalTurtles,
+    });
+    expect(Object.keys(bug).toSorted()).toEqual(
+      [
+        'completed',
+        'displayProgram',
+        'finalBoard',
+        'finalTurtles',
+        'problemFormat',
+        'problemId',
+        'sessionId',
+      ].toSorted()
+    );
+    expect(execution.requests).not.toHaveBeenCalled();
+    const wrong = await submitBug(bug.sessionId, bug.displayProgram);
+    expect(wrong).toMatchObject({ status: 'incorrect' });
+    if (kind === 'syntax') {
+      expect(
+        z
+          .object({
+            diagnostics: z.array(z.object({ line: z.number().positive(), message: z.string().min(1) })).min(1),
+          })
+          .parse(wrong).diagnostics.length
+      ).toBeGreaterThan(0);
+    }
+    expect(completion(bug.sessionId)).toBeNull();
+    expect(await startBug()).toEqual(bug);
+    const code = `  \n${fixture.correctProgram}\n  `;
+    execution.run = undefined;
+    execution.unavailable = true;
+    expect(await submitBug(bug.sessionId, code)).toMatchObject({ status: 'ungradable' });
+    expect(completion(bug.sessionId)).toBeNull();
+    expect(await startBug()).toEqual(bug);
+    execution.unavailable = false;
+    await useLocalJava();
+    expect(await submitBug(bug.sessionId, code)).toMatchObject({ status: 'correct' });
+    const history = sqlite.prepare('SELECT code, status, answers FROM ExerciseSubmission ORDER BY id').all();
+    expect(history).toEqual([
+      { code: bug.displayProgram, status: 'incorrect', answers: null },
+      { code, status: 'ungradable', answers: null },
+      { code, status: 'correct', answers: null },
+    ]);
+    expect(await startBug()).toMatchObject({ sessionId: bug.sessionId, completed: true });
+    await submitBug(bug.sessionId, code);
+    expect(sqlite.prepare('SELECT code, status, answers FROM ExerciseSubmission ORDER BY id').all()).toEqual(history);
+    const nextInput = { ...locationOnly(), sessionId: bug.sessionId, problemFormat: 'bugFix' };
+    const [next, replay] = await Promise.all([
+      regularCaller().nextExercise(nextInput),
+      regularCaller().nextExercise(nextInput),
+    ]);
+    expect(replay).toEqual(next);
+    expect(next).toMatchObject({ problemFormat: 'bugFix', completed: false });
+    expect(next.sessionId).not.toBe(bug.sessionId);
+    expect(await startBug()).toEqual(next);
+    expect(await start()).toEqual(blank);
+    expect(await startRegular()).toEqual(regular);
+    expect(normalRows()).toEqual(ordinaryBefore);
+  }
+);
+
+test('bugFix rejects wrong ownership, location, format and expired attempts without changing history', async () => {
+  const fixture = await selectBugFixture('logical');
+  const bug = await startBug();
+  const blank = await start();
+  const before = exerciseRows();
+  auth.userId = 'other';
+  await expect(submitBug(bug.sessionId, fixture.correctProgram)).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  auth.userId = 'student';
+  for (const extra of [{ lectureId: 'other' }, { courseId: 'other' }, { problemFormat: 'fillInBlank' }]) {
+    await expect(submitBug(bug.sessionId, fixture.correctProgram, extra)).rejects.toMatchObject({
+      code: 'UNAUTHORIZED',
+    });
+  }
+  await expect(
+    caller.submitExercise({ ...locationOnly(), sessionId: bug.sessionId, code: fixture.correctProgram })
+  ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  await expect(submitBug(blank.sessionId, fixture.correctProgram)).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  for (const extra of [{ courseId: 'missing' }, { lectureId: 'missing' }]) {
+    await expect(submitBug(bug.sessionId, fixture.correctProgram, extra)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  }
+  await expect(
+    regularCaller().submitRegularExercise({
+      ...locationOnly(),
+      sessionId: bug.sessionId,
+      requestId: 'cross-format',
+      context: { problemType: 'executionResult', traceItemIndex: 0 },
+      isCorrect: true,
+    })
+  ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  await expect(
+    regularCaller().nextExercise({ ...locationOnly(), sessionId: bug.sessionId, problemFormat: 'fillInBlank' })
+  ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  expect(exerciseRows()).toEqual(before);
+  expect(execution.requests).not.toHaveBeenCalled();
+  sqlite.prepare('UPDATE ExerciseSession SET createdAt = 0 WHERE id = ?').run(bug.sessionId);
+  vi.setSystemTime(new Date('2026-07-15T12:00:00+09:00'));
+  const expired = exerciseRows();
+  await expect(submitBug(bug.sessionId, fixture.correctProgram)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  expect(exerciseRows()).toEqual(expired);
+});
