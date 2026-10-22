@@ -69,7 +69,10 @@ beforeAll(async () => {
   const path = `${directory}/test.sqlite3`;
   sqlite = new DatabaseSync(path);
   vi.stubEnv('DATABASE_URL', `file:${path}`);
-  vi.stubEnv('NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON', JSON.stringify({ test: ['test', 'other'], other: ['test'] }));
+  vi.stubEnv(
+    'NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON',
+    JSON.stringify({ test: ['test', 'other'], other: ['test'], tuBeginner1: ['lecture1'], tuBeginner2: ['lecture1'] })
+  );
   ({ instantiateProblem } = await import('../../src/problems/instantiateProblem'));
   ({ db } = await import('../../src/infrastructures/database'));
   migrate(db, { migrationsFolder: 'drizzle' });
@@ -1291,6 +1294,66 @@ test.each(['fillInBlank', 'bugFix'] as const)(
       expect(exerciseRows().submissions).toHaveLength(0);
     } finally {
       trace.mockRestore();
+    }
+  }
+);
+
+test.each(['regular', 'fillInBlank', 'bugFix'] as const)(
+  'curriculum %s starts and advances only independent IDs while retaining legacy history',
+  async (problemFormat) => {
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const { challengeMetadata } = await import('../../src/problems/challenge/metadata');
+      const location = { courseId: 'tuBeginner1', lectureId: 'lecture1', problemFormat };
+      const legacyId =
+        problemFormat === 'regular'
+          ? 'straight'
+          : problemFormat === 'fillInBlank'
+            ? 'straightBlank'
+            : 'sourceStraightBugFirstTurn';
+      const insertLegacy = sqlite.prepare(`INSERT INTO ExerciseSession
+      (userId, courseId, lectureId, learningMode, problemFormat, problemId, seed, problemType, traceItemIndex, createdAt)
+      VALUES ('student', 'tuBeginner1', 'lecture1', 'challenge', ?, ?, 'legacy-seed', ?, 0, ?)`);
+      insertLegacy.run(
+        problemFormat,
+        legacyId,
+        problemFormat === 'regular' ? 'executionResult' : problemFormat,
+        Date.now()
+      );
+      const first = z
+        .object({ sessionId: z.number(), problemId: z.string() })
+        .passthrough()
+        .parse(await caller.startExercise(location));
+      expect(challengeMetadata[first.problemId]).toMatchObject({
+        courseId: 'tuBeginner1',
+        lectureIndex: 0,
+        problemFormat,
+      });
+      expect(first.problemId).not.toBe(legacyId);
+      expect(sqlite.prepare('SELECT * FROM ExerciseSession WHERE problemId = ?').all(legacyId)).toHaveLength(1);
+      expect(await caller.startExercise(location)).toMatchObject({ sessionId: first.sessionId });
+      sqlite.prepare('UPDATE ExerciseSession SET completedAt = ? WHERE id = ?').run(Date.now(), first.sessionId);
+      insertLegacy.run(
+        problemFormat,
+        legacyId,
+        problemFormat === 'regular' ? 'executionResult' : problemFormat,
+        Date.now()
+      );
+      const next = z
+        .object({ problemId: z.string() })
+        .passthrough()
+        .parse(await caller.nextExercise({ ...location, sessionId: first.sessionId }));
+      expect(challengeMetadata[next.problemId]).toMatchObject({
+        courseId: 'tuBeginner1',
+        lectureIndex: 0,
+        problemFormat,
+      });
+      expect(next.problemId).not.toBe(first.problemId);
+      expect(await caller.nextExercise({ ...location, sessionId: first.sessionId })).toMatchObject(next);
+      expect(regularMap.tuBeginner1.flat()).not.toContain(first.problemId);
+      expect(sqlite.prepare('SELECT * FROM ExerciseSession WHERE problemId = ?').all(legacyId)).toHaveLength(2);
+    } finally {
+      random.mockRestore();
     }
   }
 );

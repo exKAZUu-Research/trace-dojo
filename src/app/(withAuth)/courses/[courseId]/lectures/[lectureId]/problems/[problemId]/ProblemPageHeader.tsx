@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefetch';
 import { Heading, HStack, Link, Text, VStack } from '@/infrastructures/useClient/chakra';
+import { challengeMetadata } from '@/problems/challenge/metadata';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import { courseIdToLectureIds, courseIdToName, problemIdToName } from '@/problems/problemData';
 
@@ -39,7 +40,7 @@ export const ProblemPageHeader: React.FC<Props> = ({
         </Link>
       </HStack>
       <HStack justify="space-between" spacing={2}>
-        <Heading as="h1">{problemIdToName[problemId] ?? fallbackTitle}</Heading>
+        <Heading as="h1">{problemIdToName[problemId] ?? challengeMetadata[problemId]?.title ?? fallbackTitle}</Heading>
         {actions}
       </HStack>
     </VStack>

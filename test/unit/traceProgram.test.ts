@@ -5,7 +5,7 @@ import {
   TURTLE_GRAPHICS_BOARD_ROWS as GRID_ROWS,
 } from '../../src/constants';
 import { instantiateProblem } from '../../src/problems/instantiateProblem';
-import type { TraceItem, TurtleTrace } from '../../src/problems/traceProgram';
+import { traceProgram, type TraceItem, type TurtleTrace } from '../../src/problems/traceProgram';
 
 const defaultBoard = ('.'.repeat(GRID_COLUMNS) + '\n').repeat(GRID_ROWS).trim();
 const sx = 0;
@@ -629,3 +629,83 @@ function getBoard(dots: { x: number; y: number; color: string }[]): string {
   }
   return board.map((row) => row.join('')).join('\n');
 }
+
+test('earlier array traces preserve values through alias mutation and nested row replacement', () => {
+  const result = traceProgram(
+    `
+const t = new Turtle(); // step
+s.set('values', [1, 2]);
+s.set('nested', [[3, 4], [5, 6]]);
+s.set('alias', s.get('nested')[0]);
+s.get('values')[0] = 9; // step
+s.get('nested')[0][1] = 8; // step
+s.get('alias')[0] = 7; // step
+s.get('nested')[1] = [10, 11]; // step
+`,
+    `class Main {
+  public static void main(String[] args) {
+    Turtle t = new Turtle(); // step
+    int[] values = { 1, 2 }; // step
+    int[][] nested = { { 3, 4 }, { 5, 6 } }; // step
+    int[] alias = nested[0]; // step
+    values[0] = 9; // step
+    nested[0][1] = 8; // step
+    alias[0] = 7; // step
+    nested[1] = new int[] { 10, 11 }; // step
+  }
+}`,
+    'java'
+  );
+  expect(result.traceItems.map(({ vars }) => vars)).toEqual([
+    {},
+    {},
+    { values: [1, 2] },
+    {
+      values: [1, 2],
+      nested: [
+        [3, 4],
+        [5, 6],
+      ],
+    },
+    {
+      values: [1, 2],
+      nested: [
+        [3, 4],
+        [5, 6],
+      ],
+      alias: [3, 4],
+    },
+    {
+      values: [9, 2],
+      nested: [
+        [3, 4],
+        [5, 6],
+      ],
+      alias: [3, 4],
+    },
+    {
+      values: [9, 2],
+      nested: [
+        [3, 8],
+        [5, 6],
+      ],
+      alias: [3, 8],
+    },
+    {
+      values: [9, 2],
+      nested: [
+        [7, 8],
+        [5, 6],
+      ],
+      alias: [7, 8],
+    },
+    {
+      values: [9, 2],
+      nested: [
+        [7, 8],
+        [10, 11],
+      ],
+      alias: [7, 8],
+    },
+  ]);
+});

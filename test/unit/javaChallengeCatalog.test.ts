@@ -1,3 +1,4 @@
+import { challengeMetadata } from '../../src/problems/challenge/metadata';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -115,7 +116,9 @@ test('every fixed catalog definition is registered and has a distinct visible st
   }
   const starters = new Set<string>();
   for (const [id, definition] of Object.entries(catalog)) {
-    expect(courseIdToLectureIndexToExerciseProblemIds[definition.courseId][definition.lectureIndex], id).toContain(id);
+    const selectable = courseIdToLectureIndexToExerciseProblemIds[definition.courseId][definition.lectureIndex];
+    if (definition.courseId === 'test' || challengeMetadata[id]) expect(selectable, id).toContain(id);
+    else expect(selectable, id).not.toContain(id);
     const visible = extractBlanks(definition.starterProgram).programWithPlaceholders;
     const key = `${definition.courseId}/${definition.lectureIndex}/${definition.problemFormat}/${visible.trim()}`;
     expect(starters.has(key), `Duplicate playable starter: ${id}`).toBe(false);

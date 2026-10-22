@@ -1,3 +1,4 @@
+import { independentJavaChallengeDefinitions } from '../challenge/javaDefinitions';
 import { beginner1Early } from './beginner1Early';
 import { beginner1Late } from './beginner1Late';
 import { beginner2Early } from './beginner2Early';
@@ -19,6 +20,7 @@ export const javaChallengeDefinitions: Record<string, JavaChallengeDefinition> =
   ...beginner2Early,
   ...beginner2Late,
   ...testProblems,
+  ...independentJavaChallengeDefinitions,
   ...sourceI1To4Blanks,
   ...sourceI5To8Blanks,
   ...sourceBeginner2EarlyBlanks,
