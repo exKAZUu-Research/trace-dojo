@@ -59,7 +59,7 @@ test('the curriculum inventory accounts explicitly for supported and deferred or
   ).toEqual(deferred);
 });
 
-test.each(supported)('$sourceProblemId offers two distinct registered source-derived blanks', (source) => {
+test.each(supported)('$sourceProblemId retains two distinct historical source-derived blanks', (source) => {
   const membership = courseIdToLectureIndexToExerciseProblemIds[source.courseId][source.lectureIndex];
   const variants = entries.filter(
     (entry) => entry.sourceProblemId === source.sourceProblemId && entry.definition.problemFormat === 'fillInBlank'
@@ -67,7 +67,7 @@ test.each(supported)('$sourceProblemId offers two distinct registered source-der
   expect(variants.length, `${source.sourceProblemId}: no source-attributable blank coverage`).toBeGreaterThanOrEqual(2);
   const visible = new Set<string>();
   for (const { id, definition, authoringSeed } of variants) {
-    expect(membership, id).toContain(id);
+    expect(membership, id).not.toContain(id);
     expect(definition.courseId, id).toBe(source.courseId);
     expect(definition.lectureIndex, id).toBe(source.lectureIndex);
     expect(authoringSeed, id).toEqual(expect.any(String));
@@ -98,12 +98,14 @@ test('every attributed definition points to its actual supported ordinary source
       lectureIndex: definition.lectureIndex,
     });
     expect(authoringSeed, id).toEqual(expect.any(String));
-    expect(courseIdToLectureIndexToExerciseProblemIds[definition.courseId][definition.lectureIndex], id).toContain(id);
+    expect(courseIdToLectureIndexToExerciseProblemIds[definition.courseId][definition.lectureIndex], id).not.toContain(
+      id
+    );
   }
 });
 
 test.each(supported)(
-  '$sourceProblemId offers two distinct registered source-derived bugs sharing its accepted blank model',
+  '$sourceProblemId retains two distinct historical source-derived bugs sharing its accepted blank model',
   (source) => {
     const membership = courseIdToLectureIndexToExerciseProblemIds[source.courseId][source.lectureIndex];
     const sourceEntries = entries.filter((entry) => entry.sourceProblemId === source.sourceProblemId);
@@ -124,7 +126,7 @@ test.each(supported)(
     const visible = new Set<string>();
     for (const entry of bugs) {
       const { id, definition } = entry;
-      expect(membership, id).toContain(id);
+      expect(membership, id).not.toContain(id);
       expect(definition.courseId, id).toBe(source.courseId);
       expect(definition.lectureIndex, id).toBe(source.lectureIndex);
       expect(modelOf(entry), `${id}: bug changed accepted source model`).toEqual(acceptedModel);
