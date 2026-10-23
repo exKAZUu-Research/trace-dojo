@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { stripJavaTraceAnnotations } from './javaSource';
+
 const prefix = 'trace-dojo:java-draft:';
 const sourceLimit = 100_000;
 const contextSchema = z.object({
@@ -35,10 +37,17 @@ export function restoreJavaDraft(key: string, baseline: string, completed: boole
     const raw = localStorage.getItem(key);
     if (raw === null) return { code: baseline, failed: false };
     const draft = parseDraft(raw);
-    if (!draft || javaDraftKey(draft.context) !== key || draft.baseline !== baseline) {
+    if (
+      !draft ||
+      javaDraftKey(draft.context) !== key ||
+      (draft.baseline !== baseline && stripJavaTraceAnnotations(draft.baseline) !== baseline)
+    ) {
       return { code: baseline, failed: !removeJavaDraft(key) };
     }
-    return { code: draft.code, failed: false };
+    return {
+      code: draft.baseline === baseline ? draft.code : stripJavaTraceAnnotations(draft.code),
+      failed: false,
+    };
   } catch {
     return { code: baseline, failed: true };
   }

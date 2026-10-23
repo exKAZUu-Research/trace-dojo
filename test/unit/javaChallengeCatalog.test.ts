@@ -1,4 +1,5 @@
 import { challengeMetadata } from '../../src/problems/challenge/metadata';
+import { stripJavaTraceAnnotations } from '../../src/problems/fillInBlank/javaSource';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -119,7 +120,7 @@ test('every fixed catalog definition is registered and has a distinct visible st
     const selectable = courseIdToLectureIndexToExerciseProblemIds[definition.courseId][definition.lectureIndex];
     if (definition.courseId === 'test' || challengeMetadata[id]) expect(selectable, id).toContain(id);
     else expect(selectable, id).not.toContain(id);
-    const visible = extractBlanks(definition.starterProgram).programWithPlaceholders;
+    const visible = instantiateJavaChallenge(id, definition.problemFormat).displayProgram;
     const key = `${definition.courseId}/${definition.lectureIndex}/${definition.problemFormat}/${visible.trim()}`;
     expect(starters.has(key), `Duplicate playable starter: ${id}`).toBe(false);
     starters.add(key);
@@ -139,7 +140,7 @@ test.each(catalogLectures)(
     )) {
       const admitted = instantiateJavaChallenge(id, definition.problemFormat);
       expect(admitted, `${id}: public admission`).toEqual({
-        displayProgram: extractBlanks(definition.starterProgram).programWithPlaceholders,
+        displayProgram: stripJavaTraceAnnotations(extractBlanks(definition.starterProgram).programWithPlaceholders),
         finalBoard: definition.finalBoard,
         finalTurtles: definition.finalTurtles,
       });
@@ -196,6 +197,25 @@ test.each(catalogLectures)(
     }
   },
   1_200_000
+);
+
+test.each(['fillInBlank', 'bugFix'] as const)(
+  'annotation-free %s public source remains repairable through real Java grading',
+  async (format) => {
+    const id = `challengeI7ValueSnapshot${format === 'fillInBlank' ? 'Blank' : 'Bug'}Condition4`;
+    const definition = catalog[id];
+    const problem = instantiateJavaChallenge(id, format);
+    expect(problem.displayProgram).not.toMatch(/\/\/\s*(?:step|caller)\b/);
+    const answers = extractBlanks(definition.starterProgram).answers;
+    const repaired =
+      format === 'fillInBlank'
+        ? problem.displayProgram.replaceAll(/【(\d+)】/g, (_, index: string) => answers[Number(index) - 1])
+        : stripJavaTraceAnnotations(definition.correctProgram);
+    expect(await gradeFillInBlankCode(problem, repaired, { javaExecutors: [localJavaExecutor] })).toMatchObject({
+      status: 'correct',
+    });
+  },
+  60_000
 );
 
 test.each(independentCases)(

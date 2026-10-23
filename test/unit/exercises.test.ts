@@ -1330,6 +1330,8 @@ test.each(['regular', 'fillInBlank', 'bugFix'] as const)(
         problemFormat,
       });
       expect(first.problemId).not.toBe(legacyId);
+      if (problemFormat !== 'regular')
+        expect(z.string().parse(first.displayProgram)).not.toMatch(/\/\/\s*(?:step|caller)\b/);
       expect(sqlite.prepare('SELECT * FROM ExerciseSession WHERE problemId = ?').all(legacyId)).toHaveLength(1);
       expect(await caller.startExercise(location)).toMatchObject({ sessionId: first.sessionId });
       sqlite.prepare('UPDATE ExerciseSession SET completedAt = ? WHERE id = ?').run(Date.now(), first.sessionId);
@@ -1349,6 +1351,8 @@ test.each(['regular', 'fillInBlank', 'bugFix'] as const)(
         problemFormat,
       });
       expect(next.problemId).not.toBe(first.problemId);
+      if (problemFormat !== 'regular')
+        expect(z.string().parse(next.displayProgram)).not.toMatch(/\/\/\s*(?:step|caller)\b/);
       expect(await caller.nextExercise({ ...location, sessionId: first.sessionId })).toMatchObject(next);
       expect(regularMap.tuBeginner1.flat()).not.toContain(first.problemId);
       expect(sqlite.prepare('SELECT * FROM ExerciseSession WHERE problemId = ?').all(legacyId)).toHaveLength(2);
