@@ -111,7 +111,7 @@
     "@types/seedrandom": "3.0.8",
     "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "@willbooster/oxfmt-config": "1.2.2",
-    "@willbooster/oxlint-config": "1.4.8",
+    "@willbooster/oxlint-config": "1.4.9",
     "babel-plugin-react-compiler": "1.0.0",
     "concurrently": "10.0.6",
     "conventional-changelog-conventionalcommits": "10.4.1",
