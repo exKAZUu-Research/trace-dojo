@@ -1,14 +1,8 @@
 'use client';
 
-import type { ProblemSession } from '../../../../../../../../../db/schema';
 import { notFound, useParams } from 'next/navigation';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
-
-import { FillInBlankBody } from './FillInBlankBody';
-import { ProblemBody } from './ProblmBody';
-import { ProblemPageHeader } from './ProblemPageHeader';
-import { ReloadNotice } from './ReloadNotice';
 
 import {
   DEFAULT_LANGUAGE_ID,
@@ -22,6 +16,12 @@ import type { FillInBlankGradingResult } from '@/problems/fillInBlank/grade';
 import { instantiateProblem } from '@/problems/instantiateProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import { isProblemSessionExpired } from '@/utils/problemSessionError';
+
+import type { ProblemSession } from '../../../../../../../../../db/schema';
+import { FillInBlankBody } from './FillInBlankBody';
+import { ProblemPageHeader } from './ProblemPageHeader';
+import { ProblemBody } from './ProblmBody';
+import { ReloadNotice } from './ReloadNotice';
 
 interface Props {
   initialProblemSession: ProblemSession;

@@ -6,7 +6,7 @@ import { eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-sqlite/migrator';
 import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest';
 
-import { problemSessions, problemSubmissions, users, type ProblemSession } from '../../db/schema';
+import { type ProblemSession, problemSessions, problemSubmissions, users } from '../../db/schema';
 import type { db as databaseClient } from '../../src/infrastructures/database';
 import type { BackendRouter } from '../../src/infrastructures/trpcBackend/routers';
 

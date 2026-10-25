@@ -3,8 +3,8 @@ import type { AddressInfo } from 'node:net';
 
 import { describe, expect, test } from 'vitest';
 
-import { gradeFillInBlankAnswers } from '../../src/problems/fillInBlank/grade';
 import { fillBlanks } from '../../src/problems/fillInBlank/blanks';
+import { gradeFillInBlankAnswers } from '../../src/problems/fillInBlank/grade';
 import { createJudgeExecutor, createWandboxExecutor } from '../../src/problems/fillInBlank/javaExecutors';
 import {
   buildJavaJudgeProgram,

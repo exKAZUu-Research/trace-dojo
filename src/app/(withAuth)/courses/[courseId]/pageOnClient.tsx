@@ -4,6 +4,8 @@ import { useLocalStorage } from '@willbooster/shared-lib-react';
 import { useParams } from 'next/navigation';
 import { MdOutlineVerified, MdVerified } from 'react-icons/md';
 
+import { getLectureStorageKey } from '@/utils/lectureStorage';
+
 import { useAuthContextSelector } from '../../../../contexts/AuthContext';
 import {
   Box,
@@ -27,8 +29,6 @@ import {
   courseIdToLectureIndexToProblemIds,
   courseIdToName,
 } from '../../../../problems/problemData';
-
-import { getLectureStorageKey } from '@/utils/lectureStorage';
 
 interface Props {
   learningPeriodStart?: string;

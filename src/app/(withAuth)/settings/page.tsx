@@ -4,12 +4,13 @@ import { cookies } from 'next/headers';
 import { z } from 'zod';
 import { zfd } from 'zod-form-data';
 
-import { users } from '../../../../db/schema';
 import { withAuthorizationOnServer } from '@/app/utils/withAuth';
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { db } from '@/infrastructures/database';
 import { Button, FormControl, FormLabel, Input, VStack } from '@/infrastructures/useClient/chakra';
 import { getNonNullableSessionOnServer } from '@/utils/session';
+
+import { users } from '../../../../db/schema';
 
 const SettingsPage: MyAuthorizedNextPageOrLayout = async ({ session }) => {
   const user = await db.query.users.findFirst({

@@ -10,11 +10,11 @@ import { copyFileSync, existsSync, renameSync, rmSync, writeFileSync } from 'nod
 
 import SuperTokensNode from 'supertokens-node';
 
-import { db } from '../src/infrastructures/database';
 import { ensureSuperTokensInit } from '@/infrastructures/supertokens/backendConfig';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import { courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
 
+import { db } from '../src/infrastructures/database';
 import { loadValidStudentIds } from './loadValidStudentIds';
 
 const defaultValidStudentIdsCsvPath = 'students.csv';

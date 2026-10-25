@@ -1,9 +1,9 @@
 import { notFound } from 'next/navigation';
 
-import { ChallengePageOnClient } from './pageOnClient';
+import { type MyAuthorizedNextPageOrLayout, withAuthorizationOnServer } from '@/app/utils/withAuth';
+import { type CourseId, courseIdToLectureIds } from '@/problems/problemData';
 
-import { withAuthorizationOnServer, type MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
-import { courseIdToLectureIds, type CourseId } from '@/problems/problemData';
+import { ChallengePageOnClient } from './pageOnClient';
 
 const ChallengePage: MyAuthorizedNextPageOrLayout<
   { courseId: CourseId; lectureId: string },

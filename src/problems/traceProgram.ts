@@ -1,14 +1,13 @@
+import type { CellColor, ColorChar } from '@/types';
+
 import {
   TURTLE_GRAPHICS_BOARD_COLUMNS as GRID_COLUMNS,
   TURTLE_GRAPHICS_BOARD_ROWS as GRID_ROWS,
   TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR,
   TURTLE_GRAPHICS_EMPTY_COLOR as EMPTY_COLOR,
 } from '../constants';
-
 import type { InstantiatedProblem } from './instantiateProblem';
 import type { LanguageId } from './problemData';
-
-import type { CellColor, ColorChar } from '@/types';
 
 export interface TurtleTrace {
   x: number;
