@@ -1,13 +1,13 @@
 import { notFound } from 'next/navigation';
 
-import { Lecture } from './pageOnClient';
-
 import { withAuthorizationOnServer } from '@/app/utils/withAuth';
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { db } from '@/infrastructures/database';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import type { CourseId } from '@/problems/problemData';
 import { courseIdToLectureIds } from '@/problems/problemData';
+
+import { Lecture } from './pageOnClient';
 
 const LecturePage: MyAuthorizedNextPageOrLayout<{ courseId: CourseId; lectureId: string }> = async ({
   params,
