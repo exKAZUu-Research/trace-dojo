@@ -18,6 +18,7 @@ import {
   Button,
   Text,
 } from '@/infrastructures/useClient/chakra';
+import { instantiateRegularChallenge } from '@/problems/challenge/regular';
 import { instantiateProblem } from '@/problems/instantiateProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
@@ -58,7 +59,8 @@ export const RegularChallengeBody: React.FC<Props> = ({
   const editor = useRef<TurtleGraphicsHandle>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const problem = useMemo(() => {
-    const value = instantiateProblem(display.problemId, 'java', display.seed);
+    const value =
+      instantiateRegularChallenge(display.problemId) ?? instantiateProblem(display.problemId, 'java', display.seed);
     if (!value) throw new Error(`Unknown regular problem: ${display.problemId}`);
     return value;
   }, [display.problemId, display.seed]);

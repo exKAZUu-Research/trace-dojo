@@ -49,6 +49,10 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
   },
 }));
 
+import { instantiateJavaChallenge } from '../../../src/problems/javaChallenges/instantiate';
+import { javaChallengeDefinitions } from '../../../src/problems/javaChallenges/definitions';
+import { extractBlanks } from '../../../src/problems/fillInBlank/blanks';
+
 import { ChallengePageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/pageOnClient';
 
 import { ProblemPageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/pageOnClient';
@@ -1173,3 +1177,57 @@ test('local draft identities separate ordinary and challenge modes with the same
   expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(ordinary);
   expect(infrastructure.grade).not.toHaveBeenCalled();
 });
+
+test.each(['fillInBlank', 'bugFix'] as const)(
+  '%s editor hides trace annotations and migrates an annotated draft without losing learner text',
+  async (format) => {
+    const id = `challengeI7ValueSnapshot${format === 'fillInBlank' ? 'Blank' : 'Bug'}Condition4`;
+    const problem = instantiateJavaChallenge(id, format);
+    infrastructure.start.mockResolvedValue({
+      ...problem,
+      problemFormat: format,
+      sessionId: 10,
+      problemId: id,
+      blankCount: format === 'fillInBlank' ? 1 : 0,
+      completed: false,
+    });
+    const renderChallenge = (): ReturnType<typeof render> =>
+      render(
+        <ChakraProvider>
+          <ChallengePageOnClient initialFormat={format} />
+        </ChakraProvider>
+      );
+    let rendered = renderChallenge();
+    let editor = await screen.findByRole('textbox', { name: /Java/ });
+    expect(readRenderedJavaSource(editor)).toBe(problem.displayProgram);
+    expect(readRenderedJavaSource(editor)).not.toMatch(/\/\/\s*(?:step|caller)\b/);
+    await replaceJavaSource(editor, `${problem.displayProgram}\n// saved learner edit`);
+    const entry = expectStoredDraft('// saved learner edit');
+    const saved = JSON.parse(entry.raw);
+    const oldBaseline = extractBlanks(javaChallengeDefinitions[id].starterProgram).programWithPlaceholders;
+    const learnerText = String.raw`// step explanation stays
+String quoted = "escaped \" // step";
+char slash = '/';
+String text = """
+// step
+// caller
+""";
+/* // caller
+   // step */`;
+    saved.baseline = oldBaseline;
+    saved.code = `${oldBaseline}\n// step: 12 // caller\n${learnerText}`;
+    localStorage.setItem(entry.key, JSON.stringify(saved));
+    rendered.unmount();
+    rendered = renderChallenge();
+    editor = await screen.findByRole('textbox', { name: /Java/ });
+    expect(readRenderedJavaSource(editor)).toBe(`${problem.displayProgram}\n\n${learnerText}`);
+    expect(editor).toHaveAttribute('contenteditable', 'true');
+    expect(infrastructure.grade).not.toHaveBeenCalled();
+    rendered.unmount();
+    saved.baseline = 'class ChangedProblem {}';
+    localStorage.setItem(entry.key, JSON.stringify(saved));
+    renderChallenge();
+    expect(readRenderedJavaSource(await screen.findByRole('textbox', { name: /Java/ }))).toBe(problem.displayProgram);
+    expect(localStorage.getItem(entry.key)).toBeNull();
+  }
+);

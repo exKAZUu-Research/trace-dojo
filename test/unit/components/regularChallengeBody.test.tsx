@@ -9,6 +9,7 @@ import {
   RegularChallengeBody,
   type RegularChallengeTransport,
 } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/RegularChallengeBody';
+import { challengeMetadata } from '../../../src/problems/challenge/metadata';
 import type { RegularExerciseDisplay } from '../../../src/problems/regular/exerciseProblem';
 
 const executionDisplay: RegularExerciseDisplay = {
@@ -20,6 +21,14 @@ const executionDisplay: RegularExerciseDisplay = {
   traceItemIndex: 0,
   completed: false,
 };
+
+test('renders the independent problem title from public metadata', () => {
+  const entry = Object.entries(challengeMetadata).find(([, metadata]) => metadata.problemFormat === 'regular');
+  if (!entry) throw new Error('Missing independent regular metadata');
+  const [problemId, metadata] = entry;
+  renderBody({ display: { ...executionDisplay, problemId } });
+  expect(screen.getByRole('heading', { name: metadata.title, level: 1 })).toBeVisible();
+});
 
 test('uses the real editor local grader and sends only verdict with stored context', async () => {
   const user = userEvent.setup();

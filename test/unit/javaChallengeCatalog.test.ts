@@ -1,3 +1,5 @@
+import { challengeMetadata } from '../../src/problems/challenge/metadata';
+import { stripJavaTraceAnnotations } from '../../src/problems/fillInBlank/javaSource';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -78,7 +80,7 @@ const independentCases = [
 ];
 
 test.each(lectures)(
-  '$courseId lecture $lectureIndex offers at least one playable challenge of each kind',
+  '$courseId lecture $lectureIndex offers at least 12 distinct playable challenges of each kind',
   ({ courseId, lectureIndex }) => {
     const ids = courseIdToLectureIndexToExerciseProblemIds[courseId][lectureIndex];
     expect(new Set(ids).size).toBe(ids.length);
@@ -90,7 +92,9 @@ test.each(lectures)(
             catalog[id].lectureIndex === lectureIndex) ||
           (!catalog[id] && format === 'fillInBlank' && isFillInBlankProblem(id))
       );
-      expect.soft(matching.length, `${courseId}/${lectureIndex + 1}: ${format} availability`).toBeGreaterThanOrEqual(1);
+      expect
+        .soft(matching.length, `${courseId}/${lectureIndex + 1}: ${format} availability`)
+        .toBeGreaterThanOrEqual(12);
     }
   }
 );
@@ -111,8 +115,10 @@ test('every fixed catalog definition is registered and has a distinct visible st
   }
   const starters = new Set<string>();
   for (const [id, definition] of Object.entries(catalog)) {
-    expect(courseIdToLectureIndexToExerciseProblemIds[definition.courseId][definition.lectureIndex], id).toContain(id);
-    const visible = extractBlanks(definition.starterProgram).programWithPlaceholders;
+    const selectable = courseIdToLectureIndexToExerciseProblemIds[definition.courseId][definition.lectureIndex];
+    if (definition.courseId === 'test' || challengeMetadata[id]) expect(selectable, id).toContain(id);
+    else expect(selectable, id).not.toContain(id);
+    const visible = instantiateJavaChallenge(id, definition.problemFormat).displayProgram;
     const key = `${definition.courseId}/${definition.lectureIndex}/${definition.problemFormat}/${visible.trim()}`;
     expect(starters.has(key), `Duplicate playable starter: ${id}`).toBe(false);
     starters.add(key);
@@ -132,7 +138,7 @@ test.each(catalogLectures)(
     )) {
       const admitted = instantiateJavaChallenge(id, definition.problemFormat);
       expect(admitted, `${id}: public admission`).toEqual({
-        displayProgram: extractBlanks(definition.starterProgram).programWithPlaceholders,
+        displayProgram: stripJavaTraceAnnotations(extractBlanks(definition.starterProgram).programWithPlaceholders),
         finalBoard: definition.finalBoard,
         finalTurtles: definition.finalTurtles,
       });
@@ -189,6 +195,25 @@ test.each(catalogLectures)(
     }
   },
   1_200_000
+);
+
+test.each(['fillInBlank', 'bugFix'] as const)(
+  'annotation-free %s public source remains repairable through real Java grading',
+  async (format) => {
+    const id = `challengeI7ValueSnapshot${format === 'fillInBlank' ? 'Blank' : 'Bug'}Condition4`;
+    const definition = catalog[id];
+    const problem = instantiateJavaChallenge(id, format);
+    expect(problem.displayProgram).not.toMatch(/\/\/\s*(?:step|caller)\b/);
+    const answers = extractBlanks(definition.starterProgram).answers;
+    const repaired =
+      format === 'fillInBlank'
+        ? problem.displayProgram.replaceAll(/【(\d+)】/g, (_, index: string) => answers[Number(index) - 1])
+        : stripJavaTraceAnnotations(definition.correctProgram);
+    expect(await gradeFillInBlankCode(problem, repaired, { javaExecutors: [localJavaExecutor] })).toMatchObject({
+      status: 'correct',
+    });
+  },
+  60_000
 );
 
 test.each(independentCases)(

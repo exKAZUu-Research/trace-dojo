@@ -252,7 +252,17 @@ function addTrace(sid, self) {
     const node = captureDisplayNode(self, new Set());
     if (node !== undefined) referenceVars['this'] = node;
   }
-  trace.push({depth: s.getDepth(), sid, callStack: [...callStack], turtles: _turtles.map(t => ({...t})), vars, referenceVars, board: board.map(r => r.join('')).join('\\n')});
+  trace.push({depth: s.getDepth(), sid, callStack: [...callStack], turtles: _turtles.map(t => ({...t})), vars: snapshotVariables(vars), referenceVars, board: board.map(r => r.join('')).join('\\n')});
+}
+function snapshotVariables(value, seen = new WeakMap()) {
+  if (value === null || typeof value !== 'object') return value;
+  if (seen.has(value)) return seen.get(value);
+  const snapshot = Array.isArray(value) ? new Array(value.length) : {};
+  seen.set(value, snapshot);
+  for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+    if (descriptor.enumerable && 'value' in descriptor) snapshot[key] = snapshotVariables(descriptor.value, seen);
+  }
+  return snapshot;
 }
 function captureDisplayNode(value, seen) {
   if (value === null || typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean') {
