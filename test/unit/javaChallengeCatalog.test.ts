@@ -31,8 +31,6 @@ const definitionSchema = z.object({
   finalBoard: z.string().min(1),
   finalTurtles: z.array(z.object({ x: z.number(), y: z.number(), color: z.string(), dir: z.string() })),
   bugKind: z.enum(['logical', 'syntax']).optional(),
-  sourceProblemId: z.string().min(1).optional(),
-  authoringSeed: z.string().min(1).optional(),
 });
 const catalogSchema = z.record(z.string(), definitionSchema);
 const catalogPath = resolve('src/problems/javaChallenges/definitions.ts');

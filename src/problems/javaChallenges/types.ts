@@ -8,8 +8,6 @@ export interface JavaChallengeTarget {
 }
 
 export interface JavaChallengeDefinition extends JavaChallengeTarget {
-  sourceProblemId?: string;
-  authoringSeed?: string;
   title: string;
   courseId: 'tuBeginner1' | 'tuBeginner2' | 'test';
   lectureIndex: number;
