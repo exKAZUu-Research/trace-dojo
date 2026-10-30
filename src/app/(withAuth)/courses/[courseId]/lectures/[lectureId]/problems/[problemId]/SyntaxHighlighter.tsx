@@ -1,6 +1,6 @@
 import type { BoxProps } from '@chakra-ui/react';
 import type React from 'react';
-import { useId, useState } from 'react';
+import { useState } from 'react';
 import { MdOutlineZoomIn, MdOutlineZoomOut } from 'react-icons/md';
 import { Prism } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/cjs/styles/prism';
@@ -28,7 +28,6 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
   ...boxProps
 }) => {
   const [fontSize, setFontSize] = useState(1);
-  const instructionsId = useId();
   const hintsEnabled = enableSyntaxHints && programmingLanguageId === 'java';
   const handleZoomIn = (): void => {
     setFontSize((prev) => Math.min(prev + 0.1, 2));
@@ -43,18 +42,10 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
         <IconButton aria-label="Zoom out" icon={<MdOutlineZoomOut size={24} />} mr={2} onClick={handleZoomOut} />
         <IconButton aria-label="Zoom in" icon={<MdOutlineZoomIn size={24} />} onClick={handleZoomIn} />
       </Box>
-      {hintsEnabled && (
-        <Box id={instructionsId} fontSize="sm" px={4} pt={3} pr="7rem">
-          下線のある記号や語にカーソルを合わせると説明が出ます。クリック・タップで固定／解除。 キーボードでは Tab
-          で入り、← →・Home・End で移動、Enter・Space で固定／解除、Esc で閉じます。
-        </Box>
-      )}
       <Box
         sx={{
           '.java-syntax-hint': {
-            cursor: 'help',
-            textDecoration: 'underline dotted',
-            textUnderlineOffset: '3px',
+            cursor: 'inherit',
             _focusVisible: { outline: '2px solid', outlineColor: 'blue.600', outlineOffset: '2px' },
           },
         }}
@@ -62,7 +53,6 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
         overflow="auto"
         role={hintsEnabled ? 'group' : undefined}
         aria-label={hintsEnabled ? 'Java の構文ヒント' : undefined}
-        aria-describedby={hintsEnabled ? instructionsId : undefined}
       >
         <Prism
           codeTagProps={{

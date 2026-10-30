@@ -23,6 +23,53 @@ const lexicalCode = String.raw`int 個数 = 17;
     """;
   java.util.List<String> 一覧;`;
 
+test('renders hinted code without a usage helper or an instruction description', () => {
+  renderHighlighter({ code: 'int 個数 = 17;' });
+  expect.soft(screen.queryByText(/下線のある記号や語/)).not.toBeInTheDocument();
+  const group = screen.getByRole('group', { name: 'Java の構文ヒント' });
+  expect.soft(group).not.toHaveAttribute('aria-describedby');
+  expect(group).not.toHaveAccessibleDescription();
+});
+
+test('keeps punctuation, literals, String, class names, and arbitrary names noninteractive', () => {
+  const source = `int 個数 = 17;
+個数 += 2;
+String 文;
+Widget 道具;
+{ 道具.accept(17, 1.5, "text", 'x', true, false, null); }
+一覧[0].accept(文);`;
+  const { container } = renderHighlighter({ code: source });
+  const code = getCode(container);
+  expectSource(code, source);
+  expect(within(code).getByRole('button', { name: 'int の説明' })).toBeVisible();
+  expect(within(code).getByRole('button', { name: '+= の説明' })).toBeVisible();
+  for (const line of [...code.children].slice(2)) {
+    if (!(line instanceof HTMLElement)) throw new Error('Source line must be rendered');
+    expect.soft(within(line).queryAllByRole('button')).toHaveLength(0);
+  }
+  expect(within(code).queryByRole('button', { name: '個数 の説明' })).not.toBeInTheDocument();
+});
+
+test('shows keyword syntax and concrete keyword and operator examples in accessible tooltips', async () => {
+  const user = userEvent.setup();
+  const { container } = renderHighlighter({ code: 'if (課題の個数 > 937) { 課題の個数 %= 937; }' });
+  const query = within(getCode(container));
+  const keyword = query.getByRole('button', { name: 'if の説明' });
+  await user.hover(keyword);
+  const keywordTooltip = await screen.findByRole('tooltip');
+  expect.soft(keywordTooltip).toHaveTextContent(/構文[：:]\s*if\s*\(/);
+  expect.soft(keywordTooltip).toHaveTextContent(/例[：:]\s*if\s*\([^)]*\)\s*\{/);
+  expect(keyword).toHaveAccessibleDescription(keywordTooltip.textContent ?? '');
+  expect(keywordTooltip).not.toHaveTextContent(/課題の個数|937/);
+  await user.unhover(keyword);
+  const operator = query.getByRole('button', { name: '%= の説明' });
+  await user.hover(operator);
+  const operatorTooltip = await screen.findByRole('tooltip');
+  await waitFor(() => expect(operator).toHaveAccessibleDescription(operatorTooltip.textContent ?? ''));
+  expect.soft(operatorTooltip).toHaveTextContent(/例[：:][\s\S]*%=\s*\d+\s*;/);
+  expect(operatorTooltip).not.toHaveTextContent(/課題の個数|937/);
+});
+
 test('preserves exact Java source and lexical boundaries around compound operators and literals', async () => {
   const user = userEvent.setup();
   const { container } = renderHighlighter({ code: lexicalCode });
