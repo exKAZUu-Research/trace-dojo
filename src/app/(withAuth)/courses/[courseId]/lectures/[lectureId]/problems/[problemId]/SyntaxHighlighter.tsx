@@ -46,6 +46,8 @@ export const SyntaxHighlighter: React.FC<SyntaxHighlighterProps> = ({
         sx={{
           '.java-syntax-hint': {
             cursor: 'inherit',
+            textDecoration: 'underline dotted',
+            textUnderlineOffset: '3px',
             _focusVisible: { outline: '2px solid', outlineColor: 'blue.600', outlineOffset: '2px' },
           },
         }}
