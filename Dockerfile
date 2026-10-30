@@ -24,6 +24,7 @@ ENV ARCH=$ARCH
 COPY dist/bash/ ./bash/
 
 RUN apt-get -qq update \
+    && apt-get -qq install -y --no-install-recommends libatomic1 \
     && bash ./bash/prepare-node-web.sh \
     && bash ./bash/install-litestream.sh \
     && curl https://mise.run | sh \
