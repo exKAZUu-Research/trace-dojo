@@ -1,636 +1,588 @@
 import type { PracticeDefinition } from './types';
 
+const define = (
+  lecture: number,
+  family: string,
+  title: string,
+  variant: number,
+  java: string,
+  instrumented: string,
+  methods = ''
+): PracticeDefinition => ({
+  id: `practiceEasyV1Beginner1L${lecture}${family}V${variant}`,
+  lectureIndex: lecture - 1,
+  title: `${title} ${variant}`,
+  program: {
+    java: `
+public class Main {
+    public static void main(String[] args) {
+${java}
+    }
+${methods}}
+`,
+    instrumented,
+  },
+});
+
 export const beginner1PracticeDefinitions = [
-  {
-    id: 'practiceBeginner1L1A',
-    lectureIndex: 0,
-    title: '折れ道を戻る',
-    program: {
-      java: `
-public class Main {
-    public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
+  define(
+    1,
+    'TerminalTurn',
+    '進んで向きを変える',
+    1,
+    `        Turtle t = new Turtle(); // step
         t.前に進む(); // step
-        t.右を向く(); // step
+        t.右を向く(); // step`,
+    `const t = new Turtle(); registerDisplayRef('t', () => t); // step
+t.forward();
+t.turnRight();`
+  ),
+  define(
+    1,
+    'TerminalTurn',
+    '進んで向きを変える',
+    2,
+    `        Turtle t = new Turtle(); // step
         t.前に進む(); // step
-        t.後に戻る(); // step
+        t.前に進む(); // step
+        t.右を向く(); // step`,
+    `const t = new Turtle(); registerDisplayRef('t', () => t); // step
+t.forward();
+t.forward();
+t.turnRight();`
+  ),
+  define(
+    1,
+    'TerminalTurn',
+    '進んで向きを変える',
+    3,
+    `        Turtle t = new Turtle(); // step
+        t.前に進む(); // step
+        t.前に進む(); // step
+        t.前に進む(); // step
+        t.右を向く(); // step`,
+    `const t = new Turtle(); registerDisplayRef('t', () => t); // step
+t.forward();
+t.forward();
+t.forward();
+t.turnRight();`
+  ),
+  define(
+    1,
+    'FinishBackward',
+    '向きを変えて一歩戻る',
+    1,
+    `        Turtle t = new Turtle(); // step
+        t.前に進む(); // step
         t.左を向く(); // step
-        t.前に進む(); // step
-    }
-}
-`,
-      instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnRight();
-t.forward();
-t.backward();
-t.turnLeft();
-t.forward();
-`,
-    },
-  },
-  {
-    id: 'practiceBeginner1L1B',
-    lectureIndex: 0,
-    title: '向きを変えて戻る',
-    program: {
-      java: `
-public class Main {
-    public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.右を向く(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-    }
-}
-`,
-      instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnRight();
-t.turnRight();
-t.backward();
-t.turnLeft();
+        t.後に戻る(); // step`,
+    `const t = new Turtle(); registerDisplayRef('t', () => t); // step
 t.forward();
 t.turnLeft();
-`,
-    },
-  },
-  {
-    id: 'practiceBeginner1L2A',
-    lectureIndex: 1,
-    title: '座標と移動の記録',
-    program: {
-      java: `
-public class Main {
-    public static void main(String[] args) {
-        int north = 1; // step
-        int east = north + 1; // step
-        Turtle t = new Turtle(east, north); // step
+t.backward();`
+  ),
+  define(
+    1,
+    'FinishBackward',
+    '向きを変えて一歩戻る',
+    2,
+    `        Turtle t = new Turtle(); // step
         t.前に進む(); // step
-        north = north + 1; // step
-        t.右を向く(); // step
         t.前に進む(); // step
-        east = east + 1; // step
-        t.後に戻る(); // step
-        east = east - 1; // step
-    }
-}
-`,
-      instrumented: `
-s.set('north', 1);
-s.set('east', s.get('north') + 1);
-const t = new Turtle(s.get('east'), s.get('north')); registerDisplayRef('t', () => t); // step
-t.forward();
-s.set('north', s.get('north') + 1);
-t.turnRight();
-t.forward();
-s.set('east', s.get('east') + 1);
-t.backward();
-s.set('east', s.get('east') - 1);
-`,
-    },
-  },
-  {
-    id: 'practiceBeginner1L2B',
-    lectureIndex: 1,
-    title: '二つの値の交換',
-    program: {
-      java: `
-public class Main {
-    public static void main(String[] args) {
-        int x = 1; // step
-        int y = 3; // step
-        int saved = x; // step
-        x = y; // step
-        y = saved; // step
-        y += x - 1; // step
-        Turtle t = new Turtle(x, y); // step
-        t.右を向く(); // step
-        t.後に戻る(); // step
         t.左を向く(); // step
+        t.後に戻る(); // step`,
+    `const t = new Turtle(); registerDisplayRef('t', () => t); // step
+t.forward();
+t.forward();
+t.turnLeft();
+t.backward();`
+  ),
+  define(
+    1,
+    'FinishBackward',
+    '向きを変えて一歩戻る',
+    3,
+    `        Turtle t = new Turtle(); // step
         t.前に進む(); // step
-        x = y - saved; // step
-    }
-}
-`,
-      instrumented: `
-s.set('x', 1);
-s.set('y', 3);
-s.set('saved', s.get('x'));
-s.set('x', s.get('y'));
-s.set('y', s.get('saved'));
-s.set('y', s.get('y') + s.get('x') - 1);
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
+        t.前に進む(); // step
+        t.前に進む(); // step
+        t.左を向く(); // step
+        t.後に戻る(); // step`,
+    `const t = new Turtle(); registerDisplayRef('t', () => t); // step
+t.forward();
+t.forward();
+t.forward();
+t.turnLeft();
+t.backward();`
+  ),
+  define(
+    1,
+    'OppositeBackward',
+    '反対を向いて戻る',
+    1,
+    `        Turtle t = new Turtle(); // step
+        t.右を向く(); // step
+        t.右を向く(); // step
+        t.後に戻る(); // step`,
+    `const t = new Turtle(); registerDisplayRef('t', () => t); // step
+t.turnRight();
+t.turnRight();
+t.backward();`
+  ),
+  define(
+    1,
+    'OppositeBackward',
+    '反対を向いて戻る',
+    2,
+    `        Turtle t = new Turtle(); // step
+        t.右を向く(); // step
+        t.右を向く(); // step
+        t.後に戻る(); // step
+        t.後に戻る(); // step`,
+    `const t = new Turtle(); registerDisplayRef('t', () => t); // step
+t.turnRight();
 t.turnRight();
 t.backward();
-t.turnLeft();
-t.forward();
-s.set('x', s.get('y') - s.get('saved'));
-`,
-    },
-  },
-  {
-    id: 'practiceBeginner1L3A',
-    lectureIndex: 2,
-    title: '残りの回数を減らす',
-    program: {
-      java: `
-public class Main {
-    public static void main(String[] args) {
-        Turtle t = new Turtle(1, 1); // step
-        int remaining = 6; // step
-        int used = 1; // step
-        while (remaining > used) {
+t.backward();`
+  ),
+  define(
+    1,
+    'OppositeBackward',
+    '反対を向いて戻る',
+    3,
+    `        Turtle t = new Turtle(); // step
+        t.右を向く(); // step
+        t.右を向く(); // step
+        t.後に戻る(); // step
+        t.後に戻る(); // step
+        t.後に戻る(); // step`,
+    `const t = new Turtle(); registerDisplayRef('t', () => t); // step
+t.turnRight();
+t.turnRight();
+t.backward();
+t.backward();
+t.backward();`
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      2,
+      'CoordinateRead',
+      '座標の値を読む',
+      variant,
+      `        int value = ${variant}; // step
+        Turtle t = new Turtle(value, 1); // step
+        t.右を向く(); // step`,
+      `s.set('value', ${variant});
+const t = new Turtle(s.get('value'), 1); registerDisplayRef('t', () => t); // step
+t.turnRight();`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      2,
+      'UpdateAfterCreation',
+      '値を一度増やす',
+      variant,
+      `        int value = ${variant}; // step
+        Turtle t = new Turtle(value, 1); // step
+        value++; // step`,
+      `s.set('value', ${variant});
+const t = new Turtle(s.get('value'), 1); registerDisplayRef('t', () => t); // step
+s.set('value', s.get('value') + 1);`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      2,
+      'ReadUpdatedExpression',
+      '更新した値から計算する',
+      variant,
+      `        Turtle t = new Turtle(${variant}, 1); // step
+        int value = ${variant}; // step
+        value++; // step
+        int next = value + 1; // step`,
+      `const t = new Turtle(${variant}, 1); registerDisplayRef('t', () => t); // step
+s.set('value', ${variant});
+s.set('value', s.get('value') + 1);
+s.set('next', s.get('value') + 1);`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      3,
+      'Countdown',
+      '残りの回数を減らす',
+      variant,
+      `        Turtle t = new Turtle(1, 1); // step
+        int remaining = ${variant}; // step
+        while (remaining > 0) {
             t.前に進む(); // step
-            remaining = remaining - used; // step
-            used++; // step
-        }
-        t.右を向く(); // step
-        t.前に進む(); // step
-    }
-}
-`,
-      instrumented: `
-const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
-s.set('remaining', 6);
-s.set('used', 1);
-while (s.get('remaining') > s.get('used')) {
+            remaining--; // step
+        }`,
+      `const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
+s.set('remaining', ${variant});
+while (s.get('remaining') > 0) {
   t.forward();
-  s.set('remaining', s.get('remaining') - s.get('used'));
-  s.set('used', s.get('used') + 1);
+  s.set('remaining', s.get('remaining') - 1);
+}`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      3,
+      'RepeatedTurn',
+      '同じ向きに回る',
+      variant,
+      `        Turtle t = new Turtle(1, 1); // step
+        for (int i = 0; i < ${variant}; i++) { // step
+            t.右を向く(); // step
+        }`,
+      `const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
+for (s.set('i', 0); s.get('i') < ${variant}; s.set('i', s.get('i') + 1)) {
+  t.turnRight();
 }
-t.turnRight();
-t.forward();
-`,
-    },
-  },
-  {
-    id: 'practiceBeginner1L3B',
-    lectureIndex: 2,
-    title: '増える間隔と合計',
-    program: {
-      java: `
-public class Main {
-    public static void main(String[] args) {
-        Turtle t = new Turtle(1, 1); // step
-        int stride = 1; // step
-        int total = 0; // step
-        for (int count = 0; count < 3; count += stride) { // step
-            total += count + stride; // step
-            t.前に進む(); // step
-            stride++; // step
+delete s.vars['i'];`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      3,
+      'RepeatedIncrement',
+      '値を一ずつ増やす',
+      variant,
+      `        Turtle t = new Turtle(1, 1); // step
+        int value = 0; // step
+        for (int i = 0; i < ${variant}; i++) { // step
+            value++; // step
+        }`,
+      `const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
+s.set('value', 0);
+for (s.set('i', 0); s.get('i') < ${variant}; s.set('i', s.get('i') + 1)) {
+  s.set('value', s.get('value') + 1);
+}
+delete s.vars['i'];`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      4,
+      'SingleChoice',
+      '条件で向きを変える',
+      variant,
+      `        Turtle t = new Turtle(1, 1); // step
+        int value = ${variant}; // step
+        if (value > 1) {
+            t.右を向く(); // step
         }
-        t.右を向く(); // step
-        for (int rest = total - stride; rest > 0; rest--) { // step
-            t.前に進む(); // step
+        t.前に進む(); // step`,
+      `const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
+s.set('value', ${variant});
+if (s.get('value') > 1) {
+  t.turnRight();
+}
+t.forward();`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      4,
+      'UpdatedChoice',
+      '更新後の値で選ぶ',
+      variant,
+      `        Turtle t = new Turtle(1, 1); // step
+        int value = ${variant}; // step
+        value--; // step
+        if (value == 2) {
+            t.右を向く(); // step
         }
-    }
+        t.前に進む(); // step`,
+      `const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
+s.set('value', ${variant});
+s.set('value', s.get('value') - 1);
+if (s.get('value') === 2) {
+  t.turnRight();
 }
-`,
-      instrumented: `
-const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
-s.set('stride', 1);
-s.set('total', 0);
-for (s.set('count', 0); s.get('count') < 3; s.set('count', s.get('count') + s.get('stride'))) {
-  s.set('total', s.get('total') + s.get('count') + s.get('stride'));
-  t.forward();
-  s.set('stride', s.get('stride') + 1);
-}
-delete s.vars['count'];
-t.turnRight();
-for (s.set('rest', s.get('total') - s.get('stride')); s.get('rest') > 0; s.set('rest', s.get('rest') - 1)) {
-  t.forward();
-}
-delete s.vars['rest'];
-`,
-    },
-  },
-  {
-    id: 'practiceBeginner1L4A',
-    lectureIndex: 3,
-    title: '行ごとに折り返す',
-    program: {
-      java: `
-public class Main {
-    public static void main(String[] args) {
-        Turtle t = new Turtle(1, 1); // step
-        for (int row = 1; row <= 2; row++) { // step
-            for (int column = 0; column < row; column++) { // step
-                t.前に進む(); // step
-                if (column == 0) {
-                    t.右を向く(); // step
-                }
+t.forward();`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      4,
+      'NestedTurns',
+      '二重の繰り返し',
+      variant,
+      `        Turtle t = new Turtle(1, 1); // step
+        for (int row = 0; row < ${['1', '2', '2'][variant - 1]}; row++) { // step
+            for (int column = 0; column < ${['2', '1', '2'][variant - 1]}; column++) { // step
+                t.右を向く(); // step
             }
-            t.左を向く(); // step
-            t.後に戻る(); // step
-        }
-    }
-}
-`,
-      instrumented: `
-const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
-for (s.set('row', 1); s.get('row') <= 2; s.set('row', s.get('row') + 1)) {
-  for (s.set('column', 0); s.get('column') < s.get('row'); s.set('column', s.get('column') + 1)) {
-    t.forward();
-    if (s.get('column') === 0) {
-      t.turnRight();
-    }
+        }`,
+      `const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
+for (s.set('row', 0); s.get('row') < ${['1', '2', '2'][variant - 1]}; s.set('row', s.get('row') + 1)) {
+  for (s.set('column', 0); s.get('column') < ${['2', '1', '2'][variant - 1]}; s.set('column', s.get('column') + 1)) {
+    t.turnRight();
   }
   delete s.vars['column'];
+}
+delete s.vars['row'];`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      5,
+      'EitherDirection',
+      '二つの向きから選ぶ',
+      variant,
+      `        Turtle t = new Turtle(2, 2); // step
+        int value = ${variant}; // step
+        if (value > 1) {
+            t.右を向く(); // step
+        } else {
+            t.左を向く(); // step
+        }`,
+      `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
+s.set('value', ${variant});
+if (s.get('value') > 1) {
+  t.turnRight();
+} else {
   t.turnLeft();
-  t.backward();
-}
-delete s.vars['row'];
-`,
-    },
-  },
-  {
-    id: 'practiceBeginner1L4B',
-    lectureIndex: 3,
-    title: '前の値で向きを選ぶ',
-    program: {
-      java: `
-public class Main {
-    public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
-        int pending = 0; // step
-        for (int round = 0; round < 3; round++) { // step
-            if (pending > 1) {
-                t.右を向く(); // step
-                pending = 0; // step
-            }
+}`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      5,
+      'ThreeChoices',
+      '三つの動作から選ぶ',
+      variant,
+      `        Turtle t = new Turtle(2, 2); // step
+        int value = ${variant}; // step
+        if (value == 1) {
             t.前に進む(); // step
-            pending += round + 1; // step
-        }
-        if (pending == 3) {
+        } else if (value == 2) {
+            t.右を向く(); // step
+        } else {
             t.後に戻る(); // step
-        }
-    }
-}
-`,
-      instrumented: `
-const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-s.set('pending', 0);
-for (s.set('round', 0); s.get('round') < 3; s.set('round', s.get('round') + 1)) {
-  if (s.get('pending') > 1) {
-    t.turnRight();
-    s.set('pending', 0);
-  }
+        }`,
+      `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
+s.set('value', ${variant});
+if (s.get('value') === 1) {
   t.forward();
-  s.set('pending', s.get('pending') + s.get('round') + 1);
-}
-delete s.vars['round'];
-if (s.get('pending') === 3) {
+} else if (s.get('value') === 2) {
+  t.turnRight();
+} else {
   t.backward();
-}
-`,
-    },
-  },
-  {
-    id: 'practiceBeginner1L5A',
-    lectureIndex: 4,
-    title: '残量で進路を選ぶ',
-    program: {
-      java: `
-public class Main {
-    public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
-        int reserve = 5; // step
-        while (reserve > 0) {
-            if (reserve > 3) {
-                t.前に進む(); // step
-                reserve -= 2; // step
-            } else if (reserve == 3) {
-                t.右を向く(); // step
-                reserve--; // step
-            } else {
+}`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      5,
+      'SingleSwitch',
+      '番号で動作を選ぶ',
+      variant,
+      `        Turtle t = new Turtle(2, 2); // step
+        int value = ${variant}; // step
+        switch (value) {
+            case 1:
+                t.左を向く(); // step
+                break;
+            case 2:
                 t.後に戻る(); // step
-                reserve--; // step
-            }
-        }
-    }
-}
-`,
-      instrumented: `
-const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-s.set('reserve', 5);
-while (s.get('reserve') > 0) {
-  if (s.get('reserve') > 3) {
-    t.forward();
-    s.set('reserve', s.get('reserve') - 2);
-  } else if (s.get('reserve') === 3) {
-    t.turnRight();
-    s.set('reserve', s.get('reserve') - 1);
-  } else {
+                break;
+            default:
+                t.右を向く(); // step
+                break;
+        }`,
+      `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
+s.set('value', ${variant});
+switch (s.get('value')) {
+  case 1:
+    t.turnLeft();
+    break;
+  case 2:
     t.backward();
-    s.set('reserve', s.get('reserve') - 1);
-  }
-}
-`,
-    },
-  },
-  {
-    id: 'practiceBeginner1L5B',
-    lectureIndex: 4,
-    title: '次の状態を選ぶ',
-    program: {
-      java: `
-public class Main {
-    public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
-        int state = 2; // step
-        for (int round = 0; round < 3; round++) { // step
-            switch (state) {
-                case 2:
-                    t.右を向く(); // step
-                    state = 0; // step
-                    break;
-                case 0:
-                    t.前に進む(); // step
-                    state = 1; // step
-                    break;
-                default:
-                    t.左を向く(); // step
-                    state = 2; // step
-                    break;
-            }
-            t.前に進む(); // step
-        }
-    }
-}
-`,
-      instrumented: `
-const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-s.set('state', 2);
-for (s.set('round', 0); s.get('round') < 3; s.set('round', s.get('round') + 1)) {
-  switch (s.get('state')) {
-    case 2:
-      t.turnRight();
-      s.set('state', 0);
-      break;
-    case 0:
-      t.forward();
-      s.set('state', 1);
-      break;
-    default:
-      t.turnLeft();
-      s.set('state', 2);
-      break;
-  }
-  t.forward();
-}
-delete s.vars['round'];
-`,
-    },
-  },
-  {
-    id: 'practiceBeginner1L6A',
-    lectureIndex: 5,
-    title: '合計が目印に届くまで',
-    program: {
-      java: `
-public class Main {
-    public static void main(String[] args) {
-        Turtle t = new Turtle(1, 1); // step
-        int marker = 0; // step
-        for (int step = 1; step <= 5; step++) { // step
-            marker += step; // step
-            if (marker >= 5) {
+    break;
+  default:
+    t.turnRight();
+    break;
+}`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      6,
+      'StopBeforeTurn',
+      '途中で繰り返しを終える',
+      variant,
+      `        Turtle t = new Turtle(2, 2); // step
+        for (int i = 1; i <= 3; i++) { // step
+            if (i == ${variant}) {
                 break;
             }
-            t.前に進む(); // step
             t.右を向く(); // step
-        }
-        t.後に戻る(); // step
-    }
-}
-`,
-      instrumented: `
-const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
-s.set('marker', 0);
-for (s.set('step', 1); s.get('step') <= 5; s.set('step', s.get('step') + 1)) {
-  s.set('marker', s.get('marker') + s.get('step'));
-  if (s.get('marker') >= 5) {
+        }`,
+      `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
+for (s.set('i', 1); s.get('i') <= 3; s.set('i', s.get('i') + 1)) {
+  if (s.get('i') === ${variant}) {
     break;
   }
-  t.forward();
   t.turnRight();
 }
-delete s.vars['step'];
-t.backward();
-`,
-    },
-  },
-  {
-    id: 'practiceBeginner1L6B',
-    lectureIndex: 5,
-    title: '休みの回を飛ばす',
-    program: {
-      java: `
-public class Main {
-    public static void main(String[] args) {
-        Turtle t = new Turtle(1, 1); // step
-        int cooldown = 0; // step
-        int moved = 0; // step
-        for (int round = 0; round < 5; round++) { // step
-            if (cooldown > 0) {
-                cooldown--; // step
+delete s.vars['i'];`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      6,
+      'SkipTurn',
+      '残りの動作を飛ばす',
+      variant,
+      `        Turtle t = new Turtle(2, 2); // step
+        for (int i = 1; i <= ${variant}; i++) { // step
+            t.前に進む(); // step
+            if (i == 1) {
                 continue;
             }
-            t.前に進む(); // step
-            moved++; // step
-            cooldown = moved; // step
-        }
-        t.右を向く(); // step
-        t.前に進む(); // step
-    }
-}
-`,
-      instrumented: `
-const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
-s.set('cooldown', 0);
-s.set('moved', 0);
-for (s.set('round', 0); s.get('round') < 5; s.set('round', s.get('round') + 1)) {
-  if (s.get('cooldown') > 0) {
-    s.set('cooldown', s.get('cooldown') - 1);
+            t.右を向く(); // step
+        }`,
+      `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
+for (s.set('i', 1); s.get('i') <= ${variant}; s.set('i', s.get('i') + 1)) {
+  t.forward();
+  if (s.get('i') === 1) {
     continue;
   }
-  t.forward();
-  s.set('moved', s.get('moved') + 1);
-  s.set('cooldown', s.get('moved'));
-}
-delete s.vars['round'];
-t.turnRight();
-t.forward();
-`,
-    },
-  },
-  {
-    id: 'practiceBeginner1L7A',
-    lectureIndex: 6,
-    title: '二つの長さを渡す',
-    program: {
-      java: `
-public class Main {
-    public static void main(String[] args) {
-        Turtle t = new Turtle(1, 1); // step
-        int width = 2; // step
-        dogleg(t, width, width - 1); // caller
-        width--; // step
-        dogleg(t, width, width + 1); // caller
-    }
-    static void dogleg(Turtle t, int rise, int run) {
-        for (int i = 0; i < rise; i++) { // step
-            t.前に進む(); // step
-        }
-        t.右を向く(); // step
-        for (int i = 0; i < run; i++) { // step
-            t.前に進む(); // step
-        }
-        t.左を向く(); // step
-    }
-}
-`,
-      instrumented: `
-const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
-s.set('width', 2);
-call(dogleg, 't', 'rise', 'run')(t, s.get('width'), s.get('width') - 1);
-s.set('width', s.get('width') - 1);
-call(dogleg, 't', 'rise', 'run')(t, s.get('width'), s.get('width') + 1);
-
-function dogleg(t, rise, run) {
-  for (s.set('i', 0); s.get('i') < rise; s.set('i', s.get('i') + 1)) {
-    t.forward();
-  }
-  delete s.vars['i'];
   t.turnRight();
-  for (s.set('i', 0); s.get('i') < run; s.set('i', s.get('i') + 1)) {
-    t.forward();
-  }
-  delete s.vars['i'];
-  t.turnLeft();
 }
-`,
-    },
-  },
-  {
-    id: 'practiceBeginner1L7B',
-    lectureIndex: 6,
-    title: '戻り値で次の長さを決める',
-    program: {
-      java: `
-public class Main {
-    public static void main(String[] args) {
-        Turtle t = new Turtle(1, 1); // step
-        int next = shorten(t, 3); // step // caller
-        next = shorten(t, next); // step // caller
-        t.前に進む(); // step
-    }
-    static int shorten(Turtle t, int length) {
-        for (int i = 1; i < length; i++) { // step
-            t.前に進む(); // step
-        }
-        t.右を向く(); // step
-        return length - 1;
-    }
-}
-`,
-      instrumented: `
-const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
-s.set('next', call(shorten, 't', 'length')(t, 3));
-s.set('next', call(shorten, 't', 'length')(t, s.get('next')));
-t.forward();
-
-function shorten(t, length) {
-  for (s.set('i', 1); s.get('i') < length; s.set('i', s.get('i') + 1)) {
-    t.forward();
-  }
-  delete s.vars['i'];
-  t.turnRight();
-  return length - 1;
-}
-`,
-    },
-  },
-  {
-    id: 'practiceBeginner1L8A',
-    lectureIndex: 7,
-    title: '後ろから配列を更新する',
-    program: {
-      java: `
-public class Main {
-    public static void main(String[] args) {
-        Turtle t = new Turtle(1, 1); // step
-        int[] distances = {1, 2, 1}; // step
-        for (int index = distances.length - 1; index > 0; index--) { // step
-            distances[index - 1] += distances[index]; // step
-            for (int step = 0; step < distances[index]; step++) { // step
-                t.前に進む(); // step
+delete s.vars['i'];`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      6,
+      'ContinueUpdate',
+      '飛ばした後も回数を増やす',
+      variant,
+      `        Turtle t = new Turtle(2, 2); // step
+        int i = 0; // step
+        for (; i < ${variant}; i++) { // step
+            if (i < 1) {
+                continue;
             }
             t.右を向く(); // step
-        }
-    }
-}
-`,
-      instrumented: `
-const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
-s.set('distances', [1, 2, 1]);
-for (s.set('index', s.get('distances').length - 1); s.get('index') > 0; s.set('index', s.get('index') - 1)) {
-  s.get('distances')[s.get('index') - 1] += s.get('distances')[s.get('index')]; // step
-  for (s.set('step', 0); s.get('step') < s.get('distances')[s.get('index')]; s.set('step', s.get('step') + 1)) {
-    t.forward();
+        }`,
+      `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
+s.set('i', 0);
+for (; s.get('i') < ${variant}; s.set('i', s.get('i') + 1)) {
+  if (s.get('i') < 1) {
+    continue;
   }
-  delete s.vars['step'];
   t.turnRight();
-}
-delete s.vars['index'];
-`,
-    },
-  },
-  {
-    id: 'practiceBeginner1L8B',
-    lectureIndex: 7,
-    title: '文字列をつなぎ直す',
-    program: {
-      java: `
-public class Main {
-    public static void main(String[] args) {
-        Turtle t = new Turtle(2, 1); // step
-        String word = "ab"; // step
-        word = word + word.charAt(0); // step
-        int limit = word.length(); // step
-        for (int index = limit - 1; index >= 0; index--) { // step
-            if (word.charAt(index) == word.charAt(0)) {
-                t.前に進む(); // step
-            } else {
-                t.右を向く(); // step
-            }
-        }
-        word = word + "b"; // step
+}`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      7,
+      'LocalHelper',
+      '引数なしで呼び出す',
+      variant,
+      `        place(); // caller`,
+      `call(place)();
+
+function place() {
+  const t = new Turtle(${variant}, 1); registerDisplayRef('t', () => t); // step
+  t.turnRight();
+}`,
+      `    static void place() {
+        Turtle t = new Turtle(${variant}, 1); // step
+        t.右を向く(); // step
     }
-}
-`,
-      instrumented: `
-const t = new Turtle(2, 1); registerDisplayRef('t', () => t); // step
-s.set('word', 'ab');
-s.set('word', s.get('word') + s.get('word').charAt(0));
-s.set('limit', s.get('word').length);
-for (s.set('index', s.get('limit') - 1); s.get('index') >= 0; s.set('index', s.get('index') - 1)) {
-  if (s.get('word').charAt(s.get('index')) === s.get('word').charAt(0)) {
-    t.forward();
-  } else {
-    t.turnRight();
-  }
-}
-delete s.vars['index'];
-s.set('word', s.get('word') + 'b');
-`,
-    },
-  },
+`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      7,
+      'CoordinateParameter',
+      '一つの値を渡す',
+      variant,
+      `        place(${variant}); // caller`,
+      `call(place, 'x')(${variant});
+
+function place(x) {
+  const t = new Turtle(x, 1); registerDisplayRef('t', () => t); // step
+  t.turnLeft();
+}`,
+      `    static void place(int x) {
+        Turtle t = new Turtle(x, 1); // step
+        t.左を向く(); // step
+    }
+`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      7,
+      'SimpleReturn',
+      '戻り値を受け取る',
+      variant,
+      `        Turtle t = new Turtle(2, 2); // step
+        int result = next(${variant}); // step // caller`,
+      `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
+s.set('result', call(next, 'value')(${variant}));
+
+function next(value) {
+  return value + 1;
+}`,
+      `    static int next(int value) {
+        return value + 1;
+    }
+`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      8,
+      'ReadCell',
+      '配列の一つを読む',
+      variant,
+      `        Turtle t = new Turtle(2, 2); // step
+        int[] values = {1, 2, 3}; // step
+        int selected = values[${variant - 1}]; // step`,
+      `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
+s.set('values', [1, 2, 3]);
+s.set('selected', s.get('values')[${variant - 1}]);`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      8,
+      'ReplaceCell',
+      '配列の一つを置き換える',
+      variant,
+      `        Turtle t = new Turtle(2, 2); // step
+        int[] values = {0, 0, 0}; // step
+        values[1] = ${variant}; // step
+        int selected = values[1]; // step`,
+      `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
+s.set('values', [0, 0, 0]);
+s.get('values')[1] = ${variant}; // step
+s.set('selected', s.get('values')[1]);`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      8,
+      'StringLength',
+      '文字列の長さを読む',
+      variant,
+      `        Turtle t = new Turtle(2, 2); // step
+        String word = ${['"a"', '"ab"', '"abc"'][variant - 1]}; // step
+        int length = word.length(); // step`,
+      `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
+s.set('word', ${["'a'", "'ab'", "'abc'"][variant - 1]});
+s.set('length', s.get('word').length);`
+    )
+  ),
 ] satisfies PracticeDefinition[];

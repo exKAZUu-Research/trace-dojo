@@ -912,7 +912,7 @@ test('normal URLs reject practice and foreign membership before inserting, and r
   const renderLecture = async (): Promise<string> =>
     renderToStaticMarkup(createElement(ChakraProvider, {}, await lecture({ params: Promise.resolve(locationOnly()) })));
   const beforeInvalid = normalRows();
-  for (const problemId of ['practiceTestL1A', 'test2', 'missing', 'toString']) {
+  for (const problemId of ['practiceEasyV1TestL1ScalarUpdateV1', 'practiceTestL1A', 'test2', 'missing', 'toString']) {
     await expect(route({ params: Promise.resolve({ ...locationOnly(), problemId }) })).rejects.toThrow(
       'NEXT_NOT_FOUND'
     );
@@ -1040,6 +1040,139 @@ test('practice fails closed when its stored identity is replaced by a graded tem
   });
   expect(exerciseRows()).toEqual(before);
 });
+
+test.each(['executionResult', 'step'] as const)(
+  'practice replaces a retired %s session once and preserves its persisted history',
+  async (problemType) => {
+    const initial = await startPractice();
+    await runtimeCaller.mutation(
+      'submitRegularExercise',
+      practiceSubmission(initial, 'historical-incorrect-attempt', false)
+    );
+    const old = {
+      ...initial,
+      problemId: 'practiceTestL1A',
+      problemType,
+      traceItemIndex: problemType === 'step' ? 3 : 0,
+    };
+    sqlite
+      .prepare('UPDATE ExerciseSession SET problemId = ?, problemType = ?, traceItemIndex = ? WHERE id = ?')
+      .run(old.problemId, old.problemType, old.traceItemIndex, old.sessionId);
+    const oldRow = sqlite.prepare('SELECT * FROM ExerciseSession WHERE id = ?').get(old.sessionId);
+    const submissions = exerciseRows().submissions;
+    expect(submissions).toHaveLength(1);
+
+    const replacements = await Promise.all([startPractice(), startPractice(), startPractice()]);
+    const fresh = replacements[0];
+    expect(fresh.sessionId).not.toBe(old.sessionId);
+    expect(['practiceTestL1A', 'practiceTestL1B']).not.toContain(fresh.problemId);
+    expect(fresh).toMatchObject({ problemType: 'executionResult', traceItemIndex: 0, completed: false });
+    for (const replacement of replacements) expect(replacement).toEqual(fresh);
+    expect(await startPractice()).toEqual(fresh);
+    expect(exerciseRows().sessions).toHaveLength(2);
+    expect(exerciseRows().submissions).toEqual(submissions);
+    expect(sqlite.prepare('SELECT * FROM ExerciseSession WHERE id = ?').get(old.sessionId)).toEqual(oldRow);
+  }
+);
+
+test.each(['executionResult', 'step'] as const)(
+  'retired %s sessions reject submit, step conversion, and Next without writing',
+  async (problemType) => {
+    const initial = await startPractice();
+    await runtimeCaller.mutation(
+      'submitRegularExercise',
+      practiceSubmission(initial, 'historical-incorrect-attempt', false)
+    );
+    const old = {
+      ...initial,
+      problemId: 'practiceTestL1A',
+      problemType,
+      traceItemIndex: problemType === 'step' ? 3 : 0,
+    };
+    sqlite
+      .prepare('UPDATE ExerciseSession SET problemId = ?, problemType = ?, traceItemIndex = ? WHERE id = ?')
+      .run(old.problemId, old.problemType, old.traceItemIndex, old.sessionId);
+    const before = exerciseRows();
+    expect(before.submissions).toHaveLength(1);
+    await expect(
+      runtimeCaller.mutation('submitRegularExercise', practiceSubmission(old, 'retired-submission', false))
+    ).rejects.toMatchObject({ data: { code: 'CONFLICT' } });
+    expect(exerciseRows()).toEqual(before);
+    await expect(
+      runtimeCaller.mutation('switchRegularExerciseToStep', practiceSession(old.sessionId))
+    ).rejects.toMatchObject({ data: { code: 'CONFLICT' } });
+    expect(exerciseRows()).toEqual(before);
+    await expect(
+      runtimeCaller.mutation('nextExercise', { ...practiceSession(old.sessionId), problemFormat: 'regular' })
+    ).rejects.toMatchObject({ data: { code: 'CONFLICT' } });
+    expect(exerciseRows()).toEqual(before);
+  }
+);
+
+test.each(['practiceTestL1Unknown', 'test1', 'practiceBeginner1L1A'])(
+  'practice does not retire unknown, production, or wrong-location identity %s',
+  async (problemId) => {
+    const initial = await startPractice();
+    sqlite.prepare('UPDATE ExerciseSession SET problemId = ? WHERE id = ?').run(problemId, initial.sessionId);
+    const before = exerciseRows();
+    await expect(startPractice()).rejects.toMatchObject({ data: { code: 'INTERNAL_SERVER_ERROR' } });
+    expect(exerciseRows()).toEqual(before);
+  }
+);
+
+test.each([
+  { problemType: 'executionResult', traceItemIndex: 1 },
+  { problemType: 'step', traceItemIndex: 0 },
+  { problemType: 'unknown', traceItemIndex: 0 },
+])(
+  'practice does not skip a retired identity with invalid regular state $problemType/$traceItemIndex',
+  async (state) => {
+    const initial = await startPractice();
+    sqlite
+      .prepare('UPDATE ExerciseSession SET problemId = ?, problemType = ?, traceItemIndex = ? WHERE id = ?')
+      .run('practiceTestL1A', state.problemType, state.traceItemIndex, initial.sessionId);
+    const before = exerciseRows();
+    await expect(startPractice()).rejects.toMatchObject({ data: { code: 'CONFLICT' } });
+    expect(exerciseRows()).toEqual(before);
+  }
+);
+
+test('a retired identity cannot bypass the regular-only practice format contract', async () => {
+  const initial = await startPractice();
+  sqlite
+    .prepare('UPDATE ExerciseSession SET problemId = ?, problemFormat = ? WHERE id = ?')
+    .run('practiceTestL1A', 'fillInBlank', initial.sessionId);
+  const before = exerciseRows();
+  await expect(startPractice()).rejects.toMatchObject({ data: { code: 'INTERNAL_SERVER_ERROR' } });
+  expect(exerciseRows()).toEqual(before);
+});
+
+test.each([false, true])(
+  'a completed retired history row preserves a current session with completed=%s',
+  async (completed) => {
+    const historical = await startPractice();
+    await runtimeCaller.mutation('submitRegularExercise', practiceSubmission(historical, 'history-completion', true));
+    const current = regularDisplaySchema.parse(
+      await runtimeCaller.mutation('nextExercise', {
+        ...practiceSession(historical.sessionId),
+        problemFormat: 'regular',
+      })
+    );
+    const expected = completed
+      ? regularDisplaySchema.parse(
+          await runtimeCaller.mutation('submitRegularExercise', practiceSubmission(current, 'current-completion', true))
+        )
+      : current;
+    sqlite
+      .prepare('UPDATE ExerciseSession SET problemId = ? WHERE id = ?')
+      .run('practiceTestL1A', historical.sessionId);
+    const before = exerciseRows();
+    const gradedBefore = normalRows();
+    expect(await startPractice()).toEqual(expected);
+    expect(exerciseRows()).toEqual(before);
+    expect(normalRows()).toEqual(gradedBefore);
+  }
+);
 
 test('practice rejects another user, lecture, and expired learning period without mutation', async () => {
   const practice = await startPractice();

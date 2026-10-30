@@ -1,70 +1,68 @@
 import type { PracticeDefinition } from './types';
 
+const define = (
+  lecture: number,
+  family: string,
+  title: string,
+  variant: number,
+  java: string,
+  instrumented: string,
+  methods = ''
+): PracticeDefinition => ({
+  id: `practiceEasyV1TestL${lecture}${family}V${variant}`,
+  lectureIndex: lecture - 1,
+  title: `${title} ${variant}`,
+  program: {
+    java: `
+public class Main {
+    public static void main(String[] args) {
+${java}
+    }
+${methods}}
+`,
+    instrumented,
+  },
+});
+
 export const testPracticeDefinitions = [
-  {
-    id: 'practiceTestL1A',
-    lectureIndex: 0,
-    title: '値の更新と折り返し',
-    program: {
-      java: `
-public class Main {
-    public static void main(String[] args) {
-        int start = 2; // step
-        Turtle t = new Turtle(start, start - 1); // step
-        start += 2; // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.後に戻る(); // step
-        start -= 1; // step
-        t.左を向く(); // step
-    }
-}
-`,
-      instrumented: `
-s.set('start', 2);
-const t = new Turtle(s.get('start'), s.get('start') - 1); registerDisplayRef('t', () => t); // step
-s.set('start', s.get('start') + 2);
-t.forward();
-t.turnRight();
-t.backward();
-s.set('start', s.get('start') - 1);
-t.turnLeft();
-`,
-    },
-  },
-  {
-    id: 'practiceTestL1B',
-    lectureIndex: 0,
-    title: '参照を戻して動かす',
-    program: {
-      java: `
-public class Main {
-    public static void main(String[] args) {
-        Turtle first = new Turtle(1, 2); // step
-        Turtle second = new Turtle(4, 1); // step
-        Turtle cursor = second; // step
-        cursor.右を向く(); // step
-        cursor.後に戻る(); // step
-        cursor = first; // step
-        cursor.後に戻る(); // step
-        second = cursor; // step
-        second.左を向く(); // step
-        first.後に戻る(); // step
-    }
-}
-`,
-      instrumented: `
-const first = new Turtle(1, 2); registerDisplayRef('first', () => first); // step
-let second = new Turtle(4, 1); registerDisplayRef('second', () => second); // step
-let cursor = second; registerDisplayRef('cursor', () => cursor); // step
-cursor.turnRight();
-cursor.backward();
-cursor = first; // step
-cursor.backward();
-second = cursor; // step
-second.turnLeft();
-first.backward();
-`,
-    },
-  },
+  ...[1, 2, 3].map((variant) =>
+    define(
+      1,
+      'HeadingOnly',
+      '向きだけを変える',
+      variant,
+      `        Turtle t = new Turtle(${variant}, 2); // step
+        t.左を向く(); // step`,
+      `const t = new Turtle(${variant}, 2); registerDisplayRef('t', () => t); // step
+t.turnLeft();`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      1,
+      'ScalarUpdate',
+      '値を一度更新する',
+      variant,
+      `        Turtle t = new Turtle(${variant}, 2); // step
+        int value = ${variant}; // step
+        value--; // step`,
+      `const t = new Turtle(${variant}, 2); registerDisplayRef('t', () => t); // step
+s.set('value', ${variant});
+s.set('value', s.get('value') - 1);`
+    )
+  ),
+  ...[1, 2, 3].map((variant) =>
+    define(
+      1,
+      'SingleAlias',
+      '同じ亀を別の名前で動かす',
+      variant,
+      `        Turtle t = new Turtle(${variant}, 2); // step
+        Turtle cursor = t; // step
+        cursor.後に戻る(); // step`,
+      `const t = new Turtle(${variant}, 2); registerDisplayRef('t', () => t); // step
+const cursor = t; registerDisplayRef('cursor', () => cursor); // step
+cursor.backward();`
+    )
+  ),
 ] satisfies PracticeDefinition[];

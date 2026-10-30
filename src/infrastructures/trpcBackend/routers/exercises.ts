@@ -22,6 +22,7 @@ import {
 
 import { getPracticeProblemIds } from '@/problems/practice/definitions';
 import { instantiatePracticeProblem } from '@/problems/practice/instantiatePracticeProblem';
+import { isRetiredPracticeProblem } from '@/problems/practice/retiredDefinitions';
 
 type LearningMode = 'challenge' | 'practice';
 const learningModeSchema = z.enum(['challenge', 'practice']).default('challenge');
@@ -251,6 +252,7 @@ const ownedSession = (
     session.problemFormat !== format
   )
     throw new TRPCError({ code: 'UNAUTHORIZED' });
+  if (isRetiredRegularPractice(session)) throw new TRPCError({ code: 'CONFLICT' });
   validateMembership(session);
   if (format === 'regular') {
     validateRegularState(session);
@@ -292,14 +294,29 @@ const startOrResume = (
         eq(exerciseSessions.courseId, courseId),
         eq(exerciseSessions.lectureId, lectureId),
         eq(exerciseSessions.learningMode, mode),
-        eq(exerciseSessions.problemFormat, format),
+        mode === 'practice' ? undefined : eq(exerciseSessions.problemFormat, format),
         start ? gte(exerciseSessions.createdAt, start) : undefined
       )
     )
     .orderBy(desc(exerciseSessions.id))
     .all();
-  const selected = rows.find((row) => row.completedAt === null) ?? rows[0];
+  const selected =
+    mode === 'practice'
+      ? rows
+          .toSorted((left, right) => Number(Boolean(left.completedAt)) - Number(Boolean(right.completedAt)))
+          .find((row) => !isRetiredRegularPractice(row))
+      : (rows.find((row) => row.completedAt === null) ?? rows[0]);
   return selected ? toDisplay(selected, format) : createFromCandidates(userId, courseId, lectureId, format, mode);
+};
+const isRetiredRegularPractice = (row: ExerciseSession): boolean => {
+  if (
+    row.learningMode !== 'practice' ||
+    row.problemFormat !== 'regular' ||
+    !isRetiredPracticeProblem(row.problemId, row.courseId, row.lectureId)
+  )
+    return false;
+  validateRegularState(row);
+  return true;
 };
 const createFromCandidates = (
   userId: string,

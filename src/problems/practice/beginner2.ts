@@ -1,977 +1,953 @@
 import type { PracticeDefinition } from './types';
 
 export const beginner2PracticeDefinitions = [
-  {
-    id: 'practiceBeginner2L1A',
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L1IndependentTurnsV${index + 1}`,
     lectureIndex: 0,
-    title: '参照をつなぎ替える',
-    program: {
-      java: `
+    title: `それぞれの向き ${index + 1}`,
+    program: independentTurns(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L1AliasTurnV${index + 1}`,
+    lectureIndex: 0,
+    title: `同じオブジェクト ${index + 1}`,
+    program: aliasTurn(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L1ReferenceTargetV${index + 1}`,
+    lectureIndex: 0,
+    title: `参照先の変更 ${index + 1}`,
+    program: referenceTarget(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L2FieldReadV${index + 1}`,
+    lectureIndex: 1,
+    title: `フィールドの値 ${index + 1}`,
+    program: fieldRead(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L2InstanceMethodV${index + 1}`,
+    lectureIndex: 1,
+    title: `メソッドの呼び出し ${index + 1}`,
+    program: instanceMethod(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L2ConstructorFieldV${index + 1}`,
+    lectureIndex: 1,
+    title: `コンストラクタの値 ${index + 1}`,
+    program: constructorField(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L3PublicFieldV${index + 1}`,
+    lectureIndex: 2,
+    title: `公開フィールド ${index + 1}`,
+    program: publicField(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L3AccessorV${index + 1}`,
+    lectureIndex: 2,
+    title: `値の設定と取得 ${index + 1}`,
+    program: accessor(value),
+  })),
+  ...[-1, 1, 2].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L3GuardedSetterV${index + 1}`,
+    lectureIndex: 2,
+    title: `条件のある設定 ${index + 1}`,
+    program: guardedSetter(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L4StaticCallV${index + 1}`,
+    lectureIndex: 3,
+    title: `静的メソッド ${index + 1}`,
+    program: staticCall(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L4StaticFieldV${index + 1}`,
+    lectureIndex: 3,
+    title: `静的フィールド ${index + 1}`,
+    program: staticField(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L4SharedFieldV${index + 1}`,
+    lectureIndex: 3,
+    title: `共有される値 ${index + 1}`,
+    program: sharedField(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L5InheritedMethodV${index + 1}`,
+    lectureIndex: 4,
+    title: `継承したメソッド ${index + 1}`,
+    program: inheritedMethod(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L5OverrideMethodV${index + 1}`,
+    lectureIndex: 4,
+    title: `上書きしたメソッド ${index + 1}`,
+    program: overrideMethod(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L5BaseReferenceV${index + 1}`,
+    lectureIndex: 4,
+    title: `基本クラスの参照 ${index + 1}`,
+    program: baseReference(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L6PackageValueV${index + 1}`,
+    lectureIndex: 5,
+    title: `パッケージのクラス ${index + 1}`,
+    program: packageValue(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L6OverloadCallV${index + 1}`,
+    lectureIndex: 5,
+    title: `引数のある呼び出し ${index + 1}`,
+    program: overloadCall(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L6OverloadDispatchV${index + 1}`,
+    lectureIndex: 5,
+    title: `型と呼び出し ${index + 1}`,
+    program: overloadDispatch(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L7TrySuccessV${index + 1}`,
+    lectureIndex: 6,
+    title: `try の中の処理 ${index + 1}`,
+    program: trySuccess(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L7ExceptionSkipV${index + 1}`,
+    lectureIndex: 6,
+    title: `例外と後続の処理 ${index + 1}`,
+    program: exceptionSkip(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L7CustomExceptionV${index + 1}`,
+    lectureIndex: 6,
+    title: `独自の例外 ${index + 1}`,
+    program: customException(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L8CellReadV${index + 1}`,
+    lectureIndex: 7,
+    title: `二次元配列の要素 ${index + 1}`,
+    program: cellRead(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L8CellUpdateV${index + 1}`,
+    lectureIndex: 7,
+    title: `二次元配列の更新 ${index + 1}`,
+    program: cellUpdate(value),
+  })),
+  ...[1, 2, 3].map((value, index) => ({
+    id: `practiceEasyV1Beginner2L8LayerReadV${index + 1}`,
+    lectureIndex: 7,
+    title: `三次元配列の要素 ${index + 1}`,
+    program: layerRead(value),
+  })),
+] satisfies PracticeDefinition[];
+
+function independentTurns(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
 public class Main {
   public static void main(String[] args) {
-    Turtle first = new Turtle(1, 1); // step
-    Turtle second = new Turtle(4, 1); // step
-    Turtle saved = first; // step
-    first = second; // step
-    first.右を向く(); // step
-    saved.前に進む(); // step
-    second.前に進む(); // step
-    saved.右を向く(); // step
-    first = saved; // step
-    first.前に進む(); // step
-    second.左を向く(); // step
+    Turtle a = new Turtle(${value}, 1); // step
+    Turtle b = new Turtle(${value}, 3); // step
+    a.右を向く(); // step
+    b.左を向く(); // step
   }
 }
+
 `,
-      instrumented: `
-let first = new Turtle(1, 1); registerDisplayRef('first', () => first); // step
-const second = new Turtle(4, 1); registerDisplayRef('second', () => second); // step
-const saved = first; registerDisplayRef('saved', () => saved); // step
-first = second; // step
-first.右を向く(); // step
-saved.前に進む(); // step
-second.前に進む(); // step
-saved.右を向く(); // step
-first = saved; // step
-first.前に進む(); // step
-second.左を向く(); // step
+    instrumented: `
+function main() {
+  const a = new Turtle(${value}, 1); registerDisplayRef('a', () => a); // step
+  const b = new Turtle(${value}, 3); registerDisplayRef('b', () => b); // step
+  a.右を向く(); // step
+  b.左を向く(); // step
+}
+
+main();
 `,
-    },
-  },
-  {
-    id: 'practiceBeginner2L1B',
-    lectureIndex: 0,
-    title: '残る参照と手放す参照',
-    program: {
-      java: `
+  };
+}
+
+function aliasTurn(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
 public class Main {
   public static void main(String[] args) {
-    Turtle active = new Turtle(2, 2); // step
-    Turtle saved = active; // step
-    active.前に進む(); // step
-    active = new Turtle(5, 1); // step
-    active.左を向く(); // step
-    saved.右を向く(); // step
-    active.前に進む(); // step
-    active.remove(); // step
-    active = saved; // step
-    saved.前に進む(); // step
+    Turtle t = new Turtle(${value}, 1); // step
+    Turtle alias = t; // step
+    alias.右を向く(); // step
+    t.前に進む(); // step
+  }
+}
+
+`,
+    instrumented: `
+function main() {
+  const t = new Turtle(${value}, 1); registerDisplayRef('t', () => t); // step
+  const alias = t; registerDisplayRef('alias', () => alias); // step
+  alias.右を向く(); // step
+  t.前に進む(); // step
+}
+
+main();
+`,
+  };
+}
+
+function referenceTarget(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle a = new Turtle(${value}, 1); // step
+    Turtle b = new Turtle(${value}, 3); // step
+    Turtle active = a; // step
+    active = b; // step
     active.後に戻る(); // step
   }
 }
+
 `,
-      instrumented: `
-let active = new Turtle(2, 2); registerDisplayRef('active', () => active); // step
-const saved = active; registerDisplayRef('saved', () => saved); // step
-active.前に進む(); // step
-active = new Turtle(5, 1); // step
-active.左を向く(); // step
-saved.右を向く(); // step
-active.前に進む(); // step
-active.remove(); // step
-active = saved; // step
-saved.前に進む(); // step
-active.後に戻る(); // step
-`,
-    },
-  },
-  {
-    id: 'practiceBeginner2L2A',
-    lectureIndex: 1,
-    title: '別々にたまる歩数',
-    program: {
-      java: `
-public class Main {
-  public static void main(String[] args) {
-    Walker a = new Walker(1); // caller
-    Walker b = new Walker(4); // caller
-    a.walk(2); // caller
-    b.walk(a.total); // caller
-    a.walk(1); // caller
-    b.total = a.total - b.total; // step
-    b.walk(b.total); // caller
-  }
-}
-class Walker {
-  Turtle t;
-  int total = 0;
-  Walker(int x) {
-    this.t = new Turtle(x, 0); // step
-  }
-  void walk(int amount) {
-    for (int i = 0; i < amount; i++) { // step
-      this.t.前に進む(); // step
-      this.total++; // step
-    }
-  }
-}
-`,
-      instrumented: `
+    instrumented: `
 function main() {
-  const a = call(Walker, 'x')(1); registerDisplayRef('a', () => a);
-  const b = call(Walker, 'x')(4); registerDisplayRef('b', () => b);
-  call(a.walk.bind(a), 'amount')(2);
-  call(b.walk.bind(b), 'amount')(a.total);
-  call(a.walk.bind(a), 'amount')(1);
-  b.total = a.total - b.total; // step
-  call(b.walk.bind(b), 'amount')(b.total);
+  const a = new Turtle(${value}, 1); registerDisplayRef('a', () => a); // step
+  const b = new Turtle(${value}, 3); registerDisplayRef('b', () => b); // step
+  let active = a; registerDisplayRef('active', () => active); // step
+  active = b; // step
+  active.後に戻る(); // step
 }
-class Walker {
-  total = 0;
-  constructor(x) {
-    this.t = new Turtle(x, 0); // step
-  }
-  walk(amount) {
-    for (s.set('i', 0); s.get('i') < amount; s.set('i', s.get('i') + 1)) {
-      this.t.前に進む(); // step
-      this.total++; // step
-    }
-    delete s.vars['i'];
-  }
-}
+
 main();
 `,
-    },
-  },
-  {
-    id: 'practiceBeginner2L2B',
-    lectureIndex: 1,
-    title: '作るときに決まる残り回数',
-    program: {
-      java: `
+  };
+}
+
+function fieldRead(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
 public class Main {
   public static void main(String[] args) {
-    Ticket a = new Ticket(1, 3); // caller
-    a.use(); // caller
-    Ticket b = new Ticket(4, a.remaining); // caller
-    a.use(); // caller
-    b.use(); // caller
-    b.use(); // caller
+    Box b = new Box(); // caller
+    int x = b.value; // step
+    Turtle t = new Turtle(x, 0); // step
   }
 }
-class Ticket {
-  Turtle t;
-  int remaining;
-  Ticket(int x, int limit) {
-    this.t = new Turtle(x, 1); // step
-    this.remaining = limit - 1; // step
-  }
-  void use() {
-    if (this.remaining > 0) {
-      this.t.前に進む(); // step
-      this.remaining--; // step
-    } else {
-      this.t.右を向く(); // step
-    }
-  }
+class Box {
+  int value = ${value}; // step
 }
 `,
-      instrumented: `
+    instrumented: `
 function main() {
-  const a = call(Ticket, 'x', 'limit')(1, 3); registerDisplayRef('a', () => a);
-  call(a.use.bind(a))();
-  const b = call(Ticket, 'x', 'limit')(4, a.remaining); registerDisplayRef('b', () => b);
-  call(a.use.bind(a))();
-  call(b.use.bind(b))();
-  call(b.use.bind(b))();
+  const b = call(Box)(); registerDisplayRef('b', () => b);
+  s.set('x', b.value);
+  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
 }
-class Ticket {
-  constructor(x, limit) {
-    this.t = new Turtle(x, 1); // step
-    this.remaining = limit - 1; // step
-  }
-  use() {
-    if (this.remaining > 0) {
-      this.t.前に進む(); // step
-      this.remaining--; // step
-    } else {
-      this.t.右を向く(); // step
-    }
-  }
-}
-main();
-`,
-    },
-  },
-  {
-    id: 'practiceBeginner2L3A',
-    lectureIndex: 2,
-    title: '予算の範囲だけ進む',
-    program: {
-      java: `
-public class Main {
-  public static void main(String[] args) {
-    Budget b = new Budget(); // caller
-    b.spend(2); // caller
-    b.spend(2); // caller
-    b.spend(1); // caller
-  }
-}
-class Budget {
-  private Turtle t = new Turtle(1, 1); // step
-  private int remaining = 3; // step
-  public void spend(int amount) {
-    if (amount > 0 && amount <= this.remaining) {
-      this.remaining -= amount; // step
-      for (int i = 0; i < amount; i++) { // step
-        this.t.前に進む(); // step
-      }
-    } else {
-      this.t.右を向く(); // step
-    }
-  }
-}
-`,
-      instrumented: `
-function main() {
-  const b = call(Budget)(); registerDisplayRef('b', () => b);
-  call(b.spend.bind(b), 'amount')(2);
-  call(b.spend.bind(b), 'amount')(2);
-  call(b.spend.bind(b), 'amount')(1);
-}
-class Budget {
+class Box {
   constructor() {
-    this.t = new Turtle(1, 1); // step
-    this.remaining = 3; // step
-  }
-  spend(amount) {
-    if (amount > 0 && amount <= this.remaining) {
-      this.remaining -= amount; // step
-      for (s.set('i', 0); s.get('i') < amount; s.set('i', s.get('i') + 1)) {
-        this.t.前に進む(); // step
-      }
-      delete s.vars['i'];
-    } else {
-      this.t.右を向く(); // step
-    }
+    this.value = ${value}; // step
   }
 }
 main();
 `,
-    },
-  },
-  {
-    id: 'practiceBeginner2L3B',
-    lectureIndex: 2,
-    title: '公開フィールドと消費',
-    program: {
-      java: `
+  };
+}
+
+function instanceMethod(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
 public class Main {
   public static void main(String[] args) {
-    Meter m = new Meter(); // caller
-    m.units = 2; // step
-    m.consume(); // caller
-    m.units += 1; // step
-    m.consume(); // caller
-    m.consume(); // caller
+    Box b = new Box(); // caller
+    b.increase(); // caller
+    int x = b.value; // step
+    Turtle t = new Turtle(x, 0); // step
   }
 }
-class Meter {
-  Turtle t = new Turtle(1, 1); // step
-  int units = 0; // step
-  void consume() {
-    while (this.units > 0) {
-      this.t.前に進む(); // step
-      this.units--; // step
-    }
-    this.t.右を向く(); // step
+class Box {
+  int value = ${value}; // step
+  void increase() {
+    this.value++; // step
   }
 }
 `,
-      instrumented: `
+    instrumented: `
 function main() {
-  const m = call(Meter)(); registerDisplayRef('m', () => m);
-  m.units = 2; // step
-  call(m.consume.bind(m))();
-  m.units += 1; // step
-  call(m.consume.bind(m))();
-  call(m.consume.bind(m))();
+  const b = call(Box)(); registerDisplayRef('b', () => b);
+  call(b.increase.bind(b))();
+  s.set('x', b.value);
+  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
 }
-class Meter {
+class Box {
   constructor() {
-    this.t = new Turtle(1, 1); // step
-    this.units = 0; // step
+    this.value = ${value}; // step
   }
-  consume() {
-    while (this.units > 0) {
-      this.t.前に進む(); // step
-      this.units--; // step
-    }
-    this.t.右を向く(); // step
+  increase() {
+    this.value++; // step
   }
 }
 main();
 `,
-    },
-  },
-  {
-    id: 'practiceBeginner2L4A',
-    lectureIndex: 3,
-    title: '静的メソッドから残りを返す',
-    program: {
-      java: `
+  };
+}
+
+function constructorField(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
 public class Main {
   public static void main(String[] args) {
-    Turtle a = new Turtle(1, 1); // step
-    Turtle b = new Turtle(4, 1); // step
-    int remaining = Relay.spend(a, 3); // step // caller
-    remaining = Relay.spend(b, remaining + 1); // step // caller
-    remaining = Relay.spend(a, remaining); // step // caller
+    Box b = new Box(${value}); // caller
+    int x = b.value; // step
+    Turtle t = new Turtle(x, 0); // step
   }
 }
-class Relay {
-  static int spend(Turtle t, int remaining) {
-    while (remaining > 1) {
-      t.前に進む(); // step
-      remaining--; // step
-    }
-    return remaining;
+class Box {
+  int value;
+  Box(int value) {
+    this.value = value; // step
   }
 }
 `,
-      instrumented: `
+    instrumented: `
 function main() {
-  const a = new Turtle(1, 1); registerDisplayRef('a', () => a); // step
-  const b = new Turtle(4, 1); registerDisplayRef('b', () => b); // step
-  s.set('remaining', call(Relay.spend, 't', 'remaining')(a, 3));
-  s.set('remaining', call(Relay.spend, 't', 'remaining')(b, s.get('remaining') + 1));
-  s.set('remaining', call(Relay.spend, 't', 'remaining')(a, s.get('remaining')));
+  const b = call(Box, 'value')(${value}); registerDisplayRef('b', () => b);
+  s.set('x', b.value);
+  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
 }
-class Relay {
-  static spend(t, remaining) {
-    while (s.get('remaining') > 1) {
-      t.前に進む(); // step
-      s.set('remaining', s.get('remaining') - 1);
-    }
-    return s.get('remaining');
+class Box {
+  constructor(value) {
+    this.value = value; // step
   }
 }
 main();
 `,
-    },
-  },
-  {
-    id: 'practiceBeginner2L4B',
-    lectureIndex: 3,
-    title: '共有カウンタと各自の距離',
-    program: {
-      java: `
+  };
+}
+
+function publicField(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
 public class Main {
   public static void main(String[] args) {
-    Visitor a = new Visitor(1); // caller
-    Visitor b = new Visitor(4); // caller
-    a.visit(); // caller
-    b.visit(); // caller
-    a.visit(); // caller
-    int count = Visitor.visits; // step
+    Box b = new Box(); // caller
+    b.value = ${value}; // step
+    Turtle t = new Turtle(b.value, 0); // step
   }
 }
-class Visitor {
-  static int visits = 0;
-  int distance = 0;
-  Turtle t;
-  Visitor(int x) {
-    this.t = new Turtle(x, 0); // step
-  }
-  void visit() {
-    Visitor.visits++; // step
-    this.distance = Visitor.visits - this.distance; // step
-    for (int i = 0; i < this.distance; i++) { // step
-      this.t.前に進む(); // step
-    }
-  }
+class Box {
+  public int value = 0; // step
 }
 `,
-      instrumented: `
+    instrumented: `
 function main() {
-  const a = call(Visitor, 'x')(1); registerDisplayRef('a', () => a);
-  const b = call(Visitor, 'x')(4); registerDisplayRef('b', () => b);
-  call(a.visit.bind(a))();
-  call(b.visit.bind(b))();
-  call(a.visit.bind(a))();
-  s.set('count', Visitor.visits);
+  const b = call(Box)(); registerDisplayRef('b', () => b);
+  b.value = ${value}; // step
+  const t = new Turtle(b.value, 0); registerDisplayRef('t', () => t); // step
 }
-class Visitor {
-  static visits = 0;
-  distance = 0;
-  constructor(x) {
-    this.t = new Turtle(x, 0); // step
-  }
-  visit() {
-    Visitor.visits++; // step
-    this.distance = Visitor.visits - this.distance; // step
-    for (s.set('i', 0); s.get('i') < this.distance; s.set('i', s.get('i') + 1)) {
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-main();
-`,
-    },
-  },
-  {
-    id: 'practiceBeginner2L5A',
-    lectureIndex: 4,
-    title: '継承した残り歩数',
-    program: {
-      java: `
-public class Main {
-  public static void main(String[] args) {
-    Corner c = new Corner(); // caller
-    c.advance(); // caller
-    c.refill(); // caller
-    c.advance(); // caller
-  }
-}
-class Supply {
-  Turtle t = new Turtle(1, 1); // step
-  int remaining = 1; // step
-  void advance() {
-    while (this.remaining > 0) {
-      this.t.前に進む(); // step
-      this.remaining--; // step
-    }
-  }
-}
-class Corner extends Supply {
-  void refill() {
-    this.remaining += 2; // step
-    this.t.右を向く(); // step
-  }
-}
-`,
-      instrumented: `
-function main() {
-  const c = call(Corner)(); registerDisplayRef('c', () => c);
-  call(c.advance.bind(c))();
-  call(c.refill.bind(c))();
-  call(c.advance.bind(c))();
-}
-class Supply {
+class Box {
   constructor() {
-    this.t = new Turtle(1, 1); // step
-    this.remaining = 1; // step
-  }
-  advance() {
-    while (this.remaining > 0) {
-      this.t.前に進む(); // step
-      this.remaining--; // step
-    }
-  }
-}
-class Corner extends Supply {
-  refill() {
-    this.remaining += 2; // step
-    this.t.右を向く(); // step
+    this.value = 0; // step
   }
 }
 main();
 `,
-    },
-  },
-  {
-    id: 'practiceBeginner2L5B',
-    lectureIndex: 4,
-    title: '基本動作の前後に処理する',
-    program: {
-      java: `
+  };
+}
+
+function accessor(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
 public class Main {
   public static void main(String[] args) {
-    Turning c = new Turning(); // caller
-    c.move(); // caller
-    c.move(); // caller
+    Box b = new Box(); // caller
+    b.setValue(${value}); // caller
+    int x = b.getValue(); // step // caller
+    Turtle t = new Turtle(x, 0); // step
   }
 }
-class Counted {
-  Turtle t = new Turtle(2, 2); // step
-  int moves = 0; // step
-  void move() {
-    this.t.前に進む(); // step
-    this.moves++; // step
+class Box {
+  private int value = 3; // step
+  public void setValue(int value) {
+    this.value = value; // step
   }
-}
-class Turning extends Counted {
-  @Override void move() {
-    if (this.moves == 0) {
-      this.t.右を向く(); // step
-    }
-    super.move(); // caller
-    if (this.moves == 2) {
-      this.t.左を向く(); // step
-    }
+  public int getValue() {
+    return this.value;
   }
 }
 `,
-      instrumented: `
+    instrumented: `
 function main() {
-  const c = call(Turning)(); registerDisplayRef('c', () => c);
-  call(c.move.bind(c))();
-  call(c.move.bind(c))();
+  const b = call(Box)(); registerDisplayRef('b', () => b);
+  call(b.setValue.bind(b), 'value')(${value});
+  s.set('x', call(b.getValue.bind(b))());
+  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
 }
-class Counted {
+class Box {
   constructor() {
-    this.t = new Turtle(2, 2); // step
-    this.moves = 0; // step
+    this.value = 3; // step
   }
-  move() {
-    this.t.前に進む(); // step
-    this.moves++; // step
+  setValue(value) {
+    this.value = value; // step
   }
-}
-class Turning extends Counted {
-  move() {
-    if (this.moves == 0) {
-      this.t.右を向く(); // step
-    }
-    call(super.move.bind(this))();
-    if (this.moves == 2) {
-      this.t.左を向く(); // step
-    }
+  getValue() {
+    return this.value;
   }
 }
 main();
 `,
-    },
-  },
-  {
-    id: 'practiceBeginner2L5C',
-    lectureIndex: 4,
-    title: '参照先で変わる動作',
-    program: {
-      java: `
+  };
+}
+
+function guardedSetter(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
 public class Main {
   public static void main(String[] args) {
-    Action first = new Forward(); // caller
-    Action second = new Sideways(); // caller
-    Turtle t = new Turtle(1, 1); // step
-    first.apply(t); // caller
-    Action saved = first; // step
-    first = second; // step
-    first.apply(t); // caller
-    saved.apply(t); // caller
-    second.apply(t); // caller
+    Box b = new Box(); // caller
+    b.setValue(${value}); // caller
+    int x = b.getValue(); // step // caller
+    Turtle t = new Turtle(x, 0); // step
   }
 }
-class Action {
-  void apply(Turtle t) { }
-}
-class Forward extends Action {
-  @Override void apply(Turtle t) {
-    t.前に進む(); // step
+class Box {
+  private int value = 3; // step
+  public void setValue(int value) {
+    if (value >= 0) {
+      this.value = value; // step
+    }
   }
-}
-class Sideways extends Action {
-  @Override void apply(Turtle t) {
-    t.右を向く(); // step
-    t.前に進む(); // step
-    t.左を向く(); // step
+  public int getValue() {
+    return this.value;
   }
 }
 `,
-      instrumented: `
+    instrumented: `
 function main() {
-  let first = call(Forward)(); registerDisplayRef('first', () => first);
-  const second = call(Sideways)(); registerDisplayRef('second', () => second);
-  const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
-  call(first.apply.bind(first), 't')(t);
-  const saved = first; registerDisplayRef('saved', () => saved); // step
-  first = second; // step
-  call(first.apply.bind(first), 't')(t);
-  call(saved.apply.bind(saved), 't')(t);
-  call(second.apply.bind(second), 't')(t);
+  const b = call(Box)(); registerDisplayRef('b', () => b);
+  call(b.setValue.bind(b), 'value')(${value});
+  s.set('x', call(b.getValue.bind(b))());
+  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
 }
-class Action {
-  apply(t) { }
-}
-class Forward extends Action {
-  apply(t) {
-    t.前に進む(); // step
+class Box {
+  constructor() {
+    this.value = 3; // step
   }
-}
-class Sideways extends Action {
-  apply(t) {
-    t.右を向く(); // step
-    t.前に進む(); // step
-    t.左を向く(); // step
+  setValue(value) {
+    if (value >= 0) {
+      this.value = value; // step
+    }
+  }
+  getValue() {
+    return this.value;
   }
 }
 main();
 `,
-    },
-  },
-  {
-    id: 'practiceBeginner2L6A',
-    lectureIndex: 5,
-    title: 'パッケージの値を組み合わせる',
-    program: {
-      java: `
+  };
+}
+
+function staticCall(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    int x = Coordinate.next(${value}); // step // caller
+    Turtle t = new Turtle(x, 0); // step
+  }
+}
+class Coordinate {
+  static int next(int value) {
+    return value + 1;
+  }
+}
+`,
+    instrumented: `
+function main() {
+  s.set('x', call(Coordinate.next, 'value')(${value}));
+  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
+}
+class Coordinate {
+  static next(value) {
+    return value + 1;
+  }
+}
+main();
+`,
+  };
+}
+
+function staticField(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Settings.value = ${value}; // step
+    int x = Settings.value; // step
+    Turtle t = new Turtle(x, 0); // step
+  }
+}
+class Settings {
+  static int value = 0;
+}
+`,
+    instrumented: `
+function main() {
+  Settings.value = ${value}; // step
+  s.set('x', Settings.value);
+  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
+}
+class Settings {
+  static value = 0;
+}
+main();
+`,
+  };
+}
+
+function sharedField(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Settings a = new Settings(); // caller
+    Settings b = new Settings(); // caller
+    a.value = ${value}; // step
+    int x = b.value; // step
+    Turtle t = new Turtle(x, 0); // step
+  }
+}
+class Settings {
+  static int value = 0;
+}
+`,
+    instrumented: `
+function main() {
+  const a = call(Settings)(); registerDisplayRef('a', () => a);
+  const b = call(Settings)(); registerDisplayRef('b', () => b);
+  Settings.value = ${value}; // step
+  s.set('x', Settings.value);
+  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
+}
+class Settings {
+  static value = 0;
+}
+main();
+`,
+  };
+}
+
+function inheritedMethod(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Child b = new Child(); // caller
+    int x = b.getValue(); // step // caller
+    Turtle t = new Turtle(x, 0); // step
+  }
+}
+class Parent {
+  int getValue() {
+    return ${value};
+  }
+}
+class Child extends Parent { }
+`,
+    instrumented: `
+function main() {
+  const b = call(Child)(); registerDisplayRef('b', () => b);
+  s.set('x', call(b.getValue.bind(b))());
+  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
+}
+class Parent {
+  getValue() {
+    return ${value};
+  }
+}
+class Child extends Parent { }
+main();
+`,
+  };
+}
+
+function overrideMethod(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Child b = new Child(); // caller
+    int x = b.getValue(); // step // caller
+    Turtle t = new Turtle(x, 0); // step
+  }
+}
+class Parent {
+  int getValue() {
+    return 0;
+  }
+}
+class Child extends Parent {
+  @Override int getValue() {
+    return ${value};
+  }
+}
+`,
+    instrumented: `
+function main() {
+  const b = call(Child)(); registerDisplayRef('b', () => b);
+  s.set('x', call(b.getValue.bind(b))());
+  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
+}
+class Parent {
+  getValue() {
+    return 0;
+  }
+}
+class Child extends Parent {
+  getValue() {
+    return ${value};
+  }
+}
+main();
+`,
+  };
+}
+
+function baseReference(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Parent b = new Child(); // caller
+    int x = b.getValue(); // step // caller
+    Turtle t = new Turtle(x, 0); // step
+  }
+}
+class Parent {
+  int getValue() {
+    return 0;
+  }
+}
+class Child extends Parent {
+  @Override int getValue() {
+    return ${value};
+  }
+}
+`,
+    instrumented: `
+function main() {
+  const b = call(Child)(); registerDisplayRef('b', () => b);
+  s.set('x', call(b.getValue.bind(b))());
+  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
+}
+class Parent {
+  getValue() {
+    return 0;
+  }
+}
+class Child extends Parent {
+  getValue() {
+    return ${value};
+  }
+}
+main();
+`,
+  };
+}
+
+function packageValue(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
 // Main.java
-import route.Distance;
+import coordinates.Coordinate;
 public class Main {
   public static void main(String[] args) {
-    Turtle t = new Turtle(1, 1); // step
-    int steps = Distance.after(1); // step // caller
-    for (int i = 0; i < steps; i++) { // step
-      t.前に進む(); // step
-    }
-    t.右を向く(); // step
-    steps = route.Distance.after(steps); // step // caller
-    for (int i = 0; i < steps; i++) { // step
-      t.前に進む(); // step
-    }
+    int x = Coordinate.getValue(); // step // caller
+    Turtle t = new Turtle(x, 0); // step
   }
 }
-// route/Distance.java
-package route;
-public class Distance {
-  public static int after(int used) {
-    return Limits.total - used;
+// coordinates/Coordinate.java
+package coordinates;
+public class Coordinate {
+  public static int getValue() {
+    return ${value};
   }
-}
-// route/Limits.java
-package route;
-class Limits {
-  static int total = 3;
 }
 `,
-      instrumented: `
+    instrumented: `
 function main() {
-  const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
-  s.set('steps', call(Distance.after, 'used')(1));
-  for (s.set('i', 0); s.get('i') < s.get('steps'); s.set('i', s.get('i') + 1)) {
-    t.前に進む(); // step
-  }
-  delete s.vars['i'];
-  t.右を向く(); // step
-  s.set('steps', call(Distance.after, 'used')(s.get('steps')));
-  for (s.set('i', 0); s.get('i') < s.get('steps'); s.set('i', s.get('i') + 1)) {
-    t.前に進む(); // step
-  }
-  delete s.vars['i'];
+  s.set('x', call(Coordinate.getValue)());
+  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
 }
-class Distance {
-  static after(used) {
-    return Limits.total - used;
-  }
-}
-class Limits {
-  static total = 3;
-}
-main();
-`,
-    },
-  },
-  {
-    id: 'practiceBeginner2L6B',
-    lectureIndex: 5,
-    title: '引数の数と残る歩数',
-    program: {
-      java: `
-public class Main {
-  public static void main(String[] args) {
-    Splitter s = new Splitter(); // caller
-    s.move(1, 2); // caller
-    s.move(1); // caller
-  }
-}
-class Splitter {
-  Turtle t = new Turtle(1, 1); // step
-  void move(int first, int second) {
-    this.move(first); // caller
-    this.t.右を向く(); // step
-    this.move(second - first); // caller
-  }
-  void move(int steps) {
-    while (steps > 0) {
-      this.t.前に進む(); // step
-      steps--; // step
-    }
-    this.t.左を向く(); // step
-  }
-}
-`,
-      instrumented: `
-function main() {
-  const splitter = call(Splitter)(); registerDisplayRef('s', () => splitter);
-  call(splitter.moveTwo.bind(splitter), 'first', 'second')(1, 2);
-  call(splitter.moveOne.bind(splitter), 'steps')(1);
-}
-class Splitter {
-  constructor() {
-    this.t = new Turtle(1, 1); // step
-  }
-  moveTwo(first, second) {
-    call(this.moveOne.bind(this), 'steps')(first);
-    this.t.右を向く(); // step
-    call(this.moveOne.bind(this), 'steps')(second - first);
-  }
-  moveOne(steps) {
-    while (s.get('steps') > 0) {
-      this.t.前に進む(); // step
-      s.set('steps', s.get('steps') - 1);
-    }
-    this.t.左を向く(); // step
+class Coordinate {
+  static getValue() {
+    return ${value};
   }
 }
 main();
 `,
-    },
-  },
-  {
-    id: 'practiceBeginner2L6C',
-    lectureIndex: 5,
-    title: '宣言した型と実際の型',
-    program: {
-      java: `
+  };
+}
+
+function overloadCall(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t = new Turtle(2, 1); // step
-    Token token = new SpecialToken(); // caller
-    SpecialToken special = new SpecialToken(); // caller
-    Router base = new Alternate(); // caller
-    base.route(t, token); // caller
-    base.route(t, special); // caller
-    base.route(t, token); // caller
+    Parent b = new Parent(); // caller
+    int x = b.getValue(${value}); // step // caller
+    Turtle t = new Turtle(x, 0); // step
   }
 }
-class Token { }
-class SpecialToken extends Token { }
-class Router {
-  void route(Turtle t, Token token) {
-    t.前に進む(); // step
+class Parent {
+  int getValue() {
+    return 0;
   }
-  void route(Turtle t, SpecialToken token) {
-    t.左を向く(); // step
-    this.route(t, (Token) token); // caller
-  }
-}
-class Alternate extends Router {
-  @Override void route(Turtle t, Token token) {
-    t.右を向く(); // step
-    t.前に進む(); // step
+  int getValue(int value) {
+    return value;
   }
 }
 `,
-      instrumented: `
+    instrumented: `
 function main() {
-  const t = new Turtle(2, 1); registerDisplayRef('t', () => t); // step
-  const token = call(SpecialToken)(); registerDisplayRef('token', () => token);
-  const special = call(SpecialToken)(); registerDisplayRef('special', () => special);
-  const base = call(Alternate)(); registerDisplayRef('base', () => base);
-  call(base.routeToken.bind(base), 't', 'token')(t, token);
-  call(base.routeSpecial.bind(base), 't', 'token')(t, special);
-  call(base.routeToken.bind(base), 't', 'token')(t, token);
+  const b = call(Parent)(); registerDisplayRef('b', () => b);
+  s.set('x', call(b.getValueInt.bind(b), 'value')(${value}));
+  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
 }
-class Token { }
-class SpecialToken extends Token { }
-class Router {
-  routeToken(t, token) {
-    t.前に進む(); // step
+class Parent {
+  getValue() {
+    return 0;
   }
-  routeSpecial(t, token) {
-    t.左を向く(); // step
-    call(this.routeToken.bind(this), 't', 'token')(t, token);
-  }
-}
-class Alternate extends Router {
-  routeToken(t, token) {
-    t.右を向く(); // step
-    t.前に進む(); // step
+  getValueInt(value) {
+    return value;
   }
 }
 main();
 `,
-    },
-  },
-  {
-    id: 'practiceBeginner2L7A',
-    lectureIndex: 6,
-    title: '途中の失敗から続ける',
-    program: {
-      java: `
+  };
+}
+
+function overloadDispatch(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t = new Turtle(1, 1); // step
-    for (int amount = 1; amount <= 3; amount++) { // step
-      try {
-        advance(t, amount); // caller
-        t.左を向く(); // step
-      } catch (IllegalArgumentException e) {
-        t.右を向く(); // step
-      }
-    }
-    t.前に進む(); // step
+    Parent b = new Child(); // caller
+    int x = b.getValue(${value}); // step // caller
+    Turtle t = new Turtle(x, 0); // step
   }
-  static void advance(Turtle t, int amount) {
-    t.前に進む(); // step
-    if (amount == 2) {
-      throw new IllegalArgumentException("two");
-    }
-    t.右を向く(); // step
+}
+class Parent {
+  int getValue() {
+    return 0;
+  }
+  int getValue(int value) {
+    return value;
+  }
+}
+class Child extends Parent {
+  @Override int getValue(int value) {
+    return value + 1;
   }
 }
 `,
-      instrumented: `
+    instrumented: `
 function main() {
-  const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
-  for (s.set('amount', 1); s.get('amount') <= 3; s.set('amount', s.get('amount') + 1)) {
+  const b = call(Child)(); registerDisplayRef('b', () => b);
+  s.set('x', call(b.getValueInt.bind(b), 'value')(${value}));
+  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
+}
+class Parent {
+  getValue() {
+    return 0;
+  }
+  getValueInt(value) {
+    return value;
+  }
+}
+class Child extends Parent {
+  getValueInt(value) {
+    return value + 1;
+  }
+}
+main();
+`,
+  };
+}
+
+function trySuccess(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle t = new Turtle(${value}, 1); // step
     try {
-      call(advance, 't', 'amount')(t, s.get('amount'));
-      t.左を向く(); // step
-    } catch (e) {
+      t.前に進む(); // step
+    } catch (RuntimeException e) {
       t.右を向く(); // step
     }
   }
-  delete s.vars['amount'];
-  t.前に進む(); // step
 }
-function advance(t, amount) {
-  t.前に進む(); // step
-  if (amount == 2) {
-    throw new Error('two');
+
+`,
+    instrumented: `
+function main() {
+  const t = new Turtle(${value}, 1); registerDisplayRef('t', () => t); // step
+  try {
+    t.前に進む(); // step
+  } catch (e) {
+    t.右を向く(); // step
   }
-  t.右を向く(); // step
+}
+
+main();
+`,
+  };
+}
+
+function exceptionSkip(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    Turtle t = new Turtle(${value}, 1); // step
+    try {
+      Stop.fail(); // caller
+      t.前に進む(); // step
+    } catch (IllegalArgumentException e) {
+      t.右を向く(); // step
+    }
+  }
+}
+class Stop {
+  static void fail() {
+    throw new IllegalArgumentException();
+  }
+}
+`,
+    instrumented: `
+function main() {
+  const t = new Turtle(${value}, 1); registerDisplayRef('t', () => t); // step
+  try {
+    call(Stop.fail)();
+    t.前に進む(); // step
+  } catch (e) {
+    t.右を向く(); // step
+  }
+}
+class Stop {
+  static fail() {
+    throw new Error();
+  }
 }
 main();
 `,
-    },
-  },
-  {
-    id: 'practiceBeginner2L7B',
-    lectureIndex: 6,
-    title: '例外が運ぶ残りの距離',
-    program: {
-      java: `
+  };
+}
+
+function customException(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t = new Turtle(1, 1); // step
+    Turtle t = new Turtle(${value}, 1); // step
     try {
-      travel(t, 3); // caller
-      t.左を向く(); // step
-    } catch (Remainder e) {
-      t.右を向く(); // step
-      for (int i = 0; i < e.steps; i++) { // step
-        t.前に進む(); // step
-      }
+      throw new Stop();
+    } catch (Stop e) {
+      t.後に戻る(); // step
     }
+  }
+}
+class Stop extends Exception { }
+`,
+    instrumented: `
+function main() {
+  const t = new Turtle(${value}, 1); registerDisplayRef('t', () => t); // step
+  try {
+    throw new Stop();
+  } catch (e) {
     t.後に戻る(); // step
   }
-  static void travel(Turtle t, int steps) throws Remainder {
-    t.前に進む(); // step
-    throw new Remainder(steps - 1); // caller
-  }
 }
-class Remainder extends Exception {
-  int steps;
-  Remainder(int steps) {
-    this.steps = steps; // step
-  }
-}
-`,
-      instrumented: `
-function main() {
-  const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
-  try {
-    call(travel, 't', 'steps')(t, 3);
-    t.左を向く(); // step
-  } catch (e) {
-    registerDisplayRef('e', () => e);
-    t.右を向く(); // step
-    for (s.set('i', 0); s.get('i') < e.steps; s.set('i', s.get('i') + 1)) {
-      t.前に進む(); // step
-    }
-    delete s.vars['i'];
-    unregisterDisplayRef('e');
-  }
-  t.後に戻る(); // step
-}
-function travel(t, steps) {
-  t.前に進む(); // step
-  throw call(Remainder, 'steps')(steps - 1);
-}
-class Remainder extends Error {
-  constructor(steps) {
-    super();
-    this.steps = steps; // step
-  }
-}
+class Stop extends Error { }
 main();
 `,
-    },
-  },
-  {
-    id: 'practiceBeginner2L8A',
-    lectureIndex: 7,
-    title: '行ごとに値を書き換える',
-    program: {
-      java: `
+  };
+}
+
+function cellRead(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t = new Turtle(1, 1); // step
-    int[][] distances = {{1, 1}, {2, 0}}; // step
-    for (int row = 0; row < distances.length; row++) { // step
-      distances[row][1] += distances[row][0]; // step
-      for (int step = 0; step < distances[row][1]; step++) { // step
-        t.前に進む(); // step
-      }
-      t.右を向く(); // step
-    }
-    distances[0][0] = distances[1][1]; // step
+    int[][] values = {{0, ${value}}, {0, 0}}; // step
+    int x = values[0][1]; // step
+    Turtle t = new Turtle(x, 0); // step
   }
 }
+
 `,
-      instrumented: `
-const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
-const distances = [[1, 1], [2, 0]]; registerDisplayRef('distances', () => distances); // step
-for (s.set('row', 0); s.get('row') < distances.length; s.set('row', s.get('row') + 1)) {
-  distances[s.get('row')][1] += distances[s.get('row')][0]; // step
-  for (s.set('step', 0); s.get('step') < distances[s.get('row')][1]; s.set('step', s.get('step') + 1)) {
-    t.前に進む(); // step
-  }
-  delete s.vars['step'];
-  t.右を向く(); // step
+    instrumented: `
+function main() {
+  const values = [[0, ${value}], [0, 0]]; registerDisplayRef('values', () => values); // step
+  s.set('x', values[0][1]);
+  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
 }
-delete s.vars['row'];
-distances[0][0] = distances[1][1]; // step
+
+main();
 `,
-    },
-  },
-  {
-    id: 'practiceBeginner2L8B',
-    lectureIndex: 7,
-    title: '別の層から値を受け取る',
-    program: {
-      java: `
+  };
+}
+
+function cellUpdate(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t = new Turtle(1, 1); // step
-    int[][][] distances = {{{1, 2}}, {{2, 1}}}; // step
-    distances[1][0][1] += distances[0][0][0]; // step
-    distances[0][0][0] = distances[1][0][0]; // step
-    for (int layer = 1; layer >= 0; layer--) { // step
-      for (int step = 0; step < distances[layer][0][layer]; step++) { // step
-        t.前に進む(); // step
-      }
-      t.右を向く(); // step
-    }
+    int[][] values = {{0, 0}, {0, 0}}; // step
+    values[0][1] = ${value}; // step
+    int x = values[0][1]; // step
+    Turtle t = new Turtle(x, 0); // step
   }
 }
+
 `,
-      instrumented: `
-const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
-const distances = [[[1, 2]], [[2, 1]]]; registerDisplayRef('distances', () => distances); // step
-distances[1][0][1] += distances[0][0][0]; // step
-distances[0][0][0] = distances[1][0][0]; // step
-for (s.set('layer', 1); s.get('layer') >= 0; s.set('layer', s.get('layer') - 1)) {
-  for (s.set('step', 0); s.get('step') < distances[s.get('layer')][0][s.get('layer')]; s.set('step', s.get('step') + 1)) {
-    t.前に進む(); // step
-  }
-  delete s.vars['step'];
-  t.右を向く(); // step
+    instrumented: `
+function main() {
+  const values = [[0, 0], [0, 0]]; registerDisplayRef('values', () => values); // step
+  values[0][1] = ${value}; // step
+  s.set('x', values[0][1]);
+  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
 }
-delete s.vars['layer'];
+
+main();
 `,
-    },
-  },
-] satisfies PracticeDefinition[];
+  };
+}
+
+function layerRead(value: number): PracticeDefinition['program'] {
+  return {
+    java: `
+public class Main {
+  public static void main(String[] args) {
+    int[][][] values = {{{0}}, {{${value}}}}; // step
+    int x = values[1][0][0]; // step
+    Turtle t = new Turtle(x, 0); // step
+  }
+}
+
+`,
+    instrumented: `
+function main() {
+  const values = [[[0]], [[${value}]]]; registerDisplayRef('values', () => values); // step
+  s.set('x', values[1][0][0]);
+  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
+}
+
+main();
+`,
+  };
+}
