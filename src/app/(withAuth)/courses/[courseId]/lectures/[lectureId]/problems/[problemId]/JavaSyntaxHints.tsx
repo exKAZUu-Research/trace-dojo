@@ -1,4 +1,4 @@
-import { Box, Portal, useStyleConfig, useTooltip } from '@chakra-ui/react';
+import { Box, Portal, useColorModeValue, useTooltip } from '@chakra-ui/react';
 import {
   cloneElement,
   useEffect,
@@ -10,14 +10,14 @@ import {
 } from 'react';
 import { createElement, type createElementProps, type SyntaxHighlighterProps } from 'react-syntax-highlighter';
 import { useImmer } from 'use-immer';
-import { getJavaSyntaxHint } from './javaSyntaxHintContent';
+import { getJavaSyntaxHint, type JavaSyntaxHintContent } from './javaSyntaxHintContent';
 
 type RendererProps = Parameters<NonNullable<SyntaxHighlighterProps['renderer']>>[0];
 type Node = createElementProps['node'];
 interface Hint {
   index: number;
   text: string;
-  description: string;
+  description: JavaSyntaxHintContent;
 }
 
 export const JavaSyntaxHints: React.FC<RendererProps> = ({ rows, stylesheet, useInlineStyles }) => {
@@ -31,8 +31,12 @@ export const JavaSyntaxHints: React.FC<RendererProps> = ({ rows, stylesheet, use
     closeOnClick: false,
     closeOnEsc: false,
     closeOnPointerDown: false,
+    modifiers: [{ name: 'preventOverflow', options: { altAxis: true, tether: false, padding: 12 } }],
   });
-  const tooltipStyles = useStyleConfig('Tooltip');
+  const cardBackground = useColorModeValue('white', 'gray.800');
+  const cardForeground = useColorModeValue('gray.800', 'gray.100');
+  const codeBackground = useColorModeValue('gray.50', 'gray.900');
+  const cardBorder = useColorModeValue('gray.200', 'gray.600');
   const targets = useRef(new Map<number, HTMLSpanElement>());
   const tooltip = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -181,6 +185,12 @@ export const JavaSyntaxHints: React.FC<RendererProps> = ({ rows, stylesheet, use
               draft.open = next;
             });
             targets.current.get(next)?.focus();
+          } else if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown'].includes(event.key) && tooltip.current) {
+            event.preventDefault();
+            event.stopPropagation();
+            const direction = event.key === 'ArrowUp' || event.key === 'PageUp' ? -1 : 1;
+            const distance = event.key.startsWith('Page') ? tooltip.current.clientHeight * 0.8 : 40;
+            tooltip.current.scrollBy({ top: direction * distance });
           } else if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             event.stopPropagation();
@@ -199,6 +209,8 @@ export const JavaSyntaxHints: React.FC<RendererProps> = ({ rows, stylesheet, use
     );
   };
 
+  const content = [...hints.values()].find((hint) => hint.index === state.open)?.description;
+
   return (
     <>
       {rows.map((row, index) => renderNode(row, String(index)))}
@@ -208,13 +220,47 @@ export const JavaSyntaxHints: React.FC<RendererProps> = ({ rows, stylesheet, use
             <Box
               {...popup.getTooltipProps()}
               ref={tooltip}
-              __css={tooltipStyles}
               pointerEvents="auto"
-              maxW="24rem"
+              bg={cardBackground}
+              color={cardForeground}
+              border="1px solid"
+              borderColor={cardBorder}
+              borderRadius="xl"
+              boxShadow="lg"
+              p={4}
+              w="26rem"
+              maxW="calc(100vw - 24px)"
+              maxH="calc(100dvh - 24px)"
+              overflowY="auto"
+              overscrollBehavior="contain"
+              fontSize="sm"
+              lineHeight="1.6"
+              fontWeight="normal"
+              textAlign="left"
+              whiteSpace="normal"
+              onPointerDown={(event: ReactPointerEvent<HTMLDivElement>) => {
+                if (event.pointerType === 'touch') {
+                  cancelClose();
+                  update((draft) => {
+                    draft.pinned = true;
+                  });
+                }
+              }}
               onPointerEnter={cancelClose}
               onPointerLeave={leave}
             >
-              {[...hints.values()].find((hint) => hint.index === state.open)?.description}
+              {content && (
+                <>
+                  <Box as="p" mb={3}>
+                    {content.meaning}
+                  </Box>
+                  <HintCode label="書き方" code={content.syntax} background={codeBackground} />
+                  <HintCode label="例" code={content.example} background={codeBackground} />
+                  <Box as="p" mt={3}>
+                    {content.explanation}
+                  </Box>
+                </>
+              )}
             </Box>
           </Box>
         </Portal>
@@ -222,6 +268,27 @@ export const JavaSyntaxHints: React.FC<RendererProps> = ({ rows, stylesheet, use
     </>
   );
 };
+
+const HintCode: React.FC<{ label: string; code: string; background: string }> = ({ label, code, background }) => (
+  <Box mt={3}>
+    <Box fontSize="xs" fontWeight="semibold" mb={1}>
+      {label}
+    </Box>
+    <Box
+      as="pre"
+      bg={background}
+      borderRadius="md"
+      px={3}
+      py={2}
+      fontSize="sm"
+      lineHeight="1.5"
+      whiteSpace="pre-wrap"
+      overflowWrap="anywhere"
+    >
+      <code>{code}</code>
+    </Box>
+  </Box>
+);
 
 const collectHints = (node: Node, hints: Map<Node, Hint>): void => {
   const classes: string[] = node.properties?.className ?? [];

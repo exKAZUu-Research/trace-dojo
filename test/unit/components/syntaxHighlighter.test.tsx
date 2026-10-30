@@ -50,24 +50,45 @@ Widget 道具;
   expect(within(code).queryByRole('button', { name: '個数 の説明' })).not.toBeInTheDocument();
 });
 
-test('shows keyword syntax and concrete keyword and operator examples in accessible tooltips', async () => {
+test('shows labeled static snippets, preserves multiline examples, and describes the active hint', async () => {
   const user = userEvent.setup();
   const { container } = renderHighlighter({ code: 'if (課題の個数 > 937) { 課題の個数 %= 937; }' });
   const query = within(getCode(container));
   const keyword = query.getByRole('button', { name: 'if の説明' });
   await user.hover(keyword);
   const keywordTooltip = await screen.findByRole('tooltip');
-  expect.soft(keywordTooltip).toHaveTextContent(/構文[：:]\s*if\s*\(/);
-  expect.soft(keywordTooltip).toHaveTextContent(/例[：:]\s*if\s*\([^)]*\)\s*\{/);
-  expect(keyword).toHaveAccessibleDescription(keywordTooltip.textContent ?? '');
+  expect(within(keywordTooltip).getByText(/^書き方[：:]?$/)).toBeVisible();
+  expect(within(keywordTooltip).getByText(/^例[：:]?$/)).toBeVisible();
+  const keywordSnippets = keywordTooltip.querySelectorAll('pre > code');
+  expect(keywordSnippets).toHaveLength(2);
+  expect(keywordSnippets[0]).toHaveTextContent(/^if\s*\(/);
+  expect(keywordSnippets[1]?.textContent).toMatch(/if[^\n]*\{\n[ \t]+System\.out\.println\("合格"\);\n\}/);
+  const explanation = within(keywordTooltip).getByText(/合格.*(?:表示|出力)/);
+  expect(explanation).toBeVisible();
+  expect(explanation.closest('pre, code')).toBeNull();
+  const keywordDescription = keywordTooltip.textContent ?? '';
+  expect(keyword).toHaveAttribute('aria-describedby', keywordTooltip.id);
+  expect(keyword).toHaveAccessibleDescription(
+    /条件[\s\S]*書き方\s*if[\s\S]*例[\s\S]*if[\s\S]*合格[\s\S]*(?:表示|出力)/
+  );
   expect(keywordTooltip).not.toHaveTextContent(/課題の個数|937/);
   await user.unhover(keyword);
   const operator = query.getByRole('button', { name: '%= の説明' });
   await user.hover(operator);
-  const operatorTooltip = await screen.findByRole('tooltip');
-  await waitFor(() => expect(operator).toHaveAccessibleDescription(operatorTooltip.textContent ?? ''));
-  expect.soft(operatorTooltip).toHaveTextContent(/例[：:][\s\S]*%=\s*\d+\s*;/);
+  await waitFor(() => {
+    const tooltip = screen.getByRole('tooltip');
+    expect(tooltip.textContent).not.toBe(keywordDescription);
+    expect(operator).toHaveAttribute('aria-describedby', tooltip.id);
+    expect(operator).toHaveAccessibleDescription(/余り[\s\S]*書き方[\s\S]*%=[\s\S]*例[\s\S]*%=\s*3\s*;[\s\S]*1/);
+  });
+  const operatorTooltip = screen.getByRole('tooltip');
+  expect(within(operatorTooltip).getByText(/^書き方[：:]?$/)).toBeVisible();
+  expect(within(operatorTooltip).getByText(/^例[：:]?$/)).toBeVisible();
+  const operatorSnippets = operatorTooltip.querySelectorAll('pre > code');
+  expect(operatorSnippets).toHaveLength(2);
+  expect(operatorSnippets[1]).toHaveTextContent(/%=\s*3\s*;/);
   expect(operatorTooltip).not.toHaveTextContent(/課題の個数|937/);
+  expect(keyword).not.toHaveAccessibleDescription();
 });
 
 test('preserves exact Java source and lexical boundaries around compound operators and literals', async () => {
@@ -126,7 +147,8 @@ test('uses one keyboard stop, navigates hints, dismisses without moving focus, a
   await user.tab();
   expect(hints[0]).toHaveFocus();
   const tooltip = await screen.findByRole('tooltip');
-  expect(hints[0]).toHaveAccessibleDescription(tooltip.textContent ?? '');
+  expect(hints[0]).toHaveAttribute('aria-describedby', tooltip.id);
+  expect(hints[0]).toHaveAccessibleDescription(/整数[\s\S]*書き方\s*int[\s\S]*例\s*int\s+個数\s*=\s*3\s*;[\s\S]*個数/);
   await user.keyboard('{ArrowRight}');
   expect(hints[1]).toHaveFocus();
   await user.keyboard('{ArrowLeft}');
