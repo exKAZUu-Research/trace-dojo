@@ -8,7 +8,8 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactElement,
 } from 'react';
-import { createElement, type createElementProps, type SyntaxHighlighterProps } from 'react-syntax-highlighter';
+import { createElement, Prism, type createElementProps, type SyntaxHighlighterProps } from 'react-syntax-highlighter';
+import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useImmer } from 'use-immer';
 import { getJavaSyntaxHint, type JavaSyntaxHintContent } from './javaSyntaxHintContent';
 
@@ -269,26 +270,35 @@ export const JavaSyntaxHints: React.FC<RendererProps> = ({ rows, stylesheet, use
   );
 };
 
-const HintCode: React.FC<{ label: string; code: string; background: string }> = ({ label, code, background }) => (
-  <Box mt={3}>
-    <Box fontSize="xs" fontWeight="semibold" mb={1}>
-      {label}
+const HintCode: React.FC<{ label: string; code: string; background: string }> = ({ label, code, background }) => {
+  const theme = useColorModeValue(oneLight, oneDark);
+  return (
+    <Box mt={3}>
+      <Box fontSize="xs" fontWeight="semibold" mb={1}>
+        {label}
+      </Box>
+      <Box bg={background} borderRadius="md" px={3} py={2} fontFamily="mono" fontSize="sm" lineHeight="1.5">
+        <Prism
+          language="java"
+          style={theme}
+          wrapLongLines
+          customStyle={{
+            background: 'transparent',
+            margin: 0,
+            padding: 0,
+            fontFamily: 'inherit',
+            fontSize: 'inherit',
+            whiteSpace: 'pre-wrap',
+            overflowWrap: 'anywhere',
+          }}
+          codeTagProps={{ style: { background: 'transparent', fontFamily: 'inherit', whiteSpace: 'pre-wrap' } }}
+        >
+          {code}
+        </Prism>
+      </Box>
     </Box>
-    <Box
-      as="pre"
-      bg={background}
-      borderRadius="md"
-      px={3}
-      py={2}
-      fontSize="sm"
-      lineHeight="1.5"
-      whiteSpace="pre-wrap"
-      overflowWrap="anywhere"
-    >
-      <code>{code}</code>
-    </Box>
-  </Box>
-);
+  );
+};
 
 const collectHints = (node: Node, hints: Map<Node, Hint>): void => {
   const classes: string[] = node.properties?.className ?? [];

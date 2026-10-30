@@ -50,7 +50,7 @@ Widget 道具;
   expect(within(code).queryByRole('button', { name: '個数 の説明' })).not.toBeInTheDocument();
 });
 
-test('shows labeled static snippets, preserves multiline examples, and describes the active hint', async () => {
+test('shows highlighted static snippets, preserves exact code, and describes the active hint', async () => {
   const user = userEvent.setup();
   const { container } = renderHighlighter({ code: 'if (課題の個数 > 937) { 課題の個数 %= 937; }' });
   const query = within(getCode(container));
@@ -61,8 +61,12 @@ test('shows labeled static snippets, preserves multiline examples, and describes
   expect(within(keywordTooltip).getByText(/^例[：:]?$/)).toBeVisible();
   const keywordSnippets = keywordTooltip.querySelectorAll('pre > code');
   expect(keywordSnippets).toHaveLength(2);
-  expect(keywordSnippets[0]).toHaveTextContent(/^if\s*\(/);
-  expect(keywordSnippets[1]?.textContent).toMatch(/if[^\n]*\{\n[ \t]+System\.out\.println\("合格"\);\n\}/);
+  expectHighlightedSnippet(keywordSnippets[0], 'if (条件) {\n  処理\n}', ['if']);
+  expectHighlightedSnippet(keywordSnippets[1], 'int 点数 = 80;\nif (点数 >= 80) {\n  System.out.println("合格");\n}', [
+    'if',
+    '"合格"',
+    '>=',
+  ]);
   const explanation = within(keywordTooltip).getByText(/合格.*(?:表示|出力)/);
   expect(explanation).toBeVisible();
   expect(explanation.closest('pre, code')).toBeNull();
@@ -86,7 +90,8 @@ test('shows labeled static snippets, preserves multiline examples, and describes
   expect(within(operatorTooltip).getByText(/^例[：:]?$/)).toBeVisible();
   const operatorSnippets = operatorTooltip.querySelectorAll('pre > code');
   expect(operatorSnippets).toHaveLength(2);
-  expect(operatorSnippets[1]).toHaveTextContent(/%=\s*3\s*;/);
+  expectHighlightedSnippet(operatorSnippets[0], '変数 %= 値;', ['%=']);
+  expectHighlightedSnippet(operatorSnippets[1], 'int 個数 = 7;\n個数 %= 3;', ['int', '%=']);
   expect(operatorTooltip).not.toHaveTextContent(/課題の個数|937/);
   expect(keyword).not.toHaveAccessibleDescription();
 });
@@ -148,7 +153,7 @@ test('uses one keyboard stop, navigates hints, dismisses without moving focus, a
   expect(hints[0]).toHaveFocus();
   const tooltip = await screen.findByRole('tooltip');
   expect(hints[0]).toHaveAttribute('aria-describedby', tooltip.id);
-  expect(hints[0]).toHaveAccessibleDescription(/整数[\s\S]*書き方\s*int[\s\S]*例\s*int\s+個数\s*=\s*3\s*;[\s\S]*個数/);
+  expect(hints[0]).toHaveAccessibleDescription(/整数[\s\S]*書き方\s*int[\s\S]*例\s*int\s*個数\s*=\s*3\s*;[\s\S]*個数/);
   await user.keyboard('{ArrowRight}');
   expect(hints[1]).toHaveFocus();
   await user.keyboard('{ArrowLeft}');
@@ -281,4 +286,19 @@ const expectSource = (code: HTMLElement, source: string): void => {
   if (!(copy instanceof HTMLElement)) throw new Error('Code clone must be an element');
   for (const line of copy.querySelectorAll('.linenumber')) line.remove();
   expect(copy.textContent).toBe(source);
+};
+
+const expectHighlightedSnippet = (snippet: Element | undefined, source: string, tokens: string[]): void => {
+  if (!(snippet instanceof HTMLElement)) throw new Error('Hint snippet must be rendered');
+  expect(snippet.textContent).toBe(source);
+  expect(snippet.querySelector('button, [role="button"], [tabindex], a[href], input, select, textarea')).toBeNull();
+  for (const token of tokens) {
+    const span = [...snippet.querySelectorAll('span')].find((element) => element.textContent === token);
+    expect.soft(span, `Highlighted token: ${token}`).toBeDefined();
+    if (span) {
+      const color = getComputedStyle(span).color;
+      expect.soft(color).not.toBe('');
+      expect.soft(color).not.toBe(getComputedStyle(snippet).color);
+    }
+  }
 };
