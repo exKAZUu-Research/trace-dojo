@@ -6,14 +6,13 @@ import { Heading, HStack, Link, Text, VStack } from '@/infrastructures/useClient
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import { courseIdToLectureIds, courseIdToName, problemIdToName } from '@/problems/problemData';
 
-interface Props {
+type Props = {
   courseId: CourseId;
   lectureId: string;
-  problemId: ProblemId;
   actions?: ReactNode;
-}
+} & ({ problemId: ProblemId; title?: never } | { title: string; problemId?: never });
 
-export const ProblemPageHeader: React.FC<Props> = ({ courseId, lectureId, problemId, actions }) => {
+export const ProblemPageHeader: React.FC<Props> = ({ courseId, lectureId, problemId, title, actions }) => {
   const lectureIndex = courseIdToLectureIds[courseId].indexOf(lectureId);
   return (
     <VStack align="stretch" spacing={1}>
@@ -32,7 +31,7 @@ export const ProblemPageHeader: React.FC<Props> = ({ courseId, lectureId, proble
         </Link>
       </HStack>
       <HStack justify="space-between" spacing={2}>
-        <Heading as="h1">{problemIdToName[problemId]}</Heading>
+        <Heading as="h1">{title ?? problemIdToName[problemId!]}</Heading>
         {actions}
       </HStack>
     </VStack>

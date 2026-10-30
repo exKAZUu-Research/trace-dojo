@@ -161,6 +161,12 @@ export const Lecture: React.FC<Props> = (props) => {
               </Tbody>
             </Table>
 
+            <Link
+              as={NextLinkWithoutPrefetch}
+              href={`/courses/${params.courseId}/lectures/${params.lectureId}/practice`}
+            >
+              練習する（成績に影響しません）
+            </Link>
             <ChallengeModeButton courseId={params.courseId} lectureId={params.lectureId} />
           </CardBody>
         </Card>

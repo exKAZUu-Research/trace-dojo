@@ -20,26 +20,49 @@ import {
   type CourseId,
 } from '@/problems/problemData';
 
+import { getPracticeProblemIds } from '@/problems/practice/definitions';
+import { instantiatePracticeProblem } from '@/problems/practice/instantiatePracticeProblem';
+
+type LearningMode = 'challenge' | 'practice';
+const learningModeSchema = z.enum(['challenge', 'practice']).default('challenge');
 type ProblemFormat = 'fillInBlank' | 'regular';
 const locationSchema = z.object({ courseId: z.string(), lectureId: z.string() });
 const startSchema = z.union([
-  locationSchema.extend({ problemFormat: z.literal('regular') }).strict(),
-  locationSchema.extend({ problemFormat: z.literal('fillInBlank').optional() }),
+  locationSchema.extend({ problemFormat: z.literal('regular'), learningMode: learningModeSchema }).strict(),
+  locationSchema
+    .extend({
+      problemFormat: z.literal('fillInBlank').optional(),
+      learningMode: z.literal('challenge').default('challenge'),
+    })
+    .strict(),
 ]);
 const nextSchema = z.union([
-  locationSchema.extend({ sessionId: z.number().int().positive(), problemFormat: z.literal('regular') }).strict(),
-  locationSchema.extend({
-    sessionId: z.number().int().positive(),
-    problemFormat: z.literal('fillInBlank').optional(),
-  }),
+  locationSchema
+    .extend({
+      sessionId: z.number().int().positive(),
+      problemFormat: z.literal('regular'),
+      learningMode: learningModeSchema,
+    })
+    .strict(),
+  locationSchema
+    .extend({
+      sessionId: z.number().int().positive(),
+      problemFormat: z.literal('fillInBlank').optional(),
+      learningMode: z.literal('challenge').default('challenge'),
+    })
+    .strict(),
 ]);
-const submissionSchema = locationSchema.extend({
-  sessionId: z.number().int().positive(),
-  answers: z.array(z.string().max(1000)).max(50),
-});
+const submissionSchema = locationSchema
+  .extend({
+    sessionId: z.number().int().positive(),
+    answers: z.array(z.string().max(1000)).max(50),
+    learningMode: z.literal('challenge').default('challenge'),
+  })
+  .strict();
 const regularSubmissionSchema = locationSchema
   .extend({
     sessionId: z.number().int().positive(),
+    learningMode: learningModeSchema,
     requestId: z.string().min(1).max(200),
     context: z
       .object({ problemType: z.enum(['executionResult', 'step']), traceItemIndex: z.number().int().nonnegative() })
@@ -47,7 +70,9 @@ const regularSubmissionSchema = locationSchema
     isCorrect: z.boolean(),
   })
   .strict();
-const switchSchema = locationSchema.extend({ sessionId: z.number().int().positive() }).strict();
+const switchSchema = locationSchema
+  .extend({ sessionId: z.number().int().positive(), learningMode: learningModeSchema })
+  .strict();
 const queues = new Map<string, Promise<unknown>>();
 const gradingLocks = new Map<string, Promise<FillInBlankVerdict>>();
 
@@ -59,8 +84,8 @@ export const exerciseProcedures = {
       checkedLecture(input.courseId, input.lectureId);
       const format = input.problemFormat ?? 'fillInBlank';
       const userId = ctx.session.superTokensUserId;
-      return await lockedStart(`${userId}:${input.courseId}:${input.lectureId}:${format}`, () =>
-        startOrResume(userId, input.courseId, input.lectureId, format)
+      return await lockedStart(`${userId}:${input.courseId}:${input.lectureId}:${input.learningMode}:${format}`, () =>
+        startOrResume(userId, input.courseId, input.lectureId, format, input.learningMode)
       );
     }),
   nextExercise: procedure
@@ -70,8 +95,16 @@ export const exerciseProcedures = {
       checkedLecture(input.courseId, input.lectureId);
       const format = input.problemFormat ?? 'fillInBlank';
       const userId = ctx.session.superTokensUserId;
-      return await lockedStart(`${userId}:${input.courseId}:${input.lectureId}:${format}`, () => {
-        const previous = ownedSession(input.sessionId, userId, input.courseId, input.lectureId, format);
+      return await lockedStart(`${userId}:${input.courseId}:${input.lectureId}:${input.learningMode}:${format}`, () => {
+        const start = periodStart();
+        const previous = ownedSession(
+          input.sessionId,
+          userId,
+          input.courseId,
+          input.lectureId,
+          format,
+          input.learningMode
+        );
         if (!previous.completedAt) throw new TRPCError({ code: 'CONFLICT' });
         const newer = db
           .select()
@@ -81,16 +114,24 @@ export const exerciseProcedures = {
               eq(exerciseSessions.userId, userId),
               eq(exerciseSessions.courseId, input.courseId),
               eq(exerciseSessions.lectureId, input.lectureId),
-              eq(exerciseSessions.learningMode, 'challenge'),
+              eq(exerciseSessions.learningMode, input.learningMode),
               eq(exerciseSessions.problemFormat, format),
-              gt(exerciseSessions.id, previous.id)
+              gt(exerciseSessions.id, previous.id),
+              start ? gte(exerciseSessions.createdAt, start) : undefined
             )
           )
           .orderBy(asc(exerciseSessions.id))
           .get();
         return newer
           ? toDisplay(newer, format)
-          : createFromCandidates(userId, input.courseId, input.lectureId, format, previous.problemId);
+          : createFromCandidates(
+              userId,
+              input.courseId,
+              input.lectureId,
+              format,
+              input.learningMode,
+              previous.problemId
+            );
       });
     }),
   submitExercise: procedure
@@ -100,7 +141,7 @@ export const exerciseProcedures = {
       const receivedAt = new Date();
       checkedLecture(input.courseId, input.lectureId);
       const userId = ctx.session.superTokensUserId;
-      ownedSession(input.sessionId, userId, input.courseId, input.lectureId, 'fillInBlank', receivedAt);
+      ownedSession(input.sessionId, userId, input.courseId, input.lectureId, 'fillInBlank', 'challenge', receivedAt);
       const key = `${input.sessionId}:${JSON.stringify(input.answers)}`;
       const existing = gradingLocks.get(key);
       if (existing) return await existing;
@@ -120,7 +161,7 @@ export const exerciseProcedures = {
     .mutation(async ({ ctx, input }) => {
       checkedLecture(input.courseId, input.lectureId);
       const userId = ctx.session.superTokensUserId;
-      ownedSession(input.sessionId, userId, input.courseId, input.lectureId, 'regular');
+      ownedSession(input.sessionId, userId, input.courseId, input.lectureId, 'regular', input.learningMode);
       return await enqueue(input.sessionId, () => saveRegularVerdict(userId, input));
     }),
   switchRegularExerciseToStep: procedure
@@ -131,7 +172,14 @@ export const exerciseProcedures = {
       const userId = ctx.session.superTokensUserId;
       return await enqueue(input.sessionId, () =>
         db.transaction((tx) => {
-          const session = ownedSession(input.sessionId, userId, input.courseId, input.lectureId, 'regular');
+          const session = ownedSession(
+            input.sessionId,
+            userId,
+            input.courseId,
+            input.lectureId,
+            'regular',
+            input.learningMode
+          );
           if (session.completedAt) throw new TRPCError({ code: 'CONFLICT' });
           if (session.problemType === 'step' && session.traceItemIndex === 1) return toRegularDisplay(session);
           if (session.problemType !== 'executionResult' || session.traceItemIndex !== 0)
@@ -167,7 +215,10 @@ const serialize = async <T>(key: string, action: () => T | Promise<T>): Promise<
   }
 };
 const checkedLecture = (courseId: string, lectureId: string): void => {
-  if (!(courseId in courseIdToLectureIds) || !courseIdToLectureIds[courseId as CourseId]?.includes(lectureId))
+  if (
+    !Object.hasOwn(courseIdToLectureIds, courseId) ||
+    !courseIdToLectureIds[courseId as CourseId]?.includes(lectureId)
+  )
     throw new TRPCError({ code: 'NOT_FOUND' });
 };
 const periodStart = (at = new Date()): Date | undefined => getLearningPeriodFilter(at).createdAt?.gte;
@@ -186,6 +237,7 @@ const ownedSession = (
   courseId: string,
   lectureId: string,
   format: ProblemFormat,
+  mode: LearningMode,
   at = new Date()
 ): ExerciseSession => {
   const session = db.select().from(exerciseSessions).where(eq(exerciseSessions.id, id)).get();
@@ -195,14 +247,19 @@ const ownedSession = (
     session.userId !== userId ||
     session.courseId !== courseId ||
     session.lectureId !== lectureId ||
-    session.learningMode !== 'challenge' ||
+    session.learningMode !== mode ||
     session.problemFormat !== format
   )
     throw new TRPCError({ code: 'UNAUTHORIZED' });
-  if (format === 'regular') validateRegularState(session);
+  validateMembership(session);
+  if (format === 'regular') {
+    validateRegularState(session);
+    instantiateRegular(session.problemId, session.seed, mode);
+  }
   return session;
 };
-const candidatesFor = (courseId: string, lectureId: string, format: ProblemFormat): string[] => {
+const candidatesFor = (courseId: string, lectureId: string, format: ProblemFormat, mode: LearningMode): string[] => {
+  if (mode === 'practice') return getPracticeProblemIds(courseId, lectureId);
   const lectureIndex = courseIdToLectureIds[courseId as CourseId].indexOf(lectureId);
   const configured =
     format === 'fillInBlank'
@@ -218,7 +275,13 @@ const candidatesFor = (courseId: string, lectureId: string, format: ProblemForma
   return format === 'regular' ? configured.filter((id) => !isFillInBlankProblem(id)) : configured;
 };
 type DisplayResult = ExerciseDisplay | RegularExerciseDisplay | { status: 'noProblems' };
-const startOrResume = (userId: string, courseId: string, lectureId: string, format: ProblemFormat): DisplayResult => {
+const startOrResume = (
+  userId: string,
+  courseId: string,
+  lectureId: string,
+  format: ProblemFormat,
+  mode: LearningMode
+): DisplayResult => {
   const start = periodStart();
   const rows = db
     .select()
@@ -228,7 +291,7 @@ const startOrResume = (userId: string, courseId: string, lectureId: string, form
         eq(exerciseSessions.userId, userId),
         eq(exerciseSessions.courseId, courseId),
         eq(exerciseSessions.lectureId, lectureId),
-        eq(exerciseSessions.learningMode, 'challenge'),
+        eq(exerciseSessions.learningMode, mode),
         eq(exerciseSessions.problemFormat, format),
         start ? gte(exerciseSessions.createdAt, start) : undefined
       )
@@ -236,22 +299,23 @@ const startOrResume = (userId: string, courseId: string, lectureId: string, form
     .orderBy(desc(exerciseSessions.id))
     .all();
   const selected = rows.find((row) => row.completedAt === null) ?? rows[0];
-  return selected ? toDisplay(selected, format) : createFromCandidates(userId, courseId, lectureId, format);
+  return selected ? toDisplay(selected, format) : createFromCandidates(userId, courseId, lectureId, format, mode);
 };
 const createFromCandidates = (
   userId: string,
   courseId: string,
   lectureId: string,
   format: ProblemFormat,
+  mode: LearningMode,
   previousId?: string
 ): DisplayResult => {
-  const configured = candidatesFor(courseId, lectureId, format);
+  const configured = candidatesFor(courseId, lectureId, format, mode);
   if (configured.length === 0) return { status: 'noProblems' as const };
   const candidates = configured.length > 1 ? configured.filter((id) => id !== previousId) : configured;
   const problemId = candidates[Math.floor(Math.random() * candidates.length)];
   const seed = randomUUID();
   // Generate before inserting: a session whose problem cannot be generated would be resumed and fail forever.
-  const problem = format === 'regular' ? instantiateRegular(problemId, seed) : instantiateBlank(problemId, seed);
+  const problem = format === 'regular' ? instantiateRegular(problemId, seed, mode) : instantiateBlank(problemId, seed);
   if (format === 'regular' && problem.traceItems.length <= 1)
     throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Too few trace items: ${problemId}` });
   const row = db
@@ -260,7 +324,7 @@ const createFromCandidates = (
       userId,
       courseId,
       lectureId,
-      learningMode: 'challenge',
+      learningMode: mode,
       problemFormat: format,
       problemId,
       seed,
@@ -271,8 +335,8 @@ const createFromCandidates = (
     .get();
   return toDisplay(row, format, problem);
 };
-const instantiateRegular = (problemId: string, seed: string): InstantiatedProblem => {
-  const problem = instantiateProblem(problemId, 'java', seed);
+const instantiateRegular = (problemId: string, seed: string, mode: LearningMode): InstantiatedProblem => {
+  const problem = (mode === 'practice' ? instantiatePracticeProblem : instantiateProblem)(problemId, 'java', seed);
   if (!problem || problem.blankAnswers.length > 0)
     throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Invalid regular problem: ${problemId}` });
   return problem;
@@ -282,6 +346,22 @@ const instantiateBlank = (problemId: string, seed: string): InstantiatedProblem 
   if (!problem || problem.blankAnswers.length === 0)
     throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Invalid challenge problem: ${problemId}` });
   return problem;
+};
+const validateMembership = (row: ExerciseSession): void => {
+  const lectureIndex = courseIdToLectureIds[row.courseId as CourseId]?.indexOf(row.lectureId) ?? -1;
+  const configured =
+    row.learningMode === 'practice'
+      ? getPracticeProblemIds(row.courseId, row.lectureId)
+      : row.problemFormat === 'regular'
+        ? courseIdToLectureIndexToProblemIds[row.courseId as CourseId]?.[lectureIndex]
+        : courseIdToLectureIndexToExerciseProblemIds[row.courseId as CourseId]?.[lectureIndex];
+  if (
+    (row.learningMode !== 'practice' && row.learningMode !== 'challenge') ||
+    (row.problemFormat !== 'regular' && row.problemFormat !== 'fillInBlank') ||
+    (row.learningMode === 'practice' && row.problemFormat !== 'regular') ||
+    !configured?.some((id) => id === row.problemId)
+  )
+    throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Session problem is outside its configured bank' });
 };
 const toRegularDisplay = (row: ExerciseSession): RegularExerciseDisplay => ({
   problemFormat: 'regular',
@@ -297,10 +377,11 @@ const toDisplay = (
   format: ProblemFormat,
   problem?: InstantiatedProblem
 ): ExerciseDisplay | RegularExerciseDisplay => {
+  validateMembership(row);
   if (format === 'regular') {
     validateRegularState(row);
     // The client regenerates the problem while rendering, so a resumed row whose definition no longer generates must fail here.
-    if (!problem) instantiateRegular(row.problemId, row.seed);
+    if (!problem) instantiateRegular(row.problemId, row.seed, row.learningMode as LearningMode);
     return toRegularDisplay(row);
   }
   const { displayProgram, blankAnswers, finalBoard, finalTurtles, finalVars } =
@@ -319,7 +400,14 @@ const toDisplay = (
 };
 const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmissionSchema>): RegularExerciseDisplay =>
   db.transaction((tx) => {
-    const current = ownedSession(input.sessionId, userId, input.courseId, input.lectureId, 'regular');
+    const current = ownedSession(
+      input.sessionId,
+      userId,
+      input.courseId,
+      input.lectureId,
+      'regular',
+      input.learningMode
+    );
     const previous = tx
       .select()
       .from(exerciseSubmissions)
@@ -356,7 +444,8 @@ const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmiss
     // The trace comes from the current definition, as the client's does, so an edited definition moves the final step.
     const completed =
       current.problemType === 'executionResult' ||
-      current.traceItemIndex >= instantiateRegular(current.problemId, current.seed).traceItems.length - 1;
+      current.traceItemIndex >=
+        instantiateRegular(current.problemId, current.seed, input.learningMode).traceItems.length - 1;
     const updated = tx
       .update(exerciseSessions)
       .set(completed ? { completedAt: new Date() } : { traceItemIndex: current.traceItemIndex + 1 })
@@ -374,7 +463,7 @@ const gradeAndSave = async (
   answers: string[],
   receivedAt: Date
 ): Promise<FillInBlankVerdict> => {
-  const session = ownedSession(id, userId, courseId, lectureId, 'fillInBlank', receivedAt);
+  const session = ownedSession(id, userId, courseId, lectureId, 'fillInBlank', 'challenge', receivedAt);
   const result = await gradeFillInBlankAnswers(instantiateBlank(session.problemId, session.seed), answers);
   if (result.status === 'ungradable') logger.warn('Failed to grade exercise %d: %s', id, result.detail);
   db.transaction((tx) => {

@@ -1,3 +1,5 @@
+import { notFound } from 'next/navigation';
+import { courseIdToLectureIds, courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
 import { problemSessions } from '../../../../../../../../../db/schema';
 import { ProblemPageOnClient } from './pageOnClient';
 
@@ -14,6 +16,17 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
   lectureId: string;
   problemId: ProblemId;
 }> = async ({ params, session }) => {
+  if (
+    !Object.hasOwn(courseIdToLectureIds, params.courseId) ||
+    !Object.hasOwn(courseIdToLectureIndexToProblemIds, params.courseId)
+  )
+    notFound();
+  const lectureIndex = courseIdToLectureIds[params.courseId].indexOf(params.lectureId);
+  if (
+    lectureIndex === -1 ||
+    !courseIdToLectureIndexToProblemIds[params.courseId][lectureIndex]?.includes(params.problemId)
+  )
+    notFound();
   let incompleteProblemSession = await db.query.problemSessions.findFirst({
     where: {
       ...getLearningPeriodFilter(),

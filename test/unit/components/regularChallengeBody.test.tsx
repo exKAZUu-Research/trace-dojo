@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { ChakraProvider } from '@chakra-ui/react';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, test, vi } from 'vitest';
 
@@ -21,38 +21,17 @@ const executionDisplay: RegularExerciseDisplay = {
   completed: false,
 };
 
-test.each(['executionResult', 'step'] as const)(
-  'shows Java syntax hints in challenge %s without submitting from the keyboard',
-  async (problemType) => {
-    const user = userEvent.setup();
-    const submit = vi.fn<RegularChallengeTransport['submit']>().mockResolvedValue(executionDisplay);
-    const { container } = renderBody({
-      submit,
-      display: { ...executionDisplay, problemType, traceItemIndex: problemType === 'step' ? 1 : 0 },
-    });
-    for (const input of screen.getAllByRole('textbox')) {
-      await user.clear(input);
-      await user.paste('999');
-    }
-    expect(screen.getByRole('button', { name: /提出/ })).toBeEnabled();
-    const code = container.querySelector('code');
-    if (!code) throw new Error('Challenge source must be rendered');
-    const hint = within(code).getAllByRole('button', { name: 'int の説明' })[0];
-    act(() => hint.focus());
-    expect(hint).toHaveFocus();
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(/[ぁ-んァ-ヶ一-龯]/);
-    await user.keyboard('{Escape}');
-    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
-    await user.keyboard('{Enter}');
-    expect(await screen.findByRole('tooltip')).toBeVisible();
-    await user.keyboard('{Escape}');
-    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
-    await user.keyboard(' ');
-    expect(await screen.findByRole('tooltip')).toBeVisible();
-    expect(submit).not.toHaveBeenCalled();
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-  }
-);
+test.each(['executionResult', 'step'] as const)('keeps syntax hints disabled in challenge %s', async (problemType) => {
+  const user = userEvent.setup();
+  const { container } = renderBody({
+    display: { ...executionDisplay, problemType, traceItemIndex: problemType === 'step' ? 1 : 0 },
+  });
+  const code = container.querySelector('code');
+  if (!code) throw new Error('Challenge source must be rendered');
+  expect(within(code).queryAllByRole('button')).toHaveLength(0);
+  await user.hover(within(code).getAllByText('int', { exact: true })[0]);
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+});
 
 test('uses the real editor local grader and sends only verdict with stored context', async () => {
   const user = userEvent.setup();
