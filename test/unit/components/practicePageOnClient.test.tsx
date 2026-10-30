@@ -60,12 +60,22 @@ beforeEach(() => {
   navigation.lectureId = courseIdToLectureIds.test[0];
 });
 
-test('starts regular practice once, opens syntax hints by keyboard without submitting, and returns to the lecture', async () => {
+test('starts regular practice with the shared header first and opens syntax hints by keyboard without submitting', async () => {
   transport.start.mockResolvedValue(display);
   const user = userEvent.setup();
   const { container } = render(page());
-  await screen.findByRole('heading', { level: 1, name: '練習：値の更新と折り返し' });
-  expect(screen.getByText(/課題の成績・進捗には影響しません/)).toBeVisible();
+  const heading = await screen.findByRole('heading', { level: 1, name: '値の更新と折り返し' });
+  expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  expect(screen.queryByText(/課題の成績・進捗には影響しません/)).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '授業回に戻る' })).not.toBeInTheDocument();
+  const firstPageBlock = container.querySelector(':scope > :not(style) > :not(style)');
+  expect(firstPageBlock).toContainElement(heading);
+  const courseLink = screen.getByRole('link', { name: '動作確認用' });
+  const lectureLink = screen.getByRole('link', { name: '第1回' });
+  expect(firstPageBlock).toContainElement(courseLink);
+  expect(firstPageBlock).toContainElement(lectureLink);
+  expect(courseLink).toHaveAttribute('href', '/courses/test');
+  expect(lectureLink).toHaveAttribute('href', `/courses/test/lectures/${navigation.lectureId}`);
   expect(transport.start).toHaveBeenCalledExactlyOnceWith({
     courseId: 'test',
     lectureId: navigation.lectureId,
@@ -80,8 +90,6 @@ test('starts regular practice once, opens syntax hints by keyboard without submi
   expect(await screen.findByRole('tooltip')).toBeVisible();
   expect(transport.submit).not.toHaveBeenCalled();
   await user.keyboard('{Escape}');
-  await user.click(screen.getByRole('button', { name: '授業回に戻る' }));
-  expect(navigation.push).toHaveBeenCalledWith(`/courses/test/lectures/${navigation.lectureId}`);
 });
 
 test('edits a real practice answer and retains the incorrect draft through feedback', async () => {
@@ -143,6 +151,14 @@ test('confirms step conversion and submits an independently correct first answer
   expect(await screen.findByRole('alertdialog')).toHaveTextContent('正解');
 });
 
+test('returns to the lecture when ending completed practice', async () => {
+  transport.start.mockResolvedValue({ ...display, completed: true });
+  const user = userEvent.setup();
+  render(page());
+  await user.click(await screen.findByRole('button', { name: '終わる' }));
+  expect(navigation.push).toHaveBeenCalledWith(`/courses/test/lectures/${navigation.lectureId}`);
+});
+
 test('resumes completion, requests the next practice source, and resumes that source after remount', async () => {
   const nextDisplay = { ...display, sessionId: 18, problemId: 'practiceTestL1B' };
   transport.start.mockResolvedValueOnce({ ...display, completed: true }).mockResolvedValueOnce(nextDisplay);
@@ -157,11 +173,11 @@ test('resumes completion, requests the next practice source, and resumes that so
     problemFormat: 'regular',
     sessionId: 17,
   });
-  expect(await screen.findByRole('heading', { level: 1, name: '練習：参照を戻して動かす' })).toBeVisible();
+  expect(await screen.findByRole('heading', { level: 1, name: '参照を戻して動かす' })).toBeVisible();
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   rendered.unmount();
   render(page());
-  expect(await screen.findByRole('heading', { level: 1, name: '練習：参照を戻して動かす' })).toBeVisible();
+  expect(await screen.findByRole('heading', { level: 1, name: '参照を戻して動かす' })).toBeVisible();
   expect(transport.start).toHaveBeenCalledTimes(2);
 });
 
@@ -179,10 +195,10 @@ test('ignores a deferred previous-location response after navigation', async () 
   navigation.courseId = 'tuBeginner1';
   navigation.lectureId = courseIdToLectureIds.tuBeginner1[0];
   rendered.rerender(page());
-  expect(await screen.findByRole('heading', { level: 1, name: '練習：折れ道を戻る' })).toBeVisible();
+  expect(await screen.findByRole('heading', { level: 1, name: '折れ道を戻る' })).toBeVisible();
   await act(async () => resolveOld(display));
-  expect(screen.getByRole('heading', { level: 1, name: '練習：折れ道を戻る' })).toBeVisible();
-  expect(screen.queryByRole('heading', { name: '練習：値の更新と折り返し' })).not.toBeInTheDocument();
+  expect(screen.getByRole('heading', { level: 1, name: '折れ道を戻る' })).toBeVisible();
+  expect(screen.queryByRole('heading', { name: '値の更新と折り返し' })).not.toBeInTheDocument();
   expect(transport.start).toHaveBeenLastCalledWith({
     courseId: 'tuBeginner1',
     lectureId: navigation.lectureId,

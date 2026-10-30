@@ -163,7 +163,7 @@ const RegularExerciseSession: React.FC<Props> = ({
         lectureId={lectureId}
         title={
           mode === 'practice'
-            ? `練習：${practiceIdToDefinition[display.problemId].title}`
+            ? practiceIdToDefinition[display.problemId].title
             : problemIdToName[display.problemId as ProblemId]
         }
         actions={

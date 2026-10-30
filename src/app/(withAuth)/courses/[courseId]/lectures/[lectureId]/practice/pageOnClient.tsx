@@ -69,11 +69,7 @@ const PracticeSession: React.FC<{ courseId: CourseId; lectureId: string }> = ({ 
       />
     );
   return (
-    <VStack align="stretch" spacing={5}>
-      <Text>練習モード：課題の成績・進捗には影響しません。ヒントを使って何度でも練習できます。</Text>
-      <Button alignSelf="start" onClick={back}>
-        授業回に戻る
-      </Button>
+    <VStack align="stretch" spacing={4}>
       {display ? (
         <RegularExerciseBody
           mode="practice"
@@ -96,6 +92,9 @@ const PracticeSession: React.FC<{ courseId: CourseId; lectureId: string }> = ({ 
       ) : message ? (
         <>
           <Text role="alert">{message}</Text>
+          <Button alignSelf="start" onClick={back}>
+            授業回に戻る
+          </Button>
           <Button
             onClick={() => {
               setMessage('');

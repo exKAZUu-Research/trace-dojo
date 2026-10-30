@@ -11,6 +11,7 @@ import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefe
 import { useAuthContextSelector } from '@/contexts/AuthContext';
 import {
   Box,
+  Button,
   Card,
   CardBody,
   CardHeader,
@@ -90,6 +91,14 @@ export const Lecture: React.FC<Props> = (props) => {
               value={completedProblemCount}
             />
 
+            <Button
+              alignSelf="start"
+              as={NextLinkWithoutPrefetch}
+              colorScheme="brand"
+              href={`/courses/${params.courseId}/lectures/${params.lectureId}/practice`}
+            >
+              練習する（成績に影響しません）
+            </Button>
             <Table
               mx={-5}
               sx={{
@@ -161,12 +170,6 @@ export const Lecture: React.FC<Props> = (props) => {
               </Tbody>
             </Table>
 
-            <Link
-              as={NextLinkWithoutPrefetch}
-              href={`/courses/${params.courseId}/lectures/${params.lectureId}/practice`}
-            >
-              練習する（成績に影響しません）
-            </Link>
             <ChallengeModeButton courseId={params.courseId} lectureId={params.lectureId} />
           </CardBody>
         </Card>
