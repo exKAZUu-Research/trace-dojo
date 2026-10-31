@@ -1,13 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import { ProblemPageHeader } from './problems/[problemId]/ProblemPageHeader';
-import {
-  deriveRegularProblemView,
-  RegularProblemPresentation,
-} from './problems/[problemId]/RegularProblemPresentation';
-import { ResultAlertDialog } from './problems/[problemId]/ResultAlertDialog';
-import { BoardEditor, type TurtleGraphicsHandle } from './problems/[problemId]/BoardEditor';
+
 import {
   AlertDialog,
   AlertDialogBody,
@@ -19,11 +13,18 @@ import {
   Text,
 } from '@/infrastructures/useClient/chakra';
 import { instantiateProblem } from '@/problems/instantiateProblem';
-import { problemIdToName, type CourseId, type ProblemId } from '@/problems/problemData';
+import { practiceIdToDefinition } from '@/problems/practice/definitions';
+import { instantiatePracticeProblem } from '@/problems/practice/instantiatePracticeProblem';
+import { type CourseId, type ProblemId, problemIdToName } from '@/problems/problemData';
 import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
 
-import { instantiatePracticeProblem } from '@/problems/practice/instantiatePracticeProblem';
-import { practiceIdToDefinition } from '@/problems/practice/definitions';
+import { BoardEditor, type TurtleGraphicsHandle } from './problems/[problemId]/BoardEditor';
+import { ProblemPageHeader } from './problems/[problemId]/ProblemPageHeader';
+import {
+  deriveRegularProblemView,
+  RegularProblemPresentation,
+} from './problems/[problemId]/RegularProblemPresentation';
+import { ResultAlertDialog } from './problems/[problemId]/ResultAlertDialog';
 
 export type ExerciseMode = 'challenge' | 'practice';
 interface SubmitInput {
@@ -60,6 +61,7 @@ export const RegularExerciseBody: React.FC<Props> = (props) => (
   />
 );
 
+// code-gauge-allow functionNcss 58 -- Keeps the shared session state and its rendering together; splitting it would only relocate complexity.
 const RegularExerciseSession: React.FC<Props> = ({
   mode,
   courseId,
@@ -180,7 +182,7 @@ const RegularExerciseSession: React.FC<Props> = ({
         </Text>
       )}
       <RegularProblemPresentation
-        enableSyntaxHints={mode === 'practice'}
+        enableSyntaxHints
         problem={problem}
         view={view}
         viewingTraceItemIndex={viewingIndex}

@@ -247,7 +247,8 @@ test('a late practice Next response cannot replace the challenge page or its ans
   });
   const code = rendered.container.querySelector('code');
   if (!code) throw new Error('Challenge source must render');
-  expect(within(code).queryByRole('button')).not.toBeInTheDocument();
+  await user.hover(within(code).getAllByRole('button', { name: 'int の説明' })[0]);
+  expect(await screen.findByRole('tooltip')).toHaveTextContent('整数');
 });
 
 test('a stale step draft is discarded when reloading the practice route into its replacement session', async () => {
