@@ -1,5 +1,5 @@
-import { courseIdToLectureIds, type CourseId } from '../problemData';
 import { extractBlanks } from '../fillInBlank/blanks';
+import { type CourseId, courseIdToLectureIds } from '../problemData';
 import { beginner1PracticeDefinitions } from './beginner1';
 import { beginner2PracticeDefinitions } from './beginner2';
 import { testPracticeDefinitions } from './test';

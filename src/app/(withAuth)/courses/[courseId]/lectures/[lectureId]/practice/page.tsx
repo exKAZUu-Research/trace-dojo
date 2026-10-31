@@ -1,7 +1,9 @@
 import { notFound } from 'next/navigation';
+
+import { type MyAuthorizedNextPageOrLayout, withAuthorizationOnServer } from '@/app/utils/withAuth';
+import { type CourseId, courseIdToLectureIds } from '@/problems/problemData';
+
 import { PracticePageOnClient } from './pageOnClient';
-import { withAuthorizationOnServer, type MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
-import { courseIdToLectureIds, type CourseId } from '@/problems/problemData';
 
 const PracticePage: MyAuthorizedNextPageOrLayout<{ courseId: CourseId; lectureId: string }> = ({ params }) => {
   if (

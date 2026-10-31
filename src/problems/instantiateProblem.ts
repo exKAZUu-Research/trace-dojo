@@ -1,6 +1,6 @@
 import { extractBlanks } from './fillInBlank/blanks';
-import { instantiateTemplate, type InstantiatedProblem } from './instantiateTemplate';
-import { problemIdToLanguageIdToProgram, type LanguageId, type ProblemId } from './problemData';
+import { type InstantiatedProblem, instantiateTemplate } from './instantiateTemplate';
+import { type LanguageId, type ProblemId, problemIdToLanguageIdToProgram } from './problemData';
 
 export type { InstantiatedProblem } from './instantiateTemplate';
 

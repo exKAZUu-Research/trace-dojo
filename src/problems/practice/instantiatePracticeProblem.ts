@@ -1,4 +1,4 @@
-import { instantiateTemplate, type InstantiatedProblem } from '../instantiateTemplate';
+import { type InstantiatedProblem, instantiateTemplate } from '../instantiateTemplate';
 import type { LanguageId } from '../problemData';
 import { practiceIdToDefinition } from './definitions';
 

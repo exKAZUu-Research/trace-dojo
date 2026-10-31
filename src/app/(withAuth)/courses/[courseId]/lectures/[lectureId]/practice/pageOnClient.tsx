@@ -2,13 +2,15 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { RegularExerciseBody } from '../RegularExerciseBody';
-import { ReloadNotice } from '../problems/[problemId]/ReloadNotice';
+
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
 import { Button, Spinner, Text, VStack } from '@/infrastructures/useClient/chakra';
 import type { CourseId } from '@/problems/problemData';
 import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
 import { isChallengeSessionStale } from '@/utils/problemSessionError';
+
+import { ReloadNotice } from '../problems/[problemId]/ReloadNotice';
+import { RegularExerciseBody } from '../RegularExerciseBody';
 
 export const PracticePageOnClient: React.FC = () => {
   const { courseId, lectureId } = useParams<{ courseId: CourseId; lectureId: string }>();

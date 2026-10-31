@@ -2,9 +2,9 @@ import { expect, test } from 'vitest';
 
 import { TURTLE_GRAPHICS_BOARD_COLUMNS, TURTLE_GRAPHICS_BOARD_ROWS } from '../../src/constants';
 import { instantiateProblem } from '../../src/problems/instantiateProblem';
-import { courseIdToLectureIds } from '../../src/problems/problemData';
 import { getPracticeProblemIds, practiceDefinitions } from '../../src/problems/practice/definitions';
 import { instantiatePracticeProblem } from '../../src/problems/practice/instantiatePracticeProblem';
+import { courseIdToLectureIds } from '../../src/problems/problemData';
 
 for (const [courseId, lectureIds] of Object.entries(courseIdToLectureIds)) {
   test.each(lectureIds)(
