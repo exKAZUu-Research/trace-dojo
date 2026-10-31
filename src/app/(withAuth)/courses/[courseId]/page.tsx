@@ -1,14 +1,14 @@
 import { notFound } from 'next/navigation';
 
-import { CoursePageOnClient } from './pageOnClient';
-
 import { withAuthorizationOnServer } from '@/app/utils/withAuth';
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
-import { logger } from '@/infrastructures/pino';
 import { db } from '@/infrastructures/database';
+import { logger } from '@/infrastructures/pino';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import type { CourseId } from '@/problems/problemData';
 import { courseIdToLectureIds } from '@/problems/problemData';
+
+import { CoursePageOnClient } from './pageOnClient';
 
 const CoursePage: MyAuthorizedNextPageOrLayout<{ courseId: CourseId }> = async ({ params, session }) => {
   if (!(params.courseId in courseIdToLectureIds)) notFound();
