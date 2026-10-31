@@ -194,16 +194,14 @@ s.set('value', s.get('value') + 1);`
   ...[1, 2, 3].map((variant) =>
     define(
       2,
-      'ReadUpdatedExpression',
-      '更新した値から計算する',
+      'ReadExpression',
+      '値から計算する',
       variant,
       `        Turtle t = new Turtle(${variant}, 1); // step
         int value = ${variant}; // step
-        value++; // step
         int next = value + 1; // step`,
       `const t = new Turtle(${variant}, 1); registerDisplayRef('t', () => t); // step
 s.set('value', ${variant});
-s.set('value', s.get('value') + 1);
 s.set('next', s.get('value') + 1);`
     )
   ),

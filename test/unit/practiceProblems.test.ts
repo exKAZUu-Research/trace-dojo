@@ -134,3 +134,26 @@ test('a two-dimensional update reaches the indexed constructor argument', () => 
   });
   expect(problem?.finalTurtles).toEqual([{ x: 3, y: 0, dir: 'N', color: '#' }]);
 });
+
+test.each([1, 2, 3])('direct expression variant %i reads the unchanged scalar at the expression step', (initial) => {
+  const problem = instantiatePracticeProblem(
+    `practiceEasyV1Beginner1L2ReadExpressionV${initial}`,
+    'java',
+    'expression'
+  );
+  expect(problem).toBeDefined();
+  if (!problem) throw new Error('Missing direct expression practice program');
+  const scalarSteps = problem.traceItems.filter((item) => item.vars.value !== undefined);
+  expect(scalarSteps.length).toBeGreaterThan(0);
+  expect(scalarSteps.every((item) => item.vars.value === initial)).toBe(true);
+  expect(scalarSteps.some((item) => item.vars.next === undefined)).toBe(true);
+  expect(problem.finalVars).toEqual({ value: initial, next: initial + 1 });
+  expect(problem.finalTurtles).toEqual([{ x: initial, y: 1, dir: 'N', color: '#' }]);
+  const lines = problem.displayProgram.split('\n');
+  const expressionStep = problem.traceItems.find((item) => {
+    const line = problem.sidToLineIndex.get(item.sid);
+    return line !== undefined && lines[line - 1]?.includes('int next = value + 1;');
+  });
+  expect(expressionStep?.vars.value).toBe(initial);
+  expect(problem.displayProgram).not.toContain('value++');
+});
