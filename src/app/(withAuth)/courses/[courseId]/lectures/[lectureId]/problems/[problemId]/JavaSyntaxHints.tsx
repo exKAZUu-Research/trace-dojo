@@ -1,16 +1,17 @@
 import { Box, Portal, useColorModeValue, useTooltip } from '@chakra-ui/react';
 import {
   cloneElement,
-  useEffect,
-  useRef,
   type FocusEvent,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactElement,
+  useEffect,
+  useRef,
 } from 'react';
-import { createElement, Prism, type createElementProps, type SyntaxHighlighterProps } from 'react-syntax-highlighter';
+import { createElement, type createElementProps, Prism, type SyntaxHighlighterProps } from 'react-syntax-highlighter';
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useImmer } from 'use-immer';
+
 import { getJavaSyntaxHint, type JavaSyntaxHintContent } from './javaSyntaxHintContent';
 
 type RendererProps = Parameters<NonNullable<SyntaxHighlighterProps['renderer']>>[0];
