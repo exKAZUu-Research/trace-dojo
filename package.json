@@ -59,7 +59,7 @@
     "@trpc/next": "11.19.0",
     "@trpc/react-query": "11.19.0",
     "@trpc/server": "11.19.0",
-    "@willbooster/shared-lib": "11.0.0",
+    "@willbooster/shared-lib": "11.1.0",
     "@willbooster/shared-lib-react": "6.3.0",
     "@willbooster/wb": "23.0.0",
     "at-decorators": "7.1.2",
