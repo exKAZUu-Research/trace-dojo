@@ -1,14 +1,8 @@
 'use client';
 
-import type { ProblemSession } from '../../../../../../../../../db/schema';
 import { useParams, useRouter } from 'next/navigation';
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-
-import type { TurtleGraphicsHandle } from './BoardEditor';
-import { BoardEditor } from './BoardEditor';
-import { deriveRegularProblemView, RegularProblemPresentation } from './RegularProblemPresentation';
-import { ResultAlertDialog } from './ResultAlertDialog';
 
 import { MAX_CHALLENGE_COUNT } from '@/constants';
 import { useAuthContextSelector } from '@/contexts/AuthContext';
@@ -17,6 +11,12 @@ import { useDisclosure } from '@/infrastructures/useClient/chakra';
 import type { InstantiatedProblem } from '@/problems/instantiateProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import type { ProblemType } from '@/types';
+
+import type { ProblemSession } from '../../../../../../../../../db/schema';
+import type { TurtleGraphicsHandle } from './BoardEditor';
+import { BoardEditor } from './BoardEditor';
+import { deriveRegularProblemView, RegularProblemPresentation } from './RegularProblemPresentation';
+import { ResultAlertDialog } from './ResultAlertDialog';
 
 interface Props {
   problem: InstantiatedProblem;

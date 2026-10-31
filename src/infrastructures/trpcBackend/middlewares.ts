@@ -2,7 +2,6 @@ import { TRPCError } from '@trpc/server';
 
 import { getSessionOnNode } from '../../utils/sessionOnNode';
 import { logger } from '../pino';
-
 import { middleware } from './trpc';
 
 const accessTokenRegex = /(?:^|;)\s*sAccessToken=([^;]*)/;

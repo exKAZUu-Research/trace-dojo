@@ -5,11 +5,6 @@ import type React from 'react';
 import { useState } from 'react';
 import { useImmer } from 'use-immer';
 
-import { BoardViewer } from './BoardViewer';
-import { SyntaxHighlighter } from './SyntaxHighlighter';
-import { Variables } from './Variables';
-import { ResultAlertDialog, type CompletionAction } from './ResultAlertDialog';
-
 import {
   Box,
   Button,
@@ -24,8 +19,13 @@ import {
 } from '@/infrastructures/useClient/chakra';
 import { toBlankPlaceholder } from '@/problems/fillInBlank/blanks';
 import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
-import type { TraceItemVariable, TurtleTrace } from '@/problems/traceProgram';
 import type { CourseId, ProblemId } from '@/problems/problemData';
+import type { TraceItemVariable, TurtleTrace } from '@/problems/traceProgram';
+
+import { BoardViewer } from './BoardViewer';
+import { type CompletionAction, ResultAlertDialog } from './ResultAlertDialog';
+import { SyntaxHighlighter } from './SyntaxHighlighter';
+import { Variables } from './Variables';
 
 interface Props {
   problem: {

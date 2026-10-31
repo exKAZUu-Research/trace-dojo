@@ -1,24 +1,27 @@
 import { randomUUID } from 'node:crypto';
+
 import { TRPCError } from '@trpc/server';
 import { and, asc, desc, eq, gt, gte } from 'drizzle-orm';
 import { z } from 'zod';
-import { exerciseSessions, exerciseSubmissions, type ExerciseSession } from '../../../../db/schema';
-import { db } from '../../database';
-import { logger } from '../../pino';
-import { authorize } from '../middlewares';
-import { procedure } from '../trpc';
+
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import type { ExerciseDisplay } from '@/problems/fillInBlank/exerciseProblem';
-import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
-import { gradeFillInBlankAnswers, type FillInBlankVerdict } from '@/problems/fillInBlank/grade';
-import { instantiateProblem, isFillInBlankProblem, type InstantiatedProblem } from '@/problems/instantiateProblem';
+import { type FillInBlankVerdict, gradeFillInBlankAnswers } from '@/problems/fillInBlank/grade';
+import { type InstantiatedProblem, instantiateProblem, isFillInBlankProblem } from '@/problems/instantiateProblem';
 import {
+  type CourseId,
   courseIdToLectureIds,
   courseIdToLectureIndexToExerciseProblemIds,
   courseIdToLectureIndexToProblemIds,
   problemIdToLanguageIdToProgram,
-  type CourseId,
 } from '@/problems/problemData';
+import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
+
+import { type ExerciseSession, exerciseSessions, exerciseSubmissions } from '../../../../db/schema';
+import { db } from '../../database';
+import { logger } from '../../pino';
+import { authorize } from '../middlewares';
+import { procedure } from '../trpc';
 
 type ProblemFormat = 'fillInBlank' | 'regular';
 const locationSchema = z.object({ courseId: z.string(), lectureId: z.string() });

@@ -2,13 +2,7 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { type ChallengeProblemFormat } from './ChallengeSelection';
-import { ChallengeSelectionModal } from './ChallengeSelectionModal';
-import { RegularChallengeBody } from './RegularChallengeBody';
-import { FillInBlankBody } from '../problems/[problemId]/FillInBlankBody';
-import { ProblemPageHeader } from '../problems/[problemId]/ProblemPageHeader';
-import { ReloadNotice } from '../problems/[problemId]/ReloadNotice';
-import type { CompletionAction } from '../problems/[problemId]/ResultAlertDialog';
+
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
 import { Center, Spinner, VStack } from '@/infrastructures/useClient/chakra';
 import type { ExerciseDisplay } from '@/problems/fillInBlank/exerciseProblem';
@@ -16,6 +10,14 @@ import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
 import { isChallengeSessionStale } from '@/utils/problemSessionError';
+
+import { FillInBlankBody } from '../problems/[problemId]/FillInBlankBody';
+import { ProblemPageHeader } from '../problems/[problemId]/ProblemPageHeader';
+import { ReloadNotice } from '../problems/[problemId]/ReloadNotice';
+import type { CompletionAction } from '../problems/[problemId]/ResultAlertDialog';
+import { type ChallengeProblemFormat } from './ChallengeSelection';
+import { ChallengeSelectionModal } from './ChallengeSelectionModal';
+import { RegularChallengeBody } from './RegularChallengeBody';
 
 type Display = ExerciseDisplay | RegularExerciseDisplay;
 interface Props {

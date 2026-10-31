@@ -5,7 +5,7 @@ telemetry = false
 exact = true
 globalStore = false
 linker = "isolated"
-publicHoistPattern = ["tsx", "undici-types"]
+publicHoistPattern = ["tsx"]
 minimumReleaseAge = 604800
 minimumReleaseAgeExcludes = [
   "@exercode/problem-utils",
@@ -16,8 +16,11 @@ minimumReleaseAgeExcludes = [
   "@willbooster-private/ai-ocr",
   "@willbooster-private/code-analyzer",
   "@willbooster-private/judge",
+  "@willbooster-private/kaizen-spring",
   "@willbooster-private/llm-proxy",
   "@willbooster-private/review-booster",
+  "@willbooster-private/rubitasu",
+  "@willbooster-private/slidev-theme-willbooster",
   "@willbooster/babel-configs",
   "@willbooster/biome-config",
   "@willbooster/eslint-config-blitz-next",
@@ -42,10 +45,23 @@ minimumReleaseAgeExcludes = [
   "@willbooster/tree-sitter-c",
   "@willbooster/tree-sitter-c-sharp",
   "@willbooster/tree-sitter-cpp",
+  "@willbooster/tree-sitter-css",
+  "@willbooster/tree-sitter-dart",
+  "@willbooster/tree-sitter-embedded-template",
+  "@willbooster/tree-sitter-go",
+  "@willbooster/tree-sitter-haskell",
+  "@willbooster/tree-sitter-html",
+  "@willbooster/tree-sitter-java",
   "@willbooster/tree-sitter-javascript",
   "@willbooster/tree-sitter-kotlin",
+  "@willbooster/tree-sitter-markdown",
+  "@willbooster/tree-sitter-php",
+  "@willbooster/tree-sitter-python",
+  "@willbooster/tree-sitter-ruby",
   "@willbooster/tree-sitter-rust",
   "@willbooster/tree-sitter-typescript",
+  "@willbooster/tree-sitter-xml",
+  "@willbooster/tree-sitter-zig",
   "@willbooster/wb",
   "@willbooster/wbfy",
   "@willbooster/web-tree-sitter",
@@ -61,21 +77,63 @@ minimumReleaseAgeExcludes = [
   "code-gauge-linux-x64-gnu",
   "code-gauge-linux-x64-musl",
   "code-gauge-win32-x64-msvc",
+  "commitkv",
   "gen-i18n-ts",
   "minimal-promise-pool",
   "one-way-git-sync",
   "slidev-check",
+  "tokzip",
   "vinext-progress",
   "wbfy",
   "yarn-plugin-auto-install",
-  "@anthropic-ai/claude-agent-sdk",
-  "@anthropic-ai/claude-agent-sdk-darwin-arm64",
-  "@anthropic-ai/claude-agent-sdk-darwin-x64",
-  "@anthropic-ai/claude-agent-sdk-linux-arm64",
-  "@anthropic-ai/claude-agent-sdk-linux-arm64-musl",
-  "@anthropic-ai/claude-agent-sdk-linux-x64",
-  "@anthropic-ai/claude-agent-sdk-linux-x64-musl",
-  "@anthropic-ai/claude-agent-sdk-win32-arm64",
-  "@anthropic-ai/claude-agent-sdk-win32-x64",
-  "@openai/codex-sdk",
 ]
+
+[fmt]
+flavor = "oxfmt"
+printWidth = 120
+singleQuote = true
+sortImports = true
+sortPackageJson = true
+trailingComma = "es5"
+ignorePatterns = [
+  "**/.agents/**",
+  "**/.claude/**",
+  "**/.devcontainer/**",
+  "**/.idea/AugmentWebviewStateStore.xml",
+  "**/.idea/copilot*/**",
+  "**/.playwright-cli/**",
+  "**/.serena/**",
+  "**/.tmp/**",
+  "**/.venv/**",
+  "**/.yarn/**",
+  "**/3rd-party/**",
+  "**/@types/**",
+  "**/@willbooster/**",
+  "**/__generated__/**",
+  "**/android/**",
+  "**/bin/**",
+  "**/build/**",
+  "**/coverage/**",
+  "**/dist/**",
+  "**/ios/**",
+  "**/no-format/**",
+  "**/node_modules/**",
+  "**/temp/**",
+  "**/tmp/**",
+  "**/test-fixtures/**",
+  "**/test-results/**",
+  "**/test/fixtures/**",
+  "**/.aider*",
+  "**/.env.production",
+  "**/.pnp.js",
+  "**/*/mount/*.hash",
+  "**/*.d.ts",
+  "**/*.java",
+  "**/*.min.*js",
+  "**/src/grammar.json",
+  "**/src/node-types.json",
+]
+
+[[fmt.overrides]]
+files = ["**/oxlint.config.ts"]
+options = { sortImports = false }

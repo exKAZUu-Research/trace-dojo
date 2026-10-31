@@ -5,8 +5,7 @@
     "allowSyntheticDefaultImports": true,
     "alwaysStrict": true,
     "paths": {
-      "@/*": ["./src/*"],
-      "undici-types": ["./node_modules/undici-types/index.d.ts"]
+      "@/*": ["./src/*"]
     },
     "declaration": true,
     "esModuleInterop": true,

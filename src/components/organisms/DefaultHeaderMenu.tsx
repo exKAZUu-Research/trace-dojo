@@ -2,8 +2,6 @@
 
 import { MdKeyboardArrowDown, MdOutlinePerson, MdOutlineSettings } from 'react-icons/md';
 
-import { SignOutMenuItem } from './SignOutMenuItem';
-
 import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefetch';
 import {
   Avatar,
@@ -15,6 +13,8 @@ import {
   MenuItem,
   MenuList,
 } from '@/infrastructures/useClient/chakra';
+
+import { SignOutMenuItem } from './SignOutMenuItem';
 
 interface Props {
   displayName: string;

@@ -1,4 +1,4 @@
-import { createORPCClient, type Client } from '@orpc/client';
+import { type Client, createORPCClient } from '@orpc/client';
 import { RPCLink } from '@orpc/client/fetch';
 import { z } from 'zod';
 

@@ -1,11 +1,9 @@
 'use client';
 
-import type { ProblemSession, ProblemSubmission } from '../../../../../../../db/schema';
 import { useLocalStorage } from '@willbooster/shared-lib-react';
 import { useParams } from 'next/navigation';
 import { useEffect, useMemo } from 'react';
 import { MdCheckCircle, MdCheckCircleOutline, MdOutlineVerified, MdVerified } from 'react-icons/md';
-import { ChallengeModeButton } from './ChallengeModeButton';
 
 import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefetch';
 import { useAuthContextSelector } from '@/contexts/AuthContext';
@@ -32,6 +30,9 @@ import {
 import type { CourseId } from '@/problems/problemData';
 import { courseIdToLectureIndexToProblemIds, courseIdToName, problemIdToName } from '@/problems/problemData';
 import { getLectureStorageKey } from '@/utils/lectureStorage';
+
+import type { ProblemSession, ProblemSubmission } from '../../../../../../../db/schema';
+import { ChallengeModeButton } from './ChallengeModeButton';
 
 interface Props {
   learningPeriodStart?: string;

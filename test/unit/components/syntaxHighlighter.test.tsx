@@ -131,7 +131,7 @@ class Example<T extends Number & Runnable> {
   const productLine = code.children[2];
   const bitsLine = code.children[3];
   if (!(productLine instanceof HTMLElement) || !(bitsLine instanceof HTMLElement)) {
-    throw new Error('Operator source lines must be rendered');
+    throw new TypeError('Operator source lines must be rendered');
   }
   expect(within(productLine).getByRole('button', { name: '* の説明' })).toBeVisible();
   expect(within(bitsLine).getByRole('button', { name: '& の説明' })).toBeVisible();
