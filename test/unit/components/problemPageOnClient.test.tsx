@@ -1,17 +1,17 @@
 // @vitest-environment jsdom
 
 import { ChakraProvider } from '@chakra-ui/react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, test, vi } from 'vitest';
 
-const infrastructure = vi.hoisted(() => ({ isAdmin: false }));
+const infrastructure = vi.hoisted(() => ({ isAdmin: false, problemId: 'test3' }));
 vi.mock('next/navigation', () => ({
   notFound: vi.fn(),
   useParams: () => ({
     courseId: 'test',
     lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
-    problemId: 'test3',
+    problemId: infrastructure.problemId,
   }),
   useRouter: () => ({ push: vi.fn() }),
 }));
@@ -33,6 +33,7 @@ import { ProblemPageOnClient } from '../../../src/app/(withAuth)/courses/[course
 
 beforeEach(() => {
   infrastructure.isAdmin = false;
+  infrastructure.problemId = 'test3';
 });
 
 test.each([
@@ -49,6 +50,18 @@ test.each([
     await userEvent.setup().hover(control);
     expect(await screen.findByText('減点になりますが、確実に問題を解けます。')).toBeInTheDocument();
   }
+});
+
+test('keeps syntax hints disabled in ordinary fill-in questions', async () => {
+  infrastructure.problemId = 'fillInBlank2';
+  const user = userEvent.setup();
+  const { container } = renderPage('fillInBlank');
+  expect(screen.getAllByRole('textbox').length).toBeGreaterThan(0);
+  const code = container.querySelector('code');
+  if (!code) throw new Error('Fill-in source must be rendered');
+  expect(within(code).queryByRole('button')).not.toBeInTheDocument();
+  await user.hover(within(code).getAllByText('int', { exact: true })[0]);
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
 });
 
 test('hides regular controls for fill-in-blank and retains the admin next-step action', () => {

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { ChakraProvider } from '@chakra-ui/react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, test, vi } from 'vitest';
 
@@ -22,6 +22,30 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
 
 import { ProblemBody } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/ProblmBody';
 import { instantiateProblem } from '../../../src/problems/instantiateProblem';
+
+test.each(['executionResult', 'step'] as const)(
+  'keeps syntax hints disabled in ordinary %s assignments',
+  async (problemType) => {
+    const user = userEvent.setup();
+    const problem = instantiateProblem('test3', 'java', 'normal-component');
+    if (!problem) throw new Error('test3 must instantiate');
+    const { container } = render(
+      <ChakraProvider>
+        <ProblemBody
+          problem={problem}
+          problemSession={{ id: 7, problemType, traceItemIndex: problemType === 'step' ? 1 : 0 } as never}
+          createSubmissionUpdatingProblemSession={vi.fn()}
+          updateProblemSession={vi.fn()}
+        />
+      </ChakraProvider>
+    );
+    const code = container.querySelector('code');
+    if (!code) throw new Error('Assignment source must be rendered');
+    expect(within(code).queryByRole('button')).not.toBeInTheDocument();
+    await user.hover(within(code).getAllByText('int', { exact: true })[0]);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  }
+);
 
 test('keeps the normal three-wrong automatic fallback through the real editor', async () => {
   count.value = 0;

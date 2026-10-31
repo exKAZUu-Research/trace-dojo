@@ -66,6 +66,18 @@ const renderPage = (initialFormat?: 'regular' | 'fillInBlank', strict = false): 
 
 beforeEach(() => vi.clearAllMocks());
 
+test('keeps syntax hints disabled in challenge fill-in questions', async () => {
+  transport.start.mockResolvedValue(blankDisplay);
+  const user = userEvent.setup();
+  const { container } = renderPage('fillInBlank');
+  await screen.findByRole('textbox', { name: '空欄【1】' });
+  const code = container.querySelector('code');
+  if (!code) throw new Error('Fill-in source must be rendered');
+  expect(within(code).queryByRole('button')).not.toBeInTheDocument();
+  await user.hover(within(code).getByText('int', { exact: true }));
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+});
+
 test('a valid URL format starts exactly once under StrictMode and renders the exercise', async () => {
   transport.start.mockResolvedValue(blankDisplay);
   renderPage('fillInBlank', true);
