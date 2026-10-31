@@ -5,9 +5,8 @@ import { MdOutlineZoomIn, MdOutlineZoomOut } from 'react-icons/md';
 import { Prism } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 
-import { JavaSyntaxHints } from './JavaSyntaxHints';
-
 import { Box, IconButton } from '../../../../../../../../infrastructures/useClient/chakra';
+import { JavaSyntaxHints } from './JavaSyntaxHints';
 
 type SyntaxHighlighterProps = BoxProps & {
   code: string;
