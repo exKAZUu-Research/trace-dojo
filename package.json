@@ -61,7 +61,7 @@
     "@trpc/server": "11.19.0",
     "@willbooster/shared-lib": "11.1.0",
     "@willbooster/shared-lib-react": "6.3.0",
-    "@willbooster/wb": "23.0.0",
+    "@willbooster/wb": "23.0.2",
     "at-decorators": "7.1.2",
     "csv-parse": "7.0.3",
     "dayjs": "1.11.23",
