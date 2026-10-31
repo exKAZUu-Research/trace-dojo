@@ -1,0 +1,5 @@
+Practice programs are independently authored teaching examples reserved for ungraded practice. Keep them out of assignment pools. Review new practice and assignment templates against both banks. Common elementary syntax idioms may overlap, but assignment-specific sequences, dependencies, or combined conditions and control flow must not reveal a complete assignment solution through renamed identifiers, changed literals, formatting, or decorative statements alone. Preserve matching Java and instrumented behavior and validate both execution paths when editing a template.
+
+Each configured lecture contains three elementary patterns with three fixed, learner-visible variants each. Keep concrete variants deterministic and free of hidden numeric placeholders. Selection excludes the immediately preceding question ID; it does not guarantee that all nine questions appear before one repeats.
+
+Practice IDs include the bank version, course, lecture, descriptive family, and variant (for example, `practiceEasyV1Beginner1L1TerminalTurnV1`).

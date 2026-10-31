@@ -2,7 +2,13 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
+import { ChakraProvider } from '@chakra-ui/react';
+import { createTRPCUntypedClient, httpLink, type TRPCUntypedClient } from '@trpc/client';
+import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 import { migrate } from 'drizzle-orm/node-sqlite/migrator';
+import { createElement, type ReactNode } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import superjson from 'superjson';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import { z } from 'zod';
 
@@ -15,6 +21,26 @@ import type { instantiateProblem as instantiateProblemType } from '../../src/pro
 const auth = vi.hoisted(() => ({ userId: 'student' }));
 vi.mock('../../src/utils/sessionOnNode', () => ({
   getSessionOnNode: async () => ({ superTokensUserId: auth.userId }),
+}));
+vi.mock('../../src/app/utils/withAuth', () => ({
+  withAuthorizationOnServer:
+    (page: (props: object) => Promise<ReactNode>) =>
+    async ({ params }: { params: Promise<object> }) =>
+      page({ params: await params, session: { superTokensUserId: auth.userId }, searchParams: {} }),
+}));
+vi.mock('next/navigation', () => ({
+  notFound: () => {
+    throw new Error('NEXT_NOT_FOUND');
+  },
+  useParams: () => ({ courseId: 'test', lectureId: 'test' }),
+  useRouter: () => ({ push: vi.fn() }),
+}));
+vi.mock('../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/pageOnClient', () => ({
+  ProblemPageOnClient: () => {},
+}));
+vi.mock('../../src/contexts/AuthContext', () => ({
+  useAuthContextSelector: (selector: (value: { currentUserId: string }) => unknown) =>
+    selector({ currentUserId: auth.userId }),
 }));
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 vi.mock('../../src/problems/fillInBlank/javaExecutors', async (importOriginal) => {
@@ -40,6 +66,7 @@ let directory: string;
 let sqlite: DatabaseSync;
 let db: typeof databaseClient;
 let caller: ReturnType<BackendRouter['createCaller']>;
+let runtimeCaller: TRPCUntypedClient<BackendRouter>;
 let instantiateProblem: typeof instantiateProblemType;
 let challengeMap: ChallengeMap;
 let originalChallengeTestLectures: string[][] | undefined;
@@ -57,6 +84,22 @@ beforeAll(async () => {
   ({ db } = await import('../../src/infrastructures/database'));
   migrate(db, { migrationsFolder: 'drizzle' });
   const { backendRouter } = await import('../../src/infrastructures/trpcBackend/routers');
+  runtimeCaller = createTRPCUntypedClient<BackendRouter>({
+    links: [
+      httpLink({
+        url: 'http://localhost/api/trpc',
+        transformer: superjson,
+        headers: { Cookie: 'sAccessToken=test' },
+        fetch: async (url, options) =>
+          fetchRequestHandler({
+            endpoint: '/api/trpc',
+            req: new Request(url, options),
+            router: backendRouter,
+            createContext: (context) => context,
+          }),
+      }),
+    ],
+  });
   caller = backendRouter.createCaller({
     req: new Request('http://localhost', { headers: { Cookie: 'sAccessToken=test' } }),
     resHeaders: new Headers(),
@@ -353,7 +396,7 @@ test('keeps a completed session visible when Next configuration fails and create
   expect(completed).toMatchObject({ sessionId: exercise.sessionId, completed: true });
   expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSession').count).toBe(1);
 
-  challengeMap.test = [['notRegistered'], ['fillInBlank1']];
+  challengeMap.test = [['fillInBlank2', 'notRegistered'], ['fillInBlank1']];
   await expect(caller.nextExercise({ ...locationOnly(), sessionId: exercise.sessionId })).rejects.toMatchObject({
     code: 'INTERNAL_SERVER_ERROR',
   });
@@ -464,7 +507,6 @@ test('keeps regular incorrect verdicts in execution-result mode and derives comp
     const result = await submitRegular(regular, `wrong-${index}`, false);
     expect(result).toMatchObject({ problemType: 'executionResult', traceItemIndex: 0, completed: false });
   }
-  sqlite.prepare("UPDATE ExerciseSession SET problemId = 'does-not-exist' WHERE id = ?").run(regular.sessionId);
   expect(await submitRegular(regular, 'correct', true)).toMatchObject({ completed: true });
   const submissions = z
     .array(
@@ -484,6 +526,18 @@ test('keeps regular incorrect verdicts in execution-result mode and derives comp
         .all()
     );
   expect(submissions.map(({ status }) => status)).toEqual([...Array.from({ length: 4 }, () => 'incorrect'), 'correct']);
+});
+
+test('rejects a corrupted challenge identity without changing exercise rows', async () => {
+  const regular = await startRegular();
+  sqlite.prepare("UPDATE ExerciseSession SET problemId = 'does-not-exist' WHERE id = ?").run(regular.sessionId);
+  const before = exerciseRows();
+  await expect(submitRegular(regular, 'corrupt-challenge', true)).rejects.toMatchObject({
+    code: 'INTERNAL_SERVER_ERROR',
+  });
+  expect(exerciseRows()).toEqual(before);
+  await expect(startRegular()).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
+  expect(exerciseRows()).toEqual(before);
 });
 
 test('switches regular exercise one way, resumes step 1, then advances and completes at the final trace item', async () => {
@@ -751,6 +805,334 @@ test('leaves a regular session unchanged when the step switch update fails', asy
   } finally {
     sqlite.exec('DROP TRIGGER reject_regular_switch');
   }
+});
+
+test('practice resumes independently, repeats through step mode, and leaves overlapping graded records unchanged', async () => {
+  const practice = await startPractice();
+  const normal = db
+    .insert(problemSessions)
+    .values({
+      id: practice.sessionId,
+      userId: 'student',
+      courseId: 'test',
+      lectureId: 'test',
+      problemId: 'test1',
+      problemVariablesSeed: 'graded-overlap',
+      problemType: 'executionResult',
+      traceItemIndex: 0,
+      elapsedMilliseconds: 321,
+    })
+    .returning()
+    .get()!;
+  db.insert(problemSubmissions)
+    .values({
+      sessionId: normal.id,
+      problemType: 'executionResult',
+      traceItemIndex: 0,
+      elapsedMilliseconds: 321,
+      isCorrect: false,
+    })
+    .run();
+  const gradedBefore = normalRows();
+  const challenge = await startRegular();
+  expect(challenge.sessionId).not.toBe(practice.sessionId);
+  expect(instantiateProblem(practice.problemId, 'java', practice.seed)).toBeUndefined();
+  expect(await startPractice()).toEqual(practice);
+  expect(await startRegular()).toEqual(challenge);
+
+  const wrongInput = practiceSubmission(practice, 'shared-request', false);
+  const [wrong, replay] = await Promise.all([
+    runtimeCaller.mutation('submitRegularExercise', wrongInput),
+    runtimeCaller.mutation('submitRegularExercise', wrongInput),
+  ]);
+  expect(replay).toEqual(wrong);
+  expect(wrong).toMatchObject({ completed: false, problemType: 'executionResult', traceItemIndex: 0 });
+  await submitRegular(challenge, 'shared-request', false);
+  const challengeBefore = sqlite.prepare('SELECT * FROM ExerciseSession WHERE id = ?').get(challenge.sessionId);
+  const challengeAttemptsBefore = sqlite
+    .prepare('SELECT * FROM ExerciseSubmission WHERE sessionId = ?')
+    .all(challenge.sessionId);
+  const switched = regularDisplaySchema.parse(
+    await runtimeCaller.mutation('switchRegularExerciseToStep', practiceSession(practice.sessionId))
+  );
+  expect(switched).toMatchObject({
+    sessionId: practice.sessionId,
+    seed: practice.seed,
+    problemType: 'step',
+    traceItemIndex: 1,
+  });
+  expect(await startPractice()).toEqual(switched);
+  let current = switched;
+  while (!current.completed) {
+    expect(current.traceItemIndex).toBeLessThan(500);
+    const previousIndex = current.traceItemIndex;
+    current = regularDisplaySchema.parse(
+      await runtimeCaller.mutation('submitRegularExercise', practiceSubmission(current, `step-${previousIndex}`, true))
+    );
+    if (!current.completed) expect(current.traceItemIndex).toBe(previousIndex + 1);
+  }
+  expect(await startPractice()).toEqual(current);
+  const nextInput = { ...practiceSession(practice.sessionId), problemFormat: 'regular' as const };
+  const [nextValue, duplicate] = await Promise.all([
+    runtimeCaller.mutation('nextExercise', nextInput),
+    runtimeCaller.mutation('nextExercise', nextInput),
+  ]);
+  expect(duplicate).toEqual(nextValue);
+  const next = regularDisplaySchema.parse(nextValue);
+  expect(next).toMatchObject({ completed: false, problemType: 'executionResult', traceItemIndex: 0 });
+  expect(next.sessionId).not.toBe(practice.sessionId);
+  expect(next.seed).not.toBe(practice.seed);
+  expect(next.problemId).not.toBe(practice.problemId);
+  expect(await startPractice()).toEqual(next);
+  expect(sqlite.prepare('SELECT * FROM ExerciseSession WHERE id = ?').get(challenge.sessionId)).toEqual(
+    challengeBefore
+  );
+  expect(sqlite.prepare('SELECT * FROM ExerciseSubmission WHERE sessionId = ?').all(challenge.sessionId)).toEqual(
+    challengeAttemptsBefore
+  );
+  expect(
+    sqlite.prepare('SELECT status FROM ExerciseSubmission WHERE sessionId = ? ORDER BY id').all(practice.sessionId)
+  ).toEqual([
+    { status: 'incorrect' },
+    ...Array.from({ length: current.traceItemIndex }, () => ({ status: 'correct' })),
+  ]);
+  expect(normalRows()).toEqual(gradedBefore);
+});
+
+test('normal URLs reject practice and foreign membership before inserting, and rendered graded progress survives practice completion', async () => {
+  const { default: problemPage } =
+    await import('../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/page');
+  const { default: lecturePage } =
+    await import('../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/page');
+  const route = problemPage as unknown as (props: {
+    params: Promise<Location & { problemId: string }>;
+  }) => Promise<ReactNode>;
+  const lecture = lecturePage as unknown as (props: { params: Promise<Location> }) => Promise<ReactNode>;
+  const renderLecture = async (): Promise<string> =>
+    renderToStaticMarkup(createElement(ChakraProvider, {}, await lecture({ params: Promise.resolve(locationOnly()) })));
+  const beforeInvalid = normalRows();
+  for (const problemId of ['practiceEasyV1TestL1ScalarUpdateV1', 'practiceTestL1A', 'test2', 'missing', 'toString']) {
+    await expect(route({ params: Promise.resolve({ ...locationOnly(), problemId }) })).rejects.toThrow(
+      'NEXT_NOT_FOUND'
+    );
+    expect(normalRows()).toEqual(beforeInvalid);
+  }
+  await route({ params: Promise.resolve({ ...locationOnly(), problemId: 'test1' }) });
+  const graded = await db.query.problemSessions.findFirst({ where: { problemId: 'test1' } });
+  expect(graded).toBeDefined();
+  if (!graded) throw new Error('Valid normal URL must create a graded session');
+  db.insert(problemSubmissions)
+    .values({
+      sessionId: graded.id,
+      problemType: 'executionResult',
+      traceItemIndex: 0,
+      elapsedMilliseconds: 71,
+      isCorrect: false,
+    })
+    .run();
+  const gradedBefore = normalRows();
+  const progressBefore = await renderLecture();
+  expect(progressBefore).toContain('aria-valuenow="0"');
+  expect(progressBefore).toContain('初回の不正解');
+  expect(progressBefore).toContain('未完了');
+  const practice = await startPractice();
+  await runtimeCaller.mutation(
+    'submitRegularExercise',
+    practiceSubmission(practice, 'practice-wrong-for-progress', false)
+  );
+  const completed = regularDisplaySchema.parse(
+    await runtimeCaller.mutation(
+      'submitRegularExercise',
+      practiceSubmission(practice, 'practice-complete-for-progress', true)
+    )
+  );
+  expect(completed.completed).toBe(true);
+  await runtimeCaller.mutation('nextExercise', { ...practiceSession(practice.sessionId), problemFormat: 'regular' });
+  expect(normalRows()).toEqual(gradedBefore);
+  expect(await renderLecture()).toBe(progressBefore);
+});
+
+test('practice and challenge reject each other’s session IDs on submit, switch, and Next', async () => {
+  const challenge = await startRegular();
+  const practice = await startPractice();
+  const before = exerciseRows();
+  for (const [session, learningMode] of [
+    [challenge, 'practice'],
+    [practice, 'challenge'],
+  ] as const) {
+    const location = { ...locationOnly(), sessionId: session.sessionId, learningMode };
+    const submit = { ...practiceSubmission(session, 'wrong-mode', true), learningMode };
+    await expect(runtimeCaller.mutation('submitRegularExercise', submit)).rejects.toMatchObject({
+      data: { code: 'UNAUTHORIZED' },
+    });
+    await expect(runtimeCaller.mutation('switchRegularExerciseToStep', location)).rejects.toMatchObject({
+      data: { code: 'UNAUTHORIZED' },
+    });
+    await expect(
+      runtimeCaller.mutation('nextExercise', { ...location, problemFormat: 'regular' })
+    ).rejects.toMatchObject({
+      data: { code: 'UNAUTHORIZED' },
+    });
+  }
+  expect(exerciseRows()).toEqual(before);
+});
+
+test('practice rejects blank format and client-authored selectors without creating sessions', async () => {
+  const before = exerciseRows();
+  for (const extra of [{}, { problemFormat: 'fillInBlank' as const }]) {
+    const input = { ...locationOnly(), learningMode: 'practice' as const, ...extra };
+    await expect(runtimeCaller.mutation('startExercise', input)).rejects.toMatchObject({
+      data: { code: 'BAD_REQUEST' },
+    });
+  }
+  for (const extra of [{ problemId: 'test1' }, { seed: 'client-seed' }, { source: 'class Main {}' }]) {
+    const input = { ...locationOnly(), learningMode: 'practice' as const, problemFormat: 'regular' as const, ...extra };
+    await expect(runtimeCaller.mutation('startExercise', input)).rejects.toMatchObject({
+      data: { code: 'BAD_REQUEST' },
+    });
+  }
+  expect(exerciseRows()).toEqual(before);
+});
+
+test('practice rejects unknown and inherited course or lecture names without creating sessions', async () => {
+  const before = exerciseRows();
+  for (const location of [
+    { courseId: 'missing', lectureId: 'test' },
+    { courseId: '__proto__', lectureId: 'test' },
+    { courseId: 'constructor', lectureId: 'test' },
+    { courseId: 'test', lectureId: 'missing' },
+    { courseId: 'test', lectureId: '__proto__' },
+  ]) {
+    const input = { ...location, learningMode: 'practice' as const, problemFormat: 'regular' as const };
+    await expect(runtimeCaller.mutation('startExercise', input)).rejects.toMatchObject({ data: { code: 'NOT_FOUND' } });
+  }
+  expect(exerciseRows()).toEqual(before);
+});
+
+test('practice rejects blank submission and Next even when given a valid challenge session', async () => {
+  const blank = await start();
+  await runtimeCaller.mutation('submitExercise', submission(blank.sessionId, modelAnswers(blank.sessionId)));
+  const before = exerciseRows();
+  const submit = { ...submission(blank.sessionId, modelAnswers(blank.sessionId)), learningMode: 'practice' as const };
+  await expect(runtimeCaller.mutation('submitExercise', submit)).rejects.toMatchObject({
+    data: { code: 'BAD_REQUEST' },
+  });
+  const next = { ...practiceSession(blank.sessionId), problemFormat: 'fillInBlank' as const };
+  await expect(runtimeCaller.mutation('nextExercise', next)).rejects.toMatchObject({ data: { code: 'BAD_REQUEST' } });
+  expect(exerciseRows()).toEqual(before);
+});
+
+test('practice fails closed when its stored identity is replaced by a graded template', async () => {
+  const practice = await startPractice();
+  sqlite.prepare("UPDATE ExerciseSession SET problemId = 'test1' WHERE id = ?").run(practice.sessionId);
+  const before = exerciseRows();
+  await expect(startPractice()).rejects.toMatchObject({ data: { code: 'INTERNAL_SERVER_ERROR' } });
+  await expect(
+    runtimeCaller.mutation('submitRegularExercise', practiceSubmission(practice, 'corrupt', true))
+  ).rejects.toMatchObject({
+    data: { code: 'INTERNAL_SERVER_ERROR' },
+  });
+  await expect(
+    runtimeCaller.mutation('switchRegularExerciseToStep', practiceSession(practice.sessionId))
+  ).rejects.toMatchObject({
+    data: { code: 'INTERNAL_SERVER_ERROR' },
+  });
+  expect(exerciseRows()).toEqual(before);
+});
+
+test.each(['practiceTestL1Unknown', 'test1', 'practiceEasyV1Beginner1L1TerminalTurnV1'])(
+  'practice rejects unknown, graded, or wrong-location identity %s without writes',
+  async (problemId) => {
+    const initial = await startPractice();
+    sqlite.prepare('UPDATE ExerciseSession SET problemId = ? WHERE id = ?').run(problemId, initial.sessionId);
+    const before = exerciseRows();
+    await expect(startPractice()).rejects.toMatchObject({ data: { code: 'INTERNAL_SERVER_ERROR' } });
+    expect(exerciseRows()).toEqual(before);
+    await expect(
+      runtimeCaller.mutation('submitRegularExercise', practiceSubmission(initial, 'invalid-identity', false))
+    ).rejects.toMatchObject({ data: { code: 'INTERNAL_SERVER_ERROR' } });
+    expect(exerciseRows()).toEqual(before);
+    await expect(
+      runtimeCaller.mutation('switchRegularExerciseToStep', practiceSession(initial.sessionId))
+    ).rejects.toMatchObject({ data: { code: 'INTERNAL_SERVER_ERROR' } });
+    expect(exerciseRows()).toEqual(before);
+    await expect(
+      runtimeCaller.mutation('nextExercise', { ...practiceSession(initial.sessionId), problemFormat: 'regular' })
+    ).rejects.toMatchObject({ data: { code: 'INTERNAL_SERVER_ERROR' } });
+    expect(exerciseRows()).toEqual(before);
+  }
+);
+
+test.each([
+  { problemType: 'executionResult', traceItemIndex: 1 },
+  { problemType: 'step', traceItemIndex: 0 },
+  { problemType: 'step', traceItemIndex: -1 },
+  { problemType: 'unknown', traceItemIndex: 0 },
+])('practice rejects invalid regular state $problemType/$traceItemIndex without writes', async (state) => {
+  const initial = await startPractice();
+  sqlite
+    .prepare('UPDATE ExerciseSession SET problemId = ?, problemType = ?, traceItemIndex = ? WHERE id = ?')
+    .run(initial.problemId, state.problemType, state.traceItemIndex, initial.sessionId);
+  const before = exerciseRows();
+  await expect(startPractice()).rejects.toMatchObject({ data: { code: 'CONFLICT' } });
+  expect(exerciseRows()).toEqual(before);
+});
+
+test('practice rejects another user, lecture, and expired learning period without mutation', async () => {
+  const practice = await startPractice();
+  const before = exerciseRows();
+  auth.userId = 'other';
+  await expect(
+    runtimeCaller.mutation('submitRegularExercise', practiceSubmission(practice, 'other-user', true))
+  ).rejects.toMatchObject({
+    data: { code: 'UNAUTHORIZED' },
+  });
+  auth.userId = 'student';
+  await expect(
+    runtimeCaller.mutation('switchRegularExerciseToStep', {
+      ...practiceSession(practice.sessionId),
+      lectureId: 'other',
+    })
+  ).rejects.toMatchObject({ data: { code: 'UNAUTHORIZED' } });
+  expect(exerciseRows()).toEqual(before);
+  sqlite.prepare('UPDATE ExerciseSession SET createdAt = 0 WHERE id = ?').run(practice.sessionId);
+  vi.setSystemTime(new Date('2026-07-15T12:00:00+09:00'));
+  const expiredBefore = exerciseRows();
+  await expect(
+    runtimeCaller.mutation('submitRegularExercise', practiceSubmission(practice, 'expired', true))
+  ).rejects.toMatchObject({
+    data: { code: 'NOT_FOUND' },
+  });
+  expect(exerciseRows()).toEqual(expiredBefore);
+});
+
+const regularDisplaySchema = z.object({
+  problemFormat: z.literal('regular'),
+  sessionId: z.number(),
+  problemId: z.string(),
+  seed: z.string(),
+  problemType: z.enum(['executionResult', 'step']),
+  traceItemIndex: z.number(),
+  completed: z.boolean(),
+});
+const startPractice = async (): Promise<z.infer<typeof regularDisplaySchema>> => {
+  const input = { ...locationOnly(), learningMode: 'practice' as const, problemFormat: 'regular' as const };
+  return regularDisplaySchema.parse(await runtimeCaller.mutation('startExercise', input));
+};
+const practiceSession = (sessionId: number): Location & { sessionId: number; learningMode: 'practice' } => ({
+  ...locationOnly(),
+  sessionId,
+  learningMode: 'practice' as const,
+});
+const practiceSubmission = (
+  exercise: z.infer<typeof regularDisplaySchema>,
+  requestId: string,
+  isCorrect: boolean
+): RegularSubmissionInput & { learningMode: 'practice' } => ({
+  ...practiceSession(exercise.sessionId),
+  requestId,
+  context: { problemType: exercise.problemType, traceItemIndex: exercise.traceItemIndex },
+  isCorrect,
 });
 
 const start = async (): Promise<Exercise> => {

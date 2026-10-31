@@ -1,9 +1,12 @@
+import { notFound } from 'next/navigation';
+
 import { withAuthorizationOnServer } from '@/app/utils/withAuth';
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { db } from '@/infrastructures/database';
 import { logger } from '@/infrastructures/pino';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import { isFillInBlankProblem } from '@/problems/instantiateProblem';
+import { courseIdToLectureIds, courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 
 import { problemSessions } from '../../../../../../../../../db/schema';
@@ -14,6 +17,17 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
   lectureId: string;
   problemId: ProblemId;
 }> = async ({ params, session }) => {
+  if (
+    !Object.hasOwn(courseIdToLectureIds, params.courseId) ||
+    !Object.hasOwn(courseIdToLectureIndexToProblemIds, params.courseId)
+  )
+    notFound();
+  const lectureIndex = courseIdToLectureIds[params.courseId].indexOf(params.lectureId);
+  if (
+    lectureIndex === -1 ||
+    !courseIdToLectureIndexToProblemIds[params.courseId][lectureIndex]?.includes(params.problemId)
+  )
+    notFound();
   let incompleteProblemSession = await db.query.problemSessions.findFirst({
     where: {
       ...getLearningPeriodFilter(),

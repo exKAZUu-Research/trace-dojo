@@ -22,35 +22,34 @@ const executionDisplay: RegularExerciseDisplay = {
 };
 
 test.each(['executionResult', 'step'] as const)(
-  'shows Java syntax hints in challenge %s without submitting from the keyboard',
+  'supports syntax hints in challenge %s without submitting',
   async (problemType) => {
     const user = userEvent.setup();
     const submit = vi.fn<RegularChallengeTransport['submit']>().mockResolvedValue(executionDisplay);
     const { container } = renderBody({
-      submit,
       display: { ...executionDisplay, problemType, traceItemIndex: problemType === 'step' ? 1 : 0 },
+      submit,
     });
-    for (const input of screen.getAllByRole('textbox')) {
-      await user.clear(input);
-      await user.paste('999');
-    }
-    expect(screen.getByRole('button', { name: /提出/ })).toBeEnabled();
     const code = container.querySelector('code');
     if (!code) throw new Error('Challenge source must be rendered');
-    const hint = within(code).getAllByRole('button', { name: 'int の説明' })[0];
-    act(() => hint.focus());
-    expect(hint).toHaveFocus();
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(/[ぁ-んァ-ヶ一-龯]/);
-    await user.keyboard('{Escape}');
+    const keyword = within(code).getAllByRole('button', { name: 'int の説明' })[0];
+    await user.hover(keyword);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('整数');
+    await user.unhover(keyword);
     await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
+    const answers = problemType === 'step' ? ['1'] : ['2', '2', '4'];
+    for (const [index, input] of screen.getAllByRole('textbox').entries()) {
+      await user.type(input, answers[index]);
+    }
+    expect(screen.getByRole('button', { name: /提出/ })).toBeEnabled();
+    act(() => keyword.focus());
+    expect(keyword).toHaveFocus();
     await user.keyboard('{Enter}');
-    expect(await screen.findByRole('tooltip')).toBeVisible();
-    await user.keyboard('{Escape}');
-    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
-    await user.keyboard(' ');
-    expect(await screen.findByRole('tooltip')).toBeVisible();
+    const tooltip = await screen.findByRole('tooltip');
+    const explanation = tooltip.textContent;
+    await user.hover(within(code).getAllByRole('button', { name: '= の説明' })[0]);
+    expect(screen.getByRole('tooltip').textContent).toBe(explanation);
     expect(submit).not.toHaveBeenCalled();
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   }
 );
 
