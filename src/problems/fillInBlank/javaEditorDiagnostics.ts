@@ -3,7 +3,7 @@ import { type Diagnostic, linter, setDiagnosticsEffect } from '@codemirror/lint'
 import { EditorState, type Extension, StateEffect, StateField } from '@codemirror/state';
 
 import { formatJavaDiagnostic, type JavaDiagnostic } from './javaDiagnostics';
-import { hasIncompleteJavaPlaceholders } from './javaSource';
+import { javaPlaceholderRanges } from './javaSource';
 
 export const compilerFeedback = StateEffect.define<JavaDiagnostic[]>();
 export const javaComposition = StateEffect.define<boolean>();
@@ -64,9 +64,9 @@ function combinedDiagnostics(state: EditorState): Diagnostic[] {
   }
   if (state.doc.length > 20_000) return diagnostics;
   const source = state.doc.toString();
-  if (hasIncompleteJavaPlaceholders(source)) return diagnostics;
+  const placeholders = javaPlaceholderRanges(source);
   const completeTree = ensureSyntaxTree(state, state.doc.length, 20);
-  const allowContext = Boolean(completeTree) && !/\\u/.test(source);
+  const allowContext = Boolean(completeTree) && placeholders.length === 0 && !/\\u/.test(source);
   let isFirstError = true;
   (completeTree ?? syntaxTree(state)).iterate({
     enter(node) {
@@ -75,7 +75,7 @@ function combinedDiagnostics(state: EditorState): Diagnostic[] {
       isFirstError = false;
       if (diagnostics.length >= 20) return;
       const line = state.doc.lineAt(node.from);
-      if (occupiedLines.has(line.number)) return;
+      if (occupiedLines.has(line.number) || isCausedByPlaceholder(state, source, placeholders, node.from)) return;
       occupiedLines.add(line.number);
       const from = node.from === line.to && line.length > 0 ? node.from - 1 : node.from;
       diagnostics.push({
@@ -89,6 +89,21 @@ function combinedDiagnostics(state: EditorState): Diagnostic[] {
     },
   });
   return diagnostics;
+}
+
+// Unfilled placeholders are not Java; Lezer reports a missing `;` after a bare placeholder statement at the next token, possibly on a later line.
+function isCausedByPlaceholder(
+  state: EditorState,
+  source: string,
+  placeholders: { from: number; to: number }[],
+  errorFrom: number
+): boolean {
+  const errorLine = state.doc.lineAt(errorFrom).number;
+  return placeholders.some(
+    (placeholder) =>
+      state.doc.lineAt(placeholder.from).number === errorLine ||
+      (placeholder.to <= errorFrom && /^\s*$/.test(source.slice(placeholder.to, errorFrom)))
+  );
 }
 
 function contextualHint(node: ReturnType<typeof syntaxTree>['topNode'], source: string): string | undefined {

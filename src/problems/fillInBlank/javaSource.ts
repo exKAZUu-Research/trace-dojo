@@ -1,5 +1,12 @@
 export function hasIncompleteJavaPlaceholders(source: string): boolean {
-  return /【[1-9]\d*】/.test(maskJavaNonCode(source));
+  return javaPlaceholderRanges(source).length > 0;
+}
+
+export function javaPlaceholderRanges(source: string): { from: number; to: number }[] {
+  return [...maskJavaNonCode(source).matchAll(/【[1-9]\d*】/g)].map((match) => ({
+    from: match.index,
+    to: match.index + match[0].length,
+  }));
 }
 
 export function maskJavaNonCode(source: string): string {

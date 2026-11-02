@@ -37,6 +37,7 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
   backendTrpcReact: {
     startExercise: { useMutation: () => ({ mutateAsync: infrastructure.start }) },
     nextExercise: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+    endExercise: { useMutation: () => ({ mutateAsync: vi.fn() }) },
     submitExercise: { useMutation: () => ({ mutateAsync: infrastructure.grade }) },
     submitRegularExercise: { useMutation: () => ({ mutateAsync: vi.fn() }) },
     switchRegularExerciseToStep: { useMutation: () => ({ mutateAsync: vi.fn() }) },
@@ -441,6 +442,10 @@ test('local hints identify a missing operand and disappear after a repair withou
   await waitFor(() => expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument());
   await replaceJavaSource(editor, 'class Main { void draw() { int x = 【1】; } }');
   expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
+  await replaceJavaSource(editor, 'class Main {\n void draw() {\n  int x = 【1】;\n  int y = ;\n  【2】\n }\n}');
+  await waitFor(() => expect(document.querySelectorAll('.cm-lintRange-error')).toHaveLength(1));
+  const hinted = document.querySelector('.cm-lintRange-error')?.closest('.cm-line');
+  expect(hinted).toHaveTextContent('int y = ;');
   expect(infrastructure.grade).not.toHaveBeenCalled();
 });
 
