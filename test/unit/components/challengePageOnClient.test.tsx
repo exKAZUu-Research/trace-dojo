@@ -271,6 +271,7 @@ test('completed fill-in-blank next keeps the active format and renders the retur
   expect(screen.getByRole('button', { hidden: true, name: '元に戻す' })).toBeDisabled();
   expect(screen.getByRole('button', { hidden: true, name: 'やり直す' })).toBeDisabled();
   expect(screen.getByText(/プログラムを実行した後の盤面/)).toBeVisible();
+  await waitFor(() => expect(screen.getByRole('alertdialog')).toBeVisible());
   await user.keyboard('{Escape}');
   expect(screen.getByRole('alertdialog')).toBeVisible();
   await user.click(screen.getByRole('button', { name: '次の問題へ' }));
