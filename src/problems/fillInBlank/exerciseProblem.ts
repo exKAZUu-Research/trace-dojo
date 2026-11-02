@@ -1,7 +1,7 @@
 import type { TurtleTrace } from '@/problems/traceProgram';
 
 export interface ExerciseDisplay {
-  problemFormat: 'fillInBlank';
+  problemFormat: 'fillInBlank' | 'bugFix';
   sessionId: number;
   problemId: string;
   displayProgram: string;
