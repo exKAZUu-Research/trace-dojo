@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 import { TraceViewer } from '../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/TraceViewer';
 import { Variables } from '../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/Variables';
-import { instantiateProblem, type InstantiatedProblem } from '../../src/problems/instantiateProblem';
+import { type InstantiatedProblem, instantiateProblem } from '../../src/problems/instantiateProblem';
 import { traceProgram } from '../../src/problems/traceProgram';
 
 const problem = (id: string): InstantiatedProblem => {

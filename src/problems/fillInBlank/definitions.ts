@@ -1,5 +1,5 @@
-import { challengeFillInBlankProblemDefinitions } from './challengeDefinitions';
 import type { LanguageId } from '../problemData';
+import { challengeFillInBlankProblemDefinitions } from './challengeDefinitions';
 
 export const fillInBlankProblemDefinitions = {
   fillInBlank1: {

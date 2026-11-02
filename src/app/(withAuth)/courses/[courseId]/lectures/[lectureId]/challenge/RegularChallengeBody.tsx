@@ -1,13 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import { ProblemPageHeader } from '../problems/[problemId]/ProblemPageHeader';
-import {
-  deriveRegularProblemView,
-  RegularProblemPresentation,
-} from '../problems/[problemId]/RegularProblemPresentation';
-import { ResultAlertDialog } from '../problems/[problemId]/ResultAlertDialog';
-import { BoardEditor, type TurtleGraphicsHandle } from '../problems/[problemId]/BoardEditor';
+
 import {
   AlertDialog,
   AlertDialogBody,
@@ -21,6 +15,14 @@ import {
 import { instantiateProblem } from '@/problems/instantiateProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
+
+import { BoardEditor, type TurtleGraphicsHandle } from '../problems/[problemId]/BoardEditor';
+import { ProblemPageHeader } from '../problems/[problemId]/ProblemPageHeader';
+import {
+  deriveRegularProblemView,
+  RegularProblemPresentation,
+} from '../problems/[problemId]/RegularProblemPresentation';
+import { ResultAlertDialog } from '../problems/[problemId]/ResultAlertDialog';
 
 interface SubmitInput {
   courseId: string;

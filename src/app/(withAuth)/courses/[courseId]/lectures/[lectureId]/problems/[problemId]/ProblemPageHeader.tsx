@@ -1,6 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
+
 import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefetch';
 import { Heading, HStack, Link, Text, VStack } from '@/infrastructures/useClient/chakra';
 import type { CourseId, ProblemId } from '@/problems/problemData';

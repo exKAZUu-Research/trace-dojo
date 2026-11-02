@@ -1,9 +1,9 @@
 import type { BoxProps } from '@chakra-ui/react';
 import type React from 'react';
 
-import { APP_AUTHOR } from '../../constants';
-
 import { Box, HStack } from '@/infrastructures/useClient/chakra';
+
+import { APP_AUTHOR } from '../../constants';
 
 export const DefaultFooter: React.FC<BoxProps> = (props) => {
   return (

@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
+import { logger } from '../../infrastructures/pino';
 import type { InstantiatedProblem } from '../instantiateProblem';
 import { SCOPE_ERROR_NAME, TRACE_BUDGET_EXCEEDED_MESSAGE, traceProgram } from '../traceProgram';
-import { logger } from '../../infrastructures/pino';
-
 import { fillBlanks, normalizeAnswer } from './blanks';
 import type { JavaExecutor } from './javaExecutors';
 import { createJudgeExecutor, createWandboxExecutor } from './javaExecutors';
