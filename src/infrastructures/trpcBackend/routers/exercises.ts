@@ -245,7 +245,8 @@ const ownedSession = (
 };
 const candidatesFor = (courseId: string, lectureId: string, format: ProblemFormat): string[] => {
   const lectureIndex = courseIdToLectureIds[courseId as CourseId].indexOf(lectureId);
-  if (courseId === 'tuBeginner1' || courseId === 'tuBeginner2') {
+  // Curriculum regular challenges come from the independent bank, not the ordinary lecture problem lists.
+  if (format === 'regular' && (courseId === 'tuBeginner1' || courseId === 'tuBeginner2')) {
     return Object.entries(challengeMetadata)
       .filter(
         ([, item]) => item.courseId === courseId && item.lectureIndex === lectureIndex && item.problemFormat === format
