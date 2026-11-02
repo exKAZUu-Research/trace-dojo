@@ -1,9 +1,7 @@
-import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import { expect, test } from 'vitest';
-import { z } from 'zod';
 
 import { extractBlanks, fillBlanks } from '../../src/problems/fillInBlank/blanks';
 import { gradeFillInBlankCode } from '../../src/problems/fillInBlank/grade';
@@ -15,25 +13,14 @@ import {
   parseJavaJudgeOutput,
 } from '../../src/problems/fillInBlank/javaProgram';
 import { instantiateProblem, isFillInBlankProblem } from '../../src/problems/instantiateProblem';
+import { javaChallengeDefinitions } from '../../src/problems/javaChallenges/definitions';
 import { instantiateJavaChallenge } from '../../src/problems/javaChallenges/instantiate';
+import type { JavaChallengeDefinition } from '../../src/problems/javaChallenges/types';
 import { courseIdToLectureIndexToExerciseProblemIds } from '../../src/problems/problemData';
 import { createLocalJavaExecutor, localJavaExecutor } from '../helpers/localJavaExecutor';
 
-const definitionSchema = z.object({
-  title: z.string().min(1),
-  courseId: z.enum(['tuBeginner1', 'tuBeginner2', 'test']),
-  lectureIndex: z.number().int().min(0).max(7),
-  problemFormat: z.enum(['fillInBlank', 'bugFix']),
-  correctProgram: z.string().min(1),
-  starterProgram: z.string().min(1),
-  finalBoard: z.string().min(1),
-  finalTurtles: z.array(z.object({ x: z.number(), y: z.number(), color: z.string(), dir: z.string() })),
-  bugKind: z.enum(['logical', 'syntax']).optional(),
-});
-const catalogSchema = z.record(z.string(), definitionSchema);
-const catalogPath = resolve('src/problems/javaChallenges/definitions.ts');
-const catalogModule = existsSync(catalogPath) ? await import(/* @vite-ignore */ catalogPath) : undefined;
-const catalog = catalogModule ? catalogSchema.parse(catalogModule.javaChallengeDefinitions) : {};
+const catalog = javaChallengeDefinitions;
+const definitionOf = (id: string): JavaChallengeDefinition | undefined => catalog[id];
 const courses = ['tuBeginner1', 'tuBeginner2'] as const;
 const lectures = courses.flatMap((courseId) =>
   Array.from({ length: 8 }, (_, lectureIndex) => ({ courseId, lectureIndex }))
@@ -85,10 +72,10 @@ test.each(lectures)(
     for (const format of ['fillInBlank', 'bugFix'] as const) {
       const matching = ids.filter(
         (id) =>
-          (catalog[id]?.problemFormat === format &&
-            catalog[id].courseId === courseId &&
-            catalog[id].lectureIndex === lectureIndex) ||
-          (!catalog[id] && format === 'fillInBlank' && isFillInBlankProblem(id))
+          (definitionOf(id)?.problemFormat === format &&
+            definitionOf(id)?.courseId === courseId &&
+            definitionOf(id)?.lectureIndex === lectureIndex) ||
+          (!definitionOf(id) && format === 'fillInBlank' && isFillInBlankProblem(id))
       );
       expect.soft(matching.length, `${courseId}/${lectureIndex + 1}: ${format} availability`).toBeGreaterThanOrEqual(1);
     }
@@ -96,11 +83,10 @@ test.each(lectures)(
 );
 
 test('every fixed catalog definition is registered and has a distinct visible starter within its lecture and format', () => {
-  expect(Object.keys(catalog).length, 'New fixed catalog is not available').toBeGreaterThan(0);
   for (const [courseId, configuredLectures] of Object.entries(courseIdToLectureIndexToExerciseProblemIds)) {
     for (const [lectureIndex, ids] of configuredLectures.entries()) {
       for (const id of ids) {
-        const definition = catalog[id];
+        const definition = definitionOf(id);
         if (definition)
           expect(
             { courseId: definition.courseId, lectureIndex: definition.lectureIndex },
@@ -126,7 +112,6 @@ const catalogLectures = [...lectures, { courseId: 'test' as const, lectureIndex:
 test.each(catalogLectures)(
   '$courseId lecture $lectureIndex: all fixed solutions and starters satisfy real Java grading',
   async ({ courseId, lectureIndex }) => {
-    expect(Object.keys(catalog).length, 'No fixed Java definitions to validate').toBeGreaterThan(0);
     for (const [id, definition] of Object.entries(catalog).filter(
       ([, item]) => item.courseId === courseId && item.lectureIndex === lectureIndex
     )) {
