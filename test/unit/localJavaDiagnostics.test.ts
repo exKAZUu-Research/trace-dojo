@@ -36,6 +36,14 @@ test('local compiler builds without executing learner code and cleans successful
   }
 }, 60_000);
 
+test('a public helper class compiles when another class holds the entry point', async () => {
+  const source = `public class Main { static void run() { new Turtle().前に進む(); } }
+public interface Shape {}
+class Runner { public static void main(String[] args) { Main.run(); } }`;
+  const result = await compileJavaProgram(buildJavaJudgeProgram(source, '__TRACE_DOJO_RESULT_local__').program);
+  expect(result).toMatchObject({ kind: 'compiled', exitCode: 0 });
+}, 60_000);
+
 test('actual compiler feedback preserves Japanese learner names and CRLF locations with Japanese primary and safe original', async () => {
   const source = '\r\nclass Main {\r\n public static void main(String[] args) {\r\n  前に進む();\r\n }\r\n}\r\n';
   const result = await gradeFillInBlankCode(problem, source, {

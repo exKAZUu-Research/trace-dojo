@@ -23,23 +23,27 @@ export function prepareJavaEntry(source: string): { className: string; source: s
   let depth = 0;
   let declarationStart = 0;
   let memberStart = 0;
-  let candidate: { className: string; publicIndex?: number } | undefined;
-  let firstClass: typeof candidate;
-  let entry: typeof candidate;
+  let candidate: string | undefined;
+  let firstClass: string | undefined;
+  let entry: string | undefined;
+  // The whole unit is compiled as TraceDojoJudge.java, so no top-level type may stay public.
+  const publicIndices: number[] = [];
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
-    if (depth === 0 && token[0] === 'class') {
+    if (depth === 0 && /^(?:class|interface|enum|record)$/.test(token[0])) {
       const name = tokens[index + 1];
-      if (!name || !/^[\p{L}_$]/u.test(name[0])) continue;
-      const modifier = /\bpublic\b/.exec(code.slice(declarationStart, token.index));
-      candidate = {
-        className: name[0],
-        publicIndex: modifier ? declarationStart + modifier.index : undefined,
-      };
-      firstClass ??= candidate;
+      if (name && /^[\p{L}_$]/u.test(name[0])) {
+        const modifier = /\bpublic\b/.exec(code.slice(declarationStart, token.index));
+        if (modifier) publicIndices.push(declarationStart + modifier.index);
+        if (token[0] === 'class') {
+          candidate = name[0];
+          firstClass ??= candidate;
+        }
+      }
     }
     const methodHeader = code.slice(memberStart, token.index);
     if (
+      !entry &&
       depth === 1 &&
       token[0] === 'main' &&
       /^(?:\s*(?:public|static|final|synchronized|strictfp))+\s+void\s+$/.test(methodHeader) &&
@@ -50,7 +54,6 @@ export function prepareJavaEntry(source: string): { className: string; source: s
       )
     ) {
       entry = candidate;
-      break;
     }
     if (token[0] === '{') depth += 1;
     if (token[0] === '}') {
@@ -60,13 +63,9 @@ export function prepareJavaEntry(source: string): { className: string; source: s
     if (depth === 0 && (token[0] === '}' || token[0] === ';')) declarationStart = token.index + 1;
     if (depth === 1 && /[{};]/.test(token[0])) memberStart = token.index + 1;
   }
-  const selected = entry ?? firstClass;
-  const publicIndex = selected?.publicIndex;
-  return {
-    className: selected?.className ?? 'Main',
-    source:
-      publicIndex === undefined
-        ? source
-        : `${source.slice(0, publicIndex)}      ${source.slice(publicIndex + 'public'.length)}`,
-  };
+  let prepared = source;
+  for (const publicIndex of publicIndices.toReversed()) {
+    prepared = `${prepared.slice(0, publicIndex)}      ${prepared.slice(publicIndex + 'public'.length)}`;
+  }
+  return { className: entry ?? firstClass ?? 'Main', source: prepared };
 }
