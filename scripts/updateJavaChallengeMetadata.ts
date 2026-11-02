@@ -13,6 +13,6 @@ const metadata = Object.fromEntries(
 const metadataPath = fileURLToPath(new URL('../src/problems/javaChallenges/metadata.ts', import.meta.url));
 writeFileSync(
   metadataPath,
-  `// Refresh with bun scripts/updateJavaChallengeMetadata.ts after editing the catalog.\nimport type { JavaChallengeDefinition } from './types';\n\nexport const javaChallengeMetadata: Record<string, Pick<JavaChallengeDefinition, 'title' | 'courseId' | 'lectureIndex' | 'problemFormat'>> = ${JSON.stringify(metadata, undefined, 2)};\n`
+  `// Refresh with bun scripts/updateJavaChallengeMetadata.ts after editing the catalog.\nimport type { JavaChallengeDefinition } from './types';\n\nexport const javaChallengeMetadata = ${JSON.stringify(metadata, undefined, 2)} as const satisfies Record<string, Pick<JavaChallengeDefinition, 'title' | 'courseId' | 'lectureIndex' | 'problemFormat'>>;\n\nexport type JavaChallengeId = keyof typeof javaChallengeMetadata;\n`
 );
 execFileSync('bun', ['fmt', metadataPath], { stdio: 'inherit' });

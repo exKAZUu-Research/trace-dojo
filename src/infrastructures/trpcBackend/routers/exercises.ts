@@ -17,7 +17,7 @@ import {
   courseIdToLectureIds,
   courseIdToLectureIndexToExerciseProblemIds,
   courseIdToLectureIndexToProblemIds,
-  problemIdToLanguageIdToProgram,
+  getProblemProgram,
 } from '@/problems/problemData';
 import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
 
@@ -253,7 +253,7 @@ const candidatesFor = (courseId: string, lectureId: string, format: ProblemForma
       }
       return fixed.problemFormat === format;
     }
-    if (!problemIdToLanguageIdToProgram[id])
+    if (!getProblemProgram(id))
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Unknown challenge problem: ${id}` });
     const blank = isFillInBlankProblem(id);
     if (format !== 'regular' && !blank)

@@ -1,10 +1,7 @@
 // Refresh with bun scripts/updateJavaChallengeMetadata.ts after editing the catalog.
 import type { JavaChallengeDefinition } from './types';
 
-export const javaChallengeMetadata: Record<
-  string,
-  Pick<JavaChallengeDefinition, 'title' | 'courseId' | 'lectureIndex' | 'problemFormat'>
-> = {
+export const javaChallengeMetadata = {
   javaI1CornerApproachBlank: {
     title: '角のある道（1）',
     courseId: 'tuBeginner1',
@@ -119,4 +116,9 @@ export const javaChallengeMetadata: Record<
     lectureIndex: 0,
     problemFormat: 'bugFix',
   },
-};
+} as const satisfies Record<
+  string,
+  Pick<JavaChallengeDefinition, 'title' | 'courseId' | 'lectureIndex' | 'problemFormat'>
+>;
+
+export type JavaChallengeId = keyof typeof javaChallengeMetadata;

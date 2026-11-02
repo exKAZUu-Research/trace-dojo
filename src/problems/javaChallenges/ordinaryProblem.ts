@@ -1,5 +1,5 @@
 import type { OrdinaryJavaProblemData } from '../../types';
-import { courseIdToLectureIds, courseIdToLectureIndexToProblemIds } from '../problemData';
+import { courseIdToLectureIds, courseIdToLectureIndexToProblemIds, type ProblemId } from '../problemData';
 import { javaChallengeDefinitions } from './definitions';
 import { instantiateJavaChallenge } from './instantiate';
 
@@ -26,7 +26,9 @@ export const findOrdinaryJavaProblem = (
     definition?.problemFormat !== 'bugFix' ||
     definition.courseId !== courseId ||
     courseIdToLectureIds[definition.courseId]?.[definition.lectureIndex] !== lectureId ||
-    !courseIdToLectureIndexToProblemIds[definition.courseId]?.[definition.lectureIndex]?.includes(problemId)
+    !courseIdToLectureIndexToProblemIds[definition.courseId]?.[definition.lectureIndex]?.includes(
+      problemId as ProblemId
+    )
   )
     return undefined;
   return { problemId, problemFormat: 'bugFix', ...instantiateJavaChallenge(problemId, 'bugFix') };
