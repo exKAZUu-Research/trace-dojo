@@ -1,6 +1,6 @@
 ## Challenge fill-in-the-blank problems
 
-Define paired Java and instrumented templates in `src/problems/fillInBlank/definitions.ts` or `challengeDefinitions.ts`, following [穴埋め問題の作問手順](#穴埋め問題の作問手順) for the `@[model answer]@` markers (the same number, in the same order, in both templates). Keep `<min-max>` placeholders in the same order so an ID and seed reproduce the complete generated problem. Use the same variable names (including the turtle's) in both templates: local grading translates a Java answer and runs it in the instrumented template.
+Define paired Java and instrumented templates in `src/problems/fillInBlank/definitions.ts` or `challengeDefinitions.ts`, following [穴埋め問題の作問手順](#穴埋め問題の作問手順): only the Java template carries `@[model answer]@` markers, and the instrumented template is the complete model program. Keep `<min-max>` placeholders in the same order so an ID and seed reproduce the complete generated problem.
 
 Register the name in `problemIdToName`. Add the ID explicitly to `courseIdToLectureIndexToProblemIds` for ordinary lectures or `courseIdToLectureIndexToExerciseProblemIds` for the fill-in-the-blank challenge, which accepts only problems with blanks. Membership in either list does not imply membership in the other. The regular challenge has no list of its own: it draws from the problems without blanks in the lecture's `courseIdToLectureIndexToProblemIds` entry.
 
@@ -263,13 +263,13 @@ The step viewer shows data fields such as `this.speed`, `turtles[0].x`, and `mov
 
 ## 穴埋め問題の作問手順
 
-`java` と `instrumented` の両方で、空欄にしたい箇所を `@[模範解答]@` で囲む。空欄は式または文の単位で作り、両言語で同じ順序・同じ個数にする。例:
+`java` 側だけで、空欄にしたい箇所を `@[模範解答]@` で囲む。`instrumented` 側には空欄を書かず、模範解答を埋めた完全なプログラムを書く。例:
 
 ```js
 fillInBlank1: {
   instrumented: `
 const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); @[s.get('i') < 4]@; s.set('i', s.get('i') + 1)) {
+for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
   t.forward();
 }
 delete s.vars['i'];
@@ -287,13 +287,8 @@ public class Main {
 }
 ```
 
-`java` に `@[...]@` が含まれる問題は自動的に穴埋め問題として扱われ、実行後の盤面と変数の値を見せた上で空欄の入力を求める。`java` 側は実際にコンパイル・実行されることがあるため、正しいJavaプログラムにすること。
+`java` に `@[...]@` が含まれる問題は自動的に穴埋め問題として扱われる。学習者には空欄を `【1】` などに置き換えたJavaプログラム全体が編集可能な状態で表示され、`instrumented` を実行した後の盤面と亀を見せた上で、プログラムを書き換えて提出させる。模範解答を埋めた `java` 側は実際にコンパイル・実行されるため、`instrumented` と同じ盤面と亀になる正しいJavaプログラムにすること。
 
-採点は次の順で行う。段階1で一致した解答と、段階2で盤面・亀・変数のいずれかが異なると判定された解答はそこで確定する。段階2で全て一致した解答は、Javaとして正しいことを確認するために段階3・4でも実行する。
+採点では、提出されたJavaプログラム全体をWandboxで実行し、Wandboxが利用できない場合は [judge](https://github.com/WillBooster/judge) で実行する。judgeは自身のマシン上でサンドボックス化してJavaプログラムをコンパイル・実行する。実行後の最終的な盤面と亀だけを `instrumented` の実行結果と比較し、変数の値は比較しない。
 
-1. 模範解答との文字列一致（空白の違いは無視）。
-2. 解答を `instrumented` の記法に変換して既存のJavaScriptトレーサで再実行し、最終的な盤面・亀・変数を比較する。変換できない記法や、変換結果がJavaScriptとして実行できない場合は段階3に進む。変換できるのは四則演算（除算を除く）、比較、論理演算、代入、`++`/`--`、亀のメソッド呼び出し、`new Turtle(...)` など限られた記法のみ。
-3. WandboxでJavaプログラムとして実行し、最終的な盤面と亀を比較する。
-4. Wandboxが利用できない場合は、[judge](https://github.com/WillBooster/judge) で実行する。judgeは自身のマシン上でサンドボックス化してJavaプログラムをコンパイル・実行する。
-
-穴埋め問題も他の問題と同様に必ず亀を使うこと。段階3・4は最終的な盤面と亀の状態で採点するため、亀のいないプログラムは採点できない。
+穴埋め問題も他の問題と同様に必ず亀を使うこと。最終的な盤面と亀の状態で採点するため、亀のいないプログラムは採点できない。
