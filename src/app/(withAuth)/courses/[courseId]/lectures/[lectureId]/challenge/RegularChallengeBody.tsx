@@ -42,7 +42,7 @@ interface Props {
   lectureId: string;
   display: RegularExerciseDisplay;
   transport: RegularChallengeTransport;
-  back: () => void;
+  back: (sessionId: number) => void | Promise<void>;
 }
 
 export const RegularChallengeBody: React.FC<Props> = ({
@@ -181,7 +181,7 @@ export const RegularChallengeBody: React.FC<Props> = ({
         message="正解です！次の問題へ進めます。"
         title="正解"
         actions={[
-          { label: '終わる', onClick: back },
+          { label: '終わる', onClick: () => back(display.sessionId) },
           { label: '次の問題へ', colorScheme: 'brand', onClick: nextProblem },
         ]}
       />

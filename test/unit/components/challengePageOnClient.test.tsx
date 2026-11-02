@@ -9,6 +9,7 @@ import { beforeEach, expect, test, vi } from 'vitest';
 const transport = vi.hoisted(() => ({
   start: vi.fn(),
   next: vi.fn(),
+  end: vi.fn(),
   submitBlank: vi.fn(),
   submitRegular: vi.fn(),
   switchRegular: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
   backendTrpcReact: {
     startExercise: { useMutation: () => ({ mutateAsync: transport.start }) },
     nextExercise: { useMutation: () => ({ mutateAsync: transport.next }) },
+    endExercise: { useMutation: () => ({ mutateAsync: transport.end }) },
     submitExercise: { useMutation: () => ({ mutateAsync: transport.submitBlank }) },
     submitRegularExercise: { useMutation: () => ({ mutateAsync: transport.submitRegular }) },
     switchRegularExerciseToStep: { useMutation: () => ({ mutateAsync: transport.switchRegular }) },
@@ -64,7 +66,10 @@ const page = (initialFormat?: 'regular' | 'fillInBlank', strict = false): React.
 const renderPage = (initialFormat?: 'regular' | 'fillInBlank', strict = false): ReturnType<typeof render> =>
   render(page(initialFormat, strict));
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  transport.end.mockReset().mockResolvedValue({ status: 'ended' });
+});
 
 test('a valid URL format starts exactly once under StrictMode and renders the exercise', async () => {
   transport.start.mockResolvedValue(blankDisplay);
@@ -184,6 +189,7 @@ test('a missing format opens the selector without starting and close returns to 
   await waitFor(() => expect(dialog).toBeVisible());
   expect(transport.start).not.toHaveBeenCalled();
   await user.click(screen.getByRole('button', { name: /閉じる/ }));
+  expect(transport.end).not.toHaveBeenCalled();
   expect(navigation.push).toHaveBeenCalledWith('/courses/test/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d');
 });
 
@@ -307,11 +313,17 @@ test('completed fill-in-blank orders Back before Next and reports a failed actio
   expect(dialog).toBeVisible();
 });
 
-test('completed fill-in-blank back returns to the lecture', async () => {
+test('completed fill-in-blank explicit End persists before returning to the lecture', async () => {
   transport.start.mockResolvedValue({ ...blankDisplay, completed: true });
   const user = userEvent.setup();
   renderPage('fillInBlank');
   await user.click(await screen.findByRole('button', { name: '終わる' }));
+  expect(transport.end).toHaveBeenCalledWith({
+    courseId: 'test',
+    lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
+    problemFormat: 'fillInBlank',
+    sessionId: 23,
+  });
   expect(navigation.push).toHaveBeenCalledWith('/courses/test/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d');
 });
 
@@ -357,6 +369,7 @@ test('a deferred result from before close does not replace the exercise started 
   const rendered = renderPage();
   await user.click(screen.getByRole('button', { name: /穴埋め問題/ }));
   await user.click(screen.getByRole('button', { name: /閉じる/ }));
+  expect(transport.end).not.toHaveBeenCalled();
   expect(navigation.push).toHaveBeenCalledWith('/courses/test/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d');
   rendered.rerender(page('fillInBlank'));
   expect(await screen.findByRole('heading', { level: 1, name: '穴埋めのテスト用問題(3)' })).toBeVisible();
@@ -364,3 +377,140 @@ test('a deferred result from before close does not replace the exercise started 
   expect(screen.getByRole('heading', { level: 1, name: '穴埋めのテスト用問題(3)' })).toBeVisible();
   expect(transport.start).toHaveBeenCalledTimes(2);
 });
+
+test.each([blankDisplay, regularDisplay])(
+  '$problemFormat explicit End waits for persistence and prevents duplicate or competing actions',
+  async (display) => {
+    let acknowledge!: (value: { status: 'ended' }) => void;
+    transport.start.mockResolvedValue({ ...display, completed: true });
+    transport.end.mockReturnValue(new Promise((resolve) => (acknowledge = resolve)));
+    const user = userEvent.setup();
+    renderPage(display.problemFormat);
+    const dialog = await screen.findByRole('alertdialog');
+    await waitFor(() => expect(dialog).toBeVisible());
+    expect(transport.end).not.toHaveBeenCalled();
+    const end = within(dialog).getByRole('button', { name: '終わる' });
+    const next = within(dialog).getByRole('button', { name: '次の問題へ' });
+
+    await user.dblClick(end);
+
+    expect(navigation.push).not.toHaveBeenCalled();
+    expect(transport.end).toHaveBeenCalledTimes(1);
+    expect(transport.end).toHaveBeenCalledWith({
+      courseId: 'test',
+      lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
+      problemFormat: display.problemFormat,
+      sessionId: display.sessionId,
+    });
+    expect(end).toBeDisabled();
+    expect(next).toBeDisabled();
+    await user.click(next);
+    await user.click(end);
+    expect(transport.next).not.toHaveBeenCalled();
+    expect(transport.end).toHaveBeenCalledTimes(1);
+    expect(dialog).toBeVisible();
+
+    await act(async () => acknowledge({ status: 'ended' }));
+
+    await waitFor(() => expect(navigation.push).toHaveBeenCalledTimes(1));
+    expect(navigation.push).toHaveBeenCalledWith('/courses/test/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d');
+  }
+);
+
+test.each([blankDisplay, regularDisplay])(
+  '$problemFormat explicit End failure retains the completed problem and allows retry',
+  async (display) => {
+    transport.start.mockResolvedValue({ ...display, completed: true });
+    transport.end.mockRejectedValueOnce(new Error('private transport diagnostic'));
+    const user = userEvent.setup();
+    renderPage(display.problemFormat);
+    const dialog = await screen.findByRole('alertdialog');
+    await waitFor(() => expect(dialog).toBeVisible());
+
+    await user.click(within(dialog).getByRole('button', { name: '終わる' }));
+
+    expect(navigation.push).not.toHaveBeenCalled();
+    const error = await within(dialog).findByRole('alert');
+    expect(error).toHaveTextContent(/終了|終わ/);
+    expect(error).toHaveTextContent(/再試行|もう一度/);
+    expect(error).not.toHaveTextContent('private transport diagnostic');
+    expect(dialog).toBeVisible();
+    expect(within(dialog).getByRole('button', { name: '終わる' })).toBeEnabled();
+    expect(within(dialog).getByRole('button', { name: '次の問題へ' })).toBeEnabled();
+    expect(transport.start).toHaveBeenCalledTimes(1);
+    expect(transport.next).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole('button', { name: '終わる' }));
+
+    expect(transport.end).toHaveBeenCalledTimes(2);
+    expect(transport.end).toHaveBeenNthCalledWith(2, {
+      courseId: 'test',
+      lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
+      problemFormat: display.problemFormat,
+      sessionId: display.sessionId,
+    });
+    await waitFor(() => expect(navigation.push).toHaveBeenCalledTimes(1));
+    expect(navigation.push).toHaveBeenCalledWith('/courses/test/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d');
+  }
+);
+
+test.each([
+  { display: blankDisplay, code: 'CONFLICT' },
+  { display: blankDisplay, code: 'UNAUTHORIZED' },
+  { display: blankDisplay, code: 'NOT_FOUND' },
+  { display: regularDisplay, code: 'CONFLICT' },
+  { display: regularDisplay, code: 'UNAUTHORIZED' },
+  { display: regularDisplay, code: 'NOT_FOUND' },
+])(
+  '$display.problemFormat explicit End $code replaces the stale problem with a reload notice',
+  async ({ display, code }) => {
+    transport.start.mockResolvedValue({ ...display, completed: true });
+    transport.end.mockRejectedValueOnce({ data: { code } });
+    const user = userEvent.setup();
+    renderPage(display.problemFormat);
+    const dialog = await screen.findByRole('alertdialog');
+    await waitFor(() => expect(dialog).toBeVisible());
+
+    await user.click(within(dialog).getByRole('button', { name: '終わる' }));
+
+    expect(await screen.findByRole('button', { name: 'ページを再読み込み' })).toBeVisible();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(navigation.push).not.toHaveBeenCalled();
+    expect(transport.end).toHaveBeenCalledTimes(1);
+    expect(transport.start).toHaveBeenCalledTimes(1);
+    expect(transport.next).not.toHaveBeenCalled();
+  }
+);
+
+test('regular explicit End after Next persists the currently displayed successor rather than the initial session', async () => {
+  const successor = { ...regularDisplay, sessionId: 18 };
+  transport.start.mockResolvedValue({ ...regularDisplay, completed: true });
+  transport.next.mockResolvedValue(successor);
+  transport.submitRegular.mockResolvedValue({ ...successor, completed: true });
+  const user = userEvent.setup();
+  renderPage('regular');
+  const initialDialog = await screen.findByRole('alertdialog');
+  await waitFor(() => expect(initialDialog).toBeVisible());
+  await user.click(within(initialDialog).getByRole('button', { name: '次の問題へ' }));
+  const inputs = await screen.findAllByRole('textbox');
+  expect(transport.end).not.toHaveBeenCalled();
+  for (const [index, input] of inputs.entries()) {
+    await user.type(input, ['2', '2', '4'][index]);
+  }
+  await user.click(screen.getByRole('button', { name: /提出/ }));
+  const successorDialog = await screen.findByRole('alertdialog');
+  await waitFor(() => expect(successorDialog).toBeVisible());
+  expect(transport.submitRegular).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 18, isCorrect: true }));
+
+  await user.click(within(successorDialog).getByRole('button', { name: '終わる' }));
+
+  expect(transport.end).toHaveBeenCalledTimes(1);
+  expect(transport.end).toHaveBeenCalledWith({
+    courseId: 'test',
+    lectureId: '8d692b48-8c19-4679-8d8f-3f27a051d44d',
+    problemFormat: 'regular',
+    sessionId: 18,
+  });
+  expect(navigation.push).toHaveBeenCalledWith('/courses/test/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d');
+}, 15_000);
