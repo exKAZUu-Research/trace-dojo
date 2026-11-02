@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { TURTLE_GRAPHICS_BOARD_COLUMNS, TURTLE_GRAPHICS_BOARD_ROWS } from '../../constants';
 import { extractBlanks } from '../fillInBlank/blanks';
 import { buildJavaJudgeProgram, findForbiddenJavaPattern, MAX_JAVA_PROGRAM_LENGTH } from '../fillInBlank/javaProgram';
+import { stripJavaTraceAnnotations } from '../fillInBlank/javaSource';
 import { charToColor } from '../traceProgram';
 import { javaChallengeDefinitions } from './definitions';
 import type { JavaChallengeFormat, JavaChallengeTarget } from './types';
@@ -55,7 +56,7 @@ export const instantiateJavaChallenge = (problemId: string, format: JavaChalleng
     if (!definition.bugKind || definition.starterProgram.trim() === definition.correctProgram)
       throw new Error(`Invalid bug repair: ${problemId}`);
     return {
-      displayProgram: definition.starterProgram,
+      displayProgram: stripJavaTraceAnnotations(definition.starterProgram),
       finalBoard: definition.finalBoard,
       finalTurtles: definition.finalTurtles,
     };
@@ -65,7 +66,7 @@ export const instantiateJavaChallenge = (problemId: string, format: JavaChalleng
   if (blanks.answers.length === 0 || restored !== definition.correctProgram)
     throw new Error(`Invalid blank challenge: ${problemId}`);
   return {
-    displayProgram: blanks.programWithPlaceholders,
+    displayProgram: stripJavaTraceAnnotations(blanks.programWithPlaceholders),
     finalBoard: definition.finalBoard,
     finalTurtles: definition.finalTurtles,
   };

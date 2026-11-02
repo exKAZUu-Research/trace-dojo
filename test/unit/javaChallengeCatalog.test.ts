@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 
 import { expect, test } from 'vitest';
 
+import { type ChallengeMetadata, challengeMetadata } from '../../src/problems/challenge/metadata';
 import { extractBlanks, fillBlanks } from '../../src/problems/fillInBlank/blanks';
 import { gradeFillInBlankCode } from '../../src/problems/fillInBlank/grade';
 import type { JavaExecutionResult } from '../../src/problems/fillInBlank/javaExecutors';
@@ -12,6 +13,7 @@ import {
   type JavaTurtleState,
   parseJavaJudgeOutput,
 } from '../../src/problems/fillInBlank/javaProgram';
+import { stripJavaTraceAnnotations } from '../../src/problems/fillInBlank/javaSource';
 import { instantiateProblem, isFillInBlankProblem } from '../../src/problems/instantiateProblem';
 import { javaChallengeDefinitions } from '../../src/problems/javaChallenges/definitions';
 import { instantiateJavaChallenge } from '../../src/problems/javaChallenges/instantiate';
@@ -25,6 +27,8 @@ const courses = ['tuBeginner1', 'tuBeginner2'] as const;
 const lectures = courses.flatMap((courseId) =>
   Array.from({ length: 8 }, (_, lectureIndex) => ({ courseId, lectureIndex }))
 );
+const challengeMetadataOf = (id: string): ChallengeMetadata | undefined =>
+  (challengeMetadata as Partial<Record<string, ChallengeMetadata>>)[id];
 const marker = '__TRACE_DOJO_RESULT_catalog__';
 
 const independentCases = [
@@ -65,7 +69,7 @@ const independentCases = [
 ];
 
 test.each(lectures)(
-  '$courseId lecture $lectureIndex offers at least one playable challenge of each kind',
+  '$courseId lecture $lectureIndex offers at least 12 distinct playable challenges of each kind',
   ({ courseId, lectureIndex }) => {
     const ids = courseIdToLectureIndexToExerciseProblemIds[courseId][lectureIndex];
     expect(new Set(ids).size).toBe(ids.length);
@@ -77,7 +81,9 @@ test.each(lectures)(
             definitionOf(id)?.lectureIndex === lectureIndex) ||
           (!definitionOf(id) && format === 'fillInBlank' && isFillInBlankProblem(id))
       );
-      expect.soft(matching.length, `${courseId}/${lectureIndex + 1}: ${format} availability`).toBeGreaterThanOrEqual(1);
+      expect
+        .soft(matching.length, `${courseId}/${lectureIndex + 1}: ${format} availability`)
+        .toBeGreaterThanOrEqual(12);
     }
   }
 );
@@ -97,8 +103,10 @@ test('every fixed catalog definition is registered and has a distinct visible st
   }
   const starters = new Set<string>();
   for (const [id, definition] of Object.entries(catalog)) {
-    expect(courseIdToLectureIndexToExerciseProblemIds[definition.courseId][definition.lectureIndex], id).toContain(id);
-    const visible = extractBlanks(definition.starterProgram).programWithPlaceholders;
+    const selectable = courseIdToLectureIndexToExerciseProblemIds[definition.courseId][definition.lectureIndex];
+    if (definition.courseId === 'test' || challengeMetadataOf(id)) expect(selectable, id).toContain(id);
+    else expect(selectable, id).not.toContain(id);
+    const visible = instantiateJavaChallenge(id, definition.problemFormat).displayProgram;
     const key = `${definition.courseId}/${definition.lectureIndex}/${definition.problemFormat}/${visible.trim()}`;
     expect(starters.has(key), `Duplicate playable starter: ${id}`).toBe(false);
     starters.add(key);
@@ -117,7 +125,7 @@ test.each(catalogLectures)(
     )) {
       const admitted = instantiateJavaChallenge(id, definition.problemFormat);
       expect(admitted, `${id}: public admission`).toEqual({
-        displayProgram: extractBlanks(definition.starterProgram).programWithPlaceholders,
+        displayProgram: stripJavaTraceAnnotations(extractBlanks(definition.starterProgram).programWithPlaceholders),
         finalBoard: definition.finalBoard,
         finalTurtles: definition.finalTurtles,
       });
@@ -174,6 +182,25 @@ test.each(catalogLectures)(
     }
   },
   1_200_000
+);
+
+test.each(['fillInBlank', 'bugFix'] as const)(
+  'annotation-free %s public source remains repairable through real Java grading',
+  async (format) => {
+    const id = `challengeI7ValueSnapshot${format === 'fillInBlank' ? 'Blank' : 'Bug'}Condition4`;
+    const definition = catalog[id];
+    const problem = instantiateJavaChallenge(id, format);
+    expect(problem.displayProgram).not.toMatch(/\/\/\s*(?:step|caller)\b/);
+    const answers = extractBlanks(definition.starterProgram).answers;
+    const repaired =
+      format === 'fillInBlank'
+        ? problem.displayProgram.replaceAll(/【(\d+)】/g, (_, index: string) => answers[Number(index) - 1])
+        : stripJavaTraceAnnotations(definition.correctProgram);
+    expect(await gradeFillInBlankCode(problem, repaired, { javaExecutors: [localJavaExecutor] })).toMatchObject({
+      status: 'correct',
+    });
+  },
+  60_000
 );
 
 test.each(independentCases)(

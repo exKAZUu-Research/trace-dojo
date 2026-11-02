@@ -2,9 +2,15 @@
 
 Define paired Java and instrumented templates in `src/problems/fillInBlank/definitions.ts` or `challengeDefinitions.ts`, following [穴埋め問題の作問手順](#穴埋め問題の作問手順): only the Java template carries `@[model answer]@` markers, and the instrumented template is the complete model program. Keep `<min-max>` placeholders in the same order so an ID and seed reproduce the complete generated problem.
 
-Register the name in `problemIdToName`. Add the ID explicitly to `courseIdToLectureIndexToProblemIds` for ordinary lectures or `courseIdToLectureIndexToExerciseProblemIds` for the fill-in-the-blank challenge, which accepts only problems with blanks. Membership in either list does not imply membership in the other. The regular challenge has no list of its own: it draws from the problems without blanks in the lecture's `courseIdToLectureIndexToProblemIds` entry.
+Register the name in `problemIdToName` and add the ID explicitly to `courseIdToLectureIndexToProblemIds` for ordinary lectures. Challenge mode draws its problems from `courseIdToLectureIndexToExerciseProblemIds` for the fill-in-the-blank and bug-fix challenges; outside the curriculum courses (for example `test`), the regular challenge draws from the problems without blanks in the lecture's `courseIdToLectureIndexToProblemIds` entry.
 
 Challenge sessions persist the problem ID and seed. Displays and grading regenerate from the current definition, so editing a definition also changes an active session when it is next loaded. Challenge submissions stay in `ExerciseSession` and `ExerciseSubmission` and do not affect ordinary progress or grades.
+
+## Curriculum challenge bank
+
+For `tuBeginner1` and `tuBeginner2`, every challenge format comes from the independent bank, so ordinary lecture problems are never offered as challenges. Each lecture file under `src/problems/challenge/tuBeginner*/lecture*.ts` lists base programs (`id`, `title`, `courseId`, `lectureIndex`, the `java` program, its complete `instrumented` model, and three `blanks` and three `bugs` edits). Each edit replaces one exact `before` snippet of the Java program with `after`: a blank wraps the answer in `@[...]@`, and a bug introduces a `logical` or `syntax` defect. The three blanks, and likewise the three bugs, must edit distinct positions. A base yields one regular challenge plus one fill-in-the-blank and one bug-fix challenge per edit.
+
+After editing the bank, run `bun run gen-code` to regenerate `src/problems/challenge/metadata.ts` and `regularPrograms.ts`; unit tests fail when they are stale.
 
 ## 新問題の作問手順
 

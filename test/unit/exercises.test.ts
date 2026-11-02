@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { problemSessions, problemSubmissions, users } from '../../db/schema';
 import type { db as databaseClient } from '../../src/infrastructures/database';
 import type { BackendRouter } from '../../src/infrastructures/trpcBackend/routers';
+import type { ChallengeMetadata } from '../../src/problems/challenge/metadata';
 import { fillBlanks } from '../../src/problems/fillInBlank/blanks';
 import type * as JavaExecutors from '../../src/problems/fillInBlank/javaExecutors';
 import type { instantiateProblem as instantiateProblemType } from '../../src/problems/instantiateProblem';
@@ -75,7 +76,10 @@ beforeAll(async () => {
   const path = `${directory}/test.sqlite3`;
   sqlite = new DatabaseSync(path);
   vi.stubEnv('DATABASE_URL', `file:${path}`);
-  vi.stubEnv('NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON', JSON.stringify({ test: ['test', 'other'], other: ['test'] }));
+  vi.stubEnv(
+    'NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON',
+    JSON.stringify({ test: ['test', 'other'], other: ['test'], tuBeginner1: ['lecture1'], tuBeginner2: ['lecture1'] })
+  );
   ({ instantiateProblem } = await import('../../src/problems/instantiateProblem'));
   ({ db } = await import('../../src/infrastructures/database'));
   migrate(db, { migrationsFolder: 'drizzle' });
@@ -1712,3 +1716,69 @@ test('bugFix rejects wrong ownership, location, format and expired attempts with
   });
   expect(exerciseRows()).toEqual(expired);
 });
+
+test.each(['regular', 'fillInBlank', 'bugFix'] as const)(
+  'curriculum %s starts and advances only independent IDs while retaining legacy history',
+  async (problemFormat) => {
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const { challengeMetadata } = await import('../../src/problems/challenge/metadata');
+      const challengeMetadataOf = (id: string): ChallengeMetadata | undefined =>
+        (challengeMetadata as Partial<Record<string, ChallengeMetadata>>)[id];
+      const location = { courseId: 'tuBeginner1', lectureId: 'lecture1', problemFormat };
+      const legacyId =
+        problemFormat === 'regular'
+          ? 'straight'
+          : problemFormat === 'fillInBlank'
+            ? 'straightBlank'
+            : 'javaI1CornerTurnBug';
+      const insertLegacy = sqlite.prepare(`INSERT INTO ExerciseSession
+      (userId, courseId, lectureId, learningMode, problemFormat, problemId, seed, problemType, traceItemIndex, createdAt)
+      VALUES ('student', 'tuBeginner1', 'lecture1', 'challenge', ?, ?, 'legacy-seed', ?, 0, ?)`);
+      insertLegacy.run(
+        problemFormat,
+        legacyId,
+        problemFormat === 'regular' ? 'executionResult' : problemFormat,
+        Date.now()
+      );
+      const first = z
+        .object({ sessionId: z.number(), problemId: z.string() })
+        .passthrough()
+        .parse(await caller.startExercise(location));
+      expect(challengeMetadataOf(first.problemId)).toMatchObject({
+        courseId: 'tuBeginner1',
+        lectureIndex: 0,
+        problemFormat,
+      });
+      expect(first.problemId).not.toBe(legacyId);
+      if (problemFormat !== 'regular')
+        expect(z.string().parse(first.displayProgram)).not.toMatch(/\/\/\s*(?:step|caller)\b/);
+      expect(sqlite.prepare('SELECT * FROM ExerciseSession WHERE problemId = ?').all(legacyId)).toHaveLength(1);
+      expect(await caller.startExercise(location)).toMatchObject({ sessionId: first.sessionId });
+      sqlite.prepare('UPDATE ExerciseSession SET completedAt = ? WHERE id = ?').run(Date.now(), first.sessionId);
+      insertLegacy.run(
+        problemFormat,
+        legacyId,
+        problemFormat === 'regular' ? 'executionResult' : problemFormat,
+        Date.now()
+      );
+      const next = z
+        .object({ problemId: z.string() })
+        .passthrough()
+        .parse(await caller.nextExercise({ ...location, sessionId: first.sessionId }));
+      expect(challengeMetadataOf(next.problemId)).toMatchObject({
+        courseId: 'tuBeginner1',
+        lectureIndex: 0,
+        problemFormat,
+      });
+      expect(next.problemId).not.toBe(first.problemId);
+      if (problemFormat !== 'regular')
+        expect(z.string().parse(next.displayProgram)).not.toMatch(/\/\/\s*(?:step|caller)\b/);
+      expect(await caller.nextExercise({ ...location, sessionId: first.sessionId })).toMatchObject(next);
+      expect(regularMap.tuBeginner1.flat()).not.toContain(first.problemId);
+      expect(sqlite.prepare('SELECT * FROM ExerciseSession WHERE problemId = ?').all(legacyId)).toHaveLength(2);
+    } finally {
+      random.mockRestore();
+    }
+  }
+);

@@ -5,6 +5,8 @@ import { and, asc, desc, eq, gt, gte, isNotNull } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { getLearningPeriodFilter } from '@/learningPeriod';
+import { challengeMetadata } from '@/problems/challenge/metadata';
+import { instantiateRegularChallenge } from '@/problems/challenge/regular';
 import type { ExerciseDisplay } from '@/problems/fillInBlank/exerciseProblem';
 import { type FillInBlankVerdict, gradeFillInBlankCode } from '@/problems/fillInBlank/grade';
 import { MAX_JAVA_PROGRAM_LENGTH } from '@/problems/fillInBlank/javaProgram';
@@ -116,7 +118,12 @@ export const exerciseProcedures = {
             )
           )
           .orderBy(asc(exerciseSessions.id))
-          .get();
+          .all()
+          .find(
+            (row) =>
+              input.courseId === 'test' ||
+              candidatesFor(input.courseId, input.lectureId, format).includes(row.problemId)
+          );
         return newer
           ? toDisplay(newer, format)
           : createFromCandidates(userId, input.courseId, input.lectureId, format, previous.problemId);
@@ -238,6 +245,14 @@ const ownedSession = (
 };
 const candidatesFor = (courseId: string, lectureId: string, format: ProblemFormat): string[] => {
   const lectureIndex = courseIdToLectureIds[courseId as CourseId].indexOf(lectureId);
+  // Curriculum regular challenges come from the independent bank, not the ordinary lecture problem lists.
+  if (format === 'regular' && (courseId === 'tuBeginner1' || courseId === 'tuBeginner2')) {
+    return Object.entries(challengeMetadata)
+      .filter(
+        ([, item]) => item.courseId === courseId && item.lectureIndex === lectureIndex && item.problemFormat === format
+      )
+      .map(([id]) => id);
+  }
   const configured =
     format === 'regular'
       ? courseIdToLectureIndexToProblemIds[courseId as CourseId]?.[lectureIndex]
@@ -281,7 +296,9 @@ const startOrResume = (userId: string, courseId: string, lectureId: string, form
     .all();
   const endedIndex = rows.findIndex((row) => row.endedAt !== null);
   const resumable = endedIndex === -1 ? rows : rows.slice(0, endedIndex);
-  const selected = resumable.find((row) => row.completedAt === null) ?? resumable[0];
+  const candidates = courseId === 'test' ? undefined : new Set(candidatesFor(courseId, lectureId, format));
+  const eligible = candidates ? resumable.filter((row) => candidates.has(row.problemId)) : resumable;
+  const selected = eligible.find((row) => row.completedAt === null) ?? eligible[0];
   return selected
     ? toDisplay(selected, format)
     : createFromCandidates(userId, courseId, lectureId, format, rows[0]?.problemId);
@@ -319,7 +336,7 @@ const createFromCandidates = (
   return toDisplay(row, format, problem);
 };
 const instantiateRegular = (problemId: string, seed: string): InstantiatedProblem => {
-  const problem = instantiateProblem(problemId, 'java', seed);
+  const problem = instantiateRegularChallenge(problemId) ?? instantiateProblem(problemId, 'java', seed);
   if (!problem || problem.blankAnswers.length > 0 || problem.traceItems.length <= 1)
     throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Invalid regular problem: ${problemId}` });
   return problem;

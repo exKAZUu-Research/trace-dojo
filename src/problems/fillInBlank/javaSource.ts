@@ -1,3 +1,6 @@
+const javaNonCodePattern =
+  /\/\/[^\r\n]*|\/\*[\s\S]*?(?:\*\/|$)|"""(?:\\[\s\S]|(?!""")[^\\])*?(?:"""|$)|"(?:\\[\s\S]|[^"\\\r\n])*(?:"|$)|'(?:\\[\s\S]|[^'\\\r\n])*(?:'|$)/g;
+
 export function hasIncompleteJavaPlaceholders(source: string): boolean {
   return javaPlaceholderRanges(source).length > 0;
 }
@@ -11,9 +14,16 @@ export function javaPlaceholderRanges(source: string): { from: number; to: numbe
 
 export function maskJavaNonCode(source: string): string {
   // Preserve offsets and line breaks so declarations can be edited in the original source.
-  return source.replaceAll(
-    /\/\/[^\r\n]*|\/\*[\s\S]*?(?:\*\/|$)|"""(?:\\[\s\S]|(?!""")[^\\])*?(?:"""|$)|"(?:\\[\s\S]|[^"\\\r\n])*(?:"|$)|'(?:\\[\s\S]|[^'\\\r\n])*(?:'|$)/g,
-    (literal) => literal.replaceAll(/[^\r\n]/g, ' ')
+  return source.replaceAll(javaNonCodePattern, (literal) => literal.replaceAll(/[^\r\n]/g, ' '));
+}
+
+export function stripJavaTraceAnnotations(source: string): string {
+  return source.replaceAll(javaNonCodePattern, (token) =>
+    /^\/\/[ \t]*(?:step(?:[ \t]*:[ \t]*\d+)?|caller)(?:[ \t]*\/\/[ \t]*(?:step(?:[ \t]*:[ \t]*\d+)?|caller))*[ \t]*$/.test(
+      token
+    )
+      ? ''
+      : token
   );
 }
 

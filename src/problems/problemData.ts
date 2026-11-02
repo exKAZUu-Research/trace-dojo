@@ -1,3 +1,4 @@
+import { type ChallengeId, challengeMetadata } from './challenge/metadata';
 import { fillInBlankProblemDefinitions } from './fillInBlank/definitions';
 import { type JavaChallengeId, javaChallengeMetadata } from './javaChallenges/metadata';
 
@@ -222,10 +223,14 @@ const legacyProblemIdToName = {
   overload1Blank: '穴埋めチャレンジ：オーバーロード',
 } as const;
 type LegacyProblemId = keyof typeof legacyProblemIdToName;
-export type ProblemId = LegacyProblemId | JavaChallengeId;
+export type ProblemId = LegacyProblemId | JavaChallengeId | ChallengeId;
 export const problemIdToName: Record<ProblemId, string> = {
   ...(Object.fromEntries(Object.entries(javaChallengeMetadata).map(([id, metadata]) => [id, metadata.title])) as Record<
     JavaChallengeId,
+    string
+  >),
+  ...(Object.fromEntries(Object.entries(challengeMetadata).map(([id, metadata]) => [id, metadata.title])) as Record<
+    ChallengeId,
     string
   >),
   ...legacyProblemIdToName,
@@ -397,31 +402,18 @@ export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]>
 };
 
 export const courseIdToLectureIndexToExerciseProblemIds: Record<CourseId, ProblemId[][]> = {
-  tuBeginner1: [
-    ['straightBlank', 'straightSecondBlank'],
-    ['square1Blank'],
-    ['while1Blank'],
-    ['doubleLoop1Blank'],
-    ['elseIf1Blank'],
-    ['break1Blank'],
-    ['method1Blank'],
-    ['array1Blank'],
-  ],
-  tuBeginner2: [
-    ['multiObject1Blank'],
-    ['makeClass1Blank'],
-    ['encapsulationBlank'],
-    ['staticMethod1Blank'],
-    ['inheritance1Blank'],
-    ['overload1Blank'],
-    ['exception1Blank'],
-    ['twoDimensionalArray1Blank'],
-  ],
+  tuBeginner1: Array.from({ length: 8 }, () => []),
+  tuBeginner2: Array.from({ length: 8 }, () => []),
   test: [['test1Blank']],
 };
 
-for (const [id, { courseId, lectureIndex }] of Object.entries(javaChallengeMetadata)) {
-  courseIdToLectureIndexToExerciseProblemIds[courseId][lectureIndex].push(id as JavaChallengeId);
+for (const [id, metadata] of Object.entries(javaChallengeMetadata)) {
+  if (metadata.courseId === 'test')
+    courseIdToLectureIndexToExerciseProblemIds.test[metadata.lectureIndex].push(id as JavaChallengeId);
+}
+for (const [id, metadata] of Object.entries(challengeMetadata)) {
+  if (metadata.problemFormat !== 'regular')
+    courseIdToLectureIndexToExerciseProblemIds[metadata.courseId][metadata.lectureIndex].push(id as ChallengeId);
 }
 
 export const courseIdToLectureIds = JSON.parse(process.env.NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON ?? '{}') as Record<

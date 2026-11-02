@@ -2,13 +2,16 @@ import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+import { independentJavaChallengeDefinitions } from '../src/problems/challenge/javaDefinitions';
 import { javaChallengeDefinitions } from '../src/problems/javaChallenges/definitions';
 
 const metadata = Object.fromEntries(
-  Object.entries(javaChallengeDefinitions).map(([id, { title, courseId, lectureIndex, problemFormat }]) => [
-    id,
-    { title, courseId, lectureIndex, problemFormat },
-  ])
+  Object.entries(javaChallengeDefinitions)
+    .filter(([id]) => !independentJavaChallengeDefinitions[id])
+    .map(([id, { title, courseId, lectureIndex, problemFormat }]) => [
+      id,
+      { title, courseId, lectureIndex, problemFormat },
+    ])
 );
 const metadataPath = fileURLToPath(new URL('../src/problems/javaChallenges/metadata.ts', import.meta.url));
 writeFileSync(
