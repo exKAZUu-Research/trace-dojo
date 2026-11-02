@@ -67,13 +67,8 @@ export function traceProgram(
   this: unknown,
   instrumented: string,
   rawDisplayProgram: string,
-  languageId: LanguageId,
-  options?: {
-    /** Set to false when only the final state matters, so no per-step snapshots are retained. */
-    collectTrace?: boolean;
-  }
+  languageId: LanguageId
 ): TracedProgram {
-  const collectTrace = options?.collectTrace ?? true;
   if (!instrumented.includes('Turtle') && !/registerDisplayRef\s*\(/.test(instrumented)) {
     if (instrumented.includes(' = ')) {
       throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
@@ -94,7 +89,6 @@ class ScopeError extends Error {
     this.name = '${SCOPE_ERROR_NAME}';
   }
 }
-const collectTrace = ${collectTrace};
 let remainingOperations = ${MAX_TRACE_OPERATIONS};
 function spend(cost = 1) {
   remainingOperations -= cost;
@@ -232,7 +226,6 @@ class Turtle {
 }
 function addTrace(sid, self) {
   spend(1 + _turtles.length);
-  if (!collectTrace) return;
   const vars = {...s.vars, ...myGlobal};
   if (self && self !== globalThis) {
     vars['this'] = {...self};
