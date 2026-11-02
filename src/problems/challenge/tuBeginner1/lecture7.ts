@@ -723,6 +723,7 @@ for (s.set('i', 1); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
  } else {
   t.forward();
  }
+ delete s.vars['turn'];
 }
 delete s.vars['i'];
 t.backward();
