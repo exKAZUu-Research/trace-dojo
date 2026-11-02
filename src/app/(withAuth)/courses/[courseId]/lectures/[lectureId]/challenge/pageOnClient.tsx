@@ -208,9 +208,7 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
   };
   const nextJava = async (): Promise<void> => {
     if (!exercise || exercise.problemFormat === 'regular') throw new Error('次の問題を取得できませんでした。');
-    const isCurrent = currentAttempt(exercise.sessionId, exercise.problemFormat);
     const display = await fetchNext(exercise.sessionId, exercise.problemFormat);
-    if (!isCurrent()) return;
     activeSessionRef.current = { sessionId: display.sessionId, problemFormat: display.problemFormat };
     setExercise(display);
   };
@@ -279,9 +277,7 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
                 currentAttempt(sessionId, 'regular')
               ),
             next: async ({ sessionId, problemFormat }) => {
-              const isCurrent = currentAttempt(sessionId, problemFormat);
               const value = await fetchNext(sessionId, problemFormat);
-              if (!isCurrent()) throw new Error('Exercise request is no longer active');
               if (value.problemFormat !== 'regular') throw new Error('次の問題を取得できませんでした。');
               activeSessionRef.current = { sessionId: value.sessionId, problemFormat: value.problemFormat };
               return value;
