@@ -3,6 +3,7 @@
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
+import { useAuthContextSelector } from '@/contexts/AuthContext';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
 import { Center, Spinner, VStack } from '@/infrastructures/useClient/chakra';
 import type { ExerciseDisplay } from '@/problems/fillInBlank/exerciseProblem';
@@ -26,6 +27,30 @@ interface Props {
 
 export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
   const { courseId, lectureId } = useParams<{ courseId: CourseId; lectureId: string }>();
+  const userId = useAuthContextSelector((context) => context.currentUserId);
+  if (!userId)
+    return (
+      <Center py={10}>
+        <Spinner label="問題を準備しています" />
+      </Center>
+    );
+  return (
+    <ChallengeAttempt
+      key={JSON.stringify([userId, courseId, lectureId])}
+      initialFormat={initialFormat}
+      userId={userId}
+      courseId={courseId}
+      lectureId={lectureId}
+    />
+  );
+};
+
+const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; lectureId: string }> = ({
+  initialFormat,
+  userId,
+  courseId,
+  lectureId,
+}) => {
   const router = useRouter();
   const [exercise, setExercise] = useState<Display>();
   const [format, setFormat] = useState<ChallengeProblemFormat | undefined>(initialFormat);
@@ -55,7 +80,6 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
     activeRequestRef.current += 1;
     requestRef.current = undefined;
     pendingRef.current = false;
-    // URL changes are external input and must reset the active challenge view.
     // oxlint-disable-next-line react/set-state-in-effect -- synchronize client state with server search params
     setIsPending(false);
     setMessage(undefined);
@@ -76,7 +100,6 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
       };
     }
     pendingRef.current = true;
-    // Starting is an external request whose pending state is reflected in the modal.
     // oxlint-disable-next-line react/set-state-in-effect -- synchronize UI with the active request
     setIsPending(true);
     const promise = requestRef.current.promise;
@@ -170,10 +193,10 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
     },
     { label: '次の問題へ', colorScheme: 'brand', onClick: nextBlank },
   ];
-  const gradeBlank = async (answers: string[]): Promise<FillInBlankVerdict> => {
+  const gradeBlank = async (code: string): Promise<FillInBlankVerdict> => {
     if (!exercise) throw new Error('No active exercise');
     return await detectStaleSession(
-      submitBlank.mutateAsync({ courseId, lectureId, sessionId: exercise.sessionId, answers })
+      submitBlank.mutateAsync({ courseId, lectureId, sessionId: exercise.sessionId, code })
     );
   };
 
@@ -224,8 +247,16 @@ export const ChallengePageOnClient: React.FC<Props> = ({ initialFormat }) => {
         <VStack key={exercise.sessionId} align="stretch" spacing={4}>
           <ProblemPageHeader courseId={courseId} lectureId={lectureId} problemId={exercise.problemId as ProblemId} />
           <FillInBlankBody
+            draftContext={{
+              userId,
+              mode: 'challenge',
+              courseId,
+              lectureId,
+              problemId: exercise.problemId,
+              sessionId: exercise.sessionId,
+            }}
             problem={exercise}
-            gradeAnswers={gradeBlank}
+            gradeCode={gradeBlank}
             completionActions={actions}
             completionMessage="正解です！次の問題へ進めます。"
             isCompleted={exercise.completed}

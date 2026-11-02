@@ -1,5 +1,5 @@
 import { Random } from '../app/utils/random';
-import { extractBlanks, fillBlanks } from './fillInBlank/blanks';
+import { extractBlanks } from './fillInBlank/blanks';
 import type { LanguageId, ProblemId } from './problemData';
 import { problemIdToLanguageIdToProgram } from './problemData';
 import { type TraceItem, type TraceItemVariable, traceProgram, type TurtleTrace } from './traceProgram';
@@ -59,11 +59,6 @@ export interface InstantiatedProblem {
    * The display-language program whose blanks are kept as `@[...]@` markers and whose random numbers are instantiated.
    */
   displayProgramTemplate: string;
-
-  /**
-   * The instrumented program whose blanks are kept as `@[...]@` markers and whose random numbers are instantiated.
-   */
-  instrumentedTemplate: string;
 }
 
 const randomNumberRegex = /<(\d+)-(\d+)>/g;
@@ -91,26 +86,16 @@ export function instantiateProblem(
     return randomNumber.toString();
   });
 
-  // 言語が変わっても、乱数埋め込み箇所の出現順序は変わらないという前提を置く。
+  // Random placeholders must occur in the same order in both language definitions.
   let index = 0;
   const displayProgramTemplate = template[languageId].replaceAll(randomNumberRegex, () =>
     generatedNumbers[index++].toString()
   );
   const displayBlanks = extractBlanks(displayProgramTemplate);
-  const instrumentedBlanks = extractBlanks(instrumentedTemplate);
-  // Grading fills the student's answers into the instrumented template by position, so the counts must match.
-  if (displayBlanks.answers.length !== instrumentedBlanks.answers.length) {
-    throw new Error(`Blank counts differ between the ${languageId} and instrumented templates of ${problemId}`);
-  }
-  const problem = traceProgram(
-    fillBlanks(instrumentedTemplate, instrumentedBlanks.answers),
-    displayBlanks.answers.length > 0 ? displayBlanks.programWithPlaceholders : displayProgramTemplate,
-    languageId
-  );
+  const problem = traceProgram(instrumentedTemplate, displayBlanks.programWithPlaceholders, languageId);
   return {
     ...problem,
     blankAnswers: displayBlanks.answers,
     displayProgramTemplate,
-    instrumentedTemplate,
   };
 }

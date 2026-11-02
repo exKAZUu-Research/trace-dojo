@@ -53,30 +53,19 @@ export const colorToChar = Object.fromEntries(
 
 /**
  * The maximum number of traced operations before execution aborts.
- * Student-written blanks run through this tracer, so unbounded loops must not hang the server.
+ * Model definitions run on the server, so an accidental unbounded loop must not hang it.
  */
-export const MAX_TRACE_OPERATIONS = 20_000;
-export const TRACE_BUDGET_EXCEEDED_MESSAGE = 'Execution budget exceeded';
+const MAX_TRACE_OPERATIONS = 20_000;
+const TRACE_BUDGET_EXCEEDED_MESSAGE = 'Execution budget exceeded';
 
-export type TracedProgram = Omit<
-  InstantiatedProblem,
-  'blankAnswers' | 'displayProgramTemplate' | 'instrumentedTemplate'
->;
-
-/** Thrown by the instrumented runtime when a name is not in scope, i.e. a translation gap rather than Java semantics. */
-export const SCOPE_ERROR_NAME = 'ScopeError';
+export type TracedProgram = Omit<InstantiatedProblem, 'blankAnswers' | 'displayProgramTemplate'>;
 
 export function traceProgram(
   this: unknown,
   instrumented: string,
   rawDisplayProgram: string,
-  languageId: LanguageId,
-  options?: {
-    /** Set to false when only the final state matters, so no per-step snapshots are retained. */
-    collectTrace?: boolean;
-  }
+  languageId: LanguageId
 ): TracedProgram {
-  const collectTrace = options?.collectTrace ?? true;
   if (!instrumented.includes('Turtle') && !/registerDisplayRef\s*\(/.test(instrumented)) {
     if (instrumented.includes(' = ')) {
       throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
@@ -94,10 +83,9 @@ let myGlobal = {};
 class ScopeError extends Error {
   constructor(message) {
     super(message);
-    this.name = '${SCOPE_ERROR_NAME}';
+    this.name = 'ScopeError';
   }
 }
-const collectTrace = ${collectTrace};
 let remainingOperations = ${MAX_TRACE_OPERATIONS};
 function spend(cost = 1) {
   remainingOperations -= cost;
@@ -235,7 +223,6 @@ class Turtle {
 }
 function addTrace(sid, self) {
   spend(1 + _turtles.length);
-  if (!collectTrace) return;
   const vars = {...s.vars, ...myGlobal};
   if (self && self !== globalThis) {
     vars['this'] = {...self};
@@ -290,7 +277,7 @@ function flattenObjects(obj) {
 }
 function checkForCond(cond, sid) {
   spend();
-  // Java only accepts boolean conditions; a coerced value means a blank was filled with an ill-typed expression.
+  // The instrumented models use Java boolean condition semantics.
   if (typeof cond !== 'boolean') throw new TypeError('Loop condition is not a boolean');
   if (!cond && trace.at(-1).sid === sid) {
     trace.at(-1).last = true;

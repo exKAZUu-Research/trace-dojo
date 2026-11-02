@@ -71,15 +71,15 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   const gradeFillInBlankAnswersMutation = backendTrpcReact.gradeFillInBlankAnswers.useMutation({
     onError: onSessionError,
   });
-  const gradeAnswers = useCallback(
-    async (answers: string[]): Promise<FillInBlankGradingResult> => {
+  const gradeCode = useCallback(
+    async (code: string): Promise<FillInBlankGradingResult> => {
       const newProblemSession = await updateProblemSessionMutation.mutateAsync({
         id: problemSession.id,
         incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),
       });
       return await gradeFillInBlankAnswersMutation.mutateAsync({
         sessionId: problemSession.id,
-        answers,
+        code,
         elapsedMilliseconds: newProblemSession.elapsedMilliseconds,
       });
     },
@@ -147,7 +147,6 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
                 colorScheme="blue"
                 variant="outline"
                 onClick={() =>
-                  // 管理者は最後の盤面を確認できるように、 problem.traceItems.length まで進める。
                   updateProblemSession('step', Math.min(problemSession.traceItemIndex + 1, problem.traceItems.length))
                 }
               >
@@ -160,13 +159,21 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
 
       {isFillInBlank ? (
         <FillInBlankBody
-          gradeAnswers={gradeAnswers}
+          key={`${problemSession.id}:${problem.displayProgram}`}
+          draftContext={{
+            userId: props.userId,
+            mode: 'ordinary',
+            courseId: params.courseId,
+            lectureId: params.lectureId,
+            problemId: params.problemId,
+            sessionId: problemSession.id,
+            seed: props.initialProblemSession.problemVariablesSeed,
+          }}
+          gradeCode={gradeCode}
           problem={{
             displayProgram: problem.displayProgram,
-            blankCount: problem.blankAnswers.length,
             finalBoard: problem.finalBoard,
             finalTurtles: problem.finalTurtles,
-            finalVars: problem.finalVars,
           }}
         />
       ) : (
