@@ -5903,7 +5903,7 @@ export const challengeMetadata = {
     lectureIndex: 5,
     problemFormat: 'fillInBlank',
   },
-  challengeII6ChosenSuperSignatureBlankSuperChoice: {
+  challengeII6ChosenSuperSignatureBlankChildTurn: {
     title: 'superで引数のある親の動作を選ぶ',
     courseId: 'tuBeginner2',
     lectureIndex: 5,
@@ -5921,7 +5921,7 @@ export const challengeMetadata = {
     lectureIndex: 5,
     problemFormat: 'bugFix',
   },
-  challengeII6ChosenSuperSignatureBugSuperChoice: {
+  challengeII6ChosenSuperSignatureBugChildTurn: {
     title: 'superで引数のある親の動作を選ぶ',
     courseId: 'tuBeginner2',
     lectureIndex: 5,

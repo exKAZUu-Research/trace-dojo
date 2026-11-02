@@ -36,6 +36,8 @@ test('all independent regular challenges render bounded traces with mapped displ
         expect(problem.callerIdToLineIndex.has(caller), `${base.id}: caller ${caller}`).toBe(true);
     }
     expect(courseIdToLectureIndexToProblemIds[base.courseId].flat(), base.id).not.toContain(base.id);
+    for (const edits of [base.blanks, base.bugs])
+      expect(new Set(edits.map(({ before }) => before)).size, `${base.id}: distinct edit positions`).toBe(3);
   }
 });
 

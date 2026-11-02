@@ -338,9 +338,9 @@ export const lecture6: ChallengeBase[] = [
         after: '    super.act(@[1]@); // caller',
       },
       {
-        id: 'SuperChoice',
-        before: '    super.act(1); // caller',
-        after: '    super.@[act(1)]@; // caller',
+        id: 'ChildTurn',
+        before: '    super.act(1); // caller\n    this.t.左を向く(); // step',
+        after: '    super.act(1); // caller\n    this.t.@[左を向く]@(); // step',
       },
       {
         id: 'ParentCondition',
@@ -356,9 +356,9 @@ export const lecture6: ChallengeBase[] = [
         kind: 'logical',
       },
       {
-        id: 'SuperChoice',
-        before: '    super.act(1); // caller',
-        after: '    super.act(); // caller',
+        id: 'ChildTurn',
+        before: '    super.act(1); // caller\n    this.t.左を向く(); // step',
+        after: '    super.act(1); // caller\n    this.t.右を向く(); // step',
         kind: 'logical',
       },
       {
