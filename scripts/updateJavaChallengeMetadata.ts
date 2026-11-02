@@ -1,4 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { javaChallengeDefinitions } from '../src/problems/javaChallenges/definitions';
 
@@ -8,7 +10,9 @@ const metadata = Object.fromEntries(
     { title, courseId, lectureIndex, problemFormat },
   ])
 );
+const metadataPath = fileURLToPath(new URL('../src/problems/javaChallenges/metadata.ts', import.meta.url));
 writeFileSync(
-  new URL('../src/problems/javaChallenges/metadata.ts', import.meta.url),
+  metadataPath,
   `// Refresh with bun scripts/updateJavaChallengeMetadata.ts after editing the catalog.\nimport type { JavaChallengeDefinition } from './types';\n\nexport const javaChallengeMetadata: Record<string, Pick<JavaChallengeDefinition, 'title' | 'courseId' | 'lectureIndex' | 'problemFormat'>> = ${JSON.stringify(metadata, undefined, 2)};\n`
 );
+execFileSync('bun', ['fmt', metadataPath], { stdio: 'inherit' });
