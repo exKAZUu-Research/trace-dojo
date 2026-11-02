@@ -11,6 +11,16 @@ export const getOrdinaryJavaProblem = (
   courseId: string,
   lectureId: string
 ): OrdinaryJavaProblemData => {
+  const problem = findOrdinaryJavaProblem(problemId, courseId, lectureId);
+  if (!problem) throw new Error('Invalid ordinary Java problem location');
+  return problem;
+};
+
+export const findOrdinaryJavaProblem = (
+  problemId: string,
+  courseId: string,
+  lectureId: string
+): OrdinaryJavaProblemData | undefined => {
   const definition = javaChallengeDefinitions[problemId];
   if (
     definition?.problemFormat !== 'bugFix' ||
@@ -18,6 +28,6 @@ export const getOrdinaryJavaProblem = (
     courseIdToLectureIds[definition.courseId]?.[definition.lectureIndex] !== lectureId ||
     !courseIdToLectureIndexToProblemIds[definition.courseId]?.[definition.lectureIndex]?.includes(problemId)
   )
-    throw new Error('Invalid ordinary Java problem location');
+    return undefined;
   return { problemId, problemFormat: 'bugFix', ...instantiateJavaChallenge(problemId, 'bugFix') };
 };

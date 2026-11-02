@@ -6,7 +6,7 @@ import { db } from '@/infrastructures/database';
 import { logger } from '@/infrastructures/pino';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import { isFillInBlankProblem } from '@/problems/instantiateProblem';
-import { getOrdinaryJavaProblem, isOrdinaryBugProblem } from '@/problems/javaChallenges/ordinaryProblem';
+import { findOrdinaryJavaProblem, isOrdinaryBugProblem } from '@/problems/javaChallenges/ordinaryProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 
 import { problemSessions } from '../../../../../../../../../db/schema';
@@ -18,7 +18,7 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
   problemId: ProblemId;
 }> = async ({ params, session }) => {
   const javaProblem = isOrdinaryBugProblem(params.problemId)
-    ? getOrdinaryJavaProblem(params.problemId, params.courseId, params.lectureId)
+    ? (findOrdinaryJavaProblem(params.problemId, params.courseId, params.lectureId) ?? notFound())
     : undefined;
   let incompleteProblemSession = await db.query.problemSessions.findFirst({
     where: {
