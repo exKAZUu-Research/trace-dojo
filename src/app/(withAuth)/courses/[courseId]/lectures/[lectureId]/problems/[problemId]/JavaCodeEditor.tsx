@@ -24,6 +24,8 @@ import styles from './JavaCodeEditor.module.css';
 export interface JavaCodeEditorHandle {
   undo: () => void;
   redo: () => void;
+  /** Replaces the whole document as one undoable change; it reaches the parent through `onChange`. */
+  replace: (source: string) => void;
 }
 
 export interface EditorHistoryAvailability {
@@ -34,7 +36,7 @@ export interface EditorHistoryAvailability {
 interface Props {
   ref?: React.Ref<JavaCodeEditorHandle>;
   onHistoryChange: (availability: EditorHistoryAvailability) => void;
-  value: string;
+  initialValue: string;
   disabled: boolean;
   onChange: (value: string) => void;
   diagnostics?: JavaDiagnostic[];
@@ -43,7 +45,7 @@ interface Props {
 
 export const JavaCodeEditor: React.FC<Props> = ({
   ref,
-  value,
+  initialValue,
   disabled,
   onChange,
   onHistoryChange,
@@ -57,7 +59,7 @@ export const JavaCodeEditor: React.FC<Props> = ({
   const fontSizeTheme = useRef(new Compartment());
   const onChangeRef = useRef(onChange);
   const onInvalidateRef = useRef(onInvalidate);
-  const initialValue = useRef(value);
+  const initialDocument = useRef(initialValue);
   const onHistoryChangeRef = useRef(onHistoryChange);
 
   useImperativeHandle(
@@ -74,6 +76,14 @@ export const JavaCodeEditor: React.FC<Props> = ({
         if (disabled || !view || view.state.readOnly) return;
         redo(view);
         view.focus();
+      },
+      replace: (source) => {
+        const view = editor.current;
+        if (!view || source === view.state.doc.toString()) return;
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: source },
+          annotations: isolateHistory.of('full'),
+        });
       },
     }),
     [disabled]
@@ -92,7 +102,7 @@ export const JavaCodeEditor: React.FC<Props> = ({
     if (!host.current) return;
     const view = new EditorView({
       parent: host.current,
-      doc: initialValue.current,
+      doc: initialDocument.current,
       extensions: [
         basicSetup,
         java(),
@@ -174,16 +184,6 @@ export const JavaCodeEditor: React.FC<Props> = ({
       ]),
     });
   }, [disabled]);
-
-  useEffect(() => {
-    const view = editor.current;
-    if (view && value !== view.state.doc.toString()) {
-      view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: value },
-        annotations: isolateHistory.of('full'),
-      });
-    }
-  }, [value]);
 
   useEffect(() => {
     editor.current?.dispatch({

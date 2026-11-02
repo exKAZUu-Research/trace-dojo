@@ -58,10 +58,7 @@ export const colorToChar = Object.fromEntries(
 export const MAX_TRACE_OPERATIONS = 20_000;
 export const TRACE_BUDGET_EXCEEDED_MESSAGE = 'Execution budget exceeded';
 
-export type TracedProgram = Omit<
-  InstantiatedProblem,
-  'blankAnswers' | 'displayProgramTemplate' | 'instrumentedTemplate'
->;
+export type TracedProgram = Omit<InstantiatedProblem, 'blankAnswers' | 'displayProgramTemplate'>;
 
 /** Thrown by the instrumented runtime when a name is not in scope. */
 export const SCOPE_ERROR_NAME = 'ScopeError';

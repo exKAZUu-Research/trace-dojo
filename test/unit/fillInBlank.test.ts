@@ -28,7 +28,6 @@ describe('trusted model catalog', () => {
     const problem = instantiate(id);
     expect(problem.displayProgram).toMatch(/【\d+】/);
     expect(problem.displayProgram).not.toContain('@[');
-    expect(problem.instrumentedTemplate).not.toContain('@[');
     expect(problem.finalBoard.split('\n')).toHaveLength(7);
     expect(instantiate(id)).toMatchObject({ finalBoard: problem.finalBoard, finalTurtles: problem.finalTurtles });
   });

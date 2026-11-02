@@ -59,11 +59,6 @@ export interface InstantiatedProblem {
    * The display-language program whose blanks are kept as `@[...]@` markers and whose random numbers are instantiated.
    */
   displayProgramTemplate: string;
-
-  /**
-   * The trusted instrumented model with instantiated random numbers.
-   */
-  instrumentedTemplate: string;
 }
 
 const randomNumberRegex = /<(\d+)-(\d+)>/g;
@@ -102,6 +97,5 @@ export function instantiateProblem(
     ...problem,
     blankAnswers: displayBlanks.answers,
     displayProgramTemplate,
-    instrumentedTemplate,
   };
 }

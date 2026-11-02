@@ -205,7 +205,7 @@ const EditingBody: React.FC<Props & { baseline: string; draftKey: string; restor
 
           <JavaCodeEditor
             ref={editor}
-            value={code}
+            initialValue={props.restored.code}
             disabled={isEditorLocked}
             onChange={(value) => {
               invalidate();
@@ -314,7 +314,7 @@ const EditingBody: React.FC<Props & { baseline: string; draftKey: string; restor
                   if (isLocked) return;
                   invalidate();
                   setSaveFailed(!removeJavaDraft(props.draftKey));
-                  setCode(props.baseline);
+                  editor.current?.replace(props.baseline);
                   setIsResetOpen(false);
                 }}
               >
