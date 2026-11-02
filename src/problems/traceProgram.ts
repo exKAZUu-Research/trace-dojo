@@ -55,13 +55,10 @@ export const colorToChar = Object.fromEntries(
  * The maximum number of traced operations before execution aborts.
  * Model definitions run on the server, so an accidental unbounded loop must not hang it.
  */
-export const MAX_TRACE_OPERATIONS = 20_000;
-export const TRACE_BUDGET_EXCEEDED_MESSAGE = 'Execution budget exceeded';
+const MAX_TRACE_OPERATIONS = 20_000;
+const TRACE_BUDGET_EXCEEDED_MESSAGE = 'Execution budget exceeded';
 
 export type TracedProgram = Omit<InstantiatedProblem, 'blankAnswers' | 'displayProgramTemplate'>;
-
-/** Thrown by the instrumented runtime when a name is not in scope. */
-export const SCOPE_ERROR_NAME = 'ScopeError';
 
 export function traceProgram(
   this: unknown,
@@ -86,7 +83,7 @@ let myGlobal = {};
 class ScopeError extends Error {
   constructor(message) {
     super(message);
-    this.name = '${SCOPE_ERROR_NAME}';
+    this.name = 'ScopeError';
   }
 }
 let remainingOperations = ${MAX_TRACE_OPERATIONS};
