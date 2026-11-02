@@ -1,4 +1,5 @@
-import { readdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { resolve } from 'node:path';
 
 import { expect, test, vi } from 'vitest';
 
@@ -13,23 +14,33 @@ const problem = instantiateProblem('fillInBlank1', 'java', 'local-diagnostic-tes
 if (!problem) throw new Error('Missing fillInBlank1 problem');
 
 test('local compiler builds without executing learner code and cleans successful and failed compilation artifacts', async () => {
-  const before = await readdir('.tmp/javaDiagnostics').catch(() => []);
-  const source = 'class Main { public static void main(String[] args) { while (true) {} } }';
-  const built = buildJavaJudgeProgram(source, '__TRACE_DOJO_RESULT_local__');
-  const success = await compileJavaProgram(built.program);
-  expect(success).toMatchObject({ kind: 'compiled', exitCode: 0 });
-  const failed = await compileJavaProgram(
-    buildJavaJudgeProgram(source.replace('while (true) {}', 'int 亀 = true;'), '__TRACE_DOJO_RESULT_local__').program
-  );
-  expect(failed).toMatchObject({ kind: 'compileError', exitCode: 1 });
-  expect(failed.stderr).toContain('boolean cannot be converted to int');
-  expect(await readdir('.tmp/javaDiagnostics')).toEqual(before);
-  await expect(localCompileOnlyExecutor.execute(built.program, 'TraceDojoJudge')).rejects.toThrow('received compiled');
+  await mkdir('.tmp', { recursive: true });
+  const parent = await mkdtemp(resolve('.tmp/local-compiler-'));
+  try {
+    const source = 'class Main { public static void main(String[] args) { while (true) {} } }';
+    const built = buildJavaJudgeProgram(source, '__TRACE_DOJO_RESULT_local__');
+    const success = await compileJavaProgram(built.program, parent);
+    expect(success).toMatchObject({ kind: 'compiled', exitCode: 0 });
+    const failed = await compileJavaProgram(
+      buildJavaJudgeProgram(source.replace('while (true) {}', 'int 亀 = true;'), '__TRACE_DOJO_RESULT_local__').program,
+      parent
+    );
+    expect(failed).toMatchObject({ kind: 'compileError', exitCode: 1 });
+    expect(failed.stderr).toContain('boolean cannot be converted to int');
+    expect(await readdir(parent)).toEqual([]);
+    await expect(localCompileOnlyExecutor.execute(built.program, 'TraceDojoJudge')).rejects.toThrow(
+      'received compiled'
+    );
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
 }, 60_000);
 
 test('actual compiler feedback preserves Japanese learner names and CRLF locations with Japanese primary and safe original', async () => {
   const source = '\r\nclass Main {\r\n public static void main(String[] args) {\r\n  前に進む();\r\n }\r\n}\r\n';
-  const result = await gradeFillInBlankCode(problem, source, { javaExecutors: [localCompileOnlyExecutor] });
+  const result = await gradeFillInBlankCode(problem, source, {
+    javaExecutors: [localCompileOnlyExecutor],
+  });
   const verdict = diagnosticVerdictSchema.parse(result);
   expect(verdict.diagnostics).toEqual(
     expect.arrayContaining([
@@ -47,7 +58,9 @@ test('actual compiler feedback preserves Japanese learner names and CRLF locatio
 }, 30_000);
 
 test('actual wrapper compile failure explains the program entry without exposing generated locations or secondary internals', async () => {
-  const result = await gradeFillInBlankCode(problem, 'class Main {}', { javaExecutors: [localCompileOnlyExecutor] });
+  const result = await gradeFillInBlankCode(problem, 'class Main {}', {
+    javaExecutors: [localCompileOnlyExecutor],
+  });
   const verdict = diagnosticVerdictSchema.parse(result);
   expect(verdict.diagnostics).toEqual([expect.objectContaining({ message: expect.stringMatching(/始|開始/) })]);
   for (const diagnostic of verdict.diagnostics) {
