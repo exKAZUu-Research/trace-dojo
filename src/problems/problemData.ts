@@ -1,6 +1,6 @@
-import { challengeMetadata } from './challenge/metadata';
+import { type ChallengeId, challengeMetadata } from './challenge/metadata';
 import { fillInBlankProblemDefinitions } from './fillInBlank/definitions';
-import { javaChallengeMetadata } from './javaChallenges/metadata';
+import { type JavaChallengeId, javaChallengeMetadata } from './javaChallenges/metadata';
 
 export const languageIds = ['instrumented', 'java'] as const;
 export type LanguageId = (typeof languageIds)[number];
@@ -13,8 +13,7 @@ export const courseIdToName = {
 export type CourseId = keyof typeof courseIdToName;
 export const courseIds = Object.keys(courseIdToName) as CourseId[];
 
-export const problemIdToName: Record<string, string> = {
-  ...Object.fromEntries(Object.entries(javaChallengeMetadata).map(([id, metadata]) => [id, metadata.title])),
+const legacyProblemIdToName = {
   straight: '線を描こう(1)',
   straight2: '線を描こう(2)',
   stepBack: '線を描こう(3)',
@@ -223,7 +222,19 @@ export const problemIdToName: Record<string, string> = {
   test1Blank: '穴埋めチャレンジのテスト用問題',
   overload1Blank: '穴埋めチャレンジ：オーバーロード',
 } as const;
-export type ProblemId = keyof typeof problemIdToName;
+type LegacyProblemId = keyof typeof legacyProblemIdToName;
+export type ProblemId = LegacyProblemId | JavaChallengeId | ChallengeId;
+export const problemIdToName: Record<ProblemId, string> = {
+  ...(Object.fromEntries(Object.entries(javaChallengeMetadata).map(([id, metadata]) => [id, metadata.title])) as Record<
+    JavaChallengeId,
+    string
+  >),
+  ...(Object.fromEntries(Object.entries(challengeMetadata).map(([id, metadata]) => [id, metadata.title])) as Record<
+    ChallengeId,
+    string
+  >),
+  ...legacyProblemIdToName,
+};
 
 export const courseIdToLectureIndexToProblemIds: Record<CourseId, ProblemId[][]> = {
   tuBeginner1: [
@@ -397,11 +408,12 @@ export const courseIdToLectureIndexToExerciseProblemIds: Record<CourseId, Proble
 };
 
 for (const [id, metadata] of Object.entries(javaChallengeMetadata)) {
-  if (metadata.courseId === 'test') courseIdToLectureIndexToExerciseProblemIds.test[metadata.lectureIndex].push(id);
+  if (metadata.courseId === 'test')
+    courseIdToLectureIndexToExerciseProblemIds.test[metadata.lectureIndex].push(id as JavaChallengeId);
 }
 for (const [id, metadata] of Object.entries(challengeMetadata)) {
   if (metadata.problemFormat !== 'regular')
-    courseIdToLectureIndexToExerciseProblemIds[metadata.courseId][metadata.lectureIndex].push(id);
+    courseIdToLectureIndexToExerciseProblemIds[metadata.courseId][metadata.lectureIndex].push(id as ChallengeId);
 }
 
 export const courseIdToLectureIds = JSON.parse(process.env.NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON ?? '{}') as Record<
@@ -409,7 +421,11 @@ export const courseIdToLectureIds = JSON.parse(process.env.NEXT_PUBLIC_COURSE_ID
   string[]
 >;
 
-export const problemIdToLanguageIdToProgram: Record<ProblemId, Record<LanguageId, string>> = {
+export function getProblemProgram(problemId: string): Record<LanguageId, string> | undefined {
+  return (problemIdToLanguageIdToProgram as Partial<Record<string, Record<LanguageId, string>>>)[problemId];
+}
+
+export const problemIdToLanguageIdToProgram: Record<LegacyProblemId, Record<LanguageId, string>> = {
   straight: {
     instrumented: `
 const t = new Turtle(); registerDisplayRef('亀', () => t); // step

@@ -33,8 +33,10 @@ export type LocalCompilationResult = ProcessResult & {
   kind: 'compiled' | 'compileError' | 'toolError';
 };
 
-export async function compileJavaProgram(program: string): Promise<LocalCompilationResult> {
-  const parent = resolvePath('.tmp/javaDiagnostics');
+export async function compileJavaProgram(
+  program: string,
+  parent = resolvePath('.tmp/javaDiagnostics')
+): Promise<LocalCompilationResult> {
   await mkdir(parent, { recursive: true });
   const directory = await mkdtemp(`${parent}/compile-`);
   try {

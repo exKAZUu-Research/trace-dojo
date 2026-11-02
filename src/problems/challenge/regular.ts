@@ -9,6 +9,5 @@ export const instantiateRegularChallenge = (problemId: string): InstantiatedProb
     ...traceProgram(source.instrumented, source.java, 'java'),
     blankAnswers: [],
     displayProgramTemplate: source.java,
-    instrumentedTemplate: source.instrumented,
   };
 };

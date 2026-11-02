@@ -4,7 +4,7 @@ import {
   genericCompilerMessage,
   translateCompilerMessage,
 } from './compilerMessages';
-import { javaDiagnosticsSchema, type JavaDiagnostic } from './javaDiagnostics';
+import { type JavaDiagnostic, javaDiagnosticsSchema } from './javaDiagnostics';
 import { JAVA_JUDGE_CLASS_NAME, type JavaJudgeProgram } from './javaProgram';
 import { maskJavaNonCode } from './javaSource';
 
@@ -49,8 +49,8 @@ export function normalizeCompilerDiagnostics(output: string, source: JavaJudgePr
     if (line === undefined) {
       originalMessage = undefined;
       message =
-        generatedLine === source.entryInvocationLine &&
-        /^(cannot find symbol|method main |non-static method main)/.test(category)
+        // That wrapper line only calls the learner's main, so any error there concerns its declaration.
+        generatedLine === source.entryInvocationLine
           ? 'プログラムを始める部分が見つからないか、書き方が合っていません。public static void main(String[] args) を確認してください。'
           : fixedMessages.has(category) &&
               (category.endsWith(' expected') || category === 'reached end of file while parsing')

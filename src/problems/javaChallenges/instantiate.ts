@@ -2,10 +2,9 @@ import { z } from 'zod';
 
 import { TURTLE_GRAPHICS_BOARD_COLUMNS, TURTLE_GRAPHICS_BOARD_ROWS } from '../../constants';
 import { extractBlanks } from '../fillInBlank/blanks';
-import { stripJavaTraceAnnotations } from '../fillInBlank/javaSource';
 import { buildJavaJudgeProgram, findForbiddenJavaPattern, MAX_JAVA_PROGRAM_LENGTH } from '../fillInBlank/javaProgram';
+import { stripJavaTraceAnnotations } from '../fillInBlank/javaSource';
 import { charToColor } from '../traceProgram';
-
 import { javaChallengeDefinitions } from './definitions';
 import type { JavaChallengeFormat, JavaChallengeTarget } from './types';
 

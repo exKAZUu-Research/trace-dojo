@@ -1,11 +1,12 @@
 import { expect, test } from 'vitest';
-import { instantiateJavaChallenge } from '../../src/problems/javaChallenges/instantiate';
-import { javaChallengeDefinitions } from '../../src/problems/javaChallenges/definitions';
-import { stripJavaTraceAnnotations } from '../../src/problems/fillInBlank/javaSource';
+
 import { challengeBases } from '../../src/problems/challenge/definitions';
 import { challengeMetadata } from '../../src/problems/challenge/metadata';
 import { instantiateRegularChallenge } from '../../src/problems/challenge/regular';
 import { challengeRegularPrograms } from '../../src/problems/challenge/regularPrograms';
+import { stripJavaTraceAnnotations } from '../../src/problems/fillInBlank/javaSource';
+import { javaChallengeDefinitions } from '../../src/problems/javaChallenges/definitions';
+import { instantiateJavaChallenge } from '../../src/problems/javaChallenges/instantiate';
 import { courseIdToLectureIndexToProblemIds } from '../../src/problems/problemData';
 
 test('all independent regular challenges render bounded traces with mapped displayed statements and calls', () => {

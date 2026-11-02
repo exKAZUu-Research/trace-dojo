@@ -4,11 +4,12 @@ import { ChakraProvider } from '@chakra-ui/react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, test, vi } from 'vitest';
-import { readRenderedJavaSource, replaceJavaSource } from '../../helpers/javaEditor';
-import { courseIdToLectureIds } from '../../../src/problems/problemData';
+
+import { ChallengePageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/pageOnClient';
 import { Lecture } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/pageOnClient';
 import { ProblemPageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/pageOnClient';
-import { ChallengePageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/pageOnClient';
+import { courseIdToLectureIds } from '../../../src/problems/problemData';
+import { readRenderedJavaSource, replaceJavaSource } from '../../helpers/javaEditor';
 
 const transport = vi.hoisted(() => ({
   problemId: 'testTurnBug',
@@ -34,6 +35,7 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
   backendTrpcReact: {
     startExercise: { useMutation: () => ({ mutateAsync: transport.start }) },
     nextExercise: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+    endExercise: { useMutation: () => ({ mutateAsync: vi.fn() }) },
     submitExercise: { useMutation: () => ({ mutateAsync: transport.grade }) },
     submitRegularExercise: { useMutation: () => ({ mutateAsync: vi.fn() }) },
     switchRegularExerciseToStep: { useMutation: () => ({ mutateAsync: vi.fn() }) },

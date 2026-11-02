@@ -4,7 +4,7 @@ export interface ChallengeMetadata {
   lectureIndex: number;
   problemFormat: 'regular' | 'fillInBlank' | 'bugFix';
 }
-export const challengeMetadata: Record<string, ChallengeMetadata> = {
+export const challengeMetadata = {
   challengeI1ForkReturn: {
     title: '枝から戻る道',
     courseId: 'tuBeginner1',
@@ -6725,4 +6725,6 @@ export const challengeMetadata: Record<string, ChallengeMetadata> = {
     lectureIndex: 7,
     problemFormat: 'bugFix',
   },
-};
+} as const satisfies Record<string, ChallengeMetadata>;
+
+export type ChallengeId = keyof typeof challengeMetadata;

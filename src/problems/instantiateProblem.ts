@@ -1,8 +1,7 @@
 import { Random } from '../app/utils/random';
-
 import { extractBlanks } from './fillInBlank/blanks';
-import type { LanguageId, ProblemId } from './problemData';
-import { problemIdToLanguageIdToProgram } from './problemData';
+import type { LanguageId } from './problemData';
+import { getProblemProgram } from './problemData';
 import { type TraceItem, type TraceItemVariable, traceProgram, type TurtleTrace } from './traceProgram';
 
 export interface InstantiatedProblem {
@@ -60,18 +59,12 @@ export interface InstantiatedProblem {
    * The display-language program whose blanks are kept as `@[...]@` markers and whose random numbers are instantiated.
    */
   displayProgramTemplate: string;
-
-  /**
-   * The trusted instrumented model with instantiated random numbers.
-   */
-  instrumentedTemplate: string;
 }
 
 const randomNumberRegex = /<(\d+)-(\d+)>/g;
 
 export function isFillInBlankProblem(problemId: string): boolean {
-  const template = problemIdToLanguageIdToProgram[problemId as ProblemId];
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  const template = getProblemProgram(problemId);
   return extractBlanks(template?.java ?? '').answers.length > 0;
 }
 
@@ -80,8 +73,7 @@ export function instantiateProblem(
   languageId: LanguageId,
   variableSeed: string
 ): InstantiatedProblem | undefined {
-  const template = problemIdToLanguageIdToProgram[problemId as ProblemId];
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  const template = getProblemProgram(problemId);
   if (!template?.[languageId]) return;
 
   const random = new Random(variableSeed);
@@ -103,6 +95,5 @@ export function instantiateProblem(
     ...problem,
     blankAnswers: displayBlanks.answers,
     displayProgramTemplate,
-    instrumentedTemplate,
   };
 }

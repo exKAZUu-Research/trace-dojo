@@ -3,14 +3,13 @@ import type { AddressInfo } from 'node:net';
 
 import { describe, expect, test } from 'vitest';
 
-import { diagnosticVerdictSchema, withCompilerTransport } from '../helpers/compilerTransport';
-
 import { fillBlanks } from '../../src/problems/fillInBlank/blanks';
 import { fillInBlankProblemDefinitions } from '../../src/problems/fillInBlank/definitions';
 import type { FillInBlankGradingResult, GradingOptions } from '../../src/problems/fillInBlank/grade';
 import { createJudgeExecutor, createWandboxExecutor } from '../../src/problems/fillInBlank/javaExecutors';
 import type { InstantiatedProblem } from '../../src/problems/instantiateProblem';
 import { instantiateProblem } from '../../src/problems/instantiateProblem';
+import { diagnosticVerdictSchema, withCompilerTransport } from '../helpers/compilerTransport';
 
 const judge = createJudgeExecutor();
 const withJudge = { javaExecutors: [judge] };
@@ -29,7 +28,6 @@ describe('trusted model catalog', () => {
     const problem = instantiate(id);
     expect(problem.displayProgram).toMatch(/【\d+】/);
     expect(problem.displayProgram).not.toContain('@[');
-    expect(problem.instrumentedTemplate).not.toContain('@[');
     expect(problem.finalBoard.split('\n')).toHaveLength(7);
     expect(instantiate(id)).toMatchObject({ finalBoard: problem.finalBoard, finalTurtles: problem.finalTurtles });
   });
@@ -298,6 +296,12 @@ test.each([
     category: /^no suitable constructor found for Turtle\(boolean\)$/,
   },
   { name: 'missing main', source: 'class Main {}', line: undefined, category: /main/ },
+  {
+    name: 'main without String[] parameter',
+    source: 'class Main {\n public static void main(String args) {}\n}',
+    line: undefined,
+    category: /public static void main\(String\[\] args\)/,
+  },
   {
     name: 'missing closing brace',
     source: 'class Main {\n public static void main(String[] args) {\n } // final comment',

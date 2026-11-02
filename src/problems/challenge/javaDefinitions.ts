@@ -1,10 +1,11 @@
 import { z } from 'zod';
+
 import { extractBlanks } from '../fillInBlank/blanks';
 import type { JavaChallengeDefinition } from '../javaChallenges/types';
 import { traceProgram } from '../traceProgram';
-import { challengeBaseSchema } from './schema';
 import { challengeBases } from './definitions';
 import { applyChallengeEdit } from './edits';
+import { challengeBaseSchema } from './schema';
 
 const directionSchema = z.enum(['N', 'E', 'S', 'W']);
 

@@ -1,4 +1,3 @@
-import type { ChallengeBase } from './types';
 import { lecture1 as tuBeginner1Lecture1 } from './tuBeginner1/lecture1';
 import { lecture2 as tuBeginner1Lecture2 } from './tuBeginner1/lecture2';
 import { lecture3 as tuBeginner1Lecture3 } from './tuBeginner1/lecture3';
@@ -15,6 +14,7 @@ import { lecture5 as tuBeginner2Lecture5 } from './tuBeginner2/lecture5';
 import { lecture6 as tuBeginner2Lecture6 } from './tuBeginner2/lecture6';
 import { lecture7 as tuBeginner2Lecture7 } from './tuBeginner2/lecture7';
 import { lecture8 as tuBeginner2Lecture8 } from './tuBeginner2/lecture8';
+import type { ChallengeBase } from './types';
 
 export const challengeBases: ChallengeBase[] = [
   ...tuBeginner1Lecture1,

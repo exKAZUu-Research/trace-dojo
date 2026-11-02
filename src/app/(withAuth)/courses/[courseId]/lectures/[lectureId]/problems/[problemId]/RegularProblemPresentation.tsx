@@ -1,12 +1,14 @@
 'use client';
 
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
-import { SyntaxHighlighter } from './SyntaxHighlighter';
-import { TraceViewer } from './TraceViewer';
+
 import { Box, Card, Flex, Heading, HStack, Tag, VStack } from '@/infrastructures/useClient/chakra';
 import type { InstantiatedProblem } from '@/problems/instantiateProblem';
 import type { TraceItemVariable } from '@/problems/traceProgram';
 import type { ProblemType } from '@/types';
+
+import { SyntaxHighlighter } from './SyntaxHighlighter';
+import { TraceViewer } from './TraceViewer';
 
 export interface RegularProblemView {
   problemType: Exclude<ProblemType, 'fillInBlank'>;

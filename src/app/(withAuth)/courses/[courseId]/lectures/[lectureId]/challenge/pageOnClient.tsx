@@ -2,13 +2,7 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { type ChallengeProblemFormat } from './ChallengeSelection';
-import { ChallengeSelectionModal } from './ChallengeSelectionModal';
-import { RegularChallengeBody } from './RegularChallengeBody';
-import { FillInBlankBody } from '../problems/[problemId]/FillInBlankBody';
-import { ProblemPageHeader } from '../problems/[problemId]/ProblemPageHeader';
-import { ReloadNotice } from '../problems/[problemId]/ReloadNotice';
-import type { CompletionAction } from '../problems/[problemId]/ResultAlertDialog';
+
 import { useAuthContextSelector } from '@/contexts/AuthContext';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
 import { Center, Spinner, VStack } from '@/infrastructures/useClient/chakra';
@@ -17,6 +11,14 @@ import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
 import { isChallengeSessionStale } from '@/utils/problemSessionError';
+
+import { FillInBlankBody } from '../problems/[problemId]/FillInBlankBody';
+import { ProblemPageHeader } from '../problems/[problemId]/ProblemPageHeader';
+import { ReloadNotice } from '../problems/[problemId]/ReloadNotice';
+import type { CompletionAction } from '../problems/[problemId]/ResultAlertDialog';
+import { type ChallengeProblemFormat } from './ChallengeSelection';
+import { ChallengeSelectionModal } from './ChallengeSelectionModal';
+import { RegularChallengeBody } from './RegularChallengeBody';
 
 type Display = ExerciseDisplay | RegularExerciseDisplay;
 interface Props {
@@ -66,6 +68,7 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
   const previousInitialFormatRef = useRef(initialFormat);
   const { mutateAsync: start } = backendTrpcReact.startExercise.useMutation();
   const next = backendTrpcReact.nextExercise.useMutation();
+  const end = backendTrpcReact.endExercise.useMutation();
   const submitJava = backendTrpcReact.submitExercise.useMutation();
   const submitRegular = backendTrpcReact.submitRegularExercise.useMutation();
   const switchRegular = backendTrpcReact.switchRegularExerciseToStep.useMutation();
@@ -177,6 +180,17 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
       throw error;
     }
   };
+  const endExercise = async (sessionId: number, problemFormat: ChallengeProblemFormat): Promise<void> => {
+    try {
+      await detectStaleSession(
+        end.mutateAsync({ courseId, lectureId, sessionId, problemFormat }),
+        currentAttempt(sessionId, problemFormat)
+      );
+    } catch {
+      throw new Error('終了できませんでした。もう一度お試しください。');
+    }
+    back();
+  };
   const fetchNext = async (sessionId: number, problemFormat: ChallengeProblemFormat): Promise<Display> => {
     const isCurrent = currentAttempt(sessionId, problemFormat);
     let display: Display | { status: 'noProblems' };
@@ -194,14 +208,19 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
   };
   const nextJava = async (): Promise<void> => {
     if (!exercise || exercise.problemFormat === 'regular') throw new Error('次の問題を取得できませんでした。');
-    const isCurrent = currentAttempt(exercise.sessionId, exercise.problemFormat);
     const display = await fetchNext(exercise.sessionId, exercise.problemFormat);
-    if (!isCurrent()) return;
     activeSessionRef.current = { sessionId: display.sessionId, problemFormat: display.problemFormat };
     setExercise(display);
   };
   const actions: CompletionAction[] = [
-    { label: '終わる', onClick: back },
+    {
+      label: '終わる',
+      onClick: async () => {
+        if (!exercise || exercise.problemFormat === 'regular')
+          throw new Error('終了できませんでした。ページを再読み込みしてください。');
+        await endExercise(exercise.sessionId, exercise.problemFormat);
+      },
+    },
     { label: '次の問題へ', colorScheme: 'brand', onClick: nextJava },
   ];
   const gradeJava = async (code: string): Promise<FillInBlankVerdict> => {
@@ -248,7 +267,7 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
           courseId={courseId}
           lectureId={lectureId}
           display={exercise}
-          back={back}
+          back={async (sessionId) => await endExercise(sessionId, 'regular')}
           transport={{
             submit: async (input) =>
               await detectStaleSession(submitRegular.mutateAsync(input), currentAttempt(input.sessionId, 'regular')),
@@ -258,9 +277,7 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
                 currentAttempt(sessionId, 'regular')
               ),
             next: async ({ sessionId, problemFormat }) => {
-              const isCurrent = currentAttempt(sessionId, problemFormat);
               const value = await fetchNext(sessionId, problemFormat);
-              if (!isCurrent()) throw new Error('Exercise request is no longer active');
               if (value.problemFormat !== 'regular') throw new Error('次の問題を取得できませんでした。');
               activeSessionRef.current = { sessionId: value.sessionId, problemFormat: value.problemFormat };
               return value;
@@ -270,12 +287,7 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
       )}
       {exercise && exercise.problemFormat !== 'regular' && exercise.problemFormat === format && (
         <VStack key={`${exercise.problemFormat}:${exercise.sessionId}`} align="stretch" spacing={4}>
-          <ProblemPageHeader
-            courseId={courseId}
-            lectureId={lectureId}
-            problemId={exercise.problemId as ProblemId}
-            fallbackTitle={exercise.problemFormat === 'bugFix' ? 'バグ修正' : '穴埋め問題'}
-          />
+          <ProblemPageHeader courseId={courseId} lectureId={lectureId} problemId={exercise.problemId as ProblemId} />
           <FillInBlankBody
             draftContext={{
               userId,

@@ -2,7 +2,6 @@ import type { inferRouterContext } from '@trpc/server';
 import type { FetchCreateContextFnOptions } from '@trpc/server/adapters/fetch';
 
 import { logger } from '../pino';
-
 import type { BackendRouter } from './routers';
 
 export type Context = FetchCreateContextFnOptions;

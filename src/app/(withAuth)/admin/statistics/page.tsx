@@ -1,5 +1,9 @@
-import { logger } from '../../../../infrastructures/pino';
+import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
+import { withAuthorizationOnServer } from '@/app/utils/withAuth';
+import { getLearningPeriodFilter } from '@/learningPeriod';
+
 import { db } from '../../../../infrastructures/database';
+import { logger } from '../../../../infrastructures/pino';
 import {
   Box,
   Heading,
@@ -15,10 +19,6 @@ import {
 import type { CourseId } from '../../../../problems/problemData';
 import { courseIdToLectureIndexToProblemIds } from '../../../../problems/problemData';
 import { dayjs } from '../../../utils/dayjs';
-
-import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
-import { withAuthorizationOnServer } from '@/app/utils/withAuth';
-import { getLearningPeriodFilter } from '@/learningPeriod';
 
 interface ProblemStatistics {
   courseId: string;

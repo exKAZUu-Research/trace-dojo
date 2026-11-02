@@ -13,8 +13,8 @@ vi.mock('next/navigation', () => ({
 vi.mock('@willbooster/shared-lib-react', () => ({ useLocalStorage: () => [false, vi.fn()] }));
 vi.mock('../../../src/contexts/AuthContext', () => ({ useAuthContextSelector: () => 'user-1' }));
 
-import { ChallengeModeButton } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/ChallengeModeButton';
 import { ChallengeSelectionModal } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/ChallengeSelectionModal';
+import { ChallengeModeButton } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/ChallengeModeButton';
 import { Lecture } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/pageOnClient';
 
 const renderInChakra = (node: React.ReactNode): ReturnType<typeof render> =>

@@ -3,9 +3,9 @@
 import { usePathname, useSearchParams } from 'next/navigation';
 import type React from 'react';
 
-import { NextLinkWithoutPrefetch } from '../atoms/NextLinkWithoutPrefetch';
-
 import { Button } from '@/infrastructures/useClient/chakra';
+
+import { NextLinkWithoutPrefetch } from '../atoms/NextLinkWithoutPrefetch';
 
 export const AuthButtons: React.FC = () => {
   const pathname = usePathname();

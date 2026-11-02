@@ -39,6 +39,7 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
   backendTrpcReact: {
     startExercise: { useMutation: () => ({ mutateAsync: infrastructure.start }) },
     nextExercise: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+    endExercise: { useMutation: () => ({ mutateAsync: vi.fn() }) },
     submitExercise: { useMutation: () => ({ mutateAsync: infrastructure.grade }) },
     submitRegularExercise: { useMutation: () => ({ mutateAsync: vi.fn() }) },
     switchRegularExerciseToStep: { useMutation: () => ({ mutateAsync: vi.fn() }) },
@@ -49,13 +50,11 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
   },
 }));
 
-import { instantiateJavaChallenge } from '../../../src/problems/javaChallenges/instantiate';
-import { javaChallengeDefinitions } from '../../../src/problems/javaChallenges/definitions';
-import { extractBlanks } from '../../../src/problems/fillInBlank/blanks';
-
 import { ChallengePageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/pageOnClient';
-
 import { ProblemPageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/pageOnClient';
+import { extractBlanks } from '../../../src/problems/fillInBlank/blanks';
+import { javaChallengeDefinitions } from '../../../src/problems/javaChallenges/definitions';
+import { instantiateJavaChallenge } from '../../../src/problems/javaChallenges/instantiate';
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -448,6 +447,10 @@ test('local hints identify a missing operand and disappear after a repair withou
   await waitFor(() => expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument());
   await replaceJavaSource(editor, 'class Main { void draw() { int x = 【1】; } }');
   expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
+  await replaceJavaSource(editor, 'class Main {\n void draw() {\n  int x = 【1】;\n  int y = ;\n  【2】\n }\n}');
+  await waitFor(() => expect(document.querySelectorAll('.cm-lintRange-error')).toHaveLength(1));
+  const hinted = document.querySelector('.cm-lintRange-error')?.closest('.cm-line');
+  expect(hinted).toHaveTextContent('int y = ;');
   expect(infrastructure.grade).not.toHaveBeenCalled();
 });
 
@@ -563,6 +566,16 @@ test('Japanese Turtle completion inserts literal source, supports undo, and neve
   expect(infrastructure.grade).not.toHaveBeenCalled();
 });
 
+test('Turtle member completion follows a return keyword', async () => {
+  infrastructure.problemId = 'fillInBlank2';
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await replaceJavaSource(editor, 'class Main { boolean check(Turtle t) { return t.前');
+  await user.keyboard('{Control>} {/Control}');
+  expect(await screen.findByRole('option', { name: /前に進めるか/ })).toBeVisible();
+});
+
 test.each([
   { option: /^Turtle亀を作る$/, suffix: 'Turtle learner = new Turtle();', inputs: ['learner'] },
   { option: /Turtle\(x, y\)/, suffix: 'Turtle learner = new Turtle(2, 3);', inputs: ['learner', '2', '3'] },
@@ -590,6 +603,7 @@ test.each([
   'class Main { void draw() { int 亀 = 1; 亀.前',
   'class Main { void draw() { { Turtle 亀 = new Turtle(); } 亀.前',
   'class Main { void draw() { Turtle 亀 = new Turtle(); { int 亀 = 1; 亀.前',
+  'class Main { void draw(Turtle 亀) { other.亀.前',
 ])('does not suggest Turtle members outside a visible explicit Turtle local: %s', async (source) => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();

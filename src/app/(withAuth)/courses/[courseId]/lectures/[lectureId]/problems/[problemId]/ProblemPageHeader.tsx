@@ -1,9 +1,9 @@
 'use client';
 
 import type { ReactNode } from 'react';
+
 import { NextLinkWithoutPrefetch } from '@/components/atoms/NextLinkWithoutPrefetch';
 import { Heading, HStack, Link, Text, VStack } from '@/infrastructures/useClient/chakra';
-import { challengeMetadata } from '@/problems/challenge/metadata';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import { courseIdToLectureIds, courseIdToName, problemIdToName } from '@/problems/problemData';
 
@@ -12,16 +12,9 @@ interface Props {
   lectureId: string;
   problemId: ProblemId;
   actions?: ReactNode;
-  fallbackTitle?: string;
 }
 
-export const ProblemPageHeader: React.FC<Props> = ({
-  courseId,
-  lectureId,
-  problemId,
-  actions,
-  fallbackTitle = '問題',
-}) => {
+export const ProblemPageHeader: React.FC<Props> = ({ courseId, lectureId, problemId, actions }) => {
   const lectureIndex = courseIdToLectureIds[courseId].indexOf(lectureId);
   return (
     <VStack align="stretch" spacing={1}>
@@ -40,7 +33,7 @@ export const ProblemPageHeader: React.FC<Props> = ({
         </Link>
       </HStack>
       <HStack justify="space-between" spacing={2}>
-        <Heading as="h1">{problemIdToName[problemId] ?? challengeMetadata[problemId]?.title ?? fallbackTitle}</Heading>
+        <Heading as="h1">{problemIdToName[problemId]}</Heading>
         {actions}
       </HStack>
     </VStack>

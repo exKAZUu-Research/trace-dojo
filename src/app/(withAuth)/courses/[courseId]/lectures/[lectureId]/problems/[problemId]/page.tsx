@@ -1,15 +1,16 @@
 import { notFound } from 'next/navigation';
-import { problemSessions } from '../../../../../../../../../db/schema';
-import { ProblemPageOnClient } from './pageOnClient';
 
 import { withAuthorizationOnServer } from '@/app/utils/withAuth';
 import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
-import { logger } from '@/infrastructures/pino';
 import { db } from '@/infrastructures/database';
+import { logger } from '@/infrastructures/pino';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import { isFillInBlankProblem } from '@/problems/instantiateProblem';
-import { getOrdinaryJavaProblem, isOrdinaryBugProblem } from '@/problems/javaChallenges/ordinaryProblem';
+import { findOrdinaryJavaProblem, isOrdinaryBugProblem } from '@/problems/javaChallenges/ordinaryProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
+
+import { problemSessions } from '../../../../../../../../../db/schema';
+import { ProblemPageOnClient } from './pageOnClient';
 
 const ProblemPage: MyAuthorizedNextPageOrLayout<{
   courseId: CourseId;
@@ -17,7 +18,7 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
   problemId: ProblemId;
 }> = async ({ params, session }) => {
   const javaProblem = isOrdinaryBugProblem(params.problemId)
-    ? getOrdinaryJavaProblem(params.problemId, params.courseId, params.lectureId)
+    ? (findOrdinaryJavaProblem(params.problemId, params.courseId, params.lectureId) ?? notFound())
     : undefined;
   let incompleteProblemSession = await db.query.problemSessions.findFirst({
     where: {
