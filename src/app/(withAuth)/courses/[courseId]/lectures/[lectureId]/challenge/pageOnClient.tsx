@@ -291,12 +291,7 @@ const ChallengeAttempt: React.FC<Props & { userId: string; courseId: CourseId; l
       )}
       {exercise && exercise.problemFormat !== 'regular' && exercise.problemFormat === format && (
         <VStack key={`${exercise.problemFormat}:${exercise.sessionId}`} align="stretch" spacing={4}>
-          <ProblemPageHeader
-            courseId={courseId}
-            lectureId={lectureId}
-            problemId={exercise.problemId as ProblemId}
-            fallbackTitle={exercise.problemFormat === 'bugFix' ? 'バグ修正' : '穴埋め問題'}
-          />
+          <ProblemPageHeader courseId={courseId} lectureId={lectureId} problemId={exercise.problemId as ProblemId} />
           <FillInBlankBody
             draftContext={{
               userId,
