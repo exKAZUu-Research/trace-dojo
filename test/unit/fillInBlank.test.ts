@@ -297,6 +297,12 @@ test.each([
   },
   { name: 'missing main', source: 'class Main {}', line: undefined, category: /main/ },
   {
+    name: 'main without String[] parameter',
+    source: 'class Main {\n public static void main(String args) {}\n}',
+    line: undefined,
+    category: /public static void main\(String\[\] args\)/,
+  },
+  {
     name: 'missing closing brace',
     source: 'class Main {\n public static void main(String[] args) {\n } // final comment',
     line: undefined,
