@@ -561,6 +561,16 @@ test('Japanese Turtle completion inserts literal source, supports undo, and neve
   expect(infrastructure.grade).not.toHaveBeenCalled();
 });
 
+test('Turtle member completion follows a return keyword', async () => {
+  infrastructure.problemId = 'fillInBlank2';
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = screen.getByRole('textbox', { name: /Java/ });
+  await replaceJavaSource(editor, 'class Main { boolean check(Turtle t) { return t.前');
+  await user.keyboard('{Control>} {/Control}');
+  expect(await screen.findByRole('option', { name: /前に進めるか/ })).toBeVisible();
+});
+
 test.each([
   { option: /^Turtle亀を作る$/, suffix: 'Turtle learner = new Turtle();', inputs: ['learner'] },
   { option: /Turtle\(x, y\)/, suffix: 'Turtle learner = new Turtle(2, 3);', inputs: ['learner', '2', '3'] },
@@ -588,6 +598,7 @@ test.each([
   'class Main { void draw() { int 亀 = 1; 亀.前',
   'class Main { void draw() { { Turtle 亀 = new Turtle(); } 亀.前',
   'class Main { void draw() { Turtle 亀 = new Turtle(); { int 亀 = 1; 亀.前',
+  'class Main { void draw(Turtle 亀) { other.亀.前',
 ])('does not suggest Turtle members outside a visible explicit Turtle local: %s', async (source) => {
   infrastructure.problemId = 'fillInBlank2';
   const user = userEvent.setup();
