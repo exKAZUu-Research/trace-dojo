@@ -4,12 +4,12 @@ import { memoizeFactory } from 'at-decorators';
 import type { ReadonlyRequestCookies } from 'next/dist/server/web/spec-extension/adapters/request-cookies';
 import SuperTokensNode from 'supertokens-node';
 
+import { db } from '@/infrastructures/database';
+import { logger } from '@/infrastructures/pino';
+
 import { users } from '../../db/schema';
 import type { SessionOnNode } from './sessionOnNode';
 import { getSessionOnServer } from './sessionOnServer';
-
-import { logger } from '@/infrastructures/pino';
-import { db } from '@/infrastructures/database';
 
 export interface SessionOnServer {
   session: SessionOnNode | undefined;

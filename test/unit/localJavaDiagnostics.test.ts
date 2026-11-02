@@ -2,12 +2,12 @@ import { readdir } from 'node:fs/promises';
 
 import { expect, test, vi } from 'vitest';
 
-import { diagnosticVerdictSchema } from '../helpers/compilerTransport';
-import { localCompileOnlyExecutor } from '../helpers/localJavaCompiler';
 import { compileJavaProgram } from '../../scripts/javaDiagnostics/localCompiler';
 import { gradeFillInBlankCode } from '../../src/problems/fillInBlank/grade';
 import { buildJavaJudgeProgram } from '../../src/problems/fillInBlank/javaProgram';
 import { instantiateProblem } from '../../src/problems/instantiateProblem';
+import { diagnosticVerdictSchema } from '../helpers/compilerTransport';
+import { localCompileOnlyExecutor } from '../helpers/localJavaCompiler';
 
 const problem = instantiateProblem('fillInBlank1', 'java', 'local-diagnostic-test');
 if (!problem) throw new Error('Missing fillInBlank1 problem');

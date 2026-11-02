@@ -1,11 +1,11 @@
 'use client';
 
 import { Box, HStack, IconButton } from '@chakra-ui/react';
-import { indentWithTab, isolateHistory, redo, redoDepth, undo, undoDepth } from '@codemirror/commands';
 import { closeCompletion } from '@codemirror/autocomplete';
+import { indentWithTab, isolateHistory, redo, redoDepth, undo, undoDepth } from '@codemirror/commands';
 import { java, javaLanguage } from '@codemirror/lang-java';
-import { forceLinting } from '@codemirror/lint';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { forceLinting } from '@codemirror/lint';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
@@ -14,11 +14,12 @@ import type React from 'react';
 import { useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { MdOutlineZoomIn, MdOutlineZoomOut } from 'react-icons/md';
 
-import styles from './JavaCodeEditor.module.css';
 import { javaAssistanceTheme } from '@/problems/fillInBlank/javaAssistanceTheme';
 import { javaCompletion } from '@/problems/fillInBlank/javaCompletion';
-import { compilerFeedback, javaComposition, javaEditorDiagnostics } from '@/problems/fillInBlank/javaEditorDiagnostics';
 import type { JavaDiagnostic } from '@/problems/fillInBlank/javaDiagnostics';
+import { compilerFeedback, javaComposition, javaEditorDiagnostics } from '@/problems/fillInBlank/javaEditorDiagnostics';
+
+import styles from './JavaCodeEditor.module.css';
 
 export interface JavaCodeEditorHandle {
   undo: () => void;

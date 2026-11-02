@@ -1,5 +1,4 @@
 import { Random } from '../app/utils/random';
-
 import { extractBlanks } from './fillInBlank/blanks';
 import type { LanguageId, ProblemId } from './problemData';
 import { problemIdToLanguageIdToProgram } from './problemData';

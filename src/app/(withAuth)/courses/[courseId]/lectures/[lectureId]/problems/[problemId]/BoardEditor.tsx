@@ -39,7 +39,6 @@ import {
 } from '../../../../../../../../problems/regular/grade';
 import type { TraceItemVariable, TurtleTrace } from '../../../../../../../../problems/traceProgram';
 import type { ColorChar, ProblemType, SelectedCell } from '../../../../../../../../types';
-
 import { BoardViewer } from './BoardViewer';
 
 const DIRECTIONS = ['N', 'E', 'S', 'W'];

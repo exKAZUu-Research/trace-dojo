@@ -48,7 +48,6 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
 }));
 
 import { ChallengePageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/pageOnClient';
-
 import { ProblemPageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/pageOnClient';
 
 beforeEach(() => {

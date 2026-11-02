@@ -4,7 +4,7 @@ import {
   genericCompilerMessage,
   translateCompilerMessage,
 } from './compilerMessages';
-import { javaDiagnosticsSchema, type JavaDiagnostic } from './javaDiagnostics';
+import { type JavaDiagnostic, javaDiagnosticsSchema } from './javaDiagnostics';
 import { JAVA_JUDGE_CLASS_NAME, type JavaJudgeProgram } from './javaProgram';
 import { maskJavaNonCode } from './javaSource';
 

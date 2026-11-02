@@ -1,6 +1,6 @@
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
-import { linter, setDiagnosticsEffect, type Diagnostic } from '@codemirror/lint';
-import { EditorState, StateEffect, StateField, type Extension } from '@codemirror/state';
+import { type Diagnostic, linter, setDiagnosticsEffect } from '@codemirror/lint';
+import { EditorState, type Extension, StateEffect, StateField } from '@codemirror/state';
 
 import { formatJavaDiagnostic, type JavaDiagnostic } from './javaDiagnostics';
 import { hasIncompleteJavaPlaceholders } from './javaSource';

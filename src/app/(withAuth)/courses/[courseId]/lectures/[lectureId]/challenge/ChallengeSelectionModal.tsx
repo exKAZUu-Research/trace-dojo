@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef } from 'react';
-import { ChallengeSelection, type ChallengeProblemFormat } from './ChallengeSelection';
+
 import {
   Modal,
   ModalBody,
@@ -11,6 +11,8 @@ import {
   ModalOverlay,
   Text,
 } from '@/infrastructures/useClient/chakra';
+
+import { type ChallengeProblemFormat, ChallengeSelection } from './ChallengeSelection';
 
 interface ChallengeSelectionModalProps {
   isOpen: boolean;

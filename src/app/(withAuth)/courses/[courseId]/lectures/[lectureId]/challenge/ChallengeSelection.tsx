@@ -2,8 +2,9 @@
 
 import type { Ref } from 'react';
 import type { IconType } from 'react-icons';
-import { MdCode, MdEditNote } from '@/infrastructures/useClient/icons';
+
 import { Button, Heading, Icon, SimpleGrid, Text, VStack } from '@/infrastructures/useClient/chakra';
+import { MdCode, MdEditNote } from '@/infrastructures/useClient/icons';
 
 export type ChallengeProblemFormat = 'regular' | 'fillInBlank';
 interface Props {

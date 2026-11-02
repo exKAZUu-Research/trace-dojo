@@ -1,9 +1,9 @@
 /* oxlint-disable unicorn/no-null -- CodeMirror completion sources and syntax-node parents use null. */
 import {
-  snippetCompletion,
   type Completion,
   type CompletionContext,
   type CompletionResult,
+  snippetCompletion,
 } from '@codemirror/autocomplete';
 import { ensureSyntaxTree } from '@codemirror/language';
 

@@ -3,14 +3,13 @@ import type { AddressInfo } from 'node:net';
 
 import { describe, expect, test } from 'vitest';
 
-import { diagnosticVerdictSchema, withCompilerTransport } from '../helpers/compilerTransport';
-
 import { fillBlanks } from '../../src/problems/fillInBlank/blanks';
 import { fillInBlankProblemDefinitions } from '../../src/problems/fillInBlank/definitions';
 import type { FillInBlankGradingResult, GradingOptions } from '../../src/problems/fillInBlank/grade';
 import { createJudgeExecutor, createWandboxExecutor } from '../../src/problems/fillInBlank/javaExecutors';
 import type { InstantiatedProblem } from '../../src/problems/instantiateProblem';
 import { instantiateProblem } from '../../src/problems/instantiateProblem';
+import { diagnosticVerdictSchema, withCompilerTransport } from '../helpers/compilerTransport';
 
 const judge = createJudgeExecutor();
 const withJudge = { javaExecutors: [judge] };
