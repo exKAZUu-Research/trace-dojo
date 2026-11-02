@@ -71,17 +71,19 @@ test('actual wrapper compile failure explains the program entry without exposing
 }, 30_000);
 
 test('compiler launch failure remains tooling failure and removes temporary input', async () => {
-  const before = await readdir('.tmp/javaDiagnostics').catch(() => []);
+  await mkdir('.tmp', { recursive: true });
+  const parent = await mkdtemp(resolve('.tmp/local-compiler-'));
   vi.stubEnv('PATH', '/nonexistent-trace-dojo-tools');
   try {
-    const result = await compileJavaProgram('class Main {}');
+    const result = await compileJavaProgram('class Main {}', parent);
     expect(result.kind).toBe('toolError');
     expect(result.failure).toMatch(/ENOENT/);
+    expect(await readdir(parent)).toEqual([]);
     await expect(localCompileOnlyExecutor.execute('class Main {}', 'TraceDojoJudge')).rejects.toThrow(
       'received toolError'
     );
   } finally {
     vi.unstubAllEnvs();
+    await rm(parent, { recursive: true, force: true });
   }
-  expect(await readdir('.tmp/javaDiagnostics')).toEqual(before);
 });
