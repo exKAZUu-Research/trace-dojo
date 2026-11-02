@@ -1,9 +1,10 @@
+import { javaLanguage } from '@codemirror/lang-java';
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { type Diagnostic, linter, setDiagnosticsEffect } from '@codemirror/lint';
 import { EditorState, type Extension, StateEffect, StateField } from '@codemirror/state';
 
 import { formatJavaDiagnostic, type JavaDiagnostic } from './javaDiagnostics';
-import { javaPlaceholderRanges } from './javaSource';
+import { javaPlaceholderRanges, maskJavaNonCode } from './javaSource';
 
 export const compilerFeedback = StateEffect.define<JavaDiagnostic[]>();
 export const javaComposition = StateEffect.define<boolean>();
@@ -63,10 +64,12 @@ function combinedDiagnostics(state: EditorState): Diagnostic[] {
     occupiedLines.add(line.number);
   }
   if (state.doc.length > 20_000) return diagnostics;
-  const source = state.doc.toString();
-  const placeholders = javaPlaceholderRanges(source);
-  const completeTree = ensureSyntaxTree(state, state.doc.length, 20);
-  const allowContext = Boolean(completeTree) && placeholders.length === 0 && !/\\u/.test(source);
+  const rawSource = state.doc.toString();
+  const placeholders = javaPlaceholderRanges(rawSource);
+  const source = placeholders.length > 0 ? substitutePlaceholders(rawSource, placeholders) : rawSource;
+  const completeTree =
+    placeholders.length > 0 ? javaLanguage.parser.parse(source) : ensureSyntaxTree(state, state.doc.length, 20);
+  const allowContext = Boolean(completeTree) && !/\\u/.test(source);
   let isFirstError = true;
   (completeTree ?? syntaxTree(state)).iterate({
     enter(node) {
@@ -75,7 +78,7 @@ function combinedDiagnostics(state: EditorState): Diagnostic[] {
       isFirstError = false;
       if (diagnostics.length >= 20) return;
       const line = state.doc.lineAt(node.from);
-      if (occupiedLines.has(line.number) || isCausedByPlaceholder(state, source, placeholders, node.from)) return;
+      if (occupiedLines.has(line.number)) return;
       occupiedLines.add(line.number);
       const from = node.from === line.to && line.length > 0 ? node.from - 1 : node.from;
       diagnostics.push({
@@ -91,19 +94,18 @@ function combinedDiagnostics(state: EditorState): Diagnostic[] {
   return diagnostics;
 }
 
-// Unfilled placeholders are not Java; Lezer reports a missing `;` after a bare placeholder statement at the next token, possibly on a later line.
-function isCausedByPlaceholder(
-  state: EditorState,
-  source: string,
-  placeholders: { from: number; to: number }[],
-  errorFrom: number
-): boolean {
-  const errorLine = state.doc.lineAt(errorFrom).number;
-  return placeholders.some(
-    (placeholder) =>
-      state.doc.lineAt(placeholder.from).number === errorLine ||
-      (placeholder.to <= errorFrom && /^\s*$/.test(source.slice(placeholder.to, errorFrom)))
-  );
+// Unfilled placeholders are not Java, so the hints parse a same-length copy in which each one is valid Java:
+// an expression placeholder becomes an identifier and a placeholder standing alone as a statement becomes `x;`.
+function substitutePlaceholders(source: string, placeholders: { from: number; to: number }[]): string {
+  const code = maskJavaNonCode(source);
+  let substituted = source;
+  for (const { from, to } of placeholders) {
+    const isStatement =
+      /(?:^|[;{})]|\belse|\bdo)\s*$/.test(code.slice(0, from)) && /^[ \t]*(?:\n|$|\})/.test(code.slice(to));
+    const replacement = (isStatement ? 'x;' : 'x').padEnd(to - from, ' ');
+    substituted = substituted.slice(0, from) + replacement + substituted.slice(to);
+  }
+  return substituted;
 }
 
 function contextualHint(node: ReturnType<typeof syntaxTree>['topNode'], source: string): string | undefined {
