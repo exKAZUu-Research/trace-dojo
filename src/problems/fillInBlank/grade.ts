@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
 import type { JavaChallengeTarget } from '../javaChallenges/types';
-
 import { normalizeCompilerDiagnostics } from './compilerDiagnostics';
 import type { JavaDiagnostic } from './javaDiagnostics';
 import type { JavaExecutor } from './javaExecutors';

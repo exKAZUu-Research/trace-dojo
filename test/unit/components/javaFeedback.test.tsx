@@ -5,9 +5,9 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, test, vi } from 'vitest';
 
-import { readRenderedJavaSource, replaceJavaSource } from '../../helpers/javaEditor';
-import type { FillInBlankVerdict } from '../../../src/problems/fillInBlank/grade';
 import { FillInBlankBody } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/FillInBlankBody';
+import type { FillInBlankVerdict } from '../../../src/problems/fillInBlank/grade';
+import { readRenderedJavaSource, replaceJavaSource } from '../../helpers/javaEditor';
 
 vi.mock('next/navigation', () => ({
   useParams: () => ({ courseId: 'test', lectureId: 'test', problemId: 'fillInBlank1' }),

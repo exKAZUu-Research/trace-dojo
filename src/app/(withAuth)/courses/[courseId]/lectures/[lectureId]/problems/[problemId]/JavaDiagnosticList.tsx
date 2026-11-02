@@ -1,7 +1,7 @@
 import type React from 'react';
 
 import { Box, Heading } from '@/infrastructures/useClient/chakra';
-import { javaOriginalMessageLabel, type JavaDiagnostic } from '@/problems/fillInBlank/javaDiagnostics';
+import { type JavaDiagnostic, javaOriginalMessageLabel } from '@/problems/fillInBlank/javaDiagnostics';
 
 export const JavaDiagnosticList: React.FC<{ diagnostics: JavaDiagnostic[] }> = ({ diagnostics }) => (
   <Box as="ul" listStyleType="none" m={0} p={0} whiteSpace="normal">

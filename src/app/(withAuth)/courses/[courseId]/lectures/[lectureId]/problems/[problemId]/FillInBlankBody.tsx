@@ -6,11 +6,6 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { MdRedo, MdUndo } from 'react-icons/md';
 import { useImmer } from 'use-immer';
 
-import { BoardViewer } from './BoardViewer';
-import { JavaDiagnosticList } from './JavaDiagnosticList';
-import { JavaCodeEditor, type EditorHistoryAvailability, type JavaCodeEditorHandle } from './JavaCodeEditor';
-import { ResultAlertDialog, type CompletionAction } from './ResultAlertDialog';
-
 import {
   AlertDialog,
   AlertDialogBody,
@@ -28,19 +23,24 @@ import {
   IconButton,
   VStack,
 } from '@/infrastructures/useClient/chakra';
-import { javaFeedbackSummary, readJavaDiagnostics, type JavaDiagnostic } from '@/problems/fillInBlank/javaDiagnostics';
+import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
+import { type JavaDiagnostic, javaFeedbackSummary, readJavaDiagnostics } from '@/problems/fillInBlank/javaDiagnostics';
 import {
+  type JavaDraftContext,
   javaDraftKey,
+  type JavaDraftRestoration,
+  removeJavaDraft,
   restoreJavaDraft,
   saveJavaDraft,
-  removeJavaDraft,
-  type JavaDraftContext,
-  type JavaDraftRestoration,
 } from '@/problems/fillInBlank/javaDraft';
 import { hasIncompleteJavaPlaceholders } from '@/problems/fillInBlank/javaSource';
-import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
-import type { TurtleTrace } from '@/problems/traceProgram';
 import type { CourseId, ProblemId } from '@/problems/problemData';
+import type { TurtleTrace } from '@/problems/traceProgram';
+
+import { BoardViewer } from './BoardViewer';
+import { type EditorHistoryAvailability, JavaCodeEditor, type JavaCodeEditorHandle } from './JavaCodeEditor';
+import { JavaDiagnosticList } from './JavaDiagnosticList';
+import { type CompletionAction, ResultAlertDialog } from './ResultAlertDialog';
 
 interface Props {
   draftContext: JavaDraftContext;
@@ -208,7 +208,7 @@ const EditingBody: React.FC<Props & { baseline: string; draftKey: string; restor
 
           <JavaCodeEditor
             ref={editor}
-            value={code}
+            initialValue={props.restored.code}
             disabled={isEditorLocked}
             onChange={(value) => {
               invalidate();
@@ -317,7 +317,7 @@ const EditingBody: React.FC<Props & { baseline: string; draftKey: string; restor
                   if (isLocked) return;
                   invalidate();
                   setSaveFailed(!removeJavaDraft(props.draftKey));
-                  setCode(props.baseline);
+                  editor.current?.replace(props.baseline);
                   setIsResetOpen(false);
                 }}
               >

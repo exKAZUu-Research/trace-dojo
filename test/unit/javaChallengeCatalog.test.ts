@@ -5,19 +5,19 @@ import { resolve } from 'node:path';
 import { expect, test } from 'vitest';
 import { z } from 'zod';
 
-import { createLocalJavaExecutor, localJavaExecutor } from '../helpers/localJavaExecutor';
-import type { JavaExecutionResult } from '../../src/problems/fillInBlank/javaExecutors';
-import { gradeFillInBlankCode } from '../../src/problems/fillInBlank/grade';
 import { extractBlanks, fillBlanks } from '../../src/problems/fillInBlank/blanks';
+import { gradeFillInBlankCode } from '../../src/problems/fillInBlank/grade';
+import type { JavaExecutionResult } from '../../src/problems/fillInBlank/javaExecutors';
 import {
   buildJavaJudgeProgram,
   JAVA_JUDGE_CLASS_NAME,
-  parseJavaJudgeOutput,
   type JavaTurtleState,
+  parseJavaJudgeOutput,
 } from '../../src/problems/fillInBlank/javaProgram';
-import { instantiateJavaChallenge } from '../../src/problems/javaChallenges/instantiate';
 import { instantiateProblem, isFillInBlankProblem } from '../../src/problems/instantiateProblem';
+import { instantiateJavaChallenge } from '../../src/problems/javaChallenges/instantiate';
 import { courseIdToLectureIndexToExerciseProblemIds } from '../../src/problems/problemData';
+import { createLocalJavaExecutor, localJavaExecutor } from '../helpers/localJavaExecutor';
 
 const definitionSchema = z.object({
   title: z.string().min(1),

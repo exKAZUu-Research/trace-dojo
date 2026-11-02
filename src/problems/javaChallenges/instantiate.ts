@@ -4,7 +4,6 @@ import { TURTLE_GRAPHICS_BOARD_COLUMNS, TURTLE_GRAPHICS_BOARD_ROWS } from '../..
 import { extractBlanks } from '../fillInBlank/blanks';
 import { buildJavaJudgeProgram, findForbiddenJavaPattern, MAX_JAVA_PROGRAM_LENGTH } from '../fillInBlank/javaProgram';
 import { charToColor } from '../traceProgram';
-
 import { javaChallengeDefinitions } from './definitions';
 import type { JavaChallengeFormat, JavaChallengeTarget } from './types';
 

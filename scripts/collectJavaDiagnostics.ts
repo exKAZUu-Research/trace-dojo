@@ -1,13 +1,13 @@
 import { mkdir, writeFile } from 'node:fs/promises';
+
 import { z } from 'zod';
 
-import { javaDiagnosticExamples } from './javaDiagnostics/examples';
-import { compileJavaProgram, compilerArguments, readJavaCompilerVersion } from './javaDiagnostics/localCompiler';
-
-import { genericCompilerMessage } from '../src/problems/fillInBlank/compilerMessages';
 import { normalizeCompilerDiagnostics } from '../src/problems/fillInBlank/compilerDiagnostics';
+import { genericCompilerMessage } from '../src/problems/fillInBlank/compilerMessages';
 import { javaDiagnosticsSchema } from '../src/problems/fillInBlank/javaDiagnostics';
 import { buildJavaJudgeProgram } from '../src/problems/fillInBlank/javaProgram';
+import { javaDiagnosticExamples } from './javaDiagnostics/examples';
+import { compileJavaProgram, compilerArguments, readJavaCompilerVersion } from './javaDiagnostics/localCompiler';
 
 const observationSchema = z.object({
   diagnostic: javaDiagnosticsSchema.element,

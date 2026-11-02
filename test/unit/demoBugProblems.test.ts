@@ -7,7 +7,7 @@ import { migrate } from 'drizzle-orm/node-sqlite/migrator';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import { z } from 'zod';
 
-import { problemSessions, users, type ProblemSession, type ProblemSubmission } from '../../db/schema';
+import { type ProblemSession, problemSessions, type ProblemSubmission, users } from '../../db/schema';
 import type { db as databaseClient } from '../../src/infrastructures/database';
 import type { BackendRouter } from '../../src/infrastructures/trpcBackend/routers';
 import type * as JavaExecutors from '../../src/problems/fillInBlank/javaExecutors';

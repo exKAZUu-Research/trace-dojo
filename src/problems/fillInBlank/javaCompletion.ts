@@ -1,9 +1,9 @@
 /* oxlint-disable unicorn/no-null -- CodeMirror completion sources and syntax-node parents use null. */
 import {
-  snippetCompletion,
   type Completion,
   type CompletionContext,
   type CompletionResult,
+  snippetCompletion,
 } from '@codemirror/autocomplete';
 import { ensureSyntaxTree } from '@codemirror/language';
 
@@ -85,7 +85,7 @@ export function javaCompletion(context: CompletionContext): CompletionResult | n
   const receiver = /([\p{L}_$][\p{L}\p{N}\p{M}_$]*)\.$/u.exec(before);
   if (receiver) {
     if (!node) return null;
-    if (/[.\p{L}\p{N}\p{M}_$]$/u.test(before.slice(0, receiver.index).trimEnd())) return null;
+    if (/\.\s*$/.test(before.slice(0, receiver.index))) return null;
     const variable = visibleVariables(context, node, from).find((entry) => entry.name === receiver[1]);
     return variable?.turtle ? { from, options: methods } : null;
   }

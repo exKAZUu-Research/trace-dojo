@@ -1,14 +1,13 @@
+import type { CellColor, ColorChar } from '@/types';
+
 import {
   TURTLE_GRAPHICS_BOARD_COLUMNS as GRID_COLUMNS,
   TURTLE_GRAPHICS_BOARD_ROWS as GRID_ROWS,
   TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR,
   TURTLE_GRAPHICS_EMPTY_COLOR as EMPTY_COLOR,
 } from '../constants';
-
 import type { InstantiatedProblem } from './instantiateProblem';
 import type { LanguageId } from './problemData';
-
-import type { CellColor, ColorChar } from '@/types';
 
 export interface TurtleTrace {
   x: number;
@@ -56,28 +55,17 @@ export const colorToChar = Object.fromEntries(
  * The maximum number of traced operations before execution aborts.
  * Model definitions run on the server, so an accidental unbounded loop must not hang it.
  */
-export const MAX_TRACE_OPERATIONS = 20_000;
-export const TRACE_BUDGET_EXCEEDED_MESSAGE = 'Execution budget exceeded';
+const MAX_TRACE_OPERATIONS = 20_000;
+const TRACE_BUDGET_EXCEEDED_MESSAGE = 'Execution budget exceeded';
 
-export type TracedProgram = Omit<
-  InstantiatedProblem,
-  'blankAnswers' | 'displayProgramTemplate' | 'instrumentedTemplate'
->;
-
-/** Thrown by the instrumented runtime when a name is not in scope. */
-export const SCOPE_ERROR_NAME = 'ScopeError';
+export type TracedProgram = Omit<InstantiatedProblem, 'blankAnswers' | 'displayProgramTemplate'>;
 
 export function traceProgram(
   this: unknown,
   instrumented: string,
   rawDisplayProgram: string,
-  languageId: LanguageId,
-  options?: {
-    /** Set to false when only the final state matters, so no per-step snapshots are retained. */
-    collectTrace?: boolean;
-  }
+  languageId: LanguageId
 ): TracedProgram {
-  const collectTrace = options?.collectTrace ?? true;
   if (!instrumented.includes('Turtle') && !/registerDisplayRef\s*\(/.test(instrumented)) {
     if (instrumented.includes(' = ')) {
       throw new Error('Instrumented program MUST NOT contain assignment operators (=).');
@@ -95,10 +83,9 @@ let myGlobal = {};
 class ScopeError extends Error {
   constructor(message) {
     super(message);
-    this.name = '${SCOPE_ERROR_NAME}';
+    this.name = 'ScopeError';
   }
 }
-const collectTrace = ${collectTrace};
 let remainingOperations = ${MAX_TRACE_OPERATIONS};
 function spend(cost = 1) {
   remainingOperations -= cost;
@@ -236,7 +223,6 @@ class Turtle {
 }
 function addTrace(sid, self) {
   spend(1 + _turtles.length);
-  if (!collectTrace) return;
   const vars = {...s.vars, ...myGlobal};
   if (self && self !== globalThis) {
     vars['this'] = {...self};

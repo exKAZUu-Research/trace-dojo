@@ -1,7 +1,7 @@
+import type { OrdinaryJavaProblemData } from '../../types';
 import { courseIdToLectureIds, courseIdToLectureIndexToProblemIds } from '../problemData';
 import { javaChallengeDefinitions } from './definitions';
 import { instantiateJavaChallenge } from './instantiate';
-import type { OrdinaryJavaProblemData } from '../../types';
 
 export const isOrdinaryBugProblem = (problemId: string): boolean =>
   javaChallengeDefinitions[problemId]?.problemFormat === 'bugFix';

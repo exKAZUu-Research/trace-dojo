@@ -2,12 +2,11 @@
 
 import type React from 'react';
 
-import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateProblem';
+import { Box, Button, Card, Heading, HStack, VStack } from '@/infrastructures/useClient/chakra';
 
+import type { InstantiatedProblem } from '../../../../../../../../problems/instantiateProblem';
 import { BoardViewer } from './BoardViewer';
 import { Variables } from './Variables';
-
-import { Box, Button, Card, Heading, HStack, VStack } from '@/infrastructures/useClient/chakra';
 
 interface Props {
   currentTraceItemIndex: number;

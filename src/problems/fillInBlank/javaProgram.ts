@@ -1,7 +1,5 @@
 import { z } from 'zod';
 
-import { maskJavaNonCode, prepareJavaEntry } from './javaSource';
-
 import {
   TURTLE_GRAPHICS_BOARD_COLUMNS as GRID_COLUMNS,
   TURTLE_GRAPHICS_BOARD_ROWS as GRID_ROWS,
@@ -9,6 +7,7 @@ import {
   TURTLE_GRAPHICS_EMPTY_COLOR as EMPTY_COLOR,
 } from '../../constants';
 import { charToColor, type TurtleTrace } from '../traceProgram';
+import { maskJavaNonCode, prepareJavaEntry } from './javaSource';
 
 const validColorChars = Object.keys(charToColor).join('');
 

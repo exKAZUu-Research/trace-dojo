@@ -2,9 +2,11 @@
 
 import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
-import { ChallengeSelectionModal } from './challenge/ChallengeSelectionModal';
-import type { ChallengeProblemFormat } from './challenge/ChallengeSelection';
+
 import { Button, Text, VStack } from '@/infrastructures/useClient/chakra';
+
+import type { ChallengeProblemFormat } from './challenge/ChallengeSelection';
+import { ChallengeSelectionModal } from './challenge/ChallengeSelectionModal';
 
 interface ChallengeModeButtonProps {
   courseId: string;
