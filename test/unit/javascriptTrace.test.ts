@@ -504,3 +504,17 @@ test.each([
 ])('a step after a call with a callback is recorded once, however the callback is laid out: %s', (program) => {
   expect(traceProgram('javascript', program, program).traceItems.map(({ vars }) => vars)).toEqual([{}, { total: 6 }]);
 });
+
+test('a step on a one-line method of a longer object literal is recorded each time the method runs', () => {
+  const program = `let total = 0;
+const handlers = {
+  add(n) { total += n; }, // step
+};
+handlers.add(1);
+handlers.add(2);`;
+  expect(traceProgram('javascript', program, program).traceItems.map(({ vars }) => vars.total)).toEqual([
+    undefined,
+    1,
+    3,
+  ]);
+});

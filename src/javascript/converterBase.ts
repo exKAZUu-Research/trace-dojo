@@ -86,7 +86,8 @@ export abstract class ConverterBase {
 
   /**
    * Gives each `// step` row to the innermost statements on it, where the rows inside a function body belong to the
-   * statements of that body, and a body on the step row alone belongs to the statement containing the function.
+   * statements of that body, and a body on the step row alone belongs to a statement that contains the function and
+   * ends on that row, as a call taking a one-line callback does.
    */
   protected assignSteps(): void {
     for (const [row, stepId] of this.stepIdByRow) {
@@ -99,7 +100,7 @@ export abstract class ConverterBase {
               body.row === row &&
               body.endRow === row &&
               encloses(body, steppable) &&
-              onRow.some((outer) => encloses(outer, body))
+              onRow.some((outer) => outer.endRow === row && encloses(outer, body))
           )
       );
       if (candidates.length === 0) {
