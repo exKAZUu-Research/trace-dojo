@@ -32,10 +32,7 @@ export abstract class ExpressionConverter extends ConverterBase {
     // oxlint-disable-next-line unicorn/no-null -- JavaScript null is a value of the interpreted language.
     null: (node) => ({ kind: 'literal', value: null, row: rowOf(node) }),
     undefined: (node) => ({ kind: 'identifier', name: node.text, row: rowOf(node) }),
-    identifier: (node) => {
-      if (node.text === 'arguments') this.context.argumentsUse.isUsed = true;
-      return { kind: 'identifier', name: node.text, row: rowOf(node) };
-    },
+    identifier: (node) => this.identifierRead(node),
     this: (node) => ({ kind: 'this', row: rowOf(node) }),
     super: (node) => fail(node, 'super は super(...) か super.メソッド名 の形でしか書けません。'),
     array: (node) => ({ kind: 'array', elements: this.arrayElements(node), row: rowOf(node) }),
@@ -84,6 +81,12 @@ export abstract class ExpressionConverter extends ConverterBase {
     const convert = this.expressionConverters[node.type] as ExpressionConverterFunction | undefined;
     if (convert) return convert(node);
     return unsupported(node, unsupportedFeatures[node.type] ?? `式「${node.type}」`);
+  }
+
+  /** Reads a variable by name, noting a read of `arguments`, which the enclosing function then creates. */
+  private identifierRead(node: Node): Expression {
+    if (node.text === 'arguments') this.context.argumentsUse.isUsed = true;
+    return { kind: 'identifier', name: node.text, row: rowOf(node) };
   }
 
   protected parenthesized(node: Node): Expression {
@@ -173,8 +176,7 @@ export abstract class ExpressionConverter extends ConverterBase {
           return { kind: 'property', key, value };
         }
         case 'shorthand_property_identifier': {
-          const value: Expression = { kind: 'identifier', name: member.text, row: rowOf(member) };
-          return { kind: 'property', key: { kind: 'key', key: member.text }, value };
+          return { kind: 'property', key: { kind: 'key', key: member.text }, value: this.identifierRead(member) };
         }
         case 'method_definition': {
           return this.objectMethod(member);

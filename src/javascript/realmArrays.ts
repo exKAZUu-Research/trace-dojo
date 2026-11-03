@@ -47,7 +47,6 @@ export function buildArray(runtime: Runtime, build: (ops: ArrayOps) => void): Js
   return array;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function arrayFrom({ runtime, args, callRow }: NativeCall): JsArray {
   const [source, mapper, thisArg] = args;
   if (mapper !== undefined && !isCallable(mapper)) {

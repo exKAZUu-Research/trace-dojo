@@ -218,6 +218,7 @@ test.each([
     'String((() => { function sum() { const all = () => arguments.length; return [arguments[0] + arguments[1], all()]; } return sum(1, 2); })())',
     '3,2',
   ],
+  ['String((() => { function pack() { return { arguments }; } return pack(1, 2).arguments[1]; })())', '2'],
   [
     'String((() => { class Path extends Array { count() { return this.length; } } const a = new Path(2); return [a.count(), a instanceof Path, Array.isArray(a)]; })())',
     '2,true,true',
