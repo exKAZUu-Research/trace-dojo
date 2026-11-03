@@ -35,6 +35,16 @@ test.each([
     { kind: 'executed', uncaughtException: 'E' },
   ],
   [
+    'an uncaught exception whose toString() recurses endlessly',
+    'class Main { public static void main(String[] a) { throw new E(); } } class E extends RuntimeException { static int f(int n) { for (int i = 0; i < 2; i++) { if (n >= 0) { try { while (true) { n += f(n + 1); break; } } finally { } } } return n; } public String toString() { f(0); return "E"; } }',
+    { kind: 'executed', uncaughtException: 'E' },
+  ],
+  [
+    'a search for an invalid code point',
+    main('Turtle t = new Turtle(); if ("abc".indexOf(-1) == -1 && "abc".indexOf(0x110000) == -1) t.前に進む();'),
+    { kind: 'executed', finalTurtles: [{ x: 0, y: 1, color: '#', dir: 'N' }], uncaughtException: undefined },
+  ],
+  [
     'a huge array',
     main('int[][] a = new int[100000][100000];'),
     { kind: 'executed', uncaughtException: expect.stringContaining('OutOfMemoryError') },

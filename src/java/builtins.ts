@@ -255,7 +255,9 @@ function defineStringQueries(stringClass: ClassInfo, objectType: JavaType): void
   });
   addMethod(stringClass, 'indexOf', [INT], INT, false, (frame, receiver, [code]) => {
     frame.runtime.scanString(text(receiver).length);
-    return text(receiver).indexOf(String.fromCodePoint(code as number));
+    const codePoint = code as number;
+    if (codePoint < 0 || codePoint > 0x10_ff_ff) return -1;
+    return text(receiver).indexOf(String.fromCodePoint(codePoint));
   });
   for (const name of ['contains', 'startsWith', 'endsWith'] as const) {
     const method = name === 'contains' ? 'includes' : name;

@@ -65,21 +65,25 @@ function runMain(runtime: Runtime, program: CompiledProgram): string | undefined
     runtime.invoke(root, program.mainMethod, undefined, [args], undefined);
     return undefined;
   } catch (error) {
-    // The host's stack can run out before the Java call depth limit when each call nests many statements.
-    if (error instanceof RangeError && /call stack/i.test(error.message)) return 'java.lang.StackOverflowError';
-    if (!(error instanceof JavaThrow)) throw error;
-    return describeException(runtime, root, error);
+    return describeUncaught(runtime, root, error);
   }
 }
 
-function describeException(runtime: Runtime, root: Frame, thrown: JavaThrow): string {
+function describeUncaught(runtime: Runtime, root: Frame, error: unknown): string {
+  if (isHostStackOverflow(error)) return 'java.lang.StackOverflowError';
+  if (!(error instanceof JavaThrow)) throw error;
   try {
-    return runtime.invokeToString(root, thrown.value)?.value ?? thrown.value.cls.name;
-  } catch (error) {
-    // A learner's toString() may itself throw, which leaves only the class to describe the exception.
-    if (error instanceof JavaThrow) return thrown.value.cls.name;
-    throw error;
+    return runtime.invokeToString(root, error.value)?.value ?? error.value.cls.name;
+  } catch (formattingError) {
+    // A learner's toString() may itself fail, which leaves only the class to describe the exception.
+    if (formattingError instanceof JavaThrow || isHostStackOverflow(formattingError)) return error.value.cls.name;
+    throw formattingError;
   }
+}
+
+/** The host's stack can run out before the Java call depth limit when each call nests many statements. */
+function isHostStackOverflow(error: unknown): boolean {
+  return error instanceof RangeError && /call stack/i.test(error.message);
 }
 
 export function boardText(runtime: Runtime): string {
