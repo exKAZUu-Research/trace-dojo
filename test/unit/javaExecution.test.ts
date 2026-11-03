@@ -83,6 +83,11 @@ test.each([
     { kind: 'executed', uncaughtException: undefined },
   ],
   [
+    'a turtle kept alive only through an exception cause',
+    'class E extends Exception { Turtle t = new Turtle(); } class Main { public static void main(String[] a) { Exception e = new Exception(new E()); } }',
+    { kind: 'executed', finalTurtles: [{ x: 0, y: 0, color: '#', dir: 'N' }], uncaughtException: undefined },
+  ],
+  [
     'a huge array',
     main('int[][] a = new int[100000][100000];'),
     { kind: 'executed', uncaughtException: expect.stringContaining('OutOfMemoryError') },

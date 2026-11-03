@@ -103,10 +103,21 @@ function defineObject(objectClass: ClassInfo, stringType: JavaType): void {
   addConstructor(objectClass, [], () => {});
 }
 
+const causeTakers = new Set([
+  'Throwable',
+  'Exception',
+  'RuntimeException',
+  'Error',
+  'IllegalArgumentException',
+  'IllegalStateException',
+  'UnsupportedOperationException',
+]);
+
 function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType: JavaType): ClassInfo {
   const defineThrowable = (name: string, superclass: ClassInfo): ClassInfo => {
     const cls = registry.define(name, superclass);
-    addMessageConstructors(cls, stringType, throwableClass.type);
+    // Constructors are not inherited, and only these classes declare the ones taking a cause.
+    addMessageConstructors(cls, stringType, causeTakers.has(name) ? throwableClass.type : undefined);
     return cls;
   };
   const throwableClass = registry.define('Throwable', objectClass);
@@ -149,11 +160,12 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
   return throwableClass;
 }
 
-function addMessageConstructors(cls: ClassInfo, stringType: JavaType, throwableType: JavaType): void {
+function addMessageConstructors(cls: ClassInfo, stringType: JavaType, throwableType: JavaType | undefined): void {
   addConstructor(cls, [], () => {});
   addConstructor(cls, [stringType], (_, receiver, [message]) => {
     (receiver as JavaObject).message = message as JavaString | undefined;
   });
+  if (!throwableType) return;
   addConstructor(cls, [throwableType], (frame, receiver, [cause]) => {
     const exception = receiver as JavaObject;
     exception.cause = cause as JavaObject | undefined;

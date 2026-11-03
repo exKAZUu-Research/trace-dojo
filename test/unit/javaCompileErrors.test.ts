@@ -888,6 +888,36 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'public class Main { final int x; Main(int x) { try { this.x = x; } finally { } } public static void main(String[] a) { new Main(1); } }',
   ],
+  [
+    'finallyReturnSuppresses',
+    true,
+    'public class Main { static void f() throws Exception {} public static void main(String[] a) { try { f(); } finally { return; } } }',
+  ],
+  [
+    'finallyThrowSuppresses',
+    true,
+    'public class Main { static void f() throws Exception {} public static void main(String[] a) { try { f(); } catch (RuntimeException e) { throw new Exception(); } finally { throw new RuntimeException(); } } }',
+  ],
+  [
+    'finallyNormalPropagates',
+    false,
+    'public class Main { static void f() throws Exception {} public static void main(String[] a) { try { f(); } finally { System.out.println(1); } } }',
+  ],
+  [
+    'npeNullMessage',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    NullPointerException e = new NullPointerException(null); System.out.println(e.getMessage());\n  }\n  \n}\n',
+  ],
+  [
+    'npeCause',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    NullPointerException e = new NullPointerException(new RuntimeException());\n  }\n  \n}\n',
+  ],
+  [
+    'iaeCause',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    IllegalArgumentException e = new IllegalArgumentException("x", new RuntimeException());\n  }\n  \n}\n',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

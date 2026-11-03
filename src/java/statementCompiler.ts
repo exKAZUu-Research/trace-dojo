@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 430 -- The statement compiler keeps one method per statement kind together.
+// code-gauge-allow-file fileNcss 438 -- The statement compiler keeps one method per statement kind together.
 import type {
   Block,
   CatchClause,
@@ -534,26 +534,28 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (statement.catches.length === 0 && !statement.finallyBlock) {
       this.error(statement, 'try 文には catch か finally が必要です。');
     }
-    const enclosing: EnclosingTry = {
-      caughtTypes: statement.catches.flatMap((clause) => clause.types.map((type) => this.resolveThrowable(type))),
-      thrownTypes: [],
-    };
-    context.tries.push(enclosing);
-    let body: Exec;
-    try {
-      body = this.compileBlock(context, statement.body);
-    } finally {
-      context.tries.pop();
-    }
-    const handle = this.compileCatchClauses(context, statement.catches, enclosing.thrownTypes);
+    // The finally block is compiled first: one that cannot complete normally discards every exception thrown
+    // before it, so the try and catch blocks then throw nothing out of the statement.
     const finallyBlock = statement.finallyBlock ? this.compileBlock(context, statement.finallyBlock) : undefined;
-    return (frame) => {
-      const { completion, pending } = attemptTry(frame, body, handle);
-      const finallyCompletion = finallyBlock?.(frame);
-      if (finallyCompletion) return finallyCompletion;
-      if (pending) throw pending;
-      return completion;
-    };
+    const discardsExceptions = statement.finallyBlock !== undefined && !canCompleteNormally(statement.finallyBlock);
+    if (discardsExceptions) context.tries.push({ caughtTypes: [this.builtins.throwableClass], thrownTypes: [] });
+    try {
+      const enclosing: EnclosingTry = {
+        caughtTypes: statement.catches.flatMap((clause) => clause.types.map((type) => this.resolveThrowable(type))),
+        thrownTypes: [],
+      };
+      context.tries.push(enclosing);
+      let body: Exec;
+      try {
+        body = this.compileBlock(context, statement.body);
+      } finally {
+        context.tries.pop();
+      }
+      const handle = this.compileCatchClauses(context, statement.catches, enclosing.thrownTypes);
+      return runTry(body, handle, finallyBlock);
+    } finally {
+      if (discardsExceptions) context.tries.pop();
+    }
   }
 
   /** Rejects catching what an earlier clause catches, or a checked exception the try block cannot throw. */
@@ -628,6 +630,16 @@ function caughtByClause(
     })
   );
   return narrowed.filter((thrown) => !earlierClasses.some((earlier) => isSubclass(thrown, earlier)));
+}
+
+function runTry(body: Exec, handle: CatchHandler, finallyBlock: Exec | undefined): Exec {
+  return (frame) => {
+    const { completion, pending } = attemptTry(frame, body, handle);
+    const finallyCompletion = finallyBlock?.(frame);
+    if (finallyCompletion) return finallyCompletion;
+    if (pending) throw pending;
+    return completion;
+  };
 }
 
 /** Runs a try block and its catch clauses, returning how they completed or the exception left for finally. */

@@ -306,9 +306,12 @@ function markReachable(roots: Value[]): { reached: Set<JavaObject | JavaArray>; 
     const children = value instanceof JavaObject ? value.fields : value.values;
     scanned += children.length;
     // Pushed one by one: spreading a large array into push() exceeds the engine's argument limit.
-    for (const child of children) {
-      if (child instanceof JavaObject || child instanceof JavaArray) pending.push(child);
-    }
+    for (const child of children) pushReference(pending, child);
+    if (value instanceof JavaObject) pushReference(pending, value.cause);
   }
   return { reached, scanned };
+}
+
+function pushReference(pending: Value[], value: Value): void {
+  if (value instanceof JavaObject || value instanceof JavaArray) pending.push(value);
 }
