@@ -1101,22 +1101,25 @@ test.each([
 
 test.each([
   ['long x = 0;', '型「long」は、この採点環境では使えません。'],
-  ['double r = Math.round(2.5);', 'この採点環境の Math では、メソッド round を使えません。'],
-  ['StringBuilder b = null;', '型 StringBuilder が見つからないか、この採点環境では使えません。'],
+  ['double r = Math.round(2.5);', 'この採点環境の Math には、メソッド round がありません。'],
+  ['StringBuilder b = null;', 'この採点環境には、型 StringBuilder がありません。'],
   [
     'String s = String.valueOf(1, 2);',
     'この採点環境では、メソッド valueOf に (int, int) を渡して呼び出すことはできません。',
   ],
-  ['Turtle t = new Turtle(); t.前に進む(3);', 'メソッド 前に進む に (int) を渡して呼び出すことはできません。'],
-  ['Turtle t = new Turtle(); t.x = 3;', 'Turtle にフィールド x がありません。'],
   ['int n = Integer.parseInt(123);', 'この採点環境では、メソッド parseInt に (int) を渡して呼び出すことはできません。'],
   [
     'Object e = new IndexOutOfBoundsException(1);',
     'この採点環境では、コンストラクタ IndexOutOfBoundsException に (int) を渡して呼び出すことはできません。',
   ],
-  ['Object o = new Object(); o.getClass();', 'この採点環境の Object では、メソッド getClass を使えません。'],
-  ['Turtle t = new Turtle(); t.前進する();', 'Turtle にメソッド 前進する がありません。'],
-])('messages about the standard library state what this environment allows: %s', (body, message) => {
+  ['Object o = new Object(); o.getClass();', 'この採点環境の Object には、メソッド getClass がありません。'],
+  [
+    'Turtle t = new Turtle(); t.前に進む(3);',
+    'この採点環境では、メソッド 前に進む に (int) を渡して呼び出すことはできません。',
+  ],
+  ['Turtle t = new Turtle(); t.x = 3;', 'この採点環境の Turtle には、フィールド x がありません。'],
+  ['Turtle t = new Turtle(); t.前進する();', 'この採点環境の Turtle には、メソッド 前進する がありません。'],
+])('messages about what Java may have state only what this environment has: %s', (body, message) => {
   const source = `class Main {\n  public static void main(String[] args) {\n    ${body}\n  }\n}`;
   expect(executeJavaProgram(source)).toEqual({ kind: 'compileError', diagnostics: [{ row: 2, message }] });
 });
@@ -1135,21 +1138,4 @@ test('exceptions keep their causes and Math offers its constants', () => {
     finalTurtles: [{ x: 0, y: 2, color: '#', dir: 'N' }],
     uncaughtException: undefined,
   });
-});
-
-test('a wrong call to a learner-defined exception class gets the plain message', () => {
-  const source =
-    'class Main { public static void main(String[] args) { MyEx e = new MyEx(); } }\nclass MyEx extends Exception { MyEx(int code) { super("x"); } }';
-  expect(executeJavaProgram(source)).toEqual({
-    kind: 'compileError',
-    diagnostics: [{ row: 0, message: 'コンストラクタ MyEx に () を渡して呼び出すことはできません。' }],
-  });
-});
-
-test.each([
-  ['missing();', 'MyEx にメソッド missing がありません。'],
-  ['printStackTrace();', 'この採点環境の MyEx では、メソッド printStackTrace を使えません。'],
-])('a missing method on a learner-defined exception: %s', (call, message) => {
-  const source = `class Main { public static void main(String[] args) { new MyEx().${call} } }\nclass MyEx extends Exception {}`;
-  expect(executeJavaProgram(source)).toEqual({ kind: 'compileError', diagnostics: [{ row: 0, message }] });
 });

@@ -130,7 +130,7 @@ export abstract class CompilerBase {
       }
       case 'named': {
         const cls = this.classes.get(syntax.name) ?? this.builtins.classes.get(syntax.name);
-        if (!cls) this.error(syntax, `型 ${syntax.name} が見つからないか、この採点環境では使えません。`);
+        if (!cls) this.error(syntax, `この採点環境には、型 ${syntax.name} がありません。`);
         return cls.type;
       }
       case 'var': {
@@ -334,17 +334,6 @@ export abstract class CompilerBase {
     return methods;
   }
 
-  /**
-   * Whether `cls` is or extends a standard library class, whose members this environment implements only partly,
-   * so that a member missing here may still exist in Java. Turtle belongs to the course and is complete.
-   */
-  protected isPartialLibraryClass(cls: ClassInfo): boolean {
-    for (let current: ClassInfo | undefined = cls; current; current = current.superclass) {
-      if (current.isBuiltin && current !== this.builtins.objectClass && current.name !== 'Turtle') return true;
-    }
-    return false;
-  }
-
   /** Picks the most specific applicable method, as Java's overload resolution does without boxing or varargs. */
   protected selectMethod(span: Span, candidates: MethodInfo[], argTypes: JavaType[], what: string): MethodInfo {
     const objectClass = this.builtins.objectClass;
@@ -355,12 +344,8 @@ export abstract class CompilerBase {
     );
     if (applicable.length === 0) {
       const given = argTypes.map((type) => typeName(type)).join(', ');
-      // Java may declare an overload of a standard library member that this environment lacks, so the message
-      // states only what this environment allows.
-      if (candidates.some((method) => method.owner.isBuiltin && this.isPartialLibraryClass(method.owner))) {
-        return this.error(span, `この採点環境では、${what} に (${given}) を渡して呼び出すことはできません。`);
-      }
-      return this.error(span, `${what} に (${given}) を渡して呼び出すことはできません。`);
+      // This environment implements only part of the standard library, so the message states only what it allows.
+      return this.error(span, `この採点環境では、${what} に (${given}) を渡して呼び出すことはできません。`);
     }
     const mostSpecific = applicable.filter((method) =>
       applicable.every(

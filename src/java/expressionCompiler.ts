@@ -23,38 +23,12 @@ import {
   isNumeric,
   isPrimitive,
   isReference,
-  isSubclass,
   type JavaType,
   type MethodInfo,
   NULL,
   typeName,
 } from './types';
 import { defaultValue, JavaArray, JavaObject, JavaString, toInt32, type Value } from './values';
-
-/** The methods every Java class inherits from Object, of which this environment implements only some. */
-const objectMethodNames = new Set([
-  'clone',
-  'equals',
-  'finalize',
-  'getClass',
-  'hashCode',
-  'notify',
-  'notifyAll',
-  'toString',
-  'wait',
-]);
-
-/** The public methods of Throwable that this environment does not implement. */
-const throwableMethodNames = new Set([
-  'addSuppressed',
-  'fillInStackTrace',
-  'getLocalizedMessage',
-  'getStackTrace',
-  'getSuppressed',
-  'initCause',
-  'printStackTrace',
-  'setStackTrace',
-]);
 
 /** Type-checks expressions and compiles them into closures. */
 export abstract class ExpressionCompiler extends CompilerBase {
@@ -288,7 +262,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const object = this.compileExpression(context, access.object);
     if (object.kind === 'class') {
       const field = this.findField(object.cls, name);
-      if (!field) return this.error(access, this.missingFieldMessage(object.cls, name));
+      if (!field) return this.error(access, missingFieldMessage(object.cls, name));
       if (!field.isStatic) this.error(access, `static ではないフィールド ${name} はクラス名から使えません。`);
       this.checkAccess(context, field.owner, field.access, access, `フィールド ${name}`);
       return this.fieldReference(field, undefined);
@@ -312,7 +286,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return this.error(access, `${typeName(object.type)} 型の値にはフィールドがありません。`);
     }
     const field = this.findField(object.type.cls, name);
-    if (!field) return this.error(access, this.missingFieldMessage(object.type.cls, name));
+    if (!field) return this.error(access, missingFieldMessage(object.type.cls, name));
     this.checkAccess(context, field.owner, field.access, access, `フィールド ${name}`);
     return this.fieldReference(field, field.isStatic ? undefined : object, field.isStatic ? object : undefined);
   }
@@ -371,19 +345,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
         };
       },
     };
-  }
-
-  /** Whether Java may give `owner` a method named `name` that this environment does not implement. */
-  protected mayInheritMethod(owner: ClassInfo, name: string): boolean {
-    if (owner.isBuiltin && this.isPartialLibraryClass(owner)) return true;
-    if (objectMethodNames.has(name)) return true;
-    return isSubclass(owner, this.builtins.throwableClass) && throwableMethodNames.has(name);
-  }
-
-  protected missingFieldMessage(cls: ClassInfo, name: string): string {
-    return cls.isBuiltin && this.isPartialLibraryClass(cls)
-      ? `この採点環境の ${cls.name} では、フィールド ${name} を使えません。`
-      : `${cls.name} にフィールド ${name} がありません。`;
   }
 
   protected compileReference(context: MethodContext, target: Expression): Reference {
@@ -727,10 +688,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const args = expression.args.map((arg) => this.compileValue(context, arg));
     const target = this.resolveCallTarget(context, expression);
     if (target.candidates.length === 0) {
-      const message = this.mayInheritMethod(target.owner, expression.name)
-        ? `この採点環境の ${target.owner.name} では、メソッド ${expression.name} を使えません。`
-        : `${target.owner.name} にメソッド ${expression.name} がありません。`;
-      this.error(expression, message);
+      this.error(expression, `この採点環境の ${target.owner.name} には、メソッド ${expression.name} がありません。`);
     }
     const method = this.selectMethod(
       expression,
@@ -839,6 +797,11 @@ function shortCircuit(operator: '&&' | '||', left: CompiledValue, right: Compile
         ? (left.run(frame) as boolean) && (right.run(frame) as boolean)
         : (left.run(frame) as boolean) || (right.run(frame) as boolean),
   };
+}
+
+/** This environment implements only part of the standard library, so the message states only what it has. */
+function missingFieldMessage(cls: ClassInfo, name: string): string {
+  return `この採点環境の ${cls.name} には、フィールド ${name} がありません。`;
 }
 
 function notConstant(reference: Reference & { constant?: Value }): Reference & { constant?: Value } {
