@@ -25,6 +25,7 @@ export class JavaObject {
   turtle?: TurtleState;
   /** Set by the builtin Throwable constructors. */
   message?: JavaString;
+  cause?: JavaObject;
 
   constructor(readonly cls: ClassInfo) {
     this.fields = Array.from({ length: cls.instanceFieldCount });

@@ -8,7 +8,7 @@ import { MAX_ACTIVE_DURATION_MS_AFTER_LAST_EVENT, MIN_INTERVAL_MS_OF_ACTIVE_EVEN
 import { useAuthContextSelector } from '@/contexts/AuthContext';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
 import { Button, HStack, Tooltip, VStack } from '@/infrastructures/useClient/chakra';
-import type { FillInBlankGradingResult } from '@/problems/fillInBlank/grade';
+import type { FillInBlankVerdict } from '@/problems/fillInBlank/grade';
 import type { InstantiatedProblem } from '@/problems/instantiateProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import type { OrdinaryJavaProblemData } from '@/types';
@@ -92,7 +92,7 @@ const ProblemSessionPage: React.FC<Props> = (props) => {
     onError: onSessionError,
   });
   const gradeCode = useCallback(
-    async (code: string): Promise<FillInBlankGradingResult> => {
+    async (code: string): Promise<FillInBlankVerdict> => {
       const newProblemSession = await updateProblemSessionMutation.mutateAsync({
         id: problemSession.id,
         incrementalElapsedMilliseconds: getIncrementalElapsedMilliseconds(lastActionTimeRef),

@@ -1,31 +1,22 @@
 import { findJavaTraceAnnotations } from '../problems/fillInBlank/javaSource';
-import type { DisplayNode, TraceItem, TraceItemVariable, TurtleTrace } from '../problems/trace';
+import type { DisplayNode, TraceItem, TraceItemVariable } from '../problems/trace';
 import { type CompiledProgram, compileProgram } from './compiler';
+import { boardText, type ProgramRun, runProgram, turtlesOf } from './execute';
 import { parseJava } from './parse';
-import { ExecutionLimitError, Frame, JavaThrow, Runtime, type RuntimeLimits, UNASSIGNED } from './runtime';
+import { ExecutionLimitError, type Frame, Runtime, UNASSIGNED } from './runtime';
 import type { JavaType } from './types';
 import { charToString, defaultValue, JavaArray, JavaObject, JavaString, type TurtleState, type Value } from './values';
 
-export interface JavaTrace {
+export interface JavaTrace extends ProgramRun {
   /** The program without its `// step` and `// caller` annotations. */
   displayProgram: string;
   traceItems: TraceItem[];
   sidToLineIndex: Map<number, number>;
   callerIdToLineIndex: Map<number, number>;
   finalVars: TraceItemVariable;
-  finalBoard: string;
-  finalTurtles: TurtleTrace[];
-  /** The `toString()` of the exception that ended the program, if one escaped `main`. */
-  uncaughtException: string | undefined;
 }
 
 /** Model programs are trusted but must not hang the server through an accidental unbounded loop. */
-const TRACE_LIMITS: RuntimeLimits = {
-  maxOperations: 1_000_000,
-  maxCallDepth: 512,
-  maxArrayElements: 1_000_000,
-  maxOutputLength: 100_000,
-};
 const MAX_TRACE_ITEMS = 10_000;
 
 interface Annotations {
@@ -78,7 +69,7 @@ export function traceJavaProgram(program: string, displayProgram: string): JavaT
   const executed = readAnnotations(program);
   const displayed = readAnnotations(displayProgram);
   const compiled = compileProgram(parseJava(program), { stepIdByRow: executed.stepIdByRow });
-  const runtime = new Runtime(compiled.builtins, TRACE_LIMITS);
+  const runtime = new Runtime(compiled.builtins);
   const snapshotter = new Snapshotter(runtime, compiled, executed.callerIdByRow);
   const traceItems: TraceItem[] = [snapshotter.initialItem()];
   runtime.onStep = (stepId) => {
@@ -86,40 +77,18 @@ export function traceJavaProgram(program: string, displayProgram: string): JavaT
     traceItems.push(snapshotter.snapshot(stepId));
   };
   let finalVars: TraceItemVariable = {};
-  let finalTurtles: TurtleTrace[] = [];
-  runtime.onExit = (frame) => {
-    if (frame.method !== compiled.mainMethod || runtime.frames.length !== 1) return;
-    finalVars = snapshotter.variablesOf(frame, false).vars;
-    // Collecting while main's frame still exists keeps the turtles its variables hold.
-    runtime.collectGarbage();
-    finalTurtles = turtlesOf(runtime);
-  };
   // A model program may end with an uncaught exception to show how one stops the program.
-  const uncaughtException = runMain(runtime, compiled);
+  const run = runProgram(runtime, compiled, (frame) => {
+    finalVars = snapshotter.variablesOf(frame, false).vars;
+  });
   return {
     displayProgram: removeAnnotations(displayProgram),
     traceItems,
     sidToLineIndex: new Map([...displayed.stepIdByRow].map(([row, id]) => [id, row + 1])),
     callerIdToLineIndex: new Map([...displayed.callerIdByRow].map(([row, id]) => [id, row + 1])),
     finalVars,
-    finalBoard: boardText(runtime),
-    finalTurtles,
-    uncaughtException,
+    ...run,
   };
-}
-
-/** Runs `main` and returns the uncaught exception's `toString()`, if any. */
-export function runMain(runtime: Runtime, program: CompiledProgram): string | undefined {
-  const root = new Frame(runtime, undefined, [], undefined, undefined);
-  try {
-    runtime.initializeClass(root, program.entryClass);
-    const args = new JavaArray(program.builtins.stringClass.type, []);
-    runtime.invoke(root, program.mainMethod, undefined, [args], undefined);
-    return undefined;
-  } catch (error) {
-    if (!(error instanceof JavaThrow)) throw error;
-    return runtime.invokeToString(root, error.value)?.value ?? error.value.cls.name;
-  }
 }
 
 class Snapshotter {
@@ -297,12 +266,4 @@ function objectEntriesOf(object: JavaObject, seen: Set<unknown>): Record<string,
     if (node) entries[field.name] = node;
   }
   return entries;
-}
-
-function boardText(runtime: Runtime): string {
-  return runtime.world.board.map((row) => row.join('')).join('\n');
-}
-
-function turtlesOf(runtime: Runtime): TurtleTrace[] {
-  return runtime.turtleStates().map(({ color, dir, x, y }) => ({ x, y, color, dir }));
 }

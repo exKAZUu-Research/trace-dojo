@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 432 -- The expression compiler keeps one method per expression kind together.
+// code-gauge-allow-file fileNcss 453 -- The expression compiler keeps one method per expression kind together.
 import type { ArrayInitializer, BinaryOperator, Expression, Span } from './ast';
 import {
   type Compiled,
@@ -9,8 +9,8 @@ import {
   type MethodContext,
   type Reference,
 } from './compilerBase';
-import { CompileError } from './diagnostics';
 import { binaryOperation, castOperation, conditionalType, unaryOperation } from './operators';
+import { booleanConstants } from './reachability';
 import { type Frame, throwBuiltin, UNASSIGNED } from './runtime';
 import {
   BOOLEAN,
@@ -57,7 +57,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     type: JavaType
   ): Eval {
     if (initializer.kind === 'arrayInitializer') return this.compileArrayInitializer(context, initializer, type);
-    return this.convert(this.compileValue(context, initializer), type, 'assignment').run;
+    return this.convert(this.compileValue(context, initializer), type, 'assignment', initializer).run;
   }
 
   protected compileArrayInitializer(context: MethodContext, initializer: ArrayInitializer, type: JavaType): Eval {
@@ -81,15 +81,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   protected compileExpression(context: MethodContext, expression: Expression): Compiled {
-    try {
-      return this.compileExpressionBody(context, expression);
-    } catch (error) {
-      // Conversions report no location of their own, so they take the expression's.
-      if (error instanceof CompileError && error.diagnostics[0]?.row === -1) {
-        throw new CompileError([{ row: expression.row, message: error.diagnostics[0].message }]);
-      }
-      throw error;
+    const compiled = this.compileExpressionBody(context, expression);
+    if (compiled.kind === 'value' && typeof compiled.constant === 'boolean') {
+      booleanConstants.set(expression, compiled.constant);
     }
+    return compiled;
   }
 
   // code-gauge-allow functionNcss 46 -- One case per expression kind, each delegating to its own compiler.
@@ -260,18 +256,19 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (access.object === 'super') {
       if (context.isStatic) this.error(access, 'static メソッドの中では super を使えません。');
       const field = this.findField(context.cls.superclass as ClassInfo, name);
-      if (!field) return this.error(access, `フィールド ${name} が見つかりません。`);
-      return this.fieldReference(field, field.isStatic ? undefined : thisValue(context));
+      if (!field) return this.error(access, missingFieldMessage(context.cls.superclass as ClassInfo, name));
+      return notConstant(this.fieldReference(field, field.isStatic ? undefined : thisValue(context)));
     }
     const object = this.compileExpression(context, access.object);
     if (object.kind === 'class') {
       const field = this.findField(object.cls, name);
-      if (!field) return this.error(access, `${object.cls.name} にフィールド ${name} がありません。`);
+      if (!field) return this.error(access, missingFieldMessage(object.cls, name));
       if (!field.isStatic) this.error(access, `static ではないフィールド ${name} はクラス名から使えません。`);
       this.checkAccess(context, field.owner, field.access, access, `フィールド ${name}`);
       return this.fieldReference(field, undefined);
     }
-    return this.compileMemberOfValue(context, access, object);
+    // Java folds a constant field only when it is named by its simple name or as TypeName.name.
+    return notConstant(this.compileMemberOfValue(context, access, object));
   }
 
   /** Resolves `object.name` where `object` is a value, including an array's `length`. */
@@ -289,7 +286,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return this.error(access, `${typeName(object.type)} 型の値にはフィールドがありません。`);
     }
     const field = this.findField(object.type.cls, name);
-    if (!field) return this.error(access, `${object.type.cls.name} にフィールド ${name} がありません。`);
+    if (!field) return this.error(access, missingFieldMessage(object.type.cls, name));
     this.checkAccess(context, field.owner, field.access, access, `フィールド ${name}`);
     return this.fieldReference(field, field.isStatic ? undefined : object, field.isStatic ? object : undefined);
   }
@@ -304,19 +301,28 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (constant !== undefined) {
       return {
         type: field.type,
+        field,
         constant,
-        bind: () => ({
-          get: () => constant,
-          set: () => {
-            throw new Error('A constant variable was assigned');
-          },
-        }),
+        bind: (frame) => {
+          // A receiver written before the field still runs, and an instance field still needs an object.
+          ignoredReceiver?.run(frame);
+          if (!field.isStatic && !((receiver as CompiledValue).run(frame) instanceof JavaObject)) {
+            throwBuiltin(frame, 'NullPointerException');
+          }
+          return {
+            get: () => constant,
+            set: () => {
+              throw new Error('A constant variable was assigned');
+            },
+          };
+        },
       };
     }
     if (field.isStatic) {
       const builtinConstant = field.constant;
       return {
         type: field.type,
+        field,
         constant:
           builtinConstant !== undefined && !(builtinConstant instanceof JavaObject) ? builtinConstant : undefined,
         bind: (frame) => {
@@ -334,6 +340,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const object = receiver as CompiledValue;
     return {
       type: field.type,
+      field,
       bind: (frame) => {
         const target = object.run(frame);
         if (!(target instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
@@ -400,7 +407,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   protected compileAssignment(context: MethodContext, expression: Extract<Expression, { kind: 'assign' }>): Compiled {
     const reference = this.compileReference(context, expression.target);
-    this.checkFinalAssignment(context, expression.target);
+    this.checkAssignable(context, expression.target, reference);
     const value = this.compileValue(context, expression.value);
     const { bind, type } = reference;
     if (expression.operator === '=') {
@@ -439,22 +446,29 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  protected checkFinalAssignment(context: MethodContext, target: Expression): void {
-    if (target.kind === 'name' && this.findLocal(context, target.name) !== undefined) return;
-    const name = target.kind === 'name' || target.kind === 'fieldAccess' ? target.name : undefined;
-    if (!name) return;
-    const owner =
-      target.kind === 'fieldAccess' && target.object !== 'super' && target.object.kind !== 'this'
-        ? undefined
-        : context.cls;
-    const field = owner ? this.findField(owner, name) : undefined;
-    if (field && (field.constant !== undefined || this.constantOf(field) !== undefined)) {
-      this.error(target, `${name} は final なので代入できません。`);
-    }
+  /**
+   * Rejects assigning an array's length or a final field, except a blank final field that a constructor or an
+   * initializer of its class assigns by its simple name or through `this`.
+   */
+  protected checkAssignable(context: MethodContext, target: Expression, reference: Reference): void {
+    const { field } = reference;
+    if (reference.isArrayLength) this.error(target, 'length は final なので代入できません。');
+    if (!field?.isFinal) return;
+    const isBlank =
+      field.constant === undefined &&
+      !field.declaration?.declarators.find((declarator) => declarator.name === field.name)?.initializer;
+    const namesOwnField =
+      target.kind === 'name' ||
+      (target.kind === 'fieldAccess' && target.object !== 'super' && target.object.kind === 'this');
+    const initializesField =
+      context.cls === field.owner && context.initializes === (field.isStatic ? 'static' : 'instance');
+    if (!(isBlank && namesOwnField && initializesField))
+      this.error(target, `${field.name} は final なので代入できません。`);
   }
 
   protected compileUpdate(context: MethodContext, expression: Extract<Expression, { kind: 'update' }>): Compiled {
     const reference = this.compileReference(context, expression.target);
+    this.checkAssignable(context, expression.target, reference);
     const { type, bind } = reference;
     if (!isNumeric(type))
       this.error(expression, `${typeName(type)} 型の変数には ${expression.operator} を使えません。`);
@@ -500,15 +514,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const right = this.compileValue(context, expression.right);
     const operation = this.binaryOperation(expression, expression.operator, left.type, right.type);
     if (expression.operator === '&&' || expression.operator === '||') {
-      const isAnd = expression.operator === '&&';
-      return {
-        kind: 'value',
-        type: BOOLEAN,
-        run: (frame) =>
-          isAnd
-            ? (left.run(frame) as boolean) && (right.run(frame) as boolean)
-            : (left.run(frame) as boolean) || (right.run(frame) as boolean),
-      };
+      return shortCircuit(expression.operator, left, right);
     }
     let constant: Value;
     if (left.constant !== undefined && right.constant !== undefined && isPrimitive(operation.type)) {
@@ -567,12 +573,16 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const consequence = this.compileValue(context, expression.consequence);
     const alternative = this.compileValue(context, expression.alternative);
     const type = this.conditionalType(expression, consequence.type, alternative.type);
-    const whenTrue = this.convert(consequence, type).run;
-    const whenFalse = this.convert(alternative, type).run;
+    const whenTrue = this.convert(consequence, type, 'invocation', expression.consequence);
+    const whenFalse = this.convert(alternative, type, 'invocation', expression.alternative);
+    const constantCondition = booleanConstants.get(expression.condition);
+    const isConstant =
+      constantCondition !== undefined && whenTrue.constant !== undefined && whenFalse.constant !== undefined;
     return {
       kind: 'value',
       type,
-      run: (frame) => (condition(frame) ? whenTrue(frame) : whenFalse(frame)),
+      constant: isConstant ? (constantCondition ? whenTrue.constant : whenFalse.constant) : undefined,
+      run: (frame) => (condition(frame) ? whenTrue.run(frame) : whenFalse.run(frame)),
     };
   }
 
@@ -659,14 +669,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
       `コンストラクタ ${cls.name}`
     );
     this.checkAccess(context, cls, constructor.access, expression, `コンストラクタ ${cls.name}`);
-    const convertedArgs = args.map((arg, index) => this.convert(arg, constructor.parameterTypes[index]).run);
+    this.checkThrown(context, expression, constructor.thrownTypes);
+    const convertedArgs = args.map(
+      (arg, index) => this.convert(arg, constructor.parameterTypes[index], 'invocation', expression.args[index]).run
+    );
     const callRow = expression.row;
     return {
       kind: 'value',
       type,
       run: (frame) => {
         frame.runtime.initializeClass(frame, cls);
-        const object = new JavaObject(cls);
+        const object = frame.runtime.allocateObject(frame, cls);
         frame.temporaries.push(object);
         try {
           this.invokeWithArguments(frame, constructor, object, convertedArgs, callRow);
@@ -682,7 +695,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const args = expression.args.map((arg) => this.compileValue(context, arg));
     const target = this.resolveCallTarget(context, expression);
     if (target.candidates.length === 0) {
-      this.error(expression, `${target.ownerName} にメソッド ${expression.name} がありません。`);
+      this.error(expression, `この採点環境の ${target.owner.name} には、メソッド ${expression.name} がありません。`);
     }
     const method = this.selectMethod(
       expression,
@@ -691,7 +704,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
       `メソッド ${expression.name}`
     );
     this.checkCall(context, expression, method, target.receiver === undefined);
-    const convertedArgs = args.map((arg, index) => this.convert(arg, method.parameterTypes[index]).run);
+    this.checkThrown(context, expression, method.thrownTypes);
+    const convertedArgs = args.map(
+      (arg, index) => this.convert(arg, method.parameterTypes[index], 'invocation', expression.args[index]).run
+    );
     const callRow = expression.row;
     if (method.isStatic) {
       // A static method called through an expression still evaluates that expression.
@@ -729,14 +745,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
   protected resolveCallTarget(
     context: MethodContext,
     expression: Extract<Expression, { kind: 'call' }>
-  ): { candidates: MethodInfo[]; ownerName: string; receiver: CompiledValue | undefined } {
+  ): { candidates: MethodInfo[]; owner: ClassInfo; receiver: CompiledValue | undefined } {
     if (expression.object === undefined || expression.object === 'super') {
       const isSuper = expression.object === 'super';
       if (isSuper && context.isStatic) this.error(expression, 'static メソッドの中では super を使えません。');
       const owner = isSuper ? (context.cls.superclass as ClassInfo) : context.cls;
       return {
         candidates: this.collectMethods(owner, expression.name),
-        ownerName: owner.name,
+        owner,
         receiver: thisValue(context),
       };
     }
@@ -744,7 +760,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (object.kind === 'class') {
       return {
         candidates: this.collectMethods(object.cls, expression.name),
-        ownerName: object.cls.name,
+        owner: object.cls,
         receiver: undefined,
       };
     }
@@ -752,7 +768,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.error(expression, `${typeName(object.type)} 型の値にはメソッドがありません。`);
     }
     const owner = object.type.kind === 'class' ? object.type.cls : this.builtins.objectClass;
-    return { candidates: this.collectMethods(owner, expression.name), ownerName: owner.name, receiver: object };
+    return { candidates: this.collectMethods(owner, expression.name), owner, receiver: object };
   }
 
   protected checkCall(
@@ -775,6 +791,30 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 }
 
+/** `&&` or `||`, which evaluates its right operand only when the left one does not decide the result. */
+function shortCircuit(operator: '&&' | '||', left: CompiledValue, right: CompiledValue): CompiledValue {
+  const isAnd = operator === '&&';
+  const bothConstant = typeof left.constant === 'boolean' && typeof right.constant === 'boolean';
+  return {
+    kind: 'value',
+    type: BOOLEAN,
+    constant: bothConstant ? (isAnd ? left.constant && right.constant : left.constant || right.constant) : undefined,
+    run: (frame) =>
+      isAnd
+        ? (left.run(frame) as boolean) && (right.run(frame) as boolean)
+        : (left.run(frame) as boolean) || (right.run(frame) as boolean),
+  };
+}
+
+/** This environment implements only part of the standard library, so the message states only what it has. */
+function missingFieldMessage(cls: ClassInfo, name: string): string {
+  return `この採点環境の ${cls.name} には、フィールド ${name} がありません。`;
+}
+
+function notConstant(reference: Reference & { constant?: Value }): Reference & { constant?: Value } {
+  return { ...reference, constant: undefined };
+}
+
 function thisValue(context: MethodContext): CompiledValue {
   return { kind: 'value', type: context.cls.type, run: (frame) => frame.thisObject };
 }
@@ -782,6 +822,7 @@ function thisValue(context: MethodContext): CompiledValue {
 function arrayLengthReference(array: CompiledValue): Reference {
   return {
     type: INT,
+    isArrayLength: true,
     bind: (frame) => {
       const value = array.run(frame);
       if (!(value instanceof JavaArray)) throwBuiltin(frame, 'NullPointerException');

@@ -1,14 +1,19 @@
 import type {
+  ArrayInitializer,
+  Block,
   ClassDeclaration,
   CompilationUnit,
   ConstructorDeclaration,
+  Expression,
   FieldDeclaration,
+  InitializerBlock,
   MethodDeclaration,
   Span,
   VariableDeclarator,
 } from './ast';
 import type { Builtins } from './builtins';
 import { type CompileOptions, type MethodContext, sameParameters } from './compilerBase';
+import { checkDefiniteAssignment, checkInitialization } from './definiteAssignment';
 import { canCompleteNormally } from './reachability';
 import { type Frame, type Slot, UNASSIGNED } from './runtime';
 import { StatementCompiler } from './statementCompiler';
@@ -269,8 +274,10 @@ class Compiler extends StatementCompiler {
   }
 
   protected compileBodies(cls: ClassInfo): void {
-    const staticContext = this.newContext(cls, true, VOID);
+    const staticContext = { ...this.newContext(cls, true, VOID), initializes: 'static' as const };
     const staticInitializers = this.compileInitializers(staticContext, cls, true);
+    // Definite assignment reads the constants that compiling the initializers records.
+    checkInitialization({ ...this.initializationOf(cls, true), span: cls.declaration as ClassDeclaration });
     if (staticInitializers.length > 0) {
       const locals = staticContext.locals;
       cls.initializeStatics = (frame) => {
@@ -283,30 +290,47 @@ class Compiler extends StatementCompiler {
     for (const constructor of cls.constructors) this.compileConstructor(cls, constructor);
   }
 
+  /** The blank final fields and the initializers of one kind, which assign those fields first. */
+  protected initializationOf(
+    cls: ClassInfo,
+    isStatic: boolean
+  ): { blankFinals: string[]; initializers: (Block | Expression | ArrayInitializer)[] } {
+    const members = initializingMembersOf(cls, isStatic);
+    return {
+      blankFinals: members.flatMap((member) =>
+        member.kind === 'field' && member.modifiers.isFinal
+          ? member.declarators.filter((declarator) => !declarator.initializer).map((declarator) => declarator.name)
+          : []
+      ),
+      initializers: members.flatMap((member): (Block | Expression | ArrayInitializer)[] => {
+        if (member.kind === 'initializer') return [member.body];
+        return member.declarators.flatMap((declarator) => (declarator.initializer ? [declarator.initializer] : []));
+      }),
+    };
+  }
+
   /** Compiles the field initializers and initializer blocks of one kind in textual order. */
   protected compileInitializers(context: MethodContext, cls: ClassInfo, isStatic: boolean): ((frame: Frame) => void)[] {
-    const initializers: ((frame: Frame) => void)[] = [];
-    for (const member of (cls.declaration as ClassDeclaration).members) {
-      if (member.kind === 'field' && member.modifiers.isStatic === isStatic) {
-        initializers.push(...this.compileFieldInitializers(context, cls, member.declarators, member));
-      } else if (member.kind === 'initializer' && member.isStatic === isStatic) {
-        const body = this.compileBlock(context, member.body);
-        initializers.push((frame) => {
+    return initializingMembersOf(cls, isStatic).flatMap((member) => {
+      if (member.kind === 'field') return this.compileFieldInitializers(context, cls, member.declarators, member);
+      const body = this.compileBlock({ ...context, isInitializerBlock: true }, member.body);
+      return [
+        (frame: Frame) => {
           if (body(frame)) throw new Error('An initializer completed abruptly');
-        });
-      }
-    }
-    return initializers;
+        },
+      ];
+    });
   }
 
   protected compileMethod(cls: ClassInfo, method: MethodInfo): void {
     const member = method.declaration as MethodDeclaration;
     if (!member.body) return;
-    const context = this.newContext(cls, method.isStatic, method.returnType);
+    const context = this.newContext(cls, method.isStatic, method.returnType, method.thrownTypes);
     for (const [index, parameter] of member.parameters.entries()) {
       this.declareLocal(context, parameter, parameter.name, method.parameterTypes[index]);
     }
     const body = this.compileBlock(context, member.body, false);
+    checkDefiniteAssignment(member.parameters, member.body);
     if (method.returnType.kind !== 'void' && canCompleteNormally(member.body)) {
       this.error({ ...member.body, row: member.body.endRow }, `メソッド ${method.name} に return 文がありません。`);
     }
@@ -346,7 +370,7 @@ class Compiler extends StatementCompiler {
 
   protected compileConstructor(cls: ClassInfo, constructor: MethodInfo): void {
     const declaration = constructor.declaration as ConstructorDeclaration | undefined;
-    const context = this.newContext(cls, false, VOID);
+    const context = { ...this.newContext(cls, false, VOID, constructor.thrownTypes), initializes: 'instance' as const };
     for (const [index, parameter] of (declaration?.parameters ?? []).entries()) {
       this.declareLocal(context, parameter, parameter.name, constructor.parameterTypes[index]);
     }
@@ -354,19 +378,28 @@ class Compiler extends StatementCompiler {
     const callsThis = explicitCall?.target === 'this';
     const targetClass = callsThis ? cls : (cls.superclass as ClassInfo);
     // Arguments of an explicit constructor call may not refer to the object under construction.
-    const args = (explicitCall?.args ?? []).map((arg) => this.compileValue({ ...context, isStatic: true }, arg));
+    const argSyntax = explicitCall?.args ?? [];
+    const args = argSyntax.map((arg) => this.compileValue({ ...context, isStatic: true }, arg));
     const target = this.selectMethod(
       explicitCall ?? declaration ?? (cls.declaration as ClassDeclaration),
       targetClass.constructors.filter((candidate) => candidate !== constructor || !callsThis),
       args.map((arg) => arg.type),
       `コンストラクタ ${targetClass.name}`
     );
-    const convertedArgs = args.map((arg, index) => this.convert(arg, target.parameterTypes[index]).run);
+    this.checkThrown(context, explicitCall ?? declaration ?? (cls.declaration as ClassDeclaration), target.thrownTypes);
+    const convertedArgs = args.map(
+      (arg, index) => this.convert(arg, target.parameterTypes[index], 'invocation', argSyntax[index]).run
+    );
     // An implicit super() has no call in the source, so its frame is not a call that learners trace.
     const callRow = explicitCall?.row;
     // A constructor that delegates to this(...) leaves the initializers to the constructor it calls.
     const initializers = callsThis ? [] : this.compileInitializers(context, cls, false);
     const body = declaration ? this.compileBlock(context, declaration.body, false) : undefined;
+    checkInitialization({
+      ...this.initializationOf(cls, false),
+      constructorDeclaration: declaration,
+      span: declaration ?? (cls.declaration as ClassDeclaration),
+    });
     constructor.code = {
       locals: context.locals,
       run: (frame) => {
@@ -377,6 +410,15 @@ class Compiler extends StatementCompiler {
       },
     };
   }
+}
+
+/** The field declarations and initializer blocks of one kind, in the textual order in which they run. */
+function initializingMembersOf(cls: ClassInfo, isStatic: boolean): (FieldDeclaration | InitializerBlock)[] {
+  return (cls.declaration as ClassDeclaration).members.filter(
+    (member): member is FieldDeclaration | InitializerBlock =>
+      (member.kind === 'field' && member.modifiers.isStatic === isStatic) ||
+      (member.kind === 'initializer' && member.isStatic === isStatic)
+  );
 }
 
 function accessRank(access: string): number {

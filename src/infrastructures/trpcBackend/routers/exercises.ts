@@ -8,7 +8,7 @@ import { getLearningPeriodFilter } from '@/learningPeriod';
 import { challengeMetadata } from '@/problems/challenge/metadata';
 import { instantiateRegularChallenge } from '@/problems/challenge/regular';
 import type { ExerciseDisplay } from '@/problems/fillInBlank/exerciseProblem';
-import { type FillInBlankVerdict, gradeFillInBlankCode } from '@/problems/fillInBlank/grade';
+import { type FillInBlankVerdict, gradeFillInBlankCode, GRADING_STAGE } from '@/problems/fillInBlank/grade';
 import { MAX_JAVA_PROGRAM_LENGTH } from '@/problems/fillInBlank/javaProgram';
 import { type InstantiatedProblem, instantiateProblem, isFillInBlankProblem } from '@/problems/instantiateProblem';
 import { javaChallengeDefinitions } from '@/problems/javaChallenges/definitions';
@@ -25,7 +25,6 @@ import type { RegularExerciseDisplay, RegularExerciseState } from '@/problems/re
 
 import { type ExerciseSession, exerciseSessions, exerciseSubmissions } from '../../../../db/schema';
 import { db } from '../../database';
-import { logger } from '../../pino';
 import { authorize } from '../middlewares';
 import { procedure } from '../trpc';
 
@@ -444,7 +443,8 @@ const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmiss
     if (!updated) throw new TRPCError({ code: 'CONFLICT' });
     return toRegularState(updated);
   });
-const gradeAndSave = async (
+// code-gauge-allow functionParameterCount 7 -- The function predates this change, which only makes it synchronous.
+const gradeAndSave = (
   id: number,
   userId: string,
   courseId: string,
@@ -452,11 +452,10 @@ const gradeAndSave = async (
   code: string,
   receivedAt: Date,
   format: JavaChallengeFormat
-): Promise<FillInBlankVerdict> => {
+): FillInBlankVerdict => {
   const session = ownedSession(id, userId, courseId, lectureId, format, receivedAt);
   assertNotEnded(session, receivedAt);
-  const result = await gradeFillInBlankCode(instantiateChallenge(session.problemId, session.seed, format), code);
-  if (result.status === 'ungradable') logger.warn('Failed to grade exercise %d: %s', id, result.detail);
+  const result = gradeFillInBlankCode(instantiateChallenge(session.problemId, session.seed, format), code);
   db.transaction((tx) => {
     const current = tx.select().from(exerciseSessions).where(eq(exerciseSessions.id, id)).get();
     if (!current) throw new TRPCError({ code: 'NOT_FOUND' });
@@ -468,15 +467,13 @@ const gradeAndSave = async (
         sessionId: id,
         code,
         status: result.status,
-        gradingStage: result.status === 'ungradable' ? undefined : result.stage,
+        gradingStage: GRADING_STAGE,
       })
       .run();
     if (result.status === 'correct')
       tx.update(exerciseSessions).set({ completedAt: receivedAt }).where(eq(exerciseSessions.id, id)).run();
   });
-  if (result.status === 'correct') return { status: 'correct' };
-  if (result.status === 'ungradable') return { status: 'ungradable', detail: '' };
-  return { status: 'incorrect', detail: result.detail, diagnostics: result.diagnostics };
+  return result;
 };
 
 const assertNotEnded = (session: ExerciseSession, at = new Date()): void => {

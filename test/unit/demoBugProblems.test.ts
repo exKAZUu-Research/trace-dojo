@@ -10,12 +10,9 @@ import { z } from 'zod';
 import { type ProblemSession, problemSessions, type ProblemSubmission, users } from '../../db/schema';
 import type { db as databaseClient } from '../../src/infrastructures/database';
 import type { BackendRouter } from '../../src/infrastructures/trpcBackend/routers';
-import type * as JavaExecutors from '../../src/problems/fillInBlank/javaExecutors';
 import type * as ProblemData from '../../src/problems/problemData';
-import { localJavaExecutor } from '../helpers/localJavaExecutor';
 
 const auth = vi.hoisted(() => ({ userId: 'demo-student' }));
-const execution = vi.hoisted(() => ({ unavailable: false, requests: vi.fn() }));
 vi.mock('../../src/utils/sessionOnNode', () => ({
   getSessionOnNode: async () => ({ superTokensUserId: auth.userId }),
 }));
@@ -35,25 +32,6 @@ vi.mock('@/app/utils/withAuth', () => ({
 vi.mock('../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/pageOnClient', () => ({
   ProblemPageOnClient: () => {},
 }));
-vi.mock('../../src/problems/fillInBlank/javaExecutors', async (importOriginal) => {
-  const original = await importOriginal<typeof JavaExecutors>();
-  return {
-    ...original,
-    createWandboxExecutor: () => ({
-      name: 'wandbox',
-      execute: async () => ({ kind: 'unavailable', reason: 'local transport' }),
-    }),
-    createJudgeExecutor: () => ({
-      name: 'judge',
-      execute: async (program: string, entry: string) => {
-        execution.requests(program, entry);
-        return execution.unavailable
-          ? { kind: 'unavailable', reason: 'controlled outage' }
-          : localJavaExecutor.execute(program, entry);
-      },
-    }),
-  };
-});
 
 const examples = [
   {
@@ -139,8 +117,6 @@ beforeAll(async () => {
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'], now: Date.now() });
   auth.userId = 'demo-student';
-  execution.unavailable = false;
-  execution.requests.mockClear();
   sqlite.exec(
     'DELETE FROM ExerciseSubmission; DELETE FROM ExerciseSession; DELETE FROM ProblemSubmission; DELETE FROM ProblemSession; DELETE FROM User'
   );
@@ -169,46 +145,42 @@ test('actual checking lists register both dedicated bugs without losing regular 
   );
 });
 
-test(
-  'actual checking challenge starts, grades both real Java starters and repairs, then advances to the other bug',
-  { timeout: 90_000 },
-  async () => {
-    let challenge = challengeSchema.parse(await caller.startExercise({ ...location, problemFormat: 'bugFix' }));
-    const seen = new Set<string>();
-    for (let i = 0; i < 2; i++) {
-      const example = examples.find(({ id }) => id === challenge.problemId)!;
-      expect(seen.has(example.id)).toBe(false);
-      seen.add(example.id);
-      expect(challenge).toMatchObject({ finalBoard: example.board, finalTurtles: example.turtles });
-      const wrong = await caller.submitExercise({
+test('actual checking challenge starts, grades both starters and repairs, then advances to the other bug', async () => {
+  let challenge = challengeSchema.parse(await caller.startExercise({ ...location, problemFormat: 'bugFix' }));
+  const seen = new Set<string>();
+  for (let i = 0; i < 2; i++) {
+    const example = examples.find(({ id }) => id === challenge.problemId)!;
+    expect(seen.has(example.id)).toBe(false);
+    seen.add(example.id);
+    expect(challenge).toMatchObject({ finalBoard: example.board, finalTurtles: example.turtles });
+    const wrong = await caller.submitExercise({
+      ...location,
+      problemFormat: 'bugFix',
+      sessionId: challenge.sessionId,
+      code: challenge.displayProgram,
+    });
+    assertWrong(wrong, example.defect);
+    expect(
+      await caller.submitExercise({
         ...location,
         problemFormat: 'bugFix',
         sessionId: challenge.sessionId,
-        code: challenge.displayProgram,
-      });
-      assertWrong(wrong, example.defect);
-      expect(
-        await caller.submitExercise({
-          ...location,
-          problemFormat: 'bugFix',
-          sessionId: challenge.sessionId,
-          code: example.correct,
-        })
-      ).toMatchObject({ status: 'correct' });
-      if (i === 0)
-        challenge = challengeSchema.parse(
-          await caller.nextExercise({ ...location, problemFormat: 'bugFix', sessionId: challenge.sessionId })
-        );
-    }
-    expect(seen).toEqual(new Set(examples.map(({ id }) => id)));
-    expect(sqlite.prepare('SELECT status FROM ExerciseSubmission ORDER BY id').all()).toEqual([
-      { status: 'incorrect' },
-      { status: 'correct' },
-      { status: 'incorrect' },
-      { status: 'correct' },
-    ]);
+        code: example.correct,
+      })
+    ).toMatchObject({ status: 'correct' });
+    if (i === 0)
+      challenge = challengeSchema.parse(
+        await caller.nextExercise({ ...location, problemFormat: 'bugFix', sessionId: challenge.sessionId })
+      );
   }
-);
+  expect(seen).toEqual(new Set(examples.map(({ id }) => id)));
+  expect(sqlite.prepare('SELECT status FROM ExerciseSubmission ORDER BY id').all()).toEqual([
+    { status: 'incorrect' },
+    { status: 'correct' },
+    { status: 'incorrect' },
+    { status: 'correct' },
+  ]);
+});
 
 test.each(['regular', 'fillInBlank'] as const)(
   'actual checking membership still starts %s challenges',
@@ -220,54 +192,41 @@ test.each(['regular', 'fillInBlank'] as const)(
   }
 );
 
-test.each(examples)(
-  'direct page $id resumes safely and grades through ordinary persistence using real Java',
-  { timeout: 60_000 },
-  async (example) => {
-    const props = pageSchema.parse(await openPage({ ...location, problemId: example.id })).props;
-    const id = props.initialProblemSession.id;
-    expect(props.initialProblemSession).toMatchObject({ problemType: 'bugFix', traceItemIndex: 0 });
-    expect(props.javaProblem).toMatchObject({
-      problemId: example.id,
-      finalBoard: example.board,
-      finalTurtles: example.turtles,
-    });
-    expect(props.javaProblem.displayProgram).toBe(starter(example));
-    expect(pageSchema.parse(await openPage({ ...location, problemId: example.id })).props).toEqual(props);
-    expect(execution.requests).not.toHaveBeenCalled();
-    const wrong = await caller.gradeFillInBlankAnswers({
-      sessionId: id,
+test.each(examples)('direct page $id resumes safely and grades through ordinary persistence', async (example) => {
+  const props = pageSchema.parse(await openPage({ ...location, problemId: example.id })).props;
+  const id = props.initialProblemSession.id;
+  expect(props.initialProblemSession).toMatchObject({ problemType: 'bugFix', traceItemIndex: 0 });
+  expect(props.javaProblem).toMatchObject({
+    problemId: example.id,
+    finalBoard: example.board,
+    finalTurtles: example.turtles,
+  });
+  expect(props.javaProblem.displayProgram).toBe(starter(example));
+  expect(pageSchema.parse(await openPage({ ...location, problemId: example.id })).props).toEqual(props);
+  const wrong = await caller.gradeFillInBlankAnswers({
+    sessionId: id,
+    code: props.javaProblem.displayProgram,
+    elapsedMilliseconds: 21,
+  });
+  assertWrong(wrong, example.defect);
+  const afterWrong = await stored(id);
+  expect(afterWrong?.completedAt).toBeNull();
+  expect(
+    await caller.gradeFillInBlankAnswers({ sessionId: id, code: example.correct, elapsedMilliseconds: 42 })
+  ).toEqual({ status: 'correct' });
+  const saved = await stored(id);
+  expect(saved?.completedAt).toEqual(new Date());
+  expect(saved?.problemType).toBe('bugFix');
+  expect(saved?.submissions).toEqual([
+    expect.objectContaining({
       code: props.javaProblem.displayProgram,
+      isCorrect: false,
+      gradingStage: 5,
       elapsedMilliseconds: 21,
-    });
-    assertWrong(wrong, example.defect);
-    const afterWrong = await stored(id);
-    expect(afterWrong?.completedAt).toBeNull();
-    execution.unavailable = true;
-    expect(
-      await caller.gradeFillInBlankAnswers({ sessionId: id, code: example.correct, elapsedMilliseconds: 30 })
-    ).toMatchObject({ status: 'ungradable' });
-    const afterOutage = await stored(id);
-    expect(afterOutage?.submissions).toHaveLength(1);
-    expect(afterOutage?.completedAt).toBeNull();
-    execution.unavailable = false;
-    expect(
-      await caller.gradeFillInBlankAnswers({ sessionId: id, code: example.correct, elapsedMilliseconds: 42 })
-    ).toMatchObject({ status: 'correct', stage: 4 });
-    const saved = await stored(id);
-    expect(saved?.completedAt).toEqual(new Date());
-    expect(saved?.problemType).toBe('bugFix');
-    expect(saved?.submissions).toEqual([
-      expect.objectContaining({
-        code: props.javaProblem.displayProgram,
-        isCorrect: false,
-        gradingStage: 4,
-        elapsedMilliseconds: 21,
-      }),
-      expect.objectContaining({ code: example.correct, isCorrect: true, gradingStage: 4, elapsedMilliseconds: 42 }),
-    ]);
-  }
-);
+    }),
+    expect.objectContaining({ code: example.correct, isCorrect: true, gradingStage: 5, elapsedMilliseconds: 42 }),
+  ]);
+});
 
 test('direct page rejects wrong location before insertion', async () => {
   await expect(
@@ -288,7 +247,7 @@ test.each([
   { name: 'format', patch: { problemType: 'executionResult' } },
   { name: 'course', patch: { courseId: 'missing' } },
   { name: 'lecture', patch: { lectureId: 'missing' } },
-])('ordinary grading rejects persisted wrong $name with no history or Java execution', async ({ patch }) => {
+])('ordinary grading rejects persisted wrong $name with no history', async ({ patch }) => {
   const id = await pageSession();
   db.update(problemSessions).set(patch).where(eq(problemSessions.id, id)).run();
   const before = await stored(id);
@@ -296,7 +255,6 @@ test.each([
     caller.gradeFillInBlankAnswers({ sessionId: id, code: examples[0].correct, elapsedMilliseconds: 1 })
   ).rejects.toThrow();
   expect(await stored(id)).toEqual(before);
-  expect(execution.requests).not.toHaveBeenCalled();
 });
 
 test('ordinary bug sessions permit elapsed time updates', async () => {
@@ -358,7 +316,7 @@ test.each(['executionResult', 'fillInBlank'])(
   }
 );
 
-test('challenge rejects foreign user, wrong location and wrong format without history or Java execution', async () => {
+test('challenge rejects foreign user, wrong location and wrong format without history', async () => {
   const challenge = challengeSchema.parse(await caller.startExercise({ ...location, problemFormat: 'bugFix' }));
   const input = {
     ...location,
@@ -373,7 +331,6 @@ test('challenge rejects foreign user, wrong location and wrong format without hi
   await expect(caller.submitExercise(input)).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
   expect(sqlite.prepare('SELECT * FROM ExerciseSession').all()).toEqual(before);
   expect(sqlite.prepare('SELECT * FROM ExerciseSubmission').all()).toHaveLength(0);
-  expect(execution.requests).not.toHaveBeenCalled();
 });
 
 test('foreign users cannot grade, update, or submit a bug session; their direct page creates a separate session', async () => {
@@ -396,7 +353,6 @@ test('foreign users cannot grade, update, or submit a bug session; their direct 
   ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
   expect(await stored(id)).toEqual(before);
   expect(await pageSession()).not.toBe(id);
-  expect(execution.requests).not.toHaveBeenCalled();
 });
 
 async function pageSession(): Promise<number> {

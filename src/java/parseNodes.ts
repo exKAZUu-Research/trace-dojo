@@ -13,7 +13,7 @@ export function span(node: Node): Span {
 }
 
 export function unsupported(node: Node, feature: string): never {
-  throw new CompileError([{ row: node.startPosition.row, message: `${feature}は使えません。` }]);
+  throw new CompileError([{ row: node.startPosition.row, message: `${feature}は、この採点環境では使えません。` }]);
 }
 
 export function namedChildren(node: Node): Node[] {

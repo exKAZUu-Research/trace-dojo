@@ -18,11 +18,10 @@ beforeEach(() => localStorage.clear());
 
 const source = 'class Main {\n public static void main(String[] args) {\n  missing();\n }\n}';
 const message = '変数やメソッドの名前と宣言を確認してください。';
-const originalMessage = 'cannot find symbol\nsymbol: method missing()';
 const verdict = {
   status: 'incorrect' as const,
   detail: 'Compile error.',
-  diagnostics: [{ line: 3, message, originalMessage }],
+  diagnostics: [{ line: 3, message }],
 };
 const problem = {
   displayProgram: source,
@@ -71,7 +70,6 @@ test.each(['reset', 'composition'] as const)(
     expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
     const report = screen.getByRole('region', { name: '前回提出したコードの確認結果' });
     expect(within(report).getByText(message)).toBeVisible();
-    expect(within(report).getByText(/symbol: method missing/)).toBeVisible();
     expect(within(report).getByRole('status')).toHaveTextContent(/前回提出.*もう一度提出/);
     expect(within(report).getByRole('status')).not.toHaveTextContent('編集しました');
     expect(readRenderedJavaSource(editor)).toBe(source);
@@ -121,9 +119,6 @@ test.each(
     [{ line: -1, message: 'INVALID_DIAGNOSTIC_LINE' }],
     [{ line: '3', message: 'INVALID_DIAGNOSTIC_LINE' }],
     [{ line: 3, message: 'INVALID_DIAGNOSTIC_MESSAGE'.repeat(30) }],
-    [{ line: 3, message: 'INVALID_DIAGNOSTIC_MESSAGE', originalMessage: 42 }],
-    [{ line: 3, message: 'INVALID_DIAGNOSTIC_MESSAGE', originalMessage: '' }],
-    [{ line: 3, message: 'INVALID_DIAGNOSTIC_MESSAGE', originalMessage: 'X'.repeat(241) }],
   ].map((diagnostics) => ({ diagnostics }))
 )(
   'invalid optional compiler payload falls back without rendering an invalid annotation: %j',
@@ -181,13 +176,12 @@ test('compiler diagnostic on the empty final CRLF learner line stays on that lin
   expect(grade).toHaveBeenCalledOnce();
 });
 
-test('Japanese explanation precedes the optional plain-text compiler reference in dialog and inline feedback', async () => {
+test('line-specific and whole-program explanations are listed in dialog and inline feedback', async () => {
   const user = userEvent.setup();
-  const secondary = 'cannot find symbol <img src=x onerror=alert(1)>\nsymbol: method missing()';
   const generalMessage = 'コード全体の宣言を確認してください。';
   const grade = vi.fn().mockResolvedValue({
     ...verdict,
-    diagnostics: [{ line: 3, message, originalMessage: secondary }, { message: generalMessage }],
+    diagnostics: [{ line: 3, message }, { message: generalMessage }],
   });
   render(body(grade));
   await user.click(screen.getByRole('button', { name: '提出' }));
@@ -198,24 +192,15 @@ test('Japanese explanation precedes the optional plain-text compiler reference i
   expect(items).toHaveLength(2);
   expect(items[0]).toHaveTextContent('3行目付近');
   expect(within(items[0]).getByText(message)).toBeVisible();
-  expect(within(items[0]).getByText(/参考（Java のメッセージ）/)).toBeVisible();
   expect(items[0]).not.toHaveTextContent(generalMessage);
   expect(items[1]).not.toHaveTextContent(message);
   expect(items[1]).toHaveTextContent('コード全体');
   expect(within(items[1]).getByText(generalMessage)).toBeVisible();
-  expect(within(items[1]).queryByText(/参考（Java のメッセージ）/)).not.toBeInTheDocument();
   expect(within(dialog).getByText('閉じてコードを修正し、もう一度提出してください。')).toBeVisible();
-  expect(dialog.textContent?.indexOf(message)).toBeLessThan(dialog.textContent?.indexOf(secondary) ?? -1);
-  expect(dialog.textContent).toContain(secondary);
-  expect(dialog.querySelector('img')).not.toBeInTheDocument();
   await user.keyboard('{Escape}');
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   const region = screen.getByRole('region', { name: '提出したコードの確認結果' });
   expect(within(region).getByText(message)).toBeVisible();
-  expect(within(region).getByText(/参考（Java のメッセージ）/)).toBeVisible();
-  expect(region.textContent?.indexOf(message)).toBeLessThan(region.textContent?.indexOf(secondary) ?? -1);
-  expect(region.textContent).toContain(secondary);
-  expect(region.querySelector('img')).not.toBeInTheDocument();
   expect(within(region).getAllByRole('listitem')).toHaveLength(2);
 });
 
@@ -291,7 +276,6 @@ test('a new keyed session discards its predecessor’s visible compiler report',
   expect(screen.getByRole('region', { name: '提出したコードの確認結果' })).toHaveTextContent(message);
   rendered.rerender(body(grade, 'next'));
   expect(screen.queryByText(message)).not.toBeInTheDocument();
-  expect(screen.queryByText(/symbol: method missing/)).not.toBeInTheDocument();
   expect(screen.queryByRole('region', { name: /提出したコードの確認結果/ })).not.toBeInTheDocument();
   expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
   expect(grade).toHaveBeenCalledOnce();

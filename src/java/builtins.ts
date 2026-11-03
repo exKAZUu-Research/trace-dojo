@@ -96,26 +96,45 @@ function createRegistry(): Registry {
 function defineObject(objectClass: ClassInfo, stringType: JavaType): void {
   addMethod(objectClass, 'equals', [objectClass.type], BOOLEAN, false, (_, receiver, [other]) => receiver === other);
   addMethod(objectClass, 'hashCode', [], INT, false, (_, receiver) => identityOf(receiver));
-  addMethod(objectClass, 'toString', [], stringType, false, (_, receiver) => {
+  addMethod(objectClass, 'toString', [], stringType, false, (frame, receiver) => {
     const name = receiver instanceof JavaObject ? receiver.cls.name : 'Object';
-    return new JavaString(`${name}@${identityOf(receiver).toString(16)}`);
+    return newString(frame, `${name}@${identityOf(receiver).toString(16)}`);
   });
   addConstructor(objectClass, [], () => {});
 }
 
+const causeTakers = new Set([
+  'Throwable',
+  'Exception',
+  'RuntimeException',
+  'Error',
+  'IllegalArgumentException',
+  'IllegalStateException',
+  'UnsupportedOperationException',
+]);
+
 function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType: JavaType): ClassInfo {
   const defineThrowable = (name: string, superclass: ClassInfo): ClassInfo => {
     const cls = registry.define(name, superclass);
-    addMessageConstructors(cls, stringType);
+    // Constructors are not inherited, and only these classes declare the ones taking a cause.
+    addMessageConstructors(cls, stringType, causeTakers.has(name) ? throwableClass.type : undefined);
     return cls;
   };
   const throwableClass = registry.define('Throwable', objectClass);
-  addMessageConstructors(throwableClass, stringType);
+  addMessageConstructors(throwableClass, stringType, throwableClass.type);
   addMethod(throwableClass, 'getMessage', [], stringType, false, (_, receiver) => (receiver as JavaObject).message);
-  addMethod(throwableClass, 'toString', [], stringType, false, (_, receiver) => {
+  addMethod(
+    throwableClass,
+    'getCause',
+    [],
+    throwableClass.type,
+    false,
+    (_, receiver) => (receiver as JavaObject).cause
+  );
+  addMethod(throwableClass, 'toString', [], stringType, false, (frame, receiver) => {
     const exception = receiver as JavaObject;
     const name = registry.qualifiedNames.get(exception.cls) ?? exception.cls.name;
-    return new JavaString(exception.message ? `${name}: ${exception.message.value}` : name);
+    return newString(frame, exception.message ? `${name}: ${exception.message.value}` : name);
   });
   const exceptionClass = defineThrowable('Exception', throwableClass);
   const runtimeExceptionClass = defineThrowable('RuntimeException', exceptionClass);
@@ -141,10 +160,22 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
   return throwableClass;
 }
 
-function addMessageConstructors(cls: ClassInfo, stringType: JavaType): void {
+function addMessageConstructors(cls: ClassInfo, stringType: JavaType, throwableType: JavaType | undefined): void {
   addConstructor(cls, [], () => {});
   addConstructor(cls, [stringType], (_, receiver, [message]) => {
     (receiver as JavaObject).message = message as JavaString | undefined;
+  });
+  if (!throwableType) return;
+  addConstructor(cls, [throwableType], (frame, receiver, [cause]) => {
+    const exception = receiver as JavaObject;
+    exception.cause = cause as JavaObject | undefined;
+    // Java uses the cause's description as the message.
+    if (exception.cause) exception.message = frame.runtime.invokeToString(frame, exception.cause);
+  });
+  addConstructor(cls, [stringType, throwableType], (_, receiver, [message, cause]) => {
+    const exception = receiver as JavaObject;
+    exception.message = message as JavaString | undefined;
+    exception.cause = cause as JavaObject | undefined;
   });
 }
 
@@ -160,6 +191,8 @@ function defineMath(mathClass: ClassInfo): void {
     addMethod(mathClass, name, [DOUBLE], DOUBLE, true, (_, __, [value]) => Math[name](value as number));
   }
   addMethod(mathClass, 'pow', [DOUBLE, DOUBLE], DOUBLE, true, (_, __, [a, b]) => (a as number) ** (b as number));
+  addConstant(mathClass, 'PI', DOUBLE, Math.PI);
+  addConstant(mathClass, 'E', DOUBLE, Math.E);
 }
 
 function defineInteger(integerClass: ClassInfo, stringType: JavaType): void {
@@ -167,6 +200,7 @@ function defineInteger(integerClass: ClassInfo, stringType: JavaType): void {
   addConstant(integerClass, 'MIN_VALUE', INT, -2_147_483_648);
   addMethod(integerClass, 'parseInt', [stringType], INT, true, (frame, _, [text]) => {
     const value = (text as JavaString | undefined)?.value;
+    frame.runtime.scanString(value?.length ?? 0);
     if (value === undefined || !/^[+-]?\d+$/.test(value) || Math.abs(Number(value)) > 2_147_483_648) {
       throwBuiltin(
         frame,
@@ -178,13 +212,8 @@ function defineInteger(integerClass: ClassInfo, stringType: JavaType): void {
     if (parsed > 2_147_483_647) throwBuiltin(frame, 'NumberFormatException', `For input string: "${value}"`);
     return parsed;
   });
-  addMethod(
-    integerClass,
-    'toString',
-    [INT],
-    stringType,
-    true,
-    (_, __, [value]) => new JavaString(String(value as number))
+  addMethod(integerClass, 'toString', [INT], stringType, true, (frame, __, [value]) =>
+    newString(frame, String(value as number))
   );
 }
 
@@ -212,6 +241,7 @@ function defineString(stringClass: ClassInfo, objectType: JavaType): void {
   defineStringTransforms(stringClass, objectType);
 }
 
+// code-gauge-allow functionNcss 47 -- One registration per String method, each charging the characters it reads.
 function defineStringQueries(stringClass: ClassInfo, objectType: JavaType): void {
   const stringType = stringClass.type;
   addMethod(stringClass, 'length', [], INT, false, (_, receiver) => text(receiver).length);
@@ -220,24 +250,18 @@ function defineStringQueries(stringClass: ClassInfo, objectType: JavaType): void
     checkIndex(frame, index as number, text(receiver).length);
     return charCodeOf(text(receiver), index as number);
   });
-  addMethod(
-    stringClass,
-    'equals',
-    [objectType],
-    BOOLEAN,
-    false,
-    (_, receiver, [other]) => other instanceof JavaString && other.value === text(receiver)
-  );
-  addMethod(
-    stringClass,
-    'equalsIgnoreCase',
-    [stringType],
-    BOOLEAN,
-    false,
-    (_, receiver, [other]) => other instanceof JavaString && other.value.toLowerCase() === text(receiver).toLowerCase()
-  );
-  addMethod(stringClass, 'hashCode', [], INT, false, (_, receiver) => {
+  addMethod(stringClass, 'equals', [objectType], BOOLEAN, false, (frame, receiver, [other]) => {
+    frame.runtime.scanString(text(receiver).length);
+    return other instanceof JavaString && other.value === text(receiver);
+  });
+  addMethod(stringClass, 'equalsIgnoreCase', [stringType], BOOLEAN, false, (frame, receiver, [other]) => {
+    if (!(other instanceof JavaString)) return false;
+    frame.runtime.scanString(text(receiver).length + other.value.length);
+    return other.value.toLowerCase() === text(receiver).toLowerCase();
+  });
+  addMethod(stringClass, 'hashCode', [], INT, false, (frame, receiver) => {
     const value = text(receiver);
+    frame.runtime.scanString(value.length);
     let hash = 0;
     for (let index = 0; index < value.length; index++) hash = toInt32(Math.imul(hash, 31) + charCodeOf(value, index));
     return hash;
@@ -246,71 +270,71 @@ function defineStringQueries(stringClass: ClassInfo, objectType: JavaType): void
   addMethod(stringClass, 'substring', [INT], stringType, false, (frame, receiver, [begin]) => {
     const value = text(receiver);
     checkRange(frame, begin as number, value.length, value.length);
-    return new JavaString(value.slice(begin as number));
+    return newString(frame, value.slice(begin as number));
   });
   addMethod(stringClass, 'substring', [INT, INT], stringType, false, (frame, receiver, [begin, end]) => {
     const value = text(receiver);
     checkRange(frame, begin as number, end as number, value.length);
-    return new JavaString(value.slice(begin as number, end as number));
+    return newString(frame, value.slice(begin as number, end as number));
   });
-  addMethod(stringClass, 'indexOf', [stringType], INT, false, (frame, receiver, [other]) =>
-    text(receiver).indexOf(requireString(frame, other))
-  );
-  addMethod(stringClass, 'indexOf', [INT], INT, false, (_, receiver, [code]) =>
-    text(receiver).indexOf(String.fromCodePoint(code as number))
-  );
+  addMethod(stringClass, 'indexOf', [stringType], INT, false, (frame, receiver, [other]) => {
+    const pattern = requireString(frame, other);
+    // A search may compare the pattern at every position of the text.
+    frame.runtime.scanString(text(receiver).length * Math.max(pattern.length, 1));
+    return text(receiver).indexOf(pattern);
+  });
+  addMethod(stringClass, 'indexOf', [INT], INT, false, (frame, receiver, [code]) => {
+    frame.runtime.scanString(text(receiver).length);
+    const codePoint = code as number;
+    if (codePoint < 0 || codePoint > 0x10_ff_ff) return -1;
+    return text(receiver).indexOf(String.fromCodePoint(codePoint));
+  });
   for (const name of ['contains', 'startsWith', 'endsWith'] as const) {
     const method = name === 'contains' ? 'includes' : name;
-    addMethod(stringClass, name, [stringType], BOOLEAN, false, (frame, receiver, [other]) =>
-      text(receiver)[method](requireString(frame, other))
-    );
+    addMethod(stringClass, name, [stringType], BOOLEAN, false, (frame, receiver, [other]) => {
+      const pattern = requireString(frame, other);
+      frame.runtime.scanString(
+        name === 'contains' ? text(receiver).length * Math.max(pattern.length, 1) : pattern.length
+      );
+      return text(receiver)[method](pattern);
+    });
   }
 }
 
+// code-gauge-allow functionNcss 38 -- One registration per String method, each charging the characters it reads.
 function defineStringTransforms(stringClass: ClassInfo, objectType: JavaType): void {
   const stringType = stringClass.type;
-  addMethod(
-    stringClass,
-    'toUpperCase',
-    [],
-    stringType,
-    false,
-    (_, receiver) => new JavaString(text(receiver).toUpperCase())
+  addMethod(stringClass, 'toUpperCase', [], stringType, false, (frame, receiver) =>
+    newString(frame, text(receiver).toUpperCase())
   );
-  addMethod(
-    stringClass,
-    'toLowerCase',
-    [],
-    stringType,
-    false,
-    (_, receiver) => new JavaString(text(receiver).toLowerCase())
+  addMethod(stringClass, 'toLowerCase', [], stringType, false, (frame, receiver) =>
+    newString(frame, text(receiver).toLowerCase())
   );
-  addMethod(
-    stringClass,
-    'trim',
-    [],
-    stringType,
-    false,
-    (_, receiver) =>
-      // oxlint-disable-next-line no-control-regex -- String.trim removes every code unit up to U+0020.
-      new JavaString(text(receiver).replaceAll(/^[\u0000- ]+|[\u0000- ]+$/g, ''))
-  );
-  addMethod(
-    stringClass,
-    'concat',
-    [stringType],
-    stringType,
-    false,
-    (frame, receiver, [other]) => new JavaString(text(receiver) + requireString(frame, other))
-  );
+  addMethod(stringClass, 'trim', [], stringType, false, (frame, receiver) => {
+    const value = text(receiver);
+    frame.runtime.scanString(value.length);
+    // String.trim removes every code unit up to U+0020 from both ends.
+    let start = 0;
+    let end = value.length;
+    while (start < end && charCodeOf(value, start) <= 0x20) start++;
+    while (end > start && charCodeOf(value, end - 1) <= 0x20) end--;
+    return newString(frame, value.slice(start, end));
+  });
+  addMethod(stringClass, 'concat', [stringType], stringType, false, (frame, receiver, [other]) => {
+    const left = text(receiver);
+    const right = requireString(frame, other);
+    frame.runtime.allocateString(frame, left.length + right.length);
+    return new JavaString(left + right);
+  });
   addMethod(stringClass, 'repeat', [INT], stringType, false, (frame, receiver, [count]) => {
     if ((count as number) < 0) throwBuiltin(frame, 'IllegalArgumentException', `count is negative: ${count as number}`);
-    frame.runtime.spend(Math.ceil((text(receiver).length * (count as number)) / 64));
+    frame.runtime.allocateString(frame, text(receiver).length * (count as number));
     return new JavaString(text(receiver).repeat(count as number));
   });
   addMethod(stringClass, 'compareTo', [stringType], INT, false, (frame, receiver, [other]) => {
     const left = text(receiver);
     const right = requireString(frame, other);
+    frame.runtime.scanString(Math.min(left.length, right.length));
     for (let index = 0; index < Math.min(left.length, right.length); index++) {
       if (left[index] !== right[index]) return charCodeOf(left, index) - charCodeOf(right, index);
     }
@@ -325,15 +349,15 @@ function defineStringTransforms(stringClass: ClassInfo, objectType: JavaType): v
     );
   });
   for (const type of [INT, DOUBLE, CHAR, BOOLEAN, objectType]) {
-    addMethod(
-      stringClass,
-      'valueOf',
-      [type],
-      stringType,
-      true,
-      (frame, _, [value]) => new JavaString(stringify(frame, value, type))
+    addMethod(stringClass, 'valueOf', [type], stringType, true, (frame, _, [value]) =>
+      newString(frame, stringify(frame, value, type))
     );
   }
+}
+
+function newString(frame: Frame, value: string): JavaString {
+  frame.runtime.allocateString(frame, value.length);
+  return new JavaString(value);
 }
 
 function text(value: Value): string {

@@ -510,11 +510,10 @@ test('local hints keep uncertain recovery generic without flagging valid literal
 test('compiler feedback becomes historical on edit and undo never restores compiler annotations', async () => {
   infrastructure.problemId = 'fillInBlank2';
   const message = 'この呼び出し方に合う名前が見つかりません。';
-  const originalMessage = 'cannot find symbol\nsymbol: method missing()';
   infrastructure.grade.mockResolvedValue({
     status: 'incorrect',
     detail: 'Compile error.',
-    diagnostics: [{ line: 3, message, originalMessage }],
+    diagnostics: [{ line: 3, message }],
   });
   const user = userEvent.setup();
   renderPage('fillInBlank');
@@ -526,14 +525,12 @@ test('compiler feedback becomes historical on edit and undo never restores compi
   await user.keyboard('{Escape}');
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   expect(screen.getByText(message, { exact: true, normalizer: (text) => text })).toBeVisible();
-  expect(screen.getByText(/symbol: method missing/)).toBeVisible();
   await waitFor(() => expect(document.querySelector('.cm-lintRange-error')).toBeInTheDocument());
   await user.click(editor);
   await user.keyboard('{Control>}{End}{/Control} ');
   expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
   const report = screen.getByRole('region', { name: '前回提出したコードの確認結果' });
   expect(within(report).getByText(message)).toBeVisible();
-  expect(within(report).getByText(/symbol: method missing/)).toBeVisible();
   const notice = within(report).getByRole('status');
   expect(notice).toHaveTextContent(/前回提出.*もう一度提出/);
   expect(notice).not.toHaveAttribute('aria-live', 'assertive');

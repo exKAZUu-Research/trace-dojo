@@ -54,6 +54,9 @@ export type Compiled = CompiledValue | { kind: 'class'; cls: ClassInfo };
 
 export interface Reference {
   type: JavaType;
+  /** The field this reference names, whose finality decides whether it may be assigned. */
+  field?: FieldInfo;
+  isArrayLength?: boolean;
   /** Evaluates the receiver and index once, returning accessors bound to them. */
   bind: (frame: Frame) => { get: () => Value; set: (value: Value) => void };
 }
@@ -76,8 +79,26 @@ export interface MethodContext {
   labels: string[];
   /** Labels written directly before the statement being compiled. */
   loopLabels: string[];
+  /** Labels written directly before the enclosing loops, which `continue` may name. */
+  continueLabels: string[];
   loopDepth: number;
   switchDepth: number;
+  /** The objects or class whose fields this code initializes, where their blank finals may be assigned. */
+  initializes: 'instance' | 'static' | undefined;
+  /** Whether this code is an initializer block, where `return` is not allowed. */
+  isInitializerBlock: boolean;
+  /** The exceptions the method declares in its `throws` clause. */
+  thrownTypes: readonly ClassInfo[];
+  /** The try statements whose try block encloses the code being compiled, innermost last. */
+  tries: EnclosingTry[];
+  /** The checked exceptions that rethrowing each catch parameter throws: those its try block throws. */
+  rethrownTypes: Map<number, ClassInfo[]>;
+}
+
+export interface EnclosingTry {
+  caughtTypes: ClassInfo[];
+  /** The checked exceptions thrown in the try block that reach its catch clauses. */
+  thrownTypes: ClassInfo[];
 }
 
 /** Name resolution, conversions, and overload resolution shared by the expression and statement compilers. */
@@ -111,7 +132,7 @@ export abstract class CompilerBase {
       }
       case 'named': {
         const cls = this.classes.get(syntax.name) ?? this.builtins.classes.get(syntax.name);
-        if (!cls) this.error(syntax, `型 ${syntax.name} が見つかりません。`);
+        if (!cls) this.error(syntax, `この採点環境には、型 ${syntax.name} がありません。`);
         return cls.type;
       }
       case 'var': {
@@ -134,7 +155,12 @@ export abstract class CompilerBase {
     return result;
   }
 
-  protected newContext(cls: ClassInfo, isStatic: boolean, returnType: JavaType): MethodContext {
+  protected newContext(
+    cls: ClassInfo,
+    isStatic: boolean,
+    returnType: JavaType,
+    thrownTypes: readonly ClassInfo[] = []
+  ): MethodContext {
     return {
       constants: new Map(),
       cls,
@@ -144,9 +170,32 @@ export abstract class CompilerBase {
       scopes: [{ names: new Map(), slots: [] }],
       labels: [],
       loopLabels: [],
+      continueLabels: [],
       loopDepth: 0,
       switchDepth: 0,
+      initializes: undefined,
+      isInitializerBlock: false,
+      thrownTypes,
+      tries: [],
+      rethrownTypes: new Map(),
     };
+  }
+
+  /** Rejects a checked exception that no enclosing catch clause catches and the method does not declare. */
+  protected checkThrown(context: MethodContext, span: Span, thrown: readonly ClassInfo[]): void {
+    for (const cls of thrown) {
+      if (!this.isChecked(cls)) continue;
+      const catching = context.tries.findLastIndex((enclosing) =>
+        enclosing.caughtTypes.some((caught) => isSubclass(cls, caught))
+      );
+      for (const enclosing of context.tries.slice(Math.max(catching, 0))) enclosing.thrownTypes.push(cls);
+      if (catching !== -1 || context.thrownTypes.some((declared) => isSubclass(cls, declared))) continue;
+      this.error(span, `例外 ${cls.name} は、catch するか、throws で宣言する必要があります。`);
+    }
+  }
+
+  protected isChecked(cls: ClassInfo): boolean {
+    return !['RuntimeException', 'Error'].some((name) => isSubclass(cls, this.builtins.classes.get(name) as ClassInfo));
   }
 
   protected declareLocal(context: MethodContext, span: Span, name: string, type: JavaType): number {
@@ -172,12 +221,14 @@ export abstract class CompilerBase {
   /**
    * Converts a value for assignment (which also narrows int constants to char) or for method invocation, failing
    * compilation when Java forbids the conversion.
+   *
+   * @param span The expression converted, where a failed conversion is reported.
    */
   protected convert(
     value: CompiledValue,
     to: JavaType,
-    context: 'assignment' | 'invocation' = 'invocation',
-    span?: Span
+    context: 'assignment' | 'invocation',
+    span: Span
   ): CompiledValue {
     if (isWidening(value.type, to, this.builtins.objectClass)) {
       return { kind: 'value', type: to, run: value.run, constant: value.constant };
@@ -192,9 +243,7 @@ export abstract class CompilerBase {
     ) {
       return { kind: 'value', type: CHAR, run: value.run, constant: value.constant };
     }
-    const message = `${typeName(value.type)} 型の値を ${typeName(to)} 型に変換できません。`;
-    if (span) this.error(span, message);
-    throw new CompileError([{ row: -1, message }]);
+    return this.error(span, `${typeName(value.type)} 型の値を ${typeName(to)} 型に変換できません。`);
   }
 
   /**
@@ -219,7 +268,8 @@ export abstract class CompilerBase {
         const compiled = this.convert(
           this.compileValue(this.newContext(field.owner, true, VOID), initializer),
           field.type,
-          'assignment'
+          'assignment',
+          initializer
         );
         constant = compiled.constant;
       } catch {
@@ -297,7 +347,8 @@ export abstract class CompilerBase {
     );
     if (applicable.length === 0) {
       const given = argTypes.map((type) => typeName(type)).join(', ');
-      return this.error(span, `${what} に (${given}) を渡して呼び出すことはできません。`);
+      // This environment implements only part of the standard library, so the message states only what it allows.
+      return this.error(span, `この採点環境では、${what} に (${given}) を渡して呼び出すことはできません。`);
     }
     const mostSpecific = applicable.filter((method) =>
       applicable.every(

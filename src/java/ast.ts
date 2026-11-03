@@ -203,6 +203,7 @@ export interface TryStatement extends Span {
 export interface CatchClause extends Span {
   types: TypeSyntax[];
   name: string;
+  isFinal: boolean;
   body: Block;
 }
 

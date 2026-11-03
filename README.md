@@ -31,20 +31,19 @@ An educational web app for training program tracing skills.
    mise install
    ```
 
-1. Create your own [age](https://github.com/FiloSottile/age) identity and ask a maintainer to add its public key
-   to the recipients in `fnox.toml`
+1. To work with the `staging` or `production` profile of `fnox.toml` (e.g., to deploy), create your own
+   [age](https://github.com/FiloSottile/age) identity and ask a maintainer to add its public key to the recipients
 
    ```
    mkdir -p ~/.config/fnox && age-keygen -o ~/.config/fnox/age.txt
    ```
 
-   Every command reads its environment from `fnox.toml`, whose `development` profile holds the encrypted key of
-   the judge service, so without an identity of your own no environment variable resolves at all. Keep it to
-   yourself: each identity decrypts every profile, and a shared one cannot be revoked for one person. A recipient
-   on the list reads nothing until a maintainer rewrites each profile's stored values for it:
+   Those profiles hold encrypted values, which resolve only with an identity on the list. Keep it to yourself: each
+   identity decrypts every profile, and a shared one cannot be revoked for one person. A recipient on the list reads
+   nothing until a maintainer rewrites each profile's stored values for it:
 
    ```
-   for profile in development test staging production; do fnox reencrypt --provider age --profile $profile; done
+   for profile in staging production; do fnox reencrypt --provider age --profile $profile; done
    ```
 
 1. Install dependencies

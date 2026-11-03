@@ -1,10 +1,12 @@
-import type { BinaryOperator, Expression, Statement } from './ast';
+import type { Expression, Statement } from './ast';
 
 /** A conservative version of Java's reachability rule for a method body's end. */
 export function canCompleteNormally(statement: Statement): boolean {
   switch (statement.kind) {
     case 'return':
-    case 'throw': {
+    case 'throw':
+    case 'break':
+    case 'continue': {
       return false;
     }
     case 'block': {
@@ -32,7 +34,12 @@ export function canCompleteNormally(statement: Statement): boolean {
       return switchCanCompleteNormally(statement);
     }
     case 'labeled': {
-      return canCompleteNormally(statement.body) || containsBreak(statement.body, statement.label);
+      const { body, label } = statement;
+      const bodyCompletes =
+        body.kind === 'while' || body.kind === 'do' || body.kind === 'for'
+          ? loopCanCompleteNormally(body, label)
+          : canCompleteNormally(body);
+      return bodyCompletes || containsJump(body, 'break', label);
     }
     default: {
       return true;
@@ -40,17 +47,28 @@ export function canCompleteNormally(statement: Statement): boolean {
   }
 }
 
-function loopCanCompleteNormally(statement: Extract<Statement, { kind: 'while' | 'do' | 'for' }>): boolean {
-  if (containsBreak(statement.body)) return true;
+/** @param label The label written before the loop, which its `continue` statements may name. */
+function loopCanCompleteNormally(
+  statement: Extract<Statement, { kind: 'while' | 'do' | 'for' }>,
+  label?: string
+): boolean {
+  if (containsJump(statement.body, 'break')) return true;
   // A for statement without a condition loops as if its condition were true.
-  const runsForever = statement.condition === undefined || constantBoolean(statement.condition) === true;
-  return !runsForever && (statement.kind !== 'do' || canCompleteNormally(statement.body));
+  const runsForever = statement.condition === undefined || booleanConstants.get(statement.condition) === true;
+  if (runsForever) return false;
+  if (statement.kind !== 'do') return true;
+  // A do statement reaches its condition after its body or through a continue.
+  return (
+    canCompleteNormally(statement.body) ||
+    containsJump(statement.body, 'continue') ||
+    (label !== undefined && containsJump(statement.body, 'continue', label))
+  );
 }
 
 function switchCanCompleteNormally(statement: Extract<Statement, { kind: 'switch' }>): boolean {
   const hasDefault = statement.groups.some((group) => group.labels.includes(undefined));
   if (!hasDefault) return true;
-  if (statement.groups.some((group) => group.statements.some((child) => containsBreak(child)))) return true;
+  if (statement.groups.some((group) => group.statements.some((child) => containsJump(child, 'break')))) return true;
   if (statement.isArrowForm) {
     return statement.groups.some((group) => group.statements.every((child) => canCompleteNormally(child)));
   }
@@ -58,86 +76,48 @@ function switchCanCompleteNormally(statement: Extract<Statement, { kind: 'switch
   return !last || last.statements.every((child) => canCompleteNormally(child));
 }
 
-/** Evaluates boolean constant expressions built from literals, which decide reachability in Java. */
-function constantBoolean(expression: Expression): boolean | undefined {
-  switch (expression.kind) {
-    case 'literal': {
-      return expression.literal.type === 'boolean' ? expression.literal.value : undefined;
-    }
-    case 'unary': {
-      const operand = constantBoolean(expression.operand);
-      return expression.operator === '!' && operand !== undefined ? !operand : undefined;
-    }
-    case 'binary': {
-      return constantBinary(expression);
-    }
-    default: {
-      return;
-    }
-  }
-}
+/** The values of the boolean constant expressions compiled so far, which decide reachability in Java. */
+export const booleanConstants = new WeakMap<Expression, boolean>();
 
-const numericComparisons: Partial<Record<BinaryOperator, (left: number, right: number) => boolean>> = {
-  '<': (left, right) => left < right,
-  '>': (left, right) => left > right,
-  '<=': (left, right) => left <= right,
-  '>=': (left, right) => left >= right,
-  '==': (left, right) => left === right,
-  '!=': (left, right) => left !== right,
-};
-
-function constantBinary(expression: Extract<Expression, { kind: 'binary' }>): boolean | undefined {
-  if (expression.operator === '&&' || expression.operator === '||') {
-    const left = constantBoolean(expression.left);
-    const right = constantBoolean(expression.right);
-    if (left === undefined || right === undefined) return;
-    return expression.operator === '&&' ? left && right : left || right;
-  }
-  const compare = numericComparisons[expression.operator];
-  const left = constantNumber(expression.left);
-  const right = constantNumber(expression.right);
-  if (!compare || left === undefined || right === undefined) return;
-  return compare(left, right);
-}
-
-function constantNumber(expression: Expression): number | undefined {
-  if (expression.kind !== 'literal') return;
-  const { literal } = expression;
-  return literal.type === 'int' || literal.type === 'double' || literal.type === 'char' ? literal.value : undefined;
-}
-
-/** Whether `statement` contains a `break` that exits it (unlabeled at loop level, or to `label`). */
-function containsBreak(statement: Statement, label?: string, depth = 0): boolean {
+/**
+ * Whether `statement` contains a `break` that exits it or a `continue` that continues it: unlabeled outside nested
+ * loops (and, for `break`, nested switch statements), or naming `label`.
+ */
+function containsJump(statement: Statement, kind: 'break' | 'continue', label?: string, depth = 0): boolean {
+  const inside = (child: Statement, childDepth = depth): boolean => containsJump(child, kind, label, childDepth);
   switch (statement.kind) {
-    case 'break': {
+    case 'break':
+    case 'continue': {
+      if (statement.kind !== kind) return false;
       return label === undefined ? statement.label === undefined && depth === 0 : statement.label === label;
     }
     case 'block': {
-      return statement.statements.some((child) => containsBreak(child, label, depth));
+      return statement.statements.some((child) => inside(child));
     }
     case 'if': {
-      return (
-        containsBreak(statement.consequence, label, depth) ||
-        (!!statement.alternative && containsBreak(statement.alternative, label, depth))
-      );
+      return inside(statement.consequence) || (!!statement.alternative && inside(statement.alternative));
     }
     case 'while':
     case 'do':
     case 'for':
     case 'forEach': {
-      return containsBreak(statement.body, label, depth + 1);
+      return inside(statement.body, depth + 1);
     }
     case 'switch': {
-      return statement.groups.some((group) => group.statements.some((child) => containsBreak(child, label, depth + 1)));
+      // A continue in a switch statement continues the enclosing loop.
+      const switchDepth = kind === 'break' ? depth + 1 : depth;
+      return statement.groups.some((group) => group.statements.some((child) => inside(child, switchDepth)));
     }
     case 'labeled': {
-      return containsBreak(statement.body, label, depth);
+      return inside(statement.body);
     }
     case 'try': {
+      const { finallyBlock } = statement;
+      // A finally block that cannot complete normally stops the jumps of the try and catch blocks.
+      const jumpsLeave = !finallyBlock || canCompleteNormally(finallyBlock);
       return (
-        containsBreak(statement.body, label, depth) ||
-        statement.catches.some((clause) => containsBreak(clause.body, label, depth)) ||
-        (!!statement.finallyBlock && containsBreak(statement.finallyBlock, label, depth))
+        (jumpsLeave && (inside(statement.body) || statement.catches.some((clause) => inside(clause.body)))) ||
+        (!!finallyBlock && inside(finallyBlock))
       );
     }
     default: {

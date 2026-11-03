@@ -543,12 +543,11 @@ test('challenge Reset restores the exact starter without submitting or changing 
 
 test('challenge compiler feedback reaches the editor and survives result dismissal', async () => {
   const message = '代入する値の種類を確認してください。';
-  const originalMessage = 'incompatible types: boolean cannot be converted to int';
   transport.start.mockResolvedValue(blankDisplay);
   transport.submitBlank.mockResolvedValue({
     status: 'incorrect',
     detail: 'Compile error.',
-    diagnostics: [{ line: 2, message, originalMessage }],
+    diagnostics: [{ line: 2, message }],
   });
   const user = userEvent.setup();
   renderPage('fillInBlank');
@@ -560,13 +559,11 @@ test('challenge compiler feedback reaches the editor and survives result dismiss
   await user.keyboard('{Escape}');
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   expect(screen.getByText(message)).toBeVisible();
-  expect(screen.getByText(originalMessage, { exact: false })).toBeVisible();
   await waitFor(() => expect(document.querySelector('.cm-lintRange-error')).toBeInTheDocument());
   await replaceJavaSource(editor, 'class Main {\n public static void main(String[] args) { int x = 1; }\n}');
   expect(document.querySelector('.cm-lintRange-error')).not.toBeInTheDocument();
   const report = screen.getByRole('region', { name: '前回提出したコードの確認結果' });
   expect(report).toHaveTextContent(message);
-  expect(report).toHaveTextContent(originalMessage);
   expect(within(report).getByRole('status')).toHaveTextContent(/もう一度提出/);
   expect(transport.submitBlank).toHaveBeenCalledTimes(1);
 });
@@ -711,7 +708,7 @@ test('bug repair selection supports compiler feedback, full-source repair, compl
     .mockResolvedValueOnce({
       status: 'incorrect',
       detail: 'Compile error.',
-      diagnostics: [{ line: 4, message, originalMessage: 'int cannot be converted to boolean' }],
+      diagnostics: [{ line: 4, message }],
     })
     .mockResolvedValueOnce({ status: 'correct' });
   transport.next.mockResolvedValue({ ...syntaxBugDisplay, sessionId: 24 });

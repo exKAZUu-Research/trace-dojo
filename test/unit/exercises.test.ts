@@ -12,39 +12,13 @@ import type { db as databaseClient } from '../../src/infrastructures/database';
 import type { BackendRouter } from '../../src/infrastructures/trpcBackend/routers';
 import type { ChallengeMetadata } from '../../src/problems/challenge/metadata';
 import { fillBlanks } from '../../src/problems/fillInBlank/blanks';
-import type * as JavaExecutors from '../../src/problems/fillInBlank/javaExecutors';
 import type { instantiateProblem as instantiateProblemType } from '../../src/problems/instantiateProblem';
-import { diagnosticVerdictSchema, withCompilerTransport } from '../helpers/compilerTransport';
 
-const executorGate = vi.hoisted(() => ({ wait: undefined as (() => Promise<void>) | undefined }));
 const auth = vi.hoisted(() => ({ userId: 'student' }));
-const execution = vi.hoisted(() => ({
-  unavailable: false,
-  requests: vi.fn(),
-  run: undefined as undefined | JavaExecutors.JavaExecutor['execute'],
-}));
 vi.mock('../../src/utils/sessionOnNode', () => ({
   getSessionOnNode: async () => ({ superTokensUserId: auth.userId }),
 }));
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
-vi.mock('../../src/problems/fillInBlank/javaExecutors', async (importOriginal) => {
-  const original = await importOriginal<typeof JavaExecutors>();
-  return {
-    ...original,
-    createWandboxExecutor: () => unavailable('wandbox'),
-    createJudgeExecutor: () => ({
-      name: 'judge',
-      execute: async (program: string, entry: string) => {
-        await executorGate.wait?.();
-        execution.requests(program, entry);
-        if (execution.run) return execution.run(program, entry);
-        if (execution.unavailable) return { kind: 'unavailable', reason: 'controlled outage' };
-        return original.createJudgeExecutor().execute(program, entry);
-      },
-    }),
-  };
-});
-
 type ChallengeMap = Record<string, string[][]>;
 interface Location {
   courseId: string;
@@ -103,10 +77,6 @@ beforeEach(() => {
   // Learning-period visibility is evaluated per request, so a test must not straddle a period boundary.
   vi.useFakeTimers({ toFake: ['Date'], now: Date.now() });
   auth.userId = 'student';
-  execution.unavailable = false;
-  execution.run = undefined;
-  execution.requests.mockClear();
-  executorGate.wait = undefined;
   sqlite.exec(
     'DELETE FROM ExerciseSubmission; DELETE FROM ExerciseSession; DELETE FROM ProblemSubmission; DELETE FROM ProblemSession; DELETE FROM User'
   );
@@ -206,100 +176,93 @@ test('uses explicit challenge membership and distinguishes empty and invalid con
   expect(await start()).toMatchObject({ problemId: 'fillInBlank2', completed: false });
 });
 
-test(
-  'normal and challenge grade the full source by drawing and preserve it verbatim',
-  { timeout: 180_000 },
-  async () => {
-    challengeMap.test = [['fillInBlank3']];
-    const exercise = await start();
-    const seed = one(z.object({ seed: z.string() }), 'SELECT seed FROM ExerciseSession').seed;
-    const normal = db
-      .insert(problemSessions)
-      .values({
-        userId: 'student',
-        courseId: 'test',
-        lectureId: 'test',
-        problemId: 'fillInBlank3',
-        problemVariablesSeed: seed,
-        problemType: 'fillInBlank',
-        traceItemIndex: 0,
-      })
-      .returning()
-      .get()!;
-    const code = `  \n${source(exercise.sessionId, ['int extra = 99; t.右を向く();'])}\n  `;
-    const wrongCode = code.replace('new Turtle()', 'new Turtle(1, 0)');
-    expect(
-      await caller.submitExercise({
-        ...locationOnly(),
-        sessionId: exercise.sessionId,
-        code: wrongCode,
-      })
-    ).toMatchObject({ status: 'incorrect' });
-    expect(
-      await caller.gradeFillInBlankAnswers({
-        sessionId: normal.id,
-        code: wrongCode,
-        elapsedMilliseconds: 123,
-      })
-    ).toMatchObject({ status: 'incorrect' });
-    expect(await caller.submitExercise({ ...locationOnly(), sessionId: exercise.sessionId, code })).toMatchObject({
-      status: 'correct',
-    });
-    expect(
-      await caller.gradeFillInBlankAnswers({
-        sessionId: normal.id,
-        code,
-        elapsedMilliseconds: 456,
-      })
-    ).toMatchObject({ status: 'correct' });
-    expect(sqlite.prepare('SELECT code, answers, status FROM ExerciseSubmission ORDER BY id').all()).toEqual([
-      { code: wrongCode, answers: null, status: 'incorrect' },
-      { code, answers: null, status: 'correct' },
-    ]);
-    expect(
-      sqlite.prepare('SELECT code, answers, isCorrect, elapsedMilliseconds FROM ProblemSubmission ORDER BY id').all()
-    ).toEqual([
-      { code: wrongCode, answers: null, isCorrect: 0, elapsedMilliseconds: 123 },
-      { code, answers: null, isCorrect: 1, elapsedMilliseconds: 456 },
-    ]);
-    expect(completion(exercise.sessionId)).not.toBeNull();
-    expect(sqlite.prepare('SELECT completedAt FROM ProblemSession WHERE id = ?').get(normal.id)).toMatchObject({
-      completedAt: expect.any(Number),
-    });
-    const completedExecutionCount = execution.requests.mock.calls.length;
-    expect(
-      await caller.gradeFillInBlankAnswers({
-        sessionId: normal.id,
-        code,
-        elapsedMilliseconds: 456,
-      })
-    ).toMatchObject({ status: 'correct' });
-    expect(execution.requests).toHaveBeenCalledTimes(completedExecutionCount + 1);
-    expect(sqlite.prepare('SELECT code, isCorrect FROM ProblemSubmission ORDER BY id').all()).toEqual([
-      { code: wrongCode, isCorrect: 0 },
-      { code, isCorrect: 1 },
-      { code, isCorrect: 1 },
-    ]);
-  }
-);
+test('normal and challenge grade the full source by drawing and preserve it verbatim', async () => {
+  challengeMap.test = [['fillInBlank3']];
+  const exercise = await start();
+  const seed = one(z.object({ seed: z.string() }), 'SELECT seed FROM ExerciseSession').seed;
+  const normal = db
+    .insert(problemSessions)
+    .values({
+      userId: 'student',
+      courseId: 'test',
+      lectureId: 'test',
+      problemId: 'fillInBlank3',
+      problemVariablesSeed: seed,
+      problemType: 'fillInBlank',
+      traceItemIndex: 0,
+    })
+    .returning()
+    .get()!;
+  const code = `  \n${source(exercise.sessionId, ['int extra = 99; t.右を向く();'])}\n  `;
+  const wrongCode = code.replace('new Turtle()', 'new Turtle(1, 0)');
+  expect(
+    await caller.submitExercise({
+      ...locationOnly(),
+      sessionId: exercise.sessionId,
+      code: wrongCode,
+    })
+  ).toMatchObject({ status: 'incorrect' });
+  expect(
+    await caller.gradeFillInBlankAnswers({
+      sessionId: normal.id,
+      code: wrongCode,
+      elapsedMilliseconds: 123,
+    })
+  ).toMatchObject({ status: 'incorrect' });
+  expect(await caller.submitExercise({ ...locationOnly(), sessionId: exercise.sessionId, code })).toMatchObject({
+    status: 'correct',
+  });
+  expect(
+    await caller.gradeFillInBlankAnswers({
+      sessionId: normal.id,
+      code,
+      elapsedMilliseconds: 456,
+    })
+  ).toMatchObject({ status: 'correct' });
+  expect(sqlite.prepare('SELECT code, answers, status FROM ExerciseSubmission ORDER BY id').all()).toEqual([
+    { code: wrongCode, answers: null, status: 'incorrect' },
+    { code, answers: null, status: 'correct' },
+  ]);
+  expect(
+    sqlite.prepare('SELECT code, answers, isCorrect, elapsedMilliseconds FROM ProblemSubmission ORDER BY id').all()
+  ).toEqual([
+    { code: wrongCode, answers: null, isCorrect: 0, elapsedMilliseconds: 123 },
+    { code, answers: null, isCorrect: 1, elapsedMilliseconds: 456 },
+  ]);
+  expect(completion(exercise.sessionId)).not.toBeNull();
+  expect(sqlite.prepare('SELECT completedAt FROM ProblemSession WHERE id = ?').get(normal.id)).toMatchObject({
+    completedAt: expect.any(Number),
+  });
+  expect(
+    await caller.gradeFillInBlankAnswers({
+      sessionId: normal.id,
+      code,
+      elapsedMilliseconds: 456,
+    })
+  ).toMatchObject({ status: 'correct' });
+  expect(sqlite.prepare('SELECT code, isCorrect FROM ProblemSubmission ORDER BY id').all()).toEqual([
+    { code: wrongCode, isCorrect: 0 },
+    { code, isCorrect: 1 },
+    { code, isCorrect: 1 },
+  ]);
+});
 
-test(
-  'keeps incorrect and unavailable-executor attempts retryable on the same problem',
-  { timeout: 180_000 },
-  async () => {
-    const exercise = await start();
-    const wrong = submission(exercise.sessionId, ['x']);
-    expect(await caller.submitExercise(wrong)).toMatchObject({ status: 'incorrect' });
-    execution.unavailable = true;
-    const model = submission(exercise.sessionId, modelAnswers(exercise.sessionId));
-    expect(await caller.submitExercise(model)).toMatchObject({ status: 'ungradable' });
-    expect(sqlite.prepare('SELECT status, code, answers FROM ExerciseSubmission ORDER BY id').all()).toEqual([
-      { status: 'incorrect', code: wrong.code, answers: null },
-      { status: 'ungradable', code: model.code, answers: null },
-    ]);
-    expect(await start()).toMatchObject({ sessionId: exercise.sessionId, completed: false });
-  }
-);
+test('keeps incorrect and time-limit attempts retryable on the same problem', async () => {
+  const exercise = await start();
+  const wrong = submission(exercise.sessionId, ['x']);
+  expect(await caller.submitExercise(wrong)).toMatchObject({ status: 'incorrect' });
+  const endless = {
+    ...locationOnly(),
+    sessionId: exercise.sessionId,
+    code: 'public class Main { public static void main(String[] args) { while (true) {} } }',
+  };
+  expect(await caller.submitExercise(endless)).toEqual({ status: 'incorrect', detail: 'Time limit exceeded.' });
+  expect(sqlite.prepare('SELECT status, code, answers FROM ExerciseSubmission ORDER BY id').all()).toEqual([
+    { status: 'incorrect', code: wrong.code, answers: null },
+    { status: 'incorrect', code: endless.code, answers: null },
+  ]);
+  expect(await start()).toMatchObject({ sessionId: exercise.sessionId, completed: false });
+});
 
 test('rejects cross-user and location-mismatched access without mutation', async () => {
   const exercise = await start();
@@ -329,7 +292,7 @@ test('resumes only the current user and location session', async () => {
   expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSession').count).toBe(3);
 });
 
-test('rolls back both sides of correct submission atomicity', { timeout: 180_000 }, async () => {
+test('rolls back both sides of correct submission atomicity', async () => {
   const exercise = await start();
   sqlite.exec(
     "CREATE TRIGGER reject_exercise_submission BEFORE INSERT ON ExerciseSubmission BEGIN SELECT RAISE(ABORT, 'rejected'); END"
@@ -353,56 +316,49 @@ test('rolls back both sides of correct submission atomicity', { timeout: 180_000
   }
 });
 
-test(
-  'deduplicates concurrent start, correct replay, and Next while isolating ordinary records',
-  { timeout: 180_000 },
-  async () => {
-    const normal = db
-      .insert(problemSessions)
-      .values({
-        userId: 'student',
-        courseId: 'test',
-        lectureId: 'test',
-        problemId: 'test1',
-        problemVariablesSeed: 'normal',
-        problemType: 'executionResult',
-        traceItemIndex: 0,
-        elapsedMilliseconds: 321,
-      })
-      .returning()
-      .get()!;
-    db.insert(problemSubmissions)
-      .values({
-        sessionId: normal.id,
-        problemType: normal.problemType,
-        traceItemIndex: 0,
-        elapsedMilliseconds: 321,
-        isCorrect: false,
-      })
-      .run();
-    const normalBefore = normalRows();
-    const [exercise, duplicate] = await Promise.all([start(), start()]);
-    expect(duplicate).toEqual(exercise);
-    const answer = submission(exercise.sessionId, ['x + 1']);
-    const results = await Promise.all([caller.submitExercise(answer), caller.submitExercise(answer)]);
-    expect(results.map(({ status }) => status)).toEqual(['correct', 'correct']);
-    expect(execution.requests).toHaveBeenCalledTimes(1);
-    const completedExecutionCount = execution.requests.mock.calls.length;
-    expect(await caller.submitExercise(answer)).toMatchObject({ status: 'correct' });
-    expect(execution.requests).toHaveBeenCalledTimes(completedExecutionCount + 1);
-    expect(await caller.submitExercise(submission(exercise.sessionId, ['x']))).toMatchObject({
-      status: 'incorrect',
-    });
-    expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSubmission').count).toBe(1);
-    const nextInput = { ...locationOnly(), sessionId: exercise.sessionId };
-    const [next, duplicateNext] = await Promise.all([caller.nextExercise(nextInput), caller.nextExercise(nextInput)]);
-    expect(duplicateNext).toEqual(next);
-    expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSession').count).toBe(2);
-    expect(normalRows()).toEqual(normalBefore);
-  }
-);
+test('deduplicates concurrent start, correct replay, and Next while isolating ordinary records', async () => {
+  const normal = db
+    .insert(problemSessions)
+    .values({
+      userId: 'student',
+      courseId: 'test',
+      lectureId: 'test',
+      problemId: 'test1',
+      problemVariablesSeed: 'normal',
+      problemType: 'executionResult',
+      traceItemIndex: 0,
+      elapsedMilliseconds: 321,
+    })
+    .returning()
+    .get()!;
+  db.insert(problemSubmissions)
+    .values({
+      sessionId: normal.id,
+      problemType: normal.problemType,
+      traceItemIndex: 0,
+      elapsedMilliseconds: 321,
+      isCorrect: false,
+    })
+    .run();
+  const normalBefore = normalRows();
+  const [exercise, duplicate] = await Promise.all([start(), start()]);
+  expect(duplicate).toEqual(exercise);
+  const answer = submission(exercise.sessionId, ['x + 1']);
+  const results = await Promise.all([caller.submitExercise(answer), caller.submitExercise(answer)]);
+  expect(results.map(({ status }) => status)).toEqual(['correct', 'correct']);
+  expect(await caller.submitExercise(answer)).toMatchObject({ status: 'correct' });
+  expect(await caller.submitExercise(submission(exercise.sessionId, ['x']))).toMatchObject({
+    status: 'incorrect',
+  });
+  expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSubmission').count).toBe(1);
+  const nextInput = { ...locationOnly(), sessionId: exercise.sessionId };
+  const [next, duplicateNext] = await Promise.all([caller.nextExercise(nextInput), caller.nextExercise(nextInput)]);
+  expect(duplicateNext).toEqual(next);
+  expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSession').count).toBe(2);
+  expect(normalRows()).toEqual(normalBefore);
+});
 
-test('stores distinct concurrent incorrect submissions', { timeout: 180_000 }, async () => {
+test('stores distinct concurrent incorrect submissions', async () => {
   const exercise = await start();
   const results = await Promise.all([
     caller.submitExercise(submission(exercise.sessionId, ['x'])),
@@ -416,66 +372,56 @@ test('stores distinct concurrent incorrect submissions', { timeout: 180_000 }, a
   expect(await start()).toMatchObject({ sessionId: exercise.sessionId, completed: false });
 });
 
-test(
-  'keeps a completed session visible when Next configuration fails and creates one successor on retry',
-  { timeout: 180_000 },
-  async () => {
-    const exercise = await start();
-    expect(await caller.submitExercise(submission(exercise.sessionId, modelAnswers(exercise.sessionId)))).toMatchObject(
-      {
-        status: 'correct',
-      }
-    );
-    const completed = await start();
-    expect(completed).toMatchObject({ sessionId: exercise.sessionId, completed: true });
-    expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSession').count).toBe(1);
+test('keeps a completed session visible when Next configuration fails and creates one successor on retry', async () => {
+  const exercise = await start();
+  expect(await caller.submitExercise(submission(exercise.sessionId, modelAnswers(exercise.sessionId)))).toMatchObject({
+    status: 'correct',
+  });
+  const completed = await start();
+  expect(completed).toMatchObject({ sessionId: exercise.sessionId, completed: true });
+  expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSession').count).toBe(1);
 
-    challengeMap.test = [['notRegistered'], ['fillInBlank1']];
-    await expect(caller.nextExercise({ ...locationOnly(), sessionId: exercise.sessionId })).rejects.toMatchObject({
-      code: 'INTERNAL_SERVER_ERROR',
-    });
-    expect(await start()).toEqual(completed);
-    expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSession').count).toBe(1);
+  challengeMap.test = [['notRegistered'], ['fillInBlank1']];
+  await expect(caller.nextExercise({ ...locationOnly(), sessionId: exercise.sessionId })).rejects.toMatchObject({
+    code: 'INTERNAL_SERVER_ERROR',
+  });
+  expect(await start()).toEqual(completed);
+  expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSession').count).toBe(1);
 
-    challengeMap.test = [['fillInBlank2'], ['fillInBlank1']];
-    const successor = await caller.nextExercise({
-      ...locationOnly(),
-      sessionId: exercise.sessionId,
-    });
-    expect(successor).toMatchObject({ completed: false });
-    expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSession').count).toBe(2);
-  }
-);
+  challengeMap.test = [['fillInBlank2'], ['fillInBlank1']];
+  const successor = await caller.nextExercise({
+    ...locationOnly(),
+    sessionId: exercise.sessionId,
+  });
+  expect(successor).toMatchObject({ completed: false });
+  expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSession').count).toBe(2);
+});
 
-test(
-  'avoids the immediately previous candidate but keeps completed candidates eligible',
-  { timeout: 180_000 },
-  async () => {
-    challengeMap.test = [['fillInBlank1', 'fillInBlank2']];
-    const first = await start();
-    expect(await caller.submitExercise(submission(first.sessionId, modelAnswers(first.sessionId)))).toMatchObject({
-      status: 'correct',
-    });
-    const second = asExercise(await caller.nextExercise({ ...locationOnly(), sessionId: first.sessionId }));
-    expect(second.problemId).not.toBe(first.problemId);
-    expect(await caller.submitExercise(submission(second.sessionId, modelAnswers(second.sessionId)))).toMatchObject({
-      status: 'correct',
-    });
-    const third = asExercise(await caller.nextExercise({ ...locationOnly(), sessionId: second.sessionId }));
-    expect(third.problemId).toBe(first.problemId);
+test('avoids the immediately previous candidate but keeps completed candidates eligible', async () => {
+  challengeMap.test = [['fillInBlank1', 'fillInBlank2']];
+  const first = await start();
+  expect(await caller.submitExercise(submission(first.sessionId, modelAnswers(first.sessionId)))).toMatchObject({
+    status: 'correct',
+  });
+  const second = asExercise(await caller.nextExercise({ ...locationOnly(), sessionId: first.sessionId }));
+  expect(second.problemId).not.toBe(first.problemId);
+  expect(await caller.submitExercise(submission(second.sessionId, modelAnswers(second.sessionId)))).toMatchObject({
+    status: 'correct',
+  });
+  const third = asExercise(await caller.nextExercise({ ...locationOnly(), sessionId: second.sessionId }));
+  expect(third.problemId).toBe(first.problemId);
 
-    const beforeReplay = exerciseRows();
-    const replayedFirstNext = asExercise(await caller.nextExercise({ ...locationOnly(), sessionId: first.sessionId }));
-    expect(replayedFirstNext).toMatchObject({
-      sessionId: second.sessionId,
-      problemId: second.problemId,
-      completed: true,
-    });
-    expect(exerciseRows()).toEqual(beforeReplay);
-  }
-);
+  const beforeReplay = exerciseRows();
+  const replayedFirstNext = asExercise(await caller.nextExercise({ ...locationOnly(), sessionId: first.sessionId }));
+  expect(replayedFirstNext).toMatchObject({
+    sessionId: second.sessionId,
+    problemId: second.problemId,
+    completed: true,
+  });
+  expect(exerciseRows()).toEqual(beforeReplay);
+});
 
-test('normal fill-in-the-blank submissions never create exercise history', { timeout: 180_000 }, async () => {
+test('normal fill-in-the-blank submissions never create exercise history', async () => {
   const normal = db
     .insert(problemSessions)
     .values({
@@ -685,31 +631,27 @@ test.each([{ problemType: 'step' }, { traceItemIndex: 1 }, { isCompleted: true }
   }
 );
 
-test(
-  'keeps omitted-format blank start/Next compatible while explicit regular Next is strict',
-  { timeout: 180_000 },
-  async () => {
-    const blank = await start();
-    expect(blank.problemId).toBe('fillInBlank2');
-    await caller.submitExercise(submission(blank.sessionId, modelAnswers(blank.sessionId)));
-    await expect(caller.nextExercise({ ...locationOnly(), sessionId: blank.sessionId })).resolves.toMatchObject({
-      completed: false,
-    });
+test('keeps omitted-format blank start/Next compatible while explicit regular Next is strict', async () => {
+  const blank = await start();
+  expect(blank.problemId).toBe('fillInBlank2');
+  await caller.submitExercise(submission(blank.sessionId, modelAnswers(blank.sessionId)));
+  await expect(caller.nextExercise({ ...locationOnly(), sessionId: blank.sessionId })).resolves.toMatchObject({
+    completed: false,
+  });
 
-    sqlite.exec('DELETE FROM ExerciseSubmission; DELETE FROM ExerciseSession');
-    const regular = await startRegular();
-    const completed = await submitRegular(regular, 'complete-before-strict-next', true);
-    await expect(
-      regularCaller().nextExercise({
-        ...locationOnly(),
-        sessionId: completed.sessionId,
-        problemFormat: 'regular',
-        nextTraceItemIndex: 1,
-      })
-    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-    expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSession').count).toBe(1);
-  }
-);
+  sqlite.exec('DELETE FROM ExerciseSubmission; DELETE FROM ExerciseSession');
+  const regular = await startRegular();
+  const completed = await submitRegular(regular, 'complete-before-strict-next', true);
+  await expect(
+    regularCaller().nextExercise({
+      ...locationOnly(),
+      sessionId: completed.sessionId,
+      problemFormat: 'regular',
+      nextTraceItemIndex: 1,
+    })
+  ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSession').count).toBe(1);
+});
 
 test('rolls back regular submission and transition together', async () => {
   const regular = await startRegular();
@@ -928,13 +870,6 @@ const submitRegular = async (
   isCorrect: boolean
 ): Promise<RegularExercise> => regularCaller().submitRegularExercise(regularSubmission(exercise, requestId, isCorrect));
 const asExercise = (value: unknown): Exercise => exerciseSchema.parse(value);
-const unavailable = (name: string): JavaExecutors.JavaExecutor => ({
-  name,
-  execute: async (): Promise<JavaExecutors.JavaExecutionResult> => {
-    await executorGate.wait?.();
-    return { kind: 'unavailable', reason: 'controlled outage' };
-  },
-});
 const locationOnly = (): Location => ({ courseId: 'test', lectureId: 'test' });
 const submission = (sessionId: number, answers: string[]): Submission => ({
   ...locationOnly(),
@@ -971,149 +906,67 @@ const normalRows = (): { sessions: unknown[]; submissions: unknown[] } => ({
   submissions: sqlite.prepare('SELECT * FROM ProblemSubmission ORDER BY id').all(),
 });
 
-test('merges only identical in-flight source and executes settled retries again', async () => {
+test('merges only identical in-flight source and grades settled retries again', async () => {
   const exercise = await start();
-  const input = submission(exercise.sessionId, modelAnswers(exercise.sessionId));
-  let release!: (result: JavaExecutors.JavaExecutionResult) => void;
-  execution.run = () =>
-    new Promise((resolve) => {
-      release = resolve;
-    });
-  const pending = Promise.allSettled([caller.submitExercise(input), caller.submitExercise(input)]);
-  try {
-    await vi.waitFor(() => expect(execution.requests).toHaveBeenCalledTimes(1));
-    auth.userId = 'other';
-    await expect(caller.submitExercise(input)).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
-    auth.userId = 'student';
-    expect(execution.requests).toHaveBeenCalledTimes(1);
-  } finally {
-    release?.({ kind: 'compileError', message: 'controlled compiler diagnostic' });
-  }
-  expect(await pending).toEqual([
-    { status: 'fulfilled', value: expect.objectContaining({ status: 'incorrect' }) },
-    { status: 'fulfilled', value: expect.objectContaining({ status: 'incorrect' }) },
+  const input = submission(exercise.sessionId, ['x']);
+  const different = submission(exercise.sessionId, ['x + 2']);
+  const results = await Promise.all([
+    caller.submitExercise(input),
+    caller.submitExercise(input),
+    caller.submitExercise(different),
   ]);
-  expect(sqlite.prepare('SELECT code FROM ExerciseSubmission').all()).toEqual([{ code: input.code }]);
-  execution.run = async () => ({ kind: 'compileError', message: 'controlled compiler diagnostic' });
-  expect(await caller.submitExercise(input)).toMatchObject({ status: 'incorrect' });
-  expect(execution.requests).toHaveBeenCalledTimes(2);
-  expect(sqlite.prepare('SELECT code FROM ExerciseSubmission').all()).toEqual([
+  expect(results.map(({ status }) => status)).toEqual(['incorrect', 'incorrect', 'incorrect']);
+  expect(sqlite.prepare('SELECT code FROM ExerciseSubmission ORDER BY id').all()).toEqual([
     { code: input.code },
+    { code: different.code },
+  ]);
+  expect(await caller.submitExercise(input)).toMatchObject({ status: 'incorrect' });
+  expect(sqlite.prepare('SELECT code FROM ExerciseSubmission ORDER BY id').all()).toEqual([
+    { code: input.code },
+    { code: different.code },
     { code: input.code },
   ]);
-});
-
-test('releases the session lock after an executor rejects', async () => {
-  const exercise = await start();
-  const input = submission(exercise.sessionId, modelAnswers(exercise.sessionId));
-  execution.run = async () => {
-    throw new Error('controlled transport rejection');
-  };
-  await expect(caller.submitExercise(input)).rejects.toThrow();
-  execution.run = async () => ({ kind: 'compileError', message: 'controlled compiler diagnostic' });
-  expect(await caller.submitExercise(input)).toMatchObject({ status: 'incorrect' });
-  expect(execution.requests).toHaveBeenCalledTimes(2);
-  expect(sqlite.prepare('SELECT code FROM ExerciseSubmission').all()).toEqual([{ code: input.code }]);
-});
-
-test('ordinary provider outage preserves completion and history and rejects unauthorized access', async () => {
-  const normal = db
-    .insert(problemSessions)
-    .values({
-      userId: 'student',
-      courseId: 'test',
-      lectureId: 'test',
-      problemId: 'fillInBlank1',
-      problemVariablesSeed: 'outage',
-      problemType: 'fillInBlank',
-      traceItemIndex: 0,
-    })
-    .returning()
-    .get()!;
-  const problem = instantiateProblem('fillInBlank1', 'outage')!;
-  const input = {
-    sessionId: normal.id,
-    code: fillBlanks(problem.displayProgramTemplate, problem.blankAnswers),
-    elapsedMilliseconds: 12,
-  };
-  execution.unavailable = true;
-  expect(await caller.gradeFillInBlankAnswers(input)).toMatchObject({ status: 'ungradable' });
-  expect(sqlite.prepare('SELECT * FROM ProblemSubmission').all()).toEqual([]);
-  expect(sqlite.prepare('SELECT completedAt FROM ProblemSession WHERE id = ?').get(normal.id)).toEqual({
-    completedAt: null,
-  });
-  auth.userId = 'other';
-  await expect(caller.gradeFillInBlankAnswers(input)).rejects.toMatchObject({
-    code: 'UNAUTHORIZED',
-  });
-  expect(execution.requests).toHaveBeenCalledTimes(1);
 });
 
 test.each(['ordinary', 'challenge'] as const)(
-  '%s API forwards safe compiler diagnostics and preserves retry history',
+  '%s API returns compiler diagnostics and preserves retry history',
   async (context) => {
-    const original = await vi.importActual<typeof JavaExecutors>('../../src/problems/fillInBlank/javaExecutors');
     const code = 'class Main {\n public static void main(String[] args) {\n  missing();\n }\n}';
-    await withCompilerTransport(
-      (file, program) => {
-        const line = program.split(/\r\n|\r|\n/).findIndex((text) => text.includes('missing();')) + 1;
-        return {
-          status: '1',
-          compiler_error: `/private/${file}:${line}: error: cannot find symbol\nSECRET_API __TRACE_DOJO_RESULT_private__ <script>\n`,
-        };
-      },
-      async (executor) => {
-        execution.run = executor.execute;
-        const exercise = context === 'challenge' ? await start() : undefined;
-        const normal =
-          context === 'ordinary'
-            ? db
-                .insert(problemSessions)
-                .values({
-                  userId: 'student',
-                  courseId: 'test',
-                  lectureId: 'test',
-                  problemId: 'fillInBlank1',
-                  problemVariablesSeed: 'diagnostics',
-                  problemType: 'fillInBlank',
-                  traceItemIndex: 0,
-                })
-                .returning()
-                .get()
-            : undefined;
-        const submit = async (): Promise<unknown> =>
-          exercise
-            ? caller.submitExercise({ ...locationOnly(), sessionId: exercise.sessionId, code })
-            : caller.gradeFillInBlankAnswers({
-                sessionId: normal!.id,
-                code,
-                elapsedMilliseconds: 12,
-              });
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-          const result = await submit();
-          expect(JSON.stringify(result)).not.toMatch(/SECRET_API|private|TraceDojo|script/);
-          expect(diagnosticVerdictSchema.parse(result).diagnostics).toEqual(
-            expect.arrayContaining([
-              expect.objectContaining({
-                line: 3,
-                message: expect.stringMatching(/[ぁ-ん]/),
-                originalMessage: 'cannot find symbol',
-              }),
-            ])
-          );
-        }
-        expect(execution.requests).toHaveBeenCalledTimes(2);
-        expect(
-          sqlite.prepare(`SELECT code FROM ${exercise ? 'ExerciseSubmission' : 'ProblemSubmission'}`).all()
-        ).toEqual([{ code }, { code }]);
-        const table = exercise ? 'ExerciseSession' : 'ProblemSession';
-        const id = exercise?.sessionId ?? normal!.id;
-        expect(sqlite.prepare(`SELECT completedAt FROM ${table} WHERE id = ?`).get(id)).toEqual({
-          completedAt: null,
-        });
-      },
-      original.createWandboxExecutor
-    );
+    const exercise = context === 'challenge' ? await start() : undefined;
+    const normal =
+      context === 'ordinary'
+        ? db
+            .insert(problemSessions)
+            .values({
+              userId: 'student',
+              courseId: 'test',
+              lectureId: 'test',
+              problemId: 'fillInBlank1',
+              problemVariablesSeed: 'diagnostics',
+              problemType: 'fillInBlank',
+              traceItemIndex: 0,
+            })
+            .returning()
+            .get()
+        : undefined;
+    const submit = async (): Promise<unknown> =>
+      exercise
+        ? caller.submitExercise({ ...locationOnly(), sessionId: exercise.sessionId, code })
+        : caller.gradeFillInBlankAnswers({ sessionId: normal!.id, code, elapsedMilliseconds: 12 });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      expect(await submit()).toEqual({
+        status: 'incorrect',
+        detail: 'Compile error.',
+        diagnostics: [{ line: 3, message: expect.stringMatching(/[ぁ-ん]/) }],
+      });
+    }
+    expect(sqlite.prepare(`SELECT code FROM ${exercise ? 'ExerciseSubmission' : 'ProblemSubmission'}`).all()).toEqual([
+      { code },
+      { code },
+    ]);
+    const table = exercise ? 'ExerciseSession' : 'ProblemSession';
+    const id = exercise?.sessionId ?? normal!.id;
+    expect(sqlite.prepare(`SELECT completedAt FROM ${table} WHERE id = ?`).get(id)).toEqual({ completedAt: null });
   }
 );
 
@@ -1156,7 +1009,6 @@ const endedRecord = (id: number): unknown => sqlite.prepare('SELECT * FROM Exerc
 
 test.each<EndFormat>(['regular', 'fillInBlank'])(
   'explicit End %s preserves refresh and history but starts fresh once dismissed',
-  { timeout: 180_000 },
   async (format) => {
     const normal = db
       .insert(problemSessions)
@@ -1205,7 +1057,6 @@ test.each<EndFormat>(['regular', 'fillInBlank'])(
 
 test.each<EndFormat>(['regular', 'fillInBlank'])(
   'explicit End %s establishes a boundary and rejects stale Next and submissions',
-  { timeout: 180_000 },
   async (format) => {
     const a = await startFormat(format);
     await completeFormat(a, format);
@@ -1243,7 +1094,6 @@ test.each<EndFormat>(['regular', 'fillInBlank'])(
 
 test.each<EndFormat>(['regular', 'fillInBlank'])(
   'explicit End %s arriving after Next never closes its successor',
-  { timeout: 180_000 },
   async (format) => {
     const a = await startFormat(format);
     await completeFormat(a, format);
@@ -1309,51 +1159,22 @@ test('explicit End succeeds without candidate generation after failed Next and r
   expect(fresh.sessionId).not.toBe(first.sessionId);
 });
 
-test.each(['correct', 'ungradable'] as const)(
-  'explicit End waits for pending grading whose verdict is %s',
-  { timeout: 180_000 },
-  async (verdict) => {
+test.each([
+  { verdict: 'correct', answers: ['1 + x'] },
+  { verdict: 'incorrect', answers: ['x'] },
+] as const)(
+  'explicit End sent right after a submission waits for its $verdict verdict',
+  async ({ verdict, answers }) => {
     const first = await start();
-    let release!: () => void;
-    let entered!: () => void;
-    const arrived = new Promise<void>((resolve) => {
-      entered = resolve;
-    });
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    executorGate.wait = async () => {
-      entered();
-      await gate;
-    };
-    execution.unavailable = verdict === 'ungradable';
-    const answers = ['1 + x'];
-    const grading = caller.submitExercise(submission(first.sessionId, answers));
-    await arrived;
-    const ending = endExercise(first.sessionId, 'fillInBlank');
-    let endSettled = false;
-    const observedEnd = ending.then(
-      (value) => {
-        endSettled = true;
-        return { value };
-      },
-      (error: unknown) => {
-        endSettled = true;
-        return { error };
-      }
-    );
-    let settledBeforeRelease: boolean;
-    try {
-      await startRegular();
-      settledBeforeRelease = endSettled;
-    } finally {
-      release();
-    }
-    const result = await grading;
-    const outcome = await observedEnd;
-    expect(settledBeforeRelease).toBe(false);
+    const [result, outcome] = await Promise.all([
+      caller.submitExercise(submission(first.sessionId, [...answers])),
+      endExercise(first.sessionId, 'fillInBlank').then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error })
+      ),
+    ]);
+    expect(result).toMatchObject({ status: verdict });
     if (verdict === 'correct') {
-      expect(result).toMatchObject({ status: 'correct' });
       expect(outcome).toEqual({ value: { status: 'ended' } });
       expect(endedRecord(first.sessionId)).toMatchObject({
         completedAt: expect.any(Number),
@@ -1362,7 +1183,6 @@ test.each(['correct', 'ungradable'] as const)(
       const fresh = await start();
       expect(fresh.sessionId).not.toBe(first.sessionId);
     } else {
-      expect(result).toMatchObject({ status: 'ungradable' });
       expect(outcome).toMatchObject({ error: { code: 'CONFLICT' } });
       expect(await start()).toMatchObject({ sessionId: first.sessionId, completed: false });
     }
@@ -1398,66 +1218,6 @@ test('explicit End reentry avoids the preceding candidate when alternatives exis
   expect(second.problemId).not.toBe(first.problemId);
   expect(second.completed).toBe(false);
 });
-
-test(
-  'explicit End waiting on grading orders concurrent Start, Next and a different later answer',
-  { timeout: 180_000 },
-  async () => {
-    const first = await start();
-    let release!: () => void;
-    let entered!: () => void;
-    const arrived = new Promise<void>((resolve) => {
-      entered = resolve;
-    });
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    executorGate.wait = async () => {
-      entered();
-      await gate;
-    };
-    const grading = caller.submitExercise(submission(first.sessionId, ['1 + x']));
-    await arrived;
-    const ending = endExercise(first.sessionId, 'fillInBlank').then(
-      (value) => ({ value }),
-      (error: unknown) => ({ error })
-    );
-    // A different format can respond while End is queued behind this format's grader.
-    await startRegular();
-    const restarting = start();
-    const staleNext = nextFormat(first, 'fillInBlank').then(
-      (value) => ({ value }),
-      (error: unknown) => ({ error })
-    );
-    const lateSubmission = caller.submitExercise(submission(first.sessionId, ['x + 1'])).then(
-      (value) => ({ value }),
-      (error: unknown) => ({ error })
-    );
-    try {
-      await startRegular();
-    } finally {
-      release();
-    }
-    const [graded, ended, fresh, nextOutcome, submissionOutcome] = await Promise.all([
-      grading,
-      ending,
-      restarting,
-      staleNext,
-      lateSubmission,
-    ]);
-    expect(graded).toMatchObject({ status: 'correct' });
-    expect(ended).toEqual({ value: { status: 'ended' } });
-    expect(fresh).toMatchObject({ completed: false });
-    expect(fresh.sessionId).not.toBe(first.sessionId);
-    expect(nextOutcome).toMatchObject({ error: { code: 'CONFLICT' } });
-    expect(submissionOutcome).toMatchObject({ error: { code: 'CONFLICT' } });
-    expect(await start()).toEqual(fresh);
-    expect(exerciseRows().sessions).toHaveLength(3);
-    expect(sqlite.prepare('SELECT sessionId, code, status FROM ExerciseSubmission ORDER BY id').all()).toEqual([
-      { sessionId: first.sessionId, code: source(first.sessionId, ['1 + x']), status: 'correct' },
-    ]);
-  }
-);
 
 test('legacy multi-hole source and seeded targets survive session resume exactly', async () => {
   challengeMap.test = [['fillInBlank4']];
@@ -1508,16 +1268,13 @@ test('legacy multi-hole source and seeded targets survive session resume exactly
       finalTurtles: [{ x: fixture.x, y: fixture.y, color: '#', dir: 'N' }],
     });
   }
-  expect(execution.requests).not.toHaveBeenCalled();
 });
 
-test('bugFix API accepts the format and starts without executing Java', async () => {
-  execution.unavailable = true;
+test('bugFix API accepts the format and reports an empty configuration', async () => {
   challengeMap.test = [[]];
   await expect(regularCaller().startExercise({ ...locationOnly(), problemFormat: 'bugFix' })).resolves.toEqual({
     status: 'noProblems',
   });
-  expect(execution.requests).not.toHaveBeenCalled();
   expect(exerciseRows()).toEqual({ sessions: [], submissions: [] });
 });
 
@@ -1556,17 +1313,12 @@ const submitBug = async (sessionId: number, code: string, extra: Record<string, 
     problemFormat: 'bugFix',
     ...extra,
   });
-const useLocalJava = async (): Promise<void> => {
-  const { localJavaExecutor } = await import('../helpers/localJavaExecutor');
-  execution.run = localJavaExecutor.execute;
-};
 
 test.each(['logical', 'syntax'] as const)(
   'bugFix %s starter is retryable and exact full-source repair completes only its own session',
-  { timeout: 120_000 },
+
   async (kind) => {
     const fixture = await selectBugFixture(kind);
-    await useLocalJava();
     const normal = db
       .insert(problemSessions)
       .values({
@@ -1613,7 +1365,6 @@ test.each(['logical', 'syntax'] as const)(
         'sessionId',
       ].toSorted()
     );
-    expect(execution.requests).not.toHaveBeenCalled();
     const wrong = await submitBug(bug.sessionId, bug.displayProgram);
     expect(wrong).toMatchObject({ status: 'incorrect' });
     if (kind === 'syntax') {
@@ -1628,18 +1379,10 @@ test.each(['logical', 'syntax'] as const)(
     expect(completion(bug.sessionId)).toBeNull();
     expect(await startBug()).toEqual(bug);
     const code = `  \n${fixture.correctProgram}\n  `;
-    execution.run = undefined;
-    execution.unavailable = true;
-    expect(await submitBug(bug.sessionId, code)).toMatchObject({ status: 'ungradable' });
-    expect(completion(bug.sessionId)).toBeNull();
-    expect(await startBug()).toEqual(bug);
-    execution.unavailable = false;
-    await useLocalJava();
     expect(await submitBug(bug.sessionId, code)).toMatchObject({ status: 'correct' });
     const history = sqlite.prepare('SELECT code, status, answers FROM ExerciseSubmission ORDER BY id').all();
     expect(history).toEqual([
       { code: bug.displayProgram, status: 'incorrect', answers: null },
-      { code, status: 'ungradable', answers: null },
       { code, status: 'correct', answers: null },
     ]);
     expect(await startBug()).toMatchObject({ sessionId: bug.sessionId, completed: true });
@@ -1707,7 +1450,6 @@ test('bugFix rejects wrong ownership, location, format and expired attempts with
     })
   ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
   expect(exerciseRows()).toEqual(before);
-  expect(execution.requests).not.toHaveBeenCalled();
   sqlite.prepare('UPDATE ExerciseSession SET createdAt = 0 WHERE id = ?').run(bug.sessionId);
   vi.setSystemTime(new Date('2026-07-15T12:00:00+09:00'));
   const expired = exerciseRows();

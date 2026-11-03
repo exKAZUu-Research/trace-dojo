@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
 import { getLearningPeriodFilter } from '@/learningPeriod';
-import { gradeFillInBlankCode } from '@/problems/fillInBlank/grade';
+import { type FillInBlankGradingResult, gradeFillInBlankCode, GRADING_STAGE } from '@/problems/fillInBlank/grade';
 import { MAX_JAVA_PROGRAM_LENGTH } from '@/problems/fillInBlank/javaProgram';
 import { instantiateProblem } from '@/problems/instantiateProblem';
 import { getOrdinaryJavaProblem, isOrdinaryBugProblem } from '@/problems/javaChallenges/ordinaryProblem';
@@ -12,7 +12,6 @@ import type { OrdinaryJavaProblemData } from '@/types';
 
 import { type ProblemSession, problemSessions, problemSubmissions } from '../../../../db/schema';
 import { db } from '../../database';
-import { logger } from '../../pino';
 import { authorize } from '../middlewares';
 import { procedure, router } from '../trpc';
 import { exerciseProcedures } from './exercises';
@@ -147,7 +146,6 @@ export const backendRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      // Grading may take tens of seconds, so the completion time is the time the answer arrived.
       const receivedAt = new Date();
       const session = await db.query.problemSessions.findFirst({
         where: { id: input.sessionId, ...getLearningPeriodFilter(receivedAt) },
@@ -161,12 +159,7 @@ export const backendRouter = router({
       if (!problem || (!bugProblem && (!('blankAnswers' in problem) || problem.blankAnswers.length === 0)))
         throw new TRPCError({ code: 'BAD_REQUEST' });
 
-      const result = await gradeFillInBlankCode(problem, input.code);
-      if (result.status === 'ungradable') {
-        logger.warn('Failed to grade fill-in-the-blank answers of session %d: %s', session.id, result.detail);
-        // The detail describes server infrastructure, so it stays in the log.
-        return { status: result.status, detail: '' };
-      }
+      const result = gradeFillInBlankCode(problem, input.code);
       saveFillInBlankSubmission(session, input.code, input.elapsedMilliseconds, result, receivedAt);
       if (result.status === 'correct') {
         revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');
@@ -200,7 +193,7 @@ const saveFillInBlankSubmission = (
   session: ProblemSession,
   code: string,
   elapsedMilliseconds: number,
-  result: Exclude<Awaited<ReturnType<typeof gradeFillInBlankCode>>, { status: 'ungradable' }>,
+  result: FillInBlankGradingResult,
   receivedAt: Date
 ): void => {
   db.transaction((tx) => {
@@ -212,7 +205,7 @@ const saveFillInBlankSubmission = (
         elapsedMilliseconds,
         isCorrect: result.status === 'correct',
         code,
-        gradingStage: result.stage,
+        gradingStage: GRADING_STAGE,
       })
       .run();
     if (result.status === 'correct') {
