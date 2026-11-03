@@ -62,8 +62,8 @@ const LIMITS = {
   maxCallDepth: 512,
   /** The total number of array elements and object fields allocated while running. */
   maxSlots: 1_000_000,
-  /** The total length of the strings built while running. */
-  maxStringLength: 10_000_000,
+  /** The length of one string built while running; building strings also costs operations, which bounds the rest. */
+  maxStringLength: 1_000_000,
   maxOutputLength: 100_000,
 };
 const OPERATIONS_PER_CLOCK_CHECK = 1024;
@@ -87,7 +87,6 @@ export class Runtime {
   private nextClockCheck = OPERATIONS_PER_CLOCK_CHECK;
   private readonly deadline = performance.now() + LIMITS.maxMilliseconds;
   private allocatedSlots = 0;
-  private allocatedStringLength = 0;
   private readonly initializingClasses = new Set<ClassInfo>();
   private readonly dispatchCache = new Map<MethodInfo, Map<ClassInfo, MethodInfo>>();
 
@@ -110,9 +109,9 @@ export class Runtime {
 
   /** Charges for a string of `length` built at run time, before it is built. */
   allocateString(frame: Frame, length: number): void {
-    this.allocatedStringLength += length;
-    this.spend(Math.ceil(length / 64));
-    if (this.allocatedStringLength > LIMITS.maxStringLength) throwBuiltin(frame, 'OutOfMemoryError', 'Java heap space');
+    if (length > LIMITS.maxStringLength) throwBuiltin(frame, 'OutOfMemoryError', 'Java heap space');
+    // Charging every character built bounds what a run can build in all to 16 times its operations.
+    this.spend(Math.ceil(length / 16));
   }
 
   allocateArray(frame: Frame, length: number): void {

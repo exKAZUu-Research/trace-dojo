@@ -918,3 +918,32 @@ test.each([
     diagnostics: [{ row: 2, message: 'boolean 型の値を int 型に変換できません。' }],
   });
 });
+
+test.each([
+  ['long x = 0;', '型「long」は、この採点環境では使えません。'],
+  ['double r = Math.round(2.5);', 'Math のメソッド round は、Java にないか、この採点環境では使えません。'],
+  ['StringBuilder b = null;', '型 StringBuilder が見つからないか、この採点環境では使えません。'],
+  [
+    'String s = String.valueOf(1, 2);',
+    'メソッド valueOf に (int, int) を渡す呼び出しは、Java にないか、この採点環境では使えません。',
+  ],
+])('Java the interpreter does not implement is not called invalid Java: %s', (body, message) => {
+  const source = `class Main {\n  public static void main(String[] args) {\n    ${body}\n  }\n}`;
+  expect(executeJavaProgram(source)).toEqual({ kind: 'compileError', diagnostics: [{ row: 2, message }] });
+});
+
+test('exceptions keep their causes and Math offers its constants', () => {
+  const source = `class Main {
+  public static void main(String[] args) {
+    Turtle t = new Turtle();
+    RuntimeException e = new RuntimeException(new IllegalStateException("x"));
+    if (e.getCause() instanceof IllegalStateException && e.getMessage().equals("java.lang.IllegalStateException: x")) t.前に進む();
+    if (Math.PI > 3.14 && Math.E > 2.71) t.前に進む();
+  }
+}`;
+  expect(executeJavaProgram(source)).toMatchObject({
+    kind: 'executed',
+    finalTurtles: [{ x: 0, y: 2, color: '#', dir: 'N' }],
+    uncaughtException: undefined,
+  });
+});

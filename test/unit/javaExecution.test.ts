@@ -13,7 +13,11 @@ test.each([
     main('String s = "x"; while (true) s = s + s;'),
     { kind: 'executed', uncaughtException: expect.stringContaining('OutOfMemoryError') },
   ],
-  ['a huge repeated string', main('String s = "x".repeat(2000000000);'), { kind: 'limitExceeded' }],
+  [
+    'a huge repeated string',
+    main('String s = "x".repeat(2000000000);'),
+    { kind: 'executed', uncaughtException: expect.stringContaining('OutOfMemoryError') },
+  ],
   [
     'many comparisons of long strings',
     main('String a = "x".repeat(100000); String b = "x".repeat(100000); int n = 0; while (true) if (a.equals(b)) n++;'),
@@ -46,17 +50,17 @@ test.each([
   ],
   [
     'trimming a string with a long run of inner spaces',
-    main('String s = "x" + " ".repeat(2000000) + "y"; System.out.println(s.trim().length());'),
+    main('String s = "x" + " ".repeat(900000) + "y"; System.out.println(s.trim().length());'),
     { kind: 'executed', uncaughtException: undefined },
   ],
   [
     'case-insensitive comparisons with a long non-ASCII string',
-    main('String s = "İ".repeat(5000000); int n = 0; while (true) { if ("a".equalsIgnoreCase(s)) n++; }'),
+    main('String s = "İ".repeat(900000); int n = 0; while (true) { if ("a".equalsIgnoreCase(s)) n++; }'),
     { kind: 'limitExceeded' },
   ],
   [
     'parsing a long string repeatedly',
-    main('String s = "0".repeat(4000000) + "1"; int n = 0; while (true) { n += Integer.parseInt(s); }'),
+    main('String s = "0".repeat(900000) + "1"; int n = 0; while (true) { n += Integer.parseInt(s); }'),
     { kind: 'limitExceeded', limit: 'operations' },
   ],
   [
@@ -72,6 +76,11 @@ test.each([
       'String s = "x".repeat(1000000); Exception[] a = new Exception[30]; for (int i = 0; i < a.length; i++) { try { Integer.parseInt(s); } catch (NumberFormatException e) { a[i] = e; } }'
     ),
     { kind: 'executed', uncaughtException: expect.stringContaining('OutOfMemoryError') },
+  ],
+  [
+    'building a string by appending one character at a time',
+    main('String s = ""; for (int i = 0; i < 4500; i++) s = s + "x"; System.out.println(s.length());'),
+    { kind: 'executed', uncaughtException: undefined },
   ],
   [
     'a huge array',
@@ -91,7 +100,7 @@ test.each([
   [
     'a search for a long pattern in a long string',
     main(
-      'String a = "a".repeat(5000000); String p = "a".repeat(4000) + "b" + "a".repeat(4000); System.out.println(a.indexOf(p));'
+      'String a = "a".repeat(900000); String p = "a".repeat(4000) + "b" + "a".repeat(4000); System.out.println(a.indexOf(p));'
     ),
     { kind: 'limitExceeded' },
   ],

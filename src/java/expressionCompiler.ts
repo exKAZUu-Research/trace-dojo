@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 442 -- The expression compiler keeps one method per expression kind together.
+// code-gauge-allow-file fileNcss 445 -- The expression compiler keeps one method per expression kind together.
 import type { ArrayInitializer, BinaryOperator, Expression, Span } from './ast';
 import {
   type Compiled,
@@ -262,7 +262,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const object = this.compileExpression(context, access.object);
     if (object.kind === 'class') {
       const field = this.findField(object.cls, name);
-      if (!field) return this.error(access, `${object.cls.name} にフィールド ${name} がありません。`);
+      if (!field) return this.error(access, missingFieldMessage(object.cls, name));
       if (!field.isStatic) this.error(access, `static ではないフィールド ${name} はクラス名から使えません。`);
       this.checkAccess(context, field.owner, field.access, access, `フィールド ${name}`);
       return this.fieldReference(field, undefined);
@@ -286,7 +286,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return this.error(access, `${typeName(object.type)} 型の値にはフィールドがありません。`);
     }
     const field = this.findField(object.type.cls, name);
-    if (!field) return this.error(access, `${object.type.cls.name} にフィールド ${name} がありません。`);
+    if (!field) return this.error(access, missingFieldMessage(object.type.cls, name));
     this.checkAccess(context, field.owner, field.access, access, `フィールド ${name}`);
     return this.fieldReference(field, field.isStatic ? undefined : object, field.isStatic ? object : undefined);
   }
@@ -692,7 +692,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const args = expression.args.map((arg) => this.compileValue(context, arg));
     const target = this.resolveCallTarget(context, expression);
     if (target.candidates.length === 0) {
-      this.error(expression, `${target.ownerName} にメソッド ${expression.name} がありません。`);
+      const message = hasBuiltinAncestor(target.owner)
+        ? `${target.owner.name} のメソッド ${expression.name} は、Java にないか、この採点環境では使えません。`
+        : `${target.owner.name} にメソッド ${expression.name} がありません。`;
+      this.error(expression, message);
     }
     const method = this.selectMethod(
       expression,
@@ -742,14 +745,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
   protected resolveCallTarget(
     context: MethodContext,
     expression: Extract<Expression, { kind: 'call' }>
-  ): { candidates: MethodInfo[]; ownerName: string; receiver: CompiledValue | undefined } {
+  ): { candidates: MethodInfo[]; owner: ClassInfo; receiver: CompiledValue | undefined } {
     if (expression.object === undefined || expression.object === 'super') {
       const isSuper = expression.object === 'super';
       if (isSuper && context.isStatic) this.error(expression, 'static メソッドの中では super を使えません。');
       const owner = isSuper ? (context.cls.superclass as ClassInfo) : context.cls;
       return {
         candidates: this.collectMethods(owner, expression.name),
-        ownerName: owner.name,
+        owner,
         receiver: thisValue(context),
       };
     }
@@ -757,7 +760,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (object.kind === 'class') {
       return {
         candidates: this.collectMethods(object.cls, expression.name),
-        ownerName: object.cls.name,
+        owner: object.cls,
         receiver: undefined,
       };
     }
@@ -765,7 +768,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.error(expression, `${typeName(object.type)} 型の値にはメソッドがありません。`);
     }
     const owner = object.type.kind === 'class' ? object.type.cls : this.builtins.objectClass;
-    return { candidates: this.collectMethods(owner, expression.name), ownerName: owner.name, receiver: object };
+    return { candidates: this.collectMethods(owner, expression.name), owner, receiver: object };
   }
 
   protected checkCall(
@@ -786,6 +789,20 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.error(expression, `抽象メソッド ${name} は super から呼び出せません。`);
     }
   }
+}
+
+/** Whether `cls` inherits from a standard library class, whose members this environment implements only partly. */
+function hasBuiltinAncestor(cls: ClassInfo): boolean {
+  for (let current: ClassInfo | undefined = cls; current; current = current.superclass) {
+    if (current.isBuiltin && current.name !== 'Object') return true;
+  }
+  return false;
+}
+
+function missingFieldMessage(cls: ClassInfo, name: string): string {
+  return hasBuiltinAncestor(cls)
+    ? `${cls.name} のフィールド ${name} は、Java にないか、この採点環境では使えません。`
+    : `${cls.name} にフィールド ${name} がありません。`;
 }
 
 function notConstant(reference: Reference & { constant?: Value }): Reference & { constant?: Value } {

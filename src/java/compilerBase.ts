@@ -130,7 +130,7 @@ export abstract class CompilerBase {
       }
       case 'named': {
         const cls = this.classes.get(syntax.name) ?? this.builtins.classes.get(syntax.name);
-        if (!cls) this.error(syntax, `型 ${syntax.name} が見つかりません。`);
+        if (!cls) this.error(syntax, `型 ${syntax.name} が見つからないか、この採点環境では使えません。`);
         return cls.type;
       }
       case 'var': {
@@ -343,6 +343,10 @@ export abstract class CompilerBase {
     );
     if (applicable.length === 0) {
       const given = argTypes.map((type) => typeName(type)).join(', ');
+      // This environment implements only part of the standard library, so a builtin call may exist in Java.
+      if (candidates.some((method) => method.owner.isBuiltin)) {
+        return this.error(span, `${what} に (${given}) を渡す呼び出しは、Java にないか、この採点環境では使えません。`);
+      }
       return this.error(span, `${what} に (${given}) を渡して呼び出すことはできません。`);
     }
     const mostSpecific = applicable.filter((method) =>

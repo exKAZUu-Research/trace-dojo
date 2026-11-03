@@ -106,12 +106,20 @@ function defineObject(objectClass: ClassInfo, stringType: JavaType): void {
 function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType: JavaType): ClassInfo {
   const defineThrowable = (name: string, superclass: ClassInfo): ClassInfo => {
     const cls = registry.define(name, superclass);
-    addMessageConstructors(cls, stringType);
+    addMessageConstructors(cls, stringType, throwableClass.type);
     return cls;
   };
   const throwableClass = registry.define('Throwable', objectClass);
-  addMessageConstructors(throwableClass, stringType);
+  addMessageConstructors(throwableClass, stringType, throwableClass.type);
   addMethod(throwableClass, 'getMessage', [], stringType, false, (_, receiver) => (receiver as JavaObject).message);
+  addMethod(
+    throwableClass,
+    'getCause',
+    [],
+    throwableClass.type,
+    false,
+    (_, receiver) => (receiver as JavaObject).cause
+  );
   addMethod(throwableClass, 'toString', [], stringType, false, (frame, receiver) => {
     const exception = receiver as JavaObject;
     const name = registry.qualifiedNames.get(exception.cls) ?? exception.cls.name;
@@ -141,10 +149,21 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
   return throwableClass;
 }
 
-function addMessageConstructors(cls: ClassInfo, stringType: JavaType): void {
+function addMessageConstructors(cls: ClassInfo, stringType: JavaType, throwableType: JavaType): void {
   addConstructor(cls, [], () => {});
   addConstructor(cls, [stringType], (_, receiver, [message]) => {
     (receiver as JavaObject).message = message as JavaString | undefined;
+  });
+  addConstructor(cls, [throwableType], (frame, receiver, [cause]) => {
+    const exception = receiver as JavaObject;
+    exception.cause = cause as JavaObject | undefined;
+    // Java uses the cause's description as the message.
+    if (exception.cause) exception.message = frame.runtime.invokeToString(frame, exception.cause);
+  });
+  addConstructor(cls, [stringType, throwableType], (_, receiver, [message, cause]) => {
+    const exception = receiver as JavaObject;
+    exception.message = message as JavaString | undefined;
+    exception.cause = cause as JavaObject | undefined;
   });
 }
 
@@ -160,6 +179,8 @@ function defineMath(mathClass: ClassInfo): void {
     addMethod(mathClass, name, [DOUBLE], DOUBLE, true, (_, __, [value]) => Math[name](value as number));
   }
   addMethod(mathClass, 'pow', [DOUBLE, DOUBLE], DOUBLE, true, (_, __, [a, b]) => (a as number) ** (b as number));
+  addConstant(mathClass, 'PI', DOUBLE, Math.PI);
+  addConstant(mathClass, 'E', DOUBLE, Math.E);
 }
 
 function defineInteger(integerClass: ClassInfo, stringType: JavaType): void {
