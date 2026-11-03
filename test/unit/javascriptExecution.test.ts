@@ -221,8 +221,8 @@ test.each([
   ['String(new Array(3).map((_, i) => i).length + Object.keys([1, , 3]).length)', '5'],
   ['String(new Array(5000).fill(7).join().length)', '9999'],
   [
-    '(() => { const holes = [1, , 2]; function f(a,) { return a; } const { a, } = { a: 1 }; return String([holes.length, f(1,), a]); })()',
-    '3,1,1',
+    '(() => { const holes = [1, , 2]; function f(a,) { return a; } const { a, } = { a: 1 }; const o = { b: 2, }; return String([holes.length, f(1,), a, o.b]); })()',
+    '3,1,1,2',
   ],
   [
     'String((() => { function sum() { const all = () => arguments.length; return [arguments[0] + arguments[1], all()]; } return sum(1, 2); })())',
