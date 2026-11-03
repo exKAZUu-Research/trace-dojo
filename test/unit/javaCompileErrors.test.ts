@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { executeJavaProgram } from '../../src/java/execute';
+import { executeProgram } from '../../src/interpreter/program';
 
 /** Programs with whether Java 21 compiles and launches them, given a `Turtle` class, as the interpreter must. */
 const programs: [name: string, runs: boolean, source: string][] = [
@@ -1131,7 +1131,7 @@ const programs: [name: string, runs: boolean, source: string][] = [
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {
-  const execution = executeJavaProgram(source);
+  const execution = executeProgram('java', source);
   if (runs) {
     expect(execution.kind).not.toBe('compileError');
     return;
@@ -1147,7 +1147,7 @@ test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, sou
 test('a missing semicolon is reported on the line that lacks it', () => {
   const source =
     'class Main {\n  public static void main(String[] args) {\n    int count = 0;\n    count++\n\n    count++;\n  }\n}';
-  expect(executeJavaProgram(source)).toEqual({
+  expect(executeProgram('java', source)).toEqual({
     kind: 'compileError',
     diagnostics: [{ row: 3, message: '「;」が足りません。' }],
   });
@@ -1155,7 +1155,7 @@ test('a missing semicolon is reported on the line that lacks it', () => {
 
 test('a missing semicolon after a declaration is reported on its line', () => {
   const source = 'class Main {\n  public static void main(String[] args) {\n    int count = 1\n  }\n}';
-  expect(executeJavaProgram(source)).toEqual({
+  expect(executeProgram('java', source)).toEqual({
     kind: 'compileError',
     diagnostics: [{ row: 2, message: '「;」が足りません。' }],
   });
@@ -1168,7 +1168,7 @@ test.each([
   ],
   ['an array element', 'class Main {\n  public static void main(String[] a) {\n    int[] xs = {1, true};\n  }\n}'],
 ])('a type error in %s is reported on its line', (_, source) => {
-  expect(executeJavaProgram(source)).toEqual({
+  expect(executeProgram('java', source)).toEqual({
     kind: 'compileError',
     diagnostics: [{ row: 2, message: 'boolean 型の値を int 型に変換できません。' }],
   });
@@ -1196,7 +1196,7 @@ test.each([
   ['Turtle t = new Turtle(); t.前進する();', 'この採点環境の Turtle には、メソッド 前進する がありません。'],
 ])('messages about what Java may have state only what this environment has: %s', (body, message) => {
   const source = `class Main {\n  public static void main(String[] args) {\n    ${body}\n  }\n}`;
-  expect(executeJavaProgram(source)).toEqual({ kind: 'compileError', diagnostics: [{ row: 2, message }] });
+  expect(executeProgram('java', source)).toEqual({ kind: 'compileError', diagnostics: [{ row: 2, message }] });
 });
 
 test('exceptions keep their causes and Math offers its constants', () => {
@@ -1208,7 +1208,7 @@ test('exceptions keep their causes and Math offers its constants', () => {
     if (Math.PI > 3.14 && Math.E > 2.71) t.前に進む();
   }
 }`;
-  expect(executeJavaProgram(source)).toMatchObject({
+  expect(executeProgram('java', source)).toMatchObject({
     kind: 'executed',
     finalTurtles: [{ x: 0, y: 2, color: '#', dir: 'N' }],
     uncaughtException: undefined,
@@ -1218,7 +1218,7 @@ test('exceptions keep their causes and Math offers its constants', () => {
 test('a missing field through super names the superclass', () => {
   const source =
     'class A {}\nclass Main extends A {\n  void f() { super.missing = 1; }\n  public static void main(String[] a) {}\n}';
-  expect(executeJavaProgram(source)).toEqual({
+  expect(executeProgram('java', source)).toEqual({
     kind: 'compileError',
     diagnostics: [{ row: 2, message: 'この採点環境の A には、フィールド missing がありません。' }],
   });
@@ -1227,7 +1227,7 @@ test('a missing field through super names the superclass', () => {
 test('the first error in the source is reported when a finally block also has one', () => {
   const source =
     'class Main {\n  public static void main(String[] args) {\n    try {\n      int a = "s";\n    } finally {\n      int b = "t";\n    }\n  }\n}';
-  expect(executeJavaProgram(source)).toEqual({
+  expect(executeProgram('java', source)).toEqual({
     kind: 'compileError',
     diagnostics: [{ row: 3, message: 'String 型の値を int 型に変換できません。' }],
   });
@@ -1236,7 +1236,7 @@ test('the first error in the source is reported when a finally block also has on
 test('an error in a finally block that discards exceptions is the only error reported', () => {
   const source =
     'class Main {\n  static void f() throws Exception {}\n  public static void main(String[] args) {\n    try {\n      f();\n    } finally {\n      int b = "t";\n      return;\n    }\n  }\n}';
-  expect(executeJavaProgram(source)).toEqual({
+  expect(executeProgram('java', source)).toEqual({
     kind: 'compileError',
     diagnostics: [{ row: 6, message: 'String 型の値を int 型に変換できません。' }],
   });

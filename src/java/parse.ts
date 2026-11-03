@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { Language, type Node, Parser } from '@willbooster/web-tree-sitter';
 
+import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import type {
   ClassDeclaration,
   CompilationUnit,
@@ -16,7 +17,6 @@ import type {
   Statement,
   TypeSyntax,
 } from './ast';
-import { CompileError, type JavaSourceDiagnostic } from './diagnostics';
 import { convertArguments } from './parseExpression';
 import {
   convertModifiers,
@@ -80,8 +80,8 @@ function findTooDeepNode(root: Node): Node | undefined {
   }
 }
 
-function collectSyntaxErrors(root: Node): JavaSourceDiagnostic[] {
-  const errors: JavaSourceDiagnostic[] = [];
+function collectSyntaxErrors(root: Node): SourceDiagnostic[] {
+  const errors: SourceDiagnostic[] = [];
   const visit = (node: Node): void => {
     if (errors.length >= 5) return;
     if (node.isMissing) {

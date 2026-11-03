@@ -1,7 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
+import { CompileError } from '../interpreter/diagnostics';
 import type { ArrayInitializer, AssignmentOperator, BinaryOperator, Expression, LiteralValue } from './ast';
-import { CompileError } from './diagnostics';
 import { convertType, countDimensions, field, namedChildren, span, unsupported } from './parseNodes';
 import { charCodeOf } from './values';
 

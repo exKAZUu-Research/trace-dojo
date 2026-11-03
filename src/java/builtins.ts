@@ -1,10 +1,4 @@
-import {
-  TURTLE_GRAPHICS_BOARD_COLUMNS as COLUMNS,
-  TURTLE_GRAPHICS_BOARD_ROWS as ROWS,
-  TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR,
-  TURTLE_GRAPHICS_EMPTY_COLOR as EMPTY_COLOR,
-} from '../constants';
-import { charToColor } from '../problems/trace';
+import type { TurtleState } from '../interpreter/turtleWorld';
 import { type Frame, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
@@ -38,11 +32,6 @@ export interface Builtins {
   /** The qualified names `Throwable.toString` prints for builtin classes. */
   qualifiedNames: Map<ClassInfo, string>;
 }
-
-const DIRECTIONS = ['N', 'E', 'S', 'W'];
-const DX = [0, 1, 0, -1];
-const DY = [1, 0, -1, 0];
-const validColors = new Set(Object.keys(charToColor));
 
 let cachedBuiltins: Builtins | undefined;
 
@@ -227,12 +216,12 @@ function defineSystem(registry: Registry, objectClass: ClassInfo, stringType: Ja
   ] as const) {
     for (const type of [INT, DOUBLE, CHAR, BOOLEAN, stringType, objectClass.type]) {
       addMethod(printStreamClass, name, [type], VOID, false, (frame, _, [value]) => {
-        frame.runtime.print(`${stringify(frame, value, type)}${suffix}`);
+        frame.runtime.budget.print(`${stringify(frame, value, type)}${suffix}`);
       });
     }
   }
   addMethod(printStreamClass, 'println', [], VOID, false, (frame) => {
-    frame.runtime.print('\n');
+    frame.runtime.budget.print('\n');
   });
 }
 
@@ -399,76 +388,46 @@ function defineTurtle(turtleClass: ClassInfo, stringType: JavaType): void {
   }
   addMethod(turtleClass, '前に進めるか', [], BOOLEAN, false, canMoveForward);
   addMethod(turtleClass, 'canMoveForward', [], BOOLEAN, false, canMoveForward);
-  addMethod(turtleClass, '前のマスが塗られているか', [], BOOLEAN, false, isFrontPainted);
+  addMethod(turtleClass, '前のマスが塗られているか', [], BOOLEAN, false, (frame, receiver) =>
+    frame.runtime.world.isFrontPainted(stateOf(receiver))
+  );
   addMethod(turtleClass, 'remove', [], VOID, false, (frame, receiver) => {
-    const turtle = receiver as JavaObject;
-    if (turtle.turtle) turtle.turtle.isAlive = false;
-    frame.runtime.world.turtles = frame.runtime.world.turtles.filter((other) => other !== turtle);
+    const { turtle } = receiver as JavaObject;
+    if (turtle) frame.runtime.world.remove(turtle);
   });
 }
 
 function createTurtle(frame: Frame, receiver: Value, [x = 0, y = 0, color]: Value[]): Value {
-  const colorText = color === undefined ? DEFAULT_COLOR : (color as JavaString | undefined)?.value;
-  if (colorText === undefined || !validColors.has(colorText) || colorText === EMPTY_COLOR) {
-    return throwBuiltin(frame, 'RuntimeException', `Invalid color: ${colorText ?? 'null'}`);
-  }
-  const turtle = receiver as JavaObject;
-  turtle.turtle = { x: x as number, y: y as number, color: colorText, dir: 'N', isAlive: true };
-  checkBounds(frame, turtle);
-  frame.runtime.world.board[y as number][x as number] = colorText;
-  frame.runtime.world.turtles.push(turtle);
+  const created = frame.runtime.world.create(x as number, y as number, (color as JavaString | undefined)?.value);
+  if ('error' in created) return throwBuiltin(frame, 'RuntimeException', created.error);
+  (receiver as JavaObject).turtle = created;
   return undefined;
 }
 
 function moveTurtle(sign: number): NativeMethod {
   return (frame, receiver) => {
     frame.runtime.spend();
-    const turtle = stateOf(receiver);
-    const index = DIRECTIONS.indexOf(turtle.dir);
-    turtle.x += sign * DX[index];
-    turtle.y += sign * DY[index];
-    checkBounds(frame, receiver as JavaObject);
-    frame.runtime.world.board[turtle.y][turtle.x] = turtle.color;
+    const error = frame.runtime.world.move(stateOf(receiver), sign);
+    if (error) throwBuiltin(frame, 'RuntimeException', error);
   };
 }
 
-function turnTurtle(offset: number): NativeMethod {
+function turnTurtle(quarters: number): NativeMethod {
   return (frame, receiver) => {
     frame.runtime.spend();
-    const turtle = stateOf(receiver);
-    turtle.dir = DIRECTIONS[(DIRECTIONS.indexOf(turtle.dir) + offset) % 4];
+    frame.runtime.world.turn(stateOf(receiver), quarters);
   };
 }
 
 function canMoveForward(frame: Frame, receiver: Value): Value {
   frame.runtime.collectGarbage();
-  const turtle = stateOf(receiver);
-  const index = DIRECTIONS.indexOf(turtle.dir);
-  const nx = turtle.x + DX[index];
-  const ny = turtle.y + DY[index];
-  const isFree = !frame.runtime.turtleStates().some((other) => other.x === nx && other.y === ny);
-  return isFree && nx >= 0 && nx < COLUMNS && ny >= 0 && ny < ROWS;
+  return frame.runtime.world.canMoveForward(stateOf(receiver));
 }
 
-function isFrontPainted(frame: Frame, receiver: Value): Value {
-  const turtle = stateOf(receiver);
-  const index = DIRECTIONS.indexOf(turtle.dir);
-  const nx = turtle.x + DX[index];
-  const ny = turtle.y + DY[index];
-  return nx >= 0 && nx < COLUMNS && ny >= 0 && ny < ROWS && frame.runtime.world.board[ny][nx] !== EMPTY_COLOR;
-}
-
-function stateOf(receiver: Value): NonNullable<JavaObject['turtle']> {
+function stateOf(receiver: Value): TurtleState {
   const state = (receiver as JavaObject).turtle;
   if (!state) throw new Error('A turtle without its state');
   return state;
-}
-
-function checkBounds(frame: Frame, turtle: JavaObject): void {
-  const { x, y } = stateOf(turtle);
-  if (x < 0 || COLUMNS <= x || y < 0 || ROWS <= y) {
-    throwBuiltin(frame, 'RuntimeException', `Out of bounds: (${x}, ${y})`);
-  }
 }
 
 function addMethod(

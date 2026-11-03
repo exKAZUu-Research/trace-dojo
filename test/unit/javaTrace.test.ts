@@ -4,7 +4,7 @@ import {
   TURTLE_GRAPHICS_BOARD_COLUMNS as GRID_COLUMNS,
   TURTLE_GRAPHICS_BOARD_ROWS as GRID_ROWS,
 } from '../../src/constants';
-import { traceJavaProgram } from '../../src/java/trace';
+import { traceProgram } from '../../src/interpreter/program';
 import { instantiateProblem } from '../../src/problems/instantiateProblem';
 import type { TraceItem, TurtleTrace } from '../../src/problems/trace';
 
@@ -622,7 +622,7 @@ test('earlier array traces preserve values through alias mutation and nested row
     nested[1] = new int[] { 10, 11 }; // step
   }
 }`;
-  const result = traceJavaProgram(program, program);
+  const result = traceProgram('java', program, program);
   expect(result.traceItems.map(({ vars }) => vars)).toEqual([
     {},
     {},
@@ -686,7 +686,7 @@ test('a step annotation on a statement that records no step is rejected', () => 
     }
   }
 }`;
-  expect(() => traceJavaProgram(program, program)).toThrow('// step は');
+  expect(() => traceProgram('java', program, program)).toThrow('// step は');
 });
 
 test.each(['int i; // step\n    i = 3;', 'Counter counter = new Counter();'])(
@@ -701,7 +701,7 @@ class Counter {
   int count; // step
 }`;
     const annotated = body.includes('// step') ? program.replace('int count; // step', 'int count;') : program;
-    expect(() => traceJavaProgram(annotated, annotated)).toThrow('// step は');
+    expect(() => traceProgram('java', annotated, annotated)).toThrow('// step は');
   }
 );
 
@@ -714,7 +714,7 @@ test('a step annotation on a statement with several parts records one step after
     }
   }
 }`;
-  const trace = traceJavaProgram(program, program);
+  const trace = traceProgram('java', program, program);
   expect(trace.traceItems.map(({ sid, vars }) => ({ sid, vars }))).toEqual([
     { sid: 0, vars: {} },
     { sid: 1, vars: { 'Main.a': 1, 'Main.b': 2 } },
@@ -735,7 +735,7 @@ test('a step annotation on a for row records no step for an absent init or updat
     }
   }
 }`;
-  const trace = traceJavaProgram(program, program);
+  const trace = traceProgram('java', program, program);
   expect(trace.traceItems.map(({ sid, vars }) => ({ sid, vars }))).toEqual([
     { sid: 0, vars: {} },
     { sid: 1, vars: { i: 1 } },

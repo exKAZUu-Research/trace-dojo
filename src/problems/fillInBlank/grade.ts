@@ -1,4 +1,4 @@
-import { executeJavaProgram } from '../../java/execute';
+import { executeProgram } from '../../interpreter/program';
 import type { JavaChallengeTarget } from '../javaChallenges/types';
 import type { JavaDiagnostic } from './javaDiagnostics';
 import { isSameTurtleState } from './javaProgram';
@@ -18,7 +18,7 @@ const MAX_DIAGNOSTICS = 20;
 const MAX_DIAGNOSTIC_LENGTH = 240;
 
 export function gradeFillInBlankCode(problem: JavaChallengeTarget, userProgram: string): FillInBlankGradingResult {
-  const execution = executeJavaProgram(userProgram);
+  const execution = executeProgram('java', userProgram);
   switch (execution.kind) {
     case 'compileError': {
       return {

@@ -1,7 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
+import { CompileError } from '../interpreter/diagnostics';
 import type { Modifiers, Span, TypeSyntax } from './ast';
-import { CompileError } from './diagnostics';
 
 export function span(node: Node): Span {
   return {

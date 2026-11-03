@@ -1,3 +1,5 @@
+import { type TraceAnnotation, traceAnnotationPattern, traceAnnotationsIn } from '../../interpreter/traceAnnotations';
+
 const javaNonCodePattern =
   /\/\/[^\r\n]*|\/\*[\s\S]*?(?:\*\/|$)|"""(?:\\[\s\S]|(?!""")[^\\])*?(?:"""|$)|"(?:\\[\s\S]|[^"\\\r\n])*(?:"|$)|'(?:\\[\s\S]|[^'\\\r\n])*(?:'|$)/g;
 
@@ -17,10 +19,6 @@ export function maskJavaNonCode(source: string): string {
   return source.replaceAll(javaNonCodePattern, (literal) => literal.replaceAll(/[^\r\n]/g, ' '));
 }
 
-/** Matches the annotations a line comment ends with, which may follow an ordinary remark. */
-const traceAnnotationPattern =
-  /\/\/[ \t]*(?:step(?:[ \t]*:[ \t]*\d+)?|caller)(?:[ \t]*\/\/[ \t]*(?:step(?:[ \t]*:[ \t]*\d+)?|caller))*[ \t]*$/;
-
 export function stripJavaTraceAnnotations(source: string): string {
   return source.replaceAll(javaNonCodePattern, (token) => {
     const annotation = token.startsWith('//') ? traceAnnotationPattern.exec(token) : undefined;
@@ -30,9 +28,10 @@ export function stripJavaTraceAnnotations(source: string): string {
 }
 
 /** The `// step` and `// caller` annotations of a program, skipping look-alikes in literals and other comments. */
-export function findJavaTraceAnnotations(source: string): { index: number; text: string }[] {
-  return [...source.matchAll(javaNonCodePattern)].flatMap((match) => {
-    const annotation = match[0].startsWith('//') ? traceAnnotationPattern.exec(match[0]) : undefined;
-    return annotation ? [{ index: match.index + annotation.index, text: annotation[0] }] : [];
-  });
+export function findJavaTraceAnnotations(source: string): TraceAnnotation[] {
+  return traceAnnotationsIn(
+    [...source.matchAll(javaNonCodePattern)]
+      .filter((match) => match[0].startsWith('//'))
+      .map((match) => ({ index: match.index, text: match[0] }))
+  );
 }
