@@ -1,4 +1,5 @@
-import { JsArray, type Value, valueOfElement } from './values';
+import type { ArrayOps } from './arrayOps';
+import type { Value } from './values';
 
 /** What {@link ValueIterator.next} returns once the iteration has ended. */
 export const DONE = Symbol('done');
@@ -11,17 +12,17 @@ export class ValueIterator {
   private index = 0;
   private isDone = false;
 
-  /** @param source An array, or the code points of a string, which cannot change. */
-  constructor(private readonly source: JsArray | readonly string[]) {}
+  /** @param source An array, read by the spec's Get, or values that cannot change, such as a string's code points. */
+  constructor(private readonly source: ArrayOps | readonly Value[]) {}
 
   next(): Value | typeof DONE {
-    const length = this.source instanceof JsArray ? this.source.elements.length : this.source.length;
-    if (this.isDone || this.index >= length) {
+    const { source } = this;
+    if (this.isDone || this.index >= source.length) {
       this.isDone = true;
       return DONE;
     }
     const index = this.index++;
-    return this.source instanceof JsArray ? valueOfElement(this.source.elements[index]) : this.source[index];
+    return Array.isArray(source) ? (source as readonly Value[])[index] : (source as ArrayOps).get(index);
   }
 
   /** The values not read yet, which ends the iteration. */

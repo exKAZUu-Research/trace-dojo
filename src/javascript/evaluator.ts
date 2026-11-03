@@ -198,7 +198,11 @@ export class Evaluator extends ExpressionEvaluator {
 
   private forEachStatement(statement: Extract<Statement, { kind: 'forOf' | 'forIn' }>, labels: string[]): Completion {
     const { runtime } = this;
-    const iterable = this.evaluate(statement.iterable);
+    // The loop's let or const names are uninitialized while the iterable is evaluated, so `for (let x of x)` throws.
+    const iterable =
+      statement.declarationKind && statement.declarationKind !== 'var'
+        ? this.withScope(statement.scope, () => this.evaluate(statement.iterable))
+        : this.evaluate(statement.iterable);
     const iterator =
       statement.kind === 'forIn' ? new ValueIterator(this.enumerableKeys(iterable)) : runtime.iterator(iterable);
     const frame = runtime.frame;

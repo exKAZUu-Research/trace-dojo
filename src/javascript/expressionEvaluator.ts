@@ -90,8 +90,11 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       }
       case 'binary': {
         const left = this.evaluate(expression.left);
-        const right = runtime.hold(left, () => this.evaluate(expression.right));
-        return this.binary(expression.operator, left, right);
+        // Both operands stay reachable while the operator's conversions may run the program's code.
+        return runtime.hold(left, () => {
+          const right = this.evaluate(expression.right);
+          return runtime.hold(right, () => this.binary(expression.operator, left, right));
+        });
       }
       case 'logical': {
         const left = this.evaluate(expression.left);
@@ -317,8 +320,10 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         this.putReference(reference, value);
         return value;
       }
-      const right = runtime.hold(current, () => this.evaluate(expression.value));
-      const value = this.binary(baseOperator, current, right);
+      const value = runtime.hold(current, () => {
+        const right = this.evaluate(expression.value);
+        return runtime.hold(right, () => this.binary(baseOperator, current, right));
+      });
       this.putReference(reference, value);
       return value;
     });

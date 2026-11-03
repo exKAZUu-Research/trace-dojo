@@ -1,5 +1,6 @@
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { TurtleWorld } from '../interpreter/turtleWorld';
+import { ArrayOps } from './arrayOps';
 import { Evaluator } from './evaluator';
 import { findReachableTurtles } from './garbageCollection';
 import { ValueIterator } from './iteration';
@@ -160,15 +161,21 @@ export class Runtime {
     return this.throwError('TypeError', `Cannot read properties of ${String(value)} (reading '${key}')`);
   }
 
-  set(target: Value, key: string, value: Value): void {
+  /**
+   * Assigns a property as `target[key] = value` does.
+   *
+   * @param lookupStart Where the property is looked up instead of `target`, as `super[key] = value` starts at the
+   * parent's prototype while acting on `this`.
+   */
+  set(target: Value, key: string, value: Value, lookupStart?: JsObject): void {
     if (!(target instanceof JsObject)) {
       if (target === undefined || target === null) {
         this.throwError('TypeError', `Cannot set properties of ${String(target)} (setting '${key}')`);
       }
       return this.throwError('TypeError', `Cannot create property '${key}' on ${typeof target} '${String(target)}'`);
     }
-    if (target instanceof JsArray && this.setArrayProperty(target, key, value)) return;
-    const property = this.findProperty(target, key);
+    if (!lookupStart && target instanceof JsArray && this.setArrayProperty(target, key, value)) return;
+    const property = this.findProperty(lookupStart ?? target, key);
     if (property && isAccessor(property)) {
       if (!property.set) {
         this.throwError('TypeError', `Cannot set property ${key} of ${this.describe(target)} which has only a getter`);
@@ -180,8 +187,11 @@ export class Runtime {
       this.throwError('TypeError', `Cannot assign to read only property '${key}' of ${this.describe(target)}`);
     }
     const own = target.properties.get(key);
+    if (own && isAccessor(own)) this.throwError('TypeError', `Cannot redefine property: ${key}`);
     if (own) {
-      (own as DataProperty).value = value;
+      if (!own.writable)
+        this.throwError('TypeError', `Cannot assign to read only property '${key}' of ${this.describe(target)}`);
+      own.value = value;
       return;
     }
     if (!target.extensible) this.throwError('TypeError', `Cannot add property ${key}, object is not extensible`);
@@ -465,7 +475,7 @@ export class Runtime {
 
   /** The iterator that `for...of`, spread, and array destructuring use: over an array, or a string's code points. */
   iterator(value: Value): ValueIterator {
-    if (value instanceof JsArray) return new ValueIterator(value);
+    if (value instanceof JsArray) return new ValueIterator(new ArrayOps(this, value));
     if (typeof value === 'string') {
       this.scan(value.length);
       // oxlint-disable-next-line typescript/no-misused-spread -- JavaScript iterates strings by code point.

@@ -199,6 +199,18 @@ test.each([
   ['String(new Array(3).map((_, i) => i).length + Object.keys([1, , 3]).length)', '5'],
   ['String(new Array(5000).fill(7).join().length)', '9999'],
   [
+    'String((() => { class A { set x(v) { this.stored = v; } } class B extends A { set x(v) { super.x = v + 1; } } const b = new B(); b.x = 2; return b.stored; })())',
+    '3',
+  ],
+  [
+    '(() => { let x = [1, 2]; try { for (let x of x) {} return "ran"; } catch (e) { return e.name; } })()',
+    'ReferenceError',
+  ],
+  [
+    'String((() => { Array.prototype[0] = 7; const a = new Array(1); const values = [a.join(), a.some((x) => x === 7), [...a][0]]; delete Array.prototype[0]; return values; })())',
+    '7,true,7',
+  ],
+  [
     'String((() => { const a = [1, 2, 3]; let calls = 0; a.some(() => { calls++; a.length = 0; return false; }); return calls; })())',
     '1',
   ],

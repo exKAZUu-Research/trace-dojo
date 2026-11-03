@@ -197,7 +197,9 @@ export abstract class EvaluatorBase {
         return;
       }
       case 'super': {
-        runtime.set(reference.thisValue, reference.key, value);
+        // The property is looked up from the parent's prototype, while a setter or a data write acts on `this`.
+        const home = this.functionFrame()?.homeObject;
+        runtime.set(reference.thisValue, reference.key, value, home?.proto ?? undefined);
         return;
       }
     }

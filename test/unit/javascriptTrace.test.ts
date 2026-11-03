@@ -579,3 +579,14 @@ new C().get();`;
     'this.Layer.#x (2)': 2,
   });
 });
+
+test('both operands of an operator keep their turtles while a conversion records a step', () => {
+  const program = `const left = {
+  valueOf() {
+    const ready = true; // step
+    return 1;
+  },
+};
+const total = left + { turtle: new Turtle(), valueOf: () => 2 };`;
+  expect(traceProgram('javascript', program, program).traceItems[1].turtles).toHaveLength(1);
+});
