@@ -135,3 +135,14 @@ test.each([
   expect(executeProgram('javascript', source)).toMatchObject(expected);
   expect(performance.now() - startedAt).toBeLessThan(5000);
 });
+
+test.each([
+  ["'ab'.replaceAll('', '-')", '-a-b-'],
+  ['String(new (class { constructor() { return 1; } })() instanceof Object)', 'true'],
+])('%s evaluates as JavaScript does', (expression, expected) => {
+  const execution = executeProgram(
+    'javascript',
+    `const result = ${expression};\nif (result !== '${expected}') throw result;`
+  );
+  expect(execution).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});

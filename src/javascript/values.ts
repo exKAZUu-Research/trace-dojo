@@ -91,6 +91,9 @@ export interface ClassField {
 }
 
 export class JsFunction extends JsObject {
+  /** Values a native function's closure keeps, such as what `bind` bound, which garbage collection must see. */
+  captured: Value[] = [];
+
   constructor(
     proto: JsObject | null,
     readonly behavior: FunctionBehavior

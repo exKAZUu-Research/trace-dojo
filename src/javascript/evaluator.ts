@@ -485,8 +485,10 @@ export class Evaluator extends ExpressionEvaluator {
         this.superCall(args, undefined);
       }
       if (isObject(result)) return result;
-      if (result !== undefined)
+      // A base constructor's primitive result is ignored, while a derived one's is an error.
+      if (result !== undefined && behavior.isDerived) {
         runtime.throwError('TypeError', 'Derived constructors may only return object or undefined');
+      }
       const constructed = functionFrame.thisValue;
       if (constructed === UNINITIALIZED) {
         return runtime.throwError(

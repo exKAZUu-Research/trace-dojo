@@ -101,8 +101,6 @@ function defineExtractions(method: StringMethod): void {
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Lists the builtin methods, each a small closure of its own.
-// code-gauge-allow functionNcss 36 -- Lists the builtin methods, each a small closure of its own.
 function defineBuilders(method: StringMethod): void {
   method('concat', 1, ({ runtime, args }, text) => {
     const result = text + args.map((value) => runtime.toString(value)).join('');
@@ -130,29 +128,38 @@ function defineBuilders(method: StringMethod): void {
     ['replace', false],
     ['replaceAll', true],
   ] as const) {
-    method(name, 2, ({ runtime, args, callRow }, text) => {
-      const pattern = runtime.toString(args[0]);
-      const replacement = args[1];
-      const positions: number[] = [];
-      for (let index = text.indexOf(pattern); index !== -1;) {
-        positions.push(index);
-        if (!all) break;
-        index = text.indexOf(pattern, index + Math.max(pattern.length, 1));
-        runtime.spend();
-      }
-      let result = '';
-      let copied = 0;
-      for (const position of positions) {
-        const inserted = isCallable(replacement)
-          ? runtime.toString(runtime.call(replacement, undefined, [pattern, position, text], callRow))
-          : expandReplacement(runtime.toString(replacement), pattern, position, text);
-        result += text.slice(copied, position) + inserted;
-        runtime.buildString(result.length);
-        copied = position + pattern.length;
-      }
-      return result + text.slice(copied);
-    });
+    method(name, 2, (call, text) => replaceText(call, text, all));
   }
+}
+
+function replaceText({ runtime, args, callRow }: NativeCall, text: string, all: boolean): string {
+  const pattern = runtime.toString(args[0]);
+  const replacement = args[1];
+  let result = '';
+  let copied = 0;
+  for (const position of matchPositions(runtime, text, pattern, all)) {
+    const inserted = isCallable(replacement)
+      ? runtime.toString(runtime.call(replacement, undefined, [pattern, position, text], callRow))
+      : expandReplacement(runtime.toString(replacement), pattern, position, text);
+    result += text.slice(copied, position) + inserted;
+    runtime.buildString(result.length);
+    copied = position + pattern.length;
+  }
+  return result + text.slice(copied);
+}
+
+/** The positions where `pattern` occurs in `text`: the first only, or all without overlapping. */
+function matchPositions(runtime: Runtime, text: string, pattern: string, all: boolean): number[] {
+  const positions: number[] = [];
+  for (let index = text.indexOf(pattern); index !== -1;) {
+    positions.push(index);
+    const next = index + Math.max(pattern.length, 1);
+    // indexOf clamps a start past the end, where an empty pattern would match again forever.
+    if (!all || next > text.length) break;
+    index = text.indexOf(pattern, next);
+    runtime.spend();
+  }
+  return positions;
 }
 
 /** Expands `$$`, `$&`, `` $` ``, and `$'` in a replacement string. */

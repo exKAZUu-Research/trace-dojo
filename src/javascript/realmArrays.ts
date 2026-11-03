@@ -2,7 +2,6 @@ import type { RealmBuilder } from './realm';
 import type { Runtime } from './runtime';
 import { appendAll, isCallable, JsArray, type JsFunction, type NativeCall, toBoolean, type Value } from './values';
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Lists the builtin methods, each a small closure of its own.
 export function defineArrayBuiltins(builder: RealmBuilder): void {
   const { arrayPrototype } = builder.realm;
   const arrayConstructor = builder.defineClass('Array', 1, arrayPrototype, ({ runtime, args }) => {
@@ -15,33 +14,41 @@ export function defineArrayBuiltins(builder: RealmBuilder): void {
   });
   builder.method(arrayConstructor, 'isArray', 1, ({ args }) => args[0] instanceof JsArray);
   builder.method(arrayConstructor, 'of', 0, ({ runtime, args }) => runtime.newArray([...args]));
-  builder.method(arrayConstructor, 'from', 1, (call) => {
-    const { runtime, args, callRow } = call;
-    const [source, mapper] = args;
-    if (mapper !== undefined && !isCallable(mapper))
-      runtime.throwError('TypeError', `${runtime.describe(mapper)} is not a function`);
-    let values: Value[];
-    if (source instanceof JsArray || typeof source === 'string') {
-      values = [...runtime.iterate(source)];
-    } else {
-      const length = toLength(
-        runtime,
-        source === undefined || source === null ? undefined : runtime.get(source, 'length')
-      );
-      runtime.allocate(length);
-      values = Array.from({ length }, (_, index) => runtime.get(source, String(index)));
-    }
-    const array = runtime.newArray(values);
+  builder.method(arrayConstructor, 'from', 1, arrayFrom);
+  defineMutators(builder);
+  defineAccessors(builder);
+  defineIterations(builder);
+}
+
+function arrayFrom({ runtime, args, callRow }: NativeCall): JsArray {
+  const [source, mapper] = args;
+  if (mapper !== undefined && !isCallable(mapper)) {
+    runtime.throwError('TypeError', `${runtime.describe(mapper)} is not a function`);
+  }
+  // The array is built in place so that the values read and mapped so far stay reachable during callbacks.
+  const array = runtime.newArray([]);
+  return runtime.hold(array, () => {
+    readArrayLike(runtime, source, array.elements);
     if (mapper) {
-      for (const [index, value] of values.entries()) {
+      for (const [index, value] of array.elements.entries()) {
         array.elements[index] = runtime.call(mapper, undefined, [value, index], callRow);
       }
     }
     return array;
   });
-  defineMutators(builder);
-  defineAccessors(builder);
-  defineIterations(builder);
+}
+
+/** Reads the values of an array, a string, or an object with a `length` into `elements`. */
+function readArrayLike(runtime: Runtime, source: Value, elements: Value[]): void {
+  if (source instanceof JsArray || typeof source === 'string') {
+    const items = runtime.iterate(source);
+    runtime.allocate(items.length);
+    appendAll(elements, items);
+    return;
+  }
+  const length = toLength(runtime, source === undefined || source === null ? undefined : runtime.get(source, 'length'));
+  runtime.allocate(length);
+  for (let index = 0; index < length; index++) elements.push(runtime.get(source, String(index)));
 }
 
 function toLength(runtime: Runtime, value: Value): number {
@@ -256,25 +263,34 @@ function defineMappings(builder: RealmBuilder): void {
   iterationMethod(builder, 'map', (array, callback, { runtime }) => {
     const result = runtime.newArray([]);
     runtime.setLength(result, array.elements.length);
-    forEachIndex(array, (index) => (result.elements[index] = callback(array.elements[index], index)));
+    runtime.hold(result, () =>
+      forEachIndex(array, (index) => (result.elements[index] = callback(array.elements[index], index)))
+    );
     return result;
   });
   iterationMethod(builder, 'filter', (array, callback, { runtime }) => {
-    const values: Value[] = [];
-    forEachIndex(array, (index) => {
-      const value = array.elements[index];
-      if (toBoolean(callback(value, index))) values.push(value);
-    });
-    return runtime.newArray(values);
+    const result = runtime.newArray([]);
+    runtime.hold(result, () =>
+      forEachIndex(array, (index) => {
+        const value = array.elements[index];
+        if (toBoolean(callback(value, index))) result.elements.push(value);
+      })
+    );
+    runtime.allocate(result.elements.length);
+    return result;
   });
   iterationMethod(builder, 'flatMap', (array, callback, { runtime }) => {
-    const values: Value[] = [];
-    forEachIndex(array, (index) => {
-      const mapped = callback(array.elements[index], index);
-      if (mapped instanceof JsArray) appendAll(values, mapped.elements);
-      else values.push(mapped);
-    });
-    return runtime.newArray(values);
+    const result = runtime.newArray([]);
+    const values = result.elements;
+    runtime.hold(result, () =>
+      forEachIndex(array, (index) => {
+        const mapped = callback(array.elements[index], index);
+        if (mapped instanceof JsArray) appendAll(values, mapped.elements);
+        else values.push(mapped);
+      })
+    );
+    runtime.allocate(values.length);
+    return result;
   });
 }
 

@@ -34,8 +34,9 @@ function pushObjectReferences(pending: unknown[], object: JsObject): number {
   pending.push(object.proto);
   for (const property of object.properties.values()) pushProperty(pending, property);
   for (const property of object.privateMembers?.values() ?? []) pushProperty(pending, property);
-  if (object instanceof JsFunction && object.behavior.kind !== 'native') {
-    pending.push(object.behavior.scope, object.behavior.homeObject);
+  if (object instanceof JsFunction) {
+    if (object.behavior.kind !== 'native') pending.push(object.behavior.scope, object.behavior.homeObject);
+    for (const value of object.captured) pending.push(value);
   }
   if (!(object instanceof JsArray)) return 0;
   // Pushed one by one: spreading a large array into push() exceeds the engine's argument limit.

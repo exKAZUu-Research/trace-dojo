@@ -426,3 +426,18 @@ const t = make(); // step`;
   expect(trace.traceItems.map(({ turtles }) => turtles.length)).toEqual([0, 1, 1]);
   expect(trace.finalTurtles).toHaveLength(1);
 });
+
+test.each([
+  [
+    'a bound function',
+    'function move(t) {\n  t.forward();\n}\nconst run = move.bind(undefined, new Turtle());\nconst count = 1; // step\nrun();',
+    1,
+  ],
+  [
+    'the results of map so far',
+    'const turtles = [1, 2].map((n) => {\n  const t = new Turtle(n, 0);\n  const ready = true; // step\n  return t;\n});\nturtles[0].forward();',
+    2,
+  ],
+])('a step keeps the turtles that %s holds', (_, program, count) => {
+  expect(traceProgram('javascript', program, program).finalTurtles).toHaveLength(count);
+});

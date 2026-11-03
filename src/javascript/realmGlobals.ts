@@ -143,6 +143,7 @@ function defineFunction(builder: RealmBuilder): void {
           : runtime.call(target, boundThis, [...boundArgs, ...call.args], call.callRow),
       target.isConstructor
     );
+    bound.captured = [target, boundThis, ...boundArgs];
     return bound;
   });
   builder.method(functionPrototype, 'toString', 0, ({ runtime, thisValue }) => {
