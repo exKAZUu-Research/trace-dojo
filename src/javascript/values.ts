@@ -138,18 +138,11 @@ export class Scope {
   ) {}
 
   lookup(name: string): Binding | undefined {
-    for (let scope: Scope | undefined = this; scope; scope = scope.parent) {
-      const binding = scope.bindings.get(name);
-      if (binding) return binding;
-    }
-    return undefined;
+    return this.bindings.get(name) ?? this.parent?.lookup(name);
   }
 
   nearestFunctionFrame(): FunctionFrame | undefined {
-    for (let scope: Scope | undefined = this; scope; scope = scope.parent) {
-      if (scope.functionFrame) return scope.functionFrame;
-    }
-    return undefined;
+    return this.functionFrame ?? this.parent?.nearestFunctionFrame();
   }
 }
 
@@ -168,6 +161,14 @@ export function toBoolean(value: Value): boolean {
 
 export function isCallable(value: Value): value is JsFunction {
   return value instanceof JsFunction;
+}
+
+/**
+ * Appends `items` one by one: spreading an array that a program built into a call can exceed the host's argument
+ * limit.
+ */
+export function appendAll<T>(target: T[], items: readonly T[]): void {
+  for (const item of items) target.push(item);
 }
 
 /** Whether a property key is an array index. */

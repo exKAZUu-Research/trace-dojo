@@ -1,14 +1,6 @@
 import type { Expression, FunctionNode, MemberExpression, Pattern, PropertyName, ScopeDeclarations } from './ast';
 import type { Runtime } from './runtime';
-import {
-  type FunctionFrame,
-  isObject,
-  JsFunction,
-  type JsObject,
-  Scope,
-  UNINITIALIZED,
-  type Value,
-} from './values';
+import { type FunctionFrame, isObject, JsFunction, type JsObject, Scope, UNINITIALIZED, type Value } from './values';
 
 /** How a pattern stores the values it destructures. */
 export type BindingMode =
@@ -121,7 +113,8 @@ export abstract class EvaluatorBase {
       binding.isHoisted = false;
       return;
     }
-    if (binding.value === UNINITIALIZED) runtime.throwError('ReferenceError', `Cannot access '${name}' before initialization`);
+    if (binding.value === UNINITIALIZED)
+      runtime.throwError('ReferenceError', `Cannot access '${name}' before initialization`);
     if (!binding.isMutable) runtime.throwError('TypeError', 'Assignment to constant variable.');
     binding.value = value;
     binding.isHoisted = false;
@@ -211,7 +204,8 @@ export abstract class EvaluatorBase {
       }
       case 'default': {
         const resolved = value === undefined ? this.evaluate(pattern.value) : value;
-        if (pattern.target.kind === 'identifier' && resolved instanceof JsFunction) nameFunction(runtime, resolved, pattern.target.name);
+        if (pattern.target.kind === 'identifier' && resolved instanceof JsFunction)
+          nameFunction(runtime, resolved, pattern.target.name);
         this.bindPattern(pattern.target, resolved, mode);
         return;
       }
@@ -221,7 +215,8 @@ export abstract class EvaluatorBase {
           for (const [index, element] of pattern.elements.entries()) {
             if (element) this.bindPattern(element, values[index], mode);
           }
-          if (pattern.rest) this.bindPattern(pattern.rest, runtime.newArray(values.slice(pattern.elements.length)), mode);
+          if (pattern.rest)
+            this.bindPattern(pattern.rest, runtime.newArray(values.slice(pattern.elements.length)), mode);
         });
         return;
       }

@@ -13,7 +13,8 @@ export function defineStringBuiltins(builder: RealmBuilder): void {
   );
   builder.method(stringConstructor, 'fromCharCode', 1, ({ runtime, args }) => {
     runtime.buildString(args.length);
-    return String.fromCharCode(...args.map((value) => runtime.toNumber(value)));
+    // oxlint-disable-next-line unicorn/prefer-code-point -- fromCharCode is the method the program called.
+    return args.map((value) => String.fromCharCode(runtime.toNumber(value))).join('');
   });
   builder.method(stringConstructor, 'fromCodePoint', 1, ({ runtime, args }) => {
     runtime.buildString(args.length * 2);
@@ -21,7 +22,7 @@ export function defineStringBuiltins(builder: RealmBuilder): void {
     if (codePoints.some((codePoint) => !Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10_ff_ff)) {
       runtime.throwError('RangeError', 'Invalid code point');
     }
-    return String.fromCodePoint(...codePoints);
+    return codePoints.map((codePoint) => String.fromCodePoint(codePoint)).join('');
   });
   const method = (name: string, length: number, run: (call: NativeCall, text: string) => Value): void => {
     builder.method(stringPrototype, name, length, (call) => {
@@ -53,7 +54,10 @@ function defineSearches(method: StringMethod): void {
     text.indexOf(runtime.toString(args[0]), integerArgument(runtime, args[1], 0))
   );
   method('lastIndexOf', 1, ({ runtime, args }, text) =>
-    text.lastIndexOf(runtime.toString(args[0]), args[1] === undefined ? Number.POSITIVE_INFINITY : runtime.toNumber(args[1]))
+    text.lastIndexOf(
+      runtime.toString(args[0]),
+      args[1] === undefined ? Number.POSITIVE_INFINITY : runtime.toNumber(args[1])
+    )
   );
   method('includes', 1, ({ runtime, args }, text) =>
     text.includes(runtime.toString(args[0]), integerArgument(runtime, args[1], 0))
@@ -82,6 +86,7 @@ function defineExtractions(method: StringMethod): void {
     text.slice(integerArgument(runtime, args[0], 0), integerArgument(runtime, args[1], text.length))
   );
   method('substring', 2, ({ runtime, args }, text) =>
+    // oxlint-disable-next-line unicorn/prefer-string-slice -- substring swaps its arguments, which slice does not.
     text.substring(integerArgument(runtime, args[0], 0), integerArgument(runtime, args[1], text.length))
   );
   method('trim', 0, (_, text) => text.trim());
@@ -127,7 +132,7 @@ function defineBuilders(method: StringMethod): void {
       const pattern = runtime.toString(args[0]);
       const replacement = args[1];
       const positions: number[] = [];
-      for (let index = text.indexOf(pattern); index !== -1; ) {
+      for (let index = text.indexOf(pattern); index !== -1;) {
         positions.push(index);
         if (!all) break;
         index = text.indexOf(pattern, index + Math.max(pattern.length, 1));

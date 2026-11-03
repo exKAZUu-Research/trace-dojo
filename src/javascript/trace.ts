@@ -69,7 +69,11 @@ class Snapshotter {
     const variables: Variables = { vars: {}, referenceVars: {} };
     const seen = new Set<string>();
     const segments: [string, Value][][][] = [[]];
-    for (let current: Scope | undefined = scope; current && current !== this.runtime.realm.globals; current = current.parent) {
+    for (
+      let current: Scope | undefined = scope;
+      current && current !== this.runtime.realm.globals;
+      current = current.parent
+    ) {
       const entries: [string, Value][] = [];
       for (const [name, binding] of current.bindings) {
         if (seen.has(name)) continue;
@@ -140,7 +144,8 @@ const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 function displayNodeOf(value: Value, seen: Set<JsObject>): DisplayNode | undefined {
   if (value === undefined || value === null) return NULL_NODE;
-  if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean') return { kind: 'value', value };
+  if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean')
+    return { kind: 'value', value };
   if (value instanceof JsFunction || seen.has(value)) return undefined;
   if (value.turtle) {
     if (!value.turtle.isAlive) return undefined;
@@ -167,7 +172,8 @@ function displayedEntries(object: JsObject): [string, Value][] {
   const message = object.isError ? object.properties.get('message') : undefined;
   if (message && !isAccessor(message)) entries.push(['message', message.value]);
   for (const [key, property] of object.properties) {
-    if (property.enumerable && !isAccessor(property) && !(property.value instanceof JsFunction)) entries.push([key, property.value]);
+    if (property.enumerable && !isAccessor(property) && !(property.value instanceof JsFunction))
+      entries.push([key, property.value]);
   }
   for (const [key, property] of object.privateMembers ?? []) {
     if (!isAccessor(property) && !(property.value instanceof JsFunction)) entries.push([key, property.value]);

@@ -3,7 +3,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 import { type TraceAnnotation, traceAnnotationsIn } from '../interpreter/traceAnnotations';
 import { loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Program } from './ast';
-import { ProgramConverter } from './parseProgram';
+import { ProgramConverter } from './programConverter';
 
 // The Script goal matches how learners' files run: no `import`, and `await` is an ordinary name.
 const parser = await loadParser('@willbooster/tree-sitter-javascript/tree-sitter-javascript_script.wasm');

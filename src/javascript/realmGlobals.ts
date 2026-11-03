@@ -76,8 +76,12 @@ function defineObject(builder: RealmBuilder): void {
     }
     return object;
   });
-  builder.method(objectPrototype, 'hasOwnProperty', 1, ({ runtime, thisValue, args }) =>
-    runtime.getOwnProperty(runtime.toObject(thisValue), runtime.toPropertyKey(args[0])) !== undefined
+  builder.method(
+    objectPrototype,
+    'hasOwnProperty',
+    1,
+    ({ runtime, thisValue, args }) =>
+      runtime.getOwnProperty(runtime.toObject(thisValue), runtime.toPropertyKey(args[0])) !== undefined
   );
   builder.method(objectPrototype, 'toString', 0, ({ thisValue }) => {
     if (thisValue === undefined) return '[object Undefined]';
@@ -135,7 +139,8 @@ function defineFunction(builder: RealmBuilder): void {
     return bound;
   });
   builder.method(functionPrototype, 'toString', 0, ({ runtime, thisValue }) => {
-    if (!(thisValue instanceof JsFunction)) return runtime.throwError('TypeError', 'Function.prototype.toString requires a function');
+    if (!(thisValue instanceof JsFunction))
+      return runtime.throwError('TypeError', 'Function.prototype.toString requires a function');
     const { behavior } = thisValue;
     if (behavior.kind === 'native') return `function ${runtime.functionName(thisValue)}() { [native code] }`;
     return behavior.node.source;
@@ -171,7 +176,8 @@ function createError({ runtime, args, newTarget }: NativeCall, prototype: JsObje
   error.isError = true;
   const [message, options] = args;
   if (message !== undefined) defineHidden(error, 'message', runtime.toString(message));
-  if (isObject(options) && runtime.hasProperty(options, 'cause')) defineHidden(error, 'cause', runtime.get(options, 'cause'));
+  if (isObject(options) && runtime.hasProperty(options, 'cause'))
+    defineHidden(error, 'cause', runtime.get(options, 'cause'));
   return error;
 }
 
@@ -227,13 +233,15 @@ function defineNumber(builder: RealmBuilder): void {
   builder.method(numberPrototype, 'toString', 1, ({ runtime, thisValue, args }) => {
     const value = thisNumber(runtime, thisValue);
     const radix = args[0] === undefined ? 10 : runtime.toNumber(args[0]);
-    if (!Number.isInteger(radix) || radix < 2 || radix > 36) runtime.throwError('RangeError', 'toString() radix must be between 2 and 36');
+    if (!Number.isInteger(radix) || radix < 2 || radix > 36)
+      runtime.throwError('RangeError', 'toString() radix must be between 2 and 36');
     return value.toString(radix);
   });
   builder.method(numberPrototype, 'toFixed', 1, ({ runtime, thisValue, args }) => {
     const value = thisNumber(runtime, thisValue);
     const digits = args[0] === undefined ? 0 : Math.trunc(runtime.toNumber(args[0]));
-    if (!(digits >= 0 && digits <= 100)) runtime.throwError('RangeError', 'toFixed() digits argument must be between 0 and 100');
+    if (!(digits >= 0 && digits <= 100))
+      runtime.throwError('RangeError', 'toFixed() digits argument must be between 0 and 100');
     return value.toFixed(digits);
   });
   builder.method(numberPrototype, 'valueOf', 0, ({ runtime, thisValue }) => thisNumber(runtime, thisValue));
@@ -244,17 +252,17 @@ function thisNumber(runtime: Runtime, value: Value): number {
   return value;
 }
 
+function thisBoolean(runtime: Runtime, value: Value): boolean {
+  if (typeof value !== 'boolean') return runtime.throwError('TypeError', 'This method requires a boolean');
+  return value;
+}
+
 function defineBoolean(builder: RealmBuilder): void {
   const { booleanPrototype } = builder.realm;
   builder.defineClass('Boolean', 1, booleanPrototype, ({ args }) => toBoolean(args[0]), false);
-  const thisBoolean = (runtime: Runtime, value: Value): boolean => {
-    if (typeof value !== 'boolean') return runtime.throwError('TypeError', 'This method requires a boolean');
-    return value;
-  };
   builder.method(booleanPrototype, 'toString', 0, ({ runtime, thisValue }) => String(thisBoolean(runtime, thisValue)));
   builder.method(booleanPrototype, 'valueOf', 0, ({ runtime, thisValue }) => thisBoolean(runtime, thisValue));
 }
-
 
 function defineMath(builder: RealmBuilder): void {
   const math = builder.namespace('Math');
@@ -285,12 +293,19 @@ function defineMath(builder: RealmBuilder): void {
     builder.method(math, name, 1, ({ runtime, args }) => Math[name](runtime.toNumber(args[0])));
   }
   for (const name of ['atan2', 'pow'] as const) {
-    builder.method(math, name, 2, ({ runtime, args }) => Math[name](runtime.toNumber(args[0]), runtime.toNumber(args[1])));
+    builder.method(math, name, 2, ({ runtime, args }) =>
+      Math[name](runtime.toNumber(args[0]), runtime.toNumber(args[1]))
+    );
   }
   for (const name of ['max', 'min', 'hypot'] as const) {
     builder.method(math, name, 2, ({ runtime, args }) => {
       runtime.scan(args.length);
-      return Math[name](...args.map((value) => runtime.toNumber(value)));
+      const numbers = args.map((value) => runtime.toNumber(value));
+      if (name === 'hypot') return numbers.reduce((sum, value) => Math.hypot(sum, value), 0);
+      return numbers.reduce(
+        (result, value) => Math[name](result, value),
+        name === 'max' ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY
+      );
     });
   }
 }
@@ -299,8 +314,10 @@ function defineConsole(builder: RealmBuilder): void {
   const console = builder.namespace('console');
   for (const name of ['log', 'info', 'warn', 'error', 'debug']) {
     builder.method(console, name, 0, ({ runtime, args }) => {
-      runtime.budget.print(`${args.map((value) => (typeof value === 'string' ? value : inspect(runtime, value))).join(' ')}\n`);
-      return undefined;
+      runtime.budget.print(
+        `${args.map((value) => (typeof value === 'string' ? value : inspect(runtime, value))).join(' ')}\n`
+      );
+      return;
     });
   }
 }
@@ -339,7 +356,7 @@ function defineTurtle(builder: RealmBuilder): void {
     define([...names], (runtime, turtle) => {
       const error = runtime.world.move(turtle.turtle as NonNullable<JsObject['turtle']>, sign);
       if (error) runtime.throwError('Error', error);
-      return undefined;
+      return;
     });
   }
   for (const [names, quarters] of [
@@ -348,7 +365,7 @@ function defineTurtle(builder: RealmBuilder): void {
   ] as const) {
     define([...names], (runtime, turtle) => {
       runtime.world.turn(turtle.turtle as NonNullable<JsObject['turtle']>, quarters);
-      return undefined;
+      return;
     });
   }
   define(['前に進めるか', 'canMoveForward'], (runtime, turtle) => {
@@ -356,10 +373,9 @@ function defineTurtle(builder: RealmBuilder): void {
     return runtime.world.canMoveForward(turtle.turtle as NonNullable<JsObject['turtle']>);
   });
   define(['前のマスが塗られているか'], (runtime, turtle) =>
-    runtime.world.isFrontPainted(turtle.turtle as NonNullable<JsObject['turtle']>)
-  );
+    runtime.world.isFrontPainted(turtle.turtle as NonNullable<JsObject['turtle']>));
   define(['remove'], (runtime, turtle) => {
     runtime.world.remove(turtle.turtle as NonNullable<JsObject['turtle']>);
-    return undefined;
+    return;
   });
 }

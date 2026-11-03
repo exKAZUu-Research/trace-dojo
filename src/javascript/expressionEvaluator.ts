@@ -2,6 +2,7 @@ import type { Argument, ClassNode, Expression, ObjectMember } from './ast';
 import { EvaluatorBase, nameFunction, type Reference, referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
 import {
   type AccessorProperty,
+  appendAll,
   isAccessor,
   isCallable,
   isObject,
@@ -81,7 +82,13 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       }
       case 'logical': {
         const left = this.evaluate(expression.left);
-        if (expression.operator === '&&' ? !toBoolean(left) : expression.operator === '||' ? toBoolean(left) : left !== undefined && left !== null) {
+        if (
+          expression.operator === '&&'
+            ? !toBoolean(left)
+            : expression.operator === '||'
+              ? toBoolean(left)
+              : left !== undefined && left !== null
+        ) {
           return left;
         }
         return this.evaluate(expression.right);
@@ -161,7 +168,14 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
           if (member.key.kind === 'computed' && value instanceof JsFunction) nameFunction(runtime, value, key);
           runtime.createDataProperty(object, key, value);
         } else {
-          defineAccessor(runtime, object, key, member.kind, this.createFunction(member.fn, runtime.frame.scope, object), true);
+          defineAccessor(
+            runtime,
+            object,
+            key,
+            member.kind,
+            this.createFunction(member.fn, runtime.frame.scope, object),
+            true
+          );
         }
       }
     });
@@ -172,11 +186,15 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     const { runtime } = this;
     if (source === undefined || source === null) return;
     if (typeof source === 'string') {
-      for (const [index, character] of [...source].entries()) runtime.createDataProperty(target, String(index), character);
+      // A string's properties are its UTF-16 code units.
+      for (const [index, character] of source.split('').entries()) {
+        runtime.createDataProperty(target, String(index), character);
+      }
       return;
     }
     if (!isObject(source)) return;
-    for (const key of runtime.ownEnumerableKeys(source)) runtime.createDataProperty(target, key, runtime.get(source, key));
+    for (const key of runtime.ownEnumerableKeys(source))
+      runtime.createDataProperty(target, key, runtime.get(source, key));
   }
 
   private member(expression: Extract<Expression, { kind: 'member' }>): ChainValue {
@@ -215,7 +233,8 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
             : { kind: 'property', base, key: this.propertyKey(target.property) }
         );
       }
-      thisValue = reference.kind === 'super' ? reference.thisValue : reference.kind === 'binding' ? undefined : reference.base;
+      thisValue =
+        reference.kind === 'super' ? reference.thisValue : reference.kind === 'binding' ? undefined : reference.base;
       fn = runtime.hold(thisValue, () => this.getReference(reference));
     } else {
       fn = this.evaluateChain(callee);
@@ -229,7 +248,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     temporaries.push(fn, thisValue);
     try {
       const args = this.evaluateArguments(expression.args);
-      temporaries.push(...args);
+      appendAll(temporaries, args);
       return runtime.call(fn, thisValue, args, expression.row);
     } finally {
       temporaries.length = held;
@@ -247,7 +266,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     temporaries.push(constructor);
     try {
       const args = this.evaluateArguments(expression.args);
-      temporaries.push(...args);
+      appendAll(temporaries, args);
       return runtime.construct(constructor, args, constructor, expression.row);
     } finally {
       temporaries.length = held;
@@ -272,7 +291,11 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       const current = this.getReference(reference);
       if (operator === '&&=' || operator === '||=' || operator === '??=') {
         const keeps =
-          operator === '&&=' ? !toBoolean(current) : operator === '||=' ? toBoolean(current) : current !== undefined && current !== null;
+          operator === '&&='
+            ? !toBoolean(current)
+            : operator === '||='
+              ? toBoolean(current)
+              : current !== undefined && current !== null;
         if (keeps) return current;
         const value = this.evaluate(expression.value);
         this.putReference(reference, value);
@@ -299,7 +322,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
           return true;
         }
         const reference = this.memberReference(target);
-        if (reference.kind === 'super') return runtime.throwError('ReferenceError', 'Unsupported reference to \'super\'');
+        if (reference.kind === 'super') return runtime.throwError('ReferenceError', "Unsupported reference to 'super'");
         if (reference.kind !== 'property') return runtime.throwError('TypeError', 'Private fields can not be deleted');
         return runtime.deleteProperty(reference.base, reference.key);
       }
@@ -362,7 +385,10 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       }
       case 'in': {
         if (!isObject(right)) {
-          return runtime.throwError('TypeError', `Cannot use 'in' operator to search for '${runtime.toPropertyKey(left)}' in ${runtime.describe(right)}`);
+          return runtime.throwError(
+            'TypeError',
+            `Cannot use 'in' operator to search for '${runtime.toPropertyKey(left)}' in ${runtime.describe(right)}`
+          );
         }
         return runtime.hasProperty(right, runtime.toPropertyKey(left));
       }
@@ -452,4 +478,3 @@ export function defineAccessor(
   else accessor.set = fn;
   runtime.defineProperty(object, key, accessor);
 }
-

@@ -1,0 +1,398 @@
+import type { Node } from '@willbooster/web-tree-sitter';
+
+import type { Argument, Expression, ObjectMember, Pattern, PropertyName } from './ast';
+import { ConverterBase } from './converterBase';
+import {
+  accessorOf,
+  calleeText,
+  checkBindingName,
+  fail,
+  field,
+  keyName,
+  nameAnonymous,
+  namedChildren,
+  rowOf,
+  unsupported,
+  unsupportedFeatures,
+  unwrapParentheses,
+} from './convertNodes';
+import { decodeStringLiteral, decodeTemplateFragment, parseNumberLiteral } from './literals';
+
+type ExpressionConverterFunction = (node: Node) => Expression;
+
+const assignableTypes = new Set(['identifier', 'member_expression', 'subscript_expression']);
+
+export abstract class ExpressionConverter extends ConverterBase {
+  private readonly expressionConverters: Record<string, ExpressionConverterFunction> = {
+    number: (node) => ({ kind: 'literal', value: this.number(node), row: rowOf(node) }),
+    string: (node) => ({ kind: 'literal', value: decodeStringLiteral(node.text), row: rowOf(node) }),
+    template_string: (node) => this.template(node),
+    true: (node) => ({ kind: 'literal', value: true, row: rowOf(node) }),
+    false: (node) => ({ kind: 'literal', value: false, row: rowOf(node) }),
+    // oxlint-disable-next-line unicorn/no-null -- JavaScript null is a value of the interpreted language.
+    null: (node) => ({ kind: 'literal', value: null, row: rowOf(node) }),
+    undefined: (node) => ({ kind: 'identifier', name: node.text, row: rowOf(node) }),
+    identifier: (node) => ({ kind: 'identifier', name: node.text, row: rowOf(node) }),
+    this: (node) => ({ kind: 'this', row: rowOf(node) }),
+    super: (node) => fail(node, 'super は super(...) か super.メソッド名 の形でしか書けません。'),
+    array: (node) => ({ kind: 'array', elements: this.arrayElements(node), row: rowOf(node) }),
+    object: (node) => ({ kind: 'object', members: this.objectMembers(node), row: rowOf(node) }),
+    function_expression: (node) => ({
+      kind: 'functionExpression',
+      fn: this.functionNode(node, 'normal'),
+      row: rowOf(node),
+    }),
+    arrow_function: (node) => ({ kind: 'functionExpression', fn: this.functionNode(node, 'arrow'), row: rowOf(node) }),
+    class: (node) => ({
+      kind: 'classExpression',
+      cls: this.classNode(node, node.childForFieldName('name')?.text ?? ''),
+      row: rowOf(node),
+    }),
+    member_expression: (node) => this.member(node),
+    subscript_expression: (node) => this.member(node),
+    call_expression: (node) => this.call(node),
+    new_expression: (node) => this.newExpression(node),
+    assignment_expression: (node) => this.assignment(node, '='),
+    augmented_assignment_expression: (node) => this.assignment(node, field(node, 'operator').text),
+    update_expression: (node) => this.update(node),
+    unary_expression: (node) => this.unary(node),
+    binary_expression: (node) => this.binary(node),
+    ternary_expression: (node) => ({
+      kind: 'conditional',
+      test: this.expression(field(node, 'condition')),
+      consequent: this.expression(field(node, 'consequence')),
+      alternate: this.expression(field(node, 'alternative')),
+      row: rowOf(node),
+    }),
+    sequence_expression: (node) => ({
+      kind: 'sequence',
+      expressions: namedChildren(node).map((child) => this.expression(child)),
+      row: rowOf(node),
+    }),
+    parenthesized_expression: (node) => ({
+      kind: 'parenthesized',
+      expression: this.expression(namedChildren(node)[0]),
+      row: rowOf(node),
+    }),
+    meta_property: (node) => unsupported(node, `${node.text} `),
+  };
+
+  expression(node: Node): Expression {
+    const convert = this.expressionConverters[node.type] as ExpressionConverterFunction | undefined;
+    if (convert) return convert(node);
+    return unsupported(node, unsupportedFeatures[node.type] ?? `式「${node.type}」`);
+  }
+
+  protected parenthesized(node: Node): Expression {
+    return this.expression(node.type === 'parenthesized_expression' ? namedChildren(node)[0] : node);
+  }
+
+  /** Converts the value of `name = value`, which names an anonymous function after the variable. */
+  protected namedValue(node: Node, target: Pattern): Expression {
+    const value = this.expression(node);
+    if (target.kind === 'identifier') nameAnonymous(value, target.name);
+    return value;
+  }
+
+  private number(node: Node): number {
+    const value = parseNumberLiteral(node.text);
+    if (value === undefined) return unsupported(node, `数値「${node.text}」`);
+    return value;
+  }
+
+  private template(node: Node): Expression {
+    const strings: string[] = [''];
+    const expressions: Expression[] = [];
+    for (const child of node.children) {
+      if (child?.type === 'template_substitution') {
+        expressions.push(this.expression(namedChildren(child)[0]));
+        strings.push('');
+      } else if (child?.type === 'string_fragment' || child?.type === 'escape_sequence') {
+        strings[strings.length - 1] += decodeTemplateFragment(child.text);
+      }
+    }
+    return { kind: 'template', strings, expressions, row: rowOf(node) };
+  }
+
+  private assignment(node: Node, operator: string): Expression {
+    const left = field(node, 'left');
+    if (operator !== '=' && !assignableTypes.has(unwrapParentheses(left).type))
+      fail(left, 'この式には代入できません。');
+    const target = this.assignmentTarget(left);
+    return { kind: 'assign', operator, target, value: this.namedValue(field(node, 'right'), target), row: rowOf(node) };
+  }
+
+  private update(node: Node): Expression {
+    const argument = unwrapParentheses(field(node, 'argument'));
+    if (!assignableTypes.has(argument.type)) fail(argument, 'この式は ++ や -- で変更できません。');
+    const operator = field(node, 'operator');
+    return {
+      kind: 'update',
+      operator: operator.text as '++' | '--',
+      prefix: operator.startIndex === node.startIndex,
+      target: this.assignmentTarget(argument),
+      row: rowOf(node),
+    };
+  }
+
+  private unary(node: Node): Expression {
+    const operator = field(node, 'operator').text;
+    const argument = field(node, 'argument');
+    if (operator === 'delete' && unwrapParentheses(argument).type === 'identifier')
+      fail(node, '変数は delete できません。');
+    return { kind: 'unary', operator, argument: this.expression(argument), row: rowOf(node) };
+  }
+
+  private binary(node: Node): Expression {
+    const operator = field(node, 'operator').text;
+    const leftNode = field(node, 'left');
+    if (leftNode.type === 'private_property_identifier') unsupported(leftNode, '#name in 式');
+    const left = this.expression(leftNode);
+    const right = this.expression(field(node, 'right'));
+    if (operator === '&&' || operator === '||' || operator === '??') {
+      return { kind: 'logical', operator, left, right, row: rowOf(node) };
+    }
+    return { kind: 'binary', operator, left, right, row: rowOf(node) };
+  }
+
+  /** Converts the elements of an array literal, where a comma without an element leaves a hole. */
+  private arrayElements(node: Node): (Argument | undefined)[] {
+    return elementsOf(node, (child) => this.argument(child));
+  }
+
+  private objectMembers(node: Node): ObjectMember[] {
+    return namedChildren(node).map((member): ObjectMember => {
+      switch (member.type) {
+        case 'pair': {
+          const key = this.propertyName(field(member, 'key'));
+          const value = this.expression(field(member, 'value'));
+          if (key.kind === 'key') nameAnonymous(value, key.key);
+          return { kind: 'property', key, value };
+        }
+        case 'shorthand_property_identifier': {
+          const value: Expression = { kind: 'identifier', name: member.text, row: rowOf(member) };
+          return { kind: 'property', key: { kind: 'key', key: member.text }, value };
+        }
+        case 'method_definition': {
+          return this.objectMethod(member);
+        }
+        case 'spread_element': {
+          return { kind: 'spread', argument: this.expression(namedChildren(member)[0]) };
+        }
+        default: {
+          return unsupported(member, `オブジェクトリテラルの「${member.type}」`);
+        }
+      }
+    });
+  }
+
+  private objectMethod(member: Node): ObjectMember {
+    const key = this.propertyName(field(member, 'name'));
+    if (key.kind === 'private') fail(member, 'オブジェクトリテラルには # で始まる名前を書けません。');
+    const accessor = accessorOf(member);
+    if (accessor) return { kind: accessor, key, fn: this.functionNode(member, accessor, keyName(key)) };
+    const fn = this.functionNode(member, 'method', keyName(key));
+    return { kind: 'property', key, value: { kind: 'functionExpression', fn, row: rowOf(member) } };
+  }
+
+  private member(node: Node): Expression {
+    const objectNode = field(node, 'object');
+    const optional = node.childForFieldName('optional_chain') !== null;
+    const object = objectNode.type === 'super' ? this.superReference(objectNode) : this.expression(objectNode);
+    if (object.kind === 'super' && optional) fail(node, 'super に ?. は使えません。');
+    let property: PropertyName;
+    if (node.type === 'member_expression') {
+      const propertyNode = field(node, 'property');
+      property =
+        propertyNode.type === 'private_property_identifier'
+          ? { kind: 'private', name: propertyNode.text }
+          : { kind: 'key', key: propertyNode.text };
+      if (property.kind === 'private' && object.kind === 'super') fail(node, 'super.#name とは書けません。');
+    } else {
+      property = { kind: 'computed', expression: this.expression(field(node, 'index')) };
+    }
+    return { kind: 'member', object, property, optional, row: rowOf(node) };
+  }
+
+  private superReference(node: Node): { kind: 'super'; row: number } {
+    if (!this.context.canReferenceSuper) fail(node, 'super.名前 はメソッドの中にしか書けません。');
+    return { kind: 'super', row: rowOf(node) };
+  }
+
+  private call(node: Node): Expression {
+    const functionNode = field(node, 'function');
+    const argumentsNode = field(node, 'arguments');
+    if (argumentsNode.type === 'template_string') unsupported(node, 'タグ付きテンプレート');
+    if (functionNode.type === 'import') unsupported(node, 'import() ');
+    const args = this.arguments(argumentsNode);
+    const row = rowOf(node);
+    if (functionNode.type === 'super') {
+      if (!this.context.canCallSuper) fail(node, 'super(...) は継承したクラスのコンストラクタの中にしか書けません。');
+      return { kind: 'call', callee: { kind: 'super', row }, args, optional: false, calleeText: 'super', row };
+    }
+    const optional = node.childForFieldName('optional_chain') !== null;
+    const callee = this.expression(functionNode);
+    return { kind: 'call', callee, args, optional, calleeText: calleeText(functionNode), row };
+  }
+
+  private newExpression(node: Node): Expression {
+    const argumentsNode = node.childForFieldName('arguments');
+    const callee = field(node, 'constructor');
+    return {
+      kind: 'new',
+      callee: this.expression(callee),
+      args: argumentsNode ? this.arguments(argumentsNode) : [],
+      calleeText: calleeText(callee),
+      row: rowOf(node),
+    };
+  }
+
+  private arguments(node: Node): Argument[] {
+    return namedChildren(node).map((child) => this.argument(child));
+  }
+
+  private argument(node: Node): Argument {
+    if (node.type === 'spread_element') return { kind: 'spread', argument: this.expression(namedChildren(node)[0]) };
+    return this.expression(node);
+  }
+
+  protected propertyName(node: Node): PropertyName {
+    switch (node.type) {
+      case 'property_identifier':
+      case 'identifier': {
+        return { kind: 'key', key: node.text };
+      }
+      case 'private_property_identifier': {
+        return { kind: 'private', name: node.text };
+      }
+      case 'string': {
+        return { kind: 'key', key: decodeStringLiteral(node.text) };
+      }
+      case 'number': {
+        return { kind: 'key', key: String(this.number(node)) };
+      }
+      case 'computed_property_name': {
+        return { kind: 'computed', expression: this.expression(namedChildren(node)[0]) };
+      }
+      default: {
+        return unsupported(node, `プロパティ名「${node.type}」`);
+      }
+    }
+  }
+
+  // Patterns --------------------------------------------------------------------------------------------------------
+
+  /** A pattern that declares variables, calling `declare` for each name. */
+  protected bindingPattern(node: Node, declare: (identifier: Node, name: string) => void): Pattern {
+    return this.pattern(node, (target) => {
+      if (target.type !== 'identifier' && target.type !== 'shorthand_property_identifier_pattern') {
+        fail(target, '宣言では変数名しか書けません。');
+      }
+      checkBindingName(target);
+      declare(target, target.text);
+      return { kind: 'identifier', name: target.text, row: rowOf(target) };
+    });
+  }
+
+  /** A pattern that assigns to existing variables and properties. */
+  protected assignmentTarget(node: Node): Pattern {
+    return this.pattern(node, (target) => {
+      const unwrapped = unwrapParentheses(target);
+      if (unwrapped.type === 'identifier' || unwrapped.type === 'shorthand_property_identifier_pattern') {
+        checkBindingName(unwrapped);
+        return { kind: 'identifier', name: unwrapped.text, row: rowOf(unwrapped) };
+      }
+      if (unwrapped.type !== 'member_expression' && unwrapped.type !== 'subscript_expression') {
+        return fail(target, 'この式には代入できません。');
+      }
+      const member = this.expression(unwrapped);
+      if (member.kind !== 'member' || member.optional) fail(unwrapped, '?. を含む式には代入できません。');
+      return member;
+    });
+  }
+
+  private pattern(node: Node, leaf: (node: Node) => Pattern): Pattern {
+    switch (node.type) {
+      case 'assignment_pattern':
+      case 'object_assignment_pattern':
+      // An object or array literal used as a pattern spells defaults as assignments.
+      case 'assignment_expression': {
+        const target = this.pattern(field(node, 'left'), leaf);
+        return { kind: 'default', target, value: this.expression(field(node, 'right')), row: rowOf(node) };
+      }
+      case 'array_pattern':
+      case 'array': {
+        return this.arrayPattern(node, leaf);
+      }
+      case 'object_pattern':
+      case 'object': {
+        return this.objectPattern(node, leaf);
+      }
+      default: {
+        return leaf(node);
+      }
+    }
+  }
+
+  private arrayPattern(node: Node, leaf: (node: Node) => Pattern): Pattern {
+    let rest: Pattern | undefined;
+    const elements = elementsOf(node, (child) => {
+      if (rest) fail(child, '残余要素は最後にしか書けません。');
+      if (child.type !== 'rest_pattern' && child.type !== 'spread_element') return this.pattern(child, leaf);
+      rest = this.pattern(namedChildren(child)[0], leaf);
+      return 'rest';
+    }).filter((element): element is Pattern | undefined => element !== 'rest');
+    return { kind: 'arrayPattern', elements, rest, row: rowOf(node) };
+  }
+
+  private objectPattern(node: Node, leaf: (node: Node) => Pattern): Pattern {
+    const properties: { key: PropertyName; value: Pattern }[] = [];
+    let rest: Pattern | undefined;
+    for (const child of namedChildren(node)) {
+      if (rest) fail(child, '残余プロパティは最後にしか書けません。');
+      switch (child.type) {
+        case 'shorthand_property_identifier_pattern':
+        case 'shorthand_property_identifier': {
+          properties.push({ key: { kind: 'key', key: child.text }, value: leaf(child) });
+          break;
+        }
+        case 'object_assignment_pattern': {
+          properties.push({ key: { kind: 'key', key: field(child, 'left').text }, value: this.pattern(child, leaf) });
+          break;
+        }
+        case 'pair_pattern':
+        case 'pair': {
+          const key = this.propertyName(field(child, 'key'));
+          properties.push({ key, value: this.pattern(field(child, 'value'), leaf) });
+          break;
+        }
+        case 'rest_pattern':
+        case 'spread_element': {
+          rest = this.pattern(namedChildren(child)[0], leaf);
+          break;
+        }
+        default: {
+          fail(child, '分割代入の書き方に誤りがあります。');
+        }
+      }
+    }
+    return { kind: 'objectPattern', properties, rest, row: rowOf(node) };
+  }
+}
+
+/** Converts the elements between brackets, where a comma without an element leaves a hole. */
+function elementsOf<T>(node: Node, convert: (child: Node) => T): (T | undefined)[] {
+  const elements: (T | undefined)[] = [];
+  let expectsElement = true;
+  for (const child of node.children) {
+    if (!child || child.type === '[' || child.type === ']' || child.type === 'comment') continue;
+    if (child.type === ',') {
+      if (expectsElement) elements.push(undefined);
+      expectsElement = true;
+      continue;
+    }
+    elements.push(convert(child));
+    expectsElement = false;
+  }
+  return elements;
+}

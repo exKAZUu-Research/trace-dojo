@@ -4,6 +4,7 @@ import { Evaluator } from './evaluator';
 import { createRealm, type ErrorName, type Realm } from './realm';
 import {
   type AccessorProperty,
+  appendAll,
   arrayIndexOf,
   type DataProperty,
   isAccessor,
@@ -59,8 +60,8 @@ export class Runtime {
   /** Charges for array elements or properties before they are allocated. */
   allocate(count: number): void {
     this.allocatedSlots += count;
-    this.spend(Math.ceil(count / 64));
     if (this.allocatedSlots > LIMITS.maxSlots) this.throwError('RangeError', 'Out of memory');
+    this.spend(Math.ceil(count / 64));
   }
 
   /** Charges for a string of `length` built at run time. */
@@ -106,7 +107,8 @@ export class Runtime {
 
   getOwnProperty(object: JsObject, key: string): Property | undefined {
     if (object instanceof JsArray) {
-      if (key === 'length') return { value: object.elements.length, writable: true, enumerable: false, configurable: false };
+      if (key === 'length')
+        return { value: object.elements.length, writable: true, enumerable: false, configurable: false };
       const index = arrayIndexOf(key);
       if (index !== undefined) {
         return index < object.elements.length
@@ -169,11 +171,16 @@ export class Runtime {
       const property = this.getOwnProperty(current, key);
       if (!property) continue;
       if (isAccessor(property)) {
-        if (!property.set) this.throwError('TypeError', `Cannot set property ${key} of ${this.describe(target)} which has only a getter`);
+        if (!property.set)
+          this.throwError(
+            'TypeError',
+            `Cannot set property ${key} of ${this.describe(target)} which has only a getter`
+          );
         this.call(property.set, target, [value]);
         return;
       }
-      if (!property.writable) this.throwError('TypeError', `Cannot assign to read only property '${key}' of ${this.describe(target)}`);
+      if (!property.writable)
+        this.throwError('TypeError', `Cannot assign to read only property '${key}' of ${this.describe(target)}`);
       if (current === target) {
         property.value = value;
         return;
@@ -193,7 +200,8 @@ export class Runtime {
 
   setLength(array: JsArray, value: Value): void {
     const length = this.toNumber(value);
-    if (!Number.isInteger(length) || length < 0 || length >= 2 ** 32) this.throwError('RangeError', 'Invalid array length');
+    if (!Number.isInteger(length) || length < 0 || length >= 2 ** 32)
+      this.throwError('RangeError', 'Invalid array length');
     if (length < array.elements.length) array.elements.length = length;
     else this.grow(array, length);
   }
@@ -319,7 +327,8 @@ export class Runtime {
     if (!isCallable(fn)) return this.throwError('TypeError', `${this.describe(fn)} is not a function`);
     this.spend();
     const { behavior } = fn;
-    if (behavior.kind === 'native') return behavior.run({ runtime: this, thisValue, args, newTarget: undefined, callRow });
+    if (behavior.kind === 'native')
+      return behavior.run({ runtime: this, thisValue, args, newTarget: undefined, callRow });
     if (behavior.kind === 'class') {
       return this.throwError('TypeError', `Class constructor ${this.functionName(fn)} cannot be invoked without 'new'`);
     }
@@ -402,8 +411,10 @@ export class Runtime {
 
   toObject(value: Value): JsObject {
     if (isObject(value)) return value;
-    if (value === undefined || value === null) this.throwError('TypeError', 'Cannot convert undefined or null to object');
-    if (typeof value === 'string') return this.newArray([...value]);
+    if (value === undefined || value === null)
+      this.throwError('TypeError', 'Cannot convert undefined or null to object');
+    // A string's properties are its UTF-16 code units.
+    if (typeof value === 'string') return this.newArray(value.split(''));
     return this.newObject();
   }
 
@@ -429,7 +440,7 @@ export class Runtime {
     if (!isCallable(constructor)) this.throwError('TypeError', "Right-hand side of 'instanceof' is not callable");
     if (!isObject(value)) return false;
     const prototype = this.get(constructor, 'prototype');
-    if (!isObject(prototype)) this.throwError('TypeError', "Function has non-object prototype in instanceof check");
+    if (!isObject(prototype)) this.throwError('TypeError', 'Function has non-object prototype in instanceof check');
     for (let current = value.proto; current; current = current.proto) {
       this.spend();
       if (current === prototype) return true;
@@ -442,6 +453,7 @@ export class Runtime {
     if (value instanceof JsArray) return value.elements;
     if (typeof value === 'string') {
       this.scan(value.length);
+      // oxlint-disable-next-line typescript/no-misused-spread -- JavaScript iterates strings by code point.
       return [...value];
     }
     return this.throwError('TypeError', `${this.describe(value)} is not iterable`);
@@ -469,7 +481,10 @@ export class Runtime {
     const reached = new Set<TurtleState>();
     const visited = new Set<unknown>();
     const pending: unknown[] = [];
-    for (const frame of this.frames) pending.push(frame.scope, ...frame.temporaries);
+    for (const frame of this.frames) {
+      pending.push(frame.scope);
+      appendAll(pending, frame.temporaries);
+    }
     let scanned = 0;
     while (pending.length > 0) {
       const item = pending.pop();

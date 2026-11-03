@@ -2,10 +2,10 @@ import type { Block, ClassNode, FunctionNode, Program, Statement, VariableDeclar
 import { nameFunction } from './evaluatorBase';
 import { defineAccessor, ExpressionEvaluator } from './expressionEvaluator';
 import {
+  type Binding,
   type ClassField,
   type FunctionBehavior,
   type FunctionFrame,
-  type Binding,
   isObject,
   JsFunction,
   type JsObject,
@@ -162,7 +162,7 @@ export class Evaluator extends ExpressionEvaluator {
       try {
         copyBindings();
         for (;;) {
-          if (statement.test && !toBoolean(this.evaluate(statement.test))) return undefined;
+          if (statement.test && !toBoolean(this.evaluate(statement.test))) return;
           const result = this.loopBody(statement.body, labels);
           if (result !== 'next') return result;
           copyBindings();
@@ -201,7 +201,7 @@ export class Evaluator extends ExpressionEvaluator {
           frame.scope = outer;
         }
       }
-      return undefined;
+      return;
     });
   }
 
@@ -209,7 +209,7 @@ export class Evaluator extends ExpressionEvaluator {
   private enumerableKeys(value: Value): string[] {
     const { runtime } = this;
     if (value === undefined || value === null) return [];
-    if (typeof value === 'string') return [...value].map((_, index) => String(index));
+    if (typeof value === 'string') return Array.from({ length: value.length }, (_, index) => String(index));
     if (!isObject(value)) return [];
     const keys: string[] = [];
     const seen = new Set<string>();
@@ -229,15 +229,17 @@ export class Evaluator extends ExpressionEvaluator {
     return runtime.hold(discriminant, () =>
       this.withScope(statement.scope, () => {
         const { cases } = statement;
-        let start = cases.findIndex((switchCase) => switchCase.test !== undefined && this.evaluate(switchCase.test) === discriminant);
+        let start = cases.findIndex(
+          (switchCase) => switchCase.test !== undefined && this.evaluate(switchCase.test) === discriminant
+        );
         if (start === -1) start = cases.findIndex((switchCase) => switchCase.test === undefined);
-        if (start === -1) return undefined;
+        if (start === -1) return;
         for (const switchCase of cases.slice(start)) {
           const completion = this.statements(switchCase.body);
-          if (completion?.kind === 'break' && completion.label === undefined) return undefined;
+          if (completion?.kind === 'break' && completion.label === undefined) return;
           if (completion) return completion;
         }
-        return undefined;
+        return;
       })
     );
   }
@@ -329,9 +331,13 @@ export class Evaluator extends ExpressionEvaluator {
     if (cls.superClass) {
       const superClass = this.evaluate(cls.superClass);
       if (superClass === null) {
+        // oxlint-disable-next-line unicorn/no-null -- `extends null` leaves the prototype without a parent.
         prototypeParent = null;
       } else if (!(superClass instanceof JsFunction) || !superClass.isConstructor) {
-        return runtime.throwError('TypeError', `Class extends value ${runtime.describe(superClass)} is not a constructor or null`);
+        return runtime.throwError(
+          'TypeError',
+          `Class extends value ${runtime.describe(superClass)} is not a constructor or null`
+        );
       } else {
         const parentPrototype = runtime.get(superClass, 'prototype');
         if (parentPrototype !== null && !isObject(parentPrototype)) {
@@ -367,7 +373,12 @@ export class Evaluator extends ExpressionEvaluator {
   }
 
   /** Defines the methods and accessors, collecting the fields, which return the static ones to initialize. */
-  private defineMembers(cls: ClassNode, fn: JsFunction, prototype: JsObject, instanceFields: ClassField[]): ClassField[] {
+  private defineMembers(
+    cls: ClassNode,
+    fn: JsFunction,
+    prototype: JsObject,
+    instanceFields: ClassField[]
+  ): ClassField[] {
     const { runtime } = this;
     const staticFields: ClassField[] = [];
     const classScope = runtime.frame.scope;
@@ -378,7 +389,8 @@ export class Evaluator extends ExpressionEvaluator {
       if (member.kind === 'field') {
         const { value } = member;
         const initialize = value
-          ? (thisValue: JsObject): Value => this.inScope(this.methodScope(classScope, thisValue, target), () => this.evaluate(value))
+          ? (thisValue: JsObject): Value =>
+              this.inScope(this.methodScope(classScope, thisValue, target), () => this.evaluate(value))
           : undefined;
         (member.isStatic ? staticFields : instanceFields).push({ key, isPrivate, initialize, stepId: member.stepId });
         continue;
@@ -389,7 +401,12 @@ export class Evaluator extends ExpressionEvaluator {
         const property: Property =
           member.kind === 'method'
             ? { value: method, writable: false, enumerable: false, configurable: false }
-            : { get: member.kind === 'getter' ? method : undefined, set: member.kind === 'setter' ? method : undefined, enumerable: false, configurable: false };
+            : {
+                get: member.kind === 'getter' ? method : undefined,
+                set: member.kind === 'setter' ? method : undefined,
+                enumerable: false,
+                configurable: false,
+              };
         const field: ClassField = { key, isPrivate, initialize: undefined, stepId: undefined, property };
         if (member.isStatic) mergePrivate(runtime, fn, key, property);
         else instanceFields.unshift(field);
@@ -413,12 +430,19 @@ export class Evaluator extends ExpressionEvaluator {
       return;
     }
     const value = field.initialize ? field.initialize(target) : undefined;
-    if (field.isPrivate) runtime.definePrivate(target, field.key, { value, writable: true, enumerable: false, configurable: false });
+    if (field.isPrivate)
+      runtime.definePrivate(target, field.key, { value, writable: true, enumerable: false, configurable: false });
     else runtime.createDataProperty(target, field.key, value);
     this.step(field.stepId);
   }
 
-  constructClass(fn: JsFunction, behavior: ClassBehavior, args: Value[], newTarget: JsFunction, callRow: number | undefined): JsObject {
+  constructClass(
+    fn: JsFunction,
+    behavior: ClassBehavior,
+    args: Value[],
+    newTarget: JsFunction,
+    callRow: number | undefined
+  ): JsObject {
     const { runtime } = this;
     const thisValue = behavior.isDerived
       ? UNINITIALIZED
@@ -441,7 +465,8 @@ export class Evaluator extends ExpressionEvaluator {
         this.superCall(args, undefined);
       }
       if (isObject(result)) return result;
-      if (result !== undefined) runtime.throwError('TypeError', 'Derived constructors may only return object or undefined');
+      if (result !== undefined)
+        runtime.throwError('TypeError', 'Derived constructors may only return object or undefined');
       const constructed = functionFrame.thisValue;
       if (constructed === UNINITIALIZED) {
         return runtime.throwError(
@@ -459,13 +484,18 @@ export class Evaluator extends ExpressionEvaluator {
     const { runtime } = this;
     const frame = this.functionFrame();
     const constructing = frame?.constructing;
-    if (!frame || !constructing || !frame.newTarget) return runtime.throwError('SyntaxError', "'super' keyword unexpected here");
+    if (!frame || !constructing || !frame.newTarget)
+      return runtime.throwError('SyntaxError', "'super' keyword unexpected here");
     const parent = constructing.proto;
     if (!(parent instanceof JsFunction) || !parent.isConstructor) {
-      return runtime.throwError('TypeError', `Super constructor ${runtime.describe(parent)} of anonymous class is not a constructor`);
+      return runtime.throwError(
+        'TypeError',
+        `Super constructor ${runtime.describe(parent)} of anonymous class is not a constructor`
+      );
     }
     const constructed = runtime.construct(parent, args, frame.newTarget, callRow);
-    if (frame.thisValue !== UNINITIALIZED) runtime.throwError('ReferenceError', 'Super constructor may only be called once');
+    if (frame.thisValue !== UNINITIALIZED)
+      runtime.throwError('ReferenceError', 'Super constructor may only be called once');
     frame.thisValue = constructed;
     const { behavior } = constructing;
     if (behavior.kind === 'class') {
@@ -494,4 +524,3 @@ function expectedArgumentCount(node: FunctionNode): number {
   const index = node.params.findIndex((param) => param.kind === 'default');
   return index === -1 ? node.params.length : index;
 }
-

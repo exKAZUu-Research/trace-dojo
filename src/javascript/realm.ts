@@ -24,6 +24,7 @@ export class RealmBuilder {
   readonly realm: Realm;
 
   constructor(readonly runtime: Runtime) {
+    // oxlint-disable-next-line unicorn/no-null -- Object.prototype ends every prototype chain.
     const objectPrototype = new JsObject(null);
     const errorPrototype = new JsObject(objectPrototype);
     this.realm = {
@@ -72,7 +73,13 @@ export class RealmBuilder {
   }
 
   /** Defines a constructor with its prototype object, linking the two as `constructor` and `prototype`. */
-  defineClass(name: string, length: number, prototype: JsObject, run: NativeFunction, isConstructor = true): JsFunction {
+  defineClass(
+    name: string,
+    length: number,
+    prototype: JsObject,
+    run: NativeFunction,
+    isConstructor = true
+  ): JsFunction {
     const fn = this.function(name, length, run, isConstructor);
     fn.properties.set('prototype', { value: prototype, writable: false, enumerable: false, configurable: false });
     prototype.properties.set('constructor', { value: fn, writable: true, enumerable: false, configurable: true });

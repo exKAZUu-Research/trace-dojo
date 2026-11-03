@@ -31,8 +31,9 @@ function decodeEscapes(text: string): string {
     /\\(?:u\{([\dA-Fa-f]+)\}|u([\dA-Fa-f]{4})|x([\dA-Fa-f]{2})|(\r\n|[\n\r\u2028\u2029])|([\s\S]))/g,
     (_, codePoint?: string, unit?: string, hex?: string, lineBreak?: string, other?: string) => {
       if (codePoint !== undefined) return String.fromCodePoint(Math.min(Number.parseInt(codePoint, 16), 0x10_ff_ff));
+      // oxlint-disable-next-line unicorn/prefer-code-point -- A `\uXXXX` escape is a UTF-16 code unit, maybe half a pair.
       if (unit !== undefined) return String.fromCharCode(Number.parseInt(unit, 16));
-      if (hex !== undefined) return String.fromCharCode(Number.parseInt(hex, 16));
+      if (hex !== undefined) return String.fromCodePoint(Number.parseInt(hex, 16));
       if (lineBreak !== undefined) return '';
       return simpleEscapes[other as string] ?? (other as string);
     }

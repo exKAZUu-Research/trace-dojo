@@ -1,6 +1,6 @@
 import type { RealmBuilder } from './realm';
 import type { Runtime } from './runtime';
-import { isCallable, JsArray, type JsFunction, type NativeCall, toBoolean, type Value } from './values';
+import { appendAll, isCallable, JsArray, type JsFunction, type NativeCall, toBoolean, type Value } from './values';
 
 export function defineArrayBuiltins(builder: RealmBuilder): void {
   const { arrayPrototype } = builder.realm;
@@ -17,12 +17,16 @@ export function defineArrayBuiltins(builder: RealmBuilder): void {
   builder.method(arrayConstructor, 'from', 1, (call) => {
     const { runtime, args, callRow } = call;
     const [source, mapper] = args;
-    if (mapper !== undefined && !isCallable(mapper)) runtime.throwError('TypeError', `${runtime.describe(mapper)} is not a function`);
+    if (mapper !== undefined && !isCallable(mapper))
+      runtime.throwError('TypeError', `${runtime.describe(mapper)} is not a function`);
     let values: Value[];
     if (source instanceof JsArray || typeof source === 'string') {
       values = [...runtime.iterate(source)];
     } else {
-      const length = toLength(runtime, source === undefined || source === null ? undefined : runtime.get(source, 'length'));
+      const length = toLength(
+        runtime,
+        source === undefined || source === null ? undefined : runtime.get(source, 'length')
+      );
       runtime.allocate(length);
       values = Array.from({ length }, (_, index) => runtime.get(source, String(index)));
     }
@@ -60,13 +64,15 @@ function relativeIndex(runtime: Runtime, value: Value, length: number, fallback:
 type ArrayMethod = (call: NativeCall, array: JsArray) => Value;
 
 function arrayMethod(builder: RealmBuilder, name: string, length: number, run: ArrayMethod): void {
-  builder.method(builder.realm.arrayPrototype, name, length, (call) => run(call, thisArray(call.runtime, call.thisValue, name)));
+  builder.method(builder.realm.arrayPrototype, name, length, (call) =>
+    run(call, thisArray(call.runtime, call.thisValue, name))
+  );
 }
 
 function defineMutators(builder: RealmBuilder): void {
   arrayMethod(builder, 'push', 1, ({ runtime, args }, array) => {
     runtime.allocate(args.length);
-    array.elements.push(...args);
+    appendAll(array.elements, args);
     return array.elements.length;
   });
   arrayMethod(builder, 'pop', 0, (_, array) => array.elements.pop());
@@ -77,18 +83,28 @@ function defineMutators(builder: RealmBuilder): void {
   arrayMethod(builder, 'unshift', 1, ({ runtime, args }, array) => {
     runtime.allocate(args.length);
     runtime.scan(array.elements.length);
-    array.elements.unshift(...args);
+    const rest = array.elements.splice(0);
+    appendAll(array.elements, args);
+    appendAll(array.elements, rest);
     return array.elements.length;
   });
   arrayMethod(builder, 'splice', 2, ({ runtime, args }, array) => {
     const { elements } = array;
     const start = relativeIndex(runtime, args[0], elements.length, 0);
     const deleteCount =
-      args.length === 0 ? 0 : args.length === 1 ? elements.length - start : Math.min(Math.max(Math.trunc(runtime.toNumber(args[1])) || 0, 0), elements.length - start);
+      args.length === 0
+        ? 0
+        : args.length === 1
+          ? elements.length - start
+          : Math.min(Math.max(Math.trunc(runtime.toNumber(args[1])) || 0, 0), elements.length - start);
     const items = args.slice(2);
     runtime.allocate(items.length);
     runtime.scan(elements.length);
-    return runtime.newArray(elements.splice(start, deleteCount, ...items));
+    const rest = elements.splice(start);
+    const removed = rest.splice(0, deleteCount);
+    appendAll(elements, items);
+    appendAll(elements, rest);
+    return runtime.newArray(removed);
   });
   arrayMethod(builder, 'reverse', 0, ({ runtime }, array) => {
     runtime.scan(array.elements.length);
@@ -111,14 +127,15 @@ function defineMutators(builder: RealmBuilder): void {
     const { elements } = array;
     runtime.scan(elements.length * Math.ceil(Math.log2(elements.length + 1)));
     const compare = comparator
-      ? (left: Value, right: Value): number => runtime.toNumber(runtime.call(comparator, undefined, [left, right], callRow)) || 0
+      ? (left: Value, right: Value): number =>
+          runtime.toNumber(runtime.call(comparator, undefined, [left, right], callRow)) || 0
       : (left: Value, right: Value): number => {
           const leftText = runtime.toString(left);
           const rightText = runtime.toString(right);
           return leftText < rightText ? -1 : leftText > rightText ? 1 : 0;
         };
     // The host's sort also places undefined last without calling the comparison.
-    const sorted = [...elements].sort(compare);
+    const sorted = elements.toSorted(compare);
     for (const [index, value] of sorted.entries()) elements[index] = value;
     return array;
   });
@@ -134,7 +151,7 @@ function defineAccessors(builder: RealmBuilder): void {
   arrayMethod(builder, 'concat', 1, ({ runtime, args }, array) => {
     const values = [...array.elements];
     for (const item of args) {
-      if (item instanceof JsArray) values.push(...item.elements);
+      if (item instanceof JsArray) appendAll(values, item.elements);
       else values.push(item);
     }
     return runtime.newArray(values);
@@ -147,9 +164,16 @@ function defineAccessors(builder: RealmBuilder): void {
   });
   for (const name of ['indexOf', 'lastIndexOf', 'includes'] as const) {
     arrayMethod(builder, name, 1, ({ runtime, args }, array) => {
-      runtime.scan(array.elements.length);
-      if (name === 'includes') return array.elements.includes(args[0]);
-      return name === 'indexOf' ? array.elements.indexOf(args[0]) : array.elements.lastIndexOf(args[0]);
+      const { elements } = array;
+      runtime.scan(elements.length);
+      // The host methods treat an explicit undefined start as 0, which differs from an omitted one for lastIndexOf.
+      if (args.length < 2) {
+        if (name === 'includes') return elements.includes(args[0]);
+        return name === 'indexOf' ? elements.indexOf(args[0]) : elements.lastIndexOf(args[0]);
+      }
+      const start = Math.trunc(runtime.toNumber(args[1])) || 0;
+      if (name === 'includes') return elements.includes(args[0], start);
+      return name === 'indexOf' ? elements.indexOf(args[0], start) : elements.lastIndexOf(args[0], start);
     });
   }
   arrayMethod(builder, 'flat', 0, ({ runtime, args }, array) => {
@@ -199,7 +223,7 @@ function defineIterations(builder: RealmBuilder): void {
   };
   iteration('forEach', (array, callback) => {
     forEachIndex(array, (index) => callback(array.elements[index], index));
-    return undefined;
+    return;
   });
   iteration('map', (array, callback, { runtime }) => {
     const result = runtime.newArray([]);
@@ -219,7 +243,7 @@ function defineIterations(builder: RealmBuilder): void {
     const values: Value[] = [];
     forEachIndex(array, (index) => {
       const mapped = callback(array.elements[index], index);
-      if (mapped instanceof JsArray) values.push(...mapped.elements);
+      if (mapped instanceof JsArray) appendAll(values, mapped.elements);
       else values.push(mapped);
     });
     return runtime.newArray(values);
@@ -261,7 +285,14 @@ function defineIterations(builder: RealmBuilder): void {
   }
 }
 
-function reduce(runtime: Runtime, array: JsArray, fn: JsFunction, args: Value[], fromEnd: boolean, callRow: number | undefined): Value {
+function reduce(
+  runtime: Runtime,
+  array: JsArray,
+  fn: JsFunction,
+  args: Value[],
+  fromEnd: boolean,
+  callRow: number | undefined
+): Value {
   const length = array.elements.length;
   const indices = Array.from({ length }, (_, step) => (fromEnd ? length - 1 - step : step));
   let accumulator: Value;
