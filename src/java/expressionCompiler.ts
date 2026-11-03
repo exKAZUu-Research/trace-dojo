@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 440 -- The expression compiler keeps one method per expression kind together.
+// code-gauge-allow-file fileNcss 442 -- The expression compiler keeps one method per expression kind together.
 import type { ArrayInitializer, BinaryOperator, Expression, Span } from './ast';
 import {
   type Compiled,
@@ -266,7 +266,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       if (context.isStatic) this.error(access, 'static メソッドの中では super を使えません。');
       const field = this.findField(context.cls.superclass as ClassInfo, name);
       if (!field) return this.error(access, `フィールド ${name} が見つかりません。`);
-      return this.fieldReference(field, field.isStatic ? undefined : thisValue(context));
+      return notConstant(this.fieldReference(field, field.isStatic ? undefined : thisValue(context)));
     }
     const object = this.compileExpression(context, access.object);
     if (object.kind === 'class') {
@@ -276,7 +276,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.checkAccess(context, field.owner, field.access, access, `フィールド ${name}`);
       return this.fieldReference(field, undefined);
     }
-    return this.compileMemberOfValue(context, access, object);
+    // Java folds a constant field only when it is named by its simple name or as TypeName.name.
+    return notConstant(this.compileMemberOfValue(context, access, object));
   }
 
   /** Resolves `object.name` where `object` is a value, including an array's `length`. */
@@ -790,6 +791,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.error(expression, `抽象メソッド ${name} は super から呼び出せません。`);
     }
   }
+}
+
+function notConstant(reference: Reference & { constant?: Value }): Reference & { constant?: Value } {
+  return { ...reference, constant: undefined };
 }
 
 function thisValue(context: MethodContext): CompiledValue {

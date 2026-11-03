@@ -348,6 +348,7 @@ class DefiniteAssignmentChecker {
   private tryStatement(statement: TryStatement, state: State): State {
     // Jumps out of the try statement also run its finally block on the way.
     const jumpCounts = this.targets.map((target) => [target.breaks.length, target.continues.length] as const);
+    const returnCount = this.returns.length;
     const afterBody = this.statement(statement.body, state);
     // A catch block may start after any assignment in the try block.
     const possiblyAssigned = new Set([...state.possiblyAssigned, ...this.assignedVariables(statement.body)]);
@@ -370,6 +371,7 @@ class DefiniteAssignmentChecker {
     };
     // Jumps taken inside the finally block itself leave from where they are, unchanged.
     const jumpsBeforeFinally = this.targets.map((target) => [target.breaks.length, target.continues.length] as const);
+    const returnsBeforeFinally = this.returns.length;
     const afterFinally = this.statement(statement.finallyBlock, finallyEntry);
     for (const [index, [breakCount, continueCount]] of jumpCounts.entries()) {
       const target = this.targets[index];
@@ -380,6 +382,9 @@ class DefiniteAssignmentChecker {
       ] as const) {
         for (let jump = from; jump < to; jump++) jumps[jump] = throughFinally(jumps[jump], afterFinally);
       }
+    }
+    for (let index = returnCount; index < returnsBeforeFinally; index++) {
+      this.returns[index] = throughFinally(this.returns[index], afterFinally);
     }
     return throughFinally(afterTryAndCatches, afterFinally);
   }

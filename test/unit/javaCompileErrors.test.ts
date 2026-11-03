@@ -838,6 +838,41 @@ const programs: [name: string, runs: boolean, source: string][] = [
     false,
     'public class Main { final int a; int b = a; Main() { a = 1; } public static void main(String[] x) { } }',
   ],
+  [
+    'thisConstLoop',
+    true,
+    'public class Main { final boolean b = true; void m() { while (this.b) { } System.out.println(1); } public static void main(String[] a) { } }',
+  ],
+  [
+    'thisConstMissingReturn',
+    false,
+    'public class Main { final boolean b = true; int f() { while (this.b) { } } public static void main(String[] a) { } }',
+  ],
+  [
+    'thisConstDa',
+    false,
+    'public class Main { final boolean b = true; void m() { int x; if (this.b) x = 1; System.out.println(x); } public static void main(String[] a) { } }',
+  ],
+  [
+    'simpleConstLoop',
+    false,
+    'public class Main { final boolean b = true; void m() { while (b) { } System.out.println(1); } public static void main(String[] a) { } }',
+  ],
+  [
+    'typeNameConstLoop',
+    false,
+    'public class Main { static final boolean B = true; void m() { while (Main.B) { } System.out.println(1); } public static void main(String[] a) { } }',
+  ],
+  [
+    'returnThroughFinally',
+    true,
+    'public class Main { final int f; Main() { try { return; } finally { f = 1; } } public static void main(String[] a) { } }',
+  ],
+  [
+    'returnInCatchFinally',
+    true,
+    'public class Main { final int f; Main() { try { throw new RuntimeException(); } catch (RuntimeException e) { return; } finally { f = 1; } } public static void main(String[] a) { } }',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {
