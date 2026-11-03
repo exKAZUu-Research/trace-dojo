@@ -139,7 +139,7 @@ test.each([
   [
     'flatMap to a large array',
     'const a = new Array(10000).fill(0);\na.flatMap(() => a);',
-    { kind: 'executed', uncaughtException: 'RangeError: Out of memory' },
+    { kind: 'limitExceeded', limit: 'operations' },
   ],
   [
     'joining holes with a long separator',

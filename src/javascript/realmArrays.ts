@@ -1,19 +1,14 @@
+import { ArrayOps } from './arrayOps';
 import { DONE } from './iteration';
 import type { RealmBuilder } from './realm';
+import { defineArrayIterations } from './realmArrayIterations';
 import type { Runtime } from './runtime';
-import {
-  appendAll,
-  type Element,
-  HOLE,
-  isCallable,
-  JsArray,
-  type JsFunction,
-  type NativeCall,
-  toBoolean,
-  type Value,
-  valueOfElement,
-} from './values';
+import { isCallable, JsArray, type NativeCall, type Value } from './values';
 
+/**
+ * Defines Array and Array.prototype. Each method follows its algorithm in the ECMAScript specification step by step,
+ * reading the length where the spec does and each element through {@link ArrayOps} only when the step reaches it.
+ */
 export function defineArrayBuiltins(builder: RealmBuilder): void {
   const { arrayPrototype } = builder.realm;
   const arrayConstructor = builder.defineClass('Array', 1, arrayPrototype, ({ runtime, args }) => {
@@ -27,41 +22,53 @@ export function defineArrayBuiltins(builder: RealmBuilder): void {
   builder.method(arrayConstructor, 'isArray', 1, ({ args }) => args[0] instanceof JsArray);
   builder.method(arrayConstructor, 'of', 0, ({ runtime, args }) => runtime.newArray([...args]));
   builder.method(arrayConstructor, 'from', 1, arrayFrom);
-  defineMutators(builder);
-  defineAccessors(builder);
-  defineIterations(builder);
+  defineStackMethods(builder);
+  defineReorderings(builder);
+  defineCopies(builder);
+  defineSearches(builder);
+  defineArrayIterations(builder);
 }
 
+export type ArrayMethod = (call: NativeCall, ops: ArrayOps) => Value;
+
+export function arrayMethod(builder: RealmBuilder, name: string, length: number, run: ArrayMethod): void {
+  builder.method(builder.realm.arrayPrototype, name, length, (call) => {
+    const { runtime, thisValue } = call;
+    if (!(thisValue instanceof JsArray)) {
+      return runtime.throwError('TypeError', `Array.prototype.${name} requires an array`);
+    }
+    return run(call, new ArrayOps(runtime, thisValue));
+  });
+}
+
+/** A new array that the builder's steps fill through {@link ArrayOps}, held so that its values stay reachable. */
+export function buildArray(runtime: Runtime, build: (ops: ArrayOps) => void): JsArray {
+  const array = runtime.newArray([]);
+  runtime.hold(array, () => build(new ArrayOps(runtime, array)));
+  return array;
+}
+
+// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function arrayFrom({ runtime, args, callRow }: NativeCall): JsArray {
   const [source, mapper] = args;
   if (mapper !== undefined && !isCallable(mapper)) {
     runtime.throwError('TypeError', `${runtime.describe(mapper)} is not a function`);
   }
-  // Each element is read just before its mapper runs, as JavaScript's iteration does, and the result is built in place
-  // so that the elements mapped so far stay reachable during the mapper's calls.
-  const array = runtime.newArray([]);
-  const add = (value: Value, index: number): void => {
-    runtime.allocate(1);
-    array.elements.push(mapper ? runtime.call(mapper, undefined, [value, index], callRow) : value);
-  };
-  return runtime.hold(array, () => {
-    forEachSourceValue(runtime, source, add);
-    return array;
-  });
-}
-
-/** Visits the values of an iterable or of an object with a `length`, each just before it is used. */
-function forEachSourceValue(runtime: Runtime, source: Value, visit: (value: Value, index: number) => void): void {
-  if (source instanceof JsArray || typeof source === 'string') {
-    const iterator = runtime.iterator(source);
-    for (let index = 0, value = iterator.next(); value !== DONE; index++, value = iterator.next()) visit(value, index);
-  } else {
+  return buildArray(runtime, (result) => {
+    const add = (value: Value, index: number): void =>
+      result.set(index, mapper ? runtime.call(mapper, undefined, [value, index], callRow) : value);
+    if (source instanceof JsArray || typeof source === 'string') {
+      // Each value is read just before its mapper runs, as JavaScript's iteration does.
+      const iterator = runtime.iterator(source);
+      for (let index = 0, value = iterator.next(); value !== DONE; index++, value = iterator.next()) add(value, index);
+      return;
+    }
     const length = toLength(
       runtime,
       source === undefined || source === null ? undefined : runtime.get(source, 'length')
     );
-    for (let index = 0; index < length; index++) visit(runtime.get(source, String(index)), index);
-  }
+    for (let index = 0; index < length; index++) add(runtime.get(source, String(index)), index);
+  });
 }
 
 function toLength(runtime: Runtime, value: Value): number {
@@ -69,103 +76,141 @@ function toLength(runtime: Runtime, value: Value): number {
   return Number.isNaN(length) || length < 0 ? 0 : Math.min(length, Number.MAX_SAFE_INTEGER);
 }
 
-function thisArray(runtime: Runtime, value: Value, name: string): JsArray {
-  if (!(value instanceof JsArray)) return runtime.throwError('TypeError', `Array.prototype.${name} requires an array`);
-  return value;
+/** The spec's ToIntegerOrInfinity. */
+function toInteger(runtime: Runtime, value: Value): number {
+  const number = runtime.toNumber(value);
+  return Number.isNaN(number) ? 0 : Math.trunc(number);
 }
 
-/** Resolves a relative index argument as `slice` and `splice` do. */
+/** Resolves a relative index as slice, splice, and fill do: negative counts from the end, clamped to the array. */
 function relativeIndex(runtime: Runtime, value: Value, length: number, fallback: number): number {
   if (value === undefined) return fallback;
-  const index = Math.trunc(runtime.toNumber(value)) || 0;
-  if (index < 0) return Math.max(length + index, 0);
-  return Math.min(index, length);
+  const index = toInteger(runtime, value);
+  return index < 0 ? Math.max(length + index, 0) : Math.min(index, length);
 }
 
-type ArrayMethod = (call: NativeCall, array: JsArray) => Value;
+// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionNcss 40 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+function defineStackMethods(builder: RealmBuilder): void {
+  arrayMethod(builder, 'push', 1, ({ runtime, args }, ops) => {
+    let length = ops.length;
+    runtime.scan(args.length);
+    for (const item of args) ops.set(length++, item);
+    ops.setLength(length);
+    return length;
+  });
+  arrayMethod(builder, 'pop', 0, (_, ops) => {
+    const { length } = ops;
+    if (length === 0) {
+      ops.setLength(0);
+      return;
+    }
+    const element = ops.get(length - 1);
+    ops.delete(length - 1);
+    ops.setLength(length - 1);
+    return element;
+  });
+  arrayMethod(builder, 'shift', 0, ({ runtime }, ops) => {
+    const { length } = ops;
+    if (length === 0) {
+      ops.setLength(0);
+      return;
+    }
+    runtime.scan(length);
+    const first = ops.get(0);
+    for (let index = 1; index < length; index++) ops.move(index, index - 1);
+    ops.delete(length - 1);
+    ops.setLength(length - 1);
+    return first;
+  });
+  arrayMethod(builder, 'unshift', 1, ({ runtime, args }, ops) => {
+    const { length } = ops;
+    runtime.scan(length + args.length);
+    if (args.length > 0) {
+      for (let index = length; index > 0; index--) ops.move(index - 1, index + args.length - 1);
+      for (const [index, item] of args.entries()) ops.set(index, item);
+    }
+    ops.setLength(length + args.length);
+    return length + args.length;
+  });
+  arrayMethod(builder, 'splice', 2, splice);
+}
 
-/** Defines a method that always sets the array's length, which a frozen array refuses even when nothing changes. */
-function mutatorMethod(builder: RealmBuilder, name: string, length: number, run: ArrayMethod): void {
-  arrayMethod(builder, name, length, (call, array) => {
-    call.runtime.mutableElements(array);
-    return run(call, array);
+// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+function splice({ runtime, args }: NativeCall, ops: ArrayOps): JsArray {
+  const { length } = ops;
+  const start = relativeIndex(runtime, args[0], length, 0);
+  const deleteCount =
+    args.length === 0
+      ? 0
+      : args.length === 1
+        ? length - start
+        : Math.min(Math.max(toInteger(runtime, args[1]), 0), length - start);
+  const items = args.slice(2);
+  runtime.scan(length + items.length);
+  const removed = buildArray(runtime, (result) => {
+    for (let index = 0; index < deleteCount; index++) {
+      if (ops.has(start + index)) result.set(index, ops.get(start + index));
+    }
+    result.setLength(deleteCount);
+  });
+  return runtime.hold(removed, () => {
+    if (items.length < deleteCount) {
+      for (let index = start; index < length - deleteCount; index++)
+        ops.move(index + deleteCount, index + items.length);
+      for (let index = length; index > length - deleteCount + items.length; index--) ops.delete(index - 1);
+    } else if (items.length > deleteCount) {
+      for (let index = length - deleteCount; index > start; index--) {
+        ops.move(index + deleteCount - 1, index + items.length - 1);
+      }
+    }
+    for (const [index, item] of items.entries()) ops.set(start + index, item);
+    ops.setLength(length - deleteCount + items.length);
+    return removed;
   });
 }
 
-function arrayMethod(builder: RealmBuilder, name: string, length: number, run: ArrayMethod): void {
-  builder.method(builder.realm.arrayPrototype, name, length, (call) =>
-    run(call, thisArray(call.runtime, call.thisValue, name))
-  );
-}
-
-// code-gauge-allow functionNcss 42 -- Lists the builtin methods, each a small closure of its own.
-function defineMutators(builder: RealmBuilder): void {
-  mutatorMethod(builder, 'push', 1, ({ runtime, args }, array) => {
-    runtime.allocate(args.length);
-    appendAll(array.elements, args);
-    return array.elements.length;
+// code-gauge-allow functionCognitiveComplexity 18 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+function defineReorderings(builder: RealmBuilder): void {
+  arrayMethod(builder, 'reverse', 0, ({ runtime }, ops) => {
+    const { length } = ops;
+    runtime.scan(length);
+    for (let lower = 0; lower < Math.floor(length / 2); lower++) {
+      const upper = length - lower - 1;
+      const lowerExists = ops.has(lower);
+      const lowerValue = lowerExists ? ops.get(lower) : undefined;
+      const upperExists = ops.has(upper);
+      const upperValue = upperExists ? ops.get(upper) : undefined;
+      if (upperExists) ops.set(lower, upperValue);
+      else if (lowerExists) ops.delete(lower);
+      if (lowerExists) ops.set(upper, lowerValue);
+      else if (upperExists) ops.delete(upper);
+    }
+    return ops.array;
   });
-  mutatorMethod(builder, 'pop', 0, (_, array) => valueOfElement(array.elements.pop()));
-  mutatorMethod(builder, 'shift', 0, ({ runtime }, array) => {
-    runtime.scan(array.elements.length);
-    return valueOfElement(array.elements.shift());
-  });
-  mutatorMethod(builder, 'unshift', 1, ({ runtime, args }, array) => {
-    runtime.allocate(args.length);
-    runtime.scan(array.elements.length);
-    const rest = array.elements.splice(0);
-    appendAll(array.elements, args);
-    appendAll(array.elements, rest);
-    return array.elements.length;
-  });
-  mutatorMethod(builder, 'splice', 2, ({ runtime, args }, array) => {
-    const { elements } = array;
-    const start = relativeIndex(runtime, args[0], elements.length, 0);
-    const deleteCount =
-      args.length === 0
-        ? 0
-        : args.length === 1
-          ? elements.length - start
-          : Math.min(Math.max(Math.trunc(runtime.toNumber(args[1])) || 0, 0), elements.length - start);
-    const items = args.slice(2);
-    runtime.allocate(items.length);
-    runtime.scan(elements.length);
-    const rest = elements.splice(start);
-    const removed = rest.splice(0, deleteCount);
-    appendAll(elements, items);
-    appendAll(elements, rest);
-    return runtime.newArray(removed);
-  });
-  // reverse, fill, and sort write only some elements, so a frozen array refuses them only when they write any.
-  arrayMethod(builder, 'reverse', 0, ({ runtime }, array) => reverseArray(runtime, array));
-
-  arrayMethod(builder, 'fill', 1, ({ runtime, args }, array) => {
-    const { elements } = array;
-    const start = relativeIndex(runtime, args[1], elements.length, 0);
-    const end = relativeIndex(runtime, args[2], elements.length, elements.length);
+  arrayMethod(builder, 'fill', 1, ({ runtime, args }, ops) => {
+    const { length } = ops;
+    const start = relativeIndex(runtime, args[1], length, 0);
+    const end = relativeIndex(runtime, args[2], length, length);
     runtime.scan(end - start);
-    if (start < end) runtime.mutableElements(array).fill(args[0], start, end);
-    return array;
+    for (let index = start; index < end; index++) ops.set(index, args[0]);
+    return ops.array;
   });
   arrayMethod(builder, 'sort', 1, sortArray);
 }
 
-function reverseArray(runtime: Runtime, array: JsArray): JsArray {
-  const { elements } = array;
-  runtime.scan(elements.length);
-  // Swapping two holes writes nothing, and the middle element of an odd length stays in place.
-  const writes = elements.some((element, index) => element !== HOLE && index !== elements.length - 1 - index);
-  if (writes) runtime.mutableElements(array).reverse();
-  return array;
-}
-
-function sortArray({ runtime, args, callRow }: NativeCall, array: JsArray): JsArray {
+// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+function sortArray({ runtime, args, callRow }: NativeCall, ops: ArrayOps): JsArray {
   const comparator = args[0];
   if (comparator !== undefined && !isCallable(comparator)) {
     runtime.throwError('TypeError', 'The comparison function must be either a function or undefined');
   }
-  const { elements } = array;
-  runtime.scan(elements.length * Math.ceil(Math.log2(elements.length + 1)));
+  const { length } = ops;
+  // SortIndexedProperties collects the present elements into a list, held while the comparator runs.
+  const collected = buildArray(runtime, (items) => {
+    for (let index = 0; index < length; index++) if (ops.has(index)) items.set(items.length, ops.get(index));
+  });
+  runtime.scan(collected.elements.length * Math.ceil(Math.log2(collected.elements.length + 1)));
   const compare = comparator
     ? (left: Value, right: Value): number =>
         runtime.toNumber(runtime.call(comparator, undefined, [left, right], callRow)) || 0
@@ -174,267 +219,126 @@ function sortArray({ runtime, args, callRow }: NativeCall, array: JsArray): JsAr
         const rightText = runtime.toString(right);
         return leftText < rightText ? -1 : leftText > rightText ? 1 : 0;
       };
-  const length = elements.length;
-  // The collected values stay reachable while the comparator runs, even if it empties the array.
-  const collected = runtime.newArray(elements.filter((element) => element !== HOLE));
-  // The host's sort also places undefined last without calling the comparison; holes go after it.
-  const sorted = runtime.hold(collected, () => (collected.elements as Value[]).toSorted(compare));
-  if (sorted.length === 0) return array;
-  // Written back as the spec does, whatever the comparator did to the length: the sorted values from index 0, then
-  // holes up to the length the sort started with.
-  runtime.hold(collected, () => {
-    for (const [index, value] of sorted.entries()) runtime.setElement(array, index, value);
+  return runtime.hold(collected, () => {
+    // The host's sort also places undefined last without calling the comparison.
+    const sorted = (collected.elements as Value[]).toSorted(compare);
+    for (const [index, value] of sorted.entries()) ops.set(index, value);
+    for (let index = sorted.length; index < length; index++) ops.delete(index);
+    return ops.array;
   });
-  const writable = runtime.mutableElements(array);
-  for (let index = sorted.length; index < Math.min(length, writable.length); index++) writable[index] = HOLE;
-  return array;
 }
 
-function defineAccessors(builder: RealmBuilder): void {
-  arrayMethod(builder, 'slice', 2, ({ runtime, args }, array) => {
-    const { elements } = array;
-    const start = relativeIndex(runtime, args[0], elements.length, 0);
-    const end = relativeIndex(runtime, args[1], elements.length, elements.length);
-    return runtime.newArray(elements.slice(start, Math.max(start, end)));
-  });
-  arrayMethod(builder, 'concat', 1, ({ runtime, args }, array) => concatArrays(runtime, [array, ...args]));
-
-  arrayMethod(builder, 'join', 1, ({ runtime, args }, array) => joinArray(runtime, array, args[0], new Set()));
-  arrayMethod(builder, 'toString', 0, ({ runtime }, array) => joinArray(runtime, array, undefined, new Set()));
-  arrayMethod(builder, 'at', 1, ({ runtime, args }, array) => {
-    const index = Math.trunc(runtime.toNumber(args[0])) || 0;
-    return valueOfElement(array.elements.at(index));
-  });
-  for (const name of ['indexOf', 'lastIndexOf', 'includes'] as const) {
-    arrayMethod(builder, name, 1, ({ runtime, args }, array) => {
-      runtime.scan(array.elements.length);
-      return search(
-        array.elements,
-        name,
-        args[0],
-        args.length < 2 ? undefined : Math.trunc(runtime.toNumber(args[1])) || 0
-      );
+// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+function defineCopies(builder: RealmBuilder): void {
+  arrayMethod(builder, 'slice', 2, ({ runtime, args }, ops) => {
+    const { length } = ops;
+    const start = relativeIndex(runtime, args[0], length, 0);
+    const end = relativeIndex(runtime, args[1], length, length);
+    runtime.scan(end - start);
+    return buildArray(runtime, (result) => {
+      for (let index = start; index < end; index++) if (ops.has(index)) result.set(index - start, ops.get(index));
+      result.setLength(Math.max(end - start, 0));
     });
-  }
-  arrayMethod(builder, 'flat', 0, ({ runtime, args }, array) => {
-    const depth = args[0] === undefined ? 1 : Math.trunc(runtime.toNumber(args[0])) || 0;
-    const result = runtime.newArray([]);
-    flatten(runtime, array.elements, Math.min(depth, 100), result.elements);
-    return result;
+  });
+  arrayMethod(builder, 'concat', 1, ({ runtime, args }, ops) =>
+    buildArray(runtime, (result) => {
+      let next = 0;
+      for (const item of [ops.array, ...args]) {
+        if (!(item instanceof JsArray)) {
+          result.set(next++, item);
+          continue;
+        }
+        const source = new ArrayOps(runtime, item);
+        const { length } = source;
+        runtime.scan(length);
+        for (let index = 0; index < length; index++, next++) if (source.has(index)) result.set(next, source.get(index));
+      }
+      result.setLength(next);
+    })
+  );
+  arrayMethod(builder, 'flat', 0, ({ runtime, args }, ops) => {
+    const depth = args[0] === undefined ? 1 : Math.max(toInteger(runtime, args[0]), 0);
+    return buildArray(runtime, (result) => flattenInto(runtime, result, ops, Math.min(depth, 100)));
   });
 }
 
-/**
- * Searches with the host's methods, which treat an explicit undefined start as 0 unlike an omitted one. A hole never
- * equals a value, as indexOf skips holes, but includes reads it as undefined.
- */
-function search(
-  elements: Element[],
-  name: 'indexOf' | 'lastIndexOf' | 'includes',
-  value: Value,
-  start: number | undefined
-): number | boolean {
-  if (name === 'includes') {
-    const values = elements.map(valueOfElement);
-    return start === undefined ? values.includes(value) : values.includes(value, start);
-  }
-  if (name === 'indexOf') return start === undefined ? elements.indexOf(value) : elements.indexOf(value, start);
-  return start === undefined ? elements.lastIndexOf(value) : elements.lastIndexOf(value, start);
-}
-
-/** Appends the elements of nested arrays, charging for each array before copying it, as one array may recur. */
-function flatten(runtime: Runtime, elements: Element[], depth: number, values: Element[]): void {
-  runtime.allocate(elements.length);
-  for (const element of elements) {
-    if (element instanceof JsArray && depth > 0) flatten(runtime, element.elements, depth - 1, values);
-    else if (element !== HOLE) values.push(element);
+/** The spec's FlattenIntoArray without a mapper: appends the present elements, flattening nested arrays. */
+export function flattenInto(runtime: Runtime, target: ArrayOps, source: ArrayOps, depth: number): void {
+  const { length } = source;
+  runtime.scan(length);
+  for (let index = 0; index < length; index++) {
+    if (!source.has(index)) continue;
+    const element = source.get(index);
+    if (depth > 0 && element instanceof JsArray)
+      flattenInto(runtime, target, new ArrayOps(runtime, element), depth - 1);
+    else target.set(target.length, element);
   }
 }
 
-/** Concatenates arrays and values, charging the result before copying, since it can be far larger than every input. */
-function concatArrays(runtime: Runtime, parts: Value[]): JsArray {
-  let length = 0;
-  for (const part of parts) length += part instanceof JsArray ? part.elements.length : 1;
-  const result = runtime.newArray([]);
-  runtime.allocate(length);
-  for (const part of parts) {
-    if (part instanceof JsArray) appendAll(result.elements, part.elements);
-    else result.elements.push(part);
-  }
-  return result;
+function defineSearches(builder: RealmBuilder): void {
+  arrayMethod(builder, 'join', 1, ({ runtime, args }, ops) => joinArray(runtime, ops, args[0], new Set()));
+  arrayMethod(builder, 'toString', 0, ({ runtime }, ops) => joinArray(runtime, ops, undefined, new Set()));
+  arrayMethod(builder, 'at', 1, ({ runtime, args }, ops) => {
+    const { length } = ops;
+    const relative = toInteger(runtime, args[0]);
+    const index = relative >= 0 ? relative : length + relative;
+    return index < 0 || index >= length ? undefined : ops.get(index);
+  });
+  arrayMethod(builder, 'indexOf', 1, ({ runtime, args }, ops) => indexOf(runtime, ops, args, false));
+  arrayMethod(builder, 'lastIndexOf', 1, ({ runtime, args }, ops) => indexOf(runtime, ops, args, true));
+  arrayMethod(builder, 'includes', 1, ({ runtime, args }, ops) => includes(runtime, ops, args));
 }
 
-function joinArray(runtime: Runtime, array: JsArray, separatorValue: Value, joining: Set<JsArray>): string {
-  if (joining.has(array)) return '';
+/** The spec's indexOf and lastIndexOf: strict equality, skipping absent elements. */
+function indexOf(runtime: Runtime, ops: ArrayOps, args: Value[], fromEnd: boolean): number {
+  const { length } = ops;
+  runtime.scan(length);
+  const start = args.length < 2 ? (fromEnd ? length - 1 : 0) : toInteger(runtime, args[1]);
+  const step = fromEnd ? -1 : 1;
+  let index = fromEnd
+    ? start < 0
+      ? length + start
+      : Math.min(start, length - 1)
+    : start < 0
+      ? Math.max(length + start, 0)
+      : start;
+  for (; index >= 0 && index < length; index += step) {
+    if (ops.has(index) && ops.get(index) === args[0]) return index;
+  }
+  return -1;
+}
+
+/** The spec's includes: SameValueZero, which matches NaN with NaN and 0 with -0, reading absent elements as undefined. */
+function includes(runtime: Runtime, ops: ArrayOps, args: Value[]): boolean {
+  const { length } = ops;
+  runtime.scan(length);
+  const start = args.length < 2 ? 0 : toInteger(runtime, args[1]);
+  for (let index = start < 0 ? Math.max(length + start, 0) : start; index < length; index++) {
+    const element = ops.get(index);
+    if (element === args[0] || (Number.isNaN(element) && Number.isNaN(args[0]))) return true;
+  }
+  return false;
+}
+
+function joinArray(runtime: Runtime, ops: ArrayOps, separatorValue: Value, joining: Set<JsArray>): string {
+  if (joining.has(ops.array)) return '';
   // The length is read before any conversion, which may run the program's code and change the array.
-  const length = array.elements.length;
+  const { length } = ops;
   const separator = separatorValue === undefined ? ',' : runtime.toString(separatorValue);
-  joining.add(array);
+  joining.add(ops.array);
   runtime.scan(length);
   try {
     let text = '';
     for (let index = 0; index < length; index++) {
-      const element = index < array.elements.length ? array.elements[index] : HOLE;
+      const element = ops.get(index);
       let part = index > 0 ? separator : '';
-      if (element instanceof JsArray) part += joinArray(runtime, element, undefined, joining);
-      else if (element !== undefined && element !== null && element !== HOLE) part += runtime.toString(element);
+      if (element instanceof JsArray) part += joinArray(runtime, new ArrayOps(runtime, element), undefined, joining);
+      else if (element !== undefined && element !== null) part += runtime.toString(element);
       runtime.extendString(text.length + part.length, part.length);
       text += part;
     }
     return text;
   } finally {
-    joining.delete(array);
-  }
-}
-
-type Callback = (value: Value, index: number) => Value;
-type Iteration = (array: JsArray, callback: Callback, call: NativeCall) => Value;
-
-/** Defines a method that calls its first argument for elements, with its second argument as `this`. */
-function iterationMethod(builder: RealmBuilder, name: string, run: Iteration): void {
-  arrayMethod(builder, name, 1, (call, array) => {
-    const { runtime, args, callRow } = call;
-    const fn = args[0];
-    if (!isCallable(fn)) return runtime.throwError('TypeError', `${runtime.describe(fn)} is not a function`);
-    const thisArg = args[1];
-    return run(array, (value, index) => runtime.call(fn, thisArg, [value, index, array], callRow), call);
-  });
-}
-
-function defineIterations(builder: RealmBuilder): void {
-  defineMappings(builder);
-  defineFinders(builder);
-  for (const fromEnd of [false, true]) {
-    arrayMethod(builder, fromEnd ? 'reduceRight' : 'reduce', 1, ({ runtime, args, callRow }, array) => {
-      const fn = args[0];
-      if (!isCallable(fn)) return runtime.throwError('TypeError', `${runtime.describe(fn)} is not a function`);
-      return reduce(runtime, array, fn, args, fromEnd, callRow);
-    });
-  }
-}
-
-function defineMappings(builder: RealmBuilder): void {
-  iterationMethod(builder, 'forEach', (array, callback) => {
-    forEachElement(array, callback);
-    return;
-  });
-  iterationMethod(builder, 'map', (array, callback, { runtime }) => {
-    const result = runtime.newArray([]);
-    runtime.setLength(result, array.elements.length);
-    runtime.hold(result, () =>
-      forEachElement(array, (value, index) => (result.elements[index] = callback(value, index)))
-    );
-    return result;
-  });
-  iterationMethod(builder, 'filter', (array, callback, { runtime }) => {
-    const result = runtime.newArray([]);
-    runtime.hold(result, () =>
-      forEachElement(array, (value, index) => {
-        if (toBoolean(callback(value, index))) result.elements.push(value);
-      })
-    );
-    runtime.allocate(result.elements.length);
-    return result;
-  });
-  iterationMethod(builder, 'flatMap', (array, callback, { runtime }) => {
-    const result = runtime.newArray([]);
-    const values = result.elements;
-    runtime.hold(result, () =>
-      forEachElement(array, (value, index) => {
-        const mapped = callback(value, index);
-        if (mapped instanceof JsArray) {
-          flatten(runtime, mapped.elements, 0, values);
-        } else {
-          runtime.allocate(1);
-          values.push(mapped);
-        }
-      })
-    );
-    return result;
-  });
-}
-
-function defineFinders(builder: RealmBuilder): void {
-  for (const [name, fromEnd, returnsIndex] of [
-    ['find', false, false],
-    ['findIndex', false, true],
-    ['findLast', true, false],
-    ['findLastIndex', true, true],
-  ] as const) {
-    // These visit holes as undefined, unlike some and every.
-    iterationMethod(builder, name, (array, callback) => {
-      const found = findElement(array, callback, fromEnd, false);
-      return returnsIndex ? found.index : found.value;
-    });
-  }
-  iterationMethod(builder, 'some', (array, callback) => findElement(array, callback, false, true).index !== -1);
-  iterationMethod(
-    builder,
-    'every',
-    (array, callback) =>
-      findElement(array, (value, index) => !toBoolean(callback(value, index)), false, true).index === -1
-  );
-}
-
-/**
- * The first element (or the last with `fromEnd`) for which `callback` returns a truthy value, as the callback saw it,
- * or index -1.
- */
-function findElement(
-  array: JsArray,
-  callback: Callback,
-  fromEnd: boolean,
-  skipsHoles: boolean
-): { index: number; value: Value } {
-  const length = array.elements.length;
-  for (let step = 0; step < length; step++) {
-    const index = fromEnd ? length - 1 - step : step;
-    // An index the callback removed is absent, like a hole.
-    const element = index < array.elements.length ? array.elements[index] : HOLE;
-    if (element === HOLE && skipsHoles) continue;
-    const value = valueOfElement(element);
-    if (toBoolean(callback(value, index))) return { index, value };
-  }
-  return { index: -1, value: undefined };
-}
-
-function reduce(
-  runtime: Runtime,
-  array: JsArray,
-  fn: JsFunction,
-  args: Value[],
-  fromEnd: boolean,
-  callRow: number | undefined
-): Value {
-  const length = array.elements.length;
-  const indices = Array.from({ length }, (_, step) => (fromEnd ? length - 1 - step : step));
-  let accumulator: Value;
-  if (args.length >= 2) {
-    accumulator = args[1];
-  } else {
-    // Without an initial value, the first element present starts the accumulation.
-    const first = indices.findIndex((index) => array.elements[index] !== HOLE);
-    if (first === -1) return runtime.throwError('TypeError', 'Reduce of empty array with no initial value');
-    accumulator = array.elements[indices[first]] as Value;
-    indices.splice(0, first + 1);
-  }
-  // Presence is checked as each index is visited, since a callback may fill a later hole.
-  for (const index of indices) {
-    const element = index < array.elements.length ? array.elements[index] : HOLE;
-    if (element === HOLE) continue;
-    accumulator = runtime.call(fn, undefined, [accumulator, element, index, array], callRow);
-  }
-  return accumulator;
-}
-
-/**
- * Visits the elements present when the iteration started that are still present, skipping holes as the spec's
- * `HasProperty` does.
- */
-function forEachElement(array: JsArray, visit: (value: Value, index: number) => void): void {
-  const length = array.elements.length;
-  for (let index = 0; index < length && index < array.elements.length; index++) {
-    const element = array.elements[index];
-    if (element !== HOLE) visit(element, index);
+    joining.delete(ops.array);
   }
 }
