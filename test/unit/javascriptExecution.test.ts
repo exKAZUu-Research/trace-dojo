@@ -114,6 +114,21 @@ test.each([
   ],
   ['many objects', 'const a = [];\nwhile (true) a.push({ x: 1 });', { kind: 'limitExceeded' }],
   [
+    'concatenating an array with itself many times',
+    'const a = new Array(100000).fill(0);\na.concat(...new Array(100000).fill(a));',
+    { kind: 'executed', uncaughtException: 'RangeError: Out of memory' },
+  ],
+  [
+    'flatMap to a large array',
+    'const a = new Array(10000).fill(0);\na.flatMap(() => a);',
+    { kind: 'executed', uncaughtException: 'RangeError: Out of memory' },
+  ],
+  [
+    'joining holes with a long separator',
+    "new Array(100000).join('x'.repeat(100000));",
+    { kind: 'executed', uncaughtException: 'RangeError: Invalid string length' },
+  ],
+  [
     'garbage collections over a large array',
     'const t = new Turtle();\nconst a = new Array(900000).fill(0);\nwhile (true) t.canMoveForward();',
     { kind: 'limitExceeded' },
@@ -144,6 +159,12 @@ test.each([
     '2,3,false',
   ],
   ['String(new Array(3).map((_, i) => i).length + Object.keys([1, , 3]).length)', '5'],
+  ['String(new Array(5000).fill(7).join().length)', '9999'],
+  ["String('a'.repeat(8000).replaceAll('a', 'b').length)", '8000'],
+  [
+    '(() => { let b = 4; function f(a = b, b = 2) { return a; } try { f(); return "no error"; } catch (e) { return e.name; } })()',
+    'ReferenceError',
+  ],
   ['String((() => { const xs = [1, 2]; return xs.find((x, i) => { xs[i] = 9; return true; }); })())', '1'],
   [
     'String((() => { class A { #x = 1; get() { return this.#x; } } class B extends A { #x = 2; }; return new B().get(); })())',

@@ -6,10 +6,8 @@ import { type FunctionFrame, isObject, JsFunction, type JsObject, Scope, UNINITI
 export type BindingMode =
   /** Assigns to existing variables and properties. */
   | 'assign'
-  /** Initializes variables that `let`, `const`, `class`, or `var` declared in an enclosing scope. */
-  | 'initialize'
-  /** Creates variables in the current scope, as parameters are. */
-  | 'define';
+  /** Initializes variables that a declaration or a parameter list created in an enclosing scope. */
+  | 'initialize';
 
 export type Reference =
   | { kind: 'binding'; name: string }
@@ -32,15 +30,18 @@ export abstract class EvaluatorBase {
   /** Creates the variables a scope declares; function declarations become functions at once. */
   instantiate(scope: Scope, declarations: ScopeDeclarations): void {
     const { runtime } = this;
-    runtime.allocate(declarations.vars.length + declarations.lexical.length + declarations.functions.length);
-    for (const name of declarations.vars) {
-      if (!scope.bindings.has(name)) scope.bindings.set(name, { value: undefined, isMutable: true, isHoisted: true });
-    }
-    for (const { name, isConst } of declarations.lexical) {
-      scope.bindings.set(name, { value: UNINITIALIZED, isMutable: !isConst });
-    }
-    for (const fn of declarations.functions) {
-      scope.bindings.set(fn.name, { value: this.createFunction(fn, scope), isMutable: true });
+    runtime.allocate(declarations.order.length);
+    const lexical = new Map(declarations.lexical.map(({ name, isConst }) => [name, isConst]));
+    // The last declaration of a function with a repeated name wins.
+    const functions = new Map(declarations.functions.map((fn) => [fn.name, fn]));
+    for (const name of declarations.order) {
+      const fn = functions.get(name);
+      const isConst = lexical.get(name);
+      if (fn) scope.bindings.set(name, { value: this.createFunction(fn, scope), isMutable: true });
+      else if (isConst !== undefined) scope.bindings.set(name, { value: UNINITIALIZED, isMutable: !isConst });
+      // A parameter of the same name keeps its value.
+      else if (!scope.bindings.has(name))
+        scope.bindings.set(name, { value: undefined, isMutable: true, isHoisted: true });
     }
   }
 
@@ -100,13 +101,7 @@ export abstract class EvaluatorBase {
 
   writeVariable(name: string, value: Value, mode: BindingMode): void {
     const { runtime } = this;
-    const scope = runtime.frame.scope;
-    if (mode === 'define') {
-      runtime.allocate(1);
-      scope.bindings.set(name, { value, isMutable: true });
-      return;
-    }
-    const binding = scope.lookup(name);
+    const binding = runtime.frame.scope.lookup(name);
     if (!binding) return runtime.throwError('ReferenceError', `${name} is not defined`);
     if (mode === 'initialize') {
       binding.value = value;
@@ -280,6 +275,29 @@ export abstract class EvaluatorBase {
 export function nameFunction(runtime: Runtime, fn: JsFunction, name: string): void {
   if (runtime.functionName(fn) !== '' || fn.behavior.kind === 'native') return;
   fn.properties.set('name', { value: name, writable: false, enumerable: false, configurable: true });
+}
+
+/** The variables a pattern declares, in order. */
+export function patternNames(pattern: Pattern): string[] {
+  switch (pattern.kind) {
+    case 'identifier': {
+      return [pattern.name];
+    }
+    case 'member': {
+      return [];
+    }
+    case 'default': {
+      return patternNames(pattern.target);
+    }
+    case 'arrayPattern': {
+      return [...pattern.elements, pattern.rest].flatMap((element) => (element ? patternNames(element) : []));
+    }
+    case 'objectPattern': {
+      return [...pattern.properties.map(({ value }) => value), pattern.rest].flatMap((value) =>
+        value ? patternNames(value) : []
+      );
+    }
+  }
 }
 
 /** The object a reference reads from, which must stay reachable while the rest of an assignment runs. */

@@ -1,6 +1,12 @@
 import type { Block, ClassMember, ClassNode, FunctionNode, Program, Statement, VariableDeclaration } from './ast';
-import { nameFunction } from './evaluatorBase';
+import { nameFunction, patternNames } from './evaluatorBase';
 import { defineAccessor, ExpressionEvaluator } from './expressionEvaluator';
+import {
+  defineFunctionProperties,
+  expectedArgumentCount,
+  mergePrivate,
+  privateMethodProperty,
+} from './memberProperties';
 import {
   type Binding,
   type ClassField,
@@ -10,7 +16,6 @@ import {
   JsFunction,
   type JsObject,
   JsThrow,
-  type Property,
   Scope,
   toBoolean,
   UNINITIALIZED,
@@ -336,9 +341,16 @@ export class Evaluator extends ExpressionEvaluator {
     }
   }
 
+  /** Binds parameters in order after creating them all, so a default reading a later parameter throws as in JavaScript. */
   private bindParameters(node: FunctionNode, args: Value[]): void {
-    for (const [index, param] of node.params.entries()) this.bindPattern(param, args[index], 'define');
-    if (node.rest) this.bindPattern(node.rest, this.runtime.newArray(args.slice(node.params.length)), 'define');
+    const { runtime } = this;
+    const params = node.rest ? [...node.params, node.rest] : node.params;
+    const { bindings } = runtime.frame.scope;
+    const names = params.flatMap((param) => patternNames(param));
+    runtime.allocate(names.length);
+    for (const name of names) bindings.set(name, { value: UNINITIALIZED, isMutable: true });
+    for (const [index, param] of node.params.entries()) this.bindPattern(param, args[index], 'initialize');
+    if (node.rest) this.bindPattern(node.rest, runtime.newArray(args.slice(node.params.length)), 'initialize');
   }
 
   // Classes -----------------------------------------------------------------------------------------------------------
@@ -534,35 +546,4 @@ export class Evaluator extends ExpressionEvaluator {
       for (const field of behavior.fields) this.initializeField(constructed, field);
     }
   }
-}
-
-function privateMethodProperty(kind: 'method' | 'getter' | 'setter', method: JsFunction): Property {
-  if (kind === 'method') return { value: method, writable: false, enumerable: false, configurable: false };
-  return {
-    get: kind === 'getter' ? method : undefined,
-    set: kind === 'setter' ? method : undefined,
-    enumerable: false,
-    configurable: false,
-  };
-}
-
-function mergePrivate(runtime: Evaluator['runtime'], target: JsObject, key: string, property: Property): void {
-  const existing = target.privateMembers?.get(key);
-  if (existing && !('value' in existing) && !('value' in property)) {
-    existing.get ??= property.get;
-    existing.set ??= property.set;
-    return;
-  }
-  runtime.definePrivate(target, key, { ...property });
-}
-
-function defineFunctionProperties(fn: JsFunction, name: string, length: number): void {
-  fn.properties.set('length', { value: length, writable: false, enumerable: false, configurable: true });
-  fn.properties.set('name', { value: name, writable: false, enumerable: false, configurable: true });
-}
-
-/** The number of parameters before the first default or rest one, which `length` reports. */
-function expectedArgumentCount(node: FunctionNode): number {
-  const index = node.params.findIndex((param) => param.kind === 'default');
-  return index === -1 ? node.params.length : index;
 }

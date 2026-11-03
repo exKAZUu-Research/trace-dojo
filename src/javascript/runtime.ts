@@ -43,6 +43,11 @@ export class Runtime {
   readonly budget = new ExecutionBudget();
   readonly frames: Frame[] = [];
   readonly realm: Realm;
+  /**
+   * The row of the expression being evaluated, from which getters, setters, and conversions that run the program's
+   * own functions count as called.
+   */
+  currentRow: number | undefined;
   /** Called after a statement on a `// step` row completes. */
   onStep?: (stepId: number) => void;
   readonly evaluator: Evaluator;
@@ -72,6 +77,15 @@ export class Runtime {
   buildString(length: number): void {
     if (length > LIMITS.maxStringLength) this.throwError('RangeError', 'Invalid string length');
     this.spend(Math.ceil(length / 16));
+  }
+
+  /**
+   * Charges for appending `added` characters to a string being built, which then has `length` characters. Charging
+   * only what each part adds keeps building one long string linear.
+   */
+  extendString(length: number, added: number): void {
+    if (length > LIMITS.maxStringLength) this.throwError('RangeError', 'Invalid string length');
+    if (added > 0) this.spend(Math.ceil(added / 16));
   }
 
   /** Charges for reading `length` elements or characters, which one native call may do at once. */
@@ -129,7 +143,7 @@ export class Runtime {
       const property = this.getOwnProperty(current, key);
       if (!property) continue;
       if (!isAccessor(property)) return property.value;
-      return property.get ? this.call(property.get, receiver, []) : undefined;
+      return property.get ? this.call(property.get, receiver, [], this.currentRow) : undefined;
     }
     return undefined;
   }
@@ -156,7 +170,7 @@ export class Runtime {
       if (!property.set) {
         this.throwError('TypeError', `Cannot set property ${key} of ${this.describe(target)} which has only a getter`);
       }
-      this.call(property.set, target, [value]);
+      this.call(property.set, target, [value], this.currentRow);
       return;
     }
     if (property && !property.writable) {
@@ -275,14 +289,14 @@ export class Runtime {
     const property = this.privateProperty(target, name);
     if (!isAccessor(property)) return property.value;
     if (!property.get) this.throwError('TypeError', `'${privateNameOf(name)}' was defined without a getter`);
-    return this.call(property.get, target, []);
+    return this.call(property.get, target, [], this.currentRow);
   }
 
   setPrivate(target: Value, name: string, value: Value): void {
     const property = this.privateProperty(target, name);
     if (isAccessor(property)) {
       if (!property.set) this.throwError('TypeError', `'${privateNameOf(name)}' was defined without a setter`);
-      this.call(property.set, target, [value]);
+      this.call(property.set, target, [value], this.currentRow);
       return;
     }
     if (!property.writable) this.throwError('TypeError', `Private method '${privateNameOf(name)}' is not writable`);
@@ -375,7 +389,7 @@ export class Runtime {
     for (const name of hint === 'string' ? ['toString', 'valueOf'] : ['valueOf', 'toString']) {
       const method = this.get(value, name);
       if (isCallable(method)) {
-        const result = this.call(method, value, []);
+        const result = this.call(method, value, [], this.currentRow);
         if (!isObject(result)) return result;
       }
     }

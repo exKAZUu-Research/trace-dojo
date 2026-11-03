@@ -141,8 +141,9 @@ function replaceText({ runtime, args, callRow }: NativeCall, text: string, all: 
     const inserted = isCallable(replacement)
       ? runtime.toString(runtime.call(replacement, undefined, [pattern, position, text], callRow))
       : expandReplacement(runtime.toString(replacement), pattern, position, text);
-    result += text.slice(copied, position) + inserted;
-    runtime.buildString(result.length);
+    const part = text.slice(copied, position) + inserted;
+    runtime.extendString(result.length + part.length, part.length);
+    result += part;
     copied = position + pattern.length;
   }
   return result + text.slice(copied);

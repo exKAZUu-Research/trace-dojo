@@ -16,6 +16,8 @@ export interface ScopeDeclarations {
   functions: FunctionNode[];
   /** `var` names of a function body or the program, which start as `undefined`. */
   vars: string[];
+  /** Every name above in the order of its first declaration, which traces list variables in. */
+  order: string[];
 }
 
 export type Statement = Span &

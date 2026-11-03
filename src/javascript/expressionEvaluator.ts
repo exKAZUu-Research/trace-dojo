@@ -27,8 +27,19 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     return value === SHORT_CIRCUIT ? undefined : value;
   }
 
-  // code-gauge-allow functionNcss 60 -- One case per expression kind, each delegating where it grows.
   private evaluateChain(expression: Expression): ChainValue {
+    const { runtime } = this;
+    const outerRow = runtime.currentRow;
+    runtime.currentRow = expression.row;
+    try {
+      return this.evaluateKind(expression);
+    } finally {
+      runtime.currentRow = outerRow;
+    }
+  }
+
+  // code-gauge-allow functionNcss 60 -- One case per expression kind, each delegating where it grows.
+  private evaluateKind(expression: Expression): ChainValue {
     const { runtime } = this;
     switch (expression.kind) {
       case 'literal': {
@@ -106,8 +117,9 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     const { runtime } = this;
     let text = strings[0];
     for (const [index, expression] of expressions.entries()) {
-      text += runtime.toString(this.evaluate(expression)) + strings[index + 1];
-      runtime.buildString(text.length);
+      const part = runtime.toString(this.evaluate(expression)) + strings[index + 1];
+      runtime.extendString(text.length + part.length, part.length);
+      text += part;
     }
     return text;
   }

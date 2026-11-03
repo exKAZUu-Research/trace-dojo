@@ -104,7 +104,7 @@ export abstract class ConverterBase {
   // Scopes ----------------------------------------------------------------------------------------------------------
 
   protected pushScope(isFunction: boolean): ScopeDeclarations {
-    const declarations: ScopeDeclarations = { lexical: [], functions: [], vars: [] };
+    const declarations: ScopeDeclarations = { lexical: [], functions: [], vars: [], order: [] };
     this.scopes.push({ declarations, names: new Map(), isFunction });
     return declarations;
   }
@@ -142,6 +142,7 @@ export abstract class ConverterBase {
     if (scope.names.has(name)) duplicate(node, name);
     scope.names.set(name, 'lexical');
     scope.declarations.lexical.push({ name, isConst });
+    scope.declarations.order.push(name);
   }
 
   protected declareVar(node: Node, name: string): void {
@@ -151,6 +152,7 @@ export abstract class ConverterBase {
       if (!scope.names.has(name)) {
         scope.names.set(name, 'var');
         scope.declarations.vars.push(name);
+        scope.declarations.order.push(name);
       }
       return;
     }
@@ -163,6 +165,7 @@ export abstract class ConverterBase {
     if (previous && (previous === 'lexical' || !scope.isFunction)) duplicate(node, fn.name);
     scope.names.set(fn.name, scope.isFunction ? 'var' : 'lexical');
     scope.declarations.functions.push(fn);
+    if (!previous) scope.declarations.order.push(fn.name);
   }
 
   protected declareParameter(node: Node, name: string): void {

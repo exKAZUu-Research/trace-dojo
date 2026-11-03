@@ -170,14 +170,8 @@ function defineAccessors(builder: RealmBuilder): void {
     const end = relativeIndex(runtime, args[1], elements.length, elements.length);
     return runtime.newArray(elements.slice(start, Math.max(start, end)));
   });
-  arrayMethod(builder, 'concat', 1, ({ runtime, args }, array) => {
-    const values = [...array.elements];
-    for (const item of args) {
-      if (item instanceof JsArray) appendAll(values, item.elements);
-      else values.push(item);
-    }
-    return runtime.newArray(values);
-  });
+  arrayMethod(builder, 'concat', 1, ({ runtime, args }, array) => concatArrays(runtime, [array, ...args]));
+
   arrayMethod(builder, 'join', 1, ({ runtime, args }, array) => joinArray(runtime, array, args[0], new Set()));
   arrayMethod(builder, 'toString', 0, ({ runtime }, array) => joinArray(runtime, array, undefined, new Set()));
   arrayMethod(builder, 'at', 1, ({ runtime, args }, array) => {
@@ -197,9 +191,9 @@ function defineAccessors(builder: RealmBuilder): void {
   }
   arrayMethod(builder, 'flat', 0, ({ runtime, args }, array) => {
     const depth = args[0] === undefined ? 1 : Math.trunc(runtime.toNumber(args[0])) || 0;
-    const values: Element[] = [];
-    flatten(runtime, array.elements, Math.min(depth, 100), values);
-    return runtime.newArray(values);
+    const result = runtime.newArray([]);
+    flatten(runtime, array.elements, Math.min(depth, 100), result.elements);
+    return result;
   });
 }
 
@@ -221,25 +215,41 @@ function search(
   return start === undefined ? elements.lastIndexOf(value) : elements.lastIndexOf(value, start);
 }
 
+/** Appends the elements of nested arrays, charging for each array before copying it, as one array may recur. */
 function flatten(runtime: Runtime, elements: Element[], depth: number, values: Element[]): void {
-  runtime.scan(elements.length);
+  runtime.allocate(elements.length);
   for (const element of elements) {
     if (element instanceof JsArray && depth > 0) flatten(runtime, element.elements, depth - 1, values);
     else if (element !== HOLE) values.push(element);
   }
 }
 
+/** Concatenates arrays and values, charging the result before copying, since it can be far larger than every input. */
+function concatArrays(runtime: Runtime, parts: Value[]): JsArray {
+  let length = 0;
+  for (const part of parts) length += part instanceof JsArray ? part.elements.length : 1;
+  const result = runtime.newArray([]);
+  runtime.allocate(length);
+  for (const part of parts) {
+    if (part instanceof JsArray) appendAll(result.elements, part.elements);
+    else result.elements.push(part);
+  }
+  return result;
+}
+
 function joinArray(runtime: Runtime, array: JsArray, separatorValue: Value, joining: Set<JsArray>): string {
   if (joining.has(array)) return '';
   const separator = separatorValue === undefined ? ',' : runtime.toString(separatorValue);
   joining.add(array);
+  runtime.scan(array.elements.length);
   try {
     let text = '';
     for (const [index, element] of array.elements.entries()) {
-      if (index > 0) text += separator;
-      if (element === undefined || element === null || element === HOLE) continue;
-      text += element instanceof JsArray ? joinArray(runtime, element, undefined, joining) : runtime.toString(element);
-      runtime.buildString(text.length);
+      let part = index > 0 ? separator : '';
+      if (element instanceof JsArray) part += joinArray(runtime, element, undefined, joining);
+      else if (element !== undefined && element !== null && element !== HOLE) part += runtime.toString(element);
+      runtime.extendString(text.length + part.length, part.length);
+      text += part;
     }
     return text;
   } finally {
@@ -302,11 +312,14 @@ function defineMappings(builder: RealmBuilder): void {
     runtime.hold(result, () =>
       forEachElement(array, (value, index) => {
         const mapped = callback(value, index);
-        if (mapped instanceof JsArray) flatten(runtime, mapped.elements, 0, values);
-        else values.push(mapped);
+        if (mapped instanceof JsArray) {
+          flatten(runtime, mapped.elements, 0, values);
+        } else {
+          runtime.allocate(1);
+          values.push(mapped);
+        }
       })
     );
-    runtime.allocate(values.length);
     return result;
   });
 }

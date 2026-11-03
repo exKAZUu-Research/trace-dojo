@@ -468,3 +468,27 @@ const after = 2; // step`;
     { before: 1, later: { kind: 'value', value: null }, after: 2 },
   ]);
 });
+
+test('variables appear in the order the program declares them', () => {
+  const program = `let total = 0;
+for (var j = 0; j < 1; j++) { // step
+  total += j;
+}`;
+  expect(Object.keys(traceProgram('javascript', program, program).traceItems[1].vars)).toEqual(['total', 'j']);
+});
+
+test('a getter that records a step counts as a call from the row that reads it', () => {
+  const program = `class Point {
+  constructor(x) {
+    this.x = x;
+  }
+  get double() {
+    const d = this.x * 2; // step
+    return d;
+  }
+}
+const p = new Point(3);
+const y = p.double; // caller`;
+  const item = traceProgram('javascript', program, program).traceItems[1];
+  expect({ depth: item.depth, callStack: item.callStack }).toEqual({ depth: 1, callStack: [1] });
+});
