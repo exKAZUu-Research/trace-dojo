@@ -44,8 +44,9 @@ export interface InitializationPath {
 }
 
 /**
- * Applies the definite assignment rules to the code that initializes a class or an object: its initializer blocks
- * and, for objects, one constructor, which together must assign every blank final field exactly once.
+ * Applies the definite assignment rules to the code that initializes a class or an object: its field initializers
+ * and initializer blocks and, for objects, one constructor, which together must assign every blank final field
+ * exactly once.
  */
 export function checkInitialization(path: InitializationPath): void {
   const checker = new DefiniteAssignmentChecker();

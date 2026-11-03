@@ -6,6 +6,7 @@ import type {
   ConstructorDeclaration,
   Expression,
   FieldDeclaration,
+  InitializerBlock,
   MethodDeclaration,
   Span,
   VariableDeclarator,
@@ -294,11 +295,7 @@ class Compiler extends StatementCompiler {
     cls: ClassInfo,
     isStatic: boolean
   ): { blankFinals: string[]; initializers: (Block | Expression | ArrayInitializer)[] } {
-    const members = (cls.declaration as ClassDeclaration).members.filter(
-      (member) =>
-        (member.kind === 'field' && member.modifiers.isStatic === isStatic) ||
-        (member.kind === 'initializer' && member.isStatic === isStatic)
-    );
+    const members = initializingMembersOf(cls, isStatic);
     return {
       blankFinals: members.flatMap((member) =>
         member.kind === 'field' && member.modifiers.isFinal
@@ -307,7 +304,6 @@ class Compiler extends StatementCompiler {
       ),
       initializers: members.flatMap((member): (Block | Expression | ArrayInitializer)[] => {
         if (member.kind === 'initializer') return [member.body];
-        if (member.kind !== 'field') return [];
         return member.declarators.flatMap((declarator) => (declarator.initializer ? [declarator.initializer] : []));
       }),
     };
@@ -315,18 +311,15 @@ class Compiler extends StatementCompiler {
 
   /** Compiles the field initializers and initializer blocks of one kind in textual order. */
   protected compileInitializers(context: MethodContext, cls: ClassInfo, isStatic: boolean): ((frame: Frame) => void)[] {
-    const initializers: ((frame: Frame) => void)[] = [];
-    for (const member of (cls.declaration as ClassDeclaration).members) {
-      if (member.kind === 'field' && member.modifiers.isStatic === isStatic) {
-        initializers.push(...this.compileFieldInitializers(context, cls, member.declarators, member));
-      } else if (member.kind === 'initializer' && member.isStatic === isStatic) {
-        const body = this.compileBlock({ ...context, isInitializerBlock: true }, member.body);
-        initializers.push((frame) => {
+    return initializingMembersOf(cls, isStatic).flatMap((member) => {
+      if (member.kind === 'field') return this.compileFieldInitializers(context, cls, member.declarators, member);
+      const body = this.compileBlock({ ...context, isInitializerBlock: true }, member.body);
+      return [
+        (frame: Frame) => {
           if (body(frame)) throw new Error('An initializer completed abruptly');
-        });
-      }
-    }
-    return initializers;
+        },
+      ];
+    });
   }
 
   protected compileMethod(cls: ClassInfo, method: MethodInfo): void {
@@ -414,6 +407,15 @@ class Compiler extends StatementCompiler {
       },
     };
   }
+}
+
+/** The field declarations and initializer blocks of one kind, in the textual order in which they run. */
+function initializingMembersOf(cls: ClassInfo, isStatic: boolean): (FieldDeclaration | InitializerBlock)[] {
+  return (cls.declaration as ClassDeclaration).members.filter(
+    (member): member is FieldDeclaration | InitializerBlock =>
+      (member.kind === 'field' && member.modifiers.isStatic === isStatic) ||
+      (member.kind === 'initializer' && member.isStatic === isStatic)
+  );
 }
 
 function accessRank(access: string): number {
