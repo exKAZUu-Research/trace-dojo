@@ -1,10 +1,6 @@
-import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import path from 'node:path';
+import type { Node } from '@willbooster/web-tree-sitter';
 
-import { Language, type Node, Parser } from '@willbooster/web-tree-sitter';
-
-import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
+import { loadParser, parseSource } from '../interpreter/treeSitter';
 import type {
   ClassDeclaration,
   CompilationUnit,
@@ -31,84 +27,11 @@ import {
 } from './parseNodes';
 import { convertBlock, convertDeclarator, convertStatement } from './parseStatement';
 
-// Resolving from the working directory keeps the lookup independent of how Next.js bundles this module.
-const requireFromRoot = createRequire(path.join(process.cwd(), 'package.json'));
-// Copying into this realm's Uint8Array passes the runtime's `instanceof` check, which a Buffer from another realm
-// (as under jsdom) fails.
-const readWasm = (specifier: string): Uint8Array => Uint8Array.from(readFileSync(requireFromRoot.resolve(specifier)));
-await Parser.init({
-  wasmBinary: readWasm('@willbooster/web-tree-sitter/web-tree-sitter.wasm').buffer as ArrayBuffer,
-});
-const parser = new Parser();
-parser.setLanguage(await Language.load(readWasm('@willbooster/tree-sitter-java/tree-sitter-java.wasm')));
+const parser = await loadParser('@willbooster/tree-sitter-java/tree-sitter-java.wasm');
 
-/** Parses a compilation unit, throwing a {@link CompileError} for invalid or unsupported syntax. */
+/** Parses a compilation unit, throwing a `CompileError` for invalid or unsupported syntax. */
 export function parseJava(source: string): CompilationUnit {
-  const tree = parser.parse(source);
-  if (!tree) throw new Error('The Java parser returned no tree');
-  try {
-    const tooDeep = findTooDeepNode(tree.rootNode);
-    if (tooDeep) {
-      throw new CompileError([{ row: tooDeep.startPosition.row, message: '括弧やブロックなどの入れ子が深すぎます。' }]);
-    }
-    const syntaxErrors = collectSyntaxErrors(tree.rootNode);
-    if (syntaxErrors.length > 0) throw new CompileError(syntaxErrors);
-    return convertProgram(tree.rootNode);
-  } finally {
-    tree.delete();
-  }
-}
-
-/** Names for learners of the grammar's named tokens that error recovery may insert; punctuation names itself. */
-const missingTokenNames: Record<string, string> = { identifier: '名前' };
-
-/** Converting, compiling, and running recurse into nested constructs, so deeper nesting would exhaust the stack. */
-const MAX_NESTING_DEPTH = 300;
-
-function findTooDeepNode(root: Node): Node | undefined {
-  const cursor = root.walk();
-  try {
-    for (;;) {
-      if (cursor.currentDepth > MAX_NESTING_DEPTH) return cursor.currentNode;
-      if (cursor.gotoFirstChild()) continue;
-      while (!cursor.gotoNextSibling()) {
-        if (!cursor.gotoParent()) return;
-      }
-    }
-  } finally {
-    cursor.delete();
-  }
-}
-
-function collectSyntaxErrors(root: Node): SourceDiagnostic[] {
-  const errors: SourceDiagnostic[] = [];
-  const visit = (node: Node): void => {
-    if (errors.length >= 5) return;
-    if (node.isMissing) {
-      errors.push({
-        row: rowBeforeMissing(node),
-        message: `「${missingTokenNames[node.type] ?? node.type}」が足りません。`,
-      });
-      return;
-    }
-    if (node.isError) {
-      errors.push({ row: node.startPosition.row, message: '書き方に誤りがあります。' });
-      return;
-    }
-    if (!node.hasError) return;
-    for (const child of node.children) if (child) visit(child);
-  };
-  visit(root);
-  return errors;
-}
-
-/** The row where the code before a missing token ends, since the parser places that token at the next one. */
-function rowBeforeMissing(missing: Node): number {
-  for (let node: Node | null = missing; node; node = node.parent) {
-    const previous = node.previousSibling;
-    if (previous) return previous.endPosition.row;
-  }
-  return missing.startPosition.row;
+  return parseSource(parser, source, { identifier: '名前' }, convertProgram);
 }
 
 function convertProgram(root: Node): CompilationUnit {
