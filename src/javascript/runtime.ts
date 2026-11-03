@@ -186,6 +186,11 @@ export class Runtime {
     if (property && !property.writable) {
       this.throwError('TypeError', `Cannot assign to read only property '${key}' of ${this.describe(target)}`);
     }
+    this.writeOwnData(target, key, value);
+  }
+
+  /** Stores a data property of the object assigned to, which an own accessor or a read-only property refuses. */
+  private writeOwnData(target: JsObject, key: string, value: Value): void {
     const own = target.properties.get(key);
     if (own && isAccessor(own)) this.throwError('TypeError', `Cannot redefine property: ${key}`);
     if (own) {

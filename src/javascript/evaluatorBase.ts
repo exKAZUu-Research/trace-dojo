@@ -162,6 +162,7 @@ export abstract class EvaluatorBase {
     return this.runtime.toPropertyKey(this.evaluate(name.expression));
   }
 
+  // code-gauge-allow duplicateLines 17 -- Reading and writing a reference switch over the same kinds of reference.
   getReference(reference: Reference): Value {
     const { runtime } = this;
     switch (reference.kind) {
@@ -181,6 +182,7 @@ export abstract class EvaluatorBase {
     }
   }
 
+  // code-gauge-allow duplicateLines 17 -- Reading and writing a reference switch over the same kinds of reference.
   putReference(reference: Reference, value: Value): void {
     const { runtime } = this;
     switch (reference.kind) {
