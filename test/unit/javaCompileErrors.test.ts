@@ -530,6 +530,11 @@ const programs: [name: string, runs: boolean, source: string][] = [
     false,
     'class A extends Exception {}\nclass B extends A {}\npublic class Main { static void f() throws A {} public static void main(String[] args) throws B { try { f(); } catch (A e) { throw e; } } }\n',
   ],
+  [
+    'initializerConstantLoop',
+    true,
+    'public class Main { static int y; static { int x; while (true) { x = 1; break; } y = x; } { int z; if (true) z = 1; y = z; } public static void main(String[] args) { System.out.println(y); } }',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

@@ -291,8 +291,9 @@ class Compiler extends StatementCompiler {
       if (member.kind === 'field' && member.modifiers.isStatic === isStatic) {
         initializers.push(...this.compileFieldInitializers(context, cls, member.declarators, member));
       } else if (member.kind === 'initializer' && member.isStatic === isStatic) {
-        checkDefiniteAssignment([], member.body);
         const body = this.compileBlock(context, member.body);
+        // Definite assignment reads the constants that compiling the body records.
+        checkDefiniteAssignment([], member.body);
         initializers.push((frame) => {
           if (body(frame)) throw new Error('An initializer completed abruptly');
         });
