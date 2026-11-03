@@ -256,7 +256,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (access.object === 'super') {
       if (context.isStatic) this.error(access, 'static メソッドの中では super を使えません。');
       const field = this.findField(context.cls.superclass as ClassInfo, name);
-      if (!field) return this.error(access, `フィールド ${name} が見つかりません。`);
+      if (!field) return this.error(access, missingFieldMessage(context.cls.superclass as ClassInfo, name));
       return notConstant(this.fieldReference(field, field.isStatic ? undefined : thisValue(context)));
     }
     const object = this.compileExpression(context, access.object);

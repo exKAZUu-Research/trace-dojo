@@ -1053,6 +1053,31 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'public class Main {\n  public static void main(String[] args) {\n    while (true) { try { break; } finally { System.out.println(0); } } System.out.println(1);\n  }\n  \n}\n',
   ],
+  [
+    'multiLabelDoContinue',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    int i = 0; outer: inner: do { i++; continue outer; } while (i < 2); System.out.println(i);\n  }\n  \n}\n',
+  ],
+  [
+    'multiLabelBreak',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    int x; outer: inner: { x = 1; break outer; } System.out.println(x);\n  }\n  \n}\n',
+  ],
+  [
+    'multiLabelWhileTrueBreak',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    int x; outer: inner: while (true) { x = 1; break outer; } System.out.println(x);\n  }\n  \n}\n',
+  ],
+  [
+    'labeledBlockContinue',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    while (true) { a: { continue a; } }\n  }\n  \n}\n',
+  ],
+  [
+    'innerLabelContinue',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    int i = 0; outer: inner: do { i++; continue inner; } while (i < 2); System.out.println(i);\n  }\n  \n}\n',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {
@@ -1137,5 +1162,14 @@ test('exceptions keep their causes and Math offers its constants', () => {
     kind: 'executed',
     finalTurtles: [{ x: 0, y: 2, color: '#', dir: 'N' }],
     uncaughtException: undefined,
+  });
+});
+
+test('a missing field through super names the superclass', () => {
+  const source =
+    'class A {}\nclass Main extends A {\n  void f() { super.missing = 1; }\n  public static void main(String[] a) {}\n}';
+  expect(executeJavaProgram(source)).toEqual({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: 'この採点環境の A には、フィールド missing がありません。' }],
   });
 });

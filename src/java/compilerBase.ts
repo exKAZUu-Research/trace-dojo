@@ -79,6 +79,8 @@ export interface MethodContext {
   labels: string[];
   /** Labels written directly before the statement being compiled. */
   loopLabels: string[];
+  /** Labels written directly before the enclosing loops, which `continue` may name. */
+  continueLabels: string[];
   loopDepth: number;
   switchDepth: number;
   /** The objects or class whose fields this code initializes, where their blank finals may be assigned. */
@@ -168,6 +170,7 @@ export abstract class CompilerBase {
       scopes: [{ names: new Map(), slots: [] }],
       labels: [],
       loopLabels: [],
+      continueLabels: [],
       loopDepth: 0,
       switchDepth: 0,
       initializes: undefined,

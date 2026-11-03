@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 438 -- The statement compiler keeps one method per statement kind together.
+// code-gauge-allow-file fileNcss 442 -- The statement compiler keeps one method per statement kind together.
 import type {
   Block,
   CatchClause,
@@ -177,7 +177,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   protected compileWhile(context: MethodContext, statement: Extract<Statement, { kind: 'while' | 'do' }>): Exec {
     const labels = this.takeLabels(context);
     const condition = this.compileCondition(context, statement.condition);
-    const body = this.compileLoopBody(context, statement.body);
+    const body = this.compileLoopBody(context, statement.body, labels);
     const isDo = statement.kind === 'do';
     return (frame) => {
       if (!isDo && !condition(frame)) return;
@@ -205,8 +205,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   protected compileContinue(context: MethodContext, statement: Extract<Statement, { kind: 'continue' }>): Exec {
     if (context.loopDepth === 0) this.error(statement, 'continue 文はループの中にしか書けません。');
-    if (statement.label !== undefined && !context.labels.includes(statement.label)) {
-      this.error(statement, `ラベル ${statement.label} が見つかりません。`);
+    const { label } = statement;
+    if (label !== undefined && !context.continueLabels.includes(label)) {
+      const message = context.labels.includes(label)
+        ? `ラベル ${label} はループに付いていないので、continue 文では使えません。`
+        : `ラベル ${label} が見つかりません。`;
+      this.error(statement, message);
     }
     const completion: ContinueCompletion = statement.label ? { kind: 'continue', label: statement.label } : CONTINUE;
     return () => completion;
@@ -232,7 +236,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   protected compileLabeled(context: MethodContext, statement: Extract<Statement, { kind: 'labeled' }>): Exec {
     const { label } = statement;
     context.labels.push(label);
-    context.loopLabels.push(label);
+    // Only the label directly before a loop names that loop; an outer label names the labeled statement.
+    context.loopLabels = [label];
     let body: Exec;
     try {
       body = this.compileStatement(context, statement.body);
@@ -253,11 +258,13 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return labels;
   }
 
-  protected compileLoopBody(context: MethodContext, body: Statement): Exec {
+  protected compileLoopBody(context: MethodContext, body: Statement, labels: readonly string[]): Exec {
     context.loopDepth++;
+    context.continueLabels.push(...labels);
     try {
       return this.withScope(context, () => this.compileStatement(context, body));
     } finally {
+      context.continueLabels.splice(context.continueLabels.length - labels.length);
       context.loopDepth--;
     }
   }
@@ -349,7 +356,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const labels = this.takeLabels(context);
     const { init, update } = this.compileForHeader(context, statement);
     const condition = statement.condition ? this.compileCondition(context, statement.condition) : () => true;
-    const body = this.compileLoopBody(context, statement.body);
+    const body = this.compileLoopBody(context, statement.body, labels);
     return (frame) => {
       init(frame);
       while (condition(frame)) {
@@ -414,7 +421,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const convert = this.convert(element, declaredType, 'assignment', statement.variable).run;
     const slot = this.declareLocal(context, statement, statement.name, declaredType);
     const stepId = this.stepIdOf(statement.variable);
-    const body = this.compileLoopBody(context, statement.body);
+    const body = this.compileLoopBody(context, statement.body, labels);
     const bind = (frame: Frame, value: Value): void => {
       frame.temporaries.push(value);
       try {
