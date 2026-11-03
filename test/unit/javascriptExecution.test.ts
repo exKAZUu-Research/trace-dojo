@@ -61,6 +61,12 @@ test.each([
   ['a BigInt', 'const n = 1n;', 0, '数値「1n」は、この採点環境では使えません。'],
   ['import', "import x from 'x';", 0, 'import や export は、この採点環境では使えません。'],
   ['a syntax error', 'const t = new Turtle(;', 0, '「)」が足りません。'],
+  ['try without catch or finally', 'try {\n  console.log(1);\n}', 0, '書き方に誤りがあります。'],
+  ['a stray comma in arguments', 'function f(a, b) {}\nf(1,, 2);', 1, '書き方に誤りがあります。'],
+  ['a stray comma in an object literal', 'const o = { a: 1,, b: 2 };', 0, '書き方に誤りがあります。'],
+  ['a stray comma in an object pattern', 'const { a,, b } = { a: 1, b: 2 };', 0, '書き方に誤りがあります。'],
+  ['a function statement without a name', 'function () {}', 0, '書き方に誤りがあります。'],
+  ['a class statement without a name', 'class {}', 0, '書き方に誤りがあります。'],
 ])('%s is a compile error', (_, source, row, message) => {
   expect(executeProgram('javascript', source)).toEqual({ kind: 'compileError', diagnostics: [{ row, message }] });
 });
@@ -214,6 +220,10 @@ test.each([
   ],
   ['String(new Array(3).map((_, i) => i).length + Object.keys([1, , 3]).length)', '5'],
   ['String(new Array(5000).fill(7).join().length)', '9999'],
+  [
+    '(() => { const holes = [1, , 2]; function f(a,) { return a; } const { a, } = { a: 1 }; const o = { b: 2, }; return String([holes.length, f(1,), a, o.b]); })()',
+    '3,1,1,2',
+  ],
   [
     'String((() => { function sum() { const all = () => arguments.length; return [arguments[0] + arguments[1], all()]; } return sum(1, 2); })())',
     '3,2',

@@ -27,7 +27,7 @@
         "@willbooster/shared-lib": "11.1.0",
         "@willbooster/shared-lib-react": "6.3.0",
         "@willbooster/tree-sitter-java": "31.0.0",
-        "@willbooster/tree-sitter-javascript": "21.1.0",
+        "@willbooster/tree-sitter-javascript": "22.0.0",
         "@willbooster/wb": "23.1.0",
         "@willbooster/web-tree-sitter": "17.1.3",
         "at-decorators": "7.1.2",
@@ -853,7 +853,7 @@
 
     "@willbooster/tree-sitter-java": ["@willbooster/tree-sitter-java@31.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^17.0.1" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-xrLJvoOheR0WLYa1HsSYYb6pWbCNLq1BH1u2MA52IIgBw7L2dB1lLIvru1HUrReD4vHyaKChM01FVWVpmT5gpw=="],
 
-    "@willbooster/tree-sitter-javascript": ["@willbooster/tree-sitter-javascript@21.1.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^17.0.1" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-RjBscsIRkxCa6NrWTM521bewe1/x0vha+txdoBW9+rRKym0msek+mRxC8JPMvbiBVjuYmBBnWfVf1djVNXYaqA=="],
+    "@willbooster/tree-sitter-javascript": ["@willbooster/tree-sitter-javascript@22.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^17.0.1" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-XI5rk/dBBDMnnI0j6DPE5oXXWCgGcp7ASoEHSAiXHSQAQiUCqLoI+sm9di7ZziYBh+G+7fzMJtooaTFJFqc+xA=="],
 
     "@willbooster/wb": ["@willbooster/wb@23.1.0", "", { "dependencies": { "@textlint-rule/textlint-rule-no-invalid-control-character": "3.0.0", "@textlint/kernel": "15.8.0", "@textlint/module-interop": "15.8.0", "@textlint/textlint-plugin-markdown": "15.8.0", "chalk": "6.0.1", "code-gauge": "10.3.0", "dotenv": "18.0.9", "dotenv-expand": "13.0.0", "fast-glob": "3.3.3", "fastest-levenshtein": "1.0.16", "globby": "16.2.4", "jsonc-parser": "3.3.1", "minimal-promise-pool": "6.0.4", "semver": "7.8.5", "smol-toml": "1.9.1", "textlint-filter-rule-node-types": "1.1.0", "textlint-rule-ja-space-between-half-and-full-width": "3.0.4", "textlint-rule-no-zero-width-spaces": "1.0.1", "yargs": "18.2.0", "zod": "4.6.7" }, "bin": { "wb": "bin/index.js" } }, "sha512-kfn/NdL/1lfOQeaNskeUBvWX4ELkeWQYs3eOxF5BBS3xeJ8P2LX4TorDzq4m6Y1PWf4UAbrYM4qPBze/qxyt+Q=="],
 
