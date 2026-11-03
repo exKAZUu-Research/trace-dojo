@@ -518,3 +518,22 @@ handlers.add(2);`;
     3,
   ]);
 });
+
+test('private fields of the same name in a class and its subclass stay apart', () => {
+  const program = `class A {
+  #x = 1;
+  get() {
+    const n = this.#x; // step
+    return n;
+  }
+}
+class B extends A {
+  #x = 2;
+}
+new B().get();`;
+  expect(traceProgram('javascript', program, program).traceItems[1].vars).toEqual({
+    n: 1,
+    'this.A.#x': 1,
+    'this.B.#x': 2,
+  });
+});

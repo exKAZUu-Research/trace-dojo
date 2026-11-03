@@ -11,6 +11,7 @@ import {
   JsArray,
   JsFunction,
   JsObject,
+  privateClassOf,
   privateNameOf,
   type Scope,
   UNINITIALIZED,
@@ -162,9 +163,14 @@ function displayedEntries(object: JsObject): [string, Value][] {
     if (property.enumerable && !isAccessor(property) && !(property.value instanceof JsFunction))
       entries.push([key, property.value]);
   }
-  for (const [key, property] of object.privateMembers ?? []) {
-    if (!isAccessor(property) && !(property.value instanceof JsFunction))
-      entries.push([privateNameOf(key), property.value]);
+  const privateMembers = [...(object.privateMembers ?? [])];
+  const spellings = privateMembers.map(([key]) => privateNameOf(key));
+  for (const [key, property] of privateMembers) {
+    if (isAccessor(property) || property.value instanceof JsFunction) continue;
+    const name = privateNameOf(key);
+    // A class and its subclass may each declare the same name, whose fields the declaring class then tells apart.
+    const isShared = spellings.indexOf(name) !== spellings.lastIndexOf(name);
+    entries.push([isShared ? `${privateClassOf(key)}.${name}` : name, property.value]);
   }
   return entries;
 }

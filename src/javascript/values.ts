@@ -186,6 +186,11 @@ export function privateNameOf(key: string): string {
   return key.split('\0')[0];
 }
 
+/** The class that declared a private key, which tells apart members of the same name in a class and its subclass. */
+export function privateClassOf(key: string): string {
+  return key.split('\0')[1];
+}
+
 /** Whether a property key is an array index. */
 export function arrayIndexOf(key: string): number | undefined {
   if (!/^(?:0|[1-9]\d*)$/.test(key)) return undefined;

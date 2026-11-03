@@ -13,6 +13,7 @@ import {
   type FunctionBehavior,
   type FunctionFrame,
   isObject,
+  JsArray,
   JsFunction,
   type JsObject,
   JsThrow,
@@ -20,6 +21,7 @@ import {
   toBoolean,
   UNINITIALIZED,
   type Value,
+  valueOfElement,
 } from './values';
 
 let nextPrivateId = 0;
@@ -197,10 +199,15 @@ export class Evaluator extends ExpressionEvaluator {
   private forEachStatement(statement: Extract<Statement, { kind: 'forOf' | 'forIn' }>, labels: string[]): Completion {
     const { runtime } = this;
     const iterable = this.evaluate(statement.iterable);
-    const values = statement.kind === 'forOf' ? runtime.iterate(iterable) : this.enumerableKeys(iterable);
+    // An array is read live, so elements changed or added while looping are visited as JavaScript does.
+    const values =
+      statement.kind === 'forIn'
+        ? this.enumerableKeys(iterable)
+        : iterable instanceof JsArray
+          ? iterable.elements
+          : runtime.iterate(iterable);
     const frame = runtime.frame;
     return runtime.hold(iterable, () => {
-      // An array is read live, so elements added while looping are visited as JavaScript does.
       for (let index = 0; index < values.length; index++) {
         runtime.spend();
         const outer = frame.scope;
@@ -209,7 +216,8 @@ export class Evaluator extends ExpressionEvaluator {
             frame.scope = new Scope(outer);
             this.instantiate(frame.scope, statement.scope);
           }
-          this.bindPattern(statement.target, values[index], statement.declarationKind ? 'initialize' : 'assign');
+          const value = valueOfElement(values[index]);
+          this.bindPattern(statement.target, value, statement.declarationKind ? 'initialize' : 'assign');
           this.step(statement.stepId);
           const result = this.loopBody(statement.body, labels);
           if (result !== 'next') return result;
@@ -364,7 +372,8 @@ export class Evaluator extends ExpressionEvaluator {
       const { key } = member;
       // Private names live in the class scope, where `#` keeps them apart from variables.
       if (key.kind === 'private' && !classScope.bindings.has(key.name)) {
-        classScope.bindings.set(key.name, { value: `${key.name}\0${nextPrivateId++}`, isMutable: false });
+        const identity = `${key.name}\0${cls.name}\0${nextPrivateId++}`;
+        classScope.bindings.set(key.name, { value: identity, isMutable: false });
       }
     }
     const prototype = runtime.newObject(prototypeParent);

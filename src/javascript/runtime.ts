@@ -452,9 +452,10 @@ export class Runtime {
 
   /** The values `for...of`, spread, and array destructuring read: those of arrays and the characters of strings. */
   iterate(value: Value): Value[] {
-    // An array without holes is read live, so a loop visits the elements added while it runs, as JavaScript does.
-    if (value instanceof JsArray)
-      return value.elements.includes(HOLE) ? value.elements.map(valueOfElement) : (value.elements as Value[]);
+    if (value instanceof JsArray) {
+      this.scan(value.elements.length);
+      return value.elements.map(valueOfElement);
+    }
     if (typeof value === 'string') {
       this.scan(value.length);
       // oxlint-disable-next-line typescript/no-misused-spread -- JavaScript iterates strings by code point.

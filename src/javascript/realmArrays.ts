@@ -376,17 +376,18 @@ function reduce(
   callRow: number | undefined
 ): Value {
   const length = array.elements.length;
-  const indices = Array.from({ length }, (_, step) => (fromEnd ? length - 1 - step : step)).filter(
-    (index) => array.elements[index] !== HOLE
-  );
+  const indices = Array.from({ length }, (_, step) => (fromEnd ? length - 1 - step : step));
   let accumulator: Value;
   if (args.length >= 2) {
     accumulator = args[1];
   } else {
-    const first = indices.shift();
-    if (first === undefined) return runtime.throwError('TypeError', 'Reduce of empty array with no initial value');
-    accumulator = valueOfElement(array.elements[first]);
+    // Without an initial value, the first element present starts the accumulation.
+    const first = indices.findIndex((index) => array.elements[index] !== HOLE);
+    if (first === -1) return runtime.throwError('TypeError', 'Reduce of empty array with no initial value');
+    accumulator = array.elements[indices[first]] as Value;
+    indices.splice(0, first + 1);
   }
+  // Presence is checked as each index is visited, since a callback may fill a later hole.
   for (const index of indices) {
     const element = index < array.elements.length ? array.elements[index] : HOLE;
     if (element === HOLE) continue;
