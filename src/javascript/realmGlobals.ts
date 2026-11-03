@@ -1,3 +1,4 @@
+import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { inspect, OutputBudget } from './inspect';
 import type { ErrorName, RealmBuilder } from './realm';
 import { defineHidden, type Runtime } from './runtime';
@@ -362,7 +363,7 @@ function defineTurtle(builder: RealmBuilder): void {
     turtle.turtle = created;
     return turtle;
   });
-  const define = (names: string[], run: (runtime: Runtime, turtle: JsObject) => Value): void => {
+  const define = (names: readonly string[], run: (runtime: Runtime, turtle: JsObject) => Value): void => {
     for (const name of names) {
       builder.method(prototype, name, 0, ({ runtime, thisValue }) => {
         if (!(thisValue instanceof JsObject) || !thisValue.turtle) {
@@ -373,32 +374,36 @@ function defineTurtle(builder: RealmBuilder): void {
     }
   };
   for (const [names, sign] of [
-    [['前に進む', 'forward'], 1],
-    [['後に戻る', 'backward'], -1],
+    [TURTLE_METHOD_NAMES.forward, 1],
+    [TURTLE_METHOD_NAMES.backward, -1],
   ] as const) {
-    define([...names], (runtime, turtle) => {
-      const error = runtime.world.move(turtle.turtle as NonNullable<JsObject['turtle']>, sign);
+    define(names, (runtime, turtle) => {
+      const error = runtime.world.move(turtleStateOf(turtle), sign);
       if (error) runtime.throwError('Error', error);
       return;
     });
   }
   for (const [names, quarters] of [
-    [['右を向く', 'turnRight'], 1],
-    [['左を向く', 'turnLeft'], 3],
+    [TURTLE_METHOD_NAMES.turnRight, 1],
+    [TURTLE_METHOD_NAMES.turnLeft, 3],
   ] as const) {
-    define([...names], (runtime, turtle) => {
-      runtime.world.turn(turtle.turtle as NonNullable<JsObject['turtle']>, quarters);
+    define(names, (runtime, turtle) => {
+      runtime.world.turn(turtleStateOf(turtle), quarters);
       return;
     });
   }
-  define(['前に進めるか', 'canMoveForward'], (runtime, turtle) => {
+  define(TURTLE_METHOD_NAMES.canMoveForward, (runtime, turtle) => {
     runtime.collectGarbage();
-    return runtime.world.canMoveForward(turtle.turtle as NonNullable<JsObject['turtle']>);
+    return runtime.world.canMoveForward(turtleStateOf(turtle));
   });
-  define(['前のマスが塗られているか'], (runtime, turtle) =>
-    runtime.world.isFrontPainted(turtle.turtle as NonNullable<JsObject['turtle']>));
-  define(['remove'], (runtime, turtle) => {
-    runtime.world.remove(turtle.turtle as NonNullable<JsObject['turtle']>);
+  define(TURTLE_METHOD_NAMES.isFrontPainted, (runtime, turtle) => runtime.world.isFrontPainted(turtleStateOf(turtle)));
+  define(TURTLE_METHOD_NAMES.remove, (runtime, turtle) => {
+    runtime.world.remove(turtleStateOf(turtle));
     return;
   });
+}
+
+/** The state of a turtle the Turtle methods have checked is one. */
+function turtleStateOf(turtle: JsObject): NonNullable<JsObject['turtle']> {
+  return turtle.turtle as NonNullable<JsObject['turtle']>;
 }

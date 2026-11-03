@@ -168,6 +168,23 @@ while (a.前に進めるか()) {
 const painted = a.前のマスが塗られているか(); // step`,
   },
   {
+    name: 'a for header annotated on two rows',
+    java: javaMain(`
+    Turtle t = new Turtle(0, 0);
+    for (int i = 0; // step
+         i < 2;
+         i++) { // step
+      t.forward();
+    }`),
+    javascript: `
+const t = new Turtle(0, 0);
+for (let i = 0; // step
+     i < 2;
+     i++) { // step
+  t.forward();
+}`,
+  },
+  {
     name: 'calls with caller annotations',
     java: javaMain(
       `

@@ -190,7 +190,11 @@ export class ProgramConverter extends ExpressionConverter {
       if (recordsHeaderStep(statement)) {
         // The header records its step as one statement nested in the loop, at the depth of the loop's body.
         for (const part of [initNode, incrementNode]) {
-          if (part) this.addSteppable(part, (stepId) => (statement.stepId = stepId), depthOf(node) + 1 - depthOf(part));
+          // The header records one step: the first annotated row's, as Java's for does when several rows are annotated.
+          const assign = (stepId: number): void => {
+            statement.stepId ??= stepId;
+          };
+          if (part) this.addSteppable(part, assign, depthOf(node) + 1 - depthOf(part));
         }
       }
       statement.body = this.inBreakable(true, () => this.substatement(field(node, 'body')));
