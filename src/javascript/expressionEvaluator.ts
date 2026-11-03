@@ -333,7 +333,9 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
           this.evaluate(argument);
           return true;
         }
-        const reference = this.memberReference(target);
+        // An optional chain that meets null or undefined deletes nothing, which succeeds.
+        const reference = this.calleeReference(target, target === argument);
+        if (reference === SHORT_CIRCUIT) return true;
         if (reference.kind === 'super') return runtime.throwError('ReferenceError', "Unsupported reference to 'super'");
         if (reference.kind !== 'property') return runtime.throwError('TypeError', 'Private fields can not be deleted');
         return runtime.deleteProperty(reference.base, reference.key);

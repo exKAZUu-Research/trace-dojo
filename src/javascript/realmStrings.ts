@@ -149,7 +149,9 @@ function replaceText({ runtime, args, callRow }: NativeCall, text: string, all: 
     result += part;
     copied = position + pattern.length;
   }
-  return result + text.slice(copied);
+  const suffix = text.slice(copied);
+  runtime.extendString(result.length + suffix.length, suffix.length);
+  return result + suffix;
 }
 
 /** The positions where `pattern` occurs in `text`: the first only, or all without overlapping. */
