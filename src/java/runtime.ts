@@ -56,7 +56,8 @@ const LIMITS = {
   maxOperations: 1_000_000,
   maxMilliseconds: 2000,
   maxCallDepth: 512,
-  maxArrayElements: 1_000_000,
+  /** The total number of array elements and object fields allocated while running. */
+  maxSlots: 1_000_000,
   /** The total length of the strings built while running. */
   maxStringLength: 10_000_000,
   maxOutputLength: 100_000,
@@ -81,7 +82,7 @@ export class Runtime {
   private operations = 0;
   private nextClockCheck = OPERATIONS_PER_CLOCK_CHECK;
   private readonly deadline = performance.now() + LIMITS.maxMilliseconds;
-  private allocatedArrayElements = 0;
+  private allocatedSlots = 0;
   private allocatedStringLength = 0;
   private readonly initializingClasses = new Set<ClassInfo>();
   private readonly dispatchCache = new Map<MethodInfo, Map<ClassInfo, MethodInfo>>();
@@ -111,10 +112,24 @@ export class Runtime {
 
   allocateArray(frame: Frame, length: number): void {
     if (length < 0) throwBuiltin(frame, 'NegativeArraySizeException', String(length));
-    this.allocatedArrayElements += length;
+    this.allocateSlots(frame, length);
+  }
+
+  allocateObject(frame: Frame, cls: ClassInfo): JavaObject {
+    this.allocateSlots(frame, cls.instanceFieldCount + 1);
+    return new JavaObject(cls);
+  }
+
+  /** Charges for array elements or object fields before they are allocated. */
+  private allocateSlots(frame: Frame, count: number): void {
+    this.allocatedSlots += count;
+    this.spend(Math.ceil(count / 64));
+    if (this.allocatedSlots > LIMITS.maxSlots) throwBuiltin(frame, 'OutOfMemoryError', 'Java heap space');
+  }
+
+  /** Charges for reading `length` characters of strings, which one native call may do at once. */
+  scanString(length: number): void {
     this.spend(Math.ceil(length / 64));
-    if (this.allocatedArrayElements > LIMITS.maxArrayElements)
-      throwBuiltin(frame, 'OutOfMemoryError', 'Java heap space');
   }
 
   staticsOf(frame: Frame, cls: ClassInfo): Value[] {

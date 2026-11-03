@@ -39,6 +39,20 @@ test.each([
     main('Turtle t = new Turtle(); Object[] a = new Object[900000]; while (true) t.前に進めるか();'),
     { kind: 'limitExceeded' },
   ],
+  [
+    'a search for a long pattern in a long string',
+    main(
+      'String a = "a".repeat(5000000); String p = "a".repeat(4000) + "b" + "a".repeat(4000); System.out.println(a.indexOf(p));'
+    ),
+    { kind: 'limitExceeded' },
+  ],
+  [
+    'many objects with many fields',
+    `class Item { ${Array.from({ length: 1000 }, (_, index) => `int a${index};`).join(' ')} }\n${main(
+      'Item[] a = new Item[10000]; for (int i = 0; i < a.length; i++) a[i] = new Item();'
+    )}`,
+    { kind: 'executed', uncaughtException: expect.stringContaining('OutOfMemoryError') },
+  ],
   ['deeply nested blocks', main(`${'{'.repeat(9000)}${'}'.repeat(9000)}`), { kind: 'compileError' }],
   ['deeply nested negations', main(`boolean b = ${'!'.repeat(19_000)}true;`), { kind: 'compileError' }],
 ])('%s ends within the limits', (_, source, expected) => {

@@ -280,7 +280,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     declarator: VariableDeclarator
   ): { slot: number; value: Eval | undefined } {
     const { initializer } = declarator;
-    let type: JavaType;
+    let slot: number;
     let compiled: CompiledValue | undefined;
     if (statement.type.kind === 'var') {
       if (!initializer || initializer.kind === 'arrayInitializer' || declarator.extraDimensions > 0) {
@@ -290,18 +290,18 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       if (compiled.type.kind === 'null' || compiled.type.kind === 'void') {
         this.error(declarator, `変数 ${declarator.name} の型を決められません。`);
       }
-      type = compiled.type;
+      slot = this.declareLocal(context, declarator, declarator.name, compiled.type);
     } else {
-      type = this.withDimensions(this.resolveType(statement.type), declarator.extraDimensions);
+      const type = this.withDimensions(this.resolveType(statement.type), declarator.extraDimensions);
+      // The variable's scope includes its own initializer, where it shadows a field of the same name.
+      slot = this.declareLocal(context, declarator, declarator.name, type);
       if (initializer?.kind === 'arrayInitializer') {
-        const slot = this.declareLocal(context, declarator, declarator.name, type);
         return { slot, value: this.compileArrayInitializer(context, initializer, type) };
       }
       if (initializer) {
         compiled = this.convert(this.compileValue(context, initializer), type, 'assignment', declarator);
       }
     }
-    const slot = this.declareLocal(context, declarator, declarator.name, type);
     if (statement.isFinal && compiled?.constant !== undefined) context.constants.set(slot, compiled.constant);
     return { slot, value: compiled?.run };
   }

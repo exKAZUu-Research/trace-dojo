@@ -667,7 +667,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       type,
       run: (frame) => {
         frame.runtime.initializeClass(frame, cls);
-        const object = new JavaObject(cls);
+        const object = frame.runtime.allocateObject(frame, cls);
         frame.temporaries.push(object);
         try {
           this.invokeWithArguments(frame, constructor, object, convertedArgs, callRow);

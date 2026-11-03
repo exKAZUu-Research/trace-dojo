@@ -134,8 +134,11 @@ class DefiniteAssignmentChecker {
   private localDeclaration(statement: LocalVariableDeclaration, state: State): State {
     let current = state;
     for (const declarator of statement.declarators) {
-      if (declarator.initializer) current = this.initializer(declarator.initializer, current);
-      current = this.declare(current, declarator.name, statement.isFinal, declarator.initializer !== undefined);
+      // The variable's scope includes its own initializer, which therefore cannot read it.
+      current = this.declare(current, declarator.name, statement.isFinal, false);
+      if (!declarator.initializer) continue;
+      current = this.initializer(declarator.initializer, current);
+      current = assign(current, (this.lookup(declarator.name) as Variable).id);
     }
     return current;
   }

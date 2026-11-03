@@ -483,6 +483,8 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'public class Main {\n  public static void main(String[] args) {\n    int x; while (true) { switch (args.length) { case 0: break; default: break; } x = 1; break; } System.out.println(x);\n  }\n  \n}\n',
   ],
+  ['self-initializer', false, 'class Main { static int x; public static void main(String[] a) { int x = x; } }'],
+  ['later-declarator', true, 'class Main { public static void main(String[] a) { int x = 1, y = x + 1; } }'],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

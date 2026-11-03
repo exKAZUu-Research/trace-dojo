@@ -220,24 +220,17 @@ function defineStringQueries(stringClass: ClassInfo, objectType: JavaType): void
     checkIndex(frame, index as number, text(receiver).length);
     return charCodeOf(text(receiver), index as number);
   });
-  addMethod(
-    stringClass,
-    'equals',
-    [objectType],
-    BOOLEAN,
-    false,
-    (_, receiver, [other]) => other instanceof JavaString && other.value === text(receiver)
-  );
-  addMethod(
-    stringClass,
-    'equalsIgnoreCase',
-    [stringType],
-    BOOLEAN,
-    false,
-    (_, receiver, [other]) => other instanceof JavaString && other.value.toLowerCase() === text(receiver).toLowerCase()
-  );
-  addMethod(stringClass, 'hashCode', [], INT, false, (_, receiver) => {
+  addMethod(stringClass, 'equals', [objectType], BOOLEAN, false, (frame, receiver, [other]) => {
+    frame.runtime.scanString(text(receiver).length);
+    return other instanceof JavaString && other.value === text(receiver);
+  });
+  addMethod(stringClass, 'equalsIgnoreCase', [stringType], BOOLEAN, false, (frame, receiver, [other]) => {
+    frame.runtime.scanString(text(receiver).length);
+    return other instanceof JavaString && other.value.toLowerCase() === text(receiver).toLowerCase();
+  });
+  addMethod(stringClass, 'hashCode', [], INT, false, (frame, receiver) => {
     const value = text(receiver);
+    frame.runtime.scanString(value.length);
     let hash = 0;
     for (let index = 0; index < value.length; index++) hash = toInt32(Math.imul(hash, 31) + charCodeOf(value, index));
     return hash;
@@ -253,17 +246,25 @@ function defineStringQueries(stringClass: ClassInfo, objectType: JavaType): void
     checkRange(frame, begin as number, end as number, value.length);
     return newString(frame, value.slice(begin as number, end as number));
   });
-  addMethod(stringClass, 'indexOf', [stringType], INT, false, (frame, receiver, [other]) =>
-    text(receiver).indexOf(requireString(frame, other))
-  );
-  addMethod(stringClass, 'indexOf', [INT], INT, false, (_, receiver, [code]) =>
-    text(receiver).indexOf(String.fromCodePoint(code as number))
-  );
+  addMethod(stringClass, 'indexOf', [stringType], INT, false, (frame, receiver, [other]) => {
+    const pattern = requireString(frame, other);
+    // A search may compare the pattern at every position of the text.
+    frame.runtime.scanString(text(receiver).length * Math.max(pattern.length, 1));
+    return text(receiver).indexOf(pattern);
+  });
+  addMethod(stringClass, 'indexOf', [INT], INT, false, (frame, receiver, [code]) => {
+    frame.runtime.scanString(text(receiver).length);
+    return text(receiver).indexOf(String.fromCodePoint(code as number));
+  });
   for (const name of ['contains', 'startsWith', 'endsWith'] as const) {
     const method = name === 'contains' ? 'includes' : name;
-    addMethod(stringClass, name, [stringType], BOOLEAN, false, (frame, receiver, [other]) =>
-      text(receiver)[method](requireString(frame, other))
-    );
+    addMethod(stringClass, name, [stringType], BOOLEAN, false, (frame, receiver, [other]) => {
+      const pattern = requireString(frame, other);
+      frame.runtime.scanString(
+        name === 'contains' ? text(receiver).length * Math.max(pattern.length, 1) : pattern.length
+      );
+      return text(receiver)[method](pattern);
+    });
   }
 }
 
@@ -293,6 +294,7 @@ function defineStringTransforms(stringClass: ClassInfo, objectType: JavaType): v
   addMethod(stringClass, 'compareTo', [stringType], INT, false, (frame, receiver, [other]) => {
     const left = text(receiver);
     const right = requireString(frame, other);
+    frame.runtime.scanString(Math.min(left.length, right.length));
     for (let index = 0; index < Math.min(left.length, right.length); index++) {
       if (left[index] !== right[index]) return charCodeOf(left, index) - charCodeOf(right, index);
     }
