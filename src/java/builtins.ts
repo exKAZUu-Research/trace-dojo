@@ -212,6 +212,7 @@ function defineString(stringClass: ClassInfo, objectType: JavaType): void {
   defineStringTransforms(stringClass, objectType);
 }
 
+// code-gauge-allow functionNcss 42 -- One registration per String method, each charging the characters it reads.
 function defineStringQueries(stringClass: ClassInfo, objectType: JavaType): void {
   const stringType = stringClass.type;
   addMethod(stringClass, 'length', [], INT, false, (_, receiver) => text(receiver).length);

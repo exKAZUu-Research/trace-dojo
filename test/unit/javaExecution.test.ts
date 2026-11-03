@@ -25,6 +25,16 @@ test.each([
     { kind: 'executed', uncaughtException: expect.stringContaining('StackOverflowError') },
   ],
   [
+    'endless recursion through nested statements',
+    'public class Main { static int f(int n) { for (int i = 0; i < 2; i++) { if (n >= 0) { try { while (true) { n += f(n + 1); break; } } finally { } } } return n; } public static void main(String[] a) { f(0); } }',
+    { kind: 'executed', uncaughtException: 'java.lang.StackOverflowError' },
+  ],
+  [
+    'an uncaught exception whose toString() throws',
+    'class Main { public static void main(String[] a) { throw new E(); } } class E extends RuntimeException { public String toString() { throw new RuntimeException(); } }',
+    { kind: 'executed', uncaughtException: 'E' },
+  ],
+  [
     'a huge array',
     main('int[][] a = new int[100000][100000];'),
     { kind: 'executed', uncaughtException: expect.stringContaining('OutOfMemoryError') },

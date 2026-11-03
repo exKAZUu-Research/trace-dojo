@@ -65,8 +65,20 @@ function runMain(runtime: Runtime, program: CompiledProgram): string | undefined
     runtime.invoke(root, program.mainMethod, undefined, [args], undefined);
     return undefined;
   } catch (error) {
+    // The host's stack can run out before the Java call depth limit when each call nests many statements.
+    if (error instanceof RangeError && /call stack/i.test(error.message)) return 'java.lang.StackOverflowError';
     if (!(error instanceof JavaThrow)) throw error;
-    return runtime.invokeToString(root, error.value)?.value ?? error.value.cls.name;
+    return describeException(runtime, root, error);
+  }
+}
+
+function describeException(runtime: Runtime, root: Frame, thrown: JavaThrow): string {
+  try {
+    return runtime.invokeToString(root, thrown.value)?.value ?? thrown.value.cls.name;
+  } catch (error) {
+    // A learner's toString() may itself throw, which leaves only the class to describe the exception.
+    if (error instanceof JavaThrow) return thrown.value.cls.name;
+    throw error;
   }
 }
 

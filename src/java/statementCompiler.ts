@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 409 -- The statement compiler keeps one method per statement kind together.
+// code-gauge-allow-file fileNcss 417 -- The statement compiler keeps one method per statement kind together.
 import type {
   Block,
   CatchClause,
@@ -86,12 +86,14 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   protected compileStatements(context: MethodContext, statements: Statement[]): Exec {
-    for (let index = 1; index < statements.length; index++) {
-      if (!canCompleteNormally(statements[index - 1])) {
-        this.error(statements[index], 'この文は実行されることがありません。');
+    const compiled: Exec[] = [];
+    for (const [index, statement] of statements.entries()) {
+      // Reachability reads the constants of the conditions compiled before it.
+      if (index > 0 && !canCompleteNormally(statements[index - 1])) {
+        this.error(statement, 'この文は実行されることがありません。');
       }
+      compiled.push(this.compileStatement(context, statement));
     }
-    const compiled = statements.map((statement) => this.compileStatement(context, statement));
     return (frame) => {
       for (const exec of compiled) {
         const completion = exec(frame);
@@ -554,12 +556,14 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     clauses: CatchClause[],
     thrownInTry: readonly ClassInfo[]
   ): CatchHandler {
+    const earlierClasses: ClassInfo[] = [];
     const handlers = clauses.map((clause) => {
       const classes = clause.types.map((type) => this.resolveThrowable(type));
+      const rethrown = caughtByClause(thrownInTry, classes, earlierClasses);
+      earlierClasses.push(...classes);
       const exec = this.withScope(context, () => {
         const type = classes.length === 1 ? classes[0].type : this.builtins.throwableClass.type;
         const slot = this.declareLocal(context, clause, clause.name, type);
-        const rethrown = thrownInTry.filter((thrown) => classes.some((cls) => isSubclass(thrown, cls)));
         if (!assignedNames(clause.body).includes(clause.name)) context.rethrownTypes.set(slot, rethrown);
         const handler = this.compileBlock(context, clause.body);
         return (frame) => {
@@ -579,6 +583,21 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 }
 
 type CatchHandler = (frame: Frame, thrown: JavaThrow) => Completion | undefined;
+
+/** What a catch clause receives: what the try block throws narrowed to its classes, minus what earlier clauses catch. */
+function caughtByClause(
+  thrownInTry: readonly ClassInfo[],
+  classes: readonly ClassInfo[],
+  earlierClasses: readonly ClassInfo[]
+): ClassInfo[] {
+  const narrowed = thrownInTry.flatMap((thrown) =>
+    classes.flatMap((cls) => {
+      if (isSubclass(thrown, cls)) return [thrown];
+      return isSubclass(cls, thrown) ? [cls] : [];
+    })
+  );
+  return narrowed.filter((thrown) => !earlierClasses.some((earlier) => isSubclass(thrown, earlier)));
+}
 
 /** Runs a try block and its catch clauses, returning how they completed or the exception left for finally. */
 function attemptTry(frame: Frame, body: Exec, handle: CatchHandler): { completion?: Completion; pending?: JavaThrow } {

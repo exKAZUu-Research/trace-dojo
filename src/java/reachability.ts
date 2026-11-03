@@ -1,4 +1,4 @@
-import type { BinaryOperator, Expression, Statement } from './ast';
+import type { Expression, Statement } from './ast';
 
 /** A conservative version of Java's reachability rule for a method body's end. */
 export function canCompleteNormally(statement: Statement): boolean {
@@ -43,7 +43,7 @@ export function canCompleteNormally(statement: Statement): boolean {
 function loopCanCompleteNormally(statement: Extract<Statement, { kind: 'while' | 'do' | 'for' }>): boolean {
   if (containsBreak(statement.body)) return true;
   // A for statement without a condition loops as if its condition were true.
-  const runsForever = statement.condition === undefined || constantBoolean(statement.condition) === true;
+  const runsForever = statement.condition === undefined || booleanConstants.get(statement.condition) === true;
   return !runsForever && (statement.kind !== 'do' || canCompleteNormally(statement.body));
 }
 
@@ -58,53 +58,8 @@ function switchCanCompleteNormally(statement: Extract<Statement, { kind: 'switch
   return !last || last.statements.every((child) => canCompleteNormally(child));
 }
 
-/** Evaluates boolean constant expressions built from literals, which decide reachability in Java. */
-export function constantBoolean(expression: Expression): boolean | undefined {
-  switch (expression.kind) {
-    case 'literal': {
-      return expression.literal.type === 'boolean' ? expression.literal.value : undefined;
-    }
-    case 'unary': {
-      const operand = constantBoolean(expression.operand);
-      return expression.operator === '!' && operand !== undefined ? !operand : undefined;
-    }
-    case 'binary': {
-      return constantBinary(expression);
-    }
-    default: {
-      return;
-    }
-  }
-}
-
-const numericComparisons: Partial<Record<BinaryOperator, (left: number, right: number) => boolean>> = {
-  '<': (left, right) => left < right,
-  '>': (left, right) => left > right,
-  '<=': (left, right) => left <= right,
-  '>=': (left, right) => left >= right,
-  '==': (left, right) => left === right,
-  '!=': (left, right) => left !== right,
-};
-
-function constantBinary(expression: Extract<Expression, { kind: 'binary' }>): boolean | undefined {
-  if (expression.operator === '&&' || expression.operator === '||') {
-    const left = constantBoolean(expression.left);
-    const right = constantBoolean(expression.right);
-    if (left === undefined || right === undefined) return;
-    return expression.operator === '&&' ? left && right : left || right;
-  }
-  const compare = numericComparisons[expression.operator];
-  const left = constantNumber(expression.left);
-  const right = constantNumber(expression.right);
-  if (!compare || left === undefined || right === undefined) return;
-  return compare(left, right);
-}
-
-function constantNumber(expression: Expression): number | undefined {
-  if (expression.kind !== 'literal') return;
-  const { literal } = expression;
-  return literal.type === 'int' || literal.type === 'double' || literal.type === 'char' ? literal.value : undefined;
-}
+/** The values of the boolean constant expressions compiled so far, which decide reachability in Java. */
+export const booleanConstants = new WeakMap<Expression, boolean>();
 
 /** Whether `statement` contains a `break` that exits it (unlabeled at loop level, or to `label`). */
 function containsBreak(statement: Statement, label?: string, depth = 0): boolean {

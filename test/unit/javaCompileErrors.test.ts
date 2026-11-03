@@ -485,6 +485,51 @@ const programs: [name: string, runs: boolean, source: string][] = [
   ],
   ['self-initializer', false, 'class Main { static int x; public static void main(String[] a) { int x = x; } }'],
   ['later-declarator', true, 'class Main { public static void main(String[] a) { int x = 1, y = x + 1; } }'],
+  [
+    'constFinalCond',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    final boolean go = true; int n; if (go) n = 4; System.out.println(n);\n  }\n  \n}\n',
+  ],
+  [
+    'constWhileUnreachable',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    final boolean go = true; while (go) {} System.out.println(1);\n  }\n  \n}\n',
+  ],
+  [
+    'staticConstWhile',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    while (GO) {} System.out.println(1);\n  }\n  static final boolean GO = true;\n}\n',
+  ],
+  [
+    'nonConstFinal',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    final boolean go = args.length > 0; int n; if (go) n = 1; System.out.println(n);\n  }\n  \n}\n',
+  ],
+  [
+    'literalCompare',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    while (1 < 2) {} System.out.println(1);\n  }\n  \n}\n',
+  ],
+  [
+    'constMissingReturn',
+    true,
+    'public class Main { static final boolean GO = true; static int f() { while (GO) {} } public static void main(String[] a) { f(); } }',
+  ],
+  [
+    'laterRethrowCaught',
+    true,
+    'class A extends Exception {}\npublic class Main { static void f() throws A {} public static void main(String[] args) { try { f(); } catch (A a) { } catch (Exception e) { throw e; } } }\n',
+  ],
+  [
+    'narrowRethrow',
+    true,
+    'class A extends Exception {}\npublic class Main { static void f() throws Exception {} public static void main(String[] args) throws A { try { f(); } catch (A e) { throw e; } catch (Exception e) { } } }\n',
+  ],
+  [
+    'narrowRethrowBad',
+    false,
+    'class A extends Exception {}\nclass B extends A {}\npublic class Main { static void f() throws A {} public static void main(String[] args) throws B { try { f(); } catch (A e) { throw e; } } }\n',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

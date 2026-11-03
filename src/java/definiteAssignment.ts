@@ -17,7 +17,7 @@ import type {
   WhileStatement,
 } from './ast';
 import { CompileError } from './diagnostics';
-import { constantBoolean } from './reachability';
+import { booleanConstants } from './reachability';
 
 /**
  * Applies Java's definite assignment rules to the locals of one body: a local is read only after every path
@@ -282,7 +282,7 @@ class DefiniteAssignmentChecker {
   }
 
   private condition(expression: Expression, state: State): Conditional {
-    const constant = constantBoolean(expression);
+    const constant = booleanConstants.get(expression);
     if (constant !== undefined) {
       const after = this.expression(expression, state);
       return constant ? { whenTrue: after, whenFalse: UNREACHABLE } : { whenTrue: UNREACHABLE, whenFalse: after };

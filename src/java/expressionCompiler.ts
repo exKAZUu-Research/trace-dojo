@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 434 -- The expression compiler keeps one method per expression kind together.
+// code-gauge-allow-file fileNcss 438 -- The expression compiler keeps one method per expression kind together.
 import type { ArrayInitializer, BinaryOperator, Expression, Span } from './ast';
 import {
   type Compiled,
@@ -11,6 +11,7 @@ import {
 } from './compilerBase';
 import { CompileError } from './diagnostics';
 import { binaryOperation, castOperation, conditionalType, unaryOperation } from './operators';
+import { booleanConstants } from './reachability';
 import { type Frame, throwBuiltin, UNASSIGNED } from './runtime';
 import {
   BOOLEAN,
@@ -82,7 +83,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   protected compileExpression(context: MethodContext, expression: Expression): Compiled {
     try {
-      return this.compileExpressionBody(context, expression);
+      const compiled = this.compileExpressionBody(context, expression);
+      if (compiled.kind === 'value' && typeof compiled.constant === 'boolean') {
+        booleanConstants.set(expression, compiled.constant);
+      }
+      return compiled;
     } catch (error) {
       // Conversions report no location of their own, so they take the expression's.
       if (error instanceof CompileError && error.diagnostics[0]?.row === -1) {
