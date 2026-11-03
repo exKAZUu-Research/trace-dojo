@@ -193,8 +193,8 @@ test.each([
   ['String((() => { const a = []; const [x = (a.push(8, 9), 1), y] = a; return [x, y === undefined]; })())', '1,true'],
   ["String(['B', 'a', 'C', 'é', 'e', 'z'].sort((a, b) => a.localeCompare(b)))", 'a,B,C,e,é,z'],
   [
-    '(() => { const results = []; for (const change of [() => Object.freeze([]).reverse(), () => Object.freeze([1]).reverse(), () => Object.freeze([1]).fill(0, 1), () => Object.freeze([, ]).sort(), () => { delete Object.freeze([, ])[0]; }, () => Object.freeze([1, 2]).reverse(), () => Object.freeze([]).push()]) { try { change(); results.push("ok"); } catch (e) { results.push(e.name); } } return String(results); })()',
-    'ok,ok,ok,ok,ok,TypeError,TypeError',
+    '(() => { const results = []; for (const change of [() => Object.freeze([]).reverse(), () => Object.freeze([1]).reverse(), () => Object.freeze([1]).fill(0, 1), () => Object.freeze([, ]).sort(), () => { delete Object.freeze([, ])[0]; }, () => Object.freeze([, , ]).reverse(), () => Object.freeze([, 1, , ]).reverse(), () => Object.freeze([1, 2]).reverse(), () => Object.freeze([]).push()]) { try { change(); results.push("ok"); } catch (e) { results.push(e.name); } } return String(results); })()',
+    'ok,ok,ok,ok,ok,ok,ok,TypeError,TypeError',
   ],
   ['String((() => { const a = [undefined, 2]; const [x = (a[1] = 9), y] = a; return [x, y]; })())', '9,9'],
   [

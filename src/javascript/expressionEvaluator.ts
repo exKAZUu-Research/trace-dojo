@@ -319,7 +319,21 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     });
   }
 
-  // code-gauge-allow functionNcss 31 -- One case per unary operator.
+  private deleteExpression(argument: Expression): boolean {
+    const { runtime } = this;
+    const target = argument.kind === 'parenthesized' ? argument.expression : argument;
+    if (target.kind !== 'member') {
+      this.evaluate(argument);
+      return true;
+    }
+    // An optional chain that meets null or undefined deletes nothing, which succeeds.
+    const reference = this.calleeReference(target, target === argument);
+    if (reference === SHORT_CIRCUIT) return true;
+    if (reference.kind === 'super') return runtime.throwError('ReferenceError', "Unsupported reference to 'super'");
+    if (reference.kind !== 'property') return runtime.throwError('TypeError', 'Private fields can not be deleted');
+    return runtime.deleteProperty(reference.base, reference.key);
+  }
+
   private unary(operator: string, argument: Expression): Value {
     const { runtime } = this;
     switch (operator) {
@@ -328,17 +342,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         return runtime.typeOf(this.evaluate(argument));
       }
       case 'delete': {
-        const target = argument.kind === 'parenthesized' ? argument.expression : argument;
-        if (target.kind !== 'member') {
-          this.evaluate(argument);
-          return true;
-        }
-        // An optional chain that meets null or undefined deletes nothing, which succeeds.
-        const reference = this.calleeReference(target, target === argument);
-        if (reference === SHORT_CIRCUIT) return true;
-        if (reference.kind === 'super') return runtime.throwError('ReferenceError', "Unsupported reference to 'super'");
-        if (reference.kind !== 'property') return runtime.throwError('TypeError', 'Private fields can not be deleted');
-        return runtime.deleteProperty(reference.base, reference.key);
+        return this.deleteExpression(argument);
       }
       case 'void': {
         this.evaluate(argument);

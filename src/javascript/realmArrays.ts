@@ -137,11 +137,8 @@ function defineMutators(builder: RealmBuilder): void {
     return runtime.newArray(removed);
   });
   // reverse, fill, and sort write only some elements, so a frozen array refuses them only when they write any.
-  arrayMethod(builder, 'reverse', 0, ({ runtime }, array) => {
-    runtime.scan(array.elements.length);
-    if (array.elements.length >= 2) runtime.mutableElements(array).reverse();
-    return array;
-  });
+  arrayMethod(builder, 'reverse', 0, ({ runtime }, array) => reverseArray(runtime, array));
+
   arrayMethod(builder, 'fill', 1, ({ runtime, args }, array) => {
     const { elements } = array;
     const start = relativeIndex(runtime, args[1], elements.length, 0);
@@ -151,6 +148,15 @@ function defineMutators(builder: RealmBuilder): void {
     return array;
   });
   arrayMethod(builder, 'sort', 1, sortArray);
+}
+
+function reverseArray(runtime: Runtime, array: JsArray): JsArray {
+  const { elements } = array;
+  runtime.scan(elements.length);
+  // Swapping two holes writes nothing, and the middle element of an odd length stays in place.
+  const writes = elements.some((element, index) => element !== HOLE && index !== elements.length - 1 - index);
+  if (writes) runtime.mutableElements(array).reverse();
+  return array;
 }
 
 function sortArray({ runtime, args, callRow }: NativeCall, array: JsArray): JsArray {
