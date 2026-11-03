@@ -1,74 +1,61 @@
-import { ExecutionLimitError, MAX_TRACE_ITEMS } from '../interpreter/limits';
 import type { ProgramRecording } from '../interpreter/program';
 import type { Annotations } from '../interpreter/traceAnnotations';
-import type { DisplayNode, TraceItem, TraceItemVariable } from '../problems/trace';
+import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
+import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { parseJavaScript } from './parse';
 import { runProgram } from './run';
 import { type Frame, Runtime } from './runtime';
-import { isAccessor, JsArray, JsFunction, JsObject, type Scope, UNINITIALIZED, type Value } from './values';
+import {
+  type Binding,
+  isAccessor,
+  JsArray,
+  JsFunction,
+  JsObject,
+  type Scope,
+  UNINITIALIZED,
+  type Value,
+} from './values';
 
+// code-gauge-allow duplicateLines 21 -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceJavaScriptProgram(program: string, annotations: Annotations): ProgramRecording {
   const parsed = parseJavaScript(program, annotations.stepIdByRow);
   const runtime = new Runtime();
-  const snapshotter = new Snapshotter(runtime, annotations.callerIdByRow);
-  const traceItems: TraceItem[] = [snapshotter.initialItem()];
+  const snapshotter = new Snapshotter(runtime);
+  const recorder = new TraceRecorder(runtime.world, annotations.callerIdByRow);
   runtime.onStep = (stepId) => {
-    if (traceItems.length >= MAX_TRACE_ITEMS) throw new ExecutionLimitError('trace');
-    traceItems.push(snapshotter.snapshot(stepId));
+    runtime.collectGarbage();
+    const { frames } = runtime;
+    const variables = snapshotter.variablesOf((frames.at(-1) as Frame).scope, true);
+    recorder.record(
+      stepId,
+      frames.slice(1).map((frame) => frame.callRow),
+      variables
+    );
   };
   let finalVars: TraceItemVariable = {};
   // A model program may end with an uncaught exception to show how one stops the program.
   const run = runProgram(runtime, parsed, (scope) => {
     finalVars = snapshotter.variablesOf(scope, false).vars;
   });
-  return { traceItems, finalVars, ...run };
+  return { traceItems: recorder.traceItems, finalVars, ...run };
 }
 
 class Snapshotter {
-  constructor(
-    private readonly runtime: Runtime,
-    private readonly callerIdByRow: Map<number, number>
-  ) {}
+  constructor(private readonly runtime: Runtime) {}
 
-  initialItem(): TraceItem {
-    return {
-      depth: 0,
-      sid: 0,
-      callStack: [],
-      vars: {},
-      referenceVars: {},
-      turtles: [],
-      board: this.runtime.world.boardText(),
-    };
-  }
-
-  snapshot(stepId: number): TraceItem {
-    this.runtime.collectGarbage();
-    const { frames } = this.runtime;
-    const frame = frames.at(-1) as Frame;
-    const { vars, referenceVars } = this.variablesOf(frame.scope, true);
-    // Frames without a call row (implicit calls such as getters and default constructors) are part of their caller's step.
-    const calls = frames.slice(1).filter((callee) => callee.callRow !== undefined);
-    return {
-      depth: calls.length,
-      sid: stepId,
-      callStack: calls.map((callee) => this.callerIdByRow.get(callee.callRow as number) ?? 0),
-      vars,
-      referenceVars,
-      turtles: this.runtime.world.turtleTraces(),
-      board: this.runtime.world.boardText(),
-    };
-  }
-
-  /**
-   * The variables visible from `scope`: those of the running function in declaration order, then those of the
-   * functions enclosing it, and the fields of `this` when `withThis`. Functions and classes are not variables to
-   * learners, and neither is a `var` whose declaration has not run.
-   */
+  /** The variables visible from `scope`, followed by the fields of `this` when `withThis`. */
   variablesOf(scope: Scope, withThis: boolean): Variables {
     const variables: Variables = { vars: {}, referenceVars: {} };
+    for (const [name, value] of this.visibleBindings(scope)) addVariable(variables, name, value);
+    const thisValue = scope.nearestFunctionFrame()?.thisValue;
+    if (withThis && thisValue instanceof JsObject && !(thisValue instanceof JsFunction)) addThis(variables, thisValue);
+    return variables;
+  }
+
+  /** The bindings that `scope` sees, ordered by function from the innermost, and by declaration within one. */
+  private visibleBindings(scope: Scope): [string, Value][] {
     const seen = new Set<string>();
-    const segments: [string, Value][][][] = [[]];
+    const functions: [string, Value][][][] = [[]];
     for (
       let current: Scope | undefined = scope;
       current && current !== this.runtime.realm.globals;
@@ -76,28 +63,22 @@ class Snapshotter {
     ) {
       const entries: [string, Value][] = [];
       for (const [name, binding] of current.bindings) {
-        if (seen.has(name)) continue;
+        if (!seen.has(name) && isVariable(binding)) entries.push([name, binding.value as Value]);
         seen.add(name);
-        const { value } = binding;
-        if (value === UNINITIALIZED || binding.isHoisted || value instanceof JsFunction) continue;
-        entries.push([name, value]);
       }
-      (segments.at(-1) as [string, Value][][]).unshift(entries);
-      if (current.isCallScope) segments.push([]);
+      (functions.at(-1) as [string, Value][][]).unshift(entries);
+      if (current.isCallScope) functions.push([]);
     }
-    for (const segment of segments) {
-      for (const entries of segment) for (const [name, value] of entries) addVariable(variables, name, value);
-    }
-    const thisValue = scope.nearestFunctionFrame()?.thisValue;
-    if (withThis && thisValue instanceof JsObject && !(thisValue instanceof JsFunction)) addThis(variables, thisValue);
-    return variables;
+    return functions.flat(2 /* functions, then their scopes */);
   }
 }
 
-interface Variables {
-  vars: TraceItemVariable;
-  referenceVars: Record<string, DisplayNode>;
+/** Functions and classes are not variables to learners, and neither is a `var` whose declaration has not run. */
+function isVariable(binding: Binding): boolean {
+  return binding.value !== UNINITIALIZED && !binding.isHoisted && !(binding.value instanceof JsFunction);
 }
+
+type Variables = TraceVariables;
 
 function addVariable(variables: Variables, name: string, value: Value): void {
   const scalar = scalarOf(value, new Set());
@@ -142,6 +123,7 @@ function scalarOf(value: Value, seen: Set<JsArray>): Scalar | typeof NOT_SCALAR 
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows null and undefined as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
+// code-gauge-allow functionCognitiveComplexity 16 -- One check per kind of value, as learners see each.
 function displayNodeOf(value: Value, seen: Set<JsObject>): DisplayNode | undefined {
   if (value === undefined || value === null) return NULL_NODE;
   if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean')

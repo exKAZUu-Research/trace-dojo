@@ -210,32 +210,40 @@ export abstract class EvaluatorBase {
         return;
       }
       case 'arrayPattern': {
-        runtime.hold(value, () => {
-          const values = runtime.iterate(value);
-          for (const [index, element] of pattern.elements.entries()) {
-            if (element) this.bindPattern(element, values[index], mode);
-          }
-          if (pattern.rest)
-            this.bindPattern(pattern.rest, runtime.newArray(values.slice(pattern.elements.length)), mode);
-        });
+        runtime.hold(value, () => this.bindArrayPattern(pattern, value, mode));
         return;
       }
       case 'objectPattern': {
         if (value === undefined || value === null) {
           runtime.throwError('TypeError', `Cannot destructure '${String(value)}' as it is ${String(value)}.`);
         }
-        runtime.hold(value, () => {
-          const used = new Set<string>();
-          for (const property of pattern.properties) {
-            const key = this.propertyKey(property.key);
-            used.add(key);
-            this.bindPattern(property.value, runtime.get(value, key), mode);
-          }
-          if (pattern.rest) this.bindPattern(pattern.rest, this.restObject(value, used), mode);
-        });
+        runtime.hold(value, () => this.bindObjectPattern(pattern, value, mode));
         return;
       }
     }
+  }
+
+  private bindArrayPattern(pattern: Extract<Pattern, { kind: 'arrayPattern' }>, value: Value, mode: BindingMode): void {
+    const { runtime } = this;
+    const values = runtime.iterate(value);
+    for (const [index, element] of pattern.elements.entries()) {
+      if (element) this.bindPattern(element, values[index], mode);
+    }
+    if (pattern.rest) this.bindPattern(pattern.rest, runtime.newArray(values.slice(pattern.elements.length)), mode);
+  }
+
+  private bindObjectPattern(
+    pattern: Extract<Pattern, { kind: 'objectPattern' }>,
+    value: Value,
+    mode: BindingMode
+  ): void {
+    const used = new Set<string>();
+    for (const property of pattern.properties) {
+      const key = this.propertyKey(property.key);
+      used.add(key);
+      this.bindPattern(property.value, this.runtime.get(value, key), mode);
+    }
+    if (pattern.rest) this.bindPattern(pattern.rest, this.restObject(value, used), mode);
   }
 
   private restObject(value: Value, used: Set<string>): JsObject {

@@ -167,6 +167,7 @@ export class ProgramConverter extends ExpressionConverter {
     return declaration;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Each part of a for header is optional.
   private forStatement(node: Node): Statement {
     const header = field(node, 'header');
     return this.withScope((scope) => {
@@ -185,9 +186,7 @@ export class ProgramConverter extends ExpressionConverter {
         scope,
         row: rowOf(node),
       };
-      const initRecordsStep =
-        init && (init.kind !== 'declaration' || init.declarators.some((declarator) => declarator.init));
-      if (initRecordsStep || statement.update) {
+      if (recordsHeaderStep(statement)) {
         // The header records its step as one statement nested in the loop, at the depth of the loop's body.
         for (const part of [initNode, incrementNode]) {
           if (part) this.addSteppable(part, (stepId) => (statement.stepId = stepId), depthOf(node) + 1 - depthOf(part));
@@ -410,6 +409,13 @@ export class ProgramConverter extends ExpressionConverter {
     if (member.type === 'class_static_block') return unsupported(member, 'static ブロック');
     return unsupported(member, `クラスの中の「${member.type}」`);
   }
+}
+
+/** Whether a `for` header assigns something, which its step shows: an init with a value or an update. */
+function recordsHeaderStep({ init, update }: Extract<Statement, { kind: 'for' }>): boolean {
+  if (update) return true;
+  if (!init) return false;
+  return init.kind !== 'declaration' || init.declarators.some((declarator) => declarator.init);
 }
 
 function isConstructorDefinition(member: Node): boolean {

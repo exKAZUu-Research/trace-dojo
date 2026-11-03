@@ -249,6 +249,14 @@ t.forward();`;
   expect(traceProgram('javascript', program, program).uncaughtException).toBe('Error: Out of bounds: (0, 7)');
 });
 
+const turtle = (y: number): unknown => ({
+  kind: 'object',
+  entries: { x: { kind: 'value', value: 0 }, y: { kind: 'value', value: y } },
+});
+const walker = (y: number, moved: number): unknown => ({
+  kind: 'object',
+  entries: { turtle: turtle(y), '#moved': { kind: 'value', value: moved } },
+});
 test('a function shows its own variables, then the outer variables it can see, then the fields of this', () => {
   const program = `const step = 2; // step
 let count = 0; // step
@@ -268,14 +276,7 @@ class Walker {
 const walker = new Walker(new Turtle()); // caller // step
 walker.walk(1); // caller // step`;
   const trace = traceProgram('javascript', program, program);
-  const turtle = (y: number): unknown => ({
-    kind: 'object',
-    entries: { x: { kind: 'value', value: 0 }, y: { kind: 'value', value: y } },
-  });
-  const walker = (y: number, moved: number): unknown => ({
-    kind: 'object',
-    entries: { turtle: turtle(y), '#moved': { kind: 'value', value: moved } },
-  });
+
   expect(
     trace.traceItems.map(({ depth, sid, callStack, vars, referenceVars }) => ({
       depth,

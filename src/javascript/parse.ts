@@ -11,7 +11,7 @@ const parser = await loadParser('@willbooster/tree-sitter-javascript/tree-sitter
 /**
  * Parses a script, throwing a `CompileError` for invalid or unsupported syntax.
  *
- * @param stepIdByRow The `// step` rows of a model program, which every statement on them records.
+ * @param stepIdByRow The `// step` rows of a model program, which the innermost statements on them record.
  */
 export function parseJavaScript(source: string, stepIdByRow: ReadonlyMap<number, number> = new Map()): Program {
   return parseSource(parser, source, { identifier: '名前' }, (root) =>

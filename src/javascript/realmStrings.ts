@@ -101,6 +101,8 @@ function defineExtractions(method: StringMethod): void {
   });
 }
 
+// code-gauge-allow functionCognitiveComplexity 25 -- Lists the builtin methods, each a small closure of its own.
+// code-gauge-allow functionNcss 36 -- Lists the builtin methods, each a small closure of its own.
 function defineBuilders(method: StringMethod): void {
   method('concat', 1, ({ runtime, args }, text) => {
     const result = text + args.map((value) => runtime.toString(value)).join('');

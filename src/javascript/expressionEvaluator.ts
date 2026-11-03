@@ -1,4 +1,4 @@
-import type { Argument, ClassNode, Expression, ObjectMember } from './ast';
+import type { Argument, ClassNode, Expression, MemberExpression, ObjectMember } from './ast';
 import { EvaluatorBase, nameFunction, type Reference, referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
 import {
   type AccessorProperty,
@@ -82,16 +82,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       }
       case 'logical': {
         const left = this.evaluate(expression.left);
-        if (
-          expression.operator === '&&'
-            ? !toBoolean(left)
-            : expression.operator === '||'
-              ? toBoolean(left)
-              : left !== undefined && left !== null
-        ) {
-          return left;
-        }
-        return this.evaluate(expression.right);
+        return shortCircuits(expression.operator, left) ? left : this.evaluate(expression.right);
       }
       case 'conditional': {
         return toBoolean(this.evaluate(expression.test))
@@ -153,33 +144,36 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     const { runtime } = this;
     const object = runtime.newObject();
     runtime.hold(object, () => {
-      for (const member of members) {
-        if (member.kind === 'spread') {
-          this.copyDataProperties(object, this.evaluate(member.argument));
-          continue;
-        }
-        const key = this.propertyKey(member.key);
-        if (member.kind === 'property') {
-          const { value: valueExpression } = member;
-          const value =
-            valueExpression.kind === 'functionExpression' && valueExpression.fn.kind === 'method'
-              ? this.createFunction(valueExpression.fn, runtime.frame.scope, object)
-              : this.evaluate(valueExpression);
-          if (member.key.kind === 'computed' && value instanceof JsFunction) nameFunction(runtime, value, key);
-          runtime.createDataProperty(object, key, value);
-        } else {
-          defineAccessor(
-            runtime,
-            object,
-            key,
-            member.kind,
-            this.createFunction(member.fn, runtime.frame.scope, object),
-            true
-          );
-        }
-      }
+      for (const member of members) this.defineObjectMember(object, member);
     });
     return object;
+  }
+
+  private defineObjectMember(object: JsObject, member: ObjectMember): void {
+    const { runtime } = this;
+    if (member.kind === 'spread') {
+      this.copyDataProperties(object, this.evaluate(member.argument));
+      return;
+    }
+    const key = this.propertyKey(member.key);
+    if (member.kind !== 'property') {
+      defineAccessor(
+        runtime,
+        object,
+        key,
+        member.kind,
+        this.createFunction(member.fn, runtime.frame.scope, object),
+        true
+      );
+      return;
+    }
+    const { value: valueExpression } = member;
+    const value =
+      valueExpression.kind === 'functionExpression' && valueExpression.fn.kind === 'method'
+        ? this.createFunction(valueExpression.fn, runtime.frame.scope, object)
+        : this.evaluate(valueExpression);
+    if (member.key.kind === 'computed' && value instanceof JsFunction) nameFunction(runtime, value, key);
+    runtime.createDataProperty(object, key, value);
   }
 
   private copyDataProperties(target: JsObject, source: Value): void {
@@ -216,31 +210,9 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       this.superCall(this.evaluateArguments(expression.args), expression.row);
       return undefined;
     }
-    let fn: ChainValue;
-    let thisValue: Value;
-    const target = callee.kind === 'parenthesized' && callee.expression.kind === 'member' ? callee.expression : callee;
-    if (target.kind === 'member') {
-      let reference: Reference;
-      if (target.object.kind === 'super') {
-        reference = this.memberReference(target);
-      } else {
-        const base = target === callee ? this.evaluateChain(target.object) : this.evaluate(target.object);
-        if (base === SHORT_CIRCUIT) return SHORT_CIRCUIT;
-        if (target.optional && (base === undefined || base === null)) return SHORT_CIRCUIT;
-        reference = runtime.hold(base, (): Reference =>
-          target.property.kind === 'private'
-            ? { kind: 'private', base, name: target.property.name }
-            : { kind: 'property', base, key: this.propertyKey(target.property) }
-        );
-      }
-      thisValue =
-        reference.kind === 'super' ? reference.thisValue : reference.kind === 'binding' ? undefined : reference.base;
-      fn = runtime.hold(thisValue, () => this.getReference(reference));
-    } else {
-      fn = this.evaluateChain(callee);
-      if (fn === SHORT_CIRCUIT) return SHORT_CIRCUIT;
-      thisValue = undefined;
-    }
+    const resolved = this.callee(callee);
+    if (resolved === SHORT_CIRCUIT) return SHORT_CIRCUIT;
+    const { fn, thisValue } = resolved;
     if (expression.optional && (fn === undefined || fn === null)) return SHORT_CIRCUIT;
     if (!isCallable(fn)) return runtime.throwError('TypeError', `${expression.calleeText} is not a function`);
     const { temporaries } = runtime.frame;
@@ -253,6 +225,30 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     } finally {
       temporaries.length = held;
     }
+  }
+
+  /** Evaluates a callee with the `this` a call passes, which is the object of a (parenthesized) member. */
+  private callee(callee: Expression): { fn: Value; thisValue: Value } | typeof SHORT_CIRCUIT {
+    const target = callee.kind === 'parenthesized' && callee.expression.kind === 'member' ? callee.expression : callee;
+    if (target.kind !== 'member') {
+      const fn = this.evaluateChain(callee);
+      return fn === SHORT_CIRCUIT ? SHORT_CIRCUIT : { fn, thisValue: undefined };
+    }
+    const reference = this.calleeReference(target, target === callee);
+    if (reference === SHORT_CIRCUIT) return SHORT_CIRCUIT;
+    const thisValue = referenceBase(reference);
+    return { fn: this.runtime.hold(thisValue, () => this.getReference(reference)), thisValue };
+  }
+
+  private calleeReference(target: MemberExpression, continuesChain: boolean): Reference | typeof SHORT_CIRCUIT {
+    if (target.object.kind === 'super') return this.memberReference(target);
+    const base = continuesChain ? this.evaluateChain(target.object) : this.evaluate(target.object);
+    if (base === SHORT_CIRCUIT || (target.optional && (base === undefined || base === null))) return SHORT_CIRCUIT;
+    return this.runtime.hold(base, (): Reference =>
+      target.property.kind === 'private'
+        ? { kind: 'private', base, name: target.property.name }
+        : { kind: 'property', base, key: this.propertyKey(target.property) }
+    );
   }
 
   private newExpression(expression: Extract<Expression, { kind: 'new' }>): Value {
@@ -289,25 +285,21 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         return value;
       }
       const current = this.getReference(reference);
-      if (operator === '&&=' || operator === '||=' || operator === '??=') {
-        const keeps =
-          operator === '&&='
-            ? !toBoolean(current)
-            : operator === '||='
-              ? toBoolean(current)
-              : current !== undefined && current !== null;
-        if (keeps) return current;
+      const baseOperator = operator.slice(0, -1);
+      if (isLogicalOperator(baseOperator)) {
+        if (shortCircuits(baseOperator, current)) return current;
         const value = this.evaluate(expression.value);
         this.putReference(reference, value);
         return value;
       }
       const right = runtime.hold(current, () => this.evaluate(expression.value));
-      const value = this.binary(operator.slice(0, -1), current, right);
+      const value = this.binary(baseOperator, current, right);
       this.putReference(reference, value);
       return value;
     });
   }
 
+  // code-gauge-allow functionNcss 31 -- One case per unary operator.
   private unary(operator: string, argument: Expression): Value {
     const { runtime } = this;
     switch (operator) {
@@ -397,6 +389,19 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       }
     }
   }
+}
+
+type LogicalOperator = '&&' | '||' | '??';
+
+function isLogicalOperator(operator: string): operator is LogicalOperator {
+  return operator === '&&' || operator === '||' || operator === '??';
+}
+
+/** Whether a logical operator yields its left operand without evaluating its right one. */
+function shortCircuits(operator: LogicalOperator, left: Value): boolean {
+  if (operator === '&&') return !toBoolean(left);
+  if (operator === '||') return toBoolean(left);
+  return left !== undefined && left !== null;
 }
 
 type Primitive = undefined | null | boolean | number | string;

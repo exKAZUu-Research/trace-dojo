@@ -1,4 +1,4 @@
-import type { Block, ClassNode, FunctionNode, Program, Statement, VariableDeclaration } from './ast';
+import type { Block, ClassMember, ClassNode, FunctionNode, Program, Statement, VariableDeclaration } from './ast';
 import { nameFunction } from './evaluatorBase';
 import { defineAccessor, ExpressionEvaluator } from './expressionEvaluator';
 import {
@@ -42,7 +42,8 @@ export class Evaluator extends ExpressionEvaluator {
     if (stepId !== undefined) this.runtime.onStep?.(stepId);
   }
 
-  // code-gauge-allow functionNcss 70 -- One case per statement kind, each delegating where it grows.
+  // code-gauge-allow functionNcss 54 -- One case per statement kind, each delegating where it grows.
+  // code-gauge-allow functionCognitiveComplexity 20 -- One case per statement kind, each delegating where it grows.
   private statement(statement: Statement, labels: string[]): Completion {
     const { runtime } = this;
     runtime.spend();
@@ -141,31 +142,17 @@ export class Evaluator extends ExpressionEvaluator {
   private forStatement(statement: Extract<Statement, { kind: 'for' }>, labels: string[]): Completion {
     const { runtime } = this;
     return this.withScope(statement.scope, () => {
-      const { init, update, stepId, perIterationNames } = statement;
-      if (init?.kind === 'declaration') {
-        this.declaration(init);
-        if (init.declarators.some((declarator) => declarator.init)) this.step(stepId);
-      } else if (init) {
-        this.evaluate(init);
-        this.step(stepId);
-      }
+      const { update, stepId, perIterationNames } = statement;
+      this.forInit(statement);
       const frame = runtime.frame;
-      // Each iteration gets its own copy of the `let` variables, which closures created in it keep.
-      const copyBindings = (): void => {
-        if (perIterationNames.length === 0) return;
-        const current = frame.scope;
-        const next = new Scope(current.parent);
-        for (const name of perIterationNames) next.bindings.set(name, { ...(current.bindings.get(name) as Binding) });
-        frame.scope = next;
-      };
       const outer = frame.scope;
       try {
-        copyBindings();
+        this.copyIterationScope(perIterationNames);
         for (;;) {
           if (statement.test && !toBoolean(this.evaluate(statement.test))) return;
           const result = this.loopBody(statement.body, labels);
           if (result !== 'next') return result;
-          copyBindings();
+          this.copyIterationScope(perIterationNames);
           if (update) {
             this.evaluate(update);
             this.step(stepId);
@@ -176,6 +163,27 @@ export class Evaluator extends ExpressionEvaluator {
         frame.scope = outer;
       }
     });
+  }
+
+  /** Runs the init of a `for` header, which records the header's step when it assigns something. */
+  private forInit({ init, stepId }: Extract<Statement, { kind: 'for' }>): void {
+    if (init?.kind === 'declaration') {
+      this.declaration(init);
+      if (init.declarators.some((declarator) => declarator.init)) this.step(stepId);
+    } else if (init) {
+      this.evaluate(init);
+      this.step(stepId);
+    }
+  }
+
+  /** Gives the next iteration its own copy of the `let` variables, which closures created in an iteration keep. */
+  private copyIterationScope(names: string[]): void {
+    if (names.length === 0) return;
+    const frame = this.runtime.frame;
+    const current = frame.scope;
+    const next = new Scope(current.parent);
+    for (const name of names) next.bindings.set(name, { ...(current.bindings.get(name) as Binding) });
+    frame.scope = next;
   }
 
   private forEachStatement(statement: Extract<Statement, { kind: 'forOf' | 'forIn' }>, labels: string[]): Completion {
@@ -229,12 +237,7 @@ export class Evaluator extends ExpressionEvaluator {
     return runtime.hold(discriminant, () =>
       this.withScope(statement.scope, () => {
         const { cases } = statement;
-        let start = cases.findIndex(
-          (switchCase) => switchCase.test !== undefined && this.evaluate(switchCase.test) === discriminant
-        );
-        if (start === -1) start = cases.findIndex((switchCase) => switchCase.test === undefined);
-        if (start === -1) return;
-        for (const switchCase of cases.slice(start)) {
+        for (const switchCase of cases.slice(this.matchingCase(statement, discriminant))) {
           const completion = this.statements(switchCase.body);
           if (completion?.kind === 'break' && completion.label === undefined) return;
           if (completion) return completion;
@@ -244,36 +247,44 @@ export class Evaluator extends ExpressionEvaluator {
     );
   }
 
+  /** The index of the case to start from: the first whose value is strictly equal, else the default, else none. */
+  private matchingCase({ cases }: Extract<Statement, { kind: 'switch' }>, discriminant: Value): number {
+    const index = cases.findIndex(
+      (switchCase) => switchCase.test !== undefined && this.evaluate(switchCase.test) === discriminant
+    );
+    if (index !== -1) return index;
+    const defaultIndex = cases.findIndex((switchCase) => switchCase.test === undefined);
+    return defaultIndex === -1 ? cases.length : defaultIndex;
+  }
+
   private tryStatement(statement: Extract<Statement, { kind: 'try' }>): Completion {
-    const { runtime } = this;
-    let completion: Completion;
-    let pending: JsThrow | undefined;
-    try {
-      completion = this.block(statement.block);
-    } catch (error) {
-      if (!(error instanceof JsThrow)) throw error;
-      pending = error;
-    }
     const { handler, finalizer } = statement;
-    if (pending && handler) {
-      const thrown = pending.value;
-      pending = undefined;
-      try {
-        completion = this.withScope(handler.scope, () => {
-          if (handler.param) this.bindPattern(handler.param, thrown, 'initialize');
+    let outcome = this.catchThrow(() => this.block(statement.block));
+    if (outcome.thrown && handler) {
+      const { value } = outcome.thrown;
+      outcome = this.catchThrow(() =>
+        this.withScope(handler.scope, () => {
+          if (handler.param) this.bindPattern(handler.param, value, 'initialize');
           return this.block(handler.body);
-        });
-      } catch (error) {
-        if (!(error instanceof JsThrow)) throw error;
-        pending = error;
-      }
+        })
+      );
     }
     if (finalizer) {
-      const finalCompletion = runtime.hold(pending?.value, () => this.block(finalizer));
+      const finalCompletion = this.runtime.hold(outcome.thrown?.value, () => this.block(finalizer));
       if (finalCompletion) return finalCompletion;
     }
-    if (pending) throw pending;
-    return completion;
+    if (outcome.thrown) throw outcome.thrown;
+    return outcome.completion;
+  }
+
+  /** Runs `run`, catching the JavaScript exception it throws; limits and host errors still propagate. */
+  private catchThrow(run: () => Completion): { completion?: Completion; thrown?: JsThrow } {
+    try {
+      return { completion: run() };
+    } catch (error) {
+      if (!(error instanceof JsThrow)) throw error;
+      return { thrown: error };
+    }
   }
 
   // Functions ---------------------------------------------------------------------------------------------------------
@@ -325,28 +336,7 @@ export class Evaluator extends ExpressionEvaluator {
 
   evaluateClass(cls: ClassNode): JsFunction {
     const { runtime } = this;
-    const { realm } = runtime;
-    let prototypeParent: JsObject | null = realm.objectPrototype;
-    let constructorParent: JsObject = realm.functionPrototype;
-    if (cls.superClass) {
-      const superClass = this.evaluate(cls.superClass);
-      if (superClass === null) {
-        // oxlint-disable-next-line unicorn/no-null -- `extends null` leaves the prototype without a parent.
-        prototypeParent = null;
-      } else if (!(superClass instanceof JsFunction) || !superClass.isConstructor) {
-        return runtime.throwError(
-          'TypeError',
-          `Class extends value ${runtime.describe(superClass)} is not a constructor or null`
-        );
-      } else {
-        const parentPrototype = runtime.get(superClass, 'prototype');
-        if (parentPrototype !== null && !isObject(parentPrototype)) {
-          return runtime.throwError('TypeError', 'Class extends value does not have valid prototype property');
-        }
-        prototypeParent = parentPrototype;
-        constructorParent = superClass;
-      }
-    }
+    const { prototypeParent, constructorParent } = this.classParents(cls);
     const classScope = new Scope(runtime.frame.scope);
     if (cls.name) classScope.bindings.set(cls.name, { value: UNINITIALIZED, isMutable: false });
     const prototype = runtime.newObject(prototypeParent);
@@ -372,6 +362,27 @@ export class Evaluator extends ExpressionEvaluator {
     return fn;
   }
 
+  /** The prototypes of a class's prototype object and of the class itself, which `extends` decides. */
+  private classParents(cls: ClassNode): { prototypeParent: JsObject | null; constructorParent: JsObject } {
+    const { runtime } = this;
+    const { realm } = runtime;
+    if (!cls.superClass) return { prototypeParent: realm.objectPrototype, constructorParent: realm.functionPrototype };
+    const superClass = this.evaluate(cls.superClass);
+    // oxlint-disable-next-line unicorn/no-null -- `extends null` leaves the prototype without a parent.
+    if (superClass === null) return { prototypeParent: null, constructorParent: realm.functionPrototype };
+    if (!(superClass instanceof JsFunction) || !superClass.isConstructor) {
+      return runtime.throwError(
+        'TypeError',
+        `Class extends value ${runtime.describe(superClass)} is not a constructor or null`
+      );
+    }
+    const parentPrototype = runtime.get(superClass, 'prototype');
+    if (parentPrototype !== null && !isObject(parentPrototype)) {
+      return runtime.throwError('TypeError', 'Class extends value does not have valid prototype property');
+    }
+    return { prototypeParent: parentPrototype, constructorParent: superClass };
+  }
+
   /** Defines the methods and accessors, collecting the fields, which return the static ones to initialize. */
   private defineMembers(
     cls: ClassNode,
@@ -395,28 +406,31 @@ export class Evaluator extends ExpressionEvaluator {
         (member.isStatic ? staticFields : instanceFields).push({ key, isPrivate, initialize, stepId: member.stepId });
         continue;
       }
-      const method = this.createFunction(member.fn, classScope, target);
-      if (member.key.kind === 'computed') nameFunction(runtime, method, key);
-      if (isPrivate) {
-        const property: Property =
-          member.kind === 'method'
-            ? { value: method, writable: false, enumerable: false, configurable: false }
-            : {
-                get: member.kind === 'getter' ? method : undefined,
-                set: member.kind === 'setter' ? method : undefined,
-                enumerable: false,
-                configurable: false,
-              };
-        const field: ClassField = { key, isPrivate, initialize: undefined, stepId: undefined, property };
-        if (member.isStatic) mergePrivate(runtime, fn, key, property);
-        else instanceFields.unshift(field);
-      } else if (member.kind === 'method') {
-        runtime.defineProperty(target, key, { value: method, writable: true, enumerable: false, configurable: true });
-      } else {
-        defineAccessor(runtime, target, key, member.kind, method, false);
-      }
+      this.defineMethod(member, key, target, classScope, instanceFields);
     }
     return staticFields;
+  }
+
+  /** Defines a method or accessor, which instances get as private members when its name is private. */
+  private defineMethod(
+    member: Extract<ClassMember, { fn: FunctionNode }>,
+    key: string,
+    target: JsObject,
+    classScope: Scope,
+    instanceFields: ClassField[]
+  ): void {
+    const { runtime } = this;
+    const method = this.createFunction(member.fn, classScope, target);
+    if (member.key.kind === 'computed') nameFunction(runtime, method, key);
+    if (member.key.kind === 'private') {
+      const property = privateMethodProperty(member.kind, method);
+      if (member.isStatic) mergePrivate(runtime, target, key, property);
+      else instanceFields.unshift({ key, isPrivate: true, initialize: undefined, stepId: undefined, property });
+    } else if (member.kind === 'method') {
+      runtime.defineProperty(target, key, { value: method, writable: true, enumerable: false, configurable: true });
+    } else {
+      defineAccessor(runtime, target, key, member.kind, method, false);
+    }
   }
 
   private methodScope(scope: Scope, thisValue: JsObject, homeObject: JsObject): Scope {
@@ -502,6 +516,16 @@ export class Evaluator extends ExpressionEvaluator {
       for (const field of behavior.fields) this.initializeField(constructed, field);
     }
   }
+}
+
+function privateMethodProperty(kind: 'method' | 'getter' | 'setter', method: JsFunction): Property {
+  if (kind === 'method') return { value: method, writable: false, enumerable: false, configurable: false };
+  return {
+    get: kind === 'getter' ? method : undefined,
+    set: kind === 'setter' ? method : undefined,
+    enumerable: false,
+    configurable: false,
+  };
 }
 
 function mergePrivate(runtime: Evaluator['runtime'], target: JsObject, key: string, property: Property): void {

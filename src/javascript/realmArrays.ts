@@ -2,6 +2,7 @@ import type { RealmBuilder } from './realm';
 import type { Runtime } from './runtime';
 import { appendAll, isCallable, JsArray, type JsFunction, type NativeCall, toBoolean, type Value } from './values';
 
+// code-gauge-allow functionCognitiveComplexity 19 -- Lists the builtin methods, each a small closure of its own.
 export function defineArrayBuiltins(builder: RealmBuilder): void {
   const { arrayPrototype } = builder.realm;
   const arrayConstructor = builder.defineClass('Array', 1, arrayPrototype, ({ runtime, args }) => {
@@ -69,6 +70,8 @@ function arrayMethod(builder: RealmBuilder, name: string, length: number, run: A
   );
 }
 
+// code-gauge-allow functionCognitiveComplexity 23 -- Lists the builtin methods, each a small closure of its own.
+// code-gauge-allow functionNcss 53 -- Lists the builtin methods, each a small closure of its own.
 function defineMutators(builder: RealmBuilder): void {
   arrayMethod(builder, 'push', 1, ({ runtime, args }, array) => {
     runtime.allocate(args.length);
@@ -164,31 +167,41 @@ function defineAccessors(builder: RealmBuilder): void {
   });
   for (const name of ['indexOf', 'lastIndexOf', 'includes'] as const) {
     arrayMethod(builder, name, 1, ({ runtime, args }, array) => {
-      const { elements } = array;
-      runtime.scan(elements.length);
-      // The host methods treat an explicit undefined start as 0, which differs from an omitted one for lastIndexOf.
-      if (args.length < 2) {
-        if (name === 'includes') return elements.includes(args[0]);
-        return name === 'indexOf' ? elements.indexOf(args[0]) : elements.lastIndexOf(args[0]);
-      }
-      const start = Math.trunc(runtime.toNumber(args[1])) || 0;
-      if (name === 'includes') return elements.includes(args[0], start);
-      return name === 'indexOf' ? elements.indexOf(args[0], start) : elements.lastIndexOf(args[0], start);
+      runtime.scan(array.elements.length);
+      return search(
+        array.elements,
+        name,
+        args[0],
+        args.length < 2 ? undefined : Math.trunc(runtime.toNumber(args[1])) || 0
+      );
     });
   }
   arrayMethod(builder, 'flat', 0, ({ runtime, args }, array) => {
     const depth = args[0] === undefined ? 1 : Math.trunc(runtime.toNumber(args[0])) || 0;
     const values: Value[] = [];
-    const flatten = (elements: Value[], remaining: number): void => {
-      runtime.scan(elements.length);
-      for (const element of elements) {
-        if (element instanceof JsArray && remaining > 0) flatten(element.elements, remaining - 1);
-        else values.push(element);
-      }
-    };
-    flatten(array.elements, Math.min(depth, 100));
+    flatten(runtime, array.elements, Math.min(depth, 100), values);
     return runtime.newArray(values);
   });
+}
+
+/** Searches with the host's methods, which treat an explicit undefined start as 0 unlike an omitted one. */
+function search(
+  elements: Value[],
+  name: 'indexOf' | 'lastIndexOf' | 'includes',
+  value: Value,
+  start: number | undefined
+): number | boolean {
+  if (name === 'includes') return start === undefined ? elements.includes(value) : elements.includes(value, start);
+  if (name === 'indexOf') return start === undefined ? elements.indexOf(value) : elements.indexOf(value, start);
+  return start === undefined ? elements.lastIndexOf(value) : elements.lastIndexOf(value, start);
+}
+
+function flatten(runtime: Runtime, elements: Value[], depth: number, values: Value[]): void {
+  runtime.scan(elements.length);
+  for (const element of elements) {
+    if (element instanceof JsArray && depth > 0) flatten(runtime, element.elements, depth - 1, values);
+    else values.push(element);
+  }
 }
 
 function joinArray(runtime: Runtime, array: JsArray, separatorValue: Value, joining: Set<JsArray>): string {
@@ -210,28 +223,43 @@ function joinArray(runtime: Runtime, array: JsArray, separatorValue: Value, join
 }
 
 type Callback = (value: Value, index: number) => Value;
+type Iteration = (array: JsArray, callback: Callback, call: NativeCall) => Value;
+
+/** Defines a method that calls its first argument for elements, with its second argument as `this`. */
+function iterationMethod(builder: RealmBuilder, name: string, run: Iteration): void {
+  arrayMethod(builder, name, 1, (call, array) => {
+    const { runtime, args, callRow } = call;
+    const fn = args[0];
+    if (!isCallable(fn)) return runtime.throwError('TypeError', `${runtime.describe(fn)} is not a function`);
+    const thisArg = args[1];
+    return run(array, (value, index) => runtime.call(fn, thisArg, [value, index, array], callRow), call);
+  });
+}
 
 function defineIterations(builder: RealmBuilder): void {
-  const iteration = (name: string, run: (array: JsArray, callback: Callback, call: NativeCall) => Value): void => {
-    arrayMethod(builder, name, 1, (call, array) => {
-      const { runtime, args, callRow } = call;
+  defineMappings(builder);
+  defineFinders(builder);
+  for (const fromEnd of [false, true]) {
+    arrayMethod(builder, fromEnd ? 'reduceRight' : 'reduce', 1, ({ runtime, args, callRow }, array) => {
       const fn = args[0];
       if (!isCallable(fn)) return runtime.throwError('TypeError', `${runtime.describe(fn)} is not a function`);
-      const thisArg = args[1];
-      return run(array, (value, index) => runtime.call(fn, thisArg, [value, index, array], callRow), call);
+      return reduce(runtime, array, fn, args, fromEnd, callRow);
     });
-  };
-  iteration('forEach', (array, callback) => {
+  }
+}
+
+function defineMappings(builder: RealmBuilder): void {
+  iterationMethod(builder, 'forEach', (array, callback) => {
     forEachIndex(array, (index) => callback(array.elements[index], index));
     return;
   });
-  iteration('map', (array, callback, { runtime }) => {
+  iterationMethod(builder, 'map', (array, callback, { runtime }) => {
     const result = runtime.newArray([]);
     runtime.setLength(result, array.elements.length);
     forEachIndex(array, (index) => (result.elements[index] = callback(array.elements[index], index)));
     return result;
   });
-  iteration('filter', (array, callback, { runtime }) => {
+  iterationMethod(builder, 'filter', (array, callback, { runtime }) => {
     const values: Value[] = [];
     forEachIndex(array, (index) => {
       const value = array.elements[index];
@@ -239,7 +267,7 @@ function defineIterations(builder: RealmBuilder): void {
     });
     return runtime.newArray(values);
   });
-  iteration('flatMap', (array, callback, { runtime }) => {
+  iterationMethod(builder, 'flatMap', (array, callback, { runtime }) => {
     const values: Value[] = [];
     forEachIndex(array, (index) => {
       const mapped = callback(array.elements[index], index);
@@ -248,41 +276,37 @@ function defineIterations(builder: RealmBuilder): void {
     });
     return runtime.newArray(values);
   });
+}
+
+function defineFinders(builder: RealmBuilder): void {
   for (const [name, fromEnd, returnsIndex] of [
     ['find', false, false],
     ['findIndex', false, true],
     ['findLast', true, false],
     ['findLastIndex', true, true],
   ] as const) {
-    iteration(name, (array, callback) => {
-      const length = array.elements.length;
-      for (let step = 0; step < length; step++) {
-        const index = fromEnd ? length - 1 - step : step;
-        const value = array.elements[index];
-        if (toBoolean(callback(value, index))) return returnsIndex ? index : value;
-      }
-      return returnsIndex ? -1 : undefined;
+    iterationMethod(builder, name, (array, callback) => {
+      const index = findIndex(array, callback, fromEnd);
+      if (returnsIndex) return index;
+      return index === -1 ? undefined : array.elements[index];
     });
   }
-  iteration('some', (array, callback) => {
-    for (let index = 0; index < array.elements.length; index++) {
-      if (toBoolean(callback(array.elements[index], index))) return true;
-    }
-    return false;
-  });
-  iteration('every', (array, callback) => {
-    for (let index = 0; index < array.elements.length; index++) {
-      if (!toBoolean(callback(array.elements[index], index))) return false;
-    }
-    return true;
-  });
-  for (const fromEnd of [false, true]) {
-    arrayMethod(builder, fromEnd ? 'reduceRight' : 'reduce', 1, ({ runtime, args, callRow }, array) => {
-      const fn = args[0];
-      if (!isCallable(fn)) return runtime.throwError('TypeError', `${runtime.describe(fn)} is not a function`);
-      return reduce(runtime, array, fn, args, fromEnd, callRow);
-    });
+  iterationMethod(builder, 'some', (array, callback) => findIndex(array, callback, false) !== -1);
+  iterationMethod(
+    builder,
+    'every',
+    (array, callback) => findIndex(array, (value, index) => !toBoolean(callback(value, index)), false) === -1
+  );
+}
+
+/** The index of the first element (or the last with `fromEnd`) for which `callback` returns a truthy value, or -1. */
+function findIndex(array: JsArray, callback: Callback, fromEnd: boolean): number {
+  const length = array.elements.length;
+  for (let step = 0; step < length; step++) {
+    const index = fromEnd ? length - 1 - step : step;
+    if (toBoolean(callback(array.elements[index], index))) return index;
   }
+  return -1;
 }
 
 function reduce(
