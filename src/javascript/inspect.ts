@@ -6,12 +6,12 @@ const MAX_DEPTH = 2;
 
 /** Bounds the text one console call formats before it is joined, since repeated large values multiply its length. */
 export class OutputBudget {
-  private remaining = LIMITS.maxOutputLength;
+  /** The characters charged so far. */
+  used = 0;
 
-  take(text: string): string {
-    this.remaining -= text.length;
-    if (this.remaining < 0) throw new ExecutionLimitError('output');
-    return text;
+  charge(length: number): void {
+    this.used += length;
+    if (this.used > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
   }
 }
 
@@ -23,7 +23,11 @@ export function inspect(
   depth = 0,
   seen = new Set<JsObject>()
 ): string {
-  return budget.take(formatValue(runtime, value, budget, depth, seen));
+  const usedBefore = budget.used;
+  const text = formatValue(runtime, value, budget, depth, seen);
+  // The values nested in an array or object charged their own text, so only the rest of this text is new.
+  budget.charge(text.length - (budget.used - usedBefore));
+  return text;
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- One check per kind of value, as console.log formats each.
@@ -64,7 +68,7 @@ function arrayItems(
   seen: Set<JsObject>
 ): string[] {
   return array.elements.map((element) =>
-    element === HOLE ? budget.take('<1 empty item>') : inspect(runtime, element, budget, depth + 1, seen)
+    element === HOLE ? '<1 empty item>' : inspect(runtime, element, budget, depth + 1, seen)
   );
 }
 

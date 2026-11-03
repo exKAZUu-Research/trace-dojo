@@ -144,6 +144,21 @@ test.each([
     'const a = new Array(100000).fill(0).map((_, i) => -i);\na.sort((x, y) => x - y);\nwhile (true) {}',
     { kind: 'limitExceeded' },
   ],
+  [
+    'concatenating a long string many times',
+    "''.concat(...new Array(1000).fill('x'.repeat(1000000)));",
+    { kind: 'executed', uncaughtException: 'RangeError: Invalid string length' },
+  ],
+  [
+    'logging a long string many times',
+    "console.log(new Array(1000).fill('x'.repeat(100000)));",
+    { kind: 'limitExceeded', limit: 'output' },
+  ],
+  [
+    'logging a nested long string once',
+    "console.log(['x'.repeat(60000)]);\nconsole.log('done');",
+    { kind: 'executed', uncaughtException: undefined },
+  ],
   ['deeply nested blocks', `${'{'.repeat(9000)}${'}'.repeat(9000)}`, { kind: 'compileError' }],
   ['deeply nested negations', `const b = ${'!'.repeat(19_000)}true;`, { kind: 'compileError' }],
   [
