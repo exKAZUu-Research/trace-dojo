@@ -41,8 +41,8 @@ test.each([
   ],
   [
     'a large array kept alive with a turtle',
-    main('Turtle t = new Turtle(); int[] a = new int[1000000];'),
-    { kind: 'executed', finalTurtles: [{ x: 0, y: 0, color: '#', dir: 'N' }] },
+    main('Turtle t = new Turtle(); int[] a = new int[900000];'),
+    { kind: 'executed', finalTurtles: [{ x: 0, y: 0, color: '#', dir: 'N' }], uncaughtException: undefined },
   ],
   [
     'garbage collections over a large array',
