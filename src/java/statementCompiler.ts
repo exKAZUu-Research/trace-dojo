@@ -553,8 +553,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       if (!(error instanceof CompileError)) throw error;
       finallyError = error;
     }
-    const discardsExceptions =
-      statement.finallyBlock !== undefined && !finallyError && !canCompleteNormally(statement.finallyBlock);
+    // A finally block that failed to compile still has its structure, where unreached conditions count as variable.
+    const discardsExceptions = statement.finallyBlock !== undefined && !canCompleteNormally(statement.finallyBlock);
     if (discardsExceptions) context.tries.push({ caughtTypes: [this.builtins.throwableClass], thrownTypes: [] });
     try {
       const enclosing: EnclosingTry = {

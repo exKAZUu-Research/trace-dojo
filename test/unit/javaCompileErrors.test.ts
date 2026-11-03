@@ -1207,3 +1207,12 @@ test('the first error in the source is reported when a finally block also has on
     diagnostics: [{ row: 3, message: 'String 型の値を int 型に変換できません。' }],
   });
 });
+
+test('an error in a finally block that discards exceptions is the only error reported', () => {
+  const source =
+    'class Main {\n  static void f() throws Exception {}\n  public static void main(String[] args) {\n    try {\n      f();\n    } finally {\n      int b = "t";\n      return;\n    }\n  }\n}';
+  expect(executeJavaProgram(source)).toEqual({
+    kind: 'compileError',
+    diagnostics: [{ row: 6, message: 'String 型の値を int 型に変換できません。' }],
+  });
+});
