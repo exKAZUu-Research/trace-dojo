@@ -27,7 +27,8 @@ export class ExecutionBudget {
   private readonly deadline = performance.now() + LIMITS.maxMilliseconds;
 
   spend(cost = 1): void {
-    this.operations += cost;
+    // A negative charge (such as a scan over an empty range computed backward) must never refill the budget.
+    this.operations += Math.max(cost, 0);
     if (this.operations > LIMITS.maxOperations) throw new ExecutionLimitError('operations');
     // A charge for many operations at once (e.g., scanning a long string) may stand for slow native work, so it
     // checks the clock at once; single operations check it periodically.

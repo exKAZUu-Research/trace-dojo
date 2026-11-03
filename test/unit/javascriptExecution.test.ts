@@ -182,6 +182,16 @@ test.each([
     'const a = new Array(900000);\nfor (let i = 0; i < 100; i++) a.some(() => false);',
     { kind: 'limitExceeded' },
   ],
+  [
+    'filling an empty range backward many times',
+    'const a = new Array(100000);\nfor (let i = 0; i < 1000000; i++) a.fill(0, 100000, 0);',
+    { kind: 'limitExceeded' },
+  ],
+  [
+    'Array.from(null)',
+    'Array.from(null);',
+    { kind: 'executed', uncaughtException: 'TypeError: Cannot convert undefined or null to object' },
+  ],
   ['deeply nested blocks', `${'{'.repeat(9000)}${'}'.repeat(9000)}`, { kind: 'compileError' }],
   ['deeply nested negations', `const b = ${'!'.repeat(19_000)}true;`, { kind: 'compileError' }],
   [

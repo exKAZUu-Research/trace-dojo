@@ -62,11 +62,10 @@ function arrayFrom({ runtime, args, callRow }: NativeCall): JsArray {
       for (let index = 0, value = iterator.next(); value !== DONE; index++, value = iterator.next()) add(value, index);
       return;
     }
-    const length = toLength(
-      runtime,
-      source === undefined || source === null ? undefined : runtime.get(source, 'length')
-    );
-    for (let index = 0; index < length; index++) add(runtime.get(source, String(index)), index);
+    // Null and undefined are neither iterable nor array-like, which JavaScript reports as a TypeError.
+    const object = runtime.toObject(source);
+    const length = toLength(runtime, runtime.get(object, 'length'));
+    for (let index = 0; index < length; index++) add(runtime.get(object, String(index)), index);
   });
 }
 
