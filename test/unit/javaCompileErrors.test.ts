@@ -1103,6 +1103,21 @@ const programs: [name: string, runs: boolean, source: string][] = [
     false,
     'public class Main { final int f; Main() { while (true) { try { break; } finally { f = 1; } } } public static void main(String[] x) { } }',
   ],
+  [
+    'foreachFinalFalse',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    for (final int x : new int[]{1}) { if (false) x = 2; }\n  }\n  \n}\n',
+  ],
+  [
+    'catchFinalFalse',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    try { System.out.println(1); } catch (final RuntimeException e) { if (false) e = null; }\n  }\n  \n}\n',
+  ],
+  [
+    'multiCatchFalse',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    try { System.out.println(1); } catch (IllegalStateException | IllegalArgumentException e) { if (false) e = null; }\n  }\n  \n}\n',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

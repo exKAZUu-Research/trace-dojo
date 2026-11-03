@@ -154,8 +154,12 @@ class DefiniteAssignmentChecker {
     return state.assigned?.has((this.fields.get(name) as Variable).id) ?? true;
   }
 
-  declare(state: State, name: string, isFinal: boolean, isAssigned: boolean): State {
-    const variable: Variable = { id: this.nextId++, name, isFinal, isInitialized: isAssigned };
+  /**
+   * @param isInitialized Whether the variable gets its value where it is declared, as parameters do; a for-each
+   *   variable is assigned on entry to each iteration but stays subject to the flow rules, as javac treats it.
+   */
+  declare(state: State, name: string, isFinal: boolean, isAssigned: boolean, isInitialized = isAssigned): State {
+    const variable: Variable = { id: this.nextId++, name, isFinal, isInitialized };
     (this.scopes.at(-1) as Map<string, Variable>).set(name, variable);
     return isAssigned ? assign(state, variable.id) : state;
   }
@@ -246,7 +250,7 @@ class DefiniteAssignmentChecker {
         const afterIterable = this.expression(statement.iterable, state);
         return this.scoped(() =>
           this.loop(statement, afterIterable, (target, entry) => {
-            const bound = this.declare(entry, statement.name, statement.isFinal, true);
+            const bound = this.declare(entry, statement.name, statement.isFinal, true, false);
             const afterBody = this.statement(statement.body, bound);
             return { exit: entry, back: [afterBody, ...target.continues] };
           })
