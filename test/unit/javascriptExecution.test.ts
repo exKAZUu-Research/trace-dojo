@@ -176,6 +176,11 @@ test.each([
     "'a'.repeat(600000).replace('a', 'b'.repeat(600000));",
     { kind: 'executed', uncaughtException: 'RangeError: Invalid string length' },
   ],
+  [
+    'scanning a large sparse array many times',
+    'const a = new Array(900000);\nfor (let i = 0; i < 100; i++) a.some(() => false);',
+    { kind: 'limitExceeded' },
+  ],
   ['deeply nested blocks', `${'{'.repeat(9000)}${'}'.repeat(9000)}`, { kind: 'compileError' }],
   ['deeply nested negations', `const b = ${'!'.repeat(19_000)}true;`, { kind: 'compileError' }],
   [
