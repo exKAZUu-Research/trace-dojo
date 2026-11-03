@@ -137,8 +137,10 @@ class DefiniteAssignmentChecker {
       // The variable's scope includes its own initializer, which therefore cannot read it.
       current = this.declare(current, declarator.name, statement.isFinal, false);
       if (!declarator.initializer) continue;
-      current = this.initializer(declarator.initializer, current);
-      current = assign(current, (this.lookup(declarator.name) as Variable).id);
+      const { id } = this.lookup(declarator.name) as Variable;
+      // An initialized final is never assignable, so it counts as possibly assigned within its initializer too.
+      const entry = { ...current, possiblyAssigned: new Set([...current.possiblyAssigned, id]) };
+      current = assign(this.initializer(declarator.initializer, entry), id);
     }
     return current;
   }
