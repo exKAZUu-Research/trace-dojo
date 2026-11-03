@@ -82,10 +82,7 @@ function collectSyntaxErrors(root: Node): JavaSourceDiagnostic[] {
   const visit = (node: Node): void => {
     if (errors.length >= 5) return;
     if (node.isMissing) {
-      errors.push({
-        row: node.startPosition.row,
-        message: `「${node.type}」が足りません。`,
-      });
+      errors.push({ row: rowBeforeMissing(node), message: `「${node.type}」が足りません。` });
       return;
     }
     if (node.isError) {
@@ -97,6 +94,15 @@ function collectSyntaxErrors(root: Node): JavaSourceDiagnostic[] {
   };
   visit(root);
   return errors;
+}
+
+/** The row where the code before a missing token ends, since the parser places that token at the next one. */
+function rowBeforeMissing(missing: Node): number {
+  for (let node: Node | null = missing; node; node = node.parent) {
+    const previous = node.previousSibling;
+    if (previous) return previous.endPosition.row;
+  }
+  return missing.startPosition.row;
 }
 
 function convertProgram(root: Node): CompilationUnit {

@@ -497,3 +497,12 @@ test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, sou
     expect(row).toBeLessThan(lineCount);
   }
 });
+
+test('a missing semicolon is reported on the line that lacks it', () => {
+  const source =
+    'class Main {\n  public static void main(String[] args) {\n    int count = 0;\n    count++\n\n    count++;\n  }\n}';
+  expect(executeJavaProgram(source)).toEqual({
+    kind: 'compileError',
+    diagnostics: [{ row: 3, message: '「;」が足りません。' }],
+  });
+});
