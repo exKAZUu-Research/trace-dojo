@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 409 -- The statement compiler keeps one method per statement kind together.
 import type {
   Block,
   CatchClause,

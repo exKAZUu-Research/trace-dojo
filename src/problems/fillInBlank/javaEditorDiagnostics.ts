@@ -46,6 +46,8 @@ export function isJavaComposing(state: EditorState): boolean {
   return state.field(feedbackState).composing;
 }
 
+// code-gauge-allow functionCognitiveComplexity 21 -- The function predates this change, which only drops a removed field.
+// code-gauge-allow functionNcss 35 -- The function predates this change, which only drops a removed field.
 function combinedDiagnostics(state: EditorState): Diagnostic[] {
   const feedback = state.field(feedbackState);
   if (feedback.composing) return [];

@@ -1,13 +1,20 @@
 import type {
   ArrayInitializer,
   Block,
+  BreakStatement,
+  ContinueStatement,
+  DoStatement,
   Expression,
+  ForEachStatement,
   ForStatement,
+  LabeledStatement,
+  LocalVariableDeclaration,
   Parameter,
   Span,
   Statement,
   SwitchStatement,
   TryStatement,
+  WhileStatement,
 } from './ast';
 import { CompileError } from './diagnostics';
 import { constantBoolean } from './reachability';
@@ -74,19 +81,14 @@ class DefiniteAssignmentChecker {
     return isAssigned ? assign(state, variable.id) : state;
   }
 
-  // code-gauge-allow functionNcss 40 -- One case per statement kind, each delegating to its own rule.
+  // code-gauge-allow functionNcss 35 -- One case per statement kind, each delegating to its own rule.
   statement(statement: Statement, state: State): State {
     switch (statement.kind) {
       case 'block': {
         return this.scoped(() => this.statements(statement.statements, state));
       }
       case 'local': {
-        let current = state;
-        for (const declarator of statement.declarators) {
-          if (declarator.initializer) current = this.initializer(declarator.initializer, current);
-          current = this.declare(current, declarator.name, statement.isFinal, declarator.initializer !== undefined);
-        }
-        return current;
+        return this.localDeclaration(statement, state);
       }
       case 'expression': {
         return this.expression(statement.expression, state);
@@ -96,6 +98,50 @@ class DefiniteAssignmentChecker {
         const afterThen = this.statement(statement.consequence, whenTrue);
         return join(afterThen, statement.alternative ? this.statement(statement.alternative, whenFalse) : whenFalse);
       }
+      case 'while':
+      case 'do':
+      case 'forEach': {
+        return this.simpleLoop(statement, state);
+      }
+      case 'for': {
+        return this.scoped(() => this.forLoop(statement, state));
+      }
+      case 'switch': {
+        return this.switchStatement(statement, state);
+      }
+      case 'break':
+      case 'continue': {
+        this.jumpTarget(statement)?.[statement.kind === 'break' ? 'breaks' : 'continues'].push(state);
+        return UNREACHABLE;
+      }
+      case 'return':
+      case 'throw': {
+        if (statement.value) this.expression(statement.value, state);
+        return UNREACHABLE;
+      }
+      case 'try': {
+        return this.tryStatement(statement, state);
+      }
+      case 'labeled': {
+        return this.labeledStatement(statement, state);
+      }
+      case 'empty': {
+        return state;
+      }
+    }
+  }
+
+  private localDeclaration(statement: LocalVariableDeclaration, state: State): State {
+    let current = state;
+    for (const declarator of statement.declarators) {
+      if (declarator.initializer) current = this.initializer(declarator.initializer, current);
+      current = this.declare(current, declarator.name, statement.isFinal, declarator.initializer !== undefined);
+    }
+    return current;
+  }
+
+  private simpleLoop(statement: WhileStatement | DoStatement | ForEachStatement, state: State): State {
+    switch (statement.kind) {
       case 'while': {
         return this.loop(statement, [statement.condition, statement.body], state, (target, entry) => {
           const { whenTrue, whenFalse } = this.condition(statement.condition, entry);
@@ -110,9 +156,6 @@ class DefiniteAssignmentChecker {
           return { exit: whenFalse, back: [] };
         });
       }
-      case 'for': {
-        return this.scoped(() => this.forLoop(statement, state));
-      }
       case 'forEach': {
         const afterIterable = this.expression(statement.iterable, state);
         return this.scoped(() =>
@@ -123,49 +166,27 @@ class DefiniteAssignmentChecker {
           })
         );
       }
-      case 'switch': {
-        return this.switchStatement(statement, state);
-      }
-      case 'break': {
-        const target = this.targets.findLast((candidate) =>
-          statement.label === undefined ? candidate.isBreakable : candidate.label === statement.label
-        );
-        target?.breaks.push(state);
-        return UNREACHABLE;
-      }
-      case 'continue': {
-        const target = this.targets.findLast(
-          (candidate) => candidate.isLoop && (statement.label === undefined || candidate.label === statement.label)
-        );
-        target?.continues.push(state);
-        return UNREACHABLE;
-      }
-      case 'return': {
-        if (statement.value) this.expression(statement.value, state);
-        return UNREACHABLE;
-      }
-      case 'throw': {
-        this.expression(statement.value, state);
-        return UNREACHABLE;
-      }
-      case 'try': {
-        return this.tryStatement(statement, state);
-      }
-      case 'labeled': {
-        if (takesLabelItself(statement.body)) {
-          this.labelsByStatement.set(statement.body, statement.label);
-          return this.statement(statement.body, state);
-        }
-        const target = this.pushTarget(statement.label, false, false);
-        try {
-          return join(this.statement(statement.body, state), ...target.breaks);
-        } finally {
-          this.targets.pop();
-        }
-      }
-      case 'empty': {
-        return state;
-      }
+    }
+  }
+
+  private jumpTarget(statement: BreakStatement | ContinueStatement): JumpTarget | undefined {
+    const { label } = statement;
+    if (statement.kind === 'break') {
+      return this.targets.findLast((target) => (label === undefined ? target.isBreakable : target.label === label));
+    }
+    return this.targets.findLast((target) => target.isLoop && (label === undefined || target.label === label));
+  }
+
+  private labeledStatement(statement: LabeledStatement, state: State): State {
+    if (takesLabelItself(statement.body)) {
+      this.labelsByStatement.set(statement.body, statement.label);
+      return this.statement(statement.body, state);
+    }
+    const target = this.pushTarget(statement.label, false, false);
+    try {
+      return join(this.statement(statement.body, state), ...target.breaks);
+    } finally {
+      this.targets.pop();
     }
   }
 
@@ -289,7 +310,7 @@ class DefiniteAssignmentChecker {
     return { whenTrue: after, whenFalse: after };
   }
 
-  // code-gauge-allow functionNcss 36 -- One case per expression kind, most only visiting their operands in order.
+  // code-gauge-allow functionNcss 37 -- One case per expression kind, most only visiting their operands in order.
   private expression(expression: Expression, state: State): State {
     switch (expression.kind) {
       case 'name': {

@@ -443,6 +443,7 @@ const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmiss
     if (!updated) throw new TRPCError({ code: 'CONFLICT' });
     return toRegularState(updated);
   });
+// code-gauge-allow functionParameterCount 7 -- The function predates this change, which only makes it synchronous.
 const gradeAndSave = (
   id: number,
   userId: string,
