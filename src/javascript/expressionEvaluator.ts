@@ -321,13 +321,15 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
 
   private deleteExpression(argument: Expression): boolean {
     const { runtime } = this;
-    const target = argument.kind === 'parenthesized' ? argument.expression : argument;
+    // Parentheses around the whole operand do not end an optional chain inside it.
+    let target = argument;
+    while (target.kind === 'parenthesized') target = target.expression;
     if (target.kind !== 'member') {
       this.evaluate(argument);
       return true;
     }
     // An optional chain that meets null or undefined deletes nothing, which succeeds.
-    const reference = this.calleeReference(target, target === argument);
+    const reference = this.calleeReference(target, true);
     if (reference === SHORT_CIRCUIT) return true;
     if (reference.kind === 'super') return runtime.throwError('ReferenceError', "Unsupported reference to 'super'");
     if (reference.kind !== 'property') return runtime.throwError('TypeError', 'Private fields can not be deleted');
