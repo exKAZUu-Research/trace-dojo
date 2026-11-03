@@ -172,7 +172,8 @@ export class Runtime {
   /** Removes the turtles that no frame, static field, or pending value can reach any more. */
   collectGarbage(): void {
     if (this.world.turtles.length === 0) return;
-    const reached = markReachable(this.gcRoots());
+    const { reached, scanned } = markReachable(this.gcRoots());
+    this.spend(Math.ceil(scanned / 64));
     for (const turtle of this.world.turtles) {
       if (!reached.has(turtle) && turtle.turtle) turtle.turtle.isAlive = false;
     }
@@ -183,9 +184,10 @@ export class Runtime {
     const roots: Value[] = [];
     for (const frame of this.frames) {
       for (const local of frame.locals) if (local !== UNASSIGNED) roots.push(local);
-      roots.push(frame.thisObject, ...frame.temporaries);
+      roots.push(frame.thisObject);
+      for (const temporary of frame.temporaries) roots.push(temporary);
     }
-    for (const values of this.staticValues.values()) roots.push(...values);
+    for (const values of this.staticValues.values()) for (const value of values) roots.push(value);
     return roots;
   }
 
@@ -274,14 +276,20 @@ export class Runtime {
   }
 }
 
-function markReachable(roots: Value[]): Set<JavaObject | JavaArray> {
+function markReachable(roots: Value[]): { reached: Set<JavaObject | JavaArray>; scanned: number } {
   const reached = new Set<JavaObject | JavaArray>();
-  const pending = [...roots];
+  const pending: Value[] = [...roots];
+  let scanned = 0;
   while (pending.length > 0) {
     const value = pending.pop();
     if (!(value instanceof JavaObject || value instanceof JavaArray) || reached.has(value)) continue;
     reached.add(value);
-    pending.push(...(value instanceof JavaObject ? value.fields : value.values));
+    const children = value instanceof JavaObject ? value.fields : value.values;
+    scanned += children.length;
+    // Pushed one by one: spreading a large array into push() exceeds the engine's argument limit.
+    for (const child of children) {
+      if (child instanceof JavaObject || child instanceof JavaArray) pending.push(child);
+    }
   }
-  return reached;
+  return { reached, scanned };
 }

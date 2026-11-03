@@ -29,6 +29,16 @@ test.each([
     main('int[][] a = new int[100000][100000];'),
     { kind: 'executed', uncaughtException: expect.stringContaining('OutOfMemoryError') },
   ],
+  [
+    'a large array kept alive with a turtle',
+    main('Turtle t = new Turtle(); int[] a = new int[1000000];'),
+    { kind: 'executed', finalTurtles: [{ x: 0, y: 0, color: '#', dir: 'N' }] },
+  ],
+  [
+    'garbage collections over a large array',
+    main('Turtle t = new Turtle(); Object[] a = new Object[900000]; while (true) t.前に進めるか();'),
+    { kind: 'limitExceeded' },
+  ],
   ['deeply nested blocks', main(`${'{'.repeat(9000)}${'}'.repeat(9000)}`), { kind: 'compileError' }],
   ['deeply nested negations', main(`boolean b = ${'!'.repeat(19_000)}true;`), { kind: 'compileError' }],
 ])('%s ends within the limits', (_, source, expected) => {
