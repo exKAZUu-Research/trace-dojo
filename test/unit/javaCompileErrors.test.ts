@@ -585,6 +585,16 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'public class Main {\n  public static void main(String[] args) {\n    final int x; try { x = 1; } finally { } System.out.println(x);\n  }\n  \n}\n',
   ],
+  [
+    'ctorArgFinal',
+    false,
+    'class A { A(int n) {} }\npublic class Main extends A { Main(final int x) { super(x = 2); } public static void main(String[] a) { new Main(1); } }\n',
+  ],
+  [
+    'ctorArgOk',
+    true,
+    'class A { A(int n) {} }\npublic class Main extends A { Main(int x) { super(x = 2); } public static void main(String[] a) { new Main(1); } }\n',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

@@ -92,8 +92,9 @@ export class Runtime {
   spend(cost = 1): void {
     this.operations += cost;
     if (this.operations > LIMITS.maxOperations) throw new ExecutionLimitError('operations');
-    // Operations such as comparing long strings cost more time than one operation, so the clock bounds them.
-    if (this.operations < this.nextClockCheck) return;
+    // A charge for many operations at once (e.g., scanning a long string) may stand for slow native work, so it
+    // checks the clock at once; single operations check it periodically.
+    if (cost === 1 && this.operations < this.nextClockCheck) return;
     this.nextClockCheck = this.operations + OPERATIONS_PER_CLOCK_CHECK;
     if (performance.now() > this.deadline) throw new ExecutionLimitError('time');
   }

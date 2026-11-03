@@ -50,6 +50,18 @@ test.each([
     { kind: 'executed', uncaughtException: undefined },
   ],
   [
+    'case-insensitive comparisons with a long non-ASCII string',
+    main('String s = "İ".repeat(5000000); int n = 0; while (true) { if ("a".equalsIgnoreCase(s)) n++; }'),
+    { kind: 'limitExceeded' },
+  ],
+  [
+    'parsing a long string repeatedly',
+    main(
+      'String s = "1".repeat(5000000); int n = 0; while (true) { try { n += Integer.parseInt(s); } catch (NumberFormatException e) { } }'
+    ),
+    { kind: 'limitExceeded' },
+  ],
+  [
     'a huge array',
     main('int[][] a = new int[100000][100000];'),
     { kind: 'executed', uncaughtException: expect.stringContaining('OutOfMemoryError') },

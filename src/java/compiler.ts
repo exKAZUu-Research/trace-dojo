@@ -372,7 +372,9 @@ class Compiler extends StatementCompiler {
     // A constructor that delegates to this(...) leaves the initializers to the constructor it calls.
     const initializers = callsThis ? [] : this.compileInitializers(context, cls, false);
     const body = declaration ? this.compileBlock(context, declaration.body, false) : undefined;
-    if (declaration) checkDefiniteAssignment(declaration.parameters, declaration.body);
+    if (declaration) {
+      checkDefiniteAssignment(declaration.parameters, declaration.body, declaration.explicitCall?.args);
+    }
     constructor.code = {
       locals: context.locals,
       run: (frame) => {

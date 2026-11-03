@@ -167,6 +167,7 @@ function defineInteger(integerClass: ClassInfo, stringType: JavaType): void {
   addConstant(integerClass, 'MIN_VALUE', INT, -2_147_483_648);
   addMethod(integerClass, 'parseInt', [stringType], INT, true, (frame, _, [text]) => {
     const value = (text as JavaString | undefined)?.value;
+    frame.runtime.scanString(value?.length ?? 0);
     if (value === undefined || !/^[+-]?\d+$/.test(value) || Math.abs(Number(value)) > 2_147_483_648) {
       throwBuiltin(
         frame,
@@ -212,7 +213,7 @@ function defineString(stringClass: ClassInfo, objectType: JavaType): void {
   defineStringTransforms(stringClass, objectType);
 }
 
-// code-gauge-allow functionNcss 45 -- One registration per String method, each charging the characters it reads.
+// code-gauge-allow functionNcss 47 -- One registration per String method, each charging the characters it reads.
 function defineStringQueries(stringClass: ClassInfo, objectType: JavaType): void {
   const stringType = stringClass.type;
   addMethod(stringClass, 'length', [], INT, false, (_, receiver) => text(receiver).length);
@@ -226,8 +227,9 @@ function defineStringQueries(stringClass: ClassInfo, objectType: JavaType): void
     return other instanceof JavaString && other.value === text(receiver);
   });
   addMethod(stringClass, 'equalsIgnoreCase', [stringType], BOOLEAN, false, (frame, receiver, [other]) => {
-    frame.runtime.scanString(text(receiver).length);
-    return other instanceof JavaString && other.value.toLowerCase() === text(receiver).toLowerCase();
+    if (!(other instanceof JavaString)) return false;
+    frame.runtime.scanString(text(receiver).length + other.value.length);
+    return other.value.toLowerCase() === text(receiver).toLowerCase();
   });
   addMethod(stringClass, 'hashCode', [], INT, false, (frame, receiver) => {
     const value = text(receiver);

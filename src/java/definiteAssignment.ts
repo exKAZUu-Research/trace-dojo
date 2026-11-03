@@ -26,13 +26,17 @@ import { booleanConstants } from './reachability';
  * A final local assigned anywhere in a loop counts as possibly assigned throughout that loop, even where Java
  * proves otherwise (e.g., an assignment followed by `break`), which beginners' programs do not rely on.
  */
-export function checkDefiniteAssignment(parameters: readonly Parameter[], body: Block): void {
+export function checkDefiniteAssignment(
+  parameters: readonly Parameter[],
+  body: Block,
+  explicitConstructorArgs: readonly Expression[] = []
+): void {
   const checker = new DefiniteAssignmentChecker();
   let state = checker.initialState();
   for (const parameter of parameters) {
     state = checker.declare(state, parameter.name, parameter.isFinal, true);
   }
-  checker.statement(body, state);
+  checker.statement(body, checker.expressions(explicitConstructorArgs, state));
 }
 
 interface Variable {
@@ -388,7 +392,7 @@ class DefiniteAssignmentChecker {
     }
   }
 
-  private expressions(expressions: readonly Expression[], state: State): State {
+  expressions(expressions: readonly Expression[], state: State): State {
     let current = state;
     for (const expression of expressions) current = this.expression(expression, current);
     return current;
