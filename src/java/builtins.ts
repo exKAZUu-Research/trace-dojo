@@ -271,6 +271,7 @@ function defineStringQueries(stringClass: ClassInfo, objectType: JavaType): void
   }
 }
 
+// code-gauge-allow functionNcss 38 -- One registration per String method, each charging the characters it reads.
 function defineStringTransforms(stringClass: ClassInfo, objectType: JavaType): void {
   const stringType = stringClass.type;
   addMethod(stringClass, 'toUpperCase', [], stringType, false, (frame, receiver) =>
@@ -279,10 +280,16 @@ function defineStringTransforms(stringClass: ClassInfo, objectType: JavaType): v
   addMethod(stringClass, 'toLowerCase', [], stringType, false, (frame, receiver) =>
     newString(frame, text(receiver).toLowerCase())
   );
-  addMethod(stringClass, 'trim', [], stringType, false, (frame, receiver) =>
-    // oxlint-disable-next-line no-control-regex -- String.trim removes every code unit up to U+0020.
-    newString(frame, text(receiver).replaceAll(/^[\u0000- ]+|[\u0000- ]+$/g, ''))
-  );
+  addMethod(stringClass, 'trim', [], stringType, false, (frame, receiver) => {
+    const value = text(receiver);
+    frame.runtime.scanString(value.length);
+    // String.trim removes every code unit up to U+0020 from both ends.
+    let start = 0;
+    let end = value.length;
+    while (start < end && charCodeOf(value, start) <= 0x20) start++;
+    while (end > start && charCodeOf(value, end - 1) <= 0x20) end--;
+    return newString(frame, value.slice(start, end));
+  });
   addMethod(stringClass, 'concat', [stringType], stringType, false, (frame, receiver, [other]) => {
     const left = text(receiver);
     const right = requireString(frame, other);

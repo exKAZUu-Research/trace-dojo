@@ -45,6 +45,11 @@ test.each([
     { kind: 'executed', finalTurtles: [{ x: 0, y: 1, color: '#', dir: 'N' }], uncaughtException: undefined },
   ],
   [
+    'trimming a string with a long run of inner spaces',
+    main('String s = "x" + " ".repeat(2000000) + "y"; System.out.println(s.trim().length());'),
+    { kind: 'executed', uncaughtException: undefined },
+  ],
+  [
     'a huge array',
     main('int[][] a = new int[100000][100000];'),
     { kind: 'executed', uncaughtException: expect.stringContaining('OutOfMemoryError') },

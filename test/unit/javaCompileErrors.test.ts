@@ -565,6 +565,16 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'public class Main {\n  public static void main(String[] args) {\n    int x = (x = 1); System.out.println(x);\n  }\n  \n}\n',
   ],
+  [
+    'breakInFinally',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    int x; while (true) { try { } finally { if (args.length == 0) break; x = 1; } } System.out.println(x);\n  }\n  \n}\n',
+  ],
+  [
+    'breakOnlyInFinally',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    int x; while (true) { try { } finally { break; } } System.out.println(x);\n  }\n  \n}\n',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

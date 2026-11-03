@@ -277,14 +277,17 @@ class DefiniteAssignmentChecker {
       assigned: state.assigned,
       possiblyAssigned: new Set([...possiblyAssigned, ...afterCatches.flatMap((after) => [...after.possiblyAssigned])]),
     };
+    // Jumps taken inside the finally block itself leave from where they are, unchanged.
+    const jumpsBeforeFinally = this.targets.map((target) => [target.breaks.length, target.continues.length] as const);
     const afterFinally = this.statement(statement.finallyBlock, finallyEntry);
     for (const [index, [breakCount, continueCount]] of jumpCounts.entries()) {
       const target = this.targets[index];
-      for (const [jumps, count] of [
-        [target.breaks, breakCount],
-        [target.continues, continueCount],
+      const [breaksBeforeFinally, continuesBeforeFinally] = jumpsBeforeFinally[index];
+      for (const [jumps, from, to] of [
+        [target.breaks, breakCount, breaksBeforeFinally],
+        [target.continues, continueCount, continuesBeforeFinally],
       ] as const) {
-        for (let jump = count; jump < jumps.length; jump++) jumps[jump] = throughFinally(jumps[jump], afterFinally);
+        for (let jump = from; jump < to; jump++) jumps[jump] = throughFinally(jumps[jump], afterFinally);
       }
     }
     return throughFinally(afterTryAndCatches, afterFinally);
