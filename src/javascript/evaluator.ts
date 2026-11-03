@@ -9,6 +9,7 @@ import {
   privateMethodProperty,
 } from './memberProperties';
 import {
+  appendAll,
   type Binding,
   type ClassField,
   type FunctionBehavior,
@@ -539,7 +540,16 @@ export class Evaluator extends ExpressionEvaluator {
         `Super constructor ${runtime.describe(parent)} of anonymous class is not a constructor`
       );
     }
-    const constructed = runtime.construct(parent, args, frame.newTarget, callRow);
+    // The arguments stay reachable while the parent initializes its fields, before its parameters hold them.
+    const { temporaries } = runtime.frame;
+    const held = temporaries.length;
+    appendAll(temporaries, args);
+    let constructed: JsObject;
+    try {
+      constructed = runtime.construct(parent, args, frame.newTarget, callRow);
+    } finally {
+      temporaries.length = held;
+    }
     if (frame.thisValue !== UNINITIALIZED)
       runtime.throwError('ReferenceError', 'Super constructor may only be called once');
     frame.thisValue = constructed;

@@ -408,6 +408,7 @@ t.【1】(); // caller // step`;
 test.each([
   ['a row without a statement that records a step', 'let i = 0;\nwhile (i < 3) { // step\n  i++;\n}', '// step は'],
   ['a declaration without an initializer', 'let i; // step', '// step は'],
+  ['a statement spanning two step rows', 'const t = new Turtle( // step\n  0, 0); // step', '// step は'],
   ['invalid syntax', 'const t = new Turtle(;', '「)」が足りません'],
 ])('a model program with %s is rejected', (_, program, message) => {
   expect(() => traceProgram('javascript', program, program)).toThrow(message);
@@ -451,6 +452,11 @@ test.each([
   [
     'an object rest so far',
     'const { skip, ...rest } = {\n  get first() {\n    return new Turtle(0, 1);\n  },\n  get second() {\n    const ready = true; // step\n    return 0;\n  },\n};',
+    1,
+  ],
+  [
+    'super() arguments while the parent initializes its fields',
+    'class A {\n  ready = true; // step\n  constructor(t) {\n    this.t = t;\n  }\n}\nclass B extends A {\n  constructor() {\n    super(new Turtle(3, 3));\n  }\n}\nconst b = new B();',
     1,
   ],
   [

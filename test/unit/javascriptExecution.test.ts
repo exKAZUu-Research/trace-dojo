@@ -25,6 +25,18 @@ keep.forward();`
 test.each([
   ['a duplicate declaration', 'let a = 1;\nlet a = 2;', 1, 'a はすでに宣言されています。'],
   ['a var that redeclares a let', 'let a = 1;\n{ var a = 2; }', 1, 'a はすでに宣言されています。'],
+  [
+    'a static method named prototype',
+    'class A {\n  static prototype() {}\n}',
+    1,
+    'static メンバーに prototype という名前は使えません。',
+  ],
+  [
+    'a field named constructor',
+    'class A {\n  constructor = 1;\n}',
+    1,
+    'フィールドに constructor という名前は使えません。',
+  ],
   ['a const without a value', 'const a;', 0, 'const で宣言する変数には初期値が必要です。'],
   ['break outside a loop', 'if (true) {\n  break;\n}', 1, 'break 文はループや switch 文の中にしか書けません。'],
   [

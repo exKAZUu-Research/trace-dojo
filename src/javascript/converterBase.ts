@@ -32,6 +32,8 @@ interface Extent {
 interface Steppable extends Extent {
   depth: number;
   assign: (stepId: number) => void;
+  /** The `// step` row this statement records, since a statement records one step. */
+  claimedRow?: number;
 }
 
 function extentOf(node: Node): Extent {
@@ -103,7 +105,11 @@ export abstract class ConverterBase {
               onRow.some((outer) => outer.endRow === row && encloses(outer, body))
           )
       );
-      if (candidates.length === 0) {
+      let depth = 0;
+      for (const candidate of candidates) depth = Math.max(depth, candidate.depth);
+      const innermost = candidates.filter((candidate) => candidate.depth === depth);
+      // A statement already recording the step of another row leaves this row unused, as Java rejects it.
+      if (innermost.length === 0 || innermost.some((candidate) => candidate.claimedRow !== undefined)) {
         throw new CompileError([
           {
             row,
@@ -111,9 +117,10 @@ export abstract class ConverterBase {
           },
         ]);
       }
-      let depth = 0;
-      for (const candidate of candidates) depth = Math.max(depth, candidate.depth);
-      for (const candidate of candidates) if (candidate.depth === depth) candidate.assign(stepId);
+      for (const candidate of innermost) {
+        candidate.claimedRow = row;
+        candidate.assign(stepId);
+      }
     }
   }
 

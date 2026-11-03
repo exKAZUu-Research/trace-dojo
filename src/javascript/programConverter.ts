@@ -11,6 +11,7 @@ import type {
   FunctionNode,
   Pattern,
   Program,
+  PropertyName,
   Statement,
   VariableDeclaration,
 } from './ast';
@@ -389,11 +390,13 @@ export class ProgramConverter extends ExpressionConverter {
     const isStatic = hasChild(member, 'static');
     if (member.type === 'method_definition') {
       const key = this.propertyName(field(member, 'name'));
+      checkMemberName(member, key, isStatic, false);
       const kind = accessorOf(member) ?? 'method';
       return { kind, isStatic, key, fn: this.functionNode(member, kind, keyName(key)) };
     }
     if (member.type === 'field_definition') {
       const key = this.propertyName(field(member, 'property'));
+      checkMemberName(member, key, isStatic, true);
       const valueNode = member.childForFieldName('value');
       // Field initializers run like method bodies, where `this` is the instance and `super.x` works.
       const value = valueNode
@@ -412,6 +415,13 @@ function recordsHeaderStep({ init, update }: Extract<Statement, { kind: 'for' }>
   if (update) return true;
   if (!init) return false;
   return init.kind !== 'declaration' || init.declarators.some((declarator) => declarator.init);
+}
+
+/** Rejects the class member names JavaScript reserves: a static `prototype`, and a field named `constructor`. */
+function checkMemberName(member: Node, key: PropertyName, isStatic: boolean, isField: boolean): void {
+  if (key.kind !== 'key') return;
+  if (isStatic && key.key === 'prototype') fail(member, 'static メンバーに prototype という名前は使えません。');
+  if (isField && key.key === 'constructor') fail(member, 'フィールドに constructor という名前は使えません。');
 }
 
 function isConstructorDefinition(member: Node): boolean {
