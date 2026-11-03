@@ -1078,6 +1078,31 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'public class Main {\n  public static void main(String[] args) {\n    int i = 0; outer: inner: do { i++; continue inner; } while (i < 2); System.out.println(i);\n  }\n  \n}\n',
   ],
+  [
+    'finalInitFalseBranch',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    final int x = 1; if (false) x = 2;\n  }\n  \n}\n',
+  ],
+  [
+    'finalInitFalseIncrement',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    final int x = 1; if (false) x++;\n  }\n  \n}\n',
+  ],
+  [
+    'finalParamFalseBranch',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    \n  }\n  static void f(final int a) { if (false) a = 1; }\n}\n',
+  ],
+  [
+    'blankFinalFalseBranch',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    final int x; if (false) x = 2; x = 3; System.out.println(x);\n  }\n  \n}\n',
+  ],
+  [
+    'breakFinallyFieldLoop',
+    false,
+    'public class Main { final int f; Main() { while (true) { try { break; } finally { f = 1; } } } public static void main(String[] x) { } }',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {
@@ -1171,5 +1196,14 @@ test('a missing field through super names the superclass', () => {
   expect(executeJavaProgram(source)).toEqual({
     kind: 'compileError',
     diagnostics: [{ row: 2, message: 'この採点環境の A には、フィールド missing がありません。' }],
+  });
+});
+
+test('the first error in the source is reported when a finally block also has one', () => {
+  const source =
+    'class Main {\n  public static void main(String[] args) {\n    try {\n      int a = "s";\n    } finally {\n      int b = "t";\n    }\n  }\n}';
+  expect(executeJavaProgram(source)).toEqual({
+    kind: 'compileError',
+    diagnostics: [{ row: 3, message: 'String 型の値を int 型に変換できません。' }],
   });
 });

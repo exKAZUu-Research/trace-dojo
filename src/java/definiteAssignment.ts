@@ -81,6 +81,8 @@ interface Variable {
   id: number;
   name: string;
   isFinal: boolean;
+  /** Whether the variable gets its value where it is declared, which makes a final one never assignable. */
+  isInitialized: boolean;
 }
 
 /** The locals definitely assigned (`undefined` when the point is unreachable) and those possibly assigned. */
@@ -153,7 +155,7 @@ class DefiniteAssignmentChecker {
   }
 
   declare(state: State, name: string, isFinal: boolean, isAssigned: boolean): State {
-    const variable: Variable = { id: this.nextId++, name, isFinal };
+    const variable: Variable = { id: this.nextId++, name, isFinal, isInitialized: isAssigned };
     (this.scopes.at(-1) as Map<string, Variable>).set(name, variable);
     return isAssigned ? assign(state, variable.id) : state;
   }
@@ -217,10 +219,9 @@ class DefiniteAssignmentChecker {
       // The variable's scope includes its own initializer, which therefore cannot read it.
       current = this.declare(current, declarator.name, statement.isFinal, false);
       if (!declarator.initializer) continue;
-      const { id } = this.lookup(declarator.name) as Variable;
-      // An initialized final is never assignable, so it counts as possibly assigned within its initializer too.
-      const entry = { ...current, possiblyAssigned: new Set([...current.possiblyAssigned, id]) };
-      current = assign(this.initializer(declarator.initializer, entry), id);
+      const variable = this.lookup(declarator.name) as Variable;
+      variable.isInitialized = true;
+      current = assign(this.initializer(declarator.initializer, current), variable.id);
     }
     return current;
   }
@@ -519,13 +520,18 @@ class DefiniteAssignmentChecker {
     if (!variable) return target.kind === 'name' ? state : this.expression(target, state);
     if (reads) this.readVariable(target, variable, state);
     for (const log of this.writeLogs) log.add(variable.id);
-    if (variable.isFinal && state.assigned) {
-      if (state.possiblyAssigned.has(variable.id)) this.finalAssignmentError(target, variable);
-      for (const loop of this.loops) {
-        if (variable.id < loop.firstId) loop.finalWrites.push({ variable, span: target });
-      }
-    }
+    if (variable.isFinal) this.checkFinalWrite(target, variable, state);
     return assign(state, variable.id);
+  }
+
+  private checkFinalWrite(span: Span, variable: Variable, state: State): void {
+    // An initialized final is never assignable, even where the assignment cannot run.
+    if (variable.isInitialized) this.finalAssignmentError(span, variable);
+    if (!state.assigned) return;
+    if (state.possiblyAssigned.has(variable.id)) this.finalAssignmentError(span, variable);
+    for (const loop of this.loops) {
+      if (variable.id < loop.firstId) loop.finalWrites.push({ variable, span });
+    }
   }
 
   private finalAssignmentError(span: Span, variable: Variable): never {
@@ -612,29 +618,27 @@ export function assignedNames(node: Statement | Expression): string[] {
   return names;
 }
 
+/** Assigns a variable; an assignment that cannot run still makes it possibly assigned, as Java's rules say. */
 function assign(state: State, id: number): State {
-  if (!state.assigned) return state;
-  return { assigned: new Set([...state.assigned, id]), possiblyAssigned: new Set([...state.possiblyAssigned, id]) };
+  const possiblyAssigned = new Set([...state.possiblyAssigned, id]);
+  return { assigned: state.assigned && new Set([...state.assigned, id]), possiblyAssigned };
 }
 
 /** The state after a finally block that `state` entered, which keeps the assignments made before it. */
 function throughFinally(state: State, afterFinally: State): State {
-  if (!state.assigned || !afterFinally.assigned) return UNREACHABLE;
-  return {
-    assigned: new Set([...state.assigned, ...afterFinally.assigned]),
-    possiblyAssigned: new Set([...state.possiblyAssigned, ...afterFinally.possiblyAssigned]),
-  };
+  const possiblyAssigned = new Set([...state.possiblyAssigned, ...afterFinally.possiblyAssigned]);
+  if (!state.assigned || !afterFinally.assigned) return { assigned: undefined, possiblyAssigned };
+  return { assigned: new Set([...state.assigned, ...afterFinally.assigned]), possiblyAssigned };
 }
 
+/** Merges paths: assigned on every reachable one, possibly assigned on any, including assignments that cannot run. */
 function join(...states: State[]): State {
+  const possiblyAssigned = new Set(states.flatMap((state) => [...state.possiblyAssigned]));
   const reachable = states.filter((state) => state.assigned !== undefined);
-  if (reachable.length === 0) return UNREACHABLE;
+  if (reachable.length === 0) return { assigned: undefined, possiblyAssigned };
   const [first, ...rest] = reachable;
   const assigned = [...(first.assigned as ReadonlySet<number>)].filter((id) =>
     rest.every((state) => state.assigned?.has(id))
   );
-  return {
-    assigned: new Set(assigned),
-    possiblyAssigned: new Set(reachable.flatMap((state) => [...state.possiblyAssigned])),
-  };
+  return { assigned: new Set(assigned), possiblyAssigned };
 }

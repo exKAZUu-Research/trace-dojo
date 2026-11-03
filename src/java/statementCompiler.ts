@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 442 -- The statement compiler keeps one method per statement kind together.
+// code-gauge-allow-file fileNcss 451 -- The statement compiler keeps one method per statement kind together.
 import type {
   Block,
   CatchClause,
@@ -22,6 +22,7 @@ import {
   type Scope,
 } from './compilerBase';
 import { assignedNames } from './definiteAssignment';
+import { CompileError } from './diagnostics';
 import { ExpressionCompiler } from './expressionCompiler';
 import { canCompleteNormally } from './reachability';
 import { type Frame, JavaThrow, throwBuiltin, UNASSIGNED } from './runtime';
@@ -542,9 +543,18 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       this.error(statement, 'try 文には catch か finally が必要です。');
     }
     // The finally block is compiled first: one that cannot complete normally discards every exception thrown
-    // before it, so the try and catch blocks then throw nothing out of the statement.
-    const finallyBlock = statement.finallyBlock ? this.compileBlock(context, statement.finallyBlock) : undefined;
-    const discardsExceptions = statement.finallyBlock !== undefined && !canCompleteNormally(statement.finallyBlock);
+    // before it, so the try and catch blocks then throw nothing out of the statement. Its error waits until the
+    // blocks before it compile, so that the first error in the source is the one reported.
+    let finallyBlock: Exec | undefined;
+    let finallyError: CompileError | undefined;
+    try {
+      finallyBlock = statement.finallyBlock ? this.compileBlock(context, statement.finallyBlock) : undefined;
+    } catch (error) {
+      if (!(error instanceof CompileError)) throw error;
+      finallyError = error;
+    }
+    const discardsExceptions =
+      statement.finallyBlock !== undefined && !finallyError && !canCompleteNormally(statement.finallyBlock);
     if (discardsExceptions) context.tries.push({ caughtTypes: [this.builtins.throwableClass], thrownTypes: [] });
     try {
       const enclosing: EnclosingTry = {
@@ -559,6 +569,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         context.tries.pop();
       }
       const handle = this.compileCatchClauses(context, statement.catches, enclosing.thrownTypes);
+      if (finallyError) throw finallyError;
       return runTry(body, handle, finallyBlock);
     } finally {
       if (discardsExceptions) context.tries.pop();
