@@ -31,6 +31,19 @@ import {
 import { defaultValue, JavaArray, JavaObject, JavaString, toInt32, type Value } from './values';
 
 /** Type-checks expressions and compiles them into closures. */
+/** The methods every Java class inherits from Object, of which this environment implements only some. */
+const objectMethodNames = new Set([
+  'clone',
+  'equals',
+  'finalize',
+  'getClass',
+  'hashCode',
+  'notify',
+  'notifyAll',
+  'toString',
+  'wait',
+]);
+
 export abstract class ExpressionCompiler extends CompilerBase {
   protected compileCondition(context: MethodContext, expression: Expression): (frame: Frame) => boolean {
     const value = this.compileValue(context, expression);
@@ -349,7 +362,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   protected missingFieldMessage(cls: ClassInfo, name: string): string {
     return this.isPartialLibraryClass(cls)
-      ? `${cls.name} のフィールド ${name} は、Java にないか、この採点環境では使えません。`
+      ? `この採点環境の ${cls.name} では、フィールド ${name} を使えません。`
       : `${cls.name} にフィールド ${name} がありません。`;
   }
 
@@ -694,9 +707,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const args = expression.args.map((arg) => this.compileValue(context, arg));
     const target = this.resolveCallTarget(context, expression);
     if (target.candidates.length === 0) {
-      const message = this.isPartialLibraryClass(target.owner)
-        ? `${target.owner.name} のメソッド ${expression.name} は、Java にないか、この採点環境では使えません。`
-        : `${target.owner.name} にメソッド ${expression.name} がありません。`;
+      const message =
+        this.isPartialLibraryClass(target.owner) || objectMethodNames.has(expression.name)
+          ? `この採点環境の ${target.owner.name} では、メソッド ${expression.name} を使えません。`
+          : `${target.owner.name} にメソッド ${expression.name} がありません。`;
       this.error(expression, message);
     }
     const method = this.selectMethod(

@@ -1056,16 +1056,22 @@ test.each([
 
 test.each([
   ['long x = 0;', '型「long」は、この採点環境では使えません。'],
-  ['double r = Math.round(2.5);', 'Math のメソッド round は、Java にないか、この採点環境では使えません。'],
+  ['double r = Math.round(2.5);', 'この採点環境の Math では、メソッド round を使えません。'],
   ['StringBuilder b = null;', '型 StringBuilder が見つからないか、この採点環境では使えません。'],
   [
     'String s = String.valueOf(1, 2);',
-    'メソッド valueOf に (int, int) を渡す呼び出しは、Java にないか、この採点環境では使えません。',
+    'この採点環境では、メソッド valueOf に (int, int) を渡して呼び出すことはできません。',
   ],
   ['Turtle t = new Turtle(); t.前に進む(3);', 'メソッド 前に進む に (int) を渡して呼び出すことはできません。'],
   ['Turtle t = new Turtle(); t.x = 3;', 'Turtle にフィールド x がありません。'],
-  ['int n = Integer.parseInt(123);', 'メソッド parseInt に (int) を渡して呼び出すことはできません。'],
-])('only Java the interpreter does not implement is called possibly unsupported: %s', (body, message) => {
+  ['int n = Integer.parseInt(123);', 'この採点環境では、メソッド parseInt に (int) を渡して呼び出すことはできません。'],
+  [
+    'Object e = new IndexOutOfBoundsException(1);',
+    'この採点環境では、コンストラクタ IndexOutOfBoundsException に (int) を渡して呼び出すことはできません。',
+  ],
+  ['Object o = new Object(); o.getClass();', 'この採点環境の Object では、メソッド getClass を使えません。'],
+  ['Turtle t = new Turtle(); t.前進する();', 'Turtle にメソッド 前進する がありません。'],
+])('messages about the standard library state what this environment allows: %s', (body, message) => {
   const source = `class Main {\n  public static void main(String[] args) {\n    ${body}\n  }\n}`;
   expect(executeJavaProgram(source)).toEqual({ kind: 'compileError', diagnostics: [{ row: 2, message }] });
 });
