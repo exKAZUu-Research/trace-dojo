@@ -24,6 +24,7 @@ keep.forward();`
 
 test.each([
   ['a duplicate declaration', 'let a = 1;\nlet a = 2;', 1, 'a はすでに宣言されています。'],
+  ['a let that redeclares a var in its block', '{\n  var a = 1;\n  let a = 2;\n}', 2, 'a はすでに宣言されています。'],
   ['a var that redeclares a let', 'let a = 1;\n{ var a = 2; }', 1, 'a はすでに宣言されています。'],
   [
     'a static method named prototype',
@@ -203,6 +204,7 @@ test.each([
   ],
   ['String(new Array(3).map((_, i) => i).length + Object.keys([1, , 3]).length)', '5'],
   ['String(new Array(5000).fill(7).join().length)', '9999'],
+  ['String(Array.from([1, 2], function (v) { return v * this.step; }, { step: 2 }))', '2,4'],
   [
     'String((() => { class A { set x(v) { this.stored = v; } } class B extends A { set x(v) { super.x = v + 1; } } const b = new B(); b.x = 2; return b.stored; })())',
     '3',

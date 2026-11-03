@@ -175,7 +175,11 @@ export abstract class ConverterBase {
   protected declareVar(node: Node, name: string): void {
     for (const scope of this.scopes.toReversed()) {
       if (scope.names.get(name) === 'lexical') duplicate(node, name);
-      if (!scope.isFunction) continue;
+      if (!scope.isFunction) {
+        // Recorded in each block it passes through, so a later let or const of the name there is a duplicate too.
+        scope.names.set(name, 'var');
+        continue;
+      }
       if (!scope.names.has(name)) {
         scope.names.set(name, 'var');
         scope.declarations.vars.push(name);

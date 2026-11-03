@@ -50,13 +50,13 @@ export function buildArray(runtime: Runtime, build: (ops: ArrayOps) => void): Js
 
 // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function arrayFrom({ runtime, args, callRow }: NativeCall): JsArray {
-  const [source, mapper] = args;
+  const [source, mapper, thisArg] = args;
   if (mapper !== undefined && !isCallable(mapper)) {
     runtime.throwError('TypeError', `${runtime.describe(mapper)} is not a function`);
   }
   return buildArray(runtime, (result) => {
     const add = (value: Value, index: number): void =>
-      result.set(index, mapper ? runtime.call(mapper, undefined, [value, index], callRow) : value);
+      result.set(index, mapper ? runtime.call(mapper, thisArg, [value, index], callRow) : value);
     if (source instanceof JsArray || typeof source === 'string') {
       // Each value is read just before its mapper runs, as JavaScript's iteration does.
       const iterator = runtime.iterator(source);
