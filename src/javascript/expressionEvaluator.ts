@@ -249,13 +249,17 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
 
   /** Evaluates a callee with the `this` a call passes, which is the object of a (parenthesized) member. */
   private callee(callee: Expression): { fn: Value; thisValue: Value } | typeof SHORT_CIRCUIT {
-    const target = callee.kind === 'parenthesized' && callee.expression.kind === 'member' ? callee.expression : callee;
+    // Parentheses keep a method's receiver but end an optional chain, so `(a?.b)()` calls whatever `a?.b` gave.
+    let target = callee;
+    while (target.kind === 'parenthesized') target = target.expression;
     if (target.kind !== 'member') {
       const fn = this.evaluateChain(callee);
       return fn === SHORT_CIRCUIT ? SHORT_CIRCUIT : { fn, thisValue: undefined };
     }
     const reference = this.calleeReference(target, target === callee);
-    if (reference === SHORT_CIRCUIT) return SHORT_CIRCUIT;
+    if (reference === SHORT_CIRCUIT) {
+      return target === callee ? SHORT_CIRCUIT : { fn: undefined, thisValue: undefined };
+    }
     const thisValue = referenceBase(reference);
     return { fn: this.runtime.hold(thisValue, () => this.getReference(reference)), thisValue };
   }
