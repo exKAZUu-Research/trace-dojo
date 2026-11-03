@@ -535,6 +535,26 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'public class Main { static int y; static { int x; while (true) { x = 1; break; } y = x; } { int z; if (true) z = 1; y = z; } public static void main(String[] args) { System.out.println(y); } }',
   ],
+  [
+    'finallyBreak',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    int x; while (true) { try { break; } finally { x = 1; } } System.out.println(x);\n  }\n  \n}\n',
+  ],
+  [
+    'finallyContinue',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    int x; for (int i = 0; i < 2; i++) { try { if (i == 0) continue; } finally { x = i; } System.out.println(x); }\n  }\n  \n}\n',
+  ],
+  [
+    'finallyBreakNoAssign',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    int x; while (true) { try { break; } finally { } } System.out.println(x);\n  }\n  \n}\n',
+  ],
+  [
+    'nestedFinally',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    int x; outer: while (true) { try { try { break outer; } finally { } } finally { x = 2; } } System.out.println(x);\n  }\n  \n}\n',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

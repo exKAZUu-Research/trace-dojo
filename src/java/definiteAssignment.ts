@@ -258,6 +258,8 @@ class DefiniteAssignmentChecker {
   }
 
   private tryStatement(statement: TryStatement, state: State): State {
+    // Jumps out of the try statement also run its finally block on the way.
+    const jumpCounts = this.targets.map((target) => [target.breaks.length, target.continues.length] as const);
     const afterBody = this.statement(statement.body, state);
     // A catch block may start after any assignment in the try block.
     const possiblyAssigned = new Set([...state.possiblyAssigned, ...this.assignedVariables(statement.body)]);
@@ -274,11 +276,16 @@ class DefiniteAssignmentChecker {
       possiblyAssigned: new Set([...possiblyAssigned, ...afterCatches.flatMap((after) => [...after.possiblyAssigned])]),
     };
     const afterFinally = this.statement(statement.finallyBlock, finallyEntry);
-    if (!afterTryAndCatches.assigned || !afterFinally.assigned) return UNREACHABLE;
-    return {
-      assigned: new Set([...afterTryAndCatches.assigned, ...afterFinally.assigned]),
-      possiblyAssigned: new Set([...afterTryAndCatches.possiblyAssigned, ...afterFinally.possiblyAssigned]),
-    };
+    for (const [index, [breakCount, continueCount]] of jumpCounts.entries()) {
+      const target = this.targets[index];
+      for (const [jumps, count] of [
+        [target.breaks, breakCount],
+        [target.continues, continueCount],
+      ] as const) {
+        for (let jump = count; jump < jumps.length; jump++) jumps[jump] = throughFinally(jumps[jump], afterFinally);
+      }
+    }
+    return throughFinally(afterTryAndCatches, afterFinally);
   }
 
   private condition(expression: Expression, state: State): Conditional {
@@ -473,6 +480,15 @@ export function assignedNames(node: Statement | Expression): string[] {
 function assign(state: State, id: number): State {
   if (!state.assigned) return state;
   return { assigned: new Set([...state.assigned, id]), possiblyAssigned: new Set([...state.possiblyAssigned, id]) };
+}
+
+/** The state after a finally block that `state` entered, which keeps the assignments made before it. */
+function throughFinally(state: State, afterFinally: State): State {
+  if (!state.assigned || !afterFinally.assigned) return UNREACHABLE;
+  return {
+    assigned: new Set([...state.assigned, ...afterFinally.assigned]),
+    possiblyAssigned: new Set([...state.possiblyAssigned, ...afterFinally.possiblyAssigned]),
+  };
 }
 
 function join(...states: State[]): State {
