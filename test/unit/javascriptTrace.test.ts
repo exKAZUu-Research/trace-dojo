@@ -434,10 +434,37 @@ test.each([
     1,
   ],
   [
+    'a value a stepped return statement returns',
+    'function make() {\n  return new Turtle(); // step\n}\nconst t = make();',
+    1,
+  ],
+  [
+    'an earlier spread element',
+    'function check() {\n  const ready = true; // step\n  return 0;\n}\nconst a = [...[new Turtle()], check()];',
+    1,
+  ],
+  [
     'the results of map so far',
     'const turtles = [1, 2].map((n) => {\n  const t = new Turtle(n, 0);\n  const ready = true; // step\n  return t;\n});\nturtles[0].forward();',
     2,
   ],
 ])('a step keeps the turtles that %s holds', (_, program, count) => {
   expect(traceProgram('javascript', program, program).finalTurtles).toHaveLength(count);
+});
+
+test('a var declared without a value appears once its declaration runs', () => {
+  const program = `const before = 1; // step
+var later;
+const after = 2; // step`;
+  expect(
+    traceProgram('javascript', program, program).traceItems.map(({ vars, referenceVars }) => ({
+      ...vars,
+      ...referenceVars,
+    }))
+  ).toEqual([
+    {},
+    { before: 1 },
+    // oxlint-disable-next-line unicorn/no-null -- The trace format shows undefined as null.
+    { before: 1, later: { kind: 'value', value: null }, after: 2 },
+  ]);
 });

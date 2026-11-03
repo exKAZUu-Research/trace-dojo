@@ -11,9 +11,11 @@ import {
   JsArray,
   JsFunction,
   JsObject,
+  privateNameOf,
   type Scope,
   UNINITIALIZED,
   type Value,
+  valueOfElement,
 } from './values';
 
 // code-gauge-allow duplicateLines 21 -- Each language wires its own runtime into the shared TraceRecorder alike.
@@ -63,7 +65,8 @@ class Snapshotter {
     ) {
       const entries: [string, Value][] = [];
       for (const [name, binding] of current.bindings) {
-        if (!seen.has(name) && isVariable(binding)) entries.push([name, binding.value as Value]);
+        if (!seen.has(name) && !name.startsWith('#') && isVariable(binding))
+          entries.push([name, binding.value as Value]);
         seen.add(name);
       }
       (functions.at(-1) as [string, Value][][]).unshift(entries);
@@ -106,7 +109,7 @@ function scalarOf(value: Value, seen: Set<JsArray>): Scalar | typeof NOT_SCALAR 
   if (!(value instanceof JsArray) || seen.has(value)) return NOT_SCALAR;
   seen.add(value);
   const items: Scalar[] = [];
-  for (const element of value.elements) {
+  for (const element of value.elements.map(valueOfElement)) {
     if (element === undefined || element === null) {
       // oxlint-disable-next-line unicorn/no-null -- The trace format shows null and undefined as null.
       items.push(null);
@@ -138,7 +141,9 @@ function displayNodeOf(value: Value, seen: Set<JsObject>): DisplayNode | undefin
   }
   seen.add(value);
   const entries: Record<string, DisplayNode> = {};
-  for (const [key, item] of value instanceof JsArray ? value.elements.entries() : displayedEntries(value)) {
+  for (const [key, item] of value instanceof JsArray
+    ? value.elements.map(valueOfElement).entries()
+    : displayedEntries(value)) {
     const node = displayNodeOf(item, seen);
     if (node) entries[key] = node;
     else if (value instanceof JsArray) entries[key] = NULL_NODE;
@@ -158,7 +163,8 @@ function displayedEntries(object: JsObject): [string, Value][] {
       entries.push([key, property.value]);
   }
   for (const [key, property] of object.privateMembers ?? []) {
-    if (!isAccessor(property) && !(property.value instanceof JsFunction)) entries.push([key, property.value]);
+    if (!isAccessor(property) && !(property.value instanceof JsFunction))
+      entries.push([privateNameOf(key), property.value]);
   }
   return entries;
 }

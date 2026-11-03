@@ -1,5 +1,5 @@
 import type { Runtime } from './runtime';
-import { isAccessor, JsArray, JsFunction, JsObject, type Value } from './values';
+import { HOLE, isAccessor, JsArray, JsFunction, JsObject, type Value } from './values';
 
 const MAX_DEPTH = 2;
 
@@ -33,7 +33,9 @@ function functionText(runtime: Runtime, fn: JsFunction): string {
 }
 
 function arrayItems(runtime: Runtime, array: JsArray, depth: number, seen: Set<JsObject>): string[] {
-  return array.elements.map((element) => inspect(runtime, element, depth + 1, seen));
+  return array.elements.map((element) =>
+    element === HOLE ? '<1 empty item>' : inspect(runtime, element, depth + 1, seen)
+  );
 }
 
 function objectEntries(runtime: Runtime, object: JsObject, depth: number, seen: Set<JsObject>): string[] {

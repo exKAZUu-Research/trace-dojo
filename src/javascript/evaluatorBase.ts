@@ -120,6 +120,24 @@ export abstract class EvaluatorBase {
     binding.isHoisted = false;
   }
 
+  /** Shows a hoisted `var` once its declaration runs, keeping the value it has. */
+  revealVar(name: string): void {
+    const binding = this.runtime.frame.scope.lookup(name);
+    if (binding) binding.isHoisted = false;
+  }
+
+  /**
+   * The identity of a private name, which the innermost enclosing class declaring it created, so that a subclass may
+   * declare the same name for a member of its own.
+   */
+  privateKey(name: string): string {
+    const key = this.runtime.frame.scope.lookup(name)?.value;
+    if (typeof key !== 'string') {
+      return this.runtime.throwError('SyntaxError', `Private field '${name}' must be declared in an enclosing class`);
+    }
+    return key;
+  }
+
   // References --------------------------------------------------------------------------------------------------------
 
   /** Evaluates the parts of an assignment target before its value, as JavaScript does. */
@@ -136,14 +154,15 @@ export abstract class EvaluatorBase {
     }
     const base = this.evaluate(member.object);
     return this.runtime.hold(base, (): Reference => {
-      if (member.property.kind === 'private') return { kind: 'private', base, name: member.property.name };
+      if (member.property.kind === 'private')
+        return { kind: 'private', base, name: this.privateKey(member.property.name) };
       return { kind: 'property', base, key: this.propertyKey(member.property) };
     });
   }
 
   propertyKey(name: PropertyName): string {
     if (name.kind === 'key') return name.key;
-    if (name.kind === 'private') return name.name;
+    if (name.kind === 'private') return this.privateKey(name.name);
     return this.runtime.toPropertyKey(this.evaluate(name.expression));
   }
 

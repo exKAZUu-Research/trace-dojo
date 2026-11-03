@@ -27,7 +27,7 @@ export function isAccessor(property: Property): property is AccessorProperty {
 
 export class JsObject {
   readonly properties = new Map<string, Property>();
-  /** `#name` fields, methods, and accessors, shared by every class that declares the same name. */
+  /** `#name` fields, methods, and accessors, keyed by the identity of the class's private name. */
   privateMembers?: Map<string, Property>;
   extensible = true;
   /** Set by the builtin Turtle constructor. */
@@ -38,11 +38,18 @@ export class JsObject {
   constructor(public proto: JsObject | null) {}
 }
 
-/** Arrays keep their elements densely; a hole reads as `undefined`. */
+/** An array index without an element, which reads as `undefined` but which most array methods skip. */
+export const HOLE = Symbol('hole');
+export type Element = Value | typeof HOLE;
+
+export function valueOfElement(element: Element): Value {
+  return element === HOLE ? undefined : element;
+}
+
 export class JsArray extends JsObject {
   constructor(
     proto: JsObject | null,
-    readonly elements: Value[]
+    readonly elements: Element[]
   ) {
     super(proto);
   }
@@ -172,6 +179,11 @@ export function isCallable(value: Value): value is JsFunction {
  */
 export function appendAll<T>(target: T[], items: readonly T[]): void {
   for (const item of items) target.push(item);
+}
+
+/** The `#name` a private key was made from, which each class evaluation makes unique. */
+export function privateNameOf(key: string): string {
+  return key.split('\0')[0];
 }
 
 /** Whether a property key is an array index. */

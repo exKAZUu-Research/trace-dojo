@@ -17,6 +17,8 @@ import {
   type Value,
 } from './values';
 
+let nextPrivateId = 0;
+
 type Completion = undefined | { kind: 'break' | 'continue'; label?: string } | { kind: 'return'; value: Value };
 type UserBehavior = Extract<FunctionBehavior, { kind: 'user' }>;
 type ClassBehavior = Extract<FunctionBehavior, { kind: 'class' }>;
@@ -68,7 +70,7 @@ export class Evaluator extends ExpressionEvaluator {
       }
       case 'return': {
         const value = statement.value ? this.evaluate(statement.value) : undefined;
-        this.step(statement.stepId);
+        runtime.hold(value, () => this.step(statement.stepId));
         return { kind: 'return', value };
       }
       case 'if': {
@@ -121,8 +123,9 @@ export class Evaluator extends ExpressionEvaluator {
   private declaration(declaration: VariableDeclaration): void {
     for (const { target, init } of declaration.declarators) {
       if (init === undefined) {
-        // `var x;` keeps the value x has, while `let x;` initializes it.
+        // `var x;` keeps the value x has, while `let x;` initializes it; either shows x from now on.
         if (declaration.declarationKind !== 'var') this.bindPattern(target, undefined, 'initialize');
+        else if (target.kind === 'identifier') this.revealVar(target.name);
         continue;
       }
       this.bindPattern(target, this.evaluate(init), 'initialize');
@@ -345,6 +348,13 @@ export class Evaluator extends ExpressionEvaluator {
     const { prototypeParent, constructorParent } = this.classParents(cls);
     const classScope = new Scope(runtime.frame.scope);
     if (cls.name) classScope.bindings.set(cls.name, { value: UNINITIALIZED, isMutable: false });
+    for (const member of cls.members) {
+      const { key } = member;
+      // Private names live in the class scope, where `#` keeps them apart from variables.
+      if (key.kind === 'private' && !classScope.bindings.has(key.name)) {
+        classScope.bindings.set(key.name, { value: `${key.name}\0${nextPrivateId++}`, isMutable: false });
+      }
+    }
     const prototype = runtime.newObject(prototypeParent);
     const behavior: ClassBehavior = {
       kind: 'class',

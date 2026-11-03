@@ -8,6 +8,8 @@ import {
   appendAll,
   arrayIndexOf,
   type DataProperty,
+  type Element,
+  HOLE,
   isAccessor,
   isCallable,
   isObject,
@@ -16,9 +18,11 @@ import {
   JsObject,
   JsThrow,
   type NativeFunction,
+  privateNameOf,
   type Property,
   type Scope,
   type Value,
+  valueOfElement,
 } from './values';
 
 export class Frame {
@@ -82,7 +86,7 @@ export class Runtime {
     return new JsObject(proto);
   }
 
-  newArray(elements: Value[]): JsArray {
+  newArray(elements: Element[]): JsArray {
     this.allocate(elements.length + 1);
     return new JsArray(this.realm.arrayPrototype, elements);
   }
@@ -111,9 +115,8 @@ export class Runtime {
         return { value: object.elements.length, writable: true, enumerable: false, configurable: false };
       const index = arrayIndexOf(key);
       if (index !== undefined) {
-        return index < object.elements.length
-          ? { value: object.elements[index], writable: true, enumerable: true, configurable: true }
-          : undefined;
+        const element = index < object.elements.length ? object.elements[index] : HOLE;
+        return element === HOLE ? undefined : { value: element, writable: true, enumerable: true, configurable: true };
       }
     }
     return object.properties.get(key);
@@ -204,8 +207,7 @@ export class Runtime {
   private grow(array: JsArray, length: number): void {
     const { elements } = array;
     this.allocate(length - elements.length);
-    // Holes read as undefined, so the array stays dense.
-    while (elements.length < length) elements.push(undefined);
+    while (elements.length < length) elements.push(HOLE);
   }
 
   defineProperty(object: JsObject, key: string, property: Property): void {
@@ -228,8 +230,7 @@ export class Runtime {
     if (!(target instanceof JsObject)) return true;
     if (target instanceof JsArray) {
       const index = arrayIndexOf(key);
-      // Deleting an element leaves a hole, which reads as undefined in a dense array.
-      if (index !== undefined && index < target.elements.length) target.elements[index] = undefined;
+      if (index !== undefined && index < target.elements.length) target.elements[index] = HOLE;
       if (index !== undefined) return true;
     }
     const property = this.getOwnProperty(target, key);
@@ -249,7 +250,7 @@ export class Runtime {
     const keys: string[] = [];
     if (object instanceof JsArray) {
       this.scan(object.elements.length);
-      for (let index = 0; index < object.elements.length; index++) keys.push(String(index));
+      for (const [index, element] of object.elements.entries()) if (element !== HOLE) keys.push(String(index));
     }
     const integers: number[] = [];
     const others: string[] = [];
@@ -273,25 +274,25 @@ export class Runtime {
   getPrivate(target: Value, name: string): Value {
     const property = this.privateProperty(target, name);
     if (!isAccessor(property)) return property.value;
-    if (!property.get) this.throwError('TypeError', `'${name}' was defined without a getter`);
+    if (!property.get) this.throwError('TypeError', `'${privateNameOf(name)}' was defined without a getter`);
     return this.call(property.get, target, []);
   }
 
   setPrivate(target: Value, name: string, value: Value): void {
     const property = this.privateProperty(target, name);
     if (isAccessor(property)) {
-      if (!property.set) this.throwError('TypeError', `'${name}' was defined without a setter`);
+      if (!property.set) this.throwError('TypeError', `'${privateNameOf(name)}' was defined without a setter`);
       this.call(property.set, target, [value]);
       return;
     }
-    if (!property.writable) this.throwError('TypeError', `Private method '${name}' is not writable`);
+    if (!property.writable) this.throwError('TypeError', `Private method '${privateNameOf(name)}' is not writable`);
     property.value = value;
   }
 
   definePrivate(target: JsObject, name: string, property: Property): void {
     target.privateMembers ??= new Map();
     if (target.privateMembers.has(name)) {
-      this.throwError('TypeError', `Cannot initialize ${name} twice on the same object`);
+      this.throwError('TypeError', `Cannot initialize ${privateNameOf(name)} twice on the same object`);
     }
     this.allocate(1);
     target.privateMembers.set(name, property);
@@ -300,7 +301,10 @@ export class Runtime {
   private privateProperty(target: Value, name: string): DataProperty | AccessorProperty {
     const property = target instanceof JsObject ? target.privateMembers?.get(name) : undefined;
     if (!property) {
-      this.throwError('TypeError', `Cannot read private member ${name} from an object whose class did not declare it`);
+      this.throwError(
+        'TypeError',
+        `Cannot read private member ${privateNameOf(name)} from an object whose class did not declare it`
+      );
     }
     return property;
   }
@@ -434,7 +438,9 @@ export class Runtime {
 
   /** The values `for...of`, spread, and array destructuring read: those of arrays and the characters of strings. */
   iterate(value: Value): Value[] {
-    if (value instanceof JsArray) return value.elements;
+    // An array without holes is read live, so a loop visits the elements added while it runs, as JavaScript does.
+    if (value instanceof JsArray)
+      return value.elements.includes(HOLE) ? value.elements.map(valueOfElement) : (value.elements as Value[]);
     if (typeof value === 'string') {
       this.scan(value.length);
       // oxlint-disable-next-line typescript/no-misused-spread -- JavaScript iterates strings by code point.
@@ -484,7 +490,9 @@ function ownElement(value: Value, key: string): Value | typeof MISSING {
   } else if (value instanceof JsArray) {
     if (key === 'length') return value.elements.length;
     const index = arrayIndexOf(key);
-    if (index !== undefined && index < value.elements.length) return value.elements[index];
+    if (index !== undefined && index < value.elements.length && value.elements[index] !== HOLE) {
+      return value.elements[index] as Value;
+    }
   }
   return MISSING;
 }

@@ -121,7 +121,7 @@ function defineFunction(builder: RealmBuilder): void {
     if (list !== undefined && list !== null && !(list instanceof JsArray)) {
       runtime.throwError('TypeError', 'The second argument of apply must be an array');
     }
-    return runtime.call(thisValue, args[0], list instanceof JsArray ? [...list.elements] : [], callRow);
+    return runtime.call(thisValue, args[0], list instanceof JsArray ? [...runtime.iterate(list)] : [], callRow);
   });
   builder.method(functionPrototype, 'bind', 1, ({ runtime, thisValue, args }) => {
     const target = thisValue;

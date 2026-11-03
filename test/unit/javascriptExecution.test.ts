@@ -139,6 +139,16 @@ test.each([
 test.each([
   ["'ab'.replaceAll('', '-')", '-a-b-'],
   ['String(new (class { constructor() { return 1; } })() instanceof Object)', 'true'],
+  [
+    '(() => { const a = [1, 2, 3]; delete a[0]; let n = 0; a.forEach(() => n++); return String([n, a.length, 0 in a]); })()',
+    '2,3,false',
+  ],
+  ['String(new Array(3).map((_, i) => i).length + Object.keys([1, , 3]).length)', '5'],
+  ['String((() => { const xs = [1, 2]; return xs.find((x, i) => { xs[i] = 9; return true; }); })())', '1'],
+  [
+    'String((() => { class A { #x = 1; get() { return this.#x; } } class B extends A { #x = 2; }; return new B().get(); })())',
+    '1',
+  ],
 ])('%s evaluates as JavaScript does', (expression, expected) => {
   const execution = executeProgram(
     'javascript',

@@ -3,6 +3,8 @@ import { EvaluatorBase, nameFunction, type Reference, referenceBase, SHORT_CIRCU
 import {
   type AccessorProperty,
   appendAll,
+  type Element,
+  HOLE,
   isAccessor,
   isCallable,
   isObject,
@@ -110,20 +112,26 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     return text;
   }
 
-  /** Evaluates elements and arguments in order, holding the values so far for garbage collection. */
-  evaluateArguments(args: (Argument | undefined)[]): Value[] {
+  evaluateArguments(args: Argument[]): Value[] {
+    // Arguments have no elisions, which are the only source of holes.
+    return this.evaluateElements(args) as Value[];
+  }
+
+  /** Evaluates elements in order, holding the values so far for garbage collection; an elision leaves a hole. */
+  private evaluateElements(args: (Argument | undefined)[]): Element[] {
     const { runtime } = this;
-    const values: Value[] = [];
+    const values: Element[] = [];
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
     try {
       for (const argument of args) {
         if (argument === undefined) {
-          values.push(undefined);
+          values.push(HOLE);
         } else if (argument.kind === 'spread') {
           const spread = runtime.iterate(this.evaluate(argument.argument));
           runtime.allocate(spread.length);
-          for (const value of spread) values.push(value);
+          appendAll(values, spread);
+          appendAll(temporaries, spread);
         } else {
           const value = this.evaluate(argument);
           values.push(value);
@@ -137,7 +145,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
   }
 
   private arrayLiteral(elements: (Argument | undefined)[]): JsArray {
-    return this.runtime.newArray(this.evaluateArguments(elements));
+    return this.runtime.newArray(this.evaluateElements(elements));
   }
 
   private objectLiteral(members: ObjectMember[]): JsObject {
@@ -198,7 +206,8 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     if (base === SHORT_CIRCUIT) return SHORT_CIRCUIT;
     if (expression.optional && (base === undefined || base === null)) return SHORT_CIRCUIT;
     return runtime.hold(base, () => {
-      if (expression.property.kind === 'private') return runtime.getPrivate(base, expression.property.name);
+      if (expression.property.kind === 'private')
+        return runtime.getPrivate(base, this.privateKey(expression.property.name));
       return runtime.get(base, this.propertyKey(expression.property));
     });
   }
@@ -246,7 +255,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     if (base === SHORT_CIRCUIT || (target.optional && (base === undefined || base === null))) return SHORT_CIRCUIT;
     return this.runtime.hold(base, (): Reference =>
       target.property.kind === 'private'
-        ? { kind: 'private', base, name: target.property.name }
+        ? { kind: 'private', base, name: this.privateKey(target.property.name) }
         : { kind: 'property', base, key: this.propertyKey(target.property) }
     );
   }
