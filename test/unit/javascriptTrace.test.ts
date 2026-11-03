@@ -444,6 +444,16 @@ test.each([
     1,
   ],
   [
+    'Object.values so far',
+    'const observer = new Turtle(0, 0);\nconst values = Object.values({\n  get first() {\n    return new Turtle(0, 1);\n  },\n  get second() {\n    const ready = true; // step\n    return 0;\n  },\n});',
+    2,
+  ],
+  [
+    'an object rest so far',
+    'const { skip, ...rest } = {\n  get first() {\n    return new Turtle(0, 1);\n  },\n  get second() {\n    const ready = true; // step\n    return 0;\n  },\n};',
+    1,
+  ],
+  [
     'the results of map so far',
     'const turtles = [1, 2].map((n) => {\n  const t = new Turtle(n, 0);\n  const ready = true; // step\n  return t;\n});\nturtles[0].forward();',
     2,

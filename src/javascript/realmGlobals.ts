@@ -65,15 +65,12 @@ function defineObjectStatics(builder: RealmBuilder, objectConstructor: JsFunctio
   builder.method(objectConstructor, 'keys', 1, ({ runtime, args }) =>
     runtime.newArray(runtime.ownEnumerableKeys(runtime.toObject(args[0])))
   );
-  builder.method(objectConstructor, 'values', 1, ({ runtime, args }) => {
-    const object = runtime.toObject(args[0]);
-    return runtime.newArray(runtime.ownEnumerableKeys(object).map((key) => runtime.get(object, key)));
-  });
-  builder.method(objectConstructor, 'entries', 1, ({ runtime, args }) => {
-    const object = runtime.toObject(args[0]);
-    const keys = runtime.ownEnumerableKeys(object);
-    return runtime.newArray(keys.map((key) => runtime.newArray([key, runtime.get(object, key)])));
-  });
+  builder.method(objectConstructor, 'values', 1, ({ runtime, args }) =>
+    collectProperties(runtime, args[0], (key, value) => value)
+  );
+  builder.method(objectConstructor, 'entries', 1, ({ runtime, args }) =>
+    collectProperties(runtime, args[0], (key, value) => runtime.newArray([key, value]))
+  );
   builder.method(objectConstructor, 'assign', 2, ({ runtime, args }) => {
     const target = runtime.toObject(args[0]);
     for (const source of args.slice(1)) {
@@ -105,6 +102,23 @@ function defineObjectStatics(builder: RealmBuilder, objectConstructor: JsFunctio
 }
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Lists the builtin methods, each a small closure of its own.
+/**
+ * Collects a value for each own enumerable property into an array held while getters run, so the turtles collected so
+ * far stay reachable.
+ */
+function collectProperties(runtime: Runtime, value: Value, entry: (key: string, value: Value) => Value): JsArray {
+  const object = runtime.toObject(value);
+  const result = runtime.newArray([]);
+  return runtime.hold(result, () => {
+    for (const key of runtime.ownEnumerableKeys(object)) {
+      const property = runtime.get(object, key);
+      runtime.allocate(1);
+      result.elements.push(runtime.hold(property, () => entry(key, property)));
+    }
+    return result;
+  });
+}
+
 function defineFunction(builder: RealmBuilder): void {
   const { functionPrototype } = builder.realm;
   builder.defineClass(

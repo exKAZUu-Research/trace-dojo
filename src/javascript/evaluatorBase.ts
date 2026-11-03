@@ -279,10 +279,13 @@ export abstract class EvaluatorBase {
     const { runtime } = this;
     const rest = runtime.newObject();
     if (!isObject(value)) return rest;
-    for (const key of runtime.ownEnumerableKeys(value)) {
-      if (!used.has(key)) runtime.createDataProperty(rest, key, runtime.get(value, key));
-    }
-    return rest;
+    // Held while getters run, so the turtles copied so far stay reachable.
+    return runtime.hold(rest, () => {
+      for (const key of runtime.ownEnumerableKeys(value)) {
+        if (!used.has(key)) runtime.createDataProperty(rest, key, runtime.get(value, key));
+      }
+      return rest;
+    });
   }
 }
 
