@@ -2,7 +2,7 @@
 
 Define Java templates in `src/problems/fillInBlank/definitions.ts` or `challengeDefinitions.ts`, following [穴埋め問題の作問手順](#穴埋め問題の作問手順): the template carries `@[model answer]@` markers, and an ID and seed reproduce the complete generated problem.
 
-Register the name in `problemIdToName` and add the ID explicitly to `courseIdToLectureIndexToProblemIds` for ordinary lectures. Challenge mode draws its problems from `courseIdToLectureIndexToExerciseProblemIds` for the fill-in-the-blank and bug-fix challenges; outside the curriculum courses (for example `test`), the regular challenge draws from the problems without blanks in the lecture's `courseIdToLectureIndexToProblemIds` entry.
+Register the name in `legacyProblemIdToName` and add the ID explicitly to `courseIdToLectureIndexToProblemIds` for ordinary lectures. Challenge mode draws its problems from `courseIdToLectureIndexToExerciseProblemIds` for the fill-in-the-blank and bug-fix challenges; outside the curriculum courses (for example `test`), the regular challenge draws from the problems without blanks in the lecture's `courseIdToLectureIndexToProblemIds` entry.
 
 Challenge sessions persist the problem ID and seed. Displays and grading regenerate from the current definition, so editing a definition also changes an active session when it is next loaded. Challenge submissions stay in `ExerciseSession` and `ExerciseSubmission` and do not affect ordinary progress or grades.
 
@@ -16,7 +16,7 @@ After editing the bank, run `bun run gen-code` to regenerate `src/problems/chall
 
 問題はJavaプログラムだけで定義する。ステップ実行のトレースは、`src/java/` のインタプリタがJavaプログラムを実際に実行して生成する。
 
-1. `problemIdToName` に問題IDと問題名を追加する。例: `test9: 'テスト問題(9)'`
+1. `legacyProblemIdToName` に問題IDと問題名を追加する。例: `test9: 'テスト問題(9)'`
 2. `courseIdToLectureIndexToProblemIds` に問題IDを追加する。
 3. `problemIdToProgram` に問題のJavaプログラムを追加する。`.trim()`は不要。`<1-4>` と書いた箇所は、問題ごとに1以上4未満（1から3）の乱数に置き換わる。上限は含まれない。
 4. ステップ実行で止めたい文の行末に `// step` を付ける。関数呼び出しの中に入りたい場合（ステップインしたい場合）は、呼び出しの行末に `// caller` を付ける。例:
