@@ -19,6 +19,11 @@ export function extractBlanks(program: string): ExtractedBlanks {
   return { programWithPlaceholders, answers };
 }
 
+/** Removes the blank markers, leaving the model answers in place. */
+export function removeBlankMarkers(program: string): string {
+  return program.replaceAll(blankRegex, '$1');
+}
+
 export function fillBlanks(program: string, answers: readonly string[]): string {
   let index = 0;
   return program.replaceAll(blankRegex, () => answers[index++] ?? '');

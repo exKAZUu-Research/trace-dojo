@@ -21,18 +21,6 @@ export const lecture6: ChallengeBase[] = [
         t.前に進む(); // step
     }
 }`,
-    instrumented: `s.set('sum', 0);
-for (s.set('i', 1); s.get('i') < 5; s.set('i', s.get('i') + 1)) {
- s.set('sum', s.get('sum') + (s.get('i')));
- if (s.get('sum') >= 3) {
-  break;
- }
-}
-delete s.vars['i'];
-const t = new Turtle(s.get('sum'), 1); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnLeft();
-t.forward();`,
     blanks: [
       {
         id: 'Condition4',
@@ -90,17 +78,6 @@ t.forward();`,
         t.左を向く(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(2, 1); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
- if (s.get('i') == 2) {
-  break;
- }
- t.forward();
-}
-delete s.vars['i'];
-t.turnRight();
-t.forward();
-t.turnLeft();`,
     blanks: [
       {
         id: 'Condition2',
@@ -158,17 +135,6 @@ t.turnLeft();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(2, 1); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
- t.forward();
- if (s.get('i') == 1) {
-  break;
- }
-}
-delete s.vars['i'];
-t.backward();
-t.turnRight();
-t.forward();`,
     blanks: [
       {
         id: 'Condition2',
@@ -226,18 +192,6 @@ t.forward();`,
         }
     }
 }`,
-    instrumented: `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
- for (s.set('j', 0); s.get('j') < 3; s.set('j', s.get('j') + 1)) {
-  t.forward();
-  if (s.get('j') == s.get('i')) {
-   break;
-  }
- }
-delete s.vars['j'];
- t.turnRight();
-}
-delete s.vars['i'];`,
     blanks: [
       {
         id: 'Condition2',
@@ -296,18 +250,6 @@ delete s.vars['i'];`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `s.set('sum', 0);
-for (s.set('i', 1); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
- if (s.get('i') == 2) {
-  continue;
- }
- s.set('sum', s.get('sum') + (s.get('i')));
-}
-delete s.vars['i'];
-const t = new Turtle(s.get('sum'), 1); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnLeft();
-t.forward();`,
     blanks: [
       {
         id: 'Condition3',
@@ -366,17 +308,6 @@ t.forward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(2, 1); registerDisplayRef('t', () => t); // step
-s.set('remaining', 3);
-while (s.get('remaining') > 0) {
- s.set('remaining', s.get('remaining') - 1);
- if (s.get('remaining') == 1) {
-  continue;
- }
- t.forward();
-}
-t.turnRight();
-t.forward();`,
     blanks: [
       {
         id: 'Condition3',
@@ -436,19 +367,6 @@ t.forward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(2, 1); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < 5; s.set('i', s.get('i') + 1)) {
- if (s.get('i') == 1) {
-  continue;
- }
- if (s.get('i') == 3) {
-  break;
- }
- t.forward();
-}
-delete s.vars['i'];
-t.turnRight();
-t.forward();`,
     blanks: [
       {
         id: 'Condition2',
@@ -507,18 +425,6 @@ t.forward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(2, 4); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
- if (!t.canMoveForward()) {
-  t.turnRight();
-  break;
- }
- t.forward();
-}
-delete s.vars['i'];
-t.forward();
-t.turnRight();
-t.forward();`,
     blanks: [
       {
         id: 'Condition2',
@@ -576,18 +482,6 @@ t.forward();`,
         }
     }
 }`,
-    instrumented: `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
- for (s.set('j', 0); s.get('j') < 2; s.set('j', s.get('j') + 1)) {
-  if (s.get('j') == s.get('i')) {
-   continue;
-  }
-  t.forward();
- }
-delete s.vars['j'];
- t.turnRight();
-}
-delete s.vars['i'];`,
     blanks: [
       {
         id: 'Condition2',
@@ -650,22 +544,6 @@ delete s.vars['i'];`,
         }
     }
 }`,
-    instrumented: `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
- switch (s.get('i')) {
-  case 0:
-   t.turnRight();
-   break;
-  default:
-   t.forward();
-   break;
- }
- if (s.get('i') == 2) {
-  break;
- }
- t.turnLeft();
-}
-delete s.vars['i'];`,
     blanks: [
       {
         id: 'Condition2',

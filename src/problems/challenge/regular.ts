@@ -1,13 +1,13 @@
+import { traceJavaProgram } from '../../java/trace';
 import type { InstantiatedProblem } from '../instantiateProblem';
-import { traceProgram } from '../traceProgram';
-import { challengeRegularPrograms } from './regularPrograms';
+import { challengeBases } from './definitions';
 
 export const instantiateRegularChallenge = (problemId: string): InstantiatedProblem | undefined => {
-  const source = challengeRegularPrograms[problemId];
-  if (!source) return;
+  const base = challengeBases.find(({ id }) => id === problemId);
+  if (!base) return;
   return {
-    ...traceProgram(source.instrumented, source.java, 'java'),
+    ...traceJavaProgram(base.java, base.java),
     blankAnswers: [],
-    displayProgramTemplate: source.java,
+    displayProgramTemplate: base.java,
   };
 };

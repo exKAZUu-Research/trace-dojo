@@ -11,7 +11,7 @@ import { instantiateProblem } from '../../src/problems/instantiateProblem';
 test.each(Object.keys(fillInBlankProblemDefinitions))(
   'the untouched %s starter shows no local syntax hint for its placeholders',
   async (id) => {
-    const problem = instantiateProblem(id, 'java', 'starter-hints');
+    const problem = instantiateProblem(id, 'starter-hints');
     if (!problem) throw new Error(`Unknown problem: ${id}`);
     const view = new EditorView({
       parent: document.body,

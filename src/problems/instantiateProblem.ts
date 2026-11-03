@@ -1,24 +1,14 @@
 import { Random } from '../app/utils/random';
-import { extractBlanks } from './fillInBlank/blanks';
-import type { LanguageId } from './problemData';
+import { traceJavaProgram } from '../java/trace';
+import { extractBlanks, removeBlankMarkers } from './fillInBlank/blanks';
 import { getProblemProgram } from './problemData';
-import { type TraceItem, type TraceItemVariable, traceProgram, type TurtleTrace } from './traceProgram';
+import type { TraceItem, TraceItemVariable, TurtleTrace } from './trace';
 
 export interface InstantiatedProblem {
-  /**
-   * The language ID of the program.
-   */
-  languageId: LanguageId;
-
   /**
    * The program to be displayed to the user. Blanks of fill-in-the-blank problems are shown as placeholders.
    */
   displayProgram: string;
-
-  /**
-   * The program to be executable via `eval()`. For debugging.
-   */
-  executableCode: string;
 
   /**
    * The trace items of the program.
@@ -56,7 +46,7 @@ export interface InstantiatedProblem {
   blankAnswers: string[];
 
   /**
-   * The display-language program whose blanks are kept as `@[...]@` markers and whose random numbers are instantiated.
+   * The program whose blanks are kept as `@[...]@` markers and whose random numbers are instantiated.
    */
   displayProgramTemplate: string;
 }
@@ -64,35 +54,20 @@ export interface InstantiatedProblem {
 const randomNumberRegex = /<(\d+)-(\d+)>/g;
 
 export function isFillInBlankProblem(problemId: string): boolean {
-  const template = getProblemProgram(problemId);
-  return extractBlanks(template?.java ?? '').answers.length > 0;
+  return extractBlanks(getProblemProgram(problemId) ?? '').answers.length > 0;
 }
 
-export function instantiateProblem(
-  problemId: string,
-  languageId: LanguageId,
-  variableSeed: string
-): InstantiatedProblem | undefined {
+export function instantiateProblem(problemId: string, variableSeed: string): InstantiatedProblem | undefined {
   const template = getProblemProgram(problemId);
-  if (!template?.[languageId]) return;
+  if (!template) return;
 
   const random = new Random(variableSeed);
-  const generatedNumbers: number[] = [];
-  const instrumentedTemplate = template.instrumented.replaceAll(randomNumberRegex, (_, min, max) => {
-    const randomNumber = random.getInteger(Number(min), Number(max));
-    generatedNumbers.push(randomNumber);
-    return randomNumber.toString();
-  });
-
-  // Random placeholders must occur in the same order in both language definitions.
-  let index = 0;
-  const displayProgramTemplate = template[languageId].replaceAll(randomNumberRegex, () =>
-    generatedNumbers[index++].toString()
+  const displayProgramTemplate = template.replaceAll(randomNumberRegex, (_, min: string, max: string) =>
+    random.getInteger(Number(min), Number(max)).toString()
   );
   const displayBlanks = extractBlanks(displayProgramTemplate);
-  const problem = traceProgram(instrumentedTemplate, displayBlanks.programWithPlaceholders, languageId);
   return {
-    ...problem,
+    ...traceJavaProgram(removeBlankMarkers(displayProgramTemplate), displayBlanks.programWithPlaceholders),
     blankAnswers: displayBlanks.answers,
     displayProgramTemplate,
   };

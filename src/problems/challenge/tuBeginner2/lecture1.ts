@@ -7,8 +7,6 @@ export const lecture1: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 0,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Turtle first = new Turtle(2, 2); // step\n    Turtle alias = first; // step\n    Turtle other = new Turtle(4, 2, "R"); // step\n    first.前に進む(); // step\n    alias.右を向く(); // step\n    first.前に進む(); // step\n    other.左を向く(); // step\n    other.前に進む(); // step\n    alias.後に戻る(); // step\n    first.左を向く(); // step\n    alias.前に進む(); // step\n    other.後に戻る(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet first = new Turtle(2, 2); registerDisplayRef('first', () => first); // step\nlet alias = first; registerDisplayRef('alias', () => alias); // step\nlet other = new Turtle(4, 2, \"R\"); registerDisplayRef('other', () => other); // step\nfirst.前に進む(); // step\nalias.右を向く(); // step\nfirst.前に進む(); // step\nother.左を向く(); // step\nother.前に進む(); // step\nalias.後に戻る(); // step\nfirst.左を向く(); // step\nalias.前に進む(); // step\nother.後に戻る(); // step\n}\nmain();",
     blanks: [
       {
         id: 'Alias',
@@ -53,8 +51,6 @@ export const lecture1: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 0,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Turtle left = new Turtle(2, 2); // step\n    Turtle right = new Turtle(4, 2, "R"); // step\n    left.右を向く(); // step\n    right.左を向く(); // step\n    Turtle saved = left; // step\n    left = right; // step\n    right = saved; // step\n    left.前に進む(); // step\n    right.後に戻る(); // step\n    left.右を向く(); // step\n    right.左を向く(); // step\n    left.前に進む(); // step\n    right.前に進む(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet left = new Turtle(2, 2); registerDisplayRef('left', () => left); // step\nlet right = new Turtle(4, 2, \"R\"); registerDisplayRef('right', () => right); // step\nleft.右を向く(); // step\nright.左を向く(); // step\nlet saved = left; registerDisplayRef('saved', () => saved); // step\nleft = right; // step\nright = saved; // step\nleft.前に進む(); // step\nright.後に戻る(); // step\nleft.右を向く(); // step\nright.左を向く(); // step\nleft.前に進む(); // step\nright.前に進む(); // step\n}\nmain();",
     blanks: [
       {
         id: 'Saved',
@@ -99,8 +95,6 @@ export const lecture1: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 0,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Turtle a = new Turtle(2, 2); // step\n    Turtle b = new Turtle(4, 2, "B"); // step\n    Turtle[] pair = {a, b}; // step\n    Turtle selected = pair[1]; // step\n    selected.左を向く(); // step\n    pair[1].前に進む(); // step\n    pair[0].前に進む(); // step\n    selected.右を向く(); // step\n    pair[1].前に進む(); // step\n    a.右を向く(); // step\n    a.前に進む(); // step\n    b.後に戻る(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet a = new Turtle(2, 2); registerDisplayRef('a', () => a); // step\nlet b = new Turtle(4, 2, \"B\"); registerDisplayRef('b', () => b); // step\nlet pair = [a, b]; registerDisplayRef('pair', () => pair); // step\nlet selected = pair[1]; registerDisplayRef('selected', () => selected); // step\nselected.左を向く(); // step\npair[1].前に進む(); // step\npair[0].前に進む(); // step\nselected.右を向く(); // step\npair[1].前に進む(); // step\na.右を向く(); // step\na.前に進む(); // step\nb.後に戻る(); // step\n}\nmain();",
     blanks: [
       {
         id: 'Slot',
@@ -145,8 +139,6 @@ export const lecture1: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 0,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Turtle old = new Turtle(2, 2); // step\n    Turtle replacement = new Turtle(4, 2, "R"); // step\n    Turtle[] slots = {old, replacement}; // step\n    Turtle held = slots[0]; // step\n    slots[0] = replacement; // step\n    held.前に進む(); // step\n    slots[0].左を向く(); // step\n    slots[0].前に進む(); // step\n    held.右を向く(); // step\n    old.前に進む(); // step\n    replacement.右を向く(); // step\n    slots[1].前に進む(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet old = new Turtle(2, 2); registerDisplayRef('old', () => old); // step\nlet replacement = new Turtle(4, 2, \"R\"); registerDisplayRef('replacement', () => replacement); // step\nlet slots = [old, replacement]; registerDisplayRef('slots', () => slots); // step\nlet held = slots[0]; registerDisplayRef('held', () => held); // step\nslots[0] = replacement; // step\nheld.前に進む(); // step\nslots[0].左を向く(); // step\nslots[0].前に進む(); // step\nheld.右を向く(); // step\nold.前に進む(); // step\nreplacement.右を向く(); // step\nslots[1].前に進む(); // step\n}\nmain();",
     blanks: [
       {
         id: 'Held',
@@ -191,8 +183,6 @@ export const lecture1: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 0,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Turtle red = new Turtle(2, 2, "R"); // step\n    Turtle blue = new Turtle(4, 2, "B"); // step\n    Turtle active = red; // step\n    active.前に進む(); // step\n    active.右を向く(); // step\n    active = blue; // step\n    active.左を向く(); // step\n    active.前に進む(); // step\n    red.後に戻る(); // step\n    blue.右を向く(); // step\n    active.前に進む(); // step\n    red.左を向く(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet red = new Turtle(2, 2, \"R\"); registerDisplayRef('red', () => red); // step\nlet blue = new Turtle(4, 2, \"B\"); registerDisplayRef('blue', () => blue); // step\nlet active = red; registerDisplayRef('active', () => active); // step\nactive.前に進む(); // step\nactive.右を向く(); // step\nactive = blue; // step\nactive.左を向く(); // step\nactive.前に進む(); // step\nred.後に戻る(); // step\nblue.右を向く(); // step\nactive.前に進む(); // step\nred.左を向く(); // step\n}\nmain();",
     blanks: [
       {
         id: 'Initial',
@@ -237,8 +227,6 @@ export const lecture1: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 0,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Turtle walker = new Turtle(2, 2); // step\n    Turtle blocker = new Turtle(2, 3, "R"); // step\n    if (walker.前に進めるか()) {\n      walker.前に進む(); // step\n    }\n    blocker.右を向く(); // step\n    blocker.前に進む(); // step\n    if (walker.前に進めるか()) {\n      walker.前に進む(); // step\n    }\n    walker.左を向く(); // step\n    walker.前に進む(); // step\n    blocker.左を向く(); // step\n    blocker.前に進む(); // step\n    walker.右を向く(); // step\n    walker.前に進む(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet walker = new Turtle(2, 2); registerDisplayRef('walker', () => walker); // step\nlet blocker = new Turtle(2, 3, \"R\"); registerDisplayRef('blocker', () => blocker); // step\nif (walker.canMoveForward()) {\nwalker.前に進む(); // step\n}\nblocker.右を向く(); // step\nblocker.前に進む(); // step\nif (walker.canMoveForward()) {\nwalker.前に進む(); // step\n}\nwalker.左を向く(); // step\nwalker.前に進む(); // step\nblocker.左を向く(); // step\nblocker.前に進む(); // step\nwalker.右を向く(); // step\nwalker.前に進む(); // step\n}\nmain();",
     blanks: [
       {
         id: 'Gate',
@@ -287,8 +275,6 @@ export const lecture1: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 0,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Turtle shared = new Turtle(2, 2); // step\n    Turtle separate = new Turtle(4, 2, "R"); // step\n    Turtle[] turns = {shared, shared, separate}; // step\n    turns[0].右を向く(); // step\n    turns[1].右を向く(); // step\n    shared.前に進む(); // step\n    turns[2].左を向く(); // step\n    separate.前に進む(); // step\n    turns[0].左を向く(); // step\n    shared.前に進む(); // step\n    separate.右を向く(); // step\n    separate.前に進む(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet shared = new Turtle(2, 2); registerDisplayRef('shared', () => shared); // step\nlet separate = new Turtle(4, 2, \"R\"); registerDisplayRef('separate', () => separate); // step\nlet turns = [shared, shared, separate]; registerDisplayRef('turns', () => turns); // step\nturns[0].右を向く(); // step\nturns[1].右を向く(); // step\nshared.前に進む(); // step\nturns[2].左を向く(); // step\nseparate.前に進む(); // step\nturns[0].左を向く(); // step\nshared.前に進む(); // step\nseparate.右を向く(); // step\nseparate.前に進む(); // step\n}\nmain();",
     blanks: [
       {
         id: 'SharedEntry',
@@ -333,8 +319,6 @@ export const lecture1: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 0,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Turtle a = new Turtle(2, 2); // step\n    Turtle b = new Turtle(4, 2, "B"); // step\n    draw(a); // caller\n    b.左を向く(); // step\n    draw(b); // caller\n    a.後に戻る(); // step\n    b.右を向く(); // step\n    a.左を向く(); // step\n    a.前に進む(); // step\n  }\n  static void draw(Turtle t) {\n    t.前に進む(); // step\n    t.右を向く(); // step\n    t.前に進む(); // step\n  }\n}',
-    instrumented:
-      'function main() {\nlet a = new Turtle(2, 2); registerDisplayRef("a", () => a); // step\nlet b = new Turtle(4, 2, "B"); registerDisplayRef("b", () => b); // step\ncall(Corner.draw.bind(Corner), "t")(a);\nb.turnLeft();\ncall(Corner.draw.bind(Corner), "t")(b);\na.backward();\nb.turnRight();\na.turnLeft();\na.forward();\n}\nclass Corner {\nstatic draw(t) {\nt.forward();\nt.turnRight();\nt.forward();\n}\n}\nmain();',
     blanks: [
       {
         id: 'First',
@@ -379,8 +363,6 @@ export const lecture1: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 0,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Turtle current = new Turtle(2, 2); // step\n    Turtle original = current; // step\n    current.前に進む(); // step\n    current = new Turtle(4, 2, "R"); // step\n    current.左を向く(); // step\n    current.前に進む(); // step\n    original.右を向く(); // step\n    original.前に進む(); // step\n    current.右を向く(); // step\n    current.前に進む(); // step\n    original.左を向く(); // step\n    original.前に進む(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet current = new Turtle(2, 2); registerDisplayRef('current', () => current); // step\nlet original = current; registerDisplayRef('original', () => original); // step\ncurrent.前に進む(); // step\ncurrent = new Turtle(4, 2, \"R\"); // step\ncurrent.左を向く(); // step\ncurrent.前に進む(); // step\noriginal.右を向く(); // step\noriginal.前に進む(); // step\ncurrent.右を向く(); // step\ncurrent.前に進む(); // step\noriginal.左を向く(); // step\noriginal.前に進む(); // step\n}\nmain();",
     blanks: [
       {
         id: 'Keep',
@@ -425,8 +407,6 @@ export const lecture1: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 0,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Turtle a = new Turtle(2, 2); // step\n    Turtle b = new Turtle(4, 2, "B"); // step\n    shift(a, b); // caller\n    a.前に進む(); // step\n    b.後に戻る(); // step\n    a.右を向く(); // step\n    a.前に進む(); // step\n    b.左を向く(); // step\n    b.前に進む(); // step\n  }\n  static void shift(Turtle selected, Turtle other) {\n    selected.右を向く(); // step\n    selected = other; // step\n    selected.左を向く(); // step\n    selected.前に進む(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet a = new Turtle(2, 2); registerDisplayRef('a', () => a); // step\nlet b = new Turtle(4, 2, \"B\"); registerDisplayRef('b', () => b); // step\ncall(Relay.shift.bind(Relay), 'selected', 'other')(a, b); \na.前に進む(); // step\nb.後に戻る(); // step\na.右を向く(); // step\na.前に進む(); // step\nb.左を向く(); // step\nb.前に進む(); // step\n}\nclass Relay {\nstatic shift(selected, other) { registerDisplayRef('selected', () => selected);\nselected.右を向く(); // step\nselected = other; // step\nselected.左を向く(); // step\nselected.前に進む(); // step\n}\n}\nmain();",
     blanks: [
       {
         id: 'Arguments',

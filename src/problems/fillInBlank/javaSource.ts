@@ -17,14 +17,24 @@ export function maskJavaNonCode(source: string): string {
   return source.replaceAll(javaNonCodePattern, (literal) => literal.replaceAll(/[^\r\n]/g, ' '));
 }
 
+/** Matches the annotations a line comment ends with, which may follow an ordinary remark. */
+const traceAnnotationPattern =
+  /\/\/[ \t]*(?:step(?:[ \t]*:[ \t]*\d+)?|caller)(?:[ \t]*\/\/[ \t]*(?:step(?:[ \t]*:[ \t]*\d+)?|caller))*[ \t]*$/;
+
 export function stripJavaTraceAnnotations(source: string): string {
-  return source.replaceAll(javaNonCodePattern, (token) =>
-    /^\/\/[ \t]*(?:step(?:[ \t]*:[ \t]*\d+)?|caller)(?:[ \t]*\/\/[ \t]*(?:step(?:[ \t]*:[ \t]*\d+)?|caller))*[ \t]*$/.test(
-      token
-    )
-      ? ''
-      : token
-  );
+  return source.replaceAll(javaNonCodePattern, (token) => {
+    const annotation = token.startsWith('//') ? traceAnnotationPattern.exec(token) : undefined;
+    if (!annotation) return token;
+    return annotation.index === 0 ? '' : token.slice(0, annotation.index).trimEnd();
+  });
+}
+
+/** The `// step` and `// caller` annotations of a program, skipping look-alikes in literals and other comments. */
+export function findJavaTraceAnnotations(source: string): { index: number; text: string }[] {
+  return [...source.matchAll(javaNonCodePattern)].flatMap((match) => {
+    const annotation = match[0].startsWith('//') ? traceAnnotationPattern.exec(match[0]) : undefined;
+    return annotation ? [{ index: match.index + annotation.index, text: annotation[0] }] : [];
+  });
 }
 
 export function prepareJavaEntry(source: string): { className: string; source: string } {

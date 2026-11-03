@@ -35,7 +35,7 @@ import {
 } from '@/problems/fillInBlank/javaDraft';
 import { hasIncompleteJavaPlaceholders } from '@/problems/fillInBlank/javaSource';
 import type { CourseId, ProblemId } from '@/problems/problemData';
-import type { TurtleTrace } from '@/problems/traceProgram';
+import type { TurtleTrace } from '@/problems/trace';
 
 import { BoardViewer } from './BoardViewer';
 import { type EditorHistoryAvailability, JavaCodeEditor, type JavaCodeEditorHandle } from './JavaCodeEditor';

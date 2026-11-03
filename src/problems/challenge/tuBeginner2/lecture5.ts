@@ -7,8 +7,6 @@ export const lecture5: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 4,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Boost b = new Boost(); // caller\n    b.act(); // caller\n    b.boost(); // caller\n    b.act(); // caller\n    b.act(); // caller\n  }\n}\nclass Base {\n  protected Turtle t;\n  protected int count;\n  Base() {\n    this.t = new Turtle(2, 2); // step\n    this.count = 0; // step\n  }\n  void act() {\n    this.count++; // step\n    if (this.count > 2) {\n      this.t.右を向く(); // step\n    }\n    this.t.前に進む(); // step\n  }\n}\nclass Boost extends Base {\n  void boost() {\n    this.count += 2; // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet b = call(Boost)(); registerDisplayRef('b', () => b); \ncall(b.act.bind(b))(); \ncall(b.boost.bind(b))(); \ncall(b.act.bind(b))(); \ncall(b.act.bind(b))(); \n}\nclass Base {\nt = undefined;\ncount = 0;\nconstructor() {\nthis.t = new Turtle(2, 2); // step\nthis.count = 0; // step\n}\nact() {\nthis.count++; // step\nif (this.count > 2) {\nthis.t.右を向く(); // step\n}\nthis.t.前に進む(); // step\n}\n}\nclass Boost extends Base {\nboost() {\nthis.count += 2; // step\n}\n}\nmain();",
     blanks: [
       {
         id: 'Boost',
@@ -53,8 +51,6 @@ export const lecture5: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 4,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Base a = new Base(); // caller\n    Base b = new Reverse(); // caller\n    a.act(); // caller\n    b.act(); // caller\n    a.act(); // caller\n    b.act(); // caller\n  }\n}\nclass Base {\n  Turtle t;\n  Base() {\n    this.t = new Turtle(2, 2); // step\n  }\n  void act() {\n    this.t.右を向く(); // step\n    this.t.前に進む(); // step\n  }\n}\nclass Reverse extends Base {\n  void act() {\n    this.t.前に進む(); // step\n    this.t.右を向く(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet a = call(Base)(); registerDisplayRef('a', () => a); \nlet b = call(Reverse)(); registerDisplayRef('b', () => b); \ncall(a.act.bind(a))(); \ncall(b.act.bind(b))(); \ncall(a.act.bind(a))(); \ncall(b.act.bind(b))(); \n}\nclass Base {\nt = undefined;\nconstructor() {\nthis.t = new Turtle(2, 2); // step\n}\nact() {\nthis.t.右を向く(); // step\nthis.t.前に進む(); // step\n}\n}\nclass Reverse extends Base {\nact() {\nthis.t.前に進む(); // step\nthis.t.右を向く(); // step\n}\n}\nmain();",
     blanks: [
       {
         id: 'Dynamic',
@@ -99,8 +95,6 @@ export const lecture5: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 4,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Base a = new Returner(); // caller\n    a.act(); // caller\n    a.t.左を向く(); // step\n    a.act(); // caller\n    a.t.前に進む(); // step\n  }\n}\nclass Base {\n  Turtle t;\n  Base() {\n    this.t = new Turtle(2, 2); // step\n  }\n  void act() {\n    this.t.前に進む(); // step\n    this.t.右を向く(); // step\n    this.t.前に進む(); // step\n  }\n}\nclass Returner extends Base {\n  void act() {\n    super.act(); // caller\n    this.t.後に戻る(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet a = call(Returner)(); registerDisplayRef('a', () => a); \ncall(a.act.bind(a))(); \na.t.左を向く(); // step\ncall(a.act.bind(a))(); \na.t.前に進む(); // step\n}\nclass Base {\nt = undefined;\nconstructor() {\nthis.t = new Turtle(2, 2); // step\n}\nact() {\nthis.t.前に進む(); // step\nthis.t.右を向く(); // step\nthis.t.前に進む(); // step\n}\n}\nclass Returner extends Base {\nact() {\ncall(super.act.bind(this))(); \nthis.t.後に戻る(); // step\n}\n}\nmain();",
     blanks: [
       {
         id: 'Dispatch',
@@ -145,8 +139,6 @@ export const lecture5: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 4,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Shifted a = new Shifted(1); // caller\n    a.act(); // caller\n    a.act(); // caller\n    a.t.左を向く(); // step\n    a.act(); // caller\n  }\n}\nclass Base {\n  Turtle t;\n  int mode;\n  Base(int value) {\n    this.t = new Turtle(2, 2); // step\n    this.mode = value; // step\n  }\n  void act() {\n    if (this.mode == 2) {\n      this.t.右を向く(); // step\n    }\n    this.t.前に進む(); // step\n    this.mode--; // step\n  }\n}\nclass Shifted extends Base {\n  Shifted(int value) {\n    super(value + 1); // caller\n    this.mode++; // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet a = call(Shifted, 'value')(1); registerDisplayRef('a', () => a); \ncall(a.act.bind(a))(); \ncall(a.act.bind(a))(); \na.t.左を向く(); // step\ncall(a.act.bind(a))(); \n}\nclass Base {\nt = undefined;\nmode = 0;\nconstructor(value) {\nthis.t = new Turtle(2, 2); // step\nthis.mode = value; // step\n}\nact() {\nif (this.mode == 2) {\nthis.t.右を向く(); // step\n}\nthis.t.前に進む(); // step\nthis.mode--; // step\n}\n}\nclass Shifted extends Base {\nconstructor(value) {\ncall((value) => super(value), 'value')(value + 1);\nthis.mode++; // step\n}\n}\nmain();",
     blanks: [
       {
         id: 'SuperArgument',
@@ -191,8 +183,6 @@ export const lecture5: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 4,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Base a = new Alternating(); // caller\n    a.pair(); // caller\n    a.pair(); // caller\n  }\n}\nclass Base {\n  Turtle t;\n  int count;\n  Base() {\n    this.t = new Turtle(2, 2); // step\n    this.count = 0; // step\n  }\n  void unit() {\n    this.t.前に進む(); // step\n  }\n  void pair() {\n    this.unit(); // caller\n    this.unit(); // caller\n  }\n}\nclass Alternating extends Base {\n  void unit() {\n    this.count++; // step\n    if (this.count % 2 == 0) {\n      this.t.右を向く(); // step\n    }\n    this.t.前に進む(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet a = call(Alternating)(); registerDisplayRef('a', () => a); \ncall(a.pair.bind(a))(); \ncall(a.pair.bind(a))(); \n}\nclass Base {\nt = undefined;\ncount = 0;\nconstructor() {\nthis.t = new Turtle(2, 2); // step\nthis.count = 0; // step\n}\nunit() {\nthis.t.前に進む(); // step\n}\npair() {\ncall(this.unit.bind(this))(); \ncall(this.unit.bind(this))(); \n}\n}\nclass Alternating extends Base {\nunit() {\nthis.count++; // step\nif (this.count % 2 == 0) {\nthis.t.右を向く(); // step\n}\nthis.t.前に進む(); // step\n}\n}\nmain();",
     blanks: [
       {
         id: 'Dispatch',
@@ -237,8 +227,6 @@ export const lecture5: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 4,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Left a = new Left(); // caller\n    Right b = new Right(); // caller\n    Base selected = a; // step\n    selected.act(); // caller\n    selected = b; // step\n    selected.act(); // caller\n    selected = a; // step\n    selected.act(); // caller\n    b.act(); // caller\n  }\n}\nclass Base {\n  Turtle t;\n  Base() {\n    this.t = new Turtle(2, 2); // step\n  }\n  void act() {\n    this.t.前に進む(); // step\n  }\n}\nclass Left extends Base {\n  void act() {\n    this.t.左を向く(); // step\n    this.t.前に進む(); // step\n  }\n}\nclass Right extends Base {\n  void act() {\n    this.t.前に進む(); // step\n    this.t.右を向く(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet a = call(Left)(); registerDisplayRef('a', () => a); \nlet b = call(Right)(); registerDisplayRef('b', () => b); \nlet selected = a; registerDisplayRef('selected', () => selected); // step\ncall(selected.act.bind(selected))(); \nselected = b; // step\ncall(selected.act.bind(selected))(); \nselected = a; // step\ncall(selected.act.bind(selected))(); \ncall(b.act.bind(b))(); \n}\nclass Base {\nt = undefined;\nconstructor() {\nthis.t = new Turtle(2, 2); // step\n}\nact() {\nthis.t.前に進む(); // step\n}\n}\nclass Left extends Base {\nact() {\nthis.t.左を向く(); // step\nthis.t.前に進む(); // step\n}\n}\nclass Right extends Base {\nact() {\nthis.t.前に進む(); // step\nthis.t.右を向く(); // step\n}\n}\nmain();",
     blanks: [
       {
         id: 'Rebind',
@@ -283,8 +271,6 @@ export const lecture5: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 4,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Base a = new Corner(); // caller\n    Base b = new Retreat(); // caller\n    Base[] choices = {b, a}; // step\n    Base first = choices[0]; // step\n    Base second = choices[1]; // step\n    first.act(); // caller\n    second.act(); // caller\n    first.act(); // caller\n  }\n}\nclass Base {\n  Turtle t;\n  Base() {\n    this.t = new Turtle(3, 3); // step\n  }\n  void act() {\n    this.t.前に進む(); // step\n  }\n}\nclass Corner extends Base {\n  void act() {\n    this.t.右を向く(); // step\n    this.t.前に進む(); // step\n    this.t.左を向く(); // step\n  }\n}\nclass Retreat extends Base {\n  void act() {\n    this.t.後に戻る(); // step\n    this.t.左を向く(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet a = call(Corner)(); registerDisplayRef('a', () => a); \nlet b = call(Retreat)(); registerDisplayRef('b', () => b); \nlet choices = [b, a]; registerDisplayRef('choices', () => choices); // step\nlet first = choices[0]; registerDisplayRef('first', () => first); // step\nlet second = choices[1]; registerDisplayRef('second', () => second); // step\ncall(first.act.bind(first))(); \ncall(second.act.bind(second))(); \ncall(first.act.bind(first))(); \n}\nclass Base {\nt = undefined;\nconstructor() {\nthis.t = new Turtle(3, 3); // step\n}\nact() {\nthis.t.前に進む(); // step\n}\n}\nclass Corner extends Base {\nact() {\nthis.t.右を向く(); // step\nthis.t.前に進む(); // step\nthis.t.左を向く(); // step\n}\n}\nclass Retreat extends Base {\nact() {\nthis.t.後に戻る(); // step\nthis.t.左を向く(); // step\n}\n}\nmain();",
     blanks: [
       {
         id: 'Array',
@@ -329,8 +315,6 @@ export const lecture5: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 4,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Base a = new Changed(); // caller\n    a.draw(); // caller\n    a.draw(); // caller\n    a.t.右を向く(); // step\n  }\n}\nclass Base {\n  Turtle t;\n  Base() {\n    this.t = new Turtle(2, 2); // step\n  }\n  void first() {\n    this.t.前に進む(); // step\n    this.t.右を向く(); // step\n  }\n  void second() {\n    this.t.前に進む(); // step\n  }\n  void draw() {\n    this.first(); // caller\n    this.second(); // caller\n  }\n}\nclass Changed extends Base {\n  void second() {\n    this.t.左を向く(); // step\n    this.t.前に進む(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet a = call(Changed)(); registerDisplayRef('a', () => a); \ncall(a.draw.bind(a))(); \ncall(a.draw.bind(a))(); \na.t.右を向く(); // step\n}\nclass Base {\nt = undefined;\nconstructor() {\nthis.t = new Turtle(2, 2); // step\n}\nfirst() {\nthis.t.前に進む(); // step\nthis.t.右を向く(); // step\n}\nsecond() {\nthis.t.前に進む(); // step\n}\ndraw() {\ncall(this.first.bind(this))(); \ncall(this.second.bind(this))(); \n}\n}\nclass Changed extends Base {\nsecond() {\nthis.t.左を向く(); // step\nthis.t.前に進む(); // step\n}\n}\nmain();",
     blanks: [
       {
         id: 'Inherited',
@@ -375,8 +359,6 @@ export const lecture5: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 4,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Base a = new Last(); // caller\n    a.act(); // caller\n    a.t.右を向く(); // step\n    a.act(); // caller\n    a.t.後に戻る(); // step\n  }\n}\nclass Base {\n  Turtle t;\n  Base() {\n    this.t = new Turtle(2, 2); // step\n  }\n  void act() {\n    this.t.前に進む(); // step\n    this.t.右を向く(); // step\n  }\n}\nclass Middle extends Base {\n  void act() {\n    super.act(); // caller\n    this.t.前に進む(); // step\n  }\n}\nclass Last extends Middle {\n  void act() {\n    super.act(); // caller\n    this.t.左を向く(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet a = call(Last)(); registerDisplayRef('a', () => a); \ncall(a.act.bind(a))(); \na.t.右を向く(); // step\ncall(a.act.bind(a))(); \na.t.後に戻る(); // step\n}\nclass Base {\nt = undefined;\nconstructor() {\nthis.t = new Turtle(2, 2); // step\n}\nact() {\nthis.t.前に進む(); // step\nthis.t.右を向く(); // step\n}\n}\nclass Middle extends Base {\nact() {\ncall(super.act.bind(this))(); \nthis.t.前に進む(); // step\n}\n}\nclass Last extends Middle {\nact() {\ncall(super.act.bind(this))(); \nthis.t.左を向く(); // step\n}\n}\nmain();",
     blanks: [
       {
         id: 'Chain',
@@ -425,8 +407,6 @@ export const lecture5: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 4,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Base a = new Alternating(); // caller\n    a.act(); // caller\n    a.act(); // caller\n    a.act(); // caller\n    a.act(); // caller\n  }\n}\nclass Base {\n  Turtle t;\n  int count;\n  Base() {\n    this.t = new Turtle(2, 2); // step\n    this.count = 0; // step\n  }\n  void act() {\n    this.t.前に進む(); // step\n  }\n}\nclass Alternating extends Base {\n  void act() {\n    this.count++; // step\n    if (this.count % 2 == 1) {\n      super.act(); // caller\n    } else {\n      this.t.右を向く(); // step\n      this.t.前に進む(); // step\n    }\n  }\n}',
-    instrumented:
-      "function main() {\nlet a = call(Alternating)(); registerDisplayRef('a', () => a); \ncall(a.act.bind(a))(); \ncall(a.act.bind(a))(); \ncall(a.act.bind(a))(); \ncall(a.act.bind(a))(); \n}\nclass Base {\nt = undefined;\ncount = 0;\nconstructor() {\nthis.t = new Turtle(2, 2); // step\nthis.count = 0; // step\n}\nact() {\nthis.t.前に進む(); // step\n}\n}\nclass Alternating extends Base {\nact() {\nthis.count++; // step\nif (this.count % 2 == 1) {\ncall(super.act.bind(this))(); \n} else {\nthis.t.右を向く(); // step\nthis.t.前に進む(); // step\n}\n}\n}\nmain();",
     blanks: [
       {
         id: 'Parity',

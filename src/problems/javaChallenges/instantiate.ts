@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
 import { TURTLE_GRAPHICS_BOARD_COLUMNS, TURTLE_GRAPHICS_BOARD_ROWS } from '../../constants';
-import { extractBlanks } from '../fillInBlank/blanks';
+import { extractBlanks, removeBlankMarkers } from '../fillInBlank/blanks';
 import { buildJavaJudgeProgram, findForbiddenJavaPattern, MAX_JAVA_PROGRAM_LENGTH } from '../fillInBlank/javaProgram';
 import { stripJavaTraceAnnotations } from '../fillInBlank/javaSource';
-import { charToColor } from '../traceProgram';
+import { charToColor } from '../trace';
 import { javaChallengeDefinitions } from './definitions';
 import type { JavaChallengeFormat, JavaChallengeTarget } from './types';
 
@@ -62,7 +62,7 @@ export const instantiateJavaChallenge = (problemId: string, format: JavaChalleng
     };
   }
   const blanks = extractBlanks(definition.starterProgram);
-  const restored = definition.starterProgram.replaceAll(/@\[([\s\S]*?)\]@/g, '$1').trim();
+  const restored = removeBlankMarkers(definition.starterProgram).trim();
   if (blanks.answers.length === 0 || restored !== definition.correctProgram)
     throw new Error(`Invalid blank challenge: ${problemId}`);
   return {

@@ -1,84 +1,47 @@
-import type { LanguageId } from '../problemData';
 import { challengeFillInBlankProblemDefinitions } from './challengeDefinitions';
 
 export const fillInBlankProblemDefinitions = {
-  fillInBlank1: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
-  t.forward();
-}
-delete s.vars['i'];
-`,
-    java: `
+  fillInBlank1: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t = new Turtle();
-    for (int i = 0; @[i < 4]@; i++) {
-      t.前に進む();
+    Turtle t = new Turtle(); // step
+    for (int i = 0; @[i < 4]@; i++) { // step
+      t.前に進む(); // step
     }
   }
 }
 `,
-  },
-  fillInBlank2: {
-    instrumented: `
-s.set('x', <1-4>);
-s.set('y', s.get('x') + 1);
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
-t.forward();
-`,
-    java: `
+  fillInBlank2: `
 public class Main {
   public static void main(String[] args) {
-    int x = <1-4>;
-    int y = @[x + 1]@;
-    Turtle t = new Turtle(x, y);
-    t.前に進む();
+    int x = <1-4>; // step
+    int y = @[x + 1]@; // step
+    Turtle t = new Turtle(x, y); // step
+    t.前に進む(); // step
   }
 }
 `,
-  },
-  fillInBlank3: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnRight();
-t.forward();
-t.forward();
-`,
-    java: `
+  fillInBlank3: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t = new Turtle();
-    t.前に進む();
-    @[t.右を向く();]@
-    t.前に進む();
-    t.前に進む();
+    Turtle t = new Turtle(); // step
+    t.前に進む(); // step
+    @[t.右を向く();]@ // step
+    t.前に進む(); // step
+    t.前に進む(); // step
   }
 }
 `,
-  },
-  fillInBlank4: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
-  t.forward();
-  t.turnRight();
-}
-delete s.vars['i'];
-`,
-    java: `
+  fillInBlank4: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t = new Turtle();
-    for (int i = 0; i < @[3]@; i++) {
-      t.前に進む();
-      @[t.右を向く();]@
+    Turtle t = new Turtle(); // step
+    for (int i = 0; i < @[3]@; i++) { // step
+      t.前に進む(); // step
+      @[t.右を向く();]@ // step
     }
   }
 }
 `,
-  },
   ...challengeFillInBlankProblemDefinitions,
-} as const satisfies Record<string, Record<LanguageId, string>>;
+} as const satisfies Record<string, string>;

@@ -1,6 +1,6 @@
 import type React from 'react';
 
-import type { TurtleTrace } from './problems/traceProgram';
+import type { TurtleTrace } from './problems/trace';
 
 export interface LayoutProps {
   children: React.ReactNode;

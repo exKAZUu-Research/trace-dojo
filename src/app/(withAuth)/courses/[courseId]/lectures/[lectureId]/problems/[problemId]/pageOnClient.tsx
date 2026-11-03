@@ -1,19 +1,15 @@
 'use client';
 
 import { notFound, useParams } from 'next/navigation';
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useIdleTimer } from 'react-idle-timer';
 
-import {
-  DEFAULT_LANGUAGE_ID,
-  MAX_ACTIVE_DURATION_MS_AFTER_LAST_EVENT,
-  MIN_INTERVAL_MS_OF_ACTIVE_EVENTS,
-} from '@/constants';
+import { MAX_ACTIVE_DURATION_MS_AFTER_LAST_EVENT, MIN_INTERVAL_MS_OF_ACTIVE_EVENTS } from '@/constants';
 import { useAuthContextSelector } from '@/contexts/AuthContext';
 import { backendTrpcReact } from '@/infrastructures/trpcBackend/client';
 import { Button, HStack, Tooltip, VStack } from '@/infrastructures/useClient/chakra';
 import type { FillInBlankGradingResult } from '@/problems/fillInBlank/grade';
-import { instantiateProblem } from '@/problems/instantiateProblem';
+import type { InstantiatedProblem } from '@/problems/instantiateProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 import type { OrdinaryJavaProblemData } from '@/types';
 import { isProblemSessionExpired } from '@/utils/problemSessionError';
@@ -28,6 +24,8 @@ interface Props {
   initialProblemSession: ProblemSession;
   userId: string;
   javaProblem?: OrdinaryJavaProblemData;
+  /** Generated on the server, where the Java interpreter runs. */
+  problem?: InstantiatedProblem;
 }
 
 export const ProblemPageOnClient: React.FC<Props> = (props) => {
@@ -46,16 +44,13 @@ export const ProblemPageOnClient: React.FC<Props> = (props) => {
   );
 };
 
+// code-gauge-allow functionCognitiveComplexity 28 -- The component predates this change, which only receives the problem as a prop.
+// code-gauge-allow functionNcss 40 -- The component predates this change, which only receives the problem as a prop.
 const ProblemSessionPage: React.FC<Props> = (props) => {
   const isAdmin = useAuthContextSelector((c) => c.isAdmin);
 
   const params = useParams<{ courseId: CourseId; lectureId: string; problemId: ProblemId }>();
-  const problem = useMemo(
-    () =>
-      props.javaProblem ??
-      instantiateProblem(params.problemId, DEFAULT_LANGUAGE_ID, props.initialProblemSession.problemVariablesSeed),
-    [params.problemId, props.initialProblemSession.problemVariablesSeed, props.javaProblem]
-  );
+  const problem = props.javaProblem ?? props.problem;
 
   const [problemSession, setProblemSession] = useState(props.initialProblemSession);
 
@@ -128,15 +123,7 @@ const ProblemSessionPage: React.FC<Props> = (props) => {
     [problemSession.id, updateProblemSessionMutation]
   );
 
-  if (!problem) notFound();
-  if (
-    props.javaProblem &&
-    (props.javaProblem.problemId !== params.problemId ||
-      props.initialProblemSession.problemId !== params.problemId ||
-      problemSession.problemType !== props.javaProblem.problemFormat)
-  )
-    notFound();
-  if (problemSession.problemType === 'bugFix' && !props.javaProblem) notFound();
+  if (!problem || !matchesRoute(props, params.problemId, problemSession.problemType)) notFound();
 
   if (isSessionExpired) {
     return (
@@ -254,3 +241,12 @@ function getIncrementalElapsedMilliseconds(lastActionTimeRef: React.RefObject<nu
   lastActionTimeRef.current = nowTime;
   return incrementalElapsedMilliseconds;
 }
+
+const matchesRoute = (props: Props, problemId: string, problemType: ProblemSession['problemType']): boolean => {
+  if (!props.javaProblem) return problemType !== 'bugFix';
+  return (
+    props.javaProblem.problemId === problemId &&
+    props.initialProblemSession.problemId === problemId &&
+    problemType === props.javaProblem.problemFormat
+  );
+};

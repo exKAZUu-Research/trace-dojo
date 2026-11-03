@@ -5,7 +5,7 @@ import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { db } from '@/infrastructures/database';
 import { logger } from '@/infrastructures/pino';
 import { getLearningPeriodFilter } from '@/learningPeriod';
-import { isFillInBlankProblem } from '@/problems/instantiateProblem';
+import { instantiateProblem, isFillInBlankProblem } from '@/problems/instantiateProblem';
 import { findOrdinaryJavaProblem, isOrdinaryBugProblem } from '@/problems/javaChallenges/ordinaryProblem';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 
@@ -51,10 +51,15 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
     .get()!;
   logger.debug('incompleteProblemSession: %o', incompleteProblemSession);
 
+  const problem = javaProblem
+    ? undefined
+    : (instantiateProblem(params.problemId, incompleteProblemSession.problemVariablesSeed) ?? notFound());
+
   return (
     <ProblemPageOnClient
       key={incompleteProblemSession.id}
       javaProblem={javaProblem}
+      problem={problem}
       initialProblemSession={incompleteProblemSession}
       userId={session.superTokensUserId}
     />

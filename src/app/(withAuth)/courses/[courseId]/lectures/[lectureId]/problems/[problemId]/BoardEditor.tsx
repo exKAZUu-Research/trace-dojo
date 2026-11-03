@@ -37,7 +37,7 @@ import {
   parseBoard,
   type RegularGradingResult,
 } from '../../../../../../../../problems/regular/grade';
-import type { TraceItemVariable, TurtleTrace } from '../../../../../../../../problems/traceProgram';
+import type { TraceItemVariable, TurtleTrace } from '../../../../../../../../problems/trace';
 import type { ColorChar, ProblemType, SelectedCell } from '../../../../../../../../types';
 import { BoardViewer } from './BoardViewer';
 

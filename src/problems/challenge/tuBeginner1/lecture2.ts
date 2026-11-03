@@ -20,16 +20,6 @@ export const lecture2: ChallengeBase[] = [
         t.前に進む(); // step
     }
 }`,
-    instrumented: `s.set('x', 1);
-s.set('y', s.get('x'));
-s.set('x', s.get('x') + (2));
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnLeft();
-t.forward();
-t.backward();
-t.turnRight();
-t.forward();`,
     blanks: [
       {
         id: 'Value1',
@@ -111,16 +101,6 @@ t.forward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `s.set('x', 1);
-s.set('y', 3);
-s.set('saved', s.get('x'));
-s.set('x', s.get('y'));
-s.set('y', s.get('saved'));
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnLeft();
-t.forward();
-t.forward();`,
     blanks: [
       {
         id: 'Value1',
@@ -210,16 +190,6 @@ t.forward();`,
         t.後に戻る(); // step
     }
 }`,
-    instrumented: `s.set('candidate', 2);
-s.set('saved', s.get('candidate') + 1);
-s.set('candidate', s.get('candidate') * (2));
-s.set('candidate', s.get('saved') - 2);
-const t = new Turtle(s.get('candidate'), s.get('saved')); registerDisplayRef('t', () => t); // step
-t.turnRight();
-t.forward();
-t.turnLeft();
-t.forward();
-t.backward();`,
     blanks: [
       {
         id: 'Update4',
@@ -277,16 +247,6 @@ t.backward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `s.set('total', 11);
-s.set('x', Math.trunc(s.get('total') / 3));
-s.set('y', s.get('total') % 3);
-s.set('total', s.get('total') - (s.get('x')));
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
-t.turnLeft();
-t.forward();
-t.turnRight();
-t.forward();
-t.forward();`,
     blanks: [
       {
         id: 'Value1',
@@ -344,16 +304,6 @@ t.forward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `s.set('x', 2);
-s.set('y', 1);
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
-s.set('x', s.get('x') + (2));
-s.set('y', s.get('x'));
-t.forward();
-t.turnRight();
-t.forward();
-t.turnLeft();
-t.forward();`,
     blanks: [
       {
         id: 'Value1',
@@ -439,16 +389,6 @@ t.forward();`,
         t.後に戻る(); // step
     }
 }`,
-    instrumented: `s.set('base', 2);
-s.set('left', s.get('base') + 1);
-s.set('right', s.get('base') * 2);
-s.set('x', s.get('right') - s.get('left'));
-s.set('y', Math.trunc(s.get('right') / s.get('base')));
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnRight();
-t.forward();
-t.backward();`,
     blanks: [
       {
         id: 'Update2',
@@ -506,16 +446,6 @@ t.backward();`,
         t.左を向く(); // step
     }
 }`,
-    instrumented: `s.set('x', 1);
-s.set('y', 3);
-s.set('x', s.get('y') - 1);
-s.set('y', s.get('x') + 1);
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
-t.turnRight();
-t.forward();
-t.turnLeft();
-t.forward();
-t.turnLeft();`,
     blanks: [
       {
         id: 'Update3',
@@ -573,16 +503,6 @@ t.turnLeft();`,
         t.後に戻る(); // step
     }
 }`,
-    instrumented: `s.set('n', 5);
-s.set('x', Math.trunc(s.get('n') / 2));
-s.set('x', s.get('x') + (1));
-s.set('y', Math.trunc((s.get('n') + 1) / 2));
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
-t.turnLeft();
-t.forward();
-t.turnRight();
-t.forward();
-t.backward();`,
     blanks: [
       {
         id: 'Update3',
@@ -640,16 +560,6 @@ t.backward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `s.set('x', 1);
-s.set('y', 6);
-s.set('x', s.get('x') + (2));
-s.set('y', s.get('y') - (s.get('x')));
-s.set('x', s.get('x') - 1);
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnRight();
-t.forward();
-t.forward();`,
     blanks: [
       {
         id: 'Value1',
@@ -707,16 +617,6 @@ t.forward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `s.set('value', 1);
-s.set('value', s.get('value') + (3));
-s.set('saved', s.get('value'));
-s.set('value', s.get('value') - (3));
-const t = new Turtle(s.get('value'), s.get('saved')); registerDisplayRef('t', () => t); // step
-t.turnRight();
-t.forward();
-t.forward();
-t.turnLeft();
-t.forward();`,
     blanks: [
       {
         id: 'Value1',

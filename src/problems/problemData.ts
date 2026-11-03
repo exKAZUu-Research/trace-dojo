@@ -2,9 +2,6 @@ import { type ChallengeId, challengeMetadata } from './challenge/metadata';
 import { fillInBlankProblemDefinitions } from './fillInBlank/definitions';
 import { type JavaChallengeId, javaChallengeMetadata } from './javaChallenges/metadata';
 
-export const languageIds = ['instrumented', 'java'] as const;
-export type LanguageId = (typeof languageIds)[number];
-
 export const courseIdToName = {
   tuBeginner1: '初級プログラミングⅠ',
   tuBeginner2: '初級プログラミングⅡ',
@@ -421,18 +418,13 @@ export const courseIdToLectureIds = JSON.parse(process.env.NEXT_PUBLIC_COURSE_ID
   string[]
 >;
 
-export function getProblemProgram(problemId: string): Record<LanguageId, string> | undefined {
-  return (problemIdToLanguageIdToProgram as Partial<Record<string, Record<LanguageId, string>>>)[problemId];
+/** The Java program of a problem, from which its trace is generated. */
+export function getProblemProgram(problemId: string): string | undefined {
+  return (problemIdToProgram as Partial<Record<string, string>>)[problemId];
 }
 
-export const problemIdToLanguageIdToProgram: Record<LegacyProblemId, Record<LanguageId, string>> = {
-  straight: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('亀', () => t); // step
-t.forward();
-t.forward();
-    `,
-    java: `
+export const problemIdToProgram: Record<LegacyProblemId, string> = {
+  straight: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // step
@@ -441,15 +433,7 @@ public class Main {
     }
 }
     `,
-  },
-  straight2: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('亀', () => t); // step
-t.forward();
-t.forward();
-t.forward();
-    `,
-    java: `
+  straight2: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // step
@@ -459,14 +443,7 @@ public class Main {
     }
 }
     `,
-  },
-  stepBack: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('亀', () => t); // step
-t.forward();
-t.backward();
-    `,
-    java: `
+  stepBack: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // step
@@ -475,17 +452,7 @@ public class Main {
     }
 }
     `,
-  },
-  stepBack2: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('亀', () => t); // step
-t.forward();
-t.forward();
-t.backward();
-t.forward();
-t.forward();
-    `,
-    java: `
+  stepBack2: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // step
@@ -497,15 +464,7 @@ public class Main {
     }
 }
     `,
-  },
-  turnRight: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('亀', () => t); // step
-t.forward();
-t.turnRight();
-t.forward();
-    `,
-    java: `
+  turnRight: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // step
@@ -515,17 +474,7 @@ public class Main {
     }
 }
     `,
-  },
-  turnRight2: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('亀', () => t); // step
-t.forward();
-t.forward();
-t.turnRight();
-t.forward();
-t.forward();
-    `,
-    java: `
+  turnRight2: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // step
@@ -537,16 +486,7 @@ public class Main {
     }
 }
     `,
-  },
-  turnLeftAndRight: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('亀', () => t); // step
-t.turnRight();
-t.forward();
-t.turnLeft();
-t.forward();
-    `,
-    java: `
+  turnLeftAndRight: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // step
@@ -557,17 +497,7 @@ public class Main {
     }
 }
     `,
-  },
-  turnLeftAndRight2: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('亀', () => t); // step
-t.forward();
-t.turnRight();
-t.forward();
-t.turnLeft();
-t.forward();
-    `,
-    java: `
+  turnLeftAndRight2: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // step
@@ -579,18 +509,7 @@ public class Main {
     }
 }
     `,
-  },
-  turnLeftAndRight3: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('亀', () => t); // step
-t.turnRight();
-t.forward();
-t.turnLeft();
-t.forward();
-t.turnRight();
-t.forward();
-    `,
-    java: `
+  turnLeftAndRight3: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // step
@@ -603,20 +522,7 @@ public class Main {
     }
 }
     `,
-  },
-  turnLeftAndRight4: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('亀', () => t); // step
-t.forward();
-t.forward();
-t.turnRight();
-t.forward();
-t.forward();
-t.turnLeft();
-t.forward();
-t.forward();
-    `,
-    java: `
+  turnLeftAndRight4: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // step
@@ -631,17 +537,7 @@ public class Main {
     }
 }
     `,
-  },
-  square1: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('亀', () => t); // step
-t.forward();
-t.turnRight();
-t.forward();
-t.turnRight();
-t.forward();
-`,
-    java: `
+  square1: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // step
@@ -653,17 +549,7 @@ public class Main {
     }
 }
     `,
-  },
-  square2: {
-    instrumented: `
-const t = new Turtle(<1-5>, <1-4>); registerDisplayRef('亀', () => t); // step
-t.forward();
-t.turnRight();
-t.forward();
-t.turnRight();
-t.forward();
-`,
-    java: `
+  square2: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(<1-5>, <1-4>); // step
@@ -675,19 +561,7 @@ public class Main {
     }
 }
     `,
-  },
-  square3: {
-    instrumented: `
-const t = new Turtle(<2-5>, <2-5>); registerDisplayRef('亀', () => t); // step
-t.forward();
-t.turnLeft();
-t.forward();
-t.turnLeft();
-t.forward();
-t.turnLeft();
-t.forward();
-    `,
-    java: `
+  square3: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(<2-5>, <2-5>); // step
@@ -701,23 +575,7 @@ public class Main {
     }
 }
     `,
-  },
-  square4: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('亀', () => t); // step
-t.forward();
-t.forward();
-t.turnRight();
-t.forward();
-t.forward();
-t.turnRight();
-t.forward();
-t.forward();
-t.turnRight();
-t.forward();
-t.forward();
-    `,
-    java: `
+  square4: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // step
@@ -735,15 +593,8 @@ public class Main {
     }
 }
     `,
-  },
 
-  variable: {
-    instrumented: `
-s.set('x', <1-5>);
-const t = new Turtle(s.get('x'), <1-5>); registerDisplayRef('亀', () => t); // step
-t.forward();
- `,
-    java: `
+  variable: `
 public class Main {
     public static void main(String[] args) {
         int x = <1-5>; // step
@@ -752,15 +603,7 @@ public class Main {
     }
 }
     `,
-  },
-  variable2: {
-    instrumented: `
-s.set('a', <2-6>);
-s.set('a', s.get('a') - 1);
-const t = new Turtle(<1-5>, s.get('a')); registerDisplayRef('亀', () => t); // step
-t.forward();
- `,
-    java: `
+  variable2: `
 public class Main {
     public static void main(String[] args) {
         int a = <2-6>; // step
@@ -770,16 +613,7 @@ public class Main {
     }
 }
     `,
-  },
-  variable3: {
-    instrumented: `
-s.set('x', <1-4>);
-s.set('x', s.get('x') + 1);
-s.set('y', s.get('x') + 1);
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('亀', () => t); // step
-t.forward();
-`,
-    java: `
+  variable3: `
 public class Main {
     public static void main(String[] args) {
         int x = <1-4>; // step
@@ -790,16 +624,7 @@ public class Main {
     }
 }
     `,
-  },
-  variable4: {
-    instrumented: `
-s.set('b', <1-4>);
-s.set('b', s.get('b') + 1);
-s.set('a', s.get('b') - 2);
-const t = new Turtle(s.get('a') + 1, s.get('b')); registerDisplayRef('亀', () => t); // step
-t.forward();
-`,
-    java: `
+  variable4: `
 public class Main {
     public static void main(String[] args) {
         int b = <1-4>; // step
@@ -810,17 +635,7 @@ public class Main {
     }
 }
     `,
-  },
-  variable5: {
-    instrumented: `
-s.set('x', <1-5>);
-s.set('x', s.get('x') - 1);
-s.set('y', s.get('x') * 2);
-s.set('y', s.get('y') / 3);
-const t = new Turtle(s.get('x') + 1, s.get('y') + 1); registerDisplayRef('亀', () => t); // step
-t.forward();
-`,
-    java: `
+  variable5: `
 public class Main {
     public static void main(String[] args) {
         int x = <1-5>; // step
@@ -832,16 +647,7 @@ public class Main {
     }
 }
     `,
-  },
-  variable6: {
-    instrumented: `
-s.set('a', <1-3>);
-s.set('b', s.get('a') * 2);
-s.set('c', s.get('b') - 2);
-const t = new Turtle(s.get('c'), s.get('b')); registerDisplayRef('亀', () => t); // step
-t.forward();
-`,
-    java: `
+  variable6: `
 public class Main {
     public static void main(String[] args) {
         int a = <1-3>; // step
@@ -852,17 +658,7 @@ public class Main {
     }
 }
     `,
-  },
-  variable7: {
-    instrumented: `
-s.set('x', <0-2>);
-s.set('y', (s.get('x') * 2) + 1);
-s.set('z', (s.get('y') * 2) + (s.get('x') / 2));
-s.set('x', s.get('z') / 3);
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('亀', () => t); // step
-t.forward();
-    `,
-    java: `
+  variable7: `
 public class Main {
     public static void main(String[] args) {
         int x = <0-2>; // step
@@ -874,18 +670,7 @@ public class Main {
     }
 }
     `,
-  },
-  variable8: {
-    instrumented: `
-s.set('x', <0-2>);
-s.set('y', (s.get('x') * 3) + 2);
-s.set('z', (s.get('y') * 2) - (s.get('x') * 3));
-s.set('x', (s.get('z') / 4) % 7);
-s.set('y', (s.get('x') + s.get('y')) % 7);
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('亀', () => t); // step
-t.backward();
-    `,
-    java: `
+  variable8: `
 public class Main {
     public static void main(String[] args) {
         int x = <0-2>; // step
@@ -898,18 +683,7 @@ public class Main {
     }
 }
     `,
-  },
-  variable9: {
-    instrumented: `
-s.set('x', <0-3>);
-s.set('y', (s.get('x') * 4) + 3);
-s.set('z', (s.get('y') * 3) - (s.get('x') * 2));
-s.set('x', ((s.get('z') / 5) + s.get('x')) % 7);
-s.set('y', ((s.get('x') * 2) + s.get('y')) % 7);
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('亀', () => t); // step
-t.forward();
-    `,
-    java: `
+  variable9: `
 public class Main {
     public static void main(String[] args) {
         int x = <0-3>; // step
@@ -922,19 +696,7 @@ public class Main {
     }
 }
     `,
-  },
-  variable10: {
-    instrumented: `
-s.set('x', <0-3>);
-s.set('y', (s.get('x') * 5) + 4);
-s.set('z', (s.get('y') * 2) - (s.get('x') * 3));
-s.set('w', (s.get('z') + s.get('x')) % 5);
-s.set('x', ((s.get('z') / 6) + s.get('w')) % 7);
-s.set('y', ((s.get('x') * 3) + s.get('y')) % 7);
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('亀', () => t); // step
-t.forward();
-    `,
-    java: `
+  variable10: `
 public class Main {
     public static void main(String[] args) {
         int x = <0-3>; // step
@@ -948,17 +710,7 @@ public class Main {
     }
 }
     `,
-  },
-  while1: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('亀', () => t); // step
-s.set('i', 0);
-while (s.get('i') < <3-5>) {
-  t.forward();
-  s.set('i', s.get('i') + 1);
-}
-    `,
-    java: `
+  while1: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // step
@@ -970,17 +722,7 @@ public class Main {
     }
 }
     `,
-  },
-  while2: {
-    instrumented: `
-const t = new Turtle(<0-1>, <0-1>); registerDisplayRef('亀', () => t); // step
-s.set('i', <1-2>);
-while (s.get('i') < <4-6>) {
-  t.forward();
-  s.set('i', s.get('i') + 1);
-}
-    `,
-    java: `
+  while2: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(<0-1>, <0-1>); // step
@@ -992,18 +734,7 @@ public class Main {
     }
 }
     `,
-  },
-  while3: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('亀', () => t); // step
-s.set('i', 0);
-while (s.get('i') < <2-3>) {
-  s.set('i', s.get('i') + 1);
-  t.forward();
-  t.turnRight();
-}
-    `,
-    java: `
+  while3: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // step
@@ -1016,20 +747,7 @@ public class Main {
     }
 }
     `,
-  },
-  while4: {
-    instrumented: `
-const t = new Turtle(<0-1>, <0-1>); registerDisplayRef('亀', () => t); // step
-t.turnRight();
-s.set('i', <1-2>);
-while (s.get('i') < <4-5>) {
-  t.forward();
-  t.forward();
-  t.turnLeft();
-  s.set('i', s.get('i') + 1);
-}
-    `,
-    java: `
+  while4: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(<0-1>, <0-1>); // step
@@ -1044,20 +762,7 @@ public class Main {
     }
 }
     `,
-  },
-  while5: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('亀', () => t); // step
-s.set('i', <1-2>);
-while (s.get('i') < <3-4>) {
-  t.forward();
-  t.turnRight();
-  t.forward();
-  t.turnLeft();
-  s.set('i', s.get('i') + 1);
-}
-    `,
-    java: `
+  while5: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // step
@@ -1072,16 +777,7 @@ public class Main {
     }
 }
     `,
-  },
-  for1: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('亀', () => t); // step
-for (s.set('i', 0); s.get('i') < <3-5>; s.set('i', s.get('i') + 1)) {
-  t.forward();
-}
-delete s.vars['i'];
-       `,
-    java: `
+  for1: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // step
@@ -1091,16 +787,7 @@ public class Main {
     }
 }
     `,
-  },
-  for2: {
-    instrumented: `
-const t = new Turtle(<1-2>, <1-2>); registerDisplayRef('亀', () => t); // step
-for (s.set('i', <1-2>); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
-  t.forward();
-}
-delete s.vars['i'];
-       `,
-    java: `
+  for2: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(<1-2>, <1-2>); // step
@@ -1110,18 +797,7 @@ public class Main {
     }
 }
     `,
-  },
-  for3: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('亀', () => t); // step
-s.set('i', 0);
-for (; s.get('i') < <2-3>;) {
-  t.forward();
-  t.turnRight();
-  s.set('i', s.get('i') + 1);
-}
-    `,
-    java: `
+  for3: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(); // step
@@ -1134,19 +810,7 @@ public class Main {
     }
 }
     `,
-  },
-  for4: {
-    instrumented: `
-const t = new Turtle(<1-2>, <1-2>); registerDisplayRef('亀', () => t); // step
-s.set('i', 1);
-for (; s.get('i') < <3-4>;) {
-  t.forward();
-  t.turnRight();
-  s.set('i', s.get('i') + 1);
-}
-t.backward();
-    `,
-    java: `
+  for4: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(<1-2>, <1-2>); // step
@@ -1160,19 +824,7 @@ public class Main {
     }
 }
     `,
-  },
-  for5: {
-    instrumented: `
-s.set('x', 0);
-for (s.set('i', 2); s.get('i') <= <4-5>; s.set('i', s.get('i') + 1)) {
-  s.set('x', s.get('x') + s.get('i'));
-}
-delete s.vars['i'];
-s.set('x', s.get('x') / 3);
-const t = new Turtle(s.get('x') + 1, 0); registerDisplayRef('亀', () => t); // step
-t.forward();
-    `,
-    java: `
+  for5: `
 public class Main {
     public static void main(String[] args) {
         int x = 0; // step
@@ -1185,22 +837,7 @@ public class Main {
     }
 }
     `,
-  },
-  for6: {
-    instrumented: `
-s.set('a', 0);
-s.set('b', 100);
-for (s.set('i', <4-5>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
-  s.set('a', s.get('a') + s.get('i'));
-  s.set('b', s.get('b') - s.get('i'));
-}
-delete s.vars['i'];
-s.set('a', s.get('a') / 4);
-s.set('b', s.get('b') / 5);
-const t = new Turtle(s.get('a') % 6, s.get('b') % 6); registerDisplayRef('亀', () => t); // step
-t.forward();
-    `,
-    java: `
+  for6: `
 public class Main {
     public static void main(String[] args) {
         int a = 0; // step
@@ -1216,25 +853,7 @@ public class Main {
     }
 }
     `,
-  },
-  for7: {
-    instrumented: `
-const t = new Turtle(3, 3); registerDisplayRef('亀', () => t); // step
-s.set('sum', 0);
-for (s.set('i', 1); s.get('i') <= <4-6>; s.set('i', s.get('i') + 1)) {
-  s.set('sum', s.get('sum') + s.get('i'));
-  t.forward();
-  t.turnLeft();
-}
-delete s.vars['i'];
-for (s.set('i', s.get('sum') / 4); s.get('i') >= 0; s.set('i', s.get('i') - 1)) {
-  t.forward();
-  t.forward();
-  t.turnRight();
-}
-delete s.vars['i'];
-    `,
-    java: `
+  for7: `
 public class Main {
     public static void main(String[] args) {
         Turtle 亀 = new Turtle(3, 3); // step
@@ -1252,20 +871,7 @@ public class Main {
     }
 }
     `,
-  },
-  doubleLoop1: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < <2-3>; s.set('i', s.get('i') + 1)) {
-  for (s.set('j', 0); s.get('j') < <2-3>; s.set('j', s.get('j') + 1)) {
-      t.forward();
-  }
-  delete s.vars['j'];
-  t.turnRight();
-}
-delete s.vars['i'];
-    `,
-    java: `
+  doubleLoop1: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -1278,21 +884,7 @@ public class Main {
     }
 }
     `,
-  },
-  doubleLoop2: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-t.turnRight();
-for (s.set('i', 0); s.get('i') < <2-3>; s.set('i', s.get('i') + 1)) {
-  for (s.set('j', 0); s.get('j') < <2-3>; s.set('j', s.get('j') + 1)) {
-      t.forward();
-  }
-  delete s.vars['j'];
-  t.turnLeft();
-}
-delete s.vars['i'];
-    `,
-    java: `
+  doubleLoop2: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -1306,20 +898,7 @@ public class Main {
     }
 }
     `,
-  },
-  doubleLoop3: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', <3-4>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
-  for (s.set('j', 0); s.get('j') < s.get('i'); s.set('j', s.get('j') + 1)) {
-    t.forward();
-  }
-  delete s.vars['j'];
-  t.turnRight();
-}
-delete s.vars['i'];
-    `,
-    java: `
+  doubleLoop3: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -1332,22 +911,7 @@ public class Main {
     }
 }
     `,
-  },
-  doubleLoop4: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', <3-4>); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
-  s.set('j', s.get('i'));
-  while (s.get('j') >= 0) {
-    t.forward();
-    s.set('j', s.get('j') - 1);
-  }
-  t.turnRight();
-  delete s.vars['j'];
-}
-delete s.vars['i'];
-    `,
-    java: `
+  doubleLoop4: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -1362,25 +926,7 @@ public class Main {
     }
 }
     `,
-  },
-  doubleLoop5: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
-  for (s.set('j', <0-1>); s.get('j') <= s.get('i'); s.set('j', s.get('j') + 1)) {
-    t.forward();
-  }
-  delete s.vars['j'];
-  t.turnRight();
-  for (s.set('k', <0-1>); s.get('k') < s.get('i'); s.set('k', s.get('k') + 1)) {
-    t.forward();
-  }
-  delete s.vars['k'];
-  t.turnLeft();
-}
-delete s.vars['i'];
-    `,
-    java: `
+  doubleLoop5: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -1397,19 +943,7 @@ public class Main {
     }
 }
     `,
-  },
-  if1: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < <7-9>; s.set('i', s.get('i') + 1)) {
-  t.forward();
-  if (s.get('i') % 3 === 2) {
-    t.turnRight();
-  }
-}
-delete s.vars['i'];
-    `,
-    java: `
+  if1: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -1422,25 +956,12 @@ public class Main {
     }
 }
     `,
-  },
-  if2: {
-    instrumented: `
-const t = new Turtle(<1-2>, <1-2>); registerDisplayRef('t', () => t); // step
-t.turnRight();
-for (s.set('i', 0); s.get('i') < <6-8>; s.set('i', s.get('i') + 1)) {
-  t.forward();
-  if (s.get('i') % 3 === 1) {
-    t.turnLeft();
-  }
-}
-delete s.vars['i'];
-    `,
-    java: `
+  if2: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(<1-2>, <1-2>); // step
         t.右を向く(); // step
-        for (int i = 0; i < <7-9>; i++) { // step
+        for (int i = 0; i < <6-8>; i++) { // step
             t.前に進む(); // step
             if (i % 3 == 1) {
                 t.左を向く(); // step
@@ -1449,21 +970,7 @@ public class Main {
     }
 }
     `,
-  },
-  if3: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < <4-5>; s.set('i', s.get('i') + 1)) {
-  t.forward();
-  if (s.get('i') % 2 === 0) {
-    t.turnRight();
-  } else {
-    t.turnLeft();
-  }
-}
-delete s.vars['i'];
-    `,
-    java: `
+  if3: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -1478,21 +985,7 @@ public class Main {
     }
 }
     `,
-  },
-  if4: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < <4-5>; s.set('i', s.get('i') + 1)) {
-  t.forward();
-  if (s.get('i') % 3 === 0) {
-    t.turnRight();
-  } else {
-    t.turnLeft();
-  }
-}
-delete s.vars['i'];
-    `,
-    java: `
+  if4: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -1507,25 +1000,7 @@ public class Main {
     }
 }
     `,
-  },
-  if5: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
-  for (s.set('j', 0); s.get('j') < <2-3>; s.set('j', s.get('j') + 1)) {
-    if (s.get('j') % 2 === 0) {
-      t.forward();
-    } else {
-      t.turnRight();
-    }
-  }
-  delete s.vars['j'];
-  t.forward();
-  t.turnLeft();
-}
-delete s.vars['i'];
-    `,
-    java: `
+  if5: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -1543,22 +1018,7 @@ public class Main {
     }
 }
     `,
-  },
-  elseIf1: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < <4-6>; s.set('i', s.get('i') + 1)) {
-  if (s.get('i') < 2) {
-    t.forward();
-  } else if (s.get('i') === 2) {
-    t.turnLeft();
-  } else {
-    t.backward();
-  }
-}
-delete s.vars['i'];
-    `,
-    java: `
+  elseIf1: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -1573,24 +1033,7 @@ public class Main {
     }
 }
     `,
-  },
-  elseIf2: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
-  if (s.get('i') % 4 === 0) {
-    t.forward();
-  } else if (s.get('i') % 4 === 1) {
-    t.turnRight();
-  } else if (s.get('i') % 4 === 2) {
-    t.forward();
-  } else {
-    t.turnLeft();
-  }
-}
-delete s.vars['i'];
-    `,
-    java: `
+  elseIf2: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -1607,24 +1050,7 @@ public class Main {
     }
 }
     `,
-  },
-  elseIf3: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < 7; s.set('i', s.get('i') + 1)) {
-  if (s.get('i') < 2) {
-    t.forward();
-  } else if (s.get('i') === 2) {
-    t.turnLeft();
-  } else if (s.get('i') === <4-5>) {
-    t.turnRight();
-  } else {
-    t.backward();
-  }
-}
-delete s.vars['i'];
-    `,
-    java: `
+  elseIf3: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -1641,24 +1067,7 @@ public class Main {
     }
 }
     `,
-  },
-  elseIf4: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < <6-7>; s.set('i', s.get('i') + 1)) {
-  if (s.get('i') % 5 === 0) {
-    t.forward();
-  } else if (s.get('i') % 5 === 1) {
-    t.turnLeft();
-  } else if (s.get('i') % 5 === 2) {
-    t.backward();
-  } else {
-    t.turnRight();
-  }
-}
-delete s.vars['i'];
-    `,
-    java: `
+  elseIf4: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -1675,22 +1084,7 @@ public class Main {
     }
 }
     `,
-  },
-  elseIf5: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < <7-8>; s.set('i', s.get('i') + 1)) {
-  if (s.get('i') % 5 === 1) {
-    t.turnRight();
-  } else if (s.get('i') % 5 === 3) {
-    t.turnLeft();
-  } else {
-    t.forward();
-  }
-}
-delete s.vars['i'];
-    `,
-    java: `
+  elseIf5: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -1705,23 +1099,7 @@ public class Main {
     }
 }
     `,
-  },
-  switch1: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
-  switch (s.get('i')) {
-    case 0: case 1:
-      t.forward(); break;
-    case 2:
-      t.turnLeft(); break;
-    default:
-      t.backward(); break;
-  }
-}
-delete s.vars['i'];
-    `,
-    java: `
+  switch1: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -1738,23 +1116,7 @@ public class Main {
     }
 }
     `,
-  },
-  switch2: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
-  switch (s.get('i') % 4) {
-    case 1:
-      t.turnRight(); break;
-    case 3:
-      t.turnLeft(); break;
-    default:
-      t.forward(); break;
-  }
-}
-delete s.vars['i'];
-    `,
-    java: `
+  switch2: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -1771,30 +1133,7 @@ public class Main {
     }
 }
     `,
-  },
-  switch3: {
-    instrumented: `
-const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < <6-7>; s.set('i', s.get('i') + 1)) {
-  switch (s.get('i')) {
-    case 0:
-    case 1:
-      t.forward();
-      break;
-    case 2:
-      t.turnLeft();
-      break;
-    case 4:
-    case 5:
-      t.turnRight();
-      break;
-    default:
-      t.backward();
-  }
-}
-delete s.vars['i'];
-    `,
-    java: `
+  switch3: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(2, 2); // step
@@ -1818,28 +1157,7 @@ public class Main {
     }
 }
     `,
-  },
-  switch4: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < <7-8>; s.set('i', s.get('i') + 1)) {
-  switch (s.get('i') % 5) {
-    case 0:
-      t.turnLeft();
-      break;
-    case 1:
-      t.backward();
-      break;
-    case 2:
-      t.turnRight();
-      break;
-    default:
-      t.forward();
-  }
-}
-delete s.vars['i'];
-    `,
-    java: `
+  switch4: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -1861,29 +1179,7 @@ public class Main {
     }
 }
     `,
-  },
-  switch5: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < <9-10>; s.set('i', s.get('i') + 1)) {
-  switch (s.get('i') % 6) {
-    case 0:
-      t.turnLeft();
-      break;
-    case 1:
-    case 2:
-      t.backward();
-      break;
-    case 3:
-      t.turnRight();
-      break;
-    default:
-      t.forward();
-  }
-}
-delete s.vars['i'];
-    `,
-    java: `
+  switch5: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -1906,16 +1202,7 @@ public class Main {
     }
 }
     `,
-  },
-  break1: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-while (true) {
-  if (!t.canMoveForward()) break;
-  t.forward();
-}
-    `,
-    java: `
+  break1: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -1926,21 +1213,7 @@ public class Main {
     }
 }
     `,
-  },
-  break2: {
-    instrumented: `
-const t = new Turtle(<3-4>,<3-4>); registerDisplayRef('t', () => t); // step
-while (true) {
-  if (!t.canMoveForward()) break;
-  t.forward();
-  t.turnRight();
-
-  if (!t.canMoveForward()) break;
-  t.forward();
-  t.turnLeft();
-}
-    `,
-    java: `
+  break2: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(<3-4>, <3-4>); // step
@@ -1956,20 +1229,7 @@ public class Main {
     }
 }
     `,
-  },
-  break3: {
-    instrumented: `
-const t = new Turtle(<4-6>, <4-6>); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
-  while (true) {
-    t.forward();
-    if (!t.canMoveForward()) break;
-  }
-  t.turnRight();
-}
-delete s.vars['i'];
-    `,
-    java: `
+  break3: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(<4-6>, <4-6>); // step
@@ -1983,20 +1243,7 @@ public class Main {
     }
 }
     `,
-  },
-  break4: {
-    instrumented: `
-const t = new Turtle(<3-5>, <3-5>); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
-  while (true) {
-    if (!t.canMoveForward()) break;
-    t.forward();
-  }
-  t.turnLeft();
-}
-delete s.vars['i'];
-    `,
-    java: `
+  break4: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(<3-5>, <3-5>); // step
@@ -2010,26 +1257,7 @@ public class Main {
     }
 }
     `,
-  },
-  break5: {
-    instrumented: `
-const t = new Turtle(<4-6>, <4-6>); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
-  for (s.set('j', 0); s.get('j') < 6; s.set('j', s.get('j') + 1)) {
-    if (!t.canMoveForward()) break;
-    t.forward();
-    if (s.get('j') % 3 === 0) {
-      t.turnLeft();
-    } else {
-      t.turnRight();
-    }
-  }
-  delete s.vars['j'];
-  t.turnRight();
-}
-delete s.vars['i'];
-    `,
-    java: `
+  break5: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(<4-6>, <4-6>); // step
@@ -2048,19 +1276,7 @@ public class Main {
     }
 }
     `,
-  },
-  continue1: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < <3-5>; s.set('i', s.get('i') + 1)) {
-  if (s.get('i') == 0) {
-    continue;
-  }
-  t.forward();
-}
-delete s.vars['i'];
-    `,
-    java: `
+  continue1: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2073,20 +1289,7 @@ public class Main {
     }
 }
     `,
-  },
-  continue2: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < <5-7>; s.set('i', s.get('i') + 1)) {
-  if (s.get('i') % <2-3> == 1) {
-    t.turnRight();
-    continue;
-  }
-  t.forward();
-}
-delete s.vars['i'];
-    `,
-    java: `
+  continue2: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2100,25 +1303,7 @@ public class Main {
     }
 }
     `,
-  },
-  continue3: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
-  for (s.set('j', s.get('i') * 4); s.get('j') < 8; s.set('j', s.get('j') + 1)) {
-    if (s.get('j') % 4 == 1) {
-      t.turnRight(); continue;
-    } else if (s.get('j') % 4 == 3) {
-      t.turnLeft(); continue;
-    }
-    t.forward();
-  }
-  delete s.vars['j'];
-  t.turnLeft();
-}
-delete s.vars['i'];
-    `,
-    java: `
+  continue3: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2136,25 +1321,7 @@ public class Main {
     }
 }
     `,
-  },
-  continue4: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
-  for (s.set('j', s.get('i')); s.get('j') < 6; s.set('j', s.get('j') + 1)) {
-    if (s.get('j') % 2 == 0) {
-      t.turnRight(); continue;
-    }
-    if (t.canMoveForward()) {
-      t.forward();
-    }
-  }
-  delete s.vars['j'];
-  t.turnLeft();
-}
-delete s.vars['i'];
-    `,
-    java: `
+  continue4: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2172,26 +1339,7 @@ public class Main {
     }
 }
     `,
-  },
-  continue5: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
-  for (s.set('j', s.get('i') + 1); s.get('j') < 6; s.set('j', s.get('j') + 1)) {
-    if (s.get('j') % 4 == 0) {
-      t.turnLeft(); continue;
-    } else if (s.get('j') % 3 == 2) {
-      t.turnRight(); continue;
-    }
-    if (t.canMoveForward()) {
-      t.forward();
-    }
-  }
-  delete s.vars['j'];
-}
-delete s.vars['i'];
-    `,
-    java: `
+  continue5: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2210,26 +1358,7 @@ public class Main {
     }
 }
     `,
-  },
-  method1: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-call(forwardTwoSteps, 't')(t);
-t.turnRight();
-call(threeStepsForward, 't')(t);
-
-function forwardTwoSteps(t) {
-  t.forward();
-  t.forward();
-}
-
-function threeStepsForward(t) {
-  t.forward();
-  t.forward();
-  t.forward();
-}
-    `,
-    java: `
+  method1: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step: 1
@@ -2248,26 +1377,7 @@ public class Main {
     }
 }
     `,
-  },
-  method2: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-call(forwardTwoSteps, 't')(t);
-call(turnAround, 't')(t);
-t.forward();
-
-function forwardTwoSteps(t) {
-  t.forward();
-  t.forward();
-}
-
-function turnAround(t) {
-  t.turnRight();
-  t.turnRight();
-}
-
-    `,
-    java: `
+  method2: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2285,22 +1395,7 @@ public class Main {
     }
 }
     `,
-  },
-  method3: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-call(forwardGivenSteps, 't', 'n')(t, <3-4>);
-t.turnRight();
-call(forwardGivenSteps, 't', 'n')(t, 2);
-
-function forwardGivenSteps(t, n) {
-  for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
-    t.forward();
-  }
-  delete s.vars['i'];
-}
-    `,
-    java: `
+  method3: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2316,25 +1411,7 @@ public class Main {
     }
 }
     `,
-  },
-  method4: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-call(forwardTwoSteps, 't')(t);
-t.turnRight();
-call(forwardFourSteps, 't')(t);
-
-function forwardTwoSteps(t) {
-  t.forward();
-  t.forward();
-}
-
-function forwardFourSteps(t) {
-  call(forwardTwoSteps, 't')(t);
-  call(forwardTwoSteps, 't')(t);
-}
-    `,
-    java: `
+  method4: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2352,24 +1429,7 @@ public class Main {
     }
 }
     `,
-  },
-  method5: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-call(drawSquare, 't')(t);
-t.backward();
-t.backward();
-call(drawSquare, 't')(t);
-
-function drawSquare(t) {
-  for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
-    t.forward();
-    t.turnRight();
-  }
-  delete s.vars['i'];
-}
-    `,
-    java: `
+  method5: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2386,25 +1446,7 @@ public class Main {
     }
 }
     `,
-  },
-  return1: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-s.set('x', call(double, 'a')(<2-3>));
-call(forwardGivenSteps, 't', 'n')(t, s.get('x'));
-
-function forwardGivenSteps(t, n) {
-  for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
-    t.forward();
-  }
-  delete s.vars['i'];
-}
-
-function double(a) {
-  return a * 2;
-}
-    `,
-    java: `
+  return1: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2421,28 +1463,7 @@ public class Main {
     }
 }
     `,
-  },
-  return2: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-s.set('x', call(double, 'a')(2));
-call(forwardGivenSteps, 't', 'n')(t, s.get('x'));
-t.turnRight();
-s.set('x', call(double, 'a')(s.get('x') - 1));
-call(forwardGivenSteps, 't', 'n')(t, s.get('x'));
-
-function forwardGivenSteps(t, n) {
-  for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
-    t.forward();
-  }
-  delete s.vars['i'];
-}
-
-function double(a) {
-  return a * 2;
-}
-    `,
-    java: `
+  return2: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2462,25 +1483,7 @@ public class Main {
     }
 }
     `,
-  },
-  return3: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-call(forwardGivenSteps, 't', 'n')(t, call(add, 'a', 'b')(1, 1));
-call(forwardGivenSteps, 't', 'n')(t, call(add, 'a', 'b')(1, 2));
-
-function forwardGivenSteps(t, n) {
-  for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
-    t.forward();
-  }
-  delete s.vars['i'];
-}
-
-function add(a, b) {
-  return a + b;
-}
-    `,
-    java: `
+  return3: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2493,38 +1496,11 @@ public class Main {
         }
     }
     static int 加算する(int a, int b) {
-        return a + b; // step
+        return a + b;
     }
 }
     `,
-  },
-  return4: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < <3-4>; s.set('i', s.get('i') + 1)) {
-  if (call(isEven, 'a')(s.get('i'))) {
-    t.turnRight();
-    call(forwardTwoSteps, 't')(t);
-  }
-  else {
-    call(forwardTwoSteps, 't')(t);
-    t.turnRight();
-    t.turnRight();
-  }
-}
-delete s.vars['i'];
-
-function forwardTwoSteps(t) {
-  t.forward();
-  t.forward();
-}
-
-function isEven(a) {
-  return a % 2 === 0;
-}
-
-    `,
-    java: `
+  return4: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2548,32 +1524,7 @@ public class Main {
     }
 }
     `,
-  },
-  return5: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
-  for (s.set('j', 0); s.get('j') < 3; s.set('j', s.get('j') + 1)) {
-    if (call(isEqual, 'a', 'b')(s.get('i'), s.get('j')))
-      t.turnRight();
-    else
-      call(forwardTwoSteps, 't')(t);
-  }
-  delete s.vars['j'];
-  t.turnLeft();
-}
-delete s.vars['i'];
-
-function forwardTwoSteps(t) {
-  t.forward();
-  t.forward();
-}
-
-function isEqual(a, b) {
-  return a == b;
-}
-    `,
-    java: `
+  return5: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2596,26 +1547,8 @@ public class Main {
     }
 }
     `,
-  },
 
-  array1: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-s.set('arr', [2, <1-2>, <1-2>]);
-for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
-  call(forwardGivenSteps, 't', 'n')(t, s.get('arr')[s.get('i')]);
-  t.turnRight();
-}
-delete s.vars['i'];
-
-function forwardGivenSteps(t, n) {
-  for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
-    t.forward();
-  }
-  delete s.vars['i'];
-}
-    `,
-    java: `
+  array1: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2632,25 +1565,7 @@ public class Main {
     }
 }
     `,
-  },
-  array2: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-s.set('arr', [<4-5>, <3-4>, <3-4>]);
-for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
-  call(forwardGivenSteps, 't', 'n')(t, s.get('arr')[s.get('i')]);
-  t.turnRight();
-}
-delete s.vars['i'];
-
-function forwardGivenSteps(t, n) {
-  for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
-    t.forward();
-  }
-  delete s.vars['i'];
-}
-    `,
-    java: `
+  array2: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2667,24 +1582,7 @@ public class Main {
     }
 }
     `,
-  },
-  array3: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-s.set('arr', [0, 1, 0, 2, 0]);
-for (s.set('i', 0); s.get('i') < s.get('arr').length; s.set('i', s.get('i') + 1)) {
-  switch (s.get('arr')[s.get('i')]) {
-    case 0:
-      t.forward(); break;
-    case 1:
-      t.turnRight(); break;
-    case 2:
-      t.turnLeft(); break;
-  }
-}
-delete s.vars['i'];
-    `,
-    java: `
+  array3: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2702,25 +1600,7 @@ public class Main {
     }
 }
     `,
-  },
-  array4: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-s.set('arr', [0, 1, 0, 2, 0]);
-for (const cmd of [0, 1, 0, 2, 0]) {
-  s.set('cmd', cmd);
-  switch (s.get('cmd')) {
-    case 0:
-      t.forward(); break;
-    case 1:
-      t.turnRight(); break;
-    case 2:
-      t.turnLeft(); break;
-  }
-}
-delete s.vars['cmd'];
-    `,
-    java: `
+  array4: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2738,32 +1618,7 @@ public class Main {
     }
 }
     `,
-  },
-  array5: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-s.set('arr', [0, 1, 0, 2, 0, 3, 0]);
-s.set('steps', 1);
-for (const cmd of [0, 1, 0, 2, 0, 3, 0]) {
-  s.set('cmd', cmd);
-  switch (s.get('cmd')) {
-    case 0:
-      for (s.set('i', 0); s.get('i') < s.get('steps'); s.set('i', s.get('i') + 1)) {
-        t.forward();
-      }
-      delete s.vars['i'];
-      break;
-    case 1:
-      t.turnRight(); break;
-    case 2:
-      t.turnLeft(); break;
-    case 3:
-      s.set('steps', s.get('steps') + 1); break;
-  }
-}
-delete s.vars['cmd'];
-    `,
-    java: `
+  array5: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2787,24 +1642,7 @@ public class Main {
     }
 }
     `,
-  },
-  string1: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-s.set('s', 'frflf');
-for (s.set('i', 0); s.get('i') < s.get('s').length; s.set('i', s.get('i') + 1)) {
-  switch (s.get('s').charAt(s.get('i'))) {
-    case 'f':
-      t.forward(); break;
-    case 'r':
-      t.turnRight(); break;
-    case 'l':
-      t.turnLeft(); break;
-  }
-}
-delete s.vars['i'];
-    `,
-    java: `
+  string1: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2822,26 +1660,7 @@ public class Main {
     }
 }
     `,
-  },
-  string2: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-s.set('s', 'ffbrfl');
-for (s.set('i', 0); s.get('i') < s.get('s').length; s.set('i', s.get('i') + 1)) {
-  switch (s.get('s').charAt(s.get('i'))) {
-    case 'f':
-      t.forward(); break;
-    case 'r':
-      t.turnRight(); break;
-    case 'l':
-      t.turnLeft(); break;
-    case 'b':
-      t.backward(); break;
-  }
-}
-delete s.vars['i'];
-    `,
-    java: `
+  string2: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2861,25 +1680,7 @@ public class Main {
     }
 }
     `,
-  },
-  string3: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-s.set('s', 'frflf');
-for (const ch of 'frflf') {
-  s.set('ch', ch);
-  switch (s.get('ch')) {
-    case 'f':
-      t.forward(); break;
-    case 'r':
-      t.turnRight(); break;
-    case 'l':
-      t.turnLeft(); break;
-  }
-}
-delete s.vars['ch'];
-    `,
-    java: `
+  string3: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2897,24 +1698,7 @@ public class Main {
     }
 }
     `,
-  },
-  string4: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-s.set('cmds', ['ri', 'aa', 'fo']);
-for (const cmd of ['ri', 'aa', 'fo']) {
-  s.set('cmd', cmd);
-  t.forward();
-  call(parse, 't', 'c')(t, s.get('cmd'));
-}
-delete s.vars['cmd'];
-
-function parse(t, c) {
-  if (c === 'fo') t.forward();
-  else if (c === 'ri') t.turnRight();
-}
-    `,
-    java: `
+  string4: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2932,35 +1716,7 @@ public class Main {
     }
 }
     `,
-  },
-  string5: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-s.set('cmds', ['ri', 'add', 'fo', 'add', 'le', 'fo', 'fo']);
-s.set('x', 0);
-for (const cmd of ['ri', 'add', 'fo', 'add', 'le', 'fo', 'fo']) {
-  s.set('cmd', cmd);
-  call(parse, 't', 'c', 'x')(t, s.get('cmd'), s.get('x'));
-  if (cmd === 'add') {
-    s.set('x', s.get('x') + 1);
-  }
-}
-delete s.vars['cmd'];
-
-function parse(t, c, x) {
-  if (c === 'fo') call(forwardGivenSteps, 't', 'n')(t, x);
-  else if (c === 'ri') t.turnRight();
-  else if (c === 'le') t.turnLeft();
-}
-
-function forwardGivenSteps(t, n) {
-  for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) {
-    t.forward();
-  }
-  delete s.vars['i'];
-}
-    `,
-    java: `
+  string5: `
 public class Main {
     public static void main(String[] args) {
         Turtle t = new Turtle(); // step
@@ -2988,17 +1744,7 @@ public class Main {
     }
 }
     `,
-  },
-  oop1: {
-    instrumented: `
-const t1 = new Turtle(1, 1); registerDisplayRef('t1', () => t1); // step
-const t2 = new Turtle(3, 3); registerDisplayRef('t2', () => t2); // step
-t1.forward();
-t2.forward();
-t1.forward();
-t2.forward();
-`,
-    java: `
+  oop1: `
 public class Main {
   public static void main(String[] args) {
     Turtle t1 = new Turtle(1, 1); // step
@@ -3010,31 +1756,7 @@ public class Main {
   }
 }
 `,
-  },
-  oop2: {
-    // 上のコードから下にあるクラスを参照するためには、main()関数を定義しないといけない。
-    instrumented: `
-function main() {
-  const m = call(MyTurtle, 'x', 'y', 'speed')(0, 0, 2); registerDisplayRef('m', () => m);
-  call(m.forward.bind(m))();
-}
-
-class MyTurtle {
-  constructor(x, y, speed) {
-    this.speed = speed; // step
-    this.c = new Turtle(x, y); // step
-  }
-  forward() {
-    for (s.set('i', 0); s.get('i') < this.speed; s.set('i', s.get('i') + 1)) {
-      this.c.forward();
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-`,
-    java: `
+  oop2: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle m = new MyTurtle(0, 0, 2); // caller
@@ -3050,25 +1772,14 @@ class MyTurtle {
     this.c = new Turtle(x, y); // step
   }
   public void forward() {
-    for (int i = 0; i < this.speed; i++) {
+    for (int i = 0; i < this.speed; i++) { // step
       this.c.前に進む(); // step
     }
   }
 }
 `,
-  },
   // ----------- 初級プログラミングⅡ 第1回 ここから -----------
-  multiObject1: {
-    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
-    instrumented: `
-const t1 = new Turtle(1, 1); registerDisplayRef('t1', () => t1); // step
-const t2 = new Turtle(3, 3); registerDisplayRef('t2', () => t2); // step
-t1.前に進む(); // step
-t1.右を向く(); // step
-t2.前に進む(); // step
-t2.左を向く(); // step
-`,
-    java: `
+  multiObject1: `
 public class Main {
   public static void main(String[] args) {
     Turtle t1 = new Turtle(1, 1); // step
@@ -3080,19 +1791,7 @@ public class Main {
   }
 }
 `,
-  },
-  multiObject2: {
-    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
-    instrumented: `
-const t1 = new Turtle(1, 1); registerDisplayRef('t1', () => t1); // step
-t1.前に進む(); // step
-t1.右を向く(); // step
-const t2 = new Turtle(3, 3); registerDisplayRef('t2', () => t2); // step
-t2.前に進む(); // step
-t2.左を向く(); // step
-t2.前に進む(); // step
-`,
-    java: `
+  multiObject2: `
 public class Main {
   public static void main(String[] args) {
     Turtle t1 = new Turtle(1, 1); // step
@@ -3105,26 +1804,7 @@ public class Main {
   }
 }
 `,
-  },
-  multiObject3: {
-    instrumented: `
-const t1 = new Turtle(1, 4); registerDisplayRef('t1', () => t1); // step
-const t2 = new Turtle(5, 4); registerDisplayRef('t2', () => t2); // step
-const t3 = new Turtle(2, 1); registerDisplayRef('t3', () => t3); // step
-
-t1.右を向く(); // step
-t1.右を向く(); // step
-t1.前に進む(); // step
-
-t2.左を向く(); // step
-t2.左を向く(); // step
-t2.前に進む(); // step
-
-t3.右を向く(); // step
-t3.前に進む(); // step
-t3.前に進む(); // step
-`,
-    java: `
+  multiObject3: `
 public class Main {
   public static void main(String[] args) {
     Turtle t1 = new Turtle(1, 4); // step
@@ -3145,29 +1825,7 @@ public class Main {
   }
 }
 `,
-  },
-  multiObject4: {
-    instrumented: `
-const t1 = new Turtle(0, 6); registerDisplayRef('t1', () => t1); // step
-const t2 = new Turtle(6, 0); registerDisplayRef('t2', () => t2); // step
-
-t1.右を向く(); // step
-t1.右を向く(); // step
-
-for (s.set('i', 0); s.get('i') < 5; s.set('i', s.get('i') + 1)) {
-  t1.前に進む(); // step
-  t2.前に進む(); // step
-  if (s.get('i') % 2 === 0) {
-    t1.左を向く(); // step
-    t2.左を向く(); // step
-  } else {
-    t1.右を向く(); // step
-    t2.右を向く(); // step
-  }
-}
-delete s.vars['i'];
-`,
-    java: `
+  multiObject4: `
 public class Main {
   public static void main(String[] args) {
     Turtle t1 = new Turtle(0, 6); // step
@@ -3190,25 +1848,7 @@ public class Main {
   }
 }
 `,
-  },
-  multiObject5: {
-    instrumented: `
-    const t1 = new Turtle(0, 3); registerDisplayRef('t1', () => t1); // step
-    const t2 = new Turtle(4, 3); registerDisplayRef('t2', () => t2); // step
-    const t3 = new Turtle(0, 0); registerDisplayRef('t3', () => t3); // step
-    const t4 = new Turtle(1, 6); registerDisplayRef('t4', () => t4); // step
-    const t5 = new Turtle(6, 4); registerDisplayRef('t5', () => t5); // step
-
-    t1.右を向く(); // step
-
-    while (t1.canMoveForward()) {
-      while (t1.canMoveForward()) {
-        t1.前に進む(); // step
-      }
-      t1.右を向く(); // step
-    }
-    `,
-    java: `
+  multiObject5: `
 public class Main {
   public static void main(String[] args) {
     Turtle t1 = new Turtle(0, 3); // step
@@ -3228,31 +1868,7 @@ public class Main {
   }
 }
 `,
-  },
-  multiObject6: {
-    instrumented: `
-const ts = [null, null, null]; registerDisplayRef('turtles', () => ts);
-for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) {
-  ts[s.get('i')] = new Turtle(1 + s.get('i') * 2, 0); // step
-}
-delete s.vars['i'];
-
-for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
-  for (s.set('j', 0); s.get('j') < ts.length; s.set('j', s.get('j') + 1)) {
-    N歩前に進める(ts[s.get('j')], s.get('j')); // step
-    // call(N歩前に進める, 't', 'n')(ts[s.get('j')], s.get('j')); //caller
-  }
-}
-delete s.vars['i'];
-delete s.vars['j'];
-
-function N歩前に進める(t, n) {
-  for (let i = 0; i < n; i++) {
-    t.前に進む();
-  }
-}
-`,
-    java: `
+  multiObject6: `
 public class Main {
   public static void main(String[] args) {
     Turtle[] turtles = new Turtle[3];
@@ -3274,19 +1890,7 @@ public class Main {
   }
 }
 `,
-  },
-  garbageCollection1: {
-    instrumented: `
-let t1 = new Turtle(1, 1); registerDisplayRef('t1', () => t1); // step
-t1.前に進む(); // step
-t1.右を向く(); // step
-let t2 = new Turtle(3, 3); registerDisplayRef('t2', () => t2); // step
-t2.前に進む(); // step
-t2.remove();
-t2 = t1; // step
-t2.前に進む(); // step
-`,
-    java: `
+  garbageCollection1: `
 public class Main {
   public static void main(String[] args) {
     Turtle t1 = new Turtle(1, 1); // step
@@ -3300,27 +1904,7 @@ public class Main {
   }
 }
 `,
-  },
-  garbageCollection2: {
-    instrumented: `
-let t1 = new Turtle(1, 1); registerDisplayRef('t1', () => t1); // step
-let t2 = new Turtle(3, 3); registerDisplayRef('t2', () => t2); // step
-let t3 = new Turtle(5, 5); registerDisplayRef('t3', () => t3); // step
-
-t1.前に進む(); // step
-t2.前に進む(); // step
-t3.前に進む(); // step
-
-t2.remove();
-t2 = t1; // step
-t3.remove();
-t3 = t2; // step
-
-t3.前に進む(); // step
-t2.前に進む(); // step
-t1.前に進む(); // step
-`,
-    java: `
+  garbageCollection2: `
 public class Main {
   public static void main(String[] args) {
   Turtle t1 = new Turtle(1, 1); // step
@@ -3342,47 +1926,7 @@ public class Main {
   }
 }
 `,
-  },
-  garbageCollection3: {
-    instrumented: `
-const turtles = new Array(2); registerDisplayRef('turtles', () => turtles);
-turtles[0] = new Turtle(2, 3); // step
-turtles[1] = new Turtle(3, 4); // step
-
-for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
-  call(N回右を向く, 't', 'n')(turtles[s.get('i')], s.get('i')); // step
-}
-delete s.vars['i'];
-for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
-  call(N回前に進む, 't', 'n')(turtles[s.get('i')], 3); // step
-}
-delete s.vars['i'];
-
-turtles[0].remove();
-turtles[0] = new Turtle(4, 3); // step
-turtles[1].remove();
-turtles[1] = new Turtle(3, 2); // step
-
-for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
-  call(N回左を向く, 't', 'n')(turtles[s.get('i')], s.get('i')); // step
-}
-delete s.vars['i'];
-for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
-  call(N回前に進む, 't', 'n')(turtles[s.get('i')], 3); // step
-}
-delete s.vars['i'];
-
-function N回前に進む(t, n) {
-  for (let i = 0; i < n; i++) t.前に進む();
-}
-function N回右を向く(t, n) {
-  for (let i = 0; i < n; i++) t.右を向く();
-}
-function N回左を向く(t, n) {
-  for (let i = 0; i < n; i++) t.左を向く();
-}
-`,
-    java: `
+  garbageCollection3: `
 public class Main {
   public static void main(String[] args) {
     Turtle[] turtles = new Turtle[2];
@@ -3416,30 +1960,7 @@ public class Main {
   }
 }
 `,
-  },
-  garbageCollection4: {
-    instrumented: `
-const turtles = new Array(5); registerDisplayRef('turtles', () => turtles);
-for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
-  turtles[s.get('i')] = new Turtle(s.get('i'), 0); // step
-}
-delete s.vars['i'];
-
-for (s.set('i', 0); s.get('i') < turtles.length; s.set('i', s.get('i') + 1)) { // step
-  turtles[s.get('i')].remove();
-  turtles[s.get('i')] = null; // step
-
-  for (const t of turtles) {
-    registerDisplayRef('t', () => t);
-    if (t !== null) {
-      t.前に進む(); // step
-    }
-    unregisterDisplayRef('t');
-  }
-}
-delete s.vars['i'];
-`,
-    java: `
+  garbageCollection4: `
 public class Main {
   public static void main(String[] args) {
     Turtle[] turtles = new Turtle[5];
@@ -3461,27 +1982,7 @@ public class Main {
   }
 }
 `,
-  },
-  garbageCollection5: {
-    instrumented: `
-call(線を描く, 'x', 'y', 'dir', 'len')(1, 1, 1, 5);
-call(線を描く, 'x', 'y', 'dir', 'len')(1, 5, 2, 5);
-const t = new Turtle(3, 3); registerDisplayRef('t', () => t); // step
-
-function 線を描く(x, y, dir, len) {
-  const t = new Turtle(x, y); registerDisplayRef('t', () => t); // step
-  for (s.set('i', 0); s.get('i') < dir; s.set('i', s.get('i') + 1)) { // step
-    t.右を向く(); // step
-  }
-  delete s.vars['i'];
-  for (s.set('i', 0); s.get('i') < len - 1; s.set('i', s.get('i') + 1)) { // step
-    t.前に進む(); // step
-  }
-  delete s.vars['i'];
-  t.remove();
-}
-`,
-    java: `
+  garbageCollection5: `
 public class Main {
   public static void main(String[] args) {
     線を描く(1, 1, 1, 5); // caller
@@ -3501,32 +2002,7 @@ public class Main {
   }
 }
 `,
-  },
-  garbageCollection6: {
-    instrumented: `
-call(正方形を描く, 'x', 'y', 'size')(0, 0, 6);
-call(正方形を描く, 'x', 'y', 'size')(3, 3, 3);
-const t = new Turtle(3, 3); registerDisplayRef('t', () => t); // step
-
-function 正方形を描く(x, y, size) {
-  call(線を描く, 'x', 'y', 'dir', 'len')(x, y, 0, size);
-  call(線を描く, 'x', 'y', 'dir', 'len')(x, y + size, 1, size);
-  call(線を描く, 'x', 'y', 'dir', 'len')(x + size, y + size, 2, size);
-  call(線を描く, 'x', 'y', 'dir', 'len')(x + size, y, 3, size);
-}
-
-function 線を描く(x, y, dir, len) {
-  const t = new Turtle(x, y); registerDisplayRef('t', () => t); // step
-  for (let i = 0; i < dir; i++) { // step
-    t.右を向く(); // step
-  }
-  for (let i = 0; i < len - 1; i++) { // step
-    t.前に進む(); // step
-  }
-  t.remove();
-}
-`,
-    java: `
+  garbageCollection6: `
 public class Main {
   public static void main(String[] args) {
     正方形を描く(0, 0, 6); // caller
@@ -3553,36 +2029,10 @@ public class Main {
   }
 }
 `,
-  },
   // ----------- 初級プログラミングⅡ 第1回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第2回 ここから -----------
-  makeClass1: {
-    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
-    instrumented: `
-function main() {
-  const t = call(MyTurtle)(); registerDisplayRef('t', () => t);
-  call(t.moveForward.bind(t))();
-  t.speed = 1; // step
-  call(t.moveForward.bind(t))();
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-    this.speed = 2; // step
-  }
-  moveForward() {
-    for (s.set('i', 0); s.get('i') < this.speed; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-    `,
-    java: `
+  makeClass1: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(); // caller
@@ -3603,35 +2053,7 @@ class MyTurtle {
   }
 }
     `,
-  },
-  makeClass2: {
-    instrumented: `
-function main() {
-  const t = call(MyTurtle)(); registerDisplayRef('t', () => t);
-  call(t.moveDiagonally.bind(t))();
-  t.speed = 2; // step
-  call(t.moveDiagonally.bind(t))();
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-    this.speed = 1; // step
-  }
-  moveDiagonally() {
-    for (s.vars.i = 0; s.vars.i < this.speed; s.vars.i++) { // step
-      this.t.前に進む(); // step
-      this.t.右を向く(); // step
-      this.t.前に進む(); // step
-      this.t.左を向く(); // step
-    }
-    delete s.vars.i;
-  }
-}
-
-main();
-    `,
-    java: `
+  makeClass2: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(); // caller
@@ -3655,36 +2077,7 @@ class MyTurtle {
   }
 }
     `,
-  },
-  makeClass3: {
-    instrumented: `
-function main() {
-  const t = call(MyTurtle)(); registerDisplayRef('t', () => t);
-  call(t.drawSquare.bind(t))();
-  t.size = 4; // step
-  call(t.drawSquare.bind(t))();
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-    this.size = 2; // step
-  }
-  drawSquare() {
-    for (s.set('i', 0); s.get('i') < this.size * 4; s.set('i', s.get('i') + 1)) { // step
-      if (s.get('i') % this.size === this.size - 1) {
-        this.t.右を向く(); // step
-      } else {
-        this.t.前に進む(); // step
-      }
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-    `,
-    java: `
+  makeClass3: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(); // caller
@@ -3709,40 +2102,7 @@ class MyTurtle {
   }
 }
     `,
-  },
-  makeClass4: {
-    instrumented: `
-function main() {
-  const t = call(MyTurtle)(); registerDisplayRef('t', () => t);
-  call(t.moveForward.bind(t))();
-  t.speed = 1; // step
-  call(t.turnRight.bind(t))();
-  call(t.moveForward.bind(t))();
-}
-
-class MyTurtle {
-  constructor() {
-    this.fast = new Turtle(1, 1); // step
-    this.slow = new Turtle(5, 1); // step
-    this.speed = 2; // step
-  }
-  moveForward() {
-    for (s.set('i', 0); s.get('i') < this.speed; s.set('i', s.get('i') + 1)) { // step
-      this.fast.前に進む(); // step
-	    this.fast.前に進む(); // step
-      this.slow.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-  turnRight() {
-    this.fast.右を向く(); // step
-    this.slow.右を向く(); // step
-  }
-}
-
-main();
-    `,
-    java: `
+  makeClass4: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(); // caller
@@ -3770,43 +2130,7 @@ class MyTurtle {
   }
 }
     `,
-  },
-  makeClass5: {
-    instrumented: `
-function main() {
-  const t = call(MyTurtle)(); registerDisplayRef('t', () => t);
-  call(t.operate.bind(t))();
-  t.operation = "LFFRFF"; // step
-  call(t.operate.bind(t))();
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-    this.operation = "FFRFF"; // step
-  }
-
-  operate() {
-    for (s.set('i', 0); s.get('i') < this.operation.length; s.set('i', s.get('i') + 1)) { // step
-      switch (this.operation.charAt(s.get('i'))) {
-      case 'F':
-        this.t.前に進む(); // step
-        break;
-      case 'R':
-        this.t.右を向く(); // step
-        break;
-      case 'L':
-        this.t.左を向く(); // step
-        break;
-      }
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-`,
-    java: `
+  makeClass5: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(); //caller
@@ -3833,40 +2157,7 @@ class MyTurtle {
   }
 }
 `,
-  },
-  makeClass6: {
-    instrumented: `
-function main() {
-  const t = call(MyTurtle)(); registerDisplayRef('t', () => t);
-  call(t.turnRight.bind(t))();
-  call(t.moveForward.bind(t))();
-  call(t.turnLeft.bind(t))();
-  call(t.moveForward.bind(t))();
-  call(t.moveForward.bind(t))();
-}
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-    this.speed = 1; // step
-  }
-  moveForward() {
-    for (s.set('i', 0); s.get('i') < this.speed; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-    this.speed++; // step
-  }
-  turnRight() {
-    this.t.右を向く(); // step
-  }
-  turnLeft() {
-    this.t.左を向く(); // step
-  }
-}
-
-main();
-`,
-    java: `
+  makeClass6: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(); // caller
@@ -3893,32 +2184,7 @@ class MyTurtle {
   }
 }
 `,
-  },
-  constructor1: {
-    instrumented: `
-function main() {
-  const t = call(MyTurtle, 'x', 'y', 'speed')(0, 1, 2); registerDisplayRef('t', () => t);
-  call(t.moveForward.bind(t))();
-  t.speed = 1; // step
-  call(t.moveForward.bind(t))();
-}
-
-class MyTurtle {
-  constructor(x, y, speed) {
-    this.t = new Turtle(x, y); // step
-    this.speed = speed; // step
-  }
-  moveForward() {
-    for (s.set('i', 0); s.get('i') < this.speed; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-    `,
-    java: `
+  constructor1: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(0, 1, 2); // caller
@@ -3943,39 +2209,7 @@ class MyTurtle {
   }
 }
     `,
-  },
-  constructor2: {
-    instrumented: `
-function main() {
-  const t = call(MyTurtle, 'x', 'y', 'operation')(1, 1, "FRFLFFF"); registerDisplayRef('t', () => t);
-  call(t.operate.bind(t))();
-}
-class MyTurtle {
-  constructor(x, y, operation) {
-    this.t = new Turtle(x, y); // step
-    this.operation = operation; // step
-  }
-  operate() {
-    for (s.set('i', 0); s.get('i') < this.operation.length; s.set('i', s.get('i') + 1)) { // step
-      switch (this.operation.charAt(s.get('i'))) {
-      case 'F':
-        this.t.前に進む(); // step
-        break;
-      case 'R':
-        this.t.右を向く(); // step
-        break;
-      case 'L':
-        this.t.左を向く(); // step
-        break;
-      }
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-`,
-    java: `
+  constructor2: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(1, 1, "FRFLFFF"); // caller
@@ -4004,40 +2238,7 @@ class MyTurtle {
   }
 }
 `,
-  },
-  constructor3: {
-    instrumented: `
-function main() {
-  const t = call(MyTurtle, 'speed')(2); registerDisplayRef('t', () => t);
-  call(t.moveForward.bind(t))();
-  call(t.turnRight.bind(t))();
-  call(t.moveForward.bind(t))();
-  call(t.moveForward.bind(t))();
-  call(t.turnLeft.bind(t))();
-}
-class MyTurtle {
-  constructor(speed) {
-    this.t = new Turtle(); // step
-    this.speed = speed; // step
-  }
-  moveForward() {
-    for (s.set('i', 0); s.get('i') < this.speed; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-    this.speed--; // step
-  }
-  turnRight() {
-    this.t.右を向く(); // step
-  }
-  turnLeft() {
-    this.t.左を向く(); // step
-  }
-}
-
-main();
-`,
-    java: `
+  constructor3: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(2); // caller
@@ -4069,39 +2270,7 @@ class MyTurtle {
   }
 }
 `,
-  },
-  constructor4: {
-    instrumented: `
-function main() {
-  const t1 = new Turtle(3, 4); registerDisplayRef('t1', () => t1); // step
-  const t2 = new Turtle(0, 0); registerDisplayRef('t2', () => t2); // step
-  const mover = call(TurtleMover, 't')(t1); registerDisplayRef('mover', () => mover);
-  call(mover.moveSquare.bind(mover), 'size')(3);
-  mover.t = new Turtle(3, 1); // step
-  call(mover.moveSquare.bind(mover), 'size')(3);
-  mover.t.remove();
-  mover.t = t2; // step
-  call(mover.moveSquare.bind(mover), 'size')(2);
-}
-class TurtleMover {
-  constructor(t) {
-    this.t = t; // step
-  }
-  moveSquare(size) {
-    for (s.set('i', 0); s.get('i') < size * 4; s.set('i', s.get('i') + 1)) { // step
-      if (s.get('i') % size === size - 1) {
-        this.t.右を向く(); // step
-      } else {
-        this.t.前に進む(); // step
-      }
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-`,
-    java: `
+  constructor4: `
 public class Main {
   public static void main(String[] args) {
     Turtle t1 = new Turtle(3, 4); // step
@@ -4131,40 +2300,10 @@ class TurtleMover {
   }
 }
 `,
-  },
   // ----------- 初級プログラミングⅡ 第2回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第3回 ここから -----------
-  encapsulation: {
-    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
-    instrumented: `
-function main() {
-  const t = call(MyTurtle)(); registerDisplayRef('t', () => t);
-  call(t.moveForward.bind(t))();
-  call(t.changeSpeed.bind(t), 'speed')(1);
-  call(t.moveForward.bind(t))();
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-    this.speed = 2; // step
-  }
-
-  moveForward() {
-    for (s.set('i', 0); s.get('i') < this.speed; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-  changeSpeed(speed) {
-    this.speed = speed; // step
-  }
-}
-
-main();
-`,
-    java: `
+  encapsulation: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(); // caller
@@ -4188,25 +2327,7 @@ class MyTurtle {
   }
 }
 `,
-  },
-  withoutEncapsulation: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-call(drawSquare, 't', 'size')(t, 2);
-call(drawSquare, 't', 'size')(t, 3);
-
-function drawSquare(t, size) {
-  for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
-    for (s.set('j', 0); s.get('j') < size - 1; s.set('j', s.get('j') + 1)) {
-      t.前に進む(); // step
-    }
-    delete s.vars['j'];
-    t.右を向く(); // step
-  }
-  delete s.vars['i'];
-}
-`,
-    java: `
+  withoutEncapsulation: `
 public class Main {
   public static void main(String[] args) {
     Turtle t = new Turtle(); // step
@@ -4224,35 +2345,7 @@ public class Main {
   }
 }
 `,
-  },
-  withEncapsulation: {
-    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
-    instrumented: `
-function main() {
-  const t = call(SquareTurtle)(); registerDisplayRef('t', () => t);
-  call(t.draw.bind(t), 'size')(2);
-  call(t.draw.bind(t), 'size')(3);
-}
-
-class SquareTurtle {
-  constructor() {
-    this.t = new Turtle(0, 0); // step
-  }
-  draw(size) {
-    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
-      for (s.set('j', 0); s.get('j') < size - 1; s.set('j', s.get('j') + 1)) { // step
-        this.t.前に進む(); // step
-      }
-      delete s.vars['j'];
-      this.t.右を向く(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-`,
-    java: `
+  withEncapsulation: `
 public class Main {
   public static void main(String[] args) {
     SquareTurtle t = new SquareTurtle(); // caller
@@ -4274,25 +2367,7 @@ class SquareTurtle {
   }
 }
 `,
-  },
-  withoutEncapsulation2: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-call(drawCurve, 't', 'speed')(t, 3);
-
-function drawCurve(t, speed) {
-  call(drawLine, 't', 'speed')(t, speed);
-  t.右を向く(); // step
-  call(drawLine, 't', 'speed')(t, speed);
-}
-function drawLine(t, speed) {
-  for (s.set('i', 0); s.get('i') < speed; s.set('i', s.get('i') + 1)) { // step
-    t.前に進む(); // step
-  }
-  delete s.vars['i'];
-}
-`,
-    java: `
+  withoutEncapsulation2: `
 public class Main {
   public static void main(String[] args) {
     Turtle t = new Turtle(); // step
@@ -4310,32 +2385,7 @@ public class Main {
   }
 }
 `,
-  },
-  withEncapsulation2: {
-    instrumented: `
-function main() {
-  const t = call(CurveTurtle)(); registerDisplayRef('t', () => t);
-  call(t.draw.bind(t),'speed')(2);
-}
-class CurveTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-  draw(speed) {
-    call(this.drawLine.bind(this), 'speed')(speed);
-    this.t.右を向く(); // step
-    call(this.drawLine.bind(this), 'speed')(speed);
-  }
-  drawLine(speed) {
-    for (s.set('i', 0); s.get('i') < speed; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-main();
-`,
-    java: `
+  withEncapsulation2: `
 public class Main {
   public static void main(String[] args) {
     CurveTurtle t = new CurveTurtle(); // caller
@@ -4356,35 +2406,7 @@ class CurveTurtle {
   }
 }
 `,
-  },
-  withEncapsulation3: {
-    instrumented: `
-function main() {
-  let t = call(MyTurtle, 'x', 'y', 'speed')(0, 0, 1); registerDisplayRef('t', () => t);
-  call(t.moveForward.bind(t))();
-  call(t.moveForward.bind(t))();
-  t.t.remove();
-  t = call(MyTurtle, 'x', 'y', 'speed')(2, 2, t.getSpeed() * 2);
-  call(t.moveForward.bind(t))();
-}
-class MyTurtle {
-  constructor(x, y, speed) {
-    this.t = new Turtle(x, y); // step
-    this.speed = speed; // step
-  }
-  getSpeed() {
-    return this.speed;
-  }
-  moveForward() {
-    for (s.set('i', 0); s.get('i') < this.speed; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-main();
-`,
-    java: `
+  withEncapsulation3: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(0, 0, 1); // caller
@@ -4414,52 +2436,7 @@ class MyTurtle {
   }
 }
 `,
-  },
-  withEncapsulation4: {
-    instrumented: `
-function main() {
-  const t = call(MyTurtle, 'x', 'y', 'speed')(0, 0, 2); registerDisplayRef('t', () => t);
-  call(t.moveForward.bind(t))();
-  call(t.setSpeed.bind(t), 'speed')(Math.floor(t.getSpeed() * 3 / 2));
-  call(t.moveForward.bind(t))();
-  call(t.setSpeed.bind(t), 'speed')(-1);
-  call(t.moveForward.bind(t))();
-  call(t.setSpeed.bind(t), 'speed')(99);
-  call(t.moveBackward.bind(t))();
-}
-class MyTurtle {
-  constructor(x, y, speed) {
-    this.t = new Turtle(x, y); // step
-    call(this.setSpeed.bind(this), 'speed')(speed);
-  }
-  getSpeed() {
-    return this.speed;
-  }
-  setSpeed(speed) {
-    if (speed < 0) {
-      this.speed = 0; // step
-    } else if (5 < speed) {
-      this.speed = 5; // step
-    } else {
-      this.speed = speed; // step
-    }
-  }
-  moveForward() {
-    for (s.set('i', 0); s.get('i') < this.speed; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-  moveBackward() {
-    for (s.set('i', 0); s.get('i') < this.speed; s.set('i', s.get('i') + 1)) { // step
-      this.t.後に戻る(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-main();
-`,
-    java: `
+  withEncapsulation4: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(0, 0, 2); // caller
@@ -4499,39 +2476,7 @@ class MyTurtle {
   }
 }
 `,
-  },
-  withEncapsulation5: {
-    instrumented: `
-function main() {
-  const t = call(MyTurtle, 'x', 'y', 'speed')(3, 0, 3); registerDisplayRef('t', () => t);
-  call(t.moveForward.bind(t))();
-  call(t.changeSpeed.bind(t), 'speed')(-2);
-  call(t.moveForward.bind(t))();
-  call(t.changeSpeed.bind(t), 'speed')(5);
-  call(t.moveForward.bind(t))();
-}
-class MyTurtle {
-  constructor(x, y, speed) {
-    this.t = new Turtle(x, y); // step
-    this.speed = speed; // step
-  }
-  moveForward() {
-    for (s.set('i', 0); s.get('i') < Math.abs(this.speed); s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-  changeSpeed(speed) {
-    if (this.speed * speed < 0) {
-      this.t.右を向く(); // step
-      this.t.右を向く(); // step
-    }
-    this.speed = speed; // step
-  }
-}
-main();
-`,
-    java: `
+  withEncapsulation5: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(3, 0, 3); // caller
@@ -4566,32 +2511,7 @@ class MyTurtle {
   }
 }
 `,
-  },
-  withEncapsulation6: {
-    instrumented: `
-function main() {
-  const t = call(MyTurtle, 'x', 'y')(3, 3); registerDisplayRef('t', () => t);
-  call(t.moveForward.bind(t))();
-  call(t.moveForward.bind(t))();
-  call(t.teleport.bind(t), 'x', 'y')(0, 0);
-  call(t.moveForward.bind(t))();
-  call(t.teleport.bind(t), 'x', 'y')(6, 6);
-}
-class MyTurtle {
-  constructor(x, y) {
-    this.t = new Turtle(x, y); // step
-  }
-  moveForward() {
-    this.t.前に進む(); // step
-  }
-  teleport(x, y) {
-    this.t.remove();
-    this.t = new Turtle(x, y); // step
-  }
-}
-main();
-`,
-    java: `
+  withEncapsulation6: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(3, 3); // caller
@@ -4618,51 +2538,7 @@ class MyTurtle {
   }
 }
 `,
-  },
-  withEncapsulation7: {
-    instrumented: `
-function main() {
-  const t = call(MyTurtle, 'x', 'y')(0, 0); registerDisplayRef('t', () => t);
-  call(t.setOperation.bind(t), 'op')("FFRFR");
-  call(t.operate.bind(t))();
-
-  call(t.setOperation.bind(t), 'op')("ABC");
-  call(t.operate.bind(t))();
-}
-
-class MyTurtle {
-  constructor(x, y) {
-    this.t = new Turtle(x, y); // step
-    this.operation = "F"; // step
-  }
-  setOperation(op) {
-    this.operation = op; // step
-  }
-  operate() {
-    for (s.set('i', 0); s.get('i') < this.operation.length; s.set('i', s.get('i') + 1)) { // step
-      switch (this.operation.charAt(s.get('i'))) {
-        case 'F':
-          this.t.前に進む(); // step
-          break;
-        case 'B':
-          this.t.後に戻る(); // step
-          break;
-        case 'R':
-          this.t.右を向く(); // step
-          break;
-        case 'L':
-          this.t.左を向く(); // step
-          break;
-      }
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-
-`,
-    java: `
+  withEncapsulation7: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(0, 0); // caller
@@ -4699,24 +2575,10 @@ class MyTurtle {
   }
 }
 `,
-  },
   // ----------- 初級プログラミングⅡ 第3回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第4回 ここから -----------
-  staticMethod1: {
-    // 静的メソッドは普通の関数で代替すること。
-    instrumented: `
-const t1 = new Turtle(1, 1); registerDisplayRef('t1', () => t1); // step
-call(moveTwoSteps, 't')(t1);
-const t2 = new Turtle(3, 3); registerDisplayRef('t2', () => t2); // step
-call(moveTwoSteps, 't')(t2);
-
-function moveTwoSteps(t) {
-  t.前に進む(); // step
-  t.前に進む(); // step
-}
-  `,
-    java: `
+  staticMethod1: `
 public class Main {
   public static void main(String[] args) {
     Turtle t1 = new Turtle(1, 1); // step
@@ -4733,22 +2595,7 @@ class Controller {
   }
 }
     `,
-  },
-  staticMethod2: {
-    // 静的メソッドは普通の関数で代替すること。
-    instrumented: `
-const t1 = new Turtle(1, 1); registerDisplayRef('t1', () => t1); // step
-const t2 = new Turtle(3, 3); registerDisplayRef('t2', () => t2); // step
-call(moveTwoSteps, 't')(t1);
-call(moveTwoSteps, 't')(t2);
-t1.前に進む(); // step
-
-function moveTwoSteps(t) {
-  t.前に進む(); // step
-  t.前に進む(); // step
-}
-  `,
-    java: `
+  staticMethod2: `
 public class Main {
   public static void main(String[] args) {
     Turtle t1 = new Turtle(1, 1); // step
@@ -4766,23 +2613,7 @@ class Controller {
   }
 }
     `,
-  },
-  staticMethod3: {
-    instrumented: `
-const t1 = new Turtle(0, 0); registerDisplayRef('t1', () => t1); // step
-call(moveThreeSteps, 't')(t1);
-const t2 = new Turtle(3, 0); registerDisplayRef('t2', () => t2); // step
-const t3 = new Turtle(6, 0); registerDisplayRef('t3', () => t3); // step
-call(moveThreeSteps, 't')(t2);
-call(moveThreeSteps, 't')(t3);
-
-function moveThreeSteps(t) {
-  t.前に進む(); // step
-  t.前に進む(); // step
-  t.前に進む(); // step
-}
-    `,
-    java: `
+  staticMethod3: `
 public class Main {
     public static void main(String[] args) {
     Turtle t1 = new Turtle(0, 0); // step
@@ -4802,32 +2633,7 @@ class Controller {
   }
 }
     `,
-  },
-  staticMethod4: {
-    instrumented: `
-const t1 = new Turtle(0, 0); registerDisplayRef('t1', () => t1); // step
-const t2 = new Turtle(1, 1); registerDisplayRef('t2', () => t2); // step
-call(drawSquare, 't', 'size')(t1, 4);
-const t3 = new Turtle(2, 2); registerDisplayRef('t3', () => t3); // step
-call(drawSquare, 't', 'size')(t2, 3);
-call(drawSquare, 't', 'size')(t3, 2);
-
-function drawSquare(t, size) {
-  for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
-    call(drawLine, 't', 'n')(t, size - 1);
-    t.右を向く(); // step
-  }
-  delete s.vars['i'];
-}
-
-function drawLine(t, n) {
-  for (s.set('i', 0); s.get('i') < n; s.set('i', s.get('i') + 1)) { // step
-    t.前に進む(); // step
-  }
-  delete s.vars['i'];
-}
-    `,
-    java: `
+  staticMethod4: `
 public class Main {
   public static void main(String[] args) {
     Turtle t1 = new Turtle(0, 0); // step
@@ -4852,29 +2658,7 @@ class Controller {
   }
 }
     `,
-  },
-  staticField1: {
-    instrumented: `
-myGlobal.Controller = { stepCount: 0 };
-
-function main() {
-  const t1 = new Turtle(1, 1); registerDisplayRef('t1', () => t1); // step
-  call(moveTwoSteps, 't')(t1);
-  const t2 = new Turtle(3, 3); registerDisplayRef('t2', () => t2); // step
-  call(moveTwoSteps, 't')(t2);
-  s.set('count', myGlobal.Controller.stepCount); // step
-}
-
-function moveTwoSteps(t) {
-  t.前に進む(); // step
-  myGlobal.Controller.stepCount++; // step
-  t.前に進む(); // step
-  myGlobal.Controller.stepCount++; // step
-}
-
-main();
-  `,
-    java: `
+  staticField1: `
 public class Main {
   public static void main(String[] args) {
     Turtle t1 = new Turtle(1, 1); // step
@@ -4896,35 +2680,7 @@ class Controller {
   }
 }
     `,
-  },
-  staticField2: {
-    instrumented: `
-myGlobal.Settings = { speed: 3 };
-
-function main() {
-  const t1 = call(MyTurtle)(); registerDisplayRef('t1', () => t1);
-  call(t1.moveForward.bind(t1))();
-  myGlobal.Settings.speed = 2; // step
-  const t2 = call(MyTurtle)(); registerDisplayRef('t2', () => t2);
-  call(t1.moveForward.bind(t1))();
-  call(t2.moveForward.bind(t2))();
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-  moveForward() {
-    for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-`,
-    java: `
+  staticField2: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t1 = new MyTurtle(); // caller
@@ -4950,51 +2706,7 @@ class MyTurtle {
   }
 }
 `,
-  },
-  staticField3: {
-    instrumented: `
-myGlobal.Settings = { speed: 2 };
-
-function main() {
-  const t1 = call(LineTurtle)(); registerDisplayRef('t1', () => t1);
-  const t2 = call(SquareTurtle)(); registerDisplayRef('t2', () => t2);
-  call(t1.drawLine.bind(t1))();
-  call(t2.drawSquare.bind(t2))();
-  myGlobal.Settings.speed = 3; // step
-  call(t1.drawLine.bind(t1))();
-}
-
-class LineTurtle {
-  constructor() {
-    this.t = new Turtle(0, 0); // step
-  }
-  drawLine() {
-    for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-
-class SquareTurtle {
-  constructor() {
-    this.t = new Turtle(1, 1); // step
-  }
-  drawSquare() {
-    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
-      for (s.set('j', 0); s.get('j') < myGlobal.Settings.speed; s.set('j', s.get('j') + 1)) { // step
-        this.t.前に進む(); // step
-      }
-      delete s.vars['j'];
-      this.t.右を向く(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-    `,
-    java: `
+  staticField3: `
 public class Main {
   public static void main(String[] args) {
     LineTurtle t1 = new LineTurtle(); // caller
@@ -5026,52 +2738,7 @@ class SquareTurtle {
   }
 }
     `,
-  },
-  staticField4: {
-    instrumented: `
-myGlobal.Settings = { speed: 2 };
-
-function main() {
-  const t1 = call(AcceleratedTurtle)(); registerDisplayRef('t1', () => t1);
-  const t2 = call(SquareTurtle)(); registerDisplayRef('t2', () => t2);
-  call(t1.drawLine.bind(t1))();
-  call(t2.drawSquare.bind(t2))();
-  myGlobal.Settings.speed = 2; // step
-  call(t1.drawLine.bind(t1))();
-}
-
-class AcceleratedTurtle {
-  constructor() {
-    this.t = new Turtle(0, 0); // step
-  }
-  drawLine() {
-    for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-    myGlobal.Settings.speed++; // step
-  }
-}
-
-class SquareTurtle {
-  constructor() {
-    this.t = new Turtle(1, 1); // step
-  }
-  drawSquare() {
-    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
-      for (s.set('j', 0); s.get('j') < myGlobal.Settings.speed; s.set('j', s.get('j') + 1)) { // step
-        this.t.前に進む(); // step
-      }
-      delete s.vars['j'];
-      this.t.右を向く(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-    `,
-    java: `
+  staticField4: `
 public class Main {
   public static void main(String[] args) {
     AcceleratedTurtle t1 = new AcceleratedTurtle(); // caller
@@ -5104,50 +2771,7 @@ class SquareTurtle {
   }
 }
     `,
-  },
-  staticField5: {
-    instrumented: `
-myGlobal.Settings = { additionalSpeed: 0 };
-
-function main() {
-  const t1 = call(SlowTurtle)(); registerDisplayRef('t1', () => t1);
-  const t2 = call(FastTurtle)(); registerDisplayRef('t2', () => t2);
-  call(t1.moveForward.bind(t1))();
-  call(t2.moveForward.bind(t2))();
-  myGlobal.Settings.additionalSpeed++; // step
-  call(t1.moveForward.bind(t1))();
-  call(t2.moveForward.bind(t2))();
-}
-
-class SlowTurtle {
-  constructor() {
-    this.t = new Turtle(0, 0); // step
-    this.base = 1; // step
-  }
-  moveForward() {
-    for (s.set('i', 0); s.get('i') < this.base + myGlobal.Settings.additionalSpeed; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-
-class FastTurtle {
-  constructor() {
-    this.t = new Turtle(6, 0); // step
-    this.base = 2; // step
-  }
-  moveForward() {
-    for (s.set('i', 0); s.get('i') < this.base + myGlobal.Settings.additionalSpeed; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-    `,
-    java: `
+  staticField5: `
 public class Main {
   public static void main(String[] args) {
     SlowTurtle t1 = new SlowTurtle(); // caller
@@ -5179,38 +2803,7 @@ class FastTurtle {
   }
 }
     `,
-  },
-  staticField6: {
-    instrumented: `
-myGlobal.Settings = { additionalSpeed: 0 };
-
-function main() {
-  const t1 = call(MyTurtle, 'x', 'y')(0, 0); registerDisplayRef('t1', () => t1);
-  const t2 = call(MyTurtle, 'x', 'y')(3, 0); registerDisplayRef('t2', () => t2);
-  call(t1.moveForward.bind(t1))();
-  call(t2.moveForward.bind(t2))();
-  t1.base++; // step
-  myGlobal.Settings.additionalSpeed++; // step
-  call(t1.moveForward.bind(t1))();
-  call(t2.moveForward.bind(t2))();
-}
-
-class MyTurtle {
-  constructor(x, y) {
-    this.turtle = new Turtle(x, y); // step
-    this.base = 1; // step
-  }
-  moveForward() {
-    for (s.set('i', 0); s.get('i') < this.base + myGlobal.Settings.additionalSpeed; s.set('i', s.get('i') + 1)) { // step
-      this.turtle.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-    `,
-    java: `
+  staticField6: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t1 = new MyTurtle(0, 0); // caller
@@ -5227,7 +2820,7 @@ class Settings {
   static public int additionalSpeed = 0;
 }
 class MyTurtle {
-  private Turtle t;
+  private Turtle turtle;
   public int base;
 
   MyTurtle(int x, int y) {
@@ -5240,38 +2833,10 @@ class MyTurtle {
   }
 }
     `,
-  },
   // ----------- 初級プログラミングⅡ 第4回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第5回 ここから -----------
-  inheritance1: {
-    // 独自クラスを定義するコードでは `main()` 関数を定義すること。
-    instrumented: `
-function main() {
-  const t = call(CurveTurtle)(); registerDisplayRef('t', () => t);
-  call(t.drawCurve.bind(t))();
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-  drawLine() {
-    this.t.前に進む(); // step
-    this.t.前に進む(); // step
-  }
-}
-
-class CurveTurtle extends MyTurtle {
-  drawCurve() {
-    call(this.drawLine.bind(this))();
-    this.t.右を向く(); // step
-    call(this.drawLine.bind(this))();
-  }
-}
-main();
-`,
-    java: `
+  inheritance1: `
 public class Main {
   public static void main(String[] args) {
     CurveTurtle t = new CurveTurtle(); // caller
@@ -5294,37 +2859,7 @@ class CurveTurtle extends MyTurtle {
   }
 }
 `,
-  },
-  inheritance2: {
-    instrumented: `
-function main() {
-  const t = call(CurveTurtle, 'p')(2); registerDisplayRef('t', () => t);
-  call(t.drawCurve.bind(t))();
-}
-
-class MyTurtle {
-  constructor(x, y) {
-    this.t = new Turtle(x, y); // step
-  }
-  drawLine() {
-    this.t.前に進む(); // step
-    this.t.前に進む(); // step
-  }
-}
-
-class CurveTurtle extends MyTurtle {
-  constructor(p) {
-    call((x, y) => super(x, y), 'x', 'y')(p, p);
-  }
-  drawCurve() {
-    call(this.drawLine.bind(this))();
-    this.t.右を向く(); // step
-    call(this.drawLine.bind(this))();
-  }
-}
-main();
-`,
-    java: `
+  inheritance2: `
 public class Main {
   public static void main(String[] args) {
     CurveTurtle t = new CurveTurtle(2); // caller
@@ -5352,38 +2887,7 @@ class CurveTurtle extends MyTurtle {
   }
 }
 `,
-  },
-  inheritance3: {
-    instrumented: `
-function main() {
-  const t = call(CurveTurtle, 'p')(0); registerDisplayRef('t', () => t);
-  call(t.drawCurve.bind(t))();
-  call(t.drawLine.bind(t))();
-}
-
-class MyTurtle {
-  constructor(x, y) {
-    this.t = new Turtle(x, y); // step
-  }
-  drawLine() {
-    this.t.前に進む(); // step
-    this.t.前に進む(); // step
-  }
-}
-
-class CurveTurtle extends MyTurtle {
-  constructor(p) {
-    call((x, y) => super(x, y), 'x', 'y')(p + 1, p + 2);
-  }
-  drawCurve() {
-    call(this.drawLine.bind(this))();
-    this.t.右を向く(); // step
-    call(this.drawLine.bind(this))();
-  }
-}
-main();
-`,
-    java: `
+  inheritance3: `
 public class Main {
   public static void main(String[] args) {
     CurveTurtle t = new CurveTurtle(0); // caller
@@ -5412,43 +2916,7 @@ class CurveTurtle extends MyTurtle {
   }
 }
     `,
-  },
-  inheritance4: {
-    instrumented: `
-function main() {
-  const t = call(SquareTurtle)(); registerDisplayRef('t', () => t);
-  call(t.drawSquare.bind(t))();
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(0, 1); // step
-  }
-  drawLine() {
-    this.t.前に進む(); // step
-    this.t.前に進む(); // step
-  }
-}
-
-class CurveTurtle extends MyTurtle {
-  drawCurve() {
-    call(this.drawLine.bind(this))();
-    this.t.右を向く(); // step
-    call(this.drawLine.bind(this))();
-  }
-}
-
-class SquareTurtle extends CurveTurtle {
-  drawSquare() {
-    call(this.drawCurve.bind(this))();
-    this.t.右を向く(); // step
-    call(this.drawCurve.bind(this))();
-  }
-}
-
-main();
-`,
-    java: `
+  inheritance4: `
 public class Main {
   public static void main(String[] args) {
     SquareTurtle t = new SquareTurtle(); // caller
@@ -5477,39 +2945,7 @@ class SquareTurtle extends CurveTurtle {
   }
 }
     `,
-  },
-  override1: {
-    instrumented: `
-function main() {
-  const t = call(FastTurtle)(); registerDisplayRef('t', () => t); // caller
-  call(t.drawLine.bind(t))(); // caller
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-
-  drawLine() {
-    for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step // caller
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-
-  length() {
-    return 2;
-  }
-}
-
-class FastTurtle extends MyTurtle {
-  length() {
-    return 3;
-  }
-}
-main();
-`,
-    java: `
+  override1: `
 public class Main {
   public static void main(String[] args) {
     FastTurtle t = new FastTurtle(); // caller
@@ -5534,46 +2970,7 @@ class FastTurtle extends MyTurtle {
   }
 }
 `,
-  },
-  override2: {
-    instrumented: `
-function main() {
-  const t = call(SuperFastTurtle)(); registerDisplayRef('t', () => t);
-  call(t.drawLine.bind(t))();
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-
-  drawLine() {
-    for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-
-  length() {
-    return 2;
-  }
-}
-
-class FastTurtle extends MyTurtle {
-  length() {
-    return super.length() + 1;
-  }
-}
-
-class SuperFastTurtle extends FastTurtle {
-  length() {
-    return super.length() + 1;
-  }
-}
-
-main();
-`,
-    java: `
+  override2: `
 public class Main {
   public static void main(String[] args) {
     SuperFastTurtle t = new SuperFastTurtle(); // caller
@@ -5604,46 +3001,7 @@ class SuperFastTurtle extends FastTurtle {
   }
 }
 `,
-  },
-  override3: {
-    instrumented: `
-function main() {
-  const t = call(FastCurveTurtle)(); registerDisplayRef('t', () => t);
-  call(t.draw.bind(t))();
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-
-  draw() {
-    for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-
-  length() {
-    return 2;
-  }
-}
-
-class FastCurveTurtle extends MyTurtle {
-  draw() {
-    call(super.draw.bind(this))();
-    this.t.右を向く(); // step
-    call(super.draw.bind(this))();
-  }
-
-  length() {
-    return super.length() + 1;
-  }
-}
-
-main();
-`,
-    java: `
+  override3: `
 public class Main {
   public static void main(String[] args) {
     FastCurveTurtle t = new FastCurveTurtle(); // caller
@@ -5675,50 +3033,7 @@ class FastCurveTurtle extends MyTurtle {
   }
 }
 `,
-  },
-  polymorphism1: {
-    instrumented: `
-function main() {
-  const ts = [
-    call(MyTurtle, 'x', 'y')(0, 0),
-    call(FastTurtle, 'p')(1)
-  ]; registerDisplayRef('ts', () => ts);
-  for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) { // step
-    call(ts[s.get('i')].drawLine.bind(ts[s.get('i')]))(); // caller
-  }
-  delete s.vars['i'];
-}
-
-class MyTurtle {
-  constructor(x, y) {
-    this.t = new Turtle(x, y); // step
-  }
-
-  drawLine() {
-    for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-
-  length() {
-    return 2;
-  }
-}
-
-class FastTurtle extends MyTurtle {
-  constructor(p) {
-    call((x, y) => super(x, y), 'x', 'y')(p, p);
-  }
-
-  length() {
-    return 3;
-  }
-}
-
-main();
-`,
-    java: `
+  polymorphism1: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle[] ts = {
@@ -5749,62 +3064,7 @@ class FastTurtle extends MyTurtle {
   @Override int length() { return 3; }
 }
 `,
-  },
-  polymorphism2: {
-    instrumented: `
-function main() {
-  const ts = [
-    call(FastTurtle, 'p')(3),
-    call(CurveTurtle, 'p')(0)
-  ]; registerDisplayRef('ts', () => ts);
-  for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) { // step
-    call(ts[s.get('i')].draw.bind(ts[s.get('i')]))();
-  }
-  delete s.vars['i'];
-}
-
-class MyTurtle {
-  constructor(x, y) {
-    this.t = new Turtle(x, y); // step
-  }
-
-  draw() {
-    for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-
-  length() {
-    return 2;
-  }
-}
-
-class FastTurtle extends MyTurtle {
-  constructor(p) {
-    call((x, y) => super(x, y), 'x', 'y')(p, p);
-  }
-
-  length() {
-    return 3;
-  }
-}
-
-class CurveTurtle extends MyTurtle {
-  constructor(p) {
-    call((x, y) => super(x, y), 'x', 'y')(p, p + 1);
-  }
-
-  draw() {
-    call(super.draw.bind(this))();
-    this.t.右を向く(); // step
-    call(super.draw.bind(this))();
-  }
-}
-
-main();
-`,
-    java: `
+  polymorphism2: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle[] ts = {
@@ -5847,65 +3107,7 @@ class CurveTurtle extends MyTurtle {
   }
 }
 `,
-  },
-  polymorphism3: {
-    instrumented: `
-function main() {
-  const ts = [
-    call(MyTurtle, 'x', 'y')(0, 0),
-    call(FastTurtle, 'p')(3),
-    call(CurveTurtle, 'p')(2)
-  ]; registerDisplayRef('ts', () => ts);
-  for (s.set('i', 0); s.get('i') < ts.length; s.set('i', s.get('i') + 1)) { // step
-    call(ts[s.get('i')].draw.bind(ts[s.get('i')]))();
-    ts[s.get('i')].t.右を向く(); // step
-    call(ts[s.get('i')].draw.bind(ts[s.get('i')]))();
-  }
-  delete s.vars['i'];
-}
-
-class MyTurtle {
-  constructor(x, y) {
-    this.t = new Turtle(x, y); // step
-  }
-
-  draw() {
-    for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-
-  length() {
-    return 2;
-  }
-}
-
-class FastTurtle extends MyTurtle {
-  constructor(p) {
-    call((x, y) => super(x, y), 'x', 'y')(p, p);
-  }
-
-  length() {
-    return 3;
-  }
-}
-
-class CurveTurtle extends MyTurtle {
-  constructor(p) {
-    call((x, y) => super(x, y), 'x', 'y')(p, p + 1);
-  }
-
-  draw() {
-    call(super.draw.bind(this))();
-    this.t.右を向く(); // step
-    call(super.draw.bind(this))();
-  }
-}
-
-main();
-`,
-    java: `
+  polymorphism3: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle[] ts = {
@@ -5951,38 +3153,11 @@ class CurveTurtle extends MyTurtle {
   }
 }
     `,
-  },
 
   // ----------- 初級プログラミングⅡ 第5回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第6回 ここから -----------
-  package1: {
-    instrumented: `
-function main() {
-  const fast = call(FastTurtle)(); registerDisplayRef('fast', () => fast);
-  call(fast.drawLine.bind(fast))();
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-  drawLine() {
-    for (s.set('i', 0); s.get('i') < this.length(); s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-  length() { return 2; }
-}
-
-class FastTurtle extends MyTurtle {
-  length() { return 3; }
-}
-
-main();
-`,
-    java: `
+  package1: `
 // トレース道場では、複数ファイルの内容をまとめて表示する。
 
 // -------------- Main.java ここから --------------
@@ -6014,44 +3189,7 @@ public class FastTurtle extends MyTurtle {
 }
 // ------- turtle/FastTurtle.java ここまで -------
 `,
-  },
-  package2: {
-    instrumented: `
-function main() {
-  const t = call(BoldLineTurtle)(); registerDisplayRef('t', () => t);
-  call(t.draw.bind(t))();
-}
-
-class LineTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-  draw() {
-    for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) { // step
-      call(this.forward.bind(this))();
-    }
-    delete s.vars['i'];
-  }
-  forward() {
-    this.t.前に進む(); // step
-  }
-}
-
-class BoldLineTurtle extends LineTurtle {
-  forward() {
-    this.t.右を向く(); // step
-    this.t.前に進む(); // step
-    this.t.左を向く(); // step
-    this.t.前に進む(); // step
-    this.t.左を向く(); // step
-    this.t.前に進む(); // step
-    this.t.右を向く(); // step
-  }
-}
-
-main();
-`,
-    java: `
+  package2: `
 // トレース道場では、複数ファイルの内容をまとめて表示する。
 
 // -------------- Main.java ここから --------------
@@ -6067,7 +3205,7 @@ public class Main {
 // -------- turtle/LineTurtle.java ここから --------
 package turtle;
 public class LineTurtle {
-  private Turtle t = new Turtle(); // step
+  protected Turtle t = new Turtle(); // step
   public void draw() {
     for (int i = 0; i < 3; i++) // step
       this.forward(); // caller
@@ -6093,44 +3231,7 @@ public class BoldLineTurtle extends LineTurtle {
 }
 // ------- turtle/BoldLineTurtle.java ここまで -------
 `,
-  },
-  package3: {
-    instrumented: `
-function main() {
-  const ts = [
-    call(LineTurtle, 'x', 'y')(0, 0),
-    call(LongLineTurtle, 'x', 'y')(3, 0)
-  ]; registerDisplayRef('ts', () => ts);
-  for (const t of ts) {
-    call(t.draw.bind(t))();
-  }
-}
-
-class LineTurtle {
-  constructor(x, y) {
-    this.t = new Turtle(x, y); // step
-  }
-  draw() {
-    for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) { // step
-      call(this.forward.bind(this))();
-    }
-    delete s.vars['i'];
-  }
-  forward() {
-    this.t.前に進む(); // step
-  }
-}
-
-class LongLineTurtle extends LineTurtle {
-  forward() {
-    this.t.前に進む(); // step
-    this.t.前に進む(); // step
-  }
-}
-
-main();
-`,
-    java: `
+  package3: `
 // トレース道場では、複数ファイルの内容をまとめて表示する。
 
 // -------------- Main.java ここから --------------
@@ -6167,6 +3268,9 @@ public class LineTurtle {
 // ------- turtle/LongLineTurtle.java ここから -------
 package turtle;
 public class LongLineTurtle extends LineTurtle {
+  public LongLineTurtle(int x, int y) {
+    super(x, y); // caller
+  }
   @Override protected void forward() {
 		this.t.前に進む(); // step
 		this.t.前に進む(); // step
@@ -6174,40 +3278,7 @@ public class LongLineTurtle extends LineTurtle {
 }
 // ------- turtle/LongLineTurtle.java ここまで -------
 `,
-  },
-  overload1: {
-    instrumented: `
-function main() {
-  const t = call(CurveTurtle)(); registerDisplayRef('t', () => t);
-  call(t.drawCurve.bind(t))();
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-  drawLine(steps) {
-    for (s.set('i', 0); s.get('i') < steps; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-  drawLine2() {
-    call(this.drawLine.bind(this), 'steps')(2);
-  }
-}
-
-class CurveTurtle extends MyTurtle {
-  drawCurve() {
-    call(this.drawLine.bind(this), 'steps')(3);
-    this.t.右を向く(); // step
-    call(this.drawLine2.bind(this))();
-  }
-}
-
-main();
-    `,
-    java: `
+  overload1: `
 public class Main {
   public static void main(String[] args) {
     CurveTurtle t = new CurveTurtle(); // caller
@@ -6232,45 +3303,7 @@ class CurveTurtle extends MyTurtle {
   }
 }
     `,
-  },
-  overload2: {
-    instrumented: `
-function main() {
-  const t = call(MyTurtle, 'x', 'y')(0, 0); registerDisplayRef('t', () => t);
-  call(t.operate.bind(t), 'n')(0);
-  call(t.operate2.bind(t), 's')("right");
-  call(t.operate2.bind(t), 's')("up");
-  call(t.operate.bind(t), 'n')(1);
-  call(t.operate.bind(t), 'n')(0);
-}
-
-class MyTurtle {
-  constructor(x, y) {
-    this.t = new Turtle(x, y); // step
-  }
-
-  operate(n) {
-    if (n === 0) {
-      this.t.前に進む(); // step
-    } else if (n === 1) {
-      this.t.右を向く(); // step
-      this.t.前に進む(); // step
-      this.t.左を向く(); // step
-    }
-  }
-
-  operate2(s) {
-    if (s === "up") {
-      call(this.operate.bind(this), 'n')(0);
-    } else if (s === "right") {
-      call(this.operate.bind(this), 'n')(1);
-    }
-  }
-}
-
-main();
-`,
-    java: `
+  overload2: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t = new MyTurtle(); // caller
@@ -6301,58 +3334,18 @@ class MyTurtle {
   }
 }
     `,
-  },
-  overload3: {
-    instrumented: `
-function main() {
-  const t = call(MyTurtle)(); registerDisplayRef('t', () => t);
-  call(t.drawLine.bind(t), 'steps')(max(2, 3));
-  t.t.右を向く(); // step
-  call(t.drawLine.bind(t), 'steps')(max3(2, 3, 4));
-  t.t.右を向く(); // step
-  call(t.drawLine.bind(t), 'steps')(max(2, 1));
-  t.t.右を向く(); // step
-  call(t.drawLine.bind(t), 'steps')(max3(3, 2, 1));
-  t.t.右を向く(); // step
-}
-
-function max(a, b) {
-  if (a > b) return a;
-  else return b;
-}
-
-function max3(a, b, c) {
-  if (a >= b && a >= c) return a;
-  else if (b >= c) return b;
-  else return c;
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-
-  drawLine(steps) {
-    for (s.set('i', 0); s.get('i') < steps; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-main();
-`,
-    java: `
+  overload3: `
 public class Main {
   public static void main(String[] args) {
-    MaxTurtle t = new MaxTurtle(); // caller
-    drawLine(max(2, 3)); // caller
-    this.t.右を向く(); // step
-    drawLine(max(2, 3, 4)); // caller
-    this.t.右を向く(); // step
-    drawLine(max(2, 1)); // caller
-    this.t.右を向く(); // step
-    drawLine(max(3, 2, 1)); // caller
-    this.t.右を向く(); // step
+    MyTurtle t = new MyTurtle(); // caller
+    t.drawLine(max(2, 3)); // caller
+    t.t.右を向く(); // step
+    t.drawLine(max(2, 3, 4)); // caller
+    t.t.右を向く(); // step
+    t.drawLine(max(2, 1)); // caller
+    t.t.右を向く(); // step
+    t.drawLine(max(3, 2, 1)); // caller
+    t.t.右を向く(); // step
   }
   public static int max(int a, int b) {
     if (a > b) return a;
@@ -6372,55 +3365,7 @@ class MyTurtle {
   }
 }
     `,
-  },
-  overload4: {
-    instrumented: `
-function main() {
-  const t = call(MyTurtle)(); registerDisplayRef('t', () => t);
-  call(t.move.bind(t), 'dy')(2);
-  call(t.move2.bind(t), 'dx', 'dy')(1, 3);
-  call(t.move.bind(t), 'dy')(-3);
-  call(t.move2.bind(t), 'dx', 'dy')(-1, 0);
-  call(t.move2.bind(t), 'dx', 'dy')(4, 2);
-  call(t.move2.bind(t), 'dx', 'dy')(0, -4);
-}
-
-class MyTurtle {
-  constructor(x, y) {
-    this.t = new Turtle(x, y); // step
-  }
-
-  move(dy) {
-    while (s.get('dy') > 0) {
-      s.set('dy', s.get('dy') - 1); // step
-      this.t.前に進む(); // step
-    }
-    while (s.get('dy') < 0) {
-      s.set('dy', s.get('dy') + 1); // step
-      this.t.後に戻る(); // step
-    }
-  }
-
-  move2(dx, dy) {
-    call(this.move.bind(this), 'dy')(dy);
-    if (s.get('dx') != 0) {
-      this.t.右を向く(); // step
-      while (s.get('dx') > 0) {
-        s.set('dx', s.get('dx') - 1); // step
-        this.t.前に進む(); // step
-      }
-      while (s.get('dx') < 0) {
-        s.set('dx', s.get('dx') + 1); // step
-        this.t.後に戻る(); // step
-      }
-      this.t.左を向く(); // step
-    }
-  }
-}
-
-main();
-`,
-    java: `
+  overload4: `
 public class Main {
   public static void main(String[] a) {
     MyTurtle t = new MyTurtle(); // caller
@@ -6461,53 +3406,7 @@ public class MyTurtle {
   }
 }
 `,
-  },
-  overloadAndOverride1: {
-    instrumented: `
-function main() {
-  const m2 = call(MyTurtle2)(); registerDisplayRef('m2', () => m2);
-  call(m2.drawLine2.bind(m2))();
-  const m3 = call(MyTurtle3)(); registerDisplayRef('m3', () => m3);
-  call(m3.drawLine2.bind(m3))();
-  const ms = [m2, m3]; registerDisplayRef('ms', () => ms);
-  for (const m of ms) {
-    registerDisplayRef('m', () => m);
-    m.t.右を向く(); // step
-    call(m.drawLine2.bind(m))();
-    unregisterDisplayRef('m');
-  }
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-  drawLine(steps) {
-    for (s.set('i', 0); s.get('i') < steps; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-  drawLine2() {
-    call(this.drawLine.bind(this), 'steps')(2);
-  }
-}
-
-class MyTurtle2 extends MyTurtle {
-  drawLine2() {
-    call(this.drawLine.bind(this), 'steps')(4);
-  }
-}
-
-class MyTurtle3 extends MyTurtle {
-  drawLine2() {
-    call(this.drawLine.bind(this), 'steps')(3);
-  }
-}
-
-main();
-    `,
-    java: `
+  overloadAndOverride1: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle m2 = new MyTurtle2(); // caller
@@ -6542,55 +3441,7 @@ class MyTurtle3 extends MyTurtle {
   }
 }
     `,
-  },
-  overloadAndOverride2: {
-    instrumented: `
-function main() {
-  const m2 = call(MyTurtle2)(); registerDisplayRef('m2', () => m2);
-  call(m2.drawLine.bind(m2), 'steps')(2);
-  const m3 = call(MyTurtle3)(); registerDisplayRef('m3', () => m3);
-  call(m3.drawLine.bind(m3), 'steps')(1);
-  const ms = [m2, m3]; registerDisplayRef('ms', () => ms);
-  for (const m of ms) {
-    registerDisplayRef('m', () => m);
-    m.t.右を向く(); // step
-    call(m.drawLine2.bind(m))();
-    unregisterDisplayRef('m');
-  }
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-
-  drawLine(steps) {
-    for (s.set('i', 0); s.get('i') < steps; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-
-  drawLine2() {
-    call(this.drawLine.bind(this), 'steps')(2);
-  }
-}
-
-class MyTurtle2 extends MyTurtle {
-  drawLine2() {
-    call(this.drawLine.bind(this), 'steps')(3);
-  }
-}
-
-class MyTurtle3 extends MyTurtle {
-  drawLine2() {
-    call(this.drawLine.bind(this), 'steps')(4);
-  }
-}
-
-main();
-    `,
-    java: `
+  overloadAndOverride2: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle m2 = new MyTurtle2(); // caller
@@ -6625,55 +3476,7 @@ class MyTurtle3 extends MyTurtle {
   }
 }
     `,
-  },
-  overloadAndOverride3: {
-    instrumented: `
-function main() {
-  const m1 = call(MyTurtle)(); registerDisplayRef('m1', () => m1);
-  call(m1.drawLine.bind(m1), 'steps')(4);
-  const m2 = call(MyTurtle2)(); registerDisplayRef('m2', () => m2);
-  call(m2.drawLine.bind(m2), 'steps')(3);
-  const m3 = call(MyTurtle3)(); registerDisplayRef('m3', () => m3);
-  call(m3.drawLine.bind(m3), 'steps')(1);
-  const ms = [m1, m2, m3]; registerDisplayRef('ms', () => ms);
-  for (const m of ms) {
-    registerDisplayRef('m', () => m);
-    m.t.右を向く(); // step
-    call(m.drawLine2.bind(m))();
-    unregisterDisplayRef('m');
-  }
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-  drawLine(steps) {
-    for (s.set('i', 0); s.get('i') < steps; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-  drawLine2() {
-    call(this.drawLine.bind(this), 'steps')(2);
-  }
-}
-
-class MyTurtle2 extends MyTurtle {
-  drawLine2() {
-    call(this.drawLine.bind(this), 'steps')(3);
-  }
-}
-
-class MyTurtle3 extends MyTurtle2 {
-  drawLine(steps) {
-    call(super.drawLine.bind(this), 'steps')(steps * 2);
-  }
-}
-
-main();
-    `,
-    java: `
+  overloadAndOverride3: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle m1 = new MyTurtle(); // caller
@@ -6711,43 +3514,10 @@ class MyTurtle3 extends MyTurtle2 {
   }
 }
     `,
-  },
   // ----------- 初級プログラミングⅡ 第6回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第7回 ここから -----------
-  exception1: {
-    instrumented: `
-function main() {
-  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
-  try {
-    call(m.drawLine.bind(m))();
-    call(m.drawLine.bind(m))();
-  } catch (e) {
-    m.t.右を向く(); // step
-    m.t.前に進む(); // step
-  }
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-
-  drawLine() {
-    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
-      if (!this.t.前に進めるか()) {
-        delete s.vars['i'];
-        throw new Error("前に進めない！");
-      }
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-    `,
-    java: `
+  exception1: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle m = new MyTurtle(); // caller
@@ -6774,43 +3544,7 @@ class MyTurtle {
   }
 }
     `,
-  },
-  exception2: {
-    instrumented: `
-function main() {
-  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
-  try {
-    call(m.drawLine.bind(m))();
-    call(m.drawLine.bind(m))();
-  } catch (e) {
-    // Uncaught exception!
-    if (false) {
-      m.t.右を向く(); // step
-      m.t.前に進む(); // step
-    }
-  }
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-
-  drawLine() {
-    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
-      if (!this.t.前に進めるか()) {
-        delete s.vars['i'];
-        throw new RuntimeException("前に進めない！");
-      }
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-`,
-    java: `
+  exception2: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle m = new MyTurtle(); // caller
@@ -6837,41 +3571,7 @@ class MyTurtle {
   }
 }
 `,
-  },
-  exception3: {
-    instrumented: `
-function main() {
-  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
-  try {
-    call(m.drawLine.bind(m))();
-    call(m.drawLine.bind(m))();
-  } catch (e) {
-    m.t.右を向く(); // step
-    m.t.前に進む(); // step
-    m.t.左を向く(); // step
-  }
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-
-  drawLine() {
-    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
-      if (!this.t.前に進めるか()) {
-        delete s.vars['i'];
-        throw new Error("前に進めない！");
-      }
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-`,
-    java: `
+  exception3: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle m = new MyTurtle(); // caller
@@ -6899,45 +3599,7 @@ class MyTurtle {
   }
 }
 `,
-  },
-  exception4: {
-    instrumented: `
-function main() {
-  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
-  try {
-    call(m.drawLine.bind(m))();
-    call(m.drawLine.bind(m))();
-  } catch (e) {
-    m.t.前に進む(); // step
-    m.t.右を向く(); // step
-  }
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-
-  drawLine() {
-    try {
-      for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
-        if (!this.t.前に進めるか()) {
-          delete s.vars['i'];
-          throw new Error("前に進めない！");
-        }
-        this.t.前に進む(); // step
-      }
-      delete s.vars['i'];
-    } catch (e) {
-      this.t.右を向く(); // step
-      throw e;
-    }
-  }
-}
-
-main();
-`,
-    java: `
+  exception4: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle m = new MyTurtle(); // caller
@@ -6969,48 +3631,7 @@ class MyTurtle {
   }
 }
 `,
-  },
-  exception5: {
-    instrumented: `
-function main() {
-  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
-  try {
-    call(m.drawLine.bind(m))();
-    call(m.drawLine.bind(m))();
-  } catch (e) {
-    m.t.前に進む(); // step
-    // Uncaught exception!
-    if (false) {
-      m.t.右を向く(); // step
-    }
-  }
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-
-  drawLine() {
-    try {
-      for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
-        if (!this.t.前に進めるか()) {
-          delete s.vars['i'];
-          throw new Error("前に進めない！");
-        }
-        this.t.前に進む(); // step
-      }
-      delete s.vars['i'];
-    } catch (e) {
-      this.t.右を向く(); // step
-      throw e;
-    }
-  }
-}
-
-main();
-`,
-    java: `
+  exception5: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle m = new MyTurtle(); // caller
@@ -7020,7 +3641,6 @@ public class Main {
     } catch (RuntimeException e) {
       m.t.前に進む(); // step
       throw e; // catchした例外をもう一度throwする。
-      m.t.前に進む(); // step
     }
   }
 }
@@ -7043,40 +3663,7 @@ class MyTurtle {
   }
 }
 `,
-  },
-  originalException1: {
-    instrumented: `
-function main() {
-  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
-  call(m.drawLine.bind(m))();
-  call(m.drawLine.bind(m))();
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-
-  drawLine() {
-    try {
-      for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
-        if (!this.t.前に進めるか()) {
-          delete s.vars['i'];
-          throw new Error();
-        }
-        this.t.前に進む(); // step
-      }
-      delete s.vars['i'];
-    } catch (e) {
-      this.t.右を向く(); // step
-      this.t.前に進む(); // step
-    }
-  }
-}
-
-main();
-`,
-    java: `
+  originalException1: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle m = new MyTurtle(); // caller
@@ -7105,40 +3692,7 @@ class MyTurtle {
   }
 }
 `,
-  },
-  originalException2: {
-    instrumented: `
-function main() {
-  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
-  try {
-    call(m.drawLine.bind(m))();
-    call(m.drawLine.bind(m))();
-  } catch (e) {
-    m.t.右を向く(); // step
-    m.t.前に進む(); // step
-  }
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-
-  drawLine() {
-    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
-      if (!this.t.前に進めるか()) {
-        delete s.vars['i'];
-        throw new Error();
-      }
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-`,
-    java: `
+  originalException2: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle m = new MyTurtle(); // caller
@@ -7167,52 +3721,7 @@ class MyTurtle {
 
 class OutOfBoardException extends Exception { }
 `,
-  },
-  originalException3: {
-    instrumented: `
-function main() {
-  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
-  try {
-    call(m.drawSquare.bind(m))();
-  } catch (e) {
-    if (e instanceof OutOfBoardException) {
-      m.t.右を向く(); // step
-      m.t.前に進む(); // step
-    } else if (e instanceof ColoredException) {
-      m.t.前に進む(); // step
-      m.t.左を向く(); // step
-    }
-  }
-}
-
-class OutOfBoardException extends Error { }
-class ColoredException extends Error { }
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-
-  drawSquare() {
-    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
-      if (!this.t.前に進めるか()) {
-        delete s.vars['i'];
-        throw new OutOfBoardException();
-      }
-      if (this.t.前のマスが塗られているか()) {
-        delete s.vars['i'];
-        throw new ColoredException();
-      }
-      this.t.前に進む(); // step
-      this.t.右を向く(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-`,
-    java: `
+  originalException3: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle m = new MyTurtle(); // caller
@@ -7249,50 +3758,7 @@ class MyTurtle {
   }
 }
 `,
-  },
-  originalException4: {
-    instrumented: `
-function main() {
-  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
-  try {
-    call(m.drawSquare.bind(m))();
-  } catch (e) {
-    m.t.左を向く(); // step
-    m.t.左を向く(); // step
-    m.t.前に進む(); // step
-  }
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(5, 4); // step
-  }
-
-  drawSquare() {
-    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
-      for (s.set('j', 0); s.get('j') < 2; s.set('j', s.get('j') + 1)) { // step
-        if (!this.t.前に進めるか()) {
-          delete s.vars['j'];
-          delete s.vars['i'];
-          throw new OutOfBoardException();
-        }
-        if (this.t.前のマスが塗られているか()) {
-          delete s.vars['j'];
-          delete s.vars['i'];
-          throw new ColoredException();
-        }
-        this.t.前に進む(); // step
-      }
-      this.t.右を向く(); // step
-      delete s.vars['j'];
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-`,
-    java: `
+  originalException4: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle m = new MyTurtle(); // caller
@@ -7329,60 +3795,7 @@ class MyTurtle {
   }
 }
 `,
-  },
-  originalException5: {
-    instrumented: `
-function main() {
-  const m = call(MyTurtle)(); registerDisplayRef('m', () => m);
-  for (s.set('n', 0); s.get('n') < 3; s.set('n', s.get('n') + 1)) { // step
-    try {
-      call(m.drawSquare.bind(m), 'size')(1 + s.get('n'));
-    } catch (e) {
-      if (e instanceof OutOfBoardException) {
-        m.t.右を向く(); // step
-        m.t.右を向く(); // step
-      } else if (e instanceof ColoredException) {
-        m.t.前に進む(); // step
-        m.t.前に進む(); // step
-      }
-    }
-  }
-  delete s.vars['n'];
-}
-
-class OutOfBoardException extends Error { }
-class ColoredException extends Error { }
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(5, 5); // step
-  }
-
-  drawSquare(size) {
-    for (s.set('i', 0); s.get('i') < 4; s.set('i', s.get('i') + 1)) { // step
-      for (s.set('j', 0); s.get('j') < size; s.set('j', s.get('j') + 1)) { // step
-        if (!this.t.前に進めるか()) {
-          delete s.vars['j'];
-          delete s.vars['i'];
-          throw new OutOfBoardException();
-        }
-        if (this.t.前のマスが塗られているか()) {
-          delete s.vars['j'];
-          delete s.vars['i'];
-          throw new ColoredException();
-        }
-        this.t.前に進む(); // step
-      }
-      this.t.右を向く(); // step
-      delete s.vars['j'];
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-`,
-    java: `
+  originalException5: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle m = new MyTurtle(); // caller
@@ -7423,38 +3836,10 @@ class MyTurtle {
   }
 }
   `,
-  },
   // ----------- 初級プログラミングⅡ 第7回 ここまで -----------
 
   // ----------- 初級プログラミングⅡ 第8回 ここから -----------
-  twoDimensionalArray1: {
-    instrumented: `
-const arr = [[0, 3], [1, 1], [0, 2], [2, 3], [0, 1]];
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
-  s.set('c', arr[s.get('i')][1]); // step
-  switch (arr[s.get('i')][0]) {
-    case 0:
-      for (s.set('j', 0); s.get('j') < s.get('c'); s.set('j', s.get('j') + 1)) { // step
-        t.前に進む(); // step
-      }
-      break;
-    case 1:
-      for (s.set('j', 0); s.get('j') < s.get('c'); s.set('j', s.get('j') + 1)) { // step
-        t.右を向く(); // step
-      }
-      break;
-    case 2:
-      for (s.set('j', 0); s.get('j') < s.get('c'); s.set('j', s.get('j') + 1)) { // step
-        t.左を向く(); // step
-      }
-      break;
-  }
-  delete s.vars['c'];
-}
-delete s.vars['i'];
-`,
-    java: `
+  twoDimensionalArray1: `
 public class Main {
   public static void main(String[] args) {
     int [][] arr = { { 0, 3 }, { 1, 1 }, { 0, 2 },
@@ -7483,32 +3868,7 @@ public class Main {
   }
 }
   `,
-  },
-  twoDimensionalArray2: {
-    instrumented: `
-const arr = [[0, 3], [1], [0, 2], [2], [0, 1]];
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
-  switch (arr[s.get('i')][0]) {
-    case 0:
-      s.set('c', arr[s.get('i')][1]); // step
-      for (s.set('j', 0); s.get('j') < s.get('c'); s.set('j', s.get('j') + 1)) { // step
-        t.forward(); // step
-      }
-      delete s.vars['j'];
-      delete s.vars['c'];
-      break;
-    case 1:
-      t.turnRight(); // step
-      break;
-    case 2:
-      t.turnLeft(); // step
-      break;
-  }
-}
-delete s.vars['i'];
-    `,
-    java: `
+  twoDimensionalArray2: `
 public class Main {
   public static void main(String[] args) {
     int [][] arr = { { 0, 3 }, { 1 }, { 0, 2 },
@@ -7533,46 +3893,7 @@ public class Main {
   }
 }
   `,
-  },
-  twoDimensionalArray3: {
-    instrumented: `
-const FORWARD = 0;
-const TURN_RIGHT = 1;
-const TURN_LEFT = 2;
-
-const arr = [
-  [FORWARD, 3],
-  [TURN_RIGHT],
-  [FORWARD, 2],
-  [TURN_LEFT],
-  [FORWARD, 1]
-];
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-
-for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
-  call(moveTurtle, 't', 'command')(t, arr[s.get('i')]);
-}
-delete s.vars['i'];
-
-function moveTurtle(t, command) {
-  switch (command[0]) {
-    case FORWARD:
-      s.set('steps', command[1]); // step
-      for (s.set('j', 0); s.get('j') < s.get('steps'); s.set('j', s.get('j') + 1)) { // step
-        t.前に進む(); // step
-      }
-      delete s.vars['j'];
-      break;
-    case TURN_RIGHT:
-      t.右を向く(); // step
-      break;
-    case TURN_LEFT:
-      t.左を向く(); // step
-      break;
-  }
-}
-`,
-    java: `
+  twoDimensionalArray3: `
 public class Main {
   private static final int FORWARD = 0;
   private static final int TURN_RIGHT = 1;
@@ -7611,50 +3932,7 @@ public class Main {
   }
 }
   `,
-  },
-  twoDimensionalArray4: {
-    instrumented: `
-const FORWARD = 0;
-const TURN_RIGHT = 1;
-const TURN_LEFT = 2;
-const PUT_TURTLE = 3;
-
-const arr = [
-  [PUT_TURTLE, 1, 2],
-  [FORWARD, 3],
-  [TURN_RIGHT],
-  [FORWARD, 2],
-  [TURN_LEFT],
-  [FORWARD, 1]
-];
-
-let turtle = null; registerDisplayRef('turtle', () => turtle);
-for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
-  s.set('command', arr[s.get('i')][0]); // step
-  switch (s.get('command')) {
-    case PUT_TURTLE:
-      turtle = new Turtle(arr[s.get('i')][1], arr[s.get('i')][2]); // step
-      break;
-    case FORWARD:
-      s.set('steps', arr[s.get('i')][1]); // step
-      for (s.set('j', 0); s.get('j') < s.get('steps'); s.set('j', s.get('j') + 1)) { // step
-        turtle.前に進む(); // step
-      }
-      delete s.vars['j'];
-      delete s.vars['steps'];
-      break;
-    case TURN_RIGHT:
-      turtle.右を向く(); // step
-      break;
-    case TURN_LEFT:
-      turtle.左を向く(); // step
-      break;
-  }
-  delete s.vars['command'];
-}
-delete s.vars['i'];
-`,
-    java: `
+  twoDimensionalArray4: `
 public class Main {
   private static final int FORWARD = 0;
   private static final int TURN_RIGHT = 1;
@@ -7695,52 +3973,7 @@ public class Main {
   }
 }
   `,
-  },
-  twoDimensionalArray5: {
-    instrumented: `
-const FORWARD = 0;
-const TURN_RIGHT = 1;
-const TURN_LEFT = 2;
-const PUT_TURTLE = 3;
-
-const arr = [
-  [PUT_TURTLE, 2, 2],
-  [TURN_RIGHT],
-  [FORWARD, 4],
-  [PUT_TURTLE, 6, 0],
-  [FORWARD, 3],
-  [TURN_LEFT],
-  [FORWARD, 2]
-];
-
-let turtle = null; registerDisplayRef('turtle', () => turtle);
-for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
-  s.set('command', arr[s.get('i')][0]); // step
-  switch (s.get('command')) {
-    case PUT_TURTLE:
-      turtle?.remove();
-      turtle = new Turtle(arr[s.get('i')][1], arr[s.get('i')][2]); // step
-      break;
-    case FORWARD:
-      s.set('steps', arr[s.get('i')][1]); // step
-      for (s.set('j', 0); s.get('j') < s.get('steps'); s.set('j', s.get('j') + 1)) { // step
-        turtle.前に進む(); // step
-      }
-      delete s.vars['j'];
-      delete s.vars['steps'];
-      break;
-    case TURN_RIGHT:
-      turtle.右を向く(); // step
-      break;
-    case TURN_LEFT:
-      turtle.左を向く(); // step
-      break;
-  }
-  delete s.vars['command'];
-}
-delete s.vars['i'];
-`,
-    java: `
+  twoDimensionalArray5: `
 public class Main {
   private static final int FORWARD = 0;
   private static final int TURN_RIGHT = 1;
@@ -7784,52 +4017,14 @@ public class Main {
   }
 }
   `,
-  },
-  twoDimensionalArray6: {
-    instrumented: `
-const FORWARD = 0;
-const TURN_RIGHT = 1;
-const TURN_LEFT = 2;
-
-const commands = [
-  [FORWARD, FORWARD, FORWARD, FORWARD],
-  [FORWARD, FORWARD, TURN_RIGHT, FORWARD, FORWARD],
-  [TURN_LEFT, FORWARD, TURN_RIGHT, FORWARD]
-];
-
-const turtles = new Array(commands.length); registerDisplayRef('turtles', () => turtles);
-for (s.set('nthTurtle', 0); s.get('nthTurtle') < commands.length; s.set('nthTurtle', s.get('nthTurtle') + 1)) { // step
-  turtles[s.get('nthTurtle')] = new Turtle(s.get('nthTurtle'), 0); // step
-}
-
-for (s.set('nthTurtle', 0); s.get('nthTurtle') < commands.length; s.set('nthTurtle', s.get('nthTurtle') + 1)) { // step
-  for (s.set('i', 0); s.get('i') < commands[s.get('nthTurtle')].length; s.set('i', s.get('i') + 1)) { // step
-    s.set('command', commands[s.get('nthTurtle')][s.get('i')]); // step
-    switch (s.get('command')) {
-      case FORWARD:
-        turtles[s.get('nthTurtle')].前に進む(); // step
-        break;
-      case TURN_RIGHT:
-        turtles[s.get('nthTurtle')].右を向く(); // step
-        break;
-      case TURN_LEFT:
-        turtles[s.get('nthTurtle')].左を向く(); // step
-        break;
-    }
-    delete s.vars['command'];
-  }
-  delete s.vars['i'];
-}
-delete s.vars['nthTurtle'];
-`,
-    java: `
+  twoDimensionalArray6: `
 public class Main {
   private static final int FORWARD = 0;
   private static final int TURN_RIGHT = 1;
   private static final int TURN_LEFT = 2;
 
   public static void main(String[] args) {
-    String[][] commands = {
+    int[][] commands = {
       { FORWARD, FORWARD, FORWARD, FORWARD },
       { FORWARD, FORWARD, TURN_RIGHT, FORWARD, FORWARD },
       { TURN_LEFT, FORWARD, TURN_RIGHT, FORWARD }
@@ -7859,45 +4054,10 @@ public class Main {
   }
 }
   `,
-  },
-  threeDimensionalArray1: {
-    instrumented: `
-s.set('a', [ [ [0, 0], [1, 1], [0, 3] ], [ [5, 2], [2, 1], [0, 4] ] ]);
-const turtles = new Array(s.get('a').length); registerDisplayRef('turtles', () => turtles);
-for (s.set('i', 0); s.get('i') < s.get('a').length; s.set('i', s.get('i') + 1)) { // step
-  const t = new Turtle(s.get('a')[s.get('i')][0][0], s.get('a')[s.get('i')][0][1]); turtles[s.get('i')] = t; // step
-  for (s.set('j', 1); s.get('j') < s.get('a')[s.get('i')].length; s.set('j', s.get('j') + 1)) { // step
-    s.set('c', s.get('a')[s.get('i')][s.get('j')][1]); // step
-    switch (s.get('a')[s.get('i')][s.get('j')][0]) {
-      case 0:
-        for (s.set('k', 0); s.get('k') < s.get('c'); s.set('k', s.get('k') + 1)) { // step
-          t.forward(); // step
-        }
-        delete s.vars['k'];
-        break;
-      case 1:
-        for (s.set('k', 0); s.get('k') < s.get('c'); s.set('k', s.get('k') + 1)) { // step
-          t.turnRight(); // step
-        }
-        delete s.vars['k'];
-        break;
-      case 2:
-        for (s.set('k', 0); s.get('k') < s.get('c'); s.set('k', s.get('k') + 1)) { // step
-          t.turnLeft(); // step
-        }
-        delete s.vars['k'];
-        break;
-    }
-    delete s.vars['c'];
-  }
-  delete s.vars['j'];
-}
-delete s.vars['i'];
-    `,
-    java: `
+  threeDimensionalArray1: `
 public class Main {
   public static void main(String[] args) {
-    int[][][] a = { { {0, 0}, {1, 1}, {0, 3} },
+    int[][][] a = { { {0, 0}, {1, 1}, {0, 3} }, // step
                     { {5, 2}, {2, 1}, {0, 4} } };
     Turtle[] turtles = new Turtle[a.length];
     for (int i = 0; i < a.length; i++) { // step
@@ -7926,52 +4086,7 @@ public class Main {
   }
 }
   `,
-  },
-  threeDimensionalArray2: {
-    instrumented: `
-const FORWARD = 0;
-const RIGHT = 1;
-const LEFT = 2;
-
-const arr = [
-  [ [0, 0], [RIGHT, 1], [FORWARD, 1] ],
-  [ [3, 1], [FORWARD, 3], [RIGHT, 2], [FORWARD, 1] ],
-  [ [4, 5], [LEFT, 3], [FORWARD, 2] ],
-];
-const turtles = new Array(arr.length); registerDisplayRef('turtles', () => turtles);
-for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
-  turtles[s.get('i')] = new Turtle(arr[s.get('i')][0][0], arr[s.get('i')][0][1]); // step
-  for (s.set('j', 1); s.get('j') < arr[s.get('i')].length; s.set('j', s.get('j') + 1)) { // step
-    s.set('command', arr[s.get('i')][s.get('j')][0]); // step
-    s.set('times', arr[s.get('i')][s.get('j')][1]); // step
-    switch (s.get('command')) {
-      case FORWARD:
-        for (s.set('k', 0); s.get('k') < s.get('times'); s.set('k', s.get('k') + 1)) { // step
-          turtles[s.get('i')].前に進む(); // step
-        }
-        delete s.vars['k'];
-        break;
-      case RIGHT:
-        for (s.set('k', 0); s.get('k') < s.get('times'); s.set('k', s.get('k') + 1)) { // step
-          turtles[s.get('i')].右を向く(); // step
-        }
-        delete s.vars['k'];
-        break;
-      case LEFT:
-        for (s.set('k', 0); s.get('k') < s.get('times'); s.set('k', s.get('k') + 1)) { // step
-          turtles[s.get('i')].左を向く(); // step
-        }
-        delete s.vars['k'];
-        break;
-    }
-    delete s.vars['command'];
-    delete s.vars['times'];
-  }
-  delete s.vars['j'];
-}
-delete s.vars['i'];
-    `,
-    java: `
+  threeDimensionalArray2: `
 public class Main {
   private static final int FORWARD = 0;
   private static final int RIGHT = 1;
@@ -8011,40 +4126,7 @@ public class Main {
   }
 }
   `,
-  },
-  threeDimensionalArray3: {
-    instrumented: `
-const FORWARD = 0;
-const TURN_RIGHT = 1;
-const TURN_LEFT = 2;
-
-const arr = [
-  [ [0, 0], [FORWARD, FORWARD, TURN_RIGHT, FORWARD] ],
-  [ [2, 3], [TURN_LEFT, FORWARD, FORWARD] ]
-];
-const turtles = new Array(arr.length); registerDisplayRef('turtles', () => turtles);
-for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
-  turtles[s.get('i')] = new Turtle(arr[s.get('i')][0][0], arr[s.get('i')][0][1]); // step
-  for (s.set('j', 0); s.get('j') < arr[s.get('i')][1].length; s.set('j', s.get('j') + 1)) { // step
-    s.set('command', arr[s.get('i')][1][s.get('j')]); // step
-    switch (s.get('command')) {
-      case FORWARD:
-        turtles[s.get('i')].forward(); // step
-        break;
-      case TURN_RIGHT:
-        turtles[s.get('i')].turnRight(); // step
-        break;
-      case TURN_LEFT:
-        turtles[s.get('i')].turnLeft(); // step
-        break;
-    }
-    delete s.vars['command'];
-  }
-  delete s.vars['j'];
-}
-delete s.vars['i'];
-    `,
-    java: `
+  threeDimensionalArray3: `
 public class Main {
   private static final int FORWARD = 0;
   private static final int TURN_RIGHT = 1;
@@ -8076,42 +4158,7 @@ public class Main {
   }
 }
   `,
-  },
-  threeDimensionalArray4: {
-    instrumented: `
-const FORWARD = 0;
-const TURN_RIGHT = 1;
-const TURN_LEFT = 2;
-
-const arr = [
-  [ [2, 1], [FORWARD, TURN_LEFT, FORWARD, FORWARD] ],
-  [ [3, 2], [TURN_RIGHT, FORWARD, TURN_RIGHT] ],
-  [ [1, 3], [FORWARD, FORWARD, TURN_LEFT, FORWARD, TURN_LEFT] ],
-  [ [3, 3], [TURN_RIGHT, FORWARD, FORWARD, TURN_RIGHT, FORWARD] ]
-];
-const turtles = new Array(arr.length); registerDisplayRef('turtles', () => turtles);
-for (s.set('i', 0); s.get('i') < arr.length; s.set('i', s.get('i') + 1)) { // step
-  turtles[s.get('i')] = new Turtle(arr[s.get('i')][0][0], arr[s.get('i')][0][1]); // step
-  for (s.set('j', 0); s.get('j') < arr[s.get('i')][1].length; s.set('j', s.get('j') + 1)) { // step
-    s.set('command', arr[s.get('i')][1][s.get('j')]); // step
-    switch (s.get('command')) {
-      case FORWARD:
-        turtles[s.get('i')].forward(); // step
-        break;
-      case TURN_RIGHT:
-        turtles[s.get('i')].turnRight(); // step
-        break;
-      case TURN_LEFT:
-        turtles[s.get('i')].turnLeft(); // step
-        break;
-    }
-    delete s.vars['command'];
-  }
-  delete s.vars['j'];
-}
-delete s.vars['i'];
-`,
-    java: `
+  threeDimensionalArray4: `
 public class Main {
   private static final int FORWARD = 0;
   private static final int TURN_RIGHT = 1;
@@ -8145,18 +4192,10 @@ public class Main {
   }
 }
     `,
-  },
   // ----------- 初級プログラミングⅡ 第8回 ここまで -----------
 
-  test1: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('c', () => t); // step
-t.forward();
-t.forward();
-t.forward();
-`,
-    // stepがただの連番である場合、番号を省略できる。
-    java: `
+  // stepがただの連番である場合、番号を省略できる。
+  test1: `
 public class Main {
   public static void main(String[] args) {
     Turtle c = new Turtle(); // step
@@ -8166,22 +4205,11 @@ public class Main {
   }
 }
 `,
-  },
-  test2: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('c', () => t); // step
-for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
-  t.forward();
-  t.forward();
-  t.turnRight();
-}
-delete s.vars['i'];
-`,
-    java: `
+  test2: `
 public class Main {
   public static void main(String[] args) {
     Turtle c = new Turtle(); // step
-    for (let i = 0; i < 2; i++) { // step
+    for (int i = 0; i < 2; i++) { // step
       c.forward(); // step
       c.forward(); // step
       c.turnRight(); // step
@@ -8189,22 +4217,7 @@ public class Main {
   }
 }
 `,
-  },
-  test3: {
-    instrumented: `
-s.set('a', 1);
-if (s.get('a') > 0) {
-  s.set('b', 2);
-  s.set('a', call(f, 'x', 'y')(s.get('a'), s.get('b')));
-}
-s.set('c', s.get('a') * 2);
-
-function f(x, y) {
-  s.set('a', x * y);
-  return s.get('a');
-}
-`,
-    java: `
+  test3: `
 public class Main {
   public static void main(String[] args) {
     int a = 1; // step: 1
@@ -8221,24 +4234,7 @@ public class Main {
   }
 }
 `,
-  },
-  test4: {
-    instrumented: `
-const t1 = new Turtle(); registerDisplayRef('c1', () => t1); // step
-t1.forward();
-t1.turnRight();
-s.set('i', 0);
-t1.forward();
-
-const t2 = new Turtle(2, 3, 'G'); registerDisplayRef('c2', () => t2); // step
-t2.forward();
-s.set('foo', 'あいうえお');
-s.set('bar', <1-100>);
-s.set('i', s.get('bar') + 1);
-t2.forward();
-t2.forward();
-`,
-    java: `
+  test4: `
 public class Main {
   public static void main(String[] args) {
     Turtle c1 = new Turtle(); // step
@@ -8247,7 +4243,7 @@ public class Main {
     int i = 0; // step
     c1.forward(); // step
 
-    Turtle c2 = new Turtle(2, 3, "green"); // step
+    Turtle c2 = new Turtle(2, 3, "G"); // step
     c2.forward(); // step
     String foo = "あいうえお"; // step
     int bar = <1-100>; // step
@@ -8257,19 +4253,7 @@ public class Main {
   }
 }
 `,
-  },
-  test5: {
-    instrumented: `
-const t = new Turtle(); registerDisplayRef('c', () => t); // step
-t.前に進む(); // step
-t.前に進む(); // step
-t.右を向く(); // step
-t.前に進む(); // step
-t.前に進む(); // step
-t.前に進む(); // step
-t.前に進む(); // step
-`,
-    java: `
+  test5: `
 public class Straight {
   public static void main(String[] args) {
     var c = new Turtle(); // step
@@ -8283,62 +4267,14 @@ public class Straight {
   }
 }
 `,
-  },
-  test9: {
-    instrumented: `
-myGlobal.Settings = { speed: 0 };
-
-function main() {
-  const t1 = call(MyTurtle)(); registerDisplayRef('t1', () => t1);
-  myGlobal.Settings.speed = 2; // step
-  call(t1.moveForward.bind(t1))();
-
-  const t2 = call(MyTurtle2, 'x', 'y')(2, 2); registerDisplayRef('t2', () => t2);
-  call(increaseSpeed)();
-  call(t1.moveForward.bind(t1))();
-  call(t2.moveForward.bind(t2))();
-}
-
-function increaseSpeed() {
-  myGlobal.Settings.speed++; // step
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-
-  moveForward() {
-    for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-
-class MyTurtle2 {
-  constructor(x, y) {
-    this.t = new Turtle(x, y); // step
-  }
-
-  moveForward() {
-    for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) { // step
-      this.t.前に進む(); // step
-    }
-    delete s.vars['i'];
-  }
-}
-
-main();
-`,
-    java: `
+  test9: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t1 = new MyTurtle(); // caller
     Settings.speed = 2; // step
     t1.moveForward(); // caller
 
-    MyTurtle t2 = new MyTurtle2(2, 2); // caller
+    MyTurtle2 t2 = new MyTurtle2(2, 2); // caller
     Settings.increaseSpeed(); // caller
     t1.moveForward(); // caller
     t2.moveForward(); // caller
@@ -8348,7 +4284,7 @@ public class Main {
 class Settings {
   static public int speed;
 
-  public increaseSpeed() {
+  public static void increaseSpeed() {
     speed++; // step
   }
 }
@@ -8356,9 +4292,9 @@ class Settings {
 class MyTurtle {
   private Turtle t = new Turtle(); // step
 
-  void moveForward(Turtle t) {
+  void moveForward() {
     for (int i = 0; i < Settings.speed; i++) { // step
-      t.前に進む(); // step
+      this.t.前に進む(); // step
     }
   }
 }
@@ -8367,21 +4303,18 @@ class MyTurtle2 {
   private Turtle t;
 
   MyTurtle2(int x, int y) {
-    t = new Turtle(x, y); // step
+    this.t = new Turtle(x, y); // step
   }
-  void moveForward(Turtle t) {
+  void moveForward() {
     for (int i = 0; i < Settings.speed; i++) { // step
-      t.前に進む(); // step
+      this.t.前に進む(); // step
     }
   }
 }
 `,
-  },
   ...fillInBlankProblemDefinitions,
 };
 
-for (const problem of Object.values(problemIdToLanguageIdToProgram)) {
-  for (const languageId of languageIds) {
-    problem[languageId] = problem[languageId].trim();
-  }
+for (const [problemId, program] of Object.entries(problemIdToProgram)) {
+  problemIdToProgram[problemId as LegacyProblemId] = program.trim();
 }
