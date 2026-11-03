@@ -47,6 +47,9 @@ export function valueOfElement(element: Element): Value {
 }
 
 export class JsArray extends JsObject {
+  /** Set by Object.freeze, which leaves the elements and the length read-only. */
+  frozen = false;
+
   constructor(
     proto: JsObject | null,
     readonly elements: Element[]

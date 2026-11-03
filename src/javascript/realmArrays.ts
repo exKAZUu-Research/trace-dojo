@@ -36,30 +36,27 @@ function arrayFrom({ runtime, args, callRow }: NativeCall): JsArray {
   if (mapper !== undefined && !isCallable(mapper)) {
     runtime.throwError('TypeError', `${runtime.describe(mapper)} is not a function`);
   }
-  // The array is built in place so that the values read and mapped so far stay reachable during callbacks.
+  // Each element is read just before its mapper runs, as JavaScript's iteration does, and the result is built in place
+  // so that the elements mapped so far stay reachable during the mapper's calls.
   const array = runtime.newArray([]);
+  const add = (value: Value, index: number): void => {
+    runtime.allocate(1);
+    array.elements.push(mapper ? runtime.call(mapper, undefined, [value, index], callRow) : value);
+  };
   return runtime.hold(array, () => {
-    readArrayLike(runtime, source, array.elements);
-    if (mapper) {
-      for (const [index, value] of array.elements.entries()) {
-        array.elements[index] = runtime.call(mapper, undefined, [valueOfElement(value), index], callRow);
-      }
+    if (source instanceof JsArray) {
+      for (let index = 0; index < source.elements.length; index++) add(valueOfElement(source.elements[index]), index);
+    } else if (typeof source === 'string') {
+      for (const [index, character] of runtime.iterate(source).entries()) add(character, index);
+    } else {
+      const length = toLength(
+        runtime,
+        source === undefined || source === null ? undefined : runtime.get(source, 'length')
+      );
+      for (let index = 0; index < length; index++) add(runtime.get(source, String(index)), index);
     }
     return array;
   });
-}
-
-/** Reads the values of an array, a string, or an object with a `length` into `elements`. */
-function readArrayLike(runtime: Runtime, source: Value, elements: Element[]): void {
-  if (source instanceof JsArray || typeof source === 'string') {
-    const items = runtime.iterate(source);
-    runtime.allocate(items.length);
-    appendAll(elements, items);
-    return;
-  }
-  const length = toLength(runtime, source === undefined || source === null ? undefined : runtime.get(source, 'length'));
-  runtime.allocate(length);
-  for (let index = 0; index < length; index++) elements.push(runtime.get(source, String(index)));
 }
 
 function toLength(runtime: Runtime, value: Value): number {
@@ -82,6 +79,14 @@ function relativeIndex(runtime: Runtime, value: Value, length: number, fallback:
 
 type ArrayMethod = (call: NativeCall, array: JsArray) => Value;
 
+/** Defines a method that changes the array, which a frozen array refuses. */
+function mutatorMethod(builder: RealmBuilder, name: string, length: number, run: ArrayMethod): void {
+  arrayMethod(builder, name, length, (call, array) => {
+    call.runtime.mutableElements(array);
+    return run(call, array);
+  });
+}
+
 function arrayMethod(builder: RealmBuilder, name: string, length: number, run: ArrayMethod): void {
   builder.method(builder.realm.arrayPrototype, name, length, (call) =>
     run(call, thisArray(call.runtime, call.thisValue, name))
@@ -90,17 +95,17 @@ function arrayMethod(builder: RealmBuilder, name: string, length: number, run: A
 
 // code-gauge-allow functionNcss 40 -- Lists the builtin methods, each a small closure of its own.
 function defineMutators(builder: RealmBuilder): void {
-  arrayMethod(builder, 'push', 1, ({ runtime, args }, array) => {
+  mutatorMethod(builder, 'push', 1, ({ runtime, args }, array) => {
     runtime.allocate(args.length);
     appendAll(array.elements, args);
     return array.elements.length;
   });
-  arrayMethod(builder, 'pop', 0, (_, array) => valueOfElement(array.elements.pop()));
-  arrayMethod(builder, 'shift', 0, ({ runtime }, array) => {
+  mutatorMethod(builder, 'pop', 0, (_, array) => valueOfElement(array.elements.pop()));
+  mutatorMethod(builder, 'shift', 0, ({ runtime }, array) => {
     runtime.scan(array.elements.length);
     return valueOfElement(array.elements.shift());
   });
-  arrayMethod(builder, 'unshift', 1, ({ runtime, args }, array) => {
+  mutatorMethod(builder, 'unshift', 1, ({ runtime, args }, array) => {
     runtime.allocate(args.length);
     runtime.scan(array.elements.length);
     const rest = array.elements.splice(0);
@@ -108,7 +113,7 @@ function defineMutators(builder: RealmBuilder): void {
     appendAll(array.elements, rest);
     return array.elements.length;
   });
-  arrayMethod(builder, 'splice', 2, ({ runtime, args }, array) => {
+  mutatorMethod(builder, 'splice', 2, ({ runtime, args }, array) => {
     const { elements } = array;
     const start = relativeIndex(runtime, args[0], elements.length, 0);
     const deleteCount =
@@ -126,12 +131,12 @@ function defineMutators(builder: RealmBuilder): void {
     appendAll(elements, rest);
     return runtime.newArray(removed);
   });
-  arrayMethod(builder, 'reverse', 0, ({ runtime }, array) => {
+  mutatorMethod(builder, 'reverse', 0, ({ runtime }, array) => {
     runtime.scan(array.elements.length);
     array.elements.reverse();
     return array;
   });
-  arrayMethod(builder, 'fill', 1, ({ runtime, args }, array) => {
+  mutatorMethod(builder, 'fill', 1, ({ runtime, args }, array) => {
     const { elements } = array;
     const start = relativeIndex(runtime, args[1], elements.length, 0);
     const end = relativeIndex(runtime, args[2], elements.length, elements.length);
@@ -139,7 +144,7 @@ function defineMutators(builder: RealmBuilder): void {
     elements.fill(args[0], start, end);
     return array;
   });
-  arrayMethod(builder, 'sort', 1, sortArray);
+  mutatorMethod(builder, 'sort', 1, sortArray);
 }
 
 function sortArray({ runtime, args, callRow }: NativeCall, array: JsArray): JsArray {

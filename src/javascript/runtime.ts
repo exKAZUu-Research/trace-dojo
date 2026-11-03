@@ -130,7 +130,10 @@ export class Runtime {
       const index = arrayIndexOf(key);
       if (index !== undefined) {
         const element = index < object.elements.length ? object.elements[index] : HOLE;
-        return element === HOLE ? undefined : { value: element, writable: true, enumerable: true, configurable: true };
+        const isMutable = !object.frozen;
+        return element === HOLE
+          ? undefined
+          : { value: element, writable: isMutable, enumerable: true, configurable: isMutable };
       }
     }
     return object.properties.get(key);
@@ -204,8 +207,14 @@ export class Runtime {
     return undefined;
   }
 
+  /** The elements of an array a builtin or an assignment is about to change, which a frozen array refuses. */
+  mutableElements(array: JsArray): Element[] {
+    if (array.frozen) this.throwError('TypeError', 'Cannot modify a frozen array');
+    return array.elements;
+  }
+
   setElement(array: JsArray, index: number, value: Value): void {
-    const { elements } = array;
+    const elements = this.mutableElements(array);
     if (index >= elements.length) this.grow(array, index + 1);
     elements[index] = value;
   }
@@ -214,7 +223,8 @@ export class Runtime {
     const length = this.toNumber(value);
     if (!Number.isInteger(length) || length < 0 || length >= 2 ** 32)
       this.throwError('RangeError', 'Invalid array length');
-    if (length < array.elements.length) array.elements.length = length;
+    const elements = this.mutableElements(array);
+    if (length < elements.length) elements.length = length;
     else this.grow(array, length);
   }
 
@@ -244,7 +254,7 @@ export class Runtime {
     if (!(target instanceof JsObject)) return true;
     if (target instanceof JsArray) {
       const index = arrayIndexOf(key);
-      if (index !== undefined && index < target.elements.length) target.elements[index] = HOLE;
+      if (index !== undefined && index < target.elements.length) this.mutableElements(target)[index] = HOLE;
       if (index !== undefined) return true;
     }
     const property = this.getOwnProperty(target, key);

@@ -93,7 +93,8 @@ function defineObjectStatics(builder: RealmBuilder, objectConstructor: JsFunctio
   });
   builder.method(objectConstructor, 'freeze', 1, ({ args }) => {
     const object = args[0];
-    if (!isObject(object) || object instanceof JsArray) return object;
+    if (!isObject(object)) return object;
+    if (object instanceof JsArray) object.frozen = true;
     object.extensible = false;
     for (const property of object.properties.values()) {
       property.configurable = false;
