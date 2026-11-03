@@ -18,7 +18,7 @@ After editing the bank, run `bun run gen-code` to regenerate `src/problems/chall
 
 1. `problemIdToName` に問題IDと問題名を追加する。例: `test9: 'テスト問題(9)'`
 2. `courseIdToLectureIndexToProblemIds` に問題IDを追加する。
-3. `problemIdToProgram` に問題のJavaプログラムを追加する。`.trim()`は不要。`<1-3>` と書いた箇所は、問題ごとに1から3の乱数に置き換わる。
+3. `problemIdToProgram` に問題のJavaプログラムを追加する。`.trim()`は不要。`<1-4>` と書いた箇所は、問題ごとに1以上4未満（1から3）の乱数に置き換わる。上限は含まれない。
 4. ステップ実行で止めたい文の行末に `// step` を付ける。関数呼び出しの中に入りたい場合（ステップインしたい場合）は、呼び出しの行末に `// caller` を付ける。例:
 
 ```js
