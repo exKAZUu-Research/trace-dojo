@@ -273,9 +273,11 @@ class DefiniteAssignmentChecker {
     );
     const afterTryAndCatches = join(afterBody, ...afterCatches);
     if (!statement.finallyBlock) return afterTryAndCatches;
+    // The finally block may start after any assignment in the try or catch blocks, including abrupt paths.
+    const assignedInCatches = statement.catches.flatMap((clause) => this.assignedVariables(clause.body));
     const finallyEntry: State = {
       assigned: state.assigned,
-      possiblyAssigned: new Set([...possiblyAssigned, ...afterCatches.flatMap((after) => [...after.possiblyAssigned])]),
+      possiblyAssigned: new Set([...possiblyAssigned, ...assignedInCatches]),
     };
     // Jumps taken inside the finally block itself leave from where they are, unchanged.
     const jumpsBeforeFinally = this.targets.map((target) => [target.breaks.length, target.continues.length] as const);

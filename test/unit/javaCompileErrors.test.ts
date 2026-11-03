@@ -575,6 +575,16 @@ const programs: [name: string, runs: boolean, source: string][] = [
     false,
     'public class Main {\n  public static void main(String[] args) {\n    int x; while (true) { try { } finally { break; } } System.out.println(x);\n  }\n  \n}\n',
   ],
+  [
+    'finalCatchReturnFinally',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    final int x; try { throw new RuntimeException(); } catch (RuntimeException e) { x = 1; return; } finally { x = 2; }\n  }\n  \n}\n',
+  ],
+  [
+    'finalTryOnly',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    final int x; try { x = 1; } finally { } System.out.println(x);\n  }\n  \n}\n',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {
