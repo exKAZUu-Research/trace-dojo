@@ -101,7 +101,6 @@ function defineObjectStatics(builder: RealmBuilder, objectConstructor: JsFunctio
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Lists the builtin methods, each a small closure of its own.
 /**
  * Collects a value for each own enumerable property into an array held while getters run, so the turtles collected so
  * far stay reachable.
@@ -119,6 +118,7 @@ function collectProperties(runtime: Runtime, value: Value, entry: (key: string, 
   });
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Lists the builtin methods, each a small closure of its own.
 function defineFunction(builder: RealmBuilder): void {
   const { functionPrototype } = builder.realm;
   builder.defineClass(
