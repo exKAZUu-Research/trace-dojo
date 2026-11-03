@@ -59,7 +59,21 @@ test.each([
     main(
       'String s = "1".repeat(5000000); int n = 0; while (true) { try { n += Integer.parseInt(s); } catch (NumberFormatException e) { } }'
     ),
-    { kind: 'limitExceeded' },
+    { kind: 'executed', uncaughtException: expect.stringContaining('OutOfMemoryError') },
+  ],
+  [
+    'many copies of a long exception description',
+    main(
+      'RuntimeException e = new RuntimeException("x".repeat(1000000)); String[] a = new String[30]; for (int i = 0; i < a.length; i++) a[i] = e.toString();'
+    ),
+    { kind: 'executed', uncaughtException: expect.stringContaining('OutOfMemoryError') },
+  ],
+  [
+    'many exceptions echoing a long input',
+    main(
+      'String s = "x".repeat(1000000); Exception[] a = new Exception[30]; for (int i = 0; i < a.length; i++) { try { Integer.parseInt(s); } catch (NumberFormatException e) { a[i] = e; } }'
+    ),
+    { kind: 'executed', uncaughtException: expect.stringContaining('OutOfMemoryError') },
   ],
   [
     'a huge array',

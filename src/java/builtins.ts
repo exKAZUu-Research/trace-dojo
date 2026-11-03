@@ -96,9 +96,9 @@ function createRegistry(): Registry {
 function defineObject(objectClass: ClassInfo, stringType: JavaType): void {
   addMethod(objectClass, 'equals', [objectClass.type], BOOLEAN, false, (_, receiver, [other]) => receiver === other);
   addMethod(objectClass, 'hashCode', [], INT, false, (_, receiver) => identityOf(receiver));
-  addMethod(objectClass, 'toString', [], stringType, false, (_, receiver) => {
+  addMethod(objectClass, 'toString', [], stringType, false, (frame, receiver) => {
     const name = receiver instanceof JavaObject ? receiver.cls.name : 'Object';
-    return new JavaString(`${name}@${identityOf(receiver).toString(16)}`);
+    return newString(frame, `${name}@${identityOf(receiver).toString(16)}`);
   });
   addConstructor(objectClass, [], () => {});
 }
@@ -112,10 +112,10 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
   const throwableClass = registry.define('Throwable', objectClass);
   addMessageConstructors(throwableClass, stringType);
   addMethod(throwableClass, 'getMessage', [], stringType, false, (_, receiver) => (receiver as JavaObject).message);
-  addMethod(throwableClass, 'toString', [], stringType, false, (_, receiver) => {
+  addMethod(throwableClass, 'toString', [], stringType, false, (frame, receiver) => {
     const exception = receiver as JavaObject;
     const name = registry.qualifiedNames.get(exception.cls) ?? exception.cls.name;
-    return new JavaString(exception.message ? `${name}: ${exception.message.value}` : name);
+    return newString(frame, exception.message ? `${name}: ${exception.message.value}` : name);
   });
   const exceptionClass = defineThrowable('Exception', throwableClass);
   const runtimeExceptionClass = defineThrowable('RuntimeException', exceptionClass);
@@ -179,13 +179,8 @@ function defineInteger(integerClass: ClassInfo, stringType: JavaType): void {
     if (parsed > 2_147_483_647) throwBuiltin(frame, 'NumberFormatException', `For input string: "${value}"`);
     return parsed;
   });
-  addMethod(
-    integerClass,
-    'toString',
-    [INT],
-    stringType,
-    true,
-    (_, __, [value]) => new JavaString(String(value as number))
+  addMethod(integerClass, 'toString', [INT], stringType, true, (frame, __, [value]) =>
+    newString(frame, String(value as number))
   );
 }
 
