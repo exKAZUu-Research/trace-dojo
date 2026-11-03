@@ -808,6 +808,16 @@ const programs: [name: string, runs: boolean, source: string][] = [
     false,
     'public class Main { final Object f = new Object(); void set() { this.f = new Object(); } public static void main(String[] a) { } }',
   ],
+  [
+    'multiCatchRelated',
+    false,
+    'class E1 extends Exception {}\nclass E2 extends E1 {}\npublic class Main { public static void main(String[] args) { try { throw new E2(); } catch (E1 | E2 e) { } } }\n',
+  ],
+  [
+    'multiCatchUnrelated',
+    true,
+    'class E1 extends Exception {}\nclass E2 extends E1 {}\npublic class Main { public static void main(String[] args) { try { throw new E2(); } catch (E2 | RuntimeException e) { } catch (E1 e) { } } }\n',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

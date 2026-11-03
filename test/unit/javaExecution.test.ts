@@ -56,10 +56,8 @@ test.each([
   ],
   [
     'parsing a long string repeatedly',
-    main(
-      'String s = "1".repeat(5000000); int n = 0; while (true) { try { n += Integer.parseInt(s); } catch (NumberFormatException e) { } }'
-    ),
-    { kind: 'executed', uncaughtException: expect.stringContaining('OutOfMemoryError') },
+    main('String s = "0".repeat(4000000) + "1"; int n = 0; while (true) { n += Integer.parseInt(s); }'),
+    { kind: 'limitExceeded', limit: 'operations' },
   ],
   [
     'many copies of a long exception description',

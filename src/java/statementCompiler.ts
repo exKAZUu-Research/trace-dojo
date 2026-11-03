@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 428 -- The statement compiler keeps one method per statement kind together.
+// code-gauge-allow-file fileNcss 430 -- The statement compiler keeps one method per statement kind together.
 import type {
   Block,
   CatchClause,
@@ -559,7 +559,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     earlierClasses: readonly ClassInfo[]
   ): void {
     const exceptionClass = this.builtins.classes.get('Exception') as ClassInfo;
-    for (const cls of classes) {
+    for (const [index, cls] of classes.entries()) {
+      if (classes.some((other, otherIndex) => otherIndex !== index && isSubclass(cls, other))) {
+        this.error(clause, `catch の例外 ${cls.name} は、同じ catch の他の例外と親子関係にあります。`);
+      }
       if (earlierClasses.some((earlier) => isSubclass(cls, earlier))) {
         this.error(clause, `例外 ${cls.name} は、前の catch ですでに捕まえられています。`);
       }
