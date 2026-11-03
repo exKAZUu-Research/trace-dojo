@@ -221,6 +221,7 @@ function convertCatch(clause: Node): CatchClause {
   return {
     types: catchType ? namedChildren(catchType).map((type) => convertType(type)) : [],
     name: name.text,
+    isFinal: convertModifiers(modifiersOf(parameter)).isFinal,
     body: convertBlock(field(clause, 'body')),
     ...span(clause),
   };

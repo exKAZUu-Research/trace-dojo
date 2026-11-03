@@ -4,6 +4,7 @@ import type {
   BreakStatement,
   ContinueStatement,
   DoStatement,
+  ExplicitConstructorCall,
   Expression,
   ForEachStatement,
   ForStatement,
@@ -20,20 +21,56 @@ import { CompileError } from './diagnostics';
 import { booleanConstants } from './reachability';
 
 /**
- * Applies Java's definite assignment rules to the locals of one body: a local is read only after every path
- * assigns it, and a final local is assigned only while no path has assigned it.
+ * Applies Java's definite assignment rules to the locals of one method body: a local is read only after every
+ * path assigns it, and a final local is assigned only while no path has assigned it.
  */
-export function checkDefiniteAssignment(
-  parameters: readonly Parameter[],
-  body: Block,
-  explicitConstructorArgs: readonly Expression[] = []
-): void {
+export function checkDefiniteAssignment(parameters: readonly Parameter[], body: Block): void {
+  const checker = new DefiniteAssignmentChecker();
+  checker.statement(body, checker.declareParameters(checker.initialState(), parameters));
+}
+
+export interface InitializationPath {
+  /** The blank final fields this path must assign exactly once. */
+  blankFinals: readonly string[];
+  /** The initializer blocks that run before the constructor, in textual order. */
+  initializers: readonly Block[];
+  constructorDeclaration?: {
+    parameters: readonly Parameter[];
+    explicitCall: ExplicitConstructorCall | undefined;
+    body: Block;
+  };
+  /** Where an unassigned blank final is reported. */
+  span: Span;
+}
+
+/**
+ * Applies the definite assignment rules to the code that initializes a class or an object: its initializer blocks
+ * and, for objects, one constructor, which together must assign every blank final field exactly once.
+ */
+export function checkInitialization(path: InitializationPath): void {
   const checker = new DefiniteAssignmentChecker();
   let state = checker.initialState();
-  for (const parameter of parameters) {
-    state = checker.declare(state, parameter.name, parameter.isFinal, true);
+  for (const name of path.blankFinals) state = checker.declareField(state, name);
+  const constructor = path.constructorDeclaration;
+  // A constructor that calls this(...) starts after another constructor has initialized the object.
+  if (constructor?.explicitCall?.target === 'this') {
+    for (const name of path.blankFinals) state = checker.assignField(state, name);
+  } else {
+    for (const initializer of path.initializers) state = checker.statement(initializer, state);
   }
-  checker.statement(body, checker.expressions(explicitConstructorArgs, state));
+  if (constructor) {
+    const withParameters = checker.declareParameters(state, constructor.parameters);
+    const afterCall = checker.expressions(constructor.explicitCall?.args ?? [], withParameters);
+    state = checker.statement(constructor.body, afterCall);
+  }
+  for (const exit of [state, ...checker.returns]) {
+    const unassigned = path.blankFinals.find((name) => exit.assigned && !checker.isFieldAssigned(exit, name));
+    if (unassigned !== undefined) {
+      throw new CompileError([
+        { row: path.span.row, message: `final のフィールド ${unassigned} に値が代入されていない可能性があります。` },
+      ]);
+    }
+  }
 }
 
 interface Variable {
@@ -74,6 +111,10 @@ const UNREACHABLE: State = { assigned: undefined, possiblyAssigned: new Set() };
 
 class DefiniteAssignmentChecker {
   private readonly scopes: Map<string, Variable>[] = [new Map()];
+  /** Blank final fields, which `this.name` names even where a local hides the simple name. */
+  private readonly fields = new Map<string, Variable>();
+  /** The states at `return` statements, where a constructor ends too. */
+  readonly returns: State[] = [];
   private readonly targets: JumpTarget[] = [];
   private readonly loops: EnclosingLoop[] = [];
   /** The labels written directly before loops and switch statements. */
@@ -84,13 +125,34 @@ class DefiniteAssignmentChecker {
     return { assigned: new Set(), possiblyAssigned: new Set() };
   }
 
+  declareParameters(state: State, parameters: readonly Parameter[]): State {
+    this.scopes.push(new Map());
+    let current = state;
+    for (const parameter of parameters) current = this.declare(current, parameter.name, parameter.isFinal, true);
+    return current;
+  }
+
+  declareField(state: State, name: string): State {
+    const declared = this.declare(state, name, true, false);
+    this.fields.set(name, this.lookup(name) as Variable);
+    return declared;
+  }
+
+  assignField(state: State, name: string): State {
+    return assign(state, (this.fields.get(name) as Variable).id);
+  }
+
+  isFieldAssigned(state: State, name: string): boolean {
+    return state.assigned?.has((this.fields.get(name) as Variable).id) ?? true;
+  }
+
   declare(state: State, name: string, isFinal: boolean, isAssigned: boolean): State {
     const variable: Variable = { id: this.nextId++, name, isFinal };
     (this.scopes.at(-1) as Map<string, Variable>).set(name, variable);
     return isAssigned ? assign(state, variable.id) : state;
   }
 
-  // code-gauge-allow functionNcss 35 -- One case per statement kind, each delegating to its own rule.
+  // code-gauge-allow functionNcss 36 -- One case per statement kind, each delegating to its own rule.
   statement(statement: Statement, state: State): State {
     switch (statement.kind) {
       case 'block': {
@@ -123,9 +185,12 @@ class DefiniteAssignmentChecker {
         this.jumpTarget(statement)?.[statement.kind === 'break' ? 'breaks' : 'continues'].push(state);
         return UNREACHABLE;
       }
-      case 'return':
+      case 'return': {
+        this.returns.push(statement.value ? this.expression(statement.value, state) : state);
+        return UNREACHABLE;
+      }
       case 'throw': {
-        if (statement.value) this.expression(statement.value, state);
+        this.expression(statement.value, state);
         return UNREACHABLE;
       }
       case 'try': {
@@ -285,7 +350,10 @@ class DefiniteAssignmentChecker {
     const catchEntry: State = { assigned: state.assigned, possiblyAssigned };
     const afterCatches = statement.catches.map((clause) =>
       this.scoped(() =>
-        this.statement(clause.body, this.declare(catchEntry, clause.name, clause.types.length > 1, true))
+        this.statement(
+          clause.body,
+          this.declare(catchEntry, clause.name, clause.isFinal || clause.types.length > 1, true)
+        )
       )
     );
     const afterTryAndCatches = join(afterBody, ...afterCatches);
@@ -344,7 +412,7 @@ class DefiniteAssignmentChecker {
     return { whenTrue: after, whenFalse: after };
   }
 
-  // code-gauge-allow functionNcss 37 -- One case per expression kind, most only visiting their operands in order.
+  // code-gauge-allow functionNcss 40 -- One case per expression kind, most only visiting their operands in order.
   private expression(expression: Expression, state: State): State {
     switch (expression.kind) {
       case 'name': {
@@ -379,6 +447,8 @@ class DefiniteAssignmentChecker {
         return this.expression(expression.value, state);
       }
       case 'fieldAccess': {
+        const field = this.thisField(expression);
+        if (field) this.readVariable(expression, field, state);
         return expression.object === 'super' ? state : this.expression(expression.object, state);
       }
       case 'arrayAccess': {
@@ -419,20 +489,21 @@ class DefiniteAssignmentChecker {
   }
 
   private assignment(expression: Extract<Expression, { kind: 'assign' }>, state: State): State {
-    if (expression.target.kind !== 'name') {
-      const afterTarget = this.expression(expression.target, state);
+    const { target } = expression;
+    const variable = target.kind === 'name' ? this.lookup(target.name) : this.thisField(target);
+    if (!variable) {
+      const afterTarget = target.kind === 'name' ? state : this.expression(target, state);
       return this.expression(expression.value, afterTarget);
     }
-    if (expression.operator !== '=') this.read(expression.target, expression.target.name, state);
-    return this.store(expression.target, this.expression(expression.value, state), false);
+    if (expression.operator !== '=') this.readVariable(target, variable, state);
+    return this.store(target, this.expression(expression.value, state), false);
   }
 
   /** Assigns `target`, which an increment or decrement also reads first. */
   private store(target: Expression, state: State, reads: boolean): State {
-    if (target.kind !== 'name') return this.expression(target, state);
-    const variable = this.lookup(target.name);
-    if (!variable) return state;
-    if (reads) this.read(target, target.name, state);
+    const variable = target.kind === 'name' ? this.lookup(target.name) : this.thisField(target);
+    if (!variable) return target.kind === 'name' ? state : this.expression(target, state);
+    if (reads) this.readVariable(target, variable, state);
     if (variable.isFinal && state.assigned) {
       if (state.possiblyAssigned.has(variable.id)) this.finalAssignmentError(target, variable);
       for (const loop of this.loops) {
@@ -448,8 +519,20 @@ class DefiniteAssignmentChecker {
 
   private read(span: Span, name: string, state: State): void {
     const variable = this.lookup(name);
-    if (!variable || !state.assigned || state.assigned.has(variable.id)) return;
-    throw new CompileError([{ row: span.row, message: `変数 ${name} に値が代入されていない可能性があります。` }]);
+    if (variable) this.readVariable(span, variable, state);
+  }
+
+  private readVariable(span: Span, variable: Variable, state: State): void {
+    if (!state.assigned || state.assigned.has(variable.id)) return;
+    throw new CompileError([
+      { row: span.row, message: `変数 ${variable.name} に値が代入されていない可能性があります。` },
+    ]);
+  }
+
+  /** The blank final field that `this.name` names. */
+  private thisField(expression: Expression): Variable | undefined {
+    if (expression.kind !== 'fieldAccess' || expression.object === 'super' || expression.object.kind !== 'this') return;
+    return this.fields.get(expression.name);
   }
 
   /** The variables in scope here that `node` assigns anywhere. */

@@ -1,4 +1,5 @@
 import type {
+  Block,
   ClassDeclaration,
   CompilationUnit,
   ConstructorDeclaration,
@@ -9,7 +10,7 @@ import type {
 } from './ast';
 import type { Builtins } from './builtins';
 import { type CompileOptions, type MethodContext, sameParameters } from './compilerBase';
-import { checkDefiniteAssignment } from './definiteAssignment';
+import { checkDefiniteAssignment, checkInitialization } from './definiteAssignment';
 import { canCompleteNormally } from './reachability';
 import { type Frame, type Slot, UNASSIGNED } from './runtime';
 import { StatementCompiler } from './statementCompiler';
@@ -272,6 +273,8 @@ class Compiler extends StatementCompiler {
   protected compileBodies(cls: ClassInfo): void {
     const staticContext = { ...this.newContext(cls, true, VOID), initializes: 'static' as const };
     const staticInitializers = this.compileInitializers(staticContext, cls, true);
+    // Definite assignment reads the constants that compiling the initializers records.
+    checkInitialization({ ...this.initializationOf(cls, true), span: cls.declaration as ClassDeclaration });
     if (staticInitializers.length > 0) {
       const locals = staticContext.locals;
       cls.initializeStatics = (frame) => {
@@ -284,6 +287,21 @@ class Compiler extends StatementCompiler {
     for (const constructor of cls.constructors) this.compileConstructor(cls, constructor);
   }
 
+  /** The blank final fields and the initializer blocks of one kind, which assign those fields first. */
+  protected initializationOf(cls: ClassInfo, isStatic: boolean): { blankFinals: string[]; initializers: Block[] } {
+    const members = (cls.declaration as ClassDeclaration).members;
+    return {
+      blankFinals: members.flatMap((member) =>
+        member.kind === 'field' && member.modifiers.isStatic === isStatic && member.modifiers.isFinal
+          ? member.declarators.filter((declarator) => !declarator.initializer).map((declarator) => declarator.name)
+          : []
+      ),
+      initializers: members.flatMap((member) =>
+        member.kind === 'initializer' && member.isStatic === isStatic ? [member.body] : []
+      ),
+    };
+  }
+
   /** Compiles the field initializers and initializer blocks of one kind in textual order. */
   protected compileInitializers(context: MethodContext, cls: ClassInfo, isStatic: boolean): ((frame: Frame) => void)[] {
     const initializers: ((frame: Frame) => void)[] = [];
@@ -292,8 +310,6 @@ class Compiler extends StatementCompiler {
         initializers.push(...this.compileFieldInitializers(context, cls, member.declarators, member));
       } else if (member.kind === 'initializer' && member.isStatic === isStatic) {
         const body = this.compileBlock({ ...context, isInitializerBlock: true }, member.body);
-        // Definite assignment reads the constants that compiling the body records.
-        checkDefiniteAssignment([], member.body);
         initializers.push((frame) => {
           if (body(frame)) throw new Error('An initializer completed abruptly');
         });
@@ -372,9 +388,11 @@ class Compiler extends StatementCompiler {
     // A constructor that delegates to this(...) leaves the initializers to the constructor it calls.
     const initializers = callsThis ? [] : this.compileInitializers(context, cls, false);
     const body = declaration ? this.compileBlock(context, declaration.body, false) : undefined;
-    if (declaration) {
-      checkDefiniteAssignment(declaration.parameters, declaration.body, declaration.explicitCall?.args);
-    }
+    checkInitialization({
+      ...this.initializationOf(cls, false),
+      constructorDeclaration: declaration,
+      span: declaration ?? (cls.declaration as ClassDeclaration),
+    });
     constructor.code = {
       locals: context.locals,
       run: (frame) => {

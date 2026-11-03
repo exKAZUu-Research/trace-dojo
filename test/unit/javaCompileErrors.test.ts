@@ -737,6 +737,77 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'public class Main { Main() { return; } public static void main(String[] a) { new Main(); } }',
   ],
+  [
+    'blankNeverAssigned',
+    false,
+    'public class Main { final int f; public static void main(String[] a) { new Main(); } }',
+  ],
+  [
+    'blankOneCtorMissing',
+    false,
+    'public class Main { final int f; Main() { f = 1; } Main(int x) { } public static void main(String[] a) { new Main(); } }',
+  ],
+  [
+    'blankTwiceInCtor',
+    false,
+    'public class Main { final int f; Main() { f = 1; f = 2; } public static void main(String[] a) { new Main(); } }',
+  ],
+  [
+    'blankViaThisCall',
+    true,
+    'public class Main { final int f; Main() { this(1); } Main(int x) { f = x; } public static void main(String[] a) { new Main(); } }',
+  ],
+  [
+    'blankInInitializer',
+    true,
+    'public class Main { final int f; { f = 3; } Main() { } public static void main(String[] a) { new Main(); } }',
+  ],
+  [
+    'blankInitAndCtor',
+    false,
+    'public class Main { final int f; { f = 3; } Main() { f = 4; } public static void main(String[] a) { new Main(); } }',
+  ],
+  [
+    'blankBranches',
+    true,
+    'public class Main { final int f; Main(boolean b) { if (b) f = 1; else f = 2; } public static void main(String[] a) { new Main(true); } }',
+  ],
+  [
+    'blankReturnEarly',
+    false,
+    'public class Main { final int f; Main(boolean b) { if (b) return; f = 1; } public static void main(String[] a) { new Main(true); } }',
+  ],
+  [
+    'blankReadBefore',
+    false,
+    'public class Main { final int f; Main() { System.out.println(f); f = 1; } public static void main(String[] a) { new Main(); } }',
+  ],
+  [
+    'blankReadThisBefore',
+    false,
+    'public class Main { final int f; Main() { System.out.println(this.f); f = 1; } public static void main(String[] a) { new Main(); } }',
+  ],
+  [
+    'blankParamShadow',
+    true,
+    'public class Main { final int f; Main(int f) { this.f = f; } public static void main(String[] a) { new Main(1); } }',
+  ],
+  ['staticBlankMissing', false, 'public class Main { static final int F; public static void main(String[] a) { } }'],
+  [
+    'staticBlankTwice',
+    false,
+    'public class Main { static final int F; static { F = 1; } static { F = 2; } public static void main(String[] a) { } }',
+  ],
+  [
+    'finalCatchParam',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    try { System.out.println(1); } catch (final RuntimeException e) { e = new RuntimeException(); }\n  }\n  \n}\n',
+  ],
+  [
+    'objectFinalReassign',
+    false,
+    'public class Main { final Object f = new Object(); void set() { this.f = new Object(); } public static void main(String[] a) { } }',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {
