@@ -723,3 +723,22 @@ test('a step annotation on a statement with several parts records one step after
     { sid: 3, vars: { x: 1, y: 4, 'Main.a': 1, 'Main.b': 2 } },
   ]);
 });
+
+test('a step annotation on a for row records no step for an absent init or update', () => {
+  const program = `public class Main {
+  public static void main(String[] args) {
+    int i = 0;
+    for (; i < 1; i++) { // step
+    }
+    for (int j = 0; j < 1;) { // step
+      j++;
+    }
+  }
+}`;
+  const trace = traceJavaProgram(program, program);
+  expect(trace.traceItems.map(({ sid, vars }) => ({ sid, vars }))).toEqual([
+    { sid: 0, vars: {} },
+    { sid: 1, vars: { i: 1 } },
+    { sid: 2, vars: { i: 1, j: 0 } },
+  ]);
+});

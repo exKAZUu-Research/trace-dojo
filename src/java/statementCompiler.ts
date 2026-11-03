@@ -373,7 +373,14 @@ export abstract class StatementCompiler extends ExpressionCompiler {
           frame.runtime.onStep?.(stepId);
           return;
         };
-      return { init: recordStep(init), update: recordStep(update) };
+      const { init: initPart } = statement;
+      const initRecordsStep = Array.isArray(initPart)
+        ? initPart.length > 0
+        : initPart.declarators.some((declarator) => declarator.initializer);
+      return {
+        init: initRecordsStep ? recordStep(init) : init,
+        update: statement.update.length > 0 ? recordStep(update) : update,
+      };
     } finally {
       this.compilesForHeader = false;
     }
