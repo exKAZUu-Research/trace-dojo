@@ -262,7 +262,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const object = this.compileExpression(context, access.object);
     if (object.kind === 'class') {
       const field = this.findField(object.cls, name);
-      if (!field) return this.error(access, missingFieldMessage(object.cls, name));
+      if (!field) return this.error(access, this.missingFieldMessage(object.cls, name));
       if (!field.isStatic) this.error(access, `static ではないフィールド ${name} はクラス名から使えません。`);
       this.checkAccess(context, field.owner, field.access, access, `フィールド ${name}`);
       return this.fieldReference(field, undefined);
@@ -286,7 +286,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return this.error(access, `${typeName(object.type)} 型の値にはフィールドがありません。`);
     }
     const field = this.findField(object.type.cls, name);
-    if (!field) return this.error(access, missingFieldMessage(object.type.cls, name));
+    if (!field) return this.error(access, this.missingFieldMessage(object.type.cls, name));
     this.checkAccess(context, field.owner, field.access, access, `フィールド ${name}`);
     return this.fieldReference(field, field.isStatic ? undefined : object, field.isStatic ? object : undefined);
   }
@@ -345,6 +345,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
         };
       },
     };
+  }
+
+  protected missingFieldMessage(cls: ClassInfo, name: string): string {
+    return this.isPartialLibraryClass(cls)
+      ? `${cls.name} のフィールド ${name} は、Java にないか、この採点環境では使えません。`
+      : `${cls.name} にフィールド ${name} がありません。`;
   }
 
   protected compileReference(context: MethodContext, target: Expression): Reference {
@@ -692,7 +698,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const args = expression.args.map((arg) => this.compileValue(context, arg));
     const target = this.resolveCallTarget(context, expression);
     if (target.candidates.length === 0) {
-      const message = hasBuiltinAncestor(target.owner)
+      const message = this.isPartialLibraryClass(target.owner)
         ? `${target.owner.name} のメソッド ${expression.name} は、Java にないか、この採点環境では使えません。`
         : `${target.owner.name} にメソッド ${expression.name} がありません。`;
       this.error(expression, message);
@@ -789,20 +795,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.error(expression, `抽象メソッド ${name} は super から呼び出せません。`);
     }
   }
-}
-
-/** Whether `cls` inherits from a standard library class, whose members this environment implements only partly. */
-function hasBuiltinAncestor(cls: ClassInfo): boolean {
-  for (let current: ClassInfo | undefined = cls; current; current = current.superclass) {
-    if (current.isBuiltin && current.name !== 'Object') return true;
-  }
-  return false;
-}
-
-function missingFieldMessage(cls: ClassInfo, name: string): string {
-  return hasBuiltinAncestor(cls)
-    ? `${cls.name} のフィールド ${name} は、Java にないか、この採点環境では使えません。`
-    : `${cls.name} にフィールド ${name} がありません。`;
 }
 
 function notConstant(reference: Reference & { constant?: Value }): Reference & { constant?: Value } {

@@ -927,7 +927,10 @@ test.each([
     'String s = String.valueOf(1, 2);',
     'メソッド valueOf に (int, int) を渡す呼び出しは、Java にないか、この採点環境では使えません。',
   ],
-])('Java the interpreter does not implement is not called invalid Java: %s', (body, message) => {
+  ['Turtle t = new Turtle(); t.前に進む(3);', 'メソッド 前に進む に (int) を渡して呼び出すことはできません。'],
+  ['Turtle t = new Turtle(); t.x = 3;', 'Turtle にフィールド x がありません。'],
+  ['int n = Integer.parseInt(123);', 'メソッド parseInt に (int) を渡して呼び出すことはできません。'],
+])('only Java the interpreter does not implement is called possibly unsupported: %s', (body, message) => {
   const source = `class Main {\n  public static void main(String[] args) {\n    ${body}\n  }\n}`;
   expect(executeJavaProgram(source)).toEqual({ kind: 'compileError', diagnostics: [{ row: 2, message }] });
 });
