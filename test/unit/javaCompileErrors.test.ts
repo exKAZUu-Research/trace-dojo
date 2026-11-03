@@ -938,6 +938,26 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'public class Main { final int x; Main() { try { int x = 1; x = 2; } finally { this.x = 3; } } public static void main(String[] args) { new Main(); } }',
   ],
+  [
+    'conditionalConstLoop',
+    true,
+    'public class Main { static int f() { while (true ? true : false) {} } public static void main(String[] args) {} }',
+  ],
+  [
+    'conditionalConstFinal',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    final boolean go = 1 < 2 ? true : false; int n; if (go) n = 1; System.out.println(n);\n  }\n  \n}\n',
+  ],
+  [
+    'conditionalNonConst',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    int n; if (args.length > 0 ? true : false) n = 1; System.out.println(n);\n  }\n  \n}\n',
+  ],
+  [
+    'conditionalConstSwitch',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    final int k = true ? 1 : 2; switch (args.length) { case k: break; default: break; }\n  }\n  \n}\n',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

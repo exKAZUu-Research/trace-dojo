@@ -572,12 +572,16 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const consequence = this.compileValue(context, expression.consequence);
     const alternative = this.compileValue(context, expression.alternative);
     const type = this.conditionalType(expression, consequence.type, alternative.type);
-    const whenTrue = this.convert(consequence, type, 'invocation', expression.consequence).run;
-    const whenFalse = this.convert(alternative, type, 'invocation', expression.alternative).run;
+    const whenTrue = this.convert(consequence, type, 'invocation', expression.consequence);
+    const whenFalse = this.convert(alternative, type, 'invocation', expression.alternative);
+    const constantCondition = booleanConstants.get(expression.condition);
+    const isConstant =
+      constantCondition !== undefined && whenTrue.constant !== undefined && whenFalse.constant !== undefined;
     return {
       kind: 'value',
       type,
-      run: (frame) => (condition(frame) ? whenTrue(frame) : whenFalse(frame)),
+      constant: isConstant ? (constantCondition ? whenTrue.constant : whenFalse.constant) : undefined,
+      run: (frame) => (condition(frame) ? whenTrue.run(frame) : whenFalse.run(frame)),
     };
   }
 
