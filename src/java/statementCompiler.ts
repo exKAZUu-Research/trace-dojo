@@ -30,6 +30,9 @@ const CONTINUE: ContinueCompletion = { kind: 'continue', label: undefined };
 
 /** Compiles statements into closures that report how they complete. */
 export abstract class StatementCompiler extends ExpressionCompiler {
+  /** Set while compiling a `for` header, whose parts share the one step that the `for` records after them. */
+  private compilesForHeader = false;
+
   /** Compiles statements inside a new scope whose locals go out of scope when it is left. */
   protected withScope(context: MethodContext, compile: () => Exec, clearsLocals = true): Exec {
     context.scopes.push({ names: new Map(), slots: [] });
@@ -51,6 +54,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   protected stepIdOf(span: Span): number | undefined {
+    if (this.compilesForHeader) return;
     for (let row = span.row; row <= span.endRow; row++) {
       const stepId = this.stepIdByRow.get(row);
       if (stepId === undefined) continue;
@@ -256,10 +260,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const parts = statement.declarators.map((declarator) => this.compileDeclarator(context, statement, declarator));
     return (frame) => {
       for (const { slot, value } of parts) {
-        if (!value) continue;
-        frame.locals[slot] = value(frame);
-        if (stepId !== undefined) frame.runtime.onStep?.(stepId);
+        if (value) frame.locals[slot] = value(frame);
       }
+      if (stepId !== undefined) frame.runtime.onStep?.(stepId);
       return;
     };
   }
@@ -329,11 +332,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   protected compileFor(context: MethodContext, statement: Extract<Statement, { kind: 'for' }>): Exec {
     const labels = this.takeLabels(context);
-    const init: Exec = Array.isArray(statement.init)
-      ? this.compileStatements(context, statement.init)
-      : this.compileLocal(context, statement.init);
+    const { init, update } = this.compileForHeader(context, statement);
     const condition = statement.condition ? this.compileCondition(context, statement.condition) : () => true;
-    const update = this.compileStatements(context, statement.update);
     const body = this.compileLoopBody(context, statement.body);
     return (frame) => {
       init(frame);
@@ -347,6 +347,36 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       }
       return;
     };
+  }
+
+  /** Compiles the init and the update so that each records one step after it runs as a whole. */
+  protected compileForHeader(
+    context: MethodContext,
+    statement: Extract<Statement, { kind: 'for' }>
+  ): { init: Exec; update: Exec } {
+    const headerParts: Span[] = [
+      ...(Array.isArray(statement.init) ? statement.init : [statement.init]),
+      ...statement.update,
+    ];
+    const stepId = headerParts.map((part) => this.stepIdOf(part)).find((id) => id !== undefined);
+    this.compilesForHeader = true;
+    try {
+      const init = Array.isArray(statement.init)
+        ? this.compileStatements(context, statement.init)
+        : this.compileLocal(context, statement.init);
+      const update = this.compileStatements(context, statement.update);
+      if (stepId === undefined) return { init, update };
+      const recordStep =
+        (exec: Exec): Exec =>
+        (frame) => {
+          exec(frame);
+          frame.runtime.onStep?.(stepId);
+          return;
+        };
+      return { init: recordStep(init), update: recordStep(update) };
+    } finally {
+      this.compilesForHeader = false;
+    }
   }
 
   protected compileForEach(context: MethodContext, statement: Extract<Statement, { kind: 'forEach' }>): Exec {

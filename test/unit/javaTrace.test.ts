@@ -704,3 +704,22 @@ class Counter {
     expect(() => traceJavaProgram(annotated, annotated)).toThrow('// step は');
   }
 );
+
+test('a step annotation on a statement with several parts records one step after the whole statement', () => {
+  const program = `public class Main {
+  static int a = 1, b = 2; // step
+  public static void main(String[] args) {
+    int x = 3, y = 4; // step
+    for (x = 0, y = 5; x < 1; x++, y--) { // step
+    }
+  }
+}`;
+  const trace = traceJavaProgram(program, program);
+  expect(trace.traceItems.map(({ sid, vars }) => ({ sid, vars }))).toEqual([
+    { sid: 0, vars: {} },
+    { sid: 1, vars: { 'Main.a': 1, 'Main.b': 2 } },
+    { sid: 2, vars: { x: 3, y: 4, 'Main.a': 1, 'Main.b': 2 } },
+    { sid: 3, vars: { x: 0, y: 5, 'Main.a': 1, 'Main.b': 2 } },
+    { sid: 3, vars: { x: 1, y: 4, 'Main.a': 1, 'Main.b': 2 } },
+  ]);
+});

@@ -325,10 +325,11 @@ class Compiler extends StatementCompiler {
     declarators: VariableDeclarator[],
     declaration: Span
   ): ((frame: Frame) => void)[] {
-    const recordsStep = declarators.some((declarator) => declarator.initializer);
-    const stepId = recordsStep ? this.stepIdOf(declaration) : undefined;
+    const lastInitialized = declarators.findLast((declarator) => declarator.initializer);
+    const stepId = lastInitialized ? this.stepIdOf(declaration) : undefined;
     return declarators.flatMap((declarator) => {
       if (!declarator.initializer) return [];
+      const declaratorStepId = declarator === lastInitialized ? stepId : undefined;
       const field = cls.fields.get(declarator.name) as FieldInfo;
       const value = this.compileInitializer(context, declarator.initializer, field.type);
       const { slot } = field;
@@ -337,7 +338,7 @@ class Compiler extends StatementCompiler {
           const result = value(frame);
           const slots = field.isStatic ? frame.runtime.staticsOf(frame, cls) : (frame.thisObject as JavaObject).fields;
           slots[slot] = result;
-          if (stepId !== undefined) frame.runtime.onStep?.(stepId);
+          if (declaratorStepId !== undefined) frame.runtime.onStep?.(declaratorStepId);
         },
       ];
     });
