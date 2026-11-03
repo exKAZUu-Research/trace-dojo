@@ -54,6 +54,9 @@ export type Compiled = CompiledValue | { kind: 'class'; cls: ClassInfo };
 
 export interface Reference {
   type: JavaType;
+  /** The field this reference names, whose finality decides whether it may be assigned. */
+  field?: FieldInfo;
+  isArrayLength?: boolean;
   /** Evaluates the receiver and index once, returning accessors bound to them. */
   bind: (frame: Frame) => { get: () => Value; set: (value: Value) => void };
 }
@@ -78,6 +81,10 @@ export interface MethodContext {
   loopLabels: string[];
   loopDepth: number;
   switchDepth: number;
+  /** The objects or class whose fields this code initializes, where their blank finals may be assigned. */
+  initializes: 'instance' | 'static' | undefined;
+  /** Whether this code is an initializer block, where `return` is not allowed. */
+  isInitializerBlock: boolean;
   /** The exceptions the method declares in its `throws` clause. */
   thrownTypes: readonly ClassInfo[];
   /** The try statements whose try block encloses the code being compiled, innermost last. */
@@ -163,6 +170,8 @@ export abstract class CompilerBase {
       loopLabels: [],
       loopDepth: 0,
       switchDepth: 0,
+      initializes: undefined,
+      isInitializerBlock: false,
       thrownTypes,
       tries: [],
       rethrownTypes: new Map(),

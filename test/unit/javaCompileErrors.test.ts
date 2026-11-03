@@ -675,6 +675,68 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'public class Main {\n  public static void main(String[] args) {\n    try { System.out.println(1); } catch (RuntimeException e) { }\n  }\n  \n}\n',
   ],
+  [
+    'arrayLength',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    int[] arr = new int[2]; arr.length = 5;\n  }\n  \n}\n',
+  ],
+  [
+    'arrayLengthInc',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    int[] arr = new int[2]; arr.length++;\n  }\n  \n}\n',
+  ],
+  [
+    'qualifiedConst',
+    false,
+    'public class Main { static final int F = 1; public static void main(String[] a) { Main.F = 2; } }',
+  ],
+  [
+    'receiverConst',
+    false,
+    'public class Main { final int f = 1; public static void main(String[] a) { new Main().f = 2; } }',
+  ],
+  [
+    'constIncrement',
+    false,
+    'public class Main { static final int F = 1; public static void main(String[] a) { F++; } }',
+  ],
+  [
+    'blankFinalCtor',
+    true,
+    'public class Main { final int f; Main() { f = 1; } public static void main(String[] a) { new Main(); } }',
+  ],
+  [
+    'blankFinalThis',
+    true,
+    'public class Main { final int f; Main() { this.f = 1; } public static void main(String[] a) { new Main(); } }',
+  ],
+  [
+    'blankFinalMethod',
+    false,
+    'public class Main { final int f = 0; void g() { } final int h; Main() { h = 1; } void set() { h = 2; } public static void main(String[] a) { new Main(); } }',
+  ],
+  [
+    'blankFinalOther',
+    false,
+    'public class Main { final int f; Main() { f = 1; Main m = this; m.f = 2; } public static void main(String[] a) { new Main(); } }',
+  ],
+  [
+    'blankStaticFinal',
+    true,
+    'public class Main { static final int F; static { F = 3; } public static void main(String[] a) { System.out.println(F); } }',
+  ],
+  [
+    'builtinConst',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    Integer.MAX_VALUE = 1;\n  }\n  \n}\n',
+  ],
+  ['returnInInit', false, 'public class Main { { return; } public static void main(String[] a) { } }'],
+  ['returnInStaticInit', false, 'public class Main { static { return; } public static void main(String[] a) { } }'],
+  [
+    'returnInCtor',
+    true,
+    'public class Main { Main() { return; } public static void main(String[] a) { new Main(); } }',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

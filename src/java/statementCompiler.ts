@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 426 -- The statement compiler keeps one method per statement kind together.
+// code-gauge-allow-file fileNcss 428 -- The statement compiler keeps one method per statement kind together.
 import type {
   Block,
   CatchClause,
@@ -321,6 +321,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   protected compileReturn(context: MethodContext, statement: Extract<Statement, { kind: 'return' }>): Exec {
+    if (context.isInitializerBlock) this.error(statement, 'return 文は初期化ブロックの中には書けません。');
     const stepId = this.stepIdOf(statement);
     if (!statement.value) {
       if (context.returnType.kind !== 'void') this.error(statement, 'return 文に値が必要です。');

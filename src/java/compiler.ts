@@ -270,7 +270,7 @@ class Compiler extends StatementCompiler {
   }
 
   protected compileBodies(cls: ClassInfo): void {
-    const staticContext = this.newContext(cls, true, VOID);
+    const staticContext = { ...this.newContext(cls, true, VOID), initializes: 'static' as const };
     const staticInitializers = this.compileInitializers(staticContext, cls, true);
     if (staticInitializers.length > 0) {
       const locals = staticContext.locals;
@@ -291,7 +291,7 @@ class Compiler extends StatementCompiler {
       if (member.kind === 'field' && member.modifiers.isStatic === isStatic) {
         initializers.push(...this.compileFieldInitializers(context, cls, member.declarators, member));
       } else if (member.kind === 'initializer' && member.isStatic === isStatic) {
-        const body = this.compileBlock(context, member.body);
+        const body = this.compileBlock({ ...context, isInitializerBlock: true }, member.body);
         // Definite assignment reads the constants that compiling the body records.
         checkDefiniteAssignment([], member.body);
         initializers.push((frame) => {
@@ -350,7 +350,7 @@ class Compiler extends StatementCompiler {
 
   protected compileConstructor(cls: ClassInfo, constructor: MethodInfo): void {
     const declaration = constructor.declaration as ConstructorDeclaration | undefined;
-    const context = this.newContext(cls, false, VOID, constructor.thrownTypes);
+    const context = { ...this.newContext(cls, false, VOID, constructor.thrownTypes), initializes: 'instance' as const };
     for (const [index, parameter] of (declaration?.parameters ?? []).entries()) {
       this.declareLocal(context, parameter, parameter.name, constructor.parameterTypes[index]);
     }

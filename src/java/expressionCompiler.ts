@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 438 -- The expression compiler keeps one method per expression kind together.
+// code-gauge-allow-file fileNcss 440 -- The expression compiler keeps one method per expression kind together.
 import type { ArrayInitializer, BinaryOperator, Expression, Span } from './ast';
 import {
   type Compiled,
@@ -309,6 +309,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (constant !== undefined) {
       return {
         type: field.type,
+        field,
         constant,
         bind: () => ({
           get: () => constant,
@@ -322,6 +323,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const builtinConstant = field.constant;
       return {
         type: field.type,
+        field,
         constant:
           builtinConstant !== undefined && !(builtinConstant instanceof JavaObject) ? builtinConstant : undefined,
         bind: (frame) => {
@@ -339,6 +341,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const object = receiver as CompiledValue;
     return {
       type: field.type,
+      field,
       bind: (frame) => {
         const target = object.run(frame);
         if (!(target instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
@@ -405,7 +408,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   protected compileAssignment(context: MethodContext, expression: Extract<Expression, { kind: 'assign' }>): Compiled {
     const reference = this.compileReference(context, expression.target);
-    this.checkFinalAssignment(context, expression.target);
+    this.checkAssignable(context, expression.target, reference);
     const value = this.compileValue(context, expression.value);
     const { bind, type } = reference;
     if (expression.operator === '=') {
@@ -444,22 +447,29 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  protected checkFinalAssignment(context: MethodContext, target: Expression): void {
-    if (target.kind === 'name' && this.findLocal(context, target.name) !== undefined) return;
-    const name = target.kind === 'name' || target.kind === 'fieldAccess' ? target.name : undefined;
-    if (!name) return;
-    const owner =
-      target.kind === 'fieldAccess' && target.object !== 'super' && target.object.kind !== 'this'
-        ? undefined
-        : context.cls;
-    const field = owner ? this.findField(owner, name) : undefined;
-    if (field && (field.constant !== undefined || this.constantOf(field) !== undefined)) {
-      this.error(target, `${name} は final なので代入できません。`);
-    }
+  /**
+   * Rejects assigning an array's length or a final field, except a blank final field that a constructor or an
+   * initializer of its class assigns by its simple name or through `this`.
+   */
+  protected checkAssignable(context: MethodContext, target: Expression, reference: Reference): void {
+    const { field } = reference;
+    if (reference.isArrayLength) this.error(target, 'length は final なので代入できません。');
+    if (!field?.isFinal) return;
+    const isBlank =
+      field.constant === undefined &&
+      !field.declaration?.declarators.find((declarator) => declarator.name === field.name)?.initializer;
+    const namesOwnField =
+      target.kind === 'name' ||
+      (target.kind === 'fieldAccess' && target.object !== 'super' && target.object.kind === 'this');
+    const initializesField =
+      context.cls === field.owner && context.initializes === (field.isStatic ? 'static' : 'instance');
+    if (!(isBlank && namesOwnField && initializesField))
+      this.error(target, `${field.name} は final なので代入できません。`);
   }
 
   protected compileUpdate(context: MethodContext, expression: Extract<Expression, { kind: 'update' }>): Compiled {
     const reference = this.compileReference(context, expression.target);
+    this.checkAssignable(context, expression.target, reference);
     const { type, bind } = reference;
     if (!isNumeric(type))
       this.error(expression, `${typeName(type)} 型の変数には ${expression.operator} を使えません。`);
@@ -789,6 +799,7 @@ function thisValue(context: MethodContext): CompiledValue {
 function arrayLengthReference(array: CompiledValue): Reference {
   return {
     type: INT,
+    isArrayLength: true,
     bind: (frame) => {
       const value = array.run(frame);
       if (!(value instanceof JavaArray)) throwBuiltin(frame, 'NullPointerException');
