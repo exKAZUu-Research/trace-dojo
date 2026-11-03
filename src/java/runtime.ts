@@ -73,8 +73,6 @@ export class Runtime {
   output = '';
   /** Called after a statement on a `// step` row completes. */
   onStep?: (stepId: number) => void;
-  /** Whether turtles that no variable can reach disappear, as the course assumes of garbage collection. */
-  collectsGarbage = true;
   private operations = 0;
   private allocatedArrayElements = 0;
   private readonly initializingClasses = new Set<ClassInfo>();
@@ -157,7 +155,7 @@ export class Runtime {
 
   /** Removes the turtles that no frame, static field, or pending value can reach any more. */
   collectGarbage(): void {
-    if (!this.collectsGarbage || this.world.turtles.length === 0) return;
+    if (this.world.turtles.length === 0) return;
     const reached = markReachable(this.gcRoots());
     for (const turtle of this.world.turtles) {
       if (!reached.has(turtle) && turtle.turtle) turtle.turtle.isAlive = false;
