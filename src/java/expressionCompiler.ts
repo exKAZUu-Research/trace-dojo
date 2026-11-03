@@ -9,7 +9,6 @@ import {
   type MethodContext,
   type Reference,
 } from './compilerBase';
-import { CompileError } from './diagnostics';
 import { binaryOperation, castOperation, conditionalType, unaryOperation } from './operators';
 import { booleanConstants } from './reachability';
 import { type Frame, throwBuiltin, UNASSIGNED } from './runtime';
@@ -58,7 +57,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     type: JavaType
   ): Eval {
     if (initializer.kind === 'arrayInitializer') return this.compileArrayInitializer(context, initializer, type);
-    return this.convert(this.compileValue(context, initializer), type, 'assignment').run;
+    return this.convert(this.compileValue(context, initializer), type, 'assignment', initializer).run;
   }
 
   protected compileArrayInitializer(context: MethodContext, initializer: ArrayInitializer, type: JavaType): Eval {
@@ -82,19 +81,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   protected compileExpression(context: MethodContext, expression: Expression): Compiled {
-    try {
-      const compiled = this.compileExpressionBody(context, expression);
-      if (compiled.kind === 'value' && typeof compiled.constant === 'boolean') {
-        booleanConstants.set(expression, compiled.constant);
-      }
-      return compiled;
-    } catch (error) {
-      // Conversions report no location of their own, so they take the expression's.
-      if (error instanceof CompileError && error.diagnostics[0]?.row === -1) {
-        throw new CompileError([{ row: expression.row, message: error.diagnostics[0].message }]);
-      }
-      throw error;
+    const compiled = this.compileExpressionBody(context, expression);
+    if (compiled.kind === 'value' && typeof compiled.constant === 'boolean') {
+      booleanConstants.set(expression, compiled.constant);
     }
+    return compiled;
   }
 
   // code-gauge-allow functionNcss 46 -- One case per expression kind, each delegating to its own compiler.
@@ -583,8 +574,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const consequence = this.compileValue(context, expression.consequence);
     const alternative = this.compileValue(context, expression.alternative);
     const type = this.conditionalType(expression, consequence.type, alternative.type);
-    const whenTrue = this.convert(consequence, type).run;
-    const whenFalse = this.convert(alternative, type).run;
+    const whenTrue = this.convert(consequence, type, 'invocation', expression.consequence).run;
+    const whenFalse = this.convert(alternative, type, 'invocation', expression.alternative).run;
     return {
       kind: 'value',
       type,
@@ -676,7 +667,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
     );
     this.checkAccess(context, cls, constructor.access, expression, `コンストラクタ ${cls.name}`);
     this.checkThrown(context, expression, constructor.thrownTypes);
-    const convertedArgs = args.map((arg, index) => this.convert(arg, constructor.parameterTypes[index]).run);
+    const convertedArgs = args.map(
+      (arg, index) => this.convert(arg, constructor.parameterTypes[index], 'invocation', expression.args[index]).run
+    );
     const callRow = expression.row;
     return {
       kind: 'value',
@@ -709,7 +702,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
     );
     this.checkCall(context, expression, method, target.receiver === undefined);
     this.checkThrown(context, expression, method.thrownTypes);
-    const convertedArgs = args.map((arg, index) => this.convert(arg, method.parameterTypes[index]).run);
+    const convertedArgs = args.map(
+      (arg, index) => this.convert(arg, method.parameterTypes[index], 'invocation', expression.args[index]).run
+    );
     const callRow = expression.row;
     if (method.isStatic) {
       // A static method called through an expression still evaluates that expression.

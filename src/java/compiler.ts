@@ -378,7 +378,8 @@ class Compiler extends StatementCompiler {
     const callsThis = explicitCall?.target === 'this';
     const targetClass = callsThis ? cls : (cls.superclass as ClassInfo);
     // Arguments of an explicit constructor call may not refer to the object under construction.
-    const args = (explicitCall?.args ?? []).map((arg) => this.compileValue({ ...context, isStatic: true }, arg));
+    const argSyntax = explicitCall?.args ?? [];
+    const args = argSyntax.map((arg) => this.compileValue({ ...context, isStatic: true }, arg));
     const target = this.selectMethod(
       explicitCall ?? declaration ?? (cls.declaration as ClassDeclaration),
       targetClass.constructors.filter((candidate) => candidate !== constructor || !callsThis),
@@ -386,7 +387,9 @@ class Compiler extends StatementCompiler {
       `コンストラクタ ${targetClass.name}`
     );
     this.checkThrown(context, explicitCall ?? declaration ?? (cls.declaration as ClassDeclaration), target.thrownTypes);
-    const convertedArgs = args.map((arg, index) => this.convert(arg, target.parameterTypes[index]).run);
+    const convertedArgs = args.map(
+      (arg, index) => this.convert(arg, target.parameterTypes[index], 'invocation', argSyntax[index]).run
+    );
     // An implicit super() has no call in the source, so its frame is not a call that learners trace.
     const callRow = explicitCall?.row;
     // A constructor that delegates to this(...) leaves the initializers to the constructor it calls.

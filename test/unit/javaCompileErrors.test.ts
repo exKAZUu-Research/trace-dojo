@@ -884,6 +884,7 @@ test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, sou
   expect(execution).toMatchObject({ kind: 'compileError' });
   const lineCount = source.split('\n').length;
   for (const { row } of execution.kind === 'compileError' ? execution.diagnostics : []) {
+    expect(row).toBeGreaterThanOrEqual(0);
     expect(row).toBeLessThan(lineCount);
   }
 });
@@ -902,5 +903,18 @@ test('a missing semicolon after a declaration is reported on its line', () => {
   expect(executeJavaProgram(source)).toEqual({
     kind: 'compileError',
     diagnostics: [{ row: 2, message: '「;」が足りません。' }],
+  });
+});
+
+test.each([
+  [
+    'a returned value',
+    'class Main {\n  static int f() {\n    return true;\n  }\n  public static void main(String[] a) { }\n}',
+  ],
+  ['an array element', 'class Main {\n  public static void main(String[] a) {\n    int[] xs = {1, true};\n  }\n}'],
+])('a type error in %s is reported on its line', (_, source) => {
+  expect(executeJavaProgram(source)).toEqual({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: 'boolean 型の値を int 型に変換できません。' }],
   });
 });

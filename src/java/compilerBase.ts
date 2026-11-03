@@ -219,11 +219,12 @@ export abstract class CompilerBase {
    * Converts a value for assignment (which also narrows int constants to char) or for method invocation, failing
    * compilation when Java forbids the conversion.
    */
+  /** @param span The expression converted, where a failed conversion is reported. */
   protected convert(
     value: CompiledValue,
     to: JavaType,
-    context: 'assignment' | 'invocation' = 'invocation',
-    span?: Span
+    context: 'assignment' | 'invocation',
+    span: Span
   ): CompiledValue {
     if (isWidening(value.type, to, this.builtins.objectClass)) {
       return { kind: 'value', type: to, run: value.run, constant: value.constant };
@@ -238,9 +239,7 @@ export abstract class CompilerBase {
     ) {
       return { kind: 'value', type: CHAR, run: value.run, constant: value.constant };
     }
-    const message = `${typeName(value.type)} 型の値を ${typeName(to)} 型に変換できません。`;
-    if (span) this.error(span, message);
-    throw new CompileError([{ row: -1, message }]);
+    return this.error(span, `${typeName(value.type)} 型の値を ${typeName(to)} 型に変換できません。`);
   }
 
   /**
@@ -265,7 +264,8 @@ export abstract class CompilerBase {
         const compiled = this.convert(
           this.compileValue(this.newContext(field.owner, true, VOID), initializer),
           field.type,
-          'assignment'
+          'assignment',
+          initializer
         );
         constant = compiled.constant;
       } catch {
