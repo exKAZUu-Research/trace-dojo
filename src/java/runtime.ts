@@ -45,18 +45,23 @@ export class JavaThrow {
 
 /** Stops a program that exceeds a limit the learner cannot catch. */
 export class ExecutionLimitError extends Error {
-  constructor(readonly limit: 'operations' | 'output' | 'trace') {
+  constructor(readonly limit: 'operations' | 'time' | 'output' | 'trace') {
     super(`Execution limit exceeded: ${limit}`);
     this.name = 'ExecutionLimitError';
   }
 }
 
-export interface RuntimeLimits {
-  maxOperations: number;
-  maxCallDepth: number;
-  maxArrayElements: number;
-  maxOutputLength: number;
-}
+/** Bounds every run, since learners' programs run inside the web server's process. */
+const LIMITS = {
+  maxOperations: 1_000_000,
+  maxMilliseconds: 2000,
+  maxCallDepth: 512,
+  maxArrayElements: 1_000_000,
+  /** The total length of the strings built while running. */
+  maxStringLength: 10_000_000,
+  maxOutputLength: 100_000,
+};
+const OPERATIONS_PER_CLOCK_CHECK = 1024;
 
 export interface TurtleWorld {
   board: string[][];
@@ -74,30 +79,41 @@ export class Runtime {
   /** Called after a statement on a `// step` row completes. */
   onStep?: (stepId: number) => void;
   private operations = 0;
+  private nextClockCheck = OPERATIONS_PER_CLOCK_CHECK;
+  private readonly deadline = performance.now() + LIMITS.maxMilliseconds;
   private allocatedArrayElements = 0;
+  private allocatedStringLength = 0;
   private readonly initializingClasses = new Set<ClassInfo>();
   private readonly dispatchCache = new Map<MethodInfo, Map<ClassInfo, MethodInfo>>();
 
-  constructor(
-    readonly builtins: Builtins,
-    readonly limits: RuntimeLimits
-  ) {}
+  constructor(readonly builtins: Builtins) {}
 
   spend(cost = 1): void {
     this.operations += cost;
-    if (this.operations > this.limits.maxOperations) throw new ExecutionLimitError('operations');
+    if (this.operations > LIMITS.maxOperations) throw new ExecutionLimitError('operations');
+    // Operations such as comparing long strings cost more time than one operation, so the clock bounds them.
+    if (this.operations < this.nextClockCheck) return;
+    this.nextClockCheck = this.operations + OPERATIONS_PER_CLOCK_CHECK;
+    if (performance.now() > this.deadline) throw new ExecutionLimitError('time');
   }
 
   print(text: string): void {
     this.output += text;
-    if (this.output.length > this.limits.maxOutputLength) throw new ExecutionLimitError('output');
+    if (this.output.length > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
+  }
+
+  /** Charges for a string of `length` built at run time, before it is built. */
+  allocateString(frame: Frame, length: number): void {
+    this.allocatedStringLength += length;
+    this.spend(Math.ceil(length / 64));
+    if (this.allocatedStringLength > LIMITS.maxStringLength) throwBuiltin(frame, 'OutOfMemoryError', 'Java heap space');
   }
 
   allocateArray(frame: Frame, length: number): void {
     if (length < 0) throwBuiltin(frame, 'NegativeArraySizeException', String(length));
     this.allocatedArrayElements += length;
     this.spend(Math.ceil(length / 64));
-    if (this.allocatedArrayElements > this.limits.maxArrayElements)
+    if (this.allocatedArrayElements > LIMITS.maxArrayElements)
       throwBuiltin(frame, 'OutOfMemoryError', 'Java heap space');
   }
 
@@ -141,7 +157,7 @@ export class Runtime {
     callRow: number | undefined
   ): Frame {
     this.spend();
-    if (this.frames.length >= this.limits.maxCallDepth && caller) {
+    if (this.frames.length >= LIMITS.maxCallDepth && caller) {
       throwBuiltin(caller, 'StackOverflowError');
     }
     const frame = new Frame(this, method, locals, thisObject, callRow);

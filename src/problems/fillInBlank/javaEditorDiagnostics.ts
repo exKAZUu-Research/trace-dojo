@@ -3,7 +3,7 @@ import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { type Diagnostic, linter, setDiagnosticsEffect } from '@codemirror/lint';
 import { EditorState, type Extension, StateEffect, StateField } from '@codemirror/state';
 
-import { formatJavaDiagnostic, type JavaDiagnostic } from './javaDiagnostics';
+import type { JavaDiagnostic } from './javaDiagnostics';
 import { javaPlaceholderRanges, maskJavaNonCode } from './javaSource';
 
 export const compilerFeedback = StateEffect.define<JavaDiagnostic[]>();
@@ -58,7 +58,7 @@ function combinedDiagnostics(state: EditorState): Diagnostic[] {
       from: line.from,
       to: line.to,
       severity: 'error',
-      message: formatJavaDiagnostic(item),
+      message: item.message,
       source: '提出後の確認（コンパイル）',
     });
     occupiedLines.add(line.number);

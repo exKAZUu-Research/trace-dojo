@@ -47,11 +47,33 @@ export function parseJava(source: string): CompilationUnit {
   const tree = parser.parse(source);
   if (!tree) throw new Error('The Java parser returned no tree');
   try {
+    const tooDeep = findTooDeepNode(tree.rootNode);
+    if (tooDeep) {
+      throw new CompileError([{ row: tooDeep.startPosition.row, message: '括弧やブロックなどの入れ子が深すぎます。' }]);
+    }
     const syntaxErrors = collectSyntaxErrors(tree.rootNode);
     if (syntaxErrors.length > 0) throw new CompileError(syntaxErrors);
     return convertProgram(tree.rootNode);
   } finally {
     tree.delete();
+  }
+}
+
+/** Converting, compiling, and running recurse into nested constructs, so deeper nesting would exhaust the stack. */
+const MAX_NESTING_DEPTH = 300;
+
+function findTooDeepNode(root: Node): Node | undefined {
+  const cursor = root.walk();
+  try {
+    for (;;) {
+      if (cursor.currentDepth > MAX_NESTING_DEPTH) return cursor.currentNode;
+      if (cursor.gotoFirstChild()) continue;
+      while (!cursor.gotoNextSibling()) {
+        if (!cursor.gotoParent()) return;
+      }
+    }
+  } finally {
+    cursor.delete();
   }
 }
 

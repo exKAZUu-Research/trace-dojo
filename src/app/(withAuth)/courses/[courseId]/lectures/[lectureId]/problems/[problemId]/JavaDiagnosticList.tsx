@@ -1,7 +1,7 @@
 import type React from 'react';
 
 import { Box, Heading } from '@/infrastructures/useClient/chakra';
-import { type JavaDiagnostic, javaOriginalMessageLabel } from '@/problems/fillInBlank/javaDiagnostics';
+import type { JavaDiagnostic } from '@/problems/fillInBlank/javaDiagnostics';
 
 export const JavaDiagnosticList: React.FC<{ diagnostics: JavaDiagnostic[] }> = ({ diagnostics }) => (
   <Box as="ul" listStyleType="none" m={0} p={0} whiteSpace="normal">
@@ -20,16 +20,6 @@ export const JavaDiagnosticList: React.FC<{ diagnostics: JavaDiagnostic[] }> = (
         <Box as="p" whiteSpace="pre-wrap">
           {item.message}
         </Box>
-        {item.originalMessage && (
-          <Box mt={3} p={3} bg="gray.50" rounded="md" color="gray.600" fontSize="sm">
-            <Box as="p" mb={1}>
-              {javaOriginalMessageLabel}
-            </Box>
-            <Box as="p" whiteSpace="pre-wrap">
-              {item.originalMessage}
-            </Box>
-          </Box>
-        )}
       </Box>
     ))}
   </Box>

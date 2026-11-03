@@ -9,6 +9,7 @@ import type {
 } from './ast';
 import type { Builtins } from './builtins';
 import { type CompileOptions, type MethodContext, sameParameters } from './compilerBase';
+import { checkDefiniteAssignment } from './definiteAssignment';
 import { canCompleteNormally } from './reachability';
 import { type Frame, type Slot, UNASSIGNED } from './runtime';
 import { StatementCompiler } from './statementCompiler';
@@ -290,6 +291,7 @@ class Compiler extends StatementCompiler {
       if (member.kind === 'field' && member.modifiers.isStatic === isStatic) {
         initializers.push(...this.compileFieldInitializers(context, cls, member.declarators, member));
       } else if (member.kind === 'initializer' && member.isStatic === isStatic) {
+        checkDefiniteAssignment([], member.body);
         const body = this.compileBlock(context, member.body);
         initializers.push((frame) => {
           if (body(frame)) throw new Error('An initializer completed abruptly');
@@ -302,11 +304,12 @@ class Compiler extends StatementCompiler {
   protected compileMethod(cls: ClassInfo, method: MethodInfo): void {
     const member = method.declaration as MethodDeclaration;
     if (!member.body) return;
-    const context = this.newContext(cls, method.isStatic, method.returnType);
+    const context = this.newContext(cls, method.isStatic, method.returnType, method.thrownTypes);
     for (const [index, parameter] of member.parameters.entries()) {
       this.declareLocal(context, parameter, parameter.name, method.parameterTypes[index]);
     }
     const body = this.compileBlock(context, member.body, false);
+    checkDefiniteAssignment(member.parameters, member.body);
     if (method.returnType.kind !== 'void' && canCompleteNormally(member.body)) {
       this.error({ ...member.body, row: member.body.endRow }, `メソッド ${method.name} に return 文がありません。`);
     }
@@ -346,7 +349,7 @@ class Compiler extends StatementCompiler {
 
   protected compileConstructor(cls: ClassInfo, constructor: MethodInfo): void {
     const declaration = constructor.declaration as ConstructorDeclaration | undefined;
-    const context = this.newContext(cls, false, VOID);
+    const context = this.newContext(cls, false, VOID, constructor.thrownTypes);
     for (const [index, parameter] of (declaration?.parameters ?? []).entries()) {
       this.declareLocal(context, parameter, parameter.name, constructor.parameterTypes[index]);
     }
@@ -361,12 +364,14 @@ class Compiler extends StatementCompiler {
       args.map((arg) => arg.type),
       `コンストラクタ ${targetClass.name}`
     );
+    this.checkThrown(context, explicitCall ?? declaration ?? (cls.declaration as ClassDeclaration), target.thrownTypes);
     const convertedArgs = args.map((arg, index) => this.convert(arg, target.parameterTypes[index]).run);
     // An implicit super() has no call in the source, so its frame is not a call that learners trace.
     const callRow = explicitCall?.row;
     // A constructor that delegates to this(...) leaves the initializers to the constructor it calls.
     const initializers = callsThis ? [] : this.compileInitializers(context, cls, false);
     const body = declaration ? this.compileBlock(context, declaration.body, false) : undefined;
+    if (declaration) checkDefiniteAssignment(declaration.parameters, declaration.body);
     constructor.code = {
       locals: context.locals,
       run: (frame) => {

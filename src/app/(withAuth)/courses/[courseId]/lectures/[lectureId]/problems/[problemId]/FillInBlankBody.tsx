@@ -179,7 +179,8 @@ const EditingBody: React.FC<Props & { baseline: string; draftKey: string; restor
         case 'ungradable': {
           setAlert({
             title: '採点できませんでした',
-            message: '採点サービスが混み合っています。しばらく待ってから、もう一度提出してください。',
+            message:
+              '問題が切り替わったため、採点しませんでした。ページを再読み込みしてから、もう一度提出してください。',
             isCompleted: false,
           });
           break;
@@ -363,12 +364,11 @@ function toIncorrectMessage(detail: string): string {
   if (detail.startsWith('Compile error')) return `${javaFeedbackSummary}入力したコードを見直してください。`;
   if (detail.startsWith('Time limit'))
     return 'プログラムが終了しませんでした。無限ループになっていないか確認してください。';
-  if (detail.includes('forbidden')) return '使用できない機能が含まれています。';
-  if (detail.startsWith('The program threw an exception') || detail.startsWith('The program failed')) {
+  if (detail.startsWith('The program threw an exception')) {
     return 'プログラムが実行中にエラーで停止しました。亀が盤面の外に出ていないか確認してください。';
   }
-  if (detail.includes('too much output') || detail.includes('too long') || detail.includes('did not finish')) {
-    return 'プログラムを最後まで実行できませんでした。出力や入力の量を減らしてください。';
+  if (detail.includes('too much output')) {
+    return 'プログラムを最後まで実行できませんでした。出力の量を減らしてください。';
   }
   return '実行結果が期待した盤面と異なります。もう一度考えてみましょう。';
 }

@@ -76,9 +76,10 @@ function concatenation(builtins: Builtins, leftType: JavaType, rightType: JavaTy
   return {
     type: builtins.stringClass.type,
     apply: (frame, left, right) => {
-      const text = stringify(frame, left, leftType) + stringify(frame, right, rightType);
-      frame.runtime.spend(Math.ceil(text.length / 256));
-      return new JavaString(text);
+      const leftText = stringify(frame, left, leftType);
+      const rightText = stringify(frame, right, rightType);
+      frame.runtime.allocateString(frame, leftText.length + rightText.length);
+      return new JavaString(leftText + rightText);
     },
   };
 }

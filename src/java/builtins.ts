@@ -246,12 +246,12 @@ function defineStringQueries(stringClass: ClassInfo, objectType: JavaType): void
   addMethod(stringClass, 'substring', [INT], stringType, false, (frame, receiver, [begin]) => {
     const value = text(receiver);
     checkRange(frame, begin as number, value.length, value.length);
-    return new JavaString(value.slice(begin as number));
+    return newString(frame, value.slice(begin as number));
   });
   addMethod(stringClass, 'substring', [INT, INT], stringType, false, (frame, receiver, [begin, end]) => {
     const value = text(receiver);
     checkRange(frame, begin as number, end as number, value.length);
-    return new JavaString(value.slice(begin as number, end as number));
+    return newString(frame, value.slice(begin as number, end as number));
   });
   addMethod(stringClass, 'indexOf', [stringType], INT, false, (frame, receiver, [other]) =>
     text(receiver).indexOf(requireString(frame, other))
@@ -269,43 +269,25 @@ function defineStringQueries(stringClass: ClassInfo, objectType: JavaType): void
 
 function defineStringTransforms(stringClass: ClassInfo, objectType: JavaType): void {
   const stringType = stringClass.type;
-  addMethod(
-    stringClass,
-    'toUpperCase',
-    [],
-    stringType,
-    false,
-    (_, receiver) => new JavaString(text(receiver).toUpperCase())
+  addMethod(stringClass, 'toUpperCase', [], stringType, false, (frame, receiver) =>
+    newString(frame, text(receiver).toUpperCase())
   );
-  addMethod(
-    stringClass,
-    'toLowerCase',
-    [],
-    stringType,
-    false,
-    (_, receiver) => new JavaString(text(receiver).toLowerCase())
+  addMethod(stringClass, 'toLowerCase', [], stringType, false, (frame, receiver) =>
+    newString(frame, text(receiver).toLowerCase())
   );
-  addMethod(
-    stringClass,
-    'trim',
-    [],
-    stringType,
-    false,
-    (_, receiver) =>
-      // oxlint-disable-next-line no-control-regex -- String.trim removes every code unit up to U+0020.
-      new JavaString(text(receiver).replaceAll(/^[\u0000- ]+|[\u0000- ]+$/g, ''))
+  addMethod(stringClass, 'trim', [], stringType, false, (frame, receiver) =>
+    // oxlint-disable-next-line no-control-regex -- String.trim removes every code unit up to U+0020.
+    newString(frame, text(receiver).replaceAll(/^[\u0000- ]+|[\u0000- ]+$/g, ''))
   );
-  addMethod(
-    stringClass,
-    'concat',
-    [stringType],
-    stringType,
-    false,
-    (frame, receiver, [other]) => new JavaString(text(receiver) + requireString(frame, other))
-  );
+  addMethod(stringClass, 'concat', [stringType], stringType, false, (frame, receiver, [other]) => {
+    const left = text(receiver);
+    const right = requireString(frame, other);
+    frame.runtime.allocateString(frame, left.length + right.length);
+    return new JavaString(left + right);
+  });
   addMethod(stringClass, 'repeat', [INT], stringType, false, (frame, receiver, [count]) => {
     if ((count as number) < 0) throwBuiltin(frame, 'IllegalArgumentException', `count is negative: ${count as number}`);
-    frame.runtime.spend(Math.ceil((text(receiver).length * (count as number)) / 64));
+    frame.runtime.allocateString(frame, text(receiver).length * (count as number));
     return new JavaString(text(receiver).repeat(count as number));
   });
   addMethod(stringClass, 'compareTo', [stringType], INT, false, (frame, receiver, [other]) => {
@@ -325,15 +307,15 @@ function defineStringTransforms(stringClass: ClassInfo, objectType: JavaType): v
     );
   });
   for (const type of [INT, DOUBLE, CHAR, BOOLEAN, objectType]) {
-    addMethod(
-      stringClass,
-      'valueOf',
-      [type],
-      stringType,
-      true,
-      (frame, _, [value]) => new JavaString(stringify(frame, value, type))
+    addMethod(stringClass, 'valueOf', [type], stringType, true, (frame, _, [value]) =>
+      newString(frame, stringify(frame, value, type))
     );
   }
+}
+
+function newString(frame: Frame, value: string): JavaString {
+  frame.runtime.allocateString(frame, value.length);
+  return new JavaString(value);
 }
 
 function text(value: Value): string {

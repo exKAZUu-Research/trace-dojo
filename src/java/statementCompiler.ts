@@ -13,16 +13,18 @@ import {
   type CompiledValue,
   type Completion,
   type ContinueCompletion,
+  type EnclosingTry,
   type Eval,
   type Exec,
   type MethodContext,
   type ReturnCompletion,
   type Scope,
 } from './compilerBase';
+import { assignedNames } from './definiteAssignment';
 import { ExpressionCompiler } from './expressionCompiler';
 import { canCompleteNormally } from './reachability';
 import { type Frame, JavaThrow, throwBuiltin, UNASSIGNED } from './runtime';
-import { isSubclass, type JavaType, typeName } from './types';
+import { type ClassInfo, isSubclass, type JavaType, typeName } from './types';
 import { JavaArray, JavaObject, JavaString, type Value } from './values';
 
 const BREAK: BreakCompletion = { kind: 'break', label: undefined };
@@ -213,6 +215,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       value.type.kind === 'null' ||
       (value.type.kind === 'class' && isSubclass(value.type.cls, this.builtins.throwableClass));
     if (!isThrowable) this.error(statement.value, `${typeName(value.type)} は例外として投げられません。`);
+    const local = statement.value.kind === 'name' ? this.findLocal(context, statement.value.name) : undefined;
+    // Rethrowing a catch parameter throws only what its try block throws, as long as it is not reassigned.
+    const rethrown = local === undefined ? undefined : context.rethrownTypes.get(local);
+    if (value.type.kind === 'class') this.checkThrown(context, statement, rethrown ?? [value.type.cls]);
     return (frame) => {
       const exception = value.run(frame);
       if (!(exception instanceof JavaObject)) throwBuiltin(frame, 'NullPointerException');
@@ -519,8 +525,18 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (statement.catches.length === 0 && !statement.finallyBlock) {
       this.error(statement, 'try 文には catch か finally が必要です。');
     }
-    const body = this.compileBlock(context, statement.body);
-    const handle = this.compileCatchClauses(context, statement.catches);
+    const enclosing: EnclosingTry = {
+      caughtTypes: statement.catches.flatMap((clause) => clause.types.map((type) => this.resolveThrowable(type))),
+      thrownTypes: [],
+    };
+    context.tries.push(enclosing);
+    let body: Exec;
+    try {
+      body = this.compileBlock(context, statement.body);
+    } finally {
+      context.tries.pop();
+    }
+    const handle = this.compileCatchClauses(context, statement.catches, enclosing.thrownTypes);
     const finallyBlock = statement.finallyBlock ? this.compileBlock(context, statement.finallyBlock) : undefined;
     return (frame) => {
       const { completion, pending } = attemptTry(frame, body, handle);
@@ -532,12 +548,18 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   /** Compiles catch clauses into a handler that rethrows an exception none of them catches. */
-  protected compileCatchClauses(context: MethodContext, clauses: CatchClause[]): CatchHandler {
+  protected compileCatchClauses(
+    context: MethodContext,
+    clauses: CatchClause[],
+    thrownInTry: readonly ClassInfo[]
+  ): CatchHandler {
     const handlers = clauses.map((clause) => {
       const classes = clause.types.map((type) => this.resolveThrowable(type));
       const exec = this.withScope(context, () => {
         const type = classes.length === 1 ? classes[0].type : this.builtins.throwableClass.type;
         const slot = this.declareLocal(context, clause, clause.name, type);
+        const rethrown = thrownInTry.filter((thrown) => classes.some((cls) => isSubclass(thrown, cls)));
+        if (!assignedNames(clause.body).includes(clause.name)) context.rethrownTypes.set(slot, rethrown);
         const handler = this.compileBlock(context, clause.body);
         return (frame) => {
           frame.locals[slot] = frame.temporaries.pop();

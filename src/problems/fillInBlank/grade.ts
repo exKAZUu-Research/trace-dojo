@@ -1,95 +1,48 @@
-import { randomUUID } from 'node:crypto';
-
+import { executeJavaProgram } from '../../java/execute';
 import type { JavaChallengeTarget } from '../javaChallenges/types';
-import { normalizeCompilerDiagnostics } from './compilerDiagnostics';
 import type { JavaDiagnostic } from './javaDiagnostics';
-import type { JavaExecutor } from './javaExecutors';
-import { createJudgeExecutor, createWandboxExecutor } from './javaExecutors';
-import {
-  buildJavaJudgeProgram,
-  findForbiddenJavaPattern,
-  isSameTurtleState,
-  JAVA_JUDGE_CLASS_NAME,
-  MAX_JAVA_PROGRAM_LENGTH,
-  parseJavaJudgeOutput,
-} from './javaProgram';
+import { isSameTurtleState } from './javaProgram';
 
-// Stages 1 and 2 remain valid in legacy submission history. New grading uses 0, 3, and 4.
-export type GradingStage = 0 | 1 | 2 | 3 | 4;
-
-export type FillInBlankGradingResult =
-  | { status: 'correct'; stage: GradingStage }
-  | { status: 'incorrect'; stage: GradingStage; detail: string; diagnostics?: JavaDiagnostic[] }
-  /** No grader could judge the answer (e.g., every Java executor was unavailable). */
-  | { status: 'ungradable'; detail: string };
+/** Recorded with each submission; earlier submissions keep 0 to 4, where 3 was Wandbox and 4 the judge service. */
+export const GRADING_STAGE = 5;
 
 export type FillInBlankVerdict =
   | { status: 'correct' }
   | { status: 'incorrect'; detail: string; diagnostics?: JavaDiagnostic[] }
+  /** The answer could not be graded, e.g., because the problem session changed while it was being sent. */
   | { status: 'ungradable'; detail: string };
 
-export interface GradingOptions {
-  /** Executors used for stages 3 and 4, in order. Defaults to Wandbox followed by the judge service. */
-  javaExecutors?: JavaExecutor[];
-}
+export type FillInBlankGradingResult = Exclude<FillInBlankVerdict, { status: 'ungradable' }>;
 
-const defaultJavaExecutors: JavaExecutor[] = [createWandboxExecutor(), createJudgeExecutor()];
+const MAX_DIAGNOSTICS = 20;
+const MAX_DIAGNOSTIC_LENGTH = 240;
 
-export async function gradeFillInBlankCode(
-  problem: JavaChallengeTarget,
-  userProgram: string,
-  options?: GradingOptions
-): Promise<FillInBlankGradingResult> {
-  const executors = options?.javaExecutors ?? defaultJavaExecutors;
-  const forbiddenPattern = findForbiddenJavaPattern(userProgram);
-  if (forbiddenPattern) {
-    return { status: 'incorrect', stage: 0, detail: `The program uses a forbidden feature: ${forbiddenPattern}` };
-  }
-  const resultMarker = `__TRACE_DOJO_RESULT_${randomUUID().replaceAll('-', '')}__`;
-  const built = buildJavaJudgeProgram(userProgram, resultMarker);
-  if (built.program.length > MAX_JAVA_PROGRAM_LENGTH) {
-    return { status: 'incorrect', stage: 0, detail: 'The program is too long.' };
-  }
-
-  const reasons: string[] = [];
-  for (const executor of executors) {
-    const stage: GradingStage = executor.name === 'wandbox' ? 3 : 4;
-    const result = await executor.execute(built.program, JAVA_JUDGE_CLASS_NAME);
-    switch (result.kind) {
-      case 'unavailable': {
-        reasons.push(`${executor.name}: ${result.reason}`);
-        continue;
-      }
-      case 'compileError': {
-        return {
-          status: 'incorrect',
-          stage,
-          detail: 'Compile error.',
-          diagnostics: normalizeCompilerDiagnostics(result.message, built),
-        };
-      }
-      case 'timeout': {
-        return { status: 'incorrect', stage, detail: 'Time limit exceeded.' };
-      }
-      case 'memoryLimitExceeded': {
-        return { status: 'incorrect', stage, detail: 'The program used too much memory.' };
-      }
-      case 'outputLimitExceeded': {
-        return { status: 'incorrect', stage, detail: 'The program printed too much output.' };
-      }
-      case 'executed': {
-        const actual = parseJavaJudgeOutput(result.stderr, resultMarker);
-        if (!actual) {
-          return { status: 'incorrect', stage, detail: 'The program did not finish normally.' };
-        }
-        if (actual.exception) {
-          return { status: 'incorrect', stage, detail: 'The program threw an exception.' };
-        }
-        return isSameTurtleState({ board: problem.finalBoard, turtles: problem.finalTurtles }, actual)
-          ? { status: 'correct', stage }
-          : { status: 'incorrect', stage, detail: 'The final state differs from the expected one.' };
-      }
+export function gradeFillInBlankCode(problem: JavaChallengeTarget, userProgram: string): FillInBlankGradingResult {
+  const execution = executeJavaProgram(userProgram);
+  switch (execution.kind) {
+    case 'compileError': {
+      return {
+        status: 'incorrect',
+        detail: 'Compile error.',
+        diagnostics: execution.diagnostics.slice(0, MAX_DIAGNOSTICS).map(({ row, message }) => ({
+          line: row + 1,
+          message: message.slice(0, MAX_DIAGNOSTIC_LENGTH),
+        })),
+      };
+    }
+    case 'limitExceeded': {
+      return {
+        status: 'incorrect',
+        detail: execution.limit === 'output' ? 'The program printed too much output.' : 'Time limit exceeded.',
+      };
+    }
+    case 'executed': {
+      if (execution.uncaughtException) return { status: 'incorrect', detail: 'The program threw an exception.' };
+      const expected = { board: problem.finalBoard, turtles: problem.finalTurtles };
+      const actual = { board: execution.finalBoard, turtles: execution.finalTurtles };
+      return isSameTurtleState(expected, actual)
+        ? { status: 'correct' }
+        : { status: 'incorrect', detail: 'The final state differs from the expected one.' };
     }
   }
-  return { status: 'ungradable', detail: reasons.join('\n') };
 }

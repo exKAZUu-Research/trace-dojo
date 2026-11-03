@@ -78,6 +78,18 @@ export interface MethodContext {
   loopLabels: string[];
   loopDepth: number;
   switchDepth: number;
+  /** The exceptions the method declares in its `throws` clause. */
+  thrownTypes: readonly ClassInfo[];
+  /** The try statements whose try block encloses the code being compiled, innermost last. */
+  tries: EnclosingTry[];
+  /** The checked exceptions that rethrowing each catch parameter throws: those its try block throws. */
+  rethrownTypes: Map<number, ClassInfo[]>;
+}
+
+export interface EnclosingTry {
+  caughtTypes: ClassInfo[];
+  /** The checked exceptions thrown in the try block that reach its catch clauses. */
+  thrownTypes: ClassInfo[];
 }
 
 /** Name resolution, conversions, and overload resolution shared by the expression and statement compilers. */
@@ -134,7 +146,12 @@ export abstract class CompilerBase {
     return result;
   }
 
-  protected newContext(cls: ClassInfo, isStatic: boolean, returnType: JavaType): MethodContext {
+  protected newContext(
+    cls: ClassInfo,
+    isStatic: boolean,
+    returnType: JavaType,
+    thrownTypes: readonly ClassInfo[] = []
+  ): MethodContext {
     return {
       constants: new Map(),
       cls,
@@ -146,7 +163,27 @@ export abstract class CompilerBase {
       loopLabels: [],
       loopDepth: 0,
       switchDepth: 0,
+      thrownTypes,
+      tries: [],
+      rethrownTypes: new Map(),
     };
+  }
+
+  /** Rejects a checked exception that no enclosing catch clause catches and the method does not declare. */
+  protected checkThrown(context: MethodContext, span: Span, thrown: readonly ClassInfo[]): void {
+    for (const cls of thrown) {
+      if (!this.isChecked(cls)) continue;
+      const catching = context.tries.findLastIndex((enclosing) =>
+        enclosing.caughtTypes.some((caught) => isSubclass(cls, caught))
+      );
+      for (const enclosing of context.tries.slice(Math.max(catching, 0))) enclosing.thrownTypes.push(cls);
+      if (catching !== -1 || context.thrownTypes.some((declared) => isSubclass(cls, declared))) continue;
+      this.error(span, `例外 ${cls.name} は、catch するか、throws で宣言する必要があります。`);
+    }
+  }
+
+  protected isChecked(cls: ClassInfo): boolean {
+    return !['RuntimeException', 'Error'].some((name) => isSubclass(cls, this.builtins.classes.get(name) as ClassInfo));
   }
 
   protected declareLocal(context: MethodContext, span: Span, name: string, type: JavaType): number {

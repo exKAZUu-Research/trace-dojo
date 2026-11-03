@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { TURTLE_GRAPHICS_BOARD_COLUMNS, TURTLE_GRAPHICS_BOARD_ROWS } from '../../constants';
 import { extractBlanks, removeBlankMarkers } from '../fillInBlank/blanks';
-import { buildJavaJudgeProgram, findForbiddenJavaPattern, MAX_JAVA_PROGRAM_LENGTH } from '../fillInBlank/javaProgram';
+import { MAX_JAVA_PROGRAM_LENGTH } from '../fillInBlank/javaProgram';
 import { stripJavaTraceAnnotations } from '../fillInBlank/javaSource';
 import { charToColor } from '../trace';
 import { javaChallengeDefinitions } from './definitions';
@@ -47,11 +47,6 @@ const definitionSchema = z.object({
 export const instantiateJavaChallenge = (problemId: string, format: JavaChallengeFormat): InstantiatedJavaChallenge => {
   const definition = definitionSchema.parse(javaChallengeDefinitions[problemId]);
   if (definition.problemFormat !== format) throw new Error(`Wrong challenge format: ${problemId}`);
-  if (
-    findForbiddenJavaPattern(definition.correctProgram) ||
-    buildJavaJudgeProgram(definition.correctProgram, '__MODEL_VALIDATION__').program.length > MAX_JAVA_PROGRAM_LENGTH
-  )
-    throw new Error(`Unsupported challenge model: ${problemId}`);
   if (format === 'bugFix') {
     if (!definition.bugKind || definition.starterProgram.trim() === definition.correctProgram)
       throw new Error(`Invalid bug repair: ${problemId}`);

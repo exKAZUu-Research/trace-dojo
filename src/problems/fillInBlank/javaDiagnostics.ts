@@ -4,7 +4,6 @@ export const javaDiagnosticsSchema = z
   .array(
     z.object({
       message: z.string().min(1).max(240),
-      originalMessage: z.string().min(1).max(240).optional(),
       line: z.number().int().positive().optional(),
     })
   )
@@ -21,8 +20,3 @@ export function readJavaDiagnostics(value: unknown, lineCount: number): JavaDiag
 }
 
 export const javaFeedbackSummary = 'コードを実行する前に、確認が必要な箇所が見つかりました。（コンパイルエラー）';
-export const javaOriginalMessageLabel = '参考（Java のメッセージ）';
-
-export function formatJavaDiagnostic(diagnostic: JavaDiagnostic): string {
-  return `${diagnostic.message}${diagnostic.originalMessage ? `\n${javaOriginalMessageLabel}\n${diagnostic.originalMessage}` : ''}`;
-}

@@ -659,6 +659,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       `コンストラクタ ${cls.name}`
     );
     this.checkAccess(context, cls, constructor.access, expression, `コンストラクタ ${cls.name}`);
+    this.checkThrown(context, expression, constructor.thrownTypes);
     const convertedArgs = args.map((arg, index) => this.convert(arg, constructor.parameterTypes[index]).run);
     const callRow = expression.row;
     return {
@@ -691,6 +692,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       `メソッド ${expression.name}`
     );
     this.checkCall(context, expression, method, target.receiver === undefined);
+    this.checkThrown(context, expression, method.thrownTypes);
     const convertedArgs = args.map((arg, index) => this.convert(arg, method.parameterTypes[index]).run);
     const callRow = expression.row;
     if (method.isStatic) {

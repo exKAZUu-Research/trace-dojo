@@ -59,7 +59,7 @@ function switchCanCompleteNormally(statement: Extract<Statement, { kind: 'switch
 }
 
 /** Evaluates boolean constant expressions built from literals, which decide reachability in Java. */
-function constantBoolean(expression: Expression): boolean | undefined {
+export function constantBoolean(expression: Expression): boolean | undefined {
   switch (expression.kind) {
     case 'literal': {
       return expression.literal.type === 'boolean' ? expression.literal.value : undefined;
