@@ -412,3 +412,17 @@ test.each([
 ])('a model program with %s is rejected', (_, program, message) => {
   expect(() => traceProgram('javascript', program, program)).toThrow(message);
 });
+
+test('a value that a finally block delays keeps its turtle while the block records steps', () => {
+  const program = `function make() {
+  try {
+    return new Turtle();
+  } finally {
+    const done = true; // step
+  }
+}
+const t = make(); // step`;
+  const trace = traceProgram('javascript', program, program);
+  expect(trace.traceItems.map(({ turtles }) => turtles.length)).toEqual([0, 1, 1]);
+  expect(trace.finalTurtles).toHaveLength(1);
+});

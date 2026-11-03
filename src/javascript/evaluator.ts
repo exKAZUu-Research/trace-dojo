@@ -270,7 +270,13 @@ export class Evaluator extends ExpressionEvaluator {
       );
     }
     if (finalizer) {
-      const finalCompletion = this.runtime.hold(outcome.thrown?.value, () => this.block(finalizer));
+      // The exception or the return value that the finalizer delays must keep its turtles alive meanwhile.
+      const delayed = outcome.thrown
+        ? outcome.thrown.value
+        : outcome.completion?.kind === 'return'
+          ? outcome.completion.value
+          : undefined;
+      const finalCompletion = this.runtime.hold(delayed, () => this.block(finalizer));
       if (finalCompletion) return finalCompletion;
     }
     if (outcome.thrown) throw outcome.thrown;
