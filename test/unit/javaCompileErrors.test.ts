@@ -818,6 +818,26 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'class E1 extends Exception {}\nclass E2 extends E1 {}\npublic class Main { public static void main(String[] args) { try { throw new E2(); } catch (E2 | RuntimeException e) { } catch (E1 e) { } } }\n',
   ],
+  [
+    'siblingInit',
+    true,
+    'public class Main { final int a; final int b = (a = 1); public static void main(String[] x) { System.out.println(new Main().a); } }',
+  ],
+  [
+    'siblingStaticInit',
+    true,
+    'public class Main { static final int A; static final int B = (A = 1); public static void main(String[] x) { } }',
+  ],
+  [
+    'siblingArrayInit',
+    true,
+    'public class Main { final int a; final int[] b = new int[] { (a = 1) }; public static void main(String[] x) { } }',
+  ],
+  [
+    'fieldInitReadsBlank',
+    false,
+    'public class Main { final int a; int b = a; Main() { a = 1; } public static void main(String[] x) { } }',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

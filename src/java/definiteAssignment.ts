@@ -32,8 +32,8 @@ export function checkDefiniteAssignment(parameters: readonly Parameter[], body: 
 export interface InitializationPath {
   /** The blank final fields this path must assign exactly once. */
   blankFinals: readonly string[];
-  /** The initializer blocks that run before the constructor, in textual order. */
-  initializers: readonly Block[];
+  /** The initializer blocks and field initializers that run before the constructor, in textual order. */
+  initializers: readonly (Block | Expression | ArrayInitializer)[];
   constructorDeclaration?: {
     parameters: readonly Parameter[];
     explicitCall: ExplicitConstructorCall | undefined;
@@ -56,7 +56,10 @@ export function checkInitialization(path: InitializationPath): void {
   if (constructor?.explicitCall?.target === 'this') {
     for (const name of path.blankFinals) state = checker.assignField(state, name);
   } else {
-    for (const initializer of path.initializers) state = checker.statement(initializer, state);
+    for (const initializer of path.initializers) {
+      state =
+        initializer.kind === 'block' ? checker.statement(initializer, state) : checker.initializer(initializer, state);
+    }
   }
   if (constructor) {
     const withParameters = checker.declareParameters(state, constructor.parameters);
@@ -481,7 +484,7 @@ class DefiniteAssignmentChecker {
     return current;
   }
 
-  private initializer(initializer: Expression | ArrayInitializer, state: State): State {
+  initializer(initializer: Expression | ArrayInitializer, state: State): State {
     if (initializer.kind !== 'arrayInitializer') return this.expression(initializer, state);
     let current = state;
     for (const element of initializer.elements) current = this.initializer(element, current);

@@ -1,8 +1,10 @@
 import type {
+  ArrayInitializer,
   Block,
   ClassDeclaration,
   CompilationUnit,
   ConstructorDeclaration,
+  Expression,
   FieldDeclaration,
   MethodDeclaration,
   Span,
@@ -287,18 +289,27 @@ class Compiler extends StatementCompiler {
     for (const constructor of cls.constructors) this.compileConstructor(cls, constructor);
   }
 
-  /** The blank final fields and the initializer blocks of one kind, which assign those fields first. */
-  protected initializationOf(cls: ClassInfo, isStatic: boolean): { blankFinals: string[]; initializers: Block[] } {
-    const members = (cls.declaration as ClassDeclaration).members;
+  /** The blank final fields and the initializers of one kind, which assign those fields first. */
+  protected initializationOf(
+    cls: ClassInfo,
+    isStatic: boolean
+  ): { blankFinals: string[]; initializers: (Block | Expression | ArrayInitializer)[] } {
+    const members = (cls.declaration as ClassDeclaration).members.filter(
+      (member) =>
+        (member.kind === 'field' && member.modifiers.isStatic === isStatic) ||
+        (member.kind === 'initializer' && member.isStatic === isStatic)
+    );
     return {
       blankFinals: members.flatMap((member) =>
-        member.kind === 'field' && member.modifiers.isStatic === isStatic && member.modifiers.isFinal
+        member.kind === 'field' && member.modifiers.isFinal
           ? member.declarators.filter((declarator) => !declarator.initializer).map((declarator) => declarator.name)
           : []
       ),
-      initializers: members.flatMap((member) =>
-        member.kind === 'initializer' && member.isStatic === isStatic ? [member.body] : []
-      ),
+      initializers: members.flatMap((member): (Block | Expression | ArrayInitializer)[] => {
+        if (member.kind === 'initializer') return [member.body];
+        if (member.kind !== 'field') return [];
+        return member.declarators.flatMap((declarator) => (declarator.initializer ? [declarator.initializer] : []));
+      }),
     };
   }
 
