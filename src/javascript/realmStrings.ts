@@ -103,9 +103,12 @@ function defineExtractions(method: StringMethod): void {
 
 function defineBuilders(method: StringMethod): void {
   method('concat', 1, ({ runtime, args }, text) => {
-    const result = text + args.map((value) => runtime.toString(value)).join('');
-    runtime.buildString(result.length);
-    return result;
+    const parts = args.map((value) => runtime.toString(value));
+    let length = text.length;
+    for (const part of parts) length += part.length;
+    // Checked before joining, since many references to one long string make a far longer result.
+    runtime.buildString(length);
+    return text + parts.join('');
   });
   method('repeat', 1, ({ runtime, args }, text) => {
     const count = integerArgument(runtime, args[0], 0);

@@ -1,4 +1,4 @@
-import { inspect } from './inspect';
+import { inspect, OutputBudget } from './inspect';
 import type { ErrorName, RealmBuilder } from './realm';
 import { defineHidden, type Runtime } from './runtime';
 import {
@@ -59,8 +59,8 @@ function tagOf(value: Value): string {
   return typeof value === 'number' ? 'Number' : 'Boolean';
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Lists the builtin methods, each a small closure of its own.
-// code-gauge-allow functionNcss 34 -- Lists the builtin methods, each a small closure of its own.
+// code-gauge-allow functionCognitiveComplexity 21 -- Lists the builtin methods, each a small closure of its own.
+// code-gauge-allow functionNcss 36 -- Lists the builtin methods, each a small closure of its own.
 function defineObjectStatics(builder: RealmBuilder, objectConstructor: JsFunction): void {
   builder.method(objectConstructor, 'keys', 1, ({ runtime, args }) =>
     runtime.newArray(runtime.ownEnumerableKeys(runtime.toObject(args[0])))
@@ -322,9 +322,8 @@ function defineConsole(builder: RealmBuilder): void {
   const console = builder.namespace('console');
   for (const name of ['log', 'info', 'warn', 'error', 'debug']) {
     builder.method(console, name, 0, ({ runtime, args }) => {
-      runtime.budget.print(
-        `${args.map((value) => (typeof value === 'string' ? value : inspect(runtime, value))).join(' ')}\n`
-      );
+      const budget = new OutputBudget();
+      runtime.budget.print(`${args.map((value) => inspect(runtime, value, budget)).join(' ')}\n`);
       return;
     });
   }

@@ -44,19 +44,24 @@ function arrayFrom({ runtime, args, callRow }: NativeCall): JsArray {
     array.elements.push(mapper ? runtime.call(mapper, undefined, [value, index], callRow) : value);
   };
   return runtime.hold(array, () => {
-    if (source instanceof JsArray) {
-      for (let index = 0; index < source.elements.length; index++) add(valueOfElement(source.elements[index]), index);
-    } else if (typeof source === 'string') {
-      for (const [index, character] of runtime.iterate(source).entries()) add(character, index);
-    } else {
-      const length = toLength(
-        runtime,
-        source === undefined || source === null ? undefined : runtime.get(source, 'length')
-      );
-      for (let index = 0; index < length; index++) add(runtime.get(source, String(index)), index);
-    }
+    forEachSourceValue(runtime, source, add);
     return array;
   });
+}
+
+/** Visits the values of an array (live), a string, or an object with a `length`, each just before it is used. */
+function forEachSourceValue(runtime: Runtime, source: Value, visit: (value: Value, index: number) => void): void {
+  if (source instanceof JsArray) {
+    for (let index = 0; index < source.elements.length; index++) visit(valueOfElement(source.elements[index]), index);
+  } else if (typeof source === 'string') {
+    for (const [index, character] of runtime.iterate(source).entries()) visit(character, index);
+  } else {
+    const length = toLength(
+      runtime,
+      source === undefined || source === null ? undefined : runtime.get(source, 'length')
+    );
+    for (let index = 0; index < length; index++) visit(runtime.get(source, String(index)), index);
+  }
 }
 
 function toLength(runtime: Runtime, value: Value): number {

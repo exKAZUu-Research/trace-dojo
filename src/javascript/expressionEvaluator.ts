@@ -20,7 +20,7 @@ type ChainValue = Value | typeof SHORT_CIRCUIT;
 export abstract class ExpressionEvaluator extends EvaluatorBase {
   abstract evaluateClass(cls: ClassNode): JsFunction;
 
-  abstract superCall(args: Value[], callRow: number): void;
+  abstract superCall(args: Value[], callRow: number): JsObject;
 
   evaluate(expression: Expression): Value {
     const value = this.evaluateChain(expression);
@@ -228,8 +228,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     const { runtime } = this;
     const { callee } = expression;
     if (callee.kind === 'super') {
-      this.superCall(this.evaluateArguments(expression.args), expression.row);
-      return undefined;
+      return this.superCall(this.evaluateArguments(expression.args), expression.row);
     }
     const resolved = this.callee(callee);
     if (resolved === SHORT_CIRCUIT) return SHORT_CIRCUIT;

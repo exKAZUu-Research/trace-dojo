@@ -1,11 +1,33 @@
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { Runtime } from './runtime';
 import { HOLE, isAccessor, JsArray, JsFunction, JsObject, type Value } from './values';
 
 const MAX_DEPTH = 2;
 
+/** Bounds the text one console call formats before it is joined, since repeated large values multiply its length. */
+export class OutputBudget {
+  private remaining = LIMITS.maxOutputLength;
+
+  take(text: string): string {
+    this.remaining -= text.length;
+    if (this.remaining < 0) throw new ExecutionLimitError('output');
+    return text;
+  }
+}
+
 /** Formats a value as `console.log` shows it, without running the program's own code. */
+export function inspect(
+  runtime: Runtime,
+  value: Value,
+  budget = new OutputBudget(),
+  depth = 0,
+  seen = new Set<JsObject>()
+): string {
+  return budget.take(formatValue(runtime, value, budget, depth, seen));
+}
+
 // code-gauge-allow functionCognitiveComplexity 19 -- One check per kind of value, as console.log formats each.
-export function inspect(runtime: Runtime, value: Value, depth = 0, seen = new Set<JsObject>()): string {
+function formatValue(runtime: Runtime, value: Value, budget: OutputBudget, depth: number, seen: Set<JsObject>): string {
   if (typeof value === 'string') return depth === 0 ? value : `'${value.replaceAll("'", String.raw`\'`)}'`;
   if (typeof value === 'number') return Object.is(value, -0) ? '-0' : String(value);
   if (!(value instanceof JsObject)) return String(value);
@@ -17,7 +39,9 @@ export function inspect(runtime: Runtime, value: Value, depth = 0, seen = new Se
   seen.add(value);
   try {
     const items =
-      value instanceof JsArray ? arrayItems(runtime, value, depth, seen) : objectEntries(runtime, value, depth, seen);
+      value instanceof JsArray
+        ? arrayItems(runtime, value, budget, depth, seen)
+        : objectEntries(runtime, value, budget, depth, seen);
     runtime.scan(items.length);
     if (items.length === 0) return value instanceof JsArray ? '[]' : '{}';
     return value instanceof JsArray ? `[ ${items.join(', ')} ]` : `{ ${items.join(', ')} }`;
@@ -32,17 +56,29 @@ function functionText(runtime: Runtime, fn: JsFunction): string {
   return name ? `[Function: ${name}]` : '[Function (anonymous)]';
 }
 
-function arrayItems(runtime: Runtime, array: JsArray, depth: number, seen: Set<JsObject>): string[] {
+function arrayItems(
+  runtime: Runtime,
+  array: JsArray,
+  budget: OutputBudget,
+  depth: number,
+  seen: Set<JsObject>
+): string[] {
   return array.elements.map((element) =>
-    element === HOLE ? '<1 empty item>' : inspect(runtime, element, depth + 1, seen)
+    element === HOLE ? budget.take('<1 empty item>') : inspect(runtime, element, budget, depth + 1, seen)
   );
 }
 
-function objectEntries(runtime: Runtime, object: JsObject, depth: number, seen: Set<JsObject>): string[] {
+function objectEntries(
+  runtime: Runtime,
+  object: JsObject,
+  budget: OutputBudget,
+  depth: number,
+  seen: Set<JsObject>
+): string[] {
   const entries: string[] = [];
   for (const [key, property] of object.properties) {
     if (!property.enumerable) continue;
-    const text = isAccessor(property) ? '[Getter/Setter]' : inspect(runtime, property.value, depth + 1, seen);
+    const text = isAccessor(property) ? '[Getter/Setter]' : inspect(runtime, property.value, budget, depth + 1, seen);
     entries.push(`${/^[$A-Z_a-z][\w$]*$/.test(key) ? key : `'${key}'`}: ${text}`);
   }
   return entries;

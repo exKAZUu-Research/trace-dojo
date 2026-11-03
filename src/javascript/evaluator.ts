@@ -533,7 +533,7 @@ export class Evaluator extends ExpressionEvaluator {
     }
   }
 
-  superCall(args: Value[], callRow: number | undefined): void {
+  superCall(args: Value[], callRow: number | undefined): JsObject {
     const { runtime } = this;
     const frame = this.functionFrame();
     const constructing = frame?.constructing;
@@ -554,5 +554,6 @@ export class Evaluator extends ExpressionEvaluator {
     if (behavior.kind === 'class') {
       for (const field of behavior.fields) this.initializeField(constructed, field);
     }
+    return constructed;
   }
 }

@@ -537,3 +537,24 @@ new B().get();`;
     'this.B.#x': 2,
   });
 });
+
+test('private fields from two evaluations of one class stay apart', () => {
+  const program = `function layer(Base, n) {
+  return class Layer extends Base {
+    #x = n;
+    get() {
+      const value = this.#x; // step
+      return value;
+    }
+  };
+}
+class Root {}
+const C = layer(layer(Root, 1), 2);
+new C().get();`;
+  expect(traceProgram('javascript', program, program).traceItems[1].vars).toEqual({
+    value: 2,
+    n: 2,
+    'this.Layer.#x (1)': 1,
+    'this.Layer.#x (2)': 2,
+  });
+});

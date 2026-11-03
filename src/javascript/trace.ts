@@ -7,6 +7,7 @@ import { runProgram } from './run';
 import { type Frame, Runtime } from './runtime';
 import {
   type Binding,
+  type DataProperty,
   isAccessor,
   JsArray,
   JsFunction,
@@ -153,6 +154,25 @@ function displayNodeOf(value: Value, seen: Set<JsObject>): DisplayNode | undefin
   return { kind: value instanceof JsArray ? 'array' : 'object', entries };
 }
 
+/**
+ * Labels private fields by their names. A class and its subclass may each declare the same name, so a repeated name
+ * gets its declaring class, and a repeated class name (as from a class factory) also gets its position.
+ */
+function privateLabels(keys: string[]): string[] {
+  const names = keys.map((key) => privateNameOf(key));
+  const qualified = keys.map((key, index) =>
+    names.indexOf(names[index]) === names.lastIndexOf(names[index])
+      ? names[index]
+      : `${privateClassOf(key)}.${names[index]}`
+  );
+  return qualified.map((label, index) => {
+    const count = qualified.filter((other) => other === label).length;
+    return count === 1
+      ? label
+      : `${label} (${qualified.slice(0, index + 1).filter((other) => other === label).length})`;
+  });
+}
+
 /** The fields learners see in an object: its own enumerable data properties and private fields. */
 function displayedEntries(object: JsObject): [string, Value][] {
   const entries: [string, Value][] = [];
@@ -163,14 +183,10 @@ function displayedEntries(object: JsObject): [string, Value][] {
     if (property.enumerable && !isAccessor(property) && !(property.value instanceof JsFunction))
       entries.push([key, property.value]);
   }
-  const privateMembers = [...(object.privateMembers ?? [])];
-  const spellings = privateMembers.map(([key]) => privateNameOf(key));
-  for (const [key, property] of privateMembers) {
-    if (isAccessor(property) || property.value instanceof JsFunction) continue;
-    const name = privateNameOf(key);
-    // A class and its subclass may each declare the same name, whose fields the declaring class then tells apart.
-    const isShared = spellings.indexOf(name) !== spellings.lastIndexOf(name);
-    entries.push([isShared ? `${privateClassOf(key)}.${name}` : name, property.value]);
-  }
+  const fields = [...(object.privateMembers ?? [])].filter(
+    ([, property]) => !isAccessor(property) && !(property.value instanceof JsFunction)
+  );
+  const labels = privateLabels(fields.map(([key]) => key));
+  for (const [index, [, property]] of fields.entries()) entries.push([labels[index], (property as DataProperty).value]);
   return entries;
 }
