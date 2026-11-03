@@ -595,6 +595,41 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'class A { A(int n) {} }\npublic class Main extends A { Main(int x) { super(x = 2); } public static void main(String[] a) { new Main(1); } }\n',
   ],
+  [
+    'finalDoFalse',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    final int x; do { x = 1; } while (false); System.out.println(x);\n  }\n  \n}\n',
+  ],
+  [
+    'finalWhileBreak',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    final int x; while (true) { x = 1; break; } System.out.println(x);\n  }\n  \n}\n',
+  ],
+  [
+    'finalAfterLoop',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    final int x; while (args.length > 0) { x = 1; } x = 2;\n  }\n  \n}\n',
+  ],
+  [
+    'finalForLoop',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    final int x; for (int i = 0; i < 2; i++) { x = i; }\n  }\n  \n}\n',
+  ],
+  [
+    'finalNestedLoop',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    final int x; while (true) { for (int i = 0; i < 1; i++) { x = 1; break; } }\n  }\n  \n}\n',
+  ],
+  [
+    'finalContinue',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    final int x; while (args.length > 0) { x = 1; continue; }\n  }\n  \n}\n',
+  ],
+  [
+    'finalInnerDecl',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    while (args.length > 0) { final int y; y = 1; System.out.println(y); }\n  }\n  \n}\n',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

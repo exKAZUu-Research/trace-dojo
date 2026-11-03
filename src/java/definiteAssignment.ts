@@ -22,9 +22,6 @@ import { booleanConstants } from './reachability';
 /**
  * Applies Java's definite assignment rules to the locals of one body: a local is read only after every path
  * assigns it, and a final local is assigned only while no path has assigned it.
- *
- * A final local assigned anywhere in a loop counts as possibly assigned throughout that loop, even where Java
- * proves otherwise (e.g., an assignment followed by `break`), which beginners' programs do not rely on.
  */
 export function checkDefiniteAssignment(
   parameters: readonly Parameter[],
@@ -56,6 +53,13 @@ interface Conditional {
   whenFalse: State;
 }
 
+/** A loop being analyzed, with the assignments in it to finals declared before it. */
+interface EnclosingLoop {
+  /** Variables with smaller ids were declared before the loop. */
+  firstId: number;
+  finalWrites: { variable: Variable; span: Span }[];
+}
+
 interface JumpTarget {
   label: string | undefined;
   /** Whether an unlabeled `break` exits this statement. */
@@ -71,6 +75,7 @@ const UNREACHABLE: State = { assigned: undefined, possiblyAssigned: new Set() };
 class DefiniteAssignmentChecker {
   private readonly scopes: Map<string, Variable>[] = [new Map()];
   private readonly targets: JumpTarget[] = [];
+  private readonly loops: EnclosingLoop[] = [];
   /** The labels written directly before loops and switch statements. */
   private readonly labelsByStatement = new Map<Span, string>();
   private nextId = 0;
@@ -152,23 +157,23 @@ class DefiniteAssignmentChecker {
   private simpleLoop(statement: WhileStatement | DoStatement | ForEachStatement, state: State): State {
     switch (statement.kind) {
       case 'while': {
-        return this.loop(statement, [statement.condition, statement.body], state, (target, entry) => {
+        return this.loop(statement, state, (target, entry) => {
           const { whenTrue, whenFalse } = this.condition(statement.condition, entry);
           const afterBody = this.statement(statement.body, whenTrue);
           return { exit: whenFalse, back: [afterBody, ...target.continues] };
         });
       }
       case 'do': {
-        return this.loop(statement, [statement.body, statement.condition], state, (target, entry) => {
+        return this.loop(statement, state, (target, entry) => {
           const afterBody = this.statement(statement.body, entry);
-          const { whenFalse } = this.condition(statement.condition, join(afterBody, ...target.continues));
-          return { exit: whenFalse, back: [] };
+          const { whenTrue, whenFalse } = this.condition(statement.condition, join(afterBody, ...target.continues));
+          return { exit: whenFalse, back: [whenTrue] };
         });
       }
       case 'forEach': {
         const afterIterable = this.expression(statement.iterable, state);
         return this.scoped(() =>
-          this.loop(statement, [statement.body], afterIterable, (target, entry) => {
+          this.loop(statement, afterIterable, (target, entry) => {
             const bound = this.declare(entry, statement.name, statement.isFinal, true);
             const afterBody = this.statement(statement.body, bound);
             return { exit: entry, back: [afterBody, ...target.continues] };
@@ -208,8 +213,7 @@ class DefiniteAssignmentChecker {
   private forLoop(statement: ForStatement, state: State): State {
     const init = Array.isArray(statement.init) ? statement.init : [statement.init];
     const afterInit = this.statements(init, state);
-    const parts = [...(statement.condition ? [statement.condition] : []), statement.body, ...statement.update];
-    return this.loop(statement, parts, afterInit, (target, entry) => {
+    return this.loop(statement, afterInit, (target, entry) => {
       const { whenTrue, whenFalse } = statement.condition
         ? this.condition(statement.condition, entry)
         : { whenTrue: entry, whenFalse: UNREACHABLE };
@@ -220,24 +224,33 @@ class DefiniteAssignmentChecker {
   }
 
   /**
-   * Analyzes a loop whose head is entered from `state` and from the end of each iteration.
+   * Analyzes a loop whose head is entered from `state` and, through `back`, from the end of each iteration.
    *
-   * @param parts The parts that run on every iteration, whose assignments are possible at the head.
+   * A final assigned in the loop must not be possibly assigned at the head, where a later iteration starts, so each
+   * such assignment is checked against the back edges once they are known.
    */
   private loop(
     statement: Span,
-    parts: readonly (Statement | Expression)[],
     state: State,
     analyze: (target: JumpTarget, entry: State) => { exit: State; back: State[] }
   ): State {
-    const label = this.takeLabel(statement);
-    const target = this.pushTarget(label, true, true);
+    const target = this.pushTarget(this.takeLabel(statement), true, true);
+    const enclosing: EnclosingLoop = { firstId: this.nextId, finalWrites: [] };
+    this.loops.push(enclosing);
     try {
-      const assignedInLoop = parts.flatMap((part) => this.assignedVariables(part));
-      const entry = { ...state, possiblyAssigned: new Set([...state.possiblyAssigned, ...assignedInLoop]) };
-      const { exit } = analyze(target, entry);
-      return join(exit, ...target.breaks);
+      const { exit, back } = analyze(target, state);
+      const assignedOnBackEdges = new Set(back.flatMap((edge) => [...edge.possiblyAssigned]));
+      for (const { variable, span } of enclosing.finalWrites) {
+        if (assignedOnBackEdges.has(variable.id)) this.finalAssignmentError(span, variable);
+      }
+      // The exit leaves from the head, which later iterations reach too.
+      const exitFromHead = {
+        ...exit,
+        possiblyAssigned: new Set([...exit.possiblyAssigned, ...assignedOnBackEdges]),
+      };
+      return join(exitFromHead, ...target.breaks);
     } finally {
+      this.loops.pop();
       this.targets.pop();
     }
   }
@@ -420,10 +433,17 @@ class DefiniteAssignmentChecker {
     const variable = this.lookup(target.name);
     if (!variable) return state;
     if (reads) this.read(target, target.name, state);
-    if (variable.isFinal && state.assigned && state.possiblyAssigned.has(variable.id)) {
-      throw new CompileError([{ row: target.row, message: `${variable.name} は final なので代入できません。` }]);
+    if (variable.isFinal && state.assigned) {
+      if (state.possiblyAssigned.has(variable.id)) this.finalAssignmentError(target, variable);
+      for (const loop of this.loops) {
+        if (variable.id < loop.firstId) loop.finalWrites.push({ variable, span: target });
+      }
     }
     return assign(state, variable.id);
+  }
+
+  private finalAssignmentError(span: Span, variable: Variable): never {
+    throw new CompileError([{ row: span.row, message: `${variable.name} は final なので代入できません。` }]);
   }
 
   private read(span: Span, name: string, state: State): void {
