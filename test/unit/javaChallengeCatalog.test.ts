@@ -1,25 +1,14 @@
-import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
-import { resolve } from 'node:path';
-
 import { expect, test } from 'vitest';
 
 import { type ChallengeMetadata, challengeMetadata } from '../../src/problems/challenge/metadata';
-import { extractBlanks, fillBlanks } from '../../src/problems/fillInBlank/blanks';
+import { extractBlanks, fillBlanks, removeBlankMarkers } from '../../src/problems/fillInBlank/blanks';
 import { gradeFillInBlankCode } from '../../src/problems/fillInBlank/grade';
-import type { JavaExecutionResult } from '../../src/problems/fillInBlank/javaExecutors';
-import {
-  buildJavaJudgeProgram,
-  JAVA_JUDGE_CLASS_NAME,
-  type JavaTurtleState,
-  parseJavaJudgeOutput,
-} from '../../src/problems/fillInBlank/javaProgram';
 import { stripJavaTraceAnnotations } from '../../src/problems/fillInBlank/javaSource';
 import { instantiateProblem, isFillInBlankProblem } from '../../src/problems/instantiateProblem';
 import { javaChallengeDefinitions } from '../../src/problems/javaChallenges/definitions';
 import { instantiateJavaChallenge } from '../../src/problems/javaChallenges/instantiate';
 import type { JavaChallengeDefinition } from '../../src/problems/javaChallenges/types';
 import { courseIdToLectureIndexToExerciseProblemIds } from '../../src/problems/problemData';
-import { createLocalJavaExecutor, localJavaExecutor } from '../helpers/localJavaExecutor';
 
 const catalog = javaChallengeDefinitions;
 const definitionOf = (id: string): JavaChallengeDefinition | undefined => catalog[id];
@@ -29,7 +18,6 @@ const lectures = courses.flatMap((courseId) =>
 );
 const challengeMetadataOf = (id: string): ChallengeMetadata | undefined =>
   (challengeMetadata as Partial<Record<string, ChallengeMetadata>>)[id];
-const marker = '__TRACE_DOJO_RESULT_catalog__';
 
 const independentCases = [
   {
@@ -113,13 +101,11 @@ test('every fixed catalog definition is registered and has a distinct visible st
   }
 });
 
-const gradingResults = new Map<string, ReturnType<typeof gradeFillInBlankCode>>();
-const solutions = new Map<string, Promise<JavaTurtleState>>();
 const catalogLectures = [...lectures, { courseId: 'test' as const, lectureIndex: 0 }];
 
 test.each(catalogLectures)(
-  '$courseId lecture $lectureIndex: all fixed solutions and starters satisfy real Java grading',
-  async ({ courseId, lectureIndex }) => {
+  '$courseId lecture $lectureIndex: all fixed solutions pass grading and all starters fail it',
+  ({ courseId, lectureIndex }) => {
     for (const [id, definition] of Object.entries(catalog).filter(
       ([, item]) => item.courseId === courseId && item.lectureIndex === lectureIndex
     )) {
@@ -129,17 +115,10 @@ test.each(catalogLectures)(
         finalBoard: definition.finalBoard,
         finalTurtles: definition.finalTurtles,
       });
-      let solution = solutions.get(definition.correctProgram);
-      if (!solution) {
-        solution = executeState(definition.correctProgram, id);
-        solutions.set(definition.correctProgram, solution);
-      }
-      const expected = { board: definition.finalBoard.trim(), turtles: definition.finalTurtles };
-      expect(await solution, `${id}: correct source must match stored target`).toEqual(expected);
       expect(
-        await gradeOnce(definition, definition.correctProgram),
-        `${id}: intended repair must pass real grading admission`
-      ).toMatchObject({ status: 'correct' });
+        gradeFillInBlankCode(definition, removeBlankMarkers(definition.correctProgram)),
+        `${id}: intended repair must pass grading`
+      ).toEqual({ status: 'correct' });
       if (definition.problemFormat === 'fillInBlank') {
         const extracted = extractBlanks(definition.starterProgram);
         expect(extracted.answers.length, `${id}: missing holes`).toBeGreaterThan(0);
@@ -151,146 +130,53 @@ test.each(catalogLectures)(
         );
       } else {
         expect(definition.bugKind, `${id}: missing defect classification`).toBeDefined();
-        const result = await executeSource(definition.starterProgram);
+        const verdict = gradeFillInBlankCode(definition, definition.starterProgram);
         if (definition.bugKind === 'syntax') {
-          expect(result.kind, `${id}: syntax starter must fail compilation`).toBe('compileError');
-          const verdict = await gradeOnce(definition, definition.starterProgram);
-          expect(verdict, `${id}: syntax starter must reach compiler diagnostics`).toMatchObject({
+          expect(verdict, `${id}: syntax starter must fail compilation`).toEqual({
             status: 'incorrect',
-            stage: 4,
             detail: 'Compile error.',
-            diagnostics: expect.any(Array),
+            diagnostics: [expect.objectContaining({ message: expect.any(String) })],
           });
-          if (verdict.status === 'incorrect') expect(verdict.diagnostics?.length, id).toBeGreaterThan(0);
         } else {
-          expect(result.kind, `${id}: logical starter must run`).toBe('executed');
-          if (result.kind !== 'executed') throw new Error(`${id}: ${JSON.stringify(result)}`);
-          const actual = parseJavaJudgeOutput(result.stderr, marker);
-          expect(actual, `${id}: missing state`).toBeDefined();
-          expect(actual?.exception, `${id}: logical starter must terminate normally`).toBeUndefined();
-          expect(actual, `${id}: logical defect has no observable effect`).not.toEqual(expected);
-          expect(
-            await gradeOnce(definition, definition.starterProgram),
-            `${id}: logical starter must reach final-state grading`
-          ).toMatchObject({
+          expect(verdict, `${id}: logical starter must run to a different final state`).toEqual({
             status: 'incorrect',
-            stage: 4,
             detail: 'The final state differs from the expected one.',
           });
         }
       }
     }
-  },
-  1_200_000
+  }
 );
 
-test.each(['fillInBlank', 'bugFix'] as const)(
-  'annotation-free %s public source remains repairable through real Java grading',
-  async (format) => {
-    const id = `challengeI7ValueSnapshot${format === 'fillInBlank' ? 'Blank' : 'Bug'}Condition4`;
-    const definition = catalog[id];
-    const problem = instantiateJavaChallenge(id, format);
-    expect(problem.displayProgram).not.toMatch(/\/\/\s*(?:step|caller)\b/);
-    const answers = extractBlanks(definition.starterProgram).answers;
-    const repaired =
-      format === 'fillInBlank'
-        ? problem.displayProgram.replaceAll(/【(\d+)】/g, (_, index: string) => answers[Number(index) - 1])
-        : stripJavaTraceAnnotations(definition.correctProgram);
-    expect(await gradeFillInBlankCode(problem, repaired, { javaExecutors: [localJavaExecutor] })).toMatchObject({
-      status: 'correct',
-    });
-  },
-  60_000
-);
+test.each(['fillInBlank', 'bugFix'] as const)('annotation-free %s public source remains repairable', (format) => {
+  const id = `challengeI7ValueSnapshot${format === 'fillInBlank' ? 'Blank' : 'Bug'}Condition4`;
+  const definition = catalog[id];
+  const problem = instantiateJavaChallenge(id, format);
+  expect(problem.displayProgram).not.toMatch(/\/\/\s*(?:step|caller)\b/);
+  const answers = extractBlanks(definition.starterProgram).answers;
+  const repaired =
+    format === 'fillInBlank'
+      ? problem.displayProgram.replaceAll(/【(\d+)】/g, (_, index: string) => answers[Number(index) - 1])
+      : stripJavaTraceAnnotations(definition.correctProgram);
+  expect(gradeFillInBlankCode(problem, repaired)).toEqual({ status: 'correct' });
+});
 
-test.each(independentCases)(
-  'real Java agrees with hand-derived state: $name',
-  async ({ body, classes, board, turtles }) => {
-    const source = `class Main { public static void main(String[] args) { ${body} } } ${classes ?? ''}`;
-    expect(await executeState(source, body)).toEqual({ board, turtles });
-  },
-  30_000
-);
+test.each(independentCases)('grading agrees with hand-derived state: $name', ({ body, classes, board, turtles }) => {
+  const source = `class Main { public static void main(String[] args) { ${body} } } ${classes ?? ''}`;
+  expect(gradeFillInBlankCode({ finalBoard: board, finalTurtles: turtles }, source)).toEqual({ status: 'correct' });
+});
 
-test('legacy multiple holes all display and their repaired Java matches the existing target', async () => {
+test('legacy multiple holes all display and their repaired Java matches the existing target', () => {
   const problem = instantiateProblem('fillInBlank4', 'catalog-compatibility');
-  expect(problem).toBeDefined();
   if (!problem) throw new Error('Legacy blank problem unavailable');
-  expect(
-    await gradeFillInBlankCode(problem, fillBlanks(problem.displayProgramTemplate, problem.blankAnswers), {
-      javaExecutors: [localJavaExecutor],
-    })
-  ).toMatchObject({ status: 'correct' });
-  expect(
-    await gradeFillInBlankCode(problem, 'class Main { public static void main(String[] args) { if (1) {} } }', {
-      javaExecutors: [localJavaExecutor],
-    })
-  ).toMatchObject({
-    status: 'incorrect',
-    stage: 4,
-    detail: 'Compile error.',
-    diagnostics: expect.arrayContaining([expect.objectContaining({ message: expect.any(String) })]),
-  });
   expect(problem.blankAnswers.length).toBeGreaterThan(1);
   for (let i = 1; i <= problem.blankAnswers.length; i++) expect(problem.displayProgram).toContain(`【${i}】`);
-  expect(
-    await executeState(fillBlanks(problem.displayProgramTemplate, problem.blankAnswers), 'legacy multiple holes')
-  ).toEqual({
-    board: problem.finalBoard.trim(),
-    turtles: problem.finalTurtles.map(({ x, y, color, dir }) => ({ x, y, color, dir })),
+  expect(gradeFillInBlankCode(problem, fillBlanks(problem.displayProgramTemplate, problem.blankAnswers))).toEqual({
+    status: 'correct',
   });
-}, 30_000);
-
-test('local execution bounds nontermination and excessive output and cleans every temporary compilation', async () => {
-  await mkdir('.tmp', { recursive: true });
-  const root = await mkdtemp(resolve('.tmp/catalog-cleanup-'));
-  const executor = createLocalJavaExecutor(root);
-  const run = (source: string): Promise<JavaExecutionResult> =>
-    executor.execute(buildJavaJudgeProgram(source, marker).program, JAVA_JUDGE_CLASS_NAME);
-  try {
-    const success = await run('class Main { public static void main(String[] args) { new Turtle(); } }');
-    expect(success.kind).toBe('executed');
-    expect(await readdir(root)).toEqual([]);
-    const infinite = await run('class Main { public static void main(String[] args) { while (true) {} } }');
-    expect(infinite.kind).toBe('timeout');
-    expect(await readdir(root)).toEqual([]);
-    const verbose = await run(
-      'class Main { public static void main(String[] args) { while (true) System.out.println("excessive output"); } }'
-    );
-    expect(verbose.kind).toBe('outputLimitExceeded');
-    expect(await readdir(root)).toEqual([]);
-    const invalid = await run('class Main { public static void main(String[] args) { if (1) {} } }');
-    expect(invalid.kind).toBe('compileError');
-    expect(await readdir(root)).toEqual([]);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-}, 60_000);
-
-async function executeState(source: string, label: string): Promise<JavaTurtleState> {
-  const result = await executeSource(source);
-  expect(result.kind, `${label}: ${JSON.stringify(result)}`).toBe('executed');
-  if (result.kind !== 'executed') throw new Error(`${label}: ${JSON.stringify(result)}`);
-  const state = parseJavaJudgeOutput(result.stderr, marker);
-  expect(state, `${label}: missing result`).toBeDefined();
-  if (!state) throw new Error(`${label}: missing result`);
-  expect(state.exception, `${label}: program exception`).toBeUndefined();
-  return state;
-}
-
-function executeSource(source: string): Promise<JavaExecutionResult> {
-  return localJavaExecutor.execute(buildJavaJudgeProgram(source, marker).program, JAVA_JUDGE_CLASS_NAME);
-}
-
-function gradeOnce(
-  target: { finalBoard: string; finalTurtles: JavaTurtleState['turtles'] },
-  source: string
-): ReturnType<typeof gradeFillInBlankCode> {
-  const key = JSON.stringify({ source, finalBoard: target.finalBoard, finalTurtles: target.finalTurtles });
-  let result = gradingResults.get(key);
-  if (!result) {
-    result = gradeFillInBlankCode(target, source, { javaExecutors: [localJavaExecutor] });
-    gradingResults.set(key, result);
-  }
-  return result;
-}
+  expect(gradeFillInBlankCode(problem, 'class Main { public static void main(String[] args) { if (1) {} } }')).toEqual({
+    status: 'incorrect',
+    detail: 'Compile error.',
+    diagnostics: [expect.objectContaining({ line: 1, message: expect.any(String) })],
+  });
+});
