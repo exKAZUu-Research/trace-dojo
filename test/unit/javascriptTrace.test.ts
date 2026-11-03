@@ -477,7 +477,7 @@ for (var j = 0; j < 1; j++) { // step
   expect(Object.keys(traceProgram('javascript', program, program).traceItems[1].vars)).toEqual(['total', 'j']);
 });
 
-test('a getter that records a step counts as a call from the row that reads it', () => {
+test('a getter that records a step counts as a call from the row that reads or destructures it', () => {
   const program = `class Point {
   constructor(x) {
     this.x = x;
@@ -488,9 +488,13 @@ test('a getter that records a step counts as a call from the row that reads it',
   }
 }
 const p = new Point(3);
-const y = p.double; // caller`;
-  const item = traceProgram('javascript', program, program).traceItems[1];
-  expect({ depth: item.depth, callStack: item.callStack }).toEqual({ depth: 1, callStack: [1] });
+const y = p.double; // caller
+const { double } = p; // caller`;
+  const items = traceProgram('javascript', program, program).traceItems.slice(1);
+  expect(items.map(({ depth, callStack }) => ({ depth, callStack }))).toEqual([
+    { depth: 1, callStack: [1] },
+    { depth: 1, callStack: [2] },
+  ]);
 });
 
 test.each([

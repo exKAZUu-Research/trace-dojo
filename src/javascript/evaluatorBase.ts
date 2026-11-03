@@ -204,7 +204,19 @@ export abstract class EvaluatorBase {
 
   // Patterns ----------------------------------------------------------------------------------------------------------
 
+  /** Binds a pattern, whose getters and setters count as called from the pattern's row. */
   bindPattern(pattern: Pattern, value: Value, mode: BindingMode): void {
+    const { runtime } = this;
+    const outerRow = runtime.currentRow;
+    runtime.currentRow = pattern.row;
+    try {
+      this.bindPatternKind(pattern, value, mode);
+    } finally {
+      runtime.currentRow = outerRow;
+    }
+  }
+
+  private bindPatternKind(pattern: Pattern, value: Value, mode: BindingMode): void {
     const { runtime } = this;
     switch (pattern.kind) {
       case 'identifier': {
