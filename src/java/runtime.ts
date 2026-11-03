@@ -1,12 +1,9 @@
-import {
-  TURTLE_GRAPHICS_BOARD_COLUMNS as COLUMNS,
-  TURTLE_GRAPHICS_BOARD_ROWS as ROWS,
-  TURTLE_GRAPHICS_EMPTY_COLOR as EMPTY_COLOR,
-} from '../constants';
+import { ExecutionBudget, LIMITS } from '../interpreter/limits';
+import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import type { Builtins } from './builtins';
 import type { ClassInfo, LocalInfo, MethodInfo } from './types';
 import { isSubclass, sameType } from './types';
-import { defaultValue, JavaArray, JavaObject, JavaString, type TurtleState, type Value } from './values';
+import { defaultValue, JavaArray, JavaObject, JavaString, type Value } from './values';
 
 /** A local that is out of scope or not yet assigned. */
 export const UNASSIGNED = Symbol('unassigned');
@@ -47,45 +44,13 @@ export class JavaThrow {
   constructor(readonly value: JavaObject) {}
 }
 
-/** Stops a program that exceeds a limit the learner cannot catch. */
-export class ExecutionLimitError extends Error {
-  constructor(readonly limit: 'operations' | 'time' | 'output' | 'trace') {
-    super(`Execution limit exceeded: ${limit}`);
-    this.name = 'ExecutionLimitError';
-  }
-}
-
-/** Bounds every run, since learners' programs run inside the web server's process. */
-const LIMITS = {
-  maxOperations: 1_000_000,
-  maxMilliseconds: 2000,
-  maxCallDepth: 512,
-  /** The total number of array elements and object fields allocated while running. */
-  maxSlots: 1_000_000,
-  /** The length of one string built while running; building strings also costs operations, which bounds the rest. */
-  maxStringLength: 1_000_000,
-  maxOutputLength: 100_000,
-};
-const OPERATIONS_PER_CLOCK_CHECK = 1024;
-
-export interface TurtleWorld {
-  board: string[][];
-  turtles: JavaObject[];
-}
-
 export class Runtime {
   readonly frames: Frame[] = [];
-  readonly world: TurtleWorld = {
-    board: Array.from({ length: ROWS }, () => Array.from({ length: COLUMNS }, () => EMPTY_COLOR)),
-    turtles: [],
-  };
+  readonly world = new TurtleWorld();
   readonly staticValues = new Map<ClassInfo, Value[]>();
-  output = '';
   /** Called after a statement on a `// step` row completes. */
   onStep?: (stepId: number) => void;
-  private operations = 0;
-  private nextClockCheck = OPERATIONS_PER_CLOCK_CHECK;
-  private readonly deadline = performance.now() + LIMITS.maxMilliseconds;
+  readonly budget = new ExecutionBudget();
   private allocatedSlots = 0;
   private readonly initializingClasses = new Set<ClassInfo>();
   private readonly dispatchCache = new Map<MethodInfo, Map<ClassInfo, MethodInfo>>();
@@ -93,18 +58,7 @@ export class Runtime {
   constructor(readonly builtins: Builtins) {}
 
   spend(cost = 1): void {
-    this.operations += cost;
-    if (this.operations > LIMITS.maxOperations) throw new ExecutionLimitError('operations');
-    // A charge for many operations at once (e.g., scanning a long string) may stand for slow native work, so it
-    // checks the clock at once; single operations check it periodically.
-    if (cost === 1 && this.operations < this.nextClockCheck) return;
-    this.nextClockCheck = this.operations + OPERATIONS_PER_CLOCK_CHECK;
-    if (performance.now() > this.deadline) throw new ExecutionLimitError('time');
-  }
-
-  print(text: string): void {
-    this.output += text;
-    if (this.output.length > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
+    this.budget.spend(cost);
   }
 
   /** Charges for a string of `length` built at run time, before it is built. */
@@ -190,13 +144,12 @@ export class Runtime {
 
   /** Removes the turtles that no frame, static field, or pending value can reach any more. */
   collectGarbage(): void {
-    if (this.world.turtles.length === 0) return;
+    if (!this.world.hasTurtles) return;
     const { reached, scanned } = markReachable(this.gcRoots());
     this.spend(Math.ceil(scanned / 64));
-    for (const turtle of this.world.turtles) {
-      if (!reached.has(turtle) && turtle.turtle) turtle.turtle.isAlive = false;
-    }
-    this.world.turtles = this.world.turtles.filter((turtle) => turtle.turtle?.isAlive);
+    const reachedTurtles = new Set<TurtleState>();
+    for (const value of reached) if (value instanceof JavaObject && value.turtle) reachedTurtles.add(value.turtle);
+    this.world.retain((turtle) => reachedTurtles.has(turtle));
   }
 
   private gcRoots(): Value[] {
@@ -288,10 +241,6 @@ export class Runtime {
     if (value instanceof JavaString) return cls === this.builtins.stringClass || cls === this.builtins.objectClass;
     if (value instanceof JavaArray) return cls === this.builtins.objectClass;
     return false;
-  }
-
-  turtleStates(): TurtleState[] {
-    return this.world.turtles.flatMap((turtle) => (turtle.turtle ? [turtle.turtle] : []));
   }
 }
 

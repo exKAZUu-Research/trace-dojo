@@ -1,3 +1,4 @@
+import { CompileError } from '../interpreter/diagnostics';
 // code-gauge-allow-file fileNcss 402 -- One checker implements the JLS 16 rules, which share its scopes and jump targets.
 import type {
   ArrayInitializer,
@@ -18,7 +19,6 @@ import type {
   TryStatement,
   WhileStatement,
 } from './ast';
-import { CompileError } from './diagnostics';
 import { booleanConstants } from './reachability';
 
 /**

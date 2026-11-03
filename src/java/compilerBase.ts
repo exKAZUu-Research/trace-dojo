@@ -1,6 +1,6 @@
+import { CompileError } from '../interpreter/diagnostics';
 import type { Expression, Span, TypeSyntax } from './ast';
 import { getBuiltins } from './builtins';
-import { CompileError } from './diagnostics';
 import { type Frame } from './runtime';
 import {
   BOOLEAN,

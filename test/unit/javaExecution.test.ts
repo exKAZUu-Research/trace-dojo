@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { executeJavaProgram } from '../../src/java/execute';
+import { executeProgram } from '../../src/interpreter/program';
 
 const main = (body: string): string =>
   `public class Main {\n  public static void main(String[] args) {\n    ${body}\n  }\n}`;
@@ -120,7 +120,7 @@ test.each([
   ['deeply nested negations', main(`boolean b = ${'!'.repeat(19_000)}true;`), { kind: 'compileError' }],
 ])('%s ends within the limits', (_, source, expected) => {
   const startedAt = performance.now();
-  expect(executeJavaProgram(source)).toMatchObject(expected);
+  expect(executeProgram('java', source)).toMatchObject(expected);
   expect(performance.now() - startedAt).toBeLessThan(5000);
 });
 
@@ -134,5 +134,5 @@ test.each([
     { kind: 'executed', uncaughtException: 'java.lang.NullPointerException' },
   ],
 ])('reading a constant field through an expression still evaluates it: %s', (source, expected) => {
-  expect(executeJavaProgram(source)).toMatchObject(expected);
+  expect(executeProgram('java', source)).toMatchObject(expected);
 });

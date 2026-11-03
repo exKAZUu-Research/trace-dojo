@@ -1,3 +1,4 @@
+import { CompileError } from '../interpreter/diagnostics';
 // code-gauge-allow-file fileNcss 451 -- The statement compiler keeps one method per statement kind together.
 import type {
   Block,
@@ -22,7 +23,6 @@ import {
   type Scope,
 } from './compilerBase';
 import { assignedNames } from './definiteAssignment';
-import { CompileError } from './diagnostics';
 import { ExpressionCompiler } from './expressionCompiler';
 import { canCompleteNormally } from './reachability';
 import { type Frame, JavaThrow, throwBuiltin, UNASSIGNED } from './runtime';

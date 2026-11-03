@@ -1,76 +1,19 @@
-import { findJavaTraceAnnotations } from '../problems/fillInBlank/javaSource';
+import { ExecutionLimitError, MAX_TRACE_ITEMS } from '../interpreter/limits';
+import type { ProgramRecording } from '../interpreter/program';
+import type { Annotations } from '../interpreter/traceAnnotations';
+import type { TurtleState } from '../interpreter/turtleWorld';
 import type { DisplayNode, TraceItem, TraceItemVariable } from '../problems/trace';
 import { type CompiledProgram, compileProgram } from './compiler';
-import { boardText, type ProgramRun, runProgram, turtlesOf } from './execute';
+import { runProgram } from './execute';
 import { parseJava } from './parse';
-import { ExecutionLimitError, type Frame, Runtime, UNASSIGNED } from './runtime';
+import { type Frame, Runtime, UNASSIGNED } from './runtime';
 import type { JavaType } from './types';
-import { charToString, defaultValue, JavaArray, JavaObject, JavaString, type TurtleState, type Value } from './values';
+import { charToString, defaultValue, JavaArray, JavaObject, JavaString, type Value } from './values';
 
-export interface JavaTrace extends ProgramRun {
-  /** The program without its `// step` and `// caller` annotations. */
-  displayProgram: string;
-  traceItems: TraceItem[];
-  sidToLineIndex: Map<number, number>;
-  callerIdToLineIndex: Map<number, number>;
-  finalVars: TraceItemVariable;
-}
-
-/** Model programs are trusted but must not hang the server through an accidental unbounded loop. */
-const MAX_TRACE_ITEMS = 10_000;
-
-interface Annotations {
-  stepIdByRow: Map<number, number>;
-  callerIdByRow: Map<number, number>;
-}
-
-/**
- * Reads `// step` and `// caller` comments, which number the rows a trace item or a call refers to. A step's ID
- * counts up from the previous one unless written as `// step: n`.
- */
-function readAnnotations(source: string): Annotations {
-  const stepIdByRow = new Map<number, number>();
-  const callerIdByRow = new Map<number, number>();
-  let lastStepId = 0;
-  let lastCallerId = 0;
-  for (const { index, text } of findJavaTraceAnnotations(source)) {
-    const row = source.slice(0, index).split('\n').length - 1;
-    for (const [, kind, id] of text.matchAll(/(step|caller)(?:[ \t]*:[ \t]*(\d+))?/g)) {
-      if (kind === 'step') {
-        lastStepId = id ? Number(id) : lastStepId + 1;
-        stepIdByRow.set(row, lastStepId);
-      } else {
-        lastCallerId++;
-        callerIdByRow.set(row, lastCallerId);
-      }
-    }
-  }
-  return { stepIdByRow, callerIdByRow };
-}
-
-/** Removes the annotations and the blanks before them, keeping every row in place. */
-function removeAnnotations(source: string): string {
-  let program = '';
-  let copied = 0;
-  for (const { index, text } of findJavaTraceAnnotations(source)) {
-    program += source.slice(copied, index).replace(/[ \t]+$/, '');
-    copied = index + text.length;
-  }
-  return program + source.slice(copied);
-}
-
-/**
- * Runs a model program and records the state after every statement on a `// step` row.
- *
- * @param program The program to run, with every blank filled in.
- * @param displayProgram The program shown to learners, whose blanks may be placeholders on the same rows.
- */
-export function traceJavaProgram(program: string, displayProgram: string): JavaTrace {
-  const executed = readAnnotations(program);
-  const displayed = readAnnotations(displayProgram);
-  const compiled = compileProgram(parseJava(program), { stepIdByRow: executed.stepIdByRow });
+export function traceJavaProgram(program: string, annotations: Annotations): ProgramRecording {
+  const compiled = compileProgram(parseJava(program), { stepIdByRow: annotations.stepIdByRow });
   const runtime = new Runtime(compiled.builtins);
-  const snapshotter = new Snapshotter(runtime, compiled, executed.callerIdByRow);
+  const snapshotter = new Snapshotter(runtime, compiled, annotations.callerIdByRow);
   const traceItems: TraceItem[] = [snapshotter.initialItem()];
   runtime.onStep = (stepId) => {
     if (traceItems.length >= MAX_TRACE_ITEMS) throw new ExecutionLimitError('trace');
@@ -81,14 +24,7 @@ export function traceJavaProgram(program: string, displayProgram: string): JavaT
   const run = runProgram(runtime, compiled, (frame) => {
     finalVars = snapshotter.variablesOf(frame, false).vars;
   });
-  return {
-    displayProgram: removeAnnotations(displayProgram),
-    traceItems,
-    sidToLineIndex: new Map([...displayed.stepIdByRow].map(([row, id]) => [id, row + 1])),
-    callerIdToLineIndex: new Map([...displayed.callerIdByRow].map(([row, id]) => [id, row + 1])),
-    finalVars,
-    ...run,
-  };
+  return { traceItems, finalVars, ...run };
 }
 
 class Snapshotter {
@@ -106,7 +42,7 @@ class Snapshotter {
       vars: {},
       referenceVars: {},
       turtles: [],
-      board: boardText(this.runtime),
+      board: this.runtime.world.boardText(),
     };
   }
 
@@ -123,8 +59,8 @@ class Snapshotter {
       callStack: calls.map((callee) => this.callerIdByRow.get(callee.callRow as number) ?? 0),
       vars,
       referenceVars,
-      turtles: turtlesOf(this.runtime),
-      board: boardText(this.runtime),
+      turtles: this.runtime.world.turtleTraces(),
+      board: this.runtime.world.boardText(),
     };
   }
 

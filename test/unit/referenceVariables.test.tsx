@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 import { TraceViewer } from '../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/TraceViewer';
 import { Variables } from '../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/Variables';
-import { traceJavaProgram } from '../../src/java/trace';
+import { traceProgram } from '../../src/interpreter/program';
 import { type InstantiatedProblem, instantiateProblem } from '../../src/problems/instantiateProblem';
 
 const problem = (id: string): InstantiatedProblem => {
@@ -265,7 +265,7 @@ class Counter {
   Counter self = this;
 }
 `;
-  const traced = traceJavaProgram(program, program);
+  const traced = traceProgram('java', program, program);
   const first = referenceVars(traced.traceItems.find((item) => item.sid === 1));
   const second = referenceVars(traced.traceItems.find((item) => item.sid === 2));
 
@@ -329,7 +329,7 @@ class Counter {
   }
 }
 `;
-  const traced = traceJavaProgram(program, program);
+  const traced = traceProgram('java', program, program);
   const snapshot = traced.traceItems.find((item) => item.sid === 1);
   expect(snapshot).toBeDefined();
   expect(snapshot!.vars).toEqual({ 'this.count': 2 });

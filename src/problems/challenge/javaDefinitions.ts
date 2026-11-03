@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { traceJavaProgram } from '../../java/trace';
+import { traceProgram } from '../../interpreter/program';
 import { extractBlanks, removeBlankMarkers } from '../fillInBlank/blanks';
 import type { JavaChallengeDefinition } from '../javaChallenges/types';
 import { challengeBases } from './definitions';
@@ -14,9 +14,9 @@ const registeredIds = new Set<string>();
 for (const base of z.array(challengeBaseSchema).parse(challengeBases)) {
   if (registeredIds.has(base.id)) throw new Error(`Duplicate challenge ID: ${base.id}`);
   registeredIds.add(base.id);
-  let trace: ReturnType<typeof traceJavaProgram>;
+  let trace: ReturnType<typeof traceProgram>;
   try {
-    trace = traceJavaProgram(base.java, base.java);
+    trace = traceProgram('java', base.java, base.java);
   } catch (error) {
     throw new Error(`Invalid challenge trace: ${base.id}`, { cause: error });
   }

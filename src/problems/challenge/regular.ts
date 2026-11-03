@@ -1,4 +1,4 @@
-import { traceJavaProgram } from '../../java/trace';
+import { traceProgram } from '../../interpreter/program';
 import type { InstantiatedProblem } from '../instantiateProblem';
 import { challengeBases } from './definitions';
 
@@ -6,7 +6,7 @@ export const instantiateRegularChallenge = (problemId: string): InstantiatedProb
   const base = challengeBases.find(({ id }) => id === problemId);
   if (!base) return;
   return {
-    ...traceJavaProgram(base.java, base.java),
+    ...traceProgram('java', base.java, base.java),
     blankAnswers: [],
     displayProgramTemplate: base.java,
   };

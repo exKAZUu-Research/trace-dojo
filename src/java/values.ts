@@ -1,3 +1,4 @@
+import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassInfo, JavaType } from './types';
 
 /** Java `null` is `undefined`; `int`, `char`, and `double` are numbers. */
@@ -6,14 +7,6 @@ export type Value = number | boolean | JavaString | JavaObject | JavaArray | und
 /** Strings are objects so that `==` compares references as in Java. */
 export class JavaString {
   constructor(readonly value: string) {}
-}
-
-export interface TurtleState {
-  x: number;
-  y: number;
-  color: string;
-  dir: string;
-  isAlive: boolean;
 }
 
 let nextIdentity = 1;
