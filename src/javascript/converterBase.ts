@@ -21,11 +21,25 @@ export interface FunctionContext {
   loopDepth: number;
 }
 
-interface Steppable {
+/** Where a construct lies: its rows, and its offsets, which order constructs on one row. */
+interface Extent {
   row: number;
   endRow: number;
+  start: number;
+  end: number;
+}
+
+interface Steppable extends Extent {
   depth: number;
   assign: (stepId: number) => void;
+}
+
+function extentOf(node: Node): Extent {
+  return { row: node.startPosition.row, endRow: node.endPosition.row, start: node.startIndex, end: node.endIndex };
+}
+
+function encloses(outer: Extent, inner: Extent): boolean {
+  return outer.start <= inner.start && inner.end <= outer.end;
 }
 
 export function newContext(canReturn: boolean, canCallSuper: boolean, canReferenceSuper: boolean): FunctionContext {
@@ -37,8 +51,8 @@ export abstract class ConverterBase {
   protected context: FunctionContext = newContext(false, false, false);
   private readonly scopes: ScopeBuilder[] = [];
   private readonly steppables: Steppable[] = [];
-  /** Rows of function bodies, whose inner rows belong to the statements of that body. */
-  private readonly bodyRanges: { row: number; endRow: number }[] = [];
+  /** Function bodies, whose rows belong to the statements of that body. */
+  private readonly bodies: Extent[] = [];
 
   constructor(
     protected readonly source: string,
@@ -63,23 +77,30 @@ export abstract class ConverterBase {
    * @param depthOffset Moves the statement's depth, for header parts that record steps as their loop's body does.
    */
   protected addSteppable(node: Node, assign: (stepId: number) => void, depthOffset = 0): void {
-    this.steppables.push({
-      row: node.startPosition.row,
-      endRow: node.endPosition.row,
-      depth: depthOf(node) + depthOffset,
-      assign,
-    });
+    this.steppables.push({ ...extentOf(node), depth: depthOf(node) + depthOffset, assign });
   }
 
-  protected addBodyRange(body: Node): void {
-    this.bodyRanges.push({ row: body.startPosition.row, endRow: body.endPosition.row });
+  protected addBody(body: Node): void {
+    this.bodies.push(extentOf(body));
   }
 
-  /** Gives each `// step` row to the innermost statements on it, outside the bodies of functions they contain. */
+  /**
+   * Gives each `// step` row to the innermost statements on it, where the rows inside a function body belong to the
+   * statements of that body, and a body on the step row alone belongs to the statement containing the function.
+   */
   protected assignSteps(): void {
     for (const [row, stepId] of this.stepIdByRow) {
-      const candidates = this.steppables.filter(
-        (steppable) => steppable.row <= row && row <= steppable.endRow && !this.isInNestedBody(steppable, row)
+      const onRow = this.steppables.filter((steppable) => steppable.row <= row && row <= steppable.endRow);
+      const candidates = onRow.filter(
+        (steppable) =>
+          !this.isInNestedBody(steppable, row) &&
+          !this.bodies.some(
+            (body) =>
+              body.row === row &&
+              body.endRow === row &&
+              encloses(body, steppable) &&
+              onRow.some((outer) => encloses(outer, body))
+          )
       );
       if (candidates.length === 0) {
         throw new CompileError([
@@ -96,9 +117,7 @@ export abstract class ConverterBase {
   }
 
   private isInNestedBody(steppable: Steppable, row: number): boolean {
-    return this.bodyRanges.some(
-      (body) => steppable.row <= body.row && body.endRow <= steppable.endRow && body.row < row && row < body.endRow
-    );
+    return this.bodies.some((body) => encloses(steppable, body) && body.row < row && row < body.endRow);
   }
 
   // Scopes ----------------------------------------------------------------------------------------------------------

@@ -492,3 +492,11 @@ const y = p.double; // caller`;
   const item = traceProgram('javascript', program, program).traceItems[1];
   expect({ depth: item.depth, callStack: item.callStack }).toEqual({ depth: 1, callStack: [1] });
 });
+
+test.each([
+  'let total = 0;\n[1, 2, 3].forEach((n) => { total += n; }); // step',
+  'let total = 0;\n[1, 2, 3].forEach((n) => total += n); // step',
+  'let total = 0;\n[1, 2, 3].forEach((n) => {\n  total += n;\n}); // step',
+])('a step after a call with a callback is recorded once, however the callback is laid out: %s', (program) => {
+  expect(traceProgram('javascript', program, program).traceItems.map(({ vars }) => vars)).toEqual([{}, { total: 6 }]);
+});

@@ -27,6 +27,12 @@ test.each([
   ['a var that redeclares a let', 'let a = 1;\n{ var a = 2; }', 1, 'a はすでに宣言されています。'],
   ['a const without a value', 'const a;', 0, 'const で宣言する変数には初期値が必要です。'],
   ['break outside a loop', 'if (true) {\n  break;\n}', 1, 'break 文はループや switch 文の中にしか書けません。'],
+  [
+    'an unlabeled break in a labeled block',
+    'block: {\n  break;\n}',
+    1,
+    'break 文はループや switch 文の中にしか書けません。',
+  ],
   ['continue to a label of a block', 'block: {\n  continue block;\n}', 1, 'ラベル block はループに付いていません。'],
   ['return outside a function', 'return 1;', 0, 'return 文は関数の中にしか書けません。'],
   [

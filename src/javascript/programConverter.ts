@@ -271,12 +271,8 @@ export class ProgramConverter extends ExpressionConverter {
     const isLoop = loopTypes.has(current.type);
     for (const label of labels) this.context.labels.set(label, isLoop);
     try {
-      const target = current;
-      // A labeled statement other than a loop or a switch can be left with `break label` too.
-      let body =
-        isLoop || target.type === 'switch_statement'
-          ? this.substatement(target)
-          : this.inBreakable(false, () => this.substatement(target));
+      // `break label` leaves any labeled statement, which context.labels validates; a plain `break` needs a loop or switch.
+      let body = this.substatement(current);
       for (const label of labels.toReversed()) body = { kind: 'labeled', label, body, row: rowOf(node) };
       return body;
     } finally {
@@ -327,7 +323,7 @@ export class ProgramConverter extends ExpressionConverter {
     if (hasChild(node, 'async')) unsupported(node, 'async 関数');
     if (hasChild(node, '*')) unsupported(node, 'ジェネレータ関数');
     const bodyNode = field(node, 'body');
-    if (bodyNode.type === 'statement_block') this.addBodyRange(bodyNode);
+    if (bodyNode.type === 'statement_block') this.addBody(bodyNode);
     const outer = this.context;
     const isArrow = kind === 'arrow';
     const context = newContext(
