@@ -3,7 +3,6 @@ import { expect, test } from 'vitest';
 import { challengeBases } from '../../src/problems/challenge/definitions';
 import { challengeMetadata } from '../../src/problems/challenge/metadata';
 import { instantiateRegularChallenge } from '../../src/problems/challenge/regular';
-import { challengeRegularPrograms } from '../../src/problems/challenge/regularPrograms';
 import { stripJavaTraceAnnotations } from '../../src/problems/fillInBlank/javaSource';
 import { javaChallengeDefinitions } from '../../src/problems/javaChallenges/definitions';
 import { instantiateJavaChallenge } from '../../src/problems/javaChallenges/instantiate';
@@ -23,6 +22,7 @@ test('all independent regular challenges render bounded traces with mapped displ
     seen.add(base.id);
     const problem = instantiateRegularChallenge(base.id);
     if (!problem) throw new Error(`Missing regular projection: ${base.id}`);
+    expect(problem.uncaughtException, base.id).toBeUndefined();
     expect(problem.traceItems.length - 1, base.id).toBeGreaterThan(0);
     expect(problem.traceItems.length - 1, base.id).toBeLessThanOrEqual(30);
     const lineCount = problem.displayProgram.split('\n').length;
@@ -41,10 +41,8 @@ test('all independent regular challenges render bounded traces with mapped displ
   }
 });
 
-test('generated browser projections remain current and contain only regular source or public metadata', () => {
-  expect(Object.keys(challengeRegularPrograms).toSorted()).toEqual(challengeBases.map(({ id }) => id).toSorted());
+test('generated metadata remains current and contains only public fields', () => {
   for (const base of challengeBases) {
-    expect(challengeRegularPrograms[base.id]).toEqual({ java: base.java, instrumented: base.instrumented });
     for (const [id, item] of Object.entries(challengeMetadata).filter(
       ([id]) => id === base.id || id.startsWith(`${base.id}Blank`) || id.startsWith(`${base.id}Bug`)
     )) {

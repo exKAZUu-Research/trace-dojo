@@ -7,8 +7,6 @@ export const lecture6: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 5,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Dial d = new Dial(); // caller\n    d.act(); // caller\n    d.amount = 0; // step\n    d.act(); // caller\n    d.act(1); // caller\n    d.amount = 2; // step\n    d.act(); // caller\n  }\n}\nclass Dial {\n  Turtle t;\n  int amount;\n  Dial() {\n    this.t = new Turtle(2, 2); // step\n    this.amount = 1; // step\n  }\n  void act() {\n    this.act(this.amount); // caller\n  }\n  void act(int value) {\n    if (value > 0) {\n      this.t.前に進む(); // step\n    }\n    this.t.右を向く(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet d = call(Dial)(); registerDisplayRef('d', () => d); \ncall(d.actDefault.bind(d))(); \nd.amount = 0; // step\ncall(d.actDefault.bind(d))(); \ncall(d.actCount.bind(d), 'value')(1); \nd.amount = 2; // step\ncall(d.actDefault.bind(d))(); \n}\nclass Dial {\nt = undefined;\namount = 0;\nconstructor() {\nthis.t = new Turtle(2, 2); // step\nthis.amount = 1; // step\n}\nactDefault() {\ncall(this.actCount.bind(this), 'value')(this.amount); \n}\nactCount(value) {\nif (value > 0) {\nthis.t.前に進む(); // step\n}\nthis.t.右を向く(); // step\n}\n}\nmain();",
     blanks: [
       {
         id: 'Delegate',
@@ -53,8 +51,6 @@ export const lecture6: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 5,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Dial d = new Dial(); // caller\n    d.set(1); // caller\n    d.set(true); // caller\n    d.move(); // caller\n    d.set(false); // caller\n    d.move(); // caller\n    d.set(0); // caller\n    d.move(); // caller\n  }\n}\nclass Dial {\n  Turtle t;\n  int count;\n  boolean right;\n  Dial() {\n    this.t = new Turtle(2, 2); // step\n    this.count = 0; // step\n    this.right = false; // step\n  }\n  void set(int value) {\n    this.count = value; // step\n  }\n  void set(boolean value) {\n    this.right = value; // step\n  }\n  void move() {\n    if (this.right) {\n      this.t.右を向く(); // step\n    }\n    if (this.count > 0) {\n      this.t.前に進む(); // step\n    }\n  }\n}',
-    instrumented:
-      "function main() {\nlet d = call(Dial)(); registerDisplayRef('d', () => d); \ncall(d.setCount.bind(d), 'value')(1); \ncall(d.setMode.bind(d), 'value')(true); \ncall(d.move.bind(d))(); \ncall(d.setMode.bind(d), 'value')(false); \ncall(d.move.bind(d))(); \ncall(d.setCount.bind(d), 'value')(0); \ncall(d.move.bind(d))(); \n}\nclass Dial {\nt = undefined;\ncount = 0;\nright = false;\nconstructor() {\nthis.t = new Turtle(2, 2); // step\nthis.count = 0; // step\nthis.right = false; // step\n}\nsetCount(value) {\nthis.count = value; // step\n}\nsetMode(value) {\nthis.right = value; // step\n}\nmove() {\nif (this.right) {\nthis.t.右を向く(); // step\n}\nif (this.count > 0) {\nthis.t.前に進む(); // step\n}\n}\n}\nmain();",
     blanks: [
       {
         id: 'Boolean',
@@ -99,8 +95,6 @@ export const lecture6: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 5,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Dial d = new Dial(); // caller\n    d.change(2, 1); // caller\n    d.move(); // caller\n    d.change(0); // caller\n    d.move(); // caller\n    d.change(1, 2); // caller\n    d.move(); // caller\n  }\n}\nclass Dial {\n  Turtle t;\n  int left;\n  int right;\n  Dial() {\n    this.t = new Turtle(2, 2); // step\n    this.left = 0; // step\n    this.right = 0; // step\n  }\n  void change(int value) {\n    this.left = value; // step\n  }\n  void change(int first, int second) {\n    this.left = first; // step\n    this.right = second; // step\n  }\n  void move() {\n    if (this.left > this.right) {\n      this.t.右を向く(); // step\n    } else {\n      this.t.左を向く(); // step\n    }\n    this.t.前に進む(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet d = call(Dial)(); registerDisplayRef('d', () => d); \ncall(d.changePair.bind(d), 'first', 'second')(2, 1); \ncall(d.move.bind(d))(); \ncall(d.changeOne.bind(d), 'value')(0); \ncall(d.move.bind(d))(); \ncall(d.changePair.bind(d), 'first', 'second')(1, 2); \ncall(d.move.bind(d))(); \n}\nclass Dial {\nt = undefined;\nleft = 0;\nright = 0;\nconstructor() {\nthis.t = new Turtle(2, 2); // step\nthis.left = 0; // step\nthis.right = 0; // step\n}\nchangeOne(value) {\nthis.left = value; // step\n}\nchangePair(first, second) {\nthis.left = first; // step\nthis.right = second; // step\n}\nmove() {\nif (this.left > this.right) {\nthis.t.右を向く(); // step\n} else {\nthis.t.左を向く(); // step\n}\nthis.t.前に進む(); // step\n}\n}\nmain();",
     blanks: [
       {
         id: 'Pair',
@@ -145,8 +139,6 @@ export const lecture6: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 5,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Turtle a = new Turtle(2, 2); // step\n    Turtle b = new Turtle(4, 2, "R"); // step\n    Dial d = new Dial(a); // caller\n    d.draw(); // caller\n    d.draw(b); // caller\n    a.後に戻る(); // step\n    d.draw(); // caller\n    b.左を向く(); // step\n  }\n}\nclass Dial {\n  Turtle saved;\n  Dial(Turtle initial) {\n    this.saved = initial; // step\n  }\n  void draw() {\n    this.draw(this.saved); // caller\n  }\n  void draw(Turtle target) {\n    target.右を向く(); // step\n    target.前に進む(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet a = new Turtle(2, 2); registerDisplayRef('a', () => a); // step\nlet b = new Turtle(4, 2, \"R\"); registerDisplayRef('b', () => b); // step\nlet d = call(Dial, 'initial')(a); registerDisplayRef('d', () => d); \ncall(d.drawDefault.bind(d))(); \ncall(d.drawOther.bind(d), 'target')(b); \na.後に戻る(); // step\ncall(d.drawDefault.bind(d))(); \nb.左を向く(); // step\n}\nclass Dial {\nsaved = undefined;\nconstructor(initial) {\nthis.saved = initial; // step\n}\ndrawDefault() {\ncall(this.drawOther.bind(this), 'target')(this.saved); \n}\ndrawOther(target) {\ntarget.右を向く(); // step\ntarget.前に進む(); // step\n}\n}\nmain();",
     blanks: [
       {
         id: 'Target',
@@ -191,8 +183,6 @@ export const lecture6: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 5,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Dial d = new Dial(); // caller\n    d.command(1); // caller\n    d.move(); // caller\n    d.command("turn"); // caller\n    d.move(); // caller\n    d.command(0); // caller\n    d.move(); // caller\n    d.command("turn"); // caller\n  }\n}\nclass Dial {\n  Turtle t;\n  int count;\n  Dial() {\n    this.t = new Turtle(2, 2); // step\n    this.count = 0; // step\n  }\n  void command(int value) {\n    this.count = value; // step\n  }\n  void command(String text) {\n    this.t.右を向く(); // step\n  }\n  void move() {\n    if (this.count == 1) {\n      this.t.前に進む(); // step\n    }\n    this.t.左を向く(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet d = call(Dial)(); registerDisplayRef('d', () => d); \ncall(d.commandCount.bind(d), 'value')(1); \ncall(d.move.bind(d))(); \ncall(d.commandText.bind(d), 'text')(\"turn\"); \ncall(d.move.bind(d))(); \ncall(d.commandCount.bind(d), 'value')(0); \ncall(d.move.bind(d))(); \ncall(d.commandText.bind(d), 'text')(\"turn\"); \n}\nclass Dial {\nt = undefined;\ncount = 0;\nconstructor() {\nthis.t = new Turtle(2, 2); // step\nthis.count = 0; // step\n}\ncommandCount(value) {\nthis.count = value; // step\n}\ncommandText(text) {\nthis.t.右を向く(); // step\n}\nmove() {\nif (this.count == 1) {\nthis.t.前に進む(); // step\n}\nthis.t.左を向く(); // step\n}\n}\nmain();",
     blanks: [
       {
         id: 'Count',
@@ -237,8 +227,6 @@ export const lecture6: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 5,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Child d = new Child(); // caller\n    d.act(1); // caller\n    d.act(); // caller\n    d.act(0); // caller\n    d.act(); // caller\n    d.t.左を向く(); // step\n    d.t.前に進む(); // step\n  }\n}\nclass Parent {\n  Turtle t;\n  Parent() {\n    this.t = new Turtle(2, 1); // step\n  }\n  void act(int value) {\n    if (value > 0) {\n      this.t.前に進む(); // step\n    }\n    this.t.右を向く(); // step\n  }\n}\nclass Child extends Parent {\n  void act() {\n    this.t.左を向く(); // step\n    this.t.前に進む(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet d = call(Child)(); registerDisplayRef('d', () => d); \ncall(d.actCount.bind(d), 'value')(1); \ncall(d.actDefault.bind(d))(); \ncall(d.actCount.bind(d), 'value')(0); \ncall(d.actDefault.bind(d))(); \nd.t.左を向く(); // step\nd.t.前に進む(); // step\n}\nclass Parent {\nt = undefined;\nconstructor() {\nthis.t = new Turtle(2, 1); // step\n}\nactCount(value) {\nif (value > 0) {\nthis.t.前に進む(); // step\n}\nthis.t.右を向く(); // step\n}\n}\nclass Child extends Parent {\nactDefault() {\nthis.t.左を向く(); // step\nthis.t.前に進む(); // step\n}\n}\nmain();",
     blanks: [
       {
         id: 'InheritedArgument',
@@ -283,8 +271,6 @@ export const lecture6: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 5,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Parent d = new Child(); // caller\n    d.act(); // caller\n    d.act(0); // caller\n    d.act(); // caller\n  }\n}\nclass Parent {\n  Turtle t;\n  Parent() {\n    this.t = new Turtle(2, 2); // step\n  }\n  void act() {\n    this.act(1); // caller\n    this.t.右を向く(); // step\n  }\n  void act(int value) {\n    this.t.前に進む(); // step\n  }\n}\nclass Child extends Parent {\n  void act(int value) {\n    if (value > 0) {\n      this.t.左を向く(); // step\n    }\n    this.t.前に進む(); // step\n    this.t.右を向く(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet d = call(Child)(); registerDisplayRef('d', () => d); \ncall(d.actDefault.bind(d))(); \ncall(d.actCount.bind(d), 'value')(0); \ncall(d.actDefault.bind(d))(); \n}\nclass Parent {\nt = undefined;\nconstructor() {\nthis.t = new Turtle(2, 2); // step\n}\nactDefault() {\ncall(this.actCount.bind(this), 'value')(1); \nthis.t.右を向く(); // step\n}\nactCount(value) {\nthis.t.前に進む(); // step\n}\n}\nclass Child extends Parent {\nactCount(value) {\nif (value > 0) {\nthis.t.左を向く(); // step\n}\nthis.t.前に進む(); // step\nthis.t.右を向く(); // step\n}\n}\nmain();",
     blanks: [
       {
         id: 'Dynamic',
@@ -329,8 +315,6 @@ export const lecture6: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 5,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Child d = new Child(); // caller\n    d.act(); // caller\n    d.act(1); // caller\n    d.act(); // caller\n  }\n}\nclass Parent {\n  Turtle t;\n  Parent() {\n    this.t = new Turtle(3, 2); // step\n  }\n  void act() {\n    this.t.左を向く(); // step\n    this.t.前に進む(); // step\n  }\n  void act(int value) {\n    if (value == 1) {\n      this.t.右を向く(); // step\n    }\n    this.t.前に進む(); // step\n  }\n}\nclass Child extends Parent {\n  void act() {\n    super.act(1); // caller\n    this.t.左を向く(); // step\n    this.t.前に進む(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet d = call(Child)(); registerDisplayRef('d', () => d); \ncall(d.actDefault.bind(d))(); \ncall(d.actCount.bind(d), 'value')(1); \ncall(d.actDefault.bind(d))(); \n}\nclass Parent {\nt = undefined;\nconstructor() {\nthis.t = new Turtle(3, 2); // step\n}\nactDefault() {\nthis.t.左を向く(); // step\nthis.t.前に進む(); // step\n}\nactCount(value) {\nif (value == 1) {\nthis.t.右を向く(); // step\n}\nthis.t.前に進む(); // step\n}\n}\nclass Child extends Parent {\nactDefault() {\ncall(super.actCount.bind(this), 'value')(1); \nthis.t.左を向く(); // step\nthis.t.前に進む(); // step\n}\n}\nmain();",
     blanks: [
       {
         id: 'SuperArgument',
@@ -375,8 +359,6 @@ export const lecture6: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 5,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Dial d = new Dial(); // caller\n    int[] values = {1, 2}; // step\n    d.load(values); // caller\n    d.move(); // caller\n    d.load(1); // caller\n    d.move(); // caller\n    values[0] = 0; // step\n    d.load(values); // caller\n    d.move(); // caller\n  }\n}\nclass Dial {\n  Turtle t;\n  int amount;\n  Dial() {\n    this.t = new Turtle(2, 2); // step\n    this.amount = 0; // step\n  }\n  void load(int value) {\n    this.amount = value; // step\n  }\n  void load(int[] values) {\n    this.amount = values[0] + values[1]; // step\n  }\n  void move() {\n    if (this.amount > 1) {\n      this.t.右を向く(); // step\n    }\n    this.t.前に進む(); // step\n  }\n}',
-    instrumented:
-      "function main() {\nlet d = call(Dial)(); registerDisplayRef('d', () => d); \nlet values = [1, 2]; registerDisplayRef('values', () => values); // step\ncall(d.loadArray.bind(d), 'values')(values); \ncall(d.move.bind(d))(); \ncall(d.loadScalar.bind(d), 'value')(1); \ncall(d.move.bind(d))(); \nvalues[0] = 0; // step\ncall(d.loadArray.bind(d), 'values')(values); \ncall(d.move.bind(d))(); \n}\nclass Dial {\nt = undefined;\namount = 0;\nconstructor() {\nthis.t = new Turtle(2, 2); // step\nthis.amount = 0; // step\n}\nloadScalar(value) {\nthis.amount = value; // step\n}\nloadArray(values) {\nthis.amount = values[0] + values[1]; // step\n}\nmove() {\nif (this.amount > 1) {\nthis.t.右を向く(); // step\n}\nthis.t.前に進む(); // step\n}\n}\nmain();",
     blanks: [
       {
         id: 'ArrayUse',
@@ -421,8 +403,6 @@ export const lecture6: ChallengeBase[] = [
     courseId: 'tuBeginner2',
     lectureIndex: 5,
     java: 'public class Main {\n  public static void main(String[] args) {\n    Turtle a = new Turtle(2, 2); // step\n    Turtle b = new Turtle(4, 2, "R"); // step\n    Order.act(1, a); // caller\n    Order.act(b, 1); // caller\n    Order.act(0, b); // caller\n    Order.act(a, 0); // caller\n    a.前に進む(); // step\n    b.後に戻る(); // step\n  }\n}\nclass Order {\n  static void act(int value, Turtle target) {\n    if (value == 1) {\n      target.右を向く(); // step\n    }\n    target.前に進む(); // step\n  }\n  static void act(Turtle target, int value) {\n    target.前に進む(); // step\n    if (value == 1) {\n      target.左を向く(); // step\n    }\n  }\n}',
-    instrumented:
-      "function main() {\nlet a = new Turtle(2, 2); registerDisplayRef('a', () => a); // step\nlet b = new Turtle(4, 2, \"R\"); registerDisplayRef('b', () => b); // step\ncall(Order.firstCount.bind(Order), 'value', 'target')(1, a); \ncall(Order.firstTurtle.bind(Order), 'target', 'value')(b, 1); \ncall(Order.firstCount.bind(Order), 'value', 'target')(0, b); \ncall(Order.firstTurtle.bind(Order), 'target', 'value')(a, 0); \na.前に進む(); // step\nb.後に戻る(); // step\n}\nclass Order {\nstatic firstCount(value, target) {\nif (value == 1) {\ntarget.右を向く(); // step\n}\ntarget.前に進む(); // step\n}\nstatic firstTurtle(target, value) {\ntarget.前に進む(); // step\nif (value == 1) {\ntarget.左を向く(); // step\n}\n}\n}\nmain();",
     blanks: [
       {
         id: 'Order',

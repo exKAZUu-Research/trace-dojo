@@ -10,7 +10,7 @@ import { instantiateProblem } from '../../src/problems/instantiateProblem';
 import { diagnosticVerdictSchema } from '../helpers/compilerTransport';
 import { localCompileOnlyExecutor } from '../helpers/localJavaCompiler';
 
-const problem = instantiateProblem('fillInBlank1', 'java', 'local-diagnostic-test');
+const problem = instantiateProblem('fillInBlank1', 'local-diagnostic-test');
 if (!problem) throw new Error('Missing fillInBlank1 problem');
 
 test('local compiler builds without executing learner code and cleans successful and failed compilation artifacts', async () => {

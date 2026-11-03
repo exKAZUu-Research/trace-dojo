@@ -1,4 +1,4 @@
-import type { TurtleTrace } from '../traceProgram';
+import type { TurtleTrace } from '../trace';
 
 export type JavaChallengeFormat = 'fillInBlank' | 'bugFix';
 

@@ -19,16 +19,6 @@ export const lecture8: ChallengeBase[] = [
         t.前に進む(); // step
     }
 }`,
-    instrumented: `registerDisplayRef('grid', () => s.get('grid')); s.set('grid', [[1, 2], [2, 2]]);
-s.set('sum', 0);
-for (s.set('j', 0); s.get('j') < s.get('grid')[1].length; s.set('j', s.get('j') + 1)) {
- s.set('sum', s.get('sum') + (s.get('grid')[1][s.get('j')]));
-}
-delete s.vars['j'];
-const t = new Turtle(s.get('sum'), 1); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnLeft();
-t.forward();`,
     blanks: [
       {
         id: 'Value1',
@@ -85,16 +75,6 @@ t.forward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `registerDisplayRef('grid', () => s.get('grid')); s.set('grid', [[1, 2], [3, 1]]);
-s.set('sum', 0);
-for (s.set('i', 0); s.get('i') < s.get('grid').length; s.set('i', s.get('i') + 1)) {
- s.set('sum', s.get('sum') + (s.get('grid')[s.get('i')][1]));
-}
-delete s.vars['i'];
-const t = new Turtle(s.get('sum'), 2); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnRight();
-t.forward();`,
     blanks: [
       {
         id: 'Condition3',
@@ -155,19 +135,6 @@ t.forward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `registerDisplayRef('grid', () => s.get('grid')); s.set('grid', [[1, 2], [3, 4]]);
-s.set('x', s.get('grid')[0][1]);
-s.set('y', s.get('grid')[1][0]);
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
-if (s.get('grid')[0][0] < s.get('grid')[1][1]) {
- t.turnRight();
-} else {
- t.turnLeft();
-}
-t.forward();
-t.forward();
-t.turnLeft();
-t.forward();`,
     blanks: [
       {
         id: 'Condition5',
@@ -226,19 +193,6 @@ t.forward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `registerDisplayRef('rows', () => s.get('rows')); s.set('rows', [[2], [1, 2]]);
-s.set('total', 0);
-for (s.set('i', 0); s.get('i') < s.get('rows').length; s.set('i', s.get('i') + 1)) {
- for (s.set('j', 0); s.get('j') < s.get('rows')[s.get('i')].length; s.set('j', s.get('j') + 1)) {
-  s.set('total', s.get('total') + (s.get('rows')[s.get('i')][s.get('j')]));
- }
-delete s.vars['j'];
-}
-delete s.vars['i'];
-const t = new Turtle(s.get('total'), 1); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnLeft();
-t.forward();`,
     blanks: [
       {
         id: 'Value1',
@@ -296,16 +250,6 @@ t.forward();`,
         t.右を向く(); // step
     }
 }`,
-    instrumented: `registerDisplayRef('grid', () => s.get('grid')); s.set('grid', [[1, 2], [3, 1]]);
-s.get('grid')[1][0] = s.get('grid')[0][1] + 2; // step
-s.set('x', s.get('grid')[1][0]);
-s.set('y', s.get('grid')[0][0] + 1);
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnLeft();
-t.forward();
-t.backward();
-t.turnRight();`,
     blanks: [
       {
         id: 'Update4',
@@ -363,16 +307,6 @@ t.turnRight();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `registerDisplayRef('grid', () => s.get('grid')); s.set('grid', [[1, 2], [3, 1]]);
-registerDisplayRef('row', () => s.get('row')); s.set('row', s.get('grid')[0]);
-s.get('row')[0] = s.get('row')[1] + 1; // step
-s.set('x', s.get('grid')[0][0]);
-s.set('y', s.get('grid')[1][1]);
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnLeft();
-t.forward();
-t.forward();`,
     blanks: [
       {
         id: 'Value1',
@@ -430,16 +364,6 @@ t.forward();`,
         t.左を向く(); // step
     }
 }`,
-    instrumented: `registerDisplayRef('layers', () => s.get('layers')); s.set('layers', [[[1, 2]], [[3, 1]]]);
-s.set('layer', 0);
-s.set('layer', s.get('layer') + 1);
-s.set('x', s.get('layers')[s.get('layer')][0][0]);
-s.set('y', s.get('layers')[s.get('layer')][0][1]);
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnRight();
-t.forward();
-t.turnLeft();`,
     blanks: [
       {
         id: 'Value1',
@@ -497,16 +421,6 @@ t.turnLeft();`,
         t.後に戻る(); // step
     }
 }`,
-    instrumented: `registerDisplayRef('layers', () => s.get('layers')); s.set('layers', [[[1, 2]], [[2, 1]]]);
-s.set('x', s.get('layers')[0][0][0] + s.get('layers')[1][0][0]);
-s.set('y', s.get('layers')[0][0][1] - s.get('layers')[1][0][1]);
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnRight();
-t.forward();
-t.turnLeft();
-t.forward();
-t.backward();`,
     blanks: [
       {
         id: 'Update3',
@@ -564,16 +478,6 @@ t.backward();`,
         t.後に戻る(); // step
     }
 }`,
-    instrumented: `registerDisplayRef('layers', () => s.get('layers')); s.set('layers', [[[1, 2]], [[3, 1]]]);
-registerDisplayRef('saved', () => s.get('saved')); s.set('saved', s.get('layers')[0][0]);
-s.get('layers')[0][0] = s.get('layers')[1][0]; // step
-s.set('x', s.get('layers')[0][0][0]);
-s.set('y', s.get('saved')[1]);
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnLeft();
-t.forward();
-t.backward();`,
     blanks: [
       {
         id: 'Value1',
@@ -634,22 +538,6 @@ t.backward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `registerDisplayRef('layers', () => s.get('layers')); s.set('layers', [[[1], [1]], [[1]]]);
-s.set('total', 0);
-for (s.set('i', 0); s.get('i') < s.get('layers').length; s.set('i', s.get('i') + 1)) {
- for (s.set('j', 0); s.get('j') < s.get('layers')[s.get('i')].length; s.set('j', s.get('j') + 1)) {
-  for (s.set('k', 0); s.get('k') < s.get('layers')[s.get('i')][s.get('j')].length; s.set('k', s.get('k') + 1)) {
-   s.set('total', s.get('total') + (s.get('layers')[s.get('i')][s.get('j')][s.get('k')]));
-  }
-delete s.vars['k'];
- }
-delete s.vars['j'];
-}
-delete s.vars['i'];
-const t = new Turtle(s.get('total'), 1); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnLeft();
-t.forward();`,
     blanks: [
       {
         id: 'Value1',

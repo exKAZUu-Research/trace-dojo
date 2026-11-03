@@ -53,6 +53,7 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
 import { ChallengePageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/pageOnClient';
 import { ProblemPageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/pageOnClient';
 import { extractBlanks } from '../../../src/problems/fillInBlank/blanks';
+import { instantiateProblem } from '../../../src/problems/instantiateProblem';
 import { javaChallengeDefinitions } from '../../../src/problems/javaChallenges/definitions';
 import { instantiateJavaChallenge } from '../../../src/problems/javaChallenges/instantiate';
 
@@ -109,6 +110,7 @@ const renderPage = (
             traceItemIndex: problemType === 'step' ? 1 : 0,
           } as never
         }
+        problem={instantiateProblem(infrastructure.problemId, seed)}
         userId={userId}
       />
     </ChakraProvider>
@@ -237,6 +239,7 @@ test('ordinary session identity changes replace edited code with the new starter
             traceItemIndex: 0,
           } as never
         }
+        problem={instantiateProblem(infrastructure.problemId, 'replacement-session')}
         userId="user-1"
       />
     </ChakraProvider>

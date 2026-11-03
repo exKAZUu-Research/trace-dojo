@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
-import { extractBlanks } from '../fillInBlank/blanks';
+import { traceJavaProgram } from '../../java/trace';
+import { extractBlanks, removeBlankMarkers } from '../fillInBlank/blanks';
 import type { JavaChallengeDefinition } from '../javaChallenges/types';
-import { traceProgram } from '../traceProgram';
 import { challengeBases } from './definitions';
 import { applyChallengeEdit } from './edits';
 import { challengeBaseSchema } from './schema';
@@ -14,9 +14,9 @@ const registeredIds = new Set<string>();
 for (const base of z.array(challengeBaseSchema).parse(challengeBases)) {
   if (registeredIds.has(base.id)) throw new Error(`Duplicate challenge ID: ${base.id}`);
   registeredIds.add(base.id);
-  let trace: ReturnType<typeof traceProgram>;
+  let trace: ReturnType<typeof traceJavaProgram>;
   try {
-    trace = traceProgram(base.instrumented, base.java, 'java');
+    trace = traceJavaProgram(base.java, base.java);
   } catch (error) {
     throw new Error(`Invalid challenge trace: ${base.id}`, { cause: error });
   }
@@ -36,10 +36,7 @@ for (const base of z.array(challengeBaseSchema).parse(challengeBases)) {
       const starterProgram = applyChallengeEdit(base.java, edit);
       if (format === 'fillInBlank') {
         const blanks = extractBlanks(starterProgram);
-        if (
-          blanks.answers.length !== 1 ||
-          starterProgram.replaceAll(/@\[([\s\S]*?)\]@/g, '$1').trim() !== target.correctProgram
-        )
+        if (blanks.answers.length !== 1 || removeBlankMarkers(starterProgram).trim() !== target.correctProgram)
           throw new Error(`Invalid challenge blank: ${id}`);
       }
       independentJavaChallengeDefinitions[id] = {

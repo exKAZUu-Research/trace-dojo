@@ -21,7 +21,7 @@ import {
   courseIdToLectureIndexToProblemIds,
   getProblemProgram,
 } from '@/problems/problemData';
-import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
+import type { RegularExerciseDisplay, RegularExerciseState } from '@/problems/regular/exerciseProblem';
 
 import { type ExerciseSession, exerciseSessions, exerciseSubmissions } from '../../../../db/schema';
 import { db } from '../../database';
@@ -174,7 +174,7 @@ export const exerciseProcedures = {
           const session = ownedSession(input.sessionId, userId, input.courseId, input.lectureId, 'regular');
           assertNotEnded(session);
           if (session.completedAt) throw new TRPCError({ code: 'CONFLICT' });
-          if (session.problemType === 'step' && session.traceItemIndex === 1) return toRegularDisplay(session);
+          if (session.problemType === 'step' && session.traceItemIndex === 1) return toRegularState(session);
           if (session.problemType !== 'executionResult' || session.traceItemIndex !== 0)
             throw new TRPCError({ code: 'CONFLICT' });
           const updated = tx
@@ -184,7 +184,7 @@ export const exerciseProcedures = {
             .returning()
             .get();
           if (!updated) throw new TRPCError({ code: 'CONFLICT' });
-          return toRegularDisplay(updated);
+          return toRegularState(updated);
         })
       );
     }),
@@ -336,7 +336,7 @@ const createFromCandidates = (
   return toDisplay(row, format, problem);
 };
 const instantiateRegular = (problemId: string, seed: string): InstantiatedProblem => {
-  const problem = instantiateRegularChallenge(problemId) ?? instantiateProblem(problemId, 'java', seed);
+  const problem = instantiateRegularChallenge(problemId) ?? instantiateProblem(problemId, seed);
   if (!problem || problem.blankAnswers.length > 0 || problem.traceItems.length <= 1)
     throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Invalid regular problem: ${problemId}` });
   return problem;
@@ -348,7 +348,7 @@ const instantiateChallenge = (
 ): InstantiatedJavaChallenge => {
   try {
     if (javaChallengeDefinitions[problemId]) return instantiateJavaChallenge(problemId, format);
-    const problem = instantiateProblem(problemId, 'java', seed);
+    const problem = instantiateProblem(problemId, seed);
     if (format !== 'fillInBlank' || !problem || problem.blankAnswers.length === 0)
       throw new Error(`Invalid challenge problem: ${problemId}`);
     return problem;
@@ -360,25 +360,27 @@ const instantiateChallenge = (
     });
   }
 };
-const toRegularDisplay = (row: ExerciseSession): RegularExerciseDisplay => ({
+const toRegularState = (row: ExerciseSession): RegularExerciseState => ({
   problemFormat: 'regular',
   sessionId: row.id,
   problemId: row.problemId,
   seed: row.seed,
-  problemType: row.problemType as RegularExerciseDisplay['problemType'],
+  problemType: row.problemType as RegularExerciseState['problemType'],
   traceItemIndex: row.traceItemIndex,
   completed: Boolean(row.completedAt),
+});
+const toRegularDisplay = (row: ExerciseSession, problem?: InstantiatedProblem): RegularExerciseDisplay => ({
+  ...toRegularState(row),
+  problem: problem ?? instantiateRegular(row.problemId, row.seed),
 });
 const toDisplay = (
   row: ExerciseSession,
   format: ProblemFormat,
-  problem?: InstantiatedJavaChallenge
+  problem?: InstantiatedJavaChallenge | InstantiatedProblem
 ): ExerciseDisplay | RegularExerciseDisplay => {
   if (format === 'regular') {
     validateRegularState(row);
-    // The client regenerates the problem while rendering, so a resumed row whose definition no longer generates must fail here.
-    if (!problem) instantiateRegular(row.problemId, row.seed);
-    return toRegularDisplay(row);
+    return toRegularDisplay(row, problem && 'traceItems' in problem ? problem : undefined);
   }
   const { displayProgram, finalBoard, finalTurtles } = problem ?? instantiateChallenge(row.problemId, row.seed, format);
   return {
@@ -391,7 +393,8 @@ const toDisplay = (
     completed: Boolean(row.completedAt),
   };
 };
-const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmissionSchema>): RegularExerciseDisplay =>
+// code-gauge-allow functionCognitiveComplexity 18 -- The function predates this change, which only renames the value it returns.
+const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmissionSchema>): RegularExerciseState =>
   db.transaction((tx) => {
     const current = ownedSession(input.sessionId, userId, input.courseId, input.lectureId, 'regular');
     assertNotEnded(current);
@@ -410,7 +413,7 @@ const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmiss
         previous.status !== status
       )
         throw new TRPCError({ code: 'CONFLICT' });
-      return toRegularDisplay(current);
+      return toRegularState(current);
     }
     if (
       current.completedAt ||
@@ -427,7 +430,7 @@ const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmiss
         requestId: input.requestId,
       })
       .run();
-    if (!input.isCorrect) return toRegularDisplay(current);
+    if (!input.isCorrect) return toRegularState(current);
     // The trace comes from the current definition, as the client's does, so an edited definition moves the final step.
     const completed =
       current.problemType === 'executionResult' ||
@@ -439,7 +442,7 @@ const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmiss
       .returning()
       .get();
     if (!updated) throw new TRPCError({ code: 'CONFLICT' });
-    return toRegularDisplay(updated);
+    return toRegularState(updated);
   });
 const gradeAndSave = async (
   id: number,

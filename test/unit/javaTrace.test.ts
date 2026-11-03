@@ -4,8 +4,9 @@ import {
   TURTLE_GRAPHICS_BOARD_COLUMNS as GRID_COLUMNS,
   TURTLE_GRAPHICS_BOARD_ROWS as GRID_ROWS,
 } from '../../src/constants';
+import { traceJavaProgram } from '../../src/java/trace';
 import { instantiateProblem } from '../../src/problems/instantiateProblem';
-import { type TraceItem, traceProgram, type TurtleTrace } from '../../src/problems/traceProgram';
+import type { TraceItem, TurtleTrace } from '../../src/problems/trace';
 
 const defaultBoard = ('.'.repeat(GRID_COLUMNS) + '\n').repeat(GRID_ROWS).trim();
 const sx = 0;
@@ -24,7 +25,6 @@ type TraceItemWithOptionalCallStack = Omit<TraceItem, 'callStack' | 'referenceVa
 
 test.each([
   {
-    languageId: 'java',
     problemId: 'test1',
     expectedDisplayProgram: `
 public class Main {
@@ -87,13 +87,12 @@ public class Main {
     ] as TraceItemWithOptionalCallStack[],
   },
   {
-    languageId: 'java',
     problemId: 'test2',
     expectedDisplayProgram: `
 public class Main {
   public static void main(String[] args) {
     Turtle c = new Turtle();
-    for (let i = 0; i < 2; i++) {
+    for (int i = 0; i < 2; i++) {
       c.forward();
       c.forward();
       c.turnRight();
@@ -217,12 +216,10 @@ public class Main {
           { x: sx + 1, y: sy + 2, color: '#' },
           { x: sx + 2, y: sy + 2, color: '#' },
         ]),
-        last: true,
       },
     ] as TraceItemWithOptionalCallStack[],
   },
   {
-    languageId: 'java',
     problemId: 'test3',
     expectedDisplayProgram: `
 public class Main {
@@ -254,11 +251,10 @@ public class Main {
       { depth: 0, sid: 2, turtles: [], vars: { a: 1, b: 2 }, board: defaultBoard },
       { depth: 1, sid: 5, callStack: [1], turtles: [], vars: { a: 2, x: 1, y: 2 }, board: defaultBoard },
       { depth: 0, sid: 3, turtles: [], vars: { a: 2, b: 2 }, board: defaultBoard },
-      { depth: 0, sid: 4, turtles: [], vars: { a: 2, b: 2, c: 4 }, board: defaultBoard },
+      { depth: 0, sid: 4, turtles: [], vars: { a: 2, c: 4 }, board: defaultBoard },
     ] as TraceItemWithOptionalCallStack[],
   },
   {
-    languageId: 'java',
     problemId: 'test4',
     expectedDisplayProgram: `
 public class Main {
@@ -269,7 +265,7 @@ public class Main {
     int i = 0;
     c1.forward();
 
-    Turtle c2 = new Turtle(2, 3, "green");
+    Turtle c2 = new Turtle(2, 3, "G");
     c2.forward();
     String foo = "あいうえお";
     int bar = 23;
@@ -460,7 +456,6 @@ public class Main {
     ] as TraceItemWithOptionalCallStack[],
   },
   {
-    languageId: 'java',
     problemId: 'test5',
     expectedDisplayProgram: `
 public class Straight {
@@ -583,32 +578,16 @@ public class Straight {
       },
     ] as TraceItemWithOptionalCallStack[],
   },
-] as const)(
-  'Trace a program',
-  ({ expectedDisplayProgram, expectedSidToLineIndex, expectedTrace, languageId, problemId }) => {
-    const problem = instantiateProblem(problemId, languageId, '');
-    if (!problem) throw new Error('Failed to generate problem.');
-
-    const { displayProgram, sidToLineIndex, traceItems } = problem;
-    expect(displayProgram).toEqual(expectedDisplayProgram);
-    expect(sidToLineIndex).toEqual(
-      new Map(Object.entries(expectedSidToLineIndex).map(([sid, lineIndex]) => [Number(sid), lineIndex]))
-    );
-    expect(normalizeLegacyTrace(traceItems)).toEqual(normalizeLegacyTrace(expectedTrace));
-  }
-);
-
-test('Trace a specific program', () => {
-  const problem = instantiateProblem('exception4', 'java', '');
+] as const)('Trace a program', ({ expectedDisplayProgram, expectedSidToLineIndex, expectedTrace, problemId }) => {
+  const problem = instantiateProblem(problemId, '');
   if (!problem) throw new Error('Failed to generate problem.');
 
-  const { displayProgram, executableCode, sidToLineIndex, traceItems } = problem;
-  console.info('---------------------- displayProgram ----------------------\n', displayProgram);
-  console.info('------------------------------------------------------------\n');
-  console.info('---------------------- executableCode ----------------------\n', executableCode);
-  console.info('------------------------------------------------------------\n');
-  console.info('sidToLineIndex:', JSON.stringify(Object.fromEntries(sidToLineIndex), undefined, 2));
-  console.info('traceItems:', JSON.stringify(traceItems, undefined, 2));
+  const { displayProgram, sidToLineIndex, traceItems } = problem;
+  expect(displayProgram).toEqual(expectedDisplayProgram);
+  expect(sidToLineIndex).toEqual(
+    new Map(Object.entries(expectedSidToLineIndex).map(([sid, lineIndex]) => [Number(sid), lineIndex]))
+  );
+  expect(normalizeLegacyTrace(traceItems)).toEqual(normalizeLegacyTrace(expectedTrace));
 });
 
 function normalizeLegacyTrace(trace: TraceItemWithOptionalCallStack[]): TraceItemWithOptionalCallStack[] {
@@ -631,18 +610,7 @@ function getBoard(dots: { x: number; y: number; color: string }[]): string {
 }
 
 test('earlier array traces preserve values through alias mutation and nested row replacement', () => {
-  const result = traceProgram(
-    `
-const t = new Turtle(); // step
-s.set('values', [1, 2]);
-s.set('nested', [[3, 4], [5, 6]]);
-s.set('alias', s.get('nested')[0]);
-s.get('values')[0] = 9; // step
-s.get('nested')[0][1] = 8; // step
-s.get('alias')[0] = 7; // step
-s.get('nested')[1] = [10, 11]; // step
-`,
-    `class Main {
+  const program = `class Main {
   public static void main(String[] args) {
     Turtle t = new Turtle(); // step
     int[] values = { 1, 2 }; // step
@@ -653,9 +621,8 @@ s.get('nested')[1] = [10, 11]; // step
     alias[0] = 7; // step
     nested[1] = new int[] { 10, 11 }; // step
   }
-}`,
-    'java'
-  );
+}`;
+  const result = traceJavaProgram(program, program);
   expect(result.traceItems.map(({ vars }) => vars)).toEqual([
     {},
     {},
@@ -707,5 +674,71 @@ s.get('nested')[1] = [10, 11]; // step
       ],
       alias: [7, 8],
     },
+  ]);
+});
+
+test('a step annotation on a statement that records no step is rejected', () => {
+  const program = `public class Main {
+  public static void main(String[] args) {
+    int i = 0;
+    while (i < 3) { // step
+      i++;
+    }
+  }
+}`;
+  expect(() => traceJavaProgram(program, program)).toThrow('// step は');
+});
+
+test.each(['int i; // step\n    i = 3;', 'Counter counter = new Counter();'])(
+  'a step annotation on a declaration without an initializer is rejected: %s',
+  (body) => {
+    const program = `public class Main {
+  public static void main(String[] args) {
+    ${body}
+  }
+}
+class Counter {
+  int count; // step
+}`;
+    const annotated = body.includes('// step') ? program.replace('int count; // step', 'int count;') : program;
+    expect(() => traceJavaProgram(annotated, annotated)).toThrow('// step は');
+  }
+);
+
+test('a step annotation on a statement with several parts records one step after the whole statement', () => {
+  const program = `public class Main {
+  static int a = 1, b = 2; // step
+  public static void main(String[] args) {
+    int x = 3, y = 4; // step
+    for (x = 0, y = 5; x < 1; x++, y--) { // step
+    }
+  }
+}`;
+  const trace = traceJavaProgram(program, program);
+  expect(trace.traceItems.map(({ sid, vars }) => ({ sid, vars }))).toEqual([
+    { sid: 0, vars: {} },
+    { sid: 1, vars: { 'Main.a': 1, 'Main.b': 2 } },
+    { sid: 2, vars: { x: 3, y: 4, 'Main.a': 1, 'Main.b': 2 } },
+    { sid: 3, vars: { x: 0, y: 5, 'Main.a': 1, 'Main.b': 2 } },
+    { sid: 3, vars: { x: 1, y: 4, 'Main.a': 1, 'Main.b': 2 } },
+  ]);
+});
+
+test('a step annotation on a for row records no step for an absent init or update', () => {
+  const program = `public class Main {
+  public static void main(String[] args) {
+    int i = 0;
+    for (; i < 1; i++) { // step
+    }
+    for (int j = 0; j < 1;) { // step
+      j++;
+    }
+  }
+}`;
+  const trace = traceJavaProgram(program, program);
+  expect(trace.traceItems.map(({ sid, vars }) => ({ sid, vars }))).toEqual([
+    { sid: 0, vars: {} },
+    { sid: 1, vars: { i: 1 } },
+    { sid: 2, vars: { i: 1, j: 0 } },
   ]);
 });

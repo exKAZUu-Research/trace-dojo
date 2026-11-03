@@ -10,6 +10,8 @@ import {
   type RegularChallengeTransport,
 } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/RegularChallengeBody';
 import { challengeMetadata } from '../../../src/problems/challenge/metadata';
+import { instantiateRegularChallenge } from '../../../src/problems/challenge/regular';
+import { instantiateProblem } from '../../../src/problems/instantiateProblem';
 import type { RegularExerciseDisplay } from '../../../src/problems/regular/exerciseProblem';
 
 const executionDisplay: RegularExerciseDisplay = {
@@ -20,13 +22,14 @@ const executionDisplay: RegularExerciseDisplay = {
   problemType: 'executionResult',
   traceItemIndex: 0,
   completed: false,
+  problem: instantiateProblem('test3', 'component')!,
 };
 
 test('renders the independent problem title from public metadata', () => {
   const entry = Object.entries(challengeMetadata).find(([, metadata]) => metadata.problemFormat === 'regular');
   if (!entry) throw new Error('Missing independent regular metadata');
   const [problemId, metadata] = entry;
-  renderBody({ display: { ...executionDisplay, problemId } });
+  renderBody({ display: { ...executionDisplay, problemId, problem: instantiateRegularChallenge(problemId)! } });
   expect(screen.getByRole('heading', { name: metadata.title, level: 1 })).toBeVisible();
 });
 
@@ -41,7 +44,7 @@ test('uses the real editor local grader and sends only verdict with stored conte
   );
 
   const inputs = screen.getAllByRole('textbox');
-  for (const [input, value] of inputs.map((input, index) => [input, ['2', '2', '4'][index]] as const)) {
+  for (const [input, value] of inputs.map((input, index) => [input, ['2', '4'][index]] as const)) {
     await user.type(input, value);
   }
   await user.click(screen.getByRole('button', { name: /提出/ }));
@@ -93,8 +96,7 @@ test('keeps an incorrect draft mounted across repeated attempts and never switch
   renderBody({ submit, switchToStep });
   const inputs = screen.getAllByRole('textbox');
   await user.type(inputs[0], '999');
-  await user.type(inputs[1], '2');
-  await user.type(inputs[2], '4');
+  await user.type(inputs[1], '4');
   for (let attempt = 0; attempt < 4; attempt += 1) {
     await user.click(screen.getByRole('button', { name: /提出/ }));
     const alert = await screen.findByRole('alertdialog');
@@ -103,10 +105,9 @@ test('keeps an incorrect draft mounted across repeated attempts and never switch
     await user.click(screen.getByRole('button', { name: /閉じる|もう一度/ }));
   }
   const liveInputs = screen.getAllByRole('textbox');
-  expect(liveInputs).toHaveLength(3);
+  expect(liveInputs).toHaveLength(2);
   expect(liveInputs[0]).toHaveValue('999');
-  expect(liveInputs[1]).toHaveValue('2');
-  expect(liveInputs[2]).toHaveValue('4');
+  expect(liveInputs[1]).toHaveValue('4');
   expect(submit).toHaveBeenCalledTimes(4);
   expect(switchToStep).not.toHaveBeenCalled();
   expect(submit.mock.calls.every(([input]) => input.isCorrect === false)).toBe(true);
@@ -199,8 +200,8 @@ test('locally grades the final step and exposes completion actions', async () =>
     '画面下部にある6行目を実行した後の盤面と変数の一覧表を参考に、8行目を実行した後の盤面と、変数に記録されている値の一覧表を作成し、提出ボタンを押してください。'
   );
   const inputs = screen.getAllByRole('textbox');
-  expect(inputs).toHaveLength(3);
-  await user.type(inputs[2], '4');
+  expect(inputs).toHaveLength(2);
+  await user.type(inputs[1], '4');
   await user.click(screen.getByRole('button', { name: /提出/ }));
   await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
   expect(submit.mock.calls[0][0]).toMatchObject({
@@ -209,7 +210,7 @@ test('locally grades the final step and exposes completion actions', async () =>
   });
   await waitFor(() => expect(screen.getByRole('button', { name: /次の問題/ })).toBeVisible());
   expect(screen.getByRole('button', { name: /終わる/ })).toBeVisible();
-  expect(screen.getAllByRole('textbox', { hidden: true })[2]).toHaveValue('4');
+  expect(screen.getAllByRole('textbox', { hidden: true })[1]).toHaveValue('4');
   expect(screen.getByRole('button', { hidden: true, name: /提出/ })).toBeDisabled();
 });
 
@@ -244,7 +245,7 @@ test('deduplicates synchronous Back and resets the action guard for a later comp
   await user.click(screen.getByRole('button', { name: '次の問題へ' }));
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   const inputs = screen.getAllByRole('textbox');
-  for (const [input, value] of inputs.map((input, index) => [input, ['2', '2', '4'][index]] as const)) {
+  for (const [input, value] of inputs.map((input, index) => [input, ['2', '4'][index]] as const)) {
     await user.type(input, value);
   }
   await user.click(screen.getByRole('button', { name: /提出/ }));

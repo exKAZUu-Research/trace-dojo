@@ -5,11 +5,11 @@ import { z } from 'zod';
 
 import { TraceViewer } from '../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/TraceViewer';
 import { Variables } from '../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/Variables';
+import { traceJavaProgram } from '../../src/java/trace';
 import { type InstantiatedProblem, instantiateProblem } from '../../src/problems/instantiateProblem';
-import { traceProgram } from '../../src/problems/traceProgram';
 
 const problem = (id: string): InstantiatedProblem => {
-  const instantiated = instantiateProblem(id, 'java', 'turtle-variables');
+  const instantiated = instantiateProblem(id, 'turtle-variables');
   if (!instantiated) throw new Error(`Missing problem: ${id}`);
   return instantiated;
 };
@@ -241,36 +241,31 @@ test('fill in blank grading variables remain separate from references', () => {
   expect(instantiated.blankAnswers).toEqual(['i < 4']);
 });
 
-test('a registered class without turtles captures own data while skipping cycles and getters', () => {
-  const instrumented = `
-class Counter {
-  constructor() {
-    this.count = 1;
-    this.label = 'a full label with all of its text';
-    this.numericString = '2';
-    this.active = true;
-    this.color = 'ordinary color';
-    this.dir = 'ordinary direction';
-    this.missing = null;
-    this.values = [1, undefined, 'last'];
-    this.empty = {};
-    this.emptyValues = [];
-    this.self = this;
-    Object.defineProperty(this, 'computed', { enumerable: true, get() { throw new Error('Getter was called'); } });
-  }
-}
-const counter = new Counter(); registerDisplayRef('counter', () => counter); // step
-counter.count = 2; // step
-`;
-  const displayProgram = `
+test('a class without turtles shows its own fields while skipping cycles', () => {
+  const program = `
 public class Main {
   public static void main(String[] args) {
     Counter counter = new Counter(); // step
     counter.count = 2; // step
   }
 }
+class Empty {
+}
+class Counter {
+  int count = 1;
+  String label = "a full label with all of its text";
+  String numericString = "2";
+  boolean active = true;
+  String color = "ordinary color";
+  String dir = "ordinary direction";
+  String missing = null;
+  String[] values = { "1", null, "last" };
+  Empty empty = new Empty();
+  int[] emptyValues = {};
+  Counter self = this;
+}
 `;
-  const traced = traceProgram(instrumented, displayProgram, 'java');
+  const traced = traceJavaProgram(program, program);
   const first = referenceVars(traced.traceItems.find((item) => item.sid === 1));
   const second = referenceVars(traced.traceItems.find((item) => item.sid === 2));
 
@@ -284,14 +279,14 @@ public class Main {
       dir: scalar('ordinary direction'),
       // oxlint-disable-next-line unicorn/no-null -- Java null is displayed as a scalar field.
       missing: scalar(null),
-      values: array({ '0': scalar(1), '2': scalar('last') }),
+      // oxlint-disable-next-line unicorn/no-null -- Java null is displayed as a scalar element.
+      values: array({ '0': scalar('1'), '1': scalar(null), '2': scalar('last') }),
       empty: object({}),
       emptyValues: array({}),
     }),
   });
   expect(second).toMatchObject({ counter: object({ count: scalar(2) }) });
   expect(first).not.toHaveProperty(['counter', 'entries', 'self']);
-  expect(first).not.toHaveProperty(['counter', 'entries', 'computed']);
   expect(traced.traceItems[1].vars).toEqual({});
   expect(traced.finalVars).toEqual({});
 
@@ -315,33 +310,29 @@ public class Main {
   expect(html.match(/<table\b/g)).toHaveLength(1);
 });
 
-test('nested class objects render once when the legacy answer snapshot has an object value', () => {
-  const instrumented = `
-class Counter {
-  constructor() { this.inner = { label: 'nested' }; this.count = 1; }
-  tick() { this.count++; // step
-  }
-}
-const counter = new Counter(); registerDisplayRef('counter', () => counter);
-call(counter.tick.bind(counter))(); // caller
-`;
-  const displayProgram = `
+test('nested class objects render once inside this', () => {
+  const program = `
 public class Main {
   public static void main(String[] args) {
     Counter counter = new Counter();
     counter.tick(); // caller
   }
 }
+class Inner {
+  String label = "nested";
+}
 class Counter {
+  Inner inner = new Inner();
+  int count = 1;
   void tick() {
     this.count++; // step
   }
 }
 `;
-  const traced = traceProgram(instrumented, displayProgram, 'java');
+  const traced = traceJavaProgram(program, program);
   const snapshot = traced.traceItems.find((item) => item.sid === 1);
   expect(snapshot).toBeDefined();
-  expect(snapshot!.vars).toHaveProperty(['this.inner']);
+  expect(snapshot!.vars).toEqual({ 'this.count': 2 });
   const html = renderToStaticMarkup(
     createElement(Variables, { traceItemVars: snapshot!.vars, referenceVars: snapshot!.referenceVars })
   );
@@ -366,10 +357,4 @@ test('the variable table appears for references alone and disappears when the sn
   expect(referenceOnlyHtml.match(/<thead\b/g)).toHaveLength(1);
   expect(referenceOnlyHtml).toMatch(/<button(?=[^>]*type="button")(?=[^>]*aria-expanded="true")[^>]*>/);
   expect(emptyHtml).not.toContain('<table');
-});
-
-test('unregistered numeric-only programs still reject native assignments', () => {
-  expect(() => traceProgram('const count = 1; // step', 'int count = 1; // step', 'java')).toThrow(
-    'Instrumented program MUST NOT contain assignment operators (=).'
-  );
 });

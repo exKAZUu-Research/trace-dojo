@@ -21,18 +21,6 @@ export const lecture5: ChallengeBase[] = [
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-for (s.set('n', 1); s.get('n') < 4; s.set('n', s.get('n') + 1)) {
- if (s.get('n') < 3) {
-  t.forward();
- } else if (s.get('n') < 4) {
-  t.turnRight();
- } else {
-  t.backward();
- }
-}
-delete s.vars['n'];
-t.forward();`,
     blanks: [
       {
         id: 'Condition2',
@@ -92,19 +80,6 @@ t.forward();`,
         }
     }
 }`,
-    instrumented: `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-for (s.set('n', 3); s.get('n') > 0; s.set('n', s.get('n') - 1)) {
- if (s.get('n') > 2) {
-  t.forward();
-  t.turnRight();
- } else if (s.get('n') == 2) {
-  t.forward();
- } else {
-  t.turnLeft();
-  t.forward();
- }
-}
-delete s.vars['n'];`,
     blanks: [
       {
         id: 'Condition2',
@@ -165,20 +140,6 @@ delete s.vars['n'];`,
         }
     }
 }`,
-    instrumented: `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-s.set('total', 0);
-for (s.set('i', 1); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
- s.set('total', s.get('total') + (s.get('i')));
- switch (s.get('total') % 3) {
-  case 0:
-   t.forward();
-   break;
-  default:
-   t.turnRight();
-   break;
- }
-}
-delete s.vars['i'];`,
     blanks: [
       {
         id: 'Condition3',
@@ -242,23 +203,6 @@ delete s.vars['i'];`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `s.set('x', 0);
-for (s.set('n', 1); s.get('n') < 4; s.set('n', s.get('n') + 1)) {
- switch (s.get('n')) {
-  case 1:
-  case 3:
-   s.set('x', s.get('x') + 1);
-   break;
-  default:
-   s.set('x', s.get('x') + (2));
-   break;
- }
-}
-delete s.vars['n'];
-const t = new Turtle(s.get('x'), 1); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnLeft();
-t.forward();`,
     blanks: [
       {
         id: 'Condition2',
@@ -320,21 +264,6 @@ t.forward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-s.set('state', 4);
-for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
- switch (s.get('state')) {
-  case 1:
-   t.forward();
-   break;
-  default:
-   s.set('state', 1);
-   t.turnRight();
-   break;
- }
-}
-delete s.vars['i'];
-t.forward();`,
     blanks: [
       {
         id: 'Condition3',
@@ -396,21 +325,6 @@ t.forward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-for (s.set('n', 0); s.get('n') < 2; s.set('n', s.get('n') + 1)) {
- switch (s.get('n')) {
-  case 0:
-   t.forward();
-   t.turnLeft();
-   break;
-  default:
-   t.backward();
-   t.turnRight();
-   break;
- }
-}
-delete s.vars['n'];
-t.forward();`,
     blanks: [
       {
         id: 'Condition2',
@@ -474,23 +388,6 @@ t.forward();`,
         }
     }
 }`,
-    instrumented: `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-s.set('state', 0);
-for (s.set('i', 0); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
- switch (s.get('i')) {
-  case 0:
-   s.set('state', 1);
-   break;
-  default:
-   s.set('state', 2);
-   break;
- }
- if (s.get('state') == 1) {
-  t.turnRight();
- }
- t.forward();
-}
-delete s.vars['i'];`,
     blanks: [
       {
         id: 'Condition3',
@@ -553,21 +450,6 @@ delete s.vars['i'];`,
         t.後に戻る(); // step
     }
 }`,
-    instrumented: `s.set('x', 1);
-s.set('n', 2);
-if (s.get('n') <= 2) {
- s.set('x', s.get('x') + (s.get('n')));
-} else if (s.get('n') == 2) {
- s.set('x', 1);
-} else {
- s.set('x', 4);
-}
-s.set('y', s.get('x') - 1);
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnLeft();
-t.forward();
-t.backward();`,
     blanks: [
       {
         id: 'Condition3',
@@ -631,23 +513,6 @@ t.backward();`,
         }
     }
 }`,
-    instrumented: `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
- switch (s.get('i') % 2) {
-  case 0:
-   if (s.get('i') == 0) {
-    t.turnRight();
-   } else {
-    t.turnLeft();
-   }
-   break;
-  default:
-   t.forward();
-   break;
- }
- t.forward();
-}
-delete s.vars['i'];`,
     blanks: [
       {
         id: 'Condition2',
@@ -713,25 +578,6 @@ delete s.vars['i'];`,
         }
     }
 }`,
-    instrumented: `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-s.set('state', 0);
-for (s.set('i', 0); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
- switch (s.get('state')) {
-  case 0:
-   t.forward();
-   s.set('state', 2);
-   break;
-  case 2:
-   t.turnRight();
-   s.set('state', 1);
-   break;
-  default:
-   t.forward();
-   s.set('state', 0);
-   break;
- }
-}
-delete s.vars['i'];`,
     blanks: [
       {
         id: 'Condition3',

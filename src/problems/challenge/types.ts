@@ -10,7 +10,6 @@ export interface ChallengeBase {
   courseId: 'tuBeginner1' | 'tuBeginner2';
   lectureIndex: number;
   java: string;
-  instrumented: string;
   blanks: ChallengeEdit[];
   bugs: (ChallengeEdit & { kind: 'logical' | 'syntax' })[];
 }

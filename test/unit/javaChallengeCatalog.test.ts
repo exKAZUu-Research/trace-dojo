@@ -213,7 +213,7 @@ test.each(independentCases)(
 );
 
 test('legacy multiple holes all display and their repaired Java matches the existing target', async () => {
-  const problem = instantiateProblem('fillInBlank4', 'java', 'catalog-compatibility');
+  const problem = instantiateProblem('fillInBlank4', 'catalog-compatibility');
   expect(problem).toBeDefined();
   if (!problem) throw new Error('Legacy blank problem unavailable');
   expect(

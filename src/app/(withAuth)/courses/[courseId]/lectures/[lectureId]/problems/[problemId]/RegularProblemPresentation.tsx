@@ -4,7 +4,7 @@ import type { Dispatch, ReactNode, SetStateAction } from 'react';
 
 import { Box, Card, Flex, Heading, HStack, Tag, VStack } from '@/infrastructures/useClient/chakra';
 import type { InstantiatedProblem } from '@/problems/instantiateProblem';
-import type { TraceItemVariable } from '@/problems/traceProgram';
+import type { TraceItemVariable } from '@/problems/trace';
 import type { ProblemType } from '@/types';
 
 import { SyntaxHighlighter } from './SyntaxHighlighter';

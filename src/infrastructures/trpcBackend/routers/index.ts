@@ -3,7 +3,6 @@ import { and, eq, gte, sql } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
-import { DEFAULT_LANGUAGE_ID } from '@/constants';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import { gradeFillInBlankCode } from '@/problems/fillInBlank/grade';
 import { MAX_JAVA_PROGRAM_LENGTH } from '@/problems/fillInBlank/javaProgram';
@@ -158,7 +157,7 @@ export const backendRouter = router({
       const bugProblem = isOrdinaryBugProblem(session.problemId) || session.problemType === 'bugFix';
       const problem = bugProblem
         ? validateOrdinaryBugSession(session)
-        : instantiateProblem(session.problemId, DEFAULT_LANGUAGE_ID, session.problemVariablesSeed);
+        : instantiateProblem(session.problemId, session.problemVariablesSeed);
       if (!problem || (!bugProblem && (!('blankAnswers' in problem) || problem.blankAnswers.length === 0)))
         throw new TRPCError({ code: 'BAD_REQUEST' });
 
@@ -226,7 +225,7 @@ function isLegacySubmissionComplete(input: z.infer<typeof problemSubmissionSchem
   if (!input.isCorrect) return false;
   if (input.problemType === 'executionResult') return true;
   if (input.problemType !== 'step') return false;
-  const problem = instantiateProblem(session.problemId, DEFAULT_LANGUAGE_ID, session.problemVariablesSeed);
+  const problem = instantiateProblem(session.problemId, session.problemVariablesSeed);
   if (!problem) throw new TRPCError({ code: 'BAD_REQUEST' });
   return input.traceItemIndex >= problem.traceItems.length - 1;
 }

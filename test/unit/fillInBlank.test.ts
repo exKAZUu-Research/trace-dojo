@@ -21,10 +21,8 @@ type GradeCode = (
 const catalogIds = Object.keys(fillInBlankProblemDefinitions);
 
 describe('trusted model catalog', () => {
-  test.each(catalogIds)('%s contains blanks only in Java and instantiates a complete expected drawing', (id) => {
-    const definition = fillInBlankProblemDefinitions[id as keyof typeof fillInBlankProblemDefinitions];
-    expect(definition.java).toContain('@[');
-    expect(definition.instrumented).not.toMatch(/@\[|\]@/);
+  test.each(catalogIds)('%s contains blanks and instantiates a complete expected drawing', (id) => {
+    expect(fillInBlankProblemDefinitions[id as keyof typeof fillInBlankProblemDefinitions]).toContain('@[');
     const problem = instantiate(id);
     expect(problem.displayProgram).toMatch(/【\d+】/);
     expect(problem.displayProgram).not.toContain('@[');
@@ -32,11 +30,15 @@ describe('trusted model catalog', () => {
     expect(instantiate(id)).toMatchObject({ finalBoard: problem.finalBoard, finalTurtles: problem.finalTurtles });
   });
 
-  test.each(catalogIds)('%s Java model agrees with trusted JavaScript', { timeout: 180_000 }, async (id) => {
-    const grade = await loadGrade();
-    const problem = instantiate(id);
-    expect(await grade(problem, modelCode(problem), withJudge)).toMatchObject({ status: 'correct' });
-  });
+  test.each(catalogIds)(
+    '%s Java model reaches its traced final state on the judge',
+    { timeout: 180_000 },
+    async (id) => {
+      const grade = await loadGrade();
+      const problem = instantiate(id);
+      expect(await grade(problem, modelCode(problem), withJudge)).toMatchObject({ status: 'correct' });
+    }
+  );
 
   test.each([
     ['fillInBlank2', 'alternate-model-seed'],
@@ -260,7 +262,7 @@ async function loadGrade(): Promise<GradeCode> {
 }
 
 function instantiate(id: string, seed = 'catalog-model-agreement'): InstantiatedProblem {
-  const problem = instantiateProblem(id, 'java', seed);
+  const problem = instantiateProblem(id, seed);
   if (!problem) throw new Error(`Failed to instantiate ${id}`);
   return problem;
 }

@@ -6,7 +6,7 @@ import {
   TURTLE_GRAPHICS_DEFAULT_COLOR as DEFAULT_COLOR,
   TURTLE_GRAPHICS_EMPTY_COLOR as EMPTY_COLOR,
 } from '../../constants';
-import { charToColor, type TurtleTrace } from '../traceProgram';
+import { charToColor, type TurtleTrace } from '../trace';
 import { maskJavaNonCode, prepareJavaEntry } from './javaSource';
 
 const validColorChars = Object.keys(charToColor).join('');

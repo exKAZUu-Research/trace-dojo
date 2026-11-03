@@ -1,4 +1,4 @@
-import type { TurtleTrace } from '@/problems/traceProgram';
+import type { TurtleTrace } from '@/problems/trace';
 
 export interface ExerciseDisplay {
   problemFormat: 'fillInBlank' | 'bugFix';

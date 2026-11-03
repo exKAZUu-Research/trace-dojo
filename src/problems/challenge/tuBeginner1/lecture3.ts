@@ -19,16 +19,6 @@ export const lecture3: ChallengeBase[] = [
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(2, 1); registerDisplayRef('t', () => t); // step
-t.forward();
-t.forward();
-t.forward();
-for (s.set('i', 2); s.get('i') > 0; s.set('i', s.get('i') - 1)) {
- t.backward();
-}
-delete s.vars['i'];
-t.turnRight();
-t.forward();`,
     blanks: [
       {
         id: 'Condition5',
@@ -110,13 +100,6 @@ t.forward();`,
         t.後に戻る(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); s.get('i') < 5; s.set('i', s.get('i') + (2))) {
- t.forward();
- t.turnRight();
-}
-delete s.vars['i'];
-t.backward();`,
     blanks: [
       {
         id: 'Condition2',
@@ -172,14 +155,6 @@ t.backward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(1, 1); registerDisplayRef('t', () => t); // step
-s.set('budget', 5);
-while (s.get('budget') > 0) {
- t.forward();
- s.set('budget', s.get('budget') - (2));
-}
-t.turnRight();
-t.forward();`,
     blanks: [
       {
         id: 'Condition3',
@@ -236,16 +211,6 @@ t.forward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `s.set('sum', 0);
-for (s.set('i', 1); s.get('i') < 3; s.set('i', s.get('i') + 1)) {
- s.set('sum', s.get('sum') + (s.get('i')));
-}
-delete s.vars['i'];
-s.set('y', s.get('sum') - 2);
-const t = new Turtle(s.get('sum'), s.get('y')); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnLeft();
-t.forward();`,
     blanks: [
       {
         id: 'Condition2',
@@ -301,14 +266,6 @@ t.forward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(2, 1); registerDisplayRef('t', () => t); // step
-s.set('n', 1);
-while (s.get('n') < 8) {
- t.forward();
- s.set('n', s.get('n') * (2));
-}
-t.turnRight();
-t.forward();`,
     blanks: [
       {
         id: 'Condition3',
@@ -367,17 +324,6 @@ t.forward();`,
         }
     }
 }`,
-    instrumented: `const t = new Turtle(2, 1); registerDisplayRef('t', () => t); // step
-s.set('n', 3);
-while (s.get('n') > 1) {
- t.forward();
- s.set('n', s.get('n') - 1);
-}
-t.turnRight();
-while (s.get('n') < 3) {
- t.forward();
- s.set('n', s.get('n') + 1);
-}`,
     blanks: [
       {
         id: 'Condition3',
@@ -435,16 +381,6 @@ while (s.get('n') < 3) {
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(2, 1); registerDisplayRef('t', () => t); // step
-s.set('i', 0);
-s.set('limit', 4);
-while (s.get('i') < s.get('limit')) {
- t.forward();
- s.set('i', s.get('i') + 1);
- s.set('limit', s.get('limit') - 1);
-}
-t.turnLeft();
-t.forward();`,
     blanks: [
       {
         id: 'Condition4',
@@ -501,15 +437,6 @@ t.forward();`,
         t.右を向く(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(3, 3); registerDisplayRef('t', () => t); // step
-s.set('remaining', 2);
-while (s.get('remaining') > 0) {
- s.set('remaining', s.get('remaining') - 1);
- t.backward();
- t.turnLeft();
-}
-t.forward();
-t.turnRight();`,
     blanks: [
       {
         id: 'Condition3',
@@ -567,17 +494,6 @@ t.turnRight();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `s.set('sum', 1);
-for (s.set('i', 1); s.get('i') <= 2; s.set('i', s.get('i') + 1)) {
- s.set('sum', s.get('sum') + (s.get('i') * 2));
-}
-delete s.vars['i'];
-s.set('x', s.get('sum') % 3);
-s.set('y', Math.trunc(s.get('sum') / 3));
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnRight();
-t.forward();`,
     blanks: [
       {
         id: 'Condition2',
@@ -635,18 +551,6 @@ t.forward();`,
         t.左を向く(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-t.forward();
-for (s.set('i', 3); s.get('i') < 2; s.set('i', s.get('i') + 1)) {
- t.backward();
-}
-delete s.vars['i'];
-t.turnRight();
-for (s.set('j', 0); s.get('j') < 2; s.set('j', s.get('j') + 1)) {
- t.forward();
-}
-delete s.vars['j'];
-t.turnLeft();`,
     blanks: [
       {
         id: 'Condition7',

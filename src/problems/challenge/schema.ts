@@ -8,7 +8,6 @@ export const challengeBaseSchema = z
     courseId: z.enum(['tuBeginner1', 'tuBeginner2']),
     lectureIndex: z.number().int().min(0).max(7),
     java: z.string().min(1),
-    instrumented: z.string().min(1),
     blanks: z.array(editSchema).min(1),
     bugs: z.array(editSchema.extend({ kind: z.enum(['logical', 'syntax']) })).min(1),
   })

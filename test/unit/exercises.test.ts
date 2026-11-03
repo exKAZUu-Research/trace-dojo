@@ -492,7 +492,7 @@ test('normal fill-in-the-blank submissions never create exercise history', { tim
   expect(
     await caller.gradeFillInBlankAnswers({
       sessionId: normal.id,
-      code: fillBlanks(instantiateProblem('fillInBlank2', 'java', 'normal-only')!.displayProgramTemplate, ['x + 1']),
+      code: fillBlanks(instantiateProblem('fillInBlank2', 'normal-only')!.displayProgramTemplate, ['x + 1']),
       elapsedMilliseconds: 1,
     })
   ).toMatchObject({ status: 'correct' });
@@ -596,13 +596,13 @@ test('switches regular exercise one way, resumes step 1, then advances and compl
       sessionId: regular.sessionId,
     })
   ).toEqual(switched);
-  expect(await startRegular()).toEqual(switched);
+  expect(await startRegular()).toEqual({ ...switched, problem: expect.any(Object) });
 
   let current = switched;
   while (!current.completed) {
     current = await submitRegular(current, `step-${current.traceItemIndex}`, true);
   }
-  const instantiated = instantiateProblem(regular.problemId, 'java', regular.seed as string);
+  const instantiated = instantiateProblem(regular.problemId, regular.seed as string);
   if (!instantiated) throw new Error('stored regular problem must instantiate');
   expect(current.traceItemIndex).toBe(instantiated.traceItems.length - 1);
   await expect(
@@ -787,7 +787,7 @@ test('rejects cross-format and expired regular access without mutation', async (
 
 test('completes a step session whose stored index is past the final trace item of the current definition', async () => {
   const regular = await startRegular();
-  const instantiated = instantiateProblem(regular.problemId, 'java', regular.seed as string);
+  const instantiated = instantiateProblem(regular.problemId, regular.seed as string);
   if (!instantiated) throw new Error('stored regular problem must instantiate');
   // A definition edited to have fewer steps leaves an active session beyond the regenerated trace.
   sqlite
@@ -945,7 +945,7 @@ const source = (sessionId: number, answers: string[]): string => {
   const stored = z
     .object({ problemId: z.string(), seed: z.string() })
     .parse(sqlite.prepare('SELECT problemId, seed FROM ExerciseSession WHERE id = ?').get(sessionId));
-  const problem = instantiateProblem(stored.problemId, 'java', stored.seed);
+  const problem = instantiateProblem(stored.problemId, stored.seed);
   if (!problem) throw new Error(`Unknown problem: ${stored.problemId}`);
   return fillBlanks(problem.displayProgramTemplate, answers);
 };
@@ -958,7 +958,7 @@ const modelAnswers = (sessionId: number): string[] => {
   const stored = z
     .object({ problemId: z.string(), seed: z.string() })
     .parse(sqlite.prepare('SELECT problemId, seed FROM ExerciseSession WHERE id = ?').get(sessionId));
-  const problem = instantiateProblem(stored.problemId, 'java', stored.seed);
+  const problem = instantiateProblem(stored.problemId, stored.seed);
   if (!problem) throw new Error(`Unknown problem: ${stored.problemId}`);
   return problem.blankAnswers;
 };
@@ -1030,7 +1030,7 @@ test('ordinary provider outage preserves completion and history and rejects unau
     })
     .returning()
     .get()!;
-  const problem = instantiateProblem('fillInBlank1', 'java', 'outage')!;
+  const problem = instantiateProblem('fillInBlank1', 'outage')!;
   const input = {
     sessionId: normal.id,
     code: fillBlanks(problem.displayProgramTemplate, problem.blankAnswers),
@@ -1171,7 +1171,7 @@ test.each<EndFormat>(['regular', 'fillInBlank'])(
       })
       .returning()
       .get()!;
-    const ordinaryProblem = instantiateProblem('fillInBlank2', 'java', 'ordinary-end-isolation');
+    const ordinaryProblem = instantiateProblem('fillInBlank2', 'ordinary-end-isolation');
     if (!ordinaryProblem) throw new Error('Unknown problem: fillInBlank2');
     const code = fillBlanks(ordinaryProblem.displayProgramTemplate, ['x + 1']);
     await caller.gradeFillInBlankAnswers({ sessionId: normal.id, code, elapsedMilliseconds: 7 });
@@ -1379,7 +1379,7 @@ test('explicit End refuses expired sessions and preserves unfinished step resume
   await expect(endExercise(regular.sessionId, 'regular')).rejects.toMatchObject({
     code: 'CONFLICT',
   });
-  expect(await startRegular()).toEqual(stepped);
+  expect(await startRegular()).toEqual({ ...stepped, problem: expect.any(Object) });
   sqlite.prepare('UPDATE ExerciseSession SET createdAt = 0 WHERE id = ?').run(regular.sessionId);
   vi.setSystemTime(new Date('2026-07-15T12:00:00+09:00'));
   const expired = exerciseRows();

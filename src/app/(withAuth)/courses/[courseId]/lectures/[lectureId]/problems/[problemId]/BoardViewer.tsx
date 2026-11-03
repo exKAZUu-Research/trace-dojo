@@ -13,8 +13,8 @@ import {
   TURTLE_GRAPHICS_BOARD_ROWS as ROWS,
 } from '../../../../../../../../constants';
 import { Box, Grid, GridItem, Img } from '../../../../../../../../infrastructures/useClient/chakra';
-import type { TurtleTrace } from '../../../../../../../../problems/traceProgram';
-import { charToColor } from '../../../../../../../../problems/traceProgram';
+import type { TurtleTrace } from '../../../../../../../../problems/trace';
+import { charToColor } from '../../../../../../../../problems/trace';
 
 const CHAR_TO_BG_COLOR = {
   '#': 'gray.600',

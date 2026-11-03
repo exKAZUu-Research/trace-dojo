@@ -24,22 +24,6 @@ export const lecture7: ChallengeBase[] = [
         }
     }
 }`,
-    instrumented: `const t = new Turtle(2, 1); registerDisplayRef('t', () => t); // step
-s.set('n', 1);
-call(advance, 't', 'n')( t, s.get('n') );
-for (s.set('i', 0); s.get('i') < s.get('n'); s.set('i', s.get('i') + 1)) {
- t.forward();
-}
-delete s.vars['i'];
-t.turnRight();
-t.forward();
-function advance(t, n) {
- s.set('n', s.get('n') + 1);
- for (s.set('j', 0); s.get('j') < s.get('n'); s.set('j', s.get('j') + 1)) {
-  t.forward();
- }
-delete s.vars['j'];
-}`,
     blanks: [
       {
         id: 'Condition4',
@@ -97,17 +81,6 @@ delete s.vars['j'];
         t.前に進む(); // step
         t.後に戻る(); // step
     }
-}`,
-    instrumented: `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-call(corner, 't')( t );
-t.forward();
-call(corner, 't')( t );
-t.backward();
-function corner(t) {
- t.forward();
- t.turnRight();
- t.forward();
- t.backward();
 }`,
     blanks: [
       {
@@ -243,18 +216,6 @@ function corner(t) {
         return budget;
     }
 }`,
-    instrumented: `const t = new Turtle(2, 1); registerDisplayRef('t', () => t); // step
-s.set('remaining', call(consume, 't', 'budget')( t, 3 ));
-t.turnRight();
-for (s.set('i', 0); s.get('i') < s.get('remaining'); s.set('i', s.get('i') + 1)) {
- t.forward();
-}
-delete s.vars['i'];
-function consume(t, budget) {
- t.forward();
- s.set('budget', s.get('budget') - 1);
- return s.get('budget');
-}`,
     blanks: [
       {
         id: 'Condition4',
@@ -317,21 +278,6 @@ function consume(t, budget) {
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-call(guarded, 't', 'enabled')( t, 0 );
-t.turnRight();
-call(guarded, 't', 'enabled')( t, 1 );
-t.forward();
-t.turnLeft();
-t.forward();
-function guarded(t, enabled) {
- if (s.get('enabled') == 0) {
-  return;
- }
- t.forward();
- t.turnLeft();
- t.forward();
-}`,
     blanks: [
       {
         id: 'Condition2Helper',
@@ -390,18 +336,6 @@ function guarded(t, enabled) {
         int result = left - right; // step
         return result;
     }
-}`,
-    instrumented: `s.set('x', call(difference, 'left', 'right')( 5, 2 ));
-s.set('y', call(difference, 'left', 'right')( s.get('x'), 1 ));
-const t = new Turtle(s.get('x'), s.get('y')); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnLeft();
-t.forward();
-t.turnRight();
-t.forward();
-function difference(left, right) {
- s.set('result', s.get('left') - s.get('right'));
- return s.get('result');
 }`,
     blanks: [
       {
@@ -485,22 +419,6 @@ function difference(left, right) {
         return n - 1;
     }
 }`,
-    instrumented: `const t = new Turtle(2, 1); registerDisplayRef('t', () => t); // step
-call(travel, 't', 'request')( t, 3 );
-t.turnRight();
-t.forward();
-t.turnLeft();
-t.forward();
-function travel(t, request) {
- s.set('count', call(reduce, 'n')( s.get('request') ));
- for (s.set('i', 0); s.get('i') < s.get('count'); s.set('i', s.get('i') + 1)) {
-  t.forward();
- }
-delete s.vars['i'];
-}
-function reduce(n) {
- return s.get('n') - 1;
-}`,
     blanks: [
       {
         id: 'Condition3Helper',
@@ -563,21 +481,6 @@ function reduce(n) {
         t.後に戻る(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-call(visit, 't', 'n')( t, 1 );
-t.turnRight();
-call(visit, 't', 'n')( t, 2 );
-t.forward();
-t.turnLeft();
-function visit(t, n) {
- t.forward();
- if (s.get('n') == 1) {
-  return;
- }
- t.turnLeft();
- t.forward();
- t.backward();
-}`,
     blanks: [
       {
         id: 'Condition3Helper',
@@ -639,22 +542,6 @@ function visit(t, n) {
         count = 0; // step
     }
 }`,
-    instrumented: `const t = new Turtle(2, 1); registerDisplayRef('t', () => t); // step
-s.set('count', 1);
-call(localWalk, 't')( t );
-t.turnRight();
-for (s.set('i', 0); s.get('i') < s.get('count'); s.set('i', s.get('i') + 1)) {
- t.forward();
-}
-delete s.vars['i'];
-function localWalk(t) {
- s.set('count', 2);
- for (s.set('j', 0); s.get('j') < s.get('count'); s.set('j', s.get('j') + 1)) {
-  t.forward();
- }
-delete s.vars['j'];
- s.set('count', 0);
-}`,
     blanks: [
       {
         id: 'Condition5',
@@ -715,21 +602,6 @@ delete s.vars['j'];
         return value == target;
     }
 }`,
-    instrumented: `const t = new Turtle(2, 2); registerDisplayRef('t', () => t); // step
-for (s.set('i', 1); s.get('i') < 4; s.set('i', s.get('i') + 1)) {
- s.set('turn', call(reaches, 'value', 'target')( s.get('i'), 2 ));
- if (s.get('turn')) {
-  t.turnRight();
- } else {
-  t.forward();
- }
- delete s.vars['turn'];
-}
-delete s.vars['i'];
-t.backward();
-function reaches(value, target) {
- return s.get('value') == s.get('target');
-}`,
     blanks: [
       {
         id: 'Condition2',
@@ -788,19 +660,6 @@ function reaches(value, target) {
         int result = n + 1; // step
         return result;
     }
-}`,
-    instrumented: `const t = new Turtle(2, 1); registerDisplayRef('t', () => t); // step
-s.set('count', call(next, 'n')( 1 ));
-s.set('count', call(next, 'n')( s.get('count') ));
-for (s.set('i', 0); s.get('i') < s.get('count'); s.set('i', s.get('i') + 1)) {
- t.forward();
-}
-delete s.vars['i'];
-t.turnLeft();
-t.forward();
-function next(n) {
- s.set('result', s.get('n') + 1);
- return s.get('result');
 }`,
     blanks: [
       {

@@ -21,17 +21,6 @@ export const lecture1: ChallengeBase[] = [
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(); registerDisplayRef('t', () => t); // step
-t.forward();
-t.forward();
-t.turnRight();
-t.forward();
-t.forward();
-t.backward();
-t.backward();
-t.turnLeft();
-t.forward();
-t.forward();`,
     blanks: [
       {
         id: 'Action3',
@@ -186,17 +175,6 @@ t.forward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(); registerDisplayRef('t', () => t); // step
-t.forward();
-t.forward();
-t.turnLeft();
-t.backward();
-t.backward();
-t.turnRight();
-t.forward();
-t.forward();
-t.turnRight();
-t.forward();`,
     blanks: [
       {
         id: 'Action3',
@@ -356,22 +334,6 @@ t.forward();`,
         t.後に戻る(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(); registerDisplayRef('t', () => t); // step
-t.forward();
-t.forward();
-t.forward();
-t.turnRight();
-t.forward();
-t.forward();
-t.turnRight();
-t.forward();
-t.forward();
-t.turnRight();
-t.forward();
-t.turnLeft();
-t.backward();
-t.backward();
-t.backward();`,
     blanks: [
       {
         id: 'Action9',
@@ -571,18 +533,6 @@ t.backward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(); registerDisplayRef('t', () => t); // step
-t.forward();
-t.forward();
-t.forward();
-t.turnRight();
-t.forward();
-t.turnRight();
-t.forward();
-t.turnLeft();
-t.forward();
-t.turnLeft();
-t.forward();`,
     blanks: [
       {
         id: 'Action3',
@@ -745,21 +695,6 @@ t.forward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(); registerDisplayRef('t', () => t); // step
-t.turnRight();
-t.forward();
-t.turnLeft();
-t.forward();
-t.forward();
-t.turnRight();
-t.forward();
-t.forward();
-t.backward();
-t.backward();
-t.backward();
-t.turnLeft();
-t.forward();
-t.forward();`,
     blanks: [
       {
         id: 'Action9',
@@ -951,18 +886,6 @@ t.forward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(); registerDisplayRef('t', () => t); // step
-t.forward();
-t.forward();
-t.forward();
-t.turnRight();
-t.forward();
-t.forward();
-t.turnRight();
-t.forward();
-t.backward();
-t.turnLeft();
-t.forward();`,
     blanks: [
       {
         id: 'Action3',
@@ -1122,18 +1045,6 @@ t.forward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(); registerDisplayRef('t', () => t); // step
-t.forward();
-t.turnRight();
-t.forward();
-t.turnLeft();
-t.forward();
-t.turnRight();
-t.forward();
-t.backward();
-t.turnLeft();
-t.forward();
-t.forward();`,
     blanks: [
       {
         id: 'Action7',
@@ -1301,22 +1212,6 @@ t.forward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(); registerDisplayRef('t', () => t); // step
-t.forward();
-t.forward();
-t.turnRight();
-t.forward();
-t.forward();
-t.turnRight();
-t.backward();
-t.turnLeft();
-t.backward();
-t.turnRight();
-t.forward();
-t.turnRight();
-t.forward();
-t.turnRight();
-t.forward();`,
     blanks: [
       {
         id: 'Action3',
@@ -1460,18 +1355,6 @@ t.forward();`,
         t.前に進む(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(); registerDisplayRef('t', () => t); // step
-t.forward();
-t.forward();
-t.turnRight();
-t.forward();
-t.forward();
-t.backward();
-t.backward();
-t.turnRight();
-t.turnRight();
-t.backward();
-t.forward();`,
     blanks: [
       {
         id: 'Action3',
@@ -1632,19 +1515,6 @@ t.forward();`,
         t.後に戻る(); // step
     }
 }`,
-    instrumented: `const t = new Turtle(); registerDisplayRef('t', () => t); // step
-t.turnRight();
-t.forward();
-t.forward();
-t.turnLeft();
-t.forward();
-t.forward();
-t.turnLeft();
-t.backward();
-t.turnRight();
-t.forward();
-t.turnLeft();
-t.backward();`,
     blanks: [
       {
         id: 'Action8',

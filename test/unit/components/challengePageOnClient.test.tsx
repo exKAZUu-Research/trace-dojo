@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { StrictMode } from 'react';
 import { beforeEach, expect, test, vi } from 'vitest';
 
+import { instantiateProblem } from '../../../src/problems/instantiateProblem';
 import {
   composeWithoutSubmitting,
   expectJavaSource,
@@ -59,6 +60,7 @@ const regularDisplay = {
   problemType: 'executionResult' as const,
   traceItemIndex: 0,
   completed: false,
+  problem: instantiateProblem('test3', 'component')!,
 };
 const page = (
   initialFormat?: 'regular' | 'fillInBlank' | 'bugFix',
@@ -242,7 +244,7 @@ test('a regular submission refused on a stale session state replaces the exercis
   const user = userEvent.setup();
   renderPage('regular');
   const inputs = await screen.findAllByRole('textbox');
-  for (const [input, value] of inputs.map((input, index) => [input, ['2', '2', '4'][index]] as const)) {
+  for (const [input, value] of inputs.map((input, index) => [input, ['2', '4'][index]] as const)) {
     await user.type(input, value);
   }
   await user.click(screen.getByRole('button', { name: /提出/ }));
@@ -850,7 +852,7 @@ test.each(['bug submission', 'bug Next', 'regular submission'] as const)(
     } else {
       if (operation === 'regular submission') {
         const inputs = await screen.findAllByRole('textbox');
-        for (const [index, input] of inputs.entries()) await user.type(input, ['2', '2', '4'][index]);
+        for (const [index, input] of inputs.entries()) await user.type(input, ['2', '4'][index]);
       } else {
         await screen.findByRole('textbox', { name: /Java/ });
       }
@@ -992,7 +994,7 @@ test('regular explicit End after Next persists the currently displayed successor
   const inputs = await screen.findAllByRole('textbox');
   expect(transport.end).not.toHaveBeenCalled();
   for (const [index, input] of inputs.entries()) {
-    await user.type(input, ['2', '2', '4'][index]);
+    await user.type(input, ['2', '4'][index]);
   }
   await user.click(screen.getByRole('button', { name: /提出/ }));
   const successorDialog = await screen.findByRole('alertdialog');
