@@ -630,6 +630,51 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'public class Main {\n  public static void main(String[] args) {\n    while (args.length > 0) { final int y; y = 1; System.out.println(y); }\n  }\n  \n}\n',
   ],
+  [
+    'neverThrown',
+    false,
+    'class E1 extends Exception {}\npublic class Main { public static void main(String[] args) { try { System.out.println(1); } catch (E1 e) { } } }\n',
+  ],
+  [
+    'neverThrownMulti',
+    false,
+    'class E1 extends Exception {}\nclass E2 extends Exception {}\npublic class Main { static void f() throws E1 {} public static void main(String[] args) { try { f(); } catch (E1 | E2 e) { } } }\n',
+  ],
+  [
+    'catchException',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    try { System.out.println(1); } catch (Exception e) { }\n  }\n  \n}\n',
+  ],
+  [
+    'catchSuperOfThrown',
+    true,
+    'class E1 extends Exception {}\nclass E2 extends E1 {}\npublic class Main { static void f() throws E2 {} public static void main(String[] args) { try { f(); } catch (E1 e) { } } }\n',
+  ],
+  [
+    'catchSubOfThrown',
+    true,
+    'class E1 extends Exception {}\nclass E2 extends E1 {}\npublic class Main { static void f() throws E1 {} public static void main(String[] args) { try { f(); } catch (E2 e) { } catch (E1 e) { } } }\n',
+  ],
+  [
+    'innerConsumed',
+    false,
+    'class E1 extends Exception {}\npublic class Main { static void f() throws E1 {} public static void main(String[] args) { try { try { f(); } catch (E1 e) { } } catch (E1 e) { } } }\n',
+  ],
+  [
+    'alreadyCaught',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    try { System.out.println(1); } catch (Exception e) { } catch (RuntimeException e) { }\n  }\n  \n}\n',
+  ],
+  [
+    'alreadyCaughtChecked',
+    false,
+    'class E1 extends Exception {}\nclass E2 extends E1 {}\npublic class Main { static void f() throws E2 {} public static void main(String[] args) { try { f(); } catch (E1 e) { } catch (E2 e) { } } }\n',
+  ],
+  [
+    'uncheckedNever',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    try { System.out.println(1); } catch (RuntimeException e) { }\n  }\n  \n}\n',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

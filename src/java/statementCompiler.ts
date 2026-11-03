@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 417 -- The statement compiler keeps one method per statement kind together.
+// code-gauge-allow-file fileNcss 426 -- The statement compiler keeps one method per statement kind together.
 import type {
   Block,
   CatchClause,
@@ -550,6 +550,27 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     };
   }
 
+  /** Rejects catching what an earlier clause catches, or a checked exception the try block cannot throw. */
+  protected checkCatchable(
+    clause: CatchClause,
+    classes: readonly ClassInfo[],
+    thrownInTry: readonly ClassInfo[],
+    earlierClasses: readonly ClassInfo[]
+  ): void {
+    const exceptionClass = this.builtins.classes.get('Exception') as ClassInfo;
+    for (const cls of classes) {
+      if (earlierClasses.some((earlier) => isSubclass(cls, earlier))) {
+        this.error(clause, `例外 ${cls.name} は、前の catch ですでに捕まえられています。`);
+      }
+      // Exception and Throwable also catch unchecked exceptions, which any code may throw.
+      const mayBeThrown =
+        !this.isChecked(cls) ||
+        isSubclass(exceptionClass, cls) ||
+        thrownInTry.some((thrown) => isSubclass(thrown, cls) || isSubclass(cls, thrown));
+      if (!mayBeThrown) this.error(clause, `例外 ${cls.name} は、この try 文の中で投げられることがありません。`);
+    }
+  }
+
   /** Compiles catch clauses into a handler that rethrows an exception none of them catches. */
   protected compileCatchClauses(
     context: MethodContext,
@@ -559,6 +580,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const earlierClasses: ClassInfo[] = [];
     const handlers = clauses.map((clause) => {
       const classes = clause.types.map((type) => this.resolveThrowable(type));
+      this.checkCatchable(clause, classes, thrownInTry, earlierClasses);
       const rethrown = caughtByClause(thrownInTry, classes, earlierClasses);
       earlierClasses.push(...classes);
       const exec = this.withScope(context, () => {
