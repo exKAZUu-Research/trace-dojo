@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 446 -- The expression compiler keeps one method per expression kind together.
+// code-gauge-allow-file fileNcss 453 -- The expression compiler keeps one method per expression kind together.
 import type { ArrayInitializer, BinaryOperator, Expression, Span } from './ast';
 import {
   type Compiled,
@@ -23,6 +23,7 @@ import {
   isNumeric,
   isPrimitive,
   isReference,
+  isSubclass,
   type JavaType,
   type MethodInfo,
   NULL,
@@ -41,6 +42,18 @@ const objectMethodNames = new Set([
   'notifyAll',
   'toString',
   'wait',
+]);
+
+/** The public methods of Throwable that this environment does not implement. */
+const throwableMethodNames = new Set([
+  'addSuppressed',
+  'fillInStackTrace',
+  'getLocalizedMessage',
+  'getStackTrace',
+  'getSuppressed',
+  'initCause',
+  'printStackTrace',
+  'setStackTrace',
 ]);
 
 /** Type-checks expressions and compiles them into closures. */
@@ -360,8 +373,15 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
+  /** Whether Java may give `owner` a method named `name` that this environment does not implement. */
+  protected mayInheritMethod(owner: ClassInfo, name: string): boolean {
+    if (owner.isBuiltin && this.isPartialLibraryClass(owner)) return true;
+    if (objectMethodNames.has(name)) return true;
+    return isSubclass(owner, this.builtins.throwableClass) && throwableMethodNames.has(name);
+  }
+
   protected missingFieldMessage(cls: ClassInfo, name: string): string {
-    return this.isPartialLibraryClass(cls)
+    return cls.isBuiltin && this.isPartialLibraryClass(cls)
       ? `この採点環境の ${cls.name} では、フィールド ${name} を使えません。`
       : `${cls.name} にフィールド ${name} がありません。`;
   }
@@ -707,10 +727,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const args = expression.args.map((arg) => this.compileValue(context, arg));
     const target = this.resolveCallTarget(context, expression);
     if (target.candidates.length === 0) {
-      const message =
-        this.isPartialLibraryClass(target.owner) || objectMethodNames.has(expression.name)
-          ? `この採点環境の ${target.owner.name} では、メソッド ${expression.name} を使えません。`
-          : `${target.owner.name} にメソッド ${expression.name} がありません。`;
+      const message = this.mayInheritMethod(target.owner, expression.name)
+        ? `この採点環境の ${target.owner.name} では、メソッド ${expression.name} を使えません。`
+        : `${target.owner.name} にメソッド ${expression.name} がありません。`;
       this.error(expression, message);
     }
     const method = this.selectMethod(

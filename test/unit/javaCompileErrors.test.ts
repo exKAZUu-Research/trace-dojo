@@ -1145,3 +1145,11 @@ test('a wrong call to a learner-defined exception class gets the plain message',
     diagnostics: [{ row: 0, message: 'コンストラクタ MyEx に () を渡して呼び出すことはできません。' }],
   });
 });
+
+test.each([
+  ['missing();', 'MyEx にメソッド missing がありません。'],
+  ['printStackTrace();', 'この採点環境の MyEx では、メソッド printStackTrace を使えません。'],
+])('a missing method on a learner-defined exception: %s', (call, message) => {
+  const source = `class Main { public static void main(String[] args) { new MyEx().${call} } }\nclass MyEx extends Exception {}`;
+  expect(executeJavaProgram(source)).toEqual({ kind: 'compileError', diagnostics: [{ row: 0, message }] });
+});
