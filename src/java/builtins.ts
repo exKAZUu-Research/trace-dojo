@@ -34,10 +34,7 @@ export interface Builtins {
   classes: Map<string, ClassInfo>;
   objectClass: ClassInfo;
   stringClass: ClassInfo;
-  turtleClass: ClassInfo;
   throwableClass: ClassInfo;
-  runtimeExceptionClass: ClassInfo;
-  errorClass: ClassInfo;
   /** The qualified names `Throwable.toString` prints for builtin classes. */
   qualifiedNames: Map<ClassInfo, string>;
 }
@@ -67,13 +64,8 @@ function createBuiltins(): Builtins {
   const stringClass = registry.define('String', objectClass);
   defineObject(objectClass, stringClass.type);
   defineString(stringClass, objectClass.type);
-  const { throwableClass, runtimeExceptionClass, errorClass } = defineThrowables(
-    registry,
-    objectClass,
-    stringClass.type
-  );
-  const turtleClass = registry.define('Turtle', objectClass, '');
-  defineTurtle(turtleClass, stringClass.type);
+  const throwableClass = defineThrowables(registry, objectClass, stringClass.type);
+  defineTurtle(registry.define('Turtle', objectClass, ''), stringClass.type);
   defineMath(registry.define('Math', objectClass));
   defineInteger(registry.define('Integer', objectClass), stringClass.type);
   defineSystem(registry, objectClass, stringClass.type);
@@ -81,10 +73,7 @@ function createBuiltins(): Builtins {
     classes: registry.classes,
     objectClass,
     stringClass,
-    turtleClass,
     throwableClass,
-    runtimeExceptionClass,
-    errorClass,
     qualifiedNames: registry.qualifiedNames,
   };
 }
@@ -114,11 +103,7 @@ function defineObject(objectClass: ClassInfo, stringType: JavaType): void {
   addConstructor(objectClass, [], () => {});
 }
 
-function defineThrowables(
-  registry: Registry,
-  objectClass: ClassInfo,
-  stringType: JavaType
-): { throwableClass: ClassInfo; runtimeExceptionClass: ClassInfo; errorClass: ClassInfo } {
+function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType: JavaType): ClassInfo {
   const defineThrowable = (name: string, superclass: ClassInfo): ClassInfo => {
     const cls = registry.define(name, superclass);
     addMessageConstructors(cls, stringType);
@@ -153,7 +138,7 @@ function defineThrowables(
   defineThrowable('NumberFormatException', registry.classes.get('IllegalArgumentException') as ClassInfo);
   defineThrowable('StackOverflowError', errorClass);
   defineThrowable('OutOfMemoryError', errorClass);
-  return { throwableClass, runtimeExceptionClass, errorClass };
+  return throwableClass;
 }
 
 function addMessageConstructors(cls: ClassInfo, stringType: JavaType): void {

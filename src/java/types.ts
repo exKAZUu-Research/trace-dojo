@@ -82,8 +82,6 @@ export interface ClassInfo {
   staticFields: FieldInfo[];
   /** Runs the static initializers in textual order. */
   initializeStatics?: (frame: Frame) => void;
-  /** Runs the instance initializers in textual order for an object of exactly this class. */
-  initializeInstance?: (frame: Frame) => void;
   type: JavaType;
 }
 
