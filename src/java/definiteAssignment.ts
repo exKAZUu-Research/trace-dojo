@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 402 -- One checker implements the JLS 16 rules, which share its scopes and jump targets.
 import type {
   ArrayInitializer,
   Block,
@@ -405,6 +406,8 @@ class DefiniteAssignmentChecker {
     if (constant !== undefined) {
       return constant ? { whenTrue: state, whenFalse: UNREACHABLE } : { whenTrue: UNREACHABLE, whenFalse: state };
     }
+    // A boolean cast passes its operand's value through, so it decides like the operand.
+    if (expression.kind === 'cast') return this.condition(expression.value, state);
     if (expression.kind === 'unary' && expression.operator === '!') {
       const { whenTrue, whenFalse } = this.condition(expression.operand, state);
       return { whenTrue: whenFalse, whenFalse: whenTrue };
