@@ -256,7 +256,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       const fn = this.evaluateChain(callee);
       return fn === SHORT_CIRCUIT ? SHORT_CIRCUIT : { fn, thisValue: undefined };
     }
-    const reference = this.calleeReference(target, target === callee);
+    const reference = this.calleeReference(target);
     if (reference === SHORT_CIRCUIT) {
       return target === callee ? SHORT_CIRCUIT : { fn: undefined, thisValue: undefined };
     }
@@ -264,9 +264,10 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     return { fn: this.runtime.hold(thisValue, () => this.getReference(reference)), thisValue };
   }
 
-  private calleeReference(target: MemberExpression, continuesChain: boolean): Reference | typeof SHORT_CIRCUIT {
+  /** Resolves a member through its optional chain, which short-circuits as a whole when it meets null or undefined. */
+  private calleeReference(target: MemberExpression): Reference | typeof SHORT_CIRCUIT {
     if (target.object.kind === 'super') return this.memberReference(target);
-    const base = continuesChain ? this.evaluateChain(target.object) : this.evaluate(target.object);
+    const base = this.evaluateChain(target.object);
     if (base === SHORT_CIRCUIT || (target.optional && (base === undefined || base === null))) return SHORT_CIRCUIT;
     return this.runtime.hold(base, (): Reference =>
       target.property.kind === 'private'
@@ -333,7 +334,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       return true;
     }
     // An optional chain that meets null or undefined deletes nothing, which succeeds.
-    const reference = this.calleeReference(target, true);
+    const reference = this.calleeReference(target);
     if (reference === SHORT_CIRCUIT) return true;
     if (reference.kind === 'super') return runtime.throwError('ReferenceError', "Unsupported reference to 'super'");
     if (reference.kind !== 'property') return runtime.throwError('TypeError', 'Private fields can not be deleted');

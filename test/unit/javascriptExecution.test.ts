@@ -199,8 +199,8 @@ test.each([
   ['String(new Array(3).map((_, i) => i).length + Object.keys([1, , 3]).length)', '5'],
   ['String(new Array(5000).fill(7).join().length)', '9999'],
   [
-    'String((() => { const o = { v: 1, get() { return this?.v; } }; const x = null; let threw = false; try { (x?.get)(); } catch { threw = true; } return [((o.get))(), (o.get)(), threw]; })())',
-    '1,1,true',
+    'String((() => { const o = { v: 1, get() { return this?.v; } }; const x = null; let threw = false; try { (x?.get)(); } catch { threw = true; } return [((o.get))(), (o.get)(), threw, (x?.foo.bar)?.()]; })())',
+    '1,1,true,',
   ],
   [
     'String((() => { const item = null; const box = { cached: 1 }; return [delete item?.cached, delete (item?.nested.cached), delete box?.cached, "cached" in box]; })())',
