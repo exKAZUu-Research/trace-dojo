@@ -1,4 +1,4 @@
-import type { TurtleState } from '../interpreter/turtleWorld';
+import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
 import { type Frame, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
@@ -378,20 +378,18 @@ function defineTurtle(turtleClass: ClassInfo, stringType: JavaType): void {
     if (args[2] === undefined) throwBuiltin(frame, 'RuntimeException', 'Invalid color: null');
     return createTurtle(frame, receiver, args);
   });
-  for (const [names, impl] of [
-    [['前に進む', 'forward'], moveTurtle(1)],
-    [['後に戻る', 'backward'], moveTurtle(-1)],
-    [['右を向く', 'turnRight'], turnTurtle(1)],
-    [['左を向く', 'turnLeft'], turnTurtle(3)],
-  ] as const) {
-    for (const name of names) addMethod(turtleClass, name, [], VOID, false, impl);
-  }
-  addMethod(turtleClass, '前に進めるか', [], BOOLEAN, false, canMoveForward);
-  addMethod(turtleClass, 'canMoveForward', [], BOOLEAN, false, canMoveForward);
-  addMethod(turtleClass, '前のマスが塗られているか', [], BOOLEAN, false, (frame, receiver) =>
+  const define = (names: readonly string[], returnType: JavaType, impl: NativeMethod): void => {
+    for (const name of names) addMethod(turtleClass, name, [], returnType, false, impl);
+  };
+  define(TURTLE_METHOD_NAMES.forward, VOID, moveTurtle(1));
+  define(TURTLE_METHOD_NAMES.backward, VOID, moveTurtle(-1));
+  define(TURTLE_METHOD_NAMES.turnRight, VOID, turnTurtle(1));
+  define(TURTLE_METHOD_NAMES.turnLeft, VOID, turnTurtle(3));
+  define(TURTLE_METHOD_NAMES.canMoveForward, BOOLEAN, canMoveForward);
+  define(TURTLE_METHOD_NAMES.isFrontPainted, BOOLEAN, (frame, receiver) =>
     frame.runtime.world.isFrontPainted(stateOf(receiver))
   );
-  addMethod(turtleClass, 'remove', [], VOID, false, (frame, receiver) => {
+  define(TURTLE_METHOD_NAMES.remove, VOID, (frame, receiver) => {
     const { turtle } = receiver as JavaObject;
     if (turtle) frame.runtime.world.remove(turtle);
   });

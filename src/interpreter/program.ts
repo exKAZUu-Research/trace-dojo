@@ -1,5 +1,8 @@
 import { executeJavaProgram } from '../java/execute';
 import { traceJavaProgram } from '../java/trace';
+import { findJavaScriptTraceAnnotations } from '../javascript/parse';
+import { executeJavaScriptProgram } from '../javascript/run';
+import { traceJavaScriptProgram } from '../javascript/trace';
 import { findJavaTraceAnnotations } from '../problems/fillInBlank/javaSource';
 import type { TraceItem, TraceItemVariable, TurtleTrace } from '../problems/trace';
 import type { SourceDiagnostic } from './diagnostics';
@@ -46,6 +49,11 @@ interface Interpreter {
 
 const interpreters = {
   java: { findTraceAnnotations: findJavaTraceAnnotations, record: traceJavaProgram, execute: executeJavaProgram },
+  javascript: {
+    findTraceAnnotations: findJavaScriptTraceAnnotations,
+    record: traceJavaScriptProgram,
+    execute: executeJavaScriptProgram,
+  },
 } satisfies Record<string, Interpreter>;
 
 /**

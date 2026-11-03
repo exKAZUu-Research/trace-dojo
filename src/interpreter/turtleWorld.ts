@@ -14,6 +14,17 @@ export interface TurtleState {
   isAlive: boolean;
 }
 
+/** The names of each Turtle method in learners' programs, which every language's Turtle defines alike. */
+export const TURTLE_METHOD_NAMES = {
+  forward: ['前に進む', 'forward'],
+  backward: ['後に戻る', 'backward'],
+  turnRight: ['右を向く', 'turnRight'],
+  turnLeft: ['左を向く', 'turnLeft'],
+  canMoveForward: ['前に進めるか', 'canMoveForward'],
+  isFrontPainted: ['前のマスが塗られているか'],
+  remove: ['remove'],
+} as const;
+
 const DIRECTIONS = ['N', 'E', 'S', 'W'];
 const DX = [0, 1, 0, -1];
 const DY = [1, 0, -1, 0];

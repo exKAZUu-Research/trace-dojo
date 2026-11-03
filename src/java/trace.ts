@@ -1,8 +1,8 @@
-import { ExecutionLimitError, MAX_TRACE_ITEMS } from '../interpreter/limits';
 import type { ProgramRecording } from '../interpreter/program';
 import type { Annotations } from '../interpreter/traceAnnotations';
+import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { TurtleState } from '../interpreter/turtleWorld';
-import type { DisplayNode, TraceItem, TraceItemVariable } from '../problems/trace';
+import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { type CompiledProgram, compileProgram } from './compiler';
 import { runProgram } from './execute';
 import { parseJava } from './parse';
@@ -10,59 +10,35 @@ import { type Frame, Runtime, UNASSIGNED } from './runtime';
 import type { JavaType } from './types';
 import { charToString, defaultValue, JavaArray, JavaObject, JavaString, type Value } from './values';
 
+// code-gauge-allow duplicateLines 21 -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceJavaProgram(program: string, annotations: Annotations): ProgramRecording {
   const compiled = compileProgram(parseJava(program), { stepIdByRow: annotations.stepIdByRow });
   const runtime = new Runtime(compiled.builtins);
-  const snapshotter = new Snapshotter(runtime, compiled, annotations.callerIdByRow);
-  const traceItems: TraceItem[] = [snapshotter.initialItem()];
+  const snapshotter = new Snapshotter(runtime, compiled);
+  const recorder = new TraceRecorder(runtime.world, annotations.callerIdByRow);
   runtime.onStep = (stepId) => {
-    if (traceItems.length >= MAX_TRACE_ITEMS) throw new ExecutionLimitError('trace');
-    traceItems.push(snapshotter.snapshot(stepId));
+    runtime.collectGarbage();
+    const { frames } = runtime;
+    const variables = snapshotter.variablesOf(frames.at(-1) as Frame, true);
+    recorder.record(
+      stepId,
+      frames.slice(1).map((frame) => frame.callRow),
+      variables
+    );
   };
   let finalVars: TraceItemVariable = {};
   // A model program may end with an uncaught exception to show how one stops the program.
   const run = runProgram(runtime, compiled, (frame) => {
     finalVars = snapshotter.variablesOf(frame, false).vars;
   });
-  return { traceItems, finalVars, ...run };
+  return { traceItems: recorder.traceItems, finalVars, ...run };
 }
 
 class Snapshotter {
   constructor(
     private readonly runtime: Runtime,
-    private readonly program: CompiledProgram,
-    private readonly callerIdByRow: Map<number, number>
+    private readonly program: CompiledProgram
   ) {}
-
-  initialItem(): TraceItem {
-    return {
-      depth: 0,
-      sid: 0,
-      callStack: [],
-      vars: {},
-      referenceVars: {},
-      turtles: [],
-      board: this.runtime.world.boardText(),
-    };
-  }
-
-  snapshot(stepId: number): TraceItem {
-    this.runtime.collectGarbage();
-    const { frames } = this.runtime;
-    const frame = frames.at(-1) as Frame;
-    const { vars, referenceVars } = this.variablesOf(frame, true);
-    // Frames without a call row (implicit super() calls and class initialization) are part of their caller's step.
-    const calls = frames.slice(1).filter((callee) => callee.callRow !== undefined);
-    return {
-      depth: calls.length,
-      sid: stepId,
-      callStack: calls.map((callee) => this.callerIdByRow.get(callee.callRow as number) ?? 0),
-      vars,
-      referenceVars,
-      turtles: this.runtime.world.turtleTraces(),
-      board: this.runtime.world.boardText(),
-    };
-  }
 
   /** The variables a frame shows: its locals, then static fields and the fields of `this` when `withContext`. */
   variablesOf(frame: Frame, withContext: boolean): Variables {
@@ -96,10 +72,7 @@ class Snapshotter {
   }
 }
 
-interface Variables {
-  vars: TraceItemVariable;
-  referenceVars: Record<string, DisplayNode>;
-}
+type Variables = TraceVariables;
 
 function addVariable(variables: Variables, name: string, value: Value, type: JavaType): void {
   const scalar = scalarOf(value, type);
