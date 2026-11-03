@@ -30,7 +30,6 @@ import {
 } from './types';
 import { defaultValue, JavaArray, JavaObject, JavaString, toInt32, type Value } from './values';
 
-/** Type-checks expressions and compiles them into closures. */
 /** The methods every Java class inherits from Object, of which this environment implements only some. */
 const objectMethodNames = new Set([
   'clone',
@@ -44,6 +43,7 @@ const objectMethodNames = new Set([
   'wait',
 ]);
 
+/** Type-checks expressions and compiles them into closures. */
 export abstract class ExpressionCompiler extends CompilerBase {
   protected compileCondition(context: MethodContext, expression: Expression): (frame: Frame) => boolean {
     const value = this.compileValue(context, expression);

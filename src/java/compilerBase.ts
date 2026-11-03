@@ -218,8 +218,9 @@ export abstract class CompilerBase {
   /**
    * Converts a value for assignment (which also narrows int constants to char) or for method invocation, failing
    * compilation when Java forbids the conversion.
+   *
+   * @param span The expression converted, where a failed conversion is reported.
    */
-  /** @param span The expression converted, where a failed conversion is reported. */
   protected convert(
     value: CompiledValue,
     to: JavaType,
