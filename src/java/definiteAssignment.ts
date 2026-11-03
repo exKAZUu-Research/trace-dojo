@@ -121,6 +121,8 @@ class DefiniteAssignmentChecker {
   readonly returns: State[] = [];
   private readonly targets: JumpTarget[] = [];
   private readonly loops: EnclosingLoop[] = [];
+  /** The sets collecting assignments for the statements being analyzed, innermost last. */
+  private readonly writeLogs: Set<number>[] = [];
   /** The labels written directly before loops and switch statements. */
   private readonly labelsByStatement = new Map<Span, string>();
   private nextId = 0;
@@ -349,25 +351,28 @@ class DefiniteAssignmentChecker {
     // Jumps out of the try statement also run its finally block on the way.
     const jumpCounts = this.targets.map((target) => [target.breaks.length, target.continues.length] as const);
     const returnCount = this.returns.length;
-    const afterBody = this.statement(statement.body, state);
+    const { result: afterBody, written: writtenInBody } = this.recordingWrites(() =>
+      this.statement(statement.body, state)
+    );
     // A catch block may start after any assignment in the try block.
-    const possiblyAssigned = new Set([...state.possiblyAssigned, ...this.assignedVariables(statement.body)]);
+    const possiblyAssigned = new Set([...state.possiblyAssigned, ...writtenInBody]);
     const catchEntry: State = { assigned: state.assigned, possiblyAssigned };
-    const afterCatches = statement.catches.map((clause) =>
-      this.scoped(() =>
-        this.statement(
-          clause.body,
-          this.declare(catchEntry, clause.name, clause.isFinal || clause.types.length > 1, true)
+    const { result: afterCatches, written: writtenInCatches } = this.recordingWrites(() =>
+      statement.catches.map((clause) =>
+        this.scoped(() =>
+          this.statement(
+            clause.body,
+            this.declare(catchEntry, clause.name, clause.isFinal || clause.types.length > 1, true)
+          )
         )
       )
     );
     const afterTryAndCatches = join(afterBody, ...afterCatches);
     if (!statement.finallyBlock) return afterTryAndCatches;
     // The finally block may start after any assignment in the try or catch blocks, including abrupt paths.
-    const assignedInCatches = statement.catches.flatMap((clause) => this.assignedVariables(clause.body));
     const finallyEntry: State = {
       assigned: state.assigned,
-      possiblyAssigned: new Set([...possiblyAssigned, ...assignedInCatches]),
+      possiblyAssigned: new Set([...possiblyAssigned, ...writtenInCatches]),
     };
     // Jumps taken inside the finally block itself leave from where they are, unchanged.
     const jumpsBeforeFinally = this.targets.map((target) => [target.breaks.length, target.continues.length] as const);
@@ -391,9 +396,9 @@ class DefiniteAssignmentChecker {
 
   private condition(expression: Expression, state: State): Conditional {
     const constant = booleanConstants.get(expression);
+    // A constant expression neither assigns nor reads a variable that may be unassigned.
     if (constant !== undefined) {
-      const after = this.expression(expression, state);
-      return constant ? { whenTrue: after, whenFalse: UNREACHABLE } : { whenTrue: UNREACHABLE, whenFalse: after };
+      return constant ? { whenTrue: state, whenFalse: UNREACHABLE } : { whenTrue: UNREACHABLE, whenFalse: state };
     }
     if (expression.kind === 'unary' && expression.operator === '!') {
       const { whenTrue, whenFalse } = this.condition(expression.operand, state);
@@ -513,6 +518,7 @@ class DefiniteAssignmentChecker {
     const variable = target.kind === 'name' ? this.lookup(target.name) : this.thisField(target);
     if (!variable) return target.kind === 'name' ? state : this.expression(target, state);
     if (reads) this.readVariable(target, variable, state);
+    for (const log of this.writeLogs) log.add(variable.id);
     if (variable.isFinal && state.assigned) {
       if (state.possiblyAssigned.has(variable.id)) this.finalAssignmentError(target, variable);
       for (const loop of this.loops) {
@@ -544,12 +550,15 @@ class DefiniteAssignmentChecker {
     return this.fields.get(expression.name);
   }
 
-  /** The variables in scope here that `node` assigns anywhere. */
-  private assignedVariables(node: Statement | Expression): number[] {
-    return assignedTargets(node).flatMap((target) => {
-      const variable = target.kind === 'name' ? this.lookup(target.name) : this.thisField(target);
-      return variable ? [variable.id] : [];
-    });
+  /** Runs `analyze`, collecting the variables it assigns on any path, resolved where each assignment is. */
+  private recordingWrites<T>(analyze: () => T): { result: T; written: Set<number> } {
+    const written = new Set<number>();
+    this.writeLogs.push(written);
+    try {
+      return { result: analyze(), written };
+    } finally {
+      this.writeLogs.pop();
+    }
   }
 
   private lookup(name: string): Variable | undefined {
@@ -587,12 +596,7 @@ function takesLabelItself(statement: Statement): boolean {
 
 /** The simple names that `node` assigns or increments anywhere. */
 export function assignedNames(node: Statement | Expression): string[] {
-  return assignedTargets(node).flatMap((target) => (target.kind === 'name' ? [target.name] : []));
-}
-
-/** The expressions that `node` assigns or increments anywhere. */
-function assignedTargets(node: Statement | Expression): Expression[] {
-  const targets: Expression[] = [];
+  const names: string[] = [];
   const visit = (value: unknown): void => {
     if (Array.isArray(value)) {
       for (const item of value) visit(item);
@@ -601,11 +605,11 @@ function assignedTargets(node: Statement | Expression): Expression[] {
     if (typeof value !== 'object' || !value) return;
     const record = value as Record<string, unknown>;
     const target = record.kind === 'assign' || record.kind === 'update' ? (record.target as Expression) : undefined;
-    if (target) targets.push(target);
+    if (target?.kind === 'name') names.push(target.name);
     for (const child of Object.values(record)) visit(child);
   };
   visit(node);
-  return targets;
+  return names;
 }
 
 function assign(state: State, id: number): State {

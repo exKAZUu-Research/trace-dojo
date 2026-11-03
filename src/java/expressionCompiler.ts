@@ -513,15 +513,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const right = this.compileValue(context, expression.right);
     const operation = this.binaryOperation(expression, expression.operator, left.type, right.type);
     if (expression.operator === '&&' || expression.operator === '||') {
-      const isAnd = expression.operator === '&&';
-      return {
-        kind: 'value',
-        type: BOOLEAN,
-        run: (frame) =>
-          isAnd
-            ? (left.run(frame) as boolean) && (right.run(frame) as boolean)
-            : (left.run(frame) as boolean) || (right.run(frame) as boolean),
-      };
+      return shortCircuit(expression.operator, left, right);
     }
     let constant: Value;
     if (left.constant !== undefined && right.constant !== undefined && isPrimitive(operation.type)) {
@@ -795,6 +787,21 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.error(expression, `抽象メソッド ${name} は super から呼び出せません。`);
     }
   }
+}
+
+/** `&&` or `||`, which evaluates its right operand only when the left one does not decide the result. */
+function shortCircuit(operator: '&&' | '||', left: CompiledValue, right: CompiledValue): CompiledValue {
+  const isAnd = operator === '&&';
+  const bothConstant = typeof left.constant === 'boolean' && typeof right.constant === 'boolean';
+  return {
+    kind: 'value',
+    type: BOOLEAN,
+    constant: bothConstant ? (isAnd ? left.constant && right.constant : left.constant || right.constant) : undefined,
+    run: (frame) =>
+      isAnd
+        ? (left.run(frame) as boolean) && (right.run(frame) as boolean)
+        : (left.run(frame) as boolean) || (right.run(frame) as boolean),
+  };
 }
 
 function notConstant(reference: Reference & { constant?: Value }): Reference & { constant?: Value } {

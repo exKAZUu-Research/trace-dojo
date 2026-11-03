@@ -918,6 +918,26 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'public class Main {\n  public static void main(String[] args) {\n    IllegalArgumentException e = new IllegalArgumentException("x", new RuntimeException());\n  }\n  \n}\n',
   ],
+  [
+    'andConstLoop',
+    true,
+    'public class Main { static int f() { while (true && true) {} } public static void main(String[] args) {} }',
+  ],
+  [
+    'orConstFinal',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    final boolean go = false || true; int n; if (go) n = 1; System.out.println(n);\n  }\n  \n}\n',
+  ],
+  [
+    'andNonConst',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    int n; if (args.length > 0 && true) n = 1; System.out.println(n);\n  }\n  \n}\n',
+  ],
+  [
+    'shadowLocalInTry',
+    true,
+    'public class Main { final int x; Main() { try { int x = 1; x = 2; } finally { this.x = 3; } } public static void main(String[] args) { new Main(); } }',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {
