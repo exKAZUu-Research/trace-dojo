@@ -59,6 +59,9 @@ export function parseJava(source: string): CompilationUnit {
   }
 }
 
+/** Names for learners of the grammar's named tokens that error recovery may insert; punctuation names itself. */
+const missingTokenNames: Record<string, string> = { identifier: '名前' };
+
 /** Converting, compiling, and running recurse into nested constructs, so deeper nesting would exhaust the stack. */
 const MAX_NESTING_DEPTH = 300;
 
@@ -82,7 +85,10 @@ function collectSyntaxErrors(root: Node): JavaSourceDiagnostic[] {
   const visit = (node: Node): void => {
     if (errors.length >= 5) return;
     if (node.isMissing) {
-      errors.push({ row: rowBeforeMissing(node), message: `「${node.type}」が足りません。` });
+      errors.push({
+        row: rowBeforeMissing(node),
+        message: `「${missingTokenNames[node.type] ?? node.type}」が足りません。`,
+      });
       return;
     }
     if (node.isError) {

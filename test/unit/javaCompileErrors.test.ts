@@ -760,3 +760,11 @@ test('a missing semicolon is reported on the line that lacks it', () => {
     diagnostics: [{ row: 3, message: '「;」が足りません。' }],
   });
 });
+
+test('a missing semicolon after a declaration is reported on its line', () => {
+  const source = 'class Main {\n  public static void main(String[] args) {\n    int count = 1\n  }\n}';
+  expect(executeJavaProgram(source)).toEqual({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: '「;」が足りません。' }],
+  });
+});
