@@ -873,6 +873,21 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'public class Main { final int f; Main() { try { throw new RuntimeException(); } catch (RuntimeException e) { return; } finally { f = 1; } } public static void main(String[] a) { } }',
   ],
+  [
+    'thisTryFinallyTwice',
+    false,
+    'public class Main { final int x; Main() { try { this.x = 1; } finally { this.x = 2; } } public static void main(String[] a) { new Main(); } }',
+  ],
+  [
+    'thisTryCatchTwice',
+    false,
+    'public class Main { final int n; Main(String s) { try { this.n = Integer.parseInt(s); } catch (NumberFormatException e) { this.n = 0; } } public static void main(String[] a) { System.out.println(new Main("x").n); } }',
+  ],
+  [
+    'shadowedThisTry',
+    true,
+    'public class Main { final int x; Main(int x) { try { this.x = x; } finally { } } public static void main(String[] a) { new Main(1); } }',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {
@@ -948,5 +963,14 @@ test('exceptions keep their causes and Math offers its constants', () => {
     kind: 'executed',
     finalTurtles: [{ x: 0, y: 2, color: '#', dir: 'N' }],
     uncaughtException: undefined,
+  });
+});
+
+test('a wrong call to a learner-defined exception class gets the plain message', () => {
+  const source =
+    'class Main { public static void main(String[] args) { MyEx e = new MyEx(); } }\nclass MyEx extends Exception { MyEx(int code) { super("x"); } }';
+  expect(executeJavaProgram(source)).toEqual({
+    kind: 'compileError',
+    diagnostics: [{ row: 0, message: 'コンストラクタ MyEx に () を渡して呼び出すことはできません。' }],
   });
 });

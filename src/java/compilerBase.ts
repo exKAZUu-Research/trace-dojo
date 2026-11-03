@@ -355,7 +355,7 @@ export abstract class CompilerBase {
     if (applicable.length === 0) {
       const given = argTypes.map((type) => typeName(type)).join(', ');
       const isMissingOverload =
-        candidates.some((method) => this.isPartialLibraryClass(method.owner)) &&
+        candidates.some((method) => method.owner.isBuiltin && this.isPartialLibraryClass(method.owner)) &&
         !candidates.some((method) => method.parameterTypes.length === argTypes.length);
       if (isMissingOverload) {
         return this.error(span, `${what} に (${given}) を渡す呼び出しは、Java にないか、この採点環境では使えません。`);

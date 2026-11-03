@@ -546,7 +546,10 @@ class DefiniteAssignmentChecker {
 
   /** The variables in scope here that `node` assigns anywhere. */
   private assignedVariables(node: Statement | Expression): number[] {
-    return assignedNames(node).flatMap((name) => this.lookup(name)?.id ?? []);
+    return assignedTargets(node).flatMap((target) => {
+      const variable = target.kind === 'name' ? this.lookup(target.name) : this.thisField(target);
+      return variable ? [variable.id] : [];
+    });
   }
 
   private lookup(name: string): Variable | undefined {
@@ -584,7 +587,12 @@ function takesLabelItself(statement: Statement): boolean {
 
 /** The simple names that `node` assigns or increments anywhere. */
 export function assignedNames(node: Statement | Expression): string[] {
-  const names: string[] = [];
+  return assignedTargets(node).flatMap((target) => (target.kind === 'name' ? [target.name] : []));
+}
+
+/** The expressions that `node` assigns or increments anywhere. */
+function assignedTargets(node: Statement | Expression): Expression[] {
+  const targets: Expression[] = [];
   const visit = (value: unknown): void => {
     if (Array.isArray(value)) {
       for (const item of value) visit(item);
@@ -593,11 +601,11 @@ export function assignedNames(node: Statement | Expression): string[] {
     if (typeof value !== 'object' || !value) return;
     const record = value as Record<string, unknown>;
     const target = record.kind === 'assign' || record.kind === 'update' ? (record.target as Expression) : undefined;
-    if (target?.kind === 'name') names.push(target.name);
+    if (target) targets.push(target);
     for (const child of Object.values(record)) visit(child);
   };
   visit(node);
-  return names;
+  return targets;
 }
 
 function assign(state: State, id: number): State {
