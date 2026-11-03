@@ -123,3 +123,16 @@ test.each([
   expect(executeJavaProgram(source)).toMatchObject(expected);
   expect(performance.now() - startedAt).toBeLessThan(5000);
 });
+
+test.each([
+  [
+    'class Main { final boolean go = true; Main() { throw new RuntimeException(); } public static void main(String[] a) { Turtle t = new Turtle(); try { while (new Main().go) {} } catch (RuntimeException e) { t.前に進む(); } } }',
+    { kind: 'executed', finalTurtles: [{ x: 0, y: 1, color: '#', dir: 'N' }], uncaughtException: undefined },
+  ],
+  [
+    'class Main { final int k = 3; public static void main(String[] a) { Main m = null; System.out.println(m.k); } }',
+    { kind: 'executed', uncaughtException: 'java.lang.NullPointerException' },
+  ],
+])('reading a constant field through an expression still evaluates it: %s', (source, expected) => {
+  expect(executeJavaProgram(source)).toMatchObject(expected);
+});

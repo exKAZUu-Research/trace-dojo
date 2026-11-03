@@ -303,12 +303,19 @@ export abstract class ExpressionCompiler extends CompilerBase {
         type: field.type,
         field,
         constant,
-        bind: () => ({
-          get: () => constant,
-          set: () => {
-            throw new Error('A constant variable was assigned');
-          },
-        }),
+        bind: (frame) => {
+          // A receiver written before the field still runs, and an instance field still needs an object.
+          ignoredReceiver?.run(frame);
+          if (!field.isStatic && !((receiver as CompiledValue).run(frame) instanceof JavaObject)) {
+            throwBuiltin(frame, 'NullPointerException');
+          }
+          return {
+            get: () => constant,
+            set: () => {
+              throw new Error('A constant variable was assigned');
+            },
+          };
+        },
       };
     }
     if (field.isStatic) {
