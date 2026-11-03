@@ -332,6 +332,7 @@ export class ProgramConverter extends ExpressionConverter {
       isArrow ? outer.canCallSuper : kind === 'classConstructor' && this.derivedConstructor,
       isArrow ? outer.canReferenceSuper : kind !== 'normal'
     );
+    if (isArrow) context.argumentsUse = outer.argumentsUse;
     return this.withContext(context, () => {
       const scope = this.pushScope(true);
       try {
@@ -339,7 +340,20 @@ export class ProgramConverter extends ExpressionConverter {
         const body =
           bodyNode.type === 'statement_block' ? this.statementList(namedChildren(bodyNode)) : this.expression(bodyNode);
         const bindsOwnName = node.type === 'function_expression' && node.childForFieldName('name') !== null;
-        return { name, kind, params, rest, bindsOwnName, body, scope, source: this.sourceOf(node), row: rowOf(node) };
+        // Only an arrow function's own uses are its enclosing function's; a function's own uses get its arguments.
+        const usesArguments = !isArrow && context.argumentsUse.isUsed;
+        return {
+          name,
+          kind,
+          params,
+          rest,
+          bindsOwnName,
+          usesArguments,
+          body,
+          scope,
+          source: this.sourceOf(node),
+          row: rowOf(node),
+        };
       } finally {
         this.popScope();
       }

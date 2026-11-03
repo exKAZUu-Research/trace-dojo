@@ -11,13 +11,12 @@ import { isCallable, JsArray, type NativeCall, type Value } from './values';
  */
 export function defineArrayBuiltins(builder: RealmBuilder): void {
   const { arrayPrototype } = builder.realm;
-  const arrayConstructor = builder.defineClass('Array', 1, arrayPrototype, ({ runtime, args }) => {
-    if (args.length === 1 && typeof args[0] === 'number') {
-      const array = runtime.newArray([]);
-      runtime.setLength(array, args[0]);
-      return array;
-    }
-    return runtime.newArray([...args]);
+  const arrayConstructor = builder.defineClass('Array', 1, arrayPrototype, ({ runtime, args, newTarget }) => {
+    const array = runtime.newArray(args.length === 1 && typeof args[0] === 'number' ? [] : [...args]);
+    if (args.length === 1 && typeof args[0] === 'number') runtime.setLength(array, args[0]);
+    // A subclass such as `class Path extends Array` gets its own prototype.
+    array.proto = runtime.prototypeFor(newTarget, arrayPrototype);
+    return array;
   });
   builder.method(arrayConstructor, 'isArray', 1, ({ args }) => args[0] instanceof JsArray);
   builder.method(arrayConstructor, 'of', 0, ({ runtime, args }) => runtime.newArray([...args]));

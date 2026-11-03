@@ -67,7 +67,8 @@ class Snapshotter {
     ) {
       const entries: [string, Value][] = [];
       for (const [name, binding] of current.bindings) {
-        if (!seen.has(name) && !name.startsWith('#') && isVariable(binding))
+        // `arguments` and private names are bindings the program never declared.
+        if (!seen.has(name) && !name.startsWith('#') && name !== 'arguments' && isVariable(binding))
           entries.push([name, binding.value as Value]);
         seen.add(name);
       }

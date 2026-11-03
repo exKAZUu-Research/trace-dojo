@@ -350,6 +350,9 @@ export class Evaluator extends ExpressionEvaluator {
   /** Binds parameters in order after creating them all, so a default reading a later parameter throws as in JavaScript. */
   private bindParameters(node: FunctionNode, args: Value[]): void {
     const { runtime } = this;
+    if (node.usesArguments) {
+      runtime.frame.scope.bindings.set('arguments', { value: runtime.newArray([...args]), isMutable: false });
+    }
     const params = node.rest ? [...node.params, node.rest] : node.params;
     const { bindings } = runtime.frame.scope;
     const names = params.flatMap((param) => patternNames(param));

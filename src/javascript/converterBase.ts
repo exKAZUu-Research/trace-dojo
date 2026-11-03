@@ -19,6 +19,8 @@ export interface FunctionContext {
   labels: Map<string, boolean>;
   breakableDepth: number;
   loopDepth: number;
+  /** Shared by a function and the arrow functions inside it, which read its `arguments`. */
+  argumentsUse: { isUsed: boolean };
 }
 
 /** Where a construct lies: its rows, and its offsets, which order constructs on one row. */
@@ -45,7 +47,15 @@ function encloses(outer: Extent, inner: Extent): boolean {
 }
 
 export function newContext(canReturn: boolean, canCallSuper: boolean, canReferenceSuper: boolean): FunctionContext {
-  return { canReturn, canCallSuper, canReferenceSuper, labels: new Map(), breakableDepth: 0, loopDepth: 0 };
+  return {
+    canReturn,
+    canCallSuper,
+    canReferenceSuper,
+    labels: new Map(),
+    breakableDepth: 0,
+    loopDepth: 0,
+    argumentsUse: { isUsed: false },
+  };
 }
 
 /** The scopes, steps, and contexts that converting a program tracks, which its early errors depend on. */

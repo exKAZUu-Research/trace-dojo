@@ -32,7 +32,10 @@ export abstract class ExpressionConverter extends ConverterBase {
     // oxlint-disable-next-line unicorn/no-null -- JavaScript null is a value of the interpreted language.
     null: (node) => ({ kind: 'literal', value: null, row: rowOf(node) }),
     undefined: (node) => ({ kind: 'identifier', name: node.text, row: rowOf(node) }),
-    identifier: (node) => ({ kind: 'identifier', name: node.text, row: rowOf(node) }),
+    identifier: (node) => {
+      if (node.text === 'arguments') this.context.argumentsUse.isUsed = true;
+      return { kind: 'identifier', name: node.text, row: rowOf(node) };
+    },
     this: (node) => ({ kind: 'this', row: rowOf(node) }),
     super: (node) => fail(node, 'super は super(...) か super.メソッド名 の形でしか書けません。'),
     array: (node) => ({ kind: 'array', elements: this.arrayElements(node), row: rowOf(node) }),

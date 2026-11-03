@@ -97,6 +97,8 @@ export interface FunctionNode extends Span {
   rest?: Pattern;
   /** Whether a named function expression sees its own name, which is then a binding of its own. */
   bindsOwnName: boolean;
+  /** Whether the body (or an arrow function in it) reads `arguments`, which the call then creates. */
+  usesArguments: boolean;
   body: Statement[] | Expression;
   scope: ScopeDeclarations;
   /** The text `toString()` returns. */

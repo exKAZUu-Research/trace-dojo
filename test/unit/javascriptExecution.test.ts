@@ -204,6 +204,14 @@ test.each([
   ],
   ['String(new Array(3).map((_, i) => i).length + Object.keys([1, , 3]).length)', '5'],
   ['String(new Array(5000).fill(7).join().length)', '9999'],
+  [
+    'String((() => { function sum() { const all = () => arguments.length; return [arguments[0] + arguments[1], all()]; } return sum(1, 2); })())',
+    '3,2',
+  ],
+  [
+    'String((() => { class Path extends Array { count() { return this.length; } } const a = new Path(2); return [a.count(), a instanceof Path, Array.isArray(a)]; })())',
+    '2,true,true',
+  ],
   ['String(Array.from([1, 2], function (v) { return v * this.step; }, { step: 2 }))', '2,4'],
   [
     'String((() => { class A { set x(v) { this.stored = v; } } class B extends A { set x(v) { super.x = v + 1; } } const b = new B(); b.x = 2; return b.stored; })())',
