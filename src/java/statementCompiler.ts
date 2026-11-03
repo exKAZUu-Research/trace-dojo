@@ -250,7 +250,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   protected compileLocal(context: MethodContext, statement: LocalVariableDeclaration): Exec {
-    const stepId = this.stepIdOf(statement);
+    // Only an initialized declarator records a step, so a declaration without one leaves its annotation unused.
+    const recordsStep = statement.declarators.some((declarator) => declarator.initializer);
+    const stepId = recordsStep ? this.stepIdOf(statement) : undefined;
     const parts = statement.declarators.map((declarator) => this.compileDeclarator(context, statement, declarator));
     return (frame) => {
       for (const { slot, value } of parts) {

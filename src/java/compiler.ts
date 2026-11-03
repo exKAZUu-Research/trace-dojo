@@ -59,7 +59,7 @@ class Compiler extends StatementCompiler {
       if (!this.usedStepRows.has(row)) {
         this.error(
           { row, endRow: row, start: 0, end: 0 },
-          '// step は、式文、変数宣言、return 文、フィールドの初期化、for 文の行に付けてください。'
+          '// step は、式文、初期値のある変数宣言やフィールド、return 文、for 文の行に付けてください。'
         );
       }
     }
@@ -325,7 +325,8 @@ class Compiler extends StatementCompiler {
     declarators: VariableDeclarator[],
     declaration: Span
   ): ((frame: Frame) => void)[] {
-    const stepId = this.stepIdOf(declaration);
+    const recordsStep = declarators.some((declarator) => declarator.initializer);
+    const stepId = recordsStep ? this.stepIdOf(declaration) : undefined;
     return declarators.flatMap((declarator) => {
       if (!declarator.initializer) return [];
       const field = cls.fields.get(declarator.name) as FieldInfo;

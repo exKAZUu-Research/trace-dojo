@@ -688,3 +688,19 @@ test('a step annotation on a statement that records no step is rejected', () => 
 }`;
   expect(() => traceJavaProgram(program, program)).toThrow('// step は');
 });
+
+test.each(['int i; // step\n    i = 3;', 'Counter counter = new Counter();'])(
+  'a step annotation on a declaration without an initializer is rejected: %s',
+  (body) => {
+    const program = `public class Main {
+  public static void main(String[] args) {
+    ${body}
+  }
+}
+class Counter {
+  int count; // step
+}`;
+    const annotated = body.includes('// step') ? program.replace('int count; // step', 'int count;') : program;
+    expect(() => traceJavaProgram(annotated, annotated)).toThrow('// step は');
+  }
+);
