@@ -4,7 +4,9 @@ import type { Expression, Statement } from './ast';
 export function canCompleteNormally(statement: Statement): boolean {
   switch (statement.kind) {
     case 'return':
-    case 'throw': {
+    case 'throw':
+    case 'break':
+    case 'continue': {
       return false;
     }
     case 'block': {

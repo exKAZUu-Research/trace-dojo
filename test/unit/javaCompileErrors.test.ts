@@ -958,6 +958,56 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'public class Main {\n  public static void main(String[] args) {\n    final int k = true ? 1 : 2; switch (args.length) { case k: break; default: break; }\n  }\n  \n}\n',
   ],
+  [
+    'doubleSemicolonReturn',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    return;;\n  }\n  \n}\n',
+  ],
+  [
+    'doubleSemicolonThrow',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    throw new RuntimeException();;\n  }\n  \n}\n',
+  ],
+  [
+    'emptyAfterLoop',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    while (true) {};\n  }\n  \n}\n',
+  ],
+  [
+    'doubleSemicolonOk',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    int x = 1;; System.out.println(x);\n  }\n  \n}\n',
+  ],
+  [
+    'ifDoubleSemicolon',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    if (args.length > 0) return;;\n  }\n  \n}\n',
+  ],
+  [
+    'switchEmpty',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    switch (args.length) { case 0: break;; default: }\n  }\n  \n}\n',
+  ],
+  [
+    'afterBreak',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    while (true) { break; System.out.println(1); }\n  }\n  \n}\n',
+  ],
+  [
+    'afterContinue',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    for (int i = 0; i < 2; i++) { continue; System.out.println(1); }\n  }\n  \n}\n',
+  ],
+  [
+    'ifBreakOk',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    while (true) { if (args.length == 0) break; System.out.println(1); }\n  }\n  \n}\n',
+  ],
+  [
+    'labeledBlockBreak',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    a: { break a; } System.out.println(1);\n  }\n  \n}\n',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

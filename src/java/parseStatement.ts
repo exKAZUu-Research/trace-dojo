@@ -18,6 +18,7 @@ import {
   countDimensions,
   field,
   identifierOf,
+  isComment,
   modifiersOf,
   namedChildren,
   span,
@@ -33,9 +34,16 @@ export function convertBlock(node: Node): Block {
   if (node.type !== 'block') return unsupported(node, '文');
   return {
     kind: 'block',
-    statements: namedChildren(node).map((child) => convertStatement(child)),
+    statements: statementNodes(node).map((child) => convertStatement(child)),
     ...span(node),
   };
+}
+
+/** The statements among `node`'s children, including empty statements, which the grammar leaves unnamed. */
+function statementNodes(node: Node): Node[] {
+  return node.children.filter(
+    (child): child is Node => !!child && ((child.isNamed && !isComment(child)) || child.type === ';')
+  );
 }
 
 export function convertDeclarator(node: Node): VariableDeclarator {
@@ -170,7 +178,7 @@ function convertSwitch(node: Node): Statement {
 function convertSwitchGroup(groupNode: Node): SwitchGroup {
   const labels: (Expression | undefined)[] = [];
   const statements: Statement[] = [];
-  for (const child of namedChildren(groupNode)) {
+  for (const child of statementNodes(groupNode)) {
     if (child.type === 'switch_label') labels.push(...convertSwitchLabel(child));
     else statements.push(convertStatement(child));
   }
