@@ -199,6 +199,13 @@ test.each([
   ['String(new Array(3).map((_, i) => i).length + Object.keys([1, , 3]).length)', '5'],
   ['String(new Array(5000).fill(7).join().length)', '9999'],
   [
+    'String((() => { const a = [1, 2, 3]; let calls = 0; a.some(() => { calls++; a.length = 0; return false; }); return calls; })())',
+    '1',
+  ],
+  ['String((() => { const a = [3, 1, 2]; a.sort((x, y) => { a.length = 0; return x - y; }); return a; })())', '1,2,3'],
+  ['String((() => { const a = [{ toString() { a.push(2); return "1"; } }]; return a.join(); })())', '1'],
+  ['String((() => { const { 1: skip, ...rest } = "abc"; return [rest[0], rest[2], rest[1]]; })())', 'a,c,'],
+  [
     'String((() => { const o = { v: 1, get() { return this?.v; } }; const x = null; let threw = false; try { (x?.get)(); } catch { threw = true; } return [((o.get))(), (o.get)(), threw, (x?.foo.bar)?.()]; })())',
     '1,1,true,',
   ],

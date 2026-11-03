@@ -174,11 +174,19 @@ function sortArray({ runtime, args, callRow }: NativeCall, array: JsArray): JsAr
         const rightText = runtime.toString(right);
         return leftText < rightText ? -1 : leftText > rightText ? 1 : 0;
       };
+  const length = elements.length;
+  // The collected values stay reachable while the comparator runs, even if it empties the array.
+  const collected = runtime.newArray(elements.filter((element) => element !== HOLE));
   // The host's sort also places undefined last without calling the comparison; holes go after it.
-  const sorted = (elements.filter((element) => element !== HOLE) as Value[]).toSorted(compare);
+  const sorted = runtime.hold(collected, () => (collected.elements as Value[]).toSorted(compare));
   if (sorted.length === 0) return array;
+  // Written back as the spec does, whatever the comparator did to the length: the sorted values from index 0, then
+  // holes up to the length the sort started with.
+  runtime.hold(collected, () => {
+    for (const [index, value] of sorted.entries()) runtime.setElement(array, index, value);
+  });
   const writable = runtime.mutableElements(array);
-  for (const index of writable.keys()) writable[index] = index < sorted.length ? sorted[index] : HOLE;
+  for (let index = sorted.length; index < Math.min(length, writable.length); index++) writable[index] = HOLE;
   return array;
 }
 
@@ -258,12 +266,15 @@ function concatArrays(runtime: Runtime, parts: Value[]): JsArray {
 
 function joinArray(runtime: Runtime, array: JsArray, separatorValue: Value, joining: Set<JsArray>): string {
   if (joining.has(array)) return '';
+  // The length is read before any conversion, which may run the program's code and change the array.
+  const length = array.elements.length;
   const separator = separatorValue === undefined ? ',' : runtime.toString(separatorValue);
   joining.add(array);
-  runtime.scan(array.elements.length);
+  runtime.scan(length);
   try {
     let text = '';
-    for (const [index, element] of array.elements.entries()) {
+    for (let index = 0; index < length; index++) {
+      const element = index < array.elements.length ? array.elements[index] : HOLE;
       let part = index > 0 ? separator : '';
       if (element instanceof JsArray) part += joinArray(runtime, element, undefined, joining);
       else if (element !== undefined && element !== null && element !== HOLE) part += runtime.toString(element);
@@ -378,7 +389,8 @@ function findElement(
   const length = array.elements.length;
   for (let step = 0; step < length; step++) {
     const index = fromEnd ? length - 1 - step : step;
-    const element = array.elements[index];
+    // An index the callback removed is absent, like a hole.
+    const element = index < array.elements.length ? array.elements[index] : HOLE;
     if (element === HOLE && skipsHoles) continue;
     const value = valueOfElement(element);
     if (toBoolean(callback(value, index))) return { index, value };

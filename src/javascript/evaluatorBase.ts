@@ -278,11 +278,13 @@ export abstract class EvaluatorBase {
   private restObject(value: Value, used: Set<string>): JsObject {
     const { runtime } = this;
     const rest = runtime.newObject();
-    if (!isObject(value)) return rest;
+    // A string's characters are its own properties.
+    const source = typeof value === 'string' ? runtime.toObject(value) : value;
+    if (!isObject(source)) return rest;
     // Held while getters run, so the turtles copied so far stay reachable.
     return runtime.hold(rest, () => {
-      for (const key of runtime.ownEnumerableKeys(value)) {
-        if (!used.has(key)) runtime.createDataProperty(rest, key, runtime.get(value, key));
+      for (const key of runtime.ownEnumerableKeys(source)) {
+        if (!used.has(key)) runtime.createDataProperty(rest, key, runtime.get(source, key));
       }
       return rest;
     });

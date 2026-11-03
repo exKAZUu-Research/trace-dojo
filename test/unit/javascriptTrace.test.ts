@@ -460,6 +460,11 @@ test.each([
     1,
   ],
   [
+    'the values sort is comparing',
+    'const observer = new Turtle(6, 6);\nconst a = [new Turtle(0, 0), new Turtle(1, 0), new Turtle(2, 0)];\na.sort((x, y) => {\n  a.length = 0;\n  const ready = true; // step\n  return x.x - y.x;\n});',
+    4,
+  ],
+  [
     'the results of map so far',
     'const turtles = [1, 2].map((n) => {\n  const t = new Turtle(n, 0);\n  const ready = true; // step\n  return t;\n});\nturtles[0].forward();',
     2,
