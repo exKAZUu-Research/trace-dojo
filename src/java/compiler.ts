@@ -54,6 +54,15 @@ class Compiler extends StatementCompiler {
     for (const cls of ordered) this.declareMembers(cls);
     for (const cls of ordered) this.checkAbstractMethods(cls);
     for (const cls of ordered) this.compileBodies(cls);
+    // An annotation no statement records a step for would silently drop the step authors meant to show.
+    for (const row of this.stepIdByRow.keys()) {
+      if (!this.usedStepRows.has(row)) {
+        this.error(
+          { row, endRow: row, start: 0, end: 0 },
+          '// step は、式文、変数宣言、return 文、フィールドの初期化、for 文の行に付けてください。'
+        );
+      }
+    }
     const { entryClass, mainMethod } = this.findEntry(ordered, unit.classes);
     return {
       builtins: this.builtins,

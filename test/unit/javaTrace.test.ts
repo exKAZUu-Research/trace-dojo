@@ -676,3 +676,15 @@ test('earlier array traces preserve values through alias mutation and nested row
     },
   ]);
 });
+
+test('a step annotation on a statement that records no step is rejected', () => {
+  const program = `public class Main {
+  public static void main(String[] args) {
+    int i = 0;
+    while (i < 3) { // step
+      i++;
+    }
+  }
+}`;
+  expect(() => traceJavaProgram(program, program)).toThrow('// step は');
+});

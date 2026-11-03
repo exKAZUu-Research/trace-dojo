@@ -53,7 +53,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   protected stepIdOf(span: Span): number | undefined {
     for (let row = span.row; row <= span.endRow; row++) {
       const stepId = this.stepIdByRow.get(row);
-      if (stepId !== undefined) return stepId;
+      if (stepId === undefined) continue;
+      this.usedStepRows.add(row);
+      return stepId;
     }
     return;
   }

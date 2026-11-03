@@ -86,6 +86,8 @@ export abstract class CompilerBase {
   protected readonly classes = new Map<string, ClassInfo>();
   protected readonly internedStrings = new Map<string, JavaString>();
   protected readonly stepIdByRow: ReadonlyMap<number, number>;
+  /** Rows of `// step` annotations that a statement records a step for. */
+  protected readonly usedStepRows = new Set<number>();
   private readonly fieldConstants = new Map<FieldInfo, Value>();
   private readonly computingConstants = new Set<FieldInfo>();
 
