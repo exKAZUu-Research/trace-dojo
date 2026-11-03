@@ -41,6 +41,11 @@ export interface InstantiatedProblem {
   finalTurtles: TurtleTrace[];
 
   /**
+   * The `toString()` of the exception that ended the program, if one escaped `main`.
+   */
+  uncaughtException: string | undefined;
+
+  /**
    * The model answers of blanks. Empty for problems without blanks.
    */
   blankAnswers: string[];

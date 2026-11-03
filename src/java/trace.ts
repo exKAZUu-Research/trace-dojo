@@ -15,6 +15,8 @@ export interface JavaTrace {
   finalVars: TraceItemVariable;
   finalBoard: string;
   finalTurtles: TurtleTrace[];
+  /** The `toString()` of the exception that ended the program, if one escaped `main`. */
+  uncaughtException: string | undefined;
 }
 
 /** Model programs are trusted but must not hang the server through an accidental unbounded loop. */
@@ -27,8 +29,6 @@ const TRACE_LIMITS: RuntimeLimits = {
 const MAX_TRACE_ITEMS = 10_000;
 
 interface Annotations {
-  /** The program without its annotations and the blanks before them. */
-  program: string;
   stepIdByRow: Map<number, number>;
   callerIdByRow: Map<number, number>;
 }
@@ -42,8 +42,6 @@ function readAnnotations(source: string): Annotations {
   const callerIdByRow = new Map<number, number>();
   let lastStepId = 0;
   let lastCallerId = 0;
-  let program = '';
-  let copied = 0;
   for (const { index, text } of findJavaTraceAnnotations(source)) {
     const row = source.slice(0, index).split('\n').length - 1;
     for (const [, kind, id] of text.matchAll(/(step|caller)(?:[ \t]*:[ \t]*(\d+))?/g)) {
@@ -55,11 +53,19 @@ function readAnnotations(source: string): Annotations {
         callerIdByRow.set(row, lastCallerId);
       }
     }
+  }
+  return { stepIdByRow, callerIdByRow };
+}
+
+/** Removes the annotations and the blanks before them, keeping every row in place. */
+function removeAnnotations(source: string): string {
+  let program = '';
+  let copied = 0;
+  for (const { index, text } of findJavaTraceAnnotations(source)) {
     program += source.slice(copied, index).replace(/[ \t]+$/, '');
     copied = index + text.length;
   }
-  program += source.slice(copied);
-  return { program, stepIdByRow, callerIdByRow };
+  return program + source.slice(copied);
 }
 
 /**
@@ -89,15 +95,16 @@ export function traceJavaProgram(program: string, displayProgram: string): JavaT
     finalTurtles = turtlesOf(runtime);
   };
   // A model program may end with an uncaught exception to show how one stops the program.
-  runMain(runtime, compiled);
+  const uncaughtException = runMain(runtime, compiled);
   return {
-    displayProgram: displayed.program,
+    displayProgram: removeAnnotations(displayProgram),
     traceItems,
     sidToLineIndex: new Map([...displayed.stepIdByRow].map(([row, id]) => [id, row + 1])),
     callerIdToLineIndex: new Map([...displayed.callerIdByRow].map(([row, id]) => [id, row + 1])),
     finalVars,
     finalBoard: boardText(runtime),
     finalTurtles,
+    uncaughtException,
   };
 }
 

@@ -22,6 +22,7 @@ test('all independent regular challenges render bounded traces with mapped displ
     seen.add(base.id);
     const problem = instantiateRegularChallenge(base.id);
     if (!problem) throw new Error(`Missing regular projection: ${base.id}`);
+    expect(problem.uncaughtException, base.id).toBeUndefined();
     expect(problem.traceItems.length - 1, base.id).toBeGreaterThan(0);
     expect(problem.traceItems.length - 1, base.id).toBeLessThanOrEqual(30);
     const lineCount = problem.displayProgram.split('\n').length;
