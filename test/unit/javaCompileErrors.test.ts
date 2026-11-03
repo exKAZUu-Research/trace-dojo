@@ -1038,6 +1038,21 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'public class Main {\n  public static void main(String[] args) {\n    int i = 0; do { switch (i) { default: i++; continue; } } while (i < 3); System.out.println(i);\n  }\n  \n}\n',
   ],
+  [
+    'continueAbruptFinally',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    do { try { continue; } finally { throw new RuntimeException(); } } while (false); System.out.println(1);\n  }\n  \n}\n',
+  ],
+  [
+    'breakAbruptFinally',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    while (true) { try { break; } finally { throw new RuntimeException(); } } System.out.println(1);\n  }\n  \n}\n',
+  ],
+  [
+    'breakNormalFinally',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    while (true) { try { break; } finally { System.out.println(0); } } System.out.println(1);\n  }\n  \n}\n',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

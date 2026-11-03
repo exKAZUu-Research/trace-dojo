@@ -112,10 +112,12 @@ function containsJump(statement: Statement, kind: 'break' | 'continue', label?: 
       return inside(statement.body);
     }
     case 'try': {
+      const { finallyBlock } = statement;
+      // A finally block that cannot complete normally stops the jumps of the try and catch blocks.
+      const jumpsLeave = !finallyBlock || canCompleteNormally(finallyBlock);
       return (
-        inside(statement.body) ||
-        statement.catches.some((clause) => inside(clause.body)) ||
-        (!!statement.finallyBlock && inside(statement.finallyBlock))
+        (jumpsLeave && (inside(statement.body) || statement.catches.some((clause) => inside(clause.body)))) ||
+        (!!finallyBlock && inside(finallyBlock))
       );
     }
     default: {
