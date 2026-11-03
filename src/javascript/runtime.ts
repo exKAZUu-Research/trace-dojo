@@ -2,6 +2,7 @@ import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import { Evaluator } from './evaluator';
 import { findReachableTurtles } from './garbageCollection';
+import { ValueIterator } from './iteration';
 import { createRealm, type ErrorName, type Realm } from './realm';
 import {
   type AccessorProperty,
@@ -22,7 +23,6 @@ import {
   type Property,
   type Scope,
   type Value,
-  valueOfElement,
 } from './values';
 
 export class Frame {
@@ -254,7 +254,10 @@ export class Runtime {
     if (!(target instanceof JsObject)) return true;
     if (target instanceof JsArray) {
       const index = arrayIndexOf(key);
-      if (index !== undefined && index < target.elements.length) this.mutableElements(target)[index] = HOLE;
+      // Deleting a hole changes nothing, which a frozen array allows.
+      if (index !== undefined && index < target.elements.length && target.elements[index] !== HOLE) {
+        this.mutableElements(target)[index] = HOLE;
+      }
       if (index !== undefined) return true;
     }
     const property = this.getOwnProperty(target, key);
@@ -460,18 +463,21 @@ export class Runtime {
     return false;
   }
 
-  /** The values `for...of`, spread, and array destructuring read: those of arrays and the characters of strings. */
-  iterate(value: Value): Value[] {
-    if (value instanceof JsArray) {
-      this.scan(value.elements.length);
-      return value.elements.map(valueOfElement);
-    }
+  /** The iterator that `for...of`, spread, and array destructuring use: over an array, or a string's code points. */
+  iterator(value: Value): ValueIterator {
+    if (value instanceof JsArray) return new ValueIterator(value);
     if (typeof value === 'string') {
       this.scan(value.length);
       // oxlint-disable-next-line typescript/no-misused-spread -- JavaScript iterates strings by code point.
-      return [...value];
+      return new ValueIterator([...value]);
     }
     return this.throwError('TypeError', `${this.describe(value)} is not iterable`);
+  }
+
+  /** All the values an iterable yields, as spread reads them. */
+  iterate(value: Value): Value[] {
+    if (value instanceof JsArray) this.scan(value.elements.length);
+    return this.iterator(value).rest();
   }
 
   /** A short description of a value for error messages. */

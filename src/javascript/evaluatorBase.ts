@@ -1,16 +1,7 @@
 import type { Expression, FunctionNode, MemberExpression, Pattern, PropertyName, ScopeDeclarations } from './ast';
+import { DONE } from './iteration';
 import type { Runtime } from './runtime';
-import {
-  type FunctionFrame,
-  isObject,
-  JsArray,
-  JsFunction,
-  type JsObject,
-  Scope,
-  UNINITIALIZED,
-  type Value,
-  valueOfElement,
-} from './values';
+import { type FunctionFrame, isObject, JsFunction, type JsObject, Scope, UNINITIALIZED, type Value } from './values';
 
 /** How a pattern stores the values it destructures. */
 export type BindingMode =
@@ -261,14 +252,13 @@ export abstract class EvaluatorBase {
 
   private bindArrayPattern(pattern: Extract<Pattern, { kind: 'arrayPattern' }>, value: Value, mode: BindingMode): void {
     const { runtime } = this;
-    // An array is read as each binding runs, since a default or a target evaluated earlier may change it.
-    const items = value instanceof JsArray ? undefined : runtime.iterate(value);
-    const read = (start: number, end?: number): Value[] =>
-      items ? items.slice(start, end) : (value as JsArray).elements.slice(start, end).map(valueOfElement);
-    for (const [index, element] of pattern.elements.entries()) {
-      if (element) this.bindPattern(element, read(index, index + 1)[0], mode);
+    // Each binding reads the next value just before it runs, since an earlier default or target may change the array.
+    const iterator = runtime.iterator(value);
+    for (const element of pattern.elements) {
+      const next = iterator.next();
+      if (element) this.bindPattern(element, next === DONE ? undefined : next, mode);
     }
-    if (pattern.rest) this.bindPattern(pattern.rest, runtime.newArray(read(pattern.elements.length)), mode);
+    if (pattern.rest) this.bindPattern(pattern.rest, runtime.newArray(iterator.rest()), mode);
   }
 
   private bindObjectPattern(

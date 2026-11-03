@@ -2,6 +2,9 @@ import type { RealmBuilder } from './realm';
 import type { Runtime } from './runtime';
 import { isCallable, type NativeCall, type Value } from './values';
 
+/** One fixed locale, so that sorting with localeCompare gives the same order on every server. */
+const collator = new Intl.Collator('en');
+
 export function defineStringBuiltins(builder: RealmBuilder): void {
   const { stringPrototype } = builder.realm;
   const stringConstructor = builder.defineClass(
@@ -68,10 +71,7 @@ function defineSearches(method: StringMethod): void {
   method('endsWith', 1, ({ runtime, args }, text) =>
     text.endsWith(runtime.toString(args[0]), integerArgument(runtime, args[1], text.length))
   );
-  method('localeCompare', 1, ({ runtime, args }, text) => {
-    const other = runtime.toString(args[0]);
-    return text < other ? -1 : text > other ? 1 : 0;
-  });
+  method('localeCompare', 1, ({ runtime, args }, text) => collator.compare(text, runtime.toString(args[0])));
 }
 
 function defineExtractions(method: StringMethod): void {

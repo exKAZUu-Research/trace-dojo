@@ -1,6 +1,7 @@
 import type { Block, ClassMember, ClassNode, FunctionNode, Program, Statement, VariableDeclaration } from './ast';
 import { nameFunction, patternNames } from './evaluatorBase';
 import { defineAccessor, ExpressionEvaluator } from './expressionEvaluator';
+import { DONE, ValueIterator } from './iteration';
 import {
   defineFunctionProperties,
   expectedArgumentCount,
@@ -13,7 +14,6 @@ import {
   type FunctionBehavior,
   type FunctionFrame,
   isObject,
-  JsArray,
   JsFunction,
   type JsObject,
   JsThrow,
@@ -21,7 +21,6 @@ import {
   toBoolean,
   UNINITIALIZED,
   type Value,
-  valueOfElement,
 } from './values';
 
 let nextPrivateId = 0;
@@ -199,16 +198,11 @@ export class Evaluator extends ExpressionEvaluator {
   private forEachStatement(statement: Extract<Statement, { kind: 'forOf' | 'forIn' }>, labels: string[]): Completion {
     const { runtime } = this;
     const iterable = this.evaluate(statement.iterable);
-    // An array is read live, so elements changed or added while looping are visited as JavaScript does.
-    const values =
-      statement.kind === 'forIn'
-        ? this.enumerableKeys(iterable)
-        : iterable instanceof JsArray
-          ? iterable.elements
-          : runtime.iterate(iterable);
+    const iterator =
+      statement.kind === 'forIn' ? new ValueIterator(this.enumerableKeys(iterable)) : runtime.iterator(iterable);
     const frame = runtime.frame;
     return runtime.hold(iterable, () => {
-      for (let index = 0; index < values.length; index++) {
+      for (let value = iterator.next(); value !== DONE; value = iterator.next()) {
         runtime.spend();
         const outer = frame.scope;
         try {
@@ -216,7 +210,6 @@ export class Evaluator extends ExpressionEvaluator {
             frame.scope = new Scope(outer);
             this.instantiate(frame.scope, statement.scope);
           }
-          const value = valueOfElement(values[index]);
           this.bindPattern(statement.target, value, statement.declarationKind ? 'initialize' : 'assign');
           this.step(statement.stepId);
           const result = this.loopBody(statement.body, labels);

@@ -1,3 +1,4 @@
+import { DONE } from './iteration';
 import type { RealmBuilder } from './realm';
 import type { Runtime } from './runtime';
 import {
@@ -49,12 +50,11 @@ function arrayFrom({ runtime, args, callRow }: NativeCall): JsArray {
   });
 }
 
-/** Visits the values of an array (live), a string, or an object with a `length`, each just before it is used. */
+/** Visits the values of an iterable or of an object with a `length`, each just before it is used. */
 function forEachSourceValue(runtime: Runtime, source: Value, visit: (value: Value, index: number) => void): void {
-  if (source instanceof JsArray) {
-    for (let index = 0; index < source.elements.length; index++) visit(valueOfElement(source.elements[index]), index);
-  } else if (typeof source === 'string') {
-    for (const [index, character] of runtime.iterate(source).entries()) visit(character, index);
+  if (source instanceof JsArray || typeof source === 'string') {
+    const iterator = runtime.iterator(source);
+    for (let index = 0, value = iterator.next(); value !== DONE; index++, value = iterator.next()) visit(value, index);
   } else {
     const length = toLength(
       runtime,
@@ -84,7 +84,7 @@ function relativeIndex(runtime: Runtime, value: Value, length: number, fallback:
 
 type ArrayMethod = (call: NativeCall, array: JsArray) => Value;
 
-/** Defines a method that changes the array, which a frozen array refuses. */
+/** Defines a method that always sets the array's length, which a frozen array refuses even when nothing changes. */
 function mutatorMethod(builder: RealmBuilder, name: string, length: number, run: ArrayMethod): void {
   arrayMethod(builder, name, length, (call, array) => {
     call.runtime.mutableElements(array);
@@ -98,7 +98,7 @@ function arrayMethod(builder: RealmBuilder, name: string, length: number, run: A
   );
 }
 
-// code-gauge-allow functionNcss 40 -- Lists the builtin methods, each a small closure of its own.
+// code-gauge-allow functionNcss 42 -- Lists the builtin methods, each a small closure of its own.
 function defineMutators(builder: RealmBuilder): void {
   mutatorMethod(builder, 'push', 1, ({ runtime, args }, array) => {
     runtime.allocate(args.length);
@@ -136,20 +136,21 @@ function defineMutators(builder: RealmBuilder): void {
     appendAll(elements, rest);
     return runtime.newArray(removed);
   });
-  mutatorMethod(builder, 'reverse', 0, ({ runtime }, array) => {
+  // reverse, fill, and sort write only some elements, so a frozen array refuses them only when they write any.
+  arrayMethod(builder, 'reverse', 0, ({ runtime }, array) => {
     runtime.scan(array.elements.length);
-    array.elements.reverse();
+    if (array.elements.length >= 2) runtime.mutableElements(array).reverse();
     return array;
   });
-  mutatorMethod(builder, 'fill', 1, ({ runtime, args }, array) => {
+  arrayMethod(builder, 'fill', 1, ({ runtime, args }, array) => {
     const { elements } = array;
     const start = relativeIndex(runtime, args[1], elements.length, 0);
     const end = relativeIndex(runtime, args[2], elements.length, elements.length);
     runtime.scan(end - start);
-    elements.fill(args[0], start, end);
+    if (start < end) runtime.mutableElements(array).fill(args[0], start, end);
     return array;
   });
-  mutatorMethod(builder, 'sort', 1, sortArray);
+  arrayMethod(builder, 'sort', 1, sortArray);
 }
 
 function sortArray({ runtime, args, callRow }: NativeCall, array: JsArray): JsArray {
@@ -169,7 +170,9 @@ function sortArray({ runtime, args, callRow }: NativeCall, array: JsArray): JsAr
       };
   // The host's sort also places undefined last without calling the comparison; holes go after it.
   const sorted = (elements.filter((element) => element !== HOLE) as Value[]).toSorted(compare);
-  for (const index of elements.keys()) elements[index] = index < sorted.length ? sorted[index] : HOLE;
+  if (sorted.length === 0) return array;
+  const writable = runtime.mutableElements(array);
+  for (const index of writable.keys()) writable[index] = index < sorted.length ? sorted[index] : HOLE;
   return array;
 }
 
