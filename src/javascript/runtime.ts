@@ -4,6 +4,7 @@ import { ArrayOps } from './arrayOps';
 import { Evaluator } from './evaluator';
 import { findReachableTurtles } from './garbageCollection';
 import { ValueIterator } from './iteration';
+import { defineFunctionProperties } from './memberProperties';
 import { createRealm, type ErrorName, type Realm } from './realm';
 import {
   type AccessorProperty,
@@ -108,8 +109,7 @@ export class Runtime {
 
   newNativeFunction(name: string, length: number, run: NativeFunction, isConstructor = false): JsFunction {
     const fn = new JsFunction(this.realm.functionPrototype, { kind: 'native', run, isConstructor });
-    defineHidden(fn, 'length', length, false);
-    defineHidden(fn, 'name', name, false);
+    defineFunctionProperties(fn, name, length);
     return fn;
   }
 

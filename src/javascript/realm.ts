@@ -1,3 +1,4 @@
+import { defineFunctionProperties } from './memberProperties';
 import { defineArrayBuiltins } from './realmArrays';
 import { defineGlobalBuiltins } from './realmGlobals';
 import { defineStringBuiltins } from './realmStrings';
@@ -47,8 +48,7 @@ export class RealmBuilder {
 
   function(name: string, length: number, run: NativeFunction, isConstructor = false): JsFunction {
     const fn = new JsFunction(this.realm.functionPrototype, { kind: 'native', run, isConstructor });
-    fn.properties.set('length', { value: length, writable: false, enumerable: false, configurable: true });
-    fn.properties.set('name', { value: name, writable: false, enumerable: false, configurable: true });
+    defineFunctionProperties(fn, name, length);
     return fn;
   }
 
