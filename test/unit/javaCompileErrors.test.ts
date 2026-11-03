@@ -1008,6 +1008,36 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'public class Main {\n  public static void main(String[] args) {\n    a: { break a; } System.out.println(1);\n  }\n  \n}\n',
   ],
+  [
+    'doContinue',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    int i = 0; do { i++; continue; } while (i < 3); System.out.println(i);\n  }\n  \n}\n',
+  ],
+  [
+    'doContinueMissingReturn',
+    false,
+    'public class Main { static int f() { int i = 0; do { i++; continue; } while (i < 3); } public static void main(String[] a) { } }',
+  ],
+  [
+    'doContinueTry',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    int i = 0; do { try { i++; continue; } finally { } } while (i < 3); System.out.println(i);\n  }\n  \n}\n',
+  ],
+  [
+    'doContinueTrue',
+    false,
+    'public class Main {\n  public static void main(String[] args) {\n    int i = 0; do { i++; continue; } while (true); System.out.println(i);\n  }\n  \n}\n',
+  ],
+  [
+    'doLabeledContinue',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    int i = 0; outer: do { for (;;) { i++; continue outer; } } while (i < 3); System.out.println(i);\n  }\n  \n}\n',
+  ],
+  [
+    'doSwitchContinue',
+    true,
+    'public class Main {\n  public static void main(String[] args) {\n    int i = 0; do { switch (i) { default: i++; continue; } } while (i < 3); System.out.println(i);\n  }\n  \n}\n',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 445 -- The expression compiler keeps one method per expression kind together.
+// code-gauge-allow-file fileNcss 446 -- The expression compiler keeps one method per expression kind together.
 import type { ArrayInitializer, BinaryOperator, Expression, Span } from './ast';
 import {
   type Compiled,
