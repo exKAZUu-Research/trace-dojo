@@ -13,7 +13,7 @@ export interface TraceOptions {
 }
 
 export const misplacedAtomicMessage =
-  '// atomic は、メソッドや関数を宣言する行（本体の { がある行まで）に付けてください。';
+  '// atomic は、メソッド・コンストラクタ・関数を宣言する行（本体の { がある行まで）に付けてください。';
 
 /** The annotations that the given line comments end with. */
 export function traceAnnotationsIn(lineComments: Iterable<TraceAnnotation>): TraceAnnotation[] {
