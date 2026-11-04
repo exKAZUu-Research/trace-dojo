@@ -422,13 +422,11 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return (frame) => {
       const array = iterable.run(frame);
       if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
-      for (const value of array.values) {
+      return iterate(frame, array, (value) => {
         bind(frame, value);
         const completion = body(frame);
-        const result = completion && loopCompletion(completion, labels);
-        if (result && result !== 'continue') return result;
-      }
-      return;
+        return completion && loopCompletion(completion, labels);
+      });
     };
   }
 
@@ -671,6 +669,24 @@ function attemptTry(frame: Frame, body: Exec, handle: CatchHandler): { completio
 }
 
 /** Decides what a loop does with its body's abrupt completion. */
+/** Runs a for-each loop over `array`, which keeps its turtles alive while the loop runs, even when no variable holds it. */
+function iterate(
+  frame: Frame,
+  array: JavaArray,
+  runIteration: (value: Value) => Completion | undefined | 'continue'
+): Completion | undefined {
+  frame.temporaries.push(array);
+  try {
+    for (const value of array.values) {
+      const result = runIteration(value);
+      if (result && result !== 'continue') return result;
+    }
+    return;
+  } finally {
+    frame.temporaries.pop();
+  }
+}
+
 function loopCompletion(completion: Completion, labels: string[]): Completion | undefined | 'continue' {
   if (completion.kind === 'continue' && (completion.label === undefined || labels.includes(completion.label))) {
     return 'continue';

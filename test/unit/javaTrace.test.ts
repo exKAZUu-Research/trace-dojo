@@ -685,6 +685,17 @@ test('a for-each loop over objects records a binding only when the turtles chang
   expect(traceProgram('java', program, program).traceItems.map(({ line }) => line)).toEqual([0, 3, 4]);
 });
 
+test('a for-each loop keeps the turtles of an array that no variable holds', () => {
+  const program = `public class Main {
+  public static void main(String[] args) {
+    for (Turtle t : new Turtle[] { new Turtle(0, 0), new Turtle(2, 2) }) {
+      t.前に進む();
+    }
+  }
+}`;
+  expect(traceProgram('java', program, program).traceItems.map(({ turtles }) => turtles.length)).toEqual([0, 2, 2, 2]);
+});
+
 test('an atomic annotation outside a method declaration is rejected', () => {
   const program = `public class Main {
   public static void main(String[] args) {
