@@ -470,6 +470,23 @@ pick(t).forward();`;
   ]);
 });
 
+test('a call records its step when a return expression updates a variable after the last step', () => {
+  const program = `let count = 0;
+function bump() {
+  const seen = count;
+  return count++;
+}
+bump();`;
+  expect(
+    traceProgram('javascript', program, program).traceItems.map(({ line, vars }) => ({ line, count: vars.count }))
+  ).toEqual([
+    { line: 0, count: undefined },
+    { line: 1, count: 0 },
+    { line: 3, count: 0 },
+    { line: 6, count: 1 },
+  ]);
+});
+
 test('display programs keep their placeholders and lose their annotations', () => {
   const program = `function move(t) { // atomic
   t.forward();

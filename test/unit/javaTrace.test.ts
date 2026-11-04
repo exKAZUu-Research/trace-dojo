@@ -696,6 +696,25 @@ test('a for-each loop keeps the turtles of an array that no variable holds', () 
   expect(traceProgram('java', program, program).traceItems.map(({ turtles }) => turtles.length)).toEqual([0, 2, 2, 2]);
 });
 
+test('a call records its step when a return expression updates a variable after the last step', () => {
+  const program = `public class Main {
+  static int count = 0;
+  public static void main(String[] args) {
+    bump();
+  }
+  static int bump() {
+    int seen = count;
+    return count += 2;
+  }
+}`;
+  const trace = traceProgram('java', program, program);
+  expect(trace.traceItems.map(({ line, vars }) => ({ line, count: vars['Main.count'] }))).toEqual([
+    { line: 0, count: undefined },
+    { line: 7, count: 0 },
+    { line: 4, count: 2 },
+  ]);
+});
+
 test('an atomic annotation outside a method declaration is rejected', () => {
   const program = `public class Main {
   public static void main(String[] args) {
