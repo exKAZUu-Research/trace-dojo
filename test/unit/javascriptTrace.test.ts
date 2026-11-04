@@ -521,6 +521,15 @@ test.each([
   }
 );
 
+test('a static field records no step, since the variable table shows no static fields', () => {
+  const program = `class Main {
+  static n = 1;
+  static label = String(2);
+}
+const x = Main.n;`;
+  expect(traceProgram('javascript', program, program).traceItems.map(({ line }) => line)).toEqual([0, 5]);
+});
+
 test('a one-line method of a longer object literal records a step each time it runs', () => {
   const program = `let total = 0;
 const handlers = {

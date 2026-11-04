@@ -404,7 +404,8 @@ export class ProgramConverter extends ExpressionConverter {
         ? this.withContext(newContext(false, false, true), () => this.expression(valueNode))
         : undefined;
       const fieldMember: ClassMember = { kind: 'field', isStatic, key, value, row: rowOf(member) };
-      return valueNode ? this.steppable(member, fieldMember) : fieldMember;
+      // The variable table shows no static fields, so initializing one has nothing for learners to answer.
+      return valueNode && !isStatic ? this.steppable(member, fieldMember) : fieldMember;
     }
     if (member.type === 'class_static_block') return unsupported(member, 'static ブロック');
     return unsupported(member, `クラスの中の「${member.type}」`);
