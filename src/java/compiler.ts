@@ -370,22 +370,28 @@ class Compiler extends StatementCompiler {
       return declarator.initializer && !(field.isStatic && this.initialConstantOf(field) !== undefined);
     });
     const onlyCalls = shown.every(({ initializer }) => initializer !== undefined && isObjectCreation(initializer));
-    const lastShown = shown.at(-1);
-    return declarators.flatMap((declarator) => {
+    const initializers = declarators.flatMap((declarator): Exec[] => {
       if (!declarator.initializer) return [];
       const field = fieldOf(declarator);
       const value = this.compileInitializer(context, declarator.initializer, field.type);
       const { slot } = field;
-      const initialize: Exec = (frame) => {
-        const result = value(frame);
-        const slots = field.isStatic ? frame.runtime.staticsOf(frame, cls) : (frame.thisObject as JavaObject).fields;
-        slots[slot] = result;
-        return;
-      };
-      // The declaration records one step, after its last declarator that learners see.
-      const run = declarator === lastShown ? this.withStep(declaration, initialize, onlyCalls) : initialize;
-      return [(frame: Frame) => void run(frame)];
+      return [
+        (frame) => {
+          const result = value(frame);
+          const slots = field.isStatic ? frame.runtime.staticsOf(frame, cls) : (frame.thisObject as JavaObject).fields;
+          slots[slot] = result;
+          return;
+        },
+      ];
     });
+    if (initializers.length === 0) return [];
+    const initializeAll: Exec = (frame) => {
+      for (const initialize of initializers) initialize(frame);
+      return;
+    };
+    // The declaration records one step after all its declarators, as a local declaration does.
+    const run = shown.length > 0 ? this.withStep(declaration, initializeAll, onlyCalls) : initializeAll;
+    return [(frame: Frame) => void run(frame)];
   }
 
   protected compileConstructor(cls: ClassInfo, constructor: MethodInfo): void {

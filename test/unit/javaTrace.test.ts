@@ -661,6 +661,22 @@ test('a statement with several parts records one step after the whole statement'
   ]);
 });
 
+test('a field declaration that only creates objects leaves its step to constructors that record one', () => {
+  const program = `public class Main {
+  Box first = new Box(true), second = new Box(false);
+  public static void main(String[] args) {
+    Main m = new Main();
+  }
+}
+class Box {
+  int n;
+  Box(boolean set) {
+    if (set) n = 1;
+  }
+}`;
+  expect(traceProgram('java', program, program).traceItems.map(({ line }) => line)).toEqual([0, 10]);
+});
+
 test('a for statement records no step for an absent init or update', () => {
   const program = `public class Main {
   public static void main(String[] args) {
