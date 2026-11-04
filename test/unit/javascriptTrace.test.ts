@@ -491,6 +491,16 @@ pick(t).forward();`;
   ]);
 });
 
+test('a call records its step when a return expression turns Infinity into -Infinity', () => {
+  const program = `let count = 1 / 0;
+function bump() {
+  const seen = count;
+  return count = -count;
+}
+bump();`;
+  expect(traceProgram('javascript', program, program).traceItems.at(-1)?.vars.count).toBe(-Infinity);
+});
+
 test('a call records its step when a return expression updates a variable after the last step', () => {
   const program = `let count = 0;
 function bump() {
@@ -540,6 +550,11 @@ move(t);`;
 
 test.each([
   ['an atomic annotation outside a function declaration', 'let i = 0; // atomic', '// atomic は'],
+  [
+    'an atomic annotation inside a default callback body',
+    'function outer(\n  callback = () => {\n    let x = 1; // atomic\n  }\n) {\n  callback();\n}\nouter();',
+    '// atomic は',
+  ],
   ['invalid syntax', 'const t = new Turtle(;', '「)」が足りません'],
 ])('a model program with %s is rejected', (_, program, message) => {
   expect(() => traceProgram('javascript', program, program)).toThrow(message);

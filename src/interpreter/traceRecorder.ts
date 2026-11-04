@@ -29,8 +29,8 @@ export interface FrameReader<F extends TracedFrame> {
 /** Collects the trace items of a model program, starting with its state before it runs. */
 export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
   readonly traceItems: TraceItem[];
-  /** The variables each frame on the stack showed when the last step was recorded, as JSON. */
-  private readonly varsAtLastStep = new WeakMap<F, string>();
+  /** The variables each frame on the stack showed when the last step was recorded. */
+  private readonly varsAtLastStep = new WeakMap<F, TraceItem['vars']>();
 
   constructor(
     private readonly runtime: TracedRuntime<F>,
@@ -54,7 +54,7 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
       turtles: world.turtleTraces(),
       board: world.boardText(),
     });
-    for (const frame of frames) this.varsAtLastStep.set(frame, this.varsJsonOf(frame));
+    for (const frame of frames) this.varsAtLastStep.set(frame, this.frames.variablesOf(frame).vars);
     return true;
   }
 
@@ -67,11 +67,7 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     return (
       last.board === world.boardText() &&
       fastDeepEqual(last.turtles, world.turtleTraces()) &&
-      this.varsAtLastStep.get(frame) === this.varsJsonOf(frame)
+      fastDeepEqual(this.varsAtLastStep.get(frame), this.frames.variablesOf(frame).vars)
     );
-  }
-
-  private varsJsonOf(frame: F): string {
-    return JSON.stringify(this.frames.variablesOf(frame).vars);
   }
 }

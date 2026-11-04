@@ -43,6 +43,8 @@ export abstract class ConverterBase {
   private readonly atomicRows: ReadonlySet<number>;
   /** Rows of `// atomic` annotations that a function's header claims. */
   private readonly usedAtomicRows = new Set<number>();
+  /** Where the functions converted so far lie. */
+  private readonly functionSpans: { startIndex: number; endIndex: number; row: number; endRow: number }[] = [];
 
   constructor(
     protected readonly source: string,
@@ -69,13 +71,22 @@ export abstract class ConverterBase {
   }
 
   /**
-   * Whether an `// atomic` annotation lies on a function's header, from its first row to its body's, and no function
-   * nested there has claimed it already.
+   * Whether an `// atomic` annotation lies on a function's header, from its first row to its body's, outside the
+   * functions nested there, which are converted first: a row one of them spans is theirs to claim or reject.
    */
   protected claimsAtomicRow(node: Node, bodyNode: Node): boolean {
+    const nested = this.functionSpans.filter(
+      (span) => node.startIndex < span.startIndex && span.endIndex <= node.endIndex
+    );
+    this.functionSpans.push({
+      startIndex: node.startIndex,
+      endIndex: node.endIndex,
+      row: rowOf(node),
+      endRow: node.endPosition.row,
+    });
     let claims = false;
     for (let row = rowOf(node); row <= rowOf(bodyNode); row++) {
-      if (!this.atomicRows.has(row) || this.usedAtomicRows.has(row)) continue;
+      if (!this.atomicRows.has(row) || nested.some((span) => span.row <= row && row <= span.endRow)) continue;
       this.usedAtomicRows.add(row);
       claims = true;
     }
