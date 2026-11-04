@@ -288,6 +288,8 @@ test.each(['const { n } = new Box();', 'let n;\n({ n } = new Box());', 'const [n
 
 test.each([
   ['for (const t of [new Turtle()]) {}', [0, 1]],
+  ['for (const o of [{ n: 1 }, { n: 2 }]) {}', [0]],
+  ['function f() {\n  for (const o of [{ n: 1 }]) {}\n}\nf();', [0, 4]],
   ['for (const [n] of [[1], [2]]) {}', [0, 1, 1]],
   ['for (const { n } of [{ n: 1 }]) {}', [0, 1]],
 ])(

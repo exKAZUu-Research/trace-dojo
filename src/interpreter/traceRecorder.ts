@@ -58,16 +58,20 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     return true;
   }
 
-  /** Whether the turtles, the board, and the running frame's variables are as they were at the last step. */
+  /**
+   * Whether the turtles, the board, and the running frame's variables are as they were at the last step. A frame that
+   * has shown no step yet has no variables learners saw, so only the turtles and the board count for it.
+   */
   showsState(): boolean {
     this.runtime.collectGarbage();
     const last = this.traceItems.at(-1) as TraceItem;
     const { frames, world } = this.runtime;
     const frame = frames.at(-1) as F;
+    const shownVars = this.varsAtLastStep.get(frame);
     return (
       last.board === world.boardText() &&
       fastDeepEqual(last.turtles, world.turtleTraces()) &&
-      fastDeepEqual(this.varsAtLastStep.get(frame), this.frames.variablesOf(frame).vars)
+      (shownVars === undefined || fastDeepEqual(shownVars, this.frames.variablesOf(frame).vars))
     );
   }
 }
