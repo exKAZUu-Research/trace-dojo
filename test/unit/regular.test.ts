@@ -115,18 +115,18 @@ describe('regular problem grading', () => {
 
   test('normalizes full-width characters in variable and expression answers', () => {
     const input = answerFor();
-    input.expectedVariables = { count: 12, 'name + 1': 'Ａ３', ratio: -1.5, text: 'a b' };
-    input.answerVariables = { count: '１２', 'name + 1': 'A3', ratio: 'ー１．５', text: 'ａ　ｂ' };
+    input.expectedVariables = { count: 12, 'name + 1': 'Ａ３', ratio: -1.5, rate: 0.5, text: 'a b' };
+    input.answerVariables = { count: '１２', 'name + 1': 'A3', ratio: 'ー１．５', rate: '０。５', text: 'ａ　ｂ' };
 
     expect(gradeRegularAnswers(input)).toEqual({ status: 'correct', incorrectLocations: [], hintText: '' });
   });
 
-  test('keeps prolonged sound marks in string answers', () => {
+  test('keeps prolonged sound marks and ideographic full stops in string answers', () => {
     const input = answerFor();
-    input.expectedVariables = { text: '-' };
-    input.answerVariables = { text: 'ー' };
+    input.expectedVariables = { minus: '-', period: '.' };
+    input.answerVariables = { minus: 'ー', period: '。' };
 
-    expect(gradeRegularAnswers(input).incorrectLocations).toEqual(['変数text']);
+    expect(gradeRegularAnswers(input).incorrectLocations).toEqual(['変数minus', '変数period']);
   });
 
   test('does not show hints for a correct answer on a remainder line', () => {
