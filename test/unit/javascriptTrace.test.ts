@@ -418,6 +418,18 @@ const values = getters.map((get) => get());`;
   expect(traceProgram('javascript', program, program).finalVars).toEqual({ values: [0, 1, 2] });
 });
 
+test('a call to an atomic function records its step even when its arguments record steps', () => {
+  const program = `function make() {
+  const x = 1;
+  return x;
+}
+function keep(n) { // atomic
+  const y = n + 1;
+}
+keep(make());`;
+  expect(traceProgram('javascript', program, program).traceItems.map(({ line }) => line)).toEqual([0, 2, 8]);
+});
+
 test('display programs keep their placeholders and lose their annotations', () => {
   const program = `function move(t) { // atomic
   t.forward();

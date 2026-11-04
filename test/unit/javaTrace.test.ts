@@ -633,6 +633,22 @@ test('a trace records the statements outside atomic methods, leaving a call to t
   ]);
 });
 
+test('a call to an atomic method records its step even when its arguments record steps', () => {
+  const program = `public class Main {
+  public static void main(String[] args) {
+    keep(make());
+  }
+  static int make() {
+    int x = 1;
+    return x;
+  }
+  static void keep(int n) { // atomic
+    int y = n + 1;
+  }
+}`;
+  expect(traceProgram('java', program, program).traceItems.map(({ line }) => line)).toEqual([0, 6, 3]);
+});
+
 test('an atomic annotation outside a method declaration is rejected', () => {
   const program = `public class Main {
   public static void main(String[] args) {

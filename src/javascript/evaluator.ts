@@ -63,12 +63,16 @@ export class Evaluator extends ExpressionEvaluator {
 
   /**
    * Runs a statement and records its step. One that only calls functions or creates objects records none when the
-   * functions it called recorded steps, which already show what it did.
+   * functions it called recorded steps, which already show what it did, unless it completed an atomic call, whose effect
+   * only this step shows.
    */
   private runStepped(stepRow: number | undefined, onlyCalls: boolean, run: () => void): void {
-    const { recordedSteps } = this.runtime;
+    const { runtime } = this;
+    const { recordedSteps, completedAtomicCalls } = runtime;
     run();
-    if (!onlyCalls || this.runtime.recordedSteps === recordedSteps) this.step(stepRow);
+    const callsShowedIt =
+      runtime.recordedSteps !== recordedSteps && runtime.completedAtomicCalls === completedAtomicCalls;
+    if (!onlyCalls || !callsShowedIt) this.step(stepRow);
   }
 
   /** Records the step of binding a loop variable, unless it holds an object, which learners have nothing to answer. */

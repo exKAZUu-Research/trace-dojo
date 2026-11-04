@@ -52,6 +52,8 @@ export class Runtime {
   onStep?: (row: number) => boolean;
   /** How many steps `onStep` has recorded, which tells a statement whether the methods it called recorded any. */
   recordedSteps = 0;
+  /** How many atomic calls have returned, each of which needs a step of the statement that made it. */
+  completedAtomicCalls = 0;
   readonly budget = new ExecutionBudget();
   private allocatedSlots = 0;
   private readonly initializingClasses = new Set<ClassInfo>();
@@ -145,7 +147,8 @@ export class Runtime {
   }
 
   popFrame(): void {
-    this.frames.pop();
+    const frame = this.frames.pop();
+    if (frame?.method?.isAtomic) this.completedAtomicCalls++;
   }
 
   /** Removes the turtles that no frame, static field, or pending value can reach any more. */

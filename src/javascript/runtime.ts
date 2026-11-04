@@ -56,6 +56,8 @@ export class Runtime {
   onStep?: (row: number) => boolean;
   /** How many steps `onStep` has recorded, which tells a statement whether the functions it called recorded any. */
   recordedSteps = 0;
+  /** How many atomic calls have returned, each of which needs a step of the statement that made it. */
+  completedAtomicCalls = 0;
   readonly evaluator: Evaluator;
   private allocatedSlots = 0;
 
@@ -404,7 +406,8 @@ export class Runtime {
   }
 
   popFrame(): void {
-    this.frames.pop();
+    const frame = this.frames.pop();
+    if (frame?.isAtomic) this.completedAtomicCalls++;
   }
 
   /** Keeps `value` reachable for garbage collection while `run` computes with it. */

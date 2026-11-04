@@ -66,16 +66,19 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   /**
    * Records the step of a statement after it runs. One that only calls a method or creates an object records none when
-   * the methods it called recorded steps, which already show what it did.
+   * the methods it called recorded steps, which already show what it did, unless it completed an atomic call, whose
+   * effect only this step shows.
    */
   protected withStep(span: Span, exec: Exec, onlyCalls = false): Exec {
     const stepRow = this.stepRowOf(span);
     if (stepRow === undefined) return exec;
     return (frame) => {
       const { runtime } = frame;
-      const recordedSteps = runtime.recordedSteps;
+      const { recordedSteps, completedAtomicCalls } = runtime;
       const completion = exec(frame);
-      if (!onlyCalls || runtime.recordedSteps === recordedSteps) runtime.step(stepRow);
+      const callsShowedIt =
+        runtime.recordedSteps !== recordedSteps && runtime.completedAtomicCalls === completedAtomicCalls;
+      if (!onlyCalls || !callsShowedIt) runtime.step(stepRow);
       return completion;
     };
   }
