@@ -309,6 +309,27 @@ test('a compound assignment of a creation records its step after the constructor
   );
 });
 
+const turtleCounts = (language: 'java' | 'javascript', program: string): number[] =>
+  traceProgram(language, program, program).traceItems.map(({ turtles }) => turtles.length);
+
+test('a value a finally block delays keeps its turtle in both languages', () => {
+  const java = javaMain(
+    '    Turtle t = make();\n    t.forward();',
+    '  static Turtle make() {\n    try {\n      return new Turtle(3, 3);\n    } finally {\n      int done = 1;\n    }\n  }'
+  );
+  const javascript = `function make() {
+  try {
+    return new Turtle(3, 3);
+  } finally {
+    const done = 1;
+  }
+}
+const t = make();
+t.forward();`;
+  expect(turtleCounts('java', java)).toEqual([0, 1, 1, 1]);
+  expect(turtleCounts('javascript', javascript)).toEqual([0, 1, 1, 1]);
+});
+
 test('an uncaught exception is described as JavaScript prints it', () => {
   const program = `const t = new Turtle(0, 6);
 t.forward();`;

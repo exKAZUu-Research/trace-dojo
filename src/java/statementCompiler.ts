@@ -642,8 +642,16 @@ function caughtByClause(
 function runTry(body: Exec, handle: CatchHandler, finallyBlock: Exec | undefined): Exec {
   return (frame) => {
     const { completion, pending } = attemptTry(frame, body, handle);
-    const finallyCompletion = finallyBlock?.(frame);
-    if (finallyCompletion) return finallyCompletion;
+    if (finallyBlock) {
+      // A return value or an exception the finally block delays keeps its turtles alive while the block runs.
+      frame.temporaries.push(completion?.kind === 'return' ? completion.value : pending?.value);
+      try {
+        const finallyCompletion = finallyBlock(frame);
+        if (finallyCompletion) return finallyCompletion;
+      } finally {
+        frame.temporaries.pop();
+      }
+    }
     if (pending) throw pending;
     return completion;
   };
@@ -668,7 +676,6 @@ function attemptTry(frame: Frame, body: Exec, handle: CatchHandler): { completio
   }
 }
 
-/** Decides what a loop does with its body's abrupt completion. */
 /** Runs a for-each loop over `array`, which keeps its turtles alive while the loop runs, even when no variable holds it. */
 function iterate(
   frame: Frame,
@@ -687,6 +694,7 @@ function iterate(
   }
 }
 
+/** Decides what a loop does with its body's abrupt completion. */
 function loopCompletion(completion: Completion, labels: string[]): Completion | undefined | 'continue' {
   if (completion.kind === 'continue' && (completion.label === undefined || labels.includes(completion.label))) {
     return 'continue';
