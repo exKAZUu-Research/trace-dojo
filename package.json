@@ -97,7 +97,7 @@
     "server-only": "0.0.1",
     "superjson": "2.2.6",
     "supertokens-auth-react": "0.51.3",
-    "supertokens-node": "24.0.3",
+    "supertokens-node": "24.0.4",
     "supertokens-web-js": "0.16.0",
     "use-context-selector": "2.0.0",
     "use-immer": "0.11.0",
@@ -135,9 +135,16 @@
     "wait-on": "9.5.1"
   },
   "resolutions": {
+    "clear-any-console": "1.16.2",
+    "glob": "14.0.3",
+    "joi": "18.3.1",
+    "minimatch": "11.0.4",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "react-is": "19.3.1"
+  },
+  "patchedDependencies": {
+    "npm@11.21.1": "patches/npm@11.21.1.patch"
   },
   "trustedDependencies": [
     "@airbnb/node-memwatch",
