@@ -674,6 +674,17 @@ test('a turtle operation after steps in its arguments or receiver records its ow
   ]);
 });
 
+test('a for-each loop over objects records a binding only when the turtles changed', () => {
+  const program = `public class Main {
+  public static void main(String[] args) {
+    Turtle a = new Turtle();
+    for (Turtle t : new Turtle[] { a, new Turtle(2, 2) }) {
+    }
+  }
+}`;
+  expect(traceProgram('java', program, program).traceItems.map(({ line }) => line)).toEqual([0, 3, 4]);
+});
+
 test('an atomic annotation outside a method declaration is rejected', () => {
   const program = `public class Main {
   public static void main(String[] args) {

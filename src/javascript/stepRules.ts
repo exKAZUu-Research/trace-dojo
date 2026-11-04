@@ -15,7 +15,7 @@ export function onlyCreates({ declarators }: VariableDeclaration): boolean {
 }
 
 /** Whether a target stores the value itself, unlike a destructuring pattern, which stores values read from it. */
-function storesReference(target: Pattern): boolean {
+export function storesReference(target: Pattern): boolean {
   return target.kind === 'identifier' || target.kind === 'member';
 }
 

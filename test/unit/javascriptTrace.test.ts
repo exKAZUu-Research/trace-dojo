@@ -286,6 +286,17 @@ test.each(['const { n } = new Box();', 'let n;\n({ n } = new Box());', 'const [n
   }
 );
 
+test.each([
+  ['for (const t of [new Turtle()]) {}', [0, 1]],
+  ['for (const [n] of [[1], [2]]) {}', [0, 1, 1]],
+  ['for (const { n } of [{ n: 1 }]) {}', [0, 1]],
+])(
+  'a for-of loop records a binding when it stores values learners answer or the turtles changed: %s',
+  (program, lines) => {
+    expect(traceProgram('javascript', program, program).traceItems.map(({ line }) => line)).toEqual(lines);
+  }
+);
+
 test('a compound assignment of a creation records its step after the constructor steps in both languages', () => {
   const javaProgram = javaMain('    String s = "a";\n    s += new Box();', '').replace(
     /\}$/,

@@ -18,6 +18,14 @@ export class StepTracker {
   }
 
   /**
+   * Records the step of a loop variable's binding at `row`. A binding that stores nothing learners answer, such as an
+   * object, records one only when the last recorded step no longer shows the turtles and the board.
+   */
+  stepBinding(row: number | undefined, storesAnswer: boolean): void {
+    if (storesAnswer || this.recorder?.showsWorld() === false) this.step(row);
+  }
+
+  /**
    * Runs a statement, then records its step at `row`. One that `onlyCalls` (calls functions or creates objects) records
    * none when the calls it made recorded steps and the last of them still shows the turtles and the board, since those
    * steps already show what it did. A completed atomic call or a turtle operation after those steps, such as one taking

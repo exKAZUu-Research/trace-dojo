@@ -406,8 +406,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const element: CompiledValue = { kind: 'value', type: elementType, run: (frame) => frame.temporaries.at(-1) };
     const convert = this.convert(element, declaredType, 'assignment', statement.variable).run;
     const slot = this.declareLocal(context, statement, statement.name, declaredType);
-    // Learners write down only primitive and string values, so binding an object or an array has nothing to answer.
-    const stepRow = this.isAnswered(declaredType) ? this.stepRowOf(statement) : undefined;
+    const stepRow = this.stepRowOf(statement);
+    // Learners write down only primitive and string values.
+    const isAnswered = this.isAnswered(declaredType);
     const body = this.compileLoopBody(context, statement.body, labels);
     const bind = (frame: Frame, value: Value): void => {
       frame.temporaries.push(value);
@@ -416,7 +417,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       } finally {
         frame.temporaries.pop();
       }
-      frame.runtime.steps.step(stepRow);
+      frame.runtime.steps.stepBinding(stepRow, isAnswered);
     };
     return (frame) => {
       const array = iterable.run(frame);

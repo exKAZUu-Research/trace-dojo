@@ -8,7 +8,7 @@ import {
   mergePrivate,
   privateMethodProperty,
 } from './memberProperties';
-import { isObjectCreation, onlyCalls, onlyCreates } from './stepRules';
+import { isObjectCreation, onlyCalls, onlyCreates, storesReference } from './stepRules';
 import {
   appendAll,
   type Binding,
@@ -48,9 +48,9 @@ export class Evaluator extends ExpressionEvaluator {
     return undefined;
   }
 
-  /** Records the step of binding a loop variable, unless it holds an object, which learners have nothing to answer. */
-  private stepBinding(stepRow: number | undefined, value: Value): void {
-    if (!isObject(value) && value !== null) this.runtime.steps.step(stepRow);
+  /** Records the step of binding a loop's target, whose destructuring stores the values it reads out of an object. */
+  private stepBinding({ target, stepRow }: Extract<Statement, { kind: 'forOf' | 'forIn' }>, value: Value): void {
+    this.runtime.steps.stepBinding(stepRow, !storesReference(target) || (!isObject(value) && value !== null));
   }
 
   // code-gauge-allow functionNcss 54 -- One case per statement kind, each delegating where it grows.
@@ -216,7 +216,7 @@ export class Evaluator extends ExpressionEvaluator {
             this.instantiate(frame.scope, statement.scope);
           }
           this.bindPattern(statement.target, value, statement.declarationKind ? 'initialize' : 'assign');
-          this.stepBinding(statement.stepRow, value);
+          this.stepBinding(statement, value);
           const result = this.loopBody(statement.body, labels);
           if (result !== 'next') return result;
         } finally {
