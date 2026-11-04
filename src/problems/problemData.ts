@@ -4194,7 +4194,6 @@ public class Main {
     `,
   // ----------- 初級プログラミングⅡ 第8回 ここまで -----------
 
-  // stepがただの連番である場合、番号を省略できる。
   test1: `
 public class Main {
   public static void main(String[] args) {
