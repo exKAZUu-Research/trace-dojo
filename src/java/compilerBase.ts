@@ -23,7 +23,7 @@ import {
 import { type JavaString, type Value } from './values';
 
 export interface CompileOptions {
-  /** Makes the statements that record steps report their rows to `Runtime.onStep`. */
+  /** Makes the statements that record steps report their rows to `Runtime.steps`. */
   trace?: TraceOptions;
 }
 

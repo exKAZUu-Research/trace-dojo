@@ -1,4 +1,5 @@
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
+import { StepTracker } from '../interpreter/stepTracker';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import type { Builtins } from './builtins';
 import type { ClassInfo, LocalInfo, MethodInfo } from './types';
@@ -48,22 +49,13 @@ export class Runtime {
   readonly frames: Frame[] = [];
   readonly world = new TurtleWorld();
   readonly staticValues = new Map<ClassInfo, Value[]>();
-  /** Called with a statement's row after it completes, in a program compiled for tracing; tells whether it recorded. */
-  onStep?: (row: number) => boolean;
-  /** How many steps `onStep` has recorded, which tells a statement whether the methods it called recorded any. */
-  recordedSteps = 0;
-  /** How many atomic calls have returned, each of which needs a step of the statement that made it. */
-  completedAtomicCalls = 0;
+  readonly steps = new StepTracker();
   readonly budget = new ExecutionBudget();
   private allocatedSlots = 0;
   private readonly initializingClasses = new Set<ClassInfo>();
   private readonly dispatchCache = new Map<MethodInfo, Map<ClassInfo, MethodInfo>>();
 
   constructor(readonly builtins: Builtins) {}
-
-  step(row: number): void {
-    if (this.onStep?.(row)) this.recordedSteps++;
-  }
 
   spend(cost = 1): void {
     this.budget.spend(cost);
@@ -148,7 +140,7 @@ export class Runtime {
 
   popFrame(): void {
     const frame = this.frames.pop();
-    if (frame?.method?.isAtomic) this.completedAtomicCalls++;
+    if (frame?.method?.isAtomic) this.steps.completeAtomicCall();
   }
 
   /** Removes the turtles that no frame, static field, or pending value can reach any more. */

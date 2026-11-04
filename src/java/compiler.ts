@@ -17,7 +17,8 @@ import { type CompileOptions, type Exec, type MethodContext, sameParameters } fr
 import { checkDefiniteAssignment, checkInitialization } from './definiteAssignment';
 import { canCompleteNormally } from './reachability';
 import { type Frame, type Slot, UNASSIGNED } from './runtime';
-import { isObjectCreation, StatementCompiler } from './statementCompiler';
+import { StatementCompiler } from './statementCompiler';
+import { isObjectCreation } from './stepRules';
 import {
   type ClassInfo,
   createClass,

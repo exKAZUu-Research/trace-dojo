@@ -25,7 +25,7 @@ export function traceJavaScriptProgram(program: string, atomicRows: ReadonlySet<
   const runtime = new Runtime();
   const snapshotter = new Snapshotter(runtime);
   const recorder = new TraceRecorder(runtime.world);
-  runtime.onStep = (row) => {
+  runtime.steps.onStep = (row) => {
     const { frames } = runtime;
     if (frames.some((frame) => frame.isAtomic)) return false;
     runtime.collectGarbage();

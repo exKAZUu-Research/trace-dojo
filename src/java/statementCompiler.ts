@@ -1,7 +1,6 @@
 import { CompileError } from '../interpreter/diagnostics';
 // code-gauge-allow-file fileNcss 451 -- The statement compiler keeps one method per statement kind together.
 import type {
-  ArrayInitializer,
   Block,
   CatchClause,
   Expression,
@@ -27,6 +26,7 @@ import { assignedNames } from './definiteAssignment';
 import { ExpressionCompiler } from './expressionCompiler';
 import { canCompleteNormally } from './reachability';
 import { type Frame, JavaThrow, throwBuiltin, UNASSIGNED } from './runtime';
+import { isObjectCreation, onlyCalls } from './stepRules';
 import { type ClassInfo, isPrimitive, isSubclass, type JavaType, typeName } from './types';
 import { JavaArray, JavaObject, JavaString, type Value } from './values';
 
@@ -64,23 +64,11 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return span.row;
   }
 
-  /**
-   * Records the step of a statement after it runs. One that only calls a method or creates an object records none when
-   * the methods it called recorded steps, which already show what it did, unless it completed an atomic call, whose
-   * effect only this step shows.
-   */
+  /** Records the step of a statement after it runs, as `StepTracker.runStatement` says. */
   protected withStep(span: Span, exec: Exec, onlyCalls = false): Exec {
     const stepRow = this.stepRowOf(span);
     if (stepRow === undefined) return exec;
-    return (frame) => {
-      const { runtime } = frame;
-      const { recordedSteps, completedAtomicCalls } = runtime;
-      const completion = exec(frame);
-      const callsShowedIt =
-        runtime.recordedSteps !== recordedSteps && runtime.completedAtomicCalls === completedAtomicCalls;
-      if (!onlyCalls || !callsShowedIt) runtime.step(stepRow);
-      return completion;
-    };
+    return (frame) => frame.runtime.steps.runStatement(stepRow, onlyCalls, () => exec(frame));
   }
 
   /**
@@ -390,7 +378,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         (exec: Exec): Exec =>
         (frame) => {
           exec(frame);
-          frame.runtime.step(stepRow);
+          frame.runtime.steps.step(stepRow);
           return;
         };
       const { init: initPart } = statement;
@@ -428,7 +416,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       } finally {
         frame.temporaries.pop();
       }
-      if (stepRow !== undefined) frame.runtime.step(stepRow);
+      frame.runtime.steps.step(stepRow);
     };
     return (frame) => {
       const array = iterable.run(frame);
@@ -688,19 +676,4 @@ function loopCompletion(completion: Completion, labels: string[]): Completion | 
   }
   if (completion.kind === 'break' && completion.label === undefined) return;
   return completion;
-}
-
-/** Whether an expression statement only calls methods or creates objects, whose own steps show what it did. */
-function onlyCalls(expression: Expression): boolean {
-  // A compound assignment such as `s += new Box()` computes and stores a value after the constructor returns.
-  if (expression.kind === 'assign') return expression.operator === '=' && isObjectCreation(expression.value);
-  return expression.kind === 'call' || isObjectCreation(expression);
-}
-
-/** Whether an expression only creates objects, whose constructors' steps show what creating them did. */
-export function isObjectCreation(expression: Expression | ArrayInitializer): boolean {
-  if (expression.kind === 'arrayInitializer') return expression.elements.every(isObjectCreation);
-  if (expression.kind === 'newArray')
-    return expression.initializer !== undefined && isObjectCreation(expression.initializer);
-  return expression.kind === 'new';
 }

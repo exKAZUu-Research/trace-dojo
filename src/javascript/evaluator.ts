@@ -1,14 +1,4 @@
-// code-gauge-allow-file fileNcss 411 -- The evaluator keeps one method per statement kind together, as the Java statement compiler does.
-import type {
-  Block,
-  ClassMember,
-  ClassNode,
-  Expression,
-  FunctionNode,
-  Program,
-  Statement,
-  VariableDeclaration,
-} from './ast';
+import type { Block, ClassMember, ClassNode, FunctionNode, Program, Statement, VariableDeclaration } from './ast';
 import { nameFunction, patternNames } from './evaluatorBase';
 import { defineAccessor, ExpressionEvaluator } from './expressionEvaluator';
 import { DONE, ValueIterator } from './iteration';
@@ -18,6 +8,7 @@ import {
   mergePrivate,
   privateMethodProperty,
 } from './memberProperties';
+import { isObjectCreation, onlyCalls, onlyCreates } from './stepRules';
 import {
   appendAll,
   type Binding,
@@ -57,27 +48,9 @@ export class Evaluator extends ExpressionEvaluator {
     return undefined;
   }
 
-  private step(stepRow: number | undefined): void {
-    if (stepRow !== undefined) this.runtime.step(stepRow);
-  }
-
-  /**
-   * Runs a statement and records its step. One that only calls functions or creates objects records none when the
-   * functions it called recorded steps, which already show what it did, unless it completed an atomic call, whose effect
-   * only this step shows.
-   */
-  private runStepped(stepRow: number | undefined, onlyCalls: boolean, run: () => void): void {
-    const { runtime } = this;
-    const { recordedSteps, completedAtomicCalls } = runtime;
-    run();
-    const callsShowedIt =
-      runtime.recordedSteps !== recordedSteps && runtime.completedAtomicCalls === completedAtomicCalls;
-    if (!onlyCalls || !callsShowedIt) this.step(stepRow);
-  }
-
   /** Records the step of binding a loop variable, unless it holds an object, which learners have nothing to answer. */
   private stepBinding(stepRow: number | undefined, value: Value): void {
-    if (!isObject(value) && value !== null) this.step(stepRow);
+    if (!isObject(value) && value !== null) this.runtime.steps.step(stepRow);
   }
 
   // code-gauge-allow functionNcss 54 -- One case per statement kind, each delegating where it grows.
@@ -87,11 +60,13 @@ export class Evaluator extends ExpressionEvaluator {
     runtime.spend();
     switch (statement.kind) {
       case 'expression': {
-        this.runStepped(statement.stepRow, onlyCalls(statement.expression), () => this.evaluate(statement.expression));
+        runtime.steps.runStatement(statement.stepRow, onlyCalls(statement.expression), () =>
+          this.evaluate(statement.expression)
+        );
         return undefined;
       }
       case 'declaration': {
-        this.runStepped(statement.stepRow, onlyCreates(statement), () => this.declaration(statement));
+        runtime.steps.runStatement(statement.stepRow, onlyCreates(statement), () => this.declaration(statement));
         return undefined;
       }
       case 'function':
@@ -190,7 +165,7 @@ export class Evaluator extends ExpressionEvaluator {
           this.copyIterationScope(perIterationNames);
           if (update) {
             this.evaluate(update);
-            this.step(stepRow);
+            runtime.steps.step(stepRow);
           }
           runtime.spend();
         }
@@ -204,10 +179,10 @@ export class Evaluator extends ExpressionEvaluator {
   private forInit({ init, stepRow }: Extract<Statement, { kind: 'for' }>): void {
     if (init?.kind === 'declaration') {
       this.declaration(init);
-      if (init.declarators.some((declarator) => declarator.init)) this.step(stepRow);
+      if (init.declarators.some((declarator) => declarator.init)) this.runtime.steps.step(stepRow);
     } else if (init) {
       this.evaluate(init);
-      this.step(stepRow);
+      this.runtime.steps.step(stepRow);
     }
   }
 
@@ -520,7 +495,7 @@ export class Evaluator extends ExpressionEvaluator {
       mergePrivate(runtime, target, field.key, field.property);
       return;
     }
-    this.runStepped(field.stepRow, field.onlyCalls, () => {
+    this.runtime.steps.runStatement(field.stepRow, field.onlyCalls, () => {
       const value = field.initialize ? field.initialize(target) : undefined;
       if (field.isPrivate)
         runtime.definePrivate(target, field.key, { value, writable: true, enumerable: false, configurable: false });
@@ -606,32 +581,4 @@ export class Evaluator extends ExpressionEvaluator {
     }
     return constructed;
   }
-}
-
-/** Whether an expression statement only calls functions or creates objects, whose own steps show what it did. */
-function onlyCalls(expression: Expression): boolean {
-  const inner = withoutParentheses(expression);
-  // A compound assignment such as `s += new Box()` computes and stores a value after the constructor returns.
-  if (inner.kind === 'assign') return inner.operator === '=' && isObjectCreation(inner.value);
-  return inner.kind === 'call' || isObjectCreation(inner);
-}
-
-/** Whether a declaration only creates objects, whose constructors' steps show what it did. */
-function onlyCreates({ declarators }: VariableDeclaration): boolean {
-  return declarators.every(({ init }) => !init || isObjectCreation(init));
-}
-
-/** Whether an expression only creates objects, whose constructors' steps show what creating them did. */
-function isObjectCreation(expression: Expression): boolean {
-  const inner = withoutParentheses(expression);
-  if (inner.kind === 'array')
-    return inner.elements.every(
-      (element) => element?.kind !== 'spread' && element !== undefined && isObjectCreation(element)
-    );
-  return inner.kind === 'new';
-}
-
-/** The expression inside any parentheses, which Java's parser drops and so never classifies. */
-function withoutParentheses(expression: Expression): Expression {
-  return expression.kind === 'parenthesized' ? withoutParentheses(expression.expression) : expression;
 }

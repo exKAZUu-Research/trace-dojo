@@ -30,6 +30,7 @@ import {
   unsupportedFeatures,
 } from './convertNodes';
 import { ExpressionConverter } from './expressionConverter';
+import { isConstantExpression } from './stepRules';
 
 type StatementConverter = (node: Node) => Statement;
 
@@ -410,40 +411,6 @@ export class ProgramConverter extends ExpressionConverter {
     }
     if (member.type === 'class_static_block') return unsupported(member, 'static ブロック');
     return unsupported(member, `クラスの中の「${member.type}」`);
-  }
-}
-
-/** Whether an expression combines only literals, as a Java constant expression does, so evaluating it has no effect. */
-function isConstantExpression(expression: Expression): boolean {
-  switch (expression.kind) {
-    case 'literal': {
-      return true;
-    }
-    case 'template': {
-      return expression.expressions.every(isConstantExpression);
-    }
-    case 'parenthesized': {
-      return isConstantExpression(expression.expression);
-    }
-    case 'unary': {
-      return ['-', '+', '!', '~'].includes(expression.operator) && isConstantExpression(expression.argument);
-    }
-    case 'binary': {
-      return (
-        !['in', 'instanceof'].includes(expression.operator) &&
-        isConstantExpression(expression.left) &&
-        isConstantExpression(expression.right)
-      );
-    }
-    case 'logical': {
-      return isConstantExpression(expression.left) && isConstantExpression(expression.right);
-    }
-    case 'conditional': {
-      return [expression.test, expression.consequent, expression.alternate].every(isConstantExpression);
-    }
-    default: {
-      return false;
-    }
   }
 }
 

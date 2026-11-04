@@ -1,4 +1,5 @@
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
+import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import { ArrayOps } from './arrayOps';
 import { Evaluator } from './evaluator';
@@ -52,12 +53,7 @@ export class Runtime {
    * own functions count as called.
    */
   currentRow: number | undefined;
-  /** Called with a statement's row after it completes, in a program converted for tracing; tells whether it recorded. */
-  onStep?: (row: number) => boolean;
-  /** How many steps `onStep` has recorded, which tells a statement whether the functions it called recorded any. */
-  recordedSteps = 0;
-  /** How many atomic calls have returned, each of which needs a step of the statement that made it. */
-  completedAtomicCalls = 0;
+  readonly steps = new StepTracker();
   readonly evaluator: Evaluator;
   private allocatedSlots = 0;
 
@@ -68,10 +64,6 @@ export class Runtime {
 
   get frame(): Frame {
     return this.frames.at(-1) as Frame;
-  }
-
-  step(row: number): void {
-    if (this.onStep?.(row)) this.recordedSteps++;
   }
 
   spend(cost = 1): void {
@@ -407,7 +399,7 @@ export class Runtime {
 
   popFrame(): void {
     const frame = this.frames.pop();
-    if (frame?.isAtomic) this.completedAtomicCalls++;
+    if (frame?.isAtomic) this.steps.completeAtomicCall();
   }
 
   /** Keeps `value` reachable for garbage collection while `run` computes with it. */
