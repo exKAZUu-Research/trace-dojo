@@ -278,6 +278,14 @@ test.each([
   ).toEqual([0, 1]);
 });
 
+test.each(['const { n } = new Box();', 'let n;\n({ n } = new Box());', 'const [n] = [new Box()];'])(
+  'destructuring a creation records its step after the constructor steps: %s',
+  (statement) => {
+    const program = `class Box {\n  n = 1;\n}\n${statement}`;
+    expect(traceProgram('javascript', program, program).traceItems.at(-1)?.line).toBe(program.split('\n').length);
+  }
+);
+
 test('a compound assignment of a creation records its step after the constructor steps in both languages', () => {
   const javaProgram = javaMain('    String s = "a";\n    s += new Box();', '').replace(
     /\}$/,

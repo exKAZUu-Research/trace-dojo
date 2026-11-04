@@ -1,16 +1,22 @@
-import type { Expression, VariableDeclaration } from './ast';
+import type { Expression, Pattern, VariableDeclaration } from './ast';
 
 /** Whether an expression statement only calls functions or creates objects, whose own steps show what it did. */
 export function onlyCalls(expression: Expression): boolean {
   const inner = withoutParentheses(expression);
   // A compound assignment such as `s += new Box()` computes and stores a value after the constructor returns.
-  if (inner.kind === 'assign') return inner.operator === '=' && isObjectCreation(inner.value);
+  if (inner.kind === 'assign')
+    return inner.operator === '=' && storesReference(inner.target) && isObjectCreation(inner.value);
   return inner.kind === 'call' || isObjectCreation(inner);
 }
 
 /** Whether a declaration only creates objects, whose constructors' steps show what it did. */
 export function onlyCreates({ declarators }: VariableDeclaration): boolean {
-  return declarators.every(({ init }) => !init || isObjectCreation(init));
+  return declarators.every(({ target, init }) => !init || (storesReference(target) && isObjectCreation(init)));
+}
+
+/** Whether a target stores the value itself, unlike a destructuring pattern, which stores values read from it. */
+function storesReference(target: Pattern): boolean {
+  return target.kind === 'identifier' || target.kind === 'member';
 }
 
 /** Whether an expression only creates objects, whose constructors' steps show what creating them did. */
