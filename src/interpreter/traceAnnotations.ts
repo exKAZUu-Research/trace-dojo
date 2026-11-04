@@ -7,9 +7,10 @@ export interface TraceAnnotation {
 /** Matches the annotation a line comment ends with, which may follow an ordinary remark. */
 const traceAnnotationPattern = /\/\/[ \t]*atomic[ \t]*$/;
 
-/** Makes a model program record its steps, except inside the methods declared on `atomicRows`. */
+/** Makes a model program record its steps, except inside the methods its `// atomic` annotations mark. */
 export interface TraceOptions {
-  atomicRows: ReadonlySet<number>;
+  /** The offset of each annotation by its row, which holds at most one since an annotation ends its line. */
+  atomicAnnotations: ReadonlyMap<number, number>;
 }
 
 export const misplacedAtomicMessage =
@@ -23,9 +24,9 @@ export function traceAnnotationsIn(lineComments: Iterable<TraceAnnotation>): Tra
   });
 }
 
-/** The rows of `// atomic` comments, which mark the methods whose calls each count as part of the caller's step. */
-export function atomicRowsOf(source: string, annotations: TraceAnnotation[]): Set<number> {
-  return new Set(annotations.map(({ index }) => source.slice(0, index).split('\n').length - 1));
+/** The offsets of `// atomic` comments by row, which mark the methods whose calls each count as part of the caller's step. */
+export function atomicAnnotationsOf(source: string, annotations: TraceAnnotation[]): Map<number, number> {
+  return new Map(annotations.map(({ index }) => [source.slice(0, index).split('\n').length - 1, index]));
 }
 
 /** Removes the annotations and the blanks before them, keeping every row in place. */

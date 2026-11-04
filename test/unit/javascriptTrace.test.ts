@@ -520,6 +520,20 @@ bump();`;
   ]);
 });
 
+test.each([
+  'function outer(callback = () => 0) { // atomic',
+  'function outer(callback = function inner() { return 0; }) { // atomic',
+])('an atomic annotation after a one-line default callback marks the enclosing function: %s', (header) => {
+  const program = `let total = 0;
+${header}
+  total += 1;
+  callback();
+  total += 2;
+}
+outer();`;
+  expect(traceProgram('javascript', program, program).traceItems.map(({ line }) => line)).toEqual([0, 1, 7]);
+});
+
 test.each(['function inner() { // atomic', '() => { // atomic'])(
   'an atomic default callback leaves its enclosing function stepped: %s',
   (callback) => {

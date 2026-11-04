@@ -36,22 +36,27 @@ export function newContext(canReturn: boolean, canCallSuper: boolean, canReferen
   };
 }
 
+interface ConvertedFunction {
+  fn: FunctionNode;
+  /** The rows of its header, from its start to its body's start. */
+  row: number;
+  bodyRow: number;
+  startIndex: number;
+  endIndex: number;
+  bodyStartIndex: number;
+}
+
 /** The scopes, steps, and contexts that converting a program tracks, which its early errors depend on. */
 export abstract class ConverterBase {
   protected context: FunctionContext = newContext(false, false, false);
   private readonly scopes: ScopeBuilder[] = [];
-  private readonly atomicRows: ReadonlySet<number>;
-  /** Rows of `// atomic` annotations that a function's header claims. */
-  private readonly usedAtomicRows = new Set<number>();
-  /** Where the functions converted so far lie. */
-  private readonly functionSpans: { startIndex: number; endIndex: number; row: number; endRow: number }[] = [];
+  /** The functions converted so far, among which the annotations find their owners once the program is converted. */
+  private readonly functions: ConvertedFunction[] = [];
 
   constructor(
     protected readonly source: string,
     private readonly trace: TraceOptions | undefined
-  ) {
-    this.atomicRows = trace?.atomicRows ?? new Set();
-  }
+  ) {}
 
   abstract expression(node: Node): Expression;
 
@@ -70,34 +75,54 @@ export abstract class ConverterBase {
     return this.trace ? rowOf(node) : undefined;
   }
 
-  /**
-   * Whether an `// atomic` annotation lies on a function's header, from its first row to its body's, outside the
-   * functions nested there, which are converted first: a row one of them spans is theirs to claim or reject.
-   */
-  protected claimsAtomicRow(node: Node, bodyNode: Node): boolean {
-    const nested = this.functionSpans.filter(
-      (span) => node.startIndex < span.startIndex && span.endIndex <= node.endIndex
-    );
-    this.functionSpans.push({
+  protected addFunction(node: Node, bodyNode: Node, fn: FunctionNode): void {
+    this.functions.push({
+      fn,
+      row: rowOf(node),
+      bodyRow: rowOf(bodyNode),
       startIndex: node.startIndex,
       endIndex: node.endIndex,
-      row: rowOf(node),
-      endRow: node.endPosition.row,
+      bodyStartIndex: bodyNode.startIndex,
     });
-    let claims = false;
-    for (let row = rowOf(node); row <= rowOf(bodyNode); row++) {
-      if (!this.atomicRows.has(row) || nested.some((span) => span.row <= row && row <= span.endRow)) continue;
-      this.usedAtomicRows.add(row);
-      claims = true;
-    }
-    return claims;
   }
 
-  /** Rejects an annotation no function claims, which would silently leave the steps authors meant to hide. */
-  protected checkAtomicRows(): void {
-    const misplaced = [...this.atomicRows].filter((row) => !this.usedAtomicRows.has(row));
+  /**
+   * Marks the function each `// atomic` annotation belongs to, rejecting one that belongs to none. The owner's header,
+   * from its start to its body's row, holds the annotation outside any function nested in it; among such headers on
+   * one row, the annotation follows the opening of the body it annotates, so the latest body opened before it wins,
+   * and otherwise the innermost header continuing past it.
+   */
+  protected assignAtomicAnnotations(): void {
+    const misplaced: number[] = [];
+    for (const [row, index] of this.trace?.atomicAnnotations ?? []) {
+      const owner = this.ownerOf(row, index);
+      if (owner) owner.fn.isAtomic = true;
+      else misplaced.push(row);
+    }
     if (misplaced.length > 0)
       throw new CompileError(misplaced.map((row) => ({ row, message: misplacedAtomicMessage })));
+  }
+
+  private ownerOf(row: number, index: number): ConvertedFunction | undefined {
+    const candidates = this.functions.filter(
+      (fn) => fn.row <= row && row <= fn.bodyRow && fn.startIndex <= index && !this.nestsFunctionAt(fn, index)
+    );
+    const opened = candidates.filter((fn) => fn.bodyStartIndex <= index);
+    return (
+      opened.toSorted((a, b) => b.bodyStartIndex - a.bodyStartIndex)[0] ??
+      candidates.toSorted((a, b) => b.startIndex - a.startIndex)[0]
+    );
+  }
+
+  /** Whether a function nested in `outer` spans the offset `index`. */
+  private nestsFunctionAt(outer: ConvertedFunction, index: number): boolean {
+    return this.functions.some(
+      (inner) =>
+        outer.startIndex < inner.startIndex &&
+        inner.endIndex <= outer.endIndex &&
+        inner.startIndex <= index &&
+        index < inner.endIndex
+    );
   }
 
   // Scopes ----------------------------------------------------------------------------------------------------------

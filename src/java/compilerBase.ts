@@ -116,7 +116,7 @@ export abstract class CompilerBase {
 
   constructor(options: CompileOptions) {
     this.recordsSteps = options.trace !== undefined;
-    this.atomicRows = options.trace?.atomicRows ?? new Set();
+    this.atomicRows = new Set(options.trace?.atomicAnnotations.keys());
   }
 
   protected abstract compileValue(context: MethodContext, expression: Expression, allowsVoid?: boolean): CompiledValue;

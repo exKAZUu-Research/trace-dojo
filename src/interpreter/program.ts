@@ -7,7 +7,7 @@ import { findJavaTraceAnnotations } from '../problems/fillInBlank/javaSource';
 import type { TraceItem, TraceItemVariable, TurtleTrace } from '../problems/trace';
 import type { SourceDiagnostic } from './diagnostics';
 import type { ExecutionLimitError } from './limits';
-import { atomicRowsOf, removeAnnotations, type TraceAnnotation } from './traceAnnotations';
+import { atomicAnnotationsOf, removeAnnotations, type TraceAnnotation, type TraceOptions } from './traceAnnotations';
 
 export type ProgrammingLanguage = keyof typeof interpreters;
 
@@ -39,8 +39,8 @@ export interface ProgramTrace extends ProgramRecording {
 interface Interpreter {
   /** Finds the annotations in line comments, skipping look-alikes in literals and other comments. */
   findTraceAnnotations: (source: string) => TraceAnnotation[];
-  /** Runs a model program, recording its steps outside the methods declared on `atomicRows`. */
-  record: (program: string, atomicRows: ReadonlySet<number>) => ProgramRecording;
+  /** Runs a model program, recording its steps outside the methods its annotations mark atomic. */
+  record: (program: string, trace: TraceOptions) => ProgramRecording;
   /** Compiles and runs a learner's program, reporting how it ended. */
   execute: (source: string) => ProgramExecution;
 }
@@ -63,7 +63,9 @@ const interpreters = {
 export function traceProgram(language: ProgrammingLanguage, program: string, displayProgram: string): ProgramTrace {
   const interpreter: Interpreter = interpreters[language];
   return {
-    ...interpreter.record(program, atomicRowsOf(program, interpreter.findTraceAnnotations(program))),
+    ...interpreter.record(program, {
+      atomicAnnotations: atomicAnnotationsOf(program, interpreter.findTraceAnnotations(program)),
+    }),
     displayProgram: removeAnnotations(displayProgram, interpreter.findTraceAnnotations(displayProgram)),
   };
 }

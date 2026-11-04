@@ -101,7 +101,7 @@ export class ProgramConverter extends ExpressionConverter {
     const scope = this.pushScope(true);
     const body = this.statementList(namedChildren(root).filter((child) => child.type !== 'hash_bang_line'));
     this.popScope();
-    this.checkAtomicRows();
+    this.assignAtomicAnnotations();
     return { body, scope };
   }
 
@@ -325,12 +325,10 @@ export class ProgramConverter extends ExpressionConverter {
         const { params, rest } = this.parameters(node, kind);
         const body =
           bodyNode.type === 'statement_block' ? this.statementList(namedChildren(bodyNode)) : this.expression(bodyNode);
-        // Claimed after the parameters and the body, so that a function nested in a header row owns its annotation.
-        const isAtomic = this.claimsAtomicRow(node, bodyNode);
         const bindsOwnName = node.type === 'function_expression' && node.childForFieldName('name') !== null;
         // Only an arrow function's own uses are its enclosing function's; a function's own uses get its arguments.
         const usesArguments = !isArrow && context.argumentsUse.isUsed;
-        return {
+        const fn: FunctionNode = {
           name,
           kind,
           params,
@@ -339,10 +337,12 @@ export class ProgramConverter extends ExpressionConverter {
           usesArguments,
           body,
           scope,
-          isAtomic,
+          isAtomic: false,
           source: this.sourceOf(node),
           row: rowOf(node),
         };
+        this.addFunction(node, bodyNode, fn);
+        return fn;
       } finally {
         this.popScope();
       }

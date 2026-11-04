@@ -1,4 +1,5 @@
 import type { ProgramRecording } from '../interpreter/program';
+import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { parseJavaScript } from './parse';
@@ -20,8 +21,8 @@ import {
 } from './values';
 
 // code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
-export function traceJavaScriptProgram(program: string, atomicRows: ReadonlySet<number>): ProgramRecording {
-  const parsed = parseJavaScript(program, { atomicRows });
+export function traceJavaScriptProgram(program: string, trace: TraceOptions): ProgramRecording {
+  const parsed = parseJavaScript(program, trace);
   const runtime = new Runtime();
   const snapshotter = new Snapshotter(runtime);
   const recorder = new TraceRecorder(runtime, {
