@@ -1,6 +1,7 @@
 import { CompileError } from '../interpreter/diagnostics';
 // code-gauge-allow-file fileNcss 451 -- The statement compiler keeps one method per statement kind together.
 import type {
+  ArrayInitializer,
   Block,
   CatchClause,
   Expression,
@@ -26,7 +27,7 @@ import { assignedNames } from './definiteAssignment';
 import { ExpressionCompiler } from './expressionCompiler';
 import { canCompleteNormally } from './reachability';
 import { type Frame, JavaThrow, throwBuiltin, UNASSIGNED } from './runtime';
-import { type ClassInfo, isSubclass, type JavaType, typeName } from './types';
+import { type ClassInfo, isPrimitive, isSubclass, type JavaType, typeName } from './types';
 import { JavaArray, JavaObject, JavaString, type Value } from './values';
 
 const BREAK: BreakCompletion = { kind: 'break', label: undefined };
@@ -57,23 +58,24 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     };
   }
 
-  protected stepIdOf(span: Span): number | undefined {
-    if (this.compilesForHeader) return;
-    for (let row = span.row; row <= span.endRow; row++) {
-      const stepId = this.stepIdByRow.get(row);
-      if (stepId === undefined) continue;
-      this.usedStepRows.add(row);
-      return stepId;
-    }
-    return;
+  /** The row whose step a statement starting in `span` records, when the program is compiled for tracing. */
+  protected stepRowOf(span: Span): number | undefined {
+    if (!this.recordsSteps || this.compilesForHeader) return;
+    return span.row;
   }
 
-  protected withStep(span: Span, exec: Exec): Exec {
-    const stepId = this.stepIdOf(span);
-    if (stepId === undefined) return exec;
+  /**
+   * Records the step of a statement after it runs. One that only calls a method or creates an object records none when
+   * the methods it called recorded steps, which already show what it did.
+   */
+  protected withStep(span: Span, exec: Exec, onlyCalls = false): Exec {
+    const stepRow = this.stepRowOf(span);
+    if (stepRow === undefined) return exec;
     return (frame) => {
+      const { runtime } = frame;
+      const recordedSteps = runtime.recordedSteps;
       const completion = exec(frame);
-      frame.runtime.onStep?.(stepId);
+      if (!onlyCalls || runtime.recordedSteps === recordedSteps) runtime.step(stepRow);
       return completion;
     };
   }
@@ -271,17 +273,17 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   protected compileLocal(context: MethodContext, statement: LocalVariableDeclaration): Exec {
-    // Only an initialized declarator records a step, so a declaration without one leaves its annotation unused.
-    const recordsStep = statement.declarators.some((declarator) => declarator.initializer);
-    const stepId = recordsStep ? this.stepIdOf(statement) : undefined;
     const parts = statement.declarators.map((declarator) => this.compileDeclarator(context, statement, declarator));
-    return (frame) => {
+    const exec: Exec = (frame) => {
       for (const { slot, value } of parts) {
         if (value) frame.locals[slot] = value(frame);
       }
-      if (stepId !== undefined) frame.runtime.onStep?.(stepId);
       return;
     };
+    const initializers = statement.declarators.flatMap(({ initializer }) => (initializer ? [initializer] : []));
+    // A declaration without an initializer assigns nothing that learners could answer, so it records no step.
+    if (initializers.length === 0) return exec;
+    return this.withStep(statement, exec, initializers.every(isObjectCreation));
   }
 
   protected compileDeclarator(
@@ -322,22 +324,22 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       this.error(statement, '式だけを文として書くことはできません。');
     }
     const value = this.compileValue(context, expression, true);
-    return this.withStep(statement, (frame) => {
-      value.run(frame);
-      return;
-    });
+    return this.withStep(
+      statement,
+      (frame) => {
+        value.run(frame);
+        return;
+      },
+      onlyCalls(expression)
+    );
   }
 
   protected compileReturn(context: MethodContext, statement: Extract<Statement, { kind: 'return' }>): Exec {
     if (context.isInitializerBlock) this.error(statement, 'return 文は初期化ブロックの中には書けません。');
-    const stepId = this.stepIdOf(statement);
     if (!statement.value) {
       if (context.returnType.kind !== 'void') this.error(statement, 'return 文に値が必要です。');
       const completion: ReturnCompletion = { kind: 'return', value: undefined };
-      return (frame) => {
-        if (stepId !== undefined) frame.runtime.onStep?.(stepId);
-        return completion;
-      };
+      return () => completion;
     }
     if (context.returnType.kind === 'void') this.error(statement, '戻り値の型が void のメソッドは値を返せません。');
     const value = this.convert(
@@ -346,11 +348,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       'assignment',
       statement.value
     ).run;
-    return (frame) => {
-      const result = value(frame);
-      if (stepId !== undefined) frame.runtime.onStep?.(stepId);
-      return { kind: 'return', value: result };
-    };
+    return (frame) => ({ kind: 'return', value: value(frame) });
   }
 
   protected compileFor(context: MethodContext, statement: Extract<Statement, { kind: 'for' }>): Exec {
@@ -377,23 +375,19 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     context: MethodContext,
     statement: Extract<Statement, { kind: 'for' }>
   ): { init: Exec; update: Exec } {
-    const headerParts: Span[] = [
-      ...(Array.isArray(statement.init) ? statement.init : [statement.init]),
-      ...statement.update,
-    ];
-    const stepId = headerParts.map((part) => this.stepIdOf(part)).find((id) => id !== undefined);
+    const stepRow = this.stepRowOf(statement);
     this.compilesForHeader = true;
     try {
       const init = Array.isArray(statement.init)
         ? this.compileStatements(context, statement.init)
         : this.compileLocal(context, statement.init);
       const update = this.compileStatements(context, statement.update);
-      if (stepId === undefined) return { init, update };
+      if (stepRow === undefined) return { init, update };
       const recordStep =
         (exec: Exec): Exec =>
         (frame) => {
           exec(frame);
-          frame.runtime.onStep?.(stepId);
+          frame.runtime.step(stepRow);
           return;
         };
       const { init: initPart } = statement;
@@ -421,7 +415,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const element: CompiledValue = { kind: 'value', type: elementType, run: (frame) => frame.temporaries.at(-1) };
     const convert = this.convert(element, declaredType, 'assignment', statement.variable).run;
     const slot = this.declareLocal(context, statement, statement.name, declaredType);
-    const stepId = this.stepIdOf(statement.variable);
+    // Learners write down only primitive and string values, so binding an object or an array has nothing to answer.
+    const stepRow = this.isAnswered(declaredType) ? this.stepRowOf(statement) : undefined;
     const body = this.compileLoopBody(context, statement.body, labels);
     const bind = (frame: Frame, value: Value): void => {
       frame.temporaries.push(value);
@@ -430,7 +425,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       } finally {
         frame.temporaries.pop();
       }
-      if (stepId !== undefined) frame.runtime.onStep?.(stepId);
+      if (stepRow !== undefined) frame.runtime.step(stepRow);
     };
     return (frame) => {
       const array = iterable.run(frame);
@@ -443,6 +438,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       }
       return;
     };
+  }
+
+  protected isAnswered(type: JavaType): boolean {
+    return isPrimitive(type) || (type.kind === 'class' && type.cls === this.builtins.stringClass);
   }
 
   protected compileSwitch(context: MethodContext, statement: Extract<Statement, { kind: 'switch' }>): Exec {
@@ -686,4 +685,16 @@ function loopCompletion(completion: Completion, labels: string[]): Completion | 
   }
   if (completion.kind === 'break' && completion.label === undefined) return;
   return completion;
+}
+
+/** Whether an expression statement only calls methods or creates objects, whose own steps show what it did. */
+function onlyCalls(expression: Expression): boolean {
+  if (expression.kind === 'assign') return isObjectCreation(expression.value);
+  return expression.kind === 'call' || isObjectCreation(expression);
+}
+
+/** Whether an expression only creates objects, whose constructors' steps show what creating them did. */
+export function isObjectCreation(expression: Expression | ArrayInitializer): boolean {
+  if (expression.kind === 'arrayInitializer') return expression.elements.every(isObjectCreation);
+  return expression.kind === 'new';
 }

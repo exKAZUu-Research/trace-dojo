@@ -1,8 +1,9 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
+import { misplacedAtomicMessage, type TraceOptions } from '../interpreter/traceAnnotations';
 import type { ClassNode, Expression, FunctionKind, FunctionNode, ScopeDeclarations } from './ast';
-import { depthOf, fail } from './convertNodes';
+import { fail, rowOf } from './convertNodes';
 
 interface ScopeBuilder {
   declarations: ScopeDeclarations;
@@ -23,29 +24,6 @@ export interface FunctionContext {
   argumentsUse: { isUsed: boolean };
 }
 
-/** Where a construct lies: its rows, and its offsets, which order constructs on one row. */
-interface Extent {
-  row: number;
-  endRow: number;
-  start: number;
-  end: number;
-}
-
-interface Steppable extends Extent {
-  depth: number;
-  assign: (stepId: number) => void;
-  /** The `// step` row this statement records, since a statement records one step. */
-  claimedRow?: number;
-}
-
-function extentOf(node: Node): Extent {
-  return { row: node.startPosition.row, endRow: node.endPosition.row, start: node.startIndex, end: node.endIndex };
-}
-
-function encloses(outer: Extent, inner: Extent): boolean {
-  return outer.start <= inner.start && inner.end <= outer.end;
-}
-
 export function newContext(canReturn: boolean, canCallSuper: boolean, canReferenceSuper: boolean): FunctionContext {
   return {
     canReturn,
@@ -62,14 +40,16 @@ export function newContext(canReturn: boolean, canCallSuper: boolean, canReferen
 export abstract class ConverterBase {
   protected context: FunctionContext = newContext(false, false, false);
   private readonly scopes: ScopeBuilder[] = [];
-  private readonly steppables: Steppable[] = [];
-  /** Function bodies, whose rows belong to the statements of that body. */
-  private readonly bodies: Extent[] = [];
+  private readonly atomicRows: ReadonlySet<number>;
+  /** Rows of `// atomic` annotations that a function's header claims. */
+  private readonly usedAtomicRows = new Set<number>();
 
   constructor(
     protected readonly source: string,
-    private readonly stepIdByRow: ReadonlyMap<number, number>
-  ) {}
+    private readonly trace: TraceOptions | undefined
+  ) {
+    this.atomicRows = trace?.atomicRows ?? new Set();
+  }
 
   abstract expression(node: Node): Expression;
 
@@ -83,59 +63,27 @@ export abstract class ConverterBase {
 
   // Steps -----------------------------------------------------------------------------------------------------------
 
-  /**
-   * Lets a statement record the step of a `// step` row it spans.
-   *
-   * @param depthOffset Moves the statement's depth, for header parts that record steps as their loop's body does.
-   */
-  protected addSteppable(node: Node, assign: (stepId: number) => void, depthOffset = 0): void {
-    this.steppables.push({ ...extentOf(node), depth: depthOf(node) + depthOffset, assign });
+  /** The row whose step a statement starting at `node` records, when the program is converted for tracing. */
+  protected stepRowOf(node: Node): number | undefined {
+    return this.trace ? rowOf(node) : undefined;
   }
 
-  protected addBody(body: Node): void {
-    this.bodies.push(extentOf(body));
-  }
-
-  /**
-   * Gives each `// step` row to the innermost statements on it, where the rows inside a function body belong to the
-   * statements of that body, and a body on the step row alone belongs to a statement that contains the function and
-   * ends on that row, as a call taking a one-line callback does.
-   */
-  protected assignSteps(): void {
-    for (const [row, stepId] of this.stepIdByRow) {
-      const onRow = this.steppables.filter((steppable) => steppable.row <= row && row <= steppable.endRow);
-      const candidates = onRow.filter(
-        (steppable) =>
-          !this.isInNestedBody(steppable, row) &&
-          !this.bodies.some(
-            (body) =>
-              body.row === row &&
-              body.endRow === row &&
-              encloses(body, steppable) &&
-              onRow.some((outer) => outer.endRow === row && encloses(outer, body))
-          )
-      );
-      let depth = 0;
-      for (const candidate of candidates) depth = Math.max(depth, candidate.depth);
-      const innermost = candidates.filter((candidate) => candidate.depth === depth);
-      // A statement already recording the step of another row leaves this row unused, as Java rejects it.
-      if (innermost.length === 0 || innermost.some((candidate) => candidate.claimedRow !== undefined)) {
-        throw new CompileError([
-          {
-            row,
-            message: '// step は、式文、初期値のある変数宣言やフィールド、return 文、for 文の行に付けてください。',
-          },
-        ]);
-      }
-      for (const candidate of innermost) {
-        candidate.claimedRow = row;
-        candidate.assign(stepId);
-      }
+  /** Whether an `// atomic` annotation lies on a function's header, from its first row to its body's. */
+  protected claimsAtomicRow(node: Node, bodyNode: Node): boolean {
+    let claims = false;
+    for (let row = rowOf(node); row <= rowOf(bodyNode); row++) {
+      if (!this.atomicRows.has(row)) continue;
+      this.usedAtomicRows.add(row);
+      claims = true;
     }
+    return claims;
   }
 
-  private isInNestedBody(steppable: Steppable, row: number): boolean {
-    return this.bodies.some((body) => encloses(steppable, body) && body.row < row && row < body.endRow);
+  /** Rejects an annotation no function claims, which would silently leave the steps authors meant to hide. */
+  protected checkAtomicRows(): void {
+    const misplaced = [...this.atomicRows].filter((row) => !this.usedAtomicRows.has(row));
+    if (misplaced.length > 0)
+      throw new CompileError(misplaced.map((row) => ({ row, message: misplacedAtomicMessage })));
   }
 
   // Scopes ----------------------------------------------------------------------------------------------------------

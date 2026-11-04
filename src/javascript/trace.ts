@@ -1,5 +1,4 @@
 import type { ProgramRecording } from '../interpreter/program';
-import type { Annotations } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { parseJavaScript } from './parse';
@@ -20,21 +19,23 @@ import {
   valueOfElement,
 } from './values';
 
-// code-gauge-allow duplicateLines 21 -- Each language wires its own runtime into the shared TraceRecorder alike.
-export function traceJavaScriptProgram(program: string, annotations: Annotations): ProgramRecording {
-  const parsed = parseJavaScript(program, annotations.stepIdByRow);
+// code-gauge-allow duplicateLines 23 -- Each language wires its own runtime into the shared TraceRecorder alike.
+export function traceJavaScriptProgram(program: string, atomicRows: ReadonlySet<number>): ProgramRecording {
+  const parsed = parseJavaScript(program, { atomicRows });
   const runtime = new Runtime();
   const snapshotter = new Snapshotter(runtime);
-  const recorder = new TraceRecorder(runtime.world, annotations.callerIdByRow);
-  runtime.onStep = (stepId) => {
-    runtime.collectGarbage();
+  const recorder = new TraceRecorder(runtime.world);
+  runtime.onStep = (row) => {
     const { frames } = runtime;
+    if (frames.some((frame) => frame.isAtomic)) return false;
+    runtime.collectGarbage();
     const variables = snapshotter.variablesOf((frames.at(-1) as Frame).scope, true);
     recorder.record(
-      stepId,
+      row,
       frames.slice(1).map((frame) => frame.callRow),
       variables
     );
+    return true;
   };
   let finalVars: TraceItemVariable = {};
   // A model program may end with an uncaught exception to show how one stops the program.

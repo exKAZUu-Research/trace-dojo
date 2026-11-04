@@ -51,7 +51,7 @@ export const RegularProblemPresentation: React.FC<Props> = ({
                 <>
                   画面下部にある
                   <Box as="span" bgColor="orange.100" px={0.5} rounded="sm">
-                    {problem.sidToLineIndex.get(problem.traceItems[view.previousTraceItemIndex].sid)}行目
+                    {problem.traceItems[view.previousTraceItemIndex].line}行目
                   </Box>
                   を実行した後の盤面と変数の一覧表を参考に、
                 </>
@@ -62,7 +62,7 @@ export const RegularProblemPresentation: React.FC<Props> = ({
                 ) : (
                   <>
                     <Box as="span" border="2px solid #f56565" px={0.5} rounded="sm">
-                      {problem.sidToLineIndex.get(problem.traceItems[view.currentTraceItemIndex].sid)}行目
+                      {problem.traceItems[view.currentTraceItemIndex].line}行目
                     </Box>
                     を実行した後
                   </>
@@ -77,22 +77,12 @@ export const RegularProblemPresentation: React.FC<Props> = ({
           code={problem.displayProgram}
           programmingLanguageId="java"
           callerLines={
-            view.problemType === 'step'
-              ? problem.traceItems[view.currentTraceItemIndex].callStack.map((id) =>
-                  problem.callerIdToLineIndex.get(id)
-                )
-              : undefined
+            view.problemType === 'step' ? problem.traceItems[view.currentTraceItemIndex].callLines : undefined
           }
           currentFocusLine={
-            view.problemType === 'step'
-              ? problem.sidToLineIndex.get(problem.traceItems[view.currentTraceItemIndex].sid)
-              : undefined
+            view.problemType === 'step' ? problem.traceItems[view.currentTraceItemIndex].line : undefined
           }
-          previousFocusLine={
-            view.problemType === 'step'
-              ? problem.sidToLineIndex.get(problem.traceItems[viewingTraceItemIndex].sid)
-              : undefined
-          }
+          previousFocusLine={view.problemType === 'step' ? problem.traceItems[viewingTraceItemIndex].line : undefined}
         />
       </VStack>
       <VStack align="stretch" bgColor="gray.50" flexBasis={0} flexGrow={1} spacing="4">
@@ -157,16 +147,16 @@ const getInitialVariables = (
   let adjustedPreviousIndex = previousIndex;
   let emptyNonGlobals = false;
   if (problemType === 'step') {
-    const depth = traceItems[currentIndex].depth;
-    while (adjustedPreviousIndex > 0 && depth !== traceItems[adjustedPreviousIndex].depth) {
-      if (depth > traceItems[adjustedPreviousIndex].depth) {
+    const depth = traceItems[currentIndex].callLines.length;
+    while (adjustedPreviousIndex > 0 && depth !== traceItems[adjustedPreviousIndex].callLines.length) {
+      if (depth > traceItems[adjustedPreviousIndex].callLines.length) {
         emptyNonGlobals = true;
         break;
       }
       adjustedPreviousIndex -= 1;
     }
     emptyNonGlobals ||=
-      traceItems[currentIndex].callStack.at(-1) !== traceItems[adjustedPreviousIndex].callStack.at(-1);
+      traceItems[currentIndex].callLines.at(-1) !== traceItems[adjustedPreviousIndex].callLines.at(-1);
   }
   return Object.fromEntries(
     Object.entries(current)

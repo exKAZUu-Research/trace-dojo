@@ -14,10 +14,10 @@ export type DisplayNode =
   | { kind: 'object' | 'array'; entries: Record<string, DisplayNode> };
 
 export interface TraceItem {
-  depth: number;
-  sid: number;
-  /** caller id のスタック。 `// caller` のある行に caller id が付与される。 */
-  callStack: number[];
+  /** The 1-based line of the statement that has just run, or 0 for the state before the program runs. */
+  line: number;
+  /** The 1-based lines of the calls in progress, outermost first. */
+  callLines: number[];
   vars: TraceItemVariable;
   referenceVars: Record<string, DisplayNode>;
   turtles: TurtleTrace[];

@@ -49,6 +49,8 @@ export interface MethodInfo {
   access: Access;
   thrownTypes: ClassInfo[];
   declaration?: MethodDeclaration | ConstructorDeclaration;
+  /** Whether a trace shows a call to this method as part of its caller's step, marked by `// atomic`. */
+  isAtomic?: boolean;
   native?: NativeMethod;
   /** Filled in by the compiler for source methods. */
   code?: CompiledCode;

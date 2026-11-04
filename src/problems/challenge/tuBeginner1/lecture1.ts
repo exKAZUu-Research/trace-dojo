@@ -8,17 +8,17 @@ export const lecture1: ChallengeBase[] = [
     lectureIndex: 0,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.後に戻る();
+        t.後に戻る();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
     }
 }`,
     blanks: [
@@ -26,64 +26,64 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action3',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.@[前に進む]@();`,
       },
       {
         id: 'Action7',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.後に戻る();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.@[後に戻る]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.@[後に戻る]@();`,
       },
       {
         id: 'Action11',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.後に戻る();
+        t.後に戻る();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.後に戻る();
+        t.後に戻る();
+        t.左を向く();
+        t.前に進む();
+        t.@[前に進む]@();`,
       },
     ],
     bugs: [
@@ -91,66 +91,66 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action3',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.後に戻る();`,
         kind: 'logical',
       },
       {
         id: 'Action7',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.後に戻る();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();`,
         kind: 'logical',
       },
       {
         id: 'Action11',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.後に戻る();
+        t.後に戻る();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.後に戻る();
+        t.後に戻る();
+        t.左を向く();
+        t.前に進む();
+        t.後に戻る();`,
         kind: 'logical',
       },
     ],
@@ -162,17 +162,17 @@ export const lecture1: ChallengeBase[] = [
     lectureIndex: 0,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
+        t.後に戻る();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
     }
 }`,
     blanks: [
@@ -180,64 +180,64 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action3',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.@[前に進む]@();`,
       },
       {
         id: 'Action7',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
+        t.後に戻る();
+        t.右を向く();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.@[右を向く]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
+        t.後に戻る();
+        t.@[右を向く]@();`,
       },
       {
         id: 'Action11',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
+        t.後に戻る();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
+        t.後に戻る();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.@[前に進む]@();`,
       },
     ],
     bugs: [
@@ -245,66 +245,66 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action3',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.後に戻る();`,
         kind: 'logical',
       },
       {
         id: 'Action7',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
+        t.後に戻る();
+        t.右を向く();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
+        t.後に戻る();
+        t.後に戻る();`,
         kind: 'logical',
       },
       {
         id: 'Action11',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
+        t.後に戻る();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
+        t.後に戻る();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.後に戻る();`,
         kind: 'logical',
       },
     ],
@@ -316,22 +316,22 @@ export const lecture1: ChallengeBase[] = [
     lectureIndex: 0,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
+        t.後に戻る();
+        t.後に戻る();
     }
 }`,
     blanks: [
@@ -339,86 +339,86 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action9',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.@[前に進む]@();`,
       },
       {
         id: 'Action16',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
+        t.後に戻る();
+        t.後に戻る();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.@[後に戻る]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
+        t.後に戻る();
+        t.@[後に戻る]@();`,
       },
       {
         id: 'Action7',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.@[前に進む]@();`,
       },
     ],
     bugs: [
@@ -426,88 +426,88 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action9',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.後に戻る();`,
         kind: 'logical',
       },
       {
         id: 'Action16',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
+        t.後に戻る();
+        t.後に戻る();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
+        t.後に戻る();
+        t.前に進む();`,
         kind: 'logical',
       },
       {
         id: 'Action7',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();`,
         kind: 'logical',
       },
     ],
@@ -519,18 +519,18 @@ export const lecture1: ChallengeBase[] = [
     lectureIndex: 0,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
     }
 }`,
     blanks: [
@@ -538,66 +538,66 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action3',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.@[前に進む]@();`,
       },
       {
         id: 'Action7',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.右を向く();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.@[右を向く]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.@[右を向く]@();`,
       },
       {
         id: 'Action12',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.左を向く();
+        t.@[前に進む]@();`,
       },
     ],
     bugs: [
@@ -605,68 +605,68 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action3',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.後に戻る();`,
         kind: 'logical',
       },
       {
         id: 'Action7',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.右を向く();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();`,
         kind: 'logical',
       },
       {
         id: 'Action12',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();`,
         kind: 'logical',
       },
     ],
@@ -678,21 +678,21 @@ export const lecture1: ChallengeBase[] = [
     lectureIndex: 0,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.後に戻る();
+        t.後に戻る();
+        t.後に戻る();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
     }
 }`,
     blanks: [
@@ -700,82 +700,82 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action9',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.@[前に進む]@();`,
       },
       {
         id: 'Action15',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.後に戻る();
+        t.後に戻る();
+        t.後に戻る();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.後に戻る();
+        t.後に戻る();
+        t.後に戻る();
+        t.左を向く();
+        t.前に進む();
+        t.@[前に進む]@();`,
       },
       {
         id: 'Action6',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.@[前に進む]@();`,
       },
     ],
     bugs: [
@@ -783,84 +783,84 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action9',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.右を向く();`,
         kind: 'logical',
       },
       {
         id: 'Action15',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.後に戻る();
+        t.後に戻る();
+        t.後に戻る();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.後に戻る();
+        t.後に戻る();
+        t.後に戻る();
+        t.左を向く();
+        t.前に進む();
+        t.後に戻る();`,
         kind: 'logical',
       },
       {
         id: 'Action6',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.後に戻る();`,
         kind: 'logical',
       },
     ],
@@ -872,18 +872,18 @@ export const lecture1: ChallengeBase[] = [
     lectureIndex: 0,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.後に戻る();
+        t.左を向く();
+        t.前に進む();
     }
 }`,
     blanks: [
@@ -891,66 +891,66 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action3',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.@[前に進む]@();`,
       },
       {
         id: 'Action7',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.@[前に進む]@();`,
       },
       {
         id: 'Action12',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.後に戻る();
+        t.左を向く();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.後に戻る();
+        t.左を向く();
+        t.@[前に進む]@();`,
       },
     ],
     bugs: [
@@ -958,68 +958,68 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action3',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.後に戻る();`,
         kind: 'logical',
       },
       {
         id: 'Action7',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.後に戻る();`,
         kind: 'logical',
       },
       {
         id: 'Action12',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.後に戻る();
+        t.左を向く();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.後に戻る();
+        t.左を向く();
+        t.後に戻る();`,
         kind: 'logical',
       },
     ],
@@ -1031,18 +1031,18 @@ export const lecture1: ChallengeBase[] = [
     lectureIndex: 0,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.後に戻る();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
     }
 }`,
     blanks: [
@@ -1050,68 +1050,68 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action7',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.右を向く();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.@[右を向く]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.@[右を向く]@();`,
       },
       {
         id: 'Action12',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.後に戻る();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.後に戻る();
+        t.左を向く();
+        t.前に進む();
+        t.@[前に進む]@();`,
       },
       {
         id: 'Action4',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.右を向く();
+        t.@[前に進む]@();`,
       },
     ],
     bugs: [
@@ -1119,70 +1119,70 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action7',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.右を向く();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.左を向く();`,
         kind: 'logical',
       },
       {
         id: 'Action12',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.後に戻る();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.後に戻る();
+        t.左を向く();
+        t.前に進む();
+        t.後に戻る();`,
         kind: 'logical',
       },
       {
         id: 'Action4',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.右を向く(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.右を向く();
+        t.右を向く();`,
         kind: 'logical',
       },
     ],
@@ -1194,22 +1194,22 @@ export const lecture1: ChallengeBase[] = [
     lectureIndex: 0,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.後に戻る();
+        t.左を向く();
+        t.後に戻る();
+        t.右を向く();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
     }
 }`,
     blanks: [
@@ -1217,58 +1217,58 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action3',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.@[前に進む]@();`,
       },
       {
         id: 'Action9',
-        before: `        t.左を向く(); // step`,
-        after: `        t.@[左を向く]@(); // step`,
+        before: `        t.左を向く();`,
+        after: `        t.@[左を向く]@();`,
       },
       {
         id: 'Action16',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.後に戻る();
+        t.左を向く();
+        t.後に戻る();
+        t.右を向く();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.後に戻る();
+        t.左を向く();
+        t.後に戻る();
+        t.右を向く();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.右を向く();
+        t.@[前に進む]@();`,
       },
     ],
     bugs: [
@@ -1276,60 +1276,60 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action3',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.後に戻る();`,
         kind: 'logical',
       },
       {
         id: 'Action9',
-        before: `        t.左を向く(); // step`,
-        after: `        t.前に進む(); // step`,
+        before: `        t.左を向く();`,
+        after: `        t.前に進む();`,
         kind: 'logical',
       },
       {
         id: 'Action16',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.後に戻る();
+        t.左を向く();
+        t.後に戻る();
+        t.右を向く();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.後に戻る(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.後に戻る();
+        t.左を向く();
+        t.後に戻る();
+        t.右を向く();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.右を向く();
+        t.後に戻る();`,
         kind: 'logical',
       },
     ],
@@ -1341,18 +1341,18 @@ export const lecture1: ChallengeBase[] = [
     lectureIndex: 0,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.右を向く(); // step
-        t.後に戻る(); // step
-        t.前に進む(); // step
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.後に戻る();
+        t.後に戻る();
+        t.右を向く();
+        t.右を向く();
+        t.後に戻る();
+        t.前に進む();
     }
 }`,
     blanks: [
@@ -1360,66 +1360,66 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action3',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.@[前に進む]@();`,
       },
       {
         id: 'Action7',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.後に戻る();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.@[後に戻る]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.@[後に戻る]@();`,
       },
       {
         id: 'Action12',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.右を向く(); // step
-        t.後に戻る(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.後に戻る();
+        t.後に戻る();
+        t.右を向く();
+        t.右を向く();
+        t.後に戻る();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.右を向く(); // step
-        t.後に戻る(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.後に戻る();
+        t.後に戻る();
+        t.右を向く();
+        t.右を向く();
+        t.後に戻る();
+        t.@[前に進む]@();`,
       },
     ],
     bugs: [
@@ -1427,68 +1427,68 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action3',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.後に戻る();`,
         kind: 'logical',
       },
       {
         id: 'Action7',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.後に戻る();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();`,
         kind: 'logical',
       },
       {
         id: 'Action12',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.右を向く(); // step
-        t.後に戻る(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.後に戻る();
+        t.後に戻る();
+        t.右を向く();
+        t.右を向く();
+        t.後に戻る();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.右を向く(); // step
-        t.後に戻る(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.前に進む();
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.後に戻る();
+        t.後に戻る();
+        t.右を向く();
+        t.右を向く();
+        t.後に戻る();
+        t.後に戻る();`,
         kind: 'logical',
       },
     ],
@@ -1500,19 +1500,19 @@ export const lecture1: ChallengeBase[] = [
     lectureIndex: 0,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
     }
 }`,
     blanks: [
@@ -1520,72 +1520,72 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action8',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.@[左を向く]@(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
+        t.@[左を向く]@();`,
       },
       {
         id: 'Action13',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.@[後に戻る]@(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.@[後に戻る]@();`,
       },
       {
         id: 'Action4',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.@[前に進む]@();`,
       },
     ],
     bugs: [
@@ -1593,74 +1593,74 @@ export const lecture1: ChallengeBase[] = [
         id: 'Action8',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();`,
         kind: 'logical',
       },
       {
         id: 'Action13',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
+        t.前に進む();
+        t.左を向く();
+        t.後に戻る();
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();`,
         kind: 'logical',
       },
       {
         id: 'Action4',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.前に進む(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle();
+        t.右を向く();
+        t.前に進む();
+        t.後に戻る();`,
         kind: 'logical',
       },
     ],

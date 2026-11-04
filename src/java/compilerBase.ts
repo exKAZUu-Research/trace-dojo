@@ -1,4 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
+import type { TraceOptions } from '../interpreter/traceAnnotations';
 import type { Expression, Span, TypeSyntax } from './ast';
 import { getBuiltins } from './builtins';
 import { type Frame } from './runtime';
@@ -22,8 +23,8 @@ import {
 import { type JavaString, type Value } from './values';
 
 export interface CompileOptions {
-  /** Statement IDs of the rows annotated with `// step`. */
-  stepIdByRow?: ReadonlyMap<number, number>;
+  /** Makes the statements that record steps report their rows to `Runtime.onStep`. */
+  trace?: TraceOptions;
 }
 
 export type Eval = (frame: Frame) => Value;
@@ -106,14 +107,16 @@ export abstract class CompilerBase {
   protected readonly builtins = getBuiltins();
   protected readonly classes = new Map<string, ClassInfo>();
   protected readonly internedStrings = new Map<string, JavaString>();
-  protected readonly stepIdByRow: ReadonlyMap<number, number>;
-  /** Rows of `// step` annotations that a statement records a step for. */
-  protected readonly usedStepRows = new Set<number>();
+  protected readonly recordsSteps: boolean;
+  protected readonly atomicRows: ReadonlySet<number>;
+  /** Rows of `// atomic` annotations that a method or constructor declaration claims. */
+  protected readonly usedAtomicRows = new Set<number>();
   private readonly fieldConstants = new Map<FieldInfo, Value>();
   private readonly computingConstants = new Set<FieldInfo>();
 
   constructor(options: CompileOptions) {
-    this.stepIdByRow = options.stepIdByRow ?? new Map();
+    this.recordsSteps = options.trace !== undefined;
+    this.atomicRows = options.trace?.atomicRows ?? new Set();
   }
 
   protected abstract compileValue(context: MethodContext, expression: Expression, allowsVoid?: boolean): CompiledValue;

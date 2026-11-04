@@ -8,26 +8,20 @@ export type TraceVariables = Pick<TraceItem, 'vars' | 'referenceVars'>;
 export class TraceRecorder {
   readonly traceItems: TraceItem[];
 
-  constructor(
-    private readonly world: TurtleWorld,
-    private readonly callerIdByRow: Map<number, number>
-  ) {
-    this.traceItems = [
-      { depth: 0, sid: 0, callStack: [], vars: {}, referenceVars: {}, turtles: [], board: world.boardText() },
-    ];
+  constructor(private readonly world: TurtleWorld) {
+    this.traceItems = [{ line: 0, callLines: [], vars: {}, referenceVars: {}, turtles: [], board: world.boardText() }];
   }
 
   /**
+   * @param row The row of the statement that has just run.
    * @param callRows The rows of the calls that created the frames above the entry point's, where an undefined row
    * marks an implicit call (such as a default constructor), which is part of its caller's step.
    */
-  record(stepId: number, callRows: (number | undefined)[], variables: TraceVariables): void {
+  record(row: number, callRows: (number | undefined)[], variables: TraceVariables): void {
     if (this.traceItems.length >= MAX_TRACE_ITEMS) throw new ExecutionLimitError('trace');
-    const calls = callRows.filter((row) => row !== undefined);
     this.traceItems.push({
-      depth: calls.length,
-      sid: stepId,
-      callStack: calls.map((row) => this.callerIdByRow.get(row) ?? 0),
+      line: row + 1,
+      callLines: callRows.filter((callRow) => callRow !== undefined).map((callRow) => callRow + 1),
       ...variables,
       turtles: this.world.turtleTraces(),
       board: this.world.boardText(),

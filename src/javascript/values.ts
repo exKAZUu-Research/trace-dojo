@@ -95,7 +95,9 @@ export interface ClassField {
   key: string;
   isPrivate: boolean;
   initialize: ((thisValue: JsObject) => Value) | undefined;
-  stepId: number | undefined;
+  stepRow: number | undefined;
+  /** Whether the initializer only creates objects, so its step is left to their constructors' steps when they record. */
+  onlyCalls: boolean;
   /** A private method or accessor, which every instance gets before its fields. */
   property?: Property;
 }

@@ -48,14 +48,20 @@ export class Runtime {
   readonly frames: Frame[] = [];
   readonly world = new TurtleWorld();
   readonly staticValues = new Map<ClassInfo, Value[]>();
-  /** Called after a statement on a `// step` row completes. */
-  onStep?: (stepId: number) => void;
+  /** Called with a statement's row after it completes, in a program compiled for tracing; tells whether it recorded. */
+  onStep?: (row: number) => boolean;
+  /** How many steps `onStep` has recorded, which tells a statement whether the methods it called recorded any. */
+  recordedSteps = 0;
   readonly budget = new ExecutionBudget();
   private allocatedSlots = 0;
   private readonly initializingClasses = new Set<ClassInfo>();
   private readonly dispatchCache = new Map<MethodInfo, Map<ClassInfo, MethodInfo>>();
 
   constructor(readonly builtins: Builtins) {}
+
+  step(row: number): void {
+    if (this.onStep?.(row)) this.recordedSteps++;
+  }
 
   spend(cost = 1): void {
     this.budget.spend(cost);

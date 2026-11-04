@@ -8,7 +8,7 @@ import { javaChallengeDefinitions } from '../../src/problems/javaChallenges/defi
 import { instantiateJavaChallenge } from '../../src/problems/javaChallenges/instantiate';
 import { courseIdToLectureIndexToProblemIds } from '../../src/problems/problemData';
 
-test('all independent regular challenges render bounded traces with mapped displayed statements and calls', () => {
+test('all independent regular challenges render bounded traces', () => {
   expect(challengeBases).toHaveLength(160);
   for (const courseId of ['tuBeginner1', 'tuBeginner2'])
     for (let lectureIndex = 0; lectureIndex < 8; lectureIndex++)
@@ -25,16 +25,6 @@ test('all independent regular challenges render bounded traces with mapped displ
     expect(problem.uncaughtException, base.id).toBeUndefined();
     expect(problem.traceItems.length - 1, base.id).toBeGreaterThan(0);
     expect(problem.traceItems.length - 1, base.id).toBeLessThanOrEqual(30);
-    const lineCount = problem.displayProgram.split('\n').length;
-    for (const line of [...problem.sidToLineIndex.values(), ...problem.callerIdToLineIndex.values()]) {
-      expect(line, base.id).toBeGreaterThanOrEqual(1);
-      expect(line, base.id).toBeLessThanOrEqual(lineCount);
-    }
-    for (const item of problem.traceItems.slice(1)) {
-      expect(problem.sidToLineIndex.has(item.sid), `${base.id}: statement ${item.sid}`).toBe(true);
-      for (const caller of item.callStack)
-        expect(problem.callerIdToLineIndex.has(caller), `${base.id}: caller ${caller}`).toBe(true);
-    }
     expect(courseIdToLectureIndexToProblemIds[base.courseId].flat(), base.id).not.toContain(base.id);
     for (const edits of [base.blanks, base.bugs])
       expect(new Set(edits.map(({ before }) => before)).size, `${base.id}: distinct edit positions`).toBe(3);
@@ -63,7 +53,7 @@ test('all independent blank and bug starters hide internal annotations while pre
   for (const [id, item] of variants) {
     if (item.problemFormat === 'regular') throw new Error('Unexpected regular variant');
     const problem = instantiateJavaChallenge(id, item.problemFormat);
-    expect(problem.displayProgram, id).not.toMatch(/\/\/\s*(?:step|caller)\b/);
+    expect(problem.displayProgram, id).not.toMatch(/\/\/\s*atomic\b/);
     expect(problem.displayProgram.split('\n'), id).toHaveLength(
       javaChallengeDefinitions[id].starterProgram.split('\n').length
     );
@@ -73,31 +63,28 @@ test('all independent blank and bug starters hide internal annotations while pre
 
 test('display cleanup preserves Java literals and ordinary comments including marker-like textblock lines', () => {
   const source = String.raw`class Main {
-  String quoted = "escaped \" // step"; // step: 12 // caller
-  char slash = '/'; // caller // step
+  String quoted = "escaped \" // atomic";
   String text = """
-// step
-// caller
-"""; // step
-  /* // step
-     // caller */
-  int x = 1; // step explanation stays
-  int y = 2; // caller note stays
-  int z = 3; // step: 8
+// atomic
+""";
+  /* // atomic */
+  void run() { // atomic
+  }
+  void note() { // remark stays // atomic
+  }
+  int x = 1; // atomic explanation stays
 }`.replaceAll('\n', '\r\n');
-  const trailingSpace = ' ';
   const expected = String.raw`class Main {
-  String quoted = "escaped \" // step";${trailingSpace}
-  char slash = '/';${trailingSpace}
+  String quoted = "escaped \" // atomic";
   String text = """
-// step
-// caller
-""";${trailingSpace}
-  /* // step
-     // caller */
-  int x = 1; // step explanation stays
-  int y = 2; // caller note stays
-  int z = 3;${trailingSpace}
+// atomic
+""";
+  /* // atomic */
+  void run() {
+  }
+  void note() { // remark stays
+  }
+  int x = 1; // atomic explanation stays
 }`.replaceAll('\n', '\r\n');
   expect(stripJavaTraceAnnotations(source)).toBe(expected);
 });

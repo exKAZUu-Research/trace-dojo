@@ -34,7 +34,9 @@ export class Frame {
   constructor(
     public scope: Scope,
     /** The row of the call that created this frame, or undefined for the program and implicit calls. */
-    readonly callRow: number | undefined
+    readonly callRow: number | undefined,
+    /** Whether this frame runs a function marked `// atomic`. */
+    readonly isAtomic: boolean
   ) {}
 }
 
@@ -50,8 +52,10 @@ export class Runtime {
    * own functions count as called.
    */
   currentRow: number | undefined;
-  /** Called after a statement on a `// step` row completes. */
-  onStep?: (stepId: number) => void;
+  /** Called with a statement's row after it completes, in a program converted for tracing; tells whether it recorded. */
+  onStep?: (row: number) => boolean;
+  /** How many steps `onStep` has recorded, which tells a statement whether the functions it called recorded any. */
+  recordedSteps = 0;
   readonly evaluator: Evaluator;
   private allocatedSlots = 0;
 
@@ -62,6 +66,10 @@ export class Runtime {
 
   get frame(): Frame {
     return this.frames.at(-1) as Frame;
+  }
+
+  step(row: number): void {
+    if (this.onStep?.(row)) this.recordedSteps++;
   }
 
   spend(cost = 1): void {
@@ -388,9 +396,9 @@ export class Runtime {
     return isObject(prototype) ? prototype : fallback;
   }
 
-  pushFrame(scope: Scope, callRow: number | undefined): Frame {
+  pushFrame(scope: Scope, callRow: number | undefined, isAtomic: boolean): Frame {
     if (this.frames.length >= LIMITS.maxCallDepth) this.throwError('RangeError', 'Maximum call stack size exceeded');
-    const frame = new Frame(scope, callRow);
+    const frame = new Frame(scope, callRow, isAtomic);
     this.frames.push(frame);
     return frame;
   }

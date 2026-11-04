@@ -52,9 +52,7 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
 
 import { ChallengePageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/pageOnClient';
 import { ProblemPageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/pageOnClient';
-import { extractBlanks } from '../../../src/problems/fillInBlank/blanks';
 import { instantiateProblem } from '../../../src/problems/instantiateProblem';
-import { javaChallengeDefinitions } from '../../../src/problems/javaChallenges/definitions';
 import { instantiateJavaChallenge } from '../../../src/problems/javaChallenges/instantiate';
 
 beforeEach(() => {
@@ -1193,7 +1191,7 @@ test('local draft identities separate ordinary and challenge modes with the same
 });
 
 test.each(['fillInBlank', 'bugFix'] as const)(
-  '%s editor hides trace annotations and migrates an annotated draft without losing learner text',
+  '%s editor restores a draft saved while the shown program kept blanks at the ends of its rows',
   async (format) => {
     const id = `challengeI7ValueSnapshot${format === 'fillInBlank' ? 'Blank' : 'Bug'}Condition4`;
     const problem = instantiateJavaChallenge(id, format);
@@ -1214,27 +1212,18 @@ test.each(['fillInBlank', 'bugFix'] as const)(
     let rendered = renderChallenge();
     let editor = await screen.findByRole('textbox', { name: /Java/ });
     expect(readRenderedJavaSource(editor)).toBe(problem.displayProgram);
-    expect(readRenderedJavaSource(editor)).not.toMatch(/\/\/\s*(?:step|caller)\b/);
     await replaceJavaSource(editor, `${problem.displayProgram}\n// saved learner edit`);
     const entry = expectStoredDraft('// saved learner edit');
     const saved = JSON.parse(entry.raw);
-    const oldBaseline = extractBlanks(javaChallengeDefinitions[id].starterProgram).programWithPlaceholders;
-    const learnerText = String.raw`// step explanation stays
-String quoted = "escaped \" // step";
-char slash = '/';
-String text = """
-// step
-// caller
-""";
-/* // caller
-   // step */`;
-    saved.baseline = oldBaseline;
-    saved.code = `${oldBaseline}\n// step: 12 // caller\n${learnerText}`;
+    const paddedBaseline = problem.displayProgram.replaceAll(/;$/gm, '; ');
+    expect(paddedBaseline).not.toBe(problem.displayProgram);
+    saved.baseline = paddedBaseline;
+    saved.code = `${paddedBaseline}\n// saved learner edit`;
     localStorage.setItem(entry.key, JSON.stringify(saved));
     rendered.unmount();
     rendered = renderChallenge();
     editor = await screen.findByRole('textbox', { name: /Java/ });
-    expect(readRenderedJavaSource(editor)).toBe(`${problem.displayProgram}\n\n${learnerText}`);
+    expect(readRenderedJavaSource(editor)).toBe(saved.code);
     expect(editor).toHaveAttribute('contenteditable', 'true');
     expect(infrastructure.grade).not.toHaveBeenCalled();
     rendered.unmount();
