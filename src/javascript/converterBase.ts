@@ -68,11 +68,14 @@ export abstract class ConverterBase {
     return this.trace ? rowOf(node) : undefined;
   }
 
-  /** Whether an `// atomic` annotation lies on a function's header, from its first row to its body's. */
+  /**
+   * Whether an `// atomic` annotation lies on a function's header, from its first row to its body's, and no function
+   * nested there has claimed it already.
+   */
   protected claimsAtomicRow(node: Node, bodyNode: Node): boolean {
     let claims = false;
     for (let row = rowOf(node); row <= rowOf(bodyNode); row++) {
-      if (!this.atomicRows.has(row)) continue;
+      if (!this.atomicRows.has(row) || this.usedAtomicRows.has(row)) continue;
       this.usedAtomicRows.add(row);
       claims = true;
     }

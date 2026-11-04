@@ -13,11 +13,14 @@ export interface StepRecorder {
 export class StepTracker {
   recorder?: StepRecorder;
   private recordedSteps = 0;
-  private completedAtomicCalls = 0;
+  /** Whether an atomic call returned after the last recorded step, leaving an effect that no step shows yet. */
+  private atomicCallUnshown = false;
 
   /** Records the step of the statement at `row`, if the statement records steps. */
   step(row: number | undefined): void {
-    if (row !== undefined && this.recorder?.record(row)) this.recordedSteps++;
+    if (row === undefined || !this.recorder?.record(row)) return;
+    this.recordedSteps++;
+    this.atomicCallUnshown = false;
   }
 
   /**
@@ -30,23 +33,23 @@ export class StepTracker {
 
   /**
    * Runs a statement, then records its step at `row`. One that `onlyCalls` (calls functions or creates objects) records
-   * none when the calls it made recorded steps and nothing changed after the last of them, since those steps already
-   * show what it did. A completed atomic call, or a change after those steps (a turtle operation taking an argument
-   * whose evaluation recorded steps, a variable a `return` expression updates), leaves an effect only this step shows.
+   * none when the calls it made recorded steps and nothing happened after the last of them, since those steps already
+   * show what it did. An atomic call returning after those steps, or any change after them (a turtle operation taking
+   * an argument whose evaluation recorded steps, a variable a `return` expression updates), needs this step.
    */
   runStatement<T>(row: number | undefined, onlyCalls: boolean, run: () => T): T {
-    const { recordedSteps, completedAtomicCalls } = this;
+    const { recordedSteps } = this;
     const result = run();
     const callsShowedIt =
       onlyCalls &&
       this.recordedSteps !== recordedSteps &&
-      this.completedAtomicCalls === completedAtomicCalls &&
+      !this.atomicCallUnshown &&
       this.recorder?.showsState() === true;
     if (!callsShowedIt) this.step(row);
     return result;
   }
 
   completeAtomicCall(): void {
-    this.completedAtomicCalls++;
+    this.atomicCallUnshown = true;
   }
 }

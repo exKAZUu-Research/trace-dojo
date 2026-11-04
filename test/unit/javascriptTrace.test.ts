@@ -487,6 +487,24 @@ bump();`;
   ]);
 });
 
+test.each(['function inner() { // atomic', '() => { // atomic'])(
+  'an atomic default callback leaves its enclosing function stepped: %s',
+  (callback) => {
+    const program = `let total = 0;
+function outer(
+  callback = ${callback}
+    total += 10;
+  }
+) {
+  total += 1;
+  callback();
+  total += 2;
+}
+outer();`;
+    expect(traceProgram('javascript', program, program).traceItems.map(({ line }) => line)).toEqual([0, 1, 7, 8, 9]);
+  }
+);
+
 test('display programs keep their placeholders and lose their annotations', () => {
   const program = `function move(t) { // atomic
   t.forward();

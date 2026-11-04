@@ -311,7 +311,6 @@ export class ProgramConverter extends ExpressionConverter {
     if (hasChild(node, 'async')) unsupported(node, 'async 関数');
     if (hasChild(node, '*')) unsupported(node, 'ジェネレータ関数');
     const bodyNode = field(node, 'body');
-    const isAtomic = this.claimsAtomicRow(node, bodyNode);
     const outer = this.context;
     const isArrow = kind === 'arrow';
     const context = newContext(
@@ -326,6 +325,8 @@ export class ProgramConverter extends ExpressionConverter {
         const { params, rest } = this.parameters(node, kind);
         const body =
           bodyNode.type === 'statement_block' ? this.statementList(namedChildren(bodyNode)) : this.expression(bodyNode);
+        // Claimed after the parameters and the body, so that a function nested in a header row owns its annotation.
+        const isAtomic = this.claimsAtomicRow(node, bodyNode);
         const bindsOwnName = node.type === 'function_expression' && node.childForFieldName('name') !== null;
         // Only an arrow function's own uses are its enclosing function's; a function's own uses get its arguments.
         const usesArguments = !isArrow && context.argumentsUse.isUsed;
