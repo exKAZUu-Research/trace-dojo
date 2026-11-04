@@ -173,7 +173,7 @@ while (a.前に進めるか()) {
 const painted = a.前のマスが塗られているか();`,
   },
   {
-    name: 'a for header annotated on two rows',
+    name: 'a for header written over several rows',
     java: javaMain(`
     Turtle t = new Turtle(0, 0);
     for (int i = 0;
@@ -190,7 +190,7 @@ for (let i = 0;
 }`,
   },
   {
-    name: 'calls with caller annotations',
+    name: 'calls whose callee records steps',
     java: javaMain(
       `
     draw(new Turtle(1, 0), 2);
@@ -276,6 +276,18 @@ test.each([
   expect(
     traceProgram('javascript', javascriptProgram, javascriptProgram).traceItems.map(({ callLines }) => callLines.length)
   ).toEqual([0, 1]);
+});
+
+test('a compound assignment of a creation records its step after the constructor steps in both languages', () => {
+  const javaProgram = javaMain('    String s = "a";\n    s += new Box();', '').replace(
+    /\}$/,
+    '}\nclass Box {\n  int n = 1;\n}'
+  );
+  const javascriptProgram = 'class Box {\n  n = 1;\n}\nlet s = "a";\ns += new Box();';
+  expect(traceProgram('java', javaProgram, javaProgram).traceItems.at(-1)?.line).toBe(4);
+  expect(traceProgram('javascript', javascriptProgram, javascriptProgram).traceItems.at(-1)?.vars.s).toBe(
+    'a[object Object]'
+  );
 });
 
 test('an uncaught exception is described as JavaScript prints it', () => {
@@ -538,6 +550,7 @@ test.each([
 test.each([
   ['a literal', '1', false],
   ['a constant expression', '-(1 + 2) * 3', false],
+  ['a template of constants', '`a${1 + 2}`', false],
   ['a created turtle', 'new Turtle()', true],
   ['an array of created turtles', '[new Turtle()]', true],
   ['a call', 'String(2)', true],

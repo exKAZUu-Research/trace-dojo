@@ -419,6 +419,9 @@ function isConstantExpression(expression: Expression): boolean {
     case 'literal': {
       return true;
     }
+    case 'template': {
+      return expression.expressions.every(isConstantExpression);
+    }
     case 'parenthesized': {
       return isConstantExpression(expression.expression);
     }

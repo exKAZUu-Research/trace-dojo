@@ -607,7 +607,8 @@ export class Evaluator extends ExpressionEvaluator {
 /** Whether an expression statement only calls functions or creates objects, whose own steps show what it did. */
 function onlyCalls(expression: Expression): boolean {
   const inner = withoutParentheses(expression);
-  if (inner.kind === 'assign') return isObjectCreation(inner.value);
+  // A compound assignment such as `s += new Box()` computes and stores a value after the constructor returns.
+  if (inner.kind === 'assign') return inner.operator === '=' && isObjectCreation(inner.value);
   return inner.kind === 'call' || isObjectCreation(inner);
 }
 

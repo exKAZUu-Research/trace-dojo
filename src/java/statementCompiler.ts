@@ -689,7 +689,8 @@ function loopCompletion(completion: Completion, labels: string[]): Completion | 
 
 /** Whether an expression statement only calls methods or creates objects, whose own steps show what it did. */
 function onlyCalls(expression: Expression): boolean {
-  if (expression.kind === 'assign') return isObjectCreation(expression.value);
+  // A compound assignment such as `s += new Box()` computes and stores a value after the constructor returns.
+  if (expression.kind === 'assign') return expression.operator === '=' && isObjectCreation(expression.value);
   return expression.kind === 'call' || isObjectCreation(expression);
 }
 
