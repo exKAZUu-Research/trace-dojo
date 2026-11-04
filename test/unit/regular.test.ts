@@ -113,12 +113,20 @@ describe('regular problem grading', () => {
     });
   });
 
-  test('normalizes full-width numbers and letters in variable and expression answers', () => {
+  test('normalizes full-width characters in variable and expression answers', () => {
     const input = answerFor();
-    input.expectedVariables = { count: 12, 'name + 1': 'Ａ３' };
-    input.answerVariables = { count: '１２', 'name + 1': 'A3' };
+    input.expectedVariables = { count: 12, 'name + 1': 'Ａ３', ratio: -1.5, values: [-1, 2], text: 'a b' };
+    input.answerVariables = { count: '１２', 'name + 1': 'A3', ratio: 'ー１．５', values: '－１，２', text: 'ａ　ｂ' };
 
     expect(gradeRegularAnswers(input)).toEqual({ status: 'correct', incorrectLocations: [], hintText: '' });
+  });
+
+  test('keeps prolonged sound marks in string answers', () => {
+    const input = answerFor();
+    input.expectedVariables = { text: '-' };
+    input.answerVariables = { text: 'ー' };
+
+    expect(gradeRegularAnswers(input).incorrectLocations).toEqual(['変数text']);
   });
 
   test('does not show hints for a correct answer on a remainder line', () => {
