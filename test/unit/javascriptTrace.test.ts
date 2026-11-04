@@ -521,14 +521,23 @@ test.each([
   }
 );
 
-test('a static field records no step, since the variable table shows no static fields', () => {
-  const program = `class Main {
-  static n = 1;
-  static label = String(2);
-}
-const x = Main.n;`;
-  expect(traceProgram('javascript', program, program).traceItems.map(({ line }) => line)).toEqual([0, 5]);
-});
+test.each([
+  ['a literal', '1', false],
+  ['a constant expression', '-(1 + 2) * 3', false],
+  ['a created turtle', 'new Turtle()', true],
+  ['an array of created turtles', '[new Turtle()]', true],
+  ['a call', 'String(2)', true],
+])(
+  'a static field initialized with %s (%s) records a step only when evaluating it can have an effect',
+  (_, initializer, recordsStep) => {
+    const program = `class Main {
+  static field = ${initializer};
+}`;
+    const trace = traceProgram('javascript', program, program);
+    expect(trace.traceItems.map(({ line }) => line)).toEqual(recordsStep ? [0, 2] : [0]);
+    expect(trace.traceItems.at(-1)?.turtles).toEqual(trace.finalTurtles);
+  }
+);
 
 test('a one-line method of a longer object literal records a step each time it runs', () => {
   const program = `let total = 0;

@@ -404,11 +404,43 @@ export class ProgramConverter extends ExpressionConverter {
         ? this.withContext(newContext(false, false, true), () => this.expression(valueNode))
         : undefined;
       const fieldMember: ClassMember = { kind: 'field', isStatic, key, value, row: rowOf(member) };
-      // The variable table shows no static fields, so initializing one has nothing for learners to answer.
-      return valueNode && !isStatic ? this.steppable(member, fieldMember) : fieldMember;
+      // As in Java, a static field's constant initializer records no step: it changes nothing learners see.
+      const recordsStep = value !== undefined && !(isStatic && isConstantExpression(value));
+      return recordsStep ? this.steppable(member, fieldMember) : fieldMember;
     }
     if (member.type === 'class_static_block') return unsupported(member, 'static ブロック');
     return unsupported(member, `クラスの中の「${member.type}」`);
+  }
+}
+
+/** Whether an expression combines only literals, as a Java constant expression does, so evaluating it has no effect. */
+function isConstantExpression(expression: Expression): boolean {
+  switch (expression.kind) {
+    case 'literal': {
+      return true;
+    }
+    case 'parenthesized': {
+      return isConstantExpression(expression.expression);
+    }
+    case 'unary': {
+      return ['-', '+', '!', '~'].includes(expression.operator) && isConstantExpression(expression.argument);
+    }
+    case 'binary': {
+      return (
+        !['in', 'instanceof'].includes(expression.operator) &&
+        isConstantExpression(expression.left) &&
+        isConstantExpression(expression.right)
+      );
+    }
+    case 'logical': {
+      return isConstantExpression(expression.left) && isConstantExpression(expression.right);
+    }
+    case 'conditional': {
+      return [expression.test, expression.consequent, expression.alternate].every(isConstantExpression);
+    }
+    default: {
+      return false;
+    }
   }
 }
 
