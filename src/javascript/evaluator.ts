@@ -606,8 +606,9 @@ export class Evaluator extends ExpressionEvaluator {
 
 /** Whether an expression statement only calls functions or creates objects, whose own steps show what it did. */
 function onlyCalls(expression: Expression): boolean {
-  if (expression.kind === 'assign') return isObjectCreation(expression.value);
-  return expression.kind === 'call' || isObjectCreation(expression);
+  const inner = withoutParentheses(expression);
+  if (inner.kind === 'assign') return isObjectCreation(inner.value);
+  return inner.kind === 'call' || isObjectCreation(inner);
 }
 
 /** Whether a declaration only creates objects, whose constructors' steps show what it did. */
@@ -617,9 +618,15 @@ function onlyCreates({ declarators }: VariableDeclaration): boolean {
 
 /** Whether an expression only creates objects, whose constructors' steps show what creating them did. */
 function isObjectCreation(expression: Expression): boolean {
-  if (expression.kind === 'array')
-    return expression.elements.every(
+  const inner = withoutParentheses(expression);
+  if (inner.kind === 'array')
+    return inner.elements.every(
       (element) => element?.kind !== 'spread' && element !== undefined && isObjectCreation(element)
     );
-  return expression.kind === 'new';
+  return inner.kind === 'new';
+}
+
+/** The expression inside any parentheses, which Java's parser drops and so never classifies. */
+function withoutParentheses(expression: Expression): Expression {
+  return expression.kind === 'parenthesized' ? withoutParentheses(expression.expression) : expression;
 }

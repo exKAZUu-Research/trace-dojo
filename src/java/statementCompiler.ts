@@ -696,5 +696,7 @@ function onlyCalls(expression: Expression): boolean {
 /** Whether an expression only creates objects, whose constructors' steps show what creating them did. */
 export function isObjectCreation(expression: Expression | ArrayInitializer): boolean {
   if (expression.kind === 'arrayInitializer') return expression.elements.every(isObjectCreation);
+  if (expression.kind === 'newArray')
+    return expression.initializer !== undefined && isObjectCreation(expression.initializer);
   return expression.kind === 'new';
 }

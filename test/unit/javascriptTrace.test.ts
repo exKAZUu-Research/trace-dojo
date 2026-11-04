@@ -264,6 +264,20 @@ t.forward();`,
   expect(actual.uncaughtException === undefined).toBe(expected.uncaughtException === undefined);
 });
 
+test.each([
+  ['a parenthesized creation', 'Box b = (new Box());', 'const b = (new Box());'],
+  ['a created array of created objects', 'Box[] b = new Box[] { new Box() };', 'const b = [(new Box())];'],
+  ['an assigned creation', 'Box b;\n    b = (new Box());', 'let b;\n(b = new Box());'],
+])('%s leaves its step to the constructor in both languages', (_, java, javascript) => {
+  const javaProgram = javaMain(`    ${java}`, '').replace(/\}$/, '}\nclass Box {\n  int n = 1;\n}');
+  const javascriptProgram = `class Box {\n  n = 1;\n}\n${javascript}`;
+  const javaTrace = traceProgram('java', javaProgram, javaProgram).traceItems;
+  expect(javaTrace.map(({ callLines }) => callLines.length)).toEqual([0, 1]);
+  expect(
+    traceProgram('javascript', javascriptProgram, javascriptProgram).traceItems.map(({ callLines }) => callLines.length)
+  ).toEqual([0, 1]);
+});
+
 test('an uncaught exception is described as JavaScript prints it', () => {
   const program = `const t = new Turtle(0, 6);
 t.forward();`;
