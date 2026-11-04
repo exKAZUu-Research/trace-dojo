@@ -53,11 +53,7 @@ export function gradeRegularAnswers(input: {
 function normalizeAnswer(value: string, expected: TraceItemVariable[string]): string {
   const normalized = value.normalize('NFKC');
   // Japanese IMEs turn the minus key into a prolonged sound mark, which means a minus sign only in a numeric value.
-  return isNumeric(expected) ? normalized.replaceAll(/[ー‐‑‒–—―−]/g, '-') : normalized;
-}
-
-function isNumeric(value: TraceItemVariable[string]): boolean {
-  return typeof value === 'number' || (Array.isArray(value) && value.length > 0 && value.every(isNumeric));
+  return typeof expected === 'number' ? normalized.replaceAll(/[ー‐‑‒–—―−]/g, '-') : normalized;
 }
 
 function compareTurtles(a: TurtleTrace, b: TurtleTrace): number {

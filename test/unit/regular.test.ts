@@ -115,8 +115,8 @@ describe('regular problem grading', () => {
 
   test('normalizes full-width characters in variable and expression answers', () => {
     const input = answerFor();
-    input.expectedVariables = { count: 12, 'name + 1': 'Ａ３', ratio: -1.5, values: [-1, 2], text: 'a b' };
-    input.answerVariables = { count: '１２', 'name + 1': 'A3', ratio: 'ー１．５', values: '－１，２', text: 'ａ　ｂ' };
+    input.expectedVariables = { count: 12, 'name + 1': 'Ａ３', ratio: -1.5, text: 'a b' };
+    input.answerVariables = { count: '１２', 'name + 1': 'A3', ratio: 'ー１．５', text: 'ａ　ｂ' };
 
     expect(gradeRegularAnswers(input)).toEqual({ status: 'correct', incorrectLocations: [], hintText: '' });
   });
