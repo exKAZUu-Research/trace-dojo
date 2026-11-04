@@ -8,17 +8,17 @@ export const lecture6: ChallengeBase[] = [
     lectureIndex: 5,
     java: `public class Main {
     public static void main(String[] args) {
-        int sum = 0; // step
-        for (int i = 1; i < 5; i++) { // step
-            sum += i; // step
+        int sum = 0;
+        for (int i = 1; i < 5; i++) {
+            sum += i;
             if (sum >= 3) {
                 break;
             }
         }
-        Turtle t = new Turtle(sum, 1); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
+        Turtle t = new Turtle(sum, 1);
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
     }
 }`,
     blanks: [
@@ -29,13 +29,13 @@ export const lecture6: ChallengeBase[] = [
       },
       {
         id: 'Value1',
-        before: `        int sum = 0; // step`,
-        after: `        int sum = @[0]@; // step`,
+        before: `        int sum = 0;`,
+        after: `        int sum = @[0]@;`,
       },
       {
         id: 'Value2',
-        before: `        for (int i = 1; i < 5; i++) { // step`,
-        after: `        for (int i = @[1]@; i < 5; i++) { // step`,
+        before: `        for (int i = 1; i < 5; i++) {`,
+        after: `        for (int i = @[1]@; i < 5; i++) {`,
       },
     ],
     bugs: [
@@ -47,14 +47,14 @@ export const lecture6: ChallengeBase[] = [
       },
       {
         id: 'Value1',
-        before: `        int sum = 0; // step`,
-        after: `        int sum = 1; // step`,
+        before: `        int sum = 0;`,
+        after: `        int sum = 1;`,
         kind: 'logical',
       },
       {
         id: 'Value2',
-        before: `        for (int i = 1; i < 5; i++) { // step`,
-        after: `        for (int i = 2; i < 5; i++) { // step`,
+        before: `        for (int i = 1; i < 5; i++) {`,
+        after: `        for (int i = 2; i < 5; i++) {`,
         kind: 'logical',
       },
     ],
@@ -66,23 +66,23 @@ export const lecture6: ChallengeBase[] = [
     lectureIndex: 5,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 1); // step
-        for (int i = 0; i < 4; i++) { // step
+        Turtle t = new Turtle(2, 1);
+        for (int i = 0; i < 4; i++) {
             if (i == 2) {
                 break;
             }
-            t.前に進む(); // step
+            t.前に進む();
         }
-        t.右を向く(); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
+        t.右を向く();
+        t.前に進む();
+        t.左を向く();
     }
 }`,
     blanks: [
       {
         id: 'Condition2',
-        before: `        for (int i = 0; i < 4; i++) { // step`,
-        after: `        for (int i = 0; i @[<]@ 4; i++) { // step`,
+        before: `        for (int i = 0; i < 4; i++) {`,
+        after: `        for (int i = 0; i @[<]@ 4; i++) {`,
       },
       {
         id: 'Condition3',
@@ -91,15 +91,15 @@ export const lecture6: ChallengeBase[] = [
       },
       {
         id: 'Action6',
-        before: `            t.前に進む(); // step`,
-        after: `            t.@[前に進む]@(); // step`,
+        before: `            t.前に進む();`,
+        after: `            t.@[前に進む]@();`,
       },
     ],
     bugs: [
       {
         id: 'Condition2',
-        before: `        for (int i = 0; i < 4; i++) { // step`,
-        after: `        for (int i = 0; i > 4; i++) { // step`,
+        before: `        for (int i = 0; i < 4; i++) {`,
+        after: `        for (int i = 0; i > 4; i++) {`,
         kind: 'logical',
       },
       {
@@ -110,8 +110,8 @@ export const lecture6: ChallengeBase[] = [
       },
       {
         id: 'Action6',
-        before: `            t.前に進む(); // step`,
-        after: `            t.右を向く(); // step`,
+        before: `            t.前に進む();`,
+        after: `            t.右を向く();`,
         kind: 'logical',
       },
     ],
@@ -123,23 +123,23 @@ export const lecture6: ChallengeBase[] = [
     lectureIndex: 5,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 1); // step
-        for (int i = 0; i < 4; i++) { // step
-            t.前に進む(); // step
+        Turtle t = new Turtle(2, 1);
+        for (int i = 0; i < 4; i++) {
+            t.前に進む();
             if (i == 1) {
                 break;
             }
         }
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
+        t.後に戻る();
+        t.右を向く();
+        t.前に進む();
     }
 }`,
     blanks: [
       {
         id: 'Condition2',
-        before: `        for (int i = 0; i < 4; i++) { // step`,
-        after: `        for (int i = 0; i @[<]@ 4; i++) { // step`,
+        before: `        for (int i = 0; i < 4; i++) {`,
+        after: `        for (int i = 0; i @[<]@ 4; i++) {`,
       },
       {
         id: 'Condition4',
@@ -148,15 +148,15 @@ export const lecture6: ChallengeBase[] = [
       },
       {
         id: 'Action3',
-        before: `            t.前に進む(); // step`,
-        after: `            t.@[前に進む]@(); // step`,
+        before: `            t.前に進む();`,
+        after: `            t.@[前に進む]@();`,
       },
     ],
     bugs: [
       {
         id: 'Condition2',
-        before: `        for (int i = 0; i < 4; i++) { // step`,
-        after: `        for (int i = 0; i > 4; i++) { // step`,
+        before: `        for (int i = 0; i < 4; i++) {`,
+        after: `        for (int i = 0; i > 4; i++) {`,
         kind: 'logical',
       },
       {
@@ -167,8 +167,8 @@ export const lecture6: ChallengeBase[] = [
       },
       {
         id: 'Action3',
-        before: `            t.前に進む(); // step`,
-        after: `            t.右を向く(); // step`,
+        before: `            t.前に進む();`,
+        after: `            t.右を向く();`,
         kind: 'logical',
       },
     ],
@@ -180,28 +180,28 @@ export const lecture6: ChallengeBase[] = [
     lectureIndex: 5,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
-        for (int i = 0; i < 2; i++) { // step
-            for (int j = 0; j < 3; j++) { // step
-                t.前に進む(); // step
+        Turtle t = new Turtle(2, 2);
+        for (int i = 0; i < 2; i++) {
+            for (int j = 0; j < 3; j++) {
+                t.前に進む();
                 if (j == i) {
                     break;
                 }
             }
-            t.右を向く(); // step
+            t.右を向く();
         }
     }
 }`,
     blanks: [
       {
         id: 'Condition2',
-        before: `        for (int i = 0; i < 2; i++) { // step`,
-        after: `        for (int i = 0; i @[<]@ 2; i++) { // step`,
+        before: `        for (int i = 0; i < 2; i++) {`,
+        after: `        for (int i = 0; i @[<]@ 2; i++) {`,
       },
       {
         id: 'Condition3',
-        before: `            for (int j = 0; j < 3; j++) { // step`,
-        after: `            for (int j = 0; j @[<]@ 3; j++) { // step`,
+        before: `            for (int j = 0; j < 3; j++) {`,
+        after: `            for (int j = 0; j @[<]@ 3; j++) {`,
       },
       {
         id: 'Condition5',
@@ -212,14 +212,14 @@ export const lecture6: ChallengeBase[] = [
     bugs: [
       {
         id: 'Condition2',
-        before: `        for (int i = 0; i < 2; i++) { // step`,
-        after: `        for (int i = 0; i <= 2; i++) { // step`,
+        before: `        for (int i = 0; i < 2; i++) {`,
+        after: `        for (int i = 0; i <= 2; i++) {`,
         kind: 'logical',
       },
       {
         id: 'Condition3',
-        before: `            for (int j = 0; j < 3; j++) { // step`,
-        after: `            for (int j = 0; j > 3; j++) { // step`,
+        before: `            for (int j = 0; j < 3; j++) {`,
+        after: `            for (int j = 0; j > 3; j++) {`,
         kind: 'logical',
       },
       {
@@ -237,17 +237,17 @@ export const lecture6: ChallengeBase[] = [
     lectureIndex: 5,
     java: `public class Main {
     public static void main(String[] args) {
-        int sum = 0; // step
-        for (int i = 1; i < 4; i++) { // step
+        int sum = 0;
+        for (int i = 1; i < 4; i++) {
             if (i == 2) {
                 continue;
             }
-            sum += i; // step
+            sum += i;
         }
-        Turtle t = new Turtle(sum, 1); // step
-        t.前に進む(); // step
-        t.左を向く(); // step
-        t.前に進む(); // step
+        Turtle t = new Turtle(sum, 1);
+        t.前に進む();
+        t.左を向く();
+        t.前に進む();
     }
 }`,
     blanks: [
@@ -258,13 +258,13 @@ export const lecture6: ChallengeBase[] = [
       },
       {
         id: 'Value1',
-        before: `        int sum = 0; // step`,
-        after: `        int sum = @[0]@; // step`,
+        before: `        int sum = 0;`,
+        after: `        int sum = @[0]@;`,
       },
       {
         id: 'Value2',
-        before: `        for (int i = 1; i < 4; i++) { // step`,
-        after: `        for (int i = @[1]@; i < 4; i++) { // step`,
+        before: `        for (int i = 1; i < 4; i++) {`,
+        after: `        for (int i = @[1]@; i < 4; i++) {`,
       },
     ],
     bugs: [
@@ -276,14 +276,14 @@ export const lecture6: ChallengeBase[] = [
       },
       {
         id: 'Value1',
-        before: `        int sum = 0; // step`,
-        after: `        int sum = 1; // step`,
+        before: `        int sum = 0;`,
+        after: `        int sum = 1;`,
         kind: 'logical',
       },
       {
         id: 'Value2',
-        before: `        for (int i = 1; i < 4; i++) { // step`,
-        after: `        for (int i = 2; i < 4; i++) { // step`,
+        before: `        for (int i = 1; i < 4; i++) {`,
+        after: `        for (int i = 2; i < 4; i++) {`,
         kind: 'logical',
       },
     ],
@@ -295,17 +295,17 @@ export const lecture6: ChallengeBase[] = [
     lectureIndex: 5,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 1); // step
-        int remaining = 3; // step
+        Turtle t = new Turtle(2, 1);
+        int remaining = 3;
         while (remaining > 0) {
-            remaining--; // step
+            remaining--;
             if (remaining == 1) {
                 continue;
             }
-            t.前に進む(); // step
+            t.前に進む();
         }
-        t.右を向く(); // step
-        t.前に進む(); // step
+        t.右を向く();
+        t.前に進む();
     }
 }`,
     blanks: [
@@ -321,8 +321,8 @@ export const lecture6: ChallengeBase[] = [
       },
       {
         id: 'Value2',
-        before: `        int remaining = 3; // step`,
-        after: `        int remaining = @[3]@; // step`,
+        before: `        int remaining = 3;`,
+        after: `        int remaining = @[3]@;`,
       },
     ],
     bugs: [
@@ -340,8 +340,8 @@ export const lecture6: ChallengeBase[] = [
       },
       {
         id: 'Value2',
-        before: `        int remaining = 3; // step`,
-        after: `        int remaining = 4; // step`,
+        before: `        int remaining = 3;`,
+        after: `        int remaining = 4;`,
         kind: 'logical',
       },
     ],
@@ -353,25 +353,25 @@ export const lecture6: ChallengeBase[] = [
     lectureIndex: 5,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 1); // step
-        for (int i = 0; i < 5; i++) { // step
+        Turtle t = new Turtle(2, 1);
+        for (int i = 0; i < 5; i++) {
             if (i == 1) {
                 continue;
             }
             if (i == 3) {
                 break;
             }
-            t.前に進む(); // step
+            t.前に進む();
         }
-        t.右を向く(); // step
-        t.前に進む(); // step
+        t.右を向く();
+        t.前に進む();
     }
 }`,
     blanks: [
       {
         id: 'Condition2',
-        before: `        for (int i = 0; i < 5; i++) { // step`,
-        after: `        for (int i = 0; i @[<]@ 5; i++) { // step`,
+        before: `        for (int i = 0; i < 5; i++) {`,
+        after: `        for (int i = 0; i @[<]@ 5; i++) {`,
       },
       {
         id: 'Condition3',
@@ -387,8 +387,8 @@ export const lecture6: ChallengeBase[] = [
     bugs: [
       {
         id: 'Condition2',
-        before: `        for (int i = 0; i < 5; i++) { // step`,
-        after: `        for (int i = 0; i > 5; i++) { // step`,
+        before: `        for (int i = 0; i < 5; i++) {`,
+        after: `        for (int i = 0; i > 5; i++) {`,
         kind: 'logical',
       },
       {
@@ -412,53 +412,53 @@ export const lecture6: ChallengeBase[] = [
     lectureIndex: 5,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 4); // step
-        for (int i = 0; i < 4; i++) { // step
+        Turtle t = new Turtle(2, 4);
+        for (int i = 0; i < 4; i++) {
             if (!t.前に進めるか()) {
-                t.右を向く(); // step
+                t.右を向く();
                 break;
             }
-            t.前に進む(); // step
+            t.前に進む();
         }
-        t.前に進む(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
+        t.前に進む();
+        t.右を向く();
+        t.前に進む();
     }
 }`,
     blanks: [
       {
         id: 'Condition2',
-        before: `        for (int i = 0; i < 4; i++) { // step`,
-        after: `        for (int i = 0; i @[<]@ 4; i++) { // step`,
+        before: `        for (int i = 0; i < 4; i++) {`,
+        after: `        for (int i = 0; i @[<]@ 4; i++) {`,
       },
       {
         id: 'Action4',
-        before: `                t.右を向く(); // step`,
-        after: `                t.@[右を向く]@(); // step`,
+        before: `                t.右を向く();`,
+        after: `                t.@[右を向く]@();`,
       },
       {
         id: 'Action7',
-        before: `            t.前に進む(); // step`,
-        after: `            t.@[前に進む]@(); // step`,
+        before: `            t.前に進む();`,
+        after: `            t.@[前に進む]@();`,
       },
     ],
     bugs: [
       {
         id: 'Condition2',
-        before: `        for (int i = 0; i < 4; i++) { // step`,
-        after: `        for (int i = 0; i > 4; i++) { // step`,
+        before: `        for (int i = 0; i < 4; i++) {`,
+        after: `        for (int i = 0; i > 4; i++) {`,
         kind: 'logical',
       },
       {
         id: 'Action4',
-        before: `                t.右を向く(); // step`,
-        after: `                t.後に戻る(); // step`,
+        before: `                t.右を向く();`,
+        after: `                t.後に戻る();`,
         kind: 'logical',
       },
       {
         id: 'Action7',
-        before: `            t.前に進む(); // step`,
-        after: `            t.後に戻る(); // step`,
+        before: `            t.前に進む();`,
+        after: `            t.後に戻る();`,
         kind: 'logical',
       },
     ],
@@ -470,52 +470,52 @@ export const lecture6: ChallengeBase[] = [
     lectureIndex: 5,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
-        for (int i = 0; i < 2; i++) { // step
-            for (int j = 0; j < 2; j++) { // step
+        Turtle t = new Turtle(2, 2);
+        for (int i = 0; i < 2; i++) {
+            for (int j = 0; j < 2; j++) {
                 if (j == i) {
                     continue;
                 }
-                t.前に進む(); // step
+                t.前に進む();
             }
-            t.右を向く(); // step
+            t.右を向く();
         }
     }
 }`,
     blanks: [
       {
         id: 'Condition2',
-        before: `        for (int i = 0; i < 2; i++) { // step`,
-        after: `        for (int i = 0; i @[<]@ 2; i++) { // step`,
+        before: `        for (int i = 0; i < 2; i++) {`,
+        after: `        for (int i = 0; i @[<]@ 2; i++) {`,
       },
       {
         id: 'Condition3',
-        before: `            for (int j = 0; j < 2; j++) { // step`,
-        after: `            for (int j = 0; j @[<]@ 2; j++) { // step`,
+        before: `            for (int j = 0; j < 2; j++) {`,
+        after: `            for (int j = 0; j @[<]@ 2; j++) {`,
       },
       {
         id: 'Action7',
-        before: `                t.前に進む(); // step`,
-        after: `                t.@[前に進む]@(); // step`,
+        before: `                t.前に進む();`,
+        after: `                t.@[前に進む]@();`,
       },
     ],
     bugs: [
       {
         id: 'Condition2',
-        before: `        for (int i = 0; i < 2; i++) { // step`,
-        after: `        for (int i = 0; i <= 2; i++) { // step`,
+        before: `        for (int i = 0; i < 2; i++) {`,
+        after: `        for (int i = 0; i <= 2; i++) {`,
         kind: 'logical',
       },
       {
         id: 'Condition3',
-        before: `            for (int j = 0; j < 2; j++) { // step`,
-        after: `            for (int j = 0; j <= 2; j++) { // step`,
+        before: `            for (int j = 0; j < 2; j++) {`,
+        after: `            for (int j = 0; j <= 2; j++) {`,
         kind: 'logical',
       },
       {
         id: 'Action7',
-        before: `                t.前に進む(); // step`,
-        after: `                t.後に戻る(); // step`,
+        before: `                t.前に進む();`,
+        after: `                t.後に戻る();`,
         kind: 'logical',
       },
     ],
@@ -527,28 +527,28 @@ export const lecture6: ChallengeBase[] = [
     lectureIndex: 5,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
-        for (int i = 0; i < 4; i++) { // step
+        Turtle t = new Turtle(2, 2);
+        for (int i = 0; i < 4; i++) {
             switch (i) {
                 case 0:
-                    t.右を向く(); // step
+                    t.右を向く();
                     break;
                 default:
-                    t.前に進む(); // step
+                    t.前に進む();
                     break;
             }
             if (i == 2) {
                 break;
             }
-            t.左を向く(); // step
+            t.左を向く();
         }
     }
 }`,
     blanks: [
       {
         id: 'Condition2',
-        before: `        for (int i = 0; i < 4; i++) { // step`,
-        after: `        for (int i = 0; i @[<]@ 4; i++) { // step`,
+        before: `        for (int i = 0; i < 4; i++) {`,
+        after: `        for (int i = 0; i @[<]@ 4; i++) {`,
       },
       {
         id: 'Condition11',
@@ -557,15 +557,15 @@ export const lecture6: ChallengeBase[] = [
       },
       {
         id: 'Action5',
-        before: `                    t.右を向く(); // step`,
-        after: `                    t.@[右を向く]@(); // step`,
+        before: `                    t.右を向く();`,
+        after: `                    t.@[右を向く]@();`,
       },
     ],
     bugs: [
       {
         id: 'Condition2',
-        before: `        for (int i = 0; i < 4; i++) { // step`,
-        after: `        for (int i = 0; i > 4; i++) { // step`,
+        before: `        for (int i = 0; i < 4; i++) {`,
+        after: `        for (int i = 0; i > 4; i++) {`,
         kind: 'logical',
       },
       {
@@ -576,8 +576,8 @@ export const lecture6: ChallengeBase[] = [
       },
       {
         id: 'Action5',
-        before: `                    t.右を向く(); // step`,
-        after: `                    t.前に進む(); // step`,
+        before: `                    t.右を向く();`,
+        after: `                    t.前に進む();`,
         kind: 'logical',
       },
     ],

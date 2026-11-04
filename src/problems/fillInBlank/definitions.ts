@@ -4,9 +4,9 @@ export const fillInBlankProblemDefinitions = {
   fillInBlank1: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t = new Turtle(); // step
-    for (int i = 0; @[i < 4]@; i++) { // step
-      t.前に進む(); // step
+    Turtle t = new Turtle();
+    for (int i = 0; @[i < 4]@; i++) {
+      t.前に進む();
     }
   }
 }
@@ -14,31 +14,31 @@ public class Main {
   fillInBlank2: `
 public class Main {
   public static void main(String[] args) {
-    int x = <1-4>; // step
-    int y = @[x + 1]@; // step
-    Turtle t = new Turtle(x, y); // step
-    t.前に進む(); // step
+    int x = <1-4>;
+    int y = @[x + 1]@;
+    Turtle t = new Turtle(x, y);
+    t.前に進む();
   }
 }
 `,
   fillInBlank3: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t = new Turtle(); // step
-    t.前に進む(); // step
-    @[t.右を向く();]@ // step
-    t.前に進む(); // step
-    t.前に進む(); // step
+    Turtle t = new Turtle();
+    t.前に進む();
+    @[t.右を向く();]@
+    t.前に進む();
+    t.前に進む();
   }
 }
 `,
   fillInBlank4: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t = new Turtle(); // step
-    for (int i = 0; i < @[3]@; i++) { // step
-      t.前に進む(); // step
-      @[t.右を向く();]@ // step
+    Turtle t = new Turtle();
+    for (int i = 0; i < @[3]@; i++) {
+      t.前に進む();
+      @[t.右を向く();]@
     }
   }
 }

@@ -1,4 +1,5 @@
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
+import { StepTracker } from '../interpreter/stepTracker';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import type { Builtins } from './builtins';
 import type { ClassInfo, LocalInfo, MethodInfo } from './types';
@@ -48,8 +49,7 @@ export class Runtime {
   readonly frames: Frame[] = [];
   readonly world = new TurtleWorld();
   readonly staticValues = new Map<ClassInfo, Value[]>();
-  /** Called after a statement on a `// step` row completes. */
-  onStep?: (stepId: number) => void;
+  readonly steps = new StepTracker();
   readonly budget = new ExecutionBudget();
   private allocatedSlots = 0;
   private readonly initializingClasses = new Set<ClassInfo>();
@@ -139,7 +139,8 @@ export class Runtime {
   }
 
   popFrame(): void {
-    this.frames.pop();
+    const frame = this.frames.pop();
+    if (frame?.method?.isAtomic) this.steps.completeAtomicCall();
   }
 
   /** Removes the turtles that no frame, static field, or pending value can reach any more. */

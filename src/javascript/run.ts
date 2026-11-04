@@ -34,7 +34,7 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (scope: S
     constructing: undefined,
     newTarget: undefined,
   });
-  runtime.pushFrame(scope, undefined);
+  runtime.pushFrame(scope, undefined, false);
   try {
     let uncaughtException: string | undefined;
     try {

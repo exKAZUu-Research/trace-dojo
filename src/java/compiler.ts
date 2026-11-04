@@ -1,3 +1,4 @@
+import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type {
   ArrayInitializer,
   Block,
@@ -12,11 +13,12 @@ import type {
   VariableDeclarator,
 } from './ast';
 import type { Builtins } from './builtins';
-import { type CompileOptions, type MethodContext, sameParameters } from './compilerBase';
+import { type CompileOptions, type Exec, type MethodContext, sameParameters } from './compilerBase';
 import { checkDefiniteAssignment, checkInitialization } from './definiteAssignment';
 import { canCompleteNormally } from './reachability';
 import { type Frame, type Slot, UNASSIGNED } from './runtime';
 import { StatementCompiler } from './statementCompiler';
+import { isObjectCreation } from './stepRules';
 import {
   type ClassInfo,
   createClass,
@@ -59,14 +61,9 @@ class Compiler extends StatementCompiler {
     for (const cls of ordered) this.declareMembers(cls);
     for (const cls of ordered) this.checkAbstractMethods(cls);
     for (const cls of ordered) this.compileBodies(cls);
-    // An annotation no statement records a step for would silently drop the step authors meant to show.
-    for (const row of this.stepIdByRow.keys()) {
-      if (!this.usedStepRows.has(row)) {
-        this.error(
-          { row, endRow: row, start: 0, end: 0 },
-          '// step は、式文、初期値のある変数宣言やフィールド、return 文、for 文の行に付けてください。'
-        );
-      }
+    // An annotation no declaration claims would silently leave the steps authors meant to hide.
+    for (const row of this.atomicRows) {
+      if (!this.usedAtomicRows.has(row)) this.error({ row, endRow: row, start: 0, end: 0 }, misplacedAtomicMessage);
     }
     const { entryClass, mainMethod } = this.findEntry(ordered, unit.classes);
     return {
@@ -164,15 +161,11 @@ class Compiler extends StatementCompiler {
     if (!isAbstract && !member.body) this.error(member, `メソッド ${member.name} に本体がありません。`);
     const method: MethodInfo = {
       name: member.name,
-      owner: cls,
-      parameterTypes: member.parameters.map((parameter) => this.resolveType(parameter.type)),
+      ...this.declaredSignature(cls, member),
       returnType: member.returnType ? this.resolveType(member.returnType) : VOID,
       isStatic: member.modifiers.isStatic,
       isAbstract,
       isConstructor: false,
-      access: member.modifiers.access,
-      thrownTypes: member.throwsTypes.map((type) => this.resolveThrowable(type)),
-      declaration: member,
     };
     if (cls.methods.some((other) => other.name === method.name && sameParameters(other, method))) {
       this.error(member, `メソッド ${member.name} はすでに定義されています。`);
@@ -185,20 +178,42 @@ class Compiler extends StatementCompiler {
     if (member.name !== cls.name) this.error(member, `メソッド ${member.name} に戻り値の型がありません。`);
     const constructor: MethodInfo = {
       name: cls.name,
-      owner: cls,
-      parameterTypes: member.parameters.map((parameter) => this.resolveType(parameter.type)),
+      ...this.declaredSignature(cls, member),
       returnType: VOID,
       isStatic: false,
       isAbstract: false,
       isConstructor: true,
-      access: member.modifiers.access,
-      thrownTypes: member.throwsTypes.map((type) => this.resolveThrowable(type)),
-      declaration: member,
     };
     if (cls.constructors.some((other) => sameParameters(other, constructor))) {
       this.error(member, `コンストラクタ ${cls.name} はすでに定義されています。`);
     }
     cls.constructors.push(constructor);
+  }
+
+  /** What a method's and a constructor's declarations give alike. */
+  protected declaredSignature(
+    cls: ClassInfo,
+    member: MethodDeclaration | ConstructorDeclaration
+  ): Pick<MethodInfo, 'owner' | 'parameterTypes' | 'access' | 'thrownTypes' | 'declaration' | 'isAtomic'> {
+    return {
+      owner: cls,
+      parameterTypes: member.parameters.map((parameter) => this.resolveType(parameter.type)),
+      access: member.modifiers.access,
+      thrownTypes: member.throwsTypes.map((type) => this.resolveThrowable(type)),
+      declaration: member,
+      isAtomic: this.claimsAtomicRow(member),
+    };
+  }
+
+  /** Whether an `// atomic` annotation lies on the declaration's header, from its first row to its body's. */
+  protected claimsAtomicRow(member: MethodDeclaration | ConstructorDeclaration): boolean {
+    let claims = false;
+    for (let row = member.row; row <= (member.body?.row ?? member.endRow); row++) {
+      if (!this.atomicRows.has(row)) continue;
+      this.usedAtomicRows.add(row);
+      claims = true;
+    }
+    return claims;
   }
 
   protected checkOverride(cls: ClassInfo, method: MethodInfo, declaration: MethodDeclaration): void {
@@ -349,23 +364,35 @@ class Compiler extends StatementCompiler {
     declarators: VariableDeclarator[],
     declaration: Span
   ): ((frame: Frame) => void)[] {
-    const lastInitialized = declarators.findLast((declarator) => declarator.initializer);
-    const stepId = lastInitialized ? this.stepIdOf(declaration) : undefined;
-    return declarators.flatMap((declarator) => {
+    const fieldOf = (declarator: VariableDeclarator): FieldInfo => cls.fields.get(declarator.name) as FieldInfo;
+    // Learners see a static field's constant initial value before its class initializes, so assigning it shows nothing.
+    const shown = declarators.filter((declarator) => {
+      const field = fieldOf(declarator);
+      return declarator.initializer && !(field.isStatic && this.initialConstantOf(field) !== undefined);
+    });
+    const onlyCalls = shown.every(({ initializer }) => initializer !== undefined && isObjectCreation(initializer));
+    const initializers = declarators.flatMap((declarator): Exec[] => {
       if (!declarator.initializer) return [];
-      const declaratorStepId = declarator === lastInitialized ? stepId : undefined;
-      const field = cls.fields.get(declarator.name) as FieldInfo;
+      const field = fieldOf(declarator);
       const value = this.compileInitializer(context, declarator.initializer, field.type);
       const { slot } = field;
       return [
-        (frame: Frame) => {
+        (frame) => {
           const result = value(frame);
           const slots = field.isStatic ? frame.runtime.staticsOf(frame, cls) : (frame.thisObject as JavaObject).fields;
           slots[slot] = result;
-          if (declaratorStepId !== undefined) frame.runtime.onStep?.(declaratorStepId);
+          return;
         },
       ];
     });
+    if (initializers.length === 0) return [];
+    const initializeAll: Exec = (frame) => {
+      for (const initialize of initializers) initialize(frame);
+      return;
+    };
+    // The declaration records one step after all its declarators, as a local declaration does.
+    const run = shown.length > 0 ? this.withStep(declaration, initializeAll, onlyCalls) : initializeAll;
+    return [(frame: Frame) => void run(frame)];
   }
 
   protected compileConstructor(cls: ClassInfo, constructor: MethodInfo): void {

@@ -1,6 +1,6 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
-import { type TraceAnnotation, traceAnnotationsIn } from '../interpreter/traceAnnotations';
+import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../interpreter/traceAnnotations';
 import { loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Program } from './ast';
 import { ProgramConverter } from './programConverter';
@@ -11,15 +11,15 @@ const parser = await loadParser('@willbooster/tree-sitter-javascript/tree-sitter
 /**
  * Parses a script, throwing a `CompileError` for invalid or unsupported syntax.
  *
- * @param stepIdByRow The `// step` rows of a model program, which the innermost statements on them record.
+ * @param trace Makes the statements that record steps report their rows, for a model program.
  */
-export function parseJavaScript(source: string, stepIdByRow: ReadonlyMap<number, number> = new Map()): Program {
+export function parseJavaScript(source: string, trace?: TraceOptions): Program {
   return parseSource(parser, source, { identifier: '名前' }, (root) =>
-    new ProgramConverter(source, stepIdByRow).convert(root)
+    new ProgramConverter(source, trace).convert(root)
   );
 }
 
-/** The `// step` and `// caller` annotations of a script, read from its comment tokens. */
+/** The `// atomic` annotations of a script, read from its comment tokens. */
 export function findJavaScriptTraceAnnotations(source: string): TraceAnnotation[] {
   const tree = parser.parse(source);
   if (!tree) throw new Error('The JavaScript parser returned no tree');

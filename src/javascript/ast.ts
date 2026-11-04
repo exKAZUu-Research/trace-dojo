@@ -22,11 +22,11 @@ export interface ScopeDeclarations {
 
 export type Statement = Span &
   (
-    | { kind: 'expression'; expression: Expression; stepId?: number }
+    | { kind: 'expression'; expression: Expression; stepRow?: number }
     | VariableDeclaration
     | { kind: 'function' }
     | { kind: 'class'; cls: ClassNode }
-    | { kind: 'return'; value?: Expression; stepId?: number }
+    | { kind: 'return'; value?: Expression }
     | { kind: 'if'; test: Expression; consequent: Statement; alternate?: Statement }
     | Block
     | {
@@ -36,7 +36,7 @@ export type Statement = Span &
         update?: Expression;
         body: Statement;
         /** Recorded after the init and after each update. */
-        stepId?: number;
+        stepRow?: number;
         /** Names the init declares with `let` or `const`, copied into a new scope for every iteration. */
         perIterationNames: string[];
         scope: ScopeDeclarations;
@@ -48,7 +48,7 @@ export type Statement = Span &
         iterable: Expression;
         body: Statement;
         /** Recorded after each binding of the target. */
-        stepId?: number;
+        stepRow?: number;
         scope: ScopeDeclarations;
       }
     | { kind: 'while'; test: Expression; body: Statement }
@@ -67,7 +67,7 @@ export interface VariableDeclaration extends Span {
   kind: 'declaration';
   declarationKind: DeclarationKind;
   declarators: { target: Pattern; init?: Expression }[];
-  stepId?: number;
+  stepRow?: number;
 }
 
 export interface Block extends Span {
@@ -101,6 +101,8 @@ export interface FunctionNode extends Span {
   usesArguments: boolean;
   body: Statement[] | Expression;
   scope: ScopeDeclarations;
+  /** Whether a trace shows a call to this function as part of its caller's step, marked by `// atomic`. */
+  isAtomic: boolean;
   /** The text `toString()` returns. */
   source: string;
 }
@@ -115,7 +117,7 @@ export interface ClassNode extends Span {
 
 export type ClassMember =
   | { kind: 'method' | 'getter' | 'setter'; isStatic: boolean; key: PropertyName; fn: FunctionNode }
-  | { kind: 'field'; isStatic: boolean; key: PropertyName; value?: Expression; stepId?: number; row: number };
+  | { kind: 'field'; isStatic: boolean; key: PropertyName; value?: Expression; stepRow?: number; row: number };
 
 /** A property name: a fixed key, a computed one, or a private one written as `#name`. */
 export type PropertyName =

@@ -102,7 +102,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
   };
 
   const gradeAnswers = (): RegularGradingResult => {
-    const currentLine = props.problem.sidToLineIndex.get(currentTraceItem.sid);
+    const currentLine = currentTraceItem.line;
     return gradeRegularAnswers({
       expectedBoard: currentTraceItem.board,
       expectedTurtles: currentTraceItem.turtles,

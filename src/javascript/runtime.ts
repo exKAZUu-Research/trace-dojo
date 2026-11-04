@@ -1,4 +1,5 @@
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
+import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import { ArrayOps } from './arrayOps';
 import { Evaluator } from './evaluator';
@@ -34,7 +35,9 @@ export class Frame {
   constructor(
     public scope: Scope,
     /** The row of the call that created this frame, or undefined for the program and implicit calls. */
-    readonly callRow: number | undefined
+    readonly callRow: number | undefined,
+    /** Whether this frame runs a function marked `// atomic`. */
+    readonly isAtomic: boolean
   ) {}
 }
 
@@ -50,8 +53,7 @@ export class Runtime {
    * own functions count as called.
    */
   currentRow: number | undefined;
-  /** Called after a statement on a `// step` row completes. */
-  onStep?: (stepId: number) => void;
+  readonly steps = new StepTracker();
   readonly evaluator: Evaluator;
   private allocatedSlots = 0;
 
@@ -388,15 +390,16 @@ export class Runtime {
     return isObject(prototype) ? prototype : fallback;
   }
 
-  pushFrame(scope: Scope, callRow: number | undefined): Frame {
+  pushFrame(scope: Scope, callRow: number | undefined, isAtomic: boolean): Frame {
     if (this.frames.length >= LIMITS.maxCallDepth) this.throwError('RangeError', 'Maximum call stack size exceeded');
-    const frame = new Frame(scope, callRow);
+    const frame = new Frame(scope, callRow, isAtomic);
     this.frames.push(frame);
     return frame;
   }
 
   popFrame(): void {
-    this.frames.pop();
+    const frame = this.frames.pop();
+    if (frame?.isAtomic) this.steps.completeAtomicCall();
   }
 
   /** Keeps `value` reachable for garbage collection while `run` computes with it. */

@@ -9,7 +9,7 @@ import { Box, IconButton } from '../../../../../../../../infrastructures/useClie
 
 type SyntaxHighlighterProps = BoxProps & {
   code: string;
-  callerLines?: (number | undefined)[];
+  callerLines?: number[];
   currentFocusLine?: number;
   previousFocusLine?: number;
   programmingLanguageId: string;

@@ -1,10 +1,10 @@
 import type { ProgramRecording } from '../interpreter/program';
-import type { Annotations } from '../interpreter/traceAnnotations';
+import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { parseJavaScript } from './parse';
 import { runProgram } from './run';
-import { type Frame, Runtime } from './runtime';
+import { Runtime } from './runtime';
 import {
   type Binding,
   type DataProperty,
@@ -20,22 +20,16 @@ import {
   valueOfElement,
 } from './values';
 
-// code-gauge-allow duplicateLines 21 -- Each language wires its own runtime into the shared TraceRecorder alike.
-export function traceJavaScriptProgram(program: string, annotations: Annotations): ProgramRecording {
-  const parsed = parseJavaScript(program, annotations.stepIdByRow);
+// code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
+export function traceJavaScriptProgram(program: string, trace: TraceOptions): ProgramRecording {
+  const parsed = parseJavaScript(program, trace);
   const runtime = new Runtime();
   const snapshotter = new Snapshotter(runtime);
-  const recorder = new TraceRecorder(runtime.world, annotations.callerIdByRow);
-  runtime.onStep = (stepId) => {
-    runtime.collectGarbage();
-    const { frames } = runtime;
-    const variables = snapshotter.variablesOf((frames.at(-1) as Frame).scope, true);
-    recorder.record(
-      stepId,
-      frames.slice(1).map((frame) => frame.callRow),
-      variables
-    );
-  };
+  const recorder = new TraceRecorder(runtime, {
+    isAtomic: (frame) => frame.isAtomic,
+    variablesOf: (frame) => snapshotter.variablesOf(frame.scope, true),
+  });
+  runtime.steps.recorder = recorder;
   let finalVars: TraceItemVariable = {};
   // A model program may end with an uncaught exception to show how one stops the program.
   const run = runProgram(runtime, parsed, (scope) => {

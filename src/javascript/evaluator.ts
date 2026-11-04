@@ -8,6 +8,7 @@ import {
   mergePrivate,
   privateMethodProperty,
 } from './memberProperties';
+import { isObjectCreation, onlyCalls, onlyCreates, storesReference } from './stepRules';
 import {
   appendAll,
   type Binding,
@@ -47,8 +48,9 @@ export class Evaluator extends ExpressionEvaluator {
     return undefined;
   }
 
-  private step(stepId: number | undefined): void {
-    if (stepId !== undefined) this.runtime.onStep?.(stepId);
+  /** Records the step of binding a loop's target, whose destructuring stores the values it reads out of an object. */
+  private stepBinding({ target, stepRow }: Extract<Statement, { kind: 'forOf' | 'forIn' }>, value: Value): void {
+    this.runtime.steps.stepBinding(stepRow, !storesReference(target) || (!isObject(value) && value !== null));
   }
 
   // code-gauge-allow functionNcss 54 -- One case per statement kind, each delegating where it grows.
@@ -58,13 +60,13 @@ export class Evaluator extends ExpressionEvaluator {
     runtime.spend();
     switch (statement.kind) {
       case 'expression': {
-        this.evaluate(statement.expression);
-        this.step(statement.stepId);
+        runtime.steps.runStatement(statement.stepRow, onlyCalls(statement.expression), () =>
+          this.evaluate(statement.expression)
+        );
         return undefined;
       }
       case 'declaration': {
-        this.declaration(statement);
-        this.step(statement.stepId);
+        runtime.steps.runStatement(statement.stepRow, onlyCreates(statement), () => this.declaration(statement));
         return undefined;
       }
       case 'function':
@@ -76,9 +78,7 @@ export class Evaluator extends ExpressionEvaluator {
         return undefined;
       }
       case 'return': {
-        const value = statement.value ? this.evaluate(statement.value) : undefined;
-        runtime.hold(value, () => this.step(statement.stepId));
-        return { kind: 'return', value };
+        return { kind: 'return', value: statement.value ? this.evaluate(statement.value) : undefined };
       }
       case 'if': {
         if (toBoolean(this.evaluate(statement.test))) return this.statement(statement.consequent, []);
@@ -152,7 +152,7 @@ export class Evaluator extends ExpressionEvaluator {
   private forStatement(statement: Extract<Statement, { kind: 'for' }>, labels: string[]): Completion {
     const { runtime } = this;
     return this.withScope(statement.scope, () => {
-      const { update, stepId, perIterationNames } = statement;
+      const { update, stepRow, perIterationNames } = statement;
       this.forInit(statement);
       const frame = runtime.frame;
       const outer = frame.scope;
@@ -165,7 +165,7 @@ export class Evaluator extends ExpressionEvaluator {
           this.copyIterationScope(perIterationNames);
           if (update) {
             this.evaluate(update);
-            this.step(stepId);
+            runtime.steps.step(stepRow);
           }
           runtime.spend();
         }
@@ -176,13 +176,13 @@ export class Evaluator extends ExpressionEvaluator {
   }
 
   /** Runs the init of a `for` header, which records the header's step when it assigns something. */
-  private forInit({ init, stepId }: Extract<Statement, { kind: 'for' }>): void {
+  private forInit({ init, stepRow }: Extract<Statement, { kind: 'for' }>): void {
     if (init?.kind === 'declaration') {
       this.declaration(init);
-      if (init.declarators.some((declarator) => declarator.init)) this.step(stepId);
+      if (init.declarators.some((declarator) => declarator.init)) this.runtime.steps.step(stepRow);
     } else if (init) {
       this.evaluate(init);
-      this.step(stepId);
+      this.runtime.steps.step(stepRow);
     }
   }
 
@@ -216,7 +216,7 @@ export class Evaluator extends ExpressionEvaluator {
             this.instantiate(frame.scope, statement.scope);
           }
           this.bindPattern(statement.target, value, statement.declarationKind ? 'initialize' : 'assign');
-          this.step(statement.stepId);
+          this.stepBinding(statement, value);
           const result = this.loopBody(statement.body, labels);
           if (result !== 'next') return result;
         } finally {
@@ -335,7 +335,7 @@ export class Evaluator extends ExpressionEvaluator {
         : { thisValue, homeObject: behavior.homeObject, constructing: undefined, newTarget: undefined },
       true
     );
-    runtime.pushFrame(scope, callRow);
+    runtime.pushFrame(scope, callRow, node.isAtomic);
     try {
       this.bindParameters(node, args);
       if (!Array.isArray(node.body)) return this.evaluate(node.body);
@@ -441,7 +441,13 @@ export class Evaluator extends ExpressionEvaluator {
           ? (thisValue: JsObject): Value =>
               this.inScope(this.methodScope(classScope, thisValue, target), () => this.evaluate(value))
           : undefined;
-        (member.isStatic ? staticFields : instanceFields).push({ key, isPrivate, initialize, stepId: member.stepId });
+        (member.isStatic ? staticFields : instanceFields).push({
+          key,
+          isPrivate,
+          initialize,
+          stepRow: member.stepRow,
+          onlyCalls: value !== undefined && isObjectCreation(value),
+        });
         continue;
       }
       this.defineMethod(member, key, target, classScope, instanceFields);
@@ -463,7 +469,15 @@ export class Evaluator extends ExpressionEvaluator {
     if (member.key.kind === 'private') {
       const property = privateMethodProperty(member.kind, method);
       if (member.isStatic) mergePrivate(runtime, target, key, property);
-      else instanceFields.unshift({ key, isPrivate: true, initialize: undefined, stepId: undefined, property });
+      else
+        instanceFields.unshift({
+          key,
+          isPrivate: true,
+          initialize: undefined,
+          stepRow: undefined,
+          onlyCalls: false,
+          property,
+        });
     } else if (member.kind === 'method') {
       runtime.defineProperty(target, key, { value: method, writable: true, enumerable: false, configurable: true });
     } else {
@@ -481,11 +495,12 @@ export class Evaluator extends ExpressionEvaluator {
       mergePrivate(runtime, target, field.key, field.property);
       return;
     }
-    const value = field.initialize ? field.initialize(target) : undefined;
-    if (field.isPrivate)
-      runtime.definePrivate(target, field.key, { value, writable: true, enumerable: false, configurable: false });
-    else runtime.createDataProperty(target, field.key, value);
-    this.step(field.stepId);
+    this.runtime.steps.runStatement(field.stepRow, field.onlyCalls, () => {
+      const value = field.initialize ? field.initialize(target) : undefined;
+      if (field.isPrivate)
+        runtime.definePrivate(target, field.key, { value, writable: true, enumerable: false, configurable: false });
+      else runtime.createDataProperty(target, field.key, value);
+    });
   }
 
   constructClass(
@@ -501,7 +516,7 @@ export class Evaluator extends ExpressionEvaluator {
       : runtime.newObject(runtime.prototypeFor(newTarget, runtime.realm.objectPrototype));
     const functionFrame: FunctionFrame = { thisValue, homeObject: behavior.homeObject, constructing: fn, newTarget };
     const scope = new Scope(behavior.scope, functionFrame);
-    runtime.pushFrame(scope, callRow);
+    runtime.pushFrame(scope, callRow, behavior.ctor?.isAtomic ?? false);
     try {
       if (thisValue !== UNINITIALIZED) {
         for (const field of behavior.fields) this.initializeField(thisValue, field);
