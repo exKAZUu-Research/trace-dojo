@@ -9,24 +9,16 @@ import { type Frame, Runtime, UNASSIGNED } from './runtime';
 import type { JavaType } from './types';
 import { charToString, defaultValue, JavaArray, JavaObject, JavaString, type Value } from './values';
 
-// code-gauge-allow duplicateLines 23 -- Each language wires its own runtime into the shared TraceRecorder alike.
+// code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceJavaProgram(program: string, atomicRows: ReadonlySet<number>): ProgramRecording {
   const compiled = compileProgram(parseJava(program), { trace: { atomicRows } });
   const runtime = new Runtime(compiled.builtins);
   const snapshotter = new Snapshotter(runtime, compiled);
-  const recorder = new TraceRecorder(runtime.world);
-  runtime.steps.onStep = (row) => {
-    const { frames } = runtime;
-    if (frames.some((frame) => frame.method?.isAtomic)) return false;
-    runtime.collectGarbage();
-    const variables = snapshotter.variablesOf(frames.at(-1) as Frame, true);
-    recorder.record(
-      row,
-      frames.slice(1).map((frame) => frame.callRow),
-      variables
-    );
-    return true;
-  };
+  const recorder = new TraceRecorder(runtime, {
+    isAtomic: (frame) => frame.method?.isAtomic === true,
+    variablesOf: (frame) => snapshotter.variablesOf(frame, true),
+  });
+  runtime.steps.recorder = recorder;
   let finalVars: TraceItemVariable = {};
   // A model program may end with an uncaught exception to show how one stops the program.
   const run = runProgram(runtime, compiled, (frame) => {

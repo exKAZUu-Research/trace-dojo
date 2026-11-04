@@ -430,6 +430,27 @@ keep(make());`;
   expect(traceProgram('javascript', program, program).traceItems.map(({ line }) => line)).toEqual([0, 2, 8]);
 });
 
+test('a turtle operation after steps in its arguments or receiver records its own step', () => {
+  const program = `function position() {
+  const x = 2;
+  return x;
+}
+function pick(t) {
+  const picked = t;
+  return picked;
+}
+const t = new Turtle(position(), 0);
+pick(t).forward();`;
+  const trace = traceProgram('javascript', program, program);
+  expect(trace.traceItems.map(({ line, turtles }) => ({ line, y: turtles[0]?.y }))).toEqual([
+    { line: 0, y: undefined },
+    { line: 2, y: undefined },
+    { line: 9, y: 0 },
+    { line: 6, y: 0 },
+    { line: 10, y: 1 },
+  ]);
+});
+
 test('display programs keep their placeholders and lose their annotations', () => {
   const program = `function move(t) { // atomic
   t.forward();

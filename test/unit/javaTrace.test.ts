@@ -649,6 +649,31 @@ test('a call to an atomic method records its step even when its arguments record
   expect(traceProgram('java', program, program).traceItems.map(({ line }) => line)).toEqual([0, 6, 3]);
 });
 
+test('a turtle operation after steps in its arguments or receiver records its own step', () => {
+  const program = `public class Main {
+  public static void main(String[] args) {
+    Turtle t = new Turtle(position(), 0);
+    pick(t).前に進む();
+  }
+  static int position() {
+    int x = 2;
+    return x;
+  }
+  static Turtle pick(Turtle t) {
+    Turtle picked = t;
+    return picked;
+  }
+}`;
+  const trace = traceProgram('java', program, program);
+  expect(trace.traceItems.map(({ line, turtles }) => ({ line, y: turtles[0]?.y }))).toEqual([
+    { line: 0, y: undefined },
+    { line: 7, y: undefined },
+    { line: 3, y: 0 },
+    { line: 11, y: 0 },
+    { line: 4, y: 1 },
+  ]);
+});
+
 test('an atomic annotation outside a method declaration is rejected', () => {
   const program = `public class Main {
   public static void main(String[] args) {
