@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
-/** Programs with whether Java 21 compiles and launches them, given a `Turtle` class, as the interpreter must. */
+/** Programs with whether Java 25 compiles and launches them, given a `Turtle` class, as the interpreter must. */
 const programs: [name: string, runs: boolean, source: string][] = [
   [
     'valid',
@@ -131,7 +131,7 @@ const programs: [name: string, runs: boolean, source: string][] = [
     'class Main {\n  public static void main(String[] args) {\n    亀 相手 = new 亀(); System.out.println(相手.速さ);\n  }\n  \n}\nclass 亀 { private int 速さ = 1; }',
   ],
   ['missing-main', false, 'class Main {}'],
-  ['nonstatic-main', false, 'class Main { public void main(String[] args) {} }'],
+  ['nonstatic-main', true, 'class Main { public void main(String[] args) {} }'],
   [
     'uninitialized',
     false,
@@ -1128,6 +1128,236 @@ const programs: [name: string, runs: boolean, source: string][] = [
     false,
     'public class Main {\n  public static void main(String[] args) {\n    for (final int x : new int[]{1}) { x = 2; }\n  }\n  \n}\n',
   ],
+  [
+    'lambda-reads-unassigned',
+    false,
+    'class Main {\n  public static void main(String[] args) {\n    int x; Runnable r = () -> System.out.println(x); x = 1;\n  }\n}',
+  ],
+  [
+    'anonymous-class-reads-unassigned',
+    false,
+    'class Main {\n  public static void main(String[] args) {\n    int x; Object o = new Object() { public String toString() { return "" + x; } }; x = 1;\n  }\n}',
+  ],
+  [
+    'capture-after-unreachable-write',
+    true,
+    'class Main {\n  public static void main(String[] args) {\n    int x = 1; if (false) x = 2; Runnable r = () -> System.out.println(x);\n  }\n}',
+  ],
+  [
+    'expression-lambda-captures-incremented-parameter',
+    false,
+    'class Main {\n  static Runnable make(int n, Runnable r) { return r; }\n  public static void main(String[] args) {\n    java.util.function.Function<Integer, Runnable> f = x -> make(x++, () -> System.out.println(x));\n  }\n}',
+  ],
+  [
+    'prologue-local-unassigned-in-super-call',
+    false,
+    'class P { P(int v) {} }\nclass C extends P { C(int a) { int b; if (a > 0) b = 1; super(b); } }\nclass Main {\n  public static void main(String[] args) {\n    new C(1);\n  }\n}',
+  ],
+  [
+    'constant-after-covering-type-pattern',
+    false,
+    'class Main {\n  public static void main(String[] args) {\n    Integer o = 1; String s = switch (o) { case Integer i -> "i"; case 1 -> "one"; };\n  }\n}',
+  ],
+  [
+    'record-pattern-dominated-component-wise',
+    false,
+    'record Box(Object v) {}\nclass Main {\n  public static void main(String[] args) {\n    Object o = new Box("x"); String s = switch (o) { case Box(Object v) -> "o"; case Box(String v) -> v; default -> "d"; };\n  }\n}',
+  ],
+  [
+    'record-pattern-before-wider-one',
+    true,
+    'record Box(Object v) {}\nclass Main {\n  public static void main(String[] args) {\n    Object o = new Box("x"); String s = switch (o) { case Box(String v) -> v; case Box(Object v) -> "o"; default -> "d"; };\n  }\n}',
+  ],
+  [
+    'explicit-type-argument-outside-bound',
+    false,
+    'class Main {\n  static <T extends Number> T g(T t) { return t; }\n  public static void main(String[] args) {\n    Object o = Main.<Object>g(1);\n  }\n}',
+  ],
+  [
+    'explicit-type-argument-outside-receiver-bound',
+    false,
+    'class Holder<T> { <U extends T> U choose(U a, U b) { return a; } }\nclass Main {\n  public static void main(String[] args) {\n    Object o = new Holder<String>().<Object>choose("a", "b");\n  }\n}',
+  ],
+  [
+    'explicit-type-argument-within-receiver-bound',
+    true,
+    'class Holder<T> { <U extends T> U choose(U a, U b) { return a; } }\nclass Main {\n  public static void main(String[] args) {\n    String s = new Holder<String>().<String>choose("a", "b");\n  }\n}',
+  ],
+  [
+    'while-false-body',
+    false,
+    'class Main {\n  public static void main(String[] args) {\n    while (false) System.out.println("dead");\n  }\n}',
+  ],
+  [
+    'for-false-body',
+    false,
+    'class Main {\n  public static void main(String[] args) {\n    for (int i = 0; false; i++) {}\n  }\n}',
+  ],
+  [
+    'do-while-false',
+    true,
+    'class Main {\n  public static void main(String[] args) {\n    do {} while (false);\n  }\n}',
+  ],
+  [
+    'while-variable-false',
+    true,
+    'class Main {\n  public static void main(String[] args) {\n    boolean f = false; while (f) {}\n  }\n}',
+  ],
+  [
+    'private-field-through-subclass',
+    false,
+    'class Main {\n  static class A { private int p = 1; }\n  static class B extends A { int g() { return this.p; } }\n  public static void main(String[] args) {\n    System.out.println(new B().g());\n  }\n}',
+  ],
+  [
+    'private-field-in-nested-class',
+    true,
+    'class Main {\n  private int x = 3;\n  class Inner { int f() { return x; } }\n  public static void main(String[] args) {\n    System.out.println(new Main().new Inner().f());\n  }\n}',
+  ],
+  [
+    'override-throws-broader-exception',
+    false,
+    'class Main {\n  static class A { void m() {} }\n  static class B extends A { void m() throws Exception {} }\n  public static void main(String[] args) {\n    \n  }\n}',
+  ],
+  [
+    'override-throws-narrower-exception',
+    true,
+    'class Main {\n  static class A { void m() throws Exception {} }\n  static class B extends A { void m() throws java.io.IOException {} }\n  public static void main(String[] args) {\n    \n  }\n}',
+  ],
+  [
+    'method-reference-to-unrelated-static',
+    false,
+    'class Main {\n  public static void main(String[] args) {\n    java.util.function.Function<String, String> f = Integer::toString;\n  }\n}',
+  ],
+  [
+    'self-referencing-type-bound',
+    true,
+    'interface Op<T extends Op<T>> { T self(); }\nclass OpImpl implements Op<OpImpl> { public OpImpl self() { return this; } }\nclass Main {\n  public static void main(String[] args) {\n    System.out.println(new OpImpl().self() != null);\n  }\n}',
+  ],
+  [
+    'case-guard-assigns-pattern-variable',
+    false,
+    'class Main {\n  public static void main(String[] args) {\n    Object o = "abc"; switch (o) { case String s when (s = "x").isEmpty() -> {} default -> {} }\n  }\n}',
+  ],
+  [
+    'field-assigned-after-pattern-scope',
+    true,
+    'class Main {\n  final String s;\n  Main(Object o) { if (o instanceof String s) {} s = "field"; }\n  public static void main(String[] args) {\n    new Main("abc");\n  }\n}',
+  ],
+  [
+    'field-assigned-after-returning-then-pattern',
+    true,
+    'class Main {\n  final String s;\n  Main(Object o) { if (o instanceof Integer s) throw new RuntimeException(); s = "field"; }\n  public static void main(String[] args) {\n    new Main("abc");\n  }\n}',
+  ],
+  [
+    'pattern-kept-by-returning-else',
+    true,
+    'class Main {\n  final String s;\n  Main(Object o) { if (o instanceof String s) {} else { throw new RuntimeException(); } System.out.println(s.length()); this.s = s; }\n  public static void main(String[] args) {\n    new Main("abc");\n  }\n}',
+  ],
+  [
+    'pattern-kept-by-returning-else-captured-after-write',
+    false,
+    'class Main {\n  public static void main(String[] args) {\n    Object o = "abc"; if (o instanceof String s) {} else return; s = "def"; Runnable r = () -> System.out.println(s);\n  }\n}',
+  ],
+  [
+    'pattern-kept-after-loop-without-break',
+    true,
+    'class Main {\n  public static void main(String[] args) {\n    Object o = 1; while (!(o instanceof String s)) o = "x"; for (; !(o instanceof String t); ) o = "y"; System.out.println(s + t);\n  }\n}',
+  ],
+  [
+    'pattern-dropped-after-loop-with-break',
+    false,
+    'class Main {\n  public static void main(String[] args) {\n    Object o = 1; while (!(o instanceof String s)) { if (o == null) break; o = "x"; } System.out.println(s);\n  }\n}',
+  ],
+  [
+    'inner-class-of-generic-outer',
+    true,
+    'class Main {\n  static class O<T> { class I { T v; } }\n  public static void main(String[] args) {\n    O<String> o = new O<>(); O<String>.I a = o.new I(); a.v = "x"; var b = o.new I(); String s = b.v; O.I raw = a; raw.v = 1;\n  }\n}',
+  ],
+  [
+    'inner-class-of-generic-outer-mismatch',
+    false,
+    'class Main {\n  static class O<T> { class I { T v; } }\n  public static void main(String[] args) {\n    O<String> o = new O<>(); var a = o.new I(); a.v = 3;\n  }\n}',
+  ],
+  [
+    'field-assigned-after-loop-left-by-outer-label',
+    true,
+    'class Main {\n  final String s;\n  Main(Object o) { outer: inner: while (!(o instanceof String s)) { break outer; } s = "field"; }\n  public static void main(String[] args) {\n    new Main(1);\n  }\n}',
+  ],
+  [
+    'inherited-inner-class-of-generic-superclass',
+    true,
+    'class MyList<T> { class Node { T val; Node(T v) { val = v; } } }\nclass Strs extends MyList<String> { int len() { Node n = new Node("ab"); return n.val.length(); } }\nclass Main {\n  public static void main(String[] args) {\n    new Strs().len();\n  }\n}',
+  ],
+  [
+    'static-member-selected-from-parameterized-type',
+    false,
+    'class Main {\n  static class O<T> { static class N {} }\n  public static void main(String[] args) {\n    O<String>.N n = null;\n  }\n}',
+  ],
+  [
+    'static-member-in-the-middle-of-a-parameterized-qualifier',
+    false,
+    'class Main {\n  static class O<T> { static class N { class M {} } }\n  public static void main(String[] args) {\n    O<String>.N.M m = null;\n  }\n}',
+  ],
+  [
+    'numeric-value-of-an-int-code-point',
+    true,
+    'class Main {\n  public static void main(String[] args) {\n    System.out.println(Character.getNumericValue(0x1D7CF) + Character.getNumericValue("a".codePointAt(0)));\n  }\n}',
+  ],
+  [
+    'program-class-hiding-a-library-class',
+    true,
+    'class List { int value; List(int v) { value = v; } }\nclass Main {\n  public static void main(String[] args) {\n    System.out.println(new List(3).value + java.util.List.of(1).size());\n  }\n}',
+  ],
+  [
+    'class-literal-infers-a-type-argument',
+    true,
+    'class Main {\n  static <T> T make(Class<T> c) { return null; }\n  public static void main(String[] args) {\n    String[] a = make(String[].class); Class<Integer> k = int.class;\n  }\n}',
+  ],
+  [
+    'local-enum-whose-constants-implement-its-methods',
+    true,
+    'class Main {\n  public static void main(String[] args) {\n    enum Op { ADD { int ap(int a, int b) { return a + b; } }; abstract int ap(int a, int b); }\n    System.out.println(Op.ADD.ap(1, 2));\n  }\n}',
+  ],
+  [
+    'qualified-enum-constants-cover-a-sealed-selector',
+    true,
+    'sealed interface Sh permits Color, Other {}\nenum Color implements Sh { RED, GREEN }\nrecord Other() implements Sh {}\nclass Main {\n  public static void main(String[] args) {\n    Sh s = Color.RED; System.out.println(switch (s) { case Color.RED -> 1; case Color.GREEN -> 2; case Other o -> 3; });\n  }\n}',
+  ],
+  [
+    'lambda-shape-selects-runnable-or-supplier',
+    true,
+    'import java.util.function.*;\nclass Main {\n  static String f(Runnable r) { return "R"; }\n  static String f(Supplier<String> s) { return "S"; }\n  public static void main(String[] args) {\n    System.out.println(f(() -> System.out.println("x")) + f(() -> "s") + f(() -> { return "t"; }));\n  }\n}',
+  ],
+  [
+    'recursive-enum-bound',
+    true,
+    'import java.util.*;\nclass Main {\n  enum Level { LOW, HIGH }\n  static <E extends Enum<E>> E parse(Class<E> c, String s) { return Enum.valueOf(c, s); }\n  static <E extends Enum<E>> List<E> sorted(Collection<E> c) { List<E> l = new ArrayList<>(c); Collections.sort(l); return l; }\n  public static void main(String[] args) {\n    System.out.println(parse(Level.class, "HIGH") + " " + sorted(Set.of(Level.HIGH, Level.LOW)));\n  }\n}',
+  ],
+  [
+    'static-method-reference-to-a-generic-helper',
+    true,
+    'import java.util.*;\nimport java.util.function.*;\nclass Main {\n  static <T, R> List<R> map(List<T> l, Function<T, R> f) { List<R> r = new ArrayList<>(); for (T t : l) r.add(f.apply(t)); return r; }\n  public static void main(String[] args) {\n    System.out.println(map(List.of("1", "22"), Integer::parseInt));\n  }\n}',
+  ],
+  [
+    'lambda-for-a-generic-functional-method',
+    false,
+    'class Main {\n  interface Pick { <T> T pick(T a, T b); }\n  public static void main(String[] args) {\n    Pick p = (x, y) -> y;\n  }\n}',
+  ],
+  [
+    'method-references-select-runnable-or-supplier',
+    true,
+    'import java.util.function.*;\nclass Main {\n  static String f(Runnable r) { return "R"; }\n  static <T> String f(Supplier<T> s) { return "S"; }\n  static void work() {}\n  static int compute() { return 1; }\n  public static void main(String[] args) {\n    System.out.println(f(Main::work) + f(Main::compute) + f(java.util.Collections::<String>emptyList));\n  }\n}',
+  ],
+  [
+    'multi-catch-parameter-has-the-common-superclass',
+    true,
+    'class Main {\n  static void report(Exception e) {}\n  public static void main(String[] args) {\n    try { int z = 0; System.out.println(1 / z); } catch (ArithmeticException | NullPointerException e) { report(e); }\n  }\n}',
+  ],
+  [
+    'keyed-comparator-chained-without-target',
+    true,
+    'import java.util.*;\nclass Main {\n  record P(String name, int age) {}\n  public static void main(String[] args) {\n    List<P> ps = new ArrayList<>(); ps.sort(Comparator.comparing(P::name, Comparator.reverseOrder()).reversed());\n  }\n}',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {
@@ -1175,9 +1405,8 @@ test.each([
 });
 
 test.each([
-  ['long x = 0;', '型「long」は、この採点環境では使えません。'],
-  ['double r = Math.round(2.5);', 'この採点環境の Math には、メソッド round がありません。'],
-  ['StringBuilder b = null;', 'この採点環境には、型 StringBuilder がありません。'],
+  ['double r = Math.fma(1.0, 2.0, 3.0);', 'この採点環境の Math には、メソッド fma がありません。'],
+  ['Scanner sc = null;', 'この採点環境には、型 Scanner がありません。'],
   [
     'String s = String.valueOf(1, 2);',
     'この採点環境では、メソッド valueOf に (int, int) を渡して呼び出すことはできません。',
@@ -1187,7 +1416,7 @@ test.each([
     'Object e = new IndexOutOfBoundsException(1);',
     'この採点環境では、コンストラクタ IndexOutOfBoundsException に (int) を渡して呼び出すことはできません。',
   ],
-  ['Object o = new Object(); o.getClass();', 'この採点環境の Object には、メソッド getClass がありません。'],
+  ['Object o = new Object(); o.notify();', 'この採点環境の Object には、メソッド notify がありません。'],
   [
     'Turtle t = new Turtle(); t.前に進む(3);',
     'この採点環境では、メソッド 前に進む に (int) を渡して呼び出すことはできません。',

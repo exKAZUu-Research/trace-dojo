@@ -1,8 +1,5 @@
-import { CompileError } from '../interpreter/diagnostics';
-// code-gauge-allow-file fileNcss 451 -- The statement compiler keeps one method per statement kind together.
 import type {
   Block,
-  CatchClause,
   Expression,
   ExpressionStatement,
   LocalVariableDeclaration,
@@ -15,38 +12,57 @@ import {
   type CompiledValue,
   type Completion,
   type ContinueCompletion,
-  type EnclosingTry,
   type Eval,
   type Exec,
   type MethodContext,
   type ReturnCompletion,
   type Scope,
 } from './compilerBase';
-import { assignedNames } from './definiteAssignment';
-import { ExpressionCompiler } from './expressionCompiler';
-import { canCompleteNormally } from './reachability';
+import { InvocationCompiler } from './invocationCompiler';
+import { nullMessage, typeDescription } from './nullMessages';
+import { bindingsAfter, bindingsWhen } from './patternBindings';
+import { booleanConstants, canCompleteNormally } from './reachability';
 import { type Frame, JavaThrow, throwBuiltin, UNASSIGNED } from './runtime';
 import { isObjectCreation, onlyCalls } from './stepRules';
-import { type ClassInfo, isPrimitive, isSubclass, type JavaType, typeName } from './types';
-import { JavaArray, JavaObject, JavaString, type Value } from './values';
+import {
+  asSuper,
+  erasure,
+  isPrimitive,
+  isReference,
+  isSubclass,
+  type JavaType,
+  sameType,
+  typeName,
+  upperBound,
+  wildcardBound,
+} from './types';
+import { JavaArray, JavaObject, type Value } from './values';
 
 const BREAK: BreakCompletion = { kind: 'break', label: undefined };
 const CONTINUE: ContinueCompletion = { kind: 'continue', label: undefined };
 
 /** Compiles statements into closures that report how they complete. */
-export abstract class StatementCompiler extends ExpressionCompiler {
+export abstract class StatementCompiler extends InvocationCompiler {
+  protected abstract compileSwitch(context: MethodContext, statement: Extract<Statement, { kind: 'switch' }>): Exec;
+
+  protected abstract compileYield(context: MethodContext, statement: Extract<Statement, { kind: 'yield' }>): Exec;
+
+  protected abstract compileTry(context: MethodContext, statement: Extract<Statement, { kind: 'try' }>): Exec;
+
   /** Set while compiling a `for` header, whose parts share the one step that the `for` records after them. */
   private compilesForHeader = false;
 
   /** Compiles statements inside a new scope whose locals go out of scope when it is left. */
   protected withScope(context: MethodContext, compile: () => Exec, clearsLocals = true): Exec {
     context.scopes.push({ names: new Map(), slots: [] });
+    this.localTypeScopes.push(new Map());
     let exec: Exec;
     let slots: number[];
     try {
       exec = compile();
     } finally {
       slots = (context.scopes.pop() as Scope).slots;
+      this.localTypeScopes.pop();
     }
     if (slots.length === 0 || !clearsLocals) return exec;
     return (frame) => {
@@ -99,14 +115,29 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   protected compileStatement(context: MethodContext, statement: Statement): Exec {
     if (!['labeled', 'while', 'do', 'for', 'forEach'].includes(statement.kind)) context.loopLabels = [];
+    const firstPattern = context.patternSlots.length;
     const exec = this.compileStatementBody(context, statement);
+    // Pattern variables go out of scope with the statement, unless it introduced them into the enclosing block.
+    const patternSlots = context.patternSlots
+      .slice(firstPattern)
+      .filter((slot) => !context.introducedPatternSlots.has(slot));
+    if (patternSlots.length === 0) {
+      return (frame) => {
+        frame.runtime.spend();
+        return exec(frame);
+      };
+    }
     return (frame) => {
       frame.runtime.spend();
-      return exec(frame);
+      try {
+        return exec(frame);
+      } finally {
+        for (const slot of patternSlots) frame.locals[slot] = UNASSIGNED;
+      }
     };
   }
 
-  // code-gauge-allow functionNcss 33 -- One case per statement kind, each delegating to its own compiler.
+  // code-gauge-allow functionNcss 52 -- One case per statement kind, each delegating to its own compiler.
   protected compileStatementBody(context: MethodContext, statement: Statement): Exec {
     switch (statement.kind) {
       case 'block': {
@@ -126,7 +157,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         return this.compileWhile(context, statement);
       }
       case 'for': {
-        return this.withScope(context, () => this.compileFor(context, statement));
+        return this.compileFor(context, statement);
       }
       case 'forEach': {
         return this.withScope(context, () => this.compileForEach(context, statement));
@@ -152,6 +183,23 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       case 'labeled': {
         return this.compileLabeled(context, statement);
       }
+      case 'yield': {
+        return this.compileYield(context, statement);
+      }
+      case 'assert': {
+        this.compileCondition(context, statement.condition);
+        if (statement.message) this.compileValue(context, statement.message);
+        // The JVM runs without -ea by default, which disables assertions.
+        return () => {};
+      }
+      case 'synchronized': {
+        return this.compileSynchronized(context, statement);
+      }
+      case 'localClass': {
+        this.compileLocalClass(context, statement.declaration);
+        // Declaring a class runs nothing.
+        return () => {};
+      }
       case 'empty': {
         return () => {};
       }
@@ -160,23 +208,39 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   protected compileIf(context: MethodContext, statement: Extract<Statement, { kind: 'if' }>): Exec {
     const condition = this.compileCondition(context, statement.condition);
-    const consequence = this.withScope(context, () => this.compileStatement(context, statement.consequence));
+    const whenTrue = bindingsWhen(statement.condition, true);
+    const whenFalse = bindingsWhen(statement.condition, false);
+    const consequence = this.withScope(context, () =>
+      this.withBindings(context, whenTrue, () => this.compileStatement(context, statement.consequence))
+    );
     const { alternative } = statement;
     const otherwise = alternative
-      ? this.withScope(context, () => this.compileStatement(context, alternative))
+      ? this.withScope(context, () =>
+          this.withBindings(context, whenFalse, () => this.compileStatement(context, alternative))
+        )
       : undefined;
+    this.introduceBindings(context, bindingsAfter(statement));
     return (frame) => (condition(frame) ? consequence(frame) : otherwise?.(frame));
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- While and do statements share one loop, which differs only in where the condition runs.
   protected compileWhile(context: MethodContext, statement: Extract<Statement, { kind: 'while' | 'do' }>): Exec {
     const labels = this.takeLabels(context);
-    const condition = this.compileCondition(context, statement.condition);
-    const body = this.compileLoopBody(context, statement.body, labels);
     const isDo = statement.kind === 'do';
+    // A do statement's body runs before its condition, so only a while statement's body sees the condition's bindings.
+    const body = isDo ? this.compileLoopBody(context, statement.body, labels) : undefined;
+    const condition = this.compileCondition(context, statement.condition);
+    if (!isDo) this.checkLoopBodyReachable(statement.condition, statement.body);
+    const loopBody =
+      body ??
+      this.withBindings(context, bindingsWhen(statement.condition, true), () =>
+        this.compileLoopBody(context, statement.body, labels)
+      );
+    this.introduceBindings(context, bindingsAfter(statement));
     return (frame) => {
       if (!isDo && !condition(frame)) return;
       for (;;) {
-        const completion = body(frame);
+        const completion = loopBody(frame);
         if (completion) {
           const result = loopCompletion(completion, labels);
           if (result !== 'continue') return result;
@@ -220,10 +284,27 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     // Rethrowing a catch parameter throws only what its try block throws, as long as it is not reassigned.
     const rethrown = local === undefined ? undefined : context.rethrownTypes.get(local);
     if (value.type.kind === 'class') this.checkThrown(context, statement, rethrown ?? [value.type.cls]);
+    const message = nullMessage('Cannot throw exception', value.source);
     return (frame) => {
       const exception = value.run(frame);
-      if (!(exception instanceof JavaObject)) throwBuiltin(frame, 'NullPointerException');
+      if (!(exception instanceof JavaObject)) throwBuiltin(frame, 'NullPointerException', message);
       throw new JavaThrow(exception);
+    };
+  }
+
+  protected compileSynchronized(context: MethodContext, statement: Extract<Statement, { kind: 'synchronized' }>): Exec {
+    const lock = this.compileValue(context, statement.lock);
+    if (!isReference(lock.type)) {
+      this.error(
+        statement.lock,
+        `synchronized には参照型の値が必要ですが、${typeName(lock.type)} 型の値が書かれています。`
+      );
+    }
+    const body = this.compileBlock(context, statement.body);
+    const message = nullMessage('Cannot enter synchronized block', lock.source);
+    return (frame) => {
+      if (lock.run(frame) === undefined) throwBuiltin(frame, 'NullPointerException', message);
+      return body(frame);
     };
   }
 
@@ -302,7 +383,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         return { slot, value: this.compileArrayInitializer(context, initializer, type) };
       }
       if (initializer) {
-        compiled = this.convert(this.compileValue(context, initializer), type, 'assignment', declarator);
+        compiled = this.convert(this.compileValueFor(context, initializer, type), type, 'assignment', declarator);
       }
     }
     if (statement.isFinal && compiled?.constant !== undefined) context.constants.set(slot, compiled.constant);
@@ -315,6 +396,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       this.error(statement, '式だけを文として書くことはできません。');
     }
     const value = this.compileValue(context, expression, true);
+    if (statement.isGenerated) {
+      return (frame) => {
+        value.run(frame);
+        return;
+      };
+    }
     return this.withStep(
       statement,
       (frame) => {
@@ -326,6 +413,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   protected compileReturn(context: MethodContext, statement: Extract<Statement, { kind: 'return' }>): Exec {
+    if (context.isInSwitchExpression) this.error(statement, 'return 文は switch 式の中には書けません。');
     if (context.isInitializerBlock) this.error(statement, 'return 文は初期化ブロックの中には書けません。');
     if (!statement.value) {
       if (context.returnType.kind !== 'void') this.error(statement, 'return 文に値が必要です。');
@@ -333,20 +421,37 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       return () => completion;
     }
     if (context.returnType.kind === 'void') this.error(statement, '戻り値の型が void のメソッドは値を返せません。');
-    const value = this.convert(
-      this.compileValue(context, statement.value),
-      context.returnType,
-      'assignment',
-      statement.value
-    ).run;
+    const returned = this.compileValueFor(context, statement.value, context.returnType);
+    context.returnedTypes?.push(returned.type);
+    const value = this.convert(returned, context.returnType, 'assignment', statement.value).run;
     return (frame) => ({ kind: 'return', value: value(frame) });
+  }
+
+  /** Rejects the body of a `while` or `for` loop whose condition is the constant `false`, which never runs (JLS 14.22). */
+  protected checkLoopBodyReachable(condition: Expression, body: Statement): void {
+    if (booleanConstants.get(condition) === false) this.error(body, 'この文は実行されることがありません。');
   }
 
   protected compileFor(context: MethodContext, statement: Extract<Statement, { kind: 'for' }>): Exec {
     const labels = this.takeLabels(context);
+    const loop = this.withScope(context, () => this.compileForLoop(context, statement, labels));
+    // The condition's bindings outlive the loop, whose header variables go out of scope with it.
+    this.introduceBindings(context, bindingsAfter(statement));
+    return loop;
+  }
+
+  protected compileForLoop(
+    context: MethodContext,
+    statement: Extract<Statement, { kind: 'for' }>,
+    labels: string[]
+  ): Exec {
     const { init, update } = this.compileForHeader(context, statement);
-    const condition = statement.condition ? this.compileCondition(context, statement.condition) : () => true;
-    const body = this.compileLoopBody(context, statement.body, labels);
+    const { condition: conditionSyntax } = statement;
+    const condition = conditionSyntax ? this.compileCondition(context, conditionSyntax) : () => true;
+    if (conditionSyntax) this.checkLoopBodyReachable(conditionSyntax, statement.body);
+    const body = this.withBindings(context, conditionSyntax ? bindingsWhen(conditionSyntax, true) : [], () =>
+      this.compileLoopBody(context, statement.body, labels)
+    );
     return (frame) => {
       init(frame);
       while (condition(frame)) {
@@ -397,13 +502,20 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   protected compileForEach(context: MethodContext, statement: Extract<Statement, { kind: 'forEach' }>): Exec {
     const labels = this.takeLabels(context);
     const iterable = this.compileValue(context, statement.iterable);
-    if (iterable.type.kind !== 'array') {
-      return this.error(statement.iterable, '拡張 for 文では配列しか使えません。');
-    }
-    const elementType = iterable.type.element;
+    const elementType = this.elementTypeOf(statement.iterable, iterable.type);
     const declaredType = statement.type.kind === 'var' ? elementType : this.resolveType(statement.type);
-    // The element waits in the temporaries, where the conversion reads it, until the variable holds it.
-    const element: CompiledValue = { kind: 'value', type: elementType, run: (frame) => frame.temporaries.at(-1) };
+    // The element waits in the temporaries, where the conversion reads it, until the variable holds it. An
+    // iterable's element comes from Iterator.next(), whose erased result the conversion casts, as javac does.
+    const erasedElement = iterable.type.kind === 'array' ? undefined : this.builtins.objectClass.type;
+    const element: CompiledValue = {
+      kind: 'value',
+      type: elementType,
+      erasedType:
+        isReference(elementType) && !sameType(erasure(elementType), this.builtins.objectClass.type)
+          ? erasedElement
+          : undefined,
+      run: (frame) => frame.temporaries.at(-1),
+    };
     const convert = this.convert(element, declaredType, 'assignment', statement.variable).run;
     const slot = this.declareLocal(context, statement, statement.name, declaredType);
     const stepRow = this.stepRowOf(statement);
@@ -419,265 +531,56 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       }
       frame.runtime.steps.stepBinding(stepRow, isAnswered);
     };
+    const runIteration = (frame: Frame, value: Value): Completion | undefined | 'continue' => {
+      bind(frame, value);
+      const completion = body(frame);
+      return completion && loopCompletion(completion, labels);
+    };
+    return this.forEachLoop(iterable, runIteration);
+  }
+
+  /** Runs `runIteration` on each element of an array or `Iterable`, which must not be null. */
+  protected forEachLoop(
+    iterable: CompiledValue,
+    runIteration: (frame: Frame, value: Value) => Completion | undefined | 'continue'
+  ): Exec {
+    if (iterable.type.kind !== 'array') {
+      const iteratorMessage = nullMessage(
+        `Cannot invoke "${typeDescription(this.builtins, iterable.type)}.iterator()"`,
+        iterable.source
+      );
+      return (frame) => {
+        const source = iterable.run(frame);
+        if (source === undefined) return throwBuiltin(frame, 'NullPointerException', iteratorMessage);
+        return iterateIterable(frame, source, (value) => runIteration(frame, value));
+      };
+    }
+    const lengthMessage = nullMessage('Cannot read the array length', iterable.source);
     return (frame) => {
       const array = iterable.run(frame);
-      if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
-      return iterate(frame, array, (value) => {
-        bind(frame, value);
-        const completion = body(frame);
-        return completion && loopCompletion(completion, labels);
-      });
+      if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException', lengthMessage);
+      return iterate(frame, array, (value) => runIteration(frame, value));
     };
+  }
+
+  /** The type of the elements a for-each loop walks: an array's, or the type argument of an `Iterable`. */
+  protected elementTypeOf(span: Span, type: JavaType): JavaType {
+    if (type.kind === 'array') return type.element;
+    const bound = upperBound(type);
+    const iterableType = bound.kind === 'class' ? asSuper(bound, this.builtins.collections.iterableClass) : undefined;
+    if (!iterableType) return this.error(span, '拡張 for 文では配列か、List などの Iterable しか使えません。');
+    const elementArg = iterableType.args?.[0];
+    if (!elementArg) return this.builtins.objectClass.type;
+    return wildcardBound(elementArg);
   }
 
   protected isAnswered(type: JavaType): boolean {
     return isPrimitive(type) || (type.kind === 'class' && type.cls === this.builtins.stringClass);
   }
-
-  protected compileSwitch(context: MethodContext, statement: Extract<Statement, { kind: 'switch' }>): Exec {
-    const selector = this.compileValue(context, statement.selector);
-    const isString = selector.type.kind === 'class' && selector.type.cls === this.builtins.stringClass;
-    if (!isString && selector.type.kind !== 'int' && selector.type.kind !== 'char') {
-      this.error(statement.selector, `switch 文では ${typeName(selector.type)} 型の値を使えません。`);
-    }
-    const { labelValues, defaultIndex } = this.compileSwitchLabels(context, statement, selector.type);
-    const runFrom = this.compileSwitchGroups(context, statement);
-    const matches = (candidate: Value, value: Value): boolean =>
-      isString ? (candidate as JavaString).value === (value as JavaString).value : candidate === value;
-    return (frame) => {
-      const value = selector.run(frame);
-      if (value === undefined) throwBuiltin(frame, 'NullPointerException');
-      const matched = labelValues.findIndex((values) => values.some((candidate) => matches(candidate, value)));
-      const start = matched === -1 ? defaultIndex : matched;
-      if (start === -1) return;
-      const completion = runFrom(frame, start);
-      return completion?.kind === 'break' && completion.label === undefined ? undefined : completion;
-    };
-  }
-
-  /** The constants of each group's case labels, and the index of the group holding `default` (or -1). */
-  protected compileSwitchLabels(
-    context: MethodContext,
-    statement: Extract<Statement, { kind: 'switch' }>,
-    selectorType: JavaType
-  ): { labelValues: Value[][]; defaultIndex: number } {
-    const seen = new Set<unknown>();
-    let defaultIndex = -1;
-    const labelValues = statement.groups.map((group, index) =>
-      group.labels.flatMap((label) => {
-        if (label) return [this.compileCaseConstant(context, label, selectorType, seen)];
-        if (defaultIndex !== -1) this.error(group, 'default が複数あります。');
-        defaultIndex = index;
-        return [];
-      })
-    );
-    return { labelValues, defaultIndex };
-  }
-
-  protected compileCaseConstant(
-    context: MethodContext,
-    label: Expression,
-    selectorType: JavaType,
-    seen: Set<unknown>
-  ): Value {
-    const { constant } = this.convert(this.compileValue(context, label), selectorType, 'assignment', label);
-    if (constant === undefined) this.error(label, 'case には定数を書いてください。');
-    const key = constant instanceof JavaString ? `s:${constant.value}` : constant;
-    if (seen.has(key)) this.error(label, 'case の値が重複しています。');
-    seen.add(key);
-    return constant;
-  }
-
-  /** Compiles the groups into a runner that starts at a group and falls through as the switch's form allows. */
-  protected compileSwitchGroups(
-    context: MethodContext,
-    statement: Extract<Statement, { kind: 'switch' }>
-  ): (frame: Frame, start: number) => Completion | undefined {
-    context.switchDepth++;
-    let groups: Exec[];
-    let slots: number[] = [];
-    try {
-      if (statement.isArrowForm) {
-        groups = statement.groups.map((group) =>
-          this.withScope(context, () => this.compileStatements(context, group.statements))
-        );
-      } else {
-        // The groups of a classic switch share one scope, and execution falls through them in order.
-        context.scopes.push({ names: new Map(), slots: [] });
-        try {
-          groups = statement.groups.map((group) => this.compileStatements(context, group.statements));
-        } finally {
-          slots = (context.scopes.pop() as Scope).slots;
-        }
-      }
-    } finally {
-      context.switchDepth--;
-    }
-    const { isArrowForm } = statement;
-    return (frame, start) => {
-      try {
-        for (let index = start; index < groups.length; index++) {
-          const completion = groups[index](frame);
-          if (completion || isArrowForm) return completion;
-        }
-        return;
-      } finally {
-        for (const slot of slots) frame.locals[slot] = UNASSIGNED;
-      }
-    };
-  }
-
-  protected compileTry(context: MethodContext, statement: Extract<Statement, { kind: 'try' }>): Exec {
-    if (statement.catches.length === 0 && !statement.finallyBlock) {
-      this.error(statement, 'try 文には catch か finally が必要です。');
-    }
-    // The finally block is compiled first: one that cannot complete normally discards every exception thrown
-    // before it, so the try and catch blocks then throw nothing out of the statement. Its error waits until the
-    // blocks before it compile, so that the first error in the source is the one reported.
-    let finallyBlock: Exec | undefined;
-    let finallyError: CompileError | undefined;
-    try {
-      finallyBlock = statement.finallyBlock ? this.compileBlock(context, statement.finallyBlock) : undefined;
-    } catch (error) {
-      if (!(error instanceof CompileError)) throw error;
-      finallyError = error;
-    }
-    // A finally block that failed to compile still has its structure, where unreached conditions count as variable.
-    const discardsExceptions = statement.finallyBlock !== undefined && !canCompleteNormally(statement.finallyBlock);
-    if (discardsExceptions) context.tries.push({ caughtTypes: [this.builtins.throwableClass], thrownTypes: [] });
-    try {
-      const enclosing: EnclosingTry = {
-        caughtTypes: statement.catches.flatMap((clause) => clause.types.map((type) => this.resolveThrowable(type))),
-        thrownTypes: [],
-      };
-      context.tries.push(enclosing);
-      let body: Exec;
-      try {
-        body = this.compileBlock(context, statement.body);
-      } finally {
-        context.tries.pop();
-      }
-      const handle = this.compileCatchClauses(context, statement.catches, enclosing.thrownTypes);
-      if (finallyError) throw finallyError;
-      return runTry(body, handle, finallyBlock);
-    } finally {
-      if (discardsExceptions) context.tries.pop();
-    }
-  }
-
-  /** Rejects catching what an earlier clause catches, or a checked exception the try block cannot throw. */
-  protected checkCatchable(
-    clause: CatchClause,
-    classes: readonly ClassInfo[],
-    thrownInTry: readonly ClassInfo[],
-    earlierClasses: readonly ClassInfo[]
-  ): void {
-    const exceptionClass = this.builtins.classes.get('Exception') as ClassInfo;
-    for (const [index, cls] of classes.entries()) {
-      if (classes.some((other, otherIndex) => otherIndex !== index && isSubclass(cls, other))) {
-        this.error(clause, `catch の例外 ${cls.name} は、同じ catch の他の例外と親子関係にあります。`);
-      }
-      if (earlierClasses.some((earlier) => isSubclass(cls, earlier))) {
-        this.error(clause, `例外 ${cls.name} は、前の catch ですでに捕まえられています。`);
-      }
-      // Exception and Throwable also catch unchecked exceptions, which any code may throw.
-      const mayBeThrown =
-        !this.isChecked(cls) ||
-        isSubclass(exceptionClass, cls) ||
-        thrownInTry.some((thrown) => isSubclass(thrown, cls) || isSubclass(cls, thrown));
-      if (!mayBeThrown) this.error(clause, `例外 ${cls.name} は、この try 文の中で投げられることがありません。`);
-    }
-  }
-
-  /** Compiles catch clauses into a handler that rethrows an exception none of them catches. */
-  protected compileCatchClauses(
-    context: MethodContext,
-    clauses: CatchClause[],
-    thrownInTry: readonly ClassInfo[]
-  ): CatchHandler {
-    const earlierClasses: ClassInfo[] = [];
-    const handlers = clauses.map((clause) => {
-      const classes = clause.types.map((type) => this.resolveThrowable(type));
-      this.checkCatchable(clause, classes, thrownInTry, earlierClasses);
-      const rethrown = caughtByClause(thrownInTry, classes, earlierClasses);
-      earlierClasses.push(...classes);
-      const exec = this.withScope(context, () => {
-        const type = classes.length === 1 ? classes[0].type : this.builtins.throwableClass.type;
-        const slot = this.declareLocal(context, clause, clause.name, type);
-        if (!assignedNames(clause.body).includes(clause.name)) context.rethrownTypes.set(slot, rethrown);
-        const handler = this.compileBlock(context, clause.body);
-        return (frame) => {
-          frame.locals[slot] = frame.temporaries.pop();
-          return handler(frame);
-        };
-      });
-      return { classes, exec };
-    });
-    return (frame, thrown) => {
-      const handler = handlers.find(({ classes }) => classes.some((cls) => isSubclass(thrown.value.cls, cls)));
-      if (!handler) throw thrown;
-      frame.temporaries.push(thrown.value);
-      return handler.exec(frame);
-    };
-  }
-}
-
-type CatchHandler = (frame: Frame, thrown: JavaThrow) => Completion | undefined;
-
-/** What a catch clause receives: what the try block throws narrowed to its classes, minus what earlier clauses catch. */
-function caughtByClause(
-  thrownInTry: readonly ClassInfo[],
-  classes: readonly ClassInfo[],
-  earlierClasses: readonly ClassInfo[]
-): ClassInfo[] {
-  const narrowed = thrownInTry.flatMap((thrown) =>
-    classes.flatMap((cls) => {
-      if (isSubclass(thrown, cls)) return [thrown];
-      return isSubclass(cls, thrown) ? [cls] : [];
-    })
-  );
-  return narrowed.filter((thrown) => !earlierClasses.some((earlier) => isSubclass(thrown, earlier)));
-}
-
-function runTry(body: Exec, handle: CatchHandler, finallyBlock: Exec | undefined): Exec {
-  return (frame) => {
-    const { completion, pending } = attemptTry(frame, body, handle);
-    if (finallyBlock) {
-      // A return value or an exception the finally block delays keeps its turtles alive while the block runs.
-      frame.temporaries.push(completion?.kind === 'return' ? completion.value : pending?.value);
-      try {
-        const finallyCompletion = finallyBlock(frame);
-        if (finallyCompletion) return finallyCompletion;
-      } finally {
-        frame.temporaries.pop();
-      }
-    }
-    if (pending) throw pending;
-    return completion;
-  };
-}
-
-/** Runs a try block and its catch clauses, returning how they completed or the exception left for finally. */
-function attemptTry(frame: Frame, body: Exec, handle: CatchHandler): { completion?: Completion; pending?: JavaThrow } {
-  const temporaries = frame.temporaries.length;
-  try {
-    return { completion: body(frame) };
-  } catch (error) {
-    if (!(error instanceof JavaThrow)) throw error;
-    // An exception thrown mid-expression leaves that expression's pending values behind.
-    frame.temporaries.length = temporaries;
-    try {
-      return { completion: handle(frame, error) };
-    } catch (error_) {
-      if (!(error_ instanceof JavaThrow)) throw error_;
-      frame.temporaries.length = temporaries;
-      return { pending: error_ };
-    }
-  }
 }
 
 /** Runs a for-each loop over `array`, which keeps its turtles alive while the loop runs, even when no variable holds it. */
-function iterate(
+export function iterate(
   frame: Frame,
   array: JavaArray,
   runIteration: (value: Value) => Completion | undefined | 'continue'
@@ -694,8 +597,29 @@ function iterate(
   }
 }
 
+/** Runs a for-each loop over an `Iterable` through its iterator, as Java does, keeping the iterator alive meanwhile. */
+function iterateIterable(
+  frame: Frame,
+  source: Value,
+  runIteration: (value: Value) => Completion | undefined | 'continue'
+): Completion | undefined {
+  const { collections } = frame.runtime.builtins;
+  const iterator = frame.runtime.invokeVirtual(frame, collections.iterableClass, 'iterator', source, []);
+  frame.temporaries.push(iterator);
+  try {
+    while (frame.runtime.invokeVirtual(frame, collections.iteratorClass, 'hasNext', iterator, []) === true) {
+      const value = frame.runtime.invokeVirtual(frame, collections.iteratorClass, 'next', iterator, []);
+      const result = runIteration(value);
+      if (result && result !== 'continue') return result;
+    }
+    return;
+  } finally {
+    frame.temporaries.pop();
+  }
+}
+
 /** Decides what a loop does with its body's abrupt completion. */
-function loopCompletion(completion: Completion, labels: string[]): Completion | undefined | 'continue' {
+export function loopCompletion(completion: Completion, labels: string[]): Completion | undefined | 'continue' {
   if (completion.kind === 'continue' && (completion.label === undefined || labels.includes(completion.label))) {
     return 'continue';
   }

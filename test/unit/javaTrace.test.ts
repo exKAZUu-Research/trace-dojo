@@ -696,6 +696,21 @@ test('a for-each loop keeps the turtles of an array that no variable holds', () 
   expect(traceProgram('java', program, program).traceItems.map(({ turtles }) => turtles.length)).toEqual([0, 2, 2, 2]);
 });
 
+test('a priority queue iterator releases the turtle of an element it removed', () => {
+  const program = `import java.util.*;
+public class Main {
+  public static void main(String[] args) {
+    PriorityQueue<Box> q = new PriorityQueue<>((a, b) -> a.n - b.n);
+    for (int n : new int[] { 0, 4, 1, 5, 6, 2, 3 }) q.add(new Box(n));
+    Iterator<Box> i = q.iterator();
+    while (i.hasNext()) { Box b = i.next(); if (b.n == 6 || b.n == 3) i.remove(); }
+    int size = q.size();
+  }
+}
+class Box { int n; Turtle t; Box(int n) { this.n = n; if (n == 3) t = new Turtle(); } }`;
+  expect(traceProgram('java', program, program).traceItems.at(-1)?.turtles).toEqual([]);
+});
+
 test('a call records its step when a return expression updates a variable after the last step', () => {
   const program = `public class Main {
   static int count = 0;

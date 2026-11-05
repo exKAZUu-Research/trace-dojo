@@ -3,12 +3,22 @@ import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
+import { UNNAMED } from './ast';
+import { getBuiltins } from './builtins';
 import { type CompiledProgram, compileProgram } from './compiler';
 import { runProgram } from './execute';
 import { parseJava } from './parse';
 import { type Frame, Runtime, UNASSIGNED } from './runtime';
-import type { JavaType } from './types';
-import { charToString, defaultValue, JavaArray, JavaObject, JavaString, type Value } from './values';
+import { isSubclass, type JavaType } from './types';
+import {
+  charToString,
+  defaultValue,
+  floatToShortestDouble,
+  JavaArray,
+  JavaObject,
+  JavaString,
+  type Value,
+} from './values';
 
 // code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceJavaProgram(program: string, trace: TraceOptions): ProgramRecording {
@@ -37,11 +47,14 @@ class Snapshotter {
   /** The variables a frame shows: its locals, then static fields and the fields of `this` when `withContext`. */
   variablesOf(frame: Frame, withContext: boolean): Variables {
     const variables: Variables = { vars: {}, referenceVars: {} };
-    const isMain = frame.method === this.program.mainMethod;
+    const hidesArgs = frame.method === this.program.mainMethod && frame.method.parameterTypes.length === 1;
     for (const [slot, local] of frame.localInfos.entries()) {
       const value = frame.locals[slot];
       // `main`'s parameter only receives the launcher's arguments, which these programs never use.
-      if (value === UNASSIGNED || (isMain && slot === 0)) continue;
+      // Unnamed variables and the compiler's own locals, whose names start with NUL, are no variables of the program.
+      if (value === UNASSIGNED || (hidesArgs && slot === 0) || local.name === UNNAMED || local.name.startsWith('\0')) {
+        continue;
+      }
       addVariable(variables, local.name, value, local.type);
     }
     if (!withContext) return variables;
@@ -56,7 +69,7 @@ class Snapshotter {
       const statics = this.runtime.staticValues.get(cls);
       for (const field of cls.staticFields) {
         // Constants never change, so they would only crowd the table learners fill in.
-        if (this.program.constantOf(field) !== undefined) continue;
+        if (field.enumConstant || this.program.constantOf(field) !== undefined) continue;
         const value = statics
           ? statics[field.slot]
           : (this.program.initialConstantOf(field) ?? defaultValue(field.type));
@@ -89,11 +102,20 @@ function addThis(variables: Variables, self: JavaObject): void {
 const NOT_SCALAR = Symbol('notScalar');
 type Scalar = TraceItemVariable[string];
 
+// code-gauge-allow functionNcss 32 -- One case per kind of type.
 function scalarOf(value: Value, type: JavaType): Scalar | typeof NOT_SCALAR {
   switch (type.kind) {
+    case 'byte':
+    case 'short':
     case 'int':
     case 'double': {
       return value as number;
+    }
+    case 'long': {
+      return Number(value as bigint);
+    }
+    case 'float': {
+      return floatToShortestDouble(value as number);
     }
     case 'char': {
       return charToString(value as number);
@@ -101,8 +123,14 @@ function scalarOf(value: Value, type: JavaType): Scalar | typeof NOT_SCALAR {
     case 'boolean': {
       return value as boolean;
     }
-    case 'class': {
+    case 'class':
+    case 'typeVar':
+    case 'wildcard': {
       if (value instanceof JavaString) return value.value;
+      // Learners write a boxed value as the primitive value it holds.
+      if (value instanceof JavaObject && value.boxed !== undefined) {
+        return scalarOf(value.boxed, value.cls.unboxedType as JavaType);
+      }
       return NOT_SCALAR;
     }
     case 'array': {
@@ -122,7 +150,8 @@ function scalarOf(value: Value, type: JavaType): Scalar | typeof NOT_SCALAR {
 
 function hasScalarElements(type: JavaType): boolean {
   if (type.kind === 'array') return hasScalarElements(type.element);
-  return type.kind !== 'class' || type.cls.name === 'String';
+  if (type.kind === 'typeVar' || type.kind === 'wildcard') return false;
+  return type.kind !== 'class' || type.cls.name === 'String' || type.cls.unboxedType !== undefined;
 }
 
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows Java null as null.
@@ -130,19 +159,57 @@ const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 function displayNodeOf(value: Value, type: JavaType, seen: Set<unknown>): DisplayNode | undefined {
   if (value === undefined) return NULL_NODE;
-  if (typeof value === 'number') return { kind: 'value', value: type.kind === 'char' ? charToString(value) : value };
+  if (typeof value === 'number' || typeof value === 'bigint') {
+    return { kind: 'value', value: scalarOf(value, type) as number | string };
+  }
   if (typeof value === 'boolean') return { kind: 'value', value };
   if (value instanceof JavaString) return { kind: 'value', value: value.value };
   if (seen.has(value)) return undefined;
   if (value instanceof JavaObject && value.turtle) return turtleNodeOf(value.turtle);
+  if (value instanceof JavaObject && value.boxed !== undefined) {
+    return { kind: 'value', value: scalarOf(value, value.cls.type) as number | string | boolean };
+  }
+  // An enum constant shows as its name, which is what learners write for it.
+  if (value instanceof JavaObject && value.enumConstant) return { kind: 'value', value: value.enumConstant.name.value };
+  if (value instanceof JavaObject && value.builder !== undefined) return { kind: 'value', value: value.builder };
   seen.add(value);
   const node: DisplayNode =
     value instanceof JavaArray
       ? { kind: 'array', entries: arrayEntriesOf(value, seen) }
-      : { kind: 'object', entries: objectEntriesOf(value, seen) };
+      : (collectionNodeOf(value, seen) ?? { kind: 'object', entries: objectEntriesOf(value, seen) });
   seen.delete(value);
   return node;
 }
+
+/** Lists and sets show as arrays of their elements, and maps as objects keyed by their keys. */
+function collectionNodeOf(object: JavaObject, seen: Set<unknown>): DisplayNode | undefined {
+  const items =
+    object.elements ?? (object.store && !isMap(object) ? object.store.ordered().map((entry) => entry.key) : undefined);
+  if (items && !object.cls.name.endsWith('Itr')) {
+    const entries: Record<string, DisplayNode> = {};
+    for (const [index, item] of items.entries()) entries[index] = displayNodeOf(item, OBJECT, seen) ?? NULL_NODE;
+    return { kind: 'array', entries };
+  }
+  if (!object.store) return;
+  const entries: Record<string, DisplayNode> = {};
+  const ordered = object.store.ordered();
+  for (const entry of ordered) entries[keyText(entry.key)] = displayNodeOf(entry.value, OBJECT, seen) ?? NULL_NODE;
+  return { kind: 'object', entries };
+}
+
+function isMap(object: JavaObject): boolean {
+  return isSubclass(object.cls, getBuiltins().collections.mapClass);
+}
+
+/** The text a map's key shows as, which is what learners write for it. */
+function keyText(key: Value): string {
+  if (key === undefined) return 'null';
+  const node = displayNodeOf(key, OBJECT, new Set());
+  return node?.kind === 'value' ? String(node.value) : `#${(key as JavaObject | JavaArray).identity}`;
+}
+
+/** Elements of collections are references, whose own values decide how they show. */
+const OBJECT: JavaType = { kind: 'null' };
 
 function turtleNodeOf(turtle: TurtleState): DisplayNode | undefined {
   if (!turtle.isAlive) return undefined;

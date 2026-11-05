@@ -6,7 +6,8 @@ export function canCompleteNormally(statement: Statement): boolean {
     case 'return':
     case 'throw':
     case 'break':
-    case 'continue': {
+    case 'continue':
+    case 'yield': {
       return false;
     }
     case 'block': {
@@ -32,6 +33,9 @@ export function canCompleteNormally(statement: Statement): boolean {
     }
     case 'switch': {
       return switchCanCompleteNormally(statement);
+    }
+    case 'synchronized': {
+      return canCompleteNormally(statement.body);
     }
     case 'labeled': {
       const { body, label } = statement;
@@ -66,7 +70,8 @@ function loopCanCompleteNormally(
 }
 
 function switchCanCompleteNormally(statement: Extract<Statement, { kind: 'switch' }>): boolean {
-  const hasDefault = statement.groups.some((group) => group.labels.includes(undefined));
+  const hasDefault =
+    statement.groups.some((group) => group.labels.includes(undefined)) || exhaustiveSwitches.has(statement);
   if (!hasDefault) return true;
   if (statement.groups.some((group) => group.statements.some((child) => containsJump(child, 'break')))) return true;
   if (statement.isArrowForm) {
@@ -76,14 +81,66 @@ function switchCanCompleteNormally(statement: Extract<Statement, { kind: 'switch
   return !last || last.statements.every((child) => canCompleteNormally(child));
 }
 
+/** The switches with patterns that the compiler found exhaustive, which act as if they had a default. */
+export const exhaustiveSwitches = new WeakSet<object>();
+
 /** The values of the boolean constant expressions compiled so far, which decide reachability in Java. */
 export const booleanConstants = new WeakMap<Expression, boolean>();
+
+/** Whether `statement` contains a `break` whose target encloses it: unlabeled outside nested loops and switches, or naming a label declared outside it. */
+export function breaksOut(statement: Statement): boolean {
+  if (containsJump(statement, 'break')) return true;
+  const declared = new Set<string>();
+  const used = new Set<string>();
+  collectLabels(statement, declared, used);
+  return [...used].some((label) => !declared.has(label));
+}
+
+/** Adds the labels that `statement` declares and that its `break` statements name. */
+function collectLabels(statement: Statement, declared: Set<string>, used: Set<string>): void {
+  if (statement.kind === 'break') {
+    if (statement.label !== undefined) used.add(statement.label);
+    return;
+  }
+  if (statement.kind === 'labeled') declared.add(statement.label);
+  for (const child of nestedStatements(statement)) collectLabels(child, declared, used);
+}
+
+/** The statements directly nested in `statement`. */
+export function nestedStatements(statement: Statement): Statement[] {
+  switch (statement.kind) {
+    case 'block': {
+      return statement.statements;
+    }
+    case 'if': {
+      return statement.alternative ? [statement.consequence, statement.alternative] : [statement.consequence];
+    }
+    case 'while':
+    case 'do':
+    case 'for':
+    case 'forEach':
+    case 'labeled':
+    case 'synchronized': {
+      return [statement.body];
+    }
+    case 'switch': {
+      return statement.groups.flatMap((group) => group.statements);
+    }
+    case 'try': {
+      const { body, catches, finallyBlock } = statement;
+      return [body, ...catches.map((clause) => clause.body), ...(finallyBlock ? [finallyBlock] : [])];
+    }
+    default: {
+      return [];
+    }
+  }
+}
 
 /**
  * Whether `statement` contains a `break` that exits it or a `continue` that continues it: unlabeled outside nested
  * loops (and, for `break`, nested switch statements), or naming `label`.
  */
-function containsJump(statement: Statement, kind: 'break' | 'continue', label?: string, depth = 0): boolean {
+export function containsJump(statement: Statement, kind: 'break' | 'continue', label?: string, depth = 0): boolean {
   const inside = (child: Statement, childDepth = depth): boolean => containsJump(child, kind, label, childDepth);
   switch (statement.kind) {
     case 'break':
@@ -108,7 +165,8 @@ function containsJump(statement: Statement, kind: 'break' | 'continue', label?: 
       const switchDepth = kind === 'break' ? depth + 1 : depth;
       return statement.groups.some((group) => group.statements.some((child) => inside(child, switchDepth)));
     }
-    case 'labeled': {
+    case 'labeled':
+    case 'synchronized': {
       return inside(statement.body);
     }
     case 'try': {

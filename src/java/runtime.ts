@@ -3,7 +3,7 @@ import { StepTracker } from '../interpreter/stepTracker';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import type { Builtins } from './builtins';
 import type { ClassInfo, LocalInfo, MethodInfo } from './types';
-import { isSubclass, sameType } from './types';
+import { isSubclass, sameType, superinterfacesOf } from './types';
 import { defaultValue, JavaArray, JavaObject, JavaString, type Value } from './values';
 
 /** A local that is out of scope or not yet assigned. */
@@ -14,6 +14,8 @@ export class Frame {
   readonly locals: Slot[];
   /** Values a pending call or allocation holds outside any variable, which must keep their turtles alive. */
   readonly temporaries: Value[] = [];
+  /** The values of the enclosing method's locals that the lambda body running in this frame reads. */
+  captured: readonly Value[] = [];
 
   constructor(
     readonly runtime: Runtime,
@@ -27,11 +29,12 @@ export class Frame {
   }
 }
 
-/** Throws a builtin exception such as `ArithmeticException`. */
-export function throwBuiltin(frame: Frame, className: string, message?: string): never {
+/** Throws a builtin exception such as `ArithmeticException`, optionally caused by another. */
+export function throwBuiltin(frame: Frame, className: string, message?: string, cause?: JavaObject): never {
   const cls = frame.runtime.builtins.classes.get(className);
   if (!cls) throw new Error(`Unknown builtin exception: ${className}`);
   const exception = new JavaObject(cls);
+  exception.cause = cause;
   if (message !== undefined) {
     // Messages may repeat learner strings; charging one for running out of memory would recurse.
     if (className !== 'OutOfMemoryError') frame.runtime.allocateString(frame, message.length);
@@ -39,6 +42,9 @@ export function throwBuiltin(frame: Frame, className: string, message?: string):
   }
   throw new JavaThrow(exception);
 }
+
+/** Ends the program as `System.exit` does, skipping finally blocks and catch clauses. */
+export class ProgramExit {}
 
 /** A Java exception in flight. */
 export class JavaThrow {
@@ -51,9 +57,16 @@ export class Runtime {
   readonly staticValues = new Map<ClassInfo, Value[]>();
   readonly steps = new StepTracker();
   readonly budget = new ExecutionBudget();
+
+  /** Prints to standard output, which Java encodes in UTF-8, so that an unpaired surrogate prints as `?`. */
+  print(text: string): void {
+    this.budget.print(text.replaceAll(/\p{Cs}/gu, '?'));
+  }
   private allocatedSlots = 0;
   private readonly initializingClasses = new Set<ClassInfo>();
   private readonly dispatchCache = new Map<MethodInfo, Map<ClassInfo, MethodInfo>>();
+  /** The strings by text that the program's literals and constants are, which `String.intern()` returns and extends. */
+  internedStrings = new Map<string, JavaString>();
 
   constructor(readonly builtins: Builtins) {}
 
@@ -62,10 +75,11 @@ export class Runtime {
   }
 
   /** Charges for a string of `length` built at run time, before it is built. */
-  allocateString(frame: Frame, length: number): void {
+  /** Checks a string's length and charges for building it, or for the `written` characters an edit writes. */
+  allocateString(frame: Frame, length: number, written = length): void {
     if (length > LIMITS.maxStringLength) throwBuiltin(frame, 'OutOfMemoryError', 'Java heap space');
     // Charging every character built bounds what a run can build in all to 16 times its operations.
-    this.spend(Math.ceil(length / 16));
+    this.spend(Math.ceil(written / 16));
   }
 
   allocateArray(frame: Frame, length: number): void {
@@ -159,20 +173,38 @@ export class Runtime {
       for (const local of frame.locals) if (local !== UNASSIGNED) roots.push(local);
       roots.push(frame.thisObject);
       for (const temporary of frame.temporaries) roots.push(temporary);
+      for (const value of frame.captured) roots.push(value);
     }
     for (const values of this.staticValues.values()) for (const value of values) roots.push(value);
     return roots;
   }
 
   /** Calls `method` with `args`, which the caller keeps in its temporaries so that they stay reachable. */
-  invoke(caller: Frame, method: MethodInfo, receiver: Value, args: Value[], callRow: number | undefined): Value {
+  /** @param captured The values of the enclosing method's locals that a lambda body reads. */
+  invoke(
+    caller: Frame,
+    method: MethodInfo,
+    receiver: Value,
+    args: Value[],
+    callRow: number | undefined,
+    captured: readonly Value[] = []
+  ): Value {
     if (method.native) {
       this.spend();
       return method.native(caller, receiver, args);
     }
     const code = method.code;
-    if (!code) throw new Error(`Method ${method.owner.name}.${method.name} has no code`);
+    if (!code) {
+      // A builtin class that misses a native for a method it inherits fails as the JVM does, not as the host.
+      const owner = receiver instanceof JavaObject ? receiver.cls.name : method.owner.name;
+      throwBuiltin(
+        caller,
+        'AbstractMethodError',
+        `Receiver class ${owner} does not define or inherit an implementation of the resolved method '${method.name}'`
+      );
+    }
     const frame = this.pushFrame(caller, method, code.locals, receiver as JavaObject | undefined, callRow);
+    frame.captured = captured;
     try {
       for (const [index, arg] of args.entries()) frame.locals[index] = arg;
       return code.run(frame);
@@ -201,25 +233,7 @@ export class Runtime {
     }
     let resolved = overrides.get(cls);
     if (!resolved) {
-      resolved = method;
-      for (
-        let current: ClassInfo | undefined = cls;
-        current && current !== method.owner;
-        current = current.superclass
-      ) {
-        const found = current.methods.find(
-          (candidate) =>
-            candidate.name === method.name &&
-            !candidate.isStatic &&
-            candidate.access !== 'private' &&
-            candidate.parameterTypes.length === method.parameterTypes.length &&
-            candidate.parameterTypes.every((type, index) => sameType(type, method.parameterTypes[index]))
-        );
-        if (found) {
-          resolved = found;
-          break;
-        }
-      }
+      resolved = findImplementation(cls, method);
       overrides.set(cls, resolved);
     }
     return resolved;
@@ -227,22 +241,53 @@ export class Runtime {
 
   /** Calls `toString()` on an object as string concatenation does. */
   invokeToString(frame: Frame, object: JavaObject): JavaString | undefined {
-    const method = this.builtins.objectClass.methods.find((candidate) => candidate.name === 'toString');
-    if (!method) throw new Error('Object.toString is missing');
-    frame.temporaries.push(object);
+    return this.invokeVirtual(frame, this.builtins.objectClass, 'toString', object, []) as JavaString | undefined;
+  }
+
+  /** Calls the instance method `name` of `owner` on `receiver` as a virtual call, as library code calls `equals`. */
+  invokeVirtual(frame: Frame, owner: ClassInfo, name: string, receiver: Value, args: Value[]): Value {
+    const method = owner.methods.find(
+      (candidate) => candidate.name === name && candidate.parameterTypes.length === args.length
+    );
+    if (!method) throw new Error(`${owner.name}.${name} is missing`);
+    if (receiver === undefined) throwBuiltin(frame, 'NullPointerException');
+    frame.temporaries.push(receiver, ...args);
     try {
-      return this.invoke(frame, this.dispatch(object, method), object, [], undefined) as JavaString | undefined;
+      return this.invoke(frame, this.dispatch(receiver, method), receiver, args, undefined);
     } finally {
-      frame.temporaries.pop();
+      frame.temporaries.length -= args.length + 1;
     }
   }
 
   isInstance(value: Value, cls: ClassInfo): boolean {
     if (value instanceof JavaObject) return isSubclass(value.cls, cls);
-    if (value instanceof JavaString) return cls === this.builtins.stringClass || cls === this.builtins.objectClass;
+    if (value instanceof JavaString)
+      return isSubclass(this.builtins.stringClass, cls) || cls === this.builtins.objectClass;
     if (value instanceof JavaArray) return cls === this.builtins.objectClass;
     return false;
   }
+}
+
+/** The method that `cls` runs for a virtual call of `method`: an override in its superclasses, else a default method. */
+export function findImplementation(cls: ClassInfo, method: MethodInfo): MethodInfo {
+  const matches = (candidate: MethodInfo): boolean =>
+    candidate === method ||
+    (candidate.name === method.name &&
+      !candidate.isStatic &&
+      candidate.access !== 'private' &&
+      (candidate.overrides?.has(method) === true ||
+        (candidate.parameterTypes.length === method.parameterTypes.length &&
+          candidate.parameterTypes.every((type, index) => sameType(type, method.parameterTypes[index])))));
+  for (let current: ClassInfo | undefined = cls; current; current = current.superclass) {
+    if (current === method.owner) return method;
+    const found = current.methods.find(matches);
+    if (found) return found;
+  }
+  // A default method in a more specific interface overrides one in the interfaces it extends.
+  const defaults = superinterfacesOf(cls).flatMap((parent) =>
+    parent.methods.filter((candidate) => matches(candidate) && !candidate.isAbstract)
+  );
+  return defaults.find((candidate) => defaults.every((other) => isSubclass(candidate.owner, other.owner))) ?? method;
 }
 
 function markReachable(roots: Value[]): { reached: Set<JavaObject | JavaArray>; scanned: number } {
@@ -253,13 +298,29 @@ function markReachable(roots: Value[]): { reached: Set<JavaObject | JavaArray>; 
     const value = pending.pop();
     if (!(value instanceof JavaObject || value instanceof JavaArray) || reached.has(value)) continue;
     reached.add(value);
-    const children = value instanceof JavaObject ? value.fields : value.values;
+    const children = value instanceof JavaObject ? referencesOf(value) : value.values;
     scanned += children.length;
     // Pushed one by one: spreading a large array into push() exceeds the engine's argument limit.
     for (const child of children) pushReference(pending, child);
-    if (value instanceof JavaObject) pushReference(pending, value.cause);
   }
   return { reached, scanned };
+}
+
+/** The values an object keeps alive: its fields and what builtin objects hold outside them. */
+function referencesOf(object: JavaObject): Value[] {
+  const references: Value[] = [...object.fields, object.cause, object.outer, object.function?.outerThis];
+  for (const values of [
+    object.suppressed,
+    object.capturedLocals,
+    object.function?.captured,
+    object.elements,
+    object.retained,
+  ]) {
+    // Pushed one by one: spreading a large array into push() exceeds the engine's argument limit.
+    for (const value of values ?? []) references.push(value);
+  }
+  for (const entry of object.store?.entries ?? []) references.push(entry.key, entry.value);
+  return references;
 }
 
 function pushReference(pending: Value[], value: Value): void {
