@@ -1233,6 +1233,16 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'interface Op<T extends Op<T>> { T self(); }\nclass OpImpl implements Op<OpImpl> { public OpImpl self() { return this; } }\nclass Main {\n  public static void main(String[] args) {\n    System.out.println(new OpImpl().self() != null);\n  }\n}',
   ],
+  [
+    'case-guard-assigns-pattern-variable',
+    false,
+    'class Main {\n  public static void main(String[] args) {\n    Object o = "abc"; switch (o) { case String s when (s = "x").isEmpty() -> {} default -> {} }\n  }\n}',
+  ],
+  [
+    'field-assigned-after-pattern-scope',
+    true,
+    'class Main {\n  final String s;\n  Main(Object o) { if (o instanceof String s) {} s = "field"; }\n  public static void main(String[] args) {\n    new Main("abc");\n  }\n}',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

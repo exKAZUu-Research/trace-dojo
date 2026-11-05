@@ -113,6 +113,8 @@ export interface MethodContext {
    * method (`isStatic` holds too), the object under construction is not available.
    */
   isBeforeConstructorCall?: boolean;
+  /** While a case guard compiles, the number of locals declared outside it, which it may not assign. */
+  guardLocalLimit?: number;
   returnType: JavaType;
   locals: LocalInfo[];
   scopes: Scope[];
@@ -376,6 +378,9 @@ export abstract class CompilerBase extends TypeResolver {
 
   /** Records an assignment to a local, which a lambda that reads it forbids. */
   protected recordAssignment(context: MethodContext, span: Span, slot: number): void {
+    if (context.guardLocalLimit !== undefined && slot < context.guardLocalLimit) {
+      this.error(span, `case の when の中では、外側の変数 ${context.locals[slot].name} に代入できません。`);
+    }
     const captured = context.capturedSlots.get(slot);
     if (captured && !context.declarationKeys.has(slot)) {
       this.error(span, capturedAssignmentMessage(context.locals[slot].name, captured.reader));

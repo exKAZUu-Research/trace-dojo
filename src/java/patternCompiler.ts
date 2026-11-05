@@ -263,7 +263,15 @@ export abstract class PatternCompiler extends TryCompiler {
       state.dominating.push(compiled);
       return [compiled.test];
     }
-    const guardTest = this.withBindings(context, patternBindings, () => this.compileCondition(context, guard));
+    // A guard may not assign the variables declared outside it, its pattern's included (JLS 14.11.1).
+    const outerLimit = context.guardLocalLimit;
+    context.guardLocalLimit = context.locals.length;
+    let guardTest: (frame: Frame) => boolean;
+    try {
+      guardTest = this.withBindings(context, patternBindings, () => this.compileCondition(context, guard));
+    } finally {
+      context.guardLocalLimit = outerLimit;
+    }
     return [(frame, value) => compiled.test(frame, value) && guardTest(frame)];
   }
 

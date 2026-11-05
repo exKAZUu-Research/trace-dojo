@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 431 -- One checker for the definite assignment rules of JLS chapter 16, which share its scopes and states.
+// code-gauge-allow-file fileNcss 455 -- One checker for the definite assignment rules of JLS chapter 16, which share its scopes and states.
 import { CompileError } from '../interpreter/diagnostics';
 import {
   assign,
@@ -31,7 +31,7 @@ import type {
   WhileStatement,
 } from './ast';
 import { bindingsOfPattern } from './patternBindings';
-import { booleanConstants, exhaustiveSwitches } from './reachability';
+import { booleanConstants, canCompleteNormally, exhaustiveSwitches } from './reachability';
 
 /**
  * What definite assignment analysis leaves for the compiler to check against the locals that lambdas and local
@@ -113,6 +113,8 @@ export class DefiniteAssignmentChecker {
    */
   readonly notEffectivelyFinal = new Set<string>();
   readonly unassignedAtCreations: { span: Span; keys: ReadonlySet<string> }[] = [];
+  /** The pattern variables each statement being analyzed declared, innermost last. */
+  private readonly patternDeclarations: Variable[][] = [];
 
   initialState(): State {
     return { assigned: new Set(), possiblyAssigned: new Set() };
@@ -158,8 +160,31 @@ export class DefiniteAssignmentChecker {
     return isAssigned ? assign(state, variable.id) : state;
   }
 
-  // code-gauge-allow functionNcss 48 -- One case per statement kind, each delegating to its own rule.
+  /**
+   * Analyzes a statement, after which the pattern variables its expressions declared go out of scope, except those of
+   * an `if` whose then-branch cannot complete normally, as `if (!(o instanceof String s)) return;` keeps `s` for the
+   * statements after it until its block ends.
+   */
   statement(statement: Statement, state: State): State {
+    const declared: Variable[] = [];
+    this.patternDeclarations.push(declared);
+    try {
+      return this.statementOfKind(statement, state);
+    } finally {
+      this.patternDeclarations.pop();
+      const keeps = statement.kind === 'if' && !canCompleteNormally(statement.consequence);
+      if (keeps) this.patternDeclarations.at(-1)?.push(...declared);
+      else for (const variable of declared) this.forget(variable);
+    }
+  }
+
+  /** Removes a variable's name from the scope that maps it, so that the name means what it meant before. */
+  private forget(variable: Variable): void {
+    for (const scope of this.scopes) if (scope.get(variable.name) === variable) scope.delete(variable.name);
+  }
+
+  // code-gauge-allow functionNcss 48 -- One case per statement kind, each delegating to its own rule.
+  private statementOfKind(statement: Statement, state: State): State {
     switch (statement.kind) {
       case 'block': {
         return this.scoped(() => this.statements(statement.statements, state));
@@ -251,10 +276,14 @@ export class DefiniteAssignmentChecker {
 
   /** Declares the pattern variables of a switch group's labels, which hold their values where the group runs. */
   private declareLabelBindings(group: SwitchGroup, state: State): State {
-    const bindings = group.labels.flatMap((label) =>
-      label !== undefined && label.kind === 'patternLabel' ? bindingsOfPattern(label.pattern) : []
-    );
-    return this.declarePatternBindings(state, bindings);
+    let current = state;
+    for (const label of group.labels) {
+      if (label === undefined || label.kind !== 'patternLabel') continue;
+      current = this.declarePatternBindings(current, bindingsOfPattern(label.pattern));
+      // A guard runs before the body, so what it writes counts for the body's captures.
+      if (label.guard) current = this.expression(label.guard, current);
+    }
+    return current;
   }
 
   /**
@@ -263,7 +292,10 @@ export class DefiniteAssignmentChecker {
    */
   private declarePatternBindings(state: State, bindings: readonly PatternBinding[]): State {
     let current = state;
-    for (const binding of bindings) current = this.declare(current, binding.name, binding.isFinal, true, true, binding);
+    for (const binding of bindings) {
+      current = this.declare(current, binding.name, binding.isFinal, true, true, binding);
+      this.patternDeclarations.at(-1)?.push(this.lookup(binding.name) as Variable);
+    }
     return current;
   }
 
