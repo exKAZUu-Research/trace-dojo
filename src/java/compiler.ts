@@ -13,23 +13,14 @@ import type {
   VariableDeclarator,
 } from './ast';
 import type { Builtins } from './builtins';
-import { type CompileOptions, type Exec, type MethodContext, sameParameters } from './compilerBase';
+import { type CompileOptions, type Exec, type MethodContext } from './compilerBase';
+import { DeclarationCompiler } from './declarations';
 import { checkDefiniteAssignment, checkInitialization } from './definiteAssignment';
 import { canCompleteNormally } from './reachability';
 import { type Frame, type Slot, UNASSIGNED } from './runtime';
-import { StatementCompiler } from './statementCompiler';
 import { isObjectCreation } from './stepRules';
-import {
-  type ClassInfo,
-  createClass,
-  type FieldInfo,
-  isReference,
-  isWidening,
-  type MethodInfo,
-  sameType,
-  VOID,
-} from './types';
-import { type JavaObject, type Value } from './values';
+import { type ClassInfo, type FieldInfo, type MethodInfo, sameType, VOID } from './types';
+import type { JavaObject, Value } from './values';
 
 export interface CompiledProgram {
   builtins: Builtins;
@@ -46,21 +37,13 @@ export function compileProgram(unit: CompilationUnit, options: CompileOptions = 
   return new Compiler(options).compile(unit);
 }
 
-class Compiler extends StatementCompiler {
+class Compiler extends DeclarationCompiler {
   compile(unit: CompilationUnit): CompiledProgram {
-    for (const declaration of unit.classes) {
-      if (this.classes.has(declaration.name) || this.builtins.classes.has(declaration.name)) {
-        this.error(declaration, `クラス ${declaration.name} はすでに定義されています。`);
-      }
-      const cls = createClass(declaration.name, undefined, false);
-      cls.declaration = declaration;
-      cls.isAbstract = declaration.modifiers.isAbstract;
-      this.classes.set(declaration.name, cls);
-    }
-    const ordered = this.orderBySuperclass(unit.classes);
-    for (const cls of ordered) this.declareMembers(cls);
+    this.registerClasses(unit);
+    const ordered = this.orderBySupertypes();
+    for (const cls of ordered) this.withTypeScope(cls, () => this.declareMembers(cls));
     for (const cls of ordered) this.checkAbstractMethods(cls);
-    for (const cls of ordered) this.compileBodies(cls);
+    for (const cls of ordered) this.withTypeScope(cls, () => this.compileBodies(cls));
     // An annotation no declaration claims would silently leave the steps authors meant to hide.
     for (const row of this.atomicRows) {
       if (!this.usedAtomicRows.has(row)) this.error({ row, endRow: row, start: 0, end: 0 }, misplacedAtomicMessage);
@@ -74,193 +57,6 @@ class Compiler extends StatementCompiler {
       constantOf: (field) => this.constantOf(field),
       initialConstantOf: (field) => this.initialConstantOf(field),
     };
-  }
-
-  protected orderBySuperclass(declarations: ClassDeclaration[]): ClassInfo[] {
-    const ordered: ClassInfo[] = [];
-    const visiting = new Set<ClassInfo>();
-    const visit = (cls: ClassInfo): void => {
-      if (ordered.includes(cls)) return;
-      const declaration = cls.declaration as ClassDeclaration;
-      if (visiting.has(cls)) this.error(declaration, `クラス ${cls.name} の継承が循環しています。`);
-      visiting.add(cls);
-      const superclass = this.resolveSuperclass(declaration);
-      if (!superclass.isBuiltin) visit(superclass);
-      cls.superclass = superclass;
-      visiting.delete(cls);
-      ordered.push(cls);
-    };
-    for (const declaration of declarations) visit(this.classes.get(declaration.name) as ClassInfo);
-    return ordered;
-  }
-
-  protected resolveSuperclass(declaration: ClassDeclaration): ClassInfo {
-    if (!declaration.superclass) return this.builtins.objectClass;
-    const type = this.resolveType(declaration.superclass);
-    if (type.kind !== 'class') this.error(declaration.superclass, 'クラス以外は継承できません。');
-    const superclass = type.cls;
-    if (superclass === this.builtins.stringClass || (superclass.isBuiltin && superclass.constructors.length === 0)) {
-      this.error(declaration.superclass, `クラス ${superclass.name} は継承できません。`);
-    }
-    return superclass;
-  }
-
-  protected declareMembers(cls: ClassInfo): void {
-    // Superclasses come first, so their instance fields are final by now.
-    const superclass = cls.superclass as ClassInfo;
-    cls.instanceFieldCount = superclass.instanceFieldCount;
-    cls.instanceFields = [...superclass.instanceFields];
-    for (const member of (cls.declaration as ClassDeclaration).members) {
-      if (member.kind === 'field') this.declareField(cls, member);
-      else if (member.kind === 'method') this.declareMethod(cls, member);
-      else if (member.kind === 'constructor') this.declareConstructor(cls, member);
-    }
-    if (cls.constructors.length === 0) {
-      cls.constructors.push({
-        name: cls.name,
-        owner: cls,
-        parameterTypes: [],
-        returnType: VOID,
-        isStatic: false,
-        isAbstract: false,
-        isConstructor: true,
-        access: (cls.declaration as ClassDeclaration).modifiers.access,
-        thrownTypes: [],
-      });
-    }
-  }
-
-  protected declareField(cls: ClassInfo, member: FieldDeclaration): void {
-    const type = this.resolveType(member.type);
-    for (const declarator of member.declarators) {
-      if (cls.fields.has(declarator.name)) {
-        this.error(declarator, `フィールド ${declarator.name} はすでに定義されています。`);
-      }
-      const field: FieldInfo = {
-        name: declarator.name,
-        owner: cls,
-        type: this.withDimensions(type, declarator.extraDimensions),
-        isStatic: member.modifiers.isStatic,
-        isFinal: member.modifiers.isFinal,
-        access: member.modifiers.access,
-        slot: member.modifiers.isStatic ? cls.staticFieldCount++ : cls.instanceFieldCount++,
-        declaration: member,
-      };
-      cls.fields.set(declarator.name, field);
-      if (field.isStatic) cls.staticFields.push(field);
-      else cls.instanceFields.push(field);
-    }
-  }
-
-  protected declareMethod(cls: ClassInfo, member: MethodDeclaration): void {
-    const { isAbstract } = member.modifiers;
-    if (isAbstract && !cls.isAbstract) {
-      this.error(member, `抽象メソッド ${member.name} は抽象クラスの中にしか書けません。`);
-    }
-    if (isAbstract && member.body) this.error(member, `抽象メソッド ${member.name} には本体を書けません。`);
-    if (!isAbstract && !member.body) this.error(member, `メソッド ${member.name} に本体がありません。`);
-    const method: MethodInfo = {
-      name: member.name,
-      ...this.declaredSignature(cls, member),
-      returnType: member.returnType ? this.resolveType(member.returnType) : VOID,
-      isStatic: member.modifiers.isStatic,
-      isAbstract,
-      isConstructor: false,
-    };
-    if (cls.methods.some((other) => other.name === method.name && sameParameters(other, method))) {
-      this.error(member, `メソッド ${member.name} はすでに定義されています。`);
-    }
-    this.checkOverride(cls, method, member);
-    cls.methods.push(method);
-  }
-
-  protected declareConstructor(cls: ClassInfo, member: ConstructorDeclaration): void {
-    if (member.name !== cls.name) this.error(member, `メソッド ${member.name} に戻り値の型がありません。`);
-    const constructor: MethodInfo = {
-      name: cls.name,
-      ...this.declaredSignature(cls, member),
-      returnType: VOID,
-      isStatic: false,
-      isAbstract: false,
-      isConstructor: true,
-    };
-    if (cls.constructors.some((other) => sameParameters(other, constructor))) {
-      this.error(member, `コンストラクタ ${cls.name} はすでに定義されています。`);
-    }
-    cls.constructors.push(constructor);
-  }
-
-  /** What a method's and a constructor's declarations give alike. */
-  protected declaredSignature(
-    cls: ClassInfo,
-    member: MethodDeclaration | ConstructorDeclaration
-  ): Pick<MethodInfo, 'owner' | 'parameterTypes' | 'access' | 'thrownTypes' | 'declaration' | 'isAtomic'> {
-    return {
-      owner: cls,
-      parameterTypes: member.parameters.map((parameter) => this.resolveType(parameter.type)),
-      access: member.modifiers.access,
-      thrownTypes: member.throwsTypes.map((type) => this.resolveThrowable(type)),
-      declaration: member,
-      isAtomic: this.claimsAtomicRow(member),
-    };
-  }
-
-  /** Whether an `// atomic` annotation lies on the declaration's header, from its first row to its body's. */
-  protected claimsAtomicRow(member: MethodDeclaration | ConstructorDeclaration): boolean {
-    let claims = false;
-    for (let row = member.row; row <= (member.body?.row ?? member.endRow); row++) {
-      if (!this.atomicRows.has(row)) continue;
-      this.usedAtomicRows.add(row);
-      claims = true;
-    }
-    return claims;
-  }
-
-  protected checkOverride(cls: ClassInfo, method: MethodInfo, declaration: MethodDeclaration): void {
-    for (let ancestor = cls.superclass; ancestor; ancestor = ancestor.superclass) {
-      const overridden = ancestor.methods.find((other) => other.name === method.name && sameParameters(other, method));
-      if (!overridden || overridden.access === 'private') continue;
-      if (overridden.isStatic !== method.isStatic) {
-        this.error(declaration, `メソッド ${method.name} の static の有無が親クラスと異なります。`);
-      }
-      const returnsCompatible =
-        sameType(overridden.returnType, method.returnType) ||
-        (isReference(method.returnType) &&
-          isWidening(method.returnType, overridden.returnType, this.builtins.objectClass));
-      if (!returnsCompatible) {
-        this.error(declaration, `メソッド ${method.name} の戻り値の型が親クラスと異なります。`);
-      }
-      if (accessRank(method.access) < accessRank(overridden.access)) {
-        this.error(declaration, `メソッド ${method.name} の公開範囲を親クラスより狭くすることはできません。`);
-      }
-      return;
-    }
-  }
-
-  protected checkAbstractMethods(cls: ClassInfo): void {
-    if (cls.isAbstract) return;
-    for (let ancestor: ClassInfo | undefined = cls; ancestor; ancestor = ancestor.superclass) {
-      for (const method of ancestor.methods) {
-        if (!method.isAbstract) continue;
-        const implementation = this.findOverride(cls, method);
-        if (implementation.isAbstract) {
-          this.error(
-            cls.declaration as ClassDeclaration,
-            `クラス ${cls.name} は抽象メソッド ${method.name} を実装していません。`
-          );
-        }
-      }
-    }
-  }
-
-  protected findOverride(cls: ClassInfo, method: MethodInfo): MethodInfo {
-    for (let current: ClassInfo | undefined = cls; current; current = current.superclass) {
-      const found = current.methods.find(
-        (other) => other.name === method.name && !other.isStatic && sameParameters(other, method)
-      );
-      if (found) return found;
-    }
-    return method;
   }
 
   protected findEntry(
@@ -290,7 +86,10 @@ class Compiler extends StatementCompiler {
 
   protected compileBodies(cls: ClassInfo): void {
     const staticContext = { ...this.newContext(cls, true, VOID), initializes: 'static' as const };
-    const staticInitializers = this.compileInitializers(staticContext, cls, true);
+    const staticInitializers = [
+      ...this.compileEnumConstants(staticContext, cls),
+      ...this.compileInitializers(staticContext, cls, true),
+    ];
     // Definite assignment reads the constants that compiling the initializers records.
     checkInitialization({ ...this.initializationOf(cls, true), span: cls.declaration as ClassDeclaration });
     if (staticInitializers.length > 0) {
@@ -303,6 +102,38 @@ class Compiler extends StatementCompiler {
     }
     for (const method of cls.methods) this.compileMethod(cls, method);
     for (const constructor of cls.constructors) this.compileConstructor(cls, constructor);
+  }
+
+  /** Compiles the creation of an enum's constants, which run before its other static initializers. */
+  protected compileEnumConstants(context: MethodContext, cls: ClassInfo): ((frame: Frame) => void)[] {
+    const constants = cls.staticFields.filter((field) => field.enumConstant);
+    return constants.map((field, ordinal) => {
+      const constant = field.enumConstant as NonNullable<FieldInfo['enumConstant']>;
+      const args = constant.args.map((arg) => this.compileValue(context, arg));
+      const constructor = this.selectMethod(
+        constant,
+        cls.constructors,
+        args.map((arg) => arg.type),
+        `コンストラクタ ${cls.name}`
+      );
+      this.checkThrown(context, constant, constructor.thrownTypes);
+      const convertedArgs = args.map(
+        (arg, index) => this.convert(arg, constructor.parameterTypes[index], 'invocation', constant.args[index]).run
+      );
+      const name = this.internedString(constant.name);
+      // Traces leave enum constants out of the variables, so creating one shows only its constructor's steps.
+      return (frame: Frame) => {
+        const object = frame.runtime.allocateObject(frame, cls);
+        object.enumConstant = { name, ordinal };
+        frame.temporaries.push(object);
+        try {
+          this.invokeWithArguments(frame, constructor, object, convertedArgs, constant.row);
+        } finally {
+          frame.temporaries.pop();
+        }
+        frame.runtime.staticsOf(frame, cls)[field.slot] = object;
+      };
+    });
   }
 
   /** The blank final fields and the initializers of one kind, which assign those fields first. */
@@ -338,8 +169,8 @@ class Compiler extends StatementCompiler {
   }
 
   protected compileMethod(cls: ClassInfo, method: MethodInfo): void {
-    const member = method.declaration as MethodDeclaration;
-    if (!member.body) return;
+    const member = method.declaration as MethodDeclaration | undefined;
+    if (!member?.body) return;
     const context = this.newContext(cls, method.isStatic, method.returnType, method.thrownTypes);
     for (const [index, parameter] of member.parameters.entries()) {
       this.declareLocal(context, parameter, parameter.name, method.parameterTypes[index]);
@@ -446,8 +277,4 @@ function initializingMembersOf(cls: ClassInfo, isStatic: boolean): (FieldDeclara
       (member.kind === 'field' && member.modifiers.isStatic === isStatic) ||
       (member.kind === 'initializer' && member.isStatic === isStatic)
   );
-}
-
-function accessRank(access: string): number {
-  return { private: 0, package: 1, protected: 2, public: 3 }[access] ?? 0;
 }

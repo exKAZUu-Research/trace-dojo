@@ -30,7 +30,7 @@ import {
   NULL,
   typeName,
 } from './types';
-import { defaultValue, JavaArray, JavaObject, JavaString, toInt32, type Value } from './values';
+import { defaultValue, JavaArray, JavaObject, toInt32, type Value } from './values';
 
 /** Type-checks expressions and compiles them into closures. */
 export abstract class ExpressionCompiler extends CompilerBase {
@@ -188,12 +188,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return constantValue(BOOLEAN, literal.value);
       }
       case 'string': {
-        let interned = this.internedStrings.get(literal.value);
-        if (!interned) {
-          interned = new JavaString(literal.value);
-          this.internedStrings.set(literal.value, interned);
-        }
-        return constantValue(this.builtins.stringClass.type, interned);
+        return constantValue(this.builtins.stringClass.type, this.internedString(literal.value));
       }
       case 'null': {
         return { kind: 'value', type: NULL, run: () => {} };
@@ -252,7 +247,15 @@ export abstract class ExpressionCompiler extends CompilerBase {
       }
       return this.fieldReference(field, field.isStatic ? undefined : thisValue(context));
     }
-    const cls = this.classes.get(name.name) ?? this.builtins.classes.get(name.name);
+    for (let outer = context.cls.enclosing; outer; outer = outer.enclosing) {
+      const outerField = this.findField(outer, name.name);
+      if (!outerField) continue;
+      if (!outerField.isStatic) {
+        this.error(name, `static ではないフィールド ${name.name} は、static な入れ子のクラスの中から使えません。`);
+      }
+      return this.fieldReference(outerField, undefined);
+    }
+    const cls = this.lookupType(name.name, context.cls);
     if (cls) return { kind: 'class', cls };
     return this.error(name, `変数 ${name.name} が見つかりません。`);
   }
@@ -272,7 +275,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const object = this.compileExpression(context, access.object);
     if (object.kind === 'class') {
       const field = this.findField(object.cls, name);
-      if (!field) return this.error(access, missingFieldMessage(object.cls, name));
+      if (!field) {
+        const member = this.findMemberType(object.cls, name);
+        if (member) return { kind: 'class', cls: member };
+        return this.error(access, missingFieldMessage(object.cls, name));
+      }
       if (!field.isStatic) this.error(access, `static ではないフィールド ${name} はクラス名から使えません。`);
       this.checkAccess(context, field.owner, field.access, access, `フィールド ${name}`);
       return this.fieldReference(field, undefined);
@@ -578,9 +585,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const consequence = this.compileValue(context, expression.consequence);
     const alternative = this.compileValue(context, expression.alternative);
     const type = this.conditionalType(expression, consequence, alternative);
-    // A constant branch may narrow to the other branch's type, as an assignment would.
-    const whenTrue = this.convert(consequence, type, 'assignment', expression.consequence);
-    const whenFalse = this.convert(alternative, type, 'assignment', expression.alternative);
+    // A constant branch may narrow to the other branch's type, as an assignment would; a reference type is a common
+    // supertype of both branches.
+    const toType = (branch: CompiledValue, span: Expression): CompiledValue =>
+      isReference(type) ? { ...branch, type } : this.convert(branch, type, 'assignment', span);
+    const whenTrue = toType(consequence, expression.consequence);
+    const whenFalse = toType(alternative, expression.alternative);
     const constantCondition = booleanConstants.get(expression.condition);
     const isConstant =
       constantCondition !== undefined && whenTrue.constant !== undefined && whenFalse.constant !== undefined;
@@ -665,6 +675,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const type = this.resolveType(expression.type);
     if (type.kind !== 'class') return this.error(expression, `${typeName(type)} 型のオブジェクトは new で作れません。`);
     const cls = type.cls;
+    if (cls.kind === 'interface')
+      this.error(expression, `インターフェース ${cls.name} のオブジェクトは new で作れません。`);
+    if (cls.kind === 'enum' || cls === this.builtins.enumClass) {
+      this.error(expression, `列挙型 ${cls.name} のオブジェクトは new で作れません。`);
+    }
     if (cls.isAbstract) this.error(expression, `抽象クラス ${cls.name} のオブジェクトは作れません。`);
     if (cls.isBuiltin && cls.constructors.length === 0)
       this.error(expression, `${cls.name} のオブジェクトは new で作れません。`);
@@ -711,7 +726,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
       args.map((arg) => arg.type),
       `メソッド ${expression.name}`
     );
-    this.checkCall(context, expression, method, target.receiver === undefined);
+    if (target.receiver === undefined && expression.object === undefined && !method.isStatic) {
+      this.error(
+        expression,
+        `static ではないメソッド ${expression.name} は、static な入れ子のクラスの中から呼び出せません。`
+      );
+    }
+    this.checkCall(context, expression, method, target.receiver === undefined && expression.object !== undefined);
     this.checkThrown(context, expression, method.thrownTypes);
     const convertedArgs = args.map(
       (arg, index) => this.convert(arg, method.parameterTypes[index], 'invocation', expression.args[index]).run
@@ -757,12 +778,18 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (expression.object === undefined || expression.object === 'super') {
       const isSuper = expression.object === 'super';
       if (isSuper && context.isStatic) this.error(expression, 'static メソッドの中では super を使えません。');
+      if (isSuper && context.cls.kind === 'interface')
+        this.error(expression, 'インターフェースの中では super を使えません。');
       const owner = isSuper ? (context.cls.superclass as ClassInfo) : context.cls;
-      return {
-        candidates: this.collectMethods(owner, expression.name),
-        owner,
-        receiver: thisValue(context),
-      };
+      const candidates = this.collectMethods(owner, expression.name);
+      if (candidates.length === 0 && !isSuper) {
+        // A nested class calls the methods of the innermost enclosing class that has one of the name.
+        for (let outer = context.cls.enclosing; outer; outer = outer.enclosing) {
+          const outerCandidates = this.collectMethods(outer, expression.name);
+          if (outerCandidates.length > 0) return { candidates: outerCandidates, owner: outer, receiver: undefined };
+        }
+      }
+      return { candidates, owner, receiver: thisValue(context) };
     }
     const object = this.compileExpression(context, expression.object);
     if (object.kind === 'class') {

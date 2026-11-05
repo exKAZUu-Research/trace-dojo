@@ -5,6 +5,7 @@ import type {
   ClassDeclaration,
   CompilationUnit,
   ConstructorDeclaration,
+  EnumConstant,
   ExplicitConstructorCall,
   FieldDeclaration,
   MemberDeclaration,
@@ -38,21 +39,15 @@ function convertProgram(root: Node): CompilationUnit {
   const classes: ClassDeclaration[] = [];
   for (const child of namedChildren(root)) {
     switch (child.type) {
-      case 'class_declaration': {
-        classes.push(convertClass(child));
+      case 'class_declaration':
+      case 'interface_declaration':
+      case 'enum_declaration': {
+        classes.push(convertTypeDeclaration(child));
         break;
       }
       // Problems show several files in one listing, so package and import lines may appear between classes.
       case 'package_declaration':
       case 'import_declaration': {
-        break;
-      }
-      case 'interface_declaration': {
-        unsupported(child, 'インターフェース');
-        break;
-      }
-      case 'enum_declaration': {
-        unsupported(child, '列挙型');
         break;
       }
       case 'record_declaration': {
@@ -67,24 +62,46 @@ function convertProgram(root: Node): CompilationUnit {
   return { classes };
 }
 
-function convertClass(node: Node): ClassDeclaration {
+function convertTypeDeclaration(node: Node): ClassDeclaration {
   if (node.childForFieldName('type_parameters')) unsupported(node, '型パラメータ');
-  if (node.childForFieldName('interfaces')) unsupported(node, 'インターフェースの実装');
   if (node.childForFieldName('permits')) unsupported(node, 'permits');
+  const kind =
+    ({ class_declaration: 'class', interface_declaration: 'interface' } as const)[node.type as 'class_declaration'] ??
+    ('enum' as const);
   const superclassNode = node.childForFieldName('superclass');
-  const members = namedChildren(field(node, 'body')).map((member) => convertMember(member));
+  const interfacesNode =
+    node.childForFieldName('interfaces') ?? node.children.find((child) => child?.type === 'extends_interfaces');
+  const body = field(node, 'body');
+  const enumConstants: EnumConstant[] = [];
+  const members: MemberDeclaration[] = [];
+  for (const member of namedChildren(body)) {
+    if (member.type === 'enum_constant') enumConstants.push(convertEnumConstant(member));
+    else if (member.type === 'enum_body_declarations') members.push(...namedChildren(member).map(convertMember));
+    else members.push(convertMember(member));
+  }
   return {
+    kind,
     name: field(node, 'name').text,
     modifiers: convertModifiers(modifiersOf(node)),
     superclass: superclassNode ? convertType(namedChildren(superclassNode)[0]) : undefined,
+    interfaces: interfacesNode ? namedChildren(namedChildren(interfacesNode)[0]).map((type) => convertType(type)) : [],
+    enumConstants,
     members,
     ...span(node),
   };
 }
 
+function convertEnumConstant(node: Node): EnumConstant {
+  if (modifiersOf(node)) unsupported(node, '列挙定数へのアノテーション');
+  if (node.childForFieldName('body')) unsupported(node, '本体を持つ列挙定数');
+  const args = node.childForFieldName('arguments');
+  return { name: field(node, 'name').text, args: args ? convertArguments(args) : [], ...span(node) };
+}
+
 function convertMember(member: Node): MemberDeclaration {
   switch (member.type) {
-    case 'field_declaration': {
+    case 'field_declaration':
+    case 'constant_declaration': {
       return convertField(member);
     }
     case 'method_declaration': {
@@ -99,8 +116,16 @@ function convertMember(member: Node): MemberDeclaration {
     case 'static_initializer': {
       return { kind: 'initializer', isStatic: true, body: convertBlock(namedChildren(member)[0]), ...span(member) };
     }
+    case 'class_declaration':
+    case 'interface_declaration':
+    case 'enum_declaration': {
+      return convertTypeDeclaration(member);
+    }
+    case 'record_declaration': {
+      return unsupported(member, 'レコード');
+    }
     default: {
-      return unsupported(member, 'クラスの中のクラスやインターフェース');
+      return unsupported(member, `クラスの中の「${member.type}」`);
     }
   }
 }

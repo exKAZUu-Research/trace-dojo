@@ -3,7 +3,7 @@ import { StepTracker } from '../interpreter/stepTracker';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import type { Builtins } from './builtins';
 import type { ClassInfo, LocalInfo, MethodInfo } from './types';
-import { isSubclass, sameType } from './types';
+import { isSubclass, sameType, superinterfacesOf } from './types';
 import { defaultValue, JavaArray, JavaObject, JavaString, type Value } from './values';
 
 /** A local that is out of scope or not yet assigned. */
@@ -201,25 +201,7 @@ export class Runtime {
     }
     let resolved = overrides.get(cls);
     if (!resolved) {
-      resolved = method;
-      for (
-        let current: ClassInfo | undefined = cls;
-        current && current !== method.owner;
-        current = current.superclass
-      ) {
-        const found = current.methods.find(
-          (candidate) =>
-            candidate.name === method.name &&
-            !candidate.isStatic &&
-            candidate.access !== 'private' &&
-            candidate.parameterTypes.length === method.parameterTypes.length &&
-            candidate.parameterTypes.every((type, index) => sameType(type, method.parameterTypes[index]))
-        );
-        if (found) {
-          resolved = found;
-          break;
-        }
-      }
+      resolved = findImplementation(cls, method);
       overrides.set(cls, resolved);
     }
     return resolved;
@@ -243,6 +225,26 @@ export class Runtime {
     if (value instanceof JavaArray) return cls === this.builtins.objectClass;
     return false;
   }
+}
+
+/** The method that `cls` runs for a virtual call of `method`: an override in its superclasses, else a default method. */
+function findImplementation(cls: ClassInfo, method: MethodInfo): MethodInfo {
+  const matches = (candidate: MethodInfo): boolean =>
+    candidate.name === method.name &&
+    !candidate.isStatic &&
+    candidate.access !== 'private' &&
+    candidate.parameterTypes.length === method.parameterTypes.length &&
+    candidate.parameterTypes.every((type, index) => sameType(type, method.parameterTypes[index]));
+  for (let current: ClassInfo | undefined = cls; current; current = current.superclass) {
+    if (current === method.owner) return method;
+    const found = current.methods.find(matches);
+    if (found) return found;
+  }
+  // A default method in a more specific interface overrides one in the interfaces it extends.
+  const defaults = superinterfacesOf(cls).flatMap((parent) =>
+    parent.methods.filter((candidate) => matches(candidate) && !candidate.isAbstract)
+  );
+  return defaults.find((candidate) => defaults.every((other) => isSubclass(candidate.owner, other.owner))) ?? method;
 }
 
 function markReachable(roots: Value[]): { reached: Set<JavaObject | JavaArray>; scanned: number } {

@@ -64,7 +64,7 @@ class Snapshotter {
       const statics = this.runtime.staticValues.get(cls);
       for (const field of cls.staticFields) {
         // Constants never change, so they would only crowd the table learners fill in.
-        if (this.program.constantOf(field) !== undefined) continue;
+        if (field.enumConstant || this.program.constantOf(field) !== undefined) continue;
         const value = statics
           ? statics[field.slot]
           : (this.program.initialConstantOf(field) ?? defaultValue(field.type));
@@ -153,6 +153,8 @@ function displayNodeOf(value: Value, type: JavaType, seen: Set<unknown>): Displa
   if (value instanceof JavaString) return { kind: 'value', value: value.value };
   if (seen.has(value)) return undefined;
   if (value instanceof JavaObject && value.turtle) return turtleNodeOf(value.turtle);
+  // An enum constant shows as its name, which is what learners write for it.
+  if (value instanceof JavaObject && value.enumConstant) return { kind: 'value', value: value.enumConstant.name.value };
   seen.add(value);
   const node: DisplayNode =
     value instanceof JavaArray

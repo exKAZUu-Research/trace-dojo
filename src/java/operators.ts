@@ -4,6 +4,7 @@ import { type Frame, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
   type ClassInfo,
+  createClass,
   isCastable,
   isIntegral,
   isNumeric,
@@ -16,6 +17,7 @@ import {
   promoteUnary,
   sameType,
   SHORT,
+  superinterfacesOf,
   typeName,
 } from './types';
 import { convertNumber, JavaArray, JavaObject, JavaString, toInt32, toInt64, type Value } from './values';
@@ -327,10 +329,31 @@ export function conditionalType(
   if (isWidening(a, b, objectClass)) return b;
   if (isWidening(b, a, objectClass)) return a;
   if (a.kind !== 'class' || b.kind !== 'class') return objectClass.type;
-  for (let ancestor: ClassInfo | undefined = a.cls; ancestor; ancestor = ancestor.superclass) {
-    if (isSubclass(b.cls, ancestor)) return ancestor.type;
+  let superclass = objectClass;
+  for (let ancestor: ClassInfo | undefined = a.cls.superclass; ancestor; ancestor = ancestor.superclass) {
+    if (isSubclass(b.cls, ancestor)) {
+      superclass = ancestor;
+      break;
+    }
   }
-  return objectClass.type;
+  // Java types the result as the intersection of the common supertypes, of which only the most specific matter.
+  const common = superinterfacesOf(a.cls).filter(
+    (parent) => isSubclass(b.cls, parent) && !isSubclass(superclass, parent)
+  );
+  const interfaces = common.filter((parent) => !common.some((other) => other !== parent && isSubclass(other, parent)));
+  if (interfaces.length === 0) return superclass.type;
+  if (interfaces.length === 1 && superclass === objectClass) return interfaces[0].type;
+  return intersectionOf(superclass, interfaces, objectClass);
+}
+
+/** An intersection type such as `Object & Shape & Named`, which has the members of all its types. */
+function intersectionOf(superclass: ClassInfo, interfaces: ClassInfo[], objectClass: ClassInfo): JavaType {
+  const names = [superclass, ...interfaces].map((type) => type.name).join(' & ');
+  const cls = createClass(names, superclass === objectClass ? undefined : superclass, true);
+  cls.kind = superclass === objectClass ? 'interface' : 'class';
+  cls.interfaces = interfaces;
+  cls.isAbstract = true;
+  return cls.type;
 }
 
 /** The numeric type of `condition ? a : b`, which keeps a narrow type that an int constant on the other side fits. */

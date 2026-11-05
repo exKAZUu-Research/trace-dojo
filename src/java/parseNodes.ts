@@ -39,6 +39,7 @@ export function convertModifiers(node: Node | null | undefined): Modifiers {
     isStatic: false,
     isFinal: false,
     isAbstract: false,
+    isDefault: false,
     access: 'package',
   };
   for (const child of node?.children ?? []) {
@@ -72,7 +73,12 @@ function applyModifier(modifiers: Modifiers, child: Node): void {
   }
 }
 
-const keywordModifiers = { static: 'isStatic', final: 'isFinal', abstract: 'isAbstract' } as const;
+const keywordModifiers = {
+  static: 'isStatic',
+  final: 'isFinal',
+  abstract: 'isAbstract',
+  default: 'isDefault',
+} as const;
 
 function applyKeywordModifier(modifiers: Modifiers, child: Node): void {
   const key = keywordModifiers[child.text as keyof typeof keywordModifiers] as
@@ -103,17 +109,22 @@ export function convertType(node: Node): TypeSyntax {
       return { kind: 'primitive', name: 'boolean', ...span(node) };
     }
     case 'type_identifier': {
-      return node.text === 'var' ? { kind: 'var', ...span(node) } : { kind: 'named', name: node.text, ...span(node) };
+      return node.text === 'var'
+        ? { kind: 'var', ...span(node) }
+        : { kind: 'named', name: node.text, qualifier: [], ...span(node) };
     }
     case 'array_type': {
       return wrapArray(convertType(field(node, 'element')), countDimensions(field(node, 'dimensions')), node);
     }
     case 'scoped_type_identifier': {
-      // `java.lang.String` and the like name the same classes as their simple names.
+      if (namedChildren(node).some((child) => child.type.endsWith('annotation'))) {
+        unsupported(node, `型「${node.text}」`);
+      }
       const parts = node.text.split('.').map((part) => part.trim());
-      const qualifier = parts.slice(0, -1).join('.');
-      if (qualifier !== 'java.lang') unsupported(node, `型「${node.text}」`);
-      return { kind: 'named', name: parts.at(-1) ?? '', ...span(node) };
+      // `java.lang.String` and the like name the same classes as their simple names.
+      const qualifier = parts.slice(0, -1);
+      const isJavaLang = qualifier.join('.') === 'java.lang';
+      return { kind: 'named', name: parts.at(-1) ?? '', qualifier: isJavaLang ? [] : qualifier, ...span(node) };
     }
     case 'generic_type': {
       return unsupported(node, 'ジェネリクス');

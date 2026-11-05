@@ -35,6 +35,7 @@ export interface Builtins {
   classes: Map<string, ClassInfo>;
   objectClass: ClassInfo;
   stringClass: ClassInfo;
+  enumClass: ClassInfo;
   throwableClass: ClassInfo;
   /** The qualified names `Throwable.toString` prints for builtin classes. */
   qualifiedNames: Map<ClassInfo, string>;
@@ -60,6 +61,8 @@ function createBuiltins(): Builtins {
   const stringClass = registry.define('String', objectClass);
   defineObject(objectClass, stringClass.type);
   defineString(stringClass, objectClass.type);
+  stringClass.isFinal = true;
+  const enumClass = defineEnum(registry.define('Enum', objectClass), stringClass.type);
   const throwableClass = defineThrowables(registry, objectClass, stringClass.type);
   defineTurtle(registry.define('Turtle', objectClass, ''), stringClass.type);
   defineMath(registry.define('Math', objectClass));
@@ -71,6 +74,7 @@ function createBuiltins(): Builtins {
     classes: registry.classes,
     objectClass,
     stringClass,
+    enumClass,
     throwableClass,
     qualifiedNames: registry.qualifiedNames,
   };
@@ -99,6 +103,23 @@ function defineObject(objectClass: ClassInfo, stringType: JavaType): void {
     return newString(frame, `${name}@${identityOf(receiver).toString(16)}`);
   });
   addConstructor(objectClass, [], () => {});
+}
+
+function defineEnum(enumClass: ClassInfo, stringType: JavaType): ClassInfo {
+  enumClass.isAbstract = true;
+  addMethod(enumClass, 'name', [], stringType, false, (_, receiver) => nameOf(receiver)).isFinal = true;
+  addMethod(enumClass, 'toString', [], stringType, false, (_, receiver) => nameOf(receiver));
+  addMethod(enumClass, 'ordinal', [], INT, false, (_, receiver) => ordinalOf(receiver)).isFinal = true;
+  addConstructor(enumClass, [], () => {});
+  return enumClass;
+}
+
+function nameOf(receiver: Value): JavaString {
+  return (receiver as JavaObject).enumConstant?.name as JavaString;
+}
+
+function ordinalOf(value: Value): number {
+  return (value as JavaObject).enumConstant?.ordinal as number;
 }
 
 const causeTakers = new Set([

@@ -1,4 +1,11 @@
-import type { ClassDeclaration, ConstructorDeclaration, FieldDeclaration, MethodDeclaration, Modifiers } from './ast';
+import type {
+  ClassDeclaration,
+  ConstructorDeclaration,
+  EnumConstant,
+  FieldDeclaration,
+  MethodDeclaration,
+  Modifiers,
+} from './ast';
 import type { Frame } from './runtime';
 import type { Value } from './values';
 
@@ -33,6 +40,8 @@ export interface FieldInfo {
   declaration?: FieldDeclaration;
   /** The value of a builtin constant such as `Integer.MAX_VALUE`. */
   constant?: Value;
+  /** The declaration of the enum constant this field holds. */
+  enumConstant?: EnumConstant;
 }
 
 /** Runs a builtin method; `receiver` is `undefined` for static methods. */
@@ -45,6 +54,8 @@ export interface MethodInfo {
   returnType: JavaType;
   isStatic: boolean;
   isAbstract: boolean;
+  /** Whether subclasses may not override the method. */
+  isFinal?: boolean;
   isConstructor: boolean;
   access: Access;
   thrownTypes: ClassInfo[];
@@ -69,8 +80,19 @@ export interface CompiledCode {
 
 export interface ClassInfo {
   name: string;
+  /** The name `Object.toString` and `Throwable.toString` print, such as `Outer$Inner`. */
+  binaryName: string;
+  kind: 'class' | 'interface' | 'enum';
+  /** Interfaces have no superclass, though their members include those of `Object`. */
   superclass: ClassInfo | undefined;
+  /** The interfaces a class implements or an interface extends directly. */
+  interfaces: ClassInfo[];
+  /** The class whose body declares this one. */
+  enclosing: ClassInfo | undefined;
+  /** The classes, interfaces, and enums declared directly in this class's body. */
+  memberTypes: Map<string, ClassInfo>;
   isAbstract: boolean;
+  isFinal: boolean;
   isBuiltin: boolean;
   declaration?: ClassDeclaration;
   fields: Map<string, FieldInfo>;
@@ -90,8 +112,14 @@ export interface ClassInfo {
 export function createClass(name: string, superclass: ClassInfo | undefined, isBuiltin: boolean): ClassInfo {
   const cls: ClassInfo = {
     name,
+    binaryName: name,
+    kind: 'class',
     superclass,
+    interfaces: [],
+    enclosing: undefined,
+    memberTypes: new Map(),
     isAbstract: false,
+    isFinal: false,
     isBuiltin,
     fields: new Map(),
     methods: [],
@@ -106,11 +134,28 @@ export function createClass(name: string, superclass: ClassInfo | undefined, isB
   return cls;
 }
 
+/** Whether `cls` is `ancestor` or extends or implements it, directly or indirectly. */
 export function isSubclass(cls: ClassInfo, ancestor: ClassInfo): boolean {
   for (let current: ClassInfo | undefined = cls; current; current = current.superclass) {
     if (current === ancestor) return true;
+    if (ancestor.kind === 'interface' && current.interfaces.some((parent) => isSubclass(parent, ancestor))) return true;
   }
   return false;
+}
+
+/** The interfaces that `cls` implements or extends, directly or indirectly, nearest first. */
+export function superinterfacesOf(cls: ClassInfo): ClassInfo[] {
+  const found: ClassInfo[] = [];
+  const pending: ClassInfo[] = [];
+  for (let current: ClassInfo | undefined = cls; current; current = current.superclass)
+    pending.push(...current.interfaces);
+  while (pending.length > 0) {
+    const next = pending.shift() as ClassInfo;
+    if (found.includes(next)) continue;
+    found.push(next);
+    pending.push(...next.interfaces);
+  }
+  return found;
 }
 
 export function isPrimitive(type: JavaType): boolean {
@@ -180,7 +225,7 @@ export function isWidening(from: JavaType, to: JavaType, objectClass: ClassInfo)
   if (isNumeric(from)) return isNumeric(to) && isNumericWidening(from.kind, to.kind);
   if (from.kind === 'null') return isReference(to);
   if (to.kind !== 'class' && to.kind !== 'array') return false;
-  if (from.kind === 'class') return to.kind === 'class' && isSubclass(from.cls, to.cls);
+  if (from.kind === 'class') return to.kind === 'class' && (to.cls === objectClass || isSubclass(from.cls, to.cls));
   if (from.kind === 'array') {
     if (to.kind === 'class') return to.cls === objectClass;
     if (isPrimitive(from.element) || isPrimitive(to.element)) return sameType(from.element, to.element);
@@ -194,5 +239,10 @@ export function isCastable(from: JavaType, to: JavaType, objectClass: ClassInfo)
   if (isNumeric(from) && isNumeric(to)) return true;
   if (from.kind === 'boolean' || to.kind === 'boolean') return from.kind === to.kind;
   if (isPrimitive(from) || isPrimitive(to)) return false;
-  return isWidening(from, to, objectClass) || isWidening(to, from, objectClass);
+  if (isWidening(from, to, objectClass) || isWidening(to, from, objectClass)) return true;
+  // A class that is not final may have a subclass implementing any interface.
+  if (from.kind !== 'class' || to.kind !== 'class') return false;
+  const [a, b] = [from.cls, to.cls];
+  if (a.kind === 'interface') return b.kind === 'interface' || !b.isFinal;
+  return b.kind === 'interface' && !a.isFinal;
 }

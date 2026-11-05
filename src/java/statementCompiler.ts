@@ -437,7 +437,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   protected compileSwitch(context: MethodContext, statement: Extract<Statement, { kind: 'switch' }>): Exec {
     const selector = this.compileValue(context, statement.selector);
     const isString = selector.type.kind === 'class' && selector.type.cls === this.builtins.stringClass;
-    if (!isString && !['byte', 'short', 'char', 'int'].includes(selector.type.kind)) {
+    const isEnum = selector.type.kind === 'class' && selector.type.cls.kind === 'enum';
+    if (!isString && !isEnum && !['byte', 'short', 'char', 'int'].includes(selector.type.kind)) {
       this.error(statement.selector, `switch 文では ${typeName(selector.type)} 型の値を使えません。`);
     }
     const { labelValues, defaultIndex } = this.compileSwitchLabels(context, statement, selector.type);
@@ -445,7 +446,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const matches = (candidate: Value, value: Value): boolean =>
       isString ? (candidate as JavaString).value === (value as JavaString).value : candidate === value;
     return (frame) => {
-      const value = selector.run(frame);
+      const selected = selector.run(frame);
+      // Enum labels hold the ordinals of their constants.
+      const value = isEnum && selected instanceof JavaObject ? selected.enumConstant?.ordinal : selected;
       if (value === undefined) throwBuiltin(frame, 'NullPointerException');
       const matched = labelValues.findIndex((values) => values.some((candidate) => matches(candidate, value)));
       const start = matched === -1 ? defaultIndex : matched;
@@ -480,12 +483,32 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     selectorType: JavaType,
     seen: Set<unknown>
   ): Value {
+    if (selectorType.kind === 'class' && selectorType.cls.kind === 'enum') {
+      const ordinal = this.enumOrdinalOf(context, label, selectorType.cls);
+      if (seen.has(ordinal)) this.error(label, 'case の値が重複しています。');
+      seen.add(ordinal);
+      return ordinal;
+    }
     const { constant } = this.convert(this.compileValue(context, label), selectorType, 'assignment', label);
     if (constant === undefined) this.error(label, 'case には定数を書いてください。');
     const key = constant instanceof JavaString ? `s:${constant.value}` : constant;
     if (seen.has(key)) this.error(label, 'case の値が重複しています。');
     seen.add(key);
     return constant;
+  }
+
+  /** The ordinal of the constant of `enumClass` that a case label names, by its simple or qualified name. */
+  protected enumOrdinalOf(context: MethodContext, label: Expression, enumClass: ClassInfo): number {
+    let name: string | undefined;
+    if (label.kind === 'name') name = label.name;
+    else if (label.kind === 'fieldAccess' && label.object !== 'super') {
+      const owner = this.compileExpression(context, label.object);
+      if (owner.kind === 'class' && owner.cls === enumClass) name = label.name;
+    }
+    const constants = enumClass.staticFields.filter((field) => field.enumConstant);
+    const ordinal = constants.findIndex((field) => field.name === name);
+    if (ordinal === -1) this.error(label, `case には列挙型 ${enumClass.name} の定数を書いてください。`);
+    return ordinal;
   }
 
   /** Compiles the groups into a runner that starts at a group and falls through as the switch's form allows. */

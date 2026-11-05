@@ -10,7 +10,8 @@ export type PrimitiveTypeName = 'byte' | 'short' | 'int' | 'long' | 'char' | 'fl
 
 export type TypeSyntax =
   | ({ kind: 'primitive'; name: PrimitiveTypeName } & Span)
-  | ({ kind: 'named'; name: string } & Span)
+  /** `qualifier` holds the enclosing types written before the name, as in `Outer.Inner`. */
+  | ({ kind: 'named'; name: string; qualifier: string[] } & Span)
   | ({ kind: 'array'; element: TypeSyntax } & Span)
   | ({ kind: 'var' } & Span);
 
@@ -18,6 +19,8 @@ export interface Modifiers {
   isStatic: boolean;
   isFinal: boolean;
   isAbstract: boolean;
+  /** Marks an interface method with a body that implementing classes inherit. */
+  isDefault: boolean;
   access: 'public' | 'protected' | 'private' | 'package';
 }
 
@@ -26,13 +29,28 @@ export interface CompilationUnit {
 }
 
 export interface ClassDeclaration extends Span {
+  kind: 'class' | 'interface' | 'enum';
   name: string;
   modifiers: Modifiers;
   superclass?: TypeSyntax;
+  /** The interfaces a class implements or an interface extends. */
+  interfaces: TypeSyntax[];
+  /** The constants of an enum, in declaration order. */
+  enumConstants: EnumConstant[];
   members: MemberDeclaration[];
 }
 
-export type MemberDeclaration = FieldDeclaration | MethodDeclaration | ConstructorDeclaration | InitializerBlock;
+export interface EnumConstant extends Span {
+  name: string;
+  args: Expression[];
+}
+
+export type MemberDeclaration =
+  | FieldDeclaration
+  | MethodDeclaration
+  | ConstructorDeclaration
+  | InitializerBlock
+  | ClassDeclaration;
 
 export interface FieldDeclaration extends Span {
   kind: 'field';

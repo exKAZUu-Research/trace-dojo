@@ -16,6 +16,8 @@ export class JavaObject {
   readonly identity = nextIdentity++;
   /** Set by the builtin Turtle constructor. */
   turtle?: TurtleState;
+  /** Set for the constants of an enum. */
+  enumConstant?: { name: JavaString; ordinal: number };
   /** Set by the builtin Throwable constructors. */
   message?: JavaString;
   cause?: JavaObject;

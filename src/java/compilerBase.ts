@@ -1,6 +1,6 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
-import type { Expression, Span, TypeSyntax } from './ast';
+import type { Expression, FieldDeclaration, Span, TypeSyntax } from './ast';
 import { getBuiltins } from './builtins';
 import { fitsIn } from './operators';
 import { type Frame } from './runtime';
@@ -16,10 +16,11 @@ import {
   type MethodInfo,
   type NumericKind,
   sameType,
+  superinterfacesOf,
   typeName,
   VOID,
 } from './types';
-import { convertNumber, type JavaString, type Value } from './values';
+import { convertNumber, JavaString, type Value } from './values';
 
 export interface CompileOptions {
   /** Makes the statements that record steps report their rows to `Runtime.steps`. */
@@ -112,6 +113,8 @@ export abstract class CompilerBase {
   protected readonly usedAtomicRows = new Set<number>();
   private readonly fieldConstants = new Map<FieldInfo, Value>();
   private readonly computingConstants = new Set<FieldInfo>();
+  /** The class whose body the code being compiled is in, which decides what simple type names mean. */
+  protected typeScope: ClassInfo | undefined;
 
   constructor(options: CompileOptions) {
     this.recordsSteps = options.trace !== undefined;
@@ -133,14 +136,57 @@ export abstract class CompilerBase {
         return { kind: 'array', element: this.resolveType(syntax.element) };
       }
       case 'named': {
-        const cls = this.classes.get(syntax.name) ?? this.builtins.classes.get(syntax.name);
-        if (!cls) this.error(syntax, `この採点環境には、型 ${syntax.name} がありません。`);
+        const [first, ...rest] = [...syntax.qualifier, syntax.name];
+        let cls = this.lookupType(first, this.typeScope);
+        for (const name of rest) cls = cls && this.findMemberType(cls, name);
+        if (!cls)
+          this.error(syntax, `この採点環境には、型 ${[...syntax.qualifier, syntax.name].join('.')} がありません。`);
         return cls.type;
       }
       case 'var': {
         return this.error(syntax, 'ここでは var を使えません。');
       }
     }
+  }
+
+  /** The one string object that every literal with this text evaluates to. */
+  protected internedString(text: string): JavaString {
+    let interned = this.internedStrings.get(text);
+    if (!interned) {
+      interned = new JavaString(text);
+      this.internedStrings.set(text, interned);
+    }
+    return interned;
+  }
+
+  /** Runs `compile` with simple type names resolved inside `cls`'s body. */
+  protected withTypeScope<T>(cls: ClassInfo | undefined, compile: () => T): T {
+    const outer = this.typeScope;
+    this.typeScope = cls;
+    try {
+      return compile();
+    } finally {
+      this.typeScope = outer;
+    }
+  }
+
+  /** Finds the class that a simple name means inside `scope`: a member type in scope, then a top-level class. */
+  protected lookupType(name: string, scope: ClassInfo | undefined): ClassInfo | undefined {
+    for (let current = scope; current; current = current.enclosing) {
+      const member = this.findMemberType(current, name);
+      if (member) return member;
+    }
+    return this.classes.get(name) ?? this.builtins.classes.get(name);
+  }
+
+  /** Finds a member type of `cls` or one it inherits from its superclasses and interfaces. */
+  protected findMemberType(cls: ClassInfo, name: string): ClassInfo | undefined {
+    if (cls.name === name && cls.enclosing === undefined && !cls.isBuiltin) return;
+    for (const type of [cls, ...superclassesOf(cls), ...superinterfacesOf(cls)]) {
+      const member = type.memberTypes.get(name);
+      if (member) return member;
+    }
+    return;
   }
 
   protected resolveThrowable(syntax: TypeSyntax): ClassInfo {
@@ -261,11 +307,16 @@ export abstract class CompilerBase {
   }
 
   protected initialConstantOf(field: FieldInfo): Value {
-    if (!field.declaration || this.computingConstants.has(field)) return;
+    const { declaration } = field;
+    if (!declaration || this.computingConstants.has(field)) return;
     if (this.fieldConstants.has(field)) return this.fieldConstants.get(field);
+    return this.withTypeScope(field.owner, () => this.computeInitialConstant(field, declaration));
+  }
+
+  private computeInitialConstant(field: FieldInfo, declaration: FieldDeclaration): Value {
     const isConstantType =
       isPrimitive(field.type) || (field.type.kind === 'class' && field.type.cls === this.builtins.stringClass);
-    const initializer = field.declaration.declarators.find((declarator) => declarator.name === field.name)?.initializer;
+    const initializer = declaration.declarators.find((declarator) => declarator.name === field.name)?.initializer;
     let constant: Value;
     if (isConstantType && initializer && initializer.kind !== 'arrayInitializer') {
       this.computingConstants.add(field);
@@ -287,16 +338,24 @@ export abstract class CompilerBase {
     return constant;
   }
 
+  /** Finds a field of `cls`, its superclasses, or the interfaces they implement. */
   protected findField(cls: ClassInfo, name: string): FieldInfo | undefined {
     for (let current: ClassInfo | undefined = cls; current; current = current.superclass) {
       const field = current.fields.get(name);
       if (field) return field;
+      for (const parent of current.interfaces) {
+        const inherited = this.findField(parent, name);
+        if (inherited) return inherited;
+      }
     }
     return;
   }
 
+  /** Private members are accessible anywhere in the top-level class that declares them, nested classes included. */
   protected checkAccess(context: MethodContext, owner: ClassInfo, access: string, span: Span, what: string): void {
-    if (access === 'private' && owner !== context.cls) this.error(span, `${what} は private なので使えません。`);
+    if (access === 'private' && topLevelOf(owner) !== topLevelOf(context.cls)) {
+      this.error(span, `${what} は private なので使えません。`);
+    }
   }
 
   /** Evaluates arguments left to right, keeping each in `frame.temporaries` until the caller removes them. */
@@ -331,14 +390,21 @@ export abstract class CompilerBase {
     }
   }
 
-  /** Methods of `cls` and its ancestors named `name`, leaving out those an override hides. */
+  /**
+   * Methods of `cls` and its ancestors named `name`, leaving out those an override hides. Interfaces lend only their
+   * instance methods, and an interface has those of `Object` too.
+   */
   protected collectMethods(cls: ClassInfo, name: string): MethodInfo[] {
     const methods: MethodInfo[] = [];
-    for (let current: ClassInfo | undefined = cls; current; current = current.superclass) {
-      for (const method of current.methods) {
-        if (method.name === name && !methods.some((other) => sameParameters(other, method))) methods.push(method);
+    const add = (owner: ClassInfo, includesStatic: boolean): void => {
+      for (const method of owner.methods) {
+        if (method.name !== name || (method.isStatic && !includesStatic)) continue;
+        if (!methods.some((other) => sameParameters(other, method))) methods.push(method);
       }
-    }
+    };
+    for (const current of [cls, ...superclassesOf(cls)]) add(current, current.kind !== 'interface' || current === cls);
+    for (const parent of superinterfacesOf(cls)) add(parent, false);
+    if (cls.kind === 'interface') add(this.builtins.objectClass, false);
     return methods;
   }
 
@@ -377,6 +443,19 @@ function convertedNumber(value: CompiledValue, from: NumericKind, to: { kind: Nu
     run: (frame) => convertNumber(run(frame), from, to.kind),
     constant: value.constant === undefined ? undefined : convertNumber(value.constant, from, to.kind),
   };
+}
+
+/** The superclasses of `cls`, nearest first. */
+export function superclassesOf(cls: ClassInfo): ClassInfo[] {
+  const found: ClassInfo[] = [];
+  for (let current = cls.superclass; current; current = current.superclass) found.push(current);
+  return found;
+}
+
+export function topLevelOf(cls: ClassInfo): ClassInfo {
+  let current = cls;
+  while (current.enclosing) current = current.enclosing;
+  return current;
 }
 
 export function constantValue(type: JavaType, value: Value): CompiledValue {
