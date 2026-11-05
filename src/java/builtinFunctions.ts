@@ -7,7 +7,7 @@ import {
   putEntry,
   removeEntry,
 } from './builtinCollections';
-import { checkModifiable, removeElements } from './builtinCollectionSupport';
+import { checkModifiable, forEachLiveEntry, mapViewSources, removeElements } from './builtinCollectionSupport';
 import {
   addAbstractMethod,
   addConstant,
@@ -35,7 +35,7 @@ import {
   VOID,
   type WildcardType,
 } from './types';
-import { JavaArray, JavaObject, type Value } from './values';
+import { type HashStore, JavaArray, JavaObject, type Value } from './values';
 
 export interface Functions {
   comparatorClass: ClassInfo;
@@ -538,6 +538,14 @@ function defineIterableDefaults(collections: Collections, functions: DefaultFunc
     false,
     (frame, receiver, [action]) => {
       if (action === undefined) throwBuiltin(frame, 'NullPointerException');
+      // A map's views walk the map as Map.forEach does; other collections iterate as Iterable.forEach does.
+      const view = mapViewSources.get(receiver as JavaObject);
+      if (view) {
+        forEachLiveEntry(frame, receiver as JavaObject, view.store, (entry) =>
+          callFunction(frame, functions.consumer, action, [view.elementOf(entry)])
+        );
+        return;
+      }
       const iterator = frame.runtime.invokeVirtual(frame, iterableClass, 'iterator', receiver, []);
       frame.temporaries.push(iterator);
       try {
@@ -632,7 +640,23 @@ function defineListDefaults(collections: Collections, functions: DefaultFunction
   );
 }
 
+/** Visits the entries of a map that keeps no store of its own, through the entries its `entrySet` gives. */
+function forEachEntryOf(
+  frame: Frame,
+  mapClass: ClassInfo,
+  map: Value,
+  visit: (key: Value, value: Value) => void
+): void {
+  const entries = frame.runtime.invokeVirtual(frame, mapClass, 'entrySet', map, []) as JavaObject;
+  for (const node of entries.elements ?? []) {
+    const [key, value] = (node as JavaObject).elements ?? [];
+    visit(key, value);
+  }
+}
+
 /** `Map.forEach`, `Map.computeIfAbsent`, and `Map.merge`. */
+// code-gauge-allow functionCognitiveComplexity 16 -- One registration per default method, each a small native.
+// code-gauge-allow functionNcss 32 -- One registration per default method, each a small native.
 function defineMapDefaults(collections: Collections, functions: DefaultFunctions): void {
   const { mapClass } = collections;
   const [mapK, mapV] = mapClass.typeParameters.map((variable): JavaType => ({ kind: 'typeVar', variable }));
@@ -643,11 +667,19 @@ function defineMapDefaults(collections: Collections, functions: DefaultFunctions
     VOID,
     false,
     (frame, receiver, [action]) => {
-      const entries = frame.runtime.invokeVirtual(frame, mapClass, 'entrySet', receiver, []) as JavaObject;
-      for (const node of entries.elements ?? []) {
-        const [key, value] = (node as JavaObject).elements ?? [];
+      if (action === undefined) throwBuiltin(frame, 'NullPointerException');
+      const visit = (key: Value, value: Value): void => {
         callFunction(frame, functions.biConsumer, action, [key, value]);
-      }
+      };
+      const map = receiver as JavaObject;
+      if (map.store)
+        forEachLiveEntry(
+          frame,
+          map,
+          () => map.store as HashStore,
+          (entry) => visit(entry.key, entry.value)
+        );
+      else forEachEntryOf(frame, mapClass, receiver, visit);
     }
   );
   addMethod(

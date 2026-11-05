@@ -225,6 +225,7 @@ function mapView(
   });
   view.retained = [map];
   mapViewSources.set(view, {
+    store: () => storeOf(map),
     entries: () => storeOf(map).ordered(),
     elementOf,
     remove: (removeFrame, entry) => {

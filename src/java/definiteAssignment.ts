@@ -595,13 +595,9 @@ export class DefiniteAssignmentChecker {
 
   /** Records a local that a write makes not effectively final, as a final one would be rejected for it. */
   private checkEffectivelyFinalWrite(span: Span, variable: Variable, state: State, reads: boolean): void {
-    // An initialized local is never assigned, nor any local incremented, even where the code cannot run (JLS 4.12.4).
-    if (reads || variable.isInitialized) {
-      this.markNotEffectivelyFinal(variable);
-      return;
-    }
+    // javac ignores writes in code that cannot run, such as under `if (false)`, as its flow analysis does not reach them.
     if (!state.assigned) return;
-    if (state.possiblyAssigned.has(variable.id)) {
+    if (reads || variable.isInitialized || state.possiblyAssigned.has(variable.id)) {
       this.markNotEffectivelyFinal(variable);
       return;
     }

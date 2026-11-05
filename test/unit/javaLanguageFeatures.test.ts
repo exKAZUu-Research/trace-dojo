@@ -194,6 +194,16 @@ test.each([
     'Turtle t = make(); t.前に進む();',
     'static class R implements AutoCloseable { public void close() { int[] junk = new int[100]; } }\nstatic Turtle make() { try (R r = new R()) { return new Turtle(); } }',
   ],
+  [
+    'a stream pipeline',
+    'java.util.stream.Stream<Integer> s = make(); int done = 1;',
+    'static java.util.stream.Stream<Integer> make() { Turtle t = new Turtle(); return java.util.stream.Stream.of(1).map(v -> { t.前に進む(); return v; }); }',
+  ],
+  [
+    "a map's view",
+    'Collection<Integer> v = make(); int done = 1;',
+    'static Collection<Integer> make() { Map<Turtle, Integer> m = new HashMap<>(); m.put(new Turtle(), 1); return m.values(); }',
+  ],
 ])('a turtle that %s holds stays on the board', (_, body, members) => {
   const program = `import java.util.*;\npublic class Main {\n${members}\n  public static void main(String[] args) {\n${body}\n  }\n}`;
   expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', finalTurtles: [expect.anything()] });
@@ -213,4 +223,25 @@ test('Java rejects changes to unmodifiable collections through default methods a
       'String result = ""; for (Runnable r : List.<Runnable>of(() -> List.of(1).replaceAll(x -> x), () -> Map.of("a", 1).merge("a", 1, Integer::sum), () -> Collections.sort(Collections.unmodifiableList(new ArrayList<>(List.of(2, 1)))))) { try { r.run(); result += "ok "; } catch (UnsupportedOperationException e) { result += "uoe "; } }'
     )
   ).toEqual({ result: 'uoe uoe uoe ' });
+});
+
+test("Java's map views, iterators, forEach, and streams read a collection's contents when the JDK does", () => {
+  expect(
+    finalVarsOf(
+      `Map<String, Integer> m = new HashMap<>(Map.of("a", 1, "b", 2));
+Iterator<Integer> values = m.values().iterator(); int first = values.next(); m.put("b", 9); m.put("a", 9); int second = values.next();
+var counted = m.keySet().stream().filter(k -> true); List<Integer> list = new ArrayList<>(); var mapped = list.stream().map(x -> x * 2); m.put("c", 3); list.add(4); String streams = counted.count() + " " + mapped.toList();
+String cme = ""; for (Runnable r : List.<Runnable>of(() -> { for (String k : m.keySet()) if (k.equals("a")) m.remove("b"); }, () -> { Set<Integer> s = new HashSet<>(List.of(1, 2)); for (int x : s) s.remove(x); }, () -> { Map<String, Integer> one = new HashMap<>(Map.of("a", 1)); for (String k : one.keySet()) one.put(k + "x", 1); })) { try { r.run(); cme += "ok "; } catch (ConcurrentModificationException e) { cme += "cme "; } }
+StringBuilder visited = new StringBuilder(); Map<String, Integer> f = new HashMap<>(Map.of("a", 1, "b", 2)); try { f.forEach((k, v) -> { if (k.equals("a")) f.remove("b"); visited.append(k); }); } catch (ConcurrentModificationException e) { visited.append("!"); }
+String seen = visited.toString();`
+    )
+  ).toEqual({ first: 1, second: 9, streams: '3 [8]', cme: 'cme cme ok ', seen: 'a!' });
+});
+
+test('Java lets utilities that write nothing run on unmodifiable collections, and rejects writes through entries and iterators', () => {
+  expect(
+    finalVarsOf(
+      'String result = ""; for (Runnable r : List.<Runnable>of(() -> Collections.addAll(List.of(1), new Integer[0]), () -> Collections.reverse(List.of(1)), () -> Collections.shuffle(List.of(1), new Random(1)), () -> Map.of("a", 1).entrySet().iterator().next().setValue(2), () -> { Iterator<Integer> it = Set.of(1).iterator(); it.next(); it.remove(); }, () -> new HashMap<>(Map.of("a", 1)).keySet().addAll(Set.of("b")))) { try { r.run(); result += "ok "; } catch (UnsupportedOperationException e) { result += "uoe "; } }'
+    )
+  ).toEqual({ result: 'ok ok ok uoe uoe uoe ' });
 });

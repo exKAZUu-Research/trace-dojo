@@ -1128,6 +1128,46 @@ const programs: [name: string, runs: boolean, source: string][] = [
     false,
     'public class Main {\n  public static void main(String[] args) {\n    for (final int x : new int[]{1}) { x = 2; }\n  }\n  \n}\n',
   ],
+  [
+    'lambda-reads-unassigned',
+    false,
+    'class Main {\n  public static void main(String[] args) {\n    int x; Runnable r = () -> System.out.println(x); x = 1;\n  }\n}',
+  ],
+  [
+    'anonymous-class-reads-unassigned',
+    false,
+    'class Main {\n  public static void main(String[] args) {\n    int x; Object o = new Object() { public String toString() { return "" + x; } }; x = 1;\n  }\n}',
+  ],
+  [
+    'capture-after-unreachable-write',
+    true,
+    'class Main {\n  public static void main(String[] args) {\n    int x = 1; if (false) x = 2; Runnable r = () -> System.out.println(x);\n  }\n}',
+  ],
+  [
+    'expression-lambda-captures-incremented-parameter',
+    false,
+    'class Main {\n  static Runnable make(int n, Runnable r) { return r; }\n  public static void main(String[] args) {\n    java.util.function.Function<Integer, Runnable> f = x -> make(x++, () -> System.out.println(x));\n  }\n}',
+  ],
+  [
+    'prologue-local-unassigned-in-super-call',
+    false,
+    'class P { P(int v) {} }\nclass C extends P { C(int a) { int b; if (a > 0) b = 1; super(b); } }\nclass Main {\n  public static void main(String[] args) {\n    new C(1);\n  }\n}',
+  ],
+  [
+    'constant-after-covering-type-pattern',
+    false,
+    'class Main {\n  public static void main(String[] args) {\n    Integer o = 1; String s = switch (o) { case Integer i -> "i"; case 1 -> "one"; };\n  }\n}',
+  ],
+  [
+    'record-pattern-dominated-component-wise',
+    false,
+    'record Box(Object v) {}\nclass Main {\n  public static void main(String[] args) {\n    Object o = new Box("x"); String s = switch (o) { case Box(Object v) -> "o"; case Box(String v) -> v; default -> "d"; };\n  }\n}',
+  ],
+  [
+    'record-pattern-before-wider-one',
+    true,
+    'record Box(Object v) {}\nclass Main {\n  public static void main(String[] args) {\n    Object o = new Box("x"); String s = switch (o) { case Box(String v) -> v; case Box(Object v) -> "o"; default -> "d"; };\n  }\n}',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

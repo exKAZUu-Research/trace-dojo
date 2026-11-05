@@ -123,9 +123,34 @@ export function linkOverrides(cls: ClassInfo): void {
 
 /** How a view of a map's keys, values, or entries reads and removes the map's entries. */
 export interface MapViewSource {
+  store: () => HashStore;
   entries: () => HashStore['entries'];
   elementOf: (entry: HashStore['entries'][number]) => Value;
   remove: (frame: Frame, entry: HashStore['entries'][number]) => void;
+}
+
+/**
+ * Visits the entries of a map or of its view as their `forEach` does in the JDK: a `HashMap` or
+ * `LinkedHashMap` walks its live entries, skipping those removed before they are reached, and throws
+ * `ConcurrentModificationException` at the end if the map changed; a `TreeMap` throws as soon as it changed.
+ *
+ * @param owner The collection or view whose `modCount` counts the changes.
+ */
+export function forEachLiveEntry(
+  frame: Frame,
+  owner: JavaObject,
+  store: () => HashStore,
+  visit: (entry: HashStore['entries'][number]) => void
+): void {
+  const expectedModCount = owner.modCount;
+  for (const entry of store().ordered()) {
+    if (owner.modCount !== expectedModCount) {
+      if (store().order === 'sorted') throwBuiltin(frame, 'ConcurrentModificationException');
+      if (!store().entries.includes(entry)) continue;
+    }
+    visit(entry);
+  }
+  if (owner.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
 }
 
 /** The maps behind the views that `keySet`, `values`, and `entrySet` return. */
