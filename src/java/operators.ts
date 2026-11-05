@@ -188,7 +188,7 @@ function shift(operator: '<<' | '>>' | '>>>', left: JavaType, right: JavaType): 
   const type = promoteUnary(left as { kind: NumericKind });
   const leftKind = (left as { kind: NumericKind }).kind;
   const rightKind = (right as { kind: NumericKind }).kind;
-  const distanceOf = (value: Value): number => Number(convertNumber(value, rightKind, 'long') as bigint & 63n);
+  const distanceOf = (value: Value): number => Number((convertNumber(value, rightKind, 'long') as bigint) & 63n);
   if (type.kind === 'long') {
     const apply = {
       '<<': (a: bigint, b: number) => toInt64(a << BigInt(b)),

@@ -130,8 +130,8 @@ export function convertNumber(value: Value, from: NumericKind, to: NumericKind):
     case 'long': {
       if (from !== 'float' && from !== 'double') return BigInt(number);
       if (Number.isNaN(number)) return 0n;
-      if (number >= 9_223_372_036_854_775_807) return LONG_MAX;
-      if (number <= -9_223_372_036_854_775_808) return LONG_MIN;
+      if (number >= 2 ** 63) return LONG_MAX;
+      if (number <= -(2 ** 63)) return LONG_MIN;
       return BigInt(Math.trunc(number));
     }
     case 'float': {
