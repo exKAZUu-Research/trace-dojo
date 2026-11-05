@@ -254,6 +254,7 @@ function defineArrayDeque(
 ): void {
   const cls = defineArrayList(context, 'ArrayDeque', lists);
   LIST_CLASSES.delete(cls);
+  batchRemovalClasses.add(cls);
   // A deque has no indexed access, so it keeps only the list methods that ignore positions.
   cls.methods = cls.methods.filter((method) => !isIndexed(method));
   cls.interfaces = [dequeClass];

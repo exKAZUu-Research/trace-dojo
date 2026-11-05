@@ -105,7 +105,11 @@ const expressionConverters: Record<string, (node: Node) => Expression> = {
   lambda_expression: convertLambda,
   method_reference: convertMethodReference,
   switch_expression: (node) => ({ kind: 'switchExpression', ...convertSwitchParts(node, true), ...span(node) }),
-  class_literal: (node) => ({ kind: 'classLiteral', type: convertType(namedChildren(node)[0]), ...span(node) }),
+  class_literal: (node) => {
+    const [typeNode] = namedChildren(node);
+    const type = typeNode.type === 'void_type' ? undefined : convertType(typeNode);
+    return { kind: 'classLiteral', type, ...span(node) };
+  },
 };
 
 function convertLambda(node: Node): Expression {

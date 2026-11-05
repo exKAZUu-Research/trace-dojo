@@ -1,5 +1,5 @@
 import type { Expression, PatternBinding, Span } from './ast';
-import { fitsElement, runtimeClassNameOf } from './builtinClass';
+import { classObjectOfType, fitsElement, isReifiable, runtimeClassNameOf } from './builtinClass';
 import {
   type Capture,
   type Compiled,
@@ -23,6 +23,7 @@ import {
   thisTypeOf,
   typeName,
   upperBound,
+  VOID,
 } from './types';
 import { JavaArray, JavaObject, type Value } from './values';
 
@@ -237,6 +238,14 @@ export abstract class ReferenceCompiler extends CompilerBase {
 
   /** Builtin classes by their qualified names, such as `java.util.Arrays`. */
   private qualifiedClasses: Map<string, ClassInfo> | undefined;
+
+  /** `Type.class` of a class, an array type, a primitive type, or `void`, but of no type variable or parameterized type. */
+  protected compileClassLiteral(expression: Extract<Expression, { kind: 'classLiteral' }>): Compiled {
+    const type = expression.type ? this.resolveType(expression.type) : VOID;
+    if (!isReifiable(type)) this.error(expression, `型引数を含む型 ${typeName(type)} には .class を使えません。`);
+    const classClass = this.builtins.classes.get('Class') as ClassInfo;
+    return { kind: 'value', type: classClass.type, run: (frame) => classObjectOfType(frame, type, classClass) };
+  }
 
   /** Resolves `object.name` where `object` is a value, including an array's `length`. */
   protected compileMemberOfValue(

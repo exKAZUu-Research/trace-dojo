@@ -537,10 +537,10 @@ export interface MethodReference extends Span {
   name: string;
 }
 
-/** `Type.class`, the `Class` object of a type. */
+/** `Type.class`, the `Class` object of a type, which is `undefined` for `void.class`. */
 export interface ClassLiteral extends Span {
   kind: 'classLiteral';
-  type: TypeSyntax;
+  type: TypeSyntax | undefined;
 }
 
 /** A class named by a type, which the compiler writes for the method references it expands into lambdas. */

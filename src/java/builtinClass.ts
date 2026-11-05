@@ -29,6 +29,7 @@ export function defineClassClass(registry: Registry, objectClass: ClassInfo, str
   });
   addMethod(classClass, 'toString', [], stringType, false, (frame, receiver) => {
     const cls = reflected(receiver);
+    if (primitiveClassInfos.has(cls)) return newString(frame, cls.name);
     return newString(frame, `${cls.kind === 'interface' ? 'interface' : 'class'} ${classNameOf(frame, cls)}`);
   });
   const getClass = addMethod(objectClass, 'getClass', [], classClass.type, false, (frame, receiver) =>
@@ -100,6 +101,29 @@ export function classCastMessage(frame: Frame, value: Value, target: string): st
   const where =
     from === to ? `${actual} and ${target} are in ${from}` : `${actual} is in ${from}; ${target} is in ${to}`;
   return `class ${actual} cannot be cast to class ${target} (${where})`;
+}
+
+/** Whether a class literal may name `type`: one with no type variable or type arguments, an array's element included. */
+export function isReifiable(type: JavaType): boolean {
+  if (type.kind === 'array') return isReifiable(type.element);
+  return type.kind !== 'typeVar' && !(type.kind === 'class' && type.args);
+}
+
+/** The classes standing for the primitive types and `void`, which `int.class` and the like name. */
+const primitiveClasses = new Map<string, ClassInfo>();
+const primitiveClassInfos = new WeakSet<ClassInfo>();
+
+/** The `Class` object a class literal gives: a class's, an array type's, or a primitive type's or `void`'s. */
+export function classObjectOfType(frame: Frame, type: JavaType, classClass: ClassInfo): JavaObject {
+  if (type.kind === 'class') return classObjectOf(type.cls, classClass);
+  if (type.kind === 'array') return classObjectOf(arrayClassOf(frame, type.element), classClass);
+  let cls = primitiveClasses.get(type.kind);
+  if (!cls) {
+    cls = createClass(type.kind, undefined, true);
+    primitiveClasses.set(type.kind, cls);
+    primitiveClassInfos.add(cls);
+  }
+  return classObjectOf(cls, classClass);
 }
 
 /** The `Class` object of `cls`, which `getClass()` and class literals share. */

@@ -1,5 +1,4 @@
 import type { ArrayInitializer, BinaryOperator, Expression, PatternBinding, Span } from './ast';
-import { classObjectOf } from './builtinClass';
 import { box, boxedTypeOf, unbox } from './builtinWrappers';
 import {
   type Compiled,
@@ -20,7 +19,6 @@ import { type Frame } from './runtime';
 import {
   BOOLEAN,
   CHAR,
-  type ClassInfo,
   DOUBLE,
   FLOAT,
   INT,
@@ -169,7 +167,9 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
       case 'methodRef': {
         return this.compileFunctionalExpression(context, expression);
       }
-      case 'classLiteral':
+      case 'classLiteral': {
+        return this.compileClassLiteral(expression);
+      }
       case 'typeRef': {
         return this.compileTypeExpression(expression);
       }
@@ -199,21 +199,11 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
     return this.compileFunctional(context, expression, target);
   }
 
-  /** `Type.class`, or a class named for a method reference's expansion. */
-  protected compileTypeExpression(expression: Extract<Expression, { kind: 'classLiteral' | 'typeRef' }>): Compiled {
+  /** A class named for a method reference's expansion. */
+  protected compileTypeExpression(expression: Extract<Expression, { kind: 'typeRef' }>): Compiled {
     const type = this.resolveType(expression.type);
-    if (type.kind !== 'class') {
-      return this.error(
-        expression,
-        expression.kind === 'classLiteral'
-          ? 'この採点環境では、クラスと列挙型とインターフェースにしか .class を使えません。'
-          : `${typeName(type)} は値として使えません。`
-      );
-    }
-    if (expression.kind === 'typeRef') return { kind: 'class', cls: type.cls };
-    const classClass = this.builtins.classes.get('Class') as ClassInfo;
-    const object = classObjectOf(type.cls, classClass);
-    return { kind: 'value', type: classClass.type, run: () => object };
+    if (type.kind !== 'class') return this.error(expression, `${typeName(type)} は値として使えません。`);
+    return { kind: 'class', cls: type.cls };
   }
 
   /** Compiles a lambda or a method reference into an object of the functional interface `target`. */

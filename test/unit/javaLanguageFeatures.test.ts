@@ -105,6 +105,12 @@ class Res implements AutoCloseable { final StringBuilder log; Res(StringBuilder 
     { clamped: 100, limited: 1.5, optionals: 'OptionalInt[7] OptionalDouble[2.5] 3 OptionalInt.empty' },
   ],
   [
+    'class literals of primitive, array, and void types',
+    'String names = int.class.getName() + " " + boolean.class + " " + void.class + " " + int[].class.getName() + " " + String[][].class.getSimpleName(); boolean same = int[].class == new int[0].getClass();',
+    {},
+    { names: 'int boolean void [I String[][]', same: true },
+  ],
+  [
     'Map.replaceAll and the locale-taking text overloads',
     'Map<String, Integer> m = new TreeMap<>(Map.of("a", 1, "b", 2)); m.replaceAll((k, v) -> v * 10); String replaced = m.toString(); String localized = "ABC".toLowerCase(Locale.ROOT) + String.format(Locale.US, "%.2f", 1.5) + Locale.JAPAN;',
     {},
@@ -344,6 +350,8 @@ Map<Integer, Integer> viewed = new HashMap<>(Map.of(1, 1)); String viewCme = "";
 Map<String, Integer> counts = new HashMap<>(); for (String w : "one two three four five six seven eight nine ten eleven twelve thirteen one".split(" ")) counts.merge(w, 1, Integer::sum); String counted = counts.toString();
 List<Integer> linked = new LinkedList<>(List.of(1, 2, 3)); try { linked.removeIf(x -> { if (x == 3) throw new RuntimeException(); return x == 1; }); } catch (RuntimeException e) {} String linkedText = linked.toString();
 StringBuilder collecting = new StringBuilder(); Stream.of(1, 2).peek(x -> collecting.append(x)).collect(Collectors.toCollection(() -> { collecting.append("S"); return new ArrayList<Integer>(); })); String collectOrder = collecting.toString();
+PriorityQueue<Integer> heap = new PriorityQueue<>(); for (int x : new int[] {0, 10, 1, 11, 12, 2, 3, 13, 14, 15, 16, 4, 5, 6, 7}) heap.add(x); heap.removeIf(x -> x == 10); heap.removeAll(List.of(1)); String polled = ""; while (!heap.isEmpty()) polled += heap.poll() + ",";
+Deque<Integer> deque = new ArrayDeque<>(List.of(1, 2, 3)); try { deque.removeIf(x -> { if (x == 3) throw new RuntimeException(); return x == 1; }); } catch (RuntimeException e) {} String dequeText = deque.toString();
 String exhausted = ""; try { i.next(); } catch (NoSuchElementException e) { exhausted += "N"; } try { i.remove(); } catch (IllegalStateException e) { exhausted += "I"; } exhausted += q;
 Set<Integer> s = new HashSet<>(Set.of(1)); Iterator<Integer> u = Collections.unmodifiableSet(s).iterator(); s.add(2); String wrapped = ""; try { u.next(); } catch (ConcurrentModificationException e) { wrapped = "cme"; }
 List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(Comparator.nullsFirst(Comparator.naturalOrder())); String sorted = nulls.toString();`
@@ -355,6 +363,8 @@ List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(
     liveText: '[a]',
     linkedText: '[2, 3]',
     collectOrder: 'S12',
+    polled: '0,2,3,4,5,6,7,11,12,13,14,15,16,',
+    dequeText: '[1, 2, 3]',
     viewCme: 'cme{1=1, 2=2}',
     counted:
       '{nine=1, six=1, one=2, seven=1, three=1, two=1, thirteen=1, eight=1, four=1, twelve=1, eleven=1, ten=1, five=1}',

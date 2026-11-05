@@ -1,4 +1,6 @@
 import {
+  batchRemovalClasses,
+  bulkRemovalRepairs,
   classType,
   compareNatural,
   type Context,
@@ -49,6 +51,11 @@ function fillFrom(frame: Frame, receiver: Value, source: Value, queueClass: Clas
   }
   frame.runtime.allocateArray(frame, heap.length);
   if ((isQueue && (source as JavaObject).cls === queueClass) || sorted) return;
+  heapify(frame, receiver);
+}
+
+function heapify(frame: Frame, receiver: Value): void {
+  const heap = elementsOf(receiver);
   for (let index = (heap.length >>> 1) - 1; index >= 0; index--) siftDown(frame, receiver, index, heap[index]);
 }
 
@@ -88,6 +95,9 @@ export function definePriorityQueue(
   defineHeapIterator(context, cls, element);
   defineQueueOperations(cls, element, context, lists.collectionClass);
   linkOverrides(cls);
+  batchRemovalClasses.add(cls);
+  // removeIf, removeAll, and retainAll compact the array and then heapify it, as the JDK's bulkRemove does.
+  bulkRemovalRepairs.set(cls, heapify);
   return cls;
 }
 

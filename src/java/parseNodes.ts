@@ -100,6 +100,8 @@ function applyKeywordModifier(modifiers: Modifiers, child: Node): void {
 
 export function countDimensions(node: Node): number {
   if (node.namedChildren.some((child) => child && !isComment(child))) unsupported(node, '配列の次元へのアノテーション');
+  // The dimensions of a class literal's type, as in `int[].class`, come without child tokens, only their text.
+  if (node.childCount === 0) return node.text.split('[').length - 1;
   return node.children.filter((child) => child?.type === '[').length;
 }
 

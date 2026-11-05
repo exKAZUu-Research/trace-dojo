@@ -205,10 +205,13 @@ export const fixedSizeClasses = new WeakSet<ClassInfo>();
 export const defaultRemoveClasses = new WeakSet<ClassInfo>();
 
 /**
- * The lists whose `removeIf` tests every element before removing any, as ArrayList's and Vector's do; the others
- * remove each match through their iterator, as Collection's default does.
+ * The collections whose `removeIf` tests every element before removing any, as ArrayList's, Vector's, ArrayDeque's,
+ * and PriorityQueue's do; the others remove each match through their iterator, as Collection's default does.
  */
 export const batchRemovalClasses = new WeakSet<ClassInfo>();
+
+/** Restores the order a class keeps among its elements after a bulk removal compacts them, as a heap's. */
+export const bulkRemovalRepairs = new WeakMap<ClassInfo, (frame: Frame, receiver: Value) => void>();
 
 /** The `Collections.unmodifiableSet` and `unmodifiableMap` wrappers, whose iterators reject removal without a message. */
 export const unmodifiableWrappers = new WeakSet<JavaObject>();
@@ -326,7 +329,12 @@ export function removeElements(
     elements.splice(index, 1);
     removed = true;
   }
-  if (removed) touch(receiver);
+  if (removed) {
+    for (let cls: ClassInfo | undefined = (receiver as JavaObject).cls; cls; cls = cls.superclass) {
+      bulkRemovalRepairs.get(cls)?.(frame, receiver);
+    }
+    touch(receiver);
+  }
   return removed;
 }
 
