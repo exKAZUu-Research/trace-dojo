@@ -257,6 +257,22 @@ function defineArrayList(
     elementsOf(receiver).splice(index, 1);
     touch(receiver);
   });
+  defineListAdditions(cls, element, context, { listClass, collectionClass });
+  defineListArrays(cls, context);
+  defineListUpdates(cls, element, context);
+  defineListSearches(cls, context);
+  if (name === 'LinkedList') defineDequeMethods(cls, element);
+  linkOverrides(cls);
+  return cls;
+}
+
+/** The methods that add to a list. */
+function defineListAdditions(
+  cls: ClassInfo,
+  element: JavaType,
+  context: Context,
+  { listClass, collectionClass }: { listClass: ClassInfo; collectionClass: ClassInfo }
+): void {
   addMethod(cls, 'add', [element], BOOLEAN, false, (frame, receiver, [value]) => {
     frame.runtime.allocateArray(frame, 1);
     elementsOf(receiver).push(value);
@@ -303,6 +319,10 @@ function defineArrayList(
       return list;
     }
   );
+}
+
+/** The methods that copy a list into an array. */
+function defineListArrays(cls: ClassInfo, context: Context): void {
   addMethod(cls, 'toArray', [], { kind: 'array', element: context.objectType }, false, (frame, receiver) => {
     frame.runtime.allocateArray(frame, elementsOf(receiver).length);
     return new JavaArray(context.objectType, [...elementsOf(receiver)]);
@@ -321,6 +341,10 @@ function defineArrayList(
     return array;
   });
   toTypedArray.typeParameters = [arrayVariable];
+}
+
+/** The methods that read, replace, and remove elements by position or value. */
+function defineListUpdates(cls: ClassInfo, element: JavaType, context: Context): void {
   addMethod(cls, 'get', [INT], element, false, (frame, receiver, [index]) => {
     checkIndex(frame, index as number, elementsOf(receiver).length);
     return elementsOf(receiver)[index as number];
@@ -347,6 +371,10 @@ function defineArrayList(
     elementsOf(receiver).length = 0;
     touch(receiver);
   });
+}
+
+/** The methods that search a list and compare it with another. */
+function defineListSearches(cls: ClassInfo, context: Context): void {
   addMethod(cls, 'indexOf', [context.objectType], INT, false, (frame, receiver, [value]) =>
     indexOf(frame, elementsOf(receiver), value)
   );
@@ -368,9 +396,6 @@ function defineArrayList(
     for (const item of elementsOf(receiver)) hash = toInt32(Math.imul(hash, 31) + javaHash(frame, item));
     return hash;
   });
-  if (name === 'LinkedList') defineDequeMethods(cls, element);
-  linkOverrides(cls);
-  return cls;
 }
 
 const LIST_CLASSES = new Set<ClassInfo>();
