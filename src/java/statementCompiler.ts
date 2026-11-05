@@ -219,7 +219,7 @@ export abstract class StatementCompiler extends InvocationCompiler {
           this.withBindings(context, whenFalse, () => this.compileStatement(context, alternative))
         )
       : undefined;
-    this.introduceBindings(context, bindingsAfter(statement, []));
+    this.introduceBindings(context, bindingsAfter(statement));
     return (frame) => (condition(frame) ? consequence(frame) : otherwise?.(frame));
   }
 
@@ -236,7 +236,7 @@ export abstract class StatementCompiler extends InvocationCompiler {
       this.withBindings(context, bindingsWhen(statement.condition, true), () =>
         this.compileLoopBody(context, statement.body, labels)
       );
-    this.introduceBindings(context, bindingsAfter(statement, labels));
+    this.introduceBindings(context, bindingsAfter(statement));
     return (frame) => {
       if (!isDo && !condition(frame)) return;
       for (;;) {
@@ -436,7 +436,7 @@ export abstract class StatementCompiler extends InvocationCompiler {
     const labels = this.takeLabels(context);
     const loop = this.withScope(context, () => this.compileForLoop(context, statement, labels));
     // The condition's bindings outlive the loop, whose header variables go out of scope with it.
-    this.introduceBindings(context, bindingsAfter(statement, labels));
+    this.introduceBindings(context, bindingsAfter(statement));
     return loop;
   }
 

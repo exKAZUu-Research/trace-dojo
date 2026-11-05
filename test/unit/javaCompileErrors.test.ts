@@ -1279,6 +1279,16 @@ const programs: [name: string, runs: boolean, source: string][] = [
     'class Main {\n  static class O<T> { class I { T v; } }\n  public static void main(String[] args) {\n    O<String> o = new O<>(); var a = o.new I(); a.v = 3;\n  }\n}',
   ],
   [
+    'field-assigned-after-loop-left-by-outer-label',
+    true,
+    'class Main {\n  final String s;\n  Main(Object o) { outer: inner: while (!(o instanceof String s)) { break outer; } s = "field"; }\n  public static void main(String[] args) {\n    new Main(1);\n  }\n}',
+  ],
+  [
+    'inherited-inner-class-of-generic-superclass',
+    true,
+    'class MyList<T> { class Node { T val; Node(T v) { val = v; } } }\nclass Strs extends MyList<String> { int len() { Node n = new Node("ab"); return n.val.length(); } }\nclass Main {\n  public static void main(String[] args) {\n    new Strs().len();\n  }\n}',
+  ],
+  [
     'keyed-comparator-chained-without-target',
     true,
     'import java.util.*;\nclass Main {\n  record P(String name, int age) {}\n  public static void main(String[] args) {\n    List<P> ps = new ArrayList<>(); ps.sort(Comparator.comparing(P::name, Comparator.reverseOrder()).reversed());\n  }\n}',

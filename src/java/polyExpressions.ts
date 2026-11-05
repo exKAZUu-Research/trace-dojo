@@ -1,4 +1,5 @@
 import type { Expression, Statement } from './ast';
+import { nestedStatements } from './reachability';
 
 /**
  * Whether a call or creation passes an argument whose type its target may decide: an implicitly typed lambda, or a
@@ -42,43 +43,7 @@ export function resultsInFunction(expression: Expression): boolean {
 
 /** The values the `yield` statements among `statements` give, outside the switch expressions nested in them. */
 function yieldedValues(statements: readonly Statement[]): Expression[] {
-  return statements.flatMap((statement): Expression[] => {
-    switch (statement.kind) {
-      case 'yield': {
-        return [statement.value];
-      }
-      case 'block': {
-        return yieldedValues(statement.statements);
-      }
-      case 'if': {
-        return yieldedValues(
-          statement.alternative ? [statement.consequence, statement.alternative] : [statement.consequence]
-        );
-      }
-      case 'while':
-      case 'do':
-      case 'for':
-      case 'forEach':
-      case 'labeled': {
-        return yieldedValues([statement.body]);
-      }
-      case 'synchronized': {
-        return yieldedValues(statement.body.statements);
-      }
-      case 'try': {
-        const blocks = [
-          statement.body,
-          ...statement.catches.map((clause) => clause.body),
-          ...(statement.finallyBlock ? [statement.finallyBlock] : []),
-        ];
-        return blocks.flatMap((block) => yieldedValues(block.statements));
-      }
-      case 'switch': {
-        return statement.groups.flatMap((group) => yieldedValues(group.statements));
-      }
-      default: {
-        return [];
-      }
-    }
-  });
+  return statements.flatMap((statement) =>
+    statement.kind === 'yield' ? [statement.value] : yieldedValues(nestedStatements(statement))
+  );
 }

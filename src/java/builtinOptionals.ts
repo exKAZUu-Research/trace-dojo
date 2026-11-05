@@ -5,7 +5,7 @@ import { classType, type Context, extendsOf, superOf, typeVariable, variableType
 import { addMethod, newString } from './builtinSupport';
 import { hashOf } from './builtinWrappers';
 import { type Frame, JavaThrow, throwBuiltin } from './runtime';
-import { BOOLEAN, type ClassInfo, DOUBLE, INT, type JavaType, type NativeMethod, VOID } from './types';
+import { BOOLEAN, type ClassInfo, DOUBLE, INT, type JavaType, LONG, type NativeMethod, VOID } from './types';
 import { JavaObject, type Value } from './values';
 
 export interface Optionals {
@@ -43,7 +43,7 @@ function get(frame: Frame, receiver: Value): Value {
 // code-gauge-allow functionCognitiveComplexity 19 -- One registration per builtin method, each a small native.
 // code-gauge-allow functionNcss 48 -- One registration per builtin method, each a small native.
 export function defineOptionals(context: Context): Optionals {
-  const { registry, objectType, stringType } = context;
+  const { registry, objectType } = context;
   const optional = registry.define('Optional', context.objectClass, 'java.util');
   optional.isFinal = true;
   const t = typeVariable('T', objectType);
@@ -83,29 +83,10 @@ export function defineOptionals(context: Context): Optionals {
   for (const [cls, name, valueType, getter] of [
     [optional, 'Optional', tType, 'get'],
     [registry.define('OptionalInt', context.objectClass, 'java.util'), 'OptionalInt', INT, 'getAsInt'],
+    [registry.define('OptionalLong', context.objectClass, 'java.util'), 'OptionalLong', LONG, 'getAsLong'],
     [registry.define('OptionalDouble', context.objectClass, 'java.util'), 'OptionalDouble', DOUBLE, 'getAsDouble'],
   ] as const) {
-    cls.isFinal = true;
-    addMethod(cls, getter, [], valueType, false, (frame, receiver) => get(frame, receiver));
-    addMethod(cls, 'orElseThrow', [], valueType, false, (frame, receiver) => get(frame, receiver));
-    addMethod(cls, 'isPresent', [], BOOLEAN, false, (_, receiver) => stateOf(receiver).isPresent);
-    addMethod(cls, 'isEmpty', [], BOOLEAN, false, (_, receiver) => !stateOf(receiver).isPresent);
-    addMethod(cls, 'orElse', [valueType], valueType, false, (_, receiver, [other]) =>
-      stateOf(receiver).isPresent ? stateOf(receiver).value : other
-    );
-    addMethod(cls, 'toString', [], stringType, false, (frame, receiver) => {
-      const state = stateOf(receiver);
-      return newString(
-        frame,
-        state.isPresent ? `${name}[${stringify(frame, state.value, valueType)}]` : `${name}.empty`
-      );
-    });
-    addMethod(cls, 'equals', [objectType], BOOLEAN, false, (frame, receiver, [other]) => {
-      if (!(other instanceof JavaObject) || other.cls !== cls) return false;
-      const [a, b] = [stateOf(receiver), stateOf(other)];
-      return a.isPresent === b.isPresent && (Object.is(a.value, b.value) || javaEquals(frame, a.value, b.value));
-    });
-    addMethod(cls, 'hashCode', [], INT, false, (frame, receiver) => optionalHash(frame, receiver, valueType));
+    defineOptionalMembers(context, cls, name, valueType, getter, cls !== optional);
   }
   const consumer = context.fn('Consumer');
   addMethod(optional, 'ifPresent', [classType(consumer, superOf(tType))], VOID, false, (frame, receiver, [action]) => {
@@ -139,11 +120,44 @@ export function defineOptionals(context: Context): Optionals {
 }
 
 /** The hash of an optional's value as its wrapper or `hashCode` gives it, or 0 when it is empty. */
+/** The members `Optional` shares with the primitive optionals, which also have the factories `of` and `empty`. */
+function defineOptionalMembers(
+  { objectType, stringType }: Context,
+  cls: ClassInfo,
+  name: string,
+  valueType: JavaType,
+  getter: string,
+  hasFactories: boolean
+): void {
+  cls.isFinal = true;
+  if (hasFactories) {
+    addMethod(cls, 'of', [valueType], cls.type, true, (frame, _, [value]) => createOptional(frame, cls, value));
+    addMethod(cls, 'empty', [], cls.type, true, (frame) => createOptional(frame, cls, undefined));
+  }
+  addMethod(cls, getter, [], valueType, false, (frame, receiver) => get(frame, receiver));
+  addMethod(cls, 'orElseThrow', [], valueType, false, (frame, receiver) => get(frame, receiver));
+  addMethod(cls, 'isPresent', [], BOOLEAN, false, (_, receiver) => stateOf(receiver).isPresent);
+  addMethod(cls, 'isEmpty', [], BOOLEAN, false, (_, receiver) => !stateOf(receiver).isPresent);
+  addMethod(cls, 'orElse', [valueType], valueType, false, (_, receiver, [other]) =>
+    stateOf(receiver).isPresent ? stateOf(receiver).value : other
+  );
+  addMethod(cls, 'toString', [], stringType, false, (frame, receiver) => {
+    const state = stateOf(receiver);
+    return newString(frame, state.isPresent ? `${name}[${stringify(frame, state.value, valueType)}]` : `${name}.empty`);
+  });
+  addMethod(cls, 'equals', [objectType], BOOLEAN, false, (frame, receiver, [other]) => {
+    if (!(other instanceof JavaObject) || other.cls !== cls) return false;
+    const [a, b] = [stateOf(receiver), stateOf(other)];
+    return a.isPresent === b.isPresent && (Object.is(a.value, b.value) || javaEquals(frame, a.value, b.value));
+  });
+  addMethod(cls, 'hashCode', [], INT, false, (frame, receiver) => optionalHash(frame, receiver, valueType));
+}
+
 function optionalHash(frame: Frame, receiver: Value, valueType: JavaType): number {
   const { isPresent, value } = stateOf(receiver);
   if (!isPresent || value === undefined) return 0;
-  return valueType === INT || valueType === DOUBLE
-    ? hashOf(value, valueType.kind as 'int' | 'double')
+  return valueType === INT || valueType === LONG || valueType === DOUBLE
+    ? hashOf(value, valueType.kind as 'int' | 'long' | 'double')
     : javaHash(frame, value);
 }
 

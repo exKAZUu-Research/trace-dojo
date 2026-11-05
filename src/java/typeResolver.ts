@@ -74,7 +74,8 @@ export abstract class TypeResolver {
 
   /**
    * The enclosing instance's type that a named inner class of a generic class has: the qualifier written with type
-   * arguments, a raw qualifier, which erases them, or else the enclosing class's own type parameters.
+   * arguments, a raw qualifier, which erases them, or else the enclosing class as the innermost class in scope that
+   * inherits the inner class sees it, as `MyList<String>` in `class Strs extends MyList<String>`.
    */
   private outerTypeOf(syntax: Extract<TypeSyntax, { kind: 'named' }>, cls: ClassInfo): ClassType | undefined {
     const { enclosing } = cls;
@@ -84,6 +85,9 @@ export abstract class TypeResolver {
       return outer.kind === 'class' ? (asSuper(outer, enclosing) ?? outer) : undefined;
     }
     if (syntax.qualifier.length > 0) return enclosing.type as ClassType;
+    for (let scope = this.typeScope; scope; scope = scope.enclosing) {
+      if (isSubclass(scope, enclosing)) return asSuper(thisTypeOf(scope), enclosing);
+    }
     return thisTypeOf(enclosing);
   }
 

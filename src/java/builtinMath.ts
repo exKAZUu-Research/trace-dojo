@@ -89,9 +89,14 @@ function defineIntegerArithmetic(mathClass: ClassInfo): void {
   addMethod(mathClass, 'clamp', [LONG, INT, INT], INT, true, (frame, _, [value, min, max]) =>
     Number(clamp(frame, value as bigint, BigInt(min as number), BigInt(max as number)))
   );
-  addMethod(mathClass, 'clamp', [DOUBLE, DOUBLE, DOUBLE], DOUBLE, true, (frame, _, [value, min, max]) =>
-    clamp(frame, value as number, min as number, max as number)
+  addMethod(mathClass, 'clamp', [LONG, LONG, LONG], LONG, true, (frame, _, [value, min, max]) =>
+    clamp(frame, value as bigint, min as bigint, max as bigint)
   );
+  for (const type of [FLOAT, DOUBLE]) {
+    addMethod(mathClass, 'clamp', [type, type, type], type, true, (frame, _, [value, min, max]) =>
+      clamp(frame, value as number, min as number, max as number)
+    );
+  }
 }
 
 /** The result of an exact operation, which must fit an int, or a long when `isLong`. */

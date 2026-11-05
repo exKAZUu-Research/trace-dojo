@@ -173,8 +173,7 @@ export class DefiniteAssignmentChecker {
     } finally {
       this.patternDeclarations.pop();
       // A labeled statement declares nothing itself, so what it holds is what its body keeps.
-      const label = this.labelsByStatement.get(statement);
-      const kept = new Set<Span>(bindingsAfter(statement, label === undefined ? [] : [label]));
+      const kept = new Set<Span>(bindingsAfter(statement));
       for (const variable of declared) {
         if (statement.kind === 'labeled' || (variable.declaration && kept.has(variable.declaration))) {
           this.patternDeclarations.at(-1)?.push(variable);
