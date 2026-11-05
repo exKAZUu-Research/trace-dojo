@@ -58,7 +58,7 @@ export function definePriorityQueue(
   defineReadMethods(cls, element, context, lists.itrClass, (frame, receiver, index) => {
     removeAt(frame, receiver, index);
   });
-  defineQueueOperations(cls, element, context);
+  defineQueueOperations(cls, element, context, lists.collectionClass);
   linkOverrides(cls);
   return cls;
 }
@@ -71,7 +71,7 @@ function create(receiver: Value, comparator?: Value): undefined {
   return undefined;
 }
 
-function defineQueueOperations(cls: ClassInfo, element: JavaType, context: Context): void {
+function defineQueueOperations(cls: ClassInfo, element: JavaType, context: Context, collectionClass: ClassInfo): void {
   for (const name of ['add', 'offer']) {
     addMethod(cls, name, [element], BOOLEAN, false, (frame, receiver, [value]) => offer(frame, receiver, value));
   }
@@ -98,7 +98,7 @@ function defineQueueOperations(cls: ClassInfo, element: JavaType, context: Conte
   addMethod(
     cls,
     'addAll',
-    [classType(cls, { kind: 'wildcard', bound: element, isSuper: false })],
+    [classType(collectionClass, { kind: 'wildcard', bound: element, isSuper: false })],
     BOOLEAN,
     false,
     (frame, receiver, [source]) => {

@@ -7,6 +7,7 @@ import {
   javaHash,
   putEntry,
 } from './builtinCollections';
+import { checkModifiable } from './builtinCollectionSupport';
 import { createStore, NO_ENTRY } from './builtinMaps';
 import { stringify } from './builtins';
 import { addMethod, newString, type Registry } from './builtinSupport';
@@ -460,7 +461,7 @@ function touch(value: Value): void {
 }
 
 // code-gauge-allow functionCognitiveComplexity 24 -- One registration per builtin method, each a small native.
-// code-gauge-allow functionNcss 50 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 55 -- One registration per builtin method, each a small native.
 function defineCollectionsClass(
   registry: Registry,
   objectClass: ClassInfo,
@@ -491,6 +492,7 @@ function defineCollectionsClass(
     objectType,
     (element) => ({ parameterTypes: [listOf(element)], returnType: VOID }),
     (frame, _, [list]) => {
+      checkModifiable(frame, list, false);
       const values = elementsOf(frame, list);
       frame.runtime.spend(Math.ceil((values.length * Math.log2(values.length + 1)) / 16));
       const sorted = values.toSorted((a, b) => compareNatural(frame, a, b));
@@ -529,6 +531,7 @@ function defineCollectionsClass(
       returnType: VOID,
     }),
     (frame, _, [list, random]) => {
+      checkModifiable(frame, list, false);
       const values = elementsOf(frame, list);
       // Collections.shuffle swaps each position from the end with a random one before it, as Java specifies.
       for (let index = values.length - 1; index > 0; index--) {
@@ -549,6 +552,7 @@ function defineCollectionsClass(
       isVarargs: true,
     }),
     (frame, _, [collection, array]) => {
+      checkModifiable(frame, collection, true);
       let changed = false;
       for (const value of (array as JavaArray).values) {
         changed =
@@ -566,6 +570,7 @@ function defineCollectionsClass(
     objectType,
     (element) => ({ parameterTypes: [listOf(element)], returnType: VOID }),
     (frame, _, [list]) => {
+      checkModifiable(frame, list, false);
       elementsOf(frame, list).reverse();
     }
   );
@@ -576,6 +581,7 @@ function defineCollectionsClass(
     objectType,
     (element) => ({ parameterTypes: [listOf(element), INT, INT], returnType: VOID }),
     (frame, _, [list, i, j]) => {
+      checkModifiable(frame, list, false);
       const values = elementsOf(frame, list);
       for (const index of [i, j] as number[]) {
         if (index < 0 || index >= values.length) {

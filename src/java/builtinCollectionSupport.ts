@@ -1,3 +1,4 @@
+import { classCastMessage } from './builtinClass';
 import { stringify } from './builtins';
 import { addInterface, addMethod, addTypeParameters, newString, type Registry } from './builtinSupport';
 import { type BoxableKind, hashOf, type Wrappers } from './builtinWrappers';
@@ -119,6 +120,25 @@ function itemsUntilChanged(collection: JavaObject): () => Value[] {
     }
     return items;
   };
+}
+
+/** The classes of the collections that reject every change: `List.of`, `Set.of`, `Map.of`, and unmodifiable views. */
+export const unmodifiableClasses = new WeakSet<ClassInfo>();
+
+/** The classes of the lists that may change elements but not their size, as `Arrays.asList` returns. */
+export const fixedSizeClasses = new WeakSet<ClassInfo>();
+
+/**
+ * Throws `UnsupportedOperationException` for a change to a collection that rejects it, as every method that changes
+ * a collection checks, defaults and `Collections` utilities included.
+ *
+ * @param changesSize Whether the change adds or removes elements, which a fixed-size list rejects too.
+ */
+export function checkModifiable(frame: Frame, collection: Value, changesSize: boolean): void {
+  const cls = (collection as JavaObject).cls;
+  if (unmodifiableClasses.has(cls) || (changesSize && fixedSizeClasses.has(cls))) {
+    throwBuiltin(frame, 'UnsupportedOperationException');
+  }
 }
 
 export function elementsOf(receiver: Value): Value[] {
@@ -277,8 +297,7 @@ export function compareNatural(frame: Frame, a: Value, b: Value): number {
   if (a === undefined || b === undefined) return throwBuiltin(frame, 'NullPointerException');
   const comparable = frame.runtime.builtins.wrappers.comparableClass;
   if (!frame.runtime.isInstance(a, comparable)) {
-    const name = a instanceof JavaObject ? a.cls.name : 'array';
-    return throwBuiltin(frame, 'ClassCastException', `class ${name} cannot be cast to class java.lang.Comparable`);
+    return throwBuiltin(frame, 'ClassCastException', classCastMessage(frame, a, 'java.lang.Comparable'));
   }
   if (a instanceof JavaString && b instanceof JavaString) {
     frame.runtime.scanString(Math.min(a.value.length, b.value.length));

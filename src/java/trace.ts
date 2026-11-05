@@ -4,11 +4,12 @@ import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { UNNAMED } from './ast';
+import { getBuiltins } from './builtins';
 import { type CompiledProgram, compileProgram } from './compiler';
 import { runProgram } from './execute';
 import { parseJava } from './parse';
 import { type Frame, Runtime, UNASSIGNED } from './runtime';
-import type { JavaType } from './types';
+import { isSubclass, type JavaType } from './types';
 import {
   charToString,
   defaultValue,
@@ -197,7 +198,7 @@ function collectionNodeOf(object: JavaObject, seen: Set<unknown>): DisplayNode |
 }
 
 function isMap(object: JavaObject): boolean {
-  return object.cls.name.endsWith('Map');
+  return isSubclass(object.cls, getBuiltins().collections.mapClass);
 }
 
 /** The text a map's key shows as, which is what learners write for it. */

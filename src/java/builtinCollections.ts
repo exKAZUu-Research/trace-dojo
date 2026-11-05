@@ -7,14 +7,16 @@ import {
   defineReadMethods,
   defineSnapshot,
   elementsOf,
+  fixedSizeClasses,
   indexOf,
   itemsOf,
   javaEquals,
   javaHash,
   linkOverrides,
   touch,
+  unmodifiableClasses,
 } from './builtinCollectionSupport';
-import { addListIterators, defineListIterator, uneditableLists } from './builtinListIterator';
+import { addListIterators, defineListIterator } from './builtinListIterator';
 import { defineHashMap, defineSets } from './builtinMaps';
 import { definePriorityQueue } from './builtinPriorityQueue';
 import {
@@ -54,7 +56,7 @@ export interface Collections {
   next: MethodInfo;
 }
 
-// code-gauge-allow functionNcss 41 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 42 -- One registration per builtin method, each a small native.
 export function defineCollections(
   registry: Registry,
   objectClass: ClassInfo,
@@ -70,7 +72,9 @@ export function defineCollections(
   const hasNext = addAbstractMethod(iteratorClass, 'hasNext', [], BOOLEAN);
   const next = addAbstractMethod(iteratorClass, 'next', [], iteratorElement);
   // Iterator.remove is a default method that iterators without removal leave throwing.
-  addMethod(iteratorClass, 'remove', [], VOID, false, (frame) => throwBuiltin(frame, 'UnsupportedOperationException'));
+  addMethod(iteratorClass, 'remove', [], VOID, false, (frame) =>
+    throwBuiltin(frame, 'UnsupportedOperationException', 'remove')
+  );
   const iterator = addAbstractMethod(iterableClass, 'iterator', [], classType(iteratorClass, iterableElement));
   const itrClass = defineIteratorClass(context, iteratorClass);
 
@@ -97,9 +101,10 @@ export function defineCollections(
   defineArrayDeque(context, lists, dequeClass);
   const priorityQueue = definePriorityQueue(context, lists, registry.classes.get('Queue') as ClassInfo);
   const immutableList = defineRestrictedList(context, 'ListN', lists, () => true);
-  uneditableLists.add(immutableList);
+  unmodifiableClasses.add(immutableList);
   // Arrays.asList writes through to its array, so it may set elements but not change its size.
   const fixedSizeList = defineRestrictedList(context, 'ArrayList', lists, (method) => method.name !== 'set', 'Arrays$');
+  fixedSizeClasses.add(fixedSizeList);
   const snapshotSet = defineSnapshot(context, 'Set', setClass, itrClass);
   const snapshotCollection = defineSnapshot(context, 'Collection', collectionClass, itrClass);
   const immutableSet = defineSets(context, setClass, collectionClass, itrClass);

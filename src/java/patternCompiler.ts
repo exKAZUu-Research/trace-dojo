@@ -1,9 +1,9 @@
-import type { Expression, Pattern, PatternBinding, PatternLabel, Span, SwitchGroup } from './ast';
+import type { Expression, Pattern, PatternBinding, PatternLabel, Span, Statement, SwitchGroup } from './ast';
 import type { Compiled, Exec, MethodContext, Scope } from './compilerBase';
 import { memberBindings, memberType } from './conversions';
 import { bindingsOfPattern } from './patternBindings';
-import { exhaustiveSwitches } from './reachability';
-import { type Frame, throwBuiltin } from './runtime';
+import { canCompleteNormally, exhaustiveSwitches } from './reachability';
+import { type Frame, JavaThrow, throwBuiltin } from './runtime';
 import { TryCompiler } from './tryCompiler';
 import {
   BOOLEAN,
@@ -14,6 +14,7 @@ import {
   isReference,
   isWidening,
   type JavaType,
+  type MethodInfo,
   sameType,
   typeName,
   upperBound,
@@ -28,7 +29,12 @@ interface CompiledPattern {
   type: JavaType;
   /** Whether the pattern matches every non-null value of `type`. */
   isTotalFor: (type: JavaType) => boolean;
+  /** For a record pattern, its record and the patterns of its components with the components' types. */
+  record?: { cls: ClassInfo; parts: CompiledPattern[]; componentTypes: JavaType[] };
 }
+
+/** A pattern that matches anything, standing for the components of a pattern total for their record. */
+const ANYTHING: CompiledPattern = { test: () => true, type: { kind: 'null' }, isTotalFor: () => true };
 
 /** What compiling the labels of a pattern switch has found so far. */
 interface PatternSwitchState {
@@ -60,8 +66,13 @@ export abstract class PatternCompiler extends TryCompiler {
   }
 
   /** Compiles a pattern matched against values of `inputType`, allocating the slots of its variables. */
-  protected compilePattern(context: MethodContext, pattern: Pattern, inputType: JavaType): CompiledPattern {
-    if (pattern.kind === 'typePattern') return this.compileTypePattern(context, pattern, inputType);
+  protected compilePattern(
+    context: MethodContext,
+    pattern: Pattern,
+    inputType: JavaType,
+    isComponent = false
+  ): CompiledPattern {
+    if (pattern.kind === 'typePattern') return this.compileTypePattern(context, pattern, inputType, isComponent);
     const type = this.resolveType(pattern.type);
     const cls = type.kind === 'class' ? type.cls : undefined;
     const components = cls?.recordComponents;
@@ -78,23 +89,33 @@ export abstract class PatternCompiler extends TryCompiler {
     }
     const bindings = memberBindings(type, cls);
     const parts = components.map((field, index) =>
-      this.compilePattern(context, pattern.components[index], memberType(field.type, bindings))
+      this.compilePattern(context, pattern.components[index], memberType(field.type, bindings), true)
+    );
+    const accessors = components.map(
+      (field) =>
+        cls.methods.find((method) => method.name === field.name && method.parameterTypes.length === 0) as MethodInfo
     );
     return {
       type,
       test: (frame, value) =>
         frame.runtime.isInstance(value, cls) &&
-        components.every((field, index) => parts[index].test(frame, (value as JavaObject).fields[field.slot])),
+        accessors.every((accessor, index) => parts[index].test(frame, readComponent(frame, accessor, value))),
       isTotalFor: (target) =>
         isWidening(erasure(target), erasure(type), this.builtins.objectClass) &&
         parts.every((part, index) => part.isTotalFor(memberType(components[index].type, bindings))),
+      record: { cls, parts, componentTypes: components.map((field) => memberType(field.type, bindings)) },
     };
   }
 
+  /**
+   * @param isComponent Whether the pattern matches a record component, where a pattern unconditional for the
+   *   component's type matches null too (JLS 14.30.2).
+   */
   protected compileTypePattern(
     context: MethodContext,
     pattern: Extract<Pattern, { kind: 'typePattern' }>,
-    inputType: JavaType
+    inputType: JavaType,
+    isComponent: boolean
   ): CompiledPattern {
     // `var` takes the type of what it matches, as do record components.
     const type = pattern.type ? this.resolveType(pattern.type) : inputType;
@@ -106,17 +127,9 @@ export abstract class PatternCompiler extends TryCompiler {
     context.locals.push({ name: pattern.binding.name, type });
     context.patternSlots.push(slot);
     this.bindingSlots.set(pattern.binding, slot);
-    const matches = (frame: Frame, value: Value): boolean => {
-      if (isPrimitivePattern) return true;
-      if (type.kind === 'class') return frame.runtime.isInstance(value, type.cls);
-      if (type.kind === 'array') {
-        return (
-          value instanceof JavaArray &&
-          isWidening({ kind: 'array', element: value.elementType }, type, this.builtins.objectClass)
-        );
-      }
-      return value !== undefined;
-    };
+    const matchesEverything =
+      isPrimitivePattern || (isComponent && isWidening(erasure(inputType), erasure(type), this.builtins.objectClass));
+    const matches = matchesEverything ? (): boolean => true : this.typeTest(type);
     return {
       type,
       test: (frame, value) => {
@@ -126,6 +139,17 @@ export abstract class PatternCompiler extends TryCompiler {
       },
       isTotalFor: (target) => isWidening(erasure(target), erasure(type), this.builtins.objectClass),
     };
+  }
+
+  /** Whether a value is a non-null value of `type`, as `instanceof` decides. */
+  protected typeTest(type: JavaType): (frame: Frame, value: Value) => boolean {
+    const { objectClass } = this.builtins;
+    if (type.kind === 'class') return (frame, value) => frame.runtime.isInstance(value, type.cls);
+    if (type.kind === 'array') {
+      return (_, value) =>
+        value instanceof JavaArray && isWidening({ kind: 'array', element: value.elementType }, type, objectClass);
+    }
+    return (_, value) => value !== undefined;
   }
 
   protected override compileSwitchSelector(
@@ -279,6 +303,15 @@ export abstract class PatternCompiler extends TryCompiler {
       const constants = cls.staticFields.filter((field) => field.enumConstant);
       return constants.length > 0 && constants.every((field) => enumConstants.has(field.name));
     }
+    const records = patterns.filter((pattern) => pattern.record?.cls === cls);
+    if (
+      records.length > 0 &&
+      this.coversRows(
+        records.map((pattern) => [pattern]),
+        [type]
+      )
+    )
+      return true;
     if (!cls.permits) return false;
     visiting.add(cls);
     try {
@@ -286,6 +319,43 @@ export abstract class PatternCompiler extends TryCompiler {
     } finally {
       visiting.delete(cls);
     }
+  }
+
+  /**
+   * Whether rows of patterns, one per column of `types`, together cover the values of those types (JLS 14.11.1.1):
+   * a column covers its type through the rows whose pattern is total for it, or a sealed type through its permitted
+   * subtypes in turn, and a column of patterns of one record through the columns of the record's components.
+   */
+  protected coversRows(rows: readonly CompiledPattern[][], types: readonly JavaType[]): boolean {
+    if (types.length === 0) return rows.length > 0;
+    const [type, ...rest] = types;
+    const total = rows.filter((row) => row[0].isTotalFor(type));
+    if (
+      total.length > 0 &&
+      this.coversRows(
+        total.map((row) => row.slice(1)),
+        rest
+      )
+    )
+      return true;
+    const bound = upperBound(type);
+    if (bound.kind !== 'class') return false;
+    const record = rows.find((row) => row[0].record?.cls === bound.cls)?.[0].record;
+    if (record) {
+      // A record pattern's components become columns of their own, which a total pattern matches entirely.
+      const expanded = rows.flatMap((row) => {
+        const head = row[0];
+        if (head.record?.cls === bound.cls) return [[...head.record.parts, ...row.slice(1)]];
+        return head.isTotalFor(type) ? [[...record.parts.map(() => ANYTHING), ...row.slice(1)]] : [];
+      });
+      if (this.coversRows(expanded, [...record.componentTypes, ...rest])) return true;
+    }
+    const { permits } = bound.cls;
+    return (
+      permits !== undefined &&
+      permits.length > 0 &&
+      permits.every((permitted) => this.coversRows(rows, [permitted.type, ...rest]))
+    );
   }
 
   protected override compileSwitchBody(
@@ -303,6 +373,13 @@ export abstract class PatternCompiler extends TryCompiler {
         slots: [],
       };
     }
+    // A group whose label declares variables cannot be entered by falling through from the group before it.
+    for (const [index, group] of statement.groups.entries()) {
+      const previous = statement.groups[index - 1] as SwitchGroup | undefined;
+      if (groupBindings[index].length > 0 && previous && canCompleteStatementsNormally(previous.statements)) {
+        this.error(group, '変数を宣言するパターンの case には、前の case から処理を続けて入ることはできません。');
+      }
+    }
     const scope: Scope = { names: new Map(), slots: [] };
     context.scopes.push(scope);
     try {
@@ -315,4 +392,23 @@ export abstract class PatternCompiler extends TryCompiler {
 
 function isNullLabel(label: Expression | PatternLabel | undefined): boolean {
   return label?.kind === 'literal' && label.literal.type === 'null';
+}
+
+/**
+ * A record component as a record pattern reads it, by calling its accessor, which may be one the record declares;
+ * an exception from the accessor becomes the cause of a `MatchException` (JLS 14.30.2).
+ */
+function readComponent(frame: Frame, accessor: MethodInfo, record: Value): Value {
+  try {
+    return frame.runtime.invoke(frame, accessor, record, [], undefined);
+  } catch (error) {
+    if (!(error instanceof JavaThrow)) throw error;
+    const description = frame.runtime.invokeToString(frame, error.value)?.value;
+    return throwBuiltin(frame, 'MatchException', description, error.value);
+  }
+}
+
+/** Whether running `statements` in order may reach their end, which an empty list does. */
+function canCompleteStatementsNormally(statements: readonly Statement[]): boolean {
+  return statements.every((statement) => canCompleteNormally(statement));
 }

@@ -1,4 +1,4 @@
-import { classType, type Context, elementsOf, linkOverrides } from './builtinCollectionSupport';
+import { checkModifiable, classType, type Context, elementsOf, linkOverrides } from './builtinCollectionSupport';
 import { addAbstractMethod, addInterface, addMethod, addTypeParameters, defineInterface } from './builtinSupport';
 import { type Frame, throwBuiltin } from './runtime';
 import { BOOLEAN, type ClassInfo, INT, type JavaType, VOID } from './types';
@@ -14,9 +14,6 @@ interface ListIteratorState {
 }
 
 const states = new WeakMap<JavaObject, ListIteratorState>();
-
-/** The classes of the lists `List.of` returns, whose iterators reject every edit before checking anything else. */
-export const uneditableLists = new WeakSet<ClassInfo>();
 
 /**
  * `ListIterator`, which walks a list both ways and edits it through the list's own `set`, `add`, and `remove`, so
@@ -129,7 +126,8 @@ function stateOf(receiver: Value): ListIteratorState {
 /** The iterator's state, after checking that its list has not changed structurally behind it. */
 function checkedState(frame: Frame, receiver: Value, isEdit = false): ListIteratorState {
   const state = stateOf(receiver);
-  if (isEdit && uneditableLists.has(state.list.cls)) throwBuiltin(frame, 'UnsupportedOperationException');
+  // An unmodifiable list's iterator rejects every edit before checking anything else.
+  if (isEdit) checkModifiable(frame, state.list, false);
   if (state.list.modCount !== state.expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
   return state;
 }

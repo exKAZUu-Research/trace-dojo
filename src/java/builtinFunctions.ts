@@ -7,7 +7,7 @@ import {
   putEntry,
   removeEntry,
 } from './builtinCollections';
-import { removeElements } from './builtinCollectionSupport';
+import { checkModifiable, removeElements } from './builtinCollectionSupport';
 import {
   addAbstractMethod,
   addConstant,
@@ -19,6 +19,7 @@ import {
   requireString,
 } from './builtinSupport';
 import { compareIgnoringCase } from './builtinText';
+import { compareValues } from './builtinWrappers';
 import { type Frame, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
@@ -232,7 +233,7 @@ export function callFunction(frame: Frame, iface: ClassInfo, target: Value, args
   return frame.runtime.invokeVirtual(frame, method.owner, method.name, target, args);
 }
 
-// code-gauge-allow functionNcss 37 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 38 -- One registration per builtin method, each a small native.
 function defineComparator(
   context: Context,
   functions: { fn: ClassInfo; toInt: ClassInfo; toDouble: ClassInfo },
@@ -327,7 +328,50 @@ function defineComparator(
         })
     );
   }
+  defineThenComparing(cls, t, functions, comparableClass);
   return cls;
+}
+
+/** `thenComparing` with a key extractor, `thenComparingInt`, and `thenComparingDouble`, which break ties by a key. */
+function defineThenComparing(
+  cls: ClassInfo,
+  t: JavaType,
+  functions: { fn: ClassInfo; toInt: ClassInfo; toDouble: ClassInfo },
+  comparableClass: ClassInfo
+): void {
+  const thenBy = (frame: Frame, first: Value, byKey: (frame: Frame, a: Value, b: Value) => number): JavaObject =>
+    functionObject(frame, cls, (callFrame, [a, b]) => {
+      const order = callFunction(callFrame, cls, first, [a, b]) as number;
+      return order === 0 ? byKey(callFrame, a, b) : order;
+    });
+  const keyVariable: TypeVariable = { name: 'U', bounds: [] };
+  const keyType: JavaType = { kind: 'typeVar', variable: keyVariable };
+  keyVariable.bounds = [classType(comparableClass, superOf(keyType))];
+  addMethod(
+    cls,
+    'thenComparing',
+    [classType(functions.fn, superOf(t), extendsOf(keyType))],
+    classType(cls, t),
+    false,
+    (frame, receiver, [key]) =>
+      thenBy(frame, receiver, (callFrame, a, b) =>
+        compareNatural(
+          callFrame,
+          callFunction(callFrame, functions.fn, key, [a]),
+          callFunction(callFrame, functions.fn, key, [b])
+        )
+      )
+  ).typeParameters = [keyVariable];
+  for (const [name, iface] of [
+    ['thenComparingInt', functions.toInt],
+    ['thenComparingDouble', functions.toDouble],
+  ] as const) {
+    addMethod(cls, name, [classType(iface, superOf(t))], classType(cls, t), false, (frame, receiver, [key]) =>
+      thenBy(frame, receiver, (callFrame, a, b) =>
+        compareValues(callFunction(callFrame, iface, key, [a]), callFunction(callFrame, iface, key, [b]))
+      )
+    );
+  }
 }
 
 function definePredicateDefaults(cls: ClassInfo, t: JavaType): void {
@@ -514,6 +558,7 @@ function defineIterableDefaults(collections: Collections, functions: DefaultFunc
     BOOLEAN,
     false,
     (frame, receiver, [filter]) => {
+      checkModifiable(frame, receiver, false);
       const items = [...itemsOf(frame, receiver)];
       const removed = items.filter((item) => callFunction(frame, functions.predicate, filter, [item]) === true);
       return removeAllOf(frame, receiver, removed);
@@ -525,6 +570,7 @@ function defineIterableDefaults(collections: Collections, functions: DefaultFunc
 /** Removes the items in `removed` from a list, a set, or a view of a map, returning whether there were any. */
 function removeAllOf(frame: Frame, receiver: Value, removed: Value[]): boolean {
   if (removed.length === 0) return false;
+  checkModifiable(frame, receiver, true);
   const object = receiver as JavaObject;
   if (object.elements) return removeElements(frame, receiver, (item) => removed.includes(item));
   for (const item of removed) removeEntry(frame, receiver, item);
@@ -547,6 +593,7 @@ function defineBulkOperations(collectionClass: ClassInfo): void {
     ['retainAll', true],
   ] as const) {
     addMethod(collectionClass, name, [otherType], BOOLEAN, false, (frame, receiver, [other]) => {
+      checkModifiable(frame, receiver, false);
       const removed = [...itemsOf(frame, receiver)].filter((item) => contains(frame, other, item) !== keepsContained);
       return removeAllOf(frame, receiver, removed);
     });
@@ -564,6 +611,7 @@ function defineListDefaults(collections: Collections, functions: DefaultFunction
     VOID,
     false,
     (frame, receiver, [comparator]) => {
+      checkModifiable(frame, receiver, false);
       sortValues(frame, itemsOf(frame, receiver), comparator, functions.comparator);
       const object = receiver as JavaObject;
       object.modCount = (object.modCount ?? 0) + 1;
@@ -576,6 +624,7 @@ function defineListDefaults(collections: Collections, functions: DefaultFunction
     VOID,
     false,
     (frame, receiver, [operator]) => {
+      checkModifiable(frame, receiver, false);
       const values = itemsOf(frame, receiver);
       for (const [index, value] of values.entries())
         values[index] = callFunction(frame, functions.unary, operator, [value]);
@@ -608,10 +657,11 @@ function defineMapDefaults(collections: Collections, functions: DefaultFunctions
     mapV,
     false,
     (frame, receiver, [key, mapping]) => {
+      checkModifiable(frame, receiver, false);
       const entry = findEntry(frame, receiver, key);
       if (entry && entry.value !== undefined) return entry.value;
       const value = callFunction(frame, functions.fn, mapping, [key]);
-      if (value !== undefined) putEntry(frame, receiver, key, false, value);
+      if (value !== undefined) putEntry(frame, receiver, key, false, value, true);
       return value;
     }
   );
@@ -622,13 +672,14 @@ function defineMapDefaults(collections: Collections, functions: DefaultFunctions
     mapV,
     false,
     (frame, receiver, [key, value, remapping]) => {
+      checkModifiable(frame, receiver, false);
       const entry = findEntry(frame, receiver, key);
       const merged =
         entry && entry.value !== undefined
           ? callFunction(frame, functions.biFunction, remapping, [entry.value, value])
           : value;
       if (merged === undefined) removeEntry(frame, receiver, key);
-      else putEntry(frame, receiver, key, false, merged);
+      else putEntry(frame, receiver, key, false, merged, true);
       return merged;
     }
   );
@@ -646,22 +697,25 @@ function defineMapRemappings(mapClass: ClassInfo, functions: DefaultFunctions, m
     ['computeIfPresent', true],
   ] as const) {
     addMethod(mapClass, name, [mapK, remappingType], mapV, false, (frame, receiver, [key, remapping]) => {
+      checkModifiable(frame, receiver, false);
       const current = findEntry(frame, receiver, key)?.value;
       if (needsValue && current === undefined) return;
       const value = callFunction(frame, functions.biFunction, remapping, [key, current]);
       if (value === undefined) removeEntry(frame, receiver, key);
-      else putEntry(frame, receiver, key, false, value);
+      else putEntry(frame, receiver, key, false, value, true);
       return value;
     });
   }
   const objectType = mapClass.typeParameters[0].bounds[0] as JavaType;
   addMethod(mapClass, 'remove', [objectType, objectType], BOOLEAN, false, (frame, receiver, [key, value]) => {
+    checkModifiable(frame, receiver, false);
     const entry = findEntry(frame, receiver, key);
     if (!entry || !javaEquals(frame, entry.value, value)) return false;
     removeEntry(frame, receiver, key);
     return true;
   });
   addMethod(mapClass, 'replace', [mapK, mapV], mapV, false, (frame, receiver, [key, value]) => {
+    checkModifiable(frame, receiver, false);
     const entry = findEntry(frame, receiver, key);
     if (!entry) return;
     const previous = entry.value;
@@ -685,6 +739,7 @@ function defineComparatorSorts(context: Context, collections: Collections, funct
     VOID,
     true,
     (frame, _, [list, comparator]) => {
+      checkModifiable(frame, list, false);
       sortValues(frame, itemsOf(frame, list), comparator, functions.comparator);
       const object = list as JavaObject;
       object.modCount = (object.modCount ?? 0) + 1;

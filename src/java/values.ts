@@ -80,14 +80,28 @@ export class HashStore {
   /** The entries in the order Java's iteration visits them. */
   ordered(): HashEntry[] {
     if (this.order !== 'hash') return this.entries;
-    const mask = this.capacity - 1;
-    const bucketOf = (entry: HashEntry): number => (entry.hash ^ (entry.hash >>> 16)) & mask;
-    return this.entries.toSorted((a, b) => bucketOf(a) - bucketOf(b));
+    return this.entries.toSorted((a, b) => this.bucketOf(a) - this.bucketOf(b));
   }
 
+  /** Adds an entry at the end of its bucket and then grows the table, as `HashMap.put` does. */
   add(entry: HashEntry): void {
     this.entries.push(entry);
     while (this.entries.length > this.capacity * 0.75) this.capacity *= 2;
+  }
+
+  /**
+   * Grows the table and then adds an entry at the start of its bucket, as `HashMap.computeIfAbsent`, `compute`, and
+   * `merge` do; a later resize keeps the order within each bucket, as Java's split of a bucket does.
+   */
+  addAtBucketHead(entry: HashEntry): void {
+    while (this.entries.length > this.capacity * 0.75) this.capacity *= 2;
+    const bucket = this.bucketOf(entry);
+    const index = this.order === 'hash' ? this.entries.findIndex((other) => this.bucketOf(other) === bucket) : -1;
+    this.entries.splice(index === -1 ? this.entries.length : index, 0, entry);
+  }
+
+  private bucketOf(entry: HashEntry): number {
+    return (entry.hash ^ (entry.hash >>> 16)) & (this.capacity - 1);
   }
 }
 

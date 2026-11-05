@@ -26,6 +26,7 @@ export function defineText(
   const stringType = stringClass.type;
   const objectArray: JavaType = { kind: 'array', element: objectType };
   defineStringBuilder(registry, objectClass, stringClass);
+  defineStringJoiner(registry, objectClass, stringClass.type);
   defineStringExtras(stringClass, collections);
   defineStringVariants(stringClass, objectClass);
   const format = addMethod(
@@ -61,6 +62,51 @@ export function defineText(
     );
     method.isVarargs = true;
   }
+}
+
+/** What a `StringJoiner` holds: its delimiter, prefix, and suffix, the parts added, and the text when it is empty. */
+interface Joiner {
+  delimiter: string;
+  prefix: string;
+  suffix: string;
+  parts: string[];
+  emptyValue?: string;
+}
+
+const joiners = new WeakMap<JavaObject, Joiner>();
+
+function joinerOf(receiver: Value): Joiner {
+  return joiners.get(receiver as JavaObject) as Joiner;
+}
+
+function joined(joiner: Joiner): string {
+  if (joiner.parts.length === 0 && joiner.emptyValue !== undefined) return joiner.emptyValue;
+  return `${joiner.prefix}${joiner.parts.join(joiner.delimiter)}${joiner.suffix}`;
+}
+
+function defineStringJoiner(registry: Registry, objectClass: ClassInfo, stringType: JavaType): void {
+  const cls = registry.define('StringJoiner', objectClass, 'java.util');
+  for (const parameters of [[stringType], [stringType, stringType, stringType]]) {
+    addConstructor(cls, parameters, (frame, receiver, [delimiter, prefix, suffix]) => {
+      joiners.set(receiver as JavaObject, {
+        delimiter: requireString(frame, delimiter),
+        prefix: prefix === undefined && parameters.length === 1 ? '' : requireString(frame, prefix),
+        suffix: suffix === undefined && parameters.length === 1 ? '' : requireString(frame, suffix),
+        parts: [],
+      });
+    });
+  }
+  addMethod(cls, 'add', [stringType], cls.type, false, (frame, receiver, [part]) => {
+    joinerOf(receiver).parts.push(part === undefined ? 'null' : text(part));
+    frame.runtime.scanString(1);
+    return receiver;
+  });
+  addMethod(cls, 'setEmptyValue', [stringType], cls.type, false, (frame, receiver, [value]) => {
+    joinerOf(receiver).emptyValue = requireString(frame, value);
+    return receiver;
+  });
+  addMethod(cls, 'length', [], INT, false, (_, receiver) => joined(joinerOf(receiver)).length);
+  addMethod(cls, 'toString', [], stringType, false, (frame, receiver) => newString(frame, joined(joinerOf(receiver))));
 }
 
 function builderOf(receiver: Value): string {
@@ -207,7 +253,11 @@ function spliceBuilder(frame: Frame, receiver: Value, start: number, end: number
 
 function checkSpan(frame: Frame, start: number, end: number, length: number, isInvalid: boolean): void {
   if (start < 0 || isInvalid)
-    throwBuiltin(frame, 'StringIndexOutOfBoundsException', `start ${start}, end ${end}, length ${length}`);
+    throwBuiltin(
+      frame,
+      'StringIndexOutOfBoundsException',
+      `Range [${start}, ${Math.min(end, length)}) out of bounds for length ${length}`
+    );
 }
 
 /** The `count` characters of a char array from `offset`, as `new String(chars, offset, count)` takes them. */
@@ -439,18 +489,26 @@ function joinText(frame: Frame, delimiter: string, parts: Value[]): JavaString {
 
 function checkIndex(frame: Frame, index: number, length: number): void {
   if (index < 0 || index >= length) {
-    throwBuiltin(frame, 'StringIndexOutOfBoundsException', `index ${index},length ${length}`);
+    throwBuiltin(frame, 'StringIndexOutOfBoundsException', `Index ${index} out of bounds for length ${length}`);
   }
 }
 
 function checkOffset(frame: Frame, offset: number, length: number): void {
   if (offset < 0 || offset > length)
-    throwBuiltin(frame, 'StringIndexOutOfBoundsException', `offset ${offset}, length ${length}`);
+    throwBuiltin(
+      frame,
+      'StringIndexOutOfBoundsException',
+      `Range [${offset}, ${length}) out of bounds for length ${length}`
+    );
 }
 
 function checkRange(frame: Frame, begin: number, end: number, length: number): void {
   if (begin < 0 || end > length || begin > end) {
-    throwBuiltin(frame, 'StringIndexOutOfBoundsException', `start ${begin}, end ${end}, length ${length}`);
+    throwBuiltin(
+      frame,
+      'StringIndexOutOfBoundsException',
+      `Range [${begin}, ${end}) out of bounds for length ${length}`
+    );
   }
 }
 

@@ -1,4 +1,5 @@
 import type { BinaryOperator } from './ast';
+import { classCastMessage, typeClassName } from './builtinClass';
 import { type Builtins, stringify } from './builtins';
 import { type Frame, throwBuiltin } from './runtime';
 import {
@@ -6,6 +7,7 @@ import {
   type ClassInfo,
   type ClassType,
   createClass,
+  erasure,
   intersectionParts,
   isCastable,
   isIntegral,
@@ -20,9 +22,8 @@ import {
   sameType,
   SHORT,
   superinterfacesOf,
-  typeName,
 } from './types';
-import { convertNumber, JavaArray, JavaObject, JavaString, toInt32, toInt64, type Value } from './values';
+import { convertNumber, JavaArray, JavaString, toInt32, toInt64, type Value } from './values';
 
 export interface Operation<Operands extends unknown[]> {
   type: JavaType;
@@ -304,16 +305,16 @@ function numericCast(from: { kind: NumericKind }, to: { kind: NumericKind }): (f
 
 function referenceCast(objectClass: ClassInfo, from: JavaType, to: JavaType): (frame: Frame, value: Value) => Value {
   if (isWidening(from, to, objectClass)) return (_, value) => value;
+  // The JVM checks only what survives erasure: a type variable's bound, and an array's erased element type.
+  const checked = erasure(to);
   return (frame, value) => {
     if (value === undefined) return value;
     const matches =
-      to.kind === 'class'
-        ? frame.runtime.isInstance(value, to.cls)
-        : value instanceof JavaArray && isWidening({ kind: 'array', element: value.elementType }, to, objectClass);
-    if (!matches) {
-      const actual = value instanceof JavaObject ? value.cls.name : value instanceof JavaString ? 'String' : 'array';
-      throwBuiltin(frame, 'ClassCastException', `class ${actual} cannot be cast to class ${typeName(to)}`);
-    }
+      checked.kind === 'class'
+        ? frame.runtime.isInstance(value, checked.cls)
+        : value instanceof JavaArray && isWidening({ kind: 'array', element: value.elementType }, checked, objectClass);
+    if (!matches)
+      throwBuiltin(frame, 'ClassCastException', classCastMessage(frame, value, typeClassName(frame, checked)));
     return value;
   };
 }

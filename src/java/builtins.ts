@@ -187,9 +187,10 @@ const causeTakers = new Set([
   'IllegalStateException',
   'UnsupportedOperationException',
   'IOException',
+  'MatchException',
 ]);
 
-// code-gauge-allow functionNcss 46 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 47 -- One registration per builtin method, each a small native.
 function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType: JavaType): ClassInfo {
   const defineThrowable = (name: string, superclass: ClassInfo, packageName = 'java.lang'): ClassInfo => {
     const cls = registry.define(name, superclass, packageName);
@@ -268,6 +269,7 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
   }
   defineThrowable('NoSuchElementException', runtimeExceptionClass, 'java.util');
   defineThrowable('EmptyStackException', runtimeExceptionClass, 'java.util');
+  defineThrowable('MatchException', runtimeExceptionClass);
   defineThrowable('StackOverflowError', errorClass);
   defineThrowable('OutOfMemoryError', errorClass);
   return throwableClass;
@@ -479,7 +481,11 @@ function checkIndex(frame: Frame, index: number, length: number): void {
 
 function checkRange(frame: Frame, begin: number, end: number, length: number): void {
   if (begin < 0 || end > length || begin > end) {
-    throwBuiltin(frame, 'StringIndexOutOfBoundsException', `begin ${begin}, end ${end}, length ${length}`);
+    throwBuiltin(
+      frame,
+      'StringIndexOutOfBoundsException',
+      `Range [${begin}, ${end}) out of bounds for length ${length}`
+    );
   }
 }
 

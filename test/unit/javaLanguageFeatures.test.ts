@@ -198,3 +198,19 @@ test.each([
   const program = `import java.util.*;\npublic class Main {\n${members}\n  public static void main(String[] args) {\n${body}\n  }\n}`;
   expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', finalTurtles: [expect.anything()] });
 });
+
+test('Java infers lambdas inside generic calls passed as arguments, and comparator chains with method references', () => {
+  expect(
+    finalVarsOf(
+      'List<String> l = new ArrayList<>(List.of("ccc", "a", "bb")); l.sort(Comparator.comparing(s -> s.length())); String sorted = l.toString(); String grouped = l.stream().collect(Collectors.groupingBy(s -> s.length(), Collectors.counting())).toString(); l.sort(Comparator.comparing(String::length).thenComparing(String::toString).reversed()); String chained = l.toString(); var typed = Comparator.comparingInt((String s) -> s.length()); int order = typed.compare("aa", "b");'
+    )
+  ).toEqual({ sorted: '[a, bb, ccc]', grouped: '{1=1, 2=1, 3=1}', chained: '[ccc, bb, a]', order: 1 });
+});
+
+test('Java rejects changes to unmodifiable collections through default methods and utilities', () => {
+  expect(
+    finalVarsOf(
+      'String result = ""; for (Runnable r : List.<Runnable>of(() -> List.of(1).replaceAll(x -> x), () -> Map.of("a", 1).merge("a", 1, Integer::sum), () -> Collections.sort(Collections.unmodifiableList(new ArrayList<>(List.of(2, 1)))))) { try { r.run(); result += "ok "; } catch (UnsupportedOperationException e) { result += "uoe "; } }'
+    )
+  ).toEqual({ result: 'uoe uoe uoe ' });
+});

@@ -24,6 +24,21 @@ export function unboxedTypeOf(type: JavaType): JavaType | undefined {
   return bound.kind === 'class' ? bound.cls.unboxedType : undefined;
 }
 
+/**
+ * Whether a postponed argument may be passed as `to`: a lambda or method reference as a functional interface whose
+ * function takes a number of parameters it can, and a postponed call as anything its result type widens to.
+ */
+function isPendingConvertible(builtins: Builtins, from: Extract<JavaType, { kind: 'pending' }>, to: JavaType): boolean {
+  if (from.isPoly) {
+    return to.kind !== 'void' && (!from.polyErasure || isWidening(from.polyErasure, erasure(to), builtins.objectClass));
+  }
+  const bound = upperBound(to);
+  const method = bound.kind === 'class' ? functionalMethodOf(bound.cls, builtins.objectClass) : undefined;
+  if (!method) return false;
+  const count = method.parameterTypes.length;
+  return (from.arity === undefined || count === from.arity) && (from.arities?.includes(count) ?? true);
+}
+
 /** The wrapper type that boxing gives a primitive value when the result then widens to `to`. */
 export function boxingTarget(builtins: Builtins, from: JavaType, to: JavaType): ClassType | undefined {
   if (!isPrimitive(from)) return;
@@ -38,11 +53,7 @@ export function isInvocationConvertible(
   to: JavaType,
   allowsBoxing: boolean
 ): boolean {
-  if (from.kind === 'pending') {
-    const bound = upperBound(to);
-    const method = bound.kind === 'class' ? functionalMethodOf(bound.cls, builtins.objectClass) : undefined;
-    return method !== undefined && (from.arity === undefined || method.parameterTypes.length === from.arity);
-  }
+  if (from.kind === 'pending') return isPendingConvertible(builtins, from, to);
   if (isWidening(from, to, builtins.objectClass)) return true;
   // A parameter whose type inference left undecided takes any object.
   if (to.kind === 'wildcard' && to.isHole) return !isPrimitive(from) || allowsBoxing;
@@ -128,14 +139,20 @@ export function instantiateMethod(
  * Within a type argument, which admits no widening, the target's type also wins over the narrower one the arguments
  * give, as in `List<Shape> l = List.of(new Square());`.
  */
-function inferFromTarget(
+export function inferFromTarget(
   builtins: Builtins,
   method: MethodInfo,
   targetType: JavaType,
   bindings: Map<TypeVariable, JavaType>
 ): void {
   const fromTarget = new Map<TypeVariable, JavaType>();
-  infer(builtins, method.returnType, targetType, method.typeParameters ?? [], fromTarget);
+  // A bounded wildcard of the target stands for its bound, as `T` in `Comparator<T>` takes `String` from
+  // `Comparator<? super String>`, consistently with the target's other type arguments.
+  const target =
+    targetType.kind === 'class' && targetType.args
+      ? { ...targetType, args: targetType.args.map((arg) => (arg.kind === 'wildcard' && arg.bound ? arg.bound : arg)) }
+      : targetType;
+  infer(builtins, method.returnType, target, method.typeParameters ?? [], fromTarget);
   for (const [variable, type] of fromTarget) {
     const existing = bindings.get(variable);
     const widensToTarget =
@@ -176,7 +193,6 @@ function mentions(type: JavaType, variable: TypeVariable): boolean {
 
 /** Infers the types of `variables` that make an argument of `argType` fit a parameter of `parameterType`. */
 // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of type, as inference walks parameter and argument types together.
-// code-gauge-allow functionNcss 31 -- One case per kind of type, as inference walks parameter and argument types together.
 export function infer(
   builtins: Builtins,
   parameterType: JavaType,

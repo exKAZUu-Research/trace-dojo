@@ -29,11 +29,12 @@ export class Frame {
   }
 }
 
-/** Throws a builtin exception such as `ArithmeticException`. */
-export function throwBuiltin(frame: Frame, className: string, message?: string): never {
+/** Throws a builtin exception such as `ArithmeticException`, optionally caused by another. */
+export function throwBuiltin(frame: Frame, className: string, message?: string, cause?: JavaObject): never {
   const cls = frame.runtime.builtins.classes.get(className);
   if (!cls) throw new Error(`Unknown builtin exception: ${className}`);
   const exception = new JavaObject(cls);
+  exception.cause = cause;
   if (message !== undefined) {
     // Messages may repeat learner strings; charging one for running out of memory would recurse.
     if (className !== 'OutOfMemoryError') frame.runtime.allocateString(frame, message.length);

@@ -48,6 +48,18 @@ export type JavaType =
   | {
       kind: 'pending';
       arity: number | undefined;
+      /**
+       * For a method reference, the numbers of parameters a function type may have for it to name a method, or
+       * `undefined` when any number may.
+       */
+      arities?: readonly number[];
+      /**
+       * For a generic call or creation whose implicit lambdas need the parameter's type, postponed until overload
+       * resolution gives it one, which any parameter may take.
+       */
+      isPoly?: boolean;
+      /** For a postponed call or creation, the erased type it produces, when its candidates all agree on one. */
+      polyErasure?: JavaType;
       /** The class a method reference such as `String::length` names, which the first parameter takes. */
       receiverHint?: JavaType;
     };

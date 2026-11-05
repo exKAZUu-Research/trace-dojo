@@ -293,7 +293,7 @@ function sameValue(a: Value, b: Value): boolean {
 
 /** Compares as `Double.compare` does, ordering -0.0 before 0.0 and NaN after everything else. */
 // code-gauge-allow functionCognitiveComplexity 23 -- Java's order puts -0.0 before 0.0 and NaN last, which takes one branch per case.
-function compareValues(a: Value, b: Value): number {
+export function compareValues(a: Value, b: Value): number {
   if (typeof a === 'boolean') return a === b ? 0 : a ? 1 : -1;
   if (typeof a === 'number' && typeof b === 'number' && (Number.isNaN(a) || Number.isNaN(b))) {
     return Number.isNaN(a) ? (Number.isNaN(b) ? 0 : 1) : -1;
@@ -340,7 +340,7 @@ function parseIntegral(frame: Frame, text: Value, bits: 32 | 64): bigint {
     return throwBuiltin(
       frame,
       'NumberFormatException',
-      value === undefined ? 'Cannot parse null string: null' : `For input string: "${value}"`
+      value === undefined ? 'Cannot parse null string' : `For input string: "${value}"`
     );
   }
   return parsed;
@@ -357,7 +357,7 @@ function parseRadix(frame: Frame, text: Value, radix: number): number {
       frame,
       'NumberFormatException',
       value === undefined
-        ? 'Cannot parse null string: null'
+        ? 'Cannot parse null string'
         : `For input string: "${value}"${radix === 10 ? '' : ` under radix ${radix}`}`
     );
   }

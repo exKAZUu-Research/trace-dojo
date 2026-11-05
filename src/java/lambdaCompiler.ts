@@ -1,9 +1,9 @@
 import { CompileError } from '../interpreter/diagnostics';
-import type { Expression, Lambda, MethodReference, Parameter, Span } from './ast';
+import type { Expression, Lambda, MethodReference, Parameter, Span, TypeSyntax } from './ast';
 import { functionalMethodOf, functionObject } from './builtinFunctions';
 import { boxedTypeOf } from './builtinWrappers';
 import type { CompiledValue, Exec, MethodContext } from './compilerBase';
-import { infer, memberBindings, methodView, rawify } from './conversions';
+import { infer, inferFromTarget, memberBindings, methodView, rawify } from './conversions';
 import { checkDefiniteAssignment } from './definiteAssignment';
 import { PatternCompiler } from './patternCompiler';
 import { canCompleteNormally } from './reachability';
@@ -213,7 +213,8 @@ export abstract class LambdaCompiler extends PatternCompiler {
     context: MethodContext,
     method: MethodInfo,
     args: readonly CompiledValue[],
-    expressions: readonly Expression[]
+    expressions: readonly Expression[],
+    targetType?: JavaType
   ): Map<TypeVariable, JavaType> | undefined {
     const variables = method.typeParameters ?? [];
     if (variables.length === 0 || !args.some((arg) => arg.type.kind === 'pending')) return;
@@ -223,6 +224,8 @@ export abstract class LambdaCompiler extends PatternCompiler {
       if (arg.type.kind !== 'pending')
         infer(this.builtins, method.parameterTypes[index], arg.type, variables, bindings);
     }
+    // The target type decides what the other arguments leave open before the lambdas, whose parameters may need it.
+    if (targetType && !isPrimitive(targetType)) inferFromTarget(this.builtins, method, targetType, bindings);
     for (const [index, arg] of args.entries()) {
       if (arg.type.kind === 'pending') this.inferFromLambda(context, method, index, expressions[index], bindings);
     }
@@ -239,12 +242,18 @@ export abstract class LambdaCompiler extends PatternCompiler {
   ): void {
     const variables = method.typeParameters ?? [];
     const parameterType = substitute(method.parameterTypes[index], bindings);
+    if (expression.kind !== 'lambda' && expression.kind !== 'methodRef') {
+      this.inferFromPolyArgument(context, method, index, expression, bindings);
+      return;
+    }
     const bound = upperBound(parameterType);
     const functional = bound.kind === 'class' ? functionalMethodOf(bound.cls, this.builtins.objectClass) : undefined;
     if (!functional) return;
+    const declared = method.parameterTypes[index] as ClassType;
+    if (expression.kind === 'lambda')
+      this.inferFromLambdaParameters(expression, functional, declared, variables, bindings);
     const unresolved = variables.filter((variable) => !bindings.has(variable));
     // The functional interface's result in terms of the method's type parameters, as in `? extends R`.
-    const declared = method.parameterTypes[index] as ClassType;
     const samResult = substitute(functional.returnType, memberBindings(declared, functional.owner));
     const declaredResult =
       samResult.kind === 'wildcard' ? (samResult.isSuper ? undefined : samResult.bound) : samResult;
@@ -253,6 +262,52 @@ export abstract class LambdaCompiler extends PatternCompiler {
     if (!returned) return;
     const boxedReturn = isPrimitive(returned) ? (boxedTypeOf(this.builtins.wrappers, returned) ?? returned) : returned;
     infer(this.builtins, declaredResult, boxedReturn, variables, bindings);
+  }
+
+  /** Infers what a lambda's declared parameter types decide, as `(String s) -> s.length()` decides `T` = `String`. */
+  protected inferFromLambdaParameters(
+    lambda: Lambda,
+    functional: MethodInfo,
+    declared: ClassType,
+    variables: readonly TypeVariable[],
+    bindings: Map<TypeVariable, JavaType>
+  ): void {
+    if (!lambda.parameters.every((parameter) => parameter.type)) return;
+    const bindingsOfDeclared = memberBindings(declared, functional.owner);
+    for (const [position, parameter] of lambda.parameters.entries()) {
+      const type = functional.parameterTypes[position] as JavaType | undefined;
+      if (!type) continue;
+      const samParameter = substitute(type, bindingsOfDeclared);
+      const target = samParameter.kind === 'wildcard' && samParameter.bound ? samParameter.bound : samParameter;
+      infer(this.builtins, target, this.resolveType(parameter.type as TypeSyntax), variables, bindings);
+    }
+  }
+
+  /**
+   * Infers the type parameters of `method` that the type of its postponed call argument at `index` decides, compiling
+   * the call against the parameter as far as the other arguments decide it.
+   */
+  protected inferFromPolyArgument(
+    context: MethodContext,
+    method: MethodInfo,
+    index: number,
+    expression: Expression,
+    bindings: Map<TypeVariable, JavaType>
+  ): void {
+    const variables = method.typeParameters ?? [];
+    const unresolved = variables.filter((variable) => !bindings.has(variable));
+    // Each undecided type argument becomes a hole, which keeps what the other arguments decided, such as `String` in
+    // `Collector<? super String, ?, ?>`.
+    const holes = new Map(bindings);
+    for (const variable of unresolved)
+      holes.set(variable, { kind: 'wildcard', bound: undefined, isSuper: false, isHole: true });
+    const target = substitute(method.parameterTypes[index], holes);
+    try {
+      const { type } = this.compileValueFor(context, expression, target);
+      infer(this.builtins, method.parameterTypes[index], type, variables, bindings);
+    } catch (error) {
+      if (!(error instanceof CompileError)) throw error;
+    }
   }
 
   /** The type a lambda argument returns when compiled against `target`, or `undefined` when that fails. */
@@ -329,8 +384,9 @@ export abstract class LambdaCompiler extends PatternCompiler {
 
   protected override compileArgument(context: MethodContext, expression: Expression): CompiledValue {
     const compiled = super.compileArgument(context, expression);
-    if (expression.kind !== 'methodRef' || compiled.type.kind !== 'pending' || expression.name === 'new')
-      return compiled;
+    if (expression.kind !== 'methodRef' || compiled.type.kind !== 'pending') return compiled;
+    const arities = this.referenceArities(context, expression);
+    if (expression.name === 'new') return { ...compiled, type: { ...compiled.type, arities } };
     const { target } = expression;
     let hint: JavaType | undefined;
     if ('type' in target) hint = this.resolveType(target.type);
@@ -338,7 +394,44 @@ export abstract class LambdaCompiler extends PatternCompiler {
       const named = this.compileExpression(context, target.expression);
       if (named.kind === 'class') hint = named.cls.type;
     }
-    return hint ? { ...compiled, type: { ...compiled.type, receiverHint: hint } } : compiled;
+    return { ...compiled, type: { ...compiled.type, arities, receiverHint: hint } };
+  }
+
+  /**
+   * The numbers of parameters a function type may have for a method reference to name a method (JLS 15.12.2.1):
+   * those of a static method, one more than those of an instance method that `Type::method` calls on its first
+   * argument, those of an instance method of a value, or those of a constructor; `undefined` allows any number, as a
+   * variable arity method or a reference this cannot resolve does.
+   */
+  protected referenceArities(context: MethodContext, reference: MethodReference): number[] | undefined {
+    const { target } = reference;
+    const isType = 'type' in target || this.namesType(context, target.expression);
+    const owner = this.referenceOwner(context, reference);
+    if (!owner) return undefined;
+    if (reference.name === 'new' && owner.kind === 'array') return [1];
+    const bound = upperBound(owner);
+    if (bound.kind !== 'class') return undefined;
+    const candidates =
+      reference.name === 'new' ? bound.cls.constructors : this.collectMethods(bound.cls, reference.name);
+    if (candidates.length === 0 || candidates.some((method) => method.isVarargs)) return undefined;
+    return candidates.flatMap((method) => {
+      const count = method.parameterTypes.length;
+      if (reference.name === 'new' || !isType) return [count];
+      return method.isStatic ? [count] : [count + 1];
+    });
+  }
+
+  /** The type whose methods a method reference names, or `undefined` when it does not compile. */
+  protected referenceOwner(context: MethodContext, reference: MethodReference): JavaType | undefined {
+    const { target } = reference;
+    try {
+      if ('type' in target) return this.resolveType(target.type);
+      const named = this.compileExpression(context, target.expression);
+      return named.kind === 'class' ? named.cls.type : named.type;
+    } catch (error) {
+      if (error instanceof CompileError) return undefined;
+      throw error;
+    }
   }
 
   /** Whether an expression before `::` names a class rather than a value. */

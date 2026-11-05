@@ -494,7 +494,6 @@ export abstract class StatementCompiler extends InvocationCompiler {
     }
   }
 
-  // code-gauge-allow functionNcss 32 -- Arrays and Iterables share the loop variable binding and the body.
   protected compileForEach(context: MethodContext, statement: Extract<Statement, { kind: 'forEach' }>): Exec {
     const labels = this.takeLabels(context);
     const iterable = this.compileValue(context, statement.iterable);

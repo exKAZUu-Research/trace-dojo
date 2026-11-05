@@ -1,4 +1,5 @@
 import { findEntry, javaEquals, javaHash, putEntry } from './builtinCollections';
+import { defineDownstreamCollectors } from './builtinDownstreamCollectors';
 import { callFunction } from './builtinFunctions';
 import { createStore } from './builtinMaps';
 import { stringify } from './builtins';
@@ -112,35 +113,7 @@ export function defineCollectors(context: Context): ClassInfo {
           box(finishFrame, context.wrappers.byKind.get('long') as ClassInfo, (container as { count: bigint }).count),
       })
   );
-  // groupingBy(classifier) collects each group into a list, keyed in a HashMap.
-  const fn = context.fn('Function');
-  const t = typeVariable('T', objectType);
-  const k = typeVariable('K', objectType);
-  const groupingBy = addMethod(
-    collectorsClass,
-    'groupingBy',
-    [classType(fn, superOf(variableType(t)), extendsOf(variableType(k)))],
-    classType(
-      collector,
-      variableType(t),
-      wildcard,
-      classType(collections.mapClass, variableType(k), listOf(variableType(t)))
-    ),
-    true,
-    (frame, _, [classifier]) =>
-      create(frame, {
-        supply: () => [] as Group[],
-        accumulate: (accumulateFrame, container, value) =>
-          addToGroup(
-            accumulateFrame,
-            container as Group[],
-            callFunction(accumulateFrame, fn, classifier, [value]),
-            value
-          ),
-        finish: (finishFrame, container) => newGroupMap(finishFrame, container as Group[]),
-      })
-  );
-  groupingBy.typeParameters = [t, k];
+  defineDownstreamCollectors(context, collectorsClass, collector, create);
   defineToMap(context, collectorsClass, collector, create);
   return collector;
 }
@@ -191,7 +164,8 @@ function defineToMap(
             if (mapped === undefined) throwBuiltin(accumulateFrame, 'NullPointerException');
             const existing = findEntry(accumulateFrame, container as Value, key);
             if (!existing) {
-              putEntry(accumulateFrame, container as Value, key, false, mapped);
+              // A merging toMap adds a key as HashMap.merge does, at the start of its bucket.
+              putEntry(accumulateFrame, container as Value, key, false, mapped, isMerging);
               return;
             }
             if (!isMerging) {
@@ -209,27 +183,6 @@ function defineToMap(
     );
     method.typeParameters = [t, k, u];
   }
-}
-
-/** The elements a `groupingBy` collector has gathered under one key. */
-interface Group {
-  key: Value;
-  items: Value[];
-}
-
-function addToGroup(frame: Frame, groups: Group[], key: Value, value: Value): void {
-  const group = groups.find((candidate) => javaEquals(frame, candidate.key, key));
-  if (group) group.items.push(value);
-  else groups.push({ key, items: [value] });
-}
-
-/** A `HashMap` from each group's key to the list of its elements, as `groupingBy` gives. */
-function newGroupMap(frame: Frame, groups: Group[]): JavaObject {
-  const map = frame.runtime.allocateObject(frame, frame.runtime.builtins.classes.get('HashMap') as ClassInfo);
-  map.store = new HashStore();
-  map.modCount = 0;
-  for (const { key, items } of groups) map.store.add({ key, value: newList(frame, items), hash: javaHash(frame, key) });
-  return map;
 }
 
 export function newList(frame: Frame, items: Value[]): JavaObject {

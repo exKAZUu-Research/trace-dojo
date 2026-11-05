@@ -1,4 +1,5 @@
 import type { Expression, PatternBinding } from './ast';
+import { runtimeClassNameOf } from './builtinClass';
 import {
   type Capture,
   type Compiled,
@@ -489,8 +490,7 @@ function elementAccessors(
       const checked = check(storeMessage);
       // An array of a subclass type, assigned to a variable of a superclass array type, still checks its stores.
       if (isReference(checked.elementType) && !fitsElement(frame, checked.elementType, value)) {
-        const actual = value instanceof JavaObject ? value.cls.binaryName : 'java.lang.String';
-        throwBuiltin(frame, 'ArrayStoreException', actual);
+        throwBuiltin(frame, 'ArrayStoreException', runtimeClassNameOf(frame, value));
       }
       checked.values[position] = value;
     },

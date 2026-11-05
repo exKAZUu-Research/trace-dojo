@@ -1,3 +1,4 @@
+import { CompileError } from '../interpreter/diagnostics';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import {
   type ClassDeclaration,
@@ -510,8 +511,20 @@ export abstract class CompilerBase extends TypeResolver {
       const arity = expression.kind === 'lambda' ? expression.parameters.length : undefined;
       return { kind: 'value', type: { kind: 'pending', arity }, run: () => {} };
     }
-    return this.compileValue(context, expression);
+    if (!passesImplicitLambda(expression)) return this.compileValue(context, expression);
+    // A call such as `Comparator.comparing(s -> s.length())` may need the parameter it is passed to for the types
+    // of its lambdas' parameters, so it waits for overload resolution when it cannot be typed on its own.
+    try {
+      return this.compileValue(context, expression);
+    } catch (error) {
+      if (!(error instanceof CompileError)) throw error;
+      const polyErasure = this.polyErasureOf(context, expression);
+      return { kind: 'value', type: { kind: 'pending', arity: undefined, isPoly: true, polyErasure }, run: () => {} };
+    }
   }
+
+  /** The erased type a postponed call or creation produces, when that does not depend on its arguments. */
+  protected abstract polyErasureOf(context: MethodContext, expression: Expression): JavaType | undefined;
 
   /** Converts the arguments of a call to `method`, packing those of a variable arity parameter into an array. */
   protected convertArguments(
@@ -644,6 +657,12 @@ export abstract class CompilerBase extends TypeResolver {
     if (mostSpecific.length !== 1) return this.error(span, `${what} の呼び出しがあいまいです。`);
     return mostSpecific[0];
   }
+}
+
+/** Whether an expression is a call or creation that passes a lambda whose parameters have no declared types. */
+function passesImplicitLambda(expression: Expression): boolean {
+  if (expression.kind !== 'call' && expression.kind !== 'new') return false;
+  return expression.args.some((arg) => arg.kind === 'lambda' && arg.parameters.some((parameter) => !parameter.type));
 }
 
 /**

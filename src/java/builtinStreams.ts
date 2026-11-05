@@ -1,17 +1,16 @@
-import { type Collections, compareNatural, itemsOf, javaEquals, javaHash } from './builtinCollections';
+import { type Collections, compareNatural, itemsOf, javaEquals } from './builtinCollections';
 import { collectors, defineCollectors } from './builtinCollectors';
 import { callFunction, type Functions } from './builtinFunctions';
-import { stringify } from './builtins';
+import { createOptional, defineOptionals, type Optionals } from './builtinOptionals';
 import { classType, type Context, extendsOf, superOf, typeVariable, variableType } from './builtinStreamSupport';
 import { addMethod, defineInterface, newString, type Registry } from './builtinSupport';
-import { box, hashOf, type Wrappers } from './builtinWrappers';
+import { box, type Wrappers } from './builtinWrappers';
 import { type Frame, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
   type ClassInfo,
   type ClassType,
   createClass,
-  DOUBLE,
   INT,
   type JavaType,
   LONG,
@@ -20,7 +19,7 @@ import {
   type TypeVariable,
   VOID,
 } from './types';
-import { charCodeOf, JavaArray, JavaObject, type JavaString, toInt32, type Value } from './values';
+import { charCodeOf, JavaArray, type JavaObject, type JavaString, toInt32, type Value } from './values';
 
 /** The elements a stream yields, one at a time, as each stage pulls them from the stage before. */
 type Source = () => Iterator<Value>;
@@ -50,180 +49,6 @@ export function defineStreams(
   defineSources(context, streams);
   defineStringStreams(context, streams);
   defineGeneratedStreams(context, streams);
-}
-
-interface Optionals {
-  optional: ClassInfo;
-  optionalInt: ClassInfo;
-  optionalDouble: ClassInfo;
-}
-
-const optionalValues = new WeakMap<JavaObject, { isPresent: boolean; value: Value }>();
-
-/** An optional holding `value` when `isPresent`, which, as Java's do, cannot hold null. */
-function createOptional(frame: Frame, cls: ClassInfo, value: Value, isPresent = value !== undefined): JavaObject {
-  if (isPresent && value === undefined) throwBuiltin(frame, 'NullPointerException');
-  const object = frame.runtime.allocateObject(frame, cls);
-  optionalValues.set(object, { isPresent, value });
-  object.retained = [value];
-  return object;
-}
-
-function stateOf(receiver: Value): { isPresent: boolean; value: Value } {
-  return optionalValues.get(receiver as JavaObject) as { isPresent: boolean; value: Value };
-}
-
-function get(frame: Frame, receiver: Value): Value {
-  const state = stateOf(receiver);
-  if (!state.isPresent) throwBuiltin(frame, 'NoSuchElementException', 'No value present');
-  return state.value;
-}
-
-// code-gauge-allow functionCognitiveComplexity 19 -- One registration per builtin method, each a small native.
-// code-gauge-allow functionNcss 46 -- One registration per builtin method, each a small native.
-function defineOptionals(context: Context): Optionals {
-  const { registry, objectType, stringType } = context;
-  const optional = registry.define('Optional', context.objectClass, 'java.util');
-  optional.isFinal = true;
-  const t = typeVariable('T', objectType);
-  optional.typeParameters = [t];
-  const tType = variableType(t);
-  const generic = (
-    name: string,
-    parameters: (u: JavaType) => JavaType[],
-    result: (u: JavaType) => JavaType,
-    native: NativeMethod
-  ): void => {
-    const u = typeVariable('T', objectType);
-    const method = addMethod(optional, name, parameters(variableType(u)), result(variableType(u)), true, native);
-    method.typeParameters = [u];
-  };
-  generic(
-    'of',
-    (u) => [u],
-    (u) => classType(optional, u),
-    (frame, _, [value]) => {
-      if (value === undefined) throwBuiltin(frame, 'NullPointerException');
-      return createOptional(frame, optional, value);
-    }
-  );
-  generic(
-    'ofNullable',
-    (u) => [u],
-    (u) => classType(optional, u),
-    (frame, _, [value]) => createOptional(frame, optional, value)
-  );
-  generic(
-    'empty',
-    () => [],
-    (u) => classType(optional, u),
-    (frame) => createOptional(frame, optional, undefined)
-  );
-  for (const [cls, name, valueType, getter] of [
-    [optional, 'Optional', tType, 'get'],
-    [registry.define('OptionalInt', context.objectClass, 'java.util'), 'OptionalInt', INT, 'getAsInt'],
-    [registry.define('OptionalDouble', context.objectClass, 'java.util'), 'OptionalDouble', DOUBLE, 'getAsDouble'],
-  ] as const) {
-    cls.isFinal = true;
-    addMethod(cls, getter, [], valueType, false, (frame, receiver) => get(frame, receiver));
-    addMethod(cls, 'orElseThrow', [], valueType, false, (frame, receiver) => get(frame, receiver));
-    addMethod(cls, 'isPresent', [], BOOLEAN, false, (_, receiver) => stateOf(receiver).isPresent);
-    addMethod(cls, 'isEmpty', [], BOOLEAN, false, (_, receiver) => !stateOf(receiver).isPresent);
-    addMethod(cls, 'orElse', [valueType], valueType, false, (_, receiver, [other]) =>
-      stateOf(receiver).isPresent ? stateOf(receiver).value : other
-    );
-    addMethod(cls, 'toString', [], stringType, false, (frame, receiver) => {
-      const state = stateOf(receiver);
-      return newString(
-        frame,
-        state.isPresent ? `${name}[${stringify(frame, state.value, valueType)}]` : `${name}.empty`
-      );
-    });
-    addMethod(cls, 'equals', [objectType], BOOLEAN, false, (frame, receiver, [other]) => {
-      if (!(other instanceof JavaObject) || other.cls !== cls) return false;
-      const [a, b] = [stateOf(receiver), stateOf(other)];
-      return a.isPresent === b.isPresent && (Object.is(a.value, b.value) || javaEquals(frame, a.value, b.value));
-    });
-    addMethod(cls, 'hashCode', [], INT, false, (frame, receiver) => optionalHash(frame, receiver, valueType));
-  }
-  const consumer = context.fn('Consumer');
-  addMethod(optional, 'ifPresent', [classType(consumer, superOf(tType))], VOID, false, (frame, receiver, [action]) => {
-    const state = stateOf(receiver);
-    if (state.isPresent) callFunction(frame, consumer, action, [state.value]);
-  });
-  const fn = context.fn('Function');
-  const u = typeVariable('U', objectType);
-  const map = addMethod(
-    optional,
-    'map',
-    [classType(fn, superOf(tType), extendsOf(variableType(u)))],
-    classType(optional, variableType(u)),
-    false,
-    (frame, receiver, [mapper]) => {
-      const state = stateOf(receiver);
-      return state.isPresent
-        ? createOptional(frame, optional, callFunction(frame, fn, mapper, [state.value]))
-        : receiver;
-    }
-  );
-  map.typeParameters = [u];
-  defineOptionalFunctions(context, optional, tType);
-  return {
-    optional,
-    optionalInt: registry.classes.get('OptionalInt') as ClassInfo,
-    optionalDouble: registry.classes.get('OptionalDouble') as ClassInfo,
-  };
-}
-
-/** The hash of an optional's value as its wrapper or `hashCode` gives it, or 0 when it is empty. */
-function optionalHash(frame: Frame, receiver: Value, valueType: JavaType): number {
-  const { isPresent, value } = stateOf(receiver);
-  if (!isPresent || value === undefined) return 0;
-  return valueType === INT || valueType === DOUBLE
-    ? hashOf(value, valueType.kind as 'int' | 'double')
-    : javaHash(frame, value);
-}
-
-/** `Optional`'s methods that take functions for the value or its absence. */
-function defineOptionalFunctions(context: Context, optional: ClassInfo, tType: JavaType): void {
-  const supplier = context.fn('Supplier');
-  const predicate = context.fn('Predicate');
-  const consumer = context.fn('Consumer');
-  addMethod(
-    optional,
-    'orElseGet',
-    [classType(supplier, extendsOf(tType))],
-    tType,
-    false,
-    (frame, receiver, [other]) => {
-      const state = stateOf(receiver);
-      return state.isPresent ? state.value : callFunction(frame, supplier, other, []);
-    }
-  );
-  addMethod(
-    optional,
-    'filter',
-    [classType(predicate, superOf(tType))],
-    classType(optional, tType),
-    false,
-    (frame, receiver, [test]) => {
-      const state = stateOf(receiver);
-      if (!state.isPresent || callFunction(frame, predicate, test, [state.value]) === true) return receiver;
-      return createOptional(frame, optional, undefined, false);
-    }
-  );
-  addMethod(
-    optional,
-    'ifPresentOrElse',
-    [classType(consumer, superOf(tType)), context.fn('Runnable').type],
-    VOID,
-    false,
-    (frame, receiver, [action, otherwise]) => {
-      const state = stateOf(receiver);
-      if (state.isPresent) callFunction(frame, consumer, action, [state.value]);
-      else callFunction(frame, context.fn('Runnable'), otherwise, []);
-    }
-  );
 }
 
 interface StreamTypes {
@@ -323,6 +148,9 @@ interface StreamKind {
   optionalClass: ClassInfo;
   optionalType: JavaType;
   comparator: ClassInfo;
+  /** The function that combines two elements, as `reduce` takes it. */
+  binary: ClassInfo;
+  binaryType: JavaType;
   /** The parameters `max` and `min` take: a comparator, except for an `IntStream`, whose ints have an order. */
   orderParameters: JavaType[];
 }
@@ -338,6 +166,7 @@ function streamKind(
   const consumer = isInt ? fn('IntConsumer') : fn('Consumer');
   const optionalClass = isInt ? optionals.optionalInt : optionals.optional;
   const comparator = fn('Comparator');
+  const binary = isInt ? fn('IntBinaryOperator') : fn('BinaryOperator');
   return {
     cls,
     impl,
@@ -350,6 +179,8 @@ function streamKind(
     optionalClass,
     optionalType: isInt ? optionalClass.type : classType(optionalClass, element),
     comparator,
+    binary,
+    binaryType: isInt ? binary.type : classType(binary, element),
     orderParameters: isInt ? [] : [classType(comparator, superOf(element))],
   };
 }
@@ -435,6 +266,9 @@ function defineTerminalOperations(kind: StreamKind): void {
       return !stopsAt;
     });
   }
+  op(cls, 'reduce', [kind.binaryType], kind.optionalType, (frame, receiver, [accumulator]) =>
+    reduceToOptional(frame, kind, receiver, accumulator)
+  );
   op(cls, 'findFirst', [], kind.optionalType, (frame, receiver) => {
     const next = take(frame, receiver).next();
     return createOptional(frame, kind.optionalClass, next.done ? undefined : next.value, !next.done);
@@ -445,6 +279,17 @@ function defineTerminalOperations(kind: StreamKind): void {
   op(cls, 'min', kind.orderParameters, kind.optionalType, (frame, receiver, [order]) =>
     extremeOf(frame, kind, receiver, order, -1)
   );
+}
+
+/** `reduce` without an identity, which gives an empty optional for an empty stream. */
+function reduceToOptional(frame: Frame, kind: StreamKind, receiver: Value, accumulator: Value): Value {
+  let result: Value;
+  let found = false;
+  for (const value of iterate(take(frame, receiver))) {
+    result = found ? callFunction(frame, kind.binary, accumulator, [result, value]) : value;
+    found = true;
+  }
+  return createOptional(frame, kind.optionalClass, result, found);
 }
 
 /** `max` (`sign` 1) or `min` (-1), which keep the first of equal elements. */
@@ -464,7 +309,7 @@ function extremeOf(frame: Frame, kind: StreamKind, receiver: Value, order: Value
 }
 
 /** The operations only a `Stream` of objects has: mapping, sorting with a comparator, reducing, and collecting. */
-// code-gauge-allow functionNcss 31 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 32 -- One registration per builtin method, each a small native.
 function defineReferenceOperations(context: Context, types: StreamTypes, tType: JavaType, collector: ClassInfo): void {
   const { objectType, collections, fn } = context;
   const { stream, streamImpl, intStream, intStreamImpl } = types;
@@ -478,6 +323,7 @@ function defineReferenceOperations(context: Context, types: StreamTypes, tType: 
       derive(streamImpl, receiver, frame, (items) => mapped(frame, items, fn('Function'), mapper)),
     [r]
   );
+  defineFlatMap(context, types, tType);
   op(
     stream,
     'mapToInt',
@@ -524,6 +370,28 @@ function defineReferenceOperations(context: Context, types: StreamTypes, tType: 
       return functions.finish(frame, container);
     },
     [rr, a]
+  );
+}
+
+/** `flatMap`, which replaces each element with the elements of the stream the mapper returns for it. */
+function defineFlatMap(context: Context, types: StreamTypes, tType: JavaType): void {
+  const { stream, streamImpl } = types;
+  const fn = context.fn('Function');
+  const r = typeVariable('R', context.objectType);
+  const mapperType = classType(fn, superOf(tType), extendsOf(classType(stream, extendsOf(variableType(r)))));
+  op(
+    stream,
+    'flatMap',
+    [mapperType],
+    classType(stream, variableType(r)),
+    (frame, receiver, [mapper]) =>
+      derive(streamImpl, receiver, frame, function* (items) {
+        for (const value of iterate(items)) {
+          const inner = callFunction(frame, fn, mapper, [value]);
+          if (inner !== undefined) yield* iterate(take(frame, inner));
+        }
+      }),
+    [r]
   );
 }
 
@@ -659,7 +527,6 @@ function defineStringStreams(context: Context, streams: StreamTypes): void {
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- One registration per builtin method, each a small native.
 // code-gauge-allow functionNcss 39 -- One registration per builtin method, each a small native.
 function defineSources(context: Context, streams: StreamTypes): void {
   const { registry, objectType, collections } = context;

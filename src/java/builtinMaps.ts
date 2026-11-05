@@ -1,6 +1,7 @@
 import { classObjectOf } from './builtinClass';
 import type { Context } from './builtinCollectionSupport';
 import {
+  checkModifiable,
   classType,
   compareNatural,
   createIterator,
@@ -10,6 +11,7 @@ import {
   javaHash,
   linkOverrides,
   touch,
+  unmodifiableClasses,
   viewRemovals,
 } from './builtinCollectionSupport';
 import { callFunction } from './builtinFunctions';
@@ -47,15 +49,13 @@ export function defineSets(
   for (const name of ['HashSet', 'LinkedHashSet', 'TreeSet'])
     defineSetClass(context, name, setClass, collectionClass, itrClass);
   defineEnumSet(context, defineSetClass(context, 'EnumSet', setClass, collectionClass, itrClass), collectionClass);
-  // Named to end with `Set`, as sets compare equal only to sets.
   return restrictToImmutable(
     context.registry,
     defineSetClass(context, 'ImmutableCollections$SetN', setClass, collectionClass, itrClass),
-    'ImmutableSet'
+    'SetN'
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- One registration per builtin method, each a small native.
 // code-gauge-allow functionNcss 52 -- One registration per builtin method, each a small native.
 function defineSetClass(
   context: Context,
@@ -79,7 +79,8 @@ function defineSetClass(
     [classType(collectionClass, { kind: 'wildcard', bound: element, isSuper: false })],
     (frame, receiver, [source]) => {
       const items = [...itemsOf(frame, source)];
-      createStore(receiver, Math.max(tableSizeFor(Math.floor(items.length / 0.75) + 1), 16));
+      // JDK 19 and later size the table for at least 12 elements, as HashMap.newHashMap(Math.max(size, 12)) does.
+      createStore(receiver, tableSizeFor(Math.ceil(Math.max(items.length, 12) / 0.75)));
       for (const item of items) putEntry(frame, receiver, item, true);
       return;
     }
@@ -150,7 +151,7 @@ function defineSetClass(
     )
   );
   addMethod(cls, 'equals', [context.objectType], BOOLEAN, false, (frame, receiver, [other]) => {
-    if (!(other instanceof JavaObject) || !other.store || !other.cls.name.endsWith('Set')) return false;
+    if (!(other instanceof JavaObject) || !other.store || !frame.runtime.isInstance(other, setClass)) return false;
     const entries = storeOf(receiver).entries;
     return (
       entries.length === other.store.entries.length &&
@@ -223,6 +224,7 @@ function mapView(
     modCount: { get: () => (map as JavaObject).modCount, set: () => {} },
   });
   viewRemovals.set(view, (removeFrame, index) => {
+    checkModifiable(removeFrame, map, true);
     removeEntry(removeFrame, map, (storeOf(map).ordered()[index] as HashStore['entries'][number]).key);
   });
   return view;
@@ -391,6 +393,7 @@ function defineMapEntry(mapClass: ClassInfo, entryClass: ClassInfo, nodeClass: C
  */
 export function restrictToImmutable(registry: Registry, cls: ClassInfo, name: string): ClassInfo {
   registry.classes.delete(cls.name);
+  unmodifiableClasses.add(cls);
   cls.name = name;
   cls.constructors = [];
   for (const method of cls.methods) {
@@ -463,7 +466,7 @@ export function defineEntryNode(context: Context, entryClass: ClassInfo): ClassI
 
 export const nodeEntries = new WeakMap<JavaObject, { key: Value; value: Value }>();
 
-// code-gauge-allow functionCognitiveComplexity 19 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionCognitiveComplexity 21 -- One registration per builtin method, each a small native.
 // code-gauge-allow functionNcss 52 -- One registration per builtin method, each a small native.
 export function defineMapMethods(
   cls: ClassInfo,
@@ -501,8 +504,9 @@ export function defineMapMethods(
     ],
     (frame, receiver, [source]) => {
       if (!(source instanceof JavaObject) || !source.store) return throwBuiltin(frame, 'NullPointerException');
-      const entries = source.store.entries;
-      createStore(receiver, Math.max(tableSizeFor(Math.floor(entries.length / 0.75) + 1), 16));
+      // As HashMap.putMapEntries does: a table for the entries, filled in the source's iteration order.
+      const entries = source.store.ordered();
+      createStore(receiver, entries.length === 0 ? 16 : tableSizeFor(Math.ceil(entries.length / 0.75)));
       for (const entry of entries) putEntry(frame, receiver, entry.key, true, entry.value);
       return;
     }
@@ -753,7 +757,8 @@ export function putEntry(
   receiver: Value,
   key: Value,
   keepsExisting: boolean,
-  value?: Value
+  value?: Value,
+  atBucketHead = false
 ): Value | typeof NO_ENTRY {
   const entry = findEntry(frame, receiver, key);
   if (entry) {
@@ -769,7 +774,8 @@ export function putEntry(
     compare(frame, key, key);
     const index = store.entries.findIndex((other) => compare(frame, key, other.key) < 0);
     store.entries.splice(index === -1 ? store.entries.length : index, 0, { key, value, hash: 0 });
-  } else store.add({ key, value, hash: javaHash(frame, key) });
+  } else if (atBucketHead) store.addAtBucketHead({ key, value, hash: javaHash(frame, key) });
+  else store.add({ key, value, hash: javaHash(frame, key) });
   touch(receiver);
   return NO_ENTRY;
 }

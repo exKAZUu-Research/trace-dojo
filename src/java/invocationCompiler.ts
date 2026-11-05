@@ -1,7 +1,8 @@
+import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Expression, Span, TypeSyntax } from './ast';
 import { getBuiltins } from './builtins';
 import { anonymousDeclaration, type Compiled, type CompiledValue, type Eval, type MethodContext } from './compilerBase';
-import { infer, memberBindings, methodView } from './conversions';
+import { infer, isInvocationConvertible, memberBindings, methodView } from './conversions';
 import { ExpressionCompiler } from './expressionCompiler';
 import { methodDescription, nullMessage } from './nullMessages';
 import { superValue, thisValue } from './referenceCompiler';
@@ -9,9 +10,11 @@ import { type Frame, throwBuiltin } from './runtime';
 import {
   asSuper,
   type ClassInfo,
+  erasure,
   isWidening,
   type JavaType,
   type MethodInfo,
+  sameType,
   thisTypeOf,
   typeName,
   type TypeVariable,
@@ -43,7 +46,8 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
     context: MethodContext,
     method: MethodInfo,
     args: readonly CompiledValue[],
-    expressions: readonly Expression[]
+    expressions: readonly Expression[],
+    targetType?: JavaType
   ): Map<TypeVariable, JavaType> | undefined;
 
   protected compileNew(context: MethodContext, expression: Extract<Expression, { kind: 'new' }>): Compiled {
@@ -258,7 +262,7 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
       }
     }
     // The constructor's arguments decide only what the target type leaves open.
-    const candidates = cls.constructors.filter((constructor) => constructor.parameterTypes.length === argTypes.length);
+    const candidates = this.applicableConstructors(cls, argTypes);
     if (candidates.length === 1) {
       const fromArgs = new Map<TypeVariable, JavaType>();
       for (const [index, parameterType] of candidates[0].parameterTypes.entries()) {
@@ -270,7 +274,6 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
     return { kind: 'class', cls, args: variables.map((variable) => bindings.get(variable) as JavaType) };
   }
 
-  // code-gauge-allow functionNcss 32 -- Selecting, checking, and invoking a method share the compiled receiver and arguments.
   protected compileCall(context: MethodContext, expression: Extract<Expression, { kind: 'call' }>): Compiled {
     const targetType = this.takeTargetType();
     const args = expression.args.map((arg) => this.compileArgument(context, arg));
@@ -285,7 +288,7 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
       args.map((arg) => arg.type),
       `メソッド ${expression.name}`,
       targetType,
-      (candidate) => this.inferFromLambdas(context, candidate, args, expression.args)
+      (candidate) => this.inferFromLambdas(context, candidate, args, expression.args, targetType)
     );
     const declared = method.declared ?? method;
     if (target.receiver === undefined && expression.object === undefined && !method.isStatic) {
@@ -351,6 +354,32 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
   }
 
   /** The methods a call may select and the receiver it evaluates, which is absent for a class name. */
+  /** The constructors that arguments fit once type arguments are erased, of which a diamond needs one to infer from. */
+  protected applicableConstructors(cls: ClassInfo, argTypes: readonly JavaType[]): MethodInfo[] {
+    return cls.constructors.filter(
+      (constructor) =>
+        constructor.parameterTypes.length === argTypes.length &&
+        constructor.parameterTypes.every((type, index) =>
+          isInvocationConvertible(this.builtins, argTypes[index], erasure(type), true)
+        )
+    );
+  }
+
+  protected polyErasureOf(context: MethodContext, expression: Expression): JavaType | undefined {
+    try {
+      if (expression.kind === 'new') return erasure(this.resolveCreatedType(context, expression));
+      if (expression.kind !== 'call') return undefined;
+      const candidates = this.resolveCallTarget(context, expression).candidates.filter(
+        (method) => method.isVarargs || method.parameterTypes.length === expression.args.length
+      );
+      const [first, ...others] = candidates.map((method) => erasure(method.returnType));
+      return first && others.every((other) => sameType(other, first)) ? first : undefined;
+    } catch (error) {
+      if (error instanceof CompileError) return undefined;
+      throw error;
+    }
+  }
+
   protected resolveCallTarget(context: MethodContext, expression: Extract<Expression, { kind: 'call' }>): CallTarget {
     const { object } = expression;
     if (object === 'super') return this.resolveSuperCallTarget(context, expression);
