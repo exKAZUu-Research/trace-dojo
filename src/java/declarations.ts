@@ -331,6 +331,15 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
       if (!(other instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
       return ((receiver as JavaObject).enumConstant?.ordinal ?? 0) - (other.enumConstant?.ordinal ?? 0);
     });
+    this.implementComparable(cls, cls.methods.at(-1) as MethodInfo);
+  }
+
+  /** Makes an enum `Comparable` to itself, as `Enum<E>` implements `Comparable<E>`, with `compareTo` its method. */
+  protected implementComparable(cls: ClassInfo, compareTo: MethodInfo): void {
+    const { comparableClass, compareTo: comparableCompareTo } = this.builtins.wrappers;
+    cls.interfaces.push(comparableClass);
+    cls.supertypes.push({ kind: 'class', cls: comparableClass, args: [cls.type] });
+    compareTo.overrides = new Set([comparableCompareTo]);
   }
 
   protected declareField(cls: ClassInfo, member: FieldDeclaration): void {

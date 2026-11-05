@@ -1,3 +1,4 @@
+import { classObjectOf } from './builtinClass';
 import type { Context } from './builtinCollectionSupport';
 import {
   classType,
@@ -13,6 +14,7 @@ import {
   viewRemovals,
 } from './builtinCollectionSupport';
 import { callFunction } from './builtinFunctions';
+import { stringify } from './builtins';
 import {
   addAbstractMethod,
   addConstructor,
@@ -24,8 +26,17 @@ import {
   type Registry,
 } from './builtinSupport';
 import { type Frame, throwBuiltin } from './runtime';
-import { BOOLEAN, type ClassInfo, createClass, INT, type JavaType, type TypeVariable, VOID } from './types';
-import { HashStore, JavaObject, toInt32, type Value } from './values';
+import {
+  BOOLEAN,
+  type ClassInfo,
+  createClass,
+  INT,
+  type JavaType,
+  type NativeMethod,
+  type TypeVariable,
+  VOID,
+} from './types';
+import { HashStore, type JavaArray, JavaObject, toInt32, type Value } from './values';
 
 /** `HashSet`, `LinkedHashSet`, `TreeSet`, and the class of the sets `Set.of` returns, which this returns. */
 export function defineSets(
@@ -36,6 +47,7 @@ export function defineSets(
 ): ClassInfo {
   for (const name of ['HashSet', 'LinkedHashSet', 'TreeSet'])
     defineSetClass(context, name, setClass, collectionClass, itrClass);
+  defineEnumSet(context, defineSetClass(context, 'EnumSet', setClass, collectionClass, itrClass), collectionClass);
   // Named to end with `Set`, as sets compare equal only to sets.
   return restrictToImmutable(
     context.registry,
@@ -184,6 +196,7 @@ export function defineHashMap(
     return cls;
   };
   for (const name of ['HashMap', 'LinkedHashMap', 'TreeMap']) defineClass(name);
+  defineEnumMap(defineClass('EnumMap'), registry.classes.get('Class') as ClassInfo);
   defineMapEntry(mapClass, entryClass, nodeClass, objectType);
   const immutableMap = defineClass('MapN', 'ImmutableCollections$MapN');
   return { mapClass, immutableMap: restrictToImmutable(registry, immutableMap, 'MapN') };
@@ -210,6 +223,104 @@ function mapView(
     removeEntry(removeFrame, map, entry.key);
   });
   return view;
+}
+
+/** `EnumMap`, a map of an enum's constants in their order, which its constructors take the enum's class for. */
+function defineEnumMap(cls: ClassInfo, classClass: ClassInfo): void {
+  // Of the constructors every map has, an EnumMap keeps only the one copying another map.
+  cls.constructors = cls.constructors.filter((constructor) => constructor.parameterTypes[0]?.kind === 'class');
+  const [key] = cls.typeParameters;
+  addConstructor(cls, [classType(classClass, { kind: 'typeVar', variable: key })], (_, receiver) =>
+    createStore(receiver)
+  );
+}
+
+/** `EnumSet`, a set of an enum's constants in their order, which only its static methods create. */
+function defineEnumSet(context: Context, cls: ClassInfo, collectionClass: ClassInfo): void {
+  cls.constructors = [];
+  const classClass = context.registry.classes.get('Class') as ClassInfo;
+  const create = (frame: Frame, values: Iterable<Value>): JavaObject => createEnumSet(frame, cls, values);
+  const generic = (
+    name: string,
+    parameters: (e: JavaType) => JavaType[],
+    native: NativeMethod,
+    isVarargs = false
+  ): void => {
+    const variable: TypeVariable = { name: 'E', bounds: [context.objectType] };
+    const element: JavaType = { kind: 'typeVar', variable };
+    const method = addMethod(cls, name, parameters(element), classType(cls, element), true, native);
+    method.typeParameters = [variable];
+    method.isVarargs = isVarargs;
+  };
+  generic(
+    'noneOf',
+    (e) => [classType(classClass, e)],
+    (frame) => create(frame, [])
+  );
+  generic(
+    'allOf',
+    (e) => [classType(classClass, e)],
+    (frame, _, [type]) => create(frame, constantsOf(frame, type))
+  );
+  generic(
+    'of',
+    (e) => [e, { kind: 'array', element: e }],
+    (frame, _, [first, rest]) => create(frame, [first, ...(rest as JavaArray).values]),
+    true
+  );
+  generic(
+    'range',
+    (e) => [e, e],
+    (frame, _, [from, to]) => {
+      const constants = constantsOf(frame, classObjectOf((from as JavaObject).cls, classClass));
+      const [start, end] = [constants.indexOf(from), constants.indexOf(to)];
+      if (start > end)
+        throwBuiltin(
+          frame,
+          'IllegalArgumentException',
+          `${stringify(frame, from, context.objectType)} > ${stringify(frame, to, context.objectType)}`
+        );
+      return create(frame, constants.slice(start, end + 1));
+    }
+  );
+  generic(
+    'complementOf',
+    (e) => [classType(cls, e)],
+    (frame, _, [other]) => {
+      const present = keysOf(other);
+      const [first] = present;
+      if (first === undefined) throwBuiltin(frame, 'IllegalArgumentException', 'Collection is empty');
+      const all = constantsOf(frame, classObjectOf((first as JavaObject).cls, classClass));
+      return create(
+        frame,
+        all.filter((constant) => !present.includes(constant))
+      );
+    }
+  );
+  generic(
+    'copyOf',
+    (e) => [classType(collectionClass, e)],
+    (frame, _, [source]) => create(frame, itemsOf(frame, source))
+  );
+}
+
+function createEnumSet(frame: Frame, cls: ClassInfo, values: Iterable<Value>): JavaObject {
+  const set = frame.runtime.allocateObject(frame, cls);
+  createStore(set);
+  for (const value of values) {
+    if (value === undefined) throwBuiltin(frame, 'NullPointerException');
+    putEntry(frame, set, value, true);
+  }
+  return set;
+}
+
+/** The constants of the enum whose `Class` object is `type`, in their order. */
+function constantsOf(frame: Frame, type: Value): Value[] {
+  const enumClass = (type as JavaObject | undefined)?.reflected;
+  if (!enumClass) return throwBuiltin(frame, 'NullPointerException');
+  const values = enumClass.methods.find((method) => method.name === 'values' && method.isStatic);
+  if (!values) return throwBuiltin(frame, 'ClassCastException', `${enumClass.binaryName} is not an enum class`);
+  return (frame.runtime.invoke(frame, values, undefined, [], undefined) as JavaArray).values;
 }
 
 /** `equals` and `hashCode` of a map, which compare and hash its entries as `AbstractMap` does. */
@@ -567,6 +678,9 @@ export const STORE_ORDERS: Record<string, HashStore['order']> = {
   LinkedHashSet: 'insertion',
   TreeMap: 'sorted',
   TreeSet: 'sorted',
+  // Enum constants compare by their ordinals, the order these iterate in.
+  EnumMap: 'sorted',
+  EnumSet: 'sorted',
 };
 
 /** Gives a new map or set its entries, which a sorted one compares with `comparator` or in natural order. */
