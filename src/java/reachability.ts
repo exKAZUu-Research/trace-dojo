@@ -6,7 +6,8 @@ export function canCompleteNormally(statement: Statement): boolean {
     case 'return':
     case 'throw':
     case 'break':
-    case 'continue': {
+    case 'continue':
+    case 'yield': {
       return false;
     }
     case 'block': {
@@ -83,7 +84,7 @@ export const booleanConstants = new WeakMap<Expression, boolean>();
  * Whether `statement` contains a `break` that exits it or a `continue` that continues it: unlabeled outside nested
  * loops (and, for `break`, nested switch statements), or naming `label`.
  */
-function containsJump(statement: Statement, kind: 'break' | 'continue', label?: string, depth = 0): boolean {
+export function containsJump(statement: Statement, kind: 'break' | 'continue', label?: string, depth = 0): boolean {
   const inside = (child: Statement, childDepth = depth): boolean => containsJump(child, kind, label, childDepth);
   switch (statement.kind) {
     case 'break':

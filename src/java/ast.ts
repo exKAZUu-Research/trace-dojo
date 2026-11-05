@@ -120,6 +120,7 @@ export type Statement =
   | ThrowStatement
   | TryStatement
   | LabeledStatement
+  | YieldStatement
   | EmptyStatement;
 
 export interface Block extends Span {
@@ -231,6 +232,12 @@ export interface LabeledStatement extends Span {
   body: Statement;
 }
 
+/** Gives the value of the enclosing switch expression; an arrow rule's expression body is one too. */
+export interface YieldStatement extends Span {
+  kind: 'yield';
+  value: Expression;
+}
+
 export interface EmptyStatement extends Span {
   kind: 'empty';
 }
@@ -250,6 +257,7 @@ export type Expression =
   | Conditional
   | Cast
   | InstanceOf
+  | SwitchExpression
   | ThisExpression;
 
 export type LiteralValue =
@@ -379,6 +387,20 @@ export interface InstanceOf extends Span {
   kind: 'instanceOf';
   value: Expression;
   type: TypeSyntax;
+  /** The pattern variable, as in `o instanceof String s`, which holds the value where the test is known true. */
+  binding: PatternBinding | undefined;
+}
+
+export interface PatternBinding extends Span {
+  name: string;
+  isFinal: boolean;
+}
+
+export interface SwitchExpression extends Span {
+  kind: 'switchExpression';
+  selector: Expression;
+  isArrowForm: boolean;
+  groups: SwitchGroup[];
 }
 
 export interface ThisExpression extends Span {

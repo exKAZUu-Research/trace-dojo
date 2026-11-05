@@ -1,5 +1,5 @@
 // code-gauge-allow-file fileNcss 453 -- The expression compiler keeps one method per expression kind together.
-import type { ArrayInitializer, BinaryOperator, Expression, Span } from './ast';
+import type { ArrayInitializer, BinaryOperator, Expression, PatternBinding, Span } from './ast';
 import {
   type Compiled,
   type CompiledValue,
@@ -8,8 +8,10 @@ import {
   type Eval,
   type MethodContext,
   type Reference,
+  type Scope,
 } from './compilerBase';
 import { binaryOperation, castOperation, conditionalType, unaryOperation } from './operators';
+import { bindingsWhen } from './patternBindings';
 import { booleanConstants } from './reachability';
 import { type Frame, throwBuiltin, UNASSIGNED } from './runtime';
 import {
@@ -24,6 +26,7 @@ import {
   isNumeric,
   isPrimitive,
   isReference,
+  isWidening,
   type JavaType,
   LONG,
   type MethodInfo,
@@ -34,6 +37,9 @@ import { defaultValue, JavaArray, JavaObject, toInt32, type Value } from './valu
 
 /** Type-checks expressions and compiles them into closures. */
 export abstract class ExpressionCompiler extends CompilerBase {
+  /** The local slots that pattern variables use. */
+  protected readonly bindingSlots = new WeakMap<PatternBinding, number>();
+
   protected compileCondition(context: MethodContext, expression: Expression): (frame: Frame) => boolean {
     const value = this.compileValue(context, expression);
     if (value.type.kind !== 'boolean') {
@@ -147,18 +153,77 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return this.compileCast(context, expression);
       }
       case 'instanceOf': {
-        const value = this.compileValue(context, expression.value);
-        const type = this.resolveType(expression.type);
-        if (type.kind !== 'class') this.error(expression.type, 'instanceof ではクラス型しか使えません。');
-        if (!isReference(value.type) || !isCastable(value.type, type, this.builtins.objectClass)) {
-          this.error(expression, `${typeName(value.type)} 型の値は ${typeName(type)} 型になりえません。`);
-        }
-        return {
-          kind: 'value',
-          type: BOOLEAN,
-          run: (frame) => frame.runtime.isInstance(value.run(frame), type.cls),
-        };
+        return this.compileInstanceOf(context, expression);
       }
+      case 'switchExpression': {
+        return this.compileSwitchExpression(context, expression);
+      }
+    }
+  }
+
+  protected abstract compileSwitchExpression(
+    context: MethodContext,
+    expression: Extract<Expression, { kind: 'switchExpression' }>
+  ): Compiled;
+
+  protected compileInstanceOf(
+    context: MethodContext,
+    expression: Extract<Expression, { kind: 'instanceOf' }>
+  ): Compiled {
+    const value = this.compileValue(context, expression.value);
+    const type = this.resolveType(expression.type);
+    if (type.kind !== 'class' && type.kind !== 'array') {
+      this.error(expression.type, 'instanceof ではクラス型か配列型しか使えません。');
+    }
+    if (!isReference(value.type) || !isCastable(value.type, type, this.builtins.objectClass)) {
+      this.error(expression, `${typeName(value.type)} 型の値は ${typeName(type)} 型になりえません。`);
+    }
+    const test = (frame: Frame, tested: Value): boolean =>
+      type.kind === 'class'
+        ? frame.runtime.isInstance(tested, type.cls)
+        : tested instanceof JavaArray &&
+          isWidening({ kind: 'array', element: tested.elementType }, type, this.builtins.objectClass);
+    const { binding } = expression;
+    if (!binding) return { kind: 'value', type: BOOLEAN, run: (frame) => test(frame, value.run(frame)) };
+    const slot = context.locals.length;
+    context.locals.push({ name: binding.name, type });
+    context.patternSlots.push(slot);
+    this.bindingSlots.set(binding, slot);
+    return {
+      kind: 'value',
+      type: BOOLEAN,
+      run: (frame) => {
+        const tested = value.run(frame);
+        if (!test(frame, tested)) return false;
+        frame.locals[slot] = tested;
+        return true;
+      },
+    };
+  }
+
+  /** Compiles code in a scope where the pattern variables `bindings` are in scope. */
+  protected withBindings<T>(context: MethodContext, bindings: readonly PatternBinding[], compile: () => T): T {
+    if (bindings.length === 0) return compile();
+    context.scopes.push({ names: new Map(), slots: [] });
+    try {
+      this.introduceBindings(context, bindings);
+      return compile();
+    } finally {
+      context.scopes.pop();
+    }
+  }
+
+  /** Brings pattern variables into the innermost scope, where they stay until it ends. */
+  protected introduceBindings(context: MethodContext, bindings: readonly PatternBinding[]): void {
+    const scope = context.scopes.at(-1) as Scope;
+    for (const binding of bindings) {
+      if (this.findLocal(context, binding.name) !== undefined) {
+        this.error(binding, `変数 ${binding.name} はすでに定義されています。`);
+      }
+      const slot = this.bindingSlots.get(binding) as number;
+      scope.names.set(binding.name, slot);
+      scope.slots.push(slot);
+      context.introducedPatternSlots.add(slot);
     }
   }
 
@@ -526,7 +591,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   protected compileBinary(context: MethodContext, expression: Extract<Expression, { kind: 'binary' }>): Compiled {
     const left = this.compileValue(context, expression.left);
-    const right = this.compileValue(context, expression.right);
+    const { operator: binaryOperator } = expression;
+    // The right operand of && sees the pattern variables of a true left operand, and that of || of a false one.
+    const rightBindings =
+      binaryOperator === '&&' || binaryOperator === '||' ? bindingsWhen(expression.left, binaryOperator === '&&') : [];
+    const right = this.withBindings(context, rightBindings, () => this.compileValue(context, expression.right));
     const operation = this.binaryOperation(expression, expression.operator, left.type, right.type);
     if (expression.operator === '&&' || expression.operator === '||') {
       return shortCircuit(expression.operator, left, right);
@@ -582,8 +651,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
     expression: Extract<Expression, { kind: 'conditional' }>
   ): Compiled {
     const condition = this.compileCondition(context, expression.condition);
-    const consequence = this.compileValue(context, expression.consequence);
-    const alternative = this.compileValue(context, expression.alternative);
+    const consequence = this.withBindings(context, bindingsWhen(expression.condition, true), () =>
+      this.compileValue(context, expression.consequence)
+    );
+    const alternative = this.withBindings(context, bindingsWhen(expression.condition, false), () =>
+      this.compileValue(context, expression.alternative)
+    );
     const type = this.conditionalType(expression, consequence, alternative);
     // A constant branch may narrow to the other branch's type, as an assignment would; a reference type is a common
     // supertype of both branches.

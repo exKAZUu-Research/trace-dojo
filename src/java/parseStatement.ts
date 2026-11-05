@@ -87,7 +87,8 @@ const statementConverters: Record<string, (node: Node) => Statement> = {
   }),
   for_statement: convertFor,
   enhanced_for_statement: convertForEach,
-  switch_expression: convertSwitch,
+  switch_expression: (node) => ({ kind: 'switch', ...convertSwitchParts(node, false), ...span(node) }),
+  yield_statement: (node) => ({ kind: 'yield', value: convertExpression(namedChildren(node)[0]), ...span(node) }),
   break_statement: convertJump,
   continue_statement: convertJump,
   return_statement: (node) => {
@@ -163,24 +164,32 @@ function convertForEach(node: Node): Statement {
   };
 }
 
-function convertSwitch(node: Node): Statement {
+/**
+ * Converts the parts that switch statements and switch expressions share.
+ *
+ * @param isExpression Whether the switch is an expression, where an arrow rule's expression gives its value.
+ */
+export function convertSwitchParts(
+  node: Node,
+  isExpression: boolean
+): { selector: Expression; isArrowForm: boolean; groups: SwitchGroup[] } {
   const groupNodes = namedChildren(field(node, 'body'));
-  const groups = groupNodes.map((groupNode) => convertSwitchGroup(groupNode));
   return {
-    kind: 'switch',
     selector: convertCondition(field(node, 'condition')),
     isArrowForm: groupNodes.some((groupNode) => groupNode.type === 'switch_rule'),
-    groups,
-    ...span(node),
+    groups: groupNodes.map((groupNode) => convertSwitchGroup(groupNode, isExpression)),
   };
 }
 
-function convertSwitchGroup(groupNode: Node): SwitchGroup {
+function convertSwitchGroup(groupNode: Node, isExpression: boolean): SwitchGroup {
   const labels: (Expression | undefined)[] = [];
   const statements: Statement[] = [];
+  const isRule = groupNode.type === 'switch_rule';
   for (const child of statementNodes(groupNode)) {
     if (child.type === 'switch_label') labels.push(...convertSwitchLabel(child));
-    else statements.push(convertStatement(child));
+    else if (isRule && isExpression && child.type === 'expression_statement') {
+      statements.push({ kind: 'yield', value: convertExpression(namedChildren(child)[0]), ...span(child) });
+    } else statements.push(convertStatement(child));
   }
   return { labels, statements, ...span(groupNode) };
 }

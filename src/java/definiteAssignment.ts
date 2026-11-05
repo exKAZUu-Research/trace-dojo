@@ -15,6 +15,7 @@ import type {
   Parameter,
   Span,
   Statement,
+  SwitchExpression,
   SwitchStatement,
   TryStatement,
   WhileStatement,
@@ -123,6 +124,8 @@ class DefiniteAssignmentChecker {
   /** The states at `return` statements, where a constructor ends too. */
   readonly returns: State[] = [];
   private readonly targets: JumpTarget[] = [];
+  /** The states at the yields of the switch expressions being analyzed, innermost last. */
+  private readonly yields: State[][] = [];
   private readonly loops: EnclosingLoop[] = [];
   /** The sets collecting assignments for the statements being analyzed, innermost last. */
   private readonly writeLogs: Set<number>[] = [];
@@ -212,10 +215,33 @@ class DefiniteAssignmentChecker {
       case 'labeled': {
         return this.labeledStatement(statement, state);
       }
+      case 'yield': {
+        this.yields.at(-1)?.push(this.expression(statement.value, state));
+        return UNREACHABLE;
+      }
       case 'empty': {
         return state;
       }
     }
+  }
+
+  /** A switch expression's value comes from its yields, which its groups reach as a switch statement's would. */
+  private switchExpression(expression: SwitchExpression, state: State): State {
+    const afterSelector = this.expression(expression.selector, state);
+    const yields: State[] = [];
+    this.yields.push(yields);
+    try {
+      this.scoped(() => {
+        let fallthrough = UNREACHABLE;
+        for (const group of expression.groups) {
+          const entry = expression.isArrowForm ? afterSelector : join(afterSelector, fallthrough);
+          fallthrough = this.statements(group.statements, entry);
+        }
+      });
+    } finally {
+      this.yields.pop();
+    }
+    return join(...yields);
   }
 
   private localDeclaration(statement: LocalVariableDeclaration, state: State): State {
@@ -467,6 +493,9 @@ class DefiniteAssignmentChecker {
       case 'cast':
       case 'instanceOf': {
         return this.expression(expression.value, state);
+      }
+      case 'switchExpression': {
+        return this.switchExpression(expression, state);
       }
       case 'fieldAccess': {
         const field = this.thisField(expression);

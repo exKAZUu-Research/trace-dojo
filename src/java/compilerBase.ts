@@ -30,7 +30,7 @@ export interface CompileOptions {
 export type Eval = (frame: Frame) => Value;
 
 /** A statement either completes normally (`undefined`) or abruptly with one of these. */
-export type Completion = BreakCompletion | ContinueCompletion | ReturnCompletion;
+export type Completion = BreakCompletion | ContinueCompletion | ReturnCompletion | YieldCompletion;
 export interface BreakCompletion {
   kind: 'break';
   label: string | undefined;
@@ -41,6 +41,10 @@ export interface ContinueCompletion {
 }
 export interface ReturnCompletion {
   kind: 'return';
+  value: Value;
+}
+export interface YieldCompletion {
+  kind: 'yield';
   value: Value;
 }
 export type Exec = (frame: Frame) => Completion | undefined;
@@ -88,12 +92,26 @@ export interface MethodContext {
   initializes: 'instance' | 'static' | undefined;
   /** Whether this code is an initializer block, where `return` is not allowed. */
   isInitializerBlock: boolean;
+  /** Whether this code is in a switch expression, which `return` cannot leave. */
+  isInSwitchExpression: boolean;
   /** The exceptions the method declares in its `throws` clause. */
   thrownTypes: readonly ClassInfo[];
   /** The try statements whose try block encloses the code being compiled, innermost last. */
   tries: EnclosingTry[];
   /** The checked exceptions that rethrowing each catch parameter throws: those its try block throws. */
   rethrownTypes: Map<number, ClassInfo[]>;
+  /** The switch expressions whose bodies enclose the code being compiled, innermost last. */
+  switchExpressions: SwitchExpressionTarget[];
+  /** The slots of the pattern variables declared so far. */
+  patternSlots: number[];
+  /** The pattern variables that a statement introduced into its enclosing block. */
+  introducedPatternSlots: Set<number>;
+}
+
+/** The values a switch expression's yields give, which are converted to its type once all are known. */
+export interface SwitchExpressionTarget {
+  values: { value: CompiledValue; span: Span }[];
+  converters: Eval[];
 }
 
 export interface EnclosingTry {
@@ -223,9 +241,13 @@ export abstract class CompilerBase {
       switchDepth: 0,
       initializes: undefined,
       isInitializerBlock: false,
+      isInSwitchExpression: false,
       thrownTypes,
       tries: [],
       rethrownTypes: new Map(),
+      switchExpressions: [],
+      patternSlots: [],
+      introducedPatternSlots: new Set(),
     };
   }
 

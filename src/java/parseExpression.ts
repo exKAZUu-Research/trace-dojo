@@ -3,6 +3,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 import { CompileError } from '../interpreter/diagnostics';
 import type { ArrayInitializer, AssignmentOperator, BinaryOperator, Expression, LiteralValue } from './ast';
 import { convertType, countDimensions, field, namedChildren, span, unsupported } from './parseNodes';
+import { convertSwitchParts } from './parseStatement';
 import { charCodeOf } from './values';
 
 export function convertExpression(node: Node): Expression {
@@ -81,7 +82,7 @@ const expressionConverters: Record<string, (node: Node) => Expression> = {
   instanceof_expression: convertInstanceOf,
   lambda_expression: (node) => unsupported(node, 'ラムダ式'),
   method_reference: (node) => unsupported(node, 'メソッド参照'),
-  switch_expression: (node) => unsupported(node, 'switch 式'),
+  switch_expression: (node) => ({ kind: 'switchExpression', ...convertSwitchParts(node, true), ...span(node) }),
   class_literal: (node) => unsupported(node, 'クラスリテラル'),
 };
 
@@ -120,12 +121,27 @@ function convertCharacterLiteral(node: Node): Expression {
 }
 
 function convertStringLiteral(node: Node): Expression {
-  if (node.text.startsWith('"""')) unsupported(node, 'テキストブロック');
-  return {
-    kind: 'literal',
-    literal: { type: 'string', value: decodeEscapes(node.text.slice(1, -1), node) },
-    ...span(node),
-  };
+  const value = node.text.startsWith('"""')
+    ? decodeEscapes(stripIndentation(node.text.slice(3, -3)), node)
+    : decodeEscapes(node.text.slice(1, -1), node);
+  return { kind: 'literal', literal: { type: 'string', value }, ...span(node) };
+}
+
+/**
+ * Removes a text block's incidental indentation as `String.stripIndent` does: the content starts after the line break
+ * that follows the opening quotes, and the closing quotes on their own line count toward the common indentation.
+ */
+function stripIndentation(content: string): string {
+  const lines = content.replace(/^[ \t\f]*\r?\n/, '').split(/\r\n|\r|\n/);
+  const last = lines.at(-1) ?? '';
+  const significant = lines.filter((line, index) => line.trim() !== '' || index === lines.length - 1);
+  const indentation = Math.min(...significant.map((line) => line.length - line.trimStart().length));
+  const stripped = lines.map((line, index) =>
+    line.trim() === '' && index !== lines.length - 1 ? '' : line.slice(indentation).replace(/[ \t\f]+$/, '')
+  );
+  // Closing quotes on their own line end the content with a line break, which the split leaves as an empty last line.
+  if (last.trim() === '') stripped[stripped.length - 1] = '';
+  return stripped.join('\n');
 }
 
 function convertFieldAccess(node: Node): Expression {
@@ -216,11 +232,15 @@ function convertCast(node: Node): Expression {
 }
 
 function convertInstanceOf(node: Node): Expression {
-  if (node.childForFieldName('name') || node.childForFieldName('pattern')) unsupported(node, 'パターンマッチング');
+  if (node.childForFieldName('pattern')) unsupported(node, 'レコードのパターン');
+  const name = node.childForFieldName('name');
   return {
     kind: 'instanceOf',
     value: convertExpression(field(node, 'left')),
     type: convertType(field(node, 'right')),
+    binding: name
+      ? { name: name.text, isFinal: node.children.some((child) => child?.type === 'final'), ...span(name) }
+      : undefined,
     ...span(node),
   };
 }
@@ -246,6 +266,8 @@ function parseIntegerLiteral(node: Node): LiteralValue {
 }
 
 const simpleEscapes: Record<string, string> = {
+  // A backslash before a line break joins the lines of a text block.
+  '\n': '',
   b: '\b',
   s: ' ',
   t: '\t',

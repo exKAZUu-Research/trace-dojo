@@ -8,10 +8,12 @@ import type {
   LocalVariableDeclaration,
   Span,
   Statement,
+  SwitchGroup,
   VariableDeclarator,
 } from './ast';
 import {
   type BreakCompletion,
+  type Compiled,
   type CompiledValue,
   type Completion,
   type ContinueCompletion,
@@ -21,13 +23,15 @@ import {
   type MethodContext,
   type ReturnCompletion,
   type Scope,
+  type SwitchExpressionTarget,
 } from './compilerBase';
 import { assignedNames } from './definiteAssignment';
 import { ExpressionCompiler } from './expressionCompiler';
-import { canCompleteNormally } from './reachability';
+import { bindingsWhen } from './patternBindings';
+import { canCompleteNormally, containsJump } from './reachability';
 import { type Frame, JavaThrow, throwBuiltin, UNASSIGNED } from './runtime';
 import { isObjectCreation, onlyCalls } from './stepRules';
-import { type ClassInfo, isPrimitive, isSubclass, type JavaType, typeName } from './types';
+import { type ClassInfo, isPrimitive, isReference, isSubclass, type JavaType, sameType, typeName } from './types';
 import { JavaArray, JavaObject, JavaString, type Value } from './values';
 
 const BREAK: BreakCompletion = { kind: 'break', label: undefined };
@@ -99,10 +103,25 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   protected compileStatement(context: MethodContext, statement: Statement): Exec {
     if (!['labeled', 'while', 'do', 'for', 'forEach'].includes(statement.kind)) context.loopLabels = [];
+    const firstPattern = context.patternSlots.length;
     const exec = this.compileStatementBody(context, statement);
+    // Pattern variables go out of scope with the statement, unless it introduced them into the enclosing block.
+    const patternSlots = context.patternSlots
+      .slice(firstPattern)
+      .filter((slot) => !context.introducedPatternSlots.has(slot));
+    if (patternSlots.length === 0) {
+      return (frame) => {
+        frame.runtime.spend();
+        return exec(frame);
+      };
+    }
     return (frame) => {
       frame.runtime.spend();
-      return exec(frame);
+      try {
+        return exec(frame);
+      } finally {
+        for (const slot of patternSlots) frame.locals[slot] = UNASSIGNED;
+      }
     };
   }
 
@@ -152,6 +171,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       case 'labeled': {
         return this.compileLabeled(context, statement);
       }
+      case 'yield': {
+        return this.compileYield(context, statement);
+      }
       case 'empty': {
         return () => {};
       }
@@ -160,23 +182,151 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   protected compileIf(context: MethodContext, statement: Extract<Statement, { kind: 'if' }>): Exec {
     const condition = this.compileCondition(context, statement.condition);
-    const consequence = this.withScope(context, () => this.compileStatement(context, statement.consequence));
+    const whenTrue = bindingsWhen(statement.condition, true);
+    const whenFalse = bindingsWhen(statement.condition, false);
+    const consequence = this.withScope(context, () =>
+      this.withBindings(context, whenTrue, () => this.compileStatement(context, statement.consequence))
+    );
     const { alternative } = statement;
     const otherwise = alternative
-      ? this.withScope(context, () => this.compileStatement(context, alternative))
+      ? this.withScope(context, () =>
+          this.withBindings(context, whenFalse, () => this.compileStatement(context, alternative))
+        )
       : undefined;
+    // A branch that cannot complete normally leaves the other branch's pattern variables in scope after the if.
+    if (!canCompleteNormally(statement.consequence)) this.introduceBindings(context, whenFalse);
+    if (alternative && !canCompleteNormally(alternative)) this.introduceBindings(context, whenTrue);
     return (frame) => (condition(frame) ? consequence(frame) : otherwise?.(frame));
+  }
+
+  /** A loop that no break leaves ends only when its condition is false, so that case's bindings stay in scope. */
+  protected introduceLoopExitBindings(
+    context: MethodContext,
+    statement: Extract<Statement, { kind: 'while' | 'do' | 'for' }>,
+    condition: Expression,
+    labels: readonly string[]
+  ): void {
+    const breaks =
+      containsJump(statement.body, 'break') || labels.some((label) => containsJump(statement.body, 'break', label));
+    if (!breaks) this.introduceBindings(context, bindingsWhen(condition, false));
+  }
+
+  protected compileYield(context: MethodContext, statement: Extract<Statement, { kind: 'yield' }>): Exec {
+    const target = context.switchExpressions.at(-1);
+    if (!target) return this.error(statement, 'yield 文は switch 式の中にしか書けません。');
+    const value = this.compileValue(context, statement.value);
+    const index = target.values.push({ value, span: statement.value }) - 1;
+    return (frame) => ({ kind: 'yield', value: target.converters[index](frame) });
+  }
+
+  protected compileSwitchExpression(
+    context: MethodContext,
+    expression: Extract<Expression, { kind: 'switchExpression' }>
+  ): Compiled {
+    const selector = this.compileSwitchSelector(context, expression);
+    const target: SwitchExpressionTarget = { values: [], converters: [] };
+    // Jumps cannot leave a switch expression, which completes only with a value or an exception.
+    const outer = { ...context };
+    Object.assign(context, { labels: [], loopLabels: [], continueLabels: [], loopDepth: 0, switchDepth: 0 });
+    context.isInSwitchExpression = true;
+    context.switchExpressions.push(target);
+    let groups: { groups: Exec[]; slots: number[] };
+    try {
+      groups = this.compileSwitchBody(context, expression);
+    } finally {
+      context.switchExpressions.pop();
+      Object.assign(context, {
+        labels: outer.labels,
+        loopLabels: outer.loopLabels,
+        continueLabels: outer.continueLabels,
+        loopDepth: outer.loopDepth,
+        switchDepth: outer.switchDepth,
+        isInSwitchExpression: outer.isInSwitchExpression,
+      });
+    }
+    this.checkSwitchExpressionBody(expression, selector.type);
+    if (target.values.length === 0) this.error(expression, 'switch 式には値を返す case が必要です。');
+    const type = this.switchExpressionType(expression, target.values);
+    for (const { value, span } of target.values) {
+      target.converters.push(isReference(type) ? value.run : this.convert(value, type, 'assignment', span).run);
+    }
+    const runFrom = this.compileSwitchRunner(expression, groups.groups, groups.slots);
+    return {
+      kind: 'value',
+      type,
+      run: (frame) => {
+        const start = selector.run(frame);
+        const completion = start === -1 ? undefined : runFrom(frame, start);
+        if (completion?.kind !== 'yield') throw new Error('A switch expression completed without a value');
+        return completion.value;
+      },
+    };
+  }
+
+  /** Rejects a switch expression that may complete without a value, as an incomplete set of cases would. */
+  protected checkSwitchExpressionBody(
+    expression: Extract<Expression, { kind: 'switchExpression' }>,
+    selectorType: JavaType
+  ): void {
+    const hasDefault = expression.groups.some((group) => group.labels.includes(undefined));
+    const enumClass = selectorType.kind === 'class' && selectorType.cls.kind === 'enum' ? selectorType.cls : undefined;
+    const coversEnum =
+      enumClass !== undefined &&
+      enumClass.staticFields
+        .filter((field) => field.enumConstant)
+        .every((field) =>
+          expression.groups.some((group) =>
+            group.labels.some((label) =>
+              label?.kind === 'name'
+                ? label.name === field.name
+                : label?.kind === 'fieldAccess' && label.name === field.name
+            )
+          )
+        );
+    if (!hasDefault && !coversEnum)
+      this.error(expression, 'switch 式がすべての場合を網羅していません。default を書いてください。');
+    const groupsEnding = expression.isArrowForm ? expression.groups : expression.groups.slice(-1);
+    for (const group of groupsEnding) {
+      if (group.statements.every((statement) => canCompleteNormally(statement))) {
+        this.error(group, 'switch 式の case の処理が、値を返さずに終わっています。yield で値を返してください。');
+      }
+    }
+  }
+
+  /** The type of a switch expression, which joins the types of its results as a conditional joins two. */
+  protected switchExpressionType(span: Span, values: readonly { value: CompiledValue }[]): JavaType {
+    let result = values[0].value;
+    for (const { value } of values.slice(1)) {
+      const type = this.conditionalType(span, result, value);
+      result = {
+        kind: 'value',
+        type,
+        run: result.run,
+        constant:
+          result.constant !== undefined && value.constant !== undefined && sameType(type, result.type)
+            ? result.constant
+            : undefined,
+      };
+    }
+    return result.type;
   }
 
   protected compileWhile(context: MethodContext, statement: Extract<Statement, { kind: 'while' | 'do' }>): Exec {
     const labels = this.takeLabels(context);
-    const condition = this.compileCondition(context, statement.condition);
-    const body = this.compileLoopBody(context, statement.body, labels);
     const isDo = statement.kind === 'do';
+    // A do statement's body runs before its condition, so only a while statement's body sees the condition's bindings.
+    const body = isDo ? this.compileLoopBody(context, statement.body, labels) : undefined;
+    const condition = this.compileCondition(context, statement.condition);
+    const loopBody =
+      body ??
+      this.withBindings(context, bindingsWhen(statement.condition, true), () =>
+        this.compileLoopBody(context, statement.body, labels)
+      );
+    this.introduceLoopExitBindings(context, statement, statement.condition, labels);
     return (frame) => {
       if (!isDo && !condition(frame)) return;
       for (;;) {
-        const completion = body(frame);
+        const completion = loopBody(frame);
         if (completion) {
           const result = loopCompletion(completion, labels);
           if (result !== 'continue') return result;
@@ -326,6 +476,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   protected compileReturn(context: MethodContext, statement: Extract<Statement, { kind: 'return' }>): Exec {
+    if (context.isInSwitchExpression) this.error(statement, 'return 文は switch 式の中には書けません。');
     if (context.isInitializerBlock) this.error(statement, 'return 文は初期化ブロックの中には書けません。');
     if (!statement.value) {
       if (context.returnType.kind !== 'void') this.error(statement, 'return 文に値が必要です。');
@@ -345,8 +496,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   protected compileFor(context: MethodContext, statement: Extract<Statement, { kind: 'for' }>): Exec {
     const labels = this.takeLabels(context);
     const { init, update } = this.compileForHeader(context, statement);
-    const condition = statement.condition ? this.compileCondition(context, statement.condition) : () => true;
-    const body = this.compileLoopBody(context, statement.body, labels);
+    const { condition: conditionSyntax } = statement;
+    const condition = conditionSyntax ? this.compileCondition(context, conditionSyntax) : () => true;
+    const body = this.withBindings(context, conditionSyntax ? bindingsWhen(conditionSyntax, true) : [], () =>
+      this.compileLoopBody(context, statement.body, labels)
+    );
+    if (conditionSyntax) this.introduceLoopExitBindings(context, statement, conditionSyntax, labels);
     return (frame) => {
       init(frame);
       while (condition(frame)) {
@@ -435,33 +590,54 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   protected compileSwitch(context: MethodContext, statement: Extract<Statement, { kind: 'switch' }>): Exec {
-    const selector = this.compileValue(context, statement.selector);
-    const isString = selector.type.kind === 'class' && selector.type.cls === this.builtins.stringClass;
-    const isEnum = selector.type.kind === 'class' && selector.type.cls.kind === 'enum';
-    if (!isString && !isEnum && !['byte', 'short', 'char', 'int'].includes(selector.type.kind)) {
-      this.error(statement.selector, `switch 文では ${typeName(selector.type)} 型の値を使えません。`);
+    const selector = this.compileSwitchSelector(context, statement);
+    context.switchDepth++;
+    let runFrom: (frame: Frame, start: number) => Completion | undefined;
+    try {
+      const { groups, slots } = this.compileSwitchBody(context, statement);
+      runFrom = this.compileSwitchRunner(statement, groups, slots);
+    } finally {
+      context.switchDepth--;
     }
-    const { labelValues, defaultIndex } = this.compileSwitchLabels(context, statement, selector.type);
-    const runFrom = this.compileSwitchGroups(context, statement);
-    const matches = (candidate: Value, value: Value): boolean =>
-      isString ? (candidate as JavaString).value === (value as JavaString).value : candidate === value;
     return (frame) => {
-      const selected = selector.run(frame);
-      // Enum labels hold the ordinals of their constants.
-      const value = isEnum && selected instanceof JavaObject ? selected.enumConstant?.ordinal : selected;
-      if (value === undefined) throwBuiltin(frame, 'NullPointerException');
-      const matched = labelValues.findIndex((values) => values.some((candidate) => matches(candidate, value)));
-      const start = matched === -1 ? defaultIndex : matched;
+      const start = selector.run(frame);
       if (start === -1) return;
       const completion = runFrom(frame, start);
       return completion?.kind === 'break' && completion.label === undefined ? undefined : completion;
     };
   }
 
+  /** Compiles a switch's selector and labels into the index of the group where execution starts, or -1. */
+  protected compileSwitchSelector(
+    context: MethodContext,
+    statement: { selector: Expression; groups: SwitchGroup[] }
+  ): { type: JavaType; run: (frame: Frame) => number } {
+    const selector = this.compileValue(context, statement.selector);
+    const isString = selector.type.kind === 'class' && selector.type.cls === this.builtins.stringClass;
+    const isEnum = selector.type.kind === 'class' && selector.type.cls.kind === 'enum';
+    if (!isString && !isEnum && !['byte', 'short', 'char', 'int'].includes(selector.type.kind)) {
+      this.error(statement.selector, `switch では ${typeName(selector.type)} 型の値を使えません。`);
+    }
+    const { labelValues, defaultIndex } = this.compileSwitchLabels(context, statement, selector.type);
+    const matches = (candidate: Value, value: Value): boolean =>
+      isString ? (candidate as JavaString).value === (value as JavaString).value : candidate === value;
+    return {
+      type: selector.type,
+      run: (frame) => {
+        const selected = selector.run(frame);
+        if (selected === undefined) throwBuiltin(frame, 'NullPointerException');
+        // Enum labels hold the ordinals of their constants.
+        const value = isEnum && selected instanceof JavaObject ? selected.enumConstant?.ordinal : selected;
+        const matched = labelValues.findIndex((values) => values.some((candidate) => matches(candidate, value)));
+        return matched === -1 ? defaultIndex : matched;
+      },
+    };
+  }
+
   /** The constants of each group's case labels, and the index of the group holding `default` (or -1). */
   protected compileSwitchLabels(
     context: MethodContext,
-    statement: Extract<Statement, { kind: 'switch' }>,
+    statement: { groups: SwitchGroup[] },
     selectorType: JavaType
   ): { labelValues: Value[][]; defaultIndex: number } {
     const seen = new Set<unknown>();
@@ -511,31 +687,35 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return ordinal;
   }
 
-  /** Compiles the groups into a runner that starts at a group and falls through as the switch's form allows. */
-  protected compileSwitchGroups(
+  /** Compiles the groups of a switch, whose classic groups share one scope, returning that scope's slots. */
+  protected compileSwitchBody(
     context: MethodContext,
-    statement: Extract<Statement, { kind: 'switch' }>
-  ): (frame: Frame, start: number) => Completion | undefined {
-    context.switchDepth++;
-    let groups: Exec[];
-    let slots: number[] = [];
-    try {
-      if (statement.isArrowForm) {
-        groups = statement.groups.map((group) =>
-          this.withScope(context, () => this.compileStatements(context, group.statements))
-        );
-      } else {
-        // The groups of a classic switch share one scope, and execution falls through them in order.
-        context.scopes.push({ names: new Map(), slots: [] });
-        try {
-          groups = statement.groups.map((group) => this.compileStatements(context, group.statements));
-        } finally {
-          slots = (context.scopes.pop() as Scope).slots;
-        }
-      }
-    } finally {
-      context.switchDepth--;
+    statement: { isArrowForm: boolean; groups: SwitchGroup[] }
+  ): { groups: Exec[]; slots: number[] } {
+    if (statement.isArrowForm) {
+      const groups = statement.groups.map((group) =>
+        this.withScope(context, () => this.compileStatements(context, group.statements))
+      );
+      return { groups, slots: [] };
     }
+    const scope: Scope = { names: new Map(), slots: [] };
+    context.scopes.push(scope);
+    try {
+      return {
+        groups: statement.groups.map((group) => this.compileStatements(context, group.statements)),
+        slots: scope.slots,
+      };
+    } finally {
+      context.scopes.pop();
+    }
+  }
+
+  /** A runner that starts at a group and falls through the classic groups in order. */
+  protected compileSwitchRunner(
+    statement: { isArrowForm: boolean },
+    groups: Exec[],
+    slots: number[]
+  ): (frame: Frame, start: number) => Completion | undefined {
     const { isArrowForm } = statement;
     return (frame, start) => {
       try {
