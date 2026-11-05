@@ -281,26 +281,23 @@ function markReachable(roots: Value[]): { reached: Set<JavaObject | JavaArray>; 
     const value = pending.pop();
     if (!(value instanceof JavaObject || value instanceof JavaArray) || reached.has(value)) continue;
     reached.add(value);
-    const children = value instanceof JavaObject ? value.fields : value.values;
+    const children = value instanceof JavaObject ? referencesOf(value) : value.values;
     scanned += children.length;
     // Pushed one by one: spreading a large array into push() exceeds the engine's argument limit.
     for (const child of children) pushReference(pending, child);
-    if (value instanceof JavaObject) {
-      pushReference(pending, value.cause);
-      pushReference(pending, value.outer);
-      for (const suppressed of value.suppressed ?? []) pushReference(pending, suppressed);
-      for (const captured of value.capturedLocals ?? []) pushReference(pending, captured);
-      for (const captured of value.function?.captured ?? []) pushReference(pending, captured);
-      pushReference(pending, value.function?.outerThis);
-      for (const element of value.elements ?? []) pushReference(pending, element);
-      for (const entry of value.store?.entries ?? []) {
-        pushReference(pending, entry.key);
-        pushReference(pending, entry.value);
-      }
-      scanned += (value.elements?.length ?? 0) + (value.store?.entries.length ?? 0);
-    }
   }
   return { reached, scanned };
+}
+
+/** The values an object keeps alive: its fields and what builtin objects hold outside them. */
+function referencesOf(object: JavaObject): Value[] {
+  const references: Value[] = [...object.fields, object.cause, object.outer, object.function?.outerThis];
+  for (const values of [object.suppressed, object.capturedLocals, object.function?.captured, object.elements]) {
+    // Pushed one by one: spreading a large array into push() exceeds the engine's argument limit.
+    for (const value of values ?? []) references.push(value);
+  }
+  for (const entry of object.store?.entries ?? []) references.push(entry.key, entry.value);
+  return references;
 }
 
 function pushReference(pending: Value[], value: Value): void {

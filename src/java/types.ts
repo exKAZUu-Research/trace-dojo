@@ -427,24 +427,27 @@ export function isWidening(from: JavaType, to: JavaType, objectClass: ClassInfo)
       : isWidening(upperBound(from), to, objectClass);
   }
   if (to.kind !== 'class' && to.kind !== 'array') return false;
-  if (from.kind === 'class') {
-    if (to.kind !== 'class') return false;
-    if (to.cls === objectClass) return true;
-    const supertype = asSuper(from, to.cls);
-    if (!supertype) return false;
-    // Raw types convert to and from parameterized ones, as an unchecked conversion.
-    if (!supertype.args || !to.args) return true;
-    return (
-      supertype.args.length === to.args.length &&
-      to.args.every((arg, index) => containsTypeArgument(arg, (supertype.args as JavaType[])[index], objectClass))
-    );
-  }
+  if (from.kind === 'class') return to.kind === 'class' && isClassWidening(from, to, objectClass);
   if (from.kind === 'array') {
     if (to.kind === 'class') return to.cls === objectClass;
     if (isPrimitive(from.element) || isPrimitive(to.element)) return sameType(from.element, to.element);
     return isWidening(from.element, to.element, objectClass);
   }
   return false;
+}
+
+/** Whether a class type widens to another: to a supertype whose type arguments contain the ones `from` gives it. */
+function isClassWidening(from: ClassType, to: ClassType, objectClass: ClassInfo): boolean {
+  if (to.cls === objectClass) return true;
+  const supertype = asSuper(from, to.cls);
+  if (!supertype) return false;
+  const supertypeArgs = supertype.args;
+  // Raw types convert to and from parameterized ones, as an unchecked conversion.
+  if (!supertypeArgs || !to.args) return true;
+  return (
+    supertypeArgs.length === to.args.length &&
+    to.args.every((arg, index) => containsTypeArgument(arg, supertypeArgs[index], objectClass))
+  );
 }
 
 /** Whether a cast from `from` to `to` may succeed, as javac decides at compile time. */
