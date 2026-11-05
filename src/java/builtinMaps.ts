@@ -25,6 +25,8 @@ import { type Frame, throwBuiltin } from './runtime';
 import { BOOLEAN, type ClassInfo, createClass, INT, type JavaType, VOID } from './types';
 import { HashStore, JavaObject, toInt32, type Value } from './values';
 
+// code-gauge-allow functionCognitiveComplexity 17 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 51 -- One registration per builtin method, each a small native.
 export function defineSetClass(
   context: Context,
   name: string,
@@ -214,6 +216,8 @@ export function defineEntryNode(context: Context, entryClass: ClassInfo): ClassI
 
 export const nodeEntries = new WeakMap<JavaObject, { key: Value; value: Value }>();
 
+// code-gauge-allow functionCognitiveComplexity 19 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 51 -- One registration per builtin method, each a small native.
 export function defineMapMethods(
   cls: ClassInfo,
   name: string,
@@ -381,6 +385,7 @@ export function sortedKeys(receiver: Value): Value[] {
 }
 
 /** The navigation methods of `TreeMap` (on keys) and `TreeSet`: the first and last keys and the nearest ones. */
+// code-gauge-allow functionCognitiveComplexity 20 -- One registration per builtin method, each a small native.
 export function defineNavigation(cls: ClassInfo, key: JavaType, isMap: boolean): void {
   const suffix = isMap ? 'Key' : '';
   for (const [name, isFirst] of [

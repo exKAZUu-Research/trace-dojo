@@ -109,6 +109,7 @@ function defineFunctional(
   return { cls, variables };
 }
 
+// code-gauge-allow functionNcss 33 -- One registration per builtin method, each a small native.
 export function defineFunctions(
   registry: Registry,
   objectClass: ClassInfo,
@@ -168,6 +169,7 @@ export function callFunction(frame: Frame, iface: ClassInfo, target: Value, args
   return frame.runtime.invokeVirtual(frame, method.owner, method.name, target, args);
 }
 
+// code-gauge-allow functionNcss 37 -- One registration per builtin method, each a small native.
 function defineComparator(
   context: Context,
   functions: { fn: ClassInfo; toInt: ClassInfo; toDouble: ClassInfo },

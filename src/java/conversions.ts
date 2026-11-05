@@ -128,6 +128,8 @@ export function instantiateMethod(
 }
 
 /** Infers the types of `variables` that make an argument of `argType` fit a parameter of `parameterType`. */
+// code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of type, as inference walks parameter and argument types together.
+// code-gauge-allow functionNcss 31 -- One case per kind of type, as inference walks parameter and argument types together.
 export function infer(
   builtins: Builtins,
   parameterType: JavaType,
@@ -200,6 +202,7 @@ function inferFromReceiverHint(
  * Replaces type variables left `unresolved`: inside a wildcard's bound by their erasure, as a type argument by making
  * its class type raw, and standing alone by their erasure.
  */
+// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of type, as the replacement walks the type.
 export function rawify(
   type: JavaType,
   unresolved: readonly TypeVariable[],

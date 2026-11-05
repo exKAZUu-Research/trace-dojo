@@ -47,6 +47,7 @@ export interface Collections {
   next: MethodInfo;
 }
 
+// code-gauge-allow functionNcss 38 -- One registration per builtin method, each a small native.
 export function defineCollections(
   registry: Registry,
   objectClass: ClassInfo,
@@ -219,6 +220,7 @@ function declareListMethods(cls: ClassInfo, element: JavaType): void {
 }
 
 /** `ArrayList` and `LinkedList`, which differ only in performance, as far as these programs can tell. */
+// code-gauge-allow functionNcss 33 -- One registration per builtin method, each a small native.
 function defineArrayList(
   context: Context,
   name: string,
@@ -405,6 +407,7 @@ function isList(object: JavaObject): boolean {
 }
 
 /** The queue and stack methods of `LinkedList`, which learners use for breadth-first searches and stacks. */
+// code-gauge-allow functionCognitiveComplexity 24 -- One registration per builtin method, each a small native.
 function defineDequeMethods(cls: ClassInfo, element: JavaType): void {
   for (const [name, atEnd] of [
     ['addFirst', false],

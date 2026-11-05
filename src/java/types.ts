@@ -417,6 +417,7 @@ export function typeName(type: JavaType): string {
  * Whether a value of `from` converts to `to` by identity, primitive widening, or reference widening, the
  * conversions that method invocation allows without boxing.
  */
+// code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of type, following JLS 5.1.
 export function isWidening(from: JavaType, to: JavaType, objectClass: ClassInfo): boolean {
   if (sameType(from, to)) return true;
   if (isNumeric(from)) return isNumeric(to) && isNumericWidening(from.kind, to.kind);

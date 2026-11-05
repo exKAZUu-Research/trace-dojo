@@ -97,6 +97,7 @@ function addThis(variables: Variables, self: JavaObject): void {
 const NOT_SCALAR = Symbol('notScalar');
 type Scalar = TraceItemVariable[string];
 
+// code-gauge-allow functionNcss 32 -- One case per kind of type.
 function scalarOf(value: Value, type: JavaType): Scalar | typeof NOT_SCALAR {
   switch (type.kind) {
     case 'byte':

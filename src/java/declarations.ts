@@ -44,6 +44,7 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
     for (const declaration of unit.classes) this.registerClass(declaration, undefined);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- Each kind of class decides its implicit modifiers here.
   protected registerClass(declaration: ClassDeclaration, enclosing: ClassInfo | undefined): void {
     const { name, kind, modifiers } = declaration;
     const siblings = enclosing ? enclosing.memberTypes : this.classes;
@@ -489,6 +490,7 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
   }
 
   /** Checks a method against those it overrides in its supertypes, recording them in `method.overrides`. */
+  // code-gauge-allow functionCognitiveComplexity 22 -- Each check is one rule of JLS 8.4.8.
   protected checkOverride(cls: ClassInfo, method: MethodInfo, declaration: MethodDeclaration): void {
     const ancestors = [...superclassesOf(cls), ...superinterfacesOf(cls)];
     if (cls.kind === 'interface') ancestors.push(this.builtins.objectClass);

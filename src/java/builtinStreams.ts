@@ -89,6 +89,8 @@ function get(frame: Frame, receiver: Value): Value {
   return state.value;
 }
 
+// code-gauge-allow functionCognitiveComplexity 19 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 44 -- One registration per builtin method, each a small native.
 function defineOptionals(context: Context): Optionals {
   const { registry, objectType, stringType } = context;
   const optional = registry.define('Optional', context.objectClass, 'java.util');
@@ -190,6 +192,7 @@ interface CollectorFunctions {
 
 const collectors = new WeakMap<JavaObject, CollectorFunctions>();
 
+// code-gauge-allow functionNcss 32 -- One registration per builtin method, each a small native.
 function defineCollectors(context: Context): ClassInfo {
   const { registry, objectType, collections } = context;
   const collector = defineInterface(registry, 'Collector', 'java.util.stream');
@@ -471,6 +474,7 @@ function streamKind(
 }
 
 /** The operations that make a stream from another: filtering, limiting, skipping, deduplicating, and sorting. */
+// code-gauge-allow functionCognitiveComplexity 27 -- One registration per builtin method, each a small native.
 function defineIntermediateOperations(kind: StreamKind): void {
   const { cls, impl, isInt, self, predicate } = kind;
   op(cls, 'filter', [kind.predicateType], self, (frame, receiver, [test]) =>
@@ -579,6 +583,7 @@ function extremeOf(frame: Frame, kind: StreamKind, receiver: Value, order: Value
 }
 
 /** The operations only a `Stream` of objects has: mapping, sorting with a comparator, reducing, and collecting. */
+// code-gauge-allow functionNcss 31 -- One registration per builtin method, each a small native.
 function defineReferenceOperations(context: Context, types: StreamTypes, tType: JavaType, collector: ClassInfo): void {
   const { objectType, collections, fn } = context;
   const { stream, streamImpl, intStream, intStreamImpl } = types;
@@ -646,6 +651,8 @@ function* mapped(frame: Frame, items: Iterator<Value>, iface: ClassInfo, mapper:
   for (const value of iterate(items)) yield callFunction(frame, iface, mapper, [value]);
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 34 -- One registration per builtin method, each a small native.
 function defineIntStreamOperations(
   context: Context,
   types: StreamTypes,
@@ -703,6 +710,8 @@ function defineIntStreamOperations(
   });
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 39 -- One registration per builtin method, each a small native.
 function defineSources(context: Context, streams: StreamTypes): void {
   const { registry, objectType, collections } = context;
   const { stream, intStream, streamImpl, intStreamImpl } = streams;

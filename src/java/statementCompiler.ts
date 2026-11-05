@@ -236,6 +236,7 @@ export abstract class StatementCompiler extends InvocationCompiler {
     if (!breaks) this.introduceBindings(context, bindingsWhen(condition, false));
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- While and do statements share one loop, which differs only in where the condition runs.
   protected compileWhile(context: MethodContext, statement: Extract<Statement, { kind: 'while' | 'do' }>): Exec {
     const labels = this.takeLabels(context);
     const isDo = statement.kind === 'do';
@@ -477,6 +478,7 @@ export abstract class StatementCompiler extends InvocationCompiler {
     }
   }
 
+  // code-gauge-allow functionNcss 32 -- Arrays and Iterables share the loop variable binding and the body.
   protected compileForEach(context: MethodContext, statement: Extract<Statement, { kind: 'forEach' }>): Exec {
     const labels = this.takeLabels(context);
     const iterable = this.compileValue(context, statement.iterable);

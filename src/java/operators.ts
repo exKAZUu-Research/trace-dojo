@@ -318,6 +318,7 @@ function referenceCast(objectClass: ClassInfo, from: JavaType, to: JavaType): (f
 }
 
 /** The type of `condition ? a : b`, or `undefined` when the branches have no common type. */
+// code-gauge-allow functionCognitiveComplexity 17 -- One case per rule of JLS 15.25.
 export function conditionalType(
   objectClass: ClassInfo,
   a: JavaType,

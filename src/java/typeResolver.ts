@@ -145,6 +145,7 @@ export abstract class TypeResolver {
   protected readonly staticImports: { cls: ClassInfo; member: string | undefined }[] = [];
 
   /** Resolves the imports that name classes this environment has, leaving the others for their uses to report. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of import.
   protected resolveImports(imports: readonly ImportDeclaration[]): void {
     for (const declaration of imports) {
       const names =

@@ -242,6 +242,7 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
    * The type arguments the diamond `<>` stands for: those the constructor's arguments decide, then those the type the
    * value is assigned to decides. Any left undecided make the type raw, which converts to any parameterization.
    */
+  // code-gauge-allow functionCognitiveComplexity 18 -- The target type and the constructor arguments each infer type arguments in turn.
   protected inferDiamond(cls: ClassInfo, argTypes: JavaType[], targetType: JavaType | undefined): JavaType {
     const variables = cls.typeParameters;
     const bindings = new Map<TypeVariable, JavaType>();
@@ -268,6 +269,7 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
     return { kind: 'class', cls, args: variables.map((variable) => bindings.get(variable) as JavaType) };
   }
 
+  // code-gauge-allow functionNcss 32 -- Selecting, checking, and invoking a method share the compiled receiver and arguments.
   protected compileCall(context: MethodContext, expression: Extract<Expression, { kind: 'call' }>): Compiled {
     const targetType = this.takeTargetType();
     const args = expression.args.map((arg) => this.compileArgument(context, arg));

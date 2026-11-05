@@ -237,6 +237,7 @@ export abstract class LambdaCompiler extends PatternCompiler {
    * arguments or, failing that, an instance method on the first argument; `expression::method` calls it on the value;
    * `Type::new` creates an object or an array.
    */
+  // code-gauge-allow functionCognitiveComplexity 19 -- One case per form of method reference.
   protected expandMethodReference(
     context: MethodContext,
     reference: MethodReference,

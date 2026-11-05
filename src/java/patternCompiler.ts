@@ -191,6 +191,7 @@ export abstract class PatternCompiler extends TryCompiler {
   }
 
   /** Compiles one label of a pattern switch's group into the tests that select the group. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of case label.
   protected compileSwitchCase(
     context: MethodContext,
     state: PatternSwitchState,

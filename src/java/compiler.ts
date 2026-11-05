@@ -317,6 +317,8 @@ class Compiler extends DeclarationCompiler {
   }
 
   /** Declares and compiles a class written inside a method body, with the classes nested in it. */
+  // code-gauge-allow functionCognitiveComplexity 22 -- Registering, declaring, and compiling a local class and its nested classes share their state.
+  // code-gauge-allow functionNcss 41 -- Registering, declaring, and compiling a local class and its nested classes share their state.
   protected compileLocalClass(
     context: MethodContext,
     declaration: ClassDeclaration,

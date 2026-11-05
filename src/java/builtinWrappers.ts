@@ -177,6 +177,7 @@ function sameValue(a: Value, b: Value): boolean {
 }
 
 /** Compares as `Double.compare` does, ordering -0.0 before 0.0 and NaN after everything else. */
+// code-gauge-allow functionCognitiveComplexity 23 -- Java's order puts -0.0 before 0.0 and NaN last, which takes one branch per case.
 function compareValues(a: Value, b: Value): number {
   if (typeof a === 'boolean') return a === b ? 0 : a ? 1 : -1;
   if (typeof a === 'number' && typeof b === 'number' && (Number.isNaN(a) || Number.isNaN(b))) {
