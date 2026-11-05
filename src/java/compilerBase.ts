@@ -2,25 +2,24 @@ import { CompileError } from '../interpreter/diagnostics';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import type { Expression, Span, TypeSyntax } from './ast';
 import { getBuiltins } from './builtins';
+import { fitsIn } from './operators';
 import { type Frame } from './runtime';
 import {
-  BOOLEAN,
-  CHAR,
   type ClassInfo,
-  DOUBLE,
   type FieldInfo,
-  INT,
+  isNumeric,
   isPrimitive,
   isSubclass,
   isWidening,
   type JavaType,
   type LocalInfo,
   type MethodInfo,
+  type NumericKind,
   sameType,
   typeName,
   VOID,
 } from './types';
-import { type JavaString, type Value } from './values';
+import { convertNumber, type JavaString, type Value } from './values';
 
 export interface CompileOptions {
   /** Makes the statements that record steps report their rows to `Runtime.steps`. */
@@ -128,7 +127,7 @@ export abstract class CompilerBase {
   protected resolveType(syntax: TypeSyntax): JavaType {
     switch (syntax.kind) {
       case 'primitive': {
-        return { int: INT, double: DOUBLE, boolean: BOOLEAN, char: CHAR }[syntax.name];
+        return { kind: syntax.name };
       }
       case 'array': {
         return { kind: 'array', element: this.resolveType(syntax.element) };
@@ -234,17 +233,20 @@ export abstract class CompilerBase {
     span: Span
   ): CompiledValue {
     if (isWidening(value.type, to, this.builtins.objectClass)) {
-      return { kind: 'value', type: to, run: value.run, constant: value.constant };
+      return isNumeric(value.type) && isNumeric(to)
+        ? convertedNumber(value, value.type.kind, to)
+        : { ...value, type: to };
     }
+    // An assignment narrows a constant of type byte, short, char, or int that fits in byte, short, or char.
     if (
       context === 'assignment' &&
-      to.kind === 'char' &&
-      value.type.kind === 'int' &&
+      isNumeric(to) &&
+      isNumeric(value.type) &&
+      ['byte', 'short', 'char', 'int'].includes(value.type.kind) &&
       typeof value.constant === 'number' &&
-      value.constant >= 0 &&
-      value.constant <= 0xff_ff
+      fitsIn(value.constant, to.kind)
     ) {
-      return { kind: 'value', type: CHAR, run: value.run, constant: value.constant };
+      return constantValue(to, value.constant);
     }
     return this.error(span, `${typeName(value.type)} 型の値を ${typeName(to)} 型に変換できません。`);
   }
@@ -363,6 +365,18 @@ export abstract class CompilerBase {
     if (mostSpecific.length !== 1) return this.error(span, `${what} の呼び出しがあいまいです。`);
     return mostSpecific[0];
   }
+}
+
+/** Converts a numeric value to the kind `to` by a widening conversion, folding a constant. */
+function convertedNumber(value: CompiledValue, from: NumericKind, to: { kind: NumericKind }): CompiledValue {
+  if (from === to.kind) return { ...value, type: to };
+  const { run } = value;
+  return {
+    kind: 'value',
+    type: to,
+    run: (frame) => convertNumber(run(frame), from, to.kind),
+    constant: value.constant === undefined ? undefined : convertNumber(value.constant, from, to.kind),
+  };
 }
 
 export function constantValue(type: JavaType, value: Value): CompiledValue {

@@ -18,12 +18,14 @@ import {
   type ClassInfo,
   DOUBLE,
   type FieldInfo,
+  FLOAT,
   INT,
   isCastable,
   isNumeric,
   isPrimitive,
   isReference,
   type JavaType,
+  LONG,
   type MethodInfo,
   NULL,
   typeName,
@@ -167,6 +169,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
         if (literal.value > 2_147_483_647)
           this.error(expression, `整数 ${literal.value} が int 型の範囲を超えています。`);
         return constantValue(INT, literal.value);
+      }
+      case 'long': {
+        if (literal.value > 9_223_372_036_854_775_807n)
+          this.error(expression, `整数 ${literal.value} が long 型の範囲を超えています。`);
+        return constantValue(LONG, literal.value);
+      }
+      case 'float': {
+        return constantValue(FLOAT, literal.value);
       }
       case 'double': {
         return constantValue(DOUBLE, literal.value);
@@ -472,21 +482,19 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const { type, bind } = reference;
     if (!isNumeric(type))
       this.error(expression, `${typeName(type)} 型の変数には ${expression.operator} を使えません。`);
+    const { kind } = type;
     const delta = expression.operator === '++' ? 1 : -1;
-    const step =
-      type.kind === 'int'
-        ? (value: number) => toInt32(value + delta)
-        : type.kind === 'char'
-          ? (value: number) => (value + delta) & 0xff_ff
-          : (value: number) => value + delta;
+    const operation = this.binaryOperation(expression, expression.operator === '++' ? '+' : '-', type, INT);
+    const narrow = this.castOperation(operation.type, type, expression);
     const isPrefix = expression.isPrefix;
     return {
       kind: 'value',
       type,
       run: (frame) => {
         const target = bind(frame);
-        const before = target.get() as number;
-        const after = step(before);
+        const before = target.get();
+        const after =
+          kind === 'int' ? toInt32((before as number) + delta) : narrow(frame, operation.apply(frame, before, 1));
         target.set(after);
         return isPrefix ? after : before;
       },
@@ -544,14 +552,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   protected compileUnary(context: MethodContext, expression: Extract<Expression, { kind: 'unary' }>): Compiled {
     const { operand, operator } = expression;
-    // 2147483648 is a valid int literal only as the operand of unary minus.
-    if (
-      operator === '-' &&
-      operand.kind === 'literal' &&
-      operand.literal.type === 'int' &&
-      operand.literal.value === 2_147_483_648
-    ) {
-      return constantValue(INT, -2_147_483_648);
+    // 2147483648 and 9223372036854775808L are valid literals only as the operand of unary minus.
+    if (operator === '-' && operand.kind === 'literal') {
+      const { literal } = operand;
+      if (literal.type === 'int' && literal.value === 2_147_483_648) return constantValue(INT, -2_147_483_648);
+      if (literal.type === 'long' && literal.value === 2n ** 63n) return constantValue(LONG, -(2n ** 63n));
     }
     const value = this.compileValue(context, operand);
     const operation = unaryOperation(operator, value.type);
@@ -572,9 +577,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const condition = this.compileCondition(context, expression.condition);
     const consequence = this.compileValue(context, expression.consequence);
     const alternative = this.compileValue(context, expression.alternative);
-    const type = this.conditionalType(expression, consequence.type, alternative.type);
-    const whenTrue = this.convert(consequence, type, 'invocation', expression.consequence);
-    const whenFalse = this.convert(alternative, type, 'invocation', expression.alternative);
+    const type = this.conditionalType(expression, consequence, alternative);
+    // A constant branch may narrow to the other branch's type, as an assignment would.
+    const whenTrue = this.convert(consequence, type, 'assignment', expression.consequence);
+    const whenFalse = this.convert(alternative, type, 'assignment', expression.alternative);
     const constantCondition = booleanConstants.get(expression.condition);
     const isConstant =
       constantCondition !== undefined && whenTrue.constant !== undefined && whenFalse.constant !== undefined;
@@ -586,9 +592,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  protected conditionalType(span: Span, a: JavaType, b: JavaType): JavaType {
-    const type = conditionalType(this.builtins.objectClass, a, b);
-    if (!type) this.error(span, `条件演算子の 2 つの値の型 ${typeName(a)} と ${typeName(b)} が合いません。`);
+  protected conditionalType(span: Span, a: CompiledValue, b: CompiledValue): JavaType {
+    const type = conditionalType(this.builtins.objectClass, a.type, b.type, [a.constant, b.constant]);
+    if (!type) {
+      this.error(span, `条件演算子の 2 つの値の型 ${typeName(a.type)} と ${typeName(b.type)} が合いません。`);
+    }
     return type;
   }
 

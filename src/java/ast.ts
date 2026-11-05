@@ -6,7 +6,7 @@ export interface Span {
   end: number;
 }
 
-export type PrimitiveTypeName = 'int' | 'double' | 'boolean' | 'char';
+export type PrimitiveTypeName = 'byte' | 'short' | 'int' | 'long' | 'char' | 'float' | 'double' | 'boolean';
 
 export type TypeSyntax =
   | ({ kind: 'primitive'; name: PrimitiveTypeName } & Span)
@@ -236,6 +236,8 @@ export type Expression =
 
 export type LiteralValue =
   | { type: 'int'; value: number }
+  | { type: 'long'; value: bigint }
+  | { type: 'float'; value: number }
   | { type: 'double'; value: number }
   | { type: 'char'; value: number }
   | { type: 'boolean'; value: boolean }

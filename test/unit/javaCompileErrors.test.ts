@@ -1175,8 +1175,7 @@ test.each([
 });
 
 test.each([
-  ['long x = 0;', '型「long」は、この採点環境では使えません。'],
-  ['double r = Math.round(2.5);', 'この採点環境の Math には、メソッド round がありません。'],
+  ['double r = Math.hypot(3, 4);', 'この採点環境の Math には、メソッド hypot がありません。'],
   ['StringBuilder b = null;', 'この採点環境には、型 StringBuilder がありません。'],
   [
     'String s = String.valueOf(1, 2);',

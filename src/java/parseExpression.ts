@@ -90,10 +90,21 @@ function convertIntegerLiteral(node: Node): Expression {
 }
 
 function convertFloatingPointLiteral(node: Node): Expression {
-  if (/[fF]$/.test(node.text)) unsupported(node, 'float 型');
+  const text = node.text.replaceAll('_', '');
+  const isFloat = /[fF]$/.test(text);
+  const value = Number(text.replace(/[dDfF]$/, ''));
+  const rounded = isFloat ? Math.fround(value) : value;
+  if (!Number.isFinite(rounded) || (rounded === 0 && /[1-9]/.test(text.replace(/[eE].*$/, '')))) {
+    throw new CompileError([
+      {
+        row: node.startPosition.row,
+        message: `浮動小数点数「${node.text}」が ${isFloat ? 'float' : 'double'} 型の範囲を超えています。`,
+      },
+    ]);
+  }
   return {
     kind: 'literal',
-    literal: { type: 'double', value: Number(node.text.replaceAll('_', '').replace(/[dD]$/, '')) },
+    literal: isFloat ? { type: 'float', value: rounded } : { type: 'double', value },
     ...span(node),
   };
 }
@@ -215,20 +226,22 @@ function convertInstanceOf(node: Node): Expression {
 }
 
 function parseIntegerLiteral(node: Node): LiteralValue {
-  const text = node.text.replaceAll('_', '');
-  if (/[lL]$/.test(text)) unsupported(node, 'long 型');
+  const isLong = /[lL]$/.test(node.text);
+  const text = node.text.replaceAll('_', '').replace(/[lL]$/, '');
   const value = node.type === 'octal_integer_literal' ? BigInt(`0o${text.slice(1)}`) : BigInt(text);
   const isDecimal = node.type === 'decimal_integer_literal';
-  // A decimal literal may only reach 2^31 as the operand of unary minus, which the checker verifies.
-  const limit = isDecimal ? 2n ** 31n : 2n ** 32n - 1n;
+  const bits = isLong ? 64 : 32;
+  // A decimal literal may only reach 2^31 (or 2^63) as the operand of unary minus, which the compiler verifies.
+  const limit = isDecimal ? 2n ** BigInt(bits - 1) : 2n ** BigInt(bits) - 1n;
   if (value > limit) {
     throw new CompileError([
       {
         row: node.startPosition.row,
-        message: `整数「${node.text}」が int 型の範囲を超えています。`,
+        message: `整数「${node.text}」が ${isLong ? 'long' : 'int'} 型の範囲を超えています。`,
       },
     ]);
   }
+  if (isLong) return { type: 'long', value: isDecimal ? value : BigInt.asIntN(64, value) };
   return { type: 'int', value: isDecimal ? Number(value) : Number(BigInt.asIntN(32, value)) };
 }
 

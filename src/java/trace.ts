@@ -8,7 +8,15 @@ import { runProgram } from './execute';
 import { parseJava } from './parse';
 import { type Frame, Runtime, UNASSIGNED } from './runtime';
 import type { JavaType } from './types';
-import { charToString, defaultValue, JavaArray, JavaObject, JavaString, type Value } from './values';
+import {
+  charToString,
+  defaultValue,
+  floatToShortestDouble,
+  JavaArray,
+  JavaObject,
+  JavaString,
+  type Value,
+} from './values';
 
 // code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceJavaProgram(program: string, trace: TraceOptions): ProgramRecording {
@@ -91,9 +99,17 @@ type Scalar = TraceItemVariable[string];
 
 function scalarOf(value: Value, type: JavaType): Scalar | typeof NOT_SCALAR {
   switch (type.kind) {
+    case 'byte':
+    case 'short':
     case 'int':
     case 'double': {
       return value as number;
+    }
+    case 'long': {
+      return Number(value as bigint);
+    }
+    case 'float': {
+      return floatToShortestDouble(value as number);
     }
     case 'char': {
       return charToString(value as number);
@@ -130,7 +146,9 @@ const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 function displayNodeOf(value: Value, type: JavaType, seen: Set<unknown>): DisplayNode | undefined {
   if (value === undefined) return NULL_NODE;
-  if (typeof value === 'number') return { kind: 'value', value: type.kind === 'char' ? charToString(value) : value };
+  if (typeof value === 'number' || typeof value === 'bigint') {
+    return { kind: 'value', value: scalarOf(value, type) as number | string };
+  }
   if (typeof value === 'boolean') return { kind: 'value', value };
   if (value instanceof JavaString) return { kind: 'value', value: value.value };
   if (seen.has(value)) return undefined;

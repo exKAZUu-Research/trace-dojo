@@ -7,8 +7,10 @@ import {
   createClass,
   DOUBLE,
   type FieldInfo,
+  FLOAT,
   INT,
   type JavaType,
+  LONG,
   type MethodInfo,
   type NativeMethod,
   VOID,
@@ -16,13 +18,18 @@ import {
 import {
   charCodeOf,
   charToString,
+  convertNumber,
   formatDouble,
+  formatFloat,
   JavaArray,
   JavaObject,
   JavaString,
   toInt32,
+  toInt64,
   type Value,
 } from './values';
+
+const CHAR_ARRAY: JavaType = { kind: 'array', element: CHAR };
 
 export interface Builtins {
   classes: Map<string, ClassInfo>;
@@ -57,6 +64,8 @@ function createBuiltins(): Builtins {
   defineTurtle(registry.define('Turtle', objectClass, ''), stringClass.type);
   defineMath(registry.define('Math', objectClass));
   defineInteger(registry.define('Integer', objectClass), stringClass.type);
+  defineLong(registry.define('Long', objectClass), stringClass.type);
+  defineDouble(registry.define('Double', objectClass), stringClass.type);
   defineSystem(registry, objectClass, stringClass.type);
   return {
     classes: registry.classes,
@@ -169,12 +178,29 @@ function addMessageConstructors(cls: ClassInfo, stringType: JavaType, throwableT
 }
 
 function defineMath(mathClass: ClassInfo): void {
-  for (const type of [INT, DOUBLE]) {
-    addMethod(mathClass, 'abs', [type], type, true, (_, __, [value]) =>
-      type === INT ? toInt32(Math.abs(value as number)) : Math.abs(value as number)
+  for (const type of [INT, LONG, FLOAT, DOUBLE]) {
+    addMethod(mathClass, 'abs', [type], type, true, (_, __, [value]) => {
+      if (type === INT) return toInt32(Math.abs(value as number));
+      if (type === LONG) return toInt64((value as bigint) < 0n ? -(value as bigint) : (value as bigint));
+      return Math.abs(value as number);
+    });
+    const isLong = type === LONG;
+    addMethod(mathClass, 'max', [type, type], type, true, (_, __, [a, b]) =>
+      isLong ? ((a as bigint) > (b as bigint) ? a : b) : javaMax(a as number, b as number)
     );
-    addMethod(mathClass, 'max', [type, type], type, true, (_, __, [a, b]) => javaMax(a as number, b as number));
-    addMethod(mathClass, 'min', [type, type], type, true, (_, __, [a, b]) => javaMin(a as number, b as number));
+    addMethod(mathClass, 'min', [type, type], type, true, (_, __, [a, b]) =>
+      isLong ? ((a as bigint) < (b as bigint) ? a : b) : javaMin(a as number, b as number)
+    );
+  }
+  // Math.round rounds half up: floor(x + 0.5) computed exactly, which JavaScript's Math.round also does.
+  addMethod(mathClass, 'round', [DOUBLE], LONG, true, (_, __, [value]) =>
+    convertNumber(Math.round(value as number), 'double', 'long')
+  );
+  addMethod(mathClass, 'round', [FLOAT], INT, true, (_, __, [value]) =>
+    convertNumber(Math.round(value as number), 'double', 'int')
+  );
+  for (const name of ['sin', 'cos', 'tan', 'log', 'log10', 'exp', 'cbrt'] as const) {
+    addMethod(mathClass, name, [DOUBLE], DOUBLE, true, (_, __, [value]) => Math[name](value as number));
   }
   for (const name of ['sqrt', 'floor', 'ceil'] as const) {
     addMethod(mathClass, name, [DOUBLE], DOUBLE, true, (_, __, [value]) => Math[name](value as number));
@@ -206,6 +232,48 @@ function defineInteger(integerClass: ClassInfo, stringType: JavaType): void {
   );
 }
 
+function defineDouble(doubleClass: ClassInfo, stringType: JavaType): void {
+  addConstant(doubleClass, 'MAX_VALUE', DOUBLE, Number.MAX_VALUE);
+  addConstant(doubleClass, 'MIN_VALUE', DOUBLE, Number.MIN_VALUE);
+  addConstant(doubleClass, 'POSITIVE_INFINITY', DOUBLE, Number.POSITIVE_INFINITY);
+  addConstant(doubleClass, 'NEGATIVE_INFINITY', DOUBLE, Number.NEGATIVE_INFINITY);
+  addConstant(doubleClass, 'NaN', DOUBLE, Number.NaN);
+  addMethod(doubleClass, 'parseDouble', [stringType], DOUBLE, true, (frame, _, [text]) => {
+    const value = (text as JavaString | undefined)?.value;
+    if (value === undefined) return throwBuiltin(frame, 'NullPointerException');
+    frame.runtime.scanString(value.length);
+    const trimmed = value.trim();
+    const isNumber = /^[+-]?(?:NaN|Infinity|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?[fFdD]?)$/.test(trimmed);
+    if (!isNumber) throwBuiltin(frame, 'NumberFormatException', `For input string: "${value}"`);
+    return Number(trimmed.replace(/[fFdD]$/, ''));
+  });
+  addMethod(doubleClass, 'toString', [DOUBLE], stringType, true, (frame, __, [value]) =>
+    newString(frame, formatDouble(value as number))
+  );
+  addMethod(doubleClass, 'isNaN', [DOUBLE], BOOLEAN, true, (_, __, [value]) => Number.isNaN(value));
+}
+
+function defineLong(longClass: ClassInfo, stringType: JavaType): void {
+  addConstant(longClass, 'MAX_VALUE', LONG, 2n ** 63n - 1n);
+  addConstant(longClass, 'MIN_VALUE', LONG, -(2n ** 63n));
+  addMethod(longClass, 'parseLong', [stringType], LONG, true, (frame, _, [text]) => {
+    const value = (text as JavaString | undefined)?.value;
+    frame.runtime.scanString(value?.length ?? 0);
+    const parsed = value !== undefined && /^[+-]?\d+$/.test(value) ? BigInt(value) : undefined;
+    if (parsed === undefined || parsed !== toInt64(parsed)) {
+      throwBuiltin(
+        frame,
+        'NumberFormatException',
+        value === undefined ? 'Cannot parse null string: null' : `For input string: "${value}"`
+      );
+    }
+    return parsed;
+  });
+  addMethod(longClass, 'toString', [LONG], stringType, true, (frame, __, [value]) =>
+    newString(frame, String(value as bigint))
+  );
+}
+
 function defineSystem(registry: Registry, objectClass: ClassInfo, stringType: JavaType): void {
   const printStreamClass = registry.define('PrintStream', objectClass, 'java.io');
   const systemClass = registry.define('System', objectClass);
@@ -214,11 +282,16 @@ function defineSystem(registry: Registry, objectClass: ClassInfo, stringType: Ja
     ['print', ''],
     ['println', '\n'],
   ] as const) {
-    for (const type of [INT, DOUBLE, CHAR, BOOLEAN, stringType, objectClass.type]) {
+    for (const type of [INT, LONG, FLOAT, DOUBLE, CHAR, BOOLEAN, stringType, objectClass.type]) {
       addMethod(printStreamClass, name, [type], VOID, false, (frame, _, [value]) => {
         frame.runtime.budget.print(`${stringify(frame, value, type)}${suffix}`);
       });
     }
+    addMethod(printStreamClass, name, [CHAR_ARRAY], VOID, false, (frame, _, [value]) => {
+      if (!(value instanceof JavaArray)) throwBuiltin(frame, 'NullPointerException');
+      frame.runtime.scanString(value.values.length);
+      frame.runtime.budget.print(`${value.values.map((code) => charToString(code as number)).join('')}${suffix}`);
+    });
   }
   addMethod(printStreamClass, 'println', [], VOID, false, (frame) => {
     frame.runtime.budget.print('\n');
@@ -337,7 +410,7 @@ function defineStringTransforms(stringClass: ClassInfo, objectType: JavaType): v
       Array.from({ length: value.length }, (_, index) => charCodeOf(value, index))
     );
   });
-  for (const type of [INT, DOUBLE, CHAR, BOOLEAN, objectType]) {
+  for (const type of [INT, LONG, FLOAT, DOUBLE, CHAR, BOOLEAN, objectType]) {
     addMethod(stringClass, 'valueOf', [type], stringType, true, (frame, _, [value]) =>
       newString(frame, stringify(frame, value, type))
     );
@@ -500,8 +573,14 @@ function javaMin(a: number, b: number): number {
 /** Converts a value to the text that string concatenation and `print` produce. */
 export function stringify(frame: Frame, value: Value, type: JavaType): string {
   switch (type.kind) {
-    case 'int': {
-      return String(value as number);
+    case 'byte':
+    case 'short':
+    case 'int':
+    case 'long': {
+      return String(value as number | bigint);
+    }
+    case 'float': {
+      return formatFloat(value as number);
     }
     case 'double': {
       return formatDouble(value as number);
@@ -524,20 +603,21 @@ export function stringify(frame: Frame, value: Value, type: JavaType): string {
   }
 }
 
+const primitiveTypeCodes: Record<string, string> = {
+  byte: 'B',
+  short: 'S',
+  int: 'I',
+  long: 'J',
+  float: 'F',
+  double: 'D',
+  char: 'C',
+  boolean: 'Z',
+};
+
 function arrayTypeCode(type: JavaType): string {
+  const primitiveCode = primitiveTypeCodes[type.kind] as string | undefined;
+  if (primitiveCode) return primitiveCode;
   switch (type.kind) {
-    case 'int': {
-      return 'I';
-    }
-    case 'double': {
-      return 'D';
-    }
-    case 'char': {
-      return 'C';
-    }
-    case 'boolean': {
-      return 'Z';
-    }
     case 'array': {
       return `[${arrayTypeCode(type.element)}`;
     }

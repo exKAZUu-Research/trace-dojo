@@ -2,17 +2,17 @@ import type { ClassDeclaration, ConstructorDeclaration, FieldDeclaration, Method
 import type { Frame } from './runtime';
 import type { Value } from './values';
 
-export type PrimitiveType =
-  | { kind: 'int' }
-  | { kind: 'double' }
-  | { kind: 'boolean' }
-  | { kind: 'char' }
-  | { kind: 'void' }
-  | { kind: 'null' };
+export type NumericKind = 'byte' | 'short' | 'char' | 'int' | 'long' | 'float' | 'double';
+
+export type PrimitiveType = { kind: NumericKind } | { kind: 'boolean' } | { kind: 'void' } | { kind: 'null' };
 
 export type JavaType = PrimitiveType | { kind: 'class'; cls: ClassInfo } | { kind: 'array'; element: JavaType };
 
+export const BYTE: JavaType = { kind: 'byte' };
+export const SHORT: JavaType = { kind: 'short' };
 export const INT: JavaType = { kind: 'int' };
+export const LONG: JavaType = { kind: 'long' };
+export const FLOAT: JavaType = { kind: 'float' };
 export const DOUBLE: JavaType = { kind: 'double' };
 export const BOOLEAN: JavaType = { kind: 'boolean' };
 export const CHAR: JavaType = { kind: 'char' };
@@ -121,12 +121,33 @@ export function isReference(type: JavaType): boolean {
   return type.kind === 'class' || type.kind === 'array' || type.kind === 'null';
 }
 
-export function isNumeric(type: JavaType): boolean {
-  return type.kind === 'int' || type.kind === 'double' || type.kind === 'char';
+/** The numeric kinds in the order of widening: each widens to every kind after it, except `char` to `short`. */
+const NUMERIC_RANKS: Record<NumericKind, number> = { byte: 0, short: 1, char: 1, int: 2, long: 3, float: 4, double: 5 };
+
+export function isNumeric(type: JavaType): type is { kind: NumericKind } {
+  return Object.hasOwn(NUMERIC_RANKS, type.kind);
 }
 
 export function isIntegral(type: JavaType): boolean {
-  return type.kind === 'int' || type.kind === 'char';
+  return isNumeric(type) && type.kind !== 'float' && type.kind !== 'double';
+}
+
+/** Whether a numeric kind widens to another by a primitive widening conversion. */
+export function isNumericWidening(from: NumericKind, to: NumericKind): boolean {
+  if (from === to) return true;
+  if (to === 'char' || (from === 'char' && to === 'short')) return false;
+  return NUMERIC_RANKS[from] < NUMERIC_RANKS[to];
+}
+
+/** The type that unary numeric promotion gives an operand: `byte`, `short`, and `char` become `int`. */
+export function promoteUnary(type: { kind: NumericKind }): JavaType {
+  return NUMERIC_RANKS[type.kind] < NUMERIC_RANKS.int ? INT : type;
+}
+
+/** The type that binary numeric promotion gives two operands. */
+export function promoteBinary(a: { kind: NumericKind }, b: { kind: NumericKind }): JavaType {
+  for (const type of [DOUBLE, FLOAT, LONG]) if (a.kind === type.kind || b.kind === type.kind) return type;
+  return INT;
 }
 
 export function sameType(a: JavaType, b: JavaType): boolean {
@@ -156,8 +177,7 @@ export function typeName(type: JavaType): string {
  */
 export function isWidening(from: JavaType, to: JavaType, objectClass: ClassInfo): boolean {
   if (sameType(from, to)) return true;
-  if (from.kind === 'char') return to.kind === 'int' || to.kind === 'double';
-  if (from.kind === 'int') return to.kind === 'double';
+  if (isNumeric(from)) return isNumeric(to) && isNumericWidening(from.kind, to.kind);
   if (from.kind === 'null') return isReference(to);
   if (to.kind !== 'class' && to.kind !== 'array') return false;
   if (from.kind === 'class') return to.kind === 'class' && isSubclass(from.cls, to.cls);

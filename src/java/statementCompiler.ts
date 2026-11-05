@@ -437,7 +437,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   protected compileSwitch(context: MethodContext, statement: Extract<Statement, { kind: 'switch' }>): Exec {
     const selector = this.compileValue(context, statement.selector);
     const isString = selector.type.kind === 'class' && selector.type.cls === this.builtins.stringClass;
-    if (!isString && selector.type.kind !== 'int' && selector.type.kind !== 'char') {
+    if (!isString && !['byte', 'short', 'char', 'int'].includes(selector.type.kind)) {
       this.error(statement.selector, `switch 文では ${typeName(selector.type)} 型の値を使えません。`);
     }
     const { labelValues, defaultIndex } = this.compileSwitchLabels(context, statement, selector.type);

@@ -1,7 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
-import type { Modifiers, Span, TypeSyntax } from './ast';
+import type { Modifiers, PrimitiveTypeName, Span, TypeSyntax } from './ast';
 
 export function span(node: Node): Span {
   return {
@@ -95,13 +95,9 @@ export function wrapArray(type: TypeSyntax, dimensions: number, node: Node): Typ
 
 export function convertType(node: Node): TypeSyntax {
   switch (node.type) {
-    case 'integral_type': {
-      if (node.text !== 'int' && node.text !== 'char') unsupported(node, `型「${node.text}」`);
-      return { kind: 'primitive', name: node.text as 'int' | 'char', ...span(node) };
-    }
+    case 'integral_type':
     case 'floating_point_type': {
-      if (node.text !== 'double') unsupported(node, `型「${node.text}」`);
-      return { kind: 'primitive', name: 'double', ...span(node) };
+      return { kind: 'primitive', name: node.text as PrimitiveTypeName, ...span(node) };
     }
     case 'boolean_type': {
       return { kind: 'primitive', name: 'boolean', ...span(node) };

@@ -1,8 +1,8 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
-import type { ClassInfo, JavaType } from './types';
+import type { ClassInfo, JavaType, NumericKind } from './types';
 
-/** Java `null` is `undefined`; `int`, `char`, and `double` are numbers. */
-export type Value = number | boolean | JavaString | JavaObject | JavaArray | undefined;
+/** Java `null` is `undefined`; `long` values are bigints and the other numeric values are numbers. */
+export type Value = number | bigint | boolean | JavaString | JavaObject | JavaArray | undefined;
 
 /** Strings are objects so that `==` compares references as in Java. */
 export class JavaString {
@@ -37,10 +37,16 @@ export class JavaArray {
 
 export function defaultValue(type: JavaType): Value {
   switch (type.kind) {
+    case 'byte':
+    case 'short':
     case 'int':
     case 'char':
+    case 'float':
     case 'double': {
       return 0;
+    }
+    case 'long': {
+      return 0n;
     }
     case 'boolean': {
       return false;
@@ -53,18 +59,114 @@ export function defaultValue(type: JavaType): Value {
 
 /** Formats a double as `Double.toString` does (JDK 19 and later print the shortest round-trip digits). */
 export function formatDouble(value: number): string {
+  return formatShortest(value, (magnitude) => magnitude.toExponential());
+}
+
+/** Formats a float as `Float.toString` does: the shortest digits that read back as the same float. */
+export function formatFloat(value: number): string {
+  return formatShortest(value, shortestFloatDigits);
+}
+
+/** The double whose shortest digits are those `Float.toString` prints for `value`. */
+export function floatToShortestDouble(value: number): number {
+  if (!Number.isFinite(value) || value === 0) return value;
+  return Math.sign(value) * Number(twoDigitsAtLeast(Math.abs(value), shortestFloatDigits));
+}
+
+function shortestFloatDigits(magnitude: number): string {
+  for (let precision = 1; precision < 9; precision++) {
+    const candidate = magnitude.toExponential(precision - 1);
+    if (Math.fround(Number(candidate)) === magnitude) return candidate;
+  }
+  return magnitude.toExponential(8);
+}
+
+/**
+ * The shortest digits in exponential notation, but at least two of them as Java prints: among the two-digit
+ * decimals, the closest one reads back as the same value whenever a one-digit one does.
+ */
+function twoDigitsAtLeast(magnitude: number, shortest: (magnitude: number) => string): string {
+  const digits = shortest(magnitude);
+  return digits.includes('.') ? digits : magnitude.toExponential(1);
+}
+
+function formatShortest(value: number, shortest: (magnitude: number) => string): string {
   if (Number.isNaN(value)) return 'NaN';
   if (value === Number.POSITIVE_INFINITY) return 'Infinity';
   if (value === Number.NEGATIVE_INFINITY) return '-Infinity';
   if (value === 0) return Object.is(value, -0) ? '-0.0' : '0.0';
-  const magnitude = Math.abs(value);
   const sign = value < 0 ? '-' : '';
-  if (magnitude >= 1e-3 && magnitude < 1e7) {
-    const text = String(magnitude);
-    return `${sign}${text.includes('.') ? text : `${text}.0`}`;
+  const [mantissa, exponentText] = twoDigitsAtLeast(Math.abs(value), shortest).split('e');
+  const digits = mantissa.replace('.', '').replace(/0+$/, '');
+  const exponent = Number(exponentText);
+  if (exponent < -3 || exponent >= 7) return `${sign}${digits[0]}.${digits.slice(1) || '0'}E${exponent}`;
+  if (exponent < 0) return `${sign}0.${'0'.repeat(-exponent - 1)}${digits}`;
+  const integer = digits.slice(0, exponent + 1).padEnd(exponent + 1, '0');
+  return `${sign}${integer}.${digits.slice(exponent + 1) || '0'}`;
+}
+
+const LONG_MIN = -(2n ** 63n);
+const LONG_MAX = 2n ** 63n - 1n;
+
+/** Converts a numeric value between kinds as Java's widening and narrowing primitive conversions do. */
+export function convertNumber(value: Value, from: NumericKind, to: NumericKind): Value {
+  if (from === to) return value;
+  if (from === 'long') {
+    const big = value as bigint;
+    switch (to) {
+      case 'float': {
+        return Math.fround(Number(big));
+      }
+      case 'double': {
+        return Number(big);
+      }
+      default: {
+        return narrowInt(Number(BigInt.asIntN(32, big)), to);
+      }
+    }
   }
-  const [mantissa, exponent] = magnitude.toExponential().split('e');
-  return `${sign}${mantissa.includes('.') ? mantissa : `${mantissa}.0`}E${Number(exponent)}`;
+  const number = value as number;
+  switch (to) {
+    case 'long': {
+      if (from !== 'float' && from !== 'double') return BigInt(number);
+      if (Number.isNaN(number)) return 0n;
+      if (number >= 9_223_372_036_854_775_807) return LONG_MAX;
+      if (number <= -9_223_372_036_854_775_808) return LONG_MIN;
+      return BigInt(Math.trunc(number));
+    }
+    case 'float': {
+      return Math.fround(number);
+    }
+    case 'double': {
+      return number;
+    }
+    default: {
+      return narrowInt(from === 'float' || from === 'double' ? doubleToInt(number) : number, to);
+    }
+  }
+}
+
+/** Narrows an int to `byte`, `short`, `char`, or keeps it as `int`. */
+function narrowInt(value: number, to: NumericKind): number {
+  switch (to) {
+    case 'byte': {
+      return (value << 24) >> 24;
+    }
+    case 'short': {
+      return (value << 16) >> 16;
+    }
+    case 'char': {
+      return value & 0xff_ff;
+    }
+    default: {
+      return value;
+    }
+  }
+}
+
+/** Wraps a bigint to 64 bits as Java's long arithmetic does. */
+export function toInt64(value: bigint): bigint {
+  return BigInt.asIntN(64, value);
 }
 
 /** Wraps a number to 32 bits as Java's int arithmetic does. */
