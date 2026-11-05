@@ -41,7 +41,7 @@ function get(frame: Frame, receiver: Value): Value {
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- One registration per builtin method, each a small native.
-// code-gauge-allow functionNcss 46 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 48 -- One registration per builtin method, each a small native.
 export function defineOptionals(context: Context): Optionals {
   const { registry, objectType, stringType } = context;
   const optional = registry.define('Optional', context.objectClass, 'java.util');
@@ -121,6 +121,7 @@ export function defineOptionals(context: Context): Optionals {
     classType(optional, variableType(u)),
     false,
     (frame, receiver, [mapper]) => {
+      requireNonNull(frame, mapper);
       const state = stateOf(receiver);
       return state.isPresent
         ? createOptional(frame, optional, callFunction(frame, fn, mapper, [state.value]))
@@ -168,6 +169,7 @@ function defineOptionalFunctions(context: Context, optional: ClassInfo, tType: J
     classType(optional, tType),
     false,
     (frame, receiver, [test]) => {
+      requireNonNull(frame, test);
       const state = stateOf(receiver);
       if (!state.isPresent || callFunction(frame, predicate, test, [state.value]) === true) return receiver;
       return createOptional(frame, optional, undefined, false);
@@ -185,4 +187,9 @@ function defineOptionalFunctions(context: Context, optional: ClassInfo, tType: J
       else callFunction(frame, context.fn('Runnable'), otherwise, []);
     }
   );
+}
+
+/** Rejects a null function as `Objects.requireNonNull` does, which `map` and `filter` do even for an empty optional. */
+function requireNonNull(frame: Frame, value: Value): void {
+  if (value === undefined) throwBuiltin(frame, 'NullPointerException');
 }

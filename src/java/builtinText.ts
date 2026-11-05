@@ -3,7 +3,7 @@ import { stringify } from './builtins';
 import { addConstructor, addMethod, newString, type Registry, requireString, text } from './builtinSupport';
 import { JAVA_WHITESPACE } from './builtinWrappers';
 import { formatText } from './javaFormatter';
-import { javaReplacement, translateJavaRegex, UnsupportedRegexError } from './javaRegex';
+import { javaReplacer, ReplacementError, translateJavaRegex, UnsupportedRegexError } from './javaRegex';
 import { type Frame, throwBuiltin } from './runtime';
 import { BOOLEAN, CHAR, type ClassInfo, DOUBLE, FLOAT, INT, type JavaType, LONG, VOID } from './types';
 import { charCodeOf, charToString, JavaArray, JavaObject, JavaString, type Value } from './values';
@@ -342,7 +342,7 @@ function defineStringExtras(stringClass: ClassInfo, collections: Collections): v
     (frame, receiver, [regex, replacement]) => {
       frame.runtime.scanString(text(receiver).length);
       const pattern = compileRegex(frame, requireString(frame, regex), 'g');
-      return newString(frame, text(receiver).replace(pattern, javaReplacement(requireString(frame, replacement))));
+      return newString(frame, replaceWith(frame, text(receiver), pattern, requireString(frame, replacement)));
     }
   );
   addMethod(stringClass, 'matches', [stringType], BOOLEAN, false, (frame, receiver, [regex]) => {
@@ -413,7 +413,7 @@ function defineStringVariants(stringClass: ClassInfo, objectClass: ClassInfo): v
     (frame, receiver, [regex, replacement]) => {
       frame.runtime.scanString(text(receiver).length);
       const pattern = compileRegex(frame, requireString(frame, regex), '');
-      return newString(frame, text(receiver).replace(pattern, javaReplacement(requireString(frame, replacement))));
+      return newString(frame, replaceWith(frame, text(receiver), pattern, requireString(frame, replacement)));
     }
   );
   // `contentEquals` takes a CharSequence, which these programs pass as a String or a StringBuilder.
@@ -517,4 +517,14 @@ export function compareIgnoringCase(a: string, b: string): number {
     if (left[index] !== right[index]) return charCodeOf(left, index) - charCodeOf(right, index);
   }
   return left.length - right.length;
+}
+
+/** `replaceAll` and `replaceFirst`, which report an invalid replacement as Java's Matcher does. */
+function replaceWith(frame: Frame, value: string, pattern: RegExp, replacement: string): string {
+  try {
+    return value.replace(pattern, javaReplacer(replacement));
+  } catch (error) {
+    if (!(error instanceof ReplacementError)) throw error;
+    return throwBuiltin(frame, error.exception, error.message);
+  }
 }

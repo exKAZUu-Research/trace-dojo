@@ -430,6 +430,8 @@ class Compiler extends DeclarationCompiler {
     declaration: ConstructorDeclaration | undefined,
     context: MethodContext
   ): void {
+    const returned = declaration?.prologue && findReturn(declaration.prologue);
+    if (returned) this.error(returned, 'super(...) や this(...) の呼び出しより前には return 文を書けません。');
     const prologue =
       declaration?.prologue &&
       this.compileStatements({ ...context, isStatic: true, isBeforeConstructorCall: true }, declaration.prologue);
@@ -469,5 +471,28 @@ function initializingMembersOf(cls: ClassInfo, isStatic: boolean): (FieldDeclara
       // An interface's fields are implicitly static.
       (member.kind === 'field' && (member.modifiers.isStatic || cls.kind === 'interface') === isStatic) ||
       (member.kind === 'initializer' && member.isStatic === isStatic)
+  );
+}
+
+/**
+ * The first `return` statement among `nodes`, outside the lambdas and classes written there, whose own bodies may
+ * return.
+ */
+function findReturn(nodes: unknown): Span | undefined {
+  if (Array.isArray(nodes)) {
+    for (const node of nodes) {
+      const found = findReturn(node);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (typeof nodes !== 'object' || nodes === null) return undefined;
+  const node = nodes as { kind?: string; body?: unknown };
+  if (node.kind === 'return') return node as unknown as Span;
+  if (node.kind === 'lambda' || node.kind === 'localClass') return undefined;
+  return findReturn(
+    Object.entries(node)
+      .filter(([key]) => !(node.kind === 'new' && key === 'body'))
+      .map(([, value]) => value)
   );
 }

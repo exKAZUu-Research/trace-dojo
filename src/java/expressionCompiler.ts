@@ -59,7 +59,12 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
     return value.run as (frame: Frame) => boolean;
   }
 
-  protected compileValue(context: MethodContext, expression: Expression, allowsVoid = false): CompiledValue {
+  protected compileValue(
+    context: MethodContext,
+    expression: Expression,
+    allowsVoid = false,
+    keepsErasure = false
+  ): CompiledValue {
     const compiled = this.compileExpression(context, expression);
     if (compiled.kind === 'class') {
       this.error(expression, `${compiled.cls.name} は値として使えません。`);
@@ -67,7 +72,8 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
     if (compiled.type.kind === 'void' && !allowsVoid) {
       this.error(expression, '戻り値のないメソッドの呼び出しは値として使えません。');
     }
-    return compiled;
+    if (!compiled.erasedType || keepsErasure) return compiled;
+    return allowsVoid ? { ...compiled, erasedType: undefined } : this.checkErased(compiled, compiled.type);
   }
 
   protected compileInitializer(
@@ -225,7 +231,7 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
     context: MethodContext,
     expression: Extract<Expression, { kind: 'instanceOf' }>
   ): Compiled {
-    const value = this.compileValue(context, expression.value);
+    const value = this.compileValue(context, expression.value, false, true);
     const type = this.resolveType(expression.type);
     if (type.kind !== 'class' && type.kind !== 'array') {
       this.error(expression.type, 'instanceof ではクラス型か配列型しか使えません。');
@@ -326,7 +332,9 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
   }
 
   protected compileAssignment(context: MethodContext, expression: Extract<Expression, { kind: 'assign' }>): Compiled {
-    const reference = this.compileReference(context, expression.target);
+    const reference =
+      (expression.operator === '=' ? this.prologueFieldWrite(context, expression.target) : undefined) ??
+      this.compileReference(context, expression.target);
     this.checkAssignable(context, expression.target, reference);
     const { bind, type } = reference;
     const value =
@@ -480,16 +488,23 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
     expression: Extract<Expression, { kind: 'binary' }>
   ): { left: CompiledValue; right: CompiledValue; keepsReferences: boolean } {
     const { operator } = expression;
-    const leftValue = this.compileValue(context, expression.left);
+    // Comparing references needs no cast of a generic result, which a numeric comparison then casts to unbox.
+    const isEquality = operator === '==' || operator === '!=';
+    const leftValue = this.compileValue(context, expression.left, false, isEquality);
     const rightBindings =
       operator === '&&' || operator === '||' ? bindingsWhen(expression.left, operator === '&&') : [];
-    const rightValue = this.withBindings(context, rightBindings, () => this.compileValue(context, expression.right));
+    const rightValue = this.withBindings(context, rightBindings, () =>
+      this.compileValue(context, expression.right, false, isEquality)
+    );
     const isString = (type: JavaType): boolean => type.kind === 'class' && type.cls === this.builtins.stringClass;
+    const comparesReferences = isEquality && isReference(leftValue.type) && isReference(rightValue.type);
     const keepsReferences =
-      (operator === '+' && (isString(leftValue.type) || isString(rightValue.type))) ||
-      ((operator === '==' || operator === '!=') && isReference(leftValue.type) && isReference(rightValue.type));
-    if (keepsReferences) return { left: leftValue, right: rightValue, keepsReferences };
-    return { left: this.operand(leftValue), right: this.operand(rightValue), keepsReferences };
+      (operator === '+' && (isString(leftValue.type) || isString(rightValue.type))) || comparesReferences;
+    const [left, right] = comparesReferences
+      ? [leftValue, rightValue].map((value) => ({ ...value, erasedType: undefined }))
+      : [leftValue, rightValue].map((value) => this.checkErased(value, value.type));
+    if (keepsReferences) return { left: left as CompiledValue, right: right as CompiledValue, keepsReferences };
+    return { left: this.operand(left as CompiledValue), right: this.operand(right as CompiledValue), keepsReferences };
   }
 
   protected compileUnary(context: MethodContext, expression: Extract<Expression, { kind: 'unary' }>): Compiled {
@@ -568,8 +583,8 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
   }
 
   protected compileCast(context: MethodContext, expression: Extract<Expression, { kind: 'cast' }>): Compiled {
-    const value = this.compileValue(context, expression.value);
     const type = this.resolveType(expression.type);
+    const value = this.checkErased(this.compileValue(context, expression.value, false, true), type);
     if (value.type.kind !== 'null' && isPrimitive(value.type) !== isPrimitive(type)) {
       return this.compileBoxingCast(value, type, expression);
     }
@@ -674,6 +689,7 @@ function readOf(reference: (Reference & { constant?: Value }) | Compiled): Compi
     run: (frame) => bind(frame).get(),
     constant: reference.constant,
     source: reference.source,
+    erasedType: reference.erasedType,
   };
 }
 

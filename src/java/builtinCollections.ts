@@ -3,6 +3,7 @@ import {
   checkIndex,
   checkPosition,
   classType,
+  defaultRemoveClasses,
   defineIteratorClass,
   defineReadMethods,
   defineSetEquality,
@@ -57,7 +58,7 @@ export interface Collections {
   next: MethodInfo;
 }
 
-// code-gauge-allow functionNcss 44 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 45 -- One registration per builtin method, each a small native.
 export function defineCollections(
   registry: Registry,
   objectClass: ClassInfo,
@@ -106,6 +107,7 @@ export function defineCollections(
   // Arrays.asList writes through to its array, so it may set elements but not change its size.
   const fixedSizeList = defineRestrictedList(context, 'ArrayList', lists, (method) => method.name !== 'set', 'Arrays$');
   fixedSizeClasses.add(fixedSizeList);
+  defaultRemoveClasses.add(fixedSizeList);
   const snapshotSet = defineSnapshot(context, 'Set', setClass, itrClass);
   // A map's key and entry sets compare and hash as sets; its values, a plain collection, keep identity.
   defineSetEquality(snapshotSet, context, setClass);

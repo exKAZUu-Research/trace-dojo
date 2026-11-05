@@ -76,10 +76,11 @@ const ESCAPED_CHARACTERS: Record<string, number> = { t: 9, n: 10, r: 13, f: 12, 
 
 const LINE_TERMINATOR = String.raw`(?:\r\n|[\n\r\x85  ])`;
 
-/** The flags that `(?flags)` and `(?flags:...)` set, which JavaScript's modifiers take, besides `x` read here. */
-const MODIFIER_FLAGS = new Set(['i', 'm', 's']);
-/** Flags that change nothing JavaScript would read differently here: UNICODE_CASE and UNIX_LINES. */
-const IGNORED_FLAGS = new Set(['u', 'd']);
+/**
+ * The flags that `(?flags)` and `(?flags:...)` set that JavaScript reads alike; `i`, `u`, and `x` are read here, as
+ * Java's `i` without UNICODE_CASE (`u`) ignores the case of ASCII letters only.
+ */
+const MODIFIER_FLAGS = new Set(['m', 's']);
 
 /**
  * Rewrites a Java regular expression for `RegExp` with the `v` flag, reading it token by token as
@@ -100,11 +101,20 @@ interface Group {
   extraCloses: number;
   isComments: boolean;
   isMultiline: boolean;
+  isCaseInsensitive: boolean;
+  isUnicodeCase: boolean;
+}
+
+/** Whether a group lets JavaScript's `i` flag fold case, which then folds all of Unicode as UNICODE_CASE does. */
+function foldsUnicodeCase(group: Group): boolean {
+  return group.isCaseInsensitive && group.isUnicodeCase;
 }
 
 class Translator {
   private index = 0;
-  private readonly groups: Group[] = [{ extraCloses: 0, isComments: false, isMultiline: false }];
+  private readonly groups: Group[] = [
+    { extraCloses: 0, isComments: false, isMultiline: false, isCaseInsensitive: false, isUnicodeCase: false },
+  ];
   private readonly parts: string[] = [];
 
   constructor(private readonly pattern: string) {}
@@ -127,7 +137,7 @@ class Translator {
       this.index += match[0].length;
     }
     this.current().isMultiline = flags.includes('m');
-    return flags;
+    return foldsUnicodeCase(this.current()) ? `${flags}i` : flags;
   }
 
   private rest(): string {
@@ -179,9 +189,23 @@ class Translator {
         return char;
       }
       default: {
-        return literal(point);
+        return this.literal(point);
       }
     }
+  }
+
+  /** A character outside a class, which ASCII-only case insensitivity matches in either case. */
+  private literal(point: number): string {
+    const other = this.otherCase(point);
+    return other === undefined ? literal(point) : `[${literal(point)}${literal(other)}]`;
+  }
+
+  /** The other case of an ASCII letter while case is ignored for ASCII only, as Java's `i` without `u` does. */
+  private otherCase(point: number): number | undefined {
+    const group = this.current();
+    if (!group.isCaseInsensitive || group.isUnicodeCase) return undefined;
+    if (point >= 0x61 && point <= 0x7a) return point - 32;
+    return point >= 0x41 && point <= 0x5a ? point + 32 : undefined;
   }
 
   /** In comments mode, whether `char` is whitespace or starts a comment, which the pattern skips. */
@@ -246,15 +270,21 @@ class Translator {
           return false;
         })
         .join('');
-    const [jsOn, jsOff] = [forJs(on, true), forJs(off, false)];
+    const foldedBefore = foldsUnicodeCase(group);
+    let [jsOn, jsOff] = [forJs(on, true), forJs(off, false)];
     if (on.includes('m')) group.isMultiline = true;
     if (off.includes('m')) group.isMultiline = false;
+    if (!foldedBefore && foldsUnicodeCase(group)) jsOn += 'i';
+    if (foldedBefore && !foldsUnicodeCase(group)) jsOff += 'i';
     return jsOff ? `${jsOn}-${jsOff}` : jsOn;
   }
 
   private setGroupFlag(group: Group, flag: string, isOn: boolean): void {
     if (flag === 'x') group.isComments = isOn;
-    else if (!IGNORED_FLAGS.has(flag)) this.fail(`Unsupported flag ${flag}`);
+    else if (flag === 'i') group.isCaseInsensitive = isOn;
+    else if (flag === 'u') group.isUnicodeCase = isOn;
+    // UNIX_LINES changes only which characters end a line, which JavaScript's `.` and anchors read alike enough.
+    else if (flag !== 'd') this.fail(`Unsupported flag ${flag}`);
   }
 
   private closeGroup(): string {
@@ -320,7 +350,7 @@ class Translator {
     if (predefined !== undefined) return predefined;
     const point = this.escapedCharacter(char);
     if (point === undefined) this.fail(`Illegal or unsupported escape sequence \\${char}`);
-    return literal(point);
+    return this.literal(point);
   }
 
   /** The character a character escape stands for, or `undefined` when `char` starts none. */
@@ -363,7 +393,7 @@ class Translator {
     const end = this.pattern.indexOf(String.raw`\E`, this.index);
     const text = this.pattern.slice(this.index, end === -1 ? undefined : end);
     this.index = end === -1 ? this.pattern.length : end + 2;
-    return [...text].map((char) => literal(char.codePointAt(0) as number)).join('');
+    return [...text].map((char) => this.literal(char.codePointAt(0) as number)).join('');
   }
 
   /** Translates `\p{Name}`, `\pL`, or their negations, after the `p` or `P`. */
@@ -431,11 +461,25 @@ class Translator {
     const start = this.classCharacter();
     if (typeof start === 'string') return start;
     const isRange = this.pattern[this.index] === '-' && !/^-(?:\]|&&)/.test(this.rest());
-    if (!isRange) return literal(start);
+    if (!isRange) return this.classRange(start, start);
     this.index++;
     const end = this.classCharacter();
     if (typeof end === 'string' || end < start) this.fail('Illegal character range');
-    return `${literal(start)}-${literal(end)}`;
+    return this.classRange(start, end);
+  }
+
+  /** A range inside a class, with the other case of its ASCII letters while case is ignored for ASCII only. */
+  private classRange(start: number, end: number): string {
+    const ranges = [rangeText(start, end)];
+    for (const [low, high] of [
+      [0x61, 0x7a],
+      [0x41, 0x5a],
+    ] as const) {
+      const [from, to] = [Math.max(start, low), Math.min(end, high)];
+      const [otherFrom, otherTo] = [this.otherCase(from), this.otherCase(to)];
+      if (from <= to && otherFrom !== undefined && otherTo !== undefined) ranges.push(rangeText(otherFrom, otherTo));
+    }
+    return ranges.join('');
   }
 
   /** The character at the cursor inside a class, or the translation of an escape that stands for a set. */
@@ -455,6 +499,10 @@ class Translator {
   }
 }
 
+function rangeText(from: number, to: number): string {
+  return from === to ? literal(from) : `${literal(from)}-${literal(to)}`;
+}
+
 /** A character as `v`-mode syntax matches it literally, in or out of a class. */
 function literal(point: number): string {
   return /^[a-zA-Z0-9 ]$/u.test(String.fromCodePoint(point))
@@ -462,10 +510,89 @@ function literal(point: number): string {
     : `\\u{${point.toString(16)}}`;
 }
 
-/** Converts Java's replacement syntax, where `$1` names a group and a backslash escapes, to JavaScript's. */
-export function javaReplacement(replacement: string): string {
-  return replacement.replaceAll(/\\(.)|\$(\d)|\$/g, (_, escaped: string | undefined, group: string | undefined) => {
-    if (escaped !== undefined) return escaped === '$' ? '$$' : escaped;
-    return group === undefined ? '$$' : `$${group}`;
-  });
+/** A failure of a replacement string, which Java reports as `exception` with `message`. */
+export class ReplacementError extends Error {
+  constructor(
+    readonly exception: 'IllegalArgumentException' | 'IndexOutOfBoundsException',
+    message: string
+  ) {
+    super(message);
+  }
+}
+
+type ReplacementPart = string | number | { name: string };
+
+/**
+ * A function for `String.replace` that expands a Java replacement as `Matcher.appendReplacement` does: `\x` quotes
+ * `x`, `$n` names a group, taking more digits while the number stays a group, and `${name}` a named group. An invalid
+ * reference throws {@link ReplacementError} when a match first needs the replacement, as in Java.
+ */
+export function javaReplacer(replacement: string): (...args: unknown[]) => string {
+  let parts: ReplacementPart[] | undefined;
+  return (...args) => {
+    const hasGroups = typeof args.at(-1) === 'object' && args.at(-1) !== undefined;
+    const groups = (hasGroups ? args.at(-1) : undefined) as Record<string, string | undefined> | undefined;
+    const captures = args.slice(0, hasGroups ? -3 : -2) as (string | undefined)[];
+    parts ??= parseReplacement(replacement, captures.length - 1, groups ? Object.keys(groups) : []);
+    return parts
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (typeof part === 'number') return captures[part] ?? '';
+        return groups?.[part.name] ?? '';
+      })
+      .join('');
+  };
+}
+
+function parseReplacement(replacement: string, groupCount: number, names: readonly string[]): ReplacementPart[] {
+  const parts: ReplacementPart[] = [];
+  for (let index = 0; index < replacement.length;) {
+    const char = replacement[index] as string;
+    if (char === '\\') {
+      if (index + 1 >= replacement.length)
+        throw new ReplacementError('IllegalArgumentException', 'character to be escaped is missing');
+      parts.push(replacement[index + 1] as string);
+      index += 2;
+    } else if (char === '$') {
+      index = readGroupReference(replacement, index + 1, groupCount, names, parts);
+    } else {
+      parts.push(char);
+      index++;
+    }
+  }
+  return parts;
+}
+
+/** Reads the group reference after a `$`, returning the index after it. */
+function readGroupReference(
+  replacement: string,
+  start: number,
+  groupCount: number,
+  names: readonly string[],
+  parts: ReplacementPart[]
+): number {
+  const next = replacement[start];
+  if (next === undefined)
+    throw new ReplacementError('IllegalArgumentException', 'Illegal group reference: group index is missing');
+  if (next === '{') {
+    const name = /^\{([a-zA-Z][a-zA-Z0-9]*)\}/.exec(replacement.slice(start))?.[1];
+    if (name === undefined)
+      throw new ReplacementError('IllegalArgumentException', "named capturing group is missing trailing '}'");
+    if (!names.includes(name)) throw new ReplacementError('IllegalArgumentException', `No group with name {${name}}`);
+    parts.push({ name });
+    return start + name.length + 2;
+  }
+  if (!/\d/.test(next)) throw new ReplacementError('IllegalArgumentException', 'Illegal group reference');
+  let group = Number(next);
+  if (group > groupCount) throw new ReplacementError('IndexOutOfBoundsException', `No group ${group}`);
+  let index = start + 1;
+  // Further digits belong to the number while it still names a group.
+  while (index < replacement.length && /\d/.test(replacement[index] as string)) {
+    const longer = group * 10 + Number(replacement[index]);
+    if (longer > groupCount) break;
+    group = longer;
+    index++;
+  }
+  parts.push(group);
+  return index;
 }

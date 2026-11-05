@@ -31,6 +31,9 @@ interface FunctionType {
 }
 
 /** Compiles lambdas and method references into objects of functional interfaces. */
+/** The lambdas that method references expand to. */
+const referenceLambdas = new WeakSet<Lambda>();
+
 export abstract class LambdaCompiler extends PatternCompiler {
   protected compileFunctional(
     context: MethodContext,
@@ -217,7 +220,9 @@ export abstract class LambdaCompiler extends PatternCompiler {
         return;
       };
     }
-    const returned = this.compileValueFor(context, body, returnType);
+    const compiled = this.compileValueFor(context, body, returnType);
+    // A method reference returns the method's erased result, which only its caller's use casts, as on the JVM.
+    const returned = referenceLambdas.has(lambda) ? { ...compiled, erasedType: undefined } : compiled;
     context.returnedTypes?.push(returned.type);
     const value = this.convert(returned, returnType, 'assignment', body).run;
     return (frame) => ({ kind: 'return', value: value(frame) });
@@ -384,7 +389,11 @@ export abstract class LambdaCompiler extends PatternCompiler {
       ...span,
     }));
     const args = parameters.map((parameter): Expression => ({ kind: 'name', name: parameter.name, ...span }));
-    const lambdaOf = (body: Expression): Lambda => ({ kind: 'lambda', parameters, body, ...span });
+    const lambdaOf = (body: Expression): Lambda => {
+      const lambda: Lambda = { kind: 'lambda', parameters, body, ...span };
+      referenceLambdas.add(lambda);
+      return lambda;
+    };
     const { target } = reference;
     const targetType = 'type' in target ? target.type : undefined;
     if (reference.name === 'new') {

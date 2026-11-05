@@ -80,6 +80,8 @@ export class HashStore {
   order: 'hash' | 'insertion' | 'sorted' = 'hash';
   /** For a sorted store, compares keys, which also decides which keys are the same. */
   compare?: (frame: Frame, a: Value, b: Value) => number;
+  /** For a sorted store, the `Comparator` that `compare` calls, or `undefined` for natural ordering. */
+  comparator?: Value;
 
   /**
    * Where `key` is or would go among a sorted store's entries, by binary search as a `TreeMap` descends its tree, so

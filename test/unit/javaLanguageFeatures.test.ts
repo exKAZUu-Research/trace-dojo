@@ -281,3 +281,13 @@ test("Java reads Unicode digits by Character.digit's rule, and formats with the 
     )
   ).toEqual({ a: 135, b: 18, c: 13, astral: 'rejected', f: '0xff 010 1.23e+03   3.2', h: 3.5 });
 });
+
+test("Java casts a generic result where javac's checkcast does, and not where it does not", () => {
+  expect(
+    finalVarsOf(
+      'Box<String> b = new Box<>(5); String casts = ""; for (Runnable r : List.<Runnable>of(() -> { int n = b.arr().length; }, () -> { for (String s : b.arr()) {} }, () -> { String s = "" + b.get(); }, () -> { var v = b.get(); }, () -> { String s = true ? b.get() : "x"; }, () -> { int n = b.data.length; }, () -> { Supplier<String> sp = b::get; sp.get(); }, () -> { Comparable<String> c = b.get(); }, () -> { Object o = b.get(); }, () -> { boolean x = b.get() == null; }, () -> b.get())) { try { r.run(); casts += "-"; } catch (ClassCastException e) { casts += "C"; } }',
+      '',
+      'class Box<T> { Object o; T[] data; @SuppressWarnings("unchecked") Box(Object o) { this.o = o; data = (T[]) new Object[] {o}; } @SuppressWarnings("unchecked") T get() { return (T) o; } @SuppressWarnings("unchecked") T[] arr() { return (T[]) new Object[] {o}; } }'
+    )
+  ).toEqual({ casts: 'CCCCCC-----' });
+});

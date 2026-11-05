@@ -61,7 +61,7 @@ export abstract class PatternCompiler extends TryCompiler {
   ): Compiled {
     const { pattern } = expression;
     if (!pattern) return super.compileInstanceOf(context, expression);
-    const value = this.compileValue(context, expression.value);
+    const value = this.compileValue(context, expression.value, false, true);
     if (!isReference(value.type))
       this.error(expression, `${typeName(value.type)} 型の値は instanceof で調べられません。`);
     const { test } = this.compilePattern(context, pattern, value.type);

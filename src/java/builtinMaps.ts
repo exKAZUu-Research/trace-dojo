@@ -5,6 +5,7 @@ import {
   classType,
   compareNatural,
   createIterator,
+  defaultRemoveClasses,
   defineSetEquality,
   describe,
   itemsOf,
@@ -405,6 +406,7 @@ function defineMapEntry(mapClass: ClassInfo, entryClass: ClassInfo, nodeClass: C
 export function restrictToImmutable(registry: Registry, cls: ClassInfo, name: string): ClassInfo {
   registry.classes.delete(cls.name);
   unmodifiableClasses.add(cls);
+  defaultRemoveClasses.add(cls);
   cls.name = name;
   cls.constructors = [];
   for (const method of cls.methods) {
@@ -733,6 +735,8 @@ export function createStore(receiver: Value, capacity = 16, comparator?: Value):
   store.capacity = capacity;
   store.order = STORE_ORDERS[object.cls.name] ?? 'hash';
   if (store.order === 'sorted') {
+    store.comparator = comparator;
+    if (comparator !== undefined) object.retained = [...(object.retained ?? []), comparator];
     store.compare =
       comparator === undefined
         ? compareNatural

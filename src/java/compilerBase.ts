@@ -20,8 +20,10 @@ import {
   type ClassType,
   erasure,
   type FieldInfo,
+  intersectionParts,
   isNumeric,
   isPrimitive,
+  isReference,
   isSubclass,
   isWidening,
   type JavaType,
@@ -81,6 +83,8 @@ export type Compiled = CompiledValue | { kind: 'class'; cls: ClassInfo };
 
 export interface Reference {
   type: JavaType;
+  /** For a field of a type variable's type read through a generic receiver, the erasure of its declared type. */
+  erasedType?: JavaType;
   /** The field this reference names, whose finality decides whether it may be assigned. */
   field?: FieldInfo;
   isArrayLength?: boolean;
@@ -188,14 +192,25 @@ export abstract class CompilerBase extends TypeResolver {
     this.atomicRows = new Set(options.trace?.atomicAnnotations.keys());
   }
 
-  protected abstract compileValue(context: MethodContext, expression: Expression, allowsVoid?: boolean): CompiledValue;
+  /**
+   * @param allowsVoid Whether the value may be void, as an expression statement's is; the value is then discarded,
+   *   so a generic call's result is not cast.
+   * @param keepsErasure Whether a generic call's or field's result stays uncast for the consumer to cast to the type it
+   *   needs, as a conversion does; otherwise it is cast to its instantiated type, as javac casts most uses.
+   */
+  protected abstract compileValue(
+    context: MethodContext,
+    expression: Expression,
+    allowsVoid?: boolean,
+    keepsErasure?: boolean
+  ): CompiledValue;
 
   /** Compiles an expression whose value is assigned to `type`, which a diamond may infer its type arguments from. */
   protected compileValueFor(context: MethodContext, expression: Expression, type: JavaType): CompiledValue {
     const isCreation = ['new', 'lambda', 'methodRef', 'call'].includes(expression.kind);
     this.targetType = isCreation ? type : undefined;
     try {
-      return this.compileValue(context, expression);
+      return this.compileValue(context, expression, false, true);
     } finally {
       this.targetType = undefined;
     }
@@ -404,13 +419,18 @@ export abstract class CompilerBase extends TypeResolver {
   }
 
   /**
-   * Casts a generic method's result to its instantiated type where `needed` is a type its erased type does not
-   * satisfy, so that a value that heap pollution put there fails with `ClassCastException` as on the JVM.
+   * Casts a generic method's or field's result to the erasure of the type a use `needs` (its instantiated type for a
+   * primitive), where its erased type does not satisfy it, as javac's checkcast does, so that a value that heap
+   * pollution put there fails with `ClassCastException` where it does on the JVM.
    */
   protected checkErased(value: CompiledValue, needed: JavaType): CompiledValue {
     const { erasedType, ...rest } = value;
-    if (!erasedType || isWidening(erasedType, erasure(needed), this.builtins.objectClass)) return rest;
-    const cast = castOperation(this.builtins.objectClass, erasedType, value.type);
+    const erased = erasure(isReference(needed) ? needed : value.type);
+    // An intersection type, such as an inferred `Number & Comparable`, erases to its first part.
+    const parts = erased.kind === 'class' ? intersectionParts.get(erased.cls) : undefined;
+    const target = parts?.[0] ? parts[0].type : erased;
+    if (!erasedType || isWidening(erasedType, target, this.builtins.objectClass)) return rest;
+    const cast = castOperation(this.builtins.objectClass, erasedType, target);
     if (!cast) return rest;
     return { ...rest, run: (frame) => cast(frame, value.run(frame)) };
   }
@@ -540,13 +560,14 @@ export abstract class CompilerBase extends TypeResolver {
       const arity = expression.kind === 'lambda' ? expression.parameters.length : undefined;
       return { kind: 'value', type: { kind: 'pending', arity }, run: () => {} };
     }
-    if (expression.kind !== 'call' && expression.kind !== 'new') return this.compileValue(context, expression);
+    if (expression.kind !== 'call' && expression.kind !== 'new')
+      return this.compileValue(context, expression, false, true);
     // A call such as `Comparator.comparing(s -> s.length())` may need the parameter it is passed to for the types
     // of its lambdas' parameters, so it waits for overload resolution when it cannot be typed on its own. So does
     // one whose type the call leaves partly undecided, as `Collectors.toList()` leaves its element type.
     let compiled: CompiledValue;
     try {
-      compiled = this.compileValue(context, expression);
+      compiled = this.compileValue(context, expression, false, true);
     } catch (error) {
       if (!(error instanceof CompileError) || !passesImplicitLambda(expression)) throw error;
       const polyErasure = this.polyErasureOf(context, expression);

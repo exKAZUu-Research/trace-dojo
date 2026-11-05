@@ -14,12 +14,14 @@ import { type Frame, throwBuiltin, UNASSIGNED } from './runtime';
 import {
   asSuper,
   type ClassInfo,
+  erasure,
   type FieldInfo,
   INT,
   isReference,
   isSubclass,
   isWidening,
   type JavaType,
+  sameType,
   thisTypeOf,
   typeName,
   upperBound,
@@ -161,6 +163,23 @@ export abstract class ReferenceCompiler extends CompilerBase {
     return this.fieldReference(field, receiver);
   }
 
+  /**
+   * In a constructor's prologue, the field that `name = ...` or `this.name = ...` assigns: a field the class declares
+   * without an initializer, which Java 25 lets the prologue assign though it may not read the object (JEP 513).
+   */
+  protected prologueFieldWrite(context: MethodContext, target: Expression): Reference | undefined {
+    if (!context.isBeforeConstructorCall) return undefined;
+    const isThisField = target.kind === 'fieldAccess' && target.object !== 'super' && target.object.kind === 'this';
+    const isFieldName = target.kind === 'name' && this.findLocal(context, target.name) === undefined;
+    if (!isThisField && !isFieldName) return undefined;
+    const field = this.findField(context.cls, (target as { name: string }).name);
+    if (!field || field.isStatic || field.owner !== context.cls) return undefined;
+    const hasInitializer = field.declaration?.declarators.some(
+      (declarator) => declarator.name === field.name && declarator.initializer !== undefined
+    );
+    return hasInitializer ? undefined : this.fieldReference(field, thisValue(context));
+  }
+
   /** Resolves `object.name`. */
   protected compileFieldReference(
     context: MethodContext,
@@ -224,9 +243,11 @@ export abstract class ReferenceCompiler extends CompilerBase {
   protected compileMemberOfValue(
     context: MethodContext,
     access: Extract<Expression, { kind: 'fieldAccess' }>,
-    object: CompiledValue
+    selected: CompiledValue
   ): Reference & { constant?: Value } {
     const { name } = access;
+    // Selecting a member uses the value at its instantiated type, which a generic result is cast to.
+    const object = this.checkErased(selected, selected.type);
     if (object.type.kind === 'array') {
       if (name !== 'length') this.error(access, `配列にフィールド ${name} はありません。`);
       return arrayLengthReference(object);
@@ -296,8 +317,11 @@ export abstract class ReferenceCompiler extends CompilerBase {
     }
     const object = receiver as CompiledValue;
     const assignMessage = nullMessage(`Cannot assign field "${name}"`, object.source);
+    const type = memberType(field.type, memberBindings(object.type, field.owner));
+    const erased = erasure(field.type);
     return {
-      type: memberType(field.type, memberBindings(object.type, field.owner)),
+      type,
+      erasedType: isReference(erased) && !sameType(erased, erasure(type)) ? erased : undefined,
       field,
       source,
       bind: (frame) => fieldAccessors(frame, object.run(frame), slot, readMessage, assignMessage),

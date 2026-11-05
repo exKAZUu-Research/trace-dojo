@@ -14,9 +14,27 @@ import { lazyComparator } from './builtinMaps';
 import { addConstructor, addInterface, addMethod, addTypeParameters } from './builtinSupport';
 import { type Frame, throwBuiltin } from './runtime';
 import { BOOLEAN, type ClassInfo, INT, type JavaType, VOID } from './types';
-import { type JavaObject, type Value } from './values';
+import { JavaObject, type Value } from './values';
 
 const comparators = new WeakMap<JavaObject, Value>();
+
+/**
+ * `PriorityQueue(Collection)`: a priority queue or a sorted set passes on its ordering, and its elements already form
+ * a heap in that order; other collections' elements are heapified in natural order.
+ */
+function fillFrom(frame: Frame, receiver: Value, source: Value, queueClass: ClassInfo): void {
+  const sorted = source instanceof JavaObject && source.store?.order === 'sorted' ? source.store : undefined;
+  const isQueue = source instanceof JavaObject && source.cls === queueClass;
+  create(receiver, isQueue ? comparators.get(source as JavaObject) : sorted?.comparator);
+  const heap = elementsOf(receiver);
+  for (const item of itemsOf(frame, source)) {
+    if (item === undefined) throwBuiltin(frame, 'NullPointerException');
+    heap.push(item);
+  }
+  frame.runtime.allocateArray(frame, heap.length);
+  if (isQueue || sorted) return;
+  for (let index = (heap.length >>> 1) - 1; index >= 0; index--) siftDown(frame, receiver, index, heap[index]);
+}
 
 /**
  * `PriorityQueue`, a binary heap in `elements` that sifts as the JDK's does, so that its iteration order and
@@ -45,14 +63,7 @@ export function definePriorityQueue(
     cls,
     [classType(lists.collectionClass, { kind: 'wildcard', bound: element, isSuper: false })],
     (frame, receiver, [source]) => {
-      create(receiver);
-      const heap = elementsOf(receiver);
-      for (const item of itemsOf(frame, source)) {
-        if (item === undefined) throwBuiltin(frame, 'NullPointerException');
-        heap.push(item);
-      }
-      frame.runtime.allocateArray(frame, heap.length);
-      for (let index = (heap.length >>> 1) - 1; index >= 0; index--) siftDown(frame, receiver, index, heap[index]);
+      fillFrom(frame, receiver, source, cls);
     }
   );
   defineReadMethods(cls, element, context, lists.itrClass, (frame, receiver, index) => {
