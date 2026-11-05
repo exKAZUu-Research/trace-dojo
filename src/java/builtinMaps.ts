@@ -23,7 +23,7 @@ import {
   type Registry,
 } from './builtinSupport';
 import { type Frame, throwBuiltin } from './runtime';
-import { BOOLEAN, type ClassInfo, createClass, INT, type JavaType, VOID } from './types';
+import { BOOLEAN, type ClassInfo, createClass, INT, type JavaType, type TypeVariable, VOID } from './types';
 import { HashStore, JavaObject, toInt32, type Value } from './values';
 
 // code-gauge-allow functionCognitiveComplexity 17 -- One registration per builtin method, each a small native.
@@ -164,7 +164,28 @@ export function defineHashMap(
     return cls;
   };
   for (const name of ['HashMap', 'LinkedHashMap', 'TreeMap']) defineClass(name);
+  defineMapEntry(mapClass, entryClass, nodeClass, objectType);
   return { mapClass, immutableMap: restrictToImmutable(registry, defineClass('MapN', 'ImmutableCollections$MapN')) };
+}
+
+/** `Map.entry`, whose entry holds its own key and value. */
+function defineMapEntry(mapClass: ClassInfo, entryClass: ClassInfo, nodeClass: ClassInfo, objectType: JavaType): void {
+  const [k, v] = ['K', 'V'].map((name): TypeVariable => ({ name, bounds: [objectType] }));
+  const [kType, vType] = [k, v].map((variable): JavaType => ({ kind: 'typeVar', variable }));
+  const method = addMethod(
+    mapClass,
+    'entry',
+    [kType, vType],
+    classType(entryClass, kType, vType),
+    true,
+    (frame, _, [key, value]) => {
+      if (key === undefined || value === undefined) throwBuiltin(frame, 'NullPointerException');
+      const node = frame.runtime.allocateObject(frame, nodeClass);
+      nodeEntries.set(node, { key, value });
+      return node;
+    }
+  );
+  method.typeParameters = [k, v];
 }
 
 /** Makes a map class the class of the maps `Map.of` returns, whose iteration order the JDK randomizes per run. */

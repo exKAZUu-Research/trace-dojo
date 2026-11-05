@@ -1,6 +1,6 @@
 import { javaEquals, javaHash } from './builtinCollections';
 import { stringify } from './builtins';
-import { addConstructor, addMethod, newString, type Registry } from './builtinSupport';
+import { addConstructor, addMethod, defineInterface, newString, type Registry } from './builtinSupport';
 import { type Frame, throwBuiltin } from './runtime';
 import { BOOLEAN, type ClassInfo, DOUBLE, INT, type JavaType, LONG, type TypeVariable, VOID } from './types';
 import type { JavaArray, JavaObject, JavaString, Value } from './values';
@@ -9,6 +9,7 @@ import { toInt32, toInt64 } from './values';
 export function defineMisc(registry: Registry, objectClass: ClassInfo, stringType: JavaType): void {
   defineObjects(registry, objectClass, stringType);
   defineRandom(registry, objectClass);
+  defineInterface(registry, 'Cloneable', 'java.lang');
   // Programs pause between turtle moves, which a trace shows step by step, so sleeping returns at once.
   const thread = registry.define('Thread', objectClass);
   const sleep = addMethod(thread, 'sleep', [LONG], VOID, true, () => {});

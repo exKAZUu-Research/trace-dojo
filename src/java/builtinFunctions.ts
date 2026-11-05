@@ -113,7 +113,7 @@ function defineFunctional(
 }
 
 // code-gauge-allow functionNcss 33 -- One registration per builtin method, each a small native.
-// code-gauge-allow functionNcss 34 -- One registration per builtin functional interface.
+// code-gauge-allow functionNcss 35 -- One registration per builtin functional interface.
 export function defineFunctions(
   registry: Registry,
   objectClass: ClassInfo,
@@ -154,6 +154,12 @@ export function defineFunctions(
     comparableClass
   );
   defineCaseInsensitiveOrder(registry.classes.get('String') as ClassInfo, comparator, objectClass);
+  defineEntryComparators(
+    context,
+    collections.mapClass.memberTypes.get('Entry') as ClassInfo,
+    comparator,
+    comparableClass
+  );
   definePredicateDefaults(predicate.cls, predicate.variables[0]);
   defineCollectionDefaults(context, collections, {
     consumer: consumer.cls,
@@ -165,6 +171,43 @@ export function defineFunctions(
     biFunction: biFunction.cls,
   });
   return { comparatorClass: comparator };
+}
+
+/** `Map.Entry.comparingByKey` and `comparingByValue`, which order entries by their keys' or values' natural order. */
+function defineEntryComparators(
+  context: Context,
+  entryClass: ClassInfo,
+  comparatorClass: ClassInfo,
+  comparableClass: ClassInfo
+): void {
+  for (const [name, getter] of [
+    ['comparingByKey', 'getKey'],
+    ['comparingByValue', 'getValue'],
+  ] as const) {
+    const [k, v] = ['K', 'V'].map((variableName): TypeVariable => ({
+      name: variableName,
+      bounds: [context.objectType],
+    }));
+    const [kType, vType] = [k, v].map((variable): JavaType => ({ kind: 'typeVar', variable }));
+    const ordered = getter === 'getKey' ? k : v;
+    ordered.bounds = [classType(comparableClass, superOf({ kind: 'typeVar', variable: ordered }))];
+    const method = addMethod(
+      entryClass,
+      name,
+      [],
+      classType(comparatorClass, classType(entryClass, kType, vType)),
+      true,
+      (frame) =>
+        functionObject(frame, comparatorClass, (callFrame, [a, b]) =>
+          compareNatural(
+            callFrame,
+            callFrame.runtime.invokeVirtual(callFrame, entryClass, getter, a, []),
+            callFrame.runtime.invokeVirtual(callFrame, entryClass, getter, b, [])
+          )
+        )
+    );
+    method.typeParameters = [k, v];
+  }
 }
 
 function defineCaseInsensitiveOrder(stringClass: ClassInfo, comparatorClass: ClassInfo, objectClass: ClassInfo): void {
