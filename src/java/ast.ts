@@ -64,6 +64,8 @@ export interface ClassDeclaration extends Span {
   isRecord?: boolean;
   /** The direct subclasses a sealed class or interface permits. */
   permits?: TypeSyntax[];
+  /** Whether a compact source file declares the class implicitly around its top-level fields and methods. */
+  isImplicit?: boolean;
   members: MemberDeclaration[];
 }
 

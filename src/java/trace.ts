@@ -45,11 +45,11 @@ class Snapshotter {
   /** The variables a frame shows: its locals, then static fields and the fields of `this` when `withContext`. */
   variablesOf(frame: Frame, withContext: boolean): Variables {
     const variables: Variables = { vars: {}, referenceVars: {} };
-    const isMain = frame.method === this.program.mainMethod;
+    const hidesArgs = frame.method === this.program.mainMethod && frame.method.parameterTypes.length === 1;
     for (const [slot, local] of frame.localInfos.entries()) {
       const value = frame.locals[slot];
       // `main`'s parameter only receives the launcher's arguments, which these programs never use.
-      if (value === UNASSIGNED || (isMain && slot === 0)) continue;
+      if (value === UNASSIGNED || (hidesArgs && slot === 0)) continue;
       addVariable(variables, local.name, value, local.type);
     }
     if (!withContext) return variables;

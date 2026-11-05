@@ -319,6 +319,23 @@ function defineSystem(registry: Registry, objectClass: ClassInfo, stringType: Ja
   addMethod(printStreamClass, 'println', [], VOID, false, (frame, receiver) => {
     if (receiver !== errorStream) frame.runtime.budget.print('\n');
   });
+  defineIO(registry, objectClass);
+}
+
+/** `IO`, which compact source files use to print without `System.out`. */
+function defineIO(registry: Registry, objectClass: ClassInfo): void {
+  const ioClass = registry.define('IO', objectClass);
+  for (const [name, suffix] of [
+    ['print', ''],
+    ['println', '\n'],
+  ] as const) {
+    addMethod(ioClass, name, [objectClass.type], VOID, true, (frame, _, [value]) => {
+      frame.runtime.budget.print(`${stringify(frame, value, objectClass.type)}${suffix}`);
+    });
+  }
+  addMethod(ioClass, 'println', [], VOID, true, (frame) => {
+    frame.runtime.budget.print('\n');
+  });
 }
 
 function defineString(stringClass: ClassInfo, objectType: JavaType): void {

@@ -33,6 +33,7 @@ import {
   type ClassType,
   createClass,
   type FieldInfo,
+  type JavaType,
   type MethodInfo,
   sameType,
   thisTypeOf,
@@ -45,6 +46,8 @@ export interface CompiledProgram {
   classes: ClassInfo[];
   entryClass: ClassInfo;
   mainMethod: MethodInfo;
+  /** For an instance `main`, the constructor that creates the object `main` runs on. */
+  entryConstructor?: MethodInfo;
   /** The value of a constant variable, which exists before its class is initialized. */
   constantOf: (field: FieldInfo) => Value;
   /** The value of a static field's initializer when it is a constant expression. */
@@ -71,35 +74,43 @@ class Compiler extends DeclarationCompiler {
     for (const row of this.atomicRows) {
       if (!this.usedAtomicRows.has(row)) this.error({ row, endRow: row, start: 0, end: 0 }, misplacedAtomicMessage);
     }
-    const { entryClass, mainMethod } = this.findEntry(ordered, unit.classes);
+    const { entryClass, mainMethod, entryConstructor } = this.findEntry(ordered, unit.classes);
     return {
       builtins: this.builtins,
       classes: ordered,
       entryClass,
       mainMethod,
+      entryConstructor,
       constantOf: (field) => this.constantOf(field),
       initialConstantOf: (field) => this.initialConstantOf(field),
     };
   }
 
+  /**
+   * Finds the `main` method to launch as the JDK's launcher does (JEP 512): a non-private `main` that takes a
+   * `String[]`, else one that takes nothing, either of which may be an instance method of a class with a non-private
+   * constructor that takes nothing.
+   */
   protected findEntry(
     ordered: ClassInfo[],
     declarations: ClassDeclaration[]
-  ): { entryClass: ClassInfo; mainMethod: MethodInfo } {
+  ): { entryClass: ClassInfo; mainMethod: MethodInfo; entryConstructor?: MethodInfo } {
+    const stringArray: JavaType = { kind: 'array', element: this.builtins.stringClass.type };
     for (const declaration of declarations) {
       const cls = ordered.find((candidate) => candidate.declaration === declaration) as ClassInfo;
-      const main = cls.methods.find(
-        (method) =>
-          method.name === 'main' &&
-          method.isStatic &&
-          method.returnType.kind === 'void' &&
-          method.parameterTypes.length === 1 &&
-          sameType(method.parameterTypes[0], {
-            kind: 'array',
-            element: this.builtins.stringClass.type,
-          })
+      const candidates = cls.methods.filter(
+        (method) => method.name === 'main' && method.returnType.kind === 'void' && method.access !== 'private'
       );
-      if (main) return { entryClass: cls, mainMethod: main };
+      const main =
+        candidates.find(
+          (method) => method.parameterTypes.length === 1 && sameType(method.parameterTypes[0], stringArray)
+        ) ?? candidates.find((method) => method.parameterTypes.length === 0);
+      if (!main) continue;
+      if (main.isStatic) return { entryClass: cls, mainMethod: main };
+      const entryConstructor = cls.constructors.find(
+        (constructor) => constructor.parameterTypes.length === 0 && constructor.access !== 'private'
+      );
+      if (entryConstructor && !cls.isAbstract) return { entryClass: cls, mainMethod: main, entryConstructor };
     }
     return this.error(
       declarations[0] ?? { row: 0, endRow: 0, start: 0, end: 0 },

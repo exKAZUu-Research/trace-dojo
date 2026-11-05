@@ -48,8 +48,11 @@ function runMain(runtime: Runtime, program: CompiledProgram): string | undefined
   const root = new Frame(runtime, undefined, [], undefined, undefined);
   try {
     runtime.initializeClass(root, program.entryClass);
-    const args = new JavaArray(program.builtins.stringClass.type, []);
-    runtime.invoke(root, program.mainMethod, undefined, [args], undefined);
+    const { mainMethod, entryConstructor } = program;
+    const receiver = entryConstructor ? runtime.allocateObject(root, program.entryClass) : undefined;
+    if (entryConstructor) runtime.invoke(root, entryConstructor, receiver, [], undefined);
+    const args = mainMethod.parameterTypes.length === 0 ? [] : [new JavaArray(program.builtins.stringClass.type, [])];
+    runtime.invoke(root, mainMethod, receiver, args, undefined);
     return undefined;
   } catch (error) {
     return describeUncaught(runtime, root, error);

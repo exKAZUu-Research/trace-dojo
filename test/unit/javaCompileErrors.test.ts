@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
-/** Programs with whether Java 21 compiles and launches them, given a `Turtle` class, as the interpreter must. */
+/** Programs with whether Java 25 compiles and launches them, given a `Turtle` class, as the interpreter must. */
 const programs: [name: string, runs: boolean, source: string][] = [
   [
     'valid',
@@ -131,7 +131,7 @@ const programs: [name: string, runs: boolean, source: string][] = [
     'class Main {\n  public static void main(String[] args) {\n    亀 相手 = new 亀(); System.out.println(相手.速さ);\n  }\n  \n}\nclass 亀 { private int 速さ = 1; }',
   ],
   ['missing-main', false, 'class Main {}'],
-  ['nonstatic-main', false, 'class Main { public void main(String[] args) {} }'],
+  ['nonstatic-main', true, 'class Main { public void main(String[] args) {} }'],
   [
     'uninitialized',
     false,

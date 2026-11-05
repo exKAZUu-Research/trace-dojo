@@ -135,3 +135,17 @@ test.each([
     diagnostics: [{ row: 1, message }],
   });
 });
+
+// The expected values are what Java 25 computes, which launches compact source files and instance main methods.
+test('Java runs a compact source file whose instance main reads its fields, methods, and classes', () => {
+  const program = `int count = 41;
+void main() {
+  count++;
+  String greeting = greet("Ann");
+  int total = new Helper().twice();
+  IO.println(greeting);
+}
+String greet(String name) { return "Hi " + name + " " + count; }
+class Helper { int twice() { return count * 2; } }`;
+  expect(traceProgram('java', program, program).finalVars).toEqual({ greeting: 'Hi Ann 42', total: 84 });
+});

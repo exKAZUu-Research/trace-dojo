@@ -207,6 +207,11 @@ function convertEnumConstant(node: Node): EnumConstant {
   };
 }
 
+/** A field or method of a compact source file, whose fields tree-sitter parses as declarations of local variables. */
+export function convertTopLevelMember(member: Node): MemberDeclaration {
+  return member.type === 'local_variable_declaration' ? convertField(member) : convertMember(member);
+}
+
 export function convertMember(member: Node): MemberDeclaration {
   switch (member.type) {
     case 'field_declaration':
