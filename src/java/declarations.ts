@@ -20,6 +20,7 @@ import {
   type FieldInfo,
   INT,
   isReference,
+  isSubclass,
   isWidening,
   type JavaType,
   type MethodInfo,
@@ -522,6 +523,7 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
   }
 
   protected checkAbstractMethods(cls: ClassInfo): void {
+    this.checkInheritedDefaults(cls);
     if (cls.isAbstract) return;
     for (const ancestor of [cls, ...superclassesOf(cls), ...superinterfacesOf(cls)]) {
       for (const method of ancestor.methods) {
@@ -532,6 +534,37 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
             `${KIND_NAMES[cls.kind]} ${cls.name} は抽象メソッド ${method.name} を実装していません。`
           );
         }
+      }
+    }
+  }
+
+  /**
+   * Rejects inheriting a default method together with another method of the same signature from an unrelated
+   * interface, which the class must then override to choose between them.
+   */
+  protected checkInheritedDefaults(cls: ClassInfo): void {
+    const inherited = superinterfacesOf(cls).flatMap((parent) =>
+      parent.methods.filter((method) => !method.isStatic && method.access !== 'private')
+    );
+    for (const method of inherited) {
+      if (method.isAbstract) continue;
+      const rivals = inherited.filter(
+        (other) =>
+          other !== method &&
+          other.name === method.name &&
+          sameParameters(other, method) &&
+          !isSubclass(method.owner, other.owner) &&
+          !isSubclass(other.owner, method.owner)
+      );
+      if (rivals.length === 0) continue;
+      const overriding = [cls, ...superclassesOf(cls)].some((current) =>
+        current.methods.some((other) => other.name === method.name && !other.isStatic && sameParameters(other, method))
+      );
+      if (!overriding) {
+        this.error(
+          cls.declaration as ClassDeclaration,
+          `${KIND_NAMES[cls.kind]} ${cls.name} は、${method.owner.name} と ${rivals[0].owner.name} から同じメソッド ${method.name} を受け継ぐので、${method.name} をオーバーライドしてください。`
+        );
       }
     }
   }

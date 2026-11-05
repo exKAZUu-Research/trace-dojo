@@ -247,11 +247,28 @@ function expressionAsTypeSyntax(node: Node): TypeSyntax | undefined {
 function convertMethodInvocation(node: Node): Expression {
   const typeArgs = node.childForFieldName('type_arguments');
   const object = node.childForFieldName('object');
-  if (node.children.some((child) => child?.type === 'super' && child.startIndex !== object?.startIndex))
+  // `Interface.super.m()` writes the interface where the object goes and `super` after it.
+  const superInterface =
+    object && node.children.some((child) => child?.type === 'super' && child.startIndex !== object.startIndex)
+      ? expressionAsTypeSyntax(object)
+      : undefined;
+  if (
+    object &&
+    !superInterface &&
+    node.children.some((child) => child?.type === 'super' && child.startIndex !== object.startIndex)
+  ) {
     unsupported(node, '修飾された super');
+  }
   return {
     kind: 'call',
-    object: object ? (object.type === 'super' ? 'super' : convertExpression(object)) : undefined,
+    object: superInterface
+      ? 'super'
+      : object
+        ? object.type === 'super'
+          ? 'super'
+          : convertExpression(object)
+        : undefined,
+    superInterface,
     name: field(node, 'name').text,
     args: convertArguments(field(node, 'arguments')),
     typeArgs: typeArgs ? namedChildren(typeArgs).map((type) => convertType(type)) : undefined,

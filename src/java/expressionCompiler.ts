@@ -1,5 +1,13 @@
 // code-gauge-allow-file fileNcss 453 -- The expression compiler keeps one method per expression kind together.
-import type { ArrayInitializer, BinaryOperator, ClassDeclaration, Expression, PatternBinding, Span } from './ast';
+import type {
+  ArrayInitializer,
+  BinaryOperator,
+  ClassDeclaration,
+  Expression,
+  PatternBinding,
+  Span,
+  TypeSyntax,
+} from './ast';
 import { classObjectOf, getBuiltins } from './builtins';
 import { box, boxedTypeOf, unbox } from './builtinWrappers';
 import {
@@ -1237,6 +1245,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (expression.object === undefined || expression.object === 'super') {
       const isSuper = expression.object === 'super';
       if (isSuper && context.isStatic) this.error(expression, 'static メソッドの中では super を使えません。');
+      if (expression.superInterface)
+        return this.resolveInterfaceSuperCall(context, expression, expression.superInterface);
       if (isSuper && context.cls.kind === 'interface')
         this.error(expression, 'インターフェースの中では super を使えません。');
       const owner = isSuper ? (context.cls.superclass as ClassInfo) : context.cls;
@@ -1380,6 +1390,25 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const bindings = new Map(variables.map((variable, index) => [variable, typeArgs[index]]));
       return [{ ...methodView(method, bindings), typeParameters: [], declared: method.declared ?? method }];
     });
+  }
+
+  /** `Interface.super.m()`, which calls the default method of a direct superinterface. */
+  protected resolveInterfaceSuperCall(
+    context: MethodContext,
+    expression: Extract<Expression, { kind: 'call' }>,
+    syntax: TypeSyntax
+  ): { candidates: MethodInfo[]; owner: ClassInfo; receiver: CompiledValue | undefined } {
+    const type = this.resolveType(syntax);
+    if (type.kind !== 'class' || type.cls.kind !== 'interface' || !context.cls.interfaces.includes(type.cls)) {
+      return this.error(expression, `${typeName(type)}.super は、直接実装しているインターフェースにしか使えません。`);
+    }
+    const receiver: CompiledValue = {
+      kind: 'value',
+      type: asSuper(thisTypeOf(context.cls), type.cls) ?? type,
+      run: (frame) => frame.thisObject,
+    };
+    const candidates = this.collectMethods(type.cls, expression.name).filter((method) => !method.isStatic);
+    return { candidates: this.viewMethods(candidates, receiver.type), owner: type.cls, receiver };
   }
 
   /** The methods as a receiver of `receiverType` sees them, with its type arguments substituted. */

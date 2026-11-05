@@ -394,6 +394,8 @@ export interface MethodCall extends Span {
   args: Expression[];
   /** Type arguments written before the name, as in `Collections.<String>emptyList()`. */
   typeArgs?: TypeSyntax[];
+  /** The interface whose default method `Interface.super.m()` calls, with `object` set to `super`. */
+  superInterface?: TypeSyntax;
 }
 
 export interface NewObject extends Span {
