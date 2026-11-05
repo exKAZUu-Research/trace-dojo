@@ -27,6 +27,8 @@ export interface Modifiers {
   isDefault: boolean;
   /** Whether `@Override` is written, which requires the method to override another. */
   hasOverride?: boolean;
+  /** `sealed`, which limits the direct subclasses to those `permits` lists, or `non-sealed`, which lifts the limit. */
+  sealing?: 'sealed' | 'non-sealed';
   access: 'public' | 'protected' | 'private' | 'package';
 }
 
@@ -60,6 +62,8 @@ export interface ClassDeclaration extends Span {
   enumConstants: EnumConstant[];
   /** Whether the class is a record, whose components the parser turns into fields, accessors, and a constructor. */
   isRecord?: boolean;
+  /** The direct subclasses a sealed class or interface permits. */
+  permits?: TypeSyntax[];
   members: MemberDeclaration[];
 }
 
@@ -226,8 +230,31 @@ export interface SwitchStatement extends Span {
 
 export interface SwitchGroup extends Span {
   /** `undefined` stands for `default`. */
-  labels: (Expression | undefined)[];
+  labels: (Expression | PatternLabel | undefined)[];
   statements: Statement[];
+}
+
+/** A case label that matches a pattern, as in `case Circle c when c.r > 0`. */
+export interface PatternLabel extends Span {
+  kind: 'patternLabel';
+  pattern: Pattern;
+  guard: Expression | undefined;
+}
+
+export type Pattern = TypePattern | RecordPattern;
+
+/** `Type name`, or `var name` inside a record pattern, which binds the matched value. */
+export interface TypePattern extends Span {
+  kind: 'typePattern';
+  type: TypeSyntax | undefined;
+  binding: PatternBinding;
+}
+
+/** `Point(int x, var y)`, which matches a record and its components. */
+export interface RecordPattern extends Span {
+  kind: 'recordPattern';
+  type: TypeSyntax;
+  components: Pattern[];
 }
 
 export interface BreakStatement extends Span {
@@ -462,6 +489,8 @@ export interface InstanceOf extends Span {
   type: TypeSyntax;
   /** The pattern variable, as in `o instanceof String s`, which holds the value where the test is known true. */
   binding: PatternBinding | undefined;
+  /** A record pattern, as in `o instanceof Point(int x, int y)`, which replaces `type` and `binding`. */
+  pattern?: RecordPattern;
 }
 
 export interface PatternBinding extends Span {

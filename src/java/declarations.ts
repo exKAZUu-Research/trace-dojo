@@ -168,6 +168,55 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
     return type;
   }
 
+  /**
+   * Resolves what sealed classes permit, by default the classes that extend them directly, and checks that each
+   * class extending a sealed one is permitted and says how it continues the hierarchy.
+   */
+  protected checkSealing(classes: readonly ClassInfo[]): void {
+    for (const cls of classes) {
+      const declaration = cls.declaration as ClassDeclaration;
+      if (declaration.modifiers.sealing !== 'sealed') {
+        if (declaration.permits)
+          this.error(declaration, `sealed ではない ${KIND_NAMES[cls.kind]} ${cls.name} には permits を書けません。`);
+        continue;
+      }
+      cls.permits = declaration.permits
+        ? this.withTypeScope(cls.enclosing, () =>
+            (declaration.permits as TypeSyntax[]).map((syntax) => {
+              const type = this.resolveType(syntax);
+              if (type.kind !== 'class') return this.error(syntax, 'permits にはクラスを書いてください。');
+              return type.cls;
+            })
+          )
+        : classes.filter((other) => other.superclass === cls || other.interfaces.includes(cls));
+      if (cls.permits.length === 0)
+        this.error(declaration, `sealed な ${KIND_NAMES[cls.kind]} ${cls.name} を継承するクラスがありません。`);
+    }
+    for (const cls of classes) {
+      const declaration = cls.declaration as ClassDeclaration;
+      const sealedParents = [cls.superclass, ...cls.interfaces].filter(
+        (parent): parent is ClassInfo => parent?.permits !== undefined
+      );
+      for (const parent of sealedParents) {
+        if (!parent.permits?.includes(cls))
+          this.error(
+            declaration,
+            `${cls.name} は sealed な ${parent.name} の permits に含まれていないので、継承できません。`
+          );
+      }
+      const continues = cls.isFinal || declaration.modifiers.sealing !== undefined;
+      if (sealedParents.length > 0 && !continues) {
+        this.error(
+          declaration,
+          `sealed な型を継承する ${cls.name} には、final か sealed か non-sealed を付けてください。`
+        );
+      }
+      if (declaration.modifiers.sealing === 'non-sealed' && sealedParents.length === 0) {
+        this.error(declaration, `${cls.name} は sealed な型を継承していないので、non-sealed を付けられません。`);
+      }
+    }
+  }
+
   protected declareMembers(cls: ClassInfo): void {
     // Supertypes come first, so their instance fields are final by now.
     const superclass = cls.superclass;

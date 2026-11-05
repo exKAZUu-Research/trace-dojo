@@ -20,7 +20,7 @@ import type {
   TryStatement,
   WhileStatement,
 } from './ast';
-import { booleanConstants } from './reachability';
+import { booleanConstants, exhaustiveSwitches } from './reachability';
 
 /**
  * Applies Java's definite assignment rules to the locals of one method body: a local is read only after every
@@ -392,7 +392,8 @@ class DefiniteAssignmentChecker {
           if (statement.isArrowForm) ends.push(end);
           else fallthrough = end;
         }
-        const hasDefault = statement.groups.some((group) => group.labels.includes(undefined));
+        const hasDefault =
+          statement.groups.some((group) => group.labels.includes(undefined)) || exhaustiveSwitches.has(statement);
         return join(fallthrough, ...ends, ...(hasDefault ? [] : [afterSelector]), ...target.breaks);
       });
     } finally {

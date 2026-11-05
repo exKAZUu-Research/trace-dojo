@@ -1,7 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
-import type { Modifiers, PrimitiveTypeName, Span, TypeParameter, TypeSyntax } from './ast';
+import type { Modifiers, Pattern, PrimitiveTypeName, Span, TypeParameter, TypeSyntax } from './ast';
 
 export function span(node: Node): Span {
   return {
@@ -86,6 +86,10 @@ const keywordModifiers = {
 } as const;
 
 function applyKeywordModifier(modifiers: Modifiers, child: Node): void {
+  if (child.text === 'sealed' || child.text === 'non-sealed') {
+    modifiers.sealing = child.text;
+    return;
+  }
   if (IGNORED_MODIFIERS.has(child.text)) return;
   const key = keywordModifiers[child.text as keyof typeof keywordModifiers] as
     | (typeof keywordModifiers)[keyof typeof keywordModifiers]
@@ -173,6 +177,38 @@ export function convertVariableType(node: Node): TypeSyntax {
   const type = convertType(field(node, 'type'));
   const dimensions = node.childForFieldName('dimensions');
   return dimensions ? wrapArray(type, countDimensions(dimensions), dimensions) : type;
+}
+
+/** Converts a type pattern or a record pattern. */
+export function convertPattern(node: Node): Pattern {
+  if (node.type === 'pattern') return convertPattern(namedChildren(node)[0]);
+  if (node.type === 'record_pattern') {
+    const [typeNode, body] = namedChildren(node);
+    // The grammar writes a record pattern's type as an identifier rather than a type.
+    const names = typeNode.text.split('.').map((part) => part.trim());
+    const type: TypeSyntax =
+      typeNode.type === 'identifier' || typeNode.type === 'scoped_identifier'
+        ? { kind: 'named', name: names.at(-1) as string, qualifier: names.slice(0, -1), ...span(typeNode) }
+        : convertType(typeNode);
+    return {
+      kind: 'recordPattern',
+      type,
+      components: namedChildren(body).map((component) => convertPattern(component)),
+      ...span(node),
+    };
+  }
+  if (node.type === 'record_pattern_component' && namedChildren(node)[0]?.type === 'record_pattern') {
+    return convertPattern(namedChildren(node)[0]);
+  }
+  const parts = namedChildren(node).filter((child) => child.type !== 'modifiers');
+  const name = parts.at(-1) as Node;
+  const typeNode = parts.length > 1 ? parts[0] : undefined;
+  return {
+    kind: 'typePattern',
+    type: typeNode && typeNode.text !== 'var' ? convertType(typeNode) : undefined,
+    binding: { name: name.text, isFinal: convertModifiers(modifiersOf(node)).isFinal, ...span(name) },
+    ...span(node),
+  };
 }
 
 export function identifierOf(node: Node, what: string): Node {

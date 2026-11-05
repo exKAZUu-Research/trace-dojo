@@ -70,7 +70,8 @@ function loopCanCompleteNormally(
 }
 
 function switchCanCompleteNormally(statement: Extract<Statement, { kind: 'switch' }>): boolean {
-  const hasDefault = statement.groups.some((group) => group.labels.includes(undefined));
+  const hasDefault =
+    statement.groups.some((group) => group.labels.includes(undefined)) || exhaustiveSwitches.has(statement);
   if (!hasDefault) return true;
   if (statement.groups.some((group) => group.statements.some((child) => containsJump(child, 'break')))) return true;
   if (statement.isArrowForm) {
@@ -79,6 +80,9 @@ function switchCanCompleteNormally(statement: Extract<Statement, { kind: 'switch
   const last = statement.groups.at(-1);
   return !last || last.statements.every((child) => canCompleteNormally(child));
 }
+
+/** The switches with patterns that the compiler found exhaustive, which act as if they had a default. */
+export const exhaustiveSwitches = new WeakSet<object>();
 
 /** The values of the boolean constant expressions compiled so far, which decide reachability in Java. */
 export const booleanConstants = new WeakMap<Expression, boolean>();

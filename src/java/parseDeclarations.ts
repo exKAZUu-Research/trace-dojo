@@ -30,7 +30,7 @@ import {
 import { convertBlock, convertDeclarator, convertStatement } from './parseStatement';
 
 export function convertTypeDeclaration(node: Node): ClassDeclaration {
-  if (node.childForFieldName('permits')) unsupported(node, 'permits');
+  const permitsNode = node.childForFieldName('permits');
   const kinds = {
     class_declaration: 'class',
     interface_declaration: 'interface',
@@ -61,6 +61,9 @@ export function convertTypeDeclaration(node: Node): ClassDeclaration {
     enumConstants,
     members,
     isRecord: header !== undefined,
+    permits: permitsNode
+      ? namedChildren(namedChildren(permitsNode)[0] ?? permitsNode).map((type) => convertType(type))
+      : undefined,
     ...span(node),
   };
 }

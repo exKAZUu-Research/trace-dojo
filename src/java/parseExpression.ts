@@ -13,6 +13,7 @@ import type {
 import { convertMember } from './parseDeclarations';
 import {
   convertModifiers,
+  convertPattern,
   convertType,
   convertVariableType,
   countDimensions,
@@ -322,12 +323,14 @@ function convertCast(node: Node): Expression {
 }
 
 function convertInstanceOf(node: Node): Expression {
-  if (node.childForFieldName('pattern')) unsupported(node, 'レコードのパターン');
+  const patternNode = node.childForFieldName('pattern');
+  const pattern = patternNode ? convertPattern(patternNode) : undefined;
   const name = node.childForFieldName('name');
   return {
     kind: 'instanceOf',
     value: convertExpression(field(node, 'left')),
-    type: convertType(field(node, 'right')),
+    type: pattern?.kind === 'recordPattern' ? pattern.type : convertType(field(node, 'right')),
+    pattern: pattern?.kind === 'recordPattern' ? pattern : undefined,
     binding: name
       ? { name: name.text, isFinal: node.children.some((child) => child?.type === 'final'), ...span(name) }
       : undefined,

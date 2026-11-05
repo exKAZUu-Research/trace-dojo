@@ -1,10 +1,12 @@
-import type { Expression, PatternBinding } from './ast';
+import type { Expression, Pattern, PatternBinding } from './ast';
 
 /** The pattern variables that `expression` introduces where it is `whenTrue`, as JLS 6.3.1 lists them. */
 export function bindingsWhen(expression: Expression, whenTrue: boolean): PatternBinding[] {
   switch (expression.kind) {
     case 'instanceOf': {
-      return whenTrue && expression.binding ? [expression.binding] : [];
+      if (!whenTrue) return [];
+      if (expression.pattern) return bindingsOfPattern(expression.pattern);
+      return expression.binding ? [expression.binding] : [];
     }
     case 'unary': {
       return expression.operator === '!' ? bindingsWhen(expression.operand, !whenTrue) : [];
@@ -20,4 +22,11 @@ export function bindingsWhen(expression: Expression, whenTrue: boolean): Pattern
       return [];
     }
   }
+}
+
+/** The variables a pattern declares, including those of the patterns nested in a record pattern. */
+export function bindingsOfPattern(pattern: Pattern): PatternBinding[] {
+  return pattern.kind === 'typePattern'
+    ? [pattern.binding]
+    : pattern.components.flatMap((component) => bindingsOfPattern(component));
 }

@@ -28,7 +28,7 @@ import {
 import { assignedNames } from './definiteAssignment';
 import { ExpressionCompiler } from './expressionCompiler';
 import { bindingsWhen } from './patternBindings';
-import { canCompleteNormally, containsJump } from './reachability';
+import { canCompleteNormally, containsJump, exhaustiveSwitches } from './reachability';
 import { type Frame, JavaThrow, throwBuiltin, UNASSIGNED } from './runtime';
 import { isObjectCreation, onlyCalls } from './stepRules';
 import {
@@ -320,7 +320,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
             )
           )
         );
-    if (!hasDefault && !coversEnum)
+    if (!hasDefault && !coversEnum && !exhaustiveSwitches.has(expression))
       this.error(expression, 'switch 式がすべての場合を網羅していません。default を書いてください。');
     const groupsEnding = expression.isArrowForm ? expression.groups : expression.groups.slice(-1);
     for (const group of groupsEnding) {
@@ -706,7 +706,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     let defaultIndex = -1;
     const labelValues = statement.groups.map((group, index) =>
       group.labels.flatMap((label) => {
-        if (label) return [this.compileCaseConstant(context, label, selectorType, seen)];
+        // A classic switch has no patterns, which select the pattern switch instead.
+        if (label) return [this.compileCaseConstant(context, label as Expression, selectorType, seen)];
         if (defaultIndex !== -1) this.error(group, 'default が複数あります。');
         defaultIndex = index;
         return [];

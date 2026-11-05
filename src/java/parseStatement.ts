@@ -6,6 +6,7 @@ import type {
   Expression,
   ExpressionStatement,
   LocalVariableDeclaration,
+  PatternLabel,
   Resource,
   Statement,
   SwitchGroup,
@@ -15,6 +16,7 @@ import { convertTypeDeclaration } from './parseDeclarations';
 import { convertArrayInitializer, convertExpression } from './parseExpression';
 import {
   convertModifiers,
+  convertPattern,
   convertType,
   convertVariableType,
   countDimensions,
@@ -203,7 +205,7 @@ export function convertSwitchParts(
 }
 
 function convertSwitchGroup(groupNode: Node, isExpression: boolean): SwitchGroup {
-  const labels: (Expression | undefined)[] = [];
+  const labels: (Expression | PatternLabel | undefined)[] = [];
   const statements: Statement[] = [];
   const isRule = groupNode.type === 'switch_rule';
   for (const child of statementNodes(groupNode)) {
@@ -216,13 +218,22 @@ function convertSwitchGroup(groupNode: Node, isExpression: boolean): SwitchGroup
 }
 
 /** `undefined` stands for `default`. */
-function convertSwitchLabel(label: Node): (Expression | undefined)[] {
+function convertSwitchLabel(label: Node): (Expression | PatternLabel | undefined)[] {
   const values = namedChildren(label);
-  if (values.length === 0) return [undefined];
-  return values.map((value) => {
-    if (value.type === 'pattern' || value.type === 'guard') unsupported(value, 'パターンマッチング');
-    return convertExpression(value);
-  });
+  const isDefault = label.children.some((child) => child?.type === 'default');
+  const guardNode = values.find((value) => value.type === 'guard');
+  const labels = values
+    .filter((value) => value.type !== 'guard')
+    .map((value): Expression | PatternLabel => {
+      if (value.type !== 'pattern') return convertExpression(value);
+      return {
+        kind: 'patternLabel',
+        pattern: convertPattern(value),
+        guard: guardNode ? convertExpression(namedChildren(guardNode)[0]) : undefined,
+        ...span(value),
+      };
+    });
+  return isDefault ? [...labels, undefined] : labels;
 }
 
 function convertJump(node: Node): Statement {

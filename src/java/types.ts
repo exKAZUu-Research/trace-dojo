@@ -140,6 +140,8 @@ export interface ClassInfo {
   isBuiltin: boolean;
   /** The primitive type a wrapper class such as `Integer` boxes. */
   unboxedType?: JavaType;
+  /** The direct subclasses a sealed class or interface permits. */
+  permits?: ClassInfo[];
   /** The fields of a record's components, in declaration order. */
   recordComponents?: FieldInfo[];
   /** Whether instances hold an instance of the enclosing class, as inner, local, and anonymous classes may. */

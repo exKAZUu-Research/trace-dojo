@@ -1,6 +1,7 @@
 import { functionalMethodOf } from './builtinFunctions';
 import type { Builtins } from './builtins';
 import { boxedTypeOf } from './builtinWrappers';
+import { conditionalType } from './operators';
 import {
   asSuper,
   bindingsOf,
@@ -129,8 +130,15 @@ export function infer(
     const inferred = isPrimitive(argType) ? boxedTypeOf(builtins.wrappers, argType) : argType;
     if (!inferred) return;
     const existing = bindings.get(parameterType.variable);
-    if (!existing || isWidening(existing, inferred, builtins.objectClass))
+    if (!existing || isWidening(existing, inferred, builtins.objectClass)) {
       bindings.set(parameterType.variable, inferred);
+    } else if (!isWidening(inferred, existing, builtins.objectClass)) {
+      // Arguments of unrelated types make the variable their least upper bound.
+      bindings.set(
+        parameterType.variable,
+        conditionalType(builtins.objectClass, existing, inferred) ?? builtins.objectClass.type
+      );
+    }
     return;
   }
   if (parameterType.kind === 'array' && argType.kind === 'array') {

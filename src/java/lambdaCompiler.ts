@@ -4,8 +4,8 @@ import { functionalMethodOf, functionObject } from './builtinFunctions';
 import type { CompiledValue, Exec, MethodContext } from './compilerBase';
 import { memberBindings, methodView } from './conversions';
 import { checkDefiniteAssignment } from './definiteAssignment';
+import { PatternCompiler } from './patternCompiler';
 import { canCompleteNormally } from './reachability';
-import { StatementCompiler } from './statementCompiler';
 import { type ClassInfo, type JavaType, type MethodInfo, sameType, typeName, upperBound } from './types';
 
 /** The functional interface a lambda implements and the signature its body must have. */
@@ -17,7 +17,7 @@ interface FunctionType {
 }
 
 /** Compiles lambdas and method references into objects of functional interfaces. */
-export abstract class LambdaCompiler extends StatementCompiler {
+export abstract class LambdaCompiler extends PatternCompiler {
   protected compileFunctional(
     context: MethodContext,
     expression: Extract<Expression, { kind: 'lambda' | 'methodRef' }>,
