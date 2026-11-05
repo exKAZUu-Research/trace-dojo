@@ -215,6 +215,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
     anonymous?: { superConstructor: MethodInfo | undefined; base: Extract<JavaType, { kind: 'class' }> }
   ): ClassInfo;
 
+  /** Infers what a generic method's lambda arguments decide through the values they return. */
+  protected abstract inferFromLambdas(
+    context: MethodContext,
+    method: MethodInfo,
+    args: readonly CompiledValue[],
+    expressions: readonly Expression[]
+  ): Map<TypeVariable, JavaType> | undefined;
+
   /** Compiles a lambda or a method reference into an object of the functional interface `target`. */
   protected abstract compileFunctional(
     context: MethodContext,
@@ -1140,7 +1148,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
       explicitTypeArgs ? this.withTypeArguments(target.candidates, explicitTypeArgs) : target.candidates,
       args.map((arg) => arg.type),
       `メソッド ${expression.name}`,
-      targetType
+      targetType,
+      (candidate) => this.inferFromLambdas(context, candidate, args, expression.args)
     );
     const declared = method.declared ?? method;
     if (target.receiver === undefined && expression.object === undefined && !method.isStatic) {

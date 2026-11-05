@@ -527,12 +527,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       return () => completion;
     }
     if (context.returnType.kind === 'void') this.error(statement, '戻り値の型が void のメソッドは値を返せません。');
-    const value = this.convert(
-      this.compileValueFor(context, statement.value, context.returnType),
-      context.returnType,
-      'assignment',
-      statement.value
-    ).run;
+    const returned = this.compileValueFor(context, statement.value, context.returnType);
+    context.returnedTypes?.push(returned.type);
+    const value = this.convert(returned, context.returnType, 'assignment', statement.value).run;
     return (frame) => ({ kind: 'return', value: value(frame) });
   }
 

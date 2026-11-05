@@ -122,6 +122,8 @@ export interface MethodContext {
   assignmentCounts: Map<number, number>;
   /** The locals declared without an initializer, which one assignment may initialize and still be effectively final. */
   uninitializedSlots: Set<number>;
+  /** For a lambda body, the types of the values it returns, from which a generic method infers its result. */
+  returnedTypes?: JavaType[];
 }
 
 export interface Capture {
@@ -768,11 +770,12 @@ export abstract class CompilerBase {
     candidates: MethodInfo[],
     argTypes: JavaType[],
     what: string,
-    targetType?: JavaType
+    targetType?: JavaType,
+    presetsOf?: (method: MethodInfo) => Map<TypeVariable, JavaType> | undefined
   ): MethodInfo {
     const objectClass = this.builtins.objectClass;
     const instantiated = candidates.flatMap(
-      (method) => instantiateMethod(this.builtins, method, argTypes, targetType) ?? []
+      (method) => instantiateMethod(this.builtins, method, argTypes, targetType, presetsOf?.(method)) ?? []
     );
     // Java first looks for methods applicable without boxing, and boxes only when none is.
     const applicableBy = (allowsBoxing: boolean): MethodInfo[] =>
@@ -789,7 +792,8 @@ export abstract class CompilerBase {
     if (applicable.length === 0) {
       applicable = candidates.flatMap((method) => {
         const expanded = expandVarargs(method, argTypes.length);
-        const instantiatedVarargs = expanded && instantiateMethod(this.builtins, expanded, argTypes, targetType);
+        const instantiatedVarargs =
+          expanded && instantiateMethod(this.builtins, expanded, argTypes, targetType, presetsOf?.(method));
         const fits =
           instantiatedVarargs?.parameterTypes.every((type, index) =>
             isInvocationConvertible(this.builtins, argTypes[index], type, true)

@@ -88,16 +88,18 @@ export function methodView(method: MethodInfo, bindings: ReadonlyMap<TypeVariabl
  * `undefined` when an inferred type falls outside its bounds.
  *
  * @param targetType The type the call's value is assigned to, which decides the type parameters the arguments do not.
+ * @param presets Type arguments already inferred, as from the values lambda arguments return.
  */
 export function instantiateMethod(
   builtins: Builtins,
   method: MethodInfo,
   argTypes: readonly JavaType[],
-  targetType?: JavaType
+  targetType?: JavaType,
+  presets?: ReadonlyMap<TypeVariable, JavaType>
 ): MethodInfo | undefined {
   const variables = method.typeParameters ?? [];
   if (variables.length === 0) return method;
-  const bindings = new Map<TypeVariable, JavaType>();
+  const bindings = new Map<TypeVariable, JavaType>(presets);
   for (const [index, parameterType] of method.parameterTypes.entries()) {
     const argType = argTypes[index] as JavaType | undefined;
     if (argType) infer(builtins, parameterType, argType, variables, bindings);

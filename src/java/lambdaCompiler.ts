@@ -1,12 +1,24 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { Expression, Lambda, MethodReference, Parameter, Span } from './ast';
 import { functionalMethodOf, functionObject } from './builtinFunctions';
+import { boxedTypeOf } from './builtinWrappers';
 import type { CompiledValue, Exec, MethodContext } from './compilerBase';
-import { memberBindings, methodView } from './conversions';
+import { infer, memberBindings, methodView, rawify } from './conversions';
 import { checkDefiniteAssignment } from './definiteAssignment';
 import { PatternCompiler } from './patternCompiler';
 import { canCompleteNormally } from './reachability';
-import { type ClassInfo, type JavaType, type MethodInfo, sameType, typeName, upperBound } from './types';
+import {
+  type ClassInfo,
+  type ClassType,
+  isPrimitive,
+  type JavaType,
+  type MethodInfo,
+  sameType,
+  substitute,
+  typeName,
+  type TypeVariable,
+  upperBound,
+} from './types';
 
 /** The functional interface a lambda implements and the signature its body must have. */
 interface FunctionType {
@@ -48,7 +60,12 @@ export abstract class LambdaCompiler extends PatternCompiler {
     };
   }
 
-  protected compileLambda(context: MethodContext, lambda: Lambda, functionType: FunctionType): CompiledValue {
+  protected compileLambda(
+    context: MethodContext,
+    lambda: Lambda,
+    functionType: FunctionType,
+    returnedTypes?: JavaType[]
+  ): CompiledValue {
     const { parameterTypes, returnType, iface } = functionType;
     if (lambda.parameters.length !== parameterTypes.length) {
       this.error(
@@ -59,6 +76,7 @@ export abstract class LambdaCompiler extends PatternCompiler {
     const lambdaContext: MethodContext = {
       ...this.newContext(context.cls, context.isStatic, returnType, functionType.method.thrownTypes),
       enclosing: context,
+      returnedTypes,
     };
     const types = lambda.parameters.map((parameter, index) => {
       if (!parameter.type) return parameterTypes[index];
@@ -142,8 +160,67 @@ export abstract class LambdaCompiler extends PatternCompiler {
         return;
       };
     }
-    const value = this.convert(this.compileValueFor(context, body, returnType), returnType, 'assignment', body).run;
+    const returned = this.compileValueFor(context, body, returnType);
+    context.returnedTypes?.push(returned.type);
+    const value = this.convert(returned, returnType, 'assignment', body).run;
     return (frame) => ({ kind: 'return', value: value(frame) });
+  }
+
+  /**
+   * Infers the type parameters of a generic method that its lambda arguments decide through the values they return,
+   * as in `stream.map(s -> s.length())`, by compiling each lambda against what the other arguments decide.
+   */
+  protected inferFromLambdas(
+    context: MethodContext,
+    method: MethodInfo,
+    args: readonly CompiledValue[],
+    expressions: readonly Expression[]
+  ): Map<TypeVariable, JavaType> | undefined {
+    const variables = method.typeParameters ?? [];
+    if (variables.length === 0 || !args.some((arg) => arg.type.kind === 'pending')) return;
+    if (method.parameterTypes.length !== args.length) return;
+    const bindings = new Map<TypeVariable, JavaType>();
+    for (const [index, arg] of args.entries()) {
+      if (arg.type.kind !== 'pending')
+        infer(this.builtins, method.parameterTypes[index], arg.type, variables, bindings);
+    }
+    for (const [index, arg] of args.entries()) {
+      if (arg.type.kind !== 'pending') continue;
+      const parameterType = substitute(method.parameterTypes[index], bindings);
+      const bound = upperBound(parameterType);
+      const functional = bound.kind === 'class' ? functionalMethodOf(bound.cls, this.builtins.objectClass) : undefined;
+      if (bound.kind !== 'class' || !functional) continue;
+      const unresolved = variables.filter((variable) => !bindings.has(variable));
+      // The functional interface's result in terms of the method's type parameters, as in `? extends R`.
+      const declared = method.parameterTypes[index] as ClassType;
+      const samResult = substitute(functional.returnType, memberBindings(declared, functional.owner));
+      const declaredResult =
+        samResult.kind === 'wildcard' ? (samResult.isSuper ? undefined : samResult.bound) : samResult;
+      if (!declaredResult || !mentionsAny(declaredResult, unresolved)) continue;
+      const returned = this.lambdaReturnType(context, expressions[index], rawify(parameterType, unresolved, true));
+      if (!returned) continue;
+      const boxedReturn = isPrimitive(returned)
+        ? (boxedTypeOf(this.builtins.wrappers, returned) ?? returned)
+        : returned;
+      infer(this.builtins, declaredResult, boxedReturn, variables, bindings);
+    }
+    return bindings;
+  }
+
+  /** The type a lambda argument returns when compiled against `target`, or `undefined` when that fails. */
+  protected lambdaReturnType(context: MethodContext, expression: Expression, target: JavaType): JavaType | undefined {
+    if (expression.kind !== 'lambda' && expression.kind !== 'methodRef') return;
+    try {
+      const functionType = this.functionTypeOf(expression, target);
+      const lambda =
+        expression.kind === 'lambda' ? expression : this.expandMethodReference(context, expression, functionType);
+      const returnedTypes: JavaType[] = [];
+      this.compileLambda(context, lambda, functionType, returnedTypes);
+      return returnedTypes.find((type) => type.kind !== 'null');
+    } catch (error) {
+      if (error instanceof CompileError) return;
+      throw error;
+    }
   }
 
   /**
@@ -240,4 +317,25 @@ function expressionAsType(expression: Expression): Extract<Lambda['parameters'][
   const names = [current.name, ...parts];
   const { row, endRow, start, end } = expression;
   return { kind: 'named', name: names.at(-1) as string, qualifier: names.slice(0, -1), row, endRow, start, end };
+}
+
+/** Whether `type` mentions any of `variables`. */
+function mentionsAny(type: JavaType, variables: readonly TypeVariable[]): boolean {
+  switch (type.kind) {
+    case 'typeVar': {
+      return variables.includes(type.variable);
+    }
+    case 'class': {
+      return type.args?.some((arg) => mentionsAny(arg, variables)) ?? false;
+    }
+    case 'array': {
+      return mentionsAny(type.element, variables);
+    }
+    case 'wildcard': {
+      return type.bound !== undefined && mentionsAny(type.bound, variables);
+    }
+    default: {
+      return false;
+    }
+  }
 }
