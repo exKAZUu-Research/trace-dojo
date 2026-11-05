@@ -2,7 +2,7 @@ import { javaEquals, javaHash } from './builtinCollections';
 import { stringify } from './builtins';
 import { addConstructor, addMethod, defineInterface, newString, type Registry } from './builtinSupport';
 import { type Frame, throwBuiltin } from './runtime';
-import { BOOLEAN, type ClassInfo, DOUBLE, INT, type JavaType, LONG, type TypeVariable, VOID } from './types';
+import { BOOLEAN, type ClassInfo, DOUBLE, FLOAT, INT, type JavaType, LONG, type TypeVariable, VOID } from './types';
 import type { JavaArray, JavaObject, JavaString, Value } from './values';
 import { toInt32, toInt64 } from './values';
 
@@ -131,6 +131,7 @@ function defineRandom(registry: Registry, objectClass: ClassInfo): void {
   );
   addMethod(cls, 'nextBoolean', [], BOOLEAN, false, (_, receiver) => next(randomOf(receiver), 1) !== 0);
   addMethod(cls, 'nextDouble', [], DOUBLE, false, (_, receiver) => nextDouble(randomOf(receiver)));
+  addMethod(cls, 'nextFloat', [], FLOAT, false, (_, receiver) => Math.fround(next(randomOf(receiver), 24) / 2 ** 24));
   const mathClass = registry.classes.get('Math') as ClassInfo;
   addMethod(mathClass, 'random', [], DOUBLE, true, () => Math.random());
 }
