@@ -1,0 +1,137 @@
+import { expect, test } from 'vitest';
+
+import { executeProgram, traceProgram } from '../../src/interpreter/program';
+
+/** Runs `body` in `main`, after `members` of `Main` and the top-level `declarations`, returning main's final variables. */
+function finalVarsOf(body: string, members = '', declarations = ''): unknown {
+  const program = `import java.util.*;\nimport java.util.function.*;\nimport java.util.stream.*;\n${declarations}\npublic class Main {\n${members}\n  public static void main(String[] args) {\n${body}\n  }\n}`;
+  return traceProgram('java', program, program).finalVars;
+}
+
+interface Context {
+  members?: string;
+  declarations?: string;
+}
+
+// The expected values are what Java 21 computes for the same programs.
+test.each<[name: string, body: string, context: Context, expected: Record<string, unknown>]>([
+  [
+    'long, float, byte, and short arithmetic',
+    'long big = Integer.MAX_VALUE + 1L; float f = 0.1f * 3; byte b = (byte) 200; short s = (short) 70000; String text = "" + f + " " + (1L << 40);',
+    {},
+    { big: 2_147_483_648, f: 0.3, b: -56, s: 4464, text: '0.3 1099511627776' },
+  ],
+  [
+    'interfaces with default methods and enums with constant bodies',
+    'Shape sq = new Square(2); String d = sq.describe(); int r = Op.PLUS.apply(2, 3) * Op.TIMES.apply(2, 3); String names = Arrays.toString(Op.values());',
+    {
+      declarations: `interface Shape { double area(); default String describe() { return "area " + area(); } }
+class Square implements Shape { final double side; Square(double side) { this.side = side; } public double area() { return side * side; } }
+enum Op { PLUS { int apply(int a, int b) { return a + b; } }, TIMES { int apply(int a, int b) { return a * b; } }; abstract int apply(int a, int b); }`,
+    },
+    { d: 'area 4.0', r: 30, names: '[PLUS, TIMES]' },
+  ],
+  [
+    'switch expressions, pattern matching, and text blocks',
+    `Object o = new Point(2, 2);
+String kind = switch (o) { case Point(int x, int y) when x == y -> "diagonal " + x; case Point p -> "point"; default -> "other"; };
+int days = switch ("FEB") { case "JAN", "MAR" -> 31; case "FEB" -> { int d = 28; yield d; } default -> 30; };
+String block = """
+    a
+      b
+    """;`,
+    { declarations: 'record Point(int x, int y) {}' },
+    { kind: 'diagonal 2', days: 28, block: 'a\n  b\n' },
+  ],
+  [
+    'generics and the Integer cache',
+    'Integer a = 127, b = 127, c = 128, d = 128; boolean small = a == b; boolean large = c == d; Box<String> box = new Box<>("x"); String value = box.get() + Main.<Integer>first(List.of(9));',
+    {
+      members: 'static <T> T first(List<T> items) { return items.get(0); }',
+      declarations:
+        'class Box<T> { private final T value; Box(T value) { this.value = value; } T get() { return value; } }',
+    },
+    { a: 127, b: 127, c: 128, d: 128, small: true, large: false, value: 'x9' },
+  ],
+  [
+    "collections in Java's iteration order",
+    'Map<String, Integer> counts = new HashMap<>(); for (String w : "the cat the end".split(" ")) counts.merge(w, 1, Integer::sum); String text = counts.toString(); Deque<Integer> dq = new ArrayDeque<>(); dq.push(1); dq.offerLast(2); String deque = dq.toString();',
+    {},
+    { text: '{the=2, cat=1, end=1}', deque: '[1, 2]' },
+  ],
+  [
+    'lambdas, method references, and streams',
+    'List<String> words = List.of(" kiwi ", "fig", "apple"); int total = words.stream().map(String::trim).mapToInt(s -> s.length()).sum(); String sorted = words.stream().map(String::trim).sorted(Comparator.comparing(String::length)).collect(Collectors.joining(",")); int base = 10; Function<Integer, Integer> add = x -> x + base; int eleven = add.apply(1);',
+    {},
+    { total: 12, sorted: 'fig,kiwi,apple', base: 10, eleven: 11 },
+  ],
+  [
+    'inner, local, and anonymous classes',
+    `Main outer = new Main(); Main.Counter c = outer.new Counter(); c.tick(); c.tick();
+int base = 5;
+class Local { int plus(int x) { return x + base; } }
+int local = new Local().plus(1);
+Comparator<String> byLength = new Comparator<>() { public int compare(String x, String y) { return x.length() - y.length(); } };
+int compared = byLength.compare("aa", "b");`,
+    { members: 'int count; class Counter { void tick() { count++; } }' },
+    { base: 5, local: 6, compared: 1 },
+  ],
+  [
+    'records, sealed interfaces, and try-with-resources',
+    `Shape s = new Circle(1);
+double area = switch (s) { case Circle c -> 3 * c.r() * c.r(); case Square q -> q.side() * q.side(); };
+String text = new Circle(2).toString(); boolean same = new Circle(2).equals(new Circle(2));
+StringBuilder log = new StringBuilder();
+try (Res r = new Res(log)) { log.append("use;"); }
+String closed = log.toString();`,
+    {
+      declarations: `sealed interface Shape permits Circle, Square {}
+record Circle(double r) implements Shape {}
+record Square(double side) implements Shape {}
+class Res implements AutoCloseable { final StringBuilder log; Res(StringBuilder log) { this.log = log; } public void close() { log.append("close;"); } }`,
+    },
+    { area: 3, text: 'Circle[r=2.0]', same: true, closed: 'use;close;' },
+  ],
+  [
+    'seeded random numbers, formatting, and constant strings',
+    'Random random = new Random(42); int first = random.nextInt(100); String formatted = String.format("%5.2f|%,d", 3.14159, 1234567); boolean interned = "ab" == "a" + "b";',
+    {},
+    { first: 30, formatted: ' 3.14|1,234,567', interned: true },
+  ],
+])('Java runs %s as javac and the JVM do', (_, body, { members, declarations }, expected) => {
+  expect(finalVarsOf(body, members, declarations)).toMatchObject(expected);
+});
+
+test.each([
+  [
+    '@Override on a method that overrides nothing',
+    'class A { void f() {} }\nclass B extends A { @Override void g() {} }',
+    'メソッド g には @Override が付いていますが、親クラスやインターフェースのメソッドをオーバーライドしていません。',
+  ],
+  [
+    'a lambda reading a local assigned again',
+    'class C { void f() { int x = 1;\nRunnable r = () -> System.out.println(x); x = 2; } }',
+    'ラムダ式の中から使うローカル変数 x は、final か実質的に final (一度しか代入しない) である必要があります。',
+  ],
+  [
+    'a switch expression that misses a case',
+    'enum E { A, B }\nclass C { int f(E e) { return switch (e) { case A -> 1; }; } }',
+    'switch 式がすべての場合を網羅していません。default を書いてください。',
+  ],
+  [
+    'an interface method implemented without public',
+    'interface I { void f(); }\nclass C implements I { void f() {} }',
+    'メソッド f はインターフェース I のメソッドをオーバーライドするので、public を付ける必要があります。',
+  ],
+  [
+    'a class extending a sealed interface it is not permitted to',
+    'sealed interface S permits A {}\nfinal class B implements S {}\nfinal class A implements S {}',
+    'B は sealed な S の permits に含まれていないので、継承できません。',
+  ],
+])('Java rejects %s', (_, declarations, message) => {
+  const source = `${declarations}\npublic class Main { public static void main(String[] args) {} }`;
+  expect(executeProgram('java', source)).toEqual({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message }],
+  });
+});
