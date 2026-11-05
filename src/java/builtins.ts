@@ -1,5 +1,5 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
-import { type Collections, defineCollections } from './builtinCollections';
+import { type Collections, defineCollections, javaEquals, javaHash } from './builtinCollections';
 import { defineFunctions, type Functions } from './builtinFunctions';
 import {
   addConstant,
@@ -14,15 +14,17 @@ import {
 } from './builtinSupport';
 import { defineText } from './builtinText';
 import { defineUtilities } from './builtinUtilities';
-import { defineWrappers, type Wrappers } from './builtinWrappers';
+import { type BoxableKind, defineWrappers, hashOf, type Wrappers } from './builtinWrappers';
 import { type Frame, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
   CHAR,
   type ClassInfo,
   DOUBLE,
+  type FieldInfo,
   FLOAT,
   INT,
+  isPrimitive,
   type JavaType,
   LONG,
   type MethodInfo,
@@ -51,6 +53,7 @@ export interface Builtins {
   objectClass: ClassInfo;
   stringClass: ClassInfo;
   enumClass: ClassInfo;
+  recordClass: ClassInfo;
   throwableClass: ClassInfo;
   wrappers: Wrappers;
   collections: Collections;
@@ -76,6 +79,7 @@ function createBuiltins(): Builtins {
   defineString(stringClass, objectClass.type);
   stringClass.isFinal = true;
   const enumClass = defineEnum(registry.define('Enum', objectClass), stringClass.type);
+  const recordClass = defineRecord(registry.define('Record', objectClass), objectClass, stringClass.type);
   const throwableClass = defineThrowables(registry, objectClass, stringClass.type);
   defineTurtle(registry.define('Turtle', objectClass, ''), stringClass.type);
   defineMath(registry.define('Math', objectClass));
@@ -93,6 +97,7 @@ function createBuiltins(): Builtins {
     objectClass,
     stringClass,
     enumClass,
+    recordClass,
     throwableClass,
     wrappers,
     collections,
@@ -118,6 +123,45 @@ function defineEnum(enumClass: ClassInfo, stringType: JavaType): ClassInfo {
   addMethod(enumClass, 'ordinal', [], INT, false, (_, receiver) => ordinalOf(receiver)).isFinal = true;
   addConstructor(enumClass, [], () => {});
   return enumClass;
+}
+
+/** `Record`, whose `toString`, `equals`, and `hashCode` read the components that each record declares. */
+function defineRecord(recordClass: ClassInfo, objectClass: ClassInfo, stringType: JavaType): ClassInfo {
+  recordClass.isAbstract = true;
+  addConstructor(recordClass, [], () => {});
+  addMethod(recordClass, 'toString', [], stringType, false, (frame, receiver) => {
+    const object = receiver as JavaObject;
+    const parts = componentsOf(receiver).map(
+      (field) => `${field.name}=${stringify(frame, object.fields[field.slot], field.type)}`
+    );
+    return newString(frame, `${object.cls.name}[${parts.join(', ')}]`);
+  });
+  addMethod(recordClass, 'equals', [objectClass.type], BOOLEAN, false, (frame, receiver, [other]) => {
+    const object = receiver as JavaObject;
+    if (!(other instanceof JavaObject) || other.cls !== object.cls) return false;
+    return componentsOf(receiver).every((field) => {
+      const [a, b] = [object.fields[field.slot], other.fields[field.slot]];
+      // Primitive components compare as their wrappers' compare does, so NaN equals NaN.
+      return isPrimitive(field.type) ? Object.is(a, b) || a === b : javaEquals(frame, a, b);
+    });
+  });
+  addMethod(recordClass, 'hashCode', [], INT, false, (frame, receiver) => {
+    const object = receiver as JavaObject;
+    let hash = 0;
+    for (const field of componentsOf(receiver)) {
+      const value = object.fields[field.slot];
+      const fieldHash = isPrimitive(field.type)
+        ? hashOf(value, field.type.kind as BoxableKind)
+        : javaHash(frame, value);
+      hash = toInt32(Math.imul(hash, 31) + fieldHash);
+    }
+    return hash;
+  });
+  return recordClass;
+}
+
+function componentsOf(receiver: Value): FieldInfo[] {
+  return (receiver as JavaObject).cls.recordComponents ?? [];
 }
 
 function nameOf(receiver: Value): JavaString {

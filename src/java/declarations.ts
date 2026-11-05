@@ -53,7 +53,8 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
         this.error(declaration, `入れ子のクラスには、外側のクラスと同じ名前 ${name} を付けられません。`);
     }
     // Member interfaces and enums are implicitly static, as is every member of an interface.
-    const isStatic = modifiers.isStatic || kind !== 'class' || enclosing?.kind === 'interface';
+    const isStatic =
+      modifiers.isStatic || kind !== 'class' || declaration.isRecord === true || enclosing?.kind === 'interface';
     if (!enclosing && modifiers.isStatic)
       this.error(declaration, `トップレベルの${KIND_NAMES[kind]}に static は付けられません。`);
     if (kind === 'interface' && modifiers.isFinal)
@@ -67,7 +68,8 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
     cls.enclosing = enclosing;
     cls.binaryName = enclosing ? `${enclosing.binaryName}$${name}` : name;
     cls.isAbstract = modifiers.isAbstract || kind === 'interface';
-    cls.isFinal = modifiers.isFinal || kind === 'enum';
+    cls.isFinal = modifiers.isFinal || kind === 'enum' || declaration.isRecord === true;
+    if (declaration.isRecord && modifiers.isAbstract) this.error(declaration, 'レコードに abstract は付けられません。');
     // An inner class's instances belong to an instance of the class around it.
     cls.hasOuterInstance = enclosing !== undefined && !isStatic && enclosing.kind !== 'interface';
     siblings.set(name, cls);
@@ -123,6 +125,7 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
   protected resolveSuperclass(cls: ClassInfo, declaration: ClassDeclaration): ClassType | undefined {
     if (cls.kind === 'interface') return;
     if (cls.kind === 'enum') return this.builtins.enumClass.type as ClassType;
+    if (declaration.isRecord) return this.builtins.recordClass.type as ClassType;
     if (!declaration.superclass) return this.builtins.objectClass.type as ClassType;
     const type = this.resolveType(declaration.superclass);
     if (type.kind !== 'class') return this.error(declaration.superclass, 'クラス以外は継承できません。');
@@ -281,6 +284,7 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
       cls.fields.set(declarator.name, field);
       if (field.isStatic) cls.staticFields.push(field);
       else cls.instanceFields.push(field);
+      if (member.isRecordComponent) (cls.recordComponents ??= []).push(field);
     }
   }
 

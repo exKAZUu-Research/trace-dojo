@@ -47,6 +47,8 @@ export interface ClassDeclaration extends Span {
   interfaces: TypeSyntax[];
   /** The constants of an enum, in declaration order. */
   enumConstants: EnumConstant[];
+  /** Whether the class is a record, whose components the parser turns into fields, accessors, and a constructor. */
+  isRecord?: boolean;
   members: MemberDeclaration[];
 }
 
@@ -64,6 +66,8 @@ export type MemberDeclaration =
 
 export interface FieldDeclaration extends Span {
   kind: 'field';
+  /** Whether the field holds a record component. */
+  isRecordComponent?: boolean;
   modifiers: Modifiers;
   type: TypeSyntax;
   declarators: VariableDeclarator[];
@@ -97,6 +101,8 @@ export interface ConstructorDeclaration extends Span {
   throwsTypes: TypeSyntax[];
   explicitCall: ExplicitConstructorCall | undefined;
   body: Block;
+  /** Whether this is a record's compact canonical constructor, which assigns the fields after its body. */
+  isCompact?: boolean;
 }
 
 export interface InitializerBlock extends Span {
@@ -153,6 +159,8 @@ export interface LocalVariableDeclaration extends Span {
 export interface ExpressionStatement extends Span {
   kind: 'expression';
   expression: Expression;
+  /** Whether the compiler wrote the statement, as a record's constructor assigns its fields, so it records no step. */
+  isGenerated?: boolean;
 }
 
 export interface IfStatement extends Span {

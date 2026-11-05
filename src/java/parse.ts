@@ -18,17 +18,14 @@ function convertProgram(root: Node): CompilationUnit {
     switch (child.type) {
       case 'class_declaration':
       case 'interface_declaration':
-      case 'enum_declaration': {
+      case 'enum_declaration':
+      case 'record_declaration': {
         classes.push(convertTypeDeclaration(child));
         break;
       }
       // Problems show several files in one listing, so package and import lines may appear between classes.
       case 'package_declaration':
       case 'import_declaration': {
-        break;
-      }
-      case 'record_declaration': {
-        unsupported(child, 'レコード');
         break;
       }
       default: {

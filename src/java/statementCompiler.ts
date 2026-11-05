@@ -482,6 +482,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       this.error(statement, '式だけを文として書くことはできません。');
     }
     const value = this.compileValue(context, expression, true);
+    if (statement.isGenerated) {
+      return (frame) => {
+        value.run(frame);
+        return;
+      };
+    }
     return this.withStep(
       statement,
       (frame) => {

@@ -110,7 +110,7 @@ const statementConverters: Record<string, (node: Node) => Statement> = {
   ';': (node) => ({ kind: 'empty', ...span(node) }),
   class_declaration: convertLocalClass,
   interface_declaration: convertLocalClass,
-  record_declaration: (node) => unsupported(node, 'レコード'),
+  record_declaration: convertLocalClass,
   enum_declaration: convertLocalClass,
 };
 

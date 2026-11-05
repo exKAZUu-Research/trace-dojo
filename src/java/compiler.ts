@@ -316,9 +316,9 @@ class Compiler extends DeclarationCompiler {
     cls.enclosing = context.cls;
     cls.binaryName = `${top.binaryName}$${number}${anonymous ? '' : name}`;
     cls.isAbstract = modifiers.isAbstract || kind === 'interface';
-    cls.isFinal = modifiers.isFinal || kind === 'enum' || anonymous !== undefined;
+    cls.isFinal = modifiers.isFinal || kind === 'enum' || declaration.isRecord === true || anonymous !== undefined;
     // Local interfaces and enums are static, so they neither belong to an instance nor read the method's locals.
-    const isStatic = kind !== 'class';
+    const isStatic = kind !== 'class' || declaration.isRecord === true;
     cls.hasOuterInstance = !isStatic && !context.isStatic;
     if (!isStatic) this.localClasses.set(cls, { definingContext: context, captures: [] });
     if (anonymous) this.anonymousBases.set(cls, anonymous.base);

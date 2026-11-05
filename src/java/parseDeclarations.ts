@@ -1,5 +1,6 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
+import { CompileError } from '../interpreter/diagnostics';
 import type {
   ClassDeclaration,
   ConstructorDeclaration,
@@ -9,6 +10,7 @@ import type {
   MemberDeclaration,
   MethodDeclaration,
   Parameter,
+  Span,
   Statement,
   TypeSyntax,
 } from './ast';
@@ -29,9 +31,12 @@ import { convertBlock, convertDeclarator, convertStatement } from './parseStatem
 
 export function convertTypeDeclaration(node: Node): ClassDeclaration {
   if (node.childForFieldName('permits')) unsupported(node, 'permits');
-  const kind =
-    ({ class_declaration: 'class', interface_declaration: 'interface' } as const)[node.type as 'class_declaration'] ??
-    ('enum' as const);
+  const kinds = {
+    class_declaration: 'class',
+    interface_declaration: 'interface',
+    record_declaration: 'class',
+  } as const;
+  const kind = kinds[node.type as keyof typeof kinds] ?? ('enum' as const);
   const superclassNode = node.childForFieldName('superclass');
   const interfacesNode =
     node.childForFieldName('interfaces') ?? node.children.find((child) => child?.type === 'extends_interfaces');
@@ -41,8 +46,11 @@ export function convertTypeDeclaration(node: Node): ClassDeclaration {
   for (const member of namedChildren(body)) {
     if (member.type === 'enum_constant') enumConstants.push(convertEnumConstant(member));
     else if (member.type === 'enum_body_declarations') members.push(...namedChildren(member).map(convertMember));
+    else if (member.type === 'compact_constructor_declaration') members.push(convertCompactConstructor(member));
     else members.push(convertMember(member));
   }
+  const header = node.type === 'record_declaration' ? field(node, 'parameters') : undefined;
+  if (header) desugarRecord(node, header, members);
   return {
     kind,
     name: field(node, 'name').text,
@@ -52,8 +60,136 @@ export function convertTypeDeclaration(node: Node): ClassDeclaration {
     interfaces: interfacesNode ? namedChildren(namedChildren(interfacesNode)[0]).map((type) => convertType(type)) : [],
     enumConstants,
     members,
+    isRecord: header !== undefined,
     ...span(node),
   };
+}
+
+/** A compact canonical constructor, whose parameters the record's components give once the record is desugared. */
+function convertCompactConstructor(node: Node): ConstructorDeclaration {
+  return {
+    kind: 'constructor',
+    name: field(node, 'name').text,
+    modifiers: convertModifiers(modifiersOf(node)),
+    parameters: [],
+    throwsTypes: [],
+    explicitCall: undefined,
+    body: convertBlock(field(node, 'body')),
+    isCompact: true,
+    ...span(node),
+  };
+}
+
+/**
+ * Writes out what a record declares implicitly: a private final field and a public accessor for each component, and
+ * the canonical constructor, which a compact constructor's body begins.
+ */
+function desugarRecord(node: Node, header: Node, members: MemberDeclaration[]): void {
+  const where = span(header);
+  const components = namedChildren(header).map((component) => {
+    if (component.type !== 'record_component') unsupported(component, 'レコードの可変長引数');
+    return {
+      name: field(component, 'name').text,
+      type: convertType(field(component, 'type')),
+      isFinal: false,
+      isVarargs: false,
+      ...span(component),
+    };
+  });
+  const instanceField = members.find((member) => member.kind === 'field' && !member.modifiers.isStatic);
+  if (instanceField) {
+    throw new CompileError([
+      { row: instanceField.row, message: 'レコードには static でないフィールドを宣言できません。' },
+    ]);
+  }
+  const fields: FieldDeclaration[] = components.map((component) => ({
+    kind: 'field',
+    isRecordComponent: true,
+    modifiers: { isStatic: false, isFinal: true, isAbstract: false, isDefault: false, access: 'private' },
+    type: component.type,
+    declarators: [{ name: component.name, extraDimensions: 0, initializer: undefined, ...spanOf(component) }],
+    ...spanOf(component),
+  }));
+  const assignments: Statement[] = components.map((component) => ({
+    kind: 'expression',
+    isGenerated: true,
+    expression: {
+      kind: 'assign',
+      operator: '=',
+      target: { kind: 'fieldAccess', object: { kind: 'this', ...where }, name: component.name, ...where },
+      value: { kind: 'name', name: component.name, ...where },
+      ...where,
+    },
+    ...where,
+  }));
+  const isCanonical = (member: MemberDeclaration): boolean =>
+    member.kind === 'constructor' &&
+    !member.isCompact &&
+    member.parameters.length === components.length &&
+    member.parameters.every((parameter, index) => sameTypeSyntax(parameter.type, components[index].type));
+  const compactIndex = members.findIndex((member) => member.kind === 'constructor' && member.isCompact);
+  if (compactIndex !== -1) {
+    const compact = members[compactIndex] as ConstructorDeclaration;
+    members[compactIndex] = {
+      ...compact,
+      parameters: components,
+      body: { ...compact.body, statements: [...compact.body.statements, ...assignments] },
+    };
+  } else if (!members.some(isCanonical)) {
+    const name = field(node, 'name').text;
+    members.push({
+      kind: 'constructor',
+      name,
+      modifiers: { ...convertModifiers(modifiersOf(node)), isFinal: false, isStatic: false, access: 'public' },
+      parameters: components,
+      throwsTypes: [],
+      explicitCall: undefined,
+      body: { kind: 'block', statements: assignments, ...where },
+      ...where,
+    });
+  }
+  for (const component of components) {
+    const declared = members.some(
+      (member) => member.kind === 'method' && member.name === component.name && member.parameters.length === 0
+    );
+    if (declared) continue;
+    members.push({
+      kind: 'method',
+      name: component.name,
+      typeParameters: [],
+      modifiers: { isStatic: false, isFinal: false, isAbstract: false, isDefault: false, access: 'public' },
+      returnType: component.type,
+      parameters: [],
+      throwsTypes: [],
+      body: {
+        kind: 'block',
+        statements: [
+          {
+            kind: 'return',
+            value: { kind: 'fieldAccess', object: { kind: 'this', ...where }, name: component.name, ...where },
+            ...where,
+          },
+        ],
+        ...where,
+      },
+      ...where,
+    });
+  }
+  members.unshift(...fields);
+}
+
+function spanOf(value: Span): Span {
+  return { row: value.row, endRow: value.endRow, start: value.start, end: value.end };
+}
+
+function sameTypeSyntax(a: TypeSyntax, b: TypeSyntax): boolean {
+  return withoutSpans(a) === withoutSpans(b);
+}
+
+function withoutSpans(type: TypeSyntax): string {
+  return JSON.stringify(type, (key, value: unknown) =>
+    ['row', 'endRow', 'start', 'end'].includes(key) ? undefined : value
+  );
 }
 
 function convertEnumConstant(node: Node): EnumConstant {
@@ -87,7 +223,7 @@ export function convertMember(member: Node): MemberDeclaration {
       return convertTypeDeclaration(member);
     }
     case 'record_declaration': {
-      return unsupported(member, 'レコード');
+      return convertTypeDeclaration(member);
     }
     default: {
       return unsupported(member, `クラスの中の「${member.type}」`);
