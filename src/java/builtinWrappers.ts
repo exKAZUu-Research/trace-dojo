@@ -123,8 +123,95 @@ export function defineWrappers(registry: Registry, objectClass: ClassInfo, strin
   defineDoubleMembers(byKind.get('double') as ClassInfo, stringType);
   defineCharacterMembers(byKind.get('char') as ClassInfo);
   defineBooleanMembers(byKind.get('boolean') as ClassInfo, stringType);
+  defineNarrowWrapperMembers(byKind, stringType);
   for (const cls of byKind.values()) defineWrapperConstructors(cls, stringType);
   return { byKind, numberClass, comparableClass, compareTo };
+}
+
+/**
+ * The constants and parsers of `Byte`, `Short`, and `Float`, the sizes of the integral wrappers, and the members of
+ * `Double` and `Character` that their own definitions leave out.
+ */
+function defineNarrowWrapperMembers(byKind: Map<BoxableKind, ClassInfo>, stringType: JavaType): void {
+  for (const [kind, bits] of [
+    ['byte', 8],
+    ['short', 16],
+  ] as const) {
+    const cls = byKind.get(kind) as ClassInfo;
+    const type = { kind } as JavaType;
+    const limit = 2 ** (bits - 1);
+    addConstant(cls, 'MAX_VALUE', type, limit - 1);
+    addConstant(cls, 'MIN_VALUE', type, -limit);
+    addMethod(cls, `parse${cls.name}`, [stringType], type, true, (frame, _, [text]) => {
+      const value = Number(parseIntegral(frame, text, 32));
+      if (value < -limit || value >= limit) {
+        throwBuiltin(
+          frame,
+          'NumberFormatException',
+          `Value out of range. Value:"${(text as JavaString).value}" Radix:10`
+        );
+      }
+      return value;
+    });
+  }
+  for (const [kind, bits] of [
+    ['byte', 8],
+    ['short', 16],
+    ['int', 32],
+    ['long', 64],
+  ] as const) {
+    addConstant(byKind.get(kind) as ClassInfo, 'SIZE', INT, bits);
+    addConstant(byKind.get(kind) as ClassInfo, 'BYTES', INT, bits / 8);
+  }
+  defineFloatMembers(byKind.get('float') as ClassInfo, stringType);
+  defineDoubleTests(byKind.get('double') as ClassInfo);
+  defineCharacterConversions(byKind.get('char') as ClassInfo, stringType);
+}
+
+function defineFloatMembers(floatClass: ClassInfo, stringType: JavaType): void {
+  addConstant(floatClass, 'MAX_VALUE', FLOAT, 3.4028234663852886e38);
+  addConstant(floatClass, 'MIN_VALUE', FLOAT, 1.401298464324817e-45);
+  addConstant(floatClass, 'POSITIVE_INFINITY', FLOAT, Number.POSITIVE_INFINITY);
+  addConstant(floatClass, 'NEGATIVE_INFINITY', FLOAT, Number.NEGATIVE_INFINITY);
+  addConstant(floatClass, 'NaN', FLOAT, Number.NaN);
+  addMethod(floatClass, 'parseFloat', [stringType], FLOAT, true, (frame, _, [text]) =>
+    Math.fround(parseDouble(frame, text))
+  );
+}
+
+function defineDoubleTests(doubleClass: ClassInfo): void {
+  addMethod(
+    doubleClass,
+    'isInfinite',
+    [DOUBLE],
+    BOOLEAN,
+    true,
+    (_, __, [value]) => Math.abs(value as number) === Infinity
+  );
+  addMethod(doubleClass, 'isFinite', [DOUBLE], BOOLEAN, true, (_, __, [value]) => Number.isFinite(value));
+  addMethod(doubleClass, 'max', [DOUBLE, DOUBLE], DOUBLE, true, (_, __, [a, b]) => Math.max(a as number, b as number));
+  addMethod(doubleClass, 'min', [DOUBLE, DOUBLE], DOUBLE, true, (_, __, [a, b]) => Math.min(a as number, b as number));
+}
+
+function defineCharacterConversions(characterClass: ClassInfo, stringType: JavaType): void {
+  addMethod(characterClass, 'digit', [CHAR, INT], INT, true, (_, __, [code, radix]) => {
+    const digit = Number.parseInt(String.fromCodePoint(code as number), radix as number);
+    return Number.isNaN(digit) ? -1 : digit;
+  });
+  addMethod(characterClass, 'toString', [INT], stringType, true, (frame, _, [code]) => {
+    const point = code as number;
+    if (point < 0 || point > 0x10_ff_ff)
+      throwBuiltin(
+        frame,
+        'IllegalArgumentException',
+        `Not a valid Unicode code point: 0x${(point >>> 0).toString(16).toUpperCase()}`
+      );
+    return newString(frame, String.fromCodePoint(point));
+  });
+  addMethod(characterClass, 'forDigit', [INT, INT], CHAR, true, (_, __, [digit, radix]) => {
+    const [value, base] = [digit as number, radix as number];
+    return base >= 2 && base <= 36 && value >= 0 && value < base ? value.toString(base).codePointAt(0) : 0;
+  });
 }
 
 function setBoxed(receiver: Value, value: Value): undefined {
