@@ -43,6 +43,8 @@ export function isInvocationConvertible(
     return method !== undefined && (from.arity === undefined || method.parameterTypes.length === from.arity);
   }
   if (isWidening(from, to, builtins.objectClass)) return true;
+  // A parameter whose type inference left undecided takes any object.
+  if (to.kind === 'wildcard' && to.isHole) return !isPrimitive(from) || allowsBoxing;
   if (!allowsBoxing) return false;
   if (boxingTarget(builtins, from, to)) return true;
   const unboxed = unboxedTypeOf(from);
@@ -84,11 +86,14 @@ export function methodView(method: MethodInfo, bindings: ReadonlyMap<TypeVariabl
  * Instantiates a generic method for arguments of `argTypes`, inferring each type parameter from the arguments; a type
  * parameter that no argument decides makes the types mentioning it raw, as an unchecked conversion would. Returns
  * `undefined` when an inferred type falls outside its bounds.
+ *
+ * @param targetType The type the call's value is assigned to, which decides the type parameters the arguments do not.
  */
 export function instantiateMethod(
   builtins: Builtins,
   method: MethodInfo,
-  argTypes: readonly JavaType[]
+  argTypes: readonly JavaType[],
+  targetType?: JavaType
 ): MethodInfo | undefined {
   const variables = method.typeParameters ?? [];
   if (variables.length === 0) return method;
@@ -97,13 +102,20 @@ export function instantiateMethod(
     const argType = argTypes[index] as JavaType | undefined;
     if (argType) infer(builtins, parameterType, argType, variables, bindings);
   }
+  // The type the result is assigned to decides what the arguments leave open, as in `List<String> l = List.of();`.
+  if (targetType && !isPrimitive(targetType)) {
+    const fromTarget = new Map<TypeVariable, JavaType>();
+    infer(builtins, method.returnType, targetType, variables, fromTarget);
+    for (const [variable, type] of fromTarget) if (!bindings.has(variable)) bindings.set(variable, type);
+  }
   // An inferred type outside its variable's bounds makes the method inapplicable.
   for (const [variable, type] of bindings) {
     const fits = variable.bounds.every((bound) => isWidening(type, substitute(bound, bindings), builtins.objectClass));
     if (!fits) return;
   }
   const unresolved = variables.filter((variable) => !bindings.has(variable));
-  const instantiate = (type: JavaType): JavaType => rawify(substitute(type, bindings), unresolved);
+  // A result keeps its undecided type arguments as holes, which the code using it may still decide.
+  const instantiate = (type: JavaType): JavaType => rawify(substitute(type, bindings), unresolved, false, true);
   return {
     ...method,
     parameterTypes: method.parameterTypes.map((type) => rawify(substitute(type, bindings), unresolved, true)),
@@ -152,7 +164,15 @@ export function infer(
   if (!supertype?.args) return;
   for (const [index, parameterArg] of parameterBound.args.entries()) {
     const arg = supertype.args[index];
-    infer(builtins, parameterArg, arg.kind === 'wildcard' ? upperBound(arg) : arg, variables, bindings);
+    // A type variable standing alone takes a wildcard as it is, which its use then contains.
+    const isBareVariable = parameterArg.kind === 'typeVar';
+    infer(
+      builtins,
+      parameterArg,
+      arg.kind === 'wildcard' && !isBareVariable ? upperBound(arg) : arg,
+      variables,
+      bindings
+    );
   }
 }
 
@@ -178,7 +198,12 @@ function inferFromReceiverHint(
  * Replaces type variables left `unresolved`: inside a wildcard's bound by their erasure, as a type argument by making
  * its class type raw, and standing alone by their erasure.
  */
-export function rawify(type: JavaType, unresolved: readonly TypeVariable[], asWildcards = false): JavaType {
+export function rawify(
+  type: JavaType,
+  unresolved: readonly TypeVariable[],
+  asWildcards = false,
+  asHoles = false
+): JavaType {
   if (unresolved.length === 0) return type;
   switch (type.kind) {
     case 'typeVar': {
@@ -193,13 +218,13 @@ export function rawify(type: JavaType, unresolved: readonly TypeVariable[], asWi
     case 'class': {
       if (!type.args) return type;
       // A parameter keeps its other type arguments, which a lambda argument's parameters take.
-      if (asWildcards) {
+      if (asWildcards || asHoles) {
         return {
           ...type,
           args: type.args.map((arg): JavaType =>
             arg.kind === 'typeVar' && unresolved.includes(arg.variable)
-              ? { kind: 'wildcard', bound: undefined, isSuper: false }
-              : rawify(arg, unresolved, true)
+              ? { kind: 'wildcard', bound: undefined, isSuper: false, isHole: asHoles }
+              : rawify(arg, unresolved, asWildcards, asHoles)
           ),
         };
       }

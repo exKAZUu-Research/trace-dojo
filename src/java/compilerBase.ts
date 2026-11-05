@@ -279,7 +279,7 @@ export abstract class CompilerBase {
 
   /** Compiles an expression whose value is assigned to `type`, which a diamond may infer its type arguments from. */
   protected compileValueFor(context: MethodContext, expression: Expression, type: JavaType): CompiledValue {
-    const isCreation = expression.kind === 'new' || expression.kind === 'lambda' || expression.kind === 'methodRef';
+    const isCreation = ['new', 'lambda', 'methodRef', 'call'].includes(expression.kind);
     this.targetType = isCreation ? type : undefined;
     try {
       return this.compileValue(context, expression);
@@ -563,7 +563,9 @@ export abstract class CompilerBase {
     to: JavaType,
     context: 'assignment' | 'invocation'
   ): CompiledValue | undefined {
-    let boxType = boxingTarget(this.builtins, value.type, to);
+    // A hole that inference left undecided takes any value, boxed as an argument for an Object parameter would be.
+    const target = to.kind === 'wildcard' && to.isHole ? this.builtins.objectClass.type : to;
+    let boxType = boxingTarget(this.builtins, value.type, target);
     // An assignment also boxes a constant int that fits in the byte, short, or char that `Byte` and the like box.
     const unboxedTarget = unboxedTypeOf(to);
     if (
@@ -581,7 +583,7 @@ export abstract class CompilerBase {
     if (boxType) {
       const { cls } = boxType;
       const { run } = value;
-      return { kind: 'value', type: to, run: (frame) => box(frame, cls, run(frame)) };
+      return { kind: 'value', type: target === to ? to : boxType, run: (frame) => box(frame, cls, run(frame)) };
     }
     const unboxed = this.unboxed(value);
     if (unboxed && isPrimitive(to) && isWidening(unboxed.type, to, this.builtins.objectClass)) {
@@ -761,9 +763,17 @@ export abstract class CompilerBase {
   }
 
   /** Picks the most specific applicable method, as Java's overload resolution does without boxing or varargs. */
-  protected selectMethod(span: Span, candidates: MethodInfo[], argTypes: JavaType[], what: string): MethodInfo {
+  protected selectMethod(
+    span: Span,
+    candidates: MethodInfo[],
+    argTypes: JavaType[],
+    what: string,
+    targetType?: JavaType
+  ): MethodInfo {
     const objectClass = this.builtins.objectClass;
-    const instantiated = candidates.flatMap((method) => instantiateMethod(this.builtins, method, argTypes) ?? []);
+    const instantiated = candidates.flatMap(
+      (method) => instantiateMethod(this.builtins, method, argTypes, targetType) ?? []
+    );
     // Java first looks for methods applicable without boxing, and boxes only when none is.
     const applicableBy = (allowsBoxing: boolean): MethodInfo[] =>
       instantiated.filter(
@@ -779,7 +789,7 @@ export abstract class CompilerBase {
     if (applicable.length === 0) {
       applicable = candidates.flatMap((method) => {
         const expanded = expandVarargs(method, argTypes.length);
-        const instantiatedVarargs = expanded && instantiateMethod(this.builtins, expanded, argTypes);
+        const instantiatedVarargs = expanded && instantiateMethod(this.builtins, expanded, argTypes, targetType);
         const fits =
           instantiatedVarargs?.parameterTypes.every((type, index) =>
             isInvocationConvertible(this.builtins, argTypes[index], type, true)

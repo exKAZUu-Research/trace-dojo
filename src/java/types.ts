@@ -31,6 +31,11 @@ export interface WildcardType {
   kind: 'wildcard';
   bound: JavaType | undefined;
   isSuper: boolean;
+  /**
+   * Marks a type argument that inference left undecided, as in the result of `Collectors.toList()`, which fits wherever
+   * Java's inference would have decided it.
+   */
+  isHole?: boolean;
 }
 
 export type JavaType =
@@ -375,6 +380,8 @@ export function asSuper(type: ClassType, target: ClassInfo): ClassType | undefin
 
 /** Whether a type argument `argument` lies within `parameter`, which may be a wildcard. */
 function containsTypeArgument(parameter: JavaType, argument: JavaType, objectClass: ClassInfo): boolean {
+  const isHole = (type: JavaType | undefined): boolean => type?.kind === 'wildcard' && type.isHole === true;
+  if (isHole(argument) || isHole(parameter) || (parameter.kind === 'wildcard' && isHole(parameter.bound))) return true;
   if (parameter.kind !== 'wildcard') return sameType(parameter, argument);
   if (!parameter.bound) return true;
   if (parameter.isSuper) return argument.kind !== 'wildcard' && isWidening(parameter.bound, argument, objectClass);

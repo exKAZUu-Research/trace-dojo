@@ -1128,6 +1128,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   protected compileCall(context: MethodContext, expression: Extract<Expression, { kind: 'call' }>): Compiled {
+    const targetType = this.takeTargetType();
     const args = expression.args.map((arg) => this.compileArgument(context, arg));
     const target = this.resolveCallTarget(context, expression);
     if (target.candidates.length === 0) {
@@ -1138,7 +1139,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
       expression,
       explicitTypeArgs ? this.withTypeArguments(target.candidates, explicitTypeArgs) : target.candidates,
       args.map((arg) => arg.type),
-      `メソッド ${expression.name}`
+      `メソッド ${expression.name}`,
+      targetType
     );
     const declared = method.declared ?? method;
     if (target.receiver === undefined && expression.object === undefined && !method.isStatic) {
