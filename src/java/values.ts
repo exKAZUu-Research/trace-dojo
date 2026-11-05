@@ -60,6 +60,8 @@ export interface HashEntry {
   key: Value;
   value: Value;
   hash: number;
+  /** For a hash-ordered store, where the entry comes within its bucket: entries iterate by bucket, then by this. */
+  order?: number;
 }
 
 /** `HashMap`'s TREEIFY_THRESHOLD and MIN_TREEIFY_CAPACITY. */
@@ -73,6 +75,9 @@ const MIN_TREEIFY_CAPACITY = 64;
  */
 export class HashStore {
   private list: HashEntry[] = [];
+  /** The orders of the first and the next last entry within buckets, which head and tail insertion take. */
+  private firstOrder = 0;
+  private lastOrder = 0;
   /** The entries by hash, which finds a key among the entries of its hash only; built when first needed. */
   private byHash: Map<number, HashEntry[]> | undefined;
   capacity = 16;
@@ -123,7 +128,7 @@ export class HashStore {
   /** The entries in the order Java's iteration visits them, as a new array that later changes leave as it is. */
   ordered(): HashEntry[] {
     if (this.order !== 'hash') return [...this.list];
-    return this.entries.toSorted((a, b) => this.bucketOf(a) - this.bucketOf(b));
+    return this.list.toSorted((a, b) => this.bucketOf(a) - this.bucketOf(b) || (a.order ?? 0) - (b.order ?? 0));
   }
 
   get entries(): HashEntry[] {
@@ -167,6 +172,7 @@ export class HashStore {
   /** Adds an entry at the end of its bucket and then grows the table, as `HashMap.put` does. */
   add(entry: HashEntry): void {
     const crowded = this.bucketSize(entry) >= TREEIFY_THRESHOLD;
+    entry.order = this.lastOrder++;
     this.list.push(entry);
     this.indexEntry(entry);
     if (crowded) this.growCrowded();
@@ -180,9 +186,9 @@ export class HashStore {
   addAtBucketHead(entry: HashEntry): void {
     while (this.entries.length > this.capacity * 0.75) this.capacity *= 2;
     const crowded = this.bucketSize(entry) >= TREEIFY_THRESHOLD - 1;
-    const bucket = this.bucketOf(entry);
-    const index = this.order === 'hash' ? this.entries.findIndex((other) => this.bucketOf(other) === bucket) : -1;
-    this.list.splice(index === -1 ? this.list.length : index, 0, entry);
+    // An order before every other entry's puts it first in its bucket, where a HashMap's head insertion puts it.
+    entry.order = this.order === 'hash' ? --this.firstOrder : this.lastOrder++;
+    this.list.push(entry);
     this.indexEntry(entry);
     if (crowded) this.growCrowded();
   }

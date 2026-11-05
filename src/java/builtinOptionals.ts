@@ -30,7 +30,7 @@ export function createOptional(
   return object;
 }
 
-function stateOf(receiver: Value): { isPresent: boolean; value: Value } {
+export function stateOf(receiver: Value): { isPresent: boolean; value: Value } {
   return optionalValues.get(receiver as JavaObject) as { isPresent: boolean; value: Value };
 }
 

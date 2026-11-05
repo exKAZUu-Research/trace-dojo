@@ -206,14 +206,15 @@ export function inferFromTarget(
     targetType.kind === 'class' && targetType.args
       ? { ...targetType, args: targetType.args.map((arg) => (arg.kind === 'wildcard' && arg.bound ? arg.bound : arg)) }
       : targetType;
-  infer(builtins, method.returnType, target, method.typeParameters ?? [], fromTarget);
+  infer(builtins, liftTo(method.returnType, target), target, method.typeParameters ?? [], fromTarget);
   for (const [variable, type] of fromTarget) {
     const existing = bindings.get(variable);
     // A target only bounds a variable that is the whole result, as `R` of `collect`, so that an argument still
     // decides a narrower type: `Collection<Integer> c = stream.collect(toList())` takes `R` = `List<Integer>`.
     const isWholeResult = method.returnType.kind === 'typeVar' && method.returnType.variable === variable;
     if (!existing && isWholeResult && type.kind !== 'wildcard') {
-      bindUpperBound(builtins, variable, type, bindings);
+      // The target itself, wildcards included, bounds the result, as `Map<K, ? extends Collection<V>>` does.
+      bindUpperBound(builtins, variable, targetType, bindings);
       continue;
     }
     const widensToTarget =
@@ -223,6 +224,25 @@ export function inferFromTarget(
       isWidening(existing, type, builtins.objectClass);
     if (!existing || widensToTarget) bindings.set(variable, type);
   }
+}
+
+/**
+ * `type` viewed as the supertype that has the class of `target`, with its type arguments viewed likewise, as
+ * `List<T>` is a `Collection<T>` for a `Collection<Number>` target, so that inference can match it against the target.
+ */
+function liftTo(type: JavaType, target: JavaType): JavaType {
+  if (type.kind !== 'class' || target.kind !== 'class') return type;
+  const lifted = type.cls === target.cls ? type : asSuper(type, target.cls);
+  if (!lifted?.args || !target.args) return lifted ?? type;
+  const targetArgs = target.args;
+  return {
+    ...lifted,
+    args: lifted.args.map((arg, index) => {
+      const targetArg = targetArgs[index];
+      const bound = targetArg?.kind === 'wildcard' ? targetArg.bound : targetArg;
+      return bound ? liftTo(arg, bound) : arg;
+    }),
+  };
 }
 
 /** Whether `variable` occurs inside a type argument of `type`, such as `T` in `List<T>`. */

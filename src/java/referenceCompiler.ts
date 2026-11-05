@@ -257,7 +257,9 @@ export abstract class ReferenceCompiler extends CompilerBase {
     }
     const field = this.findField(bound.cls, name);
     if (!field) return this.error(access, missingFieldMessage(bound.cls, name));
-    this.checkAccess(context, field.owner, field.access, access, `フィールド ${name}`, bound.cls);
+    // A type variable has no private members, as its bound's are not inherited (JLS 4.4).
+    const through = object.type.kind === 'class' ? bound.cls : this.builtins.objectClass;
+    this.checkAccess(context, field.owner, field.access, access, `フィールド ${name}`, through);
     return this.fieldReference(field, field.isStatic ? undefined : object, field.isStatic ? object : undefined);
   }
 

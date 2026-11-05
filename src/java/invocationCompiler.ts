@@ -286,14 +286,16 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
       this.error(expression, `この採点環境の ${target.owner.name} には、メソッド ${expression.name} がありません。`);
     }
     const explicitTypeArgs = expression.typeArgs?.map((type) => this.resolveTypeArgument(type));
-    const method = this.selectMethod(
-      expression,
-      explicitTypeArgs ? this.withTypeArguments(target.candidates, explicitTypeArgs) : target.candidates,
-      args.map((arg) => arg.type),
-      `メソッド ${expression.name}`,
-      targetType,
-      (candidate) => this.inferFromLambdas(context, candidate, args, expression.args, targetType)
-    );
+    const select = (selectArgs: CompiledValue[]): MethodInfo =>
+      this.selectMethod(
+        expression,
+        explicitTypeArgs ? this.withTypeArguments(target.candidates, explicitTypeArgs) : target.candidates,
+        selectArgs.map((arg) => arg.type),
+        `メソッド ${expression.name}`,
+        targetType,
+        (candidate) => this.inferFromLambdas(context, candidate, selectArgs, expression.args, targetType)
+      );
+    const method = selectWithPolyArguments(select, args, expression.args);
     const declared = method.declared ?? method;
     if (target.receiver === undefined && expression.object === undefined && !method.isStatic) {
       this.error(
@@ -306,7 +308,8 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
       expression,
       method,
       target.receiver === undefined && expression.object !== undefined,
-      target.owner
+      // A type variable has no private members, as its bounds' are not inherited (JLS 4.4).
+      target.receiver?.type.kind === 'typeVar' ? this.builtins.objectClass : target.owner
     );
     this.checkThrown(context, expression, method.thrownTypes);
     const convertedArgs = this.convertArguments(context, method, args, expression.args);
@@ -567,4 +570,44 @@ function arrayClone(type: Extract<JavaType, { kind: 'array' }>): MethodInfo {
 function erasedResultType(declared: MethodInfo, method: MethodInfo): JavaType | undefined {
   const erased = erasure(declared.returnType);
   return isReference(erased) && !sameType(erased, erasure(method.returnType)) ? erased : undefined;
+}
+
+/** A call or creation argument of a parameterized type, postponed to be typed for its parameter as a poly expression. */
+function asPolyArgument(arg: CompiledValue, expression: Expression): CompiledValue {
+  const isPoly =
+    (expression.kind === 'call' || expression.kind === 'new') &&
+    arg.type.kind === 'class' &&
+    (arg.type.args?.length ?? 0) > 0;
+  if (!isPoly) return arg;
+  return {
+    kind: 'value',
+    type: { kind: 'pending', arity: undefined, isPoly: true, polyErasure: erasure(arg.type) },
+    run: () => {},
+  };
+}
+
+/**
+ * Selects a method, retrying with the generic call arguments postponed as poly expressions when none applies, which
+ * the parameter may type more widely, as `List.of(1)` passed for a `Collection<Number>` (JLS 15.12.2.2); `args` then
+ * holds the postponed arguments.
+ */
+function selectWithPolyArguments(
+  select: (args: CompiledValue[]) => MethodInfo,
+  args: CompiledValue[],
+  expressions: readonly Expression[]
+): MethodInfo {
+  try {
+    return select(args);
+  } catch (error) {
+    const polyArgs = args.map((arg, index) => asPolyArgument(arg, expressions[index] as Expression));
+    if (!(error instanceof CompileError) || polyArgs.every((arg, index) => arg === args[index])) throw error;
+    let method: MethodInfo;
+    try {
+      method = select(polyArgs);
+    } catch {
+      throw error;
+    }
+    args.splice(0, args.length, ...polyArgs);
+    return method;
+  }
 }

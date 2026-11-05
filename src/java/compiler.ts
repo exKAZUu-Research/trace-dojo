@@ -18,6 +18,7 @@ import { memberBindings, methodView } from './conversions';
 import { DeclarationCompiler } from './declarations';
 import { checkDefiniteAssignment } from './definiteAssignment';
 import { checkInitialization } from './initializationCheck';
+import { localClassNamesOf } from './localClassNames';
 import { canCompleteNormally } from './reachability';
 import { type Frame, type Slot, UNASSIGNED } from './runtime';
 import { isObjectCreation } from './stepRules';
@@ -57,6 +58,28 @@ export function compileProgram(unit: CompilationUnit, options: CompileOptions = 
 class Compiler extends DeclarationCompiler {
   /** The binary names given to local and anonymous classes, which numbers the next ones as javac does. */
   private readonly localClassNames = new Set<string>();
+  /** The binary names javac gives the local and anonymous classes in source order, by their declarations. */
+  private readonly assignedLocalNames = new Map<object, string>();
+  /** The local and anonymous classes compiled so far, by their declarations. */
+  private readonly compiledLocalClasses = new Map<object, ClassInfo>();
+
+  /**
+   * The class a declaration already compiled to, which an instance initializer compiled for another constructor
+   * creates again, when it reads no locals, which differ between the constructors.
+   */
+  private compiledWithoutCaptures(key: object): ClassInfo | undefined {
+    const compiled = this.compiledLocalClasses.get(key);
+    return compiled && this.localClasses.get(compiled)?.captures.length === 0 ? compiled : undefined;
+  }
+
+  /** A name for a local class that no class body declared in source, with the smallest number free for its name. */
+  private nextLocalName(enclosing: ClassInfo, suffix: string): string {
+    let number = 1;
+    while (this.localClassNames.has(`${enclosing.binaryName}$${number}${suffix}`)) number++;
+    const binaryName = `${enclosing.binaryName}$${number}${suffix}`;
+    this.localClassNames.add(binaryName);
+    return binaryName;
+  }
 
   compile(unit: CompilationUnit): CompiledProgram {
     this.registerClasses(unit);
@@ -116,6 +139,10 @@ class Compiler extends DeclarationCompiler {
   }
 
   protected compileBodies(cls: ClassInfo): void {
+    if (cls.declaration) {
+      const names = localClassNamesOf(cls.declaration as ClassDeclaration, cls.binaryName, this.localClassNames);
+      for (const [key, name] of names) this.assignedLocalNames.set(key, name);
+    }
     const staticContext = { ...this.newContext(cls, true, VOID), initializes: 'static' as const };
     const staticInitializers = [
       ...this.compileEnumConstants(staticContext, cls),
@@ -347,27 +374,21 @@ class Compiler extends DeclarationCompiler {
     anonymous?: { superConstructor: MethodInfo | undefined; base: ClassType }
   ): ClassInfo {
     const { kind, modifiers, name } = declaration;
-    if (!anonymous && (modifiers.access !== 'package' || modifiers.isStatic)) {
-      this.error(
-        declaration,
-        `メソッドの中で宣言するクラス ${name} には、public や private や static を付けられません。`
-      );
-    }
+    if (!anonymous) this.checkLocalClassDeclaration(declaration);
     const scope = this.localTypeScopes.at(-1) as Map<string, ClassInfo>;
-    if (!anonymous && this.localTypeScopes.some((types) => types.has(name))) {
-      this.error(declaration, `クラス ${name} はすでに定義されています。`);
+    const key = anonymous ? declaration.members : declaration;
+    const compiled = this.compiledWithoutCaptures(key);
+    if (compiled) {
+      if (!anonymous) scope.set(name, compiled);
+      return compiled;
     }
-    // javac names it after the class that encloses it, with the smallest number free for its name: Main$1, Main$1L.
-    const suffix = anonymous ? '' : name;
-    let number = 1;
-    while (this.localClassNames.has(`${context.cls.binaryName}$${number}${suffix}`)) number++;
-    const binaryName = `${context.cls.binaryName}$${number}${suffix}`;
-    this.localClassNames.add(binaryName);
+    const binaryName = this.assignedLocalNames.get(key) ?? this.nextLocalName(context.cls, anonymous ? '' : name);
     const cls = createClass(anonymous ? binaryName : name, undefined, false);
     cls.kind = kind;
     cls.declaration = declaration;
     cls.enclosing = context.cls;
     cls.binaryName = binaryName;
+    this.compiledLocalClasses.set(key, cls);
     cls.isAbstract = modifiers.isAbstract || kind === 'interface';
     cls.isFinal = modifiers.isFinal || kind === 'enum' || declaration.isRecord === true || anonymous !== undefined;
     // Local interfaces and enums are static, so they neither belong to an instance nor read the method's locals.
@@ -406,6 +427,19 @@ class Compiler extends DeclarationCompiler {
     for (const declared of ordered) this.checkAbstractMethods(declared);
     for (const declared of ordered) this.withTypeScope(declared, () => this.compileBodies(declared));
     return cls;
+  }
+
+  private checkLocalClassDeclaration(declaration: ClassDeclaration): void {
+    const { modifiers, name } = declaration;
+    if (modifiers.access !== 'package' || modifiers.isStatic) {
+      this.error(
+        declaration,
+        `メソッドの中で宣言するクラス ${name} には、public や private や static を付けられません。`
+      );
+    }
+    if (this.localTypeScopes.some((types) => types.has(name))) {
+      this.error(declaration, `クラス ${name} はすでに定義されています。`);
+    }
   }
 
   protected compileConstructor(cls: ClassInfo, constructor: MethodInfo): void {

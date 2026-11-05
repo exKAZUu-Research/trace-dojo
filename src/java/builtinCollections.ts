@@ -261,6 +261,15 @@ function rejectNullElements(cls: ClassInfo): void {
     if (native && INSERTERS.has(method.name)) method.native = nonNull(native);
     else if (native && method.name === 'addAll') method.native = addingEachLast(addLast);
   }
+  // The copy constructor adds the elements as addAll does.
+  for (const constructor of cls.constructors) {
+    const { native } = constructor;
+    if (!native || constructor.parameterTypes[0]?.kind !== 'class') continue;
+    constructor.native = (frame, receiver, args) => {
+      if ([...itemsOf(frame, args[0])].includes(undefined)) throwBuiltin(frame, 'NullPointerException');
+      return native(frame, receiver, args);
+    };
+  }
 }
 
 const INSERTERS = new Set(['add', 'addFirst', 'addLast', 'offer', 'offerFirst', 'offerLast', 'push']);

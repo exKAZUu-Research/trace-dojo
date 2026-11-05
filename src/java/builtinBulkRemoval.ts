@@ -1,5 +1,11 @@
 import { removeEntry } from './builtinCollections';
-import { checkModifiable, itemsOf, removeElements } from './builtinCollectionSupport';
+import {
+  checkModifiable,
+  itemsOf,
+  type MapViewSource,
+  mapViewSources,
+  removeElements,
+} from './builtinCollectionSupport';
 import { type Frame, throwBuiltin } from './runtime';
 import { type JavaObject, type Value } from './values';
 
@@ -16,10 +22,15 @@ export function removeMatching(frame: Frame, receiver: Value, matches: (item: Va
     if (collection.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
   };
   if (Array.isArray(Object.getOwnPropertyDescriptor(collection, 'elements')?.value)) {
-    const removed = items.filter((item) => matches(item));
+    // The positions the predicate picks, as a stateful predicate may pick one of two equal elements.
+    const picked = items.map((item) => matches(item));
     check();
-    return removeAllOf(frame, receiver, removed);
+    if (!picked.includes(true)) return false;
+    checkModifiable(frame, receiver, true);
+    return removeElements(frame, receiver, (_, index) => picked[index] === true);
   }
+  const view = mapViewSources.get(collection);
+  if (view) return removeFromView(frame, collection, view, matches);
   let isRemoved = false;
   for (const item of items) {
     check();
@@ -27,6 +38,25 @@ export function removeMatching(frame: Frame, receiver: Value, matches: (item: Va
     check();
     isRemoved = removeAllOf(frame, receiver, [item]) || isRemoved;
     expectedModCount = collection.modCount;
+  }
+  return isRemoved;
+}
+
+/** `removeIf` on a map's view, which reads the entries once and removes each matching one from the map as it goes. */
+function removeFromView(
+  frame: Frame,
+  collection: JavaObject,
+  view: MapViewSource,
+  matches: (item: Value) => boolean
+): boolean {
+  let expectedModCount = collection.modCount;
+  let isRemoved = false;
+  for (const entry of view.entries()) {
+    if (collection.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
+    if (!matches(view.elementOf(entry))) continue;
+    view.remove(frame, entry);
+    expectedModCount = collection.modCount;
+    isRemoved = true;
   }
   return isRemoved;
 }

@@ -3,7 +3,7 @@ import { type Collections, compareNatural, itemsOf, javaEquals } from './builtin
 import { sortedValues } from './builtinCollectionSupport';
 import { collectors, defineCollectors } from './builtinCollectors';
 import { callFunction, type Functions } from './builtinFunctions';
-import { createOptional, defineOptionals, type Optionals } from './builtinOptionals';
+import { createOptional, defineOptionals, type Optionals, stateOf as optionalState } from './builtinOptionals';
 import {
   classType,
   type Context,
@@ -622,11 +622,29 @@ function defineStringStreams(context: Context, streams: StreamTypes): void {
   });
 }
 
+/** `Optional.stream`, a stream of the value if there is one. */
+function defineOptionalStream(context: Context, { stream, streamImpl }: StreamTypes): void {
+  const optional = context.registry.classes.get('Optional') as ClassInfo;
+  const [optionalT] = optional.typeParameters;
+  addMethod(optional, 'stream', [], classType(stream, variableType(optionalT)), false, (frame, receiver) => {
+    const { isPresent, value } = optionalState(receiver);
+    const values = isPresent ? [value] : [];
+    return createStream(
+      frame,
+      streamImpl,
+      () => values[Symbol.iterator](),
+      [receiver],
+      () => BigInt(values.length)
+    );
+  });
+}
+
 // code-gauge-allow functionCognitiveComplexity 21 -- One registration per stream source, each a small native.
 // code-gauge-allow functionNcss 39 -- One registration per builtin method, each a small native.
 function defineSources(context: Context, streams: StreamTypes): void {
   const { registry, objectType, collections } = context;
   const { stream, intStream, streamImpl, intStreamImpl } = streams;
+  defineOptionalStream(context, streams);
   const [collectionE] = collections.collectionClass.typeParameters;
   addMethod(
     collections.collectionClass,

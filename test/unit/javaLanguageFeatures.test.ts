@@ -98,6 +98,12 @@ class Res implements AutoCloseable { final StringBuilder log; Res(StringBuilder 
     {},
     { first: 30, formatted: ' 3.14|1,234,567', interned: true },
   ],
+  [
+    'string methods that return the receiver or the pooled empty string',
+    'String s = "abc"; StringBuilder sb = new StringBuilder("ab"); boolean same = s.replaceAll("x", "y") == s && s.replaceFirst("x", "y") == s; boolean pooled = s.substring(3) == "" && s.repeat(0) == "" && "  ".strip() == "" && sb.substring(2, 2) == "" && new StringBuilder().toString() == ""; boolean fresh = sb.substring(0) == "ab";',
+    {},
+    { same: true, pooled: true, fresh: false },
+  ],
 ])('Java runs %s as javac and the JVM do', (_, body, { members, declarations }, expected) => {
   expect(finalVarsOf(body, members, declarations)).toMatchObject(expected);
 });

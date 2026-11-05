@@ -29,7 +29,7 @@ export function defineText(
   defineStringJoiner(registry, objectClass, stringClass.type);
   defineStringExtras(stringClass, collections);
   defineStringVariants(stringClass, objectClass);
-  defineStringIdentity(stringClass);
+  defineStringIdentity(stringClass, registry.classes.get('StringBuilder') as ClassInfo);
   const format = addMethod(
     stringClass,
     'format',
