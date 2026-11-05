@@ -1,54 +1,42 @@
-import { CompileError } from '../interpreter/diagnostics';
-// code-gauge-allow-file fileNcss 451 -- The statement compiler keeps one method per statement kind together.
 import type {
   Block,
-  CatchClause,
   Expression,
   ExpressionStatement,
   LocalVariableDeclaration,
   Span,
   Statement,
-  SwitchGroup,
   VariableDeclarator,
 } from './ast';
 import {
   type BreakCompletion,
-  type Compiled,
   type CompiledValue,
   type Completion,
   type ContinueCompletion,
-  type EnclosingTry,
   type Eval,
   type Exec,
   type MethodContext,
   type ReturnCompletion,
   type Scope,
-  type SwitchExpressionTarget,
 } from './compilerBase';
-import { assignedNames } from './definiteAssignment';
 import { InvocationCompiler } from './invocationCompiler';
 import { bindingsWhen } from './patternBindings';
-import { canCompleteNormally, containsJump, exhaustiveSwitches } from './reachability';
+import { canCompleteNormally, containsJump } from './reachability';
 import { type Frame, JavaThrow, throwBuiltin, UNASSIGNED } from './runtime';
 import { isObjectCreation, onlyCalls } from './stepRules';
-import {
-  asSuper,
-  type ClassInfo,
-  isPrimitive,
-  isReference,
-  isSubclass,
-  type JavaType,
-  sameType,
-  typeName,
-  upperBound,
-} from './types';
-import { JavaArray, JavaObject, JavaString, type Value } from './values';
+import { asSuper, isPrimitive, isReference, isSubclass, type JavaType, typeName, upperBound } from './types';
+import { JavaArray, JavaObject, type Value } from './values';
 
 const BREAK: BreakCompletion = { kind: 'break', label: undefined };
 const CONTINUE: ContinueCompletion = { kind: 'continue', label: undefined };
 
 /** Compiles statements into closures that report how they complete. */
 export abstract class StatementCompiler extends InvocationCompiler {
+  protected abstract compileSwitch(context: MethodContext, statement: Extract<Statement, { kind: 'switch' }>): Exec;
+
+  protected abstract compileYield(context: MethodContext, statement: Extract<Statement, { kind: 'yield' }>): Exec;
+
+  protected abstract compileTry(context: MethodContext, statement: Extract<Statement, { kind: 'try' }>): Exec;
+
   /** Set while compiling a `for` header, whose parts share the one step that the `for` records after them. */
   private compilesForHeader = false;
 
@@ -246,106 +234,6 @@ export abstract class StatementCompiler extends InvocationCompiler {
     const breaks =
       containsJump(statement.body, 'break') || labels.some((label) => containsJump(statement.body, 'break', label));
     if (!breaks) this.introduceBindings(context, bindingsWhen(condition, false));
-  }
-
-  protected compileYield(context: MethodContext, statement: Extract<Statement, { kind: 'yield' }>): Exec {
-    const target = context.switchExpressions.at(-1);
-    if (!target) return this.error(statement, 'yield 文は switch 式の中にしか書けません。');
-    const value = this.compileValue(context, statement.value);
-    const index = target.values.push({ value, span: statement.value }) - 1;
-    return (frame) => ({ kind: 'yield', value: target.converters[index](frame) });
-  }
-
-  protected compileSwitchExpression(
-    context: MethodContext,
-    expression: Extract<Expression, { kind: 'switchExpression' }>
-  ): Compiled {
-    const selector = this.compileSwitchSelector(context, expression);
-    const target: SwitchExpressionTarget = { values: [], converters: [] };
-    // Jumps cannot leave a switch expression, which completes only with a value or an exception.
-    const outer = { ...context };
-    Object.assign(context, { labels: [], loopLabels: [], continueLabels: [], loopDepth: 0, switchDepth: 0 });
-    context.isInSwitchExpression = true;
-    context.switchExpressions.push(target);
-    let groups: { groups: Exec[]; slots: number[] };
-    try {
-      groups = this.compileSwitchBody(context, expression);
-    } finally {
-      context.switchExpressions.pop();
-      Object.assign(context, {
-        labels: outer.labels,
-        loopLabels: outer.loopLabels,
-        continueLabels: outer.continueLabels,
-        loopDepth: outer.loopDepth,
-        switchDepth: outer.switchDepth,
-        isInSwitchExpression: outer.isInSwitchExpression,
-      });
-    }
-    this.checkSwitchExpressionBody(expression, selector.type);
-    if (target.values.length === 0) this.error(expression, 'switch 式には値を返す case が必要です。');
-    const type = this.switchExpressionType(expression, target.values);
-    for (const { value, span } of target.values) {
-      target.converters.push(isReference(type) ? value.run : this.convert(value, type, 'assignment', span).run);
-    }
-    const runFrom = this.compileSwitchRunner(expression, groups.groups, groups.slots);
-    return {
-      kind: 'value',
-      type,
-      run: (frame) => {
-        const start = selector.run(frame);
-        const completion = start === -1 ? undefined : runFrom(frame, start);
-        if (completion?.kind !== 'yield') throw new Error('A switch expression completed without a value');
-        return completion.value;
-      },
-    };
-  }
-
-  /** Rejects a switch expression that may complete without a value, as an incomplete set of cases would. */
-  protected checkSwitchExpressionBody(
-    expression: Extract<Expression, { kind: 'switchExpression' }>,
-    selectorType: JavaType
-  ): void {
-    const hasDefault = expression.groups.some((group) => group.labels.includes(undefined));
-    const enumClass = selectorType.kind === 'class' && selectorType.cls.kind === 'enum' ? selectorType.cls : undefined;
-    const coversEnum =
-      enumClass !== undefined &&
-      enumClass.staticFields
-        .filter((field) => field.enumConstant)
-        .every((field) =>
-          expression.groups.some((group) =>
-            group.labels.some((label) =>
-              label?.kind === 'name'
-                ? label.name === field.name
-                : label?.kind === 'fieldAccess' && label.name === field.name
-            )
-          )
-        );
-    if (!hasDefault && !coversEnum && !exhaustiveSwitches.has(expression))
-      this.error(expression, 'switch 式がすべての場合を網羅していません。default を書いてください。');
-    const groupsEnding = expression.isArrowForm ? expression.groups : expression.groups.slice(-1);
-    for (const group of groupsEnding) {
-      if (group.statements.every((statement) => canCompleteNormally(statement))) {
-        this.error(group, 'switch 式の case の処理が、値を返さずに終わっています。yield で値を返してください。');
-      }
-    }
-  }
-
-  /** The type of a switch expression, which joins the types of its results as a conditional joins two. */
-  protected switchExpressionType(span: Span, values: readonly { value: CompiledValue }[]): JavaType {
-    let result = values[0].value;
-    for (const { value } of values.slice(1)) {
-      const type = this.conditionalType(span, result, value);
-      result = {
-        kind: 'value',
-        type,
-        run: result.run,
-        constant:
-          result.constant !== undefined && value.constant !== undefined && sameType(type, result.type)
-            ? result.constant
-            : undefined,
-      };
-    }
-    return result.type;
   }
 
   protected compileWhile(context: MethodContext, statement: Extract<Statement, { kind: 'while' | 'do' }>): Exec {
@@ -647,359 +535,10 @@ export abstract class StatementCompiler extends InvocationCompiler {
   protected isAnswered(type: JavaType): boolean {
     return isPrimitive(type) || (type.kind === 'class' && type.cls === this.builtins.stringClass);
   }
-
-  protected compileSwitch(context: MethodContext, statement: Extract<Statement, { kind: 'switch' }>): Exec {
-    const selector = this.compileSwitchSelector(context, statement);
-    context.switchDepth++;
-    let runFrom: (frame: Frame, start: number) => Completion | undefined;
-    try {
-      const { groups, slots } = this.compileSwitchBody(context, statement);
-      runFrom = this.compileSwitchRunner(statement, groups, slots);
-    } finally {
-      context.switchDepth--;
-    }
-    return (frame) => {
-      const start = selector.run(frame);
-      if (start === -1) return;
-      const completion = runFrom(frame, start);
-      return completion?.kind === 'break' && completion.label === undefined ? undefined : completion;
-    };
-  }
-
-  /** Compiles a switch's selector and labels into the index of the group where execution starts, or -1. */
-  protected compileSwitchSelector(
-    context: MethodContext,
-    statement: { selector: Expression; groups: SwitchGroup[] }
-  ): { type: JavaType; run: (frame: Frame) => number } {
-    const selector = this.operand(this.compileValue(context, statement.selector));
-    const isString = selector.type.kind === 'class' && selector.type.cls === this.builtins.stringClass;
-    const isEnum = selector.type.kind === 'class' && selector.type.cls.kind === 'enum';
-    if (!isString && !isEnum && !['byte', 'short', 'char', 'int'].includes(selector.type.kind)) {
-      this.error(statement.selector, `switch では ${typeName(selector.type)} 型の値を使えません。`);
-    }
-    const { labelValues, defaultIndex } = this.compileSwitchLabels(context, statement, selector.type);
-    const matches = (candidate: Value, value: Value): boolean =>
-      isString ? (candidate as JavaString).value === (value as JavaString).value : candidate === value;
-    return {
-      type: selector.type,
-      run: (frame) => {
-        const selected = selector.run(frame);
-        if (selected === undefined) throwBuiltin(frame, 'NullPointerException');
-        // Enum labels hold the ordinals of their constants.
-        const value = isEnum && selected instanceof JavaObject ? selected.enumConstant?.ordinal : selected;
-        const matched = labelValues.findIndex((values) => values.some((candidate) => matches(candidate, value)));
-        return matched === -1 ? defaultIndex : matched;
-      },
-    };
-  }
-
-  /** The constants of each group's case labels, and the index of the group holding `default` (or -1). */
-  protected compileSwitchLabels(
-    context: MethodContext,
-    statement: { groups: SwitchGroup[] },
-    selectorType: JavaType
-  ): { labelValues: Value[][]; defaultIndex: number } {
-    const seen = new Set<unknown>();
-    let defaultIndex = -1;
-    const labelValues = statement.groups.map((group, index) =>
-      group.labels.flatMap((label) => {
-        // A classic switch has no patterns, which select the pattern switch instead.
-        if (label) return [this.compileCaseConstant(context, label as Expression, selectorType, seen)];
-        if (defaultIndex !== -1) this.error(group, 'default が複数あります。');
-        defaultIndex = index;
-        return [];
-      })
-    );
-    return { labelValues, defaultIndex };
-  }
-
-  protected compileCaseConstant(
-    context: MethodContext,
-    label: Expression,
-    selectorType: JavaType,
-    seen: Set<unknown>
-  ): Value {
-    if (selectorType.kind === 'class' && selectorType.cls.kind === 'enum') {
-      const ordinal = this.enumOrdinalOf(context, label, selectorType.cls);
-      if (seen.has(ordinal)) this.error(label, 'case の値が重複しています。');
-      seen.add(ordinal);
-      return ordinal;
-    }
-    const { constant } = this.convert(this.compileValue(context, label), selectorType, 'assignment', label);
-    if (constant === undefined) this.error(label, 'case には定数を書いてください。');
-    const key = constant instanceof JavaString ? `s:${constant.value}` : constant;
-    if (seen.has(key)) this.error(label, 'case の値が重複しています。');
-    seen.add(key);
-    return constant;
-  }
-
-  /** The ordinal of the constant of `enumClass` that a case label names, by its simple or qualified name. */
-  protected enumOrdinalOf(context: MethodContext, label: Expression, enumClass: ClassInfo): number {
-    let name: string | undefined;
-    if (label.kind === 'name') name = label.name;
-    else if (label.kind === 'fieldAccess' && label.object !== 'super') {
-      const owner = this.compileExpression(context, label.object);
-      if (owner.kind === 'class' && owner.cls === enumClass) name = label.name;
-    }
-    const constants = enumClass.staticFields.filter((field) => field.enumConstant);
-    const ordinal = constants.findIndex((field) => field.name === name);
-    if (ordinal === -1) this.error(label, `case には列挙型 ${enumClass.name} の定数を書いてください。`);
-    return ordinal;
-  }
-
-  /** Compiles the groups of a switch, whose classic groups share one scope, returning that scope's slots. */
-  protected compileSwitchBody(
-    context: MethodContext,
-    statement: { isArrowForm: boolean; groups: SwitchGroup[] }
-  ): { groups: Exec[]; slots: number[] } {
-    if (statement.isArrowForm) {
-      const groups = statement.groups.map((group) =>
-        this.withScope(context, () => this.compileStatements(context, group.statements))
-      );
-      return { groups, slots: [] };
-    }
-    const scope: Scope = { names: new Map(), slots: [] };
-    context.scopes.push(scope);
-    try {
-      return {
-        groups: statement.groups.map((group) => this.compileStatements(context, group.statements)),
-        slots: scope.slots,
-      };
-    } finally {
-      context.scopes.pop();
-    }
-  }
-
-  /** A runner that starts at a group and falls through the classic groups in order. */
-  protected compileSwitchRunner(
-    statement: { isArrowForm: boolean },
-    groups: Exec[],
-    slots: number[]
-  ): (frame: Frame, start: number) => Completion | undefined {
-    const { isArrowForm } = statement;
-    return (frame, start) => {
-      try {
-        for (let index = start; index < groups.length; index++) {
-          const completion = groups[index](frame);
-          if (completion || isArrowForm) return completion;
-        }
-        return;
-      } finally {
-        for (const slot of slots) frame.locals[slot] = UNASSIGNED;
-      }
-    };
-  }
-
-  protected compileTry(context: MethodContext, statement: Extract<Statement, { kind: 'try' }>): Exec {
-    if (statement.catches.length === 0 && !statement.finallyBlock && statement.resources.length === 0) {
-      this.error(statement, 'try 文には catch か finally が必要です。');
-    }
-    // The finally block is compiled first: one that cannot complete normally discards every exception thrown
-    // before it, so the try and catch blocks then throw nothing out of the statement. Its error waits until the
-    // blocks before it compile, so that the first error in the source is the one reported.
-    let finallyBlock: Exec | undefined;
-    let finallyError: CompileError | undefined;
-    try {
-      finallyBlock = statement.finallyBlock ? this.compileBlock(context, statement.finallyBlock) : undefined;
-    } catch (error) {
-      if (!(error instanceof CompileError)) throw error;
-      finallyError = error;
-    }
-    // A finally block that failed to compile still has its structure, where unreached conditions count as variable.
-    const discardsExceptions = statement.finallyBlock !== undefined && !canCompleteNormally(statement.finallyBlock);
-    if (discardsExceptions) context.tries.push({ caughtTypes: [this.builtins.throwableClass], thrownTypes: [] });
-    try {
-      const enclosing: EnclosingTry = {
-        caughtTypes: statement.catches.flatMap((clause) => clause.types.map((type) => this.resolveThrowable(type))),
-        thrownTypes: [],
-      };
-      context.tries.push(enclosing);
-      let body: Exec;
-      try {
-        body =
-          statement.resources.length > 0
-            ? this.withScope(context, () => this.compileResources(context, statement))
-            : this.compileBlock(context, statement.body);
-      } finally {
-        context.tries.pop();
-      }
-      const handle = this.compileCatchClauses(context, statement.catches, enclosing.thrownTypes);
-      if (finallyError) throw finallyError;
-      return runTry(body, handle, finallyBlock);
-    } finally {
-      if (discardsExceptions) context.tries.pop();
-    }
-  }
-
-  /** Compiles a try-with-resources statement's resources and try block, which close the resources after it. */
-  protected compileResources(context: MethodContext, statement: Extract<Statement, { kind: 'try' }>): Exec {
-    const autoCloseable = this.builtins.classes.get('AutoCloseable') as ClassInfo;
-    const resources = statement.resources.map((resource) => {
-      let init: Exec | undefined;
-      let read: Eval;
-      let type: JavaType;
-      if ('local' in resource) {
-        init = this.compileLocal(context, resource.local);
-        const slot = this.findLocal(context, resource.local.declarators[0].name) as number;
-        type = context.locals[slot].type;
-        read = (frame) => frame.locals[slot] as Value;
-      } else {
-        const value = this.compileValue(context, resource.expression);
-        ({ type, run: read } = value);
-      }
-      const bound = upperBound(type);
-      if (bound.kind !== 'class' || !isSubclass(bound.cls, autoCloseable)) {
-        this.error(resource, `try-with-resources 文には AutoCloseable を実装したオブジェクトしか書けません。`);
-      }
-      const close = this.selectMethod(resource, this.collectMethods(bound.cls, 'close'), [], 'メソッド close');
-      this.checkThrown(context, resource, close.thrownTypes);
-      return { init, read, close: close.declared ?? close };
-    });
-    const body = this.compileBlock(context, statement.body);
-    return (frame) => {
-      const opened: Value[] = [];
-      let completion: Completion | undefined;
-      let primary: JavaThrow | undefined;
-      try {
-        for (const resource of resources) {
-          resource.init?.(frame);
-          opened.push(resource.read(frame));
-        }
-        completion = body(frame);
-      } catch (error) {
-        if (!(error instanceof JavaThrow)) throw error;
-        primary = error;
-      }
-      // Resources close in reverse order; an exception closing one joins the first exception as suppressed.
-      for (let index = opened.length - 1; index >= 0; index--) {
-        const value = opened[index];
-        if (value === undefined) continue;
-        try {
-          frame.runtime.invoke(frame, frame.runtime.dispatch(value, resources[index].close), value, [], undefined);
-        } catch (error) {
-          if (!(error instanceof JavaThrow)) throw error;
-          if (primary) (primary.value.suppressed ??= []).push(error.value);
-          else primary = error;
-        }
-      }
-      if (primary) throw primary;
-      return completion;
-    };
-  }
-
-  /** Rejects catching what an earlier clause catches, or a checked exception the try block cannot throw. */
-  protected checkCatchable(
-    clause: CatchClause,
-    classes: readonly ClassInfo[],
-    thrownInTry: readonly ClassInfo[],
-    earlierClasses: readonly ClassInfo[]
-  ): void {
-    const exceptionClass = this.builtins.classes.get('Exception') as ClassInfo;
-    for (const [index, cls] of classes.entries()) {
-      if (classes.some((other, otherIndex) => otherIndex !== index && isSubclass(cls, other))) {
-        this.error(clause, `catch の例外 ${cls.name} は、同じ catch の他の例外と親子関係にあります。`);
-      }
-      if (earlierClasses.some((earlier) => isSubclass(cls, earlier))) {
-        this.error(clause, `例外 ${cls.name} は、前の catch ですでに捕まえられています。`);
-      }
-      // Exception and Throwable also catch unchecked exceptions, which any code may throw.
-      const mayBeThrown =
-        !this.isChecked(cls) ||
-        isSubclass(exceptionClass, cls) ||
-        thrownInTry.some((thrown) => isSubclass(thrown, cls) || isSubclass(cls, thrown));
-      if (!mayBeThrown) this.error(clause, `例外 ${cls.name} は、この try 文の中で投げられることがありません。`);
-    }
-  }
-
-  /** Compiles catch clauses into a handler that rethrows an exception none of them catches. */
-  protected compileCatchClauses(
-    context: MethodContext,
-    clauses: CatchClause[],
-    thrownInTry: readonly ClassInfo[]
-  ): CatchHandler {
-    const earlierClasses: ClassInfo[] = [];
-    const handlers = clauses.map((clause) => {
-      const classes = clause.types.map((type) => this.resolveThrowable(type));
-      this.checkCatchable(clause, classes, thrownInTry, earlierClasses);
-      const rethrown = caughtByClause(thrownInTry, classes, earlierClasses);
-      earlierClasses.push(...classes);
-      const exec = this.withScope(context, () => {
-        const type = classes.length === 1 ? classes[0].type : this.builtins.throwableClass.type;
-        const slot = this.declareLocal(context, clause, clause.name, type);
-        if (!assignedNames(clause.body).includes(clause.name)) context.rethrownTypes.set(slot, rethrown);
-        const handler = this.compileBlock(context, clause.body);
-        return (frame) => {
-          frame.locals[slot] = frame.temporaries.pop();
-          return handler(frame);
-        };
-      });
-      return { classes, exec };
-    });
-    return (frame, thrown) => {
-      const handler = handlers.find(({ classes }) => classes.some((cls) => isSubclass(thrown.value.cls, cls)));
-      if (!handler) throw thrown;
-      frame.temporaries.push(thrown.value);
-      return handler.exec(frame);
-    };
-  }
-}
-
-type CatchHandler = (frame: Frame, thrown: JavaThrow) => Completion | undefined;
-
-/** What a catch clause receives: what the try block throws narrowed to its classes, minus what earlier clauses catch. */
-function caughtByClause(
-  thrownInTry: readonly ClassInfo[],
-  classes: readonly ClassInfo[],
-  earlierClasses: readonly ClassInfo[]
-): ClassInfo[] {
-  const narrowed = thrownInTry.flatMap((thrown) =>
-    classes.flatMap((cls) => {
-      if (isSubclass(thrown, cls)) return [thrown];
-      return isSubclass(cls, thrown) ? [cls] : [];
-    })
-  );
-  return narrowed.filter((thrown) => !earlierClasses.some((earlier) => isSubclass(thrown, earlier)));
-}
-
-function runTry(body: Exec, handle: CatchHandler, finallyBlock: Exec | undefined): Exec {
-  return (frame) => {
-    const { completion, pending } = attemptTry(frame, body, handle);
-    if (finallyBlock) {
-      // A return value or an exception the finally block delays keeps its turtles alive while the block runs.
-      frame.temporaries.push(completion?.kind === 'return' ? completion.value : pending?.value);
-      try {
-        const finallyCompletion = finallyBlock(frame);
-        if (finallyCompletion) return finallyCompletion;
-      } finally {
-        frame.temporaries.pop();
-      }
-    }
-    if (pending) throw pending;
-    return completion;
-  };
-}
-
-/** Runs a try block and its catch clauses, returning how they completed or the exception left for finally. */
-function attemptTry(frame: Frame, body: Exec, handle: CatchHandler): { completion?: Completion; pending?: JavaThrow } {
-  const temporaries = frame.temporaries.length;
-  try {
-    return { completion: body(frame) };
-  } catch (error) {
-    if (!(error instanceof JavaThrow)) throw error;
-    // An exception thrown mid-expression leaves that expression's pending values behind.
-    frame.temporaries.length = temporaries;
-    try {
-      return { completion: handle(frame, error) };
-    } catch (error_) {
-      if (!(error_ instanceof JavaThrow)) throw error_;
-      frame.temporaries.length = temporaries;
-      return { pending: error_ };
-    }
-  }
 }
 
 /** Runs a for-each loop over `array`, which keeps its turtles alive while the loop runs, even when no variable holds it. */
-function iterate(
+export function iterate(
   frame: Frame,
   array: JavaArray,
   runIteration: (value: Value) => Completion | undefined | 'continue'
@@ -1038,7 +577,7 @@ function iterateIterable(
 }
 
 /** Decides what a loop does with its body's abrupt completion. */
-function loopCompletion(completion: Completion, labels: string[]): Completion | undefined | 'continue' {
+export function loopCompletion(completion: Completion, labels: string[]): Completion | undefined | 'continue' {
   if (completion.kind === 'continue' && (completion.label === undefined || labels.includes(completion.label))) {
     return 'continue';
   }

@@ -4,7 +4,7 @@ import { memberBindings, memberType } from './conversions';
 import { bindingsOfPattern } from './patternBindings';
 import { exhaustiveSwitches } from './reachability';
 import { type Frame, throwBuiltin } from './runtime';
-import { StatementCompiler } from './statementCompiler';
+import { TryCompiler } from './tryCompiler';
 import {
   BOOLEAN,
   type ClassInfo,
@@ -31,7 +31,7 @@ interface CompiledPattern {
 }
 
 /** Compiles the patterns of `instanceof` and of switches, which Java 21 matches against types and records. */
-export abstract class PatternCompiler extends StatementCompiler {
+export abstract class PatternCompiler extends TryCompiler {
   /** The pattern variables each group of the switch being compiled binds, which its body sees. */
   private groupBindings: PatternBinding[][] | undefined;
 
