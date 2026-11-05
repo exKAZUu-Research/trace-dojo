@@ -195,7 +195,8 @@ function defineDoubleTests(doubleClass: ClassInfo): void {
 
 function defineCharacterConversions(characterClass: ClassInfo, stringType: JavaType): void {
   addMethod(characterClass, 'digit', [CHAR, INT], INT, true, (_, __, [code, radix]) => {
-    const digit = Number.parseInt(String.fromCodePoint(code as number), radix as number);
+    const form = asciiFormOf(code as number);
+    const digit = form.length === 1 ? Number.parseInt(form, radix as number) : Number.NaN;
     return Number.isNaN(digit) ? -1 : digit;
   });
   addMethod(characterClass, 'toString', [INT], stringType, true, (frame, _, [code]) => {
@@ -462,6 +463,11 @@ const CHARACTER_TESTS = {
   isWhitespace: /^[\t\n\v\f\r\u001C-\u001F \u1680\u2000-\u2006\u2008-\u200A\u2028\u2029\u205F\u3000]$/u,
 } as const;
 
+/** A character as its compatibility form, which turns a full-width digit or letter such as `３` into `3`. */
+function asciiFormOf(code: number): string {
+  return charToString(code).normalize('NFKC');
+}
+
 function codePointToString(code: Value): string {
   const point = code as number;
   return point >= 0 && point <= 0x10_ff_ff ? String.fromCodePoint(point) : '';
@@ -488,7 +494,7 @@ function defineCharacterMembers(characterClass: ClassInfo): void {
     }
   }
   addMethod(characterClass, 'getNumericValue', [CHAR], INT, true, (_, __, [code]) => {
-    const character = charToString(code as number);
+    const character = asciiFormOf(code as number);
     if (/^\d$/.test(character)) return Number(character);
     if (/^[a-z]$/i.test(character)) return Number.parseInt(character, 36);
     return -1;
