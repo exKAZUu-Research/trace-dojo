@@ -125,8 +125,8 @@ export interface MethodContext {
   enclosing: MethodContext | undefined;
   /** For a lambda body, the enclosing locals it reads, which the lambda copies when it is created. */
   captures: Capture[];
-  /** The locals that a lambda reads, which may therefore not be assigned again. */
-  capturedSlots: Set<number>;
+  /** The locals that a lambda or a local class reads, with which reads them, which may not be assigned again. */
+  capturedSlots: Map<number, string>;
   /** How many times each local is assigned after its declaration. */
   assignmentCounts: Map<number, number>;
   /** The locals declared without an initializer, which one assignment may initialize and still be effectively final. */
@@ -442,7 +442,7 @@ export abstract class CompilerBase {
       introducedPatternSlots: new Set(),
       enclosing: undefined,
       captures: [],
-      capturedSlots: new Set(),
+      capturedSlots: new Map(),
       assignmentCounts: new Map(),
       uninitializedSlots: new Set(),
     };
@@ -500,30 +500,39 @@ export abstract class CompilerBase {
     if (!outer) return;
     const index = context.captures.findIndex((capture) => capture.name === name);
     if (index !== -1) return { index, capture: context.captures[index] };
-    let capture: Capture;
-    const slot = this.findLocal(outer, name);
+    const capture = this.captureFrom(outer, span, name, 'ラムダ式');
+    return capture && { index: context.captures.push(capture) - 1, capture };
+  }
+
+  /**
+   * Resolves `name` as a local of `defining`, or one that `defining` captures itself, for code inside a lambda or a
+   * class written there to read; the local must be effectively final.
+   *
+   * @param reader What reads the local, which the error message names.
+   */
+  protected captureFrom(defining: MethodContext, span: Span, name: string, reader: string): Capture | undefined {
+    const slot = this.findLocal(defining, name);
     if (slot === undefined) {
-      const outerCapture = this.findCapture(outer, span, name);
+      const outerCapture = this.findCapture(defining, span, name);
       if (!outerCapture) return;
       const outerIndex = outerCapture.index;
-      capture = { ...outerCapture.capture, read: (frame) => frame.captured[outerIndex] };
-    } else {
-      const allowed = outer.uninitializedSlots.has(slot) ? 1 : 0;
-      if ((outer.assignmentCounts.get(slot) ?? 0) > allowed) this.error(span, capturedAssignmentMessage(name));
-      outer.capturedSlots.add(slot);
-      capture = {
-        name,
-        type: outer.locals[slot].type,
-        constant: outer.constants.get(slot),
-        read: (frame) => frame.locals[slot] as Value,
-      };
+      return { ...outerCapture.capture, read: (frame) => frame.captured[outerIndex] };
     }
-    return { index: context.captures.push(capture) - 1, capture };
+    const allowed = defining.uninitializedSlots.has(slot) ? 1 : 0;
+    if ((defining.assignmentCounts.get(slot) ?? 0) > allowed) this.error(span, capturedAssignmentMessage(name, reader));
+    defining.capturedSlots.set(slot, reader);
+    return {
+      name,
+      type: defining.locals[slot].type,
+      constant: defining.constants.get(slot),
+      read: (frame) => frame.locals[slot] as Value,
+    };
   }
 
   /** Records an assignment to a local, which a lambda that reads it forbids. */
   protected recordAssignment(context: MethodContext, span: Span, slot: number): void {
-    if (context.capturedSlots.has(slot)) this.error(span, capturedAssignmentMessage(context.locals[slot].name));
+    const reader = context.capturedSlots.get(slot);
+    if (reader) this.error(span, capturedAssignmentMessage(context.locals[slot].name, reader));
     context.assignmentCounts.set(slot, (context.assignmentCounts.get(slot) ?? 0) + 1);
   }
 
@@ -856,8 +865,8 @@ function convertedNumber(value: CompiledValue, from: NumericKind, to: { kind: Nu
   };
 }
 
-function capturedAssignmentMessage(name: string): string {
-  return `ラムダ式の中から使うローカル変数 ${name} は、final か実質的に final (一度しか代入しない) である必要があります。`;
+function capturedAssignmentMessage(name: string, reader: string): string {
+  return `${reader}の中から使うローカル変数 ${name} は、final か実質的に final (一度しか代入しない) である必要があります。`;
 }
 
 /**

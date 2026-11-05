@@ -90,20 +90,10 @@ export abstract class ReferenceCompiler extends CompilerBase {
       return this.fieldReference(field, field.isStatic ? undefined : thisValue(context));
     }
     for (let current: ClassInfo | undefined = context.cls; current; current = current.enclosing) {
-      if (current !== context.cls) {
-        const outerField = this.findField(current, name.name);
-        if (outerField?.isStatic) return this.fieldReference(outerField, undefined);
-        if (outerField) {
-          const receiver = this.outerInstanceValue(context, current);
-          if (!receiver) {
-            this.error(name, `static ではないフィールド ${name.name} は、ここからは使えません。`);
-          }
-          return this.fieldReference(outerField, receiver);
-        }
-      }
+      const outer = current === context.cls ? undefined : this.enclosingFieldReference(context, current, name);
       // A local or anonymous class reads the locals of the method that declares it.
-      const captured = this.findClassCapture(context, current, name);
-      if (captured) return captured;
+      const found = outer ?? this.findClassCapture(context, current, name);
+      if (found) return found;
     }
     const imported = this.staticallyImported(name.name, (cls) => {
       const field = this.findField(cls, name.name);
@@ -113,6 +103,20 @@ export abstract class ReferenceCompiler extends CompilerBase {
     const cls = this.lookupType(name.name, context.cls);
     if (cls) return { kind: 'class', cls };
     return this.error(name, `変数 ${name.name} が見つかりません。`);
+  }
+
+  /** A field of an enclosing class, which an instance field reads through the enclosing instances. */
+  protected enclosingFieldReference(
+    context: MethodContext,
+    owner: ClassInfo,
+    name: Extract<Expression, { kind: 'name' }>
+  ): (Reference & { constant?: Value }) | undefined {
+    const field = this.findField(owner, name.name);
+    if (!field) return;
+    if (field.isStatic) return this.fieldReference(field, undefined);
+    const receiver = this.outerInstanceValue(context, owner);
+    if (!receiver) this.error(name, `static ではないフィールド ${name.name} は、ここからは使えません。`);
+    return this.fieldReference(field, receiver);
   }
 
   /** Resolves `object.name`. */
@@ -351,27 +355,9 @@ export abstract class ReferenceCompiler extends CompilerBase {
     if (!local) return;
     let index = local.captures.findIndex((capture) => capture.name === name.name);
     if (index === -1) {
-      const defining = local.definingContext;
-      const slot = this.findLocal(defining, name.name);
-      let type: JavaType;
-      let constant: Value;
-      if (slot === undefined) {
-        const lambdaCapture = this.findCapture(defining, name, name.name);
-        if (!lambdaCapture) return;
-        ({ type, constant } = lambdaCapture.capture);
-      } else {
-        const allowed = defining.uninitializedSlots.has(slot) ? 1 : 0;
-        if ((defining.assignmentCounts.get(slot) ?? 0) > allowed) {
-          this.error(
-            name,
-            `クラスの中から使うローカル変数 ${name.name} は、final か実質的に final (一度しか代入しない) である必要があります。`
-          );
-        }
-        defining.capturedSlots.add(slot);
-        type = defining.locals[slot].type;
-        constant = defining.constants.get(slot);
-      }
-      index = local.captures.push({ name: name.name, type, constant, read: () => {} }) - 1;
+      const capture = this.captureFrom(local.definingContext, name, name.name, 'クラス');
+      if (!capture) return;
+      index = local.captures.push(capture) - 1;
     }
     const capture = local.captures[index];
     const holder = cls === context.cls ? thisValue(context) : this.outerInstanceValue(context, cls, true);
