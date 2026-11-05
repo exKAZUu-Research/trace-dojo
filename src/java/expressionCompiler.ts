@@ -285,15 +285,24 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (bindings.length === 0) return compile();
     context.scopes.push({ names: new Map(), slots: [] });
     try {
-      this.introduceBindings(context, bindings);
+      this.introduceBindings(context, bindings, false);
       return compile();
     } finally {
       context.scopes.pop();
     }
   }
 
-  /** Brings pattern variables into the innermost scope, where they stay until it ends. */
-  protected introduceBindings(context: MethodContext, bindings: readonly PatternBinding[]): void {
+  /**
+   * Brings pattern variables into the innermost scope, where they stay until it ends.
+   *
+   * @param outlivesStatement Whether the variables stay in scope after the statement that declares them, as those of
+   *   an `if` whose branch cannot complete normally do, so that the statement leaves their slots assigned.
+   */
+  protected introduceBindings(
+    context: MethodContext,
+    bindings: readonly PatternBinding[],
+    outlivesStatement = true
+  ): void {
     const scope = context.scopes.at(-1) as Scope;
     for (const binding of bindings) {
       if (this.findLocal(context, binding.name) !== undefined) {
@@ -302,7 +311,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const slot = this.bindingSlots.get(binding) as number;
       scope.names.set(binding.name, slot);
       scope.slots.push(slot);
-      context.introducedPatternSlots.add(slot);
+      if (outlivesStatement) context.introducedPatternSlots.add(slot);
     }
   }
 
