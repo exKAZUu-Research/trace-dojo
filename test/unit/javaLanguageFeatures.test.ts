@@ -291,3 +291,11 @@ test("Java casts a generic result where javac's checkcast does, and not where it
     )
   ).toEqual({ casts: 'CCCCCC-----' });
 });
+
+test('Java casts the elements an Iterator or a function receives from a polluted collection, as javac and the JVM do', () => {
+  expect(
+    finalVarsOf(
+      'List<String> ls = new ArrayList<>(List.of("a")); ((List) ls).add(7); String casts = ""; for (Runnable r : List.<Runnable>of(() -> { for (String s : ls) {} }, () -> { for (Object o : ls) {} }, () -> ls.forEach(s -> s.length()), () -> ls.forEach((Object o) -> o.hashCode()), () -> ls.stream().map(String::length).forEach(x -> {}))) { try { r.run(); casts += "-"; } catch (ClassCastException e) { casts += "C"; } }'
+    )
+  ).toEqual({ casts: 'C-C-C' });
+});

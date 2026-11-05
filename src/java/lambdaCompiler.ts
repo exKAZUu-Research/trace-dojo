@@ -5,13 +5,17 @@ import { boxedTypeOf } from './builtinWrappers';
 import type { CompiledValue, Exec, MethodContext } from './compilerBase';
 import { infer, inferFromTarget, memberBindings, methodView, rawify } from './conversions';
 import { checkDefiniteAssignment } from './definiteAssignment';
+import { castOperation } from './operators';
 import { PatternCompiler } from './patternCompiler';
 import { canCompleteNormally } from './reachability';
-import { throwBuiltin } from './runtime';
+import { type Frame, throwBuiltin } from './runtime';
 import {
   type ClassInfo,
   type ClassType,
+  erasure,
   isPrimitive,
+  isReference,
+  isWidening,
   type JavaType,
   type MethodInfo,
   sameType,
@@ -21,18 +25,22 @@ import {
   upperBound,
   wildcardBound,
 } from './types';
+import type { Value } from './values';
 
 /** The functional interface a lambda implements and the signature its body must have. */
 interface FunctionType {
   iface: ClassInfo;
   parameterTypes: JavaType[];
+  /** Whether each parameter's type is a `? super` wildcard's bound, which an explicit supertype may replace. */
+  isLowerBounded: boolean[];
   returnType: JavaType;
   method: MethodInfo;
 }
 
-/** Compiles lambdas and method references into objects of functional interfaces. */
 /** The lambdas that method references expand to. */
 const referenceLambdas = new WeakSet<Lambda>();
+
+/** Compiles lambdas and method references into objects of functional interfaces. */
 
 export abstract class LambdaCompiler extends PatternCompiler {
   protected compileFunctional(
@@ -98,11 +106,16 @@ export abstract class LambdaCompiler extends PatternCompiler {
         `${typeName(target)} 型は関数型インターフェースではないので、ラムダ式やメソッド参照は使えません。`
       );
     }
-    const view = methodView(method, memberBindings(bound, method.owner));
+    const bindings = memberBindings(bound, method.owner);
+    const view = methodView(method, bindings);
     return {
       iface: bound.cls,
       // A parameter of a wildcard type such as `? extends T` takes values of its bound.
       parameterTypes: view.parameterTypes.map((type) => wildcardBound(type)),
+      isLowerBounded: method.parameterTypes.map((type) => {
+        const substituted = substitute(type, bindings);
+        return substituted.kind === 'wildcard' && substituted.isSuper;
+      }),
       returnType: view.returnType,
       method,
     };
@@ -129,7 +142,11 @@ export abstract class LambdaCompiler extends PatternCompiler {
     const types = lambda.parameters.map((parameter, index) => {
       if (!parameter.type) return parameterTypes[index];
       const declared = this.resolveType(parameter.type);
-      if (!sameType(declared, parameterTypes[index])) {
+      // For `Consumer<? super String>`, `(Object o) -> ...` decides the target `Consumer<Object>` (JLS 18.5.3).
+      const isSupertype =
+        functionType.isLowerBounded[index] === true &&
+        isWidening(parameterTypes[index] as JavaType, declared, this.builtins.objectClass);
+      if (!sameType(declared, parameterTypes[index]) && !isSupertype) {
         this.error(
           parameter,
           `ラムダ式の引数 ${parameter.name} の型は ${typeName(parameterTypes[index])} である必要があります。`
@@ -160,6 +177,7 @@ export abstract class LambdaCompiler extends PatternCompiler {
       },
     };
     const { captures } = lambdaContext;
+    const castArgs = this.argumentCasts(functionType, types);
     return {
       kind: 'value',
       type: iface.type,
@@ -169,7 +187,8 @@ export abstract class LambdaCompiler extends PatternCompiler {
         return functionObject(
           frame,
           iface,
-          (callFrame, args) => callFrame.runtime.invoke(callFrame, method, outerThis, args, undefined, captured),
+          (callFrame, args) =>
+            callFrame.runtime.invoke(callFrame, method, outerThis, castArgs(callFrame, args), undefined, captured),
           captured,
           outerThis
         );
@@ -226,6 +245,26 @@ export abstract class LambdaCompiler extends PatternCompiler {
     context.returnedTypes?.push(returned.type);
     const value = this.convert(returned, returnType, 'assignment', body).run;
     return (frame) => ({ kind: 'return', value: value(frame) });
+  }
+
+  /**
+   * Casts the arguments a function receives at its interface method's erased parameter types to the lambda's own
+   * parameter types, as the JVM's lambda bridge does, so that a value heap pollution put there fails with
+   * `ClassCastException` on entry.
+   */
+  protected argumentCasts(
+    functionType: FunctionType,
+    types: readonly JavaType[]
+  ): (frame: Frame, args: Value[]) => Value[] {
+    const casts = types.map((type, index) => {
+      const erased = erasure(functionType.method.parameterTypes[index] as JavaType);
+      if (!isReference(type) || !isReference(erased) || isWidening(erased, erasure(type), this.builtins.objectClass)) {
+        return;
+      }
+      return castOperation(this.builtins.objectClass, erased, erasure(type));
+    });
+    if (casts.every((cast) => cast === undefined)) return (_, args) => args;
+    return (frame, args) => args.map((arg, index) => casts[index]?.(frame, arg) ?? arg);
   }
 
   /**

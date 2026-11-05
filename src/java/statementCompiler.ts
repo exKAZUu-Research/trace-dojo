@@ -26,10 +26,12 @@ import { type Frame, JavaThrow, throwBuiltin, UNASSIGNED } from './runtime';
 import { isObjectCreation, onlyCalls } from './stepRules';
 import {
   asSuper,
+  erasure,
   isPrimitive,
   isReference,
   isSubclass,
   type JavaType,
+  sameType,
   typeName,
   upperBound,
   wildcardBound,
@@ -499,8 +501,18 @@ export abstract class StatementCompiler extends InvocationCompiler {
     const iterable = this.compileValue(context, statement.iterable);
     const elementType = this.elementTypeOf(statement.iterable, iterable.type);
     const declaredType = statement.type.kind === 'var' ? elementType : this.resolveType(statement.type);
-    // The element waits in the temporaries, where the conversion reads it, until the variable holds it.
-    const element: CompiledValue = { kind: 'value', type: elementType, run: (frame) => frame.temporaries.at(-1) };
+    // The element waits in the temporaries, where the conversion reads it, until the variable holds it. An
+    // iterable's element comes from Iterator.next(), whose erased result the conversion casts, as javac does.
+    const erasedElement = iterable.type.kind === 'array' ? undefined : this.builtins.objectClass.type;
+    const element: CompiledValue = {
+      kind: 'value',
+      type: elementType,
+      erasedType:
+        isReference(elementType) && !sameType(erasure(elementType), this.builtins.objectClass.type)
+          ? erasedElement
+          : undefined,
+      run: (frame) => frame.temporaries.at(-1),
+    };
     const convert = this.convert(element, declaredType, 'assignment', statement.variable).run;
     const slot = this.declareLocal(context, statement, statement.name, declaredType);
     const stepRow = this.stepRowOf(statement);
