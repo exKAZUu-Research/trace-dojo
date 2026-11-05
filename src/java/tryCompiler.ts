@@ -3,7 +3,7 @@ import type { CatchClause, Resource, Statement } from './ast';
 import { type Completion, type EnclosingTry, type Eval, type Exec, type MethodContext } from './compilerBase';
 import { assignedNames } from './definiteAssignment';
 import { canCompleteNormally } from './reachability';
-import { type Frame, JavaThrow } from './runtime';
+import { type Frame, JavaThrow, throwBuiltin } from './runtime';
 import { SwitchCompiler } from './switchCompiler';
 import { type ClassInfo, isSubclass, type JavaType, type MethodInfo, upperBound } from './types';
 import { type Value } from './values';
@@ -27,7 +27,8 @@ function closeResources(
   primary: JavaThrow | undefined
 ): JavaThrow | undefined {
   let thrown = primary;
-  let isRooted = false;
+  // The exception, and those suppressed in it, stay reachable in this slot while the remaining resources close.
+  const slot = frame.temporaries.push(undefined) - 1;
   try {
     for (let index = opened.length - 1; index >= 0; index--) {
       const value = opened[index];
@@ -36,19 +37,35 @@ function closeResources(
         frame.runtime.invoke(frame, frame.runtime.dispatch(value, resources[index].close), value, [], undefined);
       } catch (error) {
         if (!(error instanceof JavaThrow)) throw error;
-        if (thrown) (thrown.value.suppressed ??= []).push(error.value);
-        else {
-          thrown = error;
-          // The exception, and those suppressed in it, stay reachable while the remaining resources close.
-          frame.temporaries.push(thrown.value);
-          isRooted = true;
-        }
+        thrown = joinClosingFailure(frame, thrown, error);
+        frame.temporaries[slot] = thrown.value;
       }
     }
   } finally {
-    if (isRooted) frame.temporaries.pop();
+    frame.temporaries.pop();
   }
   return thrown;
+}
+
+/**
+ * The exception after `close()` throws `error`: the first exception, which suppresses the later ones as
+ * `Throwable.addSuppressed` does, failing for an exception suppressed in itself.
+ */
+function joinClosingFailure(frame: Frame, thrown: JavaThrow | undefined, error: JavaThrow): JavaThrow {
+  if (!thrown) return error;
+  if (error.value === thrown.value) return selfSuppression(frame, thrown);
+  (thrown.value.suppressed ??= []).push(error.value);
+  return thrown;
+}
+
+/** The `IllegalArgumentException` that `addSuppressed` throws for an exception suppressed in itself. */
+function selfSuppression(frame: Frame, exception: JavaThrow): JavaThrow {
+  try {
+    return throwBuiltin(frame, 'IllegalArgumentException', 'Self-suppression not permitted', exception.value);
+  } catch (error) {
+    if (error instanceof JavaThrow) return error;
+    throw error;
+  }
 }
 
 /** Compiles try statements, their catch clauses and finally blocks, and try-with-resources. */

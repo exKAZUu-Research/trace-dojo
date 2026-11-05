@@ -53,7 +53,9 @@ function removeThroughIterator(frame: Frame, receiver: Value): Value {
   const state = iteratorState(receiver);
   // An unmodifiable or fixed-size collection's iterator rejects every removal, before checking its own state.
   const owner = mapViewSources.get(state.source)?.map ?? state.source;
-  if (defaultRemoveClasses.has(owner.cls)) throwBuiltin(frame, 'UnsupportedOperationException', 'remove');
+  if (defaultRemoveClasses.has(owner.cls) && !unmodifiableWrappers.has(owner)) {
+    throwBuiltin(frame, 'UnsupportedOperationException', 'remove');
+  }
   checkModifiable(frame, owner, true);
   // Only the element the last next() returned may be removed, once.
   if (state.removed) throwBuiltin(frame, 'IllegalStateException');
@@ -199,6 +201,9 @@ export const fixedSizeClasses = new WeakSet<ClassInfo>();
  * message "remove": `Set.of`'s and `Map.of`'s collections and `Arrays.asList`'s list.
  */
 export const defaultRemoveClasses = new WeakSet<ClassInfo>();
+
+/** The `Collections.unmodifiableSet` and `unmodifiableMap` wrappers, whose iterators reject removal without a message. */
+export const unmodifiableWrappers = new WeakSet<JavaObject>();
 
 /**
  * Throws `UnsupportedOperationException` for a change to a collection that rejects it, as every method that changes

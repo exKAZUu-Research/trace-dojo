@@ -7,7 +7,7 @@ import {
   javaHash,
   putEntry,
 } from './builtinCollections';
-import { checkModifiable } from './builtinCollectionSupport';
+import { checkModifiable, unmodifiableWrappers } from './builtinCollectionSupport';
 import { createStore, NO_ENTRY } from './builtinMaps';
 import { stringify } from './builtins';
 import { addMethod, newString, type Registry } from './builtinSupport';
@@ -304,6 +304,7 @@ function defineCollectionViews(
           const view = frame.runtime.allocateObject(frame, immutable);
           view.store = source.store;
           view.modCount = 0;
+          unmodifiableWrappers.add(view);
           return view;
         }
       )

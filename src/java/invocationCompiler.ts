@@ -340,7 +340,8 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
     const declared = method.declared ?? method;
     const description = methodDescription(this.builtins, receiver.type, method);
     const message = nullMessage(`Cannot invoke "${description}"`, receiver.source);
-    const { run: receive } = this.checkErased(receiver, method.owner.type);
+    // javac casts a selected expression to its own type, whichever class declares the method.
+    const { run: receive } = this.checkErased(receiver, receiver.type);
     return {
       kind: 'value',
       type: method.returnType,
