@@ -435,7 +435,8 @@ class Compiler extends DeclarationCompiler {
 function initializingMembersOf(cls: ClassInfo, isStatic: boolean): (FieldDeclaration | InitializerBlock)[] {
   return (cls.declaration as ClassDeclaration).members.filter(
     (member): member is FieldDeclaration | InitializerBlock =>
-      (member.kind === 'field' && member.modifiers.isStatic === isStatic) ||
+      // An interface's fields are implicitly static.
+      (member.kind === 'field' && (member.modifiers.isStatic || cls.kind === 'interface') === isStatic) ||
       (member.kind === 'initializer' && member.isStatic === isStatic)
   );
 }
