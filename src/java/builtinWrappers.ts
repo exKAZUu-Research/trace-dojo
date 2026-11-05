@@ -333,7 +333,8 @@ function parseIntegral(frame: Frame, text: Value, bits: 32 | 64): bigint {
   frame.runtime.scanString(value?.length ?? 0);
   // Java reads any Unicode decimal digit; of those, this reads the ones whose compatibility forms are ASCII, such as
   // the full-width `１` of Japanese text.
-  const digits = value?.replaceAll(/\p{Nd}/gu, (digit) => digit.normalize('NFKC'));
+  const digits =
+    value && /[^\d+-]/.test(value) ? value.replaceAll(/\p{Nd}/gu, (digit) => digit.normalize('NFKC')) : value;
   const parsed = digits !== undefined && /^[+-]?\d+$/.test(digits) ? BigInt(digits) : undefined;
   if (parsed === undefined || parsed !== BigInt.asIntN(bits, parsed)) {
     return throwBuiltin(

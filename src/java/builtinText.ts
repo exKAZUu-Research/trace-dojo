@@ -338,7 +338,11 @@ function defineStringVariants(stringClass: ClassInfo, objectClass: ClassInfo): v
   );
   addMethod(stringClass, 'codePointCount', [INT, INT], INT, false, (frame, receiver, [begin, end]) => {
     checkRange(frame, begin as number, end as number, text(receiver).length);
-    return text(receiver).slice(begin as number, end as number).length;
+    const range = text(receiver).slice(begin as number, end as number);
+    let count = 0;
+    // A surrogate pair, which a code point above U+FFFF takes, counts once.
+    for (let index = 0; index < range.length; index += (range.codePointAt(index) as number) > 0xff_ff ? 2 : 1) count++;
+    return count;
   });
   addMethod(stringClass, 'codePointAt', [INT], INT, false, (frame, receiver, [index]) => {
     checkIndex(frame, index as number, text(receiver).length);
