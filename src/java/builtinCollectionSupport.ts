@@ -57,6 +57,8 @@ function removeThroughIterator(frame: Frame, receiver: Value): Value {
     throwBuiltin(frame, 'UnsupportedOperationException', 'remove');
   }
   checkModifiable(frame, owner, true);
+  // A read-only wrapper of a map's view shares the view's map, which it may not change.
+  checkModifiable(frame, state.source, true);
   // Only the element the last next() returned may be removed, once.
   if (state.removed) throwBuiltin(frame, 'IllegalStateException');
   if (state.source.modCount !== state.expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
@@ -209,9 +211,6 @@ export const defaultRemoveClasses = new WeakSet<ClassInfo>();
  * and PriorityQueue's do; the others remove each match through their iterator, as Collection's default does.
  */
 export const batchRemovalClasses = new WeakSet<ClassInfo>();
-
-/** The arrays whose elements `Arrays.asList`'s lists share, whose runtime element types their writes must fit. */
-export const backingArrays = new WeakMap<JavaObject, JavaArray>();
 
 /** Restores the order a class keeps among its elements after a bulk removal compacts them, as a heap's. */
 export const bulkRemovalRepairs = new WeakMap<ClassInfo, (frame: Frame, receiver: Value) => void>();

@@ -1,7 +1,7 @@
 import { fitsElement, runtimeClassNameOf } from './builtinClass';
 import { type Collections, compareNatural, itemsOf, javaEquals } from './builtinCollections';
 import { sortedValues } from './builtinCollectionSupport';
-import { collectors, defineCollectors } from './builtinCollectors';
+import { type CollectorFunctions, collectors, defineCollectors } from './builtinCollectors';
 import { callFunction, type Functions } from './builtinFunctions';
 import { createOptional, defineOptionals, type Optionals, stateOf as optionalState } from './builtinOptionals';
 import {
@@ -377,12 +377,17 @@ function defineReferenceOperations(context: Context, types: StreamTypes, tType: 
     (frame, receiver, [target]) => {
       const functions = collectors.get(target as JavaObject);
       if (!functions) return throwBuiltin(frame, 'UnsupportedOperationException');
-      const container = functions.supply(frame);
-      for (const value of iterate(take(frame, receiver))) functions.accumulate(frame, container, value);
-      return functions.finish(frame, container);
+      // A consumed stream fails before the collector supplies its container.
+      return collectAll(frame, functions, iterate(take(frame, receiver)));
     },
     [rr, a]
   );
+}
+
+function collectAll(frame: Frame, functions: CollectorFunctions, values: Iterable<Value>): Value {
+  const container = functions.supply(frame);
+  for (const value of values) functions.accumulate(frame, container, value);
+  return functions.finish(frame, container);
 }
 
 /** `toArray()`, which gives an `Object[]`, and `toArray(generator)`, which fills the array the generator makes. */

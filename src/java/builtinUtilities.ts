@@ -9,7 +9,7 @@ import {
   javaHash,
   putEntry,
 } from './builtinCollections';
-import { backingArrays, checkModifiable, sortedValues, unmodifiableWrappers } from './builtinCollectionSupport';
+import { checkModifiable, mapViewSources, sortedValues, unmodifiableWrappers } from './builtinCollectionSupport';
 import { createStore, NO_ENTRY } from './builtinMaps';
 import { stringify } from './builtins';
 import { addMethod, newString, type Registry } from './builtinSupport';
@@ -117,7 +117,7 @@ export function defineUtilities(
   );
   defineArrays(registry, objectClass, stringType, collections, listOf);
   defineCollectionsClass(registry, objectClass, collections, comparableClass);
-  defineRotateAndDisjoint(registry.classes.get('Collections') as ClassInfo, collections);
+  defineListUtilities(registry.classes.get('Collections') as ClassInfo, collections);
   defineCollectionViews(
     registry.classes.get('Collections') as ClassInfo,
     collections,
@@ -307,6 +307,9 @@ function defineCollectionViews(
           // A set without a store of its own, such as a map's key set, shares its elements, which it reads afresh.
           const view = frame.runtime.allocateObject(frame, source.store ? immutable : collections.unmodifiableViewSet);
           view.store = source.store;
+          // A map's view keeps its map's iterators, which traverse the entries they started with.
+          const mapSource = mapViewSources.get(source);
+          if (mapSource) mapViewSources.set(view, mapSource);
           return wrap(view, source);
         }
       )
@@ -434,14 +437,24 @@ function defineArrays(
   generic(
     'asList',
     (element) => ({ parameterTypes: [{ kind: 'array', element }], returnType: listOf(element), isVarargs: true }),
-    // The list shares the array's elements, so writes through either show in both, checked as stores into the array.
-    (frame, _, [array]) => {
-      const backing = arrayOf(frame, array);
-      const list = createList(frame, collections.fixedSizeList, backing.values);
-      backingArrays.set(list, backing);
-      return list;
-    }
+    // The list shares the array's elements, so writes through either show in both.
+    (frame, _, [array]) => createList(frame, collections.fixedSizeList, checkedStores(frame, arrayOf(frame, array)))
   );
+}
+
+/**
+ * The elements of `array` as a list writes them: each write, by whichever method, is a store into the array, which
+ * fails with `ArrayStoreException` where the array's runtime element type forbids the value, after the method's own
+ * index checks.
+ */
+function checkedStores(creator: Frame, array: JavaArray): Value[] {
+  const { runtime } = creator;
+  return new Proxy(array.values, {
+    set: (target, key, value: Value) => {
+      if (typeof key === 'string' && /^\d+$/.test(key)) checkStore(runtime.frames.at(-1) ?? creator, array, value);
+      return Reflect.set(target, key, value);
+    },
+  });
 }
 
 /** `Arrays.fill` of a range, whose first store fails with `ArrayStoreException` when the array's type forbids it. */
@@ -502,11 +515,29 @@ function touch(value: Value): void {
 }
 
 /**
- * `Collections.rotate`, which moves each element `distance` places on, cyclically, writing only when it moves any, and
- * `Collections.disjoint`, which asks the second collection whether it contains each element of the first.
+ * `Collections.rotate`, which moves each element `distance` places on, cyclically, writing only when it moves any,
+ * `Collections.fill`, which sets each element in order, and `Collections.disjoint`, which asks the second collection
+ * whether it contains each element of the first.
  */
-
-function defineRotateAndDisjoint(cls: ClassInfo, collections: Collections): void {
+function defineListUtilities(cls: ClassInfo, collections: Collections): void {
+  const t: TypeVariable = { name: 'T', bounds: [collections.collectionClass.typeParameters[0].bounds[0] as JavaType] };
+  const superT: JavaType = { kind: 'wildcard', bound: { kind: 'typeVar', variable: t }, isSuper: true };
+  const fill = addMethod(
+    cls,
+    'fill',
+    [
+      { kind: 'class', cls: collections.listClass, args: [superT] },
+      { kind: 'typeVar', variable: t },
+    ],
+    VOID,
+    true,
+    (frame, _, [list, value]) => {
+      const values = elementsOf(frame, list);
+      if (values.length > 0) checkModifiable(frame, list, false);
+      for (let index = 0; index < values.length; index++) values[index] = value;
+    }
+  );
+  fill.typeParameters = [t];
   addMethod(cls, 'rotate', [anyOf(collections.listClass), INT], VOID, true, (frame, _, [list, distance]) => {
     const values = elementsOf(frame, list);
     const size = values.length;

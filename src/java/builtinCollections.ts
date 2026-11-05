@@ -1,7 +1,5 @@
-import { checkStore } from './builtinClass';
 import type { Context } from './builtinCollectionSupport';
 import {
-  backingArrays,
   batchRemovalClasses,
   checkIndex,
   checkPosition,
@@ -118,7 +116,6 @@ export function defineCollections(
   const fixedSizeList = defineRestrictedList(context, 'ArrayList', lists, (method) => method.name !== 'set', 'Arrays$');
   fixedSizeClasses.add(fixedSizeList);
   defaultRemoveClasses.add(fixedSizeList);
-  checkStoresIntoBackingArray(fixedSizeList);
   const snapshotSet = defineSnapshot(context, 'Set', setClass, itrClass);
   // A map's key and entry sets compare and hash as sets; its values, a plain collection, keep identity.
   defineSetEquality(snapshotSet, context, setClass);
@@ -152,19 +149,6 @@ export function defineCollections(
       priorityQueue,
     ],
   };
-}
-
-/** Makes `set` on `Arrays.asList`'s list check the store into its array, which may be of a subclass element type. */
-function checkStoresIntoBackingArray(cls: ClassInfo): void {
-  for (const method of cls.methods) {
-    const { native } = method;
-    if (method.name !== 'set' || method.parameterTypes.length !== 2 || !native) continue;
-    method.native = (frame, receiver, args) => {
-      const backing = backingArrays.get(receiver as JavaObject);
-      if (backing) checkStore(frame, backing, args[1]);
-      return native(frame, receiver, args);
-    };
-  }
 }
 
 /** A read-only set over another set's elements, which it reads afresh at each use. */

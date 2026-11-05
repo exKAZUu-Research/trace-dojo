@@ -112,7 +112,7 @@ class Res implements AutoCloseable { final StringBuilder log; Res(StringBuilder 
   ],
   [
     'System.arraycopy, Collections.rotate and disjoint, and array stores through builtins',
-    'int[] x = {1, 2, 3, 4, 5}; System.arraycopy(x, 0, x, 1, 4); String copied = Arrays.toString(x); String bounds = ""; try { System.arraycopy(x, 0, new int[3], 0, 5); } catch (ArrayIndexOutOfBoundsException e) { bounds = e.getMessage(); } List<Integer> r = new ArrayList<>(List.of(1, 2, 3, 4)); Collections.rotate(r, 1); String rotated = r.toString(); boolean disjoint = Collections.disjoint(List.of(1), Set.of(2)); Object[] strings = new String[] {"a"}; String stored = "ok"; try { Arrays.fill(strings, 1); } catch (ArrayStoreException e) { stored = e.getMessage(); }',
+    'int[] x = {1, 2, 3, 4, 5}; System.arraycopy(x, 0, x, 1, 4); String copied = Arrays.toString(x); String bounds = ""; try { System.arraycopy(x, 0, new int[3], 0, 5); } catch (ArrayIndexOutOfBoundsException e) { bounds = e.getMessage(); } List<Integer> r = new ArrayList<>(List.of(1, 2, 3, 4)); Collections.rotate(r, 1); String rotated = r.toString(); boolean disjoint = Collections.disjoint(List.of(1), Set.of(2)); Object[] strings = new String[] {"a"}; String stored = "ok"; try { Arrays.fill(strings, 1); } catch (ArrayStoreException e) { stored = e.getMessage(); } Object[] backed = new String[] {"p", "q"}; List<Object> view = Arrays.asList(backed); String replaced = ""; try { view.replaceAll(v -> v.equals("p") ? "r" : 1); } catch (ArrayStoreException e) { replaced = Arrays.toString(backed); }',
     {},
     {
       copied: '[1, 1, 2, 3, 4]',
@@ -120,6 +120,7 @@ class Res implements AutoCloseable { final StringBuilder log; Res(StringBuilder 
       rotated: '[4, 1, 2, 3]',
       disjoint: true,
       stored: 'java.lang.Integer',
+      replaced: '[r, q]',
     },
   ],
   [
@@ -371,7 +372,7 @@ StringBuilder collecting = new StringBuilder(); Stream.of(1, 2).peek(x -> collec
 PriorityQueue<Integer> heap = new PriorityQueue<>(); for (int x : new int[] {0, 10, 1, 11, 12, 2, 3, 13, 14, 15, 16, 4, 5, 6, 7}) heap.add(x); heap.removeIf(x -> x == 10); heap.removeAll(List.of(1)); String polled = ""; while (!heap.isEmpty()) polled += heap.poll() + ",";
 Deque<Integer> deque = new ArrayDeque<>(List.of(1, 2, 3)); try { deque.removeIf(x -> { if (x == 3) throw new RuntimeException(); return x == 1; }); } catch (RuntimeException e) {} String dequeText = deque.toString();
 Map<Integer, Long> memo = new HashMap<>(); String memoCme = ""; try { memo.computeIfAbsent(3, k -> memo.computeIfAbsent(2, j -> 1L) + 1); } catch (ConcurrentModificationException e) { memoCme = "cme"; }
-Map<String, Integer> keyed = new HashMap<>(Map.of("a", 1)); Set<String> readOnlyKeys = Collections.unmodifiableSet(keyed.keySet()); keyed.put("b", 2); String keysText = readOnlyKeys.toString();
+Map<String, Integer> keyed = new HashMap<>(Map.of("a", 1)); Set<String> readOnlyKeys = Collections.unmodifiableSet(keyed.keySet()); keyed.put("b", 2); String keysText = readOnlyKeys.toString(); Iterator<String> pending = readOnlyKeys.iterator(); keyed.clear(); boolean stillPending = pending.hasNext();
 String exhausted = ""; try { i.next(); } catch (NoSuchElementException e) { exhausted += "N"; } try { i.remove(); } catch (IllegalStateException e) { exhausted += "I"; } exhausted += q;
 Set<Integer> s = new HashSet<>(Set.of(1)); Iterator<Integer> u = Collections.unmodifiableSet(s).iterator(); s.add(2); String wrapped = ""; try { u.next(); } catch (ConcurrentModificationException e) { wrapped = "cme"; }
 List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(Comparator.nullsFirst(Comparator.naturalOrder())); String sorted = nulls.toString();`
@@ -385,6 +386,7 @@ List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(
     collectOrder: 'S12',
     memoCme: 'cme',
     keysText: '[a, b]',
+    stillPending: true,
     polled: '0,2,3,4,5,6,7,11,12,13,14,15,16,',
     dequeText: '[1, 2, 3]',
     viewCme: 'cme{1=1, 2=2}',
