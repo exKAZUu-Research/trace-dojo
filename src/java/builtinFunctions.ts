@@ -723,6 +723,7 @@ function defineMapDefaults(collections: Collections, functions: DefaultFunctions
     mapV,
     false,
     (frame, receiver, [key, value, remapping]) => {
+      if (value === undefined || remapping === undefined) throwBuiltin(frame, 'NullPointerException');
       const entry = startComputing(frame, receiver, key);
       const merged =
         entry && entry.value !== undefined

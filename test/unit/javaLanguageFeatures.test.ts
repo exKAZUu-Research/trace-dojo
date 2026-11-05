@@ -130,6 +130,12 @@ class Res implements AutoCloseable { final StringBuilder log; Res(StringBuilder 
     { formatted: '1.00 0.3 a a', named: true, range: '0 > -1' },
   ],
   [
+    'StringBuffer, appendCodePoint, Class<Void>, and method reference null messages',
+    'StringBuffer buffer = new StringBuffer("x"); buffer.appendCodePoint(66); String built = buffer.toString() + new StringBuilder().appendCodePoint(0x1D7CF).length(); Class<Void> v = void.class; java.util.function.Function<String, Integer> f = String::length; String npe = "none"; try { f.apply(null); } catch (NullPointerException e) { npe = String.valueOf(e.getMessage()); }',
+    {},
+    { built: 'xB2', npe: 'null' },
+  ],
+  [
     'Map.replaceAll and the locale-taking text overloads',
     'Map<String, Integer> m = new TreeMap<>(Map.of("a", 1, "b", 2)); m.replaceAll((k, v) -> v * 10); String replaced = m.toString(); String localized = "ABC".toLowerCase(Locale.ROOT) + String.format(Locale.US, "%.2f", 1.5) + Locale.JAPAN;',
     {},
@@ -371,6 +377,7 @@ List<Integer> linked = new LinkedList<>(List.of(1, 2, 3)); try { linked.removeIf
 StringBuilder collecting = new StringBuilder(); Stream.of(1, 2).peek(x -> collecting.append(x)).collect(Collectors.toCollection(() -> { collecting.append("S"); return new ArrayList<Integer>(); })); String collectOrder = collecting.toString();
 PriorityQueue<Integer> heap = new PriorityQueue<>(); for (int x : new int[] {0, 10, 1, 11, 12, 2, 3, 13, 14, 15, 16, 4, 5, 6, 7}) heap.add(x); heap.removeIf(x -> x == 10); heap.removeAll(List.of(1)); String polled = ""; while (!heap.isEmpty()) polled += heap.poll() + ",";
 Deque<Integer> deque = new ArrayDeque<>(List.of(1, 2, 3)); try { deque.removeIf(x -> { if (x == 3) throw new RuntimeException(); return x == 1; }); } catch (RuntimeException e) {} String dequeText = deque.toString();
+enum Shade { R, G, B } Map<Shade, Integer> shades = new EnumMap<>(Shade.class); shades.computeIfAbsent(Shade.R, k -> { shades.put(Shade.G, 1); return 2; }); String enumMapText = shades.toString();
 Map<Integer, Long> memo = new HashMap<>(); String memoCme = ""; try { memo.computeIfAbsent(3, k -> memo.computeIfAbsent(2, j -> 1L) + 1); } catch (ConcurrentModificationException e) { memoCme = "cme"; }
 Map<String, Integer> keyed = new HashMap<>(Map.of("a", 1)); Set<String> readOnlyKeys = Collections.unmodifiableSet(keyed.keySet()); keyed.put("b", 2); String keysText = readOnlyKeys.toString(); Iterator<String> pending = readOnlyKeys.iterator(); keyed.clear(); boolean stillPending = pending.hasNext();
 String exhausted = ""; try { i.next(); } catch (NoSuchElementException e) { exhausted += "N"; } try { i.remove(); } catch (IllegalStateException e) { exhausted += "I"; } exhausted += q;
@@ -385,6 +392,7 @@ List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(
     linkedText: '[2, 3]',
     collectOrder: 'S12',
     memoCme: 'cme',
+    enumMapText: '{R=2, G=1}',
     keysText: '[a, b]',
     stillPending: true,
     polled: '0,2,3,4,5,6,7,11,12,13,14,15,16,',

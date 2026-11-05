@@ -1,11 +1,11 @@
 import { findEntry, javaEquals, putEntry, removeEntry } from './builtinCollections';
-import { checkModifiable } from './builtinCollectionSupport';
+import { checkModifiable, uncountedMapClasses } from './builtinCollectionSupport';
 import { callFunction } from './builtinFunctions';
 import { classType, extendsOf, superOf } from './builtinStreamSupport';
 import { addMethod } from './builtinSupport';
 import { type Frame, throwBuiltin } from './runtime';
 import { BOOLEAN, type ClassInfo, type JavaType, VOID } from './types';
-import { type JavaObject, type Value } from './values';
+import { type HashEntry, type HashStore, type JavaObject, type Value } from './values';
 
 /** The functional interfaces the compute methods take. */
 interface ComputeFunctions {
@@ -71,15 +71,11 @@ function defineMapReplaceAll(mapClass: ClassInfo, functions: ComputeFunctions, m
     const map = receiver as JavaObject;
     const store = map.store;
     if (!store) return throwBuiltin(frame, 'UnsupportedOperationException');
-    const expectedModCount = map.modCount;
-    const check = (): void => {
-      if (map.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
-    };
-    for (const entry of store.ordered()) {
+    const apply = (entry: HashEntry): void => {
       entry.value = callFunction(frame, functions.biFunction, fn, [entry.key, entry.value]);
-      if (store.compare) check();
-    }
-    check();
+    };
+    if (failsFast(map)) replaceFailingFast(frame, map, store, apply);
+    else replaceLive(store, apply);
   });
 }
 
@@ -98,8 +94,38 @@ export function unchanging(frame: Frame, receiver: Value, call: () => Value): Va
   const map = receiver as JavaObject;
   const expectedModCount = map.modCount;
   const value = call();
-  if (map.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
+  if (failsFast(map) && map.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
   return value;
+}
+
+/** Whether the map's JDK class counts its changes, which an EnumMap does not. */
+function failsFast(map: JavaObject): boolean {
+  for (let cls: ClassInfo | undefined = map.cls; cls; cls = cls.superclass) {
+    if (uncountedMapClasses.has(cls)) return false;
+  }
+  return true;
+}
+
+/** Replaces each value as a hash or tree map does, failing after each entry for a sorted map and at the end. */
+function replaceFailingFast(frame: Frame, map: JavaObject, store: HashStore, apply: (entry: HashEntry) => void): void {
+  const expectedModCount = map.modCount;
+  const check = (): void => {
+    if (map.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
+  };
+  for (const entry of store.ordered()) {
+    apply(entry);
+    if (store.compare) check();
+  }
+  check();
+}
+
+/** Replaces each value as Map's default does through an EnumMap's live iterator, which reaches keys added after it. */
+function replaceLive(store: HashStore, apply: (entry: HashEntry) => void): void {
+  for (let index = 0; index < store.ordered().length; index++) {
+    const entry = store.ordered()[index] as HashEntry;
+    apply(entry);
+    index = Math.max(index, store.ordered().indexOf(entry));
+  }
 }
 
 /** Maps the key to a computed value, or removes it for null, returning the value. */

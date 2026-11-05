@@ -18,6 +18,8 @@ const classObjects = new WeakMap<ClassInfo, JavaObject>();
 export function defineClassClass(registry: Registry, objectClass: ClassInfo, stringType: JavaType): void {
   const classClass = registry.define('Class', objectClass);
   classClass.isFinal = true;
+  // `Void`, which `void.class` is a `Class` of, has no instances.
+  registry.define('Void', objectClass).isFinal = true;
   addTypeParameters(classClass, ['T'], objectClass.type);
   addMethod(classClass, 'getName', [], stringType, false, (frame, receiver) =>
     newString(frame, classNameOf(frame, reflected(receiver)))

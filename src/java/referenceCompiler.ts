@@ -10,7 +10,7 @@ import {
   type Reference,
 } from './compilerBase';
 import { memberBindings, memberType } from './conversions';
-import { arrayKindOf, elementSource, fieldSource, nullMessage } from './nullMessages';
+import { arrayKindOf, elementSource, fieldSource, nullMessage, type NullSource } from './nullMessages';
 import { type Frame, throwBuiltin, UNASSIGNED } from './runtime';
 import {
   asSuper,
@@ -68,7 +68,7 @@ export abstract class ReferenceCompiler extends CompilerBase {
           kind: 'value',
           type,
           constant,
-          source: { path: expression.name },
+          source: nameSource(expression.name),
           run: (frame) => {
             if (frame.locals[slot] === UNASSIGNED)
               throw new Error(`Local ${expression.name} is read before assignment`);
@@ -79,7 +79,7 @@ export abstract class ReferenceCompiler extends CompilerBase {
       return {
         kind: 'value',
         type,
-        source: { path: expression.name },
+        source: nameSource(expression.name),
         run: (frame) => {
           const value = frame.locals[slot];
           if (value === UNASSIGNED) throw new Error(`Local ${expression.name} is read before assignment`);
@@ -94,7 +94,7 @@ export abstract class ReferenceCompiler extends CompilerBase {
         kind: 'value',
         type: capture.type,
         constant: capture.constant,
-        source: { path: expression.name },
+        source: nameSource(expression.name),
         run: (frame) => frame.captured[index],
       };
     }
@@ -248,7 +248,12 @@ export abstract class ReferenceCompiler extends CompilerBase {
     if (!isReifiable(type)) this.error(expression, `型引数を含む型 ${typeName(type)} には .class を使えません。`);
     const classClass = this.builtins.classes.get('Class') as ClassInfo;
     // `int.class` is a `Class<Integer>`, `String[].class` a `Class<String[]>`, and `List.class` a `Class<List>`.
-    const represented = isPrimitive(type) ? boxedTypeOf(this.builtins.wrappers, type) : erasure(type);
+    const represented =
+      type.kind === 'void'
+        ? this.builtins.classes.get('Void')?.type
+        : isPrimitive(type)
+          ? boxedTypeOf(this.builtins.wrappers, type)
+          : erasure(type);
     const literalType: JavaType = represented
       ? { kind: 'class', cls: classClass, args: [represented] }
       : classClass.type;
@@ -515,8 +520,8 @@ function fieldAccessors(
   frame: Frame,
   target: Value,
   slot: number,
-  readMessage: string,
-  assignMessage: string
+  readMessage: string | undefined,
+  assignMessage: string | undefined
 ): { get: () => Value; set: (value: Value) => void } {
   return {
     get: () =>
@@ -533,10 +538,10 @@ function elementAccessors(
   frame: Frame,
   values: Value,
   position: number,
-  loadMessage: string,
-  storeMessage: string
+  loadMessage: string | undefined,
+  storeMessage: string | undefined
 ): { get: () => Value; set: (value: Value) => void } {
-  const check = (message: string): JavaArray => {
+  const check = (message: string | undefined): JavaArray => {
     if (!(values instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException', message);
     if (position < 0 || position >= values.values.length) {
       throwBuiltin(
@@ -588,4 +593,9 @@ function localReference(context: MethodContext, slot: number): Reference {
       },
     }),
   };
+}
+
+/** The source of a variable's value, which a name the compiler made, starting with NUL, does not name. */
+function nameSource(name: string): NullSource {
+  return name.startsWith('\0') ? { hidden: true } : { path: name };
 }

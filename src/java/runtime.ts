@@ -57,6 +57,11 @@ export class Runtime {
   readonly staticValues = new Map<ClassInfo, Value[]>();
   readonly steps = new StepTracker();
   readonly budget = new ExecutionBudget();
+
+  /** Prints to standard output, which Java encodes in UTF-8, so that an unpaired surrogate prints as `?`. */
+  print(text: string): void {
+    this.budget.print(text.replaceAll(/\p{Cs}/gu, '?'));
+  }
   private allocatedSlots = 0;
   private readonly initializingClasses = new Set<ClassInfo>();
   private readonly dispatchCache = new Map<MethodInfo, Map<ClassInfo, MethodInfo>>();

@@ -26,11 +26,15 @@ export function defineText(
   const objectType = objectClass.type;
   const stringType = stringClass.type;
   const objectArray: JavaType = { kind: 'array', element: objectType };
-  defineStringBuilder(registry, objectClass, stringClass);
+  // StringBuffer has StringBuilder's members, synchronized, which a single-threaded program cannot tell apart.
+  for (const name of ['StringBuilder', 'StringBuffer']) defineStringBuilder(registry, objectClass, stringClass, name);
   defineStringJoiner(registry, objectClass, stringClass.type);
   defineStringExtras(stringClass, collections);
   defineStringVariants(stringClass, objectClass);
-  defineStringIdentity(stringClass, registry.classes.get('StringBuilder') as ClassInfo);
+  defineStringIdentity(
+    stringClass,
+    ['StringBuilder', 'StringBuffer'].map((name) => registry.classes.get(name) as ClassInfo)
+  );
   const format = addMethod(
     stringClass,
     'format',
@@ -56,7 +60,7 @@ export function defineText(
       printStreamClass.type,
       false,
       (frame, receiver, [pattern, args]) => {
-        frame.runtime.budget.print(
+        frame.runtime.print(
           formatText(frame, requireString(frame, pattern), (args as JavaArray | undefined)?.values ?? [undefined])
         );
         return receiver;
@@ -126,9 +130,9 @@ function setBuilder(frame: Frame, receiver: Value, value: string, work = value.l
   return receiver;
 }
 
-function defineStringBuilder(registry: Registry, objectClass: ClassInfo, stringClass: ClassInfo): void {
+function defineStringBuilder(registry: Registry, objectClass: ClassInfo, stringClass: ClassInfo, name: string): void {
   const stringType = stringClass.type;
-  const cls = registry.define('StringBuilder', objectClass);
+  const cls = registry.define(name, objectClass);
   cls.isFinal = true;
   const builderType = cls.type;
   addConstructor(cls, [], (_, receiver) => {
@@ -160,9 +164,21 @@ function defineStringBuilder(registry: Registry, objectClass: ClassInfo, stringC
   defineBuilderQueries(cls, stringType);
 }
 
-/** The StringBuilder methods that change characters in place. */
+/** The StringBuilder methods that change characters in place or add a code point. */
 function defineBuilderEdits(cls: ClassInfo, stringType: JavaType): void {
   const builderType = cls.type;
+  addMethod(cls, 'appendCodePoint', [INT], builderType, false, (frame, receiver, [code]) => {
+    const point = code as number;
+    if (point < 0 || point > 0x10_ff_ff) {
+      throwBuiltin(
+        frame,
+        'IllegalArgumentException',
+        `Not a valid Unicode code point: 0x${(point >>> 0).toString(16).toUpperCase()}`
+      );
+    }
+    const appended = String.fromCodePoint(point);
+    return setBuilder(frame, receiver, builderOf(receiver) + appended, appended.length);
+  });
   addMethod(cls, 'setCharAt', [INT, CHAR], VOID, false, (frame, receiver, [index, code]) => {
     checkIndex(frame, index as number, builderOf(receiver).length);
     spliceBuilder(frame, receiver, index as number, (index as number) + 1, charToString(code as number));

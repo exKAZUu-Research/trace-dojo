@@ -5,10 +5,15 @@ import { type ClassInfo, erasure, type JavaType, type MethodInfo } from './types
  * What a value that turns out null came from, which the messages of `NullPointerException` name as the JDK's
  * helpful messages (JEP 358) do: a variable, field, or array element by its `path`, or a method's return value.
  */
-export type NullSource = { path: string } | { returnOf: string };
+/**
+ * Where a null value came from, as the JDK's messages name it; `hidden` is a value of a variable the compiler made, as a
+ * method reference's parameter, which the JVM holds in a hidden frame and so gives its exception no message.
+ */
+export type NullSource = { path: string } | { returnOf: string } | { hidden: true };
 
-export function nullMessage(action: string, source: NullSource | undefined): string {
+export function nullMessage(action: string, source: NullSource | undefined): string | undefined {
   if (!source) return action;
+  if ('hidden' in source) return undefined;
   return 'path' in source
     ? `${action} because "${source.path}" is null`
     : `${action} because the return value of "${source.returnOf}" is null`;
@@ -16,11 +21,13 @@ export function nullMessage(action: string, source: NullSource | undefined): str
 
 /** The source of `object.name`, which names only the field when `object` has no path. */
 export function fieldSource(object: NullSource | undefined, name: string): NullSource {
+  if (object && 'hidden' in object) return object;
   return { path: object && 'path' in object ? `${object.path}.${name}` : name };
 }
 
 /** The source of `array[index]`, whose index the JDK names only when it is a variable or a constant. */
 export function elementSource(array: NullSource | undefined, index: string | undefined): NullSource | undefined {
+  if (array && 'hidden' in array) return array;
   if (!array || !('path' in array)) return;
   return { path: `${array.path}[${index ?? '...'}]` };
 }

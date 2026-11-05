@@ -34,10 +34,10 @@ const BUILDER_RETURNS_POOLED_EMPTY = new Set(['substring', 'toString']);
  * Gives `String` the identities the JDK's strings have: `intern()`, which returns the string the program's literals of
  * that text are, methods that return the receiver itself, so `s.trim() == s`, a split without a match, which returns
  * the receiver as its only part, and empty results that are the program's `""`, as `s.substring(s.length()) == ""`,
- * also from `StringBuilder.substring` and `toString`.
+ * also from `StringBuilder.substring` and `toString` and StringBuffer's.
  */
-export function defineStringIdentity(stringClass: ClassInfo, builderClass: ClassInfo): void {
-  for (const method of builderClass.methods) {
+export function defineStringIdentity(stringClass: ClassInfo, builderClasses: readonly ClassInfo[]): void {
+  for (const method of builderClasses.flatMap((cls) => cls.methods)) {
     // JDK 25's StringBuilder.toString returns the pooled empty string, which JDK 21's did not.
     if (method.native && BUILDER_RETURNS_POOLED_EMPTY.has(method.name)) method.native = pooledWhenEmpty(method.native);
   }

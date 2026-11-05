@@ -212,6 +212,9 @@ export const defaultRemoveClasses = new WeakSet<ClassInfo>();
  */
 export const batchRemovalClasses = new WeakSet<ClassInfo>();
 
+/** The maps whose JDK classes count no changes, as EnumMap, so that their compute methods never fail fast. */
+export const uncountedMapClasses = new WeakSet<ClassInfo>();
+
 /** Restores the order a class keeps among its elements after a bulk removal compacts them, as a heap's. */
 export const bulkRemovalRepairs = new WeakMap<ClassInfo, (frame: Frame, receiver: Value) => void>();
 
@@ -332,10 +335,11 @@ export function removeElements(
     removed = true;
   }
   if (removed) {
+    // The removal counts even when the repair fails, as a comparator that throws while a heap is restored does.
+    touch(receiver);
     for (let cls: ClassInfo | undefined = (receiver as JavaObject).cls; cls; cls = cls.superclass) {
       bulkRemovalRepairs.get(cls)?.(frame, receiver);
     }
-    touch(receiver);
   }
   return removed;
 }

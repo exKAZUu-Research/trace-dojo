@@ -324,18 +324,18 @@ function defineSystem(registry: Registry, objectClass: ClassInfo, stringType: Ja
     for (const type of [INT, LONG, FLOAT, DOUBLE, CHAR, BOOLEAN, stringType, objectClass.type]) {
       addMethod(printStreamClass, name, [type], VOID, false, (frame, receiver, [value]) => {
         const text = `${stringify(frame, value, type)}${suffix}`;
-        if (receiver !== errorStream) frame.runtime.budget.print(text);
+        if (receiver !== errorStream) frame.runtime.print(text);
       });
     }
     addMethod(printStreamClass, name, [CHAR_ARRAY], VOID, false, (frame, receiver, [value]) => {
       if (!(value instanceof JavaArray)) throwBuiltin(frame, 'NullPointerException');
       frame.runtime.scanString(value.values.length);
       const text = `${value.values.map((code) => charToString(code as number)).join('')}${suffix}`;
-      if (receiver !== errorStream) frame.runtime.budget.print(text);
+      if (receiver !== errorStream) frame.runtime.print(text);
     });
   }
   addMethod(printStreamClass, 'println', [], VOID, false, (frame, receiver) => {
-    if (receiver !== errorStream) frame.runtime.budget.print('\n');
+    if (receiver !== errorStream) frame.runtime.print('\n');
   });
   defineIO(registry, objectClass);
 }
@@ -348,11 +348,11 @@ function defineIO(registry: Registry, objectClass: ClassInfo): void {
     ['println', '\n'],
   ] as const) {
     addMethod(ioClass, name, [objectClass.type], VOID, true, (frame, _, [value]) => {
-      frame.runtime.budget.print(`${stringify(frame, value, objectClass.type)}${suffix}`);
+      frame.runtime.print(`${stringify(frame, value, objectClass.type)}${suffix}`);
     });
   }
   addMethod(ioClass, 'println', [], VOID, true, (frame) => {
-    frame.runtime.budget.print('\n');
+    frame.runtime.print('\n');
   });
 }
 

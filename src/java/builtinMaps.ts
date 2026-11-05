@@ -14,6 +14,7 @@ import {
   linkOverrides,
   mapViewSources,
   touch,
+  uncountedMapClasses,
   unmodifiableClasses,
 } from './builtinCollectionSupport';
 import { callFunction } from './builtinFunctions';
@@ -245,6 +246,7 @@ function mapView(
 
 /** `EnumMap`, a map of an enum's constants in their order, which its constructors take the enum's class for. */
 function defineEnumMap(cls: ClassInfo, classClass: ClassInfo): void {
+  uncountedMapClasses.add(cls);
   // Of the constructors every map has, an EnumMap keeps only the one copying another map.
   cls.constructors = cls.constructors.filter((constructor) => constructor.parameterTypes[0]?.kind === 'class');
   const [key] = cls.typeParameters;
