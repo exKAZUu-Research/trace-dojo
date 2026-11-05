@@ -44,7 +44,17 @@ import {
   upperBound,
   VOID,
 } from './types';
-import { defaultValue, JavaArray, JavaObject, toInt32, type Value } from './values';
+import {
+  charToString,
+  defaultValue,
+  formatDouble,
+  formatFloat,
+  JavaArray,
+  JavaObject,
+  JavaString,
+  toInt32,
+  type Value,
+} from './values';
 
 /** Type-checks expressions and compiles them into closures. */
 export abstract class ExpressionCompiler extends CompilerBase {
@@ -743,6 +753,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
       } catch {
         constant = undefined;
       }
+    } else if (
+      left.constant !== undefined &&
+      right.constant !== undefined &&
+      keepsReferences &&
+      binaryOperator === '+'
+    ) {
+      // Concatenating constants gives a constant, which Java interns like a literal.
+      const text = `${constantText(left.constant, left.type)}${constantText(right.constant, right.type)}`;
+      constant = this.internedString(text);
+      const interned = constant;
+      return { kind: 'value', type: operation.type, constant, run: () => interned };
     }
     return {
       kind: 'value',
@@ -1370,6 +1391,25 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     if (expression.object === 'super' && method.isAbstract) {
       this.error(expression, `抽象メソッド ${name} は super から呼び出せません。`);
+    }
+  }
+}
+
+/** The text a constant contributes to a string concatenation. */
+function constantText(value: Value, type: JavaType): string {
+  if (value instanceof JavaString) return value.value;
+  switch (type.kind) {
+    case 'char': {
+      return charToString(value as number);
+    }
+    case 'double': {
+      return formatDouble(value as number);
+    }
+    case 'float': {
+      return formatFloat(value as number);
+    }
+    default: {
+      return String(value as number | bigint | boolean);
     }
   }
 }

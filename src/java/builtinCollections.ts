@@ -90,7 +90,12 @@ export function defineCollections(
   addInterface(setClass, classType(collectionClass, setElement));
 
   const lists = { listClass, collectionClass, itrClass };
-  for (const name of ['ArrayList', 'LinkedList']) defineArrayList(context, name, lists);
+  const dequeClass = defineDequeInterfaces(context, collectionClass);
+  defineArrayList(context, 'ArrayList', lists);
+  const linkedList = defineArrayList(context, 'LinkedList', lists);
+  addInterface(linkedList, classType(dequeClass, { kind: 'typeVar', variable: linkedList.typeParameters[0] }));
+  linkOverrides(linkedList);
+  defineArrayDeque(context, lists, dequeClass);
   const immutableList = defineRestrictedList(context, 'ListN', lists, () => true);
   // Arrays.asList writes through to its array, so it may set elements but not change its size.
   const fixedSizeList = defineRestrictedList(context, 'ArrayList', lists, (method) => method.name !== 'set', 'Arrays$');
@@ -110,6 +115,60 @@ export function defineCollections(
     immutableList,
     fixedSizeList,
   };
+}
+
+const DEQUE_INSERTIONS = ['addFirst', 'addLast', 'offerFirst', 'offerLast', 'push'] as const;
+const DEQUE_REMOVALS = [
+  'pollFirst',
+  'pollLast',
+  'peekFirst',
+  'peekLast',
+  'getFirst',
+  'getLast',
+  'removeFirst',
+  'removeLast',
+  'pop',
+] as const;
+
+/** `Queue` and `Deque`, whose methods `LinkedList` and `ArrayDeque` implement. */
+function defineDequeInterfaces(context: Context, collectionClass: ClassInfo): ClassInfo {
+  const queueClass = defineInterface(context.registry, 'Queue', 'java.util');
+  const [queueElement] = addTypeParameters(queueClass, ['E'], context.objectType);
+  addInterface(queueClass, classType(collectionClass, queueElement));
+  addAbstractMethod(queueClass, 'offer', [queueElement], BOOLEAN);
+  for (const name of ['poll', 'peek', 'element', 'remove'] as const)
+    addAbstractMethod(queueClass, name, [], queueElement);
+  const dequeClass = defineInterface(context.registry, 'Deque', 'java.util');
+  const [dequeElement] = addTypeParameters(dequeClass, ['E'], context.objectType);
+  addInterface(dequeClass, classType(queueClass, dequeElement));
+  for (const name of DEQUE_INSERTIONS) {
+    addAbstractMethod(dequeClass, name, [dequeElement], name.startsWith('offer') ? BOOLEAN : VOID);
+  }
+  for (const name of DEQUE_REMOVALS) addAbstractMethod(dequeClass, name, [], dequeElement);
+  return dequeClass;
+}
+
+function isIndexed(method: MethodInfo): boolean {
+  return (
+    ['get', 'set', 'indexOf', 'lastIndexOf', 'equals', 'hashCode'].includes(method.name) ||
+    method.parameterTypes[0]?.kind === 'int'
+  );
+}
+
+/** `ArrayDeque`, a deque without the list's indexed methods. */
+function defineArrayDeque(
+  context: Context,
+  lists: { listClass: ClassInfo; collectionClass: ClassInfo; itrClass: ClassInfo },
+  dequeClass: ClassInfo
+): void {
+  const cls = defineArrayList(context, 'ArrayDeque', lists);
+  LIST_CLASSES.delete(cls);
+  // A deque has no indexed access, so it keeps only the list methods that ignore positions.
+  cls.methods = cls.methods.filter((method) => !isIndexed(method));
+  cls.interfaces = [dequeClass];
+  cls.supertypes = [cls.supertypes[0], classType(dequeClass, { kind: 'typeVar', variable: cls.typeParameters[0] })];
+  defineDequeMethods(cls, { kind: 'typeVar', variable: cls.typeParameters[0] });
+  linkOverrides(cls);
 }
 
 /** A list whose methods that `rejects` throw `UnsupportedOperationException`, as `List.of` and `Arrays.asList` give. */

@@ -27,6 +27,7 @@ import {
   substitute,
   superinterfacesOf,
   thisTypeOf,
+  type TypeVariable,
   VOID,
 } from './types';
 import { JavaArray, JavaObject, JavaString } from './values';
@@ -104,7 +105,7 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
       // parameters in scope.
       this.withTypeScope(cls.enclosing, () => {
         cls.typeParameters = this.declareTypeParameters(declaration.typeParameters);
-        this.withTypeVariables(cls.typeParameters, () => {
+        this.withTypeVariables(typeVariablesInScope(cls), () => {
           const base = this.anonymousBases.get(cls);
           const superclass = base && base.cls.kind !== 'interface' ? base : this.resolveSuperclass(cls, declaration);
           const interfaces: ClassType[] = [];
@@ -541,8 +542,17 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
 
   /** Runs `compile` with `cls`'s type parameters in scope when the code belongs to its instances. */
   protected withInstanceTypeVariables<T>(cls: ClassInfo, isInstance: boolean, compile: () => T): T {
-    return this.withTypeVariables(isInstance ? cls.typeParameters : [], compile);
+    return this.withTypeVariables(isInstance ? typeVariablesInScope(cls) : [], compile);
   }
+}
+
+/** The type parameters an instance of `cls` sees: its own, then those of the instances it belongs to. */
+function typeVariablesInScope(cls: ClassInfo): TypeVariable[] {
+  const variables = [...cls.typeParameters];
+  for (let current = cls; current.hasOuterInstance && current.enclosing; current = current.enclosing) {
+    variables.push(...current.enclosing.typeParameters);
+  }
+  return variables;
 }
 
 export function accessRank(access: string): number {
