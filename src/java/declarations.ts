@@ -102,32 +102,36 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
       const declaration = cls.declaration as ClassDeclaration;
       if (visiting.has(cls)) this.error(declaration, `${KIND_NAMES[cls.kind]} ${cls.name} の継承が循環しています。`);
       visiting.add(cls);
-      // A class's extends and implements clauses name types as its enclosing class's body does, with its type
-      // parameters in scope.
-      this.withTypeScope(cls.enclosing, () => {
-        cls.typeParameters = this.declareTypeParameters(declaration.typeParameters);
-        this.withTypeVariables(typeVariablesInScope(cls), () => {
-          const base = this.anonymousBases.get(cls);
-          const superclass = base && base.cls.kind !== 'interface' ? base : this.resolveSuperclass(cls, declaration);
-          const interfaces: ClassType[] = [];
-          if (base?.cls.kind === 'interface') interfaces.push(base);
-          else
-            for (const syntax of declaration.interfaces)
-              interfaces.push(this.resolveInterface(cls, syntax, interfaces));
-          for (const supertype of [superclass, ...interfaces]) {
-            if (supertype && !supertype.cls.isBuiltin) visit(supertype.cls);
-          }
-          cls.superclass = superclass?.cls;
-          cls.interfaces = interfaces.map((type) => type.cls);
-          cls.supertypes = superclass ? [superclass, ...interfaces] : interfaces;
-        });
-      });
+      const supertypes = this.resolveSupertypes(cls, declaration);
+      for (const supertype of supertypes) if (!supertype.cls.isBuiltin) visit(supertype.cls);
+      cls.superclass = cls.kind === 'interface' ? undefined : supertypes[0]?.cls;
+      cls.interfaces = (cls.kind === 'interface' ? supertypes : supertypes.slice(1)).map((type) => type.cls);
+      cls.supertypes = supertypes;
       visiting.delete(cls);
       this.resolvedClasses.add(cls);
       ordered.push(cls);
     };
     for (const cls of classes) visit(cls);
     return ordered;
+  }
+
+  /**
+   * The superclass (absent for an interface) followed by the interfaces, which a class's extends and implements
+   * clauses name as its enclosing class's body does, with its type parameters in scope.
+   */
+  protected resolveSupertypes(cls: ClassInfo, declaration: ClassDeclaration): ClassType[] {
+    return this.withTypeScope(cls.enclosing, () => {
+      cls.typeParameters = this.declareTypeParameters(declaration.typeParameters);
+      return this.withTypeVariables(typeVariablesInScope(cls), () => {
+        const base = this.anonymousBases.get(cls);
+        const superclass = base && base.cls.kind !== 'interface' ? base : this.resolveSuperclass(cls, declaration);
+        const interfaces: ClassType[] = [];
+        if (base?.cls.kind === 'interface') interfaces.push(base);
+        else
+          for (const syntax of declaration.interfaces) interfaces.push(this.resolveInterface(cls, syntax, interfaces));
+        return superclass ? [superclass, ...interfaces] : interfaces;
+      });
+    });
   }
 
   protected resolveSuperclass(cls: ClassInfo, declaration: ClassDeclaration): ClassType | undefined {
