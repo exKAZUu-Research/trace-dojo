@@ -16,6 +16,7 @@ import {
   type JavaType,
   type MethodInfo,
   sameType,
+  substitute,
   thisTypeOf,
   typeName,
   type TypeVariable,
@@ -473,6 +474,13 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
       if (variables.length === 0) return [method];
       if (variables.length !== typeArgs.length) return [];
       const bindings = new Map(variables.map((variable, index) => [variable, typeArgs[index]]));
+      // A type argument outside its variable's bounds makes the method inapplicable, as javac rejects it.
+      const isWithinBounds = variables.every((variable, index) =>
+        variable.bounds.every((bound) =>
+          isWidening(typeArgs[index] as JavaType, substitute(bound, bindings), this.builtins.objectClass)
+        )
+      );
+      if (!isWithinBounds) return [];
       return [{ ...methodView(method, bindings), typeParameters: [], declared: method.declared ?? method }];
     });
   }

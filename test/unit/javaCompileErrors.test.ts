@@ -1168,6 +1168,21 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'record Box(Object v) {}\nclass Main {\n  public static void main(String[] args) {\n    Object o = new Box("x"); String s = switch (o) { case Box(String v) -> v; case Box(Object v) -> "o"; default -> "d"; };\n  }\n}',
   ],
+  [
+    'explicit-type-argument-outside-bound',
+    false,
+    'class Main {\n  static <T extends Number> T g(T t) { return t; }\n  public static void main(String[] args) {\n    Object o = Main.<Object>g(1);\n  }\n}',
+  ],
+  [
+    'explicit-type-argument-outside-receiver-bound',
+    false,
+    'class Holder<T> { <U extends T> U choose(U a, U b) { return a; } }\nclass Main {\n  public static void main(String[] args) {\n    Object o = new Holder<String>().<Object>choose("a", "b");\n  }\n}',
+  ],
+  [
+    'explicit-type-argument-within-receiver-bound',
+    true,
+    'class Holder<T> { <U extends T> U choose(U a, U b) { return a; } }\nclass Main {\n  public static void main(String[] args) {\n    String s = new Holder<String>().<String>choose("a", "b");\n  }\n}',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {
