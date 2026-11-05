@@ -72,7 +72,6 @@ function setBuilder(frame: Frame, receiver: Value, value: string): Value {
   return receiver;
 }
 
-// code-gauge-allow functionNcss 50 -- One registration per StringBuilder method.
 function defineStringBuilder(registry: Registry, objectClass: ClassInfo, stringClass: ClassInfo): void {
   const stringType = stringClass.type;
   const cls = registry.define('StringBuilder', objectClass);
@@ -88,6 +87,10 @@ function defineStringBuilder(registry: Registry, objectClass: ClassInfo, stringC
   addConstructor(cls, [stringType], (frame, receiver, [initial]) => {
     setBuilder(frame, receiver, requireString(frame, initial));
   });
+  addConstructor(stringClass, [builderType], (frame, _, [builder]) => {
+    if (!(builder instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
+    return newString(frame, builderOf(builder));
+  });
   for (const type of [stringType, CHAR, INT, LONG, DOUBLE, FLOAT, BOOLEAN, objectClass.type, CHAR_ARRAY]) {
     addMethod(cls, 'append', [type], builderType, false, (frame, receiver, [value]) => {
       const appended = type === CHAR_ARRAY ? arrayOfChars(frame, value) : stringify(frame, value, type);
@@ -95,52 +98,29 @@ function defineStringBuilder(registry: Registry, objectClass: ClassInfo, stringC
     });
     if (type === CHAR_ARRAY) continue;
     addMethod(cls, 'insert', [INT, type], builderType, false, (frame, receiver, [offset, value]) => {
-      const current = builderOf(receiver);
-      checkOffset(frame, offset as number, current.length);
-      const inserted = stringify(frame, value, type);
-      return setBuilder(
-        frame,
-        receiver,
-        current.slice(0, offset as number) + inserted + current.slice(offset as number)
-      );
+      checkOffset(frame, offset as number, builderOf(receiver).length);
+      return spliceBuilder(frame, receiver, offset as number, offset as number, stringify(frame, value, type));
     });
   }
-  addMethod(cls, 'toString', [], stringType, false, (frame, receiver) => newString(frame, builderOf(receiver)));
-  addConstructor(stringClass, [builderType], (frame, _, [builder]) => {
-    if (!(builder instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
-    return newString(frame, builderOf(builder));
-  });
-  addMethod(cls, 'length', [], INT, false, (_, receiver) => builderOf(receiver).length);
-  addMethod(cls, 'isEmpty', [], BOOLEAN, false, (_, receiver) => builderOf(receiver).length === 0);
-  addMethod(cls, 'charAt', [INT], CHAR, false, (frame, receiver, [index]) => {
-    checkIndex(frame, index as number, builderOf(receiver).length);
-    return charCodeOf(builderOf(receiver), index as number);
-  });
+  defineBuilderEdits(cls, stringType);
+  defineBuilderQueries(cls, stringType);
+}
+
+/** The StringBuilder methods that change characters in place. */
+function defineBuilderEdits(cls: ClassInfo, stringType: JavaType): void {
+  const builderType = cls.type;
   addMethod(cls, 'setCharAt', [INT, CHAR], VOID, false, (frame, receiver, [index, code]) => {
-    const current = builderOf(receiver);
-    checkIndex(frame, index as number, current.length);
-    setBuilder(
-      frame,
-      receiver,
-      current.slice(0, index as number) + charToString(code as number) + current.slice((index as number) + 1)
-    );
+    checkIndex(frame, index as number, builderOf(receiver).length);
+    spliceBuilder(frame, receiver, index as number, (index as number) + 1, charToString(code as number));
   });
   addMethod(cls, 'deleteCharAt', [INT], builderType, false, (frame, receiver, [index]) => {
-    const current = builderOf(receiver);
-    checkIndex(frame, index as number, current.length);
-    return setBuilder(frame, receiver, current.slice(0, index as number) + current.slice((index as number) + 1));
+    checkIndex(frame, index as number, builderOf(receiver).length);
+    return spliceBuilder(frame, receiver, index as number, (index as number) + 1, '');
   });
   addMethod(cls, 'delete', [INT, INT], builderType, false, (frame, receiver, [start, end]) => {
-    const current = builderOf(receiver);
-    const stop = Math.min(end as number, current.length);
-    if ((start as number) < 0 || (start as number) > stop) {
-      throwBuiltin(
-        frame,
-        'StringIndexOutOfBoundsException',
-        `start ${start as number}, end ${end as number}, length ${current.length}`
-      );
-    }
-    return setBuilder(frame, receiver, current.slice(0, start as number) + current.slice(stop));
+    const stop = Math.min(end as number, builderOf(receiver).length);
+    checkSpan(frame, start as number, end as number, builderOf(receiver).length, (start as number) > stop);
+    return spliceBuilder(frame, receiver, start as number, stop, '');
   });
   addMethod(
     cls,
@@ -149,19 +129,20 @@ function defineStringBuilder(registry: Registry, objectClass: ClassInfo, stringC
     builderType,
     false,
     (frame, receiver, [start, end, replacement]) => {
-      const current = builderOf(receiver);
-      const stop = Math.min(end as number, current.length);
-      if ((start as number) < 0 || (start as number) > current.length || (start as number) > (end as number)) {
-        throwBuiltin(
-          frame,
-          'StringIndexOutOfBoundsException',
-          `start ${start as number}, end ${end as number}, length ${current.length}`
-        );
-      }
-      return setBuilder(
+      const { length } = builderOf(receiver);
+      checkSpan(
+        frame,
+        start as number,
+        end as number,
+        length,
+        (start as number) > length || (start as number) > (end as number)
+      );
+      return spliceBuilder(
         frame,
         receiver,
-        current.slice(0, start as number) + requireString(frame, replacement) + current.slice(stop)
+        start as number,
+        Math.min(end as number, length),
+        requireString(frame, replacement)
       );
     }
   );
@@ -171,8 +152,9 @@ function defineStringBuilder(registry: Registry, objectClass: ClassInfo, stringC
     setBuilder(frame, receiver, [...builderOf(receiver)].toReversed().join(''))
   );
   addMethod(cls, 'setLength', [INT], VOID, false, (frame, receiver, [length]) => {
-    if ((length as number) < 0)
+    if ((length as number) < 0) {
       throwBuiltin(frame, 'StringIndexOutOfBoundsException', `String index out of range: ${length as number}`);
+    }
     setBuilder(
       frame,
       receiver,
@@ -181,22 +163,42 @@ function defineStringBuilder(registry: Registry, objectClass: ClassInfo, stringC
         .padEnd(length as number, '\0')
     );
   });
+}
+
+/** The StringBuilder methods that read its characters. */
+function defineBuilderQueries(cls: ClassInfo, stringType: JavaType): void {
+  addMethod(cls, 'toString', [], stringType, false, (frame, receiver) => newString(frame, builderOf(receiver)));
+  addMethod(cls, 'length', [], INT, false, (_, receiver) => builderOf(receiver).length);
+  addMethod(cls, 'isEmpty', [], BOOLEAN, false, (_, receiver) => builderOf(receiver).length === 0);
+  addMethod(cls, 'charAt', [INT], CHAR, false, (frame, receiver, [index]) => {
+    checkIndex(frame, index as number, builderOf(receiver).length);
+    return charCodeOf(builderOf(receiver), index as number);
+  });
   addMethod(cls, 'indexOf', [stringType], INT, false, (frame, receiver, [pattern]) =>
     builderOf(receiver).indexOf(requireString(frame, pattern))
   );
   addMethod(cls, 'lastIndexOf', [stringType], INT, false, (frame, receiver, [pattern]) =>
     builderOf(receiver).lastIndexOf(requireString(frame, pattern))
   );
-  addMethod(cls, 'substring', [INT], stringType, false, (frame, receiver, [begin]) => {
-    const current = builderOf(receiver);
-    checkRange(frame, begin as number, current.length, current.length);
-    return newString(frame, current.slice(begin as number));
-  });
-  addMethod(cls, 'substring', [INT, INT], stringType, false, (frame, receiver, [begin, end]) => {
-    const current = builderOf(receiver);
-    checkRange(frame, begin as number, end as number, current.length);
-    return newString(frame, current.slice(begin as number, end as number));
-  });
+  for (const parameterTypes of [[INT], [INT, INT]]) {
+    addMethod(cls, 'substring', parameterTypes, stringType, false, (frame, receiver, [begin, end]) => {
+      const current = builderOf(receiver);
+      const stop = end === undefined ? current.length : (end as number);
+      checkRange(frame, begin as number, stop, current.length);
+      return newString(frame, current.slice(begin as number, stop));
+    });
+  }
+}
+
+/** Replaces the characters from `start` to `end` with `inserted`. */
+function spliceBuilder(frame: Frame, receiver: Value, start: number, end: number, inserted: string): Value {
+  const current = builderOf(receiver);
+  return setBuilder(frame, receiver, current.slice(0, start) + inserted + current.slice(end));
+}
+
+function checkSpan(frame: Frame, start: number, end: number, length: number, isInvalid: boolean): void {
+  if (start < 0 || isInvalid)
+    throwBuiltin(frame, 'StringIndexOutOfBoundsException', `start ${start}, end ${end}, length ${length}`);
 }
 
 function arrayOfChars(frame: Frame, value: Value): string {
@@ -413,6 +415,18 @@ function pad(text: string, flags: string, width: string | undefined): string {
   return text.padStart(size);
 }
 
+/** The kinds of boxed values that each numeric or character conversion accepts. */
+const ACCEPTED_KINDS: Record<string, readonly string[]> = {
+  c: ['char', 'int', 'byte', 'short'],
+  d: ['int', 'long', 'short', 'byte'],
+  x: ['int', 'long', 'short', 'byte'],
+  o: ['int', 'long', 'short', 'byte'],
+  f: ['double', 'float'],
+  e: ['double', 'float'],
+};
+
+const INTEGER_BITS: Record<string, number> = { byte: 8, short: 16, int: 32, long: 64 };
+
 function formatArgument(
   frame: Frame,
   arg: Value,
@@ -421,63 +435,52 @@ function formatArgument(
   conversion: string
 ): string {
   const lower = conversion.toLowerCase();
-  const isUpper = conversion !== lower;
-  const boxed = arg instanceof JavaObject ? arg.boxed : undefined;
+  const formatted = formatLower(frame, arg, flags, precision, lower, conversion);
+  return conversion === lower ? formatted : formatted.toUpperCase();
+}
+
+function formatLower(
+  frame: Frame,
+  arg: Value,
+  flags: string,
+  precision: number | undefined,
+  lower: string,
+  conversion: string
+): string {
+  if (lower === 's') {
+    const text = arg === undefined ? 'null' : stringify(frame, arg, { kind: 'null' });
+    return precision === undefined ? text : text.slice(0, precision);
+  }
+  if (lower === 'b')
+    return String(arg instanceof JavaObject && typeof arg.boxed === 'boolean' ? arg.boxed : arg !== undefined);
+  const accepted = ACCEPTED_KINDS[lower] as readonly string[] | undefined;
+  if (!accepted) return throwBuiltin(frame, 'UnknownFormatConversionException', `Conversion = '${conversion}'`);
+  if (arg === undefined) return 'null';
   const kind = arg instanceof JavaObject ? arg.cls.unboxedType?.kind : undefined;
-  const mismatch = (): never =>
-    throwBuiltin(
-      frame,
-      'IllegalFormatConversionException',
-      `${conversion} != ${arg instanceof JavaObject ? (frame.runtime.builtins.qualifiedNames.get(arg.cls) ?? arg.cls.name) : 'java.lang.String'}`
-    );
-  let formatted: string;
+  if (!kind || !accepted.includes(kind)) {
+    const typeName =
+      arg instanceof JavaObject
+        ? (frame.runtime.builtins.qualifiedNames.get(arg.cls) ?? arg.cls.name)
+        : 'java.lang.String';
+    return throwBuiltin(frame, 'IllegalFormatConversionException', `${conversion} != ${typeName}`);
+  }
+  const boxed = (arg as JavaObject).boxed as number | bigint;
   switch (lower) {
-    case 's': {
-      formatted = arg === undefined ? 'null' : stringify(frame, arg, { kind: 'null' });
-      if (precision !== undefined) formatted = formatted.slice(0, precision);
-      break;
-    }
-    case 'b': {
-      formatted = String(arg === undefined ? false : typeof boxed === 'boolean' ? boxed : true);
-      break;
-    }
     case 'c': {
-      if (arg === undefined) formatted = 'null';
-      else if (kind === 'char' || kind === 'int' || kind === 'byte' || kind === 'short')
-        formatted = String.fromCodePoint(boxed as number);
-      else return mismatch();
-      break;
+      return String.fromCodePoint(boxed as number);
     }
     case 'd': {
-      if (arg === undefined) formatted = 'null';
-      else if (kind && ['int', 'long', 'short', 'byte'].includes(kind))
-        formatted = formatInteger(BigInt(boxed as number | bigint), flags);
-      else return mismatch();
-      break;
+      return formatInteger(BigInt(boxed), flags);
     }
     case 'x':
     case 'o': {
-      if (arg === undefined) formatted = 'null';
-      else if (kind && ['int', 'long', 'short', 'byte'].includes(kind)) {
-        const bits = kind === 'long' ? 64 : kind === 'int' ? 32 : kind === 'short' ? 16 : 8;
-        formatted = BigInt.asUintN(bits, BigInt(boxed as number | bigint)).toString(lower === 'x' ? 16 : 8);
-      } else return mismatch();
-      break;
-    }
-    case 'f':
-    case 'e': {
-      if (arg === undefined) formatted = 'null';
-      else if (kind === 'double' || kind === 'float') {
-        const value = kind === 'float' ? floatToShortestDouble(boxed as number) : (boxed as number);
-        formatted = formatDecimal(value, precision ?? 6, lower, flags);
-      } else return mismatch();
-      break;
+      return BigInt.asUintN(INTEGER_BITS[kind], BigInt(boxed)).toString(lower === 'x' ? 16 : 8);
     }
     default: {
-      return throwBuiltin(frame, 'UnknownFormatConversionException', `Conversion = '${conversion}'`);
+      const value = kind === 'float' ? floatToShortestDouble(boxed as number) : (boxed as number);
+      return formatDecimal(value, precision ?? 6, lower, flags);
     }
   }
-  return isUpper ? formatted.toUpperCase() : formatted;
 }
 
 function withSign(digits: string, isNegative: boolean, flags: string): string {
