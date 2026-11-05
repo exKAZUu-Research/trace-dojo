@@ -19,12 +19,12 @@ import { JavaObject, type Value } from './values';
 const comparators = new WeakMap<JavaObject, Value>();
 
 /**
- * `PriorityQueue(Collection)`: a priority queue or a sorted set passes on its ordering, and its elements already form
- * a heap in that order; other collections' elements are heapified in natural order.
+ * `PriorityQueue(Collection)`: a priority queue, a subclass's included, or a sorted set passes on its ordering; the
+ * elements of a `PriorityQueue` itself or a sorted set already form a heap in that order, and others are heapified.
  */
 function fillFrom(frame: Frame, receiver: Value, source: Value, queueClass: ClassInfo): void {
   const sorted = source instanceof JavaObject && source.store?.order === 'sorted' ? source.store : undefined;
-  const isQueue = source instanceof JavaObject && source.cls === queueClass;
+  const isQueue = source instanceof JavaObject && frame.runtime.isInstance(source, queueClass);
   create(receiver, isQueue ? comparators.get(source as JavaObject) : sorted?.comparator);
   const heap = elementsOf(receiver);
   for (const item of itemsOf(frame, source)) {
@@ -32,7 +32,7 @@ function fillFrom(frame: Frame, receiver: Value, source: Value, queueClass: Clas
     heap.push(item);
   }
   frame.runtime.allocateArray(frame, heap.length);
-  if (isQueue || sorted) return;
+  if ((isQueue && (source as JavaObject).cls === queueClass) || sorted) return;
   for (let index = (heap.length >>> 1) - 1; index >= 0; index--) siftDown(frame, receiver, index, heap[index]);
 }
 
