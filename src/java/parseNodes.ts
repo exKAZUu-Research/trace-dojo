@@ -230,10 +230,7 @@ function convertScopedType(node: Node): TypeSyntax {
     };
   }
   const parts = node.text.split('.').map((part) => part.trim());
-  // `java.lang.String`, `java.util.List`, and the like name the same classes as their simple names.
-  const qualifier = parts.slice(0, -1);
-  const isPackage = /^java\.[a-z.]+$/.test(qualifier.join('.'));
-  return { kind: 'named', name: parts.at(-1) ?? '', qualifier: isPackage ? [] : qualifier, ...span(node) };
+  return { kind: 'named', name: parts.at(-1) ?? '', qualifier: parts.slice(0, -1), ...span(node) };
 }
 
 function hasTypeArguments(node: Node): boolean {

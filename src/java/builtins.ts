@@ -590,34 +590,10 @@ export function stringify(frame: Frame, value: Value, type: JavaType): string {
       if (value === undefined) return 'null';
       if (value instanceof JavaString) return value.value;
       if (value instanceof JavaArray) {
-        return `[${arrayTypeCode(value.elementType)}@${value.identity.toString(16)}`;
+        return `${runtimeClassNameOf(frame, value)}@${value.identity.toString(16)}`;
       }
       const result = frame.runtime.invokeToString(frame, value as JavaObject);
       return result === undefined ? 'null' : result.value;
-    }
-  }
-}
-
-const primitiveTypeCodes: Record<string, string> = {
-  byte: 'B',
-  short: 'S',
-  int: 'I',
-  long: 'J',
-  float: 'F',
-  double: 'D',
-  char: 'C',
-  boolean: 'Z',
-};
-
-function arrayTypeCode(type: JavaType): string {
-  const primitiveCode = primitiveTypeCodes[type.kind] as string | undefined;
-  if (primitiveCode) return primitiveCode;
-  switch (type.kind) {
-    case 'array': {
-      return `[${arrayTypeCode(type.element)}`;
-    }
-    default: {
-      return `L${type.kind === 'class' ? type.cls.name : 'Object'};`;
     }
   }
 }

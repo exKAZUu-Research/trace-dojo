@@ -1304,6 +1304,11 @@ const programs: [name: string, runs: boolean, source: string][] = [
     'class Main {\n  public static void main(String[] args) {\n    System.out.println(Character.getNumericValue(0x1D7CF) + Character.getNumericValue("a".codePointAt(0)));\n  }\n}',
   ],
   [
+    'program-class-hiding-a-library-class',
+    true,
+    'class List { int value; List(int v) { value = v; } }\nclass Main {\n  public static void main(String[] args) {\n    System.out.println(new List(3).value + java.util.List.of(1).size());\n  }\n}',
+  ],
+  [
     'keyed-comparator-chained-without-target',
     true,
     'import java.util.*;\nclass Main {\n  record P(String name, int age) {}\n  public static void main(String[] args) {\n    List<P> ps = new ArrayList<>(); ps.sort(Comparator.comparing(P::name, Comparator.reverseOrder()).reversed());\n  }\n}',

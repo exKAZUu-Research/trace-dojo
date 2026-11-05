@@ -81,7 +81,8 @@ function checkRange(
   }
 }
 
-function sized(array: JavaArray): string {
+/** An array with its length as HotSpot's messages name it, such as `int[3]` or `object array[2]`. */
+export function sized(array: JavaArray): string {
   return arrayName(array, `[${array.values.length}]`);
 }
 

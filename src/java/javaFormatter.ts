@@ -1,13 +1,15 @@
 import { javaHash } from './builtinCollections';
 import { stringify } from './builtins';
 import { type Frame, throwBuiltin } from './runtime';
-import { floatToShortestDouble, JavaObject, type Value } from './values';
+import { JavaObject, type Value } from './values';
 
-const SPECIFIER = /%(\d+\$)?([-#+ 0,(]*)(\d+)?(\.\d+)?([a-zA-Z%])/g;
+const SPECIFIER = /%(\d+\$|<)?([-#+ 0,(]*)(\d+)?(\.\d+)?([a-zA-Z%])/g;
 
 /** Formats as `String.format` does for the conversions learners use: d, s, f, e, g, x, o, c, b, h, n, and %. */
 export function formatText(frame: Frame, pattern: string, args: Value[]): string {
   let nextArg = 0;
+  // `%<s` takes the argument the previous specifier took.
+  let previous: number | undefined;
   frame.runtime.scanString(pattern.length);
   const result = pattern.replaceAll(
     SPECIFIER,
@@ -21,9 +23,10 @@ export function formatText(frame: Frame, pattern: string, args: Value[]): string
     ) => {
       if (conversion === 'n') return '\n';
       if (conversion === '%') return pad('%', flags, width);
-      const position = index ? Number(index.slice(0, -1)) - 1 : nextArg++;
-      if (position >= args.length)
-        throwBuiltin(frame, 'MissingFormatArgumentException', `Format specifier '${specifier}'`);
+      const position = index === '<' ? previous : index ? Number(index.slice(0, -1)) - 1 : nextArg++;
+      if (position === undefined || position >= args.length)
+        return throwBuiltin(frame, 'MissingFormatArgumentException', `Format specifier '${specifier}'`);
+      previous = position;
       const formatted = formatArgument(
         frame,
         args[position],
@@ -144,7 +147,8 @@ function formatNumber(
       return flags.includes('#') ? `${lower === 'x' ? '0x' : '0'}${digits}` : digits;
     }
     default: {
-      const value = kind === 'float' ? floatToShortestDouble(boxed as number) : (boxed as number);
+      // A float formats as the double it widens to, as Formatter's print(float) does.
+      const value = boxed as number;
       return lower === 'g'
         ? formatGeneral(value, precision ?? 6, flags)
         : formatDecimal(value, precision ?? 6, lower, flags);

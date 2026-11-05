@@ -44,11 +44,20 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
     for (const declaration of unit.classes) this.registerClass(declaration, undefined);
   }
 
+  /**
+   * Whether a class of the grading environment itself, such as `Turtle`, has the name, which the program's classes share
+   * a package with; a library class such as `java.util.List` lives in its own package, so a program's class may hide it.
+   */
+  private isEnvironmentClass(name: string): boolean {
+    const builtin = this.builtins.classes.get(name);
+    return builtin !== undefined && !this.builtins.qualifiedNames.get(builtin)?.includes('.');
+  }
+
   // code-gauge-allow functionCognitiveComplexity 19 -- Each kind of class decides its implicit modifiers here.
   protected registerClass(declaration: ClassDeclaration, enclosing: ClassInfo | undefined): void {
     const { name, kind, modifiers } = declaration;
     const siblings = enclosing ? enclosing.memberTypes : this.classes;
-    if (siblings.has(name) || (!enclosing && this.builtins.classes.has(name))) {
+    if (siblings.has(name) || (!enclosing && this.isEnvironmentClass(name))) {
       this.error(declaration, `${KIND_NAMES[kind]} ${name} はすでに定義されています。`);
     }
     for (let outer = enclosing; outer; outer = outer.enclosing) {

@@ -1,3 +1,4 @@
+import { sized } from './arrayCopy';
 import { checkStore } from './builtinClass';
 import {
   type Collections,
@@ -390,7 +391,7 @@ function defineArrays(
     });
     if (element !== objectType) {
       addMethod(arraysClass, 'copyOf', [arrayType, INT], arrayType, true, (frame, _, [array, length]) =>
-        copyRange(frame, arrayOf(frame, array), 0, length as number)
+        copyPrefix(frame, arrayOf(frame, array), length as number)
       );
       addMethod(arraysClass, 'copyOfRange', [arrayType, INT, INT], arrayType, true, (frame, _, [array, from, to]) =>
         copyRange(frame, arrayOf(frame, array), from as number, to as number)
@@ -423,7 +424,7 @@ function defineArrays(
   generic(
     'copyOf',
     (element) => ({ parameterTypes: [{ kind: 'array', element }, INT], returnType: { kind: 'array', element } }),
-    (frame, _, [array, length]) => copyRange(frame, arrayOf(frame, array), 0, length as number)
+    (frame, _, [array, length]) => copyPrefix(frame, arrayOf(frame, array), length as number)
   );
   generic(
     'copyOfRange',
@@ -460,13 +461,28 @@ function comparePrimitives(a: Value, b: Value): number {
   return x < y ? -1 : 1;
 }
 
+/** `Arrays.copyOf`, which rejects a negative length as the array it would create. */
+function copyPrefix(frame: Frame, array: JavaArray, length: number): JavaArray {
+  if (length < 0) throwBuiltin(frame, 'NegativeArraySizeException', String(length));
+  return copyRange(frame, array, 0, length);
+}
+
+/** `Arrays.copyOfRange`, which rejects a reversed range, and then copies through `System.arraycopy`, with its messages. */
 function copyRange(frame: Frame, array: JavaArray, from: number, to: number): JavaArray {
-  if (to - from < 0) {
-    if (from === 0) throwBuiltin(frame, 'NegativeArraySizeException', String(to));
-    throwBuiltin(frame, 'IllegalArgumentException', `${from} > ${to}`);
+  if (to - from < 0) throwBuiltin(frame, 'IllegalArgumentException', `${from} > ${to}`);
+  if (from < 0) {
+    throwBuiltin(
+      frame,
+      'ArrayIndexOutOfBoundsException',
+      `arraycopy: source index ${from} out of bounds for ${sized(array)}`
+    );
   }
-  if (from < 0 || from > array.values.length) {
-    throwBuiltin(frame, 'ArrayIndexOutOfBoundsException', `Array index out of range: ${from}`);
+  if (from > array.values.length) {
+    throwBuiltin(
+      frame,
+      'ArrayIndexOutOfBoundsException',
+      `arraycopy: length ${array.values.length - from} is negative`
+    );
   }
   frame.runtime.allocateArray(frame, to - from);
   const values = Array.from({ length: to - from }, (_, index) =>

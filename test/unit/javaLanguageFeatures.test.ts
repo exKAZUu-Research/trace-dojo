@@ -123,6 +123,12 @@ class Res implements AutoCloseable { final StringBuilder log; Res(StringBuilder 
     },
   ],
   [
+    'float formatting, relative format indices, array names, and copyOfRange failures',
+    'String formatted = String.format("%.2f %.1f %s %<s", 1.005f, 0.35f, "a"); boolean named = ("" + new String[0]).startsWith("[Ljava.lang.String;@"); String range = ""; try { Arrays.copyOfRange(new int[3], 0, -1); } catch (IllegalArgumentException e) { range = e.getMessage(); }',
+    {},
+    { formatted: '1.00 0.3 a a', named: true, range: '0 > -1' },
+  ],
+  [
     'Map.replaceAll and the locale-taking text overloads',
     'Map<String, Integer> m = new TreeMap<>(Map.of("a", 1, "b", 2)); m.replaceAll((k, v) -> v * 10); String replaced = m.toString(); String localized = "ABC".toLowerCase(Locale.ROOT) + String.format(Locale.US, "%.2f", 1.5) + Locale.JAPAN;',
     {},
