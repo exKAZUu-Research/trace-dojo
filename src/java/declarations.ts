@@ -68,14 +68,12 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
     const isStatic =
       modifiers.isStatic || kind !== 'class' || declaration.isRecord === true || enclosing?.kind === 'interface';
     this.checkClassModifiers(declaration, enclosing);
-    const hasConstantBodies = declaration.enumConstants.some((constant) => constant.body);
     const cls = createClass(name, undefined, false);
     cls.kind = kind;
     cls.declaration = declaration;
     cls.enclosing = enclosing;
     cls.binaryName = enclosing ? `${enclosing.binaryName}$${name}` : name;
-    cls.isAbstract = modifiers.isAbstract || kind === 'interface' || leavesMethodsToConstants(declaration);
-    cls.isFinal = modifiers.isFinal || (kind === 'enum' && !hasConstantBodies) || declaration.isRecord === true;
+    Object.assign(cls, implicitModifiers(declaration));
     // An inner class's instances belong to an instance of the class around it.
     cls.hasOuterInstance = enclosing !== undefined && !isStatic && enclosing.kind !== 'interface';
     siblings.set(name, cls);
@@ -672,6 +670,20 @@ function withMethodTypeParameters(
   const extended = new Map(bindings);
   for (const [index, variable] of from.entries()) extended.set(variable, { kind: 'typeVar', variable: to[index] });
   return extended;
+}
+
+/**
+ * Whether a class is abstract and whether final as its declaration makes it, also implicitly: an interface is abstract,
+ * an enum whose constants implement its abstract methods is abstract, and an enum without constant bodies or a record is
+ * final.
+ */
+export function implicitModifiers(declaration: ClassDeclaration): { isAbstract: boolean; isFinal: boolean } {
+  const { kind, modifiers } = declaration;
+  const hasConstantBodies = declaration.enumConstants.some((constant) => constant.body);
+  return {
+    isAbstract: modifiers.isAbstract || kind === 'interface' || leavesMethodsToConstants(declaration),
+    isFinal: modifiers.isFinal || (kind === 'enum' && !hasConstantBodies) || declaration.isRecord === true,
+  };
 }
 
 /**

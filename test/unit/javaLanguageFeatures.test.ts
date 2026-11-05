@@ -386,6 +386,7 @@ Deque<Integer> deque = new ArrayDeque<>(List.of(1, 2, 3)); try { deque.removeIf(
 enum Shade { R, G, B } Map<Shade, Integer> shades = new EnumMap<>(Shade.class); shades.computeIfAbsent(Shade.R, k -> { shades.put(Shade.G, 1); return 2; }); String enumMapText = shades.toString();
 Map<Integer, Long> memo = new HashMap<>(); String memoCme = ""; try { memo.computeIfAbsent(3, k -> memo.computeIfAbsent(2, j -> 1L) + 1); } catch (ConcurrentModificationException e) { memoCme = "cme"; }
 Map<String, Integer> keyed = new HashMap<>(Map.of("a", 1)); Set<String> readOnlyKeys = Collections.unmodifiableSet(keyed.keySet()); keyed.put("b", 2); String keysText = readOnlyKeys.toString(); Iterator<String> pending = readOnlyKeys.iterator(); keyed.clear(); boolean stillPending = pending.hasNext();
+TreeSet<Integer> tree = new TreeSet<>(List.of(1)); Iterator<Integer> walked = tree.iterator(); walked.next(); tree.add(2); String treeEnd = ""; try { walked.next(); } catch (RuntimeException e) { treeEnd = e.getClass().getSimpleName(); }
 String exhausted = ""; try { i.next(); } catch (NoSuchElementException e) { exhausted += "N"; } try { i.remove(); } catch (IllegalStateException e) { exhausted += "I"; } exhausted += q;
 Set<Integer> s = new HashSet<>(Set.of(1)); Iterator<Integer> u = Collections.unmodifiableSet(s).iterator(); s.add(2); String wrapped = ""; try { u.next(); } catch (ConcurrentModificationException e) { wrapped = "cme"; }
 List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(Comparator.nullsFirst(Comparator.naturalOrder())); String sorted = nulls.toString();`
@@ -397,6 +398,7 @@ List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(
     liveText: '[a]',
     linkedText: '[2, 3]',
     collectOrder: 'S12',
+    treeEnd: 'NoSuchElementException',
     memoCme: 'cme',
     enumMapText: '{R=2, G=1}',
     keysText: '[a, b]',

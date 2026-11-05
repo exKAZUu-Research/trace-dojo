@@ -15,7 +15,7 @@ import type {
 import type { Builtins } from './builtins';
 import { anonymousDeclaration, type CompileOptions, type Eval, type Exec, type MethodContext } from './compilerBase';
 import { memberBindings, methodView } from './conversions';
-import { DeclarationCompiler } from './declarations';
+import { DeclarationCompiler, implicitModifiers } from './declarations';
 import { checkDefiniteAssignment } from './definiteAssignment';
 import { checkInitialization } from './initializationCheck';
 import { localClassNamesOf } from './localClassNames';
@@ -373,7 +373,7 @@ class Compiler extends DeclarationCompiler {
     declaration: ClassDeclaration,
     anonymous?: { superConstructor: MethodInfo | undefined; base: ClassType }
   ): ClassInfo {
-    const { kind, modifiers, name } = declaration;
+    const { kind, name } = declaration;
     if (!anonymous) this.checkLocalClassDeclaration(declaration);
     const scope = this.localTypeScopes.at(-1) as Map<string, ClassInfo>;
     const key = anonymous ? declaration.members : declaration;
@@ -389,8 +389,8 @@ class Compiler extends DeclarationCompiler {
     cls.enclosing = context.cls;
     cls.binaryName = binaryName;
     this.compiledLocalClasses.set(key, cls);
-    cls.isAbstract = modifiers.isAbstract || kind === 'interface';
-    cls.isFinal = modifiers.isFinal || kind === 'enum' || declaration.isRecord === true || anonymous !== undefined;
+    // An anonymous class is final too.
+    Object.assign(cls, implicitModifiers(declaration), anonymous && { isFinal: true });
     // Local interfaces and enums are static, so they neither belong to an instance nor read the method's locals.
     const isStatic = kind !== 'class' || declaration.isRecord === true;
     cls.hasOuterInstance = !isStatic && !context.isStatic;

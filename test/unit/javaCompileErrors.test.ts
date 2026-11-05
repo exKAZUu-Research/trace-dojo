@@ -1314,6 +1314,11 @@ const programs: [name: string, runs: boolean, source: string][] = [
     'class Main {\n  static <T> T make(Class<T> c) { return null; }\n  public static void main(String[] args) {\n    String[] a = make(String[].class); Class<Integer> k = int.class;\n  }\n}',
   ],
   [
+    'local-enum-whose-constants-implement-its-methods',
+    true,
+    'class Main {\n  public static void main(String[] args) {\n    enum Op { ADD { int ap(int a, int b) { return a + b; } }; abstract int ap(int a, int b); }\n    System.out.println(Op.ADD.ap(1, 2));\n  }\n}',
+  ],
+  [
     'keyed-comparator-chained-without-target',
     true,
     'import java.util.*;\nclass Main {\n  record P(String name, int age) {}\n  public static void main(String[] args) {\n    List<P> ps = new ArrayList<>(); ps.sort(Comparator.comparing(P::name, Comparator.reverseOrder()).reversed());\n  }\n}',

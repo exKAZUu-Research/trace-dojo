@@ -37,8 +37,11 @@ export function defineIteratorClass(context: Context, iteratorClass: ClassInfo):
   });
   addMethod(itrClass, 'next', [], element, false, (frame, receiver) => {
     const state = iteratorState(receiver);
-    if (state.source.modCount !== state.expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
     const items = state.items();
+    // A TreeMap's iterators, its sets' and views' included, find the end before checking for a change.
+    const isSorted = (mapViewSources.get(state.source)?.map ?? state.source).store?.compare !== undefined;
+    if (isSorted && state.index >= items.length) throwBuiltin(frame, 'NoSuchElementException');
+    if (state.source.modCount !== state.expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
     if (state.index >= items.length) throwBuiltin(frame, 'NoSuchElementException');
     state.removed = false;
     return items[state.index++];
