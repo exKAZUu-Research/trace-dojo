@@ -119,7 +119,6 @@ export function defineOptionals(context: Context): Optionals {
   };
 }
 
-/** The hash of an optional's value as its wrapper or `hashCode` gives it, or 0 when it is empty. */
 /** The members `Optional` shares with the primitive optionals, which also have the factories `of` and `empty`. */
 function defineOptionalMembers(
   { objectType, stringType }: Context,
@@ -153,6 +152,7 @@ function defineOptionalMembers(
   addMethod(cls, 'hashCode', [], INT, false, (frame, receiver) => optionalHash(frame, receiver, valueType));
 }
 
+/** The hash of an optional's value as its wrapper or `hashCode` gives it, or 0 when it is empty. */
 function optionalHash(frame: Frame, receiver: Value, valueType: JavaType): number {
   const { isPresent, value } = stateOf(receiver);
   if (!isPresent || value === undefined) return 0;

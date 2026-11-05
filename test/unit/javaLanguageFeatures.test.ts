@@ -295,9 +295,17 @@ test("Java compares a map's key and entry sets as sets, and casts a generic meth
 test("Java reads Unicode digits by Character.digit's rule, and formats with the alternate form and %g", () => {
   expect(
     finalVarsOf(
-      'int a = Integer.parseInt("١٢٣") + Integer.parseInt("１２"); int b = Integer.parseInt("१२", 16); int c = Character.digit(\'๑\', 10) + Character.getNumericValue(\'Ⅻ\'); String astral = ""; try { Integer.parseInt("𝟏"); } catch (NumberFormatException e) { astral = "rejected"; } String f = String.format("%#x %#o %.3g %5.2g", 255, 8, 1234.567, 3.2); double h = Double.parseDouble("0x1.8p1") + 0x1p-1;'
+      String.raw`int a = Integer.parseInt("١٢٣") + Integer.parseInt("１２"); int b = Integer.parseInt("१२", 16); int c = Character.digit('๑', 10) + Character.getNumericValue('Ⅻ'); String astral = ""; try { Integer.parseInt("𝟏"); } catch (NumberFormatException e) { astral = "rejected"; } String f = String.format("%#x %#o %.3g %5.2g", 255, 8, 1234.567, 3.2); double h = Double.parseDouble("0x1.8p1") + 0x1p-1; String numerals = Character.getNumericValue('\u0BF1') + " " + Character.getNumericValue('\u324A') + " " + Character.getNumericValue('\uF96B') + " " + Character.getNumericValue('\u2044') + " " + Character.getNumericValue('\u00BD');`
     )
-  ).toEqual({ a: 135, b: 18, c: 13, astral: 'rejected', f: '0xff 010 1.23e+03   3.2', h: 3.5 });
+  ).toEqual({
+    a: 135,
+    b: 18,
+    c: 13,
+    astral: 'rejected',
+    f: '0xff 010 1.23e+03   3.2',
+    h: 3.5,
+    numerals: '100 30 3 -1 -2',
+  });
 });
 
 test("Java casts a generic result where javac's checkcast does, and not where it does not", () => {
