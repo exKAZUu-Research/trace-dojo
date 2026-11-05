@@ -110,6 +110,24 @@ export interface MethodContext {
   patternSlots: number[];
   /** The pattern variables that a statement introduced into its enclosing block. */
   introducedPatternSlots: Set<number>;
+  /** For a lambda body, the code around the lambda, whose locals the body may read. */
+  enclosing: MethodContext | undefined;
+  /** For a lambda body, the enclosing locals it reads, which the lambda copies when it is created. */
+  captures: Capture[];
+  /** The locals that a lambda reads, which may therefore not be assigned again. */
+  capturedSlots: Set<number>;
+  /** How many times each local is assigned after its declaration. */
+  assignmentCounts: Map<number, number>;
+  /** The locals declared without an initializer, which one assignment may initialize and still be effectively final. */
+  uninitializedSlots: Set<number>;
+}
+
+export interface Capture {
+  name: string;
+  type: JavaType;
+  constant: Value;
+  /** Reads the value in the frame that creates the lambda. */
+  read: Eval;
 }
 
 /** The values a switch expression's yields give, which are converted to its type once all are known. */
@@ -259,7 +277,7 @@ export abstract class CompilerBase {
 
   /** Compiles an expression whose value is assigned to `type`, which a diamond may infer its type arguments from. */
   protected compileValueFor(context: MethodContext, expression: Expression, type: JavaType): CompiledValue {
-    const isCreation = expression.kind === 'new';
+    const isCreation = expression.kind === 'new' || expression.kind === 'lambda' || expression.kind === 'methodRef';
     this.targetType = isCreation ? type : undefined;
     try {
       return this.compileValue(context, expression);
@@ -356,6 +374,11 @@ export abstract class CompilerBase {
       switchExpressions: [],
       patternSlots: [],
       introducedPatternSlots: new Set(),
+      enclosing: undefined,
+      captures: [],
+      capturedSlots: new Set(),
+      assignmentCounts: new Map(),
+      uninitializedSlots: new Set(),
     };
   }
 
@@ -376,16 +399,66 @@ export abstract class CompilerBase {
     return !['RuntimeException', 'Error'].some((name) => isSubclass(cls, this.builtins.classes.get(name) as ClassInfo));
   }
 
-  protected declareLocal(context: MethodContext, span: Span, name: string, type: JavaType): number {
-    for (const scope of context.scopes) {
-      if (scope.names.has(name)) this.error(span, `変数 ${name} はすでに定義されています。`);
+  protected declareLocal(
+    context: MethodContext,
+    span: Span,
+    name: string,
+    type: JavaType,
+    isInitialized = true
+  ): number {
+    // A lambda's locals may not hide the locals of the code around it.
+    for (let current: MethodContext | undefined = context; current; current = current.enclosing) {
+      for (const scope of current.scopes) {
+        if (scope.names.has(name)) this.error(span, `変数 ${name} はすでに定義されています。`);
+      }
     }
     const slot = context.locals.length;
     context.locals.push({ name, type });
     const scope = context.scopes.at(-1) as Scope;
     scope.names.set(name, slot);
     scope.slots.push(slot);
+    if (!isInitialized) context.uninitializedSlots.add(slot);
     return slot;
+  }
+
+  /**
+   * Finds a local of the code around a lambda that the lambda body reads, recording it as a capture; it must be
+   * effectively final, as Java requires.
+   */
+  protected findCapture(
+    context: MethodContext,
+    span: Span,
+    name: string
+  ): { index: number; capture: Capture } | undefined {
+    const outer = context.enclosing;
+    if (!outer) return;
+    const index = context.captures.findIndex((capture) => capture.name === name);
+    if (index !== -1) return { index, capture: context.captures[index] };
+    let capture: Capture;
+    const slot = this.findLocal(outer, name);
+    if (slot === undefined) {
+      const outerCapture = this.findCapture(outer, span, name);
+      if (!outerCapture) return;
+      const outerIndex = outerCapture.index;
+      capture = { ...outerCapture.capture, read: (frame) => frame.captured[outerIndex] };
+    } else {
+      const allowed = outer.uninitializedSlots.has(slot) ? 1 : 0;
+      if ((outer.assignmentCounts.get(slot) ?? 0) > allowed) this.error(span, capturedAssignmentMessage(name));
+      outer.capturedSlots.add(slot);
+      capture = {
+        name,
+        type: outer.locals[slot].type,
+        constant: outer.constants.get(slot),
+        read: (frame) => frame.locals[slot] as Value,
+      };
+    }
+    return { index: context.captures.push(capture) - 1, capture };
+  }
+
+  /** Records an assignment to a local, which a lambda that reads it forbids. */
+  protected recordAssignment(context: MethodContext, span: Span, slot: number): void {
+    if (context.capturedSlots.has(slot)) this.error(span, capturedAssignmentMessage(context.locals[slot].name));
+    context.assignmentCounts.set(slot, (context.assignmentCounts.get(slot) ?? 0) + 1);
   }
 
   protected findLocal(context: MethodContext, name: string): number | undefined {
@@ -544,11 +617,28 @@ export abstract class CompilerBase {
     }
   }
 
+  /** Compiles an argument, leaving a lambda or method reference to be typed once the method is chosen. */
+  protected compileArgument(context: MethodContext, expression: Expression): CompiledValue {
+    if (expression.kind === 'lambda' || expression.kind === 'methodRef') {
+      const arity = expression.kind === 'lambda' ? expression.parameters.length : undefined;
+      return { kind: 'value', type: { kind: 'pending', arity }, run: () => {} };
+    }
+    return this.compileValue(context, expression);
+  }
+
   /** Converts the arguments of a call to `method`, packing those of a variable arity parameter into an array. */
-  protected convertArguments(method: MethodInfo, args: readonly CompiledValue[], spans: readonly Span[]): Eval[] {
-    const converted = args.map(
-      (arg, index) => this.convert(arg, method.parameterTypes[index], 'invocation', spans[index]).run
-    );
+  protected convertArguments(
+    context: MethodContext,
+    method: MethodInfo,
+    args: readonly CompiledValue[],
+    expressions: readonly Expression[]
+  ): Eval[] {
+    const converted = args.map((arg, index) => {
+      const parameterType = method.parameterTypes[index];
+      const value =
+        arg.type.kind === 'pending' ? this.compileValueFor(context, expressions[index], parameterType) : arg;
+      return this.convert(value, parameterType, 'invocation', expressions[index]).run;
+    });
     const start = method.varargsStart;
     if (start === undefined) return converted;
     const declared = method.declared ?? method;
@@ -686,6 +776,10 @@ function convertedNumber(value: CompiledValue, from: NumericKind, to: { kind: Nu
     run: (frame) => convertNumber(run(frame), from, to.kind),
     constant: value.constant === undefined ? undefined : convertNumber(value.constant, from, to.kind),
   };
+}
+
+function capturedAssignmentMessage(name: string): string {
+  return `ラムダ式の中から使うローカル変数 ${name} は、final か実質的に final (一度しか代入しない) である必要があります。`;
 }
 
 /** The superclasses of `cls`, nearest first. */

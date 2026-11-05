@@ -116,7 +116,7 @@ class Compiler extends DeclarationCompiler {
     const constants = cls.staticFields.filter((field) => field.enumConstant);
     return constants.map((field, ordinal) => {
       const constant = field.enumConstant as NonNullable<FieldInfo['enumConstant']>;
-      const args = constant.args.map((arg) => this.compileValue(context, arg));
+      const args = constant.args.map((arg) => this.compileArgument(context, arg));
       const constructor = this.selectMethod(
         constant,
         cls.constructors,
@@ -124,7 +124,7 @@ class Compiler extends DeclarationCompiler {
         `コンストラクタ ${cls.name}`
       );
       this.checkThrown(context, constant, constructor.thrownTypes);
-      const convertedArgs = this.convertArguments(constructor, args, constant.args);
+      const convertedArgs = this.convertArguments(context, constructor, args, constant.args);
       const name = this.internedString(constant.name);
       // Traces leave enum constants out of the variables, so creating one shows only its constructor's steps.
       return (frame: Frame) => {
@@ -242,7 +242,7 @@ class Compiler extends DeclarationCompiler {
     const targetClass = callsThis ? cls : (cls.superclass as ClassInfo);
     // Arguments of an explicit constructor call may not refer to the object under construction.
     const argSyntax = explicitCall?.args ?? [];
-    const args = argSyntax.map((arg) => this.compileValue({ ...context, isStatic: true }, arg));
+    const args = argSyntax.map((arg) => this.compileArgument({ ...context, isStatic: true }, arg));
     const targetBindings = memberBindings(
       callsThis ? thisTypeOf(cls) : asSuper(thisTypeOf(cls), targetClass),
       targetClass
@@ -256,7 +256,7 @@ class Compiler extends DeclarationCompiler {
       `コンストラクタ ${targetClass.name}`
     );
     this.checkThrown(context, explicitCall ?? declaration ?? (cls.declaration as ClassDeclaration), target.thrownTypes);
-    const convertedArgs = this.convertArguments(target, args, argSyntax);
+    const convertedArgs = this.convertArguments({ ...context, isStatic: true }, target, args, argSyntax);
     // An implicit super() has no call in the source, so its frame is not a call that learners trace.
     const callRow = explicitCall?.row;
     // A constructor that delegates to this(...) leaves the initializers to the constructor it calls.

@@ -8,8 +8,8 @@ import type {
   TypeSyntax,
 } from './ast';
 import { sameParameters, superclassesOf } from './compilerBase';
+import { LambdaCompiler } from './lambdaCompiler';
 import { findImplementation, throwBuiltin } from './runtime';
-import { StatementCompiler } from './statementCompiler';
 import {
   asSuper,
   bindingsOf,
@@ -34,7 +34,7 @@ import { JavaArray, JavaObject, JavaString } from './values';
 const KIND_NAMES = { class: 'クラス', interface: 'インターフェース', enum: '列挙型' } as const;
 
 /** Declares the classes of a program and their members, checking how they inherit from each other. */
-export abstract class DeclarationCompiler extends StatementCompiler {
+export abstract class DeclarationCompiler extends LambdaCompiler {
   /** Every declared class, interface, and enum in textual order, nested ones after their enclosing class. */
   protected readonly declaredClasses: ClassInfo[] = [];
 

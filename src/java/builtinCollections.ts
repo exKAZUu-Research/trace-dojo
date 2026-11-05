@@ -40,6 +40,8 @@ export interface Collections {
   immutableList: ClassInfo;
   /** The class of the lists `Arrays.asList` returns, which share their array's elements. */
   fixedSizeList: ClassInfo;
+  collectionClass: ClassInfo;
+  mapClass: ClassInfo;
   /** `Iterable.iterator`, which an enhanced for statement calls. */
   iterator: MethodInfo;
   hasNext: MethodInfo;
@@ -95,8 +97,19 @@ export function defineCollections(
   const snapshotSet = defineSnapshot(context, 'Set', setClass, itrClass);
   const snapshotCollection = defineSnapshot(context, 'Collection', collectionClass, itrClass);
   defineHashSet(context, setClass, collectionClass, itrClass);
-  defineHashMap(context, { setClass, collectionClass, snapshotSet, snapshotCollection });
-  return { iterableClass, iteratorClass, iterator, hasNext, next, listClass, immutableList, fixedSizeList };
+  const mapClass = defineHashMap(context, { setClass, collectionClass, snapshotSet, snapshotCollection });
+  return {
+    iterableClass,
+    iteratorClass,
+    iterator,
+    hasNext,
+    next,
+    listClass,
+    collectionClass,
+    mapClass,
+    immutableList,
+    fixedSizeList,
+  };
 }
 
 /** A list whose methods that `rejects` throw `UnsupportedOperationException`, as `List.of` and `Arrays.asList` give. */
@@ -568,7 +581,7 @@ function defineHashSet(context: Context, setClass: ClassInfo, collectionClass: C
 function defineHashMap(
   context: Context,
   views: { setClass: ClassInfo; collectionClass: ClassInfo; snapshotSet: ClassInfo; snapshotCollection: ClassInfo }
-): void {
+): ClassInfo {
   const { registry, objectType, stringType } = context;
   const mapClass = defineInterface(registry, 'Map', 'java.util');
   const [mapKey, mapValue] = addTypeParameters(mapClass, ['K', 'V'], objectType);
@@ -592,6 +605,7 @@ function defineHashMap(
     defineMapMethods(cls, name, key, value, context, { ...views, entryClass, nodeClass, mapClass });
   }
   void stringType;
+  return mapClass;
 }
 
 function mapSignatures(
@@ -821,13 +835,13 @@ function storeOf(receiver: Value): HashStore {
   return (receiver as JavaObject).store as HashStore;
 }
 
-function findEntry(frame: Frame, receiver: Value, key: Value): HashStore['entries'][number] | undefined {
+export function findEntry(frame: Frame, receiver: Value, key: Value): HashStore['entries'][number] | undefined {
   const hash = javaHash(frame, key);
   return storeOf(receiver).entries.find((entry) => entry.hash === hash && javaEquals(frame, key, entry.key));
 }
 
 /** Adds or replaces an entry, returning the value it replaced or `NO_ENTRY`; a set keeps an existing entry. */
-function putEntry(
+export function putEntry(
   frame: Frame,
   receiver: Value,
   key: Value,
@@ -846,7 +860,7 @@ function putEntry(
   return NO_ENTRY;
 }
 
-function removeEntry(frame: Frame, receiver: Value, key: Value): Value | typeof NO_ENTRY {
+export function removeEntry(frame: Frame, receiver: Value, key: Value): Value | typeof NO_ENTRY {
   const entry = findEntry(frame, receiver, key);
   if (!entry) return NO_ENTRY;
   const store = storeOf(receiver);

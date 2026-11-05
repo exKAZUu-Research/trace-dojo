@@ -272,6 +272,9 @@ export type Expression =
   | Cast
   | InstanceOf
   | SwitchExpression
+  | Lambda
+  | MethodReference
+  | TypeReference
   | ThisExpression;
 
 export type LiteralValue =
@@ -408,6 +411,34 @@ export interface InstanceOf extends Span {
 export interface PatternBinding extends Span {
   name: string;
   isFinal: boolean;
+}
+
+export interface Lambda extends Span {
+  kind: 'lambda';
+  parameters: LambdaParameter[];
+  body: Expression | Block;
+}
+
+/** A lambda parameter, whose type the functional interface decides when it is not written. */
+export interface LambdaParameter extends Span {
+  name: string;
+  type: TypeSyntax | undefined;
+  isFinal: boolean;
+}
+
+/** `Type::method`, `expression::method`, or `Type::new`. */
+export interface MethodReference extends Span {
+  kind: 'methodRef';
+  /** An expression, which may turn out to name a class, or a type that only a type syntax can write. */
+  target: { expression: Expression } | { type: TypeSyntax };
+  /** The method's name, or `new` for a constructor. */
+  name: string;
+}
+
+/** A class named by a type, which the compiler writes for the method references it expands into lambdas. */
+export interface TypeReference extends Span {
+  kind: 'typeRef';
+  type: TypeSyntax;
 }
 
 export interface SwitchExpression extends Span {

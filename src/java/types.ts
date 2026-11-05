@@ -38,7 +38,14 @@ export type JavaType =
   | ClassType
   | { kind: 'array'; element: JavaType }
   | { kind: 'typeVar'; variable: TypeVariable }
-  | WildcardType;
+  | WildcardType
+  /** A lambda or method reference argument, typed once overload resolution picks its functional interface. */
+  | {
+      kind: 'pending';
+      arity: number | undefined;
+      /** The class a method reference such as `String::length` names, which the first parameter takes. */
+      receiverHint?: JavaType;
+    };
 
 export const BYTE: JavaType = { kind: 'byte' };
 export const SHORT: JavaType = { kind: 'short' };
@@ -376,6 +383,9 @@ export function typeName(type: JavaType): string {
     }
     case 'wildcard': {
       return type.bound ? `? ${type.isSuper ? 'super' : 'extends'} ${typeName(type.bound)}` : '?';
+    }
+    case 'pending': {
+      return 'ラムダ式';
     }
     case 'array': {
       return `${typeName(type.element)}[]`;

@@ -497,6 +497,14 @@ class DefiniteAssignmentChecker {
       case 'switchExpression': {
         return this.switchExpression(expression, state);
       }
+      // A lambda's body runs later, and its own analysis covers it; it cannot assign the enclosing locals.
+      case 'lambda':
+      case 'typeRef': {
+        return state;
+      }
+      case 'methodRef': {
+        return 'expression' in expression.target ? this.expression(expression.target.expression, state) : state;
+      }
       case 'fieldAccess': {
         const field = this.thisField(expression);
         if (field) this.readVariable(expression, field, state);

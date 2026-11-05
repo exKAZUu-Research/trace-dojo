@@ -1,5 +1,6 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
 import { type Collections, defineCollections } from './builtinCollections';
+import { defineFunctions, type Functions } from './builtinFunctions';
 import {
   addConstant,
   addConstructor,
@@ -53,6 +54,7 @@ export interface Builtins {
   throwableClass: ClassInfo;
   wrappers: Wrappers;
   collections: Collections;
+  functions: Functions;
   /** The qualified names `Throwable.toString` prints for builtin classes. */
   qualifiedNames: Map<ClassInfo, string>;
 }
@@ -85,6 +87,7 @@ function createBuiltins(): Builtins {
   defineSystem(registry, objectClass, stringClass.type);
   defineUtilities(registry, objectClass, stringClass.type, collections, wrappers.comparableClass);
   defineText(registry, objectClass, stringClass, registry.classes.get('PrintStream') as ClassInfo, collections);
+  const functions = defineFunctions(registry, objectClass, collections, wrappers.comparableClass);
   return {
     classes: registry.classes,
     objectClass,
@@ -93,6 +96,7 @@ function createBuiltins(): Builtins {
     throwableClass,
     wrappers,
     collections,
+    functions,
     qualifiedNames: registry.qualifiedNames,
   };
 }

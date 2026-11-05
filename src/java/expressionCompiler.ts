@@ -166,8 +166,31 @@ export abstract class ExpressionCompiler extends CompilerBase {
       case 'switchExpression': {
         return this.compileSwitchExpression(context, expression);
       }
+      case 'lambda':
+      case 'methodRef': {
+        const target = this.takeTargetType();
+        if (!target) {
+          return this.error(
+            expression,
+            `${expression.kind === 'lambda' ? 'ラムダ式' : 'メソッド参照'}は、変数への代入やメソッドの引数など、型が決まる場所にしか書けません。`
+          );
+        }
+        return this.compileFunctional(context, expression, target);
+      }
+      case 'typeRef': {
+        const type = this.resolveType(expression.type);
+        if (type.kind !== 'class') return this.error(expression, `${typeName(type)} は値として使えません。`);
+        return { kind: 'class', cls: type.cls };
+      }
     }
   }
+
+  /** Compiles a lambda or a method reference into an object of the functional interface `target`. */
+  protected abstract compileFunctional(
+    context: MethodContext,
+    expression: Extract<Expression, { kind: 'lambda' | 'methodRef' }>,
+    target: JavaType
+  ): CompiledValue;
 
   protected abstract compileSwitchExpression(
     context: MethodContext,
@@ -295,6 +318,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
           return value;
         },
       };
+    }
+    const captured = this.findCapture(context, expression, expression.name);
+    if (captured) {
+      const { index, capture } = captured;
+      return { kind: 'value', type: capture.type, constant: capture.constant, run: (frame) => frame.captured[index] };
     }
     const reference = this.compileSimpleNameReference(context, expression);
     if ('kind' in reference) return reference;
@@ -449,7 +477,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (target.kind === 'arrayAccess') return this.compileArrayElementReference(context, target);
     if (target.kind !== 'name' && target.kind !== 'fieldAccess') return this.error(target, '代入できない式です。');
     const slot = target.kind === 'name' ? this.findLocal(context, target.name) : undefined;
-    if (slot !== undefined) return localReference(context, slot);
+    if (slot !== undefined) {
+      this.recordAssignment(context, target, slot);
+      return localReference(context, slot);
+    }
+    if (target.kind === 'name' && this.findCapture(context, target, target.name)) {
+      this.error(target, `ラムダ式の中からは、外側のローカル変数 ${target.name} に代入できません。`);
+    }
     const reference =
       target.kind === 'name'
         ? this.compileSimpleNameReference(context, target)
@@ -829,7 +863,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (resolved.args?.some((arg) => arg.kind === 'wildcard')) {
       this.error(expression, 'new で作るオブジェクトの型引数に ? は使えません。');
     }
-    const args = expression.args.map((arg) => this.compileValue(context, arg));
+    const args = expression.args.map((arg) => this.compileArgument(context, arg));
     const argTypes = args.map((arg) => arg.type);
     const type = resolved.args?.length === 0 ? this.inferDiamond(cls, argTypes, targetType) : resolved;
     const bindings = memberBindings(type, cls);
@@ -841,7 +875,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     );
     this.checkAccess(context, cls, constructor.access, expression, `コンストラクタ ${cls.name}`);
     this.checkThrown(context, expression, constructor.thrownTypes);
-    const convertedArgs = this.convertArguments(constructor, args, expression.args);
+    const convertedArgs = this.convertArguments(context, constructor, args, expression.args);
     const callRow = expression.row;
     const declaredConstructor = constructor.declared ?? constructor;
     return {
@@ -892,7 +926,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   protected compileCall(context: MethodContext, expression: Extract<Expression, { kind: 'call' }>): Compiled {
-    const args = expression.args.map((arg) => this.compileValue(context, arg));
+    const args = expression.args.map((arg) => this.compileArgument(context, arg));
     const target = this.resolveCallTarget(context, expression);
     if (target.candidates.length === 0) {
       this.error(expression, `この採点環境の ${target.owner.name} には、メソッド ${expression.name} がありません。`);
@@ -912,7 +946,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     this.checkCall(context, expression, method, target.receiver === undefined && expression.object !== undefined);
     this.checkThrown(context, expression, method.thrownTypes);
-    const convertedArgs = this.convertArguments(method, args, expression.args);
+    const convertedArgs = this.convertArguments(context, method, args, expression.args);
     const callRow = expression.row;
     if (method.isStatic) {
       // A static method called through an expression still evaluates that expression.

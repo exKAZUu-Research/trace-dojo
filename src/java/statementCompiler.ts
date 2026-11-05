@@ -457,7 +457,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     } else {
       const type = this.withDimensions(this.resolveType(statement.type), declarator.extraDimensions);
       // The variable's scope includes its own initializer, where it shadows a field of the same name.
-      slot = this.declareLocal(context, declarator, declarator.name, type);
+      slot = this.declareLocal(context, declarator, declarator.name, type, initializer !== undefined);
       if (initializer?.kind === 'arrayInitializer') {
         return { slot, value: this.compileArrayInitializer(context, initializer, type) };
       }
@@ -573,7 +573,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       iterable.type.kind === 'array'
         ? iterable.type.element
         : elementArg
-          ? upperBound(elementArg)
+          ? elementArg.kind === 'wildcard'
+            ? upperBound(elementArg)
+            : elementArg
           : this.builtins.objectClass.type;
     const declaredType = statement.type.kind === 'var' ? elementType : this.resolveType(statement.type);
     // The element waits in the temporaries, where the conversion reads it, until the variable holds it.

@@ -1,9 +1,27 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
-import type { ArrayInitializer, AssignmentOperator, BinaryOperator, Expression, LiteralValue } from './ast';
-import { convertType, countDimensions, field, namedChildren, span, unsupported } from './parseNodes';
-import { convertSwitchParts } from './parseStatement';
+import type {
+  ArrayInitializer,
+  AssignmentOperator,
+  BinaryOperator,
+  Expression,
+  LambdaParameter,
+  LiteralValue,
+} from './ast';
+import {
+  convertModifiers,
+  convertType,
+  convertVariableType,
+  countDimensions,
+  field,
+  isComment,
+  modifiersOf,
+  namedChildren,
+  span,
+  unsupported,
+} from './parseNodes';
+import { convertBlock, convertSwitchParts } from './parseStatement';
 import { charCodeOf } from './values';
 
 export function convertExpression(node: Node): Expression {
@@ -80,11 +98,65 @@ const expressionConverters: Record<string, (node: Node) => Expression> = {
   }),
   cast_expression: convertCast,
   instanceof_expression: convertInstanceOf,
-  lambda_expression: (node) => unsupported(node, 'ラムダ式'),
-  method_reference: (node) => unsupported(node, 'メソッド参照'),
+  lambda_expression: convertLambda,
+  method_reference: convertMethodReference,
   switch_expression: (node) => ({ kind: 'switchExpression', ...convertSwitchParts(node, true), ...span(node) }),
   class_literal: (node) => unsupported(node, 'クラスリテラル'),
 };
+
+function convertLambda(node: Node): Expression {
+  const parametersNode = field(node, 'parameters');
+  const bodyNode = field(node, 'body');
+  let parameters: LambdaParameter[];
+  if (parametersNode.type === 'identifier') {
+    parameters = [{ name: parametersNode.text, type: undefined, isFinal: false, ...span(parametersNode) }];
+  } else if (parametersNode.type === 'inferred_parameters') {
+    parameters = namedChildren(parametersNode).map((parameter) => ({
+      name: parameter.text,
+      type: undefined,
+      isFinal: false,
+      ...span(parameter),
+    }));
+  } else {
+    parameters = namedChildren(parametersNode).map((parameter) => {
+      if (parameter.type !== 'formal_parameter') unsupported(parameter, 'ラムダ式の可変長引数');
+      const typeNode = field(parameter, 'type');
+      return {
+        name: field(parameter, 'name').text,
+        type: typeNode.text === 'var' ? undefined : convertVariableType(parameter),
+        isFinal: convertModifiers(modifiersOf(parameter)).isFinal,
+        ...span(parameter),
+      };
+    });
+  }
+  return {
+    kind: 'lambda',
+    parameters,
+    body: bodyNode.type === 'block' ? convertBlock(bodyNode) : convertExpression(bodyNode),
+    ...span(node),
+  };
+}
+
+const TYPE_NODES = new Set([
+  'array_type',
+  'generic_type',
+  'integral_type',
+  'floating_point_type',
+  'boolean_type',
+  'type_identifier',
+  'scoped_type_identifier',
+]);
+
+function convertMethodReference(node: Node): Expression {
+  const [targetNode, nameNode] = node.children.filter(
+    (child): child is Node => !!child && (child.isNamed || child.type === 'new') && !isComment(child)
+  );
+  if (targetNode.type === 'super') unsupported(node, 'super のメソッド参照');
+  const target = TYPE_NODES.has(targetNode.type)
+    ? { type: convertType(targetNode) }
+    : { expression: convertExpression(targetNode) };
+  return { kind: 'methodRef', target, name: nameNode.type === 'new' ? 'new' : nameNode.text, ...span(node) };
+}
 
 function convertIntegerLiteral(node: Node): Expression {
   return { kind: 'literal', literal: parseIntegerLiteral(node), ...span(node) };

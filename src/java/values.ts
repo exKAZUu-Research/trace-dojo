@@ -1,4 +1,5 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
+import type { Frame } from './runtime';
 import type { ClassInfo, JavaType, NumericKind } from './types';
 
 /** Java `null` is `undefined`; `long` values are bigints and the other numeric values are numbers. */
@@ -20,6 +21,13 @@ export class JavaObject {
   elements?: Value[];
   /** The entries of a builtin hash map or set. */
   store?: HashStore;
+  /** What a lambda, a method reference, or a library function object runs when its interface method is called. */
+  function?: {
+    call: (frame: Frame, args: Value[]) => Value;
+    /** The enclosing method's locals the function reads, which keep their turtles alive. */
+    captured?: readonly Value[];
+    outerThis?: Value;
+  };
   /** The text of a `StringBuilder`. */
   builder?: string;
   /** Counts the structural changes of a builtin collection, which make its iterators fail fast. */

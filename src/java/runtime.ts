@@ -14,6 +14,8 @@ export class Frame {
   readonly locals: Slot[];
   /** Values a pending call or allocation holds outside any variable, which must keep their turtles alive. */
   readonly temporaries: Value[] = [];
+  /** The values of the enclosing method's locals that the lambda body running in this frame reads. */
+  captured: readonly Value[] = [];
 
   constructor(
     readonly runtime: Runtime,
@@ -159,13 +161,22 @@ export class Runtime {
       for (const local of frame.locals) if (local !== UNASSIGNED) roots.push(local);
       roots.push(frame.thisObject);
       for (const temporary of frame.temporaries) roots.push(temporary);
+      for (const value of frame.captured) roots.push(value);
     }
     for (const values of this.staticValues.values()) for (const value of values) roots.push(value);
     return roots;
   }
 
   /** Calls `method` with `args`, which the caller keeps in its temporaries so that they stay reachable. */
-  invoke(caller: Frame, method: MethodInfo, receiver: Value, args: Value[], callRow: number | undefined): Value {
+  /** @param captured The values of the enclosing method's locals that a lambda body reads. */
+  invoke(
+    caller: Frame,
+    method: MethodInfo,
+    receiver: Value,
+    args: Value[],
+    callRow: number | undefined,
+    captured: readonly Value[] = []
+  ): Value {
     if (method.native) {
       this.spend();
       return method.native(caller, receiver, args);
@@ -173,6 +184,7 @@ export class Runtime {
     const code = method.code;
     if (!code) throw new Error(`Method ${method.owner.name}.${method.name} has no code`);
     const frame = this.pushFrame(caller, method, code.locals, receiver as JavaObject | undefined, callRow);
+    frame.captured = captured;
     try {
       for (const [index, arg] of args.entries()) frame.locals[index] = arg;
       return code.run(frame);
@@ -272,6 +284,8 @@ function markReachable(roots: Value[]): { reached: Set<JavaObject | JavaArray>; 
     for (const child of children) pushReference(pending, child);
     if (value instanceof JavaObject) {
       pushReference(pending, value.cause);
+      for (const captured of value.function?.captured ?? []) pushReference(pending, captured);
+      pushReference(pending, value.function?.outerThis);
       for (const element of value.elements ?? []) pushReference(pending, element);
       for (const entry of value.store?.entries ?? []) {
         pushReference(pending, entry.key);
