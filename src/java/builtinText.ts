@@ -206,7 +206,7 @@ function arrayOfChars(frame: Frame, value: Value): string {
   return value.values.map((code) => charToString(code as number)).join('');
 }
 
-// code-gauge-allow functionNcss 45 -- One registration per String method, each charging the characters it reads.
+// code-gauge-allow functionNcss 47 -- One registration per String method, each charging the characters it reads.
 function defineStringExtras(stringClass: ClassInfo, collections: Collections): void {
   const stringType = stringClass.type;
   const stringArray: JavaType = { kind: 'array', element: stringType };

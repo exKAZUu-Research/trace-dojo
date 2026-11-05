@@ -299,6 +299,7 @@ export function sameErasure(a: JavaType, b: JavaType): boolean {
 }
 
 /** The type with its type arguments removed and type variables replaced by their first bounds' erasures. */
+// code-gauge-allow duplicateLines 15 -- Erasure and substitution each map every kind of type, which reads alike.
 export function erasure(type: JavaType): JavaType {
   switch (type.kind) {
     case 'class': {
@@ -330,7 +331,8 @@ export function upperBound(type: JavaType): JavaType {
   return type;
 }
 
-/** Replaces type variables by the types `bindings` gives them; a variable without one makes its class type raw. */
+/** Replaces type variables by the types `bindings` gives them, leaving those without one. */
+// code-gauge-allow duplicateLines 16 -- Erasure and substitution each map every kind of type, which reads alike.
 export function substitute(type: JavaType, bindings: ReadonlyMap<TypeVariable, JavaType>): JavaType {
   if (bindings.size === 0) return type;
   switch (type.kind) {

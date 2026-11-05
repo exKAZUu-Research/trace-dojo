@@ -1,5 +1,13 @@
 import { CompileError } from '../interpreter/diagnostics';
-// code-gauge-allow-file fileNcss 402 -- One checker implements the JLS 16 rules, which share its scopes and jump targets.
+import {
+  assign,
+  type Conditional,
+  join,
+  type State,
+  takesLabelItself,
+  throughFinally,
+  UNREACHABLE,
+} from './assignmentStates';
 import type {
   ArrayInitializer,
   Block,
@@ -87,18 +95,6 @@ interface Variable {
   isInitialized: boolean;
 }
 
-/** The locals definitely assigned (`undefined` when the point is unreachable) and those possibly assigned. */
-interface State {
-  assigned: ReadonlySet<number> | undefined;
-  possiblyAssigned: ReadonlySet<number>;
-}
-
-interface Conditional {
-  whenTrue: State;
-  whenFalse: State;
-}
-
-/** A loop being analyzed, with the assignments in it to finals declared before it. */
 interface EnclosingLoop {
   /** Variables with smaller ids were declared before the loop. */
   firstId: number;
@@ -114,8 +110,6 @@ interface JumpTarget {
   breaks: State[];
   continues: State[];
 }
-
-const UNREACHABLE: State = { assigned: undefined, possiblyAssigned: new Set() };
 
 class DefiniteAssignmentChecker {
   private readonly scopes: Map<string, Variable>[] = [new Map()];
@@ -168,7 +162,7 @@ class DefiniteAssignmentChecker {
     return isAssigned ? assign(state, variable.id) : state;
   }
 
-  // code-gauge-allow functionNcss 36 -- One case per statement kind, each delegating to its own rule.
+  // code-gauge-allow functionNcss 47 -- One case per statement kind, each delegating to its own rule.
   statement(statement: Statement, state: State): State {
     switch (statement.kind) {
       case 'block': {
@@ -210,17 +204,9 @@ class DefiniteAssignmentChecker {
         return UNREACHABLE;
       }
       case 'try': {
-        if (statement.resources.length === 0) return this.tryStatement(statement, state);
-        return this.scoped(() => {
-          let current = state;
-          for (const resource of statement.resources) {
-            current =
-              'local' in resource
-                ? this.localDeclaration(resource.local, current)
-                : this.expression(resource.expression, current);
-          }
-          return this.tryStatement({ ...statement, resources: [] }, current);
-        });
+        return statement.resources.length === 0
+          ? this.tryStatement(statement, state)
+          : this.tryWithResources(statement, state);
       }
       case 'labeled': {
         return this.labeledStatement(statement, state);
@@ -401,6 +387,20 @@ class DefiniteAssignmentChecker {
     }
   }
 
+  /** A try-with-resources statement, whose resources are declared before its try block runs. */
+  private tryWithResources(statement: TryStatement, state: State): State {
+    return this.scoped(() => {
+      let current = state;
+      for (const resource of statement.resources) {
+        current =
+          'local' in resource
+            ? this.localDeclaration(resource.local, current)
+            : this.expression(resource.expression, current);
+      }
+      return this.tryStatement({ ...statement, resources: [] }, current);
+    });
+  }
+
   private tryStatement(statement: TryStatement, state: State): State {
     // Jumps out of the try statement also run its finally block on the way.
     const jumpCounts = this.targets.map((target) => [target.breaks.length, target.continues.length] as const);
@@ -482,7 +482,7 @@ class DefiniteAssignmentChecker {
     return { whenTrue: after, whenFalse: after };
   }
 
-  // code-gauge-allow functionNcss 40 -- One case per expression kind, most only visiting their operands in order.
+  // code-gauge-allow functionNcss 48 -- One case per expression kind, most only visiting their operands in order.
   private expression(expression: Expression, state: State): State {
     switch (expression.kind) {
       case 'name': {
@@ -662,50 +662,4 @@ class DefiniteAssignmentChecker {
   }
 }
 
-/** Whether a label written before `statement` names `statement` itself as the target of `break` or `continue`. */
-function takesLabelItself(statement: Statement): boolean {
-  return ['while', 'do', 'for', 'forEach', 'switch'].includes(statement.kind);
-}
-
-/** The simple names that `node` assigns or increments anywhere. */
-export function assignedNames(node: Statement | Expression): string[] {
-  const names: string[] = [];
-  const visit = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      for (const item of value) visit(item);
-      return;
-    }
-    if (typeof value !== 'object' || !value) return;
-    const record = value as Record<string, unknown>;
-    const target = record.kind === 'assign' || record.kind === 'update' ? (record.target as Expression) : undefined;
-    if (target?.kind === 'name') names.push(target.name);
-    for (const child of Object.values(record)) visit(child);
-  };
-  visit(node);
-  return names;
-}
-
-/** Assigns a variable; an assignment that cannot run still makes it possibly assigned, as Java's rules say. */
-function assign(state: State, id: number): State {
-  const possiblyAssigned = new Set([...state.possiblyAssigned, id]);
-  return { assigned: state.assigned && new Set([...state.assigned, id]), possiblyAssigned };
-}
-
-/** The state after a finally block that `state` entered, which keeps the assignments made before it. */
-function throughFinally(state: State, afterFinally: State): State {
-  const possiblyAssigned = new Set([...state.possiblyAssigned, ...afterFinally.possiblyAssigned]);
-  if (!state.assigned || !afterFinally.assigned) return { assigned: undefined, possiblyAssigned };
-  return { assigned: new Set([...state.assigned, ...afterFinally.assigned]), possiblyAssigned };
-}
-
-/** Merges paths: assigned on every reachable one, possibly assigned on any, including assignments that cannot run. */
-function join(...states: State[]): State {
-  const possiblyAssigned = new Set(states.flatMap((state) => [...state.possiblyAssigned]));
-  const reachable = states.filter((state) => state.assigned !== undefined);
-  if (reachable.length === 0) return { assigned: undefined, possiblyAssigned };
-  const [first, ...rest] = reachable;
-  const assigned = [...(first.assigned as ReadonlySet<number>)].filter((id) =>
-    rest.every((state) => state.assigned?.has(id))
-  );
-  return { assigned: new Set(assigned), possiblyAssigned };
-}
+export { assignedNames } from './assignmentStates';

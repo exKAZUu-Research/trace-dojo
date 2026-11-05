@@ -59,19 +59,7 @@ export function addAbstractMethod(
   parameterTypes: JavaType[],
   returnType: JavaType
 ): MethodInfo {
-  const method: MethodInfo = {
-    name,
-    owner: cls,
-    parameterTypes,
-    returnType,
-    isStatic: false,
-    isAbstract: true,
-    isConstructor: false,
-    access: 'public',
-    thrownTypes: [],
-  };
-  cls.methods.push(method);
-  return method;
+  return pushMethod(cls, { name, parameterTypes, returnType, isStatic: false, isAbstract: true });
 }
 
 export function addMethod(
@@ -82,20 +70,17 @@ export function addMethod(
   isStatic: boolean,
   native: NativeMethod
 ): MethodInfo {
-  const method: MethodInfo = {
-    name,
-    owner: cls,
-    parameterTypes,
-    returnType,
-    isStatic,
-    isAbstract: false,
-    isConstructor: false,
-    access: 'public',
-    thrownTypes: [],
-    native,
-  };
-  cls.methods.push(method);
-  return method;
+  return pushMethod(cls, { name, parameterTypes, returnType, isStatic, isAbstract: false, native });
+}
+
+/** Adds a public instance or static method to a builtin class. */
+function pushMethod(
+  cls: ClassInfo,
+  method: Pick<MethodInfo, 'name' | 'parameterTypes' | 'returnType' | 'isStatic' | 'isAbstract' | 'native'>
+): MethodInfo {
+  const info: MethodInfo = { ...method, owner: cls, isConstructor: false, access: 'public', thrownTypes: [] };
+  cls.methods.push(info);
+  return info;
 }
 
 export function addConstructor(cls: ClassInfo, parameterTypes: JavaType[], native: NativeMethod): void {

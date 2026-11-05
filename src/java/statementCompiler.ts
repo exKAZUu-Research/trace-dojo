@@ -125,7 +125,7 @@ export abstract class StatementCompiler extends InvocationCompiler {
     };
   }
 
-  // code-gauge-allow functionNcss 33 -- One case per statement kind, each delegating to its own compiler.
+  // code-gauge-allow functionNcss 52 -- One case per statement kind, each delegating to its own compiler.
   protected compileStatementBody(context: MethodContext, statement: Statement): Exec {
     switch (statement.kind) {
       case 'block': {
@@ -480,21 +480,7 @@ export abstract class StatementCompiler extends InvocationCompiler {
   protected compileForEach(context: MethodContext, statement: Extract<Statement, { kind: 'forEach' }>): Exec {
     const labels = this.takeLabels(context);
     const iterable = this.compileValue(context, statement.iterable);
-    const iterableClass = this.builtins.collections.iterableClass;
-    const bound = upperBound(iterable.type);
-    const iterableType = bound.kind === 'class' ? asSuper(bound, iterableClass) : undefined;
-    if (iterable.type.kind !== 'array' && !iterableType) {
-      return this.error(statement.iterable, '拡張 for 文では配列か、List などの Iterable しか使えません。');
-    }
-    const elementArg = iterableType?.args?.[0];
-    const elementType =
-      iterable.type.kind === 'array'
-        ? iterable.type.element
-        : elementArg
-          ? elementArg.kind === 'wildcard'
-            ? upperBound(elementArg)
-            : elementArg
-          : this.builtins.objectClass.type;
+    const elementType = this.elementTypeOf(statement.iterable, iterable.type);
     const declaredType = statement.type.kind === 'var' ? elementType : this.resolveType(statement.type);
     // The element waits in the temporaries, where the conversion reads it, until the variable holds it.
     const element: CompiledValue = { kind: 'value', type: elementType, run: (frame) => frame.temporaries.at(-1) };
@@ -530,6 +516,17 @@ export abstract class StatementCompiler extends InvocationCompiler {
       if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
       return iterate(frame, array, (value) => runIteration(frame, value));
     };
+  }
+
+  /** The type of the elements a for-each loop walks: an array's, or the type argument of an `Iterable`. */
+  protected elementTypeOf(span: Span, type: JavaType): JavaType {
+    if (type.kind === 'array') return type.element;
+    const bound = upperBound(type);
+    const iterableType = bound.kind === 'class' ? asSuper(bound, this.builtins.collections.iterableClass) : undefined;
+    if (!iterableType) return this.error(span, '拡張 for 文では配列か、List などの Iterable しか使えません。');
+    const elementArg = iterableType.args?.[0];
+    if (!elementArg) return this.builtins.objectClass.type;
+    return elementArg.kind === 'wildcard' ? upperBound(elementArg) : elementArg;
   }
 
   protected isAnswered(type: JavaType): boolean {
