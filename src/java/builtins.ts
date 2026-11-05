@@ -1,6 +1,7 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
 import { type Collections, defineCollections, javaEquals, javaHash, linkComparator } from './builtinCollections';
 import { defineFunctions, type Functions } from './builtinFunctions';
+import { defineMath } from './builtinMath';
 import { defineMisc } from './builtinMisc';
 import { defineStreams } from './builtinStreams';
 import {
@@ -38,14 +39,12 @@ import {
 import {
   charCodeOf,
   charToString,
-  convertNumber,
   formatDouble,
   formatFloat,
   JavaArray,
   JavaObject,
   JavaString,
   toInt32,
-  toInt64,
   type Value,
 } from './values';
 
@@ -340,61 +339,6 @@ function addMessageConstructors(cls: ClassInfo, stringType: JavaType, throwableT
   });
 }
 
-function defineMath(mathClass: ClassInfo): void {
-  for (const type of [INT, LONG, FLOAT, DOUBLE]) {
-    addMethod(mathClass, 'abs', [type], type, true, (_, __, [value]) => {
-      if (type === INT) return toInt32(Math.abs(value as number));
-      if (type === LONG) return toInt64((value as bigint) < 0n ? -(value as bigint) : (value as bigint));
-      return Math.abs(value as number);
-    });
-    const isLong = type === LONG;
-    addMethod(mathClass, 'max', [type, type], type, true, (_, __, [a, b]) =>
-      isLong ? ((a as bigint) > (b as bigint) ? a : b) : javaMax(a as number, b as number)
-    );
-    addMethod(mathClass, 'min', [type, type], type, true, (_, __, [a, b]) =>
-      isLong ? ((a as bigint) < (b as bigint) ? a : b) : javaMin(a as number, b as number)
-    );
-  }
-  // Math.round rounds half up: floor(x + 0.5) computed exactly, which JavaScript's Math.round also does.
-  addMethod(mathClass, 'round', [DOUBLE], LONG, true, (_, __, [value]) =>
-    convertNumber(Math.round(value as number), 'double', 'long')
-  );
-  addMethod(mathClass, 'round', [FLOAT], INT, true, (_, __, [value]) =>
-    convertNumber(Math.round(value as number), 'double', 'int')
-  );
-  for (const name of ['sin', 'cos', 'tan', 'log', 'log10', 'exp', 'cbrt'] as const) {
-    addMethod(mathClass, name, [DOUBLE], DOUBLE, true, (_, __, [value]) => Math[name](value as number));
-  }
-  for (const name of ['sqrt', 'floor', 'ceil'] as const) {
-    addMethod(mathClass, name, [DOUBLE], DOUBLE, true, (_, __, [value]) => Math[name](value as number));
-  }
-  addMethod(mathClass, 'pow', [DOUBLE, DOUBLE], DOUBLE, true, (_, __, [a, b]) => (a as number) ** (b as number));
-  addMethod(mathClass, 'atan2', [DOUBLE, DOUBLE], DOUBLE, true, (_, __, [y, x]) =>
-    Math.atan2(y as number, x as number)
-  );
-  addMethod(mathClass, 'signum', [DOUBLE], DOUBLE, true, (_, __, [value]) => Math.sign(value as number));
-  addMethod(mathClass, 'toRadians', [DOUBLE], DOUBLE, true, (_, __, [value]) => ((value as number) / 180) * Math.PI);
-  addMethod(mathClass, 'toDegrees', [DOUBLE], DOUBLE, true, (_, __, [value]) => ((value as number) * 180) / Math.PI);
-  for (const type of [INT, LONG]) {
-    const isLong = type === LONG;
-    for (const name of ['floorDiv', 'floorMod'] as const) {
-      addMethod(mathClass, name, [type, type], type, true, (frame, _, [a, b]) => {
-        if (b === 0 || b === 0n) throwBuiltin(frame, 'ArithmeticException', '/ by zero');
-        if (isLong) {
-          const [x, y] = [a as bigint, b as bigint];
-          const quotient = x / y - (x % y !== 0n && x < 0n !== y < 0n ? 1n : 0n);
-          return name === 'floorDiv' ? toInt64(quotient) : x - quotient * y;
-        }
-        const [x, y] = [a as number, b as number];
-        const quotient = Math.floor(x / y);
-        return name === 'floorDiv' ? toInt32(quotient) : x - quotient * y;
-      });
-    }
-  }
-  addConstant(mathClass, 'PI', DOUBLE, Math.PI);
-  addConstant(mathClass, 'E', DOUBLE, Math.E);
-}
-
 function defineSystem(registry: Registry, objectClass: ClassInfo, stringType: JavaType): void {
   const printStreamClass = registry.define('PrintStream', objectClass, 'java.io');
   const systemClass = registry.define('System', objectClass);
@@ -640,16 +584,6 @@ function stateOf(receiver: Value): TurtleState {
 function identityOf(value: Value): number {
   if (value instanceof JavaObject || value instanceof JavaArray) return value.identity;
   return 0;
-}
-
-function javaMax(a: number, b: number): number {
-  if (Number.isNaN(a) || Number.isNaN(b)) return Number.NaN;
-  return a === 0 && b === 0 ? (Object.is(a, -0) ? b : a) : Math.max(a, b);
-}
-
-function javaMin(a: number, b: number): number {
-  if (Number.isNaN(a) || Number.isNaN(b)) return Number.NaN;
-  return a === 0 && b === 0 ? (Object.is(a, -0) ? a : b) : Math.min(a, b);
 }
 
 /** Converts a value to the text that string concatenation and `print` produce. */
