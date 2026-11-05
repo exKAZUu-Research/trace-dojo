@@ -33,7 +33,7 @@ import {
   thisTypeOf,
   VOID,
 } from './types';
-import type { JavaObject, Value } from './values';
+import type { JavaObject, JavaString, Value } from './values';
 
 export interface CompiledProgram {
   builtins: Builtins;
@@ -44,6 +44,8 @@ export interface CompiledProgram {
   entryConstructor?: MethodInfo;
   /** The value of a constant variable, which exists before its class is initialized. */
   constantOf: (field: FieldInfo) => Value;
+  /** The strings by text that the program's literals and constants evaluate to. */
+  internedStrings: Map<string, JavaString>;
   /** The value of a static field's initializer when it is a constant expression. */
   initialConstantOf: (field: FieldInfo) => Value;
 }
@@ -76,6 +78,7 @@ class Compiler extends DeclarationCompiler {
       mainMethod,
       entryConstructor,
       constantOf: (field) => this.constantOf(field),
+      internedStrings: this.internedStrings,
       initialConstantOf: (field) => this.initialConstantOf(field),
     };
   }

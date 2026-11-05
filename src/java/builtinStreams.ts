@@ -617,7 +617,7 @@ function defineStringStreams(context: Context, streams: StreamTypes): void {
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- One registration per stream source, each a small native.
+// code-gauge-allow functionCognitiveComplexity 21 -- One registration per stream source, each a small native.
 // code-gauge-allow functionNcss 39 -- One registration per builtin method, each a small native.
 function defineSources(context: Context, streams: StreamTypes): void {
   const { registry, objectType, collections } = context;
@@ -648,7 +648,8 @@ function defineSources(context: Context, streams: StreamTypes): void {
     classType(stream, variableType(ofVariable)),
     true,
     (frame, _, [array]) => {
-      const values = (array as JavaArray).values;
+      if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
+      const { values } = array;
       return createStream(
         frame,
         streamImpl,
@@ -687,7 +688,8 @@ function defineSources(context: Context, streams: StreamTypes): void {
     intStream.type,
     true,
     (frame, _, [array]) => {
-      const values = (array as JavaArray).values;
+      if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
+      const { values } = array;
       return createStream(
         frame,
         intStreamImpl,

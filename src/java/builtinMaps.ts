@@ -39,7 +39,7 @@ import {
   type TypeVariable,
   VOID,
 } from './types';
-import { HashStore, type JavaArray, JavaObject, toInt32, type Value } from './values';
+import { HashStore, JavaArray, JavaObject, toInt32, type Value } from './values';
 
 /** `HashSet`, `LinkedHashSet`, `TreeSet`, and the class of the sets `Set.of` returns, which this returns. */
 export function defineSets(
@@ -283,7 +283,8 @@ function defineEnumSet(context: Context, cls: ClassInfo, collectionClass: ClassI
   generic(
     'of',
     (e) => [e, { kind: 'array', element: e }],
-    (frame, _, [first, rest]) => create(frame, [first, ...(rest as JavaArray).values]),
+    (frame, _, [first, rest]) =>
+      rest instanceof JavaArray ? create(frame, [first, ...rest.values]) : throwBuiltin(frame, 'NullPointerException'),
     true
   );
   generic(
@@ -673,7 +674,7 @@ export function defineNavigation(cls: ClassInfo, key: JavaType, isMap: boolean):
       const store = storeOf(receiver);
       const entry = isFirst ? store.entries[0] : store.entries.at(-1);
       if (!entry) return;
-      store.entries = store.entries.filter((other) => other !== entry);
+      store.remove(entry);
       touch(receiver);
       return entry.key;
     });
@@ -699,7 +700,7 @@ function defineEntryNavigation(cls: ClassInfo, key: JavaType, entryType: JavaTyp
       const ordered = store.ordered();
       const entry = isFirst ? ordered[0] : ordered.at(-1);
       if (entry && removes) {
-        store.entries = store.entries.filter((other) => other !== entry);
+        store.remove(entry);
         touch(receiver);
       }
       return snapshot(frame, entry);
@@ -771,7 +772,7 @@ export function findEntry(frame: Frame, receiver: Value, key: Value): HashStore[
     return isFound ? store.entries[index] : undefined;
   }
   const hash = javaHash(frame, key);
-  return store.entries.find((entry) => entry.hash === hash && javaEquals(frame, key, entry.key));
+  return store.withHash(hash).find((entry) => javaEquals(frame, key, entry.key));
 }
 
 /** Adds or replaces an entry, returning the value it replaced or `NO_ENTRY`; a set keeps an existing entry. */
@@ -798,7 +799,7 @@ export function putEntry(
     return previous;
   }
   frame.runtime.allocateArray(frame, 2);
-  if (position) store.entries.splice(position.index, 0, { key, value, hash: 0 });
+  if (position) store.insertAt(position.index, { key, value, hash: 0 });
   else if (atBucketHead) store.addAtBucketHead({ key, value, hash: javaHash(frame, key) });
   else store.add({ key, value, hash: javaHash(frame, key) });
   touch(receiver);
@@ -809,7 +810,7 @@ export function removeEntry(frame: Frame, receiver: Value, key: Value): Value | 
   const entry = findEntry(frame, receiver, key);
   if (!entry) return NO_ENTRY;
   const store = storeOf(receiver);
-  store.entries = store.entries.filter((other) => other !== entry);
+  store.remove(entry);
   touch(receiver);
   return entry.value;
 }

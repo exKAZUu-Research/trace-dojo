@@ -1203,6 +1203,36 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'class Main {\n  public static void main(String[] args) {\n    boolean f = false; while (f) {}\n  }\n}',
   ],
+  [
+    'private-field-through-subclass',
+    false,
+    'class Main {\n  static class A { private int p = 1; }\n  static class B extends A { int g() { return this.p; } }\n  public static void main(String[] args) {\n    System.out.println(new B().g());\n  }\n}',
+  ],
+  [
+    'private-field-in-nested-class',
+    true,
+    'class Main {\n  private int x = 3;\n  class Inner { int f() { return x; } }\n  public static void main(String[] args) {\n    System.out.println(new Main().new Inner().f());\n  }\n}',
+  ],
+  [
+    'override-throws-broader-exception',
+    false,
+    'class Main {\n  static class A { void m() {} }\n  static class B extends A { void m() throws Exception {} }\n  public static void main(String[] args) {\n    \n  }\n}',
+  ],
+  [
+    'override-throws-narrower-exception',
+    true,
+    'class Main {\n  static class A { void m() throws Exception {} }\n  static class B extends A { void m() throws java.io.IOException {} }\n  public static void main(String[] args) {\n    \n  }\n}',
+  ],
+  [
+    'method-reference-to-unrelated-static',
+    false,
+    'class Main {\n  public static void main(String[] args) {\n    java.util.function.Function<String, String> f = Integer::toString;\n  }\n}',
+  ],
+  [
+    'self-referencing-type-bound',
+    true,
+    'interface Op<T extends Op<T>> { T self(); }\nclass OpImpl implements Op<OpImpl> { public OpImpl self() { return this; } }\nclass Main {\n  public static void main(String[] args) {\n    System.out.println(new OpImpl().self() != null);\n  }\n}',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

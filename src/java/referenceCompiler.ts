@@ -114,6 +114,7 @@ export abstract class ReferenceCompiler extends CompilerBase {
   ): (Reference & { constant?: Value }) | Compiled {
     const field = this.findField(context.cls, name.name);
     if (field) {
+      this.checkAccess(context, field.owner, field.access, name, `フィールド ${name.name}`, context.cls);
       if (!field.isStatic && context.isStatic) {
         this.noInstanceError(
           context,
@@ -196,7 +197,7 @@ export abstract class ReferenceCompiler extends CompilerBase {
         return this.error(access, missingFieldMessage(object.cls, name));
       }
       if (!field.isStatic) this.error(access, `static ではないフィールド ${name} はクラス名から使えません。`);
-      this.checkAccess(context, field.owner, field.access, access, `フィールド ${name}`);
+      this.checkAccess(context, field.owner, field.access, access, `フィールド ${name}`, object.cls);
       return this.fieldReference(field, undefined);
     }
     // Java folds a constant field only when it is named by its simple name or as TypeName.name.
@@ -256,7 +257,7 @@ export abstract class ReferenceCompiler extends CompilerBase {
     }
     const field = this.findField(bound.cls, name);
     if (!field) return this.error(access, missingFieldMessage(bound.cls, name));
-    this.checkAccess(context, field.owner, field.access, access, `フィールド ${name}`);
+    this.checkAccess(context, field.owner, field.access, access, `フィールド ${name}`, bound.cls);
     return this.fieldReference(field, field.isStatic ? undefined : object, field.isStatic ? object : undefined);
   }
 

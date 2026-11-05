@@ -6,6 +6,7 @@ import { formatText } from './javaFormatter';
 import { translateJavaRegex, UnsupportedRegexError } from './javaRegex';
 import { javaReplacer, ReplacementError } from './javaReplacement';
 import { type Frame, throwBuiltin } from './runtime';
+import { defineStringIdentity } from './stringIdentity';
 import { BOOLEAN, CHAR, type ClassInfo, DOUBLE, FLOAT, INT, type JavaType, LONG, VOID } from './types';
 import { charCodeOf, charToString, JavaArray, JavaObject, JavaString, type Value } from './values';
 
@@ -28,6 +29,7 @@ export function defineText(
   defineStringJoiner(registry, objectClass, stringClass.type);
   defineStringExtras(stringClass, collections);
   defineStringVariants(stringClass, objectClass);
+  defineStringIdentity(stringClass);
   const format = addMethod(
     stringClass,
     'format',

@@ -32,7 +32,16 @@ import {
 } from './builtinSupport';
 import { type Wrappers } from './builtinWrappers';
 import { type Frame, throwBuiltin } from './runtime';
-import { BOOLEAN, type ClassInfo, INT, type JavaType, type MethodInfo, type TypeVariable, VOID } from './types';
+import {
+  BOOLEAN,
+  type ClassInfo,
+  INT,
+  type JavaType,
+  type MethodInfo,
+  type NativeMethod,
+  type TypeVariable,
+  VOID,
+} from './types';
 import { JavaArray, JavaObject, toInt32, type Value } from './values';
 
 export interface Collections {
@@ -237,7 +246,41 @@ function defineArrayDeque(
   cls.interfaces = [dequeClass];
   cls.supertypes = [cls.supertypes[0], classType(dequeClass, { kind: 'typeVar', variable: cls.typeParameters[0] })];
   defineDequeMethods(cls, { kind: 'typeVar', variable: cls.typeParameters[0] });
+  rejectNullElements(cls);
   linkOverrides(cls);
+}
+
+/**
+ * Makes ArrayDeque's inserting methods throw `NullPointerException` for a null element, as null marks an empty slot
+ * of its array; `addAll` adds the elements before the first null, as its `addLast` calls do.
+ */
+function rejectNullElements(cls: ClassInfo): void {
+  const addLast = cls.methods.find((method) => method.name === 'addLast')?.native as NativeMethod;
+  for (const method of cls.methods) {
+    const { native } = method;
+    if (native && INSERTERS.has(method.name)) method.native = nonNull(native);
+    else if (native && method.name === 'addAll') method.native = addingEachLast(addLast);
+  }
+}
+
+const INSERTERS = new Set(['add', 'addFirst', 'addLast', 'offer', 'offerFirst', 'offerLast', 'push']);
+
+function nonNull(native: NativeMethod): NativeMethod {
+  return (frame, receiver, args) => {
+    if (args[0] === undefined) throwBuiltin(frame, 'NullPointerException');
+    return native(frame, receiver, args);
+  };
+}
+
+function addingEachLast(addLast: NativeMethod): NativeMethod {
+  return (frame, receiver, [source]) => {
+    const items = [...itemsOf(frame, source)];
+    for (const item of items) {
+      if (item === undefined) throwBuiltin(frame, 'NullPointerException');
+      addLast(frame, receiver, [item]);
+    }
+    return items.length > 0;
+  };
 }
 
 /** A list whose methods that `rejects` throw `UnsupportedOperationException`, as `List.of` and `Arrays.asList` give. */

@@ -209,6 +209,13 @@ export function inferFromTarget(
   infer(builtins, method.returnType, target, method.typeParameters ?? [], fromTarget);
   for (const [variable, type] of fromTarget) {
     const existing = bindings.get(variable);
+    // A target only bounds a variable that is the whole result, as `R` of `collect`, so that an argument still
+    // decides a narrower type: `Collection<Integer> c = stream.collect(toList())` takes `R` = `List<Integer>`.
+    const isWholeResult = method.returnType.kind === 'typeVar' && method.returnType.variable === variable;
+    if (!existing && isWholeResult && type.kind !== 'wildcard') {
+      bindUpperBound(builtins, variable, type, bindings);
+      continue;
+    }
     const widensToTarget =
       existing !== undefined &&
       type.kind !== 'wildcard' &&

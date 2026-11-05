@@ -556,9 +556,21 @@ export abstract class CompilerBase extends TypeResolver {
     return;
   }
 
-  /** Private members are accessible anywhere in the top-level class that declares them, nested classes included. */
-  protected checkAccess(context: MethodContext, owner: ClassInfo, access: string, span: Span, what: string): void {
-    if (access === 'private' && topLevelOf(owner) !== topLevelOf(context.cls)) {
+  /**
+   * Private members are accessible anywhere in the top-level class that declares them, nested classes included, but
+   * only as members of their own class: they are not inherited, so a subclass `through` which one is named lacks it.
+   *
+   * @param through The class the member is looked up in, as the static type of `b` in `b.p`, when not its owner.
+   */
+  protected checkAccess(
+    context: MethodContext,
+    owner: ClassInfo,
+    access: string,
+    span: Span,
+    what: string,
+    through: ClassInfo = owner
+  ): void {
+    if (access === 'private' && (topLevelOf(owner) !== topLevelOf(context.cls) || through !== owner)) {
       this.error(span, `${what} は private なので使えません。`);
     }
   }

@@ -72,7 +72,9 @@ const MIN_TREEIFY_CAPACITY = 64;
  * order within a bucket.
  */
 export class HashStore {
-  entries: HashEntry[] = [];
+  private list: HashEntry[] = [];
+  /** The entries by hash, which finds a key among the entries of its hash only; built when first needed. */
+  private byHash: Map<number, HashEntry[]> | undefined;
   capacity = 16;
   /**
    * How iteration orders the entries: by hash bucket as a `HashMap`, by insertion as a `LinkedHashMap`, or sorted by
@@ -118,16 +120,55 @@ export class HashStore {
     return this.entries[fromEnd ? low - 1 : low];
   }
 
-  /** The entries in the order Java's iteration visits them. */
+  /** The entries in the order Java's iteration visits them, as a new array that later changes leave as it is. */
   ordered(): HashEntry[] {
-    if (this.order !== 'hash') return this.entries;
+    if (this.order !== 'hash') return [...this.list];
     return this.entries.toSorted((a, b) => this.bucketOf(a) - this.bucketOf(b));
+  }
+
+  get entries(): HashEntry[] {
+    return this.list;
+  }
+
+  set entries(entries: HashEntry[]) {
+    this.list = entries;
+    this.byHash = undefined;
+  }
+
+  /** The entries whose keys have `hash`, among which a key equal to one with that hash is. */
+  withHash(hash: number): readonly HashEntry[] {
+    if (!this.byHash) {
+      this.byHash = new Map();
+      for (const entry of this.list) this.indexEntry(entry);
+    }
+    return this.byHash.get(hash) ?? [];
+  }
+
+  /** Inserts an entry at a position of a sorted store, which keeps its entries in order. */
+  insertAt(index: number, entry: HashEntry): void {
+    this.list.splice(index, 0, entry);
+    this.indexEntry(entry);
+  }
+
+  /** Removes an entry, keeping the order of the others. */
+  remove(entry: HashEntry): void {
+    const index = this.list.indexOf(entry);
+    if (index !== -1) this.list.splice(index, 1);
+    const sameHash = this.byHash?.get(entry.hash);
+    if (sameHash) sameHash.splice(sameHash.indexOf(entry), 1);
+  }
+
+  private indexEntry(entry: HashEntry): void {
+    const sameHash = this.byHash?.get(entry.hash);
+    if (sameHash) sameHash.push(entry);
+    else this.byHash?.set(entry.hash, [entry]);
   }
 
   /** Adds an entry at the end of its bucket and then grows the table, as `HashMap.put` does. */
   add(entry: HashEntry): void {
     const crowded = this.bucketSize(entry) >= TREEIFY_THRESHOLD;
-    this.entries.push(entry);
+    this.list.push(entry);
+    this.indexEntry(entry);
     if (crowded) this.growCrowded();
     while (this.entries.length > this.capacity * 0.75) this.capacity *= 2;
   }
@@ -141,7 +182,8 @@ export class HashStore {
     const crowded = this.bucketSize(entry) >= TREEIFY_THRESHOLD - 1;
     const bucket = this.bucketOf(entry);
     const index = this.order === 'hash' ? this.entries.findIndex((other) => this.bucketOf(other) === bucket) : -1;
-    this.entries.splice(index === -1 ? this.entries.length : index, 0, entry);
+    this.list.splice(index === -1 ? this.list.length : index, 0, entry);
+    this.indexEntry(entry);
     if (crowded) this.growCrowded();
   }
 

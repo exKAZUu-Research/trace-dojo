@@ -58,6 +58,11 @@ function joinClosingFailure(frame: Frame, thrown: JavaThrow | undefined, error: 
   return thrown;
 }
 
+/** The value a `return` or `yield` completion carries, which stays reachable while finalizers run. */
+function completionValue(completion: Completion | undefined): Value {
+  return completion?.kind === 'return' || completion?.kind === 'yield' ? completion.value : undefined;
+}
+
 /** The `IllegalArgumentException` that `addSuppressed` throws for an exception suppressed in itself. */
 function selfSuppression(frame: Frame, exception: JavaThrow): JavaThrow {
   try {
@@ -130,7 +135,7 @@ export abstract class TryCompiler extends SwitchCompiler {
         primary = error;
       }
       // The pending return value or exception stays reachable while the resources' close() methods run.
-      frame.temporaries.push(completion?.kind === 'return' ? completion.value : primary?.value);
+      frame.temporaries.push(completionValue(completion) ?? primary?.value);
       try {
         primary = closeResources(frame, opened, resources, primary);
       } finally {
@@ -241,7 +246,7 @@ function runTry(body: Exec, handle: CatchHandler, finallyBlock: Exec | undefined
     const { completion, pending } = attemptTry(frame, body, handle);
     if (finallyBlock) {
       // A return value or an exception the finally block delays keeps its turtles alive while the block runs.
-      frame.temporaries.push(completion?.kind === 'return' ? completion.value : pending?.value);
+      frame.temporaries.push(completionValue(completion) ?? pending?.value);
       try {
         const finallyCompletion = finallyBlock(frame);
         if (finallyCompletion) return finallyCompletion;

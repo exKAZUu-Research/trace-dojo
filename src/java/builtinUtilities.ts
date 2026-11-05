@@ -74,7 +74,7 @@ export function defineUtilities(
     objectType,
     (element) => ({ parameterTypes: [{ kind: 'array', element }], returnType: listOf(element), isVarargs: true }),
     (frame, _, [array]) => {
-      const values = (array as JavaArray).values;
+      const values = arrayOf(frame, array).values;
       if (values.includes(undefined)) throwBuiltin(frame, 'NullPointerException');
       return createList(frame, collections.immutableList, [...values]);
     }
@@ -111,7 +111,7 @@ export function defineUtilities(
       returnType: { kind: 'class', cls: collections.setClass, args: [element] },
       isVarargs: true,
     }),
-    (frame, _, [array]) => createImmutableSet(frame, collections.immutableSet, (array as JavaArray).values)
+    (frame, _, [array]) => createImmutableSet(frame, collections.immutableSet, arrayOf(frame, array).values)
   );
   defineArrays(registry, objectClass, stringType, collections, listOf);
   defineCollectionsClass(registry, objectClass, collections, comparableClass);
@@ -565,7 +565,7 @@ function defineCollectionsClass(
     }),
     (frame, _, [collection, array]) => {
       let changed = false;
-      for (const value of (array as JavaArray).values) {
+      for (const value of arrayOf(frame, array).values) {
         changed =
           frame.runtime.invokeVirtual(frame, collections.listClass.interfaces[0], 'add', collection, [value]) ===
             true || changed;

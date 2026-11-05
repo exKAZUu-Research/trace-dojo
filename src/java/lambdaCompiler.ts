@@ -412,7 +412,8 @@ export abstract class LambdaCompiler extends PatternCompiler {
    * arguments or, failing that, an instance method on the first argument; `expression::method` calls it on the value;
    * `Type::new` creates an object or an array.
    */
-  // code-gauge-allow functionCognitiveComplexity 19 -- One case per form of method reference.
+  // code-gauge-allow functionCognitiveComplexity 21 -- One case per form of method reference.
+  // code-gauge-allow functionNcss 33 -- One case per form of method reference.
   protected expandMethodReference(
     context: MethodContext,
     reference: MethodReference,
@@ -463,8 +464,33 @@ export abstract class LambdaCompiler extends PatternCompiler {
       return staticForm;
     } catch (error) {
       if (!(error instanceof CompileError) || args.length === 0) throw error;
-      return lambdaOf({ kind: 'call', object: args[0], name: reference.name, args: args.slice(1), ...span });
+      const typeSyntax = targetType ?? expressionAsType(receiver);
+      if (!typeSyntax || !this.takesUnboundReceiver(typeSyntax, reference.name, functionType)) throw error;
+      // The first argument is of the named type, so the method found on it is the named type's or an override.
+      return lambdaOf({
+        kind: 'call',
+        object: args[0] as Expression,
+        name: reference.name,
+        args: args.slice(1),
+        ...span,
+      });
     }
+  }
+
+  /**
+   * Whether `Type::name` can name an instance method of `Type` called on the function's first argument: the
+   * argument is a `Type`, and `Type` has an instance method of that name, which a static one cannot stand for.
+   */
+  protected takesUnboundReceiver(typeSyntax: TypeSyntax, name: string, functionType: FunctionType): boolean {
+    const named = this.resolveType(typeSyntax);
+    const first = functionType.parameterTypes[0];
+    if (!first || !isWidening(wildcardBound(first), named, this.builtins.objectClass)) return false;
+    const bound = upperBound(named);
+    const methods =
+      bound.kind === 'class'
+        ? this.collectMethods(bound.cls, name)
+        : this.collectMethods(this.builtins.objectClass, name);
+    return methods.some((method) => !method.isStatic);
   }
 
   protected override compileArgument(context: MethodContext, expression: Expression): CompiledValue {

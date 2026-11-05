@@ -60,6 +60,8 @@ export class Runtime {
   private allocatedSlots = 0;
   private readonly initializingClasses = new Set<ClassInfo>();
   private readonly dispatchCache = new Map<MethodInfo, Map<ClassInfo, MethodInfo>>();
+  /** The strings by text that the program's literals and constants are, which `String.intern()` returns and extends. */
+  internedStrings = new Map<string, JavaString>();
 
   constructor(readonly builtins: Builtins) {}
 

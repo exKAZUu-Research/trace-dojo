@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 426 -- One checker for the definite assignment rules of JLS chapter 16, which share its scopes and states.
+// code-gauge-allow-file fileNcss 431 -- One checker for the definite assignment rules of JLS chapter 16, which share its scopes and states.
 import { CompileError } from '../interpreter/diagnostics';
 import {
   assign,
@@ -423,6 +423,7 @@ export class DefiniteAssignmentChecker {
     // Jumps out of the try statement also run its finally block on the way.
     const jumpCounts = this.targets.map((target) => [target.breaks.length, target.continues.length] as const);
     const returnCount = this.returns.length;
+    const yieldCounts = this.yields.map((yields) => yields.length);
     const { result: afterBody, written: writtenInBody } = this.recordingWrites(() =>
       this.statement(statement.body, state)
     );
@@ -449,7 +450,14 @@ export class DefiniteAssignmentChecker {
     // Jumps taken inside the finally block itself leave from where they are, unchanged.
     const jumpsBeforeFinally = this.targets.map((target) => [target.breaks.length, target.continues.length] as const);
     const returnsBeforeFinally = this.returns.length;
+    const yieldsBeforeFinally = this.yields.map((yields) => yields.length);
     const afterFinally = this.statement(statement.finallyBlock, finallyEntry);
+    // Yields leaving through the finally block, as returns and jumps do, carry what it assigns.
+    for (const [index, yields] of this.yields.entries()) {
+      for (let jump = yieldCounts[index] ?? 0; jump < (yieldsBeforeFinally[index] ?? 0); jump++) {
+        yields[jump] = throughFinally(yields[jump] as State, afterFinally);
+      }
+    }
     for (const [index, [breakCount, continueCount]] of jumpCounts.entries()) {
       const target = this.targets[index];
       const [breaksBeforeFinally, continuesBeforeFinally] = jumpsBeforeFinally[index];

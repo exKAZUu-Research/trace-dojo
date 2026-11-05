@@ -33,6 +33,7 @@ export function runProgram(
   onMainExit?: (frame: Frame) => void
 ): ProgramRun {
   let finalTurtles: ProgramRun['finalTurtles'] = [];
+  runtime.internedStrings = program.internedStrings;
   runtime.onExit = (frame) => {
     if (frame.method !== program.mainMethod || runtime.frames.length !== 1) return;
     onMainExit?.(frame);

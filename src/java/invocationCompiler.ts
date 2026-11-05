@@ -301,7 +301,13 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
         `static ではないメソッド ${expression.name} は、static な入れ子のクラスの中から呼び出せません。`
       );
     }
-    this.checkCall(context, expression, method, target.receiver === undefined && expression.object !== undefined);
+    this.checkCall(
+      context,
+      expression,
+      method,
+      target.receiver === undefined && expression.object !== undefined,
+      target.owner
+    );
     this.checkThrown(context, expression, method.thrownTypes);
     const convertedArgs = this.convertArguments(context, method, args, expression.args);
     const callRow = expression.row;
@@ -516,10 +522,11 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
     context: MethodContext,
     expression: Extract<Expression, { kind: 'call' }>,
     method: MethodInfo,
-    isThroughClassName: boolean
+    isThroughClassName: boolean,
+    through: ClassInfo
   ): void {
     const { name } = expression;
-    this.checkAccess(context, method.owner, method.access, expression, `メソッド ${name}`);
+    this.checkAccess(context, method.owner, method.access, expression, `メソッド ${name}`, through);
     if (isThroughClassName && !method.isStatic) {
       this.error(expression, `static ではないメソッド ${name} はクラス名から呼び出せません。`);
     }

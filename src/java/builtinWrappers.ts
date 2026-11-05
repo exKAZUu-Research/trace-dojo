@@ -533,6 +533,7 @@ function parseDouble(frame: Frame, text: Value, format: 'double' | 'float' = 'do
   if (value === undefined) return throwBuiltin(frame, 'NullPointerException');
   frame.runtime.scanString(value.length);
   const trimmed = value.trim();
+  if (trimmed === '') throwBuiltin(frame, 'NumberFormatException', 'empty String');
   const hex = parseHexFloat(trimmed, format);
   if (hex !== undefined) return hex;
   const isNumber = /^[+-]?(?:NaN|Infinity|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?[fFdD]?)$/.test(trimmed);

@@ -50,9 +50,7 @@ export abstract class TypeResolver {
         return { kind: 'typeVar', variable };
       }
     }
-    const [first, ...rest] = [...syntax.qualifier, syntax.name];
-    let cls = this.lookupType(first, this.typeScope);
-    for (const name of rest) cls = cls && this.findMemberType(cls, name);
+    let cls = this.lookupQualifiedType([...syntax.qualifier, syntax.name]);
     if (!cls) this.error(syntax, `この採点環境には、型 ${[...syntax.qualifier, syntax.name].join('.')} がありません。`);
     if (!syntax.args) return cls.type;
     const { typeParameters } = cls;
@@ -67,6 +65,34 @@ export abstract class TypeResolver {
       );
     }
     return { kind: 'class', cls, args: syntax.args.map((arg) => this.resolveTypeArgument(arg)) };
+  }
+
+  /**
+   * The class a dotted name names: a class in scope followed by its member types, or a package's class followed by
+   * its member types, as `java.util.Map.Entry`.
+   */
+  protected lookupQualifiedType(segments: readonly string[]): ClassInfo | undefined {
+    const [first, ...rest] = segments;
+    const inScope = this.lookupType(first as string, this.typeScope);
+    const memberOf = (start: ClassInfo | undefined, names: readonly string[]): ClassInfo | undefined => {
+      let cls = start;
+      for (const name of names) cls = cls && this.findMemberType(cls, name);
+      return cls;
+    };
+    if (inScope) return memberOf(inScope, rest);
+    // The longest package prefix whose next segment names a class of the library.
+    for (let split = segments.length - 1; split >= 1; split--) {
+      const cls = this.classesByQualifiedName().get(segments.slice(0, split + 1).join('.'));
+      if (cls) return memberOf(cls, segments.slice(split + 1));
+    }
+    return undefined;
+  }
+
+  private qualifiedClassNames: Map<string, ClassInfo> | undefined;
+
+  private classesByQualifiedName(): Map<string, ClassInfo> {
+    this.qualifiedClassNames ??= new Map([...this.builtins.qualifiedNames].map(([cls, name]) => [name, cls]));
+    return this.qualifiedClassNames;
   }
 
   protected resolveTypeArgument(syntax: TypeSyntax): JavaType {
@@ -111,12 +137,24 @@ export abstract class TypeResolver {
 
   /** Declares type parameters, whose bounds may name each other, defaulting a missing bound to `Object`. */
   protected declareTypeParameters(parameters: readonly TypeParameter[]): TypeVariable[] {
+    const variables = this.typeParameterShells(parameters);
+    this.resolveTypeParameterBounds(variables, parameters);
+    return variables;
+  }
+
+  /** The variables of type parameters before their bounds are known, which other declarations may already name. */
+  protected typeParameterShells(parameters: readonly TypeParameter[]): TypeVariable[] {
     const variables = parameters.map((parameter): TypeVariable => ({ name: parameter.name, bounds: [] }));
     for (const [index, parameter] of parameters.entries()) {
       if (variables.slice(0, index).some((other) => other.name === parameter.name)) {
         this.error(parameter, `型パラメータ ${parameter.name} が重複しています。`);
       }
     }
+    return variables;
+  }
+
+  /** Resolves the bounds of type parameters into their variables. */
+  protected resolveTypeParameterBounds(variables: TypeVariable[], parameters: readonly TypeParameter[]): void {
     this.withTypeVariables(variables, () => {
       for (const [index, parameter] of parameters.entries()) {
         variables[index].bounds =
@@ -125,7 +163,6 @@ export abstract class TypeResolver {
             : [this.builtins.objectClass.type];
       }
     });
-    return variables;
   }
 
   /** Runs `compile` with simple type names resolved inside `cls`'s body. */

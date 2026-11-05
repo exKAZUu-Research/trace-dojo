@@ -115,8 +115,22 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
       this.resolvedClasses.add(cls);
       ordered.push(cls);
     };
+    this.shellTypeParameters(classes);
     for (const cls of classes) visit(cls);
     return ordered;
+  }
+
+  /**
+   * Gives every class its type parameters before any bound is resolved, as a bound may name a class declared later
+   * or the class itself, as `class Builder<T extends Builder<T>>` does.
+   */
+  private shellTypeParameters(classes: readonly ClassInfo[]): void {
+    for (const cls of classes) {
+      const declaration = cls.declaration as ClassDeclaration | undefined;
+      if (!this.resolvedClasses.has(cls) && declaration) {
+        cls.typeParameters = this.typeParameterShells(declaration.typeParameters);
+      }
+    }
   }
 
   /**
@@ -125,7 +139,7 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
    */
   protected resolveSupertypes(cls: ClassInfo, declaration: ClassDeclaration): ClassType[] {
     return this.withTypeScope(cls.enclosing, () => {
-      cls.typeParameters = this.declareTypeParameters(declaration.typeParameters);
+      this.resolveTypeParameterBounds(cls.typeParameters, declaration.typeParameters);
       return this.withTypeVariables(typeVariablesInScope(cls), () => {
         const base = this.anonymousBases.get(cls);
         const superclass = base && base.cls.kind !== 'interface' ? base : this.resolveSuperclass(cls, declaration);
@@ -553,6 +567,16 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
         ancestor.kind === 'interface'
           ? `メソッド ${method.name} はインターフェース ${ancestor.name} のメソッドをオーバーライドするので、public を付ける必要があります。`
           : `メソッド ${method.name} の公開範囲を親クラスより狭くすることはできません。`
+      );
+    }
+    // An override may throw only the checked exceptions the overridden method declares, or their subclasses.
+    const undeclared = method.thrownTypes.find(
+      (thrown) => this.isChecked(thrown) && !overridden.thrownTypes.some((declared) => isSubclass(thrown, declared))
+    );
+    if (undeclared) {
+      this.error(
+        declaration,
+        `メソッド ${method.name} は、オーバーライドする ${ancestor.name}.${method.name} が throws に書いていない例外 ${undeclared.name} を投げられません。`
       );
     }
   }

@@ -1,5 +1,5 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
-import { classNameOf, defineClassClass } from './builtinClass';
+import { defineClassClass, runtimeClassNameOf } from './builtinClass';
 import { type Collections, defineCollections, javaEquals, javaHash, linkComparator } from './builtinCollections';
 import { defineFunctions, type Functions } from './builtinFunctions';
 import { defineMath } from './builtinMath';
@@ -116,8 +116,7 @@ function defineObject(objectClass: ClassInfo, stringType: JavaType): void {
   addMethod(objectClass, 'equals', [objectClass.type], BOOLEAN, false, (_, receiver, [other]) => receiver === other);
   addMethod(objectClass, 'hashCode', [], INT, false, (_, receiver) => identityOf(receiver));
   addMethod(objectClass, 'toString', [], stringType, false, (frame, receiver) => {
-    const name = receiver instanceof JavaObject ? classNameOf(frame, receiver.cls) : 'java.lang.Object';
-    return newString(frame, `${name}@${identityOf(receiver).toString(16)}`);
+    return newString(frame, `${runtimeClassNameOf(frame, receiver)}@${identityOf(receiver).toString(16)}`);
   });
   addConstructor(objectClass, [], () => {});
 }
@@ -189,9 +188,10 @@ const causeTakers = new Set([
   'UnsupportedOperationException',
   'IOException',
   'MatchException',
+  'AssertionError',
 ]);
 
-// code-gauge-allow functionNcss 49 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 54 -- One registration per builtin method, each a small native.
 function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType: JavaType): ClassInfo {
   const defineThrowable = (name: string, superclass: ClassInfo, packageName = 'java.lang'): ClassInfo => {
     const cls = registry.define(name, superclass, packageName);
@@ -275,6 +275,12 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
   defineThrowable('MatchException', runtimeExceptionClass);
   defineThrowable('StackOverflowError', errorClass);
   defineThrowable('OutOfMemoryError', errorClass);
+  // AssertionError takes any detail, whose text becomes the message and which is the cause when it is a Throwable.
+  addConstructor(defineThrowable('AssertionError', errorClass), [objectClass.type], (frame, receiver, [detail]) => {
+    const exception = receiver as JavaObject;
+    exception.message = newString(frame, stringify(frame, detail, objectClass.type));
+    if (detail instanceof JavaObject && frame.runtime.isInstance(detail, throwableClass)) exception.cause = detail;
+  });
   const linkage = defineThrowable('LinkageError', errorClass);
   defineThrowable('AbstractMethodError', defineThrowable('IncompatibleClassChangeError', linkage));
   return throwableClass;
