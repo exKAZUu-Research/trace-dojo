@@ -263,6 +263,46 @@ function defineCollectionsClass(
   }
   addGenericStatic(
     cls,
+    'shuffle',
+    ['T'],
+    objectType,
+    (element) => ({
+      parameterTypes: [listOf(element), (registry.classes.get('Random') as ClassInfo).type],
+      returnType: VOID,
+    }),
+    (frame, _, [list, random]) => {
+      const values = elementsOf(frame, list);
+      // Collections.shuffle swaps each position from the end with a random one before it, as Java specifies.
+      for (let index = values.length - 1; index > 0; index--) {
+        const randomClass = (random as JavaObject).cls;
+        const other = frame.runtime.invokeVirtual(frame, randomClass, 'nextInt', random, [index + 1]) as number;
+        [values[index], values[other]] = [values[other], values[index]];
+      }
+    }
+  );
+  const addAll = addGenericStatic(
+    cls,
+    'addAll',
+    ['T'],
+    objectType,
+    (element) => ({
+      parameterTypes: [collectionOf({ kind: 'wildcard', bound: element, isSuper: true }), { kind: 'array', element }],
+      returnType: BOOLEAN,
+      isVarargs: true,
+    }),
+    (frame, _, [collection, array]) => {
+      let changed = false;
+      for (const value of (array as JavaArray).values) {
+        changed =
+          frame.runtime.invokeVirtual(frame, collections.listClass.interfaces[0], 'add', collection, [value]) ===
+            true || changed;
+      }
+      return changed;
+    }
+  );
+  void addAll;
+  addGenericStatic(
+    cls,
     'reverse',
     ['T'],
     objectType,

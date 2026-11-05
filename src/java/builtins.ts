@@ -1,5 +1,5 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
-import { type Collections, defineCollections, javaEquals, javaHash } from './builtinCollections';
+import { type Collections, defineCollections, javaEquals, javaHash, linkComparator } from './builtinCollections';
 import { defineFunctions, type Functions } from './builtinFunctions';
 import { defineMisc } from './builtinMisc';
 import { defineStreams } from './builtinStreams';
@@ -93,10 +93,11 @@ function createBuiltins(): Builtins {
   addInterface(stringClass, { kind: 'class', cls: wrappers.comparableClass, args: [stringClass.type] });
   const collections = defineCollections(registry, objectClass, stringClass.type, wrappers);
   defineSystem(registry, objectClass, stringClass.type);
-  defineUtilities(registry, objectClass, stringClass.type, collections, wrappers.comparableClass);
   defineMisc(registry, objectClass, stringClass.type);
+  defineUtilities(registry, objectClass, stringClass.type, collections, wrappers.comparableClass);
   defineText(registry, objectClass, stringClass, registry.classes.get('PrintStream') as ClassInfo, collections);
   const functions = defineFunctions(registry, objectClass, collections, wrappers.comparableClass);
+  linkComparator(collections, functions.comparatorClass);
   defineStreams(registry, objectClass, stringClass.type, collections, wrappers, functions);
   return {
     classes: registry.classes,
@@ -283,6 +284,7 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
     return newString(frame, exception.message ? `${name}: ${exception.message.value}` : name);
   });
   const exceptionClass = defineThrowable('Exception', throwableClass);
+  defineThrowable('InterruptedException', exceptionClass);
   const runtimeExceptionClass = defineThrowable('RuntimeException', exceptionClass);
   const errorClass = defineThrowable('Error', throwableClass);
   for (const name of [

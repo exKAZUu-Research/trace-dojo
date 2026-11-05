@@ -1,3 +1,4 @@
+import { callFunction } from './builtinFunctions';
 import { stringify } from './builtins';
 import {
   addAbstractMethod,
@@ -15,23 +16,16 @@ import {
   BOOLEAN,
   type ClassInfo,
   type ClassType,
+  createClass,
   INT,
   type JavaType,
   type MethodInfo,
   sameErasure,
   superinterfacesOf,
+  type TypeVariable,
   VOID,
 } from './types';
-import {
-  charCodeOf,
-  type HashEntry,
-  HashStore,
-  JavaArray,
-  JavaObject,
-  JavaString,
-  toInt32,
-  type Value,
-} from './values';
+import { charCodeOf, HashStore, JavaArray, JavaObject, JavaString, toInt32, type Value } from './values';
 
 export interface Collections {
   iterableClass: ClassInfo;
@@ -41,6 +35,8 @@ export interface Collections {
   immutableList: ClassInfo;
   /** The class of the lists `Arrays.asList` returns, which share their array's elements. */
   fixedSizeList: ClassInfo;
+  /** `TreeMap` and `TreeSet`, whose constructors take a `Comparator`. */
+  sortedClasses: ClassInfo[];
   collectionClass: ClassInfo;
   mapClass: ClassInfo;
   /** `Iterable.iterator`, which an enhanced for statement calls. */
@@ -102,7 +98,8 @@ export function defineCollections(
   const fixedSizeList = defineRestrictedList(context, 'ArrayList', lists, (method) => method.name !== 'set', 'Arrays$');
   const snapshotSet = defineSnapshot(context, 'Set', setClass, itrClass);
   const snapshotCollection = defineSnapshot(context, 'Collection', collectionClass, itrClass);
-  defineHashSet(context, setClass, collectionClass, itrClass);
+  for (const name of ['HashSet', 'LinkedHashSet', 'TreeSet'])
+    defineSetClass(context, name, setClass, collectionClass, itrClass);
   const mapClass = defineHashMap(context, { setClass, collectionClass, snapshotSet, snapshotCollection });
   return {
     iterableClass,
@@ -115,6 +112,7 @@ export function defineCollections(
     mapClass,
     immutableList,
     fixedSizeList,
+    sortedClasses: ['TreeMap', 'TreeSet'].map((name) => context.registry.classes.get(name) as ClassInfo),
   };
 }
 
@@ -285,6 +283,12 @@ function declareCollectionMethods(cls: ClassInfo, element: JavaType, context: Co
 }
 
 function declareListMethods(cls: ClassInfo, element: JavaType): void {
+  addAbstractMethod(cls, 'subList', [INT, INT], { kind: 'class', cls, args: [element] });
+  const objectType = element.kind === 'typeVar' ? (element.variable.bounds[0] as JavaType) : element;
+  addAbstractMethod(cls, 'toArray', [], { kind: 'array', element: objectType });
+  const arrayVariable: TypeVariable = { name: 'T', bounds: [objectType] };
+  const arrayType: JavaType = { kind: 'array', element: { kind: 'typeVar', variable: arrayVariable } };
+  addAbstractMethod(cls, 'toArray', [arrayType], arrayType).typeParameters = [arrayVariable];
   addAbstractMethod(cls, 'get', [INT], element);
   addAbstractMethod(cls, 'set', [INT, element], element);
   addAbstractMethod(cls, 'add', [INT, element], VOID);
@@ -377,6 +381,44 @@ function defineArrayList(
       return items.length > 0;
     }
   );
+  addMethod(
+    cls,
+    'subList',
+    [INT, INT],
+    { kind: 'class', cls: listClass, args: [element] },
+    false,
+    (frame, receiver, [from, to]) => {
+      const items = elementsOf(receiver);
+      const [start, end] = [from as number, to as number];
+      if (start < 0 || end > items.length || start > end) {
+        throwBuiltin(frame, 'IndexOutOfBoundsException', `fromIndex: ${start}, toIndex: ${end}, size: ${items.length}`);
+      }
+      // A copy stands for the view, which these programs read rather than write through.
+      frame.runtime.allocateArray(frame, end - start);
+      const list = frame.runtime.allocateObject(frame, cls);
+      list.elements = items.slice(start, end);
+      list.modCount = 0;
+      return list;
+    }
+  );
+  addMethod(cls, 'toArray', [], { kind: 'array', element: context.objectType }, false, (frame, receiver) => {
+    frame.runtime.allocateArray(frame, elementsOf(receiver).length);
+    return new JavaArray(context.objectType, [...elementsOf(receiver)]);
+  });
+  const arrayVariable: TypeVariable = { name: 'T', bounds: [context.objectType] };
+  const arrayType: JavaType = { kind: 'array', element: { kind: 'typeVar', variable: arrayVariable } };
+  const toTypedArray = addMethod(cls, 'toArray', [arrayType], arrayType, false, (frame, receiver, [array]) => {
+    if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
+    const items = elementsOf(receiver);
+    if (array.values.length < items.length) {
+      frame.runtime.allocateArray(frame, items.length);
+      return new JavaArray(array.elementType, [...items]);
+    }
+    array.values.splice(0, items.length, ...items);
+    if (array.values.length > items.length) array.values[items.length] = undefined;
+    return array;
+  });
+  toTypedArray.typeParameters = [arrayVariable];
   addMethod(cls, 'get', [INT], element, false, (frame, receiver, [index]) => {
     checkIndex(frame, index as number, elementsOf(receiver).length);
     return elementsOf(receiver)[index as number];
@@ -544,12 +586,23 @@ function defineSnapshot(context: Context, kind: string, parent: ClassInfo, itrCl
   return cls;
 }
 
-function defineHashSet(context: Context, setClass: ClassInfo, collectionClass: ClassInfo, itrClass: ClassInfo): void {
-  const cls = context.registry.define('HashSet', context.objectClass, 'java.util');
+function defineSetClass(
+  context: Context,
+  name: string,
+  setClass: ClassInfo,
+  collectionClass: ClassInfo,
+  itrClass: ClassInfo
+): void {
+  const cls = context.registry.define(name, context.objectClass, 'java.util');
   const [element] = addTypeParameters(cls, ['E'], context.objectType);
   addInterface(cls, classType(setClass, element));
   addConstructor(cls, [], (_, receiver) => createStore(receiver));
-  addConstructor(cls, [INT], (_, receiver, [capacity]) => createStore(receiver, tableSizeFor(capacity as number)));
+  if (name === 'TreeSet') {
+    addSortedConstructor(cls, element);
+    defineNavigation(cls, element, false);
+  } else {
+    addConstructor(cls, [INT], (_, receiver, [capacity]) => createStore(receiver, tableSizeFor(capacity as number)));
+  }
   addConstructor(
     cls,
     [classType(collectionClass, { kind: 'wildcard', bound: element, isSuper: false })],
@@ -626,7 +679,7 @@ function defineHashSet(context: Context, setClass: ClassInfo, collectionClass: C
     )
   );
   addMethod(cls, 'equals', [context.objectType], BOOLEAN, false, (frame, receiver, [other]) => {
-    if (!(other instanceof JavaObject) || !other.store || other.cls !== cls) return false;
+    if (!(other instanceof JavaObject) || !other.store || !other.cls.name.endsWith('Set')) return false;
     const entries = storeOf(receiver).entries;
     return (
       entries.length === other.store.entries.length &&
@@ -739,19 +792,11 @@ function defineMapMethods(
   }
 ): void {
   const { objectType } = context;
-  // A LinkedHashMap iterates in insertion order and a TreeMap in key order; a HashMap by bucket.
-  const ordered = (frame: Frame, receiver: Value): HashEntry[] => {
-    const store = storeOf(receiver);
-    if (name === 'LinkedHashMap') return store.entries;
-    if (name === 'TreeMap') return store.entries.toSorted((a, b) => compareNatural(frame, a.key, b.key));
-    return store.ordered();
-  };
-  const checkKey = (frame: Frame, keyValue: Value): void => {
-    // A TreeMap compares keys, so it rejects null and keys that are not comparable.
-    if (name === 'TreeMap') compareNatural(frame, keyValue, keyValue);
-  };
   addConstructor(cls, [], (_, receiver) => createStore(receiver));
-  if (name !== 'TreeMap') {
+  if (name === 'TreeMap') {
+    addSortedConstructor(cls, key);
+    defineNavigation(cls, key, true);
+  } else {
     addConstructor(cls, [INT], (_, receiver, [capacity]) => createStore(receiver, tableSizeFor(capacity as number)));
   }
   addConstructor(
@@ -772,12 +817,10 @@ function defineMapMethods(
     }
   );
   addMethod(cls, 'put', [key, value], value, false, (frame, receiver, [keyValue, newValue]) => {
-    checkKey(frame, keyValue);
     const previous = putEntry(frame, receiver, keyValue, false, newValue);
     return previous === NO_ENTRY ? undefined : previous;
   });
   addMethod(cls, 'putIfAbsent', [key, value], value, false, (frame, receiver, [keyValue, newValue]) => {
-    checkKey(frame, keyValue);
     const entry = findEntry(frame, receiver, keyValue);
     if (entry && entry.value !== undefined) return entry.value;
     if (entry) entry.value = newValue;
@@ -821,14 +864,18 @@ function defineMapMethods(
     snapshot(
       frame,
       views.snapshotSet,
-      ordered(frame, receiver).map((entry) => entry.key)
+      storeOf(receiver)
+        .ordered()
+        .map((entry) => entry.key)
     )
   );
   addMethod(cls, 'values', [], classType(views.collectionClass, value), false, (frame, receiver) =>
     snapshot(
       frame,
       views.snapshotCollection,
-      ordered(frame, receiver).map((entry) => entry.value)
+      storeOf(receiver)
+        .ordered()
+        .map((entry) => entry.value)
     )
   );
   addMethod(
@@ -841,18 +888,21 @@ function defineMapMethods(
       snapshot(
         frame,
         views.snapshotSet,
-        ordered(frame, receiver).map((entry) => {
-          const node = frame.runtime.allocateObject(frame, views.nodeClass);
-          nodeEntries.set(node, entry);
-          node.elements = [entry.key, entry.value];
-          return node;
-        })
+        storeOf(receiver)
+          .ordered()
+          .map((entry) => {
+            const node = frame.runtime.allocateObject(frame, views.nodeClass);
+            nodeEntries.set(node, entry);
+            node.elements = [entry.key, entry.value];
+            return node;
+          })
       )
   );
   addMethod(cls, 'toString', [], context.stringType, false, (frame, receiver) =>
     newString(
       frame,
-      `{${ordered(frame, receiver)
+      `{${storeOf(receiver)
+        .ordered()
         .map((entry) => `${describe(frame, entry.key, receiver)}=${describe(frame, entry.value, receiver)}`)
         .join(', ')}}`
     )
@@ -862,11 +912,101 @@ function defineMapMethods(
 
 const NO_ENTRY = Symbol('noEntry');
 
-function createStore(receiver: Value, capacity = 16): Value {
+/** `TreeMap(Comparator)` and `TreeSet(Comparator)`, which order the keys with the comparator. */
+function addSortedConstructor(cls: ClassInfo, key: JavaType): void {
+  // The functions are defined after the collections, so the comparator's type is looked up when the class is used.
+  const comparatorType: JavaType = {
+    kind: 'class',
+    cls: lazyComparator,
+    args: [{ kind: 'wildcard', bound: key, isSuper: true }],
+  };
+  addConstructor(cls, [comparatorType], (_, receiver, [comparator]) => createStore(receiver, 16, comparator));
+}
+
+/** A placeholder for `Comparator`, which `linkComparator` replaces once the functional interfaces exist. */
+const lazyComparator = createClass('Comparator', undefined, true);
+
+/** Points the sorted collections' constructors at the real `Comparator` interface. */
+export function linkComparator(collections: { sortedClasses: ClassInfo[] }, comparatorClass: ClassInfo): void {
+  for (const cls of collections.sortedClasses) {
+    for (const constructor of cls.constructors) {
+      constructor.parameterTypes = constructor.parameterTypes.map((type) =>
+        type.kind === 'class' && type.cls === lazyComparator ? { ...type, cls: comparatorClass } : type
+      );
+    }
+  }
+}
+
+function sortedKeys(receiver: Value): Value[] {
+  return storeOf(receiver).entries.map((entry) => entry.key);
+}
+
+/** The navigation methods of `TreeMap` (on keys) and `TreeSet`: the first and last keys and the nearest ones. */
+function defineNavigation(cls: ClassInfo, key: JavaType, isMap: boolean): void {
+  const suffix = isMap ? 'Key' : '';
+  for (const [name, isFirst] of [
+    ['first', true],
+    ['last', false],
+  ] as const) {
+    addMethod(cls, `${name}${suffix}`, [], key, false, (frame, receiver) => {
+      const all = sortedKeys(receiver);
+      if (all.length === 0) throwBuiltin(frame, 'NoSuchElementException');
+      return isFirst ? all[0] : all.at(-1);
+    });
+  }
+  for (const [name, accepts, fromEnd] of [
+    ['floor', (order: number) => order <= 0, true],
+    ['lower', (order: number) => order < 0, true],
+    ['ceiling', (order: number) => order >= 0, false],
+    ['higher', (order: number) => order > 0, false],
+  ] as const) {
+    addMethod(cls, `${name}${suffix}`, [key], key, false, (frame, receiver, [target]) => {
+      const { compare } = storeOf(receiver);
+      const all = fromEnd ? sortedKeys(receiver).toReversed() : sortedKeys(receiver);
+      return all.find((candidate) => accepts((compare as NonNullable<typeof compare>)(frame, candidate, target)));
+    });
+  }
+  if (isMap) return;
+  for (const [name, isFirst] of [
+    ['pollFirst', true],
+    ['pollLast', false],
+  ] as const) {
+    addMethod(cls, name, [], key, false, (frame, receiver) => {
+      const store = storeOf(receiver);
+      const entry = isFirst ? store.entries[0] : store.entries.at(-1);
+      if (!entry) return;
+      store.entries = store.entries.filter((other) => other !== entry);
+      touch(receiver);
+      return entry.key;
+    });
+  }
+}
+
+/** The order each hash-based class iterates in. */
+const STORE_ORDERS: Record<string, HashStore['order']> = {
+  HashMap: 'hash',
+  HashSet: 'hash',
+  LinkedHashMap: 'insertion',
+  LinkedHashSet: 'insertion',
+  TreeMap: 'sorted',
+  TreeSet: 'sorted',
+};
+
+/** Gives a new map or set its entries, which a sorted one compares with `comparator` or in natural order. */
+function createStore(receiver: Value, capacity = 16, comparator?: Value): Value {
+  const object = receiver as JavaObject;
   const store = new HashStore();
   store.capacity = capacity;
-  (receiver as JavaObject).store = store;
-  (receiver as JavaObject).modCount = 0;
+  store.order = STORE_ORDERS[object.cls.name] ?? 'hash';
+  if (store.order === 'sorted') {
+    store.compare =
+      comparator === undefined
+        ? compareNatural
+        : (frame, a, b) =>
+            callFunction(frame, frame.runtime.builtins.functions.comparatorClass, comparator, [a, b]) as number;
+  }
+  object.store = store;
+  object.modCount = 0;
   return undefined;
 }
 
@@ -899,8 +1039,12 @@ function storeOf(receiver: Value): HashStore {
 }
 
 export function findEntry(frame: Frame, receiver: Value, key: Value): HashStore['entries'][number] | undefined {
+  const store = storeOf(receiver);
+  const { compare } = store;
+  // A sorted map or set takes keys that compare as equal for the same key.
+  if (compare) return store.entries.find((entry) => compare(frame, key, entry.key) === 0);
   const hash = javaHash(frame, key);
-  return storeOf(receiver).entries.find((entry) => entry.hash === hash && javaEquals(frame, key, entry.key));
+  return store.entries.find((entry) => entry.hash === hash && javaEquals(frame, key, entry.key));
 }
 
 /** Adds or replaces an entry, returning the value it replaced or `NO_ENTRY`; a set keeps an existing entry. */
@@ -918,7 +1062,14 @@ export function putEntry(
     return previous;
   }
   frame.runtime.allocateArray(frame, 2);
-  storeOf(receiver).add({ key, value, hash: javaHash(frame, key) });
+  const store = storeOf(receiver);
+  const { compare } = store;
+  if (compare) {
+    // Comparing a key with itself rejects null and keys that are not comparable, even in an empty map.
+    compare(frame, key, key);
+    const index = store.entries.findIndex((other) => compare(frame, key, other.key) < 0);
+    store.entries.splice(index === -1 ? store.entries.length : index, 0, { key, value, hash: 0 });
+  } else store.add({ key, value, hash: javaHash(frame, key) });
   touch(receiver);
   return NO_ENTRY;
 }

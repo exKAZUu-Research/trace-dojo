@@ -186,7 +186,7 @@ function collectionNodeOf(object: JavaObject, seen: Set<unknown>): DisplayNode |
   }
   if (!object.store) return;
   const entries: Record<string, DisplayNode> = {};
-  const ordered = object.cls.name === 'LinkedHashMap' ? object.store.entries : object.store.ordered();
+  const ordered = object.store.ordered();
   for (const entry of ordered) entries[keyText(entry.key)] = displayNodeOf(entry.value, OBJECT, seen) ?? NULL_NODE;
   return { kind: 'object', entries };
 }

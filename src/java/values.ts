@@ -67,9 +67,17 @@ export interface HashEntry {
 export class HashStore {
   entries: HashEntry[] = [];
   capacity = 16;
+  /**
+   * How iteration orders the entries: by hash bucket as a `HashMap`, by insertion as a `LinkedHashMap`, or sorted by
+   * `compare` as a `TreeMap`, whose entries stay sorted as they are added.
+   */
+  order: 'hash' | 'insertion' | 'sorted' = 'hash';
+  /** For a sorted store, compares keys, which also decides which keys are the same. */
+  compare?: (frame: Frame, a: Value, b: Value) => number;
 
   /** The entries in the order Java's iteration visits them. */
   ordered(): HashEntry[] {
+    if (this.order !== 'hash') return this.entries;
     const mask = this.capacity - 1;
     const bucketOf = (entry: HashEntry): number => (entry.hash ^ (entry.hash >>> 16)) & mask;
     return this.entries.toSorted((a, b) => bucketOf(a) - bucketOf(b));

@@ -9,6 +9,10 @@ import { toInt32, toInt64 } from './values';
 export function defineMisc(registry: Registry, objectClass: ClassInfo, stringType: JavaType): void {
   defineObjects(registry, objectClass, stringType);
   defineRandom(registry, objectClass);
+  // Programs pause between turtle moves, which a trace shows step by step, so sleeping returns at once.
+  const thread = registry.define('Thread', objectClass);
+  const sleep = addMethod(thread, 'sleep', [LONG], VOID, true, () => {});
+  sleep.thrownTypes = [registry.classes.get('InterruptedException') as ClassInfo];
 }
 
 function defineObjects(registry: Registry, objectClass: ClassInfo, stringType: JavaType): void {

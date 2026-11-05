@@ -19,7 +19,7 @@ import {
   VOID,
   type WildcardType,
 } from './types';
-import { HashStore, JavaArray, JavaObject, type JavaString, toInt32, type Value } from './values';
+import { charCodeOf, HashStore, JavaArray, JavaObject, type JavaString, toInt32, type Value } from './values';
 
 /** The elements a stream yields, one at a time, as each stage pulls them from the stage before. */
 type Source = () => Iterator<Value>;
@@ -640,6 +640,12 @@ function defineSources(context: Context, streams: StreamTypes): void {
       return createStream(frame, streamImpl, () => [...items][Symbol.iterator]());
     }
   );
+  addMethod(registry.classes.get('String') as ClassInfo, 'chars', [], intStream.type, false, (frame, receiver) => {
+    const text = (receiver as JavaString).value;
+    return createStream(frame, intStreamImpl, function* () {
+      for (let index = 0; index < text.length; index++) yield charCodeOf(text, index);
+    });
+  });
   const ofVariable = typeVariable('T', objectType);
   const of = addMethod(
     stream,
