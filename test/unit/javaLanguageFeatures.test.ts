@@ -131,9 +131,15 @@ class Res implements AutoCloseable { final StringBuilder log; Res(StringBuilder 
   ],
   [
     'float formatting, relative format indices, array names, and copyOfRange failures',
-    'String formatted = String.format("%.2f %.1f %s %<s", 1.005f, 0.35f, "a"); boolean named = ("" + new String[0]).startsWith("[Ljava.lang.String;@"); String range = ""; try { Arrays.copyOfRange(new int[3], 0, -1); } catch (IllegalArgumentException e) { range = e.getMessage(); }',
+    'String rejected = ""; try { String.format("%-s", "a"); } catch (java.util.MissingFormatWidthException e) { rejected = e.getMessage(); } String radix = ""; try { Integer.parseInt("5", 40); } catch (NumberFormatException e) { radix = e.getMessage(); } String formatted = String.format("%.2f %.1f %s %<s", 1.005f, 0.35f, "a"); boolean named = ("" + new String[0]).startsWith("[Ljava.lang.String;@"); String range = ""; try { Arrays.copyOfRange(new int[3], 0, -1); } catch (IllegalArgumentException e) { range = e.getMessage(); }',
     {},
-    { formatted: '1.00 0.3 a a', named: true, range: '0 > -1' },
+    {
+      formatted: '1.00 0.3 a a',
+      named: true,
+      range: '0 > -1',
+      rejected: '%-s',
+      radix: 'radix 40 greater than Character.MAX_RADIX',
+    },
   ],
   [
     'StringBuffer, appendCodePoint, Class<Void>, and method reference null messages',

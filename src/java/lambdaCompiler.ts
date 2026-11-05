@@ -7,6 +7,7 @@ import { infer, inferFromTarget, memberBindings, methodView, rawify } from './co
 import { checkDefiniteAssignment } from './definiteAssignment';
 import { castOperation } from './operators';
 import { PatternCompiler } from './patternCompiler';
+import { type LambdaShape, lambdaShapeOf, passesFunction } from './polyExpressions';
 import { canCompleteNormally } from './reachability';
 import { type Frame, throwBuiltin } from './runtime';
 import {
@@ -42,6 +43,31 @@ const referenceLambdas = new WeakSet<Lambda>();
 
 /** Compiles lambdas and method references into objects of functional interfaces. */
 export abstract class LambdaCompiler extends PatternCompiler {
+  protected pendingFunctionType(
+    context: MethodContext,
+    expression: Extract<Expression, { kind: 'lambda' | 'methodRef' }>
+  ): JavaType {
+    if (expression.kind === 'methodRef') return { kind: 'pending', arity: undefined };
+    return { kind: 'pending', arity: expression.parameters.length, lambda: this.lambdaShape(context, expression) };
+  }
+
+  /**
+   * The shape of a lambda argument's body; a call in the body of a lambda without parameters is typed where the lambda
+   * stands, so that a call of a void method suits only a void function, as javac reads such a body.
+   */
+  private lambdaShape(context: MethodContext, expression: Extract<Expression, { kind: 'lambda' }>): LambdaShape {
+    const shape = lambdaShapeOf(expression);
+    const { body } = expression;
+    if (expression.parameters.length === 0 && body.kind === 'call' && !passesFunction(body)) {
+      try {
+        if (this.compileValue(context, body, true).type.kind === 'void') shape.inValue = false;
+      } catch (error) {
+        if (!(error instanceof CompileError)) throw error;
+      }
+    }
+    return shape;
+  }
+
   protected compileFunctional(
     context: MethodContext,
     expression: Extract<Expression, { kind: 'lambda' | 'methodRef' }>,

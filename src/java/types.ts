@@ -67,6 +67,11 @@ export type JavaType =
       polyErasure?: JavaType;
       /** The class a method reference such as `String::length` names, which the first parameter takes. */
       receiverHint?: JavaType;
+      /**
+       * For a lambda, whether its body suits a void function and a value-returning one, and whether its parameters'
+       * types are known, written or none, so that overload resolution reads its body (JLS 15.12.2.1, 15.12.2.5).
+       */
+      lambda?: { inVoid: boolean; inValue: boolean; isExplicit: boolean };
     };
 
 export const BYTE: JavaType = { kind: 'byte' };

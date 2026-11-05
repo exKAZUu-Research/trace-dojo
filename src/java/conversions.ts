@@ -37,7 +37,8 @@ function isPendingConvertible(builtins: Builtins, from: Extract<JavaType, { kind
   const method = bound.kind === 'class' ? functionalMethodOf(bound.cls, builtins.objectClass) : undefined;
   if (!method) return false;
   const count = method.parameterTypes.length;
-  return (from.arity === undefined || count === from.arity) && (from.arities?.includes(count) ?? true);
+  const fitsResult = !from.lambda || (method.returnType.kind === 'void' ? from.lambda.inVoid : from.lambda.inValue);
+  return fitsResult && (from.arity === undefined || count === from.arity) && (from.arities?.includes(count) ?? true);
 }
 
 /** The wrapper type that boxing gives a primitive value when the result then widens to `to`. */
@@ -465,4 +466,25 @@ export function mentionsHole(type: JavaType): boolean {
   if (type.kind === 'wildcard') return type.isHole === true || (type.bound !== undefined && mentionsHole(type.bound));
   if (type.kind === 'array') return mentionsHole(type.element);
   return type.kind === 'class' && (type.args?.some((arg) => mentionsHole(arg)) ?? false);
+}
+
+/**
+ * Whether `type` is more specific than `other` for an explicitly typed lambda argument because its function returns
+ * a value where the other's returns nothing (JLS 15.12.2.5).
+ */
+export function returnsForLambda(
+  builtins: Builtins,
+  arg: JavaType | undefined,
+  type: JavaType,
+  other: JavaType
+): boolean {
+  if (arg?.kind !== 'pending' || !arg.lambda?.isExplicit) return false;
+  const functionOf = (candidate: JavaType): MethodInfo | undefined => {
+    const bound = upperBound(candidate);
+    return bound.kind === 'class' ? functionalMethodOf(bound.cls, builtins.objectClass) : undefined;
+  };
+  const [mine, theirs] = [functionOf(type), functionOf(other)];
+  return (
+    mine !== undefined && theirs !== undefined && mine.returnType.kind !== 'void' && theirs.returnType.kind === 'void'
+  );
 }

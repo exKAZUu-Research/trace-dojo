@@ -397,6 +397,13 @@ function isDigit(point: number): boolean {
 
 function parseRadix(frame: Frame, text: Value, radix: number): number {
   const value = (text as JavaString | undefined)?.value;
+  // Java checks the radix after a null string and before the digits.
+  if (value !== undefined && radix < 2) {
+    throwBuiltin(frame, 'NumberFormatException', `radix ${radix} less than Character.MIN_RADIX`);
+  }
+  if (value !== undefined && radix > 36) {
+    throwBuiltin(frame, 'NumberFormatException', `radix ${radix} greater than Character.MAX_RADIX`);
+  }
   const parsed = value === undefined ? undefined : digitsValue(value, radix);
   if (parsed === undefined || parsed > 2_147_483_647 || parsed < -2_147_483_648) {
     return throwBuiltin(

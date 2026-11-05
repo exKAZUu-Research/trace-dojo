@@ -10,7 +10,14 @@ import {
   UNNAMED,
 } from './ast';
 import { box, boxedTypeOf, unbox } from './builtinWrappers';
-import { boxingTarget, instantiateMethod, isInvocationConvertible, mentionsHole, unboxedTypeOf } from './conversions';
+import {
+  boxingTarget,
+  instantiateMethod,
+  isInvocationConvertible,
+  mentionsHole,
+  returnsForLambda,
+  unboxedTypeOf,
+} from './conversions';
 import { type AssignmentFacts, declarationKey } from './definiteAssignment';
 import { nullMessage, type NullSource } from './nullMessages';
 import { castOperation, fitsIn } from './operators';
@@ -197,6 +204,12 @@ export abstract class CompilerBase extends TypeResolver {
     this.recordsSteps = options.trace !== undefined;
     this.atomicRows = new Set(options.trace?.atomicAnnotations.keys());
   }
+
+  /** The type of a lambda or method reference argument before overload resolution gives it a functional interface. */
+  protected abstract pendingFunctionType(
+    context: MethodContext,
+    expression: Extract<Expression, { kind: 'lambda' | 'methodRef' }>
+  ): JavaType;
 
   /**
    * @param allowsVoid Whether the value may be void, as an expression statement's is; the value is then discarded,
@@ -583,8 +596,7 @@ export abstract class CompilerBase extends TypeResolver {
   /** Compiles an argument, leaving a lambda or method reference to be typed once the method is chosen. */
   protected compileArgument(context: MethodContext, expression: Expression): CompiledValue {
     if (expression.kind === 'lambda' || expression.kind === 'methodRef') {
-      const arity = expression.kind === 'lambda' ? expression.parameters.length : undefined;
-      return { kind: 'value', type: { kind: 'pending', arity }, run: () => {} };
+      return { kind: 'value', type: this.pendingFunctionType(context, expression), run: () => {} };
     }
     // A conditional or switch expression of lambdas waits for the parameter type too, which its results then get.
     if (
@@ -742,7 +754,11 @@ export abstract class CompilerBase extends TypeResolver {
       applicable.every(
         (other) =>
           other === method ||
-          method.parameterTypes.every((type, index) => isWidening(type, other.parameterTypes[index], objectClass))
+          method.parameterTypes.every(
+            (type, index) =>
+              isWidening(type, other.parameterTypes[index], objectClass) ||
+              returnsForLambda(this.builtins, argTypes[index], type, other.parameterTypes[index])
+          )
       )
     );
     if (mostSpecific.length !== 1) return this.error(span, `${what} の呼び出しがあいまいです。`);

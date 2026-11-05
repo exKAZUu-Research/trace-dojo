@@ -11,6 +11,7 @@ export function formatText(frame: Frame, pattern: string, args: Value[]): string
   // `%<s` takes the argument the previous specifier took.
   let previous: number | undefined;
   frame.runtime.scanString(pattern.length);
+  checkSpecifiers(frame, pattern);
   const result = pattern.replaceAll(
     SPECIFIER,
     (
@@ -42,6 +43,33 @@ export function formatText(frame: Frame, pattern: string, args: Value[]): string
     throwBuiltin(frame, 'UnknownFormatConversionException', "Conversion = '%'");
   }
   return result;
+}
+
+/** Parses every specifier, rejecting a malformed one, before any argument is formatted, as Java's Formatter does. */
+function checkSpecifiers(frame: Frame, pattern: string): void {
+  for (const match of pattern.matchAll(SPECIFIER)) checkSpecifier(frame, match);
+}
+
+/**
+ * Rejects what Formatter's parser rejects: a precision for an integer or character conversion, a `-` flag, or a `0`
+ * flag of a numeric conversion, without a width, and a `0` flag of a general or character conversion.
+ */
+function checkSpecifier(
+  frame: Frame,
+  [specifier, , flags = '', width, precision, conversion = '']: RegExpExecArray
+): void {
+  const lower = conversion.toLowerCase();
+  if (lower === 'n') return;
+  if (precision && 'dxoc'.includes(lower)) {
+    throwBuiltin(frame, 'IllegalFormatPrecisionException', precision.slice(1));
+  }
+  const isNumeric = 'dxoefg'.includes(lower);
+  if (!width && (flags.includes('-') || (isNumeric && flags.includes('0')))) {
+    throwBuiltin(frame, 'MissingFormatWidthException', specifier);
+  }
+  if ('sbhc'.includes(lower) && flags.includes('0')) {
+    throwBuiltin(frame, 'FormatFlagsConversionMismatchException', `Conversion = ${conversion}, Flags = 0`);
+  }
 }
 
 function pad(text: string, flags: string, width: string | undefined): string {

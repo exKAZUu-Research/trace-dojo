@@ -268,6 +268,8 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
     'IllegalFormatConversionException',
     'FormatFlagsConversionMismatchException',
     'IllegalFormatCodePointException',
+    'MissingFormatWidthException',
+    'IllegalFormatPrecisionException',
   ]) {
     defineThrowable(name, illegalFormat, 'java.util');
   }
