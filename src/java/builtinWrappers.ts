@@ -1,6 +1,7 @@
 import {
   addAbstractMethod,
   addConstant,
+  addConstructor,
   addInterface,
   addMethod,
   addTypeParameters,
@@ -122,7 +123,33 @@ export function defineWrappers(registry: Registry, objectClass: ClassInfo, strin
   defineDoubleMembers(byKind.get('double') as ClassInfo, stringType);
   defineCharacterMembers(byKind.get('char') as ClassInfo);
   defineBooleanMembers(byKind.get('boolean') as ClassInfo, stringType);
+  for (const cls of byKind.values()) defineWrapperConstructors(cls, stringType);
   return { byKind, numberClass, comparableClass, compareTo };
+}
+
+function setBoxed(receiver: Value, value: Value): undefined {
+  (receiver as JavaObject).boxed = value as number | bigint | boolean;
+  return undefined;
+}
+
+/**
+ * The constructors that Java deprecates for removal but still compiles, which older textbooks use and which create
+ * an object distinct from every other, unlike `valueOf`.
+ */
+function defineWrapperConstructors(cls: ClassInfo, stringType: JavaType): void {
+  addConstructor(cls, [cls.unboxedType as JavaType], (_, receiver, [value]) => setBoxed(receiver, value));
+  const parse = cls.methods.find(
+    (method) =>
+      method.isStatic &&
+      (method.name === 'valueOf' || method.name.startsWith('parse')) &&
+      method.parameterTypes.length === 1 &&
+      method.parameterTypes[0] === stringType
+  )?.native;
+  if (!parse) return;
+  addConstructor(cls, [stringType], (frame, receiver, [text]) => {
+    const parsed = parse(frame, undefined, [text]);
+    return setBoxed(receiver, parsed instanceof JavaObject ? parsed.boxed : parsed);
+  });
 }
 
 /** The members every wrapper has: boxing and unboxing, comparisons, and conversions to text. */

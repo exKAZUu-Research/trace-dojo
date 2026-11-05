@@ -166,3 +166,7 @@ public class Main {
 }`;
   expect(traceProgram('java', program, program).finalVars).toEqual({ count: 3, kind: 'right', size: 8 });
 });
+
+test('Java concatenates numbers and characters onto a String with +=', () => {
+  expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
+});

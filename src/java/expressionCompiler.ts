@@ -33,7 +33,6 @@ import {
   NULL,
   sameType,
   typeName,
-  VOID,
 } from './types';
 import {
   charToString,
@@ -349,7 +348,7 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
     const operator = expression.operator.slice(0, -1) as BinaryOperator;
     // A wrapper variable is unboxed for the operation and its result boxed again, except for string concatenation.
     const isStringTarget = type.kind === 'class' && type.cls === this.builtins.stringClass;
-    const { unbox: unboxTarget, rebox, primitiveType } = this.wrapperAccess(isStringTarget ? undefined : type);
+    const { unbox: unboxTarget, rebox, primitiveType } = this.wrapperAccess(type);
     const right = isStringTarget ? value : this.operand(value);
     const operation = this.binaryOperation(expression, operator, primitiveType, right.type);
     const narrow = this.castOperation(operation.type, primitiveType, expression);
@@ -404,16 +403,15 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
   }
 
   /** How an operator reads and writes a variable of `type`: through unboxing and boxing when it is a wrapper. */
-  protected wrapperAccess(type: JavaType | undefined): {
+  protected wrapperAccess(type: JavaType): {
     unbox: (frame: Frame, value: Value) => Value;
     rebox: (frame: Frame, value: Value) => Value;
     primitiveType: JavaType;
   } {
-    const unboxedType = type && unboxedTypeOf(type);
+    const unboxedType = unboxedTypeOf(type);
     const boxType = unboxedType && boxedTypeOf(this.builtins.wrappers, unboxedType);
-    if (!type || !unboxedType || !boxType) {
-      return { unbox: (_, value) => value, rebox: (_, value) => value, primitiveType: type ?? VOID };
-    }
+    if (!unboxedType || !boxType)
+      return { unbox: (_, value) => value, rebox: (_, value) => value, primitiveType: type };
     return {
       unbox: (frame, value) => unbox(frame, value),
       rebox: (frame, value) => box(frame, boxType.cls, value),
