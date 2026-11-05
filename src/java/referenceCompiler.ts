@@ -107,6 +107,8 @@ export abstract class ReferenceCompiler extends CompilerBase {
       run: (frame) => bound(frame).get(),
       constant: reference.constant,
       source: reference.source,
+      // A generic field read by its simple name is cast to its instantiated type as `this.value` would be.
+      erasedType: reference.erasedType,
     };
   }
 

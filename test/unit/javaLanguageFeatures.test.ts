@@ -148,6 +148,15 @@ class Res implements AutoCloseable { final StringBuilder log; Res(StringBuilder 
     { built: 'xB2', npe: 'null' },
   ],
   [
+    'a generic field read by its simple name in a subclass',
+    'Child child = new Child(); Parent raw = child; raw.value = 1; String read = ""; try { read = child.read(); } catch (ClassCastException e) { read = "cce"; }',
+    {
+      declarations:
+        'class Parent<T> { T value; }\nclass Child extends Parent<String> { String read() { return value; } }',
+    },
+    { read: 'cce' },
+  ],
+  [
     'Map.replaceAll and the locale-taking text overloads',
     'Map<String, Integer> m = new TreeMap<>(Map.of("a", 1, "b", 2)); m.replaceAll((k, v) -> v * 10); String replaced = m.toString(); String localized = "ABC".toLowerCase(Locale.ROOT) + String.format(Locale.US, "%.2f", 1.5) + Locale.JAPAN;',
     {},
