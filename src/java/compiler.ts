@@ -23,7 +23,8 @@ import {
 } from './compilerBase';
 import { memberBindings, methodView } from './conversions';
 import { DeclarationCompiler } from './declarations';
-import { checkDefiniteAssignment, checkInitialization } from './definiteAssignment';
+import { checkDefiniteAssignment } from './definiteAssignment';
+import { checkInitialization } from './initializationCheck';
 import { canCompleteNormally } from './reachability';
 import { type Frame, type Slot, UNASSIGNED } from './runtime';
 import { isObjectCreation } from './stepRules';
@@ -125,7 +126,11 @@ class Compiler extends DeclarationCompiler {
       ...this.compileInitializers(staticContext, cls, true),
     ];
     // Definite assignment reads the constants that compiling the initializers records.
-    checkInitialization({ ...this.initializationOf(cls, true), span: cls.declaration as ClassDeclaration });
+    const notEffectivelyFinal = checkInitialization({
+      ...this.initializationOf(cls, true),
+      span: cls.declaration as ClassDeclaration,
+    });
+    this.checkCaptures(staticContext, notEffectivelyFinal);
     if (staticInitializers.length > 0) {
       const locals = staticContext.locals;
       cls.initializeStatics = (frame) => {
@@ -231,7 +236,7 @@ class Compiler extends DeclarationCompiler {
       this.declareLocal(context, parameter, parameter.name, method.parameterTypes[index]);
     }
     const body = this.compileBlock(context, member.body, false);
-    checkDefiniteAssignment(member.parameters, member.body);
+    this.checkCaptures(context, checkDefiniteAssignment(member.parameters, member.body));
     if (method.returnType.kind !== 'void' && canCompleteNormally(member.body)) {
       this.error({ ...member.body, row: member.body.endRow }, `メソッド ${method.name} に return 文がありません。`);
     }
@@ -413,11 +418,12 @@ class Compiler extends DeclarationCompiler {
     // A constructor that delegates to this(...) leaves the initializers to the constructor it calls.
     const initializers = callsThis ? [] : this.compileInitializers(context, cls, false);
     const body = declaration ? this.compileBlock(context, declaration.body, false) : undefined;
-    checkInitialization({
+    const notEffectivelyFinal = checkInitialization({
       ...this.initializationOf(cls, false),
       constructorDeclaration: declaration,
       span: declaration ?? (cls.declaration as ClassDeclaration),
     });
+    this.checkCaptures(context, notEffectivelyFinal);
     constructor.code = {
       locals: context.locals,
       run: (frame) => {

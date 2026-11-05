@@ -178,3 +178,23 @@ test("Java's map views follow later changes to the map and remove the entries be
     )
   ).toEqual({ seen: '[b][2]' });
 });
+
+test('Java captures a local assigned once on each branch, and evaluates a bound method reference once', () => {
+  expect(
+    finalVarsOf(
+      'int x; if (args.length == 0) x = 1; else x = 2; Supplier<Integer> f = () -> x * 10; int got = f.get(); StringBuilder sb = new StringBuilder("a"); Supplier<String> s = sb::toString; sb = new StringBuilder("b"); String kept = s.get();'
+    )
+  ).toEqual({ x: 1, got: 10, kept: 'a' });
+});
+
+test.each([
+  ['an Optional', 'Optional<Turtle> held = Optional.of(new Turtle());', ''],
+  [
+    'a value returned while resources close',
+    'Turtle t = make(); t.前に進む();',
+    'static class R implements AutoCloseable { public void close() { int[] junk = new int[100]; } }\nstatic Turtle make() { try (R r = new R()) { return new Turtle(); } }',
+  ],
+])('a turtle that %s holds stays on the board', (_, body, members) => {
+  const program = `import java.util.*;\npublic class Main {\n${members}\n  public static void main(String[] args) {\n${body}\n  }\n}`;
+  expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', finalTurtles: [expect.anything()] });
+});

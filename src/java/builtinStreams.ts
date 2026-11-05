@@ -1,10 +1,10 @@
-import { type Collections, compareNatural, itemsOf, javaEquals } from './builtinCollections';
+import { type Collections, compareNatural, itemsOf, javaEquals, javaHash } from './builtinCollections';
 import { collectors, defineCollectors } from './builtinCollectors';
 import { callFunction, type Functions } from './builtinFunctions';
 import { stringify } from './builtins';
 import { classType, type Context, extendsOf, superOf, typeVariable, variableType } from './builtinStreamSupport';
 import { addMethod, defineInterface, newString, type Registry } from './builtinSupport';
-import { box, type Wrappers } from './builtinWrappers';
+import { box, hashOf, type Wrappers } from './builtinWrappers';
 import { type Frame, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
@@ -60,9 +60,12 @@ interface Optionals {
 
 const optionalValues = new WeakMap<JavaObject, { isPresent: boolean; value: Value }>();
 
+/** An optional holding `value` when `isPresent`, which, as Java's do, cannot hold null. */
 function createOptional(frame: Frame, cls: ClassInfo, value: Value, isPresent = value !== undefined): JavaObject {
+  if (isPresent && value === undefined) throwBuiltin(frame, 'NullPointerException');
   const object = frame.runtime.allocateObject(frame, cls);
   optionalValues.set(object, { isPresent, value });
+  object.retained = [value];
   return object;
 }
 
@@ -77,7 +80,7 @@ function get(frame: Frame, receiver: Value): Value {
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- One registration per builtin method, each a small native.
-// code-gauge-allow functionNcss 45 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 46 -- One registration per builtin method, each a small native.
 function defineOptionals(context: Context): Optionals {
   const { registry, objectType, stringType } = context;
   const optional = registry.define('Optional', context.objectClass, 'java.util');
@@ -141,6 +144,7 @@ function defineOptionals(context: Context): Optionals {
       const [a, b] = [stateOf(receiver), stateOf(other)];
       return a.isPresent === b.isPresent && (Object.is(a.value, b.value) || javaEquals(frame, a.value, b.value));
     });
+    addMethod(cls, 'hashCode', [], INT, false, (frame, receiver) => optionalHash(frame, receiver, valueType));
   }
   const consumer = context.fn('Consumer');
   addMethod(optional, 'ifPresent', [classType(consumer, superOf(tType))], VOID, false, (frame, receiver, [action]) => {
@@ -169,6 +173,15 @@ function defineOptionals(context: Context): Optionals {
     optionalInt: registry.classes.get('OptionalInt') as ClassInfo,
     optionalDouble: registry.classes.get('OptionalDouble') as ClassInfo,
   };
+}
+
+/** The hash of an optional's value as its wrapper or `hashCode` gives it, or 0 when it is empty. */
+function optionalHash(frame: Frame, receiver: Value, valueType: JavaType): number {
+  const { isPresent, value } = stateOf(receiver);
+  if (!isPresent || value === undefined) return 0;
+  return valueType === INT || valueType === DOUBLE
+    ? hashOf(value, valueType.kind as 'int' | 'double')
+    : javaHash(frame, value);
 }
 
 /** `Optional`'s methods that take functions for the value or its absence. */
@@ -220,9 +233,11 @@ interface StreamTypes {
   intStreamImpl: ClassInfo;
 }
 
-function createStream(frame: Frame, cls: ClassInfo, source: Source): JavaObject {
+/** A stream of the elements `source` yields, which keeps alive the objects in `retained` that hold its elements. */
+function createStream(frame: Frame, cls: ClassInfo, source: Source, retained: Value[] = []): JavaObject {
   const object = frame.runtime.allocateObject(frame, cls);
   sources.set(object, { source, isUsed: false });
+  object.retained = retained;
   return object;
 }
 
@@ -260,7 +275,7 @@ function derive(
   transform: (items: Iterator<Value>) => Iterator<Value>
 ): JavaObject {
   const upstream = take(frame, receiver);
-  return createStream(frame, cls, () => transform(upstream));
+  return createStream(frame, cls, () => transform(upstream), [receiver]);
 }
 
 function defineStreamTypes(context: Context, optionals: Optionals, collector: ClassInfo): StreamTypes {
@@ -658,7 +673,7 @@ function defineSources(context: Context, streams: StreamTypes): void {
     false,
     (frame, receiver) => {
       const items = itemsOf(frame, receiver);
-      return createStream(frame, streamImpl, () => [...items][Symbol.iterator]());
+      return createStream(frame, streamImpl, () => [...items][Symbol.iterator](), [receiver]);
     }
   );
   const ofVariable = typeVariable('T', objectType);
@@ -670,7 +685,7 @@ function defineSources(context: Context, streams: StreamTypes): void {
     true,
     (frame, _, [array]) => {
       const values = (array as JavaArray).values;
-      return createStream(frame, streamImpl, () => values[Symbol.iterator]());
+      return createStream(frame, streamImpl, () => values[Symbol.iterator](), [array]);
     }
   );
   of.typeParameters = [ofVariable];
@@ -715,7 +730,7 @@ function defineSources(context: Context, streams: StreamTypes): void {
     true,
     (frame, _, [array]) => {
       if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
-      return createStream(frame, streamImpl, () => [...array.values][Symbol.iterator]());
+      return createStream(frame, streamImpl, () => [...array.values][Symbol.iterator](), [array]);
     }
   );
   arrayStream.typeParameters = [arrayVariable];

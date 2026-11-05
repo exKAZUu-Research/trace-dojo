@@ -389,7 +389,7 @@ export abstract class StatementCompiler extends InvocationCompiler {
     } else {
       const type = this.withDimensions(this.resolveType(statement.type), declarator.extraDimensions);
       // The variable's scope includes its own initializer, where it shadows a field of the same name.
-      slot = this.declareLocal(context, declarator, declarator.name, type, initializer !== undefined);
+      slot = this.declareLocal(context, declarator, declarator.name, type);
       if (initializer?.kind === 'arrayInitializer') {
         return { slot, value: this.compileArrayInitializer(context, initializer, type) };
       }

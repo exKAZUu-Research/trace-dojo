@@ -11,7 +11,7 @@ export interface Conditional {
   whenFalse: State;
 }
 
-/** A loop being analyzed, with the assignments in it to finals declared before it. */
+/** The state at a point that execution cannot reach. */
 export const UNREACHABLE: State = { assigned: undefined, possiblyAssigned: new Set() };
 
 /** The simple names that `node` assigns or increments anywhere. */

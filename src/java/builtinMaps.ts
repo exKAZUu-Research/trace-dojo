@@ -157,11 +157,7 @@ function defineSetClass(
       entries.every((entry) => findEntry(frame, other, entry.key) !== undefined)
     );
   });
-  addMethod(cls, 'hashCode', [], INT, false, (_, receiver) => {
-    let sum = 0;
-    for (const entry of storeOf(receiver).entries) sum = toInt32(sum + entry.hash);
-    return sum;
-  });
+  addMethod(cls, 'hashCode', [], INT, false, (frame, receiver) => sumOfHashes(frame, storeOf(receiver).entries));
   linkOverrides(cls);
   return cls;
 }
@@ -199,6 +195,13 @@ export function defineHashMap(
   defineMapEntry(mapClass, entryClass, nodeClass, objectType);
   const immutableMap = defineClass('MapN', 'ImmutableCollections$MapN');
   return { mapClass, immutableMap: restrictToImmutable(registry, immutableMap, 'MapN') };
+}
+
+/** The sum of the elements' hashes that `Set.hashCode` specifies, which a sorted set's entries do not record. */
+function sumOfHashes(frame: Frame, entries: HashStore['entries']): number {
+  let sum = 0;
+  for (const { key } of entries) sum = toInt32(sum + (key === undefined ? 0 : javaHash(frame, key)));
+  return sum;
 }
 
 /** A view of a map's keys, values, or entries, which follows the map's changes and removes the entries it loses. */
@@ -443,6 +446,17 @@ export function defineEntryNode(context: Context, entryClass: ClassInfo): ClassI
       `${describe(frame, entryOf(receiver).key, receiver)}=${describe(frame, entryOf(receiver).value, receiver)}`
     )
   );
+  // An entry equals any entry with equal key and value, and hashes as `Map.Entry` specifies.
+  addMethod(cls, 'equals', [context.objectType], BOOLEAN, false, (frame, receiver, [other]) => {
+    if (!frame.runtime.isInstance(other, entryClass)) return false;
+    const { key, value } = entryOf(receiver);
+    const read = (name: string): Value => frame.runtime.invokeVirtual(frame, entryClass, name, other, []);
+    return javaEquals(frame, key, read('getKey')) && javaEquals(frame, value, read('getValue'));
+  });
+  addMethod(cls, 'hashCode', [], INT, false, (frame, receiver) => {
+    const { key, value } = entryOf(receiver);
+    return (key === undefined ? 0 : javaHash(frame, key)) ^ (value === undefined ? 0 : javaHash(frame, value));
+  });
   linkOverrides(cls);
   return cls;
 }

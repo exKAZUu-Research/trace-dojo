@@ -21,6 +21,8 @@ export class JavaObject {
   outer?: JavaObject;
   /** The enclosing method's locals that a local or anonymous class's instance reads. */
   capturedLocals?: Value[];
+  /** What a builtin object holds outside its fields, such as an Optional's value or a stream's source. */
+  retained?: Value[];
   /** The elements of a builtin list or the items an iterator walks over. */
   elements?: Value[];
   /** The entries of a builtin hash map or set. */

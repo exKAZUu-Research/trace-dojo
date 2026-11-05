@@ -9,6 +9,7 @@ import {
 } from './ast';
 import { box, boxedTypeOf, unbox } from './builtinWrappers';
 import { boxingTarget, instantiateMethod, isInvocationConvertible, unboxedTypeOf } from './conversions';
+import { declarationKey } from './definiteAssignment';
 import { nullMessage, type NullSource } from './nullMessages';
 import { fitsIn } from './operators';
 import { type Frame } from './runtime';
@@ -128,12 +129,12 @@ export interface MethodContext {
   enclosing: MethodContext | undefined;
   /** For a lambda body, the enclosing locals it reads, which the lambda copies when it is created. */
   captures: Capture[];
-  /** The locals that a lambda or a local class reads, with which reads them, which may not be assigned again. */
-  capturedSlots: Map<number, string>;
-  /** How many times each local is assigned after its declaration. */
+  /** The locals that a lambda or a local class reads, with what reads them and where, which must be effectively final. */
+  capturedSlots: Map<number, { reader: string; span: Span }>;
+  /** The keys by which definite assignment analysis identifies the locals declared in the source. */
+  declarationKeys: Map<number, string>;
+  /** How many times each local is assigned after its declaration, which decides for a pattern variable. */
   assignmentCounts: Map<number, number>;
-  /** The locals declared without an initializer, which one assignment may initialize and still be effectively final. */
-  uninitializedSlots: Set<number>;
   /** For a lambda body, the types of the values it returns, from which a generic method infers its result. */
   returnedTypes?: JavaType[];
 }
@@ -236,8 +237,8 @@ export abstract class CompilerBase extends TypeResolver {
       enclosing: undefined,
       captures: [],
       capturedSlots: new Map(),
+      declarationKeys: new Map(),
       assignmentCounts: new Map(),
-      uninitializedSlots: new Set(),
     };
   }
 
@@ -258,13 +259,7 @@ export abstract class CompilerBase extends TypeResolver {
     return !['RuntimeException', 'Error'].some((name) => isSubclass(cls, this.builtins.classes.get(name) as ClassInfo));
   }
 
-  protected declareLocal(
-    context: MethodContext,
-    span: Span,
-    name: string,
-    type: JavaType,
-    isInitialized = true
-  ): number {
+  protected declareLocal(context: MethodContext, span: Span, name: string, type: JavaType): number {
     // An unnamed variable (`_`) takes a slot under no name, so that any number of them never clash nor are read.
     const isNamed = name !== UNNAMED;
     // A lambda's locals may not hide the locals of the code around it.
@@ -278,7 +273,7 @@ export abstract class CompilerBase extends TypeResolver {
     const scope = context.scopes.at(-1) as Scope;
     if (isNamed) scope.names.set(name, slot);
     scope.slots.push(slot);
-    if (!isInitialized) context.uninitializedSlots.add(slot);
+    context.declarationKeys.set(slot, declarationKey(name, span));
     return slot;
   }
 
@@ -313,9 +308,12 @@ export abstract class CompilerBase extends TypeResolver {
       const outerIndex = outerCapture.index;
       return { ...outerCapture.capture, read: (frame) => frame.captured[outerIndex] };
     }
-    const allowed = defining.uninitializedSlots.has(slot) ? 1 : 0;
-    if ((defining.assignmentCounts.get(slot) ?? 0) > allowed) this.error(span, capturedAssignmentMessage(name, reader));
-    defining.capturedSlots.set(slot, reader);
+    // Definite assignment analysis decides for a declared local once the method is compiled; see checkCaptures.
+    const isPatternVariable = !defining.declarationKeys.has(slot);
+    if (isPatternVariable && (defining.assignmentCounts.get(slot) ?? 0) > 0) {
+      this.error(span, capturedAssignmentMessage(name, reader));
+    }
+    if (!defining.capturedSlots.has(slot)) defining.capturedSlots.set(slot, { reader, span });
     return {
       name,
       type: defining.locals[slot].type,
@@ -324,10 +322,25 @@ export abstract class CompilerBase extends TypeResolver {
     };
   }
 
+  /**
+   * Rejects a lambda or a local class that reads a local which definite assignment analysis found not effectively
+   * final in the code that declares it.
+   */
+  protected checkCaptures(context: MethodContext, notEffectivelyFinal: ReadonlySet<string>): void {
+    for (const [slot, { reader, span }] of context.capturedSlots) {
+      const key = context.declarationKeys.get(slot);
+      if (key !== undefined && notEffectivelyFinal.has(key)) {
+        this.error(span, capturedAssignmentMessage(context.locals[slot].name, reader));
+      }
+    }
+  }
+
   /** Records an assignment to a local, which a lambda that reads it forbids. */
   protected recordAssignment(context: MethodContext, span: Span, slot: number): void {
-    const reader = context.capturedSlots.get(slot);
-    if (reader) this.error(span, capturedAssignmentMessage(context.locals[slot].name, reader));
+    const captured = context.capturedSlots.get(slot);
+    if (captured && !context.declarationKeys.has(slot)) {
+      this.error(span, capturedAssignmentMessage(context.locals[slot].name, captured.reader));
+    }
     context.assignmentCounts.set(slot, (context.assignmentCounts.get(slot) ?? 0) + 1);
   }
 

@@ -50,7 +50,10 @@ class Snapshotter {
     for (const [slot, local] of frame.localInfos.entries()) {
       const value = frame.locals[slot];
       // `main`'s parameter only receives the launcher's arguments, which these programs never use.
-      if (value === UNASSIGNED || (hidesArgs && slot === 0) || local.name === UNNAMED) continue;
+      // Unnamed variables and the compiler's own locals, whose names start with NUL, are no variables of the program.
+      if (value === UNASSIGNED || (hidesArgs && slot === 0) || local.name === UNNAMED || local.name.startsWith('\0')) {
+        continue;
+      }
       addVariable(variables, local.name, value, local.type);
     }
     if (!withContext) return variables;

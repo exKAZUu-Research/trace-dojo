@@ -292,7 +292,13 @@ function markReachable(roots: Value[]): { reached: Set<JavaObject | JavaArray>; 
 /** The values an object keeps alive: its fields and what builtin objects hold outside them. */
 function referencesOf(object: JavaObject): Value[] {
   const references: Value[] = [...object.fields, object.cause, object.outer, object.function?.outerThis];
-  for (const values of [object.suppressed, object.capturedLocals, object.function?.captured, object.elements]) {
+  for (const values of [
+    object.suppressed,
+    object.capturedLocals,
+    object.function?.captured,
+    object.elements,
+    object.retained,
+  ]) {
     // Pushed one by one: spreading a large array into push() exceeds the engine's argument limit.
     for (const value of values ?? []) references.push(value);
   }

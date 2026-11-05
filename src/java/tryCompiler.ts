@@ -102,7 +102,13 @@ export abstract class TryCompiler extends SwitchCompiler {
         if (!(error instanceof JavaThrow)) throw error;
         primary = error;
       }
-      primary = closeResources(frame, opened, resources, primary);
+      // The pending return value or exception stays reachable while the resources' close() methods run.
+      frame.temporaries.push(completion?.kind === 'return' ? completion.value : primary?.value);
+      try {
+        primary = closeResources(frame, opened, resources, primary);
+      } finally {
+        frame.temporaries.pop();
+      }
       if (primary) throw primary;
       return completion;
     };

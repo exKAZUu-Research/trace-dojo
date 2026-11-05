@@ -7,6 +7,7 @@ import { infer, memberBindings, methodView, rawify } from './conversions';
 import { checkDefiniteAssignment } from './definiteAssignment';
 import { PatternCompiler } from './patternCompiler';
 import { canCompleteNormally } from './reachability';
+import { throwBuiltin } from './runtime';
 import {
   type ClassInfo,
   type ClassType,
@@ -37,9 +38,46 @@ export abstract class LambdaCompiler extends PatternCompiler {
     target: JavaType
   ): CompiledValue {
     const functionType = this.functionTypeOf(expression, target);
+    if (expression.kind === 'methodRef' && this.isBoundReference(context, expression)) {
+      return { ...this.compileBoundReference(context, expression, functionType), type: target };
+    }
     const lambda =
       expression.kind === 'lambda' ? expression : this.expandMethodReference(context, expression, functionType);
     return { ...this.compileLambda(context, lambda, functionType), type: target };
+  }
+
+  /** Whether a method reference names a method of a value, as `list::add` does, rather than of a type. */
+  protected isBoundReference(context: MethodContext, reference: MethodReference): boolean {
+    return (
+      reference.name !== 'new' &&
+      'expression' in reference.target &&
+      !this.namesType(context, reference.target.expression)
+    );
+  }
+
+  /**
+   * Compiles `expression::method`, which evaluates the expression once, when the reference is created, and fails
+   * there for null (JLS 15.13.3); the function then calls the method on that value, held in a local of its own.
+   */
+  protected compileBoundReference(
+    context: MethodContext,
+    reference: MethodReference,
+    functionType: FunctionType
+  ): CompiledValue {
+    const receiver = this.compileValue(context, (reference.target as { expression: Expression }).expression);
+    const name = `\0receiver${context.locals.length}`;
+    const slot = this.declareLocal(context, reference, name, receiver.type);
+    const lambda = this.expandMethodReference(context, reference, functionType, name);
+    const created = this.compileLambda(context, lambda, functionType);
+    return {
+      ...created,
+      run: (frame) => {
+        const value = receiver.run(frame);
+        if (value === undefined) throwBuiltin(frame, 'NullPointerException');
+        frame.locals[slot] = value;
+        return created.run(frame);
+      },
+    };
   }
 
   protected functionTypeOf(span: Span, target: JavaType): FunctionType {
@@ -139,7 +177,7 @@ export abstract class LambdaCompiler extends PatternCompiler {
         type: parameter.type ?? { kind: 'var', ...parameter },
         isVarargs: false,
       }));
-      checkDefiniteAssignment(parameters, body);
+      this.checkCaptures(context, checkDefiniteAssignment(parameters, body));
       if (returnType.kind !== 'void' && canCompleteNormally(body)) {
         this.error(
           { ...body, row: body.endRow },
@@ -242,7 +280,8 @@ export abstract class LambdaCompiler extends PatternCompiler {
   protected expandMethodReference(
     context: MethodContext,
     reference: MethodReference,
-    functionType: FunctionType
+    functionType: FunctionType,
+    receiverLocal?: string
   ): Lambda {
     const span: Span = { row: reference.row, endRow: reference.endRow, start: reference.start, end: reference.end };
     const parameters = functionType.parameterTypes.map((_, index) => ({
@@ -274,9 +313,7 @@ export abstract class LambdaCompiler extends PatternCompiler {
       }
       return lambdaOf({ kind: 'new', type: targetType, args, ...span });
     }
-    const receiver: Expression = targetType
-      ? { kind: 'typeRef', type: targetType, ...span }
-      : (target as { expression: Expression }).expression;
+    const receiver = referenceReceiver(reference, span, receiverLocal);
     const isTypeName = targetType !== undefined || this.namesType(context, receiver);
     const staticForm = lambdaOf({ kind: 'call', object: receiver, name: reference.name, args, ...span });
     if (!isTypeName) return staticForm;
@@ -314,6 +351,13 @@ export abstract class LambdaCompiler extends PatternCompiler {
       throw error;
     }
   }
+}
+
+/** What a method reference calls its method on: a type, the local holding a bound receiver, or the expression. */
+function referenceReceiver(reference: MethodReference, span: Span, receiverLocal: string | undefined): Expression {
+  const { target } = reference;
+  if ('type' in target) return { kind: 'typeRef', type: target.type, ...span };
+  return receiverLocal ? { kind: 'name', name: receiverLocal, ...span } : target.expression;
 }
 
 /** The type that a name or a qualified name before `::new` writes. */

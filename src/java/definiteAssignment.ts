@@ -14,7 +14,6 @@ import type {
   BreakStatement,
   ContinueStatement,
   DoStatement,
-  ExplicitConstructorCall,
   Expression,
   ForEachStatement,
   ForStatement,
@@ -33,63 +32,18 @@ import { booleanConstants, exhaustiveSwitches } from './reachability';
 /**
  * Applies Java's definite assignment rules to the locals of one method body: a local is read only after every
  * path assigns it, and a final local is assigned only while no path has assigned it.
+ *
+ * @returns The keys (see {@link declarationKey}) of the locals that are not effectively final (JLS 4.12.4).
  */
-export function checkDefiniteAssignment(parameters: readonly Parameter[], body: Block): void {
+export function checkDefiniteAssignment(parameters: readonly Parameter[], body: Block): ReadonlySet<string> {
   const checker = new DefiniteAssignmentChecker();
   checker.statement(body, checker.declareParameters(checker.initialState(), parameters));
+  return checker.notEffectivelyFinal;
 }
 
-export interface InitializationPath {
-  /** The blank final fields this path must assign exactly once. */
-  blankFinals: readonly string[];
-  /** The initializer blocks and field initializers that run before the constructor, in textual order. */
-  initializers: readonly (Block | Expression | ArrayInitializer)[];
-  constructorDeclaration?: {
-    parameters: readonly Parameter[];
-    explicitCall: ExplicitConstructorCall | undefined;
-    prologue?: readonly Statement[];
-    body: Block;
-  };
-  /** Where an unassigned blank final is reported. */
-  span: Span;
-}
-
-/**
- * Applies the definite assignment rules to the code that initializes a class or an object: its field initializers
- * and initializer blocks and, for objects, one constructor, which together must assign every blank final field
- * exactly once.
- */
-export function checkInitialization(path: InitializationPath): void {
-  const checker = new DefiniteAssignmentChecker();
-  let state = checker.initialState();
-  for (const name of path.blankFinals) state = checker.declareField(state, name);
-  const constructor = path.constructorDeclaration;
-  // A constructor that calls this(...) starts after another constructor has initialized the object.
-  if (constructor?.explicitCall?.target === 'this') {
-    for (const name of path.blankFinals) state = checker.assignField(state, name);
-  } else {
-    for (const initializer of path.initializers) {
-      state =
-        initializer.kind === 'block' ? checker.statement(initializer, state) : checker.initializer(initializer, state);
-    }
-  }
-  if (constructor) {
-    const withParameters = checker.declareParameters(state, constructor.parameters);
-    // The prologue runs before the call, and its locals stay in scope for the call and the body.
-    const whole: Block = {
-      ...constructor.body,
-      statements: [...(constructor.prologue ?? []), ...constructor.body.statements],
-    };
-    state = checker.statement(whole, checker.expressions(constructor.explicitCall?.args ?? [], withParameters));
-  }
-  for (const exit of [state, ...checker.returns]) {
-    const unassigned = path.blankFinals.find((name) => exit.assigned && !checker.isFieldAssigned(exit, name));
-    if (unassigned !== undefined) {
-      throw new CompileError([
-        { row: path.span.row, message: `final のフィールド ${unassigned} に値が代入されていない可能性があります。` },
-      ]);
-    }
-  }
+/** Identifies a local by its name and where it is declared, as the compiler and this analysis both see it. */
+export function declarationKey(name: string, declaration: Span): string {
+  return `${name}@${declaration.row}:${declaration.start}`;
 }
 
 interface Variable {
@@ -98,12 +52,18 @@ interface Variable {
   isFinal: boolean;
   /** Whether the variable gets its value where it is declared, which makes a final one never assignable. */
   isInitialized: boolean;
+  /** Where a local is declared, which identifies it to the compiler, or `undefined` for a field. */
+  declaration?: Span;
 }
 
+/**
+ * A loop being analyzed, with the assignments in it to blank locals declared before it, which a later iteration
+ * must not find already assigned, for a final one, or which make one not effectively final.
+ */
 interface EnclosingLoop {
   /** Variables with smaller ids were declared before the loop. */
   firstId: number;
-  finalWrites: { variable: Variable; span: Span }[];
+  blankWrites: { variable: Variable; span: Span }[];
 }
 
 interface JumpTarget {
@@ -116,7 +76,7 @@ interface JumpTarget {
   continues: State[];
 }
 
-class DefiniteAssignmentChecker {
+export class DefiniteAssignmentChecker {
   private readonly scopes: Map<string, Variable>[] = [new Map()];
   /** Blank final fields, which `this.name` names even where a local hides the simple name. */
   private readonly fields = new Map<string, Variable>();
@@ -131,6 +91,11 @@ class DefiniteAssignmentChecker {
   /** The labels written directly before loops and switch statements. */
   private readonly labelsByStatement = new Map<Span, string>();
   private nextId = 0;
+  /**
+   * The keys of the locals that are not effectively final: assigned after being initialized, assigned where they may
+   * already be assigned, or incremented, as if they were final (JLS 4.12.4).
+   */
+  readonly notEffectivelyFinal = new Set<string>();
 
   initialState(): State {
     return { assigned: new Set(), possiblyAssigned: new Set() };
@@ -139,7 +104,9 @@ class DefiniteAssignmentChecker {
   declareParameters(state: State, parameters: readonly Parameter[]): State {
     this.scopes.push(new Map());
     let current = state;
-    for (const parameter of parameters) current = this.declare(current, parameter.name, parameter.isFinal, true);
+    for (const parameter of parameters) {
+      current = this.declare(current, parameter.name, parameter.isFinal, true, true, parameter);
+    }
     return current;
   }
 
@@ -161,8 +128,15 @@ class DefiniteAssignmentChecker {
    * @param isInitialized Whether the variable gets its value where it is declared, as parameters do; a for-each
    *   variable is assigned on entry to each iteration but stays subject to the flow rules, as javac treats it.
    */
-  declare(state: State, name: string, isFinal: boolean, isAssigned: boolean, isInitialized = isAssigned): State {
-    const variable: Variable = { id: this.nextId++, name, isFinal, isInitialized };
+  declare(
+    state: State,
+    name: string,
+    isFinal: boolean,
+    isAssigned: boolean,
+    isInitialized = isAssigned,
+    declaration?: Span
+  ): State {
+    const variable: Variable = { id: this.nextId++, name, isFinal, isInitialized, declaration };
     (this.scopes.at(-1) as Map<string, Variable>).set(name, variable);
     return isAssigned ? assign(state, variable.id) : state;
   }
@@ -260,7 +234,7 @@ class DefiniteAssignmentChecker {
     let current = state;
     for (const declarator of statement.declarators) {
       // The variable's scope includes its own initializer, which therefore cannot read it.
-      current = this.declare(current, declarator.name, statement.isFinal, false);
+      current = this.declare(current, declarator.name, statement.isFinal, false, false, declarator);
       if (!declarator.initializer) continue;
       const variable = this.lookup(declarator.name) as Variable;
       variable.isInitialized = true;
@@ -289,7 +263,7 @@ class DefiniteAssignmentChecker {
         const afterIterable = this.expression(statement.iterable, state);
         return this.scoped(() =>
           this.loop(statement, afterIterable, (target, entry) => {
-            const bound = this.declare(entry, statement.name, statement.isFinal, true, false);
+            const bound = this.declare(entry, statement.name, statement.isFinal, true, false, statement);
             const afterBody = this.statement(statement.body, bound);
             return { exit: entry, back: [afterBody, ...target.continues] };
           })
@@ -350,13 +324,15 @@ class DefiniteAssignmentChecker {
     analyze: (target: JumpTarget, entry: State) => { exit: State; back: State[] }
   ): State {
     const target = this.pushTarget(this.takeLabel(statement), true, true);
-    const enclosing: EnclosingLoop = { firstId: this.nextId, finalWrites: [] };
+    const enclosing: EnclosingLoop = { firstId: this.nextId, blankWrites: [] };
     this.loops.push(enclosing);
     try {
       const { exit, back } = analyze(target, state);
       const assignedOnBackEdges = new Set(back.flatMap((edge) => [...edge.possiblyAssigned]));
-      for (const { variable, span } of enclosing.finalWrites) {
-        if (assignedOnBackEdges.has(variable.id)) this.finalAssignmentError(span, variable);
+      for (const { variable, span } of enclosing.blankWrites) {
+        if (!assignedOnBackEdges.has(variable.id)) continue;
+        if (variable.isFinal) this.finalAssignmentError(span, variable);
+        this.markNotEffectivelyFinal(variable);
       }
       // The exit leaves from the head, which later iterations reach too.
       const exitFromHead = {
@@ -421,7 +397,7 @@ class DefiniteAssignmentChecker {
         this.scoped(() =>
           this.statement(
             clause.body,
-            this.declare(catchEntry, clause.name, clause.isFinal || clause.types.length > 1, true)
+            this.declare(catchEntry, clause.name, clause.isFinal || clause.types.length > 1, true, true, clause)
           )
         )
       )
@@ -593,7 +569,24 @@ class DefiniteAssignmentChecker {
     if (reads) this.readVariable(target, variable, state);
     for (const log of this.writeLogs) log.add(variable.id);
     if (variable.isFinal) this.checkFinalWrite(target, variable, state);
+    else if (variable.declaration) this.checkEffectivelyFinalWrite(target, variable, state, reads);
     return assign(state, variable.id);
+  }
+
+  /** Records a local that a write makes not effectively final, as a final one would be rejected for it. */
+  private checkEffectivelyFinalWrite(span: Span, variable: Variable, state: State, reads: boolean): void {
+    if (!state.assigned) return;
+    if (reads || variable.isInitialized || state.possiblyAssigned.has(variable.id)) {
+      this.markNotEffectivelyFinal(variable);
+      return;
+    }
+    for (const loop of this.loops) {
+      if (variable.id < loop.firstId) loop.blankWrites.push({ variable, span });
+    }
+  }
+
+  private markNotEffectivelyFinal(variable: Variable): void {
+    if (variable.declaration) this.notEffectivelyFinal.add(declarationKey(variable.name, variable.declaration));
   }
 
   private checkFinalWrite(span: Span, variable: Variable, state: State): void {
@@ -602,7 +595,7 @@ class DefiniteAssignmentChecker {
     if (!state.assigned) return;
     if (state.possiblyAssigned.has(variable.id)) this.finalAssignmentError(span, variable);
     for (const loop of this.loops) {
-      if (variable.id < loop.firstId) loop.finalWrites.push({ variable, span });
+      if (variable.id < loop.firstId) loop.blankWrites.push({ variable, span });
     }
   }
 
