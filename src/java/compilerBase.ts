@@ -2,11 +2,13 @@ import type { TraceOptions } from '../interpreter/traceAnnotations';
 import type { ClassDeclaration, Expression, FieldDeclaration, MemberDeclaration, Span } from './ast';
 import { box, boxedTypeOf, unbox } from './builtinWrappers';
 import { boxingTarget, instantiateMethod, isInvocationConvertible, unboxedTypeOf } from './conversions';
+import { nullMessage, type NullSource } from './nullMessages';
 import { fitsIn } from './operators';
 import { type Frame } from './runtime';
 import { superclassesOf, topLevelOf, TypeResolver } from './typeResolver';
 import {
   type ClassInfo,
+  type ClassType,
   erasure,
   type FieldInfo,
   isNumeric,
@@ -21,6 +23,7 @@ import {
   superinterfacesOf,
   typeName,
   type TypeVariable,
+  upperBound,
   VOID,
 } from './types';
 import { convertNumber, JavaArray, JavaString, type Value } from './values';
@@ -57,6 +60,8 @@ export interface CompiledValue {
   type: JavaType;
   run: Eval;
   constant?: Value;
+  /** What the value came from, which a `NullPointerException` names when it is null. */
+  source?: NullSource;
 }
 export type Compiled = CompiledValue | { kind: 'class'; cls: ClassInfo };
 
@@ -67,6 +72,7 @@ export interface Reference {
   isArrayLength?: boolean;
   /** Whether the reference reads a local that a local or anonymous class copied, which it may not assign. */
   isCapture?: boolean;
+  source?: NullSource;
   /** Evaluates the receiver and index once, returning accessors bound to them. */
   bind: (frame: Frame) => { get: () => Value; set: (value: Value) => void };
 }
@@ -397,7 +403,9 @@ export abstract class CompilerBase extends TypeResolver {
     const type = unboxedTypeOf(value.type);
     if (!type) return;
     const { run } = value;
-    return { kind: 'value', type, run: (frame) => unbox(frame, run(frame)) };
+    const wrapper = upperBound(value.type) as ClassType;
+    const message = nullMessage(`Cannot invoke "java.lang.${wrapper.cls.name}.${type.kind}Value()"`, value.source);
+    return { kind: 'value', type, run: (frame) => unbox(frame, run(frame), message) };
   }
 
   /** A value as an operator sees it: unboxed when it is a wrapper object. */

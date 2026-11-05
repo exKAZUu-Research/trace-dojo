@@ -19,6 +19,7 @@ import {
   type Scope,
 } from './compilerBase';
 import { InvocationCompiler } from './invocationCompiler';
+import { nullMessage, typeDescription } from './nullMessages';
 import { bindingsWhen } from './patternBindings';
 import { canCompleteNormally, containsJump } from './reachability';
 import { type Frame, JavaThrow, throwBuiltin, UNASSIGNED } from './runtime';
@@ -190,18 +191,7 @@ export abstract class StatementCompiler extends InvocationCompiler {
         return () => {};
       }
       case 'synchronized': {
-        const lock = this.compileValue(context, statement.lock);
-        if (!isReference(lock.type)) {
-          this.error(
-            statement.lock,
-            `synchronized には参照型の値が必要ですが、${typeName(lock.type)} 型の値が書かれています。`
-          );
-        }
-        const body = this.compileBlock(context, statement.body);
-        return (frame) => {
-          if (lock.run(frame) === undefined) throwBuiltin(frame, 'NullPointerException');
-          return body(frame);
-        };
+        return this.compileSynchronized(context, statement);
       }
       case 'localClass': {
         this.compileLocalClass(context, statement.declaration);
@@ -305,10 +295,27 @@ export abstract class StatementCompiler extends InvocationCompiler {
     // Rethrowing a catch parameter throws only what its try block throws, as long as it is not reassigned.
     const rethrown = local === undefined ? undefined : context.rethrownTypes.get(local);
     if (value.type.kind === 'class') this.checkThrown(context, statement, rethrown ?? [value.type.cls]);
+    const message = nullMessage('Cannot throw exception', value.source);
     return (frame) => {
       const exception = value.run(frame);
-      if (!(exception instanceof JavaObject)) throwBuiltin(frame, 'NullPointerException');
+      if (!(exception instanceof JavaObject)) throwBuiltin(frame, 'NullPointerException', message);
       throw new JavaThrow(exception);
+    };
+  }
+
+  protected compileSynchronized(context: MethodContext, statement: Extract<Statement, { kind: 'synchronized' }>): Exec {
+    const lock = this.compileValue(context, statement.lock);
+    if (!isReference(lock.type)) {
+      this.error(
+        statement.lock,
+        `synchronized には参照型の値が必要ですが、${typeName(lock.type)} 型の値が書かれています。`
+      );
+    }
+    const body = this.compileBlock(context, statement.body);
+    const message = nullMessage('Cannot enter synchronized block', lock.source);
+    return (frame) => {
+      if (lock.run(frame) === undefined) throwBuiltin(frame, 'NullPointerException', message);
+      return body(frame);
     };
   }
 
@@ -515,16 +522,29 @@ export abstract class StatementCompiler extends InvocationCompiler {
       const completion = body(frame);
       return completion && loopCompletion(completion, labels);
     };
+    return this.forEachLoop(iterable, runIteration);
+  }
+
+  /** Runs `runIteration` on each element of an array or `Iterable`, which must not be null. */
+  protected forEachLoop(
+    iterable: CompiledValue,
+    runIteration: (frame: Frame, value: Value) => Completion | undefined | 'continue'
+  ): Exec {
     if (iterable.type.kind !== 'array') {
+      const iteratorMessage = nullMessage(
+        `Cannot invoke "${typeDescription(this.builtins, iterable.type)}.iterator()"`,
+        iterable.source
+      );
       return (frame) => {
         const source = iterable.run(frame);
-        if (source === undefined) return throwBuiltin(frame, 'NullPointerException');
+        if (source === undefined) return throwBuiltin(frame, 'NullPointerException', iteratorMessage);
         return iterateIterable(frame, source, (value) => runIteration(frame, value));
       };
     }
+    const lengthMessage = nullMessage('Cannot read the array length', iterable.source);
     return (frame) => {
       const array = iterable.run(frame);
-      if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
+      if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException', lengthMessage);
       return iterate(frame, array, (value) => runIteration(frame, value));
     };
   }

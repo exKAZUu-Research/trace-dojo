@@ -80,8 +80,8 @@ export function box(frame: Frame | undefined, cls: ClassInfo, value: Value): Jav
 }
 
 /** Unboxes a wrapper object, throwing `NullPointerException` for null. */
-export function unbox(frame: Frame, value: Value): Value {
-  if (!(value instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
+export function unbox(frame: Frame, value: Value, message?: string): Value {
+  if (!(value instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException', message);
   return value.boxed;
 }
 

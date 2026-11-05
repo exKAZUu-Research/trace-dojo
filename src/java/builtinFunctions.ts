@@ -1,12 +1,15 @@
 import { type Collections, compareNatural, findEntry, itemsOf, putEntry, removeEntry } from './builtinCollections';
 import {
   addAbstractMethod,
+  addConstant,
   addInterface,
   addMethod,
   addTypeParameters,
   defineInterface,
   type Registry,
+  requireString,
 } from './builtinSupport';
+import { compareIgnoringCase } from './builtinText';
 import { type Frame, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
@@ -22,7 +25,7 @@ import {
   VOID,
   type WildcardType,
 } from './types';
-import { JavaArray, type JavaObject, type Value } from './values';
+import { JavaArray, JavaObject, type Value } from './values';
 
 export interface Functions {
   comparatorClass: ClassInfo;
@@ -110,6 +113,7 @@ function defineFunctional(
 }
 
 // code-gauge-allow functionNcss 33 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 34 -- One registration per builtin functional interface.
 export function defineFunctions(
   registry: Registry,
   objectClass: ClassInfo,
@@ -149,6 +153,7 @@ export function defineFunctions(
     { fn: fn.cls, toInt: toInt.cls, toDouble: toDouble.cls },
     comparableClass
   );
+  defineCaseInsensitiveOrder(registry.classes.get('String') as ClassInfo, comparator, objectClass);
   definePredicateDefaults(predicate.cls, predicate.variables[0]);
   defineCollectionDefaults(context, collections, {
     consumer: consumer.cls,
@@ -160,6 +165,12 @@ export function defineFunctions(
     biFunction: biFunction.cls,
   });
   return { comparatorClass: comparator };
+}
+
+function defineCaseInsensitiveOrder(stringClass: ClassInfo, comparatorClass: ClassInfo, objectClass: ClassInfo): void {
+  const order = new JavaObject(functionClassOf(comparatorClass, objectClass));
+  order.function = { call: (frame, [a, b]) => compareIgnoringCase(requireString(frame, a), requireString(frame, b)) };
+  addConstant(stringClass, 'CASE_INSENSITIVE_ORDER', classType(comparatorClass, stringClass.type), order);
 }
 
 /** Calls the abstract method of a functional interface object, as library code calls a lambda. */

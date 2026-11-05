@@ -3,6 +3,7 @@ import { getBuiltins } from './builtins';
 import { anonymousDeclaration, type Compiled, type CompiledValue, type Eval, type MethodContext } from './compilerBase';
 import { infer, memberBindings, methodView } from './conversions';
 import { ExpressionCompiler } from './expressionCompiler';
+import { methodDescription, nullMessage } from './nullMessages';
 import { superValue, thisValue } from './referenceCompiler';
 import { type Frame, throwBuiltin } from './runtime';
 import {
@@ -303,6 +304,7 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
       return {
         kind: 'value',
         type: method.returnType,
+        source: { returnOf: methodDescription(this.builtins, method.owner.type, method) },
         run: (frame) => {
           ignored?.run(frame);
           frame.runtime.initializeClass(frame, method.owner);
@@ -310,14 +312,33 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
         },
       };
     }
-    const receiver = target.receiver as CompiledValue;
-    const dispatches = expression.object !== 'super' && method.access !== 'private';
+    return this.instanceInvocation(
+      target.receiver as CompiledValue,
+      method,
+      expression.object !== 'super' && method.access !== 'private',
+      convertedArgs,
+      callRow
+    );
+  }
+
+  /** Calls an instance method on `receiver`, which `dispatches` to the receiver's override unless the call is exact. */
+  protected instanceInvocation(
+    receiver: CompiledValue,
+    method: MethodInfo,
+    dispatches: boolean,
+    convertedArgs: Eval[],
+    callRow: number
+  ): CompiledValue {
+    const declared = method.declared ?? method;
+    const description = methodDescription(this.builtins, receiver.type, method);
+    const message = nullMessage(`Cannot invoke "${description}"`, receiver.source);
     return {
       kind: 'value',
       type: method.returnType,
+      source: { returnOf: description },
       run: (frame) => {
         const object = receiver.run(frame);
-        if (object === undefined) throwBuiltin(frame, 'NullPointerException');
+        if (object === undefined) throwBuiltin(frame, 'NullPointerException', message);
         const resolved = dispatches ? frame.runtime.dispatch(object, declared) : declared;
         frame.temporaries.push(object);
         try {

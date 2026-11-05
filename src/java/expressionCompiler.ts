@@ -320,7 +320,7 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
         return constantValue(this.builtins.stringClass.type, this.internedString(literal.value));
       }
       case 'null': {
-        return { kind: 'value', type: NULL, run: () => {} };
+        return { kind: 'value', type: NULL, source: { path: 'null' }, run: () => {} };
       }
     }
   }
@@ -583,6 +583,7 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
         value.constant !== undefined && isPrimitive(type)
           ? cast(undefined as unknown as Frame, value.constant)
           : undefined,
+      source: value.source,
     };
   }
 
@@ -634,7 +635,13 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
 function readOf(reference: (Reference & { constant?: Value }) | Compiled): Compiled {
   if ('kind' in reference) return reference;
   const { bind } = reference;
-  return { kind: 'value', type: reference.type, run: (frame) => bind(frame).get(), constant: reference.constant };
+  return {
+    kind: 'value',
+    type: reference.type,
+    run: (frame) => bind(frame).get(),
+    constant: reference.constant,
+    source: reference.source,
+  };
 }
 
 /** The value of an operation on constants, or `undefined` when it throws, as dividing by zero does. */

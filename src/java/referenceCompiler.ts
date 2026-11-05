@@ -8,6 +8,7 @@ import {
   type Reference,
 } from './compilerBase';
 import { memberBindings, memberType } from './conversions';
+import { arrayKindOf, elementSource, fieldSource, nullMessage } from './nullMessages';
 import { type Frame, throwBuiltin, UNASSIGNED } from './runtime';
 import {
   asSuper,
@@ -43,6 +44,7 @@ export abstract class ReferenceCompiler extends CompilerBase {
           kind: 'value',
           type,
           constant,
+          source: { path: expression.name },
           run: (frame) => {
             if (frame.locals[slot] === UNASSIGNED)
               throw new Error(`Local ${expression.name} is read before assignment`);
@@ -53,6 +55,7 @@ export abstract class ReferenceCompiler extends CompilerBase {
       return {
         kind: 'value',
         type,
+        source: { path: expression.name },
         run: (frame) => {
           const value = frame.locals[slot];
           if (value === UNASSIGNED) throw new Error(`Local ${expression.name} is read before assignment`);
@@ -63,7 +66,13 @@ export abstract class ReferenceCompiler extends CompilerBase {
     const captured = this.findCapture(context, expression, expression.name);
     if (captured) {
       const { index, capture } = captured;
-      return { kind: 'value', type: capture.type, constant: capture.constant, run: (frame) => frame.captured[index] };
+      return {
+        kind: 'value',
+        type: capture.type,
+        constant: capture.constant,
+        source: { path: expression.name },
+        run: (frame) => frame.captured[index],
+      };
     }
     const reference = this.compileSimpleNameReference(context, expression);
     if ('kind' in reference) return reference;
@@ -73,6 +82,7 @@ export abstract class ReferenceCompiler extends CompilerBase {
       type: reference.type,
       run: (frame) => bound(frame).get(),
       constant: reference.constant,
+      source: reference.source,
     };
   }
 
@@ -173,15 +183,21 @@ export abstract class ReferenceCompiler extends CompilerBase {
     receiver: CompiledValue | undefined,
     ignoredReceiver?: CompiledValue
   ): Reference & { constant?: Value } {
-    const { slot, owner } = field;
+    const { slot, owner, name } = field;
     const constant = this.constantOf(field);
+    const source = field.isStatic
+      ? { path: `${this.builtins.qualifiedNames.get(owner) ?? owner.binaryName}.${name}` }
+      : fieldSource(receiver?.source, name);
+    const readMessage = nullMessage(`Cannot read field "${name}"`, receiver?.source);
     if (constant !== undefined) {
       return {
         type: field.type,
         field,
         constant,
+        source,
         bind: (frame) => {
-          // A receiver written before the field still runs, and an instance field still needs an object.
+          // A receiver written before the field still runs, and an instance field still needs an object, which
+          // javac checks with `Objects.requireNonNull` and so without a message.
           ignoredReceiver?.run(frame);
           if (!field.isStatic && !((receiver as CompiledValue).run(frame) instanceof JavaObject)) {
             throwBuiltin(frame, 'NullPointerException');
@@ -202,6 +218,7 @@ export abstract class ReferenceCompiler extends CompilerBase {
         field,
         constant:
           builtinConstant !== undefined && !(builtinConstant instanceof JavaObject) ? builtinConstant : undefined,
+        source,
         bind: (frame) => {
           ignoredReceiver?.run(frame);
           const values = frame.runtime.staticsOf(frame, owner);
@@ -215,19 +232,12 @@ export abstract class ReferenceCompiler extends CompilerBase {
       };
     }
     const object = receiver as CompiledValue;
+    const assignMessage = nullMessage(`Cannot assign field "${name}"`, object.source);
     return {
       type: memberType(field.type, memberBindings(object.type, field.owner)),
       field,
-      bind: (frame) => {
-        const target = object.run(frame);
-        if (!(target instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
-        return {
-          get: () => target.fields[slot],
-          set: (value) => {
-            target.fields[slot] = value;
-          },
-        };
-      },
+      source,
+      bind: (frame) => fieldAccessors(frame, object.run(frame), slot, readMessage, assignMessage),
     };
   }
 
@@ -261,37 +271,30 @@ export abstract class ReferenceCompiler extends CompilerBase {
     if (array.type.kind !== 'array') {
       return this.error(target, `${typeName(array.type)} 型の値は配列ではありません。`);
     }
-    const index = this.convert(this.compileValue(context, target.index), INT, 'invocation', target.index).run;
+    const compiledIndex = this.convert(this.compileValue(context, target.index), INT, 'invocation', target.index);
+    const index = compiledIndex.run;
+    const kind = arrayKindOf(array.type.element);
+    const loadMessage = nullMessage(`Cannot load from ${kind} array`, array.source);
+    const storeMessage = nullMessage(`Cannot store to ${kind} array`, array.source);
+    const indexName =
+      compiledIndex.constant === undefined
+        ? target.index.kind === 'name'
+          ? target.index.name
+          : undefined
+        : String(compiledIndex.constant);
     return {
       type: array.type.element,
+      source: elementSource(array.source, indexName),
       bind: (frame) => {
         const values = array.run(frame);
-        if (!(values instanceof JavaArray)) throwBuiltin(frame, 'NullPointerException');
-        frame.temporaries.push(values);
+        if (values instanceof JavaArray) frame.temporaries.push(values);
         let position: number;
         try {
           position = index(frame) as number;
         } finally {
-          frame.temporaries.pop();
+          if (values instanceof JavaArray) frame.temporaries.pop();
         }
-        if (position < 0 || position >= values.values.length) {
-          throwBuiltin(
-            frame,
-            'ArrayIndexOutOfBoundsException',
-            `Index ${position} out of bounds for length ${values.values.length}`
-          );
-        }
-        return {
-          get: () => values.values[position],
-          set: (value) => {
-            // An array of a subclass type, assigned to a variable of a superclass array type, still checks its stores.
-            if (isReference(values.elementType) && !fitsElement(frame, values.elementType, value)) {
-              const actual = value instanceof JavaObject ? value.cls.binaryName : 'java.lang.String';
-              throwBuiltin(frame, 'ArrayStoreException', actual);
-            }
-            values.values[position] = value;
-          },
-        };
+        return elementAccessors(frame, values, position, loadMessage, storeMessage);
       },
     };
   }
@@ -400,7 +403,7 @@ function notConstant(reference: Reference & { constant?: Value }): Reference & {
 }
 
 export function thisValue(context: MethodContext): CompiledValue {
-  return { kind: 'value', type: thisTypeOf(context.cls), run: (frame) => frame.thisObject };
+  return { kind: 'value', type: thisTypeOf(context.cls), source: { path: 'this' }, run: (frame) => frame.thisObject };
 }
 
 /** `this` viewed as its superclass, with the type arguments the class gives it. */
@@ -413,13 +416,65 @@ export function superValue(context: MethodContext): CompiledValue {
   };
 }
 
+/** Java checks the object only when it reads or writes the field, after an assignment's value (JLS 15.26.1). */
+function fieldAccessors(
+  frame: Frame,
+  target: Value,
+  slot: number,
+  readMessage: string,
+  assignMessage: string
+): { get: () => Value; set: (value: Value) => void } {
+  return {
+    get: () =>
+      target instanceof JavaObject ? target.fields[slot] : throwBuiltin(frame, 'NullPointerException', readMessage),
+    set: (value) => {
+      if (!(target instanceof JavaObject)) throwBuiltin(frame, 'NullPointerException', assignMessage);
+      target.fields[slot] = value;
+    },
+  };
+}
+
+/** Java checks the array and index only when it reads or writes the element, after an assignment's value. */
+function elementAccessors(
+  frame: Frame,
+  values: Value,
+  position: number,
+  loadMessage: string,
+  storeMessage: string
+): { get: () => Value; set: (value: Value) => void } {
+  const check = (message: string): JavaArray => {
+    if (!(values instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException', message);
+    if (position < 0 || position >= values.values.length) {
+      throwBuiltin(
+        frame,
+        'ArrayIndexOutOfBoundsException',
+        `Index ${position} out of bounds for length ${values.values.length}`
+      );
+    }
+    return values;
+  };
+  return {
+    get: () => check(loadMessage).values[position],
+    set: (value) => {
+      const checked = check(storeMessage);
+      // An array of a subclass type, assigned to a variable of a superclass array type, still checks its stores.
+      if (isReference(checked.elementType) && !fitsElement(frame, checked.elementType, value)) {
+        const actual = value instanceof JavaObject ? value.cls.binaryName : 'java.lang.String';
+        throwBuiltin(frame, 'ArrayStoreException', actual);
+      }
+      checked.values[position] = value;
+    },
+  };
+}
+
 function arrayLengthReference(array: CompiledValue): Reference {
+  const message = nullMessage('Cannot read the array length', array.source);
   return {
     type: INT,
     isArrayLength: true,
     bind: (frame) => {
       const value = array.run(frame);
-      if (!(value instanceof JavaArray)) throwBuiltin(frame, 'NullPointerException');
+      if (!(value instanceof JavaArray)) throwBuiltin(frame, 'NullPointerException', message);
       return {
         get: () => value.values.length,
         set: () => {

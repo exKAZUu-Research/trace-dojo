@@ -8,6 +8,7 @@ import {
   type Scope,
   type SwitchExpressionTarget,
 } from './compilerBase';
+import { nullMessage } from './nullMessages';
 import { canCompleteNormally, exhaustiveSwitches } from './reachability';
 import { type Frame, throwBuiltin, UNASSIGNED } from './runtime';
 import { StatementCompiler } from './statementCompiler';
@@ -148,11 +149,15 @@ export abstract class SwitchCompiler extends StatementCompiler {
     const { labelValues, defaultIndex } = this.compileSwitchLabels(context, statement, selector.type);
     const matches = (candidate: Value, value: Value): boolean =>
       isString ? (candidate as JavaString).value === (value as JavaString).value : candidate === value;
+    // Java switches on a string's hash code and an enum constant's ordinal.
+    const selectingMethod =
+      selector.type.kind === 'class' && isEnum ? `${selector.type.cls.binaryName}.ordinal()` : 'String.hashCode()';
+    const message = nullMessage(`Cannot invoke "${selectingMethod}"`, selector.source);
     return {
       type: selector.type,
       run: (frame) => {
         const selected = selector.run(frame);
-        if (selected === undefined) throwBuiltin(frame, 'NullPointerException');
+        if (selected === undefined) throwBuiltin(frame, 'NullPointerException', message);
         // Enum labels hold the ordinals of their constants.
         const value = isEnum && selected instanceof JavaObject ? selected.enumConstant?.ordinal : selected;
         const matched = labelValues.findIndex((values) => values.some((candidate) => matches(candidate, value)));

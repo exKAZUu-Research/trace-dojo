@@ -136,3 +136,17 @@ test.each([
 ])('reading a constant field through an expression still evaluates it: %s', (source, expected) => {
   expect(executeProgram('java', source)).toMatchObject(expected);
 });
+
+test.each([
+  ['String s = null; s.length();', 'Cannot invoke "String.length()" because "s" is null'],
+  ['int[][] g = new int[2][]; g[1][0] = 5;', 'Cannot store to int array because "g[1]" is null'],
+  [
+    'Map<String, Integer> m = new HashMap<>(); int v = m.get("k");',
+    'Cannot invoke "java.lang.Integer.intValue()" because the return value of "java.util.Map.get(Object)" is null',
+  ],
+])('a NullPointerException says what was null: %s', (statements, message) => {
+  expect(executeProgram('java', `import java.util.*;\n${main(statements)}`)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: `java.lang.NullPointerException: ${message}`,
+  });
+});

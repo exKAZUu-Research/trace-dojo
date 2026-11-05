@@ -59,22 +59,13 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
     const isStatic =
       modifiers.isStatic || kind !== 'class' || declaration.isRecord === true || enclosing?.kind === 'interface';
     this.checkClassModifiers(declaration, enclosing);
-    // Constants with bodies subclass their enum, which may then leave methods abstract for them to implement:
-    // those it declares abstract, or, when every constant has a body, those of its interfaces.
     const hasConstantBodies = declaration.enumConstants.some((constant) => constant.body);
-    const hasOnlyConstantBodies =
-      declaration.enumConstants.length > 0 && declaration.enumConstants.every((constant) => constant.body);
     const cls = createClass(name, undefined, false);
     cls.kind = kind;
     cls.declaration = declaration;
     cls.enclosing = enclosing;
     cls.binaryName = enclosing ? `${enclosing.binaryName}$${name}` : name;
-    cls.isAbstract =
-      modifiers.isAbstract ||
-      kind === 'interface' ||
-      hasOnlyConstantBodies ||
-      (hasConstantBodies &&
-        declaration.members.some((member) => member.kind === 'method' && member.modifiers.isAbstract));
+    cls.isAbstract = modifiers.isAbstract || kind === 'interface' || leavesMethodsToConstants(declaration);
     cls.isFinal = modifiers.isFinal || (kind === 'enum' && !hasConstantBodies) || declaration.isRecord === true;
     // An inner class's instances belong to an instance of the class around it.
     cls.hasOuterInstance = enclosing !== undefined && !isStatic && enclosing.kind !== 'interface';
@@ -639,4 +630,17 @@ function withMethodTypeParameters(
   const extended = new Map(bindings);
   for (const [index, variable] of from.entries()) extended.set(variable, { kind: 'typeVar', variable: to[index] });
   return extended;
+}
+
+/**
+ * Whether an enum's constants subclass it to implement methods it leaves abstract: those it declares abstract, or,
+ * when every constant has a body, those of its interfaces.
+ */
+function leavesMethodsToConstants(declaration: ClassDeclaration): boolean {
+  const constants = declaration.enumConstants;
+  if (constants.length > 0 && constants.every((constant) => constant.body)) return true;
+  return (
+    constants.some((constant) => constant.body) &&
+    declaration.members.some((member) => member.kind === 'method' && member.modifiers.isAbstract)
+  );
 }

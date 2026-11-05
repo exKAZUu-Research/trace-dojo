@@ -105,22 +105,7 @@ export function instantiateMethod(
     const argType = argTypes[index] as JavaType | undefined;
     if (argType) infer(builtins, parameterType, argType, variables, bindings);
   }
-  // The type the result is assigned to decides what the arguments leave open, as in `List<String> l = List.of();`.
-  if (targetType && !isPrimitive(targetType)) {
-    const fromTarget = new Map<TypeVariable, JavaType>();
-    infer(builtins, method.returnType, targetType, variables, fromTarget);
-    for (const [variable, type] of fromTarget) {
-      const existing = bindings.get(variable);
-      // Within a type argument, which admits no widening, the target's type wins over the narrower one of the arguments,
-      // as in `List<Shape> l = List.of(new Square());`.
-      const widensToTarget =
-        existing !== undefined &&
-        type.kind !== 'wildcard' &&
-        occursInTypeArgument(method.returnType, variable) &&
-        isWidening(existing, type, builtins.objectClass);
-      if (!existing || widensToTarget) bindings.set(variable, type);
-    }
-  }
+  if (targetType && !isPrimitive(targetType)) inferFromTarget(builtins, method, targetType, bindings);
   // An inferred type outside its variable's bounds makes the method inapplicable.
   for (const [variable, type] of bindings) {
     const fits = variable.bounds.every((bound) => isWidening(type, substitute(bound, bindings), builtins.objectClass));
@@ -136,6 +121,30 @@ export function instantiateMethod(
     typeParameters: [],
     declared: method.declared ?? method,
   };
+}
+
+/**
+ * Infers from the type the result is assigned to what the arguments leave open, as in `List<String> l = List.of();`.
+ * Within a type argument, which admits no widening, the target's type also wins over the narrower one the arguments
+ * give, as in `List<Shape> l = List.of(new Square());`.
+ */
+function inferFromTarget(
+  builtins: Builtins,
+  method: MethodInfo,
+  targetType: JavaType,
+  bindings: Map<TypeVariable, JavaType>
+): void {
+  const fromTarget = new Map<TypeVariable, JavaType>();
+  infer(builtins, method.returnType, targetType, method.typeParameters ?? [], fromTarget);
+  for (const [variable, type] of fromTarget) {
+    const existing = bindings.get(variable);
+    const widensToTarget =
+      existing !== undefined &&
+      type.kind !== 'wildcard' &&
+      occursInTypeArgument(method.returnType, variable) &&
+      isWidening(existing, type, builtins.objectClass);
+    if (!existing || widensToTarget) bindings.set(variable, type);
+  }
 }
 
 /** Whether `variable` occurs inside a type argument of `type`, such as `T` in `List<T>`. */
