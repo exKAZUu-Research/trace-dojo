@@ -156,14 +156,24 @@ const TYPE_NODES = new Set([
 ]);
 
 function convertMethodReference(node: Node): Expression {
-  const [targetNode, nameNode] = node.children.filter(
+  const parts = node.children.filter(
     (child): child is Node => !!child && (child.isNamed || child.type === 'new') && !isComment(child)
   );
+  const [targetNode] = parts;
+  const argumentsNode = parts.find((part) => part.type === 'type_arguments');
+  const nameNode = parts.at(-1) as Node;
   if (targetNode.type === 'super') unsupported(node, 'super のメソッド参照');
   const target = TYPE_NODES.has(targetNode.type)
     ? { type: convertType(targetNode) }
     : { expression: convertExpression(targetNode) };
-  return { kind: 'methodRef', target, name: nameNode.type === 'new' ? 'new' : nameNode.text, ...span(node) };
+  const typeArgs = argumentsNode && namedChildren(argumentsNode).map((arg) => convertType(arg));
+  return {
+    kind: 'methodRef',
+    target,
+    name: nameNode.type === 'new' ? 'new' : nameNode.text,
+    ...(typeArgs && { typeArgs }),
+    ...span(node),
+  };
 }
 
 function convertIntegerLiteral(node: Node): Expression {

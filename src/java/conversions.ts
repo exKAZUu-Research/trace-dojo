@@ -37,6 +37,8 @@ function isPendingConvertible(builtins: Builtins, from: Extract<JavaType, { kind
   const method = bound.kind === 'class' ? functionalMethodOf(bound.cls, builtins.objectClass) : undefined;
   if (!method) return false;
   const count = method.parameterTypes.length;
+  // A lambda cannot implement a generic function, which a method reference may (JLS 15.27.3).
+  if (from.lambda && !from.lambda.isReference && (method.typeParameters?.length ?? 0) > 0) return false;
   const fitsResult = !from.lambda || (method.returnType.kind === 'void' ? from.lambda.inVoid : from.lambda.inValue);
   return fitsResult && (from.arity === undefined || count === from.arity) && (from.arities?.includes(count) ?? true);
 }

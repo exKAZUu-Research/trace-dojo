@@ -397,18 +397,14 @@ class Translator {
   private escapedCharacter(char: string): number | undefined {
     const known = ESCAPED_CHARACTERS[char];
     if (known !== undefined) return known;
-    const hex = (pattern: RegExp): number => {
-      const match = pattern.exec(this.rest());
-      if (!match) this.fail('Illegal hexadecimal escape sequence');
-      this.index += match[0].length;
-      return Number.parseInt(match[1] as string, 16);
-    };
     switch (char) {
       case 'x': {
-        return this.pattern[this.index] === '{' ? hex(/^\{([0-9a-fA-F]+)\}/) : hex(/^([0-9a-fA-F]{2})/);
+        return this.pattern[this.index] === '{'
+          ? this.hexEscape(/^\{([0-9a-fA-F]+)\}/)
+          : this.hexEscape(/^([0-9a-fA-F]{2})/);
       }
       case 'u': {
-        return hex(/^([0-9a-fA-F]{4})/);
+        return this.hexEscape(/^([0-9a-fA-F]{4})/);
       }
       case '0': {
         const octal = /^[0-3]?[0-7]{1,2}/.exec(this.rest())?.[0];
@@ -427,6 +423,15 @@ class Translator {
         return /[a-zA-Z0-9]/.test(char) ? undefined : (char.codePointAt(0) as number);
       }
     }
+  }
+  /** The code point of the hexadecimal digits `pattern` reads at the cursor, which Java limits to U+10FFFF. */
+  private hexEscape(pattern: RegExp): number {
+    const match = pattern.exec(this.rest());
+    if (!match) this.fail('Illegal hexadecimal escape sequence');
+    this.index += match[0].length;
+    const point = Number.parseInt(match[1] as string, 16);
+    if (point > 0x10_ff_ff) this.fail('Hexadecimal codepoint is too big');
+    return point;
   }
 
   private quoted(): string {
@@ -503,6 +508,8 @@ class Translator {
     const isRange = this.pattern[this.index] === '-' && !/^-(?:\]|&&)/.test(this.rest());
     if (!isRange) return this.classRange(start, start);
     this.index++;
+    // A range that the pattern ends before its end character is illegal, as `[a-` is.
+    if (this.index >= this.pattern.length) this.fail('Illegal character range');
     const end = this.classCharacter();
     if (typeof end === 'string' || end < start) this.fail('Illegal character range');
     return this.classRange(start, end);

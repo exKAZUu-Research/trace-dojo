@@ -1339,6 +1339,21 @@ const programs: [name: string, runs: boolean, source: string][] = [
     'import java.util.*;\nimport java.util.function.*;\nclass Main {\n  static <T, R> List<R> map(List<T> l, Function<T, R> f) { List<R> r = new ArrayList<>(); for (T t : l) r.add(f.apply(t)); return r; }\n  public static void main(String[] args) {\n    System.out.println(map(List.of("1", "22"), Integer::parseInt));\n  }\n}',
   ],
   [
+    'lambda-for-a-generic-functional-method',
+    false,
+    'class Main {\n  interface Pick { <T> T pick(T a, T b); }\n  public static void main(String[] args) {\n    Pick p = (x, y) -> y;\n  }\n}',
+  ],
+  [
+    'method-references-select-runnable-or-supplier',
+    true,
+    'import java.util.function.*;\nclass Main {\n  static String f(Runnable r) { return "R"; }\n  static <T> String f(Supplier<T> s) { return "S"; }\n  static void work() {}\n  static int compute() { return 1; }\n  public static void main(String[] args) {\n    System.out.println(f(Main::work) + f(Main::compute) + f(java.util.Collections::<String>emptyList));\n  }\n}',
+  ],
+  [
+    'multi-catch-parameter-has-the-common-superclass',
+    true,
+    'class Main {\n  static void report(Exception e) {}\n  public static void main(String[] args) {\n    try { int z = 0; System.out.println(1 / z); } catch (ArithmeticException | NullPointerException e) { report(e); }\n  }\n}',
+  ],
+  [
     'keyed-comparator-chained-without-target',
     true,
     'import java.util.*;\nclass Main {\n  record P(String name, int age) {}\n  public static void main(String[] args) {\n    List<P> ps = new ArrayList<>(); ps.sort(Comparator.comparing(P::name, Comparator.reverseOrder()).reversed());\n  }\n}',

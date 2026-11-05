@@ -153,7 +153,9 @@ export abstract class TryCompiler extends SwitchCompiler {
     let type: JavaType;
     if ('local' in resource) {
       init = this.compileLocal(context, resource.local);
-      const slot = this.findLocal(context, resource.local.declarators[0].name) as number;
+      // The slot the declaration took, which an unnamed variable (`_`) takes under no name to look it up by.
+      const { name } = resource.local.declarators[0];
+      const slot = context.locals.findLastIndex((local) => local.name === name);
       type = context.locals[slot].type;
       read = (frame) => frame.locals[slot] as Value;
     } else {
@@ -206,7 +208,7 @@ export abstract class TryCompiler extends SwitchCompiler {
       const rethrown = caughtByClause(thrownInTry, classes, earlierClasses);
       earlierClasses.push(...classes);
       const exec = this.withScope(context, () => {
-        const type = classes.length === 1 ? classes[0].type : this.builtins.throwableClass.type;
+        const type = commonSuperclass(classes).type;
         const slot = this.declareLocal(context, clause, clause.name, type);
         if (!assignedNames(clause.body).includes(clause.name)) context.rethrownTypes.set(slot, rethrown);
         const handler = this.compileBlock(context, clause.body);
@@ -276,4 +278,14 @@ function attemptTry(frame: Frame, body: Exec, handle: CatchHandler): { completio
       return { pending: error_ };
     }
   }
+}
+
+/** The nearest class that every alternative of a multi-catch extends, which its parameter has as its type (JLS 14.20). */
+function commonSuperclass(classes: readonly ClassInfo[]): ClassInfo {
+  const [first, ...rest] = classes as [ClassInfo, ...ClassInfo[]];
+  for (let current: ClassInfo | undefined = first; current; current = current.superclass) {
+    const candidate = current;
+    if (rest.every((cls) => isSubclass(cls, candidate))) return candidate;
+  }
+  return first;
 }

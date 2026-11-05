@@ -535,6 +535,8 @@ export interface MethodReference extends Span {
   target: { expression: Expression } | { type: TypeSyntax };
   /** The method's name, or `new` for a constructor. */
   name: string;
+  /** Type arguments written after `::`, as in `Collections::<String>emptyList`, which the call they make takes. */
+  typeArgs?: TypeSyntax[];
 }
 
 /** `Type.class`, the `Class` object of a type, which is `undefined` for `void.class`. */

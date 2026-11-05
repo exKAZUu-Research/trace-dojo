@@ -131,6 +131,13 @@ export abstract class LambdaCompiler extends PatternCompiler {
         `${typeName(target)} 型は関数型インターフェースではないので、ラムダ式やメソッド参照は使えません。`
       );
     }
+    // A lambda cannot declare the type parameters a generic function would need (JLS 15.27.3).
+    if ((span as { kind?: string }).kind === 'lambda' && (method.typeParameters?.length ?? 0) > 0) {
+      this.error(
+        span,
+        `${typeName(target)} 型のメソッド ${method.name} には型パラメータがあるので、ラムダ式では書けません。`
+      );
+    }
     const bindings = memberBindings(bound, method.owner);
     const view = methodView(method, bindings);
     return {
@@ -481,7 +488,14 @@ export abstract class LambdaCompiler extends PatternCompiler {
     }
     const receiver = referenceReceiver(reference, span, receiverLocal);
     const isTypeName = targetType !== undefined || this.namesType(context, receiver);
-    const staticForm = lambdaOf({ kind: 'call', object: receiver, name: reference.name, args, ...span });
+    const staticForm = lambdaOf({
+      kind: 'call',
+      object: receiver,
+      name: reference.name,
+      args,
+      typeArgs: reference.typeArgs,
+      ...span,
+    });
     if (!isTypeName) return staticForm;
     // A type names a static method that takes all the arguments, or an instance method of the first argument.
     try {
@@ -497,6 +511,7 @@ export abstract class LambdaCompiler extends PatternCompiler {
         object: args[0] as Expression,
         name: reference.name,
         args: args.slice(1),
+        typeArgs: reference.typeArgs,
         ...span,
       });
     }
@@ -534,7 +549,25 @@ export abstract class LambdaCompiler extends PatternCompiler {
     const bound = hint && upperBound(hint);
     const methods = bound?.kind === 'class' ? this.collectMethods(bound.cls, expression.name) : [];
     const takesReceiver = methods.length > 0 && methods.every((method) => !method.isStatic);
-    return { ...compiled, type: { ...compiled.type, arities, receiverHint: takesReceiver ? hint : undefined } };
+    const lambda = this.exactReferenceShape(context, expression);
+    return { ...compiled, type: { ...compiled.type, arities, receiverHint: takesReceiver ? hint : undefined, lambda } };
+  }
+
+  /**
+   * The shape of an exact method reference, one naming a single method of fixed arity: it suits any void function,
+   * and a value-returning one when its method returns a value (JLS 15.13.2), and counts as explicitly typed.
+   */
+  private exactReferenceShape(
+    context: MethodContext,
+    reference: MethodReference
+  ): Extract<JavaType, { kind: 'pending' }>['lambda'] {
+    const owner = this.referenceOwner(context, reference);
+    const bound = owner && upperBound(owner);
+    if (bound?.kind !== 'class') return undefined;
+    const methods = this.collectMethods(bound.cls, reference.name);
+    const [method] = methods;
+    if (methods.length !== 1 || !method || method.isVarargs) return undefined;
+    return { inVoid: true, inValue: method.returnType.kind !== 'void', isExplicit: true, isReference: true };
   }
 
   /**
