@@ -1,5 +1,6 @@
 import type { Expression, PatternBinding, Span } from './ast';
 import { classObjectOfType, fitsElement, isReifiable, runtimeClassNameOf } from './builtinClass';
+import { boxedTypeOf } from './builtinWrappers';
 import {
   type Capture,
   type Compiled,
@@ -17,8 +18,10 @@ import {
   erasure,
   type FieldInfo,
   INT,
+  isPrimitive,
   isReference,
   isSubclass,
+  type JavaType,
   sameType,
   thisTypeOf,
   typeName,
@@ -244,7 +247,12 @@ export abstract class ReferenceCompiler extends CompilerBase {
     const type = expression.type ? this.resolveType(expression.type) : VOID;
     if (!isReifiable(type)) this.error(expression, `型引数を含む型 ${typeName(type)} には .class を使えません。`);
     const classClass = this.builtins.classes.get('Class') as ClassInfo;
-    return { kind: 'value', type: classClass.type, run: (frame) => classObjectOfType(frame, type, classClass) };
+    // `int.class` is a `Class<Integer>`, `String[].class` a `Class<String[]>`, and `List.class` a `Class<List>`.
+    const represented = isPrimitive(type) ? boxedTypeOf(this.builtins.wrappers, type) : erasure(type);
+    const literalType: JavaType = represented
+      ? { kind: 'class', cls: classClass, args: [represented] }
+      : classClass.type;
+    return { kind: 'value', type: literalType, run: (frame) => classObjectOfType(frame, type, classClass) };
   }
 
   /** Resolves `object.name` where `object` is a value, including an array's `length`. */
