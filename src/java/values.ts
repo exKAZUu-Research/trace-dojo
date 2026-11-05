@@ -180,11 +180,19 @@ export class HashStore {
   }
 
   /**
-   * Grows the table and then adds an entry at the start of its bucket, as `HashMap.computeIfAbsent`, `compute`, and
-   * `merge` do; a later resize keeps the order within each bucket, as Java's split of a bucket does.
+   * Grows a table whose entries exceed three quarters of it, as `HashMap.computeIfAbsent`, `compute`, and `merge` do
+   * first, whether or not they find the key.
+   */
+  growBeforeCompute(): void {
+    while (this.entries.length > this.capacity * 0.75) this.capacity *= 2;
+  }
+
+  /**
+   * Adds an entry at the start of its bucket, as `HashMap.computeIfAbsent`, `compute`, and `merge` do after
+   * `growBeforeCompute`; a later resize keeps the order within each bucket, as Java's split of a bucket does.
    */
   addAtBucketHead(entry: HashEntry): void {
-    while (this.entries.length > this.capacity * 0.75) this.capacity *= 2;
+    this.growBeforeCompute();
     const crowded = this.bucketSize(entry) >= TREEIFY_THRESHOLD - 1;
     // An order before every other entry's puts it first in its bucket, where a HashMap's head insertion puts it.
     entry.order = this.order === 'hash' ? --this.firstOrder : this.lastOrder++;

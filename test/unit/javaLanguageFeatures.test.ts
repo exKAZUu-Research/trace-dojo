@@ -100,7 +100,7 @@ class Res implements AutoCloseable { final StringBuilder log; Res(StringBuilder 
   ],
   [
     'string methods that return the receiver or the pooled empty string',
-    'String s = "abc"; StringBuilder sb = new StringBuilder("ab"); boolean same = s.replaceAll("x", "y") == s && s.replaceFirst("x", "y") == s; boolean pooled = s.substring(3) == "" && s.repeat(0) == "" && "  ".strip() == "" && sb.substring(2, 2) == "" && new StringBuilder().toString() == ""; boolean fresh = sb.substring(0) == "ab";',
+    'String s = "abc"; StringBuilder sb = new StringBuilder("ab"); boolean same = s.replaceAll("x", "y") == s && s.replaceFirst("x", "y") == s && s.replace("b", "b") == s && s.split("x")[0] == s; boolean pooled = s.substring(3) == "" && s.repeat(0) == "" && "  ".strip() == "" && sb.substring(2, 2) == "" && new StringBuilder().toString() == "" && s.replace("abc", "") == "" && s.replaceAll(".", "") == ""; boolean fresh = sb.substring(0) == "ab" || s.replaceAll("b", "b") == s || s.replace("abc", "abc") == s || s.replace("", "") == s;',
     {},
     { same: true, pooled: true, fresh: false },
   ],
@@ -319,6 +319,9 @@ test("Java's bulk operations, priority queue iterators, and unmodifiable wrapper
     finalVarsOf(
       `List<Integer> a = new ArrayList<>(List.of(1, 2, 3)); String bulk = ""; try { a.removeIf(n -> { a.add(9); return n == 2; }); } catch (ConcurrentModificationException e) { bulk = a.toString(); }
 PriorityQueue<Integer> q = new PriorityQueue<>(); for (int x : new int[] {0, 4, 1, 5, 6, 2, 3}) q.add(x); Iterator<Integer> i = q.iterator(); String seen = ""; while (i.hasNext()) { int x = i.next(); seen += x; if (x == 6) i.remove(); }
+List<String> live = new ArrayList<>(List.of("a", "b")); live.removeIf(x -> { if (x.equals("a")) live.set(1, "c"); return x.equals("c"); }); String liveText = live.toString();
+Map<Integer, Integer> viewed = new HashMap<>(Map.of(1, 1)); String viewCme = ""; try { viewed.keySet().removeIf(x -> { viewed.put(2, 2); return true; }); } catch (ConcurrentModificationException e) { viewCme = "cme" + viewed; }
+Map<String, Integer> counts = new HashMap<>(); for (String w : "one two three four five six seven eight nine ten eleven twelve thirteen one".split(" ")) counts.merge(w, 1, Integer::sum); String counted = counts.toString();
 String exhausted = ""; try { i.next(); } catch (NoSuchElementException e) { exhausted += "N"; } try { i.remove(); } catch (IllegalStateException e) { exhausted += "I"; } exhausted += q;
 Set<Integer> s = new HashSet<>(Set.of(1)); Iterator<Integer> u = Collections.unmodifiableSet(s).iterator(); s.add(2); String wrapped = ""; try { u.next(); } catch (ConcurrentModificationException e) { wrapped = "cme"; }
 List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(Comparator.nullsFirst(Comparator.naturalOrder())); String sorted = nulls.toString();`
@@ -327,6 +330,10 @@ List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(
     bulk: '[1, 2, 3, 9, 9, 9]',
     seen: '0415623',
     exhausted: 'NI[0, 3, 1, 5, 4, 2]',
+    liveText: '[a]',
+    viewCme: 'cme{1=1, 2=2}',
+    counted:
+      '{nine=1, six=1, one=2, seven=1, three=1, two=1, thirteen=1, eight=1, four=1, twelve=1, eleven=1, ten=1, five=1}',
     wrapped: 'cme',
     sorted: '[null, a, b]',
   });

@@ -17,6 +17,9 @@ interface Group {
   container: unknown;
 }
 
+/** The groups in the order their keys came, and whether an element of an earlier key came after the last new key. */
+type Groups = Group[] & { endsWithHit?: boolean };
+
 const ANY: WildcardType = { kind: 'wildcard', bound: undefined, isSuper: false };
 
 /**
@@ -226,13 +229,14 @@ function grouping(
   const target = functionsOf(frame, downstream);
   const fn = frame.runtime.builtins.classes.get('Function') as ClassInfo;
   return {
-    supply: () => [] as Group[],
+    supply: (): Groups => [],
     accumulate: (accumulateFrame, container, value) => {
-      const groups = container as Group[];
+      const groups = container as Groups;
       const key = callFunction(accumulateFrame, fn, classifier, [value]);
       if (key === undefined)
         throwBuiltin(accumulateFrame, 'NullPointerException', 'element cannot be mapped to a null key');
       let group = groups.find((candidate) => javaEquals(accumulateFrame, candidate.key, key));
+      groups.endsWithHit = group !== undefined;
       if (!group) {
         group = { key, container: target.supply(accumulateFrame) };
         groups.push(group);
@@ -241,10 +245,13 @@ function grouping(
     },
     finish: (finishFrame, container) => {
       const map = newMap(finishFrame);
-      // groupingBy adds each key with computeIfAbsent, which a HashMap puts at the start of its bucket.
-      for (const { key, container: groupContainer } of container as Group[]) {
+      const groups = container as Groups;
+      // groupingBy adds each key with computeIfAbsent, which a HashMap puts at the start of its bucket, and calls it
+      // for each element, whose call after the last new key may still grow the table.
+      for (const { key, container: groupContainer } of groups) {
         putEntry(finishFrame, map, key, false, target.finish(finishFrame, groupContainer), true);
       }
+      if (groups.endsWithHit) (map as JavaObject).store?.growBeforeCompute();
       return map;
     },
   };

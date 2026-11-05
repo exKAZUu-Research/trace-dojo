@@ -345,7 +345,7 @@ function defineStringExtras(stringClass: ClassInfo, collections: Collections): v
     (frame, receiver, [regex, replacement]) => {
       frame.runtime.scanString(text(receiver).length);
       const pattern = compileRegex(frame, requireString(frame, regex), 'g');
-      return newString(frame, replaceWith(frame, text(receiver), pattern, requireString(frame, replacement)));
+      return replaceMatches(frame, receiver, pattern, requireString(frame, replacement));
     }
   );
   addMethod(stringClass, 'matches', [stringType], BOOLEAN, false, (frame, receiver, [regex]) => {
@@ -416,7 +416,7 @@ function defineStringVariants(stringClass: ClassInfo, objectClass: ClassInfo): v
     (frame, receiver, [regex, replacement]) => {
       frame.runtime.scanString(text(receiver).length);
       const pattern = compileRegex(frame, requireString(frame, regex), '');
-      return newString(frame, replaceWith(frame, text(receiver), pattern, requireString(frame, replacement)));
+      return replaceMatches(frame, receiver, pattern, requireString(frame, replacement));
     }
   );
   // `contentEquals` takes a CharSequence, which these programs pass as a String or a StringBuilder.
@@ -511,6 +511,14 @@ function checkRange(frame: Frame, begin: number, end: number, length: number): v
       `Range [${begin}, ${end}) out of bounds for length ${length}`
     );
   }
+}
+
+/** The string with the pattern's matches replaced, which is the receiver itself when nothing matches, as in the JDK. */
+function replaceMatches(frame: Frame, receiver: Value, pattern: RegExp, replacement: string): Value {
+  const found = pattern.test(text(receiver));
+  pattern.lastIndex = 0;
+  if (!found) return receiver;
+  return newString(frame, replaceWith(frame, text(receiver), pattern, replacement));
 }
 
 export function compareIgnoringCase(a: string, b: string): number {

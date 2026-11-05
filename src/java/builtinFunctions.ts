@@ -716,8 +716,7 @@ function defineMapDefaults(collections: Collections, functions: DefaultFunctions
     mapV,
     false,
     (frame, receiver, [key, mapping]) => {
-      checkModifiable(frame, receiver, false);
-      const entry = findEntry(frame, receiver, key);
+      const entry = startComputing(frame, receiver, key);
       if (entry && entry.value !== undefined) return entry.value;
       const value = callFunction(frame, functions.fn, mapping, [key]);
       if (value !== undefined) putEntry(frame, receiver, key, false, value, true);
@@ -731,18 +730,29 @@ function defineMapDefaults(collections: Collections, functions: DefaultFunctions
     mapV,
     false,
     (frame, receiver, [key, value, remapping]) => {
-      checkModifiable(frame, receiver, false);
-      const entry = findEntry(frame, receiver, key);
+      const entry = startComputing(frame, receiver, key);
       const merged =
         entry && entry.value !== undefined
           ? callFunction(frame, functions.biFunction, remapping, [entry.value, value])
           : value;
-      if (merged === undefined) removeEntry(frame, receiver, key);
-      else putEntry(frame, receiver, key, false, merged, true);
-      return merged;
+      return putComputed(frame, receiver, key, merged);
     }
   );
   defineMapRemappings(mapClass, functions, mapK, mapV);
+}
+
+/** Starts `computeIfAbsent`, `compute`, or `merge`, which grow a HashMap's table first, as the JDK's do. */
+function startComputing(frame: Frame, receiver: Value, key: Value): ReturnType<typeof findEntry> {
+  checkModifiable(frame, receiver, false);
+  (receiver as JavaObject).store?.growBeforeCompute();
+  return findEntry(frame, receiver, key);
+}
+
+/** Maps the key to a computed value, or removes it for null, returning the value. */
+function putComputed(frame: Frame, receiver: Value, key: Value, value: Value): Value {
+  if (value === undefined) removeEntry(frame, receiver, key);
+  else putEntry(frame, receiver, key, false, value, true);
+  return value;
 }
 
 /**
@@ -751,20 +761,16 @@ function defineMapDefaults(collections: Collections, functions: DefaultFunctions
  */
 function defineMapRemappings(mapClass: ClassInfo, functions: DefaultFunctions, mapK: JavaType, mapV: JavaType): void {
   const remappingType = classType(functions.biFunction, superOf(mapK), superOf(mapV), extendsOf(mapV));
-  for (const [name, needsValue] of [
-    ['compute', false],
-    ['computeIfPresent', true],
-  ] as const) {
-    addMethod(mapClass, name, [mapK, remappingType], mapV, false, (frame, receiver, [key, remapping]) => {
-      checkModifiable(frame, receiver, false);
-      const current = findEntry(frame, receiver, key)?.value;
-      if (needsValue && current === undefined) return;
-      const value = callFunction(frame, functions.biFunction, remapping, [key, current]);
-      if (value === undefined) removeEntry(frame, receiver, key);
-      else putEntry(frame, receiver, key, false, value, true);
-      return value;
-    });
-  }
+  addMethod(mapClass, 'compute', [mapK, remappingType], mapV, false, (frame, receiver, [key, remapping]) => {
+    const current = startComputing(frame, receiver, key)?.value;
+    return putComputed(frame, receiver, key, callFunction(frame, functions.biFunction, remapping, [key, current]));
+  });
+  addMethod(mapClass, 'computeIfPresent', [mapK, remappingType], mapV, false, (frame, receiver, [key, remapping]) => {
+    checkModifiable(frame, receiver, false);
+    const current = findEntry(frame, receiver, key)?.value;
+    if (current === undefined) return;
+    return putComputed(frame, receiver, key, callFunction(frame, functions.biFunction, remapping, [key, current]));
+  });
   const objectType = mapClass.typeParameters[0].bounds[0] as JavaType;
   addMethod(mapClass, 'remove', [objectType, objectType], BOOLEAN, false, (frame, receiver, [key, value]) => {
     checkModifiable(frame, receiver, false);
