@@ -1319,6 +1319,11 @@ const programs: [name: string, runs: boolean, source: string][] = [
     'class Main {\n  public static void main(String[] args) {\n    enum Op { ADD { int ap(int a, int b) { return a + b; } }; abstract int ap(int a, int b); }\n    System.out.println(Op.ADD.ap(1, 2));\n  }\n}',
   ],
   [
+    'qualified-enum-constants-cover-a-sealed-selector',
+    true,
+    'sealed interface Sh permits Color, Other {}\nenum Color implements Sh { RED, GREEN }\nrecord Other() implements Sh {}\nclass Main {\n  public static void main(String[] args) {\n    Sh s = Color.RED; System.out.println(switch (s) { case Color.RED -> 1; case Color.GREEN -> 2; case Other o -> 3; });\n  }\n}',
+  ],
+  [
     'keyed-comparator-chained-without-target',
     true,
     'import java.util.*;\nclass Main {\n  record P(String name, int age) {}\n  public static void main(String[] args) {\n    List<P> ps = new ArrayList<>(); ps.sort(Comparator.comparing(P::name, Comparator.reverseOrder()).reversed());\n  }\n}',

@@ -3,11 +3,9 @@ import { type ClassInfo, erasure, type JavaType, type MethodInfo } from './types
 
 /**
  * What a value that turns out null came from, which the messages of `NullPointerException` name as the JDK's
- * helpful messages (JEP 358) do: a variable, field, or array element by its `path`, or a method's return value.
- */
-/**
- * Where a null value came from, as the JDK's messages name it; `hidden` is a value of a variable the compiler made, as a
- * method reference's parameter, which the JVM holds in a hidden frame and so gives its exception no message.
+ * helpful messages (JEP 358) do: a variable, field, or array element by its `path`, or a method's return value. A
+ * `hidden` value is one of a variable the compiler made, as a method reference's parameter, which the JVM holds in a
+ * hidden frame, so that its exception has no message.
  */
 export type NullSource = { path: string } | { returnOf: string } | { hidden: true };
 

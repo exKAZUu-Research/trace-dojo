@@ -312,6 +312,23 @@ export abstract class PatternCompiler extends TryCompiler {
     }
     const value = this.compileValue(context, label);
     const constant = value.constant;
+    const valueBound = upperBound(value.type);
+    // Another selector type takes an enum's constants by qualified names, as `case Color.RED` (JLS 14.11.1).
+    if (
+      constant === undefined &&
+      label.kind === 'fieldAccess' &&
+      valueBound.kind === 'class' &&
+      valueBound.cls.kind === 'enum'
+    ) {
+      if (!isCastable(valueBound, selectorType, this.builtins.objectClass)) {
+        this.error(label, `${typeName(selectorType)} 型の値は ${typeName(valueBound)} の定数になりません。`);
+      }
+      this.checkConstantDominance(dominating, valueBound, label);
+      const key = `${valueBound.cls.binaryName}.${label.name}`;
+      if (enumConstants.has(key)) this.error(label, 'case の値が重複しています。');
+      enumConstants.add(key);
+      return (frame, tested) => tested === value.run(frame);
+    }
     if (constant === undefined) this.error(label, 'case には定数を書いてください。');
     this.checkConstantDominance(dominating, boxedTypeOf(this.builtins.wrappers, value.type) ?? value.type, label);
     if (constant instanceof JavaString) {
@@ -359,7 +376,10 @@ export abstract class PatternCompiler extends TryCompiler {
     const { cls } = bound;
     if (cls.kind === 'enum') {
       const constants = cls.staticFields.filter((field) => field.enumConstant);
-      return constants.length > 0 && constants.every((field) => enumConstants.has(field.name));
+      // A switch over the enum names its constants simply, and one over another type by qualified names.
+      const named = (field: { name: string }): boolean =>
+        enumConstants.has(field.name) || enumConstants.has(`${cls.binaryName}.${field.name}`);
+      return constants.length > 0 && constants.every((field) => named(field));
     }
     const records = patterns.filter((pattern) => pattern.record?.cls === cls);
     if (

@@ -110,7 +110,6 @@ export abstract class ReferenceCompiler extends CompilerBase {
     };
   }
 
-  /** Resolves `object.name`, or a simple name when `object` is `undefined`. */
   /** Resolves a simple name that is not a local: a field of the current class or a class name. */
   protected compileSimpleNameReference(
     context: MethodContext,

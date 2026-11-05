@@ -75,7 +75,7 @@ function defineMapReplaceAll(mapClass: ClassInfo, functions: ComputeFunctions, m
       entry.value = callFunction(frame, functions.biFunction, fn, [entry.key, entry.value]);
     };
     if (failsFast(map)) replaceFailingFast(frame, map, store, apply);
-    else replaceLive(store, apply);
+    else replaceByPosition(frame, map, store, apply);
   });
 }
 
@@ -119,13 +119,23 @@ function replaceFailingFast(frame: Frame, map: JavaObject, store: HashStore, app
   check();
 }
 
-/** Replaces each value as Map's default does through an EnumMap's live iterator, which reaches keys added after it. */
-function replaceLive(store: HashStore, apply: (entry: HashEntry) => void): void {
-  for (let index = 0; index < store.ordered().length; index++) {
-    const entry = store.ordered()[index] as HashEntry;
+/**
+ * Replaces each value as Map's default does through an EnumMap's iterator, which walks the enum's positions, reaching
+ * keys added after the current one, and whose entry writes its value back to its position even after a removal.
+ */
+function replaceByPosition(frame: Frame, map: JavaObject, store: HashStore, apply: (entry: HashEntry) => void): void {
+  let last = -1;
+  for (;;) {
+    const entry = store.ordered().find((candidate) => ordinalOf(candidate.key) > last);
+    if (!entry) return;
+    last = ordinalOf(entry.key);
     apply(entry);
-    index = Math.max(index, store.ordered().indexOf(entry));
+    if (!store.ordered().includes(entry)) putEntry(frame, map, entry.key, false, entry.value);
   }
+}
+
+function ordinalOf(key: Value): number {
+  return (key as JavaObject).enumConstant?.ordinal ?? 0;
 }
 
 /** Maps the key to a computed value, or removes it for null, returning the value. */
