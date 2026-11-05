@@ -1289,6 +1289,11 @@ const programs: [name: string, runs: boolean, source: string][] = [
     'class MyList<T> { class Node { T val; Node(T v) { val = v; } } }\nclass Strs extends MyList<String> { int len() { Node n = new Node("ab"); return n.val.length(); } }\nclass Main {\n  public static void main(String[] args) {\n    new Strs().len();\n  }\n}',
   ],
   [
+    'static-member-selected-from-parameterized-type',
+    false,
+    'class Main {\n  static class O<T> { static class N {} }\n  public static void main(String[] args) {\n    O<String>.N n = null;\n  }\n}',
+  ],
+  [
     'keyed-comparator-chained-without-target',
     true,
     'import java.util.*;\nclass Main {\n  record P(String name, int age) {}\n  public static void main(String[] args) {\n    List<P> ps = new ArrayList<>(); ps.sort(Comparator.comparing(P::name, Comparator.reverseOrder()).reversed());\n  }\n}',

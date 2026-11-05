@@ -79,6 +79,13 @@ export abstract class TypeResolver {
    */
   private outerTypeOf(syntax: Extract<TypeSyntax, { kind: 'named' }>, cls: ClassInfo): ClassType | undefined {
     const { enclosing } = cls;
+    // A static member type has no enclosing instance whose type arguments it could use (JLS 8.1.3).
+    if (syntax.outer && !cls.hasOuterInstance) {
+      this.error(
+        syntax,
+        `型引数を付けた型 ${typeName(this.resolveType(syntax.outer))} からは、static なクラス ${cls.name} を選べません。`
+      );
+    }
     if (!enclosing || !hasGenericOuter(cls)) return undefined;
     if (syntax.outer) {
       const outer = this.resolveType(syntax.outer);

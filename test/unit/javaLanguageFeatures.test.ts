@@ -343,6 +343,7 @@ List<String> live = new ArrayList<>(List.of("a", "b")); live.removeIf(x -> { if 
 Map<Integer, Integer> viewed = new HashMap<>(Map.of(1, 1)); String viewCme = ""; try { viewed.keySet().removeIf(x -> { viewed.put(2, 2); return true; }); } catch (ConcurrentModificationException e) { viewCme = "cme" + viewed; }
 Map<String, Integer> counts = new HashMap<>(); for (String w : "one two three four five six seven eight nine ten eleven twelve thirteen one".split(" ")) counts.merge(w, 1, Integer::sum); String counted = counts.toString();
 List<Integer> linked = new LinkedList<>(List.of(1, 2, 3)); try { linked.removeIf(x -> { if (x == 3) throw new RuntimeException(); return x == 1; }); } catch (RuntimeException e) {} String linkedText = linked.toString();
+StringBuilder collecting = new StringBuilder(); Stream.of(1, 2).peek(x -> collecting.append(x)).collect(Collectors.toCollection(() -> { collecting.append("S"); return new ArrayList<Integer>(); })); String collectOrder = collecting.toString();
 String exhausted = ""; try { i.next(); } catch (NoSuchElementException e) { exhausted += "N"; } try { i.remove(); } catch (IllegalStateException e) { exhausted += "I"; } exhausted += q;
 Set<Integer> s = new HashSet<>(Set.of(1)); Iterator<Integer> u = Collections.unmodifiableSet(s).iterator(); s.add(2); String wrapped = ""; try { u.next(); } catch (ConcurrentModificationException e) { wrapped = "cme"; }
 List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(Comparator.nullsFirst(Comparator.naturalOrder())); String sorted = nulls.toString();`
@@ -353,6 +354,7 @@ List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(
     exhausted: 'NI[0, 3, 1, 5, 4, 2]',
     liveText: '[a]',
     linkedText: '[2, 3]',
+    collectOrder: 'S12',
     viewCme: 'cme{1=1, 2=2}',
     counted:
       '{nine=1, six=1, one=2, seven=1, three=1, two=1, thirteen=1, eight=1, four=1, twelve=1, eleven=1, ten=1, five=1}',

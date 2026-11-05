@@ -142,15 +142,16 @@ export function defineDownstreamCollectors(
     ([t, c]) => ({ parameters: [classType(fn('Supplier'), c)], result: collectorOf(t, ANY, c) }),
     (frame, _, [factory]) =>
       create(frame, {
-        supply: () => [] as Value[],
-        accumulate: (__, container, value) => void (container as Value[]).push(value),
-        finish: (finishFrame, container) => {
-          const result = callFunction(finishFrame, fn('Supplier'), factory, []);
-          for (const value of container as Value[]) {
-            finishFrame.runtime.invokeVirtual(finishFrame, collections.collectionClass, 'add', result, [value]);
-          }
-          return result;
-        },
+        supply: (supplyFrame) => callFunction(supplyFrame, fn('Supplier'), factory, []),
+        accumulate: (accumulateFrame, container, value) =>
+          void accumulateFrame.runtime.invokeVirtual(
+            accumulateFrame,
+            collections.collectionClass,
+            'add',
+            container as Value,
+            [value]
+          ),
+        finish: (_, container) => container as Value,
       })
   );
 }
