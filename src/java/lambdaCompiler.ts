@@ -57,7 +57,8 @@ export abstract class LambdaCompiler extends PatternCompiler {
 
   /**
    * Compiles `expression::method`, which evaluates the expression once, when the reference is created, and fails
-   * there for null (JLS 15.13.3); the function then calls the method on that value, held in a local of its own.
+   * there for null (JLS 15.13.3); the function then calls the method on that value, which it captures from a local
+   * of its own.
    */
   protected compileBoundReference(
     context: MethodContext,
@@ -75,7 +76,12 @@ export abstract class LambdaCompiler extends PatternCompiler {
         const value = receiver.run(frame);
         if (value === undefined) throwBuiltin(frame, 'NullPointerException');
         frame.locals[slot] = value;
-        return created.run(frame);
+        try {
+          return created.run(frame);
+        } finally {
+          // The function holds the receiver from here on, so the local no longer keeps it alive.
+          frame.locals[slot] = undefined;
+        }
       },
     };
   }
@@ -226,10 +232,28 @@ export abstract class LambdaCompiler extends PatternCompiler {
     }
     // The target type decides what the other arguments leave open before the lambdas, whose parameters may need it.
     if (targetType && !isPrimitive(targetType)) inferFromTarget(this.builtins, method, targetType, bindings);
-    for (const [index, arg] of args.entries()) {
-      if (arg.type.kind === 'pending') this.inferFromLambda(context, method, index, expressions[index], bindings);
-    }
+    this.inferFromPendingArguments(context, method, args, expressions, bindings);
     return bindings;
+  }
+
+  /**
+   * Infers from the lambdas and postponed calls among `args`, in a second round too when the first decides something,
+   * as `groupingBy(String::length, toList())` decides `T` from the method reference before `toList()` can use it.
+   */
+  protected inferFromPendingArguments(
+    context: MethodContext,
+    method: MethodInfo,
+    args: readonly CompiledValue[],
+    expressions: readonly Expression[],
+    bindings: Map<TypeVariable, JavaType>
+  ): void {
+    for (let round = 0; round < 2; round++) {
+      const decided = bindings.size;
+      for (const [index, arg] of args.entries()) {
+        if (arg.type.kind === 'pending') this.inferFromLambda(context, method, index, expressions[index], bindings);
+      }
+      if (bindings.size === decided) return;
+    }
   }
 
   /** Infers the type parameters of `method` that the result of its lambda argument at `index` decides. */
@@ -253,6 +277,7 @@ export abstract class LambdaCompiler extends PatternCompiler {
     if (expression.kind === 'lambda')
       this.inferFromLambdaParameters(expression, functional, declared, variables, bindings);
     const unresolved = variables.filter((variable) => !bindings.has(variable));
+    if (expression.kind === 'lambda' && waitsForParameterTypes(expression, functional, declared, unresolved)) return;
     // The functional interface's result in terms of the method's type parameters, as in `? extends R`.
     const samResult = substitute(functional.returnType, memberBindings(declared, functional.owner));
     const declaredResult =
@@ -486,4 +511,19 @@ function mentionsAny(type: JavaType, variables: readonly TypeVariable[]): boolea
       return false;
     }
   }
+}
+
+/**
+ * Whether an implicitly typed lambda's body waits for parameter types that mention undecided type parameters, which a
+ * target may decide later (JLS 18.5.2).
+ */
+function waitsForParameterTypes(
+  lambda: Lambda,
+  functional: MethodInfo,
+  declared: ClassType,
+  unresolved: readonly TypeVariable[]
+): boolean {
+  if (lambda.parameters.every((parameter) => parameter.type)) return false;
+  const bindings = memberBindings(declared, functional.owner);
+  return functional.parameterTypes.some((type) => mentionsAny(substitute(type, bindings), unresolved));
 }

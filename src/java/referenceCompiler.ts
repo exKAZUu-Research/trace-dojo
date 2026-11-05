@@ -96,7 +96,12 @@ export abstract class ReferenceCompiler extends CompilerBase {
     const field = this.findField(context.cls, name.name);
     if (field) {
       if (!field.isStatic && context.isStatic) {
-        this.error(name, `static ではないフィールド ${name.name} は static メソッドの中から使えません。`);
+        this.noInstanceError(
+          context,
+          name,
+          name.name,
+          `static ではないフィールド ${name.name} は static メソッドの中から使えません。`
+        );
       }
       return this.fieldReference(field, field.isStatic ? undefined : thisValue(context));
     }
@@ -160,7 +165,8 @@ export abstract class ReferenceCompiler extends CompilerBase {
     context: MethodContext,
     access: Extract<Expression, { kind: 'fieldAccess' }>
   ): Reference {
-    if (context.isStatic) this.error(access, 'static メソッドの中では super を使えません。');
+    if (context.isStatic)
+      this.noInstanceError(context, access, 'super', 'static メソッドの中では super を使えません。');
     const superclass = context.cls.superclass as ClassInfo;
     const field = this.findField(superclass, access.name);
     if (!field) return this.error(access, missingFieldMessage(superclass, access.name));

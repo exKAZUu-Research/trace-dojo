@@ -27,16 +27,26 @@ function closeResources(
   primary: JavaThrow | undefined
 ): JavaThrow | undefined {
   let thrown = primary;
-  for (let index = opened.length - 1; index >= 0; index--) {
-    const value = opened[index];
-    if (value === undefined) continue;
-    try {
-      frame.runtime.invoke(frame, frame.runtime.dispatch(value, resources[index].close), value, [], undefined);
-    } catch (error) {
-      if (!(error instanceof JavaThrow)) throw error;
-      if (thrown) (thrown.value.suppressed ??= []).push(error.value);
-      else thrown = error;
+  let isRooted = false;
+  try {
+    for (let index = opened.length - 1; index >= 0; index--) {
+      const value = opened[index];
+      if (value === undefined) continue;
+      try {
+        frame.runtime.invoke(frame, frame.runtime.dispatch(value, resources[index].close), value, [], undefined);
+      } catch (error) {
+        if (!(error instanceof JavaThrow)) throw error;
+        if (thrown) (thrown.value.suppressed ??= []).push(error.value);
+        else {
+          thrown = error;
+          // The exception, and those suppressed in it, stay reachable while the remaining resources close.
+          frame.temporaries.push(thrown.value);
+          isRooted = true;
+        }
+      }
     }
+  } finally {
+    if (isRooted) frame.temporaries.pop();
   }
   return thrown;
 }

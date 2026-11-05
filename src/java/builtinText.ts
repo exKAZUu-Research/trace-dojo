@@ -1,6 +1,8 @@
 import { type Collections, javaHash } from './builtinCollections';
 import { stringify } from './builtins';
 import { addConstructor, addMethod, newString, type Registry, requireString, text } from './builtinSupport';
+import { JAVA_WHITESPACE } from './builtinWrappers';
+import { javaReplacement, translateJavaRegex, UnsupportedRegexError } from './javaRegex';
 import { type Frame, throwBuiltin } from './runtime';
 import { BOOLEAN, CHAR, type ClassInfo, DOUBLE, FLOAT, INT, type JavaType, LONG, VOID } from './types';
 import {
@@ -13,6 +15,9 @@ import {
   type Value,
 } from './values';
 
+const LEADING_WHITESPACE = new RegExp(`^${JAVA_WHITESPACE}+`, 'u');
+const TRAILING_WHITESPACE = new RegExp(`${JAVA_WHITESPACE}+$`, 'u');
+const BLANK = new RegExp(`^${JAVA_WHITESPACE}*$`, 'u');
 const CHAR_ARRAY: JavaType = { kind: 'array', element: CHAR };
 
 export function defineText(
@@ -113,8 +118,12 @@ function builderOf(receiver: Value): string {
   return (receiver as JavaObject).builder as string;
 }
 
-function setBuilder(frame: Frame, receiver: Value, value: string): Value {
-  frame.runtime.allocateString(frame, value.length);
+/**
+ * Gives a builder new content, charging for the characters the Java operation writes or moves, `work`, rather than
+ * for rebuilding the whole content, as a growing builder's append costs Java only its new characters.
+ */
+function setBuilder(frame: Frame, receiver: Value, value: string, work = value.length): Value {
+  frame.runtime.allocateString(frame, value.length, work);
   (receiver as JavaObject).builder = value;
   return receiver;
 }
@@ -141,7 +150,7 @@ function defineStringBuilder(registry: Registry, objectClass: ClassInfo, stringC
   for (const type of [stringType, CHAR, INT, LONG, DOUBLE, FLOAT, BOOLEAN, objectClass.type, CHAR_ARRAY]) {
     addMethod(cls, 'append', [type], builderType, false, (frame, receiver, [value]) => {
       const appended = type === CHAR_ARRAY ? arrayOfChars(frame, value) : stringify(frame, value, type);
-      return setBuilder(frame, receiver, builderOf(receiver) + appended);
+      return setBuilder(frame, receiver, builderOf(receiver) + appended, appended.length);
     });
     if (type === CHAR_ARRAY) continue;
     addMethod(cls, 'insert', [INT, type], builderType, false, (frame, receiver, [offset, value]) => {
@@ -202,12 +211,12 @@ function defineBuilderEdits(cls: ClassInfo, stringType: JavaType): void {
     if ((length as number) < 0) {
       throwBuiltin(frame, 'StringIndexOutOfBoundsException', `String index out of range: ${length as number}`);
     }
+    const current = builderOf(receiver);
     setBuilder(
       frame,
       receiver,
-      builderOf(receiver)
-        .slice(0, length as number)
-        .padEnd(length as number, '\0')
+      current.slice(0, length as number).padEnd(length as number, '\0'),
+      Math.abs((length as number) - current.length)
     );
   });
 }
@@ -248,7 +257,9 @@ function defineBuilderQueries(cls: ClassInfo, stringType: JavaType): void {
 /** Replaces the characters from `start` to `end` with `inserted`. */
 function spliceBuilder(frame: Frame, receiver: Value, start: number, end: number, inserted: string): Value {
   const current = builderOf(receiver);
-  return setBuilder(frame, receiver, current.slice(0, start) + inserted + current.slice(end));
+  // Characters after the span move unless the replacement keeps the length.
+  const moved = inserted.length === end - start ? 0 : current.length - end;
+  return setBuilder(frame, receiver, current.slice(0, start) + inserted + current.slice(end), inserted.length + moved);
 }
 
 function checkSpan(frame: Frame, start: number, end: number, length: number, isInvalid: boolean): void {
@@ -343,7 +354,7 @@ function defineStringExtras(stringClass: ClassInfo, collections: Collections): v
   );
   addMethod(stringClass, 'matches', [stringType], BOOLEAN, false, (frame, receiver, [regex]) => {
     frame.runtime.scanString(text(receiver).length);
-    return compileRegex(frame, `^(?:${requireString(frame, regex)})$`, '').test(text(receiver));
+    return compileRegex(frame, requireString(frame, regex), '', true).test(text(receiver));
   });
   addMethod(stringClass, 'lastIndexOf', [stringType], INT, false, (frame, receiver, [pattern]) => {
     frame.runtime.scanString(text(receiver).length);
@@ -364,8 +375,10 @@ function defineStringExtras(stringClass: ClassInfo, collections: Collections): v
     if ((code as number) < 0 || (code as number) > 0x10_ff_ff) return -1;
     return text(receiver).indexOf(String.fromCodePoint(code as number), Math.max(from as number, 0));
   });
-  addMethod(stringClass, 'strip', [], stringType, false, (frame, receiver) => newString(frame, text(receiver).trim()));
-  addMethod(stringClass, 'isBlank', [], BOOLEAN, false, (_, receiver) => text(receiver).trim() === '');
+  addMethod(stringClass, 'strip', [], stringType, false, (frame, receiver) =>
+    newString(frame, text(receiver).replace(LEADING_WHITESPACE, '').replace(TRAILING_WHITESPACE, ''))
+  );
+  addMethod(stringClass, 'isBlank', [], BOOLEAN, false, (_, receiver) => BLANK.test(text(receiver)));
   addMethod(stringClass, 'compareToIgnoreCase', [stringType], INT, false, (frame, receiver, [other]) =>
     compareIgnoringCase(text(receiver), requireString(frame, other))
   );
@@ -381,10 +394,10 @@ function defineStringExtras(stringClass: ClassInfo, collections: Collections): v
 function defineStringVariants(stringClass: ClassInfo, objectClass: ClassInfo): void {
   const stringType = stringClass.type;
   addMethod(stringClass, 'stripLeading', [], stringType, false, (frame, receiver) =>
-    newString(frame, text(receiver).trimStart())
+    newString(frame, text(receiver).replace(LEADING_WHITESPACE, ''))
   );
   addMethod(stringClass, 'stripTrailing', [], stringType, false, (frame, receiver) =>
-    newString(frame, text(receiver).trimEnd())
+    newString(frame, text(receiver).replace(TRAILING_WHITESPACE, ''))
   );
   addMethod(stringClass, 'codePointCount', [INT, INT], INT, false, (frame, receiver, [begin, end]) => {
     checkRange(frame, begin as number, end as number, text(receiver).length);
@@ -438,24 +451,15 @@ function lastIndexFrom(frame: Frame, value: string, target: Value | string, from
   return from < 0 ? -1 : value.lastIndexOf(needle, from);
 }
 
-function compileRegex(frame: Frame, pattern: string, flags: string): RegExp {
+/** @param isWhole Whether the expression must match the whole input, as `String.matches` requires. */
+function compileRegex(frame: Frame, pattern: string, flags: string, isWhole = false): RegExp {
   try {
-    return new RegExp(pattern.replaceAll(JAVA_LINEBREAK, `$1${LINEBREAK}`), flags);
-  } catch {
+    const translated = translateJavaRegex(pattern, isWhole);
+    return new RegExp(translated.source, translated.flags + flags);
+  } catch (error) {
+    if (!(error instanceof SyntaxError || error instanceof UnsupportedRegexError)) throw error;
     return throwBuiltin(frame, 'PatternSyntaxException', pattern);
   }
-}
-
-/** Java's `\R`, which JavaScript lacks, where an even number of backslashes before it leaves it unescaped. */
-const JAVA_LINEBREAK = /(?<=^|[^\\])((?:\\\\)*)\\R/g;
-const LINEBREAK = String.raw`(?:\r\n|[\n\v\f\r\u0085\u2028\u2029])`;
-
-/** Converts Java's replacement syntax, where `$1` names a group and a backslash escapes, to JavaScript's. */
-function javaReplacement(replacement: string): string {
-  return replacement.replaceAll(/\\(.)|\$(\d)|\$/g, (_, escaped: string | undefined, group: string | undefined) => {
-    if (escaped !== undefined) return escaped === '$' ? '$$' : escaped;
-    return group === undefined ? '$$' : `$${group}`;
-  });
 }
 
 /** Splits as `String.split` does: trailing empty strings go when `limit` is 0, and at most `limit` parts remain when positive. */
@@ -663,7 +667,8 @@ function formatDecimal(value: number, precision: number, conversion: string, fla
   if (conversion === 'e') {
     const { digits: rounded, carried } = roundDigits(digits, precision + 1);
     const finalExponent = exponent + carried;
-    const fraction = rounded.slice(1).padEnd(precision, '0');
+    // A carry into a new leading digit leaves one digit more than the precision keeps.
+    const fraction = rounded.slice(1, precision + 1).padEnd(precision, '0');
     const body = `${rounded[0]}${precision > 0 ? `.${fraction}` : ''}e${finalExponent < 0 ? '-' : '+'}${String(Math.abs(finalExponent)).padStart(2, '0')}`;
     return withSign(body, isNegative, flags);
   }
@@ -685,11 +690,8 @@ function formatDecimal(value: number, precision: number, conversion: string, fla
     fractionPart = all.slice(totalInteger, totalInteger + precision);
   }
   const integerText = flags.includes(',') ? group(integerPart) : integerPart;
-  return withSign(
-    precision > 0 ? `${integerText}.${fractionPart}` : integerText,
-    isNegative && /[1-9]/.test(integerPart + fractionPart),
-    flags
-  );
+  // The sign is the value's, even when it rounds to zero, as `-0.00` shows.
+  return withSign(precision > 0 ? `${integerText}.${fractionPart}` : integerText, isNegative, flags);
 }
 
 /** Rounds a digit string half up to `count` digits, telling whether rounding added a leading digit. */

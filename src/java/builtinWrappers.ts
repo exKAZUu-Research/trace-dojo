@@ -268,9 +268,13 @@ function defineWrapperMembers(
     (_, receiver, [other]) =>
       other instanceof JavaObject && other.cls === cls && sameValue(valueOf(receiver), other.boxed)
   );
-  addMethod(cls, 'compare', [primitive, primitive], INT, true, (_, __, [a, b]) => compareValues(a, b));
+  // Character, Short, and Byte compare by the difference of their values, the other wrappers by its sign.
+  const order = ['char', 'short', 'byte'].includes(kind)
+    ? (a: Value, b: Value): number => (a as number) - (b as number)
+    : compareValues;
+  addMethod(cls, 'compare', [primitive, primitive], INT, true, (_, __, [a, b]) => order(a, b));
   const compare = addMethod(cls, 'compareTo', [cls.type], INT, false, (frame, receiver, [other]) =>
-    compareValues(valueOf(receiver), unbox(frame, other))
+    order(valueOf(receiver), unbox(frame, other))
   );
   compare.overrides = new Set([compareTo]);
 }
@@ -331,10 +335,13 @@ export function hashOf(value: Value, kind: BoxableKind): number {
 function parseIntegral(frame: Frame, text: Value, bits: 32 | 64): bigint {
   const value = (text as JavaString | undefined)?.value;
   frame.runtime.scanString(value?.length ?? 0);
-  // Java reads any Unicode decimal digit; of those, this reads the ones whose compatibility forms are ASCII, such as
-  // the full-width `１` of Japanese text.
+  // Java reads any Unicode decimal digit of one char, such as the full-width `１` of Japanese text, by its value.
   const digits =
-    value && /[^\d+-]/.test(value) ? value.replaceAll(/\p{Nd}/gu, (digit) => digit.normalize('NFKC')) : value;
+    value && /[^\d+-]/.test(value)
+      ? value.replaceAll(/\p{Nd}/gu, (digit) =>
+          digit.length === 1 ? String(decimalDigitValue(digit.codePointAt(0) as number)) : digit
+        )
+      : value;
   const parsed = digits !== undefined && /^[+-]?\d+$/.test(digits) ? BigInt(digits) : undefined;
   if (parsed === undefined || parsed !== BigInt.asIntN(bits, parsed)) {
     return throwBuiltin(
@@ -344,6 +351,21 @@ function parseIntegral(frame: Frame, text: Value, bits: 32 | 64): bigint {
     );
   }
   return parsed;
+}
+
+/**
+ * The value of a Unicode decimal digit, or `undefined` for another character: its position in the run of ten digits
+ * that Unicode gives every script contiguously, counted from the run's start.
+ */
+export function decimalDigitValue(code: number): number | undefined {
+  if (!isDigit(code)) return undefined;
+  let start = code;
+  while (isDigit(start - 1)) start--;
+  return (code - start) % 10;
+}
+
+function isDigit(point: number): boolean {
+  return point >= 0 && /^\p{Nd}$/u.test(String.fromCodePoint(point));
 }
 
 function parseRadix(frame: Frame, text: Value, radix: number): number {
@@ -456,6 +478,12 @@ function defineDoubleMembers(doubleClass: ClassInfo, stringType: JavaType): void
   addMethod(doubleClass, 'sum', [DOUBLE, DOUBLE], DOUBLE, true, (_, __, [a, b]) => (a as number) + (b as number));
 }
 
+/**
+ * The characters `Character.isWhitespace` accepts, which `String.strip` and `isBlank` remove: the space separators
+ * except the non-breaking ones, the line and paragraph separators, and these control characters.
+ */
+export const JAVA_WHITESPACE = String.raw`[\t\n\v\f\r\u001C-\u001F \u1680\u2000-\u2006\u2008-\u200A\u2028\u2029\u205F\u3000]`;
+
 const CHARACTER_TESTS = {
   isDigit: /^\p{Nd}$/u,
   isLetter: /^\p{L}$/u,
@@ -463,8 +491,7 @@ const CHARACTER_TESTS = {
   isAlphabetic: /^\p{Alphabetic}$/u,
   isUpperCase: /^\p{Lu}$/u,
   isLowerCase: /^\p{Ll}$/u,
-  // oxlint-disable-next-line no-control-regex -- Character.isWhitespace accepts these control characters.
-  isWhitespace: /^[\t\n\v\f\r\u001C-\u001F \u1680\u2000-\u2006\u2008-\u200A\u2028\u2029\u205F\u3000]$/u,
+  isWhitespace: new RegExp(`^${JAVA_WHITESPACE}$`, 'u'),
 } as const;
 
 /** A character as its compatibility form, which turns a full-width digit or letter such as `３` into `3`. */

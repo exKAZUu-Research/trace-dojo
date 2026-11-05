@@ -84,7 +84,7 @@ export function methodView(method: MethodInfo, bindings: ReadonlyMap<TypeVariabl
     ...method,
     // A parameter of type `? super T` accepts a T, as capture conversion allows.
     parameterTypes: method.parameterTypes.map((type) => {
-      const substituted = substitute(type, bindings);
+      const substituted = flattenWildcards(substitute(type, bindings));
       return substituted.kind === 'wildcard' && substituted.isSuper && substituted.bound
         ? substituted.bound
         : substituted;
@@ -92,6 +92,29 @@ export function methodView(method: MethodInfo, bindings: ReadonlyMap<TypeVariabl
     returnType: memberType(method.returnType, bindings),
     declared: method.declared ?? method,
   };
+}
+
+/**
+ * Replaces a wildcard bounded by a wildcard, which substituting a receiver's wildcard type argument makes, by one
+ * bounded by the inner bound, as capture conversion would: for `List<? super Integer>`, `addAll`'s
+ * `Collection<? extends E>` takes a `Collection<? extends Integer>`, since `Integer` is below the captured `E`.
+ */
+function flattenWildcards(type: JavaType): JavaType {
+  switch (type.kind) {
+    case 'class': {
+      return type.args ? { ...type, args: type.args.map((arg) => flattenWildcards(arg)) } : type;
+    }
+    case 'array': {
+      return { ...type, element: flattenWildcards(type.element) };
+    }
+    case 'wildcard': {
+      const bound = type.bound && flattenWildcards(type.bound);
+      return { ...type, bound: bound?.kind === 'wildcard' ? bound.bound : bound };
+    }
+    default: {
+      return type;
+    }
+  }
 }
 
 /**
@@ -193,6 +216,7 @@ function mentions(type: JavaType, variable: TypeVariable): boolean {
 
 /** Infers the types of `variables` that make an argument of `argType` fit a parameter of `parameterType`. */
 // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of type, as inference walks parameter and argument types together.
+// code-gauge-allow functionNcss 31 -- One case per kind of type, as inference walks parameter and argument types together.
 export function infer(
   builtins: Builtins,
   parameterType: JavaType,
@@ -216,7 +240,9 @@ export function infer(
   const parameterBound = parameterType.kind === 'wildcard' ? parameterType.bound : parameterType;
   // A wildcard bounded by a type variable alone, such as `? super V`, decides that variable.
   if (parameterBound?.kind === 'typeVar' && argType.kind !== 'wildcard') {
-    infer(builtins, parameterBound, argType, variables, bindings);
+    if (parameterType.kind === 'wildcard' && parameterType.isSuper && variables.includes(parameterBound.variable)) {
+      bindUpperBound(builtins, parameterBound.variable, argType, bindings);
+    } else infer(builtins, parameterBound, argType, variables, bindings);
     return;
   }
   if (parameterBound?.kind !== 'class' || !parameterBound.args) return;
@@ -225,8 +251,8 @@ export function infer(
   if (!supertype?.args) return;
   for (const [index, parameterArg] of parameterBound.args.entries()) {
     const arg = supertype.args[index];
-    // A type argument a nested generic call left undecided decides nothing.
-    if (arg.kind === 'wildcard' && arg.isHole) continue;
+    // A type argument a nested generic call left partly undecided decides nothing.
+    if (mentionsHole(arg)) continue;
     // A type variable standing alone takes a wildcard as it is, which its use then contains.
     const isBareVariable = parameterArg.kind === 'typeVar';
     infer(
@@ -239,6 +265,27 @@ export function infer(
   }
 }
 
+/** The bindings that only an upper bound decided, which a type below it that another argument gives replaces. */
+const upperBoundBindings = new WeakSet<JavaType>();
+
+/**
+ * Binds `variable`, which a `? super T` parameter bounds from above by an argument's type, to that type unless
+ * another argument decides it: `copy(List<? super T> dst, List<T> src)` takes `T` from `src`.
+ */
+function bindUpperBound(
+  builtins: Builtins,
+  variable: TypeVariable,
+  argType: JavaType,
+  bindings: Map<TypeVariable, JavaType>
+): void {
+  if (bindings.has(variable)) return;
+  const bound = isPrimitive(argType) ? boxedTypeOf(builtins.wrappers, argType) : argType;
+  if (!bound) return;
+  const binding = { ...bound };
+  upperBoundBindings.add(binding);
+  bindings.set(variable, binding);
+}
+
 /** Binds `variable` to the type of an argument, or to its least upper bound with the type it already has. */
 function bindVariable(
   builtins: Builtins,
@@ -249,7 +296,11 @@ function bindVariable(
   const inferred = isPrimitive(argType) ? boxedTypeOf(builtins.wrappers, argType) : argType;
   if (!inferred) return;
   const existing = bindings.get(variable);
-  if (!existing || isWidening(existing, inferred, builtins.objectClass)) {
+  if (
+    !existing ||
+    isWidening(existing, inferred, builtins.objectClass) ||
+    (upperBoundBindings.has(existing) && isWidening(inferred, existing, builtins.objectClass))
+  ) {
     bindings.set(variable, inferred);
   } else if (!isWidening(inferred, existing, builtins.objectClass)) {
     bindings.set(variable, conditionalType(builtins.objectClass, existing, inferred) ?? builtins.objectClass.type);
@@ -317,4 +368,11 @@ export function rawify(
       return type;
     }
   }
+}
+
+/** Whether a type has a type argument that inference left undecided. */
+export function mentionsHole(type: JavaType): boolean {
+  if (type.kind === 'wildcard') return type.isHole === true || (type.bound !== undefined && mentionsHole(type.bound));
+  if (type.kind === 'array') return mentionsHole(type.element);
+  return type.kind === 'class' && (type.args?.some((arg) => mentionsHole(arg)) ?? false);
 }

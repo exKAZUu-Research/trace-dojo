@@ -147,8 +147,9 @@ function defineRecord(recordClass: ClassInfo, objectClass: ClassInfo, stringType
     if (!(other instanceof JavaObject) || other.cls !== object.cls) return false;
     return componentsOf(receiver).every((field) => {
       const [a, b] = [object.fields[field.slot], other.fields[field.slot]];
-      // Primitive components compare as their wrappers' compare does, so NaN equals NaN.
-      return isPrimitive(field.type) ? Object.is(a, b) || a === b : javaEquals(frame, a, b);
+      // Floating components compare as Double.compare does, so NaN equals NaN and 0.0 differs from -0.0.
+      if (field.type.kind === 'double' || field.type.kind === 'float') return Object.is(a, b);
+      return isPrimitive(field.type) ? a === b : javaEquals(frame, a, b);
     });
   });
   addMethod(recordClass, 'hashCode', [], INT, false, (frame, receiver) => {
@@ -190,7 +191,7 @@ const causeTakers = new Set([
   'MatchException',
 ]);
 
-// code-gauge-allow functionNcss 47 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 49 -- One registration per builtin method, each a small native.
 function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType: JavaType): ClassInfo {
   const defineThrowable = (name: string, superclass: ClassInfo, packageName = 'java.lang'): ClassInfo => {
     const cls = registry.define(name, superclass, packageName);
@@ -272,6 +273,8 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
   defineThrowable('MatchException', runtimeExceptionClass);
   defineThrowable('StackOverflowError', errorClass);
   defineThrowable('OutOfMemoryError', errorClass);
+  const linkage = defineThrowable('LinkageError', errorClass);
+  defineThrowable('AbstractMethodError', defineThrowable('IncompatibleClassChangeError', linkage));
   return throwableClass;
 }
 

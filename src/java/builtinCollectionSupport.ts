@@ -13,7 +13,7 @@ import {
   superinterfacesOf,
   VOID,
 } from './types';
-import { charCodeOf, JavaArray, JavaObject, JavaString, toInt32, type Value } from './values';
+import { charCodeOf, type HashStore, JavaArray, JavaObject, JavaString, toInt32, type Value } from './values';
 
 export interface Context {
   registry: Registry;
@@ -47,7 +47,9 @@ export function defineIteratorClass(context: Context, iteratorClass: ClassInfo):
     const state = iteratorState(receiver);
     // Only the element the last next() returned may be removed, once.
     if (state.removed) throwBuiltin(frame, 'IllegalStateException');
-    state.remove(frame, --state.index);
+    // A list's later elements move back over the removed one, which a fixed sequence of elements keeps.
+    if (state.isFixed) state.remove(frame, state.index - 1);
+    else state.remove(frame, --state.index);
     state.removed = true;
     state.expectedModCount = state.source.modCount;
   });
@@ -62,6 +64,11 @@ export interface IteratorState {
   expectedModCount: number | undefined;
   removed: boolean;
   remove: (frame: Frame, index: number) => void;
+  /**
+   * Whether the iterator walks the elements its collection had when it started, as the iterators of `HashMap`,
+   * `TreeMap`, their sets, and their views do, rather than reading a list's elements as they are.
+   */
+  isFixed: boolean;
 }
 
 export const iteratorStates = new WeakMap<JavaObject, IteratorState>();
@@ -70,21 +77,29 @@ export function iteratorState(receiver: Value): IteratorState {
   return iteratorStates.get(receiver as JavaObject) as IteratorState;
 }
 
+/**
+ * An iterator over `items`, which a list reads as they are on each step and a hash- or tree-based collection
+ * (`isFixed`) fixes when the iterator starts: there `hasNext` follows the elements it started with, and a change made
+ * other than through the iterator throws `ConcurrentModificationException` on the next step, as the JDK's do.
+ */
 export function createIterator(
   frame: Frame,
   itrClass: ClassInfo,
   source: JavaObject,
   items: () => Value[],
-  remove: (frame: Frame, index: number) => void
+  remove: (frame: Frame, index: number) => void,
+  isFixed = false
 ): JavaObject {
   const iterator = frame.runtime.allocateObject(frame, itrClass);
+  const fixed = isFixed ? items() : undefined;
   iteratorStates.set(iterator, {
     source,
-    items,
+    items: fixed ? () => fixed : items,
     index: 0,
     expectedModCount: source.modCount,
     removed: true,
     remove,
+    isFixed,
   });
   // The iterator keeps its collection alive, as the collection's turtles must stay while it is walked.
   iterator.elements = [source];
@@ -106,20 +121,36 @@ export function linkOverrides(cls: ClassInfo): void {
   }
 }
 
+/** How a view of a map's keys, values, or entries reads and removes the map's entries. */
+export interface MapViewSource {
+  entries: () => HashStore['entries'];
+  elementOf: (entry: HashStore['entries'][number]) => Value;
+  remove: (frame: Frame, entry: HashStore['entries'][number]) => void;
+}
+
+/** The maps behind the views that `keySet`, `values`, and `entrySet` return. */
+export const mapViewSources = new WeakMap<JavaObject, MapViewSource>();
+
 /**
- * Reads a collection's items again only after it changes structurally, as a view of a map computes its items on
- * every read, which would make each step of an iteration cost a pass over the map.
+ * An iterator over a map view, which walks the entries the map had when it started and reads each element, such as
+ * an entry's current value, when `next` reaches it, as the JDK's do.
  */
-function itemsUntilChanged(collection: JavaObject): () => Value[] {
-  let items: Value[] | undefined;
-  let readAt: number | undefined;
-  return () => {
-    if (!items || readAt !== collection.modCount) {
-      items = elementsOf(collection);
-      readAt = collection.modCount;
-    }
-    return items;
-  };
+function mapViewIterator(frame: Frame, itrClass: ClassInfo, view: JavaObject, source: MapViewSource): JavaObject {
+  const entries = source.entries();
+  const elements = new Proxy(entries, {
+    get: (target, property, receiver) =>
+      typeof property === 'string' && /^\d+$/.test(property)
+        ? source.elementOf(target[Number(property)] as HashStore['entries'][number])
+        : (Reflect.get(target, property, receiver) as unknown),
+  }) as unknown as Value[];
+  return createIterator(
+    frame,
+    itrClass,
+    view,
+    () => elements,
+    (removeFrame, index) => source.remove(removeFrame, entries[index] as HashStore['entries'][number]),
+    true
+  );
 }
 
 /** The classes of the collections that reject every change: `List.of`, `Set.of`, `Map.of`, and unmodifiable views. */
@@ -168,15 +199,17 @@ export function defineReadMethods(
     false,
     (frame, receiver, [value]) => indexOf(frame, elementsOf(receiver), value) !== -1
   );
-  addMethod(cls, 'iterator', [], { kind: 'class', cls: itrClass, args: [element] }, false, (frame, receiver) =>
-    createIterator(
+  addMethod(cls, 'iterator', [], { kind: 'class', cls: itrClass, args: [element] }, false, (frame, receiver) => {
+    const view = mapViewSources.get(receiver as JavaObject);
+    if (view) return mapViewIterator(frame, itrClass, receiver as JavaObject, view);
+    return createIterator(
       frame,
       itrClass,
       receiver as JavaObject,
-      itemsUntilChanged(receiver as JavaObject),
+      () => elementsOf(receiver),
       (removeFrame, index) => remove(removeFrame, receiver, index)
-    )
-  );
+    );
+  });
   addMethod(cls, 'toString', [], context.stringType, false, (frame, receiver) =>
     newString(
       frame,
@@ -199,10 +232,12 @@ export function defineSnapshot(context: Context, kind: string, parent: ClassInfo
   defineReadMethods(cls, element, context, itrClass, (frame, receiver, index) => {
     removeElements(frame, receiver, (_, position) => position === index);
   });
-  for (const name of ['add', 'addAll']) {
-    addMethod(cls, name, [context.objectType], BOOLEAN, false, (frame) =>
-      throwBuiltin(frame, 'UnsupportedOperationException')
-    );
+  const collectionClass = context.registry.classes.get('Collection') as ClassInfo;
+  for (const [name, parameter] of [
+    ['add', element],
+    ['addAll', classType(collectionClass, { kind: 'wildcard', bound: element, isSuper: false })],
+  ] as const) {
+    addMethod(cls, name, [parameter], BOOLEAN, false, (frame) => throwBuiltin(frame, 'UnsupportedOperationException'));
   }
   addMethod(cls, 'remove', [context.objectType], BOOLEAN, false, (frame, receiver, [value]) => {
     const index = indexOf(frame, elementsOf(receiver), value);
@@ -217,12 +252,6 @@ export function defineSnapshot(context: Context, kind: string, parent: ClassInfo
 }
 
 /**
- * For a view of a map's keys, values, or entries, removes the map's entry behind the view's element at an index,
- * which views of other collections lack.
- */
-export const viewRemovals = new WeakMap<JavaObject, (frame: Frame, index: number) => void>();
-
-/**
  * Removes the elements that `removes` selects from a collection whose `elements` hold its items, and through a view,
  * the entries of the map behind them, returning whether it removed any.
  */
@@ -232,12 +261,14 @@ export function removeElements(
   removes: (item: Value, index: number) => boolean
 ): boolean {
   const elements = elementsOf(receiver);
-  const removeBehind = viewRemovals.get(receiver as JavaObject);
+  // A view of a map removes the map's entries behind the elements, which it reads afresh from the map.
+  const view = mapViewSources.get(receiver as JavaObject);
+  const entries = view?.entries();
   let removed = false;
   // From the end, so that removing an element keeps the indices of those before it.
   for (let index = elements.length - 1; index >= 0; index--) {
     if (!removes(elements[index], index)) continue;
-    removeBehind?.(frame, index);
+    if (view && entries) view.remove(frame, entries[index] as HashStore['entries'][number]);
     elements.splice(index, 1);
     removed = true;
   }

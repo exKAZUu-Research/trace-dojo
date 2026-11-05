@@ -1,6 +1,6 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { ArrayInitializer, Block, ExplicitConstructorCall, Expression, Parameter, Span, Statement } from './ast';
-import { DefiniteAssignmentChecker } from './definiteAssignment';
+import { type AssignmentFacts, DefiniteAssignmentChecker } from './definiteAssignment';
 
 export interface InitializationPath {
   /** The blank final fields this path must assign exactly once. */
@@ -22,7 +22,7 @@ export interface InitializationPath {
  * and initializer blocks and, for objects, one constructor, which together must assign every blank final field
  * exactly once.
  */
-export function checkInitialization(path: InitializationPath): ReadonlySet<string> {
+export function checkInitialization(path: InitializationPath): AssignmentFacts {
   const checker = new DefiniteAssignmentChecker();
   let state = checker.initialState();
   for (const name of path.blankFinals) state = checker.declareField(state, name);
@@ -53,5 +53,5 @@ export function checkInitialization(path: InitializationPath): ReadonlySet<strin
       ]);
     }
   }
-  return checker.notEffectivelyFinal;
+  return checker;
 }

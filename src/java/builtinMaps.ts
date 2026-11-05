@@ -10,9 +10,9 @@ import {
   javaEquals,
   javaHash,
   linkOverrides,
+  mapViewSources,
   touch,
   unmodifiableClasses,
-  viewRemovals,
 } from './builtinCollectionSupport';
 import { callFunction } from './builtinFunctions';
 import { stringify } from './builtins';
@@ -129,18 +129,18 @@ function defineSetClass(
     }
   );
   addMethod(cls, 'iterator', [], { kind: 'class', cls: itrClass, args: [element] }, false, (frame, receiver) => {
-    let snapshot: Value[] | undefined;
-    let snapshotModCount: number | undefined;
-    const items = (): Value[] => {
-      if (!snapshot || snapshotModCount !== (receiver as JavaObject).modCount) {
-        snapshot = keysOf(receiver);
-        snapshotModCount = (receiver as JavaObject).modCount;
-      }
-      return snapshot;
-    };
-    return createIterator(frame, itrClass, receiver as JavaObject, items, (removeFrame, index) => {
-      removeEntry(removeFrame, receiver, items()[index]);
-    });
+    const items = keysOf(receiver);
+    return createIterator(
+      frame,
+      itrClass,
+      receiver as JavaObject,
+      () => items,
+      (removeFrame, index) => {
+        checkModifiable(removeFrame, receiver, true);
+        removeEntry(removeFrame, receiver, items[index]);
+      },
+      true
+    );
   });
   addMethod(cls, 'toString', [], context.stringType, false, (frame, receiver) =>
     newString(
@@ -223,9 +223,14 @@ function mapView(
     },
     modCount: { get: () => (map as JavaObject).modCount, set: () => {} },
   });
-  viewRemovals.set(view, (removeFrame, index) => {
-    checkModifiable(removeFrame, map, true);
-    removeEntry(removeFrame, map, (storeOf(map).ordered()[index] as HashStore['entries'][number]).key);
+  view.retained = [map];
+  mapViewSources.set(view, {
+    entries: () => storeOf(map).ordered(),
+    elementOf,
+    remove: (removeFrame, entry) => {
+      checkModifiable(removeFrame, map, true);
+      removeEntry(removeFrame, map, entry.key);
+    },
   });
   return view;
 }
@@ -336,6 +341,7 @@ function entrySetView(frame: Frame, map: Value, viewClass: ClassInfo, nodeClass:
     if (!node) {
       node = frame.runtime.allocateObject(frame, nodeClass);
       nodeEntries.set(node, entry);
+      nodeMaps.set(node, map as JavaObject);
       Object.defineProperty(node, 'elements', { get: () => [entry.key, entry.value] });
       nodes.set(entry, node);
     }
@@ -429,6 +435,9 @@ export function mapSignatures(
   ];
 }
 
+/** The maps whose entries the nodes from `entrySet` are, which other nodes, such as `Map.entry`'s, lack. */
+const nodeMaps = new WeakMap<JavaObject, JavaObject>();
+
 /** The entry objects that `entrySet` gives, which write `setValue` through to their map. */
 export function defineEntryNode(context: Context, entryClass: ClassInfo): ClassInfo {
   const cls = context.registry.define('Node', context.objectClass, 'java.util');
@@ -437,7 +446,11 @@ export function defineEntryNode(context: Context, entryClass: ClassInfo): ClassI
   addInterface(cls, classType(entryClass, key, value));
   addMethod(cls, 'getKey', [], key, false, (_, receiver) => entryOf(receiver).key);
   addMethod(cls, 'getValue', [], value, false, (_, receiver) => entryOf(receiver).value);
-  addMethod(cls, 'setValue', [value], value, false, (_, receiver, [newValue]) => {
+  addMethod(cls, 'setValue', [value], value, false, (frame, receiver, [newValue]) => {
+    const map = nodeMaps.get(receiver as JavaObject);
+    // Only an entry of a modifiable map can change; `Map.entry` and `TreeMap.firstEntry` give immutable ones.
+    if (!map) throwBuiltin(frame, 'UnsupportedOperationException');
+    checkModifiable(frame, map, false);
     const entry = entryOf(receiver);
     const previous = entry.value;
     entry.value = newValue;
@@ -632,11 +645,14 @@ export function defineNavigation(cls: ClassInfo, key: JavaType, isMap: boolean):
     ['ceiling', (order: number) => order >= 0, false],
     ['higher', (order: number) => order > 0, false],
   ] as const) {
-    addMethod(cls, `${name}${suffix}`, [key], key, false, (frame, receiver, [target]) => {
-      const { compare } = storeOf(receiver);
-      const all = fromEnd ? sortedKeys(receiver).toReversed() : sortedKeys(receiver);
-      return all.find((candidate) => accepts((compare as NonNullable<typeof compare>)(frame, candidate, target)));
-    });
+    addMethod(
+      cls,
+      `${name}${suffix}`,
+      [key],
+      key,
+      false,
+      (frame, receiver, [target]) => storeOf(receiver).nearest(frame, target, accepts, fromEnd)?.key
+    );
   }
   if (isMap) return;
   for (const [name, isFirst] of [
@@ -685,15 +701,9 @@ function defineEntryNavigation(cls: ClassInfo, key: JavaType, entryType: JavaTyp
     ['ceilingEntry', (order: number) => order >= 0, false],
     ['higherEntry', (order: number) => order > 0, false],
   ] as const) {
-    addMethod(cls, name, [key], entryType, false, (frame, receiver, [target]) => {
-      const store = storeOf(receiver);
-      const compare = store.compare as NonNullable<HashStore['compare']>;
-      const ordered = fromEnd ? store.ordered().toReversed() : store.ordered();
-      return snapshot(
-        frame,
-        ordered.find((entry) => accepts(compare(frame, entry.key, target)))
-      );
-    });
+    addMethod(cls, name, [key], entryType, false, (frame, receiver, [target]) =>
+      snapshot(frame, storeOf(receiver).nearest(frame, target, accepts, fromEnd))
+    );
   }
 }
 
@@ -744,9 +754,10 @@ export function storeOf(receiver: Value): HashStore {
 
 export function findEntry(frame: Frame, receiver: Value, key: Value): HashStore['entries'][number] | undefined {
   const store = storeOf(receiver);
-  const { compare } = store;
-  // A sorted map or set takes keys that compare as equal for the same key.
-  if (compare) return store.entries.find((entry) => compare(frame, key, entry.key) === 0);
+  if (store.compare) {
+    const { index, isFound } = store.positionOf(frame, key);
+    return isFound ? store.entries[index] : undefined;
+  }
   const hash = javaHash(frame, key);
   return store.entries.find((entry) => entry.hash === hash && javaEquals(frame, key, entry.key));
 }
@@ -760,21 +771,23 @@ export function putEntry(
   value?: Value,
   atBucketHead = false
 ): Value | typeof NO_ENTRY {
-  const entry = findEntry(frame, receiver, key);
+  const store = storeOf(receiver);
+  // Comparing a key with itself rejects null and keys that are not comparable, even in an empty map.
+  if (store.compare && store.entries.length === 0) store.compare(frame, key, key);
+  const position = store.compare ? store.positionOf(frame, key) : undefined;
+  const entry = position
+    ? position.isFound
+      ? store.entries[position.index]
+      : undefined
+    : findEntry(frame, receiver, key);
   if (entry) {
     const previous = entry.value;
     if (!keepsExisting) entry.value = value;
     return previous;
   }
   frame.runtime.allocateArray(frame, 2);
-  const store = storeOf(receiver);
-  const { compare } = store;
-  if (compare) {
-    // Comparing a key with itself rejects null and keys that are not comparable, even in an empty map.
-    compare(frame, key, key);
-    const index = store.entries.findIndex((other) => compare(frame, key, other.key) < 0);
-    store.entries.splice(index === -1 ? store.entries.length : index, 0, { key, value, hash: 0 });
-  } else if (atBucketHead) store.addAtBucketHead({ key, value, hash: javaHash(frame, key) });
+  if (position) store.entries.splice(position.index, 0, { key, value, hash: 0 });
+  else if (atBucketHead) store.addAtBucketHead({ key, value, hash: javaHash(frame, key) });
   else store.add({ key, value, hash: javaHash(frame, key) });
   touch(receiver);
   return NO_ENTRY;

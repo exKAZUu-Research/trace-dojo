@@ -9,8 +9,8 @@ import {
   UNNAMED,
 } from './ast';
 import { box, boxedTypeOf, unbox } from './builtinWrappers';
-import { boxingTarget, instantiateMethod, isInvocationConvertible, unboxedTypeOf } from './conversions';
-import { declarationKey } from './definiteAssignment';
+import { boxingTarget, instantiateMethod, isInvocationConvertible, mentionsHole, unboxedTypeOf } from './conversions';
+import { type AssignmentFacts, declarationKey } from './definiteAssignment';
 import { nullMessage, type NullSource } from './nullMessages';
 import { fitsIn } from './operators';
 import { type Frame } from './runtime';
@@ -97,6 +97,11 @@ export interface MethodContext {
   constants: Map<number, Value>;
   cls: ClassInfo;
   isStatic: boolean;
+  /**
+   * Whether the code runs in a constructor before its `super(...)` or `this(...)` call, where, as in a static
+   * method (`isStatic` holds too), the object under construction is not available.
+   */
+  isBeforeConstructorCall?: boolean;
   returnType: JavaType;
   locals: LocalInfo[];
   scopes: Scope[];
@@ -131,7 +136,7 @@ export interface MethodContext {
   /** For a lambda body, the enclosing locals it reads, which the lambda copies when it is created. */
   captures: Capture[];
   /** The locals that a lambda or a local class reads, with what reads them and where, which must be effectively final. */
-  capturedSlots: Map<number, { reader: string; span: Span }>;
+  capturedSlots: Map<number, { reader: string; reads: Span[] }>;
   /** The keys by which definite assignment analysis identifies the locals declared in the source. */
   declarationKeys: Map<number, string>;
   /** How many times each local is assigned after its declaration, which decides for a pattern variable. */
@@ -314,7 +319,9 @@ export abstract class CompilerBase extends TypeResolver {
     if (isPatternVariable && (defining.assignmentCounts.get(slot) ?? 0) > 0) {
       this.error(span, capturedAssignmentMessage(name, reader));
     }
-    if (!defining.capturedSlots.has(slot)) defining.capturedSlots.set(slot, { reader, span });
+    const captured = defining.capturedSlots.get(slot);
+    if (captured) captured.reads.push(span);
+    else defining.capturedSlots.set(slot, { reader, reads: [span] });
     return {
       name,
       type: defining.locals[slot].type,
@@ -323,16 +330,30 @@ export abstract class CompilerBase extends TypeResolver {
     };
   }
 
+  /** Rejects a use of the current object, naming why it is unavailable: a static method or a constructor prologue. */
+  protected noInstanceError(context: MethodContext, span: Span, subject: string, staticMessage: string): never {
+    return this.error(
+      span,
+      context.isBeforeConstructorCall
+        ? `スーパークラスのコンストラクタを呼び出す前は ${subject} を使えません。`
+        : staticMessage
+    );
+  }
+
   /**
    * Rejects a lambda or a local class that reads a local which definite assignment analysis found not effectively
-   * final in the code that declares it.
+   * final in the code that declares it, or not definitely assigned where the lambda or class appears.
    */
-  protected checkCaptures(context: MethodContext, notEffectivelyFinal: ReadonlySet<string>): void {
-    for (const [slot, { reader, span }] of context.capturedSlots) {
+  protected checkCaptures(context: MethodContext, facts: AssignmentFacts): void {
+    for (const [slot, { reader, reads }] of context.capturedSlots) {
       const key = context.declarationKeys.get(slot);
-      if (key !== undefined && notEffectivelyFinal.has(key)) {
-        this.error(span, capturedAssignmentMessage(context.locals[slot].name, reader));
-      }
+      if (key === undefined) continue;
+      const name = context.locals[slot].name;
+      if (facts.notEffectivelyFinal.has(key)) this.error(reads[0] as Span, capturedAssignmentMessage(name, reader));
+      const unassigned = reads.find((read) =>
+        facts.unassignedAtCreations.some((creation) => creation.keys.has(key) && contains(creation.span, read))
+      );
+      if (unassigned) this.error(unassigned, `変数 ${name} に値が代入されていない可能性があります。`);
     }
   }
 
@@ -511,16 +532,24 @@ export abstract class CompilerBase extends TypeResolver {
       const arity = expression.kind === 'lambda' ? expression.parameters.length : undefined;
       return { kind: 'value', type: { kind: 'pending', arity }, run: () => {} };
     }
-    if (!passesImplicitLambda(expression)) return this.compileValue(context, expression);
+    if (expression.kind !== 'call' && expression.kind !== 'new') return this.compileValue(context, expression);
     // A call such as `Comparator.comparing(s -> s.length())` may need the parameter it is passed to for the types
-    // of its lambdas' parameters, so it waits for overload resolution when it cannot be typed on its own.
+    // of its lambdas' parameters, so it waits for overload resolution when it cannot be typed on its own. So does
+    // one whose type the call leaves partly undecided, as `Collectors.toList()` leaves its element type.
+    let compiled: CompiledValue;
     try {
-      return this.compileValue(context, expression);
+      compiled = this.compileValue(context, expression);
     } catch (error) {
-      if (!(error instanceof CompileError)) throw error;
+      if (!(error instanceof CompileError) || !passesImplicitLambda(expression)) throw error;
       const polyErasure = this.polyErasureOf(context, expression);
       return { kind: 'value', type: { kind: 'pending', arity: undefined, isPoly: true, polyErasure }, run: () => {} };
     }
+    if (!mentionsHole(compiled.type)) return compiled;
+    return {
+      kind: 'value',
+      type: { kind: 'pending', arity: undefined, isPoly: true, polyErasure: erasure(compiled.type) },
+      run: () => {},
+    };
   }
 
   /** The erased type a postponed call or creation produces, when that does not depend on its arguments. */
@@ -659,10 +688,15 @@ export abstract class CompilerBase extends TypeResolver {
   }
 }
 
-/** Whether an expression is a call or creation that passes a lambda whose parameters have no declared types. */
+/**
+ * Whether an expression is a call or creation that passes a lambda whose parameters have no declared types, directly
+ * or through such a call, as `groupingBy(f, mapping(s -> s.length(), toList()))` does.
+ */
 function passesImplicitLambda(expression: Expression): boolean {
   if (expression.kind !== 'call' && expression.kind !== 'new') return false;
-  return expression.args.some((arg) => arg.kind === 'lambda' && arg.parameters.some((parameter) => !parameter.type));
+  return expression.args.some(
+    (arg) => (arg.kind === 'lambda' && arg.parameters.some((parameter) => !parameter.type)) || passesImplicitLambda(arg)
+  );
 }
 
 /**
@@ -731,3 +765,10 @@ export function sameParameters(a: MethodInfo, b: MethodInfo): boolean {
 }
 
 export { superclassesOf, topLevelOf } from './typeResolver';
+
+/** Whether `inner` lies within `outer` in the source. */
+function contains(outer: Span, inner: Span): boolean {
+  const startsAfter = inner.row > outer.row || (inner.row === outer.row && inner.start >= outer.start);
+  const endsBefore = inner.endRow < outer.endRow || (inner.endRow === outer.endRow && inner.end <= outer.end);
+  return startsAfter && endsBefore;
+}

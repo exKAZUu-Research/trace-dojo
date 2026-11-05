@@ -97,9 +97,16 @@ export abstract class PatternCompiler extends TryCompiler {
     );
     return {
       type,
-      test: (frame, value) =>
-        frame.runtime.isInstance(value, cls) &&
-        accessors.every((accessor, index) => parts[index].test(frame, readComponent(frame, accessor, value))),
+      test: (frame, value) => {
+        if (!frame.runtime.isInstance(value, cls)) return false;
+        // The record keeps its other components alive while accessors, which may run long, read each one.
+        frame.temporaries.push(value);
+        try {
+          return accessors.every((accessor, index) => parts[index].test(frame, readComponent(frame, accessor, value)));
+        } finally {
+          frame.temporaries.pop();
+        }
+      },
       isTotalFor: (target) =>
         isWidening(erasure(target), erasure(type), this.builtins.objectClass) &&
         parts.every((part, index) => part.isTotalFor(memberType(components[index].type, bindings))),

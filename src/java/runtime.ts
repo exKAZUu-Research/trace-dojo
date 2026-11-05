@@ -68,10 +68,11 @@ export class Runtime {
   }
 
   /** Charges for a string of `length` built at run time, before it is built. */
-  allocateString(frame: Frame, length: number): void {
+  /** Checks a string's length and charges for building it, or for the `written` characters an edit writes. */
+  allocateString(frame: Frame, length: number, written = length): void {
     if (length > LIMITS.maxStringLength) throwBuiltin(frame, 'OutOfMemoryError', 'Java heap space');
     // Charging every character built bounds what a run can build in all to 16 times its operations.
-    this.spend(Math.ceil(length / 16));
+    this.spend(Math.ceil(written / 16));
   }
 
   allocateArray(frame: Frame, length: number): void {
@@ -186,7 +187,15 @@ export class Runtime {
       return method.native(caller, receiver, args);
     }
     const code = method.code;
-    if (!code) throw new Error(`Method ${method.owner.name}.${method.name} has no code`);
+    if (!code) {
+      // A builtin class that misses a native for a method it inherits fails as the JVM does, not as the host.
+      const owner = receiver instanceof JavaObject ? receiver.cls.name : method.owner.name;
+      throwBuiltin(
+        caller,
+        'AbstractMethodError',
+        `Receiver class ${owner} does not define or inherit an implementation of the resolved method '${method.name}'`
+      );
+    }
     const frame = this.pushFrame(caller, method, code.locals, receiver as JavaObject | undefined, callRow);
     frame.captured = captured;
     try {

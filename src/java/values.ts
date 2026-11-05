@@ -77,6 +77,40 @@ export class HashStore {
   /** For a sorted store, compares keys, which also decides which keys are the same. */
   compare?: (frame: Frame, a: Value, b: Value) => number;
 
+  /**
+   * Where `key` is or would go among a sorted store's entries, by binary search as a `TreeMap` descends its tree, so
+   * that each lookup costs a logarithmic number of comparisons, which may call the program's comparator.
+   */
+  positionOf(frame: Frame, key: Value): { index: number; isFound: boolean } {
+    const compare = this.compare as NonNullable<HashStore['compare']>;
+    let [low, high] = [0, this.entries.length];
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      const order = compare(frame, key, (this.entries[middle] as HashEntry).key);
+      if (order === 0) return { index: middle, isFound: true };
+      if (order < 0) high = middle;
+      else low = middle + 1;
+    }
+    return { index: low, isFound: false };
+  }
+
+  /**
+   * The entry of a sorted store nearest to `target` whose order against it `accepts`: the first such entry, or with
+   * `fromEnd` the last one, found by binary search since `accepts` holds on one side of `target` only.
+   */
+  nearest(frame: Frame, target: Value, accepts: (order: number) => boolean, fromEnd: boolean): HashEntry | undefined {
+    const compare = this.compare as NonNullable<HashStore['compare']>;
+    // The first index from which `accepts` holds (or, from the end, stops holding).
+    let [low, high] = [0, this.entries.length];
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      const holds = accepts(compare(frame, (this.entries[middle] as HashEntry).key, target));
+      if (holds !== fromEnd) high = middle;
+      else low = middle + 1;
+    }
+    return this.entries[fromEnd ? low - 1 : low];
+  }
+
   /** The entries in the order Java's iteration visits them. */
   ordered(): HashEntry[] {
     if (this.order !== 'hash') return this.entries;

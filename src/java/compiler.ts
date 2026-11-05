@@ -298,7 +298,9 @@ class Compiler extends DeclarationCompiler {
     const targetClass = callsThis ? cls : (cls.superclass as ClassInfo);
     // Arguments of an explicit constructor call may not refer to the object under construction.
     const argSyntax = explicitCall?.args ?? [];
-    const args = argSyntax.map((arg) => this.compileArgument({ ...context, isStatic: true }, arg));
+    const args = argSyntax.map((arg) =>
+      this.compileArgument({ ...context, isStatic: true, isBeforeConstructorCall: true }, arg)
+    );
     const targetBindings = memberBindings(
       callsThis ? thisTypeOf(cls) : asSuper(thisTypeOf(cls), targetClass),
       targetClass
@@ -313,7 +315,15 @@ class Compiler extends DeclarationCompiler {
       `コンストラクタ ${targetClass.name}`
     );
     this.checkThrown(context, span, target.thrownTypes);
-    return { target, convertedArgs: this.convertArguments({ ...context, isStatic: true }, target, args, argSyntax) };
+    return {
+      target,
+      convertedArgs: this.convertArguments(
+        { ...context, isStatic: true, isBeforeConstructorCall: true },
+        target,
+        args,
+        argSyntax
+      ),
+    };
   }
 
   /** An anonymous class's constructor passes its arguments on to the superclass constructor that its creation chose. */
@@ -407,7 +417,8 @@ class Compiler extends DeclarationCompiler {
     }
     // The prologue's locals stay in scope for the explicit constructor call and the body.
     const prologue =
-      declaration?.prologue && this.compileStatements({ ...context, isStatic: true }, declaration.prologue);
+      declaration?.prologue &&
+      this.compileStatements({ ...context, isStatic: true, isBeforeConstructorCall: true }, declaration.prologue);
     const { target, convertedArgs } = constructor.forwardsTo
       ? this.forwardingCall(context, constructor, constructor.forwardsTo)
       : this.explicitConstructorCall(context, cls, constructor, declaration);

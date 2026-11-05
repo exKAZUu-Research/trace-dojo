@@ -199,8 +199,10 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
     if (!expression.outer) {
       const outer = this.outerInstanceValue(context, enclosing);
       if (!outer) {
-        this.error(
+        this.noInstanceError(
+          context,
           expression,
+          'this',
           `static でないクラス ${cls.name} のオブジェクトは、${enclosing.name} のオブジェクトがない static メソッドの中からは作れません。`
         );
       }
@@ -416,7 +418,8 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
     context: MethodContext,
     expression: Extract<Expression, { kind: 'call' }>
   ): CallTarget {
-    if (context.isStatic) this.error(expression, 'static メソッドの中では super を使えません。');
+    if (context.isStatic)
+      this.noInstanceError(context, expression, 'super', 'static メソッドの中では super を使えません。');
     if (expression.superInterface)
       return this.resolveInterfaceSuperCall(context, expression, expression.superInterface);
     if (context.cls.kind === 'interface') this.error(expression, 'インターフェースの中では super を使えません。');
@@ -508,7 +511,12 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
       this.error(expression, `static ではないメソッド ${name} はクラス名から呼び出せません。`);
     }
     if (expression.object === undefined && !method.isStatic && context.isStatic) {
-      this.error(expression, `static ではないメソッド ${name} は static メソッドの中から呼び出せません。`);
+      this.noInstanceError(
+        context,
+        expression,
+        name,
+        `static ではないメソッド ${name} は static メソッドの中から呼び出せません。`
+      );
     }
     if (expression.object === 'super' && method.isAbstract) {
       this.error(expression, `抽象メソッド ${name} は super から呼び出せません。`);

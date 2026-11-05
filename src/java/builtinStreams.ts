@@ -19,7 +19,7 @@ import {
   type TypeVariable,
   VOID,
 } from './types';
-import { charCodeOf, JavaArray, type JavaObject, type JavaString, toInt32, type Value } from './values';
+import { charCodeOf, JavaArray, JavaObject, type JavaString, toInt32, type Value } from './values';
 
 /** The elements a stream yields, one at a time, as each stage pulls them from the stage before. */
 type Source = () => Iterator<Value>;
@@ -78,7 +78,10 @@ function* iterate(iterator: Iterator<Value>): Generator<Value> {
   for (let next = iterator.next(); !next.done; next = iterator.next()) yield next.value;
 }
 
-/** Adds a stream operation as a default method of the interface, so that every stream object runs the same native. */
+/**
+ * Adds a stream operation as a default method of the interface, so that every stream object runs the same native.
+ * A stream it returns keeps alive the functions and values passed to it, which its later stages call or read.
+ */
 function op(
   cls: ClassInfo,
   name: string,
@@ -87,7 +90,11 @@ function op(
   native: NativeMethod,
   typeParameters?: TypeVariable[]
 ): MethodInfo {
-  const method = addMethod(cls, name, parameterTypes, returnType, false, native);
+  const method = addMethod(cls, name, parameterTypes, returnType, false, (frame, receiver, args) => {
+    const result = native(frame, receiver, args);
+    if (result instanceof JavaObject && sources.has(result)) result.retained?.push(...args);
+    return result;
+  });
   method.typeParameters = typeParameters;
   return method;
 }
@@ -468,12 +475,17 @@ function defineGeneratedStreams(context: Context, streams: StreamTypes): void {
   const iterateVariable = typeVariable('T', objectType);
   const tType = variableType(iterateVariable);
   const iterated = (frame: Frame, seed: Value, next: Value, hasNext?: Value): JavaObject =>
-    createStream(frame, streams.streamImpl, function* () {
-      for (let value = seed; ; value = callFunction(frame, unary, next, [value])) {
-        if (hasNext !== undefined && callFunction(frame, predicate, hasNext, [value]) !== true) return;
-        yield value;
-      }
-    });
+    createStream(
+      frame,
+      streams.streamImpl,
+      function* () {
+        for (let value = seed; ; value = callFunction(frame, unary, next, [value])) {
+          if (hasNext !== undefined && callFunction(frame, predicate, hasNext, [value]) !== true) return;
+          yield value;
+        }
+      },
+      [seed, next, hasNext]
+    );
   const streamOfT = classType(streams.stream, tType);
   const unbounded = addMethod(
     streams.stream,
@@ -501,9 +513,14 @@ function defineGeneratedStreams(context: Context, streams: StreamTypes): void {
     classType(streams.stream, variableType(variable)),
     true,
     (frame, _, [source]) =>
-      createStream(frame, streams.streamImpl, function* () {
-        for (;;) yield callFunction(frame, supplier, source, []);
-      })
+      createStream(
+        frame,
+        streams.streamImpl,
+        function* () {
+          for (;;) yield callFunction(frame, supplier, source, []);
+        },
+        [source]
+      )
   );
   generate.typeParameters = [variable];
 }
@@ -539,8 +556,8 @@ function defineSources(context: Context, streams: StreamTypes): void {
     classType(stream, variableType(collectionE)),
     false,
     (frame, receiver) => {
-      const items = itemsOf(frame, receiver);
-      return createStream(frame, streamImpl, () => [...items][Symbol.iterator](), [receiver]);
+      // The elements are read when the stream is consumed, so that changes made before then show, as in Java.
+      return createStream(frame, streamImpl, () => [...itemsOf(frame, receiver)][Symbol.iterator](), [receiver]);
     }
   );
   const ofVariable = typeVariable('T', objectType);

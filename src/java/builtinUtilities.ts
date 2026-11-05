@@ -541,7 +541,7 @@ function defineCollectionsClass(
       }
     }
   );
-  const addAll = addGenericStatic(
+  addGenericStatic(
     cls,
     'addAll',
     ['T'],
@@ -562,7 +562,6 @@ function defineCollectionsClass(
       return changed;
     }
   );
-  void addAll;
   addGenericStatic(
     cls,
     'reverse',

@@ -170,7 +170,8 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
   }
 
   protected compileThis(context: MethodContext, expression: Extract<Expression, { kind: 'this' }>): Compiled {
-    if (context.isStatic) this.error(expression, 'static メソッドの中では this を使えません。');
+    if (context.isStatic)
+      this.noInstanceError(context, expression, 'this', 'static メソッドの中では this を使えません。');
     if (!expression.qualifier) return thisValue(context);
     const qualifier = this.resolveType(expression.qualifier);
     const outer = qualifier.kind === 'class' ? this.outerInstanceValue(context, qualifier.cls, true) : undefined;

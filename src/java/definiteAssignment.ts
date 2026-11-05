@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 412 -- One checker for the definite assignment rules of JLS chapter 16, which share its scopes and states.
 import { CompileError } from '../interpreter/diagnostics';
 import {
   assign,
@@ -30,15 +31,27 @@ import type {
 import { booleanConstants, exhaustiveSwitches } from './reachability';
 
 /**
+ * What definite assignment analysis leaves for the compiler to check against the locals that lambdas and local
+ * classes read, which it records as it compiles them. Locals are identified by {@link declarationKey}.
+ */
+export interface AssignmentFacts {
+  /** The locals that are not effectively final (JLS 4.12.4), which no lambda or local class may read. */
+  notEffectivelyFinal: ReadonlySet<string>;
+  /**
+   * The lambdas and local or anonymous classes, with the locals not definitely assigned where they appear, which
+   * their bodies may not read (JLS 16.1.10, 8.1.3).
+   */
+  unassignedAtCreations: readonly { span: Span; keys: ReadonlySet<string> }[];
+}
+
+/**
  * Applies Java's definite assignment rules to the locals of one method body: a local is read only after every
  * path assigns it, and a final local is assigned only while no path has assigned it.
- *
- * @returns The keys (see {@link declarationKey}) of the locals that are not effectively final (JLS 4.12.4).
  */
-export function checkDefiniteAssignment(parameters: readonly Parameter[], body: Block): ReadonlySet<string> {
+export function checkDefiniteAssignment(parameters: readonly Parameter[], body: Block): AssignmentFacts {
   const checker = new DefiniteAssignmentChecker();
   checker.statement(body, checker.declareParameters(checker.initialState(), parameters));
-  return checker.notEffectivelyFinal;
+  return checker;
 }
 
 /** Identifies a local by its name and where it is declared, as the compiler and this analysis both see it. */
@@ -96,6 +109,7 @@ export class DefiniteAssignmentChecker {
    * already be assigned, or incremented, as if they were final (JLS 4.12.4).
    */
   readonly notEffectivelyFinal = new Set<string>();
+  readonly unassignedAtCreations: { span: Span; keys: ReadonlySet<string> }[] = [];
 
   initialState(): State {
     return { assigned: new Set(), possiblyAssigned: new Set() };
@@ -141,7 +155,7 @@ export class DefiniteAssignmentChecker {
     return isAssigned ? assign(state, variable.id) : state;
   }
 
-  // code-gauge-allow functionNcss 47 -- One case per statement kind, each delegating to its own rule.
+  // code-gauge-allow functionNcss 48 -- One case per statement kind, each delegating to its own rule.
   statement(statement: Statement, state: State): State {
     switch (statement.kind) {
       case 'block': {
@@ -204,7 +218,9 @@ export class DefiniteAssignmentChecker {
         return state;
       }
       // A local class's methods run later, and their own analysis covers them.
-      case 'localClass':
+      case 'localClass': {
+        return this.recordCreation(statement.declaration, state);
+      }
       case 'empty': {
         return state;
       }
@@ -463,7 +479,8 @@ export class DefiniteAssignmentChecker {
     return { whenTrue: after, whenFalse: after };
   }
 
-  // code-gauge-allow functionNcss 48 -- One case per expression kind, most only visiting their operands in order.
+  // code-gauge-allow functionCognitiveComplexity 17 -- One case per expression kind, most only visiting their operands.
+  // code-gauge-allow functionNcss 50 -- One case per expression kind, most only visiting their operands in order.
   private expression(expression: Expression, state: State): State {
     switch (expression.kind) {
       case 'name': {
@@ -501,7 +518,9 @@ export class DefiniteAssignmentChecker {
         return this.switchExpression(expression, state);
       }
       // A lambda's body runs later, and its own analysis covers it; it cannot assign the enclosing locals.
-      case 'lambda':
+      case 'lambda': {
+        return this.recordCreation(expression, state);
+      }
       case 'classLiteral':
       case 'typeRef': {
         return state;
@@ -525,7 +544,8 @@ export class DefiniteAssignmentChecker {
         return this.expressions(expression.args, receiver);
       }
       case 'new': {
-        return this.expressions(expression.args, state);
+        const afterArgs = this.expressions(expression.args, state);
+        return expression.body ? this.recordCreation(expression, afterArgs) : afterArgs;
       }
       case 'newArray': {
         const afterLengths = this.expressions(expression.dimensionLengths, state);
@@ -583,6 +603,17 @@ export class DefiniteAssignmentChecker {
     for (const loop of this.loops) {
       if (variable.id < loop.firstId) loop.blankWrites.push({ variable, span });
     }
+  }
+
+  /** Records the locals not definitely assigned where a lambda or a local or anonymous class appears. */
+  private recordCreation(span: Span, state: State): State {
+    const { assigned } = state;
+    const unassigned = this.scopes
+      .flatMap((scope) => [...scope.values()])
+      .filter((variable) => variable.declaration && assigned && !assigned.has(variable.id));
+    const keys = new Set(unassigned.map((variable) => declarationKey(variable.name, variable.declaration as Span)));
+    if (keys.size > 0) this.unassignedAtCreations.push({ span, keys });
+    return state;
   }
 
   private markNotEffectivelyFinal(variable: Variable): void {
