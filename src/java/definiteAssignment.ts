@@ -210,7 +210,17 @@ class DefiniteAssignmentChecker {
         return UNREACHABLE;
       }
       case 'try': {
-        return this.tryStatement(statement, state);
+        if (statement.resources.length === 0) return this.tryStatement(statement, state);
+        return this.scoped(() => {
+          let current = state;
+          for (const resource of statement.resources) {
+            current =
+              'local' in resource
+                ? this.localDeclaration(resource.local, current)
+                : this.expression(resource.expression, current);
+          }
+          return this.tryStatement({ ...statement, resources: [] }, current);
+        });
       }
       case 'labeled': {
         return this.labeledStatement(statement, state);

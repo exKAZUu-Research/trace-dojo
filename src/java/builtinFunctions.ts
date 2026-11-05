@@ -118,6 +118,9 @@ export function defineFunctions(
   const context: Context = { registry, objectClass, objectType: objectClass.type };
   const pkg = 'java.util.function';
   defineFunctional(context, 'Runnable', 'java.lang', [], 'run', () => [[], VOID]);
+  const autoCloseable = defineFunctional(context, 'AutoCloseable', 'java.lang', [], 'close', () => [[], VOID]);
+  const close = autoCloseable.cls.methods[0];
+  close.thrownTypes = [registry.classes.get('Exception') as ClassInfo];
   const fn = defineFunctional(context, 'Function', pkg, ['T', 'R'], 'apply', (t, r) => [[t], r]);
   const biFunction = defineFunctional(context, 'BiFunction', pkg, ['T', 'U', 'R'], 'apply', (t, u, r) => [[t, u], r]);
   const consumer = defineFunctional(context, 'Consumer', pkg, ['T'], 'accept', (t) => [[t], VOID]);

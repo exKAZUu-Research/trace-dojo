@@ -253,6 +253,24 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
     false,
     (_, receiver) => (receiver as JavaObject).cause
   );
+  addMethod(throwableClass, 'addSuppressed', [throwableClass.type], VOID, false, (frame, receiver, [other]) => {
+    if (other === receiver) throwBuiltin(frame, 'IllegalArgumentException', 'Self-suppression not permitted');
+    if (!(other instanceof JavaObject))
+      throwBuiltin(frame, 'NullPointerException', 'Cannot suppress a null exception.');
+    ((receiver as JavaObject).suppressed ??= []).push(other);
+  });
+  addMethod(
+    throwableClass,
+    'getSuppressed',
+    [],
+    { kind: 'array', element: throwableClass.type },
+    false,
+    (frame, receiver) => {
+      const suppressed = (receiver as JavaObject).suppressed ?? [];
+      frame.runtime.allocateArray(frame, suppressed.length);
+      return new JavaArray(throwableClass.type, [...suppressed]);
+    }
+  );
   // A stack trace goes to standard error, which learners do not see.
   addMethod(throwableClass, 'printStackTrace', [], VOID, false, () => {});
   addMethod(throwableClass, 'toString', [], stringType, false, (frame, receiver) => {

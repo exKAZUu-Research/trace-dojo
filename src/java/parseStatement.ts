@@ -6,6 +6,7 @@ import type {
   Expression,
   ExpressionStatement,
   LocalVariableDeclaration,
+  Resource,
   Statement,
   SwitchGroup,
   VariableDeclarator,
@@ -102,7 +103,7 @@ const statementConverters: Record<string, (node: Node) => Statement> = {
   },
   throw_statement: (node) => ({ kind: 'throw', value: convertExpression(namedChildren(node)[0]), ...span(node) }),
   try_statement: convertTry,
-  try_with_resources_statement: (node) => unsupported(node, 'try-with-resources 文'),
+  try_with_resources_statement: convertTry,
   assert_statement: (node) => {
     const [condition, message] = namedChildren(node);
     return {
@@ -240,11 +241,30 @@ function convertTry(node: Node): Statement {
     if (child.type === 'catch_clause') catches.push(convertCatch(child));
     else if (child.type === 'finally_clause') finallyBlock = convertBlock(namedChildren(child)[0]);
   }
+  const resources = node.childForFieldName('resources');
   return {
     kind: 'try',
+    resources: resources ? namedChildren(resources).map((resource) => convertResource(resource)) : [],
     body: convertBlock(field(node, 'body')),
     catches,
     finallyBlock,
+    ...span(node),
+  };
+}
+
+function convertResource(node: Node): Resource {
+  const value = node.childForFieldName('value');
+  if (!value) return { expression: convertExpression(namedChildren(node)[0]), ...span(node) };
+  const name = identifierOf(node, '名前のない変数');
+  return {
+    // A resource variable is implicitly final.
+    local: {
+      kind: 'local',
+      isFinal: true,
+      type: convertType(field(node, 'type')),
+      declarators: [{ name: name.text, extraDimensions: 0, initializer: convertExpression(value), ...span(node) }],
+      ...span(node),
+    },
     ...span(node),
   };
 }

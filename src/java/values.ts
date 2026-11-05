@@ -45,6 +45,8 @@ export class JavaObject {
   /** Set by the builtin Throwable constructors. */
   message?: JavaString;
   cause?: JavaObject;
+  /** The exceptions that closing resources threw while this one was in flight. */
+  suppressed?: JavaObject[];
 
   constructor(readonly cls: ClassInfo) {
     this.fields = Array.from({ length: cls.instanceFieldCount });

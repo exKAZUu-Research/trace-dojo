@@ -252,10 +252,15 @@ export interface ThrowStatement extends Span {
 
 export interface TryStatement extends Span {
   kind: 'try';
+  /** The resources of a try-with-resources statement, which close in reverse order after the try block. */
+  resources: Resource[];
   body: Block;
   catches: CatchClause[];
   finallyBlock: Block | undefined;
 }
+
+/** A resource declared in a try-with-resources statement, or an effectively final variable it names. */
+export type Resource = ({ local: LocalVariableDeclaration } | { expression: Expression }) & Span;
 
 export interface CatchClause extends Span {
   types: TypeSyntax[];
