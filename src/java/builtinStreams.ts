@@ -381,15 +381,12 @@ function derive(
   return createStream(frame, cls, () => transform(upstream));
 }
 
-// code-gauge-allow functionNcss 120 -- One registration per stream operation.
 function defineStreamTypes(context: Context, optionals: Optionals, collector: ClassInfo): StreamTypes {
-  const { registry, objectType, collections, wrappers } = context;
+  const { registry, objectType, wrappers } = context;
   const stream = defineInterface(registry, 'Stream', 'java.util.stream');
   const intStream = defineInterface(registry, 'IntStream', 'java.util.stream');
   const t = typeVariable('T', objectType);
   stream.typeParameters = [t];
-  const tType = variableType(t);
-  const streamOf = (element: JavaType): ClassType => classType(stream, element);
   const streamImpl = createClass('ReferencePipeline', context.objectClass, true);
   streamImpl.typeParameters = [typeVariable('T', objectType)];
   streamImpl.interfaces = [stream];
@@ -397,175 +394,243 @@ function defineStreamTypes(context: Context, optionals: Optionals, collector: Cl
   const intStreamImpl = createClass('IntPipeline', context.objectClass, true);
   intStreamImpl.interfaces = [intStream];
   intStreamImpl.supertypes.push(intStream.type as ClassType);
-  const integerClass = wrappers.byKind.get('int') as ClassInfo;
-  const fn = context.fn;
-  for (const [cls, impl, isInt] of [
-    [stream, streamImpl, false],
-    [intStream, intStreamImpl, true],
-  ] as const) {
-    const self = isInt ? (intStream.type as ClassType) : streamOf(tType);
-    const predicate = isInt ? fn('IntPredicate') : fn('Predicate');
-    const predicateType = isInt ? predicate.type : classType(predicate, superOf(tType));
-    op(cls, 'filter', [predicateType], self, (frame, receiver, [test]) =>
-      derive(impl, receiver, frame, function* (items) {
-        for (const value of iterate(items)) if (callFunction(frame, predicate, test, [value]) === true) yield value;
-      })
-    );
-    op(cls, 'limit', [LONG], self, (frame, receiver, [count]) => {
-      if ((count as bigint) < 0n) throwBuiltin(frame, 'IllegalArgumentException', String(count as bigint));
-      return derive(impl, receiver, frame, function* (items) {
-        let taken = 0n;
-        if (taken >= (count as bigint)) return;
-        for (const value of iterate(items)) {
-          yield value;
-          if (++taken >= (count as bigint)) return;
-        }
-      });
-    });
-    op(cls, 'skip', [LONG], self, (frame, receiver, [count]) =>
-      derive(impl, receiver, frame, function* (items) {
-        let skipped = 0n;
-        for (const value of iterate(items)) if (skipped++ >= (count as bigint)) yield value;
-      })
-    );
-    op(cls, 'distinct', [], self, (frame, receiver) =>
-      derive(impl, receiver, frame, function* (items) {
-        const seen: Value[] = [];
-        for (const value of iterate(items)) {
-          if (seen.some((other) => (isInt ? other === value : javaEquals(frame, other, value)))) continue;
-          seen.push(value);
-          yield value;
-        }
-      })
-    );
-    op(cls, 'sorted', [], self, (frame, receiver) =>
-      derive(impl, receiver, frame, function* (items) {
-        const values = [...iterate(items)];
-        yield* values.toSorted((a, b) => (isInt ? (a as number) - (b as number) : compareNatural(frame, a, b)));
-      })
-    );
-    const consumer = isInt ? fn('IntConsumer') : fn('Consumer');
-    op(
-      cls,
-      'forEach',
-      [isInt ? consumer.type : classType(consumer, superOf(tType))],
-      VOID,
-      (frame, receiver, [action]) => {
-        for (const value of iterate(take(frame, receiver))) callFunction(frame, consumer, action, [value]);
-      }
-    );
-    op(cls, 'peek', [isInt ? consumer.type : classType(consumer, superOf(tType))], self, (frame, receiver, [action]) =>
-      derive(impl, receiver, frame, function* (items) {
-        for (const value of iterate(items)) {
-          callFunction(frame, consumer, action, [value]);
-          yield value;
-        }
-      })
-    );
-    op(cls, 'count', [], LONG, (frame, receiver) => {
-      let count = 0n;
-      const items = take(frame, receiver);
-      while (!items.next().done) count++;
-      return count;
-    });
-    for (const [name, wanted, stopsAt] of [
-      ['anyMatch', true, true],
-      ['allMatch', false, false],
-      ['noneMatch', true, false],
-    ] as const) {
-      op(cls, name, [predicateType], BOOLEAN, (frame, receiver, [test]) => {
-        for (const value of iterate(take(frame, receiver))) {
-          if ((callFunction(frame, predicate, test, [value]) === true) === wanted) return stopsAt;
-        }
-        return !stopsAt;
-      });
-    }
-    const optionalClass = isInt ? optionals.optionalInt : optionals.optional;
-    const optionalOf = isInt ? optionalClass.type : classType(optionalClass, tType);
-    op(cls, 'findFirst', [], optionalOf, (frame, receiver) => {
-      const next = take(frame, receiver).next();
-      return createOptional(frame, optionalClass, next.done ? undefined : next.value, !next.done);
-    });
-    const comparator = fn('Comparator');
-    const extreme =
-      (sign: number) =>
-      (frame: Frame, receiver: Value, [order]: Value[]): Value => {
-        let best: Value;
-        let found = false;
-        for (const value of iterate(take(frame, receiver))) {
-          if (!found) {
-            best = value;
-            found = true;
-            continue;
-          }
-          const difference = isInt
-            ? (value as number) - (best as number)
-            : (callFunction(frame, comparator, order, [value, best]) as number);
-          if (difference * sign > 0) best = value;
-        }
-        return createOptional(frame, optionalClass, best, found);
-      };
-    const orderParameters = isInt ? [] : [classType(comparator, superOf(tType))];
-    op(cls, 'max', orderParameters, optionalOf, extreme(1));
-    op(cls, 'min', orderParameters, optionalOf, extreme(-1));
-    if (isInt) continue;
-    const r = typeVariable('R', objectType);
-    op(
-      cls,
-      'map',
-      [classType(fn('Function'), superOf(tType), extendsOf(variableType(r)))],
-      streamOf(variableType(r)),
-      (frame, receiver, [mapper]) =>
-        derive(streamImpl, receiver, frame, function* (items) {
-          for (const value of iterate(items)) yield callFunction(frame, fn('Function'), mapper, [value]);
-        }),
-      [r]
-    );
-    op(cls, 'mapToInt', [classType(fn('ToIntFunction'), superOf(tType))], intStream.type, (frame, receiver, [mapper]) =>
-      derive(intStreamImpl, receiver, frame, function* (items) {
-        for (const value of iterate(items)) yield callFunction(frame, fn('ToIntFunction'), mapper, [value]);
-      })
-    );
-    op(cls, 'sorted', [classType(comparator, superOf(tType))], self, (frame, receiver, [order]) =>
-      derive(impl, receiver, frame, function* (items) {
-        const values = [...iterate(items)];
-        yield* values.toSorted((a, b) => callFunction(frame, comparator, order, [a, b]) as number);
-      })
-    );
-    op(cls, 'toList', [], classType(collections.listClass, tType), (frame, receiver) => {
-      const items = [...iterate(take(frame, receiver))];
-      frame.runtime.allocateArray(frame, items.length);
-      const list = frame.runtime.allocateObject(frame, collections.immutableList);
-      list.elements = items;
-      list.modCount = 0;
-      return list;
-    });
-    const binary = fn('BinaryOperator');
-    op(cls, 'reduce', [tType, classType(binary, tType)], tType, (frame, receiver, [identity, accumulator]) => {
-      let result = identity;
-      for (const value of iterate(take(frame, receiver)))
-        result = callFunction(frame, binary, accumulator, [result, value]);
-      return result;
-    });
-    const a = typeVariable('A', objectType);
-    const rr = typeVariable('R', objectType);
-    op(
-      cls,
-      'collect',
-      [classType(collector, superOf(tType), variableType(a), variableType(rr))],
-      variableType(rr),
-      (frame, receiver, [target]) => {
-        const functions = collectors.get(target as JavaObject);
-        if (!functions) return throwBuiltin(frame, 'UnsupportedOperationException');
-        const container = functions.supply(frame);
-        for (const value of iterate(take(frame, receiver))) functions.accumulate(frame, container, value);
-        return functions.finish(frame, container);
-      },
-      [rr, a]
-    );
+  const types = { stream, intStream, streamImpl, intStreamImpl };
+  const tType = variableType(t);
+  for (const kind of [
+    streamKind(context, optionals, { cls: stream, impl: streamImpl, element: tType, self: classType(stream, tType) }),
+    streamKind(context, optionals, {
+      cls: intStream,
+      impl: intStreamImpl,
+      element: INT,
+      self: intStream.type as ClassType,
+    }),
+  ]) {
+    defineIntermediateOperations(kind);
+    defineTerminalOperations(kind);
   }
-  defineIntStreamOperations(context, { stream, intStream, streamImpl, intStreamImpl }, optionals, integerClass);
-  return { stream, intStream, streamImpl, intStreamImpl };
+  defineReferenceOperations(context, types, tType, collector);
+  defineIntStreamOperations(context, types, optionals, wrappers.byKind.get('int') as ClassInfo);
+  return types;
+}
+
+/** What the operations that `Stream` and `IntStream` share differ in. */
+interface StreamKind {
+  cls: ClassInfo;
+  impl: ClassInfo;
+  isInt: boolean;
+  self: ClassType;
+  predicate: ClassInfo;
+  predicateType: JavaType;
+  consumer: ClassInfo;
+  consumerType: JavaType;
+  optionalClass: ClassInfo;
+  optionalType: JavaType;
+  comparator: ClassInfo;
+  /** The parameters `max` and `min` take: a comparator, except for an `IntStream`, whose ints have an order. */
+  orderParameters: JavaType[];
+}
+
+function streamKind(
+  context: Context,
+  optionals: Optionals,
+  { cls, impl, element, self }: { cls: ClassInfo; impl: ClassInfo; element: JavaType; self: ClassType }
+): StreamKind {
+  const isInt = element === INT;
+  const { fn } = context;
+  const predicate = isInt ? fn('IntPredicate') : fn('Predicate');
+  const consumer = isInt ? fn('IntConsumer') : fn('Consumer');
+  const optionalClass = isInt ? optionals.optionalInt : optionals.optional;
+  const comparator = fn('Comparator');
+  return {
+    cls,
+    impl,
+    isInt,
+    self,
+    predicate,
+    predicateType: isInt ? predicate.type : classType(predicate, superOf(element)),
+    consumer,
+    consumerType: isInt ? consumer.type : classType(consumer, superOf(element)),
+    optionalClass,
+    optionalType: isInt ? optionalClass.type : classType(optionalClass, element),
+    comparator,
+    orderParameters: isInt ? [] : [classType(comparator, superOf(element))],
+  };
+}
+
+/** The operations that make a stream from another: filtering, limiting, skipping, deduplicating, and sorting. */
+function defineIntermediateOperations(kind: StreamKind): void {
+  const { cls, impl, isInt, self, predicate } = kind;
+  op(cls, 'filter', [kind.predicateType], self, (frame, receiver, [test]) =>
+    derive(impl, receiver, frame, function* (items) {
+      for (const value of iterate(items)) if (callFunction(frame, predicate, test, [value]) === true) yield value;
+    })
+  );
+  op(cls, 'limit', [LONG], self, (frame, receiver, [count]) => {
+    if ((count as bigint) < 0n) throwBuiltin(frame, 'IllegalArgumentException', String(count as bigint));
+    return derive(impl, receiver, frame, (items) => limited(items, count as bigint));
+  });
+  op(cls, 'skip', [LONG], self, (frame, receiver, [count]) =>
+    derive(impl, receiver, frame, function* (items) {
+      let skipped = 0n;
+      for (const value of iterate(items)) if (skipped++ >= (count as bigint)) yield value;
+    })
+  );
+  op(cls, 'distinct', [], self, (frame, receiver) =>
+    derive(impl, receiver, frame, (items) => distinct(items, (a, b) => (isInt ? a === b : javaEquals(frame, a, b))))
+  );
+  op(cls, 'sorted', [], self, (frame, receiver) =>
+    derive(impl, receiver, frame, (items) =>
+      [...iterate(items)]
+        .toSorted((a, b) => (isInt ? (a as number) - (b as number) : compareNatural(frame, a, b)))
+        [Symbol.iterator]()
+    )
+  );
+  op(cls, 'peek', [kind.consumerType], self, (frame, receiver, [action]) =>
+    derive(impl, receiver, frame, function* (items) {
+      for (const value of iterate(items)) {
+        callFunction(frame, kind.consumer, action, [value]);
+        yield value;
+      }
+    })
+  );
+}
+
+function* limited(items: Iterator<Value>, count: bigint): Generator<Value> {
+  let taken = 0n;
+  if (count === 0n) return;
+  for (const value of iterate(items)) {
+    yield value;
+    if (++taken >= count) return;
+  }
+}
+
+function* distinct(items: Iterator<Value>, equals: (a: Value, b: Value) => boolean): Generator<Value> {
+  const seen: Value[] = [];
+  for (const value of iterate(items)) {
+    if (seen.some((other) => equals(other, value))) continue;
+    seen.push(value);
+    yield value;
+  }
+}
+
+/** The operations that consume a stream: iterating, counting, matching, and finding elements. */
+function defineTerminalOperations(kind: StreamKind): void {
+  const { cls, predicate } = kind;
+  op(cls, 'forEach', [kind.consumerType], VOID, (frame, receiver, [action]) => {
+    for (const value of iterate(take(frame, receiver))) callFunction(frame, kind.consumer, action, [value]);
+  });
+  op(cls, 'count', [], LONG, (frame, receiver) => {
+    let count = 0n;
+    const items = take(frame, receiver);
+    while (!items.next().done) count++;
+    return count;
+  });
+  for (const [name, wanted, stopsAt] of [
+    ['anyMatch', true, true],
+    ['allMatch', false, false],
+    ['noneMatch', true, false],
+  ] as const) {
+    op(cls, name, [kind.predicateType], BOOLEAN, (frame, receiver, [test]) => {
+      for (const value of iterate(take(frame, receiver))) {
+        if ((callFunction(frame, predicate, test, [value]) === true) === wanted) return stopsAt;
+      }
+      return !stopsAt;
+    });
+  }
+  op(cls, 'findFirst', [], kind.optionalType, (frame, receiver) => {
+    const next = take(frame, receiver).next();
+    return createOptional(frame, kind.optionalClass, next.done ? undefined : next.value, !next.done);
+  });
+  op(cls, 'max', kind.orderParameters, kind.optionalType, (frame, receiver, [order]) =>
+    extremeOf(frame, kind, receiver, order, 1)
+  );
+  op(cls, 'min', kind.orderParameters, kind.optionalType, (frame, receiver, [order]) =>
+    extremeOf(frame, kind, receiver, order, -1)
+  );
+}
+
+/** `max` (`sign` 1) or `min` (-1), which keep the first of equal elements. */
+function extremeOf(frame: Frame, kind: StreamKind, receiver: Value, order: Value, sign: number): Value {
+  let best: Value;
+  let found = false;
+  for (const value of iterate(take(frame, receiver))) {
+    const difference = kind.isInt
+      ? (value as number) - (best as number)
+      : found
+        ? (callFunction(frame, kind.comparator, order, [value, best]) as number)
+        : 0;
+    if (!found || difference * sign > 0) best = value;
+    found = true;
+  }
+  return createOptional(frame, kind.optionalClass, best, found);
+}
+
+/** The operations only a `Stream` of objects has: mapping, sorting with a comparator, reducing, and collecting. */
+function defineReferenceOperations(context: Context, types: StreamTypes, tType: JavaType, collector: ClassInfo): void {
+  const { objectType, collections, fn } = context;
+  const { stream, streamImpl, intStream, intStreamImpl } = types;
+  const r = typeVariable('R', objectType);
+  op(
+    stream,
+    'map',
+    [classType(fn('Function'), superOf(tType), extendsOf(variableType(r)))],
+    classType(stream, variableType(r)),
+    (frame, receiver, [mapper]) =>
+      derive(streamImpl, receiver, frame, (items) => mapped(frame, items, fn('Function'), mapper)),
+    [r]
+  );
+  op(
+    stream,
+    'mapToInt',
+    [classType(fn('ToIntFunction'), superOf(tType))],
+    intStream.type,
+    (frame, receiver, [mapper]) =>
+      derive(intStreamImpl, receiver, frame, (items) => mapped(frame, items, fn('ToIntFunction'), mapper))
+  );
+  const comparator = fn('Comparator');
+  op(stream, 'sorted', [classType(comparator, superOf(tType))], classType(stream, tType), (frame, receiver, [order]) =>
+    derive(streamImpl, receiver, frame, (items) =>
+      [...iterate(items)]
+        .toSorted((a, b) => callFunction(frame, comparator, order, [a, b]) as number)
+        [Symbol.iterator]()
+    )
+  );
+  op(stream, 'toList', [], classType(collections.listClass, tType), (frame, receiver) => {
+    const items = [...iterate(take(frame, receiver))];
+    frame.runtime.allocateArray(frame, items.length);
+    const list = frame.runtime.allocateObject(frame, collections.immutableList);
+    list.elements = items;
+    list.modCount = 0;
+    return list;
+  });
+  const binary = fn('BinaryOperator');
+  op(stream, 'reduce', [tType, classType(binary, tType)], tType, (frame, receiver, [identity, accumulator]) => {
+    let result = identity;
+    for (const value of iterate(take(frame, receiver)))
+      result = callFunction(frame, binary, accumulator, [result, value]);
+    return result;
+  });
+  const a = typeVariable('A', objectType);
+  const rr = typeVariable('R', objectType);
+  op(
+    stream,
+    'collect',
+    [classType(collector, superOf(tType), variableType(a), variableType(rr))],
+    variableType(rr),
+    (frame, receiver, [target]) => {
+      const functions = collectors.get(target as JavaObject);
+      if (!functions) return throwBuiltin(frame, 'UnsupportedOperationException');
+      const container = functions.supply(frame);
+      for (const value of iterate(take(frame, receiver))) functions.accumulate(frame, container, value);
+      return functions.finish(frame, container);
+    },
+    [rr, a]
+  );
+}
+
+/** The elements that applying the function object `mapper` of `iface` gives. */
+function* mapped(frame: Frame, items: Iterator<Value>, iface: ClassInfo, mapper: Value): Generator<Value> {
+  for (const value of iterate(items)) yield callFunction(frame, iface, mapper, [value]);
 }
 
 function defineIntStreamOperations(
