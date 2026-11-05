@@ -229,7 +229,7 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
   addMethod(throwableClass, 'printStackTrace', [], VOID, false, () => {});
   addMethod(throwableClass, 'toString', [], stringType, false, (frame, receiver) => {
     const exception = receiver as JavaObject;
-    const name = registry.qualifiedNames.get(exception.cls) ?? exception.cls.name;
+    const name = registry.qualifiedNames.get(exception.cls) ?? exception.cls.binaryName;
     return newString(frame, exception.message ? `${name}: ${exception.message.value}` : name);
   });
   const exceptionClass = defineThrowable('Exception', throwableClass);
