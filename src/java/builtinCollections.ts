@@ -1,3 +1,5 @@
+import { checkCopiedElement } from './arrayCopy';
+import { checkStore } from './builtinClass';
 import type { Context } from './builtinCollectionSupport';
 import {
   batchRemovalClasses,
@@ -96,6 +98,7 @@ export function defineCollections(
   const [collectionElement] = addTypeParameters(collectionClass, ['E'], objectType);
   addInterface(collectionClass, classType(iterableClass, collectionElement));
   declareCollectionMethods(collectionClass, collectionElement, context);
+  defineCollectionArrays(collectionClass, context);
   const listClass = defineInterface(registry, 'List', 'java.util');
   const [listElement] = addTypeParameters(listClass, ['E'], objectType);
   addInterface(listClass, classType(collectionClass, listElement));
@@ -363,11 +366,6 @@ function declareListMethods(cls: ClassInfo, element: JavaType, collectionClass: 
     BOOLEAN
   );
   addAbstractMethod(cls, 'subList', [INT, INT], { kind: 'class', cls, args: [element] });
-  const objectType = element.kind === 'typeVar' ? (element.variable.bounds[0] as JavaType) : element;
-  addAbstractMethod(cls, 'toArray', [], { kind: 'array', element: objectType });
-  const arrayVariable: TypeVariable = { name: 'T', bounds: [objectType] };
-  const arrayType: JavaType = { kind: 'array', element: { kind: 'typeVar', variable: arrayVariable } };
-  addAbstractMethod(cls, 'toArray', [arrayType], arrayType).typeParameters = [arrayVariable];
   addAbstractMethod(cls, 'get', [INT], element);
   addAbstractMethod(cls, 'set', [INT, element], element);
   addAbstractMethod(cls, 'add', [INT, element], VOID);
@@ -433,7 +431,6 @@ function defineArrayList(
   });
   defineListAdditions(cls, element, context, { listClass, collectionClass });
   addListIterators(cls, element, listItrClass);
-  defineListArrays(cls, context);
   defineListUpdates(cls, element, context);
   defineListSearches(cls, context);
   if (name === 'LinkedList') defineDequeMethods(cls, element);
@@ -491,25 +488,42 @@ function defineListAdditions(
 }
 
 /** The methods that copy a list into an array. */
-function defineListArrays(cls: ClassInfo, context: Context): void {
+/**
+ * `Collection.toArray`, which every collection and view gives in its iteration order; the typed form fills the given
+ * array when it is long enough, and its stores fail where the array's runtime element type forbids an element.
+ */
+function defineCollectionArrays(cls: ClassInfo, context: Context): void {
   addMethod(cls, 'toArray', [], { kind: 'array', element: context.objectType }, false, (frame, receiver) => {
-    frame.runtime.allocateArray(frame, elementsOf(receiver).length);
-    return new JavaArray(context.objectType, [...elementsOf(receiver)]);
+    const items = itemsOf(frame, receiver);
+    frame.runtime.allocateArray(frame, items.length);
+    return new JavaArray(context.objectType, [...items]);
   });
   const arrayVariable: TypeVariable = { name: 'T', bounds: [context.objectType] };
   const arrayType: JavaType = { kind: 'array', element: { kind: 'typeVar', variable: arrayVariable } };
   const toTypedArray = addMethod(cls, 'toArray', [arrayType], arrayType, false, (frame, receiver, [array]) => {
     if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
-    const items = elementsOf(receiver);
-    if (array.values.length < items.length) {
-      frame.runtime.allocateArray(frame, items.length);
-      return new JavaArray(array.elementType, [...items]);
+    const items = itemsOf(frame, receiver);
+    const target = array.values.length < items.length ? new JavaArray(array.elementType, []) : array;
+    if (target !== array) frame.runtime.allocateArray(frame, items.length);
+    // An array-backed collection copies its Object[] through System.arraycopy; the others store each element.
+    const copiesArray = copiesBackingArray(receiver as JavaObject);
+    for (const [index, item] of items.entries()) {
+      if (copiesArray) checkCopiedElement(frame, context.objectType, target, item);
+      else checkStore(frame, target, item);
+      target.values[index] = item;
     }
-    array.values.splice(0, items.length, ...items);
-    if (array.values.length > items.length) array.values[items.length] = undefined;
-    return array;
+    if (target === array && array.values.length > items.length) array.values[items.length] = undefined;
+    return target;
   });
   toTypedArray.typeParameters = [arrayVariable];
+}
+
+function copiesBackingArray(collection: JavaObject): boolean {
+  if (fixedSizeClasses.has(collection.cls)) return true;
+  for (let cls: ClassInfo | undefined = collection.cls; cls; cls = cls.superclass) {
+    if (batchRemovalClasses.has(cls)) return true;
+  }
+  return false;
 }
 
 /** The methods that read, replace, and remove elements by position or value. */

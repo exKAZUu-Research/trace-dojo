@@ -530,7 +530,11 @@ export abstract class LambdaCompiler extends PatternCompiler {
       const named = this.compileExpression(context, target.expression);
       if (named.kind === 'class') hint = named.cls.type;
     }
-    return { ...compiled, type: { ...compiled.type, arities, receiverHint: hint } };
+    // Only a reference whose every method takes its first argument as the receiver says that argument's type.
+    const bound = hint && upperBound(hint);
+    const methods = bound?.kind === 'class' ? this.collectMethods(bound.cls, expression.name) : [];
+    const takesReceiver = methods.length > 0 && methods.every((method) => !method.isStatic);
+    return { ...compiled, type: { ...compiled.type, arities, receiverHint: takesReceiver ? hint : undefined } };
   }
 
   /**

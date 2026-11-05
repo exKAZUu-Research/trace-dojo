@@ -23,7 +23,7 @@ export function defineArrayCopy(systemClass: ClassInfo, objectType: JavaType): v
       frame.runtime.spend(Math.ceil(copied.length / 64));
       const checksStores = !isPrimitive(to.elementType);
       for (const [offset, value] of copied.entries()) {
-        if (checksStores) checkElement(frame, from, to, value);
+        if (checksStores) checkCopiedElement(frame, from.elementType, to, value);
         to.values[(targetPosition as number) + offset] = value;
       }
     }
@@ -91,9 +91,10 @@ function arrayName(array: JavaArray, suffix: string): string {
   return `${isPrimitive(array.elementType) ? array.elementType.kind : 'object array'}${suffix}`;
 }
 
-function checkElement(frame: Frame, from: JavaArray, to: JavaArray, value: Value): void {
+/** Fails as `System.arraycopy` does when an element of an array of `sourceElement` does not fit `to`. */
+export function checkCopiedElement(frame: Frame, sourceElement: JavaType, to: JavaArray, value: Value): void {
   if (fitsElement(frame, to.elementType, value)) return;
-  const [source, target] = [typeClassName(frame, from.elementType), typeClassName(frame, to.elementType)];
+  const [source, target] = [typeClassName(frame, sourceElement), typeClassName(frame, to.elementType)];
   throwBuiltin(
     frame,
     'ArrayStoreException',

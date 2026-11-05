@@ -1,4 +1,4 @@
-import { javaEquals, putEntry } from './builtinCollections';
+import { findEntry, putEntry } from './builtinCollections';
 import { type CollectorFunctions, collectors } from './builtinCollectors';
 import { callFunction } from './builtinFunctions';
 import { createStore } from './builtinMaps';
@@ -7,18 +7,15 @@ import { addMethod } from './builtinSupport';
 import { box } from './builtinWrappers';
 import { type Frame, throwBuiltin } from './runtime';
 import { type ClassInfo, type JavaType, type NativeMethod, type TypeVariable, type WildcardType } from './types';
-import { JavaObject, toInt32, type Value } from './values';
+import { type HashEntry, JavaObject, toInt32, type Value } from './values';
 
 type Create = (frame: Frame, functions: CollectorFunctions) => JavaObject;
 
-/** The elements a grouping collector has gathered under one key, in the downstream collector's container. */
-interface Group {
-  key: Value;
-  container: unknown;
+/** A grouping collector's map, and the downstream container of each of its entries until it finishes. */
+interface Groups {
+  map: JavaObject;
+  containers: Map<HashEntry, unknown>;
 }
-
-/** The groups in the order their keys came, and whether an element of an earlier key came after the last new key. */
-type Groups = Group[] & { endsWithHit?: boolean };
 
 const ANY: WildcardType = { kind: 'wildcard', bound: undefined, isSuper: false };
 
@@ -220,7 +217,11 @@ function functionsOf(frame: Frame, collector: Value): CollectorFunctions {
   return functions ?? throwBuiltin(frame, 'UnsupportedOperationException');
 }
 
-/** Groups elements by the classifier's key, each group collected by `downstream` into the map `newMap` makes. */
+/**
+ * Groups elements by the classifier's key into the map `newMap` makes before the elements come, each group collected
+ * by `downstream`: each key is looked up in that map, as `computeIfAbsent` does, so that a sorted map's comparator
+ * decides which keys share a group, and the map's table grows as the JDK's does.
+ */
 function grouping(
   frame: Frame,
   classifier: Value,
@@ -230,29 +231,25 @@ function grouping(
   const target = functionsOf(frame, downstream);
   const fn = frame.runtime.builtins.classes.get('Function') as ClassInfo;
   return {
-    supply: (): Groups => [],
+    supply: (supplyFrame): Groups => ({ map: newMap(supplyFrame) as JavaObject, containers: new Map() }),
     accumulate: (accumulateFrame, container, value) => {
-      const groups = container as Groups;
+      const { map, containers } = container as Groups;
       const key = callFunction(accumulateFrame, fn, classifier, [value]);
       if (key === undefined)
         throwBuiltin(accumulateFrame, 'NullPointerException', 'element cannot be mapped to a null key');
-      let group = groups.find((candidate) => javaEquals(accumulateFrame, candidate.key, key));
-      groups.endsWithHit = group !== undefined;
-      if (!group) {
-        group = { key, container: target.supply(accumulateFrame) };
-        groups.push(group);
+      map.store?.growBeforeCompute();
+      let entry = findEntry(accumulateFrame, map, key);
+      if (!entry) {
+        const groupContainer = target.supply(accumulateFrame);
+        putEntry(accumulateFrame, map, key, false, undefined, true);
+        entry = findEntry(accumulateFrame, map, key) as HashEntry;
+        containers.set(entry, groupContainer);
       }
-      target.accumulate(accumulateFrame, group.container, value);
+      target.accumulate(accumulateFrame, containers.get(entry), value);
     },
     finish: (finishFrame, container) => {
-      const map = newMap(finishFrame);
-      const groups = container as Groups;
-      // groupingBy adds each key with computeIfAbsent, which a HashMap puts at the start of its bucket, and calls it
-      // for each element, whose call after the last new key may still grow the table.
-      for (const { key, container: groupContainer } of groups) {
-        putEntry(finishFrame, map, key, false, target.finish(finishFrame, groupContainer), true);
-      }
-      if (groups.endsWithHit) (map as JavaObject).store?.growBeforeCompute();
+      const { map, containers } = container as Groups;
+      for (const [entry, groupContainer] of containers) entry.value = target.finish(finishFrame, groupContainer);
       return map;
     },
   };

@@ -2,6 +2,7 @@ import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorl
 import { defineArrayCopy } from './arrayCopy';
 import { defineClassClass, runtimeClassNameOf } from './builtinClass';
 import { type Collections, defineCollections, javaEquals, javaHash, linkComparator } from './builtinCollections';
+import { makeEnumGeneric } from './builtinEnum';
 import { defineFunctions, type Functions } from './builtinFunctions';
 import { defineMath } from './builtinMath';
 import { defineMisc } from './builtinMisc';
@@ -91,6 +92,7 @@ function createBuiltins(): Builtins {
   const stringCompareTo = stringClass.methods.find((method) => method.name === 'compareTo') as MethodInfo;
   stringCompareTo.overrides = new Set([wrappers.compareTo]);
   addInterface(stringClass, { kind: 'class', cls: wrappers.comparableClass, args: [stringClass.type] });
+  makeEnumGeneric(registry, enumClass, wrappers, stringClass.type);
   const collections = defineCollections(registry, objectClass, stringClass.type, wrappers);
   defineSystem(registry, objectClass, stringClass.type);
   defineMisc(registry, objectClass, stringClass.type);

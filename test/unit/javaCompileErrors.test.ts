@@ -1329,6 +1329,16 @@ const programs: [name: string, runs: boolean, source: string][] = [
     'import java.util.function.*;\nclass Main {\n  static String f(Runnable r) { return "R"; }\n  static String f(Supplier<String> s) { return "S"; }\n  public static void main(String[] args) {\n    System.out.println(f(() -> System.out.println("x")) + f(() -> "s") + f(() -> { return "t"; }));\n  }\n}',
   ],
   [
+    'recursive-enum-bound',
+    true,
+    'import java.util.*;\nclass Main {\n  enum Level { LOW, HIGH }\n  static <E extends Enum<E>> E parse(Class<E> c, String s) { return Enum.valueOf(c, s); }\n  static <E extends Enum<E>> List<E> sorted(Collection<E> c) { List<E> l = new ArrayList<>(c); Collections.sort(l); return l; }\n  public static void main(String[] args) {\n    System.out.println(parse(Level.class, "HIGH") + " " + sorted(Set.of(Level.HIGH, Level.LOW)));\n  }\n}',
+  ],
+  [
+    'static-method-reference-to-a-generic-helper',
+    true,
+    'import java.util.*;\nimport java.util.function.*;\nclass Main {\n  static <T, R> List<R> map(List<T> l, Function<T, R> f) { List<R> r = new ArrayList<>(); for (T t : l) r.add(f.apply(t)); return r; }\n  public static void main(String[] args) {\n    System.out.println(map(List.of("1", "22"), Integer::parseInt));\n  }\n}',
+  ],
+  [
     'keyed-comparator-chained-without-target',
     true,
     'import java.util.*;\nclass Main {\n  record P(String name, int age) {}\n  public static void main(String[] args) {\n    List<P> ps = new ArrayList<>(); ps.sort(Comparator.comparing(P::name, Comparator.reverseOrder()).reversed());\n  }\n}',

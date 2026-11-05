@@ -394,6 +394,8 @@ Map<Integer, Long> memo = new HashMap<>(); String memoCme = ""; try { memo.compu
 Map<String, Integer> keyed = new HashMap<>(Map.of("a", 1)); Set<String> readOnlyKeys = Collections.unmodifiableSet(keyed.keySet()); keyed.put("b", 2); String keysText = readOnlyKeys.toString(); Iterator<String> pending = readOnlyKeys.iterator(); keyed.clear(); boolean stillPending = pending.hasNext();
 TreeSet<Integer> tree = new TreeSet<>(List.of(1)); Iterator<Integer> walked = tree.iterator(); walked.next(); tree.add(2); String treeEnd = ""; try { walked.next(); } catch (RuntimeException e) { treeEnd = e.getClass().getSimpleName(); }
 PriorityQueue<Object> plain = new PriorityQueue<>(); String uncomparable = ""; try { plain.add(new Object()); } catch (ClassCastException e) { uncomparable = "cce " + plain.size(); }
+String arrays = Arrays.toString(new TreeSet<>(List.of("b", "a")).toArray(new String[0])) + Arrays.toString(new ArrayDeque<>(List.of(3, 1)).toArray());
+Map<String, List<String>> folded = Stream.of("a", "A").collect(Collectors.groupingBy(s -> s, () -> new TreeMap<>(String.CASE_INSENSITIVE_ORDER), Collectors.toList())); String foldedText = folded.toString();
 String exhausted = ""; try { i.next(); } catch (NoSuchElementException e) { exhausted += "N"; } try { i.remove(); } catch (IllegalStateException e) { exhausted += "I"; } exhausted += q;
 Set<Integer> s = new HashSet<>(Set.of(1)); Iterator<Integer> u = Collections.unmodifiableSet(s).iterator(); s.add(2); String wrapped = ""; try { u.next(); } catch (ConcurrentModificationException e) { wrapped = "cme"; }
 List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(Comparator.nullsFirst(Comparator.naturalOrder())); String sorted = nulls.toString();`
@@ -405,6 +407,8 @@ List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(
     liveText: '[a]',
     linkedText: '[2, 3]',
     collectOrder: 'S12',
+    arrays: '[a, b][3, 1]',
+    foldedText: '{a=[a, A]}',
     uncomparable: 'cce 0',
     treeEnd: 'NoSuchElementException',
     memoCme: 'cme',

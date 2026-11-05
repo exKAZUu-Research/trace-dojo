@@ -18,7 +18,6 @@ import {
   createClass,
   erasure,
   type FieldInfo,
-  INT,
   isReference,
   isSubclass,
   isWidening,
@@ -31,7 +30,7 @@ import {
   type TypeVariable,
   VOID,
 } from './types';
-import { JavaArray, JavaObject, JavaString } from './values';
+import { JavaArray, JavaString } from './values';
 
 const KIND_NAMES = { class: 'クラス', interface: 'インターフェース', enum: '列挙型' } as const;
 
@@ -161,7 +160,7 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
 
   protected resolveSuperclass(cls: ClassInfo, declaration: ClassDeclaration): ClassType | undefined {
     if (cls.kind === 'interface') return;
-    if (cls.kind === 'enum') return this.builtins.enumClass.type as ClassType;
+    if (cls.kind === 'enum') return { kind: 'class', cls: this.builtins.enumClass, args: [thisTypeOf(cls)] };
     if (declaration.isRecord) return this.builtins.recordClass.type as ClassType;
     if (!declaration.superclass) return this.builtins.objectClass.type as ClassType;
     const type = this.resolveType(declaration.superclass);
@@ -348,19 +347,6 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
       }
       return statics[field.slot];
     });
-    addNative('compareTo', [cls.type], INT, false, (frame, receiver, [other]) => {
-      if (!(other instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
-      return ((receiver as JavaObject).enumConstant?.ordinal ?? 0) - (other.enumConstant?.ordinal ?? 0);
-    });
-    this.implementComparable(cls, cls.methods.at(-1) as MethodInfo);
-  }
-
-  /** Makes an enum `Comparable` to itself, as `Enum<E>` implements `Comparable<E>`, with `compareTo` its method. */
-  protected implementComparable(cls: ClassInfo, compareTo: MethodInfo): void {
-    const { comparableClass, compareTo: comparableCompareTo } = this.builtins.wrappers;
-    cls.interfaces.push(comparableClass);
-    cls.supertypes.push({ kind: 'class', cls: comparableClass, args: [cls.type] });
-    compareTo.overrides = new Set([comparableCompareTo]);
   }
 
   protected declareField(cls: ClassInfo, member: FieldDeclaration): void {
