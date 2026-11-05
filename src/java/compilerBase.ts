@@ -1,6 +1,15 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
-import type { Expression, FieldDeclaration, ImportDeclaration, Span, TypeParameter, TypeSyntax } from './ast';
+import type {
+  ClassDeclaration,
+  Expression,
+  FieldDeclaration,
+  ImportDeclaration,
+  MemberDeclaration,
+  Span,
+  TypeParameter,
+  TypeSyntax,
+} from './ast';
 import { getBuiltins } from './builtins';
 import { box, boxedTypeOf, unbox } from './builtinWrappers';
 import { boxingTarget, instantiateMethod, isInvocationConvertible, unboxedTypeOf } from './conversions';
@@ -849,6 +858,27 @@ function convertedNumber(value: CompiledValue, from: NumericKind, to: { kind: Nu
 
 function capturedAssignmentMessage(name: string): string {
   return `ラムダ式の中から使うローカル変数 ${name} は、final か実質的に final (一度しか代入しない) である必要があります。`;
+}
+
+/**
+ * The declaration of an anonymous class with `members`, whose supertype its creation resolves, as an anonymous class
+ * or an enum constant with a body declares.
+ */
+export function anonymousDeclaration(span: Span, members: MemberDeclaration[]): ClassDeclaration {
+  const { row, endRow, start, end } = span;
+  return {
+    kind: 'class',
+    name: '',
+    typeParameters: [],
+    modifiers: { isStatic: false, isFinal: false, isAbstract: false, isDefault: false, access: 'package' },
+    interfaces: [],
+    enumConstants: [],
+    members,
+    row,
+    endRow,
+    start,
+    end,
+  };
 }
 
 /** The superclasses of `cls`, nearest first. */

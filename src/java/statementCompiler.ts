@@ -26,7 +26,7 @@ import {
   type SwitchExpressionTarget,
 } from './compilerBase';
 import { assignedNames } from './definiteAssignment';
-import { ExpressionCompiler } from './expressionCompiler';
+import { InvocationCompiler } from './invocationCompiler';
 import { bindingsWhen } from './patternBindings';
 import { canCompleteNormally, containsJump, exhaustiveSwitches } from './reachability';
 import { type Frame, JavaThrow, throwBuiltin, UNASSIGNED } from './runtime';
@@ -48,7 +48,7 @@ const BREAK: BreakCompletion = { kind: 'break', label: undefined };
 const CONTINUE: ContinueCompletion = { kind: 'continue', label: undefined };
 
 /** Compiles statements into closures that report how they complete. */
-export abstract class StatementCompiler extends ExpressionCompiler {
+export abstract class StatementCompiler extends InvocationCompiler {
   /** Set while compiling a `for` header, whose parts share the one step that the `for` records after them. */
   private compilesForHeader = false;
 

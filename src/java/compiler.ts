@@ -13,7 +13,14 @@ import type {
   VariableDeclarator,
 } from './ast';
 import type { Builtins } from './builtins';
-import { type CompileOptions, type Eval, type Exec, type MethodContext, topLevelOf } from './compilerBase';
+import {
+  anonymousDeclaration,
+  type CompileOptions,
+  type Eval,
+  type Exec,
+  type MethodContext,
+  topLevelOf,
+} from './compilerBase';
 import { memberBindings, methodView } from './conversions';
 import { DeclarationCompiler } from './declarations';
 import { checkDefiniteAssignment, checkInitialization } from './definiteAssignment';
@@ -165,21 +172,7 @@ class Compiler extends DeclarationCompiler {
     constructor: MethodInfo
   ): { objectClass: ClassInfo; objectConstructor: MethodInfo } {
     if (!constant.body) return { objectClass: cls, objectConstructor: constructor };
-    const { row, endRow, start, end } = constant;
-    const declaration: ClassDeclaration = {
-      kind: 'class',
-      name: '',
-      typeParameters: [],
-      modifiers: { isStatic: false, isFinal: false, isAbstract: false, isDefault: false, access: 'package' },
-      superclass: undefined,
-      interfaces: [],
-      enumConstants: [],
-      members: constant.body,
-      row,
-      endRow,
-      start,
-      end,
-    };
+    const declaration = anonymousDeclaration(constant, constant.body);
     const subclass = this.compileLocalClass(context, declaration, {
       superConstructor: constructor,
       base: cls.type as ClassType,
