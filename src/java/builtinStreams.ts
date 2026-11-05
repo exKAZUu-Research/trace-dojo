@@ -68,10 +68,15 @@ function createStream(frame: Frame, cls: ClassInfo, source: Source, retained: Va
 
 /** Takes a stream's elements for its next stage, which Java allows only once per stream. */
 function take(frame: Frame, receiver: Value): Iterator<Value> {
+  return claim(frame, receiver)();
+}
+
+/** Marks a stream as operated upon, returning its source for a later stage to traverse when it is consumed. */
+function claim(frame: Frame, receiver: Value): Source {
   const state = sources.get(receiver as JavaObject) as { source: Source; isUsed: boolean };
   if (state.isUsed) throwBuiltin(frame, 'IllegalStateException', 'stream has already been operated upon or closed');
   state.isUsed = true;
-  return state.source();
+  return state.source;
 }
 
 function* iterate(iterator: Iterator<Value>): Generator<Value> {
@@ -106,8 +111,9 @@ function derive(
   frame: Frame,
   transform: (items: Iterator<Value>) => Iterator<Value>
 ): JavaObject {
-  const upstream = take(frame, receiver);
-  return createStream(frame, cls, () => transform(upstream), [receiver]);
+  // The source is read only when the pipeline is consumed, so that changes made to a collection before then show.
+  const upstream = claim(frame, receiver);
+  return createStream(frame, cls, () => transform(upstream()), [receiver]);
 }
 
 function defineStreamTypes(context: Context, optionals: Optionals, collector: ClassInfo): StreamTypes {

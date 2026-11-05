@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 412 -- One checker for the definite assignment rules of JLS chapter 16, which share its scopes and states.
+// code-gauge-allow-file fileNcss 415 -- One checker for the definite assignment rules of JLS chapter 16, which share its scopes and states.
 import { CompileError } from '../interpreter/diagnostics';
 import {
   assign,
@@ -595,8 +595,13 @@ export class DefiniteAssignmentChecker {
 
   /** Records a local that a write makes not effectively final, as a final one would be rejected for it. */
   private checkEffectivelyFinalWrite(span: Span, variable: Variable, state: State, reads: boolean): void {
+    // An initialized local is never assigned, nor any local incremented, even where the code cannot run (JLS 4.12.4).
+    if (reads || variable.isInitialized) {
+      this.markNotEffectivelyFinal(variable);
+      return;
+    }
     if (!state.assigned) return;
-    if (reads || variable.isInitialized || state.possiblyAssigned.has(variable.id)) {
+    if (state.possiblyAssigned.has(variable.id)) {
       this.markNotEffectivelyFinal(variable);
       return;
     }

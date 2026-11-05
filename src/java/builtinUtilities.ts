@@ -460,8 +460,8 @@ function touch(value: Value): void {
   object.modCount = (object.modCount ?? 0) + 1;
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- One registration per builtin method, each a small native.
-// code-gauge-allow functionNcss 55 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionCognitiveComplexity 28 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 56 -- One registration per builtin method, each a small native.
 function defineCollectionsClass(
   registry: Registry,
   objectClass: ClassInfo,
@@ -531,8 +531,9 @@ function defineCollectionsClass(
       returnType: VOID,
     }),
     (frame, _, [list, random]) => {
-      checkModifiable(frame, list, false);
       const values = elementsOf(frame, list);
+      // A list of fewer than two elements is left as it is, without a write that an unmodifiable one would reject.
+      if (values.length > 1) checkModifiable(frame, list, false);
       // Collections.shuffle swaps each position from the end with a random one before it, as Java specifies.
       for (let index = values.length - 1; index > 0; index--) {
         const randomClass = (random as JavaObject).cls;
@@ -552,7 +553,6 @@ function defineCollectionsClass(
       isVarargs: true,
     }),
     (frame, _, [collection, array]) => {
-      checkModifiable(frame, collection, true);
       let changed = false;
       for (const value of (array as JavaArray).values) {
         changed =
@@ -569,8 +569,9 @@ function defineCollectionsClass(
     objectType,
     (element) => ({ parameterTypes: [listOf(element)], returnType: VOID }),
     (frame, _, [list]) => {
-      checkModifiable(frame, list, false);
-      elementsOf(frame, list).reverse();
+      const values = elementsOf(frame, list);
+      if (values.length > 1) checkModifiable(frame, list, false);
+      values.reverse();
     }
   );
   addGenericStatic(

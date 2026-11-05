@@ -1,4 +1,5 @@
-import type { Expression, Pattern, PatternBinding, PatternLabel, Span, Statement, SwitchGroup } from './ast';
+import type { Expression, Pattern, PatternBinding, PatternLabel, Statement, SwitchGroup } from './ast';
+import { boxedTypeOf } from './builtinWrappers';
 import type { Compiled, Exec, MethodContext, Scope } from './compilerBase';
 import { memberBindings, memberType } from './conversions';
 import { bindingsOfPattern } from './patternBindings';
@@ -43,8 +44,8 @@ interface PatternSwitchState {
   /** The unguarded patterns, which decide whether the switch covers every value. */
   totalPatterns: CompiledPattern[];
   enumConstants: Set<string>;
-  /** The unguarded type patterns, which match every value of their types that later labels may test. */
-  dominating: { type: JavaType; span: Span }[];
+  /** The unguarded patterns, which match every value that later labels they dominate (JLS 14.11.1) may test. */
+  dominating: CompiledPattern[];
 }
 
 /** Compiles the patterns of `instanceof` and of switches, which Java 21 matches against types and records. */
@@ -222,7 +223,6 @@ export abstract class PatternCompiler extends TryCompiler {
   }
 
   /** Compiles one label of a pattern switch's group into the tests that select the group. */
-  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of case label.
   protected compileSwitchCase(
     context: MethodContext,
     state: PatternSwitchState,
@@ -237,19 +237,23 @@ export abstract class PatternCompiler extends TryCompiler {
       state[key] = index;
       return [];
     }
-    if (label.kind !== 'patternLabel')
-      return [this.compileConstantTest(context, label, selectorType, state.enumConstants)];
+    if (label.kind !== 'patternLabel') return [this.compileConstantTest(context, label, selectorType, state)];
     const patternBindings = bindingsOfPattern(label.pattern);
     if (group.labels.length > 1 && patternBindings.length > 0) {
       this.error(label, '変数を宣言するパターンは、他のラベルと同じ case には書けません。');
     }
     const compiled = this.compilePattern(context, label.pattern, selectorType);
-    this.checkDominance(state.dominating, compiled.type, label);
+    if (state.dominating.some((earlier) => this.dominates(earlier, compiled))) {
+      this.error(
+        label,
+        'この case のパターンは、前の case のパターンにすでに含まれているため、実行されることがありません。'
+      );
+    }
     bindings.push(...patternBindings);
     const { guard } = label;
     if (!guard) {
       state.totalPatterns.push(compiled);
-      if (label.pattern.kind === 'typePattern') state.dominating.push({ type: compiled.type, span: label });
+      state.dominating.push(compiled);
       return [compiled.test];
     }
     const guardTest = this.withBindings(context, patternBindings, () => this.compileCondition(context, guard));
@@ -261,10 +265,11 @@ export abstract class PatternCompiler extends TryCompiler {
     context: MethodContext,
     label: Expression,
     selectorType: JavaType,
-    enumConstants: Set<string>
+    { enumConstants, dominating }: PatternSwitchState
   ): Test {
     const bound = upperBound(selectorType);
     if (bound.kind === 'class' && bound.cls.kind === 'enum') {
+      this.checkConstantDominance(dominating, bound, label);
       const ordinal = this.enumOrdinalOf(context, label, bound.cls);
       const name = bound.cls.staticFields.filter((field) => field.enumConstant)[ordinal].name;
       if (enumConstants.has(name)) this.error(label, 'case の値が重複しています。');
@@ -274,21 +279,33 @@ export abstract class PatternCompiler extends TryCompiler {
     const value = this.compileValue(context, label);
     const constant = value.constant;
     if (constant === undefined) this.error(label, 'case には定数を書いてください。');
+    this.checkConstantDominance(dominating, boxedTypeOf(this.builtins.wrappers, value.type) ?? value.type, label);
     if (constant instanceof JavaString) {
       return (_, tested) => tested instanceof JavaString && tested.value === constant.value;
     }
     return (_, tested) => tested instanceof JavaObject && tested.boxed === constant;
   }
 
-  /** Rejects a pattern that an earlier unguarded type pattern already matches, which would never run. */
-  protected checkDominance(dominating: readonly { type: JavaType; span: Span }[], type: JavaType, span: Span): void {
-    for (const earlier of dominating) {
-      if (isWidening(erasure(type), erasure(earlier.type), this.builtins.objectClass)) {
-        this.error(
-          span,
-          'この case のパターンは、前の case のパターンにすでに含まれているため、実行されることがありません。'
-        );
-      }
+  /**
+   * Whether an unguarded pattern matches every value a later one does (JLS 14.11.1): a type pattern any pattern of a
+   * subtype, and a record pattern one of the same record whose components it dominates one by one.
+   */
+  protected dominates(earlier: CompiledPattern, later: CompiledPattern): boolean {
+    if (!earlier.record) return isWidening(erasure(later.type), erasure(earlier.type), this.builtins.objectClass);
+    const parts = later.record?.cls === earlier.record.cls ? later.record.parts : undefined;
+    return (
+      parts !== undefined &&
+      earlier.record.parts.every((part, index) => this.dominates(part, parts[index] as CompiledPattern))
+    );
+  }
+
+  /** Rejects a constant label that an earlier unguarded type pattern already matches, which would never run. */
+  protected checkConstantDominance(dominating: readonly CompiledPattern[], type: JavaType, label: Expression): void {
+    const isDominated = dominating.some(
+      (earlier) => !earlier.record && isWidening(erasure(type), erasure(earlier.type), this.builtins.objectClass)
+    );
+    if (isDominated) {
+      this.error(label, 'この case の値は、前の case のパターンにすでに含まれているため、実行されることがありません。');
     }
   }
 

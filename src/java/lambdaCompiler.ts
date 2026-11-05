@@ -1,5 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
-import type { Expression, Lambda, MethodReference, Parameter, Span, TypeSyntax } from './ast';
+import type { Block, Expression, Lambda, MethodReference, Parameter, Span, TypeSyntax } from './ast';
 import { functionalMethodOf, functionObject } from './builtinFunctions';
 import { boxedTypeOf } from './builtinWrappers';
 import type { CompiledValue, Exec, MethodContext } from './compilerBase';
@@ -175,15 +175,27 @@ export abstract class LambdaCompiler extends PatternCompiler {
   }
 
   protected compileLambdaBody(context: MethodContext, lambda: Lambda, returnType: JavaType): Exec {
+    const exec = this.compileLambdaCode(context, lambda, returnType);
+    const { body } = lambda;
+    const parameters: Parameter[] = lambda.parameters.map((parameter) => ({
+      ...parameter,
+      type: parameter.type ?? { kind: 'var', ...parameter },
+      isVarargs: false,
+    }));
+    const span = { row: body.row, endRow: body.endRow, start: body.start, end: body.end };
+    // An expression body is analyzed as the statement it stands for, so that nested lambdas' captures are checked.
+    const block: Block =
+      body.kind === 'block'
+        ? body
+        : { kind: 'block', statements: [{ kind: 'expression', expression: body, ...span }], ...span };
+    this.checkCaptures(context, checkDefiniteAssignment(parameters, block));
+    return exec;
+  }
+
+  private compileLambdaCode(context: MethodContext, lambda: Lambda, returnType: JavaType): Exec {
     const { body } = lambda;
     if (body.kind === 'block') {
       const exec = this.compileBlock(context, body, false);
-      const parameters: Parameter[] = lambda.parameters.map((parameter) => ({
-        ...parameter,
-        type: parameter.type ?? { kind: 'var', ...parameter },
-        isVarargs: false,
-      }));
-      this.checkCaptures(context, checkDefiniteAssignment(parameters, body));
       if (returnType.kind !== 'void' && canCompleteNormally(body)) {
         this.error(
           { ...body, row: body.endRow },

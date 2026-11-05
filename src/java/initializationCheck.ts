@@ -1,5 +1,14 @@
 import { CompileError } from '../interpreter/diagnostics';
-import type { ArrayInitializer, Block, ExplicitConstructorCall, Expression, Parameter, Span, Statement } from './ast';
+import type {
+  ArrayInitializer,
+  Block,
+  ExplicitConstructorCall,
+  Expression,
+  ExpressionStatement,
+  Parameter,
+  Span,
+  Statement,
+} from './ast';
 import { type AssignmentFacts, DefiniteAssignmentChecker } from './definiteAssignment';
 
 export interface InitializationPath {
@@ -38,12 +47,20 @@ export function checkInitialization(path: InitializationPath): AssignmentFacts {
   }
   if (constructor) {
     const withParameters = checker.declareParameters(state, constructor.parameters);
-    // The prologue runs before the call, and its locals stay in scope for the call and the body.
+    // The prologue runs before the call's arguments, and its locals stay in scope for them and the body.
+    const callArgs = (constructor.explicitCall?.args ?? []).map((arg): ExpressionStatement => ({
+      kind: 'expression',
+      expression: arg,
+      row: arg.row,
+      endRow: arg.endRow,
+      start: arg.start,
+      end: arg.end,
+    }));
     const whole: Block = {
       ...constructor.body,
-      statements: [...(constructor.prologue ?? []), ...constructor.body.statements],
+      statements: [...(constructor.prologue ?? []), ...callArgs, ...constructor.body.statements],
     };
-    state = checker.statement(whole, checker.expressions(constructor.explicitCall?.args ?? [], withParameters));
+    state = checker.statement(whole, withParameters);
   }
   for (const exit of [state, ...checker.returns]) {
     const unassigned = path.blankFinals.find((name) => exit.assigned && !checker.isFieldAssigned(exit, name));
