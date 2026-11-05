@@ -30,6 +30,17 @@ interface CompiledPattern {
   isTotalFor: (type: JavaType) => boolean;
 }
 
+/** What compiling the labels of a pattern switch has found so far. */
+interface PatternSwitchState {
+  defaultIndex: number;
+  nullIndex: number;
+  /** The unguarded patterns, which decide whether the switch covers every value. */
+  totalPatterns: CompiledPattern[];
+  enumConstants: Set<string>;
+  /** The unguarded type patterns, which match every value of their types that later labels may test. */
+  dominating: { type: JavaType; span: Span }[];
+}
+
 /** Compiles the patterns of `instanceof` and of switches, which Java 21 matches against types and records. */
 export abstract class PatternCompiler extends TryCompiler {
   /** The pattern variables each group of the switch being compiled binds, which its body sees. */
@@ -143,53 +154,26 @@ export abstract class PatternCompiler extends TryCompiler {
     statement: { selector: Expression; groups: SwitchGroup[] },
     selector: { type: JavaType; run: (frame: Frame) => Value }
   ): { type: JavaType; run: (frame: Frame) => number } {
-    let defaultIndex = -1;
-    let nullIndex = -1;
-    const totalPatterns: CompiledPattern[] = [];
-    const enumConstants = new Set<string>();
-    const dominating: { type: JavaType; span: Span }[] = [];
-    const groupBindings: PatternBinding[][] = [];
-    const tests = statement.groups.map((group, index) => {
-      const bindings: PatternBinding[] = [];
-      groupBindings.push(bindings);
-      return group.labels.flatMap((label): Test[] => {
-        if (label === undefined) {
-          if (defaultIndex !== -1) this.error(group, 'default が複数あります。');
-          defaultIndex = index;
-          return [];
-        }
-        if (isNullLabel(label)) {
-          if (nullIndex !== -1) this.error(label, 'case null が複数あります。');
-          nullIndex = index;
-          return [];
-        }
-        if (label.kind !== 'patternLabel') {
-          return [this.compileConstantTest(context, label, selector.type, enumConstants)];
-        }
-        if (group.labels.length > 1 && bindingsOfPattern(label.pattern).length > 0) {
-          this.error(label, '変数を宣言するパターンは、他のラベルと同じ case には書けません。');
-        }
-        const compiled = this.compilePattern(context, label.pattern, selector.type);
-        this.checkDominance(dominating, compiled.type, label);
-        const patternBindings = bindingsOfPattern(label.pattern);
-        bindings.push(...patternBindings);
-        const guard = label.guard;
-        const guardTest = guard
-          ? this.withBindings(context, patternBindings, () => this.compileCondition(context, guard))
-          : undefined;
-        if (!guard) {
-          totalPatterns.push(compiled);
-          if (label.pattern.kind === 'typePattern') dominating.push({ type: compiled.type, span: label });
-        }
-        return [guardTest ? (frame, value) => compiled.test(frame, value) && guardTest(frame) : compiled.test];
-      });
-    });
-    const isExhaustive = defaultIndex !== -1 || this.covers(selector.type, totalPatterns, enumConstants, new Set());
-    if (!isExhaustive)
+    const state: PatternSwitchState = {
+      defaultIndex: -1,
+      nullIndex: -1,
+      totalPatterns: [],
+      enumConstants: new Set(),
+      dominating: [],
+    };
+    const groupBindings: PatternBinding[][] = statement.groups.map(() => []);
+    const tests = statement.groups.map((group, index) =>
+      group.labels.flatMap((label) =>
+        this.compileSwitchCase(context, state, group, index, label, selector.type, groupBindings[index])
+      )
+    );
+    const { defaultIndex, nullIndex } = state;
+    if (defaultIndex === -1 && !this.covers(selector.type, state.totalPatterns, state.enumConstants, new Set())) {
       this.error(
         statement.selector,
         'switch がすべての場合を網羅していません。default か、残りの型の case を書いてください。'
       );
+    }
     exhaustiveSwitches.add(statement);
     this.groupBindings = groupBindings;
     return {
@@ -204,6 +188,42 @@ export abstract class PatternCompiler extends TryCompiler {
         return matched === -1 ? defaultIndex : matched;
       },
     };
+  }
+
+  /** Compiles one label of a pattern switch's group into the tests that select the group. */
+  protected compileSwitchCase(
+    context: MethodContext,
+    state: PatternSwitchState,
+    group: SwitchGroup,
+    index: number,
+    label: SwitchGroup['labels'][number],
+    selectorType: JavaType,
+    bindings: PatternBinding[]
+  ): Test[] {
+    if (label === undefined || isNullLabel(label)) {
+      const key = label === undefined ? 'defaultIndex' : 'nullIndex';
+      if (state[key] !== -1)
+        this.error(label ?? group, label === undefined ? 'default が複数あります。' : 'case null が複数あります。');
+      state[key] = index;
+      return [];
+    }
+    if (label.kind !== 'patternLabel')
+      return [this.compileConstantTest(context, label, selectorType, state.enumConstants)];
+    const patternBindings = bindingsOfPattern(label.pattern);
+    if (group.labels.length > 1 && patternBindings.length > 0) {
+      this.error(label, '変数を宣言するパターンは、他のラベルと同じ case には書けません。');
+    }
+    const compiled = this.compilePattern(context, label.pattern, selectorType);
+    this.checkDominance(state.dominating, compiled.type, label);
+    bindings.push(...patternBindings);
+    const { guard } = label;
+    if (!guard) {
+      state.totalPatterns.push(compiled);
+      if (label.pattern.kind === 'typePattern') state.dominating.push({ type: compiled.type, span: label });
+      return [compiled.test];
+    }
+    const guardTest = this.withBindings(context, patternBindings, () => this.compileCondition(context, guard));
+    return [(frame, value) => compiled.test(frame, value) && guardTest(frame)];
   }
 
   /** Compiles a constant label of a pattern switch: an enum constant, a string, or a boxed number. */

@@ -1,14 +1,45 @@
 import { CompileError } from '../interpreter/diagnostics';
-import type { CatchClause, Statement } from './ast';
+import type { CatchClause, Resource, Statement } from './ast';
 import { type Completion, type EnclosingTry, type Eval, type Exec, type MethodContext } from './compilerBase';
 import { assignedNames } from './definiteAssignment';
 import { canCompleteNormally } from './reachability';
 import { type Frame, JavaThrow } from './runtime';
 import { SwitchCompiler } from './switchCompiler';
-import { type ClassInfo, isSubclass, type JavaType, upperBound } from './types';
+import { type ClassInfo, isSubclass, type JavaType, type MethodInfo, upperBound } from './types';
 import { type Value } from './values';
 
 type CatchHandler = (frame: Frame, thrown: JavaThrow) => Completion | undefined;
+
+interface CompiledResource {
+  init: Exec | undefined;
+  read: Eval;
+  close: MethodInfo;
+}
+
+/**
+ * Closes the opened resources in reverse order, returning the exception the statement throws: the first exception,
+ * to which the exceptions closing later resources join as suppressed.
+ */
+function closeResources(
+  frame: Frame,
+  opened: readonly Value[],
+  resources: readonly CompiledResource[],
+  primary: JavaThrow | undefined
+): JavaThrow | undefined {
+  let thrown = primary;
+  for (let index = opened.length - 1; index >= 0; index--) {
+    const value = opened[index];
+    if (value === undefined) continue;
+    try {
+      frame.runtime.invoke(frame, frame.runtime.dispatch(value, resources[index].close), value, [], undefined);
+    } catch (error) {
+      if (!(error instanceof JavaThrow)) throw error;
+      if (thrown) (thrown.value.suppressed ??= []).push(error.value);
+      else thrown = error;
+    }
+  }
+  return thrown;
+}
 
 /** Compiles try statements, their catch clauses and finally blocks, and try-with-resources. */
 export abstract class TryCompiler extends SwitchCompiler {
@@ -55,28 +86,7 @@ export abstract class TryCompiler extends SwitchCompiler {
 
   /** Compiles a try-with-resources statement's resources and try block, which close the resources after it. */
   protected compileResources(context: MethodContext, statement: Extract<Statement, { kind: 'try' }>): Exec {
-    const autoCloseable = this.builtins.classes.get('AutoCloseable') as ClassInfo;
-    const resources = statement.resources.map((resource) => {
-      let init: Exec | undefined;
-      let read: Eval;
-      let type: JavaType;
-      if ('local' in resource) {
-        init = this.compileLocal(context, resource.local);
-        const slot = this.findLocal(context, resource.local.declarators[0].name) as number;
-        type = context.locals[slot].type;
-        read = (frame) => frame.locals[slot] as Value;
-      } else {
-        const value = this.compileValue(context, resource.expression);
-        ({ type, run: read } = value);
-      }
-      const bound = upperBound(type);
-      if (bound.kind !== 'class' || !isSubclass(bound.cls, autoCloseable)) {
-        this.error(resource, `try-with-resources 文には AutoCloseable を実装したオブジェクトしか書けません。`);
-      }
-      const close = this.selectMethod(resource, this.collectMethods(bound.cls, 'close'), [], 'メソッド close');
-      this.checkThrown(context, resource, close.thrownTypes);
-      return { init, read, close: close.declared ?? close };
-    });
+    const resources = statement.resources.map((resource) => this.compileResource(context, resource));
     const body = this.compileBlock(context, statement.body);
     return (frame) => {
       const opened: Value[] = [];
@@ -92,21 +102,33 @@ export abstract class TryCompiler extends SwitchCompiler {
         if (!(error instanceof JavaThrow)) throw error;
         primary = error;
       }
-      // Resources close in reverse order; an exception closing one joins the first exception as suppressed.
-      for (let index = opened.length - 1; index >= 0; index--) {
-        const value = opened[index];
-        if (value === undefined) continue;
-        try {
-          frame.runtime.invoke(frame, frame.runtime.dispatch(value, resources[index].close), value, [], undefined);
-        } catch (error) {
-          if (!(error instanceof JavaThrow)) throw error;
-          if (primary) (primary.value.suppressed ??= []).push(error.value);
-          else primary = error;
-        }
-      }
+      primary = closeResources(frame, opened, resources, primary);
       if (primary) throw primary;
       return completion;
     };
+  }
+
+  /** Compiles a resource: a variable it declares and initializes, or the effectively final variable it names. */
+  protected compileResource(context: MethodContext, resource: Resource): CompiledResource {
+    let init: Exec | undefined;
+    let read: Eval;
+    let type: JavaType;
+    if ('local' in resource) {
+      init = this.compileLocal(context, resource.local);
+      const slot = this.findLocal(context, resource.local.declarators[0].name) as number;
+      type = context.locals[slot].type;
+      read = (frame) => frame.locals[slot] as Value;
+    } else {
+      ({ type, run: read } = this.compileValue(context, resource.expression));
+    }
+    const bound = upperBound(type);
+    const autoCloseable = this.builtins.classes.get('AutoCloseable') as ClassInfo;
+    if (bound.kind !== 'class' || !isSubclass(bound.cls, autoCloseable)) {
+      return this.error(resource, 'try-with-resources 文には AutoCloseable を実装したオブジェクトしか書けません。');
+    }
+    const close = this.selectMethod(resource, this.collectMethods(bound.cls, 'close'), [], 'メソッド close');
+    this.checkThrown(context, resource, close.thrownTypes);
+    return { init, read, close: close.declared ?? close };
   }
 
   /** Rejects catching what an earlier clause catches, or a checked exception the try block cannot throw. */
