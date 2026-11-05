@@ -1,4 +1,5 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
+import { classNameOf, defineClassClass } from './builtinClass';
 import { type Collections, defineCollections, javaEquals, javaHash, linkComparator } from './builtinCollections';
 import { defineFunctions, type Functions } from './builtinFunctions';
 import { defineMath } from './builtinMath';
@@ -9,7 +10,6 @@ import {
   addConstructor,
   addInterface,
   addMethod,
-  addTypeParameters,
   createRegistry,
   newString,
   type Registry,
@@ -120,57 +120,6 @@ function defineObject(objectClass: ClassInfo, stringType: JavaType): void {
     return newString(frame, `${name}@${identityOf(receiver).toString(16)}`);
   });
   addConstructor(objectClass, [], () => {});
-}
-
-/** The name `Class.getName` gives: the qualified name of a builtin class, or the binary name of a program's class. */
-function classNameOf(frame: Frame, cls: ClassInfo): string {
-  return frame.runtime.builtins.qualifiedNames.get(cls) ?? cls.binaryName;
-}
-
-function reflected(receiver: Value): ClassInfo {
-  return (receiver as JavaObject).reflected as ClassInfo;
-}
-
-/** The objects `getClass()` returns, one for each class, so that `==` compares classes. */
-const classObjects = new WeakMap<ClassInfo, JavaObject>();
-
-function defineClassClass(registry: Registry, objectClass: ClassInfo, stringType: JavaType): void {
-  const classClass = registry.define('Class', objectClass);
-  classClass.isFinal = true;
-  addTypeParameters(classClass, ['T'], objectClass.type);
-  addMethod(classClass, 'getName', [], stringType, false, (frame, receiver) =>
-    newString(frame, classNameOf(frame, reflected(receiver)))
-  );
-  addMethod(classClass, 'getSimpleName', [], stringType, false, (frame, receiver) => {
-    const cls = reflected(receiver);
-    // An anonymous class has no simple name.
-    return newString(frame, /\$\d+$/.test(cls.binaryName) ? '' : cls.name);
-  });
-  addMethod(classClass, 'toString', [], stringType, false, (frame, receiver) => {
-    const cls = reflected(receiver);
-    return newString(frame, `${cls.kind === 'interface' ? 'interface' : 'class'} ${classNameOf(frame, cls)}`);
-  });
-  const getClass = addMethod(objectClass, 'getClass', [], classClass.type, false, (frame, receiver) => {
-    const cls =
-      receiver instanceof JavaObject
-        ? receiver.cls
-        : receiver instanceof JavaString
-          ? frame.runtime.builtins.stringClass
-          : objectClass;
-    return classObjectOf(cls, classClass);
-  });
-  getClass.isFinal = true;
-}
-
-/** The `Class` object of `cls`, which `getClass()` and class literals share. */
-export function classObjectOf(cls: ClassInfo, classClass: ClassInfo): JavaObject {
-  let object = classObjects.get(cls);
-  if (!object) {
-    object = new JavaObject(classClass);
-    object.reflected = cls;
-    classObjects.set(cls, object);
-  }
-  return object;
 }
 
 function defineEnum(enumClass: ClassInfo, stringType: JavaType): ClassInfo {

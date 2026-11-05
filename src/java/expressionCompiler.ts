@@ -1,5 +1,5 @@
 import type { ArrayInitializer, BinaryOperator, Expression, PatternBinding, Span } from './ast';
-import { classObjectOf } from './builtins';
+import { classObjectOf } from './builtinClass';
 import { box, boxedTypeOf, unbox } from './builtinWrappers';
 import {
   type Compiled,
