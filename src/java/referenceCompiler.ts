@@ -135,12 +135,9 @@ export abstract class ReferenceCompiler extends CompilerBase {
     access: Extract<Expression, { kind: 'fieldAccess' }>
   ): (Reference & { constant?: Value }) | Compiled {
     const { name } = access;
-    if (access.object === 'super') {
-      if (context.isStatic) this.error(access, 'static メソッドの中では super を使えません。');
-      const field = this.findField(context.cls.superclass as ClassInfo, name);
-      if (!field) return this.error(access, missingFieldMessage(context.cls.superclass as ClassInfo, name));
-      return notConstant(this.fieldReference(field, field.isStatic ? undefined : superValue(context)));
-    }
+    const qualifiedClass = this.qualifiedClassOf(context, access);
+    if (qualifiedClass) return { kind: 'class', cls: qualifiedClass };
+    if (access.object === 'super') return this.superFieldReference(context, access);
     const object = this.compileExpression(context, access.object);
     if (object.kind === 'class') {
       const field = this.findField(object.cls, name);
@@ -156,6 +153,39 @@ export abstract class ReferenceCompiler extends CompilerBase {
     // Java folds a constant field only when it is named by its simple name or as TypeName.name.
     return notConstant(this.compileMemberOfValue(context, access, object));
   }
+
+  /** Resolves `super.name`, a field of the superclass. */
+  protected superFieldReference(
+    context: MethodContext,
+    access: Extract<Expression, { kind: 'fieldAccess' }>
+  ): Reference {
+    if (context.isStatic) this.error(access, 'static メソッドの中では super を使えません。');
+    const superclass = context.cls.superclass as ClassInfo;
+    const field = this.findField(superclass, access.name);
+    if (!field) return this.error(access, missingFieldMessage(superclass, access.name));
+    return notConstant(this.fieldReference(field, field.isStatic ? undefined : superValue(context)));
+  }
+
+  /**
+   * The builtin class that a qualified name such as `java.util.Arrays` names, unless its first name is a variable,
+   * which Java prefers (JLS 6.5.2).
+   */
+  protected qualifiedClassOf(
+    context: MethodContext,
+    access: Extract<Expression, { kind: 'fieldAccess' }>
+  ): ClassInfo | undefined {
+    const names: string[] = [];
+    let current: Expression | 'super' = access;
+    for (; current !== 'super' && current.kind === 'fieldAccess'; current = current.object) names.unshift(current.name);
+    if (current === 'super' || current.kind !== 'name') return;
+    const first = current.name;
+    if (this.findLocal(context, first) !== undefined || this.findField(context.cls, first)) return;
+    this.qualifiedClasses ??= new Map([...this.builtins.qualifiedNames].map(([cls, qualified]) => [qualified, cls]));
+    return this.qualifiedClasses.get([first, ...names].join('.'));
+  }
+
+  /** Builtin classes by their qualified names, such as `java.util.Arrays`. */
+  private qualifiedClasses: Map<string, ClassInfo> | undefined;
 
   /** Resolves `object.name` where `object` is a value, including an array's `length`. */
   protected compileMemberOfValue(

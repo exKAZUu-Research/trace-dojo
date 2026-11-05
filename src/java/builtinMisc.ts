@@ -10,6 +10,7 @@ export function defineMisc(registry: Registry, objectClass: ClassInfo, stringTyp
   defineObjects(registry, objectClass, stringType);
   defineRandom(registry, objectClass);
   defineInterface(registry, 'Cloneable', 'java.lang');
+  defineSystemQueries(registry.classes.get('System') as ClassInfo, stringType);
   // Programs pause between turtle moves, which a trace shows step by step, so sleeping returns at once.
   const thread = registry.define('Thread', objectClass);
   const sleep = addMethod(thread, 'sleep', [LONG], VOID, true, () => {});
@@ -132,4 +133,11 @@ function defineRandom(registry: Registry, objectClass: ClassInfo): void {
   addMethod(cls, 'nextDouble', [], DOUBLE, false, (_, receiver) => nextDouble(randomOf(receiver)));
   const mathClass = registry.classes.get('Math') as ClassInfo;
   addMethod(mathClass, 'random', [], DOUBLE, true, () => Math.random());
+}
+
+/** `System`'s clocks, which learners read to time their code, and its line separator. */
+function defineSystemQueries(systemClass: ClassInfo, stringType: JavaType): void {
+  addMethod(systemClass, 'currentTimeMillis', [], LONG, true, () => BigInt(Date.now()));
+  addMethod(systemClass, 'nanoTime', [], LONG, true, () => BigInt(Math.round(performance.now() * 1_000_000)));
+  addMethod(systemClass, 'lineSeparator', [], stringType, true, (frame) => newString(frame, '\n'));
 }
