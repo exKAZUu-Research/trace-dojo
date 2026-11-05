@@ -8,7 +8,9 @@ import type {
   Expression,
   LambdaParameter,
   LiteralValue,
+  TypeSyntax,
 } from './ast';
+import { convertMember } from './parseDeclarations';
 import {
   convertModifiers,
   convertType,
@@ -219,7 +221,11 @@ function stripIndentation(content: string): string {
 function convertFieldAccess(node: Node): Expression {
   const object = field(node, 'object');
   const name = field(node, 'field');
-  if (name.type === 'this') unsupported(node, '修飾された this');
+  if (name.type === 'this') {
+    const qualifier = expressionAsTypeSyntax(object);
+    if (!qualifier) return unsupported(node, '修飾された this');
+    return { kind: 'this', qualifier, ...span(node) };
+  }
   if (node.children.filter((child) => child?.type === 'super').length > (object.type === 'super' ? 1 : 0))
     unsupported(node, '修飾された super');
   return {
@@ -228,6 +234,13 @@ function convertFieldAccess(node: Node): Expression {
     name: name.text,
     ...span(node),
   };
+}
+
+/** The type that a name or a qualified name such as `Outer.Inner` before `.this` writes. */
+function expressionAsTypeSyntax(node: Node): TypeSyntax | undefined {
+  if (node.type !== 'identifier' && node.type !== 'field_access') return;
+  const names = node.text.split('.').map((part) => part.trim());
+  return { kind: 'named', name: names.at(-1) as string, qualifier: names.slice(0, -1), ...span(node) };
 }
 
 function convertMethodInvocation(node: Node): Expression {
@@ -246,12 +259,16 @@ function convertMethodInvocation(node: Node): Expression {
 
 function convertObjectCreation(node: Node): Expression {
   if (node.childForFieldName('type_arguments')) unsupported(node, 'コンストラクタへの型引数');
-  if (namedChildren(node).some((child) => child.type === 'class_body')) unsupported(node, '匿名クラス');
-  if (namedChildren(node)[0]?.startIndex !== field(node, 'type').startIndex) unsupported(node, '修飾された new');
+  const typeNode = field(node, 'type');
+  const parts = namedChildren(node);
+  const outerNode = parts[0]?.startIndex === typeNode.startIndex ? undefined : parts[0];
+  const bodyNode = parts.find((child) => child.type === 'class_body');
   return {
     kind: 'new',
-    type: convertType(field(node, 'type')),
+    type: convertType(typeNode),
     args: convertArguments(field(node, 'arguments')),
+    body: bodyNode ? namedChildren(bodyNode).map((member) => convertMember(member)) : undefined,
+    outer: outerNode ? convertExpression(outerNode) : undefined,
     ...span(node),
   };
 }

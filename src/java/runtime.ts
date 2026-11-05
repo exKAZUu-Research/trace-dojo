@@ -284,6 +284,8 @@ function markReachable(roots: Value[]): { reached: Set<JavaObject | JavaArray>; 
     for (const child of children) pushReference(pending, child);
     if (value instanceof JavaObject) {
       pushReference(pending, value.cause);
+      pushReference(pending, value.outer);
+      for (const captured of value.capturedLocals ?? []) pushReference(pending, captured);
       for (const captured of value.function?.captured ?? []) pushReference(pending, captured);
       pushReference(pending, value.function?.outerThis);
       for (const element of value.elements ?? []) pushReference(pending, element);

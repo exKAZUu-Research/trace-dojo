@@ -13,14 +13,24 @@ import type {
   VariableDeclarator,
 } from './ast';
 import type { Builtins } from './builtins';
-import { type CompileOptions, type Exec, type MethodContext } from './compilerBase';
+import { type CompileOptions, type Eval, type Exec, type MethodContext, topLevelOf } from './compilerBase';
 import { memberBindings, methodView } from './conversions';
 import { DeclarationCompiler } from './declarations';
 import { checkDefiniteAssignment, checkInitialization } from './definiteAssignment';
 import { canCompleteNormally } from './reachability';
 import { type Frame, type Slot, UNASSIGNED } from './runtime';
 import { isObjectCreation } from './stepRules';
-import { asSuper, type ClassInfo, type FieldInfo, type MethodInfo, sameType, thisTypeOf, VOID } from './types';
+import {
+  asSuper,
+  type ClassInfo,
+  type ClassType,
+  createClass,
+  type FieldInfo,
+  type MethodInfo,
+  sameType,
+  thisTypeOf,
+  VOID,
+} from './types';
 import type { JavaObject, Value } from './values';
 
 export interface CompiledProgram {
@@ -39,6 +49,9 @@ export function compileProgram(unit: CompilationUnit, options: CompileOptions = 
 }
 
 class Compiler extends DeclarationCompiler {
+  /** How many local and anonymous classes each top-level class holds so far, which numbers their binary names. */
+  private readonly localClassCounts = new Map<ClassInfo, number>();
+
   compile(unit: CompilationUnit): CompiledProgram {
     this.registerClasses(unit);
     const ordered = this.orderBySupertypes();
@@ -231,12 +244,13 @@ class Compiler extends DeclarationCompiler {
     return [(frame: Frame) => void run(frame)];
   }
 
-  protected compileConstructor(cls: ClassInfo, constructor: MethodInfo): void {
-    const declaration = constructor.declaration as ConstructorDeclaration | undefined;
-    const context = { ...this.newContext(cls, false, VOID, constructor.thrownTypes), initializes: 'instance' as const };
-    for (const [index, parameter] of (declaration?.parameters ?? []).entries()) {
-      this.declareLocal(context, parameter, parameter.name, constructor.parameterTypes[index]);
-    }
+  /** Compiles the this(...) or super(...) call that starts a constructor, implicitly super() when none is written. */
+  protected explicitConstructorCall(
+    context: MethodContext,
+    cls: ClassInfo,
+    constructor: MethodInfo,
+    declaration: ConstructorDeclaration | undefined
+  ): { target: MethodInfo; convertedArgs: Eval[] } {
     const explicitCall = declaration?.explicitCall;
     const callsThis = explicitCall?.target === 'this';
     const targetClass = callsThis ? cls : (cls.superclass as ClassInfo);
@@ -247,16 +261,111 @@ class Compiler extends DeclarationCompiler {
       callsThis ? thisTypeOf(cls) : asSuper(thisTypeOf(cls), targetClass),
       targetClass
     );
+    const span = explicitCall ?? declaration ?? (cls.declaration as ClassDeclaration);
     const target = this.selectMethod(
-      explicitCall ?? declaration ?? (cls.declaration as ClassDeclaration),
+      span,
       targetClass.constructors
         .filter((candidate) => candidate !== constructor || !callsThis)
         .map((candidate) => methodView(candidate, targetBindings)),
       args.map((arg) => arg.type),
       `コンストラクタ ${targetClass.name}`
     );
-    this.checkThrown(context, explicitCall ?? declaration ?? (cls.declaration as ClassDeclaration), target.thrownTypes);
-    const convertedArgs = this.convertArguments({ ...context, isStatic: true }, target, args, argSyntax);
+    this.checkThrown(context, span, target.thrownTypes);
+    return { target, convertedArgs: this.convertArguments({ ...context, isStatic: true }, target, args, argSyntax) };
+  }
+
+  /** An anonymous class's constructor passes its arguments on to the superclass constructor that its creation chose. */
+  protected forwardingCall(
+    context: MethodContext,
+    constructor: MethodInfo,
+    target: MethodInfo
+  ): { target: MethodInfo; convertedArgs: Eval[] } {
+    const span = constructor.owner.declaration as ClassDeclaration;
+    const convertedArgs = constructor.parameterTypes.map((type, index): Eval => {
+      // A name no source can write cannot clash with the program's variables.
+      const slot = this.declareLocal(context, span, `\u0000${index}`, type);
+      return (frame) => frame.locals[slot] as Value;
+    });
+    this.checkThrown(context, span, target.thrownTypes);
+    return { target, convertedArgs };
+  }
+
+  /** Declares and compiles a class written inside a method body, with the classes nested in it. */
+  protected compileLocalClass(
+    context: MethodContext,
+    declaration: ClassDeclaration,
+    anonymous?: { superConstructor: MethodInfo | undefined; base: ClassType }
+  ): ClassInfo {
+    const { kind, modifiers, name } = declaration;
+    if (!anonymous && (modifiers.access !== 'package' || modifiers.isStatic)) {
+      this.error(
+        declaration,
+        `メソッドの中で宣言するクラス ${name} には、public や private や static を付けられません。`
+      );
+    }
+    const scope = this.localTypeScopes.at(-1) as Map<string, ClassInfo>;
+    if (!anonymous && this.localTypeScopes.some((types) => types.has(name))) {
+      this.error(declaration, `クラス ${name} はすでに定義されています。`);
+    }
+    const top = topLevelOf(context.cls);
+    const number = (this.localClassCounts.get(top) ?? 0) + 1;
+    this.localClassCounts.set(top, number);
+    const cls = createClass(anonymous ? `${top.name}$${number}` : name, undefined, false);
+    cls.kind = kind;
+    cls.declaration = declaration;
+    cls.enclosing = context.cls;
+    cls.binaryName = `${top.binaryName}$${number}${anonymous ? '' : name}`;
+    cls.isAbstract = modifiers.isAbstract || kind === 'interface';
+    cls.isFinal = modifiers.isFinal || kind === 'enum' || anonymous !== undefined;
+    // Local interfaces and enums are static, so they neither belong to an instance nor read the method's locals.
+    const isStatic = kind !== 'class';
+    cls.hasOuterInstance = !isStatic && !context.isStatic;
+    if (!isStatic) this.localClasses.set(cls, { definingContext: context, captures: [] });
+    if (anonymous) this.anonymousBases.set(cls, anonymous.base);
+    else scope.set(name, cls);
+    const first = this.declaredClasses.length;
+    this.declaredClasses.push(cls);
+    for (const member of declaration.members) {
+      if (member.kind === 'class' || member.kind === 'interface' || member.kind === 'enum') {
+        this.registerClass(member, cls);
+      }
+    }
+    const ordered = this.orderBySupertypes(this.declaredClasses.slice(first));
+    for (const declared of ordered) this.withTypeScope(declared, () => this.declareMembers(declared));
+    const superConstructor = anonymous?.superConstructor;
+    if (superConstructor) {
+      cls.constructors = [
+        {
+          ...superConstructor,
+          name: cls.name,
+          owner: cls,
+          access: 'package',
+          isVarargs: false,
+          varargsStart: undefined,
+          declaration: undefined,
+          native: undefined,
+          code: undefined,
+          declared: undefined,
+          forwardsTo: superConstructor.declared ?? superConstructor,
+        },
+      ];
+    }
+    for (const declared of ordered) this.checkAbstractMethods(declared);
+    for (const declared of ordered) this.withTypeScope(declared, () => this.compileBodies(declared));
+    return cls;
+  }
+
+  protected compileConstructor(cls: ClassInfo, constructor: MethodInfo): void {
+    const declaration = constructor.declaration as ConstructorDeclaration | undefined;
+    const context = { ...this.newContext(cls, false, VOID, constructor.thrownTypes), initializes: 'instance' as const };
+    for (const [index, parameter] of (declaration?.parameters ?? []).entries()) {
+      this.declareLocal(context, parameter, parameter.name, constructor.parameterTypes[index]);
+    }
+    const { target, convertedArgs } = constructor.forwardsTo
+      ? this.forwardingCall(context, constructor, constructor.forwardsTo)
+      : this.explicitConstructorCall(context, cls, constructor, declaration);
+    const explicitCall = declaration?.explicitCall;
+    const callsThis = explicitCall?.target === 'this';
     // An implicit super() has no call in the source, so its frame is not a call that learners trace.
     const callRow = explicitCall?.row;
     // A constructor that delegates to this(...) leaves the initializers to the constructor it calls.

@@ -103,6 +103,8 @@ export interface MethodInfo {
   typeParameters?: TypeVariable[];
   /** The methods of supertypes that this one overrides, directly or indirectly. */
   overrides?: Set<MethodInfo>;
+  /** For an anonymous class's constructor, the superclass constructor it passes its arguments to. */
+  forwardsTo?: MethodInfo;
   /** For a view of a method with its receiver's type arguments substituted, the declared method. */
   declared?: MethodInfo;
   /** Filled in by the compiler for source methods. */
@@ -138,6 +140,8 @@ export interface ClassInfo {
   isBuiltin: boolean;
   /** The primitive type a wrapper class such as `Integer` boxes. */
   unboxedType?: JavaType;
+  /** Whether instances hold an instance of the enclosing class, as inner, local, and anonymous classes may. */
+  hasOuterInstance?: boolean;
   declaration?: ClassDeclaration;
   fields: Map<string, FieldInfo>;
   methods: MethodInfo[];

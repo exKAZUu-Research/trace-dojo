@@ -66,6 +66,8 @@ export interface Reference {
   /** The field this reference names, whose finality decides whether it may be assigned. */
   field?: FieldInfo;
   isArrayLength?: boolean;
+  /** Whether the reference reads a local that a local or anonymous class copied, which it may not assign. */
+  isCapture?: boolean;
   /** Evaluates the receiver and index once, returning accessors bound to them. */
   bind: (frame: Frame) => { get: () => Value; set: (value: Value) => void };
 }
@@ -314,8 +316,18 @@ export abstract class CompilerBase {
     }
   }
 
-  /** Finds the class that a simple name means inside `scope`: a member type in scope, then a top-level class. */
+  /** The local classes in scope, innermost block last. */
+  protected readonly localTypeScopes: Map<string, ClassInfo>[] = [];
+
+  /**
+   * Finds the class that a simple name means inside `scope`: a local class in scope, a member type in scope, then a
+   * top-level class.
+   */
   protected lookupType(name: string, scope: ClassInfo | undefined): ClassInfo | undefined {
+    for (let index = this.localTypeScopes.length - 1; index >= 0; index--) {
+      const local = this.localTypeScopes[index].get(name);
+      if (local) return local;
+    }
     for (let current = scope; current; current = current.enclosing) {
       const member = this.findMemberType(current, name);
       if (member) return member;

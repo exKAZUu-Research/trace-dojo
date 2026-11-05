@@ -135,6 +135,7 @@ export type Statement =
   | TryStatement
   | LabeledStatement
   | YieldStatement
+  | LocalClassStatement
   | EmptyStatement;
 
 export interface Block extends Span {
@@ -246,6 +247,12 @@ export interface LabeledStatement extends Span {
   body: Statement;
 }
 
+/** A class, interface, or enum declared inside a method body. */
+export interface LocalClassStatement extends Span {
+  kind: 'localClass';
+  declaration: ClassDeclaration;
+}
+
 /** Gives the value of the enclosing switch expression; an arrow rule's expression body is one too. */
 export interface YieldStatement extends Span {
   kind: 'yield';
@@ -321,6 +328,10 @@ export interface NewObject extends Span {
   kind: 'new';
   type: TypeSyntax;
   args: Expression[];
+  /** The body of an anonymous class, which extends or implements `type`. */
+  body?: MemberDeclaration[];
+  /** The enclosing instance written before `.new`, as in `outer.new Inner()`. */
+  outer?: Expression;
 }
 
 export interface NewArray extends Span {
@@ -450,4 +461,6 @@ export interface SwitchExpression extends Span {
 
 export interface ThisExpression extends Span {
   kind: 'this';
+  /** The enclosing class written before `.this`, as in `Outer.this`. */
+  qualifier?: TypeSyntax;
 }

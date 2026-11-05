@@ -10,6 +10,7 @@ import type {
   SwitchGroup,
   VariableDeclarator,
 } from './ast';
+import { convertTypeDeclaration } from './parseDeclarations';
 import { convertArrayInitializer, convertExpression } from './parseExpression';
 import {
   convertModifiers,
@@ -62,7 +63,11 @@ function convertInitializer(value: Node): VariableDeclarator['initializer'] {
   return value.type === 'array_initializer' ? convertArrayInitializer(value) : convertExpression(value);
 }
 
-const unsupportedDeclaration = (node: Node): never => unsupported(node, 'メソッドの中で宣言するクラス');
+const convertLocalClass = (node: Node): Statement => ({
+  kind: 'localClass',
+  declaration: convertTypeDeclaration(node),
+  ...span(node),
+});
 
 const statementConverters: Record<string, (node: Node) => Statement> = {
   block: convertBlock,
@@ -103,10 +108,10 @@ const statementConverters: Record<string, (node: Node) => Statement> = {
     return { kind: 'labeled', label: label.text, body: convertStatement(body), ...span(node) };
   },
   ';': (node) => ({ kind: 'empty', ...span(node) }),
-  class_declaration: unsupportedDeclaration,
-  interface_declaration: unsupportedDeclaration,
-  record_declaration: unsupportedDeclaration,
-  enum_declaration: unsupportedDeclaration,
+  class_declaration: convertLocalClass,
+  interface_declaration: convertLocalClass,
+  record_declaration: (node) => unsupported(node, 'レコード'),
+  enum_declaration: convertLocalClass,
 };
 
 function convertLocal(node: Node): LocalVariableDeclaration {

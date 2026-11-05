@@ -54,12 +54,6 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
     }
     // Member interfaces and enums are implicitly static, as is every member of an interface.
     const isStatic = modifiers.isStatic || kind !== 'class' || enclosing?.kind === 'interface';
-    if (enclosing && !isStatic) {
-      this.error(
-        declaration,
-        `static でない入れ子のクラス ${name} は、この採点環境では使えません。static を付けてください。`
-      );
-    }
     if (!enclosing && modifiers.isStatic)
       this.error(declaration, `トップレベルの${KIND_NAMES[kind]}に static は付けられません。`);
     if (kind === 'interface' && modifiers.isFinal)
@@ -74,6 +68,8 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
     cls.binaryName = enclosing ? `${enclosing.binaryName}$${name}` : name;
     cls.isAbstract = modifiers.isAbstract || kind === 'interface';
     cls.isFinal = modifiers.isFinal || kind === 'enum';
+    // An inner class's instances belong to an instance of the class around it.
+    cls.hasOuterInstance = enclosing !== undefined && !isStatic && enclosing.kind !== 'interface';
     siblings.set(name, cls);
     this.declaredClasses.push(cls);
     for (const member of declaration.members) {
@@ -82,12 +78,17 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
     }
   }
 
+  /** The type each anonymous class extends or implements, which its creation resolved and may have inferred. */
+  protected readonly anonymousBases = new WeakMap<ClassInfo, ClassType>();
+  /** The classes whose supertypes are resolved. */
+  private readonly resolvedClasses = new Set<ClassInfo>();
+
   /** Resolves each class's supertypes, ordering the classes so that supertypes come first. */
-  protected orderBySupertypes(): ClassInfo[] {
+  protected orderBySupertypes(classes: readonly ClassInfo[] = this.declaredClasses): ClassInfo[] {
     const ordered: ClassInfo[] = [];
     const visiting = new Set<ClassInfo>();
     const visit = (cls: ClassInfo): void => {
-      if (ordered.includes(cls)) return;
+      if (this.resolvedClasses.has(cls)) return;
       const declaration = cls.declaration as ClassDeclaration;
       if (visiting.has(cls)) this.error(declaration, `${KIND_NAMES[cls.kind]} ${cls.name} の継承が循環しています。`);
       visiting.add(cls);
@@ -96,9 +97,13 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
       this.withTypeScope(cls.enclosing, () => {
         cls.typeParameters = this.declareTypeParameters(declaration.typeParameters);
         this.withTypeVariables(cls.typeParameters, () => {
-          const superclass = this.resolveSuperclass(cls, declaration);
+          const base = this.anonymousBases.get(cls);
+          const superclass = base?.cls.kind === 'class' ? base : this.resolveSuperclass(cls, declaration);
           const interfaces: ClassType[] = [];
-          for (const syntax of declaration.interfaces) interfaces.push(this.resolveInterface(cls, syntax, interfaces));
+          if (base?.cls.kind === 'interface') interfaces.push(base);
+          else
+            for (const syntax of declaration.interfaces)
+              interfaces.push(this.resolveInterface(cls, syntax, interfaces));
           for (const supertype of [superclass, ...interfaces]) {
             if (supertype && !supertype.cls.isBuiltin) visit(supertype.cls);
           }
@@ -108,9 +113,10 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
         });
       });
       visiting.delete(cls);
+      this.resolvedClasses.add(cls);
       ordered.push(cls);
     };
-    for (const cls of this.declaredClasses) visit(cls);
+    for (const cls of classes) visit(cls);
     return ordered;
   }
 

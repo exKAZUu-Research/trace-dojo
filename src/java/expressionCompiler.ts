@@ -1,7 +1,8 @@
 // code-gauge-allow-file fileNcss 453 -- The expression compiler keeps one method per expression kind together.
-import type { ArrayInitializer, BinaryOperator, Expression, PatternBinding, Span } from './ast';
+import type { ArrayInitializer, BinaryOperator, ClassDeclaration, Expression, PatternBinding, Span } from './ast';
 import { box, boxedTypeOf, unbox } from './builtinWrappers';
 import {
+  type Capture,
   type Compiled,
   type CompiledValue,
   CompilerBase,
@@ -29,6 +30,7 @@ import {
   isNumeric,
   isPrimitive,
   isReference,
+  isSubclass,
   isWidening,
   type JavaType,
   LONG,
@@ -45,6 +47,8 @@ import { defaultValue, JavaArray, JavaObject, toInt32, type Value } from './valu
 
 /** Type-checks expressions and compiles them into closures. */
 export abstract class ExpressionCompiler extends CompilerBase {
+  /** The local and anonymous classes, with the method context that declares each and the locals it reads. */
+  protected readonly localClasses = new WeakMap<ClassInfo, { definingContext: MethodContext; captures: Capture[] }>();
   /** The local slots that pattern variables use. */
   protected readonly bindingSlots = new WeakMap<PatternBinding, number>();
 
@@ -115,7 +119,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
       }
       case 'this': {
         if (context.isStatic) this.error(expression, 'static メソッドの中では this を使えません。');
-        return thisValue(context);
+        if (!expression.qualifier) return thisValue(context);
+        const qualifier = this.resolveType(expression.qualifier);
+        const outer = qualifier.kind === 'class' ? this.outerInstanceValue(context, qualifier.cls, true) : undefined;
+        if (!outer) return this.error(expression, `ここでは ${typeName(qualifier)}.this を使えません。`);
+        return outer;
       }
       case 'fieldAccess': {
         const reference = this.compileFieldReference(context, expression);
@@ -184,6 +192,16 @@ export abstract class ExpressionCompiler extends CompilerBase {
       }
     }
   }
+
+  /**
+   * Declares and compiles a class written inside a method body: a local class, or an anonymous class that extends
+   * `anonymousSuperclass` and passes its arguments to `superConstructor`.
+   */
+  protected abstract compileLocalClass(
+    context: MethodContext,
+    declaration: ClassDeclaration,
+    anonymous?: { superConstructor: MethodInfo | undefined; base: Extract<JavaType, { kind: 'class' }> }
+  ): ClassInfo;
 
   /** Compiles a lambda or a method reference into an object of the functional interface `target`. */
   protected abstract compileFunctional(
@@ -348,13 +366,21 @@ export abstract class ExpressionCompiler extends CompilerBase {
       }
       return this.fieldReference(field, field.isStatic ? undefined : thisValue(context));
     }
-    for (let outer = context.cls.enclosing; outer; outer = outer.enclosing) {
-      const outerField = this.findField(outer, name.name);
-      if (!outerField) continue;
-      if (!outerField.isStatic) {
-        this.error(name, `static ではないフィールド ${name.name} は、static な入れ子のクラスの中から使えません。`);
+    for (let current: ClassInfo | undefined = context.cls; current; current = current.enclosing) {
+      if (current !== context.cls) {
+        const outerField = this.findField(current, name.name);
+        if (outerField?.isStatic) return this.fieldReference(outerField, undefined);
+        if (outerField) {
+          const receiver = this.outerInstanceValue(context, current);
+          if (!receiver) {
+            this.error(name, `static ではないフィールド ${name.name} は、ここからは使えません。`);
+          }
+          return this.fieldReference(outerField, receiver);
+        }
       }
-      return this.fieldReference(outerField, undefined);
+      // A local or anonymous class reads the locals of the method that declares it.
+      const captured = this.findClassCapture(context, current, name);
+      if (captured) return captured;
     }
     const cls = this.lookupType(name.name, context.cls);
     if (cls) return { kind: 'class', cls };
@@ -489,6 +515,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
         ? this.compileSimpleNameReference(context, target)
         : this.compileFieldReference(context, target);
     if ('kind' in reference) return this.error(target, `${target.name} には代入できません。`);
+    if (reference.isCapture) {
+      this.error(target, `クラスの中からは、外側のメソッドのローカル変数 ${target.name} に代入できません。`);
+    }
     return reference;
   }
 
@@ -846,10 +875,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   protected compileNew(context: MethodContext, expression: Extract<Expression, { kind: 'new' }>): Compiled {
     const targetType = this.takeTargetType();
-    const resolved = this.resolveType(expression.type);
+    const resolved = this.resolveCreatedType(context, expression);
     if (resolved.kind !== 'class') {
       return this.error(expression, `${typeName(resolved)} 型のオブジェクトは new で作れません。`);
     }
+    if (expression.body) return this.compileAnonymousCreation(context, expression, resolved, targetType);
     const cls = resolved.cls;
     if (cls.kind === 'interface')
       this.error(expression, `インターフェース ${cls.name} のオブジェクトは new で作れません。`);
@@ -876,6 +906,91 @@ export abstract class ExpressionCompiler extends CompilerBase {
     this.checkAccess(context, cls, constructor.access, expression, `コンストラクタ ${cls.name}`);
     this.checkThrown(context, expression, constructor.thrownTypes);
     const convertedArgs = this.convertArguments(context, constructor, args, expression.args);
+    return this.compileCreation(context, expression, cls, type, constructor, convertedArgs);
+  }
+
+  /** The type `new` creates, which `outer.new Inner()` names as a member of the outer value's class. */
+  protected resolveCreatedType(context: MethodContext, expression: Extract<Expression, { kind: 'new' }>): JavaType {
+    const { type, outer } = expression;
+    if (!outer || type.kind !== 'named' || type.qualifier.length > 0) return this.resolveType(type);
+    const outerType = upperBound(this.compileValue(context, outer).type);
+    const member = outerType.kind === 'class' ? this.findMemberType(outerType.cls, type.name) : undefined;
+    if (!member) return this.error(type, `${typeName(outerType)} には、クラス ${type.name} がありません。`);
+    return this.withTypeScope(outerType.kind === 'class' ? outerType.cls : undefined, () => this.resolveType(type));
+  }
+
+  /** Creates an object of an anonymous class, whose body compiles here, where it may read the enclosing locals. */
+  protected compileAnonymousCreation(
+    context: MethodContext,
+    expression: Extract<Expression, { kind: 'new' }>,
+    written: Extract<JavaType, { kind: 'class' }>,
+    targetType: JavaType | undefined
+  ): Compiled {
+    const { cls: baseClass } = written;
+    const isInterface = baseClass.kind === 'interface';
+    if (baseClass.isFinal || baseClass.kind === 'enum' || baseClass === this.builtins.enumClass) {
+      this.error(expression, `クラス ${baseClass.name} は継承できません。`);
+    }
+    const args = expression.args.map((arg) => this.compileArgument(context, arg));
+    if (isInterface && args.length > 0) {
+      this.error(expression, 'インターフェースを実装する匿名クラスには、引数を渡せません。');
+    }
+    const inferred =
+      written.args?.length === 0
+        ? this.inferDiamond(
+            baseClass,
+            args.map((arg) => arg.type),
+            targetType
+          )
+        : written;
+    const base = inferred.kind === 'class' ? inferred : written;
+    let superConstructor: MethodInfo | undefined;
+    if (!isInterface) {
+      const bindings = memberBindings(base, baseClass);
+      superConstructor = this.selectMethod(
+        expression,
+        baseClass.constructors.map((candidate) => methodView(candidate, bindings)),
+        args.map((arg) => arg.type),
+        `コンストラクタ ${baseClass.name}`
+      );
+      this.checkAccess(context, baseClass, superConstructor.access, expression, `コンストラクタ ${baseClass.name}`);
+    }
+    const { row, endRow, start, end } = expression;
+    const declaration: ClassDeclaration = {
+      kind: 'class',
+      name: '',
+      typeParameters: [],
+      modifiers: { isStatic: false, isFinal: false, isAbstract: false, isDefault: false, access: 'package' },
+      superclass: isInterface ? undefined : expression.type,
+      interfaces: isInterface ? [expression.type] : [],
+      enumConstants: [],
+      members: expression.body ?? [],
+      row,
+      endRow,
+      start,
+      end,
+    };
+    const cls = this.compileLocalClass(context, declaration, { superConstructor, base });
+    const constructor = cls.constructors[0];
+    this.checkThrown(context, expression, constructor.thrownTypes);
+    const convertedArgs = this.convertArguments(context, constructor, args, expression.args);
+    return this.compileCreation(context, expression, cls, cls.type, constructor, convertedArgs);
+  }
+
+  /**
+   * Allocates an object and runs its constructor, first giving an inner class's object its enclosing instance and a
+   * local class's object the enclosing locals it reads.
+   */
+  protected compileCreation(
+    context: MethodContext,
+    expression: Extract<Expression, { kind: 'new' }>,
+    cls: ClassInfo,
+    type: JavaType,
+    constructor: MethodInfo,
+    convertedArgs: Eval[]
+  ): CompiledValue {
+    const outer = this.compileOuterInstance(context, expression, cls);
+    const captured = this.compileCapturedLocals(context, expression, cls);
     const callRow = expression.row;
     const declaredConstructor = constructor.declared ?? constructor;
     return {
@@ -883,7 +998,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
       type,
       run: (frame) => {
         frame.runtime.initializeClass(frame, cls);
+        const outerObject = outer?.(frame);
         const object = frame.runtime.allocateObject(frame, cls);
+        if (outer) object.outer = outerObject as JavaObject;
+        if (captured) object.capturedLocals = captured(frame);
         frame.temporaries.push(object);
         try {
           this.invokeWithArguments(frame, declaredConstructor, object, convertedArgs, callRow);
@@ -893,6 +1011,65 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return object;
       },
     };
+  }
+
+  /** The enclosing instance that an object of an inner, local, or anonymous class belongs to. */
+  protected compileOuterInstance(
+    context: MethodContext,
+    expression: Extract<Expression, { kind: 'new' }>,
+    cls: ClassInfo
+  ): Eval | undefined {
+    if (!cls.hasOuterInstance) {
+      if (expression.outer)
+        this.error(expression, `static なクラス ${cls.name} のオブジェクトは、外側のオブジェクトから new できません。`);
+      return;
+    }
+    const enclosing = cls.enclosing as ClassInfo;
+    if (!expression.outer) {
+      const outer = this.outerInstanceValue(context, enclosing);
+      if (!outer) {
+        this.error(
+          expression,
+          `static でないクラス ${cls.name} のオブジェクトは、${enclosing.name} のオブジェクトがない static メソッドの中からは作れません。`
+        );
+      }
+      return outer.run;
+    }
+    const outer = this.compileValue(context, expression.outer);
+    if (!isWidening(outer.type, enclosing.type, this.builtins.objectClass)) {
+      this.error(expression.outer, `${typeName(outer.type)} 型の値からは ${cls.name} のオブジェクトを作れません。`);
+    }
+    const { run } = outer;
+    return (frame) => {
+      const value = run(frame);
+      if (value === undefined) throwBuiltin(frame, 'NullPointerException');
+      return value;
+    };
+  }
+
+  /** Reads the enclosing locals that a local class's object copies: from the creating method, or from its own copy. */
+  protected compileCapturedLocals(
+    context: MethodContext,
+    span: Span,
+    cls: ClassInfo
+  ): ((frame: Frame) => Value[]) | undefined {
+    const local = this.localClasses.get(cls);
+    if (!local) return;
+    let isInside = false;
+    for (let current: ClassInfo | undefined = context.cls; current; current = current.enclosing) {
+      if (current === cls) isInside = true;
+    }
+    if (isInside) {
+      // Code inside the class creates another object with the same locals as the object it runs in.
+      const holder = cls === context.cls ? thisValue(context) : this.outerInstanceValue(context, cls, true);
+      if (!holder) return () => [];
+      return (frame) => [...((holder.run(frame) as JavaObject | undefined)?.capturedLocals ?? [])];
+    }
+    const { row, endRow, start, end } = span;
+    const readers = local.captures.map(
+      (capture) => this.compileValue(context, { kind: 'name', name: capture.name, row, endRow, start, end }).run
+    );
+    return (frame) => readers.map((read) => read(frame));
   }
 
   /**
@@ -997,7 +1174,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
         // A nested class calls the methods of the innermost enclosing class that has one of the name.
         for (let outer = context.cls.enclosing; outer; outer = outer.enclosing) {
           const outerCandidates = this.collectMethods(outer, expression.name);
-          if (outerCandidates.length > 0) return { candidates: outerCandidates, owner: outer, receiver: undefined };
+          if (outerCandidates.length === 0) continue;
+          const outerReceiver = this.outerInstanceValue(context, outer);
+          return {
+            candidates: outerReceiver ? this.viewMethods(outerCandidates, outerReceiver.type) : outerCandidates,
+            owner: outer,
+            receiver: outerReceiver,
+          };
         }
       }
       return { candidates, owner, receiver };
@@ -1025,6 +1208,84 @@ export abstract class ExpressionCompiler extends CompilerBase {
       candidates: bound.kind === 'array' ? this.collectMethods(owner, expression.name) : methods,
       owner,
       receiver: object,
+    };
+  }
+
+  /**
+   * The instance of `target` (or a subclass) that code in `context` reaches through the enclosing instances of inner,
+   * local, and anonymous classes, or `undefined` when a static context or a static class lies on the way.
+   *
+   * @param isExact Whether the instance must be of `target` itself, as `Target.this` requires.
+   */
+  protected outerInstanceValue(context: MethodContext, target: ClassInfo, isExact = false): CompiledValue | undefined {
+    if (context.isStatic) return;
+    let cls = context.cls;
+    let hops = 0;
+    while (isExact ? cls !== target : !isSubclass(cls, target)) {
+      if (!cls.hasOuterInstance || !cls.enclosing) return;
+      cls = cls.enclosing;
+      hops++;
+    }
+    return {
+      kind: 'value',
+      type: thisTypeOf(cls),
+      run: (frame) => {
+        let object = frame.thisObject;
+        for (let hop = 0; hop < hops; hop++) object = object?.outer;
+        return object;
+      },
+    };
+  }
+
+  /**
+   * Resolves a name in a local or anonymous class `cls` as a local of the method that declares it, which the class's
+   * instances copy when they are created.
+   */
+  protected findClassCapture(
+    context: MethodContext,
+    cls: ClassInfo,
+    name: Extract<Expression, { kind: 'name' }>
+  ): (Reference & { constant?: Value }) | undefined {
+    const local = this.localClasses.get(cls);
+    if (!local) return;
+    let index = local.captures.findIndex((capture) => capture.name === name.name);
+    if (index === -1) {
+      const defining = local.definingContext;
+      const slot = this.findLocal(defining, name.name);
+      let type: JavaType;
+      let constant: Value;
+      if (slot === undefined) {
+        const lambdaCapture = this.findCapture(defining, name, name.name);
+        if (!lambdaCapture) return;
+        ({ type, constant } = lambdaCapture.capture);
+      } else {
+        const allowed = defining.uninitializedSlots.has(slot) ? 1 : 0;
+        if ((defining.assignmentCounts.get(slot) ?? 0) > allowed) {
+          this.error(
+            name,
+            `クラスの中から使うローカル変数 ${name.name} は、final か実質的に final (一度しか代入しない) である必要があります。`
+          );
+        }
+        defining.capturedSlots.add(slot);
+        type = defining.locals[slot].type;
+        constant = defining.constants.get(slot);
+      }
+      index = local.captures.push({ name: name.name, type, constant, read: () => {} }) - 1;
+    }
+    const capture = local.captures[index];
+    const holder = cls === context.cls ? thisValue(context) : this.outerInstanceValue(context, cls, true);
+    if (!holder && context.isStatic) this.error(name, `変数 ${name.name} は static メソッドの中からは使えません。`);
+    const read = holder?.run;
+    return {
+      type: capture.type,
+      constant: capture.constant,
+      isCapture: true,
+      bind: (frame) => ({
+        get: () => (read?.(frame) as JavaObject | undefined)?.capturedLocals?.[index],
+        set: () => {
+          throw new Error('A captured local was assigned');
+        },
+      }),
     };
   }
 

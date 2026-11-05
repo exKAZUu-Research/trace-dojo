@@ -55,12 +55,14 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   /** Compiles statements inside a new scope whose locals go out of scope when it is left. */
   protected withScope(context: MethodContext, compile: () => Exec, clearsLocals = true): Exec {
     context.scopes.push({ names: new Map(), slots: [] });
+    this.localTypeScopes.push(new Map());
     let exec: Exec;
     let slots: number[];
     try {
       exec = compile();
     } finally {
       slots = (context.scopes.pop() as Scope).slots;
+      this.localTypeScopes.pop();
     }
     if (slots.length === 0 || !clearsLocals) return exec;
     return (frame) => {
@@ -183,6 +185,11 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       }
       case 'yield': {
         return this.compileYield(context, statement);
+      }
+      case 'localClass': {
+        this.compileLocalClass(context, statement.declaration);
+        // Declaring a class runs nothing.
+        return () => {};
       }
       case 'empty': {
         return () => {};

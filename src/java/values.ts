@@ -17,6 +17,10 @@ export class JavaObject {
   readonly identity = nextIdentity++;
   /** Set by the builtin Turtle constructor. */
   turtle?: TurtleState;
+  /** The instance of the enclosing class that an inner, local, or anonymous class's instance belongs to. */
+  outer?: JavaObject;
+  /** The enclosing method's locals that a local or anonymous class's instance reads. */
+  capturedLocals?: Value[];
   /** The elements of a builtin list or the items an iterator walks over. */
   elements?: Value[];
   /** The entries of a builtin hash map or set. */

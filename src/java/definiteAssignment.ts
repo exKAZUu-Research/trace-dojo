@@ -219,6 +219,8 @@ class DefiniteAssignmentChecker {
         this.yields.at(-1)?.push(this.expression(statement.value, state));
         return UNREACHABLE;
       }
+      // A local class's methods run later, and their own analysis covers them.
+      case 'localClass':
       case 'empty': {
         return state;
       }
