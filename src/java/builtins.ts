@@ -186,9 +186,10 @@ const causeTakers = new Set([
   'IllegalArgumentException',
   'IllegalStateException',
   'UnsupportedOperationException',
+  'IOException',
 ]);
 
-// code-gauge-allow functionNcss 45 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 46 -- One registration per builtin method, each a small native.
 function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType: JavaType): ClassInfo {
   const defineThrowable = (name: string, superclass: ClassInfo, packageName = 'java.lang'): ClassInfo => {
     const cls = registry.define(name, superclass, packageName);
@@ -234,6 +235,7 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
   });
   const exceptionClass = defineThrowable('Exception', throwableClass);
   defineThrowable('InterruptedException', exceptionClass);
+  defineThrowable('FileNotFoundException', defineThrowable('IOException', exceptionClass, 'java.io'), 'java.io');
   const runtimeExceptionClass = defineThrowable('RuntimeException', exceptionClass);
   const errorClass = defineThrowable('Error', throwableClass);
   for (const name of [
