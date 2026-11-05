@@ -10,6 +10,7 @@ import type {
   LiteralValue,
   TypeSyntax,
 } from './ast';
+import { parseHexFloat } from './hexFloat';
 import { convertMember } from './parseDeclarations';
 import {
   convertModifiers,
@@ -53,7 +54,7 @@ const expressionConverters: Record<string, (node: Node) => Expression> = {
   octal_integer_literal: convertIntegerLiteral,
   binary_integer_literal: convertIntegerLiteral,
   decimal_floating_point_literal: convertFloatingPointLiteral,
-  hex_floating_point_literal: (node) => unsupported(node, '16進数の浮動小数点数'),
+  hex_floating_point_literal: convertFloatingPointLiteral,
   true: convertBooleanLiteral,
   false: convertBooleanLiteral,
   null_literal: (node) => ({ kind: 'literal', literal: { type: 'null' }, ...span(node) }),
@@ -168,9 +169,11 @@ function convertIntegerLiteral(node: Node): Expression {
 function convertFloatingPointLiteral(node: Node): Expression {
   const text = node.text.replaceAll('_', '');
   const isFloat = /[fF]$/.test(text);
-  const value = Number(text.replace(/[dDfF]$/, ''));
+  const isHex = /^0[xX]/.test(text);
+  const value = isHex ? (parseHexFloat(text) as number) : Number(text.replace(/[dDfF]$/, ''));
   const rounded = isFloat ? Math.fround(value) : value;
-  if (!Number.isFinite(rounded) || (rounded === 0 && /[1-9]/.test(text.replace(/[eE].*$/, '')))) {
+  const significand = isHex ? text.slice(2).replace(/[pP].*$/, '') : text.replace(/[eE].*$|[dDfF]$/, '');
+  if (!Number.isFinite(rounded) || (rounded === 0 && (isHex ? /[1-9a-fA-F]/ : /[1-9]/).test(significand))) {
     throw new CompileError([
       {
         row: node.startPosition.row,

@@ -66,6 +66,10 @@ export interface HashEntry {
  * The entries of a `HashMap` or `HashSet`, which iterates as Java's does: by bucket of a table that doubles whenever
  * the entries exceed three quarters of it, and in insertion order within a bucket.
  */
+/** `HashMap`'s TREEIFY_THRESHOLD and MIN_TREEIFY_CAPACITY. */
+const TREEIFY_THRESHOLD = 8;
+const MIN_TREEIFY_CAPACITY = 64;
+
 export class HashStore {
   entries: HashEntry[] = [];
   capacity = 16;
@@ -119,7 +123,9 @@ export class HashStore {
 
   /** Adds an entry at the end of its bucket and then grows the table, as `HashMap.put` does. */
   add(entry: HashEntry): void {
+    const crowded = this.bucketSize(entry) >= TREEIFY_THRESHOLD;
     this.entries.push(entry);
+    if (crowded) this.growCrowded();
     while (this.entries.length > this.capacity * 0.75) this.capacity *= 2;
   }
 
@@ -129,9 +135,26 @@ export class HashStore {
    */
   addAtBucketHead(entry: HashEntry): void {
     while (this.entries.length > this.capacity * 0.75) this.capacity *= 2;
+    const crowded = this.bucketSize(entry) >= TREEIFY_THRESHOLD - 1;
     const bucket = this.bucketOf(entry);
     const index = this.order === 'hash' ? this.entries.findIndex((other) => this.bucketOf(other) === bucket) : -1;
     this.entries.splice(index === -1 ? this.entries.length : index, 0, entry);
+    if (crowded) this.growCrowded();
+  }
+
+  /** The number of entries in the bucket `entry` falls into. */
+  private bucketSize(entry: HashEntry): number {
+    if (this.capacity >= MIN_TREEIFY_CAPACITY) return 0;
+    const bucket = this.bucketOf(entry);
+    return this.entries.filter((other) => this.bucketOf(other) === bucket).length;
+  }
+
+  /**
+   * Doubles a table smaller than 64 whose bucket grew crowded, as `HashMap.treeifyBin` resizes instead of turning
+   * the bucket into a tree; a larger table's tree bins are not modeled.
+   */
+  private growCrowded(): void {
+    if (this.capacity < MIN_TREEIFY_CAPACITY) this.capacity *= 2;
   }
 
   private bucketOf(entry: HashEntry): number {

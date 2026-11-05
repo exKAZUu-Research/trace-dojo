@@ -44,6 +44,8 @@ interface PatternSwitchState {
   /** The unguarded patterns, which decide whether the switch covers every value. */
   totalPatterns: CompiledPattern[];
   enumConstants: Set<string>;
+  /** Whether a `case null, default` label came, after which no label can run. */
+  hasNullDefault: boolean;
   /** The unguarded patterns, which match every value that later labels they dominate (JLS 14.11.1) may test. */
   dominating: CompiledPattern[];
 }
@@ -191,6 +193,7 @@ export abstract class PatternCompiler extends TryCompiler {
       nullIndex: -1,
       totalPatterns: [],
       enumConstants: new Set(),
+      hasNullDefault: false,
       dominating: [],
     };
     const groupBindings: PatternBinding[][] = statement.groups.map(() => []);
@@ -230,6 +233,7 @@ export abstract class PatternCompiler extends TryCompiler {
     label: SwitchGroup['labels'][number],
     selectorType: JavaType
   ): Test[] {
+    this.checkDominanceByDefault(state, group, label);
     if (label === undefined || isNullLabel(label)) {
       const key = label === undefined ? 'defaultIndex' : 'nullIndex';
       if (state[key] !== -1)
@@ -258,6 +262,25 @@ export abstract class PatternCompiler extends TryCompiler {
     }
     const guardTest = this.withBindings(context, patternBindings, () => this.compileCondition(context, guard));
     return [(frame, value) => compiled.test(frame, value) && guardTest(frame)];
+  }
+
+  /**
+   * Rejects a label that an earlier `default` makes unreachable (JLS 14.11.1): every label after `case null, default`,
+   * and a pattern or `case null` after `default`, while a constant may still follow `default`.
+   */
+  protected checkDominanceByDefault(
+    state: PatternSwitchState,
+    group: SwitchGroup,
+    label: SwitchGroup['labels'][number]
+  ): void {
+    const isDominated =
+      state.hasNullDefault ||
+      (state.defaultIndex !== -1 && label !== undefined && (isNullLabel(label) || label.kind === 'patternLabel'));
+    if (isDominated)
+      this.error(label ?? group, 'この case は、前の default にすでに含まれているため、実行されることがありません。');
+    if (label === undefined && group.labels.some((other) => other !== undefined && isNullLabel(other))) {
+      state.hasNullDefault = true;
+    }
   }
 
   /** Compiles a constant label of a pattern switch: an enum constant, a string, or a boxed number. */

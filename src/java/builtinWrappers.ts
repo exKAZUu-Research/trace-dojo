@@ -9,6 +9,7 @@ import {
   newString,
   type Registry,
 } from './builtinSupport';
+import { parseHexFloat } from './hexFloat';
 import { type Frame, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
@@ -194,11 +195,9 @@ function defineDoubleTests(doubleClass: ClassInfo): void {
 }
 
 function defineCharacterConversions(characterClass: ClassInfo, stringType: JavaType): void {
-  addMethod(characterClass, 'digit', [CHAR, INT], INT, true, (_, __, [code, radix]) => {
-    const form = asciiFormOf(code as number);
-    const digit = form.length === 1 ? Number.parseInt(form, radix as number) : Number.NaN;
-    return Number.isNaN(digit) ? -1 : digit;
-  });
+  addMethod(characterClass, 'digit', [CHAR, INT], INT, true, (_, __, [code, radix]) =>
+    characterDigit(code as number, radix as number)
+  );
   addMethod(characterClass, 'toString', [INT], stringType, true, (frame, _, [code]) => {
     const point = code as number;
     if (point < 0 || point > 0x10_ff_ff)
@@ -335,7 +334,8 @@ export function hashOf(value: Value, kind: BoxableKind): number {
 function parseIntegral(frame: Frame, text: Value, bits: 32 | 64): bigint {
   const value = (text as JavaString | undefined)?.value;
   frame.runtime.scanString(value?.length ?? 0);
-  // Java reads any Unicode decimal digit of one char, such as the full-width `１` of Japanese text, by its value.
+  // Java reads any Unicode decimal digit of one char, such as the full-width `１` of Japanese text, by its value;
+  // a digit outside the BMP is two chars, neither of which is a digit.
   const digits =
     value && /[^\d+-]/.test(value)
       ? value.replaceAll(/\p{Nd}/gu, (digit) =>
@@ -364,17 +364,54 @@ export function decimalDigitValue(code: number): number | undefined {
   return (code - start) % 10;
 }
 
+/**
+ * The value of a character as a digit of `radix`, or -1, as `Character.digit` gives it: any Unicode decimal digit,
+ * and ASCII or full-width Latin letters for the digits from 10.
+ */
+function characterDigit(point: number, radix: number): number {
+  if (radix < 2 || radix > 36) return -1;
+  const letter = /^[a-zA-Zａ-ｚＡ-Ｚ]$/u.test(String.fromCodePoint(point))
+    ? Number.parseInt(String.fromCodePoint(point).normalize('NFKC'), 36)
+    : undefined;
+  const digit = letter ?? decimalDigitValue(point) ?? -1;
+  return digit < radix ? digit : -1;
+}
+
+/** The value of signed digits of `radix`, read as `Integer.parseInt(String, int)` reads them, or `undefined`. */
+function digitsValue(text: string, radix: number): number | undefined {
+  const sign = text[0] === '-' || text[0] === '+' ? text[0] : '';
+  // By char, as Java reads them, so that the two halves of a character outside the BMP are no digits.
+  const points = text
+    .slice(sign.length)
+    .split('')
+    .map((char) => characterDigit(char.codePointAt(0) as number, radix));
+  if (points.length === 0 || points.includes(-1)) return undefined;
+  const magnitude = points.reduce((sum, digit) => sum * BigInt(radix) + BigInt(digit), 0n);
+  return Number(sign === '-' ? -magnitude : magnitude);
+}
+
+/** `Character.getNumericValue`: a digit's or letter's value as a digit, a Roman numeral's value, or -1. */
+function numericValueOf(code: number): number {
+  const digit = characterDigit(code, 36);
+  if (digit !== -1) return digit;
+  const roman = code >= 0x21_60 && code < 0x21_80 ? ROMAN_NUMERALS[(code - 0x21_60) % 16] : undefined;
+  if (roman !== undefined) return roman;
+  // Other numeric characters, such as a superscript digit, have the value of the digit they are a form of.
+  const character = asciiFormOf(code);
+  return /^\d$/.test(character) ? Number(character) : -1;
+}
+
+/** The values of the Roman numerals from U+2160 (Ⅰ), whose small forms from U+2170 (ⅰ) follow in the same order. */
+const ROMAN_NUMERALS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 50, 100, 500, 1000];
+
 function isDigit(point: number): boolean {
   return point >= 0 && /^\p{Nd}$/u.test(String.fromCodePoint(point));
 }
 
 function parseRadix(frame: Frame, text: Value, radix: number): number {
   const value = (text as JavaString | undefined)?.value;
-  const digits = '0123456789abcdefghijklmnopqrstuvwxyz'.slice(0, Math.max(radix, 0));
-  const isValid =
-    value !== undefined && radix >= 2 && radix <= 36 && new RegExp(`^[+-]?[${digits}]+$`, 'i').test(value);
-  const parsed = isValid ? Number.parseInt(value, radix) : Number.NaN;
-  if (!isValid || parsed > 2_147_483_647 || parsed < -2_147_483_648) {
+  const parsed = value === undefined ? undefined : digitsValue(value, radix);
+  if (parsed === undefined || parsed > 2_147_483_647 || parsed < -2_147_483_648) {
     return throwBuiltin(
       frame,
       'NumberFormatException',
@@ -458,6 +495,8 @@ function parseDouble(frame: Frame, text: Value): number {
   if (value === undefined) return throwBuiltin(frame, 'NullPointerException');
   frame.runtime.scanString(value.length);
   const trimmed = value.trim();
+  const hex = parseHexFloat(trimmed);
+  if (hex !== undefined) return hex;
   const isNumber = /^[+-]?(?:NaN|Infinity|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?[fFdD]?)$/.test(trimmed);
   if (!isNumber) throwBuiltin(frame, 'NumberFormatException', `For input string: "${value}"`);
   return Number(trimmed.replace(/[fFdD]$/, ''));
@@ -524,12 +563,7 @@ function defineCharacterMembers(characterClass: ClassInfo): void {
       });
     }
   }
-  addMethod(characterClass, 'getNumericValue', [CHAR], INT, true, (_, __, [code]) => {
-    const character = asciiFormOf(code as number);
-    if (/^\d$/.test(character)) return Number(character);
-    if (/^[a-z]$/i.test(character)) return Number.parseInt(character, 36);
-    return -1;
-  });
+  addMethod(characterClass, 'getNumericValue', [CHAR], INT, true, (_, __, [code]) => numericValueOf(code as number));
 }
 
 function defineBooleanMembers(booleanClass: ClassInfo, stringType: JavaType): void {

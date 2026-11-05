@@ -295,7 +295,7 @@ export abstract class LambdaCompiler extends PatternCompiler {
     const declaredResult =
       samResult.kind === 'wildcard' ? (samResult.isSuper ? undefined : samResult.bound) : samResult;
     if (!declaredResult || !mentionsAny(declaredResult, unresolved)) return;
-    const returned = this.lambdaReturnType(context, expression, rawify(parameterType, unresolved, true));
+    const returned = this.lambdaReturnType(context, expression, rawify(parameterType, unresolved, true, true));
     if (!returned) return;
     const boxedReturn = isPrimitive(returned) ? (boxedTypeOf(this.builtins.wrappers, returned) ?? returned) : returned;
     infer(this.builtins, declaredResult, boxedReturn, variables, bindings);

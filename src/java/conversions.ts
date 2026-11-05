@@ -78,10 +78,12 @@ export function memberType(type: JavaType, bindings: ReadonlyMap<TypeVariable, J
 }
 
 /** A view of `method` with the type arguments of `bindings` substituted into its signature. */
-export function methodView(method: MethodInfo, bindings: ReadonlyMap<TypeVariable, JavaType>): MethodInfo {
-  if (bindings.size === 0) return method;
+export function methodView(method: MethodInfo, receiverBindings: ReadonlyMap<TypeVariable, JavaType>): MethodInfo {
+  if (receiverBindings.size === 0) return method;
+  const { typeParameters, bindings } = withBoundTypeParameters(method.typeParameters, receiverBindings);
   return {
     ...method,
+    typeParameters,
     // A parameter of type `? super T` accepts a T, as capture conversion allows.
     parameterTypes: method.parameterTypes.map((type) => {
       const substituted = flattenWildcards(substitute(type, bindings));
@@ -92,6 +94,33 @@ export function methodView(method: MethodInfo, bindings: ReadonlyMap<TypeVariabl
     returnType: memberType(method.returnType, bindings),
     declared: method.declared ?? method,
   };
+}
+
+/**
+ * A generic method's own type parameters as a receiver sees them: those bounded by the class's type variables, as
+ * `<U extends T>` in `Box<T>`, become fresh variables bounded by the receiver's type arguments.
+ */
+function withBoundTypeParameters(
+  typeParameters: TypeVariable[] | undefined,
+  receiverBindings: ReadonlyMap<TypeVariable, JavaType>
+): { typeParameters: TypeVariable[] | undefined; bindings: ReadonlyMap<TypeVariable, JavaType> } {
+  // Bindings of the method's own type parameters, as explicit type arguments give, instantiate it instead.
+  if (typeParameters?.some((variable) => receiverBindings.has(variable)))
+    return { typeParameters, bindings: receiverBindings };
+  const receiverVariables = [...receiverBindings.keys()];
+  const isBoundByReceiver = typeParameters?.some((variable) =>
+    variable.bounds.some((bound) => receiverVariables.some((receiverVariable) => mentions(bound, receiverVariable)))
+  );
+  if (!typeParameters || !isBoundByReceiver) return { typeParameters, bindings: receiverBindings };
+  const bindings = new Map(receiverBindings);
+  const fresh = typeParameters.map((variable): TypeVariable => ({ name: variable.name, bounds: [] }));
+  for (const [index, variable] of typeParameters.entries()) {
+    bindings.set(variable, { kind: 'typeVar', variable: fresh[index] as TypeVariable });
+  }
+  for (const [index, variable] of typeParameters.entries()) {
+    (fresh[index] as TypeVariable).bounds = variable.bounds.map((bound) => substitute(bound, bindings));
+  }
+  return { typeParameters: fresh, bindings };
 }
 
 /**
@@ -341,7 +370,7 @@ function inferFromReceiverHint(
  * Replaces type variables left `unresolved`: inside a wildcard's bound by their erasure, as a type argument by making
  * its class type raw, and standing alone by their erasure.
  */
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of type, as the replacement walks the type.
+// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of type, as the replacement walks the type.
 export function rawify(
   type: JavaType,
   unresolved: readonly TypeVariable[],
@@ -354,10 +383,14 @@ export function rawify(
       return unresolved.includes(type.variable) ? erasure(type) : type;
     }
     case 'array': {
-      return { kind: 'array', element: rawify(type.element, unresolved) };
+      return { kind: 'array', element: rawify(type.element, unresolved, asWildcards, asHoles) };
     }
     case 'wildcard': {
-      return type.bound ? { ...type, bound: rawify(type.bound, unresolved) } : type;
+      // A wildcard bounded by an undecided variable, as `? extends R`, leaves it undecided too.
+      if (asHoles && type.bound?.kind === 'typeVar' && unresolved.includes(type.bound.variable)) {
+        return { kind: 'wildcard', bound: undefined, isSuper: false, isHole: true };
+      }
+      return type.bound ? { ...type, bound: rawify(type.bound, unresolved, asWildcards, asHoles) } : type;
     }
     case 'class': {
       if (!type.args) return type;

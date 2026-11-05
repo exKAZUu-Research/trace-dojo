@@ -37,9 +37,9 @@ export function defineClassClass(registry: Registry, objectClass: ClassInfo, str
   getClass.isFinal = true;
 }
 
+/** The classes standing for array types, named as `Class.getName` (`[I`) and `getSimpleName` (`int[]`) name them. */
 const arrayClasses = new Map<string, ClassInfo>();
 
-/** A class standing for an array type, named as `Class.getName` (`[I`) and `getSimpleName` (`int[]`) name it. */
 /** The class of a value, which `getClass()` returns: an array's own class, or `String` for a string. */
 function runtimeClassOf(frame: Frame, value: Value): ClassInfo {
   if (value instanceof JavaArray) return arrayClassOf(frame, value.elementType);
