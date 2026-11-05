@@ -389,7 +389,8 @@ function defineArrays(
       return a.values.every((item, index) =>
         element === objectType
           ? javaEquals(frame, item, b.values[index])
-          : Object.is(item, b.values[index]) || item === b.values[index]
+          : // Primitive elements compare as their wrappers do, NaN equal to itself and -0.0 unequal to 0.0.
+            Object.is(item, b.values[index])
       );
     });
     if (element !== objectType) {

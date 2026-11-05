@@ -397,6 +397,7 @@ PriorityQueue<Object> plain = new PriorityQueue<>(); String uncomparable = ""; t
 String arrays = Arrays.toString(new TreeSet<>(List.of("b", "a")).toArray(new String[0])) + Arrays.toString(new ArrayDeque<>(List.of(3, 1)).toArray());
 Map<String, List<String>> folded = Stream.of("a", "A").collect(Collectors.groupingBy(s -> s, () -> new TreeMap<>(String.CASE_INSENSITIVE_ORDER), Collectors.toList())); String foldedText = folded.toString();
 String badRange = ""; try { "abc".matches("[a-"); } catch (java.util.regex.PatternSyntaxException e) { badRange = "pse"; }
+boolean signedZeros = Arrays.equals(new double[] {-0.0}, new double[] {0.0}); String generalPrecision = String.format("%.3b|%#.0f", true, 2.0); List<? super Number> sup = new ArrayList<Object>(); List<? super Integer> lower = sup; lower.add(3); String lowerText = lower.toString();
 String exhausted = ""; try { i.next(); } catch (NoSuchElementException e) { exhausted += "N"; } try { i.remove(); } catch (IllegalStateException e) { exhausted += "I"; } exhausted += q;
 Set<Integer> s = new HashSet<>(Set.of(1)); Iterator<Integer> u = Collections.unmodifiableSet(s).iterator(); s.add(2); String wrapped = ""; try { u.next(); } catch (ConcurrentModificationException e) { wrapped = "cme"; }
 List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(Comparator.nullsFirst(Comparator.naturalOrder())); String sorted = nulls.toString();`
@@ -409,6 +410,9 @@ List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(
     linkedText: '[2, 3]',
     collectOrder: 'S12',
     badRange: 'pse',
+    signedZeros: false,
+    generalPrecision: 'tru|2.',
+    lowerText: '[3]',
     arrays: '[a, b][3, 1]',
     foldedText: '{a=[a, A]}',
     uncomparable: 'cce 0',

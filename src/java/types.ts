@@ -426,7 +426,12 @@ function containsTypeArgument(parameter: JavaType, argument: JavaType, objectCla
   if (isHole(argument) || isHole(parameter) || (parameter.kind === 'wildcard' && isHole(parameter.bound))) return true;
   if (parameter.kind !== 'wildcard') return sameType(parameter, argument);
   if (!parameter.bound) return true;
-  if (parameter.isSuper) return argument.kind !== 'wildcard' && isWidening(parameter.bound, argument, objectClass);
+  if (parameter.isSuper) {
+    // `? super Number` lies within `? super Integer`, as every type above Number is above Integer.
+    if (argument.kind === 'wildcard')
+      return argument.isSuper && !!argument.bound && isWidening(parameter.bound, argument.bound, objectClass);
+    return isWidening(parameter.bound, argument, objectClass);
+  }
   return isWidening(wildcardBound(argument), parameter.bound, objectClass);
 }
 

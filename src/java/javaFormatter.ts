@@ -125,13 +125,13 @@ function formatLower(
   lower: string,
   conversion: string
 ): string {
-  if (lower === 's') {
-    const text = arg === undefined ? 'null' : stringify(frame, arg, { kind: 'null' });
-    return precision === undefined ? text : text.slice(0, precision);
+  // The general conversions keep only as many characters as the precision says.
+  const general = (text: string): string => (precision === undefined ? text : text.slice(0, precision));
+  if (lower === 's') return general(arg === undefined ? 'null' : stringify(frame, arg, { kind: 'null' }));
+  if (lower === 'b') {
+    return general(String(arg instanceof JavaObject && typeof arg.boxed === 'boolean' ? arg.boxed : arg !== undefined));
   }
-  if (lower === 'b')
-    return String(arg instanceof JavaObject && typeof arg.boxed === 'boolean' ? arg.boxed : arg !== undefined);
-  if (lower === 'h') return arg === undefined ? 'null' : (javaHash(frame, arg) >>> 0).toString(16);
+  if (lower === 'h') return general(arg === undefined ? 'null' : (javaHash(frame, arg) >>> 0).toString(16));
   const accepted = ACCEPTED_KINDS[lower] as readonly string[] | undefined;
   if (!accepted) return throwBuiltin(frame, 'UnknownFormatConversionException', `Conversion = '${conversion}'`);
   if (arg === undefined) return 'null';
@@ -213,14 +213,7 @@ function formatDecimal(value: number, precision: number, conversion: string, fla
   const [mantissa, exponentText] = Math.abs(value).toExponential().split('e');
   const digits = mantissa.replace('.', '');
   const exponent = Number(exponentText);
-  if (conversion === 'e') {
-    const { digits: rounded, carried } = roundDigits(digits, precision + 1);
-    const finalExponent = exponent + carried;
-    // A carry into a new leading digit leaves one digit more than the precision keeps.
-    const fraction = rounded.slice(1, precision + 1).padEnd(precision, '0');
-    const body = `${rounded[0]}${precision > 0 ? `.${fraction}` : ''}e${finalExponent < 0 ? '-' : '+'}${String(Math.abs(finalExponent)).padStart(2, '0')}`;
-    return withSign(body, isNegative, flags);
-  }
+  if (conversion === 'e') return withSign(scientificDigits(digits, exponent, precision, flags), isNegative, flags);
   // Digits before the point number exponent + 1, which may be zero or negative for small values.
   const integerDigits = exponent + 1;
   const kept = integerDigits + precision;
@@ -240,7 +233,18 @@ function formatDecimal(value: number, precision: number, conversion: string, fla
   }
   const integerText = flags.includes(',') ? group(integerPart) : integerPart;
   // The sign is the value's, even when it rounds to zero, as `-0.00` shows.
-  return withSign(precision > 0 ? `${integerText}.${fractionPart}` : integerText, isNegative, flags);
+  const hasPoint = precision > 0 || flags.includes('#');
+  return withSign(hasPoint ? `${integerText}.${fractionPart}` : integerText, isNegative, flags);
+}
+
+/** The digits of `%e`, rounded half up to `precision`, with the point that `#` keeps even with no digits after it. */
+function scientificDigits(digits: string, exponent: number, precision: number, flags: string): string {
+  const { digits: rounded, carried } = roundDigits(digits, precision + 1);
+  const finalExponent = exponent + carried;
+  // A carry into a new leading digit leaves one digit more than the precision keeps.
+  const fraction = rounded.slice(1, precision + 1).padEnd(precision, '0');
+  const point = precision > 0 || flags.includes('#') ? `.${fraction}` : '';
+  return `${rounded[0]}${point}e${finalExponent < 0 ? '-' : '+'}${String(Math.abs(finalExponent)).padStart(2, '0')}`;
 }
 
 /**
