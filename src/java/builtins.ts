@@ -1,6 +1,6 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
 import { type Collections, defineCollections, javaEquals, javaHash, linkComparator } from './builtinCollections';
-import { defineFunctions, type Functions } from './builtinFunctions';
+import { defineFunctions, functionClassOf, type Functions } from './builtinFunctions';
 import { defineMath } from './builtinMath';
 import { defineMisc } from './builtinMisc';
 import { defineStreams } from './builtinStreams';
@@ -16,7 +16,7 @@ import {
   requireString,
   text,
 } from './builtinSupport';
-import { defineText } from './builtinText';
+import { compareIgnoringCase, defineText } from './builtinText';
 import { defineUtilities } from './builtinUtilities';
 import { type BoxableKind, defineWrappers, hashOf, type Wrappers } from './builtinWrappers';
 import { type Frame, ProgramExit, throwBuiltin } from './runtime';
@@ -97,6 +97,16 @@ function createBuiltins(): Builtins {
   defineText(registry, objectClass, stringClass, registry.classes.get('PrintStream') as ClassInfo, collections);
   const functions = defineFunctions(registry, objectClass, collections, wrappers.comparableClass);
   linkComparator(collections, functions.comparatorClass);
+  const caseInsensitiveOrder = new JavaObject(functionClassOf(functions.comparatorClass, objectClass));
+  caseInsensitiveOrder.function = {
+    call: (frame, [a, b]) => compareIgnoringCase(requireString(frame, a), requireString(frame, b)),
+  };
+  addConstant(
+    stringClass,
+    'CASE_INSENSITIVE_ORDER',
+    { kind: 'class', cls: functions.comparatorClass, args: [stringClass.type] },
+    caseInsensitiveOrder
+  );
   defineStreams(registry, objectClass, stringClass.type, collections, wrappers, functions);
   return {
     classes: registry.classes,

@@ -291,14 +291,9 @@ function defineStringExtras(stringClass: ClassInfo, collections: Collections): v
   });
   addMethod(stringClass, 'strip', [], stringType, false, (frame, receiver) => newString(frame, text(receiver).trim()));
   addMethod(stringClass, 'isBlank', [], BOOLEAN, false, (_, receiver) => text(receiver).trim() === '');
-  addMethod(stringClass, 'compareToIgnoreCase', [stringType], INT, false, (frame, receiver, [other]) => {
-    const left = text(receiver).toUpperCase().toLowerCase();
-    const right = requireString(frame, other).toUpperCase().toLowerCase();
-    for (let index = 0; index < Math.min(left.length, right.length); index++) {
-      if (left[index] !== right[index]) return charCodeOf(left, index) - charCodeOf(right, index);
-    }
-    return left.length - right.length;
-  });
+  addMethod(stringClass, 'compareToIgnoreCase', [stringType], INT, false, (frame, receiver, [other]) =>
+    compareIgnoringCase(text(receiver), requireString(frame, other))
+  );
   addMethod(stringClass, 'valueOf', [CHAR_ARRAY], stringType, true, (frame, _, [chars]) =>
     newString(frame, arrayOfChars(frame, chars))
   );
@@ -556,4 +551,13 @@ function roundDigits(digits: string, count: number): { digits: string; carried: 
     kept[index]++;
   }
   return { digits: kept.join(''), carried: 0 };
+}
+
+export function compareIgnoringCase(a: string, b: string): number {
+  const left = a.toUpperCase().toLowerCase();
+  const right = b.toUpperCase().toLowerCase();
+  for (let index = 0; index < Math.min(left.length, right.length); index++) {
+    if (left[index] !== right[index]) return charCodeOf(left, index) - charCodeOf(right, index);
+  }
+  return left.length - right.length;
 }

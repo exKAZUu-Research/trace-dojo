@@ -321,23 +321,29 @@ const CHARACTER_TESTS = {
   isWhitespace: /^[\t\n\v\f\r\u001C-\u001F \u1680\u2000-\u2006\u2008-\u200A\u2028\u2029\u205F\u3000]$/u,
 } as const;
 
+function codePointToString(code: Value): string {
+  const point = code as number;
+  return point >= 0 && point <= 0x10_ff_ff ? String.fromCodePoint(point) : '';
+}
+
 function defineCharacterMembers(characterClass: ClassInfo): void {
   addConstant(characterClass, 'MAX_VALUE', CHAR, 0xff_ff);
   addConstant(characterClass, 'MIN_VALUE', CHAR, 0);
-  for (const [name, pattern] of Object.entries(CHARACTER_TESTS)) {
-    addMethod(characterClass, name, [CHAR], BOOLEAN, true, (_, __, [code]) =>
-      pattern.test(charToString(code as number))
-    );
-  }
-  for (const [name, convert] of [
-    ['toUpperCase', (text: string) => text.toUpperCase()],
-    ['toLowerCase', (text: string) => text.toLowerCase()],
-  ] as const) {
-    addMethod(characterClass, name, [CHAR], CHAR, true, (_, __, [code]) => {
-      const converted = convert(charToString(code as number));
-      // A character whose case mapping takes several characters stays unchanged, as Character's methods leave it.
-      return converted.length === 1 ? converted.codePointAt(0) : code;
-    });
+  // Each method takes a char or an int code point, as `str.chars()` gives.
+  for (const type of [CHAR, INT]) {
+    for (const [name, pattern] of Object.entries(CHARACTER_TESTS)) {
+      addMethod(characterClass, name, [type], BOOLEAN, true, (_, __, [code]) => pattern.test(codePointToString(code)));
+    }
+    for (const [name, convert] of [
+      ['toUpperCase', (text: string) => text.toUpperCase()],
+      ['toLowerCase', (text: string) => text.toLowerCase()],
+    ] as const) {
+      addMethod(characterClass, name, [type], type, true, (_, __, [code]) => {
+        const converted = convert(codePointToString(code));
+        // A character whose case mapping takes several characters stays unchanged, as Character's methods leave it.
+        return [...converted].length === 1 ? converted.codePointAt(0) : code;
+      });
+    }
   }
   addMethod(characterClass, 'getNumericValue', [CHAR], INT, true, (_, __, [code]) => {
     const character = charToString(code as number);
