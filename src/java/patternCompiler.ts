@@ -164,7 +164,7 @@ export abstract class PatternCompiler extends TryCompiler {
     const groupBindings: PatternBinding[][] = statement.groups.map(() => []);
     const tests = statement.groups.map((group, index) =>
       group.labels.flatMap((label) =>
-        this.compileSwitchCase(context, state, group, index, label, selector.type, groupBindings[index])
+        this.compileSwitchCase(context, state, { group, index, bindings: groupBindings[index] }, label, selector.type)
       )
     );
     const { defaultIndex, nullIndex } = state;
@@ -194,11 +194,9 @@ export abstract class PatternCompiler extends TryCompiler {
   protected compileSwitchCase(
     context: MethodContext,
     state: PatternSwitchState,
-    group: SwitchGroup,
-    index: number,
+    { group, index, bindings }: { group: SwitchGroup; index: number; bindings: PatternBinding[] },
     label: SwitchGroup['labels'][number],
-    selectorType: JavaType,
-    bindings: PatternBinding[]
+    selectorType: JavaType
   ): Test[] {
     if (label === undefined || isNullLabel(label)) {
       const key = label === undefined ? 'defaultIndex' : 'nullIndex';

@@ -185,26 +185,35 @@ export abstract class LambdaCompiler extends PatternCompiler {
         infer(this.builtins, method.parameterTypes[index], arg.type, variables, bindings);
     }
     for (const [index, arg] of args.entries()) {
-      if (arg.type.kind !== 'pending') continue;
-      const parameterType = substitute(method.parameterTypes[index], bindings);
-      const bound = upperBound(parameterType);
-      const functional = bound.kind === 'class' ? functionalMethodOf(bound.cls, this.builtins.objectClass) : undefined;
-      if (bound.kind !== 'class' || !functional) continue;
-      const unresolved = variables.filter((variable) => !bindings.has(variable));
-      // The functional interface's result in terms of the method's type parameters, as in `? extends R`.
-      const declared = method.parameterTypes[index] as ClassType;
-      const samResult = substitute(functional.returnType, memberBindings(declared, functional.owner));
-      const declaredResult =
-        samResult.kind === 'wildcard' ? (samResult.isSuper ? undefined : samResult.bound) : samResult;
-      if (!declaredResult || !mentionsAny(declaredResult, unresolved)) continue;
-      const returned = this.lambdaReturnType(context, expressions[index], rawify(parameterType, unresolved, true));
-      if (!returned) continue;
-      const boxedReturn = isPrimitive(returned)
-        ? (boxedTypeOf(this.builtins.wrappers, returned) ?? returned)
-        : returned;
-      infer(this.builtins, declaredResult, boxedReturn, variables, bindings);
+      if (arg.type.kind === 'pending') this.inferFromLambda(context, method, index, expressions[index], bindings);
     }
     return bindings;
+  }
+
+  /** Infers the type parameters of `method` that the result of its lambda argument at `index` decides. */
+  protected inferFromLambda(
+    context: MethodContext,
+    method: MethodInfo,
+    index: number,
+    expression: Expression,
+    bindings: Map<TypeVariable, JavaType>
+  ): void {
+    const variables = method.typeParameters ?? [];
+    const parameterType = substitute(method.parameterTypes[index], bindings);
+    const bound = upperBound(parameterType);
+    const functional = bound.kind === 'class' ? functionalMethodOf(bound.cls, this.builtins.objectClass) : undefined;
+    if (!functional) return;
+    const unresolved = variables.filter((variable) => !bindings.has(variable));
+    // The functional interface's result in terms of the method's type parameters, as in `? extends R`.
+    const declared = method.parameterTypes[index] as ClassType;
+    const samResult = substitute(functional.returnType, memberBindings(declared, functional.owner));
+    const declaredResult =
+      samResult.kind === 'wildcard' ? (samResult.isSuper ? undefined : samResult.bound) : samResult;
+    if (!declaredResult || !mentionsAny(declaredResult, unresolved)) return;
+    const returned = this.lambdaReturnType(context, expression, rawify(parameterType, unresolved, true));
+    if (!returned) return;
+    const boxedReturn = isPrimitive(returned) ? (boxedTypeOf(this.builtins.wrappers, returned) ?? returned) : returned;
+    infer(this.builtins, declaredResult, boxedReturn, variables, bindings);
   }
 
   /** The type a lambda argument returns when compiled against `target`, or `undefined` when that fails. */

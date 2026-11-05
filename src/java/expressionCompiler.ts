@@ -438,48 +438,26 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
   }
 
   protected compileBinary(context: MethodContext, expression: Extract<Expression, { kind: 'binary' }>): Compiled {
-    const leftValue = this.compileValue(context, expression.left);
-    const { operator: binaryOperator } = expression;
-    // The right operand of && sees the pattern variables of a true left operand, and that of || of a false one.
-    const rightBindings =
-      binaryOperator === '&&' || binaryOperator === '||' ? bindingsWhen(expression.left, binaryOperator === '&&') : [];
-    const rightValue = this.withBindings(context, rightBindings, () => this.compileValue(context, expression.right));
-    // Operators unbox wrapper objects, except string concatenation and == between two references.
-    const isString = (type: JavaType): boolean => type.kind === 'class' && type.cls === this.builtins.stringClass;
-    const keepsReferences =
-      (binaryOperator === '+' && (isString(leftValue.type) || isString(rightValue.type))) ||
-      ((binaryOperator === '==' || binaryOperator === '!=') &&
-        isReference(leftValue.type) &&
-        isReference(rightValue.type));
-    const left = keepsReferences ? leftValue : this.operand(leftValue);
-    const right = keepsReferences ? rightValue : this.operand(rightValue);
-    const operation = this.binaryOperation(expression, expression.operator, left.type, right.type);
-    if (expression.operator === '&&' || expression.operator === '||') {
-      return shortCircuit(expression.operator, left, right);
-    }
-    let constant: Value;
-    if (left.constant !== undefined && right.constant !== undefined && isPrimitive(operation.type)) {
-      try {
-        constant = operation.apply(undefined as unknown as Frame, left.constant, right.constant);
-      } catch {
-        constant = undefined;
-      }
-    } else if (
-      left.constant !== undefined &&
-      right.constant !== undefined &&
-      keepsReferences &&
-      binaryOperator === '+'
-    ) {
+    const { operator } = expression;
+    const { left, right, keepsReferences } = this.compileBinaryOperands(context, expression);
+    const operation = this.binaryOperation(expression, operator, left.type, right.type);
+    if (operator === '&&' || operator === '||') return shortCircuit(operator, left, right);
+    if (left.constant !== undefined && right.constant !== undefined) {
       // Concatenating constants gives a constant, which Java interns like a literal.
-      const text = `${constantText(left.constant, left.type)}${constantText(right.constant, right.type)}`;
-      constant = this.internedString(text);
-      const interned = constant;
-      return { kind: 'value', type: operation.type, constant, run: () => interned };
+      if (keepsReferences && operator === '+') {
+        const interned = this.internedString(
+          `${constantText(left.constant, left.type)}${constantText(right.constant, right.type)}`
+        );
+        return { kind: 'value', type: operation.type, constant: interned, run: () => interned };
+      }
+      if (isPrimitive(operation.type)) {
+        const constant = foldConstant(operation, left.constant, right.constant);
+        if (constant !== undefined) return { kind: 'value', type: operation.type, constant, run: () => constant };
+      }
     }
     return {
       kind: 'value',
       type: operation.type,
-      constant,
       run: (frame) => {
         const leftValue = left.run(frame);
         frame.temporaries.push(leftValue);
@@ -492,6 +470,27 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
         return operation.apply(frame, leftValue, rightValue);
       },
     };
+  }
+
+  /**
+   * Compiles a binary operator's operands, unboxing wrapper objects except for string concatenation and `==` between
+   * two references; the right operand of && sees the pattern variables of a true left one, and that of || of a false.
+   */
+  protected compileBinaryOperands(
+    context: MethodContext,
+    expression: Extract<Expression, { kind: 'binary' }>
+  ): { left: CompiledValue; right: CompiledValue; keepsReferences: boolean } {
+    const { operator } = expression;
+    const leftValue = this.compileValue(context, expression.left);
+    const rightBindings =
+      operator === '&&' || operator === '||' ? bindingsWhen(expression.left, operator === '&&') : [];
+    const rightValue = this.withBindings(context, rightBindings, () => this.compileValue(context, expression.right));
+    const isString = (type: JavaType): boolean => type.kind === 'class' && type.cls === this.builtins.stringClass;
+    const keepsReferences =
+      (operator === '+' && (isString(leftValue.type) || isString(rightValue.type))) ||
+      ((operator === '==' || operator === '!=') && isReference(leftValue.type) && isReference(rightValue.type));
+    if (keepsReferences) return { left: leftValue, right: rightValue, keepsReferences };
+    return { left: this.operand(leftValue), right: this.operand(rightValue), keepsReferences };
   }
 
   protected compileUnary(context: MethodContext, expression: Extract<Expression, { kind: 'unary' }>): Compiled {
@@ -636,6 +635,19 @@ function readOf(reference: (Reference & { constant?: Value }) | Compiled): Compi
   if ('kind' in reference) return reference;
   const { bind } = reference;
   return { kind: 'value', type: reference.type, run: (frame) => bind(frame).get(), constant: reference.constant };
+}
+
+/** The value of an operation on constants, or `undefined` when it throws, as dividing by zero does. */
+function foldConstant(
+  operation: { apply: (frame: Frame, left: Value, right: Value) => Value },
+  left: Value,
+  right: Value
+): Value {
+  try {
+    return operation.apply(undefined as unknown as Frame, left, right);
+  } catch {
+    return undefined;
+  }
 }
 
 /** The text a constant contributes to a string concatenation. */
