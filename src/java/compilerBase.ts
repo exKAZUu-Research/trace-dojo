@@ -2,6 +2,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import {
   type ClassDeclaration,
+  encloses,
   type Expression,
   type FieldDeclaration,
   type MemberDeclaration,
@@ -366,7 +367,7 @@ export abstract class CompilerBase extends TypeResolver {
       const name = context.locals[slot].name;
       if (facts.notEffectivelyFinal.has(key)) this.error(reads[0] as Span, capturedAssignmentMessage(name, reader));
       const unassigned = reads.find((read) =>
-        facts.unassignedAtCreations.some((creation) => creation.keys.has(key) && contains(creation.span, read))
+        facts.unassignedAtCreations.some((creation) => creation.keys.has(key) && encloses(creation.span, read))
       );
       if (unassigned) this.error(unassigned, `変数 ${name} に値が代入されていない可能性があります。`);
     }
@@ -402,6 +403,8 @@ export abstract class CompilerBase extends TypeResolver {
     span: Span
   ): CompiledValue {
     if (value.erasedType) return this.convert(this.checkErased(value, to), to, context, span);
+    // A parameter whose type inference left undecided takes any object, as overload resolution already decided.
+    if (to.kind === 'wildcard' && to.isHole && (isReference(value.type) || value.type.kind === 'null')) return value;
     if (isWidening(value.type, to, this.builtins.objectClass)) {
       return isNumeric(value.type) && isNumeric(to)
         ? convertedNumber(value, value.type.kind, to)
@@ -799,10 +802,3 @@ export function sameParameters(a: MethodInfo, b: MethodInfo): boolean {
 }
 
 export { superclassesOf, topLevelOf } from './typeResolver';
-
-/** Whether `inner` lies within `outer` in the source. */
-function contains(outer: Span, inner: Span): boolean {
-  const startsAfter = inner.row > outer.row || (inner.row === outer.row && inner.start >= outer.start);
-  const endsBefore = inner.endRow < outer.endRow || (inner.endRow === outer.endRow && inner.end <= outer.end);
-  return startsAfter && endsBefore;
-}

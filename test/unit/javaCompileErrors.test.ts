@@ -1183,6 +1183,26 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'class Holder<T> { <U extends T> U choose(U a, U b) { return a; } }\nclass Main {\n  public static void main(String[] args) {\n    String s = new Holder<String>().<String>choose("a", "b");\n  }\n}',
   ],
+  [
+    'while-false-body',
+    false,
+    'class Main {\n  public static void main(String[] args) {\n    while (false) System.out.println("dead");\n  }\n}',
+  ],
+  [
+    'for-false-body',
+    false,
+    'class Main {\n  public static void main(String[] args) {\n    for (int i = 0; false; i++) {}\n  }\n}',
+  ],
+  [
+    'do-while-false',
+    true,
+    'class Main {\n  public static void main(String[] args) {\n    do {} while (false);\n  }\n}',
+  ],
+  [
+    'while-variable-false',
+    true,
+    'class Main {\n  public static void main(String[] args) {\n    boolean f = false; while (f) {}\n  }\n}',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

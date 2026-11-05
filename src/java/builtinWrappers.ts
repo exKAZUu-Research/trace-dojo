@@ -176,7 +176,7 @@ function defineFloatMembers(floatClass: ClassInfo, stringType: JavaType): void {
   addConstant(floatClass, 'NEGATIVE_INFINITY', FLOAT, Number.NEGATIVE_INFINITY);
   addConstant(floatClass, 'NaN', FLOAT, Number.NaN);
   addMethod(floatClass, 'parseFloat', [stringType], FLOAT, true, (frame, _, [text]) =>
-    Math.fround(parseDouble(frame, text))
+    Math.fround(parseDouble(frame, text, 'float'))
   );
 }
 
@@ -490,12 +490,13 @@ function defineLongMembers(longClass: ClassInfo, stringType: JavaType): void {
   }
 }
 
-function parseDouble(frame: Frame, text: Value): number {
+/** @param format The type the text is read for, to which a hexadecimal value rounds once. */
+function parseDouble(frame: Frame, text: Value, format: 'double' | 'float' = 'double'): number {
   const value = (text as JavaString | undefined)?.value;
   if (value === undefined) return throwBuiltin(frame, 'NullPointerException');
   frame.runtime.scanString(value.length);
   const trimmed = value.trim();
-  const hex = parseHexFloat(trimmed);
+  const hex = parseHexFloat(trimmed, format);
   if (hex !== undefined) return hex;
   const isNumber = /^[+-]?(?:NaN|Infinity|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?[fFdD]?)$/.test(trimmed);
   if (!isNumber) throwBuiltin(frame, 'NumberFormatException', `For input string: "${value}"`);

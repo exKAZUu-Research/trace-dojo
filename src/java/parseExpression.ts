@@ -170,7 +170,9 @@ function convertFloatingPointLiteral(node: Node): Expression {
   const text = node.text.replaceAll('_', '');
   const isFloat = /[fF]$/.test(text);
   const isHex = /^0[xX]/.test(text);
-  const value = isHex ? (parseHexFloat(text) as number) : Number(text.replace(/[dDfF]$/, ''));
+  const value = isHex
+    ? (parseHexFloat(text, isFloat ? 'float' : 'double') as number)
+    : Number(text.replace(/[dDfF]$/, ''));
   const rounded = isFloat ? Math.fround(value) : value;
   const significand = isHex ? text.slice(2).replace(/[pP].*$/, '') : text.replace(/[eE].*$|[dDfF]$/, '');
   if (!Number.isFinite(rounded) || (rounded === 0 && (isHex ? /[1-9a-fA-F]/ : /[1-9]/).test(significand))) {

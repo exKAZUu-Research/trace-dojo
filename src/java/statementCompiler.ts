@@ -21,7 +21,7 @@ import {
 import { InvocationCompiler } from './invocationCompiler';
 import { nullMessage, typeDescription } from './nullMessages';
 import { bindingsWhen } from './patternBindings';
-import { canCompleteNormally, containsJump } from './reachability';
+import { booleanConstants, canCompleteNormally, containsJump } from './reachability';
 import { type Frame, JavaThrow, throwBuiltin, UNASSIGNED } from './runtime';
 import { isObjectCreation, onlyCalls } from './stepRules';
 import {
@@ -237,13 +237,14 @@ export abstract class StatementCompiler extends InvocationCompiler {
     if (!breaks) this.introduceBindings(context, bindingsWhen(condition, false));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- While and do statements share one loop, which differs only in where the condition runs.
+  // code-gauge-allow functionCognitiveComplexity 17 -- While and do statements share one loop, which differs only in where the condition runs.
   protected compileWhile(context: MethodContext, statement: Extract<Statement, { kind: 'while' | 'do' }>): Exec {
     const labels = this.takeLabels(context);
     const isDo = statement.kind === 'do';
     // A do statement's body runs before its condition, so only a while statement's body sees the condition's bindings.
     const body = isDo ? this.compileLoopBody(context, statement.body, labels) : undefined;
     const condition = this.compileCondition(context, statement.condition);
+    if (!isDo) this.checkLoopBodyReachable(statement.condition, statement.body);
     const loopBody =
       body ??
       this.withBindings(context, bindingsWhen(statement.condition, true), () =>
@@ -440,11 +441,17 @@ export abstract class StatementCompiler extends InvocationCompiler {
     return (frame) => ({ kind: 'return', value: value(frame) });
   }
 
+  /** Rejects the body of a `while` or `for` loop whose condition is the constant `false`, which never runs (JLS 14.22). */
+  protected checkLoopBodyReachable(condition: Expression, body: Statement): void {
+    if (booleanConstants.get(condition) === false) this.error(body, 'この文は実行されることがありません。');
+  }
+
   protected compileFor(context: MethodContext, statement: Extract<Statement, { kind: 'for' }>): Exec {
     const labels = this.takeLabels(context);
     const { init, update } = this.compileForHeader(context, statement);
     const { condition: conditionSyntax } = statement;
     const condition = conditionSyntax ? this.compileCondition(context, conditionSyntax) : () => true;
+    if (conditionSyntax) this.checkLoopBodyReachable(conditionSyntax, statement.body);
     const body = this.withBindings(context, conditionSyntax ? bindingsWhen(conditionSyntax, true) : [], () =>
       this.compileLoopBody(context, statement.body, labels)
     );

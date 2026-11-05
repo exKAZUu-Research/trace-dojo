@@ -74,13 +74,10 @@ const ESCAPED_CLASSES: Record<string, string> = {
 /** Java's character escapes, as the characters they stand for. */
 const ESCAPED_CHARACTERS: Record<string, number> = { t: 9, n: 10, r: 13, f: 12, a: 7, e: 27 };
 
-const LINE_TERMINATOR = String.raw`(?:\r\n|[\n\r\x85  ])`;
-
-/**
- * The flags that `(?flags)` and `(?flags:...)` set that JavaScript reads alike; `i`, `u`, and `x` are read here, as
- * Java's `i` without UNICODE_CASE (`u`) ignores the case of ASCII letters only.
- */
-const MODIFIER_FLAGS = new Set(['m', 's']);
+/** Java's line terminators, which end a line for `.`, `^`, and `$`; UNIX_LINES (`d`) keeps `\n` only. */
+const LINE_TERMINATORS = String.raw`\n\r\x85\u2028\u2029`;
+/** What `\R` matches: a line terminator, a vertical tab, or a form feed. */
+const LINEBREAK = String.raw`(?:\r\n|[\n\x0B\f\r\x85\u2028\u2029])`;
 
 /**
  * Rewrites a Java regular expression for `RegExp` with the `v` flag, reading it token by token as
@@ -96,11 +93,26 @@ export function translateJavaRegex(pattern: string, isWhole: boolean): Translate
   return { source: isWhole ? String.raw`(?<![\s\S])(?:${source})(?![\s\S])` : source, flags: `${flags}v` };
 }
 
+/** The group state each embedded flag sets, as `(?s)` sets DOTALL. */
+const GROUP_FLAGS: Record<
+  string,
+  'isComments' | 'isMultiline' | 'isDotAll' | 'isUnixLines' | 'isCaseInsensitive' | 'isUnicodeCase'
+> = {
+  x: 'isComments',
+  m: 'isMultiline',
+  s: 'isDotAll',
+  d: 'isUnixLines',
+  i: 'isCaseInsensitive',
+  u: 'isUnicodeCase',
+};
+
 /** A group being translated, with the scoped flag groups that embedded flags inside it opened. */
 interface Group {
   extraCloses: number;
   isComments: boolean;
   isMultiline: boolean;
+  isDotAll: boolean;
+  isUnixLines: boolean;
   isCaseInsensitive: boolean;
   isUnicodeCase: boolean;
 }
@@ -113,7 +125,15 @@ function foldsUnicodeCase(group: Group): boolean {
 class Translator {
   private index = 0;
   private readonly groups: Group[] = [
-    { extraCloses: 0, isComments: false, isMultiline: false, isCaseInsensitive: false, isUnicodeCase: false },
+    {
+      extraCloses: 0,
+      isComments: false,
+      isMultiline: false,
+      isDotAll: false,
+      isUnixLines: false,
+      isCaseInsensitive: false,
+      isUnicodeCase: false,
+    },
   ];
   private readonly parts: string[] = [];
 
@@ -126,18 +146,16 @@ class Translator {
     return { source: this.parts.join('') + ')'.repeat(this.current().extraCloses), flags };
   }
 
-  /** Reads the flag groups at the start, such as `(?i)(?s)`, which become the expression's own flags. */
+  /**
+   * Reads the flag groups at the start, such as `(?i)(?s)`, which hold for the whole expression; JavaScript gets
+   * only `i`, for Unicode case folding, as the translation spells out what the other flags change.
+   */
   private leadingFlags(): string {
-    let flags = '';
     for (let match = /^\(\?([a-zA-Z]+)\)/.exec(this.rest()); match; match = /^\(\?([a-zA-Z]+)\)/.exec(this.rest())) {
-      for (const flag of match[1] as string) {
-        if (MODIFIER_FLAGS.has(flag)) flags += flags.includes(flag) ? '' : flag;
-        else this.setGroupFlag(this.current(), flag, true);
-      }
+      for (const flag of match[1] as string) this.setGroupFlag(this.current(), flag, true);
       this.index += match[0].length;
     }
-    this.current().isMultiline = flags.includes('m');
-    return foldsUnicodeCase(this.current()) ? `${flags}i` : flags;
+    return foldsUnicodeCase(this.current()) ? 'i' : '';
   }
 
   private rest(): string {
@@ -179,12 +197,13 @@ class Translator {
       case '{': {
         return this.braceQuantifier();
       }
-      case '$': {
-        // Without MULTILINE, Java's `$` also matches before a line terminator that ends the input.
-        return this.current().isMultiline ? '$' : String.raw`(?=${LINE_TERMINATOR}?(?![\s\S]))`;
+      case '$':
+      case '^': {
+        return this.lineAnchor(char);
       }
-      case '.':
-      case '^':
+      case '.': {
+        return this.anyCharacter();
+      }
       case '|': {
         return char;
       }
@@ -192,6 +211,37 @@ class Translator {
         return this.literal(point);
       }
     }
+  }
+
+  /** Where `^` or `$` matches, at the input's bounds or, with MULTILINE, at its lines'. */
+  private lineAnchor(char: '^' | '$'): string {
+    if (!this.current().isMultiline) return char === '^' ? String.raw`(?<![\s\S])` : this.inputEnd();
+    return char === '^' ? this.lineStart() : this.lineEnd();
+  }
+
+  /** What `.` matches: any character but a line terminator, unless DOTALL. */
+  private anyCharacter(): string {
+    const group = this.current();
+    if (group.isDotAll) return String.raw`[\s\S]`;
+    return group.isUnixLines ? String.raw`[^\n]` : `[^${LINE_TERMINATORS}]`;
+  }
+
+  /** Where `$` matches without MULTILINE, and `\Z`: at the end, or before a line terminator that ends the input. */
+  private inputEnd(): string {
+    const terminator = this.current().isUnixLines ? String.raw`\n` : String.raw`(?:\r\n|[${LINE_TERMINATORS}])`;
+    return String.raw`(?=${terminator}?(?![\s\S]))`;
+  }
+
+  /** Where `$` matches with MULTILINE: before any line terminator, but not between `\r` and `\n`, or at the end. */
+  private lineEnd(): string {
+    if (this.current().isUnixLines) return String.raw`(?=\n|(?![\s\S]))`;
+    return String.raw`(?:(?=[\r\x85\u2028\u2029]|(?![\s\S]))|(?<!\r)(?=\n))`;
+  }
+
+  /** Where `^` matches with MULTILINE: at the start, or after a line terminator that does not end the input. */
+  private lineStart(): string {
+    const after = this.current().isUnixLines ? String.raw`\n` : String.raw`[\n\x85\u2028\u2029]|\r(?!\n)`;
+    return String.raw`(?:(?<![\s\S])|(?<=${after})(?=[\s\S]))`;
   }
 
   /** A character outside a class, which ASCII-only case insensitivity matches in either case. */
@@ -262,29 +312,17 @@ class Translator {
 
   /** Applies the flags of an inline modifier to `group`, returning those JavaScript's modifiers take. */
   private modifiers(on: string, off: string, group: Group): string {
-    const forJs = (flags: string, isOn: boolean): string =>
-      [...flags]
-        .filter((flag) => {
-          if (MODIFIER_FLAGS.has(flag)) return true;
-          this.setGroupFlag(group, flag, isOn);
-          return false;
-        })
-        .join('');
     const foldedBefore = foldsUnicodeCase(group);
-    let [jsOn, jsOff] = [forJs(on, true), forJs(off, false)];
-    if (on.includes('m')) group.isMultiline = true;
-    if (off.includes('m')) group.isMultiline = false;
-    if (!foldedBefore && foldsUnicodeCase(group)) jsOn += 'i';
-    if (foldedBefore && !foldsUnicodeCase(group)) jsOff += 'i';
-    return jsOff ? `${jsOn}-${jsOff}` : jsOn;
+    for (const flag of on) this.setGroupFlag(group, flag, true);
+    for (const flag of off) this.setGroupFlag(group, flag, false);
+    if (!foldedBefore && foldsUnicodeCase(group)) return 'i';
+    return foldedBefore && !foldsUnicodeCase(group) ? '-i' : '';
   }
 
   private setGroupFlag(group: Group, flag: string, isOn: boolean): void {
-    if (flag === 'x') group.isComments = isOn;
-    else if (flag === 'i') group.isCaseInsensitive = isOn;
-    else if (flag === 'u') group.isUnicodeCase = isOn;
-    // UNIX_LINES changes only which characters end a line, which JavaScript's `.` and anchors read alike enough.
-    else if (flag !== 'd') this.fail(`Unsupported flag ${flag}`);
+    const field = GROUP_FLAGS[flag];
+    if (!field) this.fail(`Unsupported flag ${flag}`);
+    group[field] = isOn;
   }
 
   private closeGroup(): string {
@@ -313,11 +351,11 @@ class Translator {
       }
       case 'Z': {
         this.index++;
-        return String.raw`(?=${LINE_TERMINATOR}?(?![\s\S]))`;
+        return this.inputEnd();
       }
       case 'R': {
         this.index++;
-        return LINE_TERMINATOR;
+        return LINEBREAK;
       }
       case 'k': {
         const name = /^k<([a-zA-Z][a-zA-Z0-9]*)>/.exec(this.rest());
@@ -508,91 +546,4 @@ function literal(point: number): string {
   return /^[a-zA-Z0-9 ]$/u.test(String.fromCodePoint(point))
     ? String.fromCodePoint(point)
     : `\\u{${point.toString(16)}}`;
-}
-
-/** A failure of a replacement string, which Java reports as `exception` with `message`. */
-export class ReplacementError extends Error {
-  constructor(
-    readonly exception: 'IllegalArgumentException' | 'IndexOutOfBoundsException',
-    message: string
-  ) {
-    super(message);
-  }
-}
-
-type ReplacementPart = string | number | { name: string };
-
-/**
- * A function for `String.replace` that expands a Java replacement as `Matcher.appendReplacement` does: `\x` quotes
- * `x`, `$n` names a group, taking more digits while the number stays a group, and `${name}` a named group. An invalid
- * reference throws {@link ReplacementError} when a match first needs the replacement, as in Java.
- */
-export function javaReplacer(replacement: string): (...args: unknown[]) => string {
-  let parts: ReplacementPart[] | undefined;
-  return (...args) => {
-    const hasGroups = typeof args.at(-1) === 'object' && args.at(-1) !== undefined;
-    const groups = (hasGroups ? args.at(-1) : undefined) as Record<string, string | undefined> | undefined;
-    const captures = args.slice(0, hasGroups ? -3 : -2) as (string | undefined)[];
-    parts ??= parseReplacement(replacement, captures.length - 1, groups ? Object.keys(groups) : []);
-    return parts
-      .map((part) => {
-        if (typeof part === 'string') return part;
-        if (typeof part === 'number') return captures[part] ?? '';
-        return groups?.[part.name] ?? '';
-      })
-      .join('');
-  };
-}
-
-function parseReplacement(replacement: string, groupCount: number, names: readonly string[]): ReplacementPart[] {
-  const parts: ReplacementPart[] = [];
-  for (let index = 0; index < replacement.length;) {
-    const char = replacement[index] as string;
-    if (char === '\\') {
-      if (index + 1 >= replacement.length)
-        throw new ReplacementError('IllegalArgumentException', 'character to be escaped is missing');
-      parts.push(replacement[index + 1] as string);
-      index += 2;
-    } else if (char === '$') {
-      index = readGroupReference(replacement, index + 1, groupCount, names, parts);
-    } else {
-      parts.push(char);
-      index++;
-    }
-  }
-  return parts;
-}
-
-/** Reads the group reference after a `$`, returning the index after it. */
-function readGroupReference(
-  replacement: string,
-  start: number,
-  groupCount: number,
-  names: readonly string[],
-  parts: ReplacementPart[]
-): number {
-  const next = replacement[start];
-  if (next === undefined)
-    throw new ReplacementError('IllegalArgumentException', 'Illegal group reference: group index is missing');
-  if (next === '{') {
-    const name = /^\{([a-zA-Z][a-zA-Z0-9]*)\}/.exec(replacement.slice(start))?.[1];
-    if (name === undefined)
-      throw new ReplacementError('IllegalArgumentException', "named capturing group is missing trailing '}'");
-    if (!names.includes(name)) throw new ReplacementError('IllegalArgumentException', `No group with name {${name}}`);
-    parts.push({ name });
-    return start + name.length + 2;
-  }
-  if (!/\d/.test(next)) throw new ReplacementError('IllegalArgumentException', 'Illegal group reference');
-  let group = Number(next);
-  if (group > groupCount) throw new ReplacementError('IndexOutOfBoundsException', `No group ${group}`);
-  let index = start + 1;
-  // Further digits belong to the number while it still names a group.
-  while (index < replacement.length && /\d/.test(replacement[index] as string)) {
-    const longer = group * 10 + Number(replacement[index]);
-    if (longer > groupCount) break;
-    group = longer;
-    index++;
-  }
-  parts.push(group);
-  return index;
 }

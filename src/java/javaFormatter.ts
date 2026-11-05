@@ -45,9 +45,11 @@ function pad(text: string, flags: string, width: string | undefined): string {
   if (!width) return text;
   const size = Number(width);
   if (flags.includes('-')) return text.padEnd(size);
-  if (flags.includes('0') && /^[+-]?\d/.test(text)) {
-    const sign = /^[+-]/.test(text) ? text[0] : '';
-    return sign + text.slice(sign.length).padStart(size - sign.length, '0');
+  // Zeros go between the sign, parenthesis, or radix prefix and the digits, before a closing parenthesis.
+  const parts = /^([+ (-]?(?:0[xX])?)([\da-fA-F.,eE+-]+)(\)?)$/.exec(text);
+  if (flags.includes('0') && parts) {
+    const [, prefix = '', digits = '', suffix = ''] = parts;
+    return prefix + digits.padStart(size - prefix.length - suffix.length, '0') + suffix;
   }
   return text.padStart(size);
 }

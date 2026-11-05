@@ -9,6 +9,13 @@ export interface Span {
   end: number;
 }
 
+/** Whether `inner` lies within `outer` in the source. */
+export function encloses(outer: Span, inner: Span): boolean {
+  const startsAfter = inner.row > outer.row || (inner.row === outer.row && inner.start >= outer.start);
+  const endsBefore = inner.endRow < outer.endRow || (inner.endRow === outer.endRow && inner.end <= outer.end);
+  return startsAfter && endsBefore;
+}
+
 export type PrimitiveTypeName = 'byte' | 'short' | 'int' | 'long' | 'char' | 'float' | 'double' | 'boolean';
 
 export type TypeSyntax =
