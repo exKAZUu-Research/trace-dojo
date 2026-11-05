@@ -1186,7 +1186,7 @@ test.each([
     'Object e = new IndexOutOfBoundsException(1);',
     'この採点環境では、コンストラクタ IndexOutOfBoundsException に (int) を渡して呼び出すことはできません。',
   ],
-  ['Object o = new Object(); o.getClass();', 'この採点環境の Object には、メソッド getClass がありません。'],
+  ['Object o = new Object(); o.notify();', 'この採点環境の Object には、メソッド notify がありません。'],
   [
     'Turtle t = new Turtle(); t.前に進む(3);',
     'この採点環境では、メソッド 前に進む に (int) を渡して呼び出すことはできません。',

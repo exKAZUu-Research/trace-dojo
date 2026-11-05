@@ -3,7 +3,7 @@ import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import { type CompiledProgram, compileProgram } from './compiler';
 import { parseJava } from './parse';
-import { Frame, JavaThrow, Runtime } from './runtime';
+import { Frame, JavaThrow, ProgramExit, Runtime } from './runtime';
 import { JavaArray } from './values';
 
 export function executeJavaProgram(source: string): ProgramExecution {
@@ -56,7 +56,8 @@ function runMain(runtime: Runtime, program: CompiledProgram): string | undefined
   }
 }
 
-function describeUncaught(runtime: Runtime, root: Frame, error: unknown): string {
+function describeUncaught(runtime: Runtime, root: Frame, error: unknown): string | undefined {
+  if (error instanceof ProgramExit) return undefined;
   if (isHostStackOverflow(error)) return 'java.lang.StackOverflowError';
   if (!(error instanceof JavaThrow)) throw error;
   try {

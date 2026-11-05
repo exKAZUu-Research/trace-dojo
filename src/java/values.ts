@@ -36,6 +36,8 @@ export class JavaObject {
   builder?: string;
   /** Counts the structural changes of a builtin collection, which make its iterators fail fast. */
   modCount?: number;
+  /** The class a `Class` object stands for. */
+  reflected?: ClassInfo;
   /** The primitive value a wrapper object such as an `Integer` boxes. */
   boxed?: number | bigint | boolean;
   /** Set for the constants of an enum. */

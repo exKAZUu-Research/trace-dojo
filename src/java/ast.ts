@@ -30,6 +30,15 @@ export interface Modifiers {
 
 export interface CompilationUnit {
   classes: ClassDeclaration[];
+  imports: ImportDeclaration[];
+}
+
+/** `import a.b.C;`, `import a.b.*;`, `import static a.b.C.m;`, or `import static a.b.C.*;`. */
+export interface ImportDeclaration extends Span {
+  isStatic: boolean;
+  /** The names before the final `*`, or the full name of what a single import names. */
+  names: string[];
+  isWildcard: boolean;
 }
 
 export interface TypeParameter extends Span {

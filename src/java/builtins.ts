@@ -6,6 +6,7 @@ import {
   addConstructor,
   addInterface,
   addMethod,
+  addTypeParameters,
   createRegistry,
   newString,
   type Registry,
@@ -15,7 +16,7 @@ import {
 import { defineText } from './builtinText';
 import { defineUtilities } from './builtinUtilities';
 import { type BoxableKind, defineWrappers, hashOf, type Wrappers } from './builtinWrappers';
-import { type Frame, throwBuiltin } from './runtime';
+import { type Frame, ProgramExit, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
   CHAR,
@@ -76,6 +77,7 @@ function createBuiltins(): Builtins {
   OBJECT_TYPE.value = objectClass.type;
   const stringClass = registry.define('String', objectClass);
   defineObject(objectClass, stringClass.type);
+  defineClassClass(registry, objectClass, stringClass.type);
   defineString(stringClass, objectClass.type);
   stringClass.isFinal = true;
   const enumClass = defineEnum(registry.define('Enum', objectClass), stringClass.type);
@@ -110,10 +112,56 @@ function defineObject(objectClass: ClassInfo, stringType: JavaType): void {
   addMethod(objectClass, 'equals', [objectClass.type], BOOLEAN, false, (_, receiver, [other]) => receiver === other);
   addMethod(objectClass, 'hashCode', [], INT, false, (_, receiver) => identityOf(receiver));
   addMethod(objectClass, 'toString', [], stringType, false, (frame, receiver) => {
-    const name = receiver instanceof JavaObject ? receiver.cls.name : 'Object';
+    const name = receiver instanceof JavaObject ? classNameOf(frame, receiver.cls) : 'java.lang.Object';
     return newString(frame, `${name}@${identityOf(receiver).toString(16)}`);
   });
   addConstructor(objectClass, [], () => {});
+}
+
+/** The name `Class.getName` gives: the qualified name of a builtin class, or the binary name of a program's class. */
+function classNameOf(frame: Frame, cls: ClassInfo): string {
+  return frame.runtime.builtins.qualifiedNames.get(cls) ?? cls.binaryName;
+}
+
+function reflected(receiver: Value): ClassInfo {
+  return (receiver as JavaObject).reflected as ClassInfo;
+}
+
+/** The objects `getClass()` returns, one for each class, so that `==` compares classes. */
+const classObjects = new WeakMap<ClassInfo, JavaObject>();
+
+function defineClassClass(registry: Registry, objectClass: ClassInfo, stringType: JavaType): void {
+  const classClass = registry.define('Class', objectClass);
+  classClass.isFinal = true;
+  addTypeParameters(classClass, ['T'], objectClass.type);
+  addMethod(classClass, 'getName', [], stringType, false, (frame, receiver) =>
+    newString(frame, classNameOf(frame, reflected(receiver)))
+  );
+  addMethod(classClass, 'getSimpleName', [], stringType, false, (frame, receiver) => {
+    const cls = reflected(receiver);
+    // An anonymous class has no simple name.
+    return newString(frame, /\$\d+$/.test(cls.binaryName) ? '' : cls.name);
+  });
+  addMethod(classClass, 'toString', [], stringType, false, (frame, receiver) => {
+    const cls = reflected(receiver);
+    return newString(frame, `${cls.kind === 'interface' ? 'interface' : 'class'} ${classNameOf(frame, cls)}`);
+  });
+  const getClass = addMethod(objectClass, 'getClass', [], classClass.type, false, (frame, receiver) => {
+    const cls =
+      receiver instanceof JavaObject
+        ? receiver.cls
+        : receiver instanceof JavaString
+          ? frame.runtime.builtins.stringClass
+          : objectClass;
+    let object = classObjects.get(cls);
+    if (!object) {
+      object = new JavaObject(classClass);
+      object.reflected = cls;
+      classObjects.set(cls, object);
+    }
+    return object;
+  });
+  getClass.isFinal = true;
 }
 
 function defineEnum(enumClass: ClassInfo, stringType: JavaType): ClassInfo {
@@ -200,6 +248,8 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
     false,
     (_, receiver) => (receiver as JavaObject).cause
   );
+  // A stack trace goes to standard error, which learners do not see.
+  addMethod(throwableClass, 'printStackTrace', [], VOID, false, () => {});
   addMethod(throwableClass, 'toString', [], stringType, false, (frame, receiver) => {
     const exception = receiver as JavaObject;
     const name = registry.qualifiedNames.get(exception.cls) ?? exception.cls.name;
@@ -289,6 +339,28 @@ function defineMath(mathClass: ClassInfo): void {
     addMethod(mathClass, name, [DOUBLE], DOUBLE, true, (_, __, [value]) => Math[name](value as number));
   }
   addMethod(mathClass, 'pow', [DOUBLE, DOUBLE], DOUBLE, true, (_, __, [a, b]) => (a as number) ** (b as number));
+  addMethod(mathClass, 'atan2', [DOUBLE, DOUBLE], DOUBLE, true, (_, __, [y, x]) =>
+    Math.atan2(y as number, x as number)
+  );
+  addMethod(mathClass, 'signum', [DOUBLE], DOUBLE, true, (_, __, [value]) => Math.sign(value as number));
+  addMethod(mathClass, 'toRadians', [DOUBLE], DOUBLE, true, (_, __, [value]) => ((value as number) / 180) * Math.PI);
+  addMethod(mathClass, 'toDegrees', [DOUBLE], DOUBLE, true, (_, __, [value]) => ((value as number) * 180) / Math.PI);
+  for (const type of [INT, LONG]) {
+    const isLong = type === LONG;
+    for (const name of ['floorDiv', 'floorMod'] as const) {
+      addMethod(mathClass, name, [type, type], type, true, (frame, _, [a, b]) => {
+        if (b === 0 || b === 0n) throwBuiltin(frame, 'ArithmeticException', '/ by zero');
+        if (isLong) {
+          const [x, y] = [a as bigint, b as bigint];
+          const quotient = x / y - (x % y !== 0n && x < 0n !== y < 0n ? 1n : 0n);
+          return name === 'floorDiv' ? toInt64(quotient) : x - quotient * y;
+        }
+        const [x, y] = [a as number, b as number];
+        const quotient = Math.floor(x / y);
+        return name === 'floorDiv' ? toInt32(quotient) : x - quotient * y;
+      });
+    }
+  }
   addConstant(mathClass, 'PI', DOUBLE, Math.PI);
   addConstant(mathClass, 'E', DOUBLE, Math.E);
 }
@@ -297,23 +369,31 @@ function defineSystem(registry: Registry, objectClass: ClassInfo, stringType: Ja
   const printStreamClass = registry.define('PrintStream', objectClass, 'java.io');
   const systemClass = registry.define('System', objectClass);
   addConstant(systemClass, 'out', printStreamClass.type, new JavaObject(printStreamClass));
+  // Learners see only standard output, so standard error discards what it prints.
+  const errorStream = new JavaObject(printStreamClass);
+  addConstant(systemClass, 'err', printStreamClass.type, errorStream);
+  addMethod(systemClass, 'exit', [INT], VOID, true, () => {
+    throw new ProgramExit();
+  });
   for (const [name, suffix] of [
     ['print', ''],
     ['println', '\n'],
   ] as const) {
     for (const type of [INT, LONG, FLOAT, DOUBLE, CHAR, BOOLEAN, stringType, objectClass.type]) {
-      addMethod(printStreamClass, name, [type], VOID, false, (frame, _, [value]) => {
-        frame.runtime.budget.print(`${stringify(frame, value, type)}${suffix}`);
+      addMethod(printStreamClass, name, [type], VOID, false, (frame, receiver, [value]) => {
+        const text = `${stringify(frame, value, type)}${suffix}`;
+        if (receiver !== errorStream) frame.runtime.budget.print(text);
       });
     }
-    addMethod(printStreamClass, name, [CHAR_ARRAY], VOID, false, (frame, _, [value]) => {
+    addMethod(printStreamClass, name, [CHAR_ARRAY], VOID, false, (frame, receiver, [value]) => {
       if (!(value instanceof JavaArray)) throwBuiltin(frame, 'NullPointerException');
       frame.runtime.scanString(value.values.length);
-      frame.runtime.budget.print(`${value.values.map((code) => charToString(code as number)).join('')}${suffix}`);
+      const text = `${value.values.map((code) => charToString(code as number)).join('')}${suffix}`;
+      if (receiver !== errorStream) frame.runtime.budget.print(text);
     });
   }
-  addMethod(printStreamClass, 'println', [], VOID, false, (frame) => {
-    frame.runtime.budget.print('\n');
+  addMethod(printStreamClass, 'println', [], VOID, false, (frame, receiver) => {
+    if (receiver !== errorStream) frame.runtime.budget.print('\n');
   });
 }
 

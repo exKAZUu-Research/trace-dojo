@@ -42,6 +42,9 @@ export function throwBuiltin(frame: Frame, className: string, message?: string):
   throw new JavaThrow(exception);
 }
 
+/** Ends the program as `System.exit` does, skipping finally blocks and catch clauses. */
+export class ProgramExit {}
+
 /** A Java exception in flight. */
 export class JavaThrow {
   constructor(readonly value: JavaObject) {}

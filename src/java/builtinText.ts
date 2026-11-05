@@ -40,6 +40,10 @@ export function defineText(
       )
   );
   format.isVarargs = true;
+  const formatted = addMethod(stringClass, 'formatted', [objectArray], stringType, false, (frame, receiver, [args]) =>
+    newString(frame, formatText(frame, text(receiver), (args as JavaArray | undefined)?.values ?? [undefined]))
+  );
+  formatted.isVarargs = true;
   for (const name of ['printf', 'format']) {
     const method = addMethod(
       printStreamClass,

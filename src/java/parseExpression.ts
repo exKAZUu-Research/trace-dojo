@@ -369,7 +369,8 @@ const simpleEscapes: Record<string, string> = {
 };
 
 function decodeEscapes(text: string, node: Node): string {
-  return text.replaceAll(/\\([0-7]{1,3}|.)/gs, (_, escape: string) => {
+  return text.replaceAll(/\\(u+[\dA-Fa-f]{4}|[0-7]{1,3}|.)/gs, (_, escape: string) => {
+    if (escape.startsWith('u') && escape.length > 1) return String.fromCodePoint(Number.parseInt(escape.slice(-4), 16));
     if (/^[0-7]/.test(escape)) return String.fromCodePoint(Number.parseInt(escape, 8));
     const decoded = simpleEscapes[escape];
     if (decoded === undefined) unsupported(node, `エスケープ「\\${escape}」`);

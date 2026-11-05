@@ -382,6 +382,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const captured = this.findClassCapture(context, current, name);
       if (captured) return captured;
     }
+    const imported = this.staticallyImported(name.name, (cls) => {
+      const field = this.findField(cls, name.name);
+      return field?.isStatic ? field : undefined;
+    });
+    if (imported) return this.fieldReference(imported, undefined);
     const cls = this.lookupType(name.name, context.cls);
     if (cls) return { kind: 'class', cls };
     return this.error(name, `変数 ${name.name} が見つかりません。`);
@@ -1182,6 +1187,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
             receiver: outerReceiver,
           };
         }
+      }
+      if (candidates.length === 0 && !isSuper) {
+        const imported = this.staticallyImported(expression.name, (cls) => {
+          const methods = this.collectMethods(cls, expression.name).filter((method) => method.isStatic);
+          return methods.length > 0 ? { methods, cls } : undefined;
+        });
+        if (imported) return { candidates: imported.methods, owner: imported.cls, receiver: undefined };
       }
       return { candidates, owner, receiver };
     }

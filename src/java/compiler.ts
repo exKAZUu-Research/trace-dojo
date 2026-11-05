@@ -54,6 +54,7 @@ class Compiler extends DeclarationCompiler {
 
   compile(unit: CompilationUnit): CompiledProgram {
     this.registerClasses(unit);
+    this.resolveImports(unit.imports);
     const ordered = this.orderBySupertypes();
     for (const cls of ordered) this.withTypeScope(cls, () => this.declareMembers(cls));
     for (const cls of ordered) this.checkAbstractMethods(cls);

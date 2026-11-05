@@ -1,6 +1,6 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
-import type { Expression, FieldDeclaration, Span, TypeParameter, TypeSyntax } from './ast';
+import type { Expression, FieldDeclaration, ImportDeclaration, Span, TypeParameter, TypeSyntax } from './ast';
 import { getBuiltins } from './builtins';
 import { box, boxedTypeOf, unbox } from './builtinWrappers';
 import { boxingTarget, instantiateMethod, isInvocationConvertible, unboxedTypeOf } from './conversions';
@@ -316,6 +316,49 @@ export abstract class CompilerBase {
     }
   }
 
+  /** The classes that single-type imports such as `import java.util.Map.Entry;` name by their simple names. */
+  protected readonly importedTypes = new Map<string, ClassInfo>();
+  /** The classes whose static members static imports bring in, with the member's name or `undefined` for `*`. */
+  protected readonly staticImports: { cls: ClassInfo; member: string | undefined }[] = [];
+
+  /** Resolves the imports that name classes this environment has, leaving the others for their uses to report. */
+  protected resolveImports(imports: readonly ImportDeclaration[]): void {
+    for (const declaration of imports) {
+      const names =
+        declaration.isStatic && !declaration.isWildcard ? declaration.names.slice(0, -1) : declaration.names;
+      const cls = this.importedClass(names);
+      if (!cls) continue;
+      if (declaration.isStatic) {
+        this.staticImports.push({ cls, member: declaration.isWildcard ? undefined : declaration.names.at(-1) });
+      } else if (declaration.isWildcard) {
+        for (const [name, member] of cls.memberTypes) this.importedTypes.set(name, member);
+      } else {
+        this.importedTypes.set(cls.name, cls);
+      }
+    }
+  }
+
+  /** The class a qualified name such as `java.util.Map.Entry` names, skipping its package. */
+  protected importedClass(names: readonly string[]): ClassInfo | undefined {
+    const start = names.findIndex((name) => this.classes.has(name) || this.builtins.classes.has(name));
+    if (start === -1) return;
+    let cls = this.classes.get(names[start]) ?? this.builtins.classes.get(names[start]);
+    for (const name of names.slice(start + 1)) cls = cls && this.findMemberType(cls, name);
+    return cls;
+  }
+
+  /** The static members of `name` that static imports bring in, single imports first. */
+  protected staticallyImported<T>(name: string, find: (cls: ClassInfo) => T | undefined): T | undefined {
+    for (const isSingle of [true, false]) {
+      for (const { cls, member } of this.staticImports) {
+        if ((member !== undefined) !== isSingle || (member !== undefined && member !== name)) continue;
+        const found = find(cls);
+        if (found !== undefined) return found;
+      }
+    }
+    return;
+  }
+
   /** The local classes in scope, innermost block last. */
   protected readonly localTypeScopes: Map<string, ClassInfo>[] = [];
 
@@ -332,7 +375,7 @@ export abstract class CompilerBase {
       const member = this.findMemberType(current, name);
       if (member) return member;
     }
-    return this.classes.get(name) ?? this.builtins.classes.get(name);
+    return this.importedTypes.get(name) ?? this.classes.get(name) ?? this.builtins.classes.get(name);
   }
 
   /** Finds a member type of `cls` or one it inherits from its superclasses and interfaces. */
