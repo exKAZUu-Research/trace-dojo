@@ -190,7 +190,8 @@ export abstract class LambdaCompiler extends PatternCompiler {
           (callFrame, args) =>
             callFrame.runtime.invoke(callFrame, method, outerThis, castArgs(callFrame, args), undefined, captured),
           captured,
-          outerThis
+          outerThis,
+          context.cls
         );
       },
     };

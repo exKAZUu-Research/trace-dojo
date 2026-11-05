@@ -164,6 +164,8 @@ export interface Capture {
 
 /** The values a switch expression's yields give, which are converted to its type once all are known. */
 export interface SwitchExpressionTarget {
+  /** The type the switch expression is assigned to, which its results are compiled for. */
+  targetType: JavaType | undefined;
   values: { value: CompiledValue; span: Span }[];
   converters: Eval[];
 }
@@ -207,7 +209,10 @@ export abstract class CompilerBase extends TypeResolver {
 
   /** Compiles an expression whose value is assigned to `type`, which a diamond may infer its type arguments from. */
   protected compileValueFor(context: MethodContext, expression: Expression, type: JavaType): CompiledValue {
-    const isCreation = ['new', 'lambda', 'methodRef', 'call'].includes(expression.kind);
+    // A conditional and a switch expression pass the target on to their branches, as poly expressions (JLS 15.25.3).
+    const isCreation = ['new', 'lambda', 'methodRef', 'call', 'conditional', 'switchExpression'].includes(
+      expression.kind
+    );
     this.targetType = isCreation ? type : undefined;
     try {
       return this.compileValue(context, expression, false, true);

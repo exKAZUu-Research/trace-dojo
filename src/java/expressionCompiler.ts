@@ -531,19 +531,22 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
     context: MethodContext,
     expression: Extract<Expression, { kind: 'conditional' }>
   ): Compiled {
+    const targetType = this.takeTargetType();
     const condition = this.compileCondition(context, expression.condition);
+    const compileBranch = (value: Expression): CompiledValue =>
+      targetType ? this.compileValueFor(context, value, targetType) : this.compileValue(context, value);
     const consequenceValue = this.withBindings(context, bindingsWhen(expression.condition, true), () =>
-      this.compileValue(context, expression.consequence)
+      compileBranch(expression.consequence)
     );
     const alternativeValue = this.withBindings(context, bindingsWhen(expression.condition, false), () =>
-      this.compileValue(context, expression.alternative)
+      compileBranch(expression.alternative)
     );
     const [consequence, alternative] = this.conditionalOperands(consequenceValue, alternativeValue);
     const type = this.conditionalType(expression, consequence, alternative);
     // A constant branch may narrow to the other branch's type, as an assignment would; a reference type is a common
     // supertype of both branches.
     const toType = (branch: CompiledValue, span: Expression): CompiledValue =>
-      isReference(type) ? { ...branch, type } : this.convert(branch, type, 'assignment', span);
+      isReference(type) ? { ...this.checkErased(branch, type), type } : this.convert(branch, type, 'assignment', span);
     const whenTrue = toType(consequence, expression.consequence);
     const whenFalse = toType(alternative, expression.alternative);
     const constantCondition = booleanConstants.get(expression.condition);
@@ -584,7 +587,11 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
 
   protected compileCast(context: MethodContext, expression: Extract<Expression, { kind: 'cast' }>): Compiled {
     const type = this.resolveType(expression.type);
-    const value = this.checkErased(this.compileValue(context, expression.value, false, true), type);
+    // A lambda, a method reference, or a conditional of them takes its type from the cast (JLS 15.16).
+    const operand = ['lambda', 'methodRef', 'conditional', 'switchExpression'].includes(expression.value.kind)
+      ? this.compileValueFor(context, expression.value, type)
+      : this.compileValue(context, expression.value, false, true);
+    const value = this.checkErased(operand, type);
     if (value.type.kind !== 'null' && isPrimitive(value.type) !== isPrimitive(type)) {
       return this.compileBoxingCast(value, type, expression);
     }

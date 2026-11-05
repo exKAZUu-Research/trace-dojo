@@ -299,3 +299,11 @@ test('Java casts the elements an Iterator or a function receives from a polluted
     )
   ).toEqual({ casts: 'C-C-C' });
 });
+
+test('Java types lambdas and method references by casts, conditional branches, and switch expression arms', () => {
+  expect(
+    finalVarsOf(
+      'StringBuilder out = new StringBuilder(); Runnable a = args.length == 0 ? () -> out.append("t") : () -> out.append("f"); a.run(); Runnable b = switch (1) { case 1 -> () -> out.append("s"); default -> out::reverse; }; b.run(); Object c = (Runnable) () -> out.append("c"); ((Runnable) c).run(); Supplier<String> d = args.length == 0 ? out::toString : () -> "x"; String result = d.get();'
+    )
+  ).toEqual({ result: 'tsc' });
+});

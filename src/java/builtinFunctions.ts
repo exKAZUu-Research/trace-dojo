@@ -46,7 +46,8 @@ const superOf = (bound: JavaType): WildcardType => ({ kind: 'wildcard', bound, i
 const extendsOf = (bound: JavaType): WildcardType => ({ kind: 'wildcard', bound, isSuper: false });
 
 /** The classes whose objects lambdas and library function objects are, one for each functional interface. */
-const functionClasses = new WeakMap<ClassInfo, ClassInfo>();
+/** The classes of function objects, by interface and then by the class whose lambdas they are. */
+const functionClasses = new WeakMap<ClassInfo, Map<ClassInfo | undefined, ClassInfo>>();
 
 /** The single abstract method of a functional interface, or `undefined` when `cls` is not one. */
 export function functionalMethodOf(cls: ClassInfo, objectClass: ClassInfo): MethodInfo | undefined {
@@ -72,18 +73,28 @@ export function functionObject(
   iface: ClassInfo,
   call: (frame: Frame, args: Value[]) => Value,
   captured?: readonly Value[],
-  outerThis?: Value
+  outerThis?: Value,
+  owner?: ClassInfo
 ): JavaObject {
-  const object = frame.runtime.allocateObject(frame, functionClassOf(iface, frame.runtime.builtins.objectClass));
+  const object = frame.runtime.allocateObject(frame, functionClassOf(iface, frame.runtime.builtins.objectClass, owner));
   object.function = { call, captured, outerThis };
   return object;
 }
 
-export function functionClassOf(iface: ClassInfo, objectClass: ClassInfo): ClassInfo {
-  let cls = functionClasses.get(iface);
+/**
+ * The class of function objects of `iface`, named after the class whose lambdas they are as the JVM names its
+ * hidden classes (`Main$$Lambda`), or after the interface for functions the library makes.
+ */
+export function functionClassOf(iface: ClassInfo, objectClass: ClassInfo, owner?: ClassInfo): ClassInfo {
+  let byOwner = functionClasses.get(iface);
+  if (!byOwner) {
+    byOwner = new Map();
+    functionClasses.set(iface, byOwner);
+  }
+  let cls = byOwner.get(owner);
   if (cls) return cls;
   const method = functionalMethodOf(iface, objectClass) as MethodInfo;
-  cls = createClass(`${iface.name}$$Lambda`, objectClass, true);
+  cls = createClass(`${owner?.binaryName ?? iface.name}$$Lambda`, objectClass, true);
   cls.isFinal = true;
   cls.interfaces = [iface];
   cls.supertypes.push(iface.type as ClassType);
@@ -96,7 +107,7 @@ export function functionClassOf(iface: ClassInfo, objectClass: ClassInfo): Class
     (frame, receiver, args) => (receiver as JavaObject).function?.call(frame, args)
   );
   implementation.overrides = new Set([method, ...(method.overrides ?? [])]);
-  functionClasses.set(iface, cls);
+  byOwner.set(owner, cls);
   return cls;
 }
 

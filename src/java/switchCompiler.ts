@@ -20,7 +20,9 @@ export abstract class SwitchCompiler extends StatementCompiler {
   protected compileYield(context: MethodContext, statement: Extract<Statement, { kind: 'yield' }>): Exec {
     const target = context.switchExpressions.at(-1);
     if (!target) return this.error(statement, 'yield 文は switch 式の中にしか書けません。');
-    const value = this.compileValue(context, statement.value);
+    const value = target.targetType
+      ? this.compileValueFor(context, statement.value, target.targetType)
+      : this.compileValue(context, statement.value);
     const index = target.values.push({ value, span: statement.value }) - 1;
     return (frame) => ({ kind: 'yield', value: target.converters[index](frame) });
   }
@@ -29,8 +31,9 @@ export abstract class SwitchCompiler extends StatementCompiler {
     context: MethodContext,
     expression: Extract<Expression, { kind: 'switchExpression' }>
   ): Compiled {
+    const targetType = this.takeTargetType();
     const selector = this.compileSwitchSelector(context, expression);
-    const target: SwitchExpressionTarget = { values: [], converters: [] };
+    const target: SwitchExpressionTarget = { targetType, values: [], converters: [] };
     // Jumps cannot leave a switch expression, which completes only with a value or an exception.
     const outer = { ...context };
     Object.assign(context, { labels: [], loopLabels: [], continueLabels: [], loopDepth: 0, switchDepth: 0 });
@@ -54,7 +57,9 @@ export abstract class SwitchCompiler extends StatementCompiler {
     if (target.values.length === 0) this.error(expression, 'switch 式には値を返す case が必要です。');
     const type = this.switchExpressionType(expression, target.values);
     for (const { value, span } of target.values) {
-      target.converters.push(isReference(type) ? value.run : this.convert(value, type, 'assignment', span).run);
+      target.converters.push(
+        isReference(type) ? this.checkErased(value, type).run : this.convert(value, type, 'assignment', span).run
+      );
     }
     const runFrom = this.compileSwitchRunner(expression, groups.groups, groups.slots);
     return {
