@@ -216,15 +216,6 @@ function defineCollectors(context: Context): ClassInfo {
     method.typeParameters = [t];
   };
   const wildcard: WildcardType = { kind: 'wildcard', bound: undefined, isSuper: false };
-  const arrayList = registry.classes.get('ArrayList') as ClassInfo;
-  const hashSet = registry.classes.get('HashSet') as ClassInfo;
-  const newList = (frame: Frame, items: Value[]): JavaObject => {
-    frame.runtime.allocateArray(frame, items.length);
-    const list = frame.runtime.allocateObject(frame, arrayList);
-    list.elements = items;
-    list.modCount = 0;
-    return list;
-  };
   generic(
     'toList',
     () => [],
@@ -244,18 +235,7 @@ function defineCollectors(context: Context): ClassInfo {
       create(frame, {
         supply: () => [] as Value[],
         accumulate: (_, container, value) => void (container as Value[]).push(value),
-        finish: (finishFrame, container) => {
-          const set = finishFrame.runtime.allocateObject(finishFrame, hashSet);
-          set.store = new HashStore();
-          set.modCount = 0;
-          for (const value of container as Value[]) {
-            const hash = javaHash(finishFrame, value);
-            if (!set.store.entries.some((entry) => entry.hash === hash && javaEquals(finishFrame, value, entry.key))) {
-              set.store.add({ key: value, value: undefined, hash });
-            }
-          }
-          return set;
-        },
+        finish: (finishFrame, container) => newHashSet(finishFrame, container as Value[]),
       })
   );
   const charSequence = context.stringType;
@@ -292,7 +272,6 @@ function defineCollectors(context: Context): ClassInfo {
   );
   // groupingBy(classifier) collects each group into a list, keyed in a HashMap.
   const fn = context.fn('Function');
-  const hashMap = registry.classes.get('HashMap') as ClassInfo;
   const t = typeVariable('T', objectType);
   const k = typeVariable('K', objectType);
   const groupingBy = addMethod(
@@ -308,27 +287,61 @@ function defineCollectors(context: Context): ClassInfo {
     true,
     (frame, _, [classifier]) =>
       create(frame, {
-        supply: () => [] as { key: Value; items: Value[] }[],
-        accumulate: (accumulateFrame, container, value) => {
-          const key = callFunction(accumulateFrame, fn, classifier, [value]);
-          const groups = container as { key: Value; items: Value[] }[];
-          const group = groups.find((candidate) => javaEquals(accumulateFrame, candidate.key, key));
-          if (group) group.items.push(value);
-          else groups.push({ key, items: [value] });
-        },
-        finish: (finishFrame, container) => {
-          const map = finishFrame.runtime.allocateObject(finishFrame, hashMap);
-          map.store = new HashStore();
-          map.modCount = 0;
-          for (const { key, items } of container as { key: Value; items: Value[] }[]) {
-            map.store.add({ key, value: newList(finishFrame, items), hash: javaHash(finishFrame, key) });
-          }
-          return map;
-        },
+        supply: () => [] as Group[],
+        accumulate: (accumulateFrame, container, value) =>
+          addToGroup(
+            accumulateFrame,
+            container as Group[],
+            callFunction(accumulateFrame, fn, classifier, [value]),
+            value
+          ),
+        finish: (finishFrame, container) => newGroupMap(finishFrame, container as Group[]),
       })
   );
   groupingBy.typeParameters = [t, k];
   return collector;
+}
+
+/** The elements a `groupingBy` collector has gathered under one key. */
+interface Group {
+  key: Value;
+  items: Value[];
+}
+
+function addToGroup(frame: Frame, groups: Group[], key: Value, value: Value): void {
+  const group = groups.find((candidate) => javaEquals(frame, candidate.key, key));
+  if (group) group.items.push(value);
+  else groups.push({ key, items: [value] });
+}
+
+/** A `HashMap` from each group's key to the list of its elements, as `groupingBy` gives. */
+function newGroupMap(frame: Frame, groups: Group[]): JavaObject {
+  const map = frame.runtime.allocateObject(frame, frame.runtime.builtins.classes.get('HashMap') as ClassInfo);
+  map.store = new HashStore();
+  map.modCount = 0;
+  for (const { key, items } of groups) map.store.add({ key, value: newList(frame, items), hash: javaHash(frame, key) });
+  return map;
+}
+
+function newList(frame: Frame, items: Value[]): JavaObject {
+  frame.runtime.allocateArray(frame, items.length);
+  const list = frame.runtime.allocateObject(frame, frame.runtime.builtins.classes.get('ArrayList') as ClassInfo);
+  list.elements = items;
+  list.modCount = 0;
+  return list;
+}
+
+/** A `HashSet` of the values, keeping the first of equal ones, as `toSet` gives. */
+function newHashSet(frame: Frame, values: Value[]): JavaObject {
+  const set = frame.runtime.allocateObject(frame, frame.runtime.builtins.classes.get('HashSet') as ClassInfo);
+  set.store = new HashStore();
+  set.modCount = 0;
+  for (const value of values) {
+    const hash = javaHash(frame, value);
+    const isNew = !set.store.entries.some((entry) => entry.hash === hash && javaEquals(frame, value, entry.key));
+    if (isNew) set.store.add({ key: value, value: undefined, hash });
+  }
+  return set;
 }
 
 interface StreamTypes {
