@@ -6,6 +6,7 @@ import {
   type ClassInfo,
   type ClassType,
   createClass,
+  intersectionParts,
   isCastable,
   isIntegral,
   isNumeric,
@@ -356,6 +357,7 @@ function intersectionOf(superclass: ClassInfo, interfaces: ClassInfo[], objectCl
   cls.interfaces = interfaces;
   cls.supertypes = [...cls.supertypes, ...interfaces.map((parent) => parent.type as ClassType)];
   cls.isAbstract = true;
+  intersectionParts.set(cls, [superclass, ...interfaces]);
   return cls.type;
 }
 

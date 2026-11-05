@@ -190,18 +190,7 @@ export function infer(
   }
   if (argType.kind === 'null') return;
   if (parameterType.kind === 'typeVar' && variables.includes(parameterType.variable)) {
-    const inferred = isPrimitive(argType) ? boxedTypeOf(builtins.wrappers, argType) : argType;
-    if (!inferred) return;
-    const existing = bindings.get(parameterType.variable);
-    if (!existing || isWidening(existing, inferred, builtins.objectClass)) {
-      bindings.set(parameterType.variable, inferred);
-    } else if (!isWidening(inferred, existing, builtins.objectClass)) {
-      // Arguments of unrelated types make the variable their least upper bound.
-      bindings.set(
-        parameterType.variable,
-        conditionalType(builtins.objectClass, existing, inferred) ?? builtins.objectClass.type
-      );
-    }
+    bindVariable(builtins, parameterType.variable, argType, bindings);
     return;
   }
   if (parameterType.kind === 'array' && argType.kind === 'array') {
@@ -209,12 +198,19 @@ export function infer(
     return;
   }
   const parameterBound = parameterType.kind === 'wildcard' ? parameterType.bound : parameterType;
+  // A wildcard bounded by a type variable alone, such as `? super V`, decides that variable.
+  if (parameterBound?.kind === 'typeVar' && argType.kind !== 'wildcard') {
+    infer(builtins, parameterBound, argType, variables, bindings);
+    return;
+  }
   if (parameterBound?.kind !== 'class' || !parameterBound.args) return;
   const argBound = upperBound(isPrimitive(argType) ? (boxedTypeOf(builtins.wrappers, argType) ?? argType) : argType);
   const supertype = argBound.kind === 'class' ? asSuper(argBound, parameterBound.cls) : undefined;
   if (!supertype?.args) return;
   for (const [index, parameterArg] of parameterBound.args.entries()) {
     const arg = supertype.args[index];
+    // A type argument a nested generic call left undecided decides nothing.
+    if (arg.kind === 'wildcard' && arg.isHole) continue;
     // A type variable standing alone takes a wildcard as it is, which its use then contains.
     const isBareVariable = parameterArg.kind === 'typeVar';
     infer(
@@ -224,6 +220,23 @@ export function infer(
       variables,
       bindings
     );
+  }
+}
+
+/** Binds `variable` to the type of an argument, or to its least upper bound with the type it already has. */
+function bindVariable(
+  builtins: Builtins,
+  variable: TypeVariable,
+  argType: JavaType,
+  bindings: Map<TypeVariable, JavaType>
+): void {
+  const inferred = isPrimitive(argType) ? boxedTypeOf(builtins.wrappers, argType) : argType;
+  if (!inferred) return;
+  const existing = bindings.get(variable);
+  if (!existing || isWidening(existing, inferred, builtins.objectClass)) {
+    bindings.set(variable, inferred);
+  } else if (!isWidening(inferred, existing, builtins.objectClass)) {
+    bindings.set(variable, conditionalType(builtins.objectClass, existing, inferred) ?? builtins.objectClass.type);
   }
 }
 

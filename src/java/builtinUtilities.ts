@@ -7,7 +7,7 @@ import {
   javaHash,
   putEntry,
 } from './builtinCollections';
-import { createStore } from './builtinMaps';
+import { createStore, NO_ENTRY } from './builtinMaps';
 import { stringify } from './builtins';
 import { addMethod, newString, type Registry } from './builtinSupport';
 import { type BoxableKind, hashOf } from './builtinWrappers';
@@ -98,6 +98,18 @@ export function defineUtilities(
     }
   );
   defineMapOf(collections, objectType);
+  addGenericStatic(
+    collections.setClass,
+    'of',
+    ['E'],
+    objectType,
+    (element) => ({
+      parameterTypes: [{ kind: 'array', element }],
+      returnType: { kind: 'class', cls: collections.setClass, args: [element] },
+      isVarargs: true,
+    }),
+    (frame, _, [array]) => createImmutableSet(frame, collections.immutableSet, (array as JavaArray).values)
+  );
   defineArrays(registry, objectClass, stringType, collections, listOf);
   defineCollectionsClass(registry, objectClass, collections, comparableClass);
 }
@@ -117,6 +129,23 @@ function defineMapOf(collections: Collections, objectType: JavaType): void {
       (frame, _, args) => createImmutableMap(frame, collections.immutableMap, args)
     );
   }
+}
+
+/** A set of `values`, as `Set.of` makes it, which rejects null and duplicate elements. */
+function createImmutableSet(frame: Frame, cls: ClassInfo, values: Value[]): JavaObject {
+  const set = frame.runtime.allocateObject(frame, cls);
+  createStore(set);
+  for (const value of values) {
+    if (value === undefined) throwBuiltin(frame, 'NullPointerException');
+    if (putEntry(frame, set, value, true) !== NO_ENTRY) {
+      throwBuiltin(
+        frame,
+        'IllegalArgumentException',
+        `duplicate element: ${stringify(frame, value, { kind: 'null' })}`
+      );
+    }
+  }
+  return set;
 }
 
 /** A map of the keys and values that alternate in `args`, as `Map.of` makes it. */

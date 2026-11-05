@@ -14,7 +14,7 @@ import {
   linkOverrides,
   touch,
 } from './builtinCollectionSupport';
-import { defineHashMap, defineSetClass } from './builtinMaps';
+import { defineHashMap, defineSets } from './builtinMaps';
 import { definePriorityQueue } from './builtinPriorityQueue';
 import {
   addAbstractMethod,
@@ -38,11 +38,14 @@ export interface Collections {
   immutableList: ClassInfo;
   /** The class of the maps `Map.of` returns. */
   immutableMap: ClassInfo;
+  /** The class of the sets `Set.of` returns. */
+  immutableSet: ClassInfo;
   /** The class of the lists `Arrays.asList` returns, which share their array's elements. */
   fixedSizeList: ClassInfo;
   /** `TreeMap`, `TreeSet`, and `PriorityQueue`, whose constructors take a `Comparator`. */
   sortedClasses: ClassInfo[];
   collectionClass: ClassInfo;
+  setClass: ClassInfo;
   mapClass: ClassInfo;
   /** `Iterable.iterator`, which an enhanced for statement calls. */
   iterator: MethodInfo;
@@ -95,8 +98,7 @@ export function defineCollections(
   const fixedSizeList = defineRestrictedList(context, 'ArrayList', lists, (method) => method.name !== 'set', 'Arrays$');
   const snapshotSet = defineSnapshot(context, 'Set', setClass, itrClass);
   const snapshotCollection = defineSnapshot(context, 'Collection', collectionClass, itrClass);
-  for (const name of ['HashSet', 'LinkedHashSet', 'TreeSet'])
-    defineSetClass(context, name, setClass, collectionClass, itrClass);
+  const immutableSet = defineSets(context, setClass, collectionClass, itrClass);
   const { mapClass, immutableMap } = defineHashMap(context, {
     setClass,
     collectionClass,
@@ -111,8 +113,10 @@ export function defineCollections(
     next,
     listClass,
     collectionClass,
+    setClass,
     mapClass,
     immutableMap,
+    immutableSet,
     immutableList,
     fixedSizeList,
     sortedClasses: [

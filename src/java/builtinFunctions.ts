@@ -112,8 +112,7 @@ function defineFunctional(
   return { cls, variables };
 }
 
-// code-gauge-allow functionNcss 33 -- One registration per builtin method, each a small native.
-// code-gauge-allow functionNcss 35 -- One registration per builtin functional interface.
+// code-gauge-allow functionNcss 36 -- One registration per builtin functional interface.
 export function defineFunctions(
   registry: Registry,
   objectClass: ClassInfo,
@@ -161,6 +160,7 @@ export function defineFunctions(
     comparableClass
   );
   definePredicateDefaults(predicate.cls, predicate.variables[0]);
+  defineCompositions(context, { fn, biFunction, consumer }, { unary, binary, comparator });
   defineCollectionDefaults(context, collections, {
     consumer: consumer.cls,
     predicate: predicate.cls,
@@ -342,6 +342,103 @@ function definePredicateDefaults(cls: ClassInfo, t: JavaType): void {
       (callFrame, [value]) => test(callFrame, receiver, value) || test(callFrame, other, value)
     )
   );
+}
+
+interface Functional {
+  cls: ClassInfo;
+  variables: JavaType[];
+}
+
+function typeOf(variable: TypeVariable): JavaType {
+  return { kind: 'typeVar', variable };
+}
+
+/** The default and static methods that compose functions: `andThen`, `compose`, `identity`, `minBy`, and `maxBy`. */
+function defineCompositions(
+  context: Context,
+  { fn, biFunction, consumer }: { fn: Functional; biFunction: Functional; consumer: Functional },
+  { unary, binary, comparator }: { unary: ClassInfo; binary: ClassInfo; comparator: ClassInfo }
+): void {
+  const variable = (name: string): TypeVariable => ({ name, bounds: [context.objectType] });
+  const apply = (iface: Functional, target: Value, frame: Frame, args: Value[]): Value =>
+    callFunction(frame, iface.cls, target, args);
+  const [t, r] = fn.variables;
+  const v = variable('V');
+  addMethod(
+    fn.cls,
+    'andThen',
+    [classType(fn.cls, superOf(r), extendsOf(typeOf(v)))],
+    classType(fn.cls, t, typeOf(v)),
+    false,
+    (frame, receiver, [after]) =>
+      functionObject(frame, fn.cls, (callFrame, [value]) =>
+        apply(fn, after, callFrame, [apply(fn, receiver, callFrame, [value])])
+      )
+  ).typeParameters = [v];
+  const before = variable('V');
+  addMethod(
+    fn.cls,
+    'compose',
+    [classType(fn.cls, superOf(typeOf(before)), extendsOf(t))],
+    classType(fn.cls, typeOf(before), r),
+    false,
+    (frame, receiver, [first]) =>
+      functionObject(frame, fn.cls, (callFrame, [value]) =>
+        apply(fn, receiver, callFrame, [apply(fn, first, callFrame, [value])])
+      )
+  ).typeParameters = [before];
+  for (const [owner, result] of [
+    [fn.cls, (x: JavaType) => classType(fn.cls, x, x)],
+    [unary, (x: JavaType) => classType(unary, x)],
+  ] as const) {
+    const element = variable('T');
+    addMethod(owner, 'identity', [], result(typeOf(element)), true, (frame) =>
+      functionObject(frame, owner, (_, [value]) => value)
+    ).typeParameters = [element];
+  }
+  const [bt, bu, br] = biFunction.variables;
+  const bv = variable('V');
+  addMethod(
+    biFunction.cls,
+    'andThen',
+    [classType(fn.cls, superOf(br), extendsOf(typeOf(bv)))],
+    classType(biFunction.cls, bt, bu, typeOf(bv)),
+    false,
+    (frame, receiver, [after]) =>
+      functionObject(frame, biFunction.cls, (callFrame, [a, b]) =>
+        apply(fn, after, callFrame, [apply(biFunction, receiver, callFrame, [a, b])])
+      )
+  ).typeParameters = [bv];
+  const [ct] = consumer.variables;
+  addMethod(
+    consumer.cls,
+    'andThen',
+    [classType(consumer.cls, superOf(ct))],
+    classType(consumer.cls, ct),
+    false,
+    (frame, receiver, [after]) =>
+      functionObject(frame, consumer.cls, (callFrame, [value]) => {
+        apply(consumer, receiver, callFrame, [value]);
+        apply(consumer, after, callFrame, [value]);
+      })
+  );
+  for (const [name, sign] of [
+    ['minBy', -1],
+    ['maxBy', 1],
+  ] as const) {
+    const element = variable('T');
+    addMethod(
+      binary,
+      name,
+      [classType(comparator, superOf(typeOf(element)))],
+      classType(binary, typeOf(element)),
+      true,
+      (frame, _, [order]) =>
+        functionObject(frame, binary, (callFrame, [a, b]) =>
+          (callFunction(callFrame, comparator, order, [a, b]) as number) * sign >= 0 ? a : b
+        )
+    ).typeParameters = [element];
+  }
 }
 
 /** Sorts in place with a comparator, or in natural order when it is null, as `List.sort` does. */

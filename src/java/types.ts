@@ -443,9 +443,14 @@ export function isWidening(from: JavaType, to: JavaType, objectClass: ClassInfo)
   return false;
 }
 
+/** The classes an intersection type such as `Number & Comparable` stands for, keyed by the class that models it. */
+export const intersectionParts = new WeakMap<ClassInfo, readonly ClassInfo[]>();
+
 /** Whether a class type widens to another: to a supertype whose type arguments contain the ones `from` gives it. */
 function isClassWidening(from: ClassType, to: ClassType, objectClass: ClassInfo): boolean {
   if (to.cls === objectClass) return true;
+  const parts = intersectionParts.get(to.cls);
+  if (parts) return parts.every((part) => isClassWidening(from, { kind: 'class', cls: part }, objectClass));
   const supertype = asSuper(from, to.cls);
   if (!supertype) return false;
   const supertypeArgs = supertype.args;

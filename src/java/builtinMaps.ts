@@ -26,15 +26,32 @@ import { type Frame, throwBuiltin } from './runtime';
 import { BOOLEAN, type ClassInfo, createClass, INT, type JavaType, type TypeVariable, VOID } from './types';
 import { HashStore, JavaObject, toInt32, type Value } from './values';
 
+/** `HashSet`, `LinkedHashSet`, `TreeSet`, and the class of the sets `Set.of` returns, which this returns. */
+export function defineSets(
+  context: Context,
+  setClass: ClassInfo,
+  collectionClass: ClassInfo,
+  itrClass: ClassInfo
+): ClassInfo {
+  for (const name of ['HashSet', 'LinkedHashSet', 'TreeSet'])
+    defineSetClass(context, name, setClass, collectionClass, itrClass);
+  // Named to end with `Set`, as sets compare equal only to sets.
+  return restrictToImmutable(
+    context.registry,
+    defineSetClass(context, 'ImmutableCollections$SetN', setClass, collectionClass, itrClass),
+    'ImmutableSet'
+  );
+}
+
 // code-gauge-allow functionCognitiveComplexity 17 -- One registration per builtin method, each a small native.
-// code-gauge-allow functionNcss 51 -- One registration per builtin method, each a small native.
-export function defineSetClass(
+// code-gauge-allow functionNcss 52 -- One registration per builtin method, each a small native.
+function defineSetClass(
   context: Context,
   name: string,
   setClass: ClassInfo,
   collectionClass: ClassInfo,
   itrClass: ClassInfo
-): void {
+): ClassInfo {
   const cls = context.registry.define(name, context.objectClass, 'java.util');
   const [element] = addTypeParameters(cls, ['E'], context.objectType);
   addInterface(cls, classType(setClass, element));
@@ -134,6 +151,7 @@ export function defineSetClass(
     return sum;
   });
   linkOverrides(cls);
+  return cls;
 }
 
 export function defineHashMap(
@@ -165,7 +183,8 @@ export function defineHashMap(
   };
   for (const name of ['HashMap', 'LinkedHashMap', 'TreeMap']) defineClass(name);
   defineMapEntry(mapClass, entryClass, nodeClass, objectType);
-  return { mapClass, immutableMap: restrictToImmutable(registry, defineClass('MapN', 'ImmutableCollections$MapN')) };
+  const immutableMap = defineClass('MapN', 'ImmutableCollections$MapN');
+  return { mapClass, immutableMap: restrictToImmutable(registry, immutableMap, 'MapN') };
 }
 
 /** `Map.entry`, whose entry holds its own key and value. */
@@ -188,18 +207,21 @@ function defineMapEntry(mapClass: ClassInfo, entryClass: ClassInfo, nodeClass: C
   method.typeParameters = [k, v];
 }
 
-/** Makes a map class the class of the maps `Map.of` returns, whose iteration order the JDK randomizes per run. */
-function restrictToImmutable(registry: Registry, cls: ClassInfo): ClassInfo {
+/**
+ * Makes a map or set class the class of the collections `Map.of` or `Set.of` return, whose iteration order the JDK
+ * randomizes per run.
+ */
+export function restrictToImmutable(registry: Registry, cls: ClassInfo, name: string): ClassInfo {
   registry.classes.delete(cls.name);
-  cls.name = 'MapN';
+  cls.name = name;
   cls.constructors = [];
   for (const method of cls.methods) {
-    if (MAP_MUTATORS.has(method.name)) method.native = (frame) => throwBuiltin(frame, 'UnsupportedOperationException');
+    if (MUTATORS.has(method.name)) method.native = (frame) => throwBuiltin(frame, 'UnsupportedOperationException');
   }
   return cls;
 }
 
-const MAP_MUTATORS = new Set(['put', 'remove', 'putIfAbsent', 'clear', 'putAll']);
+const MUTATORS = new Set(['put', 'remove', 'putIfAbsent', 'clear', 'putAll', 'add', 'addAll']);
 
 export function mapSignatures(
   key: JavaType,
