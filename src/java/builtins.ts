@@ -188,7 +188,7 @@ const causeTakers = new Set([
   'UnsupportedOperationException',
 ]);
 
-// code-gauge-allow functionNcss 44 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 45 -- One registration per builtin method, each a small native.
 function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType: JavaType): ClassInfo {
   const defineThrowable = (name: string, superclass: ClassInfo, packageName = 'java.lang'): ClassInfo => {
     const cls = registry.define(name, superclass, packageName);
@@ -265,6 +265,7 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
     defineThrowable(name, illegalFormat, 'java.util');
   }
   defineThrowable('NoSuchElementException', runtimeExceptionClass, 'java.util');
+  defineThrowable('EmptyStackException', runtimeExceptionClass, 'java.util');
   defineThrowable('StackOverflowError', errorClass);
   defineThrowable('OutOfMemoryError', errorClass);
   return throwableClass;

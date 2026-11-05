@@ -1,4 +1,12 @@
-import { type Collections, compareNatural, findEntry, itemsOf, putEntry, removeEntry } from './builtinCollections';
+import {
+  type Collections,
+  compareNatural,
+  findEntry,
+  itemsOf,
+  javaEquals,
+  putEntry,
+  removeEntry,
+} from './builtinCollections';
 import {
   addAbstractMethod,
   addConstant,
@@ -516,6 +524,34 @@ function defineIterableDefaults(collections: Collections, functions: DefaultFunc
       return true;
     }
   );
+  defineBulkOperations(collectionClass);
+}
+
+/** `containsAll`, `removeAll`, and `retainAll`, which ask the other collection whether it contains each element. */
+function defineBulkOperations(collectionClass: ClassInfo): void {
+  const otherType = classType(collectionClass, { kind: 'wildcard', bound: undefined, isSuper: false });
+  const contains = (frame: Frame, collection: Value, item: Value): boolean => {
+    if (collection === undefined) return throwBuiltin(frame, 'NullPointerException');
+    return frame.runtime.invokeVirtual(frame, collectionClass, 'contains', collection, [item]) === true;
+  };
+  addMethod(collectionClass, 'containsAll', [otherType], BOOLEAN, false, (frame, receiver, [other]) =>
+    itemsOf(frame, other).every((item) => contains(frame, receiver, item))
+  );
+  for (const [name, keepsContained] of [
+    ['removeAll', false],
+    ['retainAll', true],
+  ] as const) {
+    addMethod(collectionClass, name, [otherType], BOOLEAN, false, (frame, receiver, [other]) => {
+      const object = receiver as JavaObject;
+      const removed = [...itemsOf(frame, receiver)].filter((item) => contains(frame, other, item) !== keepsContained);
+      if (removed.length === 0) return false;
+      if (object.elements) {
+        object.elements.splice(0, object.elements.length, ...object.elements.filter((item) => !removed.includes(item)));
+      } else for (const item of removed) removeEntry(frame, receiver, item);
+      object.modCount = (object.modCount ?? 0) + 1;
+      return true;
+    });
+  }
 }
 
 /** `List.sort` and `List.replaceAll`. */
@@ -597,6 +633,42 @@ function defineMapDefaults(collections: Collections, functions: DefaultFunctions
       return merged;
     }
   );
+  defineMapRemappings(mapClass, functions, mapK, mapV);
+}
+
+/**
+ * `Map.compute` and `Map.computeIfPresent`, which remove the key when the function returns null, `remove` of a key only
+ * with a given value, and `replace`.
+ */
+function defineMapRemappings(mapClass: ClassInfo, functions: DefaultFunctions, mapK: JavaType, mapV: JavaType): void {
+  const remappingType = classType(functions.biFunction, superOf(mapK), superOf(mapV), extendsOf(mapV));
+  for (const [name, needsValue] of [
+    ['compute', false],
+    ['computeIfPresent', true],
+  ] as const) {
+    addMethod(mapClass, name, [mapK, remappingType], mapV, false, (frame, receiver, [key, remapping]) => {
+      const current = findEntry(frame, receiver, key)?.value;
+      if (needsValue && current === undefined) return;
+      const value = callFunction(frame, functions.biFunction, remapping, [key, current]);
+      if (value === undefined) removeEntry(frame, receiver, key);
+      else putEntry(frame, receiver, key, false, value);
+      return value;
+    });
+  }
+  const objectType = mapClass.typeParameters[0].bounds[0] as JavaType;
+  addMethod(mapClass, 'remove', [objectType, objectType], BOOLEAN, false, (frame, receiver, [key, value]) => {
+    const entry = findEntry(frame, receiver, key);
+    if (!entry || !javaEquals(frame, entry.value, value)) return false;
+    removeEntry(frame, receiver, key);
+    return true;
+  });
+  addMethod(mapClass, 'replace', [mapK, mapV], mapV, false, (frame, receiver, [key, value]) => {
+    const entry = findEntry(frame, receiver, key);
+    if (!entry) return;
+    const previous = entry.value;
+    entry.value = value;
+    return previous;
+  });
 }
 
 /** `Collections.sort` and `Arrays.sort` with a comparator. */
@@ -668,4 +740,20 @@ function defineComparatorExtremes(context: Context, collections: Collections, fu
     );
     extreme.typeParameters = [variable];
   }
+  const orderVariable: TypeVariable = { name: 'T', bounds: [context.objectType] };
+  const orderType: JavaType = { kind: 'typeVar', variable: orderVariable };
+  addMethod(collectionsClass, 'reverseOrder', [], classType(functions.comparator, orderType), true, (frame) =>
+    functionObject(frame, functions.comparator, (callFrame, [a, b]) => compareNatural(callFrame, b, a))
+  ).typeParameters = [orderVariable];
+  addMethod(
+    collectionsClass,
+    'reverseOrder',
+    [classType(functions.comparator, orderType)],
+    classType(functions.comparator, orderType),
+    true,
+    (frame, _, [order]) =>
+      functionObject(frame, functions.comparator, (callFrame, [a, b]) =>
+        callFunction(callFrame, functions.comparator, order, [b, a])
+      )
+  ).typeParameters = [orderVariable];
 }

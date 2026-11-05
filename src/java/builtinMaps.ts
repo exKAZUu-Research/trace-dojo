@@ -179,12 +179,37 @@ export function defineHashMap(
     const [key, value] = addTypeParameters(cls, ['K', 'V'], objectType);
     addInterface(cls, classType(mapClass, key, value));
     defineMapMethods(cls, name, key, value, context, { ...views, entryClass, nodeClass, mapClass });
+    defineMapEquality(cls, context, mapClass);
     return cls;
   };
   for (const name of ['HashMap', 'LinkedHashMap', 'TreeMap']) defineClass(name);
   defineMapEntry(mapClass, entryClass, nodeClass, objectType);
   const immutableMap = defineClass('MapN', 'ImmutableCollections$MapN');
   return { mapClass, immutableMap: restrictToImmutable(registry, immutableMap, 'MapN') };
+}
+
+/** `equals` and `hashCode` of a map, which compare and hash its entries as `AbstractMap` does. */
+function defineMapEquality(cls: ClassInfo, context: Context, mapClass: ClassInfo): void {
+  addMethod(cls, 'equals', [context.objectType], BOOLEAN, false, (frame, receiver, [other]) => {
+    if (other === receiver) return true;
+    if (!(other instanceof JavaObject) || !other.store || !frame.runtime.isInstance(other, mapClass)) return false;
+    const { entries } = storeOf(receiver);
+    return (
+      entries.length === other.store.entries.length &&
+      entries.every((entry) => {
+        const found = findEntry(frame, other, entry.key);
+        return found !== undefined && javaEquals(frame, entry.value, found.value);
+      })
+    );
+  });
+  addMethod(cls, 'hashCode', [], INT, false, (frame, receiver) => {
+    let sum = 0;
+    for (const entry of storeOf(receiver).entries) {
+      const valueHash = entry.value === undefined ? 0 : javaHash(frame, entry.value);
+      sum = toInt32(sum + ((entry.key === undefined ? 0 : javaHash(frame, entry.key)) ^ valueHash));
+    }
+    return sum;
+  });
 }
 
 /** `Map.entry`, whose entry holds its own key and value. */

@@ -26,7 +26,7 @@ import {
   type Registry,
 } from './builtinSupport';
 import { type Wrappers } from './builtinWrappers';
-import { throwBuiltin } from './runtime';
+import { type Frame, throwBuiltin } from './runtime';
 import { BOOLEAN, type ClassInfo, INT, type JavaType, type MethodInfo, type TypeVariable, VOID } from './types';
 import { JavaArray, JavaObject, toInt32, type Value } from './values';
 
@@ -80,7 +80,7 @@ export function defineCollections(
   const listClass = defineInterface(registry, 'List', 'java.util');
   const [listElement] = addTypeParameters(listClass, ['E'], objectType);
   addInterface(listClass, classType(collectionClass, listElement));
-  declareListMethods(listClass, listElement);
+  declareListMethods(listClass, listElement, collectionClass);
   const setClass = defineInterface(registry, 'Set', 'java.util');
   const [setElement] = addTypeParameters(setClass, ['E'], objectType);
   addInterface(setClass, classType(collectionClass, setElement));
@@ -88,6 +88,7 @@ export function defineCollections(
   const lists = { listClass, collectionClass, itrClass };
   const dequeClass = defineDequeInterfaces(context, collectionClass);
   defineArrayList(context, 'ArrayList', lists);
+  defineStack(defineArrayList(context, 'Stack', lists));
   const linkedList = defineArrayList(context, 'LinkedList', lists);
   addInterface(linkedList, classType(dequeClass, { kind: 'typeVar', variable: linkedList.typeParameters[0] }));
   linkOverrides(linkedList);
@@ -164,6 +165,51 @@ function isIndexed(method: MethodInfo): boolean {
   );
 }
 
+/** The elements of a non-empty stack, whose last is its top. */
+function stackElements(frame: Frame, receiver: Value): Value[] {
+  const elements = elementsOf(receiver);
+  if (elements.length === 0) throwBuiltin(frame, 'EmptyStackException');
+  return elements;
+}
+
+/** Inserts the elements of `source` at `index`, returning whether there were any. */
+function insertAll(frame: Frame, receiver: Value, index: number, source: Value): boolean {
+  const items = [...itemsOf(frame, source)];
+  frame.runtime.allocateArray(frame, items.length);
+  elementsOf(receiver).splice(index, 0, ...items);
+  touch(receiver);
+  return items.length > 0;
+}
+
+/** `Stack`, a list whose end is the top of the stack. */
+function defineStack(cls: ClassInfo): void {
+  const element: JavaType = { kind: 'typeVar', variable: cls.typeParameters[0] };
+  addMethod(cls, 'push', [element], element, false, (_, receiver, [value]) => {
+    elementsOf(receiver).push(value);
+    touch(receiver);
+    return value;
+  });
+  addMethod(cls, 'pop', [], element, false, (frame, receiver) => {
+    const value = stackElements(frame, receiver).pop();
+    touch(receiver);
+    return value;
+  });
+  addMethod(cls, 'peek', [], element, false, (frame, receiver) => stackElements(frame, receiver).at(-1));
+  addMethod(cls, 'empty', [], BOOLEAN, false, (_, receiver) => elementsOf(receiver).length === 0);
+  addMethod(
+    cls,
+    'search',
+    [{ kind: 'class', cls: cls.superclass as ClassInfo }],
+    INT,
+    false,
+    (frame, receiver, [value]) => {
+      const elements = elementsOf(receiver);
+      const index = elements.findLastIndex((item) => javaEquals(frame, value, item));
+      return index === -1 ? -1 : elements.length - index;
+    }
+  );
+}
+
 /** `ArrayDeque`, a deque without the list's indexed methods. */
 function defineArrayDeque(
   context: Context,
@@ -211,7 +257,13 @@ function declareCollectionMethods(cls: ClassInfo, element: JavaType, context: Co
   addAbstractMethod(cls, 'addAll', [classType(cls, { kind: 'wildcard', bound: element, isSuper: false })], BOOLEAN);
 }
 
-function declareListMethods(cls: ClassInfo, element: JavaType): void {
+function declareListMethods(cls: ClassInfo, element: JavaType, collectionClass: ClassInfo): void {
+  addAbstractMethod(
+    cls,
+    'addAll',
+    [INT, classType(collectionClass, { kind: 'wildcard', bound: element, isSuper: false })],
+    BOOLEAN
+  );
   addAbstractMethod(cls, 'subList', [INT, INT], { kind: 'class', cls, args: [element] });
   const objectType = element.kind === 'typeVar' ? (element.variable.bounds[0] as JavaType) : element;
   addAbstractMethod(cls, 'toArray', [], { kind: 'array', element: objectType });
@@ -304,20 +356,14 @@ function defineListAdditions(
     elementsOf(receiver).splice(index as number, 0, value);
     touch(receiver);
   });
-  addMethod(
-    cls,
-    'addAll',
-    [classType(collectionClass, { kind: 'wildcard', bound: element, isSuper: false })],
-    BOOLEAN,
-    false,
-    (frame, receiver, [source]) => {
-      const items = [...itemsOf(frame, source)];
-      frame.runtime.allocateArray(frame, items.length);
-      elementsOf(receiver).push(...items);
-      touch(receiver);
-      return items.length > 0;
-    }
+  const sourceType = classType(collectionClass, { kind: 'wildcard', bound: element, isSuper: false });
+  addMethod(cls, 'addAll', [sourceType], BOOLEAN, false, (frame, receiver, [source]) =>
+    insertAll(frame, receiver, elementsOf(receiver).length, source)
   );
+  addMethod(cls, 'addAll', [INT, sourceType], BOOLEAN, false, (frame, receiver, [index, source]) => {
+    checkPosition(frame, index as number, elementsOf(receiver).length);
+    return insertAll(frame, receiver, index as number, source);
+  });
   addMethod(
     cls,
     'subList',

@@ -112,6 +112,12 @@ export function defineUtilities(
   );
   defineArrays(registry, objectClass, stringType, collections, listOf);
   defineCollectionsClass(registry, objectClass, collections, comparableClass);
+  defineCollectionViews(
+    registry.classes.get('Collections') as ClassInfo,
+    collections,
+    objectClass.type,
+    comparableClass
+  );
 }
 
 /** `Map.of` with up to ten keys and values, as the JDK overloads it. */
@@ -204,6 +210,82 @@ function binarySearch(
     else high = middle - 1;
   }
   return -(low + 1);
+}
+
+function typeOf(variable: TypeVariable): JavaType {
+  return { kind: 'typeVar', variable };
+}
+
+function classOf(owner: ClassInfo, ...args: JavaType[]): JavaType {
+  return { kind: 'class', cls: owner, args };
+}
+
+/** A class type whose type arguments are `? extends` the given ones, which a method only reads from. */
+function readOnly(owner: ClassInfo, ...args: JavaType[]): JavaType {
+  return classOf(owner, ...args.map((arg): JavaType => ({ kind: 'wildcard', bound: arg, isSuper: false })));
+}
+
+/**
+ * The `Collections` methods that make empty, single-element, and unmodifiable collections, whose unmodifiable views
+ * share the elements of the collections they wrap, and `binarySearch`.
+ */
+function defineCollectionViews(
+  cls: ClassInfo,
+  collections: Collections,
+  objectType: JavaType,
+  comparableClass: ClassInfo
+): void {
+  const { listClass, setClass, mapClass } = collections;
+  const generic = (names: string[], define: (...types: JavaType[]) => MethodInfo): void => {
+    const variables = names.map((name): TypeVariable => ({ name, bounds: [objectType] }));
+    define(...variables.map((variable) => typeOf(variable))).typeParameters = variables;
+  };
+  generic(['T'], (t) =>
+    addMethod(cls, 'emptyList', [], classOf(listClass, t), true, (frame) =>
+      createList(frame, collections.immutableList, [])
+    )
+  );
+  generic(['T'], (t) =>
+    addMethod(cls, 'singletonList', [t], classOf(listClass, t), true, (frame, _, [value]) =>
+      createList(frame, collections.immutableList, [value])
+    )
+  );
+  generic(['T'], (t) =>
+    addMethod(cls, 'unmodifiableList', [readOnly(listClass, t)], classOf(listClass, t), true, (frame, _, [list]) =>
+      createList(frame, collections.immutableList, itemsOf(frame, list))
+    )
+  );
+  for (const [owner, immutable, names] of [
+    [setClass, collections.immutableSet, ['T']],
+    [mapClass, collections.immutableMap, ['K', 'V']],
+  ] as const) {
+    generic([...names], (...types) =>
+      addMethod(
+        cls,
+        `unmodifiable${owner.name}`,
+        [readOnly(owner, ...types)],
+        classOf(owner, ...types),
+        true,
+        (frame, _, [source]) => {
+          if (!(source instanceof JavaObject) || !source.store) return throwBuiltin(frame, 'NullPointerException');
+          const view = frame.runtime.allocateObject(frame, immutable);
+          view.store = source.store;
+          view.modCount = 0;
+          return view;
+        }
+      )
+    );
+  }
+  const keyVariable: TypeVariable = { name: 'T', bounds: [objectType] };
+  const key = typeOf(keyVariable);
+  const comparable: JavaType = {
+    kind: 'class',
+    cls: comparableClass,
+    args: [{ kind: 'wildcard', bound: key, isSuper: true }],
+  };
+  addMethod(cls, 'binarySearch', [readOnly(listClass, comparable), key], INT, true, (frame, _, [list, target]) =>
+    binarySearch(frame, itemsOf(frame, list), target, compareNatural)
+  ).typeParameters = [keyVariable];
 }
 
 function createList(frame: Frame, cls: ClassInfo, elements: Value[]): JavaObject {
