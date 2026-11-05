@@ -43,18 +43,25 @@ export function defineIteratorClass(context: Context, iteratorClass: ClassInfo):
     state.removed = false;
     return items[state.index++];
   });
-  addMethod(itrClass, 'remove', [], VOID, false, (frame, receiver) => {
-    const state = iteratorState(receiver);
-    // Only the element the last next() returned may be removed, once.
-    if (state.removed) throwBuiltin(frame, 'IllegalStateException');
-    // A list's later elements move back over the removed one, which a fixed sequence of elements keeps.
-    if (state.isFixed) state.remove(frame, state.index - 1);
-    else state.remove(frame, --state.index);
-    state.removed = true;
-    state.expectedModCount = state.source.modCount;
-  });
+  addMethod(itrClass, 'remove', [], VOID, false, removeThroughIterator);
   linkOverrides(itrClass);
   return itrClass;
+}
+
+/** `Iterator.remove`, which removes the element the last `next()` returned, as the JDK's iterators check it. */
+function removeThroughIterator(frame: Frame, receiver: Value): Value {
+  const state = iteratorState(receiver);
+  // An unmodifiable or fixed-size collection's iterator rejects every removal, before checking its own state.
+  checkModifiable(frame, mapViewSources.get(state.source)?.map ?? state.source, true);
+  // Only the element the last next() returned may be removed, once.
+  if (state.removed) throwBuiltin(frame, 'IllegalStateException');
+  if (state.source.modCount !== state.expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
+  // A list's later elements move back over the removed one, which a fixed sequence of elements keeps.
+  if (state.isFixed) state.remove(frame, state.index - 1);
+  else state.remove(frame, --state.index);
+  state.removed = true;
+  state.expectedModCount = state.source.modCount;
+  return undefined;
 }
 
 export interface IteratorState {
@@ -123,6 +130,7 @@ export function linkOverrides(cls: ClassInfo): void {
 
 /** How a view of a map's keys, values, or entries reads and removes the map's entries. */
 export interface MapViewSource {
+  map: JavaObject;
   store: () => HashStore;
   entries: () => HashStore['entries'];
   elementOf: (entry: HashStore['entries'][number]) => Value;
@@ -374,4 +382,35 @@ export function checkIndex(frame: Frame, index: number, length: number): void {
 
 export function checkPosition(frame: Frame, index: number, length: number): void {
   if (index < 0 || index > length) throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}, Size: ${length}`);
+}
+
+/**
+ * `equals` and `hashCode` of a set, a map's key set, or its entry set, as `AbstractSet` gives them: equal to any set
+ * of equal elements, and hashed as the sum of the elements' hashes.
+ */
+export function defineSetEquality(cls: ClassInfo, context: Context, setClass: ClassInfo): void {
+  addMethod(cls, 'equals', [context.objectType], BOOLEAN, false, (frame, receiver, [other]) => {
+    if (other === receiver) return true;
+    if (!(other instanceof JavaObject) || !frame.runtime.isInstance(other, setClass)) return false;
+    if (!other.store && !other.elements) return false;
+    return sameElements(frame, itemsOf(frame, receiver), itemsOf(frame, other));
+  });
+  addMethod(cls, 'hashCode', [], INT, false, (frame, receiver) => sumOfHashes(frame, itemsOf(frame, receiver)));
+}
+
+/** Whether two sets' elements are equal, found by their hashes as a hash set's `containsAll` finds them. */
+function sameElements(frame: Frame, mine: Value[], theirs: Value[]): boolean {
+  if (mine.length !== theirs.length) return false;
+  const hashOf = (item: Value): number => (item === undefined ? 0 : javaHash(frame, item));
+  const byHash = Map.groupBy(mine, hashOf);
+  return theirs.every((item) =>
+    (byHash.get(hashOf(item)) ?? []).some((candidate) => javaEquals(frame, item, candidate))
+  );
+}
+
+/** The sum of the elements' hashes that `Set.hashCode` specifies. */
+function sumOfHashes(frame: Frame, items: readonly Value[]): number {
+  let sum = 0;
+  for (const item of items) sum = toInt32(sum + (item === undefined ? 0 : javaHash(frame, item)));
+  return sum;
 }

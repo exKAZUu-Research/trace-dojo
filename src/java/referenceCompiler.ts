@@ -1,4 +1,4 @@
-import type { Expression, PatternBinding } from './ast';
+import type { Expression, PatternBinding, Span } from './ast';
 import { runtimeClassNameOf } from './builtinClass';
 import {
   type Capture,
@@ -32,6 +32,25 @@ export abstract class ReferenceCompiler extends CompilerBase {
 
   /** The local and anonymous classes, with the method context that declares each and the locals it reads. */
   protected readonly localClasses = new WeakMap<ClassInfo, { definingContext: MethodContext; captures: Capture[] }>();
+
+  /** Rejects a use of the current object, naming why it is unavailable: a static method or a constructor prologue. */
+  protected noInstanceError(context: MethodContext, span: Span, subject: string, staticMessage: string): never {
+    return this.error(
+      span,
+      this.isBeforeConstructorCall(context)
+        ? `スーパークラスのコンストラクタを呼び出す前は ${subject} を使えません。`
+        : staticMessage
+    );
+  }
+
+  /** Whether code runs in a constructor's prologue, directly or in a lambda or a local class written there. */
+  protected isBeforeConstructorCall(context: MethodContext): boolean {
+    for (let current: MethodContext | undefined = context; current; current = current.enclosing) {
+      if (current.isBeforeConstructorCall) return true;
+    }
+    const defining = this.localClasses.get(context.cls)?.definingContext;
+    return defining !== undefined && this.isBeforeConstructorCall(defining);
+  }
   /** The local slots that pattern variables use. */
   protected readonly bindingSlots = new WeakMap<PatternBinding, number>();
 
@@ -131,7 +150,14 @@ export abstract class ReferenceCompiler extends CompilerBase {
     if (!field) return;
     if (field.isStatic) return this.fieldReference(field, undefined);
     const receiver = this.outerInstanceValue(context, owner);
-    if (!receiver) this.error(name, `static ではないフィールド ${name.name} は、ここからは使えません。`);
+    if (!receiver) {
+      this.noInstanceError(
+        context,
+        name,
+        name.name,
+        `static ではないフィールド ${name.name} は、ここからは使えません。`
+      );
+    }
     return this.fieldReference(field, receiver);
   }
 

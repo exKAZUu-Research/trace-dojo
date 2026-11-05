@@ -11,6 +11,7 @@ import {
   asSuper,
   type ClassInfo,
   erasure,
+  isReference,
   isWidening,
   type JavaType,
   type MethodInfo,
@@ -309,6 +310,7 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
       return {
         kind: 'value',
         type: method.returnType,
+        erasedType: erasedResultType(declared, method),
         source: { returnOf: methodDescription(this.builtins, method.owner.type, method) },
         run: (frame) => {
           ignored?.run(frame);
@@ -337,12 +339,14 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
     const declared = method.declared ?? method;
     const description = methodDescription(this.builtins, receiver.type, method);
     const message = nullMessage(`Cannot invoke "${description}"`, receiver.source);
+    const { run: receive } = this.checkErased(receiver, method.owner.type);
     return {
       kind: 'value',
       type: method.returnType,
+      erasedType: erasedResultType(declared, method),
       source: { returnOf: description },
       run: (frame) => {
-        const object = receiver.run(frame);
+        const object = receive(frame);
         if (object === undefined) throwBuiltin(frame, 'NullPointerException', message);
         const resolved = dispatches ? frame.runtime.dispatch(object, declared) : declared;
         frame.temporaries.push(object);
@@ -541,4 +545,10 @@ function arrayClone(type: Extract<JavaType, { kind: 'array' }>): MethodInfo {
       return new JavaArray(array.elementType, [...array.values]);
     },
   };
+}
+
+/** The erasure of a generic method's declared result, when it is less than the type the call instantiates. */
+function erasedResultType(declared: MethodInfo, method: MethodInfo): JavaType | undefined {
+  const erased = erasure(declared.returnType);
+  return isReference(erased) && !sameType(erased, erasure(method.returnType)) ? erased : undefined;
 }

@@ -60,7 +60,8 @@ export function defineMath(mathClass: ClassInfo): void {
 function roundHalfEven(value: number): number {
   const floor = Math.floor(value);
   if (value - floor !== 0.5) return Math.round(value);
-  return floor % 2 === 0 ? floor : floor + 1;
+  // -0.5 rounds up to zero, which keeps the sign of the value.
+  return floor % 2 === 0 ? floor : floor + 1 || -0;
 }
 
 /** The methods that throw `ArithmeticException` instead of overflowing, `ceilDiv`, and `clamp`. */

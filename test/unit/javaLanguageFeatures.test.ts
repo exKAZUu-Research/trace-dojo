@@ -245,3 +245,31 @@ test('Java lets utilities that write nothing run on unmodifiable collections, an
     )
   ).toEqual({ result: 'ok ok ok uoe uoe uoe ' });
 });
+
+test('Java reads regular expressions with its own syntax: class intersection, POSIX and Unicode classes, escapes, and flags', () => {
+  expect(
+    finalVarsOf(
+      String.raw`String consonants = "Hello World".replaceAll("[a-z&&[^aeiou]]", "_");
+String classes = "Hello, World! 5pm".replaceAll("\\p{Punct}", "") + " " + "Wörld ñ".replaceAll("\\p{L}", "x") + " " + "a1_".replaceAll("[\\w&&[^_]]", ".");
+String escapes = "a-b".replaceAll("\\e", "E") + "ab".replaceAll("\\a", "A") + " " + "a  b".replaceAll("\\h", "_") + " " + "[a]".replaceAll("\\Q[a]\\E", "Q");
+String flags = "Hello hello".replaceAll("(?i:h)ello", "X") + " " + "ABC abc".replaceAll("(?i)(?s)b", "-") + " " + "ab".replaceAll("(?x) a b # c", "X") + " " + "abc".matches("a(?i)BC");
+String rejected = ""; try { "aaa".replaceAll("a++", "x"); } catch (java.util.regex.PatternSyntaxException e) { rejected = "unsupported"; }`
+    )
+  ).toEqual({
+    consonants: 'He__o Wo___',
+    classes: 'Hello World 5pm xxxxx x .._',
+    escapes: 'a-bab a__b Q',
+    flags: 'X X A-C a-c X true',
+    rejected: 'unsupported',
+  });
+});
+
+test("Java compares a map's key and entry sets as sets, and casts a generic method's result where its type is needed", () => {
+  expect(
+    finalVarsOf(
+      'Map<String, Integer> m = new HashMap<>(Map.of("a", 1, "b", 2)); String views = m.keySet().equals(Set.of("a", "b")) + " " + new HashSet<>(m.keySet()).equals(m.keySet()) + " " + m.keySet().hashCode() + " " + m.entrySet().hashCode() + " " + (m.keySet() == m.keySet()); String cast = ""; Object kept = new Box<String>().get(); try { String[] sa = new Box<String>().toArr(); } catch (ClassCastException e) { cast += "array "; } try { String s = new Box<String>().get(); } catch (ClassCastException e) { cast += "scalar"; }',
+      '',
+      'class Box<T> { Object[] d = new Object[2]; Object o = 3; @SuppressWarnings("unchecked") T[] toArr() { return (T[]) d; } @SuppressWarnings("unchecked") T get() { return (T) o; } }'
+    )
+  ).toEqual({ views: 'true true 195 192 true', kept: 3, cast: 'array scalar' });
+});

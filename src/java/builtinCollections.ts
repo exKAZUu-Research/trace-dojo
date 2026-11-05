@@ -5,6 +5,7 @@ import {
   classType,
   defineIteratorClass,
   defineReadMethods,
+  defineSetEquality,
   defineSnapshot,
   elementsOf,
   fixedSizeClasses,
@@ -56,7 +57,7 @@ export interface Collections {
   next: MethodInfo;
 }
 
-// code-gauge-allow functionNcss 42 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 44 -- One registration per builtin method, each a small native.
 export function defineCollections(
   registry: Registry,
   objectClass: ClassInfo,
@@ -106,6 +107,9 @@ export function defineCollections(
   const fixedSizeList = defineRestrictedList(context, 'ArrayList', lists, (method) => method.name !== 'set', 'Arrays$');
   fixedSizeClasses.add(fixedSizeList);
   const snapshotSet = defineSnapshot(context, 'Set', setClass, itrClass);
+  // A map's key and entry sets compare and hash as sets; its values, a plain collection, keep identity.
+  defineSetEquality(snapshotSet, context, setClass);
+  linkOverrides(snapshotSet);
   const snapshotCollection = defineSnapshot(context, 'Collection', collectionClass, itrClass);
   const immutableSet = defineSets(context, setClass, collectionClass, itrClass);
   const { mapClass, immutableMap } = defineHashMap(context, {

@@ -415,7 +415,21 @@ class Compiler extends DeclarationCompiler {
     for (const [index, parameter] of (declaration?.parameters ?? []).entries()) {
       this.declareLocal(context, parameter, parameter.name, constructor.parameterTypes[index]);
     }
-    // The prologue's locals stay in scope for the explicit constructor call and the body.
+    // The prologue's locals and local classes stay in scope for the explicit constructor call and the body.
+    this.localTypeScopes.push(new Map());
+    try {
+      this.compileConstructorCode(cls, constructor, declaration, context);
+    } finally {
+      this.localTypeScopes.pop();
+    }
+  }
+
+  private compileConstructorCode(
+    cls: ClassInfo,
+    constructor: MethodInfo,
+    declaration: ConstructorDeclaration | undefined,
+    context: MethodContext
+  ): void {
     const prologue =
       declaration?.prologue &&
       this.compileStatements({ ...context, isStatic: true, isBeforeConstructorCall: true }, declaration.prologue);

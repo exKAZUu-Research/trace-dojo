@@ -216,7 +216,6 @@ function mentions(type: JavaType, variable: TypeVariable): boolean {
 
 /** Infers the types of `variables` that make an argument of `argType` fit a parameter of `parameterType`. */
 // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of type, as inference walks parameter and argument types together.
-// code-gauge-allow functionNcss 31 -- One case per kind of type, as inference walks parameter and argument types together.
 export function infer(
   builtins: Builtins,
   parameterType: JavaType,
@@ -240,9 +239,8 @@ export function infer(
   const parameterBound = parameterType.kind === 'wildcard' ? parameterType.bound : parameterType;
   // A wildcard bounded by a type variable alone, such as `? super V`, decides that variable.
   if (parameterBound?.kind === 'typeVar' && argType.kind !== 'wildcard') {
-    if (parameterType.kind === 'wildcard' && parameterType.isSuper && variables.includes(parameterBound.variable)) {
-      bindUpperBound(builtins, parameterBound.variable, argType, bindings);
-    } else infer(builtins, parameterBound, argType, variables, bindings);
+    // A type variable that is not being inferred, such as the enclosing method's `T`, decides nothing.
+    if (parameterType.kind === 'wildcard') inferFromWildcard(builtins, parameterType, argType, variables, bindings);
     return;
   }
   if (parameterBound?.kind !== 'class' || !parameterBound.args) return;
@@ -263,6 +261,20 @@ export function infer(
       bindings
     );
   }
+}
+
+/** Infers from a wildcard bounded by a type variable alone: `? super T` bounds `T` from above, `? extends T` decides it. */
+function inferFromWildcard(
+  builtins: Builtins,
+  wildcard: Extract<JavaType, { kind: 'wildcard' }>,
+  argType: JavaType,
+  variables: readonly TypeVariable[],
+  bindings: Map<TypeVariable, JavaType>
+): void {
+  const bound = wildcard.bound as Extract<JavaType, { kind: 'typeVar' }>;
+  if (wildcard.isSuper && variables.includes(bound.variable))
+    bindUpperBound(builtins, bound.variable, argType, bindings);
+  else infer(builtins, bound, argType, variables, bindings);
 }
 
 /** The bindings that only an upper bound decided, which a type below it that another argument gives replaces. */

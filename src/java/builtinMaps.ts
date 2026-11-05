@@ -5,6 +5,7 @@ import {
   classType,
   compareNatural,
   createIterator,
+  defineSetEquality,
   describe,
   itemsOf,
   javaEquals,
@@ -150,15 +151,7 @@ function defineSetClass(
         .join(', ')}]`
     )
   );
-  addMethod(cls, 'equals', [context.objectType], BOOLEAN, false, (frame, receiver, [other]) => {
-    if (!(other instanceof JavaObject) || !other.store || !frame.runtime.isInstance(other, setClass)) return false;
-    const entries = storeOf(receiver).entries;
-    return (
-      entries.length === other.store.entries.length &&
-      entries.every((entry) => findEntry(frame, other, entry.key) !== undefined)
-    );
-  });
-  addMethod(cls, 'hashCode', [], INT, false, (frame, receiver) => sumOfHashes(frame, storeOf(receiver).entries));
+  defineSetEquality(cls, context, setClass);
   linkOverrides(cls);
   return cls;
 }
@@ -198,11 +191,21 @@ export function defineHashMap(
   return { mapClass, immutableMap: restrictToImmutable(registry, immutableMap, 'MapN') };
 }
 
-/** The sum of the elements' hashes that `Set.hashCode` specifies, which a sorted set's entries do not record. */
-function sumOfHashes(frame: Frame, entries: HashStore['entries']): number {
-  let sum = 0;
-  for (const { key } of entries) sum = toInt32(sum + (key === undefined ? 0 : javaHash(frame, key)));
-  return sum;
+/** The views each map has given, which `keySet`, `values`, and `entrySet` return again, as the JDK's maps do. */
+const mapViews = new WeakMap<JavaObject, Map<string, JavaObject>>();
+
+function cachedView(map: Value, kind: string, create: () => JavaObject): JavaObject {
+  let views = mapViews.get(map as JavaObject);
+  if (!views) {
+    views = new Map();
+    mapViews.set(map as JavaObject, views);
+  }
+  let view = views.get(kind);
+  if (!view) {
+    view = create();
+    views.set(kind, view);
+  }
+  return view;
 }
 
 /** A view of a map's keys, values, or entries, which follows the map's changes and removes the entries it loses. */
@@ -225,6 +228,7 @@ function mapView(
   });
   view.retained = [map];
   mapViewSources.set(view, {
+    map: map as JavaObject,
     store: () => storeOf(map),
     entries: () => storeOf(map).ordered(),
     elementOf,
@@ -570,10 +574,10 @@ export function defineMapMethods(
     touch(receiver);
   });
   addMethod(cls, 'keySet', [], classType(views.setClass, key), false, (frame, receiver) =>
-    mapView(frame, receiver, views.snapshotSet, (entry) => entry.key)
+    cachedView(receiver, 'keySet', () => mapView(frame, receiver, views.snapshotSet, (entry) => entry.key))
   );
   addMethod(cls, 'values', [], classType(views.collectionClass, value), false, (frame, receiver) =>
-    mapView(frame, receiver, views.snapshotCollection, (entry) => entry.value)
+    cachedView(receiver, 'values', () => mapView(frame, receiver, views.snapshotCollection, (entry) => entry.value))
   );
   addMethod(
     cls,
@@ -581,7 +585,8 @@ export function defineMapMethods(
     [],
     classType(views.setClass, classType(views.entryClass, key, value)),
     false,
-    (frame, receiver) => entrySetView(frame, receiver, views.snapshotSet, views.nodeClass)
+    (frame, receiver) =>
+      cachedView(receiver, 'entrySet', () => entrySetView(frame, receiver, views.snapshotSet, views.nodeClass))
   );
   addMethod(cls, 'toString', [], context.stringType, false, (frame, receiver) =>
     newString(

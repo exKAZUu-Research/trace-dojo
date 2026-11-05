@@ -12,7 +12,7 @@ import { box, boxedTypeOf, unbox } from './builtinWrappers';
 import { boxingTarget, instantiateMethod, isInvocationConvertible, mentionsHole, unboxedTypeOf } from './conversions';
 import { type AssignmentFacts, declarationKey } from './definiteAssignment';
 import { nullMessage, type NullSource } from './nullMessages';
-import { fitsIn } from './operators';
+import { castOperation, fitsIn } from './operators';
 import { type Frame } from './runtime';
 import { superclassesOf, topLevelOf, TypeResolver } from './typeResolver';
 import {
@@ -71,6 +71,11 @@ export interface CompiledValue {
   constant?: Value;
   /** What the value came from, which a `NullPointerException` names when it is null. */
   source?: NullSource;
+  /**
+   * For the result of a generic method, the erasure of its declared type, which is all the JVM knows of the value
+   * until a use that needs `type` casts it, as javac's checkcast does.
+   */
+  erasedType?: JavaType;
 }
 export type Compiled = CompiledValue | { kind: 'class'; cls: ClassInfo };
 
@@ -330,16 +335,6 @@ export abstract class CompilerBase extends TypeResolver {
     };
   }
 
-  /** Rejects a use of the current object, naming why it is unavailable: a static method or a constructor prologue. */
-  protected noInstanceError(context: MethodContext, span: Span, subject: string, staticMessage: string): never {
-    return this.error(
-      span,
-      context.isBeforeConstructorCall
-        ? `スーパークラスのコンストラクタを呼び出す前は ${subject} を使えません。`
-        : staticMessage
-    );
-  }
-
   /**
    * Rejects a lambda or a local class that reads a local which definite assignment analysis found not effectively
    * final in the code that declares it, or not definitely assigned where the lambda or class appears.
@@ -386,6 +381,7 @@ export abstract class CompilerBase extends TypeResolver {
     context: 'assignment' | 'invocation',
     span: Span
   ): CompiledValue {
+    if (value.erasedType) return this.convert(this.checkErased(value, to), to, context, span);
     if (isWidening(value.type, to, this.builtins.objectClass)) {
       return isNumeric(value.type) && isNumeric(to)
         ? convertedNumber(value, value.type.kind, to)
@@ -405,6 +401,18 @@ export abstract class CompilerBase extends TypeResolver {
     const boxed = this.boxedConversion(value, to, context);
     if (boxed) return boxed;
     return this.error(span, `${typeName(value.type)} 型の値を ${typeName(to)} 型に変換できません。`);
+  }
+
+  /**
+   * Casts a generic method's result to its instantiated type where `needed` is a type its erased type does not
+   * satisfy, so that a value that heap pollution put there fails with `ClassCastException` as on the JVM.
+   */
+  protected checkErased(value: CompiledValue, needed: JavaType): CompiledValue {
+    const { erasedType, ...rest } = value;
+    if (!erasedType || isWidening(erasedType, erasure(needed), this.builtins.objectClass)) return rest;
+    const cast = castOperation(this.builtins.objectClass, erasedType, value.type);
+    if (!cast) return rest;
+    return { ...rest, run: (frame) => cast(frame, value.run(frame)) };
   }
 
   /** Converts by boxing a primitive value or unboxing a wrapper object, then widening the result. */

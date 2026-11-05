@@ -458,7 +458,8 @@ function compileRegex(frame: Frame, pattern: string, flags: string, isWhole = fa
     return new RegExp(translated.source, translated.flags + flags);
   } catch (error) {
     if (!(error instanceof SyntaxError || error instanceof UnsupportedRegexError)) throw error;
-    return throwBuiltin(frame, 'PatternSyntaxException', pattern);
+    const reason = error instanceof UnsupportedRegexError ? error.message : 'Invalid regular expression';
+    return throwBuiltin(frame, 'PatternSyntaxException', `${reason}\n${pattern}`);
   }
 }
 
