@@ -14,6 +14,7 @@ import {
   linkOverrides,
   touch,
 } from './builtinCollectionSupport';
+import { addListIterators, defineListIterator, uneditableLists } from './builtinListIterator';
 import { defineHashMap, defineSets } from './builtinMaps';
 import { definePriorityQueue } from './builtinPriorityQueue';
 import {
@@ -53,7 +54,7 @@ export interface Collections {
   next: MethodInfo;
 }
 
-// code-gauge-allow functionNcss 39 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 41 -- One registration per builtin method, each a small native.
 export function defineCollections(
   registry: Registry,
   objectClass: ClassInfo,
@@ -81,11 +82,12 @@ export function defineCollections(
   const [listElement] = addTypeParameters(listClass, ['E'], objectType);
   addInterface(listClass, classType(collectionClass, listElement));
   declareListMethods(listClass, listElement, collectionClass);
+  const listItrClass = defineListIterator(context, iteratorClass, listClass);
   const setClass = defineInterface(registry, 'Set', 'java.util');
   const [setElement] = addTypeParameters(setClass, ['E'], objectType);
   addInterface(setClass, classType(collectionClass, setElement));
 
-  const lists = { listClass, collectionClass, itrClass };
+  const lists = { listClass, collectionClass, itrClass, listItrClass };
   const dequeClass = defineDequeInterfaces(context, collectionClass);
   defineArrayList(context, 'ArrayList', lists);
   defineStack(defineArrayList(context, 'Stack', lists));
@@ -95,6 +97,7 @@ export function defineCollections(
   defineArrayDeque(context, lists, dequeClass);
   const priorityQueue = definePriorityQueue(context, lists, registry.classes.get('Queue') as ClassInfo);
   const immutableList = defineRestrictedList(context, 'ListN', lists, () => true);
+  uneditableLists.add(immutableList);
   // Arrays.asList writes through to its array, so it may set elements but not change its size.
   const fixedSizeList = defineRestrictedList(context, 'ArrayList', lists, (method) => method.name !== 'set', 'Arrays$');
   const snapshotSet = defineSnapshot(context, 'Set', setClass, itrClass);
@@ -160,7 +163,7 @@ function defineDequeInterfaces(context: Context, collectionClass: ClassInfo): Cl
 
 function isIndexed(method: MethodInfo): boolean {
   return (
-    ['get', 'set', 'indexOf', 'lastIndexOf', 'equals', 'hashCode'].includes(method.name) ||
+    ['get', 'set', 'indexOf', 'lastIndexOf', 'equals', 'hashCode', 'listIterator'].includes(method.name) ||
     method.parameterTypes[0]?.kind === 'int'
   );
 }
@@ -213,7 +216,7 @@ function defineStack(cls: ClassInfo): void {
 /** `ArrayDeque`, a deque without the list's indexed methods. */
 function defineArrayDeque(
   context: Context,
-  lists: { listClass: ClassInfo; collectionClass: ClassInfo; itrClass: ClassInfo },
+  lists: { listClass: ClassInfo; collectionClass: ClassInfo; itrClass: ClassInfo; listItrClass: ClassInfo },
   dequeClass: ClassInfo
 ): void {
   const cls = defineArrayList(context, 'ArrayDeque', lists);
@@ -230,7 +233,7 @@ function defineArrayDeque(
 function defineRestrictedList(
   context: Context,
   name: string,
-  lists: { listClass: ClassInfo; collectionClass: ClassInfo; itrClass: ClassInfo },
+  lists: { listClass: ClassInfo; collectionClass: ClassInfo; itrClass: ClassInfo; listItrClass: ClassInfo },
   rejects: (method: MethodInfo) => boolean,
   prefix = 'ImmutableCollections$'
 ): ClassInfo {
@@ -289,11 +292,16 @@ function declareListMethods(cls: ClassInfo, element: JavaType, collectionClass: 
 }
 
 /** `ArrayList` and `LinkedList`, which differ only in performance, as far as these programs can tell. */
-// code-gauge-allow functionNcss 33 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 34 -- One registration per builtin method, each a small native.
 function defineArrayList(
   context: Context,
   name: string,
-  { listClass, collectionClass, itrClass }: { listClass: ClassInfo; collectionClass: ClassInfo; itrClass: ClassInfo },
+  {
+    listClass,
+    collectionClass,
+    itrClass,
+    listItrClass,
+  }: { listClass: ClassInfo; collectionClass: ClassInfo; itrClass: ClassInfo; listItrClass: ClassInfo },
   hiddenName?: string
 ): ClassInfo {
   const cls = context.registry.define(hiddenName ?? name, context.objectClass, 'java.util');
@@ -329,6 +337,7 @@ function defineArrayList(
     touch(receiver);
   });
   defineListAdditions(cls, element, context, { listClass, collectionClass });
+  addListIterators(cls, element, listItrClass);
   defineListArrays(cls, context);
   defineListUpdates(cls, element, context);
   defineListSearches(cls, context);
