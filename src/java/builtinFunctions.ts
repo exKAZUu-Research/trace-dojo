@@ -7,6 +7,7 @@ import {
   putEntry,
   removeEntry,
 } from './builtinCollections';
+import { removeElements } from './builtinCollectionSupport';
 import {
   addAbstractMethod,
   addConstant,
@@ -513,18 +514,22 @@ function defineIterableDefaults(collections: Collections, functions: DefaultFunc
     BOOLEAN,
     false,
     (frame, receiver, [filter]) => {
-      const object = receiver as JavaObject;
       const items = [...itemsOf(frame, receiver)];
       const removed = items.filter((item) => callFunction(frame, functions.predicate, filter, [item]) === true);
-      if (removed.length === 0) return false;
-      if (object.elements)
-        object.elements.splice(0, object.elements.length, ...object.elements.filter((item) => !removed.includes(item)));
-      else for (const item of removed) removeEntry(frame, receiver, item);
-      object.modCount = (object.modCount ?? 0) + 1;
-      return true;
+      return removeAllOf(frame, receiver, removed);
     }
   );
   defineBulkOperations(collectionClass);
+}
+
+/** Removes the items in `removed` from a list, a set, or a view of a map, returning whether there were any. */
+function removeAllOf(frame: Frame, receiver: Value, removed: Value[]): boolean {
+  if (removed.length === 0) return false;
+  const object = receiver as JavaObject;
+  if (object.elements) return removeElements(frame, receiver, (item) => removed.includes(item));
+  for (const item of removed) removeEntry(frame, receiver, item);
+  object.modCount = (object.modCount ?? 0) + 1;
+  return true;
 }
 
 /** `containsAll`, `removeAll`, and `retainAll`, which ask the other collection whether it contains each element. */
@@ -542,14 +547,8 @@ function defineBulkOperations(collectionClass: ClassInfo): void {
     ['retainAll', true],
   ] as const) {
     addMethod(collectionClass, name, [otherType], BOOLEAN, false, (frame, receiver, [other]) => {
-      const object = receiver as JavaObject;
       const removed = [...itemsOf(frame, receiver)].filter((item) => contains(frame, other, item) !== keepsContained);
-      if (removed.length === 0) return false;
-      if (object.elements) {
-        object.elements.splice(0, object.elements.length, ...object.elements.filter((item) => !removed.includes(item)));
-      } else for (const item of removed) removeEntry(frame, receiver, item);
-      object.modCount = (object.modCount ?? 0) + 1;
-      return true;
+      return removeAllOf(frame, receiver, removed);
     });
   }
 }

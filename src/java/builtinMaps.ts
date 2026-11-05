@@ -10,6 +10,7 @@ import {
   linkOverrides,
   snapshot,
   touch,
+  viewRemovals,
 } from './builtinCollectionSupport';
 import { callFunction } from './builtinFunctions';
 import {
@@ -186,6 +187,29 @@ export function defineHashMap(
   defineMapEntry(mapClass, entryClass, nodeClass, objectType);
   const immutableMap = defineClass('MapN', 'ImmutableCollections$MapN');
   return { mapClass, immutableMap: restrictToImmutable(registry, immutableMap, 'MapN') };
+}
+
+/**
+ * A view of a map's keys, values, or entries, which reads the map's contents at the time of the call and removes the
+ * entries behind the elements it loses.
+ */
+function mapView(
+  frame: Frame,
+  map: Value,
+  viewClass: ClassInfo,
+  elementOf: (entry: HashStore['entries'][number]) => Value
+): JavaObject {
+  const entries = storeOf(map).ordered();
+  const view = snapshot(
+    frame,
+    viewClass,
+    entries.map((entry) => elementOf(entry))
+  );
+  viewRemovals.set(view, (removeFrame, index) => {
+    const [entry] = entries.splice(index, 1);
+    removeEntry(removeFrame, map, entry.key);
+  });
+  return view;
 }
 
 /** `equals` and `hashCode` of a map, which compare and hash its entries as `AbstractMap` does. */
@@ -388,22 +412,10 @@ export function defineMapMethods(
     touch(receiver);
   });
   addMethod(cls, 'keySet', [], classType(views.setClass, key), false, (frame, receiver) =>
-    snapshot(
-      frame,
-      views.snapshotSet,
-      storeOf(receiver)
-        .ordered()
-        .map((entry) => entry.key)
-    )
+    mapView(frame, receiver, views.snapshotSet, (entry) => entry.key)
   );
   addMethod(cls, 'values', [], classType(views.collectionClass, value), false, (frame, receiver) =>
-    snapshot(
-      frame,
-      views.snapshotCollection,
-      storeOf(receiver)
-        .ordered()
-        .map((entry) => entry.value)
-    )
+    mapView(frame, receiver, views.snapshotCollection, (entry) => entry.value)
   );
   addMethod(
     cls,
@@ -412,18 +424,12 @@ export function defineMapMethods(
     classType(views.setClass, classType(views.entryClass, key, value)),
     false,
     (frame, receiver) =>
-      snapshot(
-        frame,
-        views.snapshotSet,
-        storeOf(receiver)
-          .ordered()
-          .map((entry) => {
-            const node = frame.runtime.allocateObject(frame, views.nodeClass);
-            nodeEntries.set(node, entry);
-            node.elements = [entry.key, entry.value];
-            return node;
-          })
-      )
+      mapView(frame, receiver, views.snapshotSet, (entry) => {
+        const node = frame.runtime.allocateObject(frame, views.nodeClass);
+        nodeEntries.set(node, entry);
+        node.elements = [entry.key, entry.value];
+        return node;
+      })
   );
   addMethod(cls, 'toString', [], context.stringType, false, (frame, receiver) =>
     newString(

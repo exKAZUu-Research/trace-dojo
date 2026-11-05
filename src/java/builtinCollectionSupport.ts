@@ -151,28 +151,62 @@ export function defineReadMethods(
   );
 }
 
-/** Snapshots that `keySet`, `values`, and `entrySet` return, which read a map's contents at the time of the call. */
+/**
+ * The views that `keySet`, `values`, and `entrySet` return, which read a map's contents at the time of the call and
+ * remove the map's entries behind the elements removed from them, but cannot add elements.
+ */
 export function defineSnapshot(context: Context, kind: string, parent: ClassInfo, itrClass: ClassInfo): ClassInfo {
   const cls = context.registry.define(`Snapshot${kind}`, context.objectClass, 'java.util');
   context.registry.classes.delete(cls.name);
   const [element] = addTypeParameters(cls, ['E'], context.objectType);
   addInterface(cls, classType(parent, element));
-  defineReadMethods(cls, element, context, itrClass, (_, receiver, index) => {
-    elementsOf(receiver).splice(index, 1);
+  defineReadMethods(cls, element, context, itrClass, (frame, receiver, index) => {
+    removeElements(frame, receiver, (_, position) => position === index);
   });
-  for (const name of ['add', 'remove', 'clear', 'addAll']) {
-    const parameterCount = name === 'clear' ? 0 : 1;
-    addMethod(
-      cls,
-      name,
-      Array.from({ length: parameterCount }, () => context.objectType),
-      name === 'clear' ? VOID : BOOLEAN,
-      false,
-      (frame) => throwBuiltin(frame, 'UnsupportedOperationException')
+  for (const name of ['add', 'addAll']) {
+    addMethod(cls, name, [context.objectType], BOOLEAN, false, (frame) =>
+      throwBuiltin(frame, 'UnsupportedOperationException')
     );
   }
+  addMethod(cls, 'remove', [context.objectType], BOOLEAN, false, (frame, receiver, [value]) => {
+    const index = indexOf(frame, elementsOf(receiver), value);
+    if (index !== -1) removeElements(frame, receiver, (_, position) => position === index);
+    return index !== -1;
+  });
+  addMethod(cls, 'clear', [], VOID, false, (frame, receiver) => {
+    removeElements(frame, receiver, () => true);
+  });
   linkOverrides(cls);
   return cls;
+}
+
+/**
+ * For a view of a map's keys, values, or entries, removes the map's entry behind the view's element at an index,
+ * which views of other collections lack.
+ */
+export const viewRemovals = new WeakMap<JavaObject, (frame: Frame, index: number) => void>();
+
+/**
+ * Removes the elements that `removes` selects from a collection whose `elements` hold its items, and through a view,
+ * the entries of the map behind them, returning whether it removed any.
+ */
+export function removeElements(
+  frame: Frame,
+  receiver: Value,
+  removes: (item: Value, index: number) => boolean
+): boolean {
+  const elements = elementsOf(receiver);
+  const removeBehind = viewRemovals.get(receiver as JavaObject);
+  let removed = false;
+  // From the end, so that removing an element keeps the indices of those before it.
+  for (let index = elements.length - 1; index >= 0; index--) {
+    if (!removes(elements[index], index)) continue;
+    removeBehind?.(frame, index);
+    elements.splice(index, 1);
+    removed = true;
+  }
+  if (removed) touch(receiver);
+  return removed;
 }
 
 export function snapshot(frame: Frame, viewClass: ClassInfo, items: Value[]): JavaObject {
