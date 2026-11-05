@@ -1,5 +1,5 @@
 import { addMethod, addTypeParameters, newString, type Registry } from './builtinSupport';
-import type { Frame } from './runtime';
+import { type Frame, throwBuiltin } from './runtime';
 import { type ClassInfo, createClass, isWidening, type JavaType, typeName } from './types';
 import { JavaArray, JavaObject, type Value } from './values';
 
@@ -135,6 +135,19 @@ export function classObjectOf(cls: ClassInfo, classClass: ClassInfo): JavaObject
     classObjects.set(cls, object);
   }
   return object;
+}
+
+/** Stores `value` at `index` of `array`, failing with `ArrayStoreException` where its runtime type forbids it. */
+export function storeElement(frame: Frame, array: JavaArray, index: number, value: Value): void {
+  checkStore(frame, array, value);
+  array.values[index] = value;
+}
+
+/** Fails with `ArrayStoreException` when the array's runtime element type does not admit `value`. */
+export function checkStore(frame: Frame, array: JavaArray, value: Value): void {
+  if (!fitsElement(frame, array.elementType, value)) {
+    throwBuiltin(frame, 'ArrayStoreException', runtimeClassNameOf(frame, value));
+  }
 }
 
 /** Whether `value` may be stored in an array of `elementType`, which the JVM checks at run time. */

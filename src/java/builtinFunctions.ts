@@ -1,15 +1,8 @@
 import { removeAllOf, removeMatching } from './builtinBulkRemoval';
-import {
-  type Collections,
-  compareNatural,
-  findEntry,
-  itemsOf,
-  javaEquals,
-  putEntry,
-  removeEntry,
-} from './builtinCollections';
+import { type Collections, compareNatural, itemsOf, putEntry } from './builtinCollections';
 import { checkModifiable, forEachLiveEntry, mapViewSources, sortedValues } from './builtinCollectionSupport';
 import { defineKeyComparators } from './builtinComparators';
+import { defineMapRemappings, putComputed, startComputing, unchanging } from './builtinMapComputing';
 import {
   addAbstractMethod,
   addConstant,
@@ -718,7 +711,7 @@ function defineMapDefaults(collections: Collections, functions: DefaultFunctions
     (frame, receiver, [key, mapping]) => {
       const entry = startComputing(frame, receiver, key);
       if (entry && entry.value !== undefined) return entry.value;
-      const value = callFunction(frame, functions.fn, mapping, [key]);
+      const value = unchanging(frame, receiver, () => callFunction(frame, functions.fn, mapping, [key]));
       if (value !== undefined) putEntry(frame, receiver, key, false, value, true);
       return value;
     }
@@ -733,86 +726,14 @@ function defineMapDefaults(collections: Collections, functions: DefaultFunctions
       const entry = startComputing(frame, receiver, key);
       const merged =
         entry && entry.value !== undefined
-          ? callFunction(frame, functions.biFunction, remapping, [entry.value, value])
+          ? unchanging(frame, receiver, () =>
+              callFunction(frame, functions.biFunction, remapping, [entry.value, value])
+            )
           : value;
       return putComputed(frame, receiver, key, merged);
     }
   );
   defineMapRemappings(mapClass, functions, mapK, mapV);
-}
-
-/** Starts `computeIfAbsent`, `compute`, or `merge`, which grow a HashMap's table first, as the JDK's do. */
-function startComputing(frame: Frame, receiver: Value, key: Value): ReturnType<typeof findEntry> {
-  checkModifiable(frame, receiver, false);
-  (receiver as JavaObject).store?.growBeforeCompute();
-  return findEntry(frame, receiver, key);
-}
-
-/** Maps the key to a computed value, or removes it for null, returning the value. */
-function putComputed(frame: Frame, receiver: Value, key: Value, value: Value): Value {
-  if (value === undefined) removeEntry(frame, receiver, key);
-  else putEntry(frame, receiver, key, false, value, true);
-  return value;
-}
-
-/**
- * `Map.compute` and `Map.computeIfPresent`, which remove the key when the function returns null, `remove` of a key only
- * with a given value, and `replace`.
- */
-function defineMapRemappings(mapClass: ClassInfo, functions: DefaultFunctions, mapK: JavaType, mapV: JavaType): void {
-  const remappingType = classType(functions.biFunction, superOf(mapK), superOf(mapV), extendsOf(mapV));
-  addMethod(mapClass, 'compute', [mapK, remappingType], mapV, false, (frame, receiver, [key, remapping]) => {
-    const current = startComputing(frame, receiver, key)?.value;
-    return putComputed(frame, receiver, key, callFunction(frame, functions.biFunction, remapping, [key, current]));
-  });
-  addMethod(mapClass, 'computeIfPresent', [mapK, remappingType], mapV, false, (frame, receiver, [key, remapping]) => {
-    checkModifiable(frame, receiver, false);
-    const current = findEntry(frame, receiver, key)?.value;
-    if (current === undefined) return;
-    return putComputed(frame, receiver, key, callFunction(frame, functions.biFunction, remapping, [key, current]));
-  });
-  defineMapReplaceAll(mapClass, functions, mapK, mapV);
-  const objectType = mapClass.typeParameters[0].bounds[0] as JavaType;
-  addMethod(mapClass, 'remove', [objectType, objectType], BOOLEAN, false, (frame, receiver, [key, value]) => {
-    checkModifiable(frame, receiver, false);
-    const entry = findEntry(frame, receiver, key);
-    if (!entry || !javaEquals(frame, entry.value, value)) return false;
-    removeEntry(frame, receiver, key);
-    return true;
-  });
-  addMethod(mapClass, 'replace', [mapK, mapV], mapV, false, (frame, receiver, [key, value]) => {
-    checkModifiable(frame, receiver, false);
-    const entry = findEntry(frame, receiver, key);
-    if (!entry) return;
-    const previous = entry.value;
-    entry.value = value;
-    return previous;
-  });
-}
-
-/**
- * `Map.replaceAll`, which replaces each value, in iteration order, by what the function gives for its entry; a change
- * the function makes to the map fails with `ConcurrentModificationException`, after each entry for a sorted map and
- * after the last one for a hash map, as the JDK's do.
- */
-function defineMapReplaceAll(mapClass: ClassInfo, functions: DefaultFunctions, mapK: JavaType, mapV: JavaType): void {
-  const functionType = classType(functions.biFunction, superOf(mapK), superOf(mapV), extendsOf(mapV));
-  addMethod(mapClass, 'replaceAll', [functionType], VOID, false, (frame, receiver, [fn]) => {
-    if (fn === undefined) throwBuiltin(frame, 'NullPointerException');
-    checkModifiable(frame, receiver, false);
-    const map = receiver as JavaObject;
-    const store = map.store;
-    if (!store) return throwBuiltin(frame, 'UnsupportedOperationException');
-    const expectedModCount = map.modCount;
-    const check = (): void => {
-      if (map.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
-    };
-    for (const entry of store.ordered()) {
-      entry.value = callFunction(frame, functions.biFunction, fn, [entry.key, entry.value]);
-      if (store.compare) check();
-    }
-    check();
-  });
 }
 
 /** `Collections.sort` and `Arrays.sort` with a comparator. */

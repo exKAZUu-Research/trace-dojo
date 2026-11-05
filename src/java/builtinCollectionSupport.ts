@@ -210,6 +210,9 @@ export const defaultRemoveClasses = new WeakSet<ClassInfo>();
  */
 export const batchRemovalClasses = new WeakSet<ClassInfo>();
 
+/** The arrays whose elements `Arrays.asList`'s lists share, whose runtime element types their writes must fit. */
+export const backingArrays = new WeakMap<JavaObject, JavaArray>();
+
 /** Restores the order a class keeps among its elements after a bulk removal compacts them, as a heap's. */
 export const bulkRemovalRepairs = new WeakMap<ClassInfo, (frame: Frame, receiver: Value) => void>();
 

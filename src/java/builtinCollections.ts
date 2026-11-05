@@ -1,5 +1,7 @@
+import { checkStore } from './builtinClass';
 import type { Context } from './builtinCollectionSupport';
 import {
+  backingArrays,
   batchRemovalClasses,
   checkIndex,
   checkPosition,
@@ -55,6 +57,8 @@ export interface Collections {
   immutableMap: ClassInfo;
   /** The class of the sets `Set.of` returns. */
   immutableSet: ClassInfo;
+  /** The class of `Collections.unmodifiableSet` of a set without a store of its own, such as a map's key set. */
+  unmodifiableViewSet: ClassInfo;
   /** The class of the lists `Arrays.asList` returns, which share their array's elements. */
   fixedSizeList: ClassInfo;
   /** `TreeMap`, `TreeSet`, and `PriorityQueue`, whose constructors take a `Comparator`. */
@@ -114,11 +118,13 @@ export function defineCollections(
   const fixedSizeList = defineRestrictedList(context, 'ArrayList', lists, (method) => method.name !== 'set', 'Arrays$');
   fixedSizeClasses.add(fixedSizeList);
   defaultRemoveClasses.add(fixedSizeList);
+  checkStoresIntoBackingArray(fixedSizeList);
   const snapshotSet = defineSnapshot(context, 'Set', setClass, itrClass);
   // A map's key and entry sets compare and hash as sets; its values, a plain collection, keep identity.
   defineSetEquality(snapshotSet, context, setClass);
   linkOverrides(snapshotSet);
   const snapshotCollection = defineSnapshot(context, 'Collection', collectionClass, itrClass);
+  const unmodifiableViewSet = defineUnmodifiableViewSet(context, setClass, itrClass);
   const immutableSet = defineSets(context, setClass, collectionClass, itrClass);
   const { mapClass, immutableMap } = defineHashMap(context, {
     setClass,
@@ -138,6 +144,7 @@ export function defineCollections(
     mapClass,
     immutableMap,
     immutableSet,
+    unmodifiableViewSet,
     immutableList,
     fixedSizeList,
     sortedClasses: [
@@ -145,6 +152,33 @@ export function defineCollections(
       priorityQueue,
     ],
   };
+}
+
+/** Makes `set` on `Arrays.asList`'s list check the store into its array, which may be of a subclass element type. */
+function checkStoresIntoBackingArray(cls: ClassInfo): void {
+  for (const method of cls.methods) {
+    const { native } = method;
+    if (method.name !== 'set' || method.parameterTypes.length !== 2 || !native) continue;
+    method.native = (frame, receiver, args) => {
+      const backing = backingArrays.get(receiver as JavaObject);
+      if (backing) checkStore(frame, backing, args[1]);
+      return native(frame, receiver, args);
+    };
+  }
+}
+
+/** A read-only set over another set's elements, which it reads afresh at each use. */
+function defineUnmodifiableViewSet(context: Context, setClass: ClassInfo, itrClass: ClassInfo): ClassInfo {
+  const cls = defineSnapshot(context, 'UnmodifiableSet', setClass, itrClass);
+  defineSetEquality(cls, context, setClass);
+  linkOverrides(cls);
+  for (const method of cls.methods) {
+    if (method.name === 'remove' || method.name === 'clear') {
+      method.native = (frame) => throwBuiltin(frame, 'UnsupportedOperationException');
+    }
+  }
+  unmodifiableClasses.add(cls);
+  return cls;
 }
 
 /** `ArrayList`, `Stack`, and `LinkedList`, which hold their elements in an array. */

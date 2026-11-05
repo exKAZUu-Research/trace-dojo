@@ -547,7 +547,9 @@ function defineCharacterMembers(characterClass: ClassInfo): void {
       });
     }
   }
-  addMethod(characterClass, 'getNumericValue', [CHAR], INT, true, (_, __, [code]) => numericValueOf(code as number));
+  for (const type of [CHAR, INT]) {
+    addMethod(characterClass, 'getNumericValue', [type], INT, true, (_, __, [code]) => numericValueOf(code as number));
+  }
 }
 
 function defineBooleanMembers(booleanClass: ClassInfo, stringType: JavaType): void {

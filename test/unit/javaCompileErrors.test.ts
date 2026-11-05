@@ -1294,6 +1294,16 @@ const programs: [name: string, runs: boolean, source: string][] = [
     'class Main {\n  static class O<T> { static class N {} }\n  public static void main(String[] args) {\n    O<String>.N n = null;\n  }\n}',
   ],
   [
+    'static-member-in-the-middle-of-a-parameterized-qualifier',
+    false,
+    'class Main {\n  static class O<T> { static class N { class M {} } }\n  public static void main(String[] args) {\n    O<String>.N.M m = null;\n  }\n}',
+  ],
+  [
+    'numeric-value-of-an-int-code-point',
+    true,
+    'class Main {\n  public static void main(String[] args) {\n    System.out.println(Character.getNumericValue(0x1D7CF) + Character.getNumericValue("a".codePointAt(0)));\n  }\n}',
+  ],
+  [
     'keyed-comparator-chained-without-target',
     true,
     'import java.util.*;\nclass Main {\n  record P(String name, int age) {}\n  public static void main(String[] args) {\n    List<P> ps = new ArrayList<>(); ps.sort(Comparator.comparing(P::name, Comparator.reverseOrder()).reversed());\n  }\n}',

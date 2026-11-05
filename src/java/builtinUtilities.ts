@@ -1,3 +1,4 @@
+import { checkStore } from './builtinClass';
 import {
   type Collections,
   compareNatural,
@@ -7,7 +8,7 @@ import {
   javaHash,
   putEntry,
 } from './builtinCollections';
-import { checkModifiable, sortedValues, unmodifiableWrappers } from './builtinCollectionSupport';
+import { backingArrays, checkModifiable, sortedValues, unmodifiableWrappers } from './builtinCollectionSupport';
 import { createStore, NO_ENTRY } from './builtinMaps';
 import { stringify } from './builtins';
 import { addMethod, newString, type Registry } from './builtinSupport';
@@ -115,6 +116,7 @@ export function defineUtilities(
   );
   defineArrays(registry, objectClass, stringType, collections, listOf);
   defineCollectionsClass(registry, objectClass, collections, comparableClass);
+  defineRotateAndDisjoint(registry.classes.get('Collections') as ClassInfo, collections);
   defineCollectionViews(
     registry.classes.get('Collections') as ClassInfo,
     collections,
@@ -179,9 +181,9 @@ function defineArraySearches(arraysClass: ClassInfo, element: JavaType, isObject
     hashArray(frame, array, isObject ? undefined : (element.kind as BoxableKind))
   );
   addMethod(arraysClass, 'fill', [arrayType, INT, INT, element], VOID, true, (frame, _, [array, from, to, value]) => {
-    const { values } = arrayOf(frame, array);
-    checkArrayRange(frame, from as number, to as number, values.length);
-    values.fill(value, from as number, to as number);
+    const target = arrayOf(frame, array);
+    checkArrayRange(frame, from as number, to as number, target.values.length);
+    fillArray(frame, target, value, from as number, to as number);
   });
   if (element === BOOLEAN) return;
   const compare = isObject ? compareNatural : (_: Frame, a: Value, b: Value): number => comparePrimitives(a, b);
@@ -300,8 +302,9 @@ function defineCollectionViews(
         classOf(owner, ...types),
         true,
         (frame, _, [source]) => {
-          if (!(source instanceof JavaObject) || !source.store) return throwBuiltin(frame, 'NullPointerException');
-          const view = frame.runtime.allocateObject(frame, immutable);
+          if (!(source instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
+          // A set without a store of its own, such as a map's key set, shares its elements, which it reads afresh.
+          const view = frame.runtime.allocateObject(frame, source.store ? immutable : collections.unmodifiableViewSet);
           view.store = source.store;
           return wrap(view, source);
         }
@@ -372,9 +375,9 @@ function defineArrays(
       newString(frame, describe(frame, array, false))
     );
     addMethod(arraysClass, 'fill', [arrayType, element], VOID, true, (frame, _, [array, value]) => {
-      const { values } = arrayOf(frame, array);
-      frame.runtime.spend(Math.ceil(values.length / 64));
-      values.fill(value);
+      const target = arrayOf(frame, array);
+      frame.runtime.spend(Math.ceil(target.values.length / 64));
+      fillArray(frame, target, value, 0, target.values.length);
     });
     addMethod(arraysClass, 'equals', [arrayType, arrayType], BOOLEAN, true, (frame, _, [a, b]) => {
       if (a === b) return true;
@@ -430,9 +433,20 @@ function defineArrays(
   generic(
     'asList',
     (element) => ({ parameterTypes: [{ kind: 'array', element }], returnType: listOf(element), isVarargs: true }),
-    // The list shares the array's elements, so writes through either show in both.
-    (frame, _, [array]) => createList(frame, collections.fixedSizeList, arrayOf(frame, array).values)
+    // The list shares the array's elements, so writes through either show in both, checked as stores into the array.
+    (frame, _, [array]) => {
+      const backing = arrayOf(frame, array);
+      const list = createList(frame, collections.fixedSizeList, backing.values);
+      backingArrays.set(list, backing);
+      return list;
+    }
   );
+}
+
+/** `Arrays.fill` of a range, whose first store fails with `ArrayStoreException` when the array's type forbids it. */
+function fillArray(frame: Frame, array: JavaArray, value: Value, from: number, to: number): void {
+  if (from < to) checkStore(frame, array, value);
+  array.values.fill(value, from, to);
 }
 
 /** Orders primitive values as `Arrays.sort` does, with -0.0 before 0.0 and NaN last. */
@@ -469,6 +483,40 @@ function elementsOf(frame: Frame, value: Value): Value[] {
 function touch(value: Value): void {
   const object = value as JavaObject;
   object.modCount = (object.modCount ?? 0) + 1;
+}
+
+/**
+ * `Collections.rotate`, which moves each element `distance` places on, cyclically, writing only when it moves any, and
+ * `Collections.disjoint`, which asks the second collection whether it contains each element of the first.
+ */
+
+function defineRotateAndDisjoint(cls: ClassInfo, collections: Collections): void {
+  addMethod(cls, 'rotate', [anyOf(collections.listClass), INT], VOID, true, (frame, _, [list, distance]) => {
+    const values = elementsOf(frame, list);
+    const size = values.length;
+    const shift = size === 0 ? 0 : (((distance as number) % size) + size) % size;
+    if (shift === 0) return;
+    checkModifiable(frame, list, false);
+    const original = [...values];
+    for (const [index, value] of original.entries()) values[(index + shift) % size] = value;
+  });
+  addMethod(
+    cls,
+    'disjoint',
+    [anyOf(collections.collectionClass), anyOf(collections.collectionClass)],
+    BOOLEAN,
+    true,
+    (frame, _, [first, second]) => {
+      if (first === undefined || second === undefined) throwBuiltin(frame, 'NullPointerException');
+      return elementsOf(frame, first).every(
+        (value) => frame.runtime.invokeVirtual(frame, collections.collectionClass, 'contains', second, [value]) !== true
+      );
+    }
+  );
+}
+
+function anyOf(owner: ClassInfo): ClassType {
+  return { kind: 'class', cls: owner, args: [{ kind: 'wildcard', bound: undefined, isSuper: false }] };
 }
 
 // code-gauge-allow functionCognitiveComplexity 28 -- One registration per builtin method, each a small native.

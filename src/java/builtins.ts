@@ -1,4 +1,5 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
+import { defineArrayCopy } from './arrayCopy';
 import { defineClassClass, runtimeClassNameOf } from './builtinClass';
 import { type Collections, defineCollections, javaEquals, javaHash, linkComparator } from './builtinCollections';
 import { defineFunctions, type Functions } from './builtinFunctions';
@@ -315,6 +316,7 @@ function defineSystem(registry: Registry, objectClass: ClassInfo, stringType: Ja
   addMethod(systemClass, 'exit', [INT], VOID, true, () => {
     throw new ProgramExit();
   });
+  defineArrayCopy(systemClass, objectClass.type);
   for (const [name, suffix] of [
     ['print', ''],
     ['println', '\n'],

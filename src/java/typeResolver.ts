@@ -79,18 +79,14 @@ export abstract class TypeResolver {
    */
   private outerTypeOf(syntax: Extract<TypeSyntax, { kind: 'named' }>, cls: ClassInfo): ClassType | undefined {
     const { enclosing } = cls;
+    // Resolving the qualifier checks each of its segments, which may select a static member type too.
+    const written = syntax.outer && this.resolveType(syntax.outer);
     // A static member type has no enclosing instance whose type arguments it could use (JLS 8.1.3).
-    if (syntax.outer && !cls.hasOuterInstance) {
-      this.error(
-        syntax,
-        `型引数を付けた型 ${typeName(this.resolveType(syntax.outer))} からは、static なクラス ${cls.name} を選べません。`
-      );
+    if (written && !cls.hasOuterInstance) {
+      this.error(syntax, `型引数を付けた型 ${typeName(written)} からは、static なクラス ${cls.name} を選べません。`);
     }
     if (!enclosing || !hasGenericOuter(cls)) return undefined;
-    if (syntax.outer) {
-      const outer = this.resolveType(syntax.outer);
-      return outer.kind === 'class' ? (asSuper(outer, enclosing) ?? outer) : undefined;
-    }
+    if (written) return written.kind === 'class' ? (asSuper(written, enclosing) ?? written) : undefined;
     if (syntax.qualifier.length > 0) return enclosing.type as ClassType;
     for (let scope = this.typeScope; scope; scope = scope.enclosing) {
       if (isSubclass(scope, enclosing)) return asSuper(thisTypeOf(scope), enclosing);
