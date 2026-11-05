@@ -74,7 +74,7 @@ test.each([
   { name: 'missing entry method', code: 'public class Renamed {}', detail: 'Compile error.' },
   {
     name: 'invalid entry method',
-    code: 'public class Renamed { public void main(String[] args) {} }',
+    code: 'public class Renamed { public static int main(String[] args) { return 0; } }',
     detail: 'Compile error.',
   },
   { name: 'JavaScript payload', code: 'globalThis.__fullJavaTestExecuted = true;', detail: 'Compile error.' },
