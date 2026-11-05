@@ -25,7 +25,7 @@ export function defineText(
   const objectType = objectClass.type;
   const stringType = stringClass.type;
   const objectArray: JavaType = { kind: 'array', element: objectType };
-  defineStringBuilder(registry, objectClass, stringType);
+  defineStringBuilder(registry, objectClass, stringClass);
   defineStringExtras(stringClass, collections);
   const format = addMethod(
     stringClass,
@@ -73,7 +73,8 @@ function setBuilder(frame: Frame, receiver: Value, value: string): Value {
 }
 
 // code-gauge-allow functionNcss 50 -- One registration per StringBuilder method.
-function defineStringBuilder(registry: Registry, objectClass: ClassInfo, stringType: JavaType): void {
+function defineStringBuilder(registry: Registry, objectClass: ClassInfo, stringClass: ClassInfo): void {
+  const stringType = stringClass.type;
   const cls = registry.define('StringBuilder', objectClass);
   cls.isFinal = true;
   const builderType = cls.type;
@@ -105,6 +106,10 @@ function defineStringBuilder(registry: Registry, objectClass: ClassInfo, stringT
     });
   }
   addMethod(cls, 'toString', [], stringType, false, (frame, receiver) => newString(frame, builderOf(receiver)));
+  addConstructor(stringClass, [builderType], (frame, _, [builder]) => {
+    if (!(builder instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
+    return newString(frame, builderOf(builder));
+  });
   addMethod(cls, 'length', [], INT, false, (_, receiver) => builderOf(receiver).length);
   addMethod(cls, 'isEmpty', [], BOOLEAN, false, (_, receiver) => builderOf(receiver).length === 0);
   addMethod(cls, 'charAt', [INT], CHAR, false, (frame, receiver, [index]) => {

@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss 453 -- The expression compiler keeps one method per expression kind together.
 import type { ArrayInitializer, BinaryOperator, ClassDeclaration, Expression, PatternBinding, Span } from './ast';
-import { classObjectOf } from './builtins';
+import { classObjectOf, getBuiltins } from './builtins';
 import { box, boxedTypeOf, unbox } from './builtinWrappers';
 import {
   type Capture,
@@ -906,7 +906,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (cls.isAbstract) this.error(expression, `抽象クラス ${cls.name} のオブジェクトは作れません。`);
     if (cls.isBuiltin && cls.constructors.length === 0)
       this.error(expression, `${cls.name} のオブジェクトは new で作れません。`);
-    if (cls === this.builtins.stringClass) this.error(expression, 'String のオブジェクトは new で作れません。');
+
     if (resolved.args?.some((arg) => arg.kind === 'wildcard')) {
       this.error(expression, 'new で作るオブジェクトの型引数に ? は使えません。');
     }
@@ -923,6 +923,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
     this.checkAccess(context, cls, constructor.access, expression, `コンストラクタ ${cls.name}`);
     this.checkThrown(context, expression, constructor.thrownTypes);
     const convertedArgs = this.convertArguments(context, constructor, args, expression.args);
+    if (cls === this.builtins.stringClass) {
+      // A String's constructor builds the string itself, which is a new object distinct from equal strings.
+      return {
+        kind: 'value',
+        type,
+        run: (frame) => this.invokeWithArguments(frame, constructor, undefined, convertedArgs, undefined),
+      };
+    }
     return this.compileCreation(context, expression, cls, type, constructor, convertedArgs);
   }
 
@@ -1125,9 +1133,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (target.candidates.length === 0) {
       this.error(expression, `この採点環境の ${target.owner.name} には、メソッド ${expression.name} がありません。`);
     }
+    const explicitTypeArgs = expression.typeArgs?.map((type) => this.resolveTypeArgument(type));
     const method = this.selectMethod(
       expression,
-      target.candidates,
+      explicitTypeArgs ? this.withTypeArguments(target.candidates, explicitTypeArgs) : target.candidates,
       args.map((arg) => arg.type),
       `メソッド ${expression.name}`
     );
@@ -1228,11 +1237,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const upper = upperBound(type);
       return upper.kind === 'class' ? this.viewMethods(this.collectMethods(upper.cls, expression.name), upper) : [];
     });
-    return {
-      candidates: bound.kind === 'array' ? this.collectMethods(owner, expression.name) : methods,
-      owner,
-      receiver: object,
-    };
+    if (bound.kind === 'array') {
+      // An array's clone() returns an array of its own type.
+      const candidates =
+        expression.name === 'clone' ? [arrayClone(bound)] : this.collectMethods(owner, expression.name);
+      return { candidates, owner, receiver: object };
+    }
+    return { candidates: methods, owner, receiver: object };
   }
 
   /**
@@ -1313,6 +1324,18 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
+  /** The generic methods instantiated with explicit type arguments, as `obj.<String>m()` calls them. */
+  protected withTypeArguments(methods: MethodInfo[], typeArgs: JavaType[]): MethodInfo[] {
+    return methods.flatMap((method) => {
+      const variables = method.typeParameters ?? [];
+      // Java ignores type arguments that a method without type parameters is given.
+      if (variables.length === 0) return [method];
+      if (variables.length !== typeArgs.length) return [];
+      const bindings = new Map(variables.map((variable, index) => [variable, typeArgs[index]]));
+      return [{ ...methodView(method, bindings), typeParameters: [], declared: method.declared ?? method }];
+    });
+  }
+
   /** The methods as a receiver of `receiverType` sees them, with its type arguments substituted. */
   protected viewMethods(methods: MethodInfo[], receiverType: JavaType): MethodInfo[] {
     return methods.map((method) =>
@@ -1366,6 +1389,25 @@ function notConstant(reference: Reference & { constant?: Value }): Reference & {
 
 function thisValue(context: MethodContext): CompiledValue {
   return { kind: 'value', type: thisTypeOf(context.cls), run: (frame) => frame.thisObject };
+}
+
+function arrayClone(type: Extract<JavaType, { kind: 'array' }>): MethodInfo {
+  return {
+    name: 'clone',
+    owner: getBuiltins().objectClass,
+    parameterTypes: [],
+    returnType: type,
+    isStatic: false,
+    isAbstract: false,
+    isConstructor: false,
+    access: 'public',
+    thrownTypes: [],
+    native: (frame, receiver) => {
+      const array = receiver as JavaArray;
+      frame.runtime.allocateArray(frame, array.values.length);
+      return new JavaArray(array.elementType, [...array.values]);
+    },
+  };
 }
 
 /** `this` viewed as its superclass, with the type arguments the class gives it. */

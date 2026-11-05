@@ -58,12 +58,11 @@ function applyModifier(modifiers: Modifiers, child: Node): void {
       applyKeywordModifier(modifiers, child);
       break;
     }
-    case 'marker_annotation': {
-      if (child.text !== '@Override') unsupported(child, `アノテーション「${child.text}」`);
-      break;
-    }
+    case 'marker_annotation':
     case 'annotation': {
-      unsupported(child, `アノテーション「${child.text}」`);
+      const name = (child.childForFieldName('name')?.text ?? '').replace(/^java\.lang\./, '');
+      if (!KNOWN_ANNOTATIONS.has(name)) unsupported(child, `アノテーション「${child.text}」`);
+      if (name === 'Override') modifiers.hasOverride = true;
       break;
     }
     // The fork exposes visibility keywords and modifiers as named nodes; other tokens are punctuation.
@@ -73,6 +72,12 @@ function applyModifier(modifiers: Modifiers, child: Node): void {
   }
 }
 
+/** The annotations of java.lang, which change nothing these programs do except what `@Override` checks. */
+const KNOWN_ANNOTATIONS = new Set(['Override', 'SuppressWarnings', 'Deprecated', 'FunctionalInterface', 'SafeVarargs']);
+
+/** Modifiers that concern only threads and serialization, which these single-threaded programs never see. */
+const IGNORED_MODIFIERS = new Set(['transient', 'volatile', 'synchronized', 'strictfp']);
+
 const keywordModifiers = {
   static: 'isStatic',
   final: 'isFinal',
@@ -81,6 +86,7 @@ const keywordModifiers = {
 } as const;
 
 function applyKeywordModifier(modifiers: Modifiers, child: Node): void {
+  if (IGNORED_MODIFIERS.has(child.text)) return;
   const key = keywordModifiers[child.text as keyof typeof keywordModifiers] as
     | (typeof keywordModifiers)[keyof typeof keywordModifiers]
     | undefined;

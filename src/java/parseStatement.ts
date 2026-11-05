@@ -103,6 +103,21 @@ const statementConverters: Record<string, (node: Node) => Statement> = {
   throw_statement: (node) => ({ kind: 'throw', value: convertExpression(namedChildren(node)[0]), ...span(node) }),
   try_statement: convertTry,
   try_with_resources_statement: (node) => unsupported(node, 'try-with-resources 文'),
+  assert_statement: (node) => {
+    const [condition, message] = namedChildren(node);
+    return {
+      kind: 'assert',
+      condition: convertExpression(condition),
+      message: message ? convertExpression(message) : undefined,
+      ...span(node),
+    };
+  },
+  synchronized_statement: (node) => ({
+    kind: 'synchronized',
+    lock: convertCondition(namedChildren(node)[0]),
+    body: convertBlock(field(node, 'body')),
+    ...span(node),
+  }),
   labeled_statement: (node) => {
     const [label, body] = namedChildren(node);
     return { kind: 'labeled', label: label.text, body: convertStatement(body), ...span(node) };

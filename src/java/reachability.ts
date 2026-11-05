@@ -34,6 +34,9 @@ export function canCompleteNormally(statement: Statement): boolean {
     case 'switch': {
       return switchCanCompleteNormally(statement);
     }
+    case 'synchronized': {
+      return canCompleteNormally(statement.body);
+    }
     case 'labeled': {
       const { body, label } = statement;
       const bodyCompletes =
@@ -109,7 +112,8 @@ export function containsJump(statement: Statement, kind: 'break' | 'continue', l
       const switchDepth = kind === 'break' ? depth + 1 : depth;
       return statement.groups.some((group) => group.statements.some((child) => inside(child, switchDepth)));
     }
-    case 'labeled': {
+    case 'labeled':
+    case 'synchronized': {
       return inside(statement.body);
     }
     case 'try': {

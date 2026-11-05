@@ -186,6 +186,26 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       case 'yield': {
         return this.compileYield(context, statement);
       }
+      case 'assert': {
+        this.compileCondition(context, statement.condition);
+        if (statement.message) this.compileValue(context, statement.message);
+        // The JVM runs without -ea by default, which disables assertions.
+        return () => {};
+      }
+      case 'synchronized': {
+        const lock = this.compileValue(context, statement.lock);
+        if (!isReference(lock.type)) {
+          this.error(
+            statement.lock,
+            `synchronized には参照型の値が必要ですが、${typeName(lock.type)} 型の値が書かれています。`
+          );
+        }
+        const body = this.compileBlock(context, statement.body);
+        return (frame) => {
+          if (lock.run(frame) === undefined) throwBuiltin(frame, 'NullPointerException');
+          return body(frame);
+        };
+      }
       case 'localClass': {
         this.compileLocalClass(context, statement.declaration);
         // Declaring a class runs nothing.

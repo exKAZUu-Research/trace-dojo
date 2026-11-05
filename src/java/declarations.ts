@@ -323,6 +323,12 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
       this.error(member, `メソッド ${member.name} はすでに定義されています。`);
     }
     this.checkOverride(cls, method, member);
+    if (member.modifiers.hasOverride && (method.isStatic || method.overrides?.size === 0)) {
+      this.error(
+        member,
+        `メソッド ${member.name} には @Override が付いていますが、親クラスやインターフェースのメソッドをオーバーライドしていません。`
+      );
+    }
     cls.methods.push(method);
   }
 

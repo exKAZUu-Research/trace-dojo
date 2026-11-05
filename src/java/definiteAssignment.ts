@@ -219,6 +219,15 @@ class DefiniteAssignmentChecker {
         this.yields.at(-1)?.push(this.expression(statement.value, state));
         return UNREACHABLE;
       }
+      case 'synchronized': {
+        return this.statement(statement.body, this.expression(statement.lock, state));
+      }
+      // An assertion may not run, so what it assigns stays unassigned after it.
+      case 'assert': {
+        const { whenFalse } = this.condition(statement.condition, state);
+        if (statement.message) this.expression(statement.message, whenFalse);
+        return state;
+      }
       // A local class's methods run later, and their own analysis covers them.
       case 'localClass':
       case 'empty': {

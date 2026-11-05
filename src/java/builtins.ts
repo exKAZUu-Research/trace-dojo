@@ -403,6 +403,27 @@ function defineSystem(registry: Registry, objectClass: ClassInfo, stringType: Ja
 }
 
 function defineString(stringClass: ClassInfo, objectType: JavaType): void {
+  addConstructor(stringClass, [], (frame) => newString(frame, ''));
+  addConstructor(stringClass, [stringClass.type], (frame, _, [original]) =>
+    newString(frame, requireString(frame, original))
+  );
+  addConstructor(stringClass, [CHAR_ARRAY], (frame, _, [chars]) => {
+    if (!(chars instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
+    return newString(frame, chars.values.map((code) => charToString(code as number)).join(''));
+  });
+  addConstructor(stringClass, [CHAR_ARRAY, INT, INT], (frame, _, [chars, offset, count]) => {
+    if (!(chars instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
+    const [start, length] = [offset as number, count as number];
+    if (start < 0 || length < 0 || start + length > chars.values.length) {
+      throwBuiltin(
+        frame,
+        'StringIndexOutOfBoundsException',
+        `offset ${start}, count ${length}, length ${chars.values.length}`
+      );
+    }
+    const codes = chars.values.slice(start, start + length);
+    return newString(frame, codes.map((code) => charToString(code as number)).join(''));
+  });
   defineStringQueries(stringClass, objectType);
   defineStringTransforms(stringClass, objectType);
 }

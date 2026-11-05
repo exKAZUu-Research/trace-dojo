@@ -244,7 +244,7 @@ function expressionAsTypeSyntax(node: Node): TypeSyntax | undefined {
 }
 
 function convertMethodInvocation(node: Node): Expression {
-  if (node.childForFieldName('type_arguments')) unsupported(node, 'メソッドへの型引数');
+  const typeArgs = node.childForFieldName('type_arguments');
   const object = node.childForFieldName('object');
   if (node.children.some((child) => child?.type === 'super' && child.startIndex !== object?.startIndex))
     unsupported(node, '修飾された super');
@@ -253,6 +253,7 @@ function convertMethodInvocation(node: Node): Expression {
     object: object ? (object.type === 'super' ? 'super' : convertExpression(object)) : undefined,
     name: field(node, 'name').text,
     args: convertArguments(field(node, 'arguments')),
+    typeArgs: typeArgs ? namedChildren(typeArgs).map((type) => convertType(type)) : undefined,
     ...span(node),
   };
 }

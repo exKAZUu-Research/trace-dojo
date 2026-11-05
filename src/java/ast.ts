@@ -25,6 +25,8 @@ export interface Modifiers {
   isAbstract: boolean;
   /** Marks an interface method with a body that implementing classes inherit. */
   isDefault: boolean;
+  /** Whether `@Override` is written, which requires the method to override another. */
+  hasOverride?: boolean;
   access: 'public' | 'protected' | 'private' | 'package';
 }
 
@@ -153,6 +155,8 @@ export type Statement =
   | LabeledStatement
   | YieldStatement
   | LocalClassStatement
+  | AssertStatement
+  | SynchronizedStatement
   | EmptyStatement;
 
 export interface Block extends Span {
@@ -266,6 +270,20 @@ export interface LabeledStatement extends Span {
   body: Statement;
 }
 
+/** `assert condition : message;`, which checks nothing, since the JVM disables assertions by default. */
+export interface AssertStatement extends Span {
+  kind: 'assert';
+  condition: Expression;
+  message: Expression | undefined;
+}
+
+/** `synchronized (lock) { ... }`, which runs its body, as a single thread always holds the lock. */
+export interface SynchronizedStatement extends Span {
+  kind: 'synchronized';
+  lock: Expression;
+  body: Block;
+}
+
 /** A class, interface, or enum declared inside a method body. */
 export interface LocalClassStatement extends Span {
   kind: 'localClass';
@@ -342,6 +360,8 @@ export interface MethodCall extends Span {
   object: Expression | 'super' | undefined;
   name: string;
   args: Expression[];
+  /** Type arguments written before the name, as in `Collections.<String>emptyList()`. */
+  typeArgs?: TypeSyntax[];
 }
 
 export interface NewObject extends Span {
