@@ -85,7 +85,7 @@ function formatArgument(
   return conversion === lower ? formatted : formatted.toUpperCase();
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- One branch per conversion of Java's Formatter, before the numeric ones.
+// code-gauge-allow functionCognitiveComplexity 20 -- One branch per conversion of Java's Formatter, before the numeric ones.
 function formatLower(
   frame: Frame,
   arg: Value,
@@ -112,7 +112,15 @@ function formatLower(
         : 'java.lang.String';
     return throwBuiltin(frame, 'IllegalFormatConversionException', `${conversion} != ${typeName}`);
   }
-  return formatNumber((arg as JavaObject).boxed as number | bigint, kind, flags, precision, lower);
+  const boxed = (arg as JavaObject).boxed as number | bigint;
+  if (lower === 'c') checkCodePoint(frame, boxed as number);
+  return formatNumber(boxed, kind, flags, precision, lower);
+}
+
+/** Rejects a `%c` argument that is no Unicode code point, as `IllegalFormatCodePointException`. */
+function checkCodePoint(frame: Frame, point: number): void {
+  if (point >= 0 && point <= 0x10_ff_ff) return;
+  throwBuiltin(frame, 'IllegalFormatCodePointException', `Code point = 0x${(point >>> 0).toString(16)}`);
 }
 
 /** Formats a boxed number or character that a numeric or character conversion accepted. */

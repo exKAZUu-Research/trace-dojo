@@ -1,5 +1,5 @@
 import type { Expression, PatternBinding, Span } from './ast';
-import { runtimeClassNameOf } from './builtinClass';
+import { fitsElement, runtimeClassNameOf } from './builtinClass';
 import {
   type Capture,
   type Compiled,
@@ -19,8 +19,6 @@ import {
   INT,
   isReference,
   isSubclass,
-  isWidening,
-  type JavaType,
   sameType,
   thisTypeOf,
   typeName,
@@ -468,17 +466,6 @@ export abstract class ReferenceCompiler extends CompilerBase {
 }
 
 /** Whether an array whose elements have the runtime type `elementType` may store `value`. */
-function fitsElement(frame: Frame, elementType: JavaType, value: Value): boolean {
-  if (value === undefined) return true;
-  if (elementType.kind === 'class') return frame.runtime.isInstance(value, elementType.cls);
-  if (elementType.kind === 'array') {
-    return (
-      value instanceof JavaArray &&
-      isWidening({ kind: 'array', element: value.elementType }, elementType, frame.runtime.builtins.objectClass)
-    );
-  }
-  return true;
-}
 
 /** This environment implements only part of the standard library, so the message states only what it has. */
 function missingFieldMessage(cls: ClassInfo, name: string): string {

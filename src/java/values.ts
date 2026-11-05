@@ -62,14 +62,15 @@ export interface HashEntry {
   hash: number;
 }
 
-/**
- * The entries of a `HashMap` or `HashSet`, which iterates as Java's does: by bucket of a table that doubles whenever
- * the entries exceed three quarters of it, and in insertion order within a bucket.
- */
 /** `HashMap`'s TREEIFY_THRESHOLD and MIN_TREEIFY_CAPACITY. */
 const TREEIFY_THRESHOLD = 8;
 const MIN_TREEIFY_CAPACITY = 64;
 
+/**
+ * The entries of a `HashMap` or `HashSet`, which iterates as Java's does: by bucket of a table that doubles whenever
+ * the entries exceed three quarters of it, or a bucket of a table smaller than 64 grows crowded, and in insertion
+ * order within a bucket.
+ */
 export class HashStore {
   entries: HashEntry[] = [];
   capacity = 16;

@@ -4,7 +4,7 @@ import { stringify } from './builtins';
 import { classType, type Context, extendsOf, superOf, typeVariable, variableType } from './builtinStreamSupport';
 import { addMethod, newString } from './builtinSupport';
 import { hashOf } from './builtinWrappers';
-import { type Frame, throwBuiltin } from './runtime';
+import { type Frame, JavaThrow, throwBuiltin } from './runtime';
 import { BOOLEAN, type ClassInfo, DOUBLE, INT, type JavaType, type NativeMethod, VOID } from './types';
 import { JavaObject, type Value } from './values';
 
@@ -130,6 +130,7 @@ export function defineOptionals(context: Context): Optionals {
   );
   map.typeParameters = [u];
   defineOptionalFunctions(context, optional, tType);
+  defineOptionalChains(context, optional, tType);
   return {
     optional,
     optionalInt: registry.classes.get('OptionalInt') as ClassInfo,
@@ -144,6 +145,59 @@ function optionalHash(frame: Frame, receiver: Value, valueType: JavaType): numbe
   return valueType === INT || valueType === DOUBLE
     ? hashOf(value, valueType.kind as 'int' | 'double')
     : javaHash(frame, value);
+}
+
+/**
+ * `flatMap` and `or`, which give another optional, and `orElseThrow(Supplier)`, which throws the exception the
+ * supplier makes when the optional is empty.
+ */
+function defineOptionalChains(context: Context, optional: ClassInfo, tType: JavaType): void {
+  const { objectType } = context;
+  const [fn, supplier] = [context.fn('Function'), context.fn('Supplier')];
+  const u = typeVariable('U', objectType);
+  const optionalOfU = classType(optional, extendsOf(variableType(u)));
+  addMethod(
+    optional,
+    'flatMap',
+    [classType(fn, superOf(tType), optionalOfU)],
+    classType(optional, variableType(u)),
+    false,
+    (frame, receiver, [mapper]) => {
+      requireNonNull(frame, mapper);
+      const state = stateOf(receiver);
+      if (!state.isPresent) return receiver;
+      const result = callFunction(frame, fn, mapper, [state.value]);
+      return result ?? throwBuiltin(frame, 'NullPointerException');
+    }
+  ).typeParameters = [u];
+  addMethod(
+    optional,
+    'or',
+    [classType(supplier, extendsOf(classType(optional, extendsOf(tType))))],
+    classType(optional, tType),
+    false,
+    (frame, receiver, [other]) => {
+      requireNonNull(frame, other);
+      if (stateOf(receiver).isPresent) return receiver;
+      return callFunction(frame, supplier, other, []) ?? throwBuiltin(frame, 'NullPointerException');
+    }
+  );
+  const throwableClass = context.registry.classes.get('Throwable') as ClassInfo;
+  const x = typeVariable('X', throwableClass.type);
+  addMethod(
+    optional,
+    'orElseThrow',
+    [classType(supplier, extendsOf(variableType(x)))],
+    tType,
+    false,
+    (frame, receiver, [exceptionSupplier]) => {
+      const state = stateOf(receiver);
+      if (state.isPresent) return state.value;
+      const exception = callFunction(frame, supplier, exceptionSupplier, []);
+      if (!(exception instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
+      throw new JavaThrow(exception);
+    }
+  ).typeParameters = [x];
 }
 
 /** `Optional`'s methods that take functions for the value or its absence. */

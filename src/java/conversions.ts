@@ -169,6 +169,8 @@ export function instantiateMethod(
     if (argType) infer(builtins, parameterType, argType, variables, bindings);
   }
   if (targetType && !isPrimitive(targetType)) inferFromTarget(builtins, method, targetType, bindings);
+  // A type argument the target leaves undecided decides nothing, and the variable stays open for a later pass.
+  for (const [variable, type] of bindings) if (mentionsHole(type)) bindings.delete(variable);
   // An inferred type outside its variable's bounds makes the method inapplicable.
   for (const [variable, type] of bindings) {
     const fits = variable.bounds.every((bound) => isWidening(type, substitute(bound, bindings), builtins.objectClass));
@@ -337,8 +339,16 @@ function bindVariable(
   const inferred = isPrimitive(argType) ? boxedTypeOf(builtins.wrappers, argType) : argType;
   if (!inferred) return;
   const existing = bindings.get(variable);
+  // A raw type, as a method reference such as `List::size` names it, gives way to the same class with arguments.
+  const isRawOfInferred =
+    existing?.kind === 'class' &&
+    inferred.kind === 'class' &&
+    existing.cls === inferred.cls &&
+    !existing.args?.length &&
+    (inferred.args?.length ?? 0) > 0;
   if (
     !existing ||
+    isRawOfInferred ||
     isWidening(existing, inferred, builtins.objectClass) ||
     (upperBoundBindings.has(existing) && isWidening(inferred, existing, builtins.objectClass))
   ) {
@@ -363,7 +373,14 @@ function inferFromReceiverHint(
   const index = parameterType.cls.typeParameters.indexOf(first.variable);
   const arg = parameterType.args[index] as JavaType | undefined;
   if (!arg) return;
-  infer(builtins, arg.kind === 'wildcard' && arg.bound ? arg.bound : arg, hint, variables, bindings);
+  const target = arg.kind === 'wildcard' && arg.bound ? arg.bound : arg;
+  // A raw class, as `List::size` names it, decides a variable only until another argument gives its type arguments.
+  const isRaw = hint.kind === 'class' && !hint.args?.length && hint.cls.typeParameters.length > 0;
+  if (isRaw && target.kind === 'typeVar' && variables.includes(target.variable)) {
+    bindUpperBound(builtins, target.variable, hint, bindings);
+    return;
+  }
+  infer(builtins, target, hint, variables, bindings);
 }
 
 /**

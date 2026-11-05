@@ -41,7 +41,6 @@ interface FunctionType {
 const referenceLambdas = new WeakSet<Lambda>();
 
 /** Compiles lambdas and method references into objects of functional interfaces. */
-
 export abstract class LambdaCompiler extends PatternCompiler {
   protected compileFunctional(
     context: MethodContext,

@@ -1,6 +1,6 @@
 import { addMethod, addTypeParameters, newString, type Registry } from './builtinSupport';
 import type { Frame } from './runtime';
-import { type ClassInfo, createClass, type JavaType, typeName } from './types';
+import { type ClassInfo, createClass, isWidening, type JavaType, typeName } from './types';
 import { JavaArray, JavaObject, type Value } from './values';
 
 /** The name `Class.getName` gives: the qualified name of a builtin class, or the binary name of a program's class. */
@@ -111,4 +111,17 @@ export function classObjectOf(cls: ClassInfo, classClass: ClassInfo): JavaObject
     classObjects.set(cls, object);
   }
   return object;
+}
+
+/** Whether `value` may be stored in an array of `elementType`, which the JVM checks at run time. */
+export function fitsElement(frame: Frame, elementType: JavaType, value: Value): boolean {
+  if (value === undefined) return true;
+  if (elementType.kind === 'class') return frame.runtime.isInstance(value, elementType.cls);
+  if (elementType.kind === 'array') {
+    return (
+      value instanceof JavaArray &&
+      isWidening({ kind: 'array', element: value.elementType }, elementType, frame.runtime.builtins.objectClass)
+    );
+  }
+  return true;
 }

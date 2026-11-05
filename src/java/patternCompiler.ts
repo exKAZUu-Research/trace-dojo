@@ -2,6 +2,7 @@ import type { Expression, Pattern, PatternBinding, PatternLabel, Statement, Swit
 import { boxedTypeOf } from './builtinWrappers';
 import type { Compiled, Exec, MethodContext, Scope } from './compilerBase';
 import { memberBindings, memberType } from './conversions';
+import { declarationKey } from './definiteAssignment';
 import { bindingsOfPattern } from './patternBindings';
 import { canCompleteNormally, exhaustiveSwitches } from './reachability';
 import { type Frame, JavaThrow, throwBuiltin } from './runtime';
@@ -136,6 +137,8 @@ export abstract class PatternCompiler extends TryCompiler {
     const slot = context.locals.length;
     context.locals.push({ name: pattern.binding.name, type });
     context.patternSlots.push(slot);
+    // Definite assignment analysis knows the variable by its declaration, as it knows other locals.
+    context.declarationKeys.set(slot, declarationKey(pattern.binding.name, pattern.binding));
     this.bindingSlots.set(pattern.binding, slot);
     const matchesEverything =
       isPrimitivePattern || (isComponent && isWidening(erasure(inputType), erasure(type), this.builtins.objectClass));

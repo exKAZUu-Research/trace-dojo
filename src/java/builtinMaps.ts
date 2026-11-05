@@ -214,7 +214,8 @@ function mapView(
   frame: Frame,
   map: Value,
   viewClass: ClassInfo,
-  elementOf: (entry: HashStore['entries'][number]) => Value
+  elementOf: (entry: HashStore['entries'][number]) => Value,
+  isKeySet = false
 ): JavaObject {
   const view = frame.runtime.allocateObject(frame, viewClass);
   // A view reads the map's entries whenever it is used, so that it follows every later change to the map.
@@ -233,6 +234,7 @@ function mapView(
     store: () => storeOf(map),
     entries: () => storeOf(map).ordered(),
     elementOf,
+    isKeySet,
     remove: (removeFrame, entry) => {
       checkModifiable(removeFrame, map, true);
       removeEntry(removeFrame, map, entry.key);
@@ -576,7 +578,7 @@ export function defineMapMethods(
     touch(receiver);
   });
   addMethod(cls, 'keySet', [], classType(views.setClass, key), false, (frame, receiver) =>
-    cachedView(receiver, 'keySet', () => mapView(frame, receiver, views.snapshotSet, (entry) => entry.key))
+    cachedView(receiver, 'keySet', () => mapView(frame, receiver, views.snapshotSet, (entry) => entry.key, true))
   );
   addMethod(cls, 'values', [], classType(views.collectionClass, value), false, (frame, receiver) =>
     cachedView(receiver, 'values', () => mapView(frame, receiver, views.snapshotCollection, (entry) => entry.value))

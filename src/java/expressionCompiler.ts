@@ -11,6 +11,7 @@ import {
   type Scope,
 } from './compilerBase';
 import { unboxedTypeOf } from './conversions';
+import { declarationKey } from './definiteAssignment';
 import { binaryOperation, castOperation, conditionalType, unaryOperation } from './operators';
 import { bindingsWhen } from './patternBindings';
 import { booleanConstants } from './reachability';
@@ -249,6 +250,7 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
     const slot = context.locals.length;
     context.locals.push({ name: binding.name, type });
     context.patternSlots.push(slot);
+    context.declarationKeys.set(slot, declarationKey(binding.name, binding));
     this.bindingSlots.set(binding, slot);
     return {
       kind: 'value',

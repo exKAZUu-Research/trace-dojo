@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 415 -- One checker for the definite assignment rules of JLS chapter 16, which share its scopes and states.
+// code-gauge-allow-file fileNcss 426 -- One checker for the definite assignment rules of JLS chapter 16, which share its scopes and states.
 import { CompileError } from '../interpreter/diagnostics';
 import {
   assign,
@@ -21,13 +21,16 @@ import type {
   LabeledStatement,
   LocalVariableDeclaration,
   Parameter,
+  PatternBinding,
   Span,
   Statement,
   SwitchExpression,
+  SwitchGroup,
   SwitchStatement,
   TryStatement,
   WhileStatement,
 } from './ast';
+import { bindingsOfPattern } from './patternBindings';
 import { booleanConstants, exhaustiveSwitches } from './reachability';
 
 /**
@@ -237,13 +240,31 @@ export class DefiniteAssignmentChecker {
         let fallthrough = UNREACHABLE;
         for (const group of expression.groups) {
           const entry = expression.isArrowForm ? afterSelector : join(afterSelector, fallthrough);
-          fallthrough = this.statements(group.statements, entry);
+          fallthrough = this.statements(group.statements, this.declareLabelBindings(group, entry));
         }
       });
     } finally {
       this.yields.pop();
     }
     return join(...yields);
+  }
+
+  /** Declares the pattern variables of a switch group's labels, which hold their values where the group runs. */
+  private declareLabelBindings(group: SwitchGroup, state: State): State {
+    const bindings = group.labels.flatMap((label) =>
+      label !== undefined && label.kind === 'patternLabel' ? bindingsOfPattern(label.pattern) : []
+    );
+    return this.declarePatternBindings(state, bindings);
+  }
+
+  /**
+   * Declares pattern variables, assigned where they are in scope, so that the effective finality of those that
+   * lambdas and classes capture follows the same flow analysis as other locals'.
+   */
+  private declarePatternBindings(state: State, bindings: readonly PatternBinding[]): State {
+    let current = state;
+    for (const binding of bindings) current = this.declare(current, binding.name, binding.isFinal, true, true, binding);
+    return current;
   }
 
   private localDeclaration(statement: LocalVariableDeclaration, state: State): State {
@@ -371,7 +392,7 @@ export class DefiniteAssignmentChecker {
         const ends: State[] = [];
         for (const group of statement.groups) {
           const entry = statement.isArrowForm ? afterSelector : join(afterSelector, fallthrough);
-          const end = this.statements(group.statements, entry);
+          const end = this.statements(group.statements, this.declareLabelBindings(group, entry));
           if (statement.isArrowForm) ends.push(end);
           else fallthrough = end;
         }
@@ -480,7 +501,7 @@ export class DefiniteAssignmentChecker {
   }
 
   // code-gauge-allow functionCognitiveComplexity 17 -- One case per expression kind, most only visiting their operands.
-  // code-gauge-allow functionNcss 50 -- One case per expression kind, most only visiting their operands in order.
+  // code-gauge-allow functionNcss 51 -- One case per expression kind, most only visiting their operands in order.
   private expression(expression: Expression, state: State): State {
     switch (expression.kind) {
       case 'name': {
@@ -510,9 +531,11 @@ export class DefiniteAssignmentChecker {
       case 'unary': {
         return this.expression(expression.operand, state);
       }
-      case 'cast':
-      case 'instanceOf': {
+      case 'cast': {
         return this.expression(expression.value, state);
+      }
+      case 'instanceOf': {
+        return this.declarePatternBindings(this.expression(expression.value, state), instanceOfBindings(expression));
       }
       case 'switchExpression': {
         return this.switchExpression(expression, state);
@@ -693,3 +716,9 @@ export class DefiniteAssignmentChecker {
 }
 
 export { assignedNames } from './assignmentStates';
+
+/** The pattern variables an `instanceof` declares. */
+function instanceOfBindings(expression: Extract<Expression, { kind: 'instanceOf' }>): PatternBinding[] {
+  if (expression.pattern) return bindingsOfPattern(expression.pattern);
+  return expression.binding ? [expression.binding] : [];
+}

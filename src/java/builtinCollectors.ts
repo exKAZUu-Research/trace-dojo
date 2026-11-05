@@ -1,4 +1,4 @@
-import { findEntry, javaEquals, javaHash, putEntry } from './builtinCollections';
+import { findEntry, javaEquals, javaHash, putEntry, removeEntry } from './builtinCollections';
 import { defineDownstreamCollectors } from './builtinDownstreamCollectors';
 import { callFunction } from './builtinFunctions';
 import { createStore } from './builtinMaps';
@@ -162,27 +162,39 @@ function defineToMap(
             const key = callFunction(accumulateFrame, fn, keyMapper, [value]);
             const mapped = callFunction(accumulateFrame, fn, valueMapper, [value]);
             if (mapped === undefined) throwBuiltin(accumulateFrame, 'NullPointerException');
-            const existing = findEntry(accumulateFrame, container as Value, key);
-            if (!existing) {
-              // A merging toMap adds a key as HashMap.merge does, at the start of its bucket.
-              putEntry(accumulateFrame, container as Value, key, false, mapped, isMerging);
-              return;
-            }
-            if (!isMerging) {
-              const describe = (item: Value): string => stringify(accumulateFrame, item, objectType);
-              throwBuiltin(
-                accumulateFrame,
-                'IllegalStateException',
-                `Duplicate key ${describe(key)} (attempted merging values ${describe(existing.value)} and ${describe(mapped)})`
-              );
-            }
-            existing.value = callFunction(accumulateFrame, binary, merger, [existing.value, mapped]);
+            const merge = isMerging
+              ? (existing: Value): Value => callFunction(accumulateFrame, binary, merger, [existing, mapped])
+              : undefined;
+            putMapped(accumulateFrame, container as Value, key, mapped, merge);
           },
           finish: (_, container) => container as Value,
         })
     );
     method.typeParameters = [t, k, u];
   }
+}
+
+/**
+ * Puts a key `toMap` maps: a new key as `HashMap.merge` adds it, at the start of its bucket when merging; a
+ * duplicate through `merge`, whose null result removes the key, or as an `IllegalStateException` without a merger.
+ */
+function putMapped(frame: Frame, map: Value, key: Value, mapped: Value, merge?: (existing: Value) => Value): void {
+  const existing = findEntry(frame, map, key);
+  if (!existing) {
+    putEntry(frame, map, key, false, mapped, merge !== undefined);
+    return;
+  }
+  if (!merge) {
+    const describe = (item: Value): string => stringify(frame, item, frame.runtime.builtins.objectClass.type);
+    throwBuiltin(
+      frame,
+      'IllegalStateException',
+      `Duplicate key ${describe(key)} (attempted merging values ${describe(existing.value)} and ${describe(mapped)})`
+    );
+  }
+  const merged = merge(existing.value);
+  if (merged === undefined) removeEntry(frame, map, key);
+  else existing.value = merged;
 }
 
 export function newList(frame: Frame, items: Value[]): JavaObject {

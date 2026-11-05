@@ -396,10 +396,47 @@ function numericValueOf(code: number): number {
   if (digit !== -1) return digit;
   const roman = code >= 0x21_60 && code < 0x21_80 ? ROMAN_NUMERALS[(code - 0x21_60) % 16] : undefined;
   if (roman !== undefined) return roman;
-  // Other numeric characters, such as a superscript digit, have the value of the digit they are a form of.
-  const character = asciiFormOf(code);
-  return /^\d$/.test(character) ? Number(character) : -1;
+  const numeral = NUMERAL_RUNS.find(([start, end]) => code >= start && code <= end);
+  if (numeral) return numeral[2] + (code - numeral[0]) * numeral[3];
+  // Other numeric characters have the value of the number they are a form of, as ⑳ of 20, or -2 for a fraction.
+  const form = asciiFormOf(code);
+  if (form.includes('\u2044')) return -2;
+  const value = /^\(?(\d+)[.)]?$/.exec(form)?.[1];
+  if (value !== undefined) return Number(value);
+  // A numeral left is one whose value is no nonnegative integer, such as a fraction or a half, as far as known here.
+  return /\p{N}/u.test(String.fromCodePoint(code)) ? -2 : -1;
 }
+
+/**
+ * Runs of numerals with no compatibility form that spells their value, as [first, last, first value, step]: Ethiopic
+ * and early Roman numerals, circled and parenthesized ideographs, Hangzhou numerals, negative and double circled
+ * numbers, and the zeros.
+ */
+const NUMERAL_RUNS: readonly (readonly [number, number, number, number])[] = [
+  [0x13_69, 0x13_71, 1, 1],
+  [0x13_72, 0x13_7a, 10, 10],
+  [0x13_7b, 0x13_7b, 100, 0],
+  [0x13_7c, 0x13_7c, 10_000, 0],
+  [0x21_80, 0x21_80, 1000, 0],
+  [0x21_81, 0x21_81, 5000, 0],
+  [0x21_82, 0x21_82, 10_000, 0],
+  [0x21_85, 0x21_85, 6, 0],
+  [0x21_86, 0x21_86, 50, 0],
+  [0x21_87, 0x21_87, 50_000, 0],
+  [0x21_88, 0x21_88, 100_000, 0],
+  [0x21_89, 0x21_89, 0, 0],
+  [0x24_eb, 0x24_f4, 11, 1],
+  [0x24_f5, 0x24_fe, 1, 1],
+  [0x24_ff, 0x24_ff, 0, 0],
+  [0x27_76, 0x27_7f, 1, 1],
+  [0x27_80, 0x27_89, 1, 1],
+  [0x27_8a, 0x27_93, 1, 1],
+  [0x30_07, 0x30_07, 0, 0],
+  [0x30_21, 0x30_29, 1, 1],
+  [0x30_38, 0x30_3a, 10, 10],
+  [0x32_20, 0x32_29, 1, 1],
+  [0x32_80, 0x32_89, 1, 1],
+];
 
 /** The values of the Roman numerals from U+2160 (Ⅰ), whose small forms from U+2170 (ⅰ) follow in the same order. */
 const ROMAN_NUMERALS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 50, 100, 500, 1000];

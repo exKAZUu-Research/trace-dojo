@@ -109,15 +109,28 @@ export function defineDownstreamCollectors(
       parameters: [classType(fn('Function'), superOf(t), extendsOf(u)), collectorOf(superOf(u), a, r)],
       result: collectorOf(t, ANY, r),
     }),
-    (frame, _, [mapper, downstream]) => {
-      const target = functionsOf(frame, downstream);
-      return create(frame, {
-        supply: (supplyFrame) => target.supply(supplyFrame),
-        accumulate: (accumulateFrame, container, value) =>
-          target.accumulate(accumulateFrame, container, callFunction(accumulateFrame, fn('Function'), mapper, [value])),
-        finish: (finishFrame, container) => target.finish(finishFrame, container),
-      });
-    }
+    (frame, _, [mapper, downstream]) =>
+      create(
+        frame,
+        adapted(functionsOf(frame, downstream), {
+          map: (mapFrame, value) => callFunction(mapFrame, fn('Function'), mapper, [value]),
+        })
+      )
+  );
+  define(
+    'collectingAndThen',
+    ['T', 'A', 'R', 'RR'],
+    ([t, a, r, rr]) => ({
+      parameters: [collectorOf(t, a, r), classType(fn('Function'), r, rr)],
+      result: collectorOf(t, a, rr),
+    }),
+    (frame, _, [downstream, finisher]) =>
+      create(
+        frame,
+        adapted(functionsOf(frame, downstream), {
+          finish: (finishFrame, result) => callFunction(finishFrame, fn('Function'), finisher, [result]),
+        })
+      )
   );
   defineNumericCollectors(context, define, collectorOf, create);
   define(
@@ -183,6 +196,21 @@ function defineNumericCollectors(
 }
 
 /** The collector functions behind a collector object, which only the builtin collectors have. */
+/** A downstream collector that sees each value through `map`, as `mapping`, or gives its result to `finish`. */
+function adapted(
+  target: CollectorFunctions,
+  {
+    map = (_, value) => value,
+    finish = (_, result) => result,
+  }: { map?: (frame: Frame, value: Value) => Value; finish?: (frame: Frame, result: Value) => Value }
+): CollectorFunctions {
+  return {
+    supply: (frame) => target.supply(frame),
+    accumulate: (frame, container, value) => target.accumulate(frame, container, map(frame, value)),
+    finish: (frame, container) => finish(frame, target.finish(frame, container)),
+  };
+}
+
 function functionsOf(frame: Frame, collector: Value): CollectorFunctions {
   const functions = collector instanceof JavaObject ? collectors.get(collector) : undefined;
   return functions ?? throwBuiltin(frame, 'UnsupportedOperationException');

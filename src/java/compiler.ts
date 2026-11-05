@@ -13,14 +13,7 @@ import type {
   VariableDeclarator,
 } from './ast';
 import type { Builtins } from './builtins';
-import {
-  anonymousDeclaration,
-  type CompileOptions,
-  type Eval,
-  type Exec,
-  type MethodContext,
-  topLevelOf,
-} from './compilerBase';
+import { anonymousDeclaration, type CompileOptions, type Eval, type Exec, type MethodContext } from './compilerBase';
 import { memberBindings, methodView } from './conversions';
 import { DeclarationCompiler } from './declarations';
 import { checkDefiniteAssignment } from './definiteAssignment';
@@ -60,8 +53,8 @@ export function compileProgram(unit: CompilationUnit, options: CompileOptions = 
 }
 
 class Compiler extends DeclarationCompiler {
-  /** How many local and anonymous classes each top-level class holds so far, which numbers their binary names. */
-  private readonly localClassCounts = new Map<ClassInfo, number>();
+  /** The binary names given to local and anonymous classes, which numbers the next ones as javac does. */
+  private readonly localClassNames = new Set<string>();
 
   compile(unit: CompilationUnit): CompiledProgram {
     this.registerClasses(unit);
@@ -343,8 +336,8 @@ class Compiler extends DeclarationCompiler {
   }
 
   /** Declares and compiles a class written inside a method body, with the classes nested in it. */
-  // code-gauge-allow functionCognitiveComplexity 22 -- Registering, declaring, and compiling a local class and its nested classes share their state.
-  // code-gauge-allow functionNcss 41 -- Registering, declaring, and compiling a local class and its nested classes share their state.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Registering, declaring, and compiling a local class and its nested classes share their state.
+  // code-gauge-allow functionNcss 44 -- Registering, declaring, and compiling a local class and its nested classes share their state.
   protected compileLocalClass(
     context: MethodContext,
     declaration: ClassDeclaration,
@@ -361,14 +354,17 @@ class Compiler extends DeclarationCompiler {
     if (!anonymous && this.localTypeScopes.some((types) => types.has(name))) {
       this.error(declaration, `クラス ${name} はすでに定義されています。`);
     }
-    const top = topLevelOf(context.cls);
-    const number = (this.localClassCounts.get(top) ?? 0) + 1;
-    this.localClassCounts.set(top, number);
-    const cls = createClass(anonymous ? `${top.name}$${number}` : name, undefined, false);
+    // javac names it after the class that encloses it, with the smallest number free for its name: Main$1, Main$1L.
+    const suffix = anonymous ? '' : name;
+    let number = 1;
+    while (this.localClassNames.has(`${context.cls.binaryName}$${number}${suffix}`)) number++;
+    const binaryName = `${context.cls.binaryName}$${number}${suffix}`;
+    this.localClassNames.add(binaryName);
+    const cls = createClass(anonymous ? binaryName : name, undefined, false);
     cls.kind = kind;
     cls.declaration = declaration;
     cls.enclosing = context.cls;
-    cls.binaryName = `${top.binaryName}$${number}${anonymous ? '' : name}`;
+    cls.binaryName = binaryName;
     cls.isAbstract = modifiers.isAbstract || kind === 'interface';
     cls.isFinal = modifiers.isFinal || kind === 'enum' || declaration.isRecord === true || anonymous !== undefined;
     // Local interfaces and enums are static, so they neither belong to an instance nor read the method's locals.

@@ -138,6 +138,8 @@ export interface MapViewSource {
   store: () => HashStore;
   entries: () => HashStore['entries'];
   elementOf: (entry: HashStore['entries'][number]) => Value;
+  /** Whether the view is a key set, which a sorted map's is a `SortedSet` with the map's comparator. */
+  isKeySet?: boolean;
   remove: (frame: Frame, entry: HashStore['entries'][number]) => void;
 }
 
@@ -426,4 +428,15 @@ function sumOfHashes(frame: Frame, items: readonly Value[]): number {
   let sum = 0;
   for (const item of items) sum = toInt32(sum + (item === undefined ? 0 : javaHash(frame, item)));
   return sum;
+}
+
+/**
+ * The values sorted stably by `compare`, which also receives nulls: JavaScript's sort would put `undefined`, the
+ * interpreter's null, last without asking the comparator, where a Java comparator such as `nullsFirst` decides.
+ */
+export function sortedValues(values: readonly Value[], compare: (a: Value, b: Value) => number): Value[] {
+  return values
+    .map((_, index) => index)
+    .toSorted((i, j) => compare(values[i], values[j]))
+    .map((index) => values[index]);
 }

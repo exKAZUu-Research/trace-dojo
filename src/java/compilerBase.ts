@@ -14,6 +14,7 @@ import { boxingTarget, instantiateMethod, isInvocationConvertible, mentionsHole,
 import { type AssignmentFacts, declarationKey } from './definiteAssignment';
 import { nullMessage, type NullSource } from './nullMessages';
 import { castOperation, fitsIn } from './operators';
+import { passesPolyArgument, resultsInFunction } from './polyExpressions';
 import { type Frame } from './runtime';
 import { superclassesOf, topLevelOf, TypeResolver } from './typeResolver';
 import {
@@ -568,6 +569,13 @@ export abstract class CompilerBase extends TypeResolver {
       const arity = expression.kind === 'lambda' ? expression.parameters.length : undefined;
       return { kind: 'value', type: { kind: 'pending', arity }, run: () => {} };
     }
+    // A conditional or switch expression of lambdas waits for the parameter type too, which its results then get.
+    if (
+      (expression.kind === 'conditional' || expression.kind === 'switchExpression') &&
+      resultsInFunction(expression)
+    ) {
+      return { kind: 'value', type: { kind: 'pending', arity: undefined }, run: () => {} };
+    }
     if (expression.kind !== 'call' && expression.kind !== 'new')
       return this.compileValue(context, expression, false, true);
     // A call such as `Comparator.comparing(s -> s.length())` may need the parameter it is passed to for the types
@@ -577,7 +585,7 @@ export abstract class CompilerBase extends TypeResolver {
     try {
       compiled = this.compileValue(context, expression, false, true);
     } catch (error) {
-      if (!(error instanceof CompileError) || !passesImplicitLambda(expression)) throw error;
+      if (!(error instanceof CompileError) || !passesPolyArgument(expression)) throw error;
       const polyErasure = this.polyErasureOf(context, expression);
       return { kind: 'value', type: { kind: 'pending', arity: undefined, isPoly: true, polyErasure }, run: () => {} };
     }
@@ -723,17 +731,6 @@ export abstract class CompilerBase extends TypeResolver {
     if (mostSpecific.length !== 1) return this.error(span, `${what} の呼び出しがあいまいです。`);
     return mostSpecific[0];
   }
-}
-
-/**
- * Whether an expression is a call or creation that passes a lambda whose parameters have no declared types, directly
- * or through such a call, as `groupingBy(f, mapping(s -> s.length(), toList()))` does.
- */
-function passesImplicitLambda(expression: Expression): boolean {
-  if (expression.kind !== 'call' && expression.kind !== 'new') return false;
-  return expression.args.some(
-    (arg) => (arg.kind === 'lambda' && arg.parameters.some((parameter) => !parameter.type)) || passesImplicitLambda(arg)
-  );
 }
 
 /**

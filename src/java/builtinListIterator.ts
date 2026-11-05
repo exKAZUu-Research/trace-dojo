@@ -134,12 +134,18 @@ function checkedState(frame: Frame, receiver: Value, isEdit = false): ListIterat
 
 /** Calls the list's own indexed `name`, whose first parameter is the index. */
 function callListMethod(frame: Frame, list: JavaObject, name: string, args: Value[]): void {
-  const method = list.cls.methods.find(
-    (candidate) =>
-      candidate.name === name &&
-      candidate.parameterTypes.length === args.length &&
-      candidate.parameterTypes[0]?.kind === 'int'
-  );
-  if (!method) throw new Error(`${list.cls.name}.${name} is missing`);
-  frame.runtime.invoke(frame, method, list, args, undefined);
+  // The indexed overload, found through the superclasses and dispatched, as a subclass may inherit or override it.
+  for (let cls: ClassInfo | undefined = list.cls; cls; cls = cls.superclass) {
+    const method = cls.methods.find(
+      (candidate) =>
+        candidate.name === name &&
+        candidate.parameterTypes.length === args.length &&
+        candidate.parameterTypes[0]?.kind === 'int'
+    );
+    if (method) {
+      frame.runtime.invoke(frame, frame.runtime.dispatch(list, method), list, args, undefined);
+      return;
+    }
+  }
+  throw new Error(`${list.cls.name}.${name} is missing`);
 }

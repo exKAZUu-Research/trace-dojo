@@ -1,3 +1,4 @@
+import { removeAllOf, removeMatching } from './builtinBulkRemoval';
 import {
   type Collections,
   compareNatural,
@@ -7,7 +8,8 @@ import {
   putEntry,
   removeEntry,
 } from './builtinCollections';
-import { checkModifiable, forEachLiveEntry, mapViewSources, removeElements } from './builtinCollectionSupport';
+import { checkModifiable, forEachLiveEntry, mapViewSources, sortedValues } from './builtinCollectionSupport';
+import { defineKeyComparators } from './builtinComparators';
 import {
   addAbstractMethod,
   addConstant,
@@ -29,6 +31,7 @@ import {
   DOUBLE,
   INT,
   type JavaType,
+  LONG,
   type MethodInfo,
   superinterfacesOf,
   type TypeVariable,
@@ -45,7 +48,6 @@ const classType = (cls: ClassInfo, ...args: JavaType[]): ClassType => ({ kind: '
 const superOf = (bound: JavaType): WildcardType => ({ kind: 'wildcard', bound, isSuper: true });
 const extendsOf = (bound: JavaType): WildcardType => ({ kind: 'wildcard', bound, isSuper: false });
 
-/** The classes whose objects lambdas and library function objects are, one for each functional interface. */
 /** The classes of function objects, by interface and then by the class whose lambdas they are. */
 const functionClasses = new WeakMap<ClassInfo, Map<ClassInfo | undefined, ClassInfo>>();
 
@@ -133,7 +135,7 @@ function defineFunctional(
   return { cls, variables };
 }
 
-// code-gauge-allow functionNcss 36 -- One registration per builtin functional interface.
+// code-gauge-allow functionNcss 39 -- One registration per builtin functional interface.
 export function defineFunctions(
   registry: Registry,
   objectClass: ClassInfo,
@@ -155,6 +157,7 @@ export function defineFunctions(
   defineFunctional(context, 'BiPredicate', pkg, ['T', 'U'], 'test', (t, u) => [[t, u], BOOLEAN]);
   const toInt = defineFunctional(context, 'ToIntFunction', pkg, ['T'], 'applyAsInt', (t) => [[t], INT]);
   const toDouble = defineFunctional(context, 'ToDoubleFunction', pkg, ['T'], 'applyAsDouble', (t) => [[t], DOUBLE]);
+  const toLong = defineFunctional(context, 'ToLongFunction', pkg, ['T'], 'applyAsLong', (t) => [[t], LONG]);
   defineFunctional(context, 'IntFunction', pkg, ['R'], 'apply', (r) => [[INT], r]);
   defineFunctional(context, 'IntPredicate', pkg, [], 'test', () => [[INT], BOOLEAN]);
   defineFunctional(context, 'IntUnaryOperator', pkg, [], 'applyAsInt', () => [[INT], INT]);
@@ -174,11 +177,14 @@ export function defineFunctions(
     comparableClass
   );
   defineCaseInsensitiveOrder(registry.classes.get('String') as ClassInfo, comparator, objectClass);
-  defineEntryComparators(
-    context,
-    collections.mapClass.memberTypes.get('Entry') as ClassInfo,
+  const entryClass = collections.mapClass.memberTypes.get('Entry') as ClassInfo;
+  defineEntryComparators(context, entryClass, comparator, comparableClass);
+  defineKeyComparators(
     comparator,
-    comparableClass
+    { kind: 'typeVar', variable: comparator.typeParameters[0] as TypeVariable },
+    { fn: fn.cls, toLong: toLong.cls },
+    entryClass,
+    context.objectType
   );
   definePredicateDefaults(predicate.cls, predicate.variables[0]);
   defineCompositions(context, { fn, biFunction, consumer }, { unary, binary, comparator });
@@ -505,14 +511,25 @@ function defineCompositions(
   }
 }
 
-/** Sorts in place with a comparator, or in natural order when it is null, as `List.sort` does. */
-export function sortValues(frame: Frame, values: Value[], comparator: Value, comparatorClass: ClassInfo): void {
+/**
+ * Sorts in place with a comparator, or in natural order when it is null, as `List.sort` does; a list (`owner`) that
+ * the comparator changes keeps its order and fails with `ConcurrentModificationException`, as ArrayList's does.
+ */
+export function sortValues(
+  frame: Frame,
+  values: Value[],
+  comparator: Value,
+  comparatorClass: ClassInfo,
+  owner?: JavaObject
+): void {
   frame.runtime.spend(Math.ceil((values.length * Math.log2(values.length + 1)) / 16));
-  const sorted = values.toSorted((a, b) =>
+  const expectedModCount = owner?.modCount;
+  const sorted = sortedValues(values, (a, b) =>
     comparator === undefined
       ? compareNatural(frame, a, b)
       : (callFunction(frame, comparatorClass, comparator, [a, b]) as number)
   );
+  if (owner && owner.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
   values.splice(0, values.length, ...sorted);
 }
 
@@ -578,23 +595,14 @@ function defineIterableDefaults(collections: Collections, functions: DefaultFunc
     false,
     (frame, receiver, [filter]) => {
       checkModifiable(frame, receiver, false);
-      const items = [...itemsOf(frame, receiver)];
-      const removed = items.filter((item) => callFunction(frame, functions.predicate, filter, [item]) === true);
-      return removeAllOf(frame, receiver, removed);
+      return removeMatching(
+        frame,
+        receiver,
+        (item) => callFunction(frame, functions.predicate, filter, [item]) === true
+      );
     }
   );
   defineBulkOperations(collectionClass);
-}
-
-/** Removes the items in `removed` from a list, a set, or a view of a map, returning whether there were any. */
-function removeAllOf(frame: Frame, receiver: Value, removed: Value[]): boolean {
-  if (removed.length === 0) return false;
-  checkModifiable(frame, receiver, true);
-  const object = receiver as JavaObject;
-  if (object.elements) return removeElements(frame, receiver, (item) => removed.includes(item));
-  for (const item of removed) removeEntry(frame, receiver, item);
-  object.modCount = (object.modCount ?? 0) + 1;
-  return true;
 }
 
 /** `containsAll`, `removeAll`, and `retainAll`, which ask the other collection whether it contains each element. */
@@ -631,7 +639,7 @@ function defineListDefaults(collections: Collections, functions: DefaultFunction
     false,
     (frame, receiver, [comparator]) => {
       checkModifiable(frame, receiver, false);
-      sortValues(frame, itemsOf(frame, receiver), comparator, functions.comparator);
+      sortValues(frame, itemsOf(frame, receiver), comparator, functions.comparator, receiver as JavaObject);
       const object = receiver as JavaObject;
       object.modCount = (object.modCount ?? 0) + 1;
     }
@@ -645,8 +653,16 @@ function defineListDefaults(collections: Collections, functions: DefaultFunction
     (frame, receiver, [operator]) => {
       checkModifiable(frame, receiver, false);
       const values = itemsOf(frame, receiver);
-      for (const [index, value] of values.entries())
-        values[index] = callFunction(frame, functions.unary, operator, [value]);
+      const list = receiver as JavaObject;
+      const expectedModCount = list.modCount;
+      // As ArrayList's does, the operator runs over the elements there were, and a change it makes ends the loop;
+      // the value it returns then lands in the array the change replaced, so the list does not show it.
+      const size = values.length;
+      for (let index = 0; index < size && list.modCount === expectedModCount; index++) {
+        const replaced = callFunction(frame, functions.unary, operator, [values[index]]);
+        if (list.modCount === expectedModCount) values[index] = replaced;
+      }
+      if (list.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
     }
   );
 }
@@ -783,7 +799,7 @@ function defineComparatorSorts(context: Context, collections: Collections, funct
     true,
     (frame, _, [list, comparator]) => {
       checkModifiable(frame, list, false);
-      sortValues(frame, itemsOf(frame, list), comparator, functions.comparator);
+      sortValues(frame, itemsOf(frame, list), comparator, functions.comparator, list as JavaObject);
       const object = list as JavaObject;
       object.modCount = (object.modCount ?? 0) + 1;
     }

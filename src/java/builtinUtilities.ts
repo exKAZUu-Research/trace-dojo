@@ -7,7 +7,7 @@ import {
   javaHash,
   putEntry,
 } from './builtinCollections';
-import { checkModifiable, unmodifiableWrappers } from './builtinCollectionSupport';
+import { checkModifiable, sortedValues, unmodifiableWrappers } from './builtinCollectionSupport';
 import { createStore, NO_ENTRY } from './builtinMaps';
 import { stringify } from './builtins';
 import { addMethod, newString, type Registry } from './builtinSupport';
@@ -193,7 +193,7 @@ function defineArraySearches(arraysClass: ClassInfo, element: JavaType, isObject
     const [start, end] = [from as number, to as number];
     checkArrayRange(frame, start, end, values.length);
     frame.runtime.spend(Math.ceil(((end - start) * Math.log2(end - start + 1)) / 16));
-    values.splice(start, end - start, ...values.slice(start, end).toSorted((a, b) => compare(frame, a, b)));
+    values.splice(start, end - start, ...sortedValues(values.slice(start, end), (a, b) => compare(frame, a, b)));
   });
 }
 
@@ -285,7 +285,7 @@ function defineCollectionViews(
   );
   generic(['T'], (t) =>
     addMethod(cls, 'unmodifiableList', [readOnly(listClass, t)], classOf(listClass, t), true, (frame, _, [list]) =>
-      createList(frame, collections.immutableList, itemsOf(frame, list))
+      wrap(createList(frame, collections.immutableList, itemsOf(frame, list)), list as JavaObject)
     )
   );
   for (const [owner, immutable, names] of [
@@ -303,9 +303,7 @@ function defineCollectionViews(
           if (!(source instanceof JavaObject) || !source.store) return throwBuiltin(frame, 'NullPointerException');
           const view = frame.runtime.allocateObject(frame, immutable);
           view.store = source.store;
-          view.modCount = 0;
-          unmodifiableWrappers.add(view);
-          return view;
+          return wrap(view, source);
         }
       )
     );
@@ -320,6 +318,18 @@ function defineCollectionViews(
   addMethod(cls, 'binarySearch', [readOnly(listClass, comparable), key], INT, true, (frame, _, [list, target]) =>
     binarySearch(frame, itemsOf(frame, list), target, compareNatural)
   ).typeParameters = [keyVariable];
+}
+
+/**
+ * Makes `view` an unmodifiable wrapper of `source`, whose elements it shares: it follows the changes made to
+ * `source`, so that its iterators fail fast on them, and keeps `source` alive.
+ */
+function wrap(view: JavaObject, source: JavaObject): JavaObject {
+  Object.defineProperty(view, 'modCount', { get: () => source.modCount, set: () => {} });
+  if (source.elements) Object.defineProperty(view, 'elements', { get: () => source.elements, set: () => {} });
+  view.retained = [source];
+  unmodifiableWrappers.add(view);
+  return view;
 }
 
 function createList(frame: Frame, cls: ClassInfo, elements: Value[]): JavaObject {
@@ -389,7 +399,7 @@ function defineArrays(
       const { values } = arrayOf(frame, array);
       frame.runtime.spend(Math.ceil((values.length * Math.log2(values.length + 1)) / 16));
       if (element === objectType) {
-        const sorted = values.toSorted((a, b) => compareNatural(frame, a, b));
+        const sorted = sortedValues(values, (a, b) => compareNatural(frame, a, b));
         values.splice(0, values.length, ...sorted);
       } else values.sort(comparePrimitives);
     });
@@ -496,7 +506,7 @@ function defineCollectionsClass(
       checkModifiable(frame, list, false);
       const values = elementsOf(frame, list);
       frame.runtime.spend(Math.ceil((values.length * Math.log2(values.length + 1)) / 16));
-      const sorted = values.toSorted((a, b) => compareNatural(frame, a, b));
+      const sorted = sortedValues(values, (a, b) => compareNatural(frame, a, b));
       values.splice(0, values.length, ...sorted);
       touch(list);
     }

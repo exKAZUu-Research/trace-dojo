@@ -1,30 +1,28 @@
+import { fitsElement, runtimeClassNameOf } from './builtinClass';
 import { type Collections, compareNatural, itemsOf, javaEquals } from './builtinCollections';
+import { sortedValues } from './builtinCollectionSupport';
 import { collectors, defineCollectors } from './builtinCollectors';
 import { callFunction, type Functions } from './builtinFunctions';
 import { createOptional, defineOptionals, type Optionals } from './builtinOptionals';
-import { classType, type Context, extendsOf, superOf, typeVariable, variableType } from './builtinStreamSupport';
+import {
+  classType,
+  type Context,
+  countOf,
+  createStream,
+  derive,
+  extendsOf,
+  iterate,
+  op,
+  superOf,
+  take,
+  typeVariable,
+  variableType,
+} from './builtinStreamSupport';
 import { addMethod, defineInterface, newString, type Registry } from './builtinSupport';
 import { box, type Wrappers } from './builtinWrappers';
 import { type Frame, throwBuiltin } from './runtime';
-import {
-  BOOLEAN,
-  type ClassInfo,
-  type ClassType,
-  createClass,
-  INT,
-  type JavaType,
-  LONG,
-  type MethodInfo,
-  type NativeMethod,
-  type TypeVariable,
-  VOID,
-} from './types';
-import { charCodeOf, JavaArray, JavaObject, type JavaString, toInt32, type Value } from './values';
-
-/** The elements a stream yields, one at a time, as each stage pulls them from the stage before. */
-type Source = () => Iterator<Value>;
-
-const sources = new WeakMap<JavaObject, { source: Source; isUsed: boolean }>();
+import { BOOLEAN, type ClassInfo, type ClassType, createClass, INT, type JavaType, LONG, VOID } from './types';
+import { charCodeOf, JavaArray, type JavaObject, type JavaString, toInt32, type Value } from './values';
 
 export function defineStreams(
   registry: Registry,
@@ -56,64 +54,6 @@ interface StreamTypes {
   intStream: ClassInfo;
   streamImpl: ClassInfo;
   intStreamImpl: ClassInfo;
-}
-
-/** A stream of the elements `source` yields, which keeps alive the objects in `retained` that hold its elements. */
-function createStream(frame: Frame, cls: ClassInfo, source: Source, retained: Value[] = []): JavaObject {
-  const object = frame.runtime.allocateObject(frame, cls);
-  sources.set(object, { source, isUsed: false });
-  object.retained = retained;
-  return object;
-}
-
-/** Takes a stream's elements for its next stage, which Java allows only once per stream. */
-function take(frame: Frame, receiver: Value): Iterator<Value> {
-  return claim(frame, receiver)();
-}
-
-/** Marks a stream as operated upon, returning its source for a later stage to traverse when it is consumed. */
-function claim(frame: Frame, receiver: Value): Source {
-  const state = sources.get(receiver as JavaObject) as { source: Source; isUsed: boolean };
-  if (state.isUsed) throwBuiltin(frame, 'IllegalStateException', 'stream has already been operated upon or closed');
-  state.isUsed = true;
-  return state.source;
-}
-
-function* iterate(iterator: Iterator<Value>): Generator<Value> {
-  for (let next = iterator.next(); !next.done; next = iterator.next()) yield next.value;
-}
-
-/**
- * Adds a stream operation as a default method of the interface, so that every stream object runs the same native.
- * A stream it returns keeps alive the functions and values passed to it, which its later stages call or read.
- */
-function op(
-  cls: ClassInfo,
-  name: string,
-  parameterTypes: JavaType[],
-  returnType: JavaType,
-  native: NativeMethod,
-  typeParameters?: TypeVariable[]
-): MethodInfo {
-  const method = addMethod(cls, name, parameterTypes, returnType, false, (frame, receiver, args) => {
-    const result = native(frame, receiver, args);
-    if (result instanceof JavaObject && sources.has(result)) result.retained?.push(...args);
-    return result;
-  });
-  method.typeParameters = typeParameters;
-  return method;
-}
-
-/** A stream whose elements `transform` derives from the elements of the stream `receiver`. */
-function derive(
-  cls: ClassInfo,
-  receiver: Value,
-  frame: Frame,
-  transform: (items: Iterator<Value>) => Iterator<Value>
-): JavaObject {
-  // The source is read only when the pipeline is consumed, so that changes made to a collection before then show.
-  const upstream = claim(frame, receiver);
-  return createStream(frame, cls, () => transform(upstream()), [receiver]);
 }
 
 function defineStreamTypes(context: Context, optionals: Optionals, collector: ClassInfo): StreamTypes {
@@ -199,42 +139,97 @@ function streamKind(
 }
 
 /** The operations that make a stream from another: filtering, limiting, skipping, deduplicating, and sorting. */
-// code-gauge-allow functionCognitiveComplexity 27 -- One registration per builtin method, each a small native.
 function defineIntermediateOperations(kind: StreamKind): void {
   const { cls, impl, isInt, self, predicate } = kind;
-  op(cls, 'filter', [kind.predicateType], self, (frame, receiver, [test]) =>
-    derive(impl, receiver, frame, function* (items) {
-      for (const value of iterate(items)) if (callFunction(frame, predicate, test, [value]) === true) yield value;
-    })
+  const test = (frame: Frame, function_: Value) => (value: Value) =>
+    callFunction(frame, predicate, function_, [value]) === true;
+  op(cls, 'filter', [kind.predicateType], self, (frame, receiver, [function_]) =>
+    derive(impl, receiver, frame, (items) => filtered(items, test(frame, function_)))
+  );
+  op(cls, 'takeWhile', [kind.predicateType], self, (frame, receiver, [function_]) =>
+    derive(impl, receiver, frame, (items) => takenWhile(items, test(frame, function_)))
+  );
+  op(cls, 'dropWhile', [kind.predicateType], self, (frame, receiver, [function_]) =>
+    derive(impl, receiver, frame, (items) => droppedWhile(items, test(frame, function_)))
   );
   op(cls, 'limit', [LONG], self, (frame, receiver, [count]) => {
-    if ((count as bigint) < 0n) throwBuiltin(frame, 'IllegalArgumentException', String(count as bigint));
-    return derive(impl, receiver, frame, (items) => limited(items, count as bigint));
+    const n = sliceCount(frame, count);
+    return derive(
+      impl,
+      receiver,
+      frame,
+      (items) => limited(items, n),
+      (size) => minOf(size, n)
+    );
   });
-  op(cls, 'skip', [LONG], self, (frame, receiver, [count]) =>
-    derive(impl, receiver, frame, function* (items) {
-      let skipped = 0n;
-      for (const value of iterate(items)) if (skipped++ >= (count as bigint)) yield value;
-    })
-  );
+  op(cls, 'skip', [LONG], self, (frame, receiver, [count]) => {
+    const n = sliceCount(frame, count);
+    return derive(
+      impl,
+      receiver,
+      frame,
+      (items) => skipped(items, n),
+      (size) => (size > n ? size - n : 0n)
+    );
+  });
   op(cls, 'distinct', [], self, (frame, receiver) =>
     derive(impl, receiver, frame, (items) => distinct(items, (a, b) => (isInt ? a === b : javaEquals(frame, a, b))))
   );
+  const natural = (frame: Frame) => (a: Value, b: Value) =>
+    isInt ? (a as number) - (b as number) : compareNatural(frame, a, b);
   op(cls, 'sorted', [], self, (frame, receiver) =>
-    derive(impl, receiver, frame, (items) =>
-      [...iterate(items)]
-        .toSorted((a, b) => (isInt ? (a as number) - (b as number) : compareNatural(frame, a, b)))
-        [Symbol.iterator]()
-    )
+    derive(impl, receiver, frame, (items) => sortedValues([...iterate(items)], natural(frame))[Symbol.iterator](), true)
   );
   op(cls, 'peek', [kind.consumerType], self, (frame, receiver, [action]) =>
-    derive(impl, receiver, frame, function* (items) {
-      for (const value of iterate(items)) {
-        callFunction(frame, kind.consumer, action, [value]);
-        yield value;
-      }
-    })
+    derive(
+      impl,
+      receiver,
+      frame,
+      (items) => peeked(items, (value) => callFunction(frame, kind.consumer, action, [value])),
+      true
+    )
   );
+}
+
+/** The count `limit` or `skip` takes, which must not be negative. */
+function sliceCount(frame: Frame, count: Value): bigint {
+  if ((count as bigint) < 0n) throwBuiltin(frame, 'IllegalArgumentException', String(count as bigint));
+  return count as bigint;
+}
+
+function minOf(a: bigint, b: bigint): bigint {
+  return a < b ? a : b;
+}
+
+function* filtered(items: Iterator<Value>, test: (value: Value) => boolean): Generator<Value> {
+  for (const value of iterate(items)) if (test(value)) yield value;
+}
+
+function* takenWhile(items: Iterator<Value>, test: (value: Value) => boolean): Generator<Value> {
+  for (const value of iterate(items)) {
+    if (!test(value)) return;
+    yield value;
+  }
+}
+
+function* droppedWhile(items: Iterator<Value>, test: (value: Value) => boolean): Generator<Value> {
+  let isDropping = true;
+  for (const value of iterate(items)) {
+    if (isDropping) isDropping = test(value);
+    if (!isDropping) yield value;
+  }
+}
+
+function* skipped(items: Iterator<Value>, count: bigint): Generator<Value> {
+  let passed = 0n;
+  for (const value of iterate(items)) if (passed++ >= count) yield value;
+}
+
+function* peeked(items: Iterator<Value>, action: (value: Value) => void): Generator<Value> {
+  for (const value of iterate(items)) {
+    action(value);
+    yield value;
+  }
 }
 
 function* limited(items: Iterator<Value>, count: bigint): Generator<Value> {
@@ -261,12 +256,7 @@ function defineTerminalOperations(kind: StreamKind): void {
   op(cls, 'forEach', [kind.consumerType], VOID, (frame, receiver, [action]) => {
     for (const value of iterate(take(frame, receiver))) callFunction(frame, kind.consumer, action, [value]);
   });
-  op(cls, 'count', [], LONG, (frame, receiver) => {
-    let count = 0n;
-    const items = take(frame, receiver);
-    while (!items.next().done) count++;
-    return count;
-  });
+  op(cls, 'count', [], LONG, (frame, receiver) => countOf(frame, receiver));
   for (const [name, wanted, stopsAt] of [
     ['anyMatch', true, true],
     ['allMatch', false, false],
@@ -282,10 +272,13 @@ function defineTerminalOperations(kind: StreamKind): void {
   op(cls, 'reduce', [kind.binaryType], kind.optionalType, (frame, receiver, [accumulator]) =>
     reduceToOptional(frame, kind, receiver, accumulator)
   );
-  op(cls, 'findFirst', [], kind.optionalType, (frame, receiver) => {
-    const next = take(frame, receiver).next();
-    return createOptional(frame, kind.optionalClass, next.done ? undefined : next.value, !next.done);
-  });
+  // A sequential stream finds its first element for findAny too.
+  for (const name of ['findFirst', 'findAny']) {
+    op(cls, name, [], kind.optionalType, (frame, receiver) => {
+      const next = take(frame, receiver).next();
+      return createOptional(frame, kind.optionalClass, next.done ? undefined : next.value, !next.done);
+    });
+  }
   op(cls, 'max', kind.orderParameters, kind.optionalType, (frame, receiver, [order]) =>
     extremeOf(frame, kind, receiver, order, 1)
   );
@@ -322,7 +315,7 @@ function extremeOf(frame: Frame, kind: StreamKind, receiver: Value, order: Value
 }
 
 /** The operations only a `Stream` of objects has: mapping, sorting with a comparator, reducing, and collecting. */
-// code-gauge-allow functionNcss 32 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 33 -- One registration per builtin method, each a small native.
 function defineReferenceOperations(context: Context, types: StreamTypes, tType: JavaType, collector: ClassInfo): void {
   const { objectType, collections, fn } = context;
   const { stream, streamImpl, intStream, intStreamImpl } = types;
@@ -333,24 +326,30 @@ function defineReferenceOperations(context: Context, types: StreamTypes, tType: 
     [classType(fn('Function'), superOf(tType), extendsOf(variableType(r)))],
     classType(stream, variableType(r)),
     (frame, receiver, [mapper]) =>
-      derive(streamImpl, receiver, frame, (items) => mapped(frame, items, fn('Function'), mapper)),
+      derive(streamImpl, receiver, frame, (items) => mapped(frame, items, fn('Function'), mapper), true),
     [r]
   );
   defineFlatMap(context, types, tType);
+  defineToArray(context, stream);
   op(
     stream,
     'mapToInt',
     [classType(fn('ToIntFunction'), superOf(tType))],
     intStream.type,
     (frame, receiver, [mapper]) =>
-      derive(intStreamImpl, receiver, frame, (items) => mapped(frame, items, fn('ToIntFunction'), mapper))
+      derive(intStreamImpl, receiver, frame, (items) => mapped(frame, items, fn('ToIntFunction'), mapper), true)
   );
   const comparator = fn('Comparator');
   op(stream, 'sorted', [classType(comparator, superOf(tType))], classType(stream, tType), (frame, receiver, [order]) =>
-    derive(streamImpl, receiver, frame, (items) =>
-      [...iterate(items)]
-        .toSorted((a, b) => callFunction(frame, comparator, order, [a, b]) as number)
-        [Symbol.iterator]()
+    derive(
+      streamImpl,
+      receiver,
+      frame,
+      (items) =>
+        sortedValues([...iterate(items)], (a, b) => callFunction(frame, comparator, order, [a, b]) as number)[
+          Symbol.iterator
+        ](),
+      true
     )
   );
   op(stream, 'toList', [], classType(collections.listClass, tType), (frame, receiver) => {
@@ -386,6 +385,38 @@ function defineReferenceOperations(context: Context, types: StreamTypes, tType: 
   );
 }
 
+/** `toArray()`, which gives an `Object[]`, and `toArray(generator)`, which fills the array the generator makes. */
+function defineToArray(context: Context, stream: ClassInfo): void {
+  const { objectType, fn } = context;
+  op(stream, 'toArray', [], { kind: 'array', element: objectType }, (frame, receiver) => {
+    const values = [...iterate(take(frame, receiver))];
+    frame.runtime.allocateArray(frame, values.length);
+    return new JavaArray(objectType, values);
+  });
+  const a = typeVariable('A', objectType);
+  const arrayType: JavaType = { kind: 'array', element: variableType(a) };
+  op(
+    stream,
+    'toArray',
+    [classType(fn('IntFunction'), arrayType)],
+    arrayType,
+    (frame, receiver, [generator]) => {
+      const values = [...iterate(take(frame, receiver))];
+      const array = callFunction(frame, fn('IntFunction'), generator, [values.length]);
+      if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
+      if (array.values.length < values.length) throwBuiltin(frame, 'IllegalStateException');
+      for (const [index, value] of values.entries()) {
+        if (!fitsElement(frame, array.elementType, value)) {
+          throwBuiltin(frame, 'ArrayStoreException', runtimeClassNameOf(frame, value));
+        }
+        array.values[index] = value;
+      }
+      return array;
+    },
+    [a]
+  );
+}
+
 /** `flatMap`, which replaces each element with the elements of the stream the mapper returns for it. */
 function defineFlatMap(context: Context, types: StreamTypes, tType: JavaType): void {
   const { stream, streamImpl } = types;
@@ -413,8 +444,6 @@ function* mapped(frame: Frame, items: Iterator<Value>, iface: ClassInfo, mapper:
   for (const value of iterate(items)) yield callFunction(frame, iface, mapper, [value]);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- One registration per builtin method, each a small native.
-// code-gauge-allow functionNcss 34 -- One registration per builtin method, each a small native.
 function defineIntStreamOperations(
   context: Context,
   types: StreamTypes,
@@ -424,9 +453,7 @@ function defineIntStreamOperations(
   const { intStream, intStreamImpl, streamImpl, stream } = types;
   const fn = context.fn;
   op(intStream, 'map', [fn('IntUnaryOperator').type], intStream.type, (frame, receiver, [mapper]) =>
-    derive(intStreamImpl, receiver, frame, function* (items) {
-      for (const value of iterate(items)) yield callFunction(frame, fn('IntUnaryOperator'), mapper, [value]);
-    })
+    derive(intStreamImpl, receiver, frame, (items) => mapped(frame, items, fn('IntUnaryOperator'), mapper), true)
   );
   const r = typeVariable('R', context.objectType);
   op(
@@ -435,15 +462,19 @@ function defineIntStreamOperations(
     [classType(fn('IntFunction'), extendsOf(variableType(r)))],
     classType(stream, variableType(r)),
     (frame, receiver, [mapper]) =>
-      derive(streamImpl, receiver, frame, function* (items) {
-        for (const value of iterate(items)) yield callFunction(frame, fn('IntFunction'), mapper, [value]);
-      }),
+      derive(streamImpl, receiver, frame, (items) => mapped(frame, items, fn('IntFunction'), mapper), true),
     [r]
   );
   op(intStream, 'boxed', [], classType(stream, integerClass.type), (frame, receiver) =>
-    derive(streamImpl, receiver, frame, function* (items) {
-      for (const value of iterate(items)) yield box(frame, integerClass, value);
-    })
+    derive(
+      streamImpl,
+      receiver,
+      frame,
+      function* (items) {
+        for (const value of iterate(items)) yield box(frame, integerClass, value);
+      },
+      true
+    )
   );
   op(intStream, 'sum', [], INT, (frame, receiver) => {
     let sum = 0;
@@ -472,6 +503,29 @@ function defineIntStreamOperations(
   });
 }
 
+/** The stream `iterate` makes: the seed, then each value `next` gives for the last, while `hasNext` holds. */
+function iteratedStream(
+  frame: Frame,
+  context: Context,
+  streams: StreamTypes,
+  { seed, next, hasNext, isInt }: { seed: Value; next: Value; hasNext?: Value; isInt: boolean }
+): JavaObject {
+  const { fn } = context;
+  const [step, test] = isInt ? [fn('IntUnaryOperator'), fn('IntPredicate')] : [fn('UnaryOperator'), fn('Predicate')];
+  if (next === undefined) throwBuiltin(frame, 'NullPointerException');
+  return createStream(
+    frame,
+    isInt ? streams.intStreamImpl : streams.streamImpl,
+    function* () {
+      for (let value = seed; ; value = callFunction(frame, step, next, [value])) {
+        if (hasNext !== undefined && callFunction(frame, test, hasNext, [value]) !== true) return;
+        yield value;
+      }
+    },
+    [seed, next, hasNext]
+  );
+}
+
 /** `Stream.iterate` and `Stream.generate`, whose streams compute each element when it is pulled. */
 function defineGeneratedStreams(context: Context, streams: StreamTypes): void {
   const { objectType, fn } = context;
@@ -480,18 +534,25 @@ function defineGeneratedStreams(context: Context, streams: StreamTypes): void {
   const supplier = fn('Supplier');
   const iterateVariable = typeVariable('T', objectType);
   const tType = variableType(iterateVariable);
-  const iterated = (frame: Frame, seed: Value, next: Value, hasNext?: Value): JavaObject =>
-    createStream(
-      frame,
-      streams.streamImpl,
-      function* () {
-        for (let value = seed; ; value = callFunction(frame, unary, next, [value])) {
-          if (hasNext !== undefined && callFunction(frame, predicate, hasNext, [value]) !== true) return;
-          yield value;
-        }
-      },
-      [seed, next, hasNext]
-    );
+  const iterated = (frame: Frame, seed: Value, next: Value, hasNext?: Value, isInt = false): JavaObject =>
+    iteratedStream(frame, context, streams, { seed, next, hasNext, isInt });
+
+  addMethod(
+    streams.intStream,
+    'iterate',
+    [INT, fn('IntUnaryOperator').type],
+    streams.intStream.type,
+    true,
+    (frame, _, [seed, next]) => iterated(frame, seed, next, undefined, true)
+  );
+  addMethod(
+    streams.intStream,
+    'iterate',
+    [INT, fn('IntPredicate').type, fn('IntUnaryOperator').type],
+    streams.intStream.type,
+    true,
+    (frame, _, [seed, hasNext, next]) => iterated(frame, seed, next, hasNext, true)
+  );
   const streamOfT = classType(streams.stream, tType);
   const unbounded = addMethod(
     streams.stream,
@@ -536,9 +597,15 @@ function defineStringStreams(context: Context, streams: StreamTypes): void {
   const stringClass = context.registry.classes.get('String') as ClassInfo;
   addMethod(stringClass, 'chars', [], streams.intStream.type, false, (frame, receiver) => {
     const text = (receiver as JavaString).value;
-    return createStream(frame, streams.intStreamImpl, function* () {
-      for (let index = 0; index < text.length; index++) yield charCodeOf(text, index);
-    });
+    return createStream(
+      frame,
+      streams.intStreamImpl,
+      function* () {
+        for (let index = 0; index < text.length; index++) yield charCodeOf(text, index);
+      },
+      [],
+      () => BigInt(text.length)
+    );
   });
   addMethod(stringClass, 'lines', [], classType(streams.stream, stringClass.type), false, (frame, receiver) => {
     const text = (receiver as JavaString).value;
@@ -550,6 +617,7 @@ function defineStringStreams(context: Context, streams: StreamTypes): void {
   });
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- One registration per stream source, each a small native.
 // code-gauge-allow functionNcss 39 -- One registration per builtin method, each a small native.
 function defineSources(context: Context, streams: StreamTypes): void {
   const { registry, objectType, collections } = context;
@@ -563,7 +631,13 @@ function defineSources(context: Context, streams: StreamTypes): void {
     false,
     (frame, receiver) => {
       // The elements are read when the stream is consumed, so that changes made before then show, as in Java.
-      return createStream(frame, streamImpl, () => [...itemsOf(frame, receiver)][Symbol.iterator](), [receiver]);
+      return createStream(
+        frame,
+        streamImpl,
+        () => [...itemsOf(frame, receiver)][Symbol.iterator](),
+        [receiver],
+        () => BigInt(itemsOf(frame, receiver).length)
+      );
     }
   );
   const ofVariable = typeVariable('T', objectType);
@@ -575,7 +649,13 @@ function defineSources(context: Context, streams: StreamTypes): void {
     true,
     (frame, _, [array]) => {
       const values = (array as JavaArray).values;
-      return createStream(frame, streamImpl, () => values[Symbol.iterator](), [array]);
+      return createStream(
+        frame,
+        streamImpl,
+        () => values[Symbol.iterator](),
+        [array],
+        () => BigInt(values.length)
+      );
     }
   );
   of.typeParameters = [ofVariable];
@@ -585,13 +665,19 @@ function defineSources(context: Context, streams: StreamTypes): void {
     ['rangeClosed', true],
   ] as const) {
     addMethod(intStream, name, [INT, INT], intStream.type, true, (frame, _, [start, end]) =>
-      createStream(frame, intStreamImpl, function* () {
-        const last = (end as number) - (isClosed ? 0 : 1);
-        for (let value = start as number; value <= last; value++) {
-          frame.runtime.spend();
-          yield value;
-        }
-      })
+      createStream(
+        frame,
+        intStreamImpl,
+        function* () {
+          const last = (end as number) - (isClosed ? 0 : 1);
+          for (let value = start as number; value <= last; value++) {
+            frame.runtime.spend();
+            yield value;
+          }
+        },
+        [],
+        () => BigInt(Math.max(0, (end as number) - (start as number) + (isClosed ? 1 : 0)))
+      )
     );
   }
   const intOf = addMethod(
@@ -602,14 +688,26 @@ function defineSources(context: Context, streams: StreamTypes): void {
     true,
     (frame, _, [array]) => {
       const values = (array as JavaArray).values;
-      return createStream(frame, intStreamImpl, () => values[Symbol.iterator]());
+      return createStream(
+        frame,
+        intStreamImpl,
+        () => values[Symbol.iterator](),
+        [],
+        () => BigInt(values.length)
+      );
     }
   );
   intOf.isVarargs = true;
   const arraysClass = registry.classes.get('Arrays') as ClassInfo;
   addMethod(arraysClass, 'stream', [{ kind: 'array', element: INT }], intStream.type, true, (frame, _, [array]) => {
     if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
-    return createStream(frame, intStreamImpl, () => [...array.values][Symbol.iterator]());
+    return createStream(
+      frame,
+      intStreamImpl,
+      () => [...array.values][Symbol.iterator](),
+      [],
+      () => BigInt(array.values.length)
+    );
   });
   const arrayVariable = typeVariable('T', objectType);
   const arrayStream = addMethod(
@@ -620,7 +718,13 @@ function defineSources(context: Context, streams: StreamTypes): void {
     true,
     (frame, _, [array]) => {
       if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
-      return createStream(frame, streamImpl, () => [...array.values][Symbol.iterator](), [array]);
+      return createStream(
+        frame,
+        streamImpl,
+        () => [...array.values][Symbol.iterator](),
+        [array],
+        () => BigInt(array.values.length)
+      );
     }
   );
   arrayStream.typeParameters = [arrayVariable];
