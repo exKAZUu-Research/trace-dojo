@@ -1,9 +1,10 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
+import { CompileError } from '../interpreter/diagnostics';
 import { loadParser, parseSource } from '../interpreter/treeSitter';
 import type { ClassDeclaration, CompilationUnit, ImportDeclaration, MemberDeclaration } from './ast';
 import { convertTopLevelMember, convertTypeDeclaration } from './parseDeclarations';
-import { namedChildren, span, unsupported } from './parseNodes';
+import { namedChildren, span } from './parseNodes';
 
 const parser = await loadParser('@willbooster/tree-sitter-java/tree-sitter-java.wasm');
 
@@ -44,8 +45,11 @@ function convertProgram(root: Node): CompilationUnit {
         isCompact = true;
         break;
       }
+      // Java accepts only declarations outside classes, so a statement there needs a method around it.
       default: {
-        unsupported(child, 'クラスの外に書いた文');
+        throw new CompileError([
+          { row: child.startPosition.row, message: '文はクラスの外ではなく、メソッドの中に書いてください。' },
+        ]);
       }
     }
   }
