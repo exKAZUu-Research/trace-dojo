@@ -5,7 +5,17 @@ import { classType, type Context, extendsOf, superOf, typeVariable, variableType
 import { addMethod, newString } from './builtinSupport';
 import { hashOf } from './builtinWrappers';
 import { type Frame, JavaThrow, throwBuiltin } from './runtime';
-import { BOOLEAN, type ClassInfo, DOUBLE, INT, type JavaType, LONG, type NativeMethod, VOID } from './types';
+import {
+  BOOLEAN,
+  type ClassInfo,
+  DOUBLE,
+  INT,
+  isPrimitive,
+  type JavaType,
+  LONG,
+  type NativeMethod,
+  VOID,
+} from './types';
 import { JavaObject, type Value } from './values';
 
 export interface Optionals {
@@ -147,7 +157,9 @@ function defineOptionalMembers(
   addMethod(cls, 'equals', [objectType], BOOLEAN, false, (frame, receiver, [other]) => {
     if (!(other instanceof JavaObject) || other.cls !== cls) return false;
     const [a, b] = [stateOf(receiver), stateOf(other)];
-    return a.isPresent === b.isPresent && (Object.is(a.value, b.value) || javaEquals(frame, a.value, b.value));
+    if (a.isPresent !== b.isPresent) return false;
+    // A primitive optional compares as Double.compare does, telling -0.0 from 0.0 and NaN equal to itself.
+    return Object.is(a.value, b.value) || (!isPrimitive(valueType) && javaEquals(frame, a.value, b.value));
   });
   addMethod(cls, 'hashCode', [], INT, false, (frame, receiver) => optionalHash(frame, receiver, valueType));
 }

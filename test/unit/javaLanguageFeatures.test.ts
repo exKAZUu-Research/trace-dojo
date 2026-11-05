@@ -100,9 +100,15 @@ class Res implements AutoCloseable { final StringBuilder log; Res(StringBuilder 
   ],
   [
     'primitive optionals and the long and float overloads of Math.clamp',
-    'long clamped = Math.clamp(9_000_000_000_000L, 1L, 100L); float limited = Math.clamp(1.5f, 0.0f, 2.0f); String optionals = OptionalInt.of(7) + " " + OptionalDouble.of(2.5) + " " + OptionalLong.of(3L).getAsLong() + " " + OptionalInt.empty();',
+    'long clamped = Math.clamp(9_000_000_000_000L, 1L, 100L); float limited = Math.clamp(1.5f, 0.0f, 2.0f); String optionals = OptionalInt.of(7) + " " + OptionalDouble.of(2.5) + " " + OptionalLong.of(3L).getAsLong() + " " + OptionalInt.empty(); boolean zeros = OptionalDouble.of(-0.0).equals(OptionalDouble.of(0.0)); boolean nans = OptionalDouble.of(Double.NaN).equals(OptionalDouble.of(Double.NaN));',
     {},
-    { clamped: 100, limited: 1.5, optionals: 'OptionalInt[7] OptionalDouble[2.5] 3 OptionalInt.empty' },
+    {
+      clamped: 100,
+      limited: 1.5,
+      optionals: 'OptionalInt[7] OptionalDouble[2.5] 3 OptionalInt.empty',
+      zeros: false,
+      nans: true,
+    },
   ],
   [
     'class literals of primitive, array, and void types',
