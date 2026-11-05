@@ -59,8 +59,11 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
     const isStatic =
       modifiers.isStatic || kind !== 'class' || declaration.isRecord === true || enclosing?.kind === 'interface';
     this.checkClassModifiers(declaration, enclosing);
-    // Constants with bodies subclass their enum, which may then leave methods abstract for them to implement.
+    // Constants with bodies subclass their enum, which may then leave methods abstract for them to implement:
+    // those it declares abstract, or, when every constant has a body, those of its interfaces.
     const hasConstantBodies = declaration.enumConstants.some((constant) => constant.body);
+    const hasOnlyConstantBodies =
+      declaration.enumConstants.length > 0 && declaration.enumConstants.every((constant) => constant.body);
     const cls = createClass(name, undefined, false);
     cls.kind = kind;
     cls.declaration = declaration;
@@ -69,6 +72,7 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
     cls.isAbstract =
       modifiers.isAbstract ||
       kind === 'interface' ||
+      hasOnlyConstantBodies ||
       (hasConstantBodies &&
         declaration.members.some((member) => member.kind === 'method' && member.modifiers.isAbstract));
     cls.isFinal = modifiers.isFinal || (kind === 'enum' && !hasConstantBodies) || declaration.isRecord === true;
