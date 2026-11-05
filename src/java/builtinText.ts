@@ -1,4 +1,4 @@
-import { type Collections } from './builtinCollections';
+import { type Collections, javaHash } from './builtinCollections';
 import { stringify } from './builtins';
 import { addConstructor, addMethod, newString, type Registry, requireString, text } from './builtinSupport';
 import { type Frame, throwBuiltin } from './runtime';
@@ -27,6 +27,7 @@ export function defineText(
   const objectArray: JavaType = { kind: 'array', element: objectType };
   defineStringBuilder(registry, objectClass, stringClass);
   defineStringExtras(stringClass, collections);
+  defineStringVariants(stringClass, objectClass);
   const format = addMethod(
     stringClass,
     'format',
@@ -170,6 +171,14 @@ function defineBuilderQueries(cls: ClassInfo, stringType: JavaType): void {
   addMethod(cls, 'toString', [], stringType, false, (frame, receiver) => newString(frame, builderOf(receiver)));
   addMethod(cls, 'length', [], INT, false, (_, receiver) => builderOf(receiver).length);
   addMethod(cls, 'isEmpty', [], BOOLEAN, false, (_, receiver) => builderOf(receiver).length === 0);
+  addMethod(cls, 'compareTo', [cls.type], INT, false, (frame, receiver, [other]) => {
+    if (!(other instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
+    const [left, right] = [builderOf(receiver), builderOf(other)];
+    for (let index = 0; index < Math.min(left.length, right.length); index++) {
+      if (left[index] !== right[index]) return charCodeOf(left, index) - charCodeOf(right, index);
+    }
+    return left.length - right.length;
+  });
   addMethod(cls, 'charAt', [INT], CHAR, false, (frame, receiver, [index]) => {
     checkIndex(frame, index as number, builderOf(receiver).length);
     return charCodeOf(builderOf(receiver), index as number);
@@ -318,13 +327,70 @@ function defineStringExtras(stringClass: ClassInfo, collections: Collections): v
   );
 }
 
+/** Variants of the common String methods: one-sided stripping, first-match replacement, and code points. */
+function defineStringVariants(stringClass: ClassInfo, objectClass: ClassInfo): void {
+  const stringType = stringClass.type;
+  addMethod(stringClass, 'stripLeading', [], stringType, false, (frame, receiver) =>
+    newString(frame, text(receiver).trimStart())
+  );
+  addMethod(stringClass, 'stripTrailing', [], stringType, false, (frame, receiver) =>
+    newString(frame, text(receiver).trimEnd())
+  );
+  addMethod(stringClass, 'codePointAt', [INT], INT, false, (frame, receiver, [index]) => {
+    checkIndex(frame, index as number, text(receiver).length);
+    return text(receiver).codePointAt(index as number) as number;
+  });
+  addMethod(
+    stringClass,
+    'replaceFirst',
+    [stringType, stringType],
+    stringType,
+    false,
+    (frame, receiver, [regex, replacement]) => {
+      frame.runtime.scanString(text(receiver).length);
+      const pattern = compileRegex(frame, requireString(frame, regex), '');
+      return newString(frame, text(receiver).replace(pattern, javaReplacement(requireString(frame, replacement))));
+    }
+  );
+  // `contentEquals` takes a CharSequence, which these programs pass as a String or a StringBuilder.
+  addMethod(stringClass, 'contentEquals', [objectClass.type], BOOLEAN, false, (frame, receiver, [other]) => {
+    if (other instanceof JavaString) return other.value === text(receiver);
+    if (other instanceof JavaObject && other.builder !== undefined) return builderOf(other) === text(receiver);
+    return throwBuiltin(frame, 'NullPointerException');
+  });
+  for (const searched of [stringType, INT]) {
+    addMethod(stringClass, 'lastIndexOf', [searched, INT], INT, false, (frame, receiver, [target, from]) =>
+      lastIndexFrom(frame, text(receiver), searched === INT ? target : requireString(frame, target), from as number)
+    );
+  }
+  addMethod(stringClass, 'startsWith', [stringType, INT], BOOLEAN, false, (frame, receiver, [prefix, offset]) => {
+    const start = offset as number;
+    return start >= 0 && text(receiver).startsWith(requireString(frame, prefix), start);
+  });
+  addMethod(stringClass, 'copyValueOf', [CHAR_ARRAY], stringType, true, (frame, _, [chars]) =>
+    newString(frame, arrayOfChars(frame, chars))
+  );
+}
+
+/** `lastIndexOf` searching back from `from` for a string or, given a number, a code point. */
+function lastIndexFrom(frame: Frame, value: string, target: Value | string, from: number): number {
+  frame.runtime.scanString(value.length);
+  if (typeof target === 'number' && (target < 0 || target > 0x10_ff_ff)) return -1;
+  const needle = typeof target === 'number' ? String.fromCodePoint(target) : (target as string);
+  return from < 0 ? -1 : value.lastIndexOf(needle, from);
+}
+
 function compileRegex(frame: Frame, pattern: string, flags: string): RegExp {
   try {
-    return new RegExp(pattern, flags);
+    return new RegExp(pattern.replaceAll(JAVA_LINEBREAK, `$1${LINEBREAK}`), flags);
   } catch {
     return throwBuiltin(frame, 'PatternSyntaxException', pattern);
   }
 }
+
+/** Java's `\R`, which JavaScript lacks, where an even number of backslashes before it leaves it unescaped. */
+const JAVA_LINEBREAK = /(?<=^|[^\\])((?:\\\\)*)\\R/g;
+const LINEBREAK = String.raw`(?:\r\n|[\n\v\f\r\u0085\u2028\u2029])`;
 
 /** Converts Java's replacement syntax, where `$1` names a group and a backslash escapes, to JavaScript's. */
 function javaReplacement(replacement: string): string {
@@ -453,7 +519,7 @@ function formatArgument(
   return conversion === lower ? formatted : formatted.toUpperCase();
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- One branch per conversion of Java's Formatter.
+// code-gauge-allow functionCognitiveComplexity 24 -- One branch per conversion of Java's Formatter.
 function formatLower(
   frame: Frame,
   arg: Value,
@@ -468,6 +534,7 @@ function formatLower(
   }
   if (lower === 'b')
     return String(arg instanceof JavaObject && typeof arg.boxed === 'boolean' ? arg.boxed : arg !== undefined);
+  if (lower === 'h') return arg === undefined ? 'null' : (javaHash(frame, arg) >>> 0).toString(16);
   const accepted = ACCEPTED_KINDS[lower] as readonly string[] | undefined;
   if (!accepted) return throwBuiltin(frame, 'UnknownFormatConversionException', `Conversion = '${conversion}'`);
   if (arg === undefined) return 'null';
