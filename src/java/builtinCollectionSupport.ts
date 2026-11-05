@@ -55,13 +55,13 @@ export function defineIteratorClass(context: Context, iteratorClass: ClassInfo):
 function removeThroughIterator(frame: Frame, receiver: Value): Value {
   const state = iteratorState(receiver);
   // An unmodifiable or fixed-size collection's iterator rejects every removal, before checking its own state.
+  // A read-only wrapper rejects removal without a message, before its backing iterator's own rule.
+  if (unmodifiableWrappers.has(state.source)) throwBuiltin(frame, 'UnsupportedOperationException');
   const owner = mapViewSources.get(state.source)?.map ?? state.source;
   if (defaultRemoveClasses.has(owner.cls) && !unmodifiableWrappers.has(owner)) {
     throwBuiltin(frame, 'UnsupportedOperationException', 'remove');
   }
   checkModifiable(frame, owner, true);
-  // A read-only wrapper of a map's view shares the view's map, which it may not change.
-  checkModifiable(frame, state.source, true);
   // Only the element the last next() returned may be removed, once.
   if (state.removed) throwBuiltin(frame, 'IllegalStateException');
   if (state.source.modCount !== state.expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');

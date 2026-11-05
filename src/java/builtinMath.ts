@@ -1,7 +1,7 @@
 import { addConstant, addMethod } from './builtinSupport';
 import { type Frame, throwBuiltin } from './runtime';
 import { type ClassInfo, DOUBLE, FLOAT, INT, type JavaType, LONG } from './types';
-import { convertNumber, toInt32, toInt64, type Value } from './values';
+import { convertNumber, formatDouble, formatFloat, toInt32, toInt64, type Value } from './values';
 
 export function defineMath(mathClass: ClassInfo): void {
   for (const type of [INT, LONG, FLOAT, DOUBLE]) {
@@ -44,8 +44,16 @@ export function defineMath(mathClass: ClassInfo): void {
   for (const type of [FLOAT, DOUBLE]) {
     addMethod(mathClass, 'signum', [type], type, true, (_, __, [value]) => Math.sign(value as number));
   }
-  addMethod(mathClass, 'toRadians', [DOUBLE], DOUBLE, true, (_, __, [value]) => ((value as number) / 180) * Math.PI);
-  addMethod(mathClass, 'toDegrees', [DOUBLE], DOUBLE, true, (_, __, [value]) => ((value as number) * 180) / Math.PI);
+  // The JDK multiplies by its constants PI / 180 and 180 / PI, whose rounding the results show.
+  addMethod(
+    mathClass,
+    'toRadians',
+    [DOUBLE],
+    DOUBLE,
+    true,
+    (_, __, [value]) => (value as number) * 0.017453292519943295
+  );
+  addMethod(mathClass, 'toDegrees', [DOUBLE], DOUBLE, true, (_, __, [value]) => (value as number) * 57.29577951308232);
   for (const type of [INT, LONG]) {
     for (const name of ['floorDiv', 'floorMod'] as const) {
       addMethod(mathClass, name, [type, type], type, true, (frame, _, [a, b]) => floorDivision(frame, a, b, name));
@@ -94,7 +102,7 @@ function defineIntegerArithmetic(mathClass: ClassInfo): void {
   );
   for (const type of [FLOAT, DOUBLE]) {
     addMethod(mathClass, 'clamp', [type, type, type], type, true, (frame, _, [value, min, max]) =>
-      clamp(frame, value as number, min as number, max as number)
+      clampFloating(frame, value as number, min as number, max as number, type === FLOAT ? formatFloat : formatDouble)
     );
   }
 }
@@ -126,6 +134,22 @@ const EXACT_UNARY: Record<string, (a: bigint) => bigint> = {
   decrementExact: (a) => a - 1n,
   absExact: (a) => (a < 0n ? -a : a),
 };
+
+/** `Math.clamp` of floating-point values, which rejects NaN bounds and orders -0.0 below 0.0, as the JDK's does. */
+function clampFloating(
+  frame: Frame,
+  value: number,
+  min: number,
+  max: number,
+  format: (value: number) => string
+): number {
+  if (Number.isNaN(min)) throwBuiltin(frame, 'IllegalArgumentException', 'min is NaN');
+  if (Number.isNaN(max)) throwBuiltin(frame, 'IllegalArgumentException', 'max is NaN');
+  if (min > max || (Object.is(min, 0) && Object.is(max, -0))) {
+    throwBuiltin(frame, 'IllegalArgumentException', `${format(min)} > ${format(max)}`);
+  }
+  return Math.min(max, Math.max(value, min));
+}
 
 function clamp<T extends number | bigint>(frame: Frame, value: T, min: T, max: T): T {
   if (min > max) throwBuiltin(frame, 'IllegalArgumentException', `${String(min)} > ${String(max)}`);

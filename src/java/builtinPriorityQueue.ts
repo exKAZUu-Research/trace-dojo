@@ -1,3 +1,4 @@
+import { classCastMessage } from './builtinClass';
 import {
   batchRemovalClasses,
   bulkRemovalRepairs,
@@ -147,14 +148,32 @@ function defineQueueOperations(cls: ClassInfo, element: JavaType, context: Conte
   );
 }
 
+/**
+ * Adds an element as the JDK's `offer` does: natural ordering casts it to Comparable even when it is the first, and a
+ * comparison that throws leaves the element out, with the parents the sift had moved down already moved.
+ */
 function offer(frame: Frame, receiver: Value, value: Value): boolean {
   if (value === undefined) throwBuiltin(frame, 'NullPointerException');
   touch(receiver);
+  if (!comparators.has(receiver as JavaObject)) requireComparable(frame, value);
   const heap = elementsOf(receiver);
   frame.runtime.allocateArray(frame, 1);
+  const size = heap.length;
   heap.push(value);
-  siftUp(frame, receiver, heap.length - 1, value);
+  try {
+    siftUp(frame, receiver, size, value);
+  } catch (error) {
+    heap.length = size;
+    throw error;
+  }
   return true;
+}
+
+function requireComparable(frame: Frame, value: Value): void {
+  const comparable = frame.runtime.builtins.classes.get('Comparable') as ClassInfo;
+  if (value instanceof JavaObject && !frame.runtime.isInstance(value, comparable)) {
+    throwBuiltin(frame, 'ClassCastException', classCastMessage(frame, value, 'java.lang.Comparable'));
+  }
 }
 
 function poll(frame: Frame, receiver: Value): Value {

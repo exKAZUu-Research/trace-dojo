@@ -100,7 +100,7 @@ class Res implements AutoCloseable { final StringBuilder log; Res(StringBuilder 
   ],
   [
     'primitive optionals and the long and float overloads of Math.clamp',
-    'long clamped = Math.clamp(9_000_000_000_000L, 1L, 100L); float limited = Math.clamp(1.5f, 0.0f, 2.0f); String optionals = OptionalInt.of(7) + " " + OptionalDouble.of(2.5) + " " + OptionalLong.of(3L).getAsLong() + " " + OptionalInt.empty(); boolean zeros = OptionalDouble.of(-0.0).equals(OptionalDouble.of(0.0)); boolean nans = OptionalDouble.of(Double.NaN).equals(OptionalDouble.of(Double.NaN));',
+    'long clamped = Math.clamp(9_000_000_000_000L, 1L, 100L); float limited = Math.clamp(1.5f, 0.0f, 2.0f); String optionals = OptionalInt.of(7) + " " + OptionalDouble.of(2.5) + " " + OptionalLong.of(3L).getAsLong() + " " + OptionalInt.empty(); String nanBound = ""; try { Math.clamp(1.0, Double.NaN, 2.0); } catch (IllegalArgumentException e) { nanBound = e.getMessage(); } double radians = Math.toRadians(0.708); boolean zeros = OptionalDouble.of(-0.0).equals(OptionalDouble.of(0.0)); boolean nans = OptionalDouble.of(Double.NaN).equals(OptionalDouble.of(Double.NaN));',
     {},
     {
       clamped: 100,
@@ -387,6 +387,7 @@ enum Shade { R, G, B } Map<Shade, Integer> shades = new EnumMap<>(Shade.class); 
 Map<Integer, Long> memo = new HashMap<>(); String memoCme = ""; try { memo.computeIfAbsent(3, k -> memo.computeIfAbsent(2, j -> 1L) + 1); } catch (ConcurrentModificationException e) { memoCme = "cme"; }
 Map<String, Integer> keyed = new HashMap<>(Map.of("a", 1)); Set<String> readOnlyKeys = Collections.unmodifiableSet(keyed.keySet()); keyed.put("b", 2); String keysText = readOnlyKeys.toString(); Iterator<String> pending = readOnlyKeys.iterator(); keyed.clear(); boolean stillPending = pending.hasNext();
 TreeSet<Integer> tree = new TreeSet<>(List.of(1)); Iterator<Integer> walked = tree.iterator(); walked.next(); tree.add(2); String treeEnd = ""; try { walked.next(); } catch (RuntimeException e) { treeEnd = e.getClass().getSimpleName(); }
+PriorityQueue<Object> plain = new PriorityQueue<>(); String uncomparable = ""; try { plain.add(new Object()); } catch (ClassCastException e) { uncomparable = "cce " + plain.size(); }
 String exhausted = ""; try { i.next(); } catch (NoSuchElementException e) { exhausted += "N"; } try { i.remove(); } catch (IllegalStateException e) { exhausted += "I"; } exhausted += q;
 Set<Integer> s = new HashSet<>(Set.of(1)); Iterator<Integer> u = Collections.unmodifiableSet(s).iterator(); s.add(2); String wrapped = ""; try { u.next(); } catch (ConcurrentModificationException e) { wrapped = "cme"; }
 List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(Comparator.nullsFirst(Comparator.naturalOrder())); String sorted = nulls.toString();`
@@ -398,6 +399,7 @@ List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(
     liveText: '[a]',
     linkedText: '[2, 3]',
     collectOrder: 'S12',
+    uncomparable: 'cce 0',
     treeEnd: 'NoSuchElementException',
     memoCme: 'cme',
     enumMapText: '{R=2, G=1}',
