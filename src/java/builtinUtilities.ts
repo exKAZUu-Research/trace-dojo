@@ -1,6 +1,16 @@
-import { type Collections, compareNatural, itemsOf, javaEquals } from './builtinCollections';
+import {
+  type Collections,
+  compareNatural,
+  findEntry,
+  itemsOf,
+  javaEquals,
+  javaHash,
+  putEntry,
+} from './builtinCollections';
+import { createStore } from './builtinMaps';
 import { stringify } from './builtins';
 import { addMethod, newString, type Registry } from './builtinSupport';
+import { type BoxableKind, hashOf } from './builtinWrappers';
 import { type Frame, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
@@ -19,7 +29,7 @@ import {
   type TypeVariable,
   VOID,
 } from './types';
-import { defaultValue, JavaArray, JavaObject, type Value } from './values';
+import { defaultValue, JavaArray, JavaObject, toInt32, type Value } from './values';
 
 const PRIMITIVE_ELEMENTS = [INT, LONG, DOUBLE, FLOAT, CHAR, BYTE, SHORT, BOOLEAN];
 
@@ -66,8 +76,105 @@ export function defineUtilities(
       return createList(frame, collections.immutableList, [...values]);
     }
   );
+  addGenericStatic(
+    collections.listClass,
+    'copyOf',
+    ['E'],
+    objectType,
+    (element) => ({
+      parameterTypes: [
+        {
+          kind: 'class',
+          cls: collections.collectionClass,
+          args: [{ kind: 'wildcard', bound: element, isSuper: false }],
+        },
+      ],
+      returnType: listOf(element),
+    }),
+    (frame, _, [collection]) => {
+      const values = itemsOf(frame, collection);
+      if (values.includes(undefined)) throwBuiltin(frame, 'NullPointerException');
+      return createList(frame, collections.immutableList, [...values]);
+    }
+  );
+  defineMapOf(collections, objectType);
   defineArrays(registry, objectClass, stringType, collections, listOf);
   defineCollectionsClass(registry, objectClass, collections, comparableClass);
+}
+
+/** `Map.of` with up to ten keys and values, as the JDK overloads it. */
+function defineMapOf(collections: Collections, objectType: JavaType): void {
+  for (let count = 0; count <= 10; count++) {
+    addGenericStatic(
+      collections.mapClass,
+      'of',
+      ['K', 'V'],
+      objectType,
+      (key, value) => ({
+        parameterTypes: Array.from({ length: count * 2 }, (_, index) => (index % 2 === 0 ? key : value)),
+        returnType: { kind: 'class', cls: collections.mapClass, args: [key, value] },
+      }),
+      (frame, _, args) => createImmutableMap(frame, collections.immutableMap, args)
+    );
+  }
+}
+
+/** A map of the keys and values that alternate in `args`, as `Map.of` makes it. */
+function createImmutableMap(frame: Frame, cls: ClassInfo, args: Value[]): JavaObject {
+  const map = frame.runtime.allocateObject(frame, cls);
+  createStore(map);
+  for (let index = 0; index < args.length; index += 2) {
+    const [key, value] = [args[index], args[index + 1]];
+    if (key === undefined || value === undefined) throwBuiltin(frame, 'NullPointerException');
+    if (findEntry(frame, map, key)) {
+      throwBuiltin(frame, 'IllegalArgumentException', `duplicate key: ${stringify(frame, key, { kind: 'null' })}`);
+    }
+    putEntry(frame, map, key, false, value);
+  }
+  return map;
+}
+
+/** `Arrays.hashCode` and, except for a boolean array, `Arrays.binarySearch`. */
+function defineArraySearches(arraysClass: ClassInfo, element: JavaType, isObject: boolean): void {
+  const arrayType: JavaType = { kind: 'array', element };
+  addMethod(arraysClass, 'hashCode', [arrayType], INT, true, (frame, _, [array]) =>
+    hashArray(frame, array, isObject ? undefined : (element.kind as BoxableKind))
+  );
+  if (element === BOOLEAN) return;
+  const compare = isObject ? compareNatural : (_: Frame, a: Value, b: Value): number => comparePrimitives(a, b);
+  addMethod(arraysClass, 'binarySearch', [arrayType, element], INT, true, (frame, _, [array, key]) =>
+    binarySearch(frame, arrayOf(frame, array).values, key, compare)
+  );
+}
+
+/** `Arrays.hashCode`, which hashes objects with `hashCode` and primitives of `kind` as their wrappers do. */
+function hashArray(frame: Frame, array: Value, kind: BoxableKind | undefined): number {
+  if (!(array instanceof JavaArray)) return 0;
+  let hash = 1;
+  for (const item of array.values) {
+    hash = toInt32(Math.imul(31, hash) + (kind ? hashOf(item, kind) : javaHash(frame, item)));
+  }
+  return hash;
+}
+
+/** `Arrays.binarySearch`, which returns `-(insertion point) - 1` for a missing key. */
+function binarySearch(
+  frame: Frame,
+  values: Value[],
+  key: Value,
+  compare: (frame: Frame, a: Value, b: Value) => number
+): number {
+  let low = 0;
+  let high = values.length - 1;
+  while (low <= high) {
+    frame.runtime.spend(1);
+    const middle = (low + high) >>> 1;
+    const order = compare(frame, values[middle], key);
+    if (order === 0) return middle;
+    if (order < 0) low = middle + 1;
+    else high = middle - 1;
+  }
+  return -(low + 1);
 }
 
 function createList(frame: Frame, cls: ClassInfo, elements: Value[]): JavaObject {
@@ -131,6 +238,7 @@ function defineArrays(
         copyRange(frame, arrayOf(frame, array), from as number, to as number)
       );
     }
+    defineArraySearches(arraysClass, element, element === objectType);
     if (element === BOOLEAN) continue;
     addMethod(arraysClass, 'sort', [arrayType], VOID, true, (frame, _, [array]) => {
       const { values } = arrayOf(frame, array);
@@ -205,8 +313,8 @@ function touch(value: Value): void {
   object.modCount = (object.modCount ?? 0) + 1;
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- One registration per builtin method, each a small native.
-// code-gauge-allow functionNcss 46 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionCognitiveComplexity 24 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 50 -- One registration per builtin method, each a small native.
 function defineCollectionsClass(
   registry: Registry,
   objectClass: ClassInfo,
@@ -339,5 +447,20 @@ function defineCollectionsClass(
     (element) => ({ parameterTypes: [collectionOf(element), objectType], returnType: INT }),
     (frame, _, [collection, target]) =>
       elementsOf(frame, collection).filter((value) => javaEquals(frame, target, value)).length
+  );
+  addGenericStatic(
+    cls,
+    'nCopies',
+    ['T'],
+    objectType,
+    (element) => ({ parameterTypes: [INT, element], returnType: listOf(element) }),
+    (frame, _, [count, value]) => {
+      if ((count as number) < 0) throwBuiltin(frame, 'IllegalArgumentException', `List length = ${count as number}`);
+      return createList(
+        frame,
+        collections.immutableList,
+        Array.from({ length: count as number }, () => value)
+      );
+    }
   );
 }

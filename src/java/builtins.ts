@@ -16,7 +16,7 @@ import {
   requireString,
   text,
 } from './builtinSupport';
-import { defineText } from './builtinText';
+import { charsInRange, defineText } from './builtinText';
 import { defineUtilities } from './builtinUtilities';
 import { type BoxableKind, defineWrappers, hashOf, type Wrappers } from './builtinWrappers';
 import { type Frame, ProgramExit, throwBuiltin } from './runtime';
@@ -381,19 +381,9 @@ function defineString(stringClass: ClassInfo, objectType: JavaType): void {
     if (!(chars instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
     return newString(frame, chars.values.map((code) => charToString(code as number)).join(''));
   });
-  addConstructor(stringClass, [CHAR_ARRAY, INT, INT], (frame, _, [chars, offset, count]) => {
-    if (!(chars instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
-    const [start, length] = [offset as number, count as number];
-    if (start < 0 || length < 0 || start + length > chars.values.length) {
-      throwBuiltin(
-        frame,
-        'StringIndexOutOfBoundsException',
-        `offset ${start}, count ${length}, length ${chars.values.length}`
-      );
-    }
-    const codes = chars.values.slice(start, start + length);
-    return newString(frame, codes.map((code) => charToString(code as number)).join(''));
-  });
+  addConstructor(stringClass, [CHAR_ARRAY, INT, INT], (frame, _, [chars, offset, count]) =>
+    newString(frame, charsInRange(frame, chars, offset as number, count as number))
+  );
   defineStringQueries(stringClass, objectType);
   defineStringTransforms(stringClass, objectType);
 }

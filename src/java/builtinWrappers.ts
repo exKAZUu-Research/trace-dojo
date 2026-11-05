@@ -273,7 +273,24 @@ function defineIntegerMembers(integerClass: ClassInfo, stringType: JavaType): vo
       newString(frame, ((value as number) >>> 0).toString(radix))
     );
   }
+  for (const [name, operation] of Object.entries(INT_BIT_OPERATIONS)) {
+    addMethod(integerClass, name, [INT], INT, true, (_, __, [value]) => operation(value as number));
+  }
 }
+
+const INT_BIT_OPERATIONS: Record<string, (value: number) => number> = {
+  bitCount: (value) => (value >>> 0).toString(2).replaceAll('0', '').length,
+  highestOneBit: (value) => (value === 0 ? 0 : toInt32(2 ** (31 - Math.clz32(value)))),
+  lowestOneBit: (value) => value & -value,
+  numberOfLeadingZeros: (value) => Math.clz32(value),
+  numberOfTrailingZeros: (value) => (value === 0 ? 32 : 31 - Math.clz32(value & -value)),
+  reverse: (value) => {
+    let reversed = 0;
+    for (let bit = 0; bit < 32; bit++) reversed = (reversed << 1) | ((value >>> bit) & 1);
+    return reversed;
+  },
+  signum: (value) => Math.sign(value),
+};
 
 function defineLongMembers(longClass: ClassInfo, stringType: JavaType): void {
   addConstant(longClass, 'MAX_VALUE', LONG, 2n ** 63n - 1n);
@@ -283,6 +300,16 @@ function defineLongMembers(longClass: ClassInfo, stringType: JavaType): void {
     box(frame, longClass, parseIntegral(frame, text, 64))
   );
   addMethod(longClass, 'sum', [LONG, LONG], LONG, true, (_, __, [a, b]) => toInt64((a as bigint) + (b as bigint)));
+  addMethod(longClass, 'max', [LONG, LONG], LONG, true, (_, __, [a, b]) => ((a as bigint) > (b as bigint) ? a : b));
+  addMethod(longClass, 'min', [LONG, LONG], LONG, true, (_, __, [a, b]) => ((a as bigint) < (b as bigint) ? a : b));
+  for (const [name, radix] of [
+    ['toBinaryString', 2],
+    ['toHexString', 16],
+  ] as const) {
+    addMethod(longClass, name, [LONG], stringType, true, (frame, _, [value]) =>
+      newString(frame, BigInt.asUintN(64, value as bigint).toString(radix))
+    );
+  }
 }
 
 function parseDouble(frame: Frame, text: Value): number {
@@ -341,7 +368,8 @@ function defineCharacterMembers(characterClass: ClassInfo): void {
       addMethod(characterClass, name, [type], type, true, (_, __, [code]) => {
         const converted = convert(codePointToString(code));
         // A character whose case mapping takes several characters stays unchanged, as Character's methods leave it.
-        return [...converted].length === 1 ? converted.codePointAt(0) : code;
+        const point = converted.codePointAt(0);
+        return point !== undefined && String.fromCodePoint(point) === converted ? point : code;
       });
     }
   }

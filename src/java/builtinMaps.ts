@@ -20,6 +20,7 @@ import {
   addTypeParameters,
   defineInterface,
   newString,
+  type Registry,
 } from './builtinSupport';
 import { type Frame, throwBuiltin } from './runtime';
 import { BOOLEAN, type ClassInfo, createClass, INT, type JavaType, VOID } from './types';
@@ -138,8 +139,8 @@ export function defineSetClass(
 export function defineHashMap(
   context: Context,
   views: { setClass: ClassInfo; collectionClass: ClassInfo; snapshotSet: ClassInfo; snapshotCollection: ClassInfo }
-): ClassInfo {
-  const { registry, objectType, stringType } = context;
+): { mapClass: ClassInfo; immutableMap: ClassInfo } {
+  const { registry, objectType } = context;
   const mapClass = defineInterface(registry, 'Map', 'java.util');
   const [mapKey, mapValue] = addTypeParameters(mapClass, ['K', 'V'], objectType);
   const entryClass = defineInterface(registry, 'Entry', 'java.util');
@@ -155,15 +156,29 @@ export function defineHashMap(
   for (const [name, parameters, returnType] of mapSignatures(mapKey, mapValue, context, entryClass, views)) {
     addAbstractMethod(mapClass, name, parameters, returnType);
   }
-  for (const name of ['HashMap', 'LinkedHashMap', 'TreeMap']) {
-    const cls = registry.define(name, context.objectClass, 'java.util');
+  const defineClass = (name: string, qualifiedName = name): ClassInfo => {
+    const cls = registry.define(qualifiedName, context.objectClass, 'java.util');
     const [key, value] = addTypeParameters(cls, ['K', 'V'], objectType);
     addInterface(cls, classType(mapClass, key, value));
     defineMapMethods(cls, name, key, value, context, { ...views, entryClass, nodeClass, mapClass });
-  }
-  void stringType;
-  return mapClass;
+    return cls;
+  };
+  for (const name of ['HashMap', 'LinkedHashMap', 'TreeMap']) defineClass(name);
+  return { mapClass, immutableMap: restrictToImmutable(registry, defineClass('MapN', 'ImmutableCollections$MapN')) };
 }
+
+/** Makes a map class the class of the maps `Map.of` returns, whose iteration order the JDK randomizes per run. */
+function restrictToImmutable(registry: Registry, cls: ClassInfo): ClassInfo {
+  registry.classes.delete(cls.name);
+  cls.name = 'MapN';
+  cls.constructors = [];
+  for (const method of cls.methods) {
+    if (MAP_MUTATORS.has(method.name)) method.native = (frame) => throwBuiltin(frame, 'UnsupportedOperationException');
+  }
+  return cls;
+}
+
+const MAP_MUTATORS = new Set(['put', 'remove', 'putIfAbsent', 'clear', 'putAll']);
 
 export function mapSignatures(
   key: JavaType,
@@ -217,7 +232,7 @@ export function defineEntryNode(context: Context, entryClass: ClassInfo): ClassI
 export const nodeEntries = new WeakMap<JavaObject, { key: Value; value: Value }>();
 
 // code-gauge-allow functionCognitiveComplexity 19 -- One registration per builtin method, each a small native.
-// code-gauge-allow functionNcss 51 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 52 -- One registration per builtin method, each a small native.
 export function defineMapMethods(
   cls: ClassInfo,
   name: string,
@@ -239,6 +254,7 @@ export function defineMapMethods(
   if (name === 'TreeMap') {
     addSortedConstructor(cls, key);
     defineNavigation(cls, key, true);
+    defineEntryNavigation(cls, key, classType(views.entryClass, key, value), views.nodeClass);
   } else {
     addConstructor(cls, [INT], (_, receiver, [capacity]) => createStore(receiver, tableSizeFor(capacity as number)));
   }
@@ -422,6 +438,49 @@ export function defineNavigation(cls: ClassInfo, key: JavaType, isMap: boolean):
       store.entries = store.entries.filter((other) => other !== entry);
       touch(receiver);
       return entry.key;
+    });
+  }
+}
+
+/** `TreeMap`'s methods that find an entry by its key's order, which return a snapshot of the entry. */
+function defineEntryNavigation(cls: ClassInfo, key: JavaType, entryType: JavaType, nodeClass: ClassInfo): void {
+  const snapshot = (frame: Frame, entry: { key: Value; value: Value } | undefined): Value => {
+    if (!entry) return undefined;
+    const node = frame.runtime.allocateObject(frame, nodeClass);
+    nodeEntries.set(node, { key: entry.key, value: entry.value });
+    return node;
+  };
+  for (const [name, isFirst, removes] of [
+    ['firstEntry', true, false],
+    ['lastEntry', false, false],
+    ['pollFirstEntry', true, true],
+    ['pollLastEntry', false, true],
+  ] as const) {
+    addMethod(cls, name, [], entryType, false, (frame, receiver) => {
+      const store = storeOf(receiver);
+      const ordered = store.ordered();
+      const entry = isFirst ? ordered[0] : ordered.at(-1);
+      if (entry && removes) {
+        store.entries = store.entries.filter((other) => other !== entry);
+        touch(receiver);
+      }
+      return snapshot(frame, entry);
+    });
+  }
+  for (const [name, accepts, fromEnd] of [
+    ['floorEntry', (order: number) => order <= 0, true],
+    ['lowerEntry', (order: number) => order < 0, true],
+    ['ceilingEntry', (order: number) => order >= 0, false],
+    ['higherEntry', (order: number) => order > 0, false],
+  ] as const) {
+    addMethod(cls, name, [key], entryType, false, (frame, receiver, [target]) => {
+      const store = storeOf(receiver);
+      const compare = store.compare as NonNullable<HashStore['compare']>;
+      const ordered = fromEnd ? store.ordered().toReversed() : store.ordered();
+      return snapshot(
+        frame,
+        ordered.find((entry) => accepts(compare(frame, entry.key, target)))
+      );
     });
   }
 }

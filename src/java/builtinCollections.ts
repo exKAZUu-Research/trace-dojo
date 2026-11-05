@@ -15,6 +15,7 @@ import {
   touch,
 } from './builtinCollectionSupport';
 import { defineHashMap, defineSetClass } from './builtinMaps';
+import { definePriorityQueue } from './builtinPriorityQueue';
 import {
   addAbstractMethod,
   addConstructor,
@@ -35,9 +36,11 @@ export interface Collections {
   listClass: ClassInfo;
   /** The class of the lists `List.of` returns. */
   immutableList: ClassInfo;
+  /** The class of the maps `Map.of` returns. */
+  immutableMap: ClassInfo;
   /** The class of the lists `Arrays.asList` returns, which share their array's elements. */
   fixedSizeList: ClassInfo;
-  /** `TreeMap` and `TreeSet`, whose constructors take a `Comparator`. */
+  /** `TreeMap`, `TreeSet`, and `PriorityQueue`, whose constructors take a `Comparator`. */
   sortedClasses: ClassInfo[];
   collectionClass: ClassInfo;
   mapClass: ClassInfo;
@@ -47,7 +50,7 @@ export interface Collections {
   next: MethodInfo;
 }
 
-// code-gauge-allow functionNcss 38 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 39 -- One registration per builtin method, each a small native.
 export function defineCollections(
   registry: Registry,
   objectClass: ClassInfo,
@@ -86,6 +89,7 @@ export function defineCollections(
   addInterface(linkedList, classType(dequeClass, { kind: 'typeVar', variable: linkedList.typeParameters[0] }));
   linkOverrides(linkedList);
   defineArrayDeque(context, lists, dequeClass);
+  const priorityQueue = definePriorityQueue(context, lists, registry.classes.get('Queue') as ClassInfo);
   const immutableList = defineRestrictedList(context, 'ListN', lists, () => true);
   // Arrays.asList writes through to its array, so it may set elements but not change its size.
   const fixedSizeList = defineRestrictedList(context, 'ArrayList', lists, (method) => method.name !== 'set', 'Arrays$');
@@ -93,7 +97,12 @@ export function defineCollections(
   const snapshotCollection = defineSnapshot(context, 'Collection', collectionClass, itrClass);
   for (const name of ['HashSet', 'LinkedHashSet', 'TreeSet'])
     defineSetClass(context, name, setClass, collectionClass, itrClass);
-  const mapClass = defineHashMap(context, { setClass, collectionClass, snapshotSet, snapshotCollection });
+  const { mapClass, immutableMap } = defineHashMap(context, {
+    setClass,
+    collectionClass,
+    snapshotSet,
+    snapshotCollection,
+  });
   return {
     iterableClass,
     iteratorClass,
@@ -103,9 +112,13 @@ export function defineCollections(
     listClass,
     collectionClass,
     mapClass,
+    immutableMap,
     immutableList,
     fixedSizeList,
-    sortedClasses: ['TreeMap', 'TreeSet'].map((name) => context.registry.classes.get(name) as ClassInfo),
+    sortedClasses: [
+      ...['TreeMap', 'TreeSet'].map((name) => context.registry.classes.get(name) as ClassInfo),
+      priorityQueue,
+    ],
   };
 }
 

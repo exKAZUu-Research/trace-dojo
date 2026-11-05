@@ -1,6 +1,8 @@
-import { type Collections, compareNatural, itemsOf, javaEquals, javaHash } from './builtinCollections';
+import { type Collections, compareNatural, itemsOf, javaEquals } from './builtinCollections';
+import { collectors, defineCollectors } from './builtinCollectors';
 import { callFunction, type Functions } from './builtinFunctions';
 import { stringify } from './builtins';
+import { classType, type Context, extendsOf, superOf, typeVariable, variableType } from './builtinStreamSupport';
 import { addMethod, defineInterface, newString, type Registry } from './builtinSupport';
 import { box, type Wrappers } from './builtinWrappers';
 import { type Frame, throwBuiltin } from './runtime';
@@ -17,30 +19,13 @@ import {
   type NativeMethod,
   type TypeVariable,
   VOID,
-  type WildcardType,
 } from './types';
-import { charCodeOf, HashStore, JavaArray, JavaObject, type JavaString, toInt32, type Value } from './values';
+import { charCodeOf, JavaArray, JavaObject, type JavaString, toInt32, type Value } from './values';
 
 /** The elements a stream yields, one at a time, as each stage pulls them from the stage before. */
 type Source = () => Iterator<Value>;
 
 const sources = new WeakMap<JavaObject, { source: Source; isUsed: boolean }>();
-
-interface Context {
-  registry: Registry;
-  objectClass: ClassInfo;
-  objectType: JavaType;
-  stringType: JavaType;
-  collections: Collections;
-  wrappers: Wrappers;
-  fn: (name: string) => ClassInfo;
-}
-
-const classType = (cls: ClassInfo, ...args: JavaType[]): ClassType => ({ kind: 'class', cls, args });
-const superOf = (bound: JavaType): WildcardType => ({ kind: 'wildcard', bound, isSuper: true });
-const extendsOf = (bound: JavaType): WildcardType => ({ kind: 'wildcard', bound, isSuper: false });
-const typeVariable = (name: string, bound: JavaType): TypeVariable => ({ name, bounds: [bound] });
-const variableType = (variable: TypeVariable): JavaType => ({ kind: 'typeVar', variable });
 
 export function defineStreams(
   registry: Registry,
@@ -63,6 +48,8 @@ export function defineStreams(
   const collector = defineCollectors(context);
   const streams = defineStreamTypes(context, optional, collector);
   defineSources(context, streams);
+  defineStringStreams(context, streams);
+  defineGeneratedStreams(context, streams);
 }
 
 interface Optionals {
@@ -90,7 +77,7 @@ function get(frame: Frame, receiver: Value): Value {
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- One registration per builtin method, each a small native.
-// code-gauge-allow functionNcss 44 -- One registration per builtin method, each a small native.
+// code-gauge-allow functionNcss 45 -- One registration per builtin method, each a small native.
 function defineOptionals(context: Context): Optionals {
   const { registry, objectType, stringType } = context;
   const optional = registry.define('Optional', context.objectClass, 'java.util');
@@ -176,6 +163,7 @@ function defineOptionals(context: Context): Optionals {
     }
   );
   map.typeParameters = [u];
+  defineOptionalFunctions(context, optional, tType);
   return {
     optional,
     optionalInt: registry.classes.get('OptionalInt') as ClassInfo,
@@ -183,168 +171,46 @@ function defineOptionals(context: Context): Optionals {
   };
 }
 
-/** What a collector does: create a container, add each element to it, and turn it into the result. */
-interface CollectorFunctions {
-  supply: (frame: Frame) => unknown;
-  accumulate: (frame: Frame, container: unknown, value: Value) => void;
-  finish: (frame: Frame, container: unknown) => Value;
-}
-
-const collectors = new WeakMap<JavaObject, CollectorFunctions>();
-
-// code-gauge-allow functionNcss 32 -- One registration per builtin method, each a small native.
-function defineCollectors(context: Context): ClassInfo {
-  const { registry, objectType, collections } = context;
-  const collector = defineInterface(registry, 'Collector', 'java.util.stream');
-  const [ct, ca, cr] = ['T', 'A', 'R'].map((name) => typeVariable(name, objectType));
-  collector.typeParameters = [ct, ca, cr];
-  const impl = createClass('CollectorImpl', context.objectClass, true);
-  impl.interfaces = [collector];
-  impl.supertypes.push(collector.type as ClassType);
-  const collectorsClass = registry.define('Collectors', context.objectClass, 'java.util.stream');
-  const create = (frame: Frame, functions: CollectorFunctions): JavaObject => {
-    const object = frame.runtime.allocateObject(frame, impl);
-    collectors.set(object, functions);
-    return object;
-  };
-  const listOf = (element: JavaType): ClassType => classType(collections.listClass, element);
-  const generic = (
-    name: string,
-    parameters: (t: JavaType) => JavaType[],
-    result: (t: JavaType) => JavaType,
-    native: NativeMethod
-  ): void => {
-    const t = typeVariable('T', objectType);
-    const method = addMethod(collectorsClass, name, parameters(variableType(t)), result(variableType(t)), true, native);
-    method.typeParameters = [t];
-  };
-  const wildcard: WildcardType = { kind: 'wildcard', bound: undefined, isSuper: false };
-  generic(
-    'toList',
-    () => [],
-    (t) => classType(collector, t, wildcard, listOf(t)),
-    (frame) =>
-      create(frame, {
-        supply: () => [] as Value[],
-        accumulate: (_, container, value) => void (container as Value[]).push(value),
-        finish: (finishFrame, container) => newList(finishFrame, container as Value[]),
-      })
+/** `Optional`'s methods that take functions for the value or its absence. */
+function defineOptionalFunctions(context: Context, optional: ClassInfo, tType: JavaType): void {
+  const supplier = context.fn('Supplier');
+  const predicate = context.fn('Predicate');
+  const consumer = context.fn('Consumer');
+  addMethod(
+    optional,
+    'orElseGet',
+    [classType(supplier, extendsOf(tType))],
+    tType,
+    false,
+    (frame, receiver, [other]) => {
+      const state = stateOf(receiver);
+      return state.isPresent ? state.value : callFunction(frame, supplier, other, []);
+    }
   );
-  generic(
-    'toSet',
-    () => [],
-    (t) => classType(collector, t, wildcard, classType(registry.classes.get('Set') as ClassInfo, t)),
-    (frame) =>
-      create(frame, {
-        supply: () => [] as Value[],
-        accumulate: (_, container, value) => void (container as Value[]).push(value),
-        finish: (finishFrame, container) => newHashSet(finishFrame, container as Value[]),
-      })
+  addMethod(
+    optional,
+    'filter',
+    [classType(predicate, superOf(tType))],
+    classType(optional, tType),
+    false,
+    (frame, receiver, [test]) => {
+      const state = stateOf(receiver);
+      if (!state.isPresent || callFunction(frame, predicate, test, [state.value]) === true) return receiver;
+      return createOptional(frame, optional, undefined, false);
+    }
   );
-  const charSequence = context.stringType;
-  for (const parameters of [[], [charSequence]]) {
-    addMethod(
-      collectorsClass,
-      'joining',
-      parameters,
-      classType(collector, charSequence, wildcard, context.stringType),
-      true,
-      (frame, _, [separator]) =>
-        create(frame, {
-          supply: () => [] as string[],
-          accumulate: (accumulateFrame, container, value) =>
-            void (container as string[]).push(stringify(accumulateFrame, value, context.objectType)),
-          finish: (finishFrame, container) =>
-            newString(finishFrame, (container as string[]).join((separator as JavaString | undefined)?.value ?? '')),
-        })
-    );
-  }
-  generic(
-    'counting',
-    () => [],
-    (t) => classType(collector, t, wildcard, context.wrappers.byKind.get('long')?.type as JavaType),
-    (frame) =>
-      create(frame, {
-        supply: () => ({ count: 0n }),
-        accumulate: (_, container) => {
-          (container as { count: bigint }).count++;
-        },
-        finish: (finishFrame, container) =>
-          box(finishFrame, context.wrappers.byKind.get('long') as ClassInfo, (container as { count: bigint }).count),
-      })
+  addMethod(
+    optional,
+    'ifPresentOrElse',
+    [classType(consumer, superOf(tType)), context.fn('Runnable').type],
+    VOID,
+    false,
+    (frame, receiver, [action, otherwise]) => {
+      const state = stateOf(receiver);
+      if (state.isPresent) callFunction(frame, consumer, action, [state.value]);
+      else callFunction(frame, context.fn('Runnable'), otherwise, []);
+    }
   );
-  // groupingBy(classifier) collects each group into a list, keyed in a HashMap.
-  const fn = context.fn('Function');
-  const t = typeVariable('T', objectType);
-  const k = typeVariable('K', objectType);
-  const groupingBy = addMethod(
-    collectorsClass,
-    'groupingBy',
-    [classType(fn, superOf(variableType(t)), extendsOf(variableType(k)))],
-    classType(
-      collector,
-      variableType(t),
-      wildcard,
-      classType(collections.mapClass, variableType(k), listOf(variableType(t)))
-    ),
-    true,
-    (frame, _, [classifier]) =>
-      create(frame, {
-        supply: () => [] as Group[],
-        accumulate: (accumulateFrame, container, value) =>
-          addToGroup(
-            accumulateFrame,
-            container as Group[],
-            callFunction(accumulateFrame, fn, classifier, [value]),
-            value
-          ),
-        finish: (finishFrame, container) => newGroupMap(finishFrame, container as Group[]),
-      })
-  );
-  groupingBy.typeParameters = [t, k];
-  return collector;
-}
-
-/** The elements a `groupingBy` collector has gathered under one key. */
-interface Group {
-  key: Value;
-  items: Value[];
-}
-
-function addToGroup(frame: Frame, groups: Group[], key: Value, value: Value): void {
-  const group = groups.find((candidate) => javaEquals(frame, candidate.key, key));
-  if (group) group.items.push(value);
-  else groups.push({ key, items: [value] });
-}
-
-/** A `HashMap` from each group's key to the list of its elements, as `groupingBy` gives. */
-function newGroupMap(frame: Frame, groups: Group[]): JavaObject {
-  const map = frame.runtime.allocateObject(frame, frame.runtime.builtins.classes.get('HashMap') as ClassInfo);
-  map.store = new HashStore();
-  map.modCount = 0;
-  for (const { key, items } of groups) map.store.add({ key, value: newList(frame, items), hash: javaHash(frame, key) });
-  return map;
-}
-
-function newList(frame: Frame, items: Value[]): JavaObject {
-  frame.runtime.allocateArray(frame, items.length);
-  const list = frame.runtime.allocateObject(frame, frame.runtime.builtins.classes.get('ArrayList') as ClassInfo);
-  list.elements = items;
-  list.modCount = 0;
-  return list;
-}
-
-/** A `HashSet` of the values, keeping the first of equal ones, as `toSet` gives. */
-function newHashSet(frame: Frame, values: Value[]): JavaObject {
-  const set = frame.runtime.allocateObject(frame, frame.runtime.builtins.classes.get('HashSet') as ClassInfo);
-  set.store = new HashStore();
-  set.modCount = 0;
-  for (const value of values) {
-    const hash = javaHash(frame, value);
-    const isNew = !set.store.entries.some((entry) => entry.hash === hash && javaEquals(frame, value, entry.key));
-    if (isNew) set.store.add({ key: value, value: undefined, hash });
-  }
-  return set;
 }
 
 interface StreamTypes {
@@ -710,6 +576,74 @@ function defineIntStreamOperations(
   });
 }
 
+/** `Stream.iterate` and `Stream.generate`, whose streams compute each element when it is pulled. */
+function defineGeneratedStreams(context: Context, streams: StreamTypes): void {
+  const { objectType, fn } = context;
+  const unary = fn('UnaryOperator');
+  const predicate = fn('Predicate');
+  const supplier = fn('Supplier');
+  const iterateVariable = typeVariable('T', objectType);
+  const tType = variableType(iterateVariable);
+  const iterated = (frame: Frame, seed: Value, next: Value, hasNext?: Value): JavaObject =>
+    createStream(frame, streams.streamImpl, function* () {
+      for (let value = seed; ; value = callFunction(frame, unary, next, [value])) {
+        if (hasNext !== undefined && callFunction(frame, predicate, hasNext, [value]) !== true) return;
+        yield value;
+      }
+    });
+  const streamOfT = classType(streams.stream, tType);
+  const unbounded = addMethod(
+    streams.stream,
+    'iterate',
+    [tType, classType(unary, tType)],
+    streamOfT,
+    true,
+    (frame, _, [seed, next]) => iterated(frame, seed, next)
+  );
+  const bounded = addMethod(
+    streams.stream,
+    'iterate',
+    [tType, classType(predicate, superOf(tType)), classType(unary, tType)],
+    streamOfT,
+    true,
+    (frame, _, [seed, hasNext, next]) => iterated(frame, seed, next, hasNext)
+  );
+  unbounded.typeParameters = [iterateVariable];
+  bounded.typeParameters = [iterateVariable];
+  const variable = typeVariable('T', objectType);
+  const generate = addMethod(
+    streams.stream,
+    'generate',
+    [classType(supplier, extendsOf(variableType(variable)))],
+    classType(streams.stream, variableType(variable)),
+    true,
+    (frame, _, [source]) =>
+      createStream(frame, streams.streamImpl, function* () {
+        for (;;) yield callFunction(frame, supplier, source, []);
+      })
+  );
+  generate.typeParameters = [variable];
+}
+
+/** `String.chars` and `String.lines`, which stream a string's characters and lines. */
+function defineStringStreams(context: Context, streams: StreamTypes): void {
+  const stringClass = context.registry.classes.get('String') as ClassInfo;
+  addMethod(stringClass, 'chars', [], streams.intStream.type, false, (frame, receiver) => {
+    const text = (receiver as JavaString).value;
+    return createStream(frame, streams.intStreamImpl, function* () {
+      for (let index = 0; index < text.length; index++) yield charCodeOf(text, index);
+    });
+  });
+  addMethod(stringClass, 'lines', [], classType(streams.stream, stringClass.type), false, (frame, receiver) => {
+    const text = (receiver as JavaString).value;
+    frame.runtime.scanString(text.length);
+    const lines = text === '' ? [] : text.replace(/(?:\r\n|\r|\n)$/, '').split(/\r\n|\r|\n/);
+    return createStream(frame, streams.streamImpl, function* () {
+      for (const line of lines) yield newString(frame, line);
+    });
+  });
+}
+
 // code-gauge-allow functionCognitiveComplexity 16 -- One registration per builtin method, each a small native.
 // code-gauge-allow functionNcss 39 -- One registration per builtin method, each a small native.
 function defineSources(context: Context, streams: StreamTypes): void {
@@ -727,12 +661,6 @@ function defineSources(context: Context, streams: StreamTypes): void {
       return createStream(frame, streamImpl, () => [...items][Symbol.iterator]());
     }
   );
-  addMethod(registry.classes.get('String') as ClassInfo, 'chars', [], intStream.type, false, (frame, receiver) => {
-    const text = (receiver as JavaString).value;
-    return createStream(frame, intStreamImpl, function* () {
-      for (let index = 0; index < text.length; index++) yield charCodeOf(text, index);
-    });
-  });
   const ofVariable = typeVariable('T', objectType);
   const of = addMethod(
     stream,

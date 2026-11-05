@@ -281,7 +281,7 @@ export abstract class ReferenceCompiler extends CompilerBase {
         ? target.index.kind === 'name'
           ? target.index.name
           : undefined
-        : String(compiledIndex.constant);
+        : String(compiledIndex.constant as number);
     return {
       type: array.type.element,
       source: elementSource(array.source, indexName),

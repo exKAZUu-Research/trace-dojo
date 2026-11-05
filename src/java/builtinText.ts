@@ -201,6 +201,22 @@ function checkSpan(frame: Frame, start: number, end: number, length: number, isI
     throwBuiltin(frame, 'StringIndexOutOfBoundsException', `start ${start}, end ${end}, length ${length}`);
 }
 
+/** The `count` characters of a char array from `offset`, as `new String(chars, offset, count)` takes them. */
+export function charsInRange(frame: Frame, chars: Value, offset: number, count: number): string {
+  if (!(chars instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
+  if (offset < 0 || count < 0 || offset + count > chars.values.length) {
+    throwBuiltin(
+      frame,
+      'StringIndexOutOfBoundsException',
+      `offset ${offset}, count ${count}, length ${chars.values.length}`
+    );
+  }
+  return chars.values
+    .slice(offset, offset + count)
+    .map((code) => charToString(code as number))
+    .join('');
+}
+
 function arrayOfChars(frame: Frame, value: Value): string {
   if (!(value instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
   return value.values.map((code) => charToString(code as number)).join('');
@@ -296,6 +312,9 @@ function defineStringExtras(stringClass: ClassInfo, collections: Collections): v
   );
   addMethod(stringClass, 'valueOf', [CHAR_ARRAY], stringType, true, (frame, _, [chars]) =>
     newString(frame, arrayOfChars(frame, chars))
+  );
+  addMethod(stringClass, 'valueOf', [CHAR_ARRAY, INT, INT], stringType, true, (frame, _, [chars, offset, count]) =>
+    newString(frame, charsInRange(frame, chars, offset as number, count as number))
   );
 }
 

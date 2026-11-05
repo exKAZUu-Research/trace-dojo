@@ -495,4 +495,37 @@ function defineComparatorSorts(context: Context, collections: Collections, funct
     }
   );
   sortArray.typeParameters = [arrayVariable];
+  defineComparatorExtremes(context, collections, functions);
+}
+
+/** `Collections.max` and `Collections.min` with a comparator, which keep the first of equal elements. */
+function defineComparatorExtremes(context: Context, collections: Collections, functions: DefaultFunctions): void {
+  const collectionsClass = context.registry.classes.get('Collections') as ClassInfo;
+  for (const [name, sign] of [
+    ['max', 1],
+    ['min', -1],
+  ] as const) {
+    const variable: TypeVariable = { name: 'T', bounds: [context.objectType] };
+    const elementType: JavaType = { kind: 'typeVar', variable };
+    const extreme = addMethod(
+      collectionsClass,
+      name,
+      [
+        classType(collections.collectionClass, extendsOf(elementType)),
+        classType(functions.comparator, superOf(elementType)),
+      ],
+      elementType,
+      true,
+      (frame, _, [collection, comparator]) => {
+        const values = itemsOf(frame, collection);
+        if (values.length === 0) throwBuiltin(frame, 'NoSuchElementException');
+        let best = values[0];
+        for (const value of values) {
+          if ((callFunction(frame, functions.comparator, comparator, [value, best]) as number) * sign > 0) best = value;
+        }
+        return best;
+      }
+    );
+    extreme.typeParameters = [variable];
+  }
 }
