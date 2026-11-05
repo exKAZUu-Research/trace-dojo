@@ -149,3 +149,20 @@ String greet(String name) { return "Hi " + name + " " + count; }
 class Helper { int twice() { return count * 2; } }`;
   expect(traceProgram('java', program, program).finalVars).toEqual({ greeting: 'Hi Ann 42', total: 84 });
 });
+
+test('Java runs unnamed variables and statements before super(...) as Java 25 does', () => {
+  const program = `import java.util.*;
+record Point(int x, int y) {}
+class Base { final int size; Base(int size) { this.size = size; } }
+class Doubled extends Base { Doubled(int n) { int twice = n * 2; super(twice); } }
+public class Main {
+  public static void main(String[] args) {
+    int count = 0;
+    for (var _ : List.of(1, 2, 3)) count++;
+    int _ = 5;
+    String kind = switch ((Object) new Point(1, 2)) { case Point(int x, _) when x > 0 -> "right"; case Point _, String _ -> "other"; default -> "none"; };
+    int size = new Doubled(4).size;
+  }
+}`;
+  expect(traceProgram('java', program, program).finalVars).toEqual({ count: 3, kind: 'right', size: 8 });
+});

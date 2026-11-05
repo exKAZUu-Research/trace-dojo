@@ -1,5 +1,12 @@
 import type { TraceOptions } from '../interpreter/traceAnnotations';
-import type { ClassDeclaration, Expression, FieldDeclaration, MemberDeclaration, Span } from './ast';
+import {
+  type ClassDeclaration,
+  type Expression,
+  type FieldDeclaration,
+  type MemberDeclaration,
+  type Span,
+  UNNAMED,
+} from './ast';
 import { box, boxedTypeOf, unbox } from './builtinWrappers';
 import { boxingTarget, instantiateMethod, isInvocationConvertible, unboxedTypeOf } from './conversions';
 import { nullMessage, type NullSource } from './nullMessages';
@@ -258,8 +265,10 @@ export abstract class CompilerBase extends TypeResolver {
     type: JavaType,
     isInitialized = true
   ): number {
+    // An unnamed variable (`_`) takes a slot under no name, so that any number of them never clash nor are read.
+    const isNamed = name !== UNNAMED;
     // A lambda's locals may not hide the locals of the code around it.
-    for (let current: MethodContext | undefined = context; current; current = current.enclosing) {
+    for (let current: MethodContext | undefined = context; current && isNamed; current = current.enclosing) {
       for (const scope of current.scopes) {
         if (scope.names.has(name)) this.error(span, `変数 ${name} はすでに定義されています。`);
       }
@@ -267,7 +276,7 @@ export abstract class CompilerBase extends TypeResolver {
     const slot = context.locals.length;
     context.locals.push({ name, type });
     const scope = context.scopes.at(-1) as Scope;
-    scope.names.set(name, slot);
+    if (isNamed) scope.names.set(name, slot);
     scope.slots.push(slot);
     if (!isInitialized) context.uninitializedSlots.add(slot);
     return slot;

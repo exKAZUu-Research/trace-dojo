@@ -1,3 +1,6 @@
+/** The name of an unnamed variable (`_`), which declares a variable that no code reads. */
+export const UNNAMED = '_';
+
 /** A source range: rows are 0-based, offsets index UTF-16 code units of the source. */
 export interface Span {
   row: number;
@@ -119,6 +122,8 @@ export interface ConstructorDeclaration extends Span {
   parameters: Parameter[];
   throwsTypes: TypeSyntax[];
   explicitCall: ExplicitConstructorCall | undefined;
+  /** The statements before the explicit constructor call, which may not use the object under construction (JEP 513). */
+  prologue?: Statement[];
   body: Block;
   /** Whether this is a record's compact canonical constructor, which assigns the fields after its body. */
   isCompact?: boolean;

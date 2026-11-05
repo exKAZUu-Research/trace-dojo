@@ -311,12 +311,15 @@ function convertMethod(node: Node): MethodDeclaration {
 function convertConstructor(node: Node): ConstructorDeclaration {
   if (node.childForFieldName('type_parameters')) unsupported(node, '型パラメータ');
   const bodyNode = field(node, 'body');
-  const statements: Statement[] = [];
+  let statements: Statement[] = [];
+  let prologue: Statement[] | undefined;
   let explicitCall: ExplicitConstructorCall | undefined;
-  for (const [index, child] of namedChildren(bodyNode).entries()) {
+  for (const child of namedChildren(bodyNode)) {
     if (child.type === 'explicit_constructor_invocation') {
-      if (index !== 0) unsupported(child, 'コンストラクタの先頭以外での this(...) や super(...)');
+      if (explicitCall) unsupported(child, '2 つ目の this(...) や super(...)');
       explicitCall = convertExplicitConstructorCall(child);
+      if (statements.length > 0) prologue = statements;
+      statements = [];
     } else {
       statements.push(convertStatement(child));
     }
@@ -328,6 +331,7 @@ function convertConstructor(node: Node): ConstructorDeclaration {
     parameters: convertParameters(field(node, 'parameters')),
     throwsTypes: convertThrows(node),
     explicitCall,
+    prologue,
     body: { kind: 'block', statements, ...span(bodyNode) },
     ...span(node),
   };

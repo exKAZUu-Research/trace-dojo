@@ -3,6 +3,7 @@ import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
+import { UNNAMED } from './ast';
 import { type CompiledProgram, compileProgram } from './compiler';
 import { runProgram } from './execute';
 import { parseJava } from './parse';
@@ -49,7 +50,7 @@ class Snapshotter {
     for (const [slot, local] of frame.localInfos.entries()) {
       const value = frame.locals[slot];
       // `main`'s parameter only receives the launcher's arguments, which these programs never use.
-      if (value === UNASSIGNED || (hidesArgs && slot === 0)) continue;
+      if (value === UNASSIGNED || (hidesArgs && slot === 0) || local.name === UNNAMED) continue;
       addVariable(variables, local.name, value, local.type);
     }
     if (!withContext) return variables;

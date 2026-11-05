@@ -47,6 +47,7 @@ export interface InitializationPath {
   constructorDeclaration?: {
     parameters: readonly Parameter[];
     explicitCall: ExplicitConstructorCall | undefined;
+    prologue?: readonly Statement[];
     body: Block;
   };
   /** Where an unassigned blank final is reported. */
@@ -74,8 +75,12 @@ export function checkInitialization(path: InitializationPath): void {
   }
   if (constructor) {
     const withParameters = checker.declareParameters(state, constructor.parameters);
-    const afterCall = checker.expressions(constructor.explicitCall?.args ?? [], withParameters);
-    state = checker.statement(constructor.body, afterCall);
+    // The prologue runs before the call, and its locals stay in scope for the call and the body.
+    const whole: Block = {
+      ...constructor.body,
+      statements: [...(constructor.prologue ?? []), ...constructor.body.statements],
+    };
+    state = checker.statement(whole, checker.expressions(constructor.explicitCall?.args ?? [], withParameters));
   }
   for (const exit of [state, ...checker.returns]) {
     const unassigned = path.blankFinals.find((name) => exit.assigned && !checker.isFieldAssigned(exit, name));

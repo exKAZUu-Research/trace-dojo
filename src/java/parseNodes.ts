@@ -211,8 +211,9 @@ export function convertPattern(node: Node): Pattern {
   };
 }
 
+/** The name a declaration gives, which is `_` for an unnamed variable. */
 export function identifierOf(node: Node, what: string): Node {
   const name = field(node, 'name');
-  if (name.type !== 'identifier') unsupported(name, what);
+  if (name.type !== 'identifier' && name.type !== 'underscore_pattern') unsupported(name, what);
   return name;
 }

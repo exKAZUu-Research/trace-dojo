@@ -400,6 +400,9 @@ class Compiler extends DeclarationCompiler {
     for (const [index, parameter] of (declaration?.parameters ?? []).entries()) {
       this.declareLocal(context, parameter, parameter.name, constructor.parameterTypes[index]);
     }
+    // The prologue's locals stay in scope for the explicit constructor call and the body.
+    const prologue =
+      declaration?.prologue && this.compileStatements({ ...context, isStatic: true }, declaration.prologue);
     const { target, convertedArgs } = constructor.forwardsTo
       ? this.forwardingCall(context, constructor, constructor.forwardsTo)
       : this.explicitConstructorCall(context, cls, constructor, declaration);
@@ -418,6 +421,7 @@ class Compiler extends DeclarationCompiler {
     constructor.code = {
       locals: context.locals,
       run: (frame) => {
+        prologue?.(frame);
         this.invokeWithArguments(frame, target.declared ?? target, frame.thisObject, convertedArgs, callRow);
         for (const initializer of initializers) initializer(frame);
         body?.(frame);

@@ -111,7 +111,7 @@ function convertLambda(node: Node): Expression {
   const parametersNode = field(node, 'parameters');
   const bodyNode = field(node, 'body');
   let parameters: LambdaParameter[];
-  if (parametersNode.type === 'identifier') {
+  if (parametersNode.type === 'identifier' || parametersNode.type === 'underscore_pattern') {
     parameters = [{ name: parametersNode.text, type: undefined, isFinal: false, ...span(parametersNode) }];
   } else if (parametersNode.type === 'inferred_parameters') {
     parameters = namedChildren(parametersNode).map((parameter) => ({
