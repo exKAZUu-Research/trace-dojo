@@ -569,6 +569,9 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
   protected compileCast(context: MethodContext, expression: Extract<Expression, { kind: 'cast' }>): Compiled {
     const value = this.compileValue(context, expression.value);
     const type = this.resolveType(expression.type);
+    if (value.type.kind !== 'null' && isPrimitive(value.type) !== isPrimitive(type)) {
+      return this.compileBoxingCast(value, type, expression);
+    }
     if (!isCastable(value.type, type, this.builtins.objectClass)) {
       this.error(expression, `${typeName(value.type)} 型の値を ${typeName(type)} 型にキャストできません。`);
     }
@@ -583,6 +586,37 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
           : undefined,
       source: value.source,
     };
+  }
+
+  /**
+   * A cast between a primitive and a reference type (JLS 5.5): boxing then widening, as in `(Number) 1`, unboxing
+   * then widening, as in `(long) integer`, or a checked cast to the wrapper then unboxing, as in `(int) object`.
+   */
+  protected compileBoxingCast(value: CompiledValue, type: JavaType, expression: Span): CompiledValue {
+    const fail = (): never =>
+      this.error(expression, `${typeName(value.type)} 型の値を ${typeName(type)} 型にキャストできません。`);
+    const { objectClass, wrappers } = this.builtins;
+    if (isPrimitive(value.type)) {
+      const boxType = boxedTypeOf(wrappers, value.type);
+      if (!boxType || !isWidening(boxType, type, objectClass)) return fail();
+      return this.convert(value, type, 'assignment', expression);
+    }
+    const unboxedType = unboxedTypeOf(value.type);
+    if (unboxedType) {
+      if (!isWidening(unboxedType, type, objectClass)) return fail();
+      return this.convert(value, type, 'assignment', expression);
+    }
+    const wrapperType = boxedTypeOf(wrappers, type);
+    if (!wrapperType || !isCastable(value.type, wrapperType, objectClass)) return fail();
+    const cast = this.castOperation(value.type, wrapperType, expression);
+    const { run } = value;
+    const wrapped: CompiledValue = {
+      kind: 'value',
+      type: wrapperType,
+      run: (frame) => cast(frame, run(frame)),
+      source: value.source,
+    };
+    return this.unboxed(wrapped) as CompiledValue;
   }
 
   protected castOperation(from: JavaType, to: JavaType, span: Span): (frame: Frame, value: Value) => Value {
