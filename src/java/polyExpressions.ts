@@ -1,4 +1,4 @@
-import type { Expression } from './ast';
+import type { Expression, Statement } from './ast';
 
 /**
  * Whether a call or creation passes an argument whose type its target may decide: an implicitly typed lambda, or a
@@ -18,14 +18,67 @@ export function passesPolyArgument(expression: Expression): boolean {
 
 /**
  * Whether a conditional or switch expression may result in a lambda or method reference, which only a target type
- * types, found among its results outside the calls and creations in it.
+ * types: a conditional's operands, or the values its switch yields, directly or through such expressions.
  */
-export function resultsInFunction(node: unknown): boolean {
-  if (Array.isArray(node)) return node.some((child) => resultsInFunction(child));
-  if (typeof node !== 'object' || node === null) return false;
-  const { kind } = node as { kind?: string };
-  if (kind === 'lambda' || kind === 'methodRef') return true;
-  if (kind === 'call' || kind === 'new') return false;
-  const children = Object.entries(node).filter(([key]) => !(kind === 'conditional' && key === 'condition'));
-  return children.some(([, value]) => resultsInFunction(value));
+export function resultsInFunction(expression: Expression): boolean {
+  switch (expression.kind) {
+    case 'lambda':
+    case 'methodRef': {
+      return true;
+    }
+    case 'conditional': {
+      return resultsInFunction(expression.consequence) || resultsInFunction(expression.alternative);
+    }
+    case 'switchExpression': {
+      return expression.groups.some((group) =>
+        yieldedValues(group.statements).some((value) => resultsInFunction(value))
+      );
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+/** The values the `yield` statements among `statements` give, outside the switch expressions nested in them. */
+function yieldedValues(statements: readonly Statement[]): Expression[] {
+  return statements.flatMap((statement): Expression[] => {
+    switch (statement.kind) {
+      case 'yield': {
+        return [statement.value];
+      }
+      case 'block': {
+        return yieldedValues(statement.statements);
+      }
+      case 'if': {
+        return yieldedValues(
+          statement.alternative ? [statement.consequence, statement.alternative] : [statement.consequence]
+        );
+      }
+      case 'while':
+      case 'do':
+      case 'for':
+      case 'forEach':
+      case 'labeled': {
+        return yieldedValues([statement.body]);
+      }
+      case 'synchronized': {
+        return yieldedValues(statement.body.statements);
+      }
+      case 'try': {
+        const blocks = [
+          statement.body,
+          ...statement.catches.map((clause) => clause.body),
+          ...(statement.finallyBlock ? [statement.finallyBlock] : []),
+        ];
+        return blocks.flatMap((block) => yieldedValues(block.statements));
+      }
+      case 'switch': {
+        return statement.groups.flatMap((group) => yieldedValues(group.statements));
+      }
+      default: {
+        return [];
+      }
+    }
+  });
 }

@@ -108,7 +108,8 @@ export abstract class SwitchCompiler extends StatementCompiler {
   protected switchExpressionType(span: Span, values: readonly { value: CompiledValue }[]): JavaType {
     let result = values[0].value;
     for (const { value } of values.slice(1)) {
-      const type = this.conditionalType(span, result, value);
+      // Results combine as a conditional's operands do, a wrapper and a primitive by unboxing.
+      const type = this.conditionalType(span, ...this.conditionalOperands(result, value));
       result = {
         kind: 'value',
         type,

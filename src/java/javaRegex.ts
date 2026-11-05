@@ -228,8 +228,9 @@ class Translator {
 
   /** Where `$` matches without MULTILINE, and `\Z`: at the end, or before a line terminator that ends the input. */
   private inputEnd(): string {
-    const terminator = this.current().isUnixLines ? String.raw`\n` : String.raw`(?:\r\n|[${LINE_TERMINATORS}])`;
-    return String.raw`(?=${terminator}?(?![\s\S]))`;
+    if (this.current().isUnixLines) return String.raw`(?=\n?(?![\s\S]))`;
+    // Not between the CR and LF of a final CRLF, which is one terminator.
+    return String.raw`(?=(?:\r\n|[${LINE_TERMINATORS}])?(?![\s\S]))(?!(?<=\r)\n)`;
   }
 
   /** Where `$` matches with MULTILINE: before any line terminator, but not between `\r` and `\n`, or at the end. */
@@ -241,7 +242,8 @@ class Translator {
   /** Where `^` matches with MULTILINE: at the start, or after a line terminator that does not end the input. */
   private lineStart(): string {
     const after = this.current().isUnixLines ? String.raw`\n` : String.raw`[\n\x85\u2028\u2029]|\r(?!\n)`;
-    return String.raw`(?:(?<![\s\S])|(?<=${after})(?=[\s\S]))`;
+    // An empty input has no line to start, which MULTILINE's `^` matches only before a character.
+    return String.raw`(?:(?<![\s\S])|(?<=${after}))(?=[\s\S])`;
   }
 
   /** A character outside a class, which ASCII-only case insensitivity matches in either case. */

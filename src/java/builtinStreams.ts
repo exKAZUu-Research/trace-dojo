@@ -503,26 +503,29 @@ function defineIntStreamOperations(
   });
 }
 
-/** The stream `iterate` makes: the seed, then each value `next` gives for the last, while `hasNext` holds. */
+/**
+ * The stream `iterate` makes: the seed, then each value `next` gives for the last, while `hasNext` holds when the
+ * bounded form gives one, whose function, as `next`, must not be null.
+ */
 function iteratedStream(
   frame: Frame,
   context: Context,
   streams: StreamTypes,
-  { seed, next, hasNext, isInt }: { seed: Value; next: Value; hasNext?: Value; isInt: boolean }
+  { seed, next, hasNext, isInt }: { seed: Value; next: Value; hasNext?: { test: Value }; isInt: boolean }
 ): JavaObject {
   const { fn } = context;
   const [step, test] = isInt ? [fn('IntUnaryOperator'), fn('IntPredicate')] : [fn('UnaryOperator'), fn('Predicate')];
-  if (next === undefined) throwBuiltin(frame, 'NullPointerException');
+  if (next === undefined || (hasNext && hasNext.test === undefined)) throwBuiltin(frame, 'NullPointerException');
   return createStream(
     frame,
     isInt ? streams.intStreamImpl : streams.streamImpl,
     function* () {
       for (let value = seed; ; value = callFunction(frame, step, next, [value])) {
-        if (hasNext !== undefined && callFunction(frame, test, hasNext, [value]) !== true) return;
+        if (hasNext && callFunction(frame, test, hasNext.test, [value]) !== true) return;
         yield value;
       }
     },
-    [seed, next, hasNext]
+    [seed, next, hasNext?.test]
   );
 }
 
@@ -534,7 +537,7 @@ function defineGeneratedStreams(context: Context, streams: StreamTypes): void {
   const supplier = fn('Supplier');
   const iterateVariable = typeVariable('T', objectType);
   const tType = variableType(iterateVariable);
-  const iterated = (frame: Frame, seed: Value, next: Value, hasNext?: Value, isInt = false): JavaObject =>
+  const iterated = (frame: Frame, seed: Value, next: Value, hasNext?: { test: Value }, isInt = false): JavaObject =>
     iteratedStream(frame, context, streams, { seed, next, hasNext, isInt });
 
   addMethod(
@@ -551,7 +554,7 @@ function defineGeneratedStreams(context: Context, streams: StreamTypes): void {
     [INT, fn('IntPredicate').type, fn('IntUnaryOperator').type],
     streams.intStream.type,
     true,
-    (frame, _, [seed, hasNext, next]) => iterated(frame, seed, next, hasNext, true)
+    (frame, _, [seed, hasNext, next]) => iterated(frame, seed, next, { test: hasNext }, true)
   );
   const streamOfT = classType(streams.stream, tType);
   const unbounded = addMethod(
@@ -568,7 +571,7 @@ function defineGeneratedStreams(context: Context, streams: StreamTypes): void {
     [tType, classType(predicate, superOf(tType)), classType(unary, tType)],
     streamOfT,
     true,
-    (frame, _, [seed, hasNext, next]) => iterated(frame, seed, next, hasNext)
+    (frame, _, [seed, hasNext, next]) => iterated(frame, seed, next, { test: hasNext })
   );
   unbounded.typeParameters = [iterateVariable];
   bounded.typeParameters = [iterateVariable];
@@ -580,14 +583,16 @@ function defineGeneratedStreams(context: Context, streams: StreamTypes): void {
     classType(streams.stream, variableType(variable)),
     true,
     (frame, _, [source]) =>
-      createStream(
-        frame,
-        streams.streamImpl,
-        function* () {
-          for (;;) yield callFunction(frame, supplier, source, []);
-        },
-        [source]
-      )
+      source === undefined
+        ? throwBuiltin(frame, 'NullPointerException')
+        : createStream(
+            frame,
+            streams.streamImpl,
+            function* () {
+              for (;;) yield callFunction(frame, supplier, source, []);
+            },
+            [source]
+          )
   );
   generate.typeParameters = [variable];
 }
