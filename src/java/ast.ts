@@ -21,10 +21,11 @@ export type PrimitiveTypeName = 'byte' | 'short' | 'int' | 'long' | 'char' | 'fl
 export type TypeSyntax =
   | ({ kind: 'primitive'; name: PrimitiveTypeName } & Span)
   /**
-   * `qualifier` holds the enclosing types written before the name, as in `Outer.Inner`; `args` holds the type
-   * arguments, which are empty for the diamond `<>`.
+   * `qualifier` holds the enclosing types written before the name, as in `Outer.Inner`, and `outer` the qualifier as a
+   * type when it has type arguments, as `O<String>` in `O<String>.I`; `args` holds the type arguments, which are empty
+   * for the diamond `<>`.
    */
-  | ({ kind: 'named'; name: string; qualifier: string[]; args?: TypeSyntax[] } & Span)
+  | ({ kind: 'named'; name: string; qualifier: string[]; outer?: TypeSyntax; args?: TypeSyntax[] } & Span)
   | ({ kind: 'wildcard'; bound: TypeSyntax | undefined; isSuper: boolean } & Span)
   | ({ kind: 'array'; element: TypeSyntax } & Span)
   | ({ kind: 'var' } & Span);

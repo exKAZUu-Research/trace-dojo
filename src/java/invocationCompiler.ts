@@ -11,6 +11,7 @@ import {
   asSuper,
   type ClassInfo,
   erasure,
+  hasGenericOuter,
   isReference,
   isWidening,
   type JavaType,
@@ -102,8 +103,13 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
     if (!outer || type.kind !== 'named' || type.qualifier.length > 0) return this.resolveType(type);
     const outerType = upperBound(this.compileValue(context, outer).type);
     const member = outerType.kind === 'class' ? this.findMemberType(outerType.cls, type.name) : undefined;
-    if (!member) return this.error(type, `${typeName(outerType)} には、クラス ${type.name} がありません。`);
-    return this.withTypeScope(outerType.kind === 'class' ? outerType.cls : undefined, () => this.resolveType(type));
+    if (!member || outerType.kind !== 'class') {
+      return this.error(type, `${typeName(outerType)} には、クラス ${type.name} がありません。`);
+    }
+    const created = this.withTypeScope(outerType.cls, () => this.resolveType(type));
+    // The created object's enclosing instance is the outer value, whose type arguments its members use.
+    const enclosing = member.enclosing && hasGenericOuter(member) ? asSuper(outerType, member.enclosing) : undefined;
+    return enclosing && created.kind === 'class' ? { ...created, outer: enclosing } : created;
   }
 
   /** Creates an object of an anonymous class, whose body compiles here, where it may read the enclosing locals. */

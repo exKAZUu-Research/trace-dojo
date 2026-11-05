@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 455 -- One checker for the definite assignment rules of JLS chapter 16, which share its scopes and states.
+// code-gauge-allow-file fileNcss 457 -- One checker for the definite assignment rules of JLS chapter 16, which share its scopes and states.
 import { CompileError } from '../interpreter/diagnostics';
 import {
   assign,
@@ -30,8 +30,8 @@ import type {
   TryStatement,
   WhileStatement,
 } from './ast';
-import { bindingsOfPattern } from './patternBindings';
-import { booleanConstants, canCompleteNormally, exhaustiveSwitches } from './reachability';
+import { bindingsAfter, bindingsOfPattern } from './patternBindings';
+import { booleanConstants, exhaustiveSwitches } from './reachability';
 
 /**
  * What definite assignment analysis leaves for the compiler to check against the locals that lambdas and local
@@ -161,9 +161,9 @@ export class DefiniteAssignmentChecker {
   }
 
   /**
-   * Analyzes a statement, after which the pattern variables its expressions declared go out of scope, except those of
-   * an `if` whose then-branch cannot complete normally, as `if (!(o instanceof String s)) return;` keeps `s` for the
-   * statements after it until its block ends.
+   * Analyzes a statement, after which the pattern variables its expressions declared go out of scope, except those
+   * that the compiler keeps in scope after it, as `if (!(o instanceof String s)) return;` keeps `s` for the statements
+   * after it until its block ends.
    */
   statement(statement: Statement, state: State): State {
     const declared: Variable[] = [];
@@ -172,9 +172,17 @@ export class DefiniteAssignmentChecker {
       return this.statementOfKind(statement, state);
     } finally {
       this.patternDeclarations.pop();
-      const keeps = statement.kind === 'if' && !canCompleteNormally(statement.consequence);
-      if (keeps) this.patternDeclarations.at(-1)?.push(...declared);
-      else for (const variable of declared) this.forget(variable);
+      // A labeled statement declares nothing itself, so what it holds is what its body keeps.
+      const label = this.labelsByStatement.get(statement);
+      const kept = new Set<Span>(bindingsAfter(statement, label === undefined ? [] : [label]));
+      for (const variable of declared) {
+        if (statement.kind === 'labeled' || (variable.declaration && kept.has(variable.declaration))) {
+          this.patternDeclarations.at(-1)?.push(variable);
+          (this.scopes.at(-1) as Map<string, Variable>).set(variable.name, variable);
+        } else {
+          this.forget(variable);
+        }
+      }
     }
   }
 

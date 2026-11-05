@@ -1243,6 +1243,46 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'class Main {\n  final String s;\n  Main(Object o) { if (o instanceof String s) {} s = "field"; }\n  public static void main(String[] args) {\n    new Main("abc");\n  }\n}',
   ],
+  [
+    'field-assigned-after-returning-then-pattern',
+    true,
+    'class Main {\n  final String s;\n  Main(Object o) { if (o instanceof Integer s) throw new RuntimeException(); s = "field"; }\n  public static void main(String[] args) {\n    new Main("abc");\n  }\n}',
+  ],
+  [
+    'pattern-kept-by-returning-else',
+    true,
+    'class Main {\n  final String s;\n  Main(Object o) { if (o instanceof String s) {} else { throw new RuntimeException(); } System.out.println(s.length()); this.s = s; }\n  public static void main(String[] args) {\n    new Main("abc");\n  }\n}',
+  ],
+  [
+    'pattern-kept-by-returning-else-captured-after-write',
+    false,
+    'class Main {\n  public static void main(String[] args) {\n    Object o = "abc"; if (o instanceof String s) {} else return; s = "def"; Runnable r = () -> System.out.println(s);\n  }\n}',
+  ],
+  [
+    'pattern-kept-after-loop-without-break',
+    true,
+    'class Main {\n  public static void main(String[] args) {\n    Object o = 1; while (!(o instanceof String s)) o = "x"; for (; !(o instanceof String t); ) o = "y"; System.out.println(s + t);\n  }\n}',
+  ],
+  [
+    'pattern-dropped-after-loop-with-break',
+    false,
+    'class Main {\n  public static void main(String[] args) {\n    Object o = 1; while (!(o instanceof String s)) { if (o == null) break; o = "x"; } System.out.println(s);\n  }\n}',
+  ],
+  [
+    'inner-class-of-generic-outer',
+    true,
+    'class Main {\n  static class O<T> { class I { T v; } }\n  public static void main(String[] args) {\n    O<String> o = new O<>(); O<String>.I a = o.new I(); a.v = "x"; var b = o.new I(); String s = b.v; O.I raw = a; raw.v = 1;\n  }\n}',
+  ],
+  [
+    'inner-class-of-generic-outer-mismatch',
+    false,
+    'class Main {\n  static class O<T> { class I { T v; } }\n  public static void main(String[] args) {\n    O<String> o = new O<>(); var a = o.new I(); a.v = 3;\n  }\n}',
+  ],
+  [
+    'keyed-comparator-chained-without-target',
+    true,
+    'import java.util.*;\nclass Main {\n  record P(String name, int age) {}\n  public static void main(String[] args) {\n    List<P> ps = new ArrayList<>(); ps.sort(Comparator.comparing(P::name, Comparator.reverseOrder()).reversed());\n  }\n}',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

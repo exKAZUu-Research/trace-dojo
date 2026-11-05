@@ -2,11 +2,15 @@ import { CompileError } from '../interpreter/diagnostics';
 import type { ImportDeclaration, Span, TypeParameter, TypeSyntax } from './ast';
 import { getBuiltins } from './builtins';
 import {
+  asSuper,
   type ClassInfo,
+  type ClassType,
+  hasGenericOuter,
   isPrimitive,
   isSubclass,
   type JavaType,
   superinterfacesOf,
+  thisTypeOf,
   typeName,
   type TypeVariable,
 } from './types';
@@ -52,10 +56,11 @@ export abstract class TypeResolver {
     }
     let cls = this.lookupQualifiedType([...syntax.qualifier, syntax.name]);
     if (!cls) this.error(syntax, `この採点環境には、型 ${[...syntax.qualifier, syntax.name].join('.')} がありません。`);
-    if (!syntax.args) return cls.type;
+    const outer = this.outerTypeOf(syntax, cls);
+    if (!syntax.args) return outer ? { kind: 'class', cls, outer } : cls.type;
     const { typeParameters } = cls;
     // The diamond `<>` stands for arguments that the creation infers.
-    if (syntax.args.length === 0) return { kind: 'class', cls, args: [] };
+    if (syntax.args.length === 0) return { kind: 'class', cls, args: [], outer };
     if (typeParameters.length !== syntax.args.length) {
       this.error(
         syntax,
@@ -64,7 +69,22 @@ export abstract class TypeResolver {
           : `型 ${cls.name} には ${typeParameters.length} 個の型引数が必要です。`
       );
     }
-    return { kind: 'class', cls, args: syntax.args.map((arg) => this.resolveTypeArgument(arg)) };
+    return { kind: 'class', cls, args: syntax.args.map((arg) => this.resolveTypeArgument(arg)), outer };
+  }
+
+  /**
+   * The enclosing instance's type that a named inner class of a generic class has: the qualifier written with type
+   * arguments, a raw qualifier, which erases them, or else the enclosing class's own type parameters.
+   */
+  private outerTypeOf(syntax: Extract<TypeSyntax, { kind: 'named' }>, cls: ClassInfo): ClassType | undefined {
+    const { enclosing } = cls;
+    if (!enclosing || !hasGenericOuter(cls)) return undefined;
+    if (syntax.outer) {
+      const outer = this.resolveType(syntax.outer);
+      return outer.kind === 'class' ? (asSuper(outer, enclosing) ?? outer) : undefined;
+    }
+    if (syntax.qualifier.length > 0) return enclosing.type as ClassType;
+    return thisTypeOf(enclosing);
   }
 
   /**

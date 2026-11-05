@@ -8,6 +8,7 @@ import {
   type ClassInfo,
   type ClassType,
   erasure,
+  hasGenericOuter,
   isPrimitive,
   isWidening,
   type JavaType,
@@ -65,7 +66,7 @@ export function isInvocationConvertible(
 
 /** The bindings of `owner`'s type parameters as a member access through a receiver of `receiverType` sees them. */
 export function memberBindings(receiverType: JavaType | undefined, owner: ClassInfo): Map<TypeVariable, JavaType> {
-  if (!receiverType || owner.typeParameters.length === 0) return new Map();
+  if (!receiverType || (owner.typeParameters.length === 0 && !hasGenericOuter(owner))) return new Map();
   const bound = upperBound(receiverType);
   const supertype = bound.kind === 'class' ? asSuper(bound, owner) : undefined;
   return supertype ? bindingsOf(supertype) : new Map();

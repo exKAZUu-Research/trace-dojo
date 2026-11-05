@@ -1,4 +1,33 @@
-import { type Expression, type Pattern, type PatternBinding, UNNAMED } from './ast';
+import { type Expression, type Pattern, type PatternBinding, type Statement, UNNAMED } from './ast';
+import { canCompleteNormally, containsJump } from './reachability';
+
+/**
+ * The pattern variables that stay in scope after `statement` (JLS 6.3.2): those of an `if` condition's other outcome
+ * when a branch cannot complete normally, and those of a loop condition when false when no `break` exits the loop.
+ *
+ * @param labels The labels that name the statement, which a `break` may use to exit it.
+ */
+export function bindingsAfter(statement: Statement, labels: readonly string[]): PatternBinding[] {
+  switch (statement.kind) {
+    case 'if': {
+      const { condition, consequence, alternative } = statement;
+      return [
+        ...(canCompleteNormally(consequence) ? [] : bindingsWhen(condition, false)),
+        ...(alternative && !canCompleteNormally(alternative) ? bindingsWhen(condition, true) : []),
+      ];
+    }
+    case 'while':
+    case 'do':
+    case 'for': {
+      const { body, condition } = statement;
+      const breaks = containsJump(body, 'break') || labels.some((label) => containsJump(body, 'break', label));
+      return condition && !breaks ? bindingsWhen(condition, false) : [];
+    }
+    default: {
+      return [];
+    }
+  }
+}
 
 /** The pattern variables that `expression` introduces where it is `whenTrue`, as JLS 6.3.1 lists them. */
 export function bindingsWhen(expression: Expression, whenTrue: boolean): PatternBinding[] {

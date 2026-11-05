@@ -18,6 +18,11 @@ export interface ClassType {
   kind: 'class';
   cls: ClassInfo;
   args?: JavaType[];
+  /**
+   * The type of the enclosing instance of an inner class that a generic class encloses, whose type arguments the inner
+   * class's members use, as `O<String>` in `O<String>.I`; a raw one erases them.
+   */
+  outer?: ClassType;
 }
 
 export interface TypeVariable {
@@ -209,10 +214,20 @@ export function createClass(name: string, superclass: ClassInfo | undefined, isB
   return cls;
 }
 
-/** The type of `this` in `cls`'s body: the class parameterized by its own type parameters. */
+/** The type of `this` in `cls`'s body: the class parameterized by its own type parameters and its enclosing ones. */
 export function thisTypeOf(cls: ClassInfo): ClassType {
-  if (cls.typeParameters.length === 0) return cls.type as ClassType;
-  return { kind: 'class', cls, args: cls.typeParameters.map((variable) => ({ kind: 'typeVar', variable })) };
+  const outer = cls.enclosing && hasGenericOuter(cls) ? thisTypeOf(cls.enclosing) : undefined;
+  if (cls.typeParameters.length === 0 && !outer) return cls.type as ClassType;
+  const args = cls.typeParameters.map((variable): JavaType => ({ kind: 'typeVar', variable }));
+  return { kind: 'class', cls, args: args.length > 0 ? args : undefined, outer };
+}
+
+/** Whether `cls` is an inner class whose enclosing instance's class, or that one's, has type parameters. */
+export function hasGenericOuter(cls: ClassInfo): boolean {
+  for (let current = cls; current.hasOuterInstance && current.enclosing; current = current.enclosing) {
+    if (current.enclosing.typeParameters.length > 0) return true;
+  }
+  return false;
 }
 
 /** Whether `cls` is `ancestor` or extends or implements it, directly or indirectly. */
@@ -280,13 +295,7 @@ export function sameType(a: JavaType, b: JavaType): boolean {
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
     case 'class': {
-      const other = b as ClassType;
-      if (a.cls !== other.cls) return false;
-      if (!a.args || !other.args) return !a.args && !other.args;
-      return (
-        a.args.length === other.args.length &&
-        a.args.every((arg, index) => sameType(arg, (other.args as JavaType[])[index]))
-      );
+      return sameClassType(a, b as ClassType);
     }
     case 'array': {
       return sameType(a.element, (b as typeof a).element);
@@ -305,6 +314,13 @@ export function sameType(a: JavaType, b: JavaType): boolean {
   }
 }
 
+function sameClassType(a: ClassType, b: ClassType): boolean {
+  if (a.cls !== b.cls) return false;
+  if (a.outer && b.outer && !sameType(a.outer, b.outer)) return false;
+  if (!a.args || !b.args) return !a.args && !b.args;
+  return a.args.length === b.args.length && a.args.every((arg, index) => sameType(arg, (b.args as JavaType[])[index]));
+}
+
 /** Whether two types erase to the same type, as overriding and overloading compare signatures. */
 export function sameErasure(a: JavaType, b: JavaType): boolean {
   return sameType(erasure(a), erasure(b));
@@ -315,7 +331,7 @@ export function sameErasure(a: JavaType, b: JavaType): boolean {
 export function erasure(type: JavaType): JavaType {
   switch (type.kind) {
     case 'class': {
-      return type.args ? type.cls.type : type;
+      return type.args || type.outer ? type.cls.type : type;
     }
     case 'array': {
       return { kind: 'array', element: erasure(type.element) };
@@ -355,9 +371,10 @@ export function substitute(type: JavaType, bindings: ReadonlyMap<TypeVariable, J
   if (bindings.size === 0) return type;
   switch (type.kind) {
     case 'class': {
-      if (!type.args) return type;
-      const args = type.args.map((arg) => substitute(arg, bindings));
-      return { kind: 'class', cls: type.cls, args };
+      if (!type.args && !type.outer) return type;
+      const args = type.args?.map((arg) => substitute(arg, bindings));
+      const outer = type.outer && (substitute(type.outer, bindings) as ClassType);
+      return { kind: 'class', cls: type.cls, args, ...(outer && { outer }) };
     }
     case 'array': {
       return { kind: 'array', element: substitute(type.element, bindings) };
@@ -377,7 +394,7 @@ export function substitute(type: JavaType, bindings: ReadonlyMap<TypeVariable, J
 /** The bindings of `cls`'s type parameters that the class type `type` gives; a raw type erases them. */
 export function bindingsOf(type: ClassType): Map<TypeVariable, JavaType> {
   const { typeParameters } = type.cls;
-  const bindings = new Map<TypeVariable, JavaType>();
+  const bindings = type.outer ? bindingsOf(type.outer) : new Map<TypeVariable, JavaType>();
   for (const [index, variable] of typeParameters.entries()) {
     bindings.set(variable, type.args?.[index] ?? erasure({ kind: 'typeVar', variable }));
   }
@@ -411,7 +428,8 @@ function containsTypeArgument(parameter: JavaType, argument: JavaType, objectCla
 export function typeName(type: JavaType): string {
   switch (type.kind) {
     case 'class': {
-      return type.args ? `${type.cls.name}<${type.args.map((arg) => typeName(arg)).join(',')}>` : type.cls.name;
+      const name = type.outer ? `${typeName(type.outer)}.${type.cls.name}` : type.cls.name;
+      return type.args ? `${name}<${type.args.map((arg) => typeName(arg)).join(',')}>` : name;
     }
     case 'typeVar': {
       return type.variable.name;

@@ -282,10 +282,9 @@ export abstract class LambdaCompiler extends PatternCompiler {
     if (variables.length === 0 || !args.some((arg) => arg.type.kind === 'pending')) return;
     if (method.parameterTypes.length !== args.length) return;
     const bindings = new Map<TypeVariable, JavaType>();
-    for (const [index, arg] of args.entries()) {
-      if (arg.type.kind !== 'pending')
-        infer(this.builtins, method.parameterTypes[index], arg.type, variables, bindings);
-    }
+    // A pending method reference's receiver hint decides its receiver type, as `P::name` decides `T` = `P`.
+    for (const [index, arg] of args.entries())
+      infer(this.builtins, method.parameterTypes[index], arg.type, variables, bindings);
     // The target type decides what the other arguments leave open before the lambdas, whose parameters may need it.
     if (targetType && !isPrimitive(targetType)) inferFromTarget(this.builtins, method, targetType, bindings);
     this.inferFromPendingArguments(context, method, args, expressions, bindings);

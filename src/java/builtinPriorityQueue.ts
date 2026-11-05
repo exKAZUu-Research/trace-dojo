@@ -199,11 +199,21 @@ function defineHeapIterator(context: Context, cls: ClassInfo, element: JavaType)
     const state = heapIteratorState(receiver);
     return state.cursor < elementsOf(state.queue).length || state.forgetMeNot.length > 0;
   });
-  addMethod(itrClass, 'next', [], itrElement, false, (frame, receiver) =>
-    nextOfHeap(frame, heapIteratorState(receiver))
-  );
+  addMethod(itrClass, 'next', [], itrElement, false, (frame, receiver) => {
+    const state = heapIteratorState(receiver);
+    try {
+      return nextOfHeap(frame, state);
+    } finally {
+      retainPending(receiver, state);
+    }
+  });
   addMethod(itrClass, 'remove', [], VOID, false, (frame, receiver) => {
-    removeThroughHeapIterator(frame, receiver, heapIteratorState(receiver));
+    const state = heapIteratorState(receiver);
+    try {
+      removeThroughHeapIterator(frame, state);
+    } finally {
+      retainPending(receiver, state);
+    }
   });
   linkOverrides(itrClass);
   const iterator = cls.methods.find(
@@ -221,10 +231,14 @@ function defineHeapIterator(context: Context, cls: ClassInfo, element: JavaType)
       forgetMeNot: [],
       expectedModCount: queue.modCount,
     });
-    // The iterator keeps its queue and the elements it still has to visit alive.
     object.retained = [queue];
     return object;
   };
+}
+
+/** Keeps the iterator's queue alive, with the elements it still has to visit and the one it may remove, as the JDK's. */
+function retainPending(receiver: Value, { queue, forgetMeNot, lastElement }: HeapIteratorState): void {
+  (receiver as JavaObject).retained = [queue, ...forgetMeNot, ...(lastElement ? [lastElement.value] : [])];
 }
 
 function heapIteratorState(receiver: Value): HeapIteratorState {
@@ -236,20 +250,19 @@ function nextOfHeap(frame: Frame, state: HeapIteratorState): Value {
   const heap = elementsOf(state.queue);
   if (state.cursor < heap.length) return heap[(state.lastReturned = state.cursor++)];
   state.lastReturned = -1;
-  if (state.forgetMeNot.length === 0) return throwBuiltin(frame, 'NoSuchElementException');
-  state.lastElement = { value: state.forgetMeNot.shift() };
+  // Polling the empty forgetMeNot clears the element a later remove() would remove, as in the JDK.
+  state.lastElement = state.forgetMeNot.length > 0 ? { value: state.forgetMeNot.shift() } : undefined;
+  if (!state.lastElement) return throwBuiltin(frame, 'NoSuchElementException');
   return state.lastElement.value;
 }
 
-function removeThroughHeapIterator(frame: Frame, receiver: Value, state: HeapIteratorState): void {
+function removeThroughHeapIterator(frame: Frame, state: HeapIteratorState): void {
   if (state.expectedModCount !== state.queue.modCount) throwBuiltin(frame, 'ConcurrentModificationException');
   if (state.lastReturned !== -1) {
     const displaced = removeAt(frame, state.queue, state.lastReturned);
     state.lastReturned = -1;
-    if (displaced) {
-      state.forgetMeNot.push(displaced.moved);
-      (receiver as JavaObject).retained?.push(displaced.moved);
-    } else state.cursor--;
+    if (displaced) state.forgetMeNot.push(displaced.moved);
+    else state.cursor--;
   } else if (state.lastElement) {
     // The element taken from forgetMeNot is removed by identity, as removeEq does.
     const index = elementsOf(state.queue).indexOf(state.lastElement.value);

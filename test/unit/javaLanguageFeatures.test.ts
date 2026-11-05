@@ -319,8 +319,15 @@ test("Java's bulk operations, priority queue iterators, and unmodifiable wrapper
     finalVarsOf(
       `List<Integer> a = new ArrayList<>(List.of(1, 2, 3)); String bulk = ""; try { a.removeIf(n -> { a.add(9); return n == 2; }); } catch (ConcurrentModificationException e) { bulk = a.toString(); }
 PriorityQueue<Integer> q = new PriorityQueue<>(); for (int x : new int[] {0, 4, 1, 5, 6, 2, 3}) q.add(x); Iterator<Integer> i = q.iterator(); String seen = ""; while (i.hasNext()) { int x = i.next(); seen += x; if (x == 6) i.remove(); }
+String exhausted = ""; try { i.next(); } catch (NoSuchElementException e) { exhausted += "N"; } try { i.remove(); } catch (IllegalStateException e) { exhausted += "I"; } exhausted += q;
 Set<Integer> s = new HashSet<>(Set.of(1)); Iterator<Integer> u = Collections.unmodifiableSet(s).iterator(); s.add(2); String wrapped = ""; try { u.next(); } catch (ConcurrentModificationException e) { wrapped = "cme"; }
 List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(Comparator.nullsFirst(Comparator.naturalOrder())); String sorted = nulls.toString();`
     )
-  ).toEqual({ bulk: '[1, 2, 3, 9, 9, 9]', seen: '0415623', wrapped: 'cme', sorted: '[null, a, b]' });
+  ).toEqual({
+    bulk: '[1, 2, 3, 9, 9, 9]',
+    seen: '0415623',
+    exhausted: 'NI[0, 3, 1, 5, 4, 2]',
+    wrapped: 'cme',
+    sorted: '[null, a, b]',
+  });
 });

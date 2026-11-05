@@ -20,8 +20,8 @@ import {
 } from './compilerBase';
 import { InvocationCompiler } from './invocationCompiler';
 import { nullMessage, typeDescription } from './nullMessages';
-import { bindingsWhen } from './patternBindings';
-import { booleanConstants, canCompleteNormally, containsJump } from './reachability';
+import { bindingsAfter, bindingsWhen } from './patternBindings';
+import { booleanConstants, canCompleteNormally } from './reachability';
 import { type Frame, JavaThrow, throwBuiltin, UNASSIGNED } from './runtime';
 import { isObjectCreation, onlyCalls } from './stepRules';
 import {
@@ -157,7 +157,7 @@ export abstract class StatementCompiler extends InvocationCompiler {
         return this.compileWhile(context, statement);
       }
       case 'for': {
-        return this.withScope(context, () => this.compileFor(context, statement));
+        return this.compileFor(context, statement);
       }
       case 'forEach': {
         return this.withScope(context, () => this.compileForEach(context, statement));
@@ -219,22 +219,8 @@ export abstract class StatementCompiler extends InvocationCompiler {
           this.withBindings(context, whenFalse, () => this.compileStatement(context, alternative))
         )
       : undefined;
-    // A branch that cannot complete normally leaves the other branch's pattern variables in scope after the if.
-    if (!canCompleteNormally(statement.consequence)) this.introduceBindings(context, whenFalse);
-    if (alternative && !canCompleteNormally(alternative)) this.introduceBindings(context, whenTrue);
+    this.introduceBindings(context, bindingsAfter(statement, []));
     return (frame) => (condition(frame) ? consequence(frame) : otherwise?.(frame));
-  }
-
-  /** A loop that no break leaves ends only when its condition is false, so that case's bindings stay in scope. */
-  protected introduceLoopExitBindings(
-    context: MethodContext,
-    statement: Extract<Statement, { kind: 'while' | 'do' | 'for' }>,
-    condition: Expression,
-    labels: readonly string[]
-  ): void {
-    const breaks =
-      containsJump(statement.body, 'break') || labels.some((label) => containsJump(statement.body, 'break', label));
-    if (!breaks) this.introduceBindings(context, bindingsWhen(condition, false));
   }
 
   // code-gauge-allow functionCognitiveComplexity 17 -- While and do statements share one loop, which differs only in where the condition runs.
@@ -250,7 +236,7 @@ export abstract class StatementCompiler extends InvocationCompiler {
       this.withBindings(context, bindingsWhen(statement.condition, true), () =>
         this.compileLoopBody(context, statement.body, labels)
       );
-    this.introduceLoopExitBindings(context, statement, statement.condition, labels);
+    this.introduceBindings(context, bindingsAfter(statement, labels));
     return (frame) => {
       if (!isDo && !condition(frame)) return;
       for (;;) {
@@ -448,6 +434,17 @@ export abstract class StatementCompiler extends InvocationCompiler {
 
   protected compileFor(context: MethodContext, statement: Extract<Statement, { kind: 'for' }>): Exec {
     const labels = this.takeLabels(context);
+    const loop = this.withScope(context, () => this.compileForLoop(context, statement, labels));
+    // The condition's bindings outlive the loop, whose header variables go out of scope with it.
+    this.introduceBindings(context, bindingsAfter(statement, labels));
+    return loop;
+  }
+
+  protected compileForLoop(
+    context: MethodContext,
+    statement: Extract<Statement, { kind: 'for' }>,
+    labels: string[]
+  ): Exec {
     const { init, update } = this.compileForHeader(context, statement);
     const { condition: conditionSyntax } = statement;
     const condition = conditionSyntax ? this.compileCondition(context, conditionSyntax) : () => true;
@@ -455,7 +452,6 @@ export abstract class StatementCompiler extends InvocationCompiler {
     const body = this.withBindings(context, conditionSyntax ? bindingsWhen(conditionSyntax, true) : [], () =>
       this.compileLoopBody(context, statement.body, labels)
     );
-    if (conditionSyntax) this.introduceLoopExitBindings(context, statement, conditionSyntax, labels);
     return (frame) => {
       init(frame);
       while (condition(frame)) {

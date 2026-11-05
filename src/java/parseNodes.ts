@@ -127,14 +127,7 @@ export function convertType(node: Node): TypeSyntax {
       return wrapArray(convertType(field(node, 'element')), countDimensions(field(node, 'dimensions')), node);
     }
     case 'scoped_type_identifier': {
-      if (namedChildren(node).some((child) => child.type.endsWith('annotation'))) {
-        unsupported(node, `型「${node.text}」`);
-      }
-      const parts = node.text.split('.').map((part) => part.trim());
-      // `java.lang.String`, `java.util.List`, and the like name the same classes as their simple names.
-      const qualifier = parts.slice(0, -1);
-      const isPackage = /^java\.[a-z.]+$/.test(qualifier.join('.'));
-      return { kind: 'named', name: parts.at(-1) ?? '', qualifier: isPackage ? [] : qualifier, ...span(node) };
+      return convertScopedType(node);
     }
     case 'generic_type': {
       const [base, argumentsNode] = namedChildren(node);
@@ -216,4 +209,31 @@ export function identifierOf(node: Node, what: string): Node {
   const name = field(node, 'name');
   if (name.type !== 'identifier' && name.type !== 'underscore_pattern') unsupported(name, what);
   return name;
+}
+
+function convertScopedType(node: Node): TypeSyntax {
+  if (namedChildren(node).some((child) => child.type.endsWith('annotation'))) {
+    unsupported(node, `型「${node.text}」`);
+  }
+  const [qualifierNode, nameNode] = namedChildren(node);
+  if (qualifierNode && nameNode && hasTypeArguments(qualifierNode)) {
+    const outer = convertType(qualifierNode);
+    if (outer.kind !== 'named') return unsupported(node, `型「${node.text}」`);
+    return {
+      kind: 'named',
+      name: nameNode.text,
+      qualifier: [...outer.qualifier, outer.name],
+      outer,
+      ...span(node),
+    };
+  }
+  const parts = node.text.split('.').map((part) => part.trim());
+  // `java.lang.String`, `java.util.List`, and the like name the same classes as their simple names.
+  const qualifier = parts.slice(0, -1);
+  const isPackage = /^java\.[a-z.]+$/.test(qualifier.join('.'));
+  return { kind: 'named', name: parts.at(-1) ?? '', qualifier: isPackage ? [] : qualifier, ...span(node) };
+}
+
+function hasTypeArguments(node: Node): boolean {
+  return node.type === 'generic_type' || namedChildren(node).some((child) => hasTypeArguments(child));
 }
