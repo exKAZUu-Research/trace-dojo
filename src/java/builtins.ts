@@ -153,15 +153,20 @@ function defineClassClass(registry: Registry, objectClass: ClassInfo, stringType
         : receiver instanceof JavaString
           ? frame.runtime.builtins.stringClass
           : objectClass;
-    let object = classObjects.get(cls);
-    if (!object) {
-      object = new JavaObject(classClass);
-      object.reflected = cls;
-      classObjects.set(cls, object);
-    }
-    return object;
+    return classObjectOf(cls, classClass);
   });
   getClass.isFinal = true;
+}
+
+/** The `Class` object of `cls`, which `getClass()` and class literals share. */
+export function classObjectOf(cls: ClassInfo, classClass: ClassInfo): JavaObject {
+  let object = classObjects.get(cls);
+  if (!object) {
+    object = new JavaObject(classClass);
+    object.reflected = cls;
+    classObjects.set(cls, object);
+  }
+  return object;
 }
 
 function defineEnum(enumClass: ClassInfo, stringType: JavaType): ClassInfo {

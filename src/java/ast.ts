@@ -64,6 +64,8 @@ export interface ClassDeclaration extends Span {
 export interface EnumConstant extends Span {
   name: string;
   args: Expression[];
+  /** The body of a constant that is an anonymous subclass of its enum, as one that overrides methods is. */
+  body?: MemberDeclaration[];
 }
 
 export type MemberDeclaration =
@@ -299,6 +301,7 @@ export type Expression =
   | Lambda
   | MethodReference
   | TypeReference
+  | ClassLiteral
   | ThisExpression;
 
 export type LiteralValue =
@@ -461,6 +464,12 @@ export interface MethodReference extends Span {
   target: { expression: Expression } | { type: TypeSyntax };
   /** The method's name, or `new` for a constructor. */
   name: string;
+}
+
+/** `Type.class`, the `Class` object of a type. */
+export interface ClassLiteral extends Span {
+  kind: 'classLiteral';
+  type: TypeSyntax;
 }
 
 /** A class named by a type, which the compiler writes for the method references it expands into lambdas. */

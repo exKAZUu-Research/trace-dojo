@@ -140,19 +140,50 @@ class Compiler extends DeclarationCompiler {
       this.checkThrown(context, constant, constructor.thrownTypes);
       const convertedArgs = this.convertArguments(context, constructor, args, constant.args);
       const name = this.internedString(constant.name);
+      const { objectClass, objectConstructor } = this.enumConstantClass(context, cls, constant, constructor);
       // Traces leave enum constants out of the variables, so creating one shows only its constructor's steps.
       return (frame: Frame) => {
-        const object = frame.runtime.allocateObject(frame, cls);
+        const object = frame.runtime.allocateObject(frame, objectClass);
         object.enumConstant = { name, ordinal };
         frame.temporaries.push(object);
         try {
-          this.invokeWithArguments(frame, constructor, object, convertedArgs, constant.row);
+          this.invokeWithArguments(frame, objectConstructor, object, convertedArgs, constant.row);
         } finally {
           frame.temporaries.pop();
         }
         frame.runtime.staticsOf(frame, cls)[field.slot] = object;
       };
     });
+  }
+
+  /** The class of an enum constant's object: the enum, or the anonymous subclass that the constant's body declares. */
+  protected enumConstantClass(
+    context: MethodContext,
+    cls: ClassInfo,
+    constant: NonNullable<FieldInfo['enumConstant']>,
+    constructor: MethodInfo
+  ): { objectClass: ClassInfo; objectConstructor: MethodInfo } {
+    if (!constant.body) return { objectClass: cls, objectConstructor: constructor };
+    const { row, endRow, start, end } = constant;
+    const declaration: ClassDeclaration = {
+      kind: 'class',
+      name: '',
+      typeParameters: [],
+      modifiers: { isStatic: false, isFinal: false, isAbstract: false, isDefault: false, access: 'package' },
+      superclass: undefined,
+      interfaces: [],
+      enumConstants: [],
+      members: constant.body,
+      row,
+      endRow,
+      start,
+      end,
+    };
+    const subclass = this.compileLocalClass(context, declaration, {
+      superConstructor: constructor,
+      base: cls.type as ClassType,
+    });
+    return { objectClass: subclass, objectConstructor: subclass.constructors[0] };
   }
 
   /** The blank final fields and the initializers of one kind, which assign those fields first. */

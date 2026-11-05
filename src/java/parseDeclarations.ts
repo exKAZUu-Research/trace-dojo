@@ -194,9 +194,14 @@ function withoutSpans(type: TypeSyntax): string {
 
 function convertEnumConstant(node: Node): EnumConstant {
   if (modifiersOf(node)) unsupported(node, '列挙定数へのアノテーション');
-  if (node.childForFieldName('body')) unsupported(node, '本体を持つ列挙定数');
   const args = node.childForFieldName('arguments');
-  return { name: field(node, 'name').text, args: args ? convertArguments(args) : [], ...span(node) };
+  const body = node.childForFieldName('body');
+  return {
+    name: field(node, 'name').text,
+    args: args ? convertArguments(args) : [],
+    body: body ? namedChildren(body).map((member) => convertMember(member)) : undefined,
+    ...span(node),
+  };
 }
 
 export function convertMember(member: Node): MemberDeclaration {

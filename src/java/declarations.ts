@@ -62,13 +62,19 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
     if (modifiers.isAbstract && modifiers.isFinal)
       this.error(declaration, `クラス ${name} に abstract と final を両方付けることはできません。`);
     if (kind === 'enum' && modifiers.isAbstract) this.error(declaration, '列挙型に abstract は付けられません。');
+    // Constants with bodies subclass their enum, which may then leave methods abstract for them to implement.
+    const hasConstantBodies = declaration.enumConstants.some((constant) => constant.body);
     const cls = createClass(name, undefined, false);
     cls.kind = kind;
     cls.declaration = declaration;
     cls.enclosing = enclosing;
     cls.binaryName = enclosing ? `${enclosing.binaryName}$${name}` : name;
-    cls.isAbstract = modifiers.isAbstract || kind === 'interface';
-    cls.isFinal = modifiers.isFinal || kind === 'enum' || declaration.isRecord === true;
+    cls.isAbstract =
+      modifiers.isAbstract ||
+      kind === 'interface' ||
+      (hasConstantBodies &&
+        declaration.members.some((member) => member.kind === 'method' && member.modifiers.isAbstract));
+    cls.isFinal = modifiers.isFinal || (kind === 'enum' && !hasConstantBodies) || declaration.isRecord === true;
     if (declaration.isRecord && modifiers.isAbstract) this.error(declaration, 'レコードに abstract は付けられません。');
     // An inner class's instances belong to an instance of the class around it.
     cls.hasOuterInstance = enclosing !== undefined && !isStatic && enclosing.kind !== 'interface';
@@ -100,7 +106,7 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
         cls.typeParameters = this.declareTypeParameters(declaration.typeParameters);
         this.withTypeVariables(cls.typeParameters, () => {
           const base = this.anonymousBases.get(cls);
-          const superclass = base?.cls.kind === 'class' ? base : this.resolveSuperclass(cls, declaration);
+          const superclass = base && base.cls.kind !== 'interface' ? base : this.resolveSuperclass(cls, declaration);
           const interfaces: ClassType[] = [];
           if (base?.cls.kind === 'interface') interfaces.push(base);
           else

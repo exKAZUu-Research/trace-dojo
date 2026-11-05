@@ -1,5 +1,6 @@
 // code-gauge-allow-file fileNcss 453 -- The expression compiler keeps one method per expression kind together.
 import type { ArrayInitializer, BinaryOperator, ClassDeclaration, Expression, PatternBinding, Span } from './ast';
+import { classObjectOf } from './builtins';
 import { box, boxedTypeOf, unbox } from './builtinWrappers';
 import {
   type Capture,
@@ -184,6 +185,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
           );
         }
         return this.compileFunctional(context, expression, target);
+      }
+      case 'classLiteral': {
+        const type = this.resolveType(expression.type);
+        if (type.kind !== 'class')
+          return this.error(
+            expression,
+            'この採点環境では、クラスと列挙型とインターフェースにしか .class を使えません。'
+          );
+        const classClass = this.builtins.classes.get('Class') as ClassInfo;
+        const object = classObjectOf(type.cls, classClass);
+        return { kind: 'value', type: classClass.type, run: () => object };
       }
       case 'typeRef': {
         const type = this.resolveType(expression.type);

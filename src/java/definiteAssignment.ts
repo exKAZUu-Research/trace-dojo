@@ -501,6 +501,7 @@ class DefiniteAssignmentChecker {
       }
       // A lambda's body runs later, and its own analysis covers it; it cannot assign the enclosing locals.
       case 'lambda':
+      case 'classLiteral':
       case 'typeRef': {
         return state;
       }
