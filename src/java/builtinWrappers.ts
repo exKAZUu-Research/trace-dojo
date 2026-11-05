@@ -331,7 +331,10 @@ export function hashOf(value: Value, kind: BoxableKind): number {
 function parseIntegral(frame: Frame, text: Value, bits: 32 | 64): bigint {
   const value = (text as JavaString | undefined)?.value;
   frame.runtime.scanString(value?.length ?? 0);
-  const parsed = value !== undefined && /^[+-]?\d+$/.test(value) ? BigInt(value) : undefined;
+  // Java reads any Unicode decimal digit; of those, this reads the ones whose compatibility forms are ASCII, such as
+  // the full-width `１` of Japanese text.
+  const digits = value?.replaceAll(/\p{Nd}/gu, (digit) => digit.normalize('NFKC'));
+  const parsed = digits !== undefined && /^[+-]?\d+$/.test(digits) ? BigInt(digits) : undefined;
   if (parsed === undefined || parsed !== BigInt.asIntN(bits, parsed)) {
     return throwBuiltin(
       frame,
