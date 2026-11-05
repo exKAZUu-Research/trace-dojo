@@ -105,6 +105,22 @@ export function linkOverrides(cls: ClassInfo): void {
   }
 }
 
+/**
+ * Reads a collection's items again only after it changes structurally, as a view of a map computes its items on
+ * every read, which would make each step of an iteration cost a pass over the map.
+ */
+function itemsUntilChanged(collection: JavaObject): () => Value[] {
+  let items: Value[] | undefined;
+  let readAt: number | undefined;
+  return () => {
+    if (!items || readAt !== collection.modCount) {
+      items = elementsOf(collection);
+      readAt = collection.modCount;
+    }
+    return items;
+  };
+}
+
 export function elementsOf(receiver: Value): Value[] {
   return (receiver as JavaObject).elements as Value[];
 }
@@ -137,7 +153,7 @@ export function defineReadMethods(
       frame,
       itrClass,
       receiver as JavaObject,
-      () => elementsOf(receiver),
+      itemsUntilChanged(receiver as JavaObject),
       (removeFrame, index) => remove(removeFrame, receiver, index)
     )
   );
@@ -152,8 +168,8 @@ export function defineReadMethods(
 }
 
 /**
- * The views that `keySet`, `values`, and `entrySet` return, which read a map's contents at the time of the call and
- * remove the map's entries behind the elements removed from them, but cannot add elements.
+ * The views that `keySet`, `values`, and `entrySet` return, which read the map's current contents whenever they are
+ * used and remove the map's entries behind the elements removed from them, but cannot add elements.
  */
 export function defineSnapshot(context: Context, kind: string, parent: ClassInfo, itrClass: ClassInfo): ClassInfo {
   const cls = context.registry.define(`Snapshot${kind}`, context.objectClass, 'java.util');
@@ -207,14 +223,6 @@ export function removeElements(
   }
   if (removed) touch(receiver);
   return removed;
-}
-
-export function snapshot(frame: Frame, viewClass: ClassInfo, items: Value[]): JavaObject {
-  frame.runtime.allocateArray(frame, items.length);
-  const object = frame.runtime.allocateObject(frame, viewClass);
-  object.elements = items;
-  object.modCount = 0;
-  return object;
 }
 
 /** The items of any builtin collection or array-backed view, in iteration order. */

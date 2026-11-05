@@ -170,3 +170,11 @@ public class Main {
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });
+
+test("Java's map views follow later changes to the map and remove the entries behind them", () => {
+  expect(
+    finalVarsOf(
+      'Map<String, Integer> m = new TreeMap<>(); Set<String> keys = m.keySet(); m.put("a", 1); m.put("b", 2); m.remove("a"); m.put("c", 3); keys.remove("c"); String seen = keys.toString() + m.values();'
+    )
+  ).toEqual({ seen: '[b][2]' });
+});

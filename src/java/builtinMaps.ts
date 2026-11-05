@@ -9,7 +9,6 @@ import {
   javaEquals,
   javaHash,
   linkOverrides,
-  snapshot,
   touch,
   viewRemovals,
 } from './builtinCollectionSupport';
@@ -202,25 +201,26 @@ export function defineHashMap(
   return { mapClass, immutableMap: restrictToImmutable(registry, immutableMap, 'MapN') };
 }
 
-/**
- * A view of a map's keys, values, or entries, which reads the map's contents at the time of the call and removes the
- * entries behind the elements it loses.
- */
+/** A view of a map's keys, values, or entries, which follows the map's changes and removes the entries it loses. */
 function mapView(
   frame: Frame,
   map: Value,
   viewClass: ClassInfo,
   elementOf: (entry: HashStore['entries'][number]) => Value
 ): JavaObject {
-  const entries = storeOf(map).ordered();
-  const view = snapshot(
-    frame,
-    viewClass,
-    entries.map((entry) => elementOf(entry))
-  );
+  const view = frame.runtime.allocateObject(frame, viewClass);
+  // A view reads the map's entries whenever it is used, so that it follows every later change to the map.
+  Object.defineProperties(view, {
+    elements: {
+      get: () =>
+        storeOf(map)
+          .ordered()
+          .map((entry) => elementOf(entry)),
+    },
+    modCount: { get: () => (map as JavaObject).modCount, set: () => {} },
+  });
   viewRemovals.set(view, (removeFrame, index) => {
-    const [entry] = entries.splice(index, 1);
-    removeEntry(removeFrame, map, entry.key);
+    removeEntry(removeFrame, map, (storeOf(map).ordered()[index] as HashStore['entries'][number]).key);
   });
   return view;
 }
@@ -321,6 +321,21 @@ function constantsOf(frame: Frame, type: Value): Value[] {
   const values = enumClass.methods.find((method) => method.name === 'values' && method.isStatic);
   if (!values) return throwBuiltin(frame, 'ClassCastException', `${enumClass.binaryName} is not an enum class`);
   return (frame.runtime.invoke(frame, values, undefined, [], undefined) as JavaArray).values;
+}
+
+/** The view `entrySet` returns, in which each entry keeps one node, so that reading it again keeps identities. */
+function entrySetView(frame: Frame, map: Value, viewClass: ClassInfo, nodeClass: ClassInfo): JavaObject {
+  const nodes = new WeakMap<HashStore['entries'][number], JavaObject>();
+  return mapView(frame, map, viewClass, (entry) => {
+    let node = nodes.get(entry);
+    if (!node) {
+      node = frame.runtime.allocateObject(frame, nodeClass);
+      nodeEntries.set(node, entry);
+      Object.defineProperty(node, 'elements', { get: () => [entry.key, entry.value] });
+      nodes.set(entry, node);
+    }
+    return node;
+  });
 }
 
 /** `equals` and `hashCode` of a map, which compare and hash its entries as `AbstractMap` does. */
@@ -534,13 +549,7 @@ export function defineMapMethods(
     [],
     classType(views.setClass, classType(views.entryClass, key, value)),
     false,
-    (frame, receiver) =>
-      mapView(frame, receiver, views.snapshotSet, (entry) => {
-        const node = frame.runtime.allocateObject(frame, views.nodeClass);
-        nodeEntries.set(node, entry);
-        node.elements = [entry.key, entry.value];
-        return node;
-      })
+    (frame, receiver) => entrySetView(frame, receiver, views.snapshotSet, views.nodeClass)
   );
   addMethod(cls, 'toString', [], context.stringType, false, (frame, receiver) =>
     newString(
