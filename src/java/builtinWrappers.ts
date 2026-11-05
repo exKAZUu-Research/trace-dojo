@@ -226,6 +226,24 @@ function parseIntegral(frame: Frame, text: Value, bits: 32 | 64): bigint {
   return parsed;
 }
 
+function parseRadix(frame: Frame, text: Value, radix: number): number {
+  const value = (text as JavaString | undefined)?.value;
+  const digits = '0123456789abcdefghijklmnopqrstuvwxyz'.slice(0, Math.max(radix, 0));
+  const isValid =
+    value !== undefined && radix >= 2 && radix <= 36 && new RegExp(`^[+-]?[${digits}]+$`, 'i').test(value);
+  const parsed = isValid ? Number.parseInt(value, radix) : Number.NaN;
+  if (!isValid || parsed > 2_147_483_647 || parsed < -2_147_483_648) {
+    return throwBuiltin(
+      frame,
+      'NumberFormatException',
+      value === undefined
+        ? 'Cannot parse null string: null'
+        : `For input string: "${value}"${radix === 10 ? '' : ` under radix ${radix}`}`
+    );
+  }
+  return parsed;
+}
+
 function defineIntegerMembers(integerClass: ClassInfo, stringType: JavaType): void {
   addConstant(integerClass, 'MAX_VALUE', INT, 2_147_483_647);
   addConstant(integerClass, 'MIN_VALUE', INT, -2_147_483_648);
@@ -235,6 +253,13 @@ function defineIntegerMembers(integerClass: ClassInfo, stringType: JavaType): vo
   addMethod(integerClass, 'valueOf', [stringType], integerClass.type, true, (frame, _, [text]) =>
     box(frame, integerClass, Number(parseIntegral(frame, text, 32)))
   );
+  addMethod(integerClass, 'parseInt', [stringType, INT], INT, true, (frame, _, [text, radix]) =>
+    parseRadix(frame, text, radix as number)
+  );
+  addMethod(integerClass, 'toString', [INT, INT], stringType, true, (frame, _, [value, radix]) => {
+    const base = (radix as number) >= 2 && (radix as number) <= 36 ? (radix as number) : 10;
+    return newString(frame, (value as number).toString(base));
+  });
   addMethod(integerClass, 'sum', [INT, INT], INT, true, (_, __, [a, b]) => toInt32((a as number) + (b as number)));
   addMethod(integerClass, 'max', [INT, INT], INT, true, (_, __, [a, b]) => Math.max(a as number, b as number));
   addMethod(integerClass, 'min', [INT, INT], INT, true, (_, __, [a, b]) => Math.min(a as number, b as number));

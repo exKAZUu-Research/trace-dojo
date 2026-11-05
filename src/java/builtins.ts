@@ -1,6 +1,7 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
 import { type Collections, defineCollections, javaEquals, javaHash } from './builtinCollections';
 import { defineFunctions, type Functions } from './builtinFunctions';
+import { defineMisc } from './builtinMisc';
 import {
   addConstant,
   addConstructor,
@@ -92,6 +93,7 @@ function createBuiltins(): Builtins {
   const collections = defineCollections(registry, objectClass, stringClass.type, wrappers);
   defineSystem(registry, objectClass, stringClass.type);
   defineUtilities(registry, objectClass, stringClass.type, collections, wrappers.comparableClass);
+  defineMisc(registry, objectClass, stringClass.type);
   defineText(registry, objectClass, stringClass, registry.classes.get('PrintStream') as ClassInfo, collections);
   const functions = defineFunctions(registry, objectClass, collections, wrappers.comparableClass);
   return {
