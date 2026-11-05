@@ -21,10 +21,12 @@ import {
   DOUBLE,
   FLOAT,
   INT,
+  isPrimitive,
   type JavaType,
   LONG,
   type MethodInfo,
   type NativeMethod,
+  sameType,
   SHORT,
   type TypeVariable,
   VOID,
@@ -175,11 +177,41 @@ function defineArraySearches(arraysClass: ClassInfo, element: JavaType, isObject
   addMethod(arraysClass, 'hashCode', [arrayType], INT, true, (frame, _, [array]) =>
     hashArray(frame, array, isObject ? undefined : (element.kind as BoxableKind))
   );
+  addMethod(arraysClass, 'fill', [arrayType, INT, INT, element], VOID, true, (frame, _, [array, from, to, value]) => {
+    const { values } = arrayOf(frame, array);
+    checkArrayRange(frame, from as number, to as number, values.length);
+    values.fill(value, from as number, to as number);
+  });
   if (element === BOOLEAN) return;
   const compare = isObject ? compareNatural : (_: Frame, a: Value, b: Value): number => comparePrimitives(a, b);
   addMethod(arraysClass, 'binarySearch', [arrayType, element], INT, true, (frame, _, [array, key]) =>
     binarySearch(frame, arrayOf(frame, array).values, key, compare)
   );
+  addMethod(arraysClass, 'sort', [arrayType, INT, INT], VOID, true, (frame, _, [array, from, to]) => {
+    const { values } = arrayOf(frame, array);
+    const [start, end] = [from as number, to as number];
+    checkArrayRange(frame, start, end, values.length);
+    frame.runtime.spend(Math.ceil(((end - start) * Math.log2(end - start + 1)) / 16));
+    values.splice(start, end - start, ...values.slice(start, end).toSorted((a, b) => compare(frame, a, b)));
+  });
+}
+
+/** Checks the range of an array that `Arrays.fill` and `Arrays.sort` take, as `Arrays.rangeCheck` does. */
+function checkArrayRange(frame: Frame, from: number, to: number, length: number): void {
+  if (from > to) throwBuiltin(frame, 'IllegalArgumentException', `fromIndex(${from}) > toIndex(${to})`);
+  if (from < 0) throwBuiltin(frame, 'ArrayIndexOutOfBoundsException', `Array index out of range: ${from}`);
+  if (to > length) throwBuiltin(frame, 'ArrayIndexOutOfBoundsException', `Array index out of range: ${to}`);
+}
+
+/** `Arrays.deepEquals`, which compares nested arrays by their elements and other elements with `equals`. */
+function deepEquals(frame: Frame, a: Value, b: Value): boolean {
+  if (a === b) return true;
+  if (!(a instanceof JavaArray) || !(b instanceof JavaArray)) return javaEquals(frame, a, b);
+  if (a.values.length !== b.values.length) return false;
+  if (isPrimitive(a.elementType) || isPrimitive(b.elementType)) {
+    return sameType(a.elementType, b.elementType) && a.values.every((item, index) => Object.is(item, b.values[index]));
+  }
+  return a.values.every((item, index) => deepEquals(frame, item, b.values[index]));
 }
 
 /** `Arrays.hashCode`, which hashes objects with `hashCode` and primitives of `kind` as their wrappers do. */
@@ -362,6 +394,9 @@ function defineArrays(
   }
   addMethod(arraysClass, 'deepToString', [objectArray], stringType, true, (frame, _, [array]) =>
     newString(frame, describe(frame, array, true))
+  );
+  addMethod(arraysClass, 'deepEquals', [objectArray, objectArray], BOOLEAN, true, (frame, _, [a, b]) =>
+    deepEquals(frame, a, b)
   );
   const generic = (
     name: string,
