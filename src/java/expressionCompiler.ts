@@ -841,9 +841,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     );
     this.checkAccess(context, cls, constructor.access, expression, `コンストラクタ ${cls.name}`);
     this.checkThrown(context, expression, constructor.thrownTypes);
-    const convertedArgs = args.map(
-      (arg, index) => this.convert(arg, constructor.parameterTypes[index], 'invocation', expression.args[index]).run
-    );
+    const convertedArgs = this.convertArguments(constructor, args, expression.args);
     const callRow = expression.row;
     const declaredConstructor = constructor.declared ?? constructor;
     return {
@@ -914,9 +912,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     this.checkCall(context, expression, method, target.receiver === undefined && expression.object !== undefined);
     this.checkThrown(context, expression, method.thrownTypes);
-    const convertedArgs = args.map(
-      (arg, index) => this.convert(arg, method.parameterTypes[index], 'invocation', expression.args[index]).run
-    );
+    const convertedArgs = this.convertArguments(method, args, expression.args);
     const callRow = expression.row;
     if (method.isStatic) {
       // A static method called through an expression still evaluates that expression.

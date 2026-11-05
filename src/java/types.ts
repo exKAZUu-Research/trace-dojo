@@ -88,6 +88,10 @@ export interface MethodInfo {
   /** Whether a trace shows a call to this method as part of its caller's step, marked by `// atomic`. */
   isAtomic?: boolean;
   native?: NativeMethod;
+  /** Whether the last parameter takes a variable number of arguments. */
+  isVarargs?: boolean;
+  /** For a call that passes variable arity arguments, how many arguments precede them. */
+  varargsStart?: number;
   /** The type parameters of a generic method, such as `T` of `<T> T first(T[] a)`. */
   typeParameters?: TypeVariable[];
   /** The methods of supertypes that this one overrides, directly or indirectly. */

@@ -209,19 +209,28 @@ export class Runtime {
 
   /** Calls `toString()` on an object as string concatenation does. */
   invokeToString(frame: Frame, object: JavaObject): JavaString | undefined {
-    const method = this.builtins.objectClass.methods.find((candidate) => candidate.name === 'toString');
-    if (!method) throw new Error('Object.toString is missing');
-    frame.temporaries.push(object);
+    return this.invokeVirtual(frame, this.builtins.objectClass, 'toString', object, []) as JavaString | undefined;
+  }
+
+  /** Calls the instance method `name` of `owner` on `receiver` as a virtual call, as library code calls `equals`. */
+  invokeVirtual(frame: Frame, owner: ClassInfo, name: string, receiver: Value, args: Value[]): Value {
+    const method = owner.methods.find(
+      (candidate) => candidate.name === name && candidate.parameterTypes.length === args.length
+    );
+    if (!method) throw new Error(`${owner.name}.${name} is missing`);
+    if (receiver === undefined) throwBuiltin(frame, 'NullPointerException');
+    frame.temporaries.push(receiver, ...args);
     try {
-      return this.invoke(frame, this.dispatch(object, method), object, [], undefined) as JavaString | undefined;
+      return this.invoke(frame, this.dispatch(receiver, method), receiver, args, undefined);
     } finally {
-      frame.temporaries.pop();
+      frame.temporaries.length -= args.length + 1;
     }
   }
 
   isInstance(value: Value, cls: ClassInfo): boolean {
     if (value instanceof JavaObject) return isSubclass(value.cls, cls);
-    if (value instanceof JavaString) return cls === this.builtins.stringClass || cls === this.builtins.objectClass;
+    if (value instanceof JavaString)
+      return isSubclass(this.builtins.stringClass, cls) || cls === this.builtins.objectClass;
     if (value instanceof JavaArray) return cls === this.builtins.objectClass;
     return false;
   }
@@ -261,7 +270,15 @@ function markReachable(roots: Value[]): { reached: Set<JavaObject | JavaArray>; 
     scanned += children.length;
     // Pushed one by one: spreading a large array into push() exceeds the engine's argument limit.
     for (const child of children) pushReference(pending, child);
-    if (value instanceof JavaObject) pushReference(pending, value.cause);
+    if (value instanceof JavaObject) {
+      pushReference(pending, value.cause);
+      for (const element of value.elements ?? []) pushReference(pending, element);
+      for (const entry of value.store?.entries ?? []) {
+        pushReference(pending, entry.key);
+        pushReference(pending, entry.value);
+      }
+      scanned += (value.elements?.length ?? 0) + (value.store?.entries.length ?? 0);
+    }
   }
   return { reached, scanned };
 }

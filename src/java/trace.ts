@@ -165,14 +165,45 @@ function displayNodeOf(value: Value, type: JavaType, seen: Set<unknown>): Displa
   }
   // An enum constant shows as its name, which is what learners write for it.
   if (value instanceof JavaObject && value.enumConstant) return { kind: 'value', value: value.enumConstant.name.value };
+  if (value instanceof JavaObject && value.builder !== undefined) return { kind: 'value', value: value.builder };
   seen.add(value);
   const node: DisplayNode =
     value instanceof JavaArray
       ? { kind: 'array', entries: arrayEntriesOf(value, seen) }
-      : { kind: 'object', entries: objectEntriesOf(value, seen) };
+      : (collectionNodeOf(value, seen) ?? { kind: 'object', entries: objectEntriesOf(value, seen) });
   seen.delete(value);
   return node;
 }
+
+/** Lists and sets show as arrays of their elements, and maps as objects keyed by their keys. */
+function collectionNodeOf(object: JavaObject, seen: Set<unknown>): DisplayNode | undefined {
+  const items =
+    object.elements ?? (object.store && !isMap(object) ? object.store.ordered().map((entry) => entry.key) : undefined);
+  if (items && !object.cls.name.endsWith('Itr')) {
+    const entries: Record<string, DisplayNode> = {};
+    for (const [index, item] of items.entries()) entries[index] = displayNodeOf(item, OBJECT, seen) ?? NULL_NODE;
+    return { kind: 'array', entries };
+  }
+  if (!object.store) return;
+  const entries: Record<string, DisplayNode> = {};
+  const ordered = object.cls.name === 'LinkedHashMap' ? object.store.entries : object.store.ordered();
+  for (const entry of ordered) entries[keyText(entry.key)] = displayNodeOf(entry.value, OBJECT, seen) ?? NULL_NODE;
+  return { kind: 'object', entries };
+}
+
+function isMap(object: JavaObject): boolean {
+  return object.cls.name.endsWith('Map');
+}
+
+/** The text a map's key shows as, which is what learners write for it. */
+function keyText(key: Value): string {
+  if (key === undefined) return 'null';
+  const node = displayNodeOf(key, OBJECT, new Set());
+  return node?.kind === 'value' ? String(node.value) : `#${(key as JavaObject | JavaArray).identity}`;
+}
+
+/** Elements of collections are references, whose own values decide how they show. */
+const OBJECT: JavaType = { kind: 'null' };
 
 function turtleNodeOf(turtle: TurtleState): DisplayNode | undefined {
   if (!turtle.isAlive) return undefined;

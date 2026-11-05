@@ -143,13 +143,34 @@ function convertField(node: Node): FieldDeclaration {
 }
 
 function convertParameters(node: Node): Parameter[] {
-  return namedChildren(node).map((parameter) => {
-    if (parameter.type !== 'formal_parameter') unsupported(parameter, '可変長引数や受け取りパラメータ');
+  const parameters = namedChildren(node);
+  return parameters.map((parameter, index) => {
+    if (parameter.type === 'spread_parameter') {
+      if (index !== parameters.length - 1) unsupported(parameter, '最後以外の可変長引数');
+      return convertVarargsParameter(parameter);
+    }
+    if (parameter.type !== 'formal_parameter') unsupported(parameter, '受け取りパラメータ');
     const modifiers = convertModifiers(modifiersOf(parameter));
     const type = convertVariableType(parameter);
     const name = identifierOf(parameter, '名前のない引数');
-    return { name: name.text, type, isFinal: modifiers.isFinal, ...span(parameter) };
+    return { name: name.text, type, isFinal: modifiers.isFinal, isVarargs: false, ...span(parameter) };
   });
+}
+
+/** Converts `int... values`, whose variable holds the arguments as an array. */
+function convertVarargsParameter(parameter: Node): Parameter {
+  const modifiers = convertModifiers(modifiersOf(parameter));
+  const parts = namedChildren(parameter).filter((child) => child.type !== 'modifiers');
+  const [typeNode, nameNode] = parts;
+  const declarator = nameNode.type === 'variable_declarator' ? field(nameNode, 'name') : nameNode;
+  const element = convertType(typeNode);
+  return {
+    name: declarator.text,
+    type: { kind: 'array', element, ...span(typeNode) },
+    isFinal: modifiers.isFinal,
+    isVarargs: true,
+    ...span(parameter),
+  };
 }
 
 function convertThrows(node: Node): TypeSyntax[] {

@@ -371,10 +371,11 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   protected declaredSignature(
     cls: ClassInfo,
     member: MethodDeclaration | ConstructorDeclaration
-  ): Pick<MethodInfo, 'owner' | 'parameterTypes' | 'thrownTypes' | 'declaration' | 'isAtomic'> {
+  ): Pick<MethodInfo, 'owner' | 'parameterTypes' | 'isVarargs' | 'thrownTypes' | 'declaration' | 'isAtomic'> {
     return {
       owner: cls,
       parameterTypes: member.parameters.map((parameter) => this.resolveType(parameter.type)),
+      isVarargs: member.parameters.at(-1)?.isVarargs ?? false,
       thrownTypes: member.throwsTypes.map((type) => this.resolveThrowable(type)),
       declaration: member,
       isAtomic: this.claimsAtomicRow(member),

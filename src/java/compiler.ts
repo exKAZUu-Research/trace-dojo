@@ -124,9 +124,7 @@ class Compiler extends DeclarationCompiler {
         `コンストラクタ ${cls.name}`
       );
       this.checkThrown(context, constant, constructor.thrownTypes);
-      const convertedArgs = args.map(
-        (arg, index) => this.convert(arg, constructor.parameterTypes[index], 'invocation', constant.args[index]).run
-      );
+      const convertedArgs = this.convertArguments(constructor, args, constant.args);
       const name = this.internedString(constant.name);
       // Traces leave enum constants out of the variables, so creating one shows only its constructor's steps.
       return (frame: Frame) => {
@@ -258,9 +256,7 @@ class Compiler extends DeclarationCompiler {
       `コンストラクタ ${targetClass.name}`
     );
     this.checkThrown(context, explicitCall ?? declaration ?? (cls.declaration as ClassDeclaration), target.thrownTypes);
-    const convertedArgs = args.map(
-      (arg, index) => this.convert(arg, target.parameterTypes[index], 'invocation', argSyntax[index]).run
-    );
+    const convertedArgs = this.convertArguments(target, args, argSyntax);
     // An implicit super() has no call in the source, so its frame is not a call that learners trace.
     const callRow = explicitCall?.row;
     // A constructor that delegates to this(...) leaves the initializers to the constructor it calls.

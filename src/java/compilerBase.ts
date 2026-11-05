@@ -8,6 +8,7 @@ import { fitsIn } from './operators';
 import { type Frame } from './runtime';
 import {
   type ClassInfo,
+  erasure,
   type FieldInfo,
   isNumeric,
   isPrimitive,
@@ -23,7 +24,7 @@ import {
   type TypeVariable,
   VOID,
 } from './types';
-import { convertNumber, JavaString, type Value } from './values';
+import { convertNumber, JavaArray, JavaString, type Value } from './values';
 
 export interface CompileOptions {
   /** Makes the statements that record steps report their rows to `Runtime.steps`. */
@@ -543,6 +544,26 @@ export abstract class CompilerBase {
     }
   }
 
+  /** Converts the arguments of a call to `method`, packing those of a variable arity parameter into an array. */
+  protected convertArguments(method: MethodInfo, args: readonly CompiledValue[], spans: readonly Span[]): Eval[] {
+    const converted = args.map(
+      (arg, index) => this.convert(arg, method.parameterTypes[index], 'invocation', spans[index]).run
+    );
+    const start = method.varargsStart;
+    if (start === undefined) return converted;
+    const declared = method.declared ?? method;
+    const arrayType = declared.parameterTypes.at(-1) as Extract<JavaType, { kind: 'array' }>;
+    const elementType = erasure(method.parameterTypes[start] ?? arrayType.element);
+    const trailing = converted.slice(start);
+    const packed: Eval = (frame) => {
+      const values = this.evaluateArguments(frame, trailing);
+      frame.temporaries.length -= values.length;
+      frame.runtime.allocateArray(frame, values.length);
+      return new JavaArray(elementType, values);
+    };
+    return [...converted.slice(0, start), packed];
+  }
+
   /** Evaluates arguments left to right, keeping each in `frame.temporaries` until the caller removes them. */
   protected evaluateArguments(frame: Frame, args: Eval[]): Value[] {
     const values: Value[] = [];
@@ -609,6 +630,18 @@ export abstract class CompilerBase {
       );
     let applicable = applicableBy(false);
     if (applicable.length === 0) applicable = applicableBy(true);
+    // The last phase passes trailing arguments to a variable arity parameter.
+    if (applicable.length === 0) {
+      applicable = candidates.flatMap((method) => {
+        const expanded = expandVarargs(method, argTypes.length);
+        const instantiatedVarargs = expanded && instantiateMethod(this.builtins, expanded, argTypes);
+        const fits =
+          instantiatedVarargs?.parameterTypes.every((type, index) =>
+            isInvocationConvertible(this.builtins, argTypes[index], type, true)
+          ) ?? false;
+        return fits && instantiatedVarargs ? [instantiatedVarargs] : [];
+      });
+    }
     if (applicable.length === 0) {
       const given = argTypes.map((type) => typeName(type)).join(', ');
       // This environment implements only part of the standard library, so the message states only what it allows.
@@ -624,6 +657,23 @@ export abstract class CompilerBase {
     if (mostSpecific.length !== 1) return this.error(span, `${what} の呼び出しがあいまいです。`);
     return mostSpecific[0];
   }
+}
+
+/**
+ * A view of a variable arity method that takes `count` arguments, the trailing ones each of the array's element
+ * type, or `undefined` when the method takes a fixed number of arguments or too many.
+ */
+function expandVarargs(method: MethodInfo, count: number): MethodInfo | undefined {
+  if (!method.isVarargs) return;
+  const fixed = method.parameterTypes.slice(0, -1);
+  const arrayType = method.parameterTypes.at(-1) as Extract<JavaType, { kind: 'array' }>;
+  if (count < fixed.length) return;
+  return {
+    ...method,
+    parameterTypes: [...fixed, ...Array.from({ length: count - fixed.length }, () => arrayType.element)],
+    varargsStart: fixed.length,
+    declared: method.declared ?? method,
+  };
 }
 
 /** Converts a numeric value to the kind `to` by a widening conversion, folding a constant. */

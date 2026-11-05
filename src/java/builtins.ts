@@ -1,4 +1,5 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
+import { type Collections, defineCollections } from './builtinCollections';
 import {
   addConstant,
   addConstructor,
@@ -10,6 +11,8 @@ import {
   requireString,
   text,
 } from './builtinSupport';
+import { defineText } from './builtinText';
+import { defineUtilities } from './builtinUtilities';
 import { defineWrappers, type Wrappers } from './builtinWrappers';
 import { type Frame, throwBuiltin } from './runtime';
 import {
@@ -49,6 +52,7 @@ export interface Builtins {
   enumClass: ClassInfo;
   throwableClass: ClassInfo;
   wrappers: Wrappers;
+  collections: Collections;
   /** The qualified names `Throwable.toString` prints for builtin classes. */
   qualifiedNames: Map<ClassInfo, string>;
 }
@@ -77,7 +81,10 @@ function createBuiltins(): Builtins {
   const stringCompareTo = stringClass.methods.find((method) => method.name === 'compareTo') as MethodInfo;
   stringCompareTo.overrides = new Set([wrappers.compareTo]);
   addInterface(stringClass, { kind: 'class', cls: wrappers.comparableClass, args: [stringClass.type] });
+  const collections = defineCollections(registry, objectClass, stringClass.type, wrappers);
   defineSystem(registry, objectClass, stringClass.type);
+  defineUtilities(registry, objectClass, stringClass.type, collections, wrappers.comparableClass);
+  defineText(registry, objectClass, stringClass, registry.classes.get('PrintStream') as ClassInfo, collections);
   return {
     classes: registry.classes,
     objectClass,
@@ -85,6 +92,7 @@ function createBuiltins(): Builtins {
     enumClass,
     throwableClass,
     wrappers,
+    collections,
     qualifiedNames: registry.qualifiedNames,
   };
 }
@@ -127,8 +135,8 @@ const causeTakers = new Set([
 ]);
 
 function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType: JavaType): ClassInfo {
-  const defineThrowable = (name: string, superclass: ClassInfo): ClassInfo => {
-    const cls = registry.define(name, superclass);
+  const defineThrowable = (name: string, superclass: ClassInfo, packageName = 'java.lang'): ClassInfo => {
+    const cls = registry.define(name, superclass, packageName);
     // Constructors are not inherited, and only these classes declare the ones taking a cause.
     addMessageConstructors(cls, stringType, causeTakers.has(name) ? throwableClass.type : undefined);
     return cls;
@@ -168,6 +176,18 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
   defineThrowable('ArrayIndexOutOfBoundsException', indexOutOfBounds);
   defineThrowable('StringIndexOutOfBoundsException', indexOutOfBounds);
   defineThrowable('NumberFormatException', registry.classes.get('IllegalArgumentException') as ClassInfo);
+  defineThrowable('ConcurrentModificationException', runtimeExceptionClass, 'java.util');
+  const illegalArgument = registry.classes.get('IllegalArgumentException') as ClassInfo;
+  defineThrowable('PatternSyntaxException', illegalArgument, 'java.util.regex');
+  const illegalFormat = defineThrowable('IllegalFormatException', illegalArgument, 'java.util');
+  for (const name of [
+    'MissingFormatArgumentException',
+    'UnknownFormatConversionException',
+    'IllegalFormatConversionException',
+  ]) {
+    defineThrowable(name, illegalFormat, 'java.util');
+  }
+  defineThrowable('NoSuchElementException', runtimeExceptionClass, 'java.util');
   defineThrowable('StackOverflowError', errorClass);
   defineThrowable('OutOfMemoryError', errorClass);
   return throwableClass;

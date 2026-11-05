@@ -31,7 +31,17 @@ import { bindingsWhen } from './patternBindings';
 import { canCompleteNormally, containsJump } from './reachability';
 import { type Frame, JavaThrow, throwBuiltin, UNASSIGNED } from './runtime';
 import { isObjectCreation, onlyCalls } from './stepRules';
-import { type ClassInfo, isPrimitive, isReference, isSubclass, type JavaType, sameType, typeName } from './types';
+import {
+  asSuper,
+  type ClassInfo,
+  isPrimitive,
+  isReference,
+  isSubclass,
+  type JavaType,
+  sameType,
+  typeName,
+  upperBound,
+} from './types';
 import { JavaArray, JavaObject, JavaString, type Value } from './values';
 
 const BREAK: BreakCompletion = { kind: 'break', label: undefined };
@@ -552,10 +562,19 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   protected compileForEach(context: MethodContext, statement: Extract<Statement, { kind: 'forEach' }>): Exec {
     const labels = this.takeLabels(context);
     const iterable = this.compileValue(context, statement.iterable);
-    if (iterable.type.kind !== 'array') {
-      return this.error(statement.iterable, '拡張 for 文では配列しか使えません。');
+    const iterableClass = this.builtins.collections.iterableClass;
+    const bound = upperBound(iterable.type);
+    const iterableType = bound.kind === 'class' ? asSuper(bound, iterableClass) : undefined;
+    if (iterable.type.kind !== 'array' && !iterableType) {
+      return this.error(statement.iterable, '拡張 for 文では配列か、List などの Iterable しか使えません。');
     }
-    const elementType = iterable.type.element;
+    const elementArg = iterableType?.args?.[0];
+    const elementType =
+      iterable.type.kind === 'array'
+        ? iterable.type.element
+        : elementArg
+          ? upperBound(elementArg)
+          : this.builtins.objectClass.type;
     const declaredType = statement.type.kind === 'var' ? elementType : this.resolveType(statement.type);
     // The element waits in the temporaries, where the conversion reads it, until the variable holds it.
     const element: CompiledValue = { kind: 'value', type: elementType, run: (frame) => frame.temporaries.at(-1) };
@@ -574,14 +593,22 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       }
       frame.runtime.steps.stepBinding(stepRow, isAnswered);
     };
+    const runIteration = (frame: Frame, value: Value): Completion | undefined | 'continue' => {
+      bind(frame, value);
+      const completion = body(frame);
+      return completion && loopCompletion(completion, labels);
+    };
+    if (iterable.type.kind !== 'array') {
+      return (frame) => {
+        const source = iterable.run(frame);
+        if (source === undefined) return throwBuiltin(frame, 'NullPointerException');
+        return iterateIterable(frame, source, (value) => runIteration(frame, value));
+      };
+    }
     return (frame) => {
       const array = iterable.run(frame);
       if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
-      return iterate(frame, array, (value) => {
-        bind(frame, value);
-        const completion = body(frame);
-        return completion && loopCompletion(completion, labels);
-      });
+      return iterate(frame, array, (value) => runIteration(frame, value));
     };
   }
 
@@ -888,6 +915,27 @@ function iterate(
   frame.temporaries.push(array);
   try {
     for (const value of array.values) {
+      const result = runIteration(value);
+      if (result && result !== 'continue') return result;
+    }
+    return;
+  } finally {
+    frame.temporaries.pop();
+  }
+}
+
+/** Runs a for-each loop over an `Iterable` through its iterator, as Java does, keeping the iterator alive meanwhile. */
+function iterateIterable(
+  frame: Frame,
+  source: Value,
+  runIteration: (value: Value) => Completion | undefined | 'continue'
+): Completion | undefined {
+  const { collections } = frame.runtime.builtins;
+  const iterator = frame.runtime.invokeVirtual(frame, collections.iterableClass, 'iterator', source, []);
+  frame.temporaries.push(iterator);
+  try {
+    while (frame.runtime.invokeVirtual(frame, collections.iteratorClass, 'hasNext', iterator, []) === true) {
+      const value = frame.runtime.invokeVirtual(frame, collections.iteratorClass, 'next', iterator, []);
       const result = runIteration(value);
       if (result && result !== 'continue') return result;
     }

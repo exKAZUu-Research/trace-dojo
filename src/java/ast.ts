@@ -71,8 +71,11 @@ export interface FieldDeclaration extends Span {
 
 export interface Parameter extends Span {
   name: string;
+  /** The type of the variable, which is an array for a variable arity parameter. */
   type: TypeSyntax;
   isFinal: boolean;
+  /** Whether the parameter takes a variable number of arguments, as in `int... values`. */
+  isVarargs: boolean;
 }
 
 export interface MethodDeclaration extends Span {

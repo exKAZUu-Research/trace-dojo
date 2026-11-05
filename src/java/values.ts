@@ -16,6 +16,14 @@ export class JavaObject {
   readonly identity = nextIdentity++;
   /** Set by the builtin Turtle constructor. */
   turtle?: TurtleState;
+  /** The elements of a builtin list or the items an iterator walks over. */
+  elements?: Value[];
+  /** The entries of a builtin hash map or set. */
+  store?: HashStore;
+  /** The text of a `StringBuilder`. */
+  builder?: string;
+  /** Counts the structural changes of a builtin collection, which make its iterators fail fast. */
+  modCount?: number;
   /** The primitive value a wrapper object such as an `Integer` boxes. */
   boxed?: number | bigint | boolean;
   /** Set for the constants of an enum. */
@@ -27,6 +35,33 @@ export class JavaObject {
   constructor(readonly cls: ClassInfo) {
     this.fields = Array.from({ length: cls.instanceFieldCount });
     for (const field of cls.instanceFields) this.fields[field.slot] = defaultValue(field.type);
+  }
+}
+
+export interface HashEntry {
+  key: Value;
+  value: Value;
+  hash: number;
+}
+
+/**
+ * The entries of a `HashMap` or `HashSet`, which iterates as Java's does: by bucket of a table that doubles whenever
+ * the entries exceed three quarters of it, and in insertion order within a bucket.
+ */
+export class HashStore {
+  entries: HashEntry[] = [];
+  capacity = 16;
+
+  /** The entries in the order Java's iteration visits them. */
+  ordered(): HashEntry[] {
+    const mask = this.capacity - 1;
+    const bucketOf = (entry: HashEntry): number => (entry.hash ^ (entry.hash >>> 16)) & mask;
+    return this.entries.toSorted((a, b) => bucketOf(a) - bucketOf(b));
+  }
+
+  add(entry: HashEntry): void {
+    this.entries.push(entry);
+    while (this.entries.length > this.capacity * 0.75) this.capacity *= 2;
   }
 }
 

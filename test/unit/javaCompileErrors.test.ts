@@ -1176,7 +1176,7 @@ test.each([
 
 test.each([
   ['double r = Math.hypot(3, 4);', 'この採点環境の Math には、メソッド hypot がありません。'],
-  ['StringBuilder b = null;', 'この採点環境には、型 StringBuilder がありません。'],
+  ['Scanner sc = null;', 'この採点環境には、型 Scanner がありません。'],
   [
     'String s = String.valueOf(1, 2);',
     'この採点環境では、メソッド valueOf に (int, int) を渡して呼び出すことはできません。',
