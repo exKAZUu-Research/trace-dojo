@@ -312,7 +312,17 @@ function defineCollectionDefaults(
     biFunction: ClassInfo;
   }
 ): void {
-  const { iterableClass, collectionClass, listClass, mapClass } = collections;
+  defineIterableDefaults(collections, functions);
+  defineListDefaults(collections, functions);
+  defineMapDefaults(collections, functions);
+  defineComparatorSorts(context, collections, functions);
+}
+
+type DefaultFunctions = Parameters<typeof defineCollectionDefaults>[2];
+
+/** `Iterable.forEach` and `Collection.removeIf`, which every builtin collection inherits. */
+function defineIterableDefaults(collections: Collections, functions: DefaultFunctions): void {
+  const { iterableClass, collectionClass } = collections;
   const [iterableT] = iterableClass.typeParameters.map((variable): JavaType => ({ kind: 'typeVar', variable }));
   addMethod(
     iterableClass,
@@ -353,6 +363,11 @@ function defineCollectionDefaults(
       return true;
     }
   );
+}
+
+/** `List.sort` and `List.replaceAll`. */
+function defineListDefaults(collections: Collections, functions: DefaultFunctions): void {
+  const { listClass } = collections;
   const [listE] = listClass.typeParameters.map((variable): JavaType => ({ kind: 'typeVar', variable }));
   addMethod(
     listClass,
@@ -378,6 +393,11 @@ function defineCollectionDefaults(
         values[index] = callFunction(frame, functions.unary, operator, [value]);
     }
   );
+}
+
+/** `Map.forEach`, `Map.computeIfAbsent`, and `Map.merge`. */
+function defineMapDefaults(collections: Collections, functions: DefaultFunctions): void {
+  const { mapClass } = collections;
   const [mapK, mapV] = mapClass.typeParameters.map((variable): JavaType => ({ kind: 'typeVar', variable }));
   addMethod(
     mapClass,
@@ -424,6 +444,11 @@ function defineCollectionDefaults(
       return merged;
     }
   );
+}
+
+/** `Collections.sort` and `Arrays.sort` with a comparator. */
+function defineComparatorSorts(context: Context, collections: Collections, functions: DefaultFunctions): void {
+  const { listClass } = collections;
   const comparatorOf = (element: JavaType): ClassType => classType(functions.comparator, superOf(element));
   const typeParameter = (): TypeVariable => ({ name: 'T', bounds: [context.objectType] });
   const collectionsClass = context.registry.classes.get('Collections') as ClassInfo;
