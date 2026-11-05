@@ -14,12 +14,13 @@ import type {
 } from './ast';
 import type { Builtins } from './builtins';
 import { type CompileOptions, type Exec, type MethodContext } from './compilerBase';
+import { memberBindings, methodView } from './conversions';
 import { DeclarationCompiler } from './declarations';
 import { checkDefiniteAssignment, checkInitialization } from './definiteAssignment';
 import { canCompleteNormally } from './reachability';
 import { type Frame, type Slot, UNASSIGNED } from './runtime';
 import { isObjectCreation } from './stepRules';
-import { type ClassInfo, type FieldInfo, type MethodInfo, sameType, VOID } from './types';
+import { asSuper, type ClassInfo, type FieldInfo, type MethodInfo, sameType, thisTypeOf, VOID } from './types';
 import type { JavaObject, Value } from './values';
 
 export interface CompiledProgram {
@@ -100,8 +101,14 @@ class Compiler extends DeclarationCompiler {
         for (const initializer of staticInitializers) initializer(frame);
       };
     }
-    for (const method of cls.methods) this.compileMethod(cls, method);
-    for (const constructor of cls.constructors) this.compileConstructor(cls, constructor);
+    for (const method of cls.methods) {
+      this.withInstanceTypeVariables(cls, !method.isStatic, () =>
+        this.withTypeVariables(method.typeParameters ?? [], () => this.compileMethod(cls, method))
+      );
+    }
+    this.withInstanceTypeVariables(cls, true, () => {
+      for (const constructor of cls.constructors) this.compileConstructor(cls, constructor);
+    });
   }
 
   /** Compiles the creation of an enum's constants, which run before its other static initializers. */
@@ -238,9 +245,15 @@ class Compiler extends DeclarationCompiler {
     // Arguments of an explicit constructor call may not refer to the object under construction.
     const argSyntax = explicitCall?.args ?? [];
     const args = argSyntax.map((arg) => this.compileValue({ ...context, isStatic: true }, arg));
+    const targetBindings = memberBindings(
+      callsThis ? thisTypeOf(cls) : asSuper(thisTypeOf(cls), targetClass),
+      targetClass
+    );
     const target = this.selectMethod(
       explicitCall ?? declaration ?? (cls.declaration as ClassDeclaration),
-      targetClass.constructors.filter((candidate) => candidate !== constructor || !callsThis),
+      targetClass.constructors
+        .filter((candidate) => candidate !== constructor || !callsThis)
+        .map((candidate) => methodView(candidate, targetBindings)),
       args.map((arg) => arg.type),
       `コンストラクタ ${targetClass.name}`
     );
@@ -261,7 +274,7 @@ class Compiler extends DeclarationCompiler {
     constructor.code = {
       locals: context.locals,
       run: (frame) => {
-        this.invokeWithArguments(frame, target, frame.thisObject, convertedArgs, callRow);
+        this.invokeWithArguments(frame, target.declared ?? target, frame.thisObject, convertedArgs, callRow);
         for (const initializer of initializers) initializer(frame);
         body?.(frame);
         return;

@@ -10,8 +10,12 @@ export type PrimitiveTypeName = 'byte' | 'short' | 'int' | 'long' | 'char' | 'fl
 
 export type TypeSyntax =
   | ({ kind: 'primitive'; name: PrimitiveTypeName } & Span)
-  /** `qualifier` holds the enclosing types written before the name, as in `Outer.Inner`. */
-  | ({ kind: 'named'; name: string; qualifier: string[] } & Span)
+  /**
+   * `qualifier` holds the enclosing types written before the name, as in `Outer.Inner`; `args` holds the type
+   * arguments, which are empty for the diamond `<>`.
+   */
+  | ({ kind: 'named'; name: string; qualifier: string[]; args?: TypeSyntax[] } & Span)
+  | ({ kind: 'wildcard'; bound: TypeSyntax | undefined; isSuper: boolean } & Span)
   | ({ kind: 'array'; element: TypeSyntax } & Span)
   | ({ kind: 'var' } & Span);
 
@@ -28,9 +32,15 @@ export interface CompilationUnit {
   classes: ClassDeclaration[];
 }
 
+export interface TypeParameter extends Span {
+  name: string;
+  bounds: TypeSyntax[];
+}
+
 export interface ClassDeclaration extends Span {
   kind: 'class' | 'interface' | 'enum';
   name: string;
+  typeParameters: TypeParameter[];
   modifiers: Modifiers;
   superclass?: TypeSyntax;
   /** The interfaces a class implements or an interface extends. */
@@ -68,6 +78,7 @@ export interface Parameter extends Span {
 export interface MethodDeclaration extends Span {
   kind: 'method';
   name: string;
+  typeParameters: TypeParameter[];
   modifiers: Modifiers;
   returnType: TypeSyntax | undefined;
   parameters: Parameter[];

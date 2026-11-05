@@ -159,7 +159,7 @@ function convertFieldAccess(node: Node): Expression {
 }
 
 function convertMethodInvocation(node: Node): Expression {
-  if (node.childForFieldName('type_arguments')) unsupported(node, '型引数');
+  if (node.childForFieldName('type_arguments')) unsupported(node, 'メソッドへの型引数');
   const object = node.childForFieldName('object');
   if (node.children.some((child) => child?.type === 'super' && child.startIndex !== object?.startIndex))
     unsupported(node, '修飾された super');
@@ -173,7 +173,7 @@ function convertMethodInvocation(node: Node): Expression {
 }
 
 function convertObjectCreation(node: Node): Expression {
-  if (node.childForFieldName('type_arguments')) unsupported(node, '型引数');
+  if (node.childForFieldName('type_arguments')) unsupported(node, 'コンストラクタへの型引数');
   if (namedChildren(node).some((child) => child.type === 'class_body')) unsupported(node, '匿名クラス');
   if (namedChildren(node)[0]?.startIndex !== field(node, 'type').startIndex) unsupported(node, '修飾された new');
   return {

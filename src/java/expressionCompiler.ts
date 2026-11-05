@@ -1,5 +1,6 @@
 // code-gauge-allow-file fileNcss 453 -- The expression compiler keeps one method per expression kind together.
 import type { ArrayInitializer, BinaryOperator, Expression, PatternBinding, Span } from './ast';
+import { box, boxedTypeOf, unbox } from './builtinWrappers';
 import {
   type Compiled,
   type CompiledValue,
@@ -10,11 +11,13 @@ import {
   type Reference,
   type Scope,
 } from './compilerBase';
+import { infer, memberBindings, memberType, methodView, unboxedTypeOf } from './conversions';
 import { binaryOperation, castOperation, conditionalType, unaryOperation } from './operators';
 import { bindingsWhen } from './patternBindings';
 import { booleanConstants } from './reachability';
 import { type Frame, throwBuiltin, UNASSIGNED } from './runtime';
 import {
+  asSuper,
   BOOLEAN,
   CHAR,
   type ClassInfo,
@@ -31,7 +34,12 @@ import {
   LONG,
   type MethodInfo,
   NULL,
+  sameType,
+  thisTypeOf,
   typeName,
+  type TypeVariable,
+  upperBound,
+  VOID,
 } from './types';
 import { defaultValue, JavaArray, JavaObject, toInt32, type Value } from './values';
 
@@ -41,7 +49,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   protected readonly bindingSlots = new WeakMap<PatternBinding, number>();
 
   protected compileCondition(context: MethodContext, expression: Expression): (frame: Frame) => boolean {
-    const value = this.compileValue(context, expression);
+    const value = this.operand(this.compileValue(context, expression));
     if (value.type.kind !== 'boolean') {
       this.error(expression, `条件には boolean 型の式が必要ですが、${typeName(value.type)} 型の式が書かれています。`);
     }
@@ -65,7 +73,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     type: JavaType
   ): Eval {
     if (initializer.kind === 'arrayInitializer') return this.compileArrayInitializer(context, initializer, type);
-    return this.convert(this.compileValue(context, initializer), type, 'assignment', initializer).run;
+    return this.convert(this.compileValueFor(context, initializer, type), type, 'assignment', initializer).run;
   }
 
   protected compileArrayInitializer(context: MethodContext, initializer: ArrayInitializer, type: JavaType): Eval {
@@ -335,7 +343,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       if (context.isStatic) this.error(access, 'static メソッドの中では super を使えません。');
       const field = this.findField(context.cls.superclass as ClassInfo, name);
       if (!field) return this.error(access, missingFieldMessage(context.cls.superclass as ClassInfo, name));
-      return notConstant(this.fieldReference(field, field.isStatic ? undefined : thisValue(context)));
+      return notConstant(this.fieldReference(field, field.isStatic ? undefined : superValue(context)));
     }
     const object = this.compileExpression(context, access.object);
     if (object.kind === 'class') {
@@ -364,11 +372,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
       if (name !== 'length') this.error(access, `配列にフィールド ${name} はありません。`);
       return arrayLengthReference(object);
     }
-    if (object.type.kind !== 'class') {
+    const bound = upperBound(object.type);
+    if (bound.kind !== 'class') {
       return this.error(access, `${typeName(object.type)} 型の値にはフィールドがありません。`);
     }
-    const field = this.findField(object.type.cls, name);
-    if (!field) return this.error(access, missingFieldMessage(object.type.cls, name));
+    const field = this.findField(bound.cls, name);
+    if (!field) return this.error(access, missingFieldMessage(bound.cls, name));
     this.checkAccess(context, field.owner, field.access, access, `フィールド ${name}`);
     return this.fieldReference(field, field.isStatic ? undefined : object, field.isStatic ? object : undefined);
   }
@@ -421,7 +430,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     const object = receiver as CompiledValue;
     return {
-      type: field.type,
+      type: memberType(field.type, memberBindings(object.type, field.owner)),
       field,
       bind: (frame) => {
         const target = object.run(frame);
@@ -490,8 +499,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
   protected compileAssignment(context: MethodContext, expression: Extract<Expression, { kind: 'assign' }>): Compiled {
     const reference = this.compileReference(context, expression.target);
     this.checkAssignable(context, expression.target, reference);
-    const value = this.compileValue(context, expression.value);
     const { bind, type } = reference;
+    const value =
+      expression.operator === '='
+        ? this.compileValueFor(context, expression.value, type)
+        : this.compileValue(context, expression.value);
     if (expression.operator === '=') {
       const converted = this.convert(value, type, 'assignment', expression.value).run;
       return {
@@ -506,22 +518,26 @@ export abstract class ExpressionCompiler extends CompilerBase {
       };
     }
     const operator = expression.operator.slice(0, -1) as BinaryOperator;
-    const operation = this.binaryOperation(expression, operator, type, value.type);
-    const narrow = this.castOperation(operation.type, type, expression);
+    // A wrapper variable is unboxed for the operation and its result boxed again, except for string concatenation.
+    const isStringTarget = type.kind === 'class' && type.cls === this.builtins.stringClass;
+    const { unbox: unboxTarget, rebox, primitiveType } = this.wrapperAccess(isStringTarget ? undefined : type);
+    const right = isStringTarget ? value : this.operand(value);
+    const operation = this.binaryOperation(expression, operator, primitiveType, right.type);
+    const narrow = this.castOperation(operation.type, primitiveType, expression);
     return {
       kind: 'value',
       type,
       run: (frame) => {
         const target = bind(frame);
-        const left = target.get();
+        const left = unboxTarget(frame, target.get());
         frame.temporaries.push(left);
-        let right: Value;
+        let rightValue: Value;
         try {
-          right = value.run(frame);
+          rightValue = right.run(frame);
         } finally {
           frame.temporaries.pop();
         }
-        const result = narrow(frame, operation.apply(frame, left, right));
+        const result = rebox(frame, narrow(frame, operation.apply(frame, left, rightValue)));
         target.set(result);
         return result;
       },
@@ -552,24 +568,47 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const reference = this.compileReference(context, expression.target);
     this.checkAssignable(context, expression.target, reference);
     const { type, bind } = reference;
-    if (!isNumeric(type))
+    const { unbox: unboxTarget, rebox, primitiveType } = this.wrapperAccess(type);
+    if (!isNumeric(primitiveType)) {
       this.error(expression, `${typeName(type)} 型の変数には ${expression.operator} を使えません。`);
-    const { kind } = type;
+    }
+    const { kind } = primitiveType;
     const delta = expression.operator === '++' ? 1 : -1;
-    const operation = this.binaryOperation(expression, expression.operator === '++' ? '+' : '-', type, INT);
-    const narrow = this.castOperation(operation.type, type, expression);
+    const operation = this.binaryOperation(expression, expression.operator === '++' ? '+' : '-', primitiveType, INT);
+    const narrow = this.castOperation(operation.type, primitiveType, expression);
     const isPrefix = expression.isPrefix;
     return {
       kind: 'value',
       type,
       run: (frame) => {
         const target = bind(frame);
-        const before = target.get();
-        const after =
-          kind === 'int' ? toInt32((before as number) + delta) : narrow(frame, operation.apply(frame, before, 1));
+        const stored = target.get();
+        const before = unboxTarget(frame, stored);
+        const after = rebox(
+          frame,
+          kind === 'int' ? toInt32((before as number) + delta) : narrow(frame, operation.apply(frame, before, 1))
+        );
         target.set(after);
-        return isPrefix ? after : before;
+        return isPrefix ? after : stored;
       },
+    };
+  }
+
+  /** How an operator reads and writes a variable of `type`: through unboxing and boxing when it is a wrapper. */
+  protected wrapperAccess(type: JavaType | undefined): {
+    unbox: (frame: Frame, value: Value) => Value;
+    rebox: (frame: Frame, value: Value) => Value;
+    primitiveType: JavaType;
+  } {
+    const unboxedType = type && unboxedTypeOf(type);
+    const boxType = unboxedType && boxedTypeOf(this.builtins.wrappers, unboxedType);
+    if (!type || !unboxedType || !boxType) {
+      return { unbox: (_, value) => value, rebox: (_, value) => value, primitiveType: type ?? VOID };
+    }
+    return {
+      unbox: (frame, value) => unbox(frame, value),
+      rebox: (frame, value) => box(frame, boxType.cls, value),
+      primitiveType: unboxedType,
     };
   }
 
@@ -590,12 +629,21 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   protected compileBinary(context: MethodContext, expression: Extract<Expression, { kind: 'binary' }>): Compiled {
-    const left = this.compileValue(context, expression.left);
+    const leftValue = this.compileValue(context, expression.left);
     const { operator: binaryOperator } = expression;
     // The right operand of && sees the pattern variables of a true left operand, and that of || of a false one.
     const rightBindings =
       binaryOperator === '&&' || binaryOperator === '||' ? bindingsWhen(expression.left, binaryOperator === '&&') : [];
-    const right = this.withBindings(context, rightBindings, () => this.compileValue(context, expression.right));
+    const rightValue = this.withBindings(context, rightBindings, () => this.compileValue(context, expression.right));
+    // Operators unbox wrapper objects, except string concatenation and == between two references.
+    const isString = (type: JavaType): boolean => type.kind === 'class' && type.cls === this.builtins.stringClass;
+    const keepsReferences =
+      (binaryOperator === '+' && (isString(leftValue.type) || isString(rightValue.type))) ||
+      ((binaryOperator === '==' || binaryOperator === '!=') &&
+        isReference(leftValue.type) &&
+        isReference(rightValue.type));
+    const left = keepsReferences ? leftValue : this.operand(leftValue);
+    const right = keepsReferences ? rightValue : this.operand(rightValue);
     const operation = this.binaryOperation(expression, expression.operator, left.type, right.type);
     if (expression.operator === '&&' || expression.operator === '||') {
       return shortCircuit(expression.operator, left, right);
@@ -634,7 +682,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       if (literal.type === 'int' && literal.value === 2_147_483_648) return constantValue(INT, -2_147_483_648);
       if (literal.type === 'long' && literal.value === 2n ** 63n) return constantValue(LONG, -(2n ** 63n));
     }
-    const value = this.compileValue(context, operand);
+    const value = this.operand(this.compileValue(context, operand));
     const operation = unaryOperation(operator, value.type);
     if (!operation) this.error(expression, `演算子 ${operator} は ${typeName(value.type)} 型には使えません。`);
     return {
@@ -651,12 +699,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
     expression: Extract<Expression, { kind: 'conditional' }>
   ): Compiled {
     const condition = this.compileCondition(context, expression.condition);
-    const consequence = this.withBindings(context, bindingsWhen(expression.condition, true), () =>
+    const consequenceValue = this.withBindings(context, bindingsWhen(expression.condition, true), () =>
       this.compileValue(context, expression.consequence)
     );
-    const alternative = this.withBindings(context, bindingsWhen(expression.condition, false), () =>
+    const alternativeValue = this.withBindings(context, bindingsWhen(expression.condition, false), () =>
       this.compileValue(context, expression.alternative)
     );
+    const [consequence, alternative] = this.conditionalOperands(consequenceValue, alternativeValue);
     const type = this.conditionalType(expression, consequence, alternative);
     // A constant branch may narrow to the other branch's type, as an assignment would; a reference type is a common
     // supertype of both branches.
@@ -673,6 +722,23 @@ export abstract class ExpressionCompiler extends CompilerBase {
       constant: isConstant ? (constantCondition ? whenTrue.constant : whenFalse.constant) : undefined,
       run: (frame) => (condition(frame) ? whenTrue.run(frame) : whenFalse.run(frame)),
     };
+  }
+
+  /**
+   * Boxes or unboxes the branches of a conditional as Java types it: a primitive branch unboxes a wrapper on the
+   * other side, two numeric wrappers of different kinds unbox, and a primitive branch next to a reference boxes.
+   */
+  protected conditionalOperands(a: CompiledValue, b: CompiledValue): [CompiledValue, CompiledValue] {
+    const unboxedA = unboxedTypeOf(a.type);
+    const unboxedB = unboxedTypeOf(b.type);
+    if (isPrimitive(a.type) && unboxedB) return [a, this.operand(b)];
+    if (isPrimitive(b.type) && unboxedA) return [this.operand(a), b];
+    if (unboxedA && unboxedB && !sameType(a.type, b.type) && isNumeric(unboxedA) && isNumeric(unboxedB)) {
+      return [this.operand(a), this.operand(b)];
+    }
+    if (isPrimitive(a.type) && isReference(b.type)) return [this.boxedValue(a), b];
+    if (isPrimitive(b.type) && isReference(a.type)) return [a, this.boxedValue(b)];
+    return [a, b];
   }
 
   protected conditionalType(span: Span, a: CompiledValue, b: CompiledValue): JavaType {
@@ -745,9 +811,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   protected compileNew(context: MethodContext, expression: Extract<Expression, { kind: 'new' }>): Compiled {
-    const type = this.resolveType(expression.type);
-    if (type.kind !== 'class') return this.error(expression, `${typeName(type)} 型のオブジェクトは new で作れません。`);
-    const cls = type.cls;
+    const targetType = this.takeTargetType();
+    const resolved = this.resolveType(expression.type);
+    if (resolved.kind !== 'class') {
+      return this.error(expression, `${typeName(resolved)} 型のオブジェクトは new で作れません。`);
+    }
+    const cls = resolved.cls;
     if (cls.kind === 'interface')
       this.error(expression, `インターフェース ${cls.name} のオブジェクトは new で作れません。`);
     if (cls.kind === 'enum' || cls === this.builtins.enumClass) {
@@ -757,11 +826,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (cls.isBuiltin && cls.constructors.length === 0)
       this.error(expression, `${cls.name} のオブジェクトは new で作れません。`);
     if (cls === this.builtins.stringClass) this.error(expression, 'String のオブジェクトは new で作れません。');
+    if (resolved.args?.some((arg) => arg.kind === 'wildcard')) {
+      this.error(expression, 'new で作るオブジェクトの型引数に ? は使えません。');
+    }
     const args = expression.args.map((arg) => this.compileValue(context, arg));
+    const argTypes = args.map((arg) => arg.type);
+    const type = resolved.args?.length === 0 ? this.inferDiamond(cls, argTypes, targetType) : resolved;
+    const bindings = memberBindings(type, cls);
     const constructor = this.selectMethod(
       expression,
-      cls.constructors,
-      args.map((arg) => arg.type),
+      cls.constructors.map((candidate) => methodView(candidate, bindings)),
+      argTypes,
       `コンストラクタ ${cls.name}`
     );
     this.checkAccess(context, cls, constructor.access, expression, `コンストラクタ ${cls.name}`);
@@ -770,6 +845,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       (arg, index) => this.convert(arg, constructor.parameterTypes[index], 'invocation', expression.args[index]).run
     );
     const callRow = expression.row;
+    const declaredConstructor = constructor.declared ?? constructor;
     return {
       kind: 'value',
       type,
@@ -778,13 +854,43 @@ export abstract class ExpressionCompiler extends CompilerBase {
         const object = frame.runtime.allocateObject(frame, cls);
         frame.temporaries.push(object);
         try {
-          this.invokeWithArguments(frame, constructor, object, convertedArgs, callRow);
+          this.invokeWithArguments(frame, declaredConstructor, object, convertedArgs, callRow);
         } finally {
           frame.temporaries.pop();
         }
         return object;
       },
     };
+  }
+
+  /**
+   * The type arguments the diamond `<>` stands for: those the constructor's arguments decide, then those the type the
+   * value is assigned to decides. Any left undecided make the type raw, which converts to any parameterization.
+   */
+  protected inferDiamond(cls: ClassInfo, argTypes: JavaType[], targetType: JavaType | undefined): JavaType {
+    const variables = cls.typeParameters;
+    const bindings = new Map<TypeVariable, JavaType>();
+    const self = thisTypeOf(cls);
+    const target = targetType && upperBound(targetType);
+    if (target?.kind === 'class' && target.args) {
+      const supertype = asSuper(self, target.cls);
+      for (const [index, arg] of (supertype?.args ?? []).entries()) {
+        const targetArg = target.args[index];
+        if (targetArg.kind !== 'wildcard') infer(this.builtins, arg, targetArg, variables, bindings);
+        else if (targetArg.bound) infer(this.builtins, arg, targetArg.bound, variables, bindings);
+      }
+    }
+    // The constructor's arguments decide only what the target type leaves open.
+    const candidates = cls.constructors.filter((constructor) => constructor.parameterTypes.length === argTypes.length);
+    if (candidates.length === 1) {
+      const fromArgs = new Map<TypeVariable, JavaType>();
+      for (const [index, parameterType] of candidates[0].parameterTypes.entries()) {
+        infer(this.builtins, parameterType, argTypes[index], variables, fromArgs);
+      }
+      for (const [variable, type] of fromArgs) if (!bindings.has(variable)) bindings.set(variable, type);
+    }
+    if (variables.some((variable) => !bindings.has(variable))) return cls.type;
+    return { kind: 'class', cls, args: variables.map((variable) => bindings.get(variable) as JavaType) };
   }
 
   protected compileCall(context: MethodContext, expression: Extract<Expression, { kind: 'call' }>): Compiled {
@@ -799,6 +905,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       args.map((arg) => arg.type),
       `メソッド ${expression.name}`
     );
+    const declared = method.declared ?? method;
     if (target.receiver === undefined && expression.object === undefined && !method.isStatic) {
       this.error(
         expression,
@@ -820,7 +927,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         run: (frame) => {
           ignored?.run(frame);
           frame.runtime.initializeClass(frame, method.owner);
-          return this.invokeWithArguments(frame, method, undefined, convertedArgs, callRow);
+          return this.invokeWithArguments(frame, declared, undefined, convertedArgs, callRow);
         },
       };
     }
@@ -832,7 +939,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       run: (frame) => {
         const object = receiver.run(frame);
         if (object === undefined) throwBuiltin(frame, 'NullPointerException');
-        const resolved = dispatches ? frame.runtime.dispatch(object, method) : method;
+        const resolved = dispatches ? frame.runtime.dispatch(object, declared) : declared;
         frame.temporaries.push(object);
         try {
           return this.invokeWithArguments(frame, resolved, object, convertedArgs, callRow);
@@ -854,7 +961,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
       if (isSuper && context.cls.kind === 'interface')
         this.error(expression, 'インターフェースの中では super を使えません。');
       const owner = isSuper ? (context.cls.superclass as ClassInfo) : context.cls;
-      const candidates = this.collectMethods(owner, expression.name);
+      const receiver = isSuper ? superValue(context) : thisValue(context);
+      const candidates = this.viewMethods(this.collectMethods(owner, expression.name), receiver.type);
       if (candidates.length === 0 && !isSuper) {
         // A nested class calls the methods of the innermost enclosing class that has one of the name.
         for (let outer = context.cls.enclosing; outer; outer = outer.enclosing) {
@@ -862,7 +970,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
           if (outerCandidates.length > 0) return { candidates: outerCandidates, owner: outer, receiver: undefined };
         }
       }
-      return { candidates, owner, receiver: thisValue(context) };
+      return { candidates, owner, receiver };
     }
     const object = this.compileExpression(context, expression.object);
     if (object.kind === 'class') {
@@ -872,11 +980,29 @@ export abstract class ExpressionCompiler extends CompilerBase {
         receiver: undefined,
       };
     }
-    if (object.type.kind !== 'class' && object.type.kind !== 'array') {
+    const bound = upperBound(object.type);
+    if (bound.kind !== 'class' && bound.kind !== 'array') {
       this.error(expression, `${typeName(object.type)} 型の値にはメソッドがありません。`);
     }
-    const owner = object.type.kind === 'class' ? object.type.cls : this.builtins.objectClass;
-    return { candidates: this.collectMethods(owner, expression.name), owner, receiver: object };
+    const owner = bound.kind === 'class' ? bound.cls : this.builtins.objectClass;
+    const bounds = object.type.kind === 'typeVar' ? object.type.variable.bounds : [bound];
+    // A type variable has the methods of all its bounds.
+    const methods = bounds.flatMap((type) => {
+      const upper = upperBound(type);
+      return upper.kind === 'class' ? this.viewMethods(this.collectMethods(upper.cls, expression.name), upper) : [];
+    });
+    return {
+      candidates: bound.kind === 'array' ? this.collectMethods(owner, expression.name) : methods,
+      owner,
+      receiver: object,
+    };
+  }
+
+  /** The methods as a receiver of `receiverType` sees them, with its type arguments substituted. */
+  protected viewMethods(methods: MethodInfo[], receiverType: JavaType): MethodInfo[] {
+    return methods.map((method) =>
+      method.isStatic ? method : methodView(method, memberBindings(receiverType, method.owner))
+    );
   }
 
   protected checkCall(
@@ -924,7 +1050,17 @@ function notConstant(reference: Reference & { constant?: Value }): Reference & {
 }
 
 function thisValue(context: MethodContext): CompiledValue {
-  return { kind: 'value', type: context.cls.type, run: (frame) => frame.thisObject };
+  return { kind: 'value', type: thisTypeOf(context.cls), run: (frame) => frame.thisObject };
+}
+
+/** `this` viewed as its superclass, with the type arguments the class gives it. */
+function superValue(context: MethodContext): CompiledValue {
+  const superclass = context.cls.superclass as ClassInfo;
+  return {
+    kind: 'value',
+    type: asSuper(thisTypeOf(context.cls), superclass) ?? superclass.type,
+    run: (frame) => frame.thisObject,
+  };
 }
 
 function arrayLengthReference(array: CompiledValue): Reference {

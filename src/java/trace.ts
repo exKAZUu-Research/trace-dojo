@@ -117,8 +117,14 @@ function scalarOf(value: Value, type: JavaType): Scalar | typeof NOT_SCALAR {
     case 'boolean': {
       return value as boolean;
     }
-    case 'class': {
+    case 'class':
+    case 'typeVar':
+    case 'wildcard': {
       if (value instanceof JavaString) return value.value;
+      // Learners write a boxed value as the primitive value it holds.
+      if (value instanceof JavaObject && value.boxed !== undefined) {
+        return scalarOf(value.boxed, value.cls.unboxedType as JavaType);
+      }
       return NOT_SCALAR;
     }
     case 'array': {
@@ -138,7 +144,8 @@ function scalarOf(value: Value, type: JavaType): Scalar | typeof NOT_SCALAR {
 
 function hasScalarElements(type: JavaType): boolean {
   if (type.kind === 'array') return hasScalarElements(type.element);
-  return type.kind !== 'class' || type.cls.name === 'String';
+  if (type.kind === 'typeVar' || type.kind === 'wildcard') return false;
+  return type.kind !== 'class' || type.cls.name === 'String' || type.cls.unboxedType !== undefined;
 }
 
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows Java null as null.
@@ -153,6 +160,9 @@ function displayNodeOf(value: Value, type: JavaType, seen: Set<unknown>): Displa
   if (value instanceof JavaString) return { kind: 'value', value: value.value };
   if (seen.has(value)) return undefined;
   if (value instanceof JavaObject && value.turtle) return turtleNodeOf(value.turtle);
+  if (value instanceof JavaObject && value.boxed !== undefined) {
+    return { kind: 'value', value: scalarOf(value, value.cls.type) as number | string | boolean };
+  }
   // An enum constant shows as its name, which is what learners write for it.
   if (value instanceof JavaObject && value.enumConstant) return { kind: 'value', value: value.enumConstant.name.value };
   seen.add(value);

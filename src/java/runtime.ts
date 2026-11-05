@@ -228,13 +228,15 @@ export class Runtime {
 }
 
 /** The method that `cls` runs for a virtual call of `method`: an override in its superclasses, else a default method. */
-function findImplementation(cls: ClassInfo, method: MethodInfo): MethodInfo {
+export function findImplementation(cls: ClassInfo, method: MethodInfo): MethodInfo {
   const matches = (candidate: MethodInfo): boolean =>
-    candidate.name === method.name &&
-    !candidate.isStatic &&
-    candidate.access !== 'private' &&
-    candidate.parameterTypes.length === method.parameterTypes.length &&
-    candidate.parameterTypes.every((type, index) => sameType(type, method.parameterTypes[index]));
+    candidate === method ||
+    (candidate.name === method.name &&
+      !candidate.isStatic &&
+      candidate.access !== 'private' &&
+      (candidate.overrides?.has(method) === true ||
+        (candidate.parameterTypes.length === method.parameterTypes.length &&
+          candidate.parameterTypes.every((type, index) => sameType(type, method.parameterTypes[index])))));
   for (let current: ClassInfo | undefined = cls; current; current = current.superclass) {
     if (current === method.owner) return method;
     const found = current.methods.find(matches);

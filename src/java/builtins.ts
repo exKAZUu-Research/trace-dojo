@@ -1,18 +1,29 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
+import {
+  addConstant,
+  addConstructor,
+  addInterface,
+  addMethod,
+  createRegistry,
+  newString,
+  type Registry,
+  requireString,
+  text,
+} from './builtinSupport';
+import { defineWrappers, type Wrappers } from './builtinWrappers';
 import { type Frame, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
   CHAR,
   type ClassInfo,
-  createClass,
   DOUBLE,
-  type FieldInfo,
   FLOAT,
   INT,
   type JavaType,
   LONG,
   type MethodInfo,
   type NativeMethod,
+  OBJECT_TYPE,
   VOID,
 } from './types';
 import {
@@ -37,6 +48,7 @@ export interface Builtins {
   stringClass: ClassInfo;
   enumClass: ClassInfo;
   throwableClass: ClassInfo;
+  wrappers: Wrappers;
   /** The qualified names `Throwable.toString` prints for builtin classes. */
   qualifiedNames: Map<ClassInfo, string>;
 }
@@ -49,15 +61,10 @@ export function getBuiltins(): Builtins {
   return cachedBuiltins;
 }
 
-interface Registry {
-  classes: Map<string, ClassInfo>;
-  qualifiedNames: Map<ClassInfo, string>;
-  define: (name: string, superclass: ClassInfo | undefined, packageName?: string) => ClassInfo;
-}
-
 function createBuiltins(): Builtins {
   const registry = createRegistry();
   const objectClass = registry.define('Object', undefined);
+  OBJECT_TYPE.value = objectClass.type;
   const stringClass = registry.define('String', objectClass);
   defineObject(objectClass, stringClass.type);
   defineString(stringClass, objectClass.type);
@@ -66,9 +73,10 @@ function createBuiltins(): Builtins {
   const throwableClass = defineThrowables(registry, objectClass, stringClass.type);
   defineTurtle(registry.define('Turtle', objectClass, ''), stringClass.type);
   defineMath(registry.define('Math', objectClass));
-  defineInteger(registry.define('Integer', objectClass), stringClass.type);
-  defineLong(registry.define('Long', objectClass), stringClass.type);
-  defineDouble(registry.define('Double', objectClass), stringClass.type);
+  const wrappers = defineWrappers(registry, objectClass, stringClass.type);
+  const stringCompareTo = stringClass.methods.find((method) => method.name === 'compareTo') as MethodInfo;
+  stringCompareTo.overrides = new Set([wrappers.compareTo]);
+  addInterface(stringClass, { kind: 'class', cls: wrappers.comparableClass, args: [stringClass.type] });
   defineSystem(registry, objectClass, stringClass.type);
   return {
     classes: registry.classes,
@@ -76,22 +84,8 @@ function createBuiltins(): Builtins {
     stringClass,
     enumClass,
     throwableClass,
+    wrappers,
     qualifiedNames: registry.qualifiedNames,
-  };
-}
-
-function createRegistry(): Registry {
-  const classes = new Map<string, ClassInfo>();
-  const qualifiedNames = new Map<ClassInfo, string>();
-  return {
-    classes,
-    qualifiedNames,
-    define: (name, superclass, packageName = 'java.lang') => {
-      const cls = createClass(name, superclass, true);
-      classes.set(name, cls);
-      qualifiedNames.set(cls, packageName ? `${packageName}.${name}` : name);
-      return cls;
-    },
   };
 }
 
@@ -229,70 +223,6 @@ function defineMath(mathClass: ClassInfo): void {
   addMethod(mathClass, 'pow', [DOUBLE, DOUBLE], DOUBLE, true, (_, __, [a, b]) => (a as number) ** (b as number));
   addConstant(mathClass, 'PI', DOUBLE, Math.PI);
   addConstant(mathClass, 'E', DOUBLE, Math.E);
-}
-
-function defineInteger(integerClass: ClassInfo, stringType: JavaType): void {
-  addConstant(integerClass, 'MAX_VALUE', INT, 2_147_483_647);
-  addConstant(integerClass, 'MIN_VALUE', INT, -2_147_483_648);
-  addMethod(integerClass, 'parseInt', [stringType], INT, true, (frame, _, [text]) => {
-    const value = (text as JavaString | undefined)?.value;
-    frame.runtime.scanString(value?.length ?? 0);
-    if (value === undefined || !/^[+-]?\d+$/.test(value) || Math.abs(Number(value)) > 2_147_483_648) {
-      throwBuiltin(
-        frame,
-        'NumberFormatException',
-        value === undefined ? 'Cannot parse null string: null' : `For input string: "${value}"`
-      );
-    }
-    const parsed = Number(value);
-    if (parsed > 2_147_483_647) throwBuiltin(frame, 'NumberFormatException', `For input string: "${value}"`);
-    return parsed;
-  });
-  addMethod(integerClass, 'toString', [INT], stringType, true, (frame, __, [value]) =>
-    newString(frame, String(value as number))
-  );
-}
-
-function defineDouble(doubleClass: ClassInfo, stringType: JavaType): void {
-  addConstant(doubleClass, 'MAX_VALUE', DOUBLE, Number.MAX_VALUE);
-  addConstant(doubleClass, 'MIN_VALUE', DOUBLE, Number.MIN_VALUE);
-  addConstant(doubleClass, 'POSITIVE_INFINITY', DOUBLE, Number.POSITIVE_INFINITY);
-  addConstant(doubleClass, 'NEGATIVE_INFINITY', DOUBLE, Number.NEGATIVE_INFINITY);
-  addConstant(doubleClass, 'NaN', DOUBLE, Number.NaN);
-  addMethod(doubleClass, 'parseDouble', [stringType], DOUBLE, true, (frame, _, [text]) => {
-    const value = (text as JavaString | undefined)?.value;
-    if (value === undefined) return throwBuiltin(frame, 'NullPointerException');
-    frame.runtime.scanString(value.length);
-    const trimmed = value.trim();
-    const isNumber = /^[+-]?(?:NaN|Infinity|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?[fFdD]?)$/.test(trimmed);
-    if (!isNumber) throwBuiltin(frame, 'NumberFormatException', `For input string: "${value}"`);
-    return Number(trimmed.replace(/[fFdD]$/, ''));
-  });
-  addMethod(doubleClass, 'toString', [DOUBLE], stringType, true, (frame, __, [value]) =>
-    newString(frame, formatDouble(value as number))
-  );
-  addMethod(doubleClass, 'isNaN', [DOUBLE], BOOLEAN, true, (_, __, [value]) => Number.isNaN(value));
-}
-
-function defineLong(longClass: ClassInfo, stringType: JavaType): void {
-  addConstant(longClass, 'MAX_VALUE', LONG, 2n ** 63n - 1n);
-  addConstant(longClass, 'MIN_VALUE', LONG, -(2n ** 63n));
-  addMethod(longClass, 'parseLong', [stringType], LONG, true, (frame, _, [text]) => {
-    const value = (text as JavaString | undefined)?.value;
-    frame.runtime.scanString(value?.length ?? 0);
-    const parsed = value !== undefined && /^[+-]?\d+$/.test(value) ? BigInt(value) : undefined;
-    if (parsed === undefined || parsed !== toInt64(parsed)) {
-      throwBuiltin(
-        frame,
-        'NumberFormatException',
-        value === undefined ? 'Cannot parse null string: null' : `For input string: "${value}"`
-      );
-    }
-    return parsed;
-  });
-  addMethod(longClass, 'toString', [LONG], stringType, true, (frame, __, [value]) =>
-    newString(frame, String(value as bigint))
-  );
 }
 
 function defineSystem(registry: Registry, objectClass: ClassInfo, stringType: JavaType): void {
@@ -438,15 +368,6 @@ function defineStringTransforms(stringClass: ClassInfo, objectType: JavaType): v
   }
 }
 
-function newString(frame: Frame, value: string): JavaString {
-  frame.runtime.allocateString(frame, value.length);
-  return new JavaString(value);
-}
-
-function text(value: Value): string {
-  return (value as JavaString).value;
-}
-
 function checkIndex(frame: Frame, index: number, length: number): void {
   if (index < 0 || index >= length) {
     throwBuiltin(frame, 'StringIndexOutOfBoundsException', `Index ${index} out of bounds for length ${length}`);
@@ -457,11 +378,6 @@ function checkRange(frame: Frame, begin: number, end: number, length: number): v
   if (begin < 0 || end > length || begin > end) {
     throwBuiltin(frame, 'StringIndexOutOfBoundsException', `begin ${begin}, end ${end}, length ${length}`);
   }
-}
-
-function requireString(frame: Frame, value: Value): string {
-  if (!(value instanceof JavaString)) return throwBuiltin(frame, 'NullPointerException');
-  return value.value;
 }
 
 function defineTurtle(turtleClass: ClassInfo, stringType: JavaType): void {
@@ -520,60 +436,6 @@ function stateOf(receiver: Value): TurtleState {
   const state = (receiver as JavaObject).turtle;
   if (!state) throw new Error('A turtle without its state');
   return state;
-}
-
-function addMethod(
-  cls: ClassInfo,
-  name: string,
-  parameterTypes: JavaType[],
-  returnType: JavaType,
-  isStatic: boolean,
-  native: NativeMethod
-): MethodInfo {
-  const method: MethodInfo = {
-    name,
-    owner: cls,
-    parameterTypes,
-    returnType,
-    isStatic,
-    isAbstract: false,
-    isConstructor: false,
-    access: 'public',
-    thrownTypes: [],
-    native,
-  };
-  cls.methods.push(method);
-  return method;
-}
-
-function addConstructor(cls: ClassInfo, parameterTypes: JavaType[], native: NativeMethod): void {
-  cls.constructors.push({
-    name: cls.name,
-    owner: cls,
-    parameterTypes,
-    returnType: VOID,
-    isStatic: false,
-    isAbstract: false,
-    isConstructor: true,
-    access: 'public',
-    thrownTypes: [],
-    native,
-  });
-}
-
-function addConstant(cls: ClassInfo, name: string, type: JavaType, constant: Value): void {
-  const field: FieldInfo = {
-    name,
-    owner: cls,
-    type,
-    isStatic: true,
-    isFinal: true,
-    access: 'public',
-    slot: cls.staticFieldCount++,
-    constant,
-  };
-  cls.fields.set(name, field);
-  cls.staticFields.push(field);
 }
 
 function identityOf(value: Value): number {

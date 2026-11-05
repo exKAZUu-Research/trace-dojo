@@ -452,7 +452,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         return { slot, value: this.compileArrayInitializer(context, initializer, type) };
       }
       if (initializer) {
-        compiled = this.convert(this.compileValue(context, initializer), type, 'assignment', declarator);
+        compiled = this.convert(this.compileValueFor(context, initializer, type), type, 'assignment', declarator);
       }
     }
     if (statement.isFinal && compiled?.constant !== undefined) context.constants.set(slot, compiled.constant);
@@ -485,7 +485,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
     if (context.returnType.kind === 'void') this.error(statement, '戻り値の型が void のメソッドは値を返せません。');
     const value = this.convert(
-      this.compileValue(context, statement.value),
+      this.compileValueFor(context, statement.value, context.returnType),
       context.returnType,
       'assignment',
       statement.value
@@ -612,7 +612,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     context: MethodContext,
     statement: { selector: Expression; groups: SwitchGroup[] }
   ): { type: JavaType; run: (frame: Frame) => number } {
-    const selector = this.compileValue(context, statement.selector);
+    const selector = this.operand(this.compileValue(context, statement.selector));
     const isString = selector.type.kind === 'class' && selector.type.cls === this.builtins.stringClass;
     const isEnum = selector.type.kind === 'class' && selector.type.cls.kind === 'enum';
     if (!isString && !isEnum && !['byte', 'short', 'char', 'int'].includes(selector.type.kind)) {

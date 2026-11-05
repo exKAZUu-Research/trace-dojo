@@ -4,6 +4,7 @@ import { type Frame, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
   type ClassInfo,
+  type ClassType,
   createClass,
   isCastable,
   isIntegral,
@@ -352,6 +353,7 @@ function intersectionOf(superclass: ClassInfo, interfaces: ClassInfo[], objectCl
   const cls = createClass(names, superclass === objectClass ? undefined : superclass, true);
   cls.kind = superclass === objectClass ? 'interface' : 'class';
   cls.interfaces = interfaces;
+  cls.supertypes = [...cls.supertypes, ...interfaces.map((parent) => parent.type as ClassType)];
   cls.isAbstract = true;
   return cls.type;
 }

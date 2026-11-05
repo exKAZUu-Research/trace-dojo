@@ -8,18 +8,25 @@ import type {
   TypeSyntax,
 } from './ast';
 import { sameParameters, superclassesOf } from './compilerBase';
-import { throwBuiltin } from './runtime';
+import { findImplementation, throwBuiltin } from './runtime';
 import { StatementCompiler } from './statementCompiler';
 import {
+  asSuper,
+  bindingsOf,
   type ClassInfo,
+  type ClassType,
   createClass,
+  erasure,
   type FieldInfo,
   INT,
   isReference,
   isWidening,
+  type JavaType,
   type MethodInfo,
   sameType,
+  substitute,
   superinterfacesOf,
+  thisTypeOf,
   VOID,
 } from './types';
 import { JavaArray, JavaObject, JavaString } from './values';
@@ -84,13 +91,21 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       const declaration = cls.declaration as ClassDeclaration;
       if (visiting.has(cls)) this.error(declaration, `${KIND_NAMES[cls.kind]} ${cls.name} の継承が循環しています。`);
       visiting.add(cls);
-      // A class's extends and implements clauses name types as its enclosing class's body does.
+      // A class's extends and implements clauses name types as its enclosing class's body does, with its type
+      // parameters in scope.
       this.withTypeScope(cls.enclosing, () => {
-        const superclass = this.resolveSuperclass(cls, declaration);
-        const interfaces = declaration.interfaces.map((syntax) => this.resolveInterface(cls, syntax));
-        for (const supertype of [superclass, ...interfaces]) if (supertype && !supertype.isBuiltin) visit(supertype);
-        cls.superclass = superclass;
-        cls.interfaces = interfaces;
+        cls.typeParameters = this.declareTypeParameters(declaration.typeParameters);
+        this.withTypeVariables(cls.typeParameters, () => {
+          const superclass = this.resolveSuperclass(cls, declaration);
+          const interfaces: ClassType[] = [];
+          for (const syntax of declaration.interfaces) interfaces.push(this.resolveInterface(cls, syntax, interfaces));
+          for (const supertype of [superclass, ...interfaces]) {
+            if (supertype && !supertype.cls.isBuiltin) visit(supertype.cls);
+          }
+          cls.superclass = superclass?.cls;
+          cls.interfaces = interfaces.map((type) => type.cls);
+          cls.supertypes = superclass ? [superclass, ...interfaces] : interfaces;
+        });
       });
       visiting.delete(cls);
       ordered.push(cls);
@@ -99,10 +114,10 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     return ordered;
   }
 
-  protected resolveSuperclass(cls: ClassInfo, declaration: ClassDeclaration): ClassInfo | undefined {
+  protected resolveSuperclass(cls: ClassInfo, declaration: ClassDeclaration): ClassType | undefined {
     if (cls.kind === 'interface') return;
-    if (cls.kind === 'enum') return this.builtins.enumClass;
-    if (!declaration.superclass) return this.builtins.objectClass;
+    if (cls.kind === 'enum') return this.builtins.enumClass.type as ClassType;
+    if (!declaration.superclass) return this.builtins.objectClass.type as ClassType;
     const type = this.resolveType(declaration.superclass);
     if (type.kind !== 'class') return this.error(declaration.superclass, 'クラス以外は継承できません。');
     const superclass = type.cls;
@@ -118,10 +133,10 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       superclass.isFinal ||
       (superclass.isBuiltin && superclass.constructors.length === 0);
     if (isUninheritable) this.error(declaration.superclass, `クラス ${superclass.name} は継承できません。`);
-    return superclass;
+    return type;
   }
 
-  protected resolveInterface(cls: ClassInfo, syntax: TypeSyntax): ClassInfo {
+  protected resolveInterface(cls: ClassInfo, syntax: TypeSyntax, earlier: readonly ClassType[]): ClassType {
     const type = this.resolveType(syntax);
     if (type.kind !== 'class' || type.cls.kind !== 'interface') {
       const name = type.kind === 'class' ? type.cls.name : 'この型';
@@ -132,8 +147,10 @@ export abstract class DeclarationCompiler extends StatementCompiler {
           : `${name} はインターフェースではないので、implements で指定できません。`
       );
     }
-    if (cls.interfaces.includes(type.cls)) this.error(syntax, `インターフェース ${type.cls.name} が重複しています。`);
-    return type.cls;
+    if (earlier.some((other) => other.cls === type.cls)) {
+      this.error(syntax, `インターフェース ${type.cls.name} が重複しています。`);
+    }
+    return type;
   }
 
   protected declareMembers(cls: ClassInfo): void {
@@ -237,7 +254,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 
   protected declareField(cls: ClassInfo, member: FieldDeclaration): void {
     const modifiers = this.memberModifiers(cls, member.modifiers, true);
-    const type = this.resolveType(member.type);
+    const type = this.withInstanceTypeVariables(cls, !modifiers.isStatic, () => this.resolveType(member.type));
     for (const declarator of member.declarators) {
       if (cls.fields.has(declarator.name)) {
         this.error(declarator, `フィールド ${declarator.name} はすでに定義されています。`);
@@ -272,16 +289,20 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   protected declareMethod(cls: ClassInfo, member: MethodDeclaration): void {
     const modifiers = this.memberModifiers(cls, member.modifiers, false);
     const isAbstract = this.checkMethodModifiers(cls, member, modifiers);
-    const method: MethodInfo = {
-      name: member.name,
-      ...this.declaredSignature(cls, member),
-      access: modifiers.access,
-      returnType: member.returnType ? this.resolveType(member.returnType) : VOID,
-      isStatic: modifiers.isStatic,
-      isAbstract,
-      isFinal: modifiers.isFinal,
-      isConstructor: false,
-    };
+    const method = this.withInstanceTypeVariables(cls, !modifiers.isStatic, (): MethodInfo => {
+      const typeParameters = this.declareTypeParameters(member.typeParameters);
+      return this.withTypeVariables(typeParameters, () => ({
+        name: member.name,
+        ...this.declaredSignature(cls, member),
+        typeParameters,
+        access: modifiers.access,
+        returnType: member.returnType ? this.resolveType(member.returnType) : VOID,
+        isStatic: modifiers.isStatic,
+        isAbstract,
+        isFinal: modifiers.isFinal,
+        isConstructor: false,
+      }));
+    });
     if (cls.methods.some((other) => other.name === method.name && sameParameters(other, method))) {
       this.error(member, `メソッド ${member.name} はすでに定義されています。`);
     }
@@ -333,7 +354,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
     const constructor: MethodInfo = {
       name: cls.name,
-      ...this.declaredSignature(cls, member),
+      ...this.withInstanceTypeVariables(cls, true, () => this.declaredSignature(cls, member)),
       access,
       returnType: VOID,
       isStatic: false,
@@ -371,34 +392,59 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     return claims;
   }
 
-  /** Checks a method against those it overrides in its superclasses and the methods of its interfaces. */
+  /** Checks a method against those it overrides in its supertypes, recording them in `method.overrides`. */
   protected checkOverride(cls: ClassInfo, method: MethodInfo, declaration: MethodDeclaration): void {
     const ancestors = [...superclassesOf(cls), ...superinterfacesOf(cls)];
     if (cls.kind === 'interface') ancestors.push(this.builtins.objectClass);
+    const self = thisTypeOf(cls);
+    method.overrides = new Set();
     for (const ancestor of ancestors) {
-      const overridden = ancestor.methods.find((other) => other.name === method.name && sameParameters(other, method));
-      if (!overridden || overridden.access === 'private') continue;
-      // An interface's static methods belong to the interface alone.
-      if (ancestor.kind === 'interface' && overridden.isStatic) continue;
-      if (overridden.isStatic !== method.isStatic) {
-        this.error(declaration, `メソッド ${method.name} の static の有無が親クラスと異なります。`);
+      // The ancestor's methods as this class sees them, with its type arguments substituted.
+      const supertype = asSuper(self, ancestor);
+      const bindings = supertype ? bindingsOf(supertype) : new Map();
+      for (const overridden of ancestor.methods) {
+        if (overridden.name !== method.name || overridden.access === 'private' || overridden.isConstructor) continue;
+        const parameterTypes = overridden.parameterTypes.map((type) => substitute(type, bindings));
+        const isSubsignature =
+          parameterTypes.length === method.parameterTypes.length &&
+          (parameterTypes.every((type, index) => sameType(type, method.parameterTypes[index])) ||
+            overridden.parameterTypes.every((type, index) => sameType(erasure(type), method.parameterTypes[index])));
+        if (!isSubsignature) continue;
+        // An interface's static methods belong to the interface alone.
+        if (ancestor.kind === 'interface' && overridden.isStatic) continue;
+        this.checkOverriding(method, overridden, substitute(overridden.returnType, bindings), ancestor, declaration);
+        method.overrides.add(overridden);
+        for (const indirect of overridden.overrides ?? []) method.overrides.add(indirect);
       }
-      if (overridden.isFinal) this.error(declaration, `final のメソッド ${method.name} はオーバーライドできません。`);
-      const returnsCompatible =
-        sameType(overridden.returnType, method.returnType) ||
-        (isReference(method.returnType) &&
-          isWidening(method.returnType, overridden.returnType, this.builtins.objectClass));
-      if (!returnsCompatible) {
-        this.error(declaration, `メソッド ${method.name} の戻り値の型が親クラスと異なります。`);
-      }
-      if (accessRank(method.access) < accessRank(overridden.access)) {
-        this.error(
-          declaration,
-          ancestor.kind === 'interface'
-            ? `メソッド ${method.name} はインターフェース ${ancestor.name} のメソッドをオーバーライドするので、public を付ける必要があります。`
-            : `メソッド ${method.name} の公開範囲を親クラスより狭くすることはできません。`
-        );
-      }
+    }
+  }
+
+  protected checkOverriding(
+    method: MethodInfo,
+    overridden: MethodInfo,
+    overriddenReturnType: JavaType,
+    ancestor: ClassInfo,
+    declaration: MethodDeclaration
+  ): void {
+    if (overridden.isStatic !== method.isStatic) {
+      this.error(declaration, `メソッド ${method.name} の static の有無が親クラスと異なります。`);
+    }
+    if (overridden.isFinal) this.error(declaration, `final のメソッド ${method.name} はオーバーライドできません。`);
+    const returnsCompatible =
+      sameType(overriddenReturnType, method.returnType) ||
+      sameType(erasure(overriddenReturnType), method.returnType) ||
+      (isReference(method.returnType) &&
+        isWidening(method.returnType, overriddenReturnType, this.builtins.objectClass));
+    if (!returnsCompatible) {
+      this.error(declaration, `メソッド ${method.name} の戻り値の型が親クラスと異なります。`);
+    }
+    if (accessRank(method.access) < accessRank(overridden.access)) {
+      this.error(
+        declaration,
+        ancestor.kind === 'interface'
+          ? `メソッド ${method.name} はインターフェース ${ancestor.name} のメソッドをオーバーライドするので、public を付ける必要があります。`
+          : `メソッド ${method.name} の公開範囲を親クラスより狭くすることはできません。`
+      );
     }
   }
 
@@ -417,19 +463,13 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
-  /** The method that instances of `cls` run for `method`: an override in its superclasses, else a default method. */
   protected findImplementation(cls: ClassInfo, method: MethodInfo): MethodInfo {
-    const matches = (other: MethodInfo): boolean =>
-      other.name === method.name && !other.isStatic && other.access !== 'private' && sameParameters(other, method);
-    for (const current of [cls, ...superclassesOf(cls)]) {
-      const found = current.methods.find(matches);
-      if (found) return found;
-    }
-    for (const parent of superinterfacesOf(cls)) {
-      const found = parent.methods.find((other) => matches(other) && !other.isAbstract);
-      if (found) return found;
-    }
-    return method;
+    return findImplementation(cls, method);
+  }
+
+  /** Runs `compile` with `cls`'s type parameters in scope when the code belongs to its instances. */
+  protected withInstanceTypeVariables<T>(cls: ClassInfo, isInstance: boolean, compile: () => T): T {
+    return this.withTypeVariables(isInstance ? cls.typeParameters : [], compile);
   }
 }
 

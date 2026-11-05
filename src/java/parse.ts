@@ -18,6 +18,7 @@ import { convertArguments } from './parseExpression';
 import {
   convertModifiers,
   convertType,
+  convertTypeParameters,
   convertVariableType,
   field,
   identifierOf,
@@ -63,7 +64,6 @@ function convertProgram(root: Node): CompilationUnit {
 }
 
 function convertTypeDeclaration(node: Node): ClassDeclaration {
-  if (node.childForFieldName('type_parameters')) unsupported(node, '型パラメータ');
   if (node.childForFieldName('permits')) unsupported(node, 'permits');
   const kind =
     ({ class_declaration: 'class', interface_declaration: 'interface' } as const)[node.type as 'class_declaration'] ??
@@ -82,6 +82,7 @@ function convertTypeDeclaration(node: Node): ClassDeclaration {
   return {
     kind,
     name: field(node, 'name').text,
+    typeParameters: convertTypeParameters(node.childForFieldName('type_parameters')),
     modifiers: convertModifiers(modifiersOf(node)),
     superclass: superclassNode ? convertType(namedChildren(superclassNode)[0]) : undefined,
     interfaces: interfacesNode ? namedChildren(namedChildren(interfacesNode)[0]).map((type) => convertType(type)) : [],
@@ -157,13 +158,13 @@ function convertThrows(node: Node): TypeSyntax[] {
 }
 
 function convertMethod(node: Node): MethodDeclaration {
-  if (node.childForFieldName('type_parameters')) unsupported(node, '型パラメータ');
   if (node.childForFieldName('dimensions')) unsupported(node, 'メソッド名の後ろの []');
   const typeNode = field(node, 'type');
   const body = node.childForFieldName('body');
   return {
     kind: 'method',
     name: field(node, 'name').text,
+    typeParameters: convertTypeParameters(node.childForFieldName('type_parameters')),
     modifiers: convertModifiers(modifiersOf(node)),
     returnType: typeNode.type === 'void_type' ? undefined : convertType(typeNode),
     parameters: convertParameters(field(node, 'parameters')),

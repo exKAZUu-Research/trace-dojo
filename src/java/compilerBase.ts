@@ -1,7 +1,9 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
-import type { Expression, FieldDeclaration, Span, TypeSyntax } from './ast';
+import type { Expression, FieldDeclaration, Span, TypeParameter, TypeSyntax } from './ast';
 import { getBuiltins } from './builtins';
+import { box, boxedTypeOf, unbox } from './builtinWrappers';
+import { boxingTarget, instantiateMethod, isInvocationConvertible, unboxedTypeOf } from './conversions';
 import { fitsIn } from './operators';
 import { type Frame } from './runtime';
 import {
@@ -18,6 +20,7 @@ import {
   sameType,
   superinterfacesOf,
   typeName,
+  type TypeVariable,
   VOID,
 } from './types';
 import { convertNumber, JavaString, type Value } from './values';
@@ -131,6 +134,8 @@ export abstract class CompilerBase {
   protected readonly usedAtomicRows = new Set<number>();
   private readonly fieldConstants = new Map<FieldInfo, Value>();
   private readonly computingConstants = new Set<FieldInfo>();
+  /** The type the expression about to be compiled is assigned to, which a diamond `<>` infers its arguments from. */
+  private targetType: JavaType | undefined;
   /** The class whose body the code being compiled is in, which decides what simple type names mean. */
   protected typeScope: ClassInfo | undefined;
 
@@ -154,17 +159,119 @@ export abstract class CompilerBase {
         return { kind: 'array', element: this.resolveType(syntax.element) };
       }
       case 'named': {
-        const [first, ...rest] = [...syntax.qualifier, syntax.name];
-        let cls = this.lookupType(first, this.typeScope);
-        for (const name of rest) cls = cls && this.findMemberType(cls, name);
-        if (!cls)
-          this.error(syntax, `この採点環境には、型 ${[...syntax.qualifier, syntax.name].join('.')} がありません。`);
-        return cls.type;
+        return this.resolveNamedType(syntax);
+      }
+      case 'wildcard': {
+        return this.error(syntax, '? は型引数の中にしか書けません。');
       }
       case 'var': {
         return this.error(syntax, 'ここでは var を使えません。');
       }
     }
+  }
+
+  protected resolveNamedType(syntax: Extract<TypeSyntax, { kind: 'named' }>): JavaType {
+    if (syntax.qualifier.length === 0) {
+      const variable = this.findTypeVariable(syntax.name);
+      if (variable) {
+        if (syntax.args) this.error(syntax, `型パラメータ ${syntax.name} には型引数を付けられません。`);
+        return { kind: 'typeVar', variable };
+      }
+    }
+    const [first, ...rest] = [...syntax.qualifier, syntax.name];
+    let cls = this.lookupType(first, this.typeScope);
+    for (const name of rest) cls = cls && this.findMemberType(cls, name);
+    if (!cls) this.error(syntax, `この採点環境には、型 ${[...syntax.qualifier, syntax.name].join('.')} がありません。`);
+    if (!syntax.args) return cls.type;
+    const { typeParameters } = cls;
+    // The diamond `<>` stands for arguments that the creation infers.
+    if (syntax.args.length === 0) return { kind: 'class', cls, args: [] };
+    if (typeParameters.length !== syntax.args.length) {
+      this.error(
+        syntax,
+        typeParameters.length === 0
+          ? `型 ${cls.name} には型引数を付けられません。`
+          : `型 ${cls.name} には ${typeParameters.length} 個の型引数が必要です。`
+      );
+    }
+    return { kind: 'class', cls, args: syntax.args.map((arg) => this.resolveTypeArgument(arg)) };
+  }
+
+  protected resolveTypeArgument(syntax: TypeSyntax): JavaType {
+    if (syntax.kind === 'wildcard') {
+      return {
+        kind: 'wildcard',
+        bound: syntax.bound && this.resolveTypeArgument(syntax.bound),
+        isSuper: syntax.isSuper,
+      };
+    }
+    const type = this.resolveType(syntax);
+    if (isPrimitive(type)) {
+      const box = `${type.kind[0].toUpperCase()}${type.kind.slice(1)}`
+        .replace('Int', 'Integer')
+        .replace('Char', 'Character');
+      this.error(syntax, `型引数にプリミティブ型 ${type.kind} は使えません。${box} を使ってください。`);
+    }
+    return type;
+  }
+
+  /** The type variables in scope, innermost last. */
+  protected readonly typeVariableScopes: Map<string, TypeVariable>[] = [];
+
+  protected findTypeVariable(name: string): TypeVariable | undefined {
+    for (let index = this.typeVariableScopes.length - 1; index >= 0; index--) {
+      const variable = this.typeVariableScopes[index].get(name);
+      if (variable) return variable;
+    }
+    return;
+  }
+
+  /** Runs `compile` with type variables in scope. */
+  protected withTypeVariables<T>(variables: readonly TypeVariable[], compile: () => T): T {
+    if (variables.length === 0) return compile();
+    this.typeVariableScopes.push(new Map(variables.map((variable) => [variable.name, variable])));
+    try {
+      return compile();
+    } finally {
+      this.typeVariableScopes.pop();
+    }
+  }
+
+  /** Declares type parameters, whose bounds may name each other, defaulting a missing bound to `Object`. */
+  protected declareTypeParameters(parameters: readonly TypeParameter[]): TypeVariable[] {
+    const variables = parameters.map((parameter): TypeVariable => ({ name: parameter.name, bounds: [] }));
+    for (const [index, parameter] of parameters.entries()) {
+      if (variables.slice(0, index).some((other) => other.name === parameter.name)) {
+        this.error(parameter, `型パラメータ ${parameter.name} が重複しています。`);
+      }
+    }
+    this.withTypeVariables(variables, () => {
+      for (const [index, parameter] of parameters.entries()) {
+        variables[index].bounds =
+          parameter.bounds.length > 0
+            ? parameter.bounds.map((bound) => this.resolveType(bound))
+            : [this.builtins.objectClass.type];
+      }
+    });
+    return variables;
+  }
+
+  /** Compiles an expression whose value is assigned to `type`, which a diamond may infer its type arguments from. */
+  protected compileValueFor(context: MethodContext, expression: Expression, type: JavaType): CompiledValue {
+    const isCreation = expression.kind === 'new';
+    this.targetType = isCreation ? type : undefined;
+    try {
+      return this.compileValue(context, expression);
+    } finally {
+      this.targetType = undefined;
+    }
+  }
+
+  /** Takes the target type of the expression being compiled, which only that expression may use. */
+  protected takeTargetType(): JavaType | undefined {
+    const type = this.targetType;
+    this.targetType = undefined;
+    return type;
   }
 
   /** The one string object that every literal with this text evaluates to. */
@@ -316,7 +423,63 @@ export abstract class CompilerBase {
     ) {
       return constantValue(to, value.constant);
     }
+    const boxed = this.boxedConversion(value, to, context);
+    if (boxed) return boxed;
     return this.error(span, `${typeName(value.type)} 型の値を ${typeName(to)} 型に変換できません。`);
+  }
+
+  /** Converts by boxing a primitive value or unboxing a wrapper object, then widening the result. */
+  protected boxedConversion(
+    value: CompiledValue,
+    to: JavaType,
+    context: 'assignment' | 'invocation'
+  ): CompiledValue | undefined {
+    let boxType = boxingTarget(this.builtins, value.type, to);
+    // An assignment also boxes a constant int that fits in the byte, short, or char that `Byte` and the like box.
+    const unboxedTarget = unboxedTypeOf(to);
+    if (
+      !boxType &&
+      context === 'assignment' &&
+      to.kind === 'class' &&
+      unboxedTarget &&
+      isNumeric(unboxedTarget) &&
+      typeof value.constant === 'number' &&
+      value.type.kind === 'int' &&
+      fitsIn(value.constant, unboxedTarget.kind)
+    ) {
+      boxType = to;
+    }
+    if (boxType) {
+      const { cls } = boxType;
+      const { run } = value;
+      return { kind: 'value', type: to, run: (frame) => box(frame, cls, run(frame)) };
+    }
+    const unboxed = this.unboxed(value);
+    if (unboxed && isPrimitive(to) && isWidening(unboxed.type, to, this.builtins.objectClass)) {
+      return this.convert(unboxed, to, context, { row: 0, endRow: 0, start: 0, end: 0 });
+    }
+    return;
+  }
+
+  /** Unboxes a wrapper value, throwing `NullPointerException` for null, or returns `undefined` for other values. */
+  protected unboxed(value: CompiledValue): CompiledValue | undefined {
+    const type = unboxedTypeOf(value.type);
+    if (!type) return;
+    const { run } = value;
+    return { kind: 'value', type, run: (frame) => unbox(frame, run(frame)) };
+  }
+
+  /** A value as an operator sees it: unboxed when it is a wrapper object. */
+  protected operand(value: CompiledValue): CompiledValue {
+    return this.unboxed(value) ?? value;
+  }
+
+  /** A primitive value boxed into its wrapper, as a conditional with a reference branch boxes the other. */
+  protected boxedValue(value: CompiledValue): CompiledValue {
+    const boxType = boxedTypeOf(this.builtins.wrappers, value.type);
+    if (!boxType) return value;
+    const { run } = value;
+    return { kind: 'value', type: boxType, run: (frame) => box(frame, boxType.cls, run(frame)) };
   }
 
   /**
@@ -421,7 +584,8 @@ export abstract class CompilerBase {
     const add = (owner: ClassInfo, includesStatic: boolean): void => {
       for (const method of owner.methods) {
         if (method.name !== name || (method.isStatic && !includesStatic)) continue;
-        if (!methods.some((other) => sameParameters(other, method))) methods.push(method);
+        const isHidden = methods.some((other) => sameParameters(other, method) || other.overrides?.has(method));
+        if (!isHidden) methods.push(method);
       }
     };
     for (const current of [cls, ...superclassesOf(cls)]) add(current, current.kind !== 'interface' || current === cls);
@@ -433,11 +597,18 @@ export abstract class CompilerBase {
   /** Picks the most specific applicable method, as Java's overload resolution does without boxing or varargs. */
   protected selectMethod(span: Span, candidates: MethodInfo[], argTypes: JavaType[], what: string): MethodInfo {
     const objectClass = this.builtins.objectClass;
-    const applicable = candidates.filter(
-      (method) =>
-        method.parameterTypes.length === argTypes.length &&
-        method.parameterTypes.every((type, index) => isWidening(argTypes[index], type, objectClass))
-    );
+    const instantiated = candidates.flatMap((method) => instantiateMethod(this.builtins, method, argTypes) ?? []);
+    // Java first looks for methods applicable without boxing, and boxes only when none is.
+    const applicableBy = (allowsBoxing: boolean): MethodInfo[] =>
+      instantiated.filter(
+        (method) =>
+          method.parameterTypes.length === argTypes.length &&
+          method.parameterTypes.every((type, index) =>
+            isInvocationConvertible(this.builtins, argTypes[index], type, allowsBoxing)
+          )
+      );
+    let applicable = applicableBy(false);
+    if (applicable.length === 0) applicable = applicableBy(true);
     if (applicable.length === 0) {
       const given = argTypes.map((type) => typeName(type)).join(', ');
       // This environment implements only part of the standard library, so the message states only what it allows.

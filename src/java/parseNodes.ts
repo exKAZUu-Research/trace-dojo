@@ -1,7 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
-import type { Modifiers, PrimitiveTypeName, Span, TypeSyntax } from './ast';
+import type { Modifiers, PrimitiveTypeName, Span, TypeParameter, TypeSyntax } from './ast';
 
 export function span(node: Node): Span {
   return {
@@ -121,18 +121,45 @@ export function convertType(node: Node): TypeSyntax {
         unsupported(node, `型「${node.text}」`);
       }
       const parts = node.text.split('.').map((part) => part.trim());
-      // `java.lang.String` and the like name the same classes as their simple names.
+      // `java.lang.String`, `java.util.List`, and the like name the same classes as their simple names.
       const qualifier = parts.slice(0, -1);
-      const isJavaLang = qualifier.join('.') === 'java.lang';
-      return { kind: 'named', name: parts.at(-1) ?? '', qualifier: isJavaLang ? [] : qualifier, ...span(node) };
+      const isPackage = /^java\.[a-z.]+$/.test(qualifier.join('.'));
+      return { kind: 'named', name: parts.at(-1) ?? '', qualifier: isPackage ? [] : qualifier, ...span(node) };
     }
     case 'generic_type': {
-      return unsupported(node, 'ジェネリクス');
+      const [base, argumentsNode] = namedChildren(node);
+      const type = convertType(base);
+      if (type.kind !== 'named') return unsupported(node, `型「${node.text}」`);
+      return { ...type, args: namedChildren(argumentsNode).map((arg) => convertTypeArgument(arg)), ...span(node) };
     }
     default: {
       return unsupported(node, `型「${node.text}」`);
     }
   }
+}
+
+function convertTypeArgument(node: Node): TypeSyntax {
+  if (node.type !== 'wildcard') return convertType(node);
+  const bound = namedChildren(node).find((child) => child.type !== 'super' && child.type !== 'extends');
+  return {
+    kind: 'wildcard',
+    bound: bound ? convertType(bound) : undefined,
+    isSuper: node.children.some((child) => child?.type === 'super'),
+    ...span(node),
+  };
+}
+
+export function convertTypeParameters(node: Node | null): TypeParameter[] {
+  if (!node) return [];
+  return namedChildren(node).map((parameter) => {
+    const [name, bound] = namedChildren(parameter);
+    if (name.type !== 'type_identifier') unsupported(parameter, '型パラメータへのアノテーション');
+    return {
+      name: name.text,
+      bounds: bound ? namedChildren(bound).map((type) => convertType(type)) : [],
+      ...span(parameter),
+    };
+  });
 }
 
 /** Converts a variable's declared type, including `[]` written after its name. */

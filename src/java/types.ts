@@ -13,7 +13,32 @@ export type NumericKind = 'byte' | 'short' | 'char' | 'int' | 'long' | 'float' |
 
 export type PrimitiveType = { kind: NumericKind } | { kind: 'boolean' } | { kind: 'void' } | { kind: 'null' };
 
-export type JavaType = PrimitiveType | { kind: 'class'; cls: ClassInfo } | { kind: 'array'; element: JavaType };
+/** A class type; `args` holds the type arguments of a parameterized type and is absent for a raw or plain one. */
+export interface ClassType {
+  kind: 'class';
+  cls: ClassInfo;
+  args?: JavaType[];
+}
+
+export interface TypeVariable {
+  name: string;
+  /** The upper bounds, the first of which decides the erasure. */
+  bounds: JavaType[];
+}
+
+/** A wildcard type argument: `?`, `? extends bound`, or `? super bound`. */
+export interface WildcardType {
+  kind: 'wildcard';
+  bound: JavaType | undefined;
+  isSuper: boolean;
+}
+
+export type JavaType =
+  | PrimitiveType
+  | ClassType
+  | { kind: 'array'; element: JavaType }
+  | { kind: 'typeVar'; variable: TypeVariable }
+  | WildcardType;
 
 export const BYTE: JavaType = { kind: 'byte' };
 export const SHORT: JavaType = { kind: 'short' };
@@ -63,6 +88,12 @@ export interface MethodInfo {
   /** Whether a trace shows a call to this method as part of its caller's step, marked by `// atomic`. */
   isAtomic?: boolean;
   native?: NativeMethod;
+  /** The type parameters of a generic method, such as `T` of `<T> T first(T[] a)`. */
+  typeParameters?: TypeVariable[];
+  /** The methods of supertypes that this one overrides, directly or indirectly. */
+  overrides?: Set<MethodInfo>;
+  /** For a view of a method with its receiver's type arguments substituted, the declared method. */
+  declared?: MethodInfo;
   /** Filled in by the compiler for source methods. */
   code?: CompiledCode;
 }
@@ -94,10 +125,16 @@ export interface ClassInfo {
   isAbstract: boolean;
   isFinal: boolean;
   isBuiltin: boolean;
+  /** The primitive type a wrapper class such as `Integer` boxes. */
+  unboxedType?: JavaType;
   declaration?: ClassDeclaration;
   fields: Map<string, FieldInfo>;
   methods: MethodInfo[];
   constructors: MethodInfo[];
+  /** The type parameters of a generic class, such as `T` of `Box<T>`. */
+  typeParameters: TypeVariable[];
+  /** The superclass and interfaces as written, with type arguments in terms of this class's type parameters. */
+  supertypes: ClassType[];
   /** Instance slots including those of superclasses. */
   instanceFieldCount: number;
   staticFieldCount: number;
@@ -116,6 +153,8 @@ export function createClass(name: string, superclass: ClassInfo | undefined, isB
     kind: 'class',
     superclass,
     interfaces: [],
+    typeParameters: [],
+    supertypes: superclass ? [superclass.type as ClassType] : [],
     enclosing: undefined,
     memberTypes: new Map(),
     isAbstract: false,
@@ -132,6 +171,12 @@ export function createClass(name: string, superclass: ClassInfo | undefined, isB
   };
   cls.type = { kind: 'class', cls };
   return cls;
+}
+
+/** The type of `this` in `cls`'s body: the class parameterized by its own type parameters. */
+export function thisTypeOf(cls: ClassInfo): ClassType {
+  if (cls.typeParameters.length === 0) return cls.type as ClassType;
+  return { kind: 'class', cls, args: cls.typeParameters.map((variable) => ({ kind: 'typeVar', variable })) };
 }
 
 /** Whether `cls` is `ancestor` or extends or implements it, directly or indirectly. */
@@ -159,11 +204,11 @@ export function superinterfacesOf(cls: ClassInfo): ClassInfo[] {
 }
 
 export function isPrimitive(type: JavaType): boolean {
-  return type.kind !== 'class' && type.kind !== 'array' && type.kind !== 'null';
+  return !isReference(type) && type.kind !== 'void';
 }
 
 export function isReference(type: JavaType): boolean {
-  return type.kind === 'class' || type.kind === 'array' || type.kind === 'null';
+  return ['class', 'array', 'null', 'typeVar', 'wildcard'].includes(type.kind);
 }
 
 /** The numeric kinds in the order of widening: each widens to every kind after it, except `char` to `short`. */
@@ -197,15 +242,136 @@ export function promoteBinary(a: { kind: NumericKind }, b: { kind: NumericKind }
 
 export function sameType(a: JavaType, b: JavaType): boolean {
   if (a.kind !== b.kind) return false;
-  if (a.kind === 'class') return a.cls === (b as typeof a).cls;
-  if (a.kind === 'array') return sameType(a.element, (b as typeof a).element);
-  return true;
+  switch (a.kind) {
+    case 'class': {
+      const other = b as ClassType;
+      if (a.cls !== other.cls) return false;
+      if (!a.args || !other.args) return !a.args && !other.args;
+      return (
+        a.args.length === other.args.length &&
+        a.args.every((arg, index) => sameType(arg, (other.args as JavaType[])[index]))
+      );
+    }
+    case 'array': {
+      return sameType(a.element, (b as typeof a).element);
+    }
+    case 'typeVar': {
+      return a.variable === (b as typeof a).variable;
+    }
+    case 'wildcard': {
+      const other = b as WildcardType;
+      if (a.isSuper !== other.isSuper || (a.bound === undefined) !== (other.bound === undefined)) return false;
+      return !a.bound || sameType(a.bound, other.bound as JavaType);
+    }
+    default: {
+      return true;
+    }
+  }
+}
+
+/** Whether two types erase to the same type, as overriding and overloading compare signatures. */
+export function sameErasure(a: JavaType, b: JavaType): boolean {
+  return sameType(erasure(a), erasure(b));
+}
+
+/** The type with its type arguments removed and type variables replaced by their first bounds' erasures. */
+export function erasure(type: JavaType): JavaType {
+  switch (type.kind) {
+    case 'class': {
+      return type.args ? type.cls.type : type;
+    }
+    case 'array': {
+      return { kind: 'array', element: erasure(type.element) };
+    }
+    case 'typeVar': {
+      return erasure(type.variable.bounds[0]);
+    }
+    case 'wildcard': {
+      return type.bound && !type.isSuper ? erasure(type.bound) : (OBJECT_TYPE.value as JavaType);
+    }
+    default: {
+      return type;
+    }
+  }
+}
+
+/** The type `Object`, which the builtins set once they define it. */
+export const OBJECT_TYPE: { value: JavaType | undefined } = { value: undefined };
+
+/** The upper bound that reading a value of `type` gives: a wildcard's or a type variable's bound. */
+export function upperBound(type: JavaType): JavaType {
+  if (type.kind === 'wildcard')
+    return type.bound && !type.isSuper ? upperBound(type.bound) : (OBJECT_TYPE.value as JavaType);
+  if (type.kind === 'typeVar') return upperBound(type.variable.bounds[0]);
+  return type;
+}
+
+/** Replaces type variables by the types `bindings` gives them; a variable without one makes its class type raw. */
+export function substitute(type: JavaType, bindings: ReadonlyMap<TypeVariable, JavaType>): JavaType {
+  if (bindings.size === 0) return type;
+  switch (type.kind) {
+    case 'class': {
+      if (!type.args) return type;
+      const args = type.args.map((arg) => substitute(arg, bindings));
+      return { kind: 'class', cls: type.cls, args };
+    }
+    case 'array': {
+      return { kind: 'array', element: substitute(type.element, bindings) };
+    }
+    case 'typeVar': {
+      return bindings.get(type.variable) ?? type;
+    }
+    case 'wildcard': {
+      return type.bound ? { ...type, bound: substitute(type.bound, bindings) } : type;
+    }
+    default: {
+      return type;
+    }
+  }
+}
+
+/** The bindings of `cls`'s type parameters that the class type `type` gives; a raw type erases them. */
+export function bindingsOf(type: ClassType): Map<TypeVariable, JavaType> {
+  const { typeParameters } = type.cls;
+  const bindings = new Map<TypeVariable, JavaType>();
+  for (const [index, variable] of typeParameters.entries()) {
+    bindings.set(variable, type.args?.[index] ?? erasure({ kind: 'typeVar', variable }));
+  }
+  return bindings;
+}
+
+/** The supertype of `type` that is a type of `target`, with its type arguments, or `undefined` if none is. */
+export function asSuper(type: ClassType, target: ClassInfo): ClassType | undefined {
+  if (type.cls === target) return type;
+  // A raw type's supertypes are raw too.
+  const isRaw = !type.args && type.cls.typeParameters.length > 0;
+  const bindings = isRaw ? undefined : bindingsOf(type);
+  for (const supertype of type.cls.supertypes) {
+    const viewed = bindings ? (substitute(supertype, bindings) as ClassType) : (supertype.cls.type as ClassType);
+    const found = asSuper(viewed, target);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/** Whether a type argument `argument` lies within `parameter`, which may be a wildcard. */
+function containsTypeArgument(parameter: JavaType, argument: JavaType, objectClass: ClassInfo): boolean {
+  if (parameter.kind !== 'wildcard') return sameType(parameter, argument);
+  if (!parameter.bound) return true;
+  if (parameter.isSuper) return argument.kind !== 'wildcard' && isWidening(parameter.bound, argument, objectClass);
+  return isWidening(upperBound(argument), parameter.bound, objectClass);
 }
 
 export function typeName(type: JavaType): string {
   switch (type.kind) {
     case 'class': {
-      return type.cls.name;
+      return type.args ? `${type.cls.name}<${type.args.map((arg) => typeName(arg)).join(',')}>` : type.cls.name;
+    }
+    case 'typeVar': {
+      return type.variable.name;
+    }
+    case 'wildcard': {
+      return type.bound ? `? ${type.isSuper ? 'super' : 'extends'} ${typeName(type.bound)}` : '?';
     }
     case 'array': {
       return `${typeName(type.element)}[]`;
@@ -224,8 +390,24 @@ export function isWidening(from: JavaType, to: JavaType, objectClass: ClassInfo)
   if (sameType(from, to)) return true;
   if (isNumeric(from)) return isNumeric(to) && isNumericWidening(from.kind, to.kind);
   if (from.kind === 'null') return isReference(to);
+  if (from.kind === 'typeVar' || from.kind === 'wildcard') {
+    return from.kind === 'typeVar'
+      ? from.variable.bounds.some((bound) => isWidening(bound, to, objectClass))
+      : isWidening(upperBound(from), to, objectClass);
+  }
   if (to.kind !== 'class' && to.kind !== 'array') return false;
-  if (from.kind === 'class') return to.kind === 'class' && (to.cls === objectClass || isSubclass(from.cls, to.cls));
+  if (from.kind === 'class') {
+    if (to.kind !== 'class') return false;
+    if (to.cls === objectClass) return true;
+    const supertype = asSuper(from, to.cls);
+    if (!supertype) return false;
+    // Raw types convert to and from parameterized ones, as an unchecked conversion.
+    if (!supertype.args || !to.args) return true;
+    return (
+      supertype.args.length === to.args.length &&
+      to.args.every((arg, index) => containsTypeArgument(arg, (supertype.args as JavaType[])[index], objectClass))
+    );
+  }
   if (from.kind === 'array') {
     if (to.kind === 'class') return to.cls === objectClass;
     if (isPrimitive(from.element) || isPrimitive(to.element)) return sameType(from.element, to.element);
@@ -235,7 +417,10 @@ export function isWidening(from: JavaType, to: JavaType, objectClass: ClassInfo)
 }
 
 /** Whether a cast from `from` to `to` may succeed, as javac decides at compile time. */
-export function isCastable(from: JavaType, to: JavaType, objectClass: ClassInfo): boolean {
+export function isCastable(fromType: JavaType, toType: JavaType, objectClass: ClassInfo): boolean {
+  // Casts check only what survives erasure.
+  const from = erasure(fromType);
+  const to = erasure(toType);
   if (isNumeric(from) && isNumeric(to)) return true;
   if (from.kind === 'boolean' || to.kind === 'boolean') return from.kind === to.kind;
   if (isPrimitive(from) || isPrimitive(to)) return false;
