@@ -23,7 +23,16 @@ import { bindingsWhen } from './patternBindings';
 import { canCompleteNormally, containsJump } from './reachability';
 import { type Frame, JavaThrow, throwBuiltin, UNASSIGNED } from './runtime';
 import { isObjectCreation, onlyCalls } from './stepRules';
-import { asSuper, isPrimitive, isReference, isSubclass, type JavaType, typeName, upperBound } from './types';
+import {
+  asSuper,
+  isPrimitive,
+  isReference,
+  isSubclass,
+  type JavaType,
+  typeName,
+  upperBound,
+  wildcardBound,
+} from './types';
 import { JavaArray, JavaObject, type Value } from './values';
 
 const BREAK: BreakCompletion = { kind: 'break', label: undefined };
@@ -528,7 +537,7 @@ export abstract class StatementCompiler extends InvocationCompiler {
     if (!iterableType) return this.error(span, '拡張 for 文では配列か、List などの Iterable しか使えません。');
     const elementArg = iterableType.args?.[0];
     if (!elementArg) return this.builtins.objectClass.type;
-    return elementArg.kind === 'wildcard' ? upperBound(elementArg) : elementArg;
+    return wildcardBound(elementArg);
   }
 
   protected isAnswered(type: JavaType): boolean {

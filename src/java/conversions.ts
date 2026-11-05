@@ -15,6 +15,7 @@ import {
   substitute,
   type TypeVariable,
   upperBound,
+  wildcardBound,
 } from './types';
 
 /** The primitive type that unboxing a value of `type` gives, if `type` is a wrapper class such as `Integer`. */
@@ -62,7 +63,7 @@ export function memberBindings(receiverType: JavaType | undefined, owner: ClassI
 /** The type of a member as seen through a receiver, where reading a wildcard gives its upper bound. */
 export function memberType(type: JavaType, bindings: ReadonlyMap<TypeVariable, JavaType>): JavaType {
   const substituted = substitute(type, bindings);
-  return substituted.kind === 'wildcard' ? upperBound(substituted) : substituted;
+  return wildcardBound(substituted);
 }
 
 /** A view of `method` with the type arguments of `bindings` substituted into its signature. */
@@ -108,7 +109,17 @@ export function instantiateMethod(
   if (targetType && !isPrimitive(targetType)) {
     const fromTarget = new Map<TypeVariable, JavaType>();
     infer(builtins, method.returnType, targetType, variables, fromTarget);
-    for (const [variable, type] of fromTarget) if (!bindings.has(variable)) bindings.set(variable, type);
+    for (const [variable, type] of fromTarget) {
+      const existing = bindings.get(variable);
+      // Within a type argument, which admits no widening, the target's type wins over the narrower one of the arguments,
+      // as in `List<Shape> l = List.of(new Square());`.
+      const widensToTarget =
+        existing !== undefined &&
+        type.kind !== 'wildcard' &&
+        occursInTypeArgument(method.returnType, variable) &&
+        isWidening(existing, type, builtins.objectClass);
+      if (!existing || widensToTarget) bindings.set(variable, type);
+    }
   }
   // An inferred type outside its variable's bounds makes the method inapplicable.
   for (const [variable, type] of bindings) {
@@ -125,6 +136,33 @@ export function instantiateMethod(
     typeParameters: [],
     declared: method.declared ?? method,
   };
+}
+
+/** Whether `variable` occurs inside a type argument of `type`, such as `T` in `List<T>`. */
+function occursInTypeArgument(type: JavaType, variable: TypeVariable): boolean {
+  if (type.kind === 'array') return occursInTypeArgument(type.element, variable);
+  if (type.kind !== 'class') return false;
+  return (type.args ?? []).some((arg) => mentions(arg, variable));
+}
+
+function mentions(type: JavaType, variable: TypeVariable): boolean {
+  switch (type.kind) {
+    case 'typeVar': {
+      return type.variable === variable;
+    }
+    case 'wildcard': {
+      return type.bound !== undefined && mentions(type.bound, variable);
+    }
+    case 'array': {
+      return mentions(type.element, variable);
+    }
+    case 'class': {
+      return (type.args ?? []).some((arg) => mentions(arg, variable));
+    }
+    default: {
+      return false;
+    }
+  }
 }
 
 /** Infers the types of `variables` that make an argument of `argType` fit a parameter of `parameterType`. */

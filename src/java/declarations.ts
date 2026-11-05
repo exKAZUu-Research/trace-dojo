@@ -502,7 +502,8 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
       const bindings = supertype ? bindingsOf(supertype) : new Map();
       for (const overridden of ancestor.methods) {
         if (overridden.name !== method.name || overridden.access === 'private' || overridden.isConstructor) continue;
-        const parameterTypes = overridden.parameterTypes.map((type) => substitute(type, bindings));
+        const methodBindings = withMethodTypeParameters(bindings, overridden, method);
+        const parameterTypes = overridden.parameterTypes.map((type) => substitute(type, methodBindings));
         const isSubsignature =
           parameterTypes.length === method.parameterTypes.length &&
           (parameterTypes.every((type, index) => sameType(type, method.parameterTypes[index])) ||
@@ -510,7 +511,13 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
         if (!isSubsignature) continue;
         // An interface's static methods belong to the interface alone.
         if (ancestor.kind === 'interface' && overridden.isStatic) continue;
-        this.checkOverriding(method, overridden, substitute(overridden.returnType, bindings), ancestor, declaration);
+        this.checkOverriding(
+          method,
+          overridden,
+          substitute(overridden.returnType, methodBindings),
+          ancestor,
+          declaration
+        );
         method.overrides.add(overridden);
         for (const indirect of overridden.overrides ?? []) method.overrides.add(indirect);
       }
@@ -614,4 +621,18 @@ function typeVariablesInScope(cls: ClassInfo): TypeVariable[] {
 
 export function accessRank(access: string): number {
   return { private: 0, package: 1, protected: 2, public: 3 }[access] ?? 0;
+}
+
+/** `bindings` extended to rename the type parameters of the generic method `overridden` to those of `method` (JLS 8.4.4). */
+function withMethodTypeParameters(
+  bindings: Map<TypeVariable, JavaType>,
+  overridden: MethodInfo,
+  method: MethodInfo
+): Map<TypeVariable, JavaType> {
+  const from = overridden.typeParameters ?? [];
+  const to = method.typeParameters ?? [];
+  if (from.length === 0 || from.length !== to.length) return bindings;
+  const extended = new Map(bindings);
+  for (const [index, variable] of from.entries()) extended.set(variable, { kind: 'typeVar', variable: to[index] });
+  return extended;
 }

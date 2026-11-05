@@ -18,6 +18,7 @@ import {
   typeName,
   type TypeVariable,
   upperBound,
+  wildcardBound,
 } from './types';
 
 /** The functional interface a lambda implements and the signature its body must have. */
@@ -54,7 +55,7 @@ export abstract class LambdaCompiler extends PatternCompiler {
     return {
       iface: bound.cls,
       // A parameter of a wildcard type such as `? extends T` takes values of its bound.
-      parameterTypes: view.parameterTypes.map((type) => (type.kind === 'wildcard' ? upperBound(type) : type)),
+      parameterTypes: view.parameterTypes.map((type) => wildcardBound(type)),
       returnType: view.returnType,
       method,
     };

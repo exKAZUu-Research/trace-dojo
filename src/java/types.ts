@@ -331,6 +331,12 @@ export function upperBound(type: JavaType): JavaType {
   return type;
 }
 
+/** The type reading a value of `type` gives: a wildcard's own bound, keeping a type variable it names. */
+export function wildcardBound(type: JavaType): JavaType {
+  if (type.kind !== 'wildcard') return type;
+  return type.bound && !type.isSuper ? wildcardBound(type.bound) : (OBJECT_TYPE.value as JavaType);
+}
+
 /** Replaces type variables by the types `bindings` gives them, leaving those without one. */
 // code-gauge-allow duplicateLines 16 -- Erasure and substitution each map every kind of type, which reads alike.
 export function substitute(type: JavaType, bindings: ReadonlyMap<TypeVariable, JavaType>): JavaType {
@@ -387,7 +393,7 @@ function containsTypeArgument(parameter: JavaType, argument: JavaType, objectCla
   if (parameter.kind !== 'wildcard') return sameType(parameter, argument);
   if (!parameter.bound) return true;
   if (parameter.isSuper) return argument.kind !== 'wildcard' && isWidening(parameter.bound, argument, objectClass);
-  return isWidening(upperBound(argument), parameter.bound, objectClass);
+  return isWidening(wildcardBound(argument), parameter.bound, objectClass);
 }
 
 export function typeName(type: JavaType): string {
