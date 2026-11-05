@@ -204,6 +204,12 @@ export const fixedSizeClasses = new WeakSet<ClassInfo>();
  */
 export const defaultRemoveClasses = new WeakSet<ClassInfo>();
 
+/**
+ * The lists whose `removeIf` tests every element before removing any, as ArrayList's and Vector's do; the others
+ * remove each match through their iterator, as Collection's default does.
+ */
+export const batchRemovalClasses = new WeakSet<ClassInfo>();
+
 /** The `Collections.unmodifiableSet` and `unmodifiableMap` wrappers, whose iterators reject removal without a message. */
 export const unmodifiableWrappers = new WeakSet<JavaObject>();
 

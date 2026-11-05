@@ -1,23 +1,30 @@
 import { removeEntry } from './builtinCollections';
 import {
+  batchRemovalClasses,
   checkModifiable,
+  defaultRemoveClasses,
   itemsOf,
   type MapViewSource,
   mapViewSources,
   removeElements,
 } from './builtinCollectionSupport';
 import { type Frame, throwBuiltin } from './runtime';
+import { type ClassInfo } from './types';
 import { type JavaObject, type Value } from './values';
 
 /**
- * `removeIf`, which fails with `ConcurrentModificationException` when the predicate changes the collection: a list
- * tests every position it had and then removes none, as ArrayList's does, and other collections remove each match through their iterator
- * as they go and fail at the next element or removal, as Collection's default does.
+ * `removeIf`, which fails with `ConcurrentModificationException` when the predicate changes the collection: an
+ * ArrayList tests every position it had and then removes none, and other collections remove each match through their
+ * iterator as they go and fail at the next element or removal, as Collection's default does.
  */
 export function removeMatching(frame: Frame, receiver: Value, matches: (item: Value) => boolean): boolean {
   const collection = receiver as JavaObject;
   const elements = Object.getOwnPropertyDescriptor(collection, 'elements')?.value as unknown;
-  if (Array.isArray(elements)) return removeMatchingPositions(frame, collection, elements as Value[], matches);
+  if (Array.isArray(elements)) {
+    return removesInBatch(collection.cls)
+      ? removeMatchingPositions(frame, collection, elements as Value[], matches)
+      : removeThroughListIterator(frame, collection, elements as Value[], matches);
+  }
   const view = mapViewSources.get(collection);
   if (view) return removeFromView(frame, collection, view, matches);
   const items = [...itemsOf(frame, receiver)];
@@ -54,6 +61,42 @@ function removeMatchingPositions(
   if (!picked.includes(true)) return false;
   checkModifiable(frame, collection, true);
   return removeElements(frame, collection, (_, index) => picked[index] === true);
+}
+
+function removesInBatch(cls: ClassInfo): boolean {
+  for (let current: ClassInfo | undefined = cls; current; current = current.superclass) {
+    if (batchRemovalClasses.has(current)) return true;
+  }
+  return false;
+}
+
+/**
+ * `removeIf` through a list's iterator, which removes each match at its position as it reaches it, so that a
+ * predicate that throws leaves the earlier matches removed, as for a LinkedList or `Arrays.asList`'s list.
+ */
+function removeThroughListIterator(
+  frame: Frame,
+  collection: JavaObject,
+  elements: Value[],
+  matches: (item: Value) => boolean
+): boolean {
+  let expectedModCount = collection.modCount;
+  let isRemoved = false;
+  for (let index = 0; index < elements.length;) {
+    if (collection.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
+    if (!matches(elements[index])) {
+      index++;
+      continue;
+    }
+    if (collection.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
+    if (defaultRemoveClasses.has(collection.cls)) throwBuiltin(frame, 'UnsupportedOperationException', 'remove');
+    checkModifiable(frame, collection, true);
+    const position = index;
+    removeElements(frame, collection, (_, candidate) => candidate === position);
+    expectedModCount = collection.modCount;
+    isRemoved = true;
+  }
+  return isRemoved;
 }
 
 /** `removeIf` on a map's view, which reads the entries once and removes each matching one from the map as it goes. */

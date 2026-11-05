@@ -771,6 +771,7 @@ function defineMapRemappings(mapClass: ClassInfo, functions: DefaultFunctions, m
     if (current === undefined) return;
     return putComputed(frame, receiver, key, callFunction(frame, functions.biFunction, remapping, [key, current]));
   });
+  defineMapReplaceAll(mapClass, functions, mapK, mapV);
   const objectType = mapClass.typeParameters[0].bounds[0] as JavaType;
   addMethod(mapClass, 'remove', [objectType, objectType], BOOLEAN, false, (frame, receiver, [key, value]) => {
     checkModifiable(frame, receiver, false);
@@ -786,6 +787,31 @@ function defineMapRemappings(mapClass: ClassInfo, functions: DefaultFunctions, m
     const previous = entry.value;
     entry.value = value;
     return previous;
+  });
+}
+
+/**
+ * `Map.replaceAll`, which replaces each value, in iteration order, by what the function gives for its entry; a change
+ * the function makes to the map fails with `ConcurrentModificationException`, after each entry for a sorted map and
+ * after the last one for a hash map, as the JDK's do.
+ */
+function defineMapReplaceAll(mapClass: ClassInfo, functions: DefaultFunctions, mapK: JavaType, mapV: JavaType): void {
+  const functionType = classType(functions.biFunction, superOf(mapK), superOf(mapV), extendsOf(mapV));
+  addMethod(mapClass, 'replaceAll', [functionType], VOID, false, (frame, receiver, [fn]) => {
+    if (fn === undefined) throwBuiltin(frame, 'NullPointerException');
+    checkModifiable(frame, receiver, false);
+    const map = receiver as JavaObject;
+    const store = map.store;
+    if (!store) return throwBuiltin(frame, 'UnsupportedOperationException');
+    const expectedModCount = map.modCount;
+    const check = (): void => {
+      if (map.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
+    };
+    for (const entry of store.ordered()) {
+      entry.value = callFunction(frame, functions.biFunction, fn, [entry.key, entry.value]);
+      if (store.compare) check();
+    }
+    check();
   });
 }
 

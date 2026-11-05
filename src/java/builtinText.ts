@@ -1,4 +1,5 @@
 import type { Collections } from './builtinCollections';
+import { defineLocale } from './builtinLocale';
 import { stringify } from './builtins';
 import { addConstructor, addMethod, newString, type Registry, requireString, text } from './builtinSupport';
 import { JAVA_WHITESPACE } from './builtinWrappers';
@@ -63,6 +64,7 @@ export function defineText(
     );
     method.isVarargs = true;
   }
+  defineLocale(registry, objectClass, stringClass, printStreamClass);
 }
 
 /** What a `StringJoiner` holds: its delimiter, prefix, and suffix, the parts added, and the text when it is empty. */

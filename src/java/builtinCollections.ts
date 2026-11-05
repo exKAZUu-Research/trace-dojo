@@ -1,5 +1,6 @@
 import type { Context } from './builtinCollectionSupport';
 import {
+  batchRemovalClasses,
   checkIndex,
   checkPosition,
   classType,
@@ -104,11 +105,7 @@ export function defineCollections(
 
   const lists = { listClass, collectionClass, itrClass, listItrClass };
   const dequeClass = defineDequeInterfaces(context, collectionClass);
-  defineArrayList(context, 'ArrayList', lists);
-  defineStack(defineArrayList(context, 'Stack', lists));
-  const linkedList = defineArrayList(context, 'LinkedList', lists);
-  addInterface(linkedList, classType(dequeClass, { kind: 'typeVar', variable: linkedList.typeParameters[0] }));
-  linkOverrides(linkedList);
+  defineListClasses(context, lists, dequeClass);
   defineArrayDeque(context, lists, dequeClass);
   const priorityQueue = definePriorityQueue(context, lists, registry.classes.get('Queue') as ClassInfo);
   const immutableList = defineRestrictedList(context, 'ListN', lists, () => true);
@@ -148,6 +145,22 @@ export function defineCollections(
       priorityQueue,
     ],
   };
+}
+
+/** `ArrayList`, `Stack`, and `LinkedList`, which hold their elements in an array. */
+function defineListClasses(
+  context: Context,
+  lists: { listClass: ClassInfo; collectionClass: ClassInfo; itrClass: ClassInfo; listItrClass: ClassInfo },
+  dequeClass: ClassInfo
+): void {
+  const arrayList = defineArrayList(context, 'ArrayList', lists);
+  const stack = defineArrayList(context, 'Stack', lists);
+  defineStack(stack);
+  batchRemovalClasses.add(arrayList);
+  batchRemovalClasses.add(stack);
+  const linkedList = defineArrayList(context, 'LinkedList', lists);
+  addInterface(linkedList, classType(dequeClass, { kind: 'typeVar', variable: linkedList.typeParameters[0] }));
+  linkOverrides(linkedList);
 }
 
 const DEQUE_INSERTIONS = ['addFirst', 'addLast', 'offerFirst', 'offerLast', 'push'] as const;
