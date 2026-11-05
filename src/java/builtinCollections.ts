@@ -18,6 +18,7 @@ import {
   INT,
   type JavaType,
   type MethodInfo,
+  sameErasure,
   superinterfacesOf,
   VOID,
 } from './types';
@@ -257,13 +258,16 @@ function createIterator(
   return iterator;
 }
 
-/** Marks each native method as implementing the interface methods of the same name and arity it stands for. */
+/** Marks each native method as implementing the interface methods of the same name and erased signature. */
 function linkOverrides(cls: ClassInfo): void {
   const inherited = superinterfacesOf(cls).flatMap((parent) => parent.methods);
   for (const method of cls.methods) {
     if (method.isStatic) continue;
     const overridden = inherited.filter(
-      (other) => other.name === method.name && other.parameterTypes.length === method.parameterTypes.length
+      (other) =>
+        other.name === method.name &&
+        other.parameterTypes.length === method.parameterTypes.length &&
+        other.parameterTypes.every((type, index) => sameErasure(type, method.parameterTypes[index]))
     );
     if (overridden.length > 0) method.overrides = new Set(overridden);
   }

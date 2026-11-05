@@ -287,6 +287,7 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
   const errorClass = defineThrowable('Error', throwableClass);
   for (const name of [
     'ArithmeticException',
+    'ArrayStoreException',
     'ClassCastException',
     'IllegalArgumentException',
     'IllegalStateException',

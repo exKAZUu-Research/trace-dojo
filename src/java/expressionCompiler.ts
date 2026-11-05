@@ -587,6 +587,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return {
           get: () => values.values[position],
           set: (value) => {
+            // An array of a subclass type, assigned to a variable of a superclass array type, still checks its stores.
+            if (isReference(values.elementType) && !fitsElement(frame, values.elementType, value)) {
+              const actual = value instanceof JavaObject ? value.cls.binaryName : 'java.lang.String';
+              throwBuiltin(frame, 'ArrayStoreException', actual);
+            }
             values.values[position] = value;
           },
         };
@@ -1393,6 +1398,19 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.error(expression, `抽象メソッド ${name} は super から呼び出せません。`);
     }
   }
+}
+
+/** Whether an array whose elements have the runtime type `elementType` may store `value`. */
+function fitsElement(frame: Frame, elementType: JavaType, value: Value): boolean {
+  if (value === undefined) return true;
+  if (elementType.kind === 'class') return frame.runtime.isInstance(value, elementType.cls);
+  if (elementType.kind === 'array') {
+    return (
+      value instanceof JavaArray &&
+      isWidening({ kind: 'array', element: value.elementType }, elementType, frame.runtime.builtins.objectClass)
+    );
+  }
+  return true;
 }
 
 /** The text a constant contributes to a string concatenation. */
