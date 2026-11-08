@@ -144,7 +144,8 @@ export const JavaSyntaxHints: React.FC<RendererProps> = ({ rows, stylesheet, use
         // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- Native buttons prevent selecting code text across targets.
         role="button"
         aria-label={`${hint.text} の説明`}
-        tabIndex={state.active === hint.index ? 0 : -1}
+        // Chromium starts no drag selection on an inline element that the press focuses.
+        tabIndex={state.selecting ? undefined : state.active === hint.index ? 0 : -1}
         onPointerEnter={(event: ReactPointerEvent<HTMLSpanElement>) => {
           if (event.buttons === 0) show(hint.index);
         }}
