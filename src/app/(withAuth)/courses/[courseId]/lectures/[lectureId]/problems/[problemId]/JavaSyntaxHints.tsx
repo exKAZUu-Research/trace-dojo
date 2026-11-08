@@ -169,6 +169,7 @@ export const JavaSyntaxHints: React.FC<RendererProps> = ({ rows, stylesheet, use
           toggle(hint.index);
         }}
         onKeyDown={(event: KeyboardEvent<HTMLSpanElement>) => {
+          if (event.altKey || event.ctrlKey || event.metaKey) return;
           const next =
             event.key === 'ArrowRight'
               ? (hint.index + 1) % hints.size

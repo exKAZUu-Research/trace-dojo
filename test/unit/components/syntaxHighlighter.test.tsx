@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { ChakraProvider } from '@chakra-ui/react';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { expect, test } from 'vitest';
@@ -154,6 +154,11 @@ test('uses one keyboard stop, navigates hints, dismisses without moving focus, a
   const tooltip = await screen.findByRole('tooltip');
   expect(hints[0]).toHaveAttribute('aria-describedby', tooltip.id);
   expect(hints[0]).toHaveAccessibleDescription(/整数[\s\S]*書き方\s*int[\s\S]*例\s*int\s*個数\s*=\s*3\s*;[\s\S]*個数/);
+  for (const shortcut of ['{Alt>}{ArrowRight}{/Alt}', '{Meta>}{ArrowRight}{/Meta}', '{Control>}{End}{/Control}']) {
+    await user.keyboard(shortcut);
+    expect(hints[0]).toHaveFocus();
+  }
+  expect(fireEvent.keyDown(hints[0], { key: 'ArrowLeft', altKey: true })).toBe(true);
   await user.keyboard('{ArrowRight}');
   expect(hints[1]).toHaveFocus();
   await user.keyboard('{ArrowLeft}');
