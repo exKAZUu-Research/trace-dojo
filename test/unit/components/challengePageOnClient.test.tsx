@@ -44,7 +44,7 @@ import { AuthContextProvider } from '../../../src/contexts/AuthContext';
 const blankDisplay = {
   problemFormat: 'fillInBlank' as const,
   sessionId: 23,
-  problemId: 'fillInBlank2',
+  problemId: 'test2',
   displayProgram: 'class Main { public static void main(String[] args) { int x = 【1】; } }',
   finalBoard: '.......\n.......\n.......\n.......\n.......\n.......\n.......',
   finalTurtles: [],
@@ -427,7 +427,7 @@ test('a deferred result from before close does not replace the exercise started 
   let resolve!: (display: typeof blankDisplay) => void;
   transport.start
     .mockReturnValueOnce(new Promise((_resolve) => (resolve = _resolve)))
-    .mockResolvedValueOnce({ ...blankDisplay, sessionId: 99, problemId: 'fillInBlank3' });
+    .mockResolvedValueOnce({ ...blankDisplay, sessionId: 99, problemId: 'test3' });
   const user = userEvent.setup();
   const rendered = renderPage();
   await user.click(screen.getByRole('button', { name: /穴埋め問題/ }));
@@ -435,9 +435,9 @@ test('a deferred result from before close does not replace the exercise started 
   expect(transport.end).not.toHaveBeenCalled();
   expect(navigation.push).toHaveBeenCalledWith('/courses/test/lectures/8d692b48-8c19-4679-8d8f-3f27a051d44d');
   rendered.rerender(page('fillInBlank'));
-  expect(await screen.findByRole('heading', { level: 1, name: '穴埋めのテスト用問題(3)' })).toBeVisible();
+  expect(await screen.findByRole('heading', { level: 1, name: 'ステップ実行のテスト用問題(3)' })).toBeVisible();
   await act(async () => resolve(blankDisplay));
-  expect(screen.getByRole('heading', { level: 1, name: '穴埋めのテスト用問題(3)' })).toBeVisible();
+  expect(screen.getByRole('heading', { level: 1, name: 'ステップ実行のテスト用問題(3)' })).toBeVisible();
   expect(transport.start).toHaveBeenCalledTimes(2);
 });
 
