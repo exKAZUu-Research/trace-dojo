@@ -95,3 +95,12 @@ test('shows recovery feedback inside the modal while preserving both choices', a
   expect(screen.getByRole('button', { name: /通常問題/ })).toBeEnabled();
   expect(screen.getByRole('button', { name: /穴埋め問題/ })).toBeEnabled();
 });
+
+test('bug repair can be selected from the lecture', async () => {
+  navigation.push.mockReset();
+  const user = userEvent.setup();
+  renderInChakra(<Lecture lectureIndex={0} problemSessions={[]} />);
+  await user.click(screen.getByRole('button', { name: 'チャレンジモード（任意）' }));
+  await user.click(screen.getByRole('button', { name: /バグ修正/ }));
+  expect(navigation.push).toHaveBeenCalledWith('/courses/test/lectures/lecture-1/challenge?format=bugFix');
+});

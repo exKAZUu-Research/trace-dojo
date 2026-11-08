@@ -1,0 +1,39 @@
+import type { Node } from '@willbooster/web-tree-sitter';
+
+import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../interpreter/traceAnnotations';
+import { loadParser, parseSource } from '../interpreter/treeSitter';
+import type { Program } from './ast';
+import { ProgramConverter } from './programConverter';
+
+// The Script goal matches how learners' files run: no `import`, and `await` is an ordinary name.
+const parser = await loadParser('@willbooster/tree-sitter-javascript/tree-sitter-javascript_script.wasm');
+
+/**
+ * Parses a script, throwing a `CompileError` for invalid or unsupported syntax.
+ *
+ * @param trace Makes the statements that record steps report their rows, for a model program.
+ */
+export function parseJavaScript(source: string, trace?: TraceOptions): Program {
+  return parseSource(parser, source, { identifier: '名前' }, (root) =>
+    new ProgramConverter(source, trace).convert(root)
+  );
+}
+
+/** The `// atomic` annotations of a script, read from its comment tokens. */
+export function findJavaScriptTraceAnnotations(source: string): TraceAnnotation[] {
+  const tree = parser.parse(source);
+  if (!tree) throw new Error('The JavaScript parser returned no tree');
+  try {
+    const comments: TraceAnnotation[] = [];
+    const visit = (node: Node): void => {
+      if (node.type === 'comment' && node.text.startsWith('//')) {
+        comments.push({ index: node.startIndex, text: node.text });
+      }
+      for (const child of node.children) if (child) visit(child);
+    };
+    visit(tree.rootNode);
+    return traceAnnotationsIn(comments);
+  } finally {
+    tree.delete();
+  }
+}

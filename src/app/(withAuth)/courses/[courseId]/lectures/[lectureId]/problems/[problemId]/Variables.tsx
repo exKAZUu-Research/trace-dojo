@@ -11,7 +11,7 @@ import {
   Thead,
   Tr,
 } from '../../../../../../../../infrastructures/useClient/chakra';
-import type { DisplayNode, TraceItemVariable } from '../../../../../../../../problems/traceProgram';
+import type { DisplayNode, TraceItemVariable } from '../../../../../../../../problems/trace';
 
 interface VariablesProps {
   traceItemVars: TraceItemVariable;

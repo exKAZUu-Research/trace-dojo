@@ -5,11 +5,11 @@ import { z } from 'zod';
 
 import { TraceViewer } from '../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/TraceViewer';
 import { Variables } from '../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/Variables';
+import { traceProgram } from '../../src/interpreter/program';
 import { type InstantiatedProblem, instantiateProblem } from '../../src/problems/instantiateProblem';
-import { traceProgram } from '../../src/problems/traceProgram';
 
 const problem = (id: string): InstantiatedProblem => {
-  const instantiated = instantiateProblem(id, 'java', 'turtle-variables');
+  const instantiated = instantiateProblem(id, 'turtle-variables');
   if (!instantiated) throw new Error(`Missing problem: ${id}`);
   return instantiated;
 };
@@ -47,9 +47,9 @@ const renderViewer = (
 
 test('Java turtle names show their selected-step coordinates apart from answer variables', () => {
   const instantiated = problem('variable3');
-  const beforeCreation = instantiated.traceItems.find((item) => item.sid === 3);
-  const afterCreation = instantiated.traceItems.find((item) => item.sid === 4);
-  const afterMoving = instantiated.traceItems.find((item) => item.sid === 5);
+  const beforeCreation = instantiated.traceItems.find((item) => item.line === 5);
+  const afterCreation = instantiated.traceItems.find((item) => item.line === 6);
+  const afterMoving = instantiated.traceItems.find((item) => item.line === 7);
 
   expect(referenceVars(instantiated.traceItems[0])).toEqual({});
   expect(referenceVars(beforeCreation)).toEqual({});
@@ -75,7 +75,7 @@ test('Java turtle names show their selected-step coordinates apart from answer v
 
 test('multiple turtles and arrays retain Java reference paths', () => {
   const multiple = problem('multiObject1');
-  expect(referenceVars(multiple.traceItems.find((item) => item.sid === 2))).toMatchObject({
+  expect(referenceVars(multiple.traceItems.find((item) => item.line === 4))).toMatchObject({
     t1: object({ x: scalar(1), y: scalar(1) }),
     t2: object({ x: scalar(3), y: scalar(3) }),
   });
@@ -91,7 +91,7 @@ test('multiple turtles and arrays retain Java reference paths', () => {
   });
 
   const unassigned = problem('garbageCollection4');
-  expect(referenceVars(unassigned.traceItems.find((item) => item.sid === 1))).toEqual({
+  expect(referenceVars(unassigned.traceItems.find((item) => item.line === 4))).toEqual({
     // oxlint-disable-next-line unicorn/no-null -- Snapshots represent unassigned Java array slots as null.
     turtles: array(Object.fromEntries(Array.from({ length: 5 }, (_, i) => [String(i), scalar(null)]))),
   });
@@ -99,19 +99,19 @@ test('multiple turtles and arrays retain Java reference paths', () => {
 
 test('alias assignment and removal update reference values at their Java steps', () => {
   const assigned = problem('garbageCollection1');
-  expect(referenceVars(assigned.traceItems.find((item) => item.sid === 6))).toMatchObject({
+  expect(referenceVars(assigned.traceItems.find((item) => item.line === 9))).toMatchObject({
     t1: object({ x: scalar(1), y: scalar(2) }),
     t2: object({ x: scalar(1), y: scalar(2) }),
   });
-  expect(referenceVars(assigned.traceItems.find((item) => item.sid === 7))).toMatchObject({
+  expect(referenceVars(assigned.traceItems.find((item) => item.line === 10))).toMatchObject({
     t1: object({ x: scalar(2), y: scalar(2) }),
     t2: object({ x: scalar(2), y: scalar(2) }),
   });
 
   const removed = problem('garbageCollection4');
-  const firstRemoval = removed.traceItems.find((item) => item.sid === 4 && item.turtles.length === 4);
-  const insideLoop = removed.traceItems.find((item) => item.sid === 5 && item.turtles.length === 4);
-  const secondRemoval = removed.traceItems.find((item) => item.sid === 4 && item.turtles.length === 3);
+  const firstRemoval = removed.traceItems.find((item) => item.line === 11 && item.turtles.length === 4);
+  const insideLoop = removed.traceItems.find((item) => item.line === 15 && item.turtles.length === 4);
+  const secondRemoval = removed.traceItems.find((item) => item.line === 11 && item.turtles.length === 3);
   // oxlint-disable-next-line unicorn/no-null -- Java null is an observable array entry.
   expect(referenceVars(firstRemoval)).toMatchObject({ turtles: array({ '0': scalar(null) }) });
   expect(referenceVars(insideLoop)).toHaveProperty('t');
@@ -122,20 +122,20 @@ test('alias assignment and removal update reference values at their Java steps',
 
 test('method argument references follow the active call scope and leave no stale reference', () => {
   const instantiated = problem('method1');
-  const insideMethod = instantiated.traceItems.find((item) => item.depth === 1);
-  const afterReturn = instantiated.traceItems.find((item) => item.depth === 0 && item.sid === 2);
+  const insideMethod = instantiated.traceItems.find((item) => item.callLines.length === 1);
+  const afterReturn = instantiated.traceItems.find((item) => item.callLines.length === 0 && item.line === 5);
 
   expect(referenceVars(insideMethod)).toMatchObject({ t: object({ x: scalar(0), y: scalar(1) }) });
-  expect(insideMethod!.callStack).toEqual([1]);
+  expect(insideMethod!.callLines).toEqual([4]);
   expect(referenceVars(afterReturn)).toMatchObject({ t: object({ x: scalar(0), y: scalar(2) }) });
-  expect(afterReturn!.callStack).toEqual([]);
+  expect(afterReturn!.callLines).toEqual([]);
 });
 
 test('class fields are captured in the active scope with immutable past values', () => {
   const instantiated = problem('makeClass1');
-  const insideConstructor = instantiated.traceItems.find((item) => item.sid === 3 && item.depth === 1);
-  const insideMethod = instantiated.traceItems.find((item) => item.sid === 5 && item.depth === 1);
-  const inMain = instantiated.traceItems.find((item) => item.sid === 1 && item.depth === 0);
+  const insideConstructor = instantiated.traceItems.find((item) => item.line === 12 && item.callLines.length === 1);
+  const insideMethod = instantiated.traceItems.find((item) => item.line === 16 && item.callLines.length === 1);
+  const inMain = instantiated.traceItems.find((item) => item.line === 5 && item.callLines.length === 0);
 
   expect(referenceVars(insideConstructor)).toEqual({
     this: object({ speed: scalar(2), t: object({ x: scalar(0), y: scalar(0) }) }),
@@ -156,8 +156,8 @@ test('class fields are captured in the active scope with immutable past values',
 
 test('replacement and alias assignment update fields inside a wrapper instance', () => {
   const instantiated = problem('constructor4');
-  const afterReplacement = instantiated.traceItems.find((item) => item.depth === 0 && item.sid === 3);
-  const afterAlias = instantiated.traceItems.find((item) => item.depth === 0 && item.sid === 4);
+  const afterReplacement = instantiated.traceItems.find((item) => item.callLines.length === 0 && item.line === 7);
+  const afterAlias = instantiated.traceItems.find((item) => item.callLines.length === 0 && item.line === 9);
   expect(referenceVars(afterReplacement)).toMatchObject({
     mover: object({ t: object({ x: scalar(3), y: scalar(1) }) }),
   });
@@ -169,8 +169,8 @@ test('replacement and alias assignment update fields inside a wrapper instance',
 
 test('viewer opens this, folds other instances, and keeps all direct fields in a readable summary', () => {
   const instantiated = problem('makeClass1');
-  const inMethodIndex = instantiated.traceItems.findIndex((item) => item.sid === 5 && item.depth === 1);
-  const inMainIndex = instantiated.traceItems.findIndex((item) => item.sid === 1 && item.depth === 0);
+  const inMethodIndex = instantiated.traceItems.findIndex((item) => item.line === 16 && item.callLines.length === 1);
+  const inMainIndex = instantiated.traceItems.findIndex((item) => item.line === 5 && item.callLines.length === 0);
   const methodHtml = renderViewer(instantiated, inMethodIndex, inMethodIndex + 1);
   const mainHtml = renderViewer(instantiated, inMainIndex, inMainIndex);
 
@@ -196,7 +196,7 @@ test('viewer opens this, folds other instances, and keeps all direct fields in a
 
 test('nested turtle instances have their own closed row inside the open this instance', () => {
   const instantiated = problem('makeClass1');
-  const inMethodIndex = instantiated.traceItems.findIndex((item) => item.sid === 5 && item.depth === 1);
+  const inMethodIndex = instantiated.traceItems.findIndex((item) => item.line === 16 && item.callLines.length === 1);
   const html = renderViewer(instantiated, inMethodIndex, inMethodIndex + 1);
   const buttons = [...html.matchAll(/<button[^>]*aria-expanded="(true|false)"[^>]*>/g)];
 
@@ -212,7 +212,9 @@ test('nested turtle instances have their own closed row inside the open this ins
 
 test('a class field appears once inside its instance without answer annotations', () => {
   const instantiated = problem('makeClass1');
-  const viewingTraceItemIndex = instantiated.traceItems.findIndex((item) => item.sid === 5 && item.depth === 1);
+  const viewingTraceItemIndex = instantiated.traceItems.findIndex(
+    (item) => item.line === 16 && item.callLines.length === 1
+  );
   const html = renderViewer(instantiated, viewingTraceItemIndex, viewingTraceItemIndex + 1);
 
   expect(html.match(/>this\.speed</g)).toHaveLength(1);
@@ -221,8 +223,8 @@ test('a class field appears once inside its instance without answer annotations'
 
 test('the viewed past instance remains unchanged when the current step is elsewhere', () => {
   const instantiated = problem('makeClass1');
-  const pastMethodIndex = instantiated.traceItems.findIndex((item) => item.sid === 5 && item.depth === 1);
-  const currentMainIndex = instantiated.traceItems.findIndex((item) => item.sid === 1 && item.depth === 0);
+  const pastMethodIndex = instantiated.traceItems.findIndex((item) => item.line === 16 && item.callLines.length === 1);
+  const currentMainIndex = instantiated.traceItems.findIndex((item) => item.line === 5 && item.callLines.length === 0);
   const pastHtml = renderViewer(instantiated, pastMethodIndex, currentMainIndex);
   const mainHtml = renderViewer(instantiated, currentMainIndex, currentMainIndex);
 
@@ -234,45 +236,42 @@ test('the viewed past instance remains unchanged when the current step is elsewh
 
 test('fill in blank grading variables remain separate from references', () => {
   const instantiated = problem('fillInBlank1');
-  expect(referenceVars(instantiated.traceItems.find((item) => item.sid === 1))).toMatchObject({
+  expect(referenceVars(instantiated.traceItems.find((item) => item.line === 3))).toMatchObject({
     t: object({ x: scalar(0), y: scalar(0) }),
   });
   expect(instantiated.finalVars).toEqual({});
   expect(instantiated.blankAnswers).toEqual(['i < 4']);
 });
 
-test('a registered class without turtles captures own data while skipping cycles and getters', () => {
-  const instrumented = `
-class Counter {
-  constructor() {
-    this.count = 1;
-    this.label = 'a full label with all of its text';
-    this.numericString = '2';
-    this.active = true;
-    this.color = 'ordinary color';
-    this.dir = 'ordinary direction';
-    this.missing = null;
-    this.values = [1, undefined, 'last'];
-    this.empty = {};
-    this.emptyValues = [];
-    this.self = this;
-    Object.defineProperty(this, 'computed', { enumerable: true, get() { throw new Error('Getter was called'); } });
-  }
-}
-const counter = new Counter(); registerDisplayRef('counter', () => counter); // step
-counter.count = 2; // step
-`;
-  const displayProgram = `
+test('a class without turtles shows its own fields while skipping cycles', () => {
+  const program = `
 public class Main {
   public static void main(String[] args) {
-    Counter counter = new Counter(); // step
-    counter.count = 2; // step
+    Counter counter = new Counter();
+    counter.count = 2;
   }
 }
+class Empty {
+}
+class Counter {
+  Counter() { // atomic
+  }
+  int count = 1;
+  String label = "a full label with all of its text";
+  String numericString = "2";
+  boolean active = true;
+  String color = "ordinary color";
+  String dir = "ordinary direction";
+  String missing = null;
+  String[] values = { "1", null, "last" };
+  Empty empty = new Empty();
+  int[] emptyValues = {};
+  Counter self = this;
+}
 `;
-  const traced = traceProgram(instrumented, displayProgram, 'java');
-  const first = referenceVars(traced.traceItems.find((item) => item.sid === 1));
-  const second = referenceVars(traced.traceItems.find((item) => item.sid === 2));
+  const traced = traceProgram('java', program, program);
+  const first = referenceVars(traced.traceItems.find((item) => item.line === 4));
+  const second = referenceVars(traced.traceItems.find((item) => item.line === 5));
 
   expect(first).toMatchObject({
     counter: object({
@@ -284,14 +283,14 @@ public class Main {
       dir: scalar('ordinary direction'),
       // oxlint-disable-next-line unicorn/no-null -- Java null is displayed as a scalar field.
       missing: scalar(null),
-      values: array({ '0': scalar(1), '2': scalar('last') }),
+      // oxlint-disable-next-line unicorn/no-null -- Java null is displayed as a scalar element.
+      values: array({ '0': scalar('1'), '1': scalar(null), '2': scalar('last') }),
       empty: object({}),
       emptyValues: array({}),
     }),
   });
   expect(second).toMatchObject({ counter: object({ count: scalar(2) }) });
   expect(first).not.toHaveProperty(['counter', 'entries', 'self']);
-  expect(first).not.toHaveProperty(['counter', 'entries', 'computed']);
   expect(traced.traceItems[1].vars).toEqual({});
   expect(traced.finalVars).toEqual({});
 
@@ -315,33 +314,29 @@ public class Main {
   expect(html.match(/<table\b/g)).toHaveLength(1);
 });
 
-test('nested class objects render once when the legacy answer snapshot has an object value', () => {
-  const instrumented = `
-class Counter {
-  constructor() { this.inner = { label: 'nested' }; this.count = 1; }
-  tick() { this.count++; // step
-  }
-}
-const counter = new Counter(); registerDisplayRef('counter', () => counter);
-call(counter.tick.bind(counter))(); // caller
-`;
-  const displayProgram = `
+test('nested class objects render once inside this', () => {
+  const program = `
 public class Main {
   public static void main(String[] args) {
     Counter counter = new Counter();
-    counter.tick(); // caller
+    counter.tick();
   }
 }
+class Inner {
+  String label = "nested";
+}
 class Counter {
+  Inner inner = new Inner();
+  int count = 1;
   void tick() {
-    this.count++; // step
+    this.count++;
   }
 }
 `;
-  const traced = traceProgram(instrumented, displayProgram, 'java');
-  const snapshot = traced.traceItems.find((item) => item.sid === 1);
+  const traced = traceProgram('java', program, program);
+  const snapshot = traced.traceItems.find((item) => item.line === 15);
   expect(snapshot).toBeDefined();
-  expect(snapshot!.vars).toHaveProperty(['this.inner']);
+  expect(snapshot!.vars).toEqual({ 'this.count': 2 });
   const html = renderToStaticMarkup(
     createElement(Variables, { traceItemVars: snapshot!.vars, referenceVars: snapshot!.referenceVars })
   );
@@ -356,7 +351,7 @@ class Counter {
 
 test('the variable table appears for references alone and disappears when the snapshot is empty', () => {
   const instantiated = problem('makeClass1');
-  const constructorItem = instantiated.traceItems.find((item) => item.sid === 3 && item.depth === 1);
+  const constructorItem = instantiated.traceItems.find((item) => item.line === 12 && item.callLines.length === 1);
   const referenceOnlyHtml = renderToStaticMarkup(
     createElement(Variables, { traceItemVars: {}, referenceVars: constructorItem!.referenceVars })
   );
@@ -366,10 +361,4 @@ test('the variable table appears for references alone and disappears when the sn
   expect(referenceOnlyHtml.match(/<thead\b/g)).toHaveLength(1);
   expect(referenceOnlyHtml).toMatch(/<button(?=[^>]*type="button")(?=[^>]*aria-expanded="true")[^>]*>/);
   expect(emptyHtml).not.toContain('<table');
-});
-
-test('unregistered numeric-only programs still reject native assignments', () => {
-  expect(() => traceProgram('const count = 1; // step', 'int count = 1; // step', 'java')).toThrow(
-    'Instrumented program MUST NOT contain assignment operators (=).'
-  );
 });

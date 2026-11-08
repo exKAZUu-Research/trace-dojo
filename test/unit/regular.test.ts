@@ -2,10 +2,10 @@ import { describe, expect, test } from 'vitest';
 
 import { instantiateProblem } from '../../src/problems/instantiateProblem';
 import { gradeRegularAnswers } from '../../src/problems/regular/grade';
-import type { TraceItemVariable, TurtleTrace } from '../../src/problems/traceProgram';
+import type { TraceItemVariable, TurtleTrace } from '../../src/problems/trace';
 import type { ColorChar } from '../../src/types';
 
-const problem = instantiateProblem('test1', 'java', '');
+const problem = instantiateProblem('test1', '');
 if (!problem) throw new Error('Failed to instantiate test1.');
 const finalTraceItem = problem.traceItems.at(-1);
 if (!finalTraceItem) throw new Error('The traced program has no final state.');

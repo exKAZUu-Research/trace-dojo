@@ -1,13 +1,11 @@
-import type { TraceItemVariable, TurtleTrace } from '@/problems/traceProgram';
+import type { TurtleTrace } from '@/problems/trace';
 
 export interface ExerciseDisplay {
-  problemFormat: 'fillInBlank';
+  problemFormat: 'fillInBlank' | 'bugFix';
   sessionId: number;
   problemId: string;
   displayProgram: string;
-  blankCount: number;
   finalBoard: string;
   finalTurtles: TurtleTrace[];
-  finalVars: TraceItemVariable;
   completed: boolean;
 }

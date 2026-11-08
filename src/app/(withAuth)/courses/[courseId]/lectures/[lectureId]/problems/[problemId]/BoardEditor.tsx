@@ -37,7 +37,7 @@ import {
   parseBoard,
   type RegularGradingResult,
 } from '../../../../../../../../problems/regular/grade';
-import type { TraceItemVariable, TurtleTrace } from '../../../../../../../../problems/traceProgram';
+import type { TraceItemVariable, TurtleTrace } from '../../../../../../../../problems/trace';
 import type { ColorChar, ProblemType, SelectedCell } from '../../../../../../../../types';
 import { BoardViewer } from './BoardViewer';
 
@@ -102,7 +102,7 @@ export const BoardEditor = forwardRef<TurtleGraphicsHandle, TurtleGraphicsProps>
   };
 
   const gradeAnswers = (): RegularGradingResult => {
-    const currentLine = props.problem.sidToLineIndex.get(currentTraceItem.sid);
+    const currentLine = currentTraceItem.line;
     return gradeRegularAnswers({
       expectedBoard: currentTraceItem.board,
       expectedTurtles: currentTraceItem.turtles,

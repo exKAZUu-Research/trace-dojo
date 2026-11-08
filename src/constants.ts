@@ -10,8 +10,6 @@ export const TURTLE_GRAPHICS_BOARD_GAP_PX = 4;
 export const TURTLE_GRAPHICS_EMPTY_COLOR = '.';
 export const TURTLE_GRAPHICS_DEFAULT_COLOR = '#';
 
-export const DEFAULT_LANGUAGE_ID = 'java';
-
 export const SUPERTOKENS_ACCESS_TOKEN_COOKIE_NAME = 'sAccessToken';
 export const SUPERTOKENS_REFRESH_TOKEN_COOKIE_NAME = 'sRefreshToken';
 export const SERVICE_ADMIN_ROLE = 'admin';

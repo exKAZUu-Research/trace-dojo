@@ -2,7 +2,7 @@ import { zenkakuAlphanumericalsToHankaku } from '@willbooster/shared-lib';
 import fastDeepEqual from 'fast-deep-equal';
 
 import type { ColorChar } from '../../types';
-import type { TraceItemVariable, TurtleTrace } from '../traceProgram';
+import type { TraceItemVariable, TurtleTrace } from '../trace';
 
 export interface RegularGradingResult {
   readonly status: 'correct' | 'incorrect';

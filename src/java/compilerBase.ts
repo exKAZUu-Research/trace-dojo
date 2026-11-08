@@ -1,0 +1,834 @@
+import { CompileError } from '../interpreter/diagnostics';
+import type { TraceOptions } from '../interpreter/traceAnnotations';
+import {
+  type ClassDeclaration,
+  encloses,
+  type Expression,
+  type FieldDeclaration,
+  type MemberDeclaration,
+  type Span,
+  UNNAMED,
+} from './ast';
+import { box, boxedTypeOf, unbox } from './builtinWrappers';
+import {
+  boxingTarget,
+  instantiateMethod,
+  isInvocationConvertible,
+  mentionsHole,
+  returnsForLambda,
+  unboxedTypeOf,
+} from './conversions';
+import { type AssignmentFacts, declarationKey } from './definiteAssignment';
+import { nullMessage, type NullSource } from './nullMessages';
+import { castOperation, fitsIn } from './operators';
+import { passesPolyArgument, resultsInFunction } from './polyExpressions';
+import { type Frame } from './runtime';
+import { superclassesOf, topLevelOf, TypeResolver } from './typeResolver';
+import {
+  type ClassInfo,
+  type ClassType,
+  erasure,
+  type FieldInfo,
+  intersectionParts,
+  isNumeric,
+  isPrimitive,
+  isReference,
+  isSubclass,
+  isWidening,
+  type JavaType,
+  type LocalInfo,
+  type MethodInfo,
+  type NumericKind,
+  sameType,
+  superinterfacesOf,
+  typeName,
+  type TypeVariable,
+  upperBound,
+  VOID,
+} from './types';
+import { convertNumber, JavaArray, JavaString, type Value } from './values';
+
+export interface CompileOptions {
+  /** Makes the statements that record steps report their rows to `Runtime.steps`. */
+  trace?: TraceOptions;
+}
+
+export type Eval = (frame: Frame) => Value;
+
+/** A statement either completes normally (`undefined`) or abruptly with one of these. */
+export type Completion = BreakCompletion | ContinueCompletion | ReturnCompletion | YieldCompletion;
+export interface BreakCompletion {
+  kind: 'break';
+  label: string | undefined;
+}
+export interface ContinueCompletion {
+  kind: 'continue';
+  label: string | undefined;
+}
+export interface ReturnCompletion {
+  kind: 'return';
+  value: Value;
+}
+export interface YieldCompletion {
+  kind: 'yield';
+  value: Value;
+}
+export type Exec = (frame: Frame) => Completion | undefined;
+
+export interface CompiledValue {
+  kind: 'value';
+  type: JavaType;
+  run: Eval;
+  constant?: Value;
+  /** What the value came from, which a `NullPointerException` names when it is null. */
+  source?: NullSource;
+  /**
+   * For the result of a generic method, the erasure of its declared type, which is all the JVM knows of the value
+   * until a use that needs `type` casts it, as javac's checkcast does.
+   */
+  erasedType?: JavaType;
+}
+export type Compiled = CompiledValue | { kind: 'class'; cls: ClassInfo };
+
+export interface Reference {
+  type: JavaType;
+  /** For a field of a type variable's type read through a generic receiver, the erasure of its declared type. */
+  erasedType?: JavaType;
+  /** The field this reference names, whose finality decides whether it may be assigned. */
+  field?: FieldInfo;
+  isArrayLength?: boolean;
+  /** Whether the reference reads a local that a local or anonymous class copied, which it may not assign. */
+  isCapture?: boolean;
+  source?: NullSource;
+  /** Evaluates the receiver and index once, returning accessors bound to them. */
+  bind: (frame: Frame) => { get: () => Value; set: (value: Value) => void };
+}
+
+export interface Scope {
+  names: Map<string, number>;
+  /** Slots declared directly in this scope, cleared when it is left. */
+  slots: number[];
+}
+
+export interface MethodContext {
+  /** Values of final locals initialized with constant expressions. */
+  constants: Map<number, Value>;
+  cls: ClassInfo;
+  isStatic: boolean;
+  /**
+   * Whether the code runs in a constructor before its `super(...)` or `this(...)` call, where, as in a static
+   * method (`isStatic` holds too), the object under construction is not available.
+   */
+  isBeforeConstructorCall?: boolean;
+  /** While a case guard compiles, the number of locals declared outside it, which it may not assign. */
+  guardLocalLimit?: number;
+  returnType: JavaType;
+  locals: LocalInfo[];
+  scopes: Scope[];
+  /** Labels of the enclosing statements, innermost last. */
+  labels: string[];
+  /** Labels written directly before the statement being compiled. */
+  loopLabels: string[];
+  /** Labels written directly before the enclosing loops, which `continue` may name. */
+  continueLabels: string[];
+  loopDepth: number;
+  switchDepth: number;
+  /** The objects or class whose fields this code initializes, where their blank finals may be assigned. */
+  initializes: 'instance' | 'static' | undefined;
+  /** Whether this code is an initializer block, where `return` is not allowed. */
+  isInitializerBlock: boolean;
+  /** Whether this code is in a switch expression, which `return` cannot leave. */
+  isInSwitchExpression: boolean;
+  /** The exceptions the method declares in its `throws` clause. */
+  thrownTypes: readonly ClassInfo[];
+  /** The try statements whose try block encloses the code being compiled, innermost last. */
+  tries: EnclosingTry[];
+  /** The checked exceptions that rethrowing each catch parameter throws: those its try block throws. */
+  rethrownTypes: Map<number, ClassInfo[]>;
+  /** The switch expressions whose bodies enclose the code being compiled, innermost last. */
+  switchExpressions: SwitchExpressionTarget[];
+  /** The slots of the pattern variables declared so far. */
+  patternSlots: number[];
+  /** The pattern variables that a statement introduced into its enclosing block. */
+  introducedPatternSlots: Set<number>;
+  /** For a lambda body, the code around the lambda, whose locals the body may read. */
+  enclosing: MethodContext | undefined;
+  /** For a lambda body, the enclosing locals it reads, which the lambda copies when it is created. */
+  captures: Capture[];
+  /** The locals that a lambda or a local class reads, with what reads them and where, which must be effectively final. */
+  capturedSlots: Map<number, { reader: string; reads: Span[] }>;
+  /** The keys by which definite assignment analysis identifies the locals declared in the source. */
+  declarationKeys: Map<number, string>;
+  /** How many times each local is assigned after its declaration, which decides for a pattern variable. */
+  assignmentCounts: Map<number, number>;
+  /** For a lambda body, the types of the values it returns, from which a generic method infers its result. */
+  returnedTypes?: JavaType[];
+}
+
+export interface Capture {
+  name: string;
+  type: JavaType;
+  constant: Value;
+  /** Reads the value in the frame that creates the lambda. */
+  read: Eval;
+}
+
+/** The values a switch expression's yields give, which are converted to its type once all are known. */
+export interface SwitchExpressionTarget {
+  /** The type the switch expression is assigned to, which its results are compiled for. */
+  targetType: JavaType | undefined;
+  values: { value: CompiledValue; span: Span }[];
+  converters: Eval[];
+}
+
+export interface EnclosingTry {
+  caughtTypes: ClassInfo[];
+  /** The checked exceptions thrown in the try block that reach its catch clauses. */
+  thrownTypes: ClassInfo[];
+}
+
+/** Name resolution, conversions, and overload resolution shared by the expression and statement compilers. */
+export abstract class CompilerBase extends TypeResolver {
+  protected readonly internedStrings = new Map<string, JavaString>();
+  protected readonly recordsSteps: boolean;
+  protected readonly atomicRows: ReadonlySet<number>;
+  /** Rows of `// atomic` annotations that a method or constructor declaration claims. */
+  protected readonly usedAtomicRows = new Set<number>();
+  private readonly fieldConstants = new Map<FieldInfo, Value>();
+  private readonly computingConstants = new Set<FieldInfo>();
+  /** The type the expression about to be compiled is assigned to, which a diamond `<>` infers its arguments from. */
+  private targetType: JavaType | undefined;
+
+  constructor(options: CompileOptions) {
+    super();
+    this.recordsSteps = options.trace !== undefined;
+    this.atomicRows = new Set(options.trace?.atomicAnnotations.keys());
+  }
+
+  /** The type of a lambda or method reference argument before overload resolution gives it a functional interface. */
+  protected abstract pendingFunctionType(
+    context: MethodContext,
+    expression: Extract<Expression, { kind: 'lambda' | 'methodRef' }>
+  ): JavaType;
+
+  /**
+   * @param allowsVoid Whether the value may be void, as an expression statement's is; the value is then discarded,
+   *   so a generic call's result is not cast.
+   * @param keepsErasure Whether a generic call's or field's result stays uncast for the consumer to cast to the type it
+   *   needs, as a conversion does; otherwise it is cast to its instantiated type, as javac casts most uses.
+   */
+  protected abstract compileValue(
+    context: MethodContext,
+    expression: Expression,
+    allowsVoid?: boolean,
+    keepsErasure?: boolean
+  ): CompiledValue;
+
+  /** Compiles an expression whose value is assigned to `type`, which a diamond may infer its type arguments from. */
+  protected compileValueFor(context: MethodContext, expression: Expression, type: JavaType): CompiledValue {
+    // A conditional and a switch expression pass the target on to their branches, as poly expressions (JLS 15.25.3).
+    const isCreation = ['new', 'lambda', 'methodRef', 'call', 'conditional', 'switchExpression'].includes(
+      expression.kind
+    );
+    this.targetType = isCreation ? type : undefined;
+    try {
+      return this.compileValue(context, expression, false, true);
+    } finally {
+      this.targetType = undefined;
+    }
+  }
+
+  /** Takes the target type of the expression being compiled, which only that expression may use. */
+  protected takeTargetType(): JavaType | undefined {
+    const type = this.targetType;
+    this.targetType = undefined;
+    return type;
+  }
+
+  /** The one string object that every literal with this text evaluates to. */
+  protected internedString(text: string): JavaString {
+    let interned = this.internedStrings.get(text);
+    if (!interned) {
+      interned = new JavaString(text);
+      this.internedStrings.set(text, interned);
+    }
+    return interned;
+  }
+
+  protected newContext(
+    cls: ClassInfo,
+    isStatic: boolean,
+    returnType: JavaType,
+    thrownTypes: readonly ClassInfo[] = []
+  ): MethodContext {
+    return {
+      constants: new Map(),
+      cls,
+      isStatic,
+      returnType,
+      locals: [],
+      scopes: [{ names: new Map(), slots: [] }],
+      labels: [],
+      loopLabels: [],
+      continueLabels: [],
+      loopDepth: 0,
+      switchDepth: 0,
+      initializes: undefined,
+      isInitializerBlock: false,
+      isInSwitchExpression: false,
+      thrownTypes,
+      tries: [],
+      rethrownTypes: new Map(),
+      switchExpressions: [],
+      patternSlots: [],
+      introducedPatternSlots: new Set(),
+      enclosing: undefined,
+      captures: [],
+      capturedSlots: new Map(),
+      declarationKeys: new Map(),
+      assignmentCounts: new Map(),
+    };
+  }
+
+  /** Rejects a checked exception that no enclosing catch clause catches and the method does not declare. */
+  protected checkThrown(context: MethodContext, span: Span, thrown: readonly ClassInfo[]): void {
+    for (const cls of thrown) {
+      if (!this.isChecked(cls)) continue;
+      const catching = context.tries.findLastIndex((enclosing) =>
+        enclosing.caughtTypes.some((caught) => isSubclass(cls, caught))
+      );
+      for (const enclosing of context.tries.slice(Math.max(catching, 0))) enclosing.thrownTypes.push(cls);
+      if (catching !== -1 || context.thrownTypes.some((declared) => isSubclass(cls, declared))) continue;
+      this.error(span, `例外 ${cls.name} は、catch するか、throws で宣言する必要があります。`);
+    }
+  }
+
+  protected isChecked(cls: ClassInfo): boolean {
+    return !['RuntimeException', 'Error'].some((name) => isSubclass(cls, this.builtins.classes.get(name) as ClassInfo));
+  }
+
+  protected declareLocal(context: MethodContext, span: Span, name: string, type: JavaType): number {
+    // An unnamed variable (`_`) takes a slot under no name, so that any number of them never clash nor are read.
+    const isNamed = name !== UNNAMED;
+    // A lambda's locals may not hide the locals of the code around it.
+    for (let current: MethodContext | undefined = context; current && isNamed; current = current.enclosing) {
+      for (const scope of current.scopes) {
+        if (scope.names.has(name)) this.error(span, `変数 ${name} はすでに定義されています。`);
+      }
+    }
+    const slot = context.locals.length;
+    context.locals.push({ name, type });
+    const scope = context.scopes.at(-1) as Scope;
+    if (isNamed) scope.names.set(name, slot);
+    scope.slots.push(slot);
+    context.declarationKeys.set(slot, declarationKey(name, span));
+    return slot;
+  }
+
+  /**
+   * Finds a local of the code around a lambda that the lambda body reads, recording it as a capture; it must be
+   * effectively final, as Java requires.
+   */
+  protected findCapture(
+    context: MethodContext,
+    span: Span,
+    name: string
+  ): { index: number; capture: Capture } | undefined {
+    const outer = context.enclosing;
+    if (!outer) return;
+    const index = context.captures.findIndex((capture) => capture.name === name);
+    if (index !== -1) return { index, capture: context.captures[index] };
+    const capture = this.captureFrom(outer, span, name, 'ラムダ式');
+    return capture && { index: context.captures.push(capture) - 1, capture };
+  }
+
+  /**
+   * Resolves `name` as a local of `defining`, or one that `defining` captures itself, for code inside a lambda or a
+   * class written there to read; the local must be effectively final.
+   *
+   * @param reader What reads the local, which the error message names.
+   */
+  protected captureFrom(defining: MethodContext, span: Span, name: string, reader: string): Capture | undefined {
+    const slot = this.findLocal(defining, name);
+    if (slot === undefined) {
+      const outerCapture = this.findCapture(defining, span, name);
+      if (!outerCapture) return;
+      const outerIndex = outerCapture.index;
+      return { ...outerCapture.capture, read: (frame) => frame.captured[outerIndex] };
+    }
+    // Definite assignment analysis decides for a declared local once the method is compiled; see checkCaptures.
+    const isPatternVariable = !defining.declarationKeys.has(slot);
+    if (isPatternVariable && (defining.assignmentCounts.get(slot) ?? 0) > 0) {
+      this.error(span, capturedAssignmentMessage(name, reader));
+    }
+    const captured = defining.capturedSlots.get(slot);
+    if (captured) captured.reads.push(span);
+    else defining.capturedSlots.set(slot, { reader, reads: [span] });
+    return {
+      name,
+      type: defining.locals[slot].type,
+      constant: defining.constants.get(slot),
+      read: (frame) => frame.locals[slot] as Value,
+    };
+  }
+
+  /**
+   * Rejects a lambda or a local class that reads a local which definite assignment analysis found not effectively
+   * final in the code that declares it, or not definitely assigned where the lambda or class appears.
+   */
+  protected checkCaptures(context: MethodContext, facts: AssignmentFacts): void {
+    for (const [slot, { reader, reads }] of context.capturedSlots) {
+      const key = context.declarationKeys.get(slot);
+      if (key === undefined) continue;
+      const name = context.locals[slot].name;
+      if (facts.notEffectivelyFinal.has(key)) this.error(reads[0] as Span, capturedAssignmentMessage(name, reader));
+      const unassigned = reads.find((read) =>
+        facts.unassignedAtCreations.some((creation) => creation.keys.has(key) && encloses(creation.span, read))
+      );
+      if (unassigned) this.error(unassigned, `変数 ${name} に値が代入されていない可能性があります。`);
+    }
+  }
+
+  /** Records an assignment to a local, which a lambda that reads it forbids. */
+  protected recordAssignment(context: MethodContext, span: Span, slot: number): void {
+    if (context.guardLocalLimit !== undefined && slot < context.guardLocalLimit) {
+      this.error(span, `case の when の中では、外側の変数 ${context.locals[slot].name} に代入できません。`);
+    }
+    const captured = context.capturedSlots.get(slot);
+    if (captured && !context.declarationKeys.has(slot)) {
+      this.error(span, capturedAssignmentMessage(context.locals[slot].name, captured.reader));
+    }
+    context.assignmentCounts.set(slot, (context.assignmentCounts.get(slot) ?? 0) + 1);
+  }
+
+  protected findLocal(context: MethodContext, name: string): number | undefined {
+    for (let index = context.scopes.length - 1; index >= 0; index--) {
+      const slot = context.scopes[index].names.get(name);
+      if (slot !== undefined) return slot;
+    }
+    return;
+  }
+
+  /**
+   * Converts a value for assignment (which also narrows int constants to char) or for method invocation, failing
+   * compilation when Java forbids the conversion.
+   *
+   * @param span The expression converted, where a failed conversion is reported.
+   */
+  protected convert(
+    value: CompiledValue,
+    to: JavaType,
+    context: 'assignment' | 'invocation',
+    span: Span
+  ): CompiledValue {
+    if (value.erasedType) return this.convert(this.checkErased(value, to), to, context, span);
+    // A parameter whose type inference left undecided takes any object, as overload resolution already decided.
+    if (to.kind === 'wildcard' && to.isHole && (isReference(value.type) || value.type.kind === 'null')) return value;
+    if (isWidening(value.type, to, this.builtins.objectClass)) {
+      return isNumeric(value.type) && isNumeric(to)
+        ? convertedNumber(value, value.type.kind, to)
+        : { ...value, type: to };
+    }
+    // An assignment narrows a constant of type byte, short, char, or int that fits in byte, short, or char.
+    if (
+      context === 'assignment' &&
+      isNumeric(to) &&
+      isNumeric(value.type) &&
+      ['byte', 'short', 'char', 'int'].includes(value.type.kind) &&
+      typeof value.constant === 'number' &&
+      fitsIn(value.constant, to.kind)
+    ) {
+      return constantValue(to, value.constant);
+    }
+    const boxed = this.boxedConversion(value, to, context);
+    if (boxed) return boxed;
+    return this.error(span, `${typeName(value.type)} 型の値を ${typeName(to)} 型に変換できません。`);
+  }
+
+  /**
+   * Casts a generic method's or field's result to the erasure of the type a use `needs` (its instantiated type for a
+   * primitive), where its erased type does not satisfy it, as javac's checkcast does, so that a value that heap
+   * pollution put there fails with `ClassCastException` where it does on the JVM.
+   */
+  protected checkErased(value: CompiledValue, needed: JavaType): CompiledValue {
+    const { erasedType, ...rest } = value;
+    const erased = erasure(isReference(needed) ? needed : value.type);
+    // An intersection type, such as an inferred `Number & Comparable`, erases to its first part.
+    const parts = erased.kind === 'class' ? intersectionParts.get(erased.cls) : undefined;
+    const target = parts?.[0] ? parts[0].type : erased;
+    if (!erasedType || isWidening(erasedType, target, this.builtins.objectClass)) return rest;
+    const cast = castOperation(this.builtins.objectClass, erasedType, target);
+    if (!cast) return rest;
+    return { ...rest, run: (frame) => cast(frame, value.run(frame)) };
+  }
+
+  /** Converts by boxing a primitive value or unboxing a wrapper object, then widening the result. */
+  protected boxedConversion(
+    value: CompiledValue,
+    to: JavaType,
+    context: 'assignment' | 'invocation'
+  ): CompiledValue | undefined {
+    // A hole that inference left undecided takes any value, boxed as an argument for an Object parameter would be.
+    const target = to.kind === 'wildcard' && to.isHole ? this.builtins.objectClass.type : to;
+    let boxType = boxingTarget(this.builtins, value.type, target);
+    // An assignment also boxes a constant int that fits in the byte, short, or char that `Byte` and the like box.
+    const unboxedTarget = unboxedTypeOf(to);
+    if (
+      !boxType &&
+      context === 'assignment' &&
+      to.kind === 'class' &&
+      unboxedTarget &&
+      isNumeric(unboxedTarget) &&
+      typeof value.constant === 'number' &&
+      value.type.kind === 'int' &&
+      fitsIn(value.constant, unboxedTarget.kind)
+    ) {
+      boxType = to;
+    }
+    if (boxType) {
+      const { cls } = boxType;
+      const { run } = value;
+      return { kind: 'value', type: target === to ? to : boxType, run: (frame) => box(frame, cls, run(frame)) };
+    }
+    const unboxed = this.unboxed(value);
+    if (unboxed && isPrimitive(to) && isWidening(unboxed.type, to, this.builtins.objectClass)) {
+      return this.convert(unboxed, to, context, { row: 0, endRow: 0, start: 0, end: 0 });
+    }
+    return;
+  }
+
+  /** Unboxes a wrapper value, throwing `NullPointerException` for null, or returns `undefined` for other values. */
+  protected unboxed(value: CompiledValue): CompiledValue | undefined {
+    const type = unboxedTypeOf(value.type);
+    if (!type) return;
+    const { run } = value;
+    const wrapper = upperBound(value.type) as ClassType;
+    const message = nullMessage(`Cannot invoke "java.lang.${wrapper.cls.name}.${type.kind}Value()"`, value.source);
+    return { kind: 'value', type, run: (frame) => unbox(frame, run(frame), message) };
+  }
+
+  /** A value as an operator sees it: unboxed when it is a wrapper object. */
+  protected operand(value: CompiledValue): CompiledValue {
+    return this.unboxed(value) ?? value;
+  }
+
+  /** A primitive value boxed into its wrapper, as a conditional with a reference branch boxes the other. */
+  protected boxedValue(value: CompiledValue): CompiledValue {
+    const boxType = boxedTypeOf(this.builtins.wrappers, value.type);
+    if (!boxType) return value;
+    const { run } = value;
+    return { kind: 'value', type: boxType, run: (frame) => box(frame, boxType.cls, run(frame)) };
+  }
+
+  /**
+   * The value of a constant variable: a final field of primitive or String type initialized with a constant
+   * expression, which Java inlines without initializing its class.
+   */
+  protected constantOf(field: FieldInfo): Value {
+    if (!field.isFinal) return;
+    return this.initialConstantOf(field);
+  }
+
+  protected initialConstantOf(field: FieldInfo): Value {
+    const { declaration } = field;
+    if (!declaration || this.computingConstants.has(field)) return;
+    if (this.fieldConstants.has(field)) return this.fieldConstants.get(field);
+    return this.withTypeScope(field.owner, () => this.computeInitialConstant(field, declaration));
+  }
+
+  private computeInitialConstant(field: FieldInfo, declaration: FieldDeclaration): Value {
+    const isConstantType =
+      isPrimitive(field.type) || (field.type.kind === 'class' && field.type.cls === this.builtins.stringClass);
+    const initializer = declaration.declarators.find((declarator) => declarator.name === field.name)?.initializer;
+    let constant: Value;
+    if (isConstantType && initializer && initializer.kind !== 'arrayInitializer') {
+      this.computingConstants.add(field);
+      try {
+        const compiled = this.convert(
+          this.compileValue(this.newContext(field.owner, true, VOID), initializer),
+          field.type,
+          'assignment',
+          initializer
+        );
+        constant = compiled.constant;
+      } catch {
+        constant = undefined;
+      } finally {
+        this.computingConstants.delete(field);
+      }
+    }
+    this.fieldConstants.set(field, constant);
+    return constant;
+  }
+
+  /** Finds a field of `cls`, its superclasses, or the interfaces they implement. */
+  protected findField(cls: ClassInfo, name: string): FieldInfo | undefined {
+    for (let current: ClassInfo | undefined = cls; current; current = current.superclass) {
+      const field = current.fields.get(name);
+      if (field) return field;
+      for (const parent of current.interfaces) {
+        const inherited = this.findField(parent, name);
+        if (inherited) return inherited;
+      }
+    }
+    return;
+  }
+
+  /**
+   * Private members are accessible anywhere in the top-level class that declares them, nested classes included, but
+   * only as members of their own class: they are not inherited, so a subclass `through` which one is named lacks it.
+   *
+   * @param through The class the member is looked up in, as the static type of `b` in `b.p`, when not its owner.
+   */
+  protected checkAccess(
+    context: MethodContext,
+    owner: ClassInfo,
+    access: string,
+    span: Span,
+    what: string,
+    through: ClassInfo = owner
+  ): void {
+    if (access === 'private' && (topLevelOf(owner) !== topLevelOf(context.cls) || through !== owner)) {
+      this.error(span, `${what} は private なので使えません。`);
+    }
+  }
+
+  /** Compiles an argument, leaving a lambda or method reference to be typed once the method is chosen. */
+  protected compileArgument(context: MethodContext, expression: Expression): CompiledValue {
+    if (expression.kind === 'lambda' || expression.kind === 'methodRef') {
+      return { kind: 'value', type: this.pendingFunctionType(context, expression), run: () => {} };
+    }
+    // A conditional or switch expression of lambdas waits for the parameter type too, which its results then get.
+    if (
+      (expression.kind === 'conditional' || expression.kind === 'switchExpression') &&
+      resultsInFunction(expression)
+    ) {
+      return { kind: 'value', type: { kind: 'pending', arity: undefined }, run: () => {} };
+    }
+    if (expression.kind !== 'call' && expression.kind !== 'new')
+      return this.compileValue(context, expression, false, true);
+    // A call such as `Comparator.comparing(s -> s.length())` may need the parameter it is passed to for the types
+    // of its lambdas' parameters, so it waits for overload resolution when it cannot be typed on its own. So does
+    // one whose type the call leaves partly undecided, as `Collectors.toList()` leaves its element type.
+    let compiled: CompiledValue;
+    try {
+      compiled = this.compileValue(context, expression, false, true);
+    } catch (error) {
+      if (!(error instanceof CompileError) || !passesPolyArgument(expression)) throw error;
+      const polyErasure = this.polyErasureOf(context, expression);
+      return { kind: 'value', type: { kind: 'pending', arity: undefined, isPoly: true, polyErasure }, run: () => {} };
+    }
+    if (!mentionsHole(compiled.type)) return compiled;
+    return {
+      kind: 'value',
+      type: { kind: 'pending', arity: undefined, isPoly: true, polyErasure: erasure(compiled.type) },
+      run: () => {},
+    };
+  }
+
+  /** The erased type a postponed call or creation produces, when that does not depend on its arguments. */
+  protected abstract polyErasureOf(context: MethodContext, expression: Expression): JavaType | undefined;
+
+  /** Converts the arguments of a call to `method`, packing those of a variable arity parameter into an array. */
+  protected convertArguments(
+    context: MethodContext,
+    method: MethodInfo,
+    args: readonly CompiledValue[],
+    expressions: readonly Expression[]
+  ): Eval[] {
+    const converted = args.map((arg, index) => {
+      const parameterType = method.parameterTypes[index];
+      const value =
+        arg.type.kind === 'pending' ? this.compileValueFor(context, expressions[index], parameterType) : arg;
+      return this.convert(value, parameterType, 'invocation', expressions[index]).run;
+    });
+    const start = method.varargsStart;
+    if (start === undefined) return converted;
+    const declared = method.declared ?? method;
+    const arrayType = declared.parameterTypes.at(-1) as Extract<JavaType, { kind: 'array' }>;
+    const elementType = erasure(method.parameterTypes[start] ?? arrayType.element);
+    const trailing = converted.slice(start);
+    const packed: Eval = (frame) => {
+      const values = this.evaluateArguments(frame, trailing);
+      frame.temporaries.length -= values.length;
+      frame.runtime.allocateArray(frame, values.length);
+      return new JavaArray(elementType, values);
+    };
+    return [...converted.slice(0, start), packed];
+  }
+
+  /** Evaluates arguments left to right, keeping each in `frame.temporaries` until the caller removes them. */
+  protected evaluateArguments(frame: Frame, args: Eval[]): Value[] {
+    const values: Value[] = [];
+    try {
+      for (const arg of args) {
+        const value = arg(frame);
+        values.push(value);
+        frame.temporaries.push(value);
+      }
+    } catch (error) {
+      frame.temporaries.length -= values.length;
+      throw error;
+    }
+    return values;
+  }
+
+  /** Evaluates the arguments and calls `method`, keeping the arguments reachable during the call. */
+  protected invokeWithArguments(
+    frame: Frame,
+    method: MethodInfo,
+    receiver: Value,
+    args: Eval[],
+    callRow: number | undefined
+  ): Value {
+    const values = this.evaluateArguments(frame, args);
+    try {
+      return frame.runtime.invoke(frame, method, receiver, values, callRow);
+    } finally {
+      frame.temporaries.length -= values.length;
+    }
+  }
+
+  /**
+   * Methods of `cls` and its ancestors named `name`, leaving out those an override hides. Interfaces lend only their
+   * instance methods, and an interface has those of `Object` too.
+   */
+  protected collectMethods(cls: ClassInfo, name: string): MethodInfo[] {
+    const methods: MethodInfo[] = [];
+    const add = (owner: ClassInfo, includesStatic: boolean): void => {
+      for (const method of owner.methods) {
+        if (method.name !== name || (method.isStatic && !includesStatic)) continue;
+        const isHidden = methods.some((other) => sameParameters(other, method) || other.overrides?.has(method));
+        if (!isHidden) methods.push(method);
+      }
+    };
+    for (const current of [cls, ...superclassesOf(cls)]) add(current, current.kind !== 'interface' || current === cls);
+    for (const parent of superinterfacesOf(cls)) add(parent, false);
+    if (cls.kind === 'interface') add(this.builtins.objectClass, false);
+    return methods;
+  }
+
+  /** Picks the most specific applicable method, as Java's overload resolution does without boxing or varargs. */
+  protected selectMethod(
+    span: Span,
+    candidates: MethodInfo[],
+    argTypes: JavaType[],
+    what: string,
+    targetType?: JavaType,
+    presetsOf?: (method: MethodInfo) => Map<TypeVariable, JavaType> | undefined
+  ): MethodInfo {
+    const objectClass = this.builtins.objectClass;
+    const instantiated = candidates.flatMap(
+      (method) => instantiateMethod(this.builtins, method, argTypes, targetType, presetsOf?.(method)) ?? []
+    );
+    // Java first looks for methods applicable without boxing, and boxes only when none is.
+    const applicableBy = (allowsBoxing: boolean): MethodInfo[] =>
+      instantiated.filter(
+        (method) =>
+          method.parameterTypes.length === argTypes.length &&
+          method.parameterTypes.every((type, index) =>
+            isInvocationConvertible(this.builtins, argTypes[index], type, allowsBoxing)
+          )
+      );
+    let applicable = applicableBy(false);
+    if (applicable.length === 0) applicable = applicableBy(true);
+    // The last phase passes trailing arguments to a variable arity parameter.
+    if (applicable.length === 0) {
+      applicable = candidates.flatMap((method) => {
+        const expanded = expandVarargs(method, argTypes.length);
+        const instantiatedVarargs =
+          expanded && instantiateMethod(this.builtins, expanded, argTypes, targetType, presetsOf?.(method));
+        const fits =
+          instantiatedVarargs?.parameterTypes.every((type, index) =>
+            isInvocationConvertible(this.builtins, argTypes[index], type, true)
+          ) ?? false;
+        return fits && instantiatedVarargs ? [instantiatedVarargs] : [];
+      });
+    }
+    if (applicable.length === 0) {
+      const given = argTypes.map((type) => typeName(type)).join(', ');
+      // This environment implements only part of the standard library, so the message states only what it allows.
+      return this.error(span, `この採点環境では、${what} に (${given}) を渡して呼び出すことはできません。`);
+    }
+    const mostSpecific = applicable.filter((method) =>
+      applicable.every(
+        (other) =>
+          other === method ||
+          method.parameterTypes.every(
+            (type, index) =>
+              isWidening(type, other.parameterTypes[index], objectClass) ||
+              returnsForLambda(this.builtins, argTypes[index], type, other.parameterTypes[index])
+          )
+      )
+    );
+    if (mostSpecific.length !== 1) return this.error(span, `${what} の呼び出しがあいまいです。`);
+    return mostSpecific[0];
+  }
+}
+
+/**
+ * A view of a variable arity method that takes `count` arguments, the trailing ones each of the array's element
+ * type, or `undefined` when the method takes a fixed number of arguments or too many.
+ */
+function expandVarargs(method: MethodInfo, count: number): MethodInfo | undefined {
+  if (!method.isVarargs) return;
+  const fixed = method.parameterTypes.slice(0, -1);
+  const arrayType = method.parameterTypes.at(-1) as Extract<JavaType, { kind: 'array' }>;
+  if (count < fixed.length) return;
+  return {
+    ...method,
+    parameterTypes: [...fixed, ...Array.from({ length: count - fixed.length }, () => arrayType.element)],
+    varargsStart: fixed.length,
+    declared: method.declared ?? method,
+  };
+}
+
+/** Converts a numeric value to the kind `to` by a widening conversion, folding a constant. */
+function convertedNumber(value: CompiledValue, from: NumericKind, to: { kind: NumericKind }): CompiledValue {
+  if (from === to.kind) return { ...value, type: to };
+  const { run } = value;
+  return {
+    kind: 'value',
+    type: to,
+    run: (frame) => convertNumber(run(frame), from, to.kind),
+    constant: value.constant === undefined ? undefined : convertNumber(value.constant, from, to.kind),
+  };
+}
+
+function capturedAssignmentMessage(name: string, reader: string): string {
+  return `${reader}の中から使うローカル変数 ${name} は、final か実質的に final (一度しか代入しない) である必要があります。`;
+}
+
+/**
+ * The declaration of an anonymous class with `members`, whose supertype its creation resolves, as an anonymous class
+ * or an enum constant with a body declares.
+ */
+export function anonymousDeclaration(span: Span, members: MemberDeclaration[]): ClassDeclaration {
+  const { row, endRow, start, end } = span;
+  return {
+    kind: 'class',
+    name: '',
+    typeParameters: [],
+    modifiers: { isStatic: false, isFinal: false, isAbstract: false, isDefault: false, access: 'package' },
+    interfaces: [],
+    enumConstants: [],
+    members,
+    row,
+    endRow,
+    start,
+    end,
+  };
+}
+
+export function constantValue(type: JavaType, value: Value): CompiledValue {
+  return { kind: 'value', type, run: () => value, constant: value };
+}
+
+export function sameParameters(a: MethodInfo, b: MethodInfo): boolean {
+  return (
+    a.parameterTypes.length === b.parameterTypes.length &&
+    a.parameterTypes.every((type, index) => sameType(type, b.parameterTypes[index]))
+  );
+}
+
+export { superclassesOf, topLevelOf } from './typeResolver';

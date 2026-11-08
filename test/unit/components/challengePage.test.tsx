@@ -26,6 +26,7 @@ const renderChallengePage = ChallengePage as unknown as (props: {
 test.each([
   ['regular', 'regular'],
   ['fillInBlank', 'fillInBlank'],
+  ['bugFix', 'bugFix'],
   [undefined, 'undefined'],
   ['unknown', 'undefined'],
   [['regular', 'fillInBlank'], 'undefined'],

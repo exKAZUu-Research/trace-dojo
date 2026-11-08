@@ -42,6 +42,7 @@ ENV NEXT_PUBLIC_WB_ENV=$WB_ENV
 # runtime from Fly.io secrets (scripts/syncFlySecrets.mjs).
 COPY .docker.env mise.toml bunfig.toml bun.lock next.config.ts tsconfig.json ./
 COPY dist/package.json ./
+COPY patches/ ./patches
 COPY db/ ./db
 COPY drizzle/ ./drizzle
 COPY drizzle.config.ts ./

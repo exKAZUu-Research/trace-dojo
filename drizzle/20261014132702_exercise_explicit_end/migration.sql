@@ -1,0 +1,1 @@
+ALTER TABLE `ExerciseSession` ADD `endedAt` integer;
