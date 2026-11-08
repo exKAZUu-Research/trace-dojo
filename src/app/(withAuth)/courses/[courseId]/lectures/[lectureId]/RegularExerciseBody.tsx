@@ -26,7 +26,6 @@ import { ResultAlertDialog } from './problems/[problemId]/ResultAlertDialog';
 
 export type ExerciseMode = 'challenge' | 'practice';
 interface SubmitInput {
-  learningMode?: ExerciseMode;
   courseId: string;
   lectureId: string;
   sessionId: number;
@@ -36,12 +35,8 @@ interface SubmitInput {
 }
 export interface RegularExerciseTransport {
   submit: (input: SubmitInput) => Promise<RegularExerciseState>;
-  switchToStep: (input: { sessionId: number; learningMode?: ExerciseMode }) => Promise<RegularExerciseState>;
-  next: (input: {
-    sessionId: number;
-    problemFormat: 'regular';
-    learningMode?: ExerciseMode;
-  }) => Promise<RegularExerciseDisplay>;
+  switchToStep: (input: { sessionId: number }) => Promise<RegularExerciseState>;
+  next: (input: { sessionId: number; problemFormat: 'regular' }) => Promise<RegularExerciseDisplay>;
 }
 interface Props {
   mode: ExerciseMode;
@@ -77,13 +72,12 @@ const RegularExerciseSession: React.FC<Props> = ({
   const editor = useRef<TurtleGraphicsHandle>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const { problem } = display;
-  const modeInput = mode === 'practice' ? { learningMode: mode } : {};
   const view = useMemo(
     () => deriveRegularProblemView(problem, display.problemType, display.traceItemIndex),
     [problem, display.problemType, display.traceItemIndex]
   );
   const { currentTraceItemIndex: currentIndex, previousTraceItemIndex: previousIndex } = view;
-  const contextKey = `${mode}:${courseId}:${lectureId}:${display.sessionId}:${display.problemId}:${display.seed}:${display.problemType}:${currentIndex}`;
+  const contextKey = `${display.sessionId}:${display.problemId}:${display.seed}:${display.problemType}:${currentIndex}`;
   // A viewing position chosen for an earlier step or problem falls back to the current step's previous trace item.
   const [viewing, setViewing] = useState({ contextKey, index: previousIndex });
   const viewingIndex = viewing.contextKey === contextKey ? viewing.index : previousIndex;
@@ -101,7 +95,6 @@ const RegularExerciseSession: React.FC<Props> = ({
     if (request.current?.context !== requestKey) request.current = { context: requestKey, id: crypto.randomUUID() };
     try {
       const result = await transport.submit({
-        ...modeInput,
         courseId,
         lectureId,
         sessionId: display.sessionId,
@@ -127,7 +120,6 @@ const RegularExerciseSession: React.FC<Props> = ({
     if (display.completed) return;
     try {
       const next = await transport.switchToStep({
-        ...modeInput,
         sessionId: display.sessionId,
       });
       setDisplay({ ...next, problem });
@@ -140,7 +132,6 @@ const RegularExerciseSession: React.FC<Props> = ({
   };
   const nextProblem = async (): Promise<void> => {
     const next = await transport.next({
-      ...modeInput,
       sessionId: display.sessionId,
       problemFormat: 'regular',
     });
