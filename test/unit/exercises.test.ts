@@ -1125,12 +1125,12 @@ test('practice fails closed when its stored identity is replaced by a graded tem
   await expect(
     runtimeCaller.mutation('submitRegularExercise', practiceSubmission(practice, 'corrupt', true))
   ).rejects.toMatchObject({
-    data: { code: 'INTERNAL_SERVER_ERROR' },
+    data: { code: 'CONFLICT' },
   });
   await expect(
     runtimeCaller.mutation('switchRegularExerciseToStep', practiceSession(practice.sessionId))
   ).rejects.toMatchObject({
-    data: { code: 'INTERNAL_SERVER_ERROR' },
+    data: { code: 'CONFLICT' },
   });
   expect(exerciseRows()).toEqual(before);
 });
@@ -1145,15 +1145,15 @@ test.each(['practiceTestL1Unknown', 'test1', 'practiceEasyV1Beginner1L1TerminalT
     const before = exerciseRows();
     await expect(
       runtimeCaller.mutation('submitRegularExercise', practiceSubmission(initial, 'invalid-identity', false))
-    ).rejects.toMatchObject({ data: { code: 'INTERNAL_SERVER_ERROR' } });
+    ).rejects.toMatchObject({ data: { code: 'CONFLICT' } });
     expect(exerciseRows()).toEqual(before);
     await expect(
       runtimeCaller.mutation('switchRegularExerciseToStep', practiceSession(initial.sessionId))
-    ).rejects.toMatchObject({ data: { code: 'INTERNAL_SERVER_ERROR' } });
+    ).rejects.toMatchObject({ data: { code: 'CONFLICT' } });
     expect(exerciseRows()).toEqual(before);
     await expect(
       runtimeCaller.mutation('nextExercise', { ...practiceSession(initial.sessionId), problemFormat: 'regular' })
-    ).rejects.toMatchObject({ data: { code: 'INTERNAL_SERVER_ERROR' } });
+    ).rejects.toMatchObject({ data: { code: 'CONFLICT' } });
     expect(exerciseRows()).toEqual(before);
   }
 );

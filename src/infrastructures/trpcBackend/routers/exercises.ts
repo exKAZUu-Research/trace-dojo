@@ -287,8 +287,9 @@ const ownedSession = (
     session.problemFormat !== format
   )
     throw new TRPCError({ code: 'UNAUTHORIZED' });
+  // CONFLICT makes an open page reload, and Start then replaces the session with a current problem.
   if (mode === 'practice' && !getPracticeProblemIds(courseId, lectureId).includes(session.problemId))
-    throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Session problem is outside its practice bank' });
+    throw new TRPCError({ code: 'CONFLICT', message: 'Session problem is outside its practice bank' });
   if (format === 'regular') {
     validateRegularState(session);
     // Fails closed when the stored problem does not belong to the session's mode, e.g. a practice ID in a challenge.
