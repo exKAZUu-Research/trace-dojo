@@ -17,6 +17,11 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
   lectureId: string;
   problemId: ProblemId;
 }> = async ({ params, session }) => {
+  if (
+    !Object.hasOwn(courseIdToLectureIds, params.courseId) ||
+    !Object.hasOwn(courseIdToLectureIndexToProblemIds, params.courseId)
+  )
+    notFound();
   const lectureIndex = courseIdToLectureIds[params.courseId]?.indexOf(params.lectureId);
   if (
     lectureIndex === undefined ||

@@ -486,6 +486,25 @@ static 型 変数名 = 値;`,
 }`,
     explanation: '計算.二倍(3) は 6 を返します。new 計算() でオブジェクトを作る必要はありません。',
   },
+  package: {
+    meaning: 'このファイルのクラスが属するパッケージ（クラスをまとめるグループ）を宣言します。',
+    syntax: 'package パッケージ名;',
+    example: `package 図形;
+
+public class 円 {
+}`,
+    explanation: '円は「図形」パッケージのクラスになります。ファイルの先頭に書きます。',
+  },
+  import: {
+    meaning: '別のパッケージのクラスを、パッケージ名を省いて使えるようにします。',
+    syntax: 'import パッケージ名.クラス名;',
+    example: `import 図形.円;
+
+public class Main {
+  円 c = new 円();
+}`,
+    explanation: '「図形」パッケージの円を、図形.円 と書かずに 円 だけで使えます。',
+  },
   ':': {
     meaning:
       'switch の case や default の後ろに付けて、そこから実行する処理の始まりを示します。for (型 変数 : 配列) では、配列の要素を順に取り出すときの区切りに使います。',
