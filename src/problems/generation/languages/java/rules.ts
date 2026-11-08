@@ -2,6 +2,8 @@ import type { Node } from '@willbooster/web-tree-sitter';
 
 import type { Selector } from '../../types';
 import type { Role } from './mutations';
+import { operatorFamilies, operatorFamily, type OperatorSelector } from './operators';
+import { isVariableUse } from './sourceFacts';
 
 export type Emit = (node: Node | null | undefined, role?: Role, start?: number, end?: number) => void;
 interface Rule {
@@ -68,11 +70,14 @@ export const rules: Rule[] = [
       for (const child of meaningfulChildren(node)) emit(child);
     },
   },
-  {
-    selector: 'operator',
+  ...(Object.keys(operatorFamilies) as OperatorSelector[]).map((selector) => ({
+    selector,
     nodeTypes: ['binary_expression', 'unary_expression', 'assignment_expression', 'update_expression'],
-    collect: operators,
-  },
+    collect: (node: Node, emit: Emit) =>
+      operators(node, (token, role) => {
+        if (token && operatorFamily(token.text) === selector) emit(token, role);
+      }),
+  })),
   {
     selector: 'literal',
     nodeTypes: [
@@ -220,41 +225,4 @@ function emitArguments(node: Node, emit: Emit): void {
   const children = meaningfulChildren(args);
   for (const child of children) emit(child);
   if (children.length > 0) emit(args, 'arguments', children[0].startIndex, children.at(-1)!.endIndex);
-}
-function isVariableUse(node: Node): boolean {
-  const parent = node.parent;
-  if (!parent) return false;
-  if (
-    [
-      'variable_declarator',
-      'formal_parameter',
-      'spread_parameter',
-      'catch_formal_parameter',
-      'enhanced_for_statement',
-    ].includes(parent.type) &&
-    parent.childForFieldName('name')?.id === node.id
-  )
-    return false;
-  if (['method_invocation', 'field_access'].includes(parent.type))
-    return parent.childForFieldName('object')?.id === node.id;
-  return [
-    'enhanced_for_statement',
-    'switch_label',
-    'ternary_expression',
-    'cast_expression',
-    'instanceof_expression',
-    'dimensions_expr',
-    'binary_expression',
-    'unary_expression',
-    'update_expression',
-    'assignment_expression',
-    'argument_list',
-    'array_access',
-    'array_initializer',
-    'return_statement',
-    'throw_statement',
-    'parenthesized_expression',
-    'variable_declarator',
-    'for_statement',
-  ].includes(parent.type);
 }

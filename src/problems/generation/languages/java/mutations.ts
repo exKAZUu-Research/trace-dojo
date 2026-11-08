@@ -1,99 +1,178 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { GenerationLimitError, MAX_REPLACEMENTS } from '../../limits';
+import type { Selector } from '../../types';
+import { operatorReplacements, operatorsLearned } from './operators';
+import { expressionType, isVariableUse, isVoidMethod, relatedClasses, visibleBindings } from './sourceFacts';
 
-const operatorChanges: Record<string, string[]> = {
-  '+': ['-', '*'],
-  '-': ['+', '*'],
-  '*': ['+', '/'],
-  '/': ['*', '+'],
-  '%': ['/', '*'],
-  '<': ['<=', '>', '+'],
-  '<=': ['<', '>='],
-  '>': ['>=', '<'],
-  '>=': ['>', '<='],
-  '==': ['!=', '='],
-  '!=': ['=='],
-  '&&': ['||'],
-  '||': ['&&'],
-  '!': [''],
-  '=': ['+=', '-='],
-  '+=': ['-=', '='],
-  '-=': ['+=', '='],
-  '*=': ['+=', '='],
-  '++': ['--', ' += 0'],
-  '--': ['++', ' -= 0'],
-};
 const turtleMethods = [
   ['forward', 'backward', 'turnLeft', 'turnRight'],
   ['前に進む', '後に戻る', '左を向く', '右を向く'],
 ];
 export type Role = 'expression' | 'operator' | 'keyword' | 'type' | 'name' | 'arguments' | 'modifier' | 'statement';
 
-export function replacementsFor(node: Node, role: Role, text: string): string[] {
-  if (role === 'operator') return operatorChanges[text] ?? [];
-  if (role === 'modifier') return [''];
-  if (role === 'keyword') return text === 'continue' ? ['break'] : text === 'break' ? ['continue'] : [];
-  if (role === 'type') return [...declaredTypes(node), 'int', 'boolean'].filter((value) => value !== text);
-  if (role === 'name')
-    return (turtleMethods.find((group) => group.includes(text)) ?? []).filter((value) => value !== text);
-  if (role === 'arguments') return argumentChanges(node, text);
-  if (role === 'statement') return text.startsWith('throw ') ? ['return'] : [];
-  const result = expressionChanges(node, text);
-  return [...new Set(result)].filter((value) => value !== text);
+/** Each edit has its own learning prerequisites, independent of which selector exposed the range. */
+export function replacementsFor(node: Node, role: Role, text: string, learned: readonly Selector[]): string[] {
+  if (role === 'operator') return operatorReplacements(node, learned);
+  if (role === 'keyword') return jumpChanges(node, learned);
+  if (role === 'modifier') return learned.includes('modifier') ? modifierChanges(node) : [];
+  if (role === 'type') return typeChanges(node, text, learned);
+  if (role === 'name') return methodChanges(node, text, learned);
+  if (!operatorsLearned(node, learned)) return [];
+  if (role === 'statement') return statementChanges(node, learned);
+  if (role === 'arguments') return invocationLearned(node.parent, learned) ? argumentChanges(node, text) : [];
+  return [...new Set(expressionChanges(node, text, learned))].filter((value) => value !== text);
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Each independent syntax case contributes alternatives to the same expression.
-// code-gauge-allow functionNcss 31 -- Keep the small expression alternatives together for comparison.
-function expressionChanges(node: Node, text: string): string[] {
-  const results = ['0', '1', 'true', 'false', ...visibleNames(node)];
-  if (/^\d+$/.test(text)) results.push(String(Number(text) + 1), String(Number(text) - 1), '2');
-  const left = node.childForFieldName('left');
-  const right = node.childForFieldName('right');
-  if (node.type === 'binary_expression' && left && right) results.push(left.text, right.text);
-  if (node.type === 'unary_expression') {
-    const operand = node.childForFieldName('operand') ?? node.namedChildren.at(-1);
-    if (operand) results.push(operand.text);
+function expressionChanges(node: Node, text: string, learned: readonly Selector[]): string[] {
+  const results: string[] = [];
+  if (learned.includes('literal')) results.push(...literalChanges(node, learned));
+  // Reference confusion uses compatible visible bindings, never arbitrary constants or unknown types.
+  if (learned.includes('variableReference') && node.type === 'identifier' && isVariableUse(node)) {
+    const type = expressionType(node);
+    if (type)
+      results.push(
+        ...visibleBindings(node)
+          .filter((b) => b.type === type)
+          .map((b) => b.name)
+      );
   }
-  if (['identifier', 'field_access', 'method_invocation', 'binary_expression'].includes(node.type))
-    results.push(`!(${text})`, `${text} + 1`);
-  if (node.type === 'field_access') {
-    const field = node.childForFieldName('field');
-    if (field) results.push(field.text);
-  }
-  if (node.type === 'method_invocation' || node.type === 'object_creation_expression')
-    results.push(...invocationChanges(node));
-  if (node.type === 'array_access') {
-    const array = node.childForFieldName('array');
-    const index = node.childForFieldName('index');
-    const nestedIndex = array?.childForFieldName('index');
-    const nestedArray = array?.childForFieldName('array');
+  if (learned.includes('logicalOperator')) results.push(...logicalChanges(node));
+  if (learned.includes('member') && learned.includes('variableReference')) results.push(...shadowChanges(node));
+  if (invocationLearned(node, learned)) results.push(...invocationChanges(node, learned));
+  if (learned.includes('array') && node.type === 'array_access') {
+    const array = node.childForFieldName('array'),
+      index = node.childForFieldName('index');
+    const nestedIndex = array?.childForFieldName('index'),
+      nestedArray = array?.childForFieldName('array');
     if (index && nestedIndex && nestedArray) results.push(`${nestedArray.text}[${index.text}][${nestedIndex.text}]`);
   }
-  if (node.type === 'assignment_expression' && left && right) {
-    for (const name of visibleNames(right)) results.push(`${left.text} = ${name}`);
-  }
-  return results;
+  return results.filter((value) => value !== text);
 }
 
-function invocationChanges(node: Node): string[] {
+function statementChanges(node: Node, learned: readonly Selector[]): string[] {
+  if (!isVoidMethod(node) || !learned.includes('return')) return [];
+  return node.type === 'return_statement' ? [''] : learned.includes('throw') ? ['return'] : [];
+}
+
+/** Omitting this matters only when a local or parameter shadows this exact field. */
+function shadowChanges(node: Node): string[] {
+  if (node.type !== 'field_access' || node.childForFieldName('object')?.text !== 'this') return [];
+  const field = node.childForFieldName('field')?.text;
+  const type = expressionType(node);
+  return field && type && visibleBindings(node).some((b) => b.kind !== 'field' && b.name === field && b.type === type)
+    ? [field]
+    : [];
+}
+
+/** Off-by-one/count mistakes are bounded decimal ints; preserve radix, suffix and precision by skipping unsupported literals. */
+function literalChanges(node: Node, learned: readonly Selector[]): string[] {
+  if (node.type === 'true' || node.type === 'false') return [node.type === 'true' ? 'false' : 'true'];
+  if (node.type !== 'decimal_integer_literal' || !/^\d+$/.test(node.text)) return [];
+  const n = Number(node.text);
+  if (!Number.isSafeInteger(n) || n > 2_147_483_647) return [];
+  return [n + 1, n - 1, 0, 1, 2]
+    .filter((value) => value <= 2_147_483_647 && (value >= 0 || learned.includes('arithmeticOperator')))
+    .map(String);
+}
+
+/** Dropping a conjunct/disjunct or negation tests Boolean reasoning, even when an if header owns the candidate. */
+function logicalChanges(node: Node): string[] {
+  if (expressionType(node) !== 'boolean') return [];
+  const operator = node.childForFieldName('operator')?.text ?? node.children.find((child) => child?.text === '!')?.text;
+  if (node.type === 'binary_expression' && (operator === '&&' || operator === '||')) {
+    const left = node.childForFieldName('left'),
+      right = node.childForFieldName('right');
+    return left && right ? [left.text, right.text] : [];
+  }
+  if (node.type === 'unary_expression' && operator === '!') {
+    const operand = node.childForFieldName('operand') ?? node.namedChildren.at(-1);
+    return operand ? [operand.text] : [];
+  }
+  return [];
+}
+
+function typeChanges(node: Node, text: string, learned: readonly Selector[]): string[] {
+  if (node.parent?.type === 'object_creation_expression' && learned.includes('construction'))
+    return relatedClasses(node, text);
+  if (
+    node.parent?.namedChildren.some(
+      (child) => child?.type === 'variable_declarator' && child.childForFieldName('dimensions')
+    )
+  )
+    return [];
+  // Narrow fractional storage to int; do not introduce double into an integer-only exercise.
+  if (
+    learned.includes('variableDeclaration') &&
+    learned.includes('arithmeticOperator') &&
+    ['local_variable_declaration', 'field_declaration'].includes(node.parent?.type ?? '')
+  )
+    return text === 'double' ? ['int'] : [];
+  return [];
+}
+
+function methodChanges(node: Node, text: string, learned: readonly Selector[]): string[] {
+  if (!learned.includes('call') || node.parent?.type !== 'method_invocation') return [];
+  const receiver = node.parent.childForFieldName('object');
+  if (!receiver || expressionType(receiver) !== 'Turtle') return [];
+  return (turtleMethods.find((group) => group.includes(text)) ?? []).filter((value) => value !== text);
+}
+
+function modifierChanges(node: Node): string[] {
+  const declaration = node.parent?.parent;
+  if (!declaration) return [];
+  const member = ['method_declaration', 'field_declaration'].includes(declaration.type);
+  // Static omission changes shared state/dispatch; access changes and final omission test member/local restrictions.
+  if (node.text === 'static' && member) return [''];
+  if (member && (node.text === 'public' || node.text === 'private'))
+    return [node.text === 'public' ? 'private' : 'public'];
+  if (node.text === 'final' && (member || declaration.type === 'local_variable_declaration')) return [''];
+  return [];
+}
+
+function jumpChanges(node: Node, learned: readonly Selector[]): string[] {
+  if (!learned.includes('break') || !learned.includes('continue') || !['break', 'continue'].includes(node.text))
+    return [];
+  if (node.parent?.namedChildren.some((child) => child?.type === 'identifier')) return [];
+  for (let scope = node.parent?.parent; scope; scope = scope.parent) {
+    if (['class_body', 'lambda_expression', 'method_declaration', 'constructor_declaration'].includes(scope.type))
+      return [];
+    if (node.text === 'break' && scope.type === 'switch_expression') return [];
+    if (['for_statement', 'enhanced_for_statement', 'while_statement', 'do_statement'].includes(scope.type))
+      return [node.text === 'break' ? 'continue' : 'break'];
+  }
+  return [];
+}
+
+function invocationLearned(node: Node | null | undefined, learned: readonly Selector[]): boolean {
+  return (
+    !!node &&
+    (node.type === 'object_creation_expression'
+      ? learned.includes('construction')
+      : ['method_invocation', 'explicit_constructor_invocation'].includes(node.type) && learned.includes('call'))
+  );
+}
+
+function invocationChanges(node: Node, learned: readonly Selector[]): string[] {
   const results: string[] = [];
   const args = node.childForFieldName('arguments');
   if (args)
     for (const value of argumentChanges(args, args.text.slice(1, -1)))
       results.push(patch(node, args.startIndex + 1, args.endIndex - 1, value));
   const type = node.childForFieldName('type');
-  if (type) for (const name of declaredTypes(node)) results.push(patch(node, type.startIndex, type.endIndex, name));
+  if (type && learned.includes('construction'))
+    for (const name of relatedClasses(node, type.text)) results.push(patch(node, type.startIndex, type.endIndex, name));
   return results;
 }
 
+/** Missing arguments and pair swaps model arity/order mistakes; the interpreter checks whether they affect the exercise. */
 function argumentChanges(node: Node, text: string): string[] {
-  const arguments_ = node.namedChildren.filter((child): child is Node => !!child && !child.type.endsWith('comment'));
-  const count = arguments_.length;
+  const args = node.namedChildren.filter((child): child is Node => !!child && !child.type.endsWith('comment'));
+  const count = args.length;
   if (1 + count + (count * (count - 1)) / 2 > MAX_REPLACEMENTS)
     throw new GenerationLimitError('Too many argument permutations');
-  const values = arguments_.map((child) => child.text);
-  const results = [''];
+  const values = args.map((child) => child.text),
+    results = [''];
   for (let i = 0; i < values.length; i++) {
     results.push(values.filter((_, index) => index !== i).join(', '));
     for (let j = i + 1; j < values.length; j++) {
@@ -104,51 +183,6 @@ function argumentChanges(node: Node, text: string): string[] {
   }
   return [...new Set(results)].filter((value) => value !== text);
 }
-
-/** Collect only lexically visible earlier locals, enclosing parameters and fields; execution validates type compatibility. */
-// code-gauge-allow functionCognitiveComplexity 24 -- Lexical scope traversal must stop at the class boundary while collecting locals, parameters, and fields.
-function visibleNames(node: Node): string[] {
-  const names = new Set<string>();
-  for (let scope = node.parent; scope; scope = scope.parent) {
-    if (scope.type === 'block' || scope.type === 'for_statement') {
-      for (const declaration of scope.namedChildren) {
-        if (declaration?.type !== 'local_variable_declaration' || declaration.endIndex > node.startIndex) continue;
-        addDeclarators(declaration, names);
-      }
-    }
-    if (scope.type === 'method_declaration' || scope.type === 'constructor_declaration') addParameters(scope, names);
-    if (scope.type === 'class_body') {
-      for (const declaration of scope.namedChildren)
-        if (declaration?.type === 'field_declaration') addDeclarators(declaration, names);
-      break;
-    }
-  }
-  return [...names];
-}
-
-function addParameters(scope: Node, names: Set<string>): void {
-  for (const parameter of scope.childForFieldName('parameters')?.namedChildren ?? []) {
-    const name = parameter?.childForFieldName('name');
-    if (name) names.add(name.text);
-  }
-}
-
-function addDeclarators(declaration: Node, names: Set<string>): void {
-  for (const child of declaration.namedChildren) {
-    const name = child?.type === 'variable_declarator' ? child.childForFieldName('name') : undefined;
-    if (name) names.add(name.text);
-  }
-}
-
-function declaredTypes(node: Node): string[] {
-  let root = node;
-  while (root.parent) root = root.parent;
-  return root.namedChildren
-    .filter((child) => child?.type === 'class_declaration')
-    .map((child) => child?.childForFieldName('name')?.text ?? '')
-    .filter(Boolean);
-}
-
 function patch(node: Node, start: number, end: number, replacement: string): string {
   return node.text.slice(0, start - node.startIndex) + replacement + node.text.slice(end - node.startIndex);
 }

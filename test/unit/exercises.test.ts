@@ -1567,12 +1567,12 @@ const selectBugFixture = async (
   kind: 'logical' | 'syntax'
 ): Promise<z.infer<typeof catalogEntrySchema> & { id: string }> => {
   const { generationPolicies } = await import('../../src/problems/courses/generationPolicies');
-  generationPolicies.test = kind === 'syntax' ? [['for'], ['for']] : [['literal'], ['literal']];
-  const id = 'fillInBlank1';
+  generationPolicies.test = kind === 'syntax' ? [['construction'], ['construction']] : [['literal'], ['literal']];
+  const id = kind === 'syntax' ? 'multiObject1Blank' : 'fillInBlank1';
   const correctProgram = blankPrograms[id].replaceAll(/@\[([\s\S]*?)\]@/g, '$1').trim();
   const generated = generateJavaExercise({
     source: correctProgram,
-    selectors: kind === 'syntax' ? ['for'] : ['literal'],
+    selectors: kind === 'syntax' ? ['construction'] : ['literal'],
     format: 'bugFix',
     bugKind: kind,
     seed: 'fixture',

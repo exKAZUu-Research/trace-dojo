@@ -10,7 +10,15 @@ const source = wrap('Turtle 亀 = new Turtle(); for (int i = 0; i < 3; i++) { �
 
 // These assertions exercise source spans exposed by the authoring API, not parser-node implementation details.
 test('overlapping selectors do not multiply ranges or change seeded selection', () => {
-  const selectors: Selector[] = ['for', 'variableDeclaration', 'operator'];
+  const selectors: Selector[] = [
+    'for',
+    'variableDeclaration',
+    'comparisonOperator',
+    'arithmeticOperator',
+    'logicalOperator',
+    'assignmentOperator',
+    'updateOperator',
+  ];
   const candidates = collectJavaCandidates(source, selectors);
   const ranges = candidates.map(({ start, end }) => `${start}:${end}`);
   expect(new Set(ranges).size).toBe(ranges.length);
@@ -20,7 +28,18 @@ test('overlapping selectors do not multiply ranges or change seeded selection', 
   for (let seed = 0; seed < 20; seed++) {
     const input = { source, format: 'fillInBlank' as const, seed: String(seed) };
     expect(generateJavaExercise({ ...input, selectors })).toEqual(
-      generateJavaExercise({ ...input, selectors: [...selectors, 'operator', 'for'] })
+      generateJavaExercise({
+        ...input,
+        selectors: [
+          ...selectors,
+          'comparisonOperator',
+          'arithmeticOperator',
+          'logicalOperator',
+          'assignmentOperator',
+          'updateOperator',
+          'for',
+        ],
+      })
     );
   }
 });
@@ -51,9 +70,17 @@ test('keywords and declared types are usable holes and leave outer delimiters in
   const text = wrap(
     'int n = 1; Turtle t = new Turtle(); if (n > 0) t.forward(); else t.backward(); switch(n) { case 1: break; default: break; }'
   );
-  const snippets = collectJavaCandidates(text, ['variableDeclaration', 'construction', 'if', 'switch', 'operator']).map(
-    ({ start, end }) => text.slice(start, end)
-  );
+  const snippets = collectJavaCandidates(text, [
+    'variableDeclaration',
+    'construction',
+    'if',
+    'switch',
+    'comparisonOperator',
+    'arithmeticOperator',
+    'logicalOperator',
+    'assignmentOperator',
+    'updateOperator',
+  ]).map(({ start, end }) => text.slice(start, end));
   for (const token of ['int', 'Turtle', 'new', 'if', 'else', 'switch', 'case', 'default'])
     expect(snippets).toContain(token);
   expect(snippets).not.toContain('=');
@@ -111,11 +138,13 @@ test('range selection is approximately uniform and duplicate rules cannot weight
 
 test('generation fails closed for empty policies, unavailable candidates and unsuccessful baselines', () => {
   expect(generateJavaExercise({ source, selectors: [], format: 'fillInBlank', seed: 'empty' })).toBeUndefined();
-  expect(generateJavaExercise({ source, selectors: ['throw'], format: 'bugFix', seed: 'missing' })).toBeUndefined();
+  expect(
+    generateJavaExercise({ source, selectors: ['throw', 'return'], format: 'bugFix', seed: 'missing' })
+  ).toBeUndefined();
   expect(
     generateJavaExercise({
       source: wrap('throw new RuntimeException();'),
-      selectors: ['throw'],
+      selectors: ['throw', 'return'],
       format: 'fillInBlank',
       seed: 'exception',
     })
@@ -133,8 +162,18 @@ test('generation fails closed for empty policies, unavailable candidates and uns
 test.each(['logical', 'syntax'] as const)('%s mutants fail grading while their original source passes', (bugKind) => {
   for (let seed = 0; seed < 12; seed++) {
     const result = generateJavaExercise({
-      source,
-      selectors: ['for', 'operator', 'call', 'literal'],
+      source: source.replace('new Turtle()', 'new Turtle(1, 2)'),
+      selectors: [
+        'construction',
+        'for',
+        'comparisonOperator',
+        'arithmeticOperator',
+        'logicalOperator',
+        'assignmentOperator',
+        'updateOperator',
+        'call',
+        'literal',
+      ],
       format: 'bugFix',
       bugKind,
       seed: String(seed),
@@ -179,7 +218,7 @@ const mechanisms: { name: string; source: string; selectors: Selector[]; matches
     source: wrap(
       'Turtle t = new Turtle(); try { go(t); t.forward(); } catch (RuntimeException e) { t.turnRight(); }'
     ).replace(/ } }$/, ' } static void go(Turtle t){ t.forward(); throw new RuntimeException(); } }'),
-    selectors: ['throw'],
+    selectors: ['throw', 'return'],
     matches: /return;/,
   },
 ];
@@ -210,7 +249,7 @@ test.each([
   {
     name: 'reference alias',
     body: 'Turtle a = new Turtle(); Turtle b = new Turtle(2, 2); Turtle alias = a; alias.forward();',
-    selectors: ['variableDeclaration'] as Selector[],
+    selectors: ['variableDeclaration', 'variableReference'] as Selector[],
     changed: 'Turtle alias = b',
   },
   {
@@ -298,13 +337,13 @@ test.each([
     source:
       wrap('A a = new A(2); a.go();') +
       ' class A { int n; Turtle t = new Turtle(); A(int n){ this.n = n; } void go(){ for(int i=0;i<n;i++) t.forward(); } }',
-    selectors: ['member'] as Selector[],
+    selectors: ['member', 'variableReference'] as Selector[],
     changed: ' n = n;',
   },
   {
     name: 'predicate pruning',
     source: wrap('Turtle t = new Turtle(); int n = -1; if(n >= 0 && n <= 2) t.forward();'),
-    selectors: ['if'] as Selector[],
+    selectors: ['if', 'logicalOperator', 'comparisonOperator'] as Selector[],
     changed: 'if(n <= 2)',
   },
 ])('generates a logical $name repair', ({ source: text, selectors, changed }) => {
@@ -400,7 +439,11 @@ test('mutation alternatives never inject placeholder identifiers into real sourc
     'variableReference',
     'if',
     'for',
-    'operator',
+    'comparisonOperator',
+    'arithmeticOperator',
+    'logicalOperator',
+    'assignmentOperator',
+    'updateOperator',
     'call',
     'throw',
     'return',
@@ -425,7 +468,7 @@ test.each([
   const text = wrap(`Turtle t = new Turtle(); if (true ${original} false) t.forward();`);
   const result = generateJavaExercise({
     source: text,
-    selectors: ['operator'],
+    selectors: ['logicalOperator'],
     format: 'bugFix',
     seed: 'boolean-swap',
   });
@@ -438,4 +481,143 @@ test.each([
     detail: 'The final state differs from the expected one.',
   });
   expect(gradeFillInBlankCode(result, text)).toEqual({ status: 'correct' });
+});
+
+test('arithmetic selection excludes comparison and logical tokens in nested conditions', () => {
+  const text = wrap('int a = 1; if (a + 1 > 0 && a < 3) new Turtle().forward();');
+  const candidates = collectJavaCandidates(text, ['arithmeticOperator']);
+  expect(candidates.map((c) => text.slice(c.start, c.end))).toEqual(['+']);
+  for (let seed = 0; seed < 8; seed++) {
+    const blank = generateJavaExercise({
+      source: text,
+      selectors: ['arithmeticOperator'],
+      format: 'fillInBlank',
+      seed: String(seed),
+    });
+    expect(blank?.displayProgram).toContain('a 【1】 1 > 0 && a < 3');
+  }
+});
+
+test('whole conditions cannot bypass unlearned logical operators', () => {
+  const text = wrap('Turtle t = new Turtle(); if (true && false) t.forward();');
+  expect(
+    generateJavaExercise({ source: text, selectors: ['if', 'arithmeticOperator'], format: 'bugFix', seed: 'guard' })
+  ).toBeUndefined();
+  const candidates = collectJavaCandidates(text, ['if', 'logicalOperator']);
+  expect(candidates.find((c) => text.slice(c.start, c.end) === 'true && false')?.replacements).toContain('true');
+});
+
+test('reference mistakes respect nearest declarations, dimensions, and static context', () => {
+  const text = `class Main { int instance = 1; static int hidden = 2;
+    public static void main(String[] args) {
+      int a = 1; int b = 2; int[] ns = {1}; int other[] = {2}; boolean hidden = true; { int closed = 3; }
+      int n = a; int later = 4; new Turtle(n, 0).forward();
+    }
+  }`;
+  const candidates = collectJavaCandidates(text, ['variableReference']);
+  const at = text.indexOf('= a;') + 2;
+  const replacements = candidates.find((c) => c.start === at)?.replacements;
+  expect(replacements).toContain('b');
+  expect(replacements).not.toContain('hidden');
+  expect(replacements).not.toContain('instance');
+  expect(replacements).not.toContain('ns');
+  for (const excluded of ['true', 'false', '0', '1', 'n', 'later', 'closed', 'other'])
+    expect(replacements).not.toContain(excluded);
+});
+
+test('numeric edits distinguish signs, concatenation, and nondecimal literals', () => {
+  const text = wrap('int n = 2; int v = -n; String s = "a" + "b"; long big = 9007199254740993L; int hex = 0x10;');
+  const candidates = collectJavaCandidates(text, ['arithmeticOperator', 'literal']);
+  const sign = candidates.find((c) => text.slice(c.start, c.end) === '-');
+  expect(sign?.replacements).toEqual(['+']);
+  for (const spelling of ['+', '9007199254740993L', '0x10'])
+    expect(candidates.find((c) => text.slice(c.start, c.end) === spelling)?.replacements).toEqual([]);
+});
+
+test('numeric declaration type confusion produces a repairable truncation error', () => {
+  const text = wrap('double n = 3; double fraction = n / 2; Turtle t = new Turtle(); if (fraction > 1) t.forward();');
+  const candidates = collectJavaCandidates(text, ['variableDeclaration', 'arithmeticOperator']);
+  expect(candidates.find((c) => text.slice(c.start, c.end) === 'double')?.replacements).toContain('int');
+  expect(candidates.flatMap((c) => c.replacements)).not.toContain('boolean');
+  const generated = generateJavaExercise({
+    source: text,
+    selectors: ['variableDeclaration', 'arithmeticOperator'],
+    format: 'bugFix',
+    seed: 'numeric-type',
+  });
+  expect(generated).toBeDefined();
+  if (!generated) throw new Error('Missing numeric mutation');
+  expect(gradeFillInBlankCode(generated, text.replace('double n', 'int n'))).toMatchObject({
+    status: 'incorrect',
+    detail: 'The final state differs from the expected one.',
+  });
+  expect(gradeFillInBlankCode(generated, text)).toEqual({ status: 'correct' });
+});
+
+test('jump swaps respect switch targets and both learned jump constructs', () => {
+  const text = wrap('for(int i=0;i<2;i++){ switch(i){ case 0: break; default: break; } continue; }');
+  const onlyBreak = collectJavaCandidates(text, ['break']);
+  expect(onlyBreak).toHaveLength(2);
+  expect(onlyBreak.every((c) => c.replacements.length === 0)).toBe(true);
+  const both = collectJavaCandidates(text, ['break', 'continue']);
+  expect(collectJavaCandidates(wrap('for(;;){break;}'), ['break'])[0]?.replacements).toEqual([]);
+  expect(both).toHaveLength(3);
+  expect(both.filter((c) => text.slice(c.start, c.end) === 'break').every((c) => c.replacements.length === 0)).toBe(
+    true
+  );
+  expect(both.find((c) => text.slice(c.start, c.end) === 'continue')?.replacements).toContain('break');
+});
+
+test('semantic mutation prerequisites apply even when a different selector owns the range', () => {
+  const text = wrap('int a=1; int b=2; int n=a;');
+  const candidates = collectJavaCandidates(text, ['variableDeclaration']);
+  expect(candidates.find((c) => text.slice(c.start, c.end) === 'a')?.replacements).toEqual([]);
+  const shadow = wrap('A a=new A();') + ' class A { int x; A(int x){ this.x=x; } }';
+  expect(
+    collectJavaCandidates(shadow, ['member']).find((c) => shadow.slice(c.start, c.end) === 'this.x')?.replacements
+  ).not.toContain('x');
+  const throwing = wrap('throw new RuntimeException();');
+  expect(
+    collectJavaCandidates(throwing, ['throw']).find((c) => throwing.slice(c.start, c.end).startsWith('throw '))
+      ?.replacements
+  ).toEqual([]);
+});
+
+test('construction mistakes use related classes rather than arbitrary declarations', () => {
+  const text = wrap('A a=new B();') + ' class A {} class B extends A {} class Unrelated {}';
+  const candidates = collectJavaCandidates(text, ['construction']);
+  const type = candidates.find((c) => text.slice(c.start, c.end) === 'B');
+  expect(type?.replacements).toContain('A');
+  expect(type?.replacements).not.toContain('Unrelated');
+  expect(type?.replacements).not.toContain('int');
+});
+
+test.each([
+  {
+    source: 'class Main { Turtle n; Turtle t; void f(int[] ns){ for(int n : ns){ int x = n; } } }',
+    reference: '= n;',
+    forbidden: 't',
+  },
+  {
+    source: 'class Main { int e; int x; void f(){ try {} catch(RuntimeException e){ throw e; } } }',
+    reference: 'throw e;',
+    forbidden: 'x',
+  },
+])(
+  'unsupported binding scopes cannot fall back to an outer type: $reference',
+  ({ source: text, reference, forbidden }) => {
+    const start = text.indexOf(reference) + reference.indexOf(reference === '= n;' ? 'n' : 'e');
+    const candidate = collectJavaCandidates(text, ['variableReference']).find((c) => c.start === start);
+    expect(candidate).toBeDefined();
+    expect(candidate?.replacements).not.toContain(forbidden);
+  }
+);
+
+test('a member name is not a same-spelled local reference', () => {
+  const text = 'class Main { int n; void f(){ Turtle n = new Turtle(); Turtle t = new Turtle(); this.n = 1; } }';
+  const candidate = collectJavaCandidates(text, ['member', 'variableReference']).find(
+    (c) => c.start === text.indexOf('this.n') + 5
+  );
+  expect(candidate).toBeDefined();
+  expect(candidate?.replacements).toEqual([]);
 });

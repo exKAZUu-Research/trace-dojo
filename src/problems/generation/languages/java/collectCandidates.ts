@@ -14,7 +14,7 @@ export function collectJavaCandidates(source: string, selectors: readonly Select
   const enabled = rules.filter((rule) => selectors.includes(rule.selector));
   return parseSource(parser, source, { identifier: '名前' }, (root) => {
     const candidates: Candidate[] = [];
-    const emit = emitter(source, candidates);
+    const emit = emitter(source, candidates, selectors);
     const stack = [root];
     while (stack.length > 0) {
       const node = stack.pop()!;
@@ -29,7 +29,7 @@ export function collectJavaCandidates(source: string, selectors: readonly Select
 
 /** Outer header parentheses and statement semicolons stay visible. Expression punctuation stays inside whole-expression candidates. */
 // code-gauge-allow functionCognitiveComplexity 17 -- Range normalization keeps all boundary checks adjacent to the source slice.
-function emitter(source: string, candidates: Candidate[]): Emit {
+function emitter(source: string, candidates: Candidate[], selectors: readonly Selector[]): Emit {
   return (original, role = 'expression', start = original?.startIndex, end = original?.endIndex) => {
     if (!original || start === undefined || end === undefined) return;
     const node = unwrap(original, start, end);
@@ -42,7 +42,7 @@ function emitter(source: string, candidates: Candidate[]): Emit {
     while (end > start && /\s/.test(source[end - 1])) end--;
     if (source[end - 1] === ';') end--;
     if (start >= end) return;
-    candidates.push({ start, end, replacements: replacementsFor(node, role, source.slice(start, end)) });
+    candidates.push({ start, end, replacements: replacementsFor(node, role, source.slice(start, end), selectors) });
   };
 }
 
