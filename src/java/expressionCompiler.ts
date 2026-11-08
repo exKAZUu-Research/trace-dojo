@@ -1,46 +1,69 @@
-// code-gauge-allow-file fileNcss 453 -- The expression compiler keeps one method per expression kind together.
-import type { ArrayInitializer, BinaryOperator, Expression, Span } from './ast';
+import type { ArrayInitializer, BinaryOperator, Expression, PatternBinding, Span } from './ast';
+import { box, boxedTypeOf, unbox } from './builtinWrappers';
 import {
   type Compiled,
   type CompiledValue,
-  CompilerBase,
   constantValue,
   type Eval,
   type MethodContext,
   type Reference,
+  type Scope,
 } from './compilerBase';
+import { unboxedTypeOf } from './conversions';
+import { declarationKey } from './definiteAssignment';
 import { binaryOperation, castOperation, conditionalType, unaryOperation } from './operators';
+import { bindingsWhen } from './patternBindings';
 import { booleanConstants } from './reachability';
-import { type Frame, throwBuiltin, UNASSIGNED } from './runtime';
+import { ReferenceCompiler, thisValue } from './referenceCompiler';
+import { type Frame } from './runtime';
 import {
   BOOLEAN,
   CHAR,
-  type ClassInfo,
   DOUBLE,
-  type FieldInfo,
+  FLOAT,
   INT,
   isCastable,
   isNumeric,
   isPrimitive,
   isReference,
+  isWidening,
   type JavaType,
-  type MethodInfo,
+  LONG,
   NULL,
+  sameType,
   typeName,
 } from './types';
-import { defaultValue, JavaArray, JavaObject, JavaString, toInt32, type Value } from './values';
+import {
+  charToString,
+  defaultValue,
+  formatDouble,
+  formatFloat,
+  JavaArray,
+  JavaString,
+  toInt32,
+  type Value,
+} from './values';
 
 /** Type-checks expressions and compiles them into closures. */
-export abstract class ExpressionCompiler extends CompilerBase {
+export abstract class ExpressionCompiler extends ReferenceCompiler {
+  protected abstract compileNew(context: MethodContext, expression: Extract<Expression, { kind: 'new' }>): Compiled;
+
+  protected abstract compileCall(context: MethodContext, expression: Extract<Expression, { kind: 'call' }>): Compiled;
+
   protected compileCondition(context: MethodContext, expression: Expression): (frame: Frame) => boolean {
-    const value = this.compileValue(context, expression);
+    const value = this.operand(this.compileValue(context, expression));
     if (value.type.kind !== 'boolean') {
       this.error(expression, `条件には boolean 型の式が必要ですが、${typeName(value.type)} 型の式が書かれています。`);
     }
     return value.run as (frame: Frame) => boolean;
   }
 
-  protected compileValue(context: MethodContext, expression: Expression, allowsVoid = false): CompiledValue {
+  protected compileValue(
+    context: MethodContext,
+    expression: Expression,
+    allowsVoid = false,
+    keepsErasure = false
+  ): CompiledValue {
     const compiled = this.compileExpression(context, expression);
     if (compiled.kind === 'class') {
       this.error(expression, `${compiled.cls.name} は値として使えません。`);
@@ -48,7 +71,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (compiled.type.kind === 'void' && !allowsVoid) {
       this.error(expression, '戻り値のないメソッドの呼び出しは値として使えません。');
     }
-    return compiled;
+    if (!compiled.erasedType || keepsErasure) return compiled;
+    return allowsVoid ? { ...compiled, erasedType: undefined } : this.checkErased(compiled, compiled.type);
   }
 
   protected compileInitializer(
@@ -57,7 +81,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     type: JavaType
   ): Eval {
     if (initializer.kind === 'arrayInitializer') return this.compileArrayInitializer(context, initializer, type);
-    return this.convert(this.compileValue(context, initializer), type, 'assignment', initializer).run;
+    return this.convert(this.compileValueFor(context, initializer, type), type, 'assignment', initializer).run;
   }
 
   protected compileArrayInitializer(context: MethodContext, initializer: ArrayInitializer, type: JavaType): Eval {
@@ -98,24 +122,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return this.compileName(context, expression);
       }
       case 'this': {
-        if (context.isStatic) this.error(expression, 'static メソッドの中では this を使えません。');
-        return thisValue(context);
+        return this.compileThis(context, expression);
       }
       case 'fieldAccess': {
-        const reference = this.compileFieldReference(context, expression);
-        if ('kind' in reference) return reference;
-        const bound = reference.bind;
-        return {
-          kind: 'value',
-          type: reference.type,
-          run: (frame) => bound(frame).get(),
-          constant: reference.constant,
-        };
+        return readOf(this.compileFieldReference(context, expression));
       }
       case 'arrayAccess': {
-        const reference = this.compileReference(context, expression);
-        const bound = reference.bind;
-        return { kind: 'value', type: reference.type, run: (frame) => bound(frame).get() };
+        return readOf(this.compileReference(context, expression));
       }
       case 'call': {
         return this.compileCall(context, expression);
@@ -145,18 +158,134 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return this.compileCast(context, expression);
       }
       case 'instanceOf': {
-        const value = this.compileValue(context, expression.value);
-        const type = this.resolveType(expression.type);
-        if (type.kind !== 'class') this.error(expression.type, 'instanceof ではクラス型しか使えません。');
-        if (!isReference(value.type) || !isCastable(value.type, type, this.builtins.objectClass)) {
-          this.error(expression, `${typeName(value.type)} 型の値は ${typeName(type)} 型になりえません。`);
-        }
-        return {
-          kind: 'value',
-          type: BOOLEAN,
-          run: (frame) => frame.runtime.isInstance(value.run(frame), type.cls),
-        };
+        return this.compileInstanceOf(context, expression);
       }
+      case 'switchExpression': {
+        return this.compileSwitchExpression(context, expression);
+      }
+      case 'lambda':
+      case 'methodRef': {
+        return this.compileFunctionalExpression(context, expression);
+      }
+      case 'classLiteral': {
+        return this.compileClassLiteral(expression);
+      }
+      case 'typeRef': {
+        return this.compileTypeExpression(expression);
+      }
+    }
+  }
+
+  protected compileThis(context: MethodContext, expression: Extract<Expression, { kind: 'this' }>): Compiled {
+    if (context.isStatic)
+      this.noInstanceError(context, expression, 'this', 'static メソッドの中では this を使えません。');
+    if (!expression.qualifier) return thisValue(context);
+    const qualifier = this.resolveType(expression.qualifier);
+    const outer = qualifier.kind === 'class' ? this.outerInstanceValue(context, qualifier.cls, true) : undefined;
+    if (!outer) return this.error(expression, `ここでは ${typeName(qualifier)}.this を使えません。`);
+    return outer;
+  }
+
+  /** A lambda or a method reference, which only the type it is assigned to can give a functional interface. */
+  protected compileFunctionalExpression(
+    context: MethodContext,
+    expression: Extract<Expression, { kind: 'lambda' | 'methodRef' }>
+  ): Compiled {
+    const target = this.takeTargetType();
+    if (!target) {
+      const what = expression.kind === 'lambda' ? 'ラムダ式' : 'メソッド参照';
+      return this.error(expression, `${what}は、変数への代入やメソッドの引数など、型が決まる場所にしか書けません。`);
+    }
+    return this.compileFunctional(context, expression, target);
+  }
+
+  /** A class named for a method reference's expansion. */
+  protected compileTypeExpression(expression: Extract<Expression, { kind: 'typeRef' }>): Compiled {
+    const type = this.resolveType(expression.type);
+    if (type.kind !== 'class') return this.error(expression, `${typeName(type)} は値として使えません。`);
+    return { kind: 'class', cls: type.cls };
+  }
+
+  /** Compiles a lambda or a method reference into an object of the functional interface `target`. */
+  protected abstract compileFunctional(
+    context: MethodContext,
+    expression: Extract<Expression, { kind: 'lambda' | 'methodRef' }>,
+    target: JavaType
+  ): CompiledValue;
+
+  protected abstract compileSwitchExpression(
+    context: MethodContext,
+    expression: Extract<Expression, { kind: 'switchExpression' }>
+  ): Compiled;
+
+  protected compileInstanceOf(
+    context: MethodContext,
+    expression: Extract<Expression, { kind: 'instanceOf' }>
+  ): Compiled {
+    const value = this.compileValue(context, expression.value, false, true);
+    const type = this.resolveType(expression.type);
+    if (type.kind !== 'class' && type.kind !== 'array') {
+      this.error(expression.type, 'instanceof ではクラス型か配列型しか使えません。');
+    }
+    if (!isReference(value.type) || !isCastable(value.type, type, this.builtins.objectClass)) {
+      this.error(expression, `${typeName(value.type)} 型の値は ${typeName(type)} 型になりえません。`);
+    }
+    const test = (frame: Frame, tested: Value): boolean =>
+      type.kind === 'class'
+        ? frame.runtime.isInstance(tested, type.cls)
+        : tested instanceof JavaArray &&
+          isWidening({ kind: 'array', element: tested.elementType }, type, this.builtins.objectClass);
+    const { binding } = expression;
+    if (!binding) return { kind: 'value', type: BOOLEAN, run: (frame) => test(frame, value.run(frame)) };
+    const slot = context.locals.length;
+    context.locals.push({ name: binding.name, type });
+    context.patternSlots.push(slot);
+    context.declarationKeys.set(slot, declarationKey(binding.name, binding));
+    this.bindingSlots.set(binding, slot);
+    return {
+      kind: 'value',
+      type: BOOLEAN,
+      run: (frame) => {
+        const tested = value.run(frame);
+        if (!test(frame, tested)) return false;
+        frame.locals[slot] = tested;
+        return true;
+      },
+    };
+  }
+
+  /** Compiles code in a scope where the pattern variables `bindings` are in scope. */
+  protected withBindings<T>(context: MethodContext, bindings: readonly PatternBinding[], compile: () => T): T {
+    if (bindings.length === 0) return compile();
+    context.scopes.push({ names: new Map(), slots: [] });
+    try {
+      this.introduceBindings(context, bindings, false);
+      return compile();
+    } finally {
+      context.scopes.pop();
+    }
+  }
+
+  /**
+   * Brings pattern variables into the innermost scope, where they stay until it ends.
+   *
+   * @param outlivesStatement Whether the variables stay in scope after the statement that declares them, as those of
+   *   an `if` whose branch cannot complete normally do, so that the statement leaves their slots assigned.
+   */
+  protected introduceBindings(
+    context: MethodContext,
+    bindings: readonly PatternBinding[],
+    outlivesStatement = true
+  ): void {
+    const scope = context.scopes.at(-1) as Scope;
+    for (const binding of bindings) {
+      if (this.findLocal(context, binding.name) !== undefined) {
+        this.error(binding, `変数 ${binding.name} はすでに定義されています。`);
+      }
+      const slot = this.bindingSlots.get(binding) as number;
+      scope.names.set(binding.name, slot);
+      scope.slots.push(slot);
+      if (outlivesStatement) context.introducedPatternSlots.add(slot);
     }
   }
 
@@ -168,6 +297,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
           this.error(expression, `整数 ${literal.value} が int 型の範囲を超えています。`);
         return constantValue(INT, literal.value);
       }
+      case 'long': {
+        if (literal.value > 9_223_372_036_854_775_807n)
+          this.error(expression, `整数 ${literal.value} が long 型の範囲を超えています。`);
+        return constantValue(LONG, literal.value);
+      }
+      case 'float': {
+        return constantValue(FLOAT, literal.value);
+      }
       case 'double': {
         return constantValue(DOUBLE, literal.value);
       }
@@ -178,238 +315,24 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return constantValue(BOOLEAN, literal.value);
       }
       case 'string': {
-        let interned = this.internedStrings.get(literal.value);
-        if (!interned) {
-          interned = new JavaString(literal.value);
-          this.internedStrings.set(literal.value, interned);
-        }
-        return constantValue(this.builtins.stringClass.type, interned);
+        return constantValue(this.builtins.stringClass.type, this.internedString(literal.value));
       }
       case 'null': {
-        return { kind: 'value', type: NULL, run: () => {} };
+        return { kind: 'value', type: NULL, source: { path: 'null' }, run: () => {} };
       }
     }
-  }
-
-  protected compileName(context: MethodContext, expression: Extract<Expression, { kind: 'name' }>): Compiled {
-    const slot = this.findLocal(context, expression.name);
-    if (slot !== undefined) {
-      const type = context.locals[slot].type;
-      const constant = context.constants.get(slot);
-      if (constant !== undefined) {
-        return {
-          kind: 'value',
-          type,
-          constant,
-          run: (frame) => {
-            if (frame.locals[slot] === UNASSIGNED)
-              throw new Error(`Local ${expression.name} is read before assignment`);
-            return constant;
-          },
-        };
-      }
-      return {
-        kind: 'value',
-        type,
-        run: (frame) => {
-          const value = frame.locals[slot];
-          if (value === UNASSIGNED) throw new Error(`Local ${expression.name} is read before assignment`);
-          return value;
-        },
-      };
-    }
-    const reference = this.compileSimpleNameReference(context, expression);
-    if ('kind' in reference) return reference;
-    const bound = reference.bind;
-    return {
-      kind: 'value',
-      type: reference.type,
-      run: (frame) => bound(frame).get(),
-      constant: reference.constant,
-    };
-  }
-
-  /** Resolves `object.name`, or a simple name when `object` is `undefined`. */
-  /** Resolves a simple name that is not a local: a field of the current class or a class name. */
-  protected compileSimpleNameReference(
-    context: MethodContext,
-    name: Extract<Expression, { kind: 'name' }>
-  ): (Reference & { constant?: Value }) | Compiled {
-    const field = this.findField(context.cls, name.name);
-    if (field) {
-      if (!field.isStatic && context.isStatic) {
-        this.error(name, `static ではないフィールド ${name.name} は static メソッドの中から使えません。`);
-      }
-      return this.fieldReference(field, field.isStatic ? undefined : thisValue(context));
-    }
-    const cls = this.classes.get(name.name) ?? this.builtins.classes.get(name.name);
-    if (cls) return { kind: 'class', cls };
-    return this.error(name, `変数 ${name.name} が見つかりません。`);
-  }
-
-  /** Resolves `object.name`. */
-  protected compileFieldReference(
-    context: MethodContext,
-    access: Extract<Expression, { kind: 'fieldAccess' }>
-  ): (Reference & { constant?: Value }) | Compiled {
-    const { name } = access;
-    if (access.object === 'super') {
-      if (context.isStatic) this.error(access, 'static メソッドの中では super を使えません。');
-      const field = this.findField(context.cls.superclass as ClassInfo, name);
-      if (!field) return this.error(access, missingFieldMessage(context.cls.superclass as ClassInfo, name));
-      return notConstant(this.fieldReference(field, field.isStatic ? undefined : thisValue(context)));
-    }
-    const object = this.compileExpression(context, access.object);
-    if (object.kind === 'class') {
-      const field = this.findField(object.cls, name);
-      if (!field) return this.error(access, missingFieldMessage(object.cls, name));
-      if (!field.isStatic) this.error(access, `static ではないフィールド ${name} はクラス名から使えません。`);
-      this.checkAccess(context, field.owner, field.access, access, `フィールド ${name}`);
-      return this.fieldReference(field, undefined);
-    }
-    // Java folds a constant field only when it is named by its simple name or as TypeName.name.
-    return notConstant(this.compileMemberOfValue(context, access, object));
-  }
-
-  /** Resolves `object.name` where `object` is a value, including an array's `length`. */
-  protected compileMemberOfValue(
-    context: MethodContext,
-    access: Extract<Expression, { kind: 'fieldAccess' }>,
-    object: CompiledValue
-  ): Reference & { constant?: Value } {
-    const { name } = access;
-    if (object.type.kind === 'array') {
-      if (name !== 'length') this.error(access, `配列にフィールド ${name} はありません。`);
-      return arrayLengthReference(object);
-    }
-    if (object.type.kind !== 'class') {
-      return this.error(access, `${typeName(object.type)} 型の値にはフィールドがありません。`);
-    }
-    const field = this.findField(object.type.cls, name);
-    if (!field) return this.error(access, missingFieldMessage(object.type.cls, name));
-    this.checkAccess(context, field.owner, field.access, access, `フィールド ${name}`);
-    return this.fieldReference(field, field.isStatic ? undefined : object, field.isStatic ? object : undefined);
-  }
-
-  protected fieldReference(
-    field: FieldInfo,
-    receiver: CompiledValue | undefined,
-    ignoredReceiver?: CompiledValue
-  ): Reference & { constant?: Value } {
-    const { slot, owner } = field;
-    const constant = this.constantOf(field);
-    if (constant !== undefined) {
-      return {
-        type: field.type,
-        field,
-        constant,
-        bind: (frame) => {
-          // A receiver written before the field still runs, and an instance field still needs an object.
-          ignoredReceiver?.run(frame);
-          if (!field.isStatic && !((receiver as CompiledValue).run(frame) instanceof JavaObject)) {
-            throwBuiltin(frame, 'NullPointerException');
-          }
-          return {
-            get: () => constant,
-            set: () => {
-              throw new Error('A constant variable was assigned');
-            },
-          };
-        },
-      };
-    }
-    if (field.isStatic) {
-      const builtinConstant = field.constant;
-      return {
-        type: field.type,
-        field,
-        constant:
-          builtinConstant !== undefined && !(builtinConstant instanceof JavaObject) ? builtinConstant : undefined,
-        bind: (frame) => {
-          ignoredReceiver?.run(frame);
-          const values = frame.runtime.staticsOf(frame, owner);
-          return {
-            get: () => values[slot],
-            set: (value) => {
-              values[slot] = value;
-            },
-          };
-        },
-      };
-    }
-    const object = receiver as CompiledValue;
-    return {
-      type: field.type,
-      field,
-      bind: (frame) => {
-        const target = object.run(frame);
-        if (!(target instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
-        return {
-          get: () => target.fields[slot],
-          set: (value) => {
-            target.fields[slot] = value;
-          },
-        };
-      },
-    };
-  }
-
-  protected compileReference(context: MethodContext, target: Expression): Reference {
-    if (target.kind === 'arrayAccess') return this.compileArrayElementReference(context, target);
-    if (target.kind !== 'name' && target.kind !== 'fieldAccess') return this.error(target, '代入できない式です。');
-    const slot = target.kind === 'name' ? this.findLocal(context, target.name) : undefined;
-    if (slot !== undefined) return localReference(context, slot);
-    const reference =
-      target.kind === 'name'
-        ? this.compileSimpleNameReference(context, target)
-        : this.compileFieldReference(context, target);
-    if ('kind' in reference) return this.error(target, `${target.name} には代入できません。`);
-    return reference;
-  }
-
-  protected compileArrayElementReference(
-    context: MethodContext,
-    target: Extract<Expression, { kind: 'arrayAccess' }>
-  ): Reference {
-    const array = this.compileValue(context, target.array);
-    if (array.type.kind !== 'array') {
-      return this.error(target, `${typeName(array.type)} 型の値は配列ではありません。`);
-    }
-    const index = this.convert(this.compileValue(context, target.index), INT, 'invocation', target.index).run;
-    return {
-      type: array.type.element,
-      bind: (frame) => {
-        const values = array.run(frame);
-        if (!(values instanceof JavaArray)) throwBuiltin(frame, 'NullPointerException');
-        frame.temporaries.push(values);
-        let position: number;
-        try {
-          position = index(frame) as number;
-        } finally {
-          frame.temporaries.pop();
-        }
-        if (position < 0 || position >= values.values.length) {
-          throwBuiltin(
-            frame,
-            'ArrayIndexOutOfBoundsException',
-            `Index ${position} out of bounds for length ${values.values.length}`
-          );
-        }
-        return {
-          get: () => values.values[position],
-          set: (value) => {
-            values.values[position] = value;
-          },
-        };
-      },
-    };
   }
 
   protected compileAssignment(context: MethodContext, expression: Extract<Expression, { kind: 'assign' }>): Compiled {
-    const reference = this.compileReference(context, expression.target);
+    const reference =
+      (expression.operator === '=' ? this.prologueFieldWrite(context, expression.target) : undefined) ??
+      this.compileReference(context, expression.target);
     this.checkAssignable(context, expression.target, reference);
-    const value = this.compileValue(context, expression.value);
     const { bind, type } = reference;
+    const value =
+      expression.operator === '='
+        ? this.compileValueFor(context, expression.value, type)
+        : this.compileValue(context, expression.value);
     if (expression.operator === '=') {
       const converted = this.convert(value, type, 'assignment', expression.value).run;
       return {
@@ -424,72 +347,76 @@ export abstract class ExpressionCompiler extends CompilerBase {
       };
     }
     const operator = expression.operator.slice(0, -1) as BinaryOperator;
-    const operation = this.binaryOperation(expression, operator, type, value.type);
-    const narrow = this.castOperation(operation.type, type, expression);
+    // A wrapper variable is unboxed for the operation and its result boxed again, except for string concatenation.
+    const isStringTarget = type.kind === 'class' && type.cls === this.builtins.stringClass;
+    const { unbox: unboxTarget, rebox, primitiveType } = this.wrapperAccess(type);
+    const right = isStringTarget ? value : this.operand(value);
+    const operation = this.binaryOperation(expression, operator, primitiveType, right.type);
+    const narrow = this.castOperation(operation.type, primitiveType, expression);
     return {
       kind: 'value',
       type,
       run: (frame) => {
         const target = bind(frame);
-        const left = target.get();
+        const left = unboxTarget(frame, target.get());
         frame.temporaries.push(left);
-        let right: Value;
+        let rightValue: Value;
         try {
-          right = value.run(frame);
+          rightValue = right.run(frame);
         } finally {
           frame.temporaries.pop();
         }
-        const result = narrow(frame, operation.apply(frame, left, right));
+        const result = rebox(frame, narrow(frame, operation.apply(frame, left, rightValue)));
         target.set(result);
         return result;
       },
     };
   }
 
-  /**
-   * Rejects assigning an array's length or a final field, except a blank final field that a constructor or an
-   * initializer of its class assigns by its simple name or through `this`.
-   */
-  protected checkAssignable(context: MethodContext, target: Expression, reference: Reference): void {
-    const { field } = reference;
-    if (reference.isArrayLength) this.error(target, 'length は final なので代入できません。');
-    if (!field?.isFinal) return;
-    const isBlank =
-      field.constant === undefined &&
-      !field.declaration?.declarators.find((declarator) => declarator.name === field.name)?.initializer;
-    const namesOwnField =
-      target.kind === 'name' ||
-      (target.kind === 'fieldAccess' && target.object !== 'super' && target.object.kind === 'this');
-    const initializesField =
-      context.cls === field.owner && context.initializes === (field.isStatic ? 'static' : 'instance');
-    if (!(isBlank && namesOwnField && initializesField))
-      this.error(target, `${field.name} は final なので代入できません。`);
-  }
-
   protected compileUpdate(context: MethodContext, expression: Extract<Expression, { kind: 'update' }>): Compiled {
     const reference = this.compileReference(context, expression.target);
     this.checkAssignable(context, expression.target, reference);
     const { type, bind } = reference;
-    if (!isNumeric(type))
+    const { unbox: unboxTarget, rebox, primitiveType } = this.wrapperAccess(type);
+    if (!isNumeric(primitiveType)) {
       this.error(expression, `${typeName(type)} 型の変数には ${expression.operator} を使えません。`);
+    }
+    const { kind } = primitiveType;
     const delta = expression.operator === '++' ? 1 : -1;
-    const step =
-      type.kind === 'int'
-        ? (value: number) => toInt32(value + delta)
-        : type.kind === 'char'
-          ? (value: number) => (value + delta) & 0xff_ff
-          : (value: number) => value + delta;
+    const operation = this.binaryOperation(expression, expression.operator === '++' ? '+' : '-', primitiveType, INT);
+    const narrow = this.castOperation(operation.type, primitiveType, expression);
     const isPrefix = expression.isPrefix;
     return {
       kind: 'value',
       type,
       run: (frame) => {
         const target = bind(frame);
-        const before = target.get() as number;
-        const after = step(before);
+        const stored = target.get();
+        const before = unboxTarget(frame, stored);
+        const after = rebox(
+          frame,
+          kind === 'int' ? toInt32((before as number) + delta) : narrow(frame, operation.apply(frame, before, 1))
+        );
         target.set(after);
-        return isPrefix ? after : before;
+        return isPrefix ? after : stored;
       },
+    };
+  }
+
+  /** How an operator reads and writes a variable of `type`: through unboxing and boxing when it is a wrapper. */
+  protected wrapperAccess(type: JavaType): {
+    unbox: (frame: Frame, value: Value) => Value;
+    rebox: (frame: Frame, value: Value) => Value;
+    primitiveType: JavaType;
+  } {
+    const unboxedType = unboxedTypeOf(type);
+    const boxType = unboxedType && boxedTypeOf(this.builtins.wrappers, unboxedType);
+    if (!unboxedType || !boxType)
+      return { unbox: (_, value) => value, rebox: (_, value) => value, primitiveType: type };
+    return {
+      unbox: (frame, value) => unbox(frame, value),
+      rebox: (frame, value) => box(frame, boxType.cls, value),
+      primitiveType: unboxedType,
     };
   }
 
@@ -510,24 +437,26 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   protected compileBinary(context: MethodContext, expression: Extract<Expression, { kind: 'binary' }>): Compiled {
-    const left = this.compileValue(context, expression.left);
-    const right = this.compileValue(context, expression.right);
-    const operation = this.binaryOperation(expression, expression.operator, left.type, right.type);
-    if (expression.operator === '&&' || expression.operator === '||') {
-      return shortCircuit(expression.operator, left, right);
-    }
-    let constant: Value;
-    if (left.constant !== undefined && right.constant !== undefined && isPrimitive(operation.type)) {
-      try {
-        constant = operation.apply(undefined as unknown as Frame, left.constant, right.constant);
-      } catch {
-        constant = undefined;
+    const { operator } = expression;
+    const { left, right, keepsReferences } = this.compileBinaryOperands(context, expression);
+    const operation = this.binaryOperation(expression, operator, left.type, right.type);
+    if (operator === '&&' || operator === '||') return shortCircuit(operator, left, right);
+    if (left.constant !== undefined && right.constant !== undefined) {
+      // Concatenating constants gives a constant, which Java interns like a literal.
+      if (keepsReferences && operator === '+') {
+        const interned = this.internedString(
+          `${constantText(left.constant, left.type)}${constantText(right.constant, right.type)}`
+        );
+        return { kind: 'value', type: operation.type, constant: interned, run: () => interned };
+      }
+      if (isPrimitive(operation.type)) {
+        const constant = foldConstant(operation, left.constant, right.constant);
+        if (constant !== undefined) return { kind: 'value', type: operation.type, constant, run: () => constant };
       }
     }
     return {
       kind: 'value',
       type: operation.type,
-      constant,
       run: (frame) => {
         const leftValue = left.run(frame);
         frame.temporaries.push(leftValue);
@@ -542,18 +471,43 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
+  /**
+   * Compiles a binary operator's operands, unboxing wrapper objects except for string concatenation and `==` between
+   * two references; the right operand of && sees the pattern variables of a true left one, and that of || of a false.
+   */
+  protected compileBinaryOperands(
+    context: MethodContext,
+    expression: Extract<Expression, { kind: 'binary' }>
+  ): { left: CompiledValue; right: CompiledValue; keepsReferences: boolean } {
+    const { operator } = expression;
+    // Comparing references needs no cast of a generic result, which a numeric comparison then casts to unbox.
+    const isEquality = operator === '==' || operator === '!=';
+    const leftValue = this.compileValue(context, expression.left, false, isEquality);
+    const rightBindings =
+      operator === '&&' || operator === '||' ? bindingsWhen(expression.left, operator === '&&') : [];
+    const rightValue = this.withBindings(context, rightBindings, () =>
+      this.compileValue(context, expression.right, false, isEquality)
+    );
+    const isString = (type: JavaType): boolean => type.kind === 'class' && type.cls === this.builtins.stringClass;
+    const comparesReferences = isEquality && isReference(leftValue.type) && isReference(rightValue.type);
+    const keepsReferences =
+      (operator === '+' && (isString(leftValue.type) || isString(rightValue.type))) || comparesReferences;
+    const [left, right] = comparesReferences
+      ? [leftValue, rightValue].map((value) => ({ ...value, erasedType: undefined }))
+      : [leftValue, rightValue].map((value) => this.checkErased(value, value.type));
+    if (keepsReferences) return { left: left as CompiledValue, right: right as CompiledValue, keepsReferences };
+    return { left: this.operand(left as CompiledValue), right: this.operand(right as CompiledValue), keepsReferences };
+  }
+
   protected compileUnary(context: MethodContext, expression: Extract<Expression, { kind: 'unary' }>): Compiled {
     const { operand, operator } = expression;
-    // 2147483648 is a valid int literal only as the operand of unary minus.
-    if (
-      operator === '-' &&
-      operand.kind === 'literal' &&
-      operand.literal.type === 'int' &&
-      operand.literal.value === 2_147_483_648
-    ) {
-      return constantValue(INT, -2_147_483_648);
+    // 2147483648 and 9223372036854775808L are valid literals only as the operand of unary minus.
+    if (operator === '-' && operand.kind === 'literal') {
+      const { literal } = operand;
+      if (literal.type === 'int' && literal.value === 2_147_483_648) return constantValue(INT, -2_147_483_648);
+      if (literal.type === 'long' && literal.value === 2n ** 63n) return constantValue(LONG, -(2n ** 63n));
     }
-    const value = this.compileValue(context, operand);
+    const value = this.operand(this.compileValue(context, operand));
     const operation = unaryOperation(operator, value.type);
     if (!operation) this.error(expression, `演算子 ${operator} は ${typeName(value.type)} 型には使えません。`);
     return {
@@ -569,12 +523,24 @@ export abstract class ExpressionCompiler extends CompilerBase {
     context: MethodContext,
     expression: Extract<Expression, { kind: 'conditional' }>
   ): Compiled {
+    const targetType = this.takeTargetType();
     const condition = this.compileCondition(context, expression.condition);
-    const consequence = this.compileValue(context, expression.consequence);
-    const alternative = this.compileValue(context, expression.alternative);
-    const type = this.conditionalType(expression, consequence.type, alternative.type);
-    const whenTrue = this.convert(consequence, type, 'invocation', expression.consequence);
-    const whenFalse = this.convert(alternative, type, 'invocation', expression.alternative);
+    const compileBranch = (value: Expression): CompiledValue =>
+      targetType ? this.compileValueFor(context, value, targetType) : this.compileValue(context, value);
+    const consequenceValue = this.withBindings(context, bindingsWhen(expression.condition, true), () =>
+      compileBranch(expression.consequence)
+    );
+    const alternativeValue = this.withBindings(context, bindingsWhen(expression.condition, false), () =>
+      compileBranch(expression.alternative)
+    );
+    const [consequence, alternative] = this.conditionalOperands(consequenceValue, alternativeValue);
+    const type = this.conditionalType(expression, consequence, alternative);
+    // A constant branch may narrow to the other branch's type, as an assignment would; a reference type is a common
+    // supertype of both branches.
+    const toType = (branch: CompiledValue, span: Expression): CompiledValue =>
+      isReference(type) ? { ...this.checkErased(branch, type), type } : this.convert(branch, type, 'assignment', span);
+    const whenTrue = toType(consequence, expression.consequence);
+    const whenFalse = toType(alternative, expression.alternative);
     const constantCondition = booleanConstants.get(expression.condition);
     const isConstant =
       constantCondition !== undefined && whenTrue.constant !== undefined && whenFalse.constant !== undefined;
@@ -586,15 +552,41 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  protected conditionalType(span: Span, a: JavaType, b: JavaType): JavaType {
-    const type = conditionalType(this.builtins.objectClass, a, b);
-    if (!type) this.error(span, `条件演算子の 2 つの値の型 ${typeName(a)} と ${typeName(b)} が合いません。`);
+  /**
+   * Boxes or unboxes the branches of a conditional as Java types it: a primitive branch unboxes a wrapper on the
+   * other side, two numeric wrappers of different kinds unbox, and a primitive branch next to a reference boxes.
+   */
+  protected conditionalOperands(a: CompiledValue, b: CompiledValue): [CompiledValue, CompiledValue] {
+    const unboxedA = unboxedTypeOf(a.type);
+    const unboxedB = unboxedTypeOf(b.type);
+    if (isPrimitive(a.type) && unboxedB) return [a, this.operand(b)];
+    if (isPrimitive(b.type) && unboxedA) return [this.operand(a), b];
+    if (unboxedA && unboxedB && !sameType(a.type, b.type) && isNumeric(unboxedA) && isNumeric(unboxedB)) {
+      return [this.operand(a), this.operand(b)];
+    }
+    if (isPrimitive(a.type) && isReference(b.type)) return [this.boxedValue(a), b];
+    if (isPrimitive(b.type) && isReference(a.type)) return [a, this.boxedValue(b)];
+    return [a, b];
+  }
+
+  protected conditionalType(span: Span, a: CompiledValue, b: CompiledValue): JavaType {
+    const type = conditionalType(this.builtins.objectClass, a.type, b.type, [a.constant, b.constant]);
+    if (!type) {
+      this.error(span, `条件演算子の 2 つの値の型 ${typeName(a.type)} と ${typeName(b.type)} が合いません。`);
+    }
     return type;
   }
 
   protected compileCast(context: MethodContext, expression: Extract<Expression, { kind: 'cast' }>): Compiled {
-    const value = this.compileValue(context, expression.value);
     const type = this.resolveType(expression.type);
+    // A lambda, a method reference, or a conditional of them takes its type from the cast (JLS 15.16).
+    const operand = ['lambda', 'methodRef', 'conditional', 'switchExpression'].includes(expression.value.kind)
+      ? this.compileValueFor(context, expression.value, type)
+      : this.compileValue(context, expression.value, false, true);
+    const value = this.checkErased(operand, type);
+    if (value.type.kind !== 'null' && isPrimitive(value.type) !== isPrimitive(type)) {
+      return this.compileBoxingCast(value, type, expression);
+    }
     if (!isCastable(value.type, type, this.builtins.objectClass)) {
       this.error(expression, `${typeName(value.type)} 型の値を ${typeName(type)} 型にキャストできません。`);
     }
@@ -607,7 +599,39 @@ export abstract class ExpressionCompiler extends CompilerBase {
         value.constant !== undefined && isPrimitive(type)
           ? cast(undefined as unknown as Frame, value.constant)
           : undefined,
+      source: value.source,
     };
+  }
+
+  /**
+   * A cast between a primitive and a reference type (JLS 5.5): boxing then widening, as in `(Number) 1`, unboxing
+   * then widening, as in `(long) integer`, or a checked cast to the wrapper then unboxing, as in `(int) object`.
+   */
+  protected compileBoxingCast(value: CompiledValue, type: JavaType, expression: Span): CompiledValue {
+    const fail = (): never =>
+      this.error(expression, `${typeName(value.type)} 型の値を ${typeName(type)} 型にキャストできません。`);
+    const { objectClass, wrappers } = this.builtins;
+    if (isPrimitive(value.type)) {
+      const boxType = boxedTypeOf(wrappers, value.type);
+      if (!boxType || !isWidening(boxType, type, objectClass)) return fail();
+      return this.convert(value, type, 'assignment', expression);
+    }
+    const unboxedType = unboxedTypeOf(value.type);
+    if (unboxedType) {
+      if (!isWidening(unboxedType, type, objectClass)) return fail();
+      return this.convert(value, type, 'assignment', expression);
+    }
+    const wrapperType = boxedTypeOf(wrappers, type);
+    if (!wrapperType || !isCastable(value.type, wrapperType, objectClass)) return fail();
+    const cast = this.castOperation(value.type, wrapperType, expression);
+    const { run } = value;
+    const wrapped: CompiledValue = {
+      kind: 'value',
+      type: wrapperType,
+      run: (frame) => cast(frame, run(frame)),
+      source: value.source,
+    };
+    return this.unboxed(wrapped) as CompiledValue;
   }
 
   protected castOperation(from: JavaType, to: JavaType, span: Span): (frame: Frame, value: Value) => Value {
@@ -652,141 +676,50 @@ export abstract class ExpressionCompiler extends CompilerBase {
         ),
     };
   }
+}
 
-  protected compileNew(context: MethodContext, expression: Extract<Expression, { kind: 'new' }>): Compiled {
-    const type = this.resolveType(expression.type);
-    if (type.kind !== 'class') return this.error(expression, `${typeName(type)} 型のオブジェクトは new で作れません。`);
-    const cls = type.cls;
-    if (cls.isAbstract) this.error(expression, `抽象クラス ${cls.name} のオブジェクトは作れません。`);
-    if (cls.isBuiltin && cls.constructors.length === 0)
-      this.error(expression, `${cls.name} のオブジェクトは new で作れません。`);
-    if (cls === this.builtins.stringClass) this.error(expression, 'String のオブジェクトは new で作れません。');
-    const args = expression.args.map((arg) => this.compileValue(context, arg));
-    const constructor = this.selectMethod(
-      expression,
-      cls.constructors,
-      args.map((arg) => arg.type),
-      `コンストラクタ ${cls.name}`
-    );
-    this.checkAccess(context, cls, constructor.access, expression, `コンストラクタ ${cls.name}`);
-    this.checkThrown(context, expression, constructor.thrownTypes);
-    const convertedArgs = args.map(
-      (arg, index) => this.convert(arg, constructor.parameterTypes[index], 'invocation', expression.args[index]).run
-    );
-    const callRow = expression.row;
-    return {
-      kind: 'value',
-      type,
-      run: (frame) => {
-        frame.runtime.initializeClass(frame, cls);
-        const object = frame.runtime.allocateObject(frame, cls);
-        frame.temporaries.push(object);
-        try {
-          this.invokeWithArguments(frame, constructor, object, convertedArgs, callRow);
-        } finally {
-          frame.temporaries.pop();
-        }
-        return object;
-      },
-    };
+/** The value a reference reads, or the class a name turned out to name. */
+function readOf(reference: (Reference & { constant?: Value }) | Compiled): Compiled {
+  if ('kind' in reference) return reference;
+  const { bind } = reference;
+  return {
+    kind: 'value',
+    type: reference.type,
+    run: (frame) => bind(frame).get(),
+    constant: reference.constant,
+    source: reference.source,
+    erasedType: reference.erasedType,
+  };
+}
+
+/** The value of an operation on constants, or `undefined` when it throws, as dividing by zero does. */
+function foldConstant(
+  operation: { apply: (frame: Frame, left: Value, right: Value) => Value },
+  left: Value,
+  right: Value
+): Value {
+  try {
+    return operation.apply(undefined as unknown as Frame, left, right);
+  } catch {
+    return undefined;
   }
+}
 
-  protected compileCall(context: MethodContext, expression: Extract<Expression, { kind: 'call' }>): Compiled {
-    const args = expression.args.map((arg) => this.compileValue(context, arg));
-    const target = this.resolveCallTarget(context, expression);
-    if (target.candidates.length === 0) {
-      this.error(expression, `この採点環境の ${target.owner.name} には、メソッド ${expression.name} がありません。`);
+/** The text a constant contributes to a string concatenation. */
+function constantText(value: Value, type: JavaType): string {
+  if (value instanceof JavaString) return value.value;
+  switch (type.kind) {
+    case 'char': {
+      return charToString(value as number);
     }
-    const method = this.selectMethod(
-      expression,
-      target.candidates,
-      args.map((arg) => arg.type),
-      `メソッド ${expression.name}`
-    );
-    this.checkCall(context, expression, method, target.receiver === undefined);
-    this.checkThrown(context, expression, method.thrownTypes);
-    const convertedArgs = args.map(
-      (arg, index) => this.convert(arg, method.parameterTypes[index], 'invocation', expression.args[index]).run
-    );
-    const callRow = expression.row;
-    if (method.isStatic) {
-      // A static method called through an expression still evaluates that expression.
-      const ignored = expression.object === undefined ? undefined : target.receiver;
-      return {
-        kind: 'value',
-        type: method.returnType,
-        run: (frame) => {
-          ignored?.run(frame);
-          frame.runtime.initializeClass(frame, method.owner);
-          return this.invokeWithArguments(frame, method, undefined, convertedArgs, callRow);
-        },
-      };
+    case 'double': {
+      return formatDouble(value as number);
     }
-    const receiver = target.receiver as CompiledValue;
-    const dispatches = expression.object !== 'super' && method.access !== 'private';
-    return {
-      kind: 'value',
-      type: method.returnType,
-      run: (frame) => {
-        const object = receiver.run(frame);
-        if (object === undefined) throwBuiltin(frame, 'NullPointerException');
-        const resolved = dispatches ? frame.runtime.dispatch(object, method) : method;
-        frame.temporaries.push(object);
-        try {
-          return this.invokeWithArguments(frame, resolved, object, convertedArgs, callRow);
-        } finally {
-          frame.temporaries.pop();
-        }
-      },
-    };
-  }
-
-  /** The methods a call may select and the receiver it evaluates, which is absent for a class name. */
-  protected resolveCallTarget(
-    context: MethodContext,
-    expression: Extract<Expression, { kind: 'call' }>
-  ): { candidates: MethodInfo[]; owner: ClassInfo; receiver: CompiledValue | undefined } {
-    if (expression.object === undefined || expression.object === 'super') {
-      const isSuper = expression.object === 'super';
-      if (isSuper && context.isStatic) this.error(expression, 'static メソッドの中では super を使えません。');
-      const owner = isSuper ? (context.cls.superclass as ClassInfo) : context.cls;
-      return {
-        candidates: this.collectMethods(owner, expression.name),
-        owner,
-        receiver: thisValue(context),
-      };
+    case 'float': {
+      return formatFloat(value as number);
     }
-    const object = this.compileExpression(context, expression.object);
-    if (object.kind === 'class') {
-      return {
-        candidates: this.collectMethods(object.cls, expression.name),
-        owner: object.cls,
-        receiver: undefined,
-      };
-    }
-    if (object.type.kind !== 'class' && object.type.kind !== 'array') {
-      this.error(expression, `${typeName(object.type)} 型の値にはメソッドがありません。`);
-    }
-    const owner = object.type.kind === 'class' ? object.type.cls : this.builtins.objectClass;
-    return { candidates: this.collectMethods(owner, expression.name), owner, receiver: object };
-  }
-
-  protected checkCall(
-    context: MethodContext,
-    expression: Extract<Expression, { kind: 'call' }>,
-    method: MethodInfo,
-    isThroughClassName: boolean
-  ): void {
-    const { name } = expression;
-    this.checkAccess(context, method.owner, method.access, expression, `メソッド ${name}`);
-    if (isThroughClassName && !method.isStatic) {
-      this.error(expression, `static ではないメソッド ${name} はクラス名から呼び出せません。`);
-    }
-    if (expression.object === undefined && !method.isStatic && context.isStatic) {
-      this.error(expression, `static ではないメソッド ${name} は static メソッドの中から呼び出せません。`);
-    }
-    if (expression.object === 'super' && method.isAbstract) {
-      this.error(expression, `抽象メソッド ${name} は super から呼び出せません。`);
+    default: {
+      return String(value as number | bigint | boolean);
     }
   }
 }
@@ -803,47 +736,5 @@ function shortCircuit(operator: '&&' | '||', left: CompiledValue, right: Compile
       isAnd
         ? (left.run(frame) as boolean) && (right.run(frame) as boolean)
         : (left.run(frame) as boolean) || (right.run(frame) as boolean),
-  };
-}
-
-/** This environment implements only part of the standard library, so the message states only what it has. */
-function missingFieldMessage(cls: ClassInfo, name: string): string {
-  return `この採点環境の ${cls.name} には、フィールド ${name} がありません。`;
-}
-
-function notConstant(reference: Reference & { constant?: Value }): Reference & { constant?: Value } {
-  return { ...reference, constant: undefined };
-}
-
-function thisValue(context: MethodContext): CompiledValue {
-  return { kind: 'value', type: context.cls.type, run: (frame) => frame.thisObject };
-}
-
-function arrayLengthReference(array: CompiledValue): Reference {
-  return {
-    type: INT,
-    isArrayLength: true,
-    bind: (frame) => {
-      const value = array.run(frame);
-      if (!(value instanceof JavaArray)) throwBuiltin(frame, 'NullPointerException');
-      return {
-        get: () => value.values.length,
-        set: () => {
-          throw new Error('Array length is final');
-        },
-      };
-    },
-  };
-}
-
-function localReference(context: MethodContext, slot: number): Reference {
-  return {
-    type: context.locals[slot].type,
-    bind: (frame) => ({
-      get: () => frame.locals[slot] as Value,
-      set: (value) => {
-        frame.locals[slot] = value;
-      },
-    }),
   };
 }

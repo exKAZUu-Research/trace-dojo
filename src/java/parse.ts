@@ -1,31 +1,10 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
+import { CompileError } from '../interpreter/diagnostics';
 import { loadParser, parseSource } from '../interpreter/treeSitter';
-import type {
-  ClassDeclaration,
-  CompilationUnit,
-  ConstructorDeclaration,
-  ExplicitConstructorCall,
-  FieldDeclaration,
-  MemberDeclaration,
-  MethodDeclaration,
-  Parameter,
-  Statement,
-  TypeSyntax,
-} from './ast';
-import { convertArguments } from './parseExpression';
-import {
-  convertModifiers,
-  convertType,
-  convertVariableType,
-  field,
-  identifierOf,
-  modifiersOf,
-  namedChildren,
-  span,
-  unsupported,
-} from './parseNodes';
-import { convertBlock, convertDeclarator, convertStatement } from './parseStatement';
+import type { ClassDeclaration, CompilationUnit, ImportDeclaration, MemberDeclaration } from './ast';
+import { convertTopLevelMember, convertTypeDeclaration } from './parseDeclarations';
+import { namedChildren, span } from './parseNodes';
 
 const parser = await loadParser('@willbooster/tree-sitter-java/tree-sitter-java.wasm');
 
@@ -36,149 +15,75 @@ export function parseJava(source: string): CompilationUnit {
 
 function convertProgram(root: Node): CompilationUnit {
   const classes: ClassDeclaration[] = [];
+  const imports: ImportDeclaration[] = [];
+  // A compact source file's top-level declarations, in order, which become members of its implicit class.
+  const members: MemberDeclaration[] = [];
+  let isCompact = false;
   for (const child of namedChildren(root)) {
     switch (child.type) {
-      case 'class_declaration': {
-        classes.push(convertClass(child));
+      case 'class_declaration':
+      case 'interface_declaration':
+      case 'enum_declaration':
+      case 'record_declaration': {
+        const declaration = convertTypeDeclaration(child);
+        classes.push(declaration);
+        members.push(declaration);
         break;
       }
       // Problems show several files in one listing, so package and import lines may appear between classes.
-      case 'package_declaration':
+      case 'package_declaration': {
+        break;
+      }
       case 'import_declaration': {
+        imports.push(convertImport(child));
         break;
       }
-      case 'interface_declaration': {
-        unsupported(child, 'インターフェース');
+      // A compact source file's fields and methods, which tree-sitter parses as declarations of local variables.
+      case 'local_variable_declaration':
+      case 'method_declaration': {
+        members.push(convertTopLevelMember(child));
+        isCompact = true;
         break;
       }
-      case 'enum_declaration': {
-        unsupported(child, '列挙型');
-        break;
-      }
-      case 'record_declaration': {
-        unsupported(child, 'レコード');
-        break;
-      }
+      // Java accepts only declarations outside classes, so a statement there needs a method around it.
       default: {
-        unsupported(child, 'クラスの外に書いた文や宣言');
+        throw new CompileError([
+          { row: child.startPosition.row, message: '文はクラスの外ではなく、メソッドの中に書いてください。' },
+        ]);
       }
     }
   }
-  return { classes };
+  return { classes: isCompact ? [implicitClass(members)] : classes, imports };
 }
 
-function convertClass(node: Node): ClassDeclaration {
-  if (node.childForFieldName('type_parameters')) unsupported(node, '型パラメータ');
-  if (node.childForFieldName('interfaces')) unsupported(node, 'インターフェースの実装');
-  if (node.childForFieldName('permits')) unsupported(node, 'permits');
-  const superclassNode = node.childForFieldName('superclass');
-  const members = namedChildren(field(node, 'body')).map((member) => convertMember(member));
+/**
+ * The final class named after the file that a compact source file declares, whose members are the file's fields,
+ * methods, and classes (JLS 7.3).
+ */
+function implicitClass(members: MemberDeclaration[]): ClassDeclaration {
+  const [first, last] = [members[0], members.at(-1) as MemberDeclaration];
   return {
-    name: field(node, 'name').text,
-    modifiers: convertModifiers(modifiersOf(node)),
-    superclass: superclassNode ? convertType(namedChildren(superclassNode)[0]) : undefined,
+    kind: 'class',
+    name: 'Main',
+    typeParameters: [],
+    modifiers: { isStatic: false, isFinal: true, isAbstract: false, isDefault: false, access: 'package' },
+    interfaces: [],
+    enumConstants: [],
+    isImplicit: true,
     members,
-    ...span(node),
+    row: first.row,
+    start: first.start,
+    endRow: last.endRow,
+    end: last.end,
   };
 }
 
-function convertMember(member: Node): MemberDeclaration {
-  switch (member.type) {
-    case 'field_declaration': {
-      return convertField(member);
-    }
-    case 'method_declaration': {
-      return convertMethod(member);
-    }
-    case 'constructor_declaration': {
-      return convertConstructor(member);
-    }
-    case 'block': {
-      return { kind: 'initializer', isStatic: false, body: convertBlock(member), ...span(member) };
-    }
-    case 'static_initializer': {
-      return { kind: 'initializer', isStatic: true, body: convertBlock(namedChildren(member)[0]), ...span(member) };
-    }
-    default: {
-      return unsupported(member, 'クラスの中のクラスやインターフェース');
-    }
-  }
-}
-
-function convertField(node: Node): FieldDeclaration {
-  const type = convertType(field(node, 'type'));
+function convertImport(node: Node): ImportDeclaration {
+  const name = namedChildren(node).find((child) => child.type === 'scoped_identifier' || child.type === 'identifier');
   return {
-    kind: 'field',
-    modifiers: convertModifiers(modifiersOf(node)),
-    type,
-    declarators: node.childrenForFieldName('declarator').map((declarator) => convertDeclarator(declarator)),
-    ...span(node),
-  };
-}
-
-function convertParameters(node: Node): Parameter[] {
-  return namedChildren(node).map((parameter) => {
-    if (parameter.type !== 'formal_parameter') unsupported(parameter, '可変長引数や受け取りパラメータ');
-    const modifiers = convertModifiers(modifiersOf(parameter));
-    const type = convertVariableType(parameter);
-    const name = identifierOf(parameter, '名前のない引数');
-    return { name: name.text, type, isFinal: modifiers.isFinal, ...span(parameter) };
-  });
-}
-
-function convertThrows(node: Node): TypeSyntax[] {
-  const throwsNode = node.children.find((child) => child?.type === 'throws');
-  return throwsNode ? namedChildren(throwsNode).map((type) => convertType(type)) : [];
-}
-
-function convertMethod(node: Node): MethodDeclaration {
-  if (node.childForFieldName('type_parameters')) unsupported(node, '型パラメータ');
-  if (node.childForFieldName('dimensions')) unsupported(node, 'メソッド名の後ろの []');
-  const typeNode = field(node, 'type');
-  const body = node.childForFieldName('body');
-  return {
-    kind: 'method',
-    name: field(node, 'name').text,
-    modifiers: convertModifiers(modifiersOf(node)),
-    returnType: typeNode.type === 'void_type' ? undefined : convertType(typeNode),
-    parameters: convertParameters(field(node, 'parameters')),
-    throwsTypes: convertThrows(node),
-    body: body ? convertBlock(body) : undefined,
-    ...span(node),
-  };
-}
-
-function convertConstructor(node: Node): ConstructorDeclaration {
-  if (node.childForFieldName('type_parameters')) unsupported(node, '型パラメータ');
-  const bodyNode = field(node, 'body');
-  const statements: Statement[] = [];
-  let explicitCall: ExplicitConstructorCall | undefined;
-  for (const [index, child] of namedChildren(bodyNode).entries()) {
-    if (child.type === 'explicit_constructor_invocation') {
-      if (index !== 0) unsupported(child, 'コンストラクタの先頭以外での this(...) や super(...)');
-      explicitCall = convertExplicitConstructorCall(child);
-    } else {
-      statements.push(convertStatement(child));
-    }
-  }
-  return {
-    kind: 'constructor',
-    name: field(node, 'name').text,
-    modifiers: convertModifiers(modifiersOf(node)),
-    parameters: convertParameters(field(node, 'parameters')),
-    throwsTypes: convertThrows(node),
-    explicitCall,
-    body: { kind: 'block', statements, ...span(bodyNode) },
-    ...span(node),
-  };
-}
-
-function convertExplicitConstructorCall(node: Node): ExplicitConstructorCall {
-  if (node.childForFieldName('object')) unsupported(node, '修飾された super(...)');
-  return {
-    kind: 'explicitConstructorCall',
-    target: field(node, 'constructor').type === 'this' ? 'this' : 'super',
-    args: convertArguments(field(node, 'arguments')),
+    isStatic: node.children.some((child) => child?.type === 'static'),
+    names: (name?.text ?? '').split('.').map((part) => part.trim()),
+    isWildcard: node.children.some((child) => child?.type === 'asterisk'),
     ...span(node),
   };
 }

@@ -32,12 +32,6 @@ export function rowOf(node: Node): number {
   return node.startPosition.row;
 }
 
-export function depthOf(node: Node): number {
-  let depth = 0;
-  for (let current = node.parent; current; current = current.parent) depth++;
-  return depth;
-}
-
 export function unwrapParentheses(node: Node): Node {
   let current = node;
   while (current.type === 'parenthesized_expression') current = namedChildren(current)[0];

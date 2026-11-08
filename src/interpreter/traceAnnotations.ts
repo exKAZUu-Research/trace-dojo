@@ -1,17 +1,20 @@
-/** A `// step` or `// caller` annotation, with its offset in the source. */
+/** An `// atomic` annotation, with its offset in the source. */
 export interface TraceAnnotation {
   index: number;
   text: string;
 }
 
-export interface Annotations {
-  stepIdByRow: Map<number, number>;
-  callerIdByRow: Map<number, number>;
+/** Matches the annotation a line comment ends with, which may follow an ordinary remark. */
+const traceAnnotationPattern = /\/\/[ \t]*atomic[ \t]*$/;
+
+/** Makes a model program record its steps, except inside the methods its `// atomic` annotations mark. */
+export interface TraceOptions {
+  /** The offset of each annotation by its row, which holds at most one since an annotation ends its line. */
+  atomicAnnotations: ReadonlyMap<number, number>;
 }
 
-/** Matches the annotations a line comment ends with, which may follow an ordinary remark. */
-export const traceAnnotationPattern =
-  /\/\/[ \t]*(?:step(?:[ \t]*:[ \t]*\d+)?|caller)(?:[ \t]*\/\/[ \t]*(?:step(?:[ \t]*:[ \t]*\d+)?|caller))*[ \t]*$/;
+export const misplacedAtomicMessage =
+  '// atomic は、メソッド・コンストラクタ・関数を宣言する行（本体の { がある行まで）に付けてください。';
 
 /** The annotations that the given line comments end with. */
 export function traceAnnotationsIn(lineComments: Iterable<TraceAnnotation>): TraceAnnotation[] {
@@ -21,28 +24,9 @@ export function traceAnnotationsIn(lineComments: Iterable<TraceAnnotation>): Tra
   });
 }
 
-/**
- * Reads `// step` and `// caller` comments, which number the rows a trace item or a call refers to. A step's ID
- * counts up from the previous one unless written as `// step: n`.
- */
-export function readAnnotations(source: string, annotations: TraceAnnotation[]): Annotations {
-  const stepIdByRow = new Map<number, number>();
-  const callerIdByRow = new Map<number, number>();
-  let lastStepId = 0;
-  let lastCallerId = 0;
-  for (const { index, text } of annotations) {
-    const row = source.slice(0, index).split('\n').length - 1;
-    for (const [, kind, id] of text.matchAll(/(step|caller)(?:[ \t]*:[ \t]*(\d+))?/g)) {
-      if (kind === 'step') {
-        lastStepId = id ? Number(id) : lastStepId + 1;
-        stepIdByRow.set(row, lastStepId);
-      } else {
-        lastCallerId++;
-        callerIdByRow.set(row, lastCallerId);
-      }
-    }
-  }
-  return { stepIdByRow, callerIdByRow };
+/** The offsets of `// atomic` comments by row, which mark the methods whose calls each count as part of the caller's step. */
+export function atomicAnnotationsOf(source: string, annotations: TraceAnnotation[]): Map<number, number> {
+  return new Map(annotations.map(({ index }) => [source.slice(0, index).split('\n').length - 1, index]));
 }
 
 /** Removes the annotations and the blanks before them, keeping every row in place. */

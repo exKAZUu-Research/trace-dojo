@@ -8,61 +8,61 @@ export const lecture7: ChallengeBase[] = [
     lectureIndex: 6,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
+        Turtle t = new Turtle(2, 2);
         try {
-            advance(t, -1); // caller
-            t.左を向く(); // step
+            advance(t, -1);
+            t.左を向く();
         } catch (RuntimeException e) {
-            t.右を向く(); // step
-            t.前に進む(); // step
+            t.右を向く();
+            t.前に進む();
         }
-        advance(t, 2); // caller
-        t.左を向く(); // step
-        t.前に進む(); // step
+        advance(t, 2);
+        t.左を向く();
+        t.前に進む();
     }
     static void advance(Turtle t, int count) {
         if (count < 0) {
             throw new RuntimeException();
         }
-        for (int i = 0; i < count; i++) { // step
-            t.前に進む(); // step
+        for (int i = 0; i < count; i++) {
+            t.前に進む();
         }
     }
 }`,
     blanks: [
       {
         id: 'Condition5Helper',
-        before: `        for (int i = 0; i < count; i++) { // step`,
-        after: `        for (int i = 0; i @[<]@ count; i++) { // step`,
+        before: `        for (int i = 0; i < count; i++) {`,
+        after: `        for (int i = 0; i @[<]@ count; i++) {`,
       },
       {
         id: 'Update3',
-        before: `            advance(t, -1); // caller`,
-        after: `            advance(t, @[-]@1); // caller`,
+        before: `            advance(t, -1);`,
+        after: `            advance(t, @[-]@1);`,
       },
       {
         id: 'Action6',
-        before: `            t.右を向く(); // step`,
-        after: `            t.@[右を向く]@(); // step`,
+        before: `            t.右を向く();`,
+        after: `            t.@[右を向く]@();`,
       },
     ],
     bugs: [
       {
         id: 'Condition5Helper',
-        before: `        for (int i = 0; i < count; i++) { // step`,
-        after: `        for (int i = 0; i <= count; i++) { // step`,
+        before: `        for (int i = 0; i < count; i++) {`,
+        after: `        for (int i = 0; i <= count; i++) {`,
         kind: 'logical',
       },
       {
         id: 'Update3',
-        before: `            advance(t, -1); // caller`,
-        after: `            advance(t, +1); // caller`,
+        before: `            advance(t, -1);`,
+        after: `            advance(t, +1);`,
         kind: 'logical',
       },
       {
         id: 'Action6',
-        before: `            t.右を向く(); // step`,
-        after: `            t.前に進む(); // step`,
+        before: `            t.右を向く();`,
+        after: `            t.前に進む();`,
         kind: 'logical',
       },
     ],
@@ -74,25 +74,25 @@ export const lecture7: ChallengeBase[] = [
     lectureIndex: 6,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
+        Turtle t = new Turtle(2, 2);
         try {
-            risky(t, 0); // caller
-            t.後に戻る(); // step
+            risky(t, 0);
+            t.後に戻る();
         } catch (RuntimeException e) {
-            t.右を向く(); // step
-            t.前に進む(); // step
+            t.右を向く();
+            t.前に進む();
         }
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
+        t.左を向く();
+        t.前に進む();
+        t.後に戻る();
+        t.右を向く();
     }
     static void risky(Turtle t, int count) {
-        t.前に進む(); // step
+        t.前に進む();
         if (count == 0) {
             throw new RuntimeException();
         }
-        t.左を向く(); // step
+        t.左を向く();
     }
 }`,
     blanks: [
@@ -103,13 +103,13 @@ export const lecture7: ChallengeBase[] = [
       },
       {
         id: 'Value3',
-        before: `            risky(t, 0); // caller`,
-        after: `            risky(t, @[0]@); // caller`,
+        before: `            risky(t, 0);`,
+        after: `            risky(t, @[0]@);`,
       },
       {
         id: 'Action6',
-        before: `            t.右を向く(); // step`,
-        after: `            t.@[右を向く]@(); // step`,
+        before: `            t.右を向く();`,
+        after: `            t.@[右を向く]@();`,
       },
     ],
     bugs: [
@@ -121,14 +121,14 @@ export const lecture7: ChallengeBase[] = [
       },
       {
         id: 'Value3',
-        before: `            risky(t, 0); // caller`,
-        after: `            risky(t, 1); // caller`,
+        before: `            risky(t, 0);`,
+        after: `            risky(t, 1);`,
         kind: 'logical',
       },
       {
         id: 'Action6',
-        before: `            t.右を向く(); // step`,
-        after: `            t.前に進む(); // step`,
+        before: `            t.右を向く();`,
+        after: `            t.前に進む();`,
         kind: 'logical',
       },
     ],
@@ -140,21 +140,21 @@ export const lecture7: ChallengeBase[] = [
     lectureIndex: 6,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
-        int remaining = 1; // step
+        Turtle t = new Turtle(2, 2);
+        int remaining = 1;
         try {
-            t.前に進む(); // step
-            remaining--; // step
-            reject(remaining); // caller
-            t.左を向く(); // step
-            t.前に進む(); // step
+            t.前に進む();
+            remaining--;
+            reject(remaining);
+            t.左を向く();
+            t.前に進む();
         } catch (RuntimeException e) {
-            t.右を向く(); // step
-            t.前に進む(); // step
+            t.右を向く();
+            t.前に進む();
         }
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
+        t.左を向く();
+        t.前に進む();
+        t.後に戻る();
     }
     static void reject(int value) {
         if (value == 0) {
@@ -170,23 +170,23 @@ export const lecture7: ChallengeBase[] = [
       },
       {
         id: 'Value2',
-        before: `        int remaining = 1; // step`,
-        after: `        int remaining = @[1]@; // step`,
+        before: `        int remaining = 1;`,
+        after: `        int remaining = @[1]@;`,
       },
       {
         id: 'Action4',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
-        int remaining = 1; // step
+        Turtle t = new Turtle(2, 2);
+        int remaining = 1;
         try {
-            t.前に進む(); // step`,
+            t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
-        int remaining = 1; // step
+        Turtle t = new Turtle(2, 2);
+        int remaining = 1;
         try {
-            t.@[前に進む]@(); // step`,
+            t.@[前に進む]@();`,
       },
     ],
     bugs: [
@@ -198,24 +198,24 @@ export const lecture7: ChallengeBase[] = [
       },
       {
         id: 'Value2',
-        before: `        int remaining = 1; // step`,
-        after: `        int remaining = 2; // step`,
+        before: `        int remaining = 1;`,
+        after: `        int remaining = 2;`,
         kind: 'logical',
       },
       {
         id: 'Action4',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
-        int remaining = 1; // step
+        Turtle t = new Turtle(2, 2);
+        int remaining = 1;
         try {
-            t.前に進む(); // step`,
+            t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
-        int remaining = 1; // step
+        Turtle t = new Turtle(2, 2);
+        int remaining = 1;
         try {
-            t.後に戻る(); // step`,
+            t.後に戻る();`,
         kind: 'logical',
       },
     ],
@@ -227,23 +227,23 @@ export const lecture7: ChallengeBase[] = [
     lectureIndex: 6,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
-        visit(t, 0); // caller
-        t.前に進む(); // step
-        visit(t, 1); // caller
-        t.右を向く(); // step
-        t.前に進む(); // step
+        Turtle t = new Turtle(2, 2);
+        visit(t, 0);
+        t.前に進む();
+        visit(t, 1);
+        t.右を向く();
+        t.前に進む();
     }
     static void visit(Turtle t, int value) {
         try {
-            t.前に進む(); // step
+            t.前に進む();
             if (value == 0) {
                 throw new RuntimeException();
             }
-            t.右を向く(); // step
+            t.右を向く();
         } catch (RuntimeException e) {
-            t.左を向く(); // step
-            t.後に戻る(); // step
+            t.左を向く();
+            t.後に戻る();
         }
     }
 }`,
@@ -255,21 +255,21 @@ export const lecture7: ChallengeBase[] = [
       },
       {
         id: 'Value2',
-        before: `        visit(t, 0); // caller`,
-        after: `        visit(t, @[0]@); // caller`,
+        before: `        visit(t, 0);`,
+        after: `        visit(t, @[0]@);`,
       },
       {
         id: 'Action3',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
-        visit(t, 0); // caller
-        t.前に進む(); // step`,
+        Turtle t = new Turtle(2, 2);
+        visit(t, 0);
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
-        visit(t, 0); // caller
-        t.@[前に進む]@(); // step`,
+        Turtle t = new Turtle(2, 2);
+        visit(t, 0);
+        t.@[前に進む]@();`,
       },
     ],
     bugs: [
@@ -281,22 +281,22 @@ export const lecture7: ChallengeBase[] = [
       },
       {
         id: 'Value2',
-        before: `        visit(t, 0); // caller`,
-        after: `        visit(t, 1); // caller`,
+        before: `        visit(t, 0);`,
+        after: `        visit(t, 1);`,
         kind: 'logical',
       },
       {
         id: 'Action3',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
-        visit(t, 0); // caller
-        t.前に進む(); // step`,
+        Turtle t = new Turtle(2, 2);
+        visit(t, 0);
+        t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
-        visit(t, 0); // caller
-        t.後に戻る(); // step`,
+        Turtle t = new Turtle(2, 2);
+        visit(t, 0);
+        t.後に戻る();`,
         kind: 'logical',
       },
     ],
@@ -308,27 +308,27 @@ export const lecture7: ChallengeBase[] = [
     lectureIndex: 6,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
+        Turtle t = new Turtle(2, 2);
         try {
-            inner(t, 1); // caller
-            t.左を向く(); // step
+            inner(t, 1);
+            t.左を向く();
         } catch (RuntimeException e) {
-            t.前に進む(); // step
-            t.前に進む(); // step
+            t.前に進む();
+            t.前に進む();
         }
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
-        t.右を向く(); // step
+        t.左を向く();
+        t.前に進む();
+        t.後に戻る();
+        t.右を向く();
     }
     static void inner(Turtle t, int n) {
         try {
-            t.前に進む(); // step
+            t.前に進む();
             if (n == 1) {
                 throw new RuntimeException();
             }
         } catch (RuntimeException e) {
-            t.右を向く(); // step
+            t.右を向く();
             throw e;
         }
     }
@@ -341,27 +341,27 @@ export const lecture7: ChallengeBase[] = [
       },
       {
         id: 'Value3',
-        before: `            inner(t, 1); // caller`,
-        after: `            inner(t, @[1]@); // caller`,
+        before: `            inner(t, 1);`,
+        after: `            inner(t, @[1]@);`,
       },
       {
         id: 'Action6',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
+        Turtle t = new Turtle(2, 2);
         try {
-            inner(t, 1); // caller
-            t.左を向く(); // step
+            inner(t, 1);
+            t.左を向く();
         } catch (RuntimeException e) {
-            t.前に進む(); // step`,
+            t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
+        Turtle t = new Turtle(2, 2);
         try {
-            inner(t, 1); // caller
-            t.左を向く(); // step
+            inner(t, 1);
+            t.左を向く();
         } catch (RuntimeException e) {
-            t.@[前に進む]@(); // step`,
+            t.@[前に進む]@();`,
       },
     ],
     bugs: [
@@ -373,28 +373,28 @@ export const lecture7: ChallengeBase[] = [
       },
       {
         id: 'Value3',
-        before: `            inner(t, 1); // caller`,
-        after: `            inner(t, 2); // caller`,
+        before: `            inner(t, 1);`,
+        after: `            inner(t, 2);`,
         kind: 'logical',
       },
       {
         id: 'Action6',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
+        Turtle t = new Turtle(2, 2);
         try {
-            inner(t, 1); // caller
-            t.左を向く(); // step
+            inner(t, 1);
+            t.左を向く();
         } catch (RuntimeException e) {
-            t.前に進む(); // step`,
+            t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
+        Turtle t = new Turtle(2, 2);
         try {
-            inner(t, 1); // caller
-            t.左を向く(); // step
+            inner(t, 1);
+            t.左を向く();
         } catch (RuntimeException e) {
-            t.後に戻る(); // step`,
+            t.後に戻る();`,
         kind: 'logical',
       },
     ],
@@ -406,25 +406,25 @@ export const lecture7: ChallengeBase[] = [
     lectureIndex: 6,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
+        Turtle t = new Turtle(2, 2);
         try {
-            request(t, 1); // caller
-            request(t, 0); // caller
-            t.後に戻る(); // step
+            request(t, 1);
+            request(t, 0);
+            t.後に戻る();
         } catch (EmptyRequest e) {
-            t.右を向く(); // step
-            t.前に進む(); // step
+            t.右を向く();
+            t.前に進む();
         }
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
+        t.左を向く();
+        t.前に進む();
+        t.後に戻る();
     }
     static void request(Turtle t, int amount) {
         if (amount == 0) {
             throw new EmptyRequest();
         }
-        t.前に進む(); // step
-        t.前に進む(); // step
+        t.前に進む();
+        t.前に進む();
     }
 }
 class EmptyRequest extends RuntimeException {}`,
@@ -436,13 +436,13 @@ class EmptyRequest extends RuntimeException {}`,
       },
       {
         id: 'Value3',
-        before: `            request(t, 1); // caller`,
-        after: `            request(t, @[1]@); // caller`,
+        before: `            request(t, 1);`,
+        after: `            request(t, @[1]@);`,
       },
       {
         id: 'Value4',
-        before: `            request(t, 0); // caller`,
-        after: `            request(t, @[0]@); // caller`,
+        before: `            request(t, 0);`,
+        after: `            request(t, @[0]@);`,
       },
     ],
     bugs: [
@@ -454,14 +454,14 @@ class EmptyRequest extends RuntimeException {}`,
       },
       {
         id: 'Value3',
-        before: `            request(t, 1); // caller`,
-        after: `            request(t, 0); // caller`,
+        before: `            request(t, 1);`,
+        after: `            request(t, 0);`,
         kind: 'logical',
       },
       {
         id: 'Value4',
-        before: `            request(t, 0); // caller`,
-        after: `            request(t, 1); // caller`,
+        before: `            request(t, 0);`,
+        after: `            request(t, 1);`,
         kind: 'logical',
       },
     ],
@@ -473,20 +473,20 @@ class EmptyRequest extends RuntimeException {}`,
     lectureIndex: 6,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
-        int remaining = 1; // step
+        Turtle t = new Turtle(2, 2);
+        int remaining = 1;
         try {
-            for (int i = 0; i < 3; i++) { // step
-                check(remaining); // caller
-                t.前に進む(); // step
-                remaining--; // step
+            for (int i = 0; i < 3; i++) {
+                check(remaining);
+                t.前に進む();
+                remaining--;
             }
         } catch (NoBudget e) {
-            t.右を向く(); // step
-            t.前に進む(); // step
+            t.右を向く();
+            t.前に進む();
         }
-        t.左を向く(); // step
-        t.前に進む(); // step
+        t.左を向く();
+        t.前に進む();
     }
     static void check(int remaining) {
         if (remaining <= 0) {
@@ -498,8 +498,8 @@ class NoBudget extends RuntimeException {}`,
     blanks: [
       {
         id: 'Condition4',
-        before: `            for (int i = 0; i < 3; i++) { // step`,
-        after: `            for (int i = 0; i @[<]@ 3; i++) { // step`,
+        before: `            for (int i = 0; i < 3; i++) {`,
+        after: `            for (int i = 0; i @[<]@ 3; i++) {`,
       },
       {
         id: 'Condition2Helper',
@@ -508,15 +508,15 @@ class NoBudget extends RuntimeException {}`,
       },
       {
         id: 'Value2',
-        before: `        int remaining = 1; // step`,
-        after: `        int remaining = @[1]@; // step`,
+        before: `        int remaining = 1;`,
+        after: `        int remaining = @[1]@;`,
       },
     ],
     bugs: [
       {
         id: 'Condition4',
-        before: `            for (int i = 0; i < 3; i++) { // step`,
-        after: `            for (int i = 0; i > 3; i++) { // step`,
+        before: `            for (int i = 0; i < 3; i++) {`,
+        after: `            for (int i = 0; i > 3; i++) {`,
         kind: 'logical',
       },
       {
@@ -527,8 +527,8 @@ class NoBudget extends RuntimeException {}`,
       },
       {
         id: 'Value2',
-        before: `        int remaining = 1; // step`,
-        after: `        int remaining = 2; // step`,
+        before: `        int remaining = 1;`,
+        after: `        int remaining = 2;`,
         kind: 'logical',
       },
     ],
@@ -540,17 +540,17 @@ class NoBudget extends RuntimeException {}`,
     lectureIndex: 6,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
-        for (int i = 0; i < 3; i++) { // step
+        Turtle t = new Turtle(2, 2);
+        for (int i = 0; i < 3; i++) {
             try {
-                check(i); // caller
-                t.前に進む(); // step
+                check(i);
+                t.前に進む();
             } catch (SkippedVisit e) {
-                t.右を向く(); // step
+                t.右を向く();
             }
         }
-        t.前に進む(); // step
-        t.左を向く(); // step
+        t.前に進む();
+        t.左を向く();
     }
     static void check(int n) {
         if (n == 1) {
@@ -562,8 +562,8 @@ class SkippedVisit extends RuntimeException {}`,
     blanks: [
       {
         id: 'Condition2',
-        before: `        for (int i = 0; i < 3; i++) { // step`,
-        after: `        for (int i = 0; i @[<]@ 3; i++) { // step`,
+        before: `        for (int i = 0; i < 3; i++) {`,
+        after: `        for (int i = 0; i @[<]@ 3; i++) {`,
       },
       {
         id: 'Condition2Helper',
@@ -572,15 +572,15 @@ class SkippedVisit extends RuntimeException {}`,
       },
       {
         id: 'Action5',
-        before: `                t.前に進む(); // step`,
-        after: `                t.@[前に進む]@(); // step`,
+        before: `                t.前に進む();`,
+        after: `                t.@[前に進む]@();`,
       },
     ],
     bugs: [
       {
         id: 'Condition2',
-        before: `        for (int i = 0; i < 3; i++) { // step`,
-        after: `        for (int i = 0; i <= 3; i++) { // step`,
+        before: `        for (int i = 0; i < 3; i++) {`,
+        after: `        for (int i = 0; i <= 3; i++) {`,
         kind: 'logical',
       },
       {
@@ -591,8 +591,8 @@ class SkippedVisit extends RuntimeException {}`,
       },
       {
         id: 'Action5',
-        before: `                t.前に進む(); // step`,
-        after: `                t.後に戻る(); // step`,
+        before: `                t.前に進む();`,
+        after: `                t.後に戻る();`,
         kind: 'logical',
       },
     ],
@@ -604,19 +604,19 @@ class SkippedVisit extends RuntimeException {}`,
     lectureIndex: 6,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
+        Turtle t = new Turtle(2, 2);
         try {
-            for (int i = 0; i < 4; i++) { // step
-                t.前に進む(); // step
-                check(i); // caller
+            for (int i = 0; i < 4; i++) {
+                t.前に進む();
+                check(i);
             }
         } catch (RouteFinished e) {
-            t.右を向く(); // step
-            t.前に進む(); // step
+            t.右を向く();
+            t.前に進む();
         }
-        t.左を向く(); // step
-        t.前に進む(); // step
-        t.後に戻る(); // step
+        t.左を向く();
+        t.前に進む();
+        t.後に戻る();
     }
     static void check(int n) {
         if (n == 1) {
@@ -628,8 +628,8 @@ class RouteFinished extends RuntimeException {}`,
     blanks: [
       {
         id: 'Condition3',
-        before: `            for (int i = 0; i < 4; i++) { // step`,
-        after: `            for (int i = 0; i @[<]@ 4; i++) { // step`,
+        before: `            for (int i = 0; i < 4; i++) {`,
+        after: `            for (int i = 0; i @[<]@ 4; i++) {`,
       },
       {
         id: 'Condition2Helper',
@@ -638,15 +638,15 @@ class RouteFinished extends RuntimeException {}`,
       },
       {
         id: 'Action4',
-        before: `                t.前に進む(); // step`,
-        after: `                t.@[前に進む]@(); // step`,
+        before: `                t.前に進む();`,
+        after: `                t.@[前に進む]@();`,
       },
     ],
     bugs: [
       {
         id: 'Condition3',
-        before: `            for (int i = 0; i < 4; i++) { // step`,
-        after: `            for (int i = 0; i > 4; i++) { // step`,
+        before: `            for (int i = 0; i < 4; i++) {`,
+        after: `            for (int i = 0; i > 4; i++) {`,
         kind: 'logical',
       },
       {
@@ -657,8 +657,8 @@ class RouteFinished extends RuntimeException {}`,
       },
       {
         id: 'Action4',
-        before: `                t.前に進む(); // step`,
-        after: `                t.後に戻る(); // step`,
+        before: `                t.前に進む();`,
+        after: `                t.後に戻る();`,
         kind: 'logical',
       },
     ],
@@ -670,27 +670,27 @@ class RouteFinished extends RuntimeException {}`,
     lectureIndex: 6,
     java: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
+        Turtle t = new Turtle(2, 2);
         try {
-            convert(t, 0); // caller
-            t.後に戻る(); // step
+            convert(t, 0);
+            t.後に戻る();
         } catch (RouteAlert e) {
-            t.前に進む(); // step
-            t.左を向く(); // step
-            t.前に進む(); // step
+            t.前に進む();
+            t.左を向く();
+            t.前に進む();
         }
-        t.後に戻る(); // step
-        t.右を向く(); // step
-        t.前に進む(); // step
+        t.後に戻る();
+        t.右を向く();
+        t.前に進む();
     }
     static void convert(Turtle t, int n) {
         try {
-            t.前に進む(); // step
+            t.前に進む();
             if (n == 0) {
                 throw new RuntimeException();
             }
         } catch (RuntimeException e) {
-            t.右を向く(); // step
+            t.右を向く();
             throw new RouteAlert();
         }
     }
@@ -704,27 +704,27 @@ class RouteAlert extends RuntimeException {}`,
       },
       {
         id: 'Value3',
-        before: `            convert(t, 0); // caller`,
-        after: `            convert(t, @[0]@); // caller`,
+        before: `            convert(t, 0);`,
+        after: `            convert(t, @[0]@);`,
       },
       {
         id: 'Action6',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
+        Turtle t = new Turtle(2, 2);
         try {
-            convert(t, 0); // caller
-            t.後に戻る(); // step
+            convert(t, 0);
+            t.後に戻る();
         } catch (RouteAlert e) {
-            t.前に進む(); // step`,
+            t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
+        Turtle t = new Turtle(2, 2);
         try {
-            convert(t, 0); // caller
-            t.後に戻る(); // step
+            convert(t, 0);
+            t.後に戻る();
         } catch (RouteAlert e) {
-            t.@[前に進む]@(); // step`,
+            t.@[前に進む]@();`,
       },
     ],
     bugs: [
@@ -736,28 +736,28 @@ class RouteAlert extends RuntimeException {}`,
       },
       {
         id: 'Value3',
-        before: `            convert(t, 0); // caller`,
-        after: `            convert(t, 1); // caller`,
+        before: `            convert(t, 0);`,
+        after: `            convert(t, 1);`,
         kind: 'logical',
       },
       {
         id: 'Action6',
         before: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
+        Turtle t = new Turtle(2, 2);
         try {
-            convert(t, 0); // caller
-            t.後に戻る(); // step
+            convert(t, 0);
+            t.後に戻る();
         } catch (RouteAlert e) {
-            t.前に進む(); // step`,
+            t.前に進む();`,
         after: `public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
+        Turtle t = new Turtle(2, 2);
         try {
-            convert(t, 0); // caller
-            t.後に戻る(); // step
+            convert(t, 0);
+            t.後に戻る();
         } catch (RouteAlert e) {
-            t.後に戻る(); // step`,
+            t.後に戻る();`,
         kind: 'logical',
       },
     ],

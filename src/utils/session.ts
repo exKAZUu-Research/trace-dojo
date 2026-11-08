@@ -49,7 +49,7 @@ async function upsertUser(id: string): Promise<void> {
 
   upsertedUserIds.add(id);
   const user = db.insert(users).values({ id, displayName: id }).onConflictDoNothing().returning().get();
-  logger.debug('User upserted: %o', user);
+  if (user) logger.debug('User inserted: %o', user);
 }
 
 const memoizeForEmails = memoizeFactory({

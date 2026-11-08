@@ -1,7 +1,5 @@
 import { z } from 'zod';
 
-import { stripJavaTraceAnnotations } from './javaSource';
-
 const prefix = 'trace-dojo:java-draft:';
 const sourceLimit = 100_000;
 const contextSchema = z.object({
@@ -37,17 +35,10 @@ export function restoreJavaDraft(key: string, baseline: string, completed: boole
     const raw = localStorage.getItem(key);
     if (raw === null) return { code: baseline, failed: false };
     const draft = parseDraft(raw);
-    if (
-      !draft ||
-      javaDraftKey(draft.context) !== key ||
-      (draft.baseline !== baseline && stripJavaTraceAnnotations(draft.baseline) !== baseline)
-    ) {
+    if (!draft || javaDraftKey(draft.context) !== key || trimLineEnds(draft.baseline) !== trimLineEnds(baseline)) {
       return { code: baseline, failed: !removeJavaDraft(key) };
     }
-    return {
-      code: draft.baseline === baseline ? draft.code : stripJavaTraceAnnotations(draft.code),
-      failed: false,
-    };
+    return { code: draft.code, failed: false };
   } catch {
     return { code: baseline, failed: true };
   }
@@ -83,6 +74,11 @@ export function removeJavaDraft(key: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Ignores blanks at the ends of rows, which the programs shown to learners once kept where annotations were. */
+function trimLineEnds(source: string): string {
+  return source.replaceAll(/[ \t]+$/gm, '');
 }
 
 function parseDraft(raw: string): z.infer<typeof draftSchema> | undefined {

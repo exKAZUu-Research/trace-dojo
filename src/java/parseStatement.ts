@@ -6,13 +6,17 @@ import type {
   Expression,
   ExpressionStatement,
   LocalVariableDeclaration,
+  PatternLabel,
+  Resource,
   Statement,
   SwitchGroup,
   VariableDeclarator,
 } from './ast';
+import { convertTypeDeclaration } from './parseDeclarations';
 import { convertArrayInitializer, convertExpression } from './parseExpression';
 import {
   convertModifiers,
+  convertPattern,
   convertType,
   convertVariableType,
   countDimensions,
@@ -62,7 +66,11 @@ function convertInitializer(value: Node): VariableDeclarator['initializer'] {
   return value.type === 'array_initializer' ? convertArrayInitializer(value) : convertExpression(value);
 }
 
-const unsupportedDeclaration = (node: Node): never => unsupported(node, 'メソッドの中で宣言するクラス');
+const convertLocalClass = (node: Node): Statement => ({
+  kind: 'localClass',
+  declaration: convertTypeDeclaration(node),
+  ...span(node),
+});
 
 const statementConverters: Record<string, (node: Node) => Statement> = {
   block: convertBlock,
@@ -87,7 +95,8 @@ const statementConverters: Record<string, (node: Node) => Statement> = {
   }),
   for_statement: convertFor,
   enhanced_for_statement: convertForEach,
-  switch_expression: convertSwitch,
+  switch_expression: (node) => ({ kind: 'switch', ...convertSwitchParts(node, false), ...span(node) }),
+  yield_statement: (node) => ({ kind: 'yield', value: convertExpression(namedChildren(node)[0]), ...span(node) }),
   break_statement: convertJump,
   continue_statement: convertJump,
   return_statement: (node) => {
@@ -96,16 +105,31 @@ const statementConverters: Record<string, (node: Node) => Statement> = {
   },
   throw_statement: (node) => ({ kind: 'throw', value: convertExpression(namedChildren(node)[0]), ...span(node) }),
   try_statement: convertTry,
-  try_with_resources_statement: (node) => unsupported(node, 'try-with-resources 文'),
+  try_with_resources_statement: convertTry,
+  assert_statement: (node) => {
+    const [condition, message] = namedChildren(node);
+    return {
+      kind: 'assert',
+      condition: convertExpression(condition),
+      message: message ? convertExpression(message) : undefined,
+      ...span(node),
+    };
+  },
+  synchronized_statement: (node) => ({
+    kind: 'synchronized',
+    lock: convertCondition(namedChildren(node)[0]),
+    body: convertBlock(field(node, 'body')),
+    ...span(node),
+  }),
   labeled_statement: (node) => {
     const [label, body] = namedChildren(node);
     return { kind: 'labeled', label: label.text, body: convertStatement(body), ...span(node) };
   },
   ';': (node) => ({ kind: 'empty', ...span(node) }),
-  class_declaration: unsupportedDeclaration,
-  interface_declaration: unsupportedDeclaration,
-  record_declaration: unsupportedDeclaration,
-  enum_declaration: unsupportedDeclaration,
+  class_declaration: convertLocalClass,
+  interface_declaration: convertLocalClass,
+  record_declaration: convertLocalClass,
+  enum_declaration: convertLocalClass,
 };
 
 function convertLocal(node: Node): LocalVariableDeclaration {
@@ -163,36 +187,53 @@ function convertForEach(node: Node): Statement {
   };
 }
 
-function convertSwitch(node: Node): Statement {
+/**
+ * Converts the parts that switch statements and switch expressions share.
+ *
+ * @param isExpression Whether the switch is an expression, where an arrow rule's expression gives its value.
+ */
+export function convertSwitchParts(
+  node: Node,
+  isExpression: boolean
+): { selector: Expression; isArrowForm: boolean; groups: SwitchGroup[] } {
   const groupNodes = namedChildren(field(node, 'body'));
-  const groups = groupNodes.map((groupNode) => convertSwitchGroup(groupNode));
   return {
-    kind: 'switch',
     selector: convertCondition(field(node, 'condition')),
     isArrowForm: groupNodes.some((groupNode) => groupNode.type === 'switch_rule'),
-    groups,
-    ...span(node),
+    groups: groupNodes.map((groupNode) => convertSwitchGroup(groupNode, isExpression)),
   };
 }
 
-function convertSwitchGroup(groupNode: Node): SwitchGroup {
-  const labels: (Expression | undefined)[] = [];
+function convertSwitchGroup(groupNode: Node, isExpression: boolean): SwitchGroup {
+  const labels: (Expression | PatternLabel | undefined)[] = [];
   const statements: Statement[] = [];
+  const isRule = groupNode.type === 'switch_rule';
   for (const child of statementNodes(groupNode)) {
     if (child.type === 'switch_label') labels.push(...convertSwitchLabel(child));
-    else statements.push(convertStatement(child));
+    else if (isRule && isExpression && child.type === 'expression_statement') {
+      statements.push({ kind: 'yield', value: convertExpression(namedChildren(child)[0]), ...span(child) });
+    } else statements.push(convertStatement(child));
   }
   return { labels, statements, ...span(groupNode) };
 }
 
 /** `undefined` stands for `default`. */
-function convertSwitchLabel(label: Node): (Expression | undefined)[] {
+function convertSwitchLabel(label: Node): (Expression | PatternLabel | undefined)[] {
   const values = namedChildren(label);
-  if (values.length === 0) return [undefined];
-  return values.map((value) => {
-    if (value.type === 'pattern' || value.type === 'guard') unsupported(value, 'パターンマッチング');
-    return convertExpression(value);
-  });
+  const isDefault = label.children.some((child) => child?.type === 'default');
+  const guardNode = values.find((value) => value.type === 'guard');
+  const labels = values
+    .filter((value) => value.type !== 'guard')
+    .map((value): Expression | PatternLabel => {
+      if (value.type !== 'pattern') return convertExpression(value);
+      return {
+        kind: 'patternLabel',
+        pattern: convertPattern(value),
+        guard: guardNode ? convertExpression(namedChildren(guardNode)[0]) : undefined,
+        ...span(value),
+      };
+    });
+  return isDefault ? [...labels, undefined] : labels;
 }
 
 function convertJump(node: Node): Statement {
@@ -211,11 +252,30 @@ function convertTry(node: Node): Statement {
     if (child.type === 'catch_clause') catches.push(convertCatch(child));
     else if (child.type === 'finally_clause') finallyBlock = convertBlock(namedChildren(child)[0]);
   }
+  const resources = node.childForFieldName('resources');
   return {
     kind: 'try',
+    resources: resources ? namedChildren(resources).map((resource) => convertResource(resource)) : [],
     body: convertBlock(field(node, 'body')),
     catches,
     finallyBlock,
+    ...span(node),
+  };
+}
+
+function convertResource(node: Node): Resource {
+  const value = node.childForFieldName('value');
+  if (!value) return { expression: convertExpression(namedChildren(node)[0]), ...span(node) };
+  const name = identifierOf(node, '名前のない変数');
+  return {
+    // A resource variable is implicitly final.
+    local: {
+      kind: 'local',
+      isFinal: true,
+      type: convertType(field(node, 'type')),
+      declarators: [{ name: name.text, extraDimensions: 0, initializer: convertExpression(value), ...span(node) }],
+      ...span(node),
+    },
     ...span(node),
   };
 }

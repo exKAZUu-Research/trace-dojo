@@ -1,22 +1,48 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
-import { type Frame, throwBuiltin } from './runtime';
+import { defineArrayCopy } from './arrayCopy';
+import { defineClassClass, runtimeClassNameOf } from './builtinClass';
+import { type Collections, defineCollections, javaEquals, javaHash, linkComparator } from './builtinCollections';
+import { makeEnumGeneric } from './builtinEnum';
+import { defineFunctions, type Functions } from './builtinFunctions';
+import { defineMath } from './builtinMath';
+import { defineMisc } from './builtinMisc';
+import { defineStreams } from './builtinStreams';
+import {
+  addConstant,
+  addConstructor,
+  addInterface,
+  addMethod,
+  createRegistry,
+  newString,
+  type Registry,
+  requireString,
+  text,
+} from './builtinSupport';
+import { charsInRange, defineText } from './builtinText';
+import { defineUtilities } from './builtinUtilities';
+import { type BoxableKind, defineWrappers, hashOf, type Wrappers } from './builtinWrappers';
+import { type Frame, ProgramExit, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
   CHAR,
   type ClassInfo,
-  createClass,
   DOUBLE,
   type FieldInfo,
+  FLOAT,
   INT,
+  isPrimitive,
   type JavaType,
+  LONG,
   type MethodInfo,
   type NativeMethod,
+  OBJECT_TYPE,
   VOID,
 } from './types';
 import {
   charCodeOf,
   charToString,
   formatDouble,
+  formatFloat,
   JavaArray,
   JavaObject,
   JavaString,
@@ -24,11 +50,18 @@ import {
   type Value,
 } from './values';
 
+const CHAR_ARRAY: JavaType = { kind: 'array', element: CHAR };
+
 export interface Builtins {
   classes: Map<string, ClassInfo>;
   objectClass: ClassInfo;
   stringClass: ClassInfo;
+  enumClass: ClassInfo;
+  recordClass: ClassInfo;
   throwableClass: ClassInfo;
+  wrappers: Wrappers;
+  collections: Collections;
+  functions: Functions;
   /** The qualified names `Throwable.toString` prints for builtin classes. */
   qualifiedNames: Map<ClassInfo, string>;
 }
@@ -41,44 +74,44 @@ export function getBuiltins(): Builtins {
   return cachedBuiltins;
 }
 
-interface Registry {
-  classes: Map<string, ClassInfo>;
-  qualifiedNames: Map<ClassInfo, string>;
-  define: (name: string, superclass: ClassInfo | undefined, packageName?: string) => ClassInfo;
-}
-
 function createBuiltins(): Builtins {
   const registry = createRegistry();
   const objectClass = registry.define('Object', undefined);
+  OBJECT_TYPE.value = objectClass.type;
   const stringClass = registry.define('String', objectClass);
   defineObject(objectClass, stringClass.type);
+  defineClassClass(registry, objectClass, stringClass.type);
   defineString(stringClass, objectClass.type);
+  stringClass.isFinal = true;
+  const enumClass = defineEnum(registry.define('Enum', objectClass), stringClass.type);
+  const recordClass = defineRecord(registry.define('Record', objectClass), objectClass, stringClass.type);
   const throwableClass = defineThrowables(registry, objectClass, stringClass.type);
   defineTurtle(registry.define('Turtle', objectClass, ''), stringClass.type);
   defineMath(registry.define('Math', objectClass));
-  defineInteger(registry.define('Integer', objectClass), stringClass.type);
+  const wrappers = defineWrappers(registry, objectClass, stringClass.type);
+  const stringCompareTo = stringClass.methods.find((method) => method.name === 'compareTo') as MethodInfo;
+  stringCompareTo.overrides = new Set([wrappers.compareTo]);
+  addInterface(stringClass, { kind: 'class', cls: wrappers.comparableClass, args: [stringClass.type] });
+  makeEnumGeneric(registry, enumClass, wrappers, stringClass.type);
+  const collections = defineCollections(registry, objectClass, stringClass.type, wrappers);
   defineSystem(registry, objectClass, stringClass.type);
+  defineMisc(registry, objectClass, stringClass.type);
+  defineUtilities(registry, objectClass, stringClass.type, collections, wrappers.comparableClass);
+  defineText(registry, objectClass, stringClass, registry.classes.get('PrintStream') as ClassInfo, collections);
+  const functions = defineFunctions(registry, objectClass, collections, wrappers.comparableClass);
+  linkComparator(collections, functions.comparatorClass);
+  defineStreams(registry, objectClass, stringClass.type, collections, wrappers, functions);
   return {
     classes: registry.classes,
     objectClass,
     stringClass,
+    enumClass,
+    recordClass,
     throwableClass,
+    wrappers,
+    collections,
+    functions,
     qualifiedNames: registry.qualifiedNames,
-  };
-}
-
-function createRegistry(): Registry {
-  const classes = new Map<string, ClassInfo>();
-  const qualifiedNames = new Map<ClassInfo, string>();
-  return {
-    classes,
-    qualifiedNames,
-    define: (name, superclass, packageName = 'java.lang') => {
-      const cls = createClass(name, superclass, true);
-      classes.set(name, cls);
-      qualifiedNames.set(cls, packageName ? `${packageName}.${name}` : name);
-      return cls;
-    },
   };
 }
 
@@ -86,10 +119,66 @@ function defineObject(objectClass: ClassInfo, stringType: JavaType): void {
   addMethod(objectClass, 'equals', [objectClass.type], BOOLEAN, false, (_, receiver, [other]) => receiver === other);
   addMethod(objectClass, 'hashCode', [], INT, false, (_, receiver) => identityOf(receiver));
   addMethod(objectClass, 'toString', [], stringType, false, (frame, receiver) => {
-    const name = receiver instanceof JavaObject ? receiver.cls.name : 'Object';
-    return newString(frame, `${name}@${identityOf(receiver).toString(16)}`);
+    return newString(frame, `${runtimeClassNameOf(frame, receiver)}@${identityOf(receiver).toString(16)}`);
   });
   addConstructor(objectClass, [], () => {});
+}
+
+function defineEnum(enumClass: ClassInfo, stringType: JavaType): ClassInfo {
+  enumClass.isAbstract = true;
+  addMethod(enumClass, 'name', [], stringType, false, (_, receiver) => nameOf(receiver)).isFinal = true;
+  addMethod(enumClass, 'toString', [], stringType, false, (_, receiver) => nameOf(receiver));
+  addMethod(enumClass, 'ordinal', [], INT, false, (_, receiver) => ordinalOf(receiver)).isFinal = true;
+  addConstructor(enumClass, [], () => {});
+  return enumClass;
+}
+
+/** `Record`, whose `toString`, `equals`, and `hashCode` read the components that each record declares. */
+function defineRecord(recordClass: ClassInfo, objectClass: ClassInfo, stringType: JavaType): ClassInfo {
+  recordClass.isAbstract = true;
+  addConstructor(recordClass, [], () => {});
+  addMethod(recordClass, 'toString', [], stringType, false, (frame, receiver) => {
+    const object = receiver as JavaObject;
+    const parts = componentsOf(receiver).map(
+      (field) => `${field.name}=${stringify(frame, object.fields[field.slot], field.type)}`
+    );
+    return newString(frame, `${object.cls.name}[${parts.join(', ')}]`);
+  });
+  addMethod(recordClass, 'equals', [objectClass.type], BOOLEAN, false, (frame, receiver, [other]) => {
+    const object = receiver as JavaObject;
+    if (!(other instanceof JavaObject) || other.cls !== object.cls) return false;
+    return componentsOf(receiver).every((field) => {
+      const [a, b] = [object.fields[field.slot], other.fields[field.slot]];
+      // Floating components compare as Double.compare does, so NaN equals NaN and 0.0 differs from -0.0.
+      if (field.type.kind === 'double' || field.type.kind === 'float') return Object.is(a, b);
+      return isPrimitive(field.type) ? a === b : javaEquals(frame, a, b);
+    });
+  });
+  addMethod(recordClass, 'hashCode', [], INT, false, (frame, receiver) => {
+    const object = receiver as JavaObject;
+    let hash = 0;
+    for (const field of componentsOf(receiver)) {
+      const value = object.fields[field.slot];
+      const fieldHash = isPrimitive(field.type)
+        ? hashOf(value, field.type.kind as BoxableKind)
+        : javaHash(frame, value);
+      hash = toInt32(Math.imul(hash, 31) + fieldHash);
+    }
+    return hash;
+  });
+  return recordClass;
+}
+
+function componentsOf(receiver: Value): FieldInfo[] {
+  return (receiver as JavaObject).cls.recordComponents ?? [];
+}
+
+function nameOf(receiver: Value): JavaString {
+  return (receiver as JavaObject).enumConstant?.name as JavaString;
+}
+
+function ordinalOf(value: Value): number {
+  return (value as JavaObject).enumConstant?.ordinal as number;
 }
 
 const causeTakers = new Set([
@@ -100,11 +189,15 @@ const causeTakers = new Set([
   'IllegalArgumentException',
   'IllegalStateException',
   'UnsupportedOperationException',
+  'IOException',
+  'MatchException',
+  'AssertionError',
 ]);
 
+// code-gauge-allow functionNcss 54 -- One registration per builtin method, each a small native.
 function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType: JavaType): ClassInfo {
-  const defineThrowable = (name: string, superclass: ClassInfo): ClassInfo => {
-    const cls = registry.define(name, superclass);
+  const defineThrowable = (name: string, superclass: ClassInfo, packageName = 'java.lang'): ClassInfo => {
+    const cls = registry.define(name, superclass, packageName);
     // Constructors are not inherited, and only these classes declare the ones taking a cause.
     addMessageConstructors(cls, stringType, causeTakers.has(name) ? throwableClass.type : undefined);
     return cls;
@@ -120,16 +213,39 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
     false,
     (_, receiver) => (receiver as JavaObject).cause
   );
+  addMethod(throwableClass, 'addSuppressed', [throwableClass.type], VOID, false, (frame, receiver, [other]) => {
+    if (other === receiver) throwBuiltin(frame, 'IllegalArgumentException', 'Self-suppression not permitted');
+    if (!(other instanceof JavaObject))
+      throwBuiltin(frame, 'NullPointerException', 'Cannot suppress a null exception.');
+    ((receiver as JavaObject).suppressed ??= []).push(other);
+  });
+  addMethod(
+    throwableClass,
+    'getSuppressed',
+    [],
+    { kind: 'array', element: throwableClass.type },
+    false,
+    (frame, receiver) => {
+      const suppressed = (receiver as JavaObject).suppressed ?? [];
+      frame.runtime.allocateArray(frame, suppressed.length);
+      return new JavaArray(throwableClass.type, [...suppressed]);
+    }
+  );
+  // A stack trace goes to standard error, which learners do not see.
+  addMethod(throwableClass, 'printStackTrace', [], VOID, false, () => {});
   addMethod(throwableClass, 'toString', [], stringType, false, (frame, receiver) => {
     const exception = receiver as JavaObject;
-    const name = registry.qualifiedNames.get(exception.cls) ?? exception.cls.name;
+    const name = registry.qualifiedNames.get(exception.cls) ?? exception.cls.binaryName;
     return newString(frame, exception.message ? `${name}: ${exception.message.value}` : name);
   });
   const exceptionClass = defineThrowable('Exception', throwableClass);
+  defineThrowable('InterruptedException', exceptionClass);
+  defineThrowable('FileNotFoundException', defineThrowable('IOException', exceptionClass, 'java.io'), 'java.io');
   const runtimeExceptionClass = defineThrowable('RuntimeException', exceptionClass);
   const errorClass = defineThrowable('Error', throwableClass);
   for (const name of [
     'ArithmeticException',
+    'ArrayStoreException',
     'ClassCastException',
     'IllegalArgumentException',
     'IllegalStateException',
@@ -144,8 +260,34 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
   defineThrowable('ArrayIndexOutOfBoundsException', indexOutOfBounds);
   defineThrowable('StringIndexOutOfBoundsException', indexOutOfBounds);
   defineThrowable('NumberFormatException', registry.classes.get('IllegalArgumentException') as ClassInfo);
+  defineThrowable('ConcurrentModificationException', runtimeExceptionClass, 'java.util');
+  const illegalArgument = registry.classes.get('IllegalArgumentException') as ClassInfo;
+  defineThrowable('PatternSyntaxException', illegalArgument, 'java.util.regex');
+  const illegalFormat = defineThrowable('IllegalFormatException', illegalArgument, 'java.util');
+  for (const name of [
+    'MissingFormatArgumentException',
+    'UnknownFormatConversionException',
+    'IllegalFormatConversionException',
+    'FormatFlagsConversionMismatchException',
+    'IllegalFormatCodePointException',
+    'MissingFormatWidthException',
+    'IllegalFormatPrecisionException',
+  ]) {
+    defineThrowable(name, illegalFormat, 'java.util');
+  }
+  defineThrowable('NoSuchElementException', runtimeExceptionClass, 'java.util');
+  defineThrowable('EmptyStackException', runtimeExceptionClass, 'java.util');
+  defineThrowable('MatchException', runtimeExceptionClass);
   defineThrowable('StackOverflowError', errorClass);
   defineThrowable('OutOfMemoryError', errorClass);
+  // AssertionError takes any detail, whose text becomes the message and which is the cause when it is a Throwable.
+  addConstructor(defineThrowable('AssertionError', errorClass), [objectClass.type], (frame, receiver, [detail]) => {
+    const exception = receiver as JavaObject;
+    exception.message = newString(frame, stringify(frame, detail, objectClass.type));
+    if (detail instanceof JavaObject && frame.runtime.isInstance(detail, throwableClass)) exception.cause = detail;
+  });
+  const linkage = defineThrowable('LinkageError', errorClass);
+  defineThrowable('AbstractMethodError', defineThrowable('IncompatibleClassChangeError', linkage));
   return throwableClass;
 }
 
@@ -168,64 +310,68 @@ function addMessageConstructors(cls: ClassInfo, stringType: JavaType, throwableT
   });
 }
 
-function defineMath(mathClass: ClassInfo): void {
-  for (const type of [INT, DOUBLE]) {
-    addMethod(mathClass, 'abs', [type], type, true, (_, __, [value]) =>
-      type === INT ? toInt32(Math.abs(value as number)) : Math.abs(value as number)
-    );
-    addMethod(mathClass, 'max', [type, type], type, true, (_, __, [a, b]) => javaMax(a as number, b as number));
-    addMethod(mathClass, 'min', [type, type], type, true, (_, __, [a, b]) => javaMin(a as number, b as number));
-  }
-  for (const name of ['sqrt', 'floor', 'ceil'] as const) {
-    addMethod(mathClass, name, [DOUBLE], DOUBLE, true, (_, __, [value]) => Math[name](value as number));
-  }
-  addMethod(mathClass, 'pow', [DOUBLE, DOUBLE], DOUBLE, true, (_, __, [a, b]) => (a as number) ** (b as number));
-  addConstant(mathClass, 'PI', DOUBLE, Math.PI);
-  addConstant(mathClass, 'E', DOUBLE, Math.E);
-}
-
-function defineInteger(integerClass: ClassInfo, stringType: JavaType): void {
-  addConstant(integerClass, 'MAX_VALUE', INT, 2_147_483_647);
-  addConstant(integerClass, 'MIN_VALUE', INT, -2_147_483_648);
-  addMethod(integerClass, 'parseInt', [stringType], INT, true, (frame, _, [text]) => {
-    const value = (text as JavaString | undefined)?.value;
-    frame.runtime.scanString(value?.length ?? 0);
-    if (value === undefined || !/^[+-]?\d+$/.test(value) || Math.abs(Number(value)) > 2_147_483_648) {
-      throwBuiltin(
-        frame,
-        'NumberFormatException',
-        value === undefined ? 'Cannot parse null string: null' : `For input string: "${value}"`
-      );
-    }
-    const parsed = Number(value);
-    if (parsed > 2_147_483_647) throwBuiltin(frame, 'NumberFormatException', `For input string: "${value}"`);
-    return parsed;
-  });
-  addMethod(integerClass, 'toString', [INT], stringType, true, (frame, __, [value]) =>
-    newString(frame, String(value as number))
-  );
-}
-
 function defineSystem(registry: Registry, objectClass: ClassInfo, stringType: JavaType): void {
   const printStreamClass = registry.define('PrintStream', objectClass, 'java.io');
   const systemClass = registry.define('System', objectClass);
   addConstant(systemClass, 'out', printStreamClass.type, new JavaObject(printStreamClass));
+  // Learners see only standard output, so standard error discards what it prints.
+  const errorStream = new JavaObject(printStreamClass);
+  addConstant(systemClass, 'err', printStreamClass.type, errorStream);
+  addMethod(systemClass, 'exit', [INT], VOID, true, () => {
+    throw new ProgramExit();
+  });
+  defineArrayCopy(systemClass, objectClass.type);
   for (const [name, suffix] of [
     ['print', ''],
     ['println', '\n'],
   ] as const) {
-    for (const type of [INT, DOUBLE, CHAR, BOOLEAN, stringType, objectClass.type]) {
-      addMethod(printStreamClass, name, [type], VOID, false, (frame, _, [value]) => {
-        frame.runtime.budget.print(`${stringify(frame, value, type)}${suffix}`);
+    for (const type of [INT, LONG, FLOAT, DOUBLE, CHAR, BOOLEAN, stringType, objectClass.type]) {
+      addMethod(printStreamClass, name, [type], VOID, false, (frame, receiver, [value]) => {
+        const text = `${stringify(frame, value, type)}${suffix}`;
+        if (receiver !== errorStream) frame.runtime.print(text);
       });
     }
+    addMethod(printStreamClass, name, [CHAR_ARRAY], VOID, false, (frame, receiver, [value]) => {
+      if (!(value instanceof JavaArray)) throwBuiltin(frame, 'NullPointerException');
+      frame.runtime.scanString(value.values.length);
+      const text = `${value.values.map((code) => charToString(code as number)).join('')}${suffix}`;
+      if (receiver !== errorStream) frame.runtime.print(text);
+    });
   }
-  addMethod(printStreamClass, 'println', [], VOID, false, (frame) => {
-    frame.runtime.budget.print('\n');
+  addMethod(printStreamClass, 'println', [], VOID, false, (frame, receiver) => {
+    if (receiver !== errorStream) frame.runtime.print('\n');
+  });
+  defineIO(registry, objectClass);
+}
+
+/** `IO`, which compact source files use to print without `System.out`. */
+function defineIO(registry: Registry, objectClass: ClassInfo): void {
+  const ioClass = registry.define('IO', objectClass);
+  for (const [name, suffix] of [
+    ['print', ''],
+    ['println', '\n'],
+  ] as const) {
+    addMethod(ioClass, name, [objectClass.type], VOID, true, (frame, _, [value]) => {
+      frame.runtime.print(`${stringify(frame, value, objectClass.type)}${suffix}`);
+    });
+  }
+  addMethod(ioClass, 'println', [], VOID, true, (frame) => {
+    frame.runtime.print('\n');
   });
 }
 
 function defineString(stringClass: ClassInfo, objectType: JavaType): void {
+  addConstructor(stringClass, [], (frame) => newString(frame, ''));
+  addConstructor(stringClass, [stringClass.type], (frame, _, [original]) =>
+    newString(frame, requireString(frame, original))
+  );
+  addConstructor(stringClass, [CHAR_ARRAY], (frame, _, [chars]) => {
+    if (!(chars instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
+    return newString(frame, chars.values.map((code) => charToString(code as number)).join(''));
+  });
+  addConstructor(stringClass, [CHAR_ARRAY, INT, INT], (frame, _, [chars, offset, count]) =>
+    newString(frame, charsInRange(frame, chars, offset as number, count as number))
+  );
   defineStringQueries(stringClass, objectType);
   defineStringTransforms(stringClass, objectType);
 }
@@ -337,20 +483,11 @@ function defineStringTransforms(stringClass: ClassInfo, objectType: JavaType): v
       Array.from({ length: value.length }, (_, index) => charCodeOf(value, index))
     );
   });
-  for (const type of [INT, DOUBLE, CHAR, BOOLEAN, objectType]) {
+  for (const type of [INT, LONG, FLOAT, DOUBLE, CHAR, BOOLEAN, objectType]) {
     addMethod(stringClass, 'valueOf', [type], stringType, true, (frame, _, [value]) =>
       newString(frame, stringify(frame, value, type))
     );
   }
-}
-
-function newString(frame: Frame, value: string): JavaString {
-  frame.runtime.allocateString(frame, value.length);
-  return new JavaString(value);
-}
-
-function text(value: Value): string {
-  return (value as JavaString).value;
 }
 
 function checkIndex(frame: Frame, index: number, length: number): void {
@@ -361,13 +498,12 @@ function checkIndex(frame: Frame, index: number, length: number): void {
 
 function checkRange(frame: Frame, begin: number, end: number, length: number): void {
   if (begin < 0 || end > length || begin > end) {
-    throwBuiltin(frame, 'StringIndexOutOfBoundsException', `begin ${begin}, end ${end}, length ${length}`);
+    throwBuiltin(
+      frame,
+      'StringIndexOutOfBoundsException',
+      `Range [${begin}, ${end}) out of bounds for length ${length}`
+    );
   }
-}
-
-function requireString(frame: Frame, value: Value): string {
-  if (!(value instanceof JavaString)) return throwBuiltin(frame, 'NullPointerException');
-  return value.value;
 }
 
 function defineTurtle(turtleClass: ClassInfo, stringType: JavaType): void {
@@ -428,80 +564,22 @@ function stateOf(receiver: Value): TurtleState {
   return state;
 }
 
-function addMethod(
-  cls: ClassInfo,
-  name: string,
-  parameterTypes: JavaType[],
-  returnType: JavaType,
-  isStatic: boolean,
-  native: NativeMethod
-): MethodInfo {
-  const method: MethodInfo = {
-    name,
-    owner: cls,
-    parameterTypes,
-    returnType,
-    isStatic,
-    isAbstract: false,
-    isConstructor: false,
-    access: 'public',
-    thrownTypes: [],
-    native,
-  };
-  cls.methods.push(method);
-  return method;
-}
-
-function addConstructor(cls: ClassInfo, parameterTypes: JavaType[], native: NativeMethod): void {
-  cls.constructors.push({
-    name: cls.name,
-    owner: cls,
-    parameterTypes,
-    returnType: VOID,
-    isStatic: false,
-    isAbstract: false,
-    isConstructor: true,
-    access: 'public',
-    thrownTypes: [],
-    native,
-  });
-}
-
-function addConstant(cls: ClassInfo, name: string, type: JavaType, constant: Value): void {
-  const field: FieldInfo = {
-    name,
-    owner: cls,
-    type,
-    isStatic: true,
-    isFinal: true,
-    access: 'public',
-    slot: cls.staticFieldCount++,
-    constant,
-  };
-  cls.fields.set(name, field);
-  cls.staticFields.push(field);
-}
-
 function identityOf(value: Value): number {
   if (value instanceof JavaObject || value instanceof JavaArray) return value.identity;
   return 0;
 }
 
-function javaMax(a: number, b: number): number {
-  if (Number.isNaN(a) || Number.isNaN(b)) return Number.NaN;
-  return a === 0 && b === 0 ? (Object.is(a, -0) ? b : a) : Math.max(a, b);
-}
-
-function javaMin(a: number, b: number): number {
-  if (Number.isNaN(a) || Number.isNaN(b)) return Number.NaN;
-  return a === 0 && b === 0 ? (Object.is(a, -0) ? a : b) : Math.min(a, b);
-}
-
 /** Converts a value to the text that string concatenation and `print` produce. */
 export function stringify(frame: Frame, value: Value, type: JavaType): string {
   switch (type.kind) {
-    case 'int': {
-      return String(value as number);
+    case 'byte':
+    case 'short':
+    case 'int':
+    case 'long': {
+      return String(value as number | bigint);
+    }
+    case 'float': {
+      return formatFloat(value as number);
     }
     case 'double': {
       return formatDouble(value as number);
@@ -516,33 +594,10 @@ export function stringify(frame: Frame, value: Value, type: JavaType): string {
       if (value === undefined) return 'null';
       if (value instanceof JavaString) return value.value;
       if (value instanceof JavaArray) {
-        return `[${arrayTypeCode(value.elementType)}@${value.identity.toString(16)}`;
+        return `${runtimeClassNameOf(frame, value)}@${value.identity.toString(16)}`;
       }
       const result = frame.runtime.invokeToString(frame, value as JavaObject);
       return result === undefined ? 'null' : result.value;
-    }
-  }
-}
-
-function arrayTypeCode(type: JavaType): string {
-  switch (type.kind) {
-    case 'int': {
-      return 'I';
-    }
-    case 'double': {
-      return 'D';
-    }
-    case 'char': {
-      return 'C';
-    }
-    case 'boolean': {
-      return 'Z';
-    }
-    case 'array': {
-      return `[${arrayTypeCode(type.element)}`;
-    }
-    default: {
-      return `L${type.kind === 'class' ? type.cls.name : 'Object'};`;
     }
   }
 }

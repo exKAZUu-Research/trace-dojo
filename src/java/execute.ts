@@ -3,7 +3,7 @@ import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import { type CompiledProgram, compileProgram } from './compiler';
 import { parseJava } from './parse';
-import { Frame, JavaThrow, Runtime } from './runtime';
+import { Frame, JavaThrow, ProgramExit, Runtime } from './runtime';
 import { JavaArray } from './values';
 
 export function executeJavaProgram(source: string): ProgramExecution {
@@ -33,6 +33,7 @@ export function runProgram(
   onMainExit?: (frame: Frame) => void
 ): ProgramRun {
   let finalTurtles: ProgramRun['finalTurtles'] = [];
+  runtime.internedStrings = program.internedStrings;
   runtime.onExit = (frame) => {
     if (frame.method !== program.mainMethod || runtime.frames.length !== 1) return;
     onMainExit?.(frame);
@@ -48,15 +49,19 @@ function runMain(runtime: Runtime, program: CompiledProgram): string | undefined
   const root = new Frame(runtime, undefined, [], undefined, undefined);
   try {
     runtime.initializeClass(root, program.entryClass);
-    const args = new JavaArray(program.builtins.stringClass.type, []);
-    runtime.invoke(root, program.mainMethod, undefined, [args], undefined);
+    const { mainMethod, entryConstructor } = program;
+    const receiver = entryConstructor ? runtime.allocateObject(root, program.entryClass) : undefined;
+    if (entryConstructor) runtime.invoke(root, entryConstructor, receiver, [], undefined);
+    const args = mainMethod.parameterTypes.length === 0 ? [] : [new JavaArray(program.builtins.stringClass.type, [])];
+    runtime.invoke(root, mainMethod, receiver, args, undefined);
     return undefined;
   } catch (error) {
     return describeUncaught(runtime, root, error);
   }
 }
 
-function describeUncaught(runtime: Runtime, root: Frame, error: unknown): string {
+function describeUncaught(runtime: Runtime, root: Frame, error: unknown): string | undefined {
+  if (error instanceof ProgramExit) return undefined;
   if (isHostStackOverflow(error)) return 'java.lang.StackOverflowError';
   if (!(error instanceof JavaThrow)) throw error;
   try {

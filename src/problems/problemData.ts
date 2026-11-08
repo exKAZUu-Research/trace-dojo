@@ -427,169 +427,169 @@ export const problemIdToProgram: Record<LegacyProblemId, string> = {
   straight: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // step
-        亀.前に進む(); // step
-        亀.前に進む(); // step
+        Turtle 亀 = new Turtle();
+        亀.前に進む();
+        亀.前に進む();
     }
 }
     `,
   straight2: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // step
-        亀.前に進む(); // step
-        亀.前に進む(); // step
-        亀.前に進む(); // step
+        Turtle 亀 = new Turtle();
+        亀.前に進む();
+        亀.前に進む();
+        亀.前に進む();
     }
 }
     `,
   stepBack: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // step
-        亀.前に進む(); // step
-        亀.後に戻る(); // step
+        Turtle 亀 = new Turtle();
+        亀.前に進む();
+        亀.後に戻る();
     }
 }
     `,
   stepBack2: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // step
-        亀.前に進む(); // step
-        亀.前に進む(); // step
-        亀.後に戻る(); // step
-        亀.前に進む(); // step
-        亀.前に進む(); // step
+        Turtle 亀 = new Turtle();
+        亀.前に進む();
+        亀.前に進む();
+        亀.後に戻る();
+        亀.前に進む();
+        亀.前に進む();
     }
 }
     `,
   turnRight: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // step
-        亀.前に進む(); // step
-        亀.右を向く(); // step
-        亀.前に進む(); // step
+        Turtle 亀 = new Turtle();
+        亀.前に進む();
+        亀.右を向く();
+        亀.前に進む();
     }
 }
     `,
   turnRight2: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // step
-        亀.前に進む(); // step
-        亀.前に進む(); // step
-        亀.右を向く(); // step
-        亀.前に進む(); // step
-        亀.前に進む(); // step
+        Turtle 亀 = new Turtle();
+        亀.前に進む();
+        亀.前に進む();
+        亀.右を向く();
+        亀.前に進む();
+        亀.前に進む();
     }
 }
     `,
   turnLeftAndRight: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // step
-        亀.右を向く(); // step
-        亀.前に進む(); // step
-        亀.左を向く(); // step
-        亀.前に進む(); // step
+        Turtle 亀 = new Turtle();
+        亀.右を向く();
+        亀.前に進む();
+        亀.左を向く();
+        亀.前に進む();
     }
 }
     `,
   turnLeftAndRight2: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // step
-        亀.前に進む(); // step
-        亀.右を向く(); // step
-        亀.前に進む(); // step
-        亀.左を向く(); // step
-        亀.前に進む(); // step
+        Turtle 亀 = new Turtle();
+        亀.前に進む();
+        亀.右を向く();
+        亀.前に進む();
+        亀.左を向く();
+        亀.前に進む();
     }
 }
     `,
   turnLeftAndRight3: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // step
-        亀.右を向く(); // step
-        亀.前に進む(); // step
-        亀.左を向く(); // step
-        亀.前に進む(); // step
-        亀.右を向く(); // step
-        亀.前に進む(); // step
+        Turtle 亀 = new Turtle();
+        亀.右を向く();
+        亀.前に進む();
+        亀.左を向く();
+        亀.前に進む();
+        亀.右を向く();
+        亀.前に進む();
     }
 }
     `,
   turnLeftAndRight4: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // step
-        亀.前に進む(); // step
-        亀.前に進む(); // step
-        亀.右を向く(); // step
-        亀.前に進む(); // step
-        亀.前に進む(); // step
-        亀.左を向く(); // step
-        亀.前に進む(); // step
-        亀.前に進む(); // step
+        Turtle 亀 = new Turtle();
+        亀.前に進む();
+        亀.前に進む();
+        亀.右を向く();
+        亀.前に進む();
+        亀.前に進む();
+        亀.左を向く();
+        亀.前に進む();
+        亀.前に進む();
     }
 }
     `,
   square1: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // step
-        亀.前に進む(); // step
-        亀.右を向く(); // step
-        亀.前に進む(); // step
-        亀.右を向く(); // step
-        亀.前に進む(); // step
+        Turtle 亀 = new Turtle();
+        亀.前に進む();
+        亀.右を向く();
+        亀.前に進む();
+        亀.右を向く();
+        亀.前に進む();
     }
 }
     `,
   square2: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(<1-5>, <1-4>); // step
-        亀.前に進む(); // step
-        亀.右を向く(); // step
-        亀.前に進む(); // step
-        亀.右を向く(); // step
-        亀.前に進む(); // step
+        Turtle 亀 = new Turtle(<1-5>, <1-4>);
+        亀.前に進む();
+        亀.右を向く();
+        亀.前に進む();
+        亀.右を向く();
+        亀.前に進む();
     }
 }
     `,
   square3: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(<2-5>, <2-5>); // step
-        亀.前に進む(); // step
-        亀.左を向く(); // step
-        亀.前に進む(); // step
-        亀.左を向く(); // step
-        亀.前に進む(); // step
-        亀.左を向く(); // step
-        亀.前に進む(); // step
+        Turtle 亀 = new Turtle(<2-5>, <2-5>);
+        亀.前に進む();
+        亀.左を向く();
+        亀.前に進む();
+        亀.左を向く();
+        亀.前に進む();
+        亀.左を向く();
+        亀.前に進む();
     }
 }
     `,
   square4: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // step
-        亀.前に進む(); // step
-        亀.前に進む(); // step
-        亀.右を向く(); // step
-        亀.前に進む(); // step
-        亀.前に進む(); // step
-        亀.右を向く(); // step
-        亀.前に進む(); // step
-        亀.前に進む(); // step
-        亀.右を向く(); // step
-        亀.前に進む(); // step
-        亀.前に進む(); // step
+        Turtle 亀 = new Turtle();
+        亀.前に進む();
+        亀.前に進む();
+        亀.右を向く();
+        亀.前に進む();
+        亀.前に進む();
+        亀.右を向く();
+        亀.前に進む();
+        亀.前に進む();
+        亀.右を向く();
+        亀.前に進む();
+        亀.前に進む();
     }
 }
     `,
@@ -597,127 +597,127 @@ public class Main {
   variable: `
 public class Main {
     public static void main(String[] args) {
-        int x = <1-5>; // step
-        Turtle 亀 = new Turtle(x, <1-5>); // step
-        亀.前に進む(); // step
+        int x = <1-5>;
+        Turtle 亀 = new Turtle(x, <1-5>);
+        亀.前に進む();
     }
 }
     `,
   variable2: `
 public class Main {
     public static void main(String[] args) {
-        int a = <2-6>; // step
-        a = a - 1; // step
-        Turtle 亀 = new Turtle(<1-5>, a); // step
-        亀.前に進む(); // step
+        int a = <2-6>;
+        a = a - 1;
+        Turtle 亀 = new Turtle(<1-5>, a);
+        亀.前に進む();
     }
 }
     `,
   variable3: `
 public class Main {
     public static void main(String[] args) {
-        int x = <1-4>; // step
-        x = x + 1; // step
-        int y = x + 1; // step
-        Turtle 亀 = new Turtle(x, y); // step
-        亀.前に進む(); // step
+        int x = <1-4>;
+        x = x + 1;
+        int y = x + 1;
+        Turtle 亀 = new Turtle(x, y);
+        亀.前に進む();
     }
 }
     `,
   variable4: `
 public class Main {
     public static void main(String[] args) {
-        int b = <1-4>; // step
-        b = b + 1; // step
-        int a = b - 2; // step
-        Turtle 亀 = new Turtle(a + 1, b); // step
-        亀.前に進む(); // step
+        int b = <1-4>;
+        b = b + 1;
+        int a = b - 2;
+        Turtle 亀 = new Turtle(a + 1, b);
+        亀.前に進む();
     }
 }
     `,
   variable5: `
 public class Main {
     public static void main(String[] args) {
-        int x = <1-5>; // step
-        x--; // step
-        int y = x * 2; // step
-        y /= 3; // step
-        Turtle 亀 = new Turtle(x + 1, y + 1); // step
-        亀.前に進む(); // step
+        int x = <1-5>;
+        x--;
+        int y = x * 2;
+        y /= 3;
+        Turtle 亀 = new Turtle(x + 1, y + 1);
+        亀.前に進む();
     }
 }
     `,
   variable6: `
 public class Main {
     public static void main(String[] args) {
-        int a = <1-3>; // step
-        int b = a * 2; // step
-        int c = b - 2; // step
-        Turtle 亀 = new Turtle(c, b); // step
-        亀.前に進む(); // step
+        int a = <1-3>;
+        int b = a * 2;
+        int c = b - 2;
+        Turtle 亀 = new Turtle(c, b);
+        亀.前に進む();
     }
 }
     `,
   variable7: `
 public class Main {
     public static void main(String[] args) {
-        int x = <0-2>; // step
-        int y = (x * 2) + 1; // step
-        int z = (y * 2) + (x / 2); // step
-        x = z / 3; // step
-        Turtle 亀 = new Turtle(x, y); // step
-        亀.前に進む(); // step
+        int x = <0-2>;
+        int y = (x * 2) + 1;
+        int z = (y * 2) + (x / 2);
+        x = z / 3;
+        Turtle 亀 = new Turtle(x, y);
+        亀.前に進む();
     }
 }
     `,
   variable8: `
 public class Main {
     public static void main(String[] args) {
-        int x = <0-2>; // step
-        int y = (x * 3) + 2; // step
-        int z = (y * 2) - (x * 3); // step
-        x = (z / 4) % 7; // step
-        y = (x + y) % 7; // step
-        Turtle 亀 = new Turtle(x, y); // step
-        亀.後に戻る(); // step
+        int x = <0-2>;
+        int y = (x * 3) + 2;
+        int z = (y * 2) - (x * 3);
+        x = (z / 4) % 7;
+        y = (x + y) % 7;
+        Turtle 亀 = new Turtle(x, y);
+        亀.後に戻る();
     }
 }
     `,
   variable9: `
 public class Main {
     public static void main(String[] args) {
-        int x = <0-3>; // step
-        int y = (x * 4) + 3; // step
-        int z = (y * 3) - (x * 2); // step
-        x = ((z / 5) + x) % 7; // step
-        y = ((x * 2) + y) % 7; // step
-        Turtle 亀 = new Turtle(x, y); // step
-        亀.前に進む(); // step
+        int x = <0-3>;
+        int y = (x * 4) + 3;
+        int z = (y * 3) - (x * 2);
+        x = ((z / 5) + x) % 7;
+        y = ((x * 2) + y) % 7;
+        Turtle 亀 = new Turtle(x, y);
+        亀.前に進む();
     }
 }
     `,
   variable10: `
 public class Main {
     public static void main(String[] args) {
-        int x = <0-3>; // step
-        int y = (x * 5) + 4; // step
-        int z = (y * 2) - (x * 3); // step
-        int w = (z + x) % 5; // step
-        x = ((z / 6) + w) % 7; // step
-        y = ((x * 3) + y) % 7; // step
-        Turtle 亀 = new Turtle(x, y); // step
-        亀.前に進む(); // step
+        int x = <0-3>;
+        int y = (x * 5) + 4;
+        int z = (y * 2) - (x * 3);
+        int w = (z + x) % 5;
+        x = ((z / 6) + w) % 7;
+        y = ((x * 3) + y) % 7;
+        Turtle 亀 = new Turtle(x, y);
+        亀.前に進む();
     }
 }
     `,
   while1: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // step
-        int i = 0; // step
+        Turtle 亀 = new Turtle();
+        int i = 0;
         while (i < <3-5>) {
-            亀.前に進む(); // step
-            i++; // step
+            亀.前に進む();
+            i++;
         }
     }
 }
@@ -725,11 +725,11 @@ public class Main {
   while2: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(<0-1>, <0-1>); // step
-        int i = <1-2>; // step
+        Turtle 亀 = new Turtle(<0-1>, <0-1>);
+        int i = <1-2>;
         while (i < <4-6>) {
-            亀.前に進む(); // step
-            i++; // step
+            亀.前に進む();
+            i++;
         }
     }
 }
@@ -737,12 +737,12 @@ public class Main {
   while3: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // step
-        int i = 0; // step
+        Turtle 亀 = new Turtle();
+        int i = 0;
         while (i < <2-3>) {
-            i++; // step
-            亀.前に進む(); // step
-            亀.右を向く(); // step
+            i++;
+            亀.前に進む();
+            亀.右を向く();
         }
     }
 }
@@ -750,14 +750,14 @@ public class Main {
   while4: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(<0-1>, <0-1>); // step
-        亀.右を向く(); // step
-        int i = <1-2>; // step
+        Turtle 亀 = new Turtle(<0-1>, <0-1>);
+        亀.右を向く();
+        int i = <1-2>;
         while (i < <4-5>) {
-            亀.前に進む(); // step
-            亀.前に進む(); // step
-            亀.左を向く(); // step
-            i++; // step
+            亀.前に進む();
+            亀.前に進む();
+            亀.左を向く();
+            i++;
         }
     }
 }
@@ -765,14 +765,14 @@ public class Main {
   while5: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // step
-        int i = <1-2>; // step
+        Turtle 亀 = new Turtle();
+        int i = <1-2>;
         while (i < <3-4>) {
-            亀.前に進む(); // step
-            亀.右を向く(); // step
-            亀.前に進む(); // step
-            亀.左を向く(); // step
-            i++; // step
+            亀.前に進む();
+            亀.右を向く();
+            亀.前に進む();
+            亀.左を向く();
+            i++;
         }
     }
 }
@@ -780,9 +780,9 @@ public class Main {
   for1: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // step
-        for (int i = 0; i < <3-5>; i++) { // step
-            亀.前に進む(); // step
+        Turtle 亀 = new Turtle();
+        for (int i = 0; i < <3-5>; i++) {
+            亀.前に進む();
         }
     }
 }
@@ -790,9 +790,9 @@ public class Main {
   for2: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(<1-2>, <1-2>); // step
-        for (int i = <1-2>; i < <4-6>; i++) { // step
-            亀.前に進む(); // step
+        Turtle 亀 = new Turtle(<1-2>, <1-2>);
+        for (int i = <1-2>; i < <4-6>; i++) {
+            亀.前に進む();
         }
     }
 }
@@ -800,12 +800,12 @@ public class Main {
   for3: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(); // step
-        int i = 0; // step
+        Turtle 亀 = new Turtle();
+        int i = 0;
         for (; i < <2-3>;) {
-            亀.前に進む(); // step
-            亀.右を向く(); // step
-            i++; // step
+            亀.前に進む();
+            亀.右を向く();
+            i++;
         }
     }
 }
@@ -813,60 +813,60 @@ public class Main {
   for4: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(<1-2>, <1-2>); // step
-        int i = 1; // step
+        Turtle 亀 = new Turtle(<1-2>, <1-2>);
+        int i = 1;
         for (; i < <3-4>;) {
-            亀.前に進む(); // step
-            亀.右を向く(); // step
-            i++; // step
+            亀.前に進む();
+            亀.右を向く();
+            i++;
         }
-        亀.後に戻る(); // step
+        亀.後に戻る();
     }
 }
     `,
   for5: `
 public class Main {
     public static void main(String[] args) {
-        int x = 0; // step
-        for (int i = 2; i <= <4-5>; i++) { // step
-            x += i; // step
+        int x = 0;
+        for (int i = 2; i <= <4-5>; i++) {
+            x += i;
         }
-        x /= 3; // step
-        Turtle 亀 = new Turtle(x + 1, 0); // step
-        亀.前に進む(); // step
+        x /= 3;
+        Turtle 亀 = new Turtle(x + 1, 0);
+        亀.前に進む();
     }
 }
     `,
   for6: `
 public class Main {
     public static void main(String[] args) {
-        int a = 0; // step
-        int b = 100; // step
-        for (int i = <4-5>; i > 0; i--) { // step
-            a += i; // step
-            b -= i; // step
+        int a = 0;
+        int b = 100;
+        for (int i = <4-5>; i > 0; i--) {
+            a += i;
+            b -= i;
         }
-        a /= 4; // step
-        b /= 5; // step
-        Turtle 亀 = new Turtle(a % 6, b % 6); // step
-        亀.前に進む(); // step
+        a /= 4;
+        b /= 5;
+        Turtle 亀 = new Turtle(a % 6, b % 6);
+        亀.前に進む();
     }
 }
     `,
   for7: `
 public class Main {
     public static void main(String[] args) {
-        Turtle 亀 = new Turtle(3, 3); // step
-        int sum = 0; // step
-        for (int i = 1; i <= <4-6>; i++) { // step
-            sum += i; // step
-            亀.前に進む(); // step
-            亀.左を向く(); // step
+        Turtle 亀 = new Turtle(3, 3);
+        int sum = 0;
+        for (int i = 1; i <= <4-6>; i++) {
+            sum += i;
+            亀.前に進む();
+            亀.左を向く();
         }
-        for (int i = sum / 4; i >= 0; i--) { // step
-            亀.前に進む(); // step
-            亀.前に進む(); // step
-            亀.右を向く(); // step
+        for (int i = sum / 4; i >= 0; i--) {
+            亀.前に進む();
+            亀.前に進む();
+            亀.右を向く();
         }
     }
 }
@@ -874,12 +874,12 @@ public class Main {
   doubleLoop1: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < <2-3>; i++) { // step
-            for (int j = 0; j < <2-3>; j++) { // step
-                t.前に進む(); // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < <2-3>; i++) {
+            for (int j = 0; j < <2-3>; j++) {
+                t.前に進む();
             }
-            t.右を向く(); // step
+            t.右を向く();
         }
     }
 }
@@ -887,13 +887,13 @@ public class Main {
   doubleLoop2: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        t.右を向く(); // step
-        for (int i = 0; i < <2-3>; i++) { // step
-            for (int j = 0; j < <2-3>; j++) { // step
-                t.前に進む(); // step
+        Turtle t = new Turtle();
+        t.右を向く();
+        for (int i = 0; i < <2-3>; i++) {
+            for (int j = 0; j < <2-3>; j++) {
+                t.前に進む();
             }
-            t.左を向く(); // step
+            t.左を向く();
         }
     }
 }
@@ -901,12 +901,12 @@ public class Main {
   doubleLoop3: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = <3-4>; i > 0; i--) { // step
-            for (int j = 0; j < i; j++) { // step
-                t.前に進む(); // step
+        Turtle t = new Turtle();
+        for (int i = <3-4>; i > 0; i--) {
+            for (int j = 0; j < i; j++) {
+                t.前に進む();
             }
-            t.右を向く(); // step
+            t.右を向く();
         }
     }
 }
@@ -914,14 +914,14 @@ public class Main {
   doubleLoop4: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 3; i > 0; i--) { // step
-            int j = i; // step
+        Turtle t = new Turtle();
+        for (int i = 3; i > 0; i--) {
+            int j = i;
             while (j >= 0) {
-                t.前に進む(); // step
-                j--; // step
+                t.前に進む();
+                j--;
             }
-            t.右を向く(); // step
+            t.右を向く();
         }
     }
 }
@@ -929,16 +929,16 @@ public class Main {
   doubleLoop5: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < <3-4>; i++) { // step
-            for (int j = <0-1>; j <= i; j++) { // step
-                t.前に進む(); // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < <3-4>; i++) {
+            for (int j = <0-1>; j <= i; j++) {
+                t.前に進む();
             }
-            t.右を向く(); // step
-            for (int k = <0-1>; k < i; k++) { // step
-                t.前に進む(); // step
+            t.右を向く();
+            for (int k = <0-1>; k < i; k++) {
+                t.前に進む();
             }
-            t.左を向く(); // step
+            t.左を向く();
         }
     }
 }
@@ -946,11 +946,11 @@ public class Main {
   if1: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < <7-9>; i++) { // step
-            t.前に進む(); // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < <7-9>; i++) {
+            t.前に進む();
             if (i % 3 == 2) {
-                t.右を向く(); // step
+                t.右を向く();
             }
         }
     }
@@ -959,12 +959,12 @@ public class Main {
   if2: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(<1-2>, <1-2>); // step
-        t.右を向く(); // step
-        for (int i = 0; i < <6-8>; i++) { // step
-            t.前に進む(); // step
+        Turtle t = new Turtle(<1-2>, <1-2>);
+        t.右を向く();
+        for (int i = 0; i < <6-8>; i++) {
+            t.前に進む();
             if (i % 3 == 1) {
-                t.左を向く(); // step
+                t.左を向く();
             }
         }
     }
@@ -973,13 +973,13 @@ public class Main {
   if3: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < <4-5>; i++) { // step
-            t.前に進む(); // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < <4-5>; i++) {
+            t.前に進む();
             if (i % 2 == 0) {
-                t.右を向く(); // step
+                t.右を向く();
             } else {
-                t.左を向く(); // step
+                t.左を向く();
             }
         }
     }
@@ -988,13 +988,13 @@ public class Main {
   if4: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < <4-5>; i++) { // step
-            t.前に進む(); // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < <4-5>; i++) {
+            t.前に進む();
             if (i % 3 == 0) {
-                t.右を向く(); // step
+                t.右を向く();
             } else {
-                t.左を向く(); // step
+                t.左を向く();
             }
         }
     }
@@ -1003,17 +1003,17 @@ public class Main {
   if5: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < <3-4>; i++) { // step
-            for (int j = 0; j < <2-3>; j++) { // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < <3-4>; i++) {
+            for (int j = 0; j < <2-3>; j++) {
                 if (j % 2 == 0) {
-                    t.前に進む(); // step
+                    t.前に進む();
                 } else {
-                    t.右を向く(); // step
+                    t.右を向く();
                 }
             }
-            t.前に進む(); // step
-            t.左を向く(); // step
+            t.前に進む();
+            t.左を向く();
         }
     }
 }
@@ -1021,14 +1021,14 @@ public class Main {
   elseIf1: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < <4-6>; i++) { // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < <4-6>; i++) {
             if (i < 2)
-                t.前に進む(); // step
+                t.前に進む();
             else if (i == 2)
-                t.左を向く(); // step
+                t.左を向く();
             else
-                t.後に戻る(); // step
+                t.後に戻る();
         }
     }
 }
@@ -1036,16 +1036,16 @@ public class Main {
   elseIf2: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < <5-7>; i++) { // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < <5-7>; i++) {
             if (i % 4 == 0)
-                t.前に進む(); // step
+                t.前に進む();
             else if (i % 4 == 1)
-                t.右を向く(); // step
+                t.右を向く();
             else if (i % 4 == 2)
-                t.前に進む(); // step
+                t.前に進む();
             else
-                t.左を向く(); // step
+                t.左を向く();
         }
     }
 }
@@ -1053,16 +1053,16 @@ public class Main {
   elseIf3: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < 7; i++) { // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < 7; i++) {
             if (i < 2)
-                t.前に進む(); // step
+                t.前に進む();
             else if (i == 2)
-                t.左を向く(); // step
+                t.左を向く();
             else if (i == <4-5>)
-                t.右を向く(); // step
+                t.右を向く();
             else
-                t.後に戻る(); // step
+                t.後に戻る();
         }
     }
 }
@@ -1070,16 +1070,16 @@ public class Main {
   elseIf4: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < <6-7>; i++) { // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < <6-7>; i++) {
             if (i % 5 == 0)
-                t.前に進む(); // step
+                t.前に進む();
             else if (i % 5 == 1)
-                t.左を向く(); // step
+                t.左を向く();
             else if (i % 5 == 2)
-                t.後に戻る(); // step
+                t.後に戻る();
             else
-                t.右を向く(); // step
+                t.右を向く();
         }
     }
 }
@@ -1087,14 +1087,14 @@ public class Main {
   elseIf5: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < <7-8>; i++) { // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < <7-8>; i++) {
             if (i % 5 == 1)
-                t.右を向く(); // step
+                t.右を向く();
             else if (i % 5 == 3)
-                t.左を向く(); // step
+                t.左を向く();
             else
-                t.前に進む(); // step
+                t.前に進む();
         }
     }
 }
@@ -1102,15 +1102,15 @@ public class Main {
   switch1: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < <5-7>; i++) { // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < <5-7>; i++) {
             switch (i) {
                 case 0: case 1:
-                    t.前に進む(); break; // step
+                    t.前に進む(); break;
                 case 2:
-                    t.左を向く(); break; // step
+                    t.左を向く(); break;
                 default:
-                    t.後に戻る(); break; // step
+                    t.後に戻る(); break;
             }
         }
     }
@@ -1119,15 +1119,15 @@ public class Main {
   switch2: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < <5-7>; i++) { // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < <5-7>; i++) {
             switch (i % 4) {
                 case 1:
-                    t.右を向く(); break; // step
+                    t.右を向く(); break;
                 case 3:
-                    t.左を向く(); break; // step
+                    t.左を向く(); break;
                 default:
-                    t.前に進む(); break; // step
+                    t.前に進む(); break;
             }
         }
     }
@@ -1136,22 +1136,22 @@ public class Main {
   switch3: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(2, 2); // step
-        for (int i = 0; i < <6-7>; i++) { // step
+        Turtle t = new Turtle(2, 2);
+        for (int i = 0; i < <6-7>; i++) {
             switch (i) {
                 case 0:
                 case 1:
-                    t.前に進む(); // step
+                    t.前に進む();
                     break;
                 case 2:
-                    t.左を向く(); // step
+                    t.左を向く();
                     break;
                 case 4:
                 case 5:
-                    t.右を向く(); // step
+                    t.右を向く();
                     break;
                 default:
-                    t.後に戻る(); // step
+                    t.後に戻る();
             }
         }
     }
@@ -1160,20 +1160,20 @@ public class Main {
   switch4: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < <7-8>; i++) { // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < <7-8>; i++) {
             switch (i % 5) {
                 case 0:
-                    t.左を向く(); // step
+                    t.左を向く();
                     break;
                 case 1:
-                    t.後に戻る(); // step
+                    t.後に戻る();
                     break;
                 case 2:
-                    t.右を向く(); // step
+                    t.右を向く();
                     break;
                 default:
-                    t.前に進む(); // step
+                    t.前に進む();
             }
         }
     }
@@ -1182,21 +1182,21 @@ public class Main {
   switch5: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < <9-10>; i++) { // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < <9-10>; i++) {
             switch (i % 6) {
                 case 0:
-                    t.左を向く(); // step
+                    t.左を向く();
                     break;
                 case 1:
                 case 2:
-                    t.後に戻る(); // step
+                    t.後に戻る();
                     break;
                 case 3:
-                    t.右を向く(); // step
+                    t.右を向く();
                     break;
                 default:
-                    t.前に進む(); // step
+                    t.前に進む();
             }
         }
     }
@@ -1205,10 +1205,10 @@ public class Main {
   break1: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
+        Turtle t = new Turtle();
         while (true) {
             if (!t.前に進めるか()) break;
-            t.前に進む(); // step
+            t.前に進む();
         }
     }
 }
@@ -1216,15 +1216,15 @@ public class Main {
   break2: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(<3-4>, <3-4>); // step
+        Turtle t = new Turtle(<3-4>, <3-4>);
         while (true) {
             if (!t.前に進めるか()) break;
-            t.前に進む(); // step
-            t.右を向く(); // step
+            t.前に進む();
+            t.右を向く();
 
             if (!t.前に進めるか()) break;
-            t.前に進む(); // step
-            t.左を向く(); // step
+            t.前に進む();
+            t.左を向く();
         }
     }
 }
@@ -1232,13 +1232,13 @@ public class Main {
   break3: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(<4-6>, <4-6>); // step
-        for (int i = 0; i < 4; i++) { // step
+        Turtle t = new Turtle(<4-6>, <4-6>);
+        for (int i = 0; i < 4; i++) {
             for (;;) {
-                t.前に進む(); // step
+                t.前に進む();
                 if (!t.前に進めるか()) break;
             }
-            t.右を向く(); // step
+            t.右を向く();
         }
     }
 }
@@ -1246,13 +1246,13 @@ public class Main {
   break4: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(<3-5>, <3-5>); // step
-        for (int i = 0; i < 3; i++) { // step
+        Turtle t = new Turtle(<3-5>, <3-5>);
+        for (int i = 0; i < 3; i++) {
             while (true) {
                 if (!t.前に進めるか()) break;
-                t.前に進む(); // step
+                t.前に進む();
             }
-            t.左を向く(); // step
+            t.左を向く();
         }
     }
 }
@@ -1260,18 +1260,18 @@ public class Main {
   break5: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(<4-6>, <4-6>); // step
-        for (int i = 0; i < 3; i++) { // step
-            for (int j = 0; j < 6; j++) { // step
+        Turtle t = new Turtle(<4-6>, <4-6>);
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 6; j++) {
                 if (!t.前に進めるか()) break;
-                t.前に進む(); // step
+                t.前に進む();
                 if (j % 3 == 0) {
-                    t.左を向く(); // step
+                    t.左を向く();
                 } else {
-                    t.右を向く(); // step
+                    t.右を向く();
                 }
             }
-            t.右を向く(); // step
+            t.右を向く();
         }
     }
 }
@@ -1279,12 +1279,12 @@ public class Main {
   continue1: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < <3-5>; i++) { // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < <3-5>; i++) {
             if (i == 0) {
                 continue;
             }
-            t.前に進む(); // step
+            t.前に進む();
         }
     }
 }
@@ -1292,13 +1292,13 @@ public class Main {
   continue2: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < <5-7>; i++) { // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < <5-7>; i++) {
             if (i % <2-3> == 1) {
-                t.右を向く(); // step
+                t.右を向く();
                 continue;
             }
-            t.前に進む(); // step
+            t.前に進む();
         }
     }
 }
@@ -1306,17 +1306,17 @@ public class Main {
   continue3: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < 2; i++) { // step
-            for (int j = i * 4; j < 8; j++) { // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < 2; i++) {
+            for (int j = i * 4; j < 8; j++) {
                 if (j % 4 == 1) {
-                    t.右を向く(); continue; // step
+                    t.右を向く(); continue;
                 } else if (j % 4 == 3) {
-                    t.左を向く(); continue; // step
+                    t.左を向く(); continue;
                 }
-                t.前に進む(); // step
+                t.前に進む();
             }
-            t.左を向く(); // step
+            t.左を向く();
         }
     }
 }
@@ -1324,17 +1324,17 @@ public class Main {
   continue4: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < 3; i++) { // step
-            for (int j = i; j < 6; j++) { // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < 3; i++) {
+            for (int j = i; j < 6; j++) {
                 if (j % 2 == 0) {
-                    t.右を向く(); continue; // step
+                    t.右を向く(); continue;
                 }
                 if (t.前に進めるか()) {
-                    t.前に進む(); // step
+                    t.前に進む();
                 }
             }
-            t.左を向く(); // step
+            t.左を向く();
         }
     }
 }
@@ -1342,16 +1342,16 @@ public class Main {
   continue5: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < 3; i++) { // step
-            for (int j = i + 1; j < 6; j++) { // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < 3; i++) {
+            for (int j = i + 1; j < 6; j++) {
                 if (j % 4 == 0) {
-                    t.左を向く(); continue; // step
+                    t.左を向く(); continue;
                 } else if (j % 3 == 2) {
-                    t.右を向く(); continue; // step
+                    t.右を向く(); continue;
                 }
                 if (t.前に進めるか()) {
-                    t.前に進む(); // step
+                    t.前に進む();
                 }
             }
         }
@@ -1361,52 +1361,52 @@ public class Main {
   method1: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step: 1
-        二歩前に進める(t); // caller
-        t.右を向く(); // step: 2
-        三歩前に進める(t); // caller
+        Turtle t = new Turtle();
+        二歩前に進める(t);
+        t.右を向く();
+        三歩前に進める(t);
     }
     static void 二歩前に進める(Turtle t) {
-        t.前に進む(); // step: 3
-        t.前に進む(); // step: 4
+        t.前に進む();
+        t.前に進む();
     }
     static void 三歩前に進める(Turtle t) {
-        t.前に進む(); // step: 5
-        t.前に進む(); // step: 6
-        t.前に進む(); // step: 7
+        t.前に進む();
+        t.前に進む();
+        t.前に進む();
     }
 }
     `,
   method2: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        二歩前に進める(t); // caller
-        後ろを向く(t); // caller
-        t.前に進む(); // step
+        Turtle t = new Turtle();
+        二歩前に進める(t);
+        後ろを向く(t);
+        t.前に進む();
     }
     static void 二歩前に進める(Turtle t) {
-        t.前に進む(); // step
-        t.前に進む(); // step
+        t.前に進む();
+        t.前に進む();
     }
     static void 後ろを向く(Turtle t) {
-        t.右を向く(); // step
-        t.右を向く(); // step
+        t.右を向く();
+        t.右を向く();
     }
 }
     `,
   method3: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        N歩前に進める(t, <3-4>); // caller
-        t.右を向く(); // step
-        N歩前に進める(t, 2); // caller
+        Turtle t = new Turtle();
+        N歩前に進める(t, <3-4>);
+        t.右を向く();
+        N歩前に進める(t, 2);
     }
 
     static void N歩前に進める(Turtle t, int n) {
-        for (int i = 0; i < n; i++) { // step
-            t.前に進む(); // step
+        for (int i = 0; i < n; i++) {
+            t.前に進む();
         }
     }
 }
@@ -1414,34 +1414,34 @@ public class Main {
   method4: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        二歩前に進める(t); // caller
-        t.右を向く(); // step
-        四歩前に進める(t); // caller
+        Turtle t = new Turtle();
+        二歩前に進める(t);
+        t.右を向く();
+        四歩前に進める(t);
     }
     static void 二歩前に進める(Turtle t) {
-        t.前に進む(); // step
-        t.前に進む(); // step
+        t.前に進む();
+        t.前に進む();
     }
     static void 四歩前に進める(Turtle t) {
-        二歩前に進める(t); // caller
-        二歩前に進める(t); // caller
+        二歩前に進める(t);
+        二歩前に進める(t);
     }
 }
     `,
   method5: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        正方形を描く(t); // caller
-        t.後に戻る(); // step
-        t.後に戻る(); // step
-        正方形を描く(t); // caller
+        Turtle t = new Turtle();
+        正方形を描く(t);
+        t.後に戻る();
+        t.後に戻る();
+        正方形を描く(t);
     }
     static void 正方形を描く(Turtle t) {
-        for (int i = 0; i < 3; i++) { // step
-            t.前に進む(); // step
-            t.右を向く(); // step
+        for (int i = 0; i < 3; i++) {
+            t.前に進む();
+            t.右を向く();
         }
     }
 }
@@ -1449,13 +1449,13 @@ public class Main {
   return1: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        int x = 二倍する(<2-3>); // step // caller
-        N歩前に進める(t, x); // caller
+        Turtle t = new Turtle();
+        int x = 二倍する(<2-3>);
+        N歩前に進める(t, x);
     }
     static void N歩前に進める(Turtle t, int n) {
-        for (int i = 0; i < n; i++) { // step
-            t.前に進む(); // step
+        for (int i = 0; i < n; i++) {
+            t.前に進む();
         }
     }
     static int 二倍する(int a) {
@@ -1466,16 +1466,16 @@ public class Main {
   return2: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        int x = 二倍する(2); // step // caller
-        N歩前に進める(t, x); // caller
-        t.右を向く(); // step
-        x = 二倍する(x - 1); // step // caller
-        N歩前に進める(t, x); // caller
+        Turtle t = new Turtle();
+        int x = 二倍する(2);
+        N歩前に進める(t, x);
+        t.右を向く();
+        x = 二倍する(x - 1);
+        N歩前に進める(t, x);
     }
     static void N歩前に進める(Turtle t, int n) {
-        for (int i = 0; i < n; i++) { // step
-            t.前に進む(); // step
+        for (int i = 0; i < n; i++) {
+            t.前に進む();
         }
     }
     static int 二倍する(int a) {
@@ -1486,13 +1486,13 @@ public class Main {
   return3: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        N歩前に進める(t, 加算する(1, 1)); // caller
-        N歩前に進める(t, 加算する(1, 2)); // caller
+        Turtle t = new Turtle();
+        N歩前に進める(t, 加算する(1, 1));
+        N歩前に進める(t, 加算する(1, 2));
     }
     static void N歩前に進める(Turtle t, int n) {
-        for (int i = 0; i < n; i++) { // step
-            t.前に進む(); // step
+        for (int i = 0; i < n; i++) {
+            t.前に進む();
         }
     }
     static int 加算する(int a, int b) {
@@ -1503,21 +1503,21 @@ public class Main {
   return4: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < <3-4>; i++) { // step
-            if (偶数か(i)) { // caller
-                t.右を向く(); // step
-                二歩前に進める(t); // caller
+        Turtle t = new Turtle();
+        for (int i = 0; i < <3-4>; i++) {
+            if (偶数か(i)) {
+                t.右を向く();
+                二歩前に進める(t);
             } else {
-                二歩前に進める(t); // caller
-                t.右を向く(); // step
-                t.右を向く(); // step
+                二歩前に進める(t);
+                t.右を向く();
+                t.右を向く();
             }
         }
     }
     static void 二歩前に進める(Turtle t) {
-        t.前に進む(); // step
-        t.前に進む(); // step
+        t.前に進む();
+        t.前に進む();
     }
     static boolean 偶数か(int a) {
         return a % 2 == 0;
@@ -1527,20 +1527,20 @@ public class Main {
   return5: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        for (int i = 0; i < 3; i++) { // step
-            for (int j = 0; j < 3; j++) { // step
-                if (等しいか(i, j)) // caller
-                    t.右を向く(); // step
+        Turtle t = new Turtle();
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                if (等しいか(i, j))
+                    t.右を向く();
                 else
-                    二歩前に進める(t); // caller
+                    二歩前に進める(t);
             }
-            t.左を向く(); // step
+            t.左を向く();
         }
     }
     static void 二歩前に進める(Turtle t) {
-        t.前に進む(); // step
-        t.前に進む(); // step
+        t.前に進む();
+        t.前に進む();
     }
     static boolean 等しいか(int a, int b) {
         return a == b;
@@ -1551,16 +1551,16 @@ public class Main {
   array1: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        int[] arr = { 2, <1-2>, <1-2> }; // step
-        for (int i = 0; i < arr.length; i++) { // step
-            N歩前に進める(t, arr[i]); // caller
-            t.右を向く(); // step
+        Turtle t = new Turtle();
+        int[] arr = { 2, <1-2>, <1-2> };
+        for (int i = 0; i < arr.length; i++) {
+            N歩前に進める(t, arr[i]);
+            t.右を向く();
         }
     }
     static void N歩前に進める(Turtle t, int n) {
-        for (int i = 0; i < n; i++) { // step
-            t.前に進む(); // step
+        for (int i = 0; i < n; i++) {
+            t.前に進む();
         }
     }
 }
@@ -1568,16 +1568,16 @@ public class Main {
   array2: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        int[] arr = { <4-5>, <3-4>, <3-4> }; // step
-        for (int i = 0; i < arr.length; i++) { // step
-            N歩前に進める(t, arr[i]); // caller
-            t.右を向く(); // step
+        Turtle t = new Turtle();
+        int[] arr = { <4-5>, <3-4>, <3-4> };
+        for (int i = 0; i < arr.length; i++) {
+            N歩前に進める(t, arr[i]);
+            t.右を向く();
         }
     }
     static void N歩前に進める(Turtle t, int n) {
-        for (int i = 0; i < n; i++) { // step
-            t.前に進む(); // step
+        for (int i = 0; i < n; i++) {
+            t.前に進む();
         }
     }
 }
@@ -1585,16 +1585,16 @@ public class Main {
   array3: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        int[] arr = { 0, 1, 0, 2, 0 }; // step
-        for (int i = 0; i < arr.length; i++) { // step
+        Turtle t = new Turtle();
+        int[] arr = { 0, 1, 0, 2, 0 };
+        for (int i = 0; i < arr.length; i++) {
             switch (arr[i]) {
                 case 0:
-                    t.前に進む(); break; // step
+                    t.前に進む(); break;
                 case 1:
-                    t.右を向く(); break; // step
+                    t.右を向く(); break;
                 case 2:
-                    t.左を向く(); break; // step
+                    t.左を向く(); break;
             }
         }
     }
@@ -1603,16 +1603,16 @@ public class Main {
   array4: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        int[] arr = { 0, 1, 0, 2, 0 }; // step
-        for (int cmd : arr) { // step
+        Turtle t = new Turtle();
+        int[] arr = { 0, 1, 0, 2, 0 };
+        for (int cmd : arr) {
             switch (cmd) {
                 case 0:
-                    t.前に進む(); break; // step
+                    t.前に進む(); break;
                 case 1:
-                    t.右を向く(); break; // step
+                    t.右を向く(); break;
                 case 2:
-                    t.左を向く(); break; // step
+                    t.左を向く(); break;
             }
         }
     }
@@ -1621,22 +1621,22 @@ public class Main {
   array5: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        int[] arr = { 0, 1, 0, 2, 0, 3, 0 }; // step
-        int steps = 1; // step
-        for (int cmd : arr) { // step
+        Turtle t = new Turtle();
+        int[] arr = { 0, 1, 0, 2, 0, 3, 0 };
+        int steps = 1;
+        for (int cmd : arr) {
             switch (cmd) {
                 case 0:
-                    for (int i = 0; i < steps; i++) { // step
-                        t.前に進む(); // step
+                    for (int i = 0; i < steps; i++) {
+                        t.前に進む();
                     }
                     break;
                 case 1:
-                    t.右を向く(); break; // step
+                    t.右を向く(); break;
                 case 2:
-                    t.左を向く(); break; // step
+                    t.左を向く(); break;
                 case 3:
-                    steps++; break; // step
+                    steps++; break;
             }
         }
     }
@@ -1645,16 +1645,16 @@ public class Main {
   string1: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        String s = "frflf"; // step
-        for (int i = 0; i < s.length(); i++) { // step
+        Turtle t = new Turtle();
+        String s = "frflf";
+        for (int i = 0; i < s.length(); i++) {
             switch (s.charAt(i)) {
                 case 'f':
-                    t.前に進む(); break; // step
+                    t.前に進む(); break;
                 case 'r':
-                    t.右を向く(); break; // step
+                    t.右を向く(); break;
                 case 'l':
-                    t.左を向く(); break; // step
+                    t.左を向く(); break;
             }
         }
     }
@@ -1663,18 +1663,18 @@ public class Main {
   string2: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        String s = "ffbrfl"; // step
-        for (int i = 0; i < s.length(); i++) { // step
+        Turtle t = new Turtle();
+        String s = "ffbrfl";
+        for (int i = 0; i < s.length(); i++) {
             switch (s.charAt(i)) {
                 case 'f':
-                    t.前に進む(); break; // step
+                    t.前に進む(); break;
                 case 'r':
-                    t.右を向く(); break; // step
+                    t.右を向く(); break;
                 case 'l':
-                    t.左を向く(); break; // step
+                    t.左を向く(); break;
                 case 'b':
-                    t.後に戻る(); break; // step
+                    t.後に戻る(); break;
             }
         }
     }
@@ -1683,16 +1683,16 @@ public class Main {
   string3: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        String s = "frflf"; // step
-        for (char ch : s.toCharArray()) { // step
+        Turtle t = new Turtle();
+        String s = "frflf";
+        for (char ch : s.toCharArray()) {
             switch (ch) {
                 case 'f':
-                    t.前に進む(); break; // step
+                    t.前に進む(); break;
                 case 'r':
-                    t.右を向く(); break; // step
+                    t.右を向く(); break;
                 case 'l':
-                    t.左を向く(); break; // step
+                    t.左を向く(); break;
             }
         }
     }
@@ -1701,45 +1701,45 @@ public class Main {
   string4: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        String[] cmds = { "ri", "aa", "fo" }; // step
-        for (String cmd : cmds) { // step
-            t.前に進む(); // step
-            parse(t, cmd); // caller
+        Turtle t = new Turtle();
+        String[] cmds = { "ri", "aa", "fo" };
+        for (String cmd : cmds) {
+            t.前に進む();
+            parse(t, cmd);
         }
     }
     static void parse(Turtle t, String c) {
         if (c.equals("fo"))
-            t.前に進む(); // step
+            t.前に進む();
         else if (c.equals("ri"))
-            t.右を向く(); // step
+            t.右を向く();
     }
 }
     `,
   string5: `
 public class Main {
     public static void main(String[] args) {
-        Turtle t = new Turtle(); // step
-        String[] cmds = { "ri", "add", "fo", "add", "le", "fo", "fo" }; // step
-        int x = 0; // step
-        for (String cmd : cmds) { // step
-            parse(t, cmd, x); // caller
+        Turtle t = new Turtle();
+        String[] cmds = { "ri", "add", "fo", "add", "le", "fo", "fo" };
+        int x = 0;
+        for (String cmd : cmds) {
+            parse(t, cmd, x);
             if (cmd.equals("add")) {
-                x++; // step
+                x++;
             }
         }
     }
     static void parse(Turtle t, String c, int x) {
         if (c.equals("fo"))
-            N歩前に進める(t, x); // caller
+            N歩前に進める(t, x);
         else if (c.equals("ri"))
-            t.右を向く(); // step
+            t.右を向く();
         else if (c.equals("le"))
-            t.左を向く(); // step
+            t.左を向く();
     }
     static void N歩前に進める(Turtle t, int n) {
-        for (int i = 0; i < n; i++) { // step
-            t.前に進む(); // step
+        for (int i = 0; i < n; i++) {
+            t.前に進む();
         }
     }
 }
@@ -1747,20 +1747,20 @@ public class Main {
   oop1: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t1 = new Turtle(1, 1); // step
-    Turtle t2 = new Turtle(3, 3); // step
-    t1.前に進む(); // step
-    t2.前に進む(); // step
-    t1.前に進む(); // step
-    t2.前に進む(); // step
+    Turtle t1 = new Turtle(1, 1);
+    Turtle t2 = new Turtle(3, 3);
+    t1.前に進む();
+    t2.前に進む();
+    t1.前に進む();
+    t2.前に進む();
   }
 }
 `,
   oop2: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle m = new MyTurtle(0, 0, 2); // caller
-    m.forward(); // caller
+    MyTurtle m = new MyTurtle(0, 0, 2);
+    m.forward();
   }
 }
 
@@ -1768,12 +1768,12 @@ class MyTurtle {
   private int speed;
   private Turtle c;
   public MyTurtle(int x, int y, int speed) {
-    this.speed = speed; // step
-    this.c = new Turtle(x, y); // step
+    this.speed = speed;
+    this.c = new Turtle(x, y);
   }
   public void forward() {
-    for (int i = 0; i < this.speed; i++) { // step
-      this.c.前に進む(); // step
+    for (int i = 0; i < this.speed; i++) {
+      this.c.前に進む();
     }
   }
 }
@@ -1782,67 +1782,67 @@ class MyTurtle {
   multiObject1: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t1 = new Turtle(1, 1); // step
-    Turtle t2 = new Turtle(3, 3); // step
-    t1.前に進む(); // step
-    t1.右を向く(); // step
-    t2.前に進む(); // step
-    t2.左を向く(); // step
+    Turtle t1 = new Turtle(1, 1);
+    Turtle t2 = new Turtle(3, 3);
+    t1.前に進む();
+    t1.右を向く();
+    t2.前に進む();
+    t2.左を向く();
   }
 }
 `,
   multiObject2: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t1 = new Turtle(1, 1); // step
-    t1.前に進む(); // step
-    t1.右を向く(); // step
-    Turtle t2 = new Turtle(3, 3); // step
-    t2.前に進む(); // step
-    t2.左を向く(); // step
-    t2.前に進む(); // step
+    Turtle t1 = new Turtle(1, 1);
+    t1.前に進む();
+    t1.右を向く();
+    Turtle t2 = new Turtle(3, 3);
+    t2.前に進む();
+    t2.左を向く();
+    t2.前に進む();
   }
 }
 `,
   multiObject3: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t1 = new Turtle(1, 4); // step
-    Turtle t2 = new Turtle(5, 4); // step
-    Turtle t3 = new Turtle(2, 1); // step
+    Turtle t1 = new Turtle(1, 4);
+    Turtle t2 = new Turtle(5, 4);
+    Turtle t3 = new Turtle(2, 1);
 
-    t1.右を向く(); // step
-    t1.右を向く(); // step
-    t1.前に進む(); // step
+    t1.右を向く();
+    t1.右を向く();
+    t1.前に進む();
 
-    t2.左を向く(); // step
-    t2.左を向く(); // step
-    t2.前に進む(); // step
+    t2.左を向く();
+    t2.左を向く();
+    t2.前に進む();
 
-    t3.右を向く(); // step
-    t3.前に進む(); // step
-    t3.前に進む(); // step
+    t3.右を向く();
+    t3.前に進む();
+    t3.前に進む();
   }
 }
 `,
   multiObject4: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t1 = new Turtle(0, 6); // step
-    Turtle t2 = new Turtle(6, 0); // step
+    Turtle t1 = new Turtle(0, 6);
+    Turtle t2 = new Turtle(6, 0);
 
-    t1.右を向く(); // step
-    t1.右を向く(); // step
+    t1.右を向く();
+    t1.右を向く();
 
-    for (int i = 0; i < 5; i++) { // step
-      t1.前に進む(); // step
-      t2.前に進む(); // step
+    for (int i = 0; i < 5; i++) {
+      t1.前に進む();
+      t2.前に進む();
       if (i % 2 == 0) {
-        t1.左を向く(); // step
-        t2.左を向く(); // step
+        t1.左を向く();
+        t2.左を向く();
       } else {
-        t1.右を向く(); // step
-        t2.右を向く(); // step
+        t1.右を向く();
+        t2.右を向く();
       }
     }
   }
@@ -1851,19 +1851,19 @@ public class Main {
   multiObject5: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t1 = new Turtle(0, 3); // step
-    Turtle t2 = new Turtle(4, 3); // step
-    Turtle t3 = new Turtle(0, 0); // step
-    Turtle t4 = new Turtle(1, 6); // step
-    Turtle t5 = new Turtle(6, 4); // step
+    Turtle t1 = new Turtle(0, 3);
+    Turtle t2 = new Turtle(4, 3);
+    Turtle t3 = new Turtle(0, 0);
+    Turtle t4 = new Turtle(1, 6);
+    Turtle t5 = new Turtle(6, 4);
 
-    t1.右を向く(); // step
+    t1.右を向く();
 
     while (t1.前に進めるか()) {
       while (t1.前に進めるか()) {
-        t1.前に進む(); // step
+        t1.前に進む();
       }
-      t1.右を向く(); // step
+      t1.右を向く();
     }
   }
 }
@@ -1872,18 +1872,18 @@ public class Main {
 public class Main {
   public static void main(String[] args) {
     Turtle[] turtles = new Turtle[3];
-    for (int i = 0; i < turtles.length; i++) { // step
-      turtles[i] = new Turtle(1 + i * 2, 0); // step
+    for (int i = 0; i < turtles.length; i++) {
+      turtles[i] = new Turtle(1 + i * 2, 0);
     }
 
-    for (int i = 0; i < 3; i++) { // step
-      for (int j = 0; j < turtles.length; j++) { // step
-        N歩前に進める(turtles[j], j); // step
+    for (int i = 0; i < 3; i++) {
+      for (int j = 0; j < turtles.length; j++) {
+        N歩前に進める(turtles[j], j);
       }
     }
   }
 
-  static void N歩前に進める(Turtle t, int n) {
+  static void N歩前に進める(Turtle t, int n) { // atomic
     for (int i = 0; i < n; i++) {
       t.前に進む();
     }
@@ -1893,36 +1893,36 @@ public class Main {
   garbageCollection1: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t1 = new Turtle(1, 1); // step
-    t1.前に進む(); // step
-    t1.右を向く(); // step
-    Turtle t2 = new Turtle(3, 3); // step
-    t2.前に進む(); // step
+    Turtle t1 = new Turtle(1, 1);
+    t1.前に進む();
+    t1.右を向く();
+    Turtle t2 = new Turtle(3, 3);
+    t2.前に進む();
     // ガベージコレクションで亀が消えることとする。
-    t2 = t1; // step
-    t2.前に進む(); // step
+    t2 = t1;
+    t2.前に進む();
   }
 }
 `,
   garbageCollection2: `
 public class Main {
   public static void main(String[] args) {
-  Turtle t1 = new Turtle(1, 1); // step
-  Turtle t2 = new Turtle(3, 3); // step
-  Turtle t3 = new Turtle(5, 5); // step
+  Turtle t1 = new Turtle(1, 1);
+  Turtle t2 = new Turtle(3, 3);
+  Turtle t3 = new Turtle(5, 5);
 
-  t1.前に進む(); // step
-  t2.前に進む(); // step
-  t3.前に進む(); // step
+  t1.前に進む();
+  t2.前に進む();
+  t3.前に進む();
 
   // ガベージコレクションで亀が消えることとする。
-  t2 = t1; // step
+  t2 = t1;
   // ガベージコレクションで亀が消えることとする。
-  t3 = t2; // step
+  t3 = t2;
 
-  t3.前に進む(); // step
-  t2.前に進む(); // step
-  t1.前に進む(); // step
+  t3.前に進む();
+  t2.前に進む();
+  t1.前に進む();
   }
 }
 `,
@@ -1930,32 +1930,32 @@ public class Main {
 public class Main {
   public static void main(String[] args) {
     Turtle[] turtles = new Turtle[2];
-    turtles[0] = new Turtle(2, 3); // step
-    turtles[1] = new Turtle(3, 4); // step
+    turtles[0] = new Turtle(2, 3);
+    turtles[1] = new Turtle(3, 4);
 
-    for (int i = 0; i < turtles.length; i++) // step
-      N回右を向く(turtles[i], i); // step
-    for (int i = 0; i < turtles.length; i++) // step
-      N回前に進む(turtles[i], 3); // step
+    for (int i = 0; i < turtles.length; i++)
+      N回右を向く(turtles[i], i);
+    for (int i = 0; i < turtles.length; i++)
+      N回前に進む(turtles[i], 3);
 
     // ガベージコレクションで亀が消えることとする。
-    turtles[0] = new Turtle(4, 3); // step
+    turtles[0] = new Turtle(4, 3);
     // ガベージコレクションで亀が消えることとする。
-    turtles[1] = new Turtle(3, 2); // step
+    turtles[1] = new Turtle(3, 2);
 
-    for (int i = 0; i < turtles.length; i++) // step
-      N回左を向く(turtles[i], i); // step
-    for (int i = 0; i < turtles.length; i++) // step
-      N回前に進む(turtles[i], 3); // step
+    for (int i = 0; i < turtles.length; i++)
+      N回左を向く(turtles[i], i);
+    for (int i = 0; i < turtles.length; i++)
+      N回前に進む(turtles[i], 3);
   }
 
-  static void N回前に進む(Turtle t, int n) {
+  static void N回前に進む(Turtle t, int n) { // atomic
     for (int i = 0; i < n; i++) t.前に進む();
   }
-  static void N回右を向く(Turtle t, int n) {
+  static void N回右を向く(Turtle t, int n) { // atomic
     for (int i = 0; i < n; i++) t.右を向く();
   }
-  static void N回左を向く(Turtle t, int n) {
+  static void N回左を向く(Turtle t, int n) { // atomic
     for (int i = 0; i < n; i++) t.左を向く();
   }
 }
@@ -1964,18 +1964,18 @@ public class Main {
 public class Main {
   public static void main(String[] args) {
     Turtle[] turtles = new Turtle[5];
-    for (int i = 0; i < turtles.length; i++) { // step
-      turtles[i] = new Turtle(i, 0); // step
+    for (int i = 0; i < turtles.length; i++) {
+      turtles[i] = new Turtle(i, 0);
     }
 
-    for (int i = 0; i < turtles.length; i++) { // step
+    for (int i = 0; i < turtles.length; i++) {
       // nullは、何も参照していないことを示す特別な値。
       // ガベージコレクションで亀が消えることとする。
-      turtles[i] = null; // step
+      turtles[i] = null;
 
       for (Turtle t : turtles) {
         if (t != null) {
-          t.前に進む(); // step
+          t.前に進む();
         }
       }
     }
@@ -1985,18 +1985,18 @@ public class Main {
   garbageCollection5: `
 public class Main {
   public static void main(String[] args) {
-    線を描く(1, 1, 1, 5); // caller
-    線を描く(1, 5, 2, 5); // caller
-    Turtle t = new Turtle(3, 3); // step
+    線を描く(1, 1, 1, 5);
+    線を描く(1, 5, 2, 5);
+    Turtle t = new Turtle(3, 3);
   }
 
   static void 線を描く(int x, int y, int dir, int len) {
-    Turtle t = new Turtle(x, y); // step
-    for (int i = 0; i < dir; i++) { // step
-      t.右を向く(); // step
+    Turtle t = new Turtle(x, y);
+    for (int i = 0; i < dir; i++) {
+      t.右を向く();
     }
-    for (int i = 0; i < len - 1; i++) { // step
-      t.前に進む(); // step
+    for (int i = 0; i < len - 1; i++) {
+      t.前に進む();
     }
     // 線を描く()メソッドが終わると変数tはなくなり、亀も消えることとする。
   }
@@ -2005,25 +2005,25 @@ public class Main {
   garbageCollection6: `
 public class Main {
   public static void main(String[] args) {
-    正方形を描く(0, 0, 6); // caller
-    正方形を描く(3, 3, 3); // caller
-    Turtle t = new Turtle(3, 3); // step
+    正方形を描く(0, 0, 6);
+    正方形を描く(3, 3, 3);
+    Turtle t = new Turtle(3, 3);
   }
 
   static void 正方形を描く(int x, int y, int size) {
-    線を描く(x, y, 0, size); // caller
-    線を描く(x, y + size, 1, size); // caller
-    線を描く(x + size, y + size, 2, size); // caller
-    線を描く(x + size, y, 3, size); // caller
+    線を描く(x, y, 0, size);
+    線を描く(x, y + size, 1, size);
+    線を描く(x + size, y + size, 2, size);
+    線を描く(x + size, y, 3, size);
   }
 
   static void 線を描く(int x, int y, int dir, int len) {
-    Turtle t = new Turtle(x, y); // step
-    for (int i = 0; i < dir; i++) { // step
-      t.右を向く(); // step
+    Turtle t = new Turtle(x, y);
+    for (int i = 0; i < dir; i++) {
+      t.右を向く();
     }
-    for (int i = 0; i < len - 1; i++) { // step
-      t.前に進む(); // step
+    for (int i = 0; i < len - 1; i++) {
+      t.前に進む();
     }
     // 線を描く()メソッドが終わると変数tはなくなり、亀も消えることとする。
   }
@@ -2035,20 +2035,20 @@ public class Main {
   makeClass1: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t = new MyTurtle(); // caller
-    t.moveForward(); // caller
-    t.speed = 1; // step
-    t.moveForward(); // caller
+    MyTurtle t = new MyTurtle();
+    t.moveForward();
+    t.speed = 1;
+    t.moveForward();
   }
 }
 
 class MyTurtle {
-  Turtle t = new Turtle(); // step
-  int speed = 2; // step
+  Turtle t = new Turtle();
+  int speed = 2;
 
   void moveForward() {
-    for (int i = 0; i < this.speed; i++) { // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < this.speed; i++) {
+      this.t.前に進む();
     }
   }
 }
@@ -2056,23 +2056,23 @@ class MyTurtle {
   makeClass2: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t = new MyTurtle(); // caller
-    t.moveDiagonally(); // caller
-    t.speed = 2; // step
-    t.moveDiagonally(); // caller
+    MyTurtle t = new MyTurtle();
+    t.moveDiagonally();
+    t.speed = 2;
+    t.moveDiagonally();
   }
 }
 
 class MyTurtle {
-  Turtle t = new Turtle(); // step
-  int speed = 1; // step
+  Turtle t = new Turtle();
+  int speed = 1;
 
   void moveDiagonally() {
-    for (int i = 0; i < this.speed; i++) { // step
-      this.t.前に進む(); // step
-      this.t.右を向く(); // step
-      this.t.前に進む(); // step
-      this.t.左を向く(); // step
+    for (int i = 0; i < this.speed; i++) {
+      this.t.前に進む();
+      this.t.右を向く();
+      this.t.前に進む();
+      this.t.左を向く();
     }
   }
 }
@@ -2080,23 +2080,23 @@ class MyTurtle {
   makeClass3: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t = new MyTurtle(); // caller
-    t.drawSquare(); // caller
-    t.size = 4; // step
-    t.drawSquare(); // caller
+    MyTurtle t = new MyTurtle();
+    t.drawSquare();
+    t.size = 4;
+    t.drawSquare();
   }
 }
 
 class MyTurtle {
-  Turtle t = new Turtle(); // step
-  int size = 2; // step
+  Turtle t = new Turtle();
+  int size = 2;
 
   void drawSquare() {
-    for (int i = 0; i < this.size * 4; i++) { // step
+    for (int i = 0; i < this.size * 4; i++) {
       if (i % this.size == this.size - 1) {
-        this.t.右を向く(); // step
+        this.t.右を向く();
       } else {
-        this.t.前に進む(); // step
+        this.t.前に進む();
       }
     }
   }
@@ -2105,53 +2105,53 @@ class MyTurtle {
   makeClass4: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t = new MyTurtle(); // caller
-    t.moveForward(); // caller
-    t.speed = 1; // step
-    t.turnRight(); // caller
-    t.moveForward(); // caller
+    MyTurtle t = new MyTurtle();
+    t.moveForward();
+    t.speed = 1;
+    t.turnRight();
+    t.moveForward();
   }
 }
 class MyTurtle {
-  Turtle fast = new Turtle(1, 1); // step
-  Turtle slow = new Turtle(5, 1); // step
-  int speed = 2; // step
+  Turtle fast = new Turtle(1, 1);
+  Turtle slow = new Turtle(5, 1);
+  int speed = 2;
 
   void moveForward() {
-    for (int i = 0; i < this.speed; i++) { // step
-      this.fast.前に進む(); // step
-      this.fast.前に進む(); // step
-      this.slow.前に進む(); // step
+    for (int i = 0; i < this.speed; i++) {
+      this.fast.前に進む();
+      this.fast.前に進む();
+      this.slow.前に進む();
     }
   }
   void turnRight() {
-    this.fast.右を向く(); // step
-    this.slow.右を向く(); // step
+    this.fast.右を向く();
+    this.slow.右を向く();
   }
 }
     `,
   makeClass5: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t = new MyTurtle(); //caller
-    t.operate(); // caller
-    t.operation = "LFFRFF"; // step
-    t.operate(); // caller
+    MyTurtle t = new MyTurtle();
+    t.operate();
+    t.operation = "LFFRFF";
+    t.operate();
   }
 }
 class MyTurtle {
-  Turtle t = new Turtle(); // step
-  String operation = "FFRFF"; // step
+  Turtle t = new Turtle();
+  String operation = "FFRFF";
 
   void operate() {
-    for (int i = 0; i < this.operation.length(); i++) { // step
+    for (int i = 0; i < this.operation.length(); i++) {
       switch (this.operation.charAt(i)) {
         case 'F':
-          this.t.前に進む(); break; // step
+          this.t.前に進む(); break;
         case 'R':
-          this.t.右を向く(); break; // step
+          this.t.右を向く(); break;
         case 'L':
-          this.t.左を向く(); break; // step
+          this.t.左を向く(); break;
       }
     }
   }
@@ -2160,37 +2160,37 @@ class MyTurtle {
   makeClass6: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t = new MyTurtle(); // caller
-    t.turnRight(); // caller
-    t.moveForward(); // caller
-    t.turnLeft(); // caller
-    t.moveForward(); // caller
-    t.moveForward(); // caller
+    MyTurtle t = new MyTurtle();
+    t.turnRight();
+    t.moveForward();
+    t.turnLeft();
+    t.moveForward();
+    t.moveForward();
   }
 }
 class MyTurtle {
-  Turtle t = new Turtle(); // step
-  int speed = 1; // step
+  Turtle t = new Turtle();
+  int speed = 1;
   void moveForward() {
-    for (int i = 0; i < this.speed; i++) // step
-      this.t.前に進む(); // step
-    speed++; // step
+    for (int i = 0; i < this.speed; i++)
+      this.t.前に進む();
+    speed++;
   }
   void turnRight() {
-    this.t.右を向く(); // step
+    this.t.右を向く();
   }
   void turnLeft() {
-    this.t.左を向く(); // step
+    this.t.左を向く();
   }
 }
 `,
   constructor1: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t = new MyTurtle(0, 1, 2); // caller
-    t.moveForward(); // caller
-    t.speed = 1; // step
-    t.moveForward(); // caller
+    MyTurtle t = new MyTurtle(0, 1, 2);
+    t.moveForward();
+    t.speed = 1;
+    t.moveForward();
   }
 }
 
@@ -2199,12 +2199,12 @@ class MyTurtle {
   int speed;
 
   MyTurtle(int x, int y, int speed) {
-    this.t = new Turtle(x, y); // step
-    this.speed = speed; // step
+    this.t = new Turtle(x, y);
+    this.speed = speed;
   }
   void moveForward() {
-    for (int i = 0; i < this.speed; i++) { // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < this.speed; i++) {
+      this.t.前に進む();
     }
   }
 }
@@ -2212,8 +2212,8 @@ class MyTurtle {
   constructor2: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t = new MyTurtle(1, 1, "FRFLFFF"); // caller
-    t.operate(); // caller
+    MyTurtle t = new MyTurtle(1, 1, "FRFLFFF");
+    t.operate();
   }
 }
 class MyTurtle {
@@ -2221,18 +2221,18 @@ class MyTurtle {
   String operation;
 
   MyTurtle(int x, int y, String operation) {
-    this.t = new Turtle(x, y); // step
-    this.operation = operation; // step
+    this.t = new Turtle(x, y);
+    this.operation = operation;
   }
   void operate() {
-    for (int i = 0; i < this.operation.length(); i++) { // step
+    for (int i = 0; i < this.operation.length(); i++) {
       switch (this.operation.charAt(i)) {
       case 'F':
-        this.t.前に進む(); break; // step
+        this.t.前に進む(); break;
       case 'R':
-        this.t.右を向く(); break; // step
+        this.t.右を向く(); break;
       case 'L':
-        this.t.左を向く(); break; // step
+        this.t.左を向く(); break;
       }
     }
   }
@@ -2241,12 +2241,12 @@ class MyTurtle {
   constructor3: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t = new MyTurtle(2); // caller
-    t.moveForward(); // caller
-    t.turnRight(); // caller
-    t.moveForward(); // caller
-    t.moveForward(); // caller
-    t.turnLeft(); // caller
+    MyTurtle t = new MyTurtle(2);
+    t.moveForward();
+    t.turnRight();
+    t.moveForward();
+    t.moveForward();
+    t.turnLeft();
   }
 }
 class MyTurtle {
@@ -2254,47 +2254,47 @@ class MyTurtle {
   int speed;
 
   MyTurtle(int speed) {
-    this.t = new Turtle(); // step
-    this.speed = speed; // step
+    this.t = new Turtle();
+    this.speed = speed;
   }
   void moveForward() {
-    for (int i = 0; i < this.speed; i++) // step
-      this.t.前に進む(); // step
-    this.speed--; // step
+    for (int i = 0; i < this.speed; i++)
+      this.t.前に進む();
+    this.speed--;
   }
   void turnRight() {
-    this.t.右を向く(); // step
+    this.t.右を向く();
   }
   void turnLeft() {
-    this.t.左を向く(); // step
+    this.t.左を向く();
   }
 }
 `,
   constructor4: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t1 = new Turtle(3, 4); // step
-    Turtle t2 = new Turtle(0, 0); // step
-    TurtleMover mover = new TurtleMover(t1); // caller
-    mover.moveSquare(3); // caller
-    mover.t = new Turtle(3, 1); // step
-    mover.moveSquare(3); // caller
-    mover.t = t2; // ガベージコレクションで亀が消えることとする。 // step
-    mover.moveSquare(2); // caller
+    Turtle t1 = new Turtle(3, 4);
+    Turtle t2 = new Turtle(0, 0);
+    TurtleMover mover = new TurtleMover(t1);
+    mover.moveSquare(3);
+    mover.t = new Turtle(3, 1);
+    mover.moveSquare(3);
+    mover.t = t2; // ガベージコレクションで亀が消えることとする。
+    mover.moveSquare(2);
   }
 }
 class TurtleMover {
   Turtle t;
 
   TurtleMover(Turtle t) {
-    this.t = t; // step
+    this.t = t;
   }
   void moveSquare(int size) {
-    for (int i = 0; i < size * 4; i++) { // step
+    for (int i = 0; i < size * 4; i++) {
       if (i % size == size - 1) {
-        this.t.右を向く(); // step
+        this.t.右を向く();
       } else {
-        this.t.前に進む(); // step
+        this.t.前に進む();
       }
     }
   }
@@ -2306,41 +2306,41 @@ class TurtleMover {
   encapsulation: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t = new MyTurtle(); // caller
-    t.moveForward(); // caller
-    t.changeSpeed(1); // caller
-    t.moveForward(); // caller
+    MyTurtle t = new MyTurtle();
+    t.moveForward();
+    t.changeSpeed(1);
+    t.moveForward();
   }
 }
 
 class MyTurtle {
-  private Turtle t = new Turtle(); // step
-  private int speed = 2; // step
+  private Turtle t = new Turtle();
+  private int speed = 2;
 
   public void moveForward() {
-    for (int i = 0; i < this.speed; i++) { // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < this.speed; i++) {
+      this.t.前に進む();
     }
   }
   public void changeSpeed(int speed) {
-    this.speed = speed; // step
+    this.speed = speed;
   }
 }
 `,
   withoutEncapsulation: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t = new Turtle(); // step
-    drawSquare(t, 2); // caller
-    drawSquare(t, 3); // caller
+    Turtle t = new Turtle();
+    drawSquare(t, 2);
+    drawSquare(t, 3);
   }
 
   static void drawSquare(Turtle t, int size) {
-    for (int i = 0; i < 4; i++) { // step
-      for (int j = 0; j < size - 1; j++) { // step
-        t.前に進む(); // step
+    for (int i = 0; i < 4; i++) {
+      for (int j = 0; j < size - 1; j++) {
+        t.前に進む();
       }
-      t.右を向く(); // step
+      t.右を向く();
     }
   }
 }
@@ -2348,21 +2348,21 @@ public class Main {
   withEncapsulation: `
 public class Main {
   public static void main(String[] args) {
-    SquareTurtle t = new SquareTurtle(); // caller
-    t.draw(2); // caller
-    t.draw(3); // caller
+    SquareTurtle t = new SquareTurtle();
+    t.draw(2);
+    t.draw(3);
   }
 }
 
 class SquareTurtle {
-  private Turtle t = new Turtle(0, 0); // step
+  private Turtle t = new Turtle(0, 0);
 
   void draw(int size) {
-    for (int i = 0; i < 4; i++) { // step
-      for (int j = 0; j < size - 1; j++) { // step
-        this.t.前に進む(); // step
+    for (int i = 0; i < 4; i++) {
+      for (int j = 0; j < size - 1; j++) {
+        this.t.前に進む();
       }
-      this.t.右を向く(); // step
+      this.t.右を向く();
     }
   }
 }
@@ -2370,17 +2370,17 @@ class SquareTurtle {
   withoutEncapsulation2: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t = new Turtle(); // step
-    drawCurve(t, 3); // caller
+    Turtle t = new Turtle();
+    drawCurve(t, 3);
   }
   static void drawCurve(Turtle t, int speed) {
-    drawLine(t, speed); // caller
-    t.右を向く(); // step
-    drawLine(t, speed); // caller
+    drawLine(t, speed);
+    t.右を向く();
+    drawLine(t, speed);
   }
   static void drawLine(Turtle t, int speed) {
-    for (int i = 0; i < speed; i++) { // step
-      t.前に進む(); // step
+    for (int i = 0; i < speed; i++) {
+      t.前に進む();
     }
   }
 }
@@ -2388,20 +2388,20 @@ public class Main {
   withEncapsulation2: `
 public class Main {
   public static void main(String[] args) {
-    CurveTurtle t = new CurveTurtle(); // caller
-    t.draw(2); // caller
+    CurveTurtle t = new CurveTurtle();
+    t.draw(2);
   }
 }
 class CurveTurtle {
-  private Turtle t = new Turtle(0, 0); // step
+  private Turtle t = new Turtle(0, 0);
   void draw(int speed) {
-    this.drawLine(speed); // caller
-    this.t.右を向く(); // step
-    this.drawLine(speed); // caller
+    this.drawLine(speed);
+    this.t.右を向く();
+    this.drawLine(speed);
   }
   void drawLine(int speed) {
-    for (int i = 0; i < speed; i++) { // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < speed; i++) {
+      this.t.前に進む();
     }
   }
 }
@@ -2409,12 +2409,12 @@ class CurveTurtle {
   withEncapsulation3: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t = new MyTurtle(0, 0, 1); // caller
-    t.moveForward(); // caller
-    t.moveForward(); // caller
+    MyTurtle t = new MyTurtle(0, 0, 1);
+    t.moveForward();
+    t.moveForward();
     // 以下ではガベージコレクションで亀が消えることとする。
-    t = new MyTurtle(2, 2, t.getSpeed() * 2); // caller
-    t.moveForward(); // caller
+    t = new MyTurtle(2, 2, t.getSpeed() * 2);
+    t.moveForward();
   }
 }
 
@@ -2423,15 +2423,15 @@ class MyTurtle {
   private int speed;
 
   MyTurtle(int x, int y, int speed) {
-    this.t = new Turtle(x, y); // step
-    this.speed = speed; // step
+    this.t = new Turtle(x, y);
+    this.speed = speed;
   }
   public int getSpeed() {
     return this.speed;
   }
   public void moveForward() {
-    for (int i = 0; i < this.speed; i++) { // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < this.speed; i++) {
+      this.t.前に進む();
     }
   }
 }
@@ -2439,14 +2439,14 @@ class MyTurtle {
   withEncapsulation4: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t = new MyTurtle(0, 0, 2); // caller
-    t.moveForward(); // caller
-    t.setSpeed(t.getSpeed() * 3 / 2); // caller
-    t.moveForward(); // caller
-    t.setSpeed(-1); // caller
-    t.moveForward(); // caller
-    t.setSpeed(99); // caller
-    t.moveBackward(); // caller
+    MyTurtle t = new MyTurtle(0, 0, 2);
+    t.moveForward();
+    t.setSpeed(t.getSpeed() * 3 / 2);
+    t.moveForward();
+    t.setSpeed(-1);
+    t.moveForward();
+    t.setSpeed(99);
+    t.moveBackward();
   }
 }
 
@@ -2455,36 +2455,36 @@ class MyTurtle {
   private int speed;
 
   MyTurtle(int x, int y, int speed) {
-    this.t = new Turtle(x, y); // step
-    this.setSpeed(speed); // caller
+    this.t = new Turtle(x, y);
+    this.setSpeed(speed);
   }
   public int getSpeed() {
     return this.speed;
   }
   public void setSpeed(int speed) {
-    if (speed < 0)      this.speed = 0; // step
-    else if (5 < speed) this.speed = 5; // step
-    else                this.speed = speed; // step
+    if (speed < 0)      this.speed = 0;
+    else if (5 < speed) this.speed = 5;
+    else                this.speed = speed;
   }
   public void moveForward() {
-    for (int i = 0; i < this.speed; i++) // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < this.speed; i++)
+      this.t.前に進む();
   }
   public void moveBackward() {
-    for (int i = 0; i < this.speed; i++) // step
-      this.t.後に戻る(); // step
+    for (int i = 0; i < this.speed; i++)
+      this.t.後に戻る();
   }
 }
 `,
   withEncapsulation5: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t = new MyTurtle(3, 0, 3); // caller
-    t.moveForward(); // caller
-    t.changeSpeed(-2); // caller
-    t.moveForward(); // caller
-    t.changeSpeed(5); // caller
-    t.moveForward(); // caller
+    MyTurtle t = new MyTurtle(3, 0, 3);
+    t.moveForward();
+    t.changeSpeed(-2);
+    t.moveForward();
+    t.changeSpeed(5);
+    t.moveForward();
   }
 }
 
@@ -2493,33 +2493,33 @@ class MyTurtle {
   private int speed;
 
   MyTurtle(int x, int y, int speed) {
-    this.t = new Turtle(x, y); // step
-    this.speed = speed; // step
+    this.t = new Turtle(x, y);
+    this.speed = speed;
   }
   public void moveForward() {
     // Math.abs(this.speed)は、this.speedの絶対値を返す。
-    for (int i = 0; i < Math.abs(this.speed); i++) { // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < Math.abs(this.speed); i++) {
+      this.t.前に進む();
     }
   }
   public void changeSpeed(int speed) {
     if (this.speed * speed < 0) {
-      this.t.右を向く(); // step
-      this.t.右を向く(); // step
+      this.t.右を向く();
+      this.t.右を向く();
     }
-    this.speed = speed; // step
+    this.speed = speed;
   }
 }
 `,
   withEncapsulation6: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t = new MyTurtle(3, 3); // caller
-    t.moveForward(); // caller
-    t.moveForward(); // caller
-    t.teleport(0, 0); // caller
-    t.moveForward(); // caller
-    t.teleport(6, 6); // caller
+    MyTurtle t = new MyTurtle(3, 3);
+    t.moveForward();
+    t.moveForward();
+    t.teleport(0, 0);
+    t.moveForward();
+    t.teleport(6, 6);
   }
 }
 
@@ -2527,25 +2527,25 @@ class MyTurtle {
   private Turtle t;
 
   MyTurtle(int x, int y) {
-    this.t = new Turtle(x, y); // step
+    this.t = new Turtle(x, y);
   }
   public void moveForward() {
-    this.t.前に進む(); // step
+    this.t.前に進む();
   }
   public void teleport(int x, int y) {
     // ガベージコレクションで元々の亀が消えることとする。
-    this.t = new Turtle(x, y); // step
+    this.t = new Turtle(x, y);
   }
 }
 `,
   withEncapsulation7: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t = new MyTurtle(0, 0); // caller
-    t.setOperation("FFRFR"); // caller
-    t.operate(); // caller
-    t.setOperation("ABC"); // caller
-    t.operate(); // caller
+    MyTurtle t = new MyTurtle(0, 0);
+    t.setOperation("FFRFR");
+    t.operate();
+    t.setOperation("ABC");
+    t.operate();
   }
 }
 class MyTurtle {
@@ -2553,23 +2553,23 @@ class MyTurtle {
   private String operation;
 
   MyTurtle(int x, int y) {
-    this.t = new Turtle(x, y); // step
-    this.operation = "F"; // step
+    this.t = new Turtle(x, y);
+    this.operation = "F";
   }
   public void setOperation(String op) {
-    this.operation = op; // step
+    this.operation = op;
   }
   public void operate() {
-    for (int i = 0; i < this.operation.length(); i++) { // step
+    for (int i = 0; i < this.operation.length(); i++) {
       switch (this.operation.charAt(i)) {
         case 'F':
-          this.t.前に進む(); break; // step
+          this.t.前に進む(); break;
         case 'B':
-          this.t.後に戻る(); break; // step
+          this.t.後に戻る(); break;
         case 'R':
-          this.t.右を向く(); break; // step
+          this.t.右を向く(); break;
         case 'L':
-          this.t.左を向く(); break; // step
+          this.t.左を向く(); break;
       }
     }
   }
@@ -2581,91 +2581,91 @@ class MyTurtle {
   staticMethod1: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t1 = new Turtle(1, 1); // step
-    Controller.moveTwoSteps(t1); // caller
-    Turtle t2 = new Turtle(3, 3); // step
-    Controller.moveTwoSteps(t2); // caller
+    Turtle t1 = new Turtle(1, 1);
+    Controller.moveTwoSteps(t1);
+    Turtle t2 = new Turtle(3, 3);
+    Controller.moveTwoSteps(t2);
   }
 }
 
 class Controller {
   static void moveTwoSteps(Turtle t) {
-    t.前に進む(); // step
-    t.前に進む(); // step
+    t.前に進む();
+    t.前に進む();
   }
 }
     `,
   staticMethod2: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t1 = new Turtle(1, 1); // step
-    Turtle t2 = new Turtle(3, 3); // step
-    Controller.moveTwoSteps(t1); // caller
-    Controller.moveTwoSteps(t2); // caller
-    t1.前に進む(); // step
+    Turtle t1 = new Turtle(1, 1);
+    Turtle t2 = new Turtle(3, 3);
+    Controller.moveTwoSteps(t1);
+    Controller.moveTwoSteps(t2);
+    t1.前に進む();
   }
 }
 
 class Controller {
   static void moveTwoSteps(Turtle t) {
-    t.前に進む(); // step
-    t.前に進む(); // step
+    t.前に進む();
+    t.前に進む();
   }
 }
     `,
   staticMethod3: `
 public class Main {
     public static void main(String[] args) {
-    Turtle t1 = new Turtle(0, 0); // step
-    Controller.moveThreeSteps(t1); // caller
-    Turtle t2 = new Turtle(3, 0); // step
-    Turtle t3 = new Turtle(6, 0); // step
-    Controller.moveThreeSteps(t2); // caller
-    Controller.moveThreeSteps(t3); // caller
+    Turtle t1 = new Turtle(0, 0);
+    Controller.moveThreeSteps(t1);
+    Turtle t2 = new Turtle(3, 0);
+    Turtle t3 = new Turtle(6, 0);
+    Controller.moveThreeSteps(t2);
+    Controller.moveThreeSteps(t3);
   }
 }
 
 class Controller {
   static void moveThreeSteps(Turtle t) {
-    t.前に進む(); // step
-    t.前に進む(); // step
-    t.前に進む(); // step
+    t.前に進む();
+    t.前に進む();
+    t.前に進む();
   }
 }
     `,
   staticMethod4: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t1 = new Turtle(0, 0); // step
-    Turtle t2 = new Turtle(1, 1); // step
-    Controller.drawSquare(t1, 4); // caller
-    Turtle t3 = new Turtle(2, 2); // step
-    Controller.drawSquare(t2, 3); // caller
-    Controller.drawSquare(t3, 2); // caller
+    Turtle t1 = new Turtle(0, 0);
+    Turtle t2 = new Turtle(1, 1);
+    Controller.drawSquare(t1, 4);
+    Turtle t3 = new Turtle(2, 2);
+    Controller.drawSquare(t2, 3);
+    Controller.drawSquare(t3, 2);
   }
 }
 
 class Controller {
   static void drawSquare(Turtle t, int size) {
-    for (int i = 0; i < 4; i++) { // step
-      Controller.drawLine(t, size - 1); // caller
-      t.右を向く(); // step
+    for (int i = 0; i < 4; i++) {
+      Controller.drawLine(t, size - 1);
+      t.右を向く();
     }
   }
   static void drawLine(Turtle t, int n) {
-    for (int i = 0; i < n; i++) // step
-      t.前に進む(); // step
+    for (int i = 0; i < n; i++)
+      t.前に進む();
   }
 }
     `,
   staticField1: `
 public class Main {
   public static void main(String[] args) {
-    Turtle t1 = new Turtle(1, 1); // step
-    Controller.moveTwoSteps(t1); // caller
-    Turtle t2 = new Turtle(3, 3); // step
-    Controller.moveTwoSteps(t2); // caller
-    int count = Controller.stepCount; // step
+    Turtle t1 = new Turtle(1, 1);
+    Controller.moveTwoSteps(t1);
+    Turtle t2 = new Turtle(3, 3);
+    Controller.moveTwoSteps(t2);
+    int count = Controller.stepCount;
   }
 }
 
@@ -2673,22 +2673,22 @@ class Controller {
   static int stepCount;
 
   static void moveTwoSteps(Turtle t) {
-    t.前に進む(); // step
-    stepCount++; // step
-    t.前に進む(); // step
-    stepCount++; // step
+    t.前に進む();
+    stepCount++;
+    t.前に進む();
+    stepCount++;
   }
 }
     `,
   staticField2: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t1 = new MyTurtle(); // caller
-    t1.moveForward(); // caller
-    Settings.speed = 2; // step
-    MyTurtle t2 = new MyTurtle(); // caller
-    t1.moveForward(); // caller
-    t2.moveForward(); // caller
+    MyTurtle t1 = new MyTurtle();
+    t1.moveForward();
+    Settings.speed = 2;
+    MyTurtle t2 = new MyTurtle();
+    t1.moveForward();
+    t2.moveForward();
   }
 }
 
@@ -2697,11 +2697,11 @@ class Settings {
 }
 
 class MyTurtle {
-  private Turtle t = new Turtle(); // step
+  private Turtle t = new Turtle();
 
   void moveForward() {
-    for (int i = 0; i < Settings.speed; i++) { // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < Settings.speed; i++) {
+      this.t.前に進む();
     }
   }
 }
@@ -2709,31 +2709,31 @@ class MyTurtle {
   staticField3: `
 public class Main {
   public static void main(String[] args) {
-    LineTurtle t1 = new LineTurtle(); // caller
-    SquareTurtle t2 = new SquareTurtle(); // caller
-    t1.drawLine(); // caller
-    t2.drawSquare(); // caller
-    Settings.speed = 3; // step
-    t1.drawLine(); // caller
+    LineTurtle t1 = new LineTurtle();
+    SquareTurtle t2 = new SquareTurtle();
+    t1.drawLine();
+    t2.drawSquare();
+    Settings.speed = 3;
+    t1.drawLine();
   }
 }
 class Settings {
   static public int speed = 2;
 }
 class LineTurtle {
-  private Turtle t = new Turtle(0, 0); // step
+  private Turtle t = new Turtle(0, 0);
   void drawLine() {
-    for (int i = 0; i < Settings.speed; i++) // step
-      t.前に進む(); // step
+    for (int i = 0; i < Settings.speed; i++)
+      t.前に進む();
   }
 }
 class SquareTurtle {
-  private Turtle t = new Turtle(1, 1); // step
+  private Turtle t = new Turtle(1, 1);
   void drawSquare() {
-    for (int i = 0; i < 4; i++) { // step
-      for (int j = 0; j < Settings.speed; j++) // step
-        t.前に進む(); // step
-      t.右を向く(); // step
+    for (int i = 0; i < 4; i++) {
+      for (int j = 0; j < Settings.speed; j++)
+        t.前に進む();
+      t.右を向く();
     }
   }
 }
@@ -2741,32 +2741,32 @@ class SquareTurtle {
   staticField4: `
 public class Main {
   public static void main(String[] args) {
-    AcceleratedTurtle t1 = new AcceleratedTurtle(); // caller
-    SquareTurtle t2 = new SquareTurtle(); // caller
-    t1.drawLine(); // caller
-    t2.drawSquare(); // caller
-    Settings.speed = 2; // step
-    t1.drawLine(); // caller
+    AcceleratedTurtle t1 = new AcceleratedTurtle();
+    SquareTurtle t2 = new SquareTurtle();
+    t1.drawLine();
+    t2.drawSquare();
+    Settings.speed = 2;
+    t1.drawLine();
   }
 }
 class Settings {
   static public int speed = 2;
 }
 class AcceleratedTurtle {
-  private Turtle t = new Turtle(0, 0); // step
+  private Turtle t = new Turtle(0, 0);
   void drawLine() {
-    for (int i = 0; i < Settings.speed; i++) // step
-      t.前に進む(); // step
-    Settings.speed++; // step
+    for (int i = 0; i < Settings.speed; i++)
+      t.前に進む();
+    Settings.speed++;
   }
 }
 class SquareTurtle {
-  private Turtle t = new Turtle(1, 1); // step
+  private Turtle t = new Turtle(1, 1);
   void drawSquare() {
-    for (int i = 0; i < 4; i++) { // step
-      for (int j = 0; j < Settings.speed; j++) // step
-        t.前に進む(); // step
-      t.右を向く(); // step
+    for (int i = 0; i < 4; i++) {
+      for (int j = 0; j < Settings.speed; j++)
+        t.前に進む();
+      t.右を向く();
     }
   }
 }
@@ -2774,46 +2774,46 @@ class SquareTurtle {
   staticField5: `
 public class Main {
   public static void main(String[] args) {
-    SlowTurtle t1 = new SlowTurtle(); // caller
-    FastTurtle t2 = new FastTurtle(); // caller
-    t1.moveForward(); // caller
-    t2.moveForward(); // caller
-    Settings.additionalSpeed++; // step
-    t1.moveForward(); // caller
-    t2.moveForward(); // caller
+    SlowTurtle t1 = new SlowTurtle();
+    FastTurtle t2 = new FastTurtle();
+    t1.moveForward();
+    t2.moveForward();
+    Settings.additionalSpeed++;
+    t1.moveForward();
+    t2.moveForward();
   }
 }
 class Settings {
   static public int additionalSpeed = 0;
 }
 class SlowTurtle {
-  private Turtle t = new Turtle(0, 0); // step
-  private int base = 1; // step
+  private Turtle t = new Turtle(0, 0);
+  private int base = 1;
   void moveForward() {
-    for (int i = 0; i < this.base + Settings.additionalSpeed; i++) // step
-      t.前に進む(); // step
+    for (int i = 0; i < this.base + Settings.additionalSpeed; i++)
+      t.前に進む();
   }
 }
 class FastTurtle {
-  private Turtle t = new Turtle(6, 0); // step
-  private int base = 2; // step
+  private Turtle t = new Turtle(6, 0);
+  private int base = 2;
   void moveForward() {
-    for (int i = 0; i < this.base + Settings.additionalSpeed; i++) // step
-      t.前に進む(); // step
+    for (int i = 0; i < this.base + Settings.additionalSpeed; i++)
+      t.前に進む();
   }
 }
     `,
   staticField6: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t1 = new MyTurtle(0, 0); // caller
-    MyTurtle t2 = new MyTurtle(3, 0); // caller
-    t1.moveForward(); // caller
-    t2.moveForward(); // caller
-    t1.base++; // step
-    Settings.additionalSpeed++; // step
-    t1.moveForward(); // caller
-    t2.moveForward(); // caller
+    MyTurtle t1 = new MyTurtle(0, 0);
+    MyTurtle t2 = new MyTurtle(3, 0);
+    t1.moveForward();
+    t2.moveForward();
+    t1.base++;
+    Settings.additionalSpeed++;
+    t1.moveForward();
+    t2.moveForward();
   }
 }
 class Settings {
@@ -2824,12 +2824,12 @@ class MyTurtle {
   public int base;
 
   MyTurtle(int x, int y) {
-    this.turtle = new Turtle(x, y); // step
-    this.base = 1; // step
+    this.turtle = new Turtle(x, y);
+    this.base = 1;
   }
   void moveForward() {
-    for (int i = 0; i < this.base + Settings.additionalSpeed; i++) // step
-      this.turtle.前に進む(); // step
+    for (int i = 0; i < this.base + Settings.additionalSpeed; i++)
+      this.turtle.前に進む();
   }
 }
     `,
@@ -2839,125 +2839,125 @@ class MyTurtle {
   inheritance1: `
 public class Main {
   public static void main(String[] args) {
-    CurveTurtle t = new CurveTurtle(); // caller
-    t.drawCurve(); // caller
+    CurveTurtle t = new CurveTurtle();
+    t.drawCurve();
   }
 }
 class MyTurtle {
-  Turtle t = new Turtle(); // step
+  Turtle t = new Turtle();
 
   void drawLine() {
-    this.t.前に進む(); // step
-    this.t.前に進む(); // step
+    this.t.前に進む();
+    this.t.前に進む();
   }
 }
 class CurveTurtle extends MyTurtle {
   void drawCurve() {
-    this.drawLine(); // caller
-    this.t.右を向く(); // step
-    this.drawLine(); // caller
+    this.drawLine();
+    this.t.右を向く();
+    this.drawLine();
   }
 }
 `,
   inheritance2: `
 public class Main {
   public static void main(String[] args) {
-    CurveTurtle t = new CurveTurtle(2); // caller
-    t.drawCurve(); // caller
+    CurveTurtle t = new CurveTurtle(2);
+    t.drawCurve();
   }
 }
 class MyTurtle {
   Turtle t;
   MyTurtle(int x, int y) {
-    this.t = new Turtle(x, y); // step
+    this.t = new Turtle(x, y);
   }
   void drawLine() {
-    this.t.前に進む(); // step
-    this.t.前に進む(); // step
+    this.t.前に進む();
+    this.t.前に進む();
   }
 }
 class CurveTurtle extends MyTurtle {
   CurveTurtle(int p) {
-    super(p, p); // caller
+    super(p, p);
   }
   void drawCurve() {
-    this.drawLine(); // caller
-    this.t.右を向く(); // step
-    this.drawLine(); // caller
+    this.drawLine();
+    this.t.右を向く();
+    this.drawLine();
   }
 }
 `,
   inheritance3: `
 public class Main {
   public static void main(String[] args) {
-    CurveTurtle t = new CurveTurtle(0); // caller
-    t.drawCurve(); // caller
-    t.drawLine(); // caller
+    CurveTurtle t = new CurveTurtle(0);
+    t.drawCurve();
+    t.drawLine();
   }
 }
 class MyTurtle {
   Turtle t;
   MyTurtle(int x, int y) {
-    this.t = new Turtle(x, y); // step
+    this.t = new Turtle(x, y);
   }
   void drawLine() {
-    this.t.前に進む(); // step
-    this.t.前に進む(); // step
+    this.t.前に進む();
+    this.t.前に進む();
   }
 }
 class CurveTurtle extends MyTurtle {
   CurveTurtle(int p) {
-    super(p + 1, p + 2); // caller
+    super(p + 1, p + 2);
   }
   void drawCurve() {
-    this.drawLine(); // caller
-    this.t.右を向く(); // step
-    this.drawLine(); // caller
+    this.drawLine();
+    this.t.右を向く();
+    this.drawLine();
   }
 }
     `,
   inheritance4: `
 public class Main {
   public static void main(String[] args) {
-    SquareTurtle t = new SquareTurtle(); // caller
-    t.drawSquare(); // caller
+    SquareTurtle t = new SquareTurtle();
+    t.drawSquare();
   }
 }
 class MyTurtle {
-  Turtle t = new Turtle(0, 1); // step
+  Turtle t = new Turtle(0, 1);
   void drawLine() {
-    this.t.前に進む(); // step
-    this.t.前に進む(); // step
+    this.t.前に進む();
+    this.t.前に進む();
   }
 }
 class CurveTurtle extends MyTurtle {
   void drawCurve() {
-    this.drawLine(); // caller
-    this.t.右を向く(); // step
-    this.drawLine(); // caller
+    this.drawLine();
+    this.t.右を向く();
+    this.drawLine();
   }
 }
 class SquareTurtle extends CurveTurtle {
   void drawSquare() {
-    this.drawCurve(); // caller
-    this.t.右を向く(); // step
-    this.drawCurve(); // caller
+    this.drawCurve();
+    this.t.右を向く();
+    this.drawCurve();
   }
 }
     `,
   override1: `
 public class Main {
   public static void main(String[] args) {
-    FastTurtle t = new FastTurtle(); // caller
-    t.drawLine(); // caller
+    FastTurtle t = new FastTurtle();
+    t.drawLine();
   }
 }
 class MyTurtle {
-  Turtle t = new Turtle(); // step
+  Turtle t = new Turtle();
 
   void drawLine() {
-    for (int i = 0; i < this.length(); i++) { // step
-      this.t.前に進む();  // step
+    for (int i = 0; i < this.length(); i++) {
+      this.t.前に進む();
     }
   }
   int length() {
@@ -2973,15 +2973,15 @@ class FastTurtle extends MyTurtle {
   override2: `
 public class Main {
   public static void main(String[] args) {
-    SuperFastTurtle t = new SuperFastTurtle(); // caller
-    t.drawLine(); // caller
+    SuperFastTurtle t = new SuperFastTurtle();
+    t.drawLine();
   }
 }
 class MyTurtle {
-  Turtle t = new Turtle(); // step
+  Turtle t = new Turtle();
   void drawLine() {
-    for (int i = 0; i < this.length(); i++) { // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < this.length(); i++) {
+      this.t.前に進む();
     }
   }
   int length() {
@@ -3004,15 +3004,15 @@ class SuperFastTurtle extends FastTurtle {
   override3: `
 public class Main {
   public static void main(String[] args) {
-    FastCurveTurtle t = new FastCurveTurtle(); // caller
-    t.draw(); // caller
+    FastCurveTurtle t = new FastCurveTurtle();
+    t.draw();
   }
 }
 class MyTurtle {
-  Turtle t = new Turtle(); // step
+  Turtle t = new Turtle();
   void draw() {
-    for (int i = 0; i < this.length(); i++) { // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < this.length(); i++) {
+      this.t.前に進む();
     }
   }
   int length() {
@@ -3022,10 +3022,10 @@ class MyTurtle {
 class FastCurveTurtle extends MyTurtle {
   @Override void draw() {
     // 親クラス (MyTurtle) の draw() を呼び出す。
-    super.draw(); // caller
-    this.t.右を向く(); // step
+    super.draw();
+    this.t.右を向く();
     // 親クラス (MyTurtle) の draw() を呼び出す。
-    super.draw(); // caller
+    super.draw();
   }
   @Override int length() {
     // 親クラス (MyTurtle) の length() を呼び出す。
@@ -3037,29 +3037,29 @@ class FastCurveTurtle extends MyTurtle {
 public class Main {
   public static void main(String[] args) {
     MyTurtle[] ts = {
-      new MyTurtle(0, 0), // caller
-      new FastTurtle(1) // caller
+      new MyTurtle(0, 0),
+      new FastTurtle(1)
     };
-    for (int i = 0; i < ts.length; i++) { // step
-      ts[i].drawLine(); // caller
+    for (int i = 0; i < ts.length; i++) {
+      ts[i].drawLine();
     }
   }
 }
 class MyTurtle {
   Turtle t;
   MyTurtle(int x, int y) {
-    this.t = new Turtle(x, y); // step
+    this.t = new Turtle(x, y);
   }
   void drawLine() {
-    for (int i = 0; i < this.length(); i++) { // step
-      this.t.前に進む();  // step
+    for (int i = 0; i < this.length(); i++) {
+      this.t.前に進む();
     }
   }
   int length() { return 2; }
 }
 class FastTurtle extends MyTurtle {
   FastTurtle(int p) {
-    super(p, p); // caller
+    super(p, p);
   }
   @Override int length() { return 3; }
 }
@@ -3068,42 +3068,42 @@ class FastTurtle extends MyTurtle {
 public class Main {
   public static void main(String[] args) {
     MyTurtle[] ts = {
-      new FastTurtle(3), // caller
-      new CurveTurtle(0) // caller
+      new FastTurtle(3),
+      new CurveTurtle(0)
     };
-    for (int i = 0; i < ts.length; i++) { // step
-      ts[i].draw(); // caller
+    for (int i = 0; i < ts.length; i++) {
+      ts[i].draw();
     }
   }
 }
 class MyTurtle {
   Turtle t;
   MyTurtle(int x, int y) {
-    this.t = new Turtle(x, y); // step
+    this.t = new Turtle(x, y);
   }
   void draw() {
-    for (int i = 0; i < this.length(); i++) { // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < this.length(); i++) {
+      this.t.前に進む();
     }
   }
   int length() { return 2; }
 }
 class FastTurtle extends MyTurtle {
   FastTurtle(int p) {
-    super(p, p); // caller
+    super(p, p);
   }
   @Override int length() { return 3; }
 }
 class CurveTurtle extends MyTurtle {
   CurveTurtle(int p) {
-    super(p, p + 1); // caller
+    super(p, p + 1);
   }
   @Override void draw() {
     // 親クラス (MyTurtle) の draw() を呼び出す。
-    super.draw(); // caller
-    this.t.右を向く(); // step
+    super.draw();
+    this.t.右を向く();
     // 親クラス (MyTurtle) の draw() を呼び出す。
-    super.draw(); // caller
+    super.draw();
   }
 }
 `,
@@ -3111,45 +3111,45 @@ class CurveTurtle extends MyTurtle {
 public class Main {
   public static void main(String[] args) {
     MyTurtle[] ts = {
-      new MyTurtle(0, 0), // caller
-      new FastTurtle(3), // caller
-      new CurveTurtle(2) // caller
+      new MyTurtle(0, 0),
+      new FastTurtle(3),
+      new CurveTurtle(2)
     };
-    for (int i = 0; i < ts.length; i++) { // step
-      ts[i].draw(); // caller
-      ts[i].t.右を向く(); // step
-      ts[i].draw(); // caller
+    for (int i = 0; i < ts.length; i++) {
+      ts[i].draw();
+      ts[i].t.右を向く();
+      ts[i].draw();
     }
   }
 }
 class MyTurtle {
   Turtle t;
   MyTurtle(int x, int y) {
-    this.t = new Turtle(x, y); // step
+    this.t = new Turtle(x, y);
   }
   void draw() {
-    for (int i = 0; i < this.length(); i++) { // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < this.length(); i++) {
+      this.t.前に進む();
     }
   }
   int length() { return 2; }
 }
 class FastTurtle extends MyTurtle {
   FastTurtle(int p) {
-    super(p, p); // caller
+    super(p, p);
   }
   @Override int length() { return 3; }
 }
 class CurveTurtle extends MyTurtle {
   CurveTurtle(int p) {
-    super(p, p + 1); // caller
+    super(p, p + 1);
   }
   @Override void draw() {
     // 親クラス (MyTurtle) の draw() を呼び出す。
-    super.draw(); // caller
-    this.t.右を向く(); // step
+    super.draw();
+    this.t.右を向く();
     // 親クラス (MyTurtle) の draw() を呼び出す。
-    super.draw(); // caller
+    super.draw();
   }
 }
     `,
@@ -3164,8 +3164,8 @@ class CurveTurtle extends MyTurtle {
 import turtle.FastTurtle;
 public class Main {
   public static void main(String[] a) {
-    FastTurtle fast = new FastTurtle(); // caller
-    fast.drawLine(); // caller
+    FastTurtle fast = new FastTurtle();
+    fast.drawLine();
   }
 }
 // -------------- Main.java ここまで --------------
@@ -3173,10 +3173,10 @@ public class Main {
 // -------- turtle/MyTurtle.java ここから --------
 package turtle;
 public class MyTurtle {
-  private Turtle t = new Turtle(); // step
+  private Turtle t = new Turtle();
   public void drawLine() {
-    for (int i = 0; i < this.length(); i++) // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < this.length(); i++)
+      this.t.前に進む();
   }
   protected int length() { return 2; }
 }
@@ -3196,8 +3196,8 @@ public class FastTurtle extends MyTurtle {
 import turtle.BoldLineTurtle;
 public class Main {
   public static void main(String[] a) {
-    BoldLineTurtle t = new BoldLineTurtle(); // caller
-    t.draw(); // caller
+    BoldLineTurtle t = new BoldLineTurtle();
+    t.draw();
   }
 }
 // -------------- Main.java ここまで --------------
@@ -3205,13 +3205,13 @@ public class Main {
 // -------- turtle/LineTurtle.java ここから --------
 package turtle;
 public class LineTurtle {
-  protected Turtle t = new Turtle(); // step
+  protected Turtle t = new Turtle();
   public void draw() {
-    for (int i = 0; i < 3; i++) // step
-      this.forward(); // caller
+    for (int i = 0; i < 3; i++)
+      this.forward();
   }
   protected void forward() {
-  	this.t.前に進む(); // step
+  	this.t.前に進む();
   }
 }
 // -------- turtle/LineTurtle.java ここまで --------
@@ -3220,13 +3220,13 @@ public class LineTurtle {
 package turtle;
 public class BoldLineTurtle extends LineTurtle {
   @Override protected void forward() {
-		this.t.右を向く(); // step
-		this.t.前に進む(); // step
-		this.t.左を向く(); // step
-		this.t.前に進む(); // step
-		this.t.左を向く(); // step
-		this.t.前に進む(); // step
-		this.t.右を向く(); // step
+		this.t.右を向く();
+		this.t.前に進む();
+		this.t.左を向く();
+		this.t.前に進む();
+		this.t.左を向く();
+		this.t.前に進む();
+		this.t.右を向く();
   }
 }
 // ------- turtle/BoldLineTurtle.java ここまで -------
@@ -3239,11 +3239,11 @@ import turtle.*;
 public class Main {
   public static void main(String[] a) {
     LineTurtle[] ts = {
-      new LineTurtle(0, 0), // caller
-      new LongLineTurtle(3, 0) // caller
+      new LineTurtle(0, 0),
+      new LongLineTurtle(3, 0)
     };
     for (LineTurtle t : ts)
-      t.draw(); // caller
+      t.draw();
   }
 }
 // -------------- Main.java ここまで --------------
@@ -3253,14 +3253,14 @@ package turtle;
 public class LineTurtle {
   protected Turtle t;
   public LineTurtle(int x, int y) {
-    this.t = new Turtle(x, y); // step
+    this.t = new Turtle(x, y);
   }
   public void draw() {
-    for (int i = 0; i < 3; i++) // step
-      this.forward(); // caller
+    for (int i = 0; i < 3; i++)
+      this.forward();
   }
   protected void forward() {
-  	this.t.前に進む(); // step
+  	this.t.前に進む();
   }
 }
 // -------- turtle/LineTurtle.java ここまで --------
@@ -3269,11 +3269,11 @@ public class LineTurtle {
 package turtle;
 public class LongLineTurtle extends LineTurtle {
   public LongLineTurtle(int x, int y) {
-    super(x, y); // caller
+    super(x, y);
   }
   @Override protected void forward() {
-		this.t.前に進む(); // step
-		this.t.前に進む(); // step
+		this.t.前に進む();
+		this.t.前に進む();
   }
 }
 // ------- turtle/LongLineTurtle.java ここまで -------
@@ -3281,55 +3281,55 @@ public class LongLineTurtle extends LineTurtle {
   overload1: `
 public class Main {
   public static void main(String[] args) {
-    CurveTurtle t = new CurveTurtle(); // caller
-    t.drawCurve(); // caller
+    CurveTurtle t = new CurveTurtle();
+    t.drawCurve();
   }
 }
 class MyTurtle {
-  Turtle t = new Turtle(); // step
+  Turtle t = new Turtle();
   void drawLine(int steps) {
-    for (int i = 0; i < steps; i++) // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < steps; i++)
+      this.t.前に進む();
   }
   void drawLine() {
-    this.drawLine(2); // caller
+    this.drawLine(2);
   }
 }
 class CurveTurtle extends MyTurtle {
   void drawCurve() {
-    this.drawLine(3); // caller
-    this.t.右を向く(); // step
-    this.drawLine(); // caller
+    this.drawLine(3);
+    this.t.右を向く();
+    this.drawLine();
   }
 }
     `,
   overload2: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t = new MyTurtle(); // caller
-    t.operate(0); // caller
-    t.operate("right"); // caller
-    t.operate("up"); // caller
-    t.operate(1); // caller
-    t.operate(0); // caller
+    MyTurtle t = new MyTurtle();
+    t.operate(0);
+    t.operate("right");
+    t.operate("up");
+    t.operate(1);
+    t.operate(0);
   }
 }
 class MyTurtle {
-  private Turtle t = new Turtle(0, 0); // step
+  private Turtle t = new Turtle(0, 0);
   public void operate(int n) {
     if (n == 0) {
-      this.t.前に進む(); // step
+      this.t.前に進む();
     } else if (n == 1) {
-      this.t.右を向く(); // step
-      this.t.前に進む(); // step
-      this.t.左を向く(); // step
+      this.t.右を向く();
+      this.t.前に進む();
+      this.t.左を向く();
     }
   }
   public void operate(String s) {
     if (s.equals("up")) {
-      operate(0); // caller
+      operate(0);
     } else if (s.equals("right")) {
-      operate(1); // caller
+      operate(1);
     }
   }
 }
@@ -3337,15 +3337,15 @@ class MyTurtle {
   overload3: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t = new MyTurtle(); // caller
-    t.drawLine(max(2, 3)); // caller
-    t.t.右を向く(); // step
-    t.drawLine(max(2, 3, 4)); // caller
-    t.t.右を向く(); // step
-    t.drawLine(max(2, 1)); // caller
-    t.t.右を向く(); // step
-    t.drawLine(max(3, 2, 1)); // caller
-    t.t.右を向く(); // step
+    MyTurtle t = new MyTurtle();
+    t.drawLine(max(2, 3));
+    t.t.右を向く();
+    t.drawLine(max(2, 3, 4));
+    t.t.右を向く();
+    t.drawLine(max(2, 1));
+    t.t.右を向く();
+    t.drawLine(max(3, 2, 1));
+    t.t.右を向く();
   }
   public static int max(int a, int b) {
     if (a > b) return a;
@@ -3358,50 +3358,50 @@ public class Main {
   }
 }
 class MyTurtle {
-  public Turtle t = new Turtle(); // step
+  public Turtle t = new Turtle();
   public void drawLine(int steps) {
-    for (int i = 0; i < steps; i++) // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < steps; i++)
+      this.t.前に進む();
   }
 }
     `,
   overload4: `
 public class Main {
   public static void main(String[] a) {
-    MyTurtle t = new MyTurtle(); // caller
-    t.move(2); // caller
-    t.move(1, 3); // caller
-    t.move(-3); // caller
-    t.move(-1, 0); // caller
-    t.move(4, 2); // caller
-    t.move(0, -4); // caller
+    MyTurtle t = new MyTurtle();
+    t.move(2);
+    t.move(1, 3);
+    t.move(-3);
+    t.move(-1, 0);
+    t.move(4, 2);
+    t.move(0, -4);
   }
 }
 public class MyTurtle {
-  private Turtle t = new Turtle(0, 0); // step
+  private Turtle t = new Turtle(0, 0);
   public void move(int dy) {
     while (dy > 0) {
-      dy--; // step
-      this.t.前に進む(); // step
+      dy--;
+      this.t.前に進む();
     }
     while (dy < 0) {
-      dy++; // step
-      this.t.後に戻る(); // step
+      dy++;
+      this.t.後に戻る();
     }
   }
   public void move(int dx, int dy) {
-    move(dy); // caller
+    move(dy);
     if (dx != 0) {
-      this.t.右を向く(); // step
+      this.t.右を向く();
       while (dx > 0) {
-        dx--; // step
-        this.t.前に進む(); // step
+        dx--;
+        this.t.前に進む();
       }
       while (dx < 0) {
-        dx++; // step
-        this.t.後に戻る(); // step
+        dx++;
+        this.t.後に戻る();
       }
-      this.t.左を向く(); // step
+      this.t.左を向く();
     }
   }
 }
@@ -3409,108 +3409,108 @@ public class MyTurtle {
   overloadAndOverride1: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle m2 = new MyTurtle2(); // caller
-    m2.drawLine(); // caller
-    MyTurtle m3 = new MyTurtle3(); // caller
-    m3.drawLine(); // caller
+    MyTurtle m2 = new MyTurtle2();
+    m2.drawLine();
+    MyTurtle m3 = new MyTurtle3();
+    m3.drawLine();
     MyTurtle[] ms = { m2, m3 };
     for (MyTurtle m : ms) {
-      m.t.右を向く(); // step
-      m.drawLine(); // caller
+      m.t.右を向く();
+      m.drawLine();
     }
   }
 }
 class MyTurtle {
-  Turtle t = new Turtle(); // step
+  Turtle t = new Turtle();
   void drawLine(int steps) {
-    for (int i = 0; i < steps; i++) // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < steps; i++)
+      this.t.前に進む();
   }
   void drawLine() {
-    this.drawLine(2); // caller
+    this.drawLine(2);
   }
 }
 class MyTurtle2 extends MyTurtle {
   @Override void drawLine() {
-    this.drawLine(4); // caller
+    this.drawLine(4);
   }
 }
 class MyTurtle3 extends MyTurtle {
   @Override void drawLine() {
-    this.drawLine(3); // caller
+    this.drawLine(3);
   }
 }
     `,
   overloadAndOverride2: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle m2 = new MyTurtle2(); // caller
-    m2.drawLine(2); // caller
-    MyTurtle m3 = new MyTurtle3(); // caller
-    m3.drawLine(1); // caller
+    MyTurtle m2 = new MyTurtle2();
+    m2.drawLine(2);
+    MyTurtle m3 = new MyTurtle3();
+    m3.drawLine(1);
     MyTurtle[] ms = { m2, m3 };
     for (MyTurtle m : ms) {
-      m.t.右を向く(); // step
-      m.drawLine(); // caller
+      m.t.右を向く();
+      m.drawLine();
     }
   }
 }
 class MyTurtle {
-  Turtle t = new Turtle(); // step
+  Turtle t = new Turtle();
   void drawLine(int steps) {
-    for (int i = 0; i < steps; i++) // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < steps; i++)
+      this.t.前に進む();
   }
   void drawLine() {
-    this.drawLine(2); // caller
+    this.drawLine(2);
   }
 }
 class MyTurtle2 extends MyTurtle {
   @Override void drawLine() {
-    this.drawLine(3); // caller
+    this.drawLine(3);
   }
 }
 class MyTurtle3 extends MyTurtle {
   @Override void drawLine() {
-    this.drawLine(4); // caller
+    this.drawLine(4);
   }
 }
     `,
   overloadAndOverride3: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle m1 = new MyTurtle(); // caller
-    m1.drawLine(4); // caller
-    MyTurtle m2 = new MyTurtle2(); // caller
-    m2.drawLine(3); // caller
-    MyTurtle m3 = new MyTurtle3(); // caller
-    m3.drawLine(1); // caller
+    MyTurtle m1 = new MyTurtle();
+    m1.drawLine(4);
+    MyTurtle m2 = new MyTurtle2();
+    m2.drawLine(3);
+    MyTurtle m3 = new MyTurtle3();
+    m3.drawLine(1);
     MyTurtle[] ms = { m1, m2, m3 };
     for (MyTurtle m : ms) {
-      m.t.右を向く(); // step
-      m.drawLine(); // caller
+      m.t.右を向く();
+      m.drawLine();
     }
   }
 }
 class MyTurtle {
-  Turtle t = new Turtle(); // step
+  Turtle t = new Turtle();
   void drawLine(int steps) {
-    for (int i = 0; i < steps; i++) // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < steps; i++)
+      this.t.前に進む();
   }
   void drawLine() {
-    this.drawLine(2); // caller
+    this.drawLine(2);
   }
 }
 class MyTurtle2 extends MyTurtle {
   @Override void drawLine() {
-    this.drawLine(3); // caller
+    this.drawLine(3);
   }
 }
 class MyTurtle3 extends MyTurtle2 {
   @Override void drawLine(int steps) {
     // MyTurtleクラスの "drawLine(int steps)" を呼ぶ。
-    super.drawLine(steps * 2); // caller
+    super.drawLine(steps * 2);
   }
 }
     `,
@@ -3520,26 +3520,26 @@ class MyTurtle3 extends MyTurtle2 {
   exception1: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle m = new MyTurtle(); // caller
+    MyTurtle m = new MyTurtle();
     try {
-      m.drawLine(); // caller
-      m.drawLine(); // caller
+      m.drawLine();
+      m.drawLine();
     } catch (Exception e) {
-      m.t.右を向く(); // step
-      m.t.前に進む(); // step
+      m.t.右を向く();
+      m.t.前に進む();
     }
   }
 }
 
 class MyTurtle {
-  public Turtle t = new Turtle(); // step
+  public Turtle t = new Turtle();
 
   public void drawLine() {
-    for (int i = 0; i < 4; i++) { // step
+    for (int i = 0; i < 4; i++) {
       if (!t.前に進めるか()) {
         throw new RuntimeException("前に進めない！");
       }
-      this.t.前に進む(); // step
+      this.t.前に進む();
     }
   }
 }
@@ -3547,26 +3547,26 @@ class MyTurtle {
   exception2: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle m = new MyTurtle(); // caller
+    MyTurtle m = new MyTurtle();
     try {
-      m.drawLine(); // caller
-      m.drawLine(); // caller
+      m.drawLine();
+      m.drawLine();
     } catch (ArithmeticException e) {
-      m.t.右を向く(); // step
-      m.t.前に進む(); // step
+      m.t.右を向く();
+      m.t.前に進む();
     }
   }
 }
 
 class MyTurtle {
-  public Turtle t = new Turtle(); // step
+  public Turtle t = new Turtle();
 
   public void drawLine() {
-    for (int i = 0; i < 4; i++) { // step
+    for (int i = 0; i < 4; i++) {
       if (!t.前に進めるか()) {
         throw new RuntimeException("前に進めない！");
       }
-      this.t.前に進む(); // step
+      this.t.前に進む();
     }
   }
 }
@@ -3574,27 +3574,27 @@ class MyTurtle {
   exception3: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle m = new MyTurtle(); // caller
+    MyTurtle m = new MyTurtle();
     try {
-      m.drawLine(); // caller
-      m.drawLine(); // caller
+      m.drawLine();
+      m.drawLine();
     } catch (Exception e) {
-      m.t.右を向く(); // step
-      m.t.前に進む(); // step
-      m.t.左を向く(); // step
+      m.t.右を向く();
+      m.t.前に進む();
+      m.t.左を向く();
     }
   }
 }
 
 class MyTurtle {
-  public Turtle t = new Turtle(); // step
+  public Turtle t = new Turtle();
 
   public void drawLine() {
-    for (int i = 0; i < 4; i++) { // step
+    for (int i = 0; i < 4; i++) {
       if (!t.前に進めるか()) {
         throw new RuntimeException("前に進めない！");
       }
-      this.t.前に進む(); // step
+      this.t.前に進む();
     }
   }
 }
@@ -3602,30 +3602,30 @@ class MyTurtle {
   exception4: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle m = new MyTurtle(); // caller
+    MyTurtle m = new MyTurtle();
     try {
-      m.drawLine(); // caller
-      m.drawLine(); // caller
+      m.drawLine();
+      m.drawLine();
     } catch (Exception e) {
-      m.t.前に進む(); // step
-      m.t.右を向く(); // step
+      m.t.前に進む();
+      m.t.右を向く();
     }
   }
 }
 
 class MyTurtle {
-  public Turtle t = new Turtle(); // step
+  public Turtle t = new Turtle();
 
   public void drawLine() {
     try {
-      for (int i = 0; i < 4; i++) { // step
+      for (int i = 0; i < 4; i++) {
         if (!t.前に進めるか()) {
           throw new RuntimeException("前に進めない！");
         }
-        this.t.前に進む(); // step
+        this.t.前に進む();
       }
     } catch (RuntimeException e) {
-      t.右を向く(); // step
+      t.右を向く();
       throw e; // catchした例外をもう一度throwする。
     }
   }
@@ -3634,30 +3634,30 @@ class MyTurtle {
   exception5: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle m = new MyTurtle(); // caller
+    MyTurtle m = new MyTurtle();
     try {
-      m.drawLine(); // caller
-      m.drawLine(); // caller
+      m.drawLine();
+      m.drawLine();
     } catch (RuntimeException e) {
-      m.t.前に進む(); // step
+      m.t.前に進む();
       throw e; // catchした例外をもう一度throwする。
     }
   }
 }
 
 class MyTurtle {
-  public Turtle t = new Turtle(); // step
+  public Turtle t = new Turtle();
 
   public void drawLine() {
     try {
-      for (int i = 0; i < 4; i++) { // step
+      for (int i = 0; i < 4; i++) {
         if (!t.前に進めるか()) {
           throw new RuntimeException("前に進めない！");
         }
-        this.t.前に進む(); // step
+        this.t.前に進む();
       }
     } catch (RuntimeException e) {
-      t.右を向く(); // step
+      t.右を向く();
       throw e; // catchした例外をもう一度throwする。
     }
   }
@@ -3666,28 +3666,28 @@ class MyTurtle {
   originalException1: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle m = new MyTurtle(); // caller
-    m.drawLine(); // caller
-    m.drawLine(); // caller
+    MyTurtle m = new MyTurtle();
+    m.drawLine();
+    m.drawLine();
   }
 }
 
 class OutOfBoardException extends Exception { }
 
 class MyTurtle {
-  public Turtle t = new Turtle(); // step
+  public Turtle t = new Turtle();
 
   public void drawLine() {
     try {
-      for (int i = 0; i < 4; i++) { // step
+      for (int i = 0; i < 4; i++) {
         if (!this.t.前に進めるか()) {
           throw new OutOfBoardException();
         }
-        this.t.前に進む(); // step
+        this.t.前に進む();
       }
     } catch (Exception e) {
-      this.t.右を向く(); // step
-      this.t.前に進む(); // step
+      this.t.右を向く();
+      this.t.前に進む();
     }
   }
 }
@@ -3695,26 +3695,26 @@ class MyTurtle {
   originalException2: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle m = new MyTurtle(); // caller
+    MyTurtle m = new MyTurtle();
     try {
-      m.drawLine(); // caller
-      m.drawLine(); // caller
+      m.drawLine();
+      m.drawLine();
     } catch (OutOfBoardException e) {
-      m.t.右を向く(); // step
-      m.t.前に進む(); // step
+      m.t.右を向く();
+      m.t.前に進む();
     }
   }
 }
 
 class MyTurtle {
-  public Turtle t = new Turtle(); // step
+  public Turtle t = new Turtle();
 
   public void drawLine() throws OutOfBoardException {
-    for (int i = 0; i < 4; i++) { // step
+    for (int i = 0; i < 4; i++) {
       if (!this.t.前に進めるか()) {
         throw new OutOfBoardException();
       }
-      this.t.前に進む(); // step
+      this.t.前に進む();
     }
   }
 }
@@ -3724,15 +3724,15 @@ class OutOfBoardException extends Exception { }
   originalException3: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle m = new MyTurtle(); // caller
+    MyTurtle m = new MyTurtle();
     try {
-      m.drawSquare(); // caller
+      m.drawSquare();
     } catch (OutOfBoardException e) {
-      m.t.右を向く(); // step
-      m.t.前に進む(); // step
+      m.t.右を向く();
+      m.t.前に進む();
     } catch (ColoredException e) {
-      m.t.前に進む(); // step
-      m.t.左を向く(); // step
+      m.t.前に進む();
+      m.t.左を向く();
     }
   }
 }
@@ -3741,19 +3741,19 @@ class OutOfBoardException extends Exception { }
 class ColoredException extends Exception { }
 
 class MyTurtle {
-  public Turtle t = new Turtle(); // step
+  public Turtle t = new Turtle();
 
   public void drawSquare()
         throws OutOfBoardException, ColoredException {
-    for (int i = 0; i < 4; i++) { // step
+    for (int i = 0; i < 4; i++) {
       if (!this.t.前に進めるか()) {
         throw new OutOfBoardException();
       }
       if (this.t.前のマスが塗られているか()) {
         throw new ColoredException();
       }
-      this.t.前に進む(); // step
-      this.t.右を向く(); // step
+      this.t.前に進む();
+      this.t.右を向く();
     }
   }
 }
@@ -3761,13 +3761,13 @@ class MyTurtle {
   originalException4: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle m = new MyTurtle(); // caller
+    MyTurtle m = new MyTurtle();
     try {
-      m.drawSquare(); // caller
+      m.drawSquare();
     } catch (Exception e) {
-      m.t.左を向く(); // step
-      m.t.左を向く(); // step
-      m.t.前に進む(); // step
+      m.t.左を向く();
+      m.t.左を向く();
+      m.t.前に進む();
     }
   }
 }
@@ -3776,21 +3776,21 @@ class OutOfBoardException extends Exception { }
 class ColoredException extends Exception { }
 
 class MyTurtle {
-  public Turtle t = new Turtle(5, 4); // step
+  public Turtle t = new Turtle(5, 4);
 
   public void drawSquare()
         throws OutOfBoardException, ColoredException {
-    for (int i = 0; i < 4; i++) { // step
-      for (int j = 0; j < 2; j++) { // step
+    for (int i = 0; i < 4; i++) {
+      for (int j = 0; j < 2; j++) {
         if (!this.t.前に進めるか()) {
           throw new OutOfBoardException();
         }
         if (this.t.前のマスが塗られているか()) {
           throw new ColoredException();
         }
-        this.t.前に進む(); // step
+        this.t.前に進む();
       }
-      this.t.右を向く(); // step
+      this.t.右を向く();
     }
   }
 }
@@ -3798,16 +3798,16 @@ class MyTurtle {
   originalException5: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle m = new MyTurtle(); // caller
-    for (int n = 0; n < 3; n++) { // step
+    MyTurtle m = new MyTurtle();
+    for (int n = 0; n < 3; n++) {
       try {
-        m.drawSquare(n + 1); // caller
+        m.drawSquare(n + 1);
       } catch (OutOfBoardException e) {
-        m.t.右を向く(); // step
-        m.t.右を向く(); // step
+        m.t.右を向く();
+        m.t.右を向く();
       } catch (ColoredException e) {
-        m.t.前に進む(); // step
-        m.t.前に進む(); // step
+        m.t.前に進む();
+        m.t.前に進む();
       }
     }
   }
@@ -3817,21 +3817,21 @@ class OutOfBoardException extends Exception { }
 class ColoredException extends Exception { }
 
 class MyTurtle {
-  public Turtle t = new Turtle(5, 5); // step
+  public Turtle t = new Turtle(5, 5);
 
   public void drawSquare(int size)
         throws OutOfBoardException, ColoredException {
-    for (int i = 0; i < 4; i++) { // step
-      for (int j = 0; j < size; j++) { // step
+    for (int i = 0; i < 4; i++) {
+      for (int j = 0; j < size; j++) {
         if (!this.t.前に進めるか()) {
           throw new OutOfBoardException();
         }
         if (this.t.前のマスが塗られているか()) {
           throw new ColoredException();
         }
-        this.t.前に進む(); // step
+        this.t.前に進む();
       }
-      this.t.右を向く(); // step
+      this.t.右を向く();
     }
   }
 }
@@ -3844,23 +3844,23 @@ public class Main {
   public static void main(String[] args) {
     int [][] arr = { { 0, 3 }, { 1, 1 }, { 0, 2 },
                      { 2, 3 }, { 0, 1 }, };
-    Turtle t = new Turtle(); // step
-    for (int i = 0; i < arr.length; i++) { // step
-      int c = arr[i][1]; // step
+    Turtle t = new Turtle();
+    for (int i = 0; i < arr.length; i++) {
+      int c = arr[i][1];
       switch (arr[i][0]) {
         case 0:
-          for (int j = 0; j < c; j++) { // step
-            t.前に進む(); // step
+          for (int j = 0; j < c; j++) {
+            t.前に進む();
           }
           break;
         case 1:
-          for (int j = 0; j < c; j++) { // step
-            t.右を向く(); // step
+          for (int j = 0; j < c; j++) {
+            t.右を向く();
           }
           break;
         case 2:
-          for (int j = 0; j < c; j++) { // step
-            t.左を向く(); // step
+          for (int j = 0; j < c; j++) {
+            t.左を向く();
           }
           break;
       }
@@ -3873,20 +3873,20 @@ public class Main {
   public static void main(String[] args) {
     int [][] arr = { { 0, 3 }, { 1 }, { 0, 2 },
                      { 2 }, { 0, 1 }, };
-    Turtle t = new Turtle(); // step
-    for (int i = 0; i < arr.length; i++) { // step
+    Turtle t = new Turtle();
+    for (int i = 0; i < arr.length; i++) {
       switch (arr[i][0]) {
         case 0:
-          int c = arr[i][1]; // step
-          for (int j = 0; j < c; j++) { // step
-            t.前に進む(); // step
+          int c = arr[i][1];
+          for (int j = 0; j < c; j++) {
+            t.前に進む();
           }
           break;
         case 1:
-          t.右を向く(); // step
+          t.右を向く();
           break;
         case 2:
-          t.左を向く(); // step
+          t.左を向く();
           break;
       }
     }
@@ -3908,25 +3908,25 @@ public class Main {
       { FORWARD, 1 }
     };
 
-    Turtle t = new Turtle(); // step
-    for (int i = 0; i < arr.length; i++) { // step
-      moveTurtle(t, arr[i]); // caller
+    Turtle t = new Turtle();
+    for (int i = 0; i < arr.length; i++) {
+      moveTurtle(t, arr[i]);
     }
   }
 
   private static void moveTurtle(Turtle t, int[] command) {
     switch (command[0]) {
       case FORWARD:
-        int steps = command[1]; // step
-        for (int j = 0; j < steps; j++) { // step
-          t.前に進む(); // step
+        int steps = command[1];
+        for (int j = 0; j < steps; j++) {
+          t.前に進む();
         }
         break;
       case TURN_RIGHT:
-        t.右を向く(); // step
+        t.右を向く();
         break;
       case TURN_LEFT:
-        t.左を向く(); // step
+        t.左を向く();
         break;
     }
   }
@@ -3950,23 +3950,23 @@ public class Main {
     };
 
     Turtle turtle = null;
-    for (int i = 0; i < arr.length; i++) { // step
-      int command = arr[i][0]; // step
+    for (int i = 0; i < arr.length; i++) {
+      int command = arr[i][0];
       switch (command) {
         case PUT_TURTLE:
-          turtle = new Turtle(arr[i][1], arr[i][2]); // step
+          turtle = new Turtle(arr[i][1], arr[i][2]);
           break;
         case FORWARD:
-          int steps = arr[i][1]; // step
-          for (int j = 0; j < steps; j++) { // step
-            turtle.前に進む(); // step
+          int steps = arr[i][1];
+          for (int j = 0; j < steps; j++) {
+            turtle.前に進む();
           }
           break;
         case TURN_RIGHT:
-          turtle.右を向く(); // step
+          turtle.右を向く();
           break;
         case TURN_LEFT:
-          turtle.左を向く(); // step
+          turtle.左を向く();
           break;
       }
     }
@@ -3992,25 +3992,25 @@ public class Main {
     };
 
     Turtle turtle = null;
-    for (int i = 0; i < arr.length; i++) { // step
-      int command = arr[i][0]; // step
+    for (int i = 0; i < arr.length; i++) {
+      int command = arr[i][0];
       switch (command) {
         case PUT_TURTLE:
           // turtle変数が上書きされた場合、ガベージコレクションによって、
           // 元々参照されていた亀が消えるものとする。
-          turtle = new Turtle(arr[i][1], arr[i][2]); // step
+          turtle = new Turtle(arr[i][1], arr[i][2]);
           break;
         case FORWARD:
-          int steps = arr[i][1]; // step
-          for (int j = 0; j < steps; j++) { // step
-            turtle.前に進む(); // step
+          int steps = arr[i][1];
+          for (int j = 0; j < steps; j++) {
+            turtle.前に進む();
           }
           break;
         case TURN_RIGHT:
-          turtle.右を向く(); // step
+          turtle.右を向く();
           break;
         case TURN_LEFT:
-          turtle.左を向く(); // step
+          turtle.左を向く();
           break;
       }
     }
@@ -4031,22 +4031,22 @@ public class Main {
     };
 
     Turtle[] turtles = new Turtle[commands.length];
-    for (int nthTurtle = 0; nthTurtle < commands.length; nthTurtle++) { // step
-      turtles[nthTurtle] = new Turtle(nthTurtle, 0); // step
+    for (int nthTurtle = 0; nthTurtle < commands.length; nthTurtle++) {
+      turtles[nthTurtle] = new Turtle(nthTurtle, 0);
     }
 
-    for (int nthTurtle = 0; nthTurtle < commands.length; nthTurtle++) { // step
-      for (int i = 0; i < commands[nthTurtle].length; i++) { // step
-        int command = commands[nthTurtle][i]; // step
+    for (int nthTurtle = 0; nthTurtle < commands.length; nthTurtle++) {
+      for (int i = 0; i < commands[nthTurtle].length; i++) {
+        int command = commands[nthTurtle][i];
         switch (command) {
           case FORWARD:
-            turtles[nthTurtle].前に進む(); // step
+            turtles[nthTurtle].前に進む();
             break;
           case TURN_RIGHT:
-            turtles[nthTurtle].右を向く(); // step
+            turtles[nthTurtle].右を向く();
             break;
           case TURN_LEFT:
-            turtles[nthTurtle].左を向く(); // step
+            turtles[nthTurtle].左を向く();
             break;
         }
       }
@@ -4057,27 +4057,27 @@ public class Main {
   threeDimensionalArray1: `
 public class Main {
   public static void main(String[] args) {
-    int[][][] a = { { {0, 0}, {1, 1}, {0, 3} }, // step
+    int[][][] a = { { {0, 0}, {1, 1}, {0, 3} },
                     { {5, 2}, {2, 1}, {0, 4} } };
     Turtle[] turtles = new Turtle[a.length];
-    for (int i = 0; i < a.length; i++) { // step
-      turtles[i] = new Turtle(a[i][0][0], a[i][0][1]); // step
-      for (int j = 1; j < a[i].length; j++) { // step
-        int c = a[i][j][1]; // step
+    for (int i = 0; i < a.length; i++) {
+      turtles[i] = new Turtle(a[i][0][0], a[i][0][1]);
+      for (int j = 1; j < a[i].length; j++) {
+        int c = a[i][j][1];
         switch (a[i][j][0]) {
           case 0:
-            for (int k = 0; k < c; k++) { // step
-              turtles[i].前に進む(); // step
+            for (int k = 0; k < c; k++) {
+              turtles[i].前に進む();
             }
             break;
           case 1:
-            for (int k = 0; k < c; k++) { // step
-              turtles[i].右を向く(); // step
+            for (int k = 0; k < c; k++) {
+              turtles[i].右を向く();
             }
             break;
           case 2:
-            for (int k = 0; k < c; k++) { // step
-              turtles[i].左を向く(); // step
+            for (int k = 0; k < c; k++) {
+              turtles[i].左を向く();
             }
             break;
         }
@@ -4099,25 +4099,25 @@ public class Main {
       { {4, 5}, {LEFT, 3}, {FORWARD, 2} },
     };
     Turtle[] turtles = new Turtle[arr.length];
-    for (int i = 0; i < arr.length; i++) { // step
-      turtles[i] = new Turtle(arr[i][0][0], arr[i][0][1]); // step
-      for (int j = 1; j < arr[i].length; j++) { // step
-        int command = arr[i][j][0]; // step
-        int times = arr[i][j][1]; // step
+    for (int i = 0; i < arr.length; i++) {
+      turtles[i] = new Turtle(arr[i][0][0], arr[i][0][1]);
+      for (int j = 1; j < arr[i].length; j++) {
+        int command = arr[i][j][0];
+        int times = arr[i][j][1];
         switch (command) {
           case FORWARD:
-            for (int k = 0; k < times; k++) { // step
-              turtles[i].前に進む(); // step
+            for (int k = 0; k < times; k++) {
+              turtles[i].前に進む();
             }
             break;
           case RIGHT:
-            for (int k = 0; k < times; k++) { // step
-              turtles[i].右を向く(); // step
+            for (int k = 0; k < times; k++) {
+              turtles[i].右を向く();
             }
             break;
           case LEFT:
-            for (int k = 0; k < times; k++) { // step
-              turtles[i].左を向く(); // step
+            for (int k = 0; k < times; k++) {
+              turtles[i].左を向く();
             }
             break;
         }
@@ -4138,19 +4138,19 @@ public class Main {
       { {2, 3}, {TURN_LEFT, FORWARD, FORWARD} }
     };
     Turtle[] turtles = new Turtle[arr.length];
-    for (int i = 0; i < arr.length; i++) { // step
-      turtles[i] = new Turtle(arr[i][0][0], arr[i][0][1]); // step
-      for (int j = 0; j < arr[i][1].length; j++) { // step
-        int command = arr[i][1][j]; // step
+    for (int i = 0; i < arr.length; i++) {
+      turtles[i] = new Turtle(arr[i][0][0], arr[i][0][1]);
+      for (int j = 0; j < arr[i][1].length; j++) {
+        int command = arr[i][1][j];
         switch (command) {
           case FORWARD:
-            turtles[i].前に進む(); // step
+            turtles[i].前に進む();
             break;
           case TURN_RIGHT:
-            turtles[i].右を向く(); // step
+            turtles[i].右を向く();
             break;
           case TURN_LEFT:
-            turtles[i].左を向く(); // step
+            turtles[i].左を向く();
             break;
         }
       }
@@ -4172,19 +4172,19 @@ public class Main {
       { {3, 3}, {TURN_RIGHT, FORWARD, FORWARD, TURN_RIGHT, FORWARD} }
     };
     Turtle[] turtles = new Turtle[arr.length];
-    for (int i = 0; i < arr.length; i++) { // step
-      turtles[i] = new Turtle(arr[i][0][0], arr[i][0][1]); // step
-      for (int j = 0; j < arr[i][1].length; j++) { // step
-        int command = arr[i][1][j]; // step
+    for (int i = 0; i < arr.length; i++) {
+      turtles[i] = new Turtle(arr[i][0][0], arr[i][0][1]);
+      for (int j = 0; j < arr[i][1].length; j++) {
+        int command = arr[i][1][j];
         switch (command) {
           case FORWARD:
-            turtles[i].前に進む(); // step
+            turtles[i].前に進む();
             break;
           case TURN_RIGHT:
-            turtles[i].右を向く(); // step
+            turtles[i].右を向く();
             break;
           case TURN_LEFT:
-            turtles[i].左を向く(); // step
+            turtles[i].左を向く();
             break;
         }
       }
@@ -4194,25 +4194,24 @@ public class Main {
     `,
   // ----------- 初級プログラミングⅡ 第8回 ここまで -----------
 
-  // stepがただの連番である場合、番号を省略できる。
   test1: `
 public class Main {
   public static void main(String[] args) {
-    Turtle c = new Turtle(); // step
-    c.forward(); // step
-    c.forward(); // step
-    c.forward(); // step
+    Turtle c = new Turtle();
+    c.forward();
+    c.forward();
+    c.forward();
   }
 }
 `,
   test2: `
 public class Main {
   public static void main(String[] args) {
-    Turtle c = new Turtle(); // step
-    for (int i = 0; i < 2; i++) { // step
-      c.forward(); // step
-      c.forward(); // step
-      c.turnRight(); // step
+    Turtle c = new Turtle();
+    for (int i = 0; i < 2; i++) {
+      c.forward();
+      c.forward();
+      c.turnRight();
     }
   }
 }
@@ -4220,16 +4219,16 @@ public class Main {
   test3: `
 public class Main {
   public static void main(String[] args) {
-    int a = 1; // step: 1
+    int a = 1;
     if (a > 0) {
-      int b = 2; // step: 2
-      a = f(a, b); // step: 3 // caller
+      int b = 2;
+      a = f(a, b);
     }
-    int c = a * 2; // step: 4
+    int c = a * 2;
   }
 
   public static int f(int x, int y) {
-    int a = x * y; // step: 5
+    int a = x * y;
     return a;
   }
 }
@@ -4237,47 +4236,47 @@ public class Main {
   test4: `
 public class Main {
   public static void main(String[] args) {
-    Turtle c1 = new Turtle(); // step
-    c1.forward(); // step
-    c1.turnRight(); // step
-    int i = 0; // step
-    c1.forward(); // step
+    Turtle c1 = new Turtle();
+    c1.forward();
+    c1.turnRight();
+    int i = 0;
+    c1.forward();
 
-    Turtle c2 = new Turtle(2, 3, "G"); // step
-    c2.forward(); // step
-    String foo = "あいうえお"; // step
-    int bar = <1-100>; // step
-    i = bar + 1; // step
-    c2.forward(); // step
-    c2.forward(); // step
+    Turtle c2 = new Turtle(2, 3, "G");
+    c2.forward();
+    String foo = "あいうえお";
+    int bar = <1-100>;
+    i = bar + 1;
+    c2.forward();
+    c2.forward();
   }
 }
 `,
   test5: `
 public class Straight {
   public static void main(String[] args) {
-    var c = new Turtle(); // step
-    c.前に進む(); // step
-    c.前に進む(); // step
-    c.右を向く(); // step
-    c.前に進む(); // step
-    c.前に進む(); // step
-    c.前に進む(); // step
-    c.前に進む(); // step
+    var c = new Turtle();
+    c.前に進む();
+    c.前に進む();
+    c.右を向く();
+    c.前に進む();
+    c.前に進む();
+    c.前に進む();
+    c.前に進む();
   }
 }
 `,
   test9: `
 public class Main {
   public static void main(String[] args) {
-    MyTurtle t1 = new MyTurtle(); // caller
-    Settings.speed = 2; // step
-    t1.moveForward(); // caller
+    MyTurtle t1 = new MyTurtle();
+    Settings.speed = 2;
+    t1.moveForward();
 
-    MyTurtle2 t2 = new MyTurtle2(2, 2); // caller
-    Settings.increaseSpeed(); // caller
-    t1.moveForward(); // caller
-    t2.moveForward(); // caller
+    MyTurtle2 t2 = new MyTurtle2(2, 2);
+    Settings.increaseSpeed();
+    t1.moveForward();
+    t2.moveForward();
   }
 }
 
@@ -4285,16 +4284,16 @@ class Settings {
   static public int speed;
 
   public static void increaseSpeed() {
-    speed++; // step
+    speed++;
   }
 }
 
 class MyTurtle {
-  private Turtle t = new Turtle(); // step
+  private Turtle t = new Turtle();
 
   void moveForward() {
-    for (int i = 0; i < Settings.speed; i++) { // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < Settings.speed; i++) {
+      this.t.前に進む();
     }
   }
 }
@@ -4303,11 +4302,11 @@ class MyTurtle2 {
   private Turtle t;
 
   MyTurtle2(int x, int y) {
-    this.t = new Turtle(x, y); // step
+    this.t = new Turtle(x, y);
   }
   void moveForward() {
-    for (int i = 0; i < Settings.speed; i++) { // step
-      this.t.前に進む(); // step
+    for (int i = 0; i < Settings.speed; i++) {
+      this.t.前に進む();
     }
   }
 }

@@ -6,7 +6,7 @@ export const lecture3: ChallengeBase[] = [
     title: '範囲外の設定を受け付けない',
     courseId: 'tuBeginner2',
     lectureIndex: 2,
-    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault(); // caller\n    v.setAmount(2); // caller\n    v.use(); // caller\n    v.setAmount(4); // caller\n    v.use(); // caller\n    v.setAmount(0); // caller\n    v.use(); // caller\n    v.use(); // caller\n  }\n}\nclass Vault {\n  private Turtle t;\n  private int amount;\n  Vault() {\n    this.t = new Turtle(2, 2); // step\n    this.amount = 1; // step\n  }\n\n  void setAmount(int value) {\n    if (value >= 0 && value <= 2) {\n      this.amount = value; // step\n    }\n  }\n  void use() {\n    if (this.amount == 2) {\n      this.t.前に進む(); // step\n    }\n    this.t.右を向く(); // step\n  }\n\n}',
+    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault();\n    v.setAmount(2);\n    v.use();\n    v.setAmount(4);\n    v.use();\n    v.setAmount(0);\n    v.use();\n    v.use();\n  }\n}\nclass Vault {\n  private Turtle t;\n  private int amount;\n  Vault() {\n    this.t = new Turtle(2, 2);\n    this.amount = 1;\n  }\n\n  void setAmount(int value) {\n    if (value >= 0 && value <= 2) {\n      this.amount = value;\n    }\n  }\n  void use() {\n    if (this.amount == 2) {\n      this.t.前に進む();\n    }\n    this.t.右を向く();\n  }\n\n}',
     blanks: [
       {
         id: 'Limit',
@@ -20,8 +20,8 @@ export const lecture3: ChallengeBase[] = [
       },
       {
         id: 'Accepted',
-        before: '    v.setAmount(2); // caller',
-        after: '    v.setAmount(@[2]@); // caller',
+        before: '    v.setAmount(2);',
+        after: '    v.setAmount(@[2]@);',
       },
     ],
     bugs: [
@@ -39,8 +39,8 @@ export const lecture3: ChallengeBase[] = [
       },
       {
         id: 'Accepted',
-        before: '    v.setAmount(2); // caller',
-        after: '    v.setAmount(0); // caller',
+        before: '    v.setAmount(2);',
+        after: '    v.setAmount(0);',
         kind: 'logical',
       },
     ],
@@ -50,7 +50,7 @@ export const lecture3: ChallengeBase[] = [
     title: 'まとめて使える残り回数',
     courseId: 'tuBeginner2',
     lectureIndex: 2,
-    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault(); // caller\n    v.spend(2); // caller\n    v.spend(2); // caller\n    v.spend(1); // caller\n    v.spend(1); // caller\n  }\n}\nclass Vault {\n  private Turtle t;\n  private int left;\n  Vault() {\n    this.t = new Turtle(2, 2); // step\n    this.left = 3; // step\n  }\n\n  void spend(int requested) {\n    if (requested <= this.left) {\n      this.left -= requested; // step\n      this.t.前に進む(); // step\n    }\n    this.t.右を向く(); // step\n  }\n\n}',
+    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault();\n    v.spend(2);\n    v.spend(2);\n    v.spend(1);\n    v.spend(1);\n  }\n}\nclass Vault {\n  private Turtle t;\n  private int left;\n  Vault() {\n    this.t = new Turtle(2, 2);\n    this.left = 3;\n  }\n\n  void spend(int requested) {\n    if (requested <= this.left) {\n      this.left -= requested;\n      this.t.前に進む();\n    }\n    this.t.右を向く();\n  }\n\n}',
     blanks: [
       {
         id: 'Check',
@@ -59,13 +59,13 @@ export const lecture3: ChallengeBase[] = [
       },
       {
         id: 'Consume',
-        before: '      this.left -= requested; // step',
-        after: '      this.left @[-=]@ requested; // step',
+        before: '      this.left -= requested;',
+        after: '      this.left @[-=]@ requested;',
       },
       {
         id: 'SecondRequest',
-        before: '    v.spend(2); // caller\n    v.spend(1); // caller',
-        after: '    v.spend(@[2]@); // caller\n    v.spend(1); // caller',
+        before: '    v.spend(2);\n    v.spend(1);',
+        after: '    v.spend(@[2]@);\n    v.spend(1);',
       },
     ],
     bugs: [
@@ -77,14 +77,14 @@ export const lecture3: ChallengeBase[] = [
       },
       {
         id: 'Consume',
-        before: '      this.left -= requested; // step',
-        after: '      this.left += requested; // step',
+        before: '      this.left -= requested;',
+        after: '      this.left += requested;',
         kind: 'logical',
       },
       {
         id: 'SecondRequest',
-        before: '    v.spend(2); // caller\n    v.spend(1); // caller',
-        after: '    v.spend(0); // caller\n    v.spend(1); // caller',
+        before: '    v.spend(2);\n    v.spend(1);',
+        after: '    v.spend(0);\n    v.spend(1);',
         kind: 'logical',
       },
     ],
@@ -94,12 +94,12 @@ export const lecture3: ChallengeBase[] = [
     title: '公開メソッドで方向モードを切り替える',
     courseId: 'tuBeginner2',
     lectureIndex: 2,
-    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault(); // caller\n    v.move(); // caller\n    v.toggle(); // caller\n    v.move(); // caller\n    v.move(); // caller\n    v.toggle(); // caller\n    v.move(); // caller\n  }\n}\nclass Vault {\n  private Turtle t;\n  private boolean right;\n  Vault() {\n    this.t = new Turtle(2, 2); // step\n    this.right = true; // step\n  }\n\n  void toggle() {\n    this.right = !this.right; // step\n  }\n  void move() {\n    if (this.right) {\n      this.t.右を向く(); // step\n    } else {\n      this.t.左を向く(); // step\n    }\n    this.t.前に進む(); // step\n  }\n\n}',
+    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault();\n    v.move();\n    v.toggle();\n    v.move();\n    v.move();\n    v.toggle();\n    v.move();\n  }\n}\nclass Vault {\n  private Turtle t;\n  private boolean right;\n  Vault() {\n    this.t = new Turtle(2, 2);\n    this.right = true;\n  }\n\n  void toggle() {\n    this.right = !this.right;\n  }\n  void move() {\n    if (this.right) {\n      this.t.右を向く();\n    } else {\n      this.t.左を向く();\n    }\n    this.t.前に進む();\n  }\n\n}',
     blanks: [
       {
         id: 'Toggle',
-        before: '    this.right = !this.right; // step',
-        after: '    this.right = @[!this.right]@; // step',
+        before: '    this.right = !this.right;',
+        after: '    this.right = @[!this.right]@;',
       },
       {
         id: 'Interpret',
@@ -108,15 +108,15 @@ export const lecture3: ChallengeBase[] = [
       },
       {
         id: 'Start',
-        before: '    this.right = true; // step',
-        after: '    this.right = @[true]@; // step',
+        before: '    this.right = true;',
+        after: '    this.right = @[true]@;',
       },
     ],
     bugs: [
       {
         id: 'Toggle',
-        before: '    this.right = !this.right; // step',
-        after: '    this.right = this.right; // step',
+        before: '    this.right = !this.right;',
+        after: '    this.right = this.right;',
         kind: 'logical',
       },
       {
@@ -127,8 +127,8 @@ export const lecture3: ChallengeBase[] = [
       },
       {
         id: 'Start',
-        before: '    this.right = true; // step',
-        after: '    this.right = false; // step',
+        before: '    this.right = true;',
+        after: '    this.right = false;',
         kind: 'logical',
       },
     ],
@@ -138,12 +138,12 @@ export const lecture3: ChallengeBase[] = [
     title: '位置を戻さずカウンタだけ戻す',
     courseId: 'tuBeginner2',
     lectureIndex: 2,
-    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault(); // caller\n    v.pulse(); // caller\n    v.pulse(); // caller\n    v.reset(); // caller\n    v.pulse(); // caller\n  }\n}\nclass Vault {\n  private Turtle t;\n  private int count;\n  Vault() {\n    this.t = new Turtle(2, 2); // step\n    this.count = 0; // step\n  }\n\n  void reset() {\n    this.count = 0; // step\n  }\n  void pulse() {\n    this.count++; // step\n    if (this.count == 1) {\n      this.t.右を向く(); // step\n    }\n    this.t.前に進む(); // step\n  }\n\n}',
+    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault();\n    v.pulse();\n    v.pulse();\n    v.reset();\n    v.pulse();\n  }\n}\nclass Vault {\n  private Turtle t;\n  private int count;\n  Vault() {\n    this.t = new Turtle(2, 2);\n    this.count = 0;\n  }\n\n  void reset() {\n    this.count = 0;\n  }\n  void pulse() {\n    this.count++;\n    if (this.count == 1) {\n      this.t.右を向く();\n    }\n    this.t.前に進む();\n  }\n\n}',
     blanks: [
       {
         id: 'Reset',
-        before: '  void reset() {\n    this.count = 0; // step',
-        after: '  void reset() {\n    this.count = @[0]@; // step',
+        before: '  void reset() {\n    this.count = 0;',
+        after: '  void reset() {\n    this.count = @[0]@;',
       },
       {
         id: 'Threshold',
@@ -152,15 +152,15 @@ export const lecture3: ChallengeBase[] = [
       },
       {
         id: 'Advance',
-        before: '    this.count++; // step',
-        after: '    this.count@[++]@; // step',
+        before: '    this.count++;',
+        after: '    this.count@[++]@;',
       },
     ],
     bugs: [
       {
         id: 'Reset',
-        before: '  void reset() {\n    this.count = 0; // step',
-        after: '  void reset() {\n    this.count = 2; // step',
+        before: '  void reset() {\n    this.count = 0;',
+        after: '  void reset() {\n    this.count = 2;',
         kind: 'logical',
       },
       {
@@ -171,8 +171,8 @@ export const lecture3: ChallengeBase[] = [
       },
       {
         id: 'Advance',
-        before: '    this.count++; // step',
-        after: '    this.count--; // step',
+        before: '    this.count++;',
+        after: '    this.count--;',
         kind: 'logical',
       },
     ],
@@ -182,12 +182,12 @@ export const lecture3: ChallengeBase[] = [
     title: '取得した数と現在の数',
     courseId: 'tuBeginner2',
     lectureIndex: 2,
-    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault(); // caller\n    int saved = v.getCount(); // step // caller\n    v.increase(); // caller\n    v.choose(saved); // caller\n    int current = v.getCount(); // step // caller\n    v.choose(current); // caller\n    v.increase(); // caller\n    v.choose(saved); // caller\n  }\n}\nclass Vault {\n  private Turtle t;\n  private int count;\n  Vault() {\n    this.t = new Turtle(2, 2); // step\n    this.count = 1; // step\n  }\n\n  int getCount() {\n    return this.count;\n  }\n  void increase() {\n    this.count++; // step\n    this.t.前に進む(); // step\n  }\n  void choose(int saved) {\n    if (saved < this.count) {\n      this.t.右を向く(); // step\n    } else {\n      this.t.左を向く(); // step\n    }\n    this.t.前に進む(); // step\n  }\n\n}',
+    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault();\n    int saved = v.getCount();\n    v.increase();\n    v.choose(saved);\n    int current = v.getCount();\n    v.choose(current);\n    v.increase();\n    v.choose(saved);\n  }\n}\nclass Vault {\n  private Turtle t;\n  private int count;\n  Vault() {\n    this.t = new Turtle(2, 2);\n    this.count = 1;\n  }\n\n  int getCount() {\n    return this.count;\n  }\n  void increase() {\n    this.count++;\n    this.t.前に進む();\n  }\n  void choose(int saved) {\n    if (saved < this.count) {\n      this.t.右を向く();\n    } else {\n      this.t.左を向く();\n    }\n    this.t.前に進む();\n  }\n\n}',
     blanks: [
       {
         id: 'Snapshot',
-        before: '    v.choose(saved); // caller\n    int current = v.getCount(); // step // caller',
-        after: '    v.choose(@[saved]@); // caller\n    int current = v.getCount(); // step // caller',
+        before: '    v.choose(saved);\n    int current = v.getCount();',
+        after: '    v.choose(@[saved]@);\n    int current = v.getCount();',
       },
       {
         id: 'Comparison',
@@ -196,15 +196,15 @@ export const lecture3: ChallengeBase[] = [
       },
       {
         id: 'Increment',
-        before: '    this.count++; // step',
-        after: '    this.count@[++]@; // step',
+        before: '    this.count++;',
+        after: '    this.count@[++]@;',
       },
     ],
     bugs: [
       {
         id: 'Snapshot',
-        before: '    v.choose(saved); // caller\n    int current = v.getCount(); // step // caller',
-        after: '    v.choose(saved + 1); // caller\n    int current = v.getCount(); // step // caller',
+        before: '    v.choose(saved);\n    int current = v.getCount();',
+        after: '    v.choose(saved + 1);\n    int current = v.getCount();',
         kind: 'logical',
       },
       {
@@ -215,8 +215,8 @@ export const lecture3: ChallengeBase[] = [
       },
       {
         id: 'Increment',
-        before: '    this.count++; // step',
-        after: '    this.count--; // step',
+        before: '    this.count++;',
+        after: '    this.count--;',
         kind: 'logical',
       },
     ],
@@ -226,17 +226,17 @@ export const lecture3: ChallengeBase[] = [
     title: '取り出した値を別の操作へ渡す',
     courseId: 'tuBeginner2',
     lectureIndex: 2,
-    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault(); // caller\n    int taken = v.withdraw(); // step // caller\n    v.mark(); // caller\n    v.deposit(taken); // caller\n    v.mark(); // caller\n    v.mark(); // caller\n  }\n}\nclass Vault {\n  private Turtle t;\n  private int credit;\n  Vault() {\n    this.t = new Turtle(2, 2); // step\n    this.credit = 2; // step\n  }\n\n  int withdraw() {\n    int old = this.credit; // step\n    this.credit = 0; // step\n    return old;\n  }\n  void deposit(int value) {\n    this.credit += value; // step\n  }\n  void mark() {\n    if (this.credit > 1) {\n      this.t.前に進む(); // step\n    }\n    this.t.右を向く(); // step\n  }\n\n}',
+    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault();\n    int taken = v.withdraw();\n    v.mark();\n    v.deposit(taken);\n    v.mark();\n    v.mark();\n  }\n}\nclass Vault {\n  private Turtle t;\n  private int credit;\n  Vault() {\n    this.t = new Turtle(2, 2);\n    this.credit = 2;\n  }\n\n  int withdraw() {\n    int old = this.credit;\n    this.credit = 0;\n    return old;\n  }\n  void deposit(int value) {\n    this.credit += value;\n  }\n  void mark() {\n    if (this.credit > 1) {\n      this.t.前に進む();\n    }\n    this.t.右を向く();\n  }\n\n}',
     blanks: [
       {
         id: 'Empty',
-        before: '    this.credit = 0; // step',
-        after: '    this.credit = @[0]@; // step',
+        before: '    this.credit = 0;',
+        after: '    this.credit = @[0]@;',
       },
       {
         id: 'Deposit',
-        before: '    this.credit += value; // step',
-        after: '    this.credit @[+=]@ value; // step',
+        before: '    this.credit += value;',
+        after: '    this.credit @[+=]@ value;',
       },
       {
         id: 'Threshold',
@@ -247,14 +247,14 @@ export const lecture3: ChallengeBase[] = [
     bugs: [
       {
         id: 'Empty',
-        before: '    this.credit = 0; // step',
-        after: '    this.credit = 2; // step',
+        before: '    this.credit = 0;',
+        after: '    this.credit = 2;',
         kind: 'logical',
       },
       {
         id: 'Deposit',
-        before: '    this.credit += value; // step',
-        after: '    this.credit -= value; // step',
+        before: '    this.credit += value;',
+        after: '    this.credit -= value;',
         kind: 'logical',
       },
       {
@@ -270,12 +270,12 @@ export const lecture3: ChallengeBase[] = [
     title: '二つの状態を一緒に更新',
     courseId: 'tuBeginner2',
     lectureIndex: 2,
-    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault(); // caller\n    v.resize(2, 1); // caller\n    v.mark(); // caller\n    v.resize(1, 2); // caller\n    v.mark(); // caller\n    v.mark(); // caller\n  }\n}\nclass Vault {\n  private Turtle t;\n  private int width;\n  private int height;\n  Vault() {\n    this.t = new Turtle(2, 2); // step\n    this.width = 1; // step\n    this.height = 1; // step\n  }\n\n  void resize(int x, int y) {\n    this.width = x; // step\n    this.height = y; // step\n  }\n  void mark() {\n    if (this.width > this.height) {\n      this.t.右を向く(); // step\n    }\n    this.t.前に進む(); // step\n  }\n\n}',
+    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault();\n    v.resize(2, 1);\n    v.mark();\n    v.resize(1, 2);\n    v.mark();\n    v.mark();\n  }\n}\nclass Vault {\n  private Turtle t;\n  private int width;\n  private int height;\n  Vault() {\n    this.t = new Turtle(2, 2);\n    this.width = 1;\n    this.height = 1;\n  }\n\n  void resize(int x, int y) {\n    this.width = x;\n    this.height = y;\n  }\n  void mark() {\n    if (this.width > this.height) {\n      this.t.右を向く();\n    }\n    this.t.前に進む();\n  }\n\n}',
     blanks: [
       {
         id: 'SecondField',
-        before: '    this.height = y; // step',
-        after: '    this.height = @[y]@; // step',
+        before: '    this.height = y;',
+        after: '    this.height = @[y]@;',
       },
       {
         id: 'Compare',
@@ -284,15 +284,15 @@ export const lecture3: ChallengeBase[] = [
       },
       {
         id: 'FirstResize',
-        before: '    v.resize(2, 1); // caller',
-        after: '    v.resize(@[2, 1]@); // caller',
+        before: '    v.resize(2, 1);',
+        after: '    v.resize(@[2, 1]@);',
       },
     ],
     bugs: [
       {
         id: 'SecondField',
-        before: '    this.height = y; // step',
-        after: '    this.height = x; // step',
+        before: '    this.height = y;',
+        after: '    this.height = x;',
         kind: 'logical',
       },
       {
@@ -303,8 +303,8 @@ export const lecture3: ChallengeBase[] = [
       },
       {
         id: 'FirstResize',
-        before: '    v.resize(2, 1); // caller',
-        after: '    v.resize(1, 2); // caller',
+        before: '    v.resize(2, 1);',
+        after: '    v.resize(1, 2);',
         kind: 'logical',
       },
     ],
@@ -314,7 +314,7 @@ export const lecture3: ChallengeBase[] = [
     title: '二回の要求で一度だけ進む',
     courseId: 'tuBeginner2',
     lectureIndex: 2,
-    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault(); // caller\n    v.request(); // caller\n    v.request(); // caller\n    v.request(); // caller\n    v.request(); // caller\n  }\n}\nclass Vault {\n  private Turtle t;\n  private int pending;\n  Vault() {\n    this.t = new Turtle(2, 2); // step\n    this.pending = 0; // step\n  }\n\n  void request() {\n    this.pending++; // step\n    if (this.pending == 2) {\n      this.t.前に進む(); // step\n      this.t.右を向く(); // step\n      this.pending = 0; // step\n    }\n  }\n\n}',
+    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault();\n    v.request();\n    v.request();\n    v.request();\n    v.request();\n  }\n}\nclass Vault {\n  private Turtle t;\n  private int pending;\n  Vault() {\n    this.t = new Turtle(2, 2);\n    this.pending = 0;\n  }\n\n  void request() {\n    this.pending++;\n    if (this.pending == 2) {\n      this.t.前に進む();\n      this.t.右を向く();\n      this.pending = 0;\n    }\n  }\n\n}',
     blanks: [
       {
         id: 'Threshold',
@@ -323,13 +323,13 @@ export const lecture3: ChallengeBase[] = [
       },
       {
         id: 'Reset',
-        before: '      this.t.右を向く(); // step\n      this.pending = 0; // step',
-        after: '      this.t.右を向く(); // step\n      this.pending = @[0]@; // step',
+        before: '      this.t.右を向く();\n      this.pending = 0;',
+        after: '      this.t.右を向く();\n      this.pending = @[0]@;',
       },
       {
         id: 'Accumulate',
-        before: '    this.pending++; // step',
-        after: '    this.pending@[++]@; // step',
+        before: '    this.pending++;',
+        after: '    this.pending@[++]@;',
       },
     ],
     bugs: [
@@ -341,14 +341,14 @@ export const lecture3: ChallengeBase[] = [
       },
       {
         id: 'Reset',
-        before: '      this.t.右を向く(); // step\n      this.pending = 0; // step',
-        after: '      this.t.右を向く(); // step\n      this.pending = 1; // step',
+        before: '      this.t.右を向く();\n      this.pending = 0;',
+        after: '      this.t.右を向く();\n      this.pending = 1;',
         kind: 'logical',
       },
       {
         id: 'Accumulate',
-        before: '    this.pending++; // step',
-        after: '    this.pending--; // step',
+        before: '    this.pending++;',
+        after: '    this.pending--;',
         kind: 'logical',
       },
     ],
@@ -358,7 +358,7 @@ export const lecture3: ChallengeBase[] = [
     title: '上限と下限のある増減',
     courseId: 'tuBeginner2',
     lectureIndex: 2,
-    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault(); // caller\n    v.raise(); // caller\n    v.raise(); // caller\n    v.mark(); // caller\n    v.lower(); // caller\n    v.mark(); // caller\n    v.raise(); // caller\n    v.mark(); // caller\n  }\n}\nclass Vault {\n  private Turtle t;\n  private int level;\n  Vault() {\n    this.t = new Turtle(2, 2); // step\n    this.level = 1; // step\n  }\n\n  void raise() {\n    if (this.level < 2) {\n      this.level++; // step\n    }\n  }\n  void lower() {\n    if (this.level > 0) {\n      this.level--; // step\n    }\n  }\n  void mark() {\n    if (this.level == 2) {\n      this.t.右を向く(); // step\n    }\n    this.t.前に進む(); // step\n  }\n\n}',
+    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault();\n    v.raise();\n    v.raise();\n    v.mark();\n    v.lower();\n    v.mark();\n    v.raise();\n    v.mark();\n  }\n}\nclass Vault {\n  private Turtle t;\n  private int level;\n  Vault() {\n    this.t = new Turtle(2, 2);\n    this.level = 1;\n  }\n\n  void raise() {\n    if (this.level < 2) {\n      this.level++;\n    }\n  }\n  void lower() {\n    if (this.level > 0) {\n      this.level--;\n    }\n  }\n  void mark() {\n    if (this.level == 2) {\n      this.t.右を向く();\n    }\n    this.t.前に進む();\n  }\n\n}',
     blanks: [
       {
         id: 'Upper',
@@ -367,8 +367,8 @@ export const lecture3: ChallengeBase[] = [
       },
       {
         id: 'Lower',
-        before: '      this.level--; // step',
-        after: '      this.level@[--]@; // step',
+        before: '      this.level--;',
+        after: '      this.level@[--]@;',
       },
       {
         id: 'Observe',
@@ -385,8 +385,8 @@ export const lecture3: ChallengeBase[] = [
       },
       {
         id: 'Lower',
-        before: '      this.level--; // step',
-        after: '      this.level++; // step',
+        before: '      this.level--;',
+        after: '      this.level++;',
         kind: 'logical',
       },
       {
@@ -402,7 +402,7 @@ export const lecture3: ChallengeBase[] = [
     title: '古い値を返してから更新する',
     courseId: 'tuBeginner2',
     lectureIndex: 2,
-    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault(); // caller\n    int first = v.take(); // step // caller\n    v.mark(first); // caller\n    int second = v.take(); // step // caller\n    v.mark(second); // caller\n    v.mark(second + 1); // caller\n  }\n}\nclass Vault {\n  private Turtle t;\n  private int next;\n  Vault() {\n    this.t = new Turtle(2, 2); // step\n    this.next = 1; // step\n  }\n\n  int take() {\n    int old = this.next; // step\n    this.next++; // step\n    return old;\n  }\n  void mark(int value) {\n    if (value == this.next) {\n      this.t.左を向く(); // step\n    } else {\n      this.t.右を向く(); // step\n    }\n    this.t.前に進む(); // step\n  }\n\n}',
+    java: 'public class Main {\n  public static void main(String[] args) {\n    Vault v = new Vault();\n    int first = v.take();\n    v.mark(first);\n    int second = v.take();\n    v.mark(second);\n    v.mark(second + 1);\n  }\n}\nclass Vault {\n  private Turtle t;\n  private int next;\n  Vault() {\n    this.t = new Turtle(2, 2);\n    this.next = 1;\n  }\n\n  int take() {\n    int old = this.next;\n    this.next++;\n    return old;\n  }\n  void mark(int value) {\n    if (value == this.next) {\n      this.t.左を向く();\n    } else {\n      this.t.右を向く();\n    }\n    this.t.前に進む();\n  }\n\n}',
     blanks: [
       {
         id: 'Return',
@@ -411,8 +411,8 @@ export const lecture3: ChallengeBase[] = [
       },
       {
         id: 'Update',
-        before: '    this.next++; // step',
-        after: '    this.next@[++]@; // step',
+        before: '    this.next++;',
+        after: '    this.next@[++]@;',
       },
       {
         id: 'Compare',
@@ -429,8 +429,8 @@ export const lecture3: ChallengeBase[] = [
       },
       {
         id: 'Update',
-        before: '    this.next++; // step',
-        after: '    this.next--; // step',
+        before: '    this.next++;',
+        after: '    this.next--;',
         kind: 'logical',
       },
       {

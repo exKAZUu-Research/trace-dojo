@@ -1,81 +1,65 @@
+// code-gauge-allow-file fileNcss 457 -- One checker for the definite assignment rules of JLS chapter 16, which share its scopes and states.
 import { CompileError } from '../interpreter/diagnostics';
-// code-gauge-allow-file fileNcss 402 -- One checker implements the JLS 16 rules, which share its scopes and jump targets.
+import {
+  assign,
+  type Conditional,
+  join,
+  type State,
+  takesLabelItself,
+  throughFinally,
+  UNREACHABLE,
+} from './assignmentStates';
 import type {
   ArrayInitializer,
   Block,
   BreakStatement,
   ContinueStatement,
   DoStatement,
-  ExplicitConstructorCall,
   Expression,
   ForEachStatement,
   ForStatement,
   LabeledStatement,
   LocalVariableDeclaration,
   Parameter,
+  PatternBinding,
   Span,
   Statement,
+  SwitchExpression,
+  SwitchGroup,
   SwitchStatement,
   TryStatement,
   WhileStatement,
 } from './ast';
-import { booleanConstants } from './reachability';
+import { bindingsAfter, bindingsOfPattern } from './patternBindings';
+import { booleanConstants, exhaustiveSwitches } from './reachability';
+
+/**
+ * What definite assignment analysis leaves for the compiler to check against the locals that lambdas and local
+ * classes read, which it records as it compiles them. Locals are identified by {@link declarationKey}.
+ */
+export interface AssignmentFacts {
+  /** The locals that are not effectively final (JLS 4.12.4), which no lambda or local class may read. */
+  notEffectivelyFinal: ReadonlySet<string>;
+  /**
+   * The lambdas and local or anonymous classes, with the locals not definitely assigned where they appear, which
+   * their bodies may not read (JLS 16.1.10, 8.1.3).
+   */
+  unassignedAtCreations: readonly { span: Span; keys: ReadonlySet<string> }[];
+}
 
 /**
  * Applies Java's definite assignment rules to the locals of one method body: a local is read only after every
  * path assigns it, and a final local is assigned only while no path has assigned it.
  */
-export function checkDefiniteAssignment(parameters: readonly Parameter[], body: Block): void {
+export function checkDefiniteAssignment(parameters: readonly Parameter[], body: Block): AssignmentFacts {
   const checker = new DefiniteAssignmentChecker();
   checker.statement(body, checker.declareParameters(checker.initialState(), parameters));
+  return checker;
 }
 
-export interface InitializationPath {
-  /** The blank final fields this path must assign exactly once. */
-  blankFinals: readonly string[];
-  /** The initializer blocks and field initializers that run before the constructor, in textual order. */
-  initializers: readonly (Block | Expression | ArrayInitializer)[];
-  constructorDeclaration?: {
-    parameters: readonly Parameter[];
-    explicitCall: ExplicitConstructorCall | undefined;
-    body: Block;
-  };
-  /** Where an unassigned blank final is reported. */
-  span: Span;
-}
-
-/**
- * Applies the definite assignment rules to the code that initializes a class or an object: its field initializers
- * and initializer blocks and, for objects, one constructor, which together must assign every blank final field
- * exactly once.
- */
-export function checkInitialization(path: InitializationPath): void {
-  const checker = new DefiniteAssignmentChecker();
-  let state = checker.initialState();
-  for (const name of path.blankFinals) state = checker.declareField(state, name);
-  const constructor = path.constructorDeclaration;
-  // A constructor that calls this(...) starts after another constructor has initialized the object.
-  if (constructor?.explicitCall?.target === 'this') {
-    for (const name of path.blankFinals) state = checker.assignField(state, name);
-  } else {
-    for (const initializer of path.initializers) {
-      state =
-        initializer.kind === 'block' ? checker.statement(initializer, state) : checker.initializer(initializer, state);
-    }
-  }
-  if (constructor) {
-    const withParameters = checker.declareParameters(state, constructor.parameters);
-    const afterCall = checker.expressions(constructor.explicitCall?.args ?? [], withParameters);
-    state = checker.statement(constructor.body, afterCall);
-  }
-  for (const exit of [state, ...checker.returns]) {
-    const unassigned = path.blankFinals.find((name) => exit.assigned && !checker.isFieldAssigned(exit, name));
-    if (unassigned !== undefined) {
-      throw new CompileError([
-        { row: path.span.row, message: `final のフィールド ${unassigned} に値が代入されていない可能性があります。` },
-      ]);
-    }
-  }
+/** Identifies a local by its name and where it is declared, as the compiler and this analysis both see it. */
+export function declarationKey(name: string, declaration: Span): string {
+  return `${name}@${declaration.row}:${declaration.start}`;
 }
 
 interface Variable {
@@ -84,24 +68,18 @@ interface Variable {
   isFinal: boolean;
   /** Whether the variable gets its value where it is declared, which makes a final one never assignable. */
   isInitialized: boolean;
+  /** Where a local is declared, which identifies it to the compiler, or `undefined` for a field. */
+  declaration?: Span;
 }
 
-/** The locals definitely assigned (`undefined` when the point is unreachable) and those possibly assigned. */
-interface State {
-  assigned: ReadonlySet<number> | undefined;
-  possiblyAssigned: ReadonlySet<number>;
-}
-
-interface Conditional {
-  whenTrue: State;
-  whenFalse: State;
-}
-
-/** A loop being analyzed, with the assignments in it to finals declared before it. */
+/**
+ * A loop being analyzed, with the assignments in it to blank locals declared before it, which a later iteration
+ * must not find already assigned, for a final one, or which make one not effectively final.
+ */
 interface EnclosingLoop {
   /** Variables with smaller ids were declared before the loop. */
   firstId: number;
-  finalWrites: { variable: Variable; span: Span }[];
+  blankWrites: { variable: Variable; span: Span }[];
 }
 
 interface JumpTarget {
@@ -114,21 +92,29 @@ interface JumpTarget {
   continues: State[];
 }
 
-const UNREACHABLE: State = { assigned: undefined, possiblyAssigned: new Set() };
-
-class DefiniteAssignmentChecker {
+export class DefiniteAssignmentChecker {
   private readonly scopes: Map<string, Variable>[] = [new Map()];
   /** Blank final fields, which `this.name` names even where a local hides the simple name. */
   private readonly fields = new Map<string, Variable>();
   /** The states at `return` statements, where a constructor ends too. */
   readonly returns: State[] = [];
   private readonly targets: JumpTarget[] = [];
+  /** The states at the yields of the switch expressions being analyzed, innermost last. */
+  private readonly yields: State[][] = [];
   private readonly loops: EnclosingLoop[] = [];
   /** The sets collecting assignments for the statements being analyzed, innermost last. */
   private readonly writeLogs: Set<number>[] = [];
   /** The labels written directly before loops and switch statements. */
   private readonly labelsByStatement = new Map<Span, string>();
   private nextId = 0;
+  /**
+   * The keys of the locals that are not effectively final: assigned after being initialized, assigned where they may
+   * already be assigned, or incremented, as if they were final (JLS 4.12.4).
+   */
+  readonly notEffectivelyFinal = new Set<string>();
+  readonly unassignedAtCreations: { span: Span; keys: ReadonlySet<string> }[] = [];
+  /** The pattern variables each statement being analyzed declared, innermost last. */
+  private readonly patternDeclarations: Variable[][] = [];
 
   initialState(): State {
     return { assigned: new Set(), possiblyAssigned: new Set() };
@@ -137,7 +123,9 @@ class DefiniteAssignmentChecker {
   declareParameters(state: State, parameters: readonly Parameter[]): State {
     this.scopes.push(new Map());
     let current = state;
-    for (const parameter of parameters) current = this.declare(current, parameter.name, parameter.isFinal, true);
+    for (const parameter of parameters) {
+      current = this.declare(current, parameter.name, parameter.isFinal, true, true, parameter);
+    }
     return current;
   }
 
@@ -159,14 +147,51 @@ class DefiniteAssignmentChecker {
    * @param isInitialized Whether the variable gets its value where it is declared, as parameters do; a for-each
    *   variable is assigned on entry to each iteration but stays subject to the flow rules, as javac treats it.
    */
-  declare(state: State, name: string, isFinal: boolean, isAssigned: boolean, isInitialized = isAssigned): State {
-    const variable: Variable = { id: this.nextId++, name, isFinal, isInitialized };
+  declare(
+    state: State,
+    name: string,
+    isFinal: boolean,
+    isAssigned: boolean,
+    isInitialized = isAssigned,
+    declaration?: Span
+  ): State {
+    const variable: Variable = { id: this.nextId++, name, isFinal, isInitialized, declaration };
     (this.scopes.at(-1) as Map<string, Variable>).set(name, variable);
     return isAssigned ? assign(state, variable.id) : state;
   }
 
-  // code-gauge-allow functionNcss 36 -- One case per statement kind, each delegating to its own rule.
+  /**
+   * Analyzes a statement, after which the pattern variables its expressions declared go out of scope, except those
+   * that the compiler keeps in scope after it, as `if (!(o instanceof String s)) return;` keeps `s` for the statements
+   * after it until its block ends.
+   */
   statement(statement: Statement, state: State): State {
+    const declared: Variable[] = [];
+    this.patternDeclarations.push(declared);
+    try {
+      return this.statementOfKind(statement, state);
+    } finally {
+      this.patternDeclarations.pop();
+      // A labeled statement declares nothing itself, so what it holds is what its body keeps.
+      const kept = new Set<Span>(bindingsAfter(statement));
+      for (const variable of declared) {
+        if (statement.kind === 'labeled' || (variable.declaration && kept.has(variable.declaration))) {
+          this.patternDeclarations.at(-1)?.push(variable);
+          (this.scopes.at(-1) as Map<string, Variable>).set(variable.name, variable);
+        } else {
+          this.forget(variable);
+        }
+      }
+    }
+  }
+
+  /** Removes a variable's name from the scope that maps it, so that the name means what it meant before. */
+  private forget(variable: Variable): void {
+    for (const scope of this.scopes) if (scope.get(variable.name) === variable) scope.delete(variable.name);
+  }
+
+  // code-gauge-allow functionNcss 48 -- One case per statement kind, each delegating to its own rule.
+  private statementOfKind(statement: Statement, state: State): State {
     switch (statement.kind) {
       case 'block': {
         return this.scoped(() => this.statements(statement.statements, state));
@@ -207,10 +232,29 @@ class DefiniteAssignmentChecker {
         return UNREACHABLE;
       }
       case 'try': {
-        return this.tryStatement(statement, state);
+        return statement.resources.length === 0
+          ? this.tryStatement(statement, state)
+          : this.tryWithResources(statement, state);
       }
       case 'labeled': {
         return this.labeledStatement(statement, state);
+      }
+      case 'yield': {
+        this.yields.at(-1)?.push(this.expression(statement.value, state));
+        return UNREACHABLE;
+      }
+      case 'synchronized': {
+        return this.statement(statement.body, this.expression(statement.lock, state));
+      }
+      // An assertion may not run, so what it assigns stays unassigned after it.
+      case 'assert': {
+        const { whenFalse } = this.condition(statement.condition, state);
+        if (statement.message) this.expression(statement.message, whenFalse);
+        return state;
+      }
+      // A local class's methods run later, and their own analysis covers them.
+      case 'localClass': {
+        return this.recordCreation(statement.declaration, state);
       }
       case 'empty': {
         return state;
@@ -218,11 +262,55 @@ class DefiniteAssignmentChecker {
     }
   }
 
+  /** A switch expression's value comes from its yields, which its groups reach as a switch statement's would. */
+  private switchExpression(expression: SwitchExpression, state: State): State {
+    const afterSelector = this.expression(expression.selector, state);
+    const yields: State[] = [];
+    this.yields.push(yields);
+    try {
+      this.scoped(() => {
+        let fallthrough = UNREACHABLE;
+        for (const group of expression.groups) {
+          const entry = expression.isArrowForm ? afterSelector : join(afterSelector, fallthrough);
+          fallthrough = this.statements(group.statements, this.declareLabelBindings(group, entry));
+        }
+      });
+    } finally {
+      this.yields.pop();
+    }
+    return join(...yields);
+  }
+
+  /** Declares the pattern variables of a switch group's labels, which hold their values where the group runs. */
+  private declareLabelBindings(group: SwitchGroup, state: State): State {
+    let current = state;
+    for (const label of group.labels) {
+      if (label === undefined || label.kind !== 'patternLabel') continue;
+      current = this.declarePatternBindings(current, bindingsOfPattern(label.pattern));
+      // A guard runs before the body, so what it writes counts for the body's captures.
+      if (label.guard) current = this.expression(label.guard, current);
+    }
+    return current;
+  }
+
+  /**
+   * Declares pattern variables, assigned where they are in scope, so that the effective finality of those that
+   * lambdas and classes capture follows the same flow analysis as other locals'.
+   */
+  private declarePatternBindings(state: State, bindings: readonly PatternBinding[]): State {
+    let current = state;
+    for (const binding of bindings) {
+      current = this.declare(current, binding.name, binding.isFinal, true, true, binding);
+      this.patternDeclarations.at(-1)?.push(this.lookup(binding.name) as Variable);
+    }
+    return current;
+  }
+
   private localDeclaration(statement: LocalVariableDeclaration, state: State): State {
     let current = state;
     for (const declarator of statement.declarators) {
       // The variable's scope includes its own initializer, which therefore cannot read it.
-      current = this.declare(current, declarator.name, statement.isFinal, false);
+      current = this.declare(current, declarator.name, statement.isFinal, false, false, declarator);
       if (!declarator.initializer) continue;
       const variable = this.lookup(declarator.name) as Variable;
       variable.isInitialized = true;
@@ -251,7 +339,7 @@ class DefiniteAssignmentChecker {
         const afterIterable = this.expression(statement.iterable, state);
         return this.scoped(() =>
           this.loop(statement, afterIterable, (target, entry) => {
-            const bound = this.declare(entry, statement.name, statement.isFinal, true, false);
+            const bound = this.declare(entry, statement.name, statement.isFinal, true, false, statement);
             const afterBody = this.statement(statement.body, bound);
             return { exit: entry, back: [afterBody, ...target.continues] };
           })
@@ -312,13 +400,15 @@ class DefiniteAssignmentChecker {
     analyze: (target: JumpTarget, entry: State) => { exit: State; back: State[] }
   ): State {
     const target = this.pushTarget(this.takeLabel(statement), true, true);
-    const enclosing: EnclosingLoop = { firstId: this.nextId, finalWrites: [] };
+    const enclosing: EnclosingLoop = { firstId: this.nextId, blankWrites: [] };
     this.loops.push(enclosing);
     try {
       const { exit, back } = analyze(target, state);
       const assignedOnBackEdges = new Set(back.flatMap((edge) => [...edge.possiblyAssigned]));
-      for (const { variable, span } of enclosing.finalWrites) {
-        if (assignedOnBackEdges.has(variable.id)) this.finalAssignmentError(span, variable);
+      for (const { variable, span } of enclosing.blankWrites) {
+        if (!assignedOnBackEdges.has(variable.id)) continue;
+        if (variable.isFinal) this.finalAssignmentError(span, variable);
+        this.markNotEffectivelyFinal(variable);
       }
       // The exit leaves from the head, which later iterations reach too.
       const exitFromHead = {
@@ -341,11 +431,12 @@ class DefiniteAssignmentChecker {
         const ends: State[] = [];
         for (const group of statement.groups) {
           const entry = statement.isArrowForm ? afterSelector : join(afterSelector, fallthrough);
-          const end = this.statements(group.statements, entry);
+          const end = this.statements(group.statements, this.declareLabelBindings(group, entry));
           if (statement.isArrowForm) ends.push(end);
           else fallthrough = end;
         }
-        const hasDefault = statement.groups.some((group) => group.labels.includes(undefined));
+        const hasDefault =
+          statement.groups.some((group) => group.labels.includes(undefined)) || exhaustiveSwitches.has(statement);
         return join(fallthrough, ...ends, ...(hasDefault ? [] : [afterSelector]), ...target.breaks);
       });
     } finally {
@@ -353,10 +444,25 @@ class DefiniteAssignmentChecker {
     }
   }
 
+  /** A try-with-resources statement, whose resources are declared before its try block runs. */
+  private tryWithResources(statement: TryStatement, state: State): State {
+    return this.scoped(() => {
+      let current = state;
+      for (const resource of statement.resources) {
+        current =
+          'local' in resource
+            ? this.localDeclaration(resource.local, current)
+            : this.expression(resource.expression, current);
+      }
+      return this.tryStatement({ ...statement, resources: [] }, current);
+    });
+  }
+
   private tryStatement(statement: TryStatement, state: State): State {
     // Jumps out of the try statement also run its finally block on the way.
     const jumpCounts = this.targets.map((target) => [target.breaks.length, target.continues.length] as const);
     const returnCount = this.returns.length;
+    const yieldCounts = this.yields.map((yields) => yields.length);
     const { result: afterBody, written: writtenInBody } = this.recordingWrites(() =>
       this.statement(statement.body, state)
     );
@@ -368,7 +474,7 @@ class DefiniteAssignmentChecker {
         this.scoped(() =>
           this.statement(
             clause.body,
-            this.declare(catchEntry, clause.name, clause.isFinal || clause.types.length > 1, true)
+            this.declare(catchEntry, clause.name, clause.isFinal || clause.types.length > 1, true, true, clause)
           )
         )
       )
@@ -383,7 +489,14 @@ class DefiniteAssignmentChecker {
     // Jumps taken inside the finally block itself leave from where they are, unchanged.
     const jumpsBeforeFinally = this.targets.map((target) => [target.breaks.length, target.continues.length] as const);
     const returnsBeforeFinally = this.returns.length;
+    const yieldsBeforeFinally = this.yields.map((yields) => yields.length);
     const afterFinally = this.statement(statement.finallyBlock, finallyEntry);
+    // Yields leaving through the finally block, as returns and jumps do, carry what it assigns.
+    for (const [index, yields] of this.yields.entries()) {
+      for (let jump = yieldCounts[index] ?? 0; jump < (yieldsBeforeFinally[index] ?? 0); jump++) {
+        yields[jump] = throughFinally(yields[jump] as State, afterFinally);
+      }
+    }
     for (const [index, [breakCount, continueCount]] of jumpCounts.entries()) {
       const target = this.targets[index];
       const [breaksBeforeFinally, continuesBeforeFinally] = jumpsBeforeFinally[index];
@@ -434,7 +547,8 @@ class DefiniteAssignmentChecker {
     return { whenTrue: after, whenFalse: after };
   }
 
-  // code-gauge-allow functionNcss 40 -- One case per expression kind, most only visiting their operands in order.
+  // code-gauge-allow functionCognitiveComplexity 17 -- One case per expression kind, most only visiting their operands.
+  // code-gauge-allow functionNcss 51 -- One case per expression kind, most only visiting their operands in order.
   private expression(expression: Expression, state: State): State {
     switch (expression.kind) {
       case 'name': {
@@ -464,9 +578,25 @@ class DefiniteAssignmentChecker {
       case 'unary': {
         return this.expression(expression.operand, state);
       }
-      case 'cast':
-      case 'instanceOf': {
+      case 'cast': {
         return this.expression(expression.value, state);
+      }
+      case 'instanceOf': {
+        return this.declarePatternBindings(this.expression(expression.value, state), instanceOfBindings(expression));
+      }
+      case 'switchExpression': {
+        return this.switchExpression(expression, state);
+      }
+      // A lambda's body runs later, and its own analysis covers it; it cannot assign the enclosing locals.
+      case 'lambda': {
+        return this.recordCreation(expression, state);
+      }
+      case 'classLiteral':
+      case 'typeRef': {
+        return state;
+      }
+      case 'methodRef': {
+        return 'expression' in expression.target ? this.expression(expression.target.expression, state) : state;
       }
       case 'fieldAccess': {
         const field = this.thisField(expression);
@@ -484,7 +614,8 @@ class DefiniteAssignmentChecker {
         return this.expressions(expression.args, receiver);
       }
       case 'new': {
-        return this.expressions(expression.args, state);
+        const afterArgs = this.expressions(expression.args, state);
+        return expression.body ? this.recordCreation(expression, afterArgs) : afterArgs;
       }
       case 'newArray': {
         const afterLengths = this.expressions(expression.dimensionLengths, state);
@@ -528,7 +659,36 @@ class DefiniteAssignmentChecker {
     if (reads) this.readVariable(target, variable, state);
     for (const log of this.writeLogs) log.add(variable.id);
     if (variable.isFinal) this.checkFinalWrite(target, variable, state);
+    else if (variable.declaration) this.checkEffectivelyFinalWrite(target, variable, state, reads);
     return assign(state, variable.id);
+  }
+
+  /** Records a local that a write makes not effectively final, as a final one would be rejected for it. */
+  private checkEffectivelyFinalWrite(span: Span, variable: Variable, state: State, reads: boolean): void {
+    // javac ignores writes in code that cannot run, such as under `if (false)`, as its flow analysis does not reach them.
+    if (!state.assigned) return;
+    if (reads || variable.isInitialized || state.possiblyAssigned.has(variable.id)) {
+      this.markNotEffectivelyFinal(variable);
+      return;
+    }
+    for (const loop of this.loops) {
+      if (variable.id < loop.firstId) loop.blankWrites.push({ variable, span });
+    }
+  }
+
+  /** Records the locals not definitely assigned where a lambda or a local or anonymous class appears. */
+  private recordCreation(span: Span, state: State): State {
+    const { assigned } = state;
+    const unassigned = this.scopes
+      .flatMap((scope) => [...scope.values()])
+      .filter((variable) => variable.declaration && assigned && !assigned.has(variable.id));
+    const keys = new Set(unassigned.map((variable) => declarationKey(variable.name, variable.declaration as Span)));
+    if (keys.size > 0) this.unassignedAtCreations.push({ span, keys });
+    return state;
+  }
+
+  private markNotEffectivelyFinal(variable: Variable): void {
+    if (variable.declaration) this.notEffectivelyFinal.add(declarationKey(variable.name, variable.declaration));
   }
 
   private checkFinalWrite(span: Span, variable: Variable, state: State): void {
@@ -537,7 +697,7 @@ class DefiniteAssignmentChecker {
     if (!state.assigned) return;
     if (state.possiblyAssigned.has(variable.id)) this.finalAssignmentError(span, variable);
     for (const loop of this.loops) {
-      if (variable.id < loop.firstId) loop.finalWrites.push({ variable, span });
+      if (variable.id < loop.firstId) loop.blankWrites.push({ variable, span });
     }
   }
 
@@ -602,50 +762,10 @@ class DefiniteAssignmentChecker {
   }
 }
 
-/** Whether a label written before `statement` names `statement` itself as the target of `break` or `continue`. */
-function takesLabelItself(statement: Statement): boolean {
-  return ['while', 'do', 'for', 'forEach', 'switch'].includes(statement.kind);
-}
+export { assignedNames } from './assignmentStates';
 
-/** The simple names that `node` assigns or increments anywhere. */
-export function assignedNames(node: Statement | Expression): string[] {
-  const names: string[] = [];
-  const visit = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      for (const item of value) visit(item);
-      return;
-    }
-    if (typeof value !== 'object' || !value) return;
-    const record = value as Record<string, unknown>;
-    const target = record.kind === 'assign' || record.kind === 'update' ? (record.target as Expression) : undefined;
-    if (target?.kind === 'name') names.push(target.name);
-    for (const child of Object.values(record)) visit(child);
-  };
-  visit(node);
-  return names;
-}
-
-/** Assigns a variable; an assignment that cannot run still makes it possibly assigned, as Java's rules say. */
-function assign(state: State, id: number): State {
-  const possiblyAssigned = new Set([...state.possiblyAssigned, id]);
-  return { assigned: state.assigned && new Set([...state.assigned, id]), possiblyAssigned };
-}
-
-/** The state after a finally block that `state` entered, which keeps the assignments made before it. */
-function throughFinally(state: State, afterFinally: State): State {
-  const possiblyAssigned = new Set([...state.possiblyAssigned, ...afterFinally.possiblyAssigned]);
-  if (!state.assigned || !afterFinally.assigned) return { assigned: undefined, possiblyAssigned };
-  return { assigned: new Set([...state.assigned, ...afterFinally.assigned]), possiblyAssigned };
-}
-
-/** Merges paths: assigned on every reachable one, possibly assigned on any, including assignments that cannot run. */
-function join(...states: State[]): State {
-  const possiblyAssigned = new Set(states.flatMap((state) => [...state.possiblyAssigned]));
-  const reachable = states.filter((state) => state.assigned !== undefined);
-  if (reachable.length === 0) return { assigned: undefined, possiblyAssigned };
-  const [first, ...rest] = reachable;
-  const assigned = [...(first.assigned as ReadonlySet<number>)].filter((id) =>
-    rest.every((state) => state.assigned?.has(id))
-  );
-  return { assigned: new Set(assigned), possiblyAssigned };
+/** The pattern variables an `instanceof` declares. */
+function instanceOfBindings(expression: Extract<Expression, { kind: 'instanceOf' }>): PatternBinding[] {
+  if (expression.pattern) return bindingsOfPattern(expression.pattern);
+  return expression.binding ? [expression.binding] : [];
 }
