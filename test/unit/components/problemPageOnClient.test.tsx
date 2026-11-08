@@ -81,6 +81,16 @@ test.each([
   }
 });
 
+test('keeps syntax hints disabled in ordinary fill-in questions', async () => {
+  infrastructure.problemId = 'fillInBlank2';
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = screen.getByRole('textbox', { name: /Java/ });
+  expect(screen.queryByRole('button', { name: /の説明$/ })).not.toBeInTheDocument();
+  await user.hover(within(editor).getAllByText(/\bint\b/)[0]);
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+});
+
 test('hides regular controls for fill-in-blank and retains the admin next-step action', () => {
   const rendered = renderPage('fillInBlank');
   expect(screen.queryByRole('button', { name: /ステップ実行モード/ })).not.toBeInTheDocument();
