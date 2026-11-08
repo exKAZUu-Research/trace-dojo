@@ -32,21 +32,13 @@ export type Role = 'expression' | 'operator' | 'keyword' | 'type' | 'name' | 'ar
 
 export function replacementsFor(node: Node, role: Role, text: string): string[] {
   if (role === 'operator') return operatorChanges[text] ?? [];
-  if (role === 'modifier') return ['', '__invalid__'];
-  if (role === 'keyword')
-    return text === 'continue'
-      ? ['break', '__invalid__']
-      : text === 'break'
-        ? ['continue', '__invalid__']
-        : ['__invalid__'];
-  if (role === 'type')
-    return [...declaredTypes(node), 'int', 'boolean', '__invalid__'].filter((value) => value !== text);
+  if (role === 'modifier') return [''];
+  if (role === 'keyword') return text === 'continue' ? ['break'] : text === 'break' ? ['continue'] : [];
+  if (role === 'type') return [...declaredTypes(node), 'int', 'boolean'].filter((value) => value !== text);
   if (role === 'name')
-    return [...(turtleMethods.find((group) => group.includes(text)) ?? []), '__invalid__'].filter(
-      (value) => value !== text
-    );
+    return (turtleMethods.find((group) => group.includes(text)) ?? []).filter((value) => value !== text);
   if (role === 'arguments') return argumentChanges(node, text);
-  if (role === 'statement') return text.startsWith('throw ') ? ['return', '__invalid__'] : ['__invalid__'];
+  if (role === 'statement') return text.startsWith('throw ') ? ['return'] : [];
   const result = expressionChanges(node, text);
   return [...new Set(result)].filter((value) => value !== text);
 }
@@ -54,7 +46,7 @@ export function replacementsFor(node: Node, role: Role, text: string): string[] 
 // code-gauge-allow functionCognitiveComplexity 20 -- Each independent syntax case contributes alternatives to the same expression.
 // code-gauge-allow functionNcss 31 -- Keep the small expression alternatives together for comparison.
 function expressionChanges(node: Node, text: string): string[] {
-  const results = ['0', '1', 'true', 'false', '__invalid__', ...visibleNames(node)];
+  const results = ['0', '1', 'true', 'false', ...visibleNames(node)];
   if (/^\d+$/.test(text)) results.push(String(Number(text) + 1), String(Number(text) - 1), '2');
   const left = node.childForFieldName('left');
   const right = node.childForFieldName('right');
@@ -98,10 +90,10 @@ function invocationChanges(node: Node): string[] {
 function argumentChanges(node: Node, text: string): string[] {
   const arguments_ = node.namedChildren.filter((child): child is Node => !!child && !child.type.endsWith('comment'));
   const count = arguments_.length;
-  if (2 + count + (count * (count - 1)) / 2 > MAX_REPLACEMENTS)
+  if (1 + count + (count * (count - 1)) / 2 > MAX_REPLACEMENTS)
     throw new GenerationLimitError('Too many argument permutations');
   const values = arguments_.map((child) => child.text);
-  const results = ['', '__invalid__'];
+  const results = [''];
   for (let i = 0; i < values.length; i++) {
     results.push(values.filter((_, index) => index !== i).join(', '));
     for (let j = i + 1; j < values.length; j++) {

@@ -377,3 +377,65 @@ test('enhanced-for iterable is a use while its bound variable is a declaration',
     'ns',
   ]);
 });
+
+test('mutation alternatives never inject placeholder identifiers into real source', () => {
+  const text = `class Main {
+    public static void main(String[] args) {
+      Turtle t = new Turtle(1, 2);
+      int n = 1;
+      if (n > 0) t.forward();
+      Main.move(t, n);
+    }
+    static void move(Turtle t, int n) {
+      for (int i = 0; i < n; i++) { t.forward(); }
+      if (n == 0) throw new RuntimeException("zero");
+      return;
+    }
+  }`;
+  const candidates = collectJavaCandidates(text, [
+    'modifier',
+    'construction',
+    'literal',
+    'variableDeclaration',
+    'variableReference',
+    'if',
+    'for',
+    'operator',
+    'call',
+    'throw',
+    'return',
+  ]);
+  expect(candidates.length).toBeGreaterThan(0);
+  for (const candidate of candidates)
+    for (const replacement of candidate.replacements) expect(replacement).not.toContain('__invalid__');
+});
+
+test('a keyword without meaningful mutations remains a hole but cannot force a bug', () => {
+  const text = wrap('for (;;) { break; }');
+  const input = { source: text, selectors: ['for'] as Selector[], seed: 'keyword-only' };
+  const blank = generateJavaExercise({ ...input, format: 'fillInBlank' });
+  expect(blank?.answer).toBe('for');
+  expect(generateJavaExercise({ ...input, format: 'bugFix' })).toBeUndefined();
+});
+
+test.each([
+  { original: '&&', changed: '||' },
+  { original: '||', changed: '&&' },
+])('swapping $original produces an executable logical bug', ({ original, changed }) => {
+  const text = wrap(`Turtle t = new Turtle(); if (true ${original} false) t.forward();`);
+  const result = generateJavaExercise({
+    source: text,
+    selectors: ['operator'],
+    format: 'bugFix',
+    seed: 'boolean-swap',
+  });
+  expect(result).toBeDefined();
+  if (!result) throw new Error('Missing logical mutant');
+  expect(result.displayProgram).toBe(text.replace(original, changed));
+  expect(result.bugKind).toBe('logical');
+  expect(gradeFillInBlankCode(result, result.displayProgram)).toMatchObject({
+    status: 'incorrect',
+    detail: 'The final state differs from the expected one.',
+  });
+  expect(gradeFillInBlankCode(result, text)).toEqual({ status: 'correct' });
+});
