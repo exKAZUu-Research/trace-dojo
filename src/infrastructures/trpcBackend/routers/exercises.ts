@@ -108,14 +108,7 @@ export const exerciseProcedures = {
           .select()
           .from(exerciseSessions)
           .where(
-            and(
-              eq(exerciseSessions.userId, userId),
-              eq(exerciseSessions.courseId, input.courseId),
-              eq(exerciseSessions.lectureId, input.lectureId),
-              eq(exerciseSessions.learningMode, 'challenge'),
-              eq(exerciseSessions.problemFormat, format),
-              gt(exerciseSessions.id, previous.id)
-            )
+            and(challengeScope(userId, input.courseId, input.lectureId, format), gt(exerciseSessions.id, previous.id))
           )
           .orderBy(asc(exerciseSessions.id))
           .all()
@@ -262,11 +255,7 @@ const startOrResume = (userId: string, courseId: string, lectureId: string, form
     .from(exerciseSessions)
     .where(
       and(
-        eq(exerciseSessions.userId, userId),
-        eq(exerciseSessions.courseId, courseId),
-        eq(exerciseSessions.lectureId, lectureId),
-        eq(exerciseSessions.learningMode, 'challenge'),
-        eq(exerciseSessions.problemFormat, format),
+        challengeScope(userId, courseId, lectureId, format),
         start ? gte(exerciseSessions.createdAt, start) : undefined
       )
     )
@@ -462,11 +451,7 @@ const assertNotEnded = (session: ExerciseSession, at = new Date()): void => {
     .from(exerciseSessions)
     .where(
       and(
-        eq(exerciseSessions.userId, session.userId),
-        eq(exerciseSessions.courseId, session.courseId),
-        eq(exerciseSessions.lectureId, session.lectureId),
-        eq(exerciseSessions.learningMode, 'challenge'),
-        eq(exerciseSessions.problemFormat, session.problemFormat),
+        challengeScope(session.userId, session.courseId, session.lectureId, session.problemFormat),
         gte(exerciseSessions.id, session.id),
         isNotNull(exerciseSessions.endedAt),
         start ? gte(exerciseSessions.createdAt, start) : undefined
@@ -475,3 +460,12 @@ const assertNotEnded = (session: ExerciseSession, at = new Date()): void => {
     .get();
   if (ended) throw new TRPCError({ code: 'CONFLICT' });
 };
+
+const challengeScope = (userId: string, courseId: string, lectureId: string, format: string): ReturnType<typeof and> =>
+  and(
+    eq(exerciseSessions.userId, userId),
+    eq(exerciseSessions.courseId, courseId),
+    eq(exerciseSessions.lectureId, lectureId),
+    eq(exerciseSessions.learningMode, 'challenge'),
+    eq(exerciseSessions.problemFormat, format)
+  );

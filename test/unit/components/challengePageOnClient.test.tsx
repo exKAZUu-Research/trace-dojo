@@ -90,6 +90,16 @@ beforeEach(() => {
   localStorage.clear();
 });
 
+test('keeps syntax hints disabled in challenge fill-in questions', async () => {
+  transport.start.mockResolvedValue(blankDisplay);
+  const user = userEvent.setup();
+  renderPage('fillInBlank');
+  const editor = await screen.findByRole('textbox', { name: /Java/ });
+  expect(screen.queryByRole('button', { name: /の説明$/ })).not.toBeInTheDocument();
+  await user.hover(within(editor).getAllByText(/\bint\b/)[0]);
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+});
+
 test('a valid URL format starts exactly once under StrictMode and renders the exercise', async () => {
   transport.start.mockResolvedValue(blankDisplay);
   renderPage('fillInBlank', true);

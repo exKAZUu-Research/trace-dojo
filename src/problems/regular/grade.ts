@@ -1,4 +1,3 @@
-import { zenkakuAlphanumericalsToHankaku } from '@willbooster/shared-lib';
 import fastDeepEqual from 'fast-deep-equal';
 
 import type { ColorChar } from '../../types';
@@ -9,6 +8,11 @@ export interface RegularGradingResult {
   readonly incorrectLocations: readonly string[];
   readonly hintText: string;
 }
+
+const ASSIGNMENT_HINT =
+  '変数を更新する代入演算子（=, +=, ++）などがなければ、計算が行われても変数の値は更新されません。代入されない限り、変数の値が変わらないことに注意してください';
+const REMAINDER_HINT =
+  '「%」は剰余算の演算子です。%の右側の数値で左側の数値を割った数の余りです。左右の数値が整数であれば、商も余りも整数になります。例えば、「1 % 7」は1を7で割った余りの数になるので1、「0 % 7」は0、「2 % 7」は2、「7 % 7」は0、「10 % 7」は3になります。';
 
 export function gradeRegularAnswers(input: {
   expectedBoard: string;
@@ -21,7 +25,7 @@ export function gradeRegularAnswers(input: {
   sourceLine?: string;
 }): RegularGradingResult {
   const incorrectLocations: string[] = [];
-  let hintText = '';
+  const hints: string[] = [];
 
   if (!fastDeepEqual(input.expectedTurtles.toSorted(compareTurtles), input.answerTurtles.toSorted(compareTurtles))) {
     incorrectLocations.push('亀');
@@ -30,29 +34,27 @@ export function gradeRegularAnswers(input: {
     incorrectLocations.push('盤面（マスの色）');
   }
   for (const [name, value] of Object.entries(input.answerVariables)) {
-    if (
-      zenkakuAlphanumericalsToHankaku(value) !== zenkakuAlphanumericalsToHankaku(String(input.expectedVariables[name]))
-    ) {
-      const isExpression = /[+\-*/%()[\]\\.]/.test(name);
-      incorrectLocations.push(isExpression ? `式「${name}」` : `変数${name}`);
-      if (input.initialVariables[name] === String(input.expectedVariables[name])) {
-        hintText += hintText ? '\n\n' : '\n\nヒント: ';
-        hintText +=
-          '変数を更新する代入演算子（=, +=, ++）などがなければ、計算が行われても変数の値は更新されません。代入されない限り、変数の値が変わらないことに注意してください';
-      }
-      if (input.sourceLine?.includes(' % ')) {
-        hintText += hintText ? '\n\n' : '\n\nヒント: ';
-        hintText +=
-          '「%」は剰余算の演算子です。%の右側の数値で左側の数値を割った数の余りです。左右の数値が整数であれば、商も余りも整数になります。例えば、「1 % 7」は1を7で割った余りの数になるので1、「0 % 7」は0、「2 % 7」は2、「7 % 7」は0、「10 % 7」は3になります。';
-      }
-    }
+    const expected = input.expectedVariables[name];
+    if (normalizeAnswer(value, expected) === normalizeAnswer(String(expected), expected)) continue;
+
+    const isExpression = /[+\-*/%()[\]\\.]/.test(name);
+    incorrectLocations.push(isExpression ? `式「${name}」` : `変数${name}`);
+    if (input.initialVariables[name] === String(expected)) hints.push(ASSIGNMENT_HINT);
+    if (input.sourceLine?.includes(' % ')) hints.push(REMAINDER_HINT);
   }
 
   return {
     status: incorrectLocations.length === 0 ? 'correct' : 'incorrect',
     incorrectLocations,
-    hintText,
+    hintText: hints.length > 0 ? `\n\nヒント: ${hints.join('\n\n')}` : '',
   };
+}
+
+function normalizeAnswer(value: string, expected: TraceItemVariable[string]): string {
+  const normalized = value.normalize('NFKC');
+  if (typeof expected !== 'number') return normalized;
+  // Japanese IMEs type the minus and period keys as ー and 。, which mean - and . only in a numeric value.
+  return normalized.replaceAll(/[ー‐‑‒–—―−]/g, '-').replaceAll('。', '.');
 }
 
 function compareTurtles(a: TurtleTrace, b: TurtleTrace): number {
