@@ -27,7 +27,7 @@ test.each(['executionResult', 'step'] as const)(
   'keeps syntax hints disabled in ordinary %s assignments',
   async (problemType) => {
     const user = userEvent.setup();
-    const problem = instantiateProblem('test3', 'java', 'normal-component');
+    const problem = instantiateProblem('test3', 'normal-component');
     if (!problem) throw new Error('test3 must instantiate');
     const { container } = render(
       <ChakraProvider>
@@ -49,7 +49,7 @@ test.each(['executionResult', 'step'] as const)(
 
 test('keeps the normal three-wrong automatic fallback through the real editor', async () => {
   count.value = 0;
-  const problem = instantiateProblem('test3', 'java', 'normal-component');
+  const problem = instantiateProblem('test3', 'normal-component');
   if (!problem) throw new Error('test3 must instantiate');
   const createSubmission = vi.fn(async () => {});
   const updateSession = vi.fn(async () => {});
@@ -90,7 +90,7 @@ test.each([
 ])(
   'keeps normal correct step $traceItemIndex advance/completion through the real editor',
   async ({ traceItemIndex, typedValue, isCompleted, nextIndex }) => {
-    const problem = instantiateProblem('test3', 'java', 'normal-component');
+    const problem = instantiateProblem('test3', 'normal-component');
     if (!problem) throw new Error('test3 must instantiate');
     const createSubmission = vi.fn(async () => {});
     const updateSession = vi.fn(async () => {});
@@ -118,7 +118,7 @@ test.each([
 );
 
 test('renders the normal step instruction with concrete current and previous line references', () => {
-  const problem = instantiateProblem('test3', 'java', 'normal-component');
+  const problem = instantiateProblem('test3', 'normal-component');
   if (!problem) throw new Error('test3 must instantiate');
   render(
     <ChakraProvider>
@@ -142,7 +142,7 @@ test.each([
 ])(
   'shows trace history only after a previous executable step at index $traceItemIndex',
   ({ traceItemIndex, isVisible }) => {
-    const problem = instantiateProblem('test3', 'java', 'normal-component');
+    const problem = instantiateProblem('test3', 'normal-component');
     if (!problem) throw new Error('test3 must instantiate');
     render(
       <ChakraProvider>
@@ -162,7 +162,7 @@ test.each([
 
 test('resets the close guard so Escape and a later close each finish one intermediate alert', async () => {
   navigation.push.mockClear();
-  const problem = instantiateProblem('test3', 'java', 'normal-component');
+  const problem = instantiateProblem('test3', 'normal-component');
   if (!problem) throw new Error('test3 must instantiate');
   const createSubmission = vi.fn(async () => {});
   const updateSession = vi.fn(async () => {});
@@ -205,7 +205,7 @@ test('resets the close guard so Escape and a later close each finish one interme
 
 test('runs a completed normal post-alert action only once when close and Escape race', async () => {
   navigation.push.mockClear();
-  const problem = instantiateProblem('test3', 'java', 'normal-component');
+  const problem = instantiateProblem('test3', 'normal-component');
   if (!problem) throw new Error('test3 must instantiate');
   const user = userEvent.setup();
   render(

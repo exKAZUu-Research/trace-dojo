@@ -9,6 +9,9 @@ import {
   RegularChallengeBody,
   type RegularChallengeTransport,
 } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/RegularChallengeBody';
+import { challengeMetadata } from '../../../src/problems/challenge/metadata';
+import { instantiateRegularChallenge } from '../../../src/problems/challenge/regular';
+import { instantiateProblem } from '../../../src/problems/instantiateProblem';
 import type { RegularExerciseDisplay } from '../../../src/problems/regular/exerciseProblem';
 
 const executionDisplay: RegularExerciseDisplay = {
@@ -19,39 +22,49 @@ const executionDisplay: RegularExerciseDisplay = {
   problemType: 'executionResult',
   traceItemIndex: 0,
   completed: false,
+  problem: instantiateProblem('test3', 'component')!,
 };
 
 test.each(['executionResult', 'step'] as const)(
-  'supports syntax hints in challenge %s without submitting',
+  'shows Java syntax hints in challenge %s without submitting from the keyboard',
   async (problemType) => {
     const user = userEvent.setup();
     const submit = vi.fn<RegularChallengeTransport['submit']>().mockResolvedValue(executionDisplay);
     const { container } = renderBody({
-      display: { ...executionDisplay, problemType, traceItemIndex: problemType === 'step' ? 1 : 0 },
       submit,
+      display: { ...executionDisplay, problemType, traceItemIndex: problemType === 'step' ? 1 : 0 },
     });
-    const code = container.querySelector('code');
-    if (!code) throw new Error('Challenge source must be rendered');
-    const keyword = within(code).getAllByRole('button', { name: 'int の説明' })[0];
-    await user.hover(keyword);
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('整数');
-    await user.unhover(keyword);
-    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
-    const answers = problemType === 'step' ? ['1'] : ['2', '2', '4'];
-    for (const [index, input] of screen.getAllByRole('textbox').entries()) {
-      await user.type(input, answers[index]);
+    for (const input of screen.getAllByRole('textbox')) {
+      await user.clear(input);
+      await user.paste('999');
     }
     expect(screen.getByRole('button', { name: /提出/ })).toBeEnabled();
-    act(() => keyword.focus());
-    expect(keyword).toHaveFocus();
+    const code = container.querySelector('code');
+    if (!code) throw new Error('Challenge source must be rendered');
+    const hint = within(code).getAllByRole('button', { name: 'int の説明' })[0];
+    act(() => hint.focus());
+    expect(hint).toHaveFocus();
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/[ぁ-んァ-ヶ一-龯]/);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
     await user.keyboard('{Enter}');
-    const tooltip = await screen.findByRole('tooltip');
-    const explanation = tooltip.textContent;
-    await user.hover(within(code).getAllByRole('button', { name: '= の説明' })[0]);
-    expect(screen.getByRole('tooltip').textContent).toBe(explanation);
+    expect(await screen.findByRole('tooltip')).toBeVisible();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
+    await user.keyboard(' ');
+    expect(await screen.findByRole('tooltip')).toBeVisible();
     expect(submit).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   }
 );
+
+test('renders the independent problem title from public metadata', () => {
+  const entry = Object.entries(challengeMetadata).find(([, metadata]) => metadata.problemFormat === 'regular');
+  if (!entry) throw new Error('Missing independent regular metadata');
+  const [problemId, metadata] = entry;
+  renderBody({ display: { ...executionDisplay, problemId, problem: instantiateRegularChallenge(problemId)! } });
+  expect(screen.getByRole('heading', { name: metadata.title, level: 1 })).toBeVisible();
+});
 
 test('uses the real editor local grader and sends only verdict with stored context', async () => {
   const user = userEvent.setup();
@@ -64,7 +77,7 @@ test('uses the real editor local grader and sends only verdict with stored conte
   );
 
   const inputs = screen.getAllByRole('textbox');
-  for (const [input, value] of inputs.map((input, index) => [input, ['2', '2', '4'][index]] as const)) {
+  for (const [input, value] of inputs.map((input, index) => [input, ['2', '4'][index]] as const)) {
     await user.type(input, value);
   }
   await user.click(screen.getByRole('button', { name: /提出/ }));
@@ -116,8 +129,7 @@ test('keeps an incorrect draft mounted across repeated attempts and never switch
   renderBody({ submit, switchToStep });
   const inputs = screen.getAllByRole('textbox');
   await user.type(inputs[0], '999');
-  await user.type(inputs[1], '2');
-  await user.type(inputs[2], '4');
+  await user.type(inputs[1], '4');
   for (let attempt = 0; attempt < 4; attempt += 1) {
     await user.click(screen.getByRole('button', { name: /提出/ }));
     const alert = await screen.findByRole('alertdialog');
@@ -126,10 +138,9 @@ test('keeps an incorrect draft mounted across repeated attempts and never switch
     await user.click(screen.getByRole('button', { name: /閉じる|もう一度/ }));
   }
   const liveInputs = screen.getAllByRole('textbox');
-  expect(liveInputs).toHaveLength(3);
+  expect(liveInputs).toHaveLength(2);
   expect(liveInputs[0]).toHaveValue('999');
-  expect(liveInputs[1]).toHaveValue('2');
-  expect(liveInputs[2]).toHaveValue('4');
+  expect(liveInputs[1]).toHaveValue('4');
   expect(submit).toHaveBeenCalledTimes(4);
   expect(switchToStep).not.toHaveBeenCalled();
   expect(submit.mock.calls.every(([input]) => input.isCorrect === false)).toBe(true);
@@ -222,8 +233,8 @@ test('locally grades the final step and exposes completion actions', async () =>
     '画面下部にある6行目を実行した後の盤面と変数の一覧表を参考に、8行目を実行した後の盤面と、変数に記録されている値の一覧表を作成し、提出ボタンを押してください。'
   );
   const inputs = screen.getAllByRole('textbox');
-  expect(inputs).toHaveLength(3);
-  await user.type(inputs[2], '4');
+  expect(inputs).toHaveLength(2);
+  await user.type(inputs[1], '4');
   await user.click(screen.getByRole('button', { name: /提出/ }));
   await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
   expect(submit.mock.calls[0][0]).toMatchObject({
@@ -232,7 +243,7 @@ test('locally grades the final step and exposes completion actions', async () =>
   });
   await waitFor(() => expect(screen.getByRole('button', { name: /次の問題/ })).toBeVisible());
   expect(screen.getByRole('button', { name: /終わる/ })).toBeVisible();
-  expect(screen.getAllByRole('textbox', { hidden: true })[2]).toHaveValue('4');
+  expect(screen.getAllByRole('textbox', { hidden: true })[1]).toHaveValue('4');
   expect(screen.getByRole('button', { hidden: true, name: /提出/ })).toBeDisabled();
 });
 
@@ -267,7 +278,7 @@ test('deduplicates synchronous Back and resets the action guard for a later comp
   await user.click(screen.getByRole('button', { name: '次の問題へ' }));
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
   const inputs = screen.getAllByRole('textbox');
-  for (const [input, value] of inputs.map((input, index) => [input, ['2', '2', '4'][index]] as const)) {
+  for (const [input, value] of inputs.map((input, index) => [input, ['2', '4'][index]] as const)) {
     await user.type(input, value);
   }
   await user.click(screen.getByRole('button', { name: /提出/ }));

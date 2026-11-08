@@ -1,280 +1,82 @@
 ## Challenge fill-in-the-blank problems
 
-Define paired Java and instrumented templates in `src/problems/fillInBlank/definitions.ts` or `challengeDefinitions.ts`, following [穴埋め問題の作問手順](#穴埋め問題の作問手順) for the `@[model answer]@` markers (the same number, in the same order, in both templates). Keep `<min-max>` placeholders in the same order so an ID and seed reproduce the complete generated problem. Use the same variable names (including the turtle's) in both templates: local grading translates a Java answer and runs it in the instrumented template.
+Define Java templates in `src/problems/fillInBlank/definitions.ts` or `challengeDefinitions.ts`, following [穴埋め問題の作問手順](#穴埋め問題の作問手順): the template carries `@[model answer]@` markers, and an ID and seed reproduce the complete generated problem.
 
-Register the name in `problemIdToName`. Add the ID explicitly to `courseIdToLectureIndexToProblemIds` for ordinary lectures or `courseIdToLectureIndexToExerciseProblemIds` for the fill-in-the-blank challenge, which accepts only problems with blanks. Membership in either list does not imply membership in the other. The regular challenge has no list of its own: it draws from the problems without blanks in the lecture's `courseIdToLectureIndexToProblemIds` entry.
+Register the name in `legacyProblemIdToName` and add the ID explicitly to `courseIdToLectureIndexToProblemIds` for ordinary lectures. Challenge mode draws its problems from `courseIdToLectureIndexToExerciseProblemIds` for the fill-in-the-blank and bug-fix challenges; outside the curriculum courses (for example `test`), the regular challenge draws from the problems without blanks in the lecture's `courseIdToLectureIndexToProblemIds` entry.
 
 Challenge sessions persist the problem ID and seed. Displays and grading regenerate from the current definition, so editing a definition also changes an active session when it is next loaded. Challenge submissions stay in `ExerciseSession` and `ExerciseSubmission` and do not affect ordinary progress or grades.
 
+## Curriculum challenge bank
+
+For `tuBeginner1` and `tuBeginner2`, every challenge format comes from the independent bank, so ordinary lecture problems are never offered as challenges. Each lecture file under `src/problems/challenge/tuBeginner*/lecture*.ts` lists base programs (`id`, `title`, `courseId`, `lectureIndex`, the `java` program, and three `blanks` and three `bugs` edits). Each edit replaces one exact `before` snippet of the Java program with `after`: a blank wraps the answer in `@[...]@`, and a bug introduces a `logical` or `syntax` defect. The three blanks, and likewise the three bugs, must edit distinct positions. A base yields one regular challenge plus one fill-in-the-blank and one bug-fix challenge per edit.
+
+After editing the bank, run `bun run gen-code` to regenerate `src/problems/challenge/metadata.ts`; unit tests fail when it is stale.
+
 ## 新問題の作問手順
 
-1. `problemIds` に問題IDを追加する。例: `test9`
-2. `problemIdToName` に追加した問題IDの問題名を追加する。例: `test9: 'テスト問題(9)'`
-3. `courseIdToLectureIndexToProblemIds` に問題IDを追加する。例: `test9`
-4. `problemIdToLanguageIdToProgram` に空のコードを追加する。`.trim()`は不要。例:
+問題はJavaプログラムだけで定義する。ステップ実行のトレースは、`src/java/` のインタプリタがJavaプログラムを実際に実行して生成する。
+
+1. `legacyProblemIdToName` に問題IDと問題名を追加する。例: `test9: 'テスト問題(9)'`
+2. `courseIdToLectureIndexToProblemIds` に問題IDを追加する。
+3. `problemIdToProgram` に問題のJavaプログラムを追加する。`.trim()`は不要。`<1-4>` と書いた箇所は、問題ごとに1以上4未満（1から3）の乱数に置き換わる。上限は含まれない。
+4. ステップ実行の止まる文は、次の規則でインタプリタが決める。呼び出しを1ステップにまとめ、中を見せる必要のないメソッドやコンストラクタは、宣言の行（本体の `{` がある行まで）の末尾に `// atomic` を付ける。例:
 
 ```js
-test9: {
-  instrumented: ``,
-  java: ``,
-}
-```
-
-5. `java`側を埋める。既にインポート済みの問題を参考にして、オリジナルの類題を作る。例:
-
-```js
-test9: {
-  instrumented: ``,
-  java: `
+test9: `
 public class Main {
   public static void main(String[] args) {
     MyTurtle t1 = new MyTurtle();
     Settings.speed = 2;
     t1.moveForward();
-
-    MyTurtle t2 = new MyTurtle2(2, 2);
-    Settings.increaseSpeed();
-    t1.moveForward();
-    t2.moveForward();
+    t1.turnTwice();
   }
 }
 
 class Settings {
-  static public int speed;
-
-  public increaseSpeed() {
-    speed++;
-  }
+  public static int speed;
 }
 
 class MyTurtle {
   private Turtle t = new Turtle();
 
-  void moveForward(Turtle t) {
+  void moveForward() {
     for (int i = 0; i < Settings.speed; i++) {
-      t.前に進む();
+      this.t.前に進む();
     }
   }
-}
 
-class MyTurtle2 {
-  private Turtle t;
-
-  MyTurtle2(int x, int y) {
-    t = new Turtle(x, y);
-  }
-  void moveForward(Turtle t) {
-    for (int i = 0; i < Settings.speed; i++) {
-      t.前に進む();
-    }
+  void turnTwice() { // atomic
+    this.t.右を向く();
+    this.t.右を向く();
   }
 }
 `,
-}
 ```
 
-6. `java`側でステップ実行で止めたい箇所に `// step` を付け、さらに、関数呼び出しの中に入りたい場合（ステップインしたい場合）は、 `// caller` を付ける。例:
+トレースは次の規則で記録される。
 
-```js
-test9: {
-  instrumented: ``,
-  java: `
-public class Main {
-  public static void main(String[] args) {
-    MyTurtle t1 = new MyTurtle(); // caller
-    Settings.speed = 2; // step
-    t1.moveForward(); // caller
+- 式文・初期値のある変数宣言・初期値のあるフィールドを実行し終えるたびに、その時点の状態を1ステップとして記録する。ステップの行は文の先頭の行になる。定数式を初期値とするstaticフィールドは、クラスの初期化前から変数表にその値が表示されるため、記録しない。
+- `for` 文は、初期化と、各回の更新の直後を記録する。拡張 `for` 文は、各回の変数への代入の直後を記録する。ただし、変数の型が基本型か `String` でない場合は、学習者が答える値が変わらないため、最後に記録したステップの後に盤面や亀、変数が変わったとき（反復する配列の中で亀を作った場合など）だけ記録する。
+- `return` 文、`if` 文、`while` 文、初期値のない変数宣言などは記録しない。
+- メソッドの呼び出しやオブジェクトの生成だけを行う文（`t.moveForward();`、`MyTurtle t1 = new MyTurtle();`、`new` だけを並べた配列の初期化など）は、呼び出したメソッドやコンストラクタの中でステップが記録された場合、その文自体のステップを記録しない。中のステップが文の結果を示しているため。ただし、`// atomic` を付けたメソッドの呼び出しを含む場合や、最後に記録したステップの後に盤面や亀、その文の位置で見える変数が変わった場合（引数を求める呼び出しの後に亀を作ったり動かしたりする場合、メソッドが終わって亀が消える場合、`return count++;` のようにステップを記録しない式で変数が変わる場合など）は、その結果を示すために記録する。戻り値を変数に代入する文（`int x = f();`）は、中のステップの後にも記録する。
+- `// atomic` を付けたメソッドやコンストラクタの中では、そこから呼び出したメソッドも含めてステップを記録しない。呼び出しを含む文が上の規則でステップを記録する場合（`t1.turnTwice();` や `int x = f();` など）、そのステップが呼び出し全体を表す。`if (check())` の条件や `return f();` のように、ステップを記録しない文の中の呼び出しにはステップがなく、その結果は次のステップに現れる。宣言の行以外に付けた `// atomic` はコンパイルエラーになる。
+- 変数表には、実行中のメソッドの有効範囲にある局所変数（名前のない変数 `_` を除く）、`this` のフィールド、各クラスのstaticフィールド（定数を除く）が表示される。亀・オブジェクト・配列は参照として、中のフィールドや要素を展開して表示する。
+- どの変数からも参照されなくなった亀は、ガベージコレクションで消えたものとして盤面から取り除かれる。
 
-    MyTurtle t2 = new MyTurtle2(2, 2); // caller
-    Settings.increaseSpeed(); // caller
-    t1.moveForward(); // caller
-    t2.moveForward(); // caller
-  }
-}
-
-class Settings {
-  static public int speed;
-
-  public increaseSpeed() {
-    speed++; // step
-  }
-}
-
-class MyTurtle {
-  private Turtle t = new Turtle(); // step
-
-  void moveForward(Turtle t) {
-    for (int i = 0; i < Settings.speed; i++) { // step
-      t.前に進む(); // step
-    }
-  }
-}
-
-class MyTurtle2 {
-  private Turtle t;
-
-  MyTurtle2(int x, int y) {
-    t = new Turtle(x, y); // step
-  }
-  void moveForward(Turtle t) {
-    for (int i = 0; i < Settings.speed; i++) { // step
-      t.前に進む(); // step
-    }
-  }
-}
-`,
-}
-```
-
-- 注意1: `// step` と `// caller` の両方を付けられない！
-- 注意2: `for` 文にも `// step` を付けること！
-
-7. Cursorで `test9` の定義全体を選択して、Ctrl/Command + Kを押して、以下のようなプロンプトを入力する。
-
-```
-以下のルールに従って、`java` のコードに基づいて `instrumented` を生成してください。
-
-1. publicな静的フィールド（つまり、グローバル変数）を扱う場合、 `myGlobal.<クラス名> = { <静的フィールド名>: <初期値> };` を先頭に置くこと。例: `myGlobal.Settings = { speed: 0 };`
-   - privateな静的フィールドは、`myGlobal`を使わずに`const`で定義すること。
-2. `Main`クラスだけが存在する場合は、`main()`メソッドの中身をトップレベルに展開して、`main()`関数を定義しないこと。`Main`以外のクラス宣言が含まれている場合、先頭で `main` 関数を定義して、末尾で `main()` を呼び出すこと。
-   - ステートメントの出現順序を変えないこと。
-3. 静的メソッドは普通の関数で代替すること。
-4. コード中で定義しているコンストラクタの呼び出しに `// caller` が付いていて、かつ、`// step`がついていない場合、 `call(<クラス名>, '仮引数の名前1', '仮引数の名前2', ...)(実引数1, 実引数2, ...)` に書き換えること。例: `const t2 = call(MyTurtle2, 'x', 'y')(2, 2);`
-5. コード中で定義している関数の呼び出しに `// caller` が付いていて、かつ、`// step`がついていない場合、 `call(<関数名>, '仮引数の名前1', '仮引数の名前2', ...)(実引数1, 実引数2, ...)` に書き換えること。例: `call(increaseSpeed)()`
-6. コード中で定義しているメソッドの呼び出しに `// caller` が付いていて、かつ、`// step`がついていない場合、 `call(<オブジェクト名>.<関数名>.bind(<オブジェクト名>), '仮引数の名前1', '仮引数の名前2', ...)(実引数1, 実引数2, ...)` に書き換えること。例: `call(t1.moveForward.bind(t1, 'speed'))(3)`
-7. `// step` のコメントを増やしたり減らしたりせずに、そのままの形で `// step` のコメントを残すこと。
-8. すべての `// caller` のコメントを削除すること。
-9. `Turtle` と関連のない値（数値・文字列・数値や文字列の配列など）をローカル変数に代入する場合は `s.set(<変数名>, <右辺値>)` を、参照する場合は `s.get(<変数名>)` を使うこと。 例: `i++` -> `s.set('i', s.get('i') + 1)`
-   - ただし、フィールド変数では `s.set` や `s.get` を使わずに、 `this.[変数名]` を使うこと。例: `this.t.前に進む();`
-   - ただし、 `call()` で呼び出されない関数内のローカル変数では `s.set` や `s.get` を使わずに、 `let` や `const` を使うこと。
-```
-
-8. Cursorの生成結果を手直しして完成させる。例:
-
-```js
-test9: {
-  instrumented: `
-myGlobal.Settings = { speed: 0 }; // <- ルール1
-
-function main() { // <- ルール3
-  const t1 = call(MyTurtle)(); registerDisplayRef('t1', () => t1); // <- ルール4
-  myGlobal.Settings.speed = 2; // step
-  call(t1.moveForward.bind(t1))(); // <- ルール6
-
-  const t2 = call(MyTurtle2, 'x', 'y')(2, 2); registerDisplayRef('t2', () => t2); // <- ルール4
-  call(increaseSpeed)(); // <- ルール2 & 5
-  call(t1.moveForward.bind(t1))(); // <- ルール6
-  call(t2.moveForward.bind(t2))(); // <- ルール6
-}
-
-function increaseSpeed() {
-  myGlobal.Settings.speed++; // step
-}
-
-class MyTurtle {
-  constructor() {
-    this.t = new Turtle(); // step
-  }
-  moveForward() {
-    for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) { // step // <- ルール7
-      this.t.前に進む(); // step
-    }
-  }
-}
-
-class MyTurtle2 {
-  constructor(x, y) {
-    this.t = new Turtle(x, y); // step
-  }
-  moveForward() {
-    for (s.set('i', 0); s.get('i') < myGlobal.Settings.speed; s.set('i', s.get('i') + 1)) { // step // <- ルール7
-      this.t.前に進む(); // step
-    }
-  }
-}
-
-main();
-   `,
-   java: `
-public class Main {
-  public static void main(String[] args) {
-    MyTurtle t1 = new MyTurtle(); // caller
-    Settings.speed = 2; // step
-    t1.moveForward(); // caller
-
-    MyTurtle t2 = new MyTurtle2(2, 2); // caller
-    Settings.increaseSpeed(); // caller
-    t1.moveForward(); // caller
-    t2.moveForward(); // caller
-  }
-}
-
-class Settings {
-  static public int speed;
-
-  public increaseSpeed() {
-    speed++; // step
-  }
-}
-
-class MyTurtle {
-  private Turtle t = new Turtle(); // step
-
-  void moveForward(Turtle t) {
-    for (int i = 0; i < Settings.speed; i++) { // step
-      t.前に進む(); // step
-    }
-  }
-}
-
-class MyTurtle2 {
-  private Turtle t;
-
-  MyTurtle2(int x, int y) {
-    t = new Turtle(x, y); // step
-  }
-  void moveForward(Turtle t) {
-    for (int i = 0; i < Settings.speed; i++) { // step
-      t.前に進む(); // step
-    }
-  }
-}
-`,
-}
-```
-
-9. `instrumented`と`java`の`// step`の個数が一致することを確認する。
-
-Register Java-visible object and array references in `instrumented` after initialization and before the next trace step. Use the name shown in `java`, even when the JavaScript binding has a different name:
-
-```js
-const t = new Turtle();
-registerDisplayRef('亀', () => t); // step
-```
-
-The step viewer shows data fields such as `this.speed`, `turtles[0].x`, and `mover.t.y` inside their instances. The registered callback follows later assignments to a binding or its fields. `call()` registers object arguments in the active method scope, and fields on `this` appear automatically. For a direct loop variable that is traced inside the loop, register it at the start of each iteration and call `unregisterDisplayRef` before leaving that iteration. These references only affect the viewer; answer variables remain in `s.vars`.
-
-10. 以下の手順で動作確認する。
-    1. `bun run start` でWebサーバーを起動すると、ブラウザが勝手に立ち上がる。
-    2. 右上の新規登録でTUのメアドでアカウントを作る。アカウントを作ると、 迷惑メール にメールが届くので、そこでアカウント認証を完了させる。
-    3. READMEにある各回のURLを開くと、問題一覧ページが表示されるので、確認したい問題を開く。
-    4. 右上の `次のステップに進む（管理者のみ）` ボタンを押して、ステップ実行される単位と、各ステップの内容を確認する。
-    5. 手順4で問題がないことを確認できたら、実際にステップ実行モードで問題全体を解いてみる。
+5. `bun wb test test/unit/problemData.test.ts` を実行し、プログラムがコンパイルでき、例外で止まらずに最後まで実行されることを確認する。Javaとして誤ったプログラムはコンパイルエラーになる。例外で終わることを教える問題は、テストの `problemsEndingWithException` に追加する。トレースの内容が意図どおりかは、手順6で確認する。
+6. 以下の手順で動作確認する。
+   1. `bun run start` でWebサーバーを起動すると、ブラウザが勝手に立ち上がる。
+   2. 右上の新規登録でTUのメアドでアカウントを作る。アカウントを作ると、 迷惑メール にメールが届くので、そこでアカウント認証を完了させる。
+   3. READMEにある各回のURLを開くと、問題一覧ページが表示されるので、確認したい問題を開く。
+   4. 右上の `次のステップに進む（管理者のみ）` ボタンを押して、ステップ実行される単位と、各ステップの内容を確認する。
+   5. 手順4で問題がないことを確認できたら、実際にステップ実行モードで問題全体を解いてみる。
 
 ## 穴埋め問題の作問手順
 
-`java` と `instrumented` の両方で、空欄にしたい箇所を `@[模範解答]@` で囲む。空欄は式または文の単位で作り、両言語で同じ順序・同じ個数にする。例:
+空欄にしたい箇所を `@[模範解答]@` で囲む。例:
 
 ```js
-fillInBlank1: {
-  instrumented: `
-const t = new Turtle(); registerDisplayRef('t', () => t); // step
-for (s.set('i', 0); @[s.get('i') < 4]@; s.set('i', s.get('i') + 1)) {
-  t.forward();
-}
-delete s.vars['i'];
-`,
-  java: `
+fillInBlank1: `
 public class Main {
   public static void main(String[] args) {
     Turtle t = new Turtle();
@@ -284,16 +86,10 @@ public class Main {
   }
 }
 `,
-}
 ```
 
-`java` に `@[...]@` が含まれる問題は自動的に穴埋め問題として扱われ、実行後の盤面と変数の値を見せた上で空欄の入力を求める。`java` 側は実際にコンパイル・実行されることがあるため、正しいJavaプログラムにすること。
+`@[...]@` が含まれる問題は自動的に穴埋め問題として扱われる。学習者には空欄を `【1】` などに置き換えたJavaプログラム全体が編集可能な状態で表示され、模範解答を埋めたプログラムを実行した後の盤面と亀を見せた上で、プログラムを書き換えて提出させる。
 
-採点は次の順で行う。段階1で一致した解答と、段階2で盤面・亀・変数のいずれかが異なると判定された解答はそこで確定する。段階2で全て一致した解答は、Javaとして正しいことを確認するために段階3・4でも実行する。
+採点では、提出されたJavaプログラム全体を、トレースを作るのと同じJavaインタプリタ（`src/java/`）でサーバー上で実行する。実行後の最終的な盤面と、`main` の終了時に変数から参照されている亀だけを模範解答の実行結果と比較し、変数の値は比較しない。
 
-1. 模範解答との文字列一致（空白の違いは無視）。
-2. 解答を `instrumented` の記法に変換して既存のJavaScriptトレーサで再実行し、最終的な盤面・亀・変数を比較する。変換できない記法や、変換結果がJavaScriptとして実行できない場合は段階3に進む。変換できるのは四則演算（除算を除く）、比較、論理演算、代入、`++`/`--`、亀のメソッド呼び出し、`new Turtle(...)` など限られた記法のみ。
-3. WandboxでJavaプログラムとして実行し、最終的な盤面と亀を比較する。
-4. Wandboxが利用できない場合は、[judge](https://github.com/WillBooster/judge) で実行する。judgeは自身のマシン上でサンドボックス化してJavaプログラムをコンパイル・実行する。
-
-穴埋め問題も他の問題と同様に必ず亀を使うこと。段階3・4は最終的な盤面と亀の状態で採点するため、亀のいないプログラムは採点できない。
+穴埋め問題も他の問題と同様に必ず亀を使うこと。最終的な盤面と亀の状態で採点するため、亀のいないプログラムは採点できない。

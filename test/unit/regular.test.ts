@@ -2,10 +2,10 @@ import { describe, expect, test } from 'vitest';
 
 import { instantiateProblem } from '../../src/problems/instantiateProblem';
 import { gradeRegularAnswers } from '../../src/problems/regular/grade';
-import type { TraceItemVariable, TurtleTrace } from '../../src/problems/traceProgram';
+import type { TraceItemVariable, TurtleTrace } from '../../src/problems/trace';
 import type { ColorChar } from '../../src/types';
 
-const problem = instantiateProblem('test1', 'java', '');
+const problem = instantiateProblem('test1', '');
 if (!problem) throw new Error('Failed to instantiate test1.');
 const finalTraceItem = problem.traceItems.at(-1);
 if (!finalTraceItem) throw new Error('The traced program has no final state.');
@@ -113,12 +113,20 @@ describe('regular problem grading', () => {
     });
   });
 
-  test('normalizes full-width numbers and letters in variable and expression answers', () => {
+  test('normalizes full-width characters in variable and expression answers', () => {
     const input = answerFor();
-    input.expectedVariables = { count: 12, 'name + 1': 'Ａ３' };
-    input.answerVariables = { count: '１２', 'name + 1': 'A3' };
+    input.expectedVariables = { count: 12, 'name + 1': 'Ａ３', ratio: -1.5, rate: 0.5, text: 'a b' };
+    input.answerVariables = { count: '１２', 'name + 1': 'A3', ratio: 'ー１．５', rate: '０。５', text: 'ａ　ｂ' };
 
     expect(gradeRegularAnswers(input)).toEqual({ status: 'correct', incorrectLocations: [], hintText: '' });
+  });
+
+  test('keeps prolonged sound marks and ideographic full stops in string answers', () => {
+    const input = answerFor();
+    input.expectedVariables = { minus: '-', period: '.' };
+    input.answerVariables = { minus: 'ー', period: '。' };
+
+    expect(gradeRegularAnswers(input).incorrectLocations).toEqual(['変数minus', '変数period']);
   });
 
   test('does not show hints for a correct answer on a remainder line', () => {

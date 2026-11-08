@@ -3,14 +3,15 @@ import { and, eq, gte, sql } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
-import { DEFAULT_LANGUAGE_ID } from '@/constants';
 import { getLearningPeriodFilter } from '@/learningPeriod';
-import { gradeFillInBlankAnswers } from '@/problems/fillInBlank/grade';
+import { type FillInBlankGradingResult, gradeFillInBlankCode, GRADING_STAGE } from '@/problems/fillInBlank/grade';
+import { MAX_JAVA_PROGRAM_LENGTH } from '@/problems/fillInBlank/javaProgram';
 import { instantiateProblem } from '@/problems/instantiateProblem';
+import { getOrdinaryJavaProblem, isOrdinaryBugProblem } from '@/problems/javaChallenges/ordinaryProblem';
+import type { OrdinaryJavaProblemData } from '@/types';
 
 import { type ProblemSession, problemSessions, problemSubmissions } from '../../../../db/schema';
 import { db } from '../../database';
-import { logger } from '../../pino';
 import { authorize } from '../middlewares';
 import { procedure, router } from '../trpc';
 import { exerciseProcedures } from './exercises';
@@ -44,6 +45,18 @@ export const backendRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST' });
       }
 
+      const ownedSession = await db.query.problemSessions.findFirst({
+        where: { id, userId: ctx.session.superTokensUserId, ...getLearningPeriodFilter() },
+      });
+      if (!ownedSession) throw new TRPCError({ code: 'NOT_FOUND' });
+      if (isOrdinaryBugProblem(ownedSession.problemId) || ownedSession.problemType === 'bugFix') {
+        validateOrdinaryBugSession(ownedSession);
+        if (
+          (data.problemType !== undefined && data.problemType !== 'bugFix') ||
+          (data.traceItemIndex !== undefined && data.traceItemIndex !== 0)
+        )
+          throw new TRPCError({ code: 'BAD_REQUEST' });
+      }
       const start = getLearningPeriodFilter().createdAt?.gte;
       const problemSession = db
         .update(problemSessions)
@@ -64,7 +77,6 @@ export const backendRouter = router({
         .returning()
         .get();
       if (!problemSession) throw new TRPCError({ code: 'NOT_FOUND' });
-      // 開発環境ではページが更新されないので注意すること。
       revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');
       console.log(`revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');`);
       return problemSession;
@@ -92,6 +104,9 @@ export const backendRouter = router({
           .sync();
         if (!session) throw new TRPCError({ code: 'NOT_FOUND' });
         if (session.userId !== ctx.session.superTokensUserId) throw new TRPCError({ code: 'UNAUTHORIZED' });
+
+        if (isOrdinaryBugProblem(session.problemId) || session.problemType === 'bugFix')
+          throw new TRPCError({ code: 'BAD_REQUEST' });
 
         const isCompleted = 'isCompleted' in input ? input.isCompleted : isLegacySubmissionComplete(input, session);
         const updatedSession = tx
@@ -126,28 +141,26 @@ export const backendRouter = router({
     .input(
       z.object({
         sessionId: z.number().int().positive(),
-        answers: z.array(z.string().max(1000)).max(50),
+        code: z.string().min(1).max(MAX_JAVA_PROGRAM_LENGTH),
         elapsedMilliseconds: z.number().nonnegative(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      // Grading may take tens of seconds, so the completion time is the time the answer arrived.
       const receivedAt = new Date();
       const session = await db.query.problemSessions.findFirst({
         where: { id: input.sessionId, ...getLearningPeriodFilter(receivedAt) },
       });
       if (!session) throw new TRPCError({ code: 'NOT_FOUND' });
       if (session.userId !== ctx.session.superTokensUserId) throw new TRPCError({ code: 'UNAUTHORIZED' });
-      const problem = instantiateProblem(session.problemId, DEFAULT_LANGUAGE_ID, session.problemVariablesSeed);
-      if (!problem || problem.blankAnswers.length === 0) throw new TRPCError({ code: 'BAD_REQUEST' });
+      const bugProblem = isOrdinaryBugProblem(session.problemId) || session.problemType === 'bugFix';
+      const problem = bugProblem
+        ? validateOrdinaryBugSession(session)
+        : instantiateProblem(session.problemId, session.problemVariablesSeed);
+      if (!problem || (!bugProblem && (!('blankAnswers' in problem) || problem.blankAnswers.length === 0)))
+        throw new TRPCError({ code: 'BAD_REQUEST' });
 
-      const result = await gradeFillInBlankAnswers(problem, input.answers);
-      if (result.status === 'ungradable') {
-        logger.warn('Failed to grade fill-in-the-blank answers of session %d: %s', session.id, result.detail);
-        // The detail describes server infrastructure, so it stays in the log.
-        return { status: result.status, detail: '' };
-      }
-      saveFillInBlankSubmission(session, input.answers, input.elapsedMilliseconds, result, receivedAt);
+      const result = gradeFillInBlankCode(problem, input.code);
+      saveFillInBlankSubmission(session, input.code, input.elapsedMilliseconds, result, receivedAt);
       if (result.status === 'correct') {
         revalidatePath('/courses/[courseId]/lectures/[lectureId]', 'page');
       }
@@ -174,14 +187,13 @@ export const backendRouter = router({
     }),
 });
 
-// export type definition of API
 export type BackendRouter = typeof backendRouter;
 
 const saveFillInBlankSubmission = (
   session: ProblemSession,
-  answers: string[],
+  code: string,
   elapsedMilliseconds: number,
-  result: Exclude<Awaited<ReturnType<typeof gradeFillInBlankAnswers>>, { status: 'ungradable' }>,
+  result: FillInBlankGradingResult,
   receivedAt: Date
 ): void => {
   db.transaction((tx) => {
@@ -192,8 +204,8 @@ const saveFillInBlankSubmission = (
         traceItemIndex: session.traceItemIndex,
         elapsedMilliseconds,
         isCorrect: result.status === 'correct',
-        answers: JSON.stringify(answers),
-        gradingStage: result.stage,
+        code,
+        gradingStage: GRADING_STAGE,
       })
       .run();
     if (result.status === 'correct') {
@@ -206,7 +218,16 @@ function isLegacySubmissionComplete(input: z.infer<typeof problemSubmissionSchem
   if (!input.isCorrect) return false;
   if (input.problemType === 'executionResult') return true;
   if (input.problemType !== 'step') return false;
-  const problem = instantiateProblem(session.problemId, DEFAULT_LANGUAGE_ID, session.problemVariablesSeed);
+  const problem = instantiateProblem(session.problemId, session.problemVariablesSeed);
   if (!problem) throw new TRPCError({ code: 'BAD_REQUEST' });
   return input.traceItemIndex >= problem.traceItems.length - 1;
 }
+
+const validateOrdinaryBugSession = (session: ProblemSession): OrdinaryJavaProblemData => {
+  if (session.problemType !== 'bugFix' || session.traceItemIndex !== 0) throw new TRPCError({ code: 'BAD_REQUEST' });
+  try {
+    return getOrdinaryJavaProblem(session.problemId, session.courseId, session.lectureId);
+  } catch {
+    throw new TRPCError({ code: 'BAD_REQUEST' });
+  }
+};

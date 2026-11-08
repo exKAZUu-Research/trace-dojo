@@ -11,7 +11,7 @@ import { JavaSyntaxHints } from './JavaSyntaxHints';
 type SyntaxHighlighterProps = BoxProps & {
   code: string;
   enableSyntaxHints?: boolean;
-  callerLines?: (number | undefined)[];
+  callerLines?: number[];
   currentFocusLine?: number;
   previousFocusLine?: number;
   programmingLanguageId: string;

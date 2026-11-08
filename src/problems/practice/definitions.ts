@@ -21,7 +21,7 @@ export function getPracticeProblemIds(courseId: string, lectureId: string): stri
   if (lectureIndex === -1) return [];
   const definitions = courseDefinitions[courseId as CourseId].filter((item) => item.lectureIndex === lectureIndex);
   for (const definition of definitions) {
-    if (Object.values(definition.program).some((source) => extractBlanks(source).answers.length > 0)) {
+    if (extractBlanks(definition.program).answers.length > 0) {
       throw new Error(`Practice definition contains blanks: ${definition.id}`);
     }
   }

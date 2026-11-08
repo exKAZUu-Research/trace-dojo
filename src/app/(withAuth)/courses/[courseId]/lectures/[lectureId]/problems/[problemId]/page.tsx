@@ -5,7 +5,8 @@ import type { MyAuthorizedNextPageOrLayout } from '@/app/utils/withAuth';
 import { db } from '@/infrastructures/database';
 import { logger } from '@/infrastructures/pino';
 import { getLearningPeriodFilter } from '@/learningPeriod';
-import { isFillInBlankProblem } from '@/problems/instantiateProblem';
+import { instantiateProblem, isFillInBlankProblem } from '@/problems/instantiateProblem';
+import { findOrdinaryJavaProblem, isOrdinaryBugProblem } from '@/problems/javaChallenges/ordinaryProblem';
 import { courseIdToLectureIds, courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 
@@ -28,6 +29,9 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
     !courseIdToLectureIndexToProblemIds[params.courseId][lectureIndex]?.includes(params.problemId)
   )
     notFound();
+  const javaProblem = isOrdinaryBugProblem(params.problemId)
+    ? (findOrdinaryJavaProblem(params.problemId, params.courseId, params.lectureId) ?? notFound())
+    : undefined;
   let incompleteProblemSession = await db.query.problemSessions.findFirst({
     where: {
       ...getLearningPeriodFilter(),
@@ -38,6 +42,12 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
       completedAt: { isNull: true },
     },
   });
+  if (
+    incompleteProblemSession &&
+    javaProblem &&
+    (incompleteProblemSession.problemType !== 'bugFix' || incompleteProblemSession.traceItemIndex !== 0)
+  )
+    notFound();
   incompleteProblemSession ??= db
     .insert(problemSessions)
     .values({
@@ -46,16 +56,22 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
       lectureId: params.lectureId,
       problemId: params.problemId,
       problemVariablesSeed: Date.now().toString(),
-      problemType: isFillInBlankProblem(params.problemId) ? 'fillInBlank' : 'executionResult',
+      problemType: javaProblem ? 'bugFix' : isFillInBlankProblem(params.problemId) ? 'fillInBlank' : 'executionResult',
       traceItemIndex: 0,
     })
     .returning()
     .get()!;
   logger.debug('incompleteProblemSession: %o', incompleteProblemSession);
 
+  const problem = javaProblem
+    ? undefined
+    : (instantiateProblem(params.problemId, incompleteProblemSession.problemVariablesSeed) ?? notFound());
+
   return (
     <ProblemPageOnClient
       key={incompleteProblemSession.id}
+      javaProblem={javaProblem}
+      problem={problem}
       initialProblemSession={incompleteProblemSession}
       userId={session.superTokensUserId}
     />

@@ -1,0 +1,579 @@
+import {
+  addAbstractMethod,
+  addConstant,
+  addConstructor,
+  addInterface,
+  addMethod,
+  addTypeParameters,
+  defineInterface,
+  newString,
+  type Registry,
+} from './builtinSupport';
+import { parseHexFloat } from './hexFloat';
+import { numericValueOf } from './numericValues';
+import { type Frame, throwBuiltin } from './runtime';
+import {
+  BOOLEAN,
+  BYTE,
+  CHAR,
+  type ClassInfo,
+  type ClassType,
+  DOUBLE,
+  FLOAT,
+  INT,
+  type JavaType,
+  LONG,
+  type MethodInfo,
+  type NumericKind,
+  SHORT,
+} from './types';
+import {
+  charToString,
+  convertNumber,
+  formatDouble,
+  formatFloat,
+  JavaObject,
+  JavaString,
+  toInt32,
+  toInt64,
+  type Value,
+} from './values';
+
+export type BoxableKind = NumericKind | 'boolean';
+
+export interface Wrappers {
+  /** The wrapper class of each primitive kind, such as `Integer` for `int`. */
+  byKind: Map<BoxableKind, ClassInfo>;
+  numberClass: ClassInfo;
+  comparableClass: ClassInfo;
+  /** `Comparable.compareTo`, which sorting and ordered collections call. */
+  compareTo: MethodInfo;
+}
+
+const WRAPPER_NAMES: Record<BoxableKind, string> = {
+  byte: 'Byte',
+  short: 'Short',
+  int: 'Integer',
+  long: 'Long',
+  float: 'Float',
+  double: 'Double',
+  char: 'Character',
+  boolean: 'Boolean',
+};
+
+/** The boxes that `valueOf` returns for small values, shared by every run since boxes never change. */
+const boxCache = new Map<string, JavaObject>();
+
+/** Boxes a primitive value as `valueOf` does, reusing the cached boxes Java keeps for small values. */
+export function box(frame: Frame | undefined, cls: ClassInfo, value: Value): JavaObject {
+  const kind = cls.unboxedType?.kind as BoxableKind;
+  const isCached =
+    kind === 'boolean' ||
+    (kind === 'char' && (value as number) <= 127) ||
+    (['byte', 'short', 'int', 'long'].includes(kind) && Number(value) >= -128 && Number(value) <= 127);
+  const key = `${kind}:${String(value as number | bigint | boolean)}`;
+  if (isCached) {
+    const cached = boxCache.get(key);
+    if (cached) return cached;
+  }
+  const object = frame ? frame.runtime.allocateObject(frame, cls) : new JavaObject(cls);
+  object.boxed = value as number | bigint | boolean;
+  if (isCached) boxCache.set(key, object);
+  return object;
+}
+
+/** Unboxes a wrapper object, throwing `NullPointerException` for null. */
+export function unbox(frame: Frame, value: Value, message?: string): Value {
+  if (!(value instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException', message);
+  return value.boxed;
+}
+
+export function defineWrappers(registry: Registry, objectClass: ClassInfo, stringType: JavaType): Wrappers {
+  const comparableClass = defineInterface(registry, 'Comparable', 'java.lang');
+  const [comparedType] = addTypeParameters(comparableClass, ['T'], objectClass.type);
+  const compareTo = addAbstractMethod(comparableClass, 'compareTo', [comparedType], INT);
+  const numberClass = registry.define('Number', objectClass);
+  numberClass.isAbstract = true;
+  for (const [name, type] of [
+    ['byteValue', BYTE],
+    ['shortValue', SHORT],
+    ['intValue', INT],
+    ['longValue', LONG],
+    ['floatValue', FLOAT],
+    ['doubleValue', DOUBLE],
+  ] as const) {
+    addMethod(numberClass, name, [], type, false, (_, receiver) =>
+      convertNumber(
+        (receiver as JavaObject).boxed,
+        (receiver as JavaObject).cls.unboxedType?.kind as NumericKind,
+        type.kind as NumericKind
+      )
+    );
+  }
+  const byKind = new Map<BoxableKind, ClassInfo>();
+  for (const [kind, name] of Object.entries(WRAPPER_NAMES) as [BoxableKind, string][]) {
+    const isNumber = kind !== 'char' && kind !== 'boolean';
+    const cls = registry.define(name, isNumber ? numberClass : objectClass);
+    cls.isFinal = true;
+    cls.unboxedType = { kind } as JavaType;
+    addInterface(cls, { kind: 'class', cls: comparableClass, args: [cls.type] });
+    defineWrapperMembers(cls, kind, stringType, objectClass, compareTo);
+    byKind.set(kind, cls);
+  }
+  defineIntegerMembers(byKind.get('int') as ClassInfo, stringType);
+  defineLongMembers(byKind.get('long') as ClassInfo, stringType);
+  defineDoubleMembers(byKind.get('double') as ClassInfo, stringType);
+  defineCharacterMembers(byKind.get('char') as ClassInfo);
+  defineBooleanMembers(byKind.get('boolean') as ClassInfo, stringType);
+  defineNarrowWrapperMembers(byKind, stringType);
+  for (const cls of byKind.values()) defineWrapperConstructors(cls, stringType);
+  return { byKind, numberClass, comparableClass, compareTo };
+}
+
+/**
+ * The constants and parsers of `Byte`, `Short`, and `Float`, the sizes of the integral wrappers, and the members of
+ * `Double` and `Character` that their own definitions leave out.
+ */
+function defineNarrowWrapperMembers(byKind: Map<BoxableKind, ClassInfo>, stringType: JavaType): void {
+  for (const [kind, bits] of [
+    ['byte', 8],
+    ['short', 16],
+  ] as const) {
+    const cls = byKind.get(kind) as ClassInfo;
+    const type = { kind } as JavaType;
+    const limit = 2 ** (bits - 1);
+    addConstant(cls, 'MAX_VALUE', type, limit - 1);
+    addConstant(cls, 'MIN_VALUE', type, -limit);
+    addMethod(cls, `parse${cls.name}`, [stringType], type, true, (frame, _, [text]) => {
+      const value = Number(parseIntegral(frame, text, 32));
+      if (value < -limit || value >= limit) {
+        throwBuiltin(
+          frame,
+          'NumberFormatException',
+          `Value out of range. Value:"${(text as JavaString).value}" Radix:10`
+        );
+      }
+      return value;
+    });
+  }
+  for (const [kind, bits] of [
+    ['byte', 8],
+    ['short', 16],
+    ['int', 32],
+    ['long', 64],
+  ] as const) {
+    addConstant(byKind.get(kind) as ClassInfo, 'SIZE', INT, bits);
+    addConstant(byKind.get(kind) as ClassInfo, 'BYTES', INT, bits / 8);
+  }
+  defineFloatMembers(byKind.get('float') as ClassInfo, stringType);
+  defineDoubleTests(byKind.get('double') as ClassInfo);
+  defineCharacterConversions(byKind.get('char') as ClassInfo, stringType);
+}
+
+function defineFloatMembers(floatClass: ClassInfo, stringType: JavaType): void {
+  addConstant(floatClass, 'MAX_VALUE', FLOAT, 3.4028234663852886e38);
+  addConstant(floatClass, 'MIN_VALUE', FLOAT, 1.401298464324817e-45);
+  addConstant(floatClass, 'POSITIVE_INFINITY', FLOAT, Number.POSITIVE_INFINITY);
+  addConstant(floatClass, 'NEGATIVE_INFINITY', FLOAT, Number.NEGATIVE_INFINITY);
+  addConstant(floatClass, 'NaN', FLOAT, Number.NaN);
+  addMethod(floatClass, 'parseFloat', [stringType], FLOAT, true, (frame, _, [text]) =>
+    Math.fround(parseDouble(frame, text, 'float'))
+  );
+}
+
+function defineDoubleTests(doubleClass: ClassInfo): void {
+  addMethod(
+    doubleClass,
+    'isInfinite',
+    [DOUBLE],
+    BOOLEAN,
+    true,
+    (_, __, [value]) => Math.abs(value as number) === Infinity
+  );
+  addMethod(doubleClass, 'isFinite', [DOUBLE], BOOLEAN, true, (_, __, [value]) => Number.isFinite(value));
+  addMethod(doubleClass, 'max', [DOUBLE, DOUBLE], DOUBLE, true, (_, __, [a, b]) => Math.max(a as number, b as number));
+  addMethod(doubleClass, 'min', [DOUBLE, DOUBLE], DOUBLE, true, (_, __, [a, b]) => Math.min(a as number, b as number));
+}
+
+function defineCharacterConversions(characterClass: ClassInfo, stringType: JavaType): void {
+  addMethod(characterClass, 'digit', [CHAR, INT], INT, true, (_, __, [code, radix]) =>
+    characterDigit(code as number, radix as number)
+  );
+  addMethod(characterClass, 'toString', [INT], stringType, true, (frame, _, [code]) => {
+    const point = code as number;
+    if (point < 0 || point > 0x10_ff_ff)
+      throwBuiltin(
+        frame,
+        'IllegalArgumentException',
+        `Not a valid Unicode code point: 0x${(point >>> 0).toString(16).toUpperCase()}`
+      );
+    return newString(frame, String.fromCodePoint(point));
+  });
+  addMethod(characterClass, 'forDigit', [INT, INT], CHAR, true, (_, __, [digit, radix]) => {
+    const [value, base] = [digit as number, radix as number];
+    return base >= 2 && base <= 36 && value >= 0 && value < base ? value.toString(base).codePointAt(0) : 0;
+  });
+}
+
+function setBoxed(receiver: Value, value: Value): undefined {
+  (receiver as JavaObject).boxed = value as number | bigint | boolean;
+  return undefined;
+}
+
+/**
+ * The constructors that Java deprecates for removal but still compiles, which older textbooks use and which create
+ * an object distinct from every other, unlike `valueOf`.
+ */
+function defineWrapperConstructors(cls: ClassInfo, stringType: JavaType): void {
+  addConstructor(cls, [cls.unboxedType as JavaType], (_, receiver, [value]) => setBoxed(receiver, value));
+  const parse = cls.methods.find(
+    (method) =>
+      method.isStatic &&
+      (method.name === 'valueOf' || method.name.startsWith('parse')) &&
+      method.parameterTypes.length === 1 &&
+      method.parameterTypes[0] === stringType
+  )?.native;
+  if (!parse) return;
+  addConstructor(cls, [stringType], (frame, receiver, [text]) => {
+    const parsed = parse(frame, undefined, [text]);
+    return setBoxed(receiver, parsed instanceof JavaObject ? parsed.boxed : parsed);
+  });
+}
+
+/** The members every wrapper has: boxing and unboxing, comparisons, and conversions to text. */
+function defineWrapperMembers(
+  cls: ClassInfo,
+  kind: BoxableKind,
+  stringType: JavaType,
+  objectClass: ClassInfo,
+  compareTo: MethodInfo
+): void {
+  const primitive = { kind } as JavaType;
+  addMethod(cls, 'valueOf', [primitive], cls.type, true, (frame, _, [value]) => box(frame, cls, value));
+  addMethod(cls, `${kind}Value`, [], primitive, false, (_, receiver) => valueOf(receiver));
+  addMethod(cls, 'toString', [], stringType, false, (frame, receiver) =>
+    newString(frame, formatPrimitive(valueOf(receiver), kind))
+  );
+  addMethod(cls, 'toString', [primitive], stringType, true, (frame, _, [value]) =>
+    newString(frame, formatPrimitive(value, kind))
+  );
+  addMethod(cls, 'hashCode', [], INT, false, (_, receiver) => hashOf(valueOf(receiver), kind));
+  addMethod(cls, 'hashCode', [primitive], INT, true, (_, __, [value]) => hashOf(value, kind));
+  addMethod(
+    cls,
+    'equals',
+    [objectClass.type],
+    BOOLEAN,
+    false,
+    (_, receiver, [other]) =>
+      other instanceof JavaObject && other.cls === cls && sameValue(valueOf(receiver), other.boxed)
+  );
+  // Character, Short, and Byte compare by the difference of their values, the other wrappers by its sign.
+  const order = ['char', 'short', 'byte'].includes(kind)
+    ? (a: Value, b: Value): number => (a as number) - (b as number)
+    : compareValues;
+  addMethod(cls, 'compare', [primitive, primitive], INT, true, (_, __, [a, b]) => order(a, b));
+  const compare = addMethod(cls, 'compareTo', [cls.type], INT, false, (frame, receiver, [other]) =>
+    order(valueOf(receiver), unbox(frame, other))
+  );
+  compare.overrides = new Set([compareTo]);
+}
+
+function valueOf(receiver: Value): Value {
+  return (receiver as JavaObject).boxed;
+}
+
+function formatPrimitive(value: Value, kind: BoxableKind): string {
+  if (kind === 'double') return formatDouble(value as number);
+  if (kind === 'float') return formatFloat(value as number);
+  if (kind === 'char') return charToString(value as number);
+  return String(value as number | bigint | boolean);
+}
+
+/** `Double.equals` and the like compare bits, so NaN equals itself and 0.0 differs from -0.0. */
+function sameValue(a: Value, b: Value): boolean {
+  return Object.is(a, b);
+}
+
+/** Compares as `Double.compare` does, ordering -0.0 before 0.0 and NaN after everything else. */
+// code-gauge-allow functionCognitiveComplexity 23 -- Java's order puts -0.0 before 0.0 and NaN last, which takes one branch per case.
+export function compareValues(a: Value, b: Value): number {
+  if (typeof a === 'boolean') return a === b ? 0 : a ? 1 : -1;
+  if (typeof a === 'number' && typeof b === 'number' && (Number.isNaN(a) || Number.isNaN(b))) {
+    return Number.isNaN(a) ? (Number.isNaN(b) ? 0 : 1) : -1;
+  }
+  if (a === b) return Object.is(a, -0) && Object.is(b, 0) ? -1 : Object.is(a, 0) && Object.is(b, -0) ? 1 : 0;
+  return (a as number) < (b as number) ? -1 : 1;
+}
+
+const view = new DataView(new ArrayBuffer(8));
+
+/** The hash code each wrapper's `hashCode` computes from its value. */
+export function hashOf(value: Value, kind: BoxableKind): number {
+  switch (kind) {
+    case 'boolean': {
+      return value ? 1231 : 1237;
+    }
+    case 'long': {
+      const bits = BigInt.asUintN(64, value as bigint);
+      return Number(BigInt.asIntN(32, bits ^ (bits >> 32n)));
+    }
+    case 'double': {
+      view.setFloat64(0, Number.isNaN(value) ? Number.NaN : (value as number));
+      return toInt32(view.getInt32(0) ^ view.getInt32(4));
+    }
+    case 'float': {
+      view.setFloat32(0, Number.isNaN(value) ? Number.NaN : (value as number));
+      return view.getInt32(0);
+    }
+    default: {
+      return value as number;
+    }
+  }
+}
+
+function parseIntegral(frame: Frame, text: Value, bits: 32 | 64): bigint {
+  const value = (text as JavaString | undefined)?.value;
+  frame.runtime.scanString(value?.length ?? 0);
+  // Java reads any Unicode decimal digit of one char, such as the full-width `１` of Japanese text, by its value;
+  // a digit outside the BMP is two chars, neither of which is a digit.
+  const digits =
+    value && /[^\d+-]/.test(value)
+      ? value.replaceAll(/\p{Nd}/gu, (digit) =>
+          digit.length === 1 ? String(decimalDigitValue(digit.codePointAt(0) as number)) : digit
+        )
+      : value;
+  const parsed = digits !== undefined && /^[+-]?\d+$/.test(digits) ? BigInt(digits) : undefined;
+  if (parsed === undefined || parsed !== BigInt.asIntN(bits, parsed)) {
+    return throwBuiltin(
+      frame,
+      'NumberFormatException',
+      value === undefined ? 'Cannot parse null string' : `For input string: "${value}"`
+    );
+  }
+  return parsed;
+}
+
+/**
+ * The value of a Unicode decimal digit, or `undefined` for another character: its position in the run of ten digits
+ * that Unicode gives every script contiguously, counted from the run's start.
+ */
+export function decimalDigitValue(code: number): number | undefined {
+  if (!isDigit(code)) return undefined;
+  let start = code;
+  while (isDigit(start - 1)) start--;
+  return (code - start) % 10;
+}
+
+/**
+ * The value of a character as a digit of `radix`, or -1, as `Character.digit` gives it: any Unicode decimal digit,
+ * and ASCII or full-width Latin letters for the digits from 10.
+ */
+function characterDigit(point: number, radix: number): number {
+  if (radix < 2 || radix > 36) return -1;
+  const letter = /^[a-zA-Zａ-ｚＡ-Ｚ]$/u.test(String.fromCodePoint(point))
+    ? Number.parseInt(String.fromCodePoint(point).normalize('NFKC'), 36)
+    : undefined;
+  const digit = letter ?? decimalDigitValue(point) ?? -1;
+  return digit < radix ? digit : -1;
+}
+
+/** The value of signed digits of `radix`, read as `Integer.parseInt(String, int)` reads them, or `undefined`. */
+function digitsValue(text: string, radix: number): number | undefined {
+  const sign = text[0] === '-' || text[0] === '+' ? text[0] : '';
+  // By char, as Java reads them, so that the two halves of a character outside the BMP are no digits.
+  const points = text
+    .slice(sign.length)
+    .split('')
+    .map((char) => characterDigit(char.codePointAt(0) as number, radix));
+  if (points.length === 0 || points.includes(-1)) return undefined;
+  const magnitude = points.reduce((sum, digit) => sum * BigInt(radix) + BigInt(digit), 0n);
+  return Number(sign === '-' ? -magnitude : magnitude);
+}
+
+function isDigit(point: number): boolean {
+  return point >= 0 && /^\p{Nd}$/u.test(String.fromCodePoint(point));
+}
+
+function parseRadix(frame: Frame, text: Value, radix: number): number {
+  const value = (text as JavaString | undefined)?.value;
+  // Java checks the radix after a null string and before the digits.
+  if (value !== undefined && radix < 2) {
+    throwBuiltin(frame, 'NumberFormatException', `radix ${radix} less than Character.MIN_RADIX`);
+  }
+  if (value !== undefined && radix > 36) {
+    throwBuiltin(frame, 'NumberFormatException', `radix ${radix} greater than Character.MAX_RADIX`);
+  }
+  const parsed = value === undefined ? undefined : digitsValue(value, radix);
+  if (parsed === undefined || parsed > 2_147_483_647 || parsed < -2_147_483_648) {
+    return throwBuiltin(
+      frame,
+      'NumberFormatException',
+      value === undefined
+        ? 'Cannot parse null string'
+        : `For input string: "${value}"${radix === 10 ? '' : ` under radix ${radix}`}`
+    );
+  }
+  return parsed;
+}
+
+function defineIntegerMembers(integerClass: ClassInfo, stringType: JavaType): void {
+  addConstant(integerClass, 'MAX_VALUE', INT, 2_147_483_647);
+  addConstant(integerClass, 'MIN_VALUE', INT, -2_147_483_648);
+  addMethod(integerClass, 'parseInt', [stringType], INT, true, (frame, _, [text]) =>
+    Number(parseIntegral(frame, text, 32))
+  );
+  addMethod(integerClass, 'valueOf', [stringType], integerClass.type, true, (frame, _, [text]) =>
+    box(frame, integerClass, Number(parseIntegral(frame, text, 32)))
+  );
+  addMethod(integerClass, 'parseInt', [stringType, INT], INT, true, (frame, _, [text, radix]) =>
+    parseRadix(frame, text, radix as number)
+  );
+  addMethod(integerClass, 'toString', [INT, INT], stringType, true, (frame, _, [value, radix]) => {
+    const base = (radix as number) >= 2 && (radix as number) <= 36 ? (radix as number) : 10;
+    return newString(frame, (value as number).toString(base));
+  });
+  addMethod(integerClass, 'sum', [INT, INT], INT, true, (_, __, [a, b]) => toInt32((a as number) + (b as number)));
+  addMethod(integerClass, 'max', [INT, INT], INT, true, (_, __, [a, b]) => Math.max(a as number, b as number));
+  addMethod(integerClass, 'min', [INT, INT], INT, true, (_, __, [a, b]) => Math.min(a as number, b as number));
+  for (const [name, radix] of [
+    ['toBinaryString', 2],
+    ['toOctalString', 8],
+    ['toHexString', 16],
+  ] as const) {
+    addMethod(integerClass, name, [INT], stringType, true, (frame, _, [value]) =>
+      newString(frame, ((value as number) >>> 0).toString(radix))
+    );
+  }
+  for (const [name, operation] of Object.entries(INT_BIT_OPERATIONS)) {
+    addMethod(integerClass, name, [INT], INT, true, (_, __, [value]) => operation(value as number));
+  }
+}
+
+const INT_BIT_OPERATIONS: Record<string, (value: number) => number> = {
+  bitCount: (value) => (value >>> 0).toString(2).replaceAll('0', '').length,
+  highestOneBit: (value) => (value === 0 ? 0 : toInt32(2 ** (31 - Math.clz32(value)))),
+  lowestOneBit: (value) => value & -value,
+  numberOfLeadingZeros: (value) => Math.clz32(value),
+  numberOfTrailingZeros: (value) => (value === 0 ? 32 : 31 - Math.clz32(value & -value)),
+  reverse: (value) => {
+    let reversed = 0;
+    for (let bit = 0; bit < 32; bit++) reversed = (reversed << 1) | ((value >>> bit) & 1);
+    return reversed;
+  },
+  signum: (value) => Math.sign(value),
+};
+
+function defineLongMembers(longClass: ClassInfo, stringType: JavaType): void {
+  addConstant(longClass, 'MAX_VALUE', LONG, 2n ** 63n - 1n);
+  addConstant(longClass, 'MIN_VALUE', LONG, -(2n ** 63n));
+  addMethod(longClass, 'parseLong', [stringType], LONG, true, (frame, _, [text]) => parseIntegral(frame, text, 64));
+  addMethod(longClass, 'valueOf', [stringType], longClass.type, true, (frame, _, [text]) =>
+    box(frame, longClass, parseIntegral(frame, text, 64))
+  );
+  addMethod(longClass, 'sum', [LONG, LONG], LONG, true, (_, __, [a, b]) => toInt64((a as bigint) + (b as bigint)));
+  addMethod(longClass, 'max', [LONG, LONG], LONG, true, (_, __, [a, b]) => ((a as bigint) > (b as bigint) ? a : b));
+  addMethod(longClass, 'min', [LONG, LONG], LONG, true, (_, __, [a, b]) => ((a as bigint) < (b as bigint) ? a : b));
+  for (const [name, radix] of [
+    ['toBinaryString', 2],
+    ['toHexString', 16],
+  ] as const) {
+    addMethod(longClass, name, [LONG], stringType, true, (frame, _, [value]) =>
+      newString(frame, BigInt.asUintN(64, value as bigint).toString(radix))
+    );
+  }
+}
+
+/** @param format The type the text is read for, to which a hexadecimal value rounds once. */
+function parseDouble(frame: Frame, text: Value, format: 'double' | 'float' = 'double'): number {
+  const value = (text as JavaString | undefined)?.value;
+  if (value === undefined) return throwBuiltin(frame, 'NullPointerException');
+  frame.runtime.scanString(value.length);
+  const trimmed = value.trim();
+  if (trimmed === '') throwBuiltin(frame, 'NumberFormatException', 'empty String');
+  const hex = parseHexFloat(trimmed, format);
+  if (hex !== undefined) return hex;
+  const isNumber = /^[+-]?(?:NaN|Infinity|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?[fFdD]?)$/.test(trimmed);
+  if (!isNumber) throwBuiltin(frame, 'NumberFormatException', `For input string: "${value}"`);
+  return Number(trimmed.replace(/[fFdD]$/, ''));
+}
+
+function defineDoubleMembers(doubleClass: ClassInfo, stringType: JavaType): void {
+  addConstant(doubleClass, 'MAX_VALUE', DOUBLE, Number.MAX_VALUE);
+  addConstant(doubleClass, 'MIN_VALUE', DOUBLE, Number.MIN_VALUE);
+  addConstant(doubleClass, 'POSITIVE_INFINITY', DOUBLE, Number.POSITIVE_INFINITY);
+  addConstant(doubleClass, 'NEGATIVE_INFINITY', DOUBLE, Number.NEGATIVE_INFINITY);
+  addConstant(doubleClass, 'NaN', DOUBLE, Number.NaN);
+  addMethod(doubleClass, 'parseDouble', [stringType], DOUBLE, true, (frame, _, [text]) => parseDouble(frame, text));
+  addMethod(doubleClass, 'valueOf', [stringType], doubleClass.type, true, (frame, _, [text]) =>
+    box(frame, doubleClass, parseDouble(frame, text))
+  );
+  addMethod(doubleClass, 'isNaN', [DOUBLE], BOOLEAN, true, (_, __, [value]) => Number.isNaN(value));
+  addMethod(doubleClass, 'isNaN', [], BOOLEAN, false, (_, receiver) => Number.isNaN((receiver as JavaObject).boxed));
+  addMethod(doubleClass, 'sum', [DOUBLE, DOUBLE], DOUBLE, true, (_, __, [a, b]) => (a as number) + (b as number));
+}
+
+/**
+ * The characters `Character.isWhitespace` accepts, which `String.strip` and `isBlank` remove: the space separators
+ * except the non-breaking ones, the line and paragraph separators, and these control characters.
+ */
+export const JAVA_WHITESPACE = String.raw`[\t\n\v\f\r\u001C-\u001F \u1680\u2000-\u2006\u2008-\u200A\u2028\u2029\u205F\u3000]`;
+
+const CHARACTER_TESTS = {
+  isDigit: /^\p{Nd}$/u,
+  isLetter: /^\p{L}$/u,
+  isLetterOrDigit: /^[\p{L}\p{Nd}]$/u,
+  isAlphabetic: /^\p{Alphabetic}$/u,
+  isUpperCase: /^\p{Lu}$/u,
+  isLowerCase: /^\p{Ll}$/u,
+  isWhitespace: new RegExp(`^${JAVA_WHITESPACE}$`, 'u'),
+} as const;
+
+function codePointToString(code: Value): string {
+  const point = code as number;
+  return point >= 0 && point <= 0x10_ff_ff ? String.fromCodePoint(point) : '';
+}
+
+function defineCharacterMembers(characterClass: ClassInfo): void {
+  addConstant(characterClass, 'MAX_VALUE', CHAR, 0xff_ff);
+  addConstant(characterClass, 'MIN_VALUE', CHAR, 0);
+  // Each method takes a char or an int code point, as `str.chars()` gives.
+  for (const type of [CHAR, INT]) {
+    for (const [name, pattern] of Object.entries(CHARACTER_TESTS)) {
+      addMethod(characterClass, name, [type], BOOLEAN, true, (_, __, [code]) => pattern.test(codePointToString(code)));
+    }
+    for (const [name, convert] of [
+      ['toUpperCase', (text: string) => text.toUpperCase()],
+      ['toLowerCase', (text: string) => text.toLowerCase()],
+    ] as const) {
+      addMethod(characterClass, name, [type], type, true, (_, __, [code]) => {
+        const converted = convert(codePointToString(code));
+        // A character whose case mapping takes several characters stays unchanged, as Character's methods leave it.
+        const point = converted.codePointAt(0);
+        return point !== undefined && String.fromCodePoint(point) === converted ? point : code;
+      });
+    }
+  }
+  for (const type of [CHAR, INT]) {
+    addMethod(characterClass, 'getNumericValue', [type], INT, true, (_, __, [code]) => numericValueOf(code as number));
+  }
+}
+
+function defineBooleanMembers(booleanClass: ClassInfo, stringType: JavaType): void {
+  addMethod(booleanClass, 'logicalXor', [BOOLEAN, BOOLEAN], BOOLEAN, true, (_, __, [a, b]) => a !== b);
+  addConstant(booleanClass, 'TRUE', booleanClass.type, box(undefined, booleanClass, true));
+  addConstant(booleanClass, 'FALSE', booleanClass.type, box(undefined, booleanClass, false));
+  addMethod(
+    booleanClass,
+    'parseBoolean',
+    [stringType],
+    BOOLEAN,
+    true,
+    (_, __, [text]) => text instanceof JavaString && text.value.toLowerCase() === 'true'
+  );
+}
+
+/** The wrapper type of a primitive type, as boxing converts it. */
+export function boxedTypeOf(wrappers: Wrappers, type: JavaType): ClassType | undefined {
+  return wrappers.byKind.get(type.kind as BoxableKind)?.type as ClassType | undefined;
+}

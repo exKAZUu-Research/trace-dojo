@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { ChakraProvider } from '@chakra-ui/react';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { expect, test } from 'vitest';
@@ -154,6 +154,11 @@ test('uses one keyboard stop, navigates hints, dismisses without moving focus, a
   const tooltip = await screen.findByRole('tooltip');
   expect(hints[0]).toHaveAttribute('aria-describedby', tooltip.id);
   expect(hints[0]).toHaveAccessibleDescription(/整数[\s\S]*書き方\s*int[\s\S]*例\s*int\s*個数\s*=\s*3\s*;[\s\S]*個数/);
+  for (const shortcut of ['{Alt>}{ArrowRight}{/Alt}', '{Meta>}{ArrowRight}{/Meta}', '{Control>}{End}{/Control}']) {
+    await user.keyboard(shortcut);
+    expect(hints[0]).toHaveFocus();
+  }
+  expect(fireEvent.keyDown(hints[0], { key: 'ArrowLeft', altKey: true })).toBe(true);
   await user.keyboard('{ArrowRight}');
   expect(hints[1]).toHaveFocus();
   await user.keyboard('{ArrowLeft}');
@@ -174,6 +179,40 @@ test('uses one keyboard stop, navigates hints, dismisses without moving focus, a
   await user.tab();
   expect(screen.getByRole('textbox', { name: 'Answer' })).toHaveFocus();
   await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
+});
+
+test('keeps a pressed hint tooltip mounted and recovers hints when a press release never arrives', async () => {
+  const { container } = renderHighlighter({ code: 'int 個数 = 17; 個数 %= 5;' });
+  const hints = within(getCode(container)).getAllByRole('button');
+  fireEvent.pointerEnter(hints[0], { buttons: 0 });
+  await screen.findByRole('tooltip');
+  fireEvent.pointerDown(hints[0], { buttons: 1 });
+  expect(screen.getByRole('tooltip')).toBeInTheDocument();
+  expect(container.querySelectorAll('[tabindex="0"]')).toHaveLength(0);
+  fireEvent.blur(globalThis.window);
+  expect(container.querySelectorAll('[tabindex="0"]')).toHaveLength(1);
+  fireEvent.pointerDown(hints[0], { buttons: 1 });
+  fireEvent.pointerLeave(hints[0]);
+  fireEvent.pointerEnter(hints[1], { buttons: 0 });
+  expect(await screen.findByRole('tooltip')).toHaveTextContent(/[ぁ-んァ-ヶ一-龯]/);
+  expect(container.querySelectorAll('[tabindex="0"]')).toHaveLength(1);
+});
+
+test('keeps a pinned tooltip open while text inside it is selected', async () => {
+  const user = userEvent.setup();
+  const { container } = renderHighlighter({ code: '個数 %= 5;' });
+  await user.click(within(getCode(container)).getByRole('button', { name: '%= の説明' }));
+  const tooltip = await screen.findByRole('tooltip');
+  const paragraph = tooltip.querySelector('p');
+  if (!paragraph) throw new Error('Hint explanation must be rendered');
+  fireEvent.pointerDown(paragraph);
+  const range = document.createRange();
+  range.selectNodeContents(paragraph);
+  globalThis.getSelection()?.removeAllRanges();
+  globalThis.getSelection()?.addRange(range);
+  fireEvent.pointerUp(paragraph);
+  expect(screen.getByRole('tooltip')).toBe(tooltip);
+  globalThis.getSelection()?.removeAllRanges();
 });
 
 test('pins a hovered hint, keeps it while hovering another, switches on tap, and dismisses outside', async () => {

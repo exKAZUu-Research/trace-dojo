@@ -12,7 +12,9 @@ const ChallengePage: MyAuthorizedNextPageOrLayout<
   if (!(params.courseId in courseIdToLectureIds) || !courseIdToLectureIds[params.courseId]?.includes(params.lectureId))
     notFound();
   const initialFormat =
-    searchParams.format === 'regular' || searchParams.format === 'fillInBlank' ? searchParams.format : undefined;
+    searchParams.format === 'regular' || searchParams.format === 'fillInBlank' || searchParams.format === 'bugFix'
+      ? searchParams.format
+      : undefined;
   return <ChallengePageOnClient key={`${params.courseId}:${params.lectureId}`} initialFormat={initialFormat} />;
 };
 

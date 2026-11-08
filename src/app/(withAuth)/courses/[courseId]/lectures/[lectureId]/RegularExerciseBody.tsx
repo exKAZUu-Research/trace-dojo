@@ -12,11 +12,9 @@ import {
   Button,
   Text,
 } from '@/infrastructures/useClient/chakra';
-import { instantiateProblem } from '@/problems/instantiateProblem';
 import { practiceIdToDefinition } from '@/problems/practice/definitions';
-import { instantiatePracticeProblem } from '@/problems/practice/instantiatePracticeProblem';
-import { type CourseId, type ProblemId, problemIdToName } from '@/problems/problemData';
-import type { RegularExerciseDisplay } from '@/problems/regular/exerciseProblem';
+import type { CourseId, ProblemId } from '@/problems/problemData';
+import type { RegularExerciseDisplay, RegularExerciseState } from '@/problems/regular/exerciseProblem';
 
 import { BoardEditor, type TurtleGraphicsHandle } from './problems/[problemId]/BoardEditor';
 import { ProblemPageHeader } from './problems/[problemId]/ProblemPageHeader';
@@ -37,8 +35,8 @@ interface SubmitInput {
   isCorrect: boolean;
 }
 export interface RegularExerciseTransport {
-  submit: (input: SubmitInput) => Promise<RegularExerciseDisplay>;
-  switchToStep: (input: { sessionId: number; learningMode?: ExerciseMode }) => Promise<RegularExerciseDisplay>;
+  submit: (input: SubmitInput) => Promise<RegularExerciseState>;
+  switchToStep: (input: { sessionId: number; learningMode?: ExerciseMode }) => Promise<RegularExerciseState>;
   next: (input: {
     sessionId: number;
     problemFormat: 'regular';
@@ -51,7 +49,7 @@ interface Props {
   lectureId: string;
   display: RegularExerciseDisplay;
   transport: RegularExerciseTransport;
-  back: () => void;
+  back: (sessionId: number) => void | Promise<void>;
 }
 
 export const RegularExerciseBody: React.FC<Props> = (props) => (
@@ -77,15 +75,7 @@ const RegularExerciseSession: React.FC<Props> = ({
   const request = useRef<{ context: string; id: string } | undefined>(undefined);
   const editor = useRef<TurtleGraphicsHandle>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
-  const problem = useMemo(() => {
-    const value = (mode === 'practice' ? instantiatePracticeProblem : instantiateProblem)(
-      display.problemId,
-      'java',
-      display.seed
-    );
-    if (!value) throw new Error(`Unknown ${mode} problem: ${display.problemId}`);
-    return value;
-  }, [mode, display.problemId, display.seed]);
+  const { problem } = display;
   const view = useMemo(
     () => deriveRegularProblemView(problem, display.problemType, display.traceItemIndex),
     [problem, display.problemType, display.traceItemIndex]
@@ -125,7 +115,7 @@ const RegularExerciseSession: React.FC<Props> = ({
         });
         return;
       }
-      setDisplay(result);
+      setDisplay({ ...result, problem });
       if (!result.completed) setAlert({ title: '正解', message: '正解です。次のステップに進みます。' });
     } catch {
       setAlert({ title: '提出できませんでした', message: '通信に失敗しました。もう一度提出してください。' });
@@ -138,7 +128,7 @@ const RegularExerciseSession: React.FC<Props> = ({
         ...(mode === 'practice' ? { learningMode: mode } : {}),
         sessionId: display.sessionId,
       });
-      setDisplay(next);
+      setDisplay({ ...next, problem });
       setSwitchOpen(false);
       setError('');
     } catch {
@@ -163,11 +153,9 @@ const RegularExerciseSession: React.FC<Props> = ({
       <ProblemPageHeader
         courseId={courseId as CourseId}
         lectureId={lectureId}
-        title={
-          mode === 'practice'
-            ? practiceIdToDefinition[display.problemId].title
-            : problemIdToName[display.problemId as ProblemId]
-        }
+        {...(mode === 'practice'
+          ? { title: practiceIdToDefinition[display.problemId].title }
+          : { problemId: display.problemId as ProblemId })}
         actions={
           display.problemType === 'executionResult' && !display.completed ? (
             <Button colorScheme="blue" variant="outline" onClick={() => setSwitchOpen(true)}>
@@ -216,7 +204,7 @@ const RegularExerciseSession: React.FC<Props> = ({
         message="正解です！次の問題へ進めます。"
         title="正解"
         actions={[
-          { label: '終わる', onClick: back },
+          { label: '終わる', onClick: () => back(display.sessionId) },
           { label: '次の問題へ', colorScheme: 'brand', onClick: nextProblem },
         ]}
       />

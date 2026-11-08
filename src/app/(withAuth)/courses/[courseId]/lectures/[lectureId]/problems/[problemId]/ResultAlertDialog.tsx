@@ -19,7 +19,7 @@ export interface CompletionAction {
   onClick: () => void | Promise<void>;
   colorScheme?: string;
 }
-type Props = { isOpen: boolean; title: string; message: string } & (
+type Props = { isOpen: boolean; title: string; message: React.ReactNode } & (
   | { onClose: () => void; actions?: never }
   | { actions: CompletionAction[]; onClose?: never }
 );
@@ -77,7 +77,7 @@ export const ResultAlertDialog: React.FC<Props> = (props) => {
           <AlertDialogHeader fontSize="lg" fontWeight="bold">
             {props.title}
           </AlertDialogHeader>
-          <AlertDialogBody whiteSpace="pre-wrap">
+          <AlertDialogBody overflowWrap="anywhere" whiteSpace="pre-wrap">
             {props.message}
             {actionError && (
               <Text color="red.600" mt={3} role="alert">

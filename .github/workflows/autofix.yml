@@ -21,15 +21,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       # Installs the tools pinned in mise.toml, including fnox so the test profile values load.
-      - uses: jdx/mise-action@v5.2.3
+      - uses: jdx/mise-action@v5.2.7
         with:
           cache: true
       - run: bun install
-      # The test profile holds an encrypted JUDGE_API_KEY, so the commands that resolve it need the age key.
       - run: bun run cleanup
-        env:
-          FNOX_AGE_KEY: ${{ secrets.FNOX_AGE_KEY }}
       - run: bun run build
-        env:
-          FNOX_AGE_KEY: ${{ secrets.FNOX_AGE_KEY }}
       - uses: autofix-ci/action@v1.3.4

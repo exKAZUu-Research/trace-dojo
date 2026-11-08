@@ -25,6 +25,7 @@ const PracticeSession: React.FC<{ courseId: CourseId; lectureId: string }> = ({ 
   const [stale, setStale] = useState(false);
   const { mutateAsync: start } = backendTrpcReact.startExercise.useMutation();
   const next = backendTrpcReact.nextExercise.useMutation();
+  const end = backendTrpcReact.endExercise.useMutation();
   const submit = backendTrpcReact.submitRegularExercise.useMutation();
   const switchToStep = backendTrpcReact.switchRegularExerciseToStep.useMutation();
   const request = useRef<{ generation: number; promise: ReturnType<typeof start> } | undefined>(undefined);
@@ -78,7 +79,14 @@ const PracticeSession: React.FC<{ courseId: CourseId; lectureId: string }> = ({ 
           courseId={courseId}
           lectureId={lectureId}
           display={display}
-          back={back}
+          back={async (sessionId) => {
+            try {
+              await detectStale(end.mutateAsync({ ...location, sessionId, problemFormat: 'regular' }));
+            } catch {
+              throw new Error('終了できませんでした。もう一度お試しください。');
+            }
+            back();
+          }}
           transport={{
             submit: async (input) => await detectStale(submit.mutateAsync({ ...input, ...location })),
             switchToStep: async ({ sessionId }) =>

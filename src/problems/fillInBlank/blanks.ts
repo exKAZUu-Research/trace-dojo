@@ -19,6 +19,11 @@ export function extractBlanks(program: string): ExtractedBlanks {
   return { programWithPlaceholders, answers };
 }
 
+/** Removes the blank markers, leaving the model answers in place. */
+export function removeBlankMarkers(program: string): string {
+  return program.replaceAll(blankRegex, '$1');
+}
+
 export function fillBlanks(program: string, answers: readonly string[]): string {
   let index = 0;
   return program.replaceAll(blankRegex, () => answers[index++] ?? '');
@@ -26,23 +31,4 @@ export function fillBlanks(program: string, answers: readonly string[]): string 
 
 export function toBlankPlaceholder(blankNumber: number): string {
   return `【${blankNumber}】`;
-}
-
-/**
- * Normalizes an answer so that differences in whitespace do not matter.
- */
-export function normalizeAnswer(answer: string): string {
-  // String and char literals keep their contents; only the code around them is normalized.
-  return answer
-    .split(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/)
-    .map((part, index) =>
-      index % 2 === 1
-        ? part
-        : part
-            .trim()
-            .replaceAll(/\s+/g, ' ')
-            .replaceAll(/\s?([^\p{L}\p{N}_$])\s?/gu, '$1')
-    )
-    .join('')
-    .trim();
 }

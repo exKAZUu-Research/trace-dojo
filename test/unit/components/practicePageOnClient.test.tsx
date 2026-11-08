@@ -12,6 +12,7 @@ const transport = vi.hoisted(() => ({
   submit: vi.fn(),
   switchToStep: vi.fn(),
   submitBlank: vi.fn(),
+  end: vi.fn(),
 }));
 const navigation = vi.hoisted(() => ({
   push: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
     submitExercise: { useMutation: () => ({ mutateAsync: transport.submitBlank }) },
     startExercise: { useMutation: () => ({ mutateAsync: transport.start }) },
     nextExercise: { useMutation: () => ({ mutateAsync: transport.next }) },
+    endExercise: { useMutation: () => ({ mutateAsync: transport.end }) },
     submitRegularExercise: { useMutation: () => ({ mutateAsync: transport.submit }) },
     switchRegularExerciseToStep: { useMutation: () => ({ mutateAsync: transport.switchToStep }) },
   },
@@ -34,13 +36,22 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
 
 import { ChallengePageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/pageOnClient';
 import { PracticePageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/practice/pageOnClient';
+import { AuthContextProvider } from '../../../src/contexts/AuthContext';
+import { instantiateProblem } from '../../../src/problems/instantiateProblem';
+import { instantiatePracticeProblem } from '../../../src/problems/practice/instantiatePracticeProblem';
 import { courseIdToLectureIds } from '../../../src/problems/problemData';
 import type { RegularExerciseDisplay } from '../../../src/problems/regular/exerciseProblem';
 
+const problemOf = (problemId: string): RegularExerciseDisplay['problem'] => {
+  const problem = instantiatePracticeProblem(problemId, 'practice-ui') ?? instantiateProblem(problemId, 'practice-ui');
+  if (!problem) throw new Error(`Unknown problem: ${problemId}`);
+  return problem;
+};
 const display: RegularExerciseDisplay = {
   problemFormat: 'regular',
   sessionId: 17,
   problemId: 'practiceEasyV1TestL1ScalarUpdateV1',
+  problem: problemOf('practiceEasyV1TestL1ScalarUpdateV1'),
   seed: 'practice-ui',
   problemType: 'executionResult',
   traceItemIndex: 0,
@@ -49,7 +60,9 @@ const display: RegularExerciseDisplay = {
 const page = (): React.ReactNode => (
   <ChakraProvider>
     <StrictMode>
-      <PracticePageOnClient />
+      <AuthContextProvider currentUserId="user-1">
+        <PracticePageOnClient />
+      </AuthContextProvider>
     </StrictMode>
   </ChakraProvider>
 );
@@ -119,7 +132,11 @@ test('edits a real practice answer and retains the incorrect draft through feedb
 test('confirms step conversion and submits an independently correct first answer through practice transport', async () => {
   navigation.courseId = 'tuBeginner2';
   navigation.lectureId = courseIdToLectureIds.tuBeginner2[5];
-  const initial = { ...display, problemId: 'practiceEasyV1Beginner2L6OverloadDispatchV1' };
+  const initial = {
+    ...display,
+    problemId: 'practiceEasyV1Beginner2L6OverloadDispatchV1',
+    problem: problemOf('practiceEasyV1Beginner2L6OverloadDispatchV1'),
+  };
   const firstStep: RegularExerciseDisplay = { ...initial, problemType: 'step', traceItemIndex: 1 };
   transport.start.mockResolvedValue(initial);
   transport.submit.mockResolvedValue({ ...firstStep, traceItemIndex: 2 });
@@ -137,9 +154,8 @@ test('confirms step conversion and submits an independently correct first answer
     sessionId: 17,
   });
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
-  const stepInput = screen.getByRole('textbox');
-  await user.type(stepInput, '2');
-  expect(stepInput).toHaveValue('2');
+  // The first step only creates the object, so its correct answer needs no variable input.
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   const submitStep = screen.getByRole('button', { name: /提出/ });
   await waitFor(() => expect(submitStep).toBeEnabled());
   await user.click(submitStep);
@@ -154,16 +170,29 @@ test('confirms step conversion and submits an independently correct first answer
   expect(await screen.findByRole('alertdialog')).toHaveTextContent('正解');
 });
 
-test('returns to the lecture when ending completed practice', async () => {
+test('ends completed practice and returns to the lecture', async () => {
   transport.start.mockResolvedValue({ ...display, completed: true });
+  transport.end.mockResolvedValue({ status: 'ended' });
   const user = userEvent.setup();
   render(page());
   await user.click(await screen.findByRole('button', { name: '終わる' }));
-  expect(navigation.push).toHaveBeenCalledWith(`/courses/test/lectures/${navigation.lectureId}`);
+  await waitFor(() => expect(navigation.push).toHaveBeenCalledWith(`/courses/test/lectures/${navigation.lectureId}`));
+  expect(transport.end).toHaveBeenCalledExactlyOnceWith({
+    courseId: 'test',
+    lectureId: navigation.lectureId,
+    learningMode: 'practice',
+    sessionId: display.sessionId,
+    problemFormat: 'regular',
+  });
 });
 
 test('resumes completion, requests the next practice source, and resumes that source after remount', async () => {
-  const nextDisplay = { ...display, sessionId: 18, problemId: 'practiceEasyV1TestL1ScalarUpdateV2' };
+  const nextDisplay = {
+    ...display,
+    sessionId: 18,
+    problemId: 'practiceEasyV1TestL1ScalarUpdateV2',
+    problem: problemOf('practiceEasyV1TestL1ScalarUpdateV2'),
+  };
   transport.start.mockResolvedValueOnce({ ...display, completed: true }).mockResolvedValueOnce(nextDisplay);
   transport.next.mockResolvedValue(nextDisplay);
   const user = userEvent.setup();
@@ -194,7 +223,12 @@ test('ignores a deferred previous-location response after navigation', async () 
         resolveOld = resolve;
       })
     )
-    .mockResolvedValueOnce({ ...display, sessionId: 18, problemId: 'practiceEasyV1Beginner1L1TerminalTurnV1' });
+    .mockResolvedValueOnce({
+      ...display,
+      sessionId: 18,
+      problemId: 'practiceEasyV1Beginner1L1TerminalTurnV1',
+      problem: problemOf('practiceEasyV1Beginner1L1TerminalTurnV1'),
+    });
   const rendered = render(page());
   await waitFor(() => expect(transport.start).toHaveBeenCalledTimes(1));
   navigation.courseId = 'tuBeginner1';
@@ -214,7 +248,7 @@ test('ignores a deferred previous-location response after navigation', async () 
 
 test('a late practice Next response cannot replace the challenge page or its answer draft after mode navigation', async () => {
   let resolveNext!: (value: RegularExerciseDisplay) => void;
-  const challenge: RegularExerciseDisplay = { ...display, problemId: 'test3' };
+  const challenge: RegularExerciseDisplay = { ...display, problemId: 'test3', problem: problemOf('test3') };
   transport.start.mockResolvedValueOnce({ ...display, completed: true }).mockResolvedValueOnce(challenge);
   transport.next.mockReturnValue(
     new Promise<RegularExerciseDisplay>((resolve) => {
@@ -228,7 +262,9 @@ test('a late practice Next response cannot replace the challenge page or its ans
   rendered.rerender(
     <ChakraProvider>
       <StrictMode>
-        <ChallengePageOnClient initialFormat="regular" />
+        <AuthContextProvider currentUserId="user-1">
+          <ChallengePageOnClient initialFormat="regular" />
+        </AuthContextProvider>
       </StrictMode>
     </ChakraProvider>
   );
@@ -236,7 +272,14 @@ test('a late practice Next response cannot replace the challenge page or its ans
   const inputs = screen.getAllByRole('textbox');
   await user.type(inputs[0], '9876');
   expect(inputs[0]).toHaveValue('9876');
-  await act(async () => resolveNext({ ...display, sessionId: 18, problemId: 'practiceEasyV1TestL1ScalarUpdateV2' }));
+  await act(async () =>
+    resolveNext({
+      ...display,
+      sessionId: 18,
+      problemId: 'practiceEasyV1TestL1ScalarUpdateV2',
+      problem: problemOf('practiceEasyV1TestL1ScalarUpdateV2'),
+    })
+  );
   expect(screen.getByRole('heading', { level: 1, name: 'ステップ実行のテスト用問題(3)' })).toBeVisible();
   expect(screen.getAllByRole('textbox')[0]).toHaveValue('9876');
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
@@ -257,6 +300,7 @@ test('a stale step draft is discarded when reloading the practice route into its
     ...display,
     sessionId: 18,
     problemId: 'practiceEasyV1TestL1ScalarUpdateV3',
+    problem: problemOf('practiceEasyV1TestL1ScalarUpdateV3'),
   };
   transport.start.mockResolvedValueOnce(oldStep).mockResolvedValueOnce(replacement);
   transport.submit.mockRejectedValue({ data: { code: 'CONFLICT' } });

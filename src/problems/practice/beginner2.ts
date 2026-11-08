@@ -148,315 +148,167 @@ export const beginner2PracticeDefinitions = [
 ] satisfies PracticeDefinition[];
 
 function independentTurns(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    Turtle a = new Turtle(${value}, 1); // step
-    Turtle b = new Turtle(${value}, 3); // step
-    a.右を向く(); // step
-    b.左を向く(); // step
+    Turtle a = new Turtle(${value}, 1);
+    Turtle b = new Turtle(${value}, 3);
+    a.右を向く();
+    b.左を向く();
   }
 }
 
-`,
-    instrumented: `
-function main() {
-  const a = new Turtle(${value}, 1); registerDisplayRef('a', () => a); // step
-  const b = new Turtle(${value}, 3); registerDisplayRef('b', () => b); // step
-  a.右を向く(); // step
-  b.左を向く(); // step
-}
-
-main();
-`,
-  };
+`;
 }
 
 function aliasTurn(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    Turtle t = new Turtle(${value}, 1); // step
-    Turtle alias = t; // step
-    alias.右を向く(); // step
-    t.前に進む(); // step
+    Turtle t = new Turtle(${value}, 1);
+    Turtle alias = t;
+    alias.右を向く();
+    t.前に進む();
   }
 }
 
-`,
-    instrumented: `
-function main() {
-  const t = new Turtle(${value}, 1); registerDisplayRef('t', () => t); // step
-  const alias = t; registerDisplayRef('alias', () => alias); // step
-  alias.右を向く(); // step
-  t.前に進む(); // step
-}
-
-main();
-`,
-  };
+`;
 }
 
 function referenceTarget(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    Turtle a = new Turtle(${value}, 1); // step
-    Turtle b = new Turtle(${value}, 3); // step
-    Turtle active = a; // step
-    active = b; // step
-    active.後に戻る(); // step
+    Turtle a = new Turtle(${value}, 1);
+    Turtle b = new Turtle(${value}, 3);
+    Turtle active = a;
+    active = b;
+    active.後に戻る();
   }
 }
 
-`,
-    instrumented: `
-function main() {
-  const a = new Turtle(${value}, 1); registerDisplayRef('a', () => a); // step
-  const b = new Turtle(${value}, 3); registerDisplayRef('b', () => b); // step
-  let active = a; registerDisplayRef('active', () => active); // step
-  active = b; // step
-  active.後に戻る(); // step
-}
-
-main();
-`,
-  };
+`;
 }
 
 function fieldRead(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    Box b = new Box(); // caller
-    int x = b.value; // step
-    Turtle t = new Turtle(x, 0); // step
+    Box b = new Box();
+    int x = b.value;
+    Turtle t = new Turtle(x, 0);
   }
 }
 class Box {
-  int value = ${value}; // step
+  int value = ${value};
 }
-`,
-    instrumented: `
-function main() {
-  const b = call(Box)(); registerDisplayRef('b', () => b);
-  s.set('x', b.value);
-  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
-}
-class Box {
-  constructor() {
-    this.value = ${value}; // step
-  }
-}
-main();
-`,
-  };
+`;
 }
 
 function instanceMethod(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    Box b = new Box(); // caller
-    b.increase(); // caller
-    int x = b.value; // step
-    Turtle t = new Turtle(x, 0); // step
+    Box b = new Box();
+    b.increase();
+    int x = b.value;
+    Turtle t = new Turtle(x, 0);
   }
 }
 class Box {
-  int value = ${value}; // step
+  int value = ${value};
   void increase() {
-    this.value++; // step
+    this.value++;
   }
 }
-`,
-    instrumented: `
-function main() {
-  const b = call(Box)(); registerDisplayRef('b', () => b);
-  call(b.increase.bind(b))();
-  s.set('x', b.value);
-  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
-}
-class Box {
-  constructor() {
-    this.value = ${value}; // step
-  }
-  increase() {
-    this.value++; // step
-  }
-}
-main();
-`,
-  };
+`;
 }
 
 function constructorField(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    Box b = new Box(${value}); // caller
-    int x = b.value; // step
-    Turtle t = new Turtle(x, 0); // step
+    Box b = new Box(${value});
+    int x = b.value;
+    Turtle t = new Turtle(x, 0);
   }
 }
 class Box {
   int value;
   Box(int value) {
-    this.value = value; // step
+    this.value = value;
   }
 }
-`,
-    instrumented: `
-function main() {
-  const b = call(Box, 'value')(${value}); registerDisplayRef('b', () => b);
-  s.set('x', b.value);
-  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
-}
-class Box {
-  constructor(value) {
-    this.value = value; // step
-  }
-}
-main();
-`,
-  };
+`;
 }
 
 function publicField(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    Box b = new Box(); // caller
-    b.value = ${value}; // step
-    Turtle t = new Turtle(b.value, 0); // step
+    Box b = new Box();
+    b.value = ${value};
+    Turtle t = new Turtle(b.value, 0);
   }
 }
 class Box {
-  public int value = 0; // step
+  public int value = 0;
 }
-`,
-    instrumented: `
-function main() {
-  const b = call(Box)(); registerDisplayRef('b', () => b);
-  b.value = ${value}; // step
-  const t = new Turtle(b.value, 0); registerDisplayRef('t', () => t); // step
-}
-class Box {
-  constructor() {
-    this.value = 0; // step
-  }
-}
-main();
-`,
-  };
+`;
 }
 
 function accessor(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    Box b = new Box(); // caller
-    b.setValue(${value}); // caller
-    int x = b.getValue(); // step // caller
-    Turtle t = new Turtle(x, 0); // step
+    Box b = new Box();
+    b.setValue(${value});
+    int x = b.getValue();
+    Turtle t = new Turtle(x, 0);
   }
 }
 class Box {
-  private int value = 3; // step
+  private int value = 3;
   public void setValue(int value) {
-    this.value = value; // step
+    this.value = value;
   }
   public int getValue() {
     return this.value;
   }
 }
-`,
-    instrumented: `
-function main() {
-  const b = call(Box)(); registerDisplayRef('b', () => b);
-  call(b.setValue.bind(b), 'value')(${value});
-  s.set('x', call(b.getValue.bind(b))());
-  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
-}
-class Box {
-  constructor() {
-    this.value = 3; // step
-  }
-  setValue(value) {
-    this.value = value; // step
-  }
-  getValue() {
-    return this.value;
-  }
-}
-main();
-`,
-  };
+`;
 }
 
 function guardedSetter(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    Box b = new Box(); // caller
-    b.setValue(${value}); // caller
-    int x = b.getValue(); // step // caller
-    Turtle t = new Turtle(x, 0); // step
+    Box b = new Box();
+    b.setValue(${value});
+    int x = b.getValue();
+    Turtle t = new Turtle(x, 0);
   }
 }
 class Box {
-  private int value = 3; // step
+  private int value = 3;
   public void setValue(int value) {
     if (value >= 0) {
-      this.value = value; // step
+      this.value = value;
     }
   }
   public int getValue() {
     return this.value;
   }
 }
-`,
-    instrumented: `
-function main() {
-  const b = call(Box)(); registerDisplayRef('b', () => b);
-  call(b.setValue.bind(b), 'value')(${value});
-  s.set('x', call(b.getValue.bind(b))());
-  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
-}
-class Box {
-  constructor() {
-    this.value = 3; // step
-  }
-  setValue(value) {
-    if (value >= 0) {
-      this.value = value; // step
-    }
-  }
-  getValue() {
-    return this.value;
-  }
-}
-main();
-`,
-  };
+`;
 }
 
 function staticCall(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    int x = Coordinate.next(${value}); // step // caller
-    Turtle t = new Turtle(x, 0); // step
+    int x = Coordinate.next(${value});
+    Turtle t = new Turtle(x, 0);
   }
 }
 class Coordinate {
@@ -464,90 +316,48 @@ class Coordinate {
     return value + 1;
   }
 }
-`,
-    instrumented: `
-function main() {
-  s.set('x', call(Coordinate.next, 'value')(${value}));
-  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
-}
-class Coordinate {
-  static next(value) {
-    return value + 1;
-  }
-}
-main();
-`,
-  };
+`;
 }
 
 function staticField(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    Settings.value = ${value}; // step
-    int x = Settings.value; // step
-    Turtle t = new Turtle(x, 0); // step
+    Settings.value = ${value};
+    int x = Settings.value;
+    Turtle t = new Turtle(x, 0);
   }
 }
 class Settings {
   static int value = 0;
 }
-`,
-    instrumented: `
-function main() {
-  Settings.value = ${value}; // step
-  s.set('x', Settings.value);
-  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
-}
-class Settings {
-  static value = 0;
-}
-main();
-`,
-  };
+`;
 }
 
 function sharedField(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    Settings a = new Settings(); // caller
-    Settings b = new Settings(); // caller
-    a.value = ${value}; // step
-    int x = b.value; // step
-    Turtle t = new Turtle(x, 0); // step
+    Settings a = new Settings();
+    Settings b = new Settings();
+    a.value = ${value};
+    int x = b.value;
+    Turtle t = new Turtle(x, 0);
   }
 }
 class Settings {
   static int value = 0;
 }
-`,
-    instrumented: `
-function main() {
-  const a = call(Settings)(); registerDisplayRef('a', () => a);
-  const b = call(Settings)(); registerDisplayRef('b', () => b);
-  Settings.value = ${value}; // step
-  s.set('x', Settings.value);
-  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
-}
-class Settings {
-  static value = 0;
-}
-main();
-`,
-  };
+`;
 }
 
 function inheritedMethod(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    Child b = new Child(); // caller
-    int x = b.getValue(); // step // caller
-    Turtle t = new Turtle(x, 0); // step
+    Child b = new Child();
+    int x = b.getValue();
+    Turtle t = new Turtle(x, 0);
   }
 }
 class Parent {
@@ -556,32 +366,16 @@ class Parent {
   }
 }
 class Child extends Parent { }
-`,
-    instrumented: `
-function main() {
-  const b = call(Child)(); registerDisplayRef('b', () => b);
-  s.set('x', call(b.getValue.bind(b))());
-  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
-}
-class Parent {
-  getValue() {
-    return ${value};
-  }
-}
-class Child extends Parent { }
-main();
-`,
-  };
+`;
 }
 
 function overrideMethod(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    Child b = new Child(); // caller
-    int x = b.getValue(); // step // caller
-    Turtle t = new Turtle(x, 0); // step
+    Child b = new Child();
+    int x = b.getValue();
+    Turtle t = new Turtle(x, 0);
   }
 }
 class Parent {
@@ -594,36 +388,16 @@ class Child extends Parent {
     return ${value};
   }
 }
-`,
-    instrumented: `
-function main() {
-  const b = call(Child)(); registerDisplayRef('b', () => b);
-  s.set('x', call(b.getValue.bind(b))());
-  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
-}
-class Parent {
-  getValue() {
-    return 0;
-  }
-}
-class Child extends Parent {
-  getValue() {
-    return ${value};
-  }
-}
-main();
-`,
-  };
+`;
 }
 
 function baseReference(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    Parent b = new Child(); // caller
-    int x = b.getValue(); // step // caller
-    Turtle t = new Turtle(x, 0); // step
+    Parent b = new Child();
+    int x = b.getValue();
+    Turtle t = new Turtle(x, 0);
   }
 }
 class Parent {
@@ -636,37 +410,17 @@ class Child extends Parent {
     return ${value};
   }
 }
-`,
-    instrumented: `
-function main() {
-  const b = call(Child)(); registerDisplayRef('b', () => b);
-  s.set('x', call(b.getValue.bind(b))());
-  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
-}
-class Parent {
-  getValue() {
-    return 0;
-  }
-}
-class Child extends Parent {
-  getValue() {
-    return ${value};
-  }
-}
-main();
-`,
-  };
+`;
 }
 
 function packageValue(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 // Main.java
 import coordinates.Coordinate;
 public class Main {
   public static void main(String[] args) {
-    int x = Coordinate.getValue(); // step // caller
-    Turtle t = new Turtle(x, 0); // step
+    int x = Coordinate.getValue();
+    Turtle t = new Turtle(x, 0);
   }
 }
 // coordinates/Coordinate.java
@@ -676,30 +430,16 @@ public class Coordinate {
     return ${value};
   }
 }
-`,
-    instrumented: `
-function main() {
-  s.set('x', call(Coordinate.getValue)());
-  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
-}
-class Coordinate {
-  static getValue() {
-    return ${value};
-  }
-}
-main();
-`,
-  };
+`;
 }
 
 function overloadCall(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    Parent b = new Parent(); // caller
-    int x = b.getValue(${value}); // step // caller
-    Turtle t = new Turtle(x, 0); // step
+    Parent b = new Parent();
+    int x = b.getValue(${value});
+    Turtle t = new Turtle(x, 0);
   }
 }
 class Parent {
@@ -710,34 +450,16 @@ class Parent {
     return value;
   }
 }
-`,
-    instrumented: `
-function main() {
-  const b = call(Parent)(); registerDisplayRef('b', () => b);
-  s.set('x', call(b.getValueInt.bind(b), 'value')(${value}));
-  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
-}
-class Parent {
-  getValue() {
-    return 0;
-  }
-  getValueInt(value) {
-    return value;
-  }
-}
-main();
-`,
-  };
+`;
 }
 
 function overloadDispatch(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    Parent b = new Child(); // caller
-    int x = b.getValue(${value}); // step // caller
-    Turtle t = new Turtle(x, 0); // step
+    Parent b = new Child();
+    int x = b.getValue(${value});
+    Turtle t = new Turtle(x, 0);
   }
 }
 class Parent {
@@ -753,72 +475,35 @@ class Child extends Parent {
     return value + 1;
   }
 }
-`,
-    instrumented: `
-function main() {
-  const b = call(Child)(); registerDisplayRef('b', () => b);
-  s.set('x', call(b.getValueInt.bind(b), 'value')(${value}));
-  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
-}
-class Parent {
-  getValue() {
-    return 0;
-  }
-  getValueInt(value) {
-    return value;
-  }
-}
-class Child extends Parent {
-  getValueInt(value) {
-    return value + 1;
-  }
-}
-main();
-`,
-  };
+`;
 }
 
 function trySuccess(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    Turtle t = new Turtle(${value}, 1); // step
+    Turtle t = new Turtle(${value}, 1);
     try {
-      t.前に進む(); // step
+      t.前に進む();
     } catch (RuntimeException e) {
-      t.右を向く(); // step
+      t.右を向く();
     }
   }
 }
 
-`,
-    instrumented: `
-function main() {
-  const t = new Turtle(${value}, 1); registerDisplayRef('t', () => t); // step
-  try {
-    t.前に進む(); // step
-  } catch (e) {
-    t.右を向く(); // step
-  }
-}
-
-main();
-`,
-  };
+`;
 }
 
 function exceptionSkip(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    Turtle t = new Turtle(${value}, 1); // step
+    Turtle t = new Turtle(${value}, 1);
     try {
-      Stop.fail(); // caller
-      t.前に進む(); // step
+      Stop.fail();
+      t.前に進む();
     } catch (IllegalArgumentException e) {
-      t.右を向く(); // step
+      t.右を向く();
     }
   }
 }
@@ -827,127 +512,61 @@ class Stop {
     throw new IllegalArgumentException();
   }
 }
-`,
-    instrumented: `
-function main() {
-  const t = new Turtle(${value}, 1); registerDisplayRef('t', () => t); // step
-  try {
-    call(Stop.fail)();
-    t.前に進む(); // step
-  } catch (e) {
-    t.右を向く(); // step
-  }
-}
-class Stop {
-  static fail() {
-    throw new Error();
-  }
-}
-main();
-`,
-  };
+`;
 }
 
 function customException(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    Turtle t = new Turtle(${value}, 1); // step
+    Turtle t = new Turtle(${value}, 1);
     try {
       throw new Stop();
     } catch (Stop e) {
-      t.後に戻る(); // step
+      t.後に戻る();
     }
   }
 }
 class Stop extends Exception { }
-`,
-    instrumented: `
-function main() {
-  const t = new Turtle(${value}, 1); registerDisplayRef('t', () => t); // step
-  try {
-    throw new Stop();
-  } catch (e) {
-    t.後に戻る(); // step
-  }
-}
-class Stop extends Error { }
-main();
-`,
-  };
+`;
 }
 
 function cellRead(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    int[][] values = {{0, ${value}}, {0, 0}}; // step
-    int x = values[0][1]; // step
-    Turtle t = new Turtle(x, 0); // step
+    int[][] values = {{0, ${value}}, {0, 0}};
+    int x = values[0][1];
+    Turtle t = new Turtle(x, 0);
   }
 }
 
-`,
-    instrumented: `
-function main() {
-  const values = [[0, ${value}], [0, 0]]; registerDisplayRef('values', () => values); // step
-  s.set('x', values[0][1]);
-  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
-}
-
-main();
-`,
-  };
+`;
 }
 
 function cellUpdate(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    int[][] values = {{0, 0}, {0, 0}}; // step
-    values[0][1] = ${value}; // step
-    int x = values[0][1]; // step
-    Turtle t = new Turtle(x, 0); // step
+    int[][] values = {{0, 0}, {0, 0}};
+    values[0][1] = ${value};
+    int x = values[0][1];
+    Turtle t = new Turtle(x, 0);
   }
 }
 
-`,
-    instrumented: `
-function main() {
-  const values = [[0, 0], [0, 0]]; registerDisplayRef('values', () => values); // step
-  values[0][1] = ${value}; // step
-  s.set('x', values[0][1]);
-  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
-}
-
-main();
-`,
-  };
+`;
 }
 
 function layerRead(value: number): PracticeDefinition['program'] {
-  return {
-    java: `
+  return `
 public class Main {
   public static void main(String[] args) {
-    int[][][] values = {{{0}}, {{${value}}}}; // step
-    int x = values[1][0][0]; // step
-    Turtle t = new Turtle(x, 0); // step
+    int[][][] values = {{{0}}, {{${value}}}};
+    int x = values[1][0][0];
+    Turtle t = new Turtle(x, 0);
   }
 }
 
-`,
-    instrumented: `
-function main() {
-  const values = [[[0]], [[${value}]]]; registerDisplayRef('values', () => values); // step
-  s.set('x', values[1][0][0]);
-  const t = new Turtle(s.get('x'), 0); registerDisplayRef('t', () => t); // step
-}
-
-main();
-`,
-  };
+`;
 }
