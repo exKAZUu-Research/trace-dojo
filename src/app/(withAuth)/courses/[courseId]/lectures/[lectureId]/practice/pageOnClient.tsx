@@ -82,11 +82,10 @@ const PracticeSession: React.FC<{ courseId: CourseId; lectureId: string }> = ({ 
           lectureId={lectureId}
           display={display}
           back={async (sessionId) => {
-            try {
-              await detectStale(end.mutateAsync({ ...location, sessionId, problemFormat: 'regular' }));
-            } catch {
-              throw new Error('終了できませんでした。もう一度お試しください。');
-            }
+            await withFailureMessage(
+              detectStale(end.mutateAsync({ ...location, sessionId, problemFormat: 'regular' })),
+              '終了できませんでした。もう一度お試しください。'
+            );
             back();
           }}
           transport={{
@@ -94,7 +93,10 @@ const PracticeSession: React.FC<{ courseId: CourseId; lectureId: string }> = ({ 
             switchToStep: async ({ sessionId }) =>
               await detectStale(switchToStep.mutateAsync({ ...location, sessionId })),
             next: async ({ sessionId }) => {
-              const value = await detectStale(next.mutateAsync({ ...location, sessionId, problemFormat: 'regular' }));
+              const value = await withFailureMessage(
+                detectStale(next.mutateAsync({ ...location, sessionId, problemFormat: 'regular' })),
+                '次の問題を取得できませんでした。'
+              );
               if ('status' in value || value.problemFormat !== 'regular')
                 throw new Error('次の問題を取得できませんでした。');
               return value;
@@ -121,4 +123,12 @@ const PracticeSession: React.FC<{ courseId: CourseId; lectureId: string }> = ({ 
       )}
     </VStack>
   );
+};
+
+const withFailureMessage = async <T,>(promise: Promise<T>, message: string): Promise<T> => {
+  try {
+    return await promise;
+  } catch {
+    throw new Error(message);
+  }
 };

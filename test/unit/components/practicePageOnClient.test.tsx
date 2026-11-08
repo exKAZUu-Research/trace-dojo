@@ -170,6 +170,16 @@ test('confirms step conversion and submits an independently correct first answer
   expect(await screen.findByRole('alertdialog')).toHaveTextContent('正解');
 });
 
+test('a failed practice Next shows the Japanese failure message instead of the transport error', async () => {
+  transport.start.mockResolvedValue({ ...display, completed: true });
+  transport.next.mockRejectedValue(new Error('Failed to fetch'));
+  const user = userEvent.setup();
+  render(page());
+  await user.click(await screen.findByRole('button', { name: '次の問題へ' }));
+  expect(await screen.findByText('次の問題を取得できませんでした。')).toBeVisible();
+  expect(screen.queryByText('Failed to fetch')).not.toBeInTheDocument();
+});
+
 test('ends completed practice and returns to the lecture', async () => {
   transport.start.mockResolvedValue({ ...display, completed: true });
   transport.end.mockResolvedValue({ status: 'ended' });
