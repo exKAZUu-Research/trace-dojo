@@ -181,6 +181,23 @@ test('uses one keyboard stop, navigates hints, dismisses without moving focus, a
   await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
 });
 
+test('keeps a pressed hint tooltip mounted and recovers hints when a press release never arrives', async () => {
+  const { container } = renderHighlighter({ code: 'int 個数 = 17; 個数 %= 5;' });
+  const hints = within(getCode(container)).getAllByRole('button');
+  fireEvent.pointerEnter(hints[0], { buttons: 0 });
+  await screen.findByRole('tooltip');
+  fireEvent.pointerDown(hints[0], { buttons: 1 });
+  expect(screen.getByRole('tooltip')).toBeInTheDocument();
+  expect(container.querySelectorAll('[tabindex="0"]')).toHaveLength(0);
+  fireEvent.blur(globalThis.window);
+  expect(container.querySelectorAll('[tabindex="0"]')).toHaveLength(1);
+  fireEvent.pointerDown(hints[0], { buttons: 1 });
+  fireEvent.pointerLeave(hints[0]);
+  fireEvent.pointerEnter(hints[1], { buttons: 0 });
+  expect(await screen.findByRole('tooltip')).toHaveTextContent(/[ぁ-んァ-ヶ一-龯]/);
+  expect(container.querySelectorAll('[tabindex="0"]')).toHaveLength(1);
+});
+
 test('pins a hovered hint, keeps it while hovering another, switches on tap, and dismisses outside', async () => {
   const user = userEvent.setup();
   const { container } = renderHighlighter({ code: '個数 %= 5; 個数 = 個数 % 3;' });

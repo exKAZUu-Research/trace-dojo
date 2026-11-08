@@ -28,10 +28,14 @@ interface HintState {
   active: number;
   open?: number;
   pinned: boolean;
-  selecting: boolean;
+  pressed: boolean;
+  dragging: boolean;
 }
 interface HintController {
+  cancelClose: () => void;
+  pin: () => void;
   show: (index: number) => void;
+  hover: (index: number) => void;
   leave: () => void;
   toggle: (index: number) => void;
   dismiss: () => void;
@@ -48,12 +52,10 @@ type HintKeyAction =
   | { kind: 'dismiss' }
   | { kind: 'leave' };
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Each small controller handler updates the shared hint state; moving them out would only pass that state around.
-// code-gauge-allow functionNcss 60 -- Each small controller handler updates the shared hint state; moving them out would only pass that state around.
 export const JavaSyntaxHints: React.FC<RendererProps> = ({ rows, stylesheet, useInlineStyles }) => {
-  const [state, update] = useImmer<HintState>({ active: 0, pinned: false, selecting: false });
+  const [state, update] = useImmer<HintState>({ active: 0, pinned: false, pressed: false, dragging: false });
   const popup = useTooltip({
-    isOpen: state.open !== undefined && !state.selecting,
+    isOpen: state.open !== undefined && !state.dragging,
     closeOnClick: false,
     closeOnEsc: false,
     closeOnPointerDown: false,
@@ -67,13 +69,83 @@ export const JavaSyntaxHints: React.FC<RendererProps> = ({ rows, stylesheet, use
   useEffect(() => () => clearTimeout(closeTimer.current), []);
   useOutsideDismissal(update, targets, tooltip);
 
+  const controller = createHintController(update, closeTimer, targets, tooltip);
+
+  const renderNode = (node: Node, key: string): ReactNode => {
+    const element = createElement({ node, stylesheet, useInlineStyles, key });
+    if (node.type === 'text') return element;
+    const hint = hints.get(node);
+    if (!hint) {
+      return cloneElement(
+        element as ReactElement,
+        undefined,
+        node.children?.map((child, index) => renderNode(child, `${key}-${index}`))
+      );
+    }
+    const triggerProps = state.open === hint.index ? popup.getTriggerProps() : {};
+    return (
+      <HintToken
+        key={key}
+        controller={controller}
+        hint={hint}
+        hintCount={hints.size}
+        // Chromium starts no drag selection on an inline element that the press focuses.
+        tabIndex={state.pressed ? undefined : state.active === hint.index ? 0 : -1}
+        targets={targets}
+        triggerProps={triggerProps}
+      >
+        {element}
+      </HintToken>
+    );
+  };
+
+  const content = [...hints.values()].find((hint) => hint.index === state.open)?.description;
+
+  return (
+    <>
+      {rows.map((row, index) => renderNode(row, String(index)))}
+      {popup.isOpen && content && (
+        <HintTooltip
+          content={content}
+          positionerProps={popup.getTooltipPositionerProps()}
+          tooltipProps={popup.getTooltipProps()}
+          tooltipRef={tooltip}
+          onPin={controller.pin}
+          onEnter={controller.cancelClose}
+          onLeave={controller.leave}
+        />
+      )}
+    </>
+  );
+};
+
+// code-gauge-allow functionNcss 42 -- One small handler per hint interaction, all sharing the close timer and state updater.
+const createHintController = (
+  update: Updater<HintState>,
+  closeTimer: RefObject<ReturnType<typeof setTimeout> | undefined>,
+  targets: RefObject<Map<number, HTMLSpanElement>>,
+  tooltip: RefObject<HTMLDivElement | null>
+): HintController => {
   const cancelClose = (): void => clearTimeout(closeTimer.current);
   const controller: HintController = {
+    cancelClose,
+    pin: () => {
+      cancelClose();
+      update((draft) => {
+        draft.pinned = true;
+      });
+    },
+
     show: (index) => {
       cancelClose();
       update((draft) => {
         if (!draft.pinned) draft.open = index;
       });
+    },
+    hover: (index) => {
+      // A hover without a pressed button proves that any earlier press ended, even one released outside the page.
+      update(releasePress);
+      controller.show(index);
     },
     leave: () => {
       cancelClose();
@@ -102,7 +174,7 @@ export const JavaSyntaxHints: React.FC<RendererProps> = ({ rows, stylesheet, use
     },
     press: () => {
       update((draft) => {
-        draft.selecting = true;
+        draft.pressed = true;
       });
     },
     focus: (index) => {
@@ -126,60 +198,10 @@ export const JavaSyntaxHints: React.FC<RendererProps> = ({ rows, stylesheet, use
     },
     isTarget: (element) => [...targets.current.values()].some((target) => target === element),
   };
-
-  const renderNode = (node: Node, key: string): ReactNode => {
-    const element = createElement({ node, stylesheet, useInlineStyles, key });
-    if (node.type === 'text') return element;
-    const hint = hints.get(node);
-    if (!hint) {
-      return cloneElement(
-        element as ReactElement,
-        undefined,
-        node.children?.map((child, index) => renderNode(child, `${key}-${index}`))
-      );
-    }
-    const triggerProps = state.open === hint.index ? popup.getTriggerProps() : {};
-    return (
-      <HintToken
-        key={key}
-        controller={controller}
-        hint={hint}
-        hintCount={hints.size}
-        // Chromium starts no drag selection on an inline element that the press focuses.
-        tabIndex={state.selecting ? undefined : state.active === hint.index ? 0 : -1}
-        targets={targets}
-        triggerProps={triggerProps}
-      >
-        {element}
-      </HintToken>
-    );
-  };
-
-  const content = [...hints.values()].find((hint) => hint.index === state.open)?.description;
-
-  return (
-    <>
-      {rows.map((row, index) => renderNode(row, String(index)))}
-      {popup.isOpen && content && (
-        <HintTooltip
-          content={content}
-          positionerProps={popup.getTooltipPositionerProps()}
-          tooltipProps={popup.getTooltipProps()}
-          tooltipRef={tooltip}
-          onPin={() => {
-            cancelClose();
-            update((draft) => {
-              draft.pinned = true;
-            });
-          }}
-          onEnter={cancelClose}
-          onLeave={controller.leave}
-        />
-      )}
-    </>
-  );
+  return controller;
 };
 
+// code-gauge-allow functionNcss 39 -- One small listener per document or window event that ends a press or closes the hint.
 const useOutsideDismissal = (
   update: Updater<HintState>,
   targets: RefObject<Map<number, HTMLSpanElement>>,
@@ -198,24 +220,42 @@ const useOutsideDismissal = (
     };
     const release = (): void => {
       update((draft) => {
-        draft.selecting = false;
+        releasePress(draft);
         if (globalThis.getSelection()?.isCollapsed === false) close(draft);
       });
     };
-    const escape = (event: globalThis.KeyboardEvent): void => {
-      if (event.key === 'Escape') update(close);
+    const select = (): void => {
+      update((draft) => {
+        draft.dragging = draft.pressed && globalThis.getSelection()?.isCollapsed === false;
+      });
     };
+    const key = (event: globalThis.KeyboardEvent): void => {
+      update((draft) => {
+        releasePress(draft);
+        if (event.key === 'Escape') close(draft);
+      });
+    };
+    const blur = (): void => update(releasePress);
     document.addEventListener('pointerdown', outside);
     document.addEventListener('pointerup', release);
     document.addEventListener('pointercancel', release);
-    document.addEventListener('keydown', escape);
+    document.addEventListener('selectionchange', select);
+    document.addEventListener('keydown', key);
+    globalThis.addEventListener('blur', blur);
     return () => {
       document.removeEventListener('pointerdown', outside);
       document.removeEventListener('pointerup', release);
       document.removeEventListener('pointercancel', release);
-      document.removeEventListener('keydown', escape);
+      document.removeEventListener('selectionchange', select);
+      document.removeEventListener('keydown', key);
+      globalThis.removeEventListener('blur', blur);
     };
   }, [update, targets, tooltip]);
+};
+
+const releasePress = (draft: HintState): void => {
+  draft.pressed = false;
+  draft.dragging = false;
 };
 
 interface HintTokenProps {
@@ -267,7 +307,7 @@ const HintToken: React.FC<HintTokenProps> = ({
       aria-label={`${hint.text} の説明`}
       tabIndex={tabIndex}
       onPointerEnter={(event: ReactPointerEvent<HTMLSpanElement>) => {
-        if (event.buttons === 0) controller.show(hint.index);
+        if (event.buttons === 0) controller.hover(hint.index);
       }}
       onPointerDown={controller.press}
       onPointerLeave={controller.leave}
