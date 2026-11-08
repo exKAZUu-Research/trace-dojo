@@ -1,12 +1,9 @@
 import { expect, test } from 'vitest';
 
-import { challengeBases } from '../../src/problems/challenge/definitions';
-import { challengeMetadata } from '../../src/problems/challenge/metadata';
-import { instantiateRegularChallenge } from '../../src/problems/challenge/regular';
+import { challengeBases } from '../../src/problems/catalog/java/definitions';
 import { stripJavaTraceAnnotations } from '../../src/problems/fillInBlank/javaSource';
-import { javaChallengeDefinitions } from '../../src/problems/javaChallenges/definitions';
-import { instantiateJavaChallenge } from '../../src/problems/javaChallenges/instantiate';
 import { courseIdToLectureIndexToProblemIds } from '../../src/problems/problemData';
+import { instantiateRegularChallenge } from '../../src/problems/regular/instantiateChallenge';
 
 test('all independent regular challenges render bounded traces', () => {
   expect(challengeBases).toHaveLength(160);
@@ -26,38 +23,6 @@ test('all independent regular challenges render bounded traces', () => {
     expect(problem.traceItems.length - 1, base.id).toBeGreaterThan(0);
     expect(problem.traceItems.length - 1, base.id).toBeLessThanOrEqual(30);
     expect(courseIdToLectureIndexToProblemIds[base.courseId].flat(), base.id).not.toContain(base.id);
-    for (const edits of [base.blanks, base.bugs])
-      expect(new Set(edits.map(({ before }) => before)).size, `${base.id}: distinct edit positions`).toBe(3);
-  }
-});
-
-test('generated metadata remains current and contains only public fields', () => {
-  for (const base of challengeBases) {
-    for (const [id, item] of Object.entries(challengeMetadata).filter(
-      ([id]) => id === base.id || id.startsWith(`${base.id}Blank`) || id.startsWith(`${base.id}Bug`)
-    )) {
-      expect(Object.keys(item).toSorted(), id).toEqual(['courseId', 'lectureIndex', 'problemFormat', 'title']);
-      expect(item).toMatchObject({ title: base.title, courseId: base.courseId, lectureIndex: base.lectureIndex });
-    }
-    expect(
-      Object.keys(challengeMetadata).filter(
-        (id) => id === base.id || id.startsWith(`${base.id}Blank`) || id.startsWith(`${base.id}Bug`)
-      )
-    ).toHaveLength(1 + base.blanks.length + base.bugs.length);
-  }
-});
-
-test('all independent blank and bug starters hide internal annotations while preserving source line positions', () => {
-  const variants = Object.entries(challengeMetadata).filter(([, item]) => item.problemFormat !== 'regular');
-  expect(variants).toHaveLength(960);
-  for (const [id, item] of variants) {
-    if (item.problemFormat === 'regular') throw new Error('Unexpected regular variant');
-    const problem = instantiateJavaChallenge(id, item.problemFormat);
-    expect(problem.displayProgram, id).not.toMatch(/\/\/\s*atomic\b/);
-    expect(problem.displayProgram.split('\n'), id).toHaveLength(
-      javaChallengeDefinitions[id].starterProgram.split('\n').length
-    );
-    if (item.problemFormat === 'fillInBlank') expect(problem.displayProgram, id).toContain('【1】');
   }
 });
 

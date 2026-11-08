@@ -84,7 +84,7 @@ beforeEach(() => {
   transport.update.mockReset().mockResolvedValue({ elapsedMilliseconds: 123 });
 });
 
-test.each([turn, loop])('checking list offers an individual ordinary link for $problemId', (problem) => {
+test.each([turn, loop])('checking list omits the retired fixed problem $problemId', (problem) => {
   render(
     <ChakraProvider>
       <Lecture lectureIndex={0} problemSessions={[]} />
@@ -93,12 +93,10 @@ test.each([turn, loop])('checking list offers an individual ordinary link for $p
   const link = screen
     .getAllByRole('link')
     .find((item) => item.getAttribute('href') === `${transport.lectureId}/problems/${problem.problemId}`);
-  expect(link, 'The real checking-course membership must render a direct problem link').toBeDefined();
-  expect(link).toBeVisible();
-  expect(link).toHaveAccessibleName(/\S/);
+  expect(link).toBeUndefined();
   expect(
     screen.getAllByRole('link').some((item) => item.getAttribute('href')?.endsWith('/problems/fillInBlank1'))
-  ).toBe(true);
+  ).toBe(false);
 });
 
 test.each([turn, loop])(

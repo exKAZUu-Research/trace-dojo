@@ -5,15 +5,16 @@ import { and, asc, desc, eq, gt, gte, isNotNull, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { getLearningPeriodFilter } from '@/learningPeriod';
-import { challengeMetadata } from '@/problems/challenge/metadata';
-import { instantiateRegularChallenge } from '@/problems/challenge/regular';
+import { challengeBases } from '@/problems/catalog/java/definitions';
 import type { ExerciseDisplay } from '@/problems/fillInBlank/exerciseProblem';
-import { type FillInBlankVerdict, gradeFillInBlankCode, GRADING_STAGE } from '@/problems/fillInBlank/grade';
 import { MAX_JAVA_PROGRAM_LENGTH } from '@/problems/fillInBlank/javaProgram';
-import { type InstantiatedProblem, instantiateProblem, isFillInBlankProblem } from '@/problems/instantiateProblem';
-import { javaChallengeDefinitions } from '@/problems/javaChallenges/definitions';
-import { type InstantiatedJavaChallenge, instantiateJavaChallenge } from '@/problems/javaChallenges/instantiate';
-import type { JavaChallengeFormat } from '@/problems/javaChallenges/types';
+import { instantiateGeneratedChallenge } from '@/problems/generation/instantiate';
+import { generatedProblemSchema, snapshotOf } from '@/problems/generation/snapshot';
+import type { ChallengeFormat as JavaChallengeFormat, ChallengeTarget } from '@/problems/generation/types';
+import { type FillInBlankVerdict, gradeFillInBlankCode, GRADING_STAGE } from '@/problems/grading/turtleState';
+import { type InstantiatedProblem, instantiateProblem } from '@/problems/instantiateProblem';
+import { instantiateRegularChallenge } from '@/problems/regular/instantiateChallenge';
+type InstantiatedJavaChallenge = ChallengeTarget & { displayProgram: string };
 import { getPracticeProblemIds } from '@/problems/practice/definitions';
 import { instantiatePracticeProblem } from '@/problems/practice/instantiatePracticeProblem';
 import {
@@ -297,40 +298,21 @@ const ownedSession = (
   }
   return session;
 };
-// code-gauge-allow functionCognitiveComplexity 24 -- The practice bank adds one branch to the existing validation of the configured challenge lists.
 const candidatesFor = (courseId: string, lectureId: string, format: ProblemFormat, mode: LearningMode): string[] => {
   if (mode === 'practice') return getPracticeProblemIds(courseId, lectureId);
   const lectureIndex = courseIdToLectureIds[courseId as CourseId].indexOf(lectureId);
-  // Curriculum regular challenges come from the independent bank, not the ordinary lecture problem lists.
-  if (format === 'regular' && (courseId === 'tuBeginner1' || courseId === 'tuBeginner2')) {
-    return Object.entries(challengeMetadata)
-      .filter(
-        ([, item]) => item.courseId === courseId && item.lectureIndex === lectureIndex && item.problemFormat === format
-      )
-      .map(([id]) => id);
-  }
-  const configured =
-    format === 'regular'
-      ? courseIdToLectureIndexToProblemIds[courseId as CourseId]?.[lectureIndex]
-      : courseIdToLectureIndexToExerciseProblemIds[courseId as CourseId]?.[lectureIndex];
+  if (format === 'regular' && (courseId === 'tuBeginner1' || courseId === 'tuBeginner2'))
+    return challengeBases
+      .filter((base) => base.courseId === courseId && base.lectureIndex === lectureIndex)
+      .map((base) => base.id);
+  const configured = (
+    format === 'regular' ? courseIdToLectureIndexToProblemIds : courseIdToLectureIndexToExerciseProblemIds
+  )[courseId as CourseId]?.[lectureIndex];
   if (!configured) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Missing challenge configuration' });
-  return configured.filter((id) => {
-    const fixed = javaChallengeDefinitions[id];
-    if (fixed) {
-      if (format === 'regular') {
-        if (fixed.courseId !== courseId || fixed.lectureIndex !== lectureIndex)
-          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Wrong Java problem location: ${id}` });
-        return false;
-      }
-      return fixed.problemFormat === format;
-    }
-    if (!getProblemProgram(id))
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Unknown challenge problem: ${id}` });
-    const blank = isFillInBlankProblem(id);
-    if (format !== 'regular' && !blank)
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Challenge problem without blanks: ${id}` });
-    return format === 'regular' ? !blank : format === 'fillInBlank';
-  });
+  for (const id of configured)
+    if (!getProblemProgram(id) && !challengeBases.some((base) => base.id === id))
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Unknown challenge source: ${id}` });
+  return configured;
 };
 const resumableProblem = (
   courseId: string,
@@ -338,7 +320,8 @@ const resumableProblem = (
   format: ProblemFormat,
   mode: LearningMode
 ): ((row: ExerciseSession) => boolean) => {
-  // Checking-course challenges resume any stored problem; every other bank resumes only its current problems.
+  if (format !== 'regular') return (row) => row.generatedProblem !== null;
+  // Regular exercise banks resume only their current problems, except for the checking course.
   if (courseId === 'test' && mode === 'challenge') return () => true;
   const candidates = new Set(candidatesFor(courseId, lectureId, format, mode));
   return (row) => candidates.has(row.problemId);
@@ -377,27 +360,42 @@ const createFromCandidates = (
   const configured = candidatesFor(courseId, lectureId, format, mode);
   if (configured.length === 0) return { status: 'noProblems' as const };
   const candidates = configured.length > 1 ? configured.filter((id) => id !== previousId) : configured;
-  const problemId = candidates[Math.floor(Math.random() * candidates.length)];
-  const seed = randomUUID();
-  // Generate before inserting: a session whose problem cannot be generated would be resumed and fail forever.
-  const problem =
-    format === 'regular' ? instantiateRegular(problemId, seed, mode) : instantiateChallenge(problemId, seed, format);
-  const row = db
-    .insert(exerciseSessions)
-    .values({
-      userId,
-      courseId,
-      lectureId,
-      learningMode: mode,
-      problemFormat: format,
-      problemId,
-      seed,
-      problemType: format === 'regular' ? 'executionResult' : format,
-      traceItemIndex: 0,
-    })
-    .returning()
-    .get();
-  return toDisplay(row, format, problem);
+  const shuffled = [...candidates];
+  // Draw without replacement so an unusable source cannot starve another configured source.
+  while (shuffled.length > 0) {
+    const index = Math.floor(Math.random() * shuffled.length);
+    const problemId = shuffled.splice(index, 1)[0];
+    const seed = randomUUID();
+    const problem =
+      format === 'regular'
+        ? instantiateRegular(problemId, seed, mode)
+        : instantiateGeneratedChallenge(
+            problemId,
+            seed,
+            format,
+            courseId,
+            courseIdToLectureIds[courseId as CourseId].indexOf(lectureId)
+          );
+    if (!problem) continue;
+    const row = db
+      .insert(exerciseSessions)
+      .values({
+        userId,
+        courseId,
+        lectureId,
+        learningMode: mode,
+        problemFormat: format,
+        problemId,
+        seed,
+        generatedProblem: format === 'regular' ? undefined : JSON.stringify(snapshotOf(problem)),
+        problemType: format === 'regular' ? 'executionResult' : format,
+        traceItemIndex: 0,
+      })
+      .returning()
+      .get();
+    return toDisplay(row, format, problem);
+  }
+  return { status: 'noProblems' };
 };
 const instantiateRegular = (problemId: string, seed: string, mode: LearningMode): InstantiatedProblem => {
   const problem =
@@ -408,24 +406,10 @@ const instantiateRegular = (problemId: string, seed: string, mode: LearningMode)
     throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Invalid regular problem: ${problemId}` });
   return problem;
 };
-const instantiateChallenge = (
-  problemId: string,
-  seed: string,
-  format: JavaChallengeFormat
-): InstantiatedJavaChallenge => {
-  try {
-    if (javaChallengeDefinitions[problemId]) return instantiateJavaChallenge(problemId, format);
-    const problem = instantiateProblem(problemId, seed);
-    if (format !== 'fillInBlank' || !problem || problem.blankAnswers.length === 0)
-      throw new Error(`Invalid challenge problem: ${problemId}`);
-    return problem;
-  } catch (error) {
-    throw new TRPCError({
-      code: 'INTERNAL_SERVER_ERROR',
-      message: `Invalid challenge problem: ${problemId}`,
-      cause: error,
-    });
-  }
+const savedChallenge = (session: ExerciseSession): InstantiatedJavaChallenge => {
+  if (!session.generatedProblem)
+    throw new TRPCError({ code: 'CONFLICT', message: 'This exercise has been retired. Start a new exercise.' });
+  return generatedProblemSchema.parse(JSON.parse(session.generatedProblem));
 };
 const toRegularState = (row: ExerciseSession): RegularExerciseState => ({
   problemFormat: 'regular',
@@ -449,7 +433,7 @@ const toDisplay = (
     validateRegularState(row);
     return toRegularDisplay(row, problem && 'traceItems' in problem ? problem : undefined);
   }
-  const { displayProgram, finalBoard, finalTurtles } = problem ?? instantiateChallenge(row.problemId, row.seed, format);
+  const { displayProgram, finalBoard, finalTurtles } = problem ?? savedChallenge(row);
   return {
     problemFormat: format,
     sessionId: row.id,
@@ -460,7 +444,7 @@ const toDisplay = (
     completed: Boolean(row.completedAt),
   };
 };
-// code-gauge-allow functionCognitiveComplexity 18 -- The function predates this change, which only renames the value it returns.
+// code-gauge-allow functionCognitiveComplexity 18 -- Replay validation and trace advancement share one atomic transaction.
 const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmissionSchema>): RegularExerciseState =>
   db.transaction((tx) => {
     const current = ownedSession(
@@ -519,7 +503,7 @@ const saveRegularVerdict = (userId: string, input: z.infer<typeof regularSubmiss
     if (!updated) throw new TRPCError({ code: 'CONFLICT' });
     return toRegularState(updated);
   });
-// code-gauge-allow functionParameterCount 7 -- The function predates this change, which only makes it synchronous.
+// code-gauge-allow functionParameterCount 7 -- Grading binds the submitted code and receipt time to the full authenticated session context.
 const gradeAndSave = (
   id: number,
   userId: string,
@@ -531,7 +515,7 @@ const gradeAndSave = (
 ): FillInBlankVerdict => {
   const session = ownedSession(id, userId, courseId, lectureId, format, 'challenge', receivedAt);
   assertNotEnded(session, receivedAt);
-  const result = gradeFillInBlankCode(instantiateChallenge(session.problemId, session.seed, format), code);
+  const result = gradeFillInBlankCode(savedChallenge(session), code);
   db.transaction((tx) => {
     const current = tx.select().from(exerciseSessions).where(eq(exerciseSessions.id, id)).get();
     if (!current) throw new TRPCError({ code: 'NOT_FOUND' });

@@ -4,9 +4,9 @@ import { diagnosticCount, forceLinting } from '@codemirror/lint';
 import { EditorView } from '@codemirror/view';
 import { expect, test } from 'vitest';
 
-import { fillInBlankProblemDefinitions } from '../../src/problems/fillInBlank/definitions';
 import { javaEditorDiagnostics } from '../../src/problems/fillInBlank/javaEditorDiagnostics';
-import { instantiateProblem } from '../../src/problems/instantiateProblem';
+import { blankPrograms as fillInBlankProblemDefinitions } from '../fixtures/blankPrograms';
+import { instantiateProblem } from '../helpers/blankProblem';
 
 test.each(Object.keys(fillInBlankProblemDefinitions))(
   'the untouched %s starter shows no local syntax hint for its placeholders',

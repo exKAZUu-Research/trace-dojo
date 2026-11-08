@@ -6,7 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, test, vi } from 'vitest';
 
 import { FillInBlankBody } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/FillInBlankBody';
-import type { FillInBlankVerdict } from '../../../src/problems/fillInBlank/grade';
+import type { FillInBlankVerdict } from '../../../src/problems/grading/turtleState';
 import { readRenderedJavaSource, replaceJavaSource } from '../../helpers/javaEditor';
 
 vi.mock('next/navigation', () => ({

@@ -6,8 +6,7 @@ import { db } from '@/infrastructures/database';
 import { logger } from '@/infrastructures/pino';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import { instantiateProblem, isFillInBlankProblem } from '@/problems/instantiateProblem';
-import { findOrdinaryJavaProblem, isOrdinaryBugProblem } from '@/problems/javaChallenges/ordinaryProblem';
-import { courseIdToLectureIds, courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
+import { courseIdToLectureIds, courseIdToLectureIndexToProblemIds, getProblemProgram } from '@/problems/problemData';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 
 import { problemSessions } from '../../../../../../../../../db/schema';
@@ -23,15 +22,14 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
     !Object.hasOwn(courseIdToLectureIndexToProblemIds, params.courseId)
   )
     notFound();
-  const lectureIndex = courseIdToLectureIds[params.courseId].indexOf(params.lectureId);
+  const lectureIndex = courseIdToLectureIds[params.courseId]?.indexOf(params.lectureId);
   if (
-    lectureIndex === -1 ||
-    !courseIdToLectureIndexToProblemIds[params.courseId][lectureIndex]?.includes(params.problemId)
+    lectureIndex === undefined ||
+    lectureIndex < 0 ||
+    !courseIdToLectureIndexToProblemIds[params.courseId]?.[lectureIndex]?.includes(params.problemId) ||
+    !getProblemProgram(params.problemId)
   )
     notFound();
-  const javaProblem = isOrdinaryBugProblem(params.problemId)
-    ? (findOrdinaryJavaProblem(params.problemId, params.courseId, params.lectureId) ?? notFound())
-    : undefined;
   let incompleteProblemSession = await db.query.problemSessions.findFirst({
     where: {
       ...getLearningPeriodFilter(),
@@ -42,12 +40,6 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
       completedAt: { isNull: true },
     },
   });
-  if (
-    incompleteProblemSession &&
-    javaProblem &&
-    (incompleteProblemSession.problemType !== 'bugFix' || incompleteProblemSession.traceItemIndex !== 0)
-  )
-    notFound();
   incompleteProblemSession ??= db
     .insert(problemSessions)
     .values({
@@ -56,21 +48,18 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
       lectureId: params.lectureId,
       problemId: params.problemId,
       problemVariablesSeed: Date.now().toString(),
-      problemType: javaProblem ? 'bugFix' : isFillInBlankProblem(params.problemId) ? 'fillInBlank' : 'executionResult',
+      problemType: isFillInBlankProblem(params.problemId) ? 'fillInBlank' : 'executionResult',
       traceItemIndex: 0,
     })
     .returning()
     .get()!;
   logger.debug('incompleteProblemSession: %o', incompleteProblemSession);
 
-  const problem = javaProblem
-    ? undefined
-    : (instantiateProblem(params.problemId, incompleteProblemSession.problemVariablesSeed) ?? notFound());
+  const problem = instantiateProblem(params.problemId, incompleteProblemSession.problemVariablesSeed) ?? notFound();
 
   return (
     <ProblemPageOnClient
       key={incompleteProblemSession.id}
-      javaProblem={javaProblem}
       problem={problem}
       initialProblemSession={incompleteProblemSession}
       userId={session.superTokensUserId}

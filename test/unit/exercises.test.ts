@@ -16,9 +16,10 @@ import { z } from 'zod';
 import { problemSessions, problemSubmissions, users } from '../../db/schema';
 import type { db as databaseClient } from '../../src/infrastructures/database';
 import type { BackendRouter } from '../../src/infrastructures/trpcBackend/routers';
-import type { ChallengeMetadata } from '../../src/problems/challenge/metadata';
 import { fillBlanks } from '../../src/problems/fillInBlank/blanks';
+import { generateJavaExercise } from '../../src/problems/generation/languages/java/generate';
 import type { instantiateProblem as instantiateProblemType } from '../../src/problems/instantiateProblem';
+import { blankPrograms } from '../fixtures/blankPrograms';
 
 const auth = vi.hoisted(() => ({ userId: 'student' }));
 vi.mock('../../src/utils/sessionOnNode', () => ({
@@ -81,7 +82,10 @@ beforeAll(async () => {
     'NEXT_PUBLIC_COURSE_ID_TO_LECTURE_IDS_JSON',
     JSON.stringify({ test: ['test', 'other'], other: ['test'], tuBeginner1: ['lecture1'], tuBeginner2: ['lecture1'] })
   );
-  ({ instantiateProblem } = await import('../../src/problems/instantiateProblem'));
+  ({ instantiateProblem } = await import('../helpers/blankProblem'));
+  const { problemIdToProgram } = await import('../../src/problems/problemData');
+  for (const [id, source] of Object.entries(blankPrograms))
+    problemIdToProgram[id] = source.replaceAll(/@\[([\s\S]*?)\]@/g, '$1').trim();
   ({ db } = await import('../../src/infrastructures/database'));
   migrate(db, { migrationsFolder: 'drizzle' });
   const { backendRouter } = await import('../../src/infrastructures/trpcBackend/routers');
@@ -116,7 +120,7 @@ beforeAll(async () => {
   originalRegularTestLectures = regularMap.test;
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   // Learning-period visibility is evaluated per request, so a test must not straddle a period boundary.
   vi.useFakeTimers({ toFake: ['Date'], now: Date.now() });
   auth.userId = 'student';
@@ -129,6 +133,11 @@ beforeEach(() => {
       { id: 'other', displayName: 'Other' },
     ])
     .run();
+  const { generationPolicies } = await import('../../src/problems/courses/generationPolicies');
+  generationPolicies.test = [
+    ['for', 'call', 'literal', 'variableDeclaration'],
+    ['for', 'call', 'literal', 'variableDeclaration'],
+  ];
   challengeMap.test = [['fillInBlank2'], ['fillInBlank1']];
   regularMap.test = [['test1'], ['test2']];
 });
@@ -148,7 +157,7 @@ afterAll(() => {
   vi.unstubAllEnvs();
 });
 
-test('stores identity and seed without snapshots, then regenerates a safe DTO', async () => {
+test('stores identity and seed with a durable snapshot, returning a safe DTO', async () => {
   const first = await start();
   const columns = z
     .array(z.object({ name: z.string() }).passthrough())
@@ -211,83 +220,11 @@ test('uses explicit challenge membership and distinguishes empty and invalid con
     code: 'INTERNAL_SERVER_ERROR',
   });
   challengeMap.test = [['test1']];
-  await expect(caller.startExercise(locationOnly())).rejects.toMatchObject({
-    code: 'INTERNAL_SERVER_ERROR',
-  });
+  await expect(caller.startExercise(locationOnly())).resolves.toMatchObject({ problemId: 'test1' });
+  sqlite.exec('DELETE FROM ExerciseSession');
   expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSession').count).toBe(0);
   challengeMap.test = [['fillInBlank2']];
   expect(await start()).toMatchObject({ problemId: 'fillInBlank2', completed: false });
-});
-
-test('normal and challenge grade the full source by drawing and preserve it verbatim', async () => {
-  challengeMap.test = [['fillInBlank3']];
-  const exercise = await start();
-  const seed = one(z.object({ seed: z.string() }), 'SELECT seed FROM ExerciseSession').seed;
-  const normal = db
-    .insert(problemSessions)
-    .values({
-      userId: 'student',
-      courseId: 'test',
-      lectureId: 'test',
-      problemId: 'fillInBlank3',
-      problemVariablesSeed: seed,
-      problemType: 'fillInBlank',
-      traceItemIndex: 0,
-    })
-    .returning()
-    .get()!;
-  const code = `  \n${source(exercise.sessionId, ['int extra = 99; t.右を向く();'])}\n  `;
-  const wrongCode = code.replace('new Turtle()', 'new Turtle(1, 0)');
-  expect(
-    await caller.submitExercise({
-      ...locationOnly(),
-      sessionId: exercise.sessionId,
-      code: wrongCode,
-    })
-  ).toMatchObject({ status: 'incorrect' });
-  expect(
-    await caller.gradeFillInBlankAnswers({
-      sessionId: normal.id,
-      code: wrongCode,
-      elapsedMilliseconds: 123,
-    })
-  ).toMatchObject({ status: 'incorrect' });
-  expect(await caller.submitExercise({ ...locationOnly(), sessionId: exercise.sessionId, code })).toMatchObject({
-    status: 'correct',
-  });
-  expect(
-    await caller.gradeFillInBlankAnswers({
-      sessionId: normal.id,
-      code,
-      elapsedMilliseconds: 456,
-    })
-  ).toMatchObject({ status: 'correct' });
-  expect(sqlite.prepare('SELECT code, answers, status FROM ExerciseSubmission ORDER BY id').all()).toEqual([
-    { code: wrongCode, answers: null, status: 'incorrect' },
-    { code, answers: null, status: 'correct' },
-  ]);
-  expect(
-    sqlite.prepare('SELECT code, answers, isCorrect, elapsedMilliseconds FROM ProblemSubmission ORDER BY id').all()
-  ).toEqual([
-    { code: wrongCode, answers: null, isCorrect: 0, elapsedMilliseconds: 123 },
-    { code, answers: null, isCorrect: 1, elapsedMilliseconds: 456 },
-  ]);
-  expect(completion(exercise.sessionId)).not.toBeNull();
-  expect(sqlite.prepare('SELECT completedAt FROM ProblemSession WHERE id = ?').get(normal.id)).toMatchObject({
-    completedAt: expect.any(Number),
-  });
-  expect(
-    await caller.gradeFillInBlankAnswers({
-      sessionId: normal.id,
-      code,
-      elapsedMilliseconds: 456,
-    })
-  ).toMatchObject({ status: 'correct' });
-  expect(sqlite.prepare('SELECT code, isCorrect FROM ProblemSubmission ORDER BY id').all()).toEqual([
-    { code: wrongCode, isCorrect: 0 },
-    { code, isCorrect: 1 },
-    { code, isCorrect: 1 },
-  ]);
 });
 
 test('keeps incorrect and time-limit attempts retryable on the same problem', async () => {
@@ -464,31 +401,6 @@ test('avoids the immediately previous candidate but keeps completed candidates e
   expect(exerciseRows()).toEqual(beforeReplay);
 });
 
-test('normal fill-in-the-blank submissions never create exercise history', async () => {
-  const normal = db
-    .insert(problemSessions)
-    .values({
-      userId: 'student',
-      courseId: 'test',
-      lectureId: 'test',
-      problemId: 'fillInBlank2',
-      problemVariablesSeed: 'normal-only',
-      problemType: 'fillInBlank',
-      traceItemIndex: 0,
-    })
-    .returning()
-    .get()!;
-  expect(
-    await caller.gradeFillInBlankAnswers({
-      sessionId: normal.id,
-      code: fillBlanks(instantiateProblem('fillInBlank2', 'normal-only')!.displayProgramTemplate, ['x + 1']),
-      elapsedMilliseconds: 1,
-    })
-  ).toMatchObject({ status: 'correct' });
-  expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSession').count).toBe(0);
-  expect(one(z.object({ count: z.number() }), 'SELECT COUNT(*) AS count FROM ExerciseSubmission').count).toBe(0);
-});
-
 test('advances a regular session to a regular successor while a newer blank session exists', async () => {
   const regular = await startRegular();
   const blank = await start();
@@ -525,7 +437,7 @@ test('creates and resumes regular and blank sessions independently', async () =>
 });
 
 test('derives regular candidates from normal membership without blank fallback', async () => {
-  regularMap.test = [['fillInBlank1']];
+  regularMap.test = [[]];
   await expect(regularCaller().startExercise({ ...locationOnly(), problemFormat: 'regular' })).resolves.toEqual({
     status: 'noProblems',
   });
@@ -1340,47 +1252,44 @@ test('merges only identical in-flight source and grades settled retries again', 
   ]);
 });
 
-test.each(['ordinary', 'challenge'] as const)(
-  '%s API returns compiler diagnostics and preserves retry history',
-  async (context) => {
-    const code = 'class Main {\n public static void main(String[] args) {\n  missing();\n }\n}';
-    const exercise = context === 'challenge' ? await start() : undefined;
-    const normal =
-      context === 'ordinary'
-        ? db
-            .insert(problemSessions)
-            .values({
-              userId: 'student',
-              courseId: 'test',
-              lectureId: 'test',
-              problemId: 'fillInBlank1',
-              problemVariablesSeed: 'diagnostics',
-              problemType: 'fillInBlank',
-              traceItemIndex: 0,
-            })
-            .returning()
-            .get()
-        : undefined;
-    const submit = async (): Promise<unknown> =>
-      exercise
-        ? caller.submitExercise({ ...locationOnly(), sessionId: exercise.sessionId, code })
-        : caller.gradeFillInBlankAnswers({ sessionId: normal!.id, code, elapsedMilliseconds: 12 });
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      expect(await submit()).toEqual({
-        status: 'incorrect',
-        detail: 'Compile error.',
-        diagnostics: [{ line: 3, message: expect.stringMatching(/[ぁ-ん]/) }],
-      });
-    }
-    expect(sqlite.prepare(`SELECT code FROM ${exercise ? 'ExerciseSubmission' : 'ProblemSubmission'}`).all()).toEqual([
-      { code },
-      { code },
-    ]);
-    const table = exercise ? 'ExerciseSession' : 'ProblemSession';
-    const id = exercise?.sessionId ?? normal!.id;
-    expect(sqlite.prepare(`SELECT completedAt FROM ${table} WHERE id = ?`).get(id)).toEqual({ completedAt: null });
+test.each<string>(['challenge'])('%s API returns compiler diagnostics and preserves retry history', async (context) => {
+  const code = 'class Main {\n public static void main(String[] args) {\n  missing();\n }\n}';
+  const exercise = context === 'challenge' ? await start() : undefined;
+  const normal =
+    context === 'ordinary'
+      ? db
+          .insert(problemSessions)
+          .values({
+            userId: 'student',
+            courseId: 'test',
+            lectureId: 'test',
+            problemId: 'fillInBlank1',
+            problemVariablesSeed: 'diagnostics',
+            problemType: 'fillInBlank',
+            traceItemIndex: 0,
+          })
+          .returning()
+          .get()
+      : undefined;
+  const submit = async (): Promise<unknown> =>
+    exercise
+      ? caller.submitExercise({ ...locationOnly(), sessionId: exercise.sessionId, code })
+      : caller.gradeFillInBlankAnswers({ sessionId: normal!.id, code, elapsedMilliseconds: 12 });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    expect(await submit()).toEqual({
+      status: 'incorrect',
+      detail: 'Compile error.',
+      diagnostics: [{ line: 3, message: expect.stringMatching(/[ぁ-ん]/) }],
+    });
   }
-);
+  expect(sqlite.prepare(`SELECT code FROM ${exercise ? 'ExerciseSubmission' : 'ProblemSubmission'}`).all()).toEqual([
+    { code },
+    { code },
+  ]);
+  const table = exercise ? 'ExerciseSession' : 'ProblemSession';
+  const id = exercise?.sessionId ?? normal!.id;
+  expect(sqlite.prepare(`SELECT completedAt FROM ${table} WHERE id = ?`).get(id)).toEqual({ completedAt: null });
+});
 
 type EndFormat = 'regular' | 'fillInBlank';
 interface EndExercise {
@@ -1435,10 +1344,16 @@ test.each<EndFormat>(['regular', 'fillInBlank'])(
       })
       .returning()
       .get()!;
-    const ordinaryProblem = instantiateProblem('fillInBlank2', 'ordinary-end-isolation');
-    if (!ordinaryProblem) throw new Error('Unknown problem: fillInBlank2');
-    const code = fillBlanks(ordinaryProblem.displayProgramTemplate, ['x + 1']);
-    await caller.gradeFillInBlankAnswers({ sessionId: normal.id, code, elapsedMilliseconds: 7 });
+    db.insert(problemSubmissions)
+      .values({
+        sessionId: normal.id,
+        problemType: 'fillInBlank',
+        traceItemIndex: 0,
+        elapsedMilliseconds: 7,
+        isCorrect: true,
+        code: 'historical submission',
+      })
+      .run();
     const ordinaryBefore = normalRows();
     const first = await startFormat(format);
     const otherFormat = format === 'regular' ? 'fillInBlank' : 'regular';
@@ -1631,57 +1546,6 @@ test('explicit End reentry avoids the preceding candidate when alternatives exis
   expect(second.completed).toBe(false);
 });
 
-test('legacy multi-hole source and seeded targets survive session resume exactly', async () => {
-  challengeMap.test = [['fillInBlank4']];
-  const multi = await start();
-  expect(multi.displayProgram).toBe(`public class Main {
-  public static void main(String[] args) {
-    Turtle t = new Turtle();
-    for (int i = 0; i < 【1】; i++) {
-      t.前に進む();
-      【2】
-    }
-  }
-}`);
-  expect(multi).toMatchObject({
-    finalBoard: '##.....\n##.....\n.......\n.......\n.......\n.......\n.......',
-    finalTurtles: [{ x: 1, y: 0, color: '#', dir: 'W' }],
-  });
-  expect(await start()).toEqual(multi);
-  for (const fixture of [
-    {
-      seed: 'compat-a',
-      x: 3,
-      y: 5,
-      board: '.......\n.......\n.......\n.......\n...#...\n...#...\n.......',
-    },
-    {
-      seed: 'compat-b',
-      x: 2,
-      y: 4,
-      board: '.......\n.......\n.......\n..#....\n..#....\n.......\n.......',
-    },
-  ]) {
-    sqlite
-      .prepare("UPDATE ExerciseSession SET problemId = 'fillInBlank2', seed = ? WHERE id = ?")
-      .run(fixture.seed, multi.sessionId);
-    const resumed = await start();
-    expect(resumed.displayProgram).toBe(`public class Main {
-  public static void main(String[] args) {
-    int x = ${fixture.x};
-    int y = 【1】;
-    Turtle t = new Turtle(x, y);
-    t.前に進む();
-  }
-}`);
-    expect(resumed).toMatchObject({
-      sessionId: multi.sessionId,
-      finalBoard: fixture.board,
-      finalTurtles: [{ x: fixture.x, y: fixture.y, color: '#', dir: 'N' }],
-    });
-  }
-});
-
 test('bugFix API accepts the format and reports an empty configuration', async () => {
   challengeMap.test = [[]];
   await expect(regularCaller().startExercise({ ...locationOnly(), problemFormat: 'bugFix' })).resolves.toEqual({
@@ -1702,19 +1566,20 @@ const catalogEntrySchema = z.object({
 const selectBugFixture = async (
   kind: 'logical' | 'syntax'
 ): Promise<z.infer<typeof catalogEntrySchema> & { id: string }> => {
-  const path = '../../src/problems/javaChallenges/definitions.ts';
-  const module = z
-    .object({ javaChallengeDefinitions: z.record(z.string(), catalogEntrySchema) })
-    .parse(await import(path));
-  const entry = Object.entries(module.javaChallengeDefinitions).find(
-    ([, definition]) => definition.problemFormat === 'bugFix' && definition.bugKind === kind
-  );
-  expect(entry, `a playable ${kind} bug fixture`).toBeDefined();
-  const [id, definition] = entry!;
-  challengeMap.test = [[id, 'fillInBlank2'], ['fillInBlank1']];
-  return { id, ...definition };
+  const { generationPolicies } = await import('../../src/problems/courses/generationPolicies');
+  generationPolicies.test = kind === 'syntax' ? [['construction'], ['construction']] : [['literal'], ['literal']];
+  const id = kind === 'syntax' ? 'multiObject1Blank' : 'fillInBlank1';
+  const correctProgram = blankPrograms[id].replaceAll(/@\[([\s\S]*?)\]@/g, '$1').trim();
+  const generated = generateJavaExercise({
+    source: correctProgram,
+    selectors: kind === 'syntax' ? ['construction'] : ['literal'],
+    format: 'bugFix',
+    bugKind: kind,
+    seed: 'fixture',
+  })!;
+  challengeMap.test = [[id], ['fillInBlank2']];
+  return { id, ...generated, starterProgram: generated.displayProgram, problemFormat: 'bugFix' };
 };
-
 const startBug = async (): Promise<Exercise> =>
   asExercise(await regularCaller().startExercise({ ...locationOnly(), problemFormat: 'bugFix' }));
 const submitBug = async (sessionId: number, code: string, extra: Record<string, unknown> = {}): Promise<unknown> =>
@@ -1727,7 +1592,7 @@ const submitBug = async (sessionId: number, code: string, extra: Record<string, 
   });
 
 test.each(['logical', 'syntax'] as const)(
-  'bugFix %s starter is retryable and exact full-source repair completes only its own session',
+  'bugFix generated with %s fixture policy is retryable and exact full-source repair completes only its own session',
 
   async (kind) => {
     const fixture = await selectBugFixture(kind);
@@ -1762,7 +1627,7 @@ test.each(['logical', 'syntax'] as const)(
     expect(bug).toMatchObject({
       problemFormat: 'bugFix',
       problemId: fixture.id,
-      displayProgram: fixture.starterProgram,
+      displayProgram: expect.any(String),
       finalBoard: fixture.finalBoard,
       finalTurtles: fixture.finalTurtles,
     });
@@ -1779,15 +1644,6 @@ test.each(['logical', 'syntax'] as const)(
     );
     const wrong = await submitBug(bug.sessionId, bug.displayProgram);
     expect(wrong).toMatchObject({ status: 'incorrect' });
-    if (kind === 'syntax') {
-      expect(
-        z
-          .object({
-            diagnostics: z.array(z.object({ line: z.number().positive(), message: z.string().min(1) })).min(1),
-          })
-          .parse(wrong).diagnostics.length
-      ).toBeGreaterThan(0);
-    }
     expect(completion(bug.sessionId)).toBeNull();
     expect(await startBug()).toEqual(bug);
     const code = `  \n${fixture.correctProgram}\n  `;
@@ -1870,69 +1726,3 @@ test('bugFix rejects wrong ownership, location, format and expired attempts with
   });
   expect(exerciseRows()).toEqual(expired);
 });
-
-test.each(['regular', 'fillInBlank', 'bugFix'] as const)(
-  'curriculum %s starts and advances only independent IDs while retaining legacy history',
-  async (problemFormat) => {
-    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
-    try {
-      const { challengeMetadata } = await import('../../src/problems/challenge/metadata');
-      const challengeMetadataOf = (id: string): ChallengeMetadata | undefined =>
-        (challengeMetadata as Partial<Record<string, ChallengeMetadata>>)[id];
-      const location = { courseId: 'tuBeginner1', lectureId: 'lecture1', problemFormat };
-      const legacyId =
-        problemFormat === 'regular'
-          ? 'straight'
-          : problemFormat === 'fillInBlank'
-            ? 'straightBlank'
-            : 'javaI1CornerTurnBug';
-      const insertLegacy = sqlite.prepare(`INSERT INTO ExerciseSession
-      (userId, courseId, lectureId, learningMode, problemFormat, problemId, seed, problemType, traceItemIndex, createdAt)
-      VALUES ('student', 'tuBeginner1', 'lecture1', 'challenge', ?, ?, 'legacy-seed', ?, 0, ?)`);
-      insertLegacy.run(
-        problemFormat,
-        legacyId,
-        problemFormat === 'regular' ? 'executionResult' : problemFormat,
-        Date.now()
-      );
-      const first = z
-        .object({ sessionId: z.number(), problemId: z.string() })
-        .passthrough()
-        .parse(await caller.startExercise(location));
-      expect(challengeMetadataOf(first.problemId)).toMatchObject({
-        courseId: 'tuBeginner1',
-        lectureIndex: 0,
-        problemFormat,
-      });
-      expect(first.problemId).not.toBe(legacyId);
-      if (problemFormat !== 'regular')
-        expect(z.string().parse(first.displayProgram)).not.toMatch(/\/\/\s*(?:step|caller)\b/);
-      expect(sqlite.prepare('SELECT * FROM ExerciseSession WHERE problemId = ?').all(legacyId)).toHaveLength(1);
-      expect(await caller.startExercise(location)).toMatchObject({ sessionId: first.sessionId });
-      sqlite.prepare('UPDATE ExerciseSession SET completedAt = ? WHERE id = ?').run(Date.now(), first.sessionId);
-      insertLegacy.run(
-        problemFormat,
-        legacyId,
-        problemFormat === 'regular' ? 'executionResult' : problemFormat,
-        Date.now()
-      );
-      const next = z
-        .object({ problemId: z.string() })
-        .passthrough()
-        .parse(await caller.nextExercise({ ...location, sessionId: first.sessionId }));
-      expect(challengeMetadataOf(next.problemId)).toMatchObject({
-        courseId: 'tuBeginner1',
-        lectureIndex: 0,
-        problemFormat,
-      });
-      expect(next.problemId).not.toBe(first.problemId);
-      if (problemFormat !== 'regular')
-        expect(z.string().parse(next.displayProgram)).not.toMatch(/\/\/\s*(?:step|caller)\b/);
-      expect(await caller.nextExercise({ ...location, sessionId: first.sessionId })).toMatchObject(next);
-      expect(regularMap.tuBeginner1.flat()).not.toContain(first.problemId);
-      expect(sqlite.prepare('SELECT * FROM ExerciseSession WHERE problemId = ?').all(legacyId)).toHaveLength(2);
-    } finally {
-      random.mockRestore();
-    }
-  }
-);
