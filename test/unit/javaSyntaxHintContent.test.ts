@@ -4,15 +4,16 @@ import { expect, test } from 'vitest';
 import { getJavaSyntaxHint } from '../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/javaSyntaxHintContent';
 import { challengeBases } from '../../src/problems/challenge/definitions';
 import { challengeMetadata } from '../../src/problems/challenge/metadata';
+import { practiceDefinitions } from '../../src/problems/practice/definitions';
 
-test('explains every keyword and operator in normal-format challenges', () => {
+test('explains every keyword and operator in normal-format challenges and practice', () => {
   const regularChallenges = challengeBases.filter(
     ({ id }) => challengeMetadata[id as keyof typeof challengeMetadata].problemFormat === 'regular'
   );
   expect(regularChallenges.length).toBeGreaterThan(0);
   const unexplained = new Set<string>();
-  for (const { java } of regularChallenges) {
-    collectUnexplainedTokens(refractor.highlight(java, 'java'), [], unexplained);
+  for (const program of [...regularChallenges.map(({ java }) => java), ...practiceDefinitions.map((d) => d.program)]) {
+    collectUnexplainedTokens(refractor.highlight(program, 'java'), [], unexplained);
   }
   expect([...unexplained]).toEqual([]);
 });

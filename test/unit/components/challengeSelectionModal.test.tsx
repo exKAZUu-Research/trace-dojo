@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
 import { ChakraProvider } from '@chakra-ui/react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { expect, test, vi } from 'vitest';
+import { beforeEach, expect, test, vi } from 'vitest';
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock('next/navigation', () => ({
@@ -19,6 +19,27 @@ import { Lecture } from '../../../src/app/(withAuth)/courses/[courseId]/lectures
 
 const renderInChakra = (node: React.ReactNode): ReturnType<typeof render> =>
   render(<ChakraProvider>{node}</ChakraProvider>);
+
+beforeEach(() => {
+  localStorage.clear();
+});
+
+test('the lecture offers practice immediately before the graded assignments and challenge after them', () => {
+  renderInChakra(<Lecture lectureIndex={0} problemSessions={[]} />);
+  const practice = screen.getByRole('link', { name: '練習する（成績に影響しません）' });
+  expect(practice).toBeVisible();
+  expect(practice).toHaveAttribute('href', '/courses/test/lectures/lecture-1/practice');
+  const assignments = screen.getByRole('table');
+  const firstAssignment = within(assignments).getAllByRole('link')[0];
+  expect(firstAssignment).toBeVisible();
+  const content = assignments.parentElement;
+  if (!content) throw new Error('Assignments must have a content container');
+  const blocks = [...content.children].filter((element) => element.tagName !== 'STYLE');
+  expect(blocks[blocks.indexOf(assignments) - 1]).toBe(practice);
+  expect(practice.compareDocumentPosition(firstAssignment) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const challenge = screen.getByRole('button', { name: 'チャレンジモード（任意）' });
+  expect(assignments.compareDocumentPosition(challenge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
 
 test('the lecture trigger opens a labelled dialog, focuses the regular native card, and Enter navigates', async () => {
   navigation.push.mockReset();

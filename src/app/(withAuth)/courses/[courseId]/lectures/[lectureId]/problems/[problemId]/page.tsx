@@ -7,6 +7,7 @@ import { logger } from '@/infrastructures/pino';
 import { getLearningPeriodFilter } from '@/learningPeriod';
 import { instantiateProblem, isFillInBlankProblem } from '@/problems/instantiateProblem';
 import { findOrdinaryJavaProblem, isOrdinaryBugProblem } from '@/problems/javaChallenges/ordinaryProblem';
+import { courseIdToLectureIds, courseIdToLectureIndexToProblemIds } from '@/problems/problemData';
 import type { CourseId, ProblemId } from '@/problems/problemData';
 
 import { problemSessions } from '../../../../../../../../../db/schema';
@@ -17,6 +18,17 @@ const ProblemPage: MyAuthorizedNextPageOrLayout<{
   lectureId: string;
   problemId: ProblemId;
 }> = async ({ params, session }) => {
+  if (
+    !Object.hasOwn(courseIdToLectureIds, params.courseId) ||
+    !Object.hasOwn(courseIdToLectureIndexToProblemIds, params.courseId)
+  )
+    notFound();
+  const lectureIndex = courseIdToLectureIds[params.courseId].indexOf(params.lectureId);
+  if (
+    lectureIndex === -1 ||
+    !courseIdToLectureIndexToProblemIds[params.courseId][lectureIndex]?.includes(params.problemId)
+  )
+    notFound();
   const javaProblem = isOrdinaryBugProblem(params.problemId)
     ? (findOrdinaryJavaProblem(params.problemId, params.courseId, params.lectureId) ?? notFound())
     : undefined;
