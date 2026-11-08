@@ -156,11 +156,7 @@ export const exerciseProcedures = {
           )
           .orderBy(asc(exerciseSessions.id))
           .all()
-          .find(
-            (row) =>
-              input.courseId === 'test' ||
-              candidatesFor(input.courseId, input.lectureId, format, mode).includes(row.problemId)
-          );
+          .find(resumableProblem(input.courseId, input.lectureId, format, mode));
         return newer
           ? toDisplay(newer, format)
           : createFromCandidates(userId, input.courseId, input.lectureId, format, mode, previous.problemId);
@@ -335,6 +331,17 @@ const candidatesFor = (courseId: string, lectureId: string, format: ProblemForma
     return format === 'regular' ? !blank : format === 'fillInBlank';
   });
 };
+const resumableProblem = (
+  courseId: string,
+  lectureId: string,
+  format: ProblemFormat,
+  mode: LearningMode
+): ((row: ExerciseSession) => boolean) => {
+  // Checking-course challenges resume any stored problem; every other bank resumes only its current problems.
+  if (courseId === 'test' && mode === 'challenge') return () => true;
+  const candidates = new Set(candidatesFor(courseId, lectureId, format, mode));
+  return (row) => candidates.has(row.problemId);
+};
 type DisplayResult = ExerciseDisplay | RegularExerciseDisplay | { status: 'noProblems' };
 const startOrResume = (
   userId: string,
@@ -352,9 +359,7 @@ const startOrResume = (
     .all();
   const endedIndex = rows.findIndex((row) => row.endedAt !== null);
   const resumable = endedIndex === -1 ? rows : rows.slice(0, endedIndex);
-  const candidates =
-    courseId === 'test' && mode === 'challenge' ? undefined : new Set(candidatesFor(courseId, lectureId, format, mode));
-  const eligible = candidates ? resumable.filter((row) => candidates.has(row.problemId)) : resumable;
+  const eligible = resumable.filter(resumableProblem(courseId, lectureId, format, mode));
   const selected = eligible.find((row) => row.completedAt === null) ?? eligible[0];
   return selected
     ? toDisplay(selected, format)

@@ -1098,6 +1098,24 @@ test('practice rejects blank submission and Next even when given a valid challen
   expect(exerciseRows()).toEqual(before);
 });
 
+test('practice Next skips a newer session whose problem left the bank and continues with a current problem', async () => {
+  const first = await startPractice();
+  await runtimeCaller.mutation('submitRegularExercise', practiceSubmission(first, 'complete-first', true));
+  const second = regularDisplaySchema.parse(
+    await runtimeCaller.mutation('nextExercise', { ...practiceSession(first.sessionId), problemFormat: 'regular' })
+  );
+  sqlite.prepare("UPDATE ExerciseSession SET problemId = 'practiceTestL1Removed' WHERE id = ?").run(second.sessionId);
+  const corrupted = exerciseRows();
+  const next = regularDisplaySchema.parse(
+    await runtimeCaller.mutation('nextExercise', { ...practiceSession(first.sessionId), problemFormat: 'regular' })
+  );
+  expect(next.sessionId).not.toBe(second.sessionId);
+  expect(next.problemId).toMatch(/^practiceEasyV1TestL1/);
+  const after = exerciseRows();
+  expect(after.sessions.slice(0, corrupted.sessions.length)).toEqual(corrupted.sessions);
+  expect(after.sessions).toHaveLength(corrupted.sessions.length + 1);
+});
+
 test('practice fails closed when its stored identity is replaced by a graded template', async () => {
   const practice = await startPractice();
   sqlite.prepare("UPDATE ExerciseSession SET problemId = 'test1' WHERE id = ?").run(practice.sessionId);
