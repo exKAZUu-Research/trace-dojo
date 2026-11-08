@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'vitest';
 
 import { fillBlanks } from '../../src/problems/fillInBlank/blanks';
-import { fillInBlankProblemDefinitions } from '../../src/problems/fillInBlank/definitions';
-import { gradeFillInBlankCode } from '../../src/problems/fillInBlank/grade';
+import { gradeFillInBlankCode } from '../../src/problems/grading/turtleState';
 import type { InstantiatedProblem } from '../../src/problems/instantiateProblem';
-import { instantiateProblem } from '../../src/problems/instantiateProblem';
+import { blankPrograms as fillInBlankProblemDefinitions } from '../fixtures/blankPrograms';
+import { instantiateProblem } from '../helpers/blankProblem';
 
 const catalogIds = Object.keys(fillInBlankProblemDefinitions);
 

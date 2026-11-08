@@ -6,7 +6,8 @@ import { z } from 'zod';
 import { TraceViewer } from '../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/TraceViewer';
 import { Variables } from '../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/Variables';
 import { traceProgram } from '../../src/interpreter/program';
-import { type InstantiatedProblem, instantiateProblem } from '../../src/problems/instantiateProblem';
+import type { InstantiatedProblem } from '../../src/problems/instantiateProblem';
+import { instantiateProblem } from '../helpers/blankProblem';
 
 const problem = (id: string): InstantiatedProblem => {
   const instantiated = instantiateProblem(id, 'turtle-variables');

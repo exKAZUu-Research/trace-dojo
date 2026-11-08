@@ -52,8 +52,9 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
 
 import { ChallengePageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/pageOnClient';
 import { ProblemPageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/pageOnClient';
-import { instantiateProblem } from '../../../src/problems/instantiateProblem';
-import { instantiateJavaChallenge } from '../../../src/problems/javaChallenges/instantiate';
+import { challengeBases } from '../../../src/problems/catalog/java/definitions';
+import { generateJavaExercise } from '../../../src/problems/generation/languages/java/generate';
+import { instantiateProblem } from '../../helpers/blankProblem';
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -1193,8 +1194,13 @@ test('local draft identities separate ordinary and challenge modes with the same
 test.each(['fillInBlank', 'bugFix'] as const)(
   '%s editor restores a draft saved while the shown program kept blanks at the ends of its rows',
   async (format) => {
-    const id = `challengeI7ValueSnapshot${format === 'fillInBlank' ? 'Blank' : 'Bug'}Condition4`;
-    const problem = instantiateJavaChallenge(id, format);
+    const id = 'challengeI7ValueSnapshot';
+    const problem = generateJavaExercise({
+      source: challengeBases.find((base) => base.id === id)!.java,
+      selectors: ['for'],
+      format,
+      seed: 'draft',
+    })!;
     infrastructure.start.mockResolvedValue({
       ...problem,
       problemFormat: format,

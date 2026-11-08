@@ -9,10 +9,10 @@ import {
   RegularChallengeBody,
   type RegularChallengeTransport,
 } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/RegularChallengeBody';
-import { challengeMetadata } from '../../../src/problems/challenge/metadata';
-import { instantiateRegularChallenge } from '../../../src/problems/challenge/regular';
+import { challengeBases } from '../../../src/problems/catalog/java/definitions';
 import { instantiateProblem } from '../../../src/problems/instantiateProblem';
 import type { RegularExerciseDisplay } from '../../../src/problems/regular/exerciseProblem';
+import { instantiateRegularChallenge } from '../../../src/problems/regular/instantiateChallenge';
 
 const executionDisplay: RegularExerciseDisplay = {
   problemFormat: 'regular',
@@ -26,7 +26,8 @@ const executionDisplay: RegularExerciseDisplay = {
 };
 
 test('renders the independent problem title from public metadata', () => {
-  const entry = Object.entries(challengeMetadata).find(([, metadata]) => metadata.problemFormat === 'regular');
+  const base = challengeBases[0];
+  const entry = [base.id, base] as const;
   if (!entry) throw new Error('Missing independent regular metadata');
   const [problemId, metadata] = entry;
   renderBody({ display: { ...executionDisplay, problemId, problem: instantiateRegularChallenge(problemId)! } });
