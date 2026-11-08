@@ -486,6 +486,85 @@ static 型 変数名 = 値;`,
 }`,
     explanation: '計算.二倍(3) は 6 を返します。new 計算() でオブジェクトを作る必要はありません。',
   },
+  ':': {
+    meaning:
+      'switch の case や default の後ろに付けて、そこから実行する処理の始まりを示します。for (型 変数 : 配列) では、配列の要素を順に取り出すときの区切りに使います。',
+    syntax: `case 定数:
+  処理
+default:
+  処理`,
+    example: `switch (2) {
+  case 2:
+    System.out.println("二");
+    break;
+}`,
+    explanation: 'case 2: の後ろの処理から実行し、「二」と表示します。',
+  },
+  extends: {
+    meaning: '別のクラスを親として、そのデータや処理を引き継いだクラスを作ります。',
+    syntax: `class 子クラス名 extends 親クラス名 {
+  追加や変更する処理
+}`,
+    example: `class 箱 {
+  int 大きさ = 3;
+}
+class 大きな箱 extends 箱 {
+  int 重さ = 5;
+}`,
+    explanation: '大きな箱は、重さに加えて、箱から引き継いだ大きさも持ちます。',
+  },
+  super: {
+    meaning: '親クラスのメソッドやコンストラクタを呼び出すときに使います。',
+    syntax: `super.メソッド名(引数);
+super(引数);`,
+    example: `class 親 {
+  void 挨拶() {
+    System.out.println("親");
+  }
+}
+class 子 extends 親 {
+  void 挨拶() {
+    super.挨拶();
+    System.out.println("子");
+  }
+}`,
+    explanation: '子の挨拶() は、親の挨拶() で「親」と表示してから「子」と表示します。',
+  },
+  try: {
+    meaning: '例外が起きるかもしれない処理を囲み、例外が起きたら catch に移ります。',
+    syntax: `try {
+  処理
+} catch (例外の型 変数名) {
+  例外が起きたときの処理
+}`,
+    example: `try {
+  System.out.println("前");
+  throw new RuntimeException();
+} catch (RuntimeException e) {
+  System.out.println("例外");
+}`,
+    explanation: '「前」と表示した後に例外が起きるので、残りを飛ばして「例外」と表示します。',
+  },
+  catch: {
+    meaning: 'try の中で起きた例外を受け取り、そのときの処理を書きます。',
+    syntax: `catch (例外の型 変数名) {
+  処理
+}`,
+    example: `try {
+  throw new RuntimeException();
+} catch (RuntimeException e) {
+  System.out.println("受け取った");
+}`,
+    explanation: 'try の中で起きた RuntimeException を受け取り、「受け取った」と表示します。',
+  },
+  throw: {
+    meaning: '例外を起こして、今の処理を途中で止めます。',
+    syntax: 'throw new 例外の型();',
+    example: `if (個数 < 0) {
+  throw new RuntimeException();
+}`,
+    explanation: '個数が負のとき例外を起こします。後ろの処理は行わず、受け取る catch へ移ります。',
+  },
 };
 
 export const getJavaSyntaxHint = (text: string, classes: readonly string[]): JavaSyntaxHintContent | undefined => {
