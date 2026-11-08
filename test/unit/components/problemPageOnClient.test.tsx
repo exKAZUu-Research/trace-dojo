@@ -53,6 +53,7 @@ vi.mock('../../../src/infrastructures/trpcBackend/client', () => ({
 import { ChallengePageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/challenge/pageOnClient';
 import { ProblemPageOnClient } from '../../../src/app/(withAuth)/courses/[courseId]/lectures/[lectureId]/problems/[problemId]/pageOnClient';
 import { challengeBases } from '../../../src/problems/catalog/java/definitions';
+import { selectorsFor } from '../../../src/problems/courses/generationPolicies';
 import { generateJavaExercise } from '../../../src/problems/generation/languages/java/generate';
 import { instantiateProblem } from '../../helpers/blankProblem';
 
@@ -1205,12 +1206,15 @@ test.each(['fillInBlank', 'bugFix'] as const)(
   '%s editor restores a draft saved while the shown program kept blanks at the ends of its rows',
   async (format) => {
     const id = 'challengeI7ValueSnapshot';
+    const base = challengeBases.find((base) => base.id === id)!;
     const problem = generateJavaExercise({
-      source: challengeBases.find((base) => base.id === id)!.java,
-      selectors: ['for'],
+      source: base.java,
+      selectors: selectorsFor(base.courseId, base.lectureIndex),
       format,
       seed: 'draft',
-    })!;
+    });
+    expect(problem).toBeDefined();
+    if (!problem) throw new Error('Missing draft exercise');
     infrastructure.start.mockResolvedValue({
       ...problem,
       problemFormat: format,
