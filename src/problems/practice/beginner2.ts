@@ -1,3 +1,4 @@
+// code-gauge-allow-file duplicateLines 27 -- Each practice family is an independently authored program; sharing their scaffolding would hide what each one teaches.
 import type { PracticeDefinition } from './types';
 
 export const beginner2PracticeDefinitions = [

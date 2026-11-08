@@ -59,6 +59,7 @@ export const RegularExerciseBody: React.FC<Props> = (props) => (
   />
 );
 
+// code-gauge-allow functionCognitiveComplexity 27 -- Keeps the shared session state and its rendering together; splitting it would only relocate complexity.
 // code-gauge-allow functionNcss 58 -- Keeps the shared session state and its rendering together; splitting it would only relocate complexity.
 const RegularExerciseSession: React.FC<Props> = ({
   mode,
@@ -76,6 +77,7 @@ const RegularExerciseSession: React.FC<Props> = ({
   const editor = useRef<TurtleGraphicsHandle>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const { problem } = display;
+  const modeInput = mode === 'practice' ? { learningMode: mode } : {};
   const view = useMemo(
     () => deriveRegularProblemView(problem, display.problemType, display.traceItemIndex),
     [problem, display.problemType, display.traceItemIndex]
@@ -99,7 +101,7 @@ const RegularExerciseSession: React.FC<Props> = ({
     if (request.current?.context !== requestKey) request.current = { context: requestKey, id: crypto.randomUUID() };
     try {
       const result = await transport.submit({
-        ...(mode === 'practice' ? { learningMode: mode } : {}),
+        ...modeInput,
         courseId,
         lectureId,
         sessionId: display.sessionId,
@@ -125,7 +127,7 @@ const RegularExerciseSession: React.FC<Props> = ({
     if (display.completed) return;
     try {
       const next = await transport.switchToStep({
-        ...(mode === 'practice' ? { learningMode: mode } : {}),
+        ...modeInput,
         sessionId: display.sessionId,
       });
       setDisplay({ ...next, problem });
@@ -138,7 +140,7 @@ const RegularExerciseSession: React.FC<Props> = ({
   };
   const nextProblem = async (): Promise<void> => {
     const next = await transport.next({
-      ...(mode === 'practice' ? { learningMode: mode } : {}),
+      ...modeInput,
       sessionId: display.sessionId,
       problemFormat: 'regular',
     });

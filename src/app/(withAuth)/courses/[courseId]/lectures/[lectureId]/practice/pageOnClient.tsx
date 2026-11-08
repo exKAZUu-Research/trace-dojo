@@ -17,6 +17,8 @@ export const PracticePageOnClient: React.FC = () => {
   return <PracticeSession key={`practice:${courseId}:${lectureId}`} courseId={courseId} lectureId={lectureId} />;
 };
 
+// code-gauge-allow functionCognitiveComplexity 28 -- Start, stale-session, retry, and end handling share the session state; splitting them would only pass it around.
+// code-gauge-allow functionNcss 50 -- Start, stale-session, retry, and end handling share the session state; splitting them would only pass it around.
 const PracticeSession: React.FC<{ courseId: CourseId; lectureId: string }> = ({ courseId, lectureId }) => {
   const router = useRouter();
   const [display, setDisplay] = useState<RegularExerciseDisplay>();

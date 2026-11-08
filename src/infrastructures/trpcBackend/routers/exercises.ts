@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { TRPCError } from '@trpc/server';
-import { and, asc, desc, eq, gt, gte, isNotNull } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, isNotNull, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { getLearningPeriodFilter } from '@/learningPeriod';
@@ -150,13 +150,8 @@ export const exerciseProcedures = {
           .from(exerciseSessions)
           .where(
             and(
-              eq(exerciseSessions.userId, userId),
-              eq(exerciseSessions.courseId, input.courseId),
-              eq(exerciseSessions.lectureId, input.lectureId),
-              eq(exerciseSessions.learningMode, mode),
-              eq(exerciseSessions.problemFormat, format),
-              gt(exerciseSessions.id, previous.id),
-              start ? gte(exerciseSessions.createdAt, start) : undefined
+              ...scopeConditions({ userId, courseId: input.courseId, lectureId: input.lectureId, mode, format }, start),
+              gt(exerciseSessions.id, previous.id)
             )
           )
           .orderBy(asc(exerciseSessions.id))
@@ -275,6 +270,7 @@ const validateRegularState = (session: ExerciseSession): void => {
   )
     throw new TRPCError({ code: 'CONFLICT' });
 };
+// code-gauge-allow functionParameterCount 7 -- Each parameter is part of the session identity checked on every call.
 const ownedSession = (
   id: number,
   userId: string,
@@ -304,6 +300,7 @@ const ownedSession = (
   }
   return session;
 };
+// code-gauge-allow functionCognitiveComplexity 24 -- The practice bank adds one branch to the existing validation of the configured challenge lists.
 const candidatesFor = (courseId: string, lectureId: string, format: ProblemFormat, mode: LearningMode): string[] => {
   if (mode === 'practice') return getPracticeProblemIds(courseId, lectureId);
   const lectureIndex = courseIdToLectureIds[courseId as CourseId].indexOf(lectureId);
@@ -350,16 +347,7 @@ const startOrResume = (
   const rows = db
     .select()
     .from(exerciseSessions)
-    .where(
-      and(
-        eq(exerciseSessions.userId, userId),
-        eq(exerciseSessions.courseId, courseId),
-        eq(exerciseSessions.lectureId, lectureId),
-        eq(exerciseSessions.learningMode, mode),
-        eq(exerciseSessions.problemFormat, format),
-        start ? gte(exerciseSessions.createdAt, start) : undefined
-      )
-    )
+    .where(and(...scopeConditions({ userId, courseId, lectureId, mode, format }, start)))
     .orderBy(desc(exerciseSessions.id))
     .all();
   const endedIndex = rows.findIndex((row) => row.endedAt !== null);
@@ -565,16 +553,35 @@ const assertNotEnded = (session: ExerciseSession, at = new Date()): void => {
     .from(exerciseSessions)
     .where(
       and(
-        eq(exerciseSessions.userId, session.userId),
-        eq(exerciseSessions.courseId, session.courseId),
-        eq(exerciseSessions.lectureId, session.lectureId),
-        eq(exerciseSessions.learningMode, session.learningMode),
-        eq(exerciseSessions.problemFormat, session.problemFormat),
+        ...scopeConditions(
+          {
+            userId: session.userId,
+            courseId: session.courseId,
+            lectureId: session.lectureId,
+            mode: session.learningMode,
+            format: session.problemFormat,
+          },
+          start
+        ),
         gte(exerciseSessions.id, session.id),
-        isNotNull(exerciseSessions.endedAt),
-        start ? gte(exerciseSessions.createdAt, start) : undefined
+        isNotNull(exerciseSessions.endedAt)
       )
     )
     .get();
   if (ended) throw new TRPCError({ code: 'CONFLICT' });
 };
+interface SessionScope {
+  userId: string;
+  courseId: string;
+  lectureId: string;
+  mode: string;
+  format: string;
+}
+const scopeConditions = (scope: SessionScope, start: Date | undefined): (SQL | undefined)[] => [
+  eq(exerciseSessions.userId, scope.userId),
+  eq(exerciseSessions.courseId, scope.courseId),
+  eq(exerciseSessions.lectureId, scope.lectureId),
+  eq(exerciseSessions.learningMode, scope.mode),
+  eq(exerciseSessions.problemFormat, scope.format),
+  start ? gte(exerciseSessions.createdAt, start) : undefined,
+];
