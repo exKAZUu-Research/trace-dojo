@@ -201,7 +201,8 @@ const createHintController = (
   return controller;
 };
 
-// code-gauge-allow functionNcss 39 -- One small listener per document or window event that ends a press or closes the hint.
+// code-gauge-allow functionCognitiveComplexity 16 -- One small listener per document or window event that ends a press or closes the hint.
+// code-gauge-allow functionNcss 40 -- One small listener per document or window event that ends a press or closes the hint.
 const useOutsideDismissal = (
   update: Updater<HintState>,
   targets: RefObject<Map<number, HTMLSpanElement>>,
@@ -220,8 +221,9 @@ const useOutsideDismissal = (
     };
     const release = (): void => {
       update((draft) => {
+        const draggedFromToken = draft.pressed && globalThis.getSelection()?.isCollapsed === false;
         releasePress(draft);
-        if (globalThis.getSelection()?.isCollapsed === false) close(draft);
+        if (draggedFromToken) close(draft);
       });
     };
     const select = (): void => {

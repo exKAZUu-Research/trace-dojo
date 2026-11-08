@@ -198,6 +198,23 @@ test('keeps a pressed hint tooltip mounted and recovers hints when a press relea
   expect(container.querySelectorAll('[tabindex="0"]')).toHaveLength(1);
 });
 
+test('keeps a pinned tooltip open while text inside it is selected', async () => {
+  const user = userEvent.setup();
+  const { container } = renderHighlighter({ code: '個数 %= 5;' });
+  await user.click(within(getCode(container)).getByRole('button', { name: '%= の説明' }));
+  const tooltip = await screen.findByRole('tooltip');
+  const paragraph = tooltip.querySelector('p');
+  if (!paragraph) throw new Error('Hint explanation must be rendered');
+  fireEvent.pointerDown(paragraph);
+  const range = document.createRange();
+  range.selectNodeContents(paragraph);
+  globalThis.getSelection()?.removeAllRanges();
+  globalThis.getSelection()?.addRange(range);
+  fireEvent.pointerUp(paragraph);
+  expect(screen.getByRole('tooltip')).toBe(tooltip);
+  globalThis.getSelection()?.removeAllRanges();
+});
+
 test('pins a hovered hint, keeps it while hovering another, switches on tap, and dismisses outside', async () => {
   const user = userEvent.setup();
   const { container } = renderHighlighter({ code: '個数 %= 5; 個数 = 個数 % 3;' });
