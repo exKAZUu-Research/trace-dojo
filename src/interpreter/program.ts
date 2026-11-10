@@ -5,6 +5,9 @@ import { executeJavaScriptProgram } from '../javascript/run';
 import { traceJavaScriptProgram } from '../javascript/trace';
 import { findJavaTraceAnnotations } from '../problems/fillInBlank/javaSource';
 import type { TraceItem, TraceItemVariable, TurtleTrace } from '../problems/trace';
+import { findPythonTraceAnnotations } from '../python/parse';
+import { executePythonProgram } from '../python/run';
+import { tracePythonProgram } from '../python/trace';
 import type { SourceDiagnostic } from './diagnostics';
 import type { ExecutionLimitError } from './limits';
 import { atomicAnnotationsOf, removeAnnotations, type TraceAnnotation, type TraceOptions } from './traceAnnotations';
@@ -51,6 +54,11 @@ const interpreters = {
     findTraceAnnotations: findJavaScriptTraceAnnotations,
     record: traceJavaScriptProgram,
     execute: executeJavaScriptProgram,
+  },
+  python: {
+    findTraceAnnotations: findPythonTraceAnnotations,
+    record: tracePythonProgram,
+    execute: executePythonProgram,
   },
 } satisfies Record<string, Interpreter>;
 

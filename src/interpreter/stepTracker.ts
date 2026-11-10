@@ -32,16 +32,17 @@ export class StepTracker {
   }
 
   /**
-   * Runs a statement, then records its step at `row`. One that `onlyCalls` (calls functions or creates objects) records
+   * Runs a statement, then records its step at `row`. One that `onlyCalls` (calls functions or creates objects, which a
+   * language may tell only after running it) records
    * none when the calls it made recorded steps and nothing happened after the last of them, since those steps already
    * show what it did. An atomic call returning after those steps, or any change after them (a turtle operation taking
    * an argument whose evaluation recorded steps, a variable a `return` expression updates), needs this step.
    */
-  runStatement<T>(row: number | undefined, onlyCalls: boolean, run: () => T): T {
+  runStatement<T>(row: number | undefined, onlyCalls: boolean | (() => boolean), run: () => T): T {
     const { recordedSteps } = this;
     const result = run();
     const callsShowedIt =
-      onlyCalls &&
+      (typeof onlyCalls === 'function' ? onlyCalls() : onlyCalls) &&
       this.recordedSteps !== recordedSteps &&
       !this.atomicCallUnshown &&
       this.recorder?.showsState() === true;

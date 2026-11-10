@@ -1,0 +1,23 @@
+// Defines the builtin types' methods and registers the standard library modules, which run.ts and trace.ts load.
+import './typeObject';
+import './typeNumbers';
+import './typeStr';
+import './typeContainers';
+import './typeExceptions';
+import './turtle';
+import './enums';
+import './modules/math';
+import './modules/sys';
+import './modules/enum';
+import './modules/collections';
+import './modules/json';
+import './modules/dataclasses';
+import './modules/random';
+import './modules/itertools';
+import './modules/functools';
+import './modules/heapq';
+import './modules/bisect';
+import './modules/copy';
+import './modules/string';
+import './modules/typing';
+import './modules/statistics';
