@@ -608,19 +608,20 @@ function iter(args: PyValue[], kwargs: Kwargs): PyValue {
   const [fn, sentinel] = args;
   if (!isCallable(fn)) throw typeError('iter(v, w): v must be callable');
   let finished = false;
-  return new PyIterator(
-    iteratorClass('callable_iterator'),
-    () => {
-      if (finished) return DONE;
-      const value = callValue(fn, []);
-      if (compareOp('==', value, sentinel) === true) {
-        finished = true;
-        return DONE;
-      }
-      return value;
-    },
-    () => [fn, sentinel]
-  );
+  const next = (): PyValue | typeof DONE => {
+    if (finished) return DONE;
+    const value = callValue(fn, []);
+    if (compareOp('==', value, sentinel) === true) {
+      finished = true;
+      return DONE;
+    }
+    return value;
+  };
+  withState(next, {
+    reduce: () =>
+      finished ? reduction('iter', [newTuple([])]) : reduction('iter', [fn as PyValue, sentinel as PyValue]),
+  });
+  return new PyIterator(iteratorClass('callable_iterator'), next, () => [fn, sentinel]);
 }
 
 function next(args: PyValue[], kwargs: Kwargs): PyValue {

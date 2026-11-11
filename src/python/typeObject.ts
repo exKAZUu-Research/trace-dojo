@@ -437,6 +437,10 @@ const MOVED_ITERATORS = new Set([
 /** The native iterators that reduce to where they are, for pickle and copy. */
 const REDUCED_ITERATORS = new Set([
   ...MOVED_ITERATORS,
+  'dict_reversekeyiterator',
+  'dict_reversevalueiterator',
+  'dict_reverseitemiterator',
+  'callable_iterator',
   'dict_keyiterator',
   'dict_valueiterator',
   'dict_itemiterator',
@@ -450,6 +454,11 @@ const REDUCED_ITERATORS = new Set([
 /** The native iterators that know how many items they have left, as their `__length_hint__` tells. */
 const HINTED_ITERATORS = new Set([
   'list_iterator',
+  'bytes_iterator',
+  'bytearray_iterator',
+  'dict_reversekeyiterator',
+  'dict_reversevalueiterator',
+  'dict_reverseitemiterator',
   'list_reverseiterator',
   'tuple_iterator',
   'range_iterator',

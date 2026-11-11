@@ -8,7 +8,15 @@ import { addModuleCreationHook } from './modules';
 import { attributeError, bindValue, callValue } from './objects';
 import { nativeCompare } from './operators';
 import { allBuiltinClasses } from './subclasses';
-import { baseExceptionClass, classmethodClass, defineMethod, nativeFunction, None, propertyClass } from './types';
+import {
+  baseExceptionClass,
+  classmethodClass,
+  defineMethod,
+  iteratorClassSetup,
+  nativeFunction,
+  None,
+  propertyClass,
+} from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import { PyBuiltinFunction, PyClass, PyDescriptor, PyObject, type PyValue } from './values';
 
@@ -127,6 +135,9 @@ addModuleCreationHook((runtime, name) => () => {
   const module = runtime.modules.get(name);
   if (module) convertBuiltinAttributes([...module.dict.values()].filter((value) => value instanceof PyClass));
 });
+
+// The classes of native iterators are created when first used, which may be while a program runs.
+iteratorClassSetup.push((cls) => convertBuiltinAttributes([cls]));
 
 /** Gives a builtin type the `__new__` CPython's tp_new is, which creates objects as calling the type does. */
 function defineTypeNew(cls: PyClass): void {

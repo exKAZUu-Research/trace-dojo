@@ -470,11 +470,12 @@ dictItemsClass.dict.set('__hash__', None);
 
 function listIterator(items: PyValue[], name: string): PyIterator {
   let index = 0;
-  return new PyIterator(
-    iteratorClass(name),
-    () => (index < items.length ? items[index++] : DONE),
-    () => items
+  const next = withRemaining(
+    () => (index < items.length ? (items[index++] as PyValue) : DONE),
+    () => items.length - index
   );
+  withState(next, { reduce: () => reduction('iter', [newList(items.slice(index))]) });
+  return new PyIterator(iteratorClass(name), next, () => items);
 }
 
 for (const [cls, view] of [
