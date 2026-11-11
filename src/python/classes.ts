@@ -305,7 +305,8 @@ function checkBases(name: string, bases: readonly PyValue[]): PyClass[] {
   const seen = new Set<PyClass>();
   return bases.map((base) => {
     if (!(base instanceof PyClass)) throw typeError('bases must be types');
-    if (base.isBuiltin && !base.isBaseType) throw typeError(`type '${base.name}' is not an acceptable base type`);
+    if (base.isBuiltin && !base.isBaseType)
+      throw typeError(`type '${base.typeName ?? base.name}' is not an acceptable base type`);
     if (base.flags.isEnum && base.enumMembers && base.enumMembers.length > 0) {
       throw typeError(`${name}: cannot extend ${base.qualifiedName}`);
     }

@@ -66,6 +66,7 @@ import './modules/keyword';
 import './modules/pprint';
 import './modules/abc';
 import './modules/contextlib';
+import './modules/contextvars';
 import './modules/collectionsAbc';
 import './modules/warnings';
 import './modules/traceback';

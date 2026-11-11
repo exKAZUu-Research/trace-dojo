@@ -5,6 +5,7 @@ import { asyncioNatives } from './asyncioNatives';
 
 const SOURCE = String.raw`
 import collections
+import contextvars
 import enum
 import functools
 import heapq
@@ -77,6 +78,8 @@ class Handle:
     __module__ = 'asyncio.events'
 
     def __init__(self, callback, args, loop, context=None):
+        if context is None:
+            context = contextvars.copy_context()
         self._context = context
         self._loop = loop
         self._callback = callback
@@ -112,7 +115,7 @@ class Handle:
 
     def _run(self):
         try:
-            self._callback(*self._args)
+            self._context.run(self._callback, *self._args)
         except (SystemExit, KeyboardInterrupt):
             raise
         except BaseException as exc:
@@ -661,6 +664,8 @@ class Future:
         if self._state != _PENDING:
             self._loop.call_soon(fn, self, context=context)
         else:
+            if context is None:
+                context = contextvars.copy_context()
             self._callbacks.append((fn, context))
 
     def remove_done_callback(self, fn):
@@ -861,7 +866,10 @@ class Task(_PyFuture):
         self._must_cancel = False
         self._fut_waiter = None
         self._coro = coro
-        self._context = context
+        if context is None:
+            self._context = contextvars.copy_context()
+        else:
+            self._context = context
         if eager_start and self._loop.is_running():
             self.__eager_start()
         else:
@@ -906,7 +914,7 @@ class Task(_PyFuture):
         try:
             _py_register_eager_task(self)
             try:
-                self.__step_run_and_handle_result(None)
+                self._context.run(self.__step_run_and_handle_result, None)
             finally:
                 _py_unregister_eager_task(self)
         finally:
