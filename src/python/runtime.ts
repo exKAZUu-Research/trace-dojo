@@ -1,6 +1,7 @@
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
+import { PyAnnotateFunction } from './annotations';
 import { createBuiltins } from './builtins';
 import type { PyMemoryView } from './bytesValues';
 import { bindArguments } from './calls';
@@ -246,6 +247,8 @@ export class Runtime {
 
   callFunction(fn: PyFunction, args: readonly PyValue[], kwargs: Kwargs): PyValue {
     const frame = this.newFunctionFrame(fn, args, kwargs);
+    // The compiler's `__annotate__` binds its arguments as a Python function and runs its body natively.
+    if (fn instanceof PyAnnotateFunction) return fn.run(frame.locals.get('format') as PyValue);
     const { scope } = fn.def;
     if (scope.isGenerator || scope.isAsync) return this.newGenerator(fn, frame);
     this.pushFrame(frame);

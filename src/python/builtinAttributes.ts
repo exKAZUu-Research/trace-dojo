@@ -1,6 +1,7 @@
 import { abstractPlaceholders } from './abstractPlaceholders';
 import { builtinTextSignature } from './builtinDocs';
 import { enumerateClass } from './builtins';
+import { addressOf } from './conversions';
 import { method } from './define';
 import { sliceIndices } from './items';
 import { defineProperty } from './modules/numberSupport';
@@ -432,6 +433,13 @@ function closureOf(fn: PyFunction): PyValue {
   );
 }
 
+method(cellClass, '__repr__', 'none', 0, 0, (self) => {
+  const { value } = (self as PyOpaque).data as PyCell;
+  const here = addressOf(self as PyOpaque);
+  if (value === undefined) return `<cell at ${here}: empty>`;
+  const there = `0x${currentRuntime().idOf(value).toString(16)}`;
+  return `<cell at ${here}: ${typeName(value)} object at ${there}>`;
+});
 defineProperty(cellClass, 'cell_contents', (self) => {
   const { value } = (self as PyOpaque).data as PyCell;
   if (value === undefined) throw valueError('Cell is empty');

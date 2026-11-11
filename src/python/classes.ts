@@ -1,4 +1,4 @@
-import { classAnnotationLists, newAnnotate } from './annotations';
+import { annotationClosure, classAnnotationLists, newAnnotate } from './annotations';
 import type { ClassDef } from './ast';
 import { INSTANCE_ATTRIBUTE_DOCS } from './builtinDocs';
 import { method } from './define';
@@ -7,6 +7,7 @@ import type { Evaluator } from './evaluator';
 import type { CallArguments } from './expressionEvaluator';
 import { Frame } from './frame';
 import { defineProperty } from './modules/numberSupport';
+import { namespaceDict } from './namespaces';
 import { bindValue, callValue, deleteItem, getAttributeOrUndefined, getItem, lookupSpecial, setItem } from './objects';
 import { firstRowOf } from './programSource';
 import { currentRuntime } from './runtimeContext';
@@ -78,8 +79,7 @@ export const classDefinitions = new WeakMap<PyClass, ClassDef>();
 // The class statement -----------------------------------------------------------------------------------------------
 
 /** Runs a class statement: evaluates the bases, runs the body in a namespace, and calls the metaclass. */
-// code-gauge-allow functionNcss 35 -- Follows how a class statement prepares its namespace and calls its metaclass.
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows how a class statement prepares its namespace and calls its metaclass.
+// code-gauge-allow functionNcss 36 -- Follows how a class statement prepares its namespace and calls its metaclass.
 export function createClass(
   evaluator: Evaluator,
   def: ClassDef,
@@ -106,13 +106,7 @@ export function createClass(
   if (bases !== originalBases) namespace.set('__orig_bases__', newTuple(originalBases));
   const classCell = new PyCell();
   const body = runClassBody(evaluator, def, frame, namespace, classCell);
-  // The annotations of the class body, which CPython's compiler gives the class as `__annotate_func__`.
-  if (body.annotations.length > 0 && !namespace.has('__annotations__')) {
-    namespace.set(
-      '__annotate_func__',
-      newAnnotate(def.qualifiedName, frame.globals, () => body.annotations)
-    );
-  }
+  const classDict = addClassAnnotate(def, frame, namespace, body.annotations);
   namespace.set('__static_attributes__', newTuple(def.staticAttributes));
   const factory = bases.find(
     (base): base is PyClass => base instanceof PyClass && base.classFactory !== undefined
@@ -120,6 +114,7 @@ export function createClass(
   if (factory) {
     const cls = factory(def, namespace, body.annotations, keywords.size > 0 ? keywords : undefined, bases as PyClass[]);
     classCell.value = cls;
+    classDict.value = namespaceDict(cls.dict);
     let decorated: PyValue = cls;
     for (const decorator of decorators.toReversed()) decorated = callValue(decorator, [decorated]);
     return decorated;
@@ -128,9 +123,33 @@ export function createClass(
     classCell,
     annotations: body.annotations,
   });
-  if (result instanceof PyClass) classDefinitions.set(result, def);
+  if (result instanceof PyClass) {
+    classDefinitions.set(result, def);
+    classDict.value = namespaceDict(result.dict);
+  }
   for (const decorator of decorators.toReversed()) result = callValue(decorator, [result]);
   return result;
+}
+
+/**
+ * Gives a class body's namespace the `__annotate_func__` CPython's compiler gives it, which reads the class's namespace
+ * through the returned cell, filled with the class's own once it exists.
+ */
+function addClassAnnotate(
+  def: ClassDef,
+  frame: Frame,
+  namespace: Map<string, PyValue>,
+  annotations: ClassAnnotations
+): PyCell {
+  const classDict = new PyCell(namespaceDict(namespace));
+  if (annotations.length > 0 && !namespace.has('__annotations__')) {
+    const closure = new Map([...annotationClosure(annotations), ['__classdict__', classDict]]);
+    namespace.set(
+      '__annotate_func__',
+      newAnnotate(def.qualifiedName, frame.globals, () => annotations, closure)
+    );
+  }
+  return classDict;
 }
 
 /** Creates the class of a class statement by calling its metaclass, which `type` does without a dict. */
