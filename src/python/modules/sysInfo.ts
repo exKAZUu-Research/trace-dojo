@@ -3,7 +3,7 @@ import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import type { Frame } from '../frame';
 import { isSupportedModule } from '../moduleNames';
-import { trackModules } from '../modules';
+import { registerMainModule, trackModules } from '../modules';
 import { namespaceDict } from '../namespaces';
 import { toIndex } from '../numbers';
 import type { Runtime } from '../runtime';
@@ -13,6 +13,7 @@ import {
   classOf,
   Ellipsis,
   moduleClass,
+  newDict,
   newTuple,
   None,
   NotImplemented,
@@ -57,6 +58,9 @@ export function sysInformation(runtime: Runtime): [string, PyValue][] {
     ['int_info', INT_INFO],
     ['hash_info', HASH_INFO],
     ['flags', FLAGS],
+    // A program here runs with no -W or -X option.
+    ['warnoptions', runtime.listOf([])],
+    ['_xoptions', newDict()],
     ['getrecursionlimit', builtin('getrecursionlimit', 'none', 0, 0, () => BigInt(runtime.recursionLimit))],
     ['setrecursionlimit', builtin('setrecursionlimit', 'one', 1, 1, ([limit]) => setRecursionLimit(runtime, limit))],
     ['getsizeof', builtin('getsizeof', 'takes', 1, 2, ([value]) => sizeOf(value), { keywords: ['object', 'default'] })],
@@ -64,6 +68,14 @@ export function sysInformation(runtime: Runtime): [string, PyValue][] {
     ['getfilesystemencoding', builtin('getfilesystemencoding', 'none', 0, 0, () => ENCODING)],
     ['get_int_max_str_digits', builtin('get_int_max_str_digits', 'none', 0, 0, () => 4300n)],
     ['intern', builtin('intern', 'one', 1, 1, ([value]) => intern(value))],
+    // With no way to add an audit hook, raising an audit event does nothing.
+    [
+      'audit',
+      builtin('audit', 'expected', 1, Number.POSITIVE_INFINITY, ([event]) => {
+        if (typeof event !== 'string') throw typeError(`audit() argument 1 must be str, not ${typeName(event)}`);
+        return None;
+      }),
+    ],
     ['exc_info', builtin('exc_info', 'none', 0, 0, () => excInfo(runtime))],
     // A program can add no audit hook, so raising an audit event does nothing, as in CPython without hooks.
     [
@@ -128,7 +140,7 @@ function moduleTable(runtime: Runtime): Map<string, PyValue> {
   const table = new Map<string, PyValue>();
   for (const name of STARTUP_MODULES) {
     const loaded = runtime.modules.get(name) ?? (isSupportedModule(name) ? runtime.importModule(name) : undefined);
-    table.set(name, loaded ?? (name === '__main__' ? mainModule(runtime) : unavailableValue(`モジュール ${name}`)));
+    table.set(name, loaded ?? unavailableValue(`モジュール ${name}`));
   }
   for (const [name, module] of runtime.modules) table.set(name, module);
   trackModules(runtime, table);
@@ -141,9 +153,7 @@ method(mainModuleClass, '__repr__', 'none', 0, 0, () => {
   throw new UnsupportedFeatureError('__main__ モジュールの repr（スクリプトのファイルのパスを含む）');
 });
 
-function mainModule(runtime: Runtime): PyModule {
-  return new PyModule(mainModuleClass, '__main__', (runtime.frames[0] as Frame).globals);
-}
+registerMainModule((runtime) => new PyModule(mainModuleClass, '__main__', (runtime.frames[0] as Frame).globals));
 
 // Struct sequences --------------------------------------------------------------------------------------------------
 

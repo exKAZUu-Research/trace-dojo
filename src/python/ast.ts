@@ -237,8 +237,9 @@ export interface ImportName {
 
 export type Statement = Span &
   Suspends &
+  /** `displays` marks a statement of code compiled in 'single' mode, which shows its value as `sys.displayhook` does. */
   (
-    | { kind: 'expression'; expression: Expression; stepRow?: number }
+    | { kind: 'expression'; expression: Expression; stepRow?: number; displays?: true }
     | { kind: 'assign'; targets: Target[]; value: Expression; stepRow?: number }
     | { kind: 'augmentedAssign'; target: Target; operator: BinaryOperator; value: Expression; stepRow?: number }
     | {

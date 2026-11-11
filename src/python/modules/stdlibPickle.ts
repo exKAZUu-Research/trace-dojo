@@ -1,0 +1,66 @@
+// The reductions of the standard library types this interpreter writes natively, as CPython's reduce them for pickle.
+import { pyStr } from '../conversions';
+import { method } from '../define';
+import { enumClass } from '../enums';
+import { callValue, getAttribute, getIterator } from '../objects';
+import { objectState } from '../reduction';
+import { classOf, dictClass, ellipsisClass, newDict, newTuple, None, notImplementedClass, typeError } from '../types';
+import { type PyDeque, PyDict, type PyOpaque, PyTuple, type PyValue } from '../values';
+import { counterClass, defaultdictClass, dequeClass, namedTupleBase, orderedDictClass } from './collections';
+import { decimalClass } from './decimal';
+import { fractionClass, type PyFraction } from './fractions';
+import { type Partial, partialClass } from './functools';
+
+const itemsIterator = (self: PyValue): PyValue => getIterator(callValue(getAttribute(self, 'items'), []));
+
+method(orderedDictClass, '__reduce__', 'none', 0, 0, (self) =>
+  newTuple([classOf(self), newTuple([]), objectState(self, false), None, itemsIterator(self)])
+);
+method(counterClass, '__reduce__', 'none', 0, 0, (self) =>
+  newTuple([classOf(self), newTuple([callValue(dictClass, [self])])])
+);
+method(defaultdictClass, '__reduce__', 'none', 0, 0, (self) => {
+  const factory = (self as PyDict).defaultFactory;
+  const args = factory === undefined || factory === None ? [] : [factory];
+  return newTuple([classOf(self), newTuple(args), None, None, itemsIterator(self)]);
+});
+method(dequeClass, '__reduce__', 'none', 0, 0, (self) => {
+  const { maxlen } = self as PyDeque;
+  const args = maxlen === undefined ? [] : [newTuple([]), BigInt(maxlen)];
+  return newTuple([classOf(self), newTuple(args), objectState(self, false), getIterator(self)]);
+});
+method(namedTupleBase, '__getnewargs__', 'none', 0, 0, (self) => newTuple((self as PyTuple).items));
+
+method(decimalClass, '__reduce__', 'none', 0, 0, (self) => newTuple([classOf(self), newTuple([pyStr(self)])]));
+method(fractionClass, '__reduce__', 'none', 0, 0, (self) => {
+  const fraction = self as PyFraction;
+  return newTuple([classOf(self), newTuple([fraction.numerator, fraction.denominator])]);
+});
+
+method(enumClass, '__reduce_ex__', 'one', 1, 1, (self) =>
+  newTuple([classOf(self), newTuple([getAttribute(self, '_value_')])])
+);
+method(notImplementedClass, '__reduce__', 'none', 0, 0, () => 'NotImplemented');
+method(ellipsisClass, '__reduce__', 'none', 0, 0, () => 'Ellipsis');
+
+const partialOf = (self: PyValue): Partial => (self as PyOpaque).data as Partial;
+
+method(partialClass, '__reduce__', 'none', 0, 0, (self) => {
+  const partial = partialOf(self);
+  const state = newTuple([partial.fn, newTuple(partial.args), newDict(partial.kwargs.entries()), None]);
+  return newTuple([classOf(self), newTuple([partial.fn]), state]);
+});
+method(partialClass, '__setstate__', 'one', 1, 1, (self, [state]) => {
+  if (!(state instanceof PyTuple) || state.items.length !== 4) throw typeError('invalid partial state');
+  const [fn, args, kwargs] = state.items;
+  if (!(args instanceof PyTuple) || !(kwargs instanceof PyDict || kwargs === None)) {
+    throw typeError('invalid partial state');
+  }
+  const partial = partialOf(self);
+  partial.fn = fn;
+  partial.args = [...args.items];
+  partial.kwargs = new Map();
+  if (kwargs instanceof PyDict)
+    for (const entry of kwargs.store.ordered()) partial.kwargs.set(entry.key as string, entry.value);
+  return None;
+});

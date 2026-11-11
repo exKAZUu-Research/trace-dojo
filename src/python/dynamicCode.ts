@@ -1,7 +1,7 @@
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import type { Module, Statement } from './ast';
 import { PyBytes } from './bytesValues';
-import { addressOf, pyRepr } from './conversions';
+import { addressOf } from './conversions';
 import { method } from './define';
 import { Frame } from './frame';
 import { findIndentationError } from './indentation';
@@ -9,7 +9,7 @@ import { builtinClassWithBase } from './modules/moduleClasses';
 import { defineProperty } from './modules/numberSupport';
 import { namespaceOf } from './namespaces';
 import { argument } from './nativeArgs';
-import { callValue, lookupSpecial } from './objects';
+import { lookupSpecial } from './objects';
 import { parseDynamicCode } from './parse';
 import { localVariables, programFrames } from './reflection';
 import type { Runtime } from './runtime';
@@ -28,7 +28,7 @@ import { unavailableValue } from './unavailableValues';
 import { UnsupportedFeatureError } from './unsupported';
 import { type Kwargs, type PyClass, PyDict, PyError, PyInstance, PyModule, PyOpaque, type PyValue } from './values';
 
-type Mode = 'exec' | 'eval' | 'single';
+export type Mode = 'exec' | 'eval' | 'single';
 
 interface Code {
   module: Module;
@@ -65,7 +65,9 @@ export function compile(args: PyValue[], kwargs: Kwargs): PyValue {
       throw typeError(`compile() missing required argument '${COMPILE_KEYWORDS[index]}' (pos ${index + 1})`);
     }
   }
-  const text = sourceText(source as PyValue);
+  const tree = astSupport?.isTree(source as PyValue) ? (source as PyValue) : undefined;
+  if (tree !== undefined && onlyAst(flags)) return tree;
+  const text = tree === undefined ? sourceText(source as PyValue) : astSupport?.unparse(tree);
   if (typeof text !== 'string') throw typeError('compile() arg 1 must be a string, bytes or AST object');
   if (typeof filename !== 'string') {
     throw typeError(`expected str, bytes or os.PathLike object, not ${typeName(filename as PyValue)}`);
@@ -75,8 +77,35 @@ export function compile(args: PyValue[], kwargs: Kwargs): PyValue {
   if (mode !== 'exec' && mode !== 'eval' && mode !== 'single') {
     throw valueError("compile() mode must be 'exec', 'eval' or 'single'");
   }
+  if (onlyAst(flags) && astSupport) return parseTree(astSupport, text, mode, filename);
   checkFlags(flags);
   return new PyOpaque(codeClass, '', compileCode(text, mode, filename));
+}
+
+/** The tree `ast.parse` gives, raising the SyntaxError of text the grammar rejects. */
+function parseTree(support: AstSupport, text: string, mode: Mode, filename: string): PyValue {
+  const indentationError = findIndentationError(text);
+  if (indentationError) throw syntaxError(unshownIndentationErrorClass, filename, reasonOf(indentationError));
+  return support.parse(text, mode, (reason) => syntaxError(unshownSyntaxErrorClass, filename, reason));
+}
+
+/** How compile() makes and reads the trees of the `ast` module, which that module provides. */
+export interface AstSupport {
+  /** Builds the tree of source text, calling `syntaxError` for the SyntaxError of text the grammar rejects. */
+  parse: (source: string, mode: Mode, syntaxError: (reason: string) => Error) => PyValue;
+  unparse: (tree: PyValue) => string;
+  isTree: (value: PyValue) => boolean;
+}
+
+let astSupport: AstSupport | undefined;
+
+export function registerAstSupport(support: AstSupport): void {
+  astSupport = support;
+}
+
+/** `PyCF_ONLY_AST`, which `ast.parse` passes, alone. */
+function onlyAst(flags: PyValue | undefined): boolean {
+  return flags === 0x4_00n;
 }
 
 /** `eval(source, /, globals=None, locals=None)`. */
@@ -155,7 +184,41 @@ function compileCode(source: string, mode: Mode, filename: string): Code {
     cache.set(source, module);
   }
   checkMode(module, mode, filename);
-  return { module, mode, filename };
+  return { module: mode === 'single' ? { ...module, body: module.body.map(markDisplays) } : module, mode, filename };
+}
+
+/** Marks the expression statements that code compiled in 'single' mode shows, outside the functions and classes it defines. */
+function markDisplays(statement: Statement): Statement {
+  const mark = (body: Statement[]): Statement[] => body.map(markDisplays);
+  switch (statement.kind) {
+    case 'expression': {
+      return { ...statement, displays: true };
+    }
+    case 'if':
+    case 'while':
+    case 'for': {
+      return { ...statement, body: mark(statement.body), orelse: mark(statement.orelse) };
+    }
+    case 'try': {
+      const handlers = statement.handlers.map((handler) => ({ ...handler, body: mark(handler.body) }));
+      return {
+        ...statement,
+        body: mark(statement.body),
+        handlers,
+        orelse: mark(statement.orelse),
+        finalbody: mark(statement.finalbody),
+      };
+    }
+    case 'with': {
+      return { ...statement, body: mark(statement.body) };
+    }
+    case 'match': {
+      return { ...statement, cases: statement.cases.map((each) => ({ ...each, body: mark(each.body) })) };
+    }
+    default: {
+      return statement;
+    }
+  }
 }
 
 function parseSource(source: string, filename: string): Module {
@@ -178,13 +241,22 @@ function checkMode(module: Module, mode: Mode, filename: string): void {
   if (mode === 'eval' && (body.length !== 1 || body[0].kind !== 'expression')) {
     throw syntaxError(unshownSyntaxErrorClass, filename, 'eval() では、式しか評価できません。');
   }
-  if (mode === 'single' && (body.length !== 1 || isCompound(body[0]))) {
-    throw new UnsupportedFeatureError("compile() の 'single' モードでの、単純な文 1 つ以外のコード");
+  // One interactive statement: a compound statement, or simple statements that semicolons join on one line.
+  if (
+    mode === 'single' &&
+    body.length > 1 &&
+    (body.some(isCompound) || body.some((each) => each.row !== body[0].row))
+  ) {
+    throw syntaxError(
+      unshownSyntaxErrorClass,
+      filename,
+      'multiple statements found while compiling a single statement'
+    );
   }
 }
 
 function isCompound(statement: Statement): boolean {
-  return ['if', 'while', 'for', 'try', 'with', 'match'].includes(statement.kind);
+  return ['if', 'while', 'for', 'try', 'with', 'match', 'functionDef', 'classDef'].includes(statement.kind);
 }
 
 /**
@@ -251,21 +323,9 @@ function runIn(runtime: Runtime, code: Code, frame: Frame): PyValue {
   const { module, mode } = code;
   const [first] = module.body;
   if (mode === 'eval' && first.kind === 'expression') return runtime.evaluator.evaluate(first.expression, frame);
-  if (mode === 'single' && first.kind === 'expression') {
-    display(runtime, runtime.evaluator.evaluate(first.expression, frame));
-    return None;
-  }
   if (mode === 'exec' && module.doc !== undefined) frame.locals.set('__doc__', module.doc);
   runtime.evaluator.runModule(module.body, frame);
   return None;
-}
-
-/** `sys.displayhook`, which shows the value of an expression statement compiled in 'single' mode. */
-function display(runtime: Runtime, value: PyValue): void {
-  if (value === None) return;
-  runtime.builtins.set('_', None);
-  callValue(runtime.builtins.get('print') as PyValue, [pyRepr(value)]);
-  runtime.builtins.set('_', value);
 }
 
 function namespacesFor(

@@ -59,6 +59,9 @@ class SimpleNamespace:
             return self.__dict__ == other.__dict__
         return NotImplemented
 
+    def __reduce__(self):
+        return (type(self), (), self.__dict__)
+
     def __replace__(self, /, **changes):
         result = type(self)(**self.__dict__)
         for key, value in changes.items():

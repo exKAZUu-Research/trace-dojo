@@ -1,4 +1,4 @@
-import { addressOf } from '../conversions';
+import { addressOf, pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { builtinClassesWithDict, builtinDescriptorClasses, ownDict } from '../descriptors';
 import { DictStore } from '../dictStore';
@@ -9,9 +9,103 @@ import { callValue, isCallable, isTruthy, iterate } from '../objects';
 import { compareOp } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
-import { builtinClass, classOf, methodClass, newTuple, None, typeError } from '../types';
+import { newGenericAlias } from '../typeHints';
+import { builtinClass, classOf, methodClass, newDict, newTuple, None, typeError } from '../types';
 import { DONE, type Kwargs, PyBoundMethod, PyBuiltinFunction, PyOpaque, type PyValue } from '../values';
 import { defineProperty } from './numberSupport';
+
+/** A builtin object bound to an instance as a method, as the `__get__` of partial and lru_cache objects binds them. */
+function bindAsMethod(self: PyValue, instance: PyValue | undefined): PyValue {
+  return instance === undefined || instance === None ? self : new PyBoundMethod(methodClass, instance, self);
+}
+
+export const partialClass = builtinClass('partial');
+partialClass.module = 'functools';
+partialClass.typeName = 'functools.partial';
+builtinClassesWithDict.add(partialClass);
+builtinDescriptorClasses.add(partialClass);
+export interface Partial {
+  fn: PyValue;
+  args: PyValue[];
+  kwargs: Map<string, PyValue>;
+}
+
+/** `functools.Placeholder`, which a partial's positional arguments leave for the call to fill. */
+const placeholderClass = builtinClass('_PlaceholderType');
+placeholderClass.module = 'functools';
+placeholderClass.typeName = 'functools._PlaceholderType';
+const Placeholder = new PyOpaque(placeholderClass, 'Placeholder');
+method(placeholderClass, '__repr__', 'none', 0, 0, () => 'Placeholder');
+placeholderClass.construct = () => Placeholder;
+
+partialClass.construct = (_cls, args, kwargs) => {
+  if (args.length === 0) throw typeError("type 'partial' takes at least one argument");
+  const [fn, ...rest] = args;
+  if (!isCallable(fn)) throw typeError('the first argument must be callable');
+  if (rest.at(-1) === Placeholder) throw typeError('trailing Placeholders are not allowed');
+  for (const value of kwargs?.values() ?? []) {
+    if (value === Placeholder) throw typeError('Placeholder cannot be passed as a keyword argument');
+  }
+  if (fn instanceof PyOpaque && fn.cls === partialClass) {
+    // A partial of a partial flattens into one, as CPython's partial_new does.
+    const inner = fn.data as Partial;
+    const merged = new Map(inner.kwargs);
+    for (const [key, value] of kwargs ?? []) merged.set(key, value);
+    return newPartial(inner.fn, fillPlaceholders(inner.args, rest, true), merged);
+  }
+  return newPartial(fn, rest, new Map(kwargs));
+};
+
+function newPartial(fn: PyValue, args: PyValue[], kwargs: Map<string, PyValue>): PyOpaque {
+  return new PyOpaque(partialClass, 'partial', { fn, args, kwargs } satisfies Partial);
+}
+
+/** Fills a partial's placeholders with call arguments in order, as CPython's partial does. */
+function fillPlaceholders(args: readonly PyValue[], given: readonly PyValue[], nesting = false): PyValue[] {
+  const count = args.filter((arg) => arg === Placeholder).length;
+  if (count === 0) return [...args, ...given];
+  if (!nesting && given.length < count) {
+    throw typeError(`missing positional arguments in 'partial' call; expected at least ${count}, got ${given.length}`);
+  }
+  let index = 0;
+  const filled = args.map((arg) => (arg === Placeholder && index < given.length ? given[index++] : arg));
+  return [...filled, ...given.slice(index)];
+}
+
+const partialOf = (self: PyValue): Partial => (self as PyOpaque).data as Partial;
+defineProperty(partialClass, 'func', (self) => partialOf(self).fn);
+defineProperty(partialClass, 'args', (self) => newTuple(partialOf(self).args));
+defineProperty(partialClass, 'keywords', (self) => newDict(partialOf(self).kwargs.entries()));
+defineProperty(partialClass, '__dict__', (self) => namespaceDict(ownDict(self) as Map<string, PyValue>));
+method(partialClass, '__get__', 'expected', 1, 2, (self, [instance]) => bindAsMethod(self, instance));
+method(partialClass, '__class_getitem__', 'one', 1, 1, (owner, [key]) => newGenericAlias(owner, key), {
+  binding: 'class',
+});
+partialClass.dict.set(
+  '__call__',
+  new PyBuiltinFunction(
+    builtinClass('method_descriptor'),
+    '__call__',
+    (args, kwargs) => {
+      const partial = partialOf(args[0]);
+      const merged = new Map(partial.kwargs);
+      for (const [key, value] of kwargs ?? []) merged.set(key, value);
+      return callValue(partial.fn, fillPlaceholders(partial.args, args.slice(1)), merged.size > 0 ? merged : undefined);
+    },
+    undefined,
+    'method',
+    'partial'
+  )
+);
+method(partialClass, '__repr__', 'none', 0, 0, (self) => {
+  const partial = partialOf(self);
+  const parts = [
+    pyRepr(partial.fn),
+    ...partial.args.map((arg) => pyRepr(arg)),
+    ...[...partial.kwargs].map(([key, value]) => `${key}=${pyRepr(value)}`),
+  ];
+  return `functools.partial(${parts.join(', ')})`;
+});
 
 function reduce(args: PyValue[], kwargs: Kwargs): PyValue {
   checkArgs({ qualified: 'reduce', min: 2, max: 3, style: 'expected', keywords: ['initial'] }, args, kwargs);
@@ -138,7 +232,7 @@ cacheClass.dict.set(
   new PyBuiltinFunction(
     builtinClass('method_descriptor'),
     '__get__',
-    ([self, instance]) => (instance === None ? self : new PyBoundMethod(methodClass, instance, self)),
+    ([self, instance]) => bindAsMethod(self, instance),
     undefined,
     'method',
     '_lru_cache_wrapper'
@@ -177,7 +271,7 @@ function cmpToKey([compare]: PyValue[]): PyValue {
   );
 }
 
-// CPython's `functools.py`, whose C parts `_functools` gives (the partial objects are those its Python gives), with
+// CPython's `functools.py`, whose C parts `_functools` gives, with
 // singledispatch's cache a plain dict, as this grader has no weak references to classes.
 const SOURCE =
   String.raw`"""functools.py - Tools for working with functions and callable objects
@@ -1364,6 +1458,9 @@ registerModule(
   () =>
     new Map<string, PyValue>([
       ['reduce', builtin('reduce', 'expected', 2, 3, reduce)],
+      ['partial', partialClass],
+      ['Placeholder', Placeholder],
+      ['_PlaceholderType', placeholderClass],
       ['cmp_to_key', builtin('cmp_to_key', 'one', 1, 1, cmpToKey)],
       ['_lru_cache_wrapper', builtin('_lru_cache_wrapper', 'expected', 4, 4, lruCacheWrapper)],
     ])

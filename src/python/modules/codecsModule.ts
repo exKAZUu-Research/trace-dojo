@@ -1140,13 +1140,8 @@ registerUnsupportedAttributes(
       'charmap_build',
       'charmap_decode',
       'charmap_encode',
-      'escape_decode',
       'escape_encode',
-      'raw_unicode_escape_decode',
-      'raw_unicode_escape_encode',
       'readbuffer_encode',
-      'unicode_escape_decode',
-      'unicode_escape_encode',
       'utf_7_decode',
       'utf_7_encode',
     ].map((name) => [name, `codecs.${name}()`])

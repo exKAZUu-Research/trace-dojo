@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 830 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss 836 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import type {
   ClassDef,
   ExceptHandler,
@@ -15,10 +15,12 @@ import { AsyncEvaluator } from './asyncEvaluator';
 import { createClass } from './classes';
 import { pyRepr } from './conversions';
 import { asyncYield } from './coroutines';
+import { displayValue } from './display';
 import { exceptionGroupOf, splitGroup } from './exceptionGroups';
 import { mappingEntries } from './expressionEvaluator';
 import type { Frame } from './frame';
 import { isMapping, isSequenceForMatch } from './matching';
+import { isRegisteredModule } from './modules';
 import {
   bindValue,
   callValue,
@@ -209,6 +211,7 @@ export class Evaluator extends AsyncEvaluator {
     const result = runtime.steps.runStatement(statement.stepRow, expression.kind === 'call', () =>
       this.evaluate(expression, frame)
     );
+    if (statement.displays) displayValue(runtime, result);
     // The statement drops its value, which closes a generator that only the value held.
     if (runtime.finalizer.pending.size > 0) this.release(result);
   }
@@ -266,7 +269,10 @@ export class Evaluator extends AsyncEvaluator {
     for (const { name, binding } of statement.names) {
       const feature = module.unsupported.get(name);
       if (feature !== undefined) throw new UnsupportedFeatureError(feature);
-      const value = module.dict.get(name);
+      // As in CPython, a name a package lacks may be a submodule, which importing it adds to the package.
+      const submodule = `${statement.module}.${name}`;
+      const value =
+        module.dict.get(name) ?? (isRegisteredModule(submodule) ? this.runtime.importModule(submodule) : undefined);
       if (value === undefined) {
         throw pyError('ImportError', `cannot import name '${name}' from '${statement.module}' (unknown location)`);
       }

@@ -1,3 +1,4 @@
+import { pyRepr } from '../conversions';
 import {
   isAsyncGenerator,
   isAsyncGeneratorFunction,
@@ -8,9 +9,11 @@ import {
 import { builtin } from '../define';
 import { registerModule } from '../modules';
 import { callValue, getAttribute, getAttributeOrUndefined, isTruthy } from '../objects';
+import type { Runtime } from '../runtime';
 import { currentRuntime } from '../runtimeContext';
-import { runModuleSource } from '../sourceModules';
-import { builtinFunctionClass, classOf, generatorClass, None, typeError } from '../types';
+import { IS_ABSTRACT, typeFlags } from '../typeFlags';
+import { builtinFunctionClass, classOf, generatorClass, None, typeError, valueError } from '../types';
+import { isUnavailable } from '../unavailableValues';
 import { UnsupportedFeatureError } from '../unsupported';
 import { PyBoundMethod, PyBuiltinFunction, PyClass, PyFunction, PyGenerator, PyModule, type PyValue } from '../values';
 import { emptyClass, formatAnnotation, parameterClass, signature, signatureClass } from './inspectSignature';
@@ -30,75 +33,18 @@ const PREDICATES: [string, (value: PyValue) => boolean][] = [
   ['isawaitable', isAwaitable],
   ['isbuiltin', (value) => isBuiltin(value)],
   ['ismethoddescriptor', (value) => isMethodDescriptor(value)],
+  // ABCMeta records `__abstractmethods__` once it creates a class, which sets the class's abstract flag.
+  ['isabstract', (value) => value instanceof PyClass && (typeFlags(value) & IS_ABSTRACT) !== 0],
   [
     'isroutine',
     (value) => value instanceof PyBuiltinFunction || value instanceof PyFunction || value instanceof PyBoundMethod,
   ],
 ];
 
-// CPython's `inspect.unwrap`.
-const SOURCE =
-  String.raw`
-import sys
-
-
-def unwrap(func, *, stop=None):
-    """Get the object wrapped by *func*.
-
-   Follows the chain of :attr:` +
-  '`' +
-  String.raw`__wrapped__` +
-  '`' +
-  String.raw` attributes returning the last
-   object in the chain.
-
-   *stop* is an optional callback accepting an object in the wrapper chain
-   as its sole argument that allows the unwrapping to be terminated early if
-   the callback returns a true value. If the callback never returns a true
-   value, the last object in the chain is returned as usual. For example,
-   :func:` +
-  '`' +
-  String.raw`signature` +
-  '`' +
-  String.raw` uses this to stop unwrapping if any object in the
-   chain has a ` +
-  '`' +
-  String.raw`` +
-  '`' +
-  String.raw`__signature__` +
-  '`' +
-  String.raw`` +
-  '`' +
-  String.raw` attribute defined.
-
-   :exc:` +
-  '`' +
-  String.raw`ValueError` +
-  '`' +
-  String.raw` is raised if a cycle is encountered.
-
-    """
-    f = func  # remember the original func for error reporting
-    # Memoise by id to tolerate non-hashable objects, but store objects to
-    # ensure they aren't destroyed, which would allow their IDs to be reused.
-    memo = {id(f): f}
-    recursion_limit = sys.getrecursionlimit()
-    while not isinstance(func, type) and hasattr(func, '__wrapped__'):
-        if stop is not None and stop(func):
-            break
-        func = func.__wrapped__
-        id_func = id(func)
-        if (id_func in memo) or (len(memo) >= recursion_limit):
-            raise ValueError('wrapper loop when unwrapping {!r}'.format(f))
-        memo[id_func] = func
-    return func
-`;
-
 registerModule(
   'inspect',
-  (runtime, namespace) => {
-    runModuleSource(runtime, namespace, SOURCE);
-    return new Map<string, PyValue>([
+  (runtime) =>
+    new Map<string, PyValue>([
       ...PREDICATES.map(([name, test]): [string, PyValue] => [
         name,
         builtin(name, 'one', 1, 1, ([value]) => test(value)),
@@ -115,15 +61,20 @@ registerModule(
       ['getdoc', builtin('getdoc', 'one', 1, 1, ([value]) => getDoc(value))],
       ['cleandoc', builtin('cleandoc', 'one', 1, 1, ([doc]) => cleanDoc(doc))],
       ['getmro', builtin('getmro', 'one', 1, 1, ([cls]) => getAttribute(cls, '__mro__'))],
-    ]);
-  },
+      ['getmodule', builtin('getmodule', 'takes', 1, 2, ([value]) => getModule(runtime, value))],
+      [
+        'unwrap',
+        builtin('unwrap', 'takes', 1, 1, ([value], kwargs) => unwrap(value, kwargs?.get('stop')), {
+          keywords: ['stop'],
+        }),
+      ],
+    ]),
   Object.fromEntries(
     [
       ['getsource', 'ソースコード'],
       ['getsourcelines', 'ソースコード'],
       ['getsourcefile', 'ソースファイル'],
       ['getfile', 'ソースファイル'],
-      ['getmodule', 'オブジェクトを定義したモジュール'],
       ['getcomments', 'ソースコードのコメント'],
       ['currentframe', 'フレームオブジェクト'],
       ['stack', 'フレームオブジェクト'],
@@ -137,12 +88,37 @@ registerModule(
       ['getattr_static', 'inspect.getattr_static()'],
       ['getfullargspec', 'inspect.getfullargspec()'],
       ['getcallargs', 'inspect.getcallargs()'],
-      ['isabstract', 'inspect.isabstract()'],
       ['isdatadescriptor', 'inspect.isdatadescriptor()'],
       ['getmembers_static', 'inspect.getmembers_static()'],
     ].map(([name, feature]) => [name, `inspect.${name}()（${feature}）`])
   )
 );
+
+/**
+ * `inspect.getmodule`: a module itself, or the module its `__module__` names. CPython looks for other objects by their
+ * source file, which only code objects, frames, and tracebacks have, which this grader does not expose.
+ */
+function getModule(runtime: Runtime, value: PyValue): PyValue {
+  if (value instanceof PyModule) return value;
+  const name = getAttributeOrUndefined(value, '__module__');
+  if (name === undefined) return None;
+  const table = getAttribute(runtime.importModule('sys'), 'modules');
+  return callValue(getAttribute(table, 'get'), [name]);
+}
+
+/** `inspect.unwrap`: follows the chain of `__wrapped__` attributes, as decorators made with `functools.wraps` leave. */
+function unwrap(start: PyValue, stop: PyValue | undefined): PyValue {
+  let fn = start;
+  const seen = new Set<PyValue>([fn]);
+  const limit = currentRuntime().recursionLimit;
+  while (!(fn instanceof PyClass) && !isUnavailable(fn) && getAttributeOrUndefined(fn, '__wrapped__') !== undefined) {
+    if (stop !== undefined && stop !== None && isTruthy(callValue(stop, [fn]))) break;
+    fn = getAttribute(fn, '__wrapped__');
+    if (seen.has(fn) || seen.size >= limit) throw valueError(`wrapper loop when unwrapping ${pyRepr(start)}`);
+    seen.add(fn);
+  }
+  return fn;
+}
 
 function isGeneratorFunction(value: PyValue): boolean {
   const fn = value instanceof PyBoundMethod ? value.fn : value;

@@ -4,6 +4,7 @@ import { registerModule, registerModuleAlias } from '../modules';
 import { callValue, lookupSpecial, toArray } from '../objects';
 import { lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
+import { registerSourceModule } from '../sourceModules';
 import { nativeFunction, newList, None, typeError, typeName, valueError } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
 import { PyError, PyInstance, type PyValue } from '../values';
@@ -81,8 +82,56 @@ registerModule(
       ['fsencode', pathFunction('fsencode', ['filename'], 1, ([filename]) => fsencode(filename as PyValue))],
       ['fsdecode', pathFunction('fsdecode', ['filename'], 1, ([filename]) => fsdecode(filename as PyValue))],
       ['path', runtime.importModule('posixpath')],
+      ['PathLike', runtime.importModule('_os_pathlike').dict.get('PathLike') as PyValue],
     ]),
   SYSTEM_FUNCTIONS
+);
+
+// CPython's `os.PathLike`, as `Lib/os.py` defines it, with `_collections_abc._check_methods`, since modules that
+// collections.abc imports import os.
+registerSourceModule(
+  '_os_pathlike',
+  String.raw`
+import abc
+
+GenericAlias = type(list[int])
+
+
+def _check_methods(C, *methods):
+    mro = C.__mro__
+    for method in methods:
+        for B in mro:
+            if method in B.__dict__:
+                if B.__dict__[method] is None:
+                    return NotImplemented
+                break
+        else:
+            return NotImplemented
+    return True
+
+
+class PathLike(abc.ABC):
+
+    '''Abstract base class for implementing the file system path protocol.'''
+
+    __slots__ = ()
+
+    @abc.abstractmethod
+    def __fspath__(self):
+        '''Return the file system path representation of the object.'''
+        raise NotImplementedError
+
+    @classmethod
+    def __subclasshook__(cls, subclass):
+        if cls is PathLike:
+            return _check_methods(subclass, '__fspath__')
+        return NotImplemented
+
+    __class_getitem__ = classmethod(GenericAlias)
+
+
+PathLike.__module__ = 'os'
+`
 );
 
 /** `os.fspath`: a path as a str or bytes, asking any other object for its `__fspath__`. */

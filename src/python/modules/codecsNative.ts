@@ -18,6 +18,7 @@ import { exceptionClassNamed, isInstanceOf, newException, newTuple, None, typeEr
 import { characterName } from '../unicodeDatabase';
 import { escapePoint } from '../unicodeErrors';
 import { PyError, PyInstance, PyTuple, type PyValue } from '../values';
+import { escapeDecodeFunction } from './escapeDecode';
 
 /** The codec modules whose `encodings` module this grader has, which `codecs.lookup` imports. */
 export const ENCODINGS_MODULES = [
@@ -52,6 +53,8 @@ const UNICODE_CODECS = [
   'utf_32',
   'utf_32_le',
   'utf_32_be',
+  'raw_unicode_escape',
+  'unicode_escape',
 ];
 
 /** What `codecs.register` and `codecs.lookup` keep for each run. */
@@ -90,6 +93,7 @@ registerModule('_codecs', () => {
     entries.set(`${module}_encode`, unicodeEncoder(module));
     entries.set(`${module}_decode`, unicodeDecoder(module));
   }
+  entries.set('escape_decode', escapeDecodeFunction);
   entries.set('utf_16_ex_decode', exDecoder(2));
   entries.set('utf_32_ex_decode', exDecoder(4));
   return entries;

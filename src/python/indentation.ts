@@ -94,6 +94,7 @@ class Scanner {
     return ch;
   }
 
+  // code-gauge-allow duplicateLines 17 -- The tokenize module's tokenizer measures a line's indentation alike.
   readIndent(): Indent {
     let column = 0;
     let altColumn = 0;

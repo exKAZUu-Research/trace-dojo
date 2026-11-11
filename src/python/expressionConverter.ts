@@ -897,7 +897,7 @@ function rejectExpression(node: Node): never {
   }
 }
 
-function constantOf(node: Node): Constant {
+export function constantOf(node: Node): Constant {
   switch (node.type) {
     case 'true':
     case 'false': {

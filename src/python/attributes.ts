@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 487 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 508 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import { solidBase } from './classes';
 import { builtin } from './define';
 import {
@@ -10,10 +10,13 @@ import {
   noteGetattributeAssigned,
   ownDict,
 } from './descriptors';
+import { hasPythonLevelNew } from './instances';
+import { builtinFunctionModule } from './modules';
 import { namespaceDict, namespaceOf } from './namespaces';
 import { attributeError, bindValue, callValue, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { deleteMember, instancesHaveDict, isMember, writeMember } from './slots';
+import { typeFlags } from './typeFlags';
 import {
   builtinFunctionClass,
   classmethodClass,
@@ -123,6 +126,9 @@ function typeData(cls: PyClass, name: string): PyValue | undefined {
     case '__module__': {
       return cls.module;
     }
+    case '__flags__': {
+      return BigInt(typeFlags(cls));
+    }
     case '__doc__': {
       return cls.isBuiltin ? (cls.doc ?? None) : (cls.dict.get('__doc__') ?? None);
     }
@@ -218,6 +224,8 @@ function boundMethodAttribute(method: PyBoundMethod, name: string): PyValue | un
   if (name === '__name__' || name === '__qualname__' || name === '__doc__' || name === '__module__') {
     return specialAttribute(method.fn, name);
   }
+  // As CPython's method_getattro does, a method reads the other attributes of its function.
+  if (method.fn instanceof PyFunction) return method.fn.dict.get(name) ?? specialAttribute(method.fn, name);
   return undefined;
 }
 
@@ -227,10 +235,12 @@ function builtinFunctionAttribute(fn: PyBuiltinFunction, name: string): PyValue 
   if (name === '__self__') {
     // A static method such as `str.maketrans` shows its type in its repr but has no `__self__`, unlike `__new__`.
     if (fn.binding === 'static' && fn.name !== '__new__') return None;
+    if (fn.self instanceof PyClass && hasPythonLevelNew(fn.self)) return None;
     return fn.self ?? (fn.cls === builtinFunctionClass ? moduleOf(fn) : undefined);
   }
   if (name === '__objclass__') return descriptorOwners.get(fn);
   if (name === '__doc__') return None;
+  if (name === '__module__') return builtinFunctionModule(currentRuntime(), fn) ?? None;
   return undefined;
 }
 
@@ -371,8 +381,17 @@ function osErrorField(state: ExceptionState, name: string): PyValue | undefined 
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of object an attribute is assigned on.
-// code-gauge-allow functionNcss 38 -- One case per kind of object an attribute is assigned on.
+function setFunctionAttribute(fn: PyFunction, name: string, value: PyValue): void {
+  if (name === '__name__' && typeof value === 'string') fn.name = value;
+  else if (name === '__qualname__' && typeof value === 'string') fn.qualifiedName = value;
+  else if (name === '__module__') fn.module = value;
+  else if (name === '__annotations__') fn.annotations = value;
+  else if (name === '__annotate__') {
+    fn.annotate = value;
+    fn.annotations = undefined;
+  } else fn.dict.set(name, value);
+}
+
 export function setAttribute(target: PyValue, name: string, value: PyValue): void {
   currentRuntime().spend();
   if (takesInstanceAttributes(target)) {
@@ -386,14 +405,7 @@ export function setAttribute(target: PyValue, name: string, value: PyValue): voi
     return;
   }
   if (target instanceof PyFunction) {
-    if (name === '__name__' && typeof value === 'string') target.name = value;
-    else if (name === '__qualname__' && typeof value === 'string') target.qualifiedName = value;
-    else if (name === '__module__') target.module = value;
-    else if (name === '__annotations__') target.annotations = value;
-    else if (name === '__annotate__') {
-      target.annotate = value;
-      target.annotations = undefined;
-    } else target.dict.set(name, value);
+    setFunctionAttribute(target, name, value);
     return;
   }
   if (target instanceof PyModule) {
@@ -447,6 +459,14 @@ function setClassAttribute(target: PyClass, name: string, value: PyValue): void 
   if (name === '__getattribute__') noteGetattributeAssigned();
   if (target.enumMembers?.some((member) => member.dict.get('_name_') === name)) {
     throw pyError('AttributeError', `cannot reassign member '${name}'`);
+  }
+  if (name === '__name__' || name === '__qualname__') {
+    if (typeof value !== 'string') {
+      throw typeError(`can only assign string to ${target.name}.${name}, not '${typeName(value)}'`);
+    }
+    if (name === '__name__') (target as { name: string }).name = value;
+    else target.qualifiedName = value;
+    return;
   }
   if (name === '__module__' && typeof value === 'string') target.module = value;
   target.dict.set(name, value);

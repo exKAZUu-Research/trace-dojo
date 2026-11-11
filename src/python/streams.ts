@@ -12,13 +12,20 @@ method(textIOClass, 'write', 'one', 1, 1, (self, [text]) => {
   return BigInt(strLength(text));
 });
 method(textIOClass, 'flush', 'none', 0, 0, () => None);
-textIOClass.dict.set(
-  'name',
-  new PyDescriptor(
-    propertyClass,
-    nativeFunction('name', ([self]) => `<${(self as PyOpaque).text}>`)
-  )
-);
+for (const [name, read] of [
+  ['name', (self: PyOpaque): PyValue => `<${self.text}>`],
+  ['encoding', (): PyValue => 'utf8'],
+  ['errors', (self: PyOpaque): PyValue => (self.text === 'stderr' ? 'backslashreplace' : 'surrogateescape')],
+  ['mode', (): PyValue => 'w'],
+] as const) {
+  textIOClass.dict.set(
+    name,
+    new PyDescriptor(
+      propertyClass,
+      nativeFunction(name, ([self]) => read(self as PyOpaque))
+    )
+  );
+}
 method(
   textIOClass,
   '__repr__',

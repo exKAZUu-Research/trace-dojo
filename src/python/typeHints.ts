@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 477 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 478 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from './conversions';
 import { method } from './define';
 import { pyHash } from './hashing';
@@ -598,6 +598,9 @@ method(genericAliasClass, '__dir__', 'none', 0, 0, (self) => {
   ]);
 });
 method(genericAliasClass, '__mro_entries__', 'one', 1, 1, (self) => newTuple([aliasOf(self).origin]));
+method(genericAliasClass, '__reduce__', 'none', 0, 0, (self) =>
+  newTuple([genericAliasClass, newTuple([aliasOf(self).origin, newTuple(aliasOf(self).args)])])
+);
 
 // collections.abc.Callable[...] -----------------------------------------------------------------------------------
 
