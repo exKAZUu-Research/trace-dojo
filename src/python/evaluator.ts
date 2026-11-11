@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 830 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss 836 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import type {
   ClassDef,
   ExceptHandler,

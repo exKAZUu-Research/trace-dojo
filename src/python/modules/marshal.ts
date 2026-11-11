@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 445 -- Reads and writes every type code of the marshal format, as marshal.c does.
 // CPython's marshal module. Loading reads every format exactly. Dumping with versions 3 to 5 marks the objects CPython
 // finds shared by their reference counts, which this interpreter does not keep: it treats the object passed, the
 // immutable values a program writes as literals, and what the data reaches more than once as shared, and str values
@@ -84,18 +85,7 @@ class Writer {
   }
 
   private singleton(value: PyValue): boolean {
-    const code =
-      value === None
-        ? 'N'
-        : value === Ellipsis
-          ? '.'
-          : value === false
-            ? 'F'
-            : value === true
-              ? 'T'
-              : value === exceptionClassNamed('StopIteration')
-                ? 'S'
-                : undefined;
+    const code = singletonCodes().get(value);
     if (code === undefined) return false;
     this.byte(code.codePointAt(0) as number);
     return true;
@@ -127,7 +117,6 @@ class Writer {
     this.byte((code.codePointAt(0) as number) | flag);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- One case per type marshal writes, as w_complex_object has.
   private complexObject(value: PyValue, flag: number): void {
     const cls = classOf(value);
     if (cls === intClass) return this.integer(value as bigint, flag);
@@ -204,6 +193,7 @@ class Writer {
   }
 
   private string(value: string, flag: number): void {
+    // oxlint-disable-next-line eslint/no-control-regex -- ASCII includes the control characters.
     const ascii = /^[\u0000-\u007F]*$/.test(value);
     const interned = isInterned(value);
     if (this.version >= 4 && ascii) {
@@ -268,6 +258,20 @@ class Writer {
     this.object(value.stop);
     this.object(value.step);
   }
+}
+
+let singletons: Map<PyValue, string> | undefined;
+
+/** The type codes of the objects marshal writes as one byte. */
+function singletonCodes(): Map<PyValue, string> {
+  singletons ??= new Map<PyValue, string>([
+    [None, 'N'],
+    [Ellipsis, '.'],
+    [false, 'F'],
+    [true, 'T'],
+    [exceptionClassNamed('StopIteration'), 'S'],
+  ]);
+  return singletons;
 }
 
 function compareBytes(a: readonly number[], b: readonly number[]): number {
@@ -378,7 +382,7 @@ class Reader {
     return value;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 26 -- One case per type code, as r_object has.
+  // code-gauge-allow functionNcss 57 -- One case per type code, as r_object has.
   private typed(code: number, flagged: boolean): PyValue | undefined {
     switch (String.fromCodePoint(code)) {
       case '0': {

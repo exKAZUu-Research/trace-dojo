@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 428 -- Transcribes zlib 1.2.12's inflate.c, whose consumption and errors depend on each of its states.
 // zlib 1.2.12's inflate.c, transcribed as a generator that suspends where inflate() returns for more input or
 // output, so that what it consumes, writes and reports at each call matches zlib's, error messages included.
 import { crc32 } from './binascii';
@@ -265,6 +266,7 @@ export class Inflater {
     this.phase = 'done';
   }
 
+  // code-gauge-allow functionNcss 32 -- Transcribes zlib 1.2.12's inflate.c, whose consumption and errors depend on each of its states.
   private *header(): Generator<Suspend, void, void> {
     yield* this.needBits(16);
     if (this.wrap & 2 && this.hold === 0x8b_1f) {
@@ -293,6 +295,7 @@ export class Inflater {
     this.strm.adler = this.check = 1;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Transcribes zlib 1.2.12's inflate.c, whose consumption and errors depend on each of its states.
   private *gzipHeader(): Generator<Suspend, void, void> {
     const headerCrc = (data: number[]): void => {
       if (this.flags & 0x02_00 && this.wrap & 4) this.check = crc32(Uint8Array.from(data), this.check);
@@ -437,6 +440,7 @@ export class Inflater {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes zlib 1.2.12's inflate.c, whose consumption and errors depend on each of its states.
   private *copyMatch(offset: number, initialLength: number): Generator<Suspend, void, void> {
     const { strm } = this;
     let length = initialLength;

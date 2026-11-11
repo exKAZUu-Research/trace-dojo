@@ -312,14 +312,7 @@ interface DecompressState {
 const DECOMPRESSOBJ: ClinicSpec = { name: 'decompressobj', params: ['wbits', 'zdict'], positionalOnly: 0, required: 0 };
 
 function decompressobj(args: PyValue[], kwargs: Kwargs): PyValue {
-  const [wbitsValue, zdictValue] = clinicArgs(DECOMPRESSOBJ, args, kwargs);
-  const wbits = cInt(wbitsValue, 15);
-  let zdict: Uint8Array | undefined;
-  if (zdictValue !== undefined) {
-    zdict = bytesLikeData(zdictValue);
-    if (zdict === undefined) throw typeError('zdict argument must support the buffer protocol');
-  }
-  if (!validInflateBits(wbits)) throw valueError('Invalid initialization option');
+  const { wbits, zdict } = inflateOptions(DECOMPRESSOBJ, args, kwargs);
   const state: DecompressState = {
     inflater: new Inflater(wbits),
     wbits,
@@ -331,6 +324,23 @@ function decompressobj(args: PyValue[], kwargs: Kwargs): PyValue {
   };
   if (zdict && wbits < 0) setInflateDictionary(state);
   return new PyOpaque(decompressClass, 'Decompress', state);
+}
+
+/** The window bits and the dictionary decompressobj and _ZlibDecompressor take. */
+function inflateOptions(
+  spec: ClinicSpec,
+  args: PyValue[],
+  kwargs: Kwargs
+): { wbits: number; zdict: Uint8Array | undefined } {
+  const [wbitsValue, zdictValue] = clinicArgs(spec, args, kwargs);
+  const wbits = cInt(wbitsValue, 15);
+  let zdict: Uint8Array | undefined;
+  if (zdictValue !== undefined) {
+    zdict = bytesLikeData(zdictValue);
+    if (zdict === undefined) throw typeError('zdict argument must support the buffer protocol');
+  }
+  if (!validInflateBits(wbits)) throw valueError('Invalid initialization option');
+  return { wbits, zdict };
 }
 
 const decompressState = (self: PyValue): DecompressState => (self as PyOpaque).data as DecompressState;
@@ -476,18 +486,11 @@ interface ZlibDecompressorState {
 const zlibDecompressorClass = builtinClass('_ZlibDecompressor');
 zlibDecompressorClass.module = 'zlib';
 zlibDecompressorClass.construct = (cls, args, kwargs) => {
-  const [wbitsValue, zdictValue] = clinicArgs(
+  const { wbits, zdict } = inflateOptions(
     { name: '_ZlibDecompressor', params: ['wbits', 'zdict'], positionalOnly: 0, required: 0 },
     args,
     kwargs
   );
-  const wbits = cInt(wbitsValue, 15);
-  let zdict: Uint8Array | undefined;
-  if (zdictValue !== undefined) {
-    zdict = bytesLikeData(zdictValue);
-    if (zdict === undefined) throw typeError('zdict argument must support the buffer protocol');
-  }
-  if (!validInflateBits(wbits)) throw valueError('Invalid initialization option');
   const inflater = new Inflater(wbits);
   if (zdict && wbits < 0) inflater.setDictionary(zdict);
   const state: ZlibDecompressorState = {
@@ -531,6 +534,7 @@ defineMethod(zlibDecompressorClass, 'decompress', (self, args, kwargs) => {
   return newBytes(buffer.finish());
 });
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Mirrors the loop of CPython's decompress_buf.
 function decompressBuffer(state: ZlibDecompressorState, buffer: OutputBuffer, maxLength: number): number {
   const { inflater } = state;
   const { strm } = inflater;

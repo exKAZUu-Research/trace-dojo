@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 445 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 475 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import { solidBase } from './classes';
 import {
   builtinClassesWithDict,
@@ -365,6 +365,7 @@ export function setAttribute(target: PyValue, name: string, value: PyValue): voi
   if (target instanceof PyFunction) {
     if (name === '__name__' && typeof value === 'string') target.name = value;
     else if (name === '__qualname__' && typeof value === 'string') target.qualifiedName = value;
+    else if (name === '__module__') target.module = value;
     else target.dict.set(name, value);
     return;
   }

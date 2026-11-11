@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 435 -- Transcribes zlib 1.2.12's trees.c, whose output depends on each of its branches.
 // zlib 1.2.12's trees.c: the Huffman coding of deflate's blocks, transcribed so that output matches zlib's byte for byte.
 
 export const LENGTH_CODES = 29;
@@ -214,7 +215,6 @@ export class TreeCoder {
   }
 
   /** zlib's `_tr_flush_block`, where `buf` is the window offset of the block's bytes, or -1 when they are gone. */
-  // code-gauge-allow functionParameterCount 6 -- Mirrors _tr_flush_block's parameters plus the deflate state it reads.
   flushBlock(window: Uint8Array, buf: number, storedLen: number, last: boolean, level: number, strategy: number): void {
     let optLenb: number;
     let staticLenb: number;
@@ -453,6 +453,8 @@ export class TreeCoder {
     }
   }
 
+  // code-gauge-allow functionNcss 31 -- Transcribes zlib 1.2.12's trees.c, whose output depends on each of its branches.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Transcribes zlib 1.2.12's trees.c, whose output depends on each of its branches.
   private sendTree(tree: Tree, maxCode: number): void {
     let prevlen = -1;
     let nextlen = tree[1];

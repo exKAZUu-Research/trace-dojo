@@ -18,6 +18,7 @@ export interface ClinicSpec {
 const plural = (count: number): string => (count === 1 ? '' : 's');
 
 /** Binds the arguments of a call to `spec`'s parameters, raising Argument Clinic's errors. */
+// code-gauge-allow functionCognitiveComplexity 20 -- Raises each of the errors of CPython's argument clinic parser in its order.
 export function clinicArgs(spec: ClinicSpec, args: readonly PyValue[], kwargs: Kwargs): (PyValue | undefined)[] {
   const { name, params, positionalOnly, required, keywordOnly = [] } = spec;
   if (args.length > params.length) {

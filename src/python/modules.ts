@@ -51,6 +51,7 @@ export function registerMainModule(create: (runtime: Runtime) => PyModule): void
 
 let createMainModule: ((runtime: Runtime) => PyModule) | undefined;
 
+// code-gauge-allow functionNcss 32 -- Creates, caches, and links a module as one import does.
 export function importModule(runtime: Runtime, name: string): PyModule {
   const cached = runtime.modules.get(name);
   if (cached) return cached;
@@ -74,17 +75,22 @@ export function importModule(runtime: Runtime, name: string): PyModule {
   runtime.modules.set(name, module);
   module.dict.set('__name__', name);
   for (const [key, value] of runFactory(runtime, name, factory, module)) module.dict.set(key, value);
-  for (const value of module.dict.values()) {
-    if (value instanceof PyBuiltinFunction && value.self === undefined && !functionModules.has(value)) {
-      functionModules.set(value, name);
-    }
-  }
+  recordFunctionModules(module);
   const unsupported = name === 'sys' ? UNSUPPORTED_SYS_ATTRIBUTES : unsupportedAttributes.get(name);
   for (const [key, feature] of Object.entries(unsupported ?? {})) module.unsupported.set(key, feature);
   moduleTables.get(runtime)?.set(name, module);
   const dot = name.lastIndexOf('.');
   if (dot !== -1) importModule(runtime, name.slice(0, dot)).dict.set(name.slice(dot + 1), module);
   return module;
+}
+
+/** Records the module of the builtin functions a module creates, which their `__module__` names. */
+function recordFunctionModules(module: PyModule): void {
+  for (const value of module.dict.values()) {
+    if (value instanceof PyBuiltinFunction && value.self === undefined && !functionModules.has(value)) {
+      functionModules.set(value, module.name);
+    }
+  }
 }
 
 function runFactory(runtime: Runtime, name: string, factory: ModuleFactory, module: PyModule): Map<string, PyValue> {

@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 659 -- Transcribes zlib 1.2.12's deflate.c, whose output depends on each of its branches.
 // zlib 1.2.12's deflate.c, transcribed so that compressed data matches zlib's byte for byte, including how the
 // output depends on the sizes of the input and output buffers a caller passes.
 import { crc32 } from './binascii';
@@ -169,6 +170,7 @@ export class Deflater {
   }
 
   /** deflateSetDictionary; returns false where zlib returns Z_STREAM_ERROR. */
+  // code-gauge-allow functionNcss 38 -- Transcribes zlib 1.2.12's deflate.c, whose output depends on each of its branches.
   setDictionary(dictionary: Uint8Array): boolean {
     const { wrap } = this;
     if (wrap === 2 || (wrap === 1 && this.status !== INIT_STATE) || this.lookahead) return false;
@@ -211,6 +213,8 @@ export class Deflater {
     return true;
   }
 
+  // code-gauge-allow functionNcss 32 -- Transcribes zlib 1.2.12's deflate.c, whose output depends on each of its branches.
+  // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes zlib 1.2.12's deflate.c, whose output depends on each of its branches.
   deflate(flush: number): number {
     const { strm } = this;
     if (this.status === FINISH_STATE && flush !== Z_FINISH) return Z_STREAM_ERROR;
@@ -239,6 +243,8 @@ export class Deflater {
   }
 
   /** Writes the zlib or gzip header, returning false when it does not fit the output yet. */
+  // code-gauge-allow functionNcss 33 -- Transcribes zlib 1.2.12's deflate.c, whose output depends on each of its branches.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Transcribes zlib 1.2.12's deflate.c, whose output depends on each of its branches.
   private writeHeader(): boolean {
     const trees = this.trees;
     if (this.status === INIT_STATE && this.wrap === 0) this.status = BUSY_STATE;
@@ -279,6 +285,7 @@ export class Deflater {
     return true;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 22 -- Transcribes zlib 1.2.12's deflate.c, whose output depends on each of its branches.
   private compressInput(flush: number): number | undefined {
     const { strm } = this;
     if (strm.availIn === 0 && this.lookahead === 0 && (flush === Z_NO_FLUSH || this.status === FINISH_STATE)) {
@@ -440,6 +447,7 @@ export class Deflater {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes zlib 1.2.12's deflate.c, whose output depends on each of its branches.
   private longestMatch(start: number): number {
     let curMatch = start;
     let chainLength = this.maxChainLength;
@@ -505,6 +513,7 @@ export class Deflater {
     return this.lookahead === 0 ? 'end' : undefined;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes zlib 1.2.12's deflate.c, whose output depends on each of its branches.
   private deflateFast(flush: number): BlockState {
     for (;;) {
       const stop = this.refill(flush, MIN_LOOKAHEAD);
@@ -545,6 +554,8 @@ export class Deflater {
     }
   }
 
+  // code-gauge-allow functionNcss 35 -- Transcribes zlib 1.2.12's deflate.c, whose output depends on each of its branches.
+  // code-gauge-allow functionCognitiveComplexity 26 -- Transcribes zlib 1.2.12's deflate.c, whose output depends on each of its branches.
   private deflateSlow(flush: number): BlockState {
     for (;;) {
       const stop = this.refill(flush, MIN_LOOKAHEAD);
@@ -604,6 +615,7 @@ export class Deflater {
     return bflush;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- Transcribes zlib 1.2.12's deflate.c, whose output depends on each of its branches.
   private deflateRle(flush: number): BlockState {
     for (;;) {
       if (this.lookahead <= MAX_MATCH) {
@@ -671,6 +683,8 @@ export class Deflater {
   }
 
   /** Copies stored blocks straight to the output while it has room, returning whether the last block was written. */
+  // code-gauge-allow functionNcss 36 -- Transcribes zlib 1.2.12's deflate.c, whose output depends on each of its branches.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Transcribes zlib 1.2.12's deflate.c, whose output depends on each of its branches.
   private copyStoredBlocks(flush: number): boolean {
     const { strm, trees } = this;
     const minBlock = Math.min(this.pendingBufSize - 5, this.wSize);
