@@ -328,7 +328,13 @@ export function typeNew(
     pendingBodies.delete(namespace);
     applyBody(cls, body);
   }
-  if (effectiveBases.some((base) => base.flags.isEnum)) createEnumMembers(cls);
+  if (effectiveBases.some((base) => base.flags.isEnum)) {
+    // EnumType takes `boundary=` itself, as the FlagBoundary of a Flag class.
+    const boundary = kwargs.get('boundary');
+    kwargs.delete('boundary');
+    if (boundary !== undefined && boundary !== None) cls.dict.set('_boundary_', boundary);
+    createEnumMembers(cls);
+  }
   const originalBases = cls.dict.get('__orig_bases__');
   initGenericSubclass(cls, originalBases instanceof PyTuple ? originalBases.items : undefined);
   for (const base of cls.mro.slice(1)) base.subclassHook?.(cls);

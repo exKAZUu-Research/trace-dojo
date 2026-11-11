@@ -5,6 +5,7 @@ import { createBuiltins } from './builtins';
 import type { PyMemoryView } from './bytesValues';
 import { bindArguments } from './calls';
 import { markIterableCoroutine } from './coroutines';
+import { enumClassDir, enumMemberDir } from './enums';
 import { Evaluator } from './evaluator';
 import { GeneratorFinalizer } from './finalization';
 import { Frame } from './frame';
@@ -477,6 +478,8 @@ export class Runtime {
 
   /** The sorted attribute names `dir()` lists, which AttributeError suggestions choose from. */
   dirNames(value: PyValue): string[] {
+    if (value instanceof PyClass && value.flags.isEnum && value.enumMembers) return enumClassDir(value, this);
+    if (value instanceof PyInstance && value.enumValue !== undefined) return enumMemberDir(value, this);
     const names = value instanceof PyModule ? new Set(value.dict.keys()) : objectAttributeNames(value);
     return [...names].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   }

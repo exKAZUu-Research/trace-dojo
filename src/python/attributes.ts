@@ -18,6 +18,7 @@ import {
   noteGetattributeAssigned,
   ownDict,
 } from './descriptors';
+import { enumClassData } from './enums';
 import type { Frame } from './frame';
 import { delegateOf } from './generators';
 import { namespaceDict } from './namespaces';
@@ -61,7 +62,7 @@ import { weakReferenceOf } from './weakReferences';
 /** Reads an attribute of a class: its own data, then the attributes of its MRO, bound as a class reads them. */
 // code-gauge-allow functionCognitiveComplexity 18 -- Follows the order CPython's type_getattro looks up an attribute in.
 export function classAttribute(cls: PyClass, name: string): PyValue | undefined {
-  const own = typeData(cls, name);
+  const own = typeData(cls, name) ?? (cls.flags.isEnum ? enumClassData(cls, name) : undefined);
   if (own !== undefined) return own;
   const meta = cls.cls;
   const metaAttribute = meta === typeClass ? undefined : meta.lookup(name);
