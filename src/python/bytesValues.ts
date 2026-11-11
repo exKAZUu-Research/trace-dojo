@@ -74,6 +74,8 @@ export class PyBytes extends PyObject {
 /** A `memoryview`: a one-dimensional view of items of `format` over the bytes of a bytes or bytearray object. */
 export class PyMemoryView extends PyObject {
   released = false;
+  /** The dimensions of a C-contiguous view that cast() gave more than one, or undefined for a one-dimensional view. */
+  shape?: number[];
 
   // code-gauge-allow functionParameterCount 7 -- Each view field is set once at creation, as CPython's buffer struct.
   constructor(

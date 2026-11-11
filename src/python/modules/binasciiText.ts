@@ -110,7 +110,8 @@ export function encodeQp(data: Uint8Array, { quotetabs, istext, header }: QpOpti
     out.push(0x0a);
   };
   const pushHex = (byte: number): void => {
-    out.push(...[...byte.toString(16).toUpperCase().padStart(2, '0')].map((digit) => digit.codePointAt(0) as number));
+    const hex = byte.toString(16).toUpperCase().padStart(2, '0');
+    out.push(hex.codePointAt(0) as number, hex.codePointAt(1) as number);
   };
   let lineLength = 0;
   let index = 0;
