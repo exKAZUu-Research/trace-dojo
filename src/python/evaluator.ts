@@ -19,6 +19,7 @@ import { exceptionGroupOf, splitGroup } from './exceptionGroups';
 import { mappingEntries, storeKey } from './expressionEvaluator';
 import type { Frame } from './frame';
 import { isMapping, isSequenceForMatch } from './matching';
+import { isRegisteredModule } from './modules';
 import {
   bindValue,
   callValue,
@@ -266,7 +267,10 @@ export class Evaluator extends AsyncEvaluator {
     for (const { name, binding } of statement.names) {
       const feature = module.unsupported.get(name);
       if (feature !== undefined) throw new UnsupportedFeatureError(feature);
-      const value = module.dict.get(name);
+      // As in CPython, a name a package lacks may be a submodule, which importing it adds to the package.
+      const submodule = `${statement.module}.${name}`;
+      const value =
+        module.dict.get(name) ?? (isRegisteredModule(submodule) ? this.runtime.importModule(submodule) : undefined);
       if (value === undefined) {
         throw pyError('ImportError', `cannot import name '${name}' from '${statement.module}' (unknown location)`);
       }

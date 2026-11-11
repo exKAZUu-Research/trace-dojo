@@ -24,6 +24,11 @@ export function registerModule(name: string, factory: ModuleFactory, unsupported
   unsupportedAttributes.set(name, unsupported);
 }
 
+/** Whether a module of this name is registered, as a submodule a package imports on demand may be. */
+export function isRegisteredModule(name: string): boolean {
+  return factories.has(name) || aliases.has(name);
+}
+
 /** Makes `name` another name of the module `target`, as `os.path` is of `posixpath`. */
 export function registerModuleAlias(name: string, target: string): void {
   aliases.set(name, target);
