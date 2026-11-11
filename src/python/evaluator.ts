@@ -49,6 +49,7 @@ import {
   baseExceptionClass,
   classOf,
   exceptionClassNamed,
+  fullyQualifiedName,
   isInstanceOf,
   nativeFunction,
   newDict,
@@ -908,7 +909,7 @@ export class Evaluator extends AsyncEvaluator {
     if (enter === undefined || exit === undefined) {
       const missed = exit === undefined ? '__exit__' : '__enter__';
       throw typeError(
-        `'${classOf(manager).qualifiedName}' object does not support the context manager protocol (missed ${missed} method)`
+        `'${fullyQualifiedName(classOf(manager))}' object does not support the context manager protocol (missed ${missed} method)`
       );
     }
     const length = frame.temporaries.length;

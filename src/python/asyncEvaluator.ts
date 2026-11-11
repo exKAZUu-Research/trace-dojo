@@ -3,7 +3,7 @@ import { asyncIterator, asyncYield, awaitValue, isStopAsyncIteration, nextAwaita
 import type { Frame } from './frame';
 import { bindValue, callValue, isTruthy, iterate, lookupSpecial, type NextFunction } from './objects';
 import { SuspendingEvaluator, type Suspension } from './suspendingEvaluator';
-import { asyncGeneratorClass, classOf, newDict, newList, newSet, None, typeError } from './types';
+import { asyncGeneratorClass, classOf, fullyQualifiedName, newDict, newList, newSet, None, typeError } from './types';
 import { DONE, PyError, PyGenerator, type PyInstance, PyList, type PyValue } from './values';
 
 type ComprehensionExpression = Extract<Expression, { kind: 'comprehension' }>;
@@ -81,7 +81,7 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
     if (exit === undefined || enter === undefined) {
       const missed = exit === undefined ? '__aexit__' : '__aenter__';
       throw typeError(
-        `'${classOf(manager).qualifiedName}' object does not support the asynchronous context manager protocol (missed ${missed} method)`
+        `'${fullyQualifiedName(classOf(manager))}' object does not support the asynchronous context manager protocol (missed ${missed} method)`
       );
     }
     const length = frame.temporaries.length;
