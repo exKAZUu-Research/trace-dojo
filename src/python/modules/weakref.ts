@@ -1,19 +1,9 @@
 import { builtin } from '../define';
-import { callValue } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
 import { None } from '../types';
-import type { PyValue } from '../values';
-import { weakrefClass, weakReferenceOf } from '../weakReferences';
-
-/** Whether a weak reference and the object it refers to are both still alive. */
-function isAlive(reference: PyValue): boolean {
-  return (
-    currentRuntime()
-      .reachableObjects()
-      .has(reference as object) && callValue(reference, []) !== None
-  );
-}
+import { PyObject, type PyValue } from '../values';
+import { liveReferencesOf, noteReference, proxyReference, weakrefClass } from '../weakReferences';
 
 // The parts of CPython's `weakref.py` and `_weakrefset.py` written in Python here: WeakMethod, the weak collections,
 // finalize, and the proxies, which CPython writes in C. A collection drops an entry when it is next used after its
@@ -777,8 +767,9 @@ ProxyTypes = (ProxyType, CallableProxyType)
 
 def proxy(object, callback=None, /):
     """Create a proxy object that weakly references 'object'."""
-    reference = ref(object) if callback is None else ref(object, lambda r: callback(result))
+    reference = _proxy_ref(object, None if callback is None else lambda r: callback(result))
     result = (CallableProxyType if callable(object) else ProxyType)(reference)
+    _note_proxy(object, result, callback is None)
     return result
 
 
@@ -794,16 +785,23 @@ registerSourceModule(
       ['ReferenceType', weakrefClass],
       [
         'getweakrefcount',
-        builtin('getweakrefcount', 'one', 1, 1, ([value]) => {
-          const reference = weakReferenceOf(value);
-          return reference !== undefined && isAlive(reference) ? 1n : 0n;
-        }),
+        builtin('getweakrefcount', 'one', 1, 1, ([value]) => BigInt(liveReferencesOf(value as PyValue).length)),
       ],
       [
         'getweakrefs',
-        builtin('getweakrefs', 'one', 1, 1, ([value]) => {
-          const reference = weakReferenceOf(value);
-          return currentRuntime().listOf(reference !== undefined && isAlive(reference) ? [reference] : []);
+        builtin('getweakrefs', 'one', 1, 1, ([value]) => currentRuntime().listOf(liveReferencesOf(value as PyValue))),
+      ],
+      [
+        '_proxy_ref',
+        builtin('_proxy_ref', 'expected', 2, 2, ([value, callback]) =>
+          proxyReference(value as PyValue, callback === None ? undefined : callback)
+        ),
+      ],
+      [
+        '_note_proxy',
+        builtin('_note_proxy', 'expected', 3, 3, ([value, proxy, basic]) => {
+          if (value instanceof PyObject) noteReference(value, proxy as PyValue, basic === true ? 'proxy' : 'other');
+          return None;
         }),
       ],
     ])

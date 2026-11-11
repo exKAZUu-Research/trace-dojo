@@ -80,6 +80,14 @@ export const asyncGeneratorClass = builtinClass('async_generator');
 export const staticmethodClass = builtinClass('staticmethod');
 export const classmethodClass = builtinClass('classmethod');
 export const propertyClass = builtinClass('property');
+/** `collections._tuplegetter`, the read-only descriptor of a namedtuple's field, which works as a property does. */
+export const tupleGetterClass = builtinClass('_tuplegetter');
+tupleGetterClass.module = 'collections';
+
+/** Whether a descriptor's class is property's kind: property, or a namedtuple field's `_tuplegetter`. */
+export function isPropertyKind(cls: PyClass): boolean {
+  return cls === propertyClass || cls === tupleGetterClass;
+}
 for (const cls of [staticmethodClass, classmethodClass, propertyClass]) cls.isBaseType = true;
 export const superClass = builtinClass('super');
 export const dictKeysClass = builtinClass('dict_keys');

@@ -258,8 +258,13 @@ export function signature(value: PyValue): PyOpaque {
 }
 
 function signatureData(value: PyValue): Signature {
-  if (value instanceof PyFunction) return functionSignature(value);
   if (value instanceof PyBoundMethod) return withoutFirst(signatureData(value.fn));
+  // As _signature_from_callable does: the function a decorator wraps, and a `__signature__` set on the way.
+  value = unwrapForSignature(value);
+  if (value instanceof PyBoundMethod) return withoutFirst(signatureData(value.fn));
+  const given = givenSignature(value);
+  if (given) return given;
+  if (value instanceof PyFunction) return functionSignature(value);
   if (value instanceof PyClass) return classSignature(value);
   if (value instanceof PyInstance && !value.cls.isBuiltin) {
     const call = value.cls.lookup('__call__');
@@ -269,6 +274,31 @@ function signatureData(value: PyValue): Signature {
   if (value instanceof PyBuiltinFunction) return builtinSignature(value);
   if (!isCallable(value)) throw typeError(`${pyRepr(value)} is not a callable object`);
   throw new UnsupportedFeatureError('組み込みの関数やクラスの inspect.signature()');
+}
+
+/** The signature an object's `__signature__` gives, if it gives one. */
+function givenSignature(value: PyValue): Signature | undefined {
+  const given = typeof value === 'object' ? getAttributeOrUndefined(value, '__signature__') : undefined;
+  if (given === undefined || given === None) return undefined;
+  if (!(given instanceof PyOpaque && given.cls === signatureClass)) {
+    throw typeError(`unexpected object ${pyRepr(given)} in __signature__ attribute`);
+  }
+  return signatureOf(given);
+}
+
+/** `inspect.unwrap` as signature() calls it, stopping at an object with `__signature__` or at a bound method. */
+function unwrapForSignature(value: PyValue): PyValue {
+  const seen = new Set<PyValue>([value]);
+  let current = value;
+  for (;;) {
+    if (current instanceof PyBoundMethod || typeof current !== 'object' || current instanceof PyClass) return current;
+    if (getAttributeOrUndefined(current, '__signature__') !== undefined) return current;
+    const wrapped = getAttributeOrUndefined(current, '__wrapped__');
+    if (wrapped === undefined) return current;
+    if (seen.has(wrapped)) throw valueError(`wrapper loop when unwrapping ${pyRepr(value)}`);
+    seen.add(wrapped);
+    current = wrapped;
+  }
 }
 
 /** `_signature_from_builtin`: the signature a builtin's `__text_signature__` describes. */

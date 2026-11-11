@@ -26,6 +26,7 @@ import {
   exceptionClassNamed,
   frozensetClass,
   isIteratorGenerator,
+  isPropertyKind,
   iteratorClass,
   methodClass,
   methodWrapperClass,
@@ -33,7 +34,6 @@ import {
   newTuple,
   None,
   NotImplemented,
-  propertyClass,
   pyError,
   rangeClass,
   staticmethodClass,
@@ -130,7 +130,7 @@ export function bindValue(attribute: PyValue, instance: PyValue, owner: PyClass 
   if (attribute instanceof PyDescriptor) {
     if (attribute.cls === staticmethodClass) return attribute.fn;
     if (attribute.cls === classmethodClass) return bindToClass(attribute.fn, owner);
-    if (attribute.cls === propertyClass) {
+    if (isPropertyKind(attribute.cls)) {
       if (attribute.fn === None) throw pyError('AttributeError', `property object has no getter`);
       return callValue(attribute.fn, [instance]);
     }
@@ -218,7 +218,7 @@ function findAttribute(value: PyValue, name: string): PyValue | undefined {
     if (!attribute.stands) return attribute.get(value);
     return ownDict(value)?.get(name) ?? attribute.fallback ?? typeDocOf(cls, name);
   }
-  if (attribute instanceof PyDescriptor && attribute.cls === propertyClass) return bindValue(attribute, value, cls);
+  if (attribute instanceof PyDescriptor && isPropertyKind(attribute.cls)) return bindValue(attribute, value, cls);
   const getter = descriptorGetter(attribute);
   if (getter !== undefined && isDataDescriptor(attribute)) return callGetter(getter, attribute, value, cls);
   const own = ownDict(value)?.get(name);
