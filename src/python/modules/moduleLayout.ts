@@ -1,4 +1,5 @@
 import { BUILTIN_DOC } from '../attributes';
+import { moduleDoc } from '../builtinDocs';
 import { pyRepr } from '../conversions';
 import { isSupportedModule, MISSING_PLATFORM_MODULES } from '../moduleNames';
 import { isRegisteredModule } from '../modules';
@@ -52,8 +53,10 @@ export function addLayoutAttributes(module: PyModule, importName: string): void 
     if (!dict.has(key)) module.unsupported.set(key, feature);
   }
   if (!dict.has('__doc__') && !module.unsupported.has('__doc__')) {
+    const doc = layout.doc === false ? undefined : moduleDoc(module.name);
     if (layout.doc === false) dict.set('__doc__', None);
-    else module.unsupported.set('__doc__', BUILTIN_DOC);
+    else if (doc === undefined) module.unsupported.set('__doc__', BUILTIN_DOC);
+    else dict.set('__doc__', doc);
   }
   if (!dict.has('__package__')) {
     const { package: name } = layout;

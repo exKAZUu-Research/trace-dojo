@@ -8,6 +8,7 @@ import {
   setClassAnnotations,
   setFunctionAnnotationAttribute,
 } from './annotations';
+import { builtinDoc, builtinTextSignature } from './builtinDocs';
 import { solidBase } from './classes';
 import {
   builtinClassesWithDict,
@@ -121,7 +122,10 @@ function typeData(cls: PyClass, name: string): PyValue | undefined {
       return BigInt(typeFlags(cls));
     }
     case '__doc__': {
-      return cls.isBuiltin ? (cls.doc ?? None) : (cls.dict.get('__doc__') ?? None);
+      return cls.isBuiltin ? (cls.doc ?? builtinDoc(cls) ?? None) : (cls.dict.get('__doc__') ?? None);
+    }
+    case '__text_signature__': {
+      return (cls.isBuiltin && builtinTextSignature(cls)) || None;
     }
     case '__mro__': {
       return newTuple(cls.mro);
@@ -242,7 +246,8 @@ function builtinFunctionAttribute(fn: PyBuiltinFunction, name: string): PyValue 
     return fn.self ?? (fn.cls === builtinFunctionClass ? moduleOf(fn) : undefined);
   }
   if (name === '__objclass__') return descriptorOwners.get(fn);
-  if (name === '__doc__') return None;
+  if (name === '__doc__') return builtinDoc(fn) ?? None;
+  if (name === '__text_signature__') return builtinTextSignature(fn) ?? None;
   if (name === '__module__') return builtinFunctionModule(currentRuntime(), fn) ?? None;
   return undefined;
 }
