@@ -18,6 +18,7 @@ import {
   valueError,
 } from '../types';
 import { type Kwargs, PyClass, PyComplex, PyList, PyNumberInstance, PyTuple, type PyValue } from '../values';
+import { abcRegister } from './abc';
 import { makeNamedTupleClass } from './collections';
 import {
   absolute,
@@ -610,6 +611,8 @@ function ieeeContext(bits: PyValue): PyValue {
 }
 
 registerModule('decimal', () => {
+  // As _decimal registers Decimal with numbers.Number when imported.
+  abcRegister(numberClass, decimalClass, true);
   const state = moduleState();
   const namespace = new Map<string, PyValue>([
     ['Decimal', decimalClass],

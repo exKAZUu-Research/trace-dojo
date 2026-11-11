@@ -246,11 +246,40 @@ function callAnnotate(annotate: PyValue): PyDict {
 
 // Classes -------------------------------------------------------------------------------------------------------------
 
+/**
+ * The classes every run shares that CPython writes in Python without annotations, such as `abc.ABCMeta` and the
+ * numbers ABCs, whose `__annotate__` is None and whose `__annotations__` an empty dict, which each run keeps its own of.
+ */
+export const sharedPythonClasses = new WeakSet<PyClass>();
+
+/**
+ * The staticmethods and classmethods a class body's `__new__`, `__init_subclass__`, and `__class_getitem__` became,
+ * which CPython creates without copying the function's attributes, so that they have no `__name__` or `__wrapped__`.
+ */
+export const implicitlyWrapped = new WeakSet<object>();
+const sharedAnnotations = new WeakMap<object, Map<PyClass, PyDict>>();
+
+function sharedClassAnnotations(cls: PyClass): PyDict {
+  const runtime = currentRuntime();
+  let byClass = sharedAnnotations.get(runtime);
+  if (!byClass) {
+    byClass = new Map();
+    sharedAnnotations.set(runtime, byClass);
+  }
+  let annotations = byClass.get(cls);
+  if (!annotations) {
+    annotations = newDict();
+    byClass.set(cls, annotations);
+  }
+  return annotations;
+}
+
 /** The annotations of each class body, which its `__annotate__` evaluates. */
 export const classAnnotationLists = new WeakMap<PyClass, readonly Annotation[]>();
 
 /** `type.__annotate__`, which a class without annotations of its own records as None. */
 export function classAnnotate(cls: PyClass): PyValue {
+  if (sharedPythonClasses.has(cls)) return None;
   if (cls.isBuiltin) throw pyError('AttributeError', `type object '${cls.name}' has no attribute '__annotate__'`);
   const own = cls.dict.get('__annotate__') ?? cls.dict.get('__annotate_func__');
   if (own !== undefined) return own;
@@ -260,6 +289,7 @@ export function classAnnotate(cls: PyClass): PyValue {
 
 /** `type.__annotations__`: the class's own annotations, cached in its dict on the first read. */
 export function classAnnotations(cls: PyClass): PyValue {
+  if (sharedPythonClasses.has(cls)) return sharedClassAnnotations(cls);
   if (cls.isBuiltin) throw pyError('AttributeError', `type object '${cls.name}' has no attribute '__annotations__'`);
   const own = cls.dict.get('__annotations__') ?? cls.dict.get('__annotations_cache__');
   if (own !== undefined) return own;

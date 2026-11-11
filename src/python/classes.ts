@@ -1,4 +1,4 @@
-import { classAnnotationLists, newAnnotate } from './annotations';
+import { classAnnotationLists, implicitlyWrapped, newAnnotate } from './annotations';
 import type { ClassDef } from './ast';
 import { INSTANCE_ATTRIBUTE_DOCS } from './builtinDocs';
 import { method } from './define';
@@ -7,7 +7,16 @@ import type { Evaluator } from './evaluator';
 import type { CallArguments } from './expressionEvaluator';
 import { Frame } from './frame';
 import { defineProperty } from './modules/numberSupport';
-import { bindValue, callValue, deleteItem, getAttributeOrUndefined, getItem, lookupSpecial, setItem } from './objects';
+import {
+  bindValue,
+  callValue,
+  deleteItem,
+  getAttribute,
+  getAttributeOrUndefined,
+  getItem,
+  lookupSpecial,
+  setItem,
+} from './objects';
 import { firstRowOf } from './programSource';
 import { currentRuntime } from './runtimeContext';
 import { defineClassSlots, slotNamesOf } from './slots';
@@ -427,7 +436,10 @@ function fillClassDict(cls: PyClass, entries: Map<string, PyValue>): void {
 /** Makes a plain function a static or class method, as CPython does for the methods it calls implicitly. */
 function wrapImplicitMethod(entries: Map<string, PyValue>, name: string, kind: PyClass): void {
   const value = entries.get(name);
-  if (value instanceof PyFunction) entries.set(name, new PyDescriptor(kind, value));
+  if (!(value instanceof PyFunction)) return;
+  const descriptor = new PyDescriptor(kind, value);
+  implicitlyWrapped.add(descriptor);
+  entries.set(name, descriptor);
 }
 
 /** Calls `__set_name__` on the attributes of a new class that define it. */
@@ -503,8 +515,10 @@ export function typeNewFromArguments(meta: PyClass, args: PyValue[], kwargs: Kwa
   }
   // As type_new does, a more derived metaclass of the bases with a `__new__` of its own, such as ABCMeta, creates it.
   const winner = winningMeta(meta, bases.items);
-  if (winner !== meta && winner.newInstance && winner.lookup('__new__') !== typeClass.dict.get('__new__')) {
-    return winner.newInstance(winner, args, kwargs) as PyClass;
+  if (winner !== meta && winner.lookup('__new__') !== typeClass.dict.get('__new__')) {
+    if (winner.newInstance) return winner.newInstance(winner, args, kwargs) as PyClass;
+    // A `__new__` written in Python, as ABCMeta's is, which CPython's slot calls through the attribute.
+    return callValue(getAttribute(winner, '__new__'), [winner, ...args], kwargs) as PyClass;
   }
   return typeNew(meta, name, bases.items, namespace, new Map(kwargs));
 }

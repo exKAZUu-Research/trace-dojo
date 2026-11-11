@@ -5,6 +5,7 @@ import { STDLIB_MODULE_NAMES } from './stdlibModuleNames';
 export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   '__future__',
   '__main__',
+  '_abc',
   '_bz2',
   '_codecs',
   '_compat_pickle',

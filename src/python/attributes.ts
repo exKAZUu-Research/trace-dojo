@@ -1,5 +1,4 @@
-import { abstractPlaceholders } from './abstractPlaceholders';
-// code-gauge-allow-file fileNcss 532 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 535 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import {
   classAnnotate,
   classAnnotations,
@@ -8,6 +7,7 @@ import {
   setClassAnnotate,
   setClassAnnotations,
   setFunctionAnnotationAttribute,
+  sharedPythonClasses,
 } from './annotations';
 import { builtinDoc, builtinTextSignature } from './builtinDocs';
 import { solidBase } from './classes';
@@ -48,6 +48,7 @@ import {
   typeError,
   typeName,
 } from './types';
+import { UnsupportedFeatureError } from './unsupported';
 import {
   type ExceptionState,
   PyBoundMethod,
@@ -149,10 +150,10 @@ export function typeData(cls: PyClass, name: string): PyValue | undefined {
       return callValue(types.dict.get('MappingProxyType') as PyValue, [namespaceDict(cls.dict)]);
     }
     case '__annotations__': {
-      return cls.isBuiltin ? undefined : classAnnotations(cls);
+      return cls.isBuiltin && !sharedPythonClasses.has(cls) ? undefined : classAnnotations(cls);
     }
     case '__annotate__': {
-      return cls.isBuiltin ? undefined : classAnnotate(cls);
+      return cls.isBuiltin && !sharedPythonClasses.has(cls) ? undefined : classAnnotate(cls);
     }
     default: {
       return undefined;
@@ -248,7 +249,6 @@ function builtinFunctionAttribute(fn: PyBuiltinFunction, name: string): PyValue 
     return fn.self ?? (fn.cls === builtinFunctionClass ? moduleOf(fn) : undefined);
   }
   if (name === '__objclass__') return descriptorOwners.get(fn);
-  if (name === '__isabstractmethod__' && abstractPlaceholders.has(fn)) return true;
   if (name === '__doc__') return builtinDoc(fn) ?? None;
   if (name === '__text_signature__') return builtinTextSignature(fn) ?? None;
   if (name === '__module__') return builtinFunctionModule(currentRuntime(), fn) ?? None;
@@ -473,6 +473,7 @@ function userHook(target: PyObject, name: string): PyValue | undefined {
 
 // code-gauge-allow functionCognitiveComplexity 16 -- Follows the order type.__setattr__ checks the special attributes of a class in.
 function setClassAttribute(target: PyClass, name: string, value: PyValue, callsHook = true): void {
+  refuseSharedClass(target);
   if (target.isBuiltin) throw typeError(`cannot set '${name}' attribute of immutable type '${target.name}'`);
   if (setClassAttributeThroughMeta(target, name, value, callsHook)) return;
   if (name === '__getattribute__') noteGetattributeAssigned();
@@ -648,8 +649,19 @@ function setExceptionField(state: ExceptionState, name: string, value: PyValue):
   }
 }
 
+/**
+ * Refuses to change a class CPython writes in Python that every run here shares, such as `abc.ABCMeta`, whose change
+ * would reach the runs of other programs.
+ */
+function refuseSharedClass(target: PyClass): void {
+  if (sharedPythonClasses.has(target)) {
+    throw new UnsupportedFeatureError(`標準ライブラリのクラス ${target.module}.${target.name} の属性の書き換え`);
+  }
+}
+
 /** `type.__delattr__`: deletes a class attribute without its metaclass's `__delattr__`. */
 export function deleteClassAttribute(target: PyClass, name: string): void {
+  refuseSharedClass(target);
   if (target.isBuiltin) throw typeError(`cannot delete '${name}' attribute of immutable type '${target.name}'`);
   if (name === '__annotations__') setClassAnnotations(target, undefined);
   else if (!target.dict.delete(name)) throw attributeError(target, name);

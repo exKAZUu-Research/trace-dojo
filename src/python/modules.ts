@@ -155,7 +155,20 @@ function recordFunctionModules(module: PyModule): void {
   }
 }
 
+/**
+ * What runs when a run creates a module, before its code: it may return what to run after that code, as the cache
+ * token of `abc` needs.
+ */
+type ModuleCreationHook = (runtime: Runtime, name: string) => (() => void) | undefined;
+
+const moduleCreationHooks: ModuleCreationHook[] = [];
+
+export function addModuleCreationHook(hook: ModuleCreationHook): void {
+  moduleCreationHooks.push(hook);
+}
+
 function runFactory(runtime: Runtime, name: string, factory: ModuleFactory, module: PyModule): Map<string, PyValue> {
+  const after = moduleCreationHooks.map((hook) => hook(runtime, name));
   try {
     return factory(runtime, module.dict);
   } catch (error) {
@@ -163,6 +176,8 @@ function runFactory(runtime: Runtime, name: string, factory: ModuleFactory, modu
     runtime.modules.delete(name);
     moduleTables.get(runtime)?.delete(name);
     throw error;
+  } finally {
+    for (const each of after) each?.();
   }
 }
 

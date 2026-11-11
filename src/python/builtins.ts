@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 510 -- The builtins module keeps every builtin function together.
+// code-gauge-allow-file fileNcss 517 -- The builtins module keeps every builtin function together.
 import { bytearrayClass, bytesClass, memoryviewClass, PyBytes } from './bytesValues';
+import { checkShortcuts } from './checkShortcuts';
 import { buildClass } from './classes';
 import { complexAbs } from './complexNumbers';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
@@ -538,7 +539,7 @@ export function isInstance(value: PyValue, classInfo: PyValue, name = 'isinstanc
     const cls = classOf(value);
     if (cls === classInfo) return true;
     const check = customCheck(classInfo, '__instancecheck__');
-    if (check !== undefined) return isTruthy(callValue(check, [value]));
+    if (check !== undefined) return isTruthy(check(value));
     return cls.isSubclassOf(classInfo) || claimedClass(value, cls)?.isSubclassOf(classInfo) === true;
   }
   if (classInfo instanceof PyTuple) return classInfo.items.some((item) => isInstance(value, item, name));
@@ -562,16 +563,21 @@ function claimedClass(value: PyValue, cls: PyClass): PyClass | undefined {
 }
 
 /** The bound `__instancecheck__` or `__subclasscheck__` that the metaclass of `cls`, such as `abc.ABCMeta`, defines. */
-function customCheck(cls: PyClass, name: string): PyValue | undefined {
+function customCheck(cls: PyClass, name: string): ((value: PyValue) => PyValue) | undefined {
   if (cls.cls === typeClass) return undefined;
   const check = cls.cls.lookup(name);
-  return check === undefined || check === typeClass.dict.get(name) ? undefined : bindValue(check, cls, cls.cls);
+  if (check === undefined || check === typeClass.dict.get(name)) return undefined;
+  const shortcut = checkShortcuts.get(check);
+  if (shortcut) return (value) => shortcut(cls, value);
+  const bound = bindValue(check, cls, cls.cls);
+  return (value) => callValue(bound, [value]);
 }
 
-function isSubclass(cls: PyValue, classInfo: PyValue): boolean {
+/** Whether `cls` is a subclass of `classInfo`, a class, a tuple of them, or a union, as issubclass() says. */
+export function isSubclass(cls: PyValue, classInfo: PyValue): boolean {
   if (classInfo instanceof PyClass) {
     const check = customCheck(classInfo, '__subclasscheck__');
-    if (check !== undefined) return isTruthy(callValue(check, [cls]));
+    if (check !== undefined) return isTruthy(check(cls));
   }
   if (!(cls instanceof PyClass)) throw typeError('issubclass() arg 1 must be a class');
   if (classInfo instanceof PyClass) return cls.isSubclassOf(classInfo);

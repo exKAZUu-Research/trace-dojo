@@ -92,3 +92,45 @@ if ${'-'.repeat(1000)}1 != 1: raise AssertionError
 `);
   expect(compileErrorRow(`x = ${'-'.repeat(50_000)}1\n`)).toBe(0);
 });
+
+test("abc.ABCMeta and the numbers ABCs are the classes of CPython's Python code, with their registries and token", () => {
+  expectSameAsCPython(`import abc, io, inspect, numbers, re
+meta = abc.ABCMeta
+if list(meta.__dict__) != ['__module__', '__firstlineno__', '__doc__', '__new__', 'register', '__instancecheck__', '__subclasscheck__', '_dump_registry', '_abc_registry_clear', '_abc_caches_clear', '__static_attributes__']: raise AssertionError(list(meta.__dict__))
+if list(abc.ABC.__dict__) != ['__module__', '__firstlineno__', '__doc__', '__slots__', '__static_attributes__', '__abstractmethods__', '_abc_impl']: raise AssertionError(list(abc.ABC.__dict__))
+if not re.fullmatch(r'<function ABCMeta.register at 0x[0-9a-f]+>', repr(meta.register)): raise AssertionError(repr(meta.register))
+if (meta.register.__qualname__, meta.register.__module__, str(inspect.signature(meta._dump_registry))) != ('ABCMeta.register', 'abc', '(cls, file=None)'): raise AssertionError
+if meta.register.__globals__ is not abc.__dict__: raise AssertionError
+if [k for k in dir(meta) if k not in dir(type)] != ['__firstlineno__', '__static_attributes__', '_abc_caches_clear', '_abc_registry_clear', '_dump_registry', 'register']: raise AssertionError(dir(meta))
+if (abc.ABC.__annotations__, abc.ABC.__annotate__, meta.__annotations__, numbers.Real.__annotate__) != ({}, None, {}, None): raise AssertionError
+if (hex(meta.__flags__), hex(numbers.Real.__flags__), hex(abc.ABC.__flags__)) != ('0x80805e00', '0x105600', '0x5600'): raise AssertionError
+if type(numbers.Complex.__dict__['__bool__']).__name__ != 'function' or numbers.Complex.__bool__.__qualname__ != 'Complex.__bool__': raise AssertionError
+class A(abc.ABC): pass
+class B: pass
+A.register(int)
+isinstance(3, A); isinstance('x', A); issubclass(float, A); issubclass(B, A)
+buf = io.StringIO()
+A._dump_registry(buf)
+lines = re.sub(r'0x[0-9a-f]+', 'X', buf.getvalue()).splitlines()
+if lines[:4] != ['Class: __main__.A', 'Inv. counter: 31', "_abc_registry: {<weakref at X; to 'type' at X (int)>}", '_abc_cache: set()'] or lines[5] != '_abc_negative_cache_version: 31': raise AssertionError(lines)
+buf = io.StringIO()
+numbers.Complex._dump_registry(buf)
+if buf.getvalue().splitlines()[-1] != '_abc_negative_cache_version: 27': raise AssertionError(buf.getvalue())
+import collections.abc
+class S:
+    def __len__(self): return 2
+    def __getitem__(self, i):
+        if i > 1: raise IndexError
+        return i
+collections.abc.Sequence.register(S)
+match S():
+    case [a, b]: pass
+    case _: raise AssertionError('not a sequence')
+class V(numbers.Real): pass
+try:
+    V()
+    raise AssertionError('instantiated')
+except TypeError as e:
+    if not str(e).startswith("Can't instantiate abstract class V without an implementation for abstract methods '__abs__', '__add__'"): raise
+`);
+});
