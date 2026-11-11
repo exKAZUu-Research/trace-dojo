@@ -6,6 +6,7 @@ import { currentRuntime } from './runtimeContext';
 import { setTraceback } from './tracebacks';
 import {
   baseExceptionClass,
+  defineMethod,
   exceptionClasses,
   exceptionClassNamed,
   newList,
@@ -19,50 +20,57 @@ import { type ExceptionState, type Kwargs, PyClass, PyInstance, PyList, PyTuple,
 const instanceOf = (self: PyValue): PyInstance => self as PyInstance;
 
 function rejectKeywords(cls: PyClass, kwargs: Kwargs): void {
-  if (kwargs && kwargs.size > 0) throw typeError(`${cls.name}() takes no keyword arguments`);
-}
-
-/** The keyword arguments of the builtin exceptions that take some, as `NameError(msg, name=...)`. */
-const EXCEPTION_KEYWORDS: [string, readonly string[]][] = [
-  ['AttributeError', ['name', 'obj']],
-  ['NameError', ['name']],
-];
-
-/** Checks the keyword arguments of a builtin exception and stores those it takes in its state. */
-function exceptionKeywords(cls: PyClass, kwargs: Kwargs, state: ExceptionState | undefined): void {
-  if (!kwargs || kwargs.size === 0) return;
-  const accepted = EXCEPTION_KEYWORDS.find(([name]) => cls.mro.some((base) => base.isBuiltin && base.name === name));
-  if (!accepted) {
-    rejectKeywords(cls, kwargs);
-    return;
-  }
-  const [owner, names] = accepted;
-  for (const [key, value] of kwargs) {
-    if (!names.includes(key)) throw typeError(`${owner}() got an unexpected keyword argument '${key}'`);
-    if (!state) continue;
-    if (key === 'obj') state.object = value;
-    else state.name = typeof value === 'string' ? value : undefined;
-  }
+  if (kwargs && kwargs.size > 0 && keywordOwner(cls) === undefined)
+    throw typeError(`${cls.name}() takes no keyword arguments`);
 }
 
 baseExceptionClass.construct = (cls, args, kwargs) => {
   if (cls.isSubclassOf(exceptionClassNamed('BaseExceptionGroup'))) return constructGroup(cls, args, kwargs);
   const exception = new PyInstance(osErrorSubclass(cls, args));
   exception.exception = { args: newTuple(args), suppressContext: false };
-  if (cls.isBuiltin) exceptionKeywords(cls, kwargs, exception.exception);
+  // A builtin class's __init__ does not run again, so its keyword arguments set its fields here.
+  if (cls.isBuiltin) setKeywordFields(exception, kwargs);
   if (isOSError(exception)) setOSErrorArgs(exception.exception, args);
   return exception;
 };
 for (const cls of exceptionClasses.values())
   if (cls !== baseExceptionClass) cls.construct ??= baseExceptionClass.construct;
 
-method(baseExceptionClass, '__init__', 'expected', 0, Number.POSITIVE_INFINITY, (self, args, kwargs) => {
+defineMethod(baseExceptionClass, '__init__', (self, args, kwargs) => {
+  setKeywordFields(instanceOf(self), kwargs);
   const state = instanceOf(self).exception;
-  exceptionKeywords(instanceOf(self).cls, kwargs, state);
   if (state && !state.exceptions) state.args = newTuple(args);
   if (state && isOSError(instanceOf(self))) setOSErrorArgs(state, args);
   return None;
 });
+
+/** The keyword arguments of the builtin exceptions that take some, which set their fields. */
+const EXCEPTION_KEYWORDS = new Map<string, readonly string[]>([
+  ['ImportError', ['name', 'path', 'name_from']],
+  ['AttributeError', ['name', 'obj']],
+  ['NameError', ['name']],
+]);
+
+/** The builtin exception class whose `__init__` takes the keyword arguments of `cls`, if any. */
+function keywordOwner(cls: PyClass): string | undefined {
+  return cls.mro.find((each) => each.isBuiltin && EXCEPTION_KEYWORDS.has(each.name))?.name;
+}
+
+/** Sets the fields an exception's `__init__` sets from its keyword arguments, which it rejects if it takes none. */
+function setKeywordFields(exception: PyInstance, kwargs: Kwargs): void {
+  const owner = keywordOwner(exception.cls);
+  if (owner === undefined) return rejectKeywords(exception.cls, kwargs);
+  const accepted = EXCEPTION_KEYWORDS.get(owner) ?? [];
+  for (const key of kwargs?.keys() ?? []) {
+    if (!accepted.includes(key)) throw typeError(`${owner}() got an unexpected keyword argument '${key}'`);
+  }
+  const state = exception.exception;
+  if (!state) return;
+  const name = kwargs?.get('name') ?? None;
+  state.name = typeof name === 'string' ? name : undefined;
+  state.object = kwargs?.get('obj');
+  state.fields = new Map(accepted.map((key) => [key, kwargs?.get(key) ?? None]));
+}
 
 /**
  * The subclass `OSError(errno, strerror)` creates for the error numbers of macOS that one stands for, such as

@@ -36,6 +36,11 @@ function entry(value: PyValue): [string | undefined, string | undefined] | undef
   return undefined;
 }
 
+/** The C accelerator module CPython's function of this name in a module comes from, such as `_operator`, if any. */
+export function acceleratorModule(module: string, name: string): string | undefined {
+  return entries().get(`@${module}.${name}`)?.[0];
+}
+
 /** The docstrings of `object.__class__` and of the `__dict__` and `__weakref__` of the classes without `__slots__`. */
 export const INSTANCE_ATTRIBUTE_DOCS: Record<string, string> = {
   __class__: "the object's class",
@@ -46,6 +51,11 @@ export const INSTANCE_ATTRIBUTE_DOCS: Record<string, string> = {
 /** The docstring CPython's module of this name has, if it has one. */
 export function moduleDoc(name: string): string | undefined {
   return entries().get(name)?.[0];
+}
+
+/** The attributes of CPython's builtin class, as sorted `name:kind` words, which pydoc's help shows. */
+export function builtinClassLayout(cls: PyClass): string | undefined {
+  return entries().get(`!${classKey(cls)}`)?.[0];
 }
 
 function entries(): Map<string, [string | undefined, string | undefined]> {

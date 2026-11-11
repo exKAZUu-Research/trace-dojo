@@ -101,3 +101,65 @@ assert out.getvalue() == ('Help on built-in function len in module builtins:\n\n
                           '    Return the square root of x.\n\n'), out.getvalue()
 `);
 });
+
+test("native functions name CPython's C accelerator as their module", () => {
+  expectSameAsCPython(String.raw`import operator, heapq, bisect, struct, functools, sys
+assert operator.add.__module__ == '_operator' and heapq.heappush.__module__ == '_heapq'
+assert bisect.insort.__module__ == '_bisect' and struct.pack.__module__ == '_struct'
+assert functools.reduce.__module__ == '_functools'
+assert sys.modules['_heapq'].heappush is heapq.heappush
+`);
+});
+
+test("the modules CPython's macOS build lacks fail with ModuleNotFoundError, which takes ImportError's keywords", () => {
+  expectSameAsCPython(String.raw`for name in ['msvcrt', 'winreg', 'winsound', '_overlapped', '_wmi', '_gdbm', 'nt']:
+    try:
+        __import__(name)
+    except ModuleNotFoundError as e:
+        assert (str(e), e.name) == (f"No module named '{name}'", name)
+    else:
+        raise AssertionError(name)
+e = ImportError('x', name='m', path='p')
+assert (e.name, e.path, e.msg, e.name_from, e.args) == ('m', 'p', 'x', None, ('x',))
+try:
+    ImportError(foo=1)
+except TypeError as t:
+    assert str(t) == "ImportError() got an unexpected keyword argument 'foo'"
+e = AttributeError('a', name='n', obj=4)
+assert (e.name, e.obj) == ('n', 4)
+e.name = 7
+assert e.name == 7
+`);
+});
+
+test("help() on a builtin type lists CPython's methods and builtin subclasses", () => {
+  expectSameAsCPython(String.raw`import io, contextlib
+def text(value):
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        help(value)
+    return out.getvalue()
+assert ' |  Built-in subclasses:\n |      asyncgen_hooks\n |      UnraisableHookArgs\n' in text(tuple)
+assert ' |  __sizeof__(self, /)\n |      Return the size of the list in memory, in bytes.\n' in text(list)
+assert ' |  Static methods defined here:\n |\n |  __new__(*args, **kwargs)\n' in text(zip)
+assert ' |  maketrans(' in text(str) and '__repr__' not in text(map)
+class A: pass
+class B(A): pass
+assert A.__subclasses__() == [B] and bool in int.__subclasses__()
+assert (5).__format__('x') == '5' and (1.5).__sizeof__() == 24 and 'ab'.__sizeof__() == 43
+`);
+});
+
+test('opcode, nturl2path, genericpath, and pydoc_data hold what CPython has', () => {
+  expectSameAsCPython(String.raw`import opcode, nturl2path, genericpath, io, contextlib
+assert opcode.opmap['LOAD_CONST'] == 82 and opcode.hasconst == [82] and opcode.opname[82] == 'LOAD_CONST'
+assert opcode.hasjump[:3] == [68, 70, 75] and opcode.cmp_op[2] == '=='
+assert nturl2path.pathname2url(r'C:\foo\bar spam.txt') == '///C:/foo/bar%20spam.txt'
+assert nturl2path.url2pathname('///C:/foo/bar%20spam.txt') == r'C:\foo\bar spam.txt'
+assert genericpath.commonprefix(['abc', 'abd']) == 'ab'
+out = io.StringIO()
+with contextlib.redirect_stdout(out):
+    help('pass')
+assert out.getvalue().startswith('The "pass" statement\n********************\n'), out.getvalue()[:60]
+`);
+});

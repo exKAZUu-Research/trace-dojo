@@ -1,10 +1,10 @@
-import { builtinTextSignature } from '../builtinDocs';
+import { builtinClassLayout, builtinTextSignature } from '../builtinDocs';
 import { builtin } from '../define';
 import { setBuiltinFunctionModule } from '../modules';
 import { registerSourceModule } from '../sourceModules';
-import { nativeFunction, None } from '../types';
+import { nativeFunction, None, typeName } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
-import { PyModule, type PyValue } from '../values';
+import { PyClass, PyModule, type PyValue } from '../values';
 
 // CPython's `pydoc.py`, whose text documentation goes to the standard output, which is not a terminal here, and whose
 // parts that read files, the platform, or the terminal fail as unsupported.
@@ -635,9 +635,13 @@ class Doc:
               not file.startswith(os.path.join(basedir, 'site-packages')))) and
             object.__name__ not in ('xml.etree', 'test.test_pydoc.pydoc_mod')):
 
-            # pydoc_data.module_docs names each standard module's page this way.
-            if True:
-                doc_name = f'{object.__name__}#module-{object.__name__}'
+            try:
+                from pydoc_data import module_docs
+            except ImportError:
+                module_docs = None
+
+            if module_docs and object.__name__ in module_docs.module_docs:
+                doc_name = module_docs.module_docs[object.__name__]
                 if docloc.startswith(("http://", "https://")):
                     docloc = "{}/{}".format(docloc.rstrip("/"), doc_name)
                 else:
@@ -1007,6 +1011,7 @@ class HTMLDoc(Doc):
     def docclass(self, object, name=None, mod=None, funcs={}, classes={},
                  *ignored):
         """Produce HTML documentation for a class object."""
+        _check_class(object)
         realname = object.__name__
         name = name or realname
         bases = object.__bases__
@@ -1464,6 +1469,7 @@ location listed above.
 
     def docclass(self, object, name=None, mod=None, *ignored):
         """Produce text documentation for a given class object."""
+        _check_class(object)
         realname = object.__name__
         name = name or realname
         bases = object.__bases__
@@ -2958,4 +2964,31 @@ const STAND_IN = builtin('_stand_in', 'expected', 2, 2, ([module, key]) => {
   return builtinTextSignature(fn) === undefined ? None : fn;
 });
 
-registerSourceModule('pydoc', SOURCE, () => new Map<string, PyValue>([['_stand_in', STAND_IN]]));
+/**
+ * Fails for a builtin class whose attributes differ from those of CPython's, whose help would list other methods or
+ * other kinds of them.
+ */
+const CHECK_CLASS = builtin('_check_class', 'one', 1, 1, ([cls]) => {
+  if (!(cls instanceof PyClass) || !cls.isBuiltin) return None;
+  const expected = builtinClassLayout(cls);
+  if (expected === undefined) return None;
+  const ours = new Set(
+    [...cls.dict].filter(([name]) => name !== '__doc__').map(([name, value]) => `${name}:${typeName(value)}`)
+  );
+  const theirs = new Set(expected.split(' ').filter((word) => word !== ''));
+  const differing = [...new Set([...ours.symmetricDifference(theirs)].map((word) => word.split(':')[0]))].toSorted();
+  if (differing.length === 0) return None;
+  const shown = differing.length > 5 ? `${differing.slice(0, 5).join('、')} など` : differing.join('、');
+  const name = cls.qualifiedName;
+  throw new UnsupportedFeatureError(`help(${name})（${name} の属性 ${shown} が CPython の型と異なる）`);
+});
+
+registerSourceModule(
+  'pydoc',
+  SOURCE,
+  () =>
+    new Map<string, PyValue>([
+      ['_stand_in', STAND_IN],
+      ['_check_class', CHECK_CLASS],
+    ])
+);

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 440 -- The attribute lookup and the protocols every kind of object follows belong together.
+// code-gauge-allow-file fileNcss 443 -- The attribute lookup and the protocols every kind of object follows belong together.
 import { moduleAnnotations } from './annotations';
 import { classAttribute, specialAttribute } from './attributes';
 import { PyBytes, PyMemoryView } from './bytesValues';
@@ -235,9 +235,12 @@ function moduleAttribute(module: PyModule, name: string): PyValue | undefined {
   if (name === '__dict__') return namespaceDict(module.dict);
   // A module's `__annotate__` is None until its code defines one, which reading it records, as CPython does.
   if (name === '__annotate__' && !module.dict.has(name)) module.dict.set(name, None);
-  return name === '__annotations__'
-    ? moduleAnnotations(module)
-    : (module.dict.get(name) ?? importedModule(module, name));
+  const value =
+    name === '__annotations__' ? moduleAnnotations(module) : (module.dict.get(name) ?? importedModule(module, name));
+  // A special name the module lacks is one its module object lacks, which programs and pydoc look for.
+  if (value === undefined && module.partialFeature !== undefined && !/^__\w+__$/.test(name))
+    throw new UnsupportedFeatureError(module.partialFeature);
+  return value;
 }
 
 /**

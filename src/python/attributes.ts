@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 539 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 560 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import {
   classAnnotate,
   classAnnotations,
@@ -267,6 +267,9 @@ function builtinFunctionAttribute(fn: PyBuiltinFunction, name: string): PyValue 
 function moduleOf(fn: PyBuiltinFunction): PyValue {
   const runtime = currentRuntime();
   if (runtime.builtins.get(fn.name) === fn) return runtime.importModule('builtins');
+  // A function of a C accelerator, as `operator.add` is of `_operator`, belongs to it.
+  const owner = runtime.modules.get(builtinFunctionModule(runtime, fn) ?? '');
+  if (owner?.dict.get(fn.name) === fn) return owner;
   for (const module of runtime.modules.values()) if (module.dict.get(fn.name) === fn) return module;
   return None;
 }
@@ -388,10 +391,18 @@ function exceptionFieldOf(instance: PyInstance, name: string): PyValue | undefin
   if (name === 'value' && is('StopIteration')) return args[0] ?? None;
   if (name === 'code' && is('SystemExit')) return args.length === 0 ? None : args.length === 1 ? args[0] : state.args;
   if ((name === 'name' || name === 'obj') && (is('AttributeError') || is('NameError') || is('ImportError'))) {
-    if (name === 'name') return state.name ?? None;
+    if (name === 'name') return state.name ?? state.fields?.get('name') ?? None;
     return state.object ?? None;
   }
+  if (is('ImportError')) return importErrorField(state, name);
   return is('OSError') ? osErrorField(state, name) : undefined;
+}
+
+/** The fields an ImportError has besides its name: its message, and those its keyword arguments set. */
+function importErrorField(state: ExceptionState, name: string): PyValue | undefined {
+  if (name === 'msg') return state.args.items.length === 1 ? state.args.items[0] : None;
+  if (name === 'path' || name === 'name_from') return state.fields?.get(name) ?? None;
+  return undefined;
 }
 
 /** The fields an OSError derives from the arguments it was created with, as `OSError(errno, strerror, filename)`. */
@@ -652,9 +663,20 @@ function setExceptionField(state: ExceptionState, name: string, value: PyValue):
       return true;
     }
     default: {
-      return false;
+      return setKeywordField(state, name, value);
     }
   }
+}
+
+/** Sets a field an exception's keyword arguments set, such as ImportError's `path`, returning whether it has it. */
+function setKeywordField(state: ExceptionState, name: string, value: PyValue): boolean {
+  const known = state.fields?.has(name) ?? false;
+  if (!known && !(name === 'name' && state.name !== undefined) && !(name === 'obj' && state.object !== undefined))
+    return false;
+  (state.fields ??= new Map()).set(name, value);
+  if (name === 'name') state.name = typeof value === 'string' ? value : undefined;
+  if (name === 'obj') state.object = value;
+  return true;
 }
 
 /**

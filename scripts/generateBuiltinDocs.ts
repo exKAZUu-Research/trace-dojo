@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 
 import { docKey, moduleDoc } from '../src/python/builtinDocs';
 import { SUPPORTED_MODULES } from '../src/python/moduleNames';
+import { builtinFunctionModule } from '../src/python/modules';
 import { parsePython } from '../src/python/parse';
 import { runModule } from '../src/python/run';
 import { Runtime } from '../src/python/runtime';
@@ -33,6 +34,13 @@ for (const module of SUPPORTED_MODULES) {
     const doc = value.dict.get('__doc__');
     if (typeof doc !== 'string' || doc === moduleDoc(module)) keys.add(module);
     for (const each of value.dict.values()) collect(each);
+    // The functions this grader creates in the module where CPython's come from a C accelerator.
+    for (const [name, each] of value.dict) {
+      const accelerator = reference[`@${module}.${name}`]?.[0];
+      if (!(each instanceof PyBuiltinFunction) || accelerator === undefined) continue;
+      const owner = builtinFunctionModule(runtime, each);
+      if (owner === module || owner === accelerator) keys.add(`@${module}.${name}`);
+    }
     // The functions this grader leaves unsupported, which pydoc documents by stand-ins.
     for (const name of value.unsupported.keys()) keys.add(`${module}.${name}`);
   });
@@ -83,6 +91,7 @@ function collect(value: PyValue): void {
   seen.add(value);
   addKey(value);
   const key = docKey(value) as string;
+  keys.add(`!${key}`);
   for (const [name, attribute] of value.dict) {
     if (attribute instanceof PyClass) collect(attribute);
     else if (attribute instanceof PyBuiltinFunction || attribute instanceof PyDescriptor) keys.add(`${key}.${name}`);

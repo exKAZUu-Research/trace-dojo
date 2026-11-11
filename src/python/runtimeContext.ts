@@ -20,3 +20,8 @@ export function withRuntime<T>(runtime: Runtime, run: () => T): T {
     current = outer;
   }
 }
+
+/** The runtime of the program running now, if any, as none runs while the builtin classes are created. */
+export function runningRuntime(): Runtime | undefined {
+  return current;
+}

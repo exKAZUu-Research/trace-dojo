@@ -3,6 +3,7 @@ import type { ClassDef, Expression, FunctionDef } from './ast';
 import type { DictStore } from './dictStore';
 import type { Frame } from './frame';
 import type { SetTable } from './setTable';
+import { recordSubclass } from './subclasses';
 
 /**
  * A Python value. Integers are bigints, so that they have no size limit, and floats are numbers; `bool` stays a JS
@@ -118,6 +119,7 @@ export class PyClass extends PyObject {
   ) {
     super(metaclass);
     this.qualifiedName = name;
+    recordSubclass(this);
   }
 
   /** Looks up an attribute along the method resolution order. */
@@ -174,6 +176,8 @@ export interface ExceptionState {
   filename?: PyValue;
   filename2?: PyValue;
   message?: string;
+  /** The fields an exception sets from its keyword arguments, such as ImportError's `path`. */
+  fields?: Map<string, PyValue>;
 }
 
 /** An instance of a class written in the program, or of a builtin class with instance attributes. */
@@ -321,6 +325,8 @@ export class PyModule extends PyObject {
   readonly unsupported = new Map<string, string>();
   /** The modules CPython's module imported under these names, which this grader imports when first read. */
   readonly imports = new Map<string, string>();
+  /** The feature to name for every attribute the module lacks, when this grader has only some of CPython's module. */
+  partialFeature?: string;
 
   constructor(
     cls: PyClass,
