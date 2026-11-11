@@ -128,8 +128,8 @@ function createModule(runtime: Runtime, name: string, factory: ModuleFactory): P
   runtime.modules.set(name, module);
   module.dict.set('__name__', name);
   for (const [key, value] of runFactory(runtime, name, factory, module)) module.dict.set(key, value);
-  recordFunctionModules(module);
   addRegisteredAttributes(runtime, module);
+  recordFunctionModules(module);
   addLayoutAttributes(module, name);
   moduleTables.get(runtime)?.set(name, module);
   loadAccelerators(runtime, module);
@@ -156,7 +156,12 @@ function addRegisteredAttributes(runtime: Runtime, module: PyModule): void {
 /** Records the module of the builtin functions a module creates, which their `__module__` names. */
 function recordFunctionModules(module: PyModule): void {
   for (const [key, value] of module.dict) {
-    if (value instanceof PyBuiltinFunction && value.self === undefined && !functionModules.has(value)) {
+    if (
+      value instanceof PyBuiltinFunction &&
+      value.self === undefined &&
+      !functionModules.has(value) &&
+      !modulelessFunctions.has(value)
+    ) {
       // CPython's function may come from a C accelerator, such as operator's from _operator.
       functionModules.set(value, acceleratorModule(module.name, key) ?? module.name);
     }
@@ -203,14 +208,22 @@ const partialAccelerators = new Set<string>();
  */
 type ModuleCreationHook = (runtime: Runtime, name: string) => (() => void) | undefined;
 
-const moduleCreationHooks: ModuleCreationHook[] = [];
+/**
+ * The module creation hooks, kept on a hoisted function rather than in a module constant, since modules imported in a
+ * cycle with this one add theirs while it is still loading.
+ */
+function creationHooks(): ModuleCreationHook[] {
+  const holder = creationHooks as { hooks?: ModuleCreationHook[] };
+  holder.hooks ??= [];
+  return holder.hooks;
+}
 
 export function addModuleCreationHook(hook: ModuleCreationHook): void {
-  moduleCreationHooks.push(hook);
+  creationHooks().push(hook);
 }
 
 function runFactory(runtime: Runtime, name: string, factory: ModuleFactory, module: PyModule): Map<string, PyValue> {
-  const after = moduleCreationHooks.map((hook) => hook(runtime, name));
+  const after = creationHooks().map((hook) => hook(runtime, name));
   try {
     return factory(runtime, module.dict);
   } catch (error) {
@@ -249,8 +262,16 @@ export function setBuiltinFunctionModule(fn: PyBuiltinFunction, module: string):
   functionModules.set(fn, module);
 }
 
+/** Makes a builtin function belong to no module, as the codec error handlers CPython creates inside do. */
+export function setNoModule(fn: PyBuiltinFunction): void {
+  modulelessFunctions.add(fn);
+}
+
+const modulelessFunctions = new WeakSet<PyBuiltinFunction>();
+
 /** The `__module__` of a builtin function: the module whose namespace it was created in, if any. */
 export function builtinFunctionModule(runtime: Runtime, fn: PyBuiltinFunction): string | undefined {
   if (fn.self instanceof PyModule) return fn.self.name;
+  if (modulelessFunctions.has(fn)) return undefined;
   return functionModules.get(fn) ?? (runtime.builtins.get(fn.name) === fn ? 'builtins' : undefined);
 }

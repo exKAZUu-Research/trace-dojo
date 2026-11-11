@@ -1,7 +1,7 @@
 // `_thread`: the locks and threads that `threading` builds on, run by the deterministic scheduler of threads.ts.
 import { addressOf } from '../conversions';
 import { builtin, method } from '../define';
-import { registerModule, registerSharedAttributes } from '../modules';
+import { registerModule, registerSharedAttributes, setBuiltinFunctionModule } from '../modules';
 import { argument } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import { callValue, isTruthy } from '../objects';
@@ -17,7 +17,7 @@ import {
 } from '../threads';
 import { toFloat } from '../typeNumbers';
 import { exceptionClassNamed, newTuple, None, objectClass, pyError, typeError, typeName, valueError } from '../types';
-import { type Kwargs, PyDict, PyError, PyOpaque, PyTuple, type PyValue } from '../values';
+import { type Kwargs, type PyBuiltinFunction, PyDict, PyError, PyOpaque, PyTuple, type PyValue } from '../values';
 import { builtinClassWithBase } from './moduleClasses';
 import { systemExitError } from './sys';
 
@@ -262,7 +262,8 @@ registerModule('_thread', () => {
         { keywords: ['name'] }
       ),
     ],
-    ['_monotonic', builtin('_monotonic', 'none', 0, 0, () => Number(schedulerOf().now()) / 1e9)],
+    // time.monotonic on the threads' clock, which threading and queue take as CPython's take time.monotonic.
+    ['_monotonic', timeFunction(builtin('monotonic', 'none', 0, 0, () => Number(schedulerOf().now()) / 1e9))],
   ]);
 });
 
@@ -271,3 +272,8 @@ registerSharedAttributes('_thread', {
   _ExceptHookArgs: 'threading:_ExceptHookArgs',
   _excepthook: 'threading:excepthook',
 });
+
+function timeFunction(fn: PyBuiltinFunction): PyBuiltinFunction {
+  setBuiltinFunctionModule(fn, 'time');
+  return fn;
+}

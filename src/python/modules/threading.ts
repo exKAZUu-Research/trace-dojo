@@ -511,6 +511,7 @@ class Thread:
 
 
 class _ExceptHookArgs(tuple):
+    __module__ = '_thread'
     n_fields = 4
     n_sequence_fields = 4
     n_unnamed_fields = 0

@@ -2,6 +2,7 @@ import { pyRepr } from './conversions';
 import { enumLookup, isEnumClass } from './enums';
 import { bindValue, callValue, toArray } from './objects';
 import { currentRuntime } from './runtimeContext';
+import { isSubclassableConstruct } from './subclassableTypes';
 import {
   builtinFunctionClass,
   classOf,
@@ -12,7 +13,16 @@ import {
   typeError,
   typeName,
 } from './types';
-import { type Kwargs, PyBuiltinFunction, PyClass, PyDescriptor, PyFunction, PyInstance, type PyValue } from './values';
+import {
+  type Kwargs,
+  PyBuiltinFunction,
+  PyClass,
+  PyDescriptor,
+  PyFunction,
+  PyInstance,
+  PyObject,
+  type PyValue,
+} from './values';
 
 type Create = (cls: PyClass, args: PyValue[], kwargs: Kwargs) => PyValue;
 
@@ -33,6 +43,8 @@ export function typeCall(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyValue
   if (isEnumClass(cls)) return enumLookup(cls, args, kwargs);
   if (cls.construct) return cls.construct(cls, args, kwargs);
   const newMethod = cls.lookup('__new__');
+  const constructing = newMethod === objectNew() ? cls.mro.find(isSubclassableConstruct) : undefined;
+  if (constructing?.construct) return constructSubclass(cls, constructing.construct, args, kwargs);
   if (newMethod === objectNew()) {
     if (cls.isBuiltin) throw cannotCreate(cls);
     const init = cls.lookup('__init__');
@@ -50,6 +62,23 @@ export function typeCall(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyValue
   const init = instanceClass.lookup('__init__');
   if (init === objectInit()) objectInitImplementation(instance, args, kwargs);
   else callInit(init, instance, args, kwargs);
+  return instance;
+}
+
+/**
+ * Creates an object of a program's subclass of a builtin type that has no `__new__` here, by the type's construct,
+ * and initializes it, as CPython's tp_new and __init__ do.
+ */
+function constructSubclass(
+  cls: PyClass,
+  construct: NonNullable<PyClass['construct']>,
+  args: PyValue[],
+  kwargs: Kwargs
+): PyValue {
+  const instance = construct(cls, args, kwargs);
+  if (instance instanceof PyObject && instance.cls !== cls && cls.isSubclassOf(instance.cls)) instance.cls = cls;
+  const init = cls.lookup('__init__');
+  if (init !== objectInit()) callInit(init, instance, args, kwargs);
   return instance;
 }
 
@@ -165,8 +194,13 @@ export function defineNew(cls: PyClass, create: Create): void {
 export function defineConstructingNew(cls: PyClass): void {
   const construct = cls.construct;
   if (!construct) return;
-  const create = (args: PyValue[], kwargs: Kwargs): PyValue =>
-    construct(checkSubtype(cls, args), args.slice(1), kwargs);
+  const create = (args: PyValue[], kwargs: Kwargs): PyValue => {
+    const subclass = checkSubtype(cls, args);
+    const made = construct(subclass, args.slice(1), kwargs);
+    // A construct that makes the type's own objects makes a subclass's by taking it as their class.
+    if (made instanceof PyObject && made.cls !== subclass && subclass.isSubclassOf(made.cls)) made.cls = subclass;
+    return made;
+  };
   cls.dict.set('__new__', new PyBuiltinFunction(builtinFunctionClass, '__new__', create, cls, 'static', cls.name));
 }
 

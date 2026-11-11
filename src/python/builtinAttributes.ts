@@ -379,7 +379,8 @@ function isAbstract(value: PyValue | undefined): boolean {
 
 for (const cls of [staticmethodClass, classmethodClass]) {
   defineProperty(cls, '__func__', (self) => asDescriptor(self).fn);
-  for (const name of ['__wrapped__', '__name__', '__qualname__', '__module__', '__annotations__', '__annotate__']) {
+  // CPython copies the function's __name__, __qualname__, and __module__ into the wrapper's own namespace.
+  for (const name of ['__wrapped__', '__annotations__', '__annotate__']) {
     defineProperty(cls, name, (self) => {
       if (implicitlyWrapped.has(self as object)) {
         throw pyError('AttributeError', `'${typeName(self)}' object has no attribute '${name}'`);

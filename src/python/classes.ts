@@ -1,12 +1,11 @@
 import { annotationClosure, classAnnotationLists, implicitlyWrapped, newAnnotate } from './annotations';
 import type { ClassDef } from './ast';
+import { defineAttribute, PyAttribute } from './attributeDescriptors';
 import { INSTANCE_ATTRIBUTE_DOCS } from './builtinDocs';
-import { method } from './define';
 import { createEnumMembers } from './enums';
 import type { Evaluator } from './evaluator';
 import type { CallArguments } from './expressionEvaluator';
 import { Frame } from './frame';
-import { defineProperty } from './modules/numberSupport';
 import { namespaceDict } from './namespaces';
 import {
   bindValue,
@@ -21,12 +20,12 @@ import {
 import { firstRowOf } from './programSource';
 import { currentRuntime } from './runtimeContext';
 import { defineClassSlots, slotNamesOf } from './slots';
+import { isBaseType } from './subclassableTypes';
 import { recordedSubclasses, recordNewBase } from './subclasses';
 import { noteUnwinding } from './tracebacks';
 import { initGenericSubclass, typingMroEntries } from './typeParams';
 import {
   baseExceptionClass,
-  builtinClass,
   builtinFunctionClass,
   bytesClass,
   classmethodClass,
@@ -56,24 +55,12 @@ import {
   PyDict,
   PyError,
   PyFunction,
-  PyOpaque,
   PyTuple,
   type PyValue,
 } from './values';
 
-/** The class of the `__dict__` and `__weakref__` entries a class defines for its instances. */
-const attributeDescriptorClass = builtinClass('getset_descriptor');
-method(attributeDescriptorClass, '__repr__', 'none', 0, 0, (self) => (self as PyOpaque).text);
 // `object.__class__`, which instances and classes read natively, listed in object's namespace as CPython lists it.
-objectClass.dict.set(
-  '__class__',
-  new PyOpaque(attributeDescriptorClass, "<attribute '__class__' of 'object' objects>")
-);
-defineProperty(
-  attributeDescriptorClass,
-  '__doc__',
-  (self) => INSTANCE_ATTRIBUTE_DOCS[/'(\w+)'/.exec((self as PyOpaque).text)?.[1] ?? ''] ?? None
-);
+defineAttribute(objectClass, '__class__', (instance) => classOf(instance));
 
 /** What a class body leaves for `type.__new__` besides its namespace, keyed by that namespace. */
 interface ClassBody {
@@ -396,8 +383,7 @@ function checkBases(name: string, bases: readonly PyValue[]): PyClass[] {
   return bases.map((base) => {
     if (!(base instanceof PyClass)) throw typeError('bases must be types');
     if (base.unsupportedBase !== undefined) throw new UnsupportedFeatureError(base.unsupportedBase);
-    if (base.isBuiltin && !base.isBaseType)
-      throw typeError(`type '${base.typeName ?? base.name}' is not an acceptable base type`);
+    if (!isBaseType(base)) throw typeError(`type '${base.typeName ?? base.name}' is not an acceptable base type`);
     if (base.flags.isEnum && base.enumMembers && base.enumMembers.length > 0) {
       throw typeError(`${name}: cannot extend ${base.qualifiedName}`);
     }
@@ -444,7 +430,7 @@ function fillClassDict(cls: PyClass, entries: Map<string, PyValue>): void {
       base.isBuiltin ? baseProvides(base, name) : base.lookup(name) !== undefined || baseProvides(base, name)
     );
     if (slots === undefined ? added : slots.includes(name)) {
-      entries.set(name, new PyOpaque(attributeDescriptorClass, `<attribute '${name}' of '${cls.name}' objects>`));
+      entries.set(name, instanceAttributeDescriptor(cls, name));
     }
   }
   // A class without a docstring gets `__doc__` after `__dict__` and `__weakref__`, as in CPython.
@@ -597,4 +583,16 @@ export function typeNewFromArguments(meta: PyClass, args: PyValue[], kwargs: Kwa
     return callValue(getAttribute(winner, '__new__'), [winner, ...args], kwargs) as PyClass;
   }
   return typeNew(meta, name, bases.items, namespace, new Map(kwargs));
+}
+
+/** The `__dict__` or `__weakref__` entry a class defines for its instances, which read them natively. */
+function instanceAttributeDescriptor(cls: PyClass, name: string): PyAttribute {
+  return new PyAttribute(
+    'getset',
+    name,
+    cls,
+    (instance) => getAttribute(instance, name),
+    undefined,
+    INSTANCE_ATTRIBUTE_DOCS[name]
+  );
 }

@@ -163,3 +163,10 @@ import './modules/tokenize';
 import './modules/symtable';
 import './modules/unittest/unittest';
 import './modules/zipfile/zipfile';
+import './richComparisons';
+import './builtinSlots';
+
+import { convertBuiltinAttributes } from './builtinAttributeKinds';
+
+// The builtin classes' data attributes become CPython's descriptors once every module has defined its classes.
+convertBuiltinAttributes();

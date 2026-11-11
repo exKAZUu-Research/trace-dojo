@@ -146,6 +146,7 @@ def resetwarnings():
 
 class _OptionError(Exception):
     """Exception used by option processing helpers."""
+    __module__ = '_py_warnings'
     pass
 
 
@@ -238,6 +239,7 @@ def warn_explicit(message, category, filename, lineno,
 
 
 class WarningMessage(object):
+    __module__ = '_py_warnings'
 
     _WARNING_DETAILS = ("message", "category", "filename", "lineno", "file",
                         "line", "source")
@@ -272,6 +274,25 @@ class WarningMessage(object):
 
 
 class catch_warnings(object):
+
+    """A context manager that copies and restores the warnings filter upon
+    exiting the context.
+
+    The 'record' argument specifies whether warnings should be captured by a
+    custom implementation of warnings.showwarning() and be appended to a list
+    returned by the context manager. Otherwise None is returned by the context
+    manager. The objects appended to the list are arguments whose attributes
+    mirror the arguments to showwarning().
+
+    The 'module' argument is to specify an alternative module to the module
+    named 'warnings' and imported under that name. This argument is only useful
+    when testing the warnings module itself.
+
+    If the 'action' argument is not None, the remaining arguments are passed
+    to warnings.simplefilter() as if it were called immediately on entering the
+    context.
+    """
+    __module__ = '_py_warnings'
 
     def __init__(self, *, record=False, module=None,
                  action=None, category=Warning, lineno=0, append=False):
@@ -324,6 +345,7 @@ class catch_warnings(object):
 
 class deprecated:
     """Indicate that a class, function or overload is deprecated."""
+    __module__ = '_py_warnings'
 
     def __init__(self, message, /, *, category=DeprecationWarning, stacklevel=1):
         if not isinstance(message, str):

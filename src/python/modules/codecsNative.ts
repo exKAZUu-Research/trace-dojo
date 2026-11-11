@@ -14,7 +14,7 @@ import {
   setRegisteredCodecLookup,
 } from '../codecs';
 import { builtin } from '../define';
-import { importModule, registerModule } from '../modules';
+import { importModule, registerModule, setNoModule } from '../modules';
 import { argument } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import { callValue, getAttribute, isTruthy } from '../objects';
@@ -24,7 +24,7 @@ import { exceptionClassNamed, isInstanceOf, newException, newTuple, None, typeEr
 import { characterName } from '../unicodeDatabase';
 import { escapePoint } from '../unicodeErrors';
 import { utf7Natives } from '../utf7';
-import { PyError, PyInstance, PyTuple, type PyValue } from '../values';
+import { type PyBuiltinFunction, PyError, PyInstance, PyTuple, type PyValue } from '../values';
 import { escapeDecodeFunction } from './escapeDecode';
 
 /** The codec modules whose `encodings` module this grader has, which `codecs.lookup` imports. */
@@ -499,6 +499,8 @@ const ERROR_HANDLERS = new Map<string, PyValue>(
     }),
   ])
 );
+// CPython's error handlers belong to no module.
+for (const handler of ERROR_HANDLERS.values()) setNoModule(handler as PyBuiltinFunction);
 
 function unicodeErrorKind(error: PyValue): UnicodeErrorKind | undefined {
   if (!(error instanceof PyInstance)) return undefined;

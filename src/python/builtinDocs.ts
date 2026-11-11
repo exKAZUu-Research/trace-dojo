@@ -1,3 +1,4 @@
+import type { PyAttribute } from './attributeDescriptors';
 import { BUILTIN_DOCS } from './data/builtinDocs';
 import { builtinFunctionModule } from './modules';
 import { currentRuntime } from './runtimeContext';
@@ -82,6 +83,9 @@ function entries(): Map<string, [string | undefined, string | undefined]> {
 export function docKey(value: PyValue): string | undefined {
   if (value instanceof PyClass) return classKey(value);
   if (value instanceof PyModule) return value.name;
+  // A getset or member descriptor, which this module, imported before them, knows by its owner.
+  const attributeOwner = (value as Partial<PyAttribute>).owner;
+  if (attributeOwner instanceof PyClass) return `${classKey(attributeOwner)}.${(value as PyAttribute).name}`;
   if (value instanceof PyDescriptor && value.fn instanceof PyBuiltinFunction) return docKey(value.fn);
   if (!(value instanceof PyBuiltinFunction)) return undefined;
   const owner = ownerOf(value);
@@ -99,7 +103,10 @@ function ownerOf(fn: PyBuiltinFunction): PyClass | undefined {
   if (owner) return owner;
   const { self } = fn;
   if (self === undefined || self instanceof PyModule) return undefined;
-  const cls = self instanceof PyClass && fn.ownerName === self.name ? self : classOf(self);
+  // A class method bound to a subclass, as `bool.from_bytes`, is its base's.
+  const inClass =
+    self instanceof PyClass && self.mro.some((each) => each.name === fn.ownerName && each.dict.has(fn.name));
+  const cls = self instanceof PyClass && inClass ? self : classOf(self);
   return cls.mro.find((each) => each.dict.has(fn.name));
 }
 

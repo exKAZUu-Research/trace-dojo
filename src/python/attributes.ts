@@ -1,14 +1,16 @@
-// code-gauge-allow-file fileNcss 571 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 602 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import {
   classAnnotate,
   classAnnotations,
   functionAnnotate,
   functionAnnotations,
+  implicitlyWrapped,
   setClassAnnotate,
   setClassAnnotations,
   setFunctionAnnotationAttribute,
   sharedPythonClasses,
 } from './annotations';
+import { attributeDescriptorField, PyAttribute } from './attributeDescriptors';
 import { builtinDoc, builtinTextSignature } from './builtinDocs';
 import { setClassBases, solidBase } from './classes';
 import {
@@ -26,9 +28,9 @@ import { delegateOf } from './generators';
 import { hasPythonLevelNew } from './instances';
 import { builtinFunctionModule } from './modules';
 import { namespaceDict, namespaceOf } from './namespaces';
-import { attributeError, bindValue, callValue, lookupSpecial } from './objects';
+import { attributeError, bindValue, callValue, getAttribute, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
-import { deleteMember, instancesHaveDict, isMember, writeMember } from './slots';
+import { instancesHaveDict } from './slots';
 import { codeObject, frameObject, functionCode, setTraceback } from './tracebacks';
 import { typeFlags } from './typeFlags';
 import {
@@ -58,6 +60,7 @@ import {
   PyComplex,
   PyDescriptor,
   PyDict,
+  PyError,
   PyFunction,
   PyGenerator,
   PyInstance,
@@ -180,7 +183,8 @@ function ownClassAttribute(value: PyValue): PyValue | undefined {
 }
 
 /** The attributes builtin objects have of their own, outside any class dictionary. */
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of builtin object with attributes of its own.
+// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of builtin object with attributes of its own.
+// code-gauge-allow functionNcss 34 -- One case per kind of builtin object with attributes of its own.
 export function specialAttribute(value: PyValue, name: string): PyValue | undefined {
   if (name === '__class__') return ownClassAttribute(value);
   if (typeof value === 'bigint' || typeof value === 'boolean') return integerAttribute(BigInt(value), name);
@@ -198,17 +202,34 @@ export function specialAttribute(value: PyValue, name: string): PyValue | undefi
   }
   if (value instanceof PyGenerator) return generatorAttribute(value, name);
   if (value instanceof PyDescriptor) return wrappedFunction(value, name);
+  if (value instanceof PyAttribute) {
+    if (name === '__doc__') return value.doc ?? builtinDoc(value) ?? None;
+    return attributeDescriptorField(value, name);
+  }
   if (name === '__dict__' && value instanceof PyObject && !value.cls.isBuiltin) return dictAttribute(value);
   return undefined;
+}
+
+/** The attributes of its function that a staticmethod or classmethod copies into its own namespace. */
+const WRAPPER_COPIES = new Set(['__name__', '__qualname__', '__module__']);
+
+function wrapperCopy(descriptor: PyDescriptor, name: string): PyValue | undefined {
+  if (implicitlyWrapped.has(descriptor)) return undefined;
+  try {
+    return getAttribute(descriptor.fn, name);
+  } catch (error) {
+    if (error instanceof PyError) return undefined;
+    throw error;
+  }
 }
 
 /** The function a staticmethod or classmethod wraps, as its `__func__` and `__wrapped__` give it. */
 function wrappedFunction(descriptor: PyDescriptor, name: string): PyValue | undefined {
   if (name === '__doc__' && isPropertyKind(descriptor.cls)) return propertyDoc(descriptor);
+  const wraps = descriptor.cls.isSubclassOf(staticmethodClass) || descriptor.cls.isSubclassOf(classmethodClass);
+  if (wraps && WRAPPER_COPIES.has(name)) return wrapperCopy(descriptor, name);
   if (name !== '__func__' && name !== '__wrapped__') return undefined;
-  return descriptor.cls.isSubclassOf(staticmethodClass) || descriptor.cls.isSubclassOf(classmethodClass)
-    ? descriptor.fn
-    : undefined;
+  return wraps ? descriptor.fn : undefined;
 }
 
 /** A property's `__doc__`: the one it was given or assigned, else its getter's. */
@@ -454,7 +475,7 @@ export function setAttribute(target: PyValue, name: string, value: PyValue): voi
     target.doc = value;
     return;
   }
-  throw readOnlyError(target, name);
+  assignBuiltinAttribute(target, name, value);
 }
 
 /** Whether assigning an attribute of `target` follows the rules of instances, as opposed to classes or modules. */
@@ -464,6 +485,13 @@ function takesInstanceAttributes(target: PyValue): boolean {
     isSubclassInstance(target) ||
     (target instanceof PyObject && builtinClassesWithDict.has(target.cls))
   );
+}
+
+/** Assigns or deletes an attribute of an object of a builtin type, which only its data descriptors take. */
+function assignBuiltinAttribute(target: PyValue, name: string, value: PyValue | undefined): void {
+  const attribute = classOf(target).lookup(name);
+  if (!(attribute instanceof PyAttribute) || attribute.stands) throw readOnlyError(target, name);
+  attribute.assign(target, value);
 }
 
 /** The AttributeError for assigning to an attribute of an object of a builtin type, which has no `__dict__`. */
@@ -596,12 +624,12 @@ export function setInstanceAttribute(target: PyObject, name: string, value: PyVa
     return;
   }
   const attribute = target.cls.lookup(name);
-  if (attribute instanceof PyDescriptor && isPropertyKind(attribute.cls)) {
-    setProperty(attribute, target, name, value);
+  if (attribute instanceof PyAttribute && !attribute.stands) {
+    attribute.assign(target, value);
     return;
   }
-  if (isMember(attribute)) {
-    writeMember(attribute, target, value);
+  if (attribute instanceof PyDescriptor && isPropertyKind(attribute.cls)) {
+    setProperty(attribute, target, name, value);
     return;
   }
   if (attribute !== undefined && callSetter(attribute, target, value)) return;
@@ -639,6 +667,17 @@ function setInstanceDictEntry(target: PyInstance, name: string, value: PyValue, 
   }
   if (cls.isBuiltin && !state && !target.turtle) throw noDictError(target, name);
   target.dict.set(name, value);
+}
+
+/** Assigns, or deletes when `value` is undefined, an attribute that an exception's class lists as a descriptor. */
+export function assignExceptionAttribute(target: PyValue, name: string, value: PyValue | undefined): void {
+  const instance = target as PyInstance;
+  if (value === undefined) {
+    if (!instance.dict.delete(name)) throw attributeError(target, name);
+    return;
+  }
+  if (instance.exception && setExceptionField(instance.exception, name, value)) return;
+  instance.dict.set(name, value);
 }
 
 /** Sets an attribute exceptions keep outside their dictionary, returning whether `name` is one. */
@@ -743,7 +782,7 @@ export function deleteAttribute(target: PyValue, name: string): void {
     return;
   }
   // Deleting an attribute of a builtin type's object fails as assigning it does.
-  throw readOnlyError(target, name);
+  assignBuiltinAttribute(target, name, undefined);
 }
 
 /** Deletes a function's or module's attribute, including a module's not yet imported or unsupported names. */
@@ -755,6 +794,10 @@ function deleteNamespaceEntry(target: PyFunction | PyModule, name: string): bool
 /** Deletes an instance attribute, honoring descriptors and slots, as `object.__delattr__` does. */
 export function deleteInstanceAttribute(target: PyObject, name: string): void {
   const attribute = target.cls.lookup(name);
+  if (attribute instanceof PyAttribute && !attribute.stands) {
+    attribute.assign(target, undefined);
+    return;
+  }
   if (attribute instanceof PyDescriptor && isPropertyKind(attribute.cls)) {
     if (attribute.cls === tupleGetterClass) throw pyError('AttributeError', "can't delete attribute");
     if (attribute.deleter === undefined || attribute.deleter === None) {
@@ -764,10 +807,6 @@ export function deleteInstanceAttribute(target: PyObject, name: string): void {
       );
     }
     callValue(attribute.deleter, [target]);
-    return;
-  }
-  if (isMember(attribute)) {
-    deleteMember(attribute, target);
     return;
   }
   if (attribute !== undefined && callSetter(attribute, target, undefined)) return;

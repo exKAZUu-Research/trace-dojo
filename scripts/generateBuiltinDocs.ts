@@ -16,7 +16,7 @@ import { PyBuiltinFunction, PyClass, PyDescriptor, PyModule, type PyValue } from
 const SAMPLES =
   'iter([]), iter(()), iter(""), iter({}), iter(set()), iter(range(1)), reversed([]), {}.keys(), {}.values(), ' +
   '{}.items(), iter({}.keys()), iter({}.values()), iter({}.items()), iter(b""), iter(bytearray()), ' +
-  '(x for x in []), len, [].append, type.__dict__, sys.flags';
+  '(x for x in []), len, [].append, type.__dict__, sys.flags, (lambda: 0), (lambda: 0).__get__(1), (lambda: 0).__code__';
 
 const reference = JSON.parse(readFileSync(process.argv[2] as string, 'utf8')) as Record<
   string,
@@ -94,7 +94,12 @@ function collect(value: PyValue): void {
   keys.add(`!${key}`);
   for (const [name, attribute] of value.dict) {
     if (attribute instanceof PyClass) collect(attribute);
-    else if (attribute instanceof PyBuiltinFunction || attribute instanceof PyDescriptor) keys.add(`${key}.${name}`);
+    else if (
+      attribute instanceof PyBuiltinFunction ||
+      attribute instanceof PyDescriptor ||
+      isAttributeDescriptor(attribute)
+    )
+      keys.add(`${key}.${name}`);
   }
 }
 
@@ -115,4 +120,9 @@ function run(source: string, inspect: (runtime: Runtime, globals: Map<string, Py
     // A module this grader cannot import alone, which has no data then.
   }
   void PyModule;
+}
+
+/** A getset or member descriptor, known by its owner, as importing their module first would break the import order. */
+function isAttributeDescriptor(value: PyValue): boolean {
+  return (value as { owner?: unknown }).owner instanceof PyClass;
 }
