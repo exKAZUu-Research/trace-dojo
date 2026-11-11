@@ -4,10 +4,11 @@ import { MappingNamespace } from '../classes';
 import { pyRepr, pyStr } from '../conversions';
 import { builtin, method } from '../define';
 import { Frame } from '../frame';
-import { namespaceOf } from '../namespaces';
-import { getAttribute, isTruthy } from '../objects';
+import { namespaceDict, namespaceOf } from '../namespaces';
+import { callValue, getAttribute, getAttributeOrUndefined, isTruthy } from '../objects';
 import { parseDynamicCode } from '../parse';
 import { currentRuntime } from '../runtimeContext';
+import { isAlias, typeConvert, unionClass } from '../typeHints';
 import {
   NoDefault,
   paramSpecClass,
@@ -30,7 +31,17 @@ import {
   typeName,
   valueError,
 } from '../types';
-import { type Kwargs, PyClass, PyDict, PyError, PyFunction, PyInstance, PyModule, type PyValue } from '../values';
+import {
+  type Kwargs,
+  PyClass,
+  PyDict,
+  PyError,
+  PyFunction,
+  PyInstance,
+  PyModule,
+  PyOpaque,
+  type PyValue,
+} from '../values';
 
 /** The keyword arguments each kind of type parameter takes, beside its name. */
 const KEYWORDS: Record<TypeParamKind, string[]> = {
@@ -40,7 +51,6 @@ const KEYWORDS: Record<TypeParamKind, string[]> = {
 };
 
 /** `TypeVar(name, *constraints, ...)`, `ParamSpec(name, ...)`, or `TypeVarTuple(name, ...)`. */
-// code-gauge-allow functionNcss 35 -- Checks the arguments as each constructor of typevarobject.c does.
 // code-gauge-allow functionCognitiveComplexity 20 -- Checks the arguments as each constructor of typevarobject.c does.
 function newTypeParamFromCall(kind: TypeParamKind, args: PyValue[], kwargs: Kwargs): PyValue {
   const label = kind.toLowerCase();
@@ -63,16 +73,22 @@ function newTypeParamFromCall(kind: TypeParamKind, args: PyValue[], kwargs: Kwar
   if (inferVariance && (covariant || contravariant)) {
     throw valueError('Variance cannot be specified with infer_variance.');
   }
-  const constraints = args.slice(1);
-  if (constraints.length === 1) throw typeError('A single constraint is not allowed');
-  const bound = option('bound') ?? None;
-  if (constraints.length > 0 && bound !== None) throw typeError('Constraints cannot be combined with bound=...');
+  const [constraints, bound] = constraintsAndBound(args.slice(1), option('bound') ?? None);
   const defaultValue = option('default') ?? NoDefault;
   const parts: TypeParamParts = { covariant, contravariant, inferVariance };
   if (bound !== None) parts.bound = () => bound;
   if (constraints.length > 0) parts.constraints = () => newTuple(constraints);
   if (defaultValue !== NoDefault) parts.default = () => defaultValue;
   return new PyTypeParam(kind, name, parts);
+}
+
+/** A TypeVar's constraints and bound, with strings as forward references, as typing's `_type_convert` makes them. */
+function constraintsAndBound(given: PyValue[], givenBound: PyValue): [PyValue[], PyValue] {
+  const constraints = given.map(typeConvert);
+  if (constraints.length === 1) throw typeError('A single constraint is not allowed');
+  const bound = givenBound === None ? None : typeConvert(givenBound);
+  if (constraints.length > 0 && bound !== None) throw typeError('Constraints cannot be combined with bound=...');
+  return [constraints, bound];
 }
 
 typeVarClass.construct = (_cls, args, kwargs) => newTypeParamFromCall('TypeVar', args, kwargs);
@@ -112,11 +128,28 @@ method(newTypeClass, '__ror__', 'one', 1, 1, (self, [other]) => currentRuntime()
 // get_type_hints --------------------------------------------------------------------------------------------------------
 
 /**
- * `typing.get_type_hints(obj, globalns=None, localns=None)`: the annotations of a function or module, or of a class
- * and its bases, with strings evaluated in the namespaces CPython chooses.
+ * `typing.get_type_hints(obj, globalns=None, localns=None, include_extras=False)`: the hints `typeHints` evaluates,
+ * without their `Annotated` metadata unless `include_extras` is true.
+ */
+export function getTypeHints(args: PyValue[], kwargs: Kwargs): PyValue {
+  const hints = typeHints(args, kwargs);
+  if (isTruthy(kwargs?.get('include_extras') ?? false)) return hints;
+  const strip = currentRuntime().importModule('typing').dict.get('_strip_annotations') as PyValue;
+  for (const entry of hints.store.ordered()) {
+    const value = entry.value;
+    if (isAlias(value) || (value instanceof PyOpaque && value.cls === unionClass)) {
+      hints.store.set(entry.key, callValue(strip, [value]));
+    }
+  }
+  return hints;
+}
+
+/**
+ * The annotations of a function or module, or of a class and its bases, with strings and the forward references in
+ * them evaluated in the namespaces CPython chooses.
  */
 // code-gauge-allow functionCognitiveComplexity 24 -- Transcribes typing.get_type_hints, one case per kind of object and namespace.
-export function getTypeHints(args: PyValue[], kwargs: Kwargs): PyValue {
+function typeHints(args: PyValue[], kwargs: Kwargs): PyDict {
   const [target, globalArgument, localArgument] = ['obj', 'globalns', 'localns'].map(
     (name, index) => args[index] ?? kwargs?.get(name) ?? None
   );
@@ -132,8 +165,9 @@ export function getTypeHints(args: PyValue[], kwargs: Kwargs): PyValue {
       let baseLocals: Map<string, PyValue> = localns ?? new Map(cls.dict);
       // CPython swaps them when neither is given, so that the class's names shadow the module's.
       if (!globalns && !localns) [baseGlobals, baseLocals] = [baseLocals, baseGlobals];
+      const typeParams = typeParamsOf(cls);
       for (const entry of annotations.store.ordered()) {
-        hints.store.set(entry.key, resolveHint(entry.value, baseGlobals, baseLocals));
+        hints.store.set(entry.key, resolveHint(entry.value, baseGlobals, baseLocals, typeParams));
       }
     }
     return hints;
@@ -148,7 +182,7 @@ export function getTypeHints(args: PyValue[], kwargs: Kwargs): PyValue {
   const globals = globalns ?? ownGlobals;
   if (annotations instanceof PyDict) {
     for (const entry of annotations.store.ordered()) {
-      hints.store.set(entry.key, resolveHint(entry.value, globals, localns ?? globals));
+      hints.store.set(entry.key, resolveHint(entry.value, globals, localns ?? globals, typeParamsOf(target)));
     }
   }
   runtime.allocate(hints.store.size + 1);
@@ -166,14 +200,28 @@ function moduleGlobals(name: string): Map<string, PyValue> {
 }
 
 /** A hint as `get_type_hints` gives it: a string evaluated as an expression, and None as NoneType. */
-function resolveHint(hint: PyValue, globals: Map<string, PyValue>, locals: Map<string, PyValue>): PyValue {
+function resolveHint(
+  hint: PyValue,
+  globals: Map<string, PyValue>,
+  locals: Map<string, PyValue>,
+  typeParams: PyValue
+): PyValue {
   if (hint === None) return noneClass;
-  if (typeof hint !== 'string') return hint;
-  const expression = forwardReference(hint);
-  const runtime = currentRuntime();
-  const frame = new Frame('module', locals, new Map(), globals, undefined, true, expression.scope);
-  const value = runtime.evaluator.evaluate(expression.expression, frame);
-  return value === None ? noneClass : value;
+  let value = hint;
+  if (typeof hint === 'string') {
+    const expression = forwardReference(hint);
+    const frame = new Frame('module', locals, new Map(), globals, undefined, true, expression.scope);
+    value = currentRuntime().evaluator.evaluate(expression.expression, frame);
+  }
+  if (value === None) return noneClass;
+  if (!(isAlias(value) || (value instanceof PyOpaque && value.cls === unionClass))) return value;
+  // The forward references nested in an alias, as `List['Node']`, evaluate as typing's `_eval_type` does.
+  const evalType = currentRuntime().importModule('typing').dict.get('_eval_type') as PyValue;
+  return callValue(evalType, [value, namespaceDict(globals), namespaceDict(locals), typeParams]);
+}
+
+function typeParamsOf(owner: PyValue): PyValue {
+  return getAttributeOrUndefined(owner, '__type_params__') ?? newTuple([]);
 }
 
 /** The expression a string hint holds, as `ForwardRef.__forward_code__` compiles it. */
