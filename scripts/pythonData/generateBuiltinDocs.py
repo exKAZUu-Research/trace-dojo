@@ -19,8 +19,6 @@ DESCRIPTORS = (types.BuiltinFunctionType, types.MethodDescriptorType, types.Wrap
 HEAPTYPE = 1 << 9
 
 
-# code-gauge-allow functionCognitiveComplexity 27 -- Walks the modules, their classes, and the classes' attributes in one pass.
-# code-gauge-allow functionNcss 39 -- Walks the modules, their classes, and the classes' attributes in one pass.
 def main():
     with open('src/python/moduleNames.ts', encoding='utf-8') as file:
         source = file.read()
@@ -36,40 +34,55 @@ def main():
                 module = importlib.import_module(name)
         except ImportError:
             continue
-        add(entries, name, module.__doc__, None)
-        for attribute, value in vars(module).items():
-            # The C accelerator a module's builtin function comes from, as `@module.name`.
-            if isinstance(value, types.BuiltinFunctionType) and isinstance(value.__self__, types.ModuleType):
-                if value.__module__ not in (None, name):
-                    entries.setdefault(f'@{name}.{attribute}', [value.__module__, None])
-            if isinstance(value, type):
-                classes.append((value, name))
-            elif isinstance(value, (types.BuiltinFunctionType, types.FunctionType)):
-                owner = getattr(value, '__module__', None) or name
-                # Also under the module that holds it, which may define it in this grader, as `operator` does.
-                for module_name in (owner, name):
-                    add(entries, f'{module_name}.{value.__qualname__}', value.__doc__, text_signature(value))
+        add_module(entries, classes, name, module)
+    add_classes(entries, classes + [(cls, cls.__module__) for cls in builtin_types()])
+    json.dump(entries, sys.stdout, indent=0, sort_keys=True, ensure_ascii=False)
+    print()
+
+
+def add_module(entries, classes, name, module):
+    """Adds the entries of a module and its functions, and collects its classes."""
+    add(entries, name, module.__doc__, None)
+    for attribute, value in vars(module).items():
+        # The C accelerator a module's builtin function comes from, as `@module.name`.
+        if isinstance(value, types.BuiltinFunctionType) and isinstance(value.__self__, types.ModuleType):
+            if value.__module__ not in (None, name):
+                entries.setdefault(f'@{name}.{attribute}', [value.__module__, None])
+        if isinstance(value, type):
+            classes.append((value, name))
+        elif isinstance(value, (types.BuiltinFunctionType, types.FunctionType)):
+            owner = getattr(value, '__module__', None) or name
+            # Also under the module that holds it, which may define it in this grader, as `operator` does.
+            for module_name in (owner, name):
+                add(entries, f'{module_name}.{value.__qualname__}', value.__doc__, text_signature(value))
+
+
+def add_classes(entries, pending):
+    """Adds the entries of classes, each under its module and the module holding it, and of their nested classes."""
     seen = set()
-    pending = classes + [(cls, cls.__module__) for cls in builtin_types()]
     while pending:
         cls, holder = pending.pop()
         if (cls, holder) in seen:
             continue
         seen.add((cls, holder))
         for module_name in {cls.__module__, holder}:
-            key = f'{module_name}.{cls.__qualname__}'
-            add(entries, key, cls.__dict__.get('__doc__'), getattr(cls, '__text_signature__', None))
-            if not cls.__flags__ & HEAPTYPE:
-                # The kinds of a builtin class's attributes, as `!module.qualname`, which pydoc's help shows.
-                entries.setdefault(f'!{key}', [class_layout(cls), None])
-            for attribute, value in cls.__dict__.items():
-                if isinstance(value, type):
-                    pending.append((value, value.__module__))
-                elif isinstance(value, DESCRIPTORS):
-                    function = getattr(value, '__func__', value)
-                    add(entries, f'{key}.{attribute}', getattr(function, '__doc__', None), text_signature(function))
-    json.dump(entries, sys.stdout, indent=0, sort_keys=True, ensure_ascii=False)
-    print()
+            pending.extend(add_class(entries, f'{module_name}.{cls.__qualname__}', cls))
+
+
+def add_class(entries, key, cls):
+    """Adds the entries of a class and its attributes under `key`, returning its nested classes."""
+    add(entries, key, cls.__dict__.get('__doc__'), getattr(cls, '__text_signature__', None))
+    if not cls.__flags__ & HEAPTYPE:
+        # The kinds of a builtin class's attributes, as `!module.qualname`, which pydoc's help shows.
+        entries.setdefault(f'!{key}', [class_layout(cls), None])
+    nested = []
+    for attribute, value in cls.__dict__.items():
+        if isinstance(value, type):
+            nested.append((value, value.__module__))
+        elif isinstance(value, DESCRIPTORS):
+            function = getattr(value, '__func__', value)
+            add(entries, f'{key}.{attribute}', getattr(function, '__doc__', None), text_signature(function))
+    return nested
 
 
 def class_layout(cls):

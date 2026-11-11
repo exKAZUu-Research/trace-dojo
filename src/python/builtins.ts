@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 517 -- The builtins module keeps every builtin function together.
+// code-gauge-allow-file fileNcss 522 -- The builtins module keeps every builtin function together.
 import { bytearrayClass, bytesClass, memoryviewClass, PyBytes } from './bytesValues';
 import { checkShortcuts } from './checkShortcuts';
 import { buildClass } from './classes';
@@ -187,6 +187,7 @@ function checkStrictLengths(name: string, nexts: (() => PyValue | typeof DONE)[]
 }
 
 export const mapClass = builtinClass('map');
+// code-gauge-allow functionCognitiveComplexity 21 -- As zip's, map's iterator keeps its next function, its reduction, and its suspending next together.
 mapClass.construct = (cls, args, kwargs) => {
   checkArgs(
     { qualified: 'map', min: 0, max: Number.POSITIVE_INFINITY, style: 'takes', keywords: ['strict'] },

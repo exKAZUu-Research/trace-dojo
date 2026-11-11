@@ -163,13 +163,7 @@ function recordFunctionModules(module: PyModule): void {
  * `inspect.getmodule` finds them: a module this grader has, or else one holding those functions.
  */
 function loadAccelerators(runtime: Runtime, module: PyModule): void {
-  const accelerators = new Map<string, [string, PyValue][]>();
-  for (const [key, value] of module.dict) {
-    const accelerator = value instanceof PyBuiltinFunction ? acceleratorModule(module.name, key) : undefined;
-    if (accelerator === undefined || accelerator === module.name) continue;
-    accelerators.set(accelerator, [...(accelerators.get(accelerator) ?? []), [key, value]]);
-  }
-  for (const [name, functions] of accelerators) {
+  for (const [name, functions] of acceleratedFunctions(module)) {
     if (runtime.modules.has(name)) continue;
     if (!isRegisteredModule(name)) {
       registerModule(name, () => new Map(functions));
@@ -180,6 +174,17 @@ function loadAccelerators(runtime: Runtime, module: PyModule): void {
     // The module holds only the functions of CPython's that the module importing it has.
     if (partialAccelerators.has(name)) accelerator.partialFeature = `モジュール ${name} のほかの名前`;
   }
+}
+
+/** The functions of a module that come from C accelerators, by accelerator. */
+function acceleratedFunctions(module: PyModule): Map<string, [string, PyValue][]> {
+  const accelerators = new Map<string, [string, PyValue][]>();
+  for (const [key, value] of module.dict) {
+    const accelerator = value instanceof PyBuiltinFunction ? acceleratorModule(module.name, key) : undefined;
+    if (accelerator === undefined || accelerator === module.name) continue;
+    accelerators.set(accelerator, [...(accelerators.get(accelerator) ?? []), [key, value]]);
+  }
+  return accelerators;
 }
 
 /** The accelerators whose import fails here, as for the platform modules CPython's macOS build lacks. */
