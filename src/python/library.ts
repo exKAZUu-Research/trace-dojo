@@ -86,6 +86,7 @@ import './modules/colorsys';
 import './modules/graphlib';
 import './modules/reprlib';
 import './modules/copyreg';
+import './modules/email/email';
 import './modules/this';
 import './modules/fnmatch';
 import './modules/shlex';

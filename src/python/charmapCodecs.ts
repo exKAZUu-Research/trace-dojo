@@ -1,7 +1,9 @@
 // The charmap codecs of CPython's `encodings` package, whose single-byte tables `codecs.charmap_decode` and
 // `charmap_encode` use, such as cp437, which zip archives name their files in.
 import { registerCodec, type TextCodec } from './codecs';
-import { encodePoints } from './unicodeCodecs';
+import { decodeByteMap, encodePoints } from './unicodeCodecs';
+
+const REASON = 'character maps to <undefined>';
 
 const CHARMAP_INLINE_HANDLERS = {
   encode: new Set(['ignore', 'replace', 'xmlcharrefreplace']),
@@ -9,6 +11,7 @@ const CHARMAP_INLINE_HANDLERS = {
 };
 
 /** A codec whose bytes map to the characters of `table`, the `decoding_table` of its module in `encodings`. */
+// code-gauge-allow duplicateLines 15 -- Codecs over encodePoints share the shape of their encoder.
 function charmapCodec(table: string): TextCodec {
   const encoding = new Map<number, number>();
   for (const [byte, char] of [...table].entries()) {
@@ -21,28 +24,15 @@ function charmapCodec(table: string): TextCodec {
       encodePoints(
         points,
         errors,
-        'character maps to <undefined>',
+        REASON,
         (point, out) => {
           const byte = encoding.get(point);
           return byte !== undefined && out.push(byte) > 0;
         },
         { groupErrors: true }
       ),
-    decode: (data, errors) => {
-      let text = '';
-      for (let index = 0; index < data.length;) {
-        const char = table[data[index]];
-        if (char !== '\uFFFE') {
-          text += char;
-          index++;
-          continue;
-        }
-        const { text: replacement, resume } = errors.decodeError(index, index + 1, 'character maps to <undefined>');
-        text += replacement;
-        index = resume;
-      }
-      return text;
-    },
+    decode: (data, errors) =>
+      decodeByteMap(data, errors, REASON, (byte) => (table[byte] === '\uFFFE' ? undefined : table[byte])),
   };
 }
 

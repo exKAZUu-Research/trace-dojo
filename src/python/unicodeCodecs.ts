@@ -63,23 +63,32 @@ function singleByteCodec(name: string, limit: number): TextCodec {
       encodePoints(points, errors, reason, (point, out) => point < limit && out.push(point) > 0, {
         groupErrors: true,
       }),
-    decode: (data, errors) => {
-      let text = '';
-      let index = 0;
-      while (index < data.length) {
-        const byte = data[index];
-        if (byte < limit) {
-          text += String.fromCodePoint(byte);
-          index++;
-          continue;
-        }
-        const { text: replacement, resume } = errors.decodeError(index, index + 1, reason);
-        text += replacement;
-        index = resume;
-      }
-      return text;
-    },
+    decode: (data, errors) =>
+      decodeByteMap(data, errors, reason, (byte) => (byte < limit ? String.fromCodePoint(byte) : undefined)),
   };
+}
+
+/** Decodes each byte to the character `charOf` maps it to, giving the bytes it maps to none to the error handler. */
+export function decodeByteMap(
+  data: Uint8Array,
+  errors: ErrorHandling,
+  reason: string,
+  charOf: (byte: number) => string | undefined
+): string {
+  let text = '';
+  let index = 0;
+  while (index < data.length) {
+    const char = charOf(data[index]);
+    if (char !== undefined) {
+      text += char;
+      index++;
+      continue;
+    }
+    const { text: replacement, resume } = errors.decodeError(index, index + 1, reason);
+    text += replacement;
+    index = resume;
+  }
+  return text;
 }
 
 registerCodec('ascii', () => singleByteCodec('ascii', 0x80));

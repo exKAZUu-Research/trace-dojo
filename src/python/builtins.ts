@@ -1,5 +1,5 @@
-// code-gauge-allow-file fileNcss 416 -- The builtins module keeps every builtin function together.
-import { bytearrayClass, bytesClass, memoryviewClass } from './bytesValues';
+// code-gauge-allow-file fileNcss 420 -- The builtins module keeps every builtin function together.
+import { bytearrayClass, bytesClass, memoryviewClass, PyBytes } from './bytesValues';
 import { complexAbs } from './complexNumbers';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
 import { aiter, anext } from './coroutines';
@@ -457,6 +457,10 @@ function chr([value]: PyValue[]): PyValue {
 
 function ord([argument]: PyValue[]): PyValue {
   const value = unbox(argument);
+  if (argument instanceof PyBytes) {
+    if (argument.length === 1) return BigInt(argument.data[0]);
+    throw typeError(`ord() expected a character, but string of length ${argument.length} found`);
+  }
   if (typeof value !== 'string') throw typeError(`ord() expected string of length 1, but ${typeName(value)} found`);
   const length = strLength(value);
   if (length !== 1) throw typeError(`ord() expected a character, but string of length ${length} found`);

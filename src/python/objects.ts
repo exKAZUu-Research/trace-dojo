@@ -203,7 +203,7 @@ function findAttribute(value: PyValue, name: string): PyValue | undefined {
   const special = specialAttribute(value, name);
   if (special !== undefined) return special;
   const attribute = cls.lookup(name);
-  if (attribute === undefined) return ownDict(value)?.get(name);
+  if (attribute === undefined) return ownDict(value)?.get(name) ?? typeDocOf(cls, name);
   if (attribute instanceof PyDescriptor && attribute.cls === propertyClass) return bindValue(attribute, value, cls);
   if (isMember(attribute)) return readMember(attribute, value as PyObject);
   const getter = descriptorGetter(attribute);
@@ -212,6 +212,11 @@ function findAttribute(value: PyValue, name: string): PyValue | undefined {
   if (own !== undefined) return own;
   if (getter !== undefined) return callGetter(getter, attribute, value, cls);
   return bindValue(attribute, value, cls);
+}
+
+/** `obj.__doc__` of an instance of a builtin class, which is the class's own doc. */
+function typeDocOf(cls: PyClass, name: string): PyValue | undefined {
+  return name === '__doc__' && cls.isBuiltin ? classAttribute(cls, name) : undefined;
 }
 
 function moduleAttribute(module: PyModule, name: string): PyValue | undefined {
