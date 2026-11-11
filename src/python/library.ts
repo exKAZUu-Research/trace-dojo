@@ -14,6 +14,7 @@ import './memoryview';
 import './builtinAttributes';
 import './unicodeErrors';
 import './unicodeCodecs';
+import './charmapCodecs';
 import './rawUnicodeEscape';
 import './unicodeEscape';
 import './japaneseCodecs';
