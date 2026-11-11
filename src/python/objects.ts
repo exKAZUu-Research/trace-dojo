@@ -90,7 +90,7 @@ export function callSpecial(value: PyValue, name: string, args: PyValue[]): PyVa
 }
 
 /** Binds a class attribute to an instance, as a descriptor's `__get__` would. */
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of descriptor binding.
+// code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of descriptor binding.
 export function bindValue(attribute: PyValue, instance: PyValue, owner: PyClass = classOf(instance)): PyValue {
   if (attribute instanceof PyFunction) return new PyBoundMethod(methodClass, instance, attribute);
   if (attribute instanceof PyBuiltinFunction && attribute.self === undefined) {
@@ -162,6 +162,8 @@ export function getAttributeOrUndefined(value: PyValue, name: string): PyValue |
   }
 }
 
+// code-gauge-allow functionNcss 35 -- Follows the order CPython looks up an attribute in.
+// code-gauge-allow functionCognitiveComplexity 21 -- Follows the order CPython looks up an attribute in.
 function findAttribute(value: PyValue, name: string): PyValue | undefined {
   if (value instanceof PyClass) return classAttribute(value, name);
   if (value instanceof PyModule) {

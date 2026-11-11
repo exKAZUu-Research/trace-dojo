@@ -37,6 +37,7 @@ import {
 export const BUILTIN_DOC = '組み込みの関数・型・モジュールの説明文（__doc__）';
 
 /** Reads an attribute of a class: its own data, then the attributes of its MRO, bound as a class reads them. */
+// code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of class attribute and descriptor CPython binds.
 export function classAttribute(cls: PyClass, name: string): PyValue | undefined {
   const own = typeData(cls, name);
   if (own !== undefined) return own;
@@ -107,7 +108,6 @@ function typeData(cls: PyClass, name: string): PyValue | undefined {
 }
 
 /** The attributes builtin objects have of their own, outside any class dictionary. */
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of builtin object with attributes of its own.
 export function specialAttribute(value: PyValue, name: string): PyValue | undefined {
   if (name === '__class__') return classOf(value);
   if (typeof value !== 'object') return undefined;
@@ -138,7 +138,7 @@ function instanceAttribute(instance: PyInstance, name: string): PyValue | undefi
   return undefined;
 }
 
-// code-gauge-allow functionNcss 32 -- Follows the rules of attribute assignment for each kind of object.
+// code-gauge-allow functionNcss 33 -- Follows the rules of attribute assignment for each kind of object.
 // code-gauge-allow functionCognitiveComplexity 21 -- Follows the rules of attribute assignment for each kind of object.
 export function setAttribute(target: PyValue, name: string, value: PyValue): void {
   currentRuntime().spend();
@@ -184,8 +184,6 @@ export function setAttribute(target: PyValue, name: string, value: PyValue): voi
 }
 
 /** Stores an instance attribute, honoring properties and the special attributes of exceptions. */
-// code-gauge-allow functionNcss 36 -- Follows the order CPython checks data descriptors, slots, and the instance dictionary in.
-// code-gauge-allow functionCognitiveComplexity 23 -- Follows the order CPython checks data descriptors, slots, and the instance dictionary in.
 export function setInstanceAttribute(target: PyInstance, name: string, value: PyValue): void {
   const cls = target.cls;
   const attribute = cls.lookup(name);

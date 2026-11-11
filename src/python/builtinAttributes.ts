@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 451 -- The methods and attributes of the builtin types it defines belong together.
 import type { BinaryOperator } from './ast';
 import { BUILTIN_DOC } from './attributes';
 import { enumerateClass, isSubclassOfClass } from './builtins';
@@ -108,6 +109,7 @@ const isReal = (value: PyValue): boolean => isInt(value) || typeof value === 'nu
 const isComplexOperand = (value: PyValue): boolean => isReal(value) || value instanceof PyComplex;
 
 /** Defines a numeric type's binary dunders, which give NotImplemented for operands the type does not handle. */
+// code-gauge-allow functionCognitiveComplexity 22 -- Defines each dunder of a numeric type, which differ only in their operator.
 function defineNumberDunders(
   cls: PyClass,
   accepts: (value: PyValue) => boolean,

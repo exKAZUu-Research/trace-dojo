@@ -236,7 +236,7 @@ class Decoder {
     return this.hooks.parseFloat === floatClass ? Number(match[0]) : callValue(this.hooks.parseFloat, [match[0]]);
   }
 
-  // code-gauge-allow functionNcss 31 -- Follows the JSON object grammar and its error messages.
+  // code-gauge-allow duplicateLines 24 -- The JSON object grammar mirrors the array grammar, as CPython's scanner does.
   object(): PyValue {
     this.index++;
     const pairs: [string, PyValue][] = [];
@@ -277,6 +277,7 @@ class Decoder {
     return this.hooks.objectHook === None ? dict : callValue(this.hooks.objectHook, [dict]);
   }
 
+  // code-gauge-allow duplicateLines 23 -- The JSON array grammar mirrors the object grammar, as CPython's scanner does.
   array(): PyValue {
     this.index++;
     const items: PyValue[] = [];
@@ -302,7 +303,7 @@ class Decoder {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Follows JSON string escapes.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Follows JSON string escapes.
   string(): string {
     const start = this.index;
     this.index++;

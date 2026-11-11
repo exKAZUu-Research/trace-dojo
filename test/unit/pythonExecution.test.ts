@@ -109,3 +109,85 @@ test.each([
   expect(executeProgram('python', source)).toMatchObject(expected);
   expect(performance.now() - startedAt).toBeLessThan(5000);
 });
+
+// CPython 3.14.10 gives these values; the library code written in Python (dataclasses, functools, collections, json)
+// and the natives under it must keep giving them.
+test('the standard library gives what CPython gives', () => {
+  const program = `import functools, json, random, typing
+from collections import ChainMap, Counter, UserDict
+from dataclasses import dataclass, field, replace
+@dataclass(frozen=True)
+class P:
+    x: int
+    tags: list = field(default_factory=list, compare=False, hash=False)
+@dataclass(unsafe_hash=True, order=True)
+class Q:
+    a: int
+    b: str = 'z'
+class D(UserDict):
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value * 2)
+@functools.singledispatch
+def kind(x):
+    return 'object'
+@kind.register
+def _(x: int):
+    return 'int'
+class Enc(json.JSONEncoder):
+    def default(self, o):
+        return sorted(o)
+r = random.Random(7)
+try:
+    P(1).x = 2
+except AttributeError as e:
+    frozen = type(e).__name__ + ': ' + str(e)
+try:
+    Q()
+except TypeError as e:
+    missing = str(e)
+actual = [hash(P(1)) == hash((1,)), {P(1), P(1, [2])} == {P(1)}, hash(Q(1)) == hash((1, 'z')), Q(1) < Q(2), frozen, missing,
+          repr(replace(Q(1), b='y')), P.__doc__, str(D(a=1)), repr(ChainMap({'a': 1}, {'a': 2, 'b': 3})['b']),
+          repr(+Counter(a=2, b=-1)), kind(True), kind('x'), json.dumps({'s': {3, 1}}, cls=Enc),
+          repr(json.loads('[1.5]', parse_float=str)), repr(typing.get_args(typing.Callable[[int], str])),
+          repr(typing.get_origin(typing.List[int])), repr(r.triangular(1, 5, 2)), repr(r.binomialvariate(20, 0.3)),
+          'ǅ'.swapcase(), 'ǆa ΣΑΣ'.title(), 'ΑΣ'.lower()]
+expected = [True, True, True, True, "FrozenInstanceError: cannot assign to field 'x'",
+            "Q.__init__() missing 1 required positional argument: 'a'", "Q(a=1, b='y')", 'P(x: int, tags: list = <factory>)',
+            "{'a': 2}", '3', "Counter({'a': 2})", 'int', 'object', '{"s": [1, 3]}', "['1.5']",
+            "([<class 'int'>], <class 'str'>)", "<class 'list'>", '2.151490420939039', '4',
+            'ǅ', 'ǅa Σας', 'ας']
+for a, e in zip(actual, expected):
+    if a != e:
+        raise ValueError(repr(a) + ' != ' + repr(e))`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test.each([
+  ['a list in a set display', '{[]}', "TypeError: cannot use 'list' as a set element (unhashable type: 'list')"],
+  ['a list looked up in a dict', '{}.get([])', "TypeError: cannot use 'list' as a dict key (unhashable type: 'list')"],
+  ['a list in a set', '[] in set()', "TypeError: cannot use 'list' as a set element (unhashable type: 'list')"],
+  ['hash() of a list', 'hash([])', "TypeError: unhashable type: 'list'"],
+  ['a Counter of lists', 'import collections\ncollections.Counter([[]])', "TypeError: unhashable type: 'list'"],
+  [
+    'the traceback of a raised exception',
+    'try:\n    1 / 0\nexcept Exception as e:\n    e.__traceback__',
+    '例外のトレースバック（__traceback__）は、この採点環境では使えません。',
+  ],
+  [
+    'math.gamma, which CPython takes from the C library',
+    'import math\nmath.gamma(1.5)',
+    'math.gamma()（C ライブラリの tgamma と最後の桁まで同じ値を出せないため）は、この採点環境では使えません。',
+  ],
+])('%s ends as in CPython', (_, source, uncaughtException) => {
+  expect(executeProgram('python', source)).toMatchObject({ kind: 'executed', uncaughtException });
+});
+
+test('dir() of builtin objects lists their attributes', () => {
+  const program = `names = [('real', dir(1)), ('start', dir(range(1))), ('__name__', dir(len)), ('indices', dir(slice(1))), ('__closure__', dir(lambda: 0)), ('fget', dir(property())), ('mapping', dir({}.keys()))]
+for name, listed in names:
+    if name not in listed:
+        raise ValueError(name)
+if dir(1) != sorted(dir(int)) or '__dict__' in dir(object()):
+    raise ValueError('dir')`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});

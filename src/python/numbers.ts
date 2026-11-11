@@ -64,7 +64,7 @@ export function intToString(value: bigint): string {
 }
 
 /** Parses a string as `int(text, base)` does, returning undefined when it is not a valid literal. */
-// code-gauge-allow functionNcss 36 -- Follows the grammar of int() literals.
+// code-gauge-allow functionNcss 37 -- Follows the grammar of int() literals.
 // code-gauge-allow functionCognitiveComplexity 22 -- Follows the grammar of int() literals.
 export function parseIntText(text: string, base: number): bigint | undefined {
   let body = text.trim().replaceAll(/^[\s]+|[\s]+$/gu, '');

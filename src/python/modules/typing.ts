@@ -265,6 +265,7 @@ function getOrigin(tp: PyValue): PyValue {
  * `typing.get_type_hints`: the annotations of a class (with its bases') or of a function or module, with None as
  * NoneType and forward references resolved by name.
  */
+// code-gauge-allow functionCognitiveComplexity 27 -- Follows typing.get_type_hints for classes, functions, and modules.
 function getTypeHints(args: PyValue[], kwargs: Kwargs): PyValue {
   const [obj] = args;
   const includeExtras = isTruthy(kwargs?.get('include_extras') ?? args[3] ?? false);

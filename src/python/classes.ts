@@ -203,7 +203,8 @@ function checkLayout(bases: PyClass[]): void {
 }
 
 /** Calls a class: creates an instance and runs its `__init__`. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Follows how calling a class creates and initializes an instance.
+// code-gauge-allow functionCognitiveComplexity 21 -- Follows how calling a class creates and initializes an instance.
+// code-gauge-allow functionNcss 31 -- Follows how calling a class creates and initializes an instance.
 export function instantiate(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyValue {
   const runtime = currentRuntime();
   if (cls === typeClass && args.length === 1 && !kwargs) return classOf(args[0]);

@@ -90,7 +90,6 @@ function pyMod(a: number, b: number): number {
   return remainder < 0 !== b < 0 ? remainder + b : remainder;
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Follows random.gammavariate's three methods for alpha.
 export function gammavariate(source: RandomSource, alpha: number, beta: number): number {
   if (alpha <= 0 || beta <= 0) throw valueError('gammavariate: alpha and beta must be > 0.0');
   if (alpha > 1) {
@@ -144,7 +143,6 @@ export function weibullvariate(source: RandomSource, alpha: number, beta: number
 }
 
 /** `random.binomialvariate(n, p)`, whose BTRS method needs the C library's lgamma, which this grader lacks. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Follows random.binomialvariate's special cases and methods.
 export function binomialvariate(source: RandomSource, nValue: PyValue, pValue: PyValue): bigint {
   const n = toIndex(nValue);
   const p = realArgument(pValue);

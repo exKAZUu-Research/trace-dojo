@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 574 -- The statement evaluator keeps one method per kind of statement together.
+// code-gauge-allow-file fileNcss 581 -- The statement evaluator keeps one method per kind of statement together.
 import type { ExceptHandler, Expression, MatchCase, Pattern, Statement, Target } from './ast';
 import { createClass } from './classes';
 import { pyRepr } from './conversions';
@@ -84,8 +84,8 @@ export class Evaluator extends ExpressionEvaluator {
     return undefined;
   }
 
-  // code-gauge-allow functionNcss 57 -- One case per kind of simple statement.
-  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of simple statement.
+  // code-gauge-allow functionNcss 60 -- One case per kind of simple statement.
+  // code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of simple statement.
   private simpleStatement(statement: Statement, frame: Frame): Completion {
     const { runtime } = this;
     runtime.spend();

@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 414 -- The methods and attributes of the builtin types it defines belong together.
 import { isSubclassOfClass } from './builtins';
 import { pyRepr } from './conversions';
 import { method } from './define';
@@ -181,6 +182,7 @@ function typeConvert(value: PyValue): PyValue {
 }
 
 /** `typing._type_check`, which rejects special forms and tuples that cannot be arguments. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Follows typing._type_check's rules for special forms.
 function typeCheck(value: PyValue, message: string, allowSpecialForms = false, isArgument = true): PyValue {
   const arg = typeConvert(value);
   if (arg instanceof PyOpaque && arg.cls === typingAliasClass) {

@@ -187,6 +187,8 @@ function isSequence(value: PyValue): boolean {
   return !(value instanceof PySet || value instanceof PyDict) && typeof value === 'object';
 }
 
+// code-gauge-allow functionNcss 33 -- Follows random.sample with and without counts.
+// code-gauge-allow functionCognitiveComplexity 16 -- Follows random.sample with and without counts.
 function sample(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs): PyValue {
   const population = argument(args, kwargs, 0, 'population') as PyValue;
   const kValue = argument(args, kwargs, 1, 'k');

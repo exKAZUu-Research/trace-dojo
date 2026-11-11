@@ -119,6 +119,25 @@ c.add()`;
   expect(trace.traceItems.at(-1)?.vars).toEqual({ 'Counter.count': 1 });
 });
 
+test('standard library code written in Python records no steps, and the code it calls back is called from the program line', () => {
+  const program = `from dataclasses import dataclass
+import heapq
+@dataclass
+class P:
+    x: int
+    def __post_init__(self):
+        self.x += 1
+p = P(1)
+merged = list(heapq.merge([1], [2], key=lambda v: -v))`;
+  const trace = traceProgram('python', program, program);
+  expect(trace.traceItems.map(({ line, callLines }) => [line, callLines])).toEqual([
+    [0, []],
+    [7, [8]],
+    [9, []],
+  ]);
+  expect(trace.traceItems.at(-1)?.vars).toMatchObject({ merged: [2, 1] });
+});
+
 test('display programs lose their annotations', () => {
   const program = 'def move(t):  # atomic\n    t.forward()\nt = Turtle()\nmove(t)';
   const trace = traceProgram('python', program, program);

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 503 -- The operator implementations of the builtin types belong together.
+// code-gauge-allow-file fileNcss 513 -- The operator implementations of the builtin types belong together.
 import type { BinaryOperator, CompareOperator } from './ast';
 import { complexBinary, isComplexOperand, newComplex } from './complexNumbers';
 import { asFloat, divmodFloat, floorDivInt, intToFloat, modInt, trueDivideInt } from './numbers';
@@ -164,7 +164,7 @@ export function nativeBinaryOperation(operator: BinaryOperator, left: PyValue, r
   return nativeBinary(operator, left, right);
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- One case per builtin type that defines binary operators.
+// code-gauge-allow functionCognitiveComplexity 19 -- One case per builtin type that defines binary operators.
 function nativeBinary(operator: BinaryOperator, left: PyValue, right: PyValue): PyValue {
   if (isNumeric(left) && isNumeric(right)) return numericBinary(operator, left, right);
   if (isComplexOperand(left) && isComplexOperand(right) && (left instanceof PyComplex || right instanceof PyComplex)) {
@@ -528,6 +528,13 @@ function nativeEquals(left: PyValue, right: PyValue): boolean | undefined {
   }
   if (typeof left === 'string' || typeof right === 'string' || isNumeric(left) || isNumeric(right)) return false;
   if (left instanceof PyRange && right instanceof PyRange) return rangesEqual(left, right);
+  if (isSequence(left) && isSequence(right)) return sameSequenceKind(left, right) ? undefined : false;
+  if (left instanceof PySet && right instanceof PySet) return undefined;
+  return mappingEquals(left, right);
+}
+
+/** Equality of dicts, dict views, and the opaque builtins, the remaining cases of nativeEquals. */
+function mappingEquals(left: PyValue, right: PyValue): boolean | undefined {
   if (left instanceof PyDict && right instanceof PyDict) {
     // A Counter compares with its own __eq__, which counts a missing element as zero.
     if (hasOwnEquality(left) || hasOwnEquality(right)) return undefined;
@@ -536,8 +543,6 @@ function nativeEquals(left: PyValue, right: PyValue): boolean | undefined {
   if (left instanceof PyDictView && right instanceof PyDictView) {
     return left.view !== 'values' && left.view === right.view && dictsEqual(left.dict, right.dict);
   }
-  if (isSequence(left) && isSequence(right)) return sameSequenceKind(left, right) ? undefined : false;
-  if (left instanceof PySet && right instanceof PySet) return undefined;
   if (left instanceof PyDictView && left.view === 'keys' && right instanceof PySet) {
     return compareSets('==', newSet(iterateAll(left)), right);
   }

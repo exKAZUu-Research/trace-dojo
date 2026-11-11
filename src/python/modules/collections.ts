@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 501 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { defineGetSet } from '../descriptors';
@@ -286,6 +287,7 @@ counterClass.construct = (cls, args, kwargs) => {
   return counter;
 };
 
+// code-gauge-allow functionCognitiveComplexity 19 -- Follows how Counter counts a mapping, an iterable, and keyword arguments.
 function countInto(counter: PyDict, source: PyValue | undefined, kwargs: Kwargs, sign: bigint): void {
   const add = (key: PyValue, amount: PyValue, hash?: bigint): void => {
     const current = counter.store.lookup(key, hash)?.value ?? 0n;
@@ -635,7 +637,7 @@ method(orderedDictClass, '__eq__', 'one', 1, 1, (self, [other]) => {
 
 // namedtuple --------------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionNcss 31 -- Follows collections.namedtuple's argument handling.
+// code-gauge-allow functionNcss 36 -- Follows collections.namedtuple's argument handling.
 function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
   checkArgs(
     {
