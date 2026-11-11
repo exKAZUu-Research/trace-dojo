@@ -1,7 +1,7 @@
 import { PyBytes, PyMemoryView } from './bytesValues';
 import { callSpecial, lookupSpecial } from './objects';
-import { classOf, None, typeError, typeName } from './types';
-import { PyComplex, PyInstance, PyObject, PySet, PyTuple, type PyValue } from './values';
+import { isNativeMethod, None, typeError, typeName } from './types';
+import { type PyObject,PyComplex,PyInstance,PySet,PyTuple,type PyValue } from './values';
 
 const MASK64 = (1n << 64n) - 1n;
 const MODULUS = (1n << 61n) - 1n;
@@ -161,7 +161,7 @@ function builtinHash(value: PyObject): bigint {
 
 /** Whether a class's `__hash__` is the builtin one that hashes by identity or by value natively. */
 function isDefaultHash(special: PyValue): boolean {
-  return special instanceof PyObject && classOf(special).name === 'method_descriptor';
+  return isNativeMethod(special);
 }
 
 export function identityHash(value: PyObject): bigint {

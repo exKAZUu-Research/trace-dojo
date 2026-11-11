@@ -1,5 +1,4 @@
 // code-gauge-allow-file fileNcss 413 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
-import { AttributeStore } from './attributeStore';
 import { solidBase } from './classes';
 import {
   callGetter,
@@ -9,14 +8,16 @@ import {
   noteGetattributeAssigned,
   ownDict,
 } from './descriptors';
-import { namespaceDict } from './namespaces';
+import { namespaceDict, namespaceOf } from './namespaces';
 import { attributeError, bindValue, callValue, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { deleteMember, instancesHaveDict, isMember, writeMember } from './slots';
 import {
+  builtinFunctionClass,
   classmethodClass,
   classOf,
-  dictClass,
+  descriptorOwners,
+  isNativeMethod,
   newDict,
   newTuple,
   None,
@@ -159,7 +160,7 @@ function wrappedFunction(descriptor: PyDescriptor, name: string): PyValue | unde
 /** The `__dict__` of an object, or undefined for one whose class gives its instances none. */
 function dictAttribute(value: PyObject): PyValue | undefined {
   const dict = ownDict(value);
-  return dict === undefined ? undefined : new PyDict(dictClass, new AttributeStore(dict));
+  return dict === undefined ? undefined : namespaceDict(dict);
 }
 
 function integerAttribute(integer: bigint, name: string): PyValue | undefined {
@@ -187,9 +188,22 @@ function boundMethodAttribute(method: PyBoundMethod, name: string): PyValue | un
 function builtinFunctionAttribute(fn: PyBuiltinFunction, name: string): PyValue | undefined {
   if (name === '__name__') return fn.name;
   if (name === '__qualname__') return fn.qualifiedName;
-  if (name === '__self__') return fn.self ?? None;
+  if (name === '__self__') {
+    // A static method such as `str.maketrans` shows its type in its repr but has no `__self__`, unlike `__new__`.
+    if (fn.binding === 'static' && fn.name !== '__new__') return None;
+    return fn.self ?? (fn.cls === builtinFunctionClass ? moduleOf(fn) : undefined);
+  }
+  if (name === '__objclass__') return descriptorOwners.get(fn);
   if (name === '__doc__') return None;
   return undefined;
+}
+
+/** The module a builtin function without a bound object belongs to, which its `__self__` gives. */
+function moduleOf(fn: PyBuiltinFunction): PyValue {
+  const runtime = currentRuntime();
+  if (runtime.builtins.get(fn.name) === fn) return runtime.importModule('builtins');
+  for (const module of runtime.modules.values()) if (module.dict.get(fn.name) === fn) return module;
+  return None;
 }
 
 /** The prefix of the attributes of each kind of generator object, such as `cr_running` of a coroutine. */
@@ -238,7 +252,7 @@ function functionAttribute(fn: PyFunction, name: string): PyValue | undefined {
       return currentRuntime().evaluator.annotationsOf(fn);
     }
     case '__dict__': {
-      return new PyDict(dictClass, new AttributeStore(fn.dict));
+      return namespaceDict(fn.dict);
     }
     default: {
       return undefined;
@@ -356,7 +370,7 @@ function readOnlyError(target: PyValue, name: string): Error {
 function userHook(target: PyObject, name: string): PyValue | undefined {
   const custom = lookupSpecial(target, name);
   // Builtin classes implement these hooks natively, except for those whose slot is not a method descriptor.
-  return custom instanceof PyBuiltinFunction && classOf(custom).name === 'method_descriptor' ? undefined : custom;
+  return isNativeMethod(custom) ? undefined : custom;
 }
 
 function setClassAttribute(target: PyClass, name: string, value: PyValue): void {
@@ -435,6 +449,10 @@ export function setInstanceAttribute(target: PyObject, name: string, value: PyVa
     setClassOf(target, value);
     return;
   }
+  if (name === '__dict__' && ownDict(target) !== undefined) {
+    replaceDict(target, value);
+    return;
+  }
   const attribute = target.cls.lookup(name);
   if (attribute instanceof PyDescriptor && attribute.cls === propertyClass) {
     setProperty(attribute, target, name, value);
@@ -452,6 +470,16 @@ export function setInstanceAttribute(target: PyObject, name: string, value: PyVa
   const dict = ownDict(target);
   if (dict === undefined) throw noDictError(target, name, attribute);
   dict.set(name, value);
+}
+
+/** Assigns `__dict__`, which makes the dict itself hold the object's attributes from then on. */
+function replaceDict(target: PyObject, value: PyValue): void {
+  if (!(value instanceof PyDict)) {
+    throw typeError(`__dict__ must be set to a dictionary, not a '${typeName(value)}'`);
+  }
+  const namespace = namespaceOf(value);
+  if (target instanceof PyInstance) target.dict = namespace;
+  else target.instanceDict = namespace;
 }
 
 /** Stores an attribute of a PyInstance once no descriptor took it, checking what its builtin class allows. */

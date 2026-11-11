@@ -62,6 +62,12 @@ export const functionClass = builtinClass('function');
 export const methodClass = builtinClass('method');
 export const builtinFunctionClass = builtinClass('builtin_function_or_method');
 export const methodDescriptorClass = builtinClass('method_descriptor');
+/** The class of a builtin type's special method that fills one of CPython's type slots, such as `int.__add__`. */
+export const wrapperDescriptorClass = builtinClass('wrapper_descriptor');
+/** The class of a slot's special method bound to an object, such as `(1).__add__`. */
+export const methodWrapperClass = builtinClass('method-wrapper');
+/** The class of a builtin type's class method as its dictionary holds it, such as `dict.fromkeys`. */
+export const classmethodDescriptorClass = builtinClass('classmethod_descriptor');
 export const moduleClass = builtinClass('module');
 export const generatorClass = builtinClass('generator');
 export const coroutineClass = builtinClass('coroutine');
@@ -289,6 +295,31 @@ export function newSet(items: Iterable<PyValue> = [], frozen = false): PySet {
   return set;
 }
 
+/** The class that defines each builtin method descriptor, whose name its repr shows. */
+export const descriptorOwners = new WeakMap<PyBuiltinFunction, PyClass>();
+
+/** The special methods that fill CPython's type slots, which `wrapper_descriptor` objects stand for. */
+const SLOT_NAMES = new Set(
+  [
+    'repr str hash call getattribute getattr setattr delattr init del lt le eq ne gt ge iter next get set delete',
+    'len contains getitem setitem delitem await aiter anext buffer release_buffer bool int float index',
+    'neg pos abs invert add sub mul matmul truediv floordiv mod divmod pow lshift rshift and or xor',
+    'radd rsub rmul rmatmul rtruediv rfloordiv rmod rdivmod rpow rlshift rrshift rand ror rxor',
+    'iadd isub imul imatmul itruediv ifloordiv imod ipow ilshift irshift iand ior ixor',
+  ]
+    .join(' ')
+    .split(' ')
+    .map((name) => `__${name}__`)
+);
+
+/** The special methods that a builtin type defines as ordinary methods although they fill a slot, as METH_COEXIST does. */
+const METHOD_TABLE_SLOTS = new Map<PyClass, readonly string[]>([
+  [listClass, ['__getitem__']],
+  [dictClass, ['__contains__', '__getitem__']],
+  [setClass, ['__contains__']],
+  [frozensetClass, ['__contains__']],
+]);
+
 // Builtin functions -------------------------------------------------------------------------------------------------
 
 export function nativeFunction(name: string, run: NativeFunction, ownerName?: string): PyBuiltinFunction {
@@ -308,23 +339,42 @@ export function defineMethod(
 ): void {
   const unboxes = PRIMITIVE_CLASSES.has(cls) && binding === 'method';
   const unboxesArguments = unboxes && !RENDERING_METHODS.has(name);
-  cls.dict.set(
+  const fn = new PyBuiltinFunction(
+    descriptorClassOf(cls, name, binding),
     name,
-    new PyBuiltinFunction(
-      methodDescriptorClass,
-      name,
-      (args, kwargs) => {
-        if (args.length === 0 && binding === 'method') {
-          throw typeError(`unbound method ${cls.name}.${name}() needs an argument`);
-        }
-        if (!unboxes) return run(args[0], args.slice(1), kwargs);
-        return run(unbox(args[0]), unboxesArguments ? args.slice(1).map(unbox) : args.slice(1), kwargs);
-      },
-      undefined,
-      binding,
-      cls.name
-    )
+    (args, kwargs) => {
+      if (args.length === 0 && binding === 'method') {
+        throw typeError(`unbound method ${cls.name}.${name}() needs an argument`);
+      }
+      if (!unboxes) return run(args[0], args.slice(1), kwargs);
+      return run(unbox(args[0]), unboxesArguments ? args.slice(1).map(unbox) : args.slice(1), kwargs);
+    },
+    // A static method of a builtin type is a builtin function bound to the type, which calling passes no instance.
+    binding === 'static' ? cls : undefined,
+    binding,
+    cls.name
   );
+  descriptorOwners.set(fn, cls);
+  cls.dict.set(name, fn);
+}
+
+/**
+ * Whether a special method found on a class is a builtin type's own, which the interpreter implements natively rather
+ * than by calling it.
+ */
+export function isNativeMethod(value: PyValue | undefined): boolean {
+  if (!(value instanceof PyBuiltinFunction)) return false;
+  const { cls } = value;
+  return cls.name === 'method_descriptor' || cls === wrapperDescriptorClass || cls === classmethodDescriptorClass;
+}
+
+/** The class CPython gives a builtin method that `cls` defines under `name`. */
+export function descriptorClassOf(cls: PyClass, name: string, binding: NativeBinding): PyClass {
+  if (binding === 'static') return builtinFunctionClass;
+  if (binding === 'class') return classmethodDescriptorClass;
+  return SLOT_NAMES.has(name) && !METHOD_TABLE_SLOTS.get(cls)?.includes(name)
+    ? wrapperDescriptorClass
+    : methodDescriptorClass;
 }
 
 const PRIMITIVE_CLASSES = new Set([intClass, boolClass, floatClass, strClass]);

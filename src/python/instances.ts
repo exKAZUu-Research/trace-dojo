@@ -151,7 +151,7 @@ export function defineNew(cls: PyClass, create: Create): void {
       builtinFunctionClass,
       '__new__',
       (args, kwargs) => create(checkSubtype(cls, args), args.slice(1), kwargs),
-      undefined,
+      cls,
       'static',
       cls.name
     )

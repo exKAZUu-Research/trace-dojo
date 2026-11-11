@@ -158,7 +158,8 @@ export interface ExceptionState {
 
 /** An instance of a class written in the program, or of a builtin class with instance attributes. */
 export class PyInstance extends PyObject {
-  readonly dict = new Map<string, PyValue>();
+  /** The instance's attributes, which assigning `__dict__` replaces. */
+  dict = new Map<string, PyValue>();
   exception?: ExceptionState;
   turtle?: TurtleState;
   /** The value of an Enum member. */

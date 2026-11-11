@@ -17,6 +17,9 @@ MethodType = _builtin_types['method']
 BuiltinFunctionType = type(len)
 BuiltinMethodType = type([].append)
 MethodDescriptorType = type(str.join)
+WrapperDescriptorType = type(object.__init__)
+MethodWrapperType = type(object().__str__)
+ClassMethodDescriptorType = type(dict.__dict__['fromkeys'])
 ModuleType = type(sys)
 GeneratorType = _builtin_types['generator']
 CoroutineType = _builtin_types['coroutine']
@@ -198,9 +201,6 @@ registerUnsupportedAttributes('types', {
   DynamicClassAttribute: 'types.DynamicClassAttribute',
   GenericAlias: 'types.GenericAlias',
   UnionType: 'types.UnionType',
-  WrapperDescriptorType: 'types.WrapperDescriptorType',
-  MethodWrapperType: 'types.MethodWrapperType',
-  ClassMethodDescriptorType: 'types.ClassMethodDescriptorType',
   GetSetDescriptorType: 'types.GetSetDescriptorType',
   MemberDescriptorType: 'types.MemberDescriptorType',
   CapsuleType: 'types.CapsuleType',
