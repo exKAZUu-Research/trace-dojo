@@ -155,6 +155,9 @@ export interface ExceptionState {
   selfValue?: PyValue;
   /** The sub-exceptions of an exception group. */
   exceptions?: PyTuple;
+  /** The file names an OSError was created with, which its `args` then leave out. */
+  filename?: PyValue;
+  filename2?: PyValue;
   message?: string;
 }
 
@@ -315,7 +318,8 @@ export class PyDescriptor extends PyObject {
     readonly fn: PyValue,
     readonly setter?: PyValue,
     readonly deleter?: PyValue,
-    readonly doc?: PyValue
+    /** A property's `__doc__`, which programs may assign, as namedtuple does for its fields. */
+    public doc?: PyValue
   ) {
     super(cls);
   }

@@ -1,6 +1,7 @@
-// code-gauge-allow-file fileNcss 436 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 445 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import { solidBase } from './classes';
 import {
+  builtinClassesWithDict,
   callGetter,
   callSetter,
   descriptorGetter,
@@ -153,10 +154,17 @@ export function specialAttribute(value: PyValue, name: string): PyValue | undefi
 
 /** The function a staticmethod or classmethod wraps, as its `__func__` and `__wrapped__` give it. */
 function wrappedFunction(descriptor: PyDescriptor, name: string): PyValue | undefined {
+  if (name === '__doc__' && descriptor.cls === propertyClass) return propertyDoc(descriptor);
   if (name !== '__func__' && name !== '__wrapped__') return undefined;
   return descriptor.cls.isSubclassOf(staticmethodClass) || descriptor.cls.isSubclassOf(classmethodClass)
     ? descriptor.fn
     : undefined;
+}
+
+/** A property's `__doc__`: the one it was given or assigned, else its getter's. */
+function propertyDoc(property: PyDescriptor): PyValue {
+  if (property.doc !== undefined && property.doc !== None) return property.doc;
+  return property.fn === None ? None : (specialAttribute(property.fn, '__doc__') ?? None);
 }
 
 /** The `__dict__` of an object, or undefined for one whose class gives its instances none. */
@@ -318,16 +326,23 @@ function exceptionFieldOf(instance: PyInstance, name: string): PyValue | undefin
     if (name === 'name') return state.name ?? None;
     return state.object ?? None;
   }
-  if (is('OSError') && (name === 'errno' || name === 'strerror' || name === 'filename')) {
-    if (args.length >= 2 && name !== 'filename') return name === 'errno' ? args[0] : args[1];
-    return None;
+  return is('OSError') ? osErrorField(state, name) : undefined;
+}
+
+/** The fields an OSError derives from the arguments it was created with, as `OSError(errno, strerror, filename)`. */
+function osErrorField(state: ExceptionState, name: string): PyValue | undefined {
+  const args = state.args.items;
+  if (name === 'errno' || name === 'strerror') {
+    return args.length >= 2 && args.length <= 5 ? args[name === 'errno' ? 0 : 1] : None;
   }
+  if (name === 'filename') return state.filename ?? None;
+  if (name === 'filename2') return state.filename2 ?? None;
   return undefined;
 }
 
 export function setAttribute(target: PyValue, name: string, value: PyValue): void {
   currentRuntime().spend();
-  if (target instanceof PyInstance || isSubclassInstance(target)) {
+  if (takesInstanceAttributes(target)) {
     const custom = userHook(target as PyObject, '__setattr__');
     if (custom === undefined) setInstanceAttribute(target as PyObject, name, value);
     else callValue(bindValue(custom, target), [name, value]);
@@ -347,7 +362,20 @@ export function setAttribute(target: PyValue, name: string, value: PyValue): voi
     target.dict.set(name, value);
     return;
   }
+  if (target instanceof PyDescriptor && target.cls === propertyClass && name === '__doc__') {
+    target.doc = value;
+    return;
+  }
   throw readOnlyError(target, name);
+}
+
+/** Whether assigning an attribute of `target` follows the rules of instances, as opposed to classes or modules. */
+function takesInstanceAttributes(target: PyValue): boolean {
+  return (
+    target instanceof PyInstance ||
+    isSubclassInstance(target) ||
+    (target instanceof PyObject && builtinClassesWithDict.has(target.cls))
+  );
 }
 
 /** The AttributeError for assigning to an attribute of an object of a builtin type, which has no `__dict__`. */
@@ -382,6 +410,7 @@ function setClassAttribute(target: PyClass, name: string, value: PyValue): void 
   if (target.enumMembers?.some((member) => member.dict.get('_name_') === name)) {
     throw pyError('AttributeError', `cannot reassign member '${name}'`);
   }
+  if (name === '__module__' && typeof value === 'string') target.module = value;
   target.dict.set(name, value);
 }
 

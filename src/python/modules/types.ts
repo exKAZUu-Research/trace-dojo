@@ -26,6 +26,7 @@ AsyncGeneratorType = _builtin_types['async_generator']
 CellType = _builtin_types['cell']
 EllipsisType = type(Ellipsis)
 NoneType = type(None)
+GenericAlias = type(list[int])
 NotImplementedType = type(NotImplemented)
 
 
@@ -199,7 +200,6 @@ registerUnsupportedAttributes('types', {
   prepare_class: 'メタクラスを使う types.prepare_class()',
   get_original_bases: 'types.get_original_bases()',
   DynamicClassAttribute: 'types.DynamicClassAttribute',
-  GenericAlias: 'types.GenericAlias',
   UnionType: 'types.UnionType',
   GetSetDescriptorType: 'types.GetSetDescriptorType',
   MemberDescriptorType: 'types.MemberDescriptorType',

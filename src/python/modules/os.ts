@@ -1,4 +1,5 @@
-import { PyBytes } from '../bytesValues';
+import { newBytes, PyBytes } from '../bytesValues';
+import { decodeBytes, encodeString } from '../codecs';
 import { registerModule, registerModuleAlias } from '../modules';
 import { callValue, lookupSpecial, toArray } from '../objects';
 import { lessThan } from '../operators';
@@ -77,6 +78,8 @@ registerModule(
       ['defpath', '/bin:/usr/bin'],
       ['devnull', '/dev/null'],
       ['fspath', pathFunction('fspath', ['path'], 1, ([path]) => fspath(path as PyValue))],
+      ['fsencode', pathFunction('fsencode', ['filename'], 1, ([filename]) => fsencode(filename as PyValue))],
+      ['fsdecode', pathFunction('fsdecode', ['filename'], 1, ([filename]) => fsdecode(filename as PyValue))],
       ['path', runtime.importModule('posixpath')],
     ]),
   SYSTEM_FUNCTIONS
@@ -93,6 +96,18 @@ function fspath(value: PyValue): PyValue {
   const result = callValue(method, [value]);
   if (typeof result === 'string' || result instanceof PyBytes) return result;
   throw typeError(`expected ${typeName(value)}.__fspath__() to return str or bytes, not ${typeName(result)}`);
+}
+
+/** `os.fsencode`: a path as bytes in the file system encoding of macOS, UTF-8 with surrogateescape. */
+function fsencode(value: PyValue): PyValue {
+  const path = fspath(value);
+  return typeof path === 'string' ? newBytes(encodeString(path, 'utf8', 'surrogateescape')) : path;
+}
+
+/** `os.fsdecode`: a path as str, decoded as `os.fsencode` encodes it. */
+function fsdecode(value: PyValue): PyValue {
+  const path = fspath(value);
+  return path instanceof PyBytes ? decodeBytes(path.data, 'utf8', 'surrogateescape') : path;
 }
 
 // posixpath ---------------------------------------------------------------------------------------------------------

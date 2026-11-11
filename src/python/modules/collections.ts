@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 428 -- The collections types and the methods of each belong together.
+// code-gauge-allow-file fileNcss 430 -- The collections types and the methods of each belong together.
 import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { DictStore } from '../dictStore';
@@ -525,8 +525,8 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
   const cls = new PyClass(typename, [tupleClass], typeClass);
   cls.mro = [cls, ...tupleClass.mro];
   cls.isBuiltin = false;
-  cls.module = '__main__';
   cls.layout = { base: 'native' };
+  describeNamedTuple(cls, fields, kwargs);
   cls.construct = (tupleType, values, keywords) => newNamedTuple(tupleType, fields, defaults, values, keywords);
   cls.slotNames = new Set();
   defineNew(cls, cls.construct);
@@ -539,11 +539,24 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
       name,
       new PyDescriptor(
         propertyClass,
-        new PyBuiltinFunction(builtinClass('getter'), name, ([self]) => (self as PyTuple).items[index])
+        new PyBuiltinFunction(builtinClass('getter'), name, ([self]) => (self as PyTuple).items[index]),
+        undefined,
+        undefined,
+        `Alias for field number ${index}`
       )
     );
   }
   return cls;
+}
+
+/**
+ * Gives a namedtuple's class its docstring and its module: the `module` argument, else the module of the code creating
+ * it.
+ */
+function describeNamedTuple(cls: PyClass, fields: string[], kwargs: Kwargs): void {
+  const module = kwargs?.get('module') ?? currentRuntime().frame.globals.get('__name__');
+  cls.module = typeof module === 'string' ? module : '__main__';
+  cls.dict.set('__doc__', `${cls.name}(${fields.join(', ')})`);
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Follows how a namedtuple binds positional and keyword arguments to its fields.
@@ -653,9 +666,7 @@ export function namedTupleClass(name: string, fields: string[], defaults: PyValu
 
 /** A namedtuple class that a library module defines, such as `functools.CacheInfo`. */
 export function makeNamedTupleClass(name: string, fields: string[], module: string): PyClass {
-  const cls = namedtupleWithMethods([name, newList(fields)], undefined) as PyClass;
-  cls.module = module;
-  return cls;
+  return namedtupleWithMethods([name, newList(fields)], new Map([['module', module]])) as PyClass;
 }
 
 registerModule(
