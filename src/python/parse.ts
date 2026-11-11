@@ -5,6 +5,7 @@ import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../
 import { loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Module } from './ast';
 import { findBlockNestingError } from './blockNesting';
+import { deepNestingError, isHostStackOverflow } from './hostStack';
 import { findIndentationError } from './indentation';
 import { ProgramConverter } from './programConverter';
 
@@ -50,19 +51,62 @@ function parseModule(
 ): Module {
   const indentationError = findIndentationError(source);
   if (indentationError) throw new CompileError([indentationError]);
-  return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) => {
-    const module = new ProgramConverter(
-      source,
-      trace,
-      namesInLocals,
-      library,
-      futureFeatures,
-      allowsTopLevelAwait
-    ).convert(root);
-    const nestingError = library ? undefined : findBlockNestingError(root);
-    if (nestingError) throw new CompileError([nestingError]);
-    return { ...module, source };
-  });
+  try {
+    return parseSourceModule(source, trace, { library, namesInLocals, futureFeatures, allowsTopLevelAwait });
+  } catch (error) {
+    // CPython parses up to thousands of nested levels, which converting and checking here recurse through.
+    if (!isHostStackOverflow(error)) throw error;
+    const row = withPythonTree(source, (root) => deepestNode(root).row);
+    throw new CompileError([{ row, message: deepNestingError().message }]);
+  }
+}
+
+function parseSourceModule(
+  source: string,
+  trace: TraceOptions | undefined,
+  options: { library: boolean; namesInLocals: boolean; futureFeatures: readonly string[]; allowsTopLevelAwait: boolean }
+): Module {
+  const { library, namesInLocals, futureFeatures, allowsTopLevelAwait } = options;
+  return parseSource(
+    parser,
+    source,
+    MISSING_TOKEN_NAMES,
+    (root) => {
+      const module = new ProgramConverter(
+        source,
+        trace,
+        namesInLocals,
+        library,
+        futureFeatures,
+        allowsTopLevelAwait
+      ).convert(root);
+      const nestingError = library ? undefined : findBlockNestingError(root);
+      if (nestingError) throw new CompileError([nestingError]);
+      return { ...module, source, nestingDepth: deepestNode(root).depth };
+    },
+    // Past the deepest nesting CPython's parser and compiler accept, which a long chain such as `a.b.c...` reaches,
+    // converting would only take long before the host's stack ran out.
+    { maxNestingDepth: 24_000, tooDeepMessage: deepNestingError().message }
+  );
+}
+
+/** The depth of the deepest node of a syntax tree, and its row. */
+function deepestNode(root: Node): { depth: number; row: number } {
+  const cursor = root.walk();
+  let deepest = { depth: 0, row: 0 };
+  try {
+    for (;;) {
+      if (cursor.currentDepth > deepest.depth) {
+        deepest = { depth: cursor.currentDepth, row: cursor.startPosition.row };
+      }
+      if (cursor.gotoFirstChild()) continue;
+      while (!cursor.gotoNextSibling()) {
+        if (!cursor.gotoParent()) return deepest;
+      }
+    }
+  } finally {
+    cursor.delete();
+  }
 }
 
 /** Matches the annotation a line comment ends with, which may follow an ordinary remark. */

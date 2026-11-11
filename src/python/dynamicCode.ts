@@ -326,7 +326,11 @@ function parseSource(source: string, filename: string, features: readonly string
     return parseDynamicCode(source, features, topLevelAwait);
   } catch (error) {
     if (!(error instanceof CompileError)) throw error;
-    throw syntaxError(unshownSyntaxErrorClass, filename, reasonOf(error.diagnostics[0]));
+    const [diagnostic] = error.diagnostics;
+    // Code this grader cannot run, which CPython compiles, stops the program rather than raising SyntaxError.
+    const unsupportedFeature = /^(.*?) ?は、この採点環境では使えません。$/.exec(diagnostic.message)?.[1];
+    if (unsupportedFeature !== undefined) throw new UnsupportedFeatureError(unsupportedFeature);
+    throw syntaxError(unshownSyntaxErrorClass, filename, reasonOf(diagnostic));
   }
 }
 

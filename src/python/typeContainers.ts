@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 401 -- The list, tuple, and dict types keep their methods together.
+// code-gauge-allow-file fileNcss 409 -- The list, tuple, and dict types keep their methods together.
 import { pyRepr } from './conversions';
 import { method } from './define';
 import { DictStore } from './dictStore';
@@ -357,18 +357,26 @@ export function updateDict(dict: PyDict, source: PyValue): void {
   }
   const next = iterate(source);
   let index = 0;
-  for (let item = next(); item !== DONE; item = next(), index++) {
-    let pair: PyValue[];
-    try {
-      pair = toArray(item);
-    } catch {
-      throw typeError(`cannot convert dictionary update sequence element #${index} to a sequence`);
-    }
-    if (pair.length !== 2) {
-      throw valueError(`dictionary update sequence element #${index} has length ${pair.length}; 2 is required`);
-    }
-    dict.store.set(pair[0], pair[1]);
+  for (let item = next(); item !== DONE; item = next(), index++) addUpdatePair(dict, item, index);
+}
+
+/** Adds the item at `index` of the pairs `dict.update` reads, which must be a sequence of a key and a value. */
+export function addUpdatePair(dict: PyDict, item: PyValue, index: number): void {
+  // CPython 3.14 words a pair that is not iterable without naming its type or index.
+  if (!isIterable(item)) throw typeError('object is not iterable');
+  const pair = toArray(item);
+  if (pair.length !== 2) {
+    throw valueError(`dictionary update sequence element #${index} has length ${pair.length}; 2 is required`);
   }
+  dict.store.set(pair[0], pair[1]);
+}
+
+/** Whether `iter()` accepts a value: one with `__iter__`, or a sequence with `__getitem__`. */
+function isIterable(value: PyValue): boolean {
+  if (typeof value === 'string') return true;
+  const iter = lookupSpecial(value, '__iter__');
+  if (iter !== undefined) return iter !== None;
+  return lookupSpecial(value, '__getitem__') !== undefined;
 }
 
 method(dictClass, '__repr__', 'none', 0, 0, (self) =>

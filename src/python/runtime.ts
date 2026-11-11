@@ -12,6 +12,7 @@ import { Frame } from './frame';
 import { findReachableObjects, findReachableTurtles } from './garbageCollection';
 import { resumeGenerator } from './generators';
 import { pyHash } from './hashing';
+import { deepNestingError, isHostStackOverflow } from './hostStack';
 import { instantiate } from './instances';
 import { keyError } from './items';
 import { viewOf } from './memoryview';
@@ -82,6 +83,11 @@ export class Runtime {
   program?: ProgramSource;
   /** The scheduler of the program's threads, once it starts one or waits. */
   threads?: Scheduler;
+  /**
+   * Whether the program nests expressions or statements so deeply that evaluating them may exhaust the host's stack
+   * where CPython's does not, which then stops the program instead of raising RecursionError.
+   */
+  deepNesting = false;
   /** The globals of the standard library modules written in Python. */
   readonly libraryNamespaces = new WeakSet<Map<string, PyValue>>();
   /** Whether any library module written in Python was imported, without which no frame is a library frame. */
@@ -220,7 +226,7 @@ export class Runtime {
     try {
       return run();
     } catch (error) {
-      throw recursionErrorFor(error);
+      throw recursionErrorFor(error, this.deepNesting);
     }
   }
 
@@ -248,7 +254,7 @@ export class Runtime {
       result = this.evaluator.runFunction(fn, frame);
       return result;
     } catch (error) {
-      const raised = recursionErrorFor(error);
+      const raised = recursionErrorFor(error, this.deepNesting);
       noteUnwinding(raised);
       // The exception's traceback keeps the frame, and with it the function's variables, while a generator may close.
       const state = raised instanceof PyError ? raised.exception.exception : undefined;
@@ -555,19 +561,13 @@ export class Runtime {
 }
 
 /** The error to raise for an error thrown while running Python code, turning the host's stack overflow into Python's. */
-function recursionErrorFor(error: unknown): unknown {
-  return isHostStackOverflow(error) ? pyError('RecursionError', 'maximum recursion depth exceeded') : error;
+function recursionErrorFor(error: unknown, deepNesting: boolean): unknown {
+  if (!isHostStackOverflow(error)) return error;
+  return deepNesting ? deepNestingError() : pyError('RecursionError', 'maximum recursion depth exceeded');
 }
 
 export { Frame, PyCell };
-
-/**
- * Whether the host's stack ran out, which can happen before the call depth limit when each call nests many statements.
- * Only a type check is safe here: on an exhausted stack, even testing the message may overflow again.
- */
-export function isHostStackOverflow(error: unknown): boolean {
-  return error instanceof RangeError;
-}
+export { isHostStackOverflow } from './hostStack';
 
 /** The attributes of a function that its class reads natively. */
 const FUNCTION_ATTRIBUTES = [

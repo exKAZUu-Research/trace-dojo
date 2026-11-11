@@ -51,7 +51,9 @@ registerSourceModule(
       ]),
       [
         'signature',
-        builtin('signature', 'takes', 1, 1, ([value]) => signature(value), { keywords: ['follow_wrapped'] }),
+        builtin('signature', 'takes', 1, 1, ([value]) => signature(value), {
+          keywords: ['follow_wrapped', 'globals', 'locals', 'eval_str', 'annotation_format'],
+        }),
       ],
       ['Signature', signatureClass],
       ['Parameter', parameterClass],

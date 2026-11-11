@@ -1,16 +1,19 @@
 import { getDoc } from './modules/inspect';
 import { formatSignatureWithin, signature } from './modules/inspectSignature';
-import { callValue } from './objects';
+import { callValue, getAttribute } from './objects';
+import { PYDOC_SOURCE } from './pydocSource';
+import type { Runtime } from './runtime';
 import { currentRuntime } from './runtimeContext';
-import { classOf, None, typeError } from './types';
+import { runModuleSource } from './sourceModules';
+import { classOf, None, objectClass, typeClass, typeError } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { type Kwargs, PyBoundMethod, PyClass, PyFunction, type PyValue } from './values';
+import { type Kwargs, PyBoundMethod, PyClass, PyFunction, PyInstance, type PyValue } from './values';
 
 /**
  * `help(obj)` of a function or method written in Python, which prints what pydoc's text renderer does. The help of
  * other objects shows CPython's docstrings and pydoc's layout of classes and modules, which this grader does not have.
  */
-// code-gauge-allow functionCognitiveComplexity 16 -- Checks the arguments of pydoc's Helper and the kinds of objects it documents here.
+// code-gauge-allow functionCognitiveComplexity 19 -- Checks the arguments of pydoc's Helper and the kinds of objects it documents here.
 export function help(args: PyValue[], kwargs?: Kwargs): PyValue {
   for (const key of kwargs?.keys() ?? []) {
     if (key !== 'request') throw typeError(`Helper.__call__() got an unexpected keyword argument '${key}'`);
@@ -26,6 +29,9 @@ export function help(args: PyValue[], kwargs?: Kwargs): PyValue {
   args = all;
   const [value] = args;
   const fn = value instanceof PyBoundMethod ? value.fn : value;
+  if (value instanceof PyClass) return classHelp(value, value);
+  // pydoc documents an instance of a class through its class.
+  if (value instanceof PyInstance && !value.cls.isBuiltin) return classHelp(value.cls, value);
   if (!(fn instanceof PyFunction)) {
     throw new UnsupportedFeatureError('help() で表示する、組み込みのオブジェクトやクラスやモジュールの説明');
   }
@@ -42,6 +48,50 @@ export function help(args: PyValue[], kwargs?: Kwargs): PyValue {
   runtime.buildString(text.length);
   callValue(runtime.builtins.get('print') as PyValue, [text], new Map([['end', '']]));
   return None;
+}
+
+/**
+ * `help(cls)` of a class the program defines, rendered by CPython's own pydoc text renderer. A class that inherits from
+ * a builtin type other than object, or whose metaclass is a builtin one other than type (ABCMeta, EnumType), lists the
+ * attributes of those builtin types with CPython's docstrings and internals, which this grader does not have.
+ */
+function classHelp(cls: PyClass, value: PyValue): PyValue {
+  if (cls.isBuiltin || builtinBases(cls, objectClass) || builtinBases(cls.cls, typeClass)) {
+    throw new UnsupportedFeatureError(
+      'help() で表示する、組み込みの型やそれを継承したクラス、メタクラスを持つクラスの説明（CPython の組み込みの型の説明文）'
+    );
+  }
+  const runtime = currentRuntime();
+  const pydoc = pydocNamespace(runtime);
+  const text = callValue(pydoc.get('render_doc') as PyValue, [
+    value,
+    'Help on %s:',
+    0n,
+    pydoc.get('plaintext') as PyValue,
+  ]);
+  // CPython's pager writes the text as it is when stdout is not a terminal, and Helper then ends it with a newline.
+  const write = getAttribute(getAttribute(runtime.importModule('sys'), 'stdout'), 'write');
+  callValue(write, [text]);
+  callValue(write, ['\n']);
+  return None;
+}
+
+const pydocNamespaces = new WeakMap<Runtime, Map<string, PyValue>>();
+
+/** The namespace pydoc's text renderer runs in, created once per run and kept out of `sys.modules`. */
+function pydocNamespace(runtime: Runtime): Map<string, PyValue> {
+  let namespace = pydocNamespaces.get(runtime);
+  if (!namespace) {
+    namespace = new Map<string, PyValue>([['__name__', 'pydoc']]);
+    runModuleSource(runtime, namespace, PYDOC_SOURCE);
+    pydocNamespaces.set(runtime, namespace);
+  }
+  return namespace;
+}
+
+/** Whether a class inherits from a builtin class other than `allowed` and object. */
+function builtinBases(cls: PyClass, allowed: PyClass): boolean {
+  return cls.mro.some((base) => base.isBuiltin && base !== allowed && base !== objectClass);
 }
 
 /** `pydoc.TextDoc.docroutine`: the declaration of a function, then its docstring indented. */

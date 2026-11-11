@@ -1,6 +1,7 @@
 // The `abc` module. CPython writes ABCMeta in C (`_abc`); here it is a builtin subclass of `type` whose `__new__`
 // records `__abstractmethods__`, which `object.__new__` refuses to instantiate, and whose `__instancecheck__` and
 // `__subclasscheck__` add `__subclasshook__` and registered virtual subclasses to isinstance() and issubclass().
+import { abstractPlaceholders } from '../abstractPlaceholders';
 import { typeNewFromArguments } from '../classes';
 import { builtin, method } from '../define';
 import { defineNew } from '../instances';
@@ -8,21 +9,20 @@ import { registerModule } from '../modules';
 import { callValue, getAttributeOrUndefined, isTruthy } from '../objects';
 import type { Runtime } from '../runtime';
 import { currentRuntime } from '../runtimeContext';
+import { runModuleSource } from '../sourceModules';
 import {
   builtinClass,
-  classmethodClass,
   classOf,
   newSet,
   None,
   NotImplemented,
   objectClass,
-  propertyClass,
   pyError,
-  staticmethodClass,
   typeClass,
   typeError,
 } from '../types';
-import { type Kwargs, PyClass, PyDescriptor, PyFunction, PyInstance, type PyValue } from '../values';
+import { PyClass, PyDescriptor, PyFunction, PyInstance, type PyValue } from '../values';
+import { ABC_SOURCE } from './abcSource';
 
 export const abcMetaClass = builtinClass('ABCMeta', typeClass, true);
 abcMetaClass.module = 'abc';
@@ -33,8 +33,6 @@ abcClass.module = 'abc';
 abcClass.isBaseType = true;
 abcClass.dict.set('__abstractmethods__', newSet([], true));
 
-/** The builtin placeholders of abstract methods, such as those of `numbers`, which a subclass must override. */
-export const abstractPlaceholders = new Set<PyValue>();
 /** Descriptors the deprecated `abstractproperty` and the like made abstract. */
 const abstractDescriptors = new WeakSet<PyDescriptor>();
 
@@ -45,6 +43,8 @@ function isAbstract(value: PyValue | undefined): boolean {
   if (abstractPlaceholders.has(value)) return true;
   if (value instanceof PyDescriptor) {
     if (abstractDescriptors.has(value)) return true;
+    // A program's subclass of property, such as abc.abstractproperty, may say so itself.
+    if (!value.cls.isBuiltin) return isTruthy(getAttributeOrUndefined(value, '__isabstractmethod__') ?? false);
     return [value.fn, value.setter, value.deleter].some((fn) => fn !== undefined && fn !== None && isAbstract(fn));
   }
   if (value instanceof PyFunction) return isTruthy(value.dict.get('__isabstractmethod__') ?? false);
@@ -65,13 +65,6 @@ function updateAbstractMethods(cls: PyClass): PyClass {
 }
 
 defineNew(abcMetaClass, (meta, args, kwargs) => updateAbstractMethods(typeNewFromArguments(meta, args, kwargs)));
-
-function markAbstract(fn: PyValue): PyValue {
-  if (fn instanceof PyFunction) fn.dict.set('__isabstractmethod__', true);
-  else if (fn instanceof PyDescriptor) abstractDescriptors.add(fn);
-  else currentRuntime().setAttributeOf(fn, '__isabstractmethod__', true);
-  return fn;
-}
 
 // Virtual subclasses ------------------------------------------------------------------------------------------------
 
@@ -140,38 +133,13 @@ method(abcMetaClass, '_abc_caches_clear', 'none', 0, 0, () => None);
 
 // The module --------------------------------------------------------------------------------------------------------
 
-function wrapAbstract(kind: PyClass): (args: PyValue[], kwargs: Kwargs) => PyValue {
-  return ([fn]) => {
-    markAbstract(fn);
-    const descriptor = new PyDescriptor(kind, fn);
-    abstractDescriptors.add(descriptor);
-    return descriptor;
-  };
-}
-
-registerModule(
-  'abc',
-  () =>
-    new Map<string, PyValue>([
-      ['ABCMeta', abcMetaClass],
-      ['ABC', abcClass],
-      ['abstractmethod', builtin('abstractmethod', 'one', 1, 1, ([fn]) => markAbstract(fn))],
-      ['abstractclassmethod', builtin('abstractclassmethod', 'one', 1, 1, wrapAbstract(classmethodClass))],
-      ['abstractstaticmethod', builtin('abstractstaticmethod', 'one', 1, 1, wrapAbstract(staticmethodClass))],
-      [
-        'abstractproperty',
-        builtin('abstractproperty', 'expected', 0, 4, ([getter, setter, deleter, doc]) => {
-          const descriptor = new PyDescriptor(propertyClass, getter ?? None, setter, deleter, doc);
-          abstractDescriptors.add(descriptor);
-          return descriptor;
-        }),
-      ],
-      ['get_cache_token', builtin('get_cache_token', 'none', 0, 0, () => 0n)],
-      [
-        'update_abstractmethods',
-        builtin('update_abstractmethods', 'one', 1, 1, ([cls]) =>
-          cls instanceof PyClass && cls.cls.isSubclassOf(abcMetaClass) ? updateAbstractMethods(cls) : cls
-        ),
-      ],
-    ])
-);
+registerModule('abc', (runtime, namespace) => {
+  // The decorators and update_abstractmethods are CPython's Python code, as their reprs and attributes show.
+  runModuleSource(runtime, namespace, ABC_SOURCE);
+  return new Map<string, PyValue>([
+    ['get_cache_token', builtin('get_cache_token', 'none', 0, 0, () => 0n)],
+    ['ABCMeta', abcMetaClass],
+    ['update_abstractmethods', namespace.get('update_abstractmethods') as PyValue],
+    ['ABC', abcClass],
+  ]);
+});

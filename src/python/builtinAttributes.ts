@@ -1,3 +1,4 @@
+import { abstractPlaceholders } from './abstractPlaceholders';
 import { enumerateClass } from './builtins';
 import { method } from './define';
 import { sliceIndices } from './items';
@@ -370,6 +371,7 @@ method(propertyClass, '__delete__', 'one', 1, 1, (self, [instance]) => {
 method(propertyClass, '__set_name__', 'expected', 2, 2, () => None);
 
 function isAbstract(value: PyValue | undefined): boolean {
+  if (value !== undefined && abstractPlaceholders.has(value)) return true;
   return value instanceof PyFunction && value.dict.get('__isabstractmethod__') === true;
 }
 

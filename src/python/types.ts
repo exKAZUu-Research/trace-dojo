@@ -75,6 +75,7 @@ export const asyncGeneratorClass = builtinClass('async_generator');
 export const staticmethodClass = builtinClass('staticmethod');
 export const classmethodClass = builtinClass('classmethod');
 export const propertyClass = builtinClass('property');
+for (const cls of [staticmethodClass, classmethodClass, propertyClass]) cls.isBaseType = true;
 export const superClass = builtinClass('super');
 export const dictKeysClass = builtinClass('dict_keys');
 export const dictValuesClass = builtinClass('dict_values');

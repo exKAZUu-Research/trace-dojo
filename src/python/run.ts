@@ -4,11 +4,12 @@ import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { Module } from './ast';
 import { describeException } from './describe';
 import { recordFutureFeatures } from './dynamicCode';
+import { deepNestingError, isHostStackOverflow, SAFE_NESTING_DEPTH } from './hostStack';
 import { runExitCallbacks } from './modules/atexit';
 import { callValue } from './objects';
 import { parsePython } from './parse';
 import { programSourceOf } from './programSource';
-import { Frame, isHostStackOverflow, Runtime } from './runtime';
+import { Frame, Runtime } from './runtime';
 import { withRuntime } from './runtimeContext';
 import { DeadlockError, WaitRequest } from './threads';
 import { None } from './types';
@@ -51,6 +52,7 @@ export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Fram
     const globals = mainGlobals(runtime, module);
     recordFutureFeatures(globals, module.futureFeatures);
     if (module.source !== undefined) runtime.program = programSourceOf(module, module.source);
+    runtime.deepNesting = (module.nestingDepth ?? 0) > SAFE_NESTING_DEPTH;
     const frame = new Frame('module', globals, new Map(), globals, undefined, false, module.scope);
     runtime.pushFrame(frame);
     try {
@@ -58,7 +60,7 @@ export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Fram
       try {
         runtime.evaluator.runModule(module.body, frame);
       } catch (error) {
-        uncaughtException = describeUncaught(error);
+        uncaughtException = describeUncaught(error, runtime);
         if (error instanceof DeadlockError) runtime.threads = undefined;
       }
       // CPython waits for the threads that are no daemons before it shuts down, and runs the atexit functions after them.
@@ -66,7 +68,7 @@ export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Fram
       try {
         runExitCallbacks(runtime);
       } catch (error) {
-        uncaughtException ??= describeUncaught(error);
+        uncaughtException ??= describeUncaught(error, runtime);
       }
       // CPython closes the generators still suspended when it shuts down, after reporting an uncaught exception.
       runtime.finalizer.closeAll(globals);
@@ -97,7 +99,7 @@ function joinThreads(runtime: Runtime): string | undefined {
     );
     return undefined;
   } catch (error) {
-    return describeUncaught(error);
+    return describeUncaught(error, runtime);
   }
 }
 
@@ -115,9 +117,11 @@ function mainGlobals(runtime: Runtime, module: Module): Map<string, PyValue> {
   ]);
 }
 
-function describeUncaught(error: unknown): string | undefined {
+function describeUncaught(error: unknown, runtime: Runtime): string | undefined {
   if (error instanceof UnsupportedFeatureError || error instanceof DeadlockError) return error.message;
-  if (isHostStackOverflow(error)) return 'RecursionError: maximum recursion depth exceeded';
+  if (isHostStackOverflow(error)) {
+    return runtime.deepNesting ? deepNestingError().message : 'RecursionError: maximum recursion depth exceeded';
+  }
   if (!(error instanceof PyError)) throw error;
   if (error.exception.cls.name === 'SystemExit' && error.exception.cls.isBuiltin) return undefined;
   try {

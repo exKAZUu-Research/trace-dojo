@@ -3,17 +3,18 @@
 // the scheduler expects, while the other programs keep calling the synchronous builtins.
 import { argument, checkArgs } from './nativeArgs';
 import { asFloat } from './numbers';
-import { callValue, isTruthy } from './objects';
+import { callValue, isTruthy, lookupSpecial } from './objects';
 import { binaryOp, compareOp } from './operators';
 import { currentRuntime } from './runtimeContext';
 import type { Suspension } from './suspendingEvaluator';
 import { callSuspending, itemsSuspending, iterateSuspending } from './threadIteration';
 import { registerSuspendingConstructor, registerSuspendingVariant, type SuspendingNative } from './threads';
-import { sortByKeys } from './typeContainers';
+import { addUpdatePair, sortByKeys } from './typeContainers';
 import {
   dictClass,
   frozensetClass,
   listClass,
+  newDict,
   newList,
   None,
   setClass,
@@ -22,7 +23,7 @@ import {
   typeError,
   valueError,
 } from './types';
-import { DONE, type Kwargs, PyBuiltinFunction, PyList, type PyValue } from './values';
+import { DONE, type Kwargs, PyBuiltinFunction, PyDict, PyList, type PyValue } from './values';
 
 /** Registers the suspending variants of the builtin functions of a run's builtins module. */
 export function registerBuiltinVariants(builtins: Map<string, PyValue>): void {
@@ -51,16 +52,24 @@ export function registerReduceVariant(reduce: PyBuiltinFunction): void {
 /** A class whose construction from one iterable reads it whole, as `list(generator)` does, then builds the same way. */
 function constructFromItems(cls: PyValue): SuspendingNative {
   return function* (args, kwargs) {
-    if (args.length !== 1 || (kwargs !== undefined && kwargs.size > 0) || (cls === dictClass && hasKeys(args[0]))) {
-      return callValue(cls, args, kwargs);
-    }
+    if (args.length !== 1 || (kwargs !== undefined && kwargs.size > 0)) return callValue(cls, args, kwargs);
     const items = yield* itemsSuspending(args[0]);
     return callValue(cls, [newList(items)]);
   };
 }
 
-function hasKeys(value: PyValue): boolean {
-  return typeof value === 'object' && value.cls.lookup('keys') !== undefined;
+/** `dict(pairs, **kwargs)`, adding each pair as it reads it, as CPython does. */
+function* dictSuspending(args: PyValue[], kwargs: Kwargs): Suspension {
+  const [source] = args;
+  if (args.length !== 1 || source instanceof PyDict || lookupSpecial(source, 'keys') !== undefined) {
+    return callValue(dictClass, args, kwargs);
+  }
+  const dict = newDict();
+  const next = iterateSuspending(source);
+  let index = 0;
+  for (let item = yield* next(); item !== DONE; item = yield* next()) addUpdatePair(dict, item, index++);
+  for (const [key, value] of kwargs ?? []) dict.store.set(key, value);
+  return dict;
 }
 
 let typeVariantsRegistered = false;
@@ -69,9 +78,10 @@ let typeVariantsRegistered = false;
 function registerTypeVariants(): void {
   if (typeVariantsRegistered) return;
   typeVariantsRegistered = true;
-  for (const cls of [listClass, tupleClass, setClass, frozensetClass, dictClass]) {
+  for (const cls of [listClass, tupleClass, setClass, frozensetClass]) {
     registerSuspendingConstructor(cls, constructFromItems(cls));
   }
+  registerSuspendingConstructor(dictClass, dictSuspending);
   const join = strClass.dict.get('join') as PyBuiltinFunction;
   registerSuspendingVariant(join, function* ([self, iterable]) {
     const items = iterable instanceof PyList ? iterable : newList(yield* itemsSuspending(iterable));

@@ -1,10 +1,12 @@
 import { classAnnotationLists, newAnnotate } from './annotations';
 import type { ClassDef } from './ast';
+import { INSTANCE_ATTRIBUTE_DOCS } from './builtinDocs';
 import { method } from './define';
 import { createEnumMembers } from './enums';
 import type { Evaluator } from './evaluator';
 import type { CallArguments } from './expressionEvaluator';
 import { Frame } from './frame';
+import { defineProperty } from './modules/numberSupport';
 import { bindValue, callValue, deleteItem, getAttributeOrUndefined, getItem, lookupSpecial, setItem } from './objects';
 import { firstRowOf } from './programSource';
 import { currentRuntime } from './runtimeContext';
@@ -51,6 +53,16 @@ import {
 /** The class of the `__dict__` and `__weakref__` entries a class defines for its instances. */
 const attributeDescriptorClass = builtinClass('getset_descriptor');
 method(attributeDescriptorClass, '__repr__', 'none', 0, 0, (self) => (self as PyOpaque).text);
+// `object.__class__`, which instances and classes read natively, listed in object's namespace as CPython lists it.
+objectClass.dict.set(
+  '__class__',
+  new PyOpaque(attributeDescriptorClass, "<attribute '__class__' of 'object' objects>")
+);
+defineProperty(
+  attributeDescriptorClass,
+  '__doc__',
+  (self) => INSTANCE_ATTRIBUTE_DOCS[/'(\w+)'/.exec((self as PyOpaque).text)?.[1] ?? ''] ?? None
+);
 
 /** What a class body leaves for `type.__new__` besides its namespace, keyed by that namespace. */
 interface ClassBody {

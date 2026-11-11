@@ -66,3 +66,29 @@ m = map(abs, [-1, -2])
 if list(pickle.loads(pickle.dumps(m))) != [1, 2]: raise AssertionError
 `);
 });
+
+test('help() of a class renders it with pydoc, as CPython does', () => {
+  expectSameAsCPython(`import io, contextlib
+class Base:
+    """Base doc."""
+    def run(self, n=1):
+        """Run n times."""
+    def __eq__(self, other):
+        return True
+class Child(Base):
+    limit = 3
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    help(Child)
+expected = 'Help on class Child in module __main__:\\n\\nclass Child(Base)\\n |  Method resolution order:\\n |      Child\\n |      Base\\n |      builtins.object\\n |\\n |  Data and other attributes defined here:\\n |\\n |  limit = 3\\n |\\n |  ----------------------------------------------------------------------\\n |  Methods inherited from Base:\\n |\\n |  __eq__(self, other)\\n |      Return self==value.\\n |\\n |  run(self, n=1)\\n |      Run n times.\\n |\\n |  ----------------------------------------------------------------------\\n |  Data descriptors inherited from Base:\\n |\\n |  __dict__\\n |      dictionary for instance variables\\n |\\n |  __weakref__\\n |      list of weak references to the object\\n |\\n |  ----------------------------------------------------------------------\\n |  Data and other attributes inherited from Base:\\n |\\n |  __hash__ = None\\n\\n'
+if buf.getvalue() != expected: raise AssertionError(buf.getvalue())
+`);
+});
+
+test('deep nesting runs as CPython runs it, or stops with the unsupported error past the host stack', () => {
+  expectSameAsCPython(`x = ${Array.from({ length: 1000 }, () => '1').join(' + ')}
+if x != 1000: raise AssertionError(x)
+if ${'-'.repeat(1000)}1 != 1: raise AssertionError
+`);
+  expect(compileErrorRow(`x = ${'-'.repeat(50_000)}1\n`)).toBe(0);
+});

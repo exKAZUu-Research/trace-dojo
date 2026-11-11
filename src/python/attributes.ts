@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 524 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+import { abstractPlaceholders } from './abstractPlaceholders';
 import {
   classAnnotate,
   classAnnotations,
@@ -8,6 +8,8 @@ import {
   setClassAnnotations,
   setFunctionAnnotationAttribute,
 } from './annotations';
+// code-gauge-allow-file fileNcss 528 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+import { builtinDocs } from './builtinDocs';
 import { solidBase } from './classes';
 import {
   builtinClassesWithDict,
@@ -232,6 +234,7 @@ function boundMethodAttribute(method: PyBoundMethod, name: string): PyValue | un
   return undefined;
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- One case per attribute CPython's builtin functions have.
 function builtinFunctionAttribute(fn: PyBuiltinFunction, name: string): PyValue | undefined {
   if (name === '__name__') return fn.name;
   if (name === '__qualname__') return fn.qualifiedName;
@@ -242,7 +245,8 @@ function builtinFunctionAttribute(fn: PyBuiltinFunction, name: string): PyValue 
     return fn.self ?? (fn.cls === builtinFunctionClass ? moduleOf(fn) : undefined);
   }
   if (name === '__objclass__') return descriptorOwners.get(fn);
-  if (name === '__doc__') return None;
+  if (name === '__isabstractmethod__' && abstractPlaceholders.has(fn)) return true;
+  if (name === '__doc__') return builtinDocs.get(fn) ?? None;
   if (name === '__module__') return builtinFunctionModule(currentRuntime(), fn) ?? None;
   return undefined;
 }
