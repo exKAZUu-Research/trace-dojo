@@ -92,6 +92,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'functools',
   'gc',
   'getopt',
+  'gettext',
   'glob',
   'graphlib',
   'hashlib',
