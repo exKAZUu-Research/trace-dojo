@@ -57,6 +57,7 @@ import {
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import { DONE, PyClass, PyError, type PyFunction, PyInstance, PyTuple, type PyValue } from './values';
+import { hasWeakCallbacks, runWeakCallbacks } from './weakReferences';
 
 const NO_EXCEPTIONS: PyInstance[] = [];
 
@@ -123,6 +124,8 @@ export class Evaluator extends AsyncEvaluator {
       const completion = isSimple(statement)
         ? this.simpleStatement(statement, frame)
         : yield* this.compoundStatement(statement, frame);
+      // An object a statement left unreachable is freed before the next one runs, calling its weakref callbacks.
+      if (hasWeakCallbacks(this.runtime)) runWeakCallbacks();
       if (completion) return completion;
     }
     return undefined;

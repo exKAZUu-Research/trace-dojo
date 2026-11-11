@@ -5,6 +5,7 @@ import { currentRuntime } from '../runtimeContext';
 import { newList, None } from '../types';
 import { unavailableValue } from '../unavailableValues';
 import type { PyValue } from '../values';
+import { runWeakCallbacks } from '../weakReferences';
 
 interface CollectorState {
   enabled: boolean;
@@ -38,9 +39,18 @@ registerModule(
       ['isenabled', builtin('isenabled', 'none', 0, 0, () => state.enabled)],
       [
         'collect',
-        builtin('collect', 'takes', 0, 1, () => unavailableValue('gc.collect() が返す、回収したオブジェクトの数'), {
-          keywords: ['generation'],
-        }),
+        builtin(
+          'collect',
+          'takes',
+          0,
+          1,
+          () => {
+            // The collector frees the objects in reference cycles that nothing reaches, calling their callbacks.
+            runWeakCallbacks([], true);
+            return unavailableValue('gc.collect() が返す、回収したオブジェクトの数');
+          },
+          { keywords: ['generation'] }
+        ),
       ],
       ['get_threshold', builtin('get_threshold', 'none', 0, 0, () => currentRuntime().tuple(state.threshold))],
       [

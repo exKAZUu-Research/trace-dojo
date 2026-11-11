@@ -62,6 +62,7 @@ import {
   PyTuple,
   type PyValue,
 } from './values';
+import { hasWeakCallbacks, runWeakCallbacks } from './weakReferences';
 
 export class Runtime {
   readonly world = new TurtleWorld();
@@ -234,6 +235,7 @@ export class Runtime {
       throw error;
     } finally {
       this.popFrame();
+      if (hasWeakCallbacks(this)) runWeakCallbacks([result]);
       // The function's variables die with its frame, which closes a generator only they held.
       const { finalizer } = this;
       if (finalizer.pending.size > 0 && [...frame.locals.values()].some((value) => finalizer.mayRelease(value))) {
@@ -500,8 +502,8 @@ export class Runtime {
   }
 
   /** The objects that variables, objects, or pending values still reach, which reference counting would keep. */
-  reachableObjects(): Set<object> {
-    const roots = [...this.evaluator.handledExceptions, ...this.modules.values(), ...this.roots()];
+  reachableObjects(inFlight: unknown[] = []): Set<object> {
+    const roots = [...inFlight, ...this.evaluator.handledExceptions, ...this.modules.values(), ...this.roots()];
     const visited = findReachableObjects(roots);
     this.spend(Math.ceil(visited.size / 64));
     return visited;

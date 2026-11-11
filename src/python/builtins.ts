@@ -460,7 +460,8 @@ export function isInstance(value: PyValue, classInfo: PyValue, name = 'isinstanc
     const cls = classOf(value);
     if (cls === classInfo) return true;
     const check = customCheck(classInfo, '__instancecheck__');
-    return check === undefined ? cls.isSubclassOf(classInfo) : isTruthy(callValue(check, [value]));
+    if (check !== undefined) return isTruthy(callValue(check, [value]));
+    return cls.isSubclassOf(classInfo) || claimedClass(value, cls)?.isSubclassOf(classInfo) === true;
   }
   if (classInfo instanceof PyTuple) return classInfo.items.some((item) => isInstance(value, item, name));
   if (classInfo instanceof PyOpaque && Array.isArray(classInfo.data)) {
@@ -469,6 +470,17 @@ export function isInstance(value: PyValue, classInfo: PyValue, name = 'isinstanc
   const check = lookupSpecial(classInfo, '__instancecheck__');
   if (check !== undefined) return isTruthy(callValue(bindValue(check, classInfo), [value]));
   throw typeError(`${name}() arg 2 must be a type, a tuple of types, or a union`);
+}
+
+/**
+ * The class an object of a program's class claims through `__class__`, as a weakref proxy claims its referent's,
+ * which isinstance() also accepts, or undefined for an object that claims its own.
+ */
+function claimedClass(value: PyValue, cls: PyClass): PyClass | undefined {
+  if (typeof value !== 'object' || cls.isBuiltin) return undefined;
+  if (!cls.flags.definesGetattribute && cls.lookup('__class__') === objectClass.dict.get('__class__')) return undefined;
+  const claimed = getAttributeOrUndefined(value, '__class__');
+  return claimed instanceof PyClass && claimed !== cls ? claimed : undefined;
 }
 
 /** The bound `__instancecheck__` or `__subclasscheck__` that the metaclass of `cls`, such as `abc.ABCMeta`, defines. */

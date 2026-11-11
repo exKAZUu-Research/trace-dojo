@@ -15,6 +15,7 @@ import {
   PyList,
   PyModule,
   PyObject,
+  PyOpaque,
   PySet,
   PyTuple,
 } from './values';
@@ -45,6 +46,9 @@ function walk(roots: unknown[], reached: Set<TurtleState>): { visited: Set<objec
       pending.push(item.value);
       continue;
     }
+    // The attributes and slots any object may have besides what its kind holds.
+    if (item.instanceDict) pushAll(pending, item.instanceDict.values());
+    if (item.slotValues) pushAll(pending, item.slotValues.values());
     scanned += pushReferences(pending, item, reached);
   }
   return { visited, scanned };
@@ -71,6 +75,12 @@ function pushReferences(pending: unknown[], object: PyObject, reached: Set<Turtl
     return keys.length;
   }
   if (object instanceof PyInstance) return pushInstanceReferences(pending, object, reached);
+  // A weak reference keeps its callback alive, but not its referent.
+  if (object instanceof PyOpaque) {
+    const callback = (object.data as { callback?: unknown } | undefined)?.callback;
+    if (callback !== undefined) pending.push(callback);
+    return 0;
+  }
   if (object instanceof PyFunction) {
     pushAll(pending, object.closure.values());
     pushAll(pending, object.defaults);
@@ -92,7 +102,7 @@ function pushInstanceReferences(pending: unknown[], instance: PyInstance, reache
   pushAll(pending, instance.dict.values());
   pending.push(instance.cls, instance.enumValue);
   const state = instance.exception;
-  if (state) pending.push(state.args, state.notes, state.cause, state.context, state.exceptions);
+  if (state) pending.push(state.args, state.notes, state.cause, state.context, state.exceptions, state.traceback);
   return instance.dict.size;
 }
 
