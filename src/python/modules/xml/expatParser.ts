@@ -92,6 +92,9 @@ export class ExpatParser {
   private doctypeName: string | undefined;
   private doctypeSysid: string | undefined;
   private doctypePubid: string | undefined;
+  /** The system and public identifiers of the external DTD subset, if the DOCTYPE names one. */
+  private externalSubset: [string, string | undefined] | undefined;
+  private externalPublicId: string | undefined;
   private declEntity: Entity | undefined;
   private declNotationName: string | undefined;
   private declNotationPublicId: string | undefined;
@@ -101,13 +104,19 @@ export class ExpatParser {
   private declAttributeType: string | undefined;
   private elementDecl: { name: string; groups: ContentModel[] } | undefined;
   private readonly groupConnector: number[] = [];
+  /** The tokenizer of the prolog's text: the document's, or a parameter entity's while its text is parsed. */
+  private prologTz: Tokenizer;
+  /** Whether the prolog's text is a parameter entity's, whose events the reference's position stands for. */
+  private prologInternal = false;
   /** Where a CDATA section that needs more input resumes. */
   private cdataResume = 0;
+  private openParamEntities = 0;
 
   constructor(separator: string | undefined, encoding: InputEncoding | undefined) {
     this.separator = separator;
     if (encoding !== undefined) this.setProtocolEncoding(encoding, '');
     this.tokenizer = new Tokenizer(this.input.cs, separator !== undefined);
+    this.prologTz = this.tokenizer;
     if (separator !== undefined)
       this.prefixes.set('xml', { prefix: 'xml', uri: XML_NAMESPACE + separator, previous: undefined });
   }
@@ -313,16 +322,23 @@ export class ExpatParser {
   }
 
   // code-gauge-allow functionCognitiveComplexity 22 -- Follows doProlog of xmlparse.c.
-  private doProlog(s: number, end: number, tok: number, next: number): number {
-    const haveMore = !this.finalBuffer;
+  private doProlog(s: number, end: number, tok: number, next: number, inEntity = false): number {
+    const haveMore = !this.finalBuffer && !inEntity;
+    const tz = this.prologTz;
     for (;;) {
-      this.eventPtr = s;
-      this.eventEndPtr = next;
+      if (!inEntity) {
+        this.eventPtr = s;
+        this.eventEndPtr = next;
+      }
       if (tok <= 0) {
         if (haveMore && tok !== TOK.INVALID) return s;
         if (tok === TOK.INVALID) {
-          this.eventPtr = next;
+          this.prologEvent(next);
           throw new XmlError(XML_ERROR.INVALID_TOKEN);
+        }
+        if (tok === TOK.NONE && inEntity) {
+          if (this.prologState.role(TOK.NONE, '') === 'ERROR') throw new XmlError(XML_ERROR.INCOMPLETE_PE);
+          return s;
         }
         if (tok === TOK.PARTIAL) throw new XmlError(XML_ERROR.UNCLOSED_TOKEN);
         if (tok === TOK.PARTIAL_CHAR) throw new XmlError(XML_ERROR.PARTIAL_CHAR);
@@ -330,17 +346,17 @@ export class ExpatParser {
         if (tok !== -TOK.PROLOG_S) next = end;
         tok = -tok;
       }
-      const role = this.prologState.role(tok, this.text(this.tokenizer, s, next));
+      const role = this.prologState.role(tok, this.text(tz, s, next));
       if (role === 'INSTANCE_START') {
         if (this.foreignDTD) this.dtd.hasParamEntityRefs = true;
         this.processor = 'content';
         return this.doContent(this.tokenizer, 0, s, end, haveMore, false);
       }
       const handleDefault = this.prologRole(role, tok, s, next);
-      if (handleDefault && this.handlers.default) this.reportDefault(this.tokenizer, s, next);
+      if (handleDefault && this.handlers.default) this.reportDefault(tz, s, next);
       if (role === 'XML_DECL') end = this.input.cs.length;
       s = next;
-      [tok, next] = this.tokenizer.prologTok(s, end);
+      [tok, next] = tz.prologTok(s, end);
     }
   }
 
@@ -348,7 +364,6 @@ export class ExpatParser {
   // code-gauge-allow functionCognitiveComplexity 30 -- Dispatches the roles of doProlog of xmlparse.c.
   // code-gauge-allow functionNcss 60 -- Dispatches the roles of doProlog of xmlparse.c.
   private prologRole(role: Role, tok: number, s: number, next: number): boolean {
-    const h = this.handlers;
     switch (role) {
       case 'XML_DECL': {
         this.processXmlDecl(s, next);
@@ -363,20 +378,15 @@ export class ExpatParser {
         return tok !== TOK.BOM;
       }
       case 'PI': {
-        this.reportProcessingInstruction(this.tokenizer, s, next);
+        this.reportProcessingInstruction(this.prologTz, s, next);
         return false;
       }
       case 'COMMENT': {
-        this.reportComment(this.tokenizer, s, next);
+        this.reportComment(this.prologTz, s, next);
         return false;
       }
       case 'PARAM_ENTITY_REF': {
-        this.dtd.hasParamEntityRefs = true;
-        if (this.paramEntityParsing === 0) this.dtd.keepProcessing = this.dtd.standalone;
-        if (!this.dtd.standalone && h.notStandalone && !h.notStandalone()) {
-          throw new XmlError(XML_ERROR.NOT_STANDALONE);
-        }
-        return true;
+        return this.paramEntityReference(s, next);
       }
       default: {
         if (role.startsWith('DOCTYPE')) return this.doctypeRole(role, s, next);
@@ -390,6 +400,69 @@ export class ExpatParser {
     }
   }
 
+  /** A parameter entity reference between declarations, which expat expands unless parameter entities are off. */
+  // code-gauge-allow functionCognitiveComplexity 24 -- Follows the PARAM_ENTITY_REF role of doProlog of xmlparse.c.
+  private paramEntityReference(s: number, next: number): boolean {
+    const h = this.handlers;
+    const dtd = this.dtd;
+    dtd.hasParamEntityRefs = true;
+    let handleDefault = true;
+    if (this.paramEntityParsing === 0) {
+      dtd.keepProcessing = dtd.standalone;
+    } else {
+      const name = this.text(this.prologTz, s + 1, next - 1);
+      const entity = dtd.paramEntities.get(name);
+      if (dtd.standalone && this.openParamEntities === 0) {
+        if (!entity) throw new XmlError(XML_ERROR.UNDEFINED_ENTITY);
+        if (!entity.isInternal) throw new XmlError(XML_ERROR.ENTITY_DECLARED_IN_PE);
+      } else if (!entity) {
+        dtd.keepProcessing = dtd.standalone;
+        if (h.skippedEntity) h.skippedEntity(name, true);
+        return !h.skippedEntity;
+      }
+      if (entity.open) throw new XmlError(XML_ERROR.RECURSIVE_ENTITY_REF);
+      if (entity.text) {
+        this.processParamEntity(entity);
+        return false;
+      }
+      if (!h.externalEntityRef) {
+        dtd.keepProcessing = dtd.standalone;
+        return true;
+      }
+      entity.open = true;
+      const read = h.externalEntityRef(undefined as unknown as string, entity.base, entity.systemId, entity.publicId);
+      entity.open = false;
+      if (!read) throw new XmlError(XML_ERROR.EXTERNAL_ENTITY_HANDLING);
+      dtd.keepProcessing = dtd.standalone;
+      return false;
+    }
+    if (!dtd.standalone && h.notStandalone && !h.notStandalone()) throw new XmlError(XML_ERROR.NOT_STANDALONE);
+    return handleDefault;
+  }
+
+  /** `processEntity` of an internal parameter entity: its text as declarations, which must be complete. */
+  private processParamEntity(entity: Entity): void {
+    const text = entity.text as number[];
+    const saved = [this.prologTz, this.prologInternal] as const;
+    entity.open = true;
+    this.openParamEntities++;
+    this.prologTz = new Tokenizer(text, this.namespaces);
+    this.prologInternal = true;
+    try {
+      const [tok, next] = this.prologTz.prologTok(0, text.length);
+      this.doProlog(0, text.length, tok, next, true);
+    } finally {
+      [this.prologTz, this.prologInternal] = saved;
+      this.openParamEntities--;
+      entity.open = false;
+    }
+  }
+
+  /** Moves the event pointer to a position of the document's own text, as expat does for its own encoding only. */
+  private prologEvent(ptr: number): void {
+    if (!this.prologInternal) this.eventPtr = ptr;
+  }
+
   private processXmlDecl(s: number, next: number): void {
     const decl = parseXmlDecl(this.input.cs, s, next);
     if (typeof decl === 'number') {
@@ -398,10 +471,10 @@ export class ExpatParser {
     }
     if (decl.standalone === 1) {
       this.dtd.standalone = true;
-      if (this.paramEntityParsing === 2) this.paramEntityParsing = 0;
+      if (this.paramEntityParsing === 1) this.paramEntityParsing = 0;
     }
     if (this.handlers.xmlDecl) this.handlers.xmlDecl(decl.version, decl.encoding, decl.standalone);
-    else this.reportDefault(this.tokenizer, s, next);
+    else this.reportDefault(this.prologTz, s, next);
     if (this.encodingFixed || decl.encoding === undefined) return;
     this.switchEncoding(decl.encoding, decl.encodingStart, next);
   }
@@ -439,7 +512,7 @@ export class ExpatParser {
     switch (role) {
       case 'DOCTYPE_NAME': {
         if (h.startDoctypeDecl) {
-          this.doctypeName = this.text(this.tokenizer, s, next);
+          this.doctypeName = this.text(this.prologTz, s, next);
           this.doctypePubid = undefined;
         }
         this.doctypeSysid = undefined;
@@ -453,16 +526,18 @@ export class ExpatParser {
       }
       case 'DOCTYPE_PUBLIC_ID': {
         this.checkPublicId(s, next);
+        this.externalPublicId = normalizePublicId(this.text(this.prologTz, s + 1, next - 1));
         this.declEntity = undefined;
         if (!h.startDoctypeDecl) return true;
-        this.doctypePubid = normalizePublicId(this.text(this.tokenizer, s + 1, next - 1));
+        this.doctypePubid = normalizePublicId(this.text(this.prologTz, s + 1, next - 1));
         return false;
       }
       case 'DOCTYPE_SYSTEM_ID': {
         this.dtd.hasParamEntityRefs = true;
+        this.externalSubset = [this.text(this.prologTz, s + 1, next - 1), this.externalPublicId];
         let handleDefault = true;
         if (h.startDoctypeDecl) {
-          this.doctypeSysid = this.text(this.tokenizer, s + 1, next - 1);
+          this.doctypeSysid = this.text(this.prologTz, s + 1, next - 1);
           handleDefault = false;
         }
         if (!this.dtd.standalone && this.paramEntityParsing === 0 && h.notStandalone && !h.notStandalone()) {
@@ -475,6 +550,12 @@ export class ExpatParser {
         if (this.doctypeName !== undefined) {
           h.startDoctypeDecl?.(this.doctypeName, this.doctypeSysid, this.doctypePubid, false);
           handleDefault = false;
+        }
+        if (this.externalSubset !== undefined && this.paramEntityParsing !== 0 && h.externalEntityRef) {
+          const [systemId, publicId] = this.externalSubset;
+          if (!h.externalEntityRef(undefined as unknown as string, this.base, systemId, publicId)) {
+            throw new XmlError(XML_ERROR.EXTERNAL_ENTITY_HANDLING);
+          }
         }
         if (h.endDoctypeDecl) {
           h.endDoctypeDecl();
@@ -489,9 +570,9 @@ export class ExpatParser {
   }
 
   private checkPublicId(s: number, next: number): void {
-    const bad = badPublicIdChar(this.input.cs, s, next);
+    const bad = badPublicIdChar(this.prologTz.cs, s, next);
     if (bad !== undefined) {
-      this.eventPtr = bad;
+      this.prologEvent(bad);
       throw new XmlError(XML_ERROR.PUBLICID);
     }
   }
@@ -505,14 +586,14 @@ export class ExpatParser {
     switch (role) {
       case 'GENERAL_ENTITY_NAME':
       case 'PARAM_ENTITY_NAME': {
-        const name = this.text(this.tokenizer, s, next);
+        const name = this.text(this.prologTz, s, next);
         const isParam = role === 'PARAM_ENTITY_NAME';
         this.declEntity = undefined;
         if (!isParam && name in PREDEFINED_ENTITIES) return true;
         if (!dtd.keepProcessing) return true;
         const table = isParam ? dtd.paramEntities : dtd.generalEntities;
         if (table.has(name)) return true;
-        this.declEntity = { name, isParam, open: false };
+        this.declEntity = { name, isParam, open: false, isInternal: this.openParamEntities === 0 };
         table.set(name, this.declEntity);
         return !h.entityDecl;
       }
@@ -549,12 +630,12 @@ export class ExpatParser {
       case 'ENTITY_PUBLIC_ID': {
         this.checkPublicId(s, next);
         if (!dtd.keepProcessing || !entity) return true;
-        entity.publicId = normalizePublicId(this.text(this.tokenizer, s + 1, next - 1));
+        entity.publicId = normalizePublicId(this.text(this.prologTz, s + 1, next - 1));
         return !h.entityDecl;
       }
       case 'ENTITY_SYSTEM_ID': {
         if (!dtd.keepProcessing || !entity) return true;
-        entity.systemId = this.text(this.tokenizer, s + 1, next - 1);
+        entity.systemId = this.text(this.prologTz, s + 1, next - 1);
         entity.base = this.base;
         return !h.entityDecl;
       }
@@ -566,7 +647,7 @@ export class ExpatParser {
       }
       case 'ENTITY_NOTATION_NAME': {
         if (!dtd.keepProcessing || !entity) return true;
-        entity.notation = this.text(this.tokenizer, s, next);
+        entity.notation = this.text(this.prologTz, s, next);
         if (h.unparsedEntityDecl) {
           h.unparsedEntityDecl(entity.name, entity.base, entity.systemId, entity.publicId, entity.notation);
           return false;
@@ -583,7 +664,7 @@ export class ExpatParser {
 
   /** `storeEntityValue`: adds the replacement text of an entity's literal, with character references replaced. */
   private storeEntityValue(start: number, end: number, text: number[]): void {
-    const tz = this.tokenizer;
+    const tz = this.prologTz;
     let ptr = start;
     for (;;) {
       const [tok, next] = tz.entityValueTok(ptr, end);
@@ -592,7 +673,7 @@ export class ExpatParser {
           return;
         }
         case TOK.PARAM_ENTITY_REF: {
-          this.eventPtr = ptr;
+          this.prologEvent(ptr);
           throw new XmlError(XML_ERROR.PARAM_ENTITY_REF);
         }
         case TOK.ENTITY_REF:
@@ -608,14 +689,14 @@ export class ExpatParser {
         case TOK.CHAR_REF: {
           const code = charRefNumber(tz.cs, ptr, next);
           if (code < 0) {
-            this.eventPtr = ptr;
+            this.prologEvent(ptr);
             throw new XmlError(XML_ERROR.BAD_CHAR_REF);
           }
           text.push(code);
           break;
         }
         default: {
-          this.eventPtr = tok === TOK.INVALID ? next : ptr;
+          this.prologEvent(tok === TOK.INVALID ? next : ptr);
           throw new XmlError(XML_ERROR.INVALID_TOKEN);
         }
       }
@@ -628,18 +709,18 @@ export class ExpatParser {
     switch (role) {
       case 'NOTATION_NAME': {
         this.declNotationPublicId = undefined;
-        this.declNotationName = h.notationDecl ? this.text(this.tokenizer, s, next) : undefined;
+        this.declNotationName = h.notationDecl ? this.text(this.prologTz, s, next) : undefined;
         return !h.notationDecl;
       }
       case 'NOTATION_PUBLIC_ID': {
         this.checkPublicId(s, next);
         if (this.declNotationName === undefined) return true;
-        this.declNotationPublicId = normalizePublicId(this.text(this.tokenizer, s + 1, next - 1));
+        this.declNotationPublicId = normalizePublicId(this.text(this.prologTz, s + 1, next - 1));
         return false;
       }
       case 'NOTATION_SYSTEM_ID': {
         if (this.declNotationName === undefined || !h.notationDecl) return true;
-        const systemId = this.text(this.tokenizer, s + 1, next - 1);
+        const systemId = this.text(this.prologTz, s + 1, next - 1);
         this.eventEndPtr = s;
         h.notationDecl(this.declNotationName, this.base, systemId, this.declNotationPublicId);
         return false;
@@ -666,7 +747,7 @@ export class ExpatParser {
     switch (role) {
       case 'ELEMENT_NAME': {
         if (!h.elementDecl) return true;
-        this.elementDecl = { name: this.text(this.tokenizer, s, next), groups: [] };
+        this.elementDecl = { name: this.text(this.prologTz, s, next), groups: [] };
         return false;
       }
       case 'CONTENT_ANY':
@@ -733,7 +814,7 @@ export class ExpatParser {
     if (!decl || !top) return true;
     if (role.startsWith('CONTENT_ELEMENT')) {
       const nameEnd = tok === TOK.NAME || tok === TOK.PREFIXED_NAME ? next : next - 1;
-      top.children.push({ type: CTYPE.NAME, quant, name: this.text(this.tokenizer, s, nameEnd), children: [] });
+      top.children.push({ type: CTYPE.NAME, quant, name: this.text(this.prologTz, s, nameEnd), children: [] });
       return !this.handlers.elementDecl;
     }
     decl.groups.pop();
@@ -752,7 +833,7 @@ export class ExpatParser {
   private attlistRole(role: Role, s: number, next: number): boolean {
     const h = this.handlers;
     const dtd = this.dtd;
-    const text = this.text(this.tokenizer, s, next);
+    const text = this.text(this.prologTz, s, next);
     switch (role) {
       case 'ATTLIST_ELEMENT_NAME': {
         this.declElementType = text;
@@ -785,7 +866,14 @@ export class ExpatParser {
         if (!dtd.keepProcessing) return true;
         const hasValue = role === 'DEFAULT_ATTRIBUTE_VALUE' || role === 'FIXED_ATTRIBUTE_VALUE';
         const value = hasValue
-          ? this.storeAttributeValue(this.tokenizer, this.declAttributeIsCdata, s + 1, next - 1, false, true)
+          ? this.storeAttributeValue(
+              this.prologTz,
+              this.declAttributeIsCdata,
+              s + 1,
+              next - 1,
+              this.prologInternal,
+              true
+            )
           : undefined;
         this.defineAttribute(value);
         let type = this.declAttributeType;
@@ -944,6 +1032,7 @@ export class ExpatParser {
     const entity = this.dtd.generalEntities.get(name);
     if (!this.dtd.hasParamEntityRefs || this.dtd.standalone) {
       if (!entity) throw new XmlError(XML_ERROR.UNDEFINED_ENTITY);
+      if (!entity.isInternal) throw new XmlError(XML_ERROR.ENTITY_DECLARED_IN_PE);
     } else if (!entity) {
       if (h.skippedEntity) h.skippedEntity(name, false);
       else this.reportDefault(tz, s, next);
@@ -1254,6 +1343,7 @@ export class ExpatParser {
       : !dtd.hasParamEntityRefs || dtd.standalone;
     if (checkEntityDecl) {
       if (!entity) throw new XmlError(XML_ERROR.UNDEFINED_ENTITY);
+      if (!entity.isInternal) throw new XmlError(XML_ERROR.ENTITY_DECLARED_IN_PE);
     } else if (!entity) {
       return;
     }

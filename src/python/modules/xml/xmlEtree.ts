@@ -598,75 +598,189 @@ def iselement(element):
     return hasattr(element, 'tag')
 
 
+class _element_iterator:
+    __module__ = '_elementtree'
+    __slots__ = ('_gen',)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return next(self._gen)
+
+
+
+
+def _make_iterator(gen):
+    it = object.__new__(_element_iterator)
+    object.__setattr__(it, '_gen', gen)
+    return it
+
+
+def _type_check(function, number, value, kind='xml.etree.ElementTree.Element'):
+    position = '' if number is None else f' {number}'
+    raise TypeError(f'{function}() argument{position} must be {kind}, not {_type_name(value)}')
+
+
+def _bind(function, names, required, args, kwargs):
+    # Binds arguments as the C methods' argument clinic does, with its messages.
+    if len(args) > len(names):
+        raise TypeError(f'{function}() takes at most {len(names)} arguments ({len(args)} given)')
+    values = list(args) + [None] * (len(names) - len(args))
+    for key, value in kwargs.items():
+        if key not in names:
+            raise TypeError(f"{function}() got an unexpected keyword argument '{key}'")
+        index = names.index(key)
+        if index < len(args):
+            raise TypeError(f"argument for {function}() given by name ('{key}') and position ({index + 1})")
+        values[index] = value
+    for index in range(required):
+        if index >= len(args) and names[index] not in kwargs:
+            raise TypeError(f"{function}() missing required argument '{names[index]}' (pos {index + 1})")
+    return values
+
+
+def _keyword_attrib(extra):
+    # Without a positional one, the C functions take the attrib keyword as the attributes, as get_attrib_from_keywords.
+    if 'attrib' not in extra:
+        return {}
+    attrib = extra.pop('attrib')
+    if not isinstance(attrib, dict):
+        raise TypeError(f'attrib must be dict, not {type(attrib).__name__}')
+    return attrib
+
+
+def _type_name(value):
+    return 'None' if value is None else type(value).__name__
+
+
+def _expect_element(value):
+    if not isinstance(value, Element):
+        raise TypeError(f'expected an Element, not "{type(value).__name__}"')
+
+
 class Element:
-    """An XML element.
+    # Transcribes the Element type of CPython's C accelerator (Modules/_elementtree.c): its checks, messages, and
+    # copying, over slots instead of an instance dictionary.
 
-    This class is the reference implementation of the Element interface.
+    __slots__ = ('_tag', '_attrib', '_text', '_tail', '_children')
 
-    An element's length is its number of subelements.  That means if you
-    want to check if an element is truly empty, you should check BOTH
-    its length AND its text attribute.
+    def __new__(cls, *args, **kwargs):
+        self = object.__new__(cls)
+        init = object.__setattr__
+        init(self, '_tag', None)
+        init(self, '_attrib', None)
+        init(self, '_text', None)
+        init(self, '_tail', None)
+        init(self, '_children', [])
+        return self
 
-    *tag* is the element name.  *attrib* is an optional dictionary containing
-    element attributes. *extra* are additional element attributes given as
-    keyword arguments.
-
-    Example form:
-        <tag attrib>text<child/>...</tag>tail
-
-    """
-
-    tag = None
-    """The element's name."""
-
-    attrib = None
-    """Dictionary of the element's attributes."""
-
-    text = None
-    """
-    Text before first subelement. This is either a string or the value None.
-    Note that if there is no text, this attribute may be either
-    None or the empty string, depending on the parser.
-
-    """
-
-    tail = None
-    """
-    Text after this element's end tag, but before the next sibling element's
-    start tag.  This is either a string or the value None.  Note that if there
-    was no text, this attribute may be either None or an empty string,
-    depending on the parser.
-
-    """
-
-    def __init__(self, tag, attrib={}, **extra):
+    def __init__(*args, **extra):
+        self, *args = args
+        if not args:
+            raise TypeError('Element() takes at least 1 argument (0 given)')
+        if len(args) > 2:
+            raise TypeError(f'Element() takes at most 2 arguments ({len(args)} given)')
+        attrib = args[1] if len(args) == 2 else _keyword_attrib(extra)
         if not isinstance(attrib, dict):
-            raise TypeError("attrib must be dict, not %s" % (
-                attrib.__class__.__name__,))
-        self.tag = tag
-        self.attrib = {**attrib, **extra}
-        self._children = []
+            _type_check('Element', 2, attrib, 'dict')
+        object.__setattr__(self, '_tag', args[0])
+        object.__setattr__(self, '_attrib', {**attrib, **extra} if (attrib or extra) else None)
+
+    def _get_tag(self):
+        return self._tag
+
+    def _set_tag(self, value):
+        object.__setattr__(self, '_tag', value)
+
+    def _get_attrib(self):
+        if self._attrib is None:
+            object.__setattr__(self, '_attrib', {})
+        return self._attrib
+
+    def _set_attrib(self, value):
+        if not isinstance(value, dict):
+            raise TypeError(f'attrib must be dict, not {type(value).__name__}')
+        object.__setattr__(self, '_attrib', value)
+
+    def _get_text(self):
+        return self._text
+
+    def _set_text(self, value):
+        object.__setattr__(self, '_text', value)
+
+    def _get_tail(self):
+        return self._tail
+
+    def _set_tail(self, value):
+        object.__setattr__(self, '_tail', value)
+
+    def _cannot_delete(self):
+        raise AttributeError("can't delete element attribute")
+
+    tag = property(_get_tag, _set_tag, _cannot_delete)
+    attrib = property(_get_attrib, _set_attrib, _cannot_delete)
+    text = property(_get_text, _set_text, _cannot_delete)
+    tail = property(_get_tail, _set_tail, _cannot_delete)
+    del _get_tag, _set_tag, _get_attrib, _set_attrib, _get_text, _set_text, _get_tail, _set_tail, _cannot_delete
 
     def __repr__(self):
-        return "<%s %r at %#x>" % (self.__class__.__name__, self.tag, id(self))
+        return '<Element %r at %#x>' % (self.tag, id(self))
 
-    def makeelement(self, tag, attrib):
-        """Create a new element with the same type.
-
-        *tag* is a string containing the element name.
-        *attrib* is a dictionary containing the element attributes.
-
-        Do not call this method, use the SubElement factory function instead.
-
-        """
-        return self.__class__(tag, attrib)
+    def makeelement(self, *args):
+        if len(args) != 2:
+            raise TypeError(f'makeelement() takes exactly 2 positional arguments ({len(args)} given)')
+        tag, attrib = args
+        if not isinstance(attrib, dict):
+            _type_check('makeelement', 2, attrib, 'dict')
+        return Element(tag, attrib.copy())
 
     def __copy__(self):
-        elem = self.makeelement(self.tag, self.attrib)
+        elem = Element(self.tag)
+        object.__setattr__(elem, '_attrib', self._attrib)
         elem.text = self.text
         elem.tail = self.tail
-        elem[:] = self
+        elem._children[:] = self._children
         return elem
+
+    def __deepcopy__(self, *args):
+        if len(args) != 1:
+            raise TypeError(f'Element.__deepcopy__() takes exactly one argument ({len(args)} given)')
+        from copy import deepcopy
+        memo, = args
+        elem = Element(deepcopy(self.tag, memo))
+        if self._attrib is not None:
+            object.__setattr__(elem, '_attrib', deepcopy(self._attrib, memo))
+        elem.text = deepcopy(self.text, memo)
+        elem.tail = deepcopy(self.tail, memo)
+        for child in self._children:
+            child = deepcopy(child, memo)
+            _expect_element(child)
+            elem._children.append(child)
+        memo[id(self)] = elem
+        return elem
+
+    def __sizeof__(self):
+        return object.__sizeof__(self) + 8 * len(self._children)
+
+    def __getstate__(self):
+        return {'tag': self.tag, '_children': list(self._children), 'attrib': self.attrib,
+                'text': self.text, 'tail': self.tail}
+
+    def __setstate__(self, state):
+        if not isinstance(state, dict):
+            raise TypeError('__setstate__ argument should be dict, not ' + type(state).__name__)
+        if 'tag' not in state:
+            raise TypeError('tag may not be NULL')
+        self.tag = state['tag']
+        attrib = state.get('attrib')
+        object.__setattr__(self, '_attrib', None if attrib is None else dict(attrib))
+        self.text = state.get('text')
+        self.tail = state.get('tail')
+        children = state.get('_children') or []
+        for child in children:
+            _expect_element(child)
+        self._children[:] = children
 
     def __len__(self):
         return len(self._children)
@@ -681,229 +795,189 @@ class Element:
         return len(self._children) != 0 # emulate old behaviour, for now
 
     def __getitem__(self, index):
-        return self._children[index]
+        if isinstance(index, slice):
+            return self._children[index]
+        if not hasattr(type(index), '__index__'):
+            raise TypeError('element indices must be integers')
+        index = index.__index__()
+        children = self._children
+        if index < 0:
+            index += len(children)
+        if not 0 <= index < len(children):
+            raise IndexError('child index out of range')
+        return children[index]
 
     def __setitem__(self, index, element):
         if isinstance(index, slice):
-            for elt in element:
-                self._assert_is_element(elt)
-        else:
-            self._assert_is_element(element)
-        self._children[index] = element
+            elements = list(element)
+            for each in elements:
+                _expect_element(each)
+            self._children[index] = elements
+            return
+        if not hasattr(type(index), '__index__'):
+            raise TypeError('element indices must be integers')
+        index = index.__index__()
+        children = self._children
+        if index < 0:
+            index += len(children)
+        if not 0 <= index < len(children):
+            raise IndexError('child assignment index out of range')
+        _expect_element(element)
+        children[index] = element
 
     def __delitem__(self, index):
-        del self._children[index]
+        if isinstance(index, slice):
+            del self._children[index]
+            return
+        if not hasattr(type(index), '__index__'):
+            raise TypeError('element indices must be integers')
+        index = index.__index__()
+        children = self._children
+        if index < 0:
+            index += len(children)
+        if not 0 <= index < len(children):
+            raise IndexError('child assignment index out of range')
+        del children[index]
 
-    def append(self, subelement):
-        """Add *subelement* to the end of this element.
-
-        The new element will appear in document order after the last existing
-        subelement (or directly after the text, if it's the first subelement),
-        but before the end tag for this element.
-
-        """
-        self._assert_is_element(subelement)
+    def append(self, *args):
+        if len(args) != 1:
+            raise TypeError(f'append() takes exactly one argument ({len(args)} given)')
+        subelement, = args
+        if not isinstance(subelement, Element):
+            _type_check('append', 1, subelement)
         self._children.append(subelement)
 
-    def extend(self, elements):
-        """Append subelements from a sequence.
-
-        *elements* is a sequence with zero or more elements.
-
-        """
+    def extend(self, *args):
+        if len(args) != 1:
+            raise TypeError(f'extend() takes exactly one argument ({len(args)} given)')
+        elements, = args
+        try:
+            elements = list(elements)
+        except TypeError:
+            raise TypeError("'elements' must be an iterable") from None
         for element in elements:
-            self._assert_is_element(element)
-            self._children.append(element)
+            _expect_element(element)
+        self._children.extend(elements)
 
-    def insert(self, index, subelement):
-        """Insert *subelement* at position *index*."""
-        self._assert_is_element(subelement)
+    def insert(self, *args):
+        if len(args) != 2:
+            raise TypeError(f'insert expected 2 arguments, got {len(args)}')
+        index, subelement = args
+        from operator import index as to_index
+        index = to_index(index)
+        if not isinstance(subelement, Element):
+            _type_check('insert', 2, subelement)
         self._children.insert(index, subelement)
 
-    def _assert_is_element(self, e):
-        # Need to refer to the actual Python implementation, not the
-        # shadowing C implementation.
-        if not isinstance(e, _Element_Py):
-            raise TypeError('expected an Element, not %s' % type(e).__name__)
-
-    def remove(self, subelement):
-        """Remove matching subelement.
-
-        Unlike the find methods, this method compares elements based on
-        identity, NOT ON tag value or contents.  To remove subelements by
-        other means, the easiest way is to use a list comprehension to
-        select what elements to keep, and then use slice assignment to update
-        the parent element.
-
-        ValueError is raised if a matching element could not be found.
-
-        """
-        # assert iselement(element)
-        try:
-            self._children.remove(subelement)
-        except ValueError:
-            # to align the error message with the C implementation
-            raise ValueError("Element.remove(x): element not found") from None
+    def remove(self, *args):
+        if len(args) != 1:
+            raise TypeError(f'Element.remove() takes exactly one argument ({len(args)} given)')
+        subelement, = args
+        if not isinstance(subelement, Element):
+            _type_check('remove', None, subelement)
+        children = self._children
+        for index, child in enumerate(children):
+            if child is subelement or child == subelement:
+                del children[index]
+                return
+        raise ValueError('Element.remove(x): element not found')
 
     def find(self, path, namespaces=None):
-        """Find first matching element by tag name or path.
-
-        *path* is a string having either an element tag or an XPath,
-        *namespaces* is an optional mapping from namespace prefix to full
-        name.
-
-        Return the first matching element, or None if no element was found.
-
-        """
         return ElementPath.find(self, path, namespaces)
 
     def findtext(self, path, default=None, namespaces=None):
-        """Find text for first matching element by tag name or path.
-
-        *path* is a string having either an element tag or an XPath,
-        *default* is the value to return if the element was not found,
-        *namespaces* is an optional mapping from namespace prefix to full
-        name.
-
-        Return text content of first matching element, or default value if
-        none was found.  Note that if an element is found having no text
-        content, the empty string is returned.
-
-        """
         return ElementPath.findtext(self, path, default, namespaces)
 
     def findall(self, path, namespaces=None):
-        """Find all matching subelements by tag name or path.
-
-        *path* is a string having either an element tag or an XPath,
-        *namespaces* is an optional mapping from namespace prefix to full
-        name.
-
-        Returns list containing all matching elements in document order.
-
-        """
         return ElementPath.findall(self, path, namespaces)
 
     def iterfind(self, path, namespaces=None):
-        """Find all matching subelements by tag name or path.
-
-        *path* is a string having either an element tag or an XPath,
-        *namespaces* is an optional mapping from namespace prefix to full
-        name.
-
-        Return an iterable yielding all matching elements in document order.
-
-        """
         return ElementPath.iterfind(self, path, namespaces)
 
     def clear(self):
-        """Reset element.
-
-        This function removes all subelements, clears all attributes, and sets
-        the text and tail attributes to None.
-
-        """
-        self.attrib.clear()
-        self._children = []
+        object.__setattr__(self, '_attrib', None)
+        self._children.clear()
         self.text = self.tail = None
 
-    def get(self, key, default=None):
-        """Get element attribute.
+    def get(self, *args, **kwargs):
+        key, default = _bind('get', ('key', 'default'), 1, args, kwargs)
+        attrib = self._attrib
+        if attrib is None:
+            return default
+        return attrib.get(key, default)
 
-        Equivalent to attrib.get, but some implementations may handle this a
-        bit more efficiently.  *key* is what attribute to look for, and
-        *default* is what to return if the attribute was not found.
-
-        Returns a string containing the attribute value, or the default if
-        attribute was not found.
-
-        """
-        return self.attrib.get(key, default)
-
-    def set(self, key, value):
-        """Set element attribute.
-
-        Equivalent to attrib[key] = value, but some implementations may handle
-        this a bit more efficiently.  *key* is what attribute to set, and
-        *value* is the attribute value to set it to.
-
-        """
+    def set(self, *args):
+        if len(args) != 2:
+            raise TypeError(f'set expected 2 arguments, got {len(args)}')
+        key, value = args
         self.attrib[key] = value
 
-    def keys(self):
-        """Get attribute names.
+    def keys(self, *args):
+        if args:
+            raise TypeError(f'Element.keys() takes no arguments ({len(args)} given)')
+        return list(self._attrib or ())
 
-        Equivalent to attrib.keys()
-
-        """
-        return self.attrib.keys()
-
-    def items(self):
-        """Get element attributes as (name, value) pairs.
-
-        Equivalent to attrib.items().
-
-        """
-        return self.attrib.items()
+    def items(self, *args):
+        if args:
+            raise TypeError(f'Element.items() takes no arguments ({len(args)} given)')
+        return list((self._attrib or {}).items())
 
     def iter(self, tag=None):
-        """Create tree iterator.
-
-        The iterator loops over the element and all subelements in document
-        order, returning all elements with a matching tag.
-
-        If the tree structure is modified during iteration, new or removed
-        elements may or may not be included.  To get a stable set, use the
-        list() function on the iterator, and loop over the resulting list.
-
-        *tag* is what tags to look for (default is to return all elements)
-
-        Return an iterator containing all the matching elements.
-
-        """
         if tag == "*":
             tag = None
+        return _make_iterator(self._iter(tag))
+
+    def _iter(self, tag):
         if tag is None or self.tag == tag:
             yield self
         for e in self._children:
-            yield from e.iter(tag)
+            yield from e._iter(tag)
 
     def itertext(self):
-        """Create text iterator.
+        return _make_iterator(self._itertext())
 
-        The iterator loops over the element and all subelements in document
-        order, returning all inner text.
-
-        """
+    def _itertext(self):
         tag = self.tag
         if not isinstance(tag, str) and tag is not None:
             return
         t = self.text
         if t:
             yield t
-        for e in self:
-            yield from e.itertext()
+        for e in self._children:
+            yield from e._itertext()
             t = e.tail
             if t:
                 yield t
 
 
-def SubElement(parent, tag, attrib={}, **extra):
-    """Subelement factory which creates an element instance, and appends it
-    to an existing parent.
+_c_type_name(Element, 'xml.etree.ElementTree.Element')
+del _c_type_name
 
-    The element tag, attribute names, and attribute values can be either
-    bytes or Unicode strings.
 
-    *parent* is the parent element, *tag* is the subelements name, *attrib* is
-    an optional directory containing element attributes, *extra* are
-    additional attributes given as keyword arguments.
-
-    """
-    attrib = {**attrib, **extra}
-    element = parent.makeelement(tag, attrib)
+def SubElement(*args, **extra):
+    if len(args) < 2:
+        raise TypeError(f'SubElement() takes at least 2 arguments ({len(args)} given)')
+    if len(args) > 3:
+        raise TypeError(f'SubElement() takes at most 3 arguments ({len(args)} given)')
+    parent, tag = args[0], args[1]
+    attrib = args[2] if len(args) == 3 else _keyword_attrib(extra)
+    if not isinstance(parent, Element):
+        _type_check('SubElement', 1, parent)
+    if not isinstance(attrib, dict):
+        _type_check('SubElement', 3, attrib, 'dict')
+    element = Element(tag, {**attrib, **extra})
     parent.append(element)
     return element
+
+
+def _set_factories(comment_factory, pi_factory):
+    global _comment_factory, _pi_factory
+    old = (_comment_factory, _pi_factory)
+    _comment_factory, _pi_factory = comment_factory, pi_factory
+    return old
+
+
+_comment_factory = _pi_factory = None
 
 
 def Comment(text=None):
@@ -1919,8 +1993,6 @@ class TreeBuilder:
 
     def close(self):
         """Flush builder buffers and return toplevel document Element."""
-        assert len(self._elem) == 0, "missing end tags"
-        assert self._root is not None, "missing toplevel element"
         return self._root
 
     def _flush(self):
@@ -1963,6 +2035,8 @@ class TreeBuilder:
 
         """
         self._flush()
+        if not self._elem:
+            raise IndexError('pop from empty stack')
         self._last = self._elem.pop()
         assert self._last.tag == tag,\
                "end tag mismatch (expected %s, got %s)" % (
@@ -2009,7 +2083,16 @@ class XMLParser:
 
     """
 
-    def __init__(self, *, target=None, encoding=None):
+    def __init__(self, *args, **kwargs):
+        if args:
+            raise TypeError(f'XMLParser() takes at most 0 positional arguments ({len(args)} given)')
+        for key in kwargs:
+            if key not in ('target', 'encoding'):
+                raise TypeError(f"XMLParser() got an unexpected keyword argument '{key}'")
+        target = kwargs.get('target')
+        encoding = kwargs.get('encoding')
+        if encoding is not None and not isinstance(encoding, str):
+            raise TypeError(f"XMLParser() argument 'encoding' must be str or None, not {type(encoding).__name__}")
         try:
             from xml.parsers import expat
         except ImportError:
@@ -2195,10 +2278,6 @@ class XMLParser:
             pass
         else:
             return close_handler()
-        finally:
-            # get rid of circular references
-            del self.parser, self._parser
-            del self.target, self._target
 
     def flush(self):
         was_enabled = self.parser.GetReparseDeferralEnabled()

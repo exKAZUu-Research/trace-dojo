@@ -116,6 +116,8 @@ export interface Entity {
   base?: string;
   notation?: string;
   open: boolean;
+  /** Whether the declaration is in the document's internal subset, not in a parameter entity's text. */
+  isInternal: boolean;
 }
 
 export interface DefaultAttribute {

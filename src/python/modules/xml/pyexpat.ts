@@ -181,21 +181,16 @@ function information(parser: ExpatParser, name: string): PyValue {
     case 'ErrorCode': {
       return BigInt(parser.errorCode);
     }
-    case 'ErrorLineNumber': {
-      return BigInt(parser.errorLine);
-    }
-    case 'ErrorColumnNumber': {
-      return BigInt(parser.errorColumn);
-    }
-    case 'ErrorByteIndex': {
-      return BigInt(parser.errorByte);
-    }
+    // expat's XML_GetErrorLineNumber and the like are its XML_GetCurrentLineNumber and the like.
+    case 'ErrorLineNumber':
     case 'CurrentLineNumber': {
       return BigInt(parser.position(parser.eventPtr)[0]);
     }
+    case 'ErrorColumnNumber':
     case 'CurrentColumnNumber': {
       return BigInt(parser.position(parser.eventPtr)[1]);
     }
+    case 'ErrorByteIndex':
     case 'CurrentByteIndex': {
       return BigInt(parser.byteIndex());
     }
