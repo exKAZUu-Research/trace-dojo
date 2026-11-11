@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 565 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 596 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import {
   classAnnotate,
   classAnnotations,
@@ -182,7 +182,8 @@ function ownClassAttribute(value: PyValue): PyValue | undefined {
 }
 
 /** The attributes builtin objects have of their own, outside any class dictionary. */
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of builtin object with attributes of its own.
+// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of builtin object with attributes of its own.
+// code-gauge-allow functionNcss 34 -- One case per kind of builtin object with attributes of its own.
 export function specialAttribute(value: PyValue, name: string): PyValue | undefined {
   if (name === '__class__') return ownClassAttribute(value);
   if (typeof value === 'bigint' || typeof value === 'boolean') return integerAttribute(BigInt(value), name);

@@ -255,6 +255,7 @@ function pad(body: string, signAndPrefix: string, spec: Spec, defaultAlign: '<' 
 }
 
 /** `complex.__format__`, which formats both parts as floats, as CPython's format_complex_internal does. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Follows the checks and the layout of CPython's format_complex_internal.
 function formatComplex(value: PyComplex, spec: Spec): string {
   let type = spec.type;
   if (type !== undefined && !'eEfFgGn'.includes(type)) {

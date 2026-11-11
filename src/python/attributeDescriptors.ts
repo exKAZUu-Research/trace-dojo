@@ -14,6 +14,7 @@ type Setter = (instance: PyValue, value: PyValue | undefined) => void;
 
 /** A data attribute of a builtin type, which reads and writes the field or value its owner keeps. */
 export class PyAttribute extends PyObject {
+  // code-gauge-allow functionParameterCount 7 -- The parts of a C type's PyGetSetDef or PyMemberDef entry.
   constructor(
     kind: 'getset' | 'member',
     readonly name: string,

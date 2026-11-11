@@ -25,24 +25,25 @@ export function convertBuiltinAttributes(classes: Iterable<PyClass> = allBuiltin
     // A type CPython gives tp_new has `__new__` in its namespace, which creates its objects as calling it does.
     if (kinds.get('__new__') === 'builtin_function_or_method' && !cls.dict.has('__new__')) defineTypeNew(cls);
     if (cls.isSubclassOf(baseExceptionClass)) defineOwnSlots(cls, kinds);
-    for (const [name, kind] of kinds) {
-      const value = cls.dict.get(name);
-      // A C type's class method is a classmethod_descriptor, not a classmethod object wrapping a function.
-      if (kind === 'classmethod_descriptor' && value instanceof PyDescriptor && value.cls === classmethodClass) {
-        defineMethod(cls, name, (owner, args, kwargs) => callValue(value.fn, [owner, ...args], kwargs), 'class');
-      }
-    }
-    for (const [name, kind] of kinds) {
-      if (kind !== 'getset_descriptor' && kind !== 'member_descriptor') continue;
-      const value = cls.dict.get(name);
-      const descriptorKind = kind === 'member_descriptor' ? 'member' : 'getset';
-      if (value instanceof PyDescriptor && value.cls === propertyClass) {
-        cls.dict.set(name, attributeOf(cls, name, value, descriptorKind));
-      } else if (value === undefined || (name === '__doc__' && (typeof value === 'string' || value === None))) {
-        // A type whose objects have their own __doc__ gives its own by type.__doc__, from CPython's data.
-        cls.dict.set(name, specialAttributeOf(cls, name, descriptorKind));
-      }
-    }
+    for (const [name, kind] of kinds) convertAttribute(cls, name, kind);
+  }
+}
+
+/** Makes one attribute of a builtin class the kind of object CPython's type has under its name. */
+function convertAttribute(cls: PyClass, name: string, kind: string): void {
+  const value = cls.dict.get(name);
+  // A C type's class method is a classmethod_descriptor, not a classmethod object wrapping a function.
+  if (kind === 'classmethod_descriptor' && value instanceof PyDescriptor && value.cls === classmethodClass) {
+    defineMethod(cls, name, (owner, args, kwargs) => callValue(value.fn, [owner, ...args], kwargs), 'class');
+    return;
+  }
+  if (kind !== 'getset_descriptor' && kind !== 'member_descriptor') return;
+  const descriptorKind = kind === 'member_descriptor' ? 'member' : 'getset';
+  if (value instanceof PyDescriptor && value.cls === propertyClass) {
+    cls.dict.set(name, attributeOf(cls, name, value, descriptorKind));
+  } else if (value === undefined || (name === '__doc__' && (typeof value === 'string' || value === None))) {
+    // A type whose objects have their own __doc__ gives its own by type.__doc__, from CPython's data.
+    cls.dict.set(name, specialAttributeOf(cls, name, descriptorKind));
   }
 }
 
