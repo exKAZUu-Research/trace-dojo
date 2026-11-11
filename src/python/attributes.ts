@@ -534,10 +534,8 @@ export function deleteAttribute(target: PyValue, name: string): void {
     if (!target.dict.delete(name)) throw attributeError(target, name);
     return;
   }
-  if (classOf(target).lookup(name) !== undefined) {
-    throw pyError('AttributeError', `'${typeName(target)}' object attribute '${name}' is read-only`);
-  }
-  throw attributeError(target, name);
+  // Deleting an attribute of a builtin type's object fails as assigning it does.
+  throw readOnlyError(target, name);
 }
 
 /** Deletes an instance attribute, honoring descriptors and slots, as `object.__delattr__` does. */

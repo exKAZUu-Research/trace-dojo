@@ -39,6 +39,8 @@ export interface FormattedValue {
   spec?: Expression;
   /** The source text of a self-documenting `{x=}`, which precedes the value. */
   debugText?: string;
+  /** The source text of the expression, which a t-string's Interpolation keeps. */
+  expressionText?: string;
 }
 
 export type Argument =
@@ -73,7 +75,8 @@ export type Expression = Span &
   (
     | { kind: 'constant'; value: Constant }
     | NameRef
-    | { kind: 'fstring'; parts: (string | FormattedValue)[] }
+    /** An f-string, or a t-string (PEP 750) when `template` is set. */
+    | { kind: 'fstring'; parts: (string | FormattedValue)[]; template?: boolean }
     | { kind: 'list' | 'tuple' | 'set'; elements: Element[] }
     | { kind: 'dict'; items: DictItem[] }
     | { kind: 'attribute'; object: Expression; name: string }

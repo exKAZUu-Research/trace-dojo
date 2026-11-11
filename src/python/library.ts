@@ -37,6 +37,7 @@ import './modules/heapq';
 import './modules/bisect';
 import './modules/copy';
 import './modules/string';
+import './modules/templatelib';
 import './modules/typing';
 import './modules/statistics';
 import './modules/re/re';

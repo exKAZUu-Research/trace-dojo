@@ -426,16 +426,21 @@ export abstract class ExpressionConverter {
     if (prefixes.some((prefix) => prefix.includes('b'))) return this.bytesLiteral(node, strings, prefixes);
     const parts: (string | FormattedValue)[] = [];
     let isFormatted = false;
+    const isTemplate = prefixes.some((prefix) => prefix.includes('t'));
     for (const [index, string] of strings.entries()) {
       const prefix = prefixes[index];
       if (prefix.includes('u') && prefix !== 'u')
         fail(rowOf(string), '接頭辞 u は、ほかの接頭辞と組み合わせられません。');
-      if (prefix.includes('t')) fail(rowOf(string), "テンプレート文字列（t'...'）は、この版の Python では使えません。");
+      if (prefix.includes('t') && prefix.includes('f')) fail(rowOf(string), '接頭辞 t と f は、組み合わせられません。');
+      if (prefix.includes('t') !== isTemplate) {
+        fail(rowOf(string), "テンプレート文字列（t'...'）は、ほかの文字列のリテラルと続けて書けません。");
+      }
       const isRaw = prefix.includes('r');
       if (prefix.includes('f')) isFormatted = true;
       this.stringParts(string, isRaw, parts);
     }
     const row = rowOf(node);
+    if (isTemplate) return { kind: 'fstring', parts, template: true, row };
     if (!isFormatted) {
       const isUnicode = /^[uU]['"]/.test(children(strings[0])[0].text) || undefined;
       return { kind: 'constant', value: { kind: 'str', value: (parts as string[]).join(''), isUnicode }, row };
@@ -477,7 +482,7 @@ export abstract class ExpressionConverter {
     const pushText = (end: number): void => {
       if (end <= position) return;
       const raw = this.source.slice(position, end);
-      const text = startNode.text.toLowerCase().includes('f') ? raw.replaceAll('{{', '{').replaceAll('}}', '}') : raw;
+      const text = /[ft]/.test(startNode.text.toLowerCase()) ? raw.replaceAll('{{', '{').replaceAll('}}', '}') : raw;
       parts.push(isRaw ? text : decodeEscapes(text, row));
     };
     for (const child of nodes.slice(1, -1)) {
@@ -504,10 +509,12 @@ export abstract class ExpressionConverter {
     if (conversionText !== undefined && !['r', 's', 'a'].includes(conversionText)) {
       fail(row, `f-string の変換 !${conversionText} は使えません。!r・!s・!a のどれかを書いてください。`);
     }
+    const expressionEnd = (equals ?? conversionNode ?? specNode ?? (children(node).at(-1) as Node)).startIndex;
     const value: FormattedValue = {
       expression,
       conversion: conversionText as FormattedValue['conversion'],
       spec: specNode ? this.formatSpec(specNode) : undefined,
+      expressionText: this.source.slice(node.startIndex + 1, expressionEnd),
     };
     if (equals) {
       value.debugText = this.source.slice(node.startIndex + 1, equals.endIndex);

@@ -33,6 +33,7 @@ import {
 import { binaryOp, compareOp, unaryOp } from './operators';
 import { markGeneratorExpression } from './reflection';
 import type { Runtime } from './runtime';
+import { templateLiteral } from './templateStrings';
 import {
   Ellipsis,
   functionClass,
@@ -77,7 +78,9 @@ export class ExpressionEvaluator {
         return constantValue(expression.value);
       }
       case 'fstring': {
-        return this.formattedString(expression.parts, frame);
+        return expression.template
+          ? this.templateString(expression.parts, frame)
+          : this.formattedString(expression.parts, frame);
       }
       case 'list':
       case 'tuple':
@@ -444,6 +447,17 @@ export class ExpressionEvaluator {
       this.runtime.buildString(result.length);
     }
     return result;
+  }
+
+  /** A t-string, whose replacement fields evaluate to the values of its Interpolations, unformatted. */
+  private templateString(parts: (string | FormattedValue)[], frame: Frame): PyValue {
+    const fields: [PyValue, string][] = [];
+    for (const part of parts) {
+      if (typeof part === 'string') continue;
+      const value = this.evaluate(part.expression, frame);
+      fields.push([value, part.spec ? (this.evaluate(part.spec, frame) as string) : '']);
+    }
+    return templateLiteral(parts, fields);
   }
 
   // Calls -----------------------------------------------------------------------------------------------------------

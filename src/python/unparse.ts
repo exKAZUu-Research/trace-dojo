@@ -67,7 +67,7 @@ function unparse(expression: Expression, level: Level): string {
       return constantText(expression.value);
     }
     case 'fstring': {
-      return `f${strRepr(fstringBody(expression.parts))}`;
+      return `${expression.template ? 't' : 'f'}${strRepr(fstringBody(expression.parts))}`;
     }
     case 'list': {
       return `[${elementsText(expression.elements)}]`;
