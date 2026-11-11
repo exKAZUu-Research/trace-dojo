@@ -15,7 +15,7 @@ def ngettext(msgid1, msgid2, n):
 
 registerSourceModule('gettext', GETTEXT_SOURCE);
 
-// The parts of CPython's private `_colorize` that `argparse` calls. Output never goes to a terminal here, so, as
+// The parts of CPython's private `_colorize` that `argparse` and `unittest` call. Output never goes to a terminal here, so, as
 // `_colorize.can_colorize()` decides for CPython's piped output, it is never colored.
 const COLORIZE_SOURCE = String.raw`
 class _ArgparseNoColor:
@@ -24,8 +24,13 @@ class _ArgparseNoColor:
     long_option = short_option = label = action = reset = ''
 
 
+class _UnittestNoColor:
+    passed = warn = fail = fail_info = reset = ''
+
+
 class _ThemeNoColor:
     argparse = _ArgparseNoColor()
+    unittest = _UnittestNoColor()
 
 
 theme_no_color = _ThemeNoColor()

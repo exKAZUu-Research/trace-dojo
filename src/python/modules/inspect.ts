@@ -9,6 +9,7 @@ import { builtin } from '../define';
 import { registerModule } from '../modules';
 import { callValue, getAttribute, getAttributeOrUndefined, isTruthy } from '../objects';
 import { currentRuntime } from '../runtimeContext';
+import { IS_ABSTRACT, typeFlags } from '../typeFlags';
 import { builtinFunctionClass, classOf, generatorClass, None, typeError } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
 import { PyBoundMethod, PyBuiltinFunction, PyClass, PyFunction, PyGenerator, PyModule, type PyValue } from '../values';
@@ -29,6 +30,8 @@ const PREDICATES: [string, (value: PyValue) => boolean][] = [
   ['isawaitable', isAwaitable],
   ['isbuiltin', (value) => isBuiltin(value)],
   ['ismethoddescriptor', (value) => isMethodDescriptor(value)],
+  // ABCMeta records `__abstractmethods__` once it creates a class, which sets the class's abstract flag.
+  ['isabstract', (value) => value instanceof PyClass && (typeFlags(value) & IS_ABSTRACT) !== 0],
   [
     'isroutine',
     (value) => value instanceof PyBuiltinFunction || value instanceof PyFunction || value instanceof PyBoundMethod,
@@ -77,7 +80,6 @@ registerModule(
       ['unwrap', 'inspect.unwrap()'],
       ['getfullargspec', 'inspect.getfullargspec()'],
       ['getcallargs', 'inspect.getcallargs()'],
-      ['isabstract', 'inspect.isabstract()'],
       ['isdatadescriptor', 'inspect.isdatadescriptor()'],
       ['getmembers_static', 'inspect.getmembers_static()'],
     ].map(([name, feature]) => [name, `inspect.${name}()（${feature}）`])

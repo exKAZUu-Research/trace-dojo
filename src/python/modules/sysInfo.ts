@@ -13,6 +13,7 @@ import {
   classOf,
   Ellipsis,
   moduleClass,
+  newDict,
   newTuple,
   None,
   NotImplemented,
@@ -57,6 +58,9 @@ export function sysInformation(runtime: Runtime): [string, PyValue][] {
     ['int_info', INT_INFO],
     ['hash_info', HASH_INFO],
     ['flags', FLAGS],
+    // A program here runs with no -W or -X option.
+    ['warnoptions', runtime.listOf([])],
+    ['_xoptions', newDict()],
     ['getrecursionlimit', builtin('getrecursionlimit', 'none', 0, 0, () => BigInt(runtime.recursionLimit))],
     ['setrecursionlimit', builtin('setrecursionlimit', 'one', 1, 1, ([limit]) => setRecursionLimit(runtime, limit))],
     ['getsizeof', builtin('getsizeof', 'takes', 1, 2, ([value]) => sizeOf(value), { keywords: ['object', 'default'] })],

@@ -4,7 +4,7 @@ import { baseExceptionClass } from './types';
 import { type PyClass, PySet } from './values';
 
 const HEAP_BASE = 0x56_00;
-const IS_ABSTRACT = 1 << 20;
+export const IS_ABSTRACT = 1 << 20;
 /** The bits a class inherits from its builtin base: the subclass bits, MATCH_SELF, SEQUENCE and MAPPING. */
 const INHERITED = 0xff_40_00_60;
 

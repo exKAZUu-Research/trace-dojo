@@ -198,6 +198,8 @@ function boundMethodAttribute(method: PyBoundMethod, name: string): PyValue | un
   if (name === '__name__' || name === '__qualname__' || name === '__doc__' || name === '__module__') {
     return specialAttribute(method.fn, name);
   }
+  // As CPython's method_getattro does, a method reads the other attributes of its function.
+  if (method.fn instanceof PyFunction) return method.fn.dict.get(name) ?? specialAttribute(method.fn, name);
   return undefined;
 }
 

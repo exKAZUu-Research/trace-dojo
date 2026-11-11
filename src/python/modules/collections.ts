@@ -5,12 +5,13 @@ import { DictStore } from '../dictStore';
 import { mappingEntries, storeKey } from '../expressionEvaluator';
 import { defineNew, definePythonLevelNew } from '../instances';
 import { keyError } from '../items';
-import { registerModule } from '../modules';
+import { importModule, registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import { callValue, getIterator, isCallable, isTruthy, iterate, lookupSpecial, toArray } from '../objects';
 import { binaryOp, equals, keysEqual, lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
+import { registerSourceModule } from '../sourceModules';
 import { containerRepr, dictBody, updateDict } from '../typeContainers';
 import {
   builtinClass,
@@ -43,6 +44,7 @@ import {
   PyTuple,
   type PyValue,
 } from '../values';
+import { COLLECTIONS_USER_SOURCE } from './collectionsUserSource';
 
 // deque -------------------------------------------------------------------------------------------------------------
 
@@ -669,21 +671,28 @@ export function makeNamedTupleClass(name: string, fields: string[], module: stri
   return namedtupleWithMethods([name, newList(fields)], new Map([['module', module]])) as PyClass;
 }
 
-registerModule(
-  'collections',
-  () =>
-    new Map<string, PyValue>([
-      ['deque', dequeClass],
-      ['Counter', counterClass],
-      ['defaultdict', defaultdictClass],
-      ['OrderedDict', orderedDictClass],
-      [
-        'namedtuple',
-        builtin('namedtuple', 'takes', 2, 2, namedtupleWithMethods, {
-          keywords: ['typename', 'field_names', 'defaults', 'rename', 'module'],
-        }),
-      ],
-    ])
-);
+registerModule('collections', (runtime, namespace) => {
+  for (const [name, value] of [
+    ['deque', dequeClass],
+    ['Counter', counterClass],
+    ['defaultdict', defaultdictClass],
+    ['OrderedDict', orderedDictClass],
+    [
+      'namedtuple',
+      builtin('namedtuple', 'takes', 2, 2, namedtupleWithMethods, {
+        keywords: ['typename', 'field_names', 'defaults', 'rename', 'module'],
+      }),
+    ],
+  ] as const) {
+    namespace.set(name, value);
+  }
+  // The classes CPython writes in Python import collections.abc, which reads the names above.
+  const written = importModule(runtime, '_collections_user').dict;
+  for (const name of ['ChainMap', 'UserDict', 'UserList', 'UserString'])
+    namespace.set(name, written.get(name) as PyValue);
+  return new Map();
+});
+
+registerSourceModule('_collections_user', COLLECTIONS_USER_SOURCE);
 
 export { getIterator, PyObject, storeKey };

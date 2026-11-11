@@ -1,5 +1,5 @@
-// CPython 3.14's `Lib/pickle.py`, with no `PickleBuffer`, and the unpickler raising the errors of CPython's C
-// unpickler (`_pickle`), which the module's functions and classes stand for.
+// CPython 3.14's `Lib/pickle.py`, with no `PickleBuffer`, and the unpickler raising the errors of CPython's C unpickler
+// (`_pickle`), which the module's functions and classes stand for.
 export const PICKLE_SOURCE =
   String.raw`"""Create portable serialized representations of Python objects.
 
