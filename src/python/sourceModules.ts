@@ -50,7 +50,8 @@ export function runModuleSource(
 ): void {
   let parsed = parsedSources.get(source);
   if (!parsed) {
-    parsed = parseSourceModule(source, blocks);
+    const { budget } = runtime;
+    parsed = budget.excludingTime(() => parseSourceModule(source, blocks));
     parsedSources.set(source, parsed);
   }
   // Only the helpers the code uses, so that a module's namespace lists no others.
