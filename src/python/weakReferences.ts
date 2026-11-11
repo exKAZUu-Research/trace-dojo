@@ -141,6 +141,10 @@ export function runWeakCallbacks(inFlight: unknown[] = [], collectCycles = false
   const runtime = currentRuntime();
   const list = watched.get(runtime);
   if (!list || list.length === 0) return;
+  // This runs after every statement, so a walk over everything the program reaches, which library code makes long,
+  // is left for when some referent is not held directly.
+  if (!collectCycles && list.every((reference) => isHeldDirectly(runtime, referenceOf(reference).referent, inFlight)))
+    return;
   const reachable = runtime.reachableObjects(inFlight);
   const dead = list.filter((reference) => {
     const { referent } = referenceOf(reference);
@@ -159,6 +163,18 @@ export function runWeakCallbacks(inFlight: unknown[] = [], collectCycles = false
     if (!reachable.has(reference) || callback === undefined) continue;
     callCallback(callback, reference);
   }
+}
+
+/** Whether the program holds `object` in a variable or a module holds it as a global, so it is certainly alive. */
+function isHeldDirectly(runtime: ReturnType<typeof currentRuntime>, object: unknown, inFlight: unknown[]): boolean {
+  if (inFlight.includes(object) || runtime.evaluator.handledExceptions.includes(object as PyInstance)) return true;
+  return runtime.frames.some(
+    (frame) =>
+      frame.locals.values().some((value) => value === object) ||
+      frame.globals.values().some((value) => value === object) ||
+      frame.cells.values().some((cell) => cell.value === object) ||
+      frame.temporaries.includes(object as PyValue)
+  );
 }
 
 /**
