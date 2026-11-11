@@ -91,3 +91,8 @@ import './modules/tomllibTypes';
 import './modules/urllibParse';
 import './modules/ipaddress';
 import './modules/sched';
+import './modules/argparse';
+import './modules/optparse';
+import './modules/getopt';
+import './modules/configparser';
+import './modules/gettextStub';

@@ -2,6 +2,7 @@
 import { AttributeStore } from './attributeStore';
 import { solidBase } from './classes';
 import {
+  builtinClassesWithDict,
   callGetter,
   callSetter,
   descriptorGetter,
@@ -317,7 +318,11 @@ function exceptionFieldOf(instance: PyInstance, name: string): PyValue | undefin
 
 export function setAttribute(target: PyValue, name: string, value: PyValue): void {
   currentRuntime().spend();
-  if (target instanceof PyInstance || isSubclassInstance(target)) {
+  if (
+    target instanceof PyInstance ||
+    isSubclassInstance(target) ||
+    (target instanceof PyObject && builtinClassesWithDict.has(target.cls))
+  ) {
     const custom = userHook(target as PyObject, '__setattr__');
     if (custom === undefined) setInstanceAttribute(target as PyObject, name, value);
     else callValue(bindValue(custom, target), [name, value]);
