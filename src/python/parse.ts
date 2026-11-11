@@ -95,14 +95,18 @@ function parseSourceModule(
 function deepestNode(root: Node): { depth: number; row: number } {
   const cursor = root.walk();
   let deepest = { depth: 0, row: 0 };
+  // The cursor's own `currentDepth` takes time in proportion to the depth, which deep nesting makes quadratic.
+  let depth = 0;
   try {
     for (;;) {
-      if (cursor.currentDepth > deepest.depth) {
-        deepest = { depth: cursor.currentDepth, row: cursor.startPosition.row };
+      if (depth > deepest.depth) deepest = { depth, row: cursor.startPosition.row };
+      if (cursor.gotoFirstChild()) {
+        depth++;
+        continue;
       }
-      if (cursor.gotoFirstChild()) continue;
       while (!cursor.gotoNextSibling()) {
         if (!cursor.gotoParent()) return deepest;
+        depth--;
       }
     }
   } finally {

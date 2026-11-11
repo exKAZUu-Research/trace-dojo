@@ -55,12 +55,18 @@ const MAX_NESTING_DEPTH = 300;
 function findTooDeepNode(root: Node, maxDepth: number): Node | undefined {
   if (maxDepth === Number.POSITIVE_INFINITY) return;
   const cursor = root.walk();
+  // The cursor's own `currentDepth` takes time in proportion to the depth, which deep nesting makes quadratic.
+  let depth = 0;
   try {
     for (;;) {
-      if (cursor.currentDepth > maxDepth) return cursor.currentNode;
-      if (cursor.gotoFirstChild()) continue;
+      if (depth > maxDepth) return cursor.currentNode;
+      if (cursor.gotoFirstChild()) {
+        depth++;
+        continue;
+      }
       while (!cursor.gotoNextSibling()) {
         if (!cursor.gotoParent()) return;
+        depth--;
       }
     }
   } finally {
