@@ -109,3 +109,11 @@ registerUnsupportedClassAttributes('typing.TypeVar', {
   ...of(INTERNAL, ['__typing_prepare_subst__', '__typing_subst__']),
   ...of('型引数の遅延評価の関数', ['evaluate_bound', 'evaluate_constraints', 'evaluate_default']),
 });
+registerUnsupportedClassAttributes(
+  'enum.EnumType',
+  of('Enum のクラスの特殊メソッドを直接呼ぶこと（len() と [] は使える）', ['__getitem__', '__len__'])
+);
+registerUnsupportedClassAttributes('typing.Any', {
+  ...of(PYTHON_CLASS, ['__firstlineno__', '__static_attributes__']),
+  ...of(WEAKREF_LIST, ['__weakref__']),
+});
