@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss 411 -- The list, tuple, and dict types keep their methods together.
 import { pyRepr } from './conversions';
 import { method } from './define';
-import { DictStore } from './dictStore';
+import { type DictEntry, DictStore } from './dictStore';
 import { mappingEntries } from './expressionEvaluator';
 import { pyHash } from './hashing';
 import { builtinGetItem, keyError, sliceIndices } from './items';
@@ -405,15 +405,7 @@ method(dictClass, '__delitem__', 'one', 1, 1, (self, [key]) => {
   return None;
 });
 method(dictClass, '__iter__', 'none', 0, 0, (self) => getIterator(new PyDictView(dictKeysClass, dictOf(self), 'keys')));
-method(dictClass, '__reversed__', 'none', 0, 0, (self) =>
-  listIterator(
-    dictOf(self)
-      .store.ordered()
-      .toReversed()
-      .map((entry) => entry.key),
-    'dict_reversekeyiterator'
-  )
-);
+method(dictClass, '__reversed__', 'none', 0, 0, (self) => reversedDict(dictOf(self), 'keys'));
 method(dictClass, 'keys', 'none', 0, 0, (self) => new PyDictView(dictKeysClass, dictOf(self), 'keys'));
 method(dictClass, 'values', 'none', 0, 0, (self) => new PyDictView(dictValuesClass, dictOf(self), 'values'));
 method(dictClass, 'items', 'none', 0, 0, (self) => new PyDictView(dictItemsClass, dictOf(self), 'items'));
@@ -468,14 +460,47 @@ dictClass.dict.set('__hash__', None);
 dictKeysClass.dict.set('__hash__', None);
 dictItemsClass.dict.set('__hash__', None);
 
-function listIterator(items: PyValue[], name: string): PyIterator {
-  let index = 0;
+/**
+ * A reverse iterator over a dict, which reads the entries as they are when it reaches them, as CPython's does, and
+ * fails once the dict's size changes.
+ */
+function reversedDict(dict: PyDict, view: 'keys' | 'values' | 'items'): PyIterator {
+  const { store } = dict;
+  const size = store.size;
+  let last: DictEntry | undefined;
+  let remaining = size;
+  let state: 'running' | 'failed' | 'done' = 'running';
+  const itemOf = (entry: DictEntry): PyValue =>
+    view === 'keys' ? entry.key : view === 'values' ? entry.value : newTuple([entry.key, entry.value]);
   const next = withRemaining(
-    () => (index < items.length ? (items[index++] as PyValue) : DONE),
-    () => items.length - index
+    () => {
+      if (state === 'done') return DONE;
+      if (state === 'failed' || store.size !== size) {
+        state = 'failed';
+        throw pyError('RuntimeError', 'dictionary changed size during iteration');
+      }
+      const entry = remaining > 0 ? store.previous(last) : undefined;
+      if (entry === undefined) {
+        state = 'done';
+        return DONE;
+      }
+      last = entry;
+      remaining--;
+      return itemOf(entry);
+    },
+    () => (state === 'running' && store.size === size ? remaining : 0)
   );
-  withState(next, { reduce: () => reduction('iter', [newList(items.slice(index))]) });
-  return new PyIterator(iteratorClass(name), next, () => items);
+  withState(next, {
+    reduce: () => {
+      const items: PyValue[] = [];
+      for (let entry = store.previous(last); entry && state === 'running'; entry = store.previous(entry)) {
+        items.push(itemOf(entry));
+      }
+      return reduction('iter', [newList(items.slice(0, remaining))]);
+    },
+  });
+  const name = view === 'keys' ? 'key' : view === 'values' ? 'value' : 'item';
+  return new PyIterator(iteratorClass(`dict_reverse${name}iterator`), next, () => [dict]);
 }
 
 for (const [cls, view] of [
@@ -489,12 +514,7 @@ for (const [cls, view] of [
   method(cls, '__len__', 'none', 0, 0, (self) => BigInt((self as PyDictView).dict.store.size));
   method(cls, '__iter__', 'none', 0, 0, (self) => getIterator(self));
   method(cls, '__contains__', 'one', 1, 1, (self, [item]) => contains(self, item));
-  method(cls, '__reversed__', 'none', 0, 0, (self) =>
-    listIterator(
-      toArray(self).toReversed(),
-      `dict_reverse${view === 'keys' ? 'key' : view === 'values' ? 'value' : 'item'}iterator`
-    )
-  );
+  method(cls, '__reversed__', 'none', 0, 0, (self) => reversedDict((self as PyDictView).dict, view));
   if (view !== 'values') {
     method(cls, 'isdisjoint', 'one', 1, 1, (self, [other]) => toArray(other).every((item) => !contains(self, item)));
   }

@@ -90,6 +90,16 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     kind: 'frozen',
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __builtins__ abstractmethod abstractclassmethod abstractstaticmethod abstractproperty get_cache_token _abc_init _abc_register _abc_instancecheck _abc_subclasscheck _get_dump _reset_registry _reset_caches ABCMeta update_abstractmethods ABC',
+    owners: {
+      get_cache_token: '_abc',
+      _abc_init: '_abc',
+      _abc_register: '_abc',
+      _abc_instancecheck: '_abc',
+      _abc_subclasscheck: '_abc',
+      _get_dump: '_abc',
+      _reset_registry: '_abc',
+      _reset_caches: '_abc',
+    },
   },
   annotationlib: {
     kind: 'source',
@@ -102,6 +112,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { _os: 'os', _re: 're', _sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __version__ __all__ _os _re _sys _ ngettext SUPPRESS OPTIONAL ZERO_OR_MORE ONE_OR_MORE PARSER REMAINDER _UNRECOGNIZED_ARGS_ATTR _AttributeHolder _copy_items _identity HelpFormatter RawDescriptionHelpFormatter RawTextHelpFormatter ArgumentDefaultsHelpFormatter MetavarTypeHelpFormatter _get_action_name ArgumentError ArgumentTypeError Action BooleanOptionalAction _StoreAction _StoreConstAction _StoreTrueAction _StoreFalseAction _AppendAction _AppendConstAction _CountAction _HelpAction _VersionAction _SubParsersAction _ExtendAction FileType Namespace _ActionsContainer _ArgumentGroup _MutuallyExclusiveGroup _prog_name ArgumentParser',
+    owners: { _: 'gettext', ngettext: 'gettext' },
   },
   ast: {
     kind: 'source',
@@ -148,6 +159,52 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __path__ __file__ __cached__ __builtins__ sys constants coroutines format_helpers base_futures exceptions base_tasks events futures protocols transports log sslproto mixins locks queues timeouts tasks staggered trsock base_events BaseEventLoop Server iscoroutinefunction iscoroutine AbstractEventLoop AbstractServer Handle TimerHandle get_event_loop_policy set_event_loop_policy get_event_loop set_event_loop new_event_loop _set_running_loop get_running_loop _get_running_loop BrokenBarrierError CancelledError InvalidStateError TimeoutError IncompleteReadError LimitOverrunError SendfileNotAvailableError Future wrap_future isfuture future_add_to_awaited_by future_discard_from_awaited_by graph capture_call_graph format_call_graph print_call_graph FrameCallGraphEntry FutureCallGraph Lock Event Condition Semaphore BoundedSemaphore Barrier BaseProtocol Protocol DatagramProtocol SubprocessProtocol BufferedProtocol runners Runner run Queue PriorityQueue LifoQueue QueueFull QueueEmpty QueueShutDown streams StreamReader StreamWriter StreamReaderProtocol open_connection start_server open_unix_connection start_unix_server subprocess create_subprocess_exec create_subprocess_shell Task create_task FIRST_COMPLETED FIRST_EXCEPTION ALL_COMPLETED wait wait_for as_completed sleep gather shield ensure_future run_coroutine_threadsafe current_task all_tasks create_eager_task_factory eager_task_factory _register_task _unregister_task _enter_task _leave_task taskgroups TaskGroup Timeout timeout timeout_at threads to_thread BaseTransport ReadTransport WriteTransport Transport DatagramTransport SubprocessTransport __all__ base_subprocess selector_events unix_events SelectorEventLoop EventLoop __getattr__',
+    owners: {
+      iscoroutinefunction: 'asyncio.coroutines',
+      iscoroutine: 'asyncio.coroutines',
+      get_event_loop_policy: 'asyncio.events',
+      set_event_loop_policy: 'asyncio.events',
+      get_event_loop: '_asyncio',
+      set_event_loop: 'asyncio.events',
+      new_event_loop: 'asyncio.events',
+      _set_running_loop: '_asyncio',
+      get_running_loop: '_asyncio',
+      _get_running_loop: '_asyncio',
+      wrap_future: 'asyncio.futures',
+      isfuture: 'asyncio.base_futures',
+      future_add_to_awaited_by: '_asyncio',
+      future_discard_from_awaited_by: '_asyncio',
+      capture_call_graph: 'asyncio.graph',
+      format_call_graph: 'asyncio.graph',
+      print_call_graph: 'asyncio.graph',
+      run: 'asyncio.runners',
+      open_connection: 'asyncio.streams',
+      start_server: 'asyncio.streams',
+      open_unix_connection: 'asyncio.streams',
+      start_unix_server: 'asyncio.streams',
+      create_subprocess_exec: 'asyncio.subprocess',
+      create_subprocess_shell: 'asyncio.subprocess',
+      create_task: 'asyncio.tasks',
+      wait: 'asyncio.tasks',
+      wait_for: 'asyncio.tasks',
+      as_completed: 'asyncio.tasks',
+      sleep: 'asyncio.tasks',
+      gather: 'asyncio.tasks',
+      shield: 'asyncio.tasks',
+      ensure_future: 'asyncio.tasks',
+      run_coroutine_threadsafe: 'asyncio.tasks',
+      current_task: '_asyncio',
+      all_tasks: '_asyncio',
+      create_eager_task_factory: 'asyncio.tasks',
+      eager_task_factory: 'asyncio.tasks',
+      _register_task: '_asyncio',
+      _unregister_task: '_asyncio',
+      _enter_task: '_asyncio',
+      _leave_task: '_asyncio',
+      timeout: 'asyncio.timeouts',
+      timeout_at: 'asyncio.timeouts',
+      to_thread: 'asyncio.threads',
+    },
   },
   'asyncio.graph': {
     kind: 'source',
@@ -182,23 +239,34 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     kind: 'source',
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ insort_right bisect_right insort_left bisect_left bisect insort',
+    owners: {
+      insort_right: '_bisect',
+      bisect_right: '_bisect',
+      insort_left: '_bisect',
+      bisect_left: '_bisect',
+      bisect: '_bisect',
+      insort: '_bisect',
+    },
   },
   builtins: {
     kind: 'builtin',
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __build_class__ __import__ abs all any ascii bin breakpoint callable chr compile delattr dir divmod eval exec format getattr globals hasattr hash hex id input isinstance issubclass iter aiter len locals max min next anext oct ord pow print repr round setattr sorted sum vars None Ellipsis NotImplemented False True bool memoryview bytearray bytes classmethod complex dict enumerate filter float frozenset property int list map object range reversed set slice staticmethod str super tuple type zip __debug__ BaseException BaseExceptionGroup Exception GeneratorExit KeyboardInterrupt SystemExit ArithmeticError AssertionError AttributeError BufferError EOFError ImportError LookupError MemoryError NameError OSError ReferenceError RuntimeError StopAsyncIteration StopIteration SyntaxError SystemError TypeError ValueError Warning FloatingPointError OverflowError ZeroDivisionError BytesWarning DeprecationWarning EncodingWarning FutureWarning ImportWarning PendingDeprecationWarning ResourceWarning RuntimeWarning SyntaxWarning UnicodeWarning UserWarning BlockingIOError ChildProcessError ConnectionError FileExistsError FileNotFoundError InterruptedError IsADirectoryError NotADirectoryError PermissionError ProcessLookupError TimeoutError IndentationError _IncompleteInputError IndexError KeyError ModuleNotFoundError NotImplementedError PythonFinalizationError RecursionError UnboundLocalError UnicodeError BrokenPipeError ConnectionAbortedError ConnectionRefusedError ConnectionResetError TabError UnicodeDecodeError UnicodeEncodeError UnicodeTranslateError ExceptionGroup EnvironmentError IOError open quit exit copyright credits license help',
+    owners: { open: '_io' },
   },
   bz2: {
     kind: 'source',
     imports: { _streams: 'compression._common._streams', io: 'io', os: 'os' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ __author__ _builtin_open _streams io os BZ2Compressor BZ2Decompressor _MODE_READ _MODE_WRITE BZ2File open compress decompress',
+    owners: { _builtin_open: '_io' },
   },
   calendar: {
     kind: 'source',
     imports: { _locale: 'locale', datetime: 'datetime', sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ sys datetime IntEnum global_enum _locale repeat __all__ error IllegalMonthError IllegalWeekdayError __getattr__ JANUARY FEBRUARY MARCH APRIL MAY JUNE JULY AUGUST SEPTEMBER OCTOBER NOVEMBER DECEMBER Month MONDAY TUESDAY WEDNESDAY THURSDAY FRIDAY SATURDAY SUNDAY Day mdays _localized_month _localized_day day_name day_abbr month_name month_abbr isleap leapdays weekday _validate_month monthrange _monthlen _prevmonth _nextmonth Calendar TextCalendar HTMLCalendar different_locale _get_default_locale LocaleTextCalendar LocaleHTMLCalendar _CLIDemoCalendar _CLIDemoLocaleCalendar c firstweekday setfirstweekday monthcalendar prweek week weekheader prmonth month calendar prcal _colwidth _spacing format formatstring EPOCH _EPOCH_ORD timegm main',
+    owners: { global_enum: 'enum' },
   },
   cmath: {
     kind: 'builtin',
@@ -210,12 +278,54 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { builtins: 'builtins', sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __builtins__ builtins sys register unregister lookup encode decode escape_encode escape_decode utf_8_encode utf_8_decode utf_7_encode utf_7_decode utf_16_encode utf_16_le_encode utf_16_be_encode utf_16_decode utf_16_le_decode utf_16_be_decode utf_16_ex_decode utf_32_encode utf_32_le_encode utf_32_be_encode utf_32_decode utf_32_le_decode utf_32_be_decode utf_32_ex_decode unicode_escape_encode unicode_escape_decode raw_unicode_escape_encode raw_unicode_escape_decode latin_1_encode latin_1_decode ascii_encode ascii_decode charmap_encode charmap_decode charmap_build readbuffer_encode register_error lookup_error __all__ BOM_UTF8 BOM_LE BOM_UTF16_LE BOM_BE BOM_UTF16_BE BOM_UTF32_LE BOM_UTF32_BE BOM BOM_UTF16 BOM_UTF32 BOM32_LE BOM32_BE BOM64_LE BOM64_BE CodecInfo Codec IncrementalEncoder BufferedIncrementalEncoder IncrementalDecoder BufferedIncrementalDecoder StreamWriter StreamReader StreamReaderWriter StreamRecoder open EncodedFile getencoder getdecoder getincrementalencoder getincrementaldecoder getreader getwriter iterencode iterdecode make_identity_dict make_encoding_map strict_errors ignore_errors replace_errors xmlcharrefreplace_errors backslashreplace_errors namereplace_errors _false',
+    owners: {
+      register: '_codecs',
+      unregister: '_codecs',
+      lookup: '_codecs',
+      encode: '_codecs',
+      decode: '_codecs',
+      escape_encode: '_codecs',
+      escape_decode: '_codecs',
+      utf_8_encode: '_codecs',
+      utf_8_decode: '_codecs',
+      utf_7_encode: '_codecs',
+      utf_7_decode: '_codecs',
+      utf_16_encode: '_codecs',
+      utf_16_le_encode: '_codecs',
+      utf_16_be_encode: '_codecs',
+      utf_16_decode: '_codecs',
+      utf_16_le_decode: '_codecs',
+      utf_16_be_decode: '_codecs',
+      utf_16_ex_decode: '_codecs',
+      utf_32_encode: '_codecs',
+      utf_32_le_encode: '_codecs',
+      utf_32_be_encode: '_codecs',
+      utf_32_decode: '_codecs',
+      utf_32_le_decode: '_codecs',
+      utf_32_be_decode: '_codecs',
+      utf_32_ex_decode: '_codecs',
+      unicode_escape_encode: '_codecs',
+      unicode_escape_decode: '_codecs',
+      raw_unicode_escape_encode: '_codecs',
+      raw_unicode_escape_decode: '_codecs',
+      latin_1_encode: '_codecs',
+      latin_1_decode: '_codecs',
+      ascii_encode: '_codecs',
+      ascii_decode: '_codecs',
+      charmap_encode: '_codecs',
+      charmap_decode: '_codecs',
+      charmap_build: '_codecs',
+      readbuffer_encode: '_codecs',
+      register_error: '_codecs',
+      lookup_error: '_codecs',
+    },
   },
   collections: {
     kind: 'package',
     imports: { _collections_abc: 'collections.abc', _sys: 'sys', abc: 'collections.abc' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __path__ __file__ __cached__ __builtins__ __all__ _collections_abc _sys abc _chain _repeat _starmap _iskeyword _eq _itemgetter _recursive_repr _proxy deque _deque_iterator defaultdict heapq _OrderedDictKeysView _OrderedDictItemsView _OrderedDictValuesView _Link OrderedDict _tuplegetter namedtuple _count_elements Counter ChainMap UserDict UserList UserString',
+    owners: { _eq: '_operator', _recursive_repr: 'reprlib', _proxy: '_weakref', _count_elements: '_collections' },
   },
   codeop: {
     kind: 'source',
@@ -229,6 +339,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __builtins__ ABCMeta abstractmethod sys GenericAlias EllipsisType FunctionType __all__ bytes_iterator bytearray_iterator dict_keyiterator dict_valueiterator dict_itemiterator list_iterator list_reverseiterator range_iterator longrange_iterator set_iterator str_iterator tuple_iterator zip_iterator dict_keys dict_values dict_items mappingproxy framelocalsproxy generator coroutine async_generator _check_methods Hashable Awaitable Coroutine AsyncIterable AsyncIterator AsyncGenerator Iterable Iterator Reversible Generator Sized Container Collection Buffer _CallableGenericAlias _is_param_expr Callable Set MutableSet Mapping MappingView KeysView ItemsView ValuesView MutableMapping Sequence _DeprecateByteStringMeta ByteString MutableSequence',
+    owners: { abstractmethod: 'abc' },
   },
   colorsys: {
     kind: 'source',
@@ -244,21 +355,32 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     kind: 'source',
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ BZ2File BZ2Compressor BZ2Decompressor open compress decompress',
+    owners: { open: 'bz2', compress: 'bz2', decompress: 'bz2' },
   },
   'compression.gzip': {
     kind: 'source',
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ BadGzipFile GzipFile open compress decompress',
+    owners: { open: 'gzip', compress: 'gzip', decompress: 'gzip' },
   },
   'compression.lzma': {
     kind: 'source',
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ CHECK_NONE CHECK_CRC32 CHECK_CRC64 CHECK_SHA256 CHECK_ID_MAX CHECK_UNKNOWN FILTER_LZMA1 FILTER_LZMA2 FILTER_DELTA FILTER_X86 FILTER_IA64 FILTER_ARM FILTER_ARMTHUMB FILTER_POWERPC FILTER_SPARC FORMAT_AUTO FORMAT_XZ FORMAT_ALONE FORMAT_RAW MF_HC3 MF_HC4 MF_BT2 MF_BT3 MF_BT4 MODE_FAST MODE_NORMAL PRESET_DEFAULT PRESET_EXTREME LZMACompressor LZMADecompressor LZMAFile LZMAError open compress decompress is_check_supported',
+    owners: { open: 'lzma', compress: 'lzma', decompress: 'lzma', is_check_supported: '_lzma' },
   },
   'compression.zlib': {
     kind: 'source',
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ adler32 compress compressobj crc32 decompress decompressobj error MAX_WBITS DEFLATED DEF_MEM_LEVEL DEF_BUF_SIZE Z_NO_COMPRESSION Z_BEST_SPEED Z_BEST_COMPRESSION Z_DEFAULT_COMPRESSION Z_FILTERED Z_HUFFMAN_ONLY Z_RLE Z_FIXED Z_DEFAULT_STRATEGY Z_NO_FLUSH Z_PARTIAL_FLUSH Z_SYNC_FLUSH Z_FULL_FLUSH Z_FINISH Z_BLOCK Z_TREES ZLIB_VERSION ZLIB_RUNTIME_VERSION',
+    owners: {
+      adler32: 'zlib',
+      compress: 'zlib',
+      compressobj: 'zlib',
+      crc32: 'zlib',
+      decompress: 'zlib',
+      decompressobj: 'zlib',
+    },
   },
   concurrent: {
     kind: 'package',
@@ -270,6 +392,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { _base: 'concurrent.futures._base', _interpreters: '_interpreters' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __path__ __file__ __cached__ __builtins__ __author__ _base FIRST_COMPLETED FIRST_EXCEPTION ALL_COMPLETED CancelledError TimeoutError InvalidStateError BrokenExecutor Future Executor wait as_completed __all__ _interpreters __dir__ __getattr__',
+    owners: { wait: 'concurrent.futures._base', as_completed: 'concurrent.futures._base' },
   },
   configparser: {
     kind: 'source',
@@ -290,6 +413,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { _collections_abc: 'collections.abc', abc: 'abc', os: 'os', sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ abc os sys _collections_abc deque wraps MethodType GenericAlias __all__ AbstractContextManager AbstractAsyncContextManager ContextDecorator AsyncContextDecorator _GeneratorContextManagerBase _GeneratorContextManager _AsyncGeneratorContextManager contextmanager asynccontextmanager closing aclosing _RedirectStream redirect_stdout redirect_stderr suppress _BaseExitStack ExitStack AsyncExitStack nullcontext chdir',
+    owners: { wraps: 'functools' },
   },
   contextvars: {
     kind: 'source',
@@ -297,6 +421,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { _collections_abc: 'collections.abc' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ _collections_abc Context ContextVar Token copy_context __all__',
+    owners: { copy_context: '_contextvars' },
   },
   copy: {
     kind: 'source',
@@ -313,6 +438,15 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { types: 'types' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ types Error writer reader register_dialect unregister_dialect get_dialect list_dialects field_size_limit QUOTE_MINIMAL QUOTE_ALL QUOTE_NONNUMERIC QUOTE_NONE QUOTE_STRINGS QUOTE_NOTNULL _Dialect StringIO __all__ __version__ Dialect excel excel_tab unix_dialect DictReader DictWriter Sniffer',
+    owners: {
+      writer: '_csv',
+      reader: '_csv',
+      register_dialect: '_csv',
+      unregister_dialect: '_csv',
+      get_dialect: '_csv',
+      list_dialects: '_csv',
+      field_size_limit: '_csv',
+    },
   },
   dataclasses: {
     kind: 'source',
@@ -330,6 +464,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ re sys copy types inspect keyword itertools annotationlib abc recursive_repr __all__ FrozenInstanceError _HAS_DEFAULT_FACTORY_CLASS _HAS_DEFAULT_FACTORY _MISSING_TYPE MISSING _KW_ONLY_TYPE KW_ONLY _EMPTY_METADATA _FIELD_BASE _FIELD _FIELD_CLASSVAR _FIELD_INITVAR _FIELDS _PARAMS _POST_INIT_NAME _MODULE_IDENTIFIER_RE _ATOMIC_TYPES _ANY_MARKER InitVar Field _DataclassParams field _fields_in_init_order _tuple_str _FuncBuilder _make_annotate_function _field_assign _field_init _init_param _init_fn _frozen_set_del_attr _is_classvar _is_initvar _is_kw_only _is_type _get_field _set_new_attribute _hash_set_none _hash_add _hash_exception _hash_action _process_class _dataclass_getstate _dataclass_setstate _get_slots _update_func_cell_for__class__ _create_slots _add_slots dataclass fields _is_dataclass_instance is_dataclass asdict _asdict_inner astuple _astuple_inner make_dataclass replace _replace',
+    owners: { recursive_repr: 'reprlib' },
   },
   datetime: {
     kind: 'source',
@@ -340,11 +475,13 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     kind: 'source',
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ getcontext setcontext localcontext IEEEContext Decimal Context DecimalTuple DecimalException Clamped Rounded Inexact Subnormal Underflow Overflow DivisionByZero FloatOperation InvalidOperation ConversionSyntax DivisionImpossible DivisionUndefined InvalidContext DefaultContext HAVE_CONTEXTVAR HAVE_THREADS BasicContext ExtendedContext MAX_PREC MAX_EMAX MIN_EMIN MIN_ETINY IEEE_CONTEXT_MAX_BITS ROUND_UP ROUND_DOWN ROUND_CEILING ROUND_FLOOR ROUND_HALF_UP ROUND_HALF_DOWN ROUND_HALF_EVEN ROUND_05UP __version__ __libmpdec_version__',
+    owners: { getcontext: '_decimal', setcontext: '_decimal', localcontext: '_decimal', IEEEContext: '_decimal' },
   },
   difflib: {
     kind: 'source',
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ _nlargest _namedtuple GenericAlias Match _calculate_ratio SequenceMatcher get_close_matches _keep_original_ws Differ IS_LINE_JUNK IS_CHARACTER_JUNK _format_range_unified unified_diff _format_range_context context_diff _check_types diff_bytes ndiff _mdiff _file_template _styles _table_template _legend HtmlDiff restore',
+    owners: { _nlargest: 'heapq', _namedtuple: 'collections' },
   },
   doctest: {
     kind: 'source',
@@ -364,6 +501,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __docformat__ __all__ __future__ difflib functools inspect linecache os pdb re sys traceback unittest StringIO IncrementalNewlineDecoder namedtuple _colorize ANSIColors can_colorize __unittest TestResults OPTIONFLAGS_BY_NAME register_optionflag DONT_ACCEPT_TRUE_FOR_1 DONT_ACCEPT_BLANKLINE NORMALIZE_WHITESPACE ELLIPSIS SKIP IGNORE_EXCEPTION_DETAIL COMPARISON_FLAGS REPORT_UDIFF REPORT_CDIFF REPORT_NDIFF REPORT_ONLY_FIRST_FAILURE FAIL_FAST REPORTING_FLAGS BLANKLINE_MARKER ELLIPSIS_MARKER _extract_future_flags _normalize_module _newline_convert _load_testfile _indent _exception_traceback _SpoofOut _ellipsis_match _comment_line _strip_exception_details _OutputRedirectingPdb _module_relative_path Example DocTest DocTestParser DocTestFinder DocTestRunner _n_items OutputChecker DocTestFailure UnexpectedException DebugRunner master testmod testfile run_docstring_examples _unittest_reportflags set_unittest_reportflags DocTestCase SkipDocTestCase _DocTestSuite DocTestSuite DocFileCase DocFileTest DocFileSuite script_from_examples testsource debug_src debug_script debug _TestClass __test__ _test',
+    owners: { namedtuple: 'collections', can_colorize: '_colorize' },
   },
   email: {
     kind: 'package',
@@ -400,11 +538,13 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { _charset: 'email.charset', abc: 'abc', header: 'email.header', re: 're' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ abc re header _charset _has_surrogates __all__ valid_header_name_re validate_header_name _PolicyBase _append_doc _extend_docstrings Policy Compat32 compat32',
+    owners: { _has_surrogates: 'email.utils' },
   },
   'email.base64mime': {
     kind: 'source',
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ b64encode b2a_base64 a2b_base64 CRLF NL EMPTYSTRING MISC_LEN header_length header_encode body_encode decode body_decode decodestring',
+    owners: { b64encode: 'base64', b2a_base64: 'binascii', a2b_base64: 'binascii' },
   },
   'email.charset': {
     kind: 'source',
@@ -412,6 +552,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { email: 'email', errors: 'email.errors' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ partial email errors encode_7or8bit QP BASE64 SHORTEST RFC2047_CHROME_LEN DEFAULT_CHARSET UNKNOWN8BIT EMPTYSTRING CHARSETS ALIASES CODEC_MAP add_charset add_alias add_codec _encode Charset',
+    owners: { encode_7or8bit: 'email.encoders' },
   },
   'email.contentmanager': {
     kind: 'source',
@@ -424,6 +565,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     kind: 'source',
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ _bencode _encodestring _qencode encode_base64 encode_quopri encode_7or8bit encode_noop',
+    owners: { _bencode: 'base64', _encodestring: 'quopri' },
   },
   'email.errors': {
     kind: 'source',
@@ -441,12 +583,14 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { random: 'random', re: 're', sys: 'sys', time: 'time' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ re sys time random deepcopy StringIO BytesIO _has_surrogates HeaderWriteError UNDERSCORE NL NLCRE fcre NEWLINE_WITHOUT_FWSP NEWLINE_WITHOUT_FWSP_BYTES Generator BytesGenerator _FMT DecodedGenerator _width _fmt _make_boundary',
+    owners: { deepcopy: 'copy', _has_surrogates: 'email.utils' },
   },
   'email.header': {
     kind: 'source',
     imports: { _charset: 'email.charset', binascii: 'binascii', email: 'email', re: 're' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ re binascii email HeaderParseError _charset Charset NL SPACE BSPACE SPACE8 EMPTYSTRING MAXLINELEN FWS USASCII UTF8 ecre fcre _embedded_header _max_append decode_header make_header Header _ValueFormatter _Accumulator',
+    owners: { _max_append: 'email.quoprimime' },
   },
   'email.headerregistry': {
     kind: 'source',
@@ -472,6 +616,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ binascii re quopri BytesIO StringIO utils errors compat32 _charset decode_b Charset SEMISPACE tspecials _splitparam _formatparam _parseparam _unquotevalue _decode_uu Message MIMEPart EmailMessage',
+    owners: { decode_b: 'email._encoded_words' },
   },
   'email.mime': {
     kind: 'package',
@@ -534,6 +679,11 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { re: 're', sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ re sys Compat32 Policy _extend_docstrings compat32 validate_header_name _has_surrogates HeaderRegistry raw_data_manager EmailMessage __all__ linesep_splitter EmailPolicy default strict SMTP HTTP SMTPUTF8',
+    owners: {
+      _extend_docstrings: 'email._policybase',
+      validate_header_name: 'email._policybase',
+      _has_surrogates: 'email.utils',
+    },
   },
   'email.quoprimime': {
     kind: 'source',
@@ -546,6 +696,13 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { datetime: 'datetime', os: 'os', re: 're', time: 'time', urllib: 'urllib' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ os re time datetime urllib quote _AddressList mktime_tz parsedate parsedate_tz _parsedate_tz COMMASPACE EMPTYSTRING UEMPTYSTRING CRLF TICK specialsre escapesre _has_surrogates _sanitize formataddr _iter_escaped_chars _strip_quoted_realnames supports_strict_parsing getaddresses _check_parenthesis _pre_parse_validation _post_parse_validation _format_timetuple_and_zone formatdate format_datetime make_msgid parsedate_to_datetime parseaddr unquote decode_rfc2231 encode_rfc2231 rfc2231_continuation decode_params collapse_rfc2231_value localtime',
+    owners: {
+      quote: 'email._parseaddr',
+      mktime_tz: 'email._parseaddr',
+      parsedate: 'email._parseaddr',
+      parsedate_tz: 'email._parseaddr',
+      _parsedate_tz: 'email._parseaddr',
+    },
   },
   encodings: {
     kind: 'package',
@@ -581,6 +738,13 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     kind: 'source',
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ get_cache_token namedtuple itemgetter recursive_repr GenericAlias MethodType MappingProxyType UnionType RLock WRAPPER_ASSIGNMENTS WRAPPER_UPDATES update_wrapper wraps _gt_from_lt _le_from_lt _ge_from_lt _ge_from_le _lt_from_le _gt_from_le _lt_from_gt _ge_from_gt _le_from_gt _le_from_ge _gt_from_ge _lt_from_ge _convert total_ordering cmp_to_key _initial_missing reduce _PlaceholderType Placeholder _partial_prepare_merger _partial_new _partial_repr partial partialmethod _unwrap_partial _unwrap_partialmethod _CacheInfo _make_key lru_cache _lru_cache_wrapper cache _c3_merge _c3_mro _compose_mro _find_impl singledispatch singledispatchmethod _singledispatchmethod_get _NOT_FOUND cached_property',
+    owners: {
+      get_cache_token: '_abc',
+      namedtuple: 'collections',
+      recursive_repr: 'reprlib',
+      cmp_to_key: '_functools',
+      reduce: '_functools',
+    },
   },
   gc: {
     kind: 'builtin',
@@ -592,6 +756,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { os: 'os' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ os _ GetoptError error getopt gnu_getopt do_longs long_has_args do_shorts short_has_arg',
+    owners: { _: 'gettext' },
   },
   genericpath: {
     kind: 'frozen',
@@ -632,6 +797,22 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { _hashlib: '_hashlib' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ algorithms_guaranteed algorithms_available __all__ __builtin_constructor_cache __block_openssl_constructor __get_builtin_constructor _hashlib new pbkdf2_hmac scrypt file_digest md5 sha1 sha224 sha256 sha384 sha512 blake2b blake2s sha3_224 sha3_256 sha3_384 sha3_512 shake_128 shake_256',
+    owners: {
+      pbkdf2_hmac: '_hashlib',
+      scrypt: '_hashlib',
+      md5: '_hashlib',
+      sha1: '_hashlib',
+      sha224: '_hashlib',
+      sha256: '_hashlib',
+      sha384: '_hashlib',
+      sha512: '_hashlib',
+      sha3_224: '_hashlib',
+      sha3_256: '_hashlib',
+      sha3_384: '_hashlib',
+      sha3_512: '_hashlib',
+      shake_128: '_hashlib',
+      shake_256: '_hashlib',
+    },
   },
   gzip: {
     kind: 'source',
@@ -653,12 +834,30 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     kind: 'source',
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __about__ __all__ heappush heappop heapreplace heappushpop heapify heappop_max heapreplace_max heappush_max heappushpop_max heapify_max _siftdown _siftup _siftdown_max _siftup_max merge nsmallest nlargest _heappop_max _heapreplace_max _heappush_max _heappushpop_max _heapify_max',
+    owners: {
+      heappush: '_heapq',
+      heappop: '_heapq',
+      heapreplace: '_heapq',
+      heappushpop: '_heapq',
+      heapify: '_heapq',
+      heappop_max: '_heapq',
+      heapreplace_max: '_heapq',
+      heappush_max: '_heapq',
+      heappushpop_max: '_heapq',
+      heapify_max: '_heapq',
+      _heappop_max: '_heapq',
+      _heapreplace_max: '_heapq',
+      _heappush_max: '_heapq',
+      _heappushpop_max: '_heapq',
+      _heapify_max: '_heapq',
+    },
   },
   hmac: {
     kind: 'source',
     imports: { _hashopenssl: '_hashlib', _hmac: '_hmac' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ _hashopenssl compare_digest _functype _hmac trans_5C trans_36 digest_size _get_digest_constructor _select_blocksize HMAC new digest _compute_digest_fallback',
+    owners: { compare_digest: '_hashlib' },
   },
   html: {
     kind: 'package',
@@ -676,12 +875,14 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { _markupbase: '_markupbase', re: 're' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ re _markupbase unescape html5_entities __all__ interesting_normal incomplete entityref charref incomplete_charref attr_charref starttagopen endtagopen piclose commentclose commentabruptclose tagfind_tolerant attrfind_tolerant locatetagend locatestarttagend_tolerant endendtag endtagfind _replace_attr_charref _unescape_attrvalue HTMLParser',
+    owners: { unescape: 'html' },
   },
   http: {
     kind: 'package',
     doc: false,
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __path__ __file__ __cached__ __builtins__ StrEnum IntEnum _simple_enum __all__ HTTPStatus HTTPMethod',
+    owners: { _simple_enum: 'enum' },
   },
   'http.cookies': {
     kind: 'source',
@@ -699,6 +900,11 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __path__ __file__ __cached__ __builtins__ __all__ _imp sys _bootstrap _bootstrap_external _pack_uint32 _unpack_uint32 __import__ invalidate_caches import_module _RELOADING reload',
+    owners: {
+      _pack_uint32: '_frozen_importlib_external',
+      _unpack_uint32: '_frozen_importlib_external',
+      __import__: '_frozen_importlib',
+    },
   },
   inspect: {
     kind: 'source',
@@ -722,12 +928,14 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __author__ __all__ abc Format ForwardRef get_annotations ast dis collections enum importlib itertools linecache os re sys tokenize token types functools builtins iskeyword attrgetter namedtuple OrderedDict make_weakref CO_OPTIMIZED CO_NEWLOCALS CO_VARARGS CO_VARKEYWORDS CO_NESTED CO_GENERATOR CO_NOFREE CO_COROUTINE CO_ITERABLE_COROUTINE CO_ASYNC_GENERATOR CO_HAS_DOCSTRING CO_METHOD TPFLAGS_IS_ABSTRACT ismodule isclass ismethod ispackage ismethoddescriptor isdatadescriptor ismemberdescriptor isgetsetdescriptor isfunction _has_code_flag isgeneratorfunction _is_coroutine_mark _has_coroutine_mark markcoroutinefunction iscoroutinefunction isasyncgenfunction isasyncgen isgenerator iscoroutine isawaitable istraceback isframe iscode isbuiltin ismethodwrapper isroutine isabstract _getmembers getmembers getmembers_static Attribute classify_class_attrs getmro unwrap indentsize _findclass _finddoc getdoc cleandoc getfile getmodulename getsourcefile getabsfile modulesbyfile _filesbymodname getmodule ClassFoundException findsource getcomments EndOfBlock BlockFinder getblock getsourcelines getsource walktree getclasstree Arguments getargs FullArgSpec getfullargspec ArgInfo getargvalues formatannotation formatannotationrelativeto formatargvalues _missing_arguments _too_many getcallargs ClosureVars getclosurevars _Traceback Traceback _get_code_position_from_tb _get_code_position getframeinfo getlineno _FrameInfo FrameInfo getouterframes getinnerframes currentframe stack trace _sentinel _static_getmro _get_dunder_dict_of_class _check_instance _check_class _shadowed_dict_from_weakref_mro_tuple _shadowed_dict getattr_static GEN_CREATED GEN_RUNNING GEN_SUSPENDED GEN_CLOSED getgeneratorstate getgeneratorlocals CORO_CREATED CORO_RUNNING CORO_SUSPENDED CORO_CLOSED getcoroutinestate getcoroutinelocals AGEN_CREATED AGEN_RUNNING AGEN_SUSPENDED AGEN_CLOSED getasyncgenstate getasyncgenlocals _NonUserDefinedCallables _signature_get_user_defined_method _signature_get_partial _signature_bound_method _signature_is_builtin _signature_is_functionlike _signature_strip_non_python_syntax _signature_fromstr _signature_from_builtin _signature_from_function _descriptor_get _signature_from_callable _void _empty _ParameterKind _POSITIONAL_ONLY _POSITIONAL_OR_KEYWORD _VAR_POSITIONAL _KEYWORD_ONLY _VAR_KEYWORD Parameter BoundArguments Signature signature BufferFlags _main',
+    owners: { get_annotations: 'annotationlib', namedtuple: 'collections' },
   },
   io: {
     kind: 'frozen',
     imports: { _io: '_io', abc: 'abc' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __builtins__ __author__ __all__ _io abc _check_methods DEFAULT_BUFFER_SIZE BlockingIOError UnsupportedOperation open open_code FileIO BytesIO StringIO BufferedReader BufferedWriter BufferedRWPair BufferedRandom IncrementalNewlineDecoder text_encoding TextIOWrapper SEEK_SET SEEK_CUR SEEK_END IOBase RawIOBase BufferedIOBase TextIOBase GenericAlias Reader Writer',
+    owners: { _check_methods: 'collections.abc', open: '_io', open_code: '_io', text_encoding: '_io' },
   },
   ipaddress: {
     kind: 'source',
@@ -751,12 +959,19 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { re: 're', scanner: 'json.scanner' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ re scanner c_scanstring __all__ FLAGS NaN PosInf NegInf JSONDecodeError _CONSTANTS HEXDIGITS STRINGCHUNK BACKSLASH _decode_uXXXX py_scanstring scanstring WHITESPACE WHITESPACE_STR JSONObject JSONArray JSONDecoder',
+    owners: { c_scanstring: '_json', scanstring: '_json' },
   },
   'json.encoder': {
     kind: 'source',
     imports: { re: 're' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ re c_encode_basestring_ascii c_encode_basestring c_make_encoder ESCAPE ESCAPE_ASCII HAS_UTF8 ESCAPE_DCT INFINITY py_encode_basestring encode_basestring py_encode_basestring_ascii encode_basestring_ascii JSONEncoder _make_iterencode',
+    owners: {
+      c_encode_basestring_ascii: '_json',
+      c_encode_basestring: '_json',
+      encode_basestring: '_json',
+      encode_basestring_ascii: '_json',
+    },
   },
   'json.scanner': {
     kind: 'source',
@@ -828,6 +1043,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { _streams: 'compression._common._streams', builtins: 'builtins', io: 'io', os: 'os' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ builtins io os _streams is_check_supported FORMAT_AUTO FORMAT_XZ FORMAT_ALONE FORMAT_RAW CHECK_NONE CHECK_CRC32 CHECK_CRC64 CHECK_SHA256 CHECK_ID_MAX CHECK_UNKNOWN FILTER_LZMA1 FILTER_LZMA2 FILTER_DELTA FILTER_X86 FILTER_IA64 FILTER_ARM FILTER_ARMTHUMB FILTER_SPARC FILTER_POWERPC MF_HC3 MF_HC4 MF_BT2 MF_BT3 MF_BT4 MODE_FAST MODE_NORMAL PRESET_DEFAULT PRESET_EXTREME LZMAError LZMACompressor LZMADecompressor _encode_filter_properties _decode_filter_properties _MODE_READ _MODE_WRITE LZMAFile open compress decompress',
+    owners: { is_check_supported: '_lzma', _encode_filter_properties: '_lzma', _decode_filter_properties: '_lzma' },
   },
   marshal: { kind: 'builtin', names: '__name__ __doc__ __package__ __loader__ __spec__ dump load dumps loads version' },
   math: {
@@ -840,6 +1056,23 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { genericpath: 'genericpath', os: 'os', sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __builtins__ curdir pardir extsep sep pathsep altsep defpath devnull os sys genericpath commonprefix exists getatime getctime getmtime getsize isdevdrive isdir isfile isjunction islink lexists samefile sameopenfile samestat ALLOW_MISSING __all__ _get_bothseps normcase isabs join splitdrive splitroot split splitext basename dirname _getvolumepathname ismount _reserved_chars _reserved_names isreserved _isreservedname expanduser _varpattern _varsub _varsubb expandvars normpath abspath realpath supports_unicode_filenames relpath commonpath',
+    owners: {
+      commonprefix: 'genericpath',
+      exists: 'genericpath',
+      getatime: 'genericpath',
+      getctime: 'genericpath',
+      getmtime: 'genericpath',
+      getsize: 'genericpath',
+      isdevdrive: 'genericpath',
+      isdir: 'genericpath',
+      isfile: 'genericpath',
+      isjunction: 'genericpath',
+      islink: 'genericpath',
+      lexists: 'genericpath',
+      samefile: 'genericpath',
+      sameopenfile: 'genericpath',
+      samestat: 'genericpath',
+    },
   },
   nturl2path: {
     kind: 'source',
@@ -851,41 +1084,305 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     kind: 'source',
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ ABCMeta abstractmethod __all__ Number Complex Real Rational Integral',
+    owners: { abstractmethod: 'abc' },
   },
   opcode: {
     kind: 'source',
     imports: { _opcode: '_opcode', builtins: 'builtins' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ builtins _opcode stack_effect _specializations _specialized_opmap opmap HAVE_ARGUMENT MIN_INSTRUMENTED_OPCODE EXTENDED_ARG opname m op i cmp_op hasarg hasconst hasname hasjump hasjrel hasjabs hasfree haslocal hasexc _intrinsic_1_descs _intrinsic_2_descs _special_method_names _common_constants _nb_ops hascompare _cache_format _inline_cache_entries',
+    owners: { stack_effect: '_opcode' },
   },
   operator: {
     kind: 'source',
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ _abs lt le eq ne ge gt not_ truth is_ is_not is_none is_not_none abs add and_ floordiv index inv invert lshift mod mul matmul neg or_ pos pow rshift sub truediv xor concat contains countOf delitem getitem indexOf setitem length_hint call attrgetter itemgetter methodcaller iadd iand iconcat ifloordiv ilshift imod imul imatmul ior ipow irshift isub itruediv ixor __lt__ __le__ __eq__ __ne__ __ge__ __gt__ __not__ __abs__ __add__ __and__ __call__ __floordiv__ __index__ __inv__ __invert__ __lshift__ __mod__ __mul__ __matmul__ __neg__ __or__ __pos__ __pow__ __rshift__ __sub__ __truediv__ __xor__ __concat__ __contains__ __delitem__ __getitem__ __setitem__ __iadd__ __iand__ __iconcat__ __ifloordiv__ __ilshift__ __imod__ __imul__ __imatmul__ __ior__ __ipow__ __irshift__ __isub__ __itruediv__ __ixor__',
+    owners: {
+      _abs: 'builtins',
+      lt: '_operator',
+      le: '_operator',
+      eq: '_operator',
+      ne: '_operator',
+      ge: '_operator',
+      gt: '_operator',
+      not_: '_operator',
+      truth: '_operator',
+      is_: '_operator',
+      is_not: '_operator',
+      is_none: '_operator',
+      is_not_none: '_operator',
+      abs: '_operator',
+      add: '_operator',
+      and_: '_operator',
+      floordiv: '_operator',
+      index: '_operator',
+      inv: '_operator',
+      invert: '_operator',
+      lshift: '_operator',
+      mod: '_operator',
+      mul: '_operator',
+      matmul: '_operator',
+      neg: '_operator',
+      or_: '_operator',
+      pos: '_operator',
+      pow: '_operator',
+      rshift: '_operator',
+      sub: '_operator',
+      truediv: '_operator',
+      xor: '_operator',
+      concat: '_operator',
+      contains: '_operator',
+      countOf: '_operator',
+      delitem: '_operator',
+      getitem: '_operator',
+      indexOf: '_operator',
+      setitem: '_operator',
+      length_hint: '_operator',
+      call: '_operator',
+      iadd: '_operator',
+      iand: '_operator',
+      iconcat: '_operator',
+      ifloordiv: '_operator',
+      ilshift: '_operator',
+      imod: '_operator',
+      imul: '_operator',
+      imatmul: '_operator',
+      ior: '_operator',
+      ipow: '_operator',
+      irshift: '_operator',
+      isub: '_operator',
+      itruediv: '_operator',
+      ixor: '_operator',
+      __lt__: '_operator',
+      __le__: '_operator',
+      __eq__: '_operator',
+      __ne__: '_operator',
+      __ge__: '_operator',
+      __gt__: '_operator',
+      __not__: '_operator',
+      __abs__: '_operator',
+      __add__: '_operator',
+      __and__: '_operator',
+      __call__: '_operator',
+      __floordiv__: '_operator',
+      __index__: '_operator',
+      __inv__: '_operator',
+      __invert__: '_operator',
+      __lshift__: '_operator',
+      __mod__: '_operator',
+      __mul__: '_operator',
+      __matmul__: '_operator',
+      __neg__: '_operator',
+      __or__: '_operator',
+      __pos__: '_operator',
+      __pow__: '_operator',
+      __rshift__: '_operator',
+      __sub__: '_operator',
+      __truediv__: '_operator',
+      __xor__: '_operator',
+      __concat__: '_operator',
+      __contains__: '_operator',
+      __delitem__: '_operator',
+      __getitem__: '_operator',
+      __setitem__: '_operator',
+      __iadd__: '_operator',
+      __iand__: '_operator',
+      __iconcat__: '_operator',
+      __ifloordiv__: '_operator',
+      __ilshift__: '_operator',
+      __imod__: '_operator',
+      __imul__: '_operator',
+      __imatmul__: '_operator',
+      __ior__: '_operator',
+      __ipow__: '_operator',
+      __irshift__: '_operator',
+      __isub__: '_operator',
+      __itruediv__: '_operator',
+      __ixor__: '_operator',
+    },
   },
   optparse: {
     kind: 'source',
     imports: { os: 'os', sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __version__ __all__ __copyright__ sys os _ ngettext _repr OptParseError OptionError OptionConflictError OptionValueError BadOptionError AmbiguousOptionError HelpFormatter IndentedHelpFormatter TitledHelpFormatter _parse_num _parse_int _builtin_cvt check_builtin check_choice NO_DEFAULT Option SUPPRESS_HELP SUPPRESS_USAGE Values OptionContainer OptionGroup OptionParser _match_abbrev make_option',
+    owners: { _: 'gettext', ngettext: 'gettext' },
   },
   pickle: {
     kind: 'source',
     imports: { _compat_pickle: '_compat_pickle', codecs: 'codecs', io: 'io', sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ FunctionType dispatch_table _extension_registry _inverted_registry _extension_cache batched partial sys maxsize pack unpack io codecs _compat_pickle __all__ PickleBuffer _HAVE_PICKLE_BUFFER bytes_types format_version compatible_formats HIGHEST_PROTOCOL DEFAULT_PROTOCOL PickleError PicklingError UnpicklingError _Stop MARK STOP POP POP_MARK DUP FLOAT INT BININT BININT1 LONG BININT2 NONE PERSID BINPERSID REDUCE STRING BINSTRING SHORT_BINSTRING UNICODE BINUNICODE APPEND BUILD GLOBAL DICT EMPTY_DICT APPENDS GET BINGET INST LONG_BINGET LIST EMPTY_LIST OBJ PUT BINPUT LONG_BINPUT SETITEM TUPLE EMPTY_TUPLE SETITEMS BINFLOAT TRUE FALSE PROTO NEWOBJ EXT1 EXT2 EXT4 TUPLE1 TUPLE2 TUPLE3 NEWTRUE NEWFALSE LONG1 LONG4 _tuplesize2code BINBYTES SHORT_BINBYTES SHORT_BINUNICODE BINUNICODE8 BINBYTES8 EMPTY_SET ADDITEMS FROZENSET NEWOBJ_EX STACK_GLOBAL MEMOIZE FRAME BYTEARRAY8 NEXT_BUFFER READONLY_BUFFER _Framer _Unframer _getattribute whichmodule encode_long decode_long _T _NoValue _Pickler _Unpickler _dump _dumps _load _loads Pickler Unpickler dump dumps load loads _main',
+    owners: {
+      pack: '_struct',
+      unpack: '_struct',
+      dump: '_pickle',
+      dumps: '_pickle',
+      load: '_pickle',
+      loads: '_pickle',
+    },
   },
   pickletools: {
     kind: 'source',
     imports: { codecs: 'codecs', io: 'io', pickle: 'pickle', re: 're', sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ codecs io pickle re sys __all__ bytes_types UP_TO_NEWLINE TAKEN_FROM_ARGUMENT1 TAKEN_FROM_ARGUMENT4 TAKEN_FROM_ARGUMENT4U TAKEN_FROM_ARGUMENT8U ArgumentDescriptor _unpack read_uint1 uint1 read_uint2 uint2 read_int4 int4 read_uint4 uint4 read_uint8 uint8 read_stringnl stringnl read_stringnl_noescape stringnl_noescape read_stringnl_noescape_pair stringnl_noescape_pair read_string1 string1 read_string4 string4 read_bytes1 bytes1 read_bytes4 bytes4 read_bytes8 bytes8 read_bytearray8 bytearray8 read_unicodestringnl unicodestringnl read_unicodestring1 unicodestring1 read_unicodestring4 unicodestring4 read_unicodestring8 unicodestring8 read_decimalnl_short read_decimalnl_long decimalnl_short decimalnl_long read_floatnl floatnl read_float8 float8 decode_long read_long1 long1 read_long4 long4 StackObject pyint pylong pyinteger_or_bool pybool pyfloat pybytes_or_str pystring pybytes pybytearray pyunicode pynone pytuple pylist pydict pyset pyfrozenset pybuffer anyobject markobject stackslice OpcodeInfo opcodes code2op _genops genops optimize dis _Example _dis_test _memo_test __test__',
+    owners: { _unpack: '_struct', decode_long: 'pickle' },
   },
   os: {
     kind: 'frozen',
     imports: { abc: 'abc', path: 'posixpath', st: 'stat', sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __builtins__ abc sys st _check_methods GenericAlias __all__ _exists _get_exports_list name linesep stat access ttyname chdir chflags chmod fchmod lchmod chown fchown lchown lchflags chroot ctermid getcwd getcwdb link listdir lstat mkdir nice getpriority setpriority posix_spawn posix_spawnp readlink rename replace rmdir symlink system umask uname unlink remove utime times execv execve fork register_at_fork sched_get_priority_max sched_get_priority_min sched_yield posix_openpt grantpt unlockpt ptsname openpty login_tty forkpty getegid geteuid getgid getgrouplist getgroups getpid getpgrp getppid getuid getlogin kill killpg setuid seteuid setreuid setgid setegid setregid setgroups initgroups getpgid setpgrp wait wait3 wait4 waitid waitpid getsid setsid setpgid tcgetpgrp tcsetpgrp open close closerange device_encoding dup dup2 lockf lseek read readinto readv pread preadv write writev pwrite pwritev sendfile fstat isatty pipe mkfifo mknod major minor makedev ftruncate truncate putenv unsetenv strerror fchdir fsync sync WCOREDUMP WIFCONTINUED WIFSTOPPED WIFSIGNALED WIFEXITED WEXITSTATUS WTERMSIG WSTOPSIG fstatvfs statvfs confstr sysconf fpathconf pathconf abort getloadavg urandom get_terminal_size cpu_count get_inheritable set_inheritable get_blocking set_blocking scandir fspath waitstatus_to_exitcode environ F_OK R_OK W_OK X_OK NGROUPS_MAX TMP_MAX WCONTINUED WNOHANG WUNTRACED O_RDONLY O_WRONLY O_RDWR O_NDELAY O_NONBLOCK O_APPEND O_DSYNC O_SYNC O_NOCTTY O_CREAT O_EXCL O_TRUNC O_SHLOCK O_EXLOCK O_EXEC O_SEARCH PRIO_PROCESS PRIO_PGRP PRIO_USER PRIO_DARWIN_THREAD PRIO_DARWIN_PROCESS PRIO_DARWIN_BG PRIO_DARWIN_NONUI O_CLOEXEC O_ACCMODE O_EVTONLY O_FSYNC O_SYMLINK SEEK_HOLE SEEK_DATA O_ASYNC O_DIRECTORY O_NOFOLLOW O_NOFOLLOW_ANY EX_OK EX_USAGE EX_DATAERR EX_NOINPUT EX_NOUSER EX_NOHOST EX_UNAVAILABLE EX_SOFTWARE EX_OSERR EX_OSFILE EX_CANTCREAT EX_IOERR EX_TEMPFAIL EX_PROTOCOL EX_NOPERM EX_CONFIG ST_RDONLY ST_NOSUID P_PID P_PGID P_ALL WEXITED WNOWAIT WSTOPPED CLD_EXITED CLD_KILLED CLD_DUMPED CLD_TRAPPED CLD_STOPPED CLD_CONTINUED F_LOCK F_TLOCK F_ULOCK F_TEST POSIX_SPAWN_OPEN POSIX_SPAWN_CLOSE POSIX_SPAWN_DUP2 SCHED_OTHER SCHED_FIFO SCHED_RR RTLD_LAZY RTLD_NOW RTLD_GLOBAL RTLD_LOCAL RTLD_NODELETE RTLD_NOLOAD pathconf_names confstr_names sysconf_names error waitid_result stat_result statvfs_result terminal_size DirEntry times_result uname_result _exit path _create_environ curdir pardir sep pathsep defpath extsep altsep devnull supports_dir_fd supports_effective_ids supports_fd supports_follow_symlinks SEEK_SET SEEK_CUR SEEK_END makedirs removedirs renames _walk_symlinks_as_files walk fwalk _fwalk_walk _fwalk_yield _fwalk_close _fwalk execl execle execlp execlpe execvp execvpe _execvpe get_exec_path MutableMapping Mapping _Environ reload_environ getenv supports_bytes_environ environb getenvb fsencode fsdecode P_WAIT P_NOWAIT P_NOWAITO _spawnvef spawnv spawnve spawnvp spawnvpe spawnl spawnle spawnlp spawnlpe popen _wrap_close fdopen _fspath PathLike process_cpu_count',
+    owners: {
+      _check_methods: 'collections.abc',
+      stat: 'posix',
+      access: 'posix',
+      ttyname: 'posix',
+      chdir: 'posix',
+      chflags: 'posix',
+      chmod: 'posix',
+      fchmod: 'posix',
+      lchmod: 'posix',
+      chown: 'posix',
+      fchown: 'posix',
+      lchown: 'posix',
+      lchflags: 'posix',
+      chroot: 'posix',
+      ctermid: 'posix',
+      getcwd: 'posix',
+      getcwdb: 'posix',
+      link: 'posix',
+      listdir: 'posix',
+      lstat: 'posix',
+      mkdir: 'posix',
+      nice: 'posix',
+      getpriority: 'posix',
+      setpriority: 'posix',
+      posix_spawn: 'posix',
+      posix_spawnp: 'posix',
+      readlink: 'posix',
+      rename: 'posix',
+      replace: 'posix',
+      rmdir: 'posix',
+      symlink: 'posix',
+      system: 'posix',
+      umask: 'posix',
+      uname: 'posix',
+      unlink: 'posix',
+      remove: 'posix',
+      utime: 'posix',
+      times: 'posix',
+      execv: 'posix',
+      execve: 'posix',
+      fork: 'posix',
+      register_at_fork: 'posix',
+      sched_get_priority_max: 'posix',
+      sched_get_priority_min: 'posix',
+      sched_yield: 'posix',
+      posix_openpt: 'posix',
+      grantpt: 'posix',
+      unlockpt: 'posix',
+      ptsname: 'posix',
+      openpty: 'posix',
+      login_tty: 'posix',
+      forkpty: 'posix',
+      getegid: 'posix',
+      geteuid: 'posix',
+      getgid: 'posix',
+      getgrouplist: 'posix',
+      getgroups: 'posix',
+      getpid: 'posix',
+      getpgrp: 'posix',
+      getppid: 'posix',
+      getuid: 'posix',
+      getlogin: 'posix',
+      kill: 'posix',
+      killpg: 'posix',
+      setuid: 'posix',
+      seteuid: 'posix',
+      setreuid: 'posix',
+      setgid: 'posix',
+      setegid: 'posix',
+      setregid: 'posix',
+      setgroups: 'posix',
+      initgroups: 'posix',
+      getpgid: 'posix',
+      setpgrp: 'posix',
+      wait: 'posix',
+      wait3: 'posix',
+      wait4: 'posix',
+      waitid: 'posix',
+      waitpid: 'posix',
+      getsid: 'posix',
+      setsid: 'posix',
+      setpgid: 'posix',
+      tcgetpgrp: 'posix',
+      tcsetpgrp: 'posix',
+      open: 'posix',
+      close: 'posix',
+      closerange: 'posix',
+      device_encoding: 'posix',
+      dup: 'posix',
+      dup2: 'posix',
+      lockf: 'posix',
+      lseek: 'posix',
+      read: 'posix',
+      readinto: 'posix',
+      readv: 'posix',
+      pread: 'posix',
+      preadv: 'posix',
+      write: 'posix',
+      writev: 'posix',
+      pwrite: 'posix',
+      pwritev: 'posix',
+      sendfile: 'posix',
+      fstat: 'posix',
+      isatty: 'posix',
+      pipe: 'posix',
+      mkfifo: 'posix',
+      mknod: 'posix',
+      major: 'posix',
+      minor: 'posix',
+      makedev: 'posix',
+      ftruncate: 'posix',
+      truncate: 'posix',
+      putenv: 'posix',
+      unsetenv: 'posix',
+      strerror: 'posix',
+      fchdir: 'posix',
+      fsync: 'posix',
+      sync: 'posix',
+      WCOREDUMP: 'posix',
+      WIFCONTINUED: 'posix',
+      WIFSTOPPED: 'posix',
+      WIFSIGNALED: 'posix',
+      WIFEXITED: 'posix',
+      WEXITSTATUS: 'posix',
+      WTERMSIG: 'posix',
+      WSTOPSIG: 'posix',
+      fstatvfs: 'posix',
+      statvfs: 'posix',
+      confstr: 'posix',
+      sysconf: 'posix',
+      fpathconf: 'posix',
+      pathconf: 'posix',
+      abort: 'posix',
+      getloadavg: 'posix',
+      urandom: 'posix',
+      get_terminal_size: 'posix',
+      cpu_count: 'posix',
+      get_inheritable: 'posix',
+      set_inheritable: 'posix',
+      get_blocking: 'posix',
+      set_blocking: 'posix',
+      scandir: 'posix',
+      fspath: 'posix',
+      waitstatus_to_exitcode: 'posix',
+      _exit: 'posix',
+      _create_environ: 'posix',
+      process_cpu_count: 'posix',
+    },
   },
   'os.path': {
     kind: 'frozen',
@@ -893,6 +1390,41 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { errno: 'errno', genericpath: 'genericpath', os: 'os', stat: 'stat', sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __builtins__ curdir pardir extsep sep pathsep defpath altsep devnull errno os sys stat genericpath commonprefix exists getatime getctime getmtime getsize isdevdrive isdir isfile isjunction islink lexists samefile sameopenfile samestat ALLOW_MISSING __all__ _get_sep normcase isabs join split splitext splitdrive splitroot basename dirname ismount expanduser _varpattern _varsub _varsubb expandvars normpath abspath realpath supports_unicode_filenames relpath commonpath',
+    owners: {
+      commonprefix: 'genericpath',
+      exists: 'genericpath',
+      getatime: 'genericpath',
+      getctime: 'genericpath',
+      getmtime: 'genericpath',
+      getsize: 'genericpath',
+      isdevdrive: 'genericpath',
+      isdir: 'genericpath',
+      isfile: 'genericpath',
+      isjunction: 'genericpath',
+      islink: 'genericpath',
+      lexists: 'genericpath',
+      samefile: 'genericpath',
+      sameopenfile: 'genericpath',
+      samestat: 'genericpath',
+      _get_sep: 'posixpath',
+      normcase: 'posixpath',
+      isabs: 'posixpath',
+      join: 'posixpath',
+      split: 'posixpath',
+      splitext: 'posixpath',
+      splitdrive: 'posixpath',
+      splitroot: 'posix',
+      basename: 'posixpath',
+      dirname: 'posixpath',
+      ismount: 'posixpath',
+      expanduser: 'posixpath',
+      expandvars: 'posixpath',
+      normpath: 'posix',
+      abspath: 'posixpath',
+      realpath: 'posixpath',
+      relpath: 'posixpath',
+      commonpath: 'posixpath',
+    },
   },
   pathlib: {
     kind: 'package',
@@ -909,12 +1441,44 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __path__ __file__ __cached__ __builtins__ io ntpath operator os posixpath sys errorcode ENODEV EHOSTUNREACH ENOMSG ENODATA ENOTBLK ENOSYS EPIPE EINVAL EOVERFLOW EINTR EUSERS ENOTEMPTY ENOBUFS EPROTO EREMOTE ECHILD ELOOP EXDEV E2BIG ESRCH EMSGSIZE EAFNOSUPPORT EHOSTDOWN EPFNOSUPPORT ENOPROTOOPT EBUSY EWOULDBLOCK EISCONN ESHUTDOWN EBADF EMULTIHOP EIO EPROTOTYPE ENOSPC ENOEXEC EALREADY ENETDOWN EACCES EILSEQ ENOTDIR EPERM EDOM ECONNREFUSED EISDIR EPROTONOSUPPORT EROFS EADDRNOTAVAIL EIDRM EBADMSG ENFILE ESPIPE ENOLINK ENETRESET ETIMEDOUT ENOENT EEXIST EDQUOT ENOSTR EFAULT EFBIG EDEADLK ENOTCONN EDESTADDRREQ ENOLCK ECONNABORTED ENETUNREACH ESTALE ENOSR ENOMEM ENOTSOCK EMLINK ERANGE ECONNRESET EADDRINUSE EOPNOTSUPP EAGAIN ENAMETOOLONG ENOTTY ESOCKTNOSUPPORT ETIME ETOOMANYREFS EMFILE ETXTBSY EINPROGRESS ENXIO ECANCELED EOWNERDEAD ENOTRECOVERABLE ENOTSUP EAUTH EBADARCH EBADEXEC EBADMACHO EBADRPC EDEVERR EFTYPE ENEEDAUTH ENOATTR ENOPOLICY EPROCLIM EPROCUNAVAIL EPROGMISMATCH EPROGUNAVAIL EPWROFF ERPCMISMATCH ESHLIBVERS EQFULL _StringGlobber _no_recurse_symlinks chain S_ISDIR S_ISREG S_ISSOCK S_ISBLK S_ISCHR S_ISFIFO Sequence pwd grp _os PathInfo DirEntryInfo ensure_different_files ensure_distinct_paths copyfile2 copyfileobj magic_open copy_info __all__ UnsupportedOperation _PathParents PurePath PurePosixPath PureWindowsPath Path PosixPath WindowsPath',
+    owners: {
+      S_ISDIR: '_stat',
+      S_ISREG: '_stat',
+      S_ISSOCK: '_stat',
+      S_ISBLK: '_stat',
+      S_ISCHR: '_stat',
+      S_ISFIFO: '_stat',
+      ensure_different_files: 'pathlib._os',
+      ensure_distinct_paths: 'pathlib._os',
+      copyfileobj: 'pathlib._os',
+      magic_open: 'pathlib._os',
+      copy_info: 'pathlib._os',
+    },
   },
   posixpath: {
     kind: 'frozen',
     imports: { errno: 'errno', genericpath: 'genericpath', os: 'os', stat: 'stat', sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __builtins__ curdir pardir extsep sep pathsep defpath altsep devnull errno os sys stat genericpath commonprefix exists getatime getctime getmtime getsize isdevdrive isdir isfile isjunction islink lexists samefile sameopenfile samestat ALLOW_MISSING __all__ _get_sep normcase isabs join split splitext splitdrive splitroot basename dirname ismount expanduser _varpattern _varsub _varsubb expandvars normpath abspath realpath supports_unicode_filenames relpath commonpath',
+    owners: {
+      commonprefix: 'genericpath',
+      exists: 'genericpath',
+      getatime: 'genericpath',
+      getctime: 'genericpath',
+      getmtime: 'genericpath',
+      getsize: 'genericpath',
+      isdevdrive: 'genericpath',
+      isdir: 'genericpath',
+      isfile: 'genericpath',
+      isjunction: 'genericpath',
+      islink: 'genericpath',
+      lexists: 'genericpath',
+      samefile: 'genericpath',
+      sameopenfile: 'genericpath',
+      samestat: 'genericpath',
+      splitroot: 'posix',
+      normpath: 'posix',
+    },
   },
   plistlib: {
     kind: 'source',
@@ -930,6 +1494,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ binascii codecs datetime enum BytesIO itertools os re struct ParserCreate PlistFormat FMT_XML FMT_BINARY _MIN_READ_BUF_SIZE UID PLISTHEADER _controlCharPat _encode_base64 _decode_base64 _dateParser _date_from_string _date_to_string _dict_items _escape _PlistParser _DumbXMLWriter _PlistWriter _is_fmt_xml InvalidFileException _BINARY_FORMAT _undefined _BinaryPlistParser _count_to_size _scalars _BinaryPlistWriter _is_fmt_binary _FORMATS load loads dump dumps',
+    owners: { ParserCreate: 'pyexpat' },
   },
   pprint: {
     kind: 'source',
@@ -959,6 +1524,20 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ __author__ __date__ __credits__ ast __future__ builtins importlib inspect io os pkgutil platform re sys sysconfig textwrap time tokenize warnings Format deque Repr format_exception_only get_pager pipe_pager plain_pager tempfile_pager tty_pager plain getpager pipepager plainpager tempfilepager ttypager pathdirs _findclass _finddoc _getowndoc _getdoc getdoc splitdoc _getargspec classname parentname isdata replace cram _re_stripid stripid _is_bound_method allmethods _split_list _future_feature_names visiblename classify_class_attrs sort_attributes ispackage source_synopsis synopsis ErrorDuringImport importfile safeimport Doc HTMLRepr HTMLDoc TextRepr TextDoc _PlainTextDoc pager describe locate text plaintext html resolve render_doc doc writedoc writedocs _introdoc Helper help ModuleScanner apropos _start_server _url_handler browse ispath _get_revised_path _adjust_cli_sys_path cli',
+    owners: {
+      format_exception_only: 'traceback',
+      get_pager: '_pyrepl.pager',
+      pipe_pager: '_pyrepl.pager',
+      plain_pager: '_pyrepl.pager',
+      tempfile_pager: '_pyrepl.pager',
+      tty_pager: '_pyrepl.pager',
+      plain: '_pyrepl.pager',
+      getpager: '_pyrepl.pager',
+      pipepager: '_pyrepl.pager',
+      plainpager: '_pyrepl.pager',
+      tempfilepager: '_pyrepl.pager',
+      ttypager: '_pyrepl.pager',
+    },
   },
   pydoc_data: {
     kind: 'package',
@@ -980,17 +1559,36 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { threading: 'threading', types: 'types' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ threading types deque heappush heappop time SimpleQueue __all__ Empty Full ShutDown Queue PriorityQueue LifoQueue _PySimpleQueue',
+    owners: { heappush: '_heapq', heappop: '_heapq', time: 'time' },
   },
   quopri: {
     kind: 'source',
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ ESCAPE MAXLINESIZE HEX EMPTYSTRING a2b_qp b2a_qp needsquoting quote encode encodestring decode decodestring ishex unhex main',
+    owners: { a2b_qp: 'binascii', b2a_qp: 'binascii' },
   },
   random: {
     kind: 'source',
     imports: { _os: 'os', _random: '_random' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ _log _exp _pi _e _ceil _sqrt _acos _cos _sin TWOPI _floor _isfinite _lgamma _fabs _log2 _urandom _Sequence _index _accumulate _repeat _bisect _os _random __all__ NV_MAGICCONST LOG4 SG_MAGICCONST BPF RECIP_BPF _ONE _sha512 Random SystemRandom _inst seed random uniform triangular randint choice randrange sample shuffle choices normalvariate lognormvariate expovariate vonmisesvariate gammavariate gauss betavariate binomialvariate paretovariate weibullvariate getstate setstate getrandbits randbytes _test_generator _test _parse_args main',
+    owners: {
+      _log: 'math',
+      _exp: 'math',
+      _ceil: 'math',
+      _sqrt: 'math',
+      _acos: 'math',
+      _cos: 'math',
+      _sin: 'math',
+      _floor: 'math',
+      _isfinite: 'math',
+      _lgamma: 'math',
+      _fabs: 'math',
+      _log2: 'math',
+      _urandom: 'posix',
+      _index: '_operator',
+      _bisect: '_bisect',
+    },
   },
   re: {
     kind: 'package',
@@ -1033,12 +1631,14 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { builtins: 'builtins' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ builtins islice get_ident recursive_repr Repr _possibly_sorted aRepr repr',
+    owners: { get_ident: '_thread' },
   },
   sched: {
     kind: 'source',
     imports: { heapq: 'heapq', threading: 'threading', time: 'time' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ time heapq namedtuple count threading _time __all__ Event _sentinel scheduler',
+    owners: { namedtuple: 'collections', _time: 'time' },
   },
   sre_compile: {
     kind: 'source',
@@ -1046,6 +1646,25 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { _: 're._compiler', _parser: 're._parser', _sre: '_sre', warnings: 'warnings' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ warnings _ _sre _parser MAGIC MAXREPEAT MAXGROUPS PatternError error FAILURE SUCCESS ANY ANY_ALL ASSERT ASSERT_NOT AT BRANCH CATEGORY CHARSET BIGCHARSET GROUPREF GROUPREF_EXISTS IN INFO JUMP LITERAL MARK MAX_UNTIL MIN_UNTIL NOT_LITERAL NEGATE RANGE REPEAT REPEAT_ONE SUBPATTERN MIN_REPEAT_ONE ATOMIC_GROUP POSSESSIVE_REPEAT POSSESSIVE_REPEAT_ONE GROUPREF_IGNORE IN_IGNORE LITERAL_IGNORE NOT_LITERAL_IGNORE GROUPREF_LOC_IGNORE IN_LOC_IGNORE LITERAL_LOC_IGNORE NOT_LITERAL_LOC_IGNORE GROUPREF_UNI_IGNORE IN_UNI_IGNORE LITERAL_UNI_IGNORE NOT_LITERAL_UNI_IGNORE RANGE_UNI_IGNORE MIN_REPEAT MAX_REPEAT OPCODES AT_BEGINNING AT_BEGINNING_LINE AT_BEGINNING_STRING AT_BOUNDARY AT_NON_BOUNDARY AT_END AT_END_LINE AT_END_STRING AT_LOC_BOUNDARY AT_LOC_NON_BOUNDARY AT_UNI_BOUNDARY AT_UNI_NON_BOUNDARY ATCODES CATEGORY_DIGIT CATEGORY_NOT_DIGIT CATEGORY_SPACE CATEGORY_NOT_SPACE CATEGORY_WORD CATEGORY_NOT_WORD CATEGORY_LINEBREAK CATEGORY_NOT_LINEBREAK CATEGORY_LOC_WORD CATEGORY_LOC_NOT_WORD CATEGORY_UNI_DIGIT CATEGORY_UNI_NOT_DIGIT CATEGORY_UNI_SPACE CATEGORY_UNI_NOT_SPACE CATEGORY_UNI_WORD CATEGORY_UNI_NOT_WORD CATEGORY_UNI_LINEBREAK CATEGORY_UNI_NOT_LINEBREAK CHCODES OP_IGNORE OP_LOCALE_IGNORE OP_UNICODE_IGNORE AT_MULTILINE AT_LOCALE AT_UNICODE CH_LOCALE CH_UNICODE CH_NEGATE SRE_FLAG_IGNORECASE SRE_FLAG_LOCALE SRE_FLAG_MULTILINE SRE_FLAG_DOTALL SRE_FLAG_UNICODE SRE_FLAG_VERBOSE SRE_FLAG_DEBUG SRE_FLAG_ASCII SRE_INFO_PREFIX SRE_INFO_LITERAL SRE_INFO_CHARSET _EXTRA_CASES _LITERAL_CODES _SUCCESS_CODES _ASSERT_CODES _UNIT_CODES _REPEATING_CODES _CHARSET_ALL _combine_flags _compile _compile_charset _optimize_charset _CODEBITS MAXCODE _BITS_TRANS _mk_bitmap _bytes_to_codes _simple _generate_overlap_table _get_iscased _get_literal_prefix _get_charset_prefix _compile_info isstring _code _hex_code dis compile',
+    owners: {
+      _combine_flags: 're._compiler',
+      _compile: 're._compiler',
+      _compile_charset: 're._compiler',
+      _optimize_charset: 're._compiler',
+      _mk_bitmap: 're._compiler',
+      _bytes_to_codes: 're._compiler',
+      _simple: 're._compiler',
+      _generate_overlap_table: 're._compiler',
+      _get_iscased: 're._compiler',
+      _get_literal_prefix: 're._compiler',
+      _get_charset_prefix: 're._compiler',
+      _compile_info: 're._compiler',
+      isstring: 're._compiler',
+      _code: 're._compiler',
+      _hex_code: 're._compiler',
+      dis: 're._compiler',
+      compile: 're._compiler',
+    },
   },
   sre_constants: {
     kind: 'source',
@@ -1053,6 +1672,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { _: 're._constants', warnings: 'warnings' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ warnings _ MAGIC MAXREPEAT MAXGROUPS PatternError error _NamedIntConstant _makecodes FAILURE SUCCESS ANY ANY_ALL ASSERT ASSERT_NOT AT BRANCH CATEGORY CHARSET BIGCHARSET GROUPREF GROUPREF_EXISTS IN INFO JUMP LITERAL MARK MAX_UNTIL MIN_UNTIL NOT_LITERAL NEGATE RANGE REPEAT REPEAT_ONE SUBPATTERN MIN_REPEAT_ONE ATOMIC_GROUP POSSESSIVE_REPEAT POSSESSIVE_REPEAT_ONE GROUPREF_IGNORE IN_IGNORE LITERAL_IGNORE NOT_LITERAL_IGNORE GROUPREF_LOC_IGNORE IN_LOC_IGNORE LITERAL_LOC_IGNORE NOT_LITERAL_LOC_IGNORE GROUPREF_UNI_IGNORE IN_UNI_IGNORE LITERAL_UNI_IGNORE NOT_LITERAL_UNI_IGNORE RANGE_UNI_IGNORE MIN_REPEAT MAX_REPEAT OPCODES AT_BEGINNING AT_BEGINNING_LINE AT_BEGINNING_STRING AT_BOUNDARY AT_NON_BOUNDARY AT_END AT_END_LINE AT_END_STRING AT_LOC_BOUNDARY AT_LOC_NON_BOUNDARY AT_UNI_BOUNDARY AT_UNI_NON_BOUNDARY ATCODES CATEGORY_DIGIT CATEGORY_NOT_DIGIT CATEGORY_SPACE CATEGORY_NOT_SPACE CATEGORY_WORD CATEGORY_NOT_WORD CATEGORY_LINEBREAK CATEGORY_NOT_LINEBREAK CATEGORY_LOC_WORD CATEGORY_LOC_NOT_WORD CATEGORY_UNI_DIGIT CATEGORY_UNI_NOT_DIGIT CATEGORY_UNI_SPACE CATEGORY_UNI_NOT_SPACE CATEGORY_UNI_WORD CATEGORY_UNI_NOT_WORD CATEGORY_UNI_LINEBREAK CATEGORY_UNI_NOT_LINEBREAK CHCODES OP_IGNORE OP_LOCALE_IGNORE OP_UNICODE_IGNORE AT_MULTILINE AT_LOCALE AT_UNICODE CH_LOCALE CH_UNICODE CH_NEGATE SRE_FLAG_IGNORECASE SRE_FLAG_LOCALE SRE_FLAG_MULTILINE SRE_FLAG_DOTALL SRE_FLAG_UNICODE SRE_FLAG_VERBOSE SRE_FLAG_DEBUG SRE_FLAG_ASCII SRE_INFO_PREFIX SRE_INFO_LITERAL SRE_INFO_CHARSET',
+    owners: { _makecodes: 're._constants' },
   },
   sre_parse: {
     kind: 'source',
@@ -1060,6 +1680,17 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { _: 're._parser', warnings: 'warnings' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ warnings _ MAGIC MAXREPEAT MAXGROUPS PatternError error FAILURE SUCCESS ANY ANY_ALL ASSERT ASSERT_NOT AT BRANCH CATEGORY CHARSET BIGCHARSET GROUPREF GROUPREF_EXISTS IN INFO JUMP LITERAL MARK MAX_UNTIL MIN_UNTIL NOT_LITERAL NEGATE RANGE REPEAT REPEAT_ONE SUBPATTERN MIN_REPEAT_ONE ATOMIC_GROUP POSSESSIVE_REPEAT POSSESSIVE_REPEAT_ONE GROUPREF_IGNORE IN_IGNORE LITERAL_IGNORE NOT_LITERAL_IGNORE GROUPREF_LOC_IGNORE IN_LOC_IGNORE LITERAL_LOC_IGNORE NOT_LITERAL_LOC_IGNORE GROUPREF_UNI_IGNORE IN_UNI_IGNORE LITERAL_UNI_IGNORE NOT_LITERAL_UNI_IGNORE RANGE_UNI_IGNORE MIN_REPEAT MAX_REPEAT OPCODES AT_BEGINNING AT_BEGINNING_LINE AT_BEGINNING_STRING AT_BOUNDARY AT_NON_BOUNDARY AT_END AT_END_LINE AT_END_STRING AT_LOC_BOUNDARY AT_LOC_NON_BOUNDARY AT_UNI_BOUNDARY AT_UNI_NON_BOUNDARY ATCODES CATEGORY_DIGIT CATEGORY_NOT_DIGIT CATEGORY_SPACE CATEGORY_NOT_SPACE CATEGORY_WORD CATEGORY_NOT_WORD CATEGORY_LINEBREAK CATEGORY_NOT_LINEBREAK CATEGORY_LOC_WORD CATEGORY_LOC_NOT_WORD CATEGORY_UNI_DIGIT CATEGORY_UNI_NOT_DIGIT CATEGORY_UNI_SPACE CATEGORY_UNI_NOT_SPACE CATEGORY_UNI_WORD CATEGORY_UNI_NOT_WORD CATEGORY_UNI_LINEBREAK CATEGORY_UNI_NOT_LINEBREAK CHCODES OP_IGNORE OP_LOCALE_IGNORE OP_UNICODE_IGNORE AT_MULTILINE AT_LOCALE AT_UNICODE CH_LOCALE CH_UNICODE CH_NEGATE SRE_FLAG_IGNORECASE SRE_FLAG_LOCALE SRE_FLAG_MULTILINE SRE_FLAG_DOTALL SRE_FLAG_UNICODE SRE_FLAG_VERBOSE SRE_FLAG_DEBUG SRE_FLAG_ASCII SRE_INFO_PREFIX SRE_INFO_LITERAL SRE_INFO_CHARSET SPECIAL_CHARS REPEAT_CHARS DIGITS OCTDIGITS HEXDIGITS ASCIILETTERS WHITESPACE _REPEATCODES _UNITCODES ESCAPES CATEGORIES FLAGS TYPE_FLAGS GLOBAL_FLAGS MAXWIDTH State SubPattern Tokenizer _class_escape _escape _uniq _parse_sub _parse _parse_flags fix_flags parse parse_template',
+    owners: {
+      _class_escape: 're._parser',
+      _escape: 're._parser',
+      _uniq: 're._parser',
+      _parse_sub: 're._parser',
+      _parse: 're._parser',
+      _parse_flags: 're._parser',
+      fix_flags: 're._parser',
+      parse: 're._parser',
+      parse_template: 're._parser',
+    },
   },
   shlex: {
     kind: 'source',
@@ -1071,12 +1702,51 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     kind: 'frozen',
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __builtins__ ST_MODE ST_INO ST_DEV ST_NLINK ST_UID ST_GID ST_SIZE ST_ATIME ST_MTIME ST_CTIME S_IMODE S_IFMT S_IFDIR S_IFCHR S_IFBLK S_IFREG S_IFIFO S_IFLNK S_IFSOCK S_IFDOOR S_IFPORT S_IFWHT S_ISDIR S_ISCHR S_ISBLK S_ISREG S_ISFIFO S_ISLNK S_ISSOCK S_ISDOOR S_ISPORT S_ISWHT S_ISUID S_ISGID S_ENFMT S_ISVTX S_IREAD S_IWRITE S_IEXEC S_IRWXU S_IRUSR S_IWUSR S_IXUSR S_IRWXG S_IRGRP S_IWGRP S_IXGRP S_IRWXO S_IROTH S_IWOTH S_IXOTH UF_SETTABLE UF_NODUMP UF_IMMUTABLE UF_APPEND UF_OPAQUE UF_NOUNLINK UF_COMPRESSED UF_TRACKED UF_DATAVAULT UF_HIDDEN SF_SETTABLE SF_ARCHIVED SF_IMMUTABLE SF_APPEND SF_RESTRICTED SF_NOUNLINK SF_SNAPSHOT SF_FIRMLINK SF_DATALESS _filemode_table filemode FILE_ATTRIBUTE_ARCHIVE FILE_ATTRIBUTE_COMPRESSED FILE_ATTRIBUTE_DEVICE FILE_ATTRIBUTE_DIRECTORY FILE_ATTRIBUTE_ENCRYPTED FILE_ATTRIBUTE_HIDDEN FILE_ATTRIBUTE_INTEGRITY_STREAM FILE_ATTRIBUTE_NORMAL FILE_ATTRIBUTE_NOT_CONTENT_INDEXED FILE_ATTRIBUTE_NO_SCRUB_DATA FILE_ATTRIBUTE_OFFLINE FILE_ATTRIBUTE_READONLY FILE_ATTRIBUTE_REPARSE_POINT FILE_ATTRIBUTE_SPARSE_FILE FILE_ATTRIBUTE_SYSTEM FILE_ATTRIBUTE_TEMPORARY FILE_ATTRIBUTE_VIRTUAL SF_SUPPORTED SF_SYNTHETIC',
+    owners: {
+      S_IMODE: '_stat',
+      S_IFMT: '_stat',
+      S_ISDIR: '_stat',
+      S_ISCHR: '_stat',
+      S_ISBLK: '_stat',
+      S_ISREG: '_stat',
+      S_ISFIFO: '_stat',
+      S_ISLNK: '_stat',
+      S_ISSOCK: '_stat',
+      S_ISDOOR: '_stat',
+      S_ISPORT: '_stat',
+      S_ISWHT: '_stat',
+      filemode: '_stat',
+    },
   },
   statistics: {
     kind: 'source',
     imports: { _random: 'random', math: 'math', numbers: 'numbers', random: 'random', sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __annotate__ __conditional_annotations__ __all__ math numbers random sys Fraction Decimal count groupby repeat bisect_left bisect_right hypot sqrt fabs exp erfc tau log fsum sumprod isfinite isinf pi cos sin tan cosh asin atan acos reduce itemgetter Counter namedtuple defaultdict _SQRT2 _random StatisticsError mean fmean geometric_mean harmonic_mean median median_low median_high median_grouped mode multimode variance pvariance stdev pstdev covariance correlation LinearRegression linear_regression _kernel_specs _newton_raphson _quartic_invcdf_estimate _triweight_invcdf_estimate kde kde_random quantiles NormalDist _sum _ss _isfinite _coerce _exact_ratio _convert _fail_neg _rank _integer_sqrt_of_frac_rto _sqrt_bit_width _float_sqrt_of_frac _decimal_sqrt_of_frac _mean_stdev _sqrtprod _normal_dist_inv_cdf',
+    owners: {
+      bisect_left: '_bisect',
+      bisect_right: '_bisect',
+      hypot: 'math',
+      sqrt: 'math',
+      fabs: 'math',
+      exp: 'math',
+      erfc: 'math',
+      log: 'math',
+      fsum: 'math',
+      sumprod: 'math',
+      isfinite: 'math',
+      isinf: 'math',
+      cos: 'math',
+      sin: 'math',
+      tan: 'math',
+      cosh: 'math',
+      asin: 'math',
+      atan: 'math',
+      acos: 'math',
+      reduce: '_functools',
+      namedtuple: 'collections',
+      _normal_dist_inv_cdf: '_statistics',
+    },
   },
   string: {
     kind: 'package',
@@ -1099,6 +1769,15 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     kind: 'source',
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ calcsize iter_unpack pack pack_into unpack unpack_from Struct error _clearcache',
+    owners: {
+      calcsize: '_struct',
+      iter_unpack: '_struct',
+      pack: '_struct',
+      pack_into: '_struct',
+      unpack: '_struct',
+      unpack_from: '_struct',
+      _clearcache: '_struct',
+    },
   },
   symtable: {
     kind: 'source',
@@ -1128,6 +1807,22 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { _contextvars: '_contextvars', _os: 'os', _sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ _os _sys _contextvars _time WeakSet _count _deque __all__ _start_joinable_thread _daemon_threads_allowed _allocate_lock _LockType _thread_shutdown _make_thread_handle _ThreadHandle get_ident _get_main_thread_ident _is_main_interpreter get_native_id _HAVE_THREAD_NATIVE_ID _set_name ThreadError _CRLock TIMEOUT_MAX local _profile_hook _trace_hook setprofile setprofile_all_threads getprofile settrace settrace_all_threads gettrace Lock RLock _RLock _PyRLock Condition Semaphore BoundedSemaphore Event Barrier BrokenBarrierError _counter _newname _active_limbo_lock _active _limbo _dangling Thread excepthook ExceptHookArgs __excepthook__ _make_invoke_excepthook Timer _MainThread _thread_local_info _DeleteDummyThreadOnDel _DummyThread current_thread currentThread active_count activeCount _enumerate enumerate _threading_atexits _SHUTTING_DOWN _register_atexit stack_size _main_thread _shutdown main_thread _after_fork',
+    owners: {
+      _time: 'time',
+      _start_joinable_thread: '_thread',
+      _daemon_threads_allowed: '_thread',
+      _allocate_lock: '_thread',
+      _thread_shutdown: '_thread',
+      _make_thread_handle: '_thread',
+      get_ident: '_thread',
+      _get_main_thread_ident: '_thread',
+      _is_main_interpreter: '_thread',
+      get_native_id: '_thread',
+      _set_name: '_thread',
+      excepthook: '_thread',
+      __excepthook__: '_thread',
+      stack_size: '_thread',
+    },
   },
   time: {
     kind: 'builtin',
@@ -1151,6 +1846,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __author__ __credits__ _builtin_open lookup BOM_UTF8 collections functools TextIOWrapper _itertools re sys tok_name ISTERMINAL ISNONTERMINAL ISEOF EXACT_TOKEN_TYPES ENDMARKER NAME NUMBER STRING NEWLINE INDENT DEDENT LPAR RPAR LSQB RSQB COLON COMMA SEMI PLUS MINUS STAR SLASH VBAR AMPER LESS GREATER EQUAL DOT PERCENT LBRACE RBRACE EQEQUAL NOTEQUAL LESSEQUAL GREATEREQUAL TILDE CIRCUMFLEX LEFTSHIFT RIGHTSHIFT DOUBLESTAR PLUSEQUAL MINEQUAL STAREQUAL SLASHEQUAL PERCENTEQUAL AMPEREQUAL VBAREQUAL CIRCUMFLEXEQUAL LEFTSHIFTEQUAL RIGHTSHIFTEQUAL DOUBLESTAREQUAL DOUBLESLASH DOUBLESLASHEQUAL AT ATEQUAL RARROW ELLIPSIS COLONEQUAL EXCLAMATION OP TYPE_IGNORE TYPE_COMMENT SOFT_KEYWORD FSTRING_START FSTRING_MIDDLE FSTRING_END TSTRING_START TSTRING_MIDDLE TSTRING_END COMMENT NL ERRORTOKEN ENCODING N_TOKENS NT_OFFSET _tokenize cookie_re blank_re __all__ TokenInfo group any maybe Whitespace Comment Ignore Name Hexnumber Binnumber Octnumber Decnumber Intnumber Exponent Pointfloat Expfloat Floatnumber Imagnumber Number _all_string_prefixes _compile StringPrefix Single Double Single3 Double3 Triple String Special Funny PlainToken Token ContStr PseudoExtras PseudoToken endpats single_quoted triple_quoted tabsize TokenError Untokenizer untokenize _get_normal_name detect_encoding open tokenize generate_tokens _main _transform_msg _generate_tokens_from_c_tokenizer',
+    owners: { _builtin_open: '_io', lookup: '_codecs', ISTERMINAL: 'token', ISNONTERMINAL: 'token', ISEOF: 'token' },
   },
   tomllib: {
     kind: 'package',
@@ -1158,6 +1854,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { _parser: 'tomllib._parser', _re: 'tomllib._re' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __path__ __file__ __cached__ __builtins__ __all__ _re _parser TOMLDecodeError load loads',
+    owners: { load: 'tomllib._parser', loads: 'tomllib._parser' },
   },
   'tomllib._parser': {
     kind: 'source',
@@ -1165,6 +1862,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __conditional_annotations__ __annotations__ annotations sys MappingProxyType RE_DATETIME RE_LOCALTIME RE_NUMBER match_to_datetime match_to_localtime match_to_number TYPE_CHECKING MAX_KEY_PARTS ASCII_CTRL ILLEGAL_BASIC_STR_CHARS ILLEGAL_MULTILINE_BASIC_STR_CHARS ILLEGAL_LITERAL_STR_CHARS ILLEGAL_MULTILINE_LITERAL_STR_CHARS ILLEGAL_COMMENT_CHARS TOML_WS TOML_WS_AND_NEWLINE BARE_KEY_CHARS KEY_INITIAL_CHARS HEXDIGIT_CHARS BASIC_STR_ESCAPE_REPLACEMENTS DEPRECATED_DEFAULT TOMLDecodeError load loads Flags NestedDict Output skip_chars skip_until skip_comment skip_comments_and_array_ws create_dict_rule create_list_rule key_value_rule parse_key_value_pair parse_key parse_key_part parse_one_line_basic_str parse_array parse_inline_table parse_basic_str_escape parse_basic_str_escape_multiline parse_hex_char parse_literal_str parse_multiline_str parse_basic_str parse_value is_unicode_scalar_value make_safe_parse_float',
+    owners: { match_to_datetime: 'tomllib._re', match_to_localtime: 'tomllib._re', match_to_number: 'tomllib._re' },
   },
   'tomllib._re': {
     kind: 'source',
@@ -1172,6 +1870,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { re: 're' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ annotations date datetime time timedelta timezone tzinfo lru_cache re TYPE_CHECKING _TIME_RE_STR RE_NUMBER RE_LOCALTIME RE_DATETIME match_to_datetime cached_tz match_to_localtime match_to_number',
+    owners: { lru_cache: 'functools' },
   },
   tarfile: {
     kind: 'source',
@@ -1190,6 +1889,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ version __author__ __credits__ bltn_open sys os io shutil stat time struct copy re pwd grp symlink_exception __all__ NUL BLOCKSIZE RECORDSIZE GNU_MAGIC POSIX_MAGIC LENGTH_NAME LENGTH_LINK LENGTH_PREFIX REGTYPE AREGTYPE LNKTYPE SYMTYPE CHRTYPE BLKTYPE DIRTYPE FIFOTYPE CONTTYPE GNUTYPE_LONGNAME GNUTYPE_LONGLINK GNUTYPE_SPARSE XHDTYPE XGLTYPE SOLARIS_XHDTYPE USTAR_FORMAT GNU_FORMAT PAX_FORMAT DEFAULT_FORMAT SUPPORTED_TYPES REGULAR_TYPES GNU_TYPES PAX_FIELDS PAX_NAME_FIELDS PAX_NUMBER_FIELDS ENCODING stn nts nti itn calc_chksums copyfileobj _EXTHEADER_READ_CHUNK _safe_read _safe_print TarError ExtractError ReadError CompressionError StreamError HeaderError EmptyHeaderError TruncatedHeaderError EOFHeaderError InvalidHeaderError SubsequentHeaderError _LowLevelFile _Stream _StreamProxy _FileInFile ExFileObject FilterError AbsolutePathError OutsideDestinationError SpecialFileError AbsoluteLinkError LinkOutsideDestinationError LinkFallbackError _FILTER_ERRORS _get_filtered_attrs fully_trusted_filter tar_filter data_filter _NAMED_FILTERS _KEEP _header_length_prefix_re TarInfo TarFile is_tarfile open main',
+    owners: { bltn_open: '_io' },
   },
   'tomllib._types': {
     kind: 'source',
@@ -1232,6 +1932,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ abstractmethod ABCMeta collections defaultdict copyreg functools operator sys types GenericAlias _idfunc TypeVar ParamSpec TypeVarTuple ParamSpecArgs ParamSpecKwargs TypeAliasType Generic Union NoDefault __all__ _LazyAnnotationLib _lazy_annotationlib _type_convert _type_check _is_param_expr _should_unflatten_callable_args _type_repr _collect_type_parameters _check_generic_specialization _unpack_args _deduplicate _flatten_literal_params _cleanups _caches _tp_cache _deprecation_warning_for_no_type_params_passed _Sentinel _sentinel _eval_type _Final _NotIterable _SpecialForm _TypedCacheSpecialForm _AnyMeta Any NoReturn Never Self LiteralString ClassVar Final Optional Literal TypeAlias Concatenate TypeGuard TypeIs _make_forward_ref evaluate_forward_ref _is_unpacked_typevartuple _is_typevar_like _typevar_subst _typevartuple_prepare_subst _paramspec_subst _paramspec_prepare_subst _generic_class_getitem _generic_init_subclass _is_dunder _BaseGenericAlias _GenericAlias _SpecialGenericAlias _DeprecatedGenericAlias _CallableGenericAlias _CallableType _TupleType _UnionGenericAliasMeta _UnionGenericAlias _value_and_type_iter _LiteralGenericAlias _ConcatenateGenericAlias Unpack _UnpackGenericAlias _TypingEllipsis _TYPING_INTERNALS _SPECIAL_NAMES EXCLUDED_ATTRIBUTES _get_protocol_attrs _no_init_or_replace_init _caller _allow_reckless_class_checks _PROTO_ALLOWLIST _lazy_load_getattr_static _abc_instancecheck _abc_subclasscheck _type_check_issubclass_arg_1 _ProtocolMeta _proto_hook Protocol _AnnotatedAlias Annotated runtime_checkable cast assert_type get_type_hints _add_type_params_to_scope _strip_annotations get_origin get_args is_typeddict _ASSERT_NEVER_REPR_MAX_LENGTH assert_never no_type_check no_type_check_decorator _overload_dummy _overload_registry overload get_overloads clear_overloads final T KT VT T_co V_co VT_co T_contra CT_co AnyStr _alias Hashable Awaitable Coroutine AsyncIterable AsyncIterator Iterable Iterator Reversible Sized Container Collection Callable AbstractSet MutableSet Mapping MutableMapping Sequence MutableSequence ByteString Tuple List Deque Set FrozenSet MappingView KeysView ItemsView ValuesView Dict DefaultDict OrderedDict Counter ChainMap Generator AsyncGenerator Type SupportsInt SupportsFloat SupportsComplex SupportsBytes SupportsIndex SupportsAbs SupportsRound _make_nmtuple _make_eager_annotate _prohibited _special NamedTupleMeta NamedTuple _NamedTuple _namedtuple_mro_entries _get_typeddict_qualifiers _TypedDictMeta TypedDict _TypedDict Required NotRequired ReadOnly NewType Text TYPE_CHECKING IO BinaryIO TextIO reveal_type _IdentityCallable dataclass_transform _Func override is_protocol get_protocol_members __getattr__',
+    owners: { abstractmethod: 'abc', _idfunc: '_typing', _abc_instancecheck: 'abc', _abc_subclasscheck: 'abc' },
   },
   unicodedata: {
     kind: 'builtin',
@@ -1251,6 +1952,19 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __path__ __file__ __cached__ __builtins__ __all__ __unittest util result TestResult case addModuleCleanup TestCase FunctionTestCase SkipTest skip skipIf skipUnless expectedFailure doModuleCleanups enterModuleContext suite BaseTestSuite TestSuite loader TestLoader defaultTestLoader signals runner main TestProgram TextTestRunner TextTestResult installHandler registerResult removeResult removeHandler __dir__ __getattr__',
+    owners: {
+      addModuleCleanup: 'unittest.case',
+      skip: 'unittest.case',
+      skipIf: 'unittest.case',
+      skipUnless: 'unittest.case',
+      expectedFailure: 'unittest.case',
+      doModuleCleanups: 'unittest.case',
+      enterModuleContext: 'unittest.case',
+      installHandler: 'unittest.signals',
+      registerResult: 'unittest.signals',
+      removeResult: 'unittest.signals',
+      removeHandler: 'unittest.signals',
+    },
   },
   'unittest.async_case': {
     kind: 'source',
@@ -1277,6 +1991,13 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ sys functools difflib pprint re warnings collections contextlib traceback time types result strclass safe_repr _count_diff_all_purpose _count_diff_hashable _common_shorten_repr __unittest _subtest_msg_sentinel DIFF_OMITTED SkipTest _ShouldStop _UnexpectedSuccess _Outcome _addSkip _addError _id _enter_context _module_cleanups addModuleCleanup enterModuleContext doModuleCleanups skip skipIf skipUnless expectedFailure _is_subtype _BaseTestCaseContext _AssertRaisesBaseContext _AssertRaisesContext _AssertWarnsContext _AssertNotWarnsContext _OrderedChainMap TestCase FunctionTestCase _SubTest',
+    owners: {
+      strclass: 'unittest.util',
+      safe_repr: 'unittest.util',
+      _count_diff_all_purpose: 'unittest.util',
+      _count_diff_hashable: 'unittest.util',
+      _common_shorten_repr: 'unittest.util',
+    },
   },
   'unittest.loader': {
     kind: 'source',
@@ -1294,12 +2015,14 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ inspect os re sys traceback types functools fnmatch fnmatchcase case suite util __unittest VALID_MODULE_NAME _FailedTest _make_failed_import_test _make_failed_load_tests _make_failed_test _make_skipped_test _splitext TestLoader defaultTestLoader',
+    owners: { fnmatch: 'fnmatch', fnmatchcase: 'fnmatch' },
   },
   'unittest.main': {
     kind: 'source',
     imports: { argparse: 'argparse', loader: 'unittest.loader', os: 'os', runner: 'unittest.runner', sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ sys argparse os loader runner installHandler __unittest _NO_TESTS_EXITCODE MAIN_EXAMPLES MODULE_EXAMPLES _convert_name _convert_names _convert_select_pattern TestProgram main',
+    owners: { installHandler: 'unittest.signals' },
   },
   'unittest.mock': {
     kind: 'source',
@@ -1317,18 +2040,28 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ asyncio contextlib io inspect pprint sys builtins pkgutil iscoroutinefunction threading Format fields is_dataclass CodeType ModuleType MethodType safe_repr wraps partial RLock InvalidSpecError _builtins FILTER_DIR _safe_super _is_async_obj _is_async_func _is_instance_mock _is_exception _extract_mock _get_signature_object _check_signature _copy_func_details _callable _is_list _instance_callable _set_signature _set_async_signature _setup_func _setup_async_mock _is_magic _SentinelObject _Sentinel sentinel DEFAULT _missing _deleted _allowed_names _delegating_property _CallList _check_and_set_parent _MockIter Base NonCallableMock _ATTRIB_DENY_LIST _AnyComparer _try_iter CallableMixin Mock _check_spec_arg_typos _patch _get_target _patch_object _patch_multiple patch _patch_dict _clear_dict _patch_stopall magic_methods numerics inplace right _non_defaults _get_method _magics _async_method_magics _sync_async_magics _async_magics _all_sync_magics _all_magics _unsupported_magics _calculate_return_value _return_values _get_eq _get_ne _get_iter _get_async_iter _side_effect_methods _set_return_value MagicMixin NonCallableMagicMock AsyncMagicMixin MagicMock MagicProxy _CODE_SIG _CODE_ATTRS AsyncMockMixin AsyncMock _ANY ANY _format_call_signature _Call call create_autospec _must_skip _SpecState FunctionTypes file_spec open_spec _to_stream mock_open PropertyMock _timeout_unset ThreadingMixin ThreadingMock seal _AsyncIterator',
+    owners: {
+      iscoroutinefunction: 'inspect',
+      fields: 'dataclasses',
+      is_dataclass: 'dataclasses',
+      safe_repr: 'unittest.util',
+      wraps: 'functools',
+      RLock: 'threading',
+    },
   },
   'unittest.result': {
     kind: 'source',
     imports: { io: 'io', sys: 'sys', traceback: 'traceback', util: 'unittest.util' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ io sys traceback util wraps __unittest failfast STDOUT_LINE STDERR_LINE TestResult',
+    owners: { wraps: 'functools' },
   },
   'unittest.runner': {
     kind: 'source',
     imports: { result: 'unittest.result', sys: 'sys', time: 'time', warnings: 'warnings' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ sys time warnings get_theme result _SubTest registerResult __unittest _WritelnDecorator TextTestResult TextTestRunner',
+    owners: { get_theme: '_colorize', registerResult: 'unittest.signals' },
   },
   'unittest.signals': {
     kind: 'source',
@@ -1336,6 +2069,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { signal: 'signal', weakref: 'weakref' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ signal weakref wraps __unittest _InterruptHandler _results registerResult removeResult _interrupt_handler installHandler removeHandler',
+    owners: { wraps: 'functools' },
   },
   'unittest.suite': {
     kind: 'source',
@@ -1347,6 +2081,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     kind: 'source',
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ namedtuple Counter commonprefix __unittest _MAX_LENGTH _PLACEHOLDER_LEN _MIN_BEGIN_LEN _MIN_END_LEN _MIN_COMMON_LEN _MIN_DIFF_LEN _shorten _common_shorten_repr safe_repr strclass sorted_list_difference unorderable_list_difference three_way_cmp _Mismatch _count_diff_all_purpose _count_diff_hashable',
+    owners: { namedtuple: 'collections', commonprefix: 'genericpath' },
   },
   urllib: {
     kind: 'package',
@@ -1365,18 +2100,21 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ namedtuple functools math re types warnings ipaddress __all__ uses_relative uses_netloc uses_params non_hierarchical uses_query uses_fragment scheme_chars _WHATWG_C0_CONTROL_OR_SPACE _UNSAFE_URL_BYTES_TO_REMOVE clear_cache _implicit_encoding _implicit_errors _noop _encode_result _decode_args _coerce_args _ResultMixinStr _ResultMixinBytes _NetlocResultMixinBase _NetlocResultMixinStr _NetlocResultMixinBytes _DefragResultBase _SplitResultBase _ParseResultBase ResultBase DefragResult SplitResult ParseResult DefragResultBytes SplitResultBytes ParseResultBytes urlparse _urlparse _splitparams _splitnetloc _checknetloc _check_bracketed_netloc _check_bracketed_host urlsplit _urlsplit urlunparse urlunsplit _urlunsplit urljoin urldefrag _hexdig _hextobyte unquote_to_bytes _unquote_impl _asciire _generate_unquoted_parts unquote parse_qs parse_qsl unquote_plus _ALWAYS_SAFE _ALWAYS_SAFE_BYTES _Quoter quote quote_plus _byte_quoter_factory quote_from_bytes urlencode to_bytes _to_bytes unwrap splittype _typeprog _splittype splithost _hostprog _splithost splituser _splituser splitpasswd _splitpasswd splitport _portprog _splitport splitnport _splitnport splitquery _splitquery splittag _splittag splitattr _splitattr splitvalue _splitvalue',
+    owners: { namedtuple: 'collections' },
   },
   uuid: {
     kind: 'source',
     imports: { _uuid: '_uuid', os: 'os', sys: 'sys', time: 'time' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ os sys time Enum _simple_enum __author__ _AIX _LINUX _MAC_DELIM _MAC_OMITS_LEADING_ZEROES RESERVED_NCS RFC_4122 RESERVED_MICROSOFT RESERVED_FUTURE int_ bytes_ SafeUUID _UINT_128_MAX _RFC_4122_CLEARFLAGS_MASK _RFC_4122_VERSION_1_FLAGS _RFC_4122_VERSION_3_FLAGS _RFC_4122_VERSION_4_FLAGS _RFC_4122_VERSION_5_FLAGS _RFC_4122_VERSION_6_FLAGS _RFC_4122_VERSION_7_FLAGS _RFC_4122_VERSION_8_FLAGS UUID _get_command_stdout _is_universal _find_mac_near_keyword _parse_mac _find_mac_under_heading _ifconfig_getnode _ip_getnode _arp_getnode _lanscan_getnode _netstat_getnode _uuid _generate_time_safe _has_stable_extractable_node _UuidCreate _unix_getnode _windll_getnode _random_getnode _OS_GETTERS _GETTERS _node getnode _last_timestamp uuid1 uuid3 uuid4 uuid5 _last_timestamp_v6 uuid6 _last_timestamp_v7 _last_counter_v7 _uuid7_get_counter_and_tail uuid7 uuid8 main NAMESPACE_DNS NAMESPACE_URL NAMESPACE_OID NAMESPACE_X500 NIL MAX',
+    owners: { _simple_enum: 'enum', _generate_time_safe: '_uuid' },
   },
   wave: {
     kind: 'source',
     imports: { builtins: 'builtins', struct: 'struct', sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ namedtuple builtins struct sys __all__ Error WAVE_FORMAT_PCM WAVE_FORMAT_EXTENSIBLE KSDATAFORMAT_SUBTYPE_PCM _array_fmts _wave_params _byteswap _Chunk Wave_read Wave_write open',
+    owners: { namedtuple: 'collections' },
   },
   pyexpat: {
     kind: 'builtin',
@@ -1405,6 +2143,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { domreg: 'xml.dom.domreg' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __path__ __file__ __cached__ __builtins__ Node INDEX_SIZE_ERR DOMSTRING_SIZE_ERR HIERARCHY_REQUEST_ERR WRONG_DOCUMENT_ERR INVALID_CHARACTER_ERR NO_DATA_ALLOWED_ERR NO_MODIFICATION_ALLOWED_ERR NOT_FOUND_ERR NOT_SUPPORTED_ERR INUSE_ATTRIBUTE_ERR INVALID_STATE_ERR SYNTAX_ERR INVALID_MODIFICATION_ERR NAMESPACE_ERR INVALID_ACCESS_ERR VALIDATION_ERR DOMException IndexSizeErr DomstringSizeErr HierarchyRequestErr WrongDocumentErr InvalidCharacterErr NoDataAllowedErr NoModificationAllowedErr NotFoundErr NotSupportedErr InuseAttributeErr InvalidStateErr SyntaxErr InvalidModificationErr NamespaceErr InvalidAccessErr ValidationErr UserDataHandler XML_NAMESPACE XMLNS_NAMESPACE XHTML_NAMESPACE EMPTY_NAMESPACE EMPTY_PREFIX domreg getDOMImplementation registerDOMImplementation',
+    owners: { getDOMImplementation: 'xml.dom.domreg', registerDOMImplementation: 'xml.dom.domreg' },
   },
   'xml.dom.NodeFilter': {
     kind: 'source',
@@ -1422,6 +2161,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { expat: 'xml.parsers.expat', minidom: 'xml.dom.minidom', xmlbuilder: 'xml.dom.xmlbuilder' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ xmlbuilder minidom Node EMPTY_NAMESPACE EMPTY_PREFIX XMLNS_NAMESPACE expat _append_child _set_attribute_node _XML_WHITESPACE NodeFilter TEXT_NODE CDATA_SECTION_NODE DOCUMENT_NODE FILTER_ACCEPT FILTER_REJECT FILTER_SKIP FILTER_INTERRUPT theDOMImplementation _typeinfo_map ElementInfo _intern _parse_ns_name ExpatBuilder _ALLOWED_FILTER_RETURNS FilterVisibilityController FilterCrutch Rejecter Skipper _FRAGMENT_BUILDER_INTERNAL_SYSTEM_ID _FRAGMENT_BUILDER_TEMPLATE FragmentBuilder Namespaces ExpatBuilderNS FragmentBuilderNS ParseEscape InternalSubsetExtractor parse parseString parseFragment parseFragmentString makeBuilder',
+    owners: { _append_child: 'xml.dom.minidom', _set_attribute_node: 'xml.dom.minidom' },
   },
   'xml.dom.minicompat': {
     kind: 'source',
@@ -1434,6 +2174,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { domreg: 'xml.dom.domreg', io: 'io', xml: 'xml' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ io xml EMPTY_NAMESPACE EMPTY_PREFIX XMLNS_NAMESPACE domreg NodeList EmptyNodeList StringTypes defproperty DOMImplementationLS DocumentLS _nodeTypes_with_children _XML_WHITESPACE Node _append_child _write_data _get_elements_by_tagName_helper _get_elements_by_tagName_ns_helper DocumentFragment Attr NamedNodeMap AttributeList TypeInfo _no_type Element _set_attribute_node Childless ProcessingInstruction CharacterData Text _get_containing_element _get_containing_entref Comment CDATASection ReadOnlySequentialNamedNodeMap Identified DocumentType Entity Notation DOMImplementation ElementInfo _clear_id_cache Document _clone_node _nssplit _do_pulldom_parse parse parseString getDOMImplementation',
+    owners: { defproperty: 'xml.dom.minicompat' },
   },
   'xml.dom.pulldom': {
     kind: 'source',
@@ -1458,6 +2199,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { ElementTree: 'xml.etree.ElementTree', copy: 'copy' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ copy ElementTree urljoin XINCLUDE XINCLUDE_INCLUDE XINCLUDE_FALLBACK DEFAULT_MAX_INCLUSION_DEPTH FatalIncludeError LimitedRecursiveIncludeError default_loader include _include',
+    owners: { urljoin: 'urllib.parse' },
   },
   'xml.etree.ElementPath': {
     kind: 'source',
@@ -1480,12 +2222,32 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __all__ VERSION sys re warnings io collections contextlib weakref ElementPath _XML_WHITESPACE ParseError iselement Element SubElement Comment ProcessingInstruction PI QName ElementTree _get_writer _namespaces _serialize_xml _CDATA_CONTENT_ELEMENTS HTML_EMPTY _serialize_html _serialize_text _serialize register_namespace _namespace_map _raise_serialization_error _escape_cdata _escape_attrib _escape_attrib_html tostring _ListDataStream tostringlist dump indent parse iterparse XMLPullParser XML XMLID fromstring fromstringlist TreeBuilder XMLParser canonicalize _looks_like_prefix_name C14NWriterTarget _escape_cdata_c14n _escape_attrib_c14n _Element_Py _set_factories',
+    owners: { SubElement: '_elementtree', _set_factories: '_elementtree' },
   },
   'xml.etree.cElementTree': {
     kind: 'source',
     doc: false,
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ Comment dump Element ElementTree fromstring fromstringlist indent iselement iterparse parse ParseError PI ProcessingInstruction QName SubElement tostring tostringlist TreeBuilder VERSION XML XMLID XMLParser XMLPullParser register_namespace canonicalize C14NWriterTarget',
+    owners: {
+      Comment: 'xml.etree.ElementTree',
+      dump: 'xml.etree.ElementTree',
+      fromstring: 'xml.etree.ElementTree',
+      fromstringlist: 'xml.etree.ElementTree',
+      indent: 'xml.etree.ElementTree',
+      iselement: 'xml.etree.ElementTree',
+      iterparse: 'xml.etree.ElementTree',
+      parse: 'xml.etree.ElementTree',
+      PI: 'xml.etree.ElementTree',
+      ProcessingInstruction: 'xml.etree.ElementTree',
+      SubElement: '_elementtree',
+      tostring: 'xml.etree.ElementTree',
+      tostringlist: 'xml.etree.ElementTree',
+      XML: 'xml.etree.ElementTree',
+      XMLID: 'xml.etree.ElementTree',
+      register_namespace: 'xml.etree.ElementTree',
+      canonicalize: 'xml.etree.ElementTree',
+    },
   },
   'xml.parsers': {
     kind: 'package',
@@ -1496,6 +2258,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { errors: 'pyexpat.errors', model: 'pyexpat.model', sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ sys ParserCreate ErrorString error ExpatError XMLParserType EXPAT_VERSION version_info native_encoding errors model features XML_PARAM_ENTITY_PARSING_NEVER XML_PARAM_ENTITY_PARSING_UNLESS_STANDALONE XML_PARAM_ENTITY_PARSING_ALWAYS expat_CAPI',
+    owners: { ParserCreate: 'pyexpat', ErrorString: 'pyexpat' },
   },
   'xml.parsers.expat.errors': {
     kind: 'builtin',
@@ -1530,6 +2293,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ version SAXException SAXParseException SAXNotRecognizedException SAXNotSupportedException SAXReaderNotAvailable feature_validation feature_namespaces feature_namespace_prefixes feature_external_ges feature_external_pes feature_string_interning property_xml_string property_interning_dict expat xmlreader saxutils handler AttributesImpl AttributesNSImpl _mkproxy _ClosedParser ExpatLocator ExpatParser create_parser',
+    owners: { _mkproxy: '_weakref' },
   },
   'xml.sax.handler': {
     kind: 'source',
@@ -1560,6 +2324,12 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { _collections_abc: 'collections.abc', itertools: 'itertools', sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ getweakrefcount getweakrefs ref proxy CallableProxyType ProxyType ReferenceType _remove_dead_weakref WeakSet _collections_abc sys itertools ProxyTypes __all__ WeakMethod WeakValueDictionary KeyedRef WeakKeyDictionary finalize',
+    owners: {
+      getweakrefcount: '_weakref',
+      getweakrefs: '_weakref',
+      proxy: '_weakref',
+      _remove_dead_weakref: '_weakref',
+    },
   },
   warnings: {
     kind: 'source',
@@ -1567,6 +2337,41 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     imports: { sys: 'sys' },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ sys __all__ WarningMessage _DEPRECATED_MSG _OptionError _add_filter _deprecated _filters_mutated _filters_mutated_lock_held _filters_version _formatwarning_orig _formatwarnmsg _formatwarnmsg_impl _get_context _get_filters _getaction _getcategory _is_filename_to_skip _is_internal_filename _is_internal_frame _lock _new_context _next_external_frame _processoptions _set_context _set_module _setoption _showwarning_orig _showwarnmsg _showwarnmsg_impl _use_context _warn_unawaited_coroutine _warnings_context catch_warnings defaultaction deprecated filters filterwarnings formatwarning onceregistry resetwarnings showwarning simplefilter warn warn_explicit _acquire_lock _release_lock _Lock',
+    owners: {
+      _add_filter: '_py_warnings',
+      _deprecated: '_py_warnings',
+      _filters_mutated: '_py_warnings',
+      _filters_mutated_lock_held: '_warnings',
+      _formatwarning_orig: '_py_warnings',
+      _formatwarnmsg: '_py_warnings',
+      _formatwarnmsg_impl: '_py_warnings',
+      _get_context: '_py_warnings',
+      _get_filters: '_py_warnings',
+      _getaction: '_py_warnings',
+      _getcategory: '_py_warnings',
+      _is_filename_to_skip: '_py_warnings',
+      _is_internal_filename: '_py_warnings',
+      _is_internal_frame: '_py_warnings',
+      _new_context: '_py_warnings',
+      _next_external_frame: '_py_warnings',
+      _processoptions: '_py_warnings',
+      _set_context: '_py_warnings',
+      _set_module: '_py_warnings',
+      _setoption: '_py_warnings',
+      _showwarning_orig: '_py_warnings',
+      _showwarnmsg: '_py_warnings',
+      _showwarnmsg_impl: '_py_warnings',
+      _warn_unawaited_coroutine: '_py_warnings',
+      filterwarnings: '_py_warnings',
+      formatwarning: '_py_warnings',
+      resetwarnings: '_py_warnings',
+      showwarning: '_py_warnings',
+      simplefilter: '_py_warnings',
+      warn: '_warnings',
+      warn_explicit: '_warnings',
+      _acquire_lock: '_warnings',
+      _release_lock: '_warnings',
+    },
   },
   zipfile: {
     kind: 'package',
@@ -1589,6 +2394,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     },
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __path__ __file__ __cached__ __builtins__ binascii importlib io os shutil stat struct sys threading time zlib crc32 bz2 lzma zstd __all__ BadZipFile LargeZipFile error BadZipfile ZIP64_LIMIT ZIP_FILECOUNT_LIMIT ZIP_MAX_COMMENT ZIP_STORED ZIP_DEFLATED ZIP_BZIP2 ZIP_LZMA ZIP_ZSTANDARD DEFAULT_VERSION ZIP64_VERSION BZIP2_VERSION LZMA_VERSION ZSTANDARD_VERSION MAX_EXTRACT_VERSION structEndArchive stringEndArchive sizeEndCentDir _ECD_SIGNATURE _ECD_DISK_NUMBER _ECD_DISK_START _ECD_ENTRIES_THIS_DISK _ECD_ENTRIES_TOTAL _ECD_SIZE _ECD_OFFSET _ECD_COMMENT_SIZE _ECD_COMMENT _ECD_LOCATION structCentralDir stringCentralDir sizeCentralDir _CD_SIGNATURE _CD_CREATE_VERSION _CD_CREATE_SYSTEM _CD_EXTRACT_VERSION _CD_EXTRACT_SYSTEM _CD_FLAG_BITS _CD_COMPRESS_TYPE _CD_TIME _CD_DATE _CD_CRC _CD_COMPRESSED_SIZE _CD_UNCOMPRESSED_SIZE _CD_FILENAME_LENGTH _CD_EXTRA_FIELD_LENGTH _CD_COMMENT_LENGTH _CD_DISK_NUMBER_START _CD_INTERNAL_FILE_ATTRIBUTES _CD_EXTERNAL_FILE_ATTRIBUTES _CD_LOCAL_HEADER_OFFSET _MASK_ENCRYPTED _MASK_COMPRESS_OPTION_1 _MASK_USE_DATA_DESCRIPTOR _MASK_COMPRESSED_PATCH _MASK_STRONG_ENCRYPTION _MASK_UTF_FILENAME structFileHeader stringFileHeader sizeFileHeader _FH_SIGNATURE _FH_EXTRACT_VERSION _FH_EXTRACT_SYSTEM _FH_GENERAL_PURPOSE_FLAG_BITS _FH_COMPRESSION_METHOD _FH_LAST_MOD_TIME _FH_LAST_MOD_DATE _FH_CRC _FH_COMPRESSED_SIZE _FH_UNCOMPRESSED_SIZE _FH_FILENAME_LENGTH _FH_EXTRA_FIELD_LENGTH structEndArchive64Locator stringEndArchive64Locator sizeEndCentDir64Locator structEndArchive64 stringEndArchive64 sizeEndCentDir64 _CD64_SIGNATURE _CD64_DIRECTORY_RECSIZE _CD64_CREATE_VERSION _CD64_EXTRACT_VERSION _CD64_DISK_NUMBER _CD64_DISK_NUMBER_START _CD64_NUMBER_ENTRIES_THIS_DISK _CD64_NUMBER_ENTRIES_TOTAL _CD64_DIRECTORY_SIZE _CD64_OFFSET_START_CENTDIR _DD_SIGNATURE _Extra _check_zipfile is_zipfile _handle_prepended_data _EndRecData64 _EndRecData _sanitize_filename ZipInfo _crctable _gen_crc _ZipDecrypter LZMACompressor LZMADecompressor compressor_names _check_compression _get_compressor _get_decompressor _SharedFile _Tellable ZipExtFile _ZipWriteFile ZipFile PyZipFile main _path Path CompleteDirs',
+    owners: { crc32: 'zlib' },
   },
   'zipfile._path': {
     kind: 'package',

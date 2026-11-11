@@ -9,7 +9,6 @@ import { builtin } from './define';
 import { compile, COMPILE_KEYWORDS, evaluate, execute } from './dynamicCode';
 import { enumMembersOf } from './enums';
 import { pyHash } from './hashing';
-import { help } from './help';
 import { defineConstructingNew } from './instances';
 import { reduction, withState } from './iteratorStates';
 import { dunderImport } from './modules/importlib';
@@ -686,12 +685,6 @@ function dir(value: PyValue): PyValue {
   return callValue(runtime.builtins.get('sorted') as PyValue, [names]);
 }
 
-function exitFunction(name: string): PyValue {
-  return builtin(name, 'expected', 0, 1, (args) => {
-    throw currentRuntime().systemExit(args[0]);
-  });
-}
-
 // The namespace -----------------------------------------------------------------------------------------------------
 
 /** The builtins module's namespace, in CPython's order, which NameError suggestions depend on. */
@@ -820,10 +813,7 @@ function builtinNamespace(): Map<string, PyValue> {
     ['EnvironmentError', exceptionClasses.get('OSError') as PyValue],
     ['IOError', exceptionClasses.get('OSError') as PyValue],
     ['open', unsupportedFunction('open', 'ファイルの読み書き（open()）')],
-    ['quit', exitFunction('quit')],
-    ['exit', exitFunction('exit')],
     ...siteBuiltins(),
-    ['help', nativeFunction('help', help)],
     ['Turtle', turtleClass],
   ]);
 }

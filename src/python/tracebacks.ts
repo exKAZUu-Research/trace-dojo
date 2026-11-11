@@ -9,14 +9,14 @@ import {
 import { addressOf } from './conversions';
 import { method, unsupportedMethod, unsupportedSizeof } from './define';
 import type { Frame } from './frame';
-import { identityHash } from './hashing';
+import { identityHash, pyHash } from './hashing';
 import { defineProperty } from './modules/numberSupport';
 import { namespaceDict } from './namespaces';
 import { callValue, getAttribute } from './objects';
 import { firstRowOf } from './programSource';
 import { cpythonFrames } from './reflection';
 import { currentRuntime } from './runtimeContext';
-import { builtinClass, newDict, newTuple, None, pyError, typeError } from './types';
+import { builtinClass, newDict, newTuple, None, NotImplemented, pyError, typeError } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import { type ExceptionState, PyError, type PyFunction, PyGenerator, PyObject, PyOpaque, type PyValue } from './values';
 
@@ -253,6 +253,29 @@ export function functionCode(fn: PyFunction): PyOpaque {
 
 export const infoOf = (self: PyValue): CodeInfo => (self as PyOpaque).data as CodeInfo;
 
+/**
+ * Whether two code objects are equal, as CPython compares their names, flags, bytecode, constants, and position
+ * tables: code compiled from the same source in the same mode is, and so is a definition's code with itself.
+ */
+function sameCode(a: CodeInfo, b: CodeInfo): boolean {
+  if (a === b) return true;
+  const [sourceA, sourceB] = [compiledSource(a), compiledSource(b)];
+  if (sourceA !== undefined || sourceB !== undefined) return sourceA === sourceB && a.futureFlags === b.futureFlags;
+  if (a.name === b.name && a.qualifiedName === b.qualifiedName && a.firstRow === b.firstRow) {
+    // Code of two definitions in two compilations of the same source, which CPython's bytecode may tell apart or not.
+    throw new UnsupportedFeatureError(
+      '同じ行の同じ名前の別々の定義のコードオブジェクトの比較（CPython はバイトコードと位置の表で比べる）'
+    );
+  }
+  return false;
+}
+
+/** The mode and source text of code compile() created, which decide its contents, or undefined for other code. */
+function compiledSource(info: CodeInfo): string | undefined {
+  const compiled = info.compiled as { module: Module; mode: string } | undefined;
+  return compiled?.module.source === undefined ? undefined : `${compiled.mode}\n${compiled.module.source}`;
+}
+
 function parameterCount(self: PyValue, kinds: string[]): bigint {
   const { fn, scope } = infoOf(self);
   // A generator expression's code takes the iterator of its first iterable as its one positional parameter.
@@ -267,7 +290,18 @@ unsupportedMethod(codeClass, 'co_branches', 'コードオブジェクトのバ�
 method(codeClass, '_varname_from_oparg', 'one', 1, 1, () => {
   throw new UnsupportedFeatureError('コードオブジェクトのバイトコード（_varname_from_oparg）');
 });
-method(codeClass, '__hash__', 'none', 0, 0, (self) => identityHash(self as PyObject));
+method(codeClass, '__eq__', 'one', 1, 1, (self, [other]) => {
+  if (!(other instanceof PyOpaque) || other.cls !== codeClass) return NotImplemented;
+  return sameCode(infoOf(self), infoOf(other));
+});
+method(codeClass, '__ne__', 'one', 1, 1, (self, [other]) => {
+  if (!(other instanceof PyOpaque) || other.cls !== codeClass) return NotImplemented;
+  return !sameCode(infoOf(self), infoOf(other));
+});
+method(codeClass, '__hash__', 'none', 0, 0, (self) => {
+  const compiled = compiledSource(infoOf(self));
+  return compiled === undefined ? identityHash(self as PyObject) : pyHash(compiled);
+});
 method(codeClass, '__repr__', 'none', 0, 0, (self) => {
   const { name, filename, firstRow } = infoOf(self);
   if (filename === undefined) {

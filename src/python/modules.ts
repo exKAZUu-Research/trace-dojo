@@ -1,6 +1,6 @@
 import { acceleratorModule } from './builtinDocs';
 import { SYS_BUILTIN_MODULE_NAMES } from './data/sysModuleNames';
-import { addLayoutAttributes, orderNamespace } from './modules/moduleLayout';
+import { addLayoutAttributes, orderNamespace, recordFunctionOwners } from './modules/moduleLayout';
 import type { Runtime } from './runtime';
 import { exceptionClassNamed, moduleClass, newException } from './types';
 import { UnsupportedFeatureError } from './unsupported';
@@ -132,6 +132,7 @@ function createModule(runtime: Runtime, name: string, factory: ModuleFactory): P
   recordFunctionModules(module);
   addLayoutAttributes(module, name);
   orderNamespace(module, name);
+  recordFunctionOwners(module, name);
   moduleTables.get(runtime)?.set(name, module);
   loadAccelerators(runtime, module);
   return module;

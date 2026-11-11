@@ -3,12 +3,13 @@ import { builtinTextSignature } from './builtinDocs';
 import { enumerateClass } from './builtins';
 import { addressOf } from './conversions';
 import { method } from './define';
+import { defineNew } from './instances';
 import { sliceIndices } from './items';
 import { defineProperty } from './modules/numberSupport';
 import { namespaceDict } from './namespaces';
 import { exactBinary, scaleToFloat, toIndex } from './numbers';
 import { bindValue, callValue, getAttribute, setAttribute } from './objects';
-import { binaryOp } from './operators';
+import { binaryOp, compareOp } from './operators';
 import { currentRuntime } from './runtimeContext';
 import { sharedNamespaceModules } from './sharedNamespaces';
 import { newGenericAlias } from './typeHints';
@@ -39,6 +40,7 @@ import {
   newDict,
   newTuple,
   None,
+  NotImplemented,
   notImplementedClass,
   propertyClass,
   pyError,
@@ -59,7 +61,7 @@ import { UnsupportedFeatureError } from './unsupported';
 import {
   type PyBoundMethod,
   type PyBuiltinFunction,
-  type PyCell,
+  PyCell,
   PyClass,
   type PyComplex,
   type PyDescriptor,
@@ -458,13 +460,46 @@ function closureOf(fn: PyFunction): PyValue {
   return newTuple(
     names.map((name) => {
       const cell = fn.closure.get(name) ?? (fn.classCell as PyCell);
-      return new PyOpaque(cellClass, 'cell', cell);
+      return cellObject(cell);
     })
   );
 }
 
-// CPython's cells compare by their contents, which makes them unhashable.
+/** The cell objects of the variables, one for each, as CPython's functions share the cells themselves. */
+const cellObjects = new WeakMap<PyCell, PyOpaque>();
+
+function cellObject(cell: PyCell): PyOpaque {
+  let object = cellObjects.get(cell);
+  if (!object) {
+    object = new PyOpaque(cellClass, 'cell', cell);
+    cellObjects.set(cell, object);
+  }
+  return object;
+}
+
+defineNew(cellClass, (_cls, args, kwargs) => {
+  if (kwargs !== undefined && kwargs.size > 0) throw typeError('cell() takes no keyword arguments');
+  if (args.length > 1) throw typeError(`cell expected at most 1 argument, got ${args.length}`);
+  return new PyOpaque(cellClass, 'cell', new PyCell(args[0]));
+});
+
+// CPython's cells compare by their contents, an empty cell before any other, which makes them unhashable.
 cellClass.dict.set('__hash__', None);
+for (const [name, operator] of [
+  ['__eq__', '=='],
+  ['__ne__', '!='],
+  ['__lt__', '<'],
+  ['__le__', '<='],
+  ['__gt__', '>'],
+  ['__ge__', '>='],
+] as const) {
+  method(cellClass, name, 'one', 1, 1, (self, [other]) => {
+    if (!(other instanceof PyOpaque) || other.cls !== cellClass) return NotImplemented;
+    const [a, b] = [((self as PyOpaque).data as PyCell).value, (other.data as PyCell).value];
+    if (a !== undefined && b !== undefined) return compareOp(operator, a, b);
+    return compareOp(operator, a === undefined ? 0n : 1n, b === undefined ? 0n : 1n);
+  });
+}
 method(cellClass, '__repr__', 'none', 0, 0, (self) => {
   const { value } = (self as PyOpaque).data as PyCell;
   const here = addressOf(self as PyOpaque);

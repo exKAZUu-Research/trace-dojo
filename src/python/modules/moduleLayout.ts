@@ -2,12 +2,12 @@ import { BUILTIN_DOC } from '../attributes';
 import { moduleDoc } from '../builtinDocs';
 import { pyRepr } from '../conversions';
 import { isSupportedModule, MISSING_PLATFORM_MODULES } from '../moduleNames';
-import { isRegisteredModule } from '../modules';
+import { isRegisteredModule, setBuiltinFunctionModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
 import { callValue, importedModule } from '../objects';
-import { newList, None, typeError, typeName } from '../types';
+import { nativeFunction, newList, None, typeError, typeName } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
-import { type Kwargs, type PyClass, PyModule, type PyValue } from '../values';
+import { type Kwargs, PyBuiltinFunction, type PyClass, PyFunction, PyModule, type PyValue } from '../values';
 import { MODULE_LAYOUTS } from './moduleLayouts';
 
 /** How CPython provides a module: where its code comes from, its doc and package, and the modules its code imported. */
@@ -22,6 +22,8 @@ export interface ModuleLayout {
   imports?: Readonly<Record<string, string>>;
   /** The names of the module's namespace in CPython's order, which follows its creation and its code, by spaces. */
   names: string;
+  /** The modules CPython's functions in the namespace come from, when another than this one, as `_json`'s. */
+  owners?: Readonly<Record<string, string>>;
 }
 
 const LOADER: Record<string, string> = {
@@ -83,6 +85,29 @@ export function orderNamespace(module: PyModule, importName = module.name): void
     entries.delete(key);
   }
   for (const [key, value] of entries) dict.set(key, value);
+}
+
+/** Gives the functions of a new module the `__module__` CPython's have, which may name the module they come from. */
+export function recordFunctionOwners(module: PyModule, importName = module.name): void {
+  const layout = MODULE_LAYOUTS[importName] ?? MODULE_LAYOUTS[module.name];
+  const owners = layout?.owners ?? {};
+  for (const [key, owner] of Object.entries(owners)) {
+    const value = module.dict.get(key);
+    if (value instanceof PyFunction && sharedUnder(module, value, key, owners)) {
+      // CPython's C function, such as json's scanstring, beside the Python function it falls back to.
+      const native = nativeFunction(key, (args, kwargs) => callValue(value, args, kwargs));
+      setBuiltinFunctionModule(native, owner);
+      module.dict.set(key, native);
+    } else if (value instanceof PyFunction) value.module = owner;
+    else if (value instanceof PyBuiltinFunction) setBuiltinFunctionModule(value, owner);
+  }
+}
+
+/** Whether the module holds a function under another name too, which CPython's function of that name is not. */
+function sharedUnder(module: PyModule, fn: PyFunction, key: string, owners: Readonly<Record<string, string>>): boolean {
+  for (const [other, value] of module.dict)
+    if (value === fn && other !== key && owners[other] === undefined) return true;
+  return false;
 }
 
 /**
