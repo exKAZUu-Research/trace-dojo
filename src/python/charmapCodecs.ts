@@ -1,7 +1,7 @@
 // CPython's charmap codecs, which map each byte to a character through a table, such as cp1252 and koi8_r, and the
 // `_codecs` functions that encode and decode through any mapping: charmap_encode, charmap_decode, and charmap_build.
 import { bytesLikeData, newBytes, PyBytes } from './bytesValues';
-import { decodeBytes, encodeString, ErrorHandling, registerCodec, type TextCodec } from './codecs';
+import { decodeBytes, decodeWithSteps, encodeString, ErrorHandling, registerCodec, type TextCodec } from './codecs';
 import { CHARMAP_TABLES } from './data/charmapCodecs';
 import { builtin, method } from './define';
 import { getItem } from './objects';
@@ -60,6 +60,7 @@ export function charmapTable(module: string): string {
  * it gives each run of unencodable characters to the error handler at once and encodes the replacement through the
  * mapping, failing for the whole run when the mapping cannot encode it either.
  */
+// code-gauge-allow functionCognitiveComplexity 16 -- Follows charmap_encoding_error, which encodes each replacement through the mapping.
 function encodeCharmap(
   points: readonly number[],
   errors: ErrorHandling,
@@ -92,20 +93,10 @@ function encodeCharmap(
 
 /** Decodes bytes through `lookup`, which gives a byte's text or undefined, one byte to each error. */
 function decodeCharmap(data: Uint8Array, errors: ErrorHandling, lookup: (byte: number) => string | undefined): string {
-  let text = '';
-  let index = 0;
-  while (index < data.length) {
-    const decoded = lookup(data[index]);
-    if (decoded !== undefined) {
-      text += decoded;
-      index++;
-      continue;
-    }
-    const failure = errors.decodeError(index, index + 1, REASON);
-    text += failure.text;
-    index = failure.resume;
-  }
-  return text;
+  return decodeWithSteps(data, errors, (bytes, index) => {
+    const text = lookup(bytes[index]);
+    return text === undefined ? { reason: REASON, end: index + 1 } : { text, length: 1 };
+  });
 }
 
 // The _codecs functions ---------------------------------------------------------------------------------------------
@@ -142,6 +133,7 @@ function charmapBuild(table: PyValue): PyValue {
 }
 
 /** The bytes a mapping gives a character: an EncodingMap's byte, or what `mapping[ord(char)]` gives. */
+// code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of value a mapping may give, as charmapencode_lookup checks them.
 function encodingLookup(mapping: PyValue): (point: number) => readonly number[] | undefined {
   if (mapping instanceof PyOpaque && mapping.cls === encodingMapClass) {
     const { bytes } = mapping.data as EncodingMap;
@@ -163,6 +155,7 @@ function encodingLookup(mapping: PyValue): (point: number) => readonly number[] 
 }
 
 /** The text a mapping gives a byte: the character of a table string, or what `mapping[byte]` gives. */
+// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of value a mapping may give, as charmap_decode_mapping checks them.
 function decodingLookup(mapping: PyValue): (byte: number) => string | undefined {
   if (typeof mapping === 'string') {
     // oxlint-disable-next-line typescript/no-misused-spread -- A decoding table holds one character per byte.

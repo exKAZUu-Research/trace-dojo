@@ -1,5 +1,5 @@
 // CPython's Japanese codecs: shift_jis, cp932, euc_jp, and iso2022_jp, built from the JIS tables when first used.
-import { type ErrorHandling, registerCodec, type TextCodec } from './codecs';
+import { decodeWithSteps, type ErrorHandling, registerCodec, type TextCodec } from './codecs';
 import {
   CP932_CHANGES,
   CP932_ROW_13,
@@ -272,20 +272,10 @@ const isEscapeEnd = (byte: number | undefined): boolean =>
 
 function decodeIso2022Jp(data: Uint8Array, errors: ErrorHandling, jis: Map<number, number>): string {
   const state: Iso2022State = { charset: 'ascii', escapeThroughout: false };
-  let text = '';
-  let index = 0;
-  while (index < data.length) {
-    const step = decodeIso2022Step(data, index, state, jis);
-    if ('text' in step) {
-      text += step.text;
-      index += step.length;
-      continue;
-    }
-    const failure = errors.decodeError(index, Math.min(index + step.length, data.length), step.reason);
-    text += failure.text;
-    index = failure.resume;
-  }
-  return text;
+  return decodeWithSteps(data, errors, (bytes, index) => {
+    const step = decodeIso2022Step(bytes, index, state, jis);
+    return 'text' in step ? step : { reason: step.reason, end: Math.min(index + step.length, bytes.length) };
+  });
 }
 
 /** Decodes the character or escape sequence at `index`, or describes the error there. */

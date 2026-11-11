@@ -9,6 +9,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   '_csv',
   '_functools',
   '_pickle',
+  '_random',
   '_thread',
   'abc',
   'annotationlib',

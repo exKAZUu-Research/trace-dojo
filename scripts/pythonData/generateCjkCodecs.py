@@ -48,58 +48,73 @@ def cells(codec, tables):
     return result
 
 
+def base_cells(codec, tables):
+    """The single characters the base codec decodes each cell of a codec to, or None for every cell without one."""
+    first_lead, last_lead, first_trail, last_trail, base = CODECS[codec]
+    table = tables.get(base, {})
+    result = []
+    for lead in range(first_lead, last_lead + 1):
+        for trail in range(first_trail, last_trail + 1):
+            text = table.get(bytes([lead, trail]))
+            result.append(text if text is not None and len(text) == 1 else None)
+    return result
+
+
+def run_end(index, length, same):
+    """The end of the run from `index` of the cells for which `same(cell index)` holds."""
+    end = index
+    while end < length and same(end):
+        end += 1
+    return end
+
+
+def run_tokens(marker, count):
+    tokens = []
+    while count > 0:
+        step = min(count, MAX_COUNT)
+        tokens.append(marker + chr(step))
+        count -= step
+    return tokens
+
+
 def encoded_cells(codec, tables):
     """The cells of a codec as its table string gives them, with the runs of markers."""
-    first_lead, last_lead, first_trail, last_trail, base = CODECS[codec]
-    width = last_trail - first_trail + 1
     own = cells(codec, tables)
-    base_table = tables.get(base) if base else None
+    from_base = base_cells(codec, tables)
     tokens = []
     previous = None
     index = 0
-
-    def run(marker, count):
-        while count > 0:
-            step = min(count, MAX_COUNT)
-            tokens.append(marker + chr(step))
-            count -= step
-
     while index < len(own):
-        lead, trail = first_lead + index // width, first_trail + index % width
-        from_base = base_table.get(bytes([lead, trail])) if base_table is not None else None
-        if from_base is not None and len(from_base) != 1:
-            from_base = None
-        if own[index] is not None and own[index] == from_base:
-            end = index
-            while end < len(own):
-                l, t = first_lead + end // width, first_trail + end % width
-                b = base_table.get(bytes([l, t]))
-                if own[end] is None or b is None or len(b) != 1 or own[end] != b:
-                    break
-                end += 1
-            run(BASE, end - index)
-            previous = own[end - 1]
-            index = end
+        if own[index] is not None and own[index] == from_base[index]:
+            end = run_end(index, len(own), lambda at: own[at] is not None and own[at] == from_base[at])
+            marker = BASE
         elif own[index] is None:
-            end = index
-            while end < len(own) and own[end] is None:
-                end += 1
-            run(SKIP, end - index)
-            index = end
+            end = run_end(index, len(own), lambda at: own[at] is None)
+            marker = SKIP
         elif previous is not None and ord(own[index]) == ord(previous) + 1:
-            end = index
-            point = ord(previous)
-            while end < len(own) and own[end] is not None and ord(own[end]) == point + 1:
-                point += 1
-                end += 1
-            run(NEXT, end - index)
-            previous = own[end - 1]
-            index = end
+            start = ord(previous) - index
+            end = run_end(index, len(own), lambda at: own[at] is not None and ord(own[at]) == start + at + 1)
+            marker = NEXT
         else:
             tokens.append(own[index])
             previous = own[index]
             index += 1
+            continue
+        tokens += run_tokens(marker, end - index)
+        previous = own[end - 1] if marker != SKIP else previous
+        index = end
     return ''.join(tokens)
+
+
+def decode_run(marker, count, result, previous, base_char):
+    """Appends the cells of a run to `result`, returning the last character it gives."""
+    for _ in range(count):
+        if marker == SKIP:
+            result.append(None)
+            continue
+        previous = chr(ord(previous) + 1) if marker == NEXT else base_char(len(result))
+        result.append(previous)
+    return previous
 
 
 def decode_cells(codec, text, decoded):
@@ -107,35 +122,22 @@ def decode_cells(codec, text, decoded):
     first_lead, last_lead, first_trail, last_trail, base = CODECS[codec]
     width = last_trail - first_trail + 1
     count = (last_lead - first_lead + 1) * width
+    key = lambda index: bytes([first_lead + index // width, first_trail + index % width])
+    base_char = lambda index: decoded[base].get(key(index))
     result = []
     previous = None
     position = 0
     while position < len(text):
         char = text[position]
         if char in (SKIP, NEXT, BASE):
-            n = ord(text[position + 1])
+            previous = decode_run(char, ord(text[position + 1]), result, previous, base_char)
             position += 2
-            for _ in range(n):
-                index = len(result)
-                if char == SKIP:
-                    result.append(None)
-                elif char == NEXT:
-                    previous = chr(ord(previous) + 1)
-                    result.append(previous)
-                else:
-                    lead, trail = first_lead + index // width, first_trail + index % width
-                    previous = decoded[base].get(bytes([lead, trail]))
-                    result.append(previous)
         else:
             result.append(char)
             previous = char
             position += 1
     result += [None] * (count - len(result))
-    table = {}
-    for index, char in enumerate(result):
-        if char is not None:
-            table[bytes([first_lead + index // width, first_trail + index % width])] = char
-    return table
+    return {key(index): char for index, char in enumerate(result) if char is not None}
 
 
 def number(value):

@@ -232,6 +232,31 @@ function lookupError(message: string): PyError {
   return new PyError(newException(exceptionClassNamed('LookupError'), [message]));
 }
 
+/** What a decoder finds at a position: the text and how many bytes it took, or an error up to `end`. */
+export type DecodeStep = { text: string; length: number } | { reason: string; end: number };
+
+/** Decodes data a step at a time, giving each error to the error handler and resuming where it says. */
+export function decodeWithSteps(
+  data: Uint8Array,
+  errors: ErrorHandling,
+  step: (data: Uint8Array, index: number) => DecodeStep
+): string {
+  let text = '';
+  let index = 0;
+  while (index < data.length) {
+    const found = step(data, index);
+    if ('text' in found) {
+      text += found.text;
+      index += found.length;
+      continue;
+    }
+    const failure = errors.decodeError(index, found.end, found.reason);
+    text += failure.text;
+    index = failure.resume;
+  }
+  return text;
+}
+
 // Error handlers ----------------------------------------------------------------------------------------------------
 
 /** What an encoder's error handler gives in place of unencodable characters. */

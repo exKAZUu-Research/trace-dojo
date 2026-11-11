@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 420 -- The enum machinery keeps the members, flags, and their boundaries together.
 import { pyRepr, pyStr } from './conversions';
 import { hashInt, pyHash } from './hashing';
 import { getItem } from './items';

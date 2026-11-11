@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 478 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 514 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from './conversions';
 import { method } from './define';
 import { pyHash } from './hashing';

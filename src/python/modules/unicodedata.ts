@@ -127,6 +127,7 @@ const NUMERIC_MESSAGES = {
 } as const;
 
 /** The functions of a database: `name(args)`, by name, with its range of positional arguments. */
+// code-gauge-allow functionCognitiveComplexity 17 -- Lists every function of the module for a version of the database.
 function functionsOf(database: Database): [string, number, number, (args: PyValue[]) => PyValue][] {
   return [
     ['lookup', 1, 1, ([name]) => lookup(database, name)],

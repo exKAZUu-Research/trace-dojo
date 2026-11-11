@@ -80,3 +80,29 @@ except ValueError as e:
     assert str(e).startswith('<flag \\'Color\\'> invalid value 7'), str(e)
 `);
 });
+
+test('the charmap, Chinese, Korean, UTF-7, and IDNA codecs convert as CPython does, as does Unicode 3.2.0', () => {
+  expectSameAsCPython(`import codecs, random, unicodedata
+assert '€Ł'.encode('cp1250') == b'\\x80\\xa3' and b'\\xd0\\xd1'.decode('koi8_r') == 'пя'
+assert '中文한국'.encode('gb18030') == b'\\xd6\\xd0\\xce\\xc4\\x836\\x843\\x827\\xf40'
+assert '中文'.encode('hz') == b'~{VPND~}' and '갂'.encode('euc_kr') == b'\\xa4\\xd4\\xa4\\xa1\\xa4\\xbf\\xa4\\xa2'
+assert 'Hi ☺+'.encode('utf-7') == b'Hi +JjoAKw-' and 'münchen.de'.encode('idna') == b'xn--mnchen-3ya.de'
+try:
+    b'\\x81'.decode('big5')
+except UnicodeDecodeError as e:
+    assert (e.start, e.end, e.reason) == (0, 1, 'incomplete multibyte sequence')
+assert codecs.charmap_decode(b'\\x00\\x01', 'strict', {0: 'ab', 1: 66}) == ('abB', 2)
+assert unicodedata.ucd_3_2_0.category('ȡ') == 'Cn' and unicodedata.category('ȡ') == 'Ll'
+`);
+});
+
+test('a subclass of random.Random that overrides random() chooses with it', () => {
+  expectSameAsCPython(`import random
+class Quarter(random.Random):
+    def random(self):
+        return 0.25
+q = Quarter(1)
+assert (q.choice('abcd'), q.randrange(10), q._randbelow.__name__) == ('a', 8, '_randbelow_without_getrandbits')
+assert random.Random(7).random() == 0.32383276483316237
+`);
+});

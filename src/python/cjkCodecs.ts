@@ -1,6 +1,6 @@
 // CPython's Chinese and Korean codecs: gb2312, gbk, gb18030, hz, big5, cp950, big5hkscs, euc_kr, cp949, and johab,
 // built from the tables of data/cjkCodecs.ts when a program first uses one.
-import { type ErrorHandling, registerCodec, type TextCodec } from './codecs';
+import { decodeWithSteps, type ErrorHandling, registerCodec, type TextCodec } from './codecs';
 import { CJK_ENCODINGS, CJK_SEQUENCES, CJK_TABLES, GB18030_RANGES } from './data/cjkCodecs';
 
 /** The codec modules of this file, whose `encodings` modules are those of CPython's multibyte codecs. */
@@ -87,21 +87,11 @@ function pairStep(decode: Map<number, string>, data: Uint8Array, index: number):
 }
 
 function decodeSteps(data: Uint8Array, errors: ErrorHandling, step: Stepper): string {
-  let text = '';
-  let index = 0;
-  while (index < data.length) {
-    const found = step(data, index);
-    if (typeof found === 'object') {
-      text += found.text;
-      index += found.length;
-      continue;
-    }
-    const end = found === 'incomplete' ? data.length : index + 1;
-    const failure = errors.decodeError(index, end, found === 'incomplete' ? INCOMPLETE : ILLEGAL);
-    text += failure.text;
-    index = failure.resume;
-  }
-  return text;
+  return decodeWithSteps(data, errors, (bytes, index) => {
+    const found = step(bytes, index);
+    if (typeof found === 'object') return found;
+    return found === 'incomplete' ? { reason: INCOMPLETE, end: bytes.length } : { reason: ILLEGAL, end: index + 1 };
+  });
 }
 
 /** The bytes at the end of data that start a sequence more data may complete. */
@@ -233,6 +223,8 @@ function findRun(runs: [number, number, number][], value: number, field: 0 | 1):
   return undefined;
 }
 
+// code-gauge-allow functionCognitiveComplexity 23 -- Follows CPython's GB18030 codec, with its two- and four-byte sequences.
+// code-gauge-allow functionNcss 33 -- Follows CPython's GB18030 codec, with its two- and four-byte sequences.
 function gb18030Codec(): TextCodec {
   const { decode, encode } = tablesOf('gb18030');
   const runs = gb18030Runs();
@@ -338,44 +330,53 @@ function hzCodec(): TextCodec {
   return {
     name: 'hz',
     inlineHandlers: INLINE_HANDLERS,
-    encode: (points, errors) => {
-      let inGb = false;
-      const out = encodeSteps(points, errors, (all, index, bytes) => {
-        const point = all[index];
-        const packed = gb2312.encode.get(point);
-        if (point >= 0x80 && packed === undefined) return 0;
-        if (point < 0x80 === inGb) bytes.push(0x7e, inGb ? 0x7d : 0x7b);
-        inGb = point >= 0x80;
-        if (point === 0x7e) bytes.push(0x7e, 0x7e);
-        else if (inGb) bytes.push(((packed as number) >> 8) & 0x7f, (packed as number) & 0x7f);
-        else bytes.push(point);
-        return 1;
-      });
-      if (inGb) out.push(0x7e, 0x7d);
-      return Uint8Array.from(out);
-    },
+    encode: (points, errors) => encodeHz(points, errors, gb2312.encode),
     decode: (data, errors) => {
-      let inGb = false;
-      return decodeSteps(data, errors, (bytes, index) => {
-        const byte = bytes[index];
-        if (byte === 0x7e) {
-          if (index + 1 >= bytes.length) return 'incomplete';
-          const next = bytes[index + 1];
-          if (next === 0x7e && !inGb) return { text: '~', length: 2 };
-          if ((next === 0x7b && !inGb) || (next === 0x7d && inGb)) inGb = next === 0x7b;
-          else if (next !== 0x0a || inGb) return 'illegal';
-          return { text: '', length: 2 };
-        }
-        if (byte >= 0x80) return 'illegal';
-        if (!inGb) return { text: String.fromCodePoint(byte), length: 1 };
-        if (index + 1 >= bytes.length) return 'incomplete';
-        if (bytes[index + 1] >= 0x80) return 'illegal';
-        const text = gb2312.decode.get((byte | 0x80) * 256 + (bytes[index + 1] | 0x80));
-        return text === undefined ? 'illegal' : { text, length: 2 };
-      });
+      const state = { inGb: false };
+      return decodeSteps(data, errors, (bytes, index) => hzStep(bytes, index, state, gb2312.decode));
     },
     stateful: true,
   };
+}
+
+/** Encodes in ASCII and in GB2312 between `~{` and `~}`, ending in ASCII. */
+function encodeHz(points: readonly number[], errors: ErrorHandling, encode: Map<number, number>): Uint8Array {
+  let inGb = false;
+  const out = encodeSteps(points, errors, (all, index, bytes) => {
+    const point = all[index];
+    const packed = encode.get(point);
+    if (point >= 0x80 && packed === undefined) return 0;
+    if (point < 0x80 === inGb) bytes.push(0x7e, inGb ? 0x7d : 0x7b);
+    inGb = point >= 0x80;
+    if (point === 0x7e) bytes.push(0x7e, 0x7e);
+    else if (inGb) bytes.push(((packed as number) >> 8) & 0x7f, (packed as number) & 0x7f);
+    else bytes.push(point);
+    return 1;
+  });
+  if (inGb) out.push(0x7e, 0x7d);
+  return Uint8Array.from(out);
+}
+
+/** Decodes the character or escape at `index`, in ASCII or, after `~{`, in GB2312's seven-bit bytes. */
+function hzStep(bytes: Uint8Array, index: number, state: { inGb: boolean }, decode: Map<number, string>): Step {
+  const byte = bytes[index];
+  if (byte === 0x7e) return hzEscape(bytes, index, state);
+  if (byte >= 0x80) return 'illegal';
+  if (!state.inGb) return { text: String.fromCodePoint(byte), length: 1 };
+  if (index + 1 >= bytes.length) return 'incomplete';
+  if (bytes[index + 1] >= 0x80) return 'illegal';
+  const text = decode.get((byte | 0x80) * 256 + (bytes[index + 1] | 0x80));
+  return text === undefined ? 'illegal' : { text, length: 2 };
+}
+
+/** `~~` for a tilde, `~{` and `~}` to switch to GB2312 and back, and `~` before a newline that continues the line. */
+function hzEscape(bytes: Uint8Array, index: number, state: { inGb: boolean }): Step {
+  if (index + 1 >= bytes.length) return 'incomplete';
+  const next = bytes[index + 1];
+  if (next === 0x7e && !state.inGb) return { text: '~', length: 2 };
+  if ((next === 0x7b && !state.inGb) || (next === 0x7d && state.inGb)) state.inGb = next === 0x7b;
+  else if (next !== 0x0a || state.inGb) return 'illegal';
+  return { text: '', length: 2 };
 }
 
 registerCodec('hz', hzCodec);

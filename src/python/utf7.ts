@@ -20,51 +20,58 @@ const encodesDirectly = (point: number): boolean =>
   point === 0x0d ||
   (point >= 0x20 && point < 0x7f && point !== PLUS && point !== 0x5c && point !== 0x7e);
 
+/** Writes UTF-16 code units as base-64, six bits at a time, keeping the bits that do not fill a character. */
+class Base64Writer {
+  private bits = 0;
+  private buffer = 0;
+
+  constructor(private readonly out: number[]) {}
+
+  write(unit: number): void {
+    this.bits += 16;
+    this.buffer = (this.buffer << 16) | unit;
+    while (this.bits >= 6) {
+      this.out.push(BASE64.codePointAt((this.buffer >> (this.bits - 6)) & 0x3f) as number);
+      this.bits -= 6;
+    }
+    this.buffer &= (1 << this.bits) - 1;
+  }
+
+  /** Writes the bits left, padded with zeros. */
+  flush(): void {
+    if (this.bits > 0) this.out.push(BASE64.codePointAt((this.buffer << (6 - this.bits)) & 0x3f) as number);
+    this.bits = 0;
+    this.buffer = 0;
+  }
+}
+
 /** Encodes code points, writing those outside the direct set as base-64 UTF-16 between `+` and `-`. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes PyUnicode_EncodeUTF7.
+// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes PyUnicode_EncodeUTF7, which decides each character in one pass.
 function encodeUtf7(points: readonly number[]): Uint8Array {
   const out: number[] = [];
+  const writer = new Base64Writer(out);
   let inShift = false;
-  let bits = 0;
-  let buffer = 0;
-  const writeUnit = (unit: number): void => {
-    bits += 16;
-    buffer = (buffer << 16) | unit;
-    while (bits >= 6) {
-      out.push(BASE64.codePointAt((buffer >> (bits - 6)) & 0x3f) as number);
-      bits -= 6;
-    }
-    buffer &= (1 << bits) - 1;
-  };
   for (const point of points) {
-    if (inShift && encodesDirectly(point)) {
-      if (bits > 0) out.push(BASE64.codePointAt((buffer << (6 - bits)) & 0x3f) as number);
-      bits = 0;
-      buffer = 0;
+    if (encodesDirectly(point)) {
+      if (inShift) {
+        writer.flush();
+        // A character outside the base-64 set ends the shift by itself, and a `-` would be absorbed.
+        if (isBase64(point) || point === MINUS) out.push(MINUS);
+      }
       inShift = false;
-      // A character outside the base-64 set ends the shift by itself, and a `-` would be absorbed.
-      if (isBase64(point) || point === MINUS) out.push(MINUS);
       out.push(point);
-      continue;
-    }
-    if (!inShift) {
-      if (point === PLUS) {
-        out.push(PLUS, MINUS);
-        continue;
-      }
-      if (encodesDirectly(point)) {
-        out.push(point);
-        continue;
-      }
-      out.push(PLUS);
+    } else if (!inShift && point === PLUS) {
+      out.push(PLUS, MINUS);
+    } else {
+      if (!inShift) out.push(PLUS);
       inShift = true;
+      if (point >= 0x1_00_00) {
+        writer.write(0xd8_00 | ((point - 0x1_00_00) >> 10));
+        writer.write(0xdc_00 | ((point - 0x1_00_00) & 0x3_ff));
+      } else writer.write(point);
     }
-    if (point >= 0x1_00_00) {
-      writeUnit(0xd8_00 | ((point - 0x1_00_00) >> 10));
-      writeUnit(0xdc_00 | ((point - 0x1_00_00) & 0x3_ff));
-    } else writeUnit(point);
   }
-  if (bits > 0) out.push(BASE64.codePointAt((buffer << (6 - bits)) & 0x3f) as number);
+  writer.flush();
   if (inShift) out.push(MINUS);
   return Uint8Array.from(out);
 }
@@ -80,85 +87,106 @@ interface Shift {
   surrogate: number;
 }
 
-/** Decodes UTF-7, or, unless `final`, as much as ends outside a base-64 section, with how many bytes it used. */
-// code-gauge-allow functionCognitiveComplexity 40 -- Transcribes PyUnicode_DecodeUTF7Stateful, one case per state of the decoder.
-// code-gauge-allow functionNcss 60 -- Transcribes PyUnicode_DecodeUTF7Stateful, one case per state of the decoder.
-function decodeUtf7(data: Uint8Array, errors: ErrorHandling, final: boolean): { text: string; consumed: number } {
-  let text = '';
-  let shift: Shift | undefined;
-  let index = 0;
-  let errorStart = 0;
-  const fail = (reason: string): void => {
-    const failure = errors.decodeError(errorStart, index, reason);
-    text += failure.text;
-    index = failure.resume;
-  };
-  for (;;) {
-    while (index < data.length) {
-      const byte = data[index];
-      if (shift) {
-        if (isBase64(byte)) {
-          shift.buffer = (shift.buffer << 6) | BASE64.indexOf(String.fromCodePoint(byte));
-          shift.bits += 6;
-          index++;
-          if (shift.bits < 16) continue;
-          const unit = shift.buffer >> (shift.bits - 16);
-          shift.bits -= 16;
-          shift.buffer &= (1 << shift.bits) - 1;
-          if (shift.surrogate !== 0) {
-            if (unit >= 0xdc_00 && unit <= 0xdf_ff) {
-              text += String.fromCodePoint(0x1_00_00 + ((shift.surrogate - 0xd8_00) << 10) + unit - 0xdc_00);
-              shift.surrogate = 0;
-              continue;
-            }
-            text += String.fromCodePoint(shift.surrogate);
-            shift.surrogate = 0;
-          }
-          if (unit >= 0xd8_00 && unit <= 0xdb_ff) shift.surrogate = unit;
-          else text += String.fromCodePoint(unit);
-          continue;
-        }
-        const left = shift;
-        shift = undefined;
-        if (left.bits >= 6 || (left.bits > 0 && left.buffer !== 0)) {
-          index++;
-          fail(left.bits >= 6 ? 'partial character in shift sequence' : 'non-zero padding bits in shift sequence');
-          continue;
-        }
-        if (left.surrogate !== 0 && byte <= 0x7f) text += String.fromCodePoint(left.surrogate);
-        if (byte === MINUS) index++;
-        continue;
-      }
-      if (byte === PLUS) {
-        errorStart = index;
-        index++;
-        if (index < data.length && data[index] === MINUS) {
-          index++;
-          text += '+';
-        } else if (index < data.length && !isBase64(data[index])) {
-          index++;
-          fail('ill-formed sequence');
-        } else {
-          shift = { start: errorStart, textStart: text.length, bits: 0, buffer: 0, surrogate: 0 };
-        }
-        continue;
-      }
-      errorStart = index;
-      index++;
-      if (byte <= 0x7f) text += String.fromCodePoint(byte);
-      else fail('unexpected special character');
+const isHighSurrogate = (unit: number): boolean => unit >= 0xd8_00 && unit <= 0xdb_ff;
+const isLowSurrogate = (unit: number): boolean => unit >= 0xdc_00 && unit <= 0xdf_ff;
+/** Whether a base-64 section ends with bits that make no character, which CPython reports. */
+const hasLeftoverBits = (shift: Shift): boolean => shift.bits >= 6 || (shift.bits > 0 && shift.buffer !== 0);
+
+/** CPython's PyUnicode_DecodeUTF7Stateful, one method per state of the decoder. */
+class Utf7Decoder {
+  text = '';
+  private shift: Shift | undefined;
+  private index = 0;
+  private errorStart = 0;
+
+  constructor(
+    private readonly data: Uint8Array,
+    private readonly errors: ErrorHandling
+  ) {}
+
+  /** Decodes all the data, or, unless `final`, as much as ends outside a base-64 section. */
+  run(final: boolean): { text: string; consumed: number } {
+    const { data } = this;
+    for (;;) {
+      while (this.index < data.length) this.step(data[this.index]);
+      const left = this.shift;
+      if (left && !final) return { text: this.text.slice(0, left.textStart), consumed: left.start };
+      this.shift = undefined;
+      if (!left || (left.surrogate === 0 && !hasLeftoverBits(left))) break;
+      this.errorStart = left.start;
+      this.index = data.length;
+      this.fail('unterminated shift sequence');
+      // A handler may resume inside the data, where decoding goes on outside a base-64 section.
+      if (this.index >= data.length) break;
     }
-    if (shift && !final) return { text: text.slice(0, shift.textStart), consumed: shift.start };
-    const left = shift;
-    shift = undefined;
-    if (!left || (left.surrogate === 0 && left.bits < 6 && (left.bits === 0 || left.buffer === 0))) break;
-    const failure = errors.decodeError(left.start, data.length, 'unterminated shift sequence');
-    text += failure.text;
-    index = failure.resume;
-    // A handler may resume inside the data, where decoding goes on outside a base-64 section.
-    if (index >= data.length) break;
+    return { text: this.text, consumed: data.length };
   }
-  return { text, consumed: data.length };
+
+  private fail(reason: string): void {
+    const failure = this.errors.decodeError(this.errorStart, this.index, reason);
+    this.text += failure.text;
+    this.index = failure.resume;
+  }
+
+  private step(byte: number): void {
+    if (this.shift && isBase64(byte)) this.base64Byte(this.shift, byte);
+    else if (this.shift) this.leaveShift(this.shift, byte);
+    else if (byte === PLUS) this.plus();
+    else {
+      this.errorStart = this.index++;
+      if (byte <= 0x7f) this.text += String.fromCodePoint(byte);
+      else this.fail('unexpected special character');
+    }
+  }
+
+  private base64Byte(shift: Shift, byte: number): void {
+    shift.buffer = (shift.buffer << 6) | BASE64.indexOf(String.fromCodePoint(byte));
+    shift.bits += 6;
+    this.index++;
+    if (shift.bits < 16) return;
+    const unit = shift.buffer >> (shift.bits - 16);
+    shift.bits -= 16;
+    shift.buffer &= (1 << shift.bits) - 1;
+    if (shift.surrogate !== 0 && isLowSurrogate(unit)) {
+      this.text += String.fromCodePoint(0x1_00_00 + ((shift.surrogate - 0xd8_00) << 10) + unit - 0xdc_00);
+      shift.surrogate = 0;
+      return;
+    }
+    if (shift.surrogate !== 0) this.text += String.fromCodePoint(shift.surrogate);
+    shift.surrogate = isHighSurrogate(unit) ? unit : 0;
+    if (!isHighSurrogate(unit)) this.text += String.fromCodePoint(unit);
+  }
+
+  /** Ends a base-64 section at a byte outside the base-64 set, which a `-` is absorbed into. */
+  private leaveShift(shift: Shift, byte: number): void {
+    this.shift = undefined;
+    if (hasLeftoverBits(shift)) {
+      this.index++;
+      this.fail(shift.bits >= 6 ? 'partial character in shift sequence' : 'non-zero padding bits in shift sequence');
+      return;
+    }
+    if (shift.surrogate !== 0 && byte <= 0x7f) this.text += String.fromCodePoint(shift.surrogate);
+    if (byte === MINUS) this.index++;
+  }
+
+  /** A `+`: a `+` itself before `-`, or the start of a base-64 section. */
+  private plus(): void {
+    const { data } = this;
+    this.errorStart = this.index++;
+    if (this.index < data.length && data[this.index] === MINUS) {
+      this.index++;
+      this.text += '+';
+    } else if (this.index < data.length && !isBase64(data[this.index])) {
+      this.index++;
+      this.fail('ill-formed sequence');
+    } else {
+      this.shift = { start: this.errorStart, textStart: this.text.length, bits: 0, buffer: 0, surrogate: 0 };
+    }
+  }
+}
+
+function decodeUtf7(data: Uint8Array, errors: ErrorHandling, final: boolean): { text: string; consumed: number } {
+  return new Utf7Decoder(data, errors).run(final);
 }
 
 registerCodec('utf_7', () => ({
