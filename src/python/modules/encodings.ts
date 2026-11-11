@@ -1208,8 +1208,6 @@ def getregentry():
     )
 `;
 
-// CPython's `encodings` package finds codecs for `_codecs.lookup`, which this grader's `_codecs` does itself.
-registerSourceModule('encodings', '');
 registerSourceModule('encodings.ascii', ASCII);
 registerSourceModule('encodings.latin_1', LATIN_1);
 registerSourceModule('encodings.utf_8', UTF_8);

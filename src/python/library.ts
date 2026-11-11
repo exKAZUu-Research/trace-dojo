@@ -119,6 +119,7 @@ import './modules/csvNative';
 import './modules/codecsModule';
 import './modules/codecsNative';
 import './modules/encodings';
+import './modules/encodingsPackage';
 import './modules/charmapEncodings';
 import './modules/pythonCodecs';
 import './modules/pathlib';
