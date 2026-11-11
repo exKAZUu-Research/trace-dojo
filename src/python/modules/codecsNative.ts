@@ -190,21 +190,9 @@ function codecFunction(direction: 'encode' | 'decode'): PyValue {
     3,
     (args, kwargs) => {
       const object = argument(args, kwargs, 0, 'obj') as PyValue;
-      const encoding = argument(args, kwargs, 1, 'encoding') ?? 'utf8';
-      const errors = argument(args, kwargs, 2, 'errors') ?? 'strict';
-      for (const [index, value] of [encoding, errors].entries()) {
-        if (typeof value !== 'string') {
-          throw typeError(
-            `${direction}() argument '${index === 0 ? 'encoding' : 'errors'}' must be str, not ${typeName(value)}`
-          );
-        }
-      }
-      const info = lookup(encoding);
-      const fn =
-        info instanceof PyTuple && !(info instanceof PyInstance)
-          ? info.items[direction === 'encode' ? 0 : 1]
-          : getAttribute(info, direction);
-      const result = callValue(fn, [object, errors]);
+      const encoding = stringArgument(direction, 'encoding', argument(args, kwargs, 1, 'encoding') ?? 'utf8');
+      const errors = stringArgument(direction, 'errors', argument(args, kwargs, 2, 'errors') ?? 'strict');
+      const result = callValue(codecInfoFunction(lookup(encoding), direction), [object, errors]);
       if (!(result instanceof PyTuple) || result.items.length !== 2) {
         throw typeError(`${direction}r must return a tuple (object, integer)`);
       }
@@ -212,6 +200,18 @@ function codecFunction(direction: 'encode' | 'decode'): PyValue {
     },
     { keywords: ['obj', 'encoding', 'errors'] }
   );
+}
+
+function stringArgument(direction: string, name: string, value: PyValue): string {
+  if (typeof value !== 'string')
+    throw typeError(`${direction}() argument '${name}' must be str, not ${typeName(value)}`);
+  return value;
+}
+
+/** The encode or decode function of a CodecInfo, or of the 4-tuple an old search function may give instead. */
+function codecInfoFunction(info: PyValue, direction: 'encode' | 'decode'): PyValue {
+  if (info instanceof PyTuple && !(info instanceof PyInstance)) return info.items[direction === 'encode' ? 0 : 1];
+  return getAttribute(info, direction);
 }
 
 // The stateless codec functions ---------------------------------------------------------------------------------------
@@ -254,19 +254,22 @@ function exDecoder(size: 2 | 4): PyValue {
   const name = `utf_${size * 8}_ex_decode`;
   return builtin(name, 'expected', 1, 4, ([input, errors, byteorderValue, final]) => {
     const data = requireBytes(input);
-    let order = byteorderValue === undefined ? 0 : Number(toIndex(byteorderValue));
+    const requested = byteorderValue === undefined ? 0 : Number(toIndex(byteorderValue));
     const isFinal = final !== undefined && isTruthy(final);
-    let start = 0;
-    if (order === 0) {
-      if (data.length < size && !isFinal) return newTuple(['', 0n, 0n]);
-      const bom = [...data.subarray(0, size)].join(',');
-      if (bom === (size === 2 ? '255,254' : '255,254,0,0')) [order, start] = [-1, size];
-      else if (bom === (size === 2 ? '254,255' : '0,0,254,255')) [order, start] = [1, size];
-    }
+    if (requested === 0 && data.length < size && !isFinal) return newTuple(['', 0n, 0n]);
+    const [order, start] = requested === 0 ? byteOrderMark(data, size) : [requested, 0];
     const module = `utf_${size * 8}_${order === 1 ? 'be' : 'le'}`;
     const decoded = decodeWith(module, newBytes(data.subarray(start)), errors ?? None, isFinal, name) as PyTuple;
     return newTuple([decoded.items[0], (decoded.items[1] as bigint) + BigInt(start), BigInt(order)]);
   });
+}
+
+/** The byte order a BOM at the start of `data` gives, -1 for little and 1 for big endian, and its length. */
+function byteOrderMark(data: Uint8Array, size: 2 | 4): [number, number] {
+  const bom = [...data.subarray(0, size)].join(',');
+  if (bom === (size === 2 ? '255,254' : '255,254,0,0')) return [-1, size];
+  if (bom === (size === 2 ? '254,255' : '0,0,254,255')) return [1, size];
+  return [0, 0];
 }
 
 function requireBytes(input: PyValue): Uint8Array {
@@ -303,14 +306,18 @@ function utf8Tail(data: Uint8Array): number {
   for (let back = 1; back <= Math.min(3, data.length); back++) {
     const lead = data[data.length - back];
     if ((lead & 0xc0) === 0x80) continue;
-    const length =
-      lead >= 0xc2 && lead <= 0xdf ? 2 : lead >= 0xe0 && lead <= 0xef ? 3 : lead >= 0xf0 && lead <= 0xf4 ? 4 : 1;
-    if (length <= back) return 0;
+    if (utf8SequenceLength(lead) <= back) return 0;
     const second = data[data.length - back + 1];
     if (second !== undefined && !validSecondByte(lead, second)) return 0;
     return back;
   }
   return 0;
+}
+
+function utf8SequenceLength(lead: number): number {
+  if (lead >= 0xc2 && lead <= 0xdf) return 2;
+  if (lead >= 0xe0 && lead <= 0xef) return 3;
+  return lead >= 0xf0 && lead <= 0xf4 ? 4 : 1;
 }
 
 function validSecondByte(lead: number, byte: number): boolean {

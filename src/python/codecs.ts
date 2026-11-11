@@ -304,14 +304,12 @@ export class ErrorHandling {
     if (!(result instanceof PyTuple) || result.items.length !== 2 || !isReplacement(result.items[0])) {
       throw typeError(message);
     }
-    const length = this.object.length;
-    let position = Number(toIndex(result.items[1]));
-    if (position < 0) position += length;
+    const length = typeof this.object === 'string' ? this.points.length : this.object.length;
+    const requested = toIndex(result.items[1]);
+    const position = Number(requested) + (requested < 0n ? length : 0);
     if (position < 0 || position > length) {
       throw new PyError(
-        newException(exceptionClassNamed('IndexError'), [
-          `position ${result.items[1]} from error handler out of bounds`,
-        ])
+        newException(exceptionClassNamed('IndexError'), [`position ${requested} from error handler out of bounds`])
       );
     }
     return [result.items[0], position];
@@ -366,14 +364,19 @@ export class ErrorHandling {
         throw typeError("don't know how to handle UnicodeDecodeError in error callback");
       }
       default: {
-        const [text, resume] = this.callCustomHandler(
-          this.decodeException(start, end, reason),
-          'decoding error handler must return (str, int) tuple',
-          (value) => typeof value === 'string'
-        );
-        return { text: text as string, resume };
+        return this.customDecodeError(start, end, reason);
       }
     }
+  }
+
+  /** The text and the position to resume at that a handler from `codecs.register_error` gives. */
+  private customDecodeError(start: number, end: number, reason: string): { text: string; resume: number } {
+    const [text, resume] = this.callCustomHandler(
+      this.decodeException(start, end, reason),
+      'decoding error handler must return (str, int) tuple',
+      (value) => typeof value === 'string'
+    );
+    return { text: text as string, resume };
   }
 
   /** The UnicodeEncodeError for the characters from `start` up to `end`. */

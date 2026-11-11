@@ -290,7 +290,7 @@ registerSourceModule(
 /** `_operator._compare_digest`: whether two ASCII strings or two bytes-like objects are equal. */
 function compareDigest(a: PyValue, b: PyValue): boolean {
   if (typeof a === 'string' && typeof b === 'string') {
-    if ([...a, ...b].some((char) => char.codePointAt(0)! > 0x7f))
+    if (/[^\u0000-\u007F]/u.test(a + b))
       throw typeError('comparing strings with non-ASCII characters is not supported');
     return a === b;
   }

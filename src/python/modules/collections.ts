@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 428 -- The collections types and the methods of each belong together.
+// code-gauge-allow-file fileNcss 430 -- The collections types and the methods of each belong together.
 import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { DictStore } from '../dictStore';
@@ -525,9 +525,8 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
   const cls = new PyClass(typename, [tupleClass], typeClass);
   cls.mro = [cls, ...tupleClass.mro];
   cls.isBuiltin = false;
-  cls.module = namedtupleModule(kwargs);
   cls.layout = { base: 'native' };
-  cls.dict.set('__doc__', `${typename}(${fields.join(', ')})`);
+  describeNamedTuple(cls, fields, kwargs);
   cls.construct = (tupleType, values, keywords) => newNamedTuple(tupleType, fields, defaults, values, keywords);
   cls.slotNames = new Set();
   defineNew(cls, cls.construct);
@@ -550,10 +549,14 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
   return cls;
 }
 
-/** The module a namedtuple's class belongs to: the `module` argument, else the module of the code creating it. */
-function namedtupleModule(kwargs: Kwargs): string {
+/**
+ * Gives a namedtuple's class its docstring and its module: the `module` argument, else the module of the code creating
+ * it.
+ */
+function describeNamedTuple(cls: PyClass, fields: string[], kwargs: Kwargs): void {
   const module = kwargs?.get('module') ?? currentRuntime().frame.globals.get('__name__');
-  return typeof module === 'string' ? module : '__main__';
+  cls.module = typeof module === 'string' ? module : '__main__';
+  cls.dict.set('__doc__', `${cls.name}(${fields.join(', ')})`);
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Follows how a namedtuple binds positional and keyword arguments to its fields.

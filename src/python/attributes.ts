@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 413 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 431 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import { AttributeStore } from './attributeStore';
 import { solidBase } from './classes';
 import {
@@ -309,21 +309,23 @@ function exceptionFieldOf(instance: PyInstance, name: string): PyValue | undefin
     if (name === 'name') return state.name ?? None;
     return state.object ?? None;
   }
-  if (is('OSError') && (name === 'errno' || name === 'strerror')) {
+  return is('OSError') ? osErrorField(state, name) : undefined;
+}
+
+/** The fields an OSError derives from the arguments it was created with, as `OSError(errno, strerror, filename)`. */
+function osErrorField(state: ExceptionState, name: string): PyValue | undefined {
+  const args = state.args.items;
+  if (name === 'errno' || name === 'strerror') {
     return args.length >= 2 && args.length <= 5 ? args[name === 'errno' ? 0 : 1] : None;
   }
-  if (is('OSError') && name === 'filename') return state.filename ?? None;
-  if (is('OSError') && name === 'filename2') return state.filename2 ?? None;
+  if (name === 'filename') return state.filename ?? None;
+  if (name === 'filename2') return state.filename2 ?? None;
   return undefined;
 }
 
 export function setAttribute(target: PyValue, name: string, value: PyValue): void {
   currentRuntime().spend();
-  if (
-    target instanceof PyInstance ||
-    isSubclassInstance(target) ||
-    (target instanceof PyObject && builtinClassesWithDict.has(target.cls))
-  ) {
+  if (takesInstanceAttributes(target)) {
     const custom = userHook(target as PyObject, '__setattr__');
     if (custom === undefined) setInstanceAttribute(target as PyObject, name, value);
     else callValue(bindValue(custom, target), [name, value]);
@@ -348,6 +350,15 @@ export function setAttribute(target: PyValue, name: string, value: PyValue): voi
     return;
   }
   throw readOnlyError(target, name);
+}
+
+/** Whether assigning an attribute of `target` follows the rules of instances, as opposed to classes or modules. */
+function takesInstanceAttributes(target: PyValue): boolean {
+  return (
+    target instanceof PyInstance ||
+    isSubclassInstance(target) ||
+    (target instanceof PyObject && builtinClassesWithDict.has(target.cls))
+  );
 }
 
 /** The AttributeError for assigning to an attribute of an object of a builtin type, which has no `__dict__`. */
