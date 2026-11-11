@@ -21,6 +21,7 @@ import {
 import { firstRowOf } from './programSource';
 import { currentRuntime } from './runtimeContext';
 import { defineClassSlots, slotNamesOf } from './slots';
+import { recordedSubclasses, recordNewBase } from './subclasses';
 import { noteUnwinding } from './tracebacks';
 import { initGenericSubclass, typingMroEntries } from './typeParams';
 import {
@@ -479,6 +480,62 @@ function initSubclass(cls: PyClass, kwargs: Map<string, PyValue>): void {
     callValue(bindValue(hook, cls, cls), [], kwargs.size > 0 ? kwargs : undefined);
     return;
   }
+}
+
+/**
+ * `cls.__bases__ = value`, as type_set_bases checks it: a tuple of classes that makes no cycle and lays out instances
+ * as the old bases did; the MROs of the class and of the classes deriving from it follow.
+ */
+export function setClassBases(cls: PyClass, value: PyValue): void {
+  const bases = checkNewBases(cls, value);
+  const runtime = currentRuntime();
+  const descendants = descendantsOf(runtime, cls);
+  const customMro = [cls, ...descendants].some((each) => each.cls.lookup('mro') !== typeClass.dict.get('mro'));
+  if (customMro || layoutOf(bases) !== layoutOf(cls.bases) || solidBase(bases[0] as PyClass) !== solidBase(cls)) {
+    throw new UnsupportedFeatureError('インスタンスの作りやメタクラスの mro() が関わる、クラスの __bases__ の付け替え');
+  }
+  const old = cls.bases;
+  cls.bases = bases;
+  try {
+    cls.mro = computeMro(cls);
+  } catch (error) {
+    cls.bases = old;
+    throw error;
+  }
+  for (const base of bases) if (!old.includes(base)) recordNewBase(cls, base);
+  for (const each of descendants) each.mro = computeMro(each);
+}
+
+/** The classes a tuple assigned to `cls.__bases__` holds, with type_set_bases's errors for others. */
+function checkNewBases(cls: PyClass, value: PyValue): PyClass[] {
+  if (!(value instanceof PyTuple)) {
+    throw typeError(`can only assign tuple to ${cls.name}.__bases__, not ${typeName(value)}`);
+  }
+  if (value.items.length === 0) throw typeError(`can only assign non-empty tuple to ${cls.name}.__bases__, not ()`);
+  const bases: PyClass[] = [];
+  for (const item of value.items) {
+    if (!(item instanceof PyClass)) {
+      throw typeError(`${cls.name}.__bases__ must be tuple of classes, not '${typeName(item)}'`);
+    }
+    if (item.mro.includes(cls)) throw typeError('a __bases__ item causes an inheritance cycle');
+    if (bases.includes(item)) throw typeError(`duplicate base class ${item.name}`);
+    bases.push(item);
+  }
+  return bases;
+}
+
+/** The classes deriving from `cls`, nearest first, which the run recorded. */
+function descendantsOf(runtime: object, cls: PyClass): PyClass[] {
+  const found: PyClass[] = [];
+  const visit = (each: PyClass): void => {
+    for (const sub of recordedSubclasses(runtime, each)) {
+      if (found.includes(sub)) continue;
+      found.push(sub);
+      visit(sub);
+    }
+  };
+  visit(cls);
+  return found;
 }
 
 /** Computes the C3 linearization of a class, raising TypeError when its bases admit none. */

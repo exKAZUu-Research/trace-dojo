@@ -2,6 +2,7 @@ import { builtin } from '../define';
 import { registerModule } from '../modules';
 import { toIndex } from '../numbers';
 import { currentRuntime } from '../runtimeContext';
+import { collectSubclasses } from '../subclasses';
 import { newList, None } from '../types';
 import { unavailableValue } from '../unavailableValues';
 import type { PyValue } from '../values';
@@ -46,8 +47,11 @@ registerModule(
           1,
           () => {
             // The collector frees the objects in reference cycles that nothing reaches, calling their callbacks.
-            currentRuntime().finalizer.collect();
+            const runtime = currentRuntime();
+            runtime.finalizer.collect();
             runWeakCallbacks([], true);
+            // A class nothing reaches is in a cycle with its __mro__, which the collector frees.
+            collectSubclasses(runtime, runtime.reachableObjects());
             return unavailableValue('gc.collect() が返す、回収したオブジェクトの数');
           },
           { keywords: ['generation'] }

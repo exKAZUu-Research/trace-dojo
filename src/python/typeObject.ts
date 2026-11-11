@@ -10,7 +10,7 @@ import { typeNewFromArguments } from './classes';
 import { addressOf, defaultRepr, pyFormat, pyRepr, pyStr } from './conversions';
 import { method } from './define';
 import { builtinDescriptorClasses, callGetter, descriptorGetter } from './descriptors';
-import { isEnumClass, isFlagClass } from './enums';
+import { enumTypeClass, isEnumClass, isFlagClass } from './enums';
 import { generatorNext } from './generators';
 import { identityHash } from './hashing';
 import { defineNew, objectInitImplementation, objectNewImplementation, typeCall } from './instances';
@@ -30,7 +30,7 @@ import {
 } from './objects';
 import { sizeWithoutHeader } from './objectSizes';
 import { currentRuntime } from './runtimeContext';
-import { subclassesOf } from './subclasses';
+import { subclassesOf } from './subclassQuery';
 import { typeOr } from './typeHints';
 import {
   builtinClass,
@@ -210,7 +210,9 @@ defineMethod(typeClass, '__call__', (self, args, kwargs) => typeCall(self as PyC
 defineMethod(typeClass, '__prepare__', () => newDict(), 'class');
 method(typeClass, '__repr__', 'none', 0, 0, (self) => {
   const cls = self as PyClass;
-  if (isEnumClass(cls) && !cls.isBuiltin) return `<${isFlagClass(cls) ? 'flag' : 'enum'} '${cls.name}'>`;
+  // EnumType's repr, which enum's own classes such as Enum and IntFlag show too.
+  if (isEnumClass(cls) || cls.cls.isSubclassOf(enumTypeClass))
+    return `<${isFlagClass(cls) ? 'flag' : 'enum'} '${cls.name}'>`;
   const module = cls.module === 'builtins' ? '' : `${cls.module}.`;
   return `<class '${module}${cls.qualifiedName}'>`;
 });
@@ -220,7 +222,7 @@ method(typeClass, '__subclasses__', 'none', 0, 0, (self) => {
   if (self === objectClass)
     throw new UnsupportedFeatureError('object のすべてのサブクラスの一覧（object.__subclasses__()）');
   const runtime = currentRuntime();
-  return runtime.listOf(subclassesOf(self as PyClass, (module) => runtime.modules.has(module)));
+  return runtime.listOf(subclassesOf(runtime, self as PyClass));
 });
 method(typeClass, '__instancecheck__', 'one', 1, 1, (self, [value]) => classOf(value).isSubclassOf(self as PyClass));
 method(

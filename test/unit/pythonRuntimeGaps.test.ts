@@ -208,3 +208,76 @@ EXPECTED = "{'quack'} set() True True\\nTrue False True False\\nInstance and cla
 if _re.sub(' at 0x[0-9a-f]*', '', _buf.getvalue()) != EXPECTED: raise AssertionError(_buf.getvalue())
 `);
 });
+
+test("type.__subclasses__() lists the live subclasses in order, and refuses lists CPython's startup fills", () => {
+  expectSameAsCPython(`import io as _io, contextlib as _contextlib
+_buf = _io.StringIO()
+_ctx = _contextlib.redirect_stdout(_buf)
+_ctx.__enter__()
+import gc, abc, collections.abc, numbers, enum, typing, weakref
+class A: pass
+class B(A): pass
+class C(A): pass
+class D(B, C): pass
+print(A.__subclasses__(), B.__subclasses__(), C.__subclasses__(), D.__subclasses__())
+del D
+gc.collect()
+print(B.__subclasses__(), C.__subclasses__())
+def make():
+    class L(A): pass
+    return L
+x = make()
+r = weakref.ref(x)
+print(A.__subclasses__())
+x = None
+gc.collect()
+print(A.__subclasses__(), r())
+class F(float): pass
+print(float.__subclasses__(), complex.__subclasses__(), int.__subclasses__())
+class E(KeyError): pass
+print(KeyError.__subclasses__())
+T = type('T', (A,), {})
+print(A.__subclasses__())
+class Color(enum.Enum):
+    RED = 1
+print(Color.__subclasses__(), enum.Enum.__subclasses__(), enum.IntFlag.__subclasses__())
+class MyAbc(abc.ABC): pass
+class Impl(MyAbc): pass
+MyAbc.register(int)
+print(MyAbc.__subclasses__(), issubclass(int, MyAbc))
+print(collections.abc.Sequence.__subclasses__(), collections.abc.MutableSequence.__subclasses__())
+class R(numbers.Real): pass
+print(numbers.Real.__subclasses__(), numbers.Rational.__subclasses__())
+class P(typing.Protocol):
+    def f(self): ...
+class Q(P, typing.Protocol): pass
+print(P.__subclasses__())
+A.__bases__
+class Z(A): pass
+Z.__bases__ = (C,)
+print(A.__subclasses__(), C.__subclasses__())
+class A: pass
+class C: pass
+class Z(A): pass
+Z.__bases__ = (C,)
+print(Z.__bases__, Z.__mro__, Z.__dict__.get("__bases__"))
+class Y(Z): pass
+print(Y.__mro__)
+Z.__bases__ = (A, C)
+print(Y.__mro__, A.__subclasses__(), C.__subclasses__())
+for v in ([A], (), (1,), (Y,)):
+    try: Z.__bases__ = v
+    except TypeError as e: print(e)
+class M(A, C): pass
+try: M.__bases__ = (C, A, C)
+except TypeError as e: print(e)
+z = Z()
+print(isinstance(z, C), Z.f if hasattr(Z, 'f') else None)
+_ctx.__exit__(None, None, None)
+EXPECTED = "[<class '__main__.B'>, <class '__main__.C'>] [<class '__main__.D'>] [<class '__main__.D'>] []\\n[] []\\n[<class '__main__.B'>, <class '__main__.C'>, <class '__main__.make.<locals>.L'>]\\n[<class '__main__.B'>, <class '__main__.C'>] None\\n[<class '__main__.F'>] [] [<class 'bool'>, <enum 'IntEnum'>, <flag 'IntFlag'>]\\n[<class '__main__.E'>]\\n[<class '__main__.B'>, <class '__main__.C'>, <class '__main__.T'>]\\n[] [<enum 'ReprEnum'>, <flag 'Flag'>, <enum 'Color'>] []\\n[<class '__main__.Impl'>] True\\n[<class 'collections.abc.ByteString'>, <class 'collections.abc.MutableSequence'>, <class 'collections.UserString'>] [<class 'collections.UserList'>]\\n[<class 'numbers.Rational'>, <class '__main__.R'>] [<class 'numbers.Integral'>]\\n[<class '__main__.Q'>]\\n[<class '__main__.B'>, <class '__main__.C'>, <class '__main__.T'>] [<class '__main__.Z'>]\\n(<class '__main__.C'>,) (<class '__main__.Z'>, <class '__main__.C'>, <class 'object'>) None\\n(<class '__main__.Y'>, <class '__main__.Z'>, <class '__main__.C'>, <class 'object'>)\\n(<class '__main__.Y'>, <class '__main__.Z'>, <class '__main__.A'>, <class '__main__.C'>, <class 'object'>) [<class '__main__.Z'>] [<class '__main__.Z'>]\\ncan only assign tuple to Z.__bases__, not list\\ncan only assign non-empty tuple to Z.__bases__, not ()\\nZ.__bases__ must be tuple of classes, not 'int'\\na __bases__ item causes an inheritance cycle\\nduplicate base class C\\nTrue None\\n"
+if _buf.getvalue() != EXPECTED: raise AssertionError(_buf.getvalue())
+`);
+  const result = executeProgram('python', 'import pydoc\nint.__subclasses__()\n');
+  expect(result).toMatchObject({ kind: 'executed' });
+  expect(result.kind === 'executed' ? result.uncaughtException : '').toContain('使えません');
+});

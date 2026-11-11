@@ -41,6 +41,11 @@ export function isRegisteredModule(name: string): boolean {
 }
 
 /** Makes `name` another name of the module `target`, as `os.path` is of `posixpath`. */
+/** Whether a module's code is CPython's Python, which creates its classes in each run that imports it. */
+export function isSourceModule(name: string): boolean {
+  return sourceModules.has(name);
+}
+
 export function registerModuleAlias(name: string, target: string): void {
   aliases.set(name, target);
 }
