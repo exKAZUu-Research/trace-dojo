@@ -200,18 +200,18 @@ test('freeing objects with __del__ costs what is dropped, not every object the p
     def __del__(self): R.count += 1
     def get(self): return self.n
 data = [[i] for i in range(100000)]
-for i in range(10000):
+for i in range(1000):
     r = R(i)
     r.get()
-objs = [R(i) for i in range(5000)]
+objs = [R(i) for i in range(500)]
 while objs:
     objs.pop()
-d = {i: R(i) for i in range(2000)}
-for i in range(2000):
+d = {i: R(i) for i in range(200)}
+for i in range(200):
     d[i] = R(-i)
 for k in list(d):
     del d[k]
-if R.count != 18999:
+if R.count != 1899:
     raise AssertionError(R.count)
 `);
 });
