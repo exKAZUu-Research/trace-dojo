@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 565 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 571 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import {
   classAnnotate,
   classAnnotations,
@@ -37,13 +37,14 @@ import {
   classOf,
   descriptorOwners,
   isNativeMethod,
+  isPropertyKind,
   newDict,
   newTuple,
   None,
   objectClass,
-  propertyClass,
   pyError,
   staticmethodClass,
+  tupleGetterClass,
   typeClass,
   typeError,
   typeName,
@@ -113,7 +114,7 @@ function bindToClass(attribute: PyValue, cls: PyClass): PyValue {
 }
 
 function isMetaDataDescriptor(attribute: PyValue): boolean {
-  return (attribute instanceof PyDescriptor && attribute.cls === propertyClass) || isDataDescriptor(attribute);
+  return (attribute instanceof PyDescriptor && isPropertyKind(attribute.cls)) || isDataDescriptor(attribute);
 }
 
 // code-gauge-allow functionNcss 33 -- One case per attribute a class keeps outside its dictionary.
@@ -203,7 +204,7 @@ export function specialAttribute(value: PyValue, name: string): PyValue | undefi
 
 /** The function a staticmethod or classmethod wraps, as its `__func__` and `__wrapped__` give it. */
 function wrappedFunction(descriptor: PyDescriptor, name: string): PyValue | undefined {
-  if (name === '__doc__' && descriptor.cls === propertyClass) return propertyDoc(descriptor);
+  if (name === '__doc__' && isPropertyKind(descriptor.cls)) return propertyDoc(descriptor);
   if (name !== '__func__' && name !== '__wrapped__') return undefined;
   return descriptor.cls.isSubclassOf(staticmethodClass) || descriptor.cls.isSubclassOf(classmethodClass)
     ? descriptor.fn
@@ -449,7 +450,7 @@ export function setAttribute(target: PyValue, name: string, value: PyValue): voi
     target.imports.delete(name);
     return;
   }
-  if (target instanceof PyDescriptor && target.cls === propertyClass && name === '__doc__') {
+  if (target instanceof PyDescriptor && isPropertyKind(target.cls) && name === '__doc__') {
     target.doc = value;
     return;
   }
@@ -468,11 +469,10 @@ function takesInstanceAttributes(target: PyValue): boolean {
 /** The AttributeError for assigning to an attribute of an object of a builtin type, which has no `__dict__`. */
 function readOnlyError(target: PyValue, name: string): Error {
   const attribute = classOf(target).lookup(name);
-  if (
-    attribute instanceof PyDescriptor &&
-    attribute.cls === propertyClass &&
-    attribute.fn instanceof PyBuiltinFunction
-  ) {
+  if (attribute instanceof PyDescriptor && attribute.cls === tupleGetterClass) {
+    return pyError('AttributeError', "can't set attribute");
+  }
+  if (attribute instanceof PyDescriptor && isPropertyKind(attribute.cls) && attribute.fn instanceof PyBuiltinFunction) {
     // A builtin type's read-only member says less than its read-only computed attribute, as in CPython.
     if (classOf(attribute.fn).name === 'member_descriptor') return pyError('AttributeError', 'readonly attribute');
     return pyError('AttributeError', `attribute '${name}' of '${typeName(target)}' objects is not writable`);
@@ -544,7 +544,7 @@ function setClassAttributeThroughMeta(target: PyClass, name: string, value: PyVa
     return true;
   }
   const attribute = meta.lookup(name);
-  if (attribute instanceof PyDescriptor && attribute.cls === propertyClass) {
+  if (attribute instanceof PyDescriptor && isPropertyKind(attribute.cls)) {
     setProperty(attribute, target, name, value);
     return true;
   }
@@ -571,6 +571,7 @@ function setClassOf(target: PyObject, value: PyValue): void {
 }
 
 function setProperty(property: PyDescriptor, target: PyObject, name: string, value: PyValue): void {
+  if (property.cls === tupleGetterClass) throw pyError('AttributeError', "can't set attribute");
   if (property.setter === undefined || property.setter === None) {
     if (property.fn instanceof PyBuiltinFunction) {
       const cls = target.cls;
@@ -595,7 +596,7 @@ export function setInstanceAttribute(target: PyObject, name: string, value: PyVa
     return;
   }
   const attribute = target.cls.lookup(name);
-  if (attribute instanceof PyDescriptor && attribute.cls === propertyClass) {
+  if (attribute instanceof PyDescriptor && isPropertyKind(attribute.cls)) {
     setProperty(attribute, target, name, value);
     return;
   }
@@ -754,7 +755,8 @@ function deleteNamespaceEntry(target: PyFunction | PyModule, name: string): bool
 /** Deletes an instance attribute, honoring descriptors and slots, as `object.__delattr__` does. */
 export function deleteInstanceAttribute(target: PyObject, name: string): void {
   const attribute = target.cls.lookup(name);
-  if (attribute instanceof PyDescriptor && attribute.cls === propertyClass) {
+  if (attribute instanceof PyDescriptor && isPropertyKind(attribute.cls)) {
+    if (attribute.cls === tupleGetterClass) throw pyError('AttributeError', "can't delete attribute");
     if (attribute.deleter === undefined || attribute.deleter === None) {
       throw pyError(
         'AttributeError',

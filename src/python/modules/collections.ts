@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 497 -- The collections types and the methods of each belong together.
+// code-gauge-allow-file fileNcss 517 -- The collections types and the methods of each belong together.
 import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { DictStore } from '../dictStore';
@@ -37,6 +37,7 @@ import {
   propertyClass,
   pyError,
   tupleClass,
+  tupleGetterClass,
   typeClass,
   typeError,
   typeName,
@@ -671,20 +672,49 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
   const defaulted = fields.slice(fields.length - defaults.length);
   cls.dict.set('_field_defaults', newDict(defaulted.map((name, index) => [name, defaults[index]])));
   cls.dict.set('__match_args__', newTuple(fields));
-  for (const [index, name] of fields.entries()) {
-    cls.dict.set(
-      name,
-      new PyDescriptor(
-        propertyClass,
-        new PyBuiltinFunction(builtinClass('getter'), name, ([self]) => (self as PyTuple).items[index]),
-        undefined,
-        undefined,
-        `Alias for field number ${index}`
-      )
-    );
-  }
+  defineFieldGetters(cls, fields);
   return cls;
 }
+
+/** Gives a namedtuple's class a `_tuplegetter` for each field. */
+function defineFieldGetters(cls: PyClass, fields: string[]): void {
+  for (const [index, name] of fields.entries()) {
+    const getter = new PyDescriptor(
+      tupleGetterClass,
+      new PyBuiltinFunction(builtinClass('getter'), name, ([self]) => (self as PyTuple).items[index]),
+      undefined,
+      undefined,
+      `Alias for field number ${index}`
+    );
+    tupleGetterIndexes.set(getter, index);
+    cls.dict.set(name, getter);
+  }
+}
+
+/** The index of the field each `_tuplegetter` reads. */
+const tupleGetterIndexes = new WeakMap<PyDescriptor, number>();
+
+method(tupleGetterClass, '__repr__', 'none', 0, 0, (self) => {
+  const getter = self as PyDescriptor;
+  return `_tuplegetter(${tupleGetterIndexes.get(getter) ?? 0}, ${pyRepr(getter.doc ?? None)})`;
+});
+method(tupleGetterClass, '__get__', 'expected', 1, 2, (self, [instance]) => {
+  const getter = self as PyDescriptor;
+  if (instance === None) return getter;
+  const index = tupleGetterIndexes.get(getter) ?? 0;
+  if (!(instance instanceof PyTuple)) {
+    throw typeError(
+      `descriptor for index '${index}' for tuple subclasses doesn't apply to '${typeName(instance)}' object`
+    );
+  }
+  return instance.items[index] ?? None;
+});
+method(tupleGetterClass, '__set__', 'expected', 2, 2, () => {
+  throw pyError('AttributeError', "can't set attribute");
+});
+method(tupleGetterClass, '__delete__', 'one', 1, 1, () => {
+  throw pyError('AttributeError', "can't delete attribute");
+});
 
 /**
  * Gives a namedtuple's class its docstring and its module: the `module` argument, else the module of the code creating

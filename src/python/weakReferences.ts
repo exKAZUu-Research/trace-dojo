@@ -63,10 +63,51 @@ function weakReference(referent: PyValue, callback: PyValue | undefined, cls: Py
     if (!reference) {
       reference = new PyOpaque(weakrefClass, '', { referent } satisfies Reference);
       references.set(referent, reference);
+      noteReference(referent, reference, 'ref');
     }
     return reference;
   }
   const reference = new PyOpaque(cls, '', { referent, callback } satisfies Reference);
+  if (callback !== undefined) watchedReferences(currentRuntime()).push(reference);
+  noteReference(referent, reference, 'other');
+  return reference;
+}
+
+/**
+ * The weak references and proxies to each object in the order of CPython's list of them: the reference without a
+ * callback first, then the proxy without one, then the others, newest first.
+ */
+const referenceLists = new WeakMap<PyObject, { value: PyValue; kind: 'ref' | 'proxy' | 'other' }[]>();
+
+/** Places a new weak reference or proxy in its object's list, as CPython's insert_weakref does. */
+export function noteReference(referent: PyObject, value: PyValue, kind: 'ref' | 'proxy' | 'other'): void {
+  const list = referenceLists.get(referent) ?? [];
+  referenceLists.set(referent, list);
+  const ref = list.findIndex((entry) => entry.kind === 'ref');
+  const proxy = list.findIndex((entry) => entry.kind === 'proxy');
+  let at = 0;
+  if (kind === 'proxy') at = ref + 1;
+  else if (kind === 'other') at = Math.max(ref, proxy) + 1;
+  list.splice(at, 0, { value, kind });
+}
+
+/** The weak references and proxies to an object that the program can still reach, as `weakref.getweakrefs` lists. */
+export function liveReferencesOf(referent: PyValue): PyValue[] {
+  if (!(referent instanceof PyObject)) return [];
+  const list = referenceLists.get(referent);
+  if (!list || list.length === 0) return [];
+  const reachable = currentRuntime().reachableObjects();
+  const live = list.filter((entry) => reachable.has(entry.value as object));
+  referenceLists.set(referent, live);
+  return live.map((entry) => entry.value);
+}
+
+/** A weak reference for a proxy, which is the proxy's own and stays out of its object's list. */
+export function proxyReference(referent: PyValue, callback: PyValue | undefined): PyOpaque {
+  if (!isWeaklyReferenceable(referent)) {
+    throw typeError(`cannot create weak reference to '${classOf(referent).name}' object`);
+  }
+  const reference = new PyOpaque(weakrefClass, '', { referent, callback } satisfies Reference);
   if (callback !== undefined) watchedReferences(currentRuntime()).push(reference);
   return reference;
 }

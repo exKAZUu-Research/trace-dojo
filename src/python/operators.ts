@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 576 -- The operator implementations of the builtin types belong together.
+// code-gauge-allow-file fileNcss 582 -- The operator implementations of the builtin types belong together.
 import type { BinaryOperator, CompareOperator } from './ast';
 import { isBytesLike, PyBytes } from './bytesValues';
 import { complexBinary, isComplexOperand, newComplex } from './complexNumbers';
@@ -153,7 +153,7 @@ export function nativeInplace(operator: BinaryOperator, left: PyValue, right: Py
     left.table = result.table;
     return left;
   }
-  if (left instanceof PyDict && operator === '|') {
+  if (left instanceof PyDict && operator === '|' && inheritsDictSlot(left, '__ior__')) {
     for (const [key, value] of mappingItems(right)) left.store.set(key, value);
     return left;
   }
@@ -245,10 +245,19 @@ export function nativeBinary(operator: BinaryOperator, left: PyValue, right: PyV
   if (isSequence(left) && !isUserObject(left)) return sequenceBinary(operator, left, right);
   if (isSequence(right) && operator === '*' && isIntLike(left)) return repeatSequence(right, left);
   if (left instanceof PySet && right instanceof PySet) return setBinary(operator, left, right);
-  if (left instanceof PyDict && right instanceof PyDict && operator === '|') {
-    return mergeDicts(left, right);
-  }
-  return NotImplemented;
+  return operator === '|' ? dictUnion(left, right) : NotImplemented;
+}
+
+/** `dict | dict`, unless a dict subclass such as Counter defines its own union, which then takes over. */
+function dictUnion(left: PyValue, right: PyValue): PyValue {
+  if (!(left instanceof PyDict && right instanceof PyDict)) return NotImplemented;
+  if (!inheritsDictSlot(left, '__or__') || !inheritsDictSlot(right, '__ror__')) return NotImplemented;
+  return mergeDicts(left, right);
+}
+
+/** Whether a dict's class takes dict's own method of this name, as opposed to one of a subclass like Counter. */
+function inheritsDictSlot(value: PyDict, name: string): boolean {
+  return value.cls === dictClass || value.cls.lookup(name) === dictClass.dict.get(name);
 }
 
 function stringBinary(operator: BinaryOperator, left: string, right: PyValue): PyValue {

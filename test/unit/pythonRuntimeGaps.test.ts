@@ -281,3 +281,64 @@ if _buf.getvalue() != EXPECTED: raise AssertionError(_buf.getvalue())
   expect(result).toMatchObject({ kind: 'executed' });
   expect(result.kind === 'executed' ? result.uncaughtException : '').toContain('使えません');
 });
+
+test("Counter unions, namedtuple fields, weak reference lists, and signatures of wrapped functions are CPython's", () => {
+  expectSameAsCPython(`import io as _io, contextlib as _contextlib
+_buf = _io.StringIO()
+_ctx = _contextlib.redirect_stdout(_buf)
+_ctx.__enter__()
+from collections import Counter, OrderedDict, defaultdict
+print(Counter(a=3) | Counter(a=1, b=2), Counter(a=3) & Counter(a=1, b=2))
+c = Counter(a=1); c |= Counter(a=5, b=1); print(c)
+c &= Counter(a=2); print(c)
+c += Counter(z=1); print(c)
+print({'a': 1} | Counter(b=2), Counter(b=2) | {'a': 1} if False else '', OrderedDict(a=1) | {'b': 2}, defaultdict(int, a=1) | {'b': 2})
+d = defaultdict(list); d |= {'x': [1]}; print(d)
+from collections import namedtuple
+P = namedtuple('P', 'x')
+p = P(1)
+for f in (lambda: setattr(p, 'x', 2), lambda: delattr(p, 'x'), lambda: setattr(p, 'y', 2)):
+    try: f()
+    except AttributeError as e: print(e)
+print(type(P.x).__name__, P.x, P.x.__doc__)
+import weakref
+class O: pass
+class R(weakref.ref): pass
+def show(o, names):
+    print([names.get(id(r), '?') for r in weakref.getweakrefs(o)])
+o = O(); names = {}
+a = weakref.ref(o, lambda r: None); names[id(a)] = 'a'
+show(o, names)
+d = R(o); names[id(d)] = 'd'
+show(o, names)
+c = weakref.ref(o); names[id(c)] = 'c'
+show(o, names)
+p = weakref.proxy(o); names[id(p)] = 'p'
+show(o, names)
+e = R(o); names[id(e)] = 'e'
+show(o, names)
+f = weakref.ref(o, lambda r: None); names[id(f)] = 'f'
+show(o, names)
+q = weakref.proxy(o, lambda r: None); names[id(q)] = 'q'
+show(o, names)
+o2 = O(); n2 = {}
+x = R(o2); n2[id(x)] = 'x'
+y = weakref.ref(o2); n2[id(y)] = 'y'
+show(o2, n2)
+import functools, inspect
+def logged(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+    return wrapper
+@logged
+def area(w: float, h: float = 1.0) -> float:
+    """Area of a rectangle."""
+    return w * h
+print(area.__name__, area.__doc__, area.__annotations__, inspect.signature(area), area.__wrapped__.__name__)
+print(area.__qualname__, area.__module__, functools.WRAPPER_ASSIGNMENTS)
+_ctx.__exit__(None, None, None)
+EXPECTED = "Counter({'a': 3, 'b': 2}) Counter({'a': 1})\\nCounter({'a': 5, 'b': 1})\\nCounter({'a': 2})\\nCounter({'a': 2, 'z': 1})\\n{'a': 1, 'b': 2}  OrderedDict({'a': 1, 'b': 2}) defaultdict(<class 'int'>, {'a': 1, 'b': 2})\\ndefaultdict(<class 'list'>, {'x': [1]})\\ncan't set attribute\\ncan't delete attribute\\n'P' object has no attribute 'y' and no __dict__ for setting new attributes\\n_tuplegetter _tuplegetter(0, 'Alias for field number 0') Alias for field number 0\\n['a']\\n['d', 'a']\\n['c', 'd', 'a']\\n['c', 'p', 'd', 'a']\\n['c', 'p', 'e', 'd', 'a']\\n['c', 'p', 'f', 'e', 'd', 'a']\\n['c', 'p', 'q', 'f', 'e', 'd', 'a']\\n['y', 'x']\\narea Area of a rectangle. {'w': <class 'float'>, 'h': <class 'float'>, 'return': <class 'float'>} (w: float, h: float = 1.0) -> float area\\narea __main__ ('__module__', '__name__', '__qualname__', '__doc__', '__annotate__', '__type_params__')\\n"
+if _buf.getvalue() != EXPECTED: raise AssertionError(_buf.getvalue())
+`);
+});
