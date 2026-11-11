@@ -130,5 +130,6 @@ import './modules/gzip';
 import './modules/doctest';
 import './modules/ast';
 import './modules/tokenize';
+import './modules/symtable';
 import './modules/unittest/unittest';
 import './modules/zipfile/zipfile';
