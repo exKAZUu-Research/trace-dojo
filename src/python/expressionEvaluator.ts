@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 561 -- The expression evaluator keeps one method per kind of expression together.
+// code-gauge-allow-file fileNcss 577 -- The expression evaluator keeps one method per kind of expression together.
 import type {
   Argument,
   Comprehension,
@@ -67,7 +67,7 @@ import {
 export class ExpressionEvaluator {
   constructor(protected readonly runtime: Runtime) {}
 
-  // code-gauge-allow functionNcss 47 -- One case per kind of expression.
+  // code-gauge-allow functionNcss 49 -- One case per kind of expression.
   evaluate(expression: Expression, frame: Frame): PyValue {
     switch (expression.kind) {
       case 'name': {

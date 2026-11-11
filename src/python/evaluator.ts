@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 818 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss 822 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import type {
   ClassDef,
   ExceptHandler,
@@ -214,8 +214,14 @@ export class Evaluator extends AsyncEvaluator {
       () => {
         const [value, isCreation] = this.evaluateCreation(statement.value, frame);
         created = isCreation;
+        const { targets } = statement;
+        // Garbage collection only looks for objects among the values held.
+        if (typeof value !== 'object') {
+          for (const target of targets) this.assign(target, value, frame);
+          return;
+        }
         this.hold(frame, value, () => {
-          for (const target of statement.targets) this.assign(target, value, frame);
+          for (const target of targets) this.assign(target, value, frame);
         });
       }
     );
@@ -265,17 +271,15 @@ export class Evaluator extends AsyncEvaluator {
   private evaluateCreation(expression: Expression, frame: Frame): [PyValue, boolean] {
     if (expression.kind === 'call') {
       const callee = this.evaluate(expression.callee, frame);
-      const value = this.hold(frame, callee, () => {
+      const { temporaries } = frame;
+      const length = temporaries.length;
+      temporaries.push(callee);
+      try {
         const { args, kwargs } = this.arguments(expression.args, frame, callee);
-        const outerRow = this.runtime.currentRow;
-        this.runtime.currentRow = expression.row;
-        try {
-          return callValue(callee, args, kwargs);
-        } finally {
-          this.runtime.currentRow = outerRow;
-        }
-      });
-      return [value, callee instanceof PyClass];
+        return [this.invoke(callee, args, kwargs, expression.row), callee instanceof PyClass];
+      } finally {
+        temporaries.length = length;
+      }
     }
     if (
       (expression.kind === 'list' || expression.kind === 'tuple') &&

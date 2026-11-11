@@ -89,9 +89,45 @@ export function sha1(data: Uint8Array): Uint8Array {
 
 // SHA-2 -------------------------------------------------------------------------------------------------------------
 
-const PRIMES = [2];
-for (let candidate = 3; PRIMES.length < 80; candidate += 2)
-  if (PRIMES.every((prime) => candidate % prime !== 0)) PRIMES.push(candidate);
+/** The SHA-2 constants, which BLAKE2 also starts from. */
+interface Sha2Constants {
+  k512: readonly bigint[];
+  iv512: readonly bigint[];
+  iv384: readonly bigint[];
+  k256: readonly number[];
+  iv256: readonly number[];
+  iv224: readonly number[];
+}
+
+let sha2Constants: Sha2Constants | undefined;
+
+/** The SHA-2 constants, computed when a program first uses an algorithm that needs them. */
+function sha2(): Sha2Constants {
+  sha2Constants ??= computeSha2Constants();
+  return sha2Constants;
+}
+
+function computeSha2Constants(): Sha2Constants {
+  const primes = [2];
+  for (let candidate = 3; primes.length < 80; candidate += 2)
+    if (primes.every((prime) => candidate % prime !== 0)) primes.push(candidate);
+  const k512 = primes.map((prime) => fractionBits(prime, 3n));
+  const iv512 = primes.slice(0, 8).map((prime) => fractionBits(prime, 2n));
+  const iv384 = primes.slice(8, 16).map((prime) => fractionBits(prime, 2n));
+  return {
+    k512,
+    iv512,
+    iv384,
+    k256: k512.slice(0, 64).map((value) => Number(value >> 32n)),
+    iv256: iv512.map((value) => Number(value >> 32n)),
+    iv224: iv384.map((value) => Number(value & 0xff_ff_ff_ffn)),
+  };
+}
+
+/** The first 64 bits of the fractional part of a prime's square or cube root, from which SHA-2 takes its constants. */
+function fractionBits(prime: number, root: bigint): bigint {
+  return integerRoot(BigInt(prime) << (64n * root), root) & MASK64;
+}
 
 /** The integer `root`th root of a bigint, by Newton's method. */
 function integerRoot(value: bigint, root: bigint): bigint {
@@ -103,18 +139,9 @@ function integerRoot(value: bigint, root: bigint): bigint {
   }
 }
 
-/** The first 64 bits of the fractional part of a prime's square or cube root, from which SHA-2 takes its constants. */
-const fractionBits = (prime: number, root: bigint): bigint => integerRoot(BigInt(prime) << (64n * root), root) & MASK64;
-
-const SHA512_K = PRIMES.map((prime) => fractionBits(prime, 3n));
-const SHA512_IV = PRIMES.slice(0, 8).map((prime) => fractionBits(prime, 2n));
-const SHA384_IV = PRIMES.slice(8, 16).map((prime) => fractionBits(prime, 2n));
-const SHA256_K = SHA512_K.slice(0, 64).map((value) => Number(value >> 32n));
-export const SHA256_IV = SHA512_IV.map((value) => Number(value >> 32n));
-const SHA224_IV = SHA384_IV.map((value) => Number(value & 0xff_ff_ff_ffn));
-
 export function sha256(data: Uint8Array, is224 = false): Uint8Array {
-  const state = [...(is224 ? SHA224_IV : SHA256_IV)];
+  const { k256, iv224, iv256 } = sha2();
+  const state = [...(is224 ? iv224 : iv256)];
   const padded = mdPad(data, 64, 8, false);
   for (let offset = 0; offset < padded.length; offset += 64) {
     const w = words32(padded, offset, 16, false);
@@ -126,7 +153,7 @@ export function sha256(data: Uint8Array, is224 = false): Uint8Array {
     let [a, b, c, d, e, f, g, h] = state;
     for (let index = 0; index < 64; index++) {
       const t1 =
-        (h + (rotr32(e, 6) ^ rotr32(e, 11) ^ rotr32(e, 25)) + ((e & f) ^ (~e & g)) + SHA256_K[index] + w[index]) >>> 0;
+        (h + (rotr32(e, 6) ^ rotr32(e, 11) ^ rotr32(e, 25)) + ((e & f) ^ (~e & g)) + k256[index] + w[index]) >>> 0;
       const t2 = ((rotr32(a, 2) ^ rotr32(a, 13) ^ rotr32(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) >>> 0;
       [a, b, c, d, e, f, g, h] = [(t1 + t2) >>> 0, a, b, c, (d + t1) >>> 0, e, f, g];
     }
@@ -136,6 +163,7 @@ export function sha256(data: Uint8Array, is224 = false): Uint8Array {
 }
 
 function sha512Core(data: Uint8Array, iv: readonly bigint[]): Uint8Array {
+  const { k512 } = sha2();
   const state = [...iv];
   const padded = mdPad(data, 128, 16, false);
   const view = new DataView(padded.buffer);
@@ -149,7 +177,7 @@ function sha512Core(data: Uint8Array, iv: readonly bigint[]): Uint8Array {
     let [a, b, c, d, e, f, g, h] = state;
     for (let index = 0; index < 80; index++) {
       const s1 = rotr64(e, 14n) ^ rotr64(e, 18n) ^ rotr64(e, 41n);
-      const t1 = (h + s1 + ((e & f) ^ (~e & MASK64 & g)) + SHA512_K[index] + w[index]) & MASK64;
+      const t1 = (h + s1 + ((e & f) ^ (~e & MASK64 & g)) + k512[index] + w[index]) & MASK64;
       const t2 = ((rotr64(a, 28n) ^ rotr64(a, 34n) ^ rotr64(a, 39n)) + ((a & b) ^ (a & c) ^ (b & c))) & MASK64;
       [a, b, c, d, e, f, g, h] = [(t1 + t2) & MASK64, a, b, c, (d + t1) & MASK64, e, f, g];
     }
@@ -162,14 +190,15 @@ const truncatedIvs = new Map<number, bigint[]>();
 
 /** SHA-512, SHA-384, or SHA-512/t, whose initial values SHA-512 derives from the name of the variant. */
 export function sha512(data: Uint8Array, bits: 224 | 256 | 384 | 512 = 512): Uint8Array {
-  if (bits === 512) return sha512Core(data, SHA512_IV);
-  if (bits === 384) return sha512Core(data, SHA384_IV).subarray(0, 48);
+  const { iv512, iv384 } = sha2();
+  if (bits === 512) return sha512Core(data, iv512);
+  if (bits === 384) return sha512Core(data, iv384).subarray(0, 48);
   let iv = truncatedIvs.get(bits);
   if (!iv) {
     const name = Uint8Array.from(`SHA-512/${bits}`, (char) => char.codePointAt(0) as number);
     const digest = sha512Core(
       name,
-      SHA512_IV.map((value) => value ^ 0xa5_a5_a5_a5_a5_a5_a5_a5n)
+      iv512.map((value) => value ^ 0xa5_a5_a5_a5_a5_a5_a5_a5n)
     );
     const view = new DataView(digest.buffer);
     iv = Array.from({ length: 8 }, (_, index) => view.getBigUint64(index * 8, false));
@@ -293,10 +322,11 @@ function blake2ParameterBlock(parameters: Blake2Parameters, wide: boolean): Uint
   return block;
 }
 
-// code-gauge-allow functionNcss 33 -- Transcribes the BLAKE2b compression of RFC 7693.
+// code-gauge-allow functionNcss 34 -- Transcribes the BLAKE2b compression of RFC 7693.
 export function blake2b(data: Uint8Array, parameters: Blake2Parameters): Uint8Array {
+  const { iv512 } = sha2();
   const parameterView = new DataView(blake2ParameterBlock(parameters, true).buffer);
-  const state = SHA512_IV.map((value, index) => value ^ parameterView.getBigUint64(index * 8, true));
+  const state = iv512.map((value, index) => value ^ parameterView.getBigUint64(index * 8, true));
   const message = keyedMessage(data, parameters.key, 128);
   const blocks = Math.max(1, Math.ceil(message.length / 128));
   for (let block = 0; block < blocks; block++) {
@@ -306,7 +336,7 @@ export function blake2b(data: Uint8Array, parameters: Blake2Parameters): Uint8Ar
     const m = Array.from({ length: 16 }, (_, index) => view.getBigUint64(index * 8, true));
     const last = block === blocks - 1;
     const counter = BigInt(last ? message.length : (block + 1) * 128);
-    const v = [...state, ...SHA512_IV];
+    const v = [...state, ...iv512];
     v[12] ^= counter & MASK64;
     v[13] ^= counter >> 64n;
     if (last) v[14] ^= MASK64;
@@ -327,10 +357,11 @@ export function blake2b(data: Uint8Array, parameters: Blake2Parameters): Uint8Ar
   return bytesOf64(state, true).subarray(0, parameters.digestSize);
 }
 
-// code-gauge-allow functionNcss 32 -- Transcribes the BLAKE2s compression of RFC 7693.
+// code-gauge-allow functionNcss 33 -- Transcribes the BLAKE2s compression of RFC 7693.
 export function blake2s(data: Uint8Array, parameters: Blake2Parameters): Uint8Array {
+  const { iv256 } = sha2();
   const parameterWords = words32(blake2ParameterBlock(parameters, false), 0, 8, true);
-  const state = SHA256_IV.map((value, index) => (value ^ parameterWords[index]) >>> 0);
+  const state = iv256.map((value, index) => (value ^ parameterWords[index]) >>> 0);
   const message = keyedMessage(data, parameters.key, 64);
   const blocks = Math.max(1, Math.ceil(message.length / 64));
   for (let block = 0; block < blocks; block++) {
@@ -339,7 +370,7 @@ export function blake2s(data: Uint8Array, parameters: Blake2Parameters): Uint8Ar
     const m = words32(chunk, 0, 16, true);
     const last = block === blocks - 1;
     const counter = last ? message.length : (block + 1) * 64;
-    const v = [...state, ...SHA256_IV];
+    const v = [...state, ...iv256];
     v[12] = (v[12] ^ counter) >>> 0;
     v[13] = (v[13] ^ Math.floor(counter / 2 ** 32)) >>> 0;
     if (last) v[14] = ~v[14] >>> 0;

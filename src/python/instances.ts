@@ -12,7 +12,7 @@ import {
   typeError,
   typeName,
 } from './types';
-import { type Kwargs, PyBuiltinFunction, PyClass, PyDescriptor, PyInstance, type PyValue } from './values';
+import { type Kwargs, PyBuiltinFunction, PyClass, PyDescriptor, PyFunction, PyInstance, type PyValue } from './values';
 
 type Create = (cls: PyClass, args: PyValue[], kwargs: Kwargs) => PyValue;
 
@@ -54,7 +54,10 @@ export function typeCall(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyValue
 }
 
 function callInit(init: PyValue | undefined, instance: PyValue, args: PyValue[], kwargs: Kwargs): void {
-  const result = callValue(bindValue(init ?? None, instance), args, kwargs);
+  const result =
+    init instanceof PyFunction
+      ? currentRuntime().callFunction(init, [instance, ...args], kwargs)
+      : callValue(bindValue(init ?? None, instance), args, kwargs);
   if (result !== None) throw typeError(`__init__() should return None, not '${typeName(result)}'`);
 }
 

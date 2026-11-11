@@ -132,6 +132,8 @@ export function specialAttribute(value: PyValue, name: string): PyValue | undefi
   if (typeof value === 'bigint' || typeof value === 'boolean') return integerAttribute(BigInt(value), name);
   if (typeof value === 'number') return realPartAttribute(value, 0, name);
   if (typeof value === 'string') return undefined;
+  // No other kind of object checked below is a PyInstance.
+  if (value instanceof PyInstance) return instanceAttribute(value, name);
   if (value instanceof PyComplex) return realPartAttribute(value.real, value.imag, name);
   if (value instanceof PyFunction) return functionAttribute(value, name);
   if (value instanceof PyBoundMethod) return boundMethodAttribute(value, name);
@@ -142,7 +144,6 @@ export function specialAttribute(value: PyValue, name: string): PyValue | undefi
   }
   if (value instanceof PyGenerator) return generatorAttribute(value, name);
   if (value instanceof PyDescriptor) return wrappedFunction(value, name);
-  if (value instanceof PyInstance) return instanceAttribute(value, name);
   if (name === '__dict__' && value instanceof PyObject && !value.cls.isBuiltin) return dictAttribute(value);
   return undefined;
 }
