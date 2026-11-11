@@ -312,7 +312,8 @@ export class PyDescriptor extends PyObject {
     readonly fn: PyValue,
     readonly setter?: PyValue,
     readonly deleter?: PyValue,
-    readonly doc?: PyValue
+    /** A property's `__doc__`, which programs may assign, as namedtuple does for its fields. */
+    public doc?: PyValue
   ) {
     super(cls);
   }

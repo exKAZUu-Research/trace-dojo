@@ -525,8 +525,9 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
   const cls = new PyClass(typename, [tupleClass], typeClass);
   cls.mro = [cls, ...tupleClass.mro];
   cls.isBuiltin = false;
-  cls.module = '__main__';
+  cls.module = namedtupleModule(kwargs);
   cls.layout = { base: 'native' };
+  cls.dict.set('__doc__', `${typename}(${fields.join(', ')})`);
   cls.construct = (tupleType, values, keywords) => newNamedTuple(tupleType, fields, defaults, values, keywords);
   cls.slotNames = new Set();
   defineNew(cls, cls.construct);
@@ -539,11 +540,20 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
       name,
       new PyDescriptor(
         propertyClass,
-        new PyBuiltinFunction(builtinClass('getter'), name, ([self]) => (self as PyTuple).items[index])
+        new PyBuiltinFunction(builtinClass('getter'), name, ([self]) => (self as PyTuple).items[index]),
+        undefined,
+        undefined,
+        `Alias for field number ${index}`
       )
     );
   }
   return cls;
+}
+
+/** The module a namedtuple's class belongs to: the `module` argument, else the module of the code creating it. */
+function namedtupleModule(kwargs: Kwargs): string {
+  const module = kwargs?.get('module') ?? currentRuntime().frame.globals.get('__name__');
+  return typeof module === 'string' ? module : '__main__';
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Follows how a namedtuple binds positional and keyword arguments to its fields.
@@ -653,9 +663,7 @@ export function namedTupleClass(name: string, fields: string[], defaults: PyValu
 
 /** A namedtuple class that a library module defines, such as `functools.CacheInfo`. */
 export function makeNamedTupleClass(name: string, fields: string[], module: string): PyClass {
-  const cls = namedtupleWithMethods([name, newList(fields)], undefined) as PyClass;
-  cls.module = module;
-  return cls;
+  return namedtupleWithMethods([name, newList(fields)], new Map([['module', module]])) as PyClass;
 }
 
 registerModule(

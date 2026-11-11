@@ -149,10 +149,17 @@ export function specialAttribute(value: PyValue, name: string): PyValue | undefi
 
 /** The function a staticmethod or classmethod wraps, as its `__func__` and `__wrapped__` give it. */
 function wrappedFunction(descriptor: PyDescriptor, name: string): PyValue | undefined {
+  if (name === '__doc__' && descriptor.cls === propertyClass) return propertyDoc(descriptor);
   if (name !== '__func__' && name !== '__wrapped__') return undefined;
   return descriptor.cls.isSubclassOf(staticmethodClass) || descriptor.cls.isSubclassOf(classmethodClass)
     ? descriptor.fn
     : undefined;
+}
+
+/** A property's `__doc__`: the one it was given or assigned, else its getter's. */
+function propertyDoc(property: PyDescriptor): PyValue {
+  if (property.doc !== undefined && property.doc !== None) return property.doc;
+  return property.fn === None ? None : (specialAttribute(property.fn, '__doc__') ?? None);
 }
 
 /** The `__dict__` of an object, or undefined for one whose class gives its instances none. */
@@ -330,6 +337,10 @@ export function setAttribute(target: PyValue, name: string, value: PyValue): voi
     target.dict.set(name, value);
     return;
   }
+  if (target instanceof PyDescriptor && target.cls === propertyClass && name === '__doc__') {
+    target.doc = value;
+    return;
+  }
   throw readOnlyError(target, name);
 }
 
@@ -365,6 +376,7 @@ function setClassAttribute(target: PyClass, name: string, value: PyValue): void 
   if (target.enumMembers?.some((member) => member.dict.get('_name_') === name)) {
     throw pyError('AttributeError', `cannot reassign member '${name}'`);
   }
+  if (name === '__module__' && typeof value === 'string') target.module = value;
   target.dict.set(name, value);
 }
 
