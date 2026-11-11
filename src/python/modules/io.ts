@@ -11,6 +11,7 @@ import { registerSourceModule } from '../sourceModules';
 import { iterStr } from '../strings';
 import {
   builtinClass,
+  classOf,
   exceptionClassNamed,
   nativeFunction,
   newException,
@@ -147,7 +148,8 @@ function defineStreamMethods(cls: PyClass, itemsLength: (value: PyValue) => numb
   });
   method(cls, '__next__', 'none', 0, 0, (self) => {
     const stream = streamOf(self);
-    const line = readLineFrom(stream, -1);
+    // A program's subclass reads its lines with its own readline, as CPython's iternext does for subclasses.
+    const line = classOf(self).isBuiltin ? readLineFrom(stream, -1) : callValue(getAttribute(self, 'readline'), []);
     if (stream.isEmpty(line)) throw pyError('StopIteration');
     return line;
   });
@@ -155,8 +157,9 @@ function defineStreamMethods(cls: PyClass, itemsLength: (value: PyValue) => numb
     checkOpen(streamOf(self));
     return self;
   });
+  // IOBase.__exit__ calls close(), which a program's subclass may override.
   method(cls, '__exit__', 'expected', 0, Number.POSITIVE_INFINITY, (self) => {
-    streamOf(self).closed = true;
+    callValue(getAttribute(self, 'close'), []);
     return None;
   });
   method(cls, '__repr__', 'none', 0, 0, (self) => `<_io.${cls.name} object at ${addressOf(self as PyOpaque)}>`);

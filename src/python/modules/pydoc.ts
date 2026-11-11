@@ -2975,7 +2975,7 @@ const CHECK_CLASS = builtin('_check_class', 'one', 1, 1, ([cls]) => {
   const ours = new Set(
     [...cls.dict].filter(([name]) => name !== '__doc__').map(([name, value]) => `${name}:${typeName(value)}`)
   );
-  const theirs = new Set(expected.split(' ').filter((word) => word !== ''));
+  const theirs = new Set(expected.split(' ').filter((word) => word !== '' && !word.startsWith('__doc__:')));
   const differing = [...new Set([...ours.symmetricDifference(theirs)].map((word) => word.split(':')[0]))].toSorted();
   if (differing.length === 0) return None;
   const shown = differing.length > 5 ? `${differing.slice(0, 5).join('、')} など` : differing.join('、');

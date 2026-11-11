@@ -2031,10 +2031,21 @@ def _invalid_load_key(code):
 from operator import index as _index
 
 for _cls, _name in ((PickleError, 'PickleError'), (PicklingError, 'PicklingError'),
-                    (UnpicklingError, 'UnpicklingError'), (_Pickler, 'Pickler'), (_Unpickler, 'Unpickler')):
+                    (UnpicklingError, 'UnpicklingError')):
     _cls.__module__ = '_pickle'
     _cls.__name__ = _cls.__qualname__ = _name
-Pickler, Unpickler = _Pickler, _Unpickler
+
+
+def _c_class(cls, name):
+    # _pickle's Pickler and Unpickler, which are classes of their own beside pickle's _Pickler and _Unpickler.
+    namespace = {key: value for key, value in cls.__dict__.items() if key not in ('__dict__', '__weakref__')}
+    namespace['__module__'] = '_pickle'
+    namespace['__qualname__'] = name
+    return type(name, cls.__bases__, namespace)
+
+
+Pickler, Unpickler = _c_class(_Pickler, 'Pickler'), _c_class(_Unpickler, 'Unpickler')
+del _c_class
 _pickler_arguments = _clinic('Pickler', ('file', 'protocol'), 0, 1, ('fix_imports', 'buffer_callback'),
                              lambda file, protocol=None, *, fix_imports=True, buffer_callback=None:
                                  (file, protocol, fix_imports, buffer_callback))

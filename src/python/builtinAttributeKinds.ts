@@ -1,14 +1,16 @@
 import { PyAttribute } from './attributeDescriptors';
 import { assignExceptionAttribute, specialAttribute } from './attributes';
-import { builtinClassLayout } from './builtinDocs';
+import { builtinClassLayout, builtinDoc } from './builtinDocs';
+import { method } from './define';
 import { ownDict } from './descriptors';
 import { defineConstructingNew } from './instances';
 import { addModuleCreationHook } from './modules';
 import { attributeError, bindValue, callValue } from './objects';
+import { nativeCompare } from './operators';
 import { allBuiltinClasses } from './subclasses';
 import { baseExceptionClass, classmethodClass, defineMethod, nativeFunction, None, propertyClass } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { PyBuiltinFunction, PyClass, PyDescriptor, type PyValue } from './values';
+import { PyBuiltinFunction, PyClass, PyDescriptor, PyObject, type PyValue } from './values';
 
 /**
  * Makes the data attributes of the builtin classes, which their modules define as properties, the getset or member
@@ -30,8 +32,20 @@ export function convertBuiltinAttributes(classes: Iterable<PyClass> = allBuiltin
 }
 
 /** Makes one attribute of a builtin class the kind of object CPython's type has under its name. */
+// code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of attribute CPython's data names.
 function convertAttribute(cls: PyClass, name: string, kind: string): void {
   const value = cls.dict.get(name);
+  // A C type's namespace holds its docstring, which this grader keeps in CPython's data.
+  if (name === '__doc__' && (kind === 'str' || kind === 'NoneType') && value === undefined) {
+    cls.dict.set(name, builtinDoc(cls) ?? None);
+    return;
+  }
+  // The comparisons of a C type that defines tp_richcompare, which this grader's values compare by natively.
+  if (kind === 'wrapper_descriptor' && value === undefined && COMPARISONS.has(name)) {
+    const operator = COMPARISONS.get(name) as Parameters<typeof nativeCompare>[0];
+    method(cls, name, 'one', 1, 1, (self, [other]) => nativeCompare(operator, self, other));
+    return;
+  }
   // A C type's class method is a classmethod_descriptor, not a classmethod object wrapping a function.
   if (kind === 'classmethod_descriptor' && value instanceof PyDescriptor && value.cls === classmethodClass) {
     defineMethod(cls, name, (owner, args, kwargs) => callValue(value.fn, [owner, ...args], kwargs), 'class');
@@ -44,10 +58,24 @@ function convertAttribute(cls: PyClass, name: string, kind: string): void {
   } else if (value === undefined || (name === '__doc__' && (typeof value === 'string' || value === None))) {
     // A type whose objects have their own __doc__ gives its own by type.__doc__, from CPython's data.
     cls.dict.set(name, specialAttributeOf(cls, name, descriptorKind));
+  } else if (!(value instanceof PyObject) || value.cls.isBuiltin === false || isPlainValue(value)) {
+    // A class attribute standing for what the objects have by default, as function's __type_params__.
+    const attribute = specialAttributeOf(cls, name, descriptorKind);
+    attribute.fallback = value;
+    cls.dict.set(name, attribute);
   }
 }
 
 const converted = new WeakSet<PyClass>();
+
+const COMPARISONS = new Map([
+  ['__lt__', '<'],
+  ['__le__', '<='],
+  ['__eq__', '=='],
+  ['__ne__', '!='],
+  ['__gt__', '>'],
+  ['__ge__', '>='],
+]);
 
 /**
  * Gives an exception class the slot methods its C type defines itself, such as KeyError's `__str__`, which this
@@ -111,4 +139,9 @@ function defineTypeNew(cls: PyClass): void {
     throw new UnsupportedFeatureError(`${cls.name} オブジェクトを型から直接作ること（${cls.name}.__new__）`);
   };
   cls.dict.set('__new__', nativeFunction('__new__', run));
+}
+
+/** Whether a class attribute is a value rather than a descriptor or a method. */
+function isPlainValue(value: PyValue): boolean {
+  return !(value instanceof PyAttribute || value instanceof PyDescriptor || value instanceof PyBuiltinFunction);
 }

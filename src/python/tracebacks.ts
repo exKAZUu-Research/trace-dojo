@@ -78,7 +78,6 @@ export function noteCaught(error: PyError, frame: Frame): void {
 
 // Traceback objects -------------------------------------------------------------------------------------------------
 
-method(tracebackClass, '__repr__', 'none', 0, 0, (self) => `<traceback object at ${addressOf(self as PyObject)}>`);
 method(tracebackClass, '__dir__', 'none', 0, 0, () =>
   currentRuntime().listOf(['tb_frame', 'tb_next', 'tb_lasti', 'tb_lineno'])
 );

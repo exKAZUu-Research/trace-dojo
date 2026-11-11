@@ -148,7 +148,8 @@ export function typeData(cls: PyClass, name: string): PyValue | undefined {
       return newTuple(cls.bases);
     }
     case '__type_params__': {
-      return (cls.isBuiltin ? undefined : cls.dict.get('__type_params__')) ?? newTuple([]);
+      // type.__type_params__ reads the class's own entry, which for a builtin type may be its objects' descriptor.
+      return (cls === typeClass ? undefined : cls.dict.get('__type_params__')) ?? newTuple([]);
     }
     case '__base__': {
       return cls.bases[0] ?? None;

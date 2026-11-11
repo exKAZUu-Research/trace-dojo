@@ -7,6 +7,7 @@ const SUBCLASSABLE = new Set([
   'builtins.map',
   'builtins.reversed',
   'builtins.zip',
+  'builtins.super',
   'functools.partial',
   'types.GenericAlias',
   '_io.StringIO',

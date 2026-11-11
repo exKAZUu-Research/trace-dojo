@@ -76,11 +76,9 @@ class pkgutil:
 from inspect import iscoroutinefunction
 import threading
 from dataclasses import is_dataclass
-from types import ModuleType, MethodType
+from types import CodeType, ModuleType, MethodType
 
 
-class CodeType:
-    co_argcount = co_posonlyargcount = co_kwonlyargcount = co_flags = co_varnames = None
 from unittest.util import safe_repr
 from functools import wraps, partial
 from threading import RLock

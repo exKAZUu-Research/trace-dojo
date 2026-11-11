@@ -28,6 +28,9 @@ export class PyAttribute extends PyObject {
     super(kind === 'member' ? memberDescriptorClass : getsetDescriptorClass);
   }
 
+  /** The value a stand-in gives an object that keeps none, as the class attribute it replaced did. */
+  fallback?: PyValue;
+
   get isMember(): boolean {
     return this.cls === memberDescriptorClass;
   }
@@ -88,10 +91,6 @@ for (const cls of [getsetDescriptorClass, memberDescriptorClass]) {
   method(cls, '__repr__', 'none', 0, 0, (descriptor) => {
     const { name, owner, isMember } = self(descriptor);
     return `<${isMember ? 'member' : 'attribute'} '${name}' of '${owner.typeName ?? owner.name}' objects>`;
-  });
-  method(cls, '__reduce__', 'none', 0, 0, (descriptor) => {
-    void descriptor;
-    throw typeError(`cannot pickle '${cls.name}' object`);
   });
 }
 
