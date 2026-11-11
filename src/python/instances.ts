@@ -101,6 +101,17 @@ function callInit(init: PyValue | undefined, instance: PyValue, args: PyValue[],
   if (result !== None) throw typeError(`__init__() should return None, not '${typeName(result)}'`);
 }
 
+/**
+ * The `__init__` of a class whose call creates a plain instance and hands its arguments to nothing else: `object`'s,
+ * or a Python function. Undefined for a class whose metaclass, `__new__`, or builtin base takes part in the call.
+ */
+export function plainInitOf(cls: PyClass): PyValue | undefined {
+  if (cls.isBuiltin || cls.cls !== typeClass || cls.construct || isEnumClass(cls)) return undefined;
+  if (cls.lookup('__new__') !== objectNew() || cls.mro.some(isSubclassableConstruct)) return undefined;
+  const init = cls.lookup('__init__');
+  return init === objectInit() || init instanceof PyFunction ? init : undefined;
+}
+
 /** The function a class's `__new__` entry stands for, which CPython calls as a static method. */
 function staticTarget(newMethod: PyValue | undefined): PyValue {
   if (newMethod instanceof PyDescriptor && newMethod.cls === staticmethodClass) return newMethod.fn;

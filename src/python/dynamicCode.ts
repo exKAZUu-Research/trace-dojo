@@ -225,6 +225,8 @@ export function registerAstSupport(support: AstSupport): void {
 
 /** `eval(source, /, globals=None, locals=None)`. */
 export function evaluate(args: PyValue[], kwargs: Kwargs): PyValue {
+  // The code may read the caller's variables as objects.
+  currentRuntime().finalizer.locals.expose();
   const [source, globals, locals] = codeArguments(args, kwargs, 'eval');
   if (globals !== None && !(globals instanceof PyDict)) {
     throw typeError(
@@ -242,6 +244,8 @@ export function evaluate(args: PyValue[], kwargs: Kwargs): PyValue {
 
 /** `exec(source, /, globals=None, locals=None, *, closure=None)`. */
 export function execute(args: PyValue[], kwargs: Kwargs): PyValue {
+  // The code may read the caller's variables as objects.
+  currentRuntime().finalizer.locals.expose();
   const [source, globals, locals] = codeArguments(args, kwargs, 'exec');
   if (globals !== None && !(globals instanceof PyDict))
     throw typeError(`exec() globals must be a dict, not ${typeName(globals)}`);

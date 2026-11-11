@@ -192,3 +192,26 @@ for i in range(1000):
 `)
   ).toContain('この採点環境では使えません');
 });
+
+test('freeing objects with __del__ costs what is dropped, not every object the program holds', () => {
+  expectSameAsCPython(`class R:
+    count = 0
+    def __init__(self, n): self.n = n
+    def __del__(self): R.count += 1
+    def get(self): return self.n
+data = [[i] for i in range(100000)]
+for i in range(10000):
+    r = R(i)
+    r.get()
+objs = [R(i) for i in range(5000)]
+while objs:
+    objs.pop()
+d = {i: R(i) for i in range(2000)}
+for i in range(2000):
+    d[i] = R(-i)
+for k in list(d):
+    del d[k]
+if R.count != 18999:
+    raise AssertionError(R.count)
+`);
+});

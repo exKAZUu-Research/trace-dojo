@@ -38,9 +38,17 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
     first: PyValue
   ): Suspension;
 
-  // code-gauge-allow functionNcss 60 -- One case per kind of expression that may contain a suspending part.
+  /** Evaluates an expression that may suspend, whose value the caller hands on, as `evaluate` does. */
   *evaluateSuspending(expression: Expression, frame: Frame): Suspension {
     if (!expression.suspends) return this.evaluate(expression, frame);
+    const value = yield* this.suspendingValue(expression, frame);
+    const { locals } = this.runtime.finalizer;
+    if (locals.marking) locals.escape(value);
+    return value;
+  }
+
+  // code-gauge-allow functionNcss 60 -- One case per kind of expression that may contain a suspending part.
+  private *suspendingValue(expression: Expression, frame: Frame): Suspension {
     switch (expression.kind) {
       case 'yield':
       case 'yieldFrom':
@@ -267,6 +275,8 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
       this.assign(target, value, frame);
       return;
     }
+    // An attribute or an item keeps the value outside the frames.
+    if (target.kind !== 'unpack') this.runtime.finalizer.locals.escape(value);
     const length = frame.temporaries.length;
     frame.temporaries.push(value);
     try {

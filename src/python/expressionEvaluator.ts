@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 634 -- The expression evaluator keeps one method per kind of expression together.
+// code-gauge-allow-file fileNcss 717 -- The expression evaluator keeps one method per kind of expression together.
 import type {
   Argument,
   Comprehension,
@@ -15,6 +15,7 @@ import { newBytes } from './bytesValues';
 import { newComplex } from './complexNumbers';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
 import { Frame } from './frame';
+import { referencesOf } from './garbageCollection';
 import { namespaceOf } from './namespaces';
 import {
   bindValue,
@@ -74,8 +75,20 @@ import {
 export class ExpressionEvaluator {
   constructor(protected readonly runtime: Runtime) {}
 
-  // code-gauge-allow functionNcss 49 -- One case per kind of expression.
+  /** Evaluates an expression whose value the caller hands on, which is then no longer local to the frames. */
   evaluate(expression: Expression, frame: Frame): PyValue {
+    const value = this.evaluateValue(expression, frame);
+    const { locals } = this.runtime.finalizer;
+    if (locals.marking) locals.escape(value);
+    return value;
+  }
+
+  /**
+   * Evaluates an expression whose value the caller keeps in the frame, or reads without keeping, such as an operand,
+   * so that a local object stays local.
+   */
+  // code-gauge-allow functionNcss 49 -- One case per kind of expression.
+  evaluateValue(expression: Expression, frame: Frame): PyValue {
     switch (expression.kind) {
       case 'name': {
         return this.loadName(expression, frame);
@@ -97,11 +110,10 @@ export class ExpressionEvaluator {
         return this.dictDisplay(expression, frame);
       }
       case 'attribute': {
-        return getAttribute(this.evaluate(expression.object, frame), expression.name);
+        return this.attribute(expression, frame);
       }
       case 'subscript': {
-        const object = this.evaluate(expression.object, frame);
-        return this.hold(frame, object, () => getItem(object, this.evaluate(expression.index, frame)));
+        return this.subscript(expression, frame);
       }
       case 'slice': {
         return this.slice(expression, frame);
@@ -110,31 +122,25 @@ export class ExpressionEvaluator {
         return this.call(expression, frame);
       }
       case 'binary': {
-        const left = this.evaluate(expression.left, frame);
-        // Garbage collection only looks for objects among the values held.
-        if (typeof left !== 'object')
-          return binaryOp(expression.operator, left, this.evaluate(expression.right, frame));
-        return this.hold(frame, left, () =>
-          binaryOp(expression.operator, left, this.evaluate(expression.right, frame))
-        );
+        return this.binary(expression, frame);
       }
       case 'unary': {
-        return unaryOp(expression.operator, this.evaluate(expression.operand, frame));
+        return unaryOp(expression.operator, this.evaluateValue(expression.operand, frame));
       }
       case 'not': {
-        return !isTruthy(this.evaluate(expression.operand, frame));
+        return !isTruthy(this.evaluateValue(expression.operand, frame));
       }
       case 'boolean': {
-        const left = this.evaluate(expression.left, frame);
+        const left = this.evaluateValue(expression.left, frame);
         const truthy = isTruthy(left);
-        return (expression.operator === 'and' ? !truthy : truthy) ? left : this.evaluate(expression.right, frame);
+        return (expression.operator === 'and' ? !truthy : truthy) ? left : this.evaluateValue(expression.right, frame);
       }
       case 'compare': {
         return this.compare(expression, frame);
       }
       case 'conditional': {
-        return this.evaluate(
-          isTruthy(this.evaluate(expression.test, frame)) ? expression.body : expression.orelse,
+        return this.evaluateValue(
+          isTruthy(this.evaluateValue(expression.test, frame)) ? expression.body : expression.orelse,
           frame
         );
       }
@@ -142,7 +148,7 @@ export class ExpressionEvaluator {
         return this.createFunction(expression.fn, frame, []);
       }
       case 'namedExpression': {
-        const value = this.evaluate(expression.value, frame);
+        const value = this.evaluateValue(expression.value, frame);
         this.storeName(expression.target, value, frame);
         return value;
       }
@@ -153,11 +159,46 @@ export class ExpressionEvaluator {
     throw new Error('Unknown expression');
   }
 
+  private attribute(expression: Extract<Expression, { kind: 'attribute' }>, frame: Frame): PyValue {
+    const object = this.evaluateValue(expression.object, frame);
+    // An object's `__dict__` holds its attributes outside it.
+    const { locals } = this.runtime.finalizer;
+    if (locals.marking && expression.name === '__dict__') locals.escape(object);
+    return getAttribute(object, expression.name);
+  }
+
+  private subscript(expression: Extract<Expression, { kind: 'subscript' }>, frame: Frame): PyValue {
+    const object = this.evaluateValue(expression.object, frame);
+    const item = this.hold(frame, object, () => getItem(object, this.evaluateValue(expression.index, frame)));
+    // A slice copies items into a new container, which is not local.
+    const { locals } = this.runtime.finalizer;
+    if (locals.marking && expression.index.kind === 'slice') locals.escapeItems(item);
+    return item;
+  }
+
+  private binary(expression: Extract<Expression, { kind: 'binary' }>, frame: Frame): PyValue {
+    const left = this.evaluateValue(expression.left, frame);
+    // Garbage collection only looks for objects among the values held.
+    if (typeof left !== 'object')
+      return binaryOp(expression.operator, left, this.evaluateValue(expression.right, frame));
+    const result = this.hold(frame, left, () =>
+      binaryOp(expression.operator, left, this.evaluateValue(expression.right, frame))
+    );
+    // Concatenating or repeating containers copies their items into a new one, which is not local.
+    const { locals } = this.runtime.finalizer;
+    if (locals.marking) locals.escapeItems(result);
+    return result;
+  }
+
   private display(expression: Extract<Expression, { kind: 'list' | 'tuple' | 'set' }>, frame: Frame): PyValue {
-    if (expression.kind === 'set') {
-      return this.withTemporaries(frame, () => this.newDisplay('set', this.elements(expression.elements, frame)));
-    }
-    return this.newDisplay(expression.kind, this.elements(expression.elements, frame));
+    const build = (): PyValue => {
+      const items = this.elements(expression.elements, frame);
+      const display = this.newDisplay(expression.kind, items);
+      const { locals } = this.runtime.finalizer;
+      if (locals.marking) locals.bornContainer(display, items);
+      return display;
+    };
+    return expression.kind === 'set' ? this.withTemporaries(frame, build) : build();
   }
 
   protected newDisplay(kind: 'list' | 'tuple' | 'set', items: PyValue[]): PyValue {
@@ -266,6 +307,8 @@ export class ExpressionEvaluator {
 
   storeName(ref: NameRef, value: PyValue, frame: Frame): void {
     const { finalizer } = this.runtime;
+    const { locals } = finalizer;
+    if (locals.marking && !locals.bindsLocally(frame, ref.access)) locals.escape(value);
     if (finalizer.pending.size === 0) {
       bindName(ref, value, frame);
       return;
@@ -333,19 +376,21 @@ export class ExpressionEvaluator {
       }
       case 'attribute': {
         this.hold(frame, value, () => {
-          const object = this.evaluate(target.object, frame);
+          const object = this.evaluateValue(target.object, frame);
           if (this.runtime.finalizer.pending.size === 0) setAttribute(object, target.name, value);
           else this.replacing(object, target.name, true, () => setAttribute(object, target.name, value));
+          this.stored(object, target.name, value, true);
         });
         return;
       }
       case 'subscript': {
         this.hold(frame, value, () => {
-          const object = this.evaluate(target.object, frame);
+          const object = this.evaluateValue(target.object, frame);
           this.hold(frame, object, () => {
-            const index = this.evaluate(target.index, frame);
+            const index = this.evaluateValue(target.index, frame);
             if (this.runtime.finalizer.pending.size === 0) setItem(object, index, value);
             else this.replacing(object, index, false, () => setItem(object, index, value));
+            this.stored(object, index, value, false);
           });
         });
         return;
@@ -359,11 +404,37 @@ export class ExpressionEvaluator {
     }
   }
 
+  /**
+   * Records that `object` now holds `value` under `key`: a local instance's attribute or a local container's item
+   * stays local in it, and anything else keeps the value, and the key, outside the frames.
+   */
+  protected stored(object: PyValue, key: PyValue, value: PyValue, isAttribute: boolean): void {
+    const { locals } = this.runtime.finalizer;
+    if (!locals.marking) return;
+    if (isAttribute) {
+      const kept = object instanceof PyInstance && locals.isLocal(object) && object.dict.get(key as string) === value;
+      if (kept) locals.own(value, object);
+      else locals.escape(value);
+      return;
+    }
+    if ((object instanceof PyList || object instanceof PyDict) && object.cls.isBuiltin && locals.isLocal(object)) {
+      locals.own(value, object);
+      locals.own(key, object);
+    } else {
+      locals.escape(value);
+      locals.escape(key);
+    }
+  }
+
   /** The items a target list unpacks a value into. */
   protected unpackTarget(target: Extract<Target, { kind: 'unpack' }>, value: PyValue): PyValue[] {
-    return target.starIndex === undefined
-      ? unpack(value, target.elements.length)
-      : this.unpackStarred(value, target.starIndex, target.elements.length - target.starIndex - 1);
+    const { starIndex } = target;
+    if (starIndex === undefined) return unpack(value, target.elements.length);
+    const items = this.unpackStarred(value, starIndex, target.elements.length - starIndex - 1);
+    // A starred target gets a new list of the items it collects.
+    const { locals } = this.runtime.finalizer;
+    if (locals.marking) locals.escapeItems(items[starIndex] as PyValue);
+    return items;
   }
 
   /** The items a target list with a starred element unpacks a value into, the starred one taking a list of the rest. */
@@ -396,12 +467,12 @@ export class ExpressionEvaluator {
         return;
       }
       case 'attribute': {
-        const object = this.evaluate(target.object, frame);
+        const object = this.evaluateValue(target.object, frame);
         this.replacing(object, target.name, true, () => deleteAttribute(object, target.name));
         return;
       }
       case 'subscript': {
-        const object = this.evaluate(target.object, frame);
+        const object = this.evaluateValue(target.object, frame);
         const index = this.evaluate(target.index, frame);
         this.replacing(object, index, false, () => deleteItem(object, index));
         return;
@@ -455,8 +526,10 @@ export class ExpressionEvaluator {
     const length = temporaries.length;
     try {
       for (const element of elements) {
-        const isStarred = element.kind === 'starred';
-        addElement(items, frame, isStarred, this.evaluate(isStarred ? element.value : element, frame));
+        // The display keeps its elements, which stay local in it; a starred one is a container it copies.
+        const value =
+          element.kind === 'starred' ? this.evaluate(element.value, frame) : this.evaluateValue(element, frame);
+        addElement(items, frame, element.kind === 'starred', value);
       }
     } finally {
       temporaries.length = length;
@@ -474,12 +547,14 @@ export class ExpressionEvaluator {
           mergeMapping(dict, this.evaluate(item.value, frame));
           continue;
         }
-        const key = this.evaluate(item.key, frame);
+        const key = this.evaluateValue(item.key, frame);
         frame.temporaries.push(key);
-        const value = this.evaluate(item.value, frame);
+        const value = this.evaluateValue(item.value, frame);
         dict.store.set(key, value);
       }
       this.runtime.allocate(dict.store.size + 1);
+      const { locals } = this.runtime.finalizer;
+      if (locals.marking) locals.bornContainer(dict, referencesOf(dict) as PyValue[]);
       return dict;
     });
   }
@@ -515,21 +590,30 @@ export class ExpressionEvaluator {
   protected call(
     expression: Extract<Expression, { kind: 'call' }>,
     frame: Frame,
-    callee = this.evaluate(expression.callee, frame)
+    callee = this.evaluateValue(expression.callee, frame)
   ): PyValue {
     const { temporaries } = frame;
     const length = temporaries.length;
     temporaries.push(callee);
     let args: PyValue[];
+    let kwargs: Kwargs;
     let result: PyValue;
     try {
       const collected = this.arguments(expression.args, frame, callee);
       args = collected.args;
+      kwargs = collected.kwargs;
       const { finalizer } = this.runtime;
+      if (finalizer.locals.marking) finalizer.locals.beforeCall(callee);
       const owner = finalizer.pending.size > 0 ? builtinMethodOwner(callee) : undefined;
       if (owner !== undefined) {
         // A method of a list, dict, set, or deque frees the items it removes, such as `clear` does.
-        result = finalizer.mutating(owner, () => this.invoke(callee, args, collected.kwargs, expression.row), args);
+        const method = { name: callee instanceof PyBuiltinFunction ? callee.name : '', key: args[0] };
+        result = finalizer.mutating(
+          owner,
+          () => this.invoke(callee, args, collected.kwargs, expression.row),
+          args,
+          method
+        );
       } else {
         // CPython's caller hands its references to the arguments to a Python function's frame.
         if (finalizer.pending.size > 0 && passesArguments(callee)) temporaries.length = length + 1;
@@ -538,6 +622,8 @@ export class ExpressionEvaluator {
     } finally {
       temporaries.length = length;
     }
+    const { locals } = this.runtime.finalizer;
+    if (locals.marking) locals.afterCall(callee, args, kwargs, result);
     this.afterCall(args, result);
     return result;
   }
@@ -553,6 +639,8 @@ export class ExpressionEvaluator {
     const { runtime } = this;
     const outerRow = runtime.currentRow;
     runtime.currentRow = row;
+    const { locals } = runtime.finalizer;
+    if (locals.marking) locals.noteCall(callee);
     try {
       return callValue(callee, args, kwargs);
     } finally {
@@ -566,8 +654,12 @@ export class ExpressionEvaluator {
    */
   arguments(argumentList: Argument[], frame: Frame, callee: PyValue, leading = 0): CallArguments {
     const collected: CallArguments = { args: [], kwargs: undefined };
+    const { locals } = this.runtime.finalizer;
+    // Arguments that only a Python function's frame or a local container keeps stay local; spread ones are copied.
+    const keeps = locals.marking && locals.keepsArgumentsLocal(callee);
     for (const argument of argumentList) {
-      const value = this.evaluate(argument.value, frame);
+      const local = keeps && (argument.kind === 'positional' || argument.kind === 'keyword');
+      const value = local ? this.evaluateValue(argument.value, frame) : this.evaluate(argument.value, frame);
       if (argument.kind === 'positional') {
         collected.args.push(value);
         frame.temporaries.push(value);
@@ -579,10 +671,10 @@ export class ExpressionEvaluator {
   }
 
   private compare(expression: Extract<Expression, { kind: 'compare' }>, frame: Frame): PyValue {
-    let left = this.evaluate(expression.operands[0], frame);
+    let left = this.evaluateValue(expression.operands[0], frame);
     let result: PyValue = true;
     for (const [index, operator] of expression.operators.entries()) {
-      const right = this.hold(frame, left, () => this.evaluate(expression.operands[index + 1], frame));
+      const right = this.hold(frame, left, () => this.evaluateValue(expression.operands[index + 1], frame));
       result = this.hold(frame, right, () => compareOp(operator, left, right));
       if (index < expression.operators.length - 1 && !isTruthy(result)) return result;
       left = right;
@@ -645,11 +737,15 @@ export class ExpressionEvaluator {
   // Comprehensions --------------------------------------------------------------------------------------------------
 
   /** Runs a comprehension, whose first iterable `first` the enclosing frame evaluated. */
-  // code-gauge-allow functionNcss 38 -- Follows how CPython runs each kind of comprehension in its own scope.
+  // code-gauge-allow functionNcss 45 -- Follows how CPython runs each kind of comprehension in its own scope.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Follows how CPython runs each kind of comprehension in its own scope.
   protected comprehension(
     expression: Extract<Expression, { kind: 'comprehension' }>,
     frame: Frame,
-    first = this.evaluate(expression.generators[0].iterable, frame)
+    // A generator expression keeps its first iterable; the other comprehensions only read it.
+    first = expression.type === 'generator'
+      ? this.evaluate(expression.generators[0].iterable, frame)
+      : this.evaluateValue(expression.generators[0].iterable, frame)
   ): PyValue {
     const { runtime } = this;
     const inner = this.comprehensionFrame(expression, frame);
@@ -669,6 +765,8 @@ export class ExpressionEvaluator {
             throw error;
           } finally {
             runtime.popFrame();
+            // The generator keeps its frame off the stack.
+            if (runtime.finalizer.locals.marking) runtime.finalizer.locals.escapeFrame(inner);
           }
         },
         () => [first, ...inner.locals.values(), ...inner.temporaries]
@@ -681,11 +779,13 @@ export class ExpressionEvaluator {
     runtime.pushFrame(inner);
     try {
       inner.temporaries.push(first);
+      const { locals } = runtime.finalizer;
       if (expression.type === 'dict') {
         const dict = newDict();
         inner.temporaries.push(dict);
         const items = this.comprehensionItems(expression, inner, next, (key, value) => dict.store.set(key, value));
         while (!items.next().done);
+        if (locals.marking) locals.bornContainer(dict, referencesOf(dict) as PyValue[]);
         return dict;
       }
       const items: PyValue[] = [];
@@ -696,6 +796,8 @@ export class ExpressionEvaluator {
         if (container instanceof PyList) items.push(item);
         else container.table.add(item);
       }
+      if (locals.marking)
+        locals.bornContainer(container, items.length > 0 ? items : (referencesOf(container) as PyValue[]));
       return container;
     } finally {
       runtime.popFrame();
@@ -761,15 +863,18 @@ export class ExpressionEvaluator {
           }
           continue;
         }
+        // A list, set, or dict comprehension keeps its elements in the container it builds, where they stay local.
         if (store) {
-          const key = this.evaluate(expression.element, frame);
+          const key = this.evaluateValue(expression.element, frame);
           store(
             key,
-            this.hold(frame, key, () => this.evaluate(expression.value as Expression, frame))
+            this.hold(frame, key, () => this.evaluateValue(expression.value as Expression, frame))
           );
           continue;
         }
-        yield this.evaluate(expression.element, frame);
+        yield expression.type === 'generator'
+          ? this.evaluate(expression.element, frame)
+          : this.evaluateValue(expression.element, frame);
       }
       return undefined;
     };

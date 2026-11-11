@@ -50,6 +50,7 @@ export interface PythonRun extends ProgramRun {
 export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Frame) => void): PythonRun {
   return withRuntime(runtime, () => {
     const globals = mainGlobals(runtime, module);
+    runtime.mainGlobals = globals;
     recordFutureFeatures(globals, module.futureFeatures);
     if (module.source !== undefined) runtime.program = programSourceOf(module, module.source);
     runtime.deepNesting = (module.nestingDepth ?? 0) > SAFE_NESTING_DEPTH;

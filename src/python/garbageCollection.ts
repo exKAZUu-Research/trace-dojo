@@ -17,6 +17,7 @@ import {
   PyObject,
   PyOpaque,
   PySet,
+  PySuper,
   PyTuple,
 } from './values';
 
@@ -212,8 +213,8 @@ function walk(
 }
 
 /** Pushes what an object refers to, returning the number of elements among them. */
-// code-gauge-allow functionNcss 46 -- One case per kind of object that refers to others.
-// code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of object that refers to others.
+// code-gauge-allow functionNcss 49 -- One case per kind of object that refers to others.
+// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of object that refers to others.
 function pushReferences(pending: unknown[], object: PyObject, reached: Set<TurtleState>): number {
   if (object instanceof PyList || object instanceof PyTuple || object instanceof PyDeque) {
     pushAll(pending, object.items);
@@ -247,6 +248,7 @@ function pushReferences(pending: unknown[], object: PyObject, reached: Set<Turtl
   }
   if (object instanceof PyClass || object instanceof PyModule) return pushNamespaceReferences(pending, object);
   if (object instanceof PyBoundMethod) pending.push(object.self, object.fn);
+  else if (object instanceof PySuper) pending.push(object.self, object.thisClass);
   else if (object instanceof PyDescriptor) pending.push(object.fn, object.setter, object.deleter);
   else if (object instanceof PyDictView) pending.push(object.dict);
   else if (object instanceof PyMemoryView) pending.push(object.source);

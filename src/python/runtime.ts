@@ -84,6 +84,8 @@ export class Runtime {
   program?: ProgramSource;
   /** The scheduler of the program's threads, once it starts one or waits. */
   threads?: Scheduler;
+  /** The program's module variables, which the bottom frame of the main thread holds. */
+  mainGlobals?: Map<string, PyValue>;
   /**
    * Whether the program nests expressions or statements so deeply that evaluating them may exhaust the host's stack
    * where CPython's does not, which then stops the program instead of raising RecursionError.
@@ -251,22 +253,29 @@ export class Runtime {
   }
 
   callFunction(fn: PyFunction, args: readonly PyValue[], kwargs: Kwargs): PyValue {
+    const { locals } = this.finalizer;
+    const direct = locals.takeDirectCall();
     const frame = this.newFunctionFrame(fn, args, kwargs);
     // The compiler's `__annotate__` binds its arguments as a Python function and runs its body natively.
     if (fn instanceof PyAnnotateFunction) return fn.run(frame.locals.get('format') as PyValue);
     const { scope } = fn.def;
     if (scope.isGenerator || scope.isAsync) return this.newGenerator(fn, frame);
+    locals.enterFunction(frame);
     this.pushFrame(frame);
     let result: PyValue | undefined;
     try {
       result = this.evaluator.runFunction(fn, frame);
+      locals.returned(result, direct);
       return result;
     } catch (error) {
       const raised = recursionErrorFor(error, this.deepNesting);
       noteUnwinding(raised);
       // The exception's traceback keeps the frame, and with it the function's variables, while a generator may close.
       const state = raised instanceof PyError ? raised.exception.exception : undefined;
-      if (state && this.finalizer.pending.size > 0) (state.tracebackFrames ??= []).push(frame);
+      if (state && this.finalizer.pending.size > 0) {
+        (state.tracebackFrames ??= []).push(frame);
+        locals.escapeFrame(frame);
+      }
       throw raised;
     } finally {
       this.popFrame();
@@ -290,6 +299,7 @@ export class Runtime {
       this.evaluator.runGenerator(fn, frame)
     );
     if (!scope.isAsync) markIterableCoroutine(generator, fn);
+    this.finalizer.locals.generatorCreated(generator, frame);
     return generator;
   }
 

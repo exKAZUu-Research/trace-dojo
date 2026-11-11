@@ -7,6 +7,7 @@ import {
   referencesOf,
 } from './garbageCollection';
 import { closeGenerator } from './generators';
+import { LocalReferences } from './localReferences';
 import { bindValue, callValue } from './objects';
 import type { Runtime } from './runtime';
 import { asyncGeneratorClass, None } from './types';
@@ -26,7 +27,7 @@ import {
   PySet,
   type PyValue,
 } from './values';
-import { runCallbacksOf } from './weakReferences';
+import { hasWeakCallbacks, runCallbacksOf } from './weakReferences';
 
 /**
  * How many slots a program may allocate after objects with `__del__` became garbage that only a reference cycle keeps,
@@ -34,6 +35,43 @@ import { runCallbacksOf } from './weakReferences';
  * might have finalized them at a time this grader cannot tell.
  */
 const CYCLIC_GARBAGE_ALLOCATIONS = 50;
+
+/** The methods of a list, dict, set, or deque that remove none of its items, but the one they return. */
+const KEEPING_ITEMS = new Set([
+  '__contains__',
+  '__getitem__',
+  '__len__',
+  'add',
+  'append',
+  'appendleft',
+  'copy',
+  'count',
+  'difference',
+  'extend',
+  'extendleft',
+  'get',
+  'index',
+  'insert',
+  'intersection',
+  'isdisjoint',
+  'issubset',
+  'issuperset',
+  'items',
+  'keys',
+  'popitem',
+  'popleft',
+  'reverse',
+  'setdefault',
+  'symmetric_difference',
+  'union',
+  'values',
+]);
+
+function keepsItsItems(name: string, key: PyValue | undefined): boolean {
+  // `pop` removes what it returns, and a dict's also the stored key, which is the one given unless it is an object.
+  if (name === 'pop') return !(key instanceof PyObject) || key === None;
+  return KEEPING_ITEMS.has(name);
+}
 
 function isContainer(value: PyValue): value is PyList | PyDict | PySet | PyDeque {
   return value instanceof PyList || value instanceof PyDict || value instanceof PySet || value instanceof PyDeque;
@@ -65,13 +103,24 @@ export class GeneratorFinalizer {
   /** The cyclic garbage with `__del__` found since the last collection, which a collection finalizes. */
   private cyclicGarbage = false;
 
-  constructor(private readonly runtime: Runtime) {}
+  /** The objects only the running frames refer to, whose freeing needs no walk over the program's objects. */
+  readonly locals: LocalReferences;
+
+  constructor(private readonly runtime: Runtime) {
+    this.locals = new LocalReferences(runtime);
+  }
 
   /** Tracks a generator after it ran, depending on whether it suspended inside a `try` or `with` statement. */
   update(generator: PyGenerator, frame: Frame, finished: boolean): void {
+    // A generator's frame leaves the stack while the generator keeps it: what it holds is no longer local.
+    if (this.locals.marking) this.locals.escapeFrame(frame);
     // An async generator with a finalizer from the hooks calls it when unfinished, wherever it suspended.
-    if (!finished && (frame.protectedDepth > 0 || hasAsyncGeneratorFinalizer(generator))) this.pending.add(generator);
-    else this.pending.delete(generator);
+    if (!finished && (frame.protectedDepth > 0 || hasAsyncGeneratorFinalizer(generator))) {
+      this.pending.add(generator);
+      this.locals.marking = true;
+    } else {
+      this.pending.delete(generator);
+    }
   }
 
   /** The objects being finalized, which stay alive until their finalization ends. */
@@ -82,6 +131,7 @@ export class GeneratorFinalizer {
   /** Tracks a new instance of a class that defines `__del__`. */
   track(instance: PyObject): void {
     this.pending.add(instance);
+    this.locals.born(instance);
   }
 
   /**
@@ -96,21 +146,48 @@ export class GeneratorFinalizer {
     const held = [...inFlight, ...this.freeing.flatMap((set) => [...set])];
     // What the program refers to directly is kept, and with it all it reaches, so the walk stops there.
     const order = findReachableInOrder(objects, this.keptObjects(held));
-    const fromDropped = new Set(order);
-    const candidates = new Set([...this.pending].filter((object) => fromDropped.has(object)));
+    const candidates = new Set(order.filter((object) => this.pending.has(object as PyObject)));
     if (candidates.size === 0) return;
+    const garbage = this.localGarbage(order, candidates, held) ?? this.walkedGarbage(order, candidates, held);
+    if (garbage.size > 0) this.free(garbage, objects);
+  }
+
+  /**
+   * The garbage among `order` when every tracked object there is local: the local objects nothing running refers to.
+   * Undefined when that does not tell, which a walk over everything the program reaches then decides.
+   */
+  private localGarbage(order: object[], candidates: Set<object>, held: unknown[]): Set<object> | undefined {
+    const { locals } = this;
+    if (![...candidates].every((object) => locals.isLocal(object))) return undefined;
+    // Freeing an object that is not local calls the callbacks of its weak references, which only a walk tells.
+    if (hasWeakCallbacks(this.runtime) && !order.every((object) => locals.isLocalOrBound(object))) return undefined;
+    const local = order.filter((object) => locals.isLocalOrBound(object));
+    const alive = locals.aliveAmong(local, held);
+    if ([...candidates].every((object) => alive.has(object))) return new Set();
+    return new Set(local.filter((object) => !alive.has(object)));
+  }
+
+  /** The garbage among `order`, which a walk from what the program refers to directly does not reach. */
+  private walkedGarbage(order: object[], candidates: Set<object>, held: unknown[]): Set<object> {
     // The walk stops once it reaches every candidate, which then stays alive: nothing is freed.
     const reachable = findReachableObjects(this.roots(held), candidates);
-    if ([...candidates].every((object) => reachable.has(object))) return;
-    this.free(new Set(order.filter((object) => !reachable.has(object))), objects);
+    if ([...candidates].every((object) => reachable.has(object))) return new Set();
+    return new Set(order.filter((object) => !reachable.has(object)));
   }
 
   /**
    * Runs `change`, which may remove items from `container`, a list, dict, set, or deque, and then frees what the
    * removed items alone kept, as CPython's container does: a list's from its last item, the others' in their order.
    */
-  mutating<T>(container: PyValue, change: () => T, inFlight: unknown[] = []): T {
+  mutating<T>(
+    container: PyValue,
+    change: () => T,
+    inFlight: unknown[] = [],
+    method?: { name: string; key?: PyValue }
+  ): T {
     if (this.pending.size === 0 || !isContainer(container)) return change();
+    // A method that removes nothing, or only what it returns, which the caller then drops, needs no comparison.
+    if (method && keepsItsItems(method.name, method.key)) return change();
     const before = referencesOf(container);
     // A method such as `sort` holds the items while it calls the program's functions, though the list may not.
     this.freeing.push(new Set(before));
@@ -247,6 +324,10 @@ export class GeneratorFinalizer {
     if (this.finalized.has(object)) return true;
     this.finalized.add(object);
     this.callDel(object);
+    if (this.locals.isLocal(object)) {
+      const held = this.freeing.filter((set) => set !== garbage).flatMap((set) => [...set]);
+      return !this.locals.aliveAmong([object], held).has(object);
+    }
     return !findReachableObjects(this.roots([], garbage), new Set([object])).has(object);
   }
 

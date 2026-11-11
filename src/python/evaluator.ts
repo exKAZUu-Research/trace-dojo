@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 894 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss 910 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import { newAnnotate, recordAnnotation } from './annotations';
 import type {
   ClassDef,
@@ -38,7 +38,7 @@ import {
 } from './objects';
 import { equals, inplaceOp, isSame } from './operators';
 import type { Runtime } from './runtime';
-// code-gauge-allow-file fileNcss 894 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss 910 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import type { Suspension } from './suspendingEvaluator';
 import { targetSuspends } from './suspension';
 import { iterateSuspending, type SuspendingNext } from './threadIteration';
@@ -91,7 +91,7 @@ export class Evaluator extends AsyncEvaluator {
 
   runFunction(fn: PyFunction, frame: Frame): PyValue {
     const { body } = fn.def;
-    if (!Array.isArray(body)) return this.evaluate(body, frame);
+    if (!Array.isArray(body)) return this.evaluateValue(body, frame);
     const completion = runToEnd(this.block(body, frame));
     return typeof completion === 'object' ? completion.value : None;
   }
@@ -181,7 +181,7 @@ export class Evaluator extends AsyncEvaluator {
         return statement.kind;
       }
       case 'return': {
-        return { value: statement.value ? this.evaluate(statement.value, frame) : None };
+        return { value: statement.value ? this.returnedValue(statement.value, frame) : None };
       }
       case 'raise': {
         const exception = statement.exception ? this.evaluate(statement.exception, frame) : undefined;
@@ -216,14 +216,25 @@ export class Evaluator extends AsyncEvaluator {
     }
   }
 
+  /** Evaluates a returned value, which a function hands to its caller, and a generator to whatever resumed it. */
+  private returnedValue(expression: Expression, frame: Frame): PyValue {
+    const { scope } = frame;
+    return scope.isGenerator || scope.isAsync
+      ? this.evaluate(expression, frame)
+      : this.evaluateValue(expression, frame);
+  }
+
   /** Evaluates an expression statement, handing its value to sys.displayhook in compile()'s 'single' mode. */
   private expressionStatement(statement: Extract<Statement, { kind: 'expression' }>, frame: Frame): void {
     const { runtime } = this;
     const { expression } = statement;
     const result = runtime.steps.runStatement(statement.stepRow, expression.kind === 'call', () =>
-      this.evaluate(expression, frame)
+      this.evaluateValue(expression, frame)
     );
-    if (statement.displays) callValue(getAttribute(runtime.importModule('sys'), 'displayhook'), [result]);
+    if (statement.displays) {
+      runtime.finalizer.locals.escape(result);
+      callValue(getAttribute(runtime.importModule('sys'), 'displayhook'), [result]);
+    }
     // The statement drops its value, which closes a generator that only the value held.
     if (runtime.finalizer.pending.size > 0) this.release(result);
   }
@@ -298,7 +309,7 @@ export class Evaluator extends AsyncEvaluator {
   /** Evaluates an assignment's value, telling whether it only creates objects, whose constructors' steps show it. */
   private evaluateCreation(expression: Expression, frame: Frame): [PyValue, boolean] {
     if (expression.kind === 'call') {
-      const callee = this.evaluate(expression.callee, frame);
+      const callee = this.evaluateValue(expression.callee, frame);
       return [this.call(expression, frame, callee), callee instanceof PyClass];
     }
     if (
@@ -318,15 +329,23 @@ export class Evaluator extends AsyncEvaluator {
             frame.temporaries.push(item);
           }
           this.runtime.allocate(items.length + 1);
+          for (const item of items) this.runtime.finalizer.locals.escape(item);
           return [expression.kind === 'list' ? newList(items) : newTuple(items), created];
         } finally {
           frame.temporaries.length = length;
         }
       }
     }
-    return [this.evaluate(expression, frame), false];
+    return [this.evaluateValue(expression, frame), false];
   }
 
+  /** Hands on the items an augmented assignment copied into a new container, as `items += (x,)` on a tuple does. */
+  private copiedBy(current: PyValue, result: PyValue): void {
+    const { locals } = this.runtime.finalizer;
+    if (locals.marking && result !== current) locals.escapeItems(result);
+  }
+
+  // code-gauge-allow functionNcss 31 -- One case per kind of target, each storing where the target keeps it.
   private augmentedAssign(statement: Extract<Statement, { kind: 'augmentedAssign' }>, frame: Frame): void {
     const { target, operator } = statement;
     switch (target.kind) {
@@ -334,31 +353,33 @@ export class Evaluator extends AsyncEvaluator {
         const current = this.loadName(target, frame);
         const value = this.evaluate(statement.value, frame);
         // `items *= 0` frees the items a list drops.
-        this.storeName(
-          target,
-          this.runtime.finalizer.mutating(current, () => inplaceOp(operator, current, value), [value]),
-          frame
-        );
+        const result = this.runtime.finalizer.mutating(current, () => inplaceOp(operator, current, value), [value]);
+        this.copiedBy(current, result);
+        this.storeName(target, result, frame);
         return;
       }
       case 'attribute': {
-        const object = this.evaluate(target.object, frame);
+        const object = this.evaluateValue(target.object, frame);
         this.hold(frame, object, () => {
           const current = getAttribute(object, target.name);
           const result = inplaceOp(operator, current, this.evaluate(statement.value, frame));
+          this.copiedBy(current, result);
           setAttribute(object, target.name, result);
+          this.stored(object, target.name, result, true);
         });
         return;
       }
       case 'subscript': {
-        const object = this.evaluate(target.object, frame);
+        const object = this.evaluateValue(target.object, frame);
         this.hold(frame, object, () => {
-          const index = this.evaluate(target.index, frame);
+          const index = this.evaluateValue(target.index, frame);
           const current = getItem(object, index);
           const result = this.hold(frame, index, () =>
             inplaceOp(operator, current, this.evaluate(statement.value, frame))
           );
+          this.copiedBy(current, result);
           setItem(object, index, result);
+          this.stored(object, index, result, false);
         });
         return;
       }
@@ -394,12 +415,14 @@ export class Evaluator extends AsyncEvaluator {
     switch (statement.kind) {
       case 'if': {
         const { test } = statement;
-        const value = test.suspends ? yield* this.evaluateSuspending(test, frame) : this.evaluate(test, frame);
+        const value = test.suspends ? yield* this.evaluateSuspending(test, frame) : this.evaluateValue(test, frame);
         return yield* this.block(isTruthy(value) ? statement.body : statement.orelse, frame);
       }
       case 'while': {
         const { test } = statement;
-        while (isTruthy(test.suspends ? yield* this.evaluateSuspending(test, frame) : this.evaluate(test, frame))) {
+        while (
+          isTruthy(test.suspends ? yield* this.evaluateSuspending(test, frame) : this.evaluateValue(test, frame))
+        ) {
           runtime.spend();
           if (runtime.threads?.shouldPreempt()) yield PREEMPTION as unknown as PyValue;
           const completion = yield* this.block(statement.body, frame);
@@ -468,9 +491,10 @@ export class Evaluator extends AsyncEvaluator {
   private *forStatement(statement: Extract<Statement, { kind: 'for' }>, frame: Frame): Execution {
     const { runtime } = this;
     const { target } = statement;
+    // The loop holds its iterable among the frame's values, and its iterator only reads it.
     const iterable = statement.iterable.suspends
       ? yield* this.evaluateSuspending(statement.iterable, frame)
-      : this.evaluate(statement.iterable, frame);
+      : this.evaluateValue(statement.iterable, frame);
     const suspendingTarget = targetSuspends(target);
     const length = frame.temporaries.length;
     frame.temporaries.push(iterable);

@@ -94,6 +94,8 @@ const frameObjects = new WeakMap<Frame, PyOpaque>();
 
 /** The frame object of a frame, the same each time, as CPython keeps one per running frame. */
 export function frameObject(frame: Frame): PyOpaque {
+  // The program can now read the frames' variables as objects.
+  currentRuntime().finalizer.locals.expose();
   let object = frameObjects.get(frame);
   if (!object) {
     object = new PyOpaque(frameClass, '', frame);

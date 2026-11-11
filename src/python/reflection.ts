@@ -16,6 +16,8 @@ export function callerGlobals(): PyDict {
  * shares; a function's is a new snapshot on each call, as PEP 667 specifies.
  */
 export function callerLocals(): PyDict {
+  // The program can now read the frames' variables as objects.
+  currentRuntime().finalizer.locals.expose();
   const frames = programFrames();
   const frame = frames.at(-1) as Frame;
   if (frame.kind === 'module' || frame.kind === 'class') return namespaceDict(frame.locals);
