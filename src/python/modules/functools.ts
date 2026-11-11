@@ -125,6 +125,11 @@ const cacheClass = builtinClass('_lru_cache_wrapper');
 cacheClass.module = 'functools';
 builtinClassesWithDict.add(cacheClass);
 builtinDescriptorClasses.add(cacheClass);
+// `_lru_cache_wrapper(user_function, maxsize, typed, _CacheInfo)`, the type of the functions lru_cache wraps.
+cacheClass.construct = (_cls, args, kwargs) => {
+  checkArgs({ qualified: '_lru_cache_wrapper', min: 4, max: 4, style: 'expected' }, args, kwargs);
+  return lruCacheWrapper(args);
+};
 defineProperty(cacheClass, '__dict__', (self) => namespaceDict(ownDict(self) as Map<string, PyValue>));
 interface Cache {
   fn: PyValue;
@@ -1466,7 +1471,7 @@ registerModule(
       ['Placeholder', Placeholder],
       ['_PlaceholderType', placeholderClass],
       ['cmp_to_key', builtin('cmp_to_key', 'one', 1, 1, cmpToKey)],
-      ['_lru_cache_wrapper', builtin('_lru_cache_wrapper', 'expected', 4, 4, lruCacheWrapper)],
+      ['_lru_cache_wrapper', cacheClass],
     ])
 );
 registerSourceModule('functools', SOURCE);

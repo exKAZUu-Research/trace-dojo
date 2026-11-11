@@ -164,6 +164,7 @@ import './modules/symtable';
 import './modules/unittest/unittest';
 import './modules/zipfile/zipfile';
 import './richComparisons';
+import './functionType';
 import './builtinSlots';
 
 import { convertBuiltinAttributes } from './builtinAttributeKinds';

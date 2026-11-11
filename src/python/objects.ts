@@ -216,7 +216,7 @@ function findAttribute(value: PyValue, name: string): PyValue | undefined {
   if (attribute instanceof PyAttribute) {
     // A descriptor standing for what this grader's objects keep natively finds nothing where they keep nothing.
     if (!attribute.stands) return attribute.get(value);
-    return ownDict(value)?.get(name) ?? typeDocOf(cls, name);
+    return ownDict(value)?.get(name) ?? attribute.fallback ?? typeDocOf(cls, name);
   }
   if (attribute instanceof PyDescriptor && attribute.cls === propertyClass) return bindValue(attribute, value, cls);
   const getter = descriptorGetter(attribute);
@@ -243,7 +243,13 @@ function moduleAttribute(module: PyModule, name: string): PyValue | undefined {
   // A special name the module lacks is one its module object lacks, which programs and pydoc look for.
   if (value === undefined && module.partialFeature !== undefined && !/^__\w+__$/.test(name))
     throw new UnsupportedFeatureError(module.partialFeature);
-  return value;
+  return value ?? moduleTypeAttribute(module, name);
+}
+
+/** An attribute of the module type, as `__getattribute__` or `__repr__`, bound to the module. */
+function moduleTypeAttribute(module: PyModule, name: string): PyValue | undefined {
+  const attribute = name.startsWith('__') ? module.cls.lookup(name) : undefined;
+  return attribute instanceof PyBuiltinFunction ? bindValue(attribute, module, module.cls) : undefined;
 }
 
 /**

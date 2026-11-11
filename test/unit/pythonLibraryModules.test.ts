@@ -200,3 +200,23 @@ c = C(5); assert (next(c), next(c)) == (5, 6) and isinstance(c, itertools.count)
 assert format(1j, '>4') == '  1j' and format(1+2j, '.2f') == '1.00+2.00j' and f'{-1.5-0.25j:^14}' == ' (-1.5-0.25j) '
 `);
 });
+
+test('subclasses of builtin types dispatch to their overrides, and library classes are the ones CPython has', () => {
+  expectSameAsCPython(String.raw`import io, pickle, functools, asyncio, types
+closed = []
+class S(io.StringIO):
+    def close(self):
+        closed.append(True)
+        super().close()
+with S('a\nb') as s:
+    assert list(s) == ['a\n', 'b']
+assert closed == [True] and s.closed
+class Sup(super): pass
+assert type(Sup(int, 1)).__name__ == 'Sup'
+assert pickle._Pickler is not pickle.Pickler and pickle.Pickler.__module__ == '_pickle'
+assert isinstance(functools._lru_cache_wrapper, type) and asyncio.AbstractEventLoop.__module__ == 'asyncio.events'
+def f(a, b=2): return a + b
+g = types.FunctionType(f.__code__, {}, 'g', (5,))
+assert (g(1), g.__name__) == (6, 'g') and '__doc__' in object.__dict__ and '__doc__' in int.__dict__
+`);
+});

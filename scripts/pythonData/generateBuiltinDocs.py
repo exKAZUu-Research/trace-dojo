@@ -92,7 +92,7 @@ def add_class(entries, key, cls):
 
 
 def class_layout(cls):
-    return ' '.join(sorted(f'{name}:{type(value).__name__}' for name, value in cls.__dict__.items() if name != '__doc__'))
+    return ' '.join(sorted(f'{name}:{type(value).__name__}' for name, value in cls.__dict__.items()))
 
 
 def builtin_types():
