@@ -11,7 +11,9 @@ import type { PyValue } from '../values';
 // a traceback anywhere but to stderr, since tracebacks name the program's file.
 const SOURCE = String.raw`
 import sys
+import threading
 import time
+import weakref
 
 __all__ = ['BASIC_FORMAT', 'CRITICAL', 'DEBUG', 'ERROR',
            'FATAL', 'Filter', 'Formatter', 'Handler', 'INFO',
@@ -370,7 +372,23 @@ class Filterer(object):
         return record
 
 
+_lock = threading.RLock()
+
+
+def _prepareFork():
+    _lock.acquire()
+
+
+def _afterFork():
+    _lock.release()
+
+
 _handlers = {}
+_handlerList = []
+
+
+def _addHandlerRef(handler):
+    _handlerList.append(weakref.ref(handler))
 
 
 def getHandlerByName(name):
@@ -388,6 +406,8 @@ class Handler(Filterer):
         self.level = _checkLevel(level)
         self.formatter = None
         self._closed = False
+        _addHandlerRef(self)
+        self.createLock()
 
     def get_name(self):
         return self._name
@@ -402,13 +422,15 @@ class Handler(Filterer):
     name = property(get_name, set_name)
 
     def createLock(self):
-        self.lock = None
+        self.lock = threading.RLock()
 
     def acquire(self):
-        pass
+        if self.lock:
+            self.lock.acquire()
 
     def release(self):
-        pass
+        if self.lock:
+            self.lock.release()
 
     def setLevel(self, level):
         self.level = _checkLevel(level)
@@ -930,9 +952,55 @@ def disable(level=CRITICAL):
     root.manager.disable = level
 
 
-def shutdown(handlerList=None):
-    for h in list(_handlers.values()):
-        h.flush()
+_warnings_showwarning = None
+
+
+def _showwarning(message, category, filename, lineno, file=None, line=None):
+    if file is not None:
+        if _warnings_showwarning is not None:
+            _warnings_showwarning(message, category, filename, lineno, file, line)
+    else:
+        logger = getLogger("py.warnings")
+        if not logger.handlers:
+            logger.addHandler(NullHandler())
+        # The message, warnings.formatwarning() of the warning, starts with the path of the program's file.
+        logger.warning(_MachineValue('py.warnings のメッセージ（プログラムのファイルのパスを含む）'))
+
+
+def captureWarnings(capture):
+    global _warnings_showwarning
+    import warnings
+    if capture:
+        if _warnings_showwarning is None:
+            _warnings_showwarning = warnings.showwarning
+            warnings.showwarning = _showwarning
+    else:
+        if _warnings_showwarning is not None:
+            warnings.showwarning = _warnings_showwarning
+            _warnings_showwarning = None
+
+
+def shutdown(handlerList=_handlerList):
+    for wr in reversed(handlerList[:]):
+        try:
+            h = wr()
+            if h:
+                try:
+                    h.acquire()
+                    if getattr(h, 'flushOnClose', True):
+                        h.flush()
+                    h.close()
+                except (OSError, ValueError):
+                    pass
+                finally:
+                    h.release()
+        except:
+            if raiseExceptions:
+                raise
+
+
+import atexit
+atexit.register(shutdown)
 `;
 
 registerSourceModule(
@@ -961,7 +1029,4 @@ registerSourceModule(
 
 registerUnsupportedAttributes('logging', {
   FileHandler: 'ファイルに書くログ（logging.FileHandler）',
-  captureWarnings: 'logging.captureWarnings()',
-  config: 'logging.config',
-  handlers: 'logging.handlers',
 });

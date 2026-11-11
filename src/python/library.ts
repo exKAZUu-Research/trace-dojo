@@ -68,6 +68,8 @@ import './modules/collectionsAbc';
 import './modules/warnings';
 import './modules/traceback';
 import './modules/logging';
+import './modules/loggingHandlers';
+import './modules/loggingConfig';
 import './modules/array';
 import './modules/thread';
 import './modules/threading';

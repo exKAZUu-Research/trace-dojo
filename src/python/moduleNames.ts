@@ -37,6 +37,8 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'json',
   'keyword',
   'logging',
+  'logging.config',
+  'logging.handlers',
   'math',
   'numbers',
   'operator',
