@@ -61,6 +61,8 @@ export abstract class ExpressionConverter {
   protected annotationContext: Context | undefined;
   /** The features the module's `from __future__ import` statements enable. */
   protected readonly futureFeatures = new Set<string>();
+  /** Whether the module may await, as code compiled with `ast.PyCF_ALLOW_TOP_LEVEL_AWAIT` may, making it a coroutine. */
+  protected allowsTopLevelAwait = false;
 
   constructor(
     protected readonly source: string,
@@ -381,6 +383,10 @@ export abstract class ExpressionConverter {
       scope.info.isAsync = true;
       if (scope.isGeneratorExpression) return;
       scope = scope.parent as ScopeBuilder;
+    }
+    if (scope.info.kind === 'module' && this.allowsTopLevelAwait) {
+      scope.info.isAsync = true;
+      return;
     }
     if (scope.info.kind !== 'function' || !scope.info.isAsync) fail(row, message);
   }

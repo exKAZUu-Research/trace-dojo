@@ -10,6 +10,7 @@ import { registerSourceModule } from '../sourceModules';
 import { PyClass, PyInstance, type PyValue } from '../values';
 import { AstBuilder, isInteractiveStatement } from './astBuilder';
 import { AST_NODES_SOURCE } from './astNodesSource';
+import { optimizeTree } from './astOptimizer';
 import { AST_SOURCE } from './astSource';
 import { AST_UNPARSE_SOURCE } from './astUnparseSource';
 
@@ -41,6 +42,7 @@ registerAstSupport({
       return new AstBuilder(source, classes, singletonsOf(runtime), syntaxError).module(root, mode);
     });
   },
+  optimize: (tree, level) => optimizeTree(tree, level, importModule(currentRuntime(), '_ast').dict),
   unparse: (tree) => callValue(importModule(currentRuntime(), 'ast').dict.get('unparse') as PyValue, [tree]) as string,
   isTree: (value) => {
     const base = currentRuntime().modules.get('_ast')?.dict.get('AST');

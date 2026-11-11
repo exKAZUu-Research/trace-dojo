@@ -390,6 +390,9 @@ function osErrorField(state: ExceptionState, name: string): PyValue | undefined 
 }
 
 function setFunctionAttribute(fn: PyFunction, name: string, value: PyValue): void {
+  if (name === '__globals__' || name === '__closure__' || name === '__builtins__') {
+    throw pyError('AttributeError', 'readonly attribute');
+  }
   if (name === '__annotations__' || name === '__annotate__') setFunctionAnnotationAttribute(fn, name, value);
   else if (name === '__name__' && typeof value === 'string') fn.name = value;
   else if (name === '__qualname__' && typeof value === 'string') fn.qualifiedName = value;

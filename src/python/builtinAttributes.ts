@@ -2,6 +2,7 @@ import { enumerateClass } from './builtins';
 import { method } from './define';
 import { sliceIndices } from './items';
 import { defineProperty } from './modules/numberSupport';
+import { namespaceDict } from './namespaces';
 import { exactBinary, scaleToFloat, toIndex } from './numbers';
 import { bindValue, callValue, getAttribute, setAttribute } from './objects';
 import { binaryOp } from './operators';
@@ -401,7 +402,7 @@ defineProperty(superClass, '__thisclass__', (self) => asSuper(self).thisClass);
 
 defineProperty(functionClass, '__closure__', (self) => closureOf(self as PyFunction));
 unsupportedProperty(functionClass, '__code__', '関数のコードオブジェクト（__code__）');
-unsupportedProperty(functionClass, '__globals__', '関数の __globals__（モジュールの名前空間そのもの）');
+defineProperty(functionClass, '__globals__', (self) => namespaceDict((self as PyFunction).globals));
 unsupportedProperty(functionClass, '__builtins__', '関数の __builtins__（組み込みの名前空間そのもの）');
 for (const cls of [functionClass, methodClass, builtinFunctionClass, methodDescriptorClass]) {
   method(

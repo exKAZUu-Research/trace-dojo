@@ -265,16 +265,42 @@ export class Runtime {
   }
 
   private newGenerator(fn: PyFunction, frame: Frame): PyGenerator {
-    const { evaluator } = this;
-    const body = evaluator.runGenerator(fn, frame);
-    // The exceptions the generator handles where it suspended, which its caller does not handle.
-    let handling: PyInstance[] = [];
     const { scope } = fn.def;
     const cls = scope.isAsync ? (scope.isGenerator ? asyncGeneratorClass : coroutineClass) : generatorClass;
-    const generator: PyGenerator = new PyGenerator(
+    const generator = this.frameGenerator(
       cls,
       fn.name,
       fn.qualifiedName,
+      frame,
+      this.evaluator.runGenerator(fn, frame)
+    );
+    if (!scope.isAsync) markIterableCoroutine(generator, fn);
+    return generator;
+  }
+
+  /**
+   * The coroutine that code compiled with `ast.PyCF_ALLOW_TOP_LEVEL_AWAIT` gives when it awaits: running it runs the
+   * code in `frame`, a frame of its own over the namespaces exec() or eval() gave.
+   */
+  newModuleCoroutine(frame: Frame, body: Generator<PyValue, PyValue, PyValue>): PyGenerator {
+    return this.frameGenerator(coroutineClass, '<module>', '<module>', frame, body);
+  }
+
+  /** A generator, coroutine, or async generator object that runs `body` in `frame` step by step. */
+  private frameGenerator(
+    cls: PyClass,
+    name: string,
+    qualifiedName: string,
+    frame: Frame,
+    body: Generator<PyValue, PyValue, PyValue>
+  ): PyGenerator {
+    const { evaluator } = this;
+    // The exceptions the generator handles where it suspended, which its caller does not handle.
+    let handling: PyInstance[] = [];
+    const generator: PyGenerator = new PyGenerator(
+      cls,
+      name,
+      qualifiedName,
       (input) => {
         const callerRow = this.currentRow;
         frame.callRow = callerRow;
@@ -305,7 +331,6 @@ export class Runtime {
     );
     generator.frame = frame;
     setFrameGenerator(frame, generator);
-    if (!scope.isAsync) markIterableCoroutine(generator, fn);
     return generator;
   }
 

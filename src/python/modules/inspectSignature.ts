@@ -3,6 +3,7 @@ import { pyRepr } from '../conversions';
 import { method } from '../define';
 import { callValue, getAttribute, getAttributeOrUndefined, isCallable } from '../objects';
 import { currentRuntime } from '../runtimeContext';
+import { toInt } from '../typeNumbers';
 import {
   builtinClass,
   defineMethod,
@@ -131,6 +132,18 @@ method(signatureClass, '__str__', 'none', 0, 0, (self) => formatSignature(signat
 method(signatureClass, '__repr__', 'none', 0, 0, (self) => `<Signature ${formatSignature(signatureOf(self))}>`);
 method(
   signatureClass,
+  'format',
+  'expected',
+  0,
+  0,
+  (self, _args, kwargs) => {
+    const width = kwargs?.get('max_width') ?? None;
+    return formatSignature(signatureOf(self), width === None ? undefined : Number(toInt(width)));
+  },
+  { keywords: ['max_width', 'quote_annotation_strings'] }
+);
+method(
+  signatureClass,
   'replace',
   'none',
   0,
@@ -190,7 +203,12 @@ function formatParameter({ name, kind, default: defaultValue, annotation }: Para
   return kind === Kind.VarKeyword ? `**${formatted}` : formatted;
 }
 
-function formatSignature({ parameters, returnAnnotation }: Signature): string {
+/** `Signature.format(max_width=...)`: the parameters on lines of their own when they do not fit in `maxWidth`. */
+export function formatSignatureWithin(value: PyValue, maxWidth: number | undefined): string {
+  return formatSignature(signatureOf(value), maxWidth);
+}
+
+function formatSignature({ parameters, returnAnnotation }: Signature, maxWidth?: number): string {
   const result: string[] = [];
   let positionalOnlySeparator = false;
   let keywordOnlySeparator = true;
@@ -211,7 +229,8 @@ function formatSignature({ parameters, returnAnnotation }: Signature): string {
     result.push(formatParameter(parameter));
   }
   if (positionalOnlySeparator) result.push('/');
-  const rendered = `(${result.join(', ')})`;
+  let rendered = `(${result.join(', ')})`;
+  if (maxWidth !== undefined && rendered.length > maxWidth) rendered = `(\n    ${result.join(',\n    ')}\n)`;
   return returnAnnotation === emptyClass ? rendered : `${rendered} -> ${formatAnnotation(returnAnnotation)}`;
 }
 

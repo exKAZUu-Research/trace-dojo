@@ -55,11 +55,13 @@ export class ProgramConverter extends ExpressionConverter {
     namesInLocals = false,
     /** Whether the source is a standard library module, whose imports of unsupported modules fail only when run. */
     private readonly library = false,
-    inheritedFutureFeatures: readonly string[] = []
+    inheritedFutureFeatures: readonly string[] = [],
+    allowsTopLevelAwait = false
   ) {
     const module = new ScopeBuilder('module', undefined, namesInLocals);
     super(source, module);
     this.module = module;
+    this.allowsTopLevelAwait = allowsTopLevelAwait;
     for (const feature of inheritedFutureFeatures) this.futureFeatures.add(feature);
   }
 
@@ -70,6 +72,7 @@ export class ProgramConverter extends ExpressionConverter {
     for (const node of nodes.slice(start, end === -1 ? undefined : end)) this.futureStatements.add(node.id);
     const body = this.block(nodes);
     if ([...this.importedPackages].some((name) => THREAD_PACKAGES.has(name))) markAllSuspending(body);
+    if (this.module.info.isAsync) markSuspendingStatements(body);
     resolveScopes(this.module);
     this.assignAtomicAnnotations();
     return {

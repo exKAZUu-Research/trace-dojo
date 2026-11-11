@@ -152,6 +152,12 @@ export abstract class AstPatternBuilder extends AstExpressionBuilder {
   }
 
   private keyOf(node: Node): PyValue {
+    const sign = node.previousSibling;
+    if (sign?.type === '-') {
+      const operand = this.expr(node);
+      return this.make('UnaryOp', { op: this.singleton('USub'), operand }, this.location(sign, node));
+    }
+    if (node.type === 'complex_pattern') return this.complexValue(node);
     if (node.type === 'dotted_name') return this.dottedValue(namedChildren(node));
     if (node.type === 'none' || node.type === 'true' || node.type === 'false') return this.expr(node);
     return node.type === 'ellipsis' ? Ellipsis : this.expr(node);
