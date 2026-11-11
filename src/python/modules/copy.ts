@@ -1,10 +1,21 @@
 import { builtin } from '../define';
 import { DictStore } from '../dictStore';
-import { registerModule } from '../modules';
+import { registerModule, registerUnsupportedAttributes } from '../modules';
 import { bindValue, callValue, lookupSpecial } from '../objects';
 import { currentRuntime } from '../runtimeContext';
-import { newTuple } from '../types';
-import { PyDeque, PyDict, PyInstance, PyList, type PyObject, PySet, PyTuple, type PyValue } from '../values';
+import { classOf, exceptionClassNamed, nativeFunction, newTuple, typeError } from '../types';
+import {
+  type Kwargs,
+  PyDeque,
+  PyDict,
+  PyInstance,
+  PyList,
+  type PyObject,
+  PySet,
+  PyTuple,
+  type PyValue,
+} from '../values';
+import { builtinClassWithBase } from './moduleClasses';
 
 /** `copy.copy`: a new container or instance holding the same items. */
 function shallowCopy(value: PyValue): PyValue {
@@ -31,7 +42,7 @@ function mapValues(map: Map<string, PyValue>, copyItem: (item: PyValue) => PyVal
 function shallowCopyContents(value: PyObject): PyValue {
   if (value instanceof PyList) return new PyList(value.cls, [...value.items]);
   if (value instanceof PyDict) {
-    const copy = new PyDict(value.cls, new DictStore(), value.defaultFactory);
+    const copy = new PyDict(value.cls, new DictStore(value.store.plainWrites), value.defaultFactory);
     for (const entry of value.store.ordered()) copy.store.set(entry.key, entry.value);
     return copy;
   }
@@ -78,7 +89,7 @@ function deepCopyContents(value: PyObject, memo: Map<PyObject, PyValue>): PyValu
     return copy;
   }
   if (value instanceof PyDict) {
-    const copy = new PyDict(value.cls, new DictStore(), value.defaultFactory);
+    const copy = new PyDict(value.cls, new DictStore(value.store.plainWrites), value.defaultFactory);
     memo.set(value, copy);
     for (const entry of value.store.ordered()) copy.store.set(deepCopy(entry.key, memo), deepCopy(entry.value, memo));
     return copy;
@@ -104,11 +115,28 @@ function deepCopyContents(value: PyObject, memo: Map<PyObject, PyValue>): PyValu
   return value;
 }
 
+const copyErrorClass = builtinClassWithBase('Error', exceptionClassNamed('Exception'), 'copy');
+
+/** `copy.replace(obj, /, **changes)`, which calls the `__replace__` of the object's class. */
+function replace(args: PyValue[], kwargs: Kwargs): PyValue {
+  if (args.length !== 1) throw typeError(`replace() takes 1 positional argument but ${args.length} were given`);
+  const [value] = args;
+  const cls = classOf(value);
+  const method = cls.lookup('__replace__');
+  if (method === undefined) throw typeError(`replace() does not support ${cls.name} objects`);
+  return callValue(bindValue(method, value), [], kwargs);
+}
+
+registerUnsupportedAttributes('copy', { dispatch_table: 'copy.dispatch_table（copyreg モジュール）' });
+
 registerModule(
   'copy',
   () =>
     new Map<string, PyValue>([
       ['copy', builtin('copy', 'one', 1, 1, ([value]) => shallowCopy(value))],
       ['deepcopy', builtin('deepcopy', 'expected', 1, 2, ([value]) => deepCopy(value, new Map()))],
+      ['replace', nativeFunction('replace', replace)],
+      ['Error', copyErrorClass],
+      ['error', copyErrorClass],
     ])
 );

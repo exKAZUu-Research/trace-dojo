@@ -22,25 +22,47 @@ export function registerSourceModule(
   natives: (runtime: Runtime) => Map<string, PyValue> = () => new Map(),
   { blocks = false, unsupported = {} }: SourceModuleOptions = {}
 ): void {
-  let parsed: Module | undefined;
   registerModule(
     name,
     (runtime, namespace) => {
-      parsed ??= parseSourceModule(source, blocks);
-      namespace.set('__doc__', None);
-      for (const [key, value] of [...commonNatives(runtime), ...natives(runtime)]) namespace.set(key, value);
-      runtime.addLibraryNamespace(namespace);
-      const frame = new Frame('module', namespace, new Map(), namespace, undefined, false, parsed.scope);
-      runtime.pushFrame(frame);
-      try {
-        runtime.evaluator.runModule(parsed.body, frame);
-      } finally {
-        runtime.popFrame();
-      }
+      for (const [key, value] of natives(runtime)) namespace.set(key, value);
+      runModuleSource(runtime, namespace, source, blocks);
       return new Map();
     },
     unsupported
   );
+}
+
+const parsedSources = new Map<string, Module>();
+
+/**
+ * Runs the Python part of a standard library module in its namespace, which the native part may fill first, with the
+ * private helpers every such module may call. Its frames stay out of the trace.
+ */
+export function runModuleSource(
+  runtime: Runtime,
+  namespace: Map<string, PyValue>,
+  source: string,
+  blocks = false
+): void {
+  let parsed = parsedSources.get(source);
+  if (!parsed) {
+    parsed = parseSourceModule(source, blocks);
+    parsedSources.set(source, parsed);
+  }
+  // Only the helpers the code uses, so that a module's namespace lists no others.
+  for (const [key, value] of commonNatives(runtime)) {
+    if (!namespace.has(key) && source.includes(key)) namespace.set(key, value);
+  }
+  if (!namespace.has('__doc__')) namespace.set('__doc__', parsed.doc ?? None);
+  runtime.addLibraryNamespace(namespace);
+  const frame = new Frame('module', namespace, new Map(), namespace, undefined, false, parsed.scope);
+  runtime.pushFrame(frame);
+  try {
+    runtime.evaluator.runModule(parsed.body, frame);
+  } finally {
+    runtime.popFrame();
+  }
 }
 
 interface SourceModuleOptions {

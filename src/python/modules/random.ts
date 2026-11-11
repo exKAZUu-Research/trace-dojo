@@ -1,27 +1,45 @@
-import { builtin } from '../define';
+import { newBytes } from '../bytesValues';
+import { pyStr } from '../conversions';
+import { method } from '../define';
 import { sha512 } from '../hashAlgorithms';
 import { pyHash } from '../hashing';
-import { registerModule } from '../modules';
-import { argument, checkArgs } from '../nativeArgs';
+import { registerModule, registerUnsupportedAttributes } from '../modules';
+import { type ArgStyle, argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
-import { getItem, isTruthy, lengthOf, setItem, toArray } from '../objects';
+import { bindValue, callValue, getItem, isTruthy, lengthOf, setItem, toArray } from '../objects';
 import { binaryOp, lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
-import { newList, None, pyError, typeError, typeName, valueError } from '../types';
-import { type Kwargs, PyDict, PySet, type PyValue } from '../values';
+import { builtinClass, newList, newTuple, None, pyError, typeError, typeName, valueError } from '../types';
+import { type Kwargs, PyDict, PyOpaque, PySet, PyTuple, type PyValue } from '../values';
 import { realArgument } from './math';
+import {
+  betavariate,
+  binomialvariate,
+  expovariate,
+  gammavariate,
+  LOG4,
+  lognormvariate,
+  normalvariate,
+  NV_MAGICCONST,
+  paretovariate,
+  SG_MAGICCONST,
+  triangular,
+  TWOPI,
+  vonmisesvariate,
+  weibullvariate,
+} from './randomDistributions';
 
 const N = 624;
 const M = 397;
 
 /** The Mersenne Twister of CPython's `_random` module, seeded as `random.seed` seeds it. */
 export class MersenneTwister {
-  private readonly state = new Uint32Array(N);
+  private readonly state32 = new Uint32Array(N);
   private index = N + 1;
   gaussNext: number | undefined;
 
   private initGenrand(seed: number): void {
-    const mt = this.state;
+    const mt = this.state32;
     mt[0] = seed >>> 0;
     for (let index = 1; index < N; index++) {
       const previous = mt[index - 1] ^ (mt[index - 1] >>> 30);
@@ -31,7 +49,7 @@ export class MersenneTwister {
   }
 
   initByArray(key: number[]): void {
-    const mt = this.state;
+    const mt = this.state32;
     this.initGenrand(19_650_218);
     let i = 1;
     let j = 0;
@@ -60,7 +78,7 @@ export class MersenneTwister {
   }
 
   nextUint32(): number {
-    const mt = this.state;
+    const mt = this.state32;
     if (this.index >= N) {
       for (let k = 0; k < N; k++) {
         const y = (mt[k] & 0x80_00_00_00) | (mt[(k + 1) % N] & 0x7f_ff_ff_ff);
@@ -80,6 +98,16 @@ export class MersenneTwister {
     const a = this.nextUint32() >>> 5;
     const b = this.nextUint32() >>> 6;
     return (a * 67_108_864 + b) * (1 / 9_007_199_254_740_992);
+  }
+
+  /** The 624 words and the position, which `getstate()` gives. */
+  state(): { words: number[]; index: number } {
+    return { words: [...this.state32], index: Math.min(this.index, N) };
+  }
+
+  restore(words: number[], index: number): void {
+    this.state32.set(words);
+    this.index = index;
   }
 
   getrandbits(bits: number): bigint {
@@ -162,13 +190,18 @@ function isSequence(value: PyValue): boolean {
   return !(value instanceof PySet || value instanceof PyDict) && typeof value === 'object';
 }
 
+// code-gauge-allow functionNcss 33 -- Follows random.sample with and without counts.
+// code-gauge-allow functionCognitiveComplexity 16 -- Follows random.sample with and without counts.
 function sample(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs): PyValue {
-  checkArgs({ qualified: 'sample', min: 2, max: 2, style: 'takes', keywords: ['counts'] }, args, kwargs);
-  const [population, kValue] = args;
+  const population = argument(args, kwargs, 0, 'population') as PyValue;
+  const kValue = argument(args, kwargs, 1, 'k');
+  if (kValue === undefined) throw typeError("Random.sample() missing 1 required positional argument: 'k'");
+  const counts = kwargs?.get('counts') ?? None;
   if (!isSequence(population) && typeof population !== 'string') {
     throw typeError('Population must be a sequence.  For dicts or sets, use sorted(d).');
   }
   const n = lengthOf(population);
+  if (counts !== None) return sampleWithCounts(generator, population, n, kValue, counts);
   const k = Number(toIndex(kValue));
   if (k < 0 || k > n) throw valueError('Sample larger than population or is negative');
   const result: PyValue[] = [];
@@ -191,6 +224,40 @@ function sample(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs): Py
     }
   }
   return newList(result);
+}
+
+/** `sample(population, k, counts=...)`, which samples positions of the repeated population and maps them back. */
+function sampleWithCounts(
+  generator: MersenneTwister,
+  population: PyValue,
+  n: number,
+  k: PyValue,
+  counts: PyValue
+): PyValue {
+  const cumulative: PyValue[] = [];
+  let running: PyValue | undefined;
+  for (const count of toArray(counts)) {
+    running = running === undefined ? count : binaryOp('+', running, count);
+    cumulative.push(running);
+  }
+  if (cumulative.length !== n) throw valueError('The number of counts does not match the population');
+  const total = cumulative.pop() ?? 0n;
+  if (typeof total !== 'bigint' && typeof total !== 'boolean') throw typeError('Counts must be integers');
+  if (BigInt(total) < 0n) throw valueError('Counts must be non-negative');
+  const range = callValue(currentRuntime().builtins.get('range') as PyValue, [total]);
+  const selections = toArray(sample(generator, [range, k], undefined));
+  return newList(selections.map((selection) => getItem(population, BigInt(bisectRight(cumulative, selection)))));
+}
+
+function bisectRight(items: PyValue[], value: PyValue): number {
+  let low = 0;
+  let high = items.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (lessThan(value, items[middle])) high = middle;
+    else low = middle + 1;
+  }
+  return low;
 }
 
 // code-gauge-allow functionNcss 38 -- Follows random.choices with and without weights.
@@ -249,99 +316,250 @@ function gauss(generator: MersenneTwister, mu: number, sigma: number): number {
   return mu + z * sigma;
 }
 
-registerModule('random', () => {
+/** `random.Random`, whose instances each have a generator of their own; the module's functions use a hidden one. */
+const randomClass = builtinClass('Random');
+randomClass.unsupportedBase = 'random.Random を継承したクラス';
+randomClass.module = 'random';
+randomClass.dict.set('__module__', 'random');
+randomClass.dict.set('VERSION', 3n);
+randomClass.construct = (cls, args, kwargs) => {
+  if (args.length > 1) {
+    throw typeError(`Random.__init__() takes from 1 to 2 positional arguments but ${args.length + 1} were given`);
+  }
   const generator = new MersenneTwister();
-  generator.initByArray(keyOf(seedOf(undefined)));
-  return new Map<string, PyValue>([
-    [
-      'seed',
-      builtin(
-        'seed',
-        'takes',
-        0,
-        2,
-        (args, kwargs) => {
-          generator.initByArray(keyOf(seedOf(argument(args, kwargs, 0, 'a'))));
-          return None;
-        },
-        { keywords: ['a', 'version'] }
-      ),
-    ],
-    ['random', builtin('random', 'none', 0, 0, () => generator.random())],
-    [
-      'getrandbits',
-      builtin('getrandbits', 'one', 1, 1, ([bits]) => {
-        const count = Number(toIndex(bits));
-        if (count < 0) throw valueError('number of bits must be non-negative');
-        return generator.getrandbits(count);
-      }),
-    ],
-    ['randrange', builtin('randrange', 'expected', 1, 3, (args) => randrange(generator, args))],
-    [
-      'randint',
-      builtin('randint', 'expected', 2, 2, ([a, b]) => {
-        const low = toIndex(a);
-        const high = toIndex(b);
-        if (high + 1n - low <= 0n) throw valueError(`empty range in randint(${low}, ${high})`);
-        return randrange(generator, [low, high + 1n]);
-      }),
-    ],
-    [
-      'choice',
-      builtin('choice', 'one', 1, 1, ([sequence]) => {
-        const length = lengthOf(sequence);
-        if (length === 0) throw pyError('IndexError', 'Cannot choose from an empty sequence');
-        return getItem(sequence, generator.randbelow(BigInt(length)));
-      }),
-    ],
-    [
-      'choices',
-      builtin('choices', 'takes', 1, 2, (args, kwargs) => choices(generator, args, kwargs), {
-        keywords: ['population', 'weights', 'cum_weights', 'k'],
-      }),
-    ],
-    [
-      'shuffle',
-      builtin('shuffle', 'one', 1, 1, ([list]) => {
-        const length = lengthOf(list);
-        for (let index = length - 1; index > 0; index--) {
-          const j = generator.randbelow(BigInt(index + 1));
-          const a = getItem(list, BigInt(index));
-          const b = getItem(list, j);
-          setItem(list, BigInt(index), b);
-          setItem(list, j, a);
-        }
-        return None;
-      }),
-    ],
-    [
-      'sample',
-      builtin('sample', 'takes', 2, 2, (args, kwargs) => sample(generator, args, kwargs), { keywords: ['counts'] }),
-    ],
-    [
-      'uniform',
-      builtin('uniform', 'expected', 2, 2, ([a, b]) => {
-        const low = realArgument(a);
-        return low + (realArgument(b) - low) * generator.random();
-      }),
-    ],
-    [
-      'gauss',
-      builtin(
-        'gauss',
-        'takes',
-        0,
-        2,
-        (args, kwargs) =>
-          gauss(
-            generator,
-            realArgument(argument(args, kwargs, 0, 'mu') ?? 0),
-            realArgument(argument(args, kwargs, 1, 'sigma') ?? 1)
-          ),
-        { keywords: ['mu', 'sigma'] }
-      ),
-    ],
+  generator.initByArray(keyOf(seedOf(argument(args, kwargs, 0, 'x'))));
+  return new PyOpaque(cls, 'Random', generator);
+};
+
+type RandomMethod = (generator: MersenneTwister, args: PyValue[], kwargs: Kwargs) => PyValue;
+const generatorOf = (self: PyValue): MersenneTwister => (self as PyOpaque).data as MersenneTwister;
+
+/** The methods of Random, which the module's functions also are, bound to the hidden instance. */
+const RANDOM_METHODS: [string, { style: ArgStyle; min: number; max: number; keywords?: string[] }, RandomMethod][] = [
+  ['seed', { style: 'takes', min: 0, max: 2, keywords: ['a', 'version'] }, seedMethod],
+  ['random', { style: 'none', min: 0, max: 0 }, (generator) => generator.random()],
+  ['getrandbits', { style: 'one', min: 1, max: 1 }, (generator, [bits]) => getrandbits(generator, bits)],
+  ['randbytes', { style: 'one', min: 1, max: 1 }, (generator, [n]) => randbytes(generator, n)],
+  ['randrange', { style: 'expected', min: 1, max: 3 }, (generator, args) => randrange(generator, args)],
+  ['randint', { style: 'expected', min: 2, max: 2 }, (generator, [a, b]) => randint(generator, a, b)],
+  ['choice', { style: 'one', min: 1, max: 1 }, (generator, [sequence]) => choice(generator, sequence)],
+  [
+    'choices',
+    { style: 'takes', min: 1, max: 2, keywords: ['population', 'weights', 'cum_weights', 'k'] },
+    (generator, args, kwargs) => choices(generator, args, kwargs),
+  ],
+  ['shuffle', { style: 'one', min: 1, max: 1 }, (generator, [list]) => shuffle(generator, list)],
+  [
+    'sample',
+    { style: 'takes', min: 1, max: 2, keywords: ['population', 'k', 'counts'] },
+    (generator, args, kwargs) => sample(generator, args, kwargs),
+  ],
+  [
+    'uniform',
+    { style: 'expected', min: 2, max: 2 },
+    (generator, [a, b]) => {
+      const low = realArgument(a);
+      return low + (realArgument(b) - low) * generator.random();
+    },
+  ],
+  [
+    'triangular',
+    { style: 'takes', min: 0, max: 3, keywords: ['low', 'high', 'mode'] },
+    (generator, args, kwargs) => {
+      const mode = argument(args, kwargs, 2, 'mode');
+      return triangular(
+        generator,
+        argument(args, kwargs, 0, 'low') ?? 0,
+        argument(args, kwargs, 1, 'high') ?? 1,
+        mode === None ? undefined : mode
+      );
+    },
+  ],
+  [
+    'gauss',
+    { style: 'takes', min: 0, max: 2, keywords: ['mu', 'sigma'] },
+    (generator, args, kwargs) => gauss(generator, ...muSigma(args, kwargs)),
+  ],
+  [
+    'normalvariate',
+    { style: 'takes', min: 0, max: 2, keywords: ['mu', 'sigma'] },
+    (generator, args, kwargs) => normalvariate(generator, ...muSigma(args, kwargs)),
+  ],
+  [
+    'lognormvariate',
+    { style: 'takes', min: 2, max: 2, keywords: ['mu', 'sigma'] },
+    (generator, args, kwargs) => lognormvariate(generator, ...muSigma(args, kwargs)),
+  ],
+  [
+    'expovariate',
+    { style: 'takes', min: 0, max: 1, keywords: ['lambd'] },
+    (generator, args, kwargs) => expovariate(generator, realArgument(argument(args, kwargs, 0, 'lambd') ?? 1)),
+  ],
+  [
+    'vonmisesvariate',
+    { style: 'takes', min: 2, max: 2, keywords: ['mu', 'kappa'] },
+    (generator, [mu, kappa]) => vonmisesvariate(generator, realArgument(mu), realArgument(kappa)),
+  ],
+  [
+    'gammavariate',
+    { style: 'takes', min: 2, max: 2, keywords: ['alpha', 'beta'] },
+    (generator, [alpha, beta]) => gammavariate(generator, realArgument(alpha), realArgument(beta)),
+  ],
+  [
+    'betavariate',
+    { style: 'takes', min: 2, max: 2, keywords: ['alpha', 'beta'] },
+    (generator, [alpha, beta]) => betavariate(generator, realArgument(alpha), realArgument(beta)),
+  ],
+  [
+    'paretovariate',
+    { style: 'takes', min: 1, max: 1, keywords: ['alpha'] },
+    (generator, [alpha]) => paretovariate(generator, realArgument(alpha)),
+  ],
+  [
+    'weibullvariate',
+    { style: 'takes', min: 2, max: 2, keywords: ['alpha', 'beta'] },
+    (generator, [alpha, beta]) => weibullvariate(generator, realArgument(alpha), realArgument(beta)),
+  ],
+  [
+    'binomialvariate',
+    { style: 'takes', min: 0, max: 2, keywords: ['n', 'p'] },
+    (generator, args, kwargs) =>
+      binomialvariate(generator, argument(args, kwargs, 0, 'n') ?? 1n, argument(args, kwargs, 1, 'p') ?? 0.5),
+  ],
+  ['getstate', { style: 'none', min: 0, max: 0 }, (generator) => getstate(generator)],
+  ['setstate', { style: 'one', min: 1, max: 1 }, (generator, [state]) => setstate(generator, state)],
+];
+
+for (const [name, spec, run] of RANDOM_METHODS) {
+  method(
+    randomClass,
+    name,
+    spec.style,
+    spec.min,
+    spec.max,
+    (self, args, kwargs) => run(generatorOf(self), args, kwargs),
+    {
+      keywords: spec.keywords,
+    }
+  );
+}
+
+function muSigma(args: PyValue[], kwargs: Kwargs): [number, number] {
+  return [realArgument(argument(args, kwargs, 0, 'mu') ?? 0), realArgument(argument(args, kwargs, 1, 'sigma') ?? 1)];
+}
+
+function seedMethod(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs): PyValue {
+  const a = argument(args, kwargs, 0, 'a');
+  const version = argument(args, kwargs, 1, 'version') ?? 2n;
+  if (version === 1n && typeof a === 'string') {
+    generator.initByArray(keyOf(versionOneSeed(a)));
+  } else {
+    generator.initByArray(keyOf(seedOf(a)));
+  }
+  generator.gaussNext = undefined;
+  return None;
+}
+
+/** The seed version 1 of random.seed makes from a string, which hashes it as Python 2 did. */
+function versionOneSeed(text: string): bigint {
+  const codes = Array.from(text, (char) => BigInt(char.codePointAt(0) as number));
+  let x = codes.length > 0 ? codes[0] << 7n : 0n;
+  for (const code of codes) x = ((1_000_003n * x) ^ code) & 0xff_ff_ff_ff_ff_ff_ff_ffn;
+  x ^= BigInt(codes.length);
+  return x === -1n ? -2n : x;
+}
+
+/** `Random.randbytes(n)`: the bytes of `getrandbits(n * 8)`, least significant first. */
+function randbytes(generator: MersenneTwister, n: PyValue): PyValue {
+  const count = Number(toIndex(n));
+  if (count < 0) throw valueError('Cannot convert negative int');
+  let value = generator.getrandbits(count * 8);
+  const data = new Uint8Array(count);
+  for (let index = 0; index < count; index++) {
+    data[index] = Number(value & 0xffn);
+    value >>= 8n;
+  }
+  return newBytes(data);
+}
+
+function getrandbits(generator: MersenneTwister, bits: PyValue): bigint {
+  const count = Number(toIndex(bits));
+  if (count < 0) throw valueError('number of bits must be non-negative');
+  return generator.getrandbits(count);
+}
+
+function randint(generator: MersenneTwister, a: PyValue, b: PyValue): bigint {
+  const low = toIndex(a);
+  const high = toIndex(b);
+  if (high < low) throw valueError(`empty range in randint(${low}, ${high})`);
+  return low + generator.randbelow(high - low + 1n);
+}
+
+function choice(generator: MersenneTwister, sequence: PyValue): PyValue {
+  const length = lengthOf(sequence);
+  if (length === 0) throw pyError('IndexError', 'Cannot choose from an empty sequence');
+  return getItem(sequence, generator.randbelow(BigInt(length)));
+}
+
+function shuffle(generator: MersenneTwister, list: PyValue): PyValue {
+  const length = lengthOf(list);
+  for (let index = length - 1; index > 0; index--) {
+    const j = generator.randbelow(BigInt(index + 1));
+    const a = getItem(list, BigInt(index));
+    const b = getItem(list, j);
+    setItem(list, BigInt(index), b);
+    setItem(list, j, a);
+  }
+  return None;
+}
+
+/** `Random.getstate()`: the version, the 624 words of the Mersenne Twister and its position, and the next gauss. */
+function getstate(generator: MersenneTwister): PyValue {
+  const { words, index } = generator.state();
+  return newTuple([3n, newTuple([...words.map(BigInt), BigInt(index)]), generator.gaussNext ?? None]);
+}
+
+function setstate(generator: MersenneTwister, state: PyValue): PyValue {
+  const items = toArray(state);
+  const version = items[0];
+  if (version !== 3n && version !== 2n) {
+    throw valueError(`state with version ${pyStr(version)} passed to Random.setstate() of version 3`);
+  }
+  if (items.length !== 3) throw valueError(`too many values to unpack (expected 3, got ${items.length})`);
+  const [, internal, gaussNext] = items;
+  if (!(internal instanceof PyTuple)) throw typeError('state vector must be a tuple');
+  if (internal.items.length !== 625) throw valueError('state vector is the wrong size');
+  const words = internal.items.slice(0, 624).map((word) => {
+    const value = toIndex(word);
+    if (value < 0n || value > 0xff_ff_ff_ffn)
+      throw pyError('OverflowError', 'Python int too large to convert to C unsigned long');
+    return Number(value);
+  });
+  const index = Number(toIndex(internal.items[624]));
+  if (index < 0 || index > 624) throw valueError('invalid state');
+  generator.restore(words, index);
+  generator.gaussNext = gaussNext === None ? undefined : realArgument(gaussNext);
+  return None;
+}
+
+registerUnsupportedAttributes('random', {
+  SystemRandom: 'random.SystemRandom（OS の乱数）',
+  main: 'random.main()（コマンドライン）',
+});
+
+registerModule('random', () => {
+  const instance = callValue(randomClass, []) as PyOpaque;
+  const namespace = new Map<string, PyValue>([
+    ['Random', randomClass],
+    ['BPF', 53n],
+    ['RECIP_BPF', 2 ** -53],
+    ['NV_MAGICCONST', NV_MAGICCONST],
+    ['LOG4', LOG4],
+    ['SG_MAGICCONST', SG_MAGICCONST],
+    ['TWOPI', TWOPI],
   ]);
+  for (const [name] of RANDOM_METHODS) namespace.set(name, bindValue(randomClass.dict.get(name) as PyValue, instance));
+  return namespace;
 });
 
 export { isTruthy, typeName };

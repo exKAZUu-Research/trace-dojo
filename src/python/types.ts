@@ -79,12 +79,6 @@ export const superClass = builtinClass('super');
 export const dictKeysClass = builtinClass('dict_keys');
 export const dictValuesClass = builtinClass('dict_values');
 export const dictItemsClass = builtinClass('dict_items');
-/** `types.GenericAlias`, the class of a builtin class subscripted, such as `list[int]`. */
-export const typingClass = builtinClass('GenericAlias');
-typingClass.module = 'types';
-/** `typing.Union`, the class of a union such as `int | None`. */
-export const unionClass = builtinClass('Union');
-unionClass.module = 'typing';
 export const cellClass = builtinClass('cell');
 
 for (const cls of [

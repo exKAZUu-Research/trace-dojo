@@ -1,6 +1,5 @@
 import type { Comprehension, Expression, Statement } from './ast';
 import { asyncIterator, asyncYield, awaitValue, isStopAsyncIteration, nextAwaitable } from './coroutines';
-import { storeKey } from './expressionEvaluator';
 import type { Frame } from './frame';
 import { bindValue, callValue, isTruthy, iterate, lookupSpecial, type NextFunction } from './objects';
 import { SuspendingEvaluator, type Suspension } from './suspendingEvaluator';
@@ -160,7 +159,7 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
       if (container instanceof PyList) items.push(value);
       else if (expression.type === 'dict') {
         const dict = container as ReturnType<typeof newDict>;
-        storeKey(dict, value, yield* this.evaluateSuspending(expression.value as Expression, inner));
+        dict.store.set(value, yield* this.evaluateSuspending(expression.value as Expression, inner));
       } else (container as ReturnType<typeof newSet>).table.add(value);
     };
     yield* this.inFrame(inner, this.comprehensionLevel(expression, inner, 0, source, store.bind(this)));

@@ -7,6 +7,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   '_codecs',
   '_compat_pickle',
   '_csv',
+  '_functools',
   '_pickle',
   '_thread',
   'abc',

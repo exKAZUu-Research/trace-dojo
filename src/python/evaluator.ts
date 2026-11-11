@@ -17,7 +17,7 @@ import { buildClass, createClass } from './classes';
 import { pyRepr } from './conversions';
 import { asyncYield } from './coroutines';
 import { exceptionGroupOf, splitGroup } from './exceptionGroups';
-import { addArgument, type CallArguments, mappingEntries, storeKey } from './expressionEvaluator';
+import { addArgument, type CallArguments, mappingEntries } from './expressionEvaluator';
 import type { Frame } from './frame';
 import { isMapping, isSequenceForMatch } from './matching';
 import { isRegisteredModule } from './modules';
@@ -1111,7 +1111,7 @@ export class Evaluator extends AsyncEvaluator {
     if (pattern.rest) {
       const rest = newDict();
       for (const [key, value] of mappingEntries(subject)) {
-        if (!seen.some((other) => equals(other, key))) storeKey(rest, key, value);
+        if (!seen.some((other) => equals(other, key))) rest.store.set(key, value);
       }
       bindings.set(pattern.rest, rest);
     }

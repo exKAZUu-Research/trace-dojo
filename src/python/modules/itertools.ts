@@ -1,25 +1,84 @@
-import { builtin } from '../define';
+import { builtin, method } from '../define';
 import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import { callValue, isTruthy, iterate, type NextFunction, toArray } from '../objects';
 import { binaryOp, equals } from '../operators';
 import { currentRuntime } from '../runtimeContext';
+import { newGenericAlias } from '../typeHints';
 import { defineIteratorClass } from '../typeObject';
 import { builtinClass, newTuple, None, typeError, valueError } from '../types';
-import { DONE, type Kwargs, type PyClass, PyIterator, type PyValue } from '../values';
+import { DONE, type Kwargs, type PyBuiltinFunction, type PyClass, PyIterator, type PyValue } from '../values';
 
 const classes = new Map<string, PyClass>();
 
 function iteratorOf(name: string, next: NextFunction, holds: () => Iterable<unknown>): PyIterator {
+  return new PyIterator(iteratorType(name), next, holds);
+}
+
+/** The class of an itertools iterator, which is also what the module calls to make one. */
+function iteratorType(name: string): PyClass {
   let cls = classes.get(name);
   if (!cls) {
     cls = builtinClass(name);
     cls.module = 'itertools';
+    cls.typeName = `itertools.${name}`;
+    cls.dict.set('__module__', 'itertools');
     defineIteratorClass(cls);
     classes.set(name, cls);
   }
-  return new PyIterator(cls, next, holds);
+  return cls;
+}
+
+/** Makes the module's function for an iterator its class, as each itertools iterator is a type in CPython. */
+function asType(fn: PyBuiltinFunction): PyClass {
+  const cls = iteratorType(fn.name);
+  cls.construct = (_cls, args, kwargs) => fn.run(args, kwargs);
+  return cls;
+}
+
+// itertools.tee -------------------------------------------------------------------------------------------------------
+
+interface TeeBuffer {
+  next: NextFunction;
+  items: PyValue[];
+  done: boolean;
+}
+
+function newTee(buffer: TeeBuffer, position: number): PyIterator {
+  let index = position;
+  const iterator = new PyIterator(
+    iteratorType('_tee'),
+    () => {
+      if (index === buffer.items.length) {
+        if (buffer.done) return DONE;
+        const item = buffer.next();
+        if (item === DONE) {
+          buffer.done = true;
+          return DONE;
+        }
+        buffer.items.push(item);
+      }
+      return buffer.items[index++];
+    },
+    () => buffer.items
+  );
+  teeStates.set(iterator, () => newTee(buffer, index));
+  return iterator;
+}
+
+const teeStates = new WeakMap<PyIterator, () => PyIterator>();
+
+function tee(args: PyValue[]): PyValue {
+  const [iterable, countValue] = args;
+  const count = countValue === undefined ? 2n : toIndex(countValue);
+  if (count < 0n) throw valueError('n must be >= 0');
+  if (count === 0n) return newTuple([]);
+  const copyOf = iterable instanceof PyIterator ? teeStates.get(iterable) : undefined;
+  const first = copyOf ? copyOf() : newTee({ next: iterate(iterable), items: [], done: false }, 0);
+  const copies: PyValue[] = [first];
+  while (copies.length < Number(count)) copies.push((teeStates.get(first) as () => PyIterator)());
+  return newTuple(copies);
 }
 
 function fromArray(name: string, items: PyValue[]): PyIterator {
@@ -341,7 +400,7 @@ function zipLongest(args: PyValue[], kwargs: Kwargs): PyValue {
 function filtering(
   name: string,
   keep: (fn: PyValue, item: PyValue, state: { dropping: boolean }) => boolean | 'stop'
-): PyValue {
+): PyBuiltinFunction {
   return builtin(name, 'expected', 2, 2, ([fn, iterable]) => {
     const next = iterate(iterable);
     const state = { dropping: true };
@@ -392,38 +451,58 @@ function batched(args: PyValue[], kwargs: Kwargs): PyValue {
   );
 }
 
+const teeClass = iteratorType('_tee');
+teeClass.dict.set(
+  '__copy__',
+  builtin('__copy__', 'one', 1, 1, ([self]) => (teeStates.get(self as PyIterator) as () => PyIterator)())
+);
+
 registerModule('itertools', () => {
-  const chainClass = builtinClass('chain');
-  chainClass.module = 'itertools';
-  chainClass.construct = (_cls, args) => chain(args);
-  chainClass.dict.set('from_iterable', builtin('from_iterable', 'one', 1, 1, chainFromIterable));
+  const chainClass = iteratorType('chain');
+  chainClass.construct = (_cls, args, kwargs) => {
+    if (kwargs && kwargs.size > 0) throw typeError('chain() takes no keyword arguments');
+    return chain(args);
+  };
+  method(chainClass, 'from_iterable', 'one', 1, 1, (_cls, [iterable]) => chainFromIterable([iterable]), {
+    binding: 'class',
+  });
+  method(chainClass, '__class_getitem__', 'one', 1, 1, (owner, [key]) => newGenericAlias(owner, key), {
+    binding: 'class',
+  });
   return new Map<string, PyValue>([
-    ['count', builtin('count', 'takes', 0, 2, count, { keywords: ['start', 'step'] })],
-    ['cycle', builtin('cycle', 'expected', 1, 1, cycle)],
-    ['repeat', builtin('repeat', 'takes', 1, 2, repeat, { keywords: ['object', 'times'] })],
-    ['accumulate', builtin('accumulate', 'takes', 1, 2, accumulate, { keywords: ['iterable', 'func', 'initial'] })],
+    ['count', asType(builtin('count', 'takes', 0, 2, count, { keywords: ['start', 'step'] }))],
+    ['cycle', asType(builtin('cycle', 'expected', 1, 1, cycle))],
+    ['repeat', asType(builtin('repeat', 'takes', 1, 2, repeat, { keywords: ['object', 'times'] }))],
+    [
+      'accumulate',
+      asType(builtin('accumulate', 'takes', 1, 2, accumulate, { keywords: ['iterable', 'func', 'initial'] })),
+    ],
     ['chain', chainClass],
-    ['combinations', combinationsBuiltin('combinations', false)],
-    ['combinations_with_replacement', combinationsBuiltin('combinations_with_replacement', true)],
-    ['permutations', builtin('permutations', 'takes', 1, 2, permutationsOf, { keywords: ['iterable', 'r'] })],
-    ['product', builtin('product', 'takes', 0, Number.POSITIVE_INFINITY, product, { keywords: ['repeat'] })],
-    ['groupby', builtin('groupby', 'takes', 1, 2, groupby, { keywords: ['iterable', 'key'] })],
-    ['islice', builtin('islice', 'expected', 2, 4, islice)],
+    ['tee', builtin('tee', 'expected', 1, 2, tee)],
+    ['combinations', asType(combinationsBuiltin('combinations', false))],
+    ['combinations_with_replacement', asType(combinationsBuiltin('combinations_with_replacement', true))],
+    ['permutations', asType(builtin('permutations', 'takes', 1, 2, permutationsOf, { keywords: ['iterable', 'r'] }))],
+    ['product', asType(builtin('product', 'takes', 0, Number.POSITIVE_INFINITY, product, { keywords: ['repeat'] }))],
+    ['groupby', asType(builtin('groupby', 'takes', 1, 2, groupby, { keywords: ['iterable', 'key'] }))],
+    ['islice', asType(builtin('islice', 'expected', 2, 4, islice))],
     [
       'zip_longest',
-      builtin('zip_longest', 'takes', 0, Number.POSITIVE_INFINITY, zipLongest, { keywords: ['fillvalue'] }),
+      asType(builtin('zip_longest', 'takes', 0, Number.POSITIVE_INFINITY, zipLongest, { keywords: ['fillvalue'] })),
     ],
-    ['starmap', builtin('starmap', 'expected', 2, 2, starmap)],
-    ['takewhile', filtering('takewhile', (fn, item) => (isTruthy(callValue(fn, [item])) ? true : 'stop'))],
-    ['dropwhile', filtering('dropwhile', keepAfterDropping)],
-    ['filterfalse', filtering('filterfalse', (fn, item) => !isTruthy(fn === None ? item : callValue(fn, [item])))],
-    ['compress', builtin('compress', 'takes', 2, 2, compress, { keywords: ['data', 'selectors'] })],
-    ['pairwise', builtin('pairwise', 'one', 1, 1, pairwise)],
-    ['batched', builtin('batched', 'takes', 2, 2, batched, { keywords: ['iterable', 'n', 'strict'] })],
+    ['starmap', asType(builtin('starmap', 'expected', 2, 2, starmap))],
+    ['takewhile', asType(filtering('takewhile', (fn, item) => (isTruthy(callValue(fn, [item])) ? true : 'stop')))],
+    ['dropwhile', asType(filtering('dropwhile', keepAfterDropping))],
+    [
+      'filterfalse',
+      asType(filtering('filterfalse', (fn, item) => !isTruthy(fn === None ? item : callValue(fn, [item])))),
+    ],
+    ['compress', asType(builtin('compress', 'takes', 2, 2, compress, { keywords: ['data', 'selectors'] }))],
+    ['pairwise', asType(builtin('pairwise', 'one', 1, 1, pairwise))],
+    ['batched', asType(builtin('batched', 'takes', 2, 2, batched, { keywords: ['iterable', 'n', 'strict'] }))],
   ]);
 });
 
-function combinationsBuiltin(name: string, withReplacement: boolean): PyValue {
+function combinationsBuiltin(name: string, withReplacement: boolean): PyBuiltinFunction {
   return builtin(
     name,
     'takes',

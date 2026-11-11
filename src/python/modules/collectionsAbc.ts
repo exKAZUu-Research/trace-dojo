@@ -1,5 +1,6 @@
 import { builtin } from '../define';
 import { registerSourceModule } from '../sourceModules';
+import { callableGenericAliasClass } from '../typeHints';
 import { builtinFunctionClass, functionClass, methodClass, methodDescriptorClass, typeClass } from '../types';
 import type { PyClass, PyValue } from '../values';
 
@@ -461,61 +462,6 @@ class Buffer(metaclass=ABCMeta):
             return _check_methods(C, "__buffer__")
         return NotImplemented
 
-
-class _CallableGenericAlias(GenericAlias):
-    """ Represent \x60Callable[argtypes, resulttype]\x60.
-
-    This sets \x60\x60__args__\x60\x60 to a tuple containing the flattened
-    \x60\x60argtypes\x60\x60 followed by \x60\x60resulttype\x60\x60.
-
-    Example: \x60\x60Callable[[int, str], float]\x60\x60 sets \x60\x60__args__\x60\x60 to
-    \x60\x60(int, str, float)\x60\x60.
-    """
-
-    __slots__ = ()
-
-    def __new__(cls, origin, args):
-        if not (isinstance(args, tuple) and len(args) == 2):
-            raise TypeError(
-                "Callable must be used as Callable[[arg, ...], result].")
-        t_args, t_result = args
-        if isinstance(t_args, (tuple, list)):
-            args = (*t_args, t_result)
-        elif not _is_param_expr(t_args):
-            raise TypeError(f"Expected a list of types, an ellipsis, "
-                            f"ParamSpec, or Concatenate. Got {t_args}")
-        return super().__new__(cls, origin, args)
-
-    def __repr__(self):
-        if len(self.__args__) == 2 and _is_param_expr(self.__args__[0]):
-            return super().__repr__()
-        from annotationlib import type_repr
-        return (f'collections.abc.Callable'
-                f'[[{", ".join([type_repr(a) for a in self.__args__[:-1]])}], '
-                f'{type_repr(self.__args__[-1])}]')
-
-    def __reduce__(self):
-        args = self.__args__
-        if not (len(args) == 2 and _is_param_expr(args[0])):
-            args = list(args[:-1]), args[-1]
-        return _CallableGenericAlias, (Callable, args)
-
-    def __getitem__(self, item):
-        # Called during TypeVar substitution, returns the custom subclass
-        # rather than the default types.GenericAlias object.  Most of the
-        # code is copied from typing's _GenericAlias and the builtin
-        # types.GenericAlias.
-        if not isinstance(item, tuple):
-            item = (item,)
-
-        new_args = super().__getitem__(item).__args__
-
-        # args[0] occurs due to things like Z[[int, str, bool]] from PEP 612
-        if not isinstance(new_args[0], (tuple, list)):
-            t_result = new_args[-1]
-            t_args = new_args[:-1]
-            new_args = (t_args, t_result)
-        return _CallableGenericAlias(Callable, tuple(new_args))
 
 def _is_param_expr(obj):
     """Checks if obj matches either a list of types, \x60\x60...\x60\x60, \x60\x60ParamSpec\x60\x60 or
@@ -1187,6 +1133,7 @@ registerSourceModule(
   SOURCE,
   () =>
     new Map<string, PyValue>([
+      ['_CallableGenericAlias', callableGenericAliasClass],
       [
         '_builtin_callable',
         // The builtin callables call natively, without a `__call__` in their class dictionaries.

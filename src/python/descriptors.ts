@@ -5,9 +5,13 @@ import { instancesHaveDict } from './slots';
 import { classOf, objectClass, pyError } from './types';
 import { type PyClass, PyError, PyFunction, PyInstance, PyObject, type PyValue } from './values';
 
+/** The builtin classes whose objects bind as methods through their native `__get__`, as `functools.lru_cache`'s do. */
+export const builtinDescriptorClasses = new Set<PyClass>();
+
 /** The `__get__` of an attribute whose class the program defined, or undefined for any other attribute. */
 export function descriptorGetter(attribute: PyValue): PyValue | undefined {
-  if (!(attribute instanceof PyObject) || attribute.cls.isBuiltin) return undefined;
+  if (!(attribute instanceof PyObject)) return undefined;
+  if (attribute.cls.isBuiltin && !builtinDescriptorClasses.has(attribute.cls)) return undefined;
   return attribute.cls.lookup('__get__');
 }
 

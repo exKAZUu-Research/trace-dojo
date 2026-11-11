@@ -31,6 +31,7 @@ TracebackType = _builtin_types['traceback']
 EllipsisType = type(Ellipsis)
 NoneType = type(None)
 GenericAlias = type(list[int])
+UnionType = type(int | str)
 NotImplementedType = type(NotImplemented)
 GenericAlias = type(list[int])
 UnionType = type(int | str)

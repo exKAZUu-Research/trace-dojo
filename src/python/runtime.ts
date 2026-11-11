@@ -11,20 +11,20 @@ import { GeneratorFinalizer } from './finalization';
 import { Frame } from './frame';
 import { findReachableObjects, findReachableTurtles } from './garbageCollection';
 import { resumeGenerator } from './generators';
-import { aliasArgumentText, genericAlias } from './genericAlias';
 import { pyHash } from './hashing';
 import { instantiate } from './instances';
 import { keyError } from './items';
 import { viewOf } from './memoryview';
 import { importModule } from './modules';
 import { systemExitError } from './modules/sys';
+import { DEFAULT_MAX_STR_DIGITS } from './numbers';
 import { bindValue, callValue, isTruthy, overriding, setAttribute, toArray } from './objects';
-import { equals, isSame } from './operators';
 import type { ProgramSource } from './programSource';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
 import type { Scheduler } from './threads';
 import { noteUnwinding } from './tracebacks';
+import { newGenericAlias, unionOf } from './typeHints';
 import { boundSuper } from './typeObject';
 import { genericClass, subscriptGeneric } from './typeParams';
 import {
@@ -33,14 +33,12 @@ import {
   coroutineClass,
   exceptionClassNamed,
   generatorClass,
-  newException,
   newList,
   newTuple,
   None,
   pyError,
   superClass,
   typeError,
-  unionClass,
   valueError,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
@@ -57,9 +55,8 @@ import {
   type PyList,
   PyModule,
   PyObject,
-  PyOpaque,
   type PySet,
-  PyTuple,
+  type PyTuple,
   type PyValue,
 } from './values';
 import { hasWeakCallbacks, runWeakCallbacks } from './weakReferences';
@@ -140,6 +137,12 @@ export class Runtime {
   }
 
   // Frames and calls ------------------------------------------------------------------------------------------------
+
+  /** Whether the running code is a standard library module's written in Python. */
+  inLibraryCode(): boolean {
+    const frame = this.frames.at(-1);
+    return frame !== undefined && this.libraryNamespaces.has(frame.globals);
+  }
 
   /** Marks the globals of a standard library module written in Python, whose frames stay out of the trace. */
   addLibraryNamespace(namespace: Map<string, PyValue>): void {
@@ -365,17 +368,9 @@ export class Runtime {
   // Services for builtins ------------------------------------------------------------------------------------------
 
   readonly none = None;
-  readonly frozenDataclasses = new Set<PyClass>();
+  /** The limit sys.set_int_max_str_digits sets, 0 for none. */
+  intMaxStrDigits = DEFAULT_MAX_STR_DIGITS;
   private readonly streams = new Map<string, PyValue>();
-
-  isFrozenDataclass(cls: PyClass): boolean {
-    return cls.mro.some((each) => this.frozenDataclasses.has(each));
-  }
-
-  frozenInstanceError(message: string): PyError {
-    const cls = this.importModule('dataclasses').dict.get('FrozenInstanceError') as PyClass;
-    return new PyError(newException(cls, [message]));
-  }
 
   exceptionClass(name: string): PyClass {
     return exceptionClassNamed(name);
@@ -425,14 +420,7 @@ export class Runtime {
 
   /** `int | None` and the like, which isinstance accepts and type hints use. */
   unionType(left: PyValue, right: PyValue): PyValue {
-    const items: PyValue[] = [];
-    for (const item of [...unionMembers(left), ...unionMembers(right)]) {
-      if (!items.some((each) => isSame(each, item) || equals(each, item))) items.push(item);
-    }
-    // A union of one type is that type, as `int | int` is `int`.
-    if (items.length === 1) return items[0];
-    const text = items.map((item) => (item === None ? 'None' : aliasArgumentText(item))).join(' | ');
-    return new PyOpaque(unionClass, text, items);
+    return unionOf([left, right]);
   }
 
   /** The value of a key missing from a dict: a Counter's zero, a defaultdict's default, or a KeyError. */
@@ -457,15 +445,9 @@ export class Runtime {
         throw keyError(key);
       return member;
     }
-    const classGetItem = cls.isBuiltin ? undefined : cls.lookup('__class_getitem__');
+    const classGetItem = cls.isBuiltin ? cls.dict.get('__class_getitem__') : cls.lookup('__class_getitem__');
     if (classGetItem !== undefined) return callValue(bindValue(classGetItem, cls, cls), [key]);
-    if (cls === unionClass) {
-      const [first, ...rest] = key instanceof PyTuple ? key.items : [key];
-      let union = first;
-      for (const arg of rest) union = this.unionType(union, arg);
-      return union;
-    }
-    if (cls.isBuiltin) return genericAlias(cls, key);
+    if (cls.isBuiltin) return newGenericAlias(cls, key);
     throw typeError(`type '${cls.qualifiedName}' is not subscriptable`);
   }
 
@@ -499,7 +481,11 @@ export class Runtime {
   dirNames(value: PyValue): string[] {
     if (value instanceof PyClass && value.flags.isEnum && value.enumMembers) return enumClassDir(value, this);
     if (value instanceof PyInstance && value.enumValue !== undefined) return enumMemberDir(value, this);
-    const names = value instanceof PyModule ? new Set(value.dict.keys()) : objectAttributeNames(value);
+    // A module lists the names this grader does not support too, as CPython's module has them.
+    const names =
+      value instanceof PyModule
+        ? new Set([...value.dict.keys(), ...value.unsupported.keys()])
+        : objectAttributeNames(value);
     return [...names].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   }
 
@@ -543,10 +529,6 @@ export class Runtime {
 function recursionErrorFor(error: unknown): unknown {
   return isHostStackOverflow(error) ? pyError('RecursionError', 'maximum recursion depth exceeded') : error;
 }
-/** The types a `|` union holds, or the type itself. */
-function unionMembers(value: PyValue): PyValue[] {
-  return value instanceof PyOpaque && Array.isArray(value.data) ? (value.data as PyValue[]) : [value];
-}
 
 export { Frame, PyCell };
 
@@ -558,7 +540,21 @@ export function isHostStackOverflow(error: unknown): boolean {
   return error instanceof RangeError;
 }
 
+/** The attributes of a function that its class reads natively. */
+const FUNCTION_ATTRIBUTES = [
+  '__annotate__',
+  '__annotations__',
+  '__defaults__',
+  '__dict__',
+  '__kwdefaults__',
+  '__module__',
+  '__name__',
+  '__qualname__',
+  '__type_params__',
+];
+
 /** The attribute names `dir()` lists for an object other than a module. */
+// code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of object whose attributes its class reads natively.
 function objectAttributeNames(value: PyValue): Set<string> {
   const names = new Set<string>();
   const add = (keys: Iterable<string>): void => {
@@ -568,9 +564,12 @@ function objectAttributeNames(value: PyValue): Set<string> {
   for (const each of cls.mro) add(each.dict.keys());
   if (value instanceof PyInstance || value instanceof PyFunction) add(value.dict.keys());
   add(['__class__', '__doc__']);
-  if (value instanceof PyClass || value instanceof PyInstance) add(['__dict__', '__module__']);
+  if (!cls.isBuiltin || (value instanceof PyClass && !value.isBuiltin)) add(['__dict__', '__module__']);
+  if (value instanceof PyFunction) add(FUNCTION_ATTRIBUTES);
+  if (value instanceof PyGenerator && value.cls === generatorClass)
+    add(['__del__', 'gi_code', 'gi_frame', 'gi_yieldfrom']);
   if (value instanceof PyInstance && value.exception) {
-    add(['args', '__traceback__', '__cause__', '__context__', '__suppress_context__']);
+    add(['__dict__', 'args', '__traceback__', '__cause__', '__context__', '__suppress_context__']);
   }
   if (value instanceof PyInstance && value.enumValue !== undefined) add(['name', 'value']);
   return names;

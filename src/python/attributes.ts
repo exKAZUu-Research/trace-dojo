@@ -64,6 +64,8 @@ import {
 } from './values';
 import { weakReferenceOf } from './weakReferences';
 
+export const BUILTIN_DOC = '組み込みの関数・型・モジュールの説明文（__doc__）';
+
 /** Reads an attribute of a class: its own data, then the attributes of its MRO, bound as a class reads them. */
 // code-gauge-allow functionCognitiveComplexity 18 -- Follows the order CPython's type_getattro looks up an attribute in.
 export function classAttribute(cls: PyClass, name: string): PyValue | undefined {
@@ -568,9 +570,6 @@ function replaceDict(target: PyObject, value: PyValue): void {
 function setInstanceDictEntry(target: PyInstance, name: string, value: PyValue, attribute: PyValue | undefined): void {
   const cls = target.cls;
   if (cls.slotNames !== undefined) throw noDictError(target, name, attribute);
-  if (cls.flags.isDataclass && currentRuntime().isFrozenDataclass(cls)) {
-    throw currentRuntime().frozenInstanceError(`cannot assign to field '${name}'`);
-  }
   if (target.enumValue !== undefined && (name === 'name' || name === 'value')) {
     throw pyError('AttributeError', `<enum 'Enum'> cannot set attribute '${name}'`);
   }
@@ -677,8 +676,5 @@ export function deleteInstanceAttribute(target: PyObject, name: string): void {
     return;
   }
   if (attribute !== undefined && callSetter(attribute, target, undefined)) return;
-  if (target.cls.flags.isDataclass && currentRuntime().isFrozenDataclass(target.cls)) {
-    throw currentRuntime().frozenInstanceError(`cannot delete field '${name}'`);
-  }
   if (!ownDict(target)?.delete(name)) throw attributeError(target, name);
 }

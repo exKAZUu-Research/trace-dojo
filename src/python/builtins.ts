@@ -512,6 +512,8 @@ function isSubclass(cls: PyValue, classInfo: PyValue): boolean {
   if (classInfo instanceof PyOpaque && Array.isArray(classInfo.data)) {
     return (classInfo.data as PyValue[]).some((item) => isSubclass(cls, item));
   }
+  const check = lookupSpecial(classInfo, '__subclasscheck__');
+  if (check !== undefined) return isTruthy(callValue(bindValue(check, classInfo), [cls]));
   throw typeError('issubclass() arg 2 must be a class, a tuple of classes, or a union');
 }
 

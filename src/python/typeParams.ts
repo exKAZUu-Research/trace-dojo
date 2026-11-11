@@ -4,17 +4,8 @@ import { identityHash } from './hashing';
 import { argument, checkArgs } from './nativeArgs';
 import { callValue, getIterator, setAttribute, toArray } from './objects';
 import { currentRuntime } from './runtimeContext';
-import {
-  builtinClass,
-  newTuple,
-  None,
-  noneClass,
-  objectClass,
-  propertyClass,
-  typeError,
-  typeName,
-  typingClass as builtinAliasClass,
-} from './types';
+import { newGenericAlias } from './typeHints';
+import { builtinClass, newTuple, None, noneClass, objectClass, propertyClass, typeError, typeName } from './types';
 import {
   type Kwargs,
   PyBuiltinFunction,
@@ -354,8 +345,7 @@ property(typeAliasClass, '__module__', (self) => (self as PyTypeAlias).module);
 method(typeAliasClass, '__getitem__', 'one', 1, 1, (self, [key]) => {
   const alias = self as PyTypeAlias;
   if (alias.typeParams.length === 0) throw typeError('Only generic type aliases are subscriptable');
-  const args = key instanceof PyTuple ? key.items : [key];
-  return new PyOpaque(builtinAliasClass, `${alias.name}[${args.map(typeText).join(', ')}]`, alias);
+  return newGenericAlias(alias, key);
 });
 method(typeAliasClass, '__or__', 'one', 1, 1, (self, [other]) => currentRuntime().unionType(self, other));
 method(typeAliasClass, '__ror__', 'one', 1, 1, (self, [other]) => currentRuntime().unionType(other, self));

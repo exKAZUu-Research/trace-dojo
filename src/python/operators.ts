@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 573 -- The operator implementations of the builtin types belong together.
+// code-gauge-allow-file fileNcss 576 -- The operator implementations of the builtin types belong together.
 import type { BinaryOperator, CompareOperator } from './ast';
 import { isBytesLike, PyBytes } from './bytesValues';
 import { complexBinary, isComplexOperand, newComplex } from './complexNumbers';
@@ -7,9 +7,11 @@ import { asFloat, divmodFloat, floorDivInt, intToFloat, modInt, trueDivideInt } 
 import { bindValue, callSpecial, callValue, iterate, lookupSpecial, overriding } from './objects';
 import { formatPercent } from './percentFormat';
 import { currentRuntime } from './runtimeContext';
+import { dictViewBinary, isSetLikeView } from './setOperations';
 import { compareStr, strLength } from './strings';
 import {
   classOf,
+  dictClass,
   intClass,
   newList,
   newSet,
@@ -229,7 +231,7 @@ function isSequenceLike(value: PyValue): boolean {
 }
 
 /** The result of an operator on builtin operands, or NotImplemented when their types do not define it. */
-// code-gauge-allow functionCognitiveComplexity 18 -- One case per builtin type that defines binary operators.
+// code-gauge-allow functionCognitiveComplexity 19 -- One case per builtin type that defines binary operators.
 export function nativeBinary(operator: BinaryOperator, left: PyValue, right: PyValue): PyValue {
   if (isNumeric(left) && isNumeric(right)) return numericBinary(operator, left, right);
   if (isComplexOperand(left) && isComplexOperand(right) && (left instanceof PyComplex || right instanceof PyComplex)) {
@@ -237,12 +239,12 @@ export function nativeBinary(operator: BinaryOperator, left: PyValue, right: PyV
   }
   if (typeof left === 'string') return stringBinary(operator, left, right);
   if (typeof right === 'string' && operator === '*' && isIntLike(left)) return repeatString(right, left);
+  if ((isSetLikeView(left) || isSetLikeView(right)) && '&|-^'.includes(operator)) {
+    return dictViewBinary(operator as '&' | '|' | '-' | '^', left, right, viewContains);
+  }
   if (isSequence(left) && !isUserObject(left)) return sequenceBinary(operator, left, right);
   if (isSequence(right) && operator === '*' && isIntLike(left)) return repeatSequence(right, left);
   if (left instanceof PySet && right instanceof PySet) return setBinary(operator, left, right);
-  if (left instanceof PyDictView && left.view !== 'values' && '&|-^'.includes(operator)) {
-    return setBinary(operator, newSet(iterateAll(left)), newSet(iterateAll(right)));
-  }
   if (left instanceof PyDict && right instanceof PyDict && operator === '|') {
     return mergeDicts(left, right);
   }
@@ -618,6 +620,8 @@ function builtinEquality(value: PyValue): boolean {
 
 /** Whether a value is an instance whose class defines `==`, such as a program's class or `fractions.Fraction`. */
 function definesEquality(value: PyValue): boolean {
+  // A dict subclass such as Counter may compare its own way.
+  if (value instanceof PyDict) return value.cls.lookup('__eq__') !== dictClass.dict.get('__eq__');
   if (!(value instanceof PyInstance)) return false;
   const cls = classOf(value);
   return !cls.isBuiltin || cls.lookup('__eq__') !== objectClass.dict.get('__eq__');

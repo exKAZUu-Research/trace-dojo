@@ -1,7 +1,17 @@
 import { PyBytes, PyMemoryView } from './bytesValues';
+import { pyStr } from './conversions';
 import { callSpecial, lookupSpecial } from './objects';
-import { isNativeMethod, None, typeError, typeName, typingClass, unionClass } from './types';
-import { PyComplex, PyInstance, type PyObject, PySet, PyTuple, type PyValue } from './values';
+import { exceptionClassNamed, isNativeMethod, None, typeError, typeName } from './types';
+import {
+  type PyBuiltinFunction,
+  PyComplex,
+  PyError,
+  PyInstance,
+  type PyObject,
+  PySet,
+  PyTuple,
+  type PyValue,
+} from './values';
 
 const MASK64 = (1n << 64n) - 1n;
 const MODULUS = (1n << 61n) - 1n;
@@ -116,8 +126,23 @@ function hashString(value: string): bigint {
 
 const NONE_HASH = 4_238_894_112n;
 
+/** What a hashed key is for, which CPython 3.14 names when the key turns out to be unhashable. */
+export type KeyRole = 'set element' | 'dict key';
+
+/** Hashes a set element or dict key, rewording a TypeError as CPython 3.14's sets and dicts do. */
+export function keyHash(value: PyValue, role: KeyRole): bigint {
+  try {
+    return pyHash(value);
+  } catch (error) {
+    if (error instanceof PyError && error.exception.cls === exceptionClassNamed('TypeError')) {
+      throw typeError(`cannot use '${typeName(value)}' as a ${role} (${pyStr(error.exception)})`);
+    }
+    throw error;
+  }
+}
+
 /** Python's `hash()`, raising TypeError for unhashable values. */
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of hashable value.
+// code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of hashable value.
 export function pyHash(value: PyValue): bigint {
   switch (typeof value) {
     case 'bigint': {
@@ -137,19 +162,16 @@ export function pyHash(value: PyValue): bigint {
   if (value instanceof PyTuple && value.cls.isBuiltin) return hashTuple(value.items);
   const special = lookupSpecial(value, '__hash__');
   if (special === None) throw typeError(`unhashable type: '${typeName(value)}'`);
-  if (
-    value instanceof PyBytes ||
-    value instanceof PyMemoryView ||
-    value.cls === typingClass ||
-    value.cls === unionClass
-  ) {
+  if (value instanceof PyBytes || value instanceof PyMemoryView) {
     return callSpecial(value, '__hash__', []) as bigint;
   }
   if (special !== undefined && !isDefaultHash(special)) {
     const result = callSpecial(value, '__hash__', []);
     if (typeof result === 'boolean') return result ? 1n : 0n;
     if (typeof result !== 'bigint') throw typeError('__hash__ method should return an integer');
-    return hashInt(result);
+    // As slot_tp_hash, an integer that fits in Py_hash_t is the hash itself, and a larger one is hashed.
+    if (result < -(1n << 63n) || result >= 1n << 63n) return hashInt(result);
+    return result === -1n ? -2n : result;
   }
   return builtinHash(value);
 }
@@ -167,8 +189,11 @@ function builtinHash(value: PyObject): bigint {
 }
 
 /** Whether a class's `__hash__` is the builtin one that hashes by identity or by value natively. */
+/** The builtin types whose `__hash__` `builtinHash` computes; any other `__hash__`, native or not, is called. */
+const DIRECT_HASHES = new Set(['object', 'tuple', 'frozenset', 'set', 'str', 'int', 'float', 'complex', 'bool']);
+
 function isDefaultHash(special: PyValue): boolean {
-  return isNativeMethod(special);
+  return isNativeMethod(special) && DIRECT_HASHES.has((special as PyBuiltinFunction).ownerName ?? '');
 }
 
 export function identityHash(value: PyObject): bigint {
