@@ -4,6 +4,7 @@ import { STDLIB_MODULE_NAMES } from './stdlibModuleNames';
 export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   '__future__',
   '__main__',
+  '_bz2',
   '_codecs',
   '_compat_pickle',
   '_csv',
@@ -19,6 +20,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'binascii',
   'bisect',
   'builtins',
+  'bz2',
   'calendar',
   'cmath',
   'codecs',
@@ -26,6 +28,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'collections.abc',
   'colorsys',
   'compression',
+  'compression.bz2',
   'compression.gzip',
   'compression.zlib',
   'concurrent',

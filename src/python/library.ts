@@ -39,6 +39,7 @@ import './modules/itertools';
 import './modules/functools';
 import './modules/heapq';
 import './modules/bisect';
+import './modules/bz2';
 import './modules/copy';
 import './modules/string';
 import './modules/typing';
