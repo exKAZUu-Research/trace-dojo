@@ -83,6 +83,10 @@ function callSlot(method: PyValue, self: PyValue, other: PyValue): PyValue {
 
 /** Python's binary operators. */
 export function binaryOp(operator: BinaryOperator, leftValue: PyValue, rightValue: PyValue): PyValue {
+  if (typeof leftValue !== 'object' && typeof rightValue !== 'object') {
+    const native = nativeBinary(operator, leftValue, rightValue);
+    return native === NotImplemented ? dispatchOrRaise(operator, leftValue, rightValue) : native;
+  }
   // The bitwise operators of a Flag combine its members into members, before an IntFlag counts as an int.
   if ('|&^'.includes(operator) && (isFlagMember(leftValue) || isFlagMember(rightValue))) {
     const combined = dispatchBinary(operator, leftValue, rightValue);
@@ -95,6 +99,10 @@ export function binaryOp(operator: BinaryOperator, leftValue: PyValue, rightValu
     const native = nativeBinary(operator, left, right);
     if (native !== NotImplemented) return native;
   }
+  return dispatchOrRaise(operator, left, right);
+}
+
+function dispatchOrRaise(operator: BinaryOperator, left: PyValue, right: PyValue): PyValue {
   const result = dispatchBinary(operator, left, right);
   if (result !== NotImplemented) return result;
   throw binaryTypeError(operator, left, right);
@@ -102,17 +110,16 @@ export function binaryOp(operator: BinaryOperator, leftValue: PyValue, rightValu
 
 /** Python's augmented assignment operators, which try the in-place method first. */
 export function inplaceOp(operator: BinaryOperator, left: PyValue, right: PyValue): PyValue {
-  if (isPlain(left)) {
+  if (typeof left !== 'object') return binaryOp(operator, left, right);
+  if (left.cls.isBuiltin) {
     const native = nativeInplace(operator, left, right);
     if (native !== NotImplemented) return native;
   }
   // A builtin type without a native in-place operator, such as deque, may define the method.
-  if (typeof left === 'object') {
-    const method = lookupSpecial(left, SPECIAL_NAMES[operator][2]);
-    if (method !== undefined) {
-      const result = callSlot(method, left, right);
-      if (result !== NotImplemented) return result;
-    }
+  const method = lookupSpecial(left, SPECIAL_NAMES[operator][2]);
+  if (method !== undefined) {
+    const result = callSlot(method, left, right);
+    if (result !== NotImplemented) return result;
   }
   return binaryOp(operator, left, right);
 }

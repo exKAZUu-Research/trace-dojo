@@ -58,6 +58,9 @@ import {
   type PyValue,
 } from './values';
 
+/** The magnitude below which multiplying two ints costs no more than one operation. */
+const SAFE_INTEGER_BOUND = 1n << 53n;
+
 export class Runtime {
   readonly world = new TurtleWorld();
   readonly budget = new ExecutionBudget();
@@ -75,6 +78,8 @@ export class Runtime {
   threads?: Scheduler;
   /** The globals of the standard library modules written in Python. */
   readonly libraryNamespaces = new WeakSet<Map<string, PyValue>>();
+  /** Whether any library module written in Python was imported, without which no frame is a library frame. */
+  private hasLibraryNamespaces = false;
   private readonly libraryEntryRows = new WeakMap<Frame, number | undefined>();
   /** What `print` wrote to stderr, which learners do not see, as Java's `System.err` output. */
   errorOutput = '';
@@ -118,16 +123,27 @@ export class Runtime {
   }
 
   chargeBigint(a: bigint, b: bigint): void {
-    if (a < 1n << 53n && a > -(1n << 53n) && b < 1n << 53n && b > -(1n << 53n)) return;
+    if (a < SAFE_INTEGER_BOUND && a > -SAFE_INTEGER_BOUND && b < SAFE_INTEGER_BOUND && b > -SAFE_INTEGER_BOUND) return;
     this.chargeBits(BigInt(a.toString(16).length * 4 + b.toString(16).length * 4));
   }
 
   // Frames and calls ------------------------------------------------------------------------------------------------
 
+  /** Marks the globals of a standard library module written in Python, whose frames stay out of the trace. */
+  addLibraryNamespace(namespace: Map<string, PyValue>): void {
+    this.libraryNamespaces.add(namespace);
+    this.hasLibraryNamespaces = true;
+  }
+
   pushFrame(frame: Frame): void {
     if (this.frames.length >= Math.min(this.recursionLimit, LIMITS.maxCallDepth)) {
       throw pyError('RecursionError', 'maximum recursion depth exceeded');
     }
+    if (this.hasLibraryNamespaces) this.noteLibraryFrame(frame);
+    this.frames.push(frame);
+  }
+
+  private noteLibraryFrame(frame: Frame): void {
     // The frames of standard library modules written in Python stay out of the trace, as native code does: they show
     // no call line, and the program's functions they call count as called from the program's row that entered them.
     if (this.libraryNamespaces.has(frame.globals)) {
@@ -136,13 +152,13 @@ export class Runtime {
     } else if (frame.callRow !== undefined && this.libraryEntryRows.has(this.frames.at(-1) as Frame)) {
       frame.callRow = this.callerRow();
     }
-    this.frames.push(frame);
   }
 
   popFrame(): void {
     const frame = this.frames.pop();
     if (frame?.isAtomic) this.steps.completeAtomicCall();
-    if (frame && this.libraryEntryRows.has(frame)) this.currentRow = this.libraryEntryRows.get(frame);
+    if (this.hasLibraryNamespaces && frame && this.libraryEntryRows.has(frame))
+      this.currentRow = this.libraryEntryRows.get(frame);
   }
 
   /**
@@ -174,10 +190,7 @@ export class Runtime {
     try {
       return run();
     } catch (error) {
-      if (isHostStackOverflow(error)) {
-        throw pyError('RecursionError', 'maximum recursion depth exceeded');
-      }
-      throw error;
+      throw recursionErrorFor(error);
     }
   }
 
@@ -202,8 +215,10 @@ export class Runtime {
     this.pushFrame(frame);
     let result: PyValue | undefined;
     try {
-      result = this.guardRecursion(() => this.evaluator.runFunction(fn, frame));
+      result = this.evaluator.runFunction(fn, frame);
       return result;
+    } catch (error) {
+      throw recursionErrorFor(error);
     } finally {
       this.popFrame();
       // The function's variables die with its frame, which closes a generator only they held.
@@ -473,6 +488,11 @@ export class Runtime {
     if (this.threads) roots.push(...this.threads.roots());
     return roots;
   }
+}
+
+/** The error to raise for an error thrown while running Python code, turning the host's stack overflow into Python's. */
+function recursionErrorFor(error: unknown): unknown {
+  return isHostStackOverflow(error) ? pyError('RecursionError', 'maximum recursion depth exceeded') : error;
 }
 
 /** `list[int]` and the like, which type hints use. */

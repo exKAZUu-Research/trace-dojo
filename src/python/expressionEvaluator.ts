@@ -102,6 +102,9 @@ export class ExpressionEvaluator {
       }
       case 'binary': {
         const left = this.evaluate(expression.left, frame);
+        // Garbage collection only looks for objects among the values held.
+        if (typeof left !== 'object')
+          return binaryOp(expression.operator, left, this.evaluate(expression.right, frame));
         return this.hold(frame, left, () =>
           binaryOp(expression.operator, left, this.evaluate(expression.right, frame))
         );
@@ -245,26 +248,13 @@ export class ExpressionEvaluator {
   }
 
   storeName(ref: NameRef, value: PyValue, frame: Frame): void {
-    const { name } = ref;
     const { finalizer } = this.runtime;
-    const replaced = finalizer.pending.size > 0 ? this.boundValue(ref, frame) : undefined;
-    switch (ref.access) {
-      case 'local':
-      case 'name': {
-        frame.locals.set(name, value);
-        break;
-      }
-      case 'cell':
-      case 'classCell': {
-        const cell = frame.cells.get(name);
-        if (cell) cell.value = value;
-        else frame.cells.set(name, new PyCell(value));
-        break;
-      }
-      default: {
-        frame.globals.set(name, value);
-      }
+    if (finalizer.pending.size === 0) {
+      bindName(ref, value, frame);
+      return;
     }
+    const replaced = this.boundValue(ref, frame);
+    bindName(ref, value, frame);
     if (finalizer.mayRelease(replaced)) finalizer.closeUnreachable();
   }
 
@@ -450,14 +440,19 @@ export class ExpressionEvaluator {
 
   private call(expression: Extract<Expression, { kind: 'call' }>, frame: Frame): PyValue {
     const callee = this.evaluate(expression.callee, frame);
-    let passed: PyValue[] = [];
-    const result = this.withTemporaries(frame, () => {
-      frame.temporaries.push(callee);
-      const { args, kwargs } = this.arguments(expression.args, frame, callee);
-      passed = args;
-      return this.invoke(callee, args, kwargs, expression.row);
-    });
-    this.afterCall(passed, result);
+    const { temporaries } = frame;
+    const length = temporaries.length;
+    temporaries.push(callee);
+    let args: PyValue[];
+    let result: PyValue;
+    try {
+      const collected = this.arguments(expression.args, frame, callee);
+      args = collected.args;
+      result = this.invoke(callee, args, collected.kwargs, expression.row);
+    } finally {
+      temporaries.length = length;
+    }
+    this.afterCall(args, result);
     return result;
   }
 
@@ -486,8 +481,15 @@ export class ExpressionEvaluator {
    */
   arguments(argumentList: Argument[], frame: Frame, callee: PyValue, leading = 0): CallArguments {
     const collected: CallArguments = { args: [], kwargs: undefined };
-    for (const argument of argumentList)
-      addArgument(collected, argument, this.evaluate(argument.value, frame), { callee, argumentList, leading }, frame);
+    for (const argument of argumentList) {
+      const value = this.evaluate(argument.value, frame);
+      if (argument.kind === 'positional') {
+        collected.args.push(value);
+        frame.temporaries.push(value);
+      } else {
+        addArgument(collected, argument, value, { callee, argumentList, leading }, frame);
+      }
+    }
     return collected;
   }
 
@@ -719,6 +721,27 @@ function unboundLocal(name: string): PyError {
   const state = error.exception.exception;
   if (state) state.name = name;
   return error;
+}
+
+function bindName(ref: NameRef, value: PyValue, frame: Frame): void {
+  const { name } = ref;
+  switch (ref.access) {
+    case 'local':
+    case 'name': {
+      frame.locals.set(name, value);
+      return;
+    }
+    case 'cell':
+    case 'classCell': {
+      const cell = frame.cells.get(name);
+      if (cell) cell.value = value;
+      else frame.cells.set(name, new PyCell(value));
+      return;
+    }
+    default: {
+      frame.globals.set(name, value);
+    }
+  }
 }
 
 /** The positional and keyword arguments of a call, collected in order. */
