@@ -177,6 +177,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'urllib',
   'urllib.parse',
   'uuid',
+  'wave',
   'weakref',
   'warnings',
   'zipfile',

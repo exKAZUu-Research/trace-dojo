@@ -135,6 +135,7 @@ import './modules/datetimePickle';
 import './modules/stdlibPickle';
 import './modules/pickle';
 import './modules/pickletools';
+import './modules/wave';
 import './modules/marshal';
 import './modules/gzip';
 import './modules/doctest';
