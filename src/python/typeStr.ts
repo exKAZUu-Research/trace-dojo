@@ -21,6 +21,17 @@ import {
   typeName,
   valueError,
 } from './types';
+import {
+  capitalize,
+  casefold,
+  isLowerText,
+  isTitleText,
+  isUpperText,
+  lower,
+  swapcase,
+  title,
+  upper,
+} from './unicodeCase';
 import { type DONE, PyDict, PySlice, PyTuple, type PyValue } from './values';
 
 strClass.construct = (_cls, args, kwargs) => {
@@ -63,18 +74,6 @@ function isAlpha(char: string): boolean {
   return /\p{L}/u.test(char);
 }
 
-function isCased(char: string): boolean {
-  return char.toLowerCase() !== char.toUpperCase() || /\p{Lt}/u.test(char);
-}
-
-function isUpperChar(char: string): boolean {
-  return /\p{Lu}|\p{Lt}/u.test(char) || (isCased(char) && char === char.toUpperCase() && char !== char.toLowerCase());
-}
-
-function isLowerChar(char: string): boolean {
-  return /\p{Ll}/u.test(char) || (isCased(char) && char === char.toLowerCase() && char !== char.toUpperCase());
-}
-
 const asStr = (self: PyValue): string => self as string;
 
 function expectStr(value: PyValue, what: string): string {
@@ -104,35 +103,12 @@ method(strClass, '__format__', 'one', 1, 1, (self, [spec]) => pyFormat(self, exp
 
 // Case --------------------------------------------------------------------------------------------------------------
 
-method(strClass, 'upper', 'none', 0, 0, (self) => asStr(self).toUpperCase());
-method(strClass, 'lower', 'none', 0, 0, (self) => asStr(self).toLowerCase());
-method(strClass, 'casefold', 'none', 0, 0, (self) =>
-  asStr(self).toLowerCase().replaceAll('ß', 'ss').replaceAll('ς', 'σ')
-);
-method(strClass, 'swapcase', 'none', 0, 0, (self) =>
-  iterStr(asStr(self))
-    .map((char) => (isUpperChar(char) ? char.toLowerCase() : isLowerChar(char) ? char.toUpperCase() : char))
-    .join('')
-);
-method(strClass, 'capitalize', 'none', 0, 0, (self) => {
-  const [first = '', ...rest] = iterStr(asStr(self));
-  return titleCase(first) + rest.join('').toLowerCase();
-});
-method(strClass, 'title', 'none', 0, 0, (self) => {
-  let previousCased = false;
-  let result = '';
-  for (const char of iterStr(asStr(self))) {
-    result += previousCased ? char.toLowerCase() : titleCase(char);
-    previousCased = isCased(char);
-  }
-  return result;
-});
-
-/** The titlecase form of a character, which differs from its uppercase for digraphs such as ǆ. */
-function titleCase(char: string): string {
-  const special: Record<string, string> = { ǆ: 'ǅ', Ǆ: 'ǅ', ǉ: 'ǈ', Ǉ: 'ǈ', ǌ: 'ǋ', Ǌ: 'ǋ', ǳ: 'ǲ', Ǳ: 'ǲ', ß: 'Ss' };
-  return special[char] ?? char.toUpperCase();
-}
+method(strClass, 'upper', 'none', 0, 0, (self) => upper(asStr(self)));
+method(strClass, 'lower', 'none', 0, 0, (self) => lower(asStr(self)));
+method(strClass, 'casefold', 'none', 0, 0, (self) => casefold(asStr(self)));
+method(strClass, 'swapcase', 'none', 0, 0, (self) => swapcase(asStr(self)));
+method(strClass, 'capitalize', 'none', 0, 0, (self) => capitalize(asStr(self)));
+method(strClass, 'title', 'none', 0, 0, (self) => title(asStr(self)));
 
 // Predicates --------------------------------------------------------------------------------------------------------
 
@@ -148,32 +124,9 @@ method(strClass, 'isspace', 'none', 0, 0, (self) => every(asStr(self), isSpace))
 method(strClass, 'isascii', 'none', 0, 0, (self) => /^[\u0000-\u007F]*$/.test(asStr(self)));
 method(strClass, 'isprintable', 'none', 0, 0, (self) => iterStr(asStr(self)).every(isPrintable));
 method(strClass, 'isidentifier', 'none', 0, 0, (self) => /^[\p{XID_Start}_][\p{XID_Continue}]*$/u.test(asStr(self)));
-method(strClass, 'isupper', 'none', 0, 0, (self) => {
-  const cased = iterStr(asStr(self)).filter(isCased);
-  return cased.length > 0 && cased.every((char) => !isLowerChar(char));
-});
-method(strClass, 'islower', 'none', 0, 0, (self) => {
-  const cased = iterStr(asStr(self)).filter(isCased);
-  return cased.length > 0 && cased.every((char) => !isUpperChar(char));
-});
-method(strClass, 'istitle', 'none', 0, 0, (self) => {
-  let previousCased = false;
-  let sawCased = false;
-  for (const char of iterStr(asStr(self))) {
-    if (isUpperChar(char)) {
-      if (previousCased) return false;
-      previousCased = true;
-      sawCased = true;
-    } else if (isLowerChar(char)) {
-      if (!previousCased) return false;
-      previousCased = true;
-      sawCased = true;
-    } else {
-      previousCased = false;
-    }
-  }
-  return sawCased;
-});
+method(strClass, 'isupper', 'none', 0, 0, (self) => isUpperText(asStr(self)));
+method(strClass, 'islower', 'none', 0, 0, (self) => isLowerText(asStr(self)));
+method(strClass, 'istitle', 'none', 0, 0, (self) => isTitleText(asStr(self)));
 
 // Searching ---------------------------------------------------------------------------------------------------------
 
