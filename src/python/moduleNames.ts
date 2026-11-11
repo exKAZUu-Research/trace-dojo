@@ -38,6 +38,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'datetime',
   'decimal',
   'difflib',
+  'doctest',
   'enum',
   'errno',
   'fnmatch',

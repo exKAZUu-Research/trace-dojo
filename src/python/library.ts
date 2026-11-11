@@ -117,4 +117,5 @@ import './modules/stdlibPickle';
 import './modules/pickle';
 import './modules/marshal';
 import './modules/gzip';
+import './modules/doctest';
 import './modules/unittest/unittest';

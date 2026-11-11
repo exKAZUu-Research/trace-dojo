@@ -15,6 +15,7 @@ import { AsyncEvaluator } from './asyncEvaluator';
 import { createClass } from './classes';
 import { pyRepr } from './conversions';
 import { asyncYield } from './coroutines';
+import { displayValue } from './display';
 import { exceptionGroupOf, splitGroup } from './exceptionGroups';
 import { mappingEntries, storeKey } from './expressionEvaluator';
 import type { Frame } from './frame';
@@ -210,6 +211,7 @@ export class Evaluator extends AsyncEvaluator {
     const result = runtime.steps.runStatement(statement.stepRow, expression.kind === 'call', () =>
       this.evaluate(expression, frame)
     );
+    if (statement.displays) displayValue(runtime, result);
     // The statement drops its value, which closes a generator that only the value held.
     if (runtime.finalizer.pending.size > 0) this.release(result);
   }

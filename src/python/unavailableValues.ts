@@ -48,3 +48,8 @@ for (const name of OPERATIONS) {
 export function unavailableValue(feature: string): PyValue {
   return new PyOpaque(unavailableClass, feature);
 }
+
+/** Whether a value stands for one this grader cannot reproduce, which has no attributes a program could read. */
+export function isUnavailable(value: PyValue): boolean {
+  return value instanceof PyOpaque && value.cls === unavailableClass;
+}

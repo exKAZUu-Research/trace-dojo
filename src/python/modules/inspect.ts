@@ -1,3 +1,4 @@
+import { pyRepr } from '../conversions';
 import {
   isAsyncGenerator,
   isAsyncGeneratorFunction,
@@ -8,9 +9,11 @@ import {
 import { builtin } from '../define';
 import { registerModule } from '../modules';
 import { callValue, getAttribute, getAttributeOrUndefined, isTruthy } from '../objects';
+import type { Runtime } from '../runtime';
 import { currentRuntime } from '../runtimeContext';
 import { IS_ABSTRACT, typeFlags } from '../typeFlags';
-import { builtinFunctionClass, classOf, generatorClass, None, typeError } from '../types';
+import { builtinFunctionClass, classOf, generatorClass, None, typeError, valueError } from '../types';
+import { isUnavailable } from '../unavailableValues';
 import { UnsupportedFeatureError } from '../unsupported';
 import { PyBoundMethod, PyBuiltinFunction, PyClass, PyFunction, PyGenerator, PyModule, type PyValue } from '../values';
 import { emptyClass, formatAnnotation, parameterClass, signature, signatureClass } from './inspectSignature';
@@ -40,7 +43,7 @@ const PREDICATES: [string, (value: PyValue) => boolean][] = [
 
 registerModule(
   'inspect',
-  () =>
+  (runtime) =>
     new Map<string, PyValue>([
       ...PREDICATES.map(([name, test]): [string, PyValue] => [
         name,
@@ -58,6 +61,13 @@ registerModule(
       ['getdoc', builtin('getdoc', 'one', 1, 1, ([value]) => getDoc(value))],
       ['cleandoc', builtin('cleandoc', 'one', 1, 1, ([doc]) => cleanDoc(doc))],
       ['getmro', builtin('getmro', 'one', 1, 1, ([cls]) => getAttribute(cls, '__mro__'))],
+      ['getmodule', builtin('getmodule', 'takes', 1, 2, ([value]) => getModule(runtime, value))],
+      [
+        'unwrap',
+        builtin('unwrap', 'takes', 1, 1, ([value], kwargs) => unwrap(value, kwargs?.get('stop')), {
+          keywords: ['stop'],
+        }),
+      ],
     ]),
   Object.fromEntries(
     [
@@ -65,7 +75,6 @@ registerModule(
       ['getsourcelines', 'ソースコード'],
       ['getsourcefile', 'ソースファイル'],
       ['getfile', 'ソースファイル'],
-      ['getmodule', 'オブジェクトを定義したモジュール'],
       ['getcomments', 'ソースコードのコメント'],
       ['currentframe', 'フレームオブジェクト'],
       ['stack', 'フレームオブジェクト'],
@@ -77,7 +86,6 @@ registerModule(
       ['getgeneratorlocals', 'ジェネレータの内部状態'],
       ['getclosurevars', '関数の内部状態'],
       ['getattr_static', 'inspect.getattr_static()'],
-      ['unwrap', 'inspect.unwrap()'],
       ['getfullargspec', 'inspect.getfullargspec()'],
       ['getcallargs', 'inspect.getcallargs()'],
       ['isdatadescriptor', 'inspect.isdatadescriptor()'],
@@ -85,6 +93,32 @@ registerModule(
     ].map(([name, feature]) => [name, `inspect.${name}()（${feature}）`])
   )
 );
+
+/**
+ * `inspect.getmodule`: a module itself, or the module its `__module__` names. CPython looks for other objects by their
+ * source file, which only code objects, frames, and tracebacks have, which this grader does not expose.
+ */
+function getModule(runtime: Runtime, value: PyValue): PyValue {
+  if (value instanceof PyModule) return value;
+  const name = getAttributeOrUndefined(value, '__module__');
+  if (name === undefined) return None;
+  const table = getAttribute(runtime.importModule('sys'), 'modules');
+  return callValue(getAttribute(table, 'get'), [name]);
+}
+
+/** `inspect.unwrap`: follows the chain of `__wrapped__` attributes, as decorators made with `functools.wraps` leave. */
+function unwrap(start: PyValue, stop: PyValue | undefined): PyValue {
+  let fn = start;
+  const seen = new Set<PyValue>([fn]);
+  const limit = currentRuntime().recursionLimit;
+  while (!(fn instanceof PyClass) && !isUnavailable(fn) && getAttributeOrUndefined(fn, '__wrapped__') !== undefined) {
+    if (stop !== undefined && stop !== None && isTruthy(callValue(stop, [fn]))) break;
+    fn = getAttribute(fn, '__wrapped__');
+    if (seen.has(fn) || seen.size >= limit) throw valueError(`wrapper loop when unwrapping ${pyRepr(start)}`);
+    seen.add(fn);
+  }
+  return fn;
+}
 
 function isGeneratorFunction(value: PyValue): boolean {
   const fn = value instanceof PyBoundMethod ? value.fn : value;
