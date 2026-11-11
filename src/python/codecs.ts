@@ -23,8 +23,17 @@ export interface TextCodec {
   inlineHandlers?: { encode: ReadonlySet<string>; decode: ReadonlySet<string> };
   /** How many bytes at the end of data start a sequence that more data may complete, for incremental decoding. */
   incompleteTail?: (data: Uint8Array) => number;
-  /** Whether the codec keeps a state between characters, which decoding a stream piece by piece must carry over. */
-  stateful?: boolean;
+  /**
+   * A decoder that keeps the codec's state from one piece of data to the next, which decodes as far as it can unless
+   * `final` and says how many bytes it used; codecs without one decode each piece afresh.
+   */
+  incrementalDecoder?: () => (
+    data: Uint8Array,
+    errors: ErrorHandling,
+    final: boolean
+  ) => { text: string; consumed: number };
+  /** An encoder that keeps the codec's state, and characters that wait for the next, until `final`. */
+  incrementalEncoder?: () => (points: readonly number[], errors: ErrorHandling, final: boolean) => Uint8Array;
 }
 
 /** Creates the codec a module name stands for, loading its tables only when a program uses it. */

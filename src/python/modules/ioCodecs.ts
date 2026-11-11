@@ -5,6 +5,7 @@ import { builtin } from '../define';
 import { currentRuntime } from '../runtimeContext';
 import { newTuple } from '../types';
 import { PyError, type PyValue } from '../values';
+import { statefulCodecFunction } from './codecsNative';
 
 // The incremental codecs TextIOWrapper reads and writes through, which decode a chunk of bytes as far as its last
 // complete character and keep the rest, with the byte order a UTF-16 or UTF-32 stream's BOM chose as their state.
@@ -29,6 +30,12 @@ export function ioCodecNatives(): [string, PyValue][] {
       '_encode_chunk',
       builtin('_encode_chunk', 'expected', 4, 4, ([encoding, errors, text, started]) =>
         newBytes(encodeChunk(encoding as string, errors as string, text as string, started === true))
+      ),
+    ],
+    [
+      '_stateful_codec',
+      builtin('_stateful_codec', 'expected', 2, 2, ([encoding, direction]) =>
+        statefulCodecFunction(encoding as string, direction as 'encode' | 'decode')
       ),
     ],
     [

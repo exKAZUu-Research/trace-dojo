@@ -1142,6 +1142,176 @@ if __name__ == '__main__':
     main()
 `;
 
+/** CPython's `encodings/charmap.py`. */
+export const CHARMAP = String.raw`""" Generic Python Character Mapping Codec.
+
+    Use this codec directly rather than through the automatic
+    conversion mechanisms supplied by unicode() and .encode().
+
+
+Written by Marc-Andre Lemburg (mal@lemburg.com).
+
+(c) Copyright CNRI, All Rights Reserved. NO WARRANTY.
+
+"""#"
+
+import codecs
+
+### Codec APIs
+
+class Codec(codecs.Codec):
+
+    # Note: Binding these as C functions will result in the class not
+    # converting them to methods. This is intended.
+    encode = codecs.charmap_encode
+    decode = codecs.charmap_decode
+
+class IncrementalEncoder(codecs.IncrementalEncoder):
+    def __init__(self, errors='strict', mapping=None):
+        codecs.IncrementalEncoder.__init__(self, errors)
+        self.mapping = mapping
+
+    def encode(self, input, final=False):
+        return codecs.charmap_encode(input, self.errors, self.mapping)[0]
+
+class IncrementalDecoder(codecs.IncrementalDecoder):
+    def __init__(self, errors='strict', mapping=None):
+        codecs.IncrementalDecoder.__init__(self, errors)
+        self.mapping = mapping
+
+    def decode(self, input, final=False):
+        return codecs.charmap_decode(input, self.errors, self.mapping)[0]
+
+class StreamWriter(Codec,codecs.StreamWriter):
+
+    def __init__(self,stream,errors='strict',mapping=None):
+        codecs.StreamWriter.__init__(self,stream,errors)
+        self.mapping = mapping
+
+    def encode(self,input,errors='strict'):
+        return Codec.encode(input,errors,self.mapping)
+
+class StreamReader(Codec,codecs.StreamReader):
+
+    def __init__(self,stream,errors='strict',mapping=None):
+        codecs.StreamReader.__init__(self,stream,errors)
+        self.mapping = mapping
+
+    def decode(self,input,errors='strict'):
+        return Codec.decode(input,errors,self.mapping)
+
+### encodings module API
+
+def getregentry():
+    return codecs.CodecInfo(
+        name='charmap',
+        encode=Codec.encode,
+        decode=Codec.decode,
+        incrementalencoder=IncrementalEncoder,
+        incrementaldecoder=IncrementalDecoder,
+        streamwriter=StreamWriter,
+        streamreader=StreamReader,
+    )
+`;
+
+/** CPython's `encodings/unicode_escape.py`. */
+export const UNICODE_ESCAPE = String.raw`""" Python 'unicode-escape' Codec
+
+
+Written by Marc-Andre Lemburg (mal@lemburg.com).
+
+(c) Copyright CNRI, All Rights Reserved. NO WARRANTY.
+
+"""
+import codecs
+
+### Codec APIs
+
+class Codec(codecs.Codec):
+
+    # Note: Binding these as C functions will result in the class not
+    # converting them to methods. This is intended.
+    encode = codecs.unicode_escape_encode
+    decode = codecs.unicode_escape_decode
+
+class IncrementalEncoder(codecs.IncrementalEncoder):
+    def encode(self, input, final=False):
+        return codecs.unicode_escape_encode(input, self.errors)[0]
+
+class IncrementalDecoder(codecs.BufferedIncrementalDecoder):
+    def _buffer_decode(self, input, errors, final):
+        return codecs.unicode_escape_decode(input, errors, final)
+
+class StreamWriter(Codec,codecs.StreamWriter):
+    pass
+
+class StreamReader(Codec,codecs.StreamReader):
+    def decode(self, input, errors='strict'):
+        return codecs.unicode_escape_decode(input, errors, False)
+
+### encodings module API
+
+def getregentry():
+    return codecs.CodecInfo(
+        name='unicode-escape',
+        encode=Codec.encode,
+        decode=Codec.decode,
+        incrementalencoder=IncrementalEncoder,
+        incrementaldecoder=IncrementalDecoder,
+        streamwriter=StreamWriter,
+        streamreader=StreamReader,
+    )
+`;
+
+/** CPython's `encodings/raw_unicode_escape.py`. */
+export const RAW_UNICODE_ESCAPE = String.raw`""" Python 'raw-unicode-escape' Codec
+
+
+Written by Marc-Andre Lemburg (mal@lemburg.com).
+
+(c) Copyright CNRI, All Rights Reserved. NO WARRANTY.
+
+"""
+import codecs
+
+### Codec APIs
+
+class Codec(codecs.Codec):
+
+    # Note: Binding these as C functions will result in the class not
+    # converting them to methods. This is intended.
+    encode = codecs.raw_unicode_escape_encode
+    decode = codecs.raw_unicode_escape_decode
+
+class IncrementalEncoder(codecs.IncrementalEncoder):
+    def encode(self, input, final=False):
+        return codecs.raw_unicode_escape_encode(input, self.errors)[0]
+
+class IncrementalDecoder(codecs.BufferedIncrementalDecoder):
+    def _buffer_decode(self, input, errors, final):
+        return codecs.raw_unicode_escape_decode(input, errors, final)
+
+class StreamWriter(Codec,codecs.StreamWriter):
+    pass
+
+class StreamReader(Codec,codecs.StreamReader):
+    def decode(self, input, errors='strict'):
+        return codecs.raw_unicode_escape_decode(input, errors, False)
+
+### encodings module API
+
+def getregentry():
+    return codecs.CodecInfo(
+        name='raw-unicode-escape',
+        encode=Codec.encode,
+        decode=Codec.decode,
+        incrementalencoder=IncrementalEncoder,
+        incrementaldecoder=IncrementalDecoder,
+        streamwriter=StreamWriter,
+        streamreader=StreamReader,
+    )
+`;
+
 /** CPython's `stringprep.py`. */
 export const STRINGPREP = String.raw`# This file is generated by mkstringprep.py. DO NOT EDIT.
 """Library that exposes various tables found in the StringPrep RFC 3454.

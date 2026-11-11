@@ -6,10 +6,10 @@ import { CJK_ENCODINGS, CJK_SEQUENCES, CJK_TABLES, GB18030_RANGES } from './data
 /** The codec modules of this file, whose `encodings` modules are those of CPython's multibyte codecs. */
 export const CJK_MODULES = ['gb2312', 'gbk', 'gb18030', 'hz', 'big5', 'cp950', 'big5hkscs', 'euc_kr', 'cp949', 'johab'];
 
-const ILLEGAL = 'illegal multibyte sequence';
-const INCOMPLETE = 'incomplete multibyte sequence';
+export const ILLEGAL = 'illegal multibyte sequence';
+export const INCOMPLETE = 'incomplete multibyte sequence';
 /** The handlers CPython's multibyte codecs apply without creating an exception. */
-const INLINE_HANDLERS = { encode: new Set(['ignore', 'replace']), decode: new Set(['ignore', 'replace']) };
+export const INLINE_HANDLERS = { encode: new Set(['ignore', 'replace']), decode: new Set(['ignore', 'replace']) };
 const SKIP = 0xff_f0;
 const NEXT = 0xff_f1;
 const BASE = 0xff_f2;
@@ -57,6 +57,18 @@ function decodeTable(codec: string): Map<number, string> {
 }
 
 /** The tables of a codec, each character encoding to the last sequence that decodes to it unless listed otherwise. */
+const sharedTables = new Map<string, Tables>();
+
+/** The tables of a codec, built once, which the ISO-2022 codecs share. */
+export function cjkTables(codec: string): Tables {
+  let tables = sharedTables.get(codec);
+  if (!tables) {
+    tables = tablesOf(codec);
+    sharedTables.set(codec, tables);
+  }
+  return tables;
+}
+
 function tablesOf(codec: string): Tables {
   const decode = new Map(decodeTable(codec));
   const encode = new Map<number, number>();
@@ -73,9 +85,10 @@ function tablesOf(codec: string): Tables {
 // Decoding ----------------------------------------------------------------------------------------------------------
 
 /** What decoding at a position finds: text and the bytes it took, an illegal byte, or a sequence the data cuts off. */
-type Step = { text: string; length: number } | 'illegal' | 'incomplete';
+/** A step can also report an illegal sequence of more than one byte, as JIS X 0213:2000's emulation does. */
+export type Step = { text: string; length: number } | { illegal: number } | 'illegal' | 'incomplete';
 
-type Stepper = (data: Uint8Array, index: number) => Step;
+export type Stepper = (data: Uint8Array, index: number) => Step;
 
 /** The step of a codec of ASCII and two-byte sequences, each byte above ASCII leading one. */
 function pairStep(decode: Map<number, string>, data: Uint8Array, index: number): Step {
@@ -86,21 +99,21 @@ function pairStep(decode: Map<number, string>, data: Uint8Array, index: number):
   return text === undefined ? 'illegal' : { text, length: 2 };
 }
 
-function decodeSteps(data: Uint8Array, errors: ErrorHandling, step: Stepper): string {
+export function decodeSteps(data: Uint8Array, errors: ErrorHandling, step: Stepper): string {
   return decodeWithSteps(data, errors, (bytes, index) => {
     const found = step(bytes, index);
-    if (typeof found === 'object') return found;
+    if (typeof found === 'object') return 'illegal' in found ? { reason: ILLEGAL, end: index + found.illegal } : found;
     return found === 'incomplete' ? { reason: INCOMPLETE, end: bytes.length } : { reason: ILLEGAL, end: index + 1 };
   });
 }
 
 /** The bytes at the end of data that start a sequence more data may complete. */
-function incompleteTail(data: Uint8Array, step: Stepper): number {
+export function incompleteTail(data: Uint8Array, step: Stepper): number {
   let index = 0;
   while (index < data.length) {
     const found = step(data, index);
     if (found === 'incomplete') return data.length - index;
-    index += typeof found === 'object' ? found.length : 1;
+    index += typeof found !== 'object' ? 1 : 'illegal' in found ? found.illegal : found.length;
   }
   return 0;
 }
@@ -108,10 +121,10 @@ function incompleteTail(data: Uint8Array, step: Stepper): number {
 // Encoding ----------------------------------------------------------------------------------------------------------
 
 /** Writes the bytes of the characters at `index`, returning how many characters it took, or 0 when it cannot. */
-type Encoder = (points: readonly number[], index: number, out: number[]) => number;
+export type Encoder = (points: readonly number[], index: number, out: number[]) => number;
 
 /** Encodes characters, giving each one the encoder refuses to the error handler, as CPython's multibyte codecs do. */
-function encodeSteps(points: readonly number[], errors: ErrorHandling, encode: Encoder): number[] {
+export function encodeSteps(points: readonly number[], errors: ErrorHandling, encode: Encoder): number[] {
   const out: number[] = [];
   let index = 0;
   while (index < points.length) {
@@ -151,7 +164,64 @@ function pairEncoder(encode: Map<number, number>): Encoder {
   };
 }
 
-function doubleByteCodec(name: string, step: Stepper, encoder: Encoder): TextCodec {
+/** The parts of a codec that keeps a state: its decoder's steps and its encoder, made afresh for each text. */
+export interface StatefulParts {
+  decoder: () => Stepper;
+  encoder: () => { step: Encoder; reset: (out: number[]) => void };
+  /** Whether a character at the end of a piece waits for the next, which may combine with it. */
+  waitsAfter?: (point: number) => boolean;
+}
+
+/** Decodes as far as the data goes, stopping before a sequence the data cuts off unless `final`. */
+function decodeIncrementally(
+  data: Uint8Array,
+  errors: ErrorHandling,
+  final: boolean,
+  step: Stepper
+): { text: string; consumed: number } {
+  let consumed = data.length;
+  const text = decodeSteps(data, errors, (bytes, index) => {
+    if (consumed !== data.length) return { text: '', length: bytes.length - index };
+    const found = step(bytes, index);
+    if (found !== 'incomplete' || final) return found;
+    consumed = index;
+    return { text: '', length: bytes.length - index };
+  });
+  return { text, consumed };
+}
+
+export function registerStatefulCodec(name: string, parts: StatefulParts): void {
+  registerCodec(name, () => ({
+    name,
+    inlineHandlers: INLINE_HANDLERS,
+    encode: (points, errors) => {
+      const { step, reset } = parts.encoder();
+      const out = encodeSteps(points, errors, step);
+      reset(out);
+      return Uint8Array.from(out);
+    },
+    decode: (data, errors) => decodeSteps(data, errors, parts.decoder()),
+    incompleteTail: (data) => incompleteTail(data, parts.decoder()),
+    incrementalDecoder: () => {
+      const step = parts.decoder();
+      return (data, errors, final) => decodeIncrementally(data, errors, final, step);
+    },
+    incrementalEncoder: () => {
+      const { step, reset } = parts.encoder();
+      let pending: number[] = [];
+      return (points, errors, final) => {
+        const all = [...pending, ...points];
+        const keep = !final && all.length > 0 && parts.waitsAfter?.(all.at(-1) as number) === true ? 1 : 0;
+        pending = all.slice(all.length - keep);
+        const out = encodeSteps(all.slice(0, all.length - keep), errors, step);
+        if (final) reset(out);
+        return Uint8Array.from(out);
+      };
+    },
+  }));
+}
+
+export function doubleByteCodec(name: string, step: Stepper, encoder: Encoder): TextCodec {
   return {
     name,
     inlineHandlers: INLINE_HANDLERS,
@@ -325,36 +395,39 @@ registerCodec('euc_kr', () => {
 // HZ ----------------------------------------------------------------------------------------------------------------
 
 /** HZ, which writes GB2312 in seven bits between `~{` and `~}`, and `~~` for a tilde. */
-function hzCodec(): TextCodec {
+function hzParts(): StatefulParts {
   const gb2312 = tablesOf('gb2312');
   return {
-    name: 'hz',
-    inlineHandlers: INLINE_HANDLERS,
-    encode: (points, errors) => encodeHz(points, errors, gb2312.encode),
-    decode: (data, errors) => {
+    decoder: () => {
       const state = { inGb: false };
-      return decodeSteps(data, errors, (bytes, index) => hzStep(bytes, index, state, gb2312.decode));
+      return (bytes, index) => hzStep(bytes, index, state, gb2312.decode);
     },
-    stateful: true,
+    encoder: () => {
+      const state = { inGb: false };
+      return {
+        step: hzEncoder(state, gb2312.encode),
+        reset: (out) => {
+          if (state.inGb) out.push(0x7e, 0x7d);
+          state.inGb = false;
+        },
+      };
+    },
   };
 }
 
-/** Encodes in ASCII and in GB2312 between `~{` and `~}`, ending in ASCII. */
-function encodeHz(points: readonly number[], errors: ErrorHandling, encode: Map<number, number>): Uint8Array {
-  let inGb = false;
-  const out = encodeSteps(points, errors, (all, index, bytes) => {
+/** Encodes in ASCII and in GB2312 between `~{` and `~}`. */
+function hzEncoder(state: { inGb: boolean }, encode: Map<number, number>): Encoder {
+  return (all, index, bytes) => {
     const point = all[index];
     const packed = encode.get(point);
     if (point >= 0x80 && packed === undefined) return 0;
-    if (point < 0x80 === inGb) bytes.push(0x7e, inGb ? 0x7d : 0x7b);
-    inGb = point >= 0x80;
+    if (point < 0x80 === state.inGb) bytes.push(0x7e, state.inGb ? 0x7d : 0x7b);
+    state.inGb = point >= 0x80;
     if (point === 0x7e) bytes.push(0x7e, 0x7e);
-    else if (inGb) bytes.push(((packed as number) >> 8) & 0x7f, (packed as number) & 0x7f);
+    else if (state.inGb) bytes.push(((packed as number) >> 8) & 0x7f, (packed as number) & 0x7f);
     else bytes.push(point);
     return 1;
-  });
-  if (inGb) out.push(0x7e, 0x7d);
-  return Uint8Array.from(out);
+  };
 }
 
 /** Decodes the character or escape at `index`, in ASCII or, after `~{`, in GB2312's seven-bit bytes. */
@@ -379,4 +452,9 @@ function hzEscape(bytes: Uint8Array, index: number, state: { inGb: boolean }): S
   return { text: '', length: 2 };
 }
 
-registerCodec('hz', hzCodec);
+// HZ's tables are built when a program first uses it.
+let hz: StatefulParts | undefined;
+registerStatefulCodec('hz', {
+  decoder: () => (hz ??= hzParts()).decoder(),
+  encoder: () => (hz ??= hzParts()).encoder(),
+});

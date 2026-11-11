@@ -1,5 +1,5 @@
-// CPython's Japanese codecs: shift_jis, cp932, euc_jp, and iso2022_jp, built from the JIS tables when first used.
-import { decodeWithSteps, type ErrorHandling, registerCodec, type TextCodec } from './codecs';
+// CPython's Japanese codecs: shift_jis, cp932, and euc_jp, built from the JIS tables when first used.
+import { type ErrorHandling, registerCodec, type TextCodec } from './codecs';
 import {
   CP932_CHANGES,
   CP932_ROW_13,
@@ -121,6 +121,26 @@ function eucJpTables(): Tables {
   return buildTables(entries, YEN_AND_OVERLINE);
 }
 
+let eucJp: Tables | undefined;
+const eucJpTablesOnce = (): Tables => (eucJp ??= eucJpTables());
+
+/**
+ * CPython's `jisxcommon` map: the JIS X 0208 code of a character, or its JIS X 0212 code with the bit 0x8000, as
+ * EUC-JP encodes it, or undefined for a character in neither.
+ */
+export function jisxCommon(point: number): number | undefined {
+  const bytes = eucJpTablesOnce().encode.get(point);
+  if (bytes?.length === 2 && bytes[0] !== 0x8e) return ((bytes[0] & 0x7f) << 8) | (bytes[1] & 0x7f);
+  if (bytes?.length === 3) return 0x80_00 | ((bytes[1] & 0x7f) << 8) | (bytes[2] & 0x7f);
+  return undefined;
+}
+
+/** The character a JIS X 0208 or JIS X 0212 code (row and cell from 0x21) decodes to, as EUC-JP decodes it. */
+export function jisDecode(set: '0208' | '0212', first: number, second: number): number | undefined {
+  const bytes = set === '0208' ? [first | 0x80, second | 0x80] : [0x8f, first | 0x80, second | 0x80];
+  return eucJpTablesOnce().decode.get(packBytes(bytes));
+}
+
 // Shift_JIS, cp932, and EUC-JP --------------------------------------------------------------------------------------
 
 /**
@@ -188,144 +208,5 @@ registerCodec('cp932', () =>
   )
 );
 registerCodec('euc_jp', () =>
-  multibyteCodec('euc_jp', eucJpTables(), (byte) => (byte === 0x8f ? 3 : byte >= 0x80 ? 2 : 0))
+  multibyteCodec('euc_jp', eucJpTablesOnce(), (byte) => (byte === 0x8f ? 3 : byte >= 0x80 ? 2 : 0))
 );
-
-// ISO-2022-JP -------------------------------------------------------------------------------------------------------
-
-type Charset = 'ascii' | 'roman' | 'jis';
-
-const ESCAPES: Record<Charset, number[]> = {
-  ascii: [0x1b, 0x28, 0x42],
-  roman: [0x1b, 0x28, 0x4a],
-  jis: [0x1b, 0x24, 0x42],
-};
-/** The escape sequences the decoder accepts, which include JIS X 0208-1978's `ESC $ @`. */
-const DESIGNATIONS = new Map<string, Charset>([
-  ['(B', 'ascii'],
-  ['(J', 'roman'],
-  ['$@', 'jis'],
-  ['$B', 'jis'],
-]);
-
-function iso2022JpCodec(): TextCodec {
-  const jis = new Map<number, number>();
-  const encode = new Map<number, number[]>();
-  for (let index = 0; index < JIS_X_0208.length; index++) {
-    const char = JIS_X_0208[index];
-    if (char === UNASSIGNED) continue;
-    const bytes = [Math.floor(index / 94) + 0x21, (index % 94) + 0x21];
-    const point = char.codePointAt(0) as number;
-    jis.set(packBytes(bytes), point);
-    if (!encode.has(point)) encode.set(point, bytes);
-  }
-  return {
-    name: 'iso2022_jp',
-    inlineHandlers: INLINE_HANDLERS,
-    encode: (points, errors) => encodeIso2022Jp(points, errors, encode),
-    decode: (data, errors) => decodeIso2022Jp(data, errors, jis),
-  };
-}
-
-registerCodec('iso2022_jp', iso2022JpCodec);
-
-/** Encodes in ASCII, JIS X 0208, or JIS X 0201 Roman for ¥ and ‾, switching with escapes and ending in ASCII. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Follows CPython's ISO-2022-JP encoder, which switches character sets with escapes.
-// code-gauge-allow functionNcss 33 -- Follows CPython's ISO-2022-JP encoder, which switches character sets with escapes.
-function encodeIso2022Jp(points: readonly number[], errors: ErrorHandling, encode: Map<number, number[]>): Uint8Array {
-  let charset: Charset = 'ascii';
-  const out: number[] = [];
-  const write = (target: Charset, bytes: readonly number[]): void => {
-    if (charset !== target) out.push(...ESCAPES[target]);
-    charset = target;
-    out.push(...bytes);
-  };
-  const encodePoint = (point: number): boolean => {
-    const bytes = encode.get(point);
-    if (point < 0x80) write('ascii', [point]);
-    else if (bytes) write('jis', bytes);
-    else if (point === 0xa5 || point === 0x20_3e) write('roman', [point === 0xa5 ? 0x5c : 0x7e]);
-    else return false;
-    return true;
-  };
-  for (let index = 0; index < points.length; index++) {
-    if (encodePoint(points[index])) continue;
-    const replacement = errors.encodeError(index, index + 1, ILLEGAL);
-    if ('bytes' in replacement) out.push(...replacement.bytes);
-    else for (const char of replacement.text) encodePoint(char.codePointAt(0) as number);
-  }
-  if (charset !== 'ascii') out.push(...ESCAPES.ascii);
-  return Uint8Array.from(out);
-}
-
-/** The state of CPython's ISO-2022 decoder. */
-interface Iso2022State {
-  charset: Charset;
-  /** Set after an escape that starts no ISO-2022 sequence, until a final byte (A to Z or @) passes through. */
-  escapeThroughout: boolean;
-}
-
-type DecodeStep = { text: string; length: number } | { reason: string; length: number };
-
-const isEscapeEnd = (byte: number | undefined): boolean =>
-  byte !== undefined && ((byte >= 0x41 && byte <= 0x5a) || byte === 0x40);
-
-function decodeIso2022Jp(data: Uint8Array, errors: ErrorHandling, jis: Map<number, number>): string {
-  const state: Iso2022State = { charset: 'ascii', escapeThroughout: false };
-  return decodeWithSteps(data, errors, (bytes, index) => {
-    const step = decodeIso2022Step(bytes, index, state, jis);
-    return 'text' in step ? step : { reason: step.reason, end: Math.min(index + step.length, bytes.length) };
-  });
-}
-
-/** Decodes the character or escape sequence at `index`, or describes the error there. */
-// code-gauge-allow functionCognitiveComplexity 19 -- Follows the cases of CPython's ISO-2022 decoder.
-function decodeIso2022Step(data: Uint8Array, index: number, state: Iso2022State, jis: Map<number, number>): DecodeStep {
-  const byte = data[index];
-  const incomplete = { reason: INCOMPLETE, length: data.length - index };
-  if (state.escapeThroughout) {
-    if (isEscapeEnd(byte)) state.escapeThroughout = false;
-    return { text: String.fromCodePoint(byte), length: 1 };
-  }
-  if (byte === 0x1b) {
-    if (index + 1 >= data.length) return incomplete;
-    if (!'()$.&'.includes(String.fromCodePoint(data[index + 1]))) {
-      state.escapeThroughout = true;
-      return { text: '\u001B', length: 1 };
-    }
-    return processEscape(data, index, state);
-  }
-  if (byte >= 0x80) return { reason: ILLEGAL, length: 1 };
-  if (byte < 0x20 || state.charset === 'ascii') return { text: String.fromCodePoint(byte), length: 1 };
-  if (state.charset === 'roman') {
-    return { text: String.fromCodePoint(byte === 0x5c ? 0xa5 : byte === 0x7e ? 0x20_3e : byte), length: 1 };
-  }
-  if (index + 1 >= data.length) return incomplete;
-  const point = jis.get(packBytes([byte, data[index + 1]]));
-  return point === undefined ? { reason: ILLEGAL, length: 2 } : { text: String.fromCodePoint(point), length: 2 };
-}
-
-/** Applies the escape sequence at `index`, as CPython's iso2022processesc reads it. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes iso2022processesc.
-function processEscape(data: Uint8Array, index: number, state: Iso2022State): DecodeStep {
-  let length = 0;
-  for (let offset = 1; offset < 16; offset++) {
-    if (index + offset >= data.length) return { reason: INCOMPLETE, length: data.length - index };
-    if (isEscapeEnd(data[index + offset])) {
-      length = offset + 1;
-      break;
-    }
-    if (data[index + offset] === 0x26 && data[index + offset + 1] === 0x40) offset += 2;
-  }
-  const at = (offset: number): string => String.fromCodePoint(data[index + offset]);
-  let sequence: string | undefined;
-  if (length === 3) sequence = at(1) + at(2);
-  else if (length === 4 && at(1) === '$' && '()'.includes(at(2))) sequence = `$${at(2)}${at(3)}`;
-  else if (length === 6 && at(3) === '\u001B' && at(4) === '$' && at(5) === 'B') sequence = '$B';
-  // The sequences for G1 designate a set that the codec never shifts to.
-  const designation =
-    sequence === undefined ? undefined : DESIGNATIONS.get(sequence.replace(/^\$[()]/, '$').replace(/^\)/, '('));
-  if (length === 0 || designation === undefined) return { reason: ILLEGAL, length: length || 1 };
-  if (!sequence?.includes(')')) state.charset = designation;
-  return { text: '', length };
-}

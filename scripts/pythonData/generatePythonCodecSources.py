@@ -12,6 +12,9 @@ SOURCES = [
     ('UU_CODEC', 'encodings/uu_codec.py'),
     ('QUOPRI_CODEC', 'encodings/quopri_codec.py'),
     ('QUOPRI', 'quopri.py'),
+    ('CHARMAP', 'encodings/charmap.py'),
+    ('UNICODE_ESCAPE', 'encodings/unicode_escape.py'),
+    ('RAW_UNICODE_ESCAPE', 'encodings/raw_unicode_escape.py'),
     ('STRINGPREP', 'stringprep.py'),
 ]
 

@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 418 -- The native random generator and the methods random.py's module functions run.
 import { newBytes } from '../bytesValues';
 import { pyStr } from '../conversions';
 import { builtin, method } from '../define';

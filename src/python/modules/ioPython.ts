@@ -56,16 +56,22 @@ class _IncrementalDecoder(_IncrementalDecoderBase):
         self.encoding = encoding
         self.buffer = b""
         self.flag = 0
+        # The decoder of a codec that keeps a state, such as iso2022_jp, or None.
+        self._stateful = _stateful_codec(encoding, 'decode')
 
     def decode(self, input, final=False):
         data = self.buffer + bytes(input)
-        text, consumed, self.flag = _decode_chunk(self.encoding, self.errors, data, final, self.flag)
+        if self._stateful is not None:
+            text, consumed = self._stateful(data, self.errors, final)
+        else:
+            text, consumed, self.flag = _decode_chunk(self.encoding, self.errors, data, final, self.flag)
         self.buffer = data[consumed:]
         return text
 
     def reset(self):
         self.buffer = b""
         self.flag = 0
+        self._stateful = _stateful_codec(self.encoding, 'decode')
 
     def getstate(self):
         return (self.buffer, self.flag)
@@ -80,14 +86,18 @@ class _IncrementalEncoder:
         self.encoding = encoding
         self.errors = errors
         self.started = False
+        self._stateful = _stateful_codec(encoding, 'encode')
 
     def encode(self, input, final=False):
+        if self._stateful is not None:
+            return self._stateful(input, self.errors, final)
         data = _encode_chunk(self.encoding, self.errors, input, self.started)
         self.started = True
         return data
 
     def reset(self):
         self.started = False
+        self._stateful = _stateful_codec(self.encoding, 'encode')
 
     def getstate(self):
         return 0

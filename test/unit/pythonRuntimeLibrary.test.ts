@@ -106,3 +106,15 @@ assert (q.choice('abcd'), q.randrange(10), q._randbelow.__name__) == ('a', 8, '_
 assert random.Random(7).random() == 0.32383276483316237
 `);
 });
+
+test("the JIS X 0213 and ISO-2022 codecs, incremental decoding, quopri, and random's bound methods are as in CPython", () => {
+  expectSameAsCPython(`import codecs, quopri, random
+assert 'か゚か'.encode('shift_jis_2004') == b'\\x82\\xf5\\x82\\xa9' and '俱'.encode('euc_jis_2004') == b'\\xae\\xa1'
+assert 'か゚日a'.encode('iso2022_jp_2004') == b'\\x1b$(Q$w\\x1b$BF|\\x1b(Ba' and '한a'.encode('iso2022_kr') == b'\\x1b$)C\\x0eGQ\\x0fa'
+assert b'\\x1b$B$+\\x1b(Bx'.decode('iso2022_jp_3') == 'かx'
+decoder = codecs.getincrementaldecoder('hz')()
+assert [decoder.decode(bytes([b])) for b in b'~{VP~}a'] == ['', '', '', '中', '', '', 'a']
+assert quopri.encodestring(b'caf\\xe9 = ok') == b'caf=E9 =3D ok'
+assert repr(random.randint).startswith('<bound method Random.randint of <random.Random object at ')
+`);
+});

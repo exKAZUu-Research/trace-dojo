@@ -78,11 +78,6 @@ base64.b64decode('abc')`,
     'binascii.Error: Incorrect padding',
   ],
   [
-    'a codec this grader lacks',
-    `'x'.encode('shift_jis_2004')`,
-    '文字コード shift_jis_2004 は、この採点環境では使えません。',
-  ],
-  [
     'an unknown name in a regular expression',
     `import re
 assert re.sub(r'\\N{EM DASH}', '-', 'a\\u2014b') == 'a-b'

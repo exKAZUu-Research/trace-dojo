@@ -6,6 +6,8 @@ import {
   customErrorHandler,
   decodeBytes,
   encodeString,
+  ErrorHandling,
+  hasTextCodec,
   lookupCodec,
   registerErrorHandler,
   setEncodingsCodecLookup,
@@ -40,7 +42,6 @@ export const ENCODINGS_MODULES = new Set<string>([
   'shift_jis',
   'cp932',
   'euc_jp',
-  'iso2022_jp',
   'rot_13',
   'hex_codec',
   'base64_codec',
@@ -87,6 +88,14 @@ registerModule('_codecs', () => {
     [
       '_encode_with',
       builtin('_encode_with', 'expected', 3, 3, ([module, input, errors]) => encodeWith(module, input, errors)),
+    ],
+    [
+      '_incremental_decoder',
+      builtin('_incremental_decoder', 'one', 1, 1, ([module]) => incrementalDecoder(module as string)),
+    ],
+    [
+      '_incremental_encoder',
+      builtin('_incremental_encoder', 'one', 1, 1, ([module]) => incrementalEncoder(module as string)),
     ],
     [
       '_decode_with',
@@ -260,12 +269,62 @@ function unicodeDecoder(module: string): PyValue {
 function decodeWith(module: string, input: PyValue, errors: PyValue, final: boolean, name: string): PyValue {
   const data = requireBytes(input);
   const handler = errorsName(name, errors);
-  if (!final && (module === 'iso2022_jp' || lookupCodec(module, 'decode').stateful === true)) {
-    throw currentRuntime().unsupported(`${module} の少しずつの復号（codecs の IncrementalDecoder・StreamReader）`);
-  }
   const used = final ? data.length : data.length - incompleteTail(data, module);
   const text = used === 0 ? '' : decodeBytes(data.subarray(0, used), module, handler);
   return newTuple([text, BigInt(used)]);
+}
+
+/**
+ * The incremental decoder or encoder of a codec that keeps a state, such as iso2022_jp, which io's TextIOWrapper uses
+ * in place of its own, or None for any other codec.
+ */
+export function statefulCodecFunction(encoding: string, direction: 'encode' | 'decode'): PyValue {
+  const module = codecModule(encoding);
+  if (module === undefined || !hasTextCodec(module)) return None;
+  const codec = lookupCodec(module, direction);
+  if (direction === 'decode') return codec.incrementalDecoder ? incrementalDecoder(module) : None;
+  return codec.incrementalEncoder ? incrementalEncoder(module) : None;
+}
+
+/**
+ * The decoder of an IncrementalDecoder or StreamReader of a multibyte codec, which keeps the codec's state from one
+ * call to the next: `decode(data, errors, final)` gives the text and how many bytes it used.
+ */
+function incrementalDecoder(module: string): PyValue {
+  const codec = lookupCodec(module, 'decode');
+  const decode = codec.incrementalDecoder?.();
+  return builtin('decode', 'expected', 3, 3, ([input, errors, final]) => {
+    if (!decode) return decodeWith(module, input, errors, isTruthy(final), `${module}_decode`);
+    const data = requireBytes(input);
+    const handling = new ErrorHandling(
+      errorsName('decode', errors),
+      codec.name,
+      new Uint8Array(data),
+      codec.inlineHandlers?.decode
+    );
+    const { text, consumed } = decode(data, handling, isTruthy(final));
+    return newTuple([text, BigInt(consumed)]);
+  });
+}
+
+/** The encoder of an IncrementalEncoder or StreamWriter of a multibyte codec, which keeps the codec's state. */
+function incrementalEncoder(module: string): PyValue {
+  const codec = lookupCodec(module, 'encode');
+  const encode = codec.incrementalEncoder?.();
+  return builtin('encode', 'expected', 3, 3, ([input, errors, final]) => {
+    if (typeof input !== 'string') throw typeError(`encode() argument 1 must be str, not ${typeName(input)}`);
+    if (!encode) return newBytes(encodeString(input, module, errorsName('encode', errors)));
+    // oxlint-disable-next-line typescript/no-misused-spread -- Python encodes strings by code point.
+    const points = [...input].map((char) => char.codePointAt(0) as number);
+    const handling = new ErrorHandling(
+      errorsName('encode', errors),
+      codec.name,
+      input,
+      codec.inlineHandlers?.encode,
+      points
+    );
+    return newBytes(encode(points, handling, isTruthy(final)));
+  });
 }
 
 /** `utf_16_ex_decode(data, errors, byteorder, final)`: decodes in the order a BOM gives, which it reports. */
