@@ -1,8 +1,11 @@
 import { BUILTIN_DOC } from '../attributes';
+import { pyRepr } from '../conversions';
 import { isSupportedModule, MISSING_PLATFORM_MODULES } from '../moduleNames';
 import { isRegisteredModule } from '../modules';
-import { None } from '../types';
-import { PyModule } from '../values';
+import { argument, checkArgs } from '../nativeArgs';
+import { None, typeError, typeName } from '../types';
+import { UnsupportedFeatureError } from '../unsupported';
+import { type Kwargs, type PyClass, PyModule, type PyValue } from '../values';
 import { MODULE_LAYOUTS } from './moduleLayouts';
 
 /** How CPython provides a module: where its code comes from, its doc and package, and the modules its code imported. */
@@ -69,6 +72,51 @@ export function addLayoutAttributes(module: PyModule, importName: string): void 
       module.unsupported.set(key, `モジュール ${target}`);
     }
   }
+}
+
+/** The modules a program creates with `types.ModuleType(name)`, whose repr reads their namespace. */
+const createdModules = new WeakSet<PyModule>();
+
+/** `types.ModuleType(name, doc=None)`, a module with CPython's initial namespace. */
+export function createModule(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyModule {
+  checkArgs(
+    { qualified: 'module', short: 'module', min: 0, max: 2, style: 'takes', keywords: ['name', 'doc'] },
+    args,
+    kwargs
+  );
+  const name = argument(args, kwargs, 0, 'name');
+  if (name === undefined) throw typeError("module() missing required argument 'name' (pos 1)");
+  if (typeof name !== 'string') throw typeError(`module() argument 'name' must be str, not ${typeName(name)}`);
+  const module = new PyModule(
+    cls,
+    name,
+    new Map<string, PyValue>([
+      ['__name__', name],
+      ['__doc__', argument(args, kwargs, 1, 'doc') ?? None],
+      ['__package__', None],
+      ['__loader__', None],
+      ['__spec__', None],
+    ])
+  );
+  createdModules.add(module);
+  return module;
+}
+
+/**
+ * The repr of a module: a builtin or frozen module of CPython says so, while CPython's repr of a module loaded from a
+ * file shows its path, which this grader does not have.
+ */
+export function moduleRepr(module: PyModule): string {
+  if (createdModules.has(module)) {
+    const name = module.dict.get('__name__');
+    const file = module.dict.get('__file__');
+    const shown = typeof name === 'string' ? pyRepr(name) : "'?'";
+    return typeof file === 'string' ? `<module ${shown} from ${pyRepr(file)}>` : `<module ${shown}>`;
+  }
+  const kind = MODULE_LAYOUTS[module.name]?.kind ?? 'builtin';
+  if (kind === 'builtin' || kind === 'frozen')
+    return `<module '${module.name}' (${kind === 'builtin' ? 'built-in' : 'frozen'})>`;
+  throw new UnsupportedFeatureError(`モジュール ${module.name} の repr（ファイルのパスを含む）`);
 }
 
 function impliedPackage(name: string, layout: ModuleLayout): string {

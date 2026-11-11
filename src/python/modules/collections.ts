@@ -305,9 +305,19 @@ function mostCommon(counter: PyDict): [PyValue, PyValue][] {
     .map(({ entry }) => entry);
 }
 
+/** CPython's `most_common(n)` imports heapq into collections the first time, which `collections.heapq` shows. */
+function importHeapq(): void {
+  const runtime = currentRuntime();
+  const collections = runtime.modules.get('collections');
+  if (collections?.dict.get('heapq') === None) collections.dict.set('heapq', importModule(runtime, 'heapq'));
+}
+
 method(counterClass, 'most_common', 'expected', 0, 1, (self, [count]) => {
   let items = mostCommon(counterOf(self));
-  if (count !== undefined && count !== None) items = items.slice(0, Math.max(0, Number(toIndex(count))));
+  if (count !== undefined && count !== None) {
+    items = items.slice(0, Math.max(0, Number(toIndex(count))));
+    importHeapq();
+  }
   return newList(items.map((item) => newTuple(item)));
 });
 method(counterClass, 'elements', 'none', 0, 0, (self) => {
@@ -797,6 +807,7 @@ export function makeNamedTupleClass(name: string, fields: string[], module: stri
 registerModule('collections', (runtime, namespace) => {
   for (const [name, value] of [
     ['deque', dequeClass],
+    ['heapq', None],
     ['Counter', counterClass],
     ['defaultdict', defaultdictClass],
     ['OrderedDict', orderedDictClass],

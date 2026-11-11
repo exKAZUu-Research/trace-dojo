@@ -7,6 +7,7 @@ import { isEnumClass, isFlagClass } from './enums';
 import { generatorNext } from './generators';
 import { identityHash } from './hashing';
 import { defineNew, objectInitImplementation, objectNewImplementation, typeCall } from './instances';
+import { createModule, moduleRepr } from './modules/moduleLayout';
 import { argument, checkArgs } from './nativeArgs';
 import {
   bindValue,
@@ -253,7 +254,10 @@ for (const [cls, kind] of [
     return `<${kind} '${fn.name}' of '${owner ? (owner.typeName ?? owner.name) : fn.ownerName}' objects>`;
   });
 }
-method(moduleClass, '__repr__', 'none', 0, 0, (self) => `<module '${(self as PyModule).name}' (built-in)>`);
+method(moduleClass, '__repr__', 'none', 0, 0, (self) => moduleRepr(self as PyModule));
+moduleClass.construct = createModule;
+// A module's attributes are its namespace alone here, so a subclass's methods would not apply to its instances.
+moduleClass.unsupportedBase = 'types.ModuleType を継承したクラス';
 
 /** How the repr of a builtin method shows the object it is bound to. */
 function boundObjectText(self: PyValue): string {

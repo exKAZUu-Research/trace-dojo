@@ -61,6 +61,13 @@ export function registerSharedAttributes(name: string, attributes: Record<string
   sharedAttributes.set(name, { ...sharedAttributes.get(name), ...attributes });
 }
 
+const extraAttributes = new Map<string, ((runtime: Runtime) => [string, PyValue][])[]>();
+
+/** Adds to a module the attributes `create` makes that CPython's module has and its code here does not define. */
+export function registerExtraAttributes(name: string, create: (runtime: Runtime) => [string, PyValue][]): void {
+  extraAttributes.set(name, [...(extraAttributes.get(name) ?? []), create]);
+}
+
 /** Sets how a run creates its `__main__` module, whose namespace is the program's globals. */
 export function registerMainModule(create: (runtime: Runtime) => PyModule): void {
   createMainModule = create;
@@ -109,6 +116,9 @@ function addRegisteredAttributes(runtime: Runtime, module: PyModule): void {
   }
   for (const [key, target] of Object.entries(sharedAttributes.get(name) ?? {})) {
     if (!dict.has(key)) module.imports.set(key, target);
+  }
+  for (const create of extraAttributes.get(name) ?? []) {
+    for (const [key, value] of create(runtime)) if (!dict.has(key)) dict.set(key, value);
   }
   const all = moduleAlls.get(name);
   if (all && !dict.has('__all__')) dict.set('__all__', runtime.listOf([...all]));

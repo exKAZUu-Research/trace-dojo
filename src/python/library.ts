@@ -38,6 +38,7 @@ import './modules/json';
 import './modules/annotationlib';
 import './modules/dataclasses';
 import './modules/unsupportedNames';
+import './modules/moduleExtras';
 import './modules/random';
 import './modules/itertools';
 import './modules/functools';

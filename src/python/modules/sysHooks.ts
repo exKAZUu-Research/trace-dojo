@@ -8,7 +8,7 @@ import { realArgument } from './math';
 import { structSeq } from './sysInfo';
 
 /** `sys.copyright` of the reference CPython. */
-const COPYRIGHT = `Copyright (c) 2001 Python Software Foundation.
+export const COPYRIGHT = `Copyright (c) 2001 Python Software Foundation.
 All Rights Reserved.
 
 Copyright (c) 2000 BeOpen.com.
@@ -133,8 +133,8 @@ function callTracing(fn: PyValue, args: PyValue): PyValue {
 function setSwitchInterval(runtime: Runtime, value: PyValue): PyValue {
   const interval = realArgument(value);
   if (interval <= 0) throw valueError('switch interval must be strictly positive');
-  // CPython converts to an unsigned long, which saturates at its limit and turns NaN into 0.
-  const microseconds = Number.isNaN(interval) ? 0 : Math.min(Math.trunc(interval * 1e6), 18_446_744_073_709_551_615);
+  // CPython converts to an unsigned long, which saturates at its limit (2 ** 64 as a float) and turns NaN into 0.
+  const microseconds = Number.isNaN(interval) ? 0 : Math.min(Math.trunc(interval * 1e6), 2 ** 64);
   runtime.switchInterval = microseconds;
   return None;
 }
