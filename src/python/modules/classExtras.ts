@@ -80,39 +80,46 @@ const modules = new Set(
 );
 for (const module of modules) {
   registerExtraAttributes(module, (_runtime, namespace) => {
-    for (const [owner, name, value] of MODULE_ENTRIES) {
-      const cls = namespace.get(name);
-      if (owner === module && cls instanceof PyClass && !cls.dict.has('__module__')) cls.dict.set('__module__', value);
-    }
-    for (const [owner, name] of GENERIC_CLASSES) {
-      const cls = namespace.get(name);
-      if (owner === module && cls instanceof PyClass && cls.lookup('__class_getitem__') === undefined) {
-        cls.dict.set('__class_getitem__', new PyDescriptor(classmethodClass, genericAliasClass));
-      }
-    }
-    for (const [owner, name, alias, original] of ALIASES) {
-      const cls = namespace.get(name);
-      const method = cls instanceof PyClass ? cls.lookup(original) : undefined;
-      if (owner === module && cls instanceof PyClass && method !== undefined && !cls.dict.has(alias)) {
-        cls.dict.set(alias, method);
-      }
-    }
-    for (const [owner, name, operator] of REFLECTED) {
-      const cls = namespace.get(name);
-      const reflected = `__r${operator.slice(2)}`;
-      if (owner !== module || !(cls instanceof PyClass) || cls.dict.has(reflected)) continue;
-      const forward = cls.lookup(operator) as PyValue;
-      method(cls, reflected, 'one', 1, 1, (self, [other]) =>
-        isInstanceOf(other, cls) ? callValue(forward, [other, self]) : NotImplemented
-      );
-    }
-    for (const [owner, name] of UNDETACHABLE) {
-      const cls = namespace.get(name);
-      if (owner !== module || !(cls instanceof PyClass) || cls.dict.has('detach')) continue;
-      method(cls, 'detach', 'none', 0, 0, () => {
-        throw new PyError(callValue(namespace.get('UnsupportedOperation') as PyValue, ['detach']) as PyInstance);
-      });
-    }
+    const classNamed = (owner: string, name: string): PyClass | undefined => {
+      const cls = owner === module ? namespace.get(name) : undefined;
+      return cls instanceof PyClass ? cls : undefined;
+    };
+    for (const [owner, name, value] of MODULE_ENTRIES) addModuleEntry(classNamed(owner, name), value);
+    for (const [owner, name] of GENERIC_CLASSES) addClassGetItem(classNamed(owner, name));
+    for (const [owner, name, alias, original] of ALIASES) addAlias(classNamed(owner, name), alias, original);
+    for (const [owner, name, operator] of REFLECTED) addReflected(classNamed(owner, name), operator);
+    for (const [owner, name] of UNDETACHABLE) addDetach(classNamed(owner, name), namespace);
     return [];
+  });
+}
+
+function addModuleEntry(cls: PyClass | undefined, module: string): void {
+  if (cls && !cls.dict.has('__module__')) cls.dict.set('__module__', module);
+}
+
+function addClassGetItem(cls: PyClass | undefined): void {
+  if (cls && cls.lookup('__class_getitem__') === undefined) {
+    cls.dict.set('__class_getitem__', new PyDescriptor(classmethodClass, genericAliasClass));
+  }
+}
+
+function addAlias(cls: PyClass | undefined, alias: string, original: string): void {
+  const target = cls?.lookup(original);
+  if (cls && target !== undefined && !cls.dict.has(alias)) cls.dict.set(alias, target);
+}
+
+function addReflected(cls: PyClass | undefined, operator: string): void {
+  const reflected = `__r${operator.slice(2)}`;
+  if (!cls || cls.dict.has(reflected)) return;
+  const forward = cls.lookup(operator) as PyValue;
+  method(cls, reflected, 'one', 1, 1, (self, [other]) =>
+    isInstanceOf(other, cls) ? callValue(forward, [other, self]) : NotImplemented
+  );
+}
+
+function addDetach(cls: PyClass | undefined, namespace: Map<string, PyValue>): void {
+  if (!cls || cls.dict.has('detach')) return;
+  method(cls, 'detach', 'none', 0, 0, () => {
+    throw new PyError(callValue(namespace.get('UnsupportedOperation') as PyValue, ['detach']) as PyInstance);
   });
 }

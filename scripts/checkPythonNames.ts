@@ -15,11 +15,11 @@ import { PyError, PyModule, PyObject, type PyValue } from '../src/python/values'
 interface Reference {
   /** Each module's names, mapped to the name of the module the name holds or to ''. */
   modules: Record<string, Record<string, string>>;
-  /** Each expression's `dir()`. */
+  /** Each expression's `dir()`, with a leading '!' on the names whose reading raises AttributeError. */
   values: Record<string, string[]>;
 }
 
-type Status = 'ok' | 'unsupported' | 'missing' | 'wrongModule';
+type Status = 'ok' | 'unsupported' | 'missing' | 'wrongModule' | 'unexpected';
 
 interface NameResult {
   owner: string;
@@ -75,11 +75,18 @@ export function checkValues(values: Record<string, string[]>): NameResult[] {
     const run = runProgram(`import ${VALUE_MODULES}\nvalue = ${expression}`, (runtime, globals) => {
       const value = globals.get('value');
       if (value === undefined) return;
-      for (const name of names) results.push(lookUp(expression, value, name, ''));
+      for (const name of names) results.push(lookUpValueName(expression, value, name));
     });
     if (results.length === 0) results.push({ owner: expression, name: '', status: 'missing', detail: `run: ${run}` });
     return results;
   });
+}
+
+/** Looks up a name of a value, which must raise AttributeError when CPython's does, as for an unset slot. */
+function lookUpValueName(expression: string, value: PyValue, name: string): NameResult {
+  if (!name.startsWith('!')) return lookUp(expression, value, name, '');
+  const result = lookUp(expression, value, name.slice(1), '');
+  return { ...result, status: result.status === 'missing' ? 'ok' : 'unexpected' };
 }
 
 function runProgram(source: string, inspect: (runtime: Runtime, globals: Map<string, PyValue>) => void): string {

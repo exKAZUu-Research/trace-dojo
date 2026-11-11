@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 877 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss 888 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import { newAnnotate, recordAnnotation } from './annotations';
 import type {
   ClassDef,

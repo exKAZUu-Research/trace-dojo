@@ -56,21 +56,21 @@ export function addLayoutAttributes(module: PyModule, importName: string): void 
     else module.unsupported.set('__doc__', BUILTIN_DOC);
   }
   if (!dict.has('__package__')) dict.set('__package__', layout.package ?? impliedPackage(importName, layout));
-  for (const [key, target] of Object.entries(layout.imports ?? {})) {
-    const supported =
-      isSupportedModule(target) || (isRegisteredModule(target) && !MISSING_PLATFORM_MODULES.has(target));
-    if (dict.has(key)) {
-      // The module's code may keep a stand-in for a module this grader lacks, as CPython's code does when an import
-      // fails; reading it from outside still names the missing module.
-      if (!supported && !(dict.get(key) instanceof PyModule)) module.unsupported.set(key, `モジュール ${target}`);
-      continue;
-    }
-    if (supported) {
-      module.unsupported.delete(key);
-      module.imports.set(key, target);
-    } else if (!module.unsupported.has(key)) {
-      module.unsupported.set(key, `モジュール ${target}`);
-    }
+  for (const [key, target] of Object.entries(layout.imports ?? {})) addImportedModule(module, key, target);
+}
+
+/** Makes `module.key` the module `target`, imported when first read, or the unsupported error when this grader lacks it. */
+function addImportedModule(module: PyModule, key: string, target: string): void {
+  const supported = isSupportedModule(target) || (isRegisteredModule(target) && !MISSING_PLATFORM_MODULES.has(target));
+  if (module.dict.has(key)) {
+    // The module's code may keep a stand-in for a module this grader lacks, as CPython's code does when an import
+    // fails; reading it from outside still names the missing module.
+    if (!supported && !(module.dict.get(key) instanceof PyModule)) module.unsupported.set(key, `モジュール ${target}`);
+  } else if (supported) {
+    module.unsupported.delete(key);
+    module.imports.set(key, target);
+  } else if (!module.unsupported.has(key)) {
+    module.unsupported.set(key, `モジュール ${target}`);
   }
 }
 

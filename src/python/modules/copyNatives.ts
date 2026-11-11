@@ -44,7 +44,6 @@ function contains(set: PyValue, value: PyValue): boolean {
   return set instanceof PySet && set.table.has(value);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows CPython's copy.deepcopy, one case per builtin container.
 function deepcopy(
   runtime: Runtime,
   global: (name: string) => PyValue,
@@ -62,32 +61,50 @@ function deepcopy(
   runtime.spend();
   const copier = dictGet(global('_deepcopy_dispatch'), cls);
   const copy = (item: PyValue): PyValue => deepcopy(runtime, global, item, memo);
-  let y: PyValue;
-  if (copier === global('_deepcopy_list') && x instanceof PyList) {
-    const list = newList([]);
-    setItem(memo, id, list);
-    for (let index = 0; index < x.items.length; index++) list.items.push(copy(x.items[index]));
-    y = list;
-  } else if (copier === global('_deepcopy_tuple') && x instanceof PyTuple) {
-    const items = x.items.map(copy);
-    // The tuple is not in the memo, but a recursive structure inside it may have put it there.
-    const recursive = memoGet(memo, id);
-    if (recursive !== undefined) return recursive;
-    y = items.every((item, index) => item === x.items[index]) ? x : newTuple(items);
-  } else if (copier === global('_deepcopy_dict') && x instanceof PyDict) {
-    const dict = newDict();
-    setItem(memo, id, dict);
-    for (const entry of x.store.ordered()) setItem(dict, copy(entry.key), copy(entry.value));
-    y = dict;
-  } else {
-    y = callValue(copier ?? global('_deepcopy_other'), copier === undefined ? [x, memo, cls] : [x, memo]);
-  }
+  const builtin = copyContainer(global, copier, x, id, memo, copy);
+  if (builtin.done) return builtin.value as PyValue;
+  const y =
+    builtin.value ?? callValue(copier ?? global('_deepcopy_other'), copier === undefined ? [x, memo, cls] : [x, memo]);
   // As in CPython, an object that is its own copy is not memoized.
   if (y !== x) {
     setItem(memo, id, y);
     keepAlive(runtime, x, memo);
   }
   return y;
+}
+
+/**
+ * Copies a list, tuple, or dict the module's dispatch table copies with its own functions, as those do; `done` says the
+ * copy is final, as for a tuple a recursive structure has already copied.
+ */
+function copyContainer(
+  global: (name: string) => PyValue,
+  copier: PyValue | undefined,
+  x: PyValue,
+  id: bigint,
+  memo: PyValue,
+  copy: (item: PyValue) => PyValue
+): { value: PyValue | undefined; done: boolean } {
+  if (copier === global('_deepcopy_list') && x instanceof PyList) {
+    const list = newList([]);
+    setItem(memo, id, list);
+    for (let index = 0; index < x.items.length; index++) list.items.push(copy(x.items[index]));
+    return { value: list, done: false };
+  }
+  if (copier === global('_deepcopy_tuple') && x instanceof PyTuple) {
+    const items = x.items.map(copy);
+    // The tuple is not in the memo, but a recursive structure inside it may have put it there.
+    const recursive = memoGet(memo, id);
+    if (recursive !== undefined) return { value: recursive, done: true };
+    return { value: items.every((item, index) => item === x.items[index]) ? x : newTuple(items), done: false };
+  }
+  if (copier === global('_deepcopy_dict') && x instanceof PyDict) {
+    const dict = newDict();
+    setItem(memo, id, dict);
+    for (const entry of x.store.ordered()) setItem(dict, copy(entry.key), copy(entry.value));
+    return { value: dict, done: false };
+  }
+  return { value: undefined, done: false };
 }
 
 function memoGet(memo: PyValue, id: bigint): PyValue | undefined {

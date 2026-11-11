@@ -101,8 +101,12 @@ export function importModule(runtime: Runtime, name: string): PyModule {
   // As in CPython, a package is imported before its submodule, and its code may import the submodule itself.
   const dot = name.lastIndexOf('.');
   const parent = dot === -1 ? undefined : importModule(runtime, name.slice(0, dot));
-  const imported = runtime.modules.get(name);
-  if (imported) return imported;
+  const module = runtime.modules.get(name) ?? createModule(runtime, name, factory);
+  parent?.dict.set(name.slice(dot + 1), module);
+  return module;
+}
+
+function createModule(runtime: Runtime, name: string, factory: ModuleFactory): PyModule {
   // The builtins module's namespace is the one names fall back to, so that changing either changes the other.
   const module = new PyModule(moduleClass, name, name === 'builtins' ? runtime.builtins : new Map());
   runtime.modules.set(name, module);
@@ -112,26 +116,22 @@ export function importModule(runtime: Runtime, name: string): PyModule {
   addRegisteredAttributes(runtime, module);
   addLayoutAttributes(module, name);
   moduleTables.get(runtime)?.set(name, module);
-  parent?.dict.set(name.slice(dot + 1), module);
   return module;
 }
 
 /** Adds to a new module the names this grader does not support, which its code did not define, and its `__all__`. */
 function addRegisteredAttributes(runtime: Runtime, module: PyModule): void {
   const { name, dict } = module;
-  const unsupported = unsupportedAttributes.get(name);
-  for (const [key, feature] of Object.entries(unsupported ?? {})) {
-    if (!dict.has(key)) module.unsupported.set(key, feature);
-  }
-  for (const [key, target] of Object.entries(sharedAttributes.get(name) ?? {})) {
-    if (dict.has(key)) continue;
-    module.imports.set(key, target);
-    module.unsupported.delete(key);
-  }
+  const missing = <T>(record: Record<string, T> | undefined): [string, T][] =>
+    Object.entries(record ?? {}).filter(([key]) => !dict.has(key));
+  for (const [key, feature] of missing(unsupportedAttributes.get(name))) module.unsupported.set(key, feature);
+  for (const [key, target] of missing(sharedAttributes.get(name))) module.imports.set(key, target);
   for (const create of extraAttributes.get(name) ?? []) {
     for (const [key, value] of create(runtime, dict)) if (!dict.has(key)) dict.set(key, value);
   }
-  for (const key of module.unsupported.keys()) if (dict.has(key)) module.unsupported.delete(key);
+  // A name defined after all, or shared from another module, is no longer one this grader lacks.
+  for (const key of module.unsupported.keys())
+    if (dict.has(key) || module.imports.has(key)) module.unsupported.delete(key);
   const all = moduleAlls.get(name);
   if (all && !dict.has('__all__')) dict.set('__all__', runtime.listOf([...all]));
 }

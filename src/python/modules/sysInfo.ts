@@ -30,7 +30,7 @@ import {
 } from '../types';
 import { unavailableValue } from '../unavailableValues';
 import { UnsupportedFeatureError } from '../unsupported';
-import { PyComplex, PyInstance, PyModule, PyObject, PyRange, PyTuple, type PyValue } from '../values';
+import { type Kwargs, PyComplex, PyInstance, PyModule, PyObject, PyRange, PyTuple, type PyValue } from '../values';
 import { defineProperty } from './numberSupport';
 
 /** What the reference CPython, 3.14.10 built for macOS, reports about itself. */
@@ -191,16 +191,27 @@ export function structSeq(
     return `${prefix}${name}(${fields.map(([field], index) => `${field}=${pyRepr(items[index])}`).join(', ')})`;
   });
   defineMethod(cls, '__replace__', (self, args, kwargs) => {
-    if (args.length > 0) throw typeError('__replace__() takes no positional arguments');
     const values = [...(self as PyTuple).items, ...(extra.get(self as PyTuple) ?? [])];
-    const unexpected = [...(kwargs?.keys() ?? [])].filter((key) => !all.some(([field]) => field === key));
-    if (unexpected.length > 0) {
-      throw typeError(`Got unexpected field name(s): [${unexpected.map((key) => pyRepr(key)).join(', ')}]`);
-    }
-    for (const [index, [field]] of all.entries()) values[index] = kwargs?.get(field) ?? values[index];
-    return create(values);
+    return create(
+      replacedFields(
+        all.map(([field]) => field),
+        values,
+        args,
+        kwargs
+      )
+    );
   });
   return create(all.map(([, value]) => value));
+}
+
+/** The values of a struct sequence's `__replace__(**changes)`: its values, with the changed fields replaced. */
+function replacedFields(fields: string[], values: PyValue[], args: PyValue[], kwargs: Kwargs): PyValue[] {
+  if (args.length > 0) throw typeError('__replace__() takes no positional arguments');
+  const unexpected = [...(kwargs?.keys() ?? [])].filter((key) => !fields.includes(key));
+  if (unexpected.length > 0) {
+    throw typeError(`Got unexpected field name(s): [${unexpected.map((key) => pyRepr(key)).join(', ')}]`);
+  }
+  return values.map((value, index) => kwargs?.get(fields[index]) ?? value);
 }
 
 const FLOAT_INFO = structSeq('float_info', [

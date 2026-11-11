@@ -45,10 +45,22 @@ def main():
     listed = re.search(r'SUPPORTED_MODULES[^\[]*\[(.*?)\]\);', source, re.S).group(1)
     modules = [name for name in re.findall(r"'([^']+)'", listed) if name != '__main__']
     namespace = {name: importlib.import_module(name) for name in VALUE_MODULES}
-    values = {expression: sorted(dir(eval(expression, namespace))) for expression in VALUE_EXPRESSIONS}
+    values = {expression: value_names(eval(expression, namespace)) for expression in VALUE_EXPRESSIONS}
     json.dump({'modules': {name: module_names(name) for name in modules}, 'values': values}, sys.stdout, indent=0,
               sort_keys=True)
     print()
+
+
+def value_names(value):
+    """The names of the value's `dir()`, marked with a leading '!' when reading them raises AttributeError."""
+    names = []
+    for name in sorted(dir(value)):
+        try:
+            getattr(value, name)
+        except AttributeError:
+            name = '!' + name
+        names.append(name)
+    return names
 
 
 def module_names(name):
