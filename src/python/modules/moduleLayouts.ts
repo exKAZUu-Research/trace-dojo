@@ -57,6 +57,18 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
       unix_events: 'asyncio.unix_events',
     },
   },
+  'asyncio.graph': {
+    kind: 'source',
+    imports: {
+      dataclasses: 'dataclasses',
+      events: 'asyncio.events',
+      futures: 'asyncio.futures',
+      io: 'io',
+      sys: 'sys',
+      tasks: 'asyncio.tasks',
+      types: 'types',
+    },
+  },
   atexit: { kind: 'builtin' },
   base64: { kind: 'source', imports: { binascii: 'binascii', struct: 'struct' } },
   binascii: { kind: 'builtin' },

@@ -644,11 +644,15 @@ class local:
         _local_arguments[id(self)] = (args, kw)
         return self
 
-    def __getattr__(self, name):
+    def __getattribute__(self, name):
+        # The running thread's values stand in for the instance dict, between the class's data descriptors and the
+        # rest of its attributes.
         values = _local_values(self)
-        if name in values:
+        if name == '__dict__':
+            return values
+        if name in values and not _is_data_descriptor(type(self), name):
             return values[name]
-        raise AttributeError(f"'{_local_name(self)}' object has no attribute '{name}'")
+        return object.__getattribute__(self, name)
 
     def __setattr__(self, name, value):
         _local_values(self)[name] = value
@@ -664,6 +668,13 @@ local.__qualname__ = '_local'
 
 _local_arguments = {}
 _local_dicts = {}
+
+def _is_data_descriptor(cls, name):
+    for klass in cls.__mro__:
+        if name in klass.__dict__:
+            kind = type(klass.__dict__[name])
+            return hasattr(kind, '__set__') or hasattr(kind, '__delete__')
+    return False
 
 def _local_name(self):
     cls = type(self)

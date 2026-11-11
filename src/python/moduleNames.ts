@@ -20,6 +20,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'ast',
   'array',
   'asyncio',
+  'asyncio.graph',
   'atexit',
   'base64',
   'binascii',
