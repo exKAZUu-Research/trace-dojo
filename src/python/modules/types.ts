@@ -20,6 +20,7 @@ BuiltinMethodType = type([].append)
 MethodDescriptorType = type(str.join)
 WrapperDescriptorType = type(object.__init__)
 MethodWrapperType = type(object().__str__)
+
 ModuleType = type(sys)
 GeneratorType = _builtin_types['generator']
 CoroutineType = _builtin_types['coroutine']
@@ -137,6 +138,14 @@ class mappingproxy:
 
 
 MappingProxyType = mappingproxy
+
+# The descriptors CPython's C types use for their attributes are properties here; a class's own __dict__ entry and a
+# slot have the same classes as in CPython.
+class _C:
+    __slots__ = ('_x', '__dict__')
+GetSetDescriptorType = type(_C.__dict__['__dict__'])
+MemberDescriptorType = type(_C.__dict__['_x'])
+del _C
 ClassMethodDescriptorType = type(dict.__dict__['fromkeys'])
 
 
@@ -374,7 +383,5 @@ registerSourceModule(
 );
 
 registerUnsupportedAttributes('types', {
-  GetSetDescriptorType: 'types.GetSetDescriptorType',
-  MemberDescriptorType: 'types.MemberDescriptorType',
   CapsuleType: 'types.CapsuleType',
 });

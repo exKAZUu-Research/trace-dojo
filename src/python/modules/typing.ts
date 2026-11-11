@@ -21,7 +21,9 @@ import {
   genericClass,
   mroEntryHooks,
   NoDefault,
+  paramSpecArgsClass,
   paramSpecClass,
+  paramSpecKwargsClass,
   typeAliasClass,
   typeVarClass,
   typeVarTupleClass,
@@ -45,25 +47,9 @@ import { getTypeHints, newTypeClass } from './typingTypeVars';
 
 /** The names of typing that need features this grader does not support. */
 registerUnsupportedAttributes('typing', {
-  ParamSpecArgs: 'typing.ParamSpecArgs',
-  ParamSpecKwargs: 'typing.ParamSpecKwargs',
-  NamedTupleMeta: 'typing.NamedTupleMeta（メタクラス）',
-  IO: 'typing.IO（ファイルの読み書き）',
-  TextIO: 'typing.TextIO（ファイルの読み書き）',
-  BinaryIO: 'typing.BinaryIO（ファイルの読み書き）',
-  ByteString: 'typing.ByteString（bytes 型）',
-  Pattern: 'typing.Pattern（re モジュール）',
-  Match: 'typing.Match（re モジュール）',
-  evaluate_forward_ref: 'typing.evaluate_forward_ref（文字列の型ヒントの評価）',
-  ContextManager: 'typing.ContextManager（contextlib モジュール）',
-  AsyncContextManager: 'typing.AsyncContextManager（contextlib モジュール）',
-  Awaitable: '非同期処理（typing.Awaitable）',
-  Coroutine: '非同期処理（typing.Coroutine）',
-  AsyncIterable: '非同期処理（typing.AsyncIterable）',
-  AsyncIterator: '非同期処理（typing.AsyncIterator）',
-  AsyncGenerator: '非同期処理（typing.AsyncGenerator）',
-  copyreg: 'モジュール copyreg',
-  operator: 'モジュール operator',
+  NamedTupleMeta: 'typing.NamedTupleMeta（NamedTuple を CPython と違う仕組みで作るので、そのメタクラス）',
+  evaluate_forward_ref:
+    'typing.evaluate_forward_ref()（入れ子の文字列の型ヒントを CPython の typing の内部と同じ規則で評価すること）',
 });
 
 /** `typing.EXCLUDED_ATTRIBUTES`, the attributes a protocol's members leave out. */
@@ -337,6 +323,154 @@ class SupportsRound[T](Protocol):
     @abstractmethod
     def __round__(self, ndigits: int = 0) -> T:
         pass
+
+
+class IO(Generic[AnyStr]):
+    """Generic base class for TextIO and BinaryIO.
+
+    This is an abstract, generic version of the return of open().
+
+    NOTE: This does not distinguish between the different possible
+    classes (text vs. binary, read vs. write vs. read/write,
+    append-only, unbuffered).  The TextIO and BinaryIO subclasses
+    below capture the distinctions between text vs. binary, which is
+    pervasive in the interface. For more precise types, define a custom
+    Protocol.
+    """
+
+    __slots__ = ()
+
+    @property
+    @abstractmethod
+    def mode(self) -> str:
+        pass
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        pass
+
+    @abstractmethod
+    def close(self) -> None:
+        pass
+
+    @property
+    @abstractmethod
+    def closed(self) -> bool:
+        pass
+
+    @abstractmethod
+    def fileno(self) -> int:
+        pass
+
+    @abstractmethod
+    def flush(self) -> None:
+        pass
+
+    @abstractmethod
+    def isatty(self) -> bool:
+        pass
+
+    @abstractmethod
+    def read(self, n: int = -1) -> AnyStr:
+        pass
+
+    @abstractmethod
+    def readable(self) -> bool:
+        pass
+
+    @abstractmethod
+    def readline(self, limit: int = -1) -> AnyStr:
+        pass
+
+    @abstractmethod
+    def readlines(self, hint: int = -1) -> list[AnyStr]:
+        pass
+
+    @abstractmethod
+    def seek(self, offset: int, whence: int = 0) -> int:
+        pass
+
+    @abstractmethod
+    def seekable(self) -> bool:
+        pass
+
+    @abstractmethod
+    def tell(self) -> int:
+        pass
+
+    @abstractmethod
+    def truncate(self, size: int | None = None) -> int:
+        pass
+
+    @abstractmethod
+    def writable(self) -> bool:
+        pass
+
+    @abstractmethod
+    def write(self, s: AnyStr) -> int:
+        pass
+
+    @abstractmethod
+    def writelines(self, lines: list[AnyStr]) -> None:
+        pass
+
+    @abstractmethod
+    def __enter__(self) -> IO[AnyStr]:
+        pass
+
+    @abstractmethod
+    def __exit__(self, type, value, traceback) -> None:
+        pass
+
+
+class BinaryIO(IO[bytes]):
+    """Typed approximation of the return of open() in binary mode."""
+
+    __slots__ = ()
+
+    @abstractmethod
+    def write(self, s: bytes | bytearray) -> int:
+        pass
+
+    @abstractmethod
+    def __enter__(self) -> BinaryIO:
+        pass
+
+
+class TextIO(IO[str]):
+    """Typed approximation of the return of open() in text mode."""
+
+    __slots__ = ()
+
+    @property
+    @abstractmethod
+    def buffer(self) -> BinaryIO:
+        pass
+
+    @property
+    @abstractmethod
+    def encoding(self) -> str:
+        pass
+
+    @property
+    @abstractmethod
+    def errors(self) -> str | None:
+        pass
+
+    @property
+    @abstractmethod
+    def line_buffering(self) -> bool:
+        pass
+
+    @property
+    @abstractmethod
+    def newlines(self) -> Any:
+        pass
+
+    @abstractmethod
+    def __enter__(self) -> TextIO:
+        pass
 `;
 
 // Subscripted aliases of typing stand for their origin in the bases of a class statement.
@@ -345,7 +479,8 @@ mroEntryHooks.push(typingBaseEntries);
 registerModule('typing', (runtime, namespace) => {
   const abc = importModule(runtime, 'collections.abc');
   const collections = importModule(runtime, 'collections');
-  for (const [key, value] of [...specialForms(), ...aliases(abc, collections), ...natives()]) {
+  const re = importModule(runtime, 're');
+  for (const [key, value] of [...specialForms(), ...aliases(abc, collections, re), ...natives()]) {
     namespace.set(key, value);
   }
   runModuleSource(runtime, namespace, SOURCE);
@@ -374,7 +509,7 @@ function specialForms(): [string, PyValue][] {
   ];
 }
 
-function aliases(abc: PyModule, collections: PyModule): [string, PyValue][] {
+function aliases(abc: PyModule, collections: PyModule, re: PyModule): [string, PyValue][] {
   const abcClass = (name: string): PyValue => abc.dict.get(name) as PyValue;
   const abcAliases: [string, string, number][] = [
     ['Hashable', 'Hashable', 0],
@@ -409,6 +544,16 @@ function aliases(abc: PyModule, collections: PyModule): [string, PyValue][] {
     ['Counter', newSpecialAlias(counterClass, 1, { name: 'Counter' })],
     ['ChainMap', newSpecialAlias(collections.dict.get('ChainMap') as PyValue, 2, { name: 'ChainMap' })],
     ['Generator', newSpecialAlias(abcClass('Generator'), 3, { defaults: [noneClass, noneClass] })],
+    ['Awaitable', newSpecialAlias(abcClass('Awaitable'), 1, { name: 'Awaitable' })],
+    ['Coroutine', newSpecialAlias(abcClass('Coroutine'), 3, { name: 'Coroutine' })],
+    ['AsyncIterable', newSpecialAlias(abcClass('AsyncIterable'), 1, { name: 'AsyncIterable' })],
+    ['AsyncIterator', newSpecialAlias(abcClass('AsyncIterator'), 1, { name: 'AsyncIterator' })],
+    ['AsyncGenerator', newSpecialAlias(abcClass('AsyncGenerator'), 2, { defaults: [noneClass] })],
+    ['ByteString', newSpecialAlias(abcClass('ByteString'), 0, { name: 'ByteString' })],
+    ['Pattern', newSpecialAlias(re.dict.get('Pattern') as PyValue, 1, { name: 'Pattern' })],
+    ['Match', newSpecialAlias(re.dict.get('Match') as PyValue, 1, { name: 'Match' })],
+    ['ParamSpecArgs', paramSpecArgsClass],
+    ['ParamSpecKwargs', paramSpecKwargsClass],
     ...abcAliases.map(([name, origin, nparams]): [string, PyValue] => [
       name,
       newSpecialAlias(abcClass(origin), nparams, { name }),
