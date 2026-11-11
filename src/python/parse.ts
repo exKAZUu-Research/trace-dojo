@@ -82,11 +82,12 @@ function parseSourceModule(
       ).convert(root);
       const nestingError = library ? undefined : findBlockNestingError(root);
       if (nestingError) throw new CompileError([nestingError]);
-      return { ...module, source, nestingDepth: deepestNode(root).depth };
+      // The standard library's sources, which are known to nest little, skip the walks that measure the nesting.
+      return library ? { ...module, source } : { ...module, source, nestingDepth: deepestNode(root).depth };
     },
     // Past the deepest nesting CPython's parser and compiler accept, which a long chain such as `a.b.c...` reaches,
     // converting would only take long before the host's stack ran out.
-    { maxNestingDepth: 24_000, tooDeepMessage: deepNestingError().message }
+    { maxNestingDepth: library ? Number.POSITIVE_INFINITY : 24_000, tooDeepMessage: deepNestingError().message }
   );
 }
 
