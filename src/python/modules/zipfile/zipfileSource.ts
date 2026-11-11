@@ -1,4 +1,4 @@
-// CPython 3.14's `Lib/zipfile/__init__.py`, over the io base classes written in Python, since this grader's io module has none, importing its package by absolute names, with shutil and importlib.util imported where extracting to and compiling from the file system uses them.
+// CPython 3.14's `Lib/zipfile/__init__.py`, over the io base classes written in Python, since this grader's io module has none, importing its package by absolute names, with shutil and importlib.util imported where extracting to and compiling from the file system uses them, and compression.zstd, which this grader lacks, left out.
 export const ZIPFILE_SOURCE =
   String.raw`"""
 Read and write ZIP files.
@@ -28,7 +28,7 @@ except ImportError:
     bz2 = None
 
 try:
-    lzma = None
+    import lzma # We may need its compression method
 except ImportError:
     lzma = None
 
