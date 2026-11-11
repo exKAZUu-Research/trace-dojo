@@ -24,7 +24,8 @@ nonmemberClass.construct = (_cls, [value]) => new PyOpaque(nonmemberClass, 'nonm
 
 // The parts of CPython's `enum.py` written in Python here: FlagBoundary, EnumCheck and verify, enum.property, EnumDict,
 // and the helpers for flags and pickling. The natives of enums.ts provide the enum classes themselves.
-const SOURCE = String.raw`import builtins as _builtins
+const SOURCE =
+  String.raw`import builtins as _builtins
 from types import DynamicClassAttribute
 
 _builtin_property = _builtins.property
@@ -375,6 +376,47 @@ class verify:
                             % (cls_name, alias, value)
                             )
         return enumeration
+
+
+def _simple_enum(etype=Enum, *, boundary=None, use_args=None):
+    """
+    Class decorator that converts a normal class into an :class:` +
+  '`' +
+  String.raw`Enum` +
+  '`' +
+  String.raw`.  No
+    safety checks are done, and some advanced behavior (such as
+    :func:` +
+  '`' +
+  String.raw`__init_subclass__` +
+  '`' +
+  String.raw`) is not available.  Enum creation can be faster
+    using :func:` +
+  '`' +
+  String.raw`_simple_enum` +
+  '`' +
+  String.raw`.
+
+        >>> from enum import Enum, _simple_enum
+        >>> @_simple_enum(Enum)
+        ... class Color:
+        ...     RED = auto()
+        ...     GREEN = auto()
+        ...     BLUE = auto()
+        >>> Color
+        <enum 'Color'>
+    """
+    # Builds the class as an Enum class statement would, which gives the members CPython's faster path gives.
+    def convert_class(cls):
+        metaclass = type(etype)
+        body = metaclass.__prepare__(cls.__name__, (etype,))
+        for name, value in cls.__dict__.items():
+            if name not in ('__dict__', '__weakref__'):
+                body[name] = value
+        if boundary is None:
+            return metaclass(cls.__name__, (etype,), body)
+        return metaclass(cls.__name__, (etype,), body, boundary=boundary)
+    return convert_class
 
 
 import builtins as bltns

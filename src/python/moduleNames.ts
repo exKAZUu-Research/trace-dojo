@@ -1,3 +1,4 @@
+import { isRegisteredModule } from './modules';
 import { STDLIB_MODULE_NAMES } from './stdlibModuleNames';
 
 /** The standard library modules this grader implements, which programs may import. */
@@ -12,6 +13,8 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   '_lzma',
   '_pickle',
   '_random',
+  '_sre',
+  '_stat',
   '_symtable',
   '_thread',
   'abc',
@@ -31,6 +34,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'cmath',
   'codecs',
   'collections',
+  'codeop',
   'collections.abc',
   'colorsys',
   'compression',
@@ -80,6 +84,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'email.policy',
   'email.quoprimime',
   'email.utils',
+  'encodings',
   'enum',
   'errno',
   'fnmatch',
@@ -87,6 +92,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'functools',
   'gc',
   'getopt',
+  'gettext',
   'glob',
   'graphlib',
   'hashlib',
@@ -96,6 +102,8 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'html',
   'html.entities',
   'html.parser',
+  'http',
+  'http.cookies',
   'importlib',
   'inspect',
   'io',
@@ -112,22 +120,34 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'lzma',
   'marshal',
   'math',
+  'ntpath',
   'numbers',
   'operator',
   'optparse',
   'pickle',
+  'pickletools',
   'os',
   'os.path',
   'pathlib',
   'posixpath',
+  'plistlib',
   'pprint',
+  'pydoc',
   'queue',
   'quopri',
   'random',
   're',
+  're._casefix',
+  're._compiler',
+  're._constants',
+  're._parser',
   'reprlib',
   'sched',
+  'sre_compile',
+  'sre_constants',
+  'sre_parse',
   'shlex',
+  'stat',
   'statistics',
   'string',
   'string.templatelib',
@@ -164,6 +184,34 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'urllib',
   'urllib.parse',
   'uuid',
+  'wave',
+  'pyexpat',
+  'pyexpat.errors',
+  'pyexpat.model',
+  'xml',
+  'xml.dom',
+  'xml.dom.NodeFilter',
+  'xml.dom.domreg',
+  'xml.dom.expatbuilder',
+  'xml.dom.minicompat',
+  'xml.dom.minidom',
+  'xml.dom.pulldom',
+  'xml.dom.xmlbuilder',
+  'xml.etree',
+  'xml.etree.ElementInclude',
+  'xml.etree.ElementPath',
+  'xml.etree.ElementTree',
+  'xml.etree.cElementTree',
+  'xml.parsers',
+  'xml.parsers.expat',
+  'xml.parsers.expat.errors',
+  'xml.parsers.expat.model',
+  'xml.sax',
+  'xml.sax._exceptions',
+  'xml.sax.expatreader',
+  'xml.sax.handler',
+  'xml.sax.saxutils',
+  'xml.sax.xmlreader',
   'weakref',
   'warnings',
   'zipfile',
@@ -176,18 +224,24 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
  * The modules of other platforms and the C modules that CPython's pure Python modules try to import, whose import
  * fails here as it does where CPython lacks them.
  */
-export const MISSING_PLATFORM_MODULES: ReadonlySet<string> = new Set([
-  'nt',
-  '_winapi',
-  'fcntl',
-  'posix',
-  'pwd',
-  'grp',
-  '_stat',
-]);
+export const MISSING_PLATFORM_MODULES: ReadonlySet<string> = new Set(['nt', '_winapi', 'fcntl', 'posix', 'pwd', 'grp']);
 
 export function isSupportedModule(module: string): boolean {
-  return SUPPORTED_MODULES.has(module);
+  return SUPPORTED_MODULES.has(module) || (module.startsWith('encodings.') && isRegisteredModule(module));
+}
+
+/** The codec modules CPython has only for Windows, which this grader does not implement. */
+const WINDOWS_CODEC_MODULES: ReadonlySet<string> = new Set(['_win_cp_codecs', 'mbcs', 'oem']);
+
+/**
+ * The submodule of the `encodings` package that an import of `module` finds missing, if any, as CPython has none but
+ * the codecs this grader implements and those for Windows.
+ */
+export function missingCodecModule(module: string): string | undefined {
+  if (!module.startsWith('encodings.')) return undefined;
+  const codec = module.split('.').slice(0, 2).join('.');
+  if (WINDOWS_CODEC_MODULES.has(codec.slice('encodings.'.length))) return undefined;
+  return isRegisteredModule(codec) ? undefined : codec;
 }
 
 /** Names an import that this grader rejects, for its error message. */

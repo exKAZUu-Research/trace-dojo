@@ -1,4 +1,5 @@
 import { BUILTIN_DOC } from '../attributes';
+import { moduleDoc } from '../builtinDocs';
 import { pyRepr } from '../conversions';
 import { isSupportedModule, MISSING_PLATFORM_MODULES } from '../moduleNames';
 import { isRegisteredModule } from '../modules';
@@ -14,8 +15,8 @@ export interface ModuleLayout {
   kind: 'builtin' | 'frozen' | 'source' | 'package';
   /** False when CPython's module has no docstring. */
   doc?: false;
-  /** The `__package__` when it is not the package the module's name implies. */
-  package?: string;
+  /** The `__package__` when it is not the package the module's name implies; null for CPython's None. */
+  package?: string | null;
   /** The modules the module's code imported, by the names it holds them under. */
   imports?: Readonly<Record<string, string>>;
 }
@@ -44,6 +45,7 @@ const LOADING_ATTRIBUTES: Record<ModuleLayout['kind'], Record<string, string>> =
  * modules CPython's code imported (imported when first read), and the loading attributes, which raise the unsupported
  * error.
  */
+// code-gauge-allow functionCognitiveComplexity 16 -- One case per attribute CPython's module creation adds.
 export function addLayoutAttributes(module: PyModule, importName: string): void {
   const layout = MODULE_LAYOUTS[importName] ?? MODULE_LAYOUTS[module.name];
   if (!layout) return;
@@ -52,10 +54,15 @@ export function addLayoutAttributes(module: PyModule, importName: string): void 
     if (!dict.has(key)) module.unsupported.set(key, feature);
   }
   if (!dict.has('__doc__') && !module.unsupported.has('__doc__')) {
+    const doc = layout.doc === false ? undefined : moduleDoc(module.name);
     if (layout.doc === false) dict.set('__doc__', None);
-    else module.unsupported.set('__doc__', BUILTIN_DOC);
+    else if (doc === undefined) module.unsupported.set('__doc__', BUILTIN_DOC);
+    else dict.set('__doc__', doc);
   }
-  if (!dict.has('__package__')) dict.set('__package__', layout.package ?? impliedPackage(importName, layout));
+  if (!dict.has('__package__')) {
+    const { package: name } = layout;
+    dict.set('__package__', name === null ? None : (name ?? impliedPackage(importName, layout)));
+  }
   for (const [key, target] of Object.entries(layout.imports ?? {})) addImportedModule(module, key, target);
 }
 

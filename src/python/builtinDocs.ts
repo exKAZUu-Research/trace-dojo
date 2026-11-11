@@ -1,42 +1,40 @@
-import { objectClass } from './types';
+import { BUILTIN_DOCS } from './data/builtinDocs';
+import { builtinFunctionModule } from './modules';
+import { currentRuntime } from './runtimeContext';
+import { classOf, descriptorOwners } from './types';
+import { PyBuiltinFunction, PyClass, PyDescriptor, PyModule, type PyValue } from './values';
 
-/** The docstrings of builtin functions that this grader gives as CPython does. */
-export const builtinDocs = new WeakMap<object, string>();
+/** The docstring and the text signature of a builtin, by `module.qualname[.attribute]`, read on first use. */
+let table: Map<string, [string | undefined, string | undefined]> | undefined;
+/** The entries of the attributes of types by `qualname.attribute`, the types of the builtins module first. */
+const bySuffix = new Map<string, [string | undefined, string | undefined]>();
+
+/** CPython's docstring of a builtin function, method, type, or module, if CPython has one. */
+export function builtinDoc(value: PyValue): string | undefined {
+  return entry(value)?.[0];
+}
+
+/** CPython's `__text_signature__` of a builtin function, method, or type, if CPython has one. */
+export function builtinTextSignature(value: PyValue): string | undefined {
+  return entry(value)?.[1];
+}
 
 /**
- * The docstrings of `object`'s methods, which pydoc shows for the methods a class inherits, or overrides without a
- * docstring of its own.
+ * The data of a builtin, or of the method a type's method overrides when CPython's type inherits it instead, as for
+ * the `__repr__` of an iterator, which is `object`'s in CPython.
  */
-const OBJECT_METHOD_DOCS: [string, string][] = [
-  ['__new__', 'Create and return a new object.  See help(type) for accurate signature.'],
-  ['__repr__', 'Return repr(self).'],
-  ['__hash__', 'Return hash(self).'],
-  ['__str__', 'Return str(self).'],
-  ['__getattribute__', 'Return getattr(self, name).'],
-  ['__setattr__', 'Implement setattr(self, name, value).'],
-  ['__delattr__', 'Implement delattr(self, name).'],
-  ['__lt__', 'Return self<value.'],
-  ['__le__', 'Return self<=value.'],
-  ['__eq__', 'Return self==value.'],
-  ['__ne__', 'Return self!=value.'],
-  ['__gt__', 'Return self>value.'],
-  ['__ge__', 'Return self>=value.'],
-  ['__init__', 'Initialize self.  See help(type(self)) for accurate signature.'],
-  ['__reduce_ex__', 'Helper for pickle.'],
-  ['__reduce__', 'Helper for pickle.'],
-  ['__getstate__', 'Helper for pickle.'],
-  [
-    '__subclasshook__',
-    'Abstract classes can override this to customize issubclass().\n\nThis is invoked early on by abc.ABCMeta.__subclasscheck__().\nIt should return True, False or NotImplemented.  If it returns\nNotImplemented, the normal algorithm is used.  Otherwise, it\noverrides the normal algorithm (and the outcome is cached).\n',
-  ],
-  [
-    '__init_subclass__',
-    'This method is called when a class is subclassed.\n\nThe default implementation does nothing. It may be\noverridden to extend subclasses.\n',
-  ],
-  ['__format__', 'Default object formatter.\n\nReturn str(self) if format_spec is empty. Raise TypeError otherwise.'],
-  ['__sizeof__', 'Size of object in memory, in bytes.'],
-  ['__dir__', 'Default dir() implementation.'],
-];
+function entry(value: PyValue): [string | undefined, string | undefined] | undefined {
+  const key = docKey(value);
+  if (key === undefined) return undefined;
+  const found = entries().get(key) ?? (key.startsWith('?') ? bySuffix.get(key.slice(1)) : undefined);
+  if (found || !(value instanceof PyBuiltinFunction)) return found;
+  const owner = ownerOf(value);
+  for (const base of owner?.mro.slice(1) ?? []) {
+    const inherited = entries().get(`${classKey(base)}.${value.name}`);
+    if (inherited) return inherited;
+  }
+  return undefined;
+}
 
 /** The docstrings of `object.__class__` and of the `__dict__` and `__weakref__` of the classes without `__slots__`. */
 export const INSTANCE_ATTRIBUTE_DOCS: Record<string, string> = {
@@ -45,10 +43,56 @@ export const INSTANCE_ATTRIBUTE_DOCS: Record<string, string> = {
   __weakref__: 'list of weak references to the object',
 };
 
-/** Records the docstrings of `object`'s methods, once they are defined. */
-export function recordObjectDocs(): void {
-  for (const [name, doc] of OBJECT_METHOD_DOCS) {
-    const method = objectClass.dict.get(name);
-    if (typeof method === 'object') builtinDocs.set(method, doc);
+/** The docstring CPython's module of this name has, if it has one. */
+export function moduleDoc(name: string): string | undefined {
+  return entries().get(name)?.[0];
+}
+
+function entries(): Map<string, [string | undefined, string | undefined]> {
+  if (!table) {
+    const [keys, strings, pairs] = JSON.parse(BUILTIN_DOCS) as [string[], string[], [number, number][]];
+    table = new Map(
+      keys.map((key, index) => {
+        const [doc, signature] = pairs[index] as [number, number];
+        return [key, [strings[doc - 1], strings[signature - 1]]];
+      })
+    );
+    for (const [key, value] of table) {
+      const suffix = key.split('.').slice(-2).join('.');
+      if (key.startsWith('builtins.') || !bySuffix.has(suffix)) bySuffix.set(suffix, value);
+    }
   }
+  return table;
+}
+
+/**
+ * The key of a builtin in the data: `module.qualname` of a type, that with `.name` of a type's method (bound or not),
+ * and `module.name` of a module's function; `?qualname.name` asks for a method of a type of unknown module.
+ */
+export function docKey(value: PyValue): string | undefined {
+  if (value instanceof PyClass) return classKey(value);
+  if (value instanceof PyModule) return value.name;
+  if (value instanceof PyDescriptor && value.fn instanceof PyBuiltinFunction) return docKey(value.fn);
+  if (!(value instanceof PyBuiltinFunction)) return undefined;
+  const owner = ownerOf(value);
+  if (owner) return `${classKey(owner)}.${value.name}`;
+  if (value.self instanceof PyModule) return `${value.self.name}.${value.name}`;
+  // A type's method whose type the function does not record, which only its type's name tells.
+  if (value.ownerName !== undefined && value.self === undefined) return `?${value.ownerName}.${value.name}`;
+  const module = builtinFunctionModule(currentRuntime(), value);
+  return module === undefined ? undefined : `${module}.${value.name}`;
+}
+
+/** The type a builtin method belongs to: the one defining it, or the one of the object it is bound to. */
+function ownerOf(fn: PyBuiltinFunction): PyClass | undefined {
+  const owner = descriptorOwners.get(fn);
+  if (owner) return owner;
+  const { self } = fn;
+  if (self === undefined || self instanceof PyModule) return undefined;
+  const cls = self instanceof PyClass && fn.ownerName === self.name ? self : classOf(self);
+  return cls.mro.find((each) => each.dict.has(fn.name));
+}
+
+function classKey(cls: PyClass): string {
+  return `${cls.module}.${cls.qualifiedName}`;
 }

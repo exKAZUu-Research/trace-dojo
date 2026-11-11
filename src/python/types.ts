@@ -180,6 +180,7 @@ const EXCEPTION_TREE: [string, string][] = [
   ['ProcessLookupError', 'OSError'],
   ['TimeoutError', 'OSError'],
   ['IndentationError', 'SyntaxError'],
+  ['_IncompleteInputError', 'SyntaxError'],
   ['IndexError', 'LookupError'],
   ['KeyError', 'LookupError'],
   ['ModuleNotFoundError', 'ImportError'],

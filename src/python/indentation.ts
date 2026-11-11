@@ -24,10 +24,13 @@ export function findIndentationError(source: string): SourceDiagnostic | undefin
   for (const line of lines) {
     const error = indentError(stack, line, previous);
     if (error) return error;
+    // A clause where none may stand is the parser's error, which comes before the indentation of the lines after it.
+    if (line.misplaced) return undefined;
     previous = line;
   }
   if (limitError) return limitError;
-  if (previous?.opensBlock) return expectedBlock(previous.row + 1, previous.row);
+  // At the end of the input, CPython reports the last line.
+  if (previous?.opensBlock) return expectedBlock(source.replace(/\r?\n$/, '').split('\n').length - 1, previous.row);
   return undefined;
 }
 
@@ -66,8 +69,10 @@ function expectedBlock(row: number, openerRow: number): SourceDiagnostic {
 interface LogicalLine {
   row: number;
   indent: Indent;
-  /** Whether the line ends with a colon outside brackets, which opens a block. */
+  /** Whether the line is a compound statement's header, ending with a colon outside brackets, which opens a block. */
   opensBlock: boolean;
+  /** Whether the line is a clause such as `else` that follows no header it may continue. */
+  misplaced: boolean;
   /** Whether the line is a decorator, which the next line must follow at the same indentation. */
   isDecorator: boolean;
 }
@@ -79,6 +84,8 @@ interface LogicalLine {
 function logicalLines(source: string): { lines: LogicalLine[]; limitError?: SourceDiagnostic } {
   const lines: LogicalLine[] = [];
   const scanner = new Scanner(source);
+  /** The first word of the last line at each indentation column that is still open. */
+  const previous = new Map<number, string>();
   while (!scanner.done) {
     const indent = scanner.readIndent();
     const row = scanner.row;
@@ -88,16 +95,52 @@ function logicalLines(source: string): { lines: LogicalLine[]; limitError?: Sour
       continue;
     }
     try {
+      const keyword = scanner.peekWord();
       const lastToken = scanner.readLogicalLine();
-      lines.push({ row, indent, opensBlock: lastToken === ':', isDecorator: ch === '@' });
+      for (const column of previous.keys()) if (column > indent.column) previous.delete(column);
+      const misplaced = !continuesHeader(keyword, previous.get(indent.column));
+      const opensBlock = lastToken === ':' && BLOCK_KEYWORDS.has(keyword) && !misplaced;
+      lines.push({ row, indent, opensBlock, isDecorator: ch === '@', misplaced });
+      previous.set(indent.column, keyword);
     } catch (error) {
       if (!(error instanceof NestingLimitError)) throw error;
-      lines.push({ row, indent, opensBlock: false, isDecorator: false });
+      lines.push({ row, indent, opensBlock: false, isDecorator: false, misplaced: false });
       return { lines, limitError: { row: error.row, message: error.message } };
     }
   }
   return { lines };
 }
+
+/** The headers a clause such as `else` continues, which must come before it at its indentation. */
+const CLAUSE_HEADERS: Record<string, readonly string[]> = {
+  elif: ['if', 'elif'],
+  else: ['if', 'elif', 'for', 'while', 'try', 'except', 'async'],
+  except: ['try', 'except'],
+  finally: ['try', 'except', 'else'],
+};
+
+function continuesHeader(keyword: string, previous: string | undefined): boolean {
+  const headers = CLAUSE_HEADERS[keyword];
+  return headers === undefined || (previous !== undefined && headers.includes(previous));
+}
+
+/** The keywords that begin the headers of compound statements and their clauses. */
+const BLOCK_KEYWORDS = new Set([
+  'if',
+  'elif',
+  'else',
+  'for',
+  'while',
+  'try',
+  'except',
+  'finally',
+  'with',
+  'def',
+  'class',
+  'async',
+  'match',
+  'case',
+]);
 
 /** Stops the scan where the tokenizer refuses a nesting too deep. */
 class NestingLimitError extends Error {
@@ -117,6 +160,11 @@ class Scanner {
   private fstringLevel = 0;
 
   constructor(private readonly source: string) {}
+
+  /** The name or keyword at the current position, if any. */
+  peekWord(): string {
+    return /^[\p{L}_][\p{L}\p{N}_]*/u.exec(this.source.slice(this.index, this.index + 20))?.[0] ?? '';
+  }
 
   get done(): boolean {
     return this.index >= this.source.length;

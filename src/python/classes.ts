@@ -409,9 +409,11 @@ function fillClassDict(cls: PyClass, entries: Map<string, PyValue>): void {
   wrapImplicitMethod(entries, '__class_getitem__', classmethodClass);
   const slots = defineClassSlots(cls, entries);
   cls.slotNames = slotNamesOf(cls, slots);
-  const plain = cls.bases.every((base) => base.isBuiltin);
   for (const name of ['__dict__', '__weakref__']) {
-    const added = plain && !cls.bases.some((base) => baseProvides(base, name));
+    // A base the program defines provides it unless its __slots__ left it out, as those of collections.abc do.
+    const added = !cls.bases.some((base) =>
+      base.isBuiltin ? baseProvides(base, name) : base.lookup(name) !== undefined || baseProvides(base, name)
+    );
     if (slots === undefined ? added : slots.includes(name)) {
       entries.set(name, new PyOpaque(attributeDescriptorClass, `<attribute '${name}' of '${cls.name}' objects>`));
     }

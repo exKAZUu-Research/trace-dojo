@@ -448,6 +448,10 @@ export class ProgramConverter extends ExpressionConverter {
     );
     const elseNode = clauses.find((clause) => clause.type === 'else_clause');
     const finallyNode = clauses.find((clause) => clause.type === 'finally_clause');
+    if (handlerNodes.length === 0 && !finallyNode) {
+      // CPython reports the line where it expected the clause: the else clause's, the next statement's, or the last.
+      fail(elseNode ? rowOf(elseNode) : followingRow(node), 'try 文には、except か finally の節が必要です。');
+    }
     const orelse = elseNode ? this.body(field(elseNode, 'body')) : [];
     const finalbody = finallyNode
       ? this.body(namedChildren(finallyNode).find((child) => child.type === 'block') as Node)
@@ -1145,4 +1149,15 @@ function rejectReturnValues(statements: Statement[]): void {
       fail(statement.row, 'async def の中で yield を使う関数では、return に値を書けません。');
     for (const block of blocksOf(statement)) rejectReturnValues(block);
   }
+}
+
+/** The row of the statement after a node, which may follow an enclosing block, or of the last line that is not blank. */
+function followingRow(node: Node): number {
+  for (let current: Node | null = node; current; current = current.parent) {
+    let next = current.nextNamedSibling;
+    while (next?.type === 'comment') next = next.nextNamedSibling;
+    if (next) return rowOf(next);
+  }
+  const lines = node.tree.rootNode.text.split('\n');
+  return lines.findLastIndex((line) => line.trim() !== '');
 }

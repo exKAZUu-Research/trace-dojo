@@ -1,4 +1,5 @@
 import { abstractPlaceholders } from './abstractPlaceholders';
+import { builtinTextSignature } from './builtinDocs';
 import { enumerateClass } from './builtins';
 import { method } from './define';
 import { sliceIndices } from './items';
@@ -297,7 +298,7 @@ defineProperty(methodClass, '__func__', (self) => (self as PyBoundMethod).fn);
 defineProperty(methodClass, '__self__', (self) => (self as PyBoundMethod).self);
 
 for (const cls of [builtinFunctionClass, methodDescriptorClass]) {
-  unsupportedProperty(cls, '__text_signature__', '組み込み関数の __text_signature__（シグネチャのデータ）');
+  defineProperty(cls, '__text_signature__', (self) => builtinTextSignature(self) ?? None);
   defineProperty(cls, '__name__', (self) => (self as PyBuiltinFunction).name);
   defineProperty(cls, '__qualname__', (self) => (self as PyBuiltinFunction).qualifiedName);
 }

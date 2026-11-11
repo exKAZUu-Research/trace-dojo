@@ -29,10 +29,10 @@ for (const iterator of [
   registerUnsupportedClassAttributes(`builtins.${iterator}`, of(ITERATOR_PICKLE, ['__setstate__']));
 }
 registerUnsupportedClassAttributes('builtins.generator', of(FINALIZER, ['__del__']));
-registerUnsupportedClassAttributes('builtins.type', {
-  ...of(MEMORY, ['__basicsize__', '__dictoffset__', '__itemsize__', '__weakrefoffset__']),
-  __text_signature__: '組み込み関数の __text_signature__（シグネチャのデータ）',
-});
+registerUnsupportedClassAttributes(
+  'builtins.type',
+  of(MEMORY, ['__basicsize__', '__dictoffset__', '__itemsize__', '__weakrefoffset__'])
+);
 registerUnsupportedClassAttributes('builtins.bytearray', of(BUFFER, ['__alloc__', '__release_buffer__']));
 registerUnsupportedClassAttributes('builtins.memoryview', of(BUFFER, ['__release_buffer__', '_from_flags']));
 registerUnsupportedClassAttributes('array.array', of(BUFFER, ['__release_buffer__']));

@@ -1,4 +1,5 @@
 import { functionAnnotations } from '../annotations';
+import { builtinTextSignature } from '../builtinDocs';
 import { pyRepr } from '../conversions';
 import { method } from '../define';
 import { callValue, getAttribute, getAttributeOrUndefined, isCallable } from '../objects';
@@ -7,10 +8,12 @@ import { toInt } from '../typeNumbers';
 import {
   builtinClass,
   defineMethod,
+  descriptorOwners,
   intClass,
   newDict,
   newTuple,
   None,
+  typeClass,
   typeError,
   typeName,
   valueError,
@@ -263,10 +266,20 @@ function signatureData(value: PyValue): Signature {
     if (call instanceof PyFunction) return withoutFirst(functionSignature(call));
   }
   if (value instanceof PyOpaque && value.cls === partialClass) return partialSignature(value);
-  const text = value instanceof PyBuiltinFunction ? builtinTextSignature(value) : undefined;
-  if (text !== undefined) return textSignature(text, (value as PyBuiltinFunction).self !== undefined);
+  if (value instanceof PyBuiltinFunction) return builtinSignature(value);
   if (!isCallable(value)) throw typeError(`${pyRepr(value)} is not a callable object`);
   throw new UnsupportedFeatureError('組み込みの関数やクラスの inspect.signature()');
+}
+
+/** `_signature_from_builtin`: the signature a builtin's `__text_signature__` describes. */
+function builtinSignature(fn: PyBuiltinFunction): Signature {
+  const text = builtinTextSignature(fn);
+  if (text === undefined) throw valueError(`no signature found for builtin ${pyRepr(fn)}`);
+  // The parameter that `$` marks is the bound object, which a method descriptor that is not bound still takes.
+  const unbound = fn.self === undefined && (descriptorOwners.has(fn) || fn.ownerName !== undefined);
+  const parsed = textSignature(text, !unbound);
+  if (!parsed) throw valueError(`${pyRepr(fn)} builtin has invalid signature`);
+  return parsed;
 }
 
 /** The signature of a `functools.partial` object, as `_signature_get_partial` derives it from its function's. */
@@ -302,51 +315,102 @@ function partialSignature(value: PyOpaque): Signature {
   return { parameters: [...result, ...moved].map(newParameter), returnAnnotation };
 }
 
-/** The `__text_signature__`s CPython gives the methods of `object` and `type`, where `$` marks the bound parameter. */
-const TEXT_SIGNATURES: Record<string, string> = {
-  'type.__call__': '$self, /, *args, **kwargs',
-  __init__: '$self, /, *args, **kwargs',
-  __new__: '$type, *args, **kwargs',
-  __init_subclass__: '$type, /',
-  __subclasshook__: '$type, object, /',
-  __delattr__: '$self, name, /',
-  __getattribute__: '$self, name, /',
-  __setattr__: '$self, name, value, /',
-  __format__: '$self, format_spec, /',
-  __reduce_ex__: '$self, protocol, /',
-  ...Object.fromEntries(
-    ['__eq__', '__ne__', '__lt__', '__le__', '__gt__', '__ge__'].map((name) => [name, '$self, value, /'])
-  ),
-  ...Object.fromEntries(
-    ['__dir__', '__getstate__', '__hash__', '__reduce__', '__repr__', '__sizeof__', '__str__'].map((name) => [
-      name,
-      '$self, /',
-    ])
-  ),
-};
-
-function builtinTextSignature(fn: PyBuiltinFunction): string | undefined {
-  const key = fn.ownerName === 'object' ? fn.name : `${fn.ownerName}.${fn.name}`;
-  return Object.hasOwn(TEXT_SIGNATURES, key) ? TEXT_SIGNATURES[key] : undefined;
-}
-
-/** The signature a `__text_signature__` describes, without its `$` parameter when the method is bound. */
-function textSignature(text: string, bound: boolean): Signature {
-  const names = text.split(', ');
-  const slash = names.indexOf('/');
+/**
+ * `_signature_fromstr`: the signature a `__text_signature__` describes, without its `$` parameter when the callable is
+ * bound, or undefined when a default is not an expression CPython evaluates.
+ */
+// code-gauge-allow functionCognitiveComplexity 22 -- Follows _signature_fromstr of CPython's inspect.py.
+// code-gauge-allow functionNcss 34 -- Follows _signature_fromstr of inspect.py.
+function textSignature(text: string, bound: boolean): Signature | undefined {
   const parameters: PyOpaque[] = [];
-  for (const [index, name] of names.entries()) {
-    if (name === '/' || (bound && name.startsWith('$'))) continue;
-    let kind: Kind = index < slash || name.startsWith('$') ? Kind.PositionalOnly : Kind.PositionalOrKeyword;
-    if (name.startsWith('**')) kind = Kind.VarKeyword;
-    else if (name.startsWith('*')) kind = Kind.VarPositional;
-    parameters.push(
-      newParameter({ name: name.replace(/^[$*]+/, ''), kind, default: emptyClass, annotation: emptyClass })
-    );
+  let kind: Kind = Kind.PositionalOrKeyword;
+  const parts = splitParameters(text.slice(1, -1));
+  const slash = parts.indexOf('/');
+  for (const [index, part] of parts.entries()) {
+    if (part === '/') continue;
+    if (part === '*') {
+      kind = Kind.KeywordOnly;
+      continue;
+    }
+    const [rawName, defaultText] = splitDefault(part);
+    if (rawName.startsWith('$')) {
+      if (!bound) parameters.push(newParameter(parameterData(rawName.slice(1), Kind.PositionalOnly, emptyClass)));
+      continue;
+    }
+    let parameterKind: Kind = index < slash ? Kind.PositionalOnly : kind;
+    let name = rawName;
+    if (name.startsWith('**')) {
+      parameterKind = Kind.VarKeyword;
+      name = name.slice(2);
+    } else if (name.startsWith('*')) {
+      parameterKind = Kind.VarPositional;
+      name = name.slice(1);
+      kind = Kind.KeywordOnly;
+    }
+    let value: PyValue = emptyClass;
+    if (defaultText !== undefined) {
+      const evaluated = evaluateDefault(defaultText);
+      if (evaluated === undefined) return undefined;
+      value = evaluated;
+    }
+    parameters.push(newParameter(parameterData(name, parameterKind, value)));
   }
   return { parameters, returnAnnotation: emptyClass };
 }
 
+function parameterData(name: string, kind: Kind, value: PyValue): Parameter {
+  return { name, kind, default: value, annotation: emptyClass };
+}
+
+/** The parameters of a signature's text, split at the commas outside brackets and strings. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Splits at commas outside brackets and strings, escapes included.
+// code-gauge-allow functionNcss 32 -- Splits at commas outside brackets and strings, escapes included.
+function splitParameters(text: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote: string | undefined;
+  let current = '';
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index] as string;
+    if (quote) {
+      if (char === '\\') {
+        current += char + (text[index + 1] ?? '');
+        index++;
+        continue;
+      }
+      if (char === quote) quote = undefined;
+    } else if (char === "'" || char === '"') quote = char;
+    else if ('([{'.includes(char)) depth++;
+    else if (')]}'.includes(char)) depth--;
+    else if (char === ',' && depth === 0) {
+      parts.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  if (current.trim() !== '') parts.push(current.trim());
+  return parts;
+}
+
+function splitDefault(part: string): [string, string | undefined] {
+  const equals = part.indexOf('=');
+  return equals === -1 ? [part, undefined] : [part.slice(0, equals).trim(), part.slice(equals + 1).trim()];
+}
+
+/** A default's value, which CPython evaluates from literals and names of `sys`, or undefined for any other. */
+function evaluateDefault(text: string): PyValue | undefined {
+  if (!/^(?:[-+]?[\w.]+|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|\(\)|\[\]|\{\})$/.test(text)) return undefined;
+  const runtime = currentRuntime();
+  const globals = newDict([['sys', runtime.importModule('sys')]]);
+  try {
+    return callValue(runtime.builtins.get('eval') as PyValue, [text, globals]);
+  } catch {
+    return undefined;
+  }
+}
+
+// code-gauge-allow functionCognitiveComplexity 19 -- Follows how _signature_from_callable of inspect.py tries a class.
 function classSignature(cls: PyClass): Signature {
   for (const each of cls.mro) {
     if (each.isBuiltin) break;
@@ -356,10 +420,18 @@ function classSignature(cls: PyClass): Signature {
     const fn = create instanceof PyDescriptor ? create.fn : create;
     if (fn instanceof PyFunction) return withoutFirst(functionSignature(fn));
   }
+  for (const base of cls.mro.slice(0, -1)) {
+    const text = base.isBuiltin ? builtinTextSignature(base) : undefined;
+    if (text === undefined) continue;
+    const parsed = textSignature(text, true);
+    if (!parsed) throw valueError(`${pyRepr(base)} builtin has invalid signature`);
+    return parsed;
+  }
   if (cls.mro.every((each) => !each.isBuiltin || each === cls.mro.at(-1))) {
     return { parameters: [], returnAnnotation: emptyClass };
   }
-  throw new UnsupportedFeatureError('組み込みのクラスを継承したクラスの inspect.signature()');
+  if (cls.mro.includes(typeClass)) throw valueError(`no signature found for builtin ${pyRepr(cls)}`);
+  throw valueError(`no signature found for builtin type ${pyRepr(cls)}`);
 }
 
 function withoutFirst({ parameters, returnAnnotation }: Signature): Signature {

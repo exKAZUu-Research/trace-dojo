@@ -1,3 +1,4 @@
+import { pyRepr } from '../conversions';
 import {
   isAsyncGenerator,
   isAsyncGeneratorFunction,
@@ -10,7 +11,7 @@ import { callValue, getAttribute, getAttributeOrUndefined, isTruthy } from '../o
 import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
 import { IS_ABSTRACT, typeFlags } from '../typeFlags';
-import { builtinFunctionClass, classOf, generatorClass, None, typeError } from '../types';
+import { builtinFunctionClass, classOf, generatorClass, None, typeError, typeName } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
 import { PyBoundMethod, PyBuiltinFunction, PyClass, PyFunction, PyGenerator, PyModule, type PyValue } from '../values';
 import { INSPECT_SOURCE } from './inspectPython';
@@ -67,20 +68,21 @@ registerSourceModule(
       ['cleandoc', builtin('cleandoc', 'one', 1, 1, ([doc]) => cleanDoc(doc))],
       ['getmro', builtin('getmro', 'one', 1, 1, ([cls]) => getAttribute(cls, '__mro__'))],
       ...inspectSourceNatives(),
+      ...['getfile', 'getsourcefile', 'getabsfile'].map((name): [string, PyValue] => [
+        name,
+        builtin(name, 'one', 1, 1, ([value]) => getFile(name, value as PyValue)),
+      ]),
     ]),
   {
     unsupported: {
       ...Object.fromEntries(
         [
-          ['getsourcefile', 'ソースファイルのパス'],
-          ['getfile', 'ソースファイルのパス'],
           ['stack', 'ソースファイルのパスを含むフレームの情報'],
           ['trace', 'ソースファイルのパスを含むフレームの情報'],
           ['getframeinfo', 'ソースファイルのパスを含むフレームの情報'],
           ['getouterframes', 'ソースファイルのパスを含むフレームの情報'],
           ['getinnerframes', 'ソースファイルのパスを含むフレームの情報'],
           ['getclosurevars', 'CPython のバイトコードから集める名前'],
-          ['getabsfile', 'ソースファイルのパス'],
         ].map(([name, feature]) => [name, `inspect.${name}()（${feature}）`])
       ),
       modulesbyfile: 'inspect.modulesbyfile（ソースファイルのパス）',
@@ -117,21 +119,29 @@ function getMembers(value: PyValue, predicate: PyValue | undefined): PyValue {
 }
 
 /**
- * `inspect.getdoc`: the cleaned docstring of an object the program defines, or of the class or base class it inherits
- * one from. The builtins' docstrings are CPython's, which this grader does not have.
+ * `inspect.getfile` and the functions over it, which name no file for a builtin module or a class of one, raising the
+ * TypeError CPython raises, and else fail as the file's path is the environment's.
  */
+function getFile(name: string, value: PyValue): PyValue {
+  const runtime = currentRuntime();
+  if (value instanceof PyModule || value instanceof PyClass) {
+    const module = value instanceof PyModule ? value : runtime.modules.get(value.module);
+    if (module && !module.dict.has('__file__') && !module.unsupported.has('__file__')) {
+      throw typeError(`${pyRepr(value)} is a built-in ${value instanceof PyModule ? 'module' : 'class'}`);
+    }
+  } else if (value instanceof PyBuiltinFunction || !(value instanceof PyFunction || value instanceof PyBoundMethod)) {
+    throw typeError(
+      `module, class, method, function, traceback, frame, or code object was expected, got ${typeName(value)}`
+    );
+  }
+  throw new UnsupportedFeatureError(`inspect.${name}()（ソースファイルのパス）`);
+}
+
+/** `inspect.getdoc`: the cleaned docstring of an object, or of the class or base class it inherits one from. */
 export function getDoc(value: PyValue): PyValue {
-  if (isBuiltinObject(value))
-    throw new UnsupportedFeatureError('組み込みのオブジェクトの docstring（inspect.getdoc()）');
   const doc = getAttributeOrUndefined(value, '__doc__') ?? None;
   const found = doc === None ? inheritedDoc(value) : doc;
   return typeof found === 'string' ? cleanDoc(found) : None;
-}
-
-function isBuiltinObject(value: PyValue): boolean {
-  if (value instanceof PyClass) return value.isBuiltin;
-  if (value instanceof PyModule || value instanceof PyBuiltinFunction) return true;
-  return !(value instanceof PyFunction || value instanceof PyBoundMethod) && classOf(value).isBuiltin;
 }
 
 /** `inspect._finddoc`: the docstring of a base class, or of the method a method overrides. */
@@ -145,7 +155,6 @@ function inheritedDoc(value: PyValue): PyValue {
 
 function baseClassDoc(cls: PyClass): PyValue {
   for (const base of cls.mro) {
-    if (base.isBuiltin) return None;
     const doc = getAttributeOrUndefined(base, '__doc__') ?? None;
     if (doc !== None) return doc;
   }
@@ -156,7 +165,6 @@ function overriddenDoc(owner: PyClass, name: string): PyValue {
   for (const base of owner.mro) {
     const attribute = base.dict.get(name);
     if (attribute === undefined) continue;
-    if (base.isBuiltin) throw new UnsupportedFeatureError('組み込みのメソッドの docstring（inspect.getdoc()）');
     const doc = getAttributeOrUndefined(attribute, '__doc__') ?? None;
     if (doc !== None) return doc;
   }

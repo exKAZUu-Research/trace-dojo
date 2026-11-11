@@ -6,7 +6,6 @@ import {
   setInstanceAttribute,
   typeData,
 } from './attributes';
-import { recordObjectDocs } from './builtinDocs';
 import { typeNewFromArguments } from './classes';
 import { addressOf, defaultRepr, pyFormat, pyRepr, pyStr } from './conversions';
 import { method } from './define';
@@ -166,8 +165,6 @@ objectClass.dict.set(
   new PyBuiltinFunction(builtinFunctionClass, '__new__', objectNewImplementation, objectClass, 'static', 'object')
 );
 method(objectClass, '__dir__', 'none', 0, 0, (self) => currentRuntime().dir(self));
-
-recordObjectDocs();
 
 // type --------------------------------------------------------------------------------------------------------------
 

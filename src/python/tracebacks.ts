@@ -192,6 +192,8 @@ export interface CodeInfo {
   compiled?: unknown;
   /** The scope of the code, which tells whether the code is the program's own. */
   scope?: object;
+  /** The `co_flags` of module code compile() created, which hold only the flags of its `__future__` features. */
+  futureFlags?: bigint;
 }
 
 const codeObjects = new WeakMap<object, PyOpaque>();
@@ -266,6 +268,11 @@ defineProperty(codeClass, 'co_filename', (self) => {
   if (filename === undefined) throw new UnsupportedFeatureError('スクリプトのファイルのパス（co_filename）');
   return filename;
 });
+defineProperty(codeClass, 'co_flags', (self) => {
+  const { futureFlags } = infoOf(self);
+  if (futureFlags === undefined) throw new UnsupportedFeatureError('CPython のバイトコードの情報（co_flags）');
+  return futureFlags;
+});
 defineProperty(codeClass, 'co_cellvars', (self) => newTuple(cellNames(infoOf(self).fn)));
 defineProperty(codeClass, 'co_freevars', (self) => newTuple(freeNames(infoOf(self).fn)));
 // The bytecode, its offsets, and the tables over them, which also `replace()` would rebuild.
@@ -276,7 +283,6 @@ for (const name of [
   'co_varnames',
   'co_nlocals',
   'co_stacksize',
-  'co_flags',
   'co_lines',
   'co_positions',
   'co_linetable',

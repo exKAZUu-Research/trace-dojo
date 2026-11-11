@@ -1,4 +1,5 @@
 import { abstractPlaceholders } from './abstractPlaceholders';
+// code-gauge-allow-file fileNcss 532 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import {
   classAnnotate,
   classAnnotations,
@@ -8,8 +9,7 @@ import {
   setClassAnnotations,
   setFunctionAnnotationAttribute,
 } from './annotations';
-// code-gauge-allow-file fileNcss 528 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
-import { builtinDocs } from './builtinDocs';
+import { builtinDoc, builtinTextSignature } from './builtinDocs';
 import { solidBase } from './classes';
 import {
   builtinClassesWithDict,
@@ -107,7 +107,7 @@ function isMetaDataDescriptor(attribute: PyValue): boolean {
   return (attribute instanceof PyDescriptor && attribute.cls === propertyClass) || isDataDescriptor(attribute);
 }
 
-// code-gauge-allow functionNcss 31 -- One case per attribute a class keeps outside its dictionary.
+// code-gauge-allow functionNcss 33 -- One case per attribute a class keeps outside its dictionary.
 export function typeData(cls: PyClass, name: string): PyValue | undefined {
   switch (name) {
     case '__name__': {
@@ -123,7 +123,10 @@ export function typeData(cls: PyClass, name: string): PyValue | undefined {
       return BigInt(typeFlags(cls));
     }
     case '__doc__': {
-      return cls.isBuiltin ? (cls.doc ?? None) : (cls.dict.get('__doc__') ?? None);
+      return cls.isBuiltin ? (cls.doc ?? builtinDoc(cls) ?? None) : (cls.dict.get('__doc__') ?? None);
+    }
+    case '__text_signature__': {
+      return (cls.isBuiltin && builtinTextSignature(cls)) || None;
     }
     case '__mro__': {
       return newTuple(cls.mro);
@@ -234,7 +237,7 @@ function boundMethodAttribute(method: PyBoundMethod, name: string): PyValue | un
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- One case per attribute CPython's builtin functions have.
+// code-gauge-allow functionCognitiveComplexity 17 -- One case per attribute CPython's builtin functions have.
 function builtinFunctionAttribute(fn: PyBuiltinFunction, name: string): PyValue | undefined {
   if (name === '__name__') return fn.name;
   if (name === '__qualname__') return fn.qualifiedName;
@@ -246,7 +249,8 @@ function builtinFunctionAttribute(fn: PyBuiltinFunction, name: string): PyValue 
   }
   if (name === '__objclass__') return descriptorOwners.get(fn);
   if (name === '__isabstractmethod__' && abstractPlaceholders.has(fn)) return true;
-  if (name === '__doc__') return builtinDocs.get(fn) ?? None;
+  if (name === '__doc__') return builtinDoc(fn) ?? None;
+  if (name === '__text_signature__') return builtinTextSignature(fn) ?? None;
   if (name === '__module__') return builtinFunctionModule(currentRuntime(), fn) ?? None;
   return undefined;
 }

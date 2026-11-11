@@ -3,7 +3,7 @@ import { pyRepr } from '../conversions';
 import { SYS_BUILTIN_MODULE_NAMES, SYS_STDLIB_MODULE_NAMES } from '../data/sysModuleNames';
 import { builtin, method } from '../define';
 import type { Frame } from '../frame';
-import { isSupportedModule } from '../moduleNames';
+import { SUPPORTED_MODULES } from '../moduleNames';
 import { registerMainModule, trackModules } from '../modules';
 import { namespaceDict } from '../namespaces';
 import { toIndex } from '../numbers';
@@ -130,7 +130,8 @@ const STARTUP_MODULES = [
 /**
  * `sys.modules`: the startup modules, then those the program imports, which this grader implements or names only. The
  * startup modules written in Python, such as `codecs`, read `sys` as they load, so `sys` must have its other attributes
- * first.
+ * first. The codec modules, such as `encodings.utf_8`, read `codecs` as they load, which may be loading itself, so they
+ * join only when imported.
  */
 export function sysModules(runtime: Runtime): PyValue {
   return namespaceDict(moduleTable(runtime));
@@ -139,7 +140,7 @@ export function sysModules(runtime: Runtime): PyValue {
 function moduleTable(runtime: Runtime): Map<string, PyValue> {
   const table = new Map<string, PyValue>();
   for (const name of STARTUP_MODULES) {
-    const loaded = runtime.modules.get(name) ?? (isSupportedModule(name) ? runtime.importModule(name) : undefined);
+    const loaded = runtime.modules.get(name) ?? (SUPPORTED_MODULES.has(name) ? runtime.importModule(name) : undefined);
     table.set(name, loaded ?? unavailableValue(`モジュール ${name}`));
   }
   for (const [name, module] of runtime.modules) table.set(name, module);

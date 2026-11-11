@@ -141,14 +141,17 @@ export class PatternObject extends PyObject {
   }
 }
 
-/** Compiles a str or bytes pattern with `flags`, as `re._compiler.compile` does. */
-export function compileRegex(sourceValue: PyValue, flags: number): PatternObject {
+/**
+ * Compiles a str or bytes pattern with `flags`, as `re._compiler.compile` does, which prints the pattern compiled with
+ * `re.DEBUG` unless that `compile` printed it already.
+ */
+export function compileRegex(sourceValue: PyValue, flags: number, printsDebug = true): PatternObject {
   const isBytes = sourceValue instanceof PyBytes;
   const source = isBytes ? latin1Text(sourceValue.data) : (unbox(sourceValue) as string);
   try {
     const parsed = parse(source, flags, !isBytes);
     const allFlags = parsed.state.flags | flags;
-    if (allFlags & FLAG.DEBUG) printDebug(parsed, allFlags);
+    if (allFlags & FLAG.DEBUG && printsDebug) printDebug(parsed, allFlags);
     const program = compilePattern(parsed, allFlags);
     const runtime = currentRuntime();
     runtime.scan(source.length + program.code.length);
