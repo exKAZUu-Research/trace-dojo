@@ -98,3 +98,4 @@ import './modules/configparser';
 import './modules/gettextStub';
 import './modules/hmac';
 import './modules/uuid';
+import './modules/errno';

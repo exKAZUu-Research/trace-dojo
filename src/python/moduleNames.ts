@@ -29,6 +29,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'decimal',
   'difflib',
   'enum',
+  'errno',
   'fnmatch',
   'fractions',
   'functools',

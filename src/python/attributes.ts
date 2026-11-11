@@ -309,10 +309,11 @@ function exceptionFieldOf(instance: PyInstance, name: string): PyValue | undefin
     if (name === 'name') return state.name ?? None;
     return state.object ?? None;
   }
-  if (is('OSError') && (name === 'errno' || name === 'strerror' || name === 'filename')) {
-    if (args.length >= 2 && name !== 'filename') return name === 'errno' ? args[0] : args[1];
-    return None;
+  if (is('OSError') && (name === 'errno' || name === 'strerror')) {
+    return args.length >= 2 && args.length <= 5 ? args[name === 'errno' ? 0 : 1] : None;
   }
+  if (is('OSError') && name === 'filename') return state.filename ?? None;
+  if (is('OSError') && name === 'filename2') return state.filename2 ?? None;
   return undefined;
 }
 

@@ -153,6 +153,9 @@ export interface ExceptionState {
   selfValue?: PyValue;
   /** The sub-exceptions of an exception group. */
   exceptions?: PyTuple;
+  /** The file names an OSError was created with, which its `args` then leave out. */
+  filename?: PyValue;
+  filename2?: PyValue;
   message?: string;
 }
 
