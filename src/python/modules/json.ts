@@ -1,13 +1,17 @@
+import { PyBytes } from '../bytesValues';
+import { decodeBytes } from '../codecs';
 import { pyRepr } from '../conversions';
 import { builtin } from '../define';
 import { registerModule } from '../modules';
 import { checkArgs } from '../nativeArgs';
 import { floatRepr, intToString } from '../numbers';
-import { callValue, isTruthy, toArray } from '../objects';
+import { callValue, getAttribute, isTruthy, toArray } from '../objects';
+import { lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { iterStr } from '../strings';
 import {
   exceptionClassNamed,
+  nativeFunction,
   newDict,
   newException,
   newList,
@@ -130,6 +134,12 @@ function keyText(item: PyValue): string {
 }
 
 function dumps(args: PyValue[], kwargs: Kwargs): PyValue {
+  const text = encode(args[0], dumpOptions(args, kwargs), 0, new Set());
+  currentRuntime().buildString(text.length);
+  return text;
+}
+
+function dumpOptions(args: PyValue[], kwargs: Kwargs): DumpOptions {
   checkArgs(
     {
       qualified: 'dumps',
@@ -161,21 +171,100 @@ function dumps(args: PyValue[], kwargs: Kwargs): PyValue {
   const separators = kwargs?.get('separators') ?? None;
   let [itemSeparator, keySeparator] = indent === undefined ? [', ', ': '] : [',', ': '];
   if (separators !== None) [itemSeparator, keySeparator] = toArray(separators) as [string, string];
-  const text = encode(
-    args[0],
-    {
-      indent,
-      itemSeparator,
-      keySeparator,
-      sortKeys: isTruthy(kwargs?.get('sort_keys') ?? false),
-      ensureAscii: isTruthy(kwargs?.get('ensure_ascii') ?? true),
-      defaultFn: kwargs?.get('default'),
-    },
-    0,
-    new Set()
-  );
-  currentRuntime().buildString(text.length);
-  return text;
+  return {
+    indent,
+    itemSeparator,
+    keySeparator,
+    sortKeys: isTruthy(kwargs?.get('sort_keys') ?? false),
+    ensureAscii: isTruthy(kwargs?.get('ensure_ascii') ?? true),
+    defaultFn: kwargs?.get('default'),
+  };
+}
+
+// The pieces json.dump writes ---------------------------------------------------------------------------------------
+
+/**
+ * The pieces that CPython's `json.encoder._make_iterencode` yields, which `json.dump` writes one by one: a scalar
+ * item joins the separator before it, and a container's brackets and separators come on their own.
+ */
+function* encodePieces(item: PyValue, options: DumpOptions, level: number, stack: Set<PyObject>): Generator<string> {
+  const value = unbox(item);
+  const scalar = scalarText(value, options);
+  if (scalar !== undefined) {
+    yield scalar;
+  } else if (value instanceof PyList || value instanceof PyTuple) {
+    yield* arrayPieces(value, options, level, stack);
+  } else if (value instanceof PyDict) {
+    yield* objectPieces(value, options, level, stack);
+  } else if (options.defaultFn !== undefined && options.defaultFn !== None) {
+    enterContainer(value as PyObject, stack);
+    yield* encodePieces(callValue(options.defaultFn, [value]), options, level, stack);
+    stack.delete(value as PyObject);
+  } else {
+    throw typeError(`Object of type ${typeName(value)} is not JSON serializable`);
+  }
+}
+
+function scalarText(value: PyValue, options: DumpOptions): string | undefined {
+  currentRuntime().spend();
+  if (value === None) return 'null';
+  if (value === true) return 'true';
+  if (value === false) return 'false';
+  if (typeof value === 'bigint') return intToString(value);
+  if (typeof value === 'number') return floatText(value);
+  if (typeof value === 'string') return quote(value, options.ensureAscii);
+  return undefined;
+}
+
+function* arrayPieces(
+  value: PyList | PyTuple,
+  options: DumpOptions,
+  level: number,
+  stack: Set<PyObject>
+): Generator<string> {
+  if (value.items.length === 0) {
+    yield '[]';
+    return;
+  }
+  enterContainer(value, stack);
+  let buffer = `[${newline(options, level + 1)}`;
+  for (const [index, item] of value.items.entries()) {
+    if (index > 0) buffer = options.itemSeparator + newline(options, level + 1);
+    const scalar = scalarText(unbox(item), options);
+    if (scalar === undefined) {
+      yield buffer;
+      yield* encodePieces(item, options, level + 1, stack);
+    } else {
+      yield buffer + scalar;
+    }
+  }
+  if (options.indent !== undefined) yield newline(options, level);
+  yield ']';
+  stack.delete(value);
+}
+
+function* objectPieces(value: PyDict, options: DumpOptions, level: number, stack: Set<PyObject>): Generator<string> {
+  if (value.store.size === 0) {
+    yield '{}';
+    return;
+  }
+  enterContainer(value, stack);
+  yield `{`;
+  if (options.indent !== undefined) yield newline(options, level + 1);
+  let entries = value.store.ordered().map((entry) => [entry.key, entry.value] as const);
+  if (options.sortKeys) {
+    entries = entries.toSorted(([a], [b]) => (lessThan(a, b) ? -1 : lessThan(b, a) ? 1 : 0));
+  }
+  for (const [index, [key, item]] of entries.entries()) {
+    const text = keyText(key);
+    if (index > 0) yield options.itemSeparator + newline(options, level + 1);
+    yield quote(text, options.ensureAscii);
+    yield options.keySeparator;
+    yield* encodePieces(item, options, level + 1, stack);
+  }
+  if (options.indent !== undefined) yield newline(options, level);
+  yield '}';
+  stack.delete(value);
 }
 
 // Decoding ----------------------------------------------------------------------------------------------------------
@@ -334,15 +423,56 @@ class Decoder {
 
 function loads(args: PyValue[], kwargs: Kwargs): PyValue {
   checkArgs({ qualified: 'loads', min: 1, max: 1, style: 'takes', keywords: [] }, args, kwargs);
-  const [text] = args;
+  const data = args[0] instanceof PyBytes ? args[0].data : undefined;
+  const text = data ? decodeBytes(data, detectEncoding(data), 'surrogatepass') : args[0];
   if (typeof text !== 'string')
     throw typeError(`the JSON object must be str, bytes or bytearray, not ${typeName(text)}`);
   return new Decoder(text).decode();
 }
 
+/** `json.dump(obj, fp, **kw)`: writes the JSON text to a stream such as io.StringIO, piece by piece as CPython does. */
+function dump(args: PyValue[], kwargs: Kwargs): PyValue {
+  if (args.length > 2) throw typeError(`dump() takes 2 positional arguments but ${args.length} were given`);
+  if (args.length < 2) {
+    throw typeError(
+      args.length === 0
+        ? "dump() missing 2 required positional arguments: 'obj' and 'fp'"
+        : "dump() missing 1 required positional argument: 'fp'"
+    );
+  }
+  const options = dumpOptions([args[0]], kwargs);
+  const write = getAttribute(args[1], 'write');
+  for (const piece of encodePieces(args[0], options, 0, new Set())) callValue(write, [piece]);
+  return None;
+}
+
+/** `json.load(fp, **kw)`: `loads` of what the stream's `read()` returns. */
+function load(args: PyValue[], kwargs: Kwargs): PyValue {
+  if (args.length > 1) throw typeError(`load() takes 1 positional argument but ${args.length} were given`);
+  if (args.length === 0) throw typeError("load() missing 1 required positional argument: 'fp'");
+  return loads([callValue(getAttribute(args[0], 'read'), [])], kwargs);
+}
+
+/** `json.detect_encoding`: the encoding of JSON bytes, from a BOM or from where the first characters' zeros are. */
+function detectEncoding(data: Uint8Array): string {
+  const startsWith = (...bytes: number[]): boolean => bytes.every((byte, index) => data[index] === byte);
+  if (startsWith(0x00, 0x00, 0xfe, 0xff) || startsWith(0xff, 0xfe, 0x00, 0x00)) return 'utf-32';
+  if (startsWith(0xfe, 0xff) || startsWith(0xff, 0xfe)) return 'utf-16';
+  if (startsWith(0xef, 0xbb, 0xbf)) return 'utf-8-sig';
+  if (data.length >= 4) {
+    if (!data[0]) return data[1] ? 'utf-16-be' : 'utf-32-be';
+    if (!data[1]) return data[2] || data[3] ? 'utf-16-le' : 'utf-32-le';
+  } else if (data.length === 2) {
+    if (!data[0]) return 'utf-16-be';
+    if (!data[1]) return 'utf-16-le';
+  }
+  // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- The name of Python's codec, as json gives it.
+  return 'utf-8';
+}
+
 registerModule(
   'json',
-  (runtime) =>
+  () =>
     new Map<string, PyValue>([
       [
         'dumps',
@@ -361,32 +491,8 @@ registerModule(
         }),
       ],
       ['loads', builtin('loads', 'takes', 1, 1, loads, { keywords: [] })],
-      [
-        'dump',
-        builtin(
-          'dump',
-          'expected',
-          0,
-          Number.POSITIVE_INFINITY,
-          () => {
-            throw runtime.unsupported('ファイルへの書き込み（json.dump）');
-          },
-          { keywords: [] }
-        ),
-      ],
-      [
-        'load',
-        builtin(
-          'load',
-          'expected',
-          0,
-          Number.POSITIVE_INFINITY,
-          () => {
-            throw runtime.unsupported('ファイルからの読み込み（json.load）');
-          },
-          { keywords: [] }
-        ),
-      ],
+      ['dump', nativeFunction('dump', dump)],
+      ['load', nativeFunction('load', load)],
       ['JSONDecodeError', jsonDecodeErrorClass],
     ])
 );

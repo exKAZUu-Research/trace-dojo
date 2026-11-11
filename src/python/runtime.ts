@@ -2,6 +2,7 @@ import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import { createBuiltins } from './builtins';
+import type { PyMemoryView } from './bytesValues';
 import { bindArguments } from './calls';
 import { pyRepr } from './conversions';
 import { markIterableCoroutine } from './coroutines';
@@ -14,6 +15,7 @@ import { genericAlias } from './genericAlias';
 import { pyHash } from './hashing';
 import { instantiate } from './instances';
 import { keyError } from './items';
+import { viewOf } from './memoryview';
 import { importModule } from './modules';
 import { systemExitError } from './modules/sys';
 import { bindValue, callValue, isTruthy, overriding, setAttribute, toArray } from './objects';
@@ -376,6 +378,11 @@ export class Runtime {
 
   systemExit(code: PyValue | undefined): PyError {
     return systemExitError(code);
+  }
+
+  /** The memoryview `memoryview(value)` gives. */
+  bufferView(value: PyValue): PyMemoryView {
+    return viewOf(value);
   }
 
   /** `int | None` and the like, which isinstance accepts and type hints use. */

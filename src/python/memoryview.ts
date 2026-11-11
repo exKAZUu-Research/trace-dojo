@@ -6,6 +6,7 @@ import { pyHash } from './hashing';
 import { sliceIndices } from './items';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
+import { bindValue, callValue, lookupSpecial } from './objects';
 import { equals } from './operators';
 import { currentRuntime } from './runtimeContext';
 import { NATIVE_CODES, readFloat, readInteger, writeFloat, writeInteger } from './structCodes';
@@ -46,7 +47,14 @@ export function viewOf(value: PyValue): PyMemoryView {
     );
   }
   if (!(value instanceof PyBytes)) {
-    throw typeError(`memoryview: a bytes-like object is required, not '${typeName(value)}'`);
+    // A Python class implements the buffer protocol with `__buffer__` (PEP 688).
+    const buffer = typeof value === 'object' && !value.cls.isBuiltin ? lookupSpecial(value, '__buffer__') : undefined;
+    if (buffer === undefined) throw typeError(`memoryview: a bytes-like object is required, not '${typeName(value)}'`);
+    const view = callValue(bindValue(buffer, value), [0n]);
+    if (!(view instanceof PyMemoryView)) {
+      throw typeError(`__buffer__ returned non-memoryview object '${typeName(view)}'`);
+    }
+    return view;
   }
   return new PyMemoryView(value, 0, value.length, 1, 'B', 1, !value.isMutable);
 }

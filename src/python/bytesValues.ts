@@ -141,6 +141,10 @@ export function sameKind(self: PyBytes, data: Uint8Array): PyBytes {
 export function bytesLikeData(value: PyValue): Uint8Array | undefined {
   if (value instanceof PyBytes) return value.data;
   if (value instanceof PyMemoryView) return value.toBytes();
+  // A Python class implements the buffer protocol with `__buffer__` (PEP 688), as `array.array` does.
+  if (value instanceof PyObject && !value.cls.isBuiltin && value.cls.lookup('__buffer__') !== undefined) {
+    return currentRuntime().bufferView(value).toBytes();
+  }
   return undefined;
 }
 

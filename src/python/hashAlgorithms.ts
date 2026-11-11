@@ -109,7 +109,7 @@ const fractionBits = (prime: number, root: bigint): bigint => integerRoot(BigInt
 const SHA512_K = PRIMES.map((prime) => fractionBits(prime, 3n));
 const SHA512_IV = PRIMES.slice(0, 8).map((prime) => fractionBits(prime, 2n));
 const SHA384_IV = PRIMES.slice(8, 16).map((prime) => fractionBits(prime, 2n));
-const SHA256_K = SHA512_K.slice(0, 64).map((value) => Number(value >> 32n));
+export const SHA256_K = SHA512_K.slice(0, 64).map((value) => Number(value >> 32n));
 export const SHA256_IV = SHA512_IV.map((value) => Number(value >> 32n));
 const SHA224_IV = SHA384_IV.map((value) => Number(value & 0xff_ff_ff_ffn));
 

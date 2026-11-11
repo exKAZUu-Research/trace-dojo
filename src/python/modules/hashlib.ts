@@ -1,5 +1,5 @@
-import { bytesLikeData, newBytes } from '../bytesValues';
-import { addressOf } from '../conversions';
+import { bytesLikeData, newByteArray, newBytes, requireBytesLike } from '../bytesValues';
+import { addressOf, pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import {
   blake2b,
@@ -16,11 +16,13 @@ import {
 import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
-import { isTruthy } from '../objects';
+import { callValue, getAttribute, getAttributeOrUndefined, isTruthy } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import {
   builtinClass,
+  exceptionClassNamed,
   nativeFunction,
+  newException,
   newSet,
   None,
   propertyClass,
@@ -30,7 +32,9 @@ import {
   unbox,
   valueError,
 } from '../types';
-import { type Kwargs, type PyClass, PyDescriptor, PyOpaque, type PyValue } from '../values';
+import { type Kwargs, type PyClass, PyDescriptor, PyError, PyOpaque, type PyValue } from '../values';
+import { type HmacHash, pbkdf2, scrypt } from './hashKdf';
+import { builtinClassWithBase } from './moduleClasses';
 
 interface Algorithm {
   digestSize: number;
@@ -295,6 +299,114 @@ function newByName(args: PyValue[], kwargs: Kwargs): PyValue {
   return newHash(cls, { name, data: new Uint8Array(0) }, data ?? kwargs?.get('string'));
 }
 
+// Key derivation and file digests ----------------------------------------------------------------------------------
+
+/** `_hashlib.UnsupportedDigestmodError`, which OpenSSL's lookup of an unknown digest raises. */
+const unsupportedDigestmodClass = builtinClassWithBase(
+  'UnsupportedDigestmodError',
+  exceptionClassNamed('ValueError'),
+  '_hashlib'
+);
+const INT_MAX = 2_147_483_647;
+
+function hmacHash(name: string): HmacHash {
+  const algorithm = Object.hasOwn(ALGORITHMS, name) && !name.startsWith('shake') ? ALGORITHMS[name] : undefined;
+  if (!algorithm)
+    throw new PyError(newException(unsupportedDigestmodClass, ['[digital envelope routines] unsupported']));
+  return { ...algorithm, name, digest: (data) => algorithm.digest(data, 0) };
+}
+
+/** `pbkdf2_hmac(hash_name, password, salt, iterations, dklen=None)`. */
+function pbkdf2Hmac(args: PyValue[], kwargs: Kwargs): PyValue {
+  const [nameValue, password, salt, iterationsValue, dklenValue] = PBKDF2_KEYWORDS.map((name, index) =>
+    argument(args, kwargs, index, name)
+  );
+  for (const [index, value] of [nameValue, password, salt, iterationsValue].entries()) {
+    if (value === undefined) {
+      throw typeError(`pbkdf2_hmac() missing required argument '${PBKDF2_KEYWORDS[index]}' (pos ${index + 1})`);
+    }
+  }
+  const name = unbox(nameValue as PyValue);
+  if (typeof name !== 'string') {
+    throw typeError(`pbkdf2_hmac() argument 'hash_name' must be str, not ${typeName(nameValue as PyValue)}`);
+  }
+  const passwordData = requireBytesLike(password as PyValue);
+  const saltData = requireBytesLike(salt as PyValue);
+  const iterations = toIndex(iterationsValue as PyValue);
+  const hash = hmacHash(name.toLowerCase());
+  if (iterations < 1n) throw valueError('iteration value must be greater than 0.');
+  if (iterations > BigInt(INT_MAX)) throw pyError('OverflowError', 'iteration value is too great.');
+  const dklen = dklenValue === undefined || dklenValue === None ? BigInt(hash.digestSize) : toIndex(dklenValue);
+  if (dklen < 1n) throw valueError('key length must be greater than 0.');
+  if (dklen > BigInt(INT_MAX)) throw pyError('OverflowError', 'key length is too great.');
+  currentRuntime().allocate(Number(dklen));
+  return newBytes(pbkdf2(hash, passwordData, saltData, Number(iterations), Number(dklen)));
+}
+
+const PBKDF2_KEYWORDS = ['hash_name', 'password', 'salt', 'iterations', 'dklen'];
+const SCRYPT_MAX_MEMORY = 32 * 1024 * 1024;
+
+/** `scrypt(password, *, salt, n, r, p, maxmem=0, dklen=64)`. */
+function scryptFunction(args: PyValue[], kwargs: Kwargs): PyValue {
+  if (args.length > 1) throw typeError(`scrypt() takes exactly 1 positional argument (${args.length} given)`);
+  const values = ['password', 'salt', 'n', 'r', 'p'].map((name, index) => {
+    const value = argument(args, kwargs, index, name);
+    if (value === undefined) throw typeError(`scrypt() missing required argument '${name}' (pos ${index + 1})`);
+    return value;
+  });
+  const [password, salt] = values.slice(0, 2).map((value) => requireBytesLike(value));
+  const [nValue, rValue, pValue] = values.slice(2);
+  if (typeof unbox(nValue) !== 'bigint') throw typeError('n is required and must be an unsigned int');
+  const [n, r, p] = [nValue, rValue, pValue].map((value) => Number(toIndex(value)));
+  if (n < 2 || (n & (n - 1)) !== 0) throw valueError('n must be a power of 2.');
+  const maxmem = Number(toIndex(kwargs?.get('maxmem') ?? 0n));
+  if (maxmem < 0 || maxmem > INT_MAX) throw valueError(`maxmem must be positive and smaller than ${INT_MAX}`);
+  const dklen = Number(toIndex(kwargs?.get('dklen') ?? 64n));
+  if (dklen < 1 || dklen > INT_MAX) throw valueError(`dklen must be greater than 0 and smaller than ${INT_MAX}`);
+  // OpenSSL's checks of the other parameters, with its default limit of 32 MiB of memory.
+  const memory = 128 * r * p + 128 * r * (n + 2);
+  if (
+    r < 1 ||
+    p < 1 ||
+    p > (2 ** 30 - 1) / r ||
+    (16 * r <= 63 && n >= 2 ** (16 * r)) ||
+    memory > (maxmem || SCRYPT_MAX_MEMORY)
+  ) {
+    throw valueError('Invalid parameter combination for n, r, p, maxmem.');
+  }
+  currentRuntime().spend(Math.ceil(memory / 1024));
+  return newBytes(scrypt(hmacHash('sha256'), password, salt, { n, r, p, length: dklen }));
+}
+
+/** `file_digest(fileobj, digest, /, *, _bufsize=2**18)`, which reads a binary stream such as io.BytesIO. */
+function fileDigest(args: PyValue[], kwargs: Kwargs): PyValue {
+  const [file, digest] = args;
+  const runtime = currentRuntime();
+  const hash = typeof unbox(digest) === 'string' ? newByName([digest], undefined) : callValue(digest, []);
+  const update = getAttribute(hash, 'update');
+  const getbuffer = getAttributeOrUndefined(file, 'getbuffer');
+  if (getbuffer !== undefined) {
+    callValue(update, [callValue(getbuffer, [])]);
+    return hash;
+  }
+  const readinto = getAttributeOrUndefined(file, 'readinto');
+  const readable = getAttributeOrUndefined(file, 'readable');
+  if (readinto === undefined || readable === undefined || !isTruthy(callValue(readable, []))) {
+    throw valueError(`'${pyRepr(file)}' is not a file-like object in binary reading mode.`);
+  }
+  const size = Number(toIndex(kwargs?.get('_bufsize') ?? 262_144n));
+  runtime.allocate(size);
+  const buffer = newByteArray(new Uint8Array(size));
+  for (;;) {
+    const count = callValue(readinto, [buffer]);
+    if (count === None)
+      throw new PyError(newException(exceptionClassNamed('BlockingIOError'), ['I/O operation would block.']));
+    const length = Number(toIndex(count));
+    if (length === 0) return hash;
+    callValue(update, [newBytes(buffer.data.slice(0, length))]);
+  }
+}
+
 registerModule(
   'hashlib',
   () =>
@@ -304,14 +416,20 @@ registerModule(
       ['algorithms_available', newSet([...Object.keys(ALGORITHMS), 'blake2b', 'blake2s'])],
       ['blake2b', blake2bClass],
       ['blake2s', blake2sClass],
+      [
+        'pbkdf2_hmac',
+        builtin('pbkdf2_hmac', 'takes', 0, 5, pbkdf2Hmac, { keywords: PBKDF2_KEYWORDS, short: 'pbkdf2_hmac' }),
+      ],
+      [
+        'scrypt',
+        builtin('scrypt', 'expected', 0, Number.POSITIVE_INFINITY, scryptFunction, {
+          keywords: ['password', 'salt', 'n', 'r', 'p', 'maxmem', 'dklen'],
+        }),
+      ],
+      ['file_digest', builtin('file_digest', 'takes', 2, 2, fileDigest, { keywords: ['_bufsize'] })],
       ...GUARANTEED.filter((name) => !name.startsWith('blake2')).map((name): [string, PyValue] => [
         name,
         constructor(name),
       ]),
-    ]),
-  {
-    file_digest: 'hashlib.file_digest（ファイルの読み書き）',
-    pbkdf2_hmac: 'hashlib.pbkdf2_hmac',
-    scrypt: 'hashlib.scrypt',
-  }
+    ])
 );
