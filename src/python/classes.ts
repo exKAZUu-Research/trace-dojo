@@ -12,16 +12,22 @@ import { defineClassSlots, slotNamesOf } from './slots';
 import { noteUnwinding } from './tracebacks';
 import { initGenericSubclass, typingMroEntries } from './typeParams';
 import {
+  baseExceptionClass,
   builtinClass,
   builtinFunctionClass,
+  bytesClass,
   classmethodClass,
   classOf,
   exceptionClassNamed,
+  frozensetClass,
+  intClass,
   newDict,
   newTuple,
   None,
   objectClass,
+  setClass,
   staticmethodClass,
+  tupleClass,
   typeClass,
   typeError,
   typeName,
@@ -374,6 +380,16 @@ function qualifiedNameOf(entries: Map<string, PyValue>, name: string): string {
   return qualified;
 }
 
+/**
+ * Whether the instances of a builtin base class already have `__dict__` or `__weakref__`, or, for `__weakref__`,
+ * cannot have one, as CPython's variable-size objects cannot, so that a subclass adds none.
+ */
+function baseProvides(base: PyClass, name: string): boolean {
+  if (base.isSubclassOf(typeClass)) return true;
+  if (name === '__dict__') return base.isSubclassOf(baseExceptionClass);
+  return [intClass, tupleClass, bytesClass, setClass, frozensetClass].some((each) => base.isSubclassOf(each));
+}
+
 /** Fills a new class's dictionary from its namespace, adding what `type.__new__` adds. */
 function fillClassDict(cls: PyClass, entries: Map<string, PyValue>): void {
   wrapImplicitMethod(entries, '__new__', staticmethodClass);
@@ -383,7 +399,8 @@ function fillClassDict(cls: PyClass, entries: Map<string, PyValue>): void {
   cls.slotNames = slotNamesOf(cls, slots);
   const plain = cls.bases.every((base) => base.isBuiltin);
   for (const name of ['__dict__', '__weakref__']) {
-    if (slots === undefined ? plain : slots.includes(name)) {
+    const added = plain && !cls.bases.some((base) => baseProvides(base, name));
+    if (slots === undefined ? added : slots.includes(name)) {
       entries.set(name, new PyOpaque(attributeDescriptorClass, `<attribute '${name}' of '${cls.name}' objects>`));
     }
   }

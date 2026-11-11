@@ -38,7 +38,7 @@ registerAstSupport({
       if (mode === 'single' && !isInteractiveStatement(root)) {
         throw syntaxError('multiple statements found while compiling a single statement');
       }
-      return new AstBuilder(source, classes, singletonsOf(runtime)).module(root, mode);
+      return new AstBuilder(source, classes, singletonsOf(runtime), syntaxError).module(root, mode);
     });
   },
   unparse: (tree) => callValue(importModule(currentRuntime(), 'ast').dict.get('unparse') as PyValue, [tree]) as string,

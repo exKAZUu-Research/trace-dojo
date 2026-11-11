@@ -1,8 +1,15 @@
-import { deleteInstanceAttribute, isInstanceWithAttributes, setInstanceAttribute } from './attributes';
+import {
+  deleteClassAttribute,
+  deleteInstanceAttribute,
+  isInstanceWithAttributes,
+  setClassAttributeWithoutHook,
+  setInstanceAttribute,
+  typeData,
+} from './attributes';
 import { typeNewFromArguments } from './classes';
 import { addressOf, defaultRepr, pyFormat, pyRepr, pyStr } from './conversions';
 import { method } from './define';
-import { callGetter, descriptorGetter } from './descriptors';
+import { builtinDescriptorClasses, callGetter, descriptorGetter } from './descriptors';
 import { isEnumClass, isFlagClass } from './enums';
 import { generatorNext } from './generators';
 import { identityHash } from './hashing';
@@ -22,6 +29,7 @@ import {
 import { currentRuntime } from './runtimeContext';
 import { typeOr } from './typeHints';
 import {
+  builtinClass,
   builtinFunctionClass,
   classmethodClass,
   classmethodDescriptorClass,
@@ -54,6 +62,7 @@ import {
   typeName,
   wrapperDescriptorClass,
 } from './types';
+import { UnsupportedFeatureError } from './unsupported';
 import {
   DONE,
   PyBoundMethod,
@@ -65,6 +74,7 @@ import {
   type PyIterator,
   type PyModule,
   PyObject,
+  PyOpaque,
   PySlice,
   PySuper,
   type PyValue,
@@ -111,6 +121,7 @@ method(objectClass, '__format__', 'one', 1, 1, (self, [spec]) => {
 });
 method(objectClass, '__setattr__', 'expected', 2, 2, (self, [name, value]) => {
   if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  if (self instanceof PyClass) throw typeError(`can't apply this __setattr__ to ${typeName(self)} object`);
   if (isInstanceWithAttributes(self)) setInstanceAttribute(self as PyObject, name, value);
   else currentRuntime().setAttributeOf(self, name, value);
   return None;
@@ -121,6 +132,7 @@ method(objectClass, '__getattribute__', 'one', 1, 1, (self, [name]) => {
 });
 method(objectClass, '__delattr__', 'one', 1, 1, (self, [name]) => {
   if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  if (self instanceof PyClass) throw typeError(`can't apply this __delattr__ to ${typeName(self)} object`);
   if (isInstanceWithAttributes(self)) deleteInstanceAttribute(self as PyObject, name);
   else deleteAttribute(self, name);
   return None;
@@ -185,6 +197,78 @@ method(
 );
 method(typeClass, '__or__', 'one', 1, 1, (self, [other]) => typeOr(self, other));
 method(typeClass, '__ror__', 'one', 1, 1, (self, [other]) => typeOr(other, self));
+const typeMemberClass = builtinClass('member_descriptor');
+const typeAttributeClass = builtinClass('getset_descriptor');
+for (const cls of [typeMemberClass, typeAttributeClass]) {
+  builtinDescriptorClasses.add(cls);
+  method(cls, '__repr__', 'none', 0, 0, (self) => (self as PyOpaque).text);
+  method(cls, '__get__', 'expected', 1, 2, (self, [instance]) =>
+    instance === None ? self : typeAttributeValue(instance, (self as PyOpaque).data as string)
+  );
+}
+/** The attributes that tell how CPython lays out a class's instances in memory. */
+const MEMORY_LAYOUT = new Set(['__basicsize__', '__itemsize__', '__weakrefoffset__', '__dictoffset__']);
+
+function typeAttributeValue(instance: PyValue, name: string): PyValue {
+  if (!(instance instanceof PyClass)) {
+    throw typeError(`descriptor '${name}' for 'type' objects doesn't apply to a '${typeName(instance)}' object`);
+  }
+  if (MEMORY_LAYOUT.has(name)) throw new UnsupportedFeatureError(`クラスのメモリ上の配置（${name}）`);
+  if (name === '__text_signature__') {
+    if (instance.isBuiltin) throw new UnsupportedFeatureError('組み込みのクラスの __text_signature__');
+    return None;
+  }
+  // As in CPython, only a class's own `__abstractmethods__` counts.
+  const value = name === '__abstractmethods__' ? instance.dict.get(name) : typeData(instance, name);
+  if (value !== undefined) return value;
+  if (name === '__abstractmethods__') throw pyError('AttributeError', name);
+  throw pyError('AttributeError', `type object '${instance.name}' has no attribute '${name}'`);
+}
+
+method(typeClass, '__getattribute__', 'one', 1, 1, (self, [name]) => {
+  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  return genericGetAttribute(self, name);
+});
+method(typeClass, '__setattr__', 'expected', 2, 2, (self, [name, value]) => {
+  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  setClassAttributeWithoutHook(self as PyClass, name, value);
+  return None;
+});
+method(typeClass, '__delattr__', 'one', 1, 1, (self, [name]) => {
+  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  deleteClassAttribute(self as PyClass, name);
+  return None;
+});
+method(typeClass, '__dir__', 'none', 0, 0, (self) => currentRuntime().dir(self));
+method(typeClass, '__sizeof__', 'none', 0, 0, () => {
+  throw new UnsupportedFeatureError('クラスのメモリ上の大きさ（type.__sizeof__）');
+});
+defineTypeAttributes();
+
+/** The attributes of classes that `type.__dict__` lists, which a class reads natively, as CPython's getsets do. */
+function defineTypeAttributes(): void {
+  const members = ['__basicsize__', '__itemsize__', '__flags__', '__weakrefoffset__', '__base__', '__dictoffset__'];
+  const attributes = [
+    '__name__',
+    '__qualname__',
+    '__bases__',
+    '__mro__',
+    '__module__',
+    '__abstractmethods__',
+    '__dict__',
+    '__doc__',
+    '__text_signature__',
+    '__annotations__',
+    '__annotate__',
+    '__type_params__',
+  ];
+  for (const name of members) {
+    typeClass.dict.set(name, new PyOpaque(typeMemberClass, `<member '${name}' of 'type' objects>`, name));
+  }
+  for (const name of attributes) {
+    typeClass.dict.set(name, new PyOpaque(typeAttributeClass, `<attribute '${name}' of 'type' objects>`, name));
+  }
+}
 
 // Singletons --------------------------------------------------------------------------------------------------------
 

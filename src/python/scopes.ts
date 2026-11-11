@@ -104,6 +104,17 @@ function resolve(scope: ScopeBuilder): void {
   info.locals = [...scope.bound.keys()].filter((name) => !scope.declarations.has(name));
   for (const ref of scope.refs) ref.access = accessOf(scope, ref.name);
   for (const child of scope.children) resolve(child);
+  if (scope.info.kind !== 'comprehension') {
+    const inlined = inlinedComprehensions(scope).flatMap((child) => child.info.cells);
+    if (inlined.length > 0) info.inlinedCells = inlined;
+  }
+}
+
+/** The comprehensions CPython compiles into the code of `scope`: all but generator expressions, however nested. */
+function inlinedComprehensions(scope: ScopeBuilder): ScopeBuilder[] {
+  return scope.children.flatMap((child) =>
+    child.info.kind === 'comprehension' && !child.isGeneratorExpression ? [child, ...inlinedComprehensions(child)] : []
+  );
 }
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Follows CPython's rules for resolving a name to local, cell, free, or global.

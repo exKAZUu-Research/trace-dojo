@@ -80,7 +80,7 @@ export function classAttribute(cls: PyClass, name: string): PyValue | undefined 
     // Methods of the metaclass, such as `mro()`, bind to the class.
     if (metaAttribute !== undefined) return bindToClass(metaAttribute, cls);
     const typeAttribute = typeClass.lookup(name);
-    return typeAttribute instanceof PyBuiltinFunction ? bindValue(typeAttribute, cls, typeClass) : undefined;
+    return typeAttribute === undefined ? undefined : bindToClass(typeAttribute, cls);
   }
   const getter = descriptorGetter(attribute);
   if (getter !== undefined) return callGetter(getter, attribute, None, cls);
@@ -106,7 +106,7 @@ function isMetaDataDescriptor(attribute: PyValue): boolean {
 }
 
 // code-gauge-allow functionNcss 31 -- One case per attribute a class keeps outside its dictionary.
-function typeData(cls: PyClass, name: string): PyValue | undefined {
+export function typeData(cls: PyClass, name: string): PyValue | undefined {
   switch (name) {
     case '__name__': {
       return cls.name;
@@ -265,13 +265,16 @@ function generatorAttribute(generator: PyGenerator, attribute: string): PyValue 
   const prefix = GENERATOR_PREFIXES[generator.cls.name] ?? 'gi_';
   if (!attribute.startsWith(prefix)) return undefined;
   const name = `gi_${attribute.slice(prefix.length)}`;
-  if (name === 'gi_await' && prefix !== 'gi_') return generatorAttribute(generator, 'gi_yieldfrom');
+  if (name === 'gi_origin' && prefix === 'cr_') return None;
   if (name === 'gi_running') return generator.running;
   if (name === 'gi_suspended') return generator.started && !generator.running && !generator.finished;
   const frame = generator.frame as Frame | undefined;
   if (name === 'gi_frame') return generator.finished || !frame ? None : frameObject(frame);
   if (name === 'gi_code' && frame) return codeObject(frame);
-  if (name === 'gi_yieldfrom') return (frame && !generator.finished && delegateOf(frame)) || None;
+  // A generator's `gi_yieldfrom` is what a coroutine and an async generator call `cr_await` and `ag_await`.
+  if (name === (prefix === 'gi_' ? 'gi_yieldfrom' : 'gi_await')) {
+    return (frame && !generator.finished && delegateOf(frame)) || None;
+  }
   return undefined;
 }
 
@@ -456,9 +459,9 @@ function userHook(target: PyObject, name: string): PyValue | undefined {
 }
 
 // code-gauge-allow functionCognitiveComplexity 16 -- Follows the order type.__setattr__ checks the special attributes of a class in.
-function setClassAttribute(target: PyClass, name: string, value: PyValue): void {
+function setClassAttribute(target: PyClass, name: string, value: PyValue, callsHook = true): void {
   if (target.isBuiltin) throw typeError(`cannot set '${name}' attribute of immutable type '${target.name}'`);
-  if (setClassAttributeThroughMeta(target, name, value)) return;
+  if (setClassAttributeThroughMeta(target, name, value, callsHook)) return;
   if (name === '__getattribute__') noteGetattributeAssigned();
   if (target.enumMembers?.some((member) => member.dict.get('_name_') === name)) {
     throw pyError('AttributeError', `cannot reassign member '${name}'`);
@@ -487,11 +490,16 @@ export function isInstanceWithAttributes(value: PyValue): boolean {
   return value instanceof PyInstance || isSubclassInstance(value);
 }
 
+/** `type.__setattr__`: sets a class attribute as a metaclass's `__setattr__` does when it defers to `type`'s. */
+export function setClassAttributeWithoutHook(target: PyClass, name: string, value: PyValue): void {
+  setClassAttribute(target, name, value, false);
+}
+
 /** Sets a class attribute through its metaclass's `__setattr__` or data descriptor, returning whether one did. */
-function setClassAttributeThroughMeta(target: PyClass, name: string, value: PyValue): boolean {
+function setClassAttributeThroughMeta(target: PyClass, name: string, value: PyValue, callsHook: boolean): boolean {
   const meta = target.cls;
   if (meta.isBuiltin) return false;
-  const custom = meta.lookup('__setattr__');
+  const custom = callsHook ? meta.lookup('__setattr__') : undefined;
   if (custom !== undefined && !(custom instanceof PyBuiltinFunction)) {
     callValue(bindValue(custom, target), [name, value]);
     return true;
@@ -627,6 +635,13 @@ function setExceptionField(state: ExceptionState, name: string, value: PyValue):
   }
 }
 
+/** `type.__delattr__`: deletes a class attribute without its metaclass's `__delattr__`. */
+export function deleteClassAttribute(target: PyClass, name: string): void {
+  if (target.isBuiltin) throw typeError(`cannot delete '${name}' attribute of immutable type '${target.name}'`);
+  if (name === '__annotations__') setClassAnnotations(target, undefined);
+  else if (!target.dict.delete(name)) throw attributeError(target, name);
+}
+
 function propertyName(property: PyDescriptor, fallback: string): string {
   const getter = property.fn;
   return getter instanceof PyFunction ? getter.name : fallback;
@@ -651,9 +666,9 @@ export function deleteAttribute(target: PyValue, name: string): void {
     return;
   }
   if (target instanceof PyClass) {
-    if (target.isBuiltin) throw typeError(`cannot delete '${name}' attribute of immutable type '${target.name}'`);
-    if (name === '__annotations__') setClassAnnotations(target, undefined);
-    else if (!target.dict.delete(name)) throw attributeError(target, name);
+    const custom = target.cls.isBuiltin ? undefined : target.cls.lookup('__delattr__');
+    if (custom === undefined || custom instanceof PyBuiltinFunction) deleteClassAttribute(target, name);
+    else callValue(bindValue(custom, target), [name]);
     return;
   }
   if (target instanceof PyFunction && (name === '__annotations__' || name === '__annotate__')) {

@@ -8,6 +8,7 @@ import { binaryOp } from './operators';
 import { currentRuntime } from './runtimeContext';
 import { newGenericAlias } from './typeHints';
 import {
+  asyncGeneratorClass,
   baseExceptionClass,
   boolClass,
   builtinFunctionClass,
@@ -15,6 +16,7 @@ import {
   classmethodClass,
   classOf,
   complexClass,
+  coroutineClass,
   dictClass,
   dictItemsClass,
   dictKeysClass,
@@ -232,7 +234,17 @@ function floatFromHex(text: string): number {
 
 method(strClass, '__getnewargs__', 'none', 0, 0, (self) => newTuple([unbox(self)]));
 method(tupleClass, '__getnewargs__', 'none', 0, 0, (self) => newTuple([...(self as PyTuple).items]));
-for (const cls of [listClass, tupleClass, dictClass, setClass, frozensetClass, enumerateClass, generatorClass]) {
+for (const cls of [
+  listClass,
+  tupleClass,
+  dictClass,
+  setClass,
+  frozensetClass,
+  enumerateClass,
+  generatorClass,
+  coroutineClass,
+  asyncGeneratorClass,
+]) {
   classGetItem(cls);
 }
 
@@ -311,8 +323,10 @@ function objclassOf(fn: PyBuiltinFunction): PyValue {
 // Generators --------------------------------------------------------------------------------------------------------
 
 const asGenerator = (self: PyValue): PyGenerator => self as PyGenerator;
-defineProperty(generatorClass, '__name__', (self) => asGenerator(self).name);
-defineProperty(generatorClass, '__qualname__', (self) => asGenerator(self).qualifiedName);
+for (const cls of [generatorClass, coroutineClass, asyncGeneratorClass]) {
+  defineProperty(cls, '__name__', (self) => asGenerator(self).name);
+  defineProperty(cls, '__qualname__', (self) => asGenerator(self).qualifiedName);
+}
 defineProperty(generatorClass, 'gi_running', (self) => asGenerator(self).running);
 defineProperty(
   generatorClass,

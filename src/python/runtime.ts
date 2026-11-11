@@ -23,7 +23,7 @@ import type { ProgramSource } from './programSource';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
 import type { Scheduler } from './threads';
-import { noteUnwinding } from './tracebacks';
+import { noteUnwinding, setFrameGenerator } from './tracebacks';
 import { newGenericAlias, unionOf } from './typeHints';
 import { boundSuper } from './typeObject';
 import { genericClass, subscriptGeneric } from './typeParams';
@@ -304,6 +304,7 @@ export class Runtime {
       ]
     );
     generator.frame = frame;
+    setFrameGenerator(frame, generator);
     if (!scope.isAsync) markIterableCoroutine(generator, fn);
     return generator;
   }
@@ -553,6 +554,13 @@ const FUNCTION_ATTRIBUTES = [
   '__type_params__',
 ];
 
+/** The attributes of each kind of generator object that its class reads natively. */
+const GENERATOR_ATTRIBUTES: Record<string, string[]> = {
+  generator: ['__del__', 'gi_code', 'gi_frame', 'gi_yieldfrom'],
+  coroutine: ['__del__', 'cr_await', 'cr_code', 'cr_frame', 'cr_origin', 'cr_running', 'cr_suspended'],
+  async_generator: ['__del__', 'ag_await', 'ag_code', 'ag_frame', 'ag_running', 'ag_suspended'],
+};
+
 /** The attribute names `dir()` lists for an object other than a module. */
 // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of object whose attributes its class reads natively.
 function objectAttributeNames(value: PyValue): Set<string> {
@@ -566,8 +574,7 @@ function objectAttributeNames(value: PyValue): Set<string> {
   add(['__class__', '__doc__']);
   if (!cls.isBuiltin || (value instanceof PyClass && !value.isBuiltin)) add(['__dict__', '__module__']);
   if (value instanceof PyFunction) add(FUNCTION_ATTRIBUTES);
-  if (value instanceof PyGenerator && value.cls === generatorClass)
-    add(['__del__', 'gi_code', 'gi_frame', 'gi_yieldfrom']);
+  if (value instanceof PyGenerator) add(GENERATOR_ATTRIBUTES[value.cls.name] ?? []);
   if (value instanceof PyInstance && value.exception) {
     add(['__dict__', 'args', '__traceback__', '__cause__', '__context__', '__suppress_context__']);
   }

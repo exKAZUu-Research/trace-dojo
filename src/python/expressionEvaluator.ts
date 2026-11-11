@@ -35,7 +35,7 @@ import { binaryOp, compareOp, unaryOp } from './operators';
 import { markGeneratorExpression } from './reflection';
 import type { Runtime } from './runtime';
 import { templateLiteral } from './templateStrings';
-import { noteUnwinding } from './tracebacks';
+import { noteUnwinding, setFrameGenerator } from './tracebacks';
 import {
   Ellipsis,
   functionClass,
@@ -656,6 +656,7 @@ export class ExpressionEvaluator {
         () => [first, ...inner.locals.values(), ...inner.temporaries]
       );
       generator.frame = inner;
+      setFrameGenerator(inner, generator);
       return generator;
     }
     runtime.pushFrame(inner);

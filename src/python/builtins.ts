@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss 430 -- The builtins module keeps every builtin function together.
 import { bytearrayClass, bytesClass, memoryviewClass, PyBytes } from './bytesValues';
 import { buildClass } from './classes';
 import { complexAbs } from './complexNumbers';
@@ -33,6 +32,8 @@ import {
 import { binaryOp, compareOp } from './operators';
 import { callerGlobals, callerLocals, callerNames, vars } from './reflection';
 import { currentRuntime } from './runtimeContext';
+// code-gauge-allow-file fileNcss 430 -- The builtins module keeps every builtin function together.
+import { siteBuiltins } from './siteBuiltins';
 import { iterStr, strLength } from './strings';
 import { turtleClass } from './turtle';
 import { sortList } from './typeContainers';
@@ -582,6 +583,20 @@ function unsupportedFunction(name: string, feature: string): PyValue {
   );
 }
 
+/**
+ * `dir(value)`: the sorted list its type's `__dir__` gives, which for objects of types that do not override `object`'s
+ * or `type`'s is the attributes they have.
+ */
+function dir(value: PyValue): PyValue {
+  const runtime = currentRuntime();
+  const custom = lookupSpecial(value, '__dir__');
+  if (custom === undefined || custom === objectClass.dict.get('__dir__') || custom === typeClass.dict.get('__dir__')) {
+    return runtime.dir(value);
+  }
+  const names = callValue(bindValue(custom, value), []);
+  return callValue(runtime.builtins.get('sorted') as PyValue, [names]);
+}
+
 function exitFunction(name: string): PyValue {
   return builtin(name, 'expected', 0, 1, (args) => {
     throw currentRuntime().systemExit(args[0]);
@@ -616,10 +631,7 @@ export function createBuiltins(): Map<string, PyValue> {
         return None;
       }),
     ],
-    [
-      'dir',
-      builtin('dir', 'expected', 0, 1, (args) => (args.length === 0 ? callerNames() : currentRuntime().dir(args[0]))),
-    ],
+    ['dir', builtin('dir', 'expected', 0, 1, (args) => (args.length === 0 ? callerNames() : dir(args[0])))],
     ['divmod', builtin('divmod', 'expected', 2, 2, divmod)],
     ['eval', builtin('eval', 'takes', 1, 3, evaluate, { keywords: ['globals', 'locals'] })],
     ['exec', builtin('exec', 'takes', 1, 3, execute, { keywords: ['globals', 'locals', 'closure'] })],
@@ -716,6 +728,7 @@ export function createBuiltins(): Map<string, PyValue> {
     ['open', unsupportedFunction('open', 'ファイルの読み書き（open()）')],
     ['quit', exitFunction('quit')],
     ['exit', exitFunction('exit')],
+    ...siteBuiltins(),
     ['help', nativeFunction('help', help)],
     ['Turtle', turtleClass],
   ]);

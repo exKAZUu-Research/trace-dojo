@@ -131,6 +131,8 @@ export interface ScopeInfo {
   /** Names captured from enclosing functions. */
   frees: string[];
   isGenerator: boolean;
+  /** The cells of the list, set, and dict comprehensions in a function, which CPython inlines into its code. */
+  inlinedCells?: string[];
   /**
    * Whether the scope is an `async def` (a coroutine, or an async generator when it also yields) or a comprehension
    * that awaits, which then suspends the coroutine running it or, for a generator expression, is an async generator.

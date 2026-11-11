@@ -3,12 +3,13 @@ import { method } from './define';
 import type { Frame } from './frame';
 import { defineProperty } from './modules/numberSupport';
 import { namespaceDict } from './namespaces';
+import { callValue, getAttribute } from './objects';
 import { firstRowOf } from './programSource';
 import { cpythonFrames } from './reflection';
 import { currentRuntime } from './runtimeContext';
-import { builtinClass, newDict, None, typeError } from './types';
+import { builtinClass, newDict, newTuple, None, pyError, typeError } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { type ExceptionState, PyError, type PyFunction, PyObject, PyOpaque, type PyValue } from './values';
+import { type ExceptionState, PyError, type PyFunction, PyGenerator, PyObject, PyOpaque, type PyValue } from './values';
 
 // Traceback, frame, and code objects. An exception's traceback grows as it leaves each frame, as CPython adds an entry
 // for every frame it passes through: the frame it was raised in, each caller with the row of its call, up to the frame
@@ -70,6 +71,9 @@ export function noteCaught(error: PyError, frame: Frame): void {
 // Traceback objects -------------------------------------------------------------------------------------------------
 
 method(tracebackClass, '__repr__', 'none', 0, 0, (self) => `<traceback object at ${addressOf(self as PyObject)}>`);
+method(tracebackClass, '__dir__', 'none', 0, 0, () =>
+  currentRuntime().listOf(['tb_frame', 'tb_next', 'tb_lasti', 'tb_lineno'])
+);
 defineProperty(tracebackClass, 'tb_frame', (self) => frameObject((self as PyTraceback).frame));
 defineProperty(tracebackClass, 'tb_lineno', (self) => BigInt((self as PyTraceback).row + 1));
 defineProperty(tracebackClass, 'tb_next', (self) => (self as PyTraceback).next);
@@ -92,6 +96,13 @@ export function frameObject(frame: Frame): PyOpaque {
 }
 
 const frameOf = (self: PyValue): Frame => (self as PyOpaque).data as Frame;
+
+const frameGenerators = new WeakMap<Frame, PyValue>();
+
+/** Records the generator, coroutine, or async generator whose frame `frame` is, which `f_generator` gives. */
+export function setFrameGenerator(frame: Frame, generator: PyValue): void {
+  frameGenerators.set(frame, generator);
+}
 
 /** The frame object `depth` frames below the innermost one, as `sys._getframe(depth)` gives it. */
 export function stackFrame(depth: number): PyValue | undefined {
@@ -130,6 +141,27 @@ defineProperty(frameClass, 'f_back', (self) => {
   const caller = index === -1 ? callers.get(frame) : frames[index - 1];
   return caller ? frameObject(caller) : None;
 });
+method(frameClass, 'clear', 'none', 0, 0, (self) => {
+  const frame = frameOf(self);
+  const generator = frameGenerators.get(frame);
+  const executing = currentRuntime()
+    .allFrames()
+    .some((each) => each.frame === frame);
+  if (executing || (generator instanceof PyGenerator && generator.running)) {
+    throw pyError('RuntimeError', 'cannot clear an executing frame');
+  }
+  if (generator instanceof PyGenerator && !generator.finished) {
+    if (generator.started) throw pyError('RuntimeError', 'cannot clear a suspended frame');
+    callValue(getAttribute(generator, 'close'), []);
+  }
+  // A module's or a class body's frame shares its namespace, which clearing the frame leaves.
+  if (frame.kind === 'function' || frame.kind === 'comprehension') {
+    frame.locals.clear();
+    frame.cells.clear();
+  }
+  return None;
+});
+defineProperty(frameClass, 'f_generator', (self) => frameGenerators.get(frameOf(self)) ?? None);
 defineProperty(frameClass, 'f_trace', () => None);
 defineProperty(frameClass, 'f_trace_lines', () => true);
 defineProperty(frameClass, 'f_trace_opcodes', () => false);
@@ -234,10 +266,30 @@ defineProperty(codeClass, 'co_filename', (self) => {
   if (filename === undefined) throw new UnsupportedFeatureError('スクリプトのファイルのパス（co_filename）');
   return filename;
 });
+defineProperty(codeClass, 'co_cellvars', (self) => newTuple(cellNames(infoOf(self).fn)));
+defineProperty(codeClass, 'co_freevars', (self) => newTuple(freeNames(infoOf(self).fn)));
 for (const name of ['co_code', 'co_consts', 'co_names', 'co_varnames', 'co_nlocals', 'co_stacksize', 'co_flags']) {
   defineProperty(codeClass, name, () => {
     throw new UnsupportedFeatureError(`CPython のバイトコードの情報（${name}）`);
   });
+}
+
+/** A function's variables that nested functions capture: its parameters in their order, then the others sorted. */
+function cellNames(fn: PyFunction | undefined): string[] {
+  if (!fn) return [];
+  const { scope, params } = fn.def;
+  const cells = new Set([...scope.cells, ...(scope.inlinedCells ?? [])]);
+  const parameters = params.map((param) => param.name).filter((name) => cells.has(name));
+  return [...parameters, ...[...cells].filter((name) => !parameters.includes(name)).toSorted()];
+}
+
+/** The variables a function reads from the functions enclosing it, sorted, with the class cell `super()` reads. */
+function freeNames(fn: PyFunction | undefined): string[] {
+  if (!fn) return [];
+  const { scope, usesClassCell, className } = fn.def;
+  const frees = new Set(scope.frees);
+  if (usesClassCell && className !== undefined) frees.add('__class__');
+  return [...frees].toSorted();
 }
 
 // Exceptions --------------------------------------------------------------------------------------------------------
