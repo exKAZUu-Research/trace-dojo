@@ -412,6 +412,8 @@ export function setAttribute(target: PyValue, name: string, value: PyValue): voi
   }
   if (target instanceof PyModule) {
     target.dict.set(name, value);
+    target.unsupported.delete(name);
+    target.imports.delete(name);
     return;
   }
   if (target instanceof PyDescriptor && target.cls === propertyClass && name === '__doc__') {
@@ -660,7 +662,12 @@ export function deleteAttribute(target: PyValue, name: string): void {
     setFunctionAnnotationAttribute(target, name, undefined);
     return;
   }
-  if (target instanceof PyFunction || target instanceof PyModule) {
+  if (target instanceof PyModule) {
+    const deleted = target.dict.delete(name) || target.imports.delete(name) || target.unsupported.delete(name);
+    if (!deleted) throw attributeError(target, name);
+    return;
+  }
+  if (target instanceof PyFunction) {
     if (!target.dict.delete(name)) throw attributeError(target, name);
     return;
   }

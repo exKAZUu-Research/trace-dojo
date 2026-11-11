@@ -1,41 +1,13 @@
-import { BUILTIN_DOC } from '../attributes';
-import { registerModuleValues, registerUnsupportedAttributes } from '../modules';
+import { registerModuleAll, registerUnsupportedAttributes } from '../modules';
 
 /**
  * The names of the supported modules that CPython 3.14 has and this grader does not implement, which raise the
- * unsupported error instead of AttributeError, with the values of `__package__` and `__all__`.
+ * unsupported error instead of AttributeError, and the values of `__all__`.
  */
 
-registerUnsupportedAttributes('math', {
-  __doc__: BUILTIN_DOC,
-  __loader__: 'モジュールの __loader__（import の仕組み）',
-  __spec__: 'モジュールの __spec__（import の仕組み）',
-});
-registerUnsupportedAttributes('random', {
-  __builtins__: 'モジュールの __builtins__（組み込みの名前空間そのもの）',
-  __cached__: 'モジュールの __cached__（ファイルのパス）',
-  __doc__: BUILTIN_DOC,
-  __file__: 'モジュールの __file__（ファイルのパス）',
-  __loader__: 'モジュールの __loader__（import の仕組み）',
-  __spec__: 'モジュールの __spec__（import の仕組み）',
-});
-registerUnsupportedAttributes('collections', {
-  __builtins__: 'モジュールの __builtins__（組み込みの名前空間そのもの）',
-  __cached__: 'モジュールの __cached__（ファイルのパス）',
-  __doc__: BUILTIN_DOC,
-  __file__: 'モジュールの __file__（ファイルのパス）',
-  __loader__: 'モジュールの __loader__（import の仕組み）',
-  __path__: 'パッケージの __path__（ファイルのパス）',
-  __spec__: 'モジュールの __spec__（import の仕組み）',
-});
 registerUnsupportedAttributes('collections.abc', {
   ABCMeta: 'collections.abc.ABCMeta（abc モジュール）',
   ByteString: 'collections.abc.ByteString（bytes 型）',
-  __builtins__: 'モジュールの __builtins__（組み込みの名前空間そのもの）',
-  __doc__: BUILTIN_DOC,
-  __file__: 'モジュールの __file__（ファイルのパス）',
-  __loader__: 'モジュールの __loader__（import の仕組み）',
-  __spec__: 'モジュールの __spec__（import の仕組み）',
   async_generator: 'collections.abc.async_generator',
   bytearray_iterator: 'collections.abc.bytearray_iterator',
   bytes_iterator: 'collections.abc.bytes_iterator',
@@ -43,71 +15,12 @@ registerUnsupportedAttributes('collections.abc', {
   framelocalsproxy: 'collections.abc.framelocalsproxy',
   longrange_iterator: 'collections.abc.longrange_iterator',
 });
-registerUnsupportedAttributes('itertools', {
-  __doc__: BUILTIN_DOC,
-  __loader__: 'モジュールの __loader__（import の仕組み）',
-  __spec__: 'モジュールの __spec__（import の仕組み）',
-});
-registerUnsupportedAttributes('functools', {
-  __builtins__: 'モジュールの __builtins__（組み込みの名前空間そのもの）',
-  __cached__: 'モジュールの __cached__（ファイルのパス）',
-  __doc__: BUILTIN_DOC,
-  __file__: 'モジュールの __file__（ファイルのパス）',
-  __loader__: 'モジュールの __loader__（import の仕組み）',
-  __spec__: 'モジュールの __spec__（import の仕組み）',
-});
-registerUnsupportedAttributes('heapq', {
-  __builtins__: 'モジュールの __builtins__（組み込みの名前空間そのもの）',
-  __cached__: 'モジュールの __cached__（ファイルのパス）',
-  __doc__: BUILTIN_DOC,
-  __file__: 'モジュールの __file__（ファイルのパス）',
-  __loader__: 'モジュールの __loader__（import の仕組み）',
-  __spec__: 'モジュールの __spec__（import の仕組み）',
-});
-registerUnsupportedAttributes('bisect', {
-  __builtins__: 'モジュールの __builtins__（組み込みの名前空間そのもの）',
-  __cached__: 'モジュールの __cached__（ファイルのパス）',
-  __doc__: BUILTIN_DOC,
-  __file__: 'モジュールの __file__（ファイルのパス）',
-  __loader__: 'モジュールの __loader__（import の仕組み）',
-  __spec__: 'モジュールの __spec__（import の仕組み）',
-});
-registerUnsupportedAttributes('copy', {
-  __builtins__: 'モジュールの __builtins__（組み込みの名前空間そのもの）',
-  __cached__: 'モジュールの __cached__（ファイルのパス）',
-  __doc__: BUILTIN_DOC,
-  __file__: 'モジュールの __file__（ファイルのパス）',
-  __loader__: 'モジュールの __loader__（import の仕組み）',
-  __spec__: 'モジュールの __spec__（import の仕組み）',
-});
 registerUnsupportedAttributes('string', {
   Formatter: 'string.Formatter',
   Template: 'string.Template',
-  __builtins__: 'モジュールの __builtins__（組み込みの名前空間そのもの）',
-  __cached__: 'モジュールの __cached__（ファイルのパス）',
-  __doc__: BUILTIN_DOC,
-  __file__: 'モジュールの __file__（ファイルのパス）',
-  __loader__: 'モジュールの __loader__（import の仕組み）',
-  __path__: 'パッケージの __path__（ファイルのパス）',
-  __spec__: 'モジュールの __spec__（import の仕組み）',
   capwords: 'string.capwords',
 });
-registerUnsupportedAttributes('json', {
-  __builtins__: 'モジュールの __builtins__（組み込みの名前空間そのもの）',
-  __cached__: 'モジュールの __cached__（ファイルのパス）',
-  __doc__: BUILTIN_DOC,
-  __file__: 'モジュールの __file__（ファイルのパス）',
-  __loader__: 'モジュールの __loader__（import の仕組み）',
-  __path__: 'パッケージの __path__（ファイルのパス）',
-  __spec__: 'モジュールの __spec__（import の仕組み）',
-});
 registerUnsupportedAttributes('dataclasses', {
-  __builtins__: 'モジュールの __builtins__（組み込みの名前空間そのもの）',
-  __cached__: 'モジュールの __cached__（ファイルのパス）',
-  __doc__: BUILTIN_DOC,
-  __file__: 'モジュールの __file__（ファイルのパス）',
-  __loader__: 'モジュールの __loader__（import の仕組み）',
-  __spec__: 'モジュールの __spec__（import の仕組み）',
   abc: 'dataclasses.abc',
   annotationlib: 'dataclasses.annotationlib',
   inspect: 'dataclasses.inspect',
@@ -134,12 +47,6 @@ registerUnsupportedAttributes('enum', {
   STRICT: 'enum.STRICT',
   StrEnum: 'enum.StrEnum',
   UNIQUE: 'enum.UNIQUE',
-  __builtins__: 'モジュールの __builtins__（組み込みの名前空間そのもの）',
-  __cached__: 'モジュールの __cached__（ファイルのパス）',
-  __doc__: BUILTIN_DOC,
-  __file__: 'モジュールの __file__（ファイルのパス）',
-  __loader__: 'モジュールの __loader__（import の仕組み）',
-  __spec__: 'モジュールの __spec__（import の仕組み）',
   bin: 'enum.bin',
   bltns: 'enum.bltns',
   global_enum: 'enum.global_enum',
@@ -157,13 +64,7 @@ registerUnsupportedAttributes('enum', {
   verify: 'enum.verify',
 });
 registerUnsupportedAttributes('typing', {
-  __builtins__: 'モジュールの __builtins__（組み込みの名前空間そのもの）',
-  __cached__: 'モジュールの __cached__（ファイルのパス）',
-  __doc__: BUILTIN_DOC,
-  __file__: 'モジュールの __file__（ファイルのパス）',
   __getattr__: 'モジュールの __getattr__',
-  __loader__: 'モジュールの __loader__（import の仕組み）',
-  __spec__: 'モジュールの __spec__（import の仕組み）',
 });
 registerUnsupportedAttributes('statistics', {
   Counter: 'statistics.Counter',
@@ -172,13 +73,7 @@ registerUnsupportedAttributes('statistics', {
   LinearRegression: 'statistics.LinearRegression',
   NormalDist: 'statistics.NormalDist',
   __annotate__: 'モジュールの __annotate__',
-  __builtins__: 'モジュールの __builtins__（組み込みの名前空間そのもの）',
-  __cached__: 'モジュールの __cached__（ファイルのパス）',
   __conditional_annotations__: 'モジュールの __conditional_annotations__',
-  __doc__: BUILTIN_DOC,
-  __file__: 'モジュールの __file__（ファイルのパス）',
-  __loader__: 'モジュールの __loader__（import の仕組み）',
-  __spec__: 'モジュールの __spec__（import の仕組み）',
   acos: 'statistics.acos',
   asin: 'statistics.asin',
   atan: 'statistics.atan',
@@ -232,11 +127,8 @@ registerUnsupportedAttributes('statistics', {
 registerUnsupportedAttributes('sys', {
   __breakpointhook__: 'sys.__breakpointhook__',
   __displayhook__: 'sys.__displayhook__',
-  __doc__: BUILTIN_DOC,
   __excepthook__: 'sys.__excepthook__',
   __interactivehook__: 'sys.__interactivehook__',
-  __loader__: 'モジュールの __loader__（import の仕組み）',
-  __spec__: 'モジュールの __spec__（import の仕組み）',
   __stderr__: 'sys.__stderr__',
   __stdin__: 'sys.__stdin__',
   __stdout__: 'sys.__stdout__',
@@ -309,8 +201,7 @@ registerUnsupportedAttributes('sys', {
   warnoptions: 'sys.warnoptions',
 });
 
-registerModuleValues('math', '', undefined);
-registerModuleValues('random', '', [
+registerModuleAll('random', [
   'Random',
   'SystemRandom',
   'betavariate',
@@ -338,7 +229,7 @@ registerModuleValues('random', '', [
   'vonmisesvariate',
   'weibullvariate',
 ]);
-registerModuleValues('collections', 'collections', [
+registerModuleAll('collections', [
   'ChainMap',
   'Counter',
   'OrderedDict',
@@ -349,7 +240,7 @@ registerModuleValues('collections', 'collections', [
   'deque',
   'namedtuple',
 ]);
-registerModuleValues('collections.abc', '', [
+registerModuleAll('collections.abc', [
   'Awaitable',
   'Coroutine',
   'AsyncIterable',
@@ -377,8 +268,7 @@ registerModuleValues('collections.abc', '', [
   'ByteString',
   'Buffer',
 ]);
-registerModuleValues('itertools', '', undefined);
-registerModuleValues('functools', '', [
+registerModuleAll('functools', [
   'update_wrapper',
   'wraps',
   'WRAPPER_ASSIGNMENTS',
@@ -395,7 +285,7 @@ registerModuleValues('functools', '', [
   'cached_property',
   'Placeholder',
 ]);
-registerModuleValues('heapq', '', [
+registerModuleAll('heapq', [
   'heappush',
   'heappop',
   'heapify',
@@ -410,9 +300,8 @@ registerModuleValues('heapq', '', [
   'nsmallest',
   'merge',
 ]);
-registerModuleValues('bisect', '', undefined);
-registerModuleValues('copy', '', ['Error', 'copy', 'deepcopy', 'replace']);
-registerModuleValues('string', 'string', [
+registerModuleAll('copy', ['Error', 'copy', 'deepcopy', 'replace']);
+registerModuleAll('string', [
   'ascii_letters',
   'ascii_lowercase',
   'ascii_uppercase',
@@ -426,16 +315,8 @@ registerModuleValues('string', 'string', [
   'Formatter',
   'Template',
 ]);
-registerModuleValues('json', 'json', [
-  'dump',
-  'dumps',
-  'load',
-  'loads',
-  'JSONDecoder',
-  'JSONDecodeError',
-  'JSONEncoder',
-]);
-registerModuleValues('dataclasses', '', [
+registerModuleAll('json', ['dump', 'dumps', 'load', 'loads', 'JSONDecoder', 'JSONDecodeError', 'JSONEncoder']);
+registerModuleAll('dataclasses', [
   'dataclass',
   'field',
   'Field',
@@ -450,7 +331,7 @@ registerModuleValues('dataclasses', '', [
   'replace',
   'is_dataclass',
 ]);
-registerModuleValues('enum', '', [
+registerModuleAll('enum', [
   'EnumType',
   'EnumMeta',
   'EnumDict',
@@ -482,7 +363,7 @@ registerModuleValues('enum', '', [
   'pickle_by_global_name',
   'pickle_by_enum_name',
 ]);
-registerModuleValues('typing', '', [
+registerModuleAll('typing', [
   'Annotated',
   'Any',
   'Callable',
@@ -589,7 +470,7 @@ registerModuleValues('typing', '', [
   'TypeAliasType',
   'Unpack',
 ]);
-registerModuleValues('statistics', '', [
+registerModuleAll('statistics', [
   'NormalDist',
   'StatisticsError',
   'correlation',
@@ -613,4 +494,3 @@ registerModuleValues('statistics', '', [
   'stdev',
   'variance',
 ]);
-registerModuleValues('sys', '', undefined);

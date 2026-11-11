@@ -168,6 +168,20 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'zlib',
 ]);
 
+/**
+ * The modules of other platforms and the C modules that CPython's pure Python modules try to import, whose import
+ * fails here as it does where CPython lacks them.
+ */
+export const MISSING_PLATFORM_MODULES: ReadonlySet<string> = new Set([
+  'nt',
+  '_winapi',
+  'fcntl',
+  'posix',
+  'pwd',
+  'grp',
+  '_stat',
+]);
+
 export function isSupportedModule(module: string): boolean {
   return SUPPORTED_MODULES.has(module);
 }

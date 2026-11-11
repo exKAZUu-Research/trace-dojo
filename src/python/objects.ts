@@ -226,7 +226,19 @@ function moduleAttribute(module: PyModule, name: string): PyValue | undefined {
   const feature = module.unsupported.get(name);
   if (feature !== undefined) throw new UnsupportedFeatureError(feature);
   if (name === '__dict__') return namespaceDict(module.dict);
-  return name === '__annotations__' ? moduleAnnotations(module) : module.dict.get(name);
+  return name === '__annotations__'
+    ? moduleAnnotations(module)
+    : (module.dict.get(name) ?? importedModule(module, name));
+}
+
+/** The module CPython's module holds under `name` because its code imported it, which is the same object here too. */
+export function importedModule(module: PyModule, name: string): PyModule | undefined {
+  const target = module.imports.get(name);
+  if (target === undefined) return undefined;
+  const imported = currentRuntime().importModule(target);
+  module.imports.delete(name);
+  module.dict.set(name, imported);
+  return imported;
 }
 
 export { deleteAttribute, setAttribute } from './attributes';

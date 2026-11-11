@@ -31,7 +31,7 @@ class Format(enum.IntEnum):
     STRING = 4
 
 
-# The nodes of the expressions a _Stringifier records, and ast.unparse for them, in place of the ast module.
+# The nodes of the expressions a _Stringifier records, and _ast.unparse for them, in place of the ast module.
 class _AST:
     _fields = ()
 
@@ -46,7 +46,7 @@ def _node(name, *fields):
     return type(name, (_AST,), {'_fields': fields})
 
 
-class ast:
+class _ast:
     AST = _AST
     Name = _node('Name', 'id')
     Constant = _node('Constant', 'value')
@@ -92,7 +92,7 @@ class ast:
         return _unparse(node, _TEST)
 
 
-# The precedences of ast._Precedence that these nodes use.
+# The precedences of _ast._Precedence that these nodes use.
 _TUPLE, _TEST, _CMP, _BOR, _BXOR, _BAND, _SHIFT, _ARITH, _TERM, _FACTOR, _POWER, _ATOM = (
     2, 4, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18)
 
@@ -132,12 +132,12 @@ def _unparse(node, level):
         return _constant(node.value)
     if kind == 'Attribute':
         value = _unparse(node.value, _ATOM)
-        if isinstance(node.value, ast.Constant) and isinstance(node.value.value, int):
+        if isinstance(node.value, _ast.Constant) and isinstance(node.value.value, int):
             value += ' '
         return f'{value}.{node.attr}'
     if kind == 'Subscript':
         index = node.slice
-        if isinstance(index, ast.Tuple) and index.elts:
+        if isinstance(index, _ast.Tuple) and index.elts:
             inner = _items(index.elts)
         else:
             inner = _unparse(index, _TEST)
@@ -209,9 +209,9 @@ def _template_text(template):
 
 
 def _replace_names(node, names):
-    if isinstance(node, ast.Name):
+    if isinstance(node, _ast.Name):
         if node.id in names:
-            return ast.Name(type_repr(names[node.id]))
+            return _ast.Name(type_repr(names[node.id]))
         return node
     if not isinstance(node, _AST):
         return node
@@ -454,7 +454,7 @@ class ForwardRef:
         if self.__arg__ is not None:
             return self.__arg__
         if self.__ast_node__ is not None:
-            self.__arg__ = ast.unparse(self.__ast_node__)
+            self.__arg__ = _ast.unparse(self.__ast_node__)
             return self.__arg__
         raise AssertionError(
             "Attempted to access '__forward_arg__' on an uninitialized ForwardRef"
@@ -469,7 +469,7 @@ class ForwardRef:
             names = self.__extra_names__
 
             if names and self.__ast_node__ is not None:
-                resolved_str = ast.unparse(_replace_names(self.__ast_node__, names))
+                resolved_str = _ast.unparse(_replace_names(self.__ast_node__, names))
 
             self.__resolved_str_cache__ = resolved_str
 
@@ -562,7 +562,7 @@ class _Stringifier:
     ):
         # Either an AST node or a simple str (for the common case where a ForwardRef
         # represent a single name).
-        assert isinstance(node, (ast.AST, str))
+        assert isinstance(node, (_ast.AST, str))
         self.__arg__ = None
         self.__forward_is_argument__ = False
         self.__forward_is_class__ = is_class
@@ -579,7 +579,7 @@ class _Stringifier:
     def __convert_to_ast(self, other):
         if isinstance(other, _Stringifier):
             if isinstance(other.__ast_node__, str):
-                return ast.Name(id=other.__ast_node__), other.__extra_names__
+                return _ast.Name(id=other.__ast_node__), other.__extra_names__
             return other.__ast_node__, other.__extra_names__
         elif type(other) is _Template:
             return _template_to_ast(other), None
@@ -590,7 +590,7 @@ class _Stringifier:
             or other is None
             or type(other) in (str, int, float, bool, complex)
         ):
-            return ast.Constant(value=other), None
+            return _ast.Constant(value=other), None
         elif type(other) is dict:
             extra_names = {}
             keys = []
@@ -604,7 +604,7 @@ class _Stringifier:
                 if new_extra_names is not None:
                     extra_names.update(new_extra_names)
                 values.append(new_value)
-            return ast.Dict(keys, values), extra_names
+            return _ast.Dict(keys, values), extra_names
         elif type(other) in (list, tuple, set):
             extra_names = {}
             elts = []
@@ -613,11 +613,11 @@ class _Stringifier:
                 if new_extra_names is not None:
                     extra_names.update(new_extra_names)
                 elts.append(new_elt)
-            ast_class = {list: ast.List, tuple: ast.Tuple, set: ast.Set}[type(other)]
+            ast_class = {list: _ast.List, tuple: _ast.Tuple, set: _ast.Set}[type(other)]
             return ast_class(elts), extra_names
         else:
             name = self.__stringifier_dict__.create_unique_name()
-            return ast.Name(id=name), {name: other}
+            return _ast.Name(id=name), {name: other}
 
     def __convert_to_ast_getitem(self, other):
         if isinstance(other, slice):
@@ -631,7 +631,7 @@ class _Stringifier:
                     extra_names.update(new_extra_names)
                 return new_obj
 
-            return ast.Slice(
+            return _ast.Slice(
                 lower=conv(other.start),
                 upper=conv(other.stop),
                 step=conv(other.step),
@@ -642,7 +642,7 @@ class _Stringifier:
     def __get_ast(self):
         node = self.__ast_node__
         if isinstance(node, str):
-            return ast.Name(id=node)
+            return _ast.Name(id=node)
         return node
 
     def __make_new(self, node, extra_names=None):
@@ -680,14 +680,14 @@ class _Stringifier:
                 if new_extra_names is not None:
                     extra_names.update(new_extra_names)
                 elts.append(new_elt)
-            other = ast.Tuple(elts)
+            other = _ast.Tuple(elts)
         else:
             other, extra_names = self.__convert_to_ast_getitem(other)
-        assert isinstance(other, ast.AST), repr(other)
-        return self.__make_new(ast.Subscript(self.__get_ast(), other), extra_names)
+        assert isinstance(other, _ast.AST), repr(other)
+        return self.__make_new(_ast.Subscript(self.__get_ast(), other), extra_names)
 
     def __getattr__(self, attr):
-        return self.__make_new(ast.Attribute(self.__get_ast(), attr))
+        return self.__make_new(_ast.Attribute(self.__get_ast(), attr))
 
     def __call__(self, *args, **kwargs):
         extra_names = {}
@@ -702,67 +702,67 @@ class _Stringifier:
             new_value, new_extra_names = self.__convert_to_ast(value)
             if new_extra_names is not None:
                 extra_names.update(new_extra_names)
-            ast_kwargs.append(ast.keyword(key, new_value))
-        return self.__make_new(ast.Call(self.__get_ast(), ast_args, ast_kwargs), extra_names)
+            ast_kwargs.append(_ast.keyword(key, new_value))
+        return self.__make_new(_ast.Call(self.__get_ast(), ast_args, ast_kwargs), extra_names)
 
     def __iter__(self):
-        yield self.__make_new(ast.Starred(self.__get_ast()))
+        yield self.__make_new(_ast.Starred(self.__get_ast()))
 
     def __repr__(self):
         if isinstance(self.__ast_node__, str):
             return self.__ast_node__
-        return ast.unparse(self.__ast_node__)
+        return _ast.unparse(self.__ast_node__)
 
     def __format__(self, format_spec):
         raise TypeError("Cannot stringify annotation containing string formatting")
 
-    def _make_binop(op: ast.AST):
+    def _make_binop(op: _ast.AST):
         def binop(self, other):
             rhs, extra_names = self.__convert_to_ast(other)
             return self.__make_new(
-                ast.BinOp(self.__get_ast(), op, rhs), extra_names
+                _ast.BinOp(self.__get_ast(), op, rhs), extra_names
             )
 
         return binop
 
-    __add__ = _make_binop(ast.Add())
-    __sub__ = _make_binop(ast.Sub())
-    __mul__ = _make_binop(ast.Mult())
-    __matmul__ = _make_binop(ast.MatMult())
-    __truediv__ = _make_binop(ast.Div())
-    __mod__ = _make_binop(ast.Mod())
-    __lshift__ = _make_binop(ast.LShift())
-    __rshift__ = _make_binop(ast.RShift())
-    __or__ = _make_binop(ast.BitOr())
-    __xor__ = _make_binop(ast.BitXor())
-    __and__ = _make_binop(ast.BitAnd())
-    __floordiv__ = _make_binop(ast.FloorDiv())
-    __pow__ = _make_binop(ast.Pow())
+    __add__ = _make_binop(_ast.Add())
+    __sub__ = _make_binop(_ast.Sub())
+    __mul__ = _make_binop(_ast.Mult())
+    __matmul__ = _make_binop(_ast.MatMult())
+    __truediv__ = _make_binop(_ast.Div())
+    __mod__ = _make_binop(_ast.Mod())
+    __lshift__ = _make_binop(_ast.LShift())
+    __rshift__ = _make_binop(_ast.RShift())
+    __or__ = _make_binop(_ast.BitOr())
+    __xor__ = _make_binop(_ast.BitXor())
+    __and__ = _make_binop(_ast.BitAnd())
+    __floordiv__ = _make_binop(_ast.FloorDiv())
+    __pow__ = _make_binop(_ast.Pow())
 
     del _make_binop
 
-    def _make_rbinop(op: ast.AST):
+    def _make_rbinop(op: _ast.AST):
         def rbinop(self, other):
             new_other, extra_names = self.__convert_to_ast(other)
             return self.__make_new(
-                ast.BinOp(new_other, op, self.__get_ast()), extra_names
+                _ast.BinOp(new_other, op, self.__get_ast()), extra_names
             )
 
         return rbinop
 
-    __radd__ = _make_rbinop(ast.Add())
-    __rsub__ = _make_rbinop(ast.Sub())
-    __rmul__ = _make_rbinop(ast.Mult())
-    __rmatmul__ = _make_rbinop(ast.MatMult())
-    __rtruediv__ = _make_rbinop(ast.Div())
-    __rmod__ = _make_rbinop(ast.Mod())
-    __rlshift__ = _make_rbinop(ast.LShift())
-    __rrshift__ = _make_rbinop(ast.RShift())
-    __ror__ = _make_rbinop(ast.BitOr())
-    __rxor__ = _make_rbinop(ast.BitXor())
-    __rand__ = _make_rbinop(ast.BitAnd())
-    __rfloordiv__ = _make_rbinop(ast.FloorDiv())
-    __rpow__ = _make_rbinop(ast.Pow())
+    __radd__ = _make_rbinop(_ast.Add())
+    __rsub__ = _make_rbinop(_ast.Sub())
+    __rmul__ = _make_rbinop(_ast.Mult())
+    __rmatmul__ = _make_rbinop(_ast.MatMult())
+    __rtruediv__ = _make_rbinop(_ast.Div())
+    __rmod__ = _make_rbinop(_ast.Mod())
+    __rlshift__ = _make_rbinop(_ast.LShift())
+    __rrshift__ = _make_rbinop(_ast.RShift())
+    __ror__ = _make_rbinop(_ast.BitOr())
+    __rxor__ = _make_rbinop(_ast.BitXor())
+    __rand__ = _make_rbinop(_ast.BitAnd())
+    __rfloordiv__ = _make_rbinop(_ast.FloorDiv())
+    __rpow__ = _make_rbinop(_ast.Pow())
 
     del _make_rbinop
 
@@ -770,7 +770,7 @@ class _Stringifier:
         def compare(self, other):
             rhs, extra_names = self.__convert_to_ast(other)
             return self.__make_new(
-                ast.Compare(
+                _ast.Compare(
                     left=self.__get_ast(),
                     ops=[op],
                     comparators=[rhs],
@@ -780,31 +780,31 @@ class _Stringifier:
 
         return compare
 
-    __lt__ = _make_compare(ast.Lt())
-    __le__ = _make_compare(ast.LtE())
-    __eq__ = _make_compare(ast.Eq())
-    __ne__ = _make_compare(ast.NotEq())
-    __gt__ = _make_compare(ast.Gt())
-    __ge__ = _make_compare(ast.GtE())
+    __lt__ = _make_compare(_ast.Lt())
+    __le__ = _make_compare(_ast.LtE())
+    __eq__ = _make_compare(_ast.Eq())
+    __ne__ = _make_compare(_ast.NotEq())
+    __gt__ = _make_compare(_ast.Gt())
+    __ge__ = _make_compare(_ast.GtE())
 
     del _make_compare
 
     def _make_unary_op(op):
         def unary_op(self):
-            return self.__make_new(ast.UnaryOp(op, self.__get_ast()))
+            return self.__make_new(_ast.UnaryOp(op, self.__get_ast()))
 
         return unary_op
 
-    __invert__ = _make_unary_op(ast.Invert())
-    __pos__ = _make_unary_op(ast.UAdd())
-    __neg__ = _make_unary_op(ast.USub())
+    __invert__ = _make_unary_op(_ast.Invert())
+    __pos__ = _make_unary_op(_ast.UAdd())
+    __neg__ = _make_unary_op(_ast.USub())
 
     del _make_unary_op
 
 
 def _template_to_ast(template):
     """Make a best-effort conversion of a \x60template\x60 instance to an AST."""
-    return ast.TemplateStr(template)
+    return _ast.TemplateStr(template)
 
 
 class _StringifierDict(dict):
@@ -1009,7 +1009,7 @@ def _stringify_single(anno):
     elif isinstance(anno, str):
         return anno
     elif isinstance(anno, _Template):
-        return ast.unparse(_template_to_ast(anno))
+        return _ast.unparse(_template_to_ast(anno))
     else:
         return repr(anno)
 
@@ -1227,7 +1227,7 @@ def type_repr(value):
         return f"{module}.{value.__qualname__}"
     elif isinstance(value, _Template):
         tree = _template_to_ast(value)
-        return ast.unparse(tree)
+        return _ast.unparse(tree)
     if value is ...:
         return "..."
     return repr(value)

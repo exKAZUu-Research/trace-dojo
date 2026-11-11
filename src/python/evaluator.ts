@@ -29,6 +29,7 @@ import {
   getAttribute,
   getAttributeOrUndefined,
   getItem,
+  importedModule,
   isTruthy,
   iterate,
   lookupSpecial,
@@ -279,6 +280,7 @@ export class Evaluator extends AsyncEvaluator {
       const submodule = `${statement.module}.${name}`;
       const value =
         module.dict.get(name) ??
+        importedModule(module, name) ??
         (module.dict.has('__getattr__') ? getAttributeOrUndefined(module, name) : undefined) ??
         (isRegisteredModule(submodule) ? this.runtime.importModule(submodule) : undefined);
       if (value === undefined) {

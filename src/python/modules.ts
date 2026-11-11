@@ -1,3 +1,4 @@
+import { addLayoutAttributes } from './modules/moduleLayout';
 import type { Runtime } from './runtime';
 import { UNSUPPORTED_SYS_ATTRIBUTES } from './sysAttributes';
 import { moduleClass } from './types';
@@ -39,11 +40,11 @@ export function trackModules(runtime: Runtime, table: Map<string, PyValue>): voi
   moduleTables.set(runtime, table);
 }
 
-const moduleValues = new Map<string, { package: string; all?: readonly string[] }>();
+const moduleAlls = new Map<string, readonly string[]>();
 
-/** Registers a module's `__package__` and `__all__`, for the modules whose code does not define them. */
-export function registerModuleValues(module: string, packageName: string, all: readonly string[] | undefined): void {
-  moduleValues.set(module, { package: packageName, all });
+/** Registers a module's `__all__`, for the modules whose code does not define it. */
+export function registerModuleAll(module: string, all: readonly string[]): void {
+  moduleAlls.set(module, all);
 }
 
 /** Names attributes of a module that this grader does not support, with the feature to name in their error. */
@@ -83,26 +84,22 @@ export function importModule(runtime: Runtime, name: string): PyModule {
   for (const [key, value] of runFactory(runtime, name, factory, module)) module.dict.set(key, value);
   recordFunctionModules(module);
   addRegisteredAttributes(runtime, module);
+  addLayoutAttributes(module, name);
   moduleTables.get(runtime)?.set(name, module);
   const dot = name.lastIndexOf('.');
   if (dot !== -1) importModule(runtime, name.slice(0, dot)).dict.set(name.slice(dot + 1), module);
   return module;
 }
 
-/**
- * Adds to a new module the names this grader does not support, which its code did not define, and the `__package__`
- * and `__all__` registered for it.
- */
+/** Adds to a new module the names this grader does not support, which its code did not define, and its `__all__`. */
 function addRegisteredAttributes(runtime: Runtime, module: PyModule): void {
   const { name, dict } = module;
   const unsupported = name === 'sys' ? UNSUPPORTED_SYS_ATTRIBUTES : unsupportedAttributes.get(name);
   for (const [key, feature] of Object.entries(unsupported ?? {})) {
     if (!dict.has(key)) module.unsupported.set(key, feature);
   }
-  const values = moduleValues.get(name);
-  if (!values) return;
-  if (!dict.has('__package__')) dict.set('__package__', values.package);
-  if (values.all && !dict.has('__all__')) dict.set('__all__', runtime.listOf([...values.all]));
+  const all = moduleAlls.get(name);
+  if (all && !dict.has('__all__')) dict.set('__all__', runtime.listOf([...all]));
 }
 
 /** Records the module of the builtin functions a module creates, which their `__module__` names. */
