@@ -163,3 +163,24 @@ with contextlib.redirect_stdout(out):
 assert out.getvalue().startswith('The "pass" statement\n********************\n'), out.getvalue()[:60]
 `);
 });
+
+test("builtin data attributes are CPython's getset and member descriptors, which help() lists as CPython does", () => {
+  expectSameAsCPython(String.raw`import inspect, types, io, contextlib
+assert repr(int.real) == "<attribute 'real' of 'int' objects>" and type(int.real) is types.GetSetDescriptorType
+assert repr(range.start) == "<member 'start' of 'range' objects>" and inspect.ismemberdescriptor(range.start)
+assert int.real.__objclass__ is int and int.real.__get__(5) == 5 and int.real.__qualname__ == 'int.real'
+try:
+    int.real.__set__(5, 1)
+except AttributeError as e:
+    assert str(e) == "attribute 'real' of 'int' objects is not writable"
+try:
+    int.real.__get__('x')
+except TypeError as e:
+    assert str(e) == "descriptor 'real' for 'int' objects doesn't apply to a 'str' object"
+out = io.StringIO()
+with contextlib.redirect_stdout(out):
+    help(range)
+assert ' |  Data descriptors defined here:\n |\n |  start\n' in out.getvalue(), out.getvalue()
+assert slice(1, 2) < slice(1, 3) and range(3) == range(0, 3) and True.__and__(2) == 0
+`);
+});

@@ -1,6 +1,6 @@
 import { DictStore } from './dictStore';
 import { SetTable } from './setTable';
-import { recordSubclass } from './subclasses';
+import { recordRootClass, recordSubclass } from './subclasses';
 import {
   type ExceptionState,
   type Kwargs,
@@ -27,6 +27,7 @@ typeClass.cls = typeClass;
 objectClass.cls = typeClass;
 typeClass.bases = [objectClass];
 recordSubclass(typeClass);
+recordRootClass(objectClass);
 objectClass.mro = [objectClass];
 typeClass.mro = [typeClass, objectClass];
 typeClass.isBaseType = true;

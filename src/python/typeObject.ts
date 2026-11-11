@@ -1,3 +1,4 @@
+import { defineAttribute } from './attributeDescriptors';
 import {
   deleteClassAttribute,
   deleteInstanceAttribute,
@@ -9,7 +10,7 @@ import {
 import { typeNewFromArguments } from './classes';
 import { addressOf, defaultRepr, pyFormat, pyRepr, pyStr } from './conversions';
 import { method } from './define';
-import { builtinDescriptorClasses, callGetter, descriptorGetter } from './descriptors';
+import { callGetter, descriptorGetter } from './descriptors';
 import { isEnumClass, isFlagClass } from './enums';
 import { generatorNext } from './generators';
 import { identityHash } from './hashing';
@@ -33,7 +34,6 @@ import { currentRuntime } from './runtimeContext';
 import { subclassesOf } from './subclasses';
 import { typeOr } from './typeHints';
 import {
-  builtinClass,
   builtinFunctionClass,
   bytearrayClass,
   classmethodClass,
@@ -88,7 +88,6 @@ import {
   type PyIterator,
   type PyModule,
   PyObject,
-  PyOpaque,
   PySlice,
   PySuper,
   type PyValue,
@@ -233,15 +232,6 @@ method(
 );
 method(typeClass, '__or__', 'one', 1, 1, (self, [other]) => typeOr(self, other));
 method(typeClass, '__ror__', 'one', 1, 1, (self, [other]) => typeOr(other, self));
-const typeMemberClass = builtinClass('member_descriptor');
-const typeAttributeClass = builtinClass('getset_descriptor');
-for (const cls of [typeMemberClass, typeAttributeClass]) {
-  builtinDescriptorClasses.add(cls);
-  method(cls, '__repr__', 'none', 0, 0, (self) => (self as PyOpaque).text);
-  method(cls, '__get__', 'expected', 1, 2, (self, [instance]) =>
-    instance === None ? self : typeAttributeValue(instance, (self as PyOpaque).data as string)
-  );
-}
 /** The attributes that tell how CPython lays out a class's instances in memory. */
 const MEMORY_LAYOUT = new Set(['__basicsize__', '__itemsize__', '__weakrefoffset__', '__dictoffset__']);
 
@@ -305,10 +295,10 @@ function defineTypeAttributes(): void {
     '__type_params__',
   ];
   for (const name of members) {
-    typeClass.dict.set(name, new PyOpaque(typeMemberClass, `<member '${name}' of 'type' objects>`, name));
+    defineAttribute(typeClass, name, (instance) => typeAttributeValue(instance, name), { kind: 'member' });
   }
   for (const name of attributes) {
-    typeClass.dict.set(name, new PyOpaque(typeAttributeClass, `<attribute '${name}' of 'type' objects>`, name));
+    defineAttribute(typeClass, name, (instance) => typeAttributeValue(instance, name));
   }
 }
 
@@ -522,7 +512,6 @@ method(propertyClass, '__set__', 'expected', 2, 2, (self, [instance, value]) =>
 method(propertyClass, '__delete__', 'one', 1, 1, (self, [instance]) =>
   callAccessor(self as PyDescriptor, 'deleter', [instance])
 );
-method(propertyClass, '__repr__', 'none', 0, 0, (self) => `<property object at ${addressOf(self as PyObject)}>`);
 
 function callAccessor(property: PyDescriptor, kind: 'setter' | 'deleter', args: PyValue[]): PyValue {
   const accessor = property[kind];

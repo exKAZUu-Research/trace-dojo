@@ -1,5 +1,6 @@
 // code-gauge-allow-file fileNcss 443 -- The attribute lookup and the protocols every kind of object follows belong together.
 import { moduleAnnotations } from './annotations';
+import { PyAttribute } from './attributeDescriptors';
 import { classAttribute, specialAttribute } from './attributes';
 import { PyBytes, PyMemoryView } from './bytesValues';
 import {
@@ -15,7 +16,6 @@ import { clamp, reduction, withState } from './iteratorStates';
 import { namespaceDict } from './namespaces';
 import { describeIntegerIndex, toIndex } from './numbers';
 import { currentRuntime } from './runtimeContext';
-import { isMember, readMember } from './slots';
 import { iterStr, strLength } from './strings';
 import { superAttribute } from './typeObject';
 import {
@@ -61,7 +61,6 @@ import {
   PyIterator,
   PyList,
   PyModule,
-  type PyObject,
   PyRange,
   PySet,
   PySuper,
@@ -214,8 +213,12 @@ function findAttribute(value: PyValue, name: string): PyValue | undefined {
   if (special !== undefined) return special;
   const attribute = cls.lookup(name);
   if (attribute === undefined) return ownDict(value)?.get(name) ?? typeDocOf(cls, name);
+  if (attribute instanceof PyAttribute) {
+    // A descriptor standing for what this grader's objects keep natively finds nothing where they keep nothing.
+    if (!attribute.stands) return attribute.get(value);
+    return ownDict(value)?.get(name) ?? typeDocOf(cls, name);
+  }
   if (attribute instanceof PyDescriptor && attribute.cls === propertyClass) return bindValue(attribute, value, cls);
-  if (isMember(attribute)) return readMember(attribute, value as PyObject);
   const getter = descriptorGetter(attribute);
   if (getter !== undefined && isDataDescriptor(attribute)) return callGetter(getter, attribute, value, cls);
   const own = ownDict(value)?.get(name);

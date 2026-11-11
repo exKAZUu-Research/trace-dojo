@@ -3,6 +3,8 @@
 //   bun scripts/generateBuiltinDocs.ts .tmp/builtinDocs.json && bun fmt src/python/data/builtinDocs.ts
 import { readFileSync, writeFileSync } from 'node:fs';
 
+// Imported after the modules that define the builtin classes, as the library imports it.
+import { PyAttribute } from '../src/python/attributeDescriptors';
 import { docKey, moduleDoc } from '../src/python/builtinDocs';
 import { SUPPORTED_MODULES } from '../src/python/moduleNames';
 import { builtinFunctionModule } from '../src/python/modules';
@@ -16,7 +18,7 @@ import { PyBuiltinFunction, PyClass, PyDescriptor, PyModule, type PyValue } from
 const SAMPLES =
   'iter([]), iter(()), iter(""), iter({}), iter(set()), iter(range(1)), reversed([]), {}.keys(), {}.values(), ' +
   '{}.items(), iter({}.keys()), iter({}.values()), iter({}.items()), iter(b""), iter(bytearray()), ' +
-  '(x for x in []), len, [].append, type.__dict__, sys.flags';
+  '(x for x in []), len, [].append, type.__dict__, sys.flags, (lambda: 0), (lambda: 0).__get__(1), (lambda: 0).__code__';
 
 const reference = JSON.parse(readFileSync(process.argv[2] as string, 'utf8')) as Record<
   string,
@@ -94,7 +96,12 @@ function collect(value: PyValue): void {
   keys.add(`!${key}`);
   for (const [name, attribute] of value.dict) {
     if (attribute instanceof PyClass) collect(attribute);
-    else if (attribute instanceof PyBuiltinFunction || attribute instanceof PyDescriptor) keys.add(`${key}.${name}`);
+    else if (
+      attribute instanceof PyBuiltinFunction ||
+      attribute instanceof PyDescriptor ||
+      attribute instanceof PyAttribute
+    )
+      keys.add(`${key}.${name}`);
   }
 }
 

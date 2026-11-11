@@ -1,8 +1,9 @@
+import { builtinClassLayout } from '../builtinDocs';
 import { method } from '../define';
 import { registerExtraAttributes } from '../modules';
 import { callValue } from '../objects';
 import { genericAliasClass } from '../typeHints';
-import { classmethodClass, isInstanceOf, NotImplemented } from '../types';
+import { classmethodClass, defineMethod, isInstanceOf, NotImplemented } from '../types';
 import { PyClass, PyDescriptor, PyError, type PyInstance, type PyValue } from '../values';
 
 // The class attributes CPython's library classes have that their implementations here do not define: the
@@ -98,7 +99,11 @@ function addModuleEntry(cls: PyClass | undefined, module: string): void {
 }
 
 function addClassGetItem(cls: PyClass | undefined): void {
-  if (cls && cls.lookup('__class_getitem__') === undefined) {
+  if (!cls || cls.lookup('__class_getitem__') !== undefined) return;
+  // A C type's is a classmethod_descriptor; a class CPython writes in Python wraps GenericAlias in a classmethod.
+  if (builtinClassLayout(cls)?.includes('__class_getitem__:classmethod_descriptor')) {
+    defineMethod(cls, '__class_getitem__', (owner, args) => callValue(genericAliasClass, [owner, ...args]), 'class');
+  } else {
     cls.dict.set('__class_getitem__', new PyDescriptor(classmethodClass, genericAliasClass));
   }
 }

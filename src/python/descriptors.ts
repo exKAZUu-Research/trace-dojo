@@ -5,6 +5,9 @@ import { instancesHaveDict } from './slots';
 import { classOf, objectClass, pyError } from './types';
 import { type PyClass, PyError, PyFunction, PyInstance, PyObject, type PyValue } from './values';
 
+/** The builtin classes whose objects are data descriptors, which take attributes over instance dicts. */
+export const builtinDataDescriptorClasses = new Set<PyClass>();
+
 /** The builtin classes whose objects bind as methods through their native `__get__`, as `functools.lru_cache`'s do. */
 export const builtinDescriptorClasses = new Set<PyClass>();
 
@@ -17,6 +20,7 @@ export function descriptorGetter(attribute: PyValue): PyValue | undefined {
 
 /** Whether an attribute of a program's class defines `__set__` or `__delete__`, which takes it over instance dicts. */
 export function isDataDescriptor(attribute: PyValue): boolean {
+  if (attribute instanceof PyObject && builtinDataDescriptorClasses.has(attribute.cls)) return true;
   if (!(attribute instanceof PyObject) || attribute.cls.isBuiltin) return false;
   return attribute.cls.lookup('__set__') !== undefined || attribute.cls.lookup('__delete__') !== undefined;
 }

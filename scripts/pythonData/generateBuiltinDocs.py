@@ -66,14 +66,20 @@ def add_classes(entries, pending):
             continue
         seen.add((cls, holder))
         for module_name in {cls.__module__, holder}:
-            pending.extend(add_class(entries, f'{module_name}.{cls.__qualname__}', cls))
+            # Another class of the name, as _Element_Py beside the C Element, is not the one the module names.
+            named = getattr(sys.modules.get(module_name), cls.__qualname__, cls)
+            if named is cls or not isinstance(named, type):
+                pending.extend(add_class(entries, f'{module_name}.{cls.__qualname__}', cls))
 
 
 def add_class(entries, key, cls):
     """Adds the entries of a class and its attributes under `key`, returning its nested classes."""
-    add(entries, key, cls.__dict__.get('__doc__'), getattr(cls, '__text_signature__', None))
-    if not cls.__flags__ & HEAPTYPE:
-        # The kinds of a builtin class's attributes, as `!module.qualname`, which pydoc's help shows.
+    # A type whose objects have a __doc__ member, as property's, keeps its own docstring in tp_doc.
+    doc = cls.__dict__.get('__doc__')
+    add(entries, key, doc if isinstance(doc, str) else type.__dict__['__doc__'].__get__(cls), getattr(cls, '__text_signature__', None))
+    if not cls.__flags__ & HEAPTYPE or '__firstlineno__' not in cls.__dict__:
+        # The kinds of a C type's attributes, as `!module.qualname`, which pydoc's help shows; C types of modules,
+        # such as _elementtree's, are heap types, but unlike classes written in Python have no __firstlineno__.
         entries.setdefault(f'!{key}', [class_layout(cls), None])
     nested = []
     for attribute, value in cls.__dict__.items():

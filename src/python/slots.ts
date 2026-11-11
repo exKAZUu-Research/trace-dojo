@@ -1,38 +1,32 @@
-import { method } from './define';
+import { PyAttribute } from './attributeDescriptors';
 import { toArray } from './objects';
-import { builtinClass, intClass, pyError, tupleClass, typeError, typeName, valueError } from './types';
-import { type PyClass, type PyObject, PyOpaque, type PyValue } from './values';
-
-/** The class of the descriptors `__slots__` creates, which store an attribute outside any `__dict__`. */
-const memberDescriptorClass = builtinClass('member_descriptor');
-method(memberDescriptorClass, '__repr__', 'none', 0, 0, (self) => {
-  const member = self as PyOpaque;
-  return `<member '${member.text}' of '${(member.data as PyClass).name}' objects>`;
-});
+import { intClass, pyError, tupleClass, typeError, typeName, valueError } from './types';
+import { type PyClass, type PyObject, type PyValue } from './values';
 
 /** Whether a class attribute is a slot's descriptor. */
-export function isMember(value: PyValue | undefined): value is PyOpaque {
-  return value instanceof PyOpaque && value.cls === memberDescriptorClass;
+export function isMember(value: PyValue | undefined): value is PyAttribute {
+  return value instanceof PyAttribute && value.isMember;
 }
 
-/** Reads a slot of an instance, raising AttributeError when it holds nothing. */
-export function readMember(member: PyOpaque, instance: PyObject): PyValue {
-  const value = instance.slotValues?.get(member.text);
-  if (value === undefined) {
-    throw pyError('AttributeError', `'${typeName(instance)}' object has no attribute '${member.text}'`);
-  }
-  return value;
-}
-
-export function writeMember(member: PyOpaque, instance: PyObject, value: PyValue): void {
-  instance.slotValues ??= new Map();
-  instance.slotValues.set(member.text, value);
-}
-
-export function deleteMember(member: PyOpaque, instance: PyObject): void {
-  if (!instance.slotValues?.delete(member.text)) {
-    throw pyError('AttributeError', `'${typeName(instance)}' object has no attribute '${member.text}'`);
-  }
+/** The descriptor of a slot, which stores an attribute of the class's instances outside any `__dict__`. */
+function slotMember(name: string, cls: PyClass): PyAttribute {
+  const missing = (instance: PyValue): Error =>
+    pyError('AttributeError', `'${typeName(instance)}' object has no attribute '${name}'`);
+  return new PyAttribute(
+    'member',
+    name,
+    cls,
+    (instance) => {
+      const value = (instance as PyObject).slotValues?.get(name);
+      if (value === undefined) throw missing(instance);
+      return value;
+    },
+    (instance, value) => {
+      const object = instance as PyObject;
+      if (value !== undefined) (object.slotValues ??= new Map()).set(name, value);
+      else if (!object.slotValues?.delete(name)) throw missing(instance);
+    }
+  );
 }
 
 /**
@@ -62,7 +56,7 @@ export function defineClassSlots(cls: PyClass, entries: Map<string, PyValue>): s
   for (const key of keys) {
     if (entries.has(key)) throw valueError(`'${key}' in __slots__ conflicts with class variable`);
   }
-  for (const key of keys) entries.set(key, new PyOpaque(memberDescriptorClass, key, cls));
+  for (const key of keys) entries.set(key, slotMember(key, cls));
   return result;
 }
 

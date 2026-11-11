@@ -39,3 +39,26 @@ export function subclassesOf(cls: PyClass, isLoaded: (module: string) => boolean
   const created = run === undefined ? [] : (tables.get(run)?.get(cls) ?? []);
   return [...builtin, ...created].filter((each) => each.bases.includes(cls));
 }
+
+/** Every class created while no program ran, as the builtin classes are, from `object` down. */
+export function allBuiltinClasses(): PyClass[] {
+  const table = tables.get(BUILTIN);
+  const found: PyClass[] = [];
+  const seen = new Set<PyClass>();
+  const visit = (cls: PyClass): void => {
+    if (seen.has(cls)) return;
+    seen.add(cls);
+    found.push(cls);
+    for (const sub of table?.get(cls) ?? []) visit(sub);
+  };
+  for (const root of roots) visit(root);
+  return found;
+}
+
+/** The classes without bases, from which every builtin class descends. */
+const roots: PyClass[] = [];
+
+/** Records a class without bases, such as `object`, whose subclasses `allBuiltinClasses` walks. */
+export function recordRootClass(cls: PyClass): void {
+  roots.push(cls);
+}
