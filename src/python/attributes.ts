@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 413 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 436 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import { solidBase } from './classes';
 import {
   callGetter,
@@ -115,7 +115,9 @@ function typeData(cls: PyClass, name: string): PyValue | undefined {
       return cls.cls;
     }
     case '__dict__': {
-      return newDict(cls.dict.entries());
+      // A read-only view of the class's own namespace, as CPython's mappingproxy.
+      const types = currentRuntime().importModule('types');
+      return callValue(types.dict.get('MappingProxyType') as PyValue, [namespaceDict(cls.dict)]);
     }
     case '__annotations__': {
       return cls.dict.get('__annotations__') ?? newDict(currentRuntime().classAnnotations(cls));

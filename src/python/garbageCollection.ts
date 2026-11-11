@@ -31,6 +31,113 @@ export function findReachableObjects(roots: unknown[]): Set<object> {
   return walk(roots, new Set()).visited;
 }
 
+/** The objects that `roots` reach, in the order a breadth-first walk finds them, as CPython's collector lists them. */
+export function findReachableInOrder(roots: unknown[]): object[] {
+  const visited = new Set<object>();
+  const turtles = new Set<TurtleState>();
+  let level = [...roots];
+  while (level.length > 0) {
+    const next: unknown[] = [];
+    for (const item of level) {
+      if (!isNode(item) || visited.has(item)) continue;
+      visited.add(item);
+      pushChildren(next, item, turtles);
+    }
+    level = next;
+  }
+  return [...visited];
+}
+
+/**
+ * The objects among `garbage`, which nothing else refers to, that reference counting frees: those that no cycle among
+ * them reaches, which only the cycle collector frees.
+ */
+export function freedByReferenceCounting(garbage: Set<object>): Set<object> {
+  const turtles = new Set<TurtleState>();
+  const children = new Map<object, object[]>();
+  for (const node of garbage) {
+    const pending: unknown[] = [];
+    pushChildren(pending, node as PyObject | PyCell, turtles);
+    children.set(
+      node,
+      pending.filter((child): child is object => isNode(child) && garbage.has(child))
+    );
+  }
+  const kept = new Set<object>();
+  const pending = [...nodesOnCycles(children)];
+  while (pending.length > 0) {
+    const node = pending.pop() as object;
+    if (kept.has(node)) continue;
+    kept.add(node);
+    pending.push(...(children.get(node) ?? []));
+  }
+  return new Set([...garbage].filter((node) => !kept.has(node)));
+}
+
+interface TarjanEntry {
+  node: object;
+  next: number;
+}
+
+/** The nodes that lie on a cycle of the graph, found as Tarjan's strongly connected components. */
+// code-gauge-allow functionCognitiveComplexity 23 -- Tarjan's algorithm, iterative so that long chains cannot exhaust the stack.
+// code-gauge-allow functionNcss 36 -- Tarjan's algorithm, iterative so that long chains cannot exhaust the stack.
+function nodesOnCycles(children: Map<object, object[]>): Set<object> {
+  const index = new Map<object, number>();
+  const low = new Map<object, number>();
+  const stack: object[] = [];
+  const onStack = new Set<object>();
+  const cyclic = new Set<object>();
+  const work: TarjanEntry[] = [];
+  const enter = (node: object): void => {
+    index.set(node, index.size);
+    low.set(node, index.size - 1);
+    stack.push(node);
+    onStack.add(node);
+    work.push({ node, next: 0 });
+  };
+  for (const start of children.keys()) {
+    if (!index.has(start)) enter(start);
+    while (work.length > 0) {
+      const top = work.at(-1) as TarjanEntry;
+      const edges = children.get(top.node) ?? [];
+      if (top.next < edges.length) {
+        const child = edges[top.next++];
+        if (child === top.node) cyclic.add(child);
+        if (!index.has(child)) enter(child);
+        else if (onStack.has(child)) low.set(top.node, Math.min(low.get(top.node) ?? 0, index.get(child) ?? 0));
+        continue;
+      }
+      work.pop();
+      const parent = work.at(-1);
+      if (parent) low.set(parent.node, Math.min(low.get(parent.node) ?? 0, low.get(top.node) ?? 0));
+      if (low.get(top.node) === index.get(top.node)) popComponent(stack, onStack, top.node, cyclic);
+    }
+  }
+  return cyclic;
+}
+
+/** Pops a strongly connected component off Tarjan's stack, adding its nodes to `cyclic` when they form a cycle. */
+function popComponent(stack: object[], onStack: Set<object>, root: object, cyclic: Set<object>): void {
+  const component: object[] = [];
+  let member: object | undefined;
+  do {
+    member = stack.pop() as object;
+    onStack.delete(member);
+    component.push(member);
+  } while (member !== root);
+  if (component.length > 1) for (const each of component) cyclic.add(each);
+}
+
+function isNode(item: unknown): item is PyObject | PyCell {
+  return item instanceof PyObject || item instanceof PyCell;
+}
+
+function pushChildren(pending: unknown[], item: PyObject | PyCell, turtles: Set<TurtleState>): void {
+  if (item instanceof PyCell) pending.push(item.value);
+  else pushReferences(pending, item, turtles);
+}
+
 // code-gauge-allow duplicateLines 16 -- Each language's runtime walks its own object model, so the loops cannot share code.
 function walk(roots: unknown[], reached: Set<TurtleState>): { visited: Set<object>; scanned: number } {
   const visited = new Set<object>();
@@ -92,7 +199,13 @@ function pushInstanceReferences(pending: unknown[], instance: PyInstance, reache
   pushAll(pending, instance.dict.values());
   pending.push(instance.cls, instance.enumValue);
   const state = instance.exception;
-  if (state) pending.push(state.args, state.notes, state.cause, state.context, state.exceptions);
+  if (state) {
+    pending.push(state.args, state.notes, state.cause, state.context, state.exceptions);
+    for (const frame of state.tracebackFrames ?? []) {
+      pushAll(pending, frame.locals.values());
+      for (const cell of frame.cells.values()) pending.push(cell);
+    }
+  }
   return instance.dict.size;
 }
 

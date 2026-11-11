@@ -65,7 +65,7 @@ export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Fram
         uncaughtException ??= describeUncaught(error);
       }
       // CPython closes the generators still suspended when it shuts down, after reporting an uncaught exception.
-      runtime.finalizer.closeAll();
+      runtime.finalizer.closeAll(globals);
       onEnd?.(frame);
       runtime.collectGarbage();
       return {

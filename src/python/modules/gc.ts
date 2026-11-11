@@ -38,9 +38,19 @@ registerModule(
       ['isenabled', builtin('isenabled', 'none', 0, 0, () => state.enabled)],
       [
         'collect',
-        builtin('collect', 'takes', 0, 1, () => unavailableValue('gc.collect() が返す、回収したオブジェクトの数'), {
-          keywords: ['generation'],
-        }),
+        builtin(
+          'collect',
+          'takes',
+          0,
+          1,
+          () => {
+            currentRuntime().finalizer.collect();
+            return unavailableValue('gc.collect() が返す、回収したオブジェクトの数');
+          },
+          {
+            keywords: ['generation'],
+          }
+        ),
       ],
       ['get_threshold', builtin('get_threshold', 'none', 0, 0, () => currentRuntime().tuple(state.threshold))],
       [

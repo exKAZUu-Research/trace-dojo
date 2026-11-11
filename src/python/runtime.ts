@@ -218,13 +218,17 @@ export class Runtime {
       result = this.evaluator.runFunction(fn, frame);
       return result;
     } catch (error) {
-      throw recursionErrorFor(error);
+      const raised = recursionErrorFor(error);
+      // The exception's traceback keeps the frame, and with it the function's variables, while a generator may close.
+      const state = raised instanceof PyError ? raised.exception.exception : undefined;
+      if (state && this.finalizer.pending.size > 0) (state.tracebackFrames ??= []).push(frame);
+      throw raised;
     } finally {
       this.popFrame();
       // The function's variables die with its frame, which closes a generator only they held.
       const { finalizer } = this;
-      if (finalizer.pending.size > 0 && [...frame.locals.values()].some((value) => finalizer.mayRelease(value))) {
-        finalizer.closeUnreachable([result]);
+      if (finalizer.pending.size > 0 && result !== undefined) {
+        finalizer.release([...frame.locals.values()], [result]);
       }
     }
   }

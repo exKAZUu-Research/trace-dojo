@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 577 -- The expression evaluator keeps one method per kind of expression together.
+// code-gauge-allow-file fileNcss 606 -- The expression evaluator keeps one method per kind of expression together.
 import type {
   Argument,
   Comprehension,
@@ -255,14 +255,14 @@ export class ExpressionEvaluator {
     }
     const replaced = this.boundValue(ref, frame);
     bindName(ref, value, frame);
-    if (finalizer.mayRelease(replaced)) finalizer.closeUnreachable();
+    finalizer.release([replaced]);
   }
 
   deleteName(ref: NameRef, frame: Frame): void {
     const { finalizer } = this.runtime;
     const deleted = finalizer.pending.size > 0 ? this.boundValue(ref, frame) : undefined;
     this.unbindName(ref, frame);
-    if (finalizer.mayRelease(deleted)) finalizer.closeUnreachable();
+    finalizer.release([deleted]);
   }
 
   /** The value a name is bound to, without the errors of reading an unbound one. */
@@ -315,13 +315,21 @@ export class ExpressionEvaluator {
         return;
       }
       case 'attribute': {
-        this.hold(frame, value, () => setAttribute(this.evaluate(target.object, frame), target.name, value));
+        this.hold(frame, value, () => {
+          const object = this.evaluate(target.object, frame);
+          if (this.runtime.finalizer.pending.size === 0) setAttribute(object, target.name, value);
+          else this.replacing(object, target.name, true, () => setAttribute(object, target.name, value));
+        });
         return;
       }
       case 'subscript': {
         this.hold(frame, value, () => {
           const object = this.evaluate(target.object, frame);
-          this.hold(frame, object, () => setItem(object, this.evaluate(target.index, frame), value));
+          this.hold(frame, object, () => {
+            const index = this.evaluate(target.index, frame);
+            if (this.runtime.finalizer.pending.size === 0) setItem(object, index, value);
+            else this.replacing(object, index, false, () => setItem(object, index, value));
+          });
         });
         return;
       }
@@ -371,18 +379,48 @@ export class ExpressionEvaluator {
         return;
       }
       case 'attribute': {
-        deleteAttribute(this.evaluate(target.object, frame), target.name);
+        const object = this.evaluate(target.object, frame);
+        this.replacing(object, target.name, true, () => deleteAttribute(object, target.name));
         return;
       }
       case 'subscript': {
         const object = this.evaluate(target.object, frame);
-        deleteItem(object, this.evaluate(target.index, frame));
+        const index = this.evaluate(target.index, frame);
+        this.replacing(object, index, false, () => deleteItem(object, index));
         return;
       }
       case 'unpack': {
         for (const element of target.elements) this.deleteTarget(element, frame);
       }
     }
+  }
+
+  /** Stores over or deletes an attribute or an item, closing a generator that only the value it held reached. */
+  private replacing(object: PyValue, key: PyValue, isAttribute: boolean, store: () => void): void {
+    const replaced = this.heldValue(object, key, isAttribute);
+    store();
+    this.release(replaced);
+  }
+
+  /**
+   * The value an attribute or an item of a builtin container holds, read without running the program's code, while a
+   * suspended generator waits to be closed: storing over it or deleting it may leave the generator unreachable.
+   */
+  private heldValue(object: PyValue, key: PyValue, isAttribute: boolean): PyValue | undefined {
+    if (this.runtime.finalizer.pending.size === 0) return undefined;
+    if (isAttribute) return object instanceof PyInstance ? object.dict.get(key as string) : undefined;
+    if (object instanceof PyList && typeof key === 'bigint') {
+      const { items } = object;
+      return items[Number(key < 0n ? key + BigInt(items.length) : key)];
+    }
+    if (object instanceof PyDict && typeof key !== 'object') return object.store.get(key);
+    return undefined;
+  }
+
+  /** Closes the generators that dropping a reference to `value` left unreachable, as reference counting does. */
+  protected release(value: PyValue | undefined): void {
+    const { finalizer } = this.runtime;
+    if (finalizer.pending.size > 0) finalizer.release([value]);
   }
 
   // Displays --------------------------------------------------------------------------------------------------------
@@ -438,8 +476,12 @@ export class ExpressionEvaluator {
 
   // Calls -----------------------------------------------------------------------------------------------------------
 
-  private call(expression: Extract<Expression, { kind: 'call' }>, frame: Frame): PyValue {
-    const callee = this.evaluate(expression.callee, frame);
+  /** Evaluates a call, whose callee the caller may have evaluated already. */
+  protected call(
+    expression: Extract<Expression, { kind: 'call' }>,
+    frame: Frame,
+    callee = this.evaluate(expression.callee, frame)
+  ): PyValue {
     const { temporaries } = frame;
     const length = temporaries.length;
     temporaries.push(callee);
@@ -459,8 +501,7 @@ export class ExpressionEvaluator {
   /** Closes a generator that only the arguments of a returned call held, as freeing them does in CPython. */
   protected afterCall(args: PyValue[], result: PyValue): void {
     const { finalizer } = this.runtime;
-    if (finalizer.pending.size > 0 && args.some((arg) => finalizer.mayRelease(arg)))
-      finalizer.closeUnreachable([result]);
+    if (finalizer.pending.size > 0) finalizer.release(args, [result]);
   }
 
   /** Calls a value from the call expression at `row`, which the call's frame and tracebacks report. */

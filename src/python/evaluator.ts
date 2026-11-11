@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 822 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss 830 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import type {
   ClassDef,
   ExceptHandler,
@@ -133,10 +133,7 @@ export class Evaluator extends AsyncEvaluator {
     runtime.currentRow = statement.row;
     switch (statement.kind) {
       case 'expression': {
-        const { expression } = statement;
-        runtime.steps.runStatement(statement.stepRow, expression.kind === 'call', () =>
-          this.evaluate(expression, frame)
-        );
+        this.expressionStatement(statement, frame);
         return undefined;
       }
       case 'assign': {
@@ -206,6 +203,16 @@ export class Evaluator extends AsyncEvaluator {
     }
   }
 
+  private expressionStatement(statement: Extract<Statement, { kind: 'expression' }>, frame: Frame): void {
+    const { runtime } = this;
+    const { expression } = statement;
+    const result = runtime.steps.runStatement(statement.stepRow, expression.kind === 'call', () =>
+      this.evaluate(expression, frame)
+    );
+    // The statement drops its value, which closes a generator that only the value held.
+    if (runtime.finalizer.pending.size > 0) this.release(result);
+  }
+
   private assignStatement(statement: Extract<Statement, { kind: 'assign' }>, frame: Frame): void {
     let created = false;
     this.runtime.steps.runStatement(
@@ -271,15 +278,7 @@ export class Evaluator extends AsyncEvaluator {
   private evaluateCreation(expression: Expression, frame: Frame): [PyValue, boolean] {
     if (expression.kind === 'call') {
       const callee = this.evaluate(expression.callee, frame);
-      const { temporaries } = frame;
-      const length = temporaries.length;
-      temporaries.push(callee);
-      try {
-        const { args, kwargs } = this.arguments(expression.args, frame, callee);
-        return [this.invoke(callee, args, kwargs, expression.row), callee instanceof PyClass];
-      } finally {
-        temporaries.length = length;
-      }
+      return [this.call(expression, frame, callee), callee instanceof PyClass];
     }
     if (
       (expression.kind === 'list' || expression.kind === 'tuple') &&
@@ -466,7 +465,7 @@ export class Evaluator extends AsyncEvaluator {
       throw error;
     } finally {
       frame.temporaries.length = length;
-      if (runtime.finalizer.mayRelease(iterable)) runtime.finalizer.closeUnreachable([leaving]);
+      runtime.finalizer.release([iterable], [leaving]);
     }
     return yield* this.block(statement.orelse, frame);
   }
@@ -762,10 +761,14 @@ export class Evaluator extends AsyncEvaluator {
   private *runHandler(handler: ExceptHandler, exception: PyInstance, frame: Frame): Execution {
     if (handler.name) this.storeName(handler.name, exception, frame);
     this.handling.push(exception);
+    let escaping: PyInstance | undefined;
     try {
       return yield* this.block(handler.body, frame);
     } catch (error) {
-      if (error instanceof PyError) this.chainTo(error.exception, exception);
+      if (error instanceof PyError) {
+        this.chainTo(error.exception, exception);
+        escaping = error.exception;
+      }
       throw error;
     } finally {
       this.handling.pop();
@@ -777,6 +780,9 @@ export class Evaluator extends AsyncEvaluator {
           // The handler may have deleted the name itself.
         }
       }
+      // The handled exception dies with the handler, and with it the frames its traceback kept.
+      const { finalizer } = this.runtime;
+      if (finalizer.pending.size > 0) finalizer.release([exception], [escaping]);
     }
   }
 
@@ -899,11 +905,16 @@ export class Evaluator extends AsyncEvaluator {
     exception: PyInstance
   ): Generator<PyValue, boolean, PyValue> {
     this.handling.push(exception);
+    let suppresses: boolean;
     try {
-      return isTruthy(yield* this.callExit(statement, exit, [exception.cls, exception, None]));
+      suppresses = isTruthy(yield* this.callExit(statement, exit, [exception.cls, exception, None]));
     } finally {
       this.handling.pop();
     }
+    // A suppressed exception dies here, and with it the frames its traceback kept.
+    const { finalizer } = this.runtime;
+    if (suppresses && finalizer.pending.size > 0) finalizer.release([exception]);
+    return suppresses;
   }
 
   /** Calls a context manager's `__exit__`, so that it may suspend the thread in a program that may run threads. */

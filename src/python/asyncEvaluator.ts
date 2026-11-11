@@ -61,7 +61,7 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
       throw error;
     } finally {
       frame.temporaries.length = length;
-      if (runtime.finalizer.mayRelease(iterator)) runtime.finalizer.closeUnreachable([leaving]);
+      runtime.finalizer.release([iterator], [leaving]);
     }
     return yield* this.block(statement.orelse, frame);
   }

@@ -139,6 +139,8 @@ export type ClassAnnotations = [string, () => PyValue][];
 /** The state of an exception that the `BaseException` layout adds to instances. */
 export interface ExceptionState {
   args: PyTuple;
+  /** The frames of the functions the exception left, whose variables its traceback keeps alive. */
+  tracebackFrames?: { readonly locals: Map<string, PyValue>; readonly cells: Map<string, PyCell> }[];
   notes?: PyList;
   cause?: PyValue;
   context?: PyValue;

@@ -1,7 +1,7 @@
 import { PyBytes, PyMemoryView } from './bytesValues';
 import { callSpecial, lookupSpecial } from './objects';
 import { isNativeMethod, None, typeError, typeName } from './types';
-import { type PyObject,PyComplex,PyInstance,PySet,PyTuple,type PyValue } from './values';
+import { PyComplex, PyInstance, type PyObject, PySet, PyTuple, type PyValue } from './values';
 
 const MASK64 = (1n << 64n) - 1n;
 const MODULUS = (1n << 61n) - 1n;

@@ -19,7 +19,6 @@ BuiltinMethodType = type([].append)
 MethodDescriptorType = type(str.join)
 WrapperDescriptorType = type(object.__init__)
 MethodWrapperType = type(object().__str__)
-ClassMethodDescriptorType = type(dict.__dict__['fromkeys'])
 ModuleType = type(sys)
 GeneratorType = _builtin_types['generator']
 CoroutineType = _builtin_types['coroutine']
@@ -127,6 +126,7 @@ class mappingproxy:
 
 
 MappingProxyType = mappingproxy
+ClassMethodDescriptorType = type(dict.__dict__['fromkeys'])
 
 
 def coroutine(func):
