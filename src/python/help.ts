@@ -1,6 +1,6 @@
 import { getDoc } from './modules/inspect';
 import { formatSignatureWithin, signature } from './modules/inspectSignature';
-import { callValue } from './objects';
+import { callValue, getAttribute } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { classOf, None, typeError } from './types';
 import { UnsupportedFeatureError } from './unsupported';
@@ -26,10 +26,9 @@ export function help(args: PyValue[], kwargs?: Kwargs): PyValue {
   args = all;
   const [value] = args;
   const fn = value instanceof PyBoundMethod ? value.fn : value;
-  if (!(fn instanceof PyFunction)) {
-    throw new UnsupportedFeatureError('help() で表示する、組み込みのオブジェクトやクラスやモジュールの説明');
-  }
   const runtime = currentRuntime();
+  // Other objects are pydoc's to document, as CPython's help() does.
+  if (!(fn instanceof PyFunction)) return callValue(getAttribute(runtime.importModule('pydoc'), 'help'), [value]);
   // The standard library's code here leaves out some of CPython's docstrings, so its functions without one may differ.
   if (runtime.libraryNamespaces.has(fn.globals) && typeof getDoc(value) !== 'string') {
     throw new UnsupportedFeatureError('help() で表示する、説明文のない標準ライブラリの関数の説明');

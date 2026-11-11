@@ -132,6 +132,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'posixpath',
   'plistlib',
   'pprint',
+  'pydoc',
   'queue',
   'quopri',
   'random',

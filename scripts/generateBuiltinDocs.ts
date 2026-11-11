@@ -33,6 +33,8 @@ for (const module of SUPPORTED_MODULES) {
     const doc = value.dict.get('__doc__');
     if (typeof doc !== 'string' || doc === moduleDoc(module)) keys.add(module);
     for (const each of value.dict.values()) collect(each);
+    // The functions this grader leaves unsupported, which pydoc documents by stand-ins.
+    for (const name of value.unsupported.keys()) keys.add(`${module}.${name}`);
   });
 }
 run(`import sys\nsamples = [${SAMPLES}]`, (_runtime, globals) => {
