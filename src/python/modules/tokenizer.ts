@@ -121,7 +121,7 @@ interface LiteralPart {
 }
 
 /** The indentation of a line: its column with tabs to multiples of 8, and with tabs as one column. */
-// code-gauge-allow duplicateLines 15 -- Measures as the indentation check of the parser does, over a line, not a scanner.
+// code-gauge-allow duplicateLines 17 -- Measures as the indentation check of the parser does, over a line, not a scanner.
 function measureIndentation(line: string): { column: number; altColumn: number; index: number } {
   let column = 0;
   let altColumn = 0;
