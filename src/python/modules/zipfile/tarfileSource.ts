@@ -1,4 +1,4 @@
-// CPython 3.14's `Lib/tarfile.py`, over the io base classes written in Python, since this grader's io module has none, with shutil imported where copying a whole file object uses it.
+// CPython 3.14's `Lib/tarfile.py`, over the io base classes written in Python, since this grader's io module has none, with compression.zstd, which this grader lacks, left out, and shutil imported where copying a whole file object uses it.
 export const TARFILE_SOURCE =
   String.raw`#-------------------------------------------------------------------
 # tarfile.py
@@ -436,7 +436,7 @@ class _Stream:
                     self.cmp = lzma.LZMACompressor(preset=preset)
             elif comptype == "zst":
                 try:
-                    from compression import zstd
+                    raise ImportError
                 except ImportError:
                     raise CompressionError("compression.zstd module is not available") from None
                 if mode == "r":
@@ -2186,7 +2186,7 @@ class TarFile(object):
             raise ValueError("mode must be 'r', 'w' or 'x'")
 
         try:
-            from compression.zstd import ZstdFile, ZstdError
+            raise ImportError
         except ImportError:
             raise CompressionError("compression.zstd module is not available") from None
 
