@@ -16,10 +16,9 @@ import { method } from './define';
 import { pyHash } from './hashing';
 import { defineNew } from './instances';
 import { sliceIndices } from './items';
-import { clamp, reduction, withState } from './iteratorStates';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
-import { bindValue, callValue, isTruthy, iterate, lookupSpecial, withRemaining } from './objects';
+import { bindValue, callValue, isTruthy, iterate, iterateByIndex, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { readInteger, writeInteger } from './structCodes';
 import {
@@ -222,22 +221,12 @@ function bytesItem(self: PyBytes, key: PyValue): PyValue {
 }
 
 function bytesIterator(self: PyBytes): PyIterator {
-  let index = 0;
-  let exhausted = false;
-  const next = withRemaining(
-    () => {
-      if (!exhausted && index < self.length) return BigInt(self.data[index++]);
-      exhausted = true;
-      return DONE;
-    },
-    () => (exhausted ? 0 : Math.max(self.length - index, 0))
+  const next = iterateByIndex(
+    self,
+    () => self.length,
+    (index) => BigInt(self.data[index] as number),
+    newTuple([])
   );
-  withState(next, {
-    reduce: () => (exhausted ? reduction('iter', [newTuple([])]) : reduction('iter', [self], BigInt(index))),
-    setState: (state) => {
-      if (!exhausted) index = clamp(state, 0, self.length);
-    },
-  });
   return new PyIterator(iteratorClass(self.isMutable ? 'bytearray_iterator' : 'bytes_iterator'), next, () => [self]);
 }
 

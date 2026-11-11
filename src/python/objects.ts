@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 452 -- The attribute lookup and the protocols every kind of object follows belong together.
+// code-gauge-allow-file fileNcss 464 -- The attribute lookup and the protocols every kind of object follows belong together.
 import { moduleAnnotations } from './annotations';
 import { PyAttribute } from './attributeDescriptors';
 import { classAttribute, specialAttribute } from './attributes';
@@ -442,20 +442,38 @@ function iterateGenerator(generator: PyGenerator): NextFunction {
 function iterateString(value: string): NextFunction {
   const characters = iterStr(value);
   currentRuntime().scan(characters.length);
+  return iterateByIndex(
+    value,
+    () => characters.length,
+    (index) => characters[index] as string,
+    ''
+  );
+}
+
+/**
+ * Iterates the items of a sequence by their index, as the iterators of str and bytes do: one that reached the end
+ * stays there, and it reduces to `iter(sequence)` and its index, or to `iter(empty)` at the end.
+ */
+export function iterateByIndex(
+  sequence: PyValue,
+  length: () => number,
+  itemAt: (index: number) => PyValue,
+  empty: PyValue
+): NextFunction {
   let index = 0;
   let exhausted = false;
   const next = withRemaining(
     () => {
-      if (!exhausted && index < characters.length) return characters[index++];
+      if (!exhausted && index < length()) return itemAt(index++);
       exhausted = true;
       return DONE;
     },
-    () => (exhausted ? 0 : characters.length - index)
+    () => (exhausted ? 0 : Math.max(length() - index, 0))
   );
   return withState(next, {
-    reduce: () => (exhausted ? reduction('iter', ['']) : reduction('iter', [value], BigInt(index))),
+    reduce: () => (exhausted ? reduction('iter', [empty]) : reduction('iter', [sequence], BigInt(index))),
     setState: (state) => {
-      if (!exhausted) index = clamp(state, 0, characters.length);
+      if (!exhausted) index = clamp(state, 0, length());
     },
   });
 }

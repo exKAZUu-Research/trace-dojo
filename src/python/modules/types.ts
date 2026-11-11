@@ -229,24 +229,32 @@ del _C
 ClassMethodDescriptorType = type(dict.__dict__['fromkeys'])
 
 
-def coroutine(func):
-    if not callable(func):
-        raise TypeError('types.coroutine() expects a callable')
-    if _make_iterable_coroutine(func):
-        return func
+def _coroutine_function(make_iterable, mark_iterable):
+    # The helpers stay out of the module's namespace, as CPython's are C functions of _types.
+    def coroutine(func):
+        if not callable(func):
+            raise TypeError('types.coroutine() expects a callable')
+        if make_iterable(func):
+            return func
 
-    def wrapped(*args, **kwargs):
-        coro = func(*args, **kwargs)
-        _mark_iterable_coroutine(coro)
-        return coro
+        def wrapped(*args, **kwargs):
+            coro = func(*args, **kwargs)
+            mark_iterable(coro)
+            return coro
 
-    for name in ('__module__', '__name__', '__qualname__', '__doc__'):
-        try:
-            setattr(wrapped, name, getattr(func, name))
-        except AttributeError:
-            pass
-    wrapped.__wrapped__ = func
-    return wrapped
+        for name in ('__module__', '__name__', '__qualname__', '__doc__'):
+            try:
+                setattr(wrapped, name, getattr(func, name))
+            except AttributeError:
+                pass
+        wrapped.__wrapped__ = func
+        return wrapped
+
+    coroutine.__qualname__ = 'coroutine'
+    return coroutine
+
+
+coroutine = _coroutine_function(_make_iterable_coroutine, _mark_iterable_coroutine)
 
 
 def new_class(name, bases=(), kwds=None, exec_body=None):
@@ -422,7 +430,7 @@ class DynamicClassAttribute:
         return result
 
 
-del _f, _builtin_types, _c_type_name, _c_type, _adopt_implementation, _simple_namespace_type, _mappingproxy_type, _allocate, _get_slot, _put_slot
+del sys, _f, _builtin_types, _coroutine_function, _make_iterable_coroutine, _mark_iterable_coroutine, _c_type_name, _c_type, _adopt_implementation, _simple_namespace_type, _mappingproxy_type, _allocate, _get_slot, _put_slot
 `;
 
 registerSourceModule(

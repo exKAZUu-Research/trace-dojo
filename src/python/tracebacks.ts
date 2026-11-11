@@ -7,7 +7,7 @@ import {
   moduleCodeNames,
 } from './codeNames';
 import { addressOf } from './conversions';
-import { method, unsupportedSizeof } from './define';
+import { method, unsupportedMethod, unsupportedSizeof } from './define';
 import type { Frame } from './frame';
 import { identityHash } from './hashing';
 import { defineProperty } from './modules/numberSupport';
@@ -262,6 +262,11 @@ function parameterCount(self: PyValue, kinds: string[]): bigint {
 
 unsupportedSizeof(frameClass);
 unsupportedSizeof(codeClass);
+// CPython's bytecode, which this grader does not compile to.
+unsupportedMethod(codeClass, 'co_branches', 'コードオブジェクトのバイトコード（co_branches）');
+method(codeClass, '_varname_from_oparg', 'one', 1, 1, () => {
+  throw new UnsupportedFeatureError('コードオブジェクトのバイトコード（_varname_from_oparg）');
+});
 method(codeClass, '__hash__', 'none', 0, 0, (self) => identityHash(self as PyObject));
 method(codeClass, '__repr__', 'none', 0, 0, (self) => {
   const { name, filename, firstRow } = infoOf(self);

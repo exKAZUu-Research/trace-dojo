@@ -30,7 +30,7 @@ import {
 } from '../types';
 import { unavailableValue } from '../unavailableValues';
 import { UnsupportedFeatureError } from '../unsupported';
-import { type Kwargs, PyDict, PyInstance, PyModule, PyTuple, type PyValue } from '../values';
+import { type Kwargs, type PyClass, PyDict, PyInstance, PyModule, PyTuple, type PyValue } from '../values';
 import { defineProperty } from './numberSupport';
 
 /** What the reference CPython, 3.14.10 built for macOS, reports about itself. */
@@ -189,20 +189,7 @@ export function structSeq(
     return tuple;
   };
   const prefix = module === 'sys' ? 'sys.' : '';
-  method(cls, '__reduce__', 'none', 0, 0, (self) => {
-    const values = extra.get(self as PyTuple) ?? [];
-    const named = newDict(hidden.map(([field], index) => [field, values[index] ?? None]));
-    return newTuple([cls, newTuple([newTuple((self as PyTuple).items), named])]);
-  });
-  if (constructible) {
-    defineNew(cls, (_cls, args, kwargs) =>
-      create(structSeqValues(`${prefix}${name}`, fields.length, hidden, args, kwargs))
-    );
-  } else {
-    cls.construct = () => {
-      throw typeError(`cannot create '${prefix}${name}' instances`);
-    };
-  }
+  defineStructSeqCreation(cls, `${prefix}${name}`, fields.length, hidden, extra, constructible ? create : undefined);
   method(cls, '__repr__', 'none', 0, 0, (self) => {
     const { items } = self as PyTuple;
     return `${prefix}${name}(${fields.map(([field], index) => `${field}=${pyRepr(items[index])}`).join(', ')})`;
@@ -219,6 +206,33 @@ export function structSeq(
     );
   });
   return create(all.map(([, value]) => value));
+}
+
+/**
+ * Gives a struct sequence type its `__reduce__`, with the hidden fields in a dict, and its `__new__`, or makes it
+ * refuse to be created, as `sys.flags` does.
+ */
+// code-gauge-allow functionParameterCount 6 -- The parts of the struct sequence that its creation needs.
+function defineStructSeqCreation(
+  cls: PyClass,
+  name: string,
+  visible: number,
+  hidden: [string, PyValue][],
+  extra: WeakMap<PyTuple, PyValue[]>,
+  create: ((values: PyValue[]) => PyTuple) | undefined
+): void {
+  method(cls, '__reduce__', 'none', 0, 0, (self) => {
+    const values = extra.get(self as PyTuple) ?? [];
+    const named = newDict(hidden.map(([field], index) => [field, values[index] ?? None]));
+    return newTuple([cls, newTuple([newTuple((self as PyTuple).items), named])]);
+  });
+  if (create) {
+    defineNew(cls, (_cls, args, kwargs) => create(structSeqValues(name, visible, hidden, args, kwargs)));
+    return;
+  }
+  cls.construct = () => {
+    throw typeError(`cannot create '${name}' instances`);
+  };
 }
 
 /** The values `structseq(sequence, dict=None)` gives a struct sequence, its hidden fields taken from the dict. */

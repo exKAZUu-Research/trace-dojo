@@ -1,3 +1,4 @@
+import { memberDescriptorClass, type PyAttribute } from './attributeDescriptors';
 // The reduction protocol of `object` and the builtin types, which pickle and copyreg rely on: `__reduce_ex__`,
 // `__reduce__`, `__getstate__` and `__getnewargs__`, as CPython's typeobject.c and the builtin types define them.
 import { bytesLikeData, latin1Text, newBytes } from './bytesValues';
@@ -213,6 +214,11 @@ method(builtinFunctionClass, '__reduce__', 'none', 0, 0, (self) => reduceBuiltin
 for (const cls of [methodDescriptorClass, wrapperDescriptorClass, methodWrapperClass]) {
   method(cls, '__reduce__', 'none', 0, 0, (self) => reduceBuiltin(self as PyBuiltinFunction));
 }
+
+method(memberDescriptorClass, '__reduce__', 'none', 0, 0, (self) => {
+  const { owner, name } = self as PyAttribute;
+  return newTuple([currentRuntime().builtins.get('getattr') as PyValue, newTuple([owner, name])]);
+});
 
 /** A module's builtin function reduces to its name; a method to `getattr` of its object or class. */
 function reduceBuiltin(fn: PyBuiltinFunction): PyValue {

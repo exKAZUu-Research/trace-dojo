@@ -4,8 +4,8 @@
 // For each builtin type, internal type (iterators, views, descriptors, code, frame, ...) and public class of the
 // supported modules, the program it runs prints the type and the sorted keys of `vars(T)`; for each module, the keys of
 // `vars(module)` in order, with the `__module__` of each function and class. Each module is imported in a process of its
-// own, as other imports would add their submodules to its namespace. The module attributes this grader leaves
-// unsupported, such as `__file__`, are left out of both sides.
+// own, as other imports would add their submodules to its namespace. The attributes this grader leaves unsupported,
+// such as a module's `__file__`, are left out of both sides.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -15,6 +15,7 @@ import { LIMITS } from '../src/interpreter/limits';
 import { parsePython } from '../src/python/parse';
 import { runModule } from '../src/python/run';
 import { Runtime } from '../src/python/runtime';
+import { registeredUnsupportedNames } from '../src/python/unsupportedAttributes';
 
 const REF = path.join(os.homedir(), 'Documents/tokyo-online-university/step-interpreter/scripts/ref');
 
@@ -107,35 +108,54 @@ if (import.meta.main) {
   const modules = requested.length > 0 ? requested : [...SUPPORTED_MODULES].filter((name) => name !== '__main__');
   mkdirSync('.tmp/pythonDicts', { recursive: true });
   const python = pythonExecutable();
-  const reference: string[] = [];
-  const ours: string[] = [];
-  const allowed = new Set<string>();
-  for (const [index, module] of modules.entries()) {
-    const program = PROGRAM([module], false);
-    reference.push(...probeLines(runCPython(python, program)));
-    const run = runOurs(program, module);
-    ours.push(...probeLines(run.output));
-    for (const key of run.unsupported) allowed.add(`M ${module} ${key}`);
-    if ((index + 1) % 50 === 0) console.error(`${index + 1}/${modules.length}`);
-  }
-  const typeProgram = PROGRAM(modules, true);
-  writeFileSync('.tmp/pythonDicts/types.py', typeProgram);
-  const ourTypes = probeLines(runOurs(typeProgram).output).filter((line) => line.startsWith('T '));
-  // A class this grader lacks is a name its module lacks, which the module's lines show.
-  const ourTypeNames = new Set(ourTypes.map((line) => line.split(' ')[1]));
-  reference.push(
-    ...probeLines(runCPython(python, typeProgram)).filter(
-      (line) => line.startsWith('T ') && ourTypeNames.has(line.split(' ')[1] as string)
-    )
-  );
-  ours.push(...ourTypes);
-  const keep = (line: string): boolean => !allowed.has(line.split(' ').slice(0, 3).join(' '));
-  writeFileSync('.tmp/pythonDicts/cpython.txt', `${reference.filter(keep).join('\n')}\n`);
-  writeFileSync('.tmp/pythonDicts/ours.txt', `${ours.filter(keep).join('\n')}\n`);
+  const lines: Lines = { reference: [], ours: [], allowed: new Set() };
+  compareModules(python, modules, lines);
+  compareTypes(python, modules, lines);
+  const keep = (line: string): boolean => !lines.allowed.has(line.split(' ').slice(0, 3).join(' '));
+  writeFileSync('.tmp/pythonDicts/cpython.txt', `${lines.reference.filter(keep).join('\n')}\n`);
+  writeFileSync('.tmp/pythonDicts/ours.txt', `${lines.ours.filter(keep).join('\n')}\n`);
   const diff = spawnSync('diff', ['.tmp/pythonDicts/cpython.txt', '.tmp/pythonDicts/ours.txt'], { encoding: 'utf8' });
   const changed = diff.stdout.split('\n').filter((line) => /^[<>] /.test(line));
   for (const line of changed) console.log(line);
   console.log(`differing lines: ${changed.length}`);
+}
+
+interface Lines {
+  reference: string[];
+  ours: string[];
+  /** The lines, by their first three words, that name what this grader leaves unsupported. */
+  allowed: Set<string>;
+}
+
+/** Compares each module's namespace, importing the module alone. */
+function compareModules(python: string, modules: string[], lines: Lines): void {
+  for (const [index, module] of modules.entries()) {
+    const program = PROGRAM([module], false);
+    lines.reference.push(...probeLines(runCPython(python, program)));
+    const run = runOurs(program, module);
+    lines.ours.push(...probeLines(run.output));
+    for (const key of run.unsupported) lines.allowed.add(`M ${module} ${key}`);
+    if ((index + 1) % 50 === 0) console.error(`${index + 1}/${modules.length}`);
+  }
+}
+
+/** Compares the namespaces of the classes both CPython and this grader reach, importing every module. */
+function compareTypes(python: string, modules: string[], lines: Lines): void {
+  const typeProgram = PROGRAM(modules, true);
+  const ourTypes = probeLines(runOurs(typeProgram).output).filter((line) => line.startsWith('T '));
+  const referenceTypes = probeLines(runCPython(python, typeProgram)).filter((line) => line.startsWith('T '));
+  // A class only one side reaches is a name a module lacks, which the module's lines show.
+  const [ourTypeNames, referenceTypeNames] = [typeNames(ourTypes), typeNames(referenceTypes)];
+  lines.reference.push(...referenceTypes.filter((line) => ourTypeNames.has(line.split(' ')[1] as string)));
+  lines.ours.push(...ourTypes.filter((line) => referenceTypeNames.has(line.split(' ')[1] as string)));
+  for (const name of ourTypeNames) {
+    // The class attributes this grader leaves unsupported, which raise the unsupported error.
+    for (const key of registeredUnsupportedNames(name)) lines.allowed.add(`T ${name} ${key}`);
+  }
+}
+
+function typeNames(lines: string[]): Set<string> {
+  return new Set(lines.map((line) => line.split(' ')[1] as string));
 }
 
 function pythonExecutable(): string {

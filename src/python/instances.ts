@@ -1,4 +1,5 @@
 import { pyRepr } from './conversions';
+import { fieldedCTypes } from './descriptors';
 import { enumLookup, isEnumClass } from './enums';
 import { bindValue, callValue, toArray } from './objects';
 import { currentRuntime } from './runtimeContext';
@@ -46,7 +47,7 @@ export function typeCall(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyValue
   const constructing = newMethod === objectNew() ? cls.mro.find(isSubclassableConstruct) : undefined;
   if (constructing?.construct) return constructSubclass(cls, constructing.construct, args, kwargs);
   if (newMethod === objectNew()) {
-    if (cls.isBuiltin) throw cannotCreate(cls);
+    if (refusesObjectNew(cls)) throw cannotCreate(cls);
     const init = cls.lookup('__init__');
     if (init === objectInit()) {
       if (hasArguments(args, kwargs)) throw takesNoArguments(cls);
@@ -120,10 +121,18 @@ function objectInit(): PyValue | undefined {
 
 /** Creates a plain instance of a class, as `object.__new__` does once it has checked its arguments. */
 function newObject(cls: PyClass): PyInstance {
-  if (cls.isBuiltin && cls !== objectClass) throw cannotCreate(cls);
+  if (cls !== objectClass && refusesObjectNew(cls)) throw cannotCreate(cls);
   checkNotAbstract(cls);
   currentRuntime().allocate(1);
   return new PyInstance(cls);
+}
+
+/**
+ * Whether `object.__new__` refuses a builtin type, as it does unless the type is a C type written in Python here,
+ * which may inherit its tp_new, as CPython's _io types do from their bases.
+ */
+function refusesObjectNew(cls: PyClass): boolean {
+  return cls.isBuiltin && !fieldedCTypes.has(cls);
 }
 
 function cannotCreate(cls: PyClass): Error {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 522 -- The builtins module keeps every builtin function together.
+// code-gauge-allow-file fileNcss 524 -- The builtins module keeps every builtin function together.
 import { bytearrayClass, bytesClass, memoryviewClass, PyBytes } from './bytesValues';
 import { checkShortcuts } from './checkShortcuts';
 import { buildClass } from './classes';

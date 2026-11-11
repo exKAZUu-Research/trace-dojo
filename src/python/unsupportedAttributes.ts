@@ -21,6 +21,11 @@ export function unsupportedClassAttribute(value: PyValue, name: string): string 
   return undefined;
 }
 
+/** The attributes registered for a class (`module.name`) that this grader does not support. */
+export function registeredUnsupportedNames(qualifiedName: string): string[] {
+  return Object.keys(byClass.get(qualifiedName) ?? {});
+}
+
 /** The names of the attributes of `value` that this grader does not support, which `dir()` lists as CPython's does. */
 export function unsupportedClassAttributeNames(value: PyValue): string[] {
   const classes = value instanceof PyClass ? value.mro : classOf(value).mro;

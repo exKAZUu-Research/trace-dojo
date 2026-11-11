@@ -141,6 +141,7 @@ method(coroutineClass, '__await__', 'none', 0, 0, (self) => {
   );
 });
 defineIteratorMethods(coroutineWrapperClass);
+coroutineWrapperClass.dict.delete('__await__');
 
 /** Gives an awaitable helper object the methods of an iterator that a coroutine delegates to. */
 function defineIteratorMethods(cls: PyClass): void {

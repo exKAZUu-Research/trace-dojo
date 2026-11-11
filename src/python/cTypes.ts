@@ -25,10 +25,12 @@ const CLASS_STATEMENT_NAMES = [
  * go unless CPython's type has them, and the type gets the docstring and slot wrappers CPython's data gives it.
  */
 export function makeCType(cls: PyClass, subclassable = true): void {
-  if (!cls.dict.has('__new__')) defineNew(cls, (subclass) => allocateInstance(subclass));
   cls.qualifiedName = cls.name;
   const layout = builtinClassLayout(cls);
   const names = layout === undefined ? undefined : new Set(layout.split(' ').map((word) => word.split(':')[0]));
+  if (!cls.dict.has('__new__') && (names?.has('__new__') ?? true)) {
+    defineNew(cls, (subclass) => allocateInstance(subclass));
+  }
   inheritOwnAttributes(cls, names);
   if (names !== undefined) hidePrivateHelpers(cls, names);
   for (const [name, attribute] of new Map(cls.dict)) {
