@@ -227,6 +227,7 @@ function unicodeEncoder(module: string): PyValue {
 function encodeWith(module: PyValue, input: PyValue, errors: PyValue, name = `${module as string}_encode`): PyValue {
   if (typeof input !== 'string') throw typeError(`${name}() argument 1 must be str, not ${typeName(input)}`);
   const encoded = encodeString(input, module as string, errorsName(name, errors));
+  // oxlint-disable-next-line typescript/no-misused-spread -- Python counts a string's length in code points.
   return newTuple([newBytes(encoded), BigInt([...input].length)]);
 }
 

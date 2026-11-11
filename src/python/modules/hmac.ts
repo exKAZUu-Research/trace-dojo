@@ -290,8 +290,7 @@ registerSourceModule(
 /** `_operator._compare_digest`: whether two ASCII strings or two bytes-like objects are equal. */
 function compareDigest(a: PyValue, b: PyValue): boolean {
   if (typeof a === 'string' && typeof b === 'string') {
-    if (/[^\u0000-\u007F]/u.test(a + b))
-      throw typeError('comparing strings with non-ASCII characters is not supported');
+    if (!isAscii(a + b)) throw typeError('comparing strings with non-ASCII characters is not supported');
     return a === b;
   }
   const left = bytesLikeData(a);
@@ -302,4 +301,9 @@ function compareDigest(a: PyValue, b: PyValue): boolean {
   if (left === undefined) throw typeError(`a bytes-like object is required, not '${typeName(a)}'`);
   if (right === undefined) throw typeError(`a bytes-like object is required, not '${typeName(b)}'`);
   return left.length === right.length && left.every((byte, index) => byte === right[index]);
+}
+
+function isAscii(text: string): boolean {
+  for (let index = 0; index < text.length; index++) if (text.codePointAt(index)! > 0x7f) return false;
+  return true;
 }
