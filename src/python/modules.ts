@@ -173,15 +173,19 @@ function loadAccelerators(runtime: Runtime, module: PyModule): void {
     if (runtime.modules.has(name)) continue;
     if (!isRegisteredModule(name)) {
       registerModule(name, () => new Map(functions));
-    } else if (aliases.has(name) || unloadableAccelerators.has(name)) {
-      continue;
+      partialAccelerators.add(name);
     }
-    importModule(runtime, name);
+    if (aliases.has(name) || unloadableAccelerators.has(name)) continue;
+    const accelerator = importModule(runtime, name);
+    // The module holds only the functions of CPython's that the module importing it has.
+    if (partialAccelerators.has(name)) accelerator.partialFeature = `モジュール ${name} のほかの名前`;
   }
 }
 
 /** The accelerators whose import fails here, as for the platform modules CPython's macOS build lacks. */
 const unloadableAccelerators = new Set(['posix']);
+/** The accelerators this grader has no module of, which hold only the functions the modules importing them have. */
+const partialAccelerators = new Set<string>();
 
 function runFactory(runtime: Runtime, name: string, factory: ModuleFactory, module: PyModule): Map<string, PyValue> {
   try {

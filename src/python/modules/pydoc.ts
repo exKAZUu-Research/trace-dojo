@@ -635,9 +635,13 @@ class Doc:
               not file.startswith(os.path.join(basedir, 'site-packages')))) and
             object.__name__ not in ('xml.etree', 'test.test_pydoc.pydoc_mod')):
 
-            # pydoc_data.module_docs names each standard module's page this way.
-            if True:
-                doc_name = f'{object.__name__}#module-{object.__name__}'
+            try:
+                from pydoc_data import module_docs
+            except ImportError:
+                module_docs = None
+
+            if module_docs and object.__name__ in module_docs.module_docs:
+                doc_name = module_docs.module_docs[object.__name__]
                 if docloc.startswith(("http://", "https://")):
                     docloc = "{}/{}".format(docloc.rstrip("/"), doc_name)
                 else:

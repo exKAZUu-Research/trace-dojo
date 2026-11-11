@@ -323,6 +323,8 @@ export class PyModule extends PyObject {
   readonly unsupported = new Map<string, string>();
   /** The modules CPython's module imported under these names, which this grader imports when first read. */
   readonly imports = new Map<string, string>();
+  /** The feature to name for every attribute the module lacks, when this grader has only some of CPython's module. */
+  partialFeature?: string;
 
   constructor(
     cls: PyClass,

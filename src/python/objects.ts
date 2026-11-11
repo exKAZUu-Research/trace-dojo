@@ -233,9 +233,11 @@ function moduleAttribute(module: PyModule, name: string): PyValue | undefined {
   const feature = module.unsupported.get(name);
   if (feature !== undefined) throw new UnsupportedFeatureError(feature);
   if (name === '__dict__') return namespaceDict(module.dict);
-  return name === '__annotations__'
-    ? moduleAnnotations(module)
-    : (module.dict.get(name) ?? importedModule(module, name));
+  const value =
+    name === '__annotations__' ? moduleAnnotations(module) : (module.dict.get(name) ?? importedModule(module, name));
+  if (value === undefined && module.partialFeature !== undefined)
+    throw new UnsupportedFeatureError(module.partialFeature);
+  return value;
 }
 
 /**
