@@ -27,14 +27,21 @@ export function findReachableTurtles(roots: unknown[]): { reached: Set<TurtleSta
   return { reached, scanned };
 }
 
-/** The objects that `roots` reach. */
-export function findReachableObjects(roots: unknown[]): Set<object> {
-  return walk(roots, new Set()).visited;
+/**
+ * The objects that `roots` reach. With `targets`, the walk may stop once it has reached them all, so that the set is
+ * complete only when some target is missing from it.
+ */
+export function findReachableObjects(roots: unknown[], targets?: ReadonlySet<object>): Set<object> {
+  return walk(roots, new Set(), targets).visited;
 }
 
-/** The objects that `roots` reach, in the order a breadth-first walk finds them, as CPython's collector lists them. */
-export function findReachableInOrder(roots: unknown[]): object[] {
+/**
+ * The objects that `roots` reach, in the order a breadth-first walk finds them, as CPython's collector lists them. The
+ * walk neither lists nor goes past the objects `skip` accepts, which the caller knows to be kept alive otherwise.
+ */
+export function findReachableInOrder(roots: unknown[], skip?: (object: object) => boolean): object[] {
   const visited = new Set<object>();
+  const listed: object[] = [];
   const turtles = new Set<TurtleState>();
   let level = [...roots];
   while (level.length > 0) {
@@ -42,11 +49,13 @@ export function findReachableInOrder(roots: unknown[]): object[] {
     for (const item of level) {
       if (!isNode(item) || visited.has(item)) continue;
       visited.add(item);
+      if (skip?.(item)) continue;
+      listed.push(item);
       pushChildren(next, item, turtles);
     }
     level = next;
   }
-  return [...visited];
+  return listed;
 }
 
 /**
@@ -139,15 +148,21 @@ function pushChildren(pending: unknown[], item: PyObject | PyCell, turtles: Set<
   else pushReferences(pending, item, turtles);
 }
 
-function walk(roots: unknown[], reached: Set<TurtleState>): { visited: Set<object>; scanned: number } {
+function walk(
+  roots: unknown[],
+  reached: Set<TurtleState>,
+  targets?: ReadonlySet<object>
+): { visited: Set<object>; scanned: number } {
   const visited = new Set<object>();
   const pending = [...roots];
   let scanned = 0;
+  let missing = targets?.size ?? -1;
   while (pending.length > 0) {
     const item = pending.pop();
     if (!(item instanceof PyObject || item instanceof PyCell) || visited.has(item)) continue;
     visited.add(item);
     scanned++;
+    if (targets?.has(item) && --missing === 0) break;
     if (item instanceof PyCell) {
       pending.push(item.value);
       continue;

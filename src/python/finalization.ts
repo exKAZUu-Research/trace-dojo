@@ -4,7 +4,7 @@ import { findReachableInOrder, findReachableObjects, freedByReferenceCounting } 
 import { closeGenerator } from './generators';
 import type { Runtime } from './runtime';
 import { asyncGeneratorClass, None } from './types';
-import { PyError, PyGenerator, PyObject, type PyValue } from './values';
+import { PyClass, PyError, PyFunction, PyGenerator, PyObject, type PyValue } from './values';
 
 /**
  * Closes the generators suspended inside a `try` or `with` statement once nothing refers to them any more, as CPython's
@@ -41,10 +41,14 @@ export class GeneratorFinalizer {
     const objects = dropped.filter((value) => value instanceof PyObject && value !== None);
     if (objects.length === 0) return;
     // Freeing cascades from the dropped objects to what they refer to, in about the order a walk from them finds it.
-    const order = findReachableInOrder(objects);
+    // What the program refers to directly is kept, and with it all it reaches, so the walk stops there.
+    const order = findReachableInOrder(objects, this.keptObjects(inFlight));
     const fromDropped = new Set(order);
-    if (![...this.pending].some((generator) => fromDropped.has(generator))) return;
-    const reachable = findReachableObjects(this.roots(inFlight));
+    const candidates = new Set([...this.pending].filter((generator) => fromDropped.has(generator)));
+    if (candidates.size === 0) return;
+    // The walk stops once it reaches every candidate, which then stays open: nothing is freed.
+    const reachable = findReachableObjects(this.roots(inFlight), candidates);
+    if ([...candidates].every((generator) => reachable.has(generator))) return;
     const freed = freedByReferenceCounting(new Set([...fromDropped].filter((object) => !reachable.has(object))));
     this.close(
       order.filter(
@@ -59,6 +63,28 @@ export class GeneratorFinalizer {
     if (this.pending.size === 0 || this.closing) return;
     const reachable = findReachableObjects(this.roots([]));
     this.close([...this.pending].filter((generator) => !reachable.has(generator)));
+  }
+
+  /**
+   * A test for objects the program certainly still reaches: what its frames, the modules, the handled exceptions, and
+   * `inFlight` refer to directly, and the classes and functions their modules hold under their own names.
+   */
+  private keptObjects(inFlight: unknown[]): (object: object) => boolean {
+    const { runtime } = this;
+    const direct = new Set<unknown>([...inFlight, ...runtime.evaluator.handledExceptions]);
+    for (const frame of runtime.frames) {
+      for (const value of frame.locals.values()) direct.add(value);
+      for (const cell of frame.cells.values()) direct.add(cell.value);
+      for (const value of frame.temporaries) direct.add(value);
+    }
+    const modules = new Set<unknown>(runtime.modules.values());
+    return (object) => {
+      if (direct.has(object) || modules.has(object)) return true;
+      if (!(object instanceof PyClass || object instanceof PyFunction) || typeof object.module !== 'string')
+        return false;
+      const module = runtime.modules.get(object.module);
+      return module !== undefined && module.dict.get(object.name) === object;
+    };
   }
 
   /** What the running program still refers to: its frames, the modules, the exceptions handled, and `inFlight`. */
