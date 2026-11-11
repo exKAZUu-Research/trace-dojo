@@ -323,7 +323,7 @@ function isKeyError(error: unknown): boolean {
 // type.__new__ ------------------------------------------------------------------------------------------------------
 
 /** `type.__new__(meta, name, bases, namespace, **kwargs)`: creates a class and runs the hooks its bases define. */
-// code-gauge-allow functionNcss 35 -- Follows the steps of type.__new__ in order.
+// code-gauge-allow functionNcss 36 -- Follows the steps of type.__new__ in order.
 export function typeNew(
   meta: PyClass,
   name: string,
@@ -349,6 +349,7 @@ export function typeNew(
   entries.delete('__qualname__');
   cls.flags.definesGetattribute =
     entries.has('__getattribute__') || classBases.some((base) => base.flags.definesGetattribute);
+  cls.flags.definesDel = entries.has('__del__') || classBases.some((base) => base.flags.definesDel);
   fillClassDict(cls, entries);
   const body = pendingBodies.get(namespace);
   if (body) {

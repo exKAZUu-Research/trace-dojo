@@ -1,7 +1,9 @@
+import { programAsyncGeneratorHooks } from '../coroutines';
 import { builtin } from '../define';
 import { callValue, isCallable } from '../objects';
 import type { Runtime } from '../runtime';
 import { newTuple, None, tupleClass, typeError, typeName, valueError } from '../types';
+import { defaultUnraisableHook, setUnraisableHookArgsClass } from '../unraisable';
 import { UnsupportedFeatureError } from '../unsupported';
 import { PyTuple, type PyValue } from '../values';
 import { realArgument } from './math';
@@ -25,18 +27,20 @@ const THREAD_INFO = structSeq('thread_info', [
   ['lock', 'mutex+cond'],
   ['version', None],
 ]);
+setUnraisableHookArgsClass(
+  structSeq(
+    'UnraisableHookArgs',
+    ['exc_type', 'exc_value', 'exc_traceback', 'err_msg', 'object'].map((field) => [field, None]),
+    { module: 'builtins' }
+  ).cls
+);
+
 const ASYNCGEN_HOOKS = structSeq(
   'asyncgen_hooks',
   [
     ['firstiter', None],
     ['finalizer', None],
   ],
-  { module: 'builtins' }
-);
-// The type of what CPython passes sys.unraisablehook, which no program here receives, but which is a subclass of tuple.
-structSeq(
-  'UnraisableHookArgs',
-  ['exc_type', 'exc_value', 'exc_traceback', 'err_msg', 'object'].map((field) => [field, None]),
   { module: 'builtins' }
 );
 
@@ -49,6 +53,8 @@ export function sysHooks(runtime: Runtime): [string, PyValue][] {
   let originTrackingDepth = 0n;
   return [
     ['__breakpointhook__', breakpointhook],
+    ['__unraisablehook__', defaultUnraisableHook],
+    ['unraisablehook', defaultUnraisableHook],
     ['breakpointhook', breakpointhook],
     ['__stdout__', runtime.standardStream('stdout')],
     ['__stderr__', runtime.standardStream('stderr')],
@@ -99,7 +105,7 @@ export function sysHooks(runtime: Runtime): [string, PyValue][] {
     ['get_asyncgen_hooks', builtin('get_asyncgen_hooks', 'none', 0, 0, () => asyncgenHooks(runtime))],
     [
       'set_asyncgen_hooks',
-      builtin('set_asyncgen_hooks', 'takes', 0, 2, (args, kwargs) => setAsyncgenHooks(args, kwargs), {
+      builtin('set_asyncgen_hooks', 'takes', 0, 2, (args, kwargs) => setAsyncgenHooks(runtime, args, kwargs), {
         keywords: ['firstiter', 'finalizer'],
       }),
     ],
@@ -153,16 +159,26 @@ function asyncgenHooks(runtime: Runtime): PyValue {
       'asyncio のイベントループが登録する非同期ジェネレータのフック（sys.get_asyncgen_hooks()）'
     );
   }
-  return ASYNCGEN_HOOKS;
+  const { firstiter, finalizer } = programAsyncGeneratorHooks(runtime);
+  return new PyTuple(ASYNCGEN_HOOKS.cls, [firstiter ?? None, finalizer ?? None]);
 }
 
-function setAsyncgenHooks(args: PyValue[], kwargs: Map<string, PyValue> | undefined): PyValue {
-  for (const [index, name] of ['firstiter', 'finalizer'].entries()) {
-    const hook = args[index] ?? kwargs?.get(name);
-    if (hook === undefined || hook === None) continue;
-    if (!isCallable(hook)) throw typeError(`callable ${name} expected, got ${typeName(hook)}`);
-    throw new UnsupportedFeatureError('非同期ジェネレータのフック（sys.set_asyncgen_hooks()）');
+/** `sys.set_asyncgen_hooks()`, which leaves a hook not given as it was and clears one given as None. */
+function setAsyncgenHooks(runtime: Runtime, args: PyValue[], kwargs: Map<string, PyValue> | undefined): PyValue {
+  const firstiter = args[0] ?? kwargs?.get('firstiter');
+  const finalizer = args[1] ?? kwargs?.get('finalizer');
+  // CPython checks the finalizer first, and sets neither hook when one is not callable.
+  for (const [name, hook] of [
+    ['finalizer', finalizer],
+    ['firstiter', firstiter],
+  ] as const) {
+    if (hook !== undefined && hook !== None && !isCallable(hook)) {
+      throw typeError(`callable ${name} expected, got ${typeName(hook)}`);
+    }
   }
+  const hooks = programAsyncGeneratorHooks(runtime);
+  if (finalizer !== undefined) hooks.finalizer = finalizer === None ? undefined : finalizer;
+  if (firstiter !== undefined) hooks.firstiter = firstiter === None ? undefined : firstiter;
   return None;
 }
 

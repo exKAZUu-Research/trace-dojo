@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 893 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss 894 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import { newAnnotate, recordAnnotation } from './annotations';
 import type {
   ClassDef,
@@ -38,7 +38,7 @@ import {
 } from './objects';
 import { equals, inplaceOp, isSame } from './operators';
 import type { Runtime } from './runtime';
-// code-gauge-allow-file fileNcss 893 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss 894 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import type { Suspension } from './suspendingEvaluator';
 import { targetSuspends } from './suspension';
 import { iterateSuspending, type SuspendingNext } from './threadIteration';
@@ -332,7 +332,13 @@ export class Evaluator extends AsyncEvaluator {
     switch (target.kind) {
       case 'name': {
         const current = this.loadName(target, frame);
-        this.storeName(target, inplaceOp(operator, current, this.evaluate(statement.value, frame)), frame);
+        const value = this.evaluate(statement.value, frame);
+        // `items *= 0` frees the items a list drops.
+        this.storeName(
+          target,
+          this.runtime.finalizer.mutating(current, () => inplaceOp(operator, current, value), [value]),
+          frame
+        );
         return;
       }
       case 'attribute': {

@@ -1,6 +1,9 @@
 import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
+import { parsePython } from '../../src/python/parse';
+import { runModule } from '../../src/python/run';
+import { Runtime } from '../../src/python/runtime';
 
 /** Runs a program that raises when a value it computes differs from what CPython 3.14.10 computes for it. */
 function expectSameAsCPython(program: string): void {
@@ -74,4 +77,118 @@ texts = [repr(value) for value in (str.upper, int.__add__, len)]
 if texts != ["<method 'upper' of 'str' objects>", "<slot wrapper '__add__' of 'int' objects>", '<built-in function len>']:
     raise AssertionError(texts)
 `);
+});
+
+/** The text a program writes, with how it ended. */
+function outputOf(program: string): string {
+  const run = runModule(new Runtime(), parsePython(program));
+  return `${run.output}=== ${run.uncaughtException ?? 'ok'}\n`;
+}
+
+test('__del__ runs when reference counting would free the object, and at the end in the order CPython clears it', () => {
+  // The expected text is what CPython 3.14.10 prints.
+  expect(
+    outputOf(`import gc, sys, weakref
+class A:
+    def __init__(self, n, *kids): self.n = n; self.kids = list(kids)
+    def __del__(self): print('del', self.n)
+a = A(1); a = None
+def f(p, q):
+    r = A('r'); s = A('s')
+    del p
+    return 0
+f(A('p'), A('q'))
+x = [A('l1'), A('l2')]; x.clear()
+d = {1: A('d1'), 2: A('d2')}; d.clear()
+n = A('n', A('n1'), A('n2')); n = None
+try:
+    raise ValueError(A('exc'))
+except ValueError as e:
+    print('handler')
+c1 = A('c1'); c2 = A('c2'); c1.o = c2; c2.o = c1
+c1 = c2 = None
+print('cycle dropped')
+gc.collect()
+saved = []
+class R:
+    def __del__(self): print('R del'); saved.append(self)
+r = R(); r = None; saved.clear()
+w = A('w')
+weakref.finalize(w, print, 'finalize')
+r1 = weakref.ref(w, lambda ref: print('cb1'))
+r2 = weakref.ref(w, lambda ref: print('cb2'))
+w = None
+class E:
+    def __del__(self): raise ValueError('boom')
+sys.unraisablehook = lambda u: print('hook', u.exc_type.__name__, u.err_msg.split(' at ')[0])
+e = E(); e = None
+sys.unraisablehook = sys.__unraisablehook__
+print('end')
+z = [A('z1'), A('z2')]
+q = A('q')
+`)
+  ).toBe(
+    `${[
+      'del 1',
+      'del p',
+      'del s',
+      'del r',
+      'del q',
+      'del l2',
+      'del l1',
+      'del d1',
+      'del d2',
+      'del n',
+      'del n2',
+      'del n1',
+      'handler',
+      'del exc',
+      'cycle dropped',
+      'del c1',
+      'del c2',
+      'R del',
+      'del w',
+      'cb2',
+      'cb1',
+      'finalize',
+      'hook ValueError Exception ignored while calling deallocator <function E.__del__',
+      'end',
+      'del q',
+      'del z2',
+      'del z1',
+    ].join('\n')}\n=== ok\n`
+  );
+});
+
+test('async generator hooks run when an async generator is first iterated and when it is freed unfinished', () => {
+  expectSameAsCPython(`import sys
+log = []
+async def agen():
+    yield 1
+    yield 2
+sys.set_asyncgen_hooks(lambda g: log.append('first'), lambda g: log.append('finalizer'))
+g = agen()
+log.append('created')
+try:
+    g.__anext__().send(None)
+except StopIteration as e:
+    log.append(e.value)
+g = None
+unstarted = agen()
+unstarted = None
+sys.set_asyncgen_hooks(None, None)
+if log != ['created', 'first', 1, 'finalizer'] or sys.get_asyncgen_hooks() != (None, None):
+    raise AssertionError(log)
+`);
+});
+
+test('cyclic garbage with __del__ that the automatic collector would free at an unknown time stops the program', () => {
+  expect(
+    outputOf(`class A:
+    def __del__(self): print('del')
+a = A(); a.self = a; a = None
+for i in range(1000):
+    b = [i]
+`)
+  ).toContain('この採点環境では使えません');
 });

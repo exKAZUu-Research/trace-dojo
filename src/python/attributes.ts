@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 602 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 604 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import {
   classAnnotate,
   classAnnotations,
@@ -525,6 +525,8 @@ function setClassAttribute(target: PyClass, name: string, value: PyValue, callsH
   if (target.isBuiltin) throw typeError(`cannot set '${name}' attribute of immutable type '${target.name}'`);
   if (setClassAttributeThroughMeta(target, name, value, callsHook)) return;
   if (name === '__getattribute__') noteGetattributeAssigned();
+  // Instances created from now on are tracked; CPython also finalizes the existing ones, which this grader does not.
+  if (name === '__del__') target.flags.definesDel = true;
   if (target.enumMembers?.some((member) => member.dict.get('_name_') === name)) {
     throw pyError('AttributeError', `cannot reassign member '${name}'`);
   }

@@ -96,7 +96,9 @@ export class Runtime {
   private readonly libraryEntryRows = new WeakMap<Frame, number | undefined>();
   /** What `print` wrote to stderr, which learners do not see, as Java's `System.err` output. */
   errorOutput = '';
-  private allocatedSlots = 0;
+  allocatedSlots = 0;
+  /** The allocations after which CPython's automatic collector could have collected cyclic garbage with `__del__`. */
+  cyclicGarbageDeadline: number | undefined;
   private reprDepth = 0;
 
   constructor() {
@@ -125,6 +127,9 @@ export class Runtime {
   allocate(count: number): void {
     this.allocatedSlots += count;
     if (this.allocatedSlots > LIMITS.maxSlots) throw pyError('MemoryError');
+    if (this.cyclicGarbageDeadline !== undefined && this.allocatedSlots > this.cyclicGarbageDeadline) {
+      this.finalizer.automaticCollectionDue();
+    }
     this.spend(Math.ceil(count / 64));
   }
 
@@ -269,7 +274,7 @@ export class Runtime {
       // The function's variables die with its frame, which closes a generator only they held.
       const { finalizer } = this;
       if (finalizer.pending.size > 0 && result !== undefined) {
-        finalizer.release([...frame.locals.values()], [result]);
+        finalizer.release(frameVariables(frame, scope.locals), [result]);
       }
     }
   }
@@ -559,6 +564,7 @@ export class Runtime {
       if (frame.globals !== frame.locals) for (const value of frame.globals.values()) roots.push(value);
     }
     if (this.threads) roots.push(...this.threads.roots());
+    roots.push(...this.finalizer.finalizing());
     return roots;
   }
 }
@@ -610,4 +616,19 @@ function objectAttributeNames(value: PyValue): Set<string> {
   }
   if (value instanceof PyInstance && value.enumValue !== undefined) add(['name', 'value']);
   return names;
+}
+
+/**
+ * The values of a returning function's variables, in the order CPython's frame drops them: from the last variable of
+ * its code to its first, its cells last.
+ */
+function frameVariables(frame: Frame, names: readonly string[]): PyValue[] {
+  const values: PyValue[] = [...frame.cells.values()].map((cell) => cell.value).filter((value) => value !== undefined);
+  const listed = new Set(names);
+  for (const [name, value] of frame.locals) if (!listed.has(name)) values.push(value);
+  for (let index = names.length - 1; index >= 0; index--) {
+    const value = frame.locals.get(names[index] as string);
+    if (value !== undefined) values.push(value);
+  }
+  return values;
 }
