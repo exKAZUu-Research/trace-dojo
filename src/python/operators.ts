@@ -5,6 +5,7 @@ import { asFloat, divmodFloat, floorDivInt, intToFloat, modInt, trueDivideInt } 
 import { bindValue, callValue, iterate, lookupSpecial } from './objects';
 import { formatPercent } from './percentFormat';
 import { currentRuntime } from './runtimeContext';
+import { dictViewBinary, isSetLikeView } from './setOperations';
 import { compareStr, strLength } from './strings';
 import { classOf, newList, newSet, newTuple, NotImplemented, pyError, typeError, typeName } from './types';
 import {
@@ -165,12 +166,12 @@ function nativeBinary(operator: BinaryOperator, left: PyValue, right: PyValue): 
   }
   if (typeof left === 'string') return stringBinary(operator, left, right);
   if (typeof right === 'string' && operator === '*' && isIntLike(left)) return repeatString(right, left);
+  if ((isSetLikeView(left) || isSetLikeView(right)) && '&|-^'.includes(operator)) {
+    return dictViewBinary(operator as '&' | '|' | '-' | '^', left, right, viewContains);
+  }
   if (isSequence(left) && !isUserObject(left)) return sequenceBinary(operator, left, right);
   if (isSequence(right) && operator === '*' && isIntLike(left)) return repeatSequence(right, left);
   if (left instanceof PySet && right instanceof PySet) return setBinary(operator, left, right);
-  if (left instanceof PyDictView && left.view !== 'values' && '&|-^'.includes(operator)) {
-    return setBinary(operator, newSet(iterateAll(left)), newSet(iterateAll(right)));
-  }
   if (left instanceof PyDict && right instanceof PyDict && operator === '|' && classOf(left).isBuiltin) {
     return mergeDicts(left, right);
   }

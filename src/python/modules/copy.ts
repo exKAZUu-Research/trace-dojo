@@ -13,7 +13,7 @@ function shallowCopy(value: PyValue): PyValue {
   if (special !== undefined) return callValue(bindValue(special, value), []);
   if (value instanceof PyList) return new PyList(value.cls, [...value.items]);
   if (value instanceof PyDict) {
-    const copy = new PyDict(value.cls, new DictStore(), value.defaultFactory);
+    const copy = new PyDict(value.cls, new DictStore(value.store.plainWrites), value.defaultFactory);
     for (const entry of value.store.ordered()) copy.store.set(entry.key, entry.value);
     return copy;
   }
@@ -53,7 +53,7 @@ function deepCopy(value: PyValue, memo: Map<PyObject, PyValue>): PyValue {
     return copy;
   }
   if (value instanceof PyDict) {
-    const copy = new PyDict(value.cls, new DictStore(), value.defaultFactory);
+    const copy = new PyDict(value.cls, new DictStore(value.store.plainWrites), value.defaultFactory);
     memo.set(value, copy);
     for (const entry of value.store.ordered()) copy.store.set(deepCopy(entry.key, memo), deepCopy(entry.value, memo));
     return copy;

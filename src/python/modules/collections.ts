@@ -1,7 +1,8 @@
 import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { DictStore } from '../dictStore';
-import { mappingEntries, storeKey } from '../expressionEvaluator';
+import { mappingEntries } from '../expressionEvaluator';
+import { pyHash } from '../hashing';
 import { keyError } from '../items';
 import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
@@ -228,9 +229,9 @@ counterClass.construct = (cls, args, kwargs) => {
 };
 
 function countInto(counter: PyDict, source: PyValue | undefined, kwargs: Kwargs, sign: bigint): void {
-  const add = (key: PyValue, amount: PyValue): void => {
-    const current = counter.store.get(key) ?? 0n;
-    counter.store.set(key, binaryOp(sign === 1n ? '+' : '-', current, amount));
+  const add = (key: PyValue, amount: PyValue, hash?: bigint): void => {
+    const current = counter.store.lookup(key, hash)?.value ?? 0n;
+    counter.store.set(key, binaryOp(sign === 1n ? '+' : '-', current, amount), hash);
   };
   if (source !== undefined && source !== None) {
     if (source instanceof PyDict || lookupSpecial(source, 'keys') !== undefined) {
@@ -239,7 +240,8 @@ function countInto(counter: PyDict, source: PyValue | undefined, kwargs: Kwargs,
       const next = iterate(source);
       for (let item = next(); item !== DONE; item = next()) {
         currentRuntime().spend();
-        add(item, 1n);
+        // CPython's _count_elements, which counts up, hashes the element itself, so its TypeError is not reworded.
+        add(item, 1n, sign === 1n ? pyHash(item) : undefined);
       }
     }
   }
@@ -384,7 +386,7 @@ orderedDictClass.mro = [orderedDictClass, ...dictClass.mro];
 orderedDictClass.module = 'collections';
 orderedDictClass.layout = { base: 'native' };
 orderedDictClass.construct = (cls, args, kwargs) => {
-  const dict = new PyDict(cls, new DictStore());
+  const dict = new PyDict(cls, new DictStore(true));
   if (args.length > 0) updateDict(dict, args[0]);
   for (const [key, value] of kwargs ?? []) dict.store.set(key, value);
   return dict;
@@ -402,7 +404,7 @@ method(
   2,
   (self, args, kwargs) => {
     const dict = self as PyDict;
-    const entry = dict.store.lookup(args[0]);
+    const entry = dict.store.lookup(args[0], pyHash(args[0]));
     if (!entry) throw keyError(args[0]);
     dict.store.moveToEnd(entry, isTruthy(argument(args, kwargs, 1, 'last') ?? true));
     return None;
@@ -619,4 +621,4 @@ registerModule(
     ])
 );
 
-export { getIterator, PyObject, storeKey };
+export { getIterator, PyObject };

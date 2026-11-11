@@ -1,4 +1,4 @@
-import { pyHash } from './hashing';
+import { keyHash, pyHash } from './hashing';
 import { keysEqual } from './operators';
 import type { PyValue } from './values';
 
@@ -11,6 +11,11 @@ export interface DictEntry {
 
 /** The entries of a dict in insertion order, found by their Python hashes and equality. */
 export class DictStore {
+  constructor(
+    /** Whether storing and deleting hash keys without rewording their TypeError, as an OrderedDict does. */
+    readonly plainWrites = false
+  ) {}
+
   private entries: DictEntry[] = [];
   private readonly index = new Map<bigint, DictEntry[]>();
   private deleted = 0;
@@ -21,7 +26,7 @@ export class DictStore {
     return this.entries.length - this.deleted;
   }
 
-  lookup(key: PyValue, hash = pyHash(key)): DictEntry | undefined {
+  lookup(key: PyValue, hash = keyHash(key, 'dict key')): DictEntry | undefined {
     const bucket = this.index.get(hash);
     if (!bucket) return undefined;
     for (const entry of bucket) {
@@ -39,8 +44,7 @@ export class DictStore {
   }
 
   /** Stores a value, keeping the key and position of an equal key already present. */
-  set(key: PyValue, value: PyValue): void {
-    const hash = pyHash(key);
+  set(key: PyValue, value: PyValue, hash = this.writeHash(key)): void {
     const existing = this.lookup(key, hash);
     if (existing) {
       existing.value = value;
@@ -55,10 +59,14 @@ export class DictStore {
   }
 
   delete(key: PyValue): DictEntry | undefined {
-    const entry = this.lookup(key);
+    const entry = this.lookup(key, this.writeHash(key));
     if (!entry) return undefined;
     this.remove(entry);
     return entry;
+  }
+
+  private writeHash(key: PyValue): bigint {
+    return this.plainWrites ? pyHash(key) : keyHash(key, 'dict key');
   }
 
   remove(entry: DictEntry): void {

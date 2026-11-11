@@ -2,7 +2,7 @@ import { setInstanceAttribute } from './attributes';
 import { addressOf, defaultRepr, pyFormat, pyRepr, pyStr } from './conversions';
 import { method } from './define';
 import { isEnumClass } from './enums';
-import { identityHash } from './hashing';
+import { identityHash, NATIVE_HASHES } from './hashing';
 import { argument, checkArgs } from './nativeArgs';
 import { bindValue, callValue, deleteAttribute, getAttribute, isCallable, lookupSpecial, nextOf } from './objects';
 import { currentRuntime } from './runtimeContext';
@@ -78,6 +78,7 @@ method(objectClass, '__ne__', 'one', 1, 1, (self, [other]) => {
 for (const name of ['__lt__', '__le__', '__gt__', '__ge__'])
   method(objectClass, name, 'one', 1, 1, () => NotImplemented);
 method(objectClass, '__hash__', 'none', 0, 0, (self) => identityHash(self as PyObject));
+NATIVE_HASHES.add(objectClass.dict.get('__hash__') as PyValue);
 method(objectClass, '__format__', 'one', 1, 1, (self, [spec]) => {
   if (typeof spec !== 'string') throw typeError(`__format__() argument must be str, not ${typeName(spec)}`);
   if (spec !== '') throw typeError(`unsupported format string passed to ${typeName(self)}.__format__`);

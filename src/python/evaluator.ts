@@ -3,7 +3,7 @@ import type { ExceptHandler, Expression, MatchCase, Pattern, Statement, Target }
 import { createClass } from './classes';
 import { pyRepr } from './conversions';
 import { exceptionGroupOf, splitGroup } from './exceptionGroups';
-import { ExpressionEvaluator, mappingEntries, storeKey } from './expressionEvaluator';
+import { ExpressionEvaluator, mappingEntries } from './expressionEvaluator';
 import type { Frame } from './frame';
 import { isMapping, isSequenceForMatch } from './matching';
 import {
@@ -680,7 +680,7 @@ export class Evaluator extends ExpressionEvaluator {
     if (pattern.rest) {
       const rest = newDict();
       for (const [key, value] of mappingEntries(subject)) {
-        if (!seen.some((other) => equals(other, key))) storeKey(rest, key, value);
+        if (!seen.some((other) => equals(other, key))) rest.store.set(key, value);
       }
       bindings.set(pattern.rest, rest);
     }

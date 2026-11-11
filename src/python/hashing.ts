@@ -1,6 +1,7 @@
+import { pyStr } from './conversions';
 import { callSpecial, lookupSpecial } from './objects';
-import { classOf, None, typeError, typeName } from './types';
-import { PyComplex, PyInstance, PyObject, PySet, PyTuple, type PyValue } from './values';
+import { exceptionClassNamed, None, typeError, typeName } from './types';
+import { PyComplex, PyError, PyInstance, type PyObject, PySet, PyTuple, type PyValue } from './values';
 
 const MASK64 = (1n << 64n) - 1n;
 const MODULUS = (1n << 61n) - 1n;
@@ -115,6 +116,21 @@ function hashString(value: string): bigint {
 
 const NONE_HASH = 4_238_894_112n;
 
+/** What a hashed key is for, which CPython 3.14 names when the key turns out to be unhashable. */
+export type KeyRole = 'set element' | 'dict key';
+
+/** Hashes a set element or dict key, rewording a TypeError as CPython 3.14's sets and dicts do. */
+export function keyHash(value: PyValue, role: KeyRole): bigint {
+  try {
+    return pyHash(value);
+  } catch (error) {
+    if (error instanceof PyError && error.exception.cls === exceptionClassNamed('TypeError')) {
+      throw typeError(`cannot use '${typeName(value)}' as a ${role} (${pyStr(error.exception)})`);
+    }
+    throw error;
+  }
+}
+
 /** Python's `hash()`, raising TypeError for unhashable values. */
 // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of hashable value.
 export function pyHash(value: PyValue): bigint {
@@ -140,7 +156,7 @@ export function pyHash(value: PyValue): bigint {
   }
   const special = lookupSpecial(value, '__hash__');
   if (special === None) throw typeError(`unhashable type: '${typeName(value)}'`);
-  if (special !== undefined && !isDefaultHash(special)) {
+  if (special !== undefined && !NATIVE_HASHES.has(special)) {
     const result = callSpecial(value, '__hash__', []);
     if (typeof result === 'boolean') return result ? 1n : 0n;
     if (typeof result !== 'bigint') throw typeError('__hash__ method should return an integer');
@@ -150,10 +166,11 @@ export function pyHash(value: PyValue): bigint {
   return identityHash(value);
 }
 
-/** Whether a class's `__hash__` is the builtin one that hashes by identity or by value natively. */
-function isDefaultHash(special: PyValue): boolean {
-  return special instanceof PyObject && classOf(special).name === 'method_descriptor';
-}
+/**
+ * The builtin `__hash__` methods that `pyHash` computes itself (by identity, or a frozenset's by value), registered
+ * by the modules defining them, so that hashing instances of plain classes needs no call.
+ */
+export const NATIVE_HASHES = new Set<PyValue>();
 
 export function identityHash(value: PyObject): bigint {
   return BigInt(value.identity) * 16n + 7n;

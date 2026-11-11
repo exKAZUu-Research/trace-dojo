@@ -1,5 +1,5 @@
 import { pyRepr, pyStr } from './conversions';
-import { hashInt } from './hashing';
+import { hashInt, NATIVE_HASHES } from './hashing';
 import { intEnumValue, keysEqual } from './operators';
 import { builtinClass, defineMethod, newList, None, pyError, typeClass, typeError } from './types';
 import {
@@ -92,6 +92,8 @@ defineMethod(
   '__hash__',
   (self) => BigInt(memberName(self).length) * 1_000_003n + BigInt(memberName(self).codePointAt(0) ?? 0)
 );
+// CPython hashes a member by its name, whose hash is randomized, so the identity hash is as good and keeps sets cheap.
+NATIVE_HASHES.add(enumClass.dict.get('__hash__') as PyValue);
 defineMethod(enumClass, '__eq__', (self, [other]) => self === other);
 defineMethod(intEnumClass, '__str__', (self) => pyStr((self as PyInstance).enumValue as PyValue));
 defineMethod(intEnumClass, '__format__', (self) => pyStr((self as PyInstance).enumValue as PyValue));

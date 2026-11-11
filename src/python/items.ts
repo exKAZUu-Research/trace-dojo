@@ -1,4 +1,3 @@
-import { storeKey } from './expressionEvaluator';
 import { toIndex } from './numbers';
 import { bindValue, callValue, lookupSpecial, toArray } from './objects';
 import { currentRuntime } from './runtimeContext';
@@ -167,7 +166,7 @@ export function setItem(container: PyValue, key: PyValue, value: PyValue): void 
     return;
   }
   if (container instanceof PyDict && classOf(container).isBuiltin) {
-    storeKey(container, key, value);
+    container.store.set(key, value);
     return;
   }
   const special = lookupSpecial(container, '__setitem__');

@@ -1,4 +1,4 @@
-import { pyHash } from './hashing';
+import { keyHash } from './hashing';
 import { keysEqual } from './operators';
 import type { PyValue } from './values';
 
@@ -51,11 +51,11 @@ export class SetTable {
     return [...this.entries()].map((entry) => entry.key);
   }
 
-  has(key: PyValue, hash = pyHash(key)): boolean {
+  has(key: PyValue, hash = keyHash(key, 'set element')): boolean {
     return this.findEntry(key, hash) !== undefined;
   }
 
-  findEntry(key: PyValue, hash = pyHash(key)): SetEntry | undefined {
+  findEntry(key: PyValue, hash = keyHash(key, 'set element')): SetEntry | undefined {
     const index = this.lookup(key, hash);
     return index === undefined ? undefined : this.table[index];
   }
@@ -79,7 +79,7 @@ export class SetTable {
   }
 
   // code-gauge-allow functionCognitiveComplexity 26 -- Transcribes CPython's set_add_entry.
-  add(key: PyValue, hash = pyHash(key)): void {
+  add(key: PyValue, hash = keyHash(key, 'set element')): void {
     const { mask } = this;
     let perturb = hash & MASK64;
     let index = Number(hash & BigInt(mask));
@@ -113,7 +113,7 @@ export class SetTable {
     }
   }
 
-  discard(key: PyValue, hash = pyHash(key)): boolean {
+  discard(key: PyValue, hash = keyHash(key, 'set element')): boolean {
     const slot = this.lookup(key, hash);
     if (slot === undefined) return false;
     this.table[slot] = DUMMY;

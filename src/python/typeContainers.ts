@@ -1,8 +1,8 @@
 import { pyRepr } from './conversions';
 import { method } from './define';
 import { DictStore } from './dictStore';
-import { mappingEntries, storeKey } from './expressionEvaluator';
-import { pyHash } from './hashing';
+import { mappingEntries } from './expressionEvaluator';
+import { NATIVE_HASHES, pyHash } from './hashing';
 import { keyError, sliceIndices } from './items';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
@@ -323,7 +323,7 @@ function updateFromArguments(qualified: string, dict: PyDict, args: PyValue[], k
 
 export function updateDict(dict: PyDict, source: PyValue): void {
   if (source instanceof PyDict || lookupSpecial(source, 'keys') !== undefined) {
-    for (const [key, value] of mappingEntries(source)) storeKey(dict, key, value);
+    for (const [key, value] of mappingEntries(source)) dict.store.set(key, value);
     return;
   }
   const next = iterate(source);
@@ -338,7 +338,7 @@ export function updateDict(dict: PyDict, source: PyValue): void {
     if (pair.length !== 2) {
       throw valueError(`dictionary update sequence element #${index} has length ${pair.length}; 2 is required`);
     }
-    storeKey(dict, pair[0], pair[1]);
+    dict.store.set(pair[0], pair[1]);
   }
 }
 
@@ -360,7 +360,7 @@ method(dictClass, '__len__', 'none', 0, 0, (self) => BigInt(dictOf(self).store.s
 method(dictClass, '__contains__', 'one', 1, 1, (self, [key]) => dictOf(self).store.has(key));
 method(dictClass, '__getitem__', 'one', 1, 1, (self, [key]) => getItem(self, key));
 method(dictClass, '__setitem__', 'expected', 2, 2, (self, [key, value]) => {
-  storeKey(dictOf(self), key, value);
+  dictOf(self).store.set(key, value);
   return None;
 });
 method(dictClass, '__delitem__', 'one', 1, 1, (self, [key]) => {
@@ -382,7 +382,8 @@ method(dictClass, 'values', 'none', 0, 0, (self) => new PyDictView(dictValuesCla
 method(dictClass, 'items', 'none', 0, 0, (self) => new PyDictView(dictItemsClass, dictOf(self), 'items'));
 method(dictClass, 'get', 'expected', 1, 2, (self, [key, fallback]) => dictOf(self).store.get(key) ?? fallback ?? None);
 method(dictClass, 'pop', 'expected', 1, 2, (self, [key, fallback]) => {
-  const entry = dictOf(self).store.delete(key);
+  // CPython does not hash the key when the dict is empty.
+  const entry = dictOf(self).store.size === 0 ? undefined : dictOf(self).store.delete(key);
   if (entry) return entry.value;
   if (fallback !== undefined) return fallback;
   throw keyError(key);
@@ -396,7 +397,7 @@ method(dictClass, 'popitem', 'none', 0, 0, (self) => {
 method(dictClass, 'setdefault', 'expected', 1, 2, (self, [key, fallback]) => {
   const existing = dictOf(self).store.get(key);
   if (existing !== undefined) return existing;
-  storeKey(dictOf(self), key, fallback ?? None);
+  dictOf(self).store.set(key, fallback ?? None);
   return fallback ?? None;
 });
 defineMethod(dictClass, 'update', (self, args, kwargs) => {
@@ -408,7 +409,7 @@ method(dictClass, 'clear', 'none', 0, 0, (self) => {
   return None;
 });
 method(dictClass, 'copy', 'none', 0, 0, (self) => {
-  const copy = new PyDict(dictOf(self).cls, new DictStore(), dictOf(self).defaultFactory);
+  const copy = new PyDict(dictOf(self).cls, new DictStore(dictOf(self).store.plainWrites), dictOf(self).defaultFactory);
   for (const entry of dictOf(self).store.ordered()) copy.store.set(entry.key, entry.value);
   return copy;
 });
@@ -420,7 +421,7 @@ method(
   2,
   (cls, [iterable, value]) => {
     const dict = callValue(cls, []) as PyDict;
-    for (const key of toArray(iterable)) storeKey(dict, key, value ?? None);
+    for (const key of toArray(iterable)) dict.store.set(key, value ?? None);
     return dict;
   },
   { binding: 'class' }
@@ -464,24 +465,10 @@ for (const cls of [setClass, frozensetClass]) {
   cls.construct = (setType, args, kwargs) => {
     checkArgs({ qualified: cls.name, min: 0, max: 1, style: 'expected' }, args, kwargs);
     const table = new SetTable();
-    if (args.length > 0) withSetElementError(() => updateTable(table, args[0]));
+    if (args.length > 0) updateTable(table, args[0]);
     currentRuntime().allocate(table.size + 1);
     return new PySet(setType, table);
   };
-}
-
-/** Rewords an unhashable element's TypeError as CPython does when building a set. */
-export function withSetElementError<T>(run: () => T): T {
-  try {
-    return run();
-  } catch (error) {
-    const state = (error as { exception?: { exception?: { args: PyTuple } } }).exception?.exception;
-    const message = state?.args.items[0];
-    if (typeof message === 'string' && message.startsWith('unhashable type: ')) {
-      throw typeError(`cannot use '${message.slice(18, -1)}' as a set element (${message})`);
-    }
-    throw error;
-  }
 }
 
 const setOf = (self: PyValue): PySet => self as PySet;
@@ -524,10 +511,11 @@ for (const cls of [setClass, frozensetClass]) {
     toArray(other).every((item) => !setOf(self).table.has(item))
   );
   method(cls, 'issubset', 'one', 1, 1, (self, [other]) => {
-    const table = other instanceof PySet ? other.table : tableFrom(other);
+    // CPython compares the size of the intersection unless the other operand is a set.
+    if (!(other instanceof PySet)) return setIntersection(setOf(self), other).table.size === setOf(self).table.size;
     return setOf(self)
       .table.keys()
-      .every((key) => table.has(key));
+      .every((key) => other.table.has(key));
   });
   method(cls, 'issuperset', 'one', 1, 1, (self, [other]) =>
     toArray(other).every((item) => setOf(self).table.has(item))
@@ -549,9 +537,10 @@ function tableFrom(value: PyValue): SetTable {
 }
 
 method(frozensetClass, '__hash__', 'none', 0, 0, (self) => pyHash(self));
+NATIVE_HASHES.add(frozensetClass.dict.get('__hash__') as PyValue);
 setClass.dict.set('__hash__', None);
 method(setClass, 'add', 'one', 1, 1, (self, [item]) => {
-  withSetElementError(() => setOf(self).table.add(item));
+  setOf(self).table.add(item);
   currentRuntime().allocate(1);
   return None;
 });
@@ -573,7 +562,7 @@ method(setClass, 'clear', 'none', 0, 0, (self) => {
   return None;
 });
 method(setClass, 'update', 'expected', 0, Number.POSITIVE_INFINITY, (self, others) => {
-  for (const other of others) withSetElementError(() => updateTable(setOf(self).table, other));
+  for (const other of others) updateTable(setOf(self).table, other);
   return None;
 });
 method(setClass, 'intersection_update', 'expected', 0, Number.POSITIVE_INFINITY, (self, others) => {
