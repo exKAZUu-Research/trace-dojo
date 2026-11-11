@@ -1,23 +1,48 @@
+import { abcInvalidationCount } from '../abstractClasses';
 import { addressOf, pyRepr } from '../conversions';
 import { builtin, method } from '../define';
+import { defineGetSet } from '../descriptors';
 import { DictStore } from '../dictStore';
-import { registerModule } from '../modules';
+import { runLibrarySource } from '../librarySource';
+import { mappingProxyClass } from '../mappingProxy';
+import { importModule, registerModule, registerUnsupportedAttributes } from '../modules';
 import { checkArgs } from '../nativeArgs';
-import {
-  bindValue,
-  callValue,
-  getAttributeOrUndefined,
-  isCallable,
-  isTruthy,
-  iterate,
-  lookupSpecial,
-  setAttribute,
-} from '../objects';
+import { toIndex } from '../numbers';
+import { bindValue, callValue, isCallable, isTruthy, iterate, lookupSpecial } from '../objects';
 import { compareOp } from '../operators';
 import { currentRuntime } from '../runtimeContext';
-import { builtinClass, newTuple, None, NotImplemented, typeError } from '../types';
-import { DONE, type Kwargs, PyBuiltinFunction, PyClass, PyDict, PyOpaque, PyTuple, type PyValue } from '../values';
+import { forwardRefClass, genericAliasClass, unionClass } from '../typeHints';
+import {
+  builtinClass,
+  classOf,
+  methodClass,
+  methodDescriptorClass,
+  namespaceDict,
+  newTuple,
+  None,
+  NotImplemented,
+  typeError,
+} from '../types';
+import {
+  DONE,
+  type Kwargs,
+  PyBoundMethod,
+  PyBuiltinFunction,
+  PyClass,
+  PyDict,
+  PyInstance,
+  type PyObject,
+  PyOpaque,
+  PyTuple,
+  type PyValue,
+} from '../values';
 import { makeNamedTupleClass } from './collections';
+import { FUNCTOOLS_SOURCE } from './functoolsSource';
+
+/** Binds a callable read from a class through an instance, as the `__get__` of partial and of the lru_cache wrapper. */
+function bindAsMethod(self: PyObject, instance: PyValue): PyValue {
+  return instance === None ? self : new PyBoundMethod(methodClass, instance, self);
+}
 
 const partialClass = builtinClass('partial');
 partialClass.tpName = 'functools.partial';
@@ -27,12 +52,47 @@ interface Partial {
   args: PyValue[];
   kwargs: Map<string, PyValue>;
 }
+/** `functools.Placeholder`, which a partial's positional arguments leave for the call to fill. */
+const placeholderClass = builtinClass('_PlaceholderType');
+placeholderClass.module = 'functools';
+placeholderClass.tpName = 'functools._PlaceholderType';
+const Placeholder = new PyOpaque(placeholderClass, 'Placeholder');
+method(placeholderClass, '__repr__', 'none', 0, 0, () => 'Placeholder');
+placeholderClass.construct = () => Placeholder;
+
 partialClass.construct = (_cls, args, kwargs) => {
   if (args.length === 0) throw typeError("type 'partial' takes at least one argument");
   const [fn, ...rest] = args;
   if (!isCallable(fn)) throw typeError('the first argument must be callable');
-  return new PyOpaque(partialClass, 'partial', { fn, args: rest, kwargs: new Map(kwargs) } satisfies Partial);
+  if (rest.at(-1) === Placeholder) throw typeError('trailing Placeholders are not allowed');
+  for (const value of kwargs?.values() ?? []) {
+    if (value === Placeholder) throw typeError('Placeholder cannot be passed as a keyword argument');
+  }
+  if (fn instanceof PyOpaque && fn.cls === partialClass) {
+    const inner = fn.data as Partial;
+    const merged = new Map(inner.kwargs);
+    for (const [key, value] of kwargs ?? []) merged.set(key, value);
+    return newPartial(inner.fn, fillPlaceholders(inner.args, rest, true), merged);
+  }
+  return newPartial(fn, rest, new Map(kwargs));
 };
+
+function newPartial(fn: PyValue, args: PyValue[], kwargs: Map<string, PyValue>): PyOpaque {
+  return new PyOpaque(partialClass, 'partial', { fn, args, kwargs } satisfies Partial);
+}
+
+/** Fills a partial's placeholders with call arguments in order, as CPython's partial does. */
+function fillPlaceholders(args: readonly PyValue[], given: readonly PyValue[], nesting = false): PyValue[] {
+  const count = args.filter((arg) => arg === Placeholder).length;
+  if (count === 0) return [...args, ...given];
+  if (!nesting && given.length < count) {
+    throw typeError(`missing positional arguments in 'partial' call; expected at least ${count}, got ${given.length}`);
+  }
+  let index = 0;
+  const filled = args.map((arg) => (arg === Placeholder && index < given.length ? given[index++] : arg));
+  return [...filled, ...given.slice(index)];
+}
+partialClass.nativeGet = bindAsMethod;
 partialClass.dict.set(
   '__call__',
   new PyBuiltinFunction(
@@ -42,7 +102,7 @@ partialClass.dict.set(
       const partial = (args[0] as PyOpaque).data as Partial;
       const merged = new Map(partial.kwargs);
       for (const [key, value] of kwargs ?? []) merged.set(key, value);
-      return callValue(partial.fn, [...partial.args, ...args.slice(1)], merged.size > 0 ? merged : undefined);
+      return callValue(partial.fn, fillPlaceholders(partial.args, args.slice(1)), merged.size > 0 ? merged : undefined);
     },
     undefined,
     'method',
@@ -72,61 +132,99 @@ function reduce(args: PyValue[], kwargs: Kwargs): PyValue {
   return accumulator;
 }
 
-let cacheInfoClass: PyClass | undefined;
 const cacheClass = builtinClass('_lru_cache_wrapper');
 cacheClass.tpName = 'functools._lru_cache_wrapper';
 cacheClass.module = 'functools';
+cacheClass.dict.set('__module__', 'functools');
 interface Cache {
   fn: PyValue;
   store: DictStore;
   maxsize: number | undefined;
+  typed: boolean;
   hits: number;
   misses: number;
+  cacheInfo: PyValue;
 }
 
-function cached(fn: PyValue, maxsize: number | undefined): PyValue {
-  const wrapper = new PyOpaque(cacheClass, 'cache', {
+/** The marker between the positional and keyword arguments of a cache key, as `_functools.lru_cache` makes keys. */
+const KEYWORD_MARK = new PyOpaque(builtinClass('object'), 'kwd_mark');
+
+/** `functools._lru_cache_wrapper(user_function, maxsize, typed, _CacheInfo)`, the C type lru_cache() returns. */
+function lruCacheWrapper([fn, maxsize, typed, cacheInfo]: PyValue[]): PyValue {
+  if (!isCallable(fn)) throw typeError('the first argument must be callable');
+  let limit: number | undefined;
+  if (maxsize !== None) {
+    const value = toIndex(maxsize);
+    limit = value < 0n ? 0 : Number(value);
+  }
+  const cache: Cache = {
     fn,
     store: new DictStore(),
-    maxsize,
+    maxsize: limit,
+    typed: isTruthy(typed),
     hits: 0,
     misses: 0,
-  } satisfies Cache);
+    cacheInfo,
+  };
+  const wrapper = new PyOpaque(cacheClass, 'cache', cache);
+  wrapper.attributes = new Map();
   return wrapper;
 }
+
+function cacheKey(cache: Cache, args: PyValue[], kwargs: Kwargs): PyValue {
+  const keywords = [...(kwargs ?? [])];
+  if (!cache.typed && keywords.length === 0) {
+    const [only] = args;
+    if (args.length === 1 && (typeof only === 'bigint' || typeof only === 'string')) return only;
+    return newTuple(args);
+  }
+  const items = [...args];
+  if (keywords.length > 0) items.push(KEYWORD_MARK, ...keywords.flat());
+  if (cache.typed) {
+    items.push(...args.map((arg) => classOf(arg)), ...keywords.map(([, value]) => classOf(value)));
+  }
+  return newTuple(items);
+}
+
+cacheClass.nativeGet = bindAsMethod;
 cacheClass.dict.set(
   '__call__',
   new PyBuiltinFunction(
-    builtinClass('method_descriptor'),
+    methodDescriptorClass,
     '__call__',
-    (args, kwargs) => {
-      const cache = (args[0] as PyOpaque).data as Cache;
-      const callArgs = args.slice(1);
-      const key = newTuple([...callArgs, ...[...(kwargs ?? [])].flatMap(([name, value]) => [name, value])]);
-      const found = cache.store.lookup(key);
-      if (found) {
-        cache.hits++;
-        if (cache.maxsize !== undefined) cache.store.moveToEnd(found, true);
-        return found.value;
-      }
-      cache.misses++;
-      const value = callValue(cache.fn, callArgs, kwargs);
-      cache.store.set(key, value);
-      if (cache.maxsize !== undefined && cache.store.size > cache.maxsize) {
-        const oldest = cache.store.first();
-        if (oldest) cache.store.remove(oldest);
-      }
-      return value;
-    },
+    (args, kwargs) => callCached((args[0] as PyOpaque).data as Cache, args.slice(1), kwargs),
     undefined,
     'method',
     '_lru_cache_wrapper'
   )
 );
+
+function callCached(cache: Cache, args: PyValue[], kwargs: Kwargs): PyValue {
+  if (cache.maxsize === 0) {
+    cache.misses++;
+    return callValue(cache.fn, args, kwargs);
+  }
+  const key = cacheKey(cache, args, kwargs);
+  const found = cache.store.lookup(key);
+  if (found) {
+    cache.hits++;
+    if (cache.maxsize !== undefined) cache.store.moveToEnd(found, true);
+    return found.value;
+  }
+  cache.misses++;
+  const value = callValue(cache.fn, args, kwargs);
+  if (cache.store.lookup(key)) return value;
+  if (cache.maxsize !== undefined && cache.store.size >= cache.maxsize) {
+    const oldest = cache.store.first();
+    if (oldest) cache.store.remove(oldest);
+  }
+  cache.store.set(key, value);
+  return value;
+}
+
 method(cacheClass, 'cache_info', 'none', 0, 0, (self) => {
   const cache = (self as PyOpaque).data as Cache;
-  cacheInfoClass ??= makeNamedTupleClass('CacheInfo', ['hits', 'misses', 'maxsize', 'currsize'], 'functools');
-  return callValue(cacheInfoClass, [
+  return callValue(cache.cacheInfo, [
     BigInt(cache.hits),
     BigInt(cache.misses),
     cache.maxsize === undefined ? None : BigInt(cache.maxsize),
@@ -148,29 +246,10 @@ method(
   0,
   (self) => `<functools._lru_cache_wrapper object at ${addressOf(self as PyOpaque)}>`
 );
-cacheClass.dict.set(
-  '__get__',
-  new PyBuiltinFunction(
-    builtinClass('method_descriptor'),
-    '__get__',
-    ([self, instance]) =>
-      instance === None
-        ? self
-        : new PyOpaque(partialClass, 'partial', { fn: self, args: [instance], kwargs: new Map() } satisfies Partial),
-    undefined,
-    'method',
-    '_lru_cache_wrapper'
-  )
-);
-
-function lruCache(args: PyValue[], kwargs: Kwargs): PyValue {
-  checkArgs({ qualified: 'lru_cache', min: 0, max: 2, style: 'takes', keywords: ['maxsize', 'typed'] }, args, kwargs);
-  const first = args[0] ?? kwargs?.get('maxsize');
-  if (first !== undefined && first !== None && isCallable(first) && typeof first !== 'bigint')
-    return cached(first, 128);
-  const maxsize = first === undefined ? 128 : first === None ? undefined : Number(first);
-  return builtin('decorating_function', 'one', 1, 1, ([fn]) => cached(fn, maxsize));
+for (const name of ['__copy__', '__deepcopy__']) {
+  method(cacheClass, name, 'expected', 0, 1, (self) => self);
 }
+defineGetSet(cacheClass, '__dict__', (self) => namespaceDict((self as PyOpaque).attributes as Map<string, PyValue>));
 
 const keyWrapperClass = builtinClass('KeyWrapper');
 keyWrapperClass.tpName = 'functools.KeyWrapper';
@@ -265,29 +344,40 @@ function wrapNot(result: PyValue, convert: (value: PyValue) => boolean): PyValue
   return result === NotImplemented ? NotImplemented : convert(result);
 }
 
-function wraps([wrapped]: PyValue[]): PyValue {
-  return builtin('decorator', 'one', 1, 1, ([wrapper]) => {
-    for (const name of ['__module__', '__name__', '__qualname__', '__doc__']) {
-      const value = getAttributeOrUndefined(wrapped, name);
-      if (value !== undefined) setAttribute(wrapper, name, value);
-    }
-    setAttribute(wrapper, '__wrapped__', wrapped);
-    return wrapper;
-  });
-}
+registerUnsupportedAttributes('functools', {
+  RLock: 'functools.RLock（スレッド）',
+  itemgetter: 'functools.itemgetter（operator モジュール）',
+});
 
-registerModule(
-  'functools',
-  () =>
+registerModule('functools', (runtime) =>
+  runLibrarySource(
+    'functools',
+    FUNCTOOLS_SOURCE,
     new Map<string, PyValue>([
       ['reduce', builtin('reduce', 'expected', 2, 3, reduce)],
       ['partial', partialClass],
-      ['lru_cache', builtin('lru_cache', 'takes', 0, 2, lruCache, { keywords: ['maxsize', 'typed'] })],
-      ['cache', builtin('cache', 'one', 1, 1, ([fn]) => cached(fn, undefined))],
+      ['Placeholder', Placeholder],
+      ['_lru_cache_wrapper', builtin('_lru_cache_wrapper', 'expected', 4, 4, lruCacheWrapper)],
+      ['_CacheInfo', makeNamedTupleClass('CacheInfo', ['hits', 'misses', 'maxsize', 'currsize'], 'functools')],
       ['cmp_to_key', builtin('cmp_to_key', 'one', 1, 1, cmpToKey)],
       ['total_ordering', builtin('total_ordering', 'one', 1, 1, totalOrdering)],
-      ['wraps', builtin('wraps', 'takes', 1, 1, wraps, { keywords: ['wrapped', 'assigned', 'updated'] })],
+      ['get_cache_token', builtin('get_cache_token', 'none', 0, 0, () => BigInt(abcInvalidationCount()))],
+      ['GenericAlias', genericAliasClass],
+      ['MappingProxyType', mappingProxyClass],
+      ['MethodType', methodClass],
+      ['UnionType', unionClass],
+      ['namedtuple', importModule(runtime, 'collections').dict.get('namedtuple') as PyValue],
+      ['_ForwardRef', forwardRefClass],
+      [
+        '_set_instance_dict_item',
+        builtin('_set_instance_dict_item', 'expected', 3, 3, ([instance, name, value]) => {
+          if (!(instance instanceof PyInstance)) throw typeError('object does not support item assignment');
+          instance.dict.set(name as string, value);
+          return None;
+        }),
+      ],
     ])
+  )
 );
 
 export { lookupSpecial, PyDict, PyTuple };

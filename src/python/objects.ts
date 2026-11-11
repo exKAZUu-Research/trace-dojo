@@ -1,4 +1,5 @@
 import { classAttribute, specialAttribute } from './attributes';
+import { isDataDescriptor, isNonDataDescriptor, readDescriptor } from './descriptors';
 import { getItem as getItemOf } from './items';
 import { describeIntegerIndex, toIndex } from './numbers';
 import { currentRuntime } from './runtimeContext';
@@ -39,7 +40,8 @@ import {
   PyIterator,
   PyList,
   PyModule,
-  type PyObject,
+  PyObject,
+  PyOpaque,
   PyRange,
   PySet,
   PySuper,
@@ -103,6 +105,13 @@ export function bindValue(attribute: PyValue, instance: PyValue, owner: PyClass 
       attribute.ownerName
     );
   }
+  if (attribute instanceof PyInstance && !attribute.cls.isBuiltin) {
+    // Only classes of library code written in Python define __get__.
+    const get = attribute.cls.lookup('__get__');
+    if (get !== undefined) return callValue(bindValue(get, attribute), [instance, owner]);
+  }
+  if (attribute instanceof PyObject && attribute.cls.nativeGet)
+    return attribute.cls.nativeGet(attribute, instance, owner);
   if (attribute instanceof PyDescriptor) {
     if (attribute.cls === staticmethodClass) return attribute.fn;
     if (attribute.cls === classmethodClass) return bindToClass(attribute.fn, owner);
@@ -160,16 +169,25 @@ function findAttribute(value: PyValue, name: string): PyValue | undefined {
     if (feature !== undefined) throw new UnsupportedFeatureError(feature);
     return value.attribute(name);
   }
-  if (value instanceof PySuper) return superAttribute(value, name);
+  if (value instanceof PySuper) {
+    const found = superAttribute(value, name);
+    if (found !== undefined) return found;
+    const own = value.cls.lookup(name);
+    return isDataDescriptor(own) ? readDescriptor(own, value) : undefined;
+  }
   const cls = classOf(value);
   const special = specialAttribute(value, name);
   if (special !== undefined) return special;
   const attribute = cls.lookup(name);
+  if (isDataDescriptor(attribute)) return readDescriptor(attribute, value);
   if (attribute instanceof PyDescriptor && attribute.cls === propertyClass) return bindValue(attribute, value, cls);
   if (value instanceof PyInstance || value instanceof PyFunction) {
     const own = value.dict.get(name);
     if (own !== undefined) return own;
   }
+  const opaqueOwn = value instanceof PyOpaque ? value.attributes?.get(name) : undefined;
+  if (opaqueOwn !== undefined) return opaqueOwn;
+  if (isNonDataDescriptor(attribute)) return readDescriptor(attribute, value);
   if (attribute === undefined) return undefined;
   return bindValue(attribute, value, cls);
 }

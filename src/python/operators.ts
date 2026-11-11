@@ -159,6 +159,11 @@ function isSequenceLike(value: PyValue): boolean {
 }
 
 /** The result of an operator on builtin operands, or NotImplemented when their types do not define it. */
+/** A binary operator as the builtin types implement it natively, or NotImplemented for operands they do not handle. */
+export function nativeBinaryOperation(operator: BinaryOperator, left: PyValue, right: PyValue): PyValue {
+  return nativeBinary(operator, left, right);
+}
+
 // code-gauge-allow functionCognitiveComplexity 18 -- One case per builtin type that defines binary operators.
 function nativeBinary(operator: BinaryOperator, left: PyValue, right: PyValue): PyValue {
   if (isNumeric(left) && isNumeric(right)) return numericBinary(operator, left, right);

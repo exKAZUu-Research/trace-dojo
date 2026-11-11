@@ -12,7 +12,7 @@ import { pyHash } from './hashing';
 import { keyError } from './items';
 import { importModule } from './modules';
 import { systemExitError } from './modules/sys';
-import { callValue, isTruthy, setAttribute, toArray } from './objects';
+import { bindValue, callValue, isTruthy, lookupSpecial, setAttribute, toArray } from './objects';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
 import { newGenericAlias, unionClass, unionGetItem } from './typeHints';
@@ -20,6 +20,7 @@ import {
   classOf,
   exceptionClassNamed,
   generatorClass,
+  moduleClass,
   newDict,
   newList,
   newTuple,
@@ -44,6 +45,7 @@ import {
   type PyList,
   PyModule,
   PyObject,
+  PyOpaque,
   type PySet,
   PySuper,
   type PyTuple,
@@ -191,6 +193,7 @@ export class Runtime {
     if (generator.finished) return DONE;
     if (generator.running) throw pyError('ValueError', 'generator already executing');
     generator.running = true;
+    generator.started = true;
     try {
       const result = generator.resume();
       if (result.done) {
@@ -263,6 +266,13 @@ export class Runtime {
   // Services for builtins ------------------------------------------------------------------------------------------
 
   readonly none = None;
+  private builtinsModuleValue: PyModule | undefined;
+
+  /** The builtins module, which is the `__self__` of the builtin functions. */
+  builtinsModule(): PyModule {
+    this.builtinsModuleValue ??= new PyModule(moduleClass, 'builtins', this.builtins);
+    return this.builtinsModuleValue;
+  }
   /** The annotations of each class body, evaluated when the program reads `__annotations__` or `@dataclass` does. */
   readonly classAnnotationThunks = new Map<PyClass, [string, () => PyValue][]>();
   private readonly streams = new Map<string, PyValue>();
@@ -383,8 +393,16 @@ export class Runtime {
 
   /** The sorted attribute names `dir()` lists, which AttributeError suggestions choose from. */
   dirNames(value: PyValue): string[] {
-    const names = value instanceof PyModule ? new Set(value.names()) : objectAttributeNames(value);
-    return [...names].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    const custom = value instanceof PyClass ? undefined : lookupSpecial(value, '__dir__');
+    if (custom instanceof PyFunction)
+      return this.toArray(callValue(bindValue(custom, value), []))
+        .map(String)
+        .toSorted(compareNames);
+    const names =
+      value instanceof PyModule
+        ? new Set([...value.names(), ...value.unsupported.keys()])
+        : objectAttributeNames(value);
+    return [...names].toSorted(compareNames);
   }
 
   idOf(value: PyValue): bigint {
@@ -420,20 +438,16 @@ export function isHostStackOverflow(error: unknown): boolean {
   return error instanceof RangeError;
 }
 
-/** The attribute names `dir()` lists for an object other than a module. */
+function compareNames(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** The attribute names `dir()` lists for an object other than a module: its own and its class's, with their bases'. */
 function objectAttributeNames(value: PyValue): Set<string> {
   const names = new Set<string>();
-  const add = (keys: Iterable<string>): void => {
-    for (const name of keys) names.add(name);
-  };
   const cls = value instanceof PyClass ? value : classOf(value);
-  for (const each of cls.mro) add(each.dict.keys());
-  if (value instanceof PyInstance || value instanceof PyFunction) add(value.dict.keys());
-  add(['__class__', '__doc__']);
-  if (value instanceof PyClass || value instanceof PyInstance) add(['__dict__', '__module__']);
-  if (value instanceof PyInstance && value.exception) {
-    add(['args', '__traceback__', '__cause__', '__context__', '__suppress_context__']);
-  }
-  if (value instanceof PyInstance && value.enumValue !== undefined) add(['name', 'value']);
+  for (const each of cls.mro) for (const name of each.dict.keys()) names.add(name);
+  if (value instanceof PyInstance || value instanceof PyFunction) for (const name of value.dict.keys()) names.add(name);
+  if (value instanceof PyOpaque) for (const name of value.attributes?.keys() ?? []) names.add(name);
   return names;
 }

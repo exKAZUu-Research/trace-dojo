@@ -77,6 +77,8 @@ export class PyClass extends PyObject {
   readonly flags: { isEnum?: boolean; isAbstractEnum?: boolean } = {};
   /** The members of an Enum class, in definition order. */
   enumMembers?: PyInstance[];
+  /** Binds an instance of this builtin class read from a class, as its `__get__` would, such as a partial's. */
+  nativeGet?: (self: PyObject, instance: PyValue, owner: PyClass) => PyValue;
   /** Reads the attributes this builtin class's opaque instances have of their own, such as an alias's `__origin__`. */
   opaqueAttribute?: (self: PyOpaque, name: string) => PyValue | undefined;
   /**
@@ -130,6 +132,10 @@ export interface ExceptionState {
   selfValue?: PyValue;
   /** The sub-exceptions of an exception group. */
   exceptions?: PyTuple;
+  /** Whether the exception has been raised, which gives it a traceback. */
+  raised?: boolean;
+  /** The values of the fields some exception types keep, such as StopIteration's value, once assigned. */
+  fields?: Map<string, PyValue>;
   message?: string;
 }
 
@@ -226,8 +232,12 @@ export class PyFunction extends PyObject {
   readonly dict = new Map<string, PyValue>();
   name: string;
   qualifiedName: string;
-  doc: PyValue;
+  /** The docstring, undefined when the function has none. */
+  doc: PyValue | undefined;
   module = '__main__';
+  /** The `__annotate__` and `__type_params__` a program assigned. */
+  annotate?: PyValue;
+  typeParams?: PyValue;
 
   // code-gauge-allow functionParameterCount 7 -- Each function field is set once at creation.
   constructor(
@@ -244,7 +254,7 @@ export class PyFunction extends PyObject {
     super(cls);
     this.name = def.name;
     this.qualifiedName = def.qualifiedName;
-    this.doc = def.doc ?? '';
+    this.doc = def.doc;
   }
 }
 
@@ -330,6 +340,7 @@ export class PyIterator extends PyObject {
 
 /** A generator object, whose frame runs until its next `yield`. */
 export class PyGenerator extends PyObject {
+  started = false;
   running = false;
   finished = false;
 
@@ -357,6 +368,9 @@ export class PyDictView extends PyObject {
 
 /** An opaque value, such as a `typing` construct, that only supports being subscripted, combined, and shown. */
 export class PyOpaque extends PyObject {
+  /** The attributes of an opaque object that has a `__dict__`, such as an lru_cache wrapper. */
+  attributes?: Map<string, PyValue>;
+
   constructor(
     cls: PyClass,
     readonly text: string,
@@ -381,5 +395,6 @@ export class PyDeque extends PyObject {
 export class PyError extends Error {
   constructor(readonly exception: PyInstance) {
     super('Python exception');
+    if (exception.exception) exception.exception.raised = true;
   }
 }

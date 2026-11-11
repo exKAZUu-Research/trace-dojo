@@ -64,7 +64,7 @@ export function createClass(evaluator: Evaluator, def: ClassDef, frame: Frame): 
   namespace.delete('__qualname__');
   const isLibrary = moduleNameOf(frame) !== '__main__';
   for (const forbidden of FORBIDDEN_CLASS_ATTRIBUTES) {
-    if (namespace.has(forbidden) && !(isLibrary && forbidden === '__class_getitem__')) {
+    if (namespace.has(forbidden) && !(isLibrary && LIBRARY_CLASS_ATTRIBUTES.has(forbidden))) {
       throw new UnsupportedFeatureError(`クラスの ${forbidden} の定義`);
     }
   }
@@ -73,10 +73,27 @@ export function createClass(evaluator: Evaluator, def: ClassDef, frame: Frame): 
   cls.annotationNames = body.annotations.map(([name]) => name);
   runtime.classAnnotationThunks.set(cls, body.annotations);
   classCell.value = cls;
+  setNames(cls);
   if (bases.some((base) => base.flags.isEnum)) createEnumMembers(cls);
   let result: PyValue = cls;
   for (const decorator of decorators.toReversed()) result = callValue(decorator, [result]);
   return result;
+}
+
+/**
+ * The attributes standard library code written in Python may define, whose protocols the interpreter runs for the
+ * classes of that code only: a descriptor's `__get__` and `__set_name__` (as functools.cached_property has) and
+ * `__class_getitem__`.
+ */
+const LIBRARY_CLASS_ATTRIBUTES = new Set(['__class_getitem__', '__get__', '__set_name__']);
+
+/** Calls `__set_name__` of the class attributes that define it, as `type.__new__` does. */
+function setNames(cls: PyClass): void {
+  for (const [name, value] of cls.dict) {
+    if (!(value instanceof PyInstance)) continue;
+    const setName = value.cls.lookup('__set_name__');
+    if (setName !== undefined) callValue(bindValue(setName, value), [cls, name]);
+  }
 }
 
 /** The name of the module whose code runs in a frame: the program's, or a standard library module written in Python. */

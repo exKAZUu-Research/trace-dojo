@@ -7,6 +7,7 @@ import './typeExceptions';
 import './turtle';
 import './enums';
 import './mappingProxy';
+import './builtinAttributes';
 import './modules/math';
 import './modules/sys';
 import './modules/enum';

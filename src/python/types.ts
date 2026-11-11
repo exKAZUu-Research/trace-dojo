@@ -1,4 +1,4 @@
-import { DictStore } from './dictStore';
+import { DictStore, NamespaceDictStore } from './dictStore';
 import { SetTable } from './setTable';
 import {
   type ExceptionState,
@@ -267,6 +267,18 @@ export function newTuple(items: readonly PyValue[]): PyTuple {
 export function newDict(entries: Iterable<[PyValue, PyValue]> = []): PyDict {
   const dict = new PyDict(dictClass, new DictStore());
   for (const [key, value] of entries) dict.store.set(key, value);
+  return dict;
+}
+
+const namespaceDicts = new WeakMap<Map<string, PyValue>, PyDict>();
+
+/** The `__dict__` of an attribute map, one dict per map, which reads and writes the attributes themselves. */
+export function namespaceDict(namespace: Map<string, PyValue>): PyDict {
+  let dict = namespaceDicts.get(namespace);
+  if (!dict) {
+    dict = new PyDict(dictClass, new NamespaceDictStore(namespace));
+    namespaceDicts.set(namespace, dict);
+  }
   return dict;
 }
 

@@ -66,6 +66,13 @@ export function abstractSubclassCheck(
   return abc.subclasses.some((subclass) => isSubclass(cls, subclass));
 }
 
+let invalidationCount = 0;
+
+/** `abc.get_cache_token()`: the number of registrations so far, which singledispatch's cache depends on. */
+export function abcInvalidationCount(): number {
+  return invalidationCount;
+}
+
 /** `ABCMeta.register`, which makes a class a virtual subclass. */
 export function registerVirtualSubclass(
   abc: PyClass,
@@ -76,6 +83,7 @@ export function registerVirtualSubclass(
   if (isSubclass(subclass, abc)) return subclass;
   if (isSubclass(abc, subclass)) throw pyError('RuntimeError', 'Refusing to create an inheritance cycle');
   abc.abc?.registry.push(subclass);
+  invalidationCount++;
   return subclass;
 }
 
