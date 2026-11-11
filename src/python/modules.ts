@@ -61,10 +61,15 @@ export function registerSharedAttributes(name: string, attributes: Record<string
   sharedAttributes.set(name, { ...sharedAttributes.get(name), ...attributes });
 }
 
-const extraAttributes = new Map<string, ((runtime: Runtime) => [string, PyValue][])[]>();
+type ExtraAttributes = (runtime: Runtime, namespace: Map<string, PyValue>) => [string, PyValue][];
 
-/** Adds to a module the attributes `create` makes that CPython's module has and its code here does not define. */
-export function registerExtraAttributes(name: string, create: (runtime: Runtime) => [string, PyValue][]): void {
+const extraAttributes = new Map<string, ExtraAttributes[]>();
+
+/**
+ * Adds to a module the attributes `create` makes that CPython's module has and its code here does not define;
+ * `create` may also define them in the module's namespace itself, as code written in Python does.
+ */
+export function registerExtraAttributes(name: string, create: ExtraAttributes): void {
   extraAttributes.set(name, [...(extraAttributes.get(name) ?? []), create]);
 }
 
@@ -119,11 +124,14 @@ function addRegisteredAttributes(runtime: Runtime, module: PyModule): void {
     if (!dict.has(key)) module.unsupported.set(key, feature);
   }
   for (const [key, target] of Object.entries(sharedAttributes.get(name) ?? {})) {
-    if (!dict.has(key)) module.imports.set(key, target);
+    if (dict.has(key)) continue;
+    module.imports.set(key, target);
+    module.unsupported.delete(key);
   }
   for (const create of extraAttributes.get(name) ?? []) {
-    for (const [key, value] of create(runtime)) if (!dict.has(key)) dict.set(key, value);
+    for (const [key, value] of create(runtime, dict)) if (!dict.has(key)) dict.set(key, value);
   }
+  for (const key of module.unsupported.keys()) if (dict.has(key)) module.unsupported.delete(key);
   const all = moduleAlls.get(name);
   if (all && !dict.has('__all__')) dict.set('__all__', runtime.listOf([...all]));
 }

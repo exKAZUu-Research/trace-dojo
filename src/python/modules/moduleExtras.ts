@@ -18,6 +18,24 @@ registerSharedAttributes('numbers', { ABCMeta: 'abc:ABCMeta', abstractmethod: 'a
 registerSharedAttributes('concurrent.futures', { TimeoutError: 'builtins:TimeoutError' });
 registerSharedAttributes('traceback', { suppress: 'contextlib:suppress' });
 registerSharedAttributes('unittest.mock', { Format: 'annotationlib:Format', fields: 'dataclasses:fields' });
+registerSharedAttributes('statistics', {
+  Counter: 'collections:Counter',
+  Decimal: 'decimal:Decimal',
+  Fraction: 'fractions:Fraction',
+  count: 'itertools:count',
+  defaultdict: 'collections:defaultdict',
+  erfc: 'math:erfc',
+  fabs: 'math:fabs',
+  fsum: 'math:fsum',
+  groupby: 'itertools:groupby',
+  hypot: 'math:hypot',
+  isfinite: 'math:isfinite',
+  isinf: 'math:isinf',
+  itemgetter: 'operator:itemgetter',
+  namedtuple: 'collections:namedtuple',
+  reduce: 'functools:reduce',
+  repeat: 'itertools:repeat',
+});
 registerSharedAttributes('_csv', { Reader: '_csv:_reader_type', Writer: '_csv:_writer_type' });
 
 registerExtraAttributes('io', () => [

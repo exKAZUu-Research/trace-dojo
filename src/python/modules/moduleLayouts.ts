@@ -299,6 +299,9 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     kind: 'package',
     imports: { codecs: 'codecs', decoder: 'json.decoder', encoder: 'json.encoder', scanner: 'json.scanner' },
   },
+  'json.decoder': { kind: 'source', imports: { re: 're', scanner: 'json.scanner' } },
+  'json.encoder': { kind: 'source', imports: { re: 're' } },
+  'json.scanner': { kind: 'source', imports: { re: 're' } },
   keyword: { kind: 'source' },
   logging: {
     kind: 'package',
