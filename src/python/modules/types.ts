@@ -18,6 +18,8 @@ MethodType = _builtin_types['method']
 BuiltinFunctionType = type(len)
 BuiltinMethodType = type([].append)
 MethodDescriptorType = type(str.join)
+WrapperDescriptorType = type(object.__init__)
+MethodWrapperType = type(object().__str__)
 ModuleType = type(sys)
 GeneratorType = _builtin_types['generator']
 CoroutineType = _builtin_types['coroutine']
@@ -28,6 +30,7 @@ FrameType = _builtin_types['frame']
 TracebackType = _builtin_types['traceback']
 EllipsisType = type(Ellipsis)
 NoneType = type(None)
+GenericAlias = type(list[int])
 NotImplementedType = type(NotImplemented)
 GenericAlias = type(list[int])
 UnionType = type(int | str)
@@ -60,6 +63,9 @@ class SimpleNamespace:
         if isinstance(self, SimpleNamespace) and isinstance(other, SimpleNamespace):
             return self.__dict__ == other.__dict__
         return NotImplemented
+
+    def __reduce__(self):
+        return (type(self), (), self.__dict__)
 
     def __replace__(self, /, **changes):
         result = type(self)(**self.__dict__)
@@ -130,6 +136,7 @@ class mappingproxy:
 
 
 MappingProxyType = mappingproxy
+ClassMethodDescriptorType = type(dict.__dict__['fromkeys'])
 
 
 def coroutine(func):
@@ -366,9 +373,6 @@ registerSourceModule(
 );
 
 registerUnsupportedAttributes('types', {
-  WrapperDescriptorType: 'types.WrapperDescriptorType',
-  MethodWrapperType: 'types.MethodWrapperType',
-  ClassMethodDescriptorType: 'types.ClassMethodDescriptorType',
   GetSetDescriptorType: 'types.GetSetDescriptorType',
   MemberDescriptorType: 'types.MemberDescriptorType',
   CapsuleType: 'types.CapsuleType',

@@ -11,7 +11,7 @@ import { PyInstance, type PyValue } from '../values';
 const SOURCE = String.raw`
 import sys
 
-__all__ = ['print_exc', 'format_exception_only', 'print_exception', 'print_stack']
+__all__ = ['print_exc', 'format_exception_only', 'print_exception', 'print_stack', 'clear_frames']
 
 _sentinel = object()
 
@@ -62,6 +62,16 @@ def print_exc(limit=None, file=None, chain=True):
     print_exception(_handled_exception(), limit=limit, file=file, chain=chain)
 
 
+def clear_frames(tb):
+    "Clear all references to local variables in the frames of a traceback."
+    while tb is not None:
+        try:
+            tb.tb_frame.clear()
+        except RuntimeError:
+            pass
+        tb = tb.tb_next
+
+
 def print_stack(f=None, limit=None, file=None):
     _print_lines(['Traceback (most recent call last):\n'], file)
 `;
@@ -105,7 +115,6 @@ registerUnsupportedAttributes('traceback', {
   print_tb: 'トレースバックの情報（traceback.print_tb）',
   print_list: 'トレースバックの情報（traceback.print_list）',
   print_last: 'traceback.print_last',
-  clear_frames: 'traceback.clear_frames',
   TracebackException: 'traceback.TracebackException',
   StackSummary: 'traceback.StackSummary',
   FrameSummary: 'traceback.FrameSummary',

@@ -1,5 +1,6 @@
 import { addressOf, pyRepr } from '../conversions';
 import { builtin, method } from '../define';
+import { builtinClassesWithDict } from '../descriptors';
 import { DictStore } from '../dictStore';
 import { registerModule } from '../modules';
 import { checkArgs } from '../nativeArgs';
@@ -19,9 +20,10 @@ import { builtinClass, newTuple, None, NotImplemented, typeError } from '../type
 import { DONE, type Kwargs, PyBuiltinFunction, PyClass, PyDict, PyOpaque, PyTuple, type PyValue } from '../values';
 import { makeNamedTupleClass } from './collections';
 
-const partialClass = builtinClass('partial');
+export const partialClass = builtinClass('partial');
 partialClass.module = 'functools';
-interface Partial {
+builtinClassesWithDict.add(partialClass);
+export interface Partial {
   fn: PyValue;
   args: PyValue[];
   kwargs: Map<string, PyValue>;

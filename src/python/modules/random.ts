@@ -1,6 +1,5 @@
-import { createHash, randomBytes } from 'node:crypto';
-
 import { builtin } from '../define';
+import { sha512 } from '../hashAlgorithms';
 import { pyHash } from '../hashing';
 import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
@@ -120,15 +119,19 @@ export function keyOf(seed: bigint): number[] {
 }
 
 export function seedOf(value: PyValue | undefined): bigint {
-  if (value === undefined || value === None) return BigInt(`0x${randomBytes(32).toString('hex')}`);
+  if (value === undefined || value === None) return bigintOfBytes(crypto.getRandomValues(new Uint8Array(32)));
   if (typeof value === 'bigint' || typeof value === 'boolean') return BigInt(value);
   if (typeof value === 'string') {
-    const bytes = Buffer.from(value, 'utf8');
-    const digest = createHash('sha512').update(bytes).digest();
-    return BigInt(`0x${Buffer.concat([bytes, digest]).toString('hex')}`);
+    const bytes = new TextEncoder().encode(value);
+    return bigintOfBytes(new Uint8Array([...bytes, ...sha512(bytes)]));
   }
   if (typeof value === 'number') return pyHash(value);
   throw typeError('The only supported seed types are:\nNone, int, float, str, bytes, and bytearray.');
+}
+
+/** The big-endian unsigned integer that bytes encode. */
+function bigintOfBytes(bytes: Uint8Array): bigint {
+  return BigInt(`0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`);
 }
 
 function randrange(generator: MersenneTwister, args: PyValue[]): bigint {

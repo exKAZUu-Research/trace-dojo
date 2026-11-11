@@ -315,7 +315,10 @@ export function suspendingCall(callee: PyValue, args: PyValue[], kwargs: Kwargs)
   if (callee instanceof PyBuiltinFunction) {
     const blocking = blockingNatives.get(callee.run);
     if (!blocking) return undefined;
-    return blocking(callee.self === undefined ? args : [callee.self, ...args], kwargs) as unknown as Suspension;
+    return blocking(
+      callee.self === undefined || callee.binding === 'static' ? args : [callee.self, ...args],
+      kwargs
+    ) as unknown as Suspension;
   }
   if (callee instanceof PyFunction && !callee.def.scope.isGenerator && !callee.def.scope.isAsync) {
     return callFunctionSuspending(callee, args, kwargs);

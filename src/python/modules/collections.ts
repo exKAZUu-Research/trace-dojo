@@ -1,11 +1,11 @@
-// code-gauge-allow-file fileNcss 428 -- The collections types and the methods of each belong together.
+// code-gauge-allow-file fileNcss 440 -- The collections types and the methods of each belong together.
 import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { DictStore } from '../dictStore';
 import { mappingEntries, storeKey } from '../expressionEvaluator';
-import { defineNew } from '../instances';
+import { defineNew, definePythonLevelNew } from '../instances';
 import { keyError } from '../items';
-import { registerModule } from '../modules';
+import { importModule, registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import {
@@ -20,6 +20,7 @@ import {
 } from '../objects';
 import { binaryOp, equals, keysEqual, lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
+import { registerSourceModule } from '../sourceModules';
 import { containerRepr, dictBody, updateDict } from '../typeContainers';
 import {
   builtinClass,
@@ -52,6 +53,7 @@ import {
   PyTuple,
   type PyValue,
 } from '../values';
+import { COLLECTIONS_USER_SOURCE } from './collectionsUserSource';
 
 // deque -------------------------------------------------------------------------------------------------------------
 
@@ -540,11 +542,11 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
   const cls = new PyClass(typename, [tupleClass], typeClass);
   cls.mro = [cls, ...tupleClass.mro];
   cls.isBuiltin = false;
-  cls.module = '__main__';
   cls.layout = { base: 'native' };
+  describeNamedTuple(cls, fields, kwargs);
   cls.construct = (tupleType, values, keywords) => newNamedTuple(tupleType, fields, defaults, values, keywords);
   cls.slotNames = new Set();
-  defineNew(cls, cls.construct);
+  definePythonLevelNew(cls, cls.construct);
   cls.dict.set('_fields', newTuple(fields));
   const defaulted = fields.slice(fields.length - defaults.length);
   cls.dict.set('_field_defaults', newDict(defaulted.map((name, index) => [name, defaults[index]])));
@@ -554,11 +556,24 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
       name,
       new PyDescriptor(
         propertyClass,
-        new PyBuiltinFunction(builtinClass('getter'), name, ([self]) => (self as PyTuple).items[index])
+        new PyBuiltinFunction(builtinClass('getter'), name, ([self]) => (self as PyTuple).items[index]),
+        undefined,
+        undefined,
+        `Alias for field number ${index}`
       )
     );
   }
   return cls;
+}
+
+/**
+ * Gives a namedtuple's class its docstring and its module: the `module` argument, else the module of the code creating
+ * it.
+ */
+function describeNamedTuple(cls: PyClass, fields: string[], kwargs: Kwargs): void {
+  const module = kwargs?.get('module') ?? currentRuntime().frame.globals.get('__name__');
+  cls.module = typeof module === 'string' ? module : '__main__';
+  cls.dict.set('__doc__', `${cls.name}(${fields.join(', ')})`);
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Follows how a namedtuple binds positional and keyword arguments to its fields.
@@ -668,26 +683,31 @@ export function namedTupleClass(name: string, fields: string[], defaults: PyValu
 
 /** A namedtuple class that a library module defines, such as `functools.CacheInfo`. */
 export function makeNamedTupleClass(name: string, fields: string[], module: string): PyClass {
-  const cls = namedtupleWithMethods([name, newList(fields)], undefined) as PyClass;
-  cls.module = module;
-  return cls;
+  return namedtupleWithMethods([name, newList(fields)], new Map([['module', module]])) as PyClass;
 }
 
-registerModule(
-  'collections',
-  () =>
-    new Map<string, PyValue>([
-      ['deque', dequeClass],
-      ['Counter', counterClass],
-      ['defaultdict', defaultdictClass],
-      ['OrderedDict', orderedDictClass],
-      [
-        'namedtuple',
-        builtin('namedtuple', 'takes', 2, 2, namedtupleWithMethods, {
-          keywords: ['typename', 'field_names', 'defaults', 'rename', 'module'],
-        }),
-      ],
-    ])
-);
+registerModule('collections', (runtime, namespace) => {
+  for (const [name, value] of [
+    ['deque', dequeClass],
+    ['Counter', counterClass],
+    ['defaultdict', defaultdictClass],
+    ['OrderedDict', orderedDictClass],
+    [
+      'namedtuple',
+      builtin('namedtuple', 'takes', 2, 2, namedtupleWithMethods, {
+        keywords: ['typename', 'field_names', 'defaults', 'rename', 'module'],
+      }),
+    ],
+  ] as const) {
+    namespace.set(name, value);
+  }
+  // The classes CPython writes in Python import collections.abc, which reads the names above.
+  const written = importModule(runtime, '_collections_user').dict;
+  for (const name of ['ChainMap', 'UserDict', 'UserList', 'UserString'])
+    namespace.set(name, written.get(name) as PyValue);
+  return new Map();
+});
+
+registerSourceModule('_collections_user', COLLECTIONS_USER_SOURCE);
 
 export { getIterator, PyObject, storeKey };

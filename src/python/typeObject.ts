@@ -20,13 +20,14 @@ import {
   nextOf,
   remainingOf,
 } from './objects';
-import { objectState, reduce, reduceEx } from './reduction';
 import { currentRuntime } from './runtimeContext';
 import {
   builtinFunctionClass,
   classmethodClass,
+  classmethodDescriptorClass,
   classOf,
   defineMethod,
+  descriptorOwners,
   ellipsisClass,
   functionClass,
   isIteratorGenerator,
@@ -34,6 +35,7 @@ import {
   iteratorClassSetup,
   methodClass,
   methodDescriptorClass,
+  methodWrapperClass,
   moduleClass,
   newDict,
   newTuple,
@@ -50,6 +52,7 @@ import {
   typeClass,
   typeError,
   typeName,
+  wrapperDescriptorClass,
 } from './types';
 import {
   DONE,
@@ -77,7 +80,7 @@ objectClass.construct = (cls, args, kwargs) => {
 objectClass.dict.set(
   '__init__',
   new PyBuiltinFunction(
-    methodDescriptorClass,
+    wrapperDescriptorClass,
     '__init__',
     ([self, ...args], kwargs) => objectInitImplementation(self, args, kwargs),
     undefined,
@@ -123,13 +126,10 @@ method(objectClass, '__delattr__', 'one', 1, 1, (self, [name]) => {
   return None;
 });
 method(objectClass, '__sizeof__', 'none', 0, 0, () => 16n);
-method(objectClass, '__getstate__', 'none', 0, 0, (self) => objectState(self));
-method(objectClass, '__reduce__', 'none', 0, 0, (self) => reduce(self));
-method(objectClass, '__reduce_ex__', 'one', 1, 1, (self, [protocol]) => reduceEx(self, protocol));
 objectClass.dict.set(
   '__init_subclass__',
   new PyBuiltinFunction(
-    methodDescriptorClass,
+    classmethodDescriptorClass,
     '__init_subclass__',
     ([cls, ...args], kwargs) => {
       const name = `${(cls as PyClass).name}.__init_subclass__`;
@@ -147,7 +147,7 @@ method(objectClass, '__subclasshook__', 'expected', 0, Number.POSITIVE_INFINITY,
 });
 objectClass.dict.set(
   '__new__',
-  new PyBuiltinFunction(builtinFunctionClass, '__new__', objectNewImplementation, undefined, 'static', 'object')
+  new PyBuiltinFunction(builtinFunctionClass, '__new__', objectNewImplementation, objectClass, 'static', 'object')
 );
 method(objectClass, '__dir__', 'none', 0, 0, (self) => currentRuntime().dir(self));
 
@@ -229,20 +229,38 @@ method(builtinFunctionClass, '__repr__', 'none', 0, 0, (self) => {
   const fn = self as PyBuiltinFunction;
   if (fn.self === undefined || (fn.self instanceof PyObject && fn.self.cls === moduleClass))
     return `<built-in function ${fn.name}>`;
-  if (fn.self instanceof PyClass) return `<built-in method ${fn.name} of type object at ${addressOf(fn.self)}>`;
-  return `<built-in method ${fn.name} of ${typeName(fn.self)} object at ${fn.self instanceof PyObject ? addressOf(fn.self) : '0x0'}>`;
+  return `<built-in method ${fn.name} of ${boundObjectText(fn.self)}>`;
 });
-method(builtinFunctionClass, '__eq__', 'one', 1, 1, (self, [other]) => {
-  if (!(other instanceof PyBuiltinFunction)) return NotImplemented;
+method(methodWrapperClass, '__repr__', 'none', 0, 0, (self) => {
   const fn = self as PyBuiltinFunction;
-  return fn === other || (fn.run === other.run && fn.self === other.self);
+  return `<method-wrapper '${fn.name}' of ${boundObjectText(fn.self as PyValue)}>`;
 });
-method(builtinFunctionClass, '__hash__', 'none', 0, 0, (self) => identityHash(self as PyObject));
-method(methodDescriptorClass, '__repr__', 'none', 0, 0, (self) => {
-  const fn = self as PyBuiltinFunction;
-  return `<method '${fn.name}' of '${fn.ownerName}' objects>`;
-});
+for (const cls of [builtinFunctionClass, methodWrapperClass]) {
+  method(cls, '__eq__', 'one', 1, 1, (self, [other]) => {
+    if (!(other instanceof PyBuiltinFunction)) return NotImplemented;
+    const fn = self as PyBuiltinFunction;
+    return fn === other || (fn.run === other.run && fn.self === other.self);
+  });
+  method(cls, '__hash__', 'none', 0, 0, (self) => identityHash(self as PyObject));
+}
+for (const [cls, kind] of [
+  [methodDescriptorClass, 'method'],
+  [classmethodDescriptorClass, 'method'],
+  [wrapperDescriptorClass, 'slot wrapper'],
+] as const) {
+  method(cls, '__repr__', 'none', 0, 0, (self) => {
+    const fn = self as PyBuiltinFunction;
+    const owner = descriptorOwners.get(fn);
+    return `<${kind} '${fn.name}' of '${owner ? (owner.typeName ?? owner.name) : fn.ownerName}' objects>`;
+  });
+}
 method(moduleClass, '__repr__', 'none', 0, 0, (self) => `<module '${(self as PyModule).name}' (built-in)>`);
+
+/** How the repr of a builtin method shows the object it is bound to. */
+function boundObjectText(self: PyValue): string {
+  if (self instanceof PyClass) return `type object at ${addressOf(self)}`;
+  return `${typeName(self)} object at ${self instanceof PyObject ? addressOf(self) : '0x0'}`;
+}
 
 // Generators and iterators ------------------------------------------------------------------------------------------
 

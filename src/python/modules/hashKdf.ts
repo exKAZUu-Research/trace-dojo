@@ -1,4 +1,4 @@
-import { SHA256_IV, SHA256_K } from '../hashAlgorithms';
+import { sha2 } from '../hashAlgorithms';
 import { currentRuntime } from '../runtimeContext';
 
 /** A hash function with the block size HMAC pads its key to. */
@@ -62,7 +62,7 @@ export function pbkdf2(
  */
 function sha256HmacOfDigest(key: Uint8Array): (digest: Uint8Array) => Uint8Array {
   const pad = (byte: number): Int32Array => {
-    const state = Int32Array.from(SHA256_IV);
+    const state = Int32Array.from(sha2().iv256);
     const block = new Int32Array(16);
     for (let index = 0; index < 16; index++) {
       block[index] =
@@ -106,9 +106,10 @@ function sha256HmacOfDigest(key: Uint8Array): (digest: Uint8Array) => Uint8Array
 
 const schedule = new Int32Array(64);
 
-// code-gauge-allow functionNcss 31 -- The SHA-256 compression function as FIPS 180-4 states it.
+// code-gauge-allow functionNcss 32 -- The SHA-256 compression function as FIPS 180-4 states it.
 function sha256Compress(state: Int32Array, block: Int32Array): void {
   const w = schedule;
+  const k = sha2().k256;
   w.set(block);
   for (let index = 16; index < 64; index++) {
     const a = w[index - 15];
@@ -120,7 +121,7 @@ function sha256Compress(state: Int32Array, block: Int32Array): void {
   let [a, b, c, d, e, f, g, h] = state;
   for (let index = 0; index < 64; index++) {
     const s1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
-    const t1 = (h + s1 + ((e & f) ^ (~e & g)) + SHA256_K[index] + w[index]) >>> 0;
+    const t1 = (h + s1 + ((e & f) ^ (~e & g)) + k[index] + w[index]) >>> 0;
     const s0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
     const t2 = (s0 + ((a & b) ^ (a & c) ^ (b & c))) >>> 0;
     h = g;

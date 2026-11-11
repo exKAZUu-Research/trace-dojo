@@ -7,6 +7,7 @@ import { blockOf } from '../programSource';
 import { currentRuntime } from '../runtimeContext';
 import { codeClass, codeObject, frameClass, infoOf, PyTraceback } from '../tracebacks';
 import { exceptionClassNamed, newException, newTuple, typeError, typeName } from '../types';
+import { isUnavailable } from '../unavailableValues';
 import { UnsupportedFeatureError } from '../unsupported';
 import { PyBoundMethod, PyClass, PyError, PyFunction, PyModule, PyOpaque, type PyValue } from '../values';
 
@@ -17,6 +18,8 @@ import { PyBoundMethod, PyClass, PyError, PyFunction, PyModule, PyOpaque, type P
 export function inspectSourceNatives(): [string, PyValue][] {
   return [
     ['_findsource', builtin('_findsource', 'one', 1, 1, ([value]) => findSource(value))],
+    // A value this grader cannot give stands for something CPython wraps nothing in.
+    ['_is_unavailable', builtin('_is_unavailable', 'one', 1, 1, ([value]) => isUnavailable(value))],
     [
       '_getblock',
       builtin('_getblock', 'one', 1, 1, ([lines]) => {

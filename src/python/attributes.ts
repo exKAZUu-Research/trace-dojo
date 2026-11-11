@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 443 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 508 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import {
   classAnnotate,
   classAnnotations,
@@ -8,9 +8,9 @@ import {
   setClassAnnotations,
   setFunctionAnnotationAttribute,
 } from './annotations';
-import { AttributeStore } from './attributeStore';
 import { solidBase } from './classes';
 import {
+  builtinClassesWithDict,
   callGetter,
   callSetter,
   descriptorGetter,
@@ -21,15 +21,20 @@ import {
 import { enumClassData } from './enums';
 import type { Frame } from './frame';
 import { delegateOf } from './generators';
-import { namespaceDict } from './namespaces';
+import { hasPythonLevelNew } from './instances';
+import { builtinFunctionModule } from './modules';
+import { namespaceDict, namespaceOf } from './namespaces';
 import { attributeError, bindValue, callValue, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { deleteMember, instancesHaveDict, isMember, writeMember } from './slots';
 import { codeObject, frameObject, functionCode, setTraceback } from './tracebacks';
+import { typeFlags } from './typeFlags';
 import {
+  builtinFunctionClass,
   classmethodClass,
   classOf,
-  dictClass,
+  descriptorOwners,
+  isNativeMethod,
   newDict,
   newTuple,
   None,
@@ -97,6 +102,7 @@ function isMetaDataDescriptor(attribute: PyValue): boolean {
   return (attribute instanceof PyDescriptor && attribute.cls === propertyClass) || isDataDescriptor(attribute);
 }
 
+// code-gauge-allow functionNcss 31 -- One case per attribute a class keeps outside its dictionary.
 function typeData(cls: PyClass, name: string): PyValue | undefined {
   switch (name) {
     case '__name__': {
@@ -107,6 +113,9 @@ function typeData(cls: PyClass, name: string): PyValue | undefined {
     }
     case '__module__': {
       return cls.module;
+    }
+    case '__flags__': {
+      return BigInt(typeFlags(cls));
     }
     case '__doc__': {
       return cls.isBuiltin ? (cls.doc ?? None) : (cls.dict.get('__doc__') ?? None);
@@ -127,7 +136,9 @@ function typeData(cls: PyClass, name: string): PyValue | undefined {
       return cls.cls;
     }
     case '__dict__': {
-      return newDict(cls.dict.entries());
+      // A read-only view of the class's own namespace, as CPython's mappingproxy.
+      const types = currentRuntime().importModule('types');
+      return callValue(types.dict.get('MappingProxyType') as PyValue, [namespaceDict(cls.dict)]);
     }
     case '__annotations__': {
       return cls.isBuiltin ? undefined : classAnnotations(cls);
@@ -148,6 +159,8 @@ export function specialAttribute(value: PyValue, name: string): PyValue | undefi
   if (typeof value === 'bigint' || typeof value === 'boolean') return integerAttribute(BigInt(value), name);
   if (typeof value === 'number') return realPartAttribute(value, 0, name);
   if (typeof value === 'string') return undefined;
+  // No other kind of object checked below is a PyInstance.
+  if (value instanceof PyInstance) return instanceAttribute(value, name);
   if (value instanceof PyComplex) return realPartAttribute(value.real, value.imag, name);
   if (value instanceof PyFunction) return functionAttribute(value, name);
   if (value instanceof PyBoundMethod) return boundMethodAttribute(value, name);
@@ -158,23 +171,29 @@ export function specialAttribute(value: PyValue, name: string): PyValue | undefi
   }
   if (value instanceof PyGenerator) return generatorAttribute(value, name);
   if (value instanceof PyDescriptor) return wrappedFunction(value, name);
-  if (value instanceof PyInstance) return instanceAttribute(value, name);
   if (name === '__dict__' && value instanceof PyObject && !value.cls.isBuiltin) return dictAttribute(value);
   return undefined;
 }
 
 /** The function a staticmethod or classmethod wraps, as its `__func__` and `__wrapped__` give it. */
 function wrappedFunction(descriptor: PyDescriptor, name: string): PyValue | undefined {
+  if (name === '__doc__' && descriptor.cls === propertyClass) return propertyDoc(descriptor);
   if (name !== '__func__' && name !== '__wrapped__') return undefined;
   return descriptor.cls.isSubclassOf(staticmethodClass) || descriptor.cls.isSubclassOf(classmethodClass)
     ? descriptor.fn
     : undefined;
 }
 
+/** A property's `__doc__`: the one it was given or assigned, else its getter's. */
+function propertyDoc(property: PyDescriptor): PyValue {
+  if (property.doc !== undefined && property.doc !== None) return property.doc;
+  return property.fn === None ? None : (specialAttribute(property.fn, '__doc__') ?? None);
+}
+
 /** The `__dict__` of an object, or undefined for one whose class gives its instances none. */
 function dictAttribute(value: PyObject): PyValue | undefined {
   const dict = ownDict(value);
-  return dict === undefined ? undefined : new PyDict(dictClass, new AttributeStore(dict));
+  return dict === undefined ? undefined : namespaceDict(dict);
 }
 
 function integerAttribute(integer: bigint, name: string): PyValue | undefined {
@@ -196,15 +215,32 @@ function boundMethodAttribute(method: PyBoundMethod, name: string): PyValue | un
   if (name === '__name__' || name === '__qualname__' || name === '__doc__' || name === '__module__') {
     return specialAttribute(method.fn, name);
   }
+  // As CPython's method_getattro does, a method reads the other attributes of its function.
+  if (method.fn instanceof PyFunction) return method.fn.dict.get(name) ?? specialAttribute(method.fn, name);
   return undefined;
 }
 
 function builtinFunctionAttribute(fn: PyBuiltinFunction, name: string): PyValue | undefined {
   if (name === '__name__') return fn.name;
   if (name === '__qualname__') return fn.qualifiedName;
-  if (name === '__self__') return fn.self ?? None;
+  if (name === '__self__') {
+    // A static method such as `str.maketrans` shows its type in its repr but has no `__self__`, unlike `__new__`.
+    if (fn.binding === 'static' && fn.name !== '__new__') return None;
+    if (fn.self instanceof PyClass && hasPythonLevelNew(fn.self)) return None;
+    return fn.self ?? (fn.cls === builtinFunctionClass ? moduleOf(fn) : undefined);
+  }
+  if (name === '__objclass__') return descriptorOwners.get(fn);
   if (name === '__doc__') return None;
+  if (name === '__module__') return builtinFunctionModule(currentRuntime(), fn) ?? None;
   return undefined;
+}
+
+/** The module a builtin function without a bound object belongs to, which its `__self__` gives. */
+function moduleOf(fn: PyBuiltinFunction): PyValue {
+  const runtime = currentRuntime();
+  if (runtime.builtins.get(fn.name) === fn) return runtime.importModule('builtins');
+  for (const module of runtime.modules.values()) if (module.dict.get(fn.name) === fn) return module;
+  return None;
 }
 
 /** The prefix of the attributes of each kind of generator object, such as `cr_running` of a coroutine. */
@@ -260,7 +296,7 @@ function functionAttribute(fn: PyFunction, name: string): PyValue | undefined {
       return functionAnnotate(fn);
     }
     case '__dict__': {
-      return new PyDict(dictClass, new AttributeStore(fn.dict));
+      return namespaceDict(fn.dict);
     }
     default: {
       return undefined;
@@ -324,17 +360,31 @@ function exceptionFieldOf(instance: PyInstance, name: string): PyValue | undefin
     if (name === 'name') return state.name ?? None;
     return state.object ?? None;
   }
-  if (is('OSError') && (name === 'errno' || name === 'strerror' || name === 'filename')) {
-    if (args.length >= 2 && name !== 'filename') return name === 'errno' ? args[0] : args[1];
-    return None;
+  return is('OSError') ? osErrorField(state, name) : undefined;
+}
+
+/** The fields an OSError derives from the arguments it was created with, as `OSError(errno, strerror, filename)`. */
+function osErrorField(state: ExceptionState, name: string): PyValue | undefined {
+  const args = state.args.items;
+  if (name === 'errno' || name === 'strerror') {
+    return args.length >= 2 && args.length <= 5 ? args[name === 'errno' ? 0 : 1] : None;
   }
+  if (name === 'filename') return state.filename ?? None;
+  if (name === 'filename2') return state.filename2 ?? None;
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows the order object.__setattr__ tries data descriptors, special stores, and the instance dict in.
+function setFunctionAttribute(fn: PyFunction, name: string, value: PyValue): void {
+  if (name === '__annotations__' || name === '__annotate__') setFunctionAnnotationAttribute(fn, name, value);
+  else if (name === '__name__' && typeof value === 'string') fn.name = value;
+  else if (name === '__qualname__' && typeof value === 'string') fn.qualifiedName = value;
+  else if (name === '__module__') fn.module = value;
+  else fn.dict.set(name, value);
+}
+
 export function setAttribute(target: PyValue, name: string, value: PyValue): void {
   currentRuntime().spend();
-  if (target instanceof PyInstance || isSubclassInstance(target)) {
+  if (takesInstanceAttributes(target)) {
     const custom = userHook(target as PyObject, '__setattr__');
     if (custom === undefined) setInstanceAttribute(target as PyObject, name, value);
     else callValue(bindValue(custom, target), [name, value]);
@@ -345,17 +395,27 @@ export function setAttribute(target: PyValue, name: string, value: PyValue): voi
     return;
   }
   if (target instanceof PyFunction) {
-    if (name === '__annotations__' || name === '__annotate__') setFunctionAnnotationAttribute(target, name, value);
-    else if (name === '__name__' && typeof value === 'string') target.name = value;
-    else if (name === '__qualname__' && typeof value === 'string') target.qualifiedName = value;
-    else target.dict.set(name, value);
+    setFunctionAttribute(target, name, value);
     return;
   }
   if (target instanceof PyModule) {
     target.dict.set(name, value);
     return;
   }
+  if (target instanceof PyDescriptor && target.cls === propertyClass && name === '__doc__') {
+    target.doc = value;
+    return;
+  }
   throw readOnlyError(target, name);
+}
+
+/** Whether assigning an attribute of `target` follows the rules of instances, as opposed to classes or modules. */
+function takesInstanceAttributes(target: PyValue): boolean {
+  return (
+    target instanceof PyInstance ||
+    isSubclassInstance(target) ||
+    (target instanceof PyObject && builtinClassesWithDict.has(target.cls))
+  );
 }
 
 /** The AttributeError for assigning to an attribute of an object of a builtin type, which has no `__dict__`. */
@@ -380,9 +440,10 @@ function readOnlyError(target: PyValue, name: string): Error {
 function userHook(target: PyObject, name: string): PyValue | undefined {
   const custom = lookupSpecial(target, name);
   // Builtin classes implement these hooks natively, except for those whose slot is not a method descriptor.
-  return custom instanceof PyBuiltinFunction && classOf(custom).name === 'method_descriptor' ? undefined : custom;
+  return isNativeMethod(custom) ? undefined : custom;
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Follows the order type.__setattr__ checks the special attributes of a class in.
 function setClassAttribute(target: PyClass, name: string, value: PyValue): void {
   if (target.isBuiltin) throw typeError(`cannot set '${name}' attribute of immutable type '${target.name}'`);
   if (setClassAttributeThroughMeta(target, name, value)) return;
@@ -390,6 +451,15 @@ function setClassAttribute(target: PyClass, name: string, value: PyValue): void 
   if (target.enumMembers?.some((member) => member.dict.get('_name_') === name)) {
     throw pyError('AttributeError', `cannot reassign member '${name}'`);
   }
+  if (name === '__name__' || name === '__qualname__') {
+    if (typeof value !== 'string') {
+      throw typeError(`can only assign string to ${target.name}.${name}, not '${typeName(value)}'`);
+    }
+    if (name === '__name__') (target as { name: string }).name = value;
+    else target.qualifiedName = value;
+    return;
+  }
+  if (name === '__module__' && typeof value === 'string') target.module = value;
   if (name === '__annotations__') setClassAnnotations(target, value);
   else if (name === '__annotate__') setClassAnnotate(target, value);
   else target.dict.set(name, value);
@@ -461,6 +531,10 @@ export function setInstanceAttribute(target: PyObject, name: string, value: PyVa
     setClassOf(target, value);
     return;
   }
+  if (name === '__dict__' && ownDict(target) !== undefined) {
+    replaceDict(target, value);
+    return;
+  }
   const attribute = target.cls.lookup(name);
   if (attribute instanceof PyDescriptor && attribute.cls === propertyClass) {
     setProperty(attribute, target, name, value);
@@ -478,6 +552,16 @@ export function setInstanceAttribute(target: PyObject, name: string, value: PyVa
   const dict = ownDict(target);
   if (dict === undefined) throw noDictError(target, name, attribute);
   dict.set(name, value);
+}
+
+/** Assigns `__dict__`, which makes the dict itself hold the object's attributes from then on. */
+function replaceDict(target: PyObject, value: PyValue): void {
+  if (!(value instanceof PyDict)) {
+    throw typeError(`__dict__ must be set to a dictionary, not a '${typeName(value)}'`);
+  }
+  const namespace = namespaceOf(value);
+  if (target instanceof PyInstance) target.dict = namespace;
+  else target.instanceDict = namespace;
 }
 
 /** Stores an attribute of a PyInstance once no descriptor took it, checking what its builtin class allows. */

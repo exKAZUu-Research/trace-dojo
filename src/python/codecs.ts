@@ -1,10 +1,13 @@
-import { bytesLikeData, newBytes } from './bytesValues';
+import { bytesLikeData, newBytes, PyBytes } from './bytesValues';
 import { CODEC_ALIASES, NON_TEXT_CODECS } from './data/codecNames';
+import { toIndex } from './numbers';
+import { callValue, getAttribute, getAttributeOrUndefined } from './objects';
+import type { Runtime } from './runtime';
 import { currentRuntime } from './runtimeContext';
 import { exceptionClassNamed, newException, typeError, typeName, unbox } from './types';
 import { characterName } from './unicodeDatabase';
 import { escapePoint, unicodeException } from './unicodeErrors';
-import { PyError, type PyValue } from './values';
+import { PyError, PyTuple, type PyValue } from './values';
 
 /** How a codec converts between code points and bytes, with the name its errors give. */
 export interface TextCodec {
@@ -73,7 +76,11 @@ export function decodeObject(
 
 export function lookupCodec(encoding: string, direction: 'encode' | 'decode'): TextCodec {
   const module = codecModule(encoding);
-  if (module === undefined) throw lookupError(`unknown encoding: ${encoding}`);
+  if (module === undefined) {
+    const info = registeredCodecLookup?.(encoding);
+    if (info === undefined) throw lookupError(`unknown encoding: ${encoding}`);
+    return registeredTextCodec(info, encoding, direction);
+  }
   if (NON_TEXT_CODECS.has(module)) {
     throw lookupError(`'${encoding}' is not a text encoding; use codecs.${direction}() to handle arbitrary codecs`);
   }
@@ -87,6 +94,71 @@ export function lookupCodec(encoding: string, direction: 'encode' | 'decode'): T
   return codec;
 }
 
+/** Whether this grader implements the text codec of a codec module, such as `utf_8`. */
+export function hasTextCodec(module: string): boolean {
+  return codecFactories.has(module);
+}
+
+/** Finds the CodecInfo of an encoding through the search functions a program registered with `codecs.register`. */
+let registeredCodecLookup: ((encoding: string) => PyValue | undefined) | undefined;
+
+export function setRegisteredCodecLookup(lookup: (encoding: string) => PyValue | undefined): void {
+  registeredCodecLookup = lookup;
+}
+
+/** A text codec that calls the functions of a CodecInfo from a registered search function. */
+function registeredTextCodec(info: PyValue, encoding: string, direction: 'encode' | 'decode'): TextCodec {
+  const field = (name: 'encode' | 'decode'): PyValue =>
+    info instanceof PyTuple ? info.items[name === 'encode' ? 0 : 1] : getAttribute(info, name);
+  if (!(info instanceof PyTuple) && getAttributeOrUndefined(info, '_is_text_encoding') === false) {
+    throw lookupError(`'${encoding}' is not a text encoding; use codecs.${direction}() to handle arbitrary codecs`);
+  }
+  const call = (name: 'encode' | 'decode', input: PyValue, errors: ErrorHandling): PyValue => {
+    const result = callValue(field(name), [input, errors.name]);
+    if (!(result instanceof PyTuple) || result.items.length !== 2) {
+      throw typeError(`${name}r must return a tuple (object, integer)`);
+    }
+    return result.items[0];
+  };
+  return {
+    name: encoding,
+    encode: (points, errors) => {
+      const result = call('encode', String.fromCodePoint(...points), errors);
+      if (!(result instanceof PyBytes)) {
+        throw typeError(
+          `'${encoding}' encoder returned '${typeName(result)}' instead of 'bytes'; use codecs.encode() to encode to arbitrary types`
+        );
+      }
+      return result.data;
+    },
+    decode: (data, errors) => {
+      const result = call('decode', newBytes(new Uint8Array(data)), errors);
+      if (typeof result !== 'string') {
+        throw typeError(
+          `'${encoding}' decoder returned '${typeName(result)}' instead of 'str'; use codecs.decode() to decode to arbitrary types`
+        );
+      }
+      return result;
+    },
+  };
+}
+
+/** The error handlers each run registered with `codecs.register_error`, by name. */
+const customErrorHandlers = new WeakMap<Runtime, Map<string, PyValue>>();
+
+export function registerErrorHandler(runtime: Runtime, name: string, handler: PyValue): void {
+  let handlers = customErrorHandlers.get(runtime);
+  if (!handlers) {
+    handlers = new Map();
+    customErrorHandlers.set(runtime, handlers);
+  }
+  handlers.set(name, handler);
+}
+
+export function customErrorHandler(runtime: Runtime, name: string): PyValue | undefined {
+  return customErrorHandlers.get(runtime)?.get(name);
+}
+
 let aliasTable: Map<string, string> | undefined;
 
 /** The codec module an encoding name stands for, or undefined for an unknown one. */
@@ -95,7 +167,7 @@ export function codecModuleOf(encoding: string): string | undefined {
 }
 
 /** The codec module an encoding name stands for, found as CPython's encodings.search_function finds it. */
-function codecModule(encoding: string): string | undefined {
+export function codecModule(encoding: string): string | undefined {
   if (!aliasTable) {
     aliasTable = new Map();
     for (const [module, aliases] of Object.entries(CODEC_ALIASES)) {
@@ -208,9 +280,44 @@ export class ErrorHandling {
         return { bytes: points.flatMap((point) => passSurrogate(point)) };
       }
       default: {
-        throw unknownHandler(this.name);
+        return this.customEncodeError(start, end, reason);
       }
     }
+  }
+
+  /** The replacement a handler from `codecs.register_error` gives, which must resume where the error ends. */
+  private customEncodeError(start: number, end: number, reason: string): EncodeReplacement {
+    const [replacement, position] = this.callCustomHandler(
+      this.encodeException(start, end, reason),
+      'encoding error handler must return (str/bytes, int) tuple',
+      (value) => typeof value === 'string' || value instanceof PyBytes
+    );
+    if (position !== end) {
+      throw currentRuntime().unsupported('エラーの終わり以外から再開する独自のエラーハンドラ（codecs.register_error）');
+    }
+    return typeof replacement === 'string' ? { text: replacement } : { bytes: [...(replacement as PyBytes).data] };
+  }
+
+  private callCustomHandler(
+    error: PyError,
+    message: string,
+    isReplacement: (value: PyValue) => boolean
+  ): [PyValue, number] {
+    const handler = customErrorHandler(currentRuntime(), this.name);
+    if (handler === undefined) throw unknownHandler(this.name);
+    const result = callValue(handler, [error.exception]);
+    if (!(result instanceof PyTuple) || result.items.length !== 2 || !isReplacement(result.items[0])) {
+      throw typeError(message);
+    }
+    const length = typeof this.object === 'string' ? this.points.length : this.object.length;
+    const requested = toIndex(result.items[1]);
+    const position = Number(requested) + (requested < 0n ? length : 0);
+    if (position < 0 || position > length) {
+      throw new PyError(
+        newException(exceptionClassNamed('IndexError'), [`position ${requested} from error handler out of bounds`])
+      );
+    }
+    return [result.items[0], position];
   }
 
   /**
@@ -262,9 +369,19 @@ export class ErrorHandling {
         throw typeError("don't know how to handle UnicodeDecodeError in error callback");
       }
       default: {
-        throw unknownHandler(this.name);
+        return this.customDecodeError(start, end, reason);
       }
     }
+  }
+
+  /** The text and the position to resume at that a handler from `codecs.register_error` gives. */
+  private customDecodeError(start: number, end: number, reason: string): { text: string; resume: number } {
+    const [text, resume] = this.callCustomHandler(
+      this.decodeException(start, end, reason),
+      'decoding error handler must return (str, int) tuple',
+      (value) => typeof value === 'string'
+    );
+    return { text: text as string, resume };
   }
 
   /** The UnicodeEncodeError for the characters from `start` up to `end`. */

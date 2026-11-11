@@ -149,6 +149,8 @@ export type ClassAnnotations = Annotation[];
 /** The state of an exception that the `BaseException` layout adds to instances. */
 export interface ExceptionState {
   args: PyTuple;
+  /** The frames of the functions the exception left, whose variables its traceback keeps alive. */
+  tracebackFrames?: { readonly locals: Map<string, PyValue>; readonly cells: Map<string, PyCell> }[];
   notes?: PyList;
   cause?: PyValue;
   context?: PyValue;
@@ -165,12 +167,16 @@ export interface ExceptionState {
   exceptions?: PyTuple;
   /** The traceback object of the frames the exception passed through, or None. */
   traceback?: PyValue;
+  /** The file names an OSError was created with, which its `args` then leave out. */
+  filename?: PyValue;
+  filename2?: PyValue;
   message?: string;
 }
 
 /** An instance of a class written in the program, or of a builtin class with instance attributes. */
 export class PyInstance extends PyObject {
-  readonly dict = new Map<string, PyValue>();
+  /** The instance's attributes, which assigning `__dict__` replaces. */
+  dict = new Map<string, PyValue>();
   exception?: ExceptionState;
   turtle?: TurtleState;
   /** The value of an Enum member. */
@@ -324,7 +330,8 @@ export class PyDescriptor extends PyObject {
     readonly fn: PyValue,
     readonly setter?: PyValue,
     readonly deleter?: PyValue,
-    readonly doc?: PyValue
+    /** A property's `__doc__`, which programs may assign, as namedtuple does for its fields. */
+    public doc?: PyValue
   ) {
     super(cls);
   }

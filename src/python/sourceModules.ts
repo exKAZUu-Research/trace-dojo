@@ -29,7 +29,7 @@ export function registerSourceModule(
       parsed ??= parseSourceModule(source, blocks);
       namespace.set('__doc__', None);
       for (const [key, value] of [...commonNatives(runtime), ...natives(runtime)]) namespace.set(key, value);
-      runtime.libraryNamespaces.add(namespace);
+      runtime.addLibraryNamespace(namespace);
       const frame = new Frame('module', namespace, new Map(), namespace, undefined, false, parsed.scope);
       runtime.pushFrame(frame);
       try {

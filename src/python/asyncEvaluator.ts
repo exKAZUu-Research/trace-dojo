@@ -24,7 +24,6 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
 
   // code-gauge-allow functionCognitiveComplexity 19 -- Follows the protocol of the async for loop, finalizing an async generator it leaves.
   // code-gauge-allow functionNcss 32 -- Follows the protocol of the async for loop.
-  // code-gauge-allow duplicateLines 30 -- Mirrors the for loop, whose items come from `__next__` instead of an awaited `__anext__`.
   /** `async for`: awaits the async iterator's `__anext__` for each item until it raises StopAsyncIteration. */
   protected *asyncForStatement(statement: Extract<Statement, { kind: 'for' }>, frame: Frame): Execution {
     const { runtime } = this;
@@ -61,7 +60,7 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
       throw error;
     } finally {
       frame.temporaries.length = length;
-      if (runtime.finalizer.mayRelease(iterator)) runtime.finalizer.closeUnreachable([leaving]);
+      runtime.finalizer.release([iterator], [leaving]);
     }
     return yield* this.block(statement.orelse, frame);
   }

@@ -32,12 +32,16 @@ export function callSetter(attribute: PyValue, instance: PyValue, value: PyValue
   return true;
 }
 
+/** The builtin classes whose instances take attributes all the same, as `functools.partial` objects do. */
+export const builtinClassesWithDict = new Set<PyClass>();
+
 /** The dictionary of an object's own attributes, or undefined for an object without one. */
 export function ownDict(value: PyValue): Map<string, PyValue> | undefined {
   if (value instanceof PyInstance) return value.cls.slotNames === undefined ? value.dict : undefined;
   if (typeof value !== 'object') return undefined;
   if (value instanceof PyFunction) return value.dict;
-  if (!(value instanceof PyObject) || value.cls.isBuiltin || !instancesHaveDict(value.cls)) return undefined;
+  if (!(value instanceof PyObject)) return undefined;
+  if (value.cls.isBuiltin ? !builtinClassesWithDict.has(value.cls) : !instancesHaveDict(value.cls)) return undefined;
   value.instanceDict ??= new Map();
   return value.instanceDict;
 }

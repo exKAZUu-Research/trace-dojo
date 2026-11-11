@@ -9,6 +9,7 @@ import { builtin } from '../define';
 import { callValue, getAttribute, getAttributeOrUndefined, isTruthy } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
+import { IS_ABSTRACT, typeFlags } from '../typeFlags';
 import { builtinFunctionClass, classOf, generatorClass, None, typeError } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
 import { PyBoundMethod, PyBuiltinFunction, PyClass, PyFunction, PyGenerator, PyModule, type PyValue } from '../values';
@@ -31,10 +32,11 @@ const PREDICATES: [string, (value: PyValue) => boolean][] = [
   ['isawaitable', isAwaitable],
   ['isbuiltin', (value) => isBuiltin(value)],
   ['ismethoddescriptor', (value) => isMethodDescriptor(value)],
+  // ABCMeta records `__abstractmethods__` once it creates a class, which sets the class's abstract flag.
+  ['isabstract', (value) => value instanceof PyClass && (typeFlags(value) & IS_ABSTRACT) !== 0],
   [
     'isroutine',
-    (value) =>
-      isBuiltin(value) || value instanceof PyFunction || value instanceof PyBoundMethod || isMethodDescriptor(value),
+    (value) => value instanceof PyBuiltinFunction || value instanceof PyFunction || value instanceof PyBoundMethod,
   ],
 ];
 
@@ -84,11 +86,11 @@ function isGeneratorFunction(value: PyValue): boolean {
 
 /** A builtin function, or a builtin method bound to an object, which CPython makes `builtin_function_or_method`. */
 function isBuiltin(value: PyValue): boolean {
-  return value instanceof PyBuiltinFunction && (value.cls === builtinFunctionClass || value.self !== undefined);
+  return value instanceof PyBuiltinFunction && value.cls === builtinFunctionClass;
 }
 
 function isMethodDescriptor(value: PyValue): boolean {
-  return value instanceof PyBuiltinFunction && !isBuiltin(value);
+  return value instanceof PyBuiltinFunction && value.self === undefined && value.cls !== builtinFunctionClass;
 }
 
 /** `inspect.getmembers`: the attributes `dir()` lists, with their values, sorted by name. */

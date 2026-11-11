@@ -407,13 +407,19 @@ defineSlot(decimalClass, 'as_integer_ratio', (self) => {
   return newTuple(asIntegerRatio(value));
 });
 
-const decimalTupleClass = makeNamedTupleClass('DecimalTuple', ['sign', 'digits', 'exponent'], 'decimal');
+let decimalTupleClass: PyClass | undefined;
+
+/** `decimal.DecimalTuple`, created when a program first imports decimal or calls `as_tuple()`. */
+function decimalTuple(): PyClass {
+  decimalTupleClass ??= makeNamedTupleClass('DecimalTuple', ['sign', 'digits', 'exponent'], 'decimal');
+  return decimalTupleClass;
+}
 
 defineSlot(decimalClass, 'as_tuple', (self) => {
   const value = valueOf(self);
   const digits = value.exp === 'F' ? [0n] : value.int.split('').map(BigInt);
   const exponent = typeof value.exp === 'number' ? BigInt(value.exp) : value.exp;
-  return callValue(decimalTupleClass, [BigInt(value.sign), newTuple(digits), exponent]);
+  return callValue(decimalTuple(), [BigInt(value.sign), newTuple(digits), exponent]);
 });
 
 for (const [name, binding] of [
@@ -583,7 +589,7 @@ registerModule('decimal', () => {
   const namespace = new Map<string, PyValue>([
     ['Decimal', decimalClass],
     ['Context', contextClass],
-    ['DecimalTuple', decimalTupleClass],
+    ['DecimalTuple', decimalTuple()],
     ['getcontext', builtin('getcontext', 'none', 0, 0, () => getContext())],
     [
       'setcontext',

@@ -15,14 +15,13 @@ import { parseDynamicCode } from './parse';
 import { localVariables, programFrames } from './reflection';
 import type { Runtime } from './runtime';
 import { currentRuntime } from './runtimeContext';
-import { blocksOf } from './suspension';
 import { codeClass, type CodeInfo, hasCode, noteUnwinding, registerCode } from './tracebacks';
 import { dictClass, exceptionClassNamed, newException, None, typeError, typeName, valueError } from './types';
 import { unavailableValue } from './unavailableValues';
 import { UnsupportedFeatureError } from './unsupported';
 import { type Kwargs, type PyClass, PyDict, PyError, PyInstance, PyOpaque, type PyValue } from './values';
 
-type Mode = 'exec' | 'eval' | 'single';
+export type Mode = 'exec' | 'eval' | 'single';
 
 interface Code {
   module: Module;
@@ -68,6 +67,7 @@ function compiledOf(value: PyOpaque): Code | undefined {
 export const COMPILE_KEYWORDS = ['source', 'filename', 'mode', 'flags', 'dont_inherit', 'optimize', '_feature_version'];
 
 /** `compile(source, filename, mode, flags=0, dont_inherit=False, optimize=-1)`. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Checks the arguments in the order CPython reports their errors in.
 export function compile(args: PyValue[], kwargs: Kwargs): PyValue {
   const [source, filename, mode, flags, dontInherit] = COMPILE_KEYWORDS.map((name, index) =>
     argument(args, kwargs, index, name)
@@ -77,7 +77,9 @@ export function compile(args: PyValue[], kwargs: Kwargs): PyValue {
       throw typeError(`compile() missing required argument '${COMPILE_KEYWORDS[index]}' (pos ${index + 1})`);
     }
   }
-  const text = sourceText(source as PyValue);
+  const tree = astSupport?.isTree(source as PyValue) ? (source as PyValue) : undefined;
+  if (tree !== undefined && onlyAst(flags)) return tree;
+  const text = tree === undefined ? sourceText(source as PyValue) : astSupport?.unparse(tree);
   if (typeof text !== 'string') throw typeError('compile() arg 1 must be a string, bytes or AST object');
   if (typeof filename !== 'string') {
     throw typeError(`expected str, bytes or os.PathLike object, not ${typeName(filename as PyValue)}`);
@@ -87,9 +89,36 @@ export function compile(args: PyValue[], kwargs: Kwargs): PyValue {
   if (mode !== 'exec' && mode !== 'eval' && mode !== 'single') {
     throw valueError("compile() mode must be 'exec', 'eval' or 'single'");
   }
+  if (onlyAst(flags) && astSupport) return parseTree(astSupport, text, mode, filename);
   const features = flagFeatures(flags);
   if (dontInherit === undefined || !isTruthy(dontInherit)) features.push(...inheritedFeatures());
   return newCode(compileCode(text, mode, filename, features));
+}
+
+/** The tree `ast.parse` gives, raising the SyntaxError of text the grammar rejects. */
+function parseTree(support: AstSupport, text: string, mode: Mode, filename: string): PyValue {
+  const indentationError = findIndentationError(text);
+  if (indentationError) throw syntaxError(unshownIndentationErrorClass, filename, reasonOf(indentationError));
+  return support.parse(text, mode, (reason) => syntaxError(unshownSyntaxErrorClass, filename, reason));
+}
+
+/** How compile() makes and reads the trees of the `ast` module, which that module provides. */
+export interface AstSupport {
+  /** Builds the tree of source text, calling `syntaxError` for the SyntaxError of text the grammar rejects. */
+  parse: (source: string, mode: Mode, syntaxError: (reason: string) => Error) => PyValue;
+  unparse: (tree: PyValue) => string;
+  isTree: (value: PyValue) => boolean;
+}
+
+let astSupport: AstSupport | undefined;
+
+export function registerAstSupport(support: AstSupport): void {
+  astSupport = support;
+}
+
+/** `PyCF_ONLY_AST`, which `ast.parse` passes, alone. */
+function onlyAst(flags: PyValue | undefined): boolean {
+  return flags === 0x4_00n;
 }
 
 /** `eval(source, /, globals=None, locals=None)`. */
@@ -198,16 +227,48 @@ function compileCode(source: string, mode: Mode, filename: string, features: rea
     cache = new Map();
     parsedSources.set(runtime, cache);
   }
-  // 'single' mode marks the expression statements that show their values, so each mode parses on its own.
   const key = `${mode} ${[...new Set(features)].toSorted().join(',')}\n${source}`;
   let module = cache.get(key);
   if (!module) {
     module = parseSource(source, filename, features);
     checkMode(module, mode, filename);
-    if (mode === 'single') markDisplayedExpressions(module.body);
     cache.set(key, module);
   }
-  return { module, mode, filename };
+  return { module: mode === 'single' ? { ...module, body: module.body.map(markDisplays) } : module, mode, filename };
+}
+
+/** Marks the expression statements that code compiled in 'single' mode shows, outside the functions and classes it defines. */
+function markDisplays(statement: Statement): Statement {
+  const mark = (body: Statement[]): Statement[] => body.map(markDisplays);
+  switch (statement.kind) {
+    case 'expression': {
+      return { ...statement, displays: true };
+    }
+    case 'if':
+    case 'while':
+    case 'for': {
+      return { ...statement, body: mark(statement.body), orelse: mark(statement.orelse) };
+    }
+    case 'try': {
+      const handlers = statement.handlers.map((handler) => ({ ...handler, body: mark(handler.body) }));
+      return {
+        ...statement,
+        body: mark(statement.body),
+        handlers,
+        orelse: mark(statement.orelse),
+        finalbody: mark(statement.finalbody),
+      };
+    }
+    case 'with': {
+      return { ...statement, body: mark(statement.body) };
+    }
+    case 'match': {
+      return { ...statement, cases: statement.cases.map((each) => ({ ...each, body: mark(each.body) })) };
+    }
+    default: {
+      return statement;
+    }
+  }
 }
 
 function parseSource(source: string, filename: string, features: readonly string[]): Module {
@@ -230,22 +291,22 @@ function checkMode(module: Module, mode: Mode, filename: string): void {
   if (mode === 'eval' && (body.length !== 1 || body[0].kind !== 'expression')) {
     throw syntaxError(unshownSyntaxErrorClass, filename, 'eval() では、式しか評価できません。');
   }
-  // 'single' mode compiles one statement of the interactive prompt: a compound statement, or a line of simple ones.
-  if (mode === 'single' && body.length > 1 && body.some((each) => each.row !== body[0].row || isCompound(each))) {
-    throw syntaxError(unshownSyntaxErrorClass, filename, '複数の文を 1 つの文として compile() しようとしました。');
+  // One interactive statement: a compound statement, or simple statements that semicolons join on one line.
+  if (
+    mode === 'single' &&
+    body.length > 1 &&
+    (body.some(isCompound) || body.some((each) => each.row !== body[0].row))
+  ) {
+    throw syntaxError(
+      unshownSyntaxErrorClass,
+      filename,
+      'multiple statements found while compiling a single statement'
+    );
   }
 }
 
 function isCompound(statement: Statement): boolean {
-  return blocksOf(statement).length > 0 || statement.kind === 'functionDef' || statement.kind === 'classDef';
-}
-
-/** Makes the expression statements outside functions and classes show their values, as the interactive prompt does. */
-function markDisplayedExpressions(statements: Statement[]): void {
-  for (const statement of statements) {
-    if (statement.kind === 'expression') statement.display = true;
-    for (const block of blocksOf(statement)) markDisplayedExpressions(block);
-  }
+  return ['if', 'while', 'for', 'try', 'with', 'match', 'functionDef', 'classDef'].includes(statement.kind);
 }
 
 /**

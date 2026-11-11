@@ -3,7 +3,7 @@ import { floatRepr, intToString } from './numbers';
 import { bindValue, callValue, getAttribute, getItem, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { asciiEscape, iterStr, strRepr } from './strings';
-import { classOf, None, typeError, typeName, valueError } from './types';
+import { classOf, isNativeMethod, None, typeError, typeName, valueError } from './types';
 import { PyBuiltinFunction, PyComplex, PyInstance, type PyObject, type PyValue } from './values';
 
 /** `repr()` of a value. */
@@ -67,7 +67,7 @@ export function defaultRepr(value: PyObject): string {
 export function pyFormat(value: PyValue, spec: string): string {
   const method = typeof value === 'object' && value !== None ? lookupSpecial(value, '__format__') : undefined;
   // The builtin types' own __format__ methods are method descriptors, which formatValue implements natively.
-  if (method !== undefined && !(method instanceof PyBuiltinFunction && classOf(method).name === 'method_descriptor')) {
+  if (method !== undefined && !isNativeMethod(method)) {
     const result = callValue(bindValue(method, value), [spec]);
     if (typeof result !== 'string') throw typeError(`__format__ must return a str, not ${typeName(result)}`);
     return result;

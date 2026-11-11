@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 421 -- The builtins module keeps every builtin function together.
+// code-gauge-allow-file fileNcss 423 -- The builtins module keeps every builtin function together.
 import { bytearrayClass, bytesClass, memoryviewClass } from './bytesValues';
 import { buildClass } from './classes';
 import { complexAbs } from './complexNumbers';
@@ -73,7 +73,18 @@ import {
   valueError,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { DONE, type Kwargs, PyClass, PyComplex, PyDict, PyIterator, PyOpaque, PyTuple, type PyValue } from './values';
+import {
+  DONE,
+  type Kwargs,
+  PyClass,
+  PyComplex,
+  PyDict,
+  PyIterator,
+  PyModule,
+  PyOpaque,
+  PyTuple,
+  type PyValue,
+} from './values';
 
 // Iterator classes --------------------------------------------------------------------------------------------------
 
@@ -620,6 +631,8 @@ export function createBuiltins(): Map<string, PyValue> {
       'hasattr',
       builtin('hasattr', 'expected', 2, 2, ([object, name]) => {
         if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+        // A module attribute this grader lacks exists in CPython, so code may test for it before it uses it.
+        if (object instanceof PyModule && object.unsupported.has(name)) return true;
         return getAttributeOrUndefined(object, name) !== undefined;
       }),
     ],

@@ -70,3 +70,14 @@ export function findPythonTraceAnnotations(source: string): TraceAnnotation[] {
     tree.delete();
   }
 }
+
+/** Parses source text and hands its syntax tree to `use` while the tree is alive. */
+export function withPythonTree<T>(source: string, use: (root: Node) => T): T {
+  const tree = parser.parse(source);
+  if (!tree) throw new Error('The Python parser returned no tree');
+  try {
+    return use(tree.rootNode);
+  } finally {
+    tree.delete();
+  }
+}

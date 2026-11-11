@@ -7,7 +7,8 @@ import type { PyDict, PyList, PyValue } from './values';
 
 /** `globals()`: the dict of the calling frame's module variables, which shares them with the frame. */
 export function callerGlobals(): PyDict {
-  return namespaceDict((programFrames().at(-1) as Frame).globals);
+  // The calling frame may be a library module's, such as token.py building its table from its own globals.
+  return namespaceDict((currentRuntime().frames.at(-1) as Frame).globals);
 }
 
 /**

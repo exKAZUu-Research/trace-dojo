@@ -26,6 +26,7 @@ import {
   isIteratorGenerator,
   iteratorClass,
   methodClass,
+  methodWrapperClass,
   newList,
   None,
   NotImplemented,
@@ -35,6 +36,7 @@ import {
   typeError,
   typeName,
   unbox,
+  wrapperDescriptorClass,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import {
@@ -69,7 +71,7 @@ export function callValue(fn: PyValue, args: PyValue[], kwargs?: Kwargs): PyValu
   if (fn instanceof PyFunction) return currentRuntime().callFunction(fn, args, kwargs);
   if (fn instanceof PyBuiltinFunction) {
     currentRuntime().spend();
-    return fn.run(fn.self === undefined ? args : [fn.self, ...args], kwargs);
+    return fn.run(fn.self === undefined || fn.binding === 'static' ? args : [fn.self, ...args], kwargs);
   }
   if (fn instanceof PyBoundMethod) return callValue(fn.fn, [fn.self, ...args], kwargs);
   if (fn instanceof PyClass) return currentRuntime().instantiate(fn, args, kwargs);
@@ -103,7 +105,7 @@ export function callSpecial(value: PyValue, name: string, args: PyValue[]): PyVa
 }
 
 /** Binds a class attribute to an instance, as a descriptor's `__get__` would. */
-// code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of descriptor binding.
+// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of descriptor binding.
 export function bindValue(attribute: PyValue, instance: PyValue, owner: PyClass = classOf(instance)): PyValue {
   if (attribute instanceof PyFunction) return new PyBoundMethod(methodClass, instance, attribute);
   if (attribute instanceof PyBuiltinFunction && attribute.self === undefined) {
@@ -111,7 +113,7 @@ export function bindValue(attribute: PyValue, instance: PyValue, owner: PyClass 
     if (attribute.binding === 'static' || attribute.cls === builtinFunctionClass) return attribute;
     const self = attribute.binding === 'class' ? owner : mixinSelf(attribute, instance);
     return new PyBuiltinFunction(
-      classOf(attribute),
+      attribute.cls === wrapperDescriptorClass ? methodWrapperClass : builtinFunctionClass,
       attribute.name,
       attribute.run,
       self,

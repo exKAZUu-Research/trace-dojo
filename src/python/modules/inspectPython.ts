@@ -109,7 +109,7 @@ def unwrap(func, *, stop=None):
     f = func
     memo = {id(f): f}
     recursion_limit = sys.getrecursionlimit()
-    while not isinstance(func, type) and hasattr(func, '__wrapped__'):
+    while not isinstance(func, type) and not _is_unavailable(func) and hasattr(func, '__wrapped__'):
         if stop is not None and stop(func):
             break
         func = func.__wrapped__

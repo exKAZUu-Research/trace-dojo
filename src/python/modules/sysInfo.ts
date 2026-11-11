@@ -4,7 +4,7 @@ import { SYS_BUILTIN_MODULE_NAMES, SYS_STDLIB_MODULE_NAMES } from '../data/sysMo
 import { builtin, method } from '../define';
 import type { Frame } from '../frame';
 import { isSupportedModule } from '../moduleNames';
-import { trackModules } from '../modules';
+import { registerMainModule, trackModules } from '../modules';
 import { namespaceDict } from '../namespaces';
 import { toIndex } from '../numbers';
 import type { Runtime } from '../runtime';
@@ -15,6 +15,7 @@ import {
   classOf,
   Ellipsis,
   moduleClass,
+  newDict,
   newSet,
   newTuple,
   None,
@@ -60,6 +61,9 @@ export function sysInformation(runtime: Runtime): [string, PyValue][] {
     ['int_info', INT_INFO],
     ['hash_info', HASH_INFO],
     ['flags', FLAGS],
+    // A program here runs with no -W or -X option.
+    ['warnoptions', runtime.listOf([])],
+    ['_xoptions', newDict()],
     ['getrecursionlimit', builtin('getrecursionlimit', 'none', 0, 0, () => BigInt(runtime.recursionLimit))],
     ['setrecursionlimit', builtin('setrecursionlimit', 'one', 1, 1, ([limit]) => setRecursionLimit(runtime, limit))],
     ['getsizeof', builtin('getsizeof', 'takes', 1, 2, ([value]) => sizeOf(value), { keywords: ['object', 'default'] })],
@@ -67,13 +71,20 @@ export function sysInformation(runtime: Runtime): [string, PyValue][] {
     ['getfilesystemencoding', builtin('getfilesystemencoding', 'none', 0, 0, () => ENCODING)],
     ['get_int_max_str_digits', builtin('get_int_max_str_digits', 'none', 0, 0, () => 4300n)],
     ['intern', builtin('intern', 'one', 1, 1, ([value]) => intern(value))],
+    // With no way to add an audit hook, raising an audit event does nothing.
+    [
+      'audit',
+      builtin('audit', 'expected', 1, Number.POSITIVE_INFINITY, ([event]) => {
+        if (typeof event !== 'string') throw typeError(`audit() argument 1 must be str, not ${typeName(event)}`);
+        return None;
+      }),
+    ],
     ['exc_info', builtin('exc_info', 'none', 0, 0, () => excInfo(runtime))],
     ['_getframe', builtin('_getframe', 'expected', 0, 1, getFrame)],
     ['stdlib_module_names', newSet(SYS_STDLIB_MODULE_NAMES, true)],
     ['builtin_module_names', newTuple([...SYS_BUILTIN_MODULE_NAMES])],
     ['audit', builtin('audit', 'expected', 1, Number.POSITIVE_INFINITY, audit)],
     ['exception', builtin('exception', 'none', 0, 0, () => runtime.evaluator.handledExceptions.at(-1) ?? None)],
-    ['modules', namespaceDict(moduleTable(runtime))],
   ];
 }
 
@@ -115,12 +126,20 @@ const STARTUP_MODULES = [
   'site',
 ];
 
-/** `sys.modules`: the startup modules, then those the program imports, which this grader implements or names only. */
+/**
+ * `sys.modules`: the startup modules, then those the program imports, which this grader implements or names only. The
+ * startup modules written in Python, such as `codecs`, read `sys` as they load, so `sys` must have its other attributes
+ * first.
+ */
+export function sysModules(runtime: Runtime): PyValue {
+  return namespaceDict(moduleTable(runtime));
+}
+
 function moduleTable(runtime: Runtime): Map<string, PyValue> {
   const table = new Map<string, PyValue>();
   for (const name of STARTUP_MODULES) {
     const loaded = runtime.modules.get(name) ?? (isSupportedModule(name) ? runtime.importModule(name) : undefined);
-    table.set(name, loaded ?? (name === '__main__' ? mainModule(runtime) : unavailableValue(`モジュール ${name}`)));
+    table.set(name, loaded ?? unavailableValue(`モジュール ${name}`));
   }
   for (const [name, module] of runtime.modules) table.set(name, module);
   trackModules(runtime, table);
@@ -133,9 +152,7 @@ method(mainModuleClass, '__repr__', 'none', 0, 0, () => {
   throw new UnsupportedFeatureError('__main__ モジュールの repr（スクリプトのファイルのパスを含む）');
 });
 
-function mainModule(runtime: Runtime): PyModule {
-  return new PyModule(mainModuleClass, '__main__', (runtime.frames[0] as Frame).globals);
-}
+registerMainModule((runtime) => new PyModule(mainModuleClass, '__main__', (runtime.frames[0] as Frame).globals));
 
 // Struct sequences --------------------------------------------------------------------------------------------------
 

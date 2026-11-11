@@ -10,7 +10,7 @@ import { CompileError, type SourceDiagnostic } from './diagnostics';
 const requireFromRoot = createRequire(path.join(process.cwd(), 'package.json'));
 // Copying into this realm's Uint8Array passes the runtime's `instanceof` check, which a Buffer from another realm
 // (as under jsdom) fails.
-const readWasm = (specifier: string): Uint8Array => Uint8Array.from(readFileSync(requireFromRoot.resolve(specifier)));
+const readWasm = (specifier: string): Uint8Array => new Uint8Array(readFileSync(requireFromRoot.resolve(specifier)));
 await Parser.init({
   wasmBinary: readWasm('@willbooster/web-tree-sitter/web-tree-sitter.wasm').buffer as ArrayBuffer,
 });
