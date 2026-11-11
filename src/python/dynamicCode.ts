@@ -134,6 +134,7 @@ const ALLOW_INCOMPLETE_INPUT = 0x40_00n;
  * mode needs the newline after it, and with incomplete input allowed, text that may continue raises
  * `_IncompleteInputError`.
  */
+// code-gauge-allow functionCognitiveComplexity 16 -- Applies both input flags as CPython's compiler does.
 function compileInput(
   text: string,
   mode: Mode,

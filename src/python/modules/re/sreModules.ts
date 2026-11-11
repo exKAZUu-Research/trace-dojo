@@ -1,3 +1,4 @@
+// code-gauge-allow-file duplicateLines 747 -- The CPython sources it holds share code with others this grader holds.
 import { PyBytes } from '../../bytesValues';
 import { builtin } from '../../define';
 import { registerModule } from '../../modules';

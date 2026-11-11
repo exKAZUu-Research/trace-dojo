@@ -18,6 +18,8 @@ DESCRIPTORS = (types.BuiltinFunctionType, types.MethodDescriptorType, types.Wrap
                types.FunctionType, staticmethod, classmethod, property)
 
 
+# code-gauge-allow functionCognitiveComplexity 27 -- Walks the modules, their classes, and the classes' attributes in one pass.
+# code-gauge-allow functionNcss 39 -- Walks the modules, their classes, and the classes' attributes in one pass.
 def main():
     with open('src/python/moduleNames.ts', encoding='utf-8') as file:
         source = file.read()

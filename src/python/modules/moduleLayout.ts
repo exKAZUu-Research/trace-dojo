@@ -45,6 +45,7 @@ const LOADING_ATTRIBUTES: Record<ModuleLayout['kind'], Record<string, string>> =
  * modules CPython's code imported (imported when first read), and the loading attributes, which raise the unsupported
  * error.
  */
+// code-gauge-allow functionCognitiveComplexity 16 -- One case per attribute CPython's module creation adds.
 export function addLayoutAttributes(module: PyModule, importName: string): void {
   const layout = MODULE_LAYOUTS[importName] ?? MODULE_LAYOUTS[module.name];
   if (!layout) return;

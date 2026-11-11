@@ -16,7 +16,8 @@ interface PseudoAttribute {
 }
 
 /** The parts of an XML declaration from `<?xml` to `?>`, or the index where it is not well-formed. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Follows doParseXmlDecl of xmltok.c.
+// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+// code-gauge-allow functionNcss 47 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
 export function parseXmlDecl(cs: ArrayLike<number>, start: number, end: number): XmlDecl | number {
   const text = (range: [number, number]): string => String.fromCodePoint(...Array.prototype.slice.call(cs, ...range));
   let ptr = start + 5;
@@ -57,50 +58,55 @@ function isSpace(c: number): boolean {
 }
 
 /** One `name="value"` with the spaces before it, or the index where it is not well-formed; no name at the end. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Follows parsePseudoAttribute of xmltok.c.
 function parsePseudoAttribute(cs: ArrayLike<number>, ptr: number, end: number): PseudoAttribute | number {
   if (ptr === end) return { value: [ptr, ptr], next: ptr };
   if (!isSpace(cs[ptr] as number)) return ptr;
-  do ptr++;
-  while (ptr < end && isSpace(cs[ptr] as number));
+  ptr = skipSpaces(cs, ptr + 1, end);
   if (ptr === end) return { value: [ptr, ptr], next: ptr };
   const nameStart = ptr;
-  let nameEnd: number;
-  for (;;) {
-    if (ptr >= end || (cs[ptr] as number) >= 0x80) return ptr;
-    const c = cs[ptr] as number;
-    if (c === 0x3d) {
-      nameEnd = ptr;
-      break;
-    }
-    if (isSpace(c)) {
-      nameEnd = ptr;
-      do ptr++;
-      while (ptr < end && isSpace(cs[ptr] as number));
-      if (ptr >= end || cs[ptr] !== 0x3d) return ptr;
-      break;
-    }
-    ptr++;
-  }
-  if (ptr === nameStart) return ptr;
-  ptr++;
-  while (ptr < end && isSpace(cs[ptr] as number)) ptr++;
+  const name = scanPseudoName(cs, ptr, end);
+  if (typeof name === 'number') return name;
+  const [nameEnd, equals] = name;
+  if (equals === nameStart) return equals;
+  ptr = skipSpaces(cs, equals + 1, end);
   const open = cs[ptr];
   if (ptr >= end || (open !== 0x22 && open !== 0x27)) return ptr;
-  ptr++;
-  const valueStart = ptr;
-  for (; ; ptr++) {
+  const valueStart = ptr + 1;
+  for (ptr = valueStart; ; ptr++) {
     if (ptr >= end) return ptr;
     const c = cs[ptr] as number;
     if (c === open) break;
-    const ok =
-      (c >= 0x61 && c <= 0x7a) ||
-      (c >= 0x41 && c <= 0x5a) ||
-      (c >= 0x30 && c <= 0x39) ||
-      c === 0x2e ||
-      c === 0x2d ||
-      c === 0x5f;
-    if (!ok) return ptr;
+    if (!isValueChar(c)) return ptr;
   }
   return { name: [nameStart, nameEnd], value: [valueStart, ptr], next: ptr + 1 };
+}
+
+function skipSpaces(cs: ArrayLike<number>, ptr: number, end: number): number {
+  while (ptr < end && isSpace(cs[ptr] as number)) ptr++;
+  return ptr;
+}
+
+/** A pseudo-attribute's name up to its `=`: where the name ends and where the `=` is, or where it is not well-formed. */
+function scanPseudoName(cs: ArrayLike<number>, ptr: number, end: number): [number, number] | number {
+  for (;;) {
+    if (ptr >= end || (cs[ptr] as number) >= 0x80) return ptr;
+    const c = cs[ptr] as number;
+    if (c === 0x3d) return [ptr, ptr];
+    if (isSpace(c)) {
+      const equals = skipSpaces(cs, ptr + 1, end);
+      return equals >= end || cs[equals] !== 0x3d ? equals : [ptr, equals];
+    }
+    ptr++;
+  }
+}
+
+function isValueChar(c: number): boolean {
+  return (
+    (c >= 0x61 && c <= 0x7a) ||
+    (c >= 0x41 && c <= 0x5a) ||
+    (c >= 0x30 && c <= 0x39) ||
+    c === 0x2e ||
+    c === 0x2d ||
+    c === 0x5f
+  );
 }

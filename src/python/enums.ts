@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 420 -- The enum machinery keeps the members, flags, and their boundaries together.
+// code-gauge-allow-file fileNcss 443 -- The enum machinery keeps the members, flags, and their boundaries together.
 import { pyRepr, pyStr } from './conversions';
 import { hashInt, pyHash } from './hashing';
 import { getItem } from './items';
@@ -187,8 +187,8 @@ export function enumContains(cls: PyClass, value: PyValue): boolean {
 // Members -----------------------------------------------------------------------------------------------------------
 
 /** Replaces the plain attributes of an Enum class body with members, in definition order. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Follows how EnumType turns a class body into members.
-// code-gauge-allow functionNcss 32 -- Follows how EnumType turns a class body into members.
+// code-gauge-allow functionCognitiveComplexity 26 -- Follows how EnumType turns a class body into members.
+// code-gauge-allow functionNcss 37 -- Follows how EnumType turns a class body into members.
 export function createEnumMembers(cls: PyClass): void {
   cls.flags.isEnum = true;
   // As EnumType does, the body's own `__new__` creates the members, and calling the class looks one up.

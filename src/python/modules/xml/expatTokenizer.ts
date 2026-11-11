@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 664 -- It transcribes one of expat's C files.
 import { NAME_RANGES, NAME_START_RANGES } from './expatNameData';
 
 // A transcription of expat's xmltok_impl.c over code points: each scanner returns a token and the index after it, or a
@@ -189,7 +190,7 @@ export class Tokenizer {
 
   // Content ---------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 28 -- Follows contentTok of xmltok_impl.c case by case.
+  // code-gauge-allow functionNcss 35 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   contentTok(ptr: number, end: number): Scan {
     if (ptr >= end) return [TOK.NONE, ptr];
     switch (this.type(ptr)) {
@@ -230,6 +231,7 @@ export class Tokenizer {
     return this.dataChars(ptr, end);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 22 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   private dataChars(ptr: number, end: number): Scan {
     while (ptr < end) {
       const type = this.type(ptr);
@@ -258,52 +260,59 @@ export class Tokenizer {
   }
 
   /** After `<` in content: a start tag, an end tag, a comment, a CDATA section, or a processing instruction. */
-  // code-gauge-allow functionCognitiveComplexity 30 -- Follows scanLt of xmltok_impl.c.
   scanLt(ptr: number, end: number): Scan {
     if (ptr >= end) return [TOK.PARTIAL, ptr];
     const first = this.type(ptr);
-    if (this.isNameStart(first)) ptr++;
-    else if (first === BT.EXCL) {
-      ptr++;
-      if (ptr >= end) return [TOK.PARTIAL, ptr];
+    if (first === BT.EXCL) return this.scanExclamation(ptr + 1, end);
+    if (first === BT.QUEST) return this.scanPi(ptr + 1, end);
+    if (first === BT.SOL) return this.scanEndTag(ptr + 1, end);
+    if (!this.isNameStart(first)) return [TOK.INVALID, ptr];
+    const nameEnd = this.scanQualifiedName(ptr + 1, end);
+    if (typeof nameEnd !== 'number') return nameEnd;
+    ptr = nameEnd;
+    if (!this.isSpace(this.type(ptr))) return this.tagEnd(ptr, end, TOK.START_TAG_NO_ATTS, TOK.EMPTY_ELEMENT_NO_ATTS);
+    for (ptr++; ptr < end; ptr++) {
       const type = this.type(ptr);
-      if (type === BT.MINUS) return this.scanComment(ptr + 1, end);
-      if (type === BT.LSQB) return this.scanCdataSection(ptr + 1, end);
-      return [TOK.INVALID, ptr];
-    } else if (first === BT.QUEST) return this.scanPi(ptr + 1, end);
-    else if (first === BT.SOL) return this.scanEndTag(ptr + 1, end);
-    else return [TOK.INVALID, ptr];
+      if (this.isNameStart(type)) return this.scanAtts(ptr + 1, end);
+      if (!this.isSpace(type)) return this.tagEnd(ptr, end, TOK.START_TAG_NO_ATTS, TOK.EMPTY_ELEMENT_NO_ATTS);
+    }
+    return [TOK.PARTIAL, ptr];
+  }
+
+  /** After `<!` in content: a comment or a CDATA section. */
+  private scanExclamation(ptr: number, end: number): Scan {
+    if (ptr >= end) return [TOK.PARTIAL, ptr];
+    const type = this.type(ptr);
+    if (type === BT.MINUS) return this.scanComment(ptr + 1, end);
+    if (type === BT.LSQB) return this.scanCdataSection(ptr + 1, end);
+    return [TOK.INVALID, ptr];
+  }
+
+  /** The rest of a name with at most one colon in namespace mode: the index after it, or how scanning it ended. */
+  private scanQualifiedName(ptr: number, end: number): number | Scan {
     let hadColon = false;
     while (ptr < end) {
       const type = this.type(ptr);
       if (this.isNameChar(type)) {
         ptr++;
-        continue;
-      }
-      if (type === BT.COLON) {
+      } else if (type === BT.COLON) {
         const scanned = this.qualifiedColon(ptr, end, hadColon);
         if (scanned) return scanned;
         hadColon = true;
         ptr += 2;
-        continue;
+      } else {
+        return ptr;
       }
-      if (this.isSpace(type)) {
-        ptr++;
-        while (ptr < end) {
-          const next = this.type(ptr);
-          if (this.isNameStart(next)) return this.scanAtts(ptr + 1, end);
-          if (next === BT.GT) return [TOK.START_TAG_NO_ATTS, ptr + 1];
-          if (next === BT.SOL) return this.emptyElementEnd(ptr + 1, end, TOK.EMPTY_ELEMENT_NO_ATTS);
-          if (!this.isSpace(next)) return [TOK.INVALID, ptr];
-          ptr++;
-        }
-        return [TOK.PARTIAL, ptr];
-      }
-      if (type === BT.GT) return [TOK.START_TAG_NO_ATTS, ptr + 1];
-      if (type === BT.SOL) return this.emptyElementEnd(ptr + 1, end, TOK.EMPTY_ELEMENT_NO_ATTS);
-      return [TOK.INVALID, ptr];
     }
     return [TOK.PARTIAL, ptr];
+  }
+
+  /** `>` or `/>` closing a tag at `ptr`. */
+  private tagEnd(ptr: number, end: number, startToken: number, emptyToken: number): Scan {
+    const type = this.type(ptr);
+    if (type === BT.GT) return [startToken, ptr + 1];
+    if (type === BT.SOL) return this.emptyElementEnd(ptr + 1, end, emptyToken);
+    return [TOK.INVALID, ptr];
   }
 
   /** A colon in a qualified name: an error when the name had one, else undefined when a name start follows it. */
@@ -321,74 +330,68 @@ export class Tokenizer {
     return [token, ptr + 1];
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Follows scanAtts of xmltok_impl.c.
-  // code-gauge-allow functionNcss 45 -- Follows scanAtts of xmltok_impl.c.
+  /** The attributes of a start tag, from the character after the first name's start. */
   private scanAtts(ptr: number, end: number): Scan {
-    let hadColon = false;
-    while (ptr < end) {
-      let type = this.type(ptr);
-      if (this.isNameChar(type)) {
-        ptr++;
-        continue;
-      }
-      if (type === BT.COLON) {
-        const scanned = this.qualifiedColon(ptr, end, hadColon);
-        if (scanned) return scanned;
-        hadColon = true;
-        ptr += 2;
-        continue;
-      }
-      if (this.isSpace(type)) {
-        for (;;) {
-          ptr++;
-          if (ptr >= end) return [TOK.PARTIAL, ptr];
-          type = this.type(ptr);
-          if (type === BT.EQUALS) break;
-          if (!this.isSpace(type)) return [TOK.INVALID, ptr];
-        }
-      }
-      if (type !== BT.EQUALS) return [TOK.INVALID, ptr];
-      hadColon = false;
-      let open: number;
-      for (;;) {
-        ptr++;
-        if (ptr >= end) return [TOK.PARTIAL, ptr];
-        open = this.type(ptr);
-        if (open === BT.QUOT || open === BT.APOS) break;
-        if (!this.isSpace(open)) return [TOK.INVALID, ptr];
-      }
-      ptr++;
-      for (;;) {
-        if (ptr >= end) return [TOK.PARTIAL, ptr];
-        const value = this.type(ptr);
-        if (value === open) break;
-        if (value === BT.NONXML || value === BT.LT) return [TOK.INVALID, ptr];
-        if (value === BT.AMP) {
-          const [token, next] = this.scanRef(ptr + 1, end);
-          if (token <= 0) return [token, next];
-          ptr = next;
-        } else {
-          ptr++;
-        }
-      }
+    for (;;) {
+      const nameEnd = this.scanQualifiedName(ptr, end);
+      if (typeof nameEnd !== 'number') return nameEnd;
+      const equals = this.scanEquals(nameEnd, end);
+      if (typeof equals !== 'number') return equals;
+      const valueEnd = this.scanAttributeValue(equals, end);
+      if (typeof valueEnd !== 'number') return valueEnd;
+      const next = this.afterAttributeValue(valueEnd, end);
+      if (typeof next !== 'number') return next;
+      ptr = next;
+    }
+  }
+
+  /** The `=` after an attribute's name and the spaces before it: its index, or how scanning ended. */
+  private scanEquals(ptr: number, end: number): number | Scan {
+    let type = this.type(ptr);
+    while (this.isSpace(type)) {
       ptr++;
       if (ptr >= end) return [TOK.PARTIAL, ptr];
-      const after = this.type(ptr);
-      if (after === BT.SOL) return this.emptyElementEnd(ptr + 1, end, TOK.EMPTY_ELEMENT_WITH_ATTS);
-      if (after === BT.GT) return [TOK.START_TAG_WITH_ATTS, ptr + 1];
-      if (!this.isSpace(after)) return [TOK.INVALID, ptr];
-      let nameFound = false;
-      while (!nameFound) {
+      type = this.type(ptr);
+    }
+    return type === BT.EQUALS ? ptr : [TOK.INVALID, ptr];
+  }
+
+  /** A quoted value after `=` at `ptr`: the index after its closing quote, or how scanning ended. */
+  // code-gauge-allow functionCognitiveComplexity 22 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  private scanAttributeValue(ptr: number, end: number): number | Scan {
+    let open: number;
+    for (;;) {
+      ptr++;
+      if (ptr >= end) return [TOK.PARTIAL, ptr];
+      open = this.type(ptr);
+      if (open === BT.QUOT || open === BT.APOS) break;
+      if (!this.isSpace(open)) return [TOK.INVALID, ptr];
+    }
+    for (ptr++; ;) {
+      if (ptr >= end) return [TOK.PARTIAL, ptr];
+      const type = this.type(ptr);
+      if (type === open) return ptr + 1;
+      if (type === BT.NONXML || type === BT.LT) return [TOK.INVALID, ptr];
+      if (type === BT.AMP) {
+        const [token, next] = this.scanRef(ptr + 1, end);
+        if (token <= 0) return [token, next];
+        ptr = next;
+      } else {
         ptr++;
-        if (ptr >= end) return [TOK.PARTIAL, ptr];
-        const next = this.type(ptr);
-        if (this.isNameStart(next)) {
-          ptr++;
-          nameFound = true;
-        } else if (next === BT.GT) return [TOK.START_TAG_WITH_ATTS, ptr + 1];
-        else if (next === BT.SOL) return this.emptyElementEnd(ptr + 1, end, TOK.EMPTY_ELEMENT_WITH_ATTS);
-        else if (!this.isSpace(next)) return [TOK.INVALID, ptr];
       }
+    }
+  }
+
+  /** What follows an attribute's value: the end of the tag, or the index after the next attribute's name start. */
+  private afterAttributeValue(ptr: number, end: number): number | Scan {
+    if (ptr >= end) return [TOK.PARTIAL, ptr];
+    if (!this.isSpace(this.type(ptr))) {
+      return this.tagEnd(ptr, end, TOK.START_TAG_WITH_ATTS, TOK.EMPTY_ELEMENT_WITH_ATTS);
+    }
+    for (ptr++; ptr < end; ptr++) {
+      const type = this.type(ptr);
+      if (this.isNameStart(type)) return ptr + 1;
+      if (!this.isSpace(type)) return this.tagEnd(ptr, end, TOK.START_TAG_WITH_ATTS, TOK.EMPTY_ELEMENT_WITH_ATTS);
     }
     return [TOK.PARTIAL, ptr];
   }
@@ -424,6 +427,7 @@ export class Tokenizer {
     return [TOK.PARTIAL, ptr];
   }
 
+  // code-gauge-allow functionCognitiveComplexity 20 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   private scanEndTag(ptr: number, end: number): Scan {
     if (ptr >= end) return [TOK.PARTIAL, ptr];
     if (!this.isNameStart(this.type(ptr))) return [TOK.INVALID, ptr];
@@ -475,38 +479,30 @@ export class Tokenizer {
   }
 
   /** After `<?`: a processing instruction, or the XML declaration when its target is `xml`. */
-  // code-gauge-allow functionCognitiveComplexity 22 -- Follows scanPi of xmltok_impl.c.
   scanPi(ptr: number, end: number): Scan {
     const target = ptr;
     if (ptr >= end) return [TOK.PARTIAL, ptr];
     if (!this.isNameStart(this.type(ptr))) return [TOK.INVALID, ptr];
+    for (ptr++; ptr < end && this.isNameChar(this.type(ptr));) ptr++;
+    if (ptr >= end) return [TOK.PARTIAL, ptr];
+    const type = this.type(ptr);
+    const token = this.piTarget(target, ptr);
+    if (this.isSpace(type)) return token === undefined ? [TOK.INVALID, ptr] : this.scanPiData(ptr + 1, end, token);
+    if (type !== BT.QUEST || token === undefined) return [TOK.INVALID, ptr];
     ptr++;
+    if (ptr >= end) return [TOK.PARTIAL, ptr];
+    return this.cs[ptr] === 0x3e ? [token, ptr + 1] : [TOK.INVALID, ptr];
+  }
+
+  /** The data of a processing instruction up to `?>`. */
+  private scanPiData(ptr: number, end: number, token: number): Scan {
     while (ptr < end) {
       const type = this.type(ptr);
-      if (this.isNameChar(type)) {
-        ptr++;
-        continue;
-      }
-      const token = this.piTarget(target, ptr);
-      if (this.isSpace(type)) {
-        if (token === undefined) return [TOK.INVALID, ptr];
-        for (ptr++; ptr < end;) {
-          const next = this.type(ptr);
-          if (next === BT.NONXML) return [TOK.INVALID, ptr];
-          ptr++;
-          if (next !== BT.QUEST) continue;
-          if (ptr >= end) return [TOK.PARTIAL, ptr];
-          if (this.cs[ptr] === 0x3e) return [token, ptr + 1];
-        }
-        return [TOK.PARTIAL, ptr];
-      }
-      if (type === BT.QUEST) {
-        if (token === undefined) return [TOK.INVALID, ptr];
-        ptr++;
-        if (ptr >= end) return [TOK.PARTIAL, ptr];
-        if (this.cs[ptr] === 0x3e) return [token, ptr + 1];
-      }
-      return [TOK.INVALID, ptr];
+      if (type === BT.NONXML) return [TOK.INVALID, ptr];
+      ptr++;
+      if (type !== BT.QUEST) continue;
+      if (ptr >= end) return [TOK.PARTIAL, ptr];
+      if (this.cs[ptr] === 0x3e) return [token, ptr + 1];
     }
     return [TOK.PARTIAL, ptr];
   }
@@ -520,6 +516,8 @@ export class Tokenizer {
   }
 
   /** Inside a CDATA section. */
+  // code-gauge-allow functionCognitiveComplexity 24 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss 35 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   cdataSectionTok(ptr: number, end: number): Scan {
     if (ptr >= end) return [TOK.NONE, ptr];
     const first = this.type(ptr);
@@ -552,8 +550,8 @@ export class Tokenizer {
 
   // Prolog ----------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Follows prologTok of xmltok_impl.c case by case.
-  // code-gauge-allow functionNcss 60 -- Follows prologTok of xmltok_impl.c case by case.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss 54 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   prologTok(ptr: number, end: number): Scan {
     if (ptr >= end) return [TOK.NONE, ptr];
     const first = this.type(ptr);
@@ -658,7 +656,8 @@ export class Tokenizer {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 26 -- Follows the name part of prologTok of xmltok_impl.c.
+  // code-gauge-allow functionCognitiveComplexity 25 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  // code-gauge-allow functionNcss 50 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   private prologName(first: number, ptr: number, end: number): Scan {
     let token: number;
     if (this.isNameStart(first)) token = TOK.NAME;
@@ -726,6 +725,7 @@ export class Tokenizer {
   }
 
   /** After `<!`. */
+  // code-gauge-allow functionCognitiveComplexity 20 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   private scanDecl(ptr: number, end: number): Scan {
     if (ptr >= end) return [TOK.PARTIAL, ptr];
     const first = this.type(ptr);
@@ -784,6 +784,7 @@ export class Tokenizer {
   // Values ----------------------------------------------------------------------------------------------------------
 
   /** The text of an attribute value, or of an internal entity a value refers to. */
+  // code-gauge-allow functionCognitiveComplexity 18 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   attributeValueTok(ptr: number, end: number): Scan {
     if (ptr >= end) return [TOK.NONE, ptr];
     const start = ptr;
@@ -810,6 +811,7 @@ export class Tokenizer {
   }
 
   /** The text of an entity's literal value. */
+  // code-gauge-allow functionCognitiveComplexity 21 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   entityValueTok(ptr: number, end: number): Scan {
     if (ptr >= end) return [TOK.NONE, ptr];
     const start = ptr;

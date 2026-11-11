@@ -1,3 +1,4 @@
+// code-gauge-allow-file duplicateLines 1354 -- The CPython sources it holds share code with others this grader holds.
 import { registerSourceModule } from '../../sourceModules';
 
 // CPython's `xml.sax` package, whose default parser is the expat reader.

@@ -320,6 +320,7 @@ function partialSignature(value: PyOpaque): Signature {
  * bound, or undefined when a default is not an expression CPython evaluates.
  */
 // code-gauge-allow functionCognitiveComplexity 22 -- Follows _signature_fromstr of CPython's inspect.py.
+// code-gauge-allow functionNcss 34 -- Follows _signature_fromstr of inspect.py.
 function textSignature(text: string, bound: boolean): Signature | undefined {
   const parameters: PyOpaque[] = [];
   let kind: Kind = Kind.PositionalOrKeyword;
@@ -362,6 +363,8 @@ function parameterData(name: string, kind: Kind, value: PyValue): Parameter {
 }
 
 /** The parameters of a signature's text, split at the commas outside brackets and strings. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Splits at commas outside brackets and strings, escapes included.
+// code-gauge-allow functionNcss 32 -- Splits at commas outside brackets and strings, escapes included.
 function splitParameters(text: string): string[] {
   const parts: string[] = [];
   let depth = 0;
@@ -407,6 +410,7 @@ function evaluateDefault(text: string): PyValue | undefined {
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 19 -- Follows how _signature_from_callable of inspect.py tries a class.
 function classSignature(cls: PyClass): Signature {
   for (const each of cls.mro) {
     if (each.isBuiltin) break;

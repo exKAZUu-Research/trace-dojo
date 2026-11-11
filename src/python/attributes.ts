@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 524 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 529 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import {
   classAnnotate,
   classAnnotations,
@@ -106,7 +106,7 @@ function isMetaDataDescriptor(attribute: PyValue): boolean {
   return (attribute instanceof PyDescriptor && attribute.cls === propertyClass) || isDataDescriptor(attribute);
 }
 
-// code-gauge-allow functionNcss 31 -- One case per attribute a class keeps outside its dictionary.
+// code-gauge-allow functionNcss 33 -- One case per attribute a class keeps outside its dictionary.
 export function typeData(cls: PyClass, name: string): PyValue | undefined {
   switch (name) {
     case '__name__': {

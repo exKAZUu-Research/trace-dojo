@@ -1,3 +1,4 @@
+// code-gauge-allow-file duplicateLines 3349 -- The CPython sources it holds share code with others this grader holds.
 import { registerSourceModule } from '../../sourceModules';
 
 // CPython's `xml.dom` package: minidom, pulldom, and the expat builder.
