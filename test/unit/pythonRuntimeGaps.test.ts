@@ -134,3 +134,77 @@ except TypeError as e:
     if not str(e).startswith("Can't instantiate abstract class V without an implementation for abstract methods '__abs__', '__add__'"): raise
 `);
 });
+
+test("typing.Protocol is the code of CPython's typing, with its runtime checks and their errors", () => {
+  expectSameAsCPython(`import io as _io, contextlib as _contextlib, re as _re
+_buf = _io.StringIO()
+_ctx = _contextlib.redirect_stdout(_buf)
+_ctx.__enter__()
+import typing, abc, functools, collections.abc as cabc
+from typing import Protocol, runtime_checkable, Generic, TypeVar
+T = TypeVar('T')
+@runtime_checkable
+class P(Protocol):
+    def quack(self): ...
+class Duck:
+    def quack(self): pass
+print(P.__protocol_attrs__, P.__non_callable_proto_members__, P._is_protocol, P._is_runtime_protocol)
+print(isinstance(Duck(), P), isinstance(3, P), issubclass(Duck, P), issubclass(int, P))
+class NR(Protocol):
+    x: int
+for f in (lambda: isinstance(1, NR), lambda: issubclass(int, NR)):
+    try: f()
+    except TypeError as e: print(e)
+@runtime_checkable
+class D(Protocol):
+    x: int
+    def m(self): ...
+print(sorted(D.__protocol_attrs__), D.__non_callable_proto_members__)
+class HasX:
+    x = 1
+    def m(self): pass
+print(isinstance(HasX(), D))
+try: issubclass(HasX, D)
+except TypeError as e: print(e)
+try: issubclass(1, D)
+except TypeError as e: print(e)
+@runtime_checkable
+class G(Protocol[T]):
+    def get(self) -> T: ...
+class GG[T](Protocol):
+    def put(self, x: T): ...
+print(G.__parameters__, G[int], GG.__parameters__, GG.__bases__, G.__mro__)
+class Sub(P, Protocol):
+    def other(self): ...
+print(Sub.__protocol_attrs__ == {'quack', 'other'}, Sub._is_protocol, Sub._is_runtime_protocol)
+class Impl(P):
+    pass
+print(Impl._is_protocol, isinstance(Impl(), P), Impl())
+try: P()
+except TypeError as e: print(e)
+try:
+    class Bad(int, Protocol): pass
+except TypeError as e: print(e)
+try: runtime_checkable(int)
+except TypeError as e: print(e)
+print(typing.is_protocol(P), typing.is_protocol(Impl), typing.get_protocol_members(D) == {'x', 'm'})
+print(isinstance(3, typing.SupportsInt), isinstance('x', typing.SupportsInt), issubclass(float, typing.SupportsIndex))
+print(type(P), type(Protocol), Protocol.__mro__, list(Protocol.__dict__))
+@functools.singledispatch
+def f(x): return 'base'
+@f.register
+def _(x: cabc.Iterable): return 'iter'
+print(f([1]), f(P))
+class MyAbc(abc.ABC): pass
+print(issubclass(Duck, MyAbc))
+print(isinstance(Duck(), typing.SupportsAbs))
+class WithInit(Protocol):
+    def __init__(self): self.a = 1
+class C2(WithInit):
+    pass
+print(C2().a)
+_ctx.__exit__(None, None, None)
+EXPECTED = "{'quack'} set() True True\\nTrue False True False\\nInstance and class checks can only be used with @runtime_checkable protocols\\nInstance and class checks can only be used with @runtime_checkable protocols\\n['m', 'x'] {'x'}\\nTrue\\nProtocols with non-method members don't support issubclass(). Non-method members: 'x'.\\nissubclass() arg 1 must be a class\\n(~T,) __main__.G[int] (T,) (<class 'typing.Protocol'>,) (<class '__main__.G'>, <class 'typing.Protocol'>, <class 'typing.Generic'>, <class 'object'>)\\nTrue True True\\nFalse True <__main__.Impl object>\\nProtocols cannot be instantiated\\nProtocols can only inherit from other protocols, got <class 'int'>\\n@runtime_checkable can be only applied to protocol classes, got <class 'int'>\\nTrue False True\\nTrue False False\\n<class 'typing._ProtocolMeta'> <class 'typing._ProtocolMeta'> (<class 'typing.Protocol'>, <class 'typing.Generic'>, <class 'object'>) ['__module__', '__firstlineno__', '__doc__', '__slots__', '_is_protocol', '_is_runtime_protocol', '__init_subclass__', '__static_attributes__', '__parameters__', '__abstractmethods__', '_abc_impl', '__protocol_attrs__']\\niter base\\nFalse\\nFalse\\n1\\n"
+if _re.sub(' at 0x[0-9a-f]*', '', _buf.getvalue()) != EXPECTED: raise AssertionError(_buf.getvalue())
+`);
+});

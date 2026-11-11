@@ -1,14 +1,12 @@
 import { evaluateAnnotations } from '../annotations';
 import type { ClassDef, Expression } from '../ast';
 import { pyRepr, pyStr } from '../conversions';
-import { builtin } from '../define';
 import { unpack } from '../expressionEvaluator';
-import { callValue, getAttribute, getAttributeOrUndefined, getItem, isCallable, toArray } from '../objects';
+import { callValue, getAttribute, getItem, isCallable, toArray } from '../objects';
 import { currentRuntime } from '../runtimeContext';
-import { genericClass, mroEntryHooks, parameterDeclaringClasses } from '../typeParams';
+import { mroEntryHooks } from '../typeParams';
 import {
   builtinClass,
-  classOf,
   dictClass,
   nativeFunction,
   newDict,
@@ -23,94 +21,6 @@ import {
 import { type ClassAnnotations, type Kwargs, PyClass, PyOpaque, type PyValue } from '../values';
 import { namedTupleClass } from './collections';
 import { PyNewType } from './typingTypeVars';
-
-// Protocol -------------------------------------------------------------------------------------------------------------
-
-/** `typing.Protocol`, whose direct subclasses are protocols: classes that only describe what their instances have. */
-export const protocolClass = new PyClass('Protocol', [genericClass], typeClass);
-protocolClass.mro = [protocolClass, ...genericClass.mro];
-protocolClass.module = 'typing';
-protocolClass.layout = { base: 'object' };
-protocolClass.isBaseType = true;
-parameterDeclaringClasses.add(protocolClass);
-
-const runtimeProtocols = new WeakSet<PyClass>();
-const protocols = new WeakSet<PyClass>();
-
-/** The attributes of a class that `_get_protocol_attrs` leaves out, being typing's own or every class's. */
-const NON_MEMBERS = new Set([
-  '__module__',
-  '__qualname__',
-  '__doc__',
-  '__dict__',
-  '__weakref__',
-  '__init__',
-  '__new__',
-  '__slots__',
-  '__annotations__',
-  '__annotate__',
-  '__parameters__',
-  '__orig_bases__',
-  '__type_params__',
-  '__static_attributes__',
-  '__firstlineno__',
-  '__match_args__',
-  '__subclasshook__',
-  '__class_getitem__',
-  '__abstractmethods__',
-  '__protocol_attrs__',
-  '__non_callable_proto_members__',
-]);
-
-protocolClass.subclassHook = (cls) => {
-  if (!cls.bases.includes(protocolClass)) return;
-  const other = cls.bases.find((base) => base !== protocolClass && base !== genericClass && !protocols.has(base));
-  if (other) throw typeError(`Protocols can only inherit from other protocols, got ${classText(other)}`);
-  protocols.add(cls);
-  cls.construct = () => {
-    throw typeError('Protocols cannot be instantiated');
-  };
-  cls.instanceCheck = (value) => protocolInstanceCheck(cls, value);
-};
-
-function protocolInstanceCheck(cls: PyClass, value: PyValue): boolean {
-  if (!runtimeProtocols.has(cls)) {
-    throw typeError('Instance and class checks can only be used with @runtime_checkable protocols');
-  }
-  if (classOf(value).isSubclassOf(cls)) return true;
-  for (const name of protocolMembers(cls)) {
-    const member = getAttributeOrUndefined(value, name);
-    if (member === undefined) return false;
-    if (member === None && isCallable(cls.lookup(name) ?? None)) return false;
-  }
-  return true;
-}
-
-/** The names a protocol requires: those its protocol classes define or annotate. */
-function protocolMembers(cls: PyClass): string[] {
-  const names = new Set<string>();
-  for (const base of cls.mro.slice(0, -1)) {
-    if (base === protocolClass || base === genericClass) continue;
-    for (const name of [...base.dict.keys(), ...base.annotationNames]) {
-      if (!NON_MEMBERS.has(name) && !name.startsWith('_abc_')) names.add(name);
-    }
-  }
-  return [...names];
-}
-
-const runtimeCheckable = builtin('runtime_checkable', 'one', 1, 1, ([cls]) => {
-  if (!(cls instanceof PyClass) || !protocols.has(cls)) {
-    throw typeError(
-      `@runtime_checkable can be only applied to protocol classes, got ${cls instanceof PyClass ? classText(cls) : pyRepr(cls)}`
-    );
-  }
-  runtimeProtocols.add(cls);
-  return cls;
-});
-
-function classText(cls: PyClass): string {
-  return `<class '${cls.module === 'builtins' ? '' : `${cls.module}.`}${cls.qualifiedName}'>`;
-}
 
 // NamedTuple ------------------------------------------------------------------------------------------------------------
 
@@ -359,25 +269,13 @@ mroEntryHooks.push((base, className) => {
   return;
 });
 
-/** Whether a class is a protocol, as `typing.is_protocol` asks. */
-export function isProtocol(value: PyValue): boolean {
-  return value instanceof PyClass && protocols.has(value);
-}
-
-/** The members of a protocol, as `typing.get_protocol_members` gives them. */
-export function protocolMemberNames(cls: PyClass): string[] {
-  return protocolMembers(cls);
-}
-
 /** Whether a class is a TypedDict class, as `typing.is_typeddict` asks. */
 export function isTypedDict(value: PyValue): boolean {
   return value instanceof PyClass && typedDicts.has(value);
 }
 
-/** The names `typing` exports for protocols, named tuples, and typed dicts. */
+/** The names `typing` exports for named tuples and typed dicts. */
 export const TYPING_CLASSES: [string, PyValue][] = [
-  ['Protocol', protocolClass],
-  ['runtime_checkable', runtimeCheckable],
   ['NamedTuple', namedTuple],
   ['TypedDict', typedDict],
 ];
