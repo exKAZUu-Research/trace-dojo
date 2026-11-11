@@ -208,6 +208,9 @@ class array:
     def reverse(self):
         self._items.reverse()
 
+    def clear(self):
+        self._items.clear()
+
     def tolist(self):
         return list(self._items)
 

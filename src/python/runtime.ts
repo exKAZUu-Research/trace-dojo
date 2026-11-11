@@ -42,6 +42,7 @@ import {
   valueError,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
+import { unsupportedClassAttributeNames } from './unsupportedAttributes';
 import {
   DONE,
   type Kwargs,
@@ -487,7 +488,7 @@ export class Runtime {
     const names =
       value instanceof PyModule
         ? new Set([...value.dict.keys(), ...value.unsupported.keys(), ...value.imports.keys()])
-        : objectAttributeNames(value);
+        : new Set([...objectAttributeNames(value), ...unsupportedClassAttributeNames(value)]);
     return [...names].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   }
 

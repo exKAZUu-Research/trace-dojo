@@ -371,6 +371,11 @@ for (const [cls, suffix] of [
     return new PyParamSpecPart(owner, origin);
   };
 }
+for (const cls of [typeVarClass, paramSpecClass, typeVarTupleClass, paramSpecArgsClass, paramSpecKwargsClass]) {
+  method(cls, '__mro_entries__', 'one', 1, 1, () => {
+    throw typeError(`Cannot subclass an instance of ${cls.name}`);
+  });
+}
 method(typeVarTupleClass, '__iter__', 'none', 0, 0, (self) =>
   getIterator(newTuple([new PyTypingAlias(self, [], true)]))
 );

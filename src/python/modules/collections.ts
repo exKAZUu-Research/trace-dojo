@@ -320,6 +320,7 @@ method(counterClass, 'most_common', 'expected', 0, 1, (self, [count]) => {
   }
   return newList(items.map((item) => newTuple(item)));
 });
+method(counterClass, '__missing__', 'one', 1, 1, () => 0n);
 method(counterClass, 'elements', 'none', 0, 0, (self) => {
   const items: PyValue[] = [];
   for (const entry of counterOf(self).store.ordered()) {
@@ -772,7 +773,7 @@ function defineNamedTupleMethods(): void {
         const items = [...tuple.items];
         for (const [key, value] of kwargs ?? []) {
           const index = fields.indexOf(key);
-          if (index === -1) throw valueError(`Got unexpected field names: [${pyRepr(key)}]`);
+          if (index === -1) throw typeError(`Got unexpected field names: [${pyRepr(key)}]`);
           items[index] = value;
         }
         return new PyTuple(tuple.cls, items);
@@ -782,6 +783,9 @@ function defineNamedTupleMethods(): void {
       'NamedTuple'
     )
   );
+  // CPython's namedtuple classes have no instance dict, and copy.replace() calls their `__replace__`, which is `_replace`.
+  namedTupleBase.dict.set('__slots__', newTuple([]));
+  namedTupleBase.dict.set('__replace__', namedTupleBase.dict.get('_replace') as PyValue);
   method(namedTupleBase, '_make', 'one', 1, 1, (cls, [iterable]) => callValue(cls, toArray(iterable)), {
     binding: 'class',
   });
@@ -791,6 +795,7 @@ defineNamedTupleMethods();
 function namedtupleWithMethods(args: PyValue[], kwargs: Kwargs): PyValue {
   const cls = namedtuple(args, kwargs) as PyClass;
   for (const [name, value] of namedTupleBase.dict) if (!cls.dict.has(name)) cls.dict.set(name, value);
+  cls.dict.set('__module__', cls.module);
   return cls;
 }
 

@@ -72,6 +72,9 @@ class Condition:
             pass
         self._waiters = _deque()
 
+    def locked(self):
+        return self._lock.locked()
+
     def __enter__(self):
         return self._lock.__enter__()
 

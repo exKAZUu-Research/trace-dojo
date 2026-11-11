@@ -413,6 +413,7 @@ export function superAttribute(sup: PySuper, name: string): PyValue | undefined 
       if (value !== undefined) return bindThroughSuper(value, self, selfClass);
     }
   }
+  if (name === '__class__') return superClass;
   const own = superClass.lookup(name);
   return own === undefined ? undefined : bindValue(own, sup, superClass);
 }

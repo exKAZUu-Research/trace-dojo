@@ -41,6 +41,8 @@ import './modules/dataclasses';
 import './modules/unsupportedNames';
 import './modules/moduleExtras';
 import './modules/osNames';
+import './modules/classExtras';
+import './classUnsupportedNames';
 import './modules/random';
 import './modules/itertools';
 import './modules/functools';

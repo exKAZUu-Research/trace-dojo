@@ -39,6 +39,7 @@ import {
   wrapperDescriptorClass,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
+import { unsupportedClassAttribute } from './unsupportedAttributes';
 import {
   DONE,
   type Kwargs,
@@ -178,6 +179,8 @@ export function getAttribute(value: PyValue, name: string): PyValue {
   const getattr = value instanceof PyModule ? value.dict.get('__getattr__') : lookupSpecial(value, '__getattr__');
   if (getattr !== undefined && value instanceof PyModule) return callValue(getattr, [name]);
   if (getattr !== undefined) return callValue(bindValue(getattr, value), [name]);
+  const feature = unsupportedClassAttribute(value, name);
+  if (feature !== undefined) throw new UnsupportedFeatureError(feature);
   throw attributeError(value, name);
 }
 

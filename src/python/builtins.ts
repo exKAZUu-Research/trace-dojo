@@ -74,6 +74,7 @@ import {
   valueError,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
+import { unsupportedClassAttribute } from './unsupportedAttributes';
 import {
   DONE,
   type Kwargs,
@@ -647,6 +648,7 @@ export function createBuiltins(): Map<string, PyValue> {
         if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
         // A module attribute this grader lacks exists in CPython, so code may test for it before it uses it.
         if (object instanceof PyModule && object.unsupported.has(name)) return true;
+        if (unsupportedClassAttribute(object, name) !== undefined) return true;
         return getAttributeOrUndefined(object, name) !== undefined;
       }),
     ],
