@@ -2,7 +2,7 @@ import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { aliasArgumentText, isUnionable, PyGenericAlias } from '../genericAlias';
 import { registerModule } from '../modules';
-import { getAttribute, setAttribute } from '../objects';
+import { callValue, getAttribute, setAttribute } from '../objects';
 import { equals } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import {
@@ -29,7 +29,7 @@ import {
   typingClass,
   unionClass,
 } from '../types';
-import { PyClass, PyError, PyList, PyOpaque, PyTuple, type PyValue } from '../values';
+import { type Kwargs, PyClass, PyError, PyList, PyOpaque, PyTuple, type PyValue } from '../values';
 import { TYPING_CLASSES } from './typingClasses';
 import { getTypeHints, newTypeClass } from './typingTypeVars';
 
@@ -91,9 +91,35 @@ for (const cls of [specialFormClass, typingClass, unionClass, formAliasClass, li
   );
   if (cls === typingClass) continue;
   method(cls, '__repr__', 'none', 0, 0, (self) => (self as PyOpaque).text);
-  method(cls, '__call__', 'expected', 0, Number.POSITIVE_INFINITY, (self) => {
-    throw currentRuntime().unsupported(`${(self as PyOpaque).text} の呼び出し`);
-  });
+  method(cls, '__call__', 'expected', 0, Number.POSITIVE_INFINITY, (self, args, kwargs) =>
+    callTypingForm(self as PyOpaque, args, kwargs)
+  );
+}
+
+/** The aliases whose `__call__` refuses to create an instance of their origin, as `_inst=False` makes them. */
+const UNINSTANTIABLE_ALIASES = new Set(['List', 'Dict', 'Set', 'FrozenSet', 'Tuple', 'Type']);
+
+/** Calling a special form or an alias: an instance of the alias's origin, or CPython's TypeError. */
+function callTypingForm(self: PyOpaque, args: PyValue[], kwargs: Kwargs): PyValue {
+  if (self.cls === unionClass) throw typeError("'typing.Union' object is not callable");
+  const typing = typingForm(self);
+  const form = typing?.form ?? '';
+  if (form === 'Union') throw typeError("cannot create 'typing.Union' instances");
+  const location = ALIAS_ORIGINS[form];
+  if (location && UNINSTANTIABLE_ALIASES.has(form)) {
+    throw typeError(`Type ${form} cannot be instantiated; use ${location[1].toLowerCase()}() instead`);
+  }
+  const origin = location ? aliasOrigin(location) : form === 'Annotated' ? typing?.args?.[0] : undefined;
+  if (origin === undefined) throw typeError(`Cannot instantiate typing.${form}`);
+  const result = callValue(origin, args, kwargs);
+  if (typing?.args !== undefined) {
+    try {
+      setAttribute(result, '__orig_class__', self);
+    } catch (error) {
+      if (!(error instanceof PyError)) throw error;
+    }
+  }
+  return result;
 }
 
 /** The name of a special form, such as `List` of `typing.List`, which an alias of it records. */
@@ -120,6 +146,13 @@ const ALIAS_ORIGINS: Record<string, [string, string]> = {
   Mapping: ['collections.abc', 'Mapping'],
   Generator: ['collections.abc', 'Generator'],
 };
+
+function aliasOrigin([module, name]: [string, string]): PyValue {
+  const runtime = currentRuntime();
+  return module === 'builtins'
+    ? (runtime.builtins.get(name) as PyValue)
+    : getAttribute(runtime.importModule(module), name);
+}
 
 /** `typing._AnyMeta`, the metaclass of `typing.Any`, which CPython makes a class programs may derive from. */
 const anyMetaClass = builtinClass('_AnyMeta', typeClass, true);
@@ -156,11 +189,7 @@ mroEntryHooks.push((base, _className, bases) => {
   if (typing.form === 'Annotated' && typing.args) return [typing.args[0]];
   const location = ALIAS_ORIGINS[typing.form];
   if (!location) throw typeError(`Cannot subclass ${(base as PyOpaque).text}`);
-  const runtime = currentRuntime();
-  const origin =
-    location[0] === 'builtins'
-      ? (runtime.builtins.get(location[1]) as PyValue)
-      : getAttribute(runtime.importModule(location[0]), location[1]);
+  const origin = aliasOrigin(location);
   const entries = bases.includes(origin) ? [] : [origin];
   const later = bases.slice(bases.indexOf(base) + 1);
   const bringsGeneric = later.some(

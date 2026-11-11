@@ -80,8 +80,8 @@ export function recordAnnotation(frame: Frame, annotation: Annotation): void {
 export function evaluateAnnotations(annotations: readonly Annotation[], fake?: FakeNames): PyDict {
   const runtime = currentRuntime();
   const dict = newDict();
-  for (const { name, expression, frame } of annotations) {
-    const value = runtime.evaluator.evaluate(expression, fake ? fakeFrame(frame, fake) : frame);
+  for (const { name, expression, frame, value: given } of annotations) {
+    const value = given ?? runtime.evaluator.evaluate(expression, fake ? fakeFrame(frame, fake) : frame);
     dict.store.set(name, value);
   }
   runtime.allocate(dict.store.size + 1);

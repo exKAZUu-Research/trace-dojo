@@ -6,7 +6,17 @@ import { pyHash } from './hashing';
 import { builtinGetItem, keyError, sliceIndices } from './items';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
-import { builtinIterator, callValue, getItem, getIterator, isTruthy, iterate, lookupSpecial, toArray } from './objects';
+import {
+  builtinIterator,
+  callValue,
+  getItem,
+  getIterator,
+  isTruthy,
+  iterate,
+  lookupSpecial,
+  toArray,
+  withRemaining,
+} from './objects';
 import { builtinContains, contains, equals, lessThan } from './operators';
 import { currentRuntime } from './runtimeContext';
 import {
@@ -226,14 +236,14 @@ function mergeSort(items: number[], less: (a: number, b: number) => boolean): nu
 
 function reversedIterator(sequence: PyList | PyTuple, name: string): PyIterator {
   let index = sequence.items.length - 1;
-  return new PyIterator(
-    iteratorClass(name),
+  const next = withRemaining(
     () => {
       if (index >= sequence.items.length) index = -1;
       return index >= 0 ? sequence.items[index--] : DONE;
     },
-    () => [sequence]
+    () => (index >= 0 && index < sequence.items.length ? index + 1 : 0)
   );
+  return new PyIterator(iteratorClass(name), next, () => [sequence]);
 }
 
 // tuple -------------------------------------------------------------------------------------------------------------

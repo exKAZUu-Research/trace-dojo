@@ -18,6 +18,7 @@ import {
   isCallable,
   lookupSpecial,
   nextOf,
+  remainingOf,
 } from './objects';
 import { objectState, reduce, reduceEx } from './reduction';
 import { currentRuntime } from './runtimeContext';
@@ -262,7 +263,28 @@ export function defineIteratorClass(cls: PyClass): void {
     return value;
   });
   method(cls, '__repr__', 'none', 0, 0, (self) => `<${cls.name} object at ${addressOf(self as PyObject)}>`);
+  if (HINTED_ITERATORS.has(cls.name)) {
+    method(cls, '__length_hint__', 'none', 0, 0, (self) => BigInt(remainingOf((self as PyIterator).next) ?? 0));
+  }
 }
+
+/** The native iterators that know how many items they have left, as their `__length_hint__` tells. */
+const HINTED_ITERATORS = new Set([
+  'list_iterator',
+  'list_reverseiterator',
+  'tuple_iterator',
+  'range_iterator',
+  'longrange_iterator',
+  'str_ascii_iterator',
+  'str_iterator',
+  'dict_keyiterator',
+  'dict_valueiterator',
+  'dict_itemiterator',
+  'set_iterator',
+  'reversed',
+  'collections._deque_iterator',
+  'collections._deque_reverse_iterator',
+]);
 
 for (const cls of iteratorClasses.values()) defineIteratorClass(cls);
 iteratorClassSetup.push(defineIteratorClass);

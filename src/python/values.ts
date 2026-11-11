@@ -139,6 +139,8 @@ export interface Annotation {
   name: string;
   expression: Expression;
   frame: Frame;
+  /** The value of an annotation a function such as `NamedTuple()` was given, which needs no evaluation. */
+  value?: PyValue;
 }
 
 /** The annotations a class body ran, in the order of the source. */

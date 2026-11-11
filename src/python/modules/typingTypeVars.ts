@@ -1,8 +1,12 @@
-import { pyStr } from '../conversions';
+import { CompileError } from '../../interpreter/diagnostics';
+import type { Expression, ScopeInfo } from '../ast';
+import { MappingNamespace } from '../classes';
+import { pyRepr, pyStr } from '../conversions';
 import { builtin, method } from '../define';
 import { Frame } from '../frame';
+import { namespaceOf } from '../namespaces';
 import { getAttribute, isTruthy } from '../objects';
-import { parsePython } from '../parse';
+import { parseDynamicCode } from '../parse';
 import { currentRuntime } from '../runtimeContext';
 import {
   NoDefault,
@@ -13,8 +17,20 @@ import {
   typeVarClass,
   typeVarTupleClass,
 } from '../typeParams';
-import { builtinClass, newDict, newTuple, None, noneClass, typeError, typeName, valueError } from '../types';
-import { type Kwargs, PyClass, PyDict, PyFunction, PyInstance, type PyValue } from '../values';
+import {
+  builtinClass,
+  dictClass,
+  exceptionClassNamed,
+  newDict,
+  newException,
+  newTuple,
+  None,
+  noneClass,
+  typeError,
+  typeName,
+  valueError,
+} from '../types';
+import { type Kwargs, PyClass, PyDict, PyError, PyFunction, PyInstance, PyModule, type PyValue } from '../values';
 
 /** The keyword arguments each kind of type parameter takes, beside its name. */
 const KEYWORDS: Record<TypeParamKind, string[]> = {
@@ -95,43 +111,86 @@ method(newTypeClass, '__ror__', 'one', 1, 1, (self, [other]) => currentRuntime()
 
 // get_type_hints --------------------------------------------------------------------------------------------------------
 
-/** `typing.get_type_hints(obj)`: the annotations of a function or a class and its bases, with strings evaluated. */
+/**
+ * `typing.get_type_hints(obj, globalns=None, localns=None)`: the annotations of a function or module, or of a class
+ * and its bases, with strings evaluated in the namespaces CPython chooses.
+ */
 export function getTypeHints(args: PyValue[], kwargs: Kwargs): PyValue {
-  const [target] = args;
-  if (kwargs?.get('globalns') !== undefined || kwargs?.get('localns') !== undefined || args.length > 1) {
-    throw currentRuntime().unsupported('get_type_hints() の globalns・localns');
-  }
+  const [target, globalArgument, localArgument] = ['obj', 'globalns', 'localns'].map(
+    (name, index) => args[index] ?? kwargs?.get(name) ?? None
+  );
+  const globalns = globalArgument === None ? undefined : namespaceOfMapping(globalArgument);
+  const localns = localArgument === None ? undefined : namespaceOfMapping(localArgument);
   const hints = newDict();
   const runtime = currentRuntime();
-  const mainGlobals = runtime.frames[0]?.globals ?? new Map<string, PyValue>();
-  const sources: [PyValue, Map<string, PyValue>][] =
-    target instanceof PyClass
-      ? target.mro.toReversed().map((cls) => [classAnnotations(cls), mainGlobals])
-      : [[getAttribute(target, '__annotations__'), target instanceof PyFunction ? target.globals : mainGlobals]];
-  for (const [annotations, globals] of sources) {
-    if (!(annotations instanceof PyDict)) continue;
+  if (target instanceof PyClass) {
+    for (const cls of target.mro.toReversed()) {
+      const annotations = cls.isBuiltin ? undefined : getAttribute(cls, '__annotations__');
+      if (!(annotations instanceof PyDict)) continue;
+      let baseGlobals = globalns ?? moduleGlobals(cls.module);
+      let baseLocals: Map<string, PyValue> = localns ?? new Map(cls.dict);
+      // CPython swaps them when neither is given, so that the class's names shadow the module's.
+      if (!globalns && !localns) [baseGlobals, baseLocals] = [baseLocals, baseGlobals];
+      for (const entry of annotations.store.ordered()) {
+        hints.store.set(entry.key, resolveHint(entry.value, baseGlobals, baseLocals));
+      }
+    }
+    return hints;
+  }
+  const annotations = getAttribute(target, '__annotations__');
+  const ownGlobals =
+    target instanceof PyFunction
+      ? target.globals
+      : target instanceof PyModule
+        ? target.dict
+        : new Map<string, PyValue>();
+  const globals = globalns ?? ownGlobals;
+  if (annotations instanceof PyDict) {
     for (const entry of annotations.store.ordered()) {
-      hints.store.set(entry.key, resolveHint(entry.value, globals));
+      hints.store.set(entry.key, resolveHint(entry.value, globals, localns ?? globals));
     }
   }
+  runtime.allocate(hints.store.size + 1);
   return hints;
 }
 
-function classAnnotations(cls: PyClass): PyValue {
-  if (cls.isBuiltin) return None;
-  return getAttribute(cls, '__annotations__');
+function namespaceOfMapping(value: PyValue): Map<string, PyValue> {
+  return value instanceof PyDict && value.cls === dictClass ? namespaceOf(value) : new MappingNamespace(value);
+}
+
+function moduleGlobals(name: string): Map<string, PyValue> {
+  const module = currentRuntime().modules.get(name);
+  if (module) return module.dict;
+  return name === '__main__' ? (currentRuntime().frames[0]?.globals ?? new Map()) : new Map();
 }
 
 /** A hint as `get_type_hints` gives it: a string evaluated as an expression, and None as NoneType. */
-function resolveHint(hint: PyValue, globals: Map<string, PyValue>): PyValue {
+function resolveHint(hint: PyValue, globals: Map<string, PyValue>, locals: Map<string, PyValue>): PyValue {
   if (hint === None) return noneClass;
   if (typeof hint !== 'string') return hint;
-  const module = parsePython(hint.trim());
-  const [statement] = module.body;
-  if (module.body.length !== 1 || statement.kind !== 'expression') {
-    throw currentRuntime().unsupported(`get_type_hints() で、式でない文字列の型ヒント（${hint}）`);
-  }
-  const frame = new Frame('module', globals, new Map(), globals, undefined, false, module.scope);
-  const value = currentRuntime().evaluator.evaluate(statement.expression, frame);
+  const expression = forwardReference(hint);
+  const runtime = currentRuntime();
+  const frame = new Frame('module', locals, new Map(), globals, undefined, true, expression.scope);
+  const value = runtime.evaluator.evaluate(expression.expression, frame);
   return value === None ? noneClass : value;
+}
+
+/** The expression a string hint holds, as `ForwardRef.__forward_code__` compiles it. */
+function forwardReference(hint: string): { expression: Expression; scope: ScopeInfo } {
+  const invalid = (): PyError =>
+    new PyError(
+      newException(exceptionClassNamed('SyntaxError'), [
+        `Forward reference must be an expression -- got ${pyRepr(hint)}`,
+      ])
+    );
+  let module;
+  try {
+    module = parseDynamicCode(hint.trimStart().startsWith('*') ? `(${hint},)[0]` : hint);
+  } catch (error) {
+    if (error instanceof CompileError) throw invalid();
+    throw error;
+  }
+  const [statement] = module.body;
+  if (module.body.length !== 1 || statement.kind !== 'expression') throw invalid();
+  return { expression: statement.expression, scope: module.scope };
 }

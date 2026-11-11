@@ -1,5 +1,6 @@
 import { PyBytes } from '../bytesValues';
 import { pyRepr } from '../conversions';
+import { SYS_BUILTIN_MODULE_NAMES, SYS_STDLIB_MODULE_NAMES } from '../data/sysModuleNames';
 import { builtin, method } from '../define';
 import type { Frame } from '../frame';
 import { isSupportedModule } from '../moduleNames';
@@ -14,6 +15,7 @@ import {
   classOf,
   Ellipsis,
   moduleClass,
+  newSet,
   newTuple,
   None,
   NotImplemented,
@@ -67,6 +69,9 @@ export function sysInformation(runtime: Runtime): [string, PyValue][] {
     ['intern', builtin('intern', 'one', 1, 1, ([value]) => intern(value))],
     ['exc_info', builtin('exc_info', 'none', 0, 0, () => excInfo(runtime))],
     ['_getframe', builtin('_getframe', 'expected', 0, 1, getFrame)],
+    ['stdlib_module_names', newSet(SYS_STDLIB_MODULE_NAMES, true)],
+    ['builtin_module_names', newTuple([...SYS_BUILTIN_MODULE_NAMES])],
+    ['audit', builtin('audit', 'expected', 1, Number.POSITIVE_INFINITY, audit)],
     ['exception', builtin('exception', 'none', 0, 0, () => runtime.evaluator.handledExceptions.at(-1) ?? None)],
     ['modules', namespaceDict(moduleTable(runtime))],
   ];
@@ -289,6 +294,12 @@ function excInfo(runtime: Runtime): PyValue {
   const exception = runtime.evaluator.handledExceptions.at(-1);
   if (!exception) return newTuple([None, None, None]);
   return currentRuntime().tuple([exception.cls, exception, exception.exception?.traceback ?? None]);
+}
+
+/** `sys.audit(event, *args)`, which calls no hooks, as no program can add one here. */
+function audit([event]: PyValue[]): PyValue {
+  if (typeof event !== 'string') throw typeError(`audit() argument 1 must be str, not ${typeName(event)}`);
+  return None;
 }
 
 /** `sys._getframe(depth=0)`: the frame object `depth` calls below the caller's. */

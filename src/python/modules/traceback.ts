@@ -16,15 +16,27 @@ __all__ = ['print_exc', 'format_exception_only', 'print_exception', 'print_stack
 _sentinel = object()
 
 
-def format_exception_only(exc, /, value=_sentinel, *, show_group=False):
+def format_exception_only(exc, /, value=_sentinel, *, show_group=False, **kwargs):
     if value is _sentinel:
         value = exc
     if value is None:
         return ['NoneType: None\n']
-    if show_group and isinstance(value, BaseExceptionGroup):
-        _unsupported('traceback.format_exception_only() の show_group=True')
+    return _format_exception_only(value, show_group, 0)
+
+
+def _format_exception_only(value, show_group, depth):
     head, notes = _describe(value)
-    return [head + '\n'] + [note + '\n' for note in notes]
+    indent = 3 * depth * ' '
+    if depth > 0:
+        lines = [indent + line + '\n' for line in head.split('\n')]
+    else:
+        lines = [head + '\n']
+    for note in notes:
+        lines.extend(indent + line + '\n' for line in note.split('\n'))
+    if show_group and isinstance(value, BaseExceptionGroup):
+        for exception in value.exceptions:
+            lines.extend(_format_exception_only(exception, show_group, depth + 1))
+    return lines
 
 
 def _print_lines(lines, file):

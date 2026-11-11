@@ -656,8 +656,17 @@ export class ProgramConverter extends ExpressionConverter {
     if (boundInner?.type === 'tuple')
       param.constraints = namedChildren(boundInner).map((each) => this.expression(each));
     else if (boundNode) param.bound = this.expression(boundNode);
-    if (defaultNode?.type === 'list_splat') unsupported(defaultNode, '* を付けた型引数のデフォルト');
-    if (defaultNode) param.default = this.expression(defaultNode);
+    if (defaultNode?.type === 'list_splat') {
+      // A TypeVarTuple's `= *X` defaults to the one item that unpacking X gives, as `[*X][0]`.
+      const row = rowOf(defaultNode);
+      const value = this.expression(namedChildren(defaultNode)[0]);
+      param.default = {
+        kind: 'subscript',
+        object: { kind: 'list', elements: [{ kind: 'starred', value, row }], row },
+        index: { kind: 'constant', value: { kind: 'int', value: 0n }, row },
+        row,
+      };
+    } else if (defaultNode) param.default = this.expression(defaultNode);
   }
 
   /** `type Name[T] = value`. */

@@ -8,7 +8,16 @@ import { keyError } from '../items';
 import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
-import { callValue, getIterator, isCallable, isTruthy, iterate, lookupSpecial, toArray } from '../objects';
+import {
+  callValue,
+  getIterator,
+  isCallable,
+  isTruthy,
+  iterate,
+  lookupSpecial,
+  toArray,
+  withRemaining,
+} from '../objects';
 import { binaryOp, equals, keysEqual, lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { containerRepr, dictBody, updateDict } from '../typeContainers';
@@ -181,10 +190,13 @@ method(dequeClass, '__iter__', 'none', 0, 0, (self) => {
   const length = deque.items.length;
   return new PyIterator(
     iteratorClass('collections._deque_iterator'),
-    () => {
-      if (deque.items.length !== length) throw pyError('RuntimeError', 'deque mutated during iteration');
-      return index < deque.items.length ? deque.items[index++] : DONE;
-    },
+    withRemaining(
+      () => {
+        if (deque.items.length !== length) throw pyError('RuntimeError', 'deque mutated during iteration');
+        return index < deque.items.length ? deque.items[index++] : DONE;
+      },
+      () => length - index
+    ),
     () => [deque]
   );
 });
@@ -193,7 +205,10 @@ method(dequeClass, '__reversed__', 'none', 0, 0, (self) => {
   let index = 0;
   return new PyIterator(
     iteratorClass('collections._deque_reverse_iterator'),
-    () => (index < items.length ? items[index++] : DONE),
+    withRemaining(
+      () => (index < items.length ? items[index++] : DONE),
+      () => items.length - index
+    ),
     () => items
   );
 });

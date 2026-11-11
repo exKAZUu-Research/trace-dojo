@@ -28,6 +28,7 @@ import {
   nextOf,
   setAttribute,
   toArray,
+  withRemaining,
 } from './objects';
 import { binaryOp, compareOp } from './operators';
 import { callerGlobals, callerLocals, callerNames, vars } from './reflection';
@@ -200,11 +201,11 @@ reversedClass.construct = (_cls, args, kwargs) => {
     throw typeError(`'${typeName(sequence)}' object is not reversible`);
   }
   let index = BigInt(lengthOf(sequence)) - 1n;
-  return new PyIterator(
-    reversedClass,
+  const next = withRemaining(
     () => (index >= 0n ? getItem(sequence, index--) : DONE),
-    () => [sequence]
+    () => (index >= 0n && BigInt(lengthOf(sequence)) > index ? Number(index) + 1 : 0)
   );
+  return new PyIterator(reversedClass, next, () => [sequence]);
 };
 
 for (const cls of [enumerateClass, zipClass, mapClass, filterClass, reversedClass]) defineIteratorClass(cls);
