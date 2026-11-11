@@ -1,10 +1,18 @@
-// code-gauge-allow-file fileNcss 514 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 517 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from './conversions';
 import { method } from './define';
 import { pyHash } from './hashing';
 import { definePythonLevelNew } from './instances';
 import { defineProperty } from './modules/numberSupport';
-import { attributeError, callValue, getAttributeOrUndefined, isTruthy, setAttribute, toArray } from './objects';
+import {
+  attributeError,
+  callValue,
+  getAttributeOrUndefined,
+  getIterator,
+  isTruthy,
+  setAttribute,
+  toArray,
+} from './objects';
 import { equals } from './operators';
 import { currentRuntime } from './runtimeContext';
 import { genericClass, PyTypeParam, PyTypingAlias } from './typeParams';
@@ -19,6 +27,7 @@ import {
   noneClass,
   NotImplemented,
   objectClass,
+  tupleClass,
   typeClass,
   typeError,
 } from './types';
@@ -47,6 +56,8 @@ export interface AliasData {
   name?: string;
   /** Whether calling the alias creates an instance of its origin. */
   inst?: boolean;
+  /** Whether a types.GenericAlias is unpacked, as `*tuple[int]`, which iterating over an alias gives. */
+  starred?: boolean;
 }
 
 /** A typing alias that is not yet specialized, such as `typing.List`. */
@@ -141,7 +152,8 @@ function genericAliasRepr(alias: AliasData): string {
   const items = alias.args.map((arg) =>
     arg instanceof PyList ? `[${arg.items.map(argumentRepr).join(', ')}]` : argumentRepr(arg)
   );
-  return `${argumentRepr(alias.origin)}[${items.length === 0 ? '()' : items.join(', ')}]`;
+  const text = `${argumentRepr(alias.origin)}[${items.length === 0 ? '()' : items.join(', ')}]`;
+  return alias.starred ? `*${text}` : text;
 }
 
 function typingAliasRepr(self: PyOpaque): string {
@@ -575,6 +587,7 @@ method(genericAliasClass, '__eq__', 'one', 1, 1, (self, [other]) => {
   const a = aliasOf(self);
   const b = aliasOf(other);
   return (
+    Boolean(a.starred) === Boolean(b.starred) &&
     equals(a.origin, b.origin) &&
     a.args.length === b.args.length &&
     a.args.every((arg, index) => equals(arg, b.args[index]))
@@ -612,8 +625,10 @@ const genericAliasAttribute: AttributeHook = (self, name) => {
   if (name === '__origin__') return alias.origin;
   if (name === '__args__') return newTuple(alias.args);
   if (name === '__parameters__') return newTuple(collectParameters(alias.args));
-  if (name === '__unpacked__') return false;
-  if (name === '__typing_unpacked_tuple_args__') return None;
+  if (name === '__unpacked__') return Boolean(alias.starred);
+  if (name === '__typing_unpacked_tuple_args__') {
+    return alias.starred && alias.origin === tupleClass ? newTuple(alias.args) : None;
+  }
   if (GENERIC_ALIAS_OWN.has(name)) return;
   return getAttributeOrUndefined(alias.origin, name);
 };
@@ -634,6 +649,9 @@ method(genericAliasClass, '__dir__', 'none', 0, 0, (self) => {
     '__mro_entries__',
   ]);
 });
+method(genericAliasClass, '__iter__', 'none', 0, 0, (self) =>
+  getIterator(newTuple([new PyOpaque(genericAliasClass, '', { ...aliasOf(self), starred: true } satisfies AliasData)]))
+);
 method(genericAliasClass, '__mro_entries__', 'one', 1, 1, (self) => newTuple([aliasOf(self).origin]));
 method(genericAliasClass, '__reduce__', 'none', 0, 0, (self) =>
   newTuple([genericAliasClass, newTuple([aliasOf(self).origin, newTuple(aliasOf(self).args)])])

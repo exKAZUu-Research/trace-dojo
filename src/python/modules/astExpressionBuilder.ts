@@ -65,7 +65,9 @@ export class AstExpressionBuilder {
     protected readonly source: string,
     private readonly classes: Map<string, PyValue>,
     /** The field-less nodes, such as `Load()`, which CPython shares between all the trees of a run. */
-    private readonly singletons: Map<string, PyValue>
+    private readonly singletons: Map<string, PyValue>,
+    /** Creates the SyntaxError of a tree the grammar accepts but CPython's parser rejects. */
+    private readonly syntaxError: (reason: string) => Error
   ) {
     for (let index = 0; index < source.length; index++) if (source[index] === '\n') this.lineStarts.push(index + 1);
   }
@@ -517,25 +519,32 @@ export class AstExpressionBuilder {
     const strings = node.type === 'concatenated_string' ? namedChildren(node) : [node];
     const prefixes = strings.map((string) => prefixOf(string));
     const at = this.location(node);
+    const templates = prefixes.filter((prefix) => prefix.includes('t')).length;
+    if (templates > 0 && templates < prefixes.length) {
+      throw this.syntaxError('cannot mix t-string literals with string or bytes literals');
+    }
     if (prefixes.some((prefix) => prefix.includes('b'))) {
+      if (!prefixes.every((prefix) => prefix.includes('b')))
+        throw this.syntaxError('cannot mix bytes and nonbytes literals');
       const data = strings.flatMap((string, index) => [...this.bytesOf(string, prefixes[index].includes('r'))]);
       return this.make('Constant', { value: newBytes(Uint8Array.from(data)), kind: None }, at);
     }
     const kind = prefixes[0] === 'u' ? 'u' : None;
-    if (!prefixes.some((prefix) => prefix.includes('f'))) {
+    if (templates === 0 && !prefixes.some((prefix) => prefix.includes('f'))) {
       const value = strings.map((string, index) => this.textOf(string, prefixes[index])).join('');
       return this.make('Constant', { value, kind }, at);
     }
     const parts: Part[] = [];
     for (const [index, string] of strings.entries()) {
-      if (prefixes[index].includes('f')) this.formattedParts(string, prefixes[index].includes('r'), parts);
+      if (/[ft]/.test(prefixes[index])) this.formattedParts(string, prefixes[index], parts);
       else parts.push({ text: this.textOf(string, prefixes[index]), start: string.startIndex, end: string.endIndex });
     }
-    return this.make('JoinedStr', { values: this.joinParts(parts) }, at);
+    return this.make(templates > 0 ? 'TemplateStr' : 'JoinedStr', { values: this.joinParts(parts) }, at);
   }
 
-  /** The texts and the replacement fields of an f-string, between its quotes. */
-  private formattedParts(string: Node, isRaw: boolean, parts: Part[]): void {
+  /** The texts and the replacement fields of an f-string or a t-string, between its quotes. */
+  private formattedParts(string: Node, prefix: string, parts: Part[]): void {
+    const isRaw = prefix.includes('r');
     const nodes = children(string);
     const startNode = nodes[0];
     const quote = startNode.text.replace(/^[a-zA-Z]+/, '');
@@ -548,14 +557,14 @@ export class AstExpressionBuilder {
     for (const child of nodes.slice(1, -1)) {
       if (child.type !== 'interpolation') continue;
       pushText(child.startIndex);
-      this.replacementField(child, isRaw, parts);
+      this.replacementField(child, isRaw, parts, prefix.includes('t'));
       position = child.endIndex;
     }
     pushText((nodes.at(-1) as Node).endIndex - quote.length);
   }
 
-  /** A `{...}` replacement field: a FormattedValue, after the text a `=` shows. */
-  private replacementField(node: Node, isRaw: boolean, parts: Part[]): void {
+  /** A `{...}` replacement field: a FormattedValue, or a t-string's Interpolation, after the text a `=` shows. */
+  private replacementField(node: Node, isRaw: boolean, parts: Part[], isTemplate = false): void {
     const expressionNode = field(node, 'expression');
     const value =
       expressionNode.type === 'expression_list'
@@ -571,6 +580,14 @@ export class AstExpressionBuilder {
       if (!conversionNode && !specNode) conversion = 114n;
     }
     const formatSpec = specNode ? this.formatSpec(specNode, isRaw) : None;
+    if (isTemplate) {
+      // The expression's text runs to the `=`, the conversion, the specifier, or the closing brace.
+      const end = (equals ?? conversionNode ?? specNode ?? (children(node).at(-1) as Node)).startIndex;
+      const text = this.source.slice(node.startIndex + 1, end);
+      const fields = { value, str: text, conversion, format_spec: formatSpec };
+      parts.push({ node: this.make('Interpolation', fields, this.location(node)) });
+      return;
+    }
     parts.push({
       node: this.make('FormattedValue', { value, conversion, format_spec: formatSpec }, this.location(node)),
     });

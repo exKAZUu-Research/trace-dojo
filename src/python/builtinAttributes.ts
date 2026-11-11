@@ -3,12 +3,14 @@ import { enumerateClass } from './builtins';
 import { method } from './define';
 import { sliceIndices } from './items';
 import { defineProperty } from './modules/numberSupport';
+import { namespaceDict } from './namespaces';
 import { exactBinary, scaleToFloat, toIndex } from './numbers';
 import { bindValue, callValue, getAttribute, setAttribute } from './objects';
 import { binaryOp } from './operators';
 import { currentRuntime } from './runtimeContext';
 import { newGenericAlias } from './typeHints';
 import {
+  asyncGeneratorClass,
   baseExceptionClass,
   boolClass,
   builtinFunctionClass,
@@ -16,6 +18,7 @@ import {
   classmethodClass,
   classOf,
   complexClass,
+  coroutineClass,
   dictClass,
   dictItemsClass,
   dictKeysClass,
@@ -233,7 +236,17 @@ function floatFromHex(text: string): number {
 
 method(strClass, '__getnewargs__', 'none', 0, 0, (self) => newTuple([unbox(self)]));
 method(tupleClass, '__getnewargs__', 'none', 0, 0, (self) => newTuple([...(self as PyTuple).items]));
-for (const cls of [listClass, tupleClass, dictClass, setClass, frozensetClass, enumerateClass, generatorClass]) {
+for (const cls of [
+  listClass,
+  tupleClass,
+  dictClass,
+  setClass,
+  frozensetClass,
+  enumerateClass,
+  generatorClass,
+  coroutineClass,
+  asyncGeneratorClass,
+]) {
   classGetItem(cls);
 }
 
@@ -312,8 +325,10 @@ function objclassOf(fn: PyBuiltinFunction): PyValue {
 // Generators --------------------------------------------------------------------------------------------------------
 
 const asGenerator = (self: PyValue): PyGenerator => self as PyGenerator;
-defineProperty(generatorClass, '__name__', (self) => asGenerator(self).name);
-defineProperty(generatorClass, '__qualname__', (self) => asGenerator(self).qualifiedName);
+for (const cls of [generatorClass, coroutineClass, asyncGeneratorClass]) {
+  defineProperty(cls, '__name__', (self) => asGenerator(self).name);
+  defineProperty(cls, '__qualname__', (self) => asGenerator(self).qualifiedName);
+}
 defineProperty(generatorClass, 'gi_running', (self) => asGenerator(self).running);
 defineProperty(
   generatorClass,
@@ -388,7 +403,7 @@ defineProperty(superClass, '__thisclass__', (self) => asSuper(self).thisClass);
 
 defineProperty(functionClass, '__closure__', (self) => closureOf(self as PyFunction));
 unsupportedProperty(functionClass, '__code__', '関数のコードオブジェクト（__code__）');
-unsupportedProperty(functionClass, '__globals__', '関数の __globals__（モジュールの名前空間そのもの）');
+defineProperty(functionClass, '__globals__', (self) => namespaceDict((self as PyFunction).globals));
 unsupportedProperty(functionClass, '__builtins__', '関数の __builtins__（組み込みの名前空間そのもの）');
 for (const cls of [functionClass, methodClass, builtinFunctionClass, methodDescriptorClass]) {
   method(

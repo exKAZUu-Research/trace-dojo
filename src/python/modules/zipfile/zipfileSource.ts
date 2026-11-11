@@ -1,4 +1,5 @@
-// CPython 3.14's `Lib/zipfile/__init__.py`, over the io base classes written in Python, since this grader's io module has none, importing its package by absolute names, with shutil and importlib.util imported where extracting to and compiling from the file system uses them, and compression.zstd, which this grader lacks, left out.
+// CPython 3.14's `Lib/zipfile/__init__.py`, over the io base classes written in Python, since this grader's io module has none, importing its package by absolute names, with shutil and importlib.util imported where extracting to and compiling from the file system uses them, and compression.zstd, which this grader lacks, left out. `_for_archive` stamps entries with the current time without reading the
+// `SOURCE_DATE_EPOCH` environment variable, which this grader has none of, as CPython does when it is unset.
 export const ZIPFILE_SOURCE =
   String.raw`"""
 Read and write ZIP files.
@@ -672,13 +673,7 @@ class ZipInfo:
 
         Return self.
         """
-        # gh-91279: Set the SOURCE_DATE_EPOCH to a specific timestamp
-        source_date_epoch = os.environ.get('SOURCE_DATE_EPOCH')
-
-        if source_date_epoch:
-            self.date_time = time.gmtime(int(source_date_epoch))[:6]
-        else:
-            self.date_time = time.localtime(time.time())[:6]
+        self.date_time = time.localtime(time.time())[:6]
 
         self.compress_type = archive.compression
         self.compress_level = archive.compresslevel

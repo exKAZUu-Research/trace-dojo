@@ -1,11 +1,11 @@
 import { builtin } from '../define';
 import { isSupportedModule, missingCodecModule, unsupportedModuleFeature } from '../moduleNames';
-import { registerModule } from '../modules';
+import { registerModule, reloadModule } from '../modules';
 import { getAttribute, isTruthy } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import { nativeFunction, None, pyError, typeError, valueError } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
-import { type Kwargs, PyInstance, type PyModule, type PyValue } from '../values';
+import { type Kwargs, PyInstance, PyModule, type PyValue } from '../values';
 import { bindArguments } from './numberSupport';
 
 /** `__import__(name, globals=None, locals=None, fromlist=(), level=0)`, for the modules this grader implements. */
@@ -41,6 +41,7 @@ registerModule(
   'importlib',
   () =>
     new Map<string, PyValue>([
+      ['__doc__', 'A pure Python implementation of import.'],
       [
         'import_module',
         nativeFunction('import_module', (args, kwargs) => {
@@ -57,9 +58,15 @@ registerModule(
       ],
       // The finders of the standard library, the only modules a program may import here, cache nothing to drop.
       ['invalidate_caches', builtin('invalidate_caches', 'none', 0, 0, () => None)],
+      [
+        'reload',
+        builtin('reload', 'one', 1, 1, ([module]) => {
+          if (!(module instanceof PyModule)) throw typeError('reload() argument must be a module');
+          return reloadModule(currentRuntime(), module);
+        }),
+      ],
     ]),
   {
-    reload: 'モジュールの再読み込み（importlib.reload()）',
     resources: 'importlib.resources',
     metadata: 'importlib.metadata',
     util: 'importlib.util',

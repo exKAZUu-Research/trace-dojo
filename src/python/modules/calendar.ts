@@ -1,7 +1,8 @@
 import { registerUnsupportedAttributes } from '../modules';
 import { registerSourceModule } from '../sourceModules';
 
-// CPython's `calendar.py` without the `locale` module, which only the locale calendars use.
+// CPython's `calendar.py`, with the locale calendars switching only to and from the "C" locale a program starts in,
+// since any other locale depends on the machine.
 const SOURCE = String.raw`
 """Calendar printing functions
 
@@ -588,6 +589,16 @@ class HTMLCalendar(Calendar):
         return ''.join(v).encode(encoding, "xmlcharrefreplace")
 
 
+class _locale:
+    LC_TIME = 2
+
+    @staticmethod
+    def setlocale(category, locale=None):
+        if locale is None or locale == 'C' or locale == 'POSIX':
+            return 'C'
+        _unsupported('ロケール（地域の設定）の切り替え')
+
+
 class different_locale:
     def __init__(self, locale):
         self.locale = locale
@@ -930,7 +941,5 @@ def main(args=None):
 
 registerSourceModule('calendar', SOURCE);
 registerUnsupportedAttributes('calendar', {
-  LocaleTextCalendar: 'ロケール（地域の設定）を使う calendar.LocaleTextCalendar',
-  LocaleHTMLCalendar: 'ロケール（地域の設定）を使う calendar.LocaleHTMLCalendar',
   main: 'コマンドラインから使う calendar.main()',
 });

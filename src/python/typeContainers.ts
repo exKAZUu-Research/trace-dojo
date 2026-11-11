@@ -1,9 +1,11 @@
+// code-gauge-allow-file fileNcss 401 -- The list, tuple, and dict types keep their methods together.
 import { pyRepr } from './conversions';
 import { method } from './define';
 import { DictStore } from './dictStore';
 import { mappingEntries } from './expressionEvaluator';
 import { pyHash } from './hashing';
 import { builtinGetItem, keyError, sliceIndices } from './items';
+import { clamp, reduction, withState } from './iteratorStates';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
 import {
@@ -196,24 +198,31 @@ function sequenceIndex(
 
 /** Sorts a list in place, stably, with keys computed once each, as `list.sort` does. */
 export function sortList(list: PyList, key: PyValue, reverse: boolean): void {
+  // As in CPython, the list is empty while the keys are computed and the items compared.
   const original = list.items;
-  const keys = key === None ? original : original.map((item) => callValue(key, [item]));
-  const indices = original.map((_, index) => index);
-  if (reverse) indices.reverse();
   list.items = [];
-  const runtime = currentRuntime();
   try {
-    const sorted = mergeSort(indices, (a, b) => {
-      runtime.spend();
-      return lessThan(keys[a], keys[b]);
-    });
-    if (reverse) sorted.reverse();
-    if (list.items.length > 0) throw valueError('list modified during sort');
-    list.items = sorted.map((index) => original[index]);
+    const keys = key === None ? original : original.map((item) => callValue(key, [item]));
+    sortByKeys(list, original, keys, reverse);
   } catch (error) {
     if (list.items.length === 0) list.items = original;
     throw error;
   }
+}
+
+/** Puts the items `sortList` took out of a list back in the order of their keys, stably. */
+export function sortByKeys(list: PyList, original: PyValue[], keys: PyValue[], reverse: boolean): void {
+  const indices = original.map((_, index) => index);
+  if (reverse) indices.reverse();
+  const runtime = currentRuntime();
+  const sorted = mergeSort(indices, (a, b) => {
+    runtime.spend();
+    return lessThan(keys[a], keys[b]);
+  });
+  if (reverse) sorted.reverse();
+  const modified = list.items.length > 0;
+  list.items = sorted.map((index) => original[index]);
+  if (modified) throw valueError('list modified during sort');
 }
 
 /** A stable merge sort that only asks whether one item is less than another, as Python's sort does. */
@@ -243,6 +252,15 @@ function reversedIterator(sequence: PyList | PyTuple, name: string): PyIterator 
     },
     () => (index >= 0 && index < sequence.items.length ? index + 1 : 0)
   );
+  withState(next, {
+    reduce: () =>
+      index >= 0 && index < sequence.items.length
+        ? reduction('reversed', [sequence], BigInt(index))
+        : reduction('reversed', [sequence instanceof PyList ? newList([]) : newTuple([])]),
+    setState: (state) => {
+      if (index >= 0) index = clamp(state, -1, sequence.items.length - 1);
+    },
+  });
   return new PyIterator(iteratorClass(name), next, () => [sequence]);
 }
 

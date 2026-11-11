@@ -235,6 +235,7 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
   functools: { kind: 'source' },
   gc: { kind: 'builtin' },
   getopt: { kind: 'source', imports: { os: 'os' } },
+  gettext: { kind: 'source', imports: { operator: 'operator', os: 'os', sys: 'sys' } },
   glob: {
     kind: 'source',
     imports: {
@@ -396,6 +397,19 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
   posixpath: {
     kind: 'frozen',
     imports: { errno: 'errno', genericpath: 'genericpath', os: 'os', stat: 'stat', sys: 'sys' },
+  },
+  plistlib: {
+    kind: 'source',
+    imports: {
+      binascii: 'binascii',
+      codecs: 'codecs',
+      datetime: 'datetime',
+      enum: 'enum',
+      itertools: 'itertools',
+      os: 'os',
+      re: 're',
+      struct: 'struct',
+    },
   },
   pprint: { kind: 'source', imports: { _collections: 'collections', _sys: 'sys', _types: 'types' } },
   queue: { kind: 'source', imports: { threading: 'threading', types: 'types' } },

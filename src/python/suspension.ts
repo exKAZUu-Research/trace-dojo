@@ -49,8 +49,10 @@ function markCalls(statements: Statement[], marksHere: boolean): void {
 
 /** Marks an expression and its parts that may suspend, returning whether it may. */
 export function markSuspendingExpression(expression: Expression): boolean {
+  if (callsSuspend) markThreadParts(expression);
   const suspends =
     markAll(partsOf(expression)) ||
+    (callsSuspend && expression.kind === 'comprehension') ||
     (callsSuspend && expression.kind === 'call') ||
     expression.kind === 'yield' ||
     expression.kind === 'yieldFrom' ||
@@ -58,6 +60,25 @@ export function markSuspendingExpression(expression: Expression): boolean {
     (expression.kind === 'comprehension' && markAsyncComprehension(expression));
   if (suspends) expression.suspends = true;
   return suspends;
+}
+
+/**
+ * Marks, in a program that runs threads, the parts of an expression that run in a frame of their own, where a call may
+ * also wait for another thread: a lambda's body, and a comprehension's clauses and elements, which a comprehension
+ * then runs step by step.
+ */
+function markThreadParts(expression: Expression): void {
+  if (expression.kind === 'lambda' && !Array.isArray(expression.fn.body)) {
+    markSuspendingExpression(expression.fn.body);
+  } else if (expression.kind === 'comprehension') {
+    const [first, ...rest] = expression.generators;
+    markAll([
+      ...first.conditions,
+      ...rest.flatMap((generator) => [generator.iterable, ...generator.conditions]),
+      expression.element,
+      expression.value,
+    ]);
+  }
 }
 
 /**

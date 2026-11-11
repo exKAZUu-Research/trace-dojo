@@ -23,7 +23,7 @@ import type { ProgramSource } from './programSource';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
 import { DEFAULT_SWITCH_INTERVAL, type Scheduler } from './threads';
-import { noteUnwinding } from './tracebacks';
+import { noteUnwinding, setFrameGenerator } from './tracebacks';
 import { newGenericAlias, unionOf } from './typeHints';
 import { boundSuper } from './typeObject';
 import { genericClass, subscriptGeneric } from './typeParams';
@@ -266,16 +266,42 @@ export class Runtime {
   }
 
   private newGenerator(fn: PyFunction, frame: Frame): PyGenerator {
-    const { evaluator } = this;
-    const body = evaluator.runGenerator(fn, frame);
-    // The exceptions the generator handles where it suspended, which its caller does not handle.
-    let handling: PyInstance[] = [];
     const { scope } = fn.def;
     const cls = scope.isAsync ? (scope.isGenerator ? asyncGeneratorClass : coroutineClass) : generatorClass;
-    const generator: PyGenerator = new PyGenerator(
+    const generator = this.frameGenerator(
       cls,
       fn.name,
       fn.qualifiedName,
+      frame,
+      this.evaluator.runGenerator(fn, frame)
+    );
+    if (!scope.isAsync) markIterableCoroutine(generator, fn);
+    return generator;
+  }
+
+  /**
+   * The coroutine that code compiled with `ast.PyCF_ALLOW_TOP_LEVEL_AWAIT` gives when it awaits: running it runs the
+   * code in `frame`, a frame of its own over the namespaces exec() or eval() gave.
+   */
+  newModuleCoroutine(frame: Frame, body: Generator<PyValue, PyValue, PyValue>): PyGenerator {
+    return this.frameGenerator(coroutineClass, '<module>', '<module>', frame, body);
+  }
+
+  /** A generator, coroutine, or async generator object that runs `body` in `frame` step by step. */
+  private frameGenerator(
+    cls: PyClass,
+    name: string,
+    qualifiedName: string,
+    frame: Frame,
+    body: Generator<PyValue, PyValue, PyValue>
+  ): PyGenerator {
+    const { evaluator } = this;
+    // The exceptions the generator handles where it suspended, which its caller does not handle.
+    let handling: PyInstance[] = [];
+    const generator: PyGenerator = new PyGenerator(
+      cls,
+      name,
+      qualifiedName,
       (input) => {
         const callerRow = this.currentRow;
         frame.callRow = callerRow;
@@ -305,7 +331,7 @@ export class Runtime {
       ]
     );
     generator.frame = frame;
-    if (!scope.isAsync) markIterableCoroutine(generator, fn);
+    setFrameGenerator(frame, generator);
     return generator;
   }
 
@@ -556,8 +582,14 @@ const FUNCTION_ATTRIBUTES = [
   '__type_params__',
 ];
 
+/** The attributes of each kind of generator object that its class reads natively. */
+const GENERATOR_ATTRIBUTES: Record<string, string[]> = {
+  generator: ['__del__', 'gi_code', 'gi_frame', 'gi_yieldfrom'],
+  coroutine: ['__del__', 'cr_await', 'cr_code', 'cr_frame', 'cr_origin', 'cr_running', 'cr_suspended'],
+  async_generator: ['__del__', 'ag_await', 'ag_code', 'ag_frame', 'ag_running', 'ag_suspended'],
+};
+
 /** The attribute names `dir()` lists for an object other than a module. */
-// code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of object whose attributes its class reads natively.
 function objectAttributeNames(value: PyValue): Set<string> {
   const names = new Set<string>();
   const add = (keys: Iterable<string>): void => {
@@ -569,8 +601,7 @@ function objectAttributeNames(value: PyValue): Set<string> {
   add(['__class__', '__doc__']);
   if (!cls.isBuiltin || (value instanceof PyClass && !value.isBuiltin)) add(['__dict__', '__module__']);
   if (value instanceof PyFunction) add(FUNCTION_ATTRIBUTES);
-  if (value instanceof PyGenerator && value.cls === generatorClass)
-    add(['__del__', 'gi_code', 'gi_frame', 'gi_yieldfrom']);
+  if (value instanceof PyGenerator) add(GENERATOR_ATTRIBUTES[value.cls.name] ?? []);
   if (value instanceof PyInstance && value.exception) {
     add(['__dict__', 'args', '__traceback__', '__cause__', '__context__', '__suppress_context__']);
   }

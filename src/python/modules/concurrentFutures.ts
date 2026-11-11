@@ -37,6 +37,7 @@ class CancelledError(Error):
     __module__ = 'concurrent.futures._base'
 class InvalidStateError(Error):
     __module__ = 'concurrent.futures._base'
+TimeoutError = TimeoutError
 class _Waiter(object):
     def __init__(self):
         self.event = threading.Event()

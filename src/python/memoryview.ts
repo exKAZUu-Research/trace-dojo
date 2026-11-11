@@ -37,15 +37,7 @@ memoryviewClass.construct = (_cls, args, kwargs) => {
 export function viewOf(value: PyValue): PyMemoryView {
   if (value instanceof PyMemoryView) {
     value.checkReleased();
-    return new PyMemoryView(
-      value.source,
-      value.offset,
-      value.count,
-      value.stride,
-      value.format,
-      value.itemsize,
-      value.readonly
-    );
+    return copyView(value, value.readonly);
   }
   if (!(value instanceof PyBytes)) {
     // A Python class implements the buffer protocol with `__buffer__` (PEP 688).
@@ -91,7 +83,7 @@ function readItem(view: PyMemoryView, index: number): PyValue {
 function writeItem(view: PyMemoryView, index: number, value: PyValue): void {
   const info = NATIVE_CODES[view.format];
   const out = view.source.data;
-  const offset = view.offset + index * view.stride;
+  const offset = view.itemOffset(index);
   const invalid = (kind: 'type' | 'value'): Error =>
     (kind === 'type' ? typeError : valueError)(`memoryview: invalid ${kind} for format '${view.format}'`);
   if (info.kind === 'char') {
@@ -136,23 +128,55 @@ function sliceView(view: PyMemoryView, slice: PySlice): PyMemoryView {
   );
 }
 
-/** A slice of the rows of a multi-dimensional view, which stays C-contiguous for a step of 1. */
+/** A slice of the rows of a multi-dimensional view, whose rows a step other than 1 sets apart. */
 function sliceRows(view: PyMemoryView, slice: PySlice): PyMemoryView {
   const [rows, ...rest] = view.shape as number[];
   const { start, step, count } = sliceIndices(slice, rows);
-  if (step !== 1 && count > 1) throw new UnsupportedFeatureError('多次元の memoryview の、step を指定したスライス');
-  const rowItems = rest.reduce((product, each) => product * each, 1);
+  const rowStride = rowStrideOf(view);
   const sliced = new PyMemoryView(
     view.source,
-    view.offset + start * rowItems * view.itemsize,
-    count * rowItems,
+    view.offset + start * rowStride,
+    count * rest.reduce((product, each) => product * each, 1),
     view.itemsize,
     view.format,
     view.itemsize,
     view.readonly
   );
   sliced.shape = [count, ...rest];
+  if (rowStride * step !== naturalRowStride(sliced)) sliced.rowStride = rowStride * step;
   return sliced;
+}
+
+/** The distance in bytes between the rows of a multi-dimensional view. */
+function rowStrideOf(view: PyMemoryView): number {
+  return view.rowStride ?? naturalRowStride(view);
+}
+
+/** The distance between the rows of a multi-dimensional view whose rows follow one another. */
+function naturalRowStride(view: PyMemoryView): number {
+  return (view.shape as number[]).slice(1).reduce((product, size) => product * size, view.itemsize);
+}
+
+/** Whether a view's items follow one another in C order, as cast() and the contiguity attributes require. */
+function isCContiguous(view: PyMemoryView): boolean {
+  if (view.stride !== view.itemsize) return false;
+  return view.rowStride === undefined || (view.shape as number[])[0] <= 1;
+}
+
+/** Another view of the same items, with the same shape and layout. */
+function copyView(view: PyMemoryView, readonly: boolean): PyMemoryView {
+  const copy = new PyMemoryView(
+    view.source,
+    view.offset,
+    view.count,
+    view.stride,
+    view.format,
+    view.itemsize,
+    readonly
+  );
+  copy.shape = view.shape;
+  copy.rowStride = view.rowStride;
+  return copy;
 }
 
 method(memoryviewClass, '__getitem__', 'one', 1, 1, (self, [key]) => {
@@ -174,7 +198,9 @@ method(memoryviewClass, '__setitem__', 'expected', 2, 2, (self, [key, value]) =>
     return None;
   }
   if (view.shape) {
-    if (key instanceof PySlice) throw new UnsupportedFeatureError('多次元の memoryview のスライスへの代入');
+    if (key instanceof PySlice) {
+      throw pyError('NotImplementedError', 'memoryview slice assignments are currently restricted to ndim = 1');
+    }
     throw subViewsNotImplemented();
   }
   if (!(key instanceof PySlice)) {
@@ -317,7 +343,7 @@ method(
     if (!isByteFormat(view.format) && !isByteFormat(char)) {
       throw typeError('memoryview: cannot cast between two non-byte formats');
     }
-    if (view.stride !== view.itemsize) throw typeError('memoryview: casts are restricted to C-contiguous views');
+    if (!isCContiguous(view)) throw typeError('memoryview: casts are restricted to C-contiguous views');
     if (view.nbytes % info.size !== 0) throw typeError('memoryview: length is not a multiple of itemsize');
     const count = view.nbytes / info.size;
     const shape = argument(args, kwargs, 1, 'shape');
@@ -366,6 +392,7 @@ function stridesOf(view: PyMemoryView): number[] {
     strides.unshift(stride);
     stride *= size;
   }
+  strides[0] = rowStrideOf(view);
   return strides;
 }
 
@@ -412,18 +439,7 @@ method(memoryviewClass, '__exit__', 'expected', 0, Number.POSITIVE_INFINITY, (se
   return None;
 });
 method(memoryviewClass, 'toreadonly', 'none', 0, 0, (self) => {
-  const view = asView(self);
-  const readOnly = new PyMemoryView(
-    view.source,
-    view.offset,
-    view.count,
-    view.stride,
-    view.format,
-    view.itemsize,
-    true
-  );
-  readOnly.shape = view.shape;
-  return readOnly;
+  return copyView(asView(self), true);
 });
 
 // Comparison, hashing, and repr -------------------------------------------------------------------------------------
@@ -475,9 +491,9 @@ const ATTRIBUTES: Record<string, (view: PyMemoryView) => PyValue> = {
   shape: (view) => currentRuntime().tuple(dimensionsOf(view).map(BigInt)),
   strides: (view) => currentRuntime().tuple(stridesOf(view).map(BigInt)),
   suboffsets: () => currentRuntime().tuple([]),
-  c_contiguous: (view) => view.stride === view.itemsize,
+  c_contiguous: (view) => isCContiguous(view),
   f_contiguous: (view) => view.stride === view.itemsize && !view.shape,
-  contiguous: (view) => view.stride === view.itemsize,
+  contiguous: (view) => isCContiguous(view),
 };
 
 for (const [name, read] of Object.entries(ATTRIBUTES)) {

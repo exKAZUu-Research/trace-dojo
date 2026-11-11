@@ -965,11 +965,15 @@ class _Pickler:
             self.write(self.get(x[0]))
             return
         shadowed = self.memo.pop(id(obj), None)
+        if shadowed is not None:
+            # Keeps the memo's length, which numbers the next memoized object.
+            self.memo[key, 'shadowed'] = shadowed
         self.save_str(obj)
         entry = self.memo.pop(id(obj), None)
         if entry is not None:
             self.memo[key] = entry
         if shadowed is not None:
+            del self.memo[key, 'shadowed']
             self.memo[id(obj)] = shadowed
 
     def save_tuple(self, obj):

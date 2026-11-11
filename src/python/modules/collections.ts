@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 493 -- The collections types and the methods of each belong together.
+// code-gauge-allow-file fileNcss 497 -- The collections types and the methods of each belong together.
 import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { DictStore } from '../dictStore';
@@ -11,6 +11,7 @@ import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import {
   callValue,
+  getAttribute,
   getIterator,
   isCallable,
   isTruthy,
@@ -760,32 +761,32 @@ function defineNamedTupleMethods(): void {
     const tuple = self as PyTuple;
     return newDict(fieldsOf(tuple).map((field, index) => [field, tuple.items[index]]));
   });
-  namedTupleBase.dict.set(
+  const replace = new PyBuiltinFunction(
+    builtinClass('method_descriptor'),
     '_replace',
-    new PyBuiltinFunction(
-      builtinClass('method_descriptor'),
-      '_replace',
-      (args, kwargs) => {
-        const tuple = args[0] as PyTuple;
-        if (args.length > 1)
-          throw typeError(`${tuple.cls.name}._replace() takes 1 positional argument but ${args.length} were given`);
-        const fields = fieldsOf(tuple);
-        const items = [...tuple.items];
-        for (const [key, value] of kwargs ?? []) {
-          const index = fields.indexOf(key);
-          if (index === -1) throw typeError(`Got unexpected field names: [${pyRepr(key)}]`);
-          items[index] = value;
-        }
-        return new PyTuple(tuple.cls, items);
-      },
-      undefined,
-      'method',
-      'NamedTuple'
-    )
+    (args, kwargs) => {
+      const tuple = args[0] as PyTuple;
+      if (args.length > 1)
+        throw typeError(`${tuple.cls.name}._replace() takes 1 positional argument but ${args.length} were given`);
+      const remaining = new Map(kwargs);
+      const items = fieldsOf(tuple).map((field, index) => {
+        if (!remaining.has(field as string)) return tuple.items[index];
+        const value = remaining.get(field as string) as PyValue;
+        remaining.delete(field as string);
+        return value;
+      });
+      const result = callValue(getAttribute(tuple, '_make'), [newList(items)]);
+      if (remaining.size > 0) throw typeError(`Got unexpected field names: ${pyRepr(newList([...remaining.keys()]))}`);
+      return result;
+    },
+    undefined,
+    'method',
+    'NamedTuple'
   );
+  namedTupleBase.dict.set('_replace', replace);
   // CPython's namedtuple classes have no instance dict, and copy.replace() calls their `__replace__`, which is `_replace`.
   namedTupleBase.dict.set('__slots__', newTuple([]));
-  namedTupleBase.dict.set('__replace__', namedTupleBase.dict.get('_replace') as PyValue);
+  namedTupleBase.dict.set('__replace__', replace);
   method(namedTupleBase, '_make', 'one', 1, 1, (cls, [iterable]) => callValue(cls, toArray(iterable)), {
     binding: 'class',
   });

@@ -7,7 +7,7 @@ import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
 import { nativeFunction, newList, None, typeError, typeName, valueError } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
-import { PyError, PyInstance, type PyValue } from '../values';
+import { PyError, PyInstance, PyTuple, type PyValue } from '../values';
 import { bindArguments } from './numberSupport';
 
 // os ----------------------------------------------------------------------------------------------------------------
@@ -180,7 +180,7 @@ registerModule(
       ['SEEK_END', 2n],
       ['defpath', '/bin:/usr/bin'],
       ['supports_unicode_filenames', true],
-      ['join', nativeFunction('join', join)],
+      ['join', nativeFunction('join', (args, kwargs) => onPaths(() => join(args, kwargs)))],
       ['split', pathFunction('split', ['p'], 1, ([p]) => tuple(splitPath(text(p))))],
       ['basename', pathFunction('basename', ['p'], 1, ([p]) => splitPath(text(p))[1])],
       ['dirname', pathFunction('dirname', ['p'], 1, ([p]) => splitPath(text(p))[0])],
@@ -194,6 +194,15 @@ registerModule(
       ['relpath', pathFunction('relpath', ['path', 'start'], 1, ([p, start]) => relpath(p as PyValue, start))],
       ['commonprefix', pathFunction('commonprefix', ['m'], 1, ([m]) => commonprefix(m as PyValue))],
       ['commonpath', pathFunction('commonpath', ['paths'], 1, ([paths]) => commonpath(paths as PyValue))],
+      // Only a path that names a home directory or a variable reads the environment.
+      [
+        'expanduser',
+        pathFunction('expanduser', ['path'], 1, ([p]) => withoutEnvironment(text(p), (path) => path.startsWith('~'))),
+      ],
+      [
+        'expandvars',
+        pathFunction('expandvars', ['path'], 1, ([p]) => withoutEnvironment(text(p), (path) => path.includes('$'))),
+      ],
     ]),
   Object.fromEntries(
     [
@@ -213,8 +222,6 @@ registerModule(
       'sameopenfile',
       'samestat',
       'realpath',
-      'expanduser',
-      'expandvars',
     ].map((name) => [name, `os.path.${name}()（ファイルシステムや環境変数を参照する関数）`])
   )
 );
@@ -228,16 +235,49 @@ function pathFunction(
   run: (args: (PyValue | undefined)[]) => PyValue
 ): PyValue {
   return nativeFunction(name, (args, kwargs) =>
-    run(bindArguments({ qualified: name, params, required, isFunction: true }, args, kwargs))
+    onPaths(() => run(bindArguments({ qualified: name, params, required, isFunction: true }, args, kwargs)))
   );
 }
 
-/** The text of a path argument; bytes paths are not supported. */
+/** Whether the paths of the running path function are bytes, which its str results then become; undefined before any. */
+let bytesPaths: boolean | undefined;
+
+/**
+ * Runs a path function over str paths, as CPython's posixpath runs the same code over str and bytes: a bytes path is
+ * read as the str of its bytes' code points, and the str results then become bytes again.
+ */
+function onPaths(run: () => PyValue): PyValue {
+  const outer = bytesPaths;
+  bytesPaths = undefined;
+  try {
+    const result = run();
+    return bytesPaths ? asBytesResult(result) : result;
+  } finally {
+    bytesPaths = outer;
+  }
+}
+
+function asBytesResult(result: PyValue): PyValue {
+  if (typeof result === 'string') return newBytes(Uint8Array.from(result, (char) => char.codePointAt(0) as number));
+  if (result instanceof PyTuple) return tuple(result.items.map((item) => asBytesResult(item)));
+  return result;
+}
+
+/** The text of a path argument, with each byte of a bytes path as a code point. */
 function text(value: PyValue | undefined): string {
   const path = fspath(value as PyValue);
-  if (typeof path === 'string') return path;
-  if (path instanceof PyInstance) return path.primitive as string;
-  throw new UnsupportedFeatureError('os.path の関数に bytes のパスを渡すこと');
+  const isBytes = path instanceof PyBytes;
+  if (bytesPaths === undefined) bytesPaths = isBytes;
+  else if (bytesPaths !== isBytes) throw typeError("Can't mix strings and bytes in path components");
+  if (path instanceof PyBytes) return Array.from(path.data, (byte) => String.fromCodePoint(byte)).join('');
+  return typeof path === 'string' ? path : ((path as PyInstance).primitive as string);
+}
+
+/** A path that `readsEnvironment` says needs no environment variable, as it is; any other is not supported. */
+function withoutEnvironment(path: string, readsEnvironment: (path: string) => boolean): string {
+  if (readsEnvironment(path))
+    throw new UnsupportedFeatureError('ホームディレクトリや環境変数を参照する os.path の展開');
+  return path;
 }
 
 function tuple(items: PyValue[]): PyValue {

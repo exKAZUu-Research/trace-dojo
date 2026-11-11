@@ -29,7 +29,8 @@ export function registerSourceModule(
       runModuleSource(runtime, namespace, source, blocks);
       return new Map();
     },
-    unsupported
+    unsupported,
+    true
   );
 }
 

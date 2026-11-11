@@ -250,7 +250,8 @@ function writeText(stream: TextStream, text: string): number {
   const chars = iterStr(translated);
   currentRuntime().buildString(stream.chars.length + chars.length);
   while (stream.chars.length < stream.position) stream.chars.push('\0');
-  stream.chars.splice(stream.position, chars.length, ...chars);
+  // Overwrites in place: splicing in a long text as arguments would exceed the host's argument limit.
+  for (const [index, char] of chars.entries()) stream.chars[stream.position + index] = char;
   stream.position += chars.length;
   return iterStr(text).length;
 }

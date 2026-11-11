@@ -28,8 +28,6 @@ import { blocksOf, markAllSuspending, markSuspendingStatements } from './suspens
 export const misplacedPythonAtomicMessage =
   '# atomic は、関数・メソッドを宣言する行（def から本体の前の : がある行まで）に付けてください。';
 
-const MAX_STATIC_BLOCKS = 20;
-
 /**
  * The packages whose import makes every call of the module able to suspend, since the program may then run threads,
  * whose blocking operations suspend the thread running them wherever the program calls them.
@@ -50,7 +48,6 @@ export class ProgramConverter extends ExpressionConverter {
   private readonly futureStatements = new Set<number>();
   /** The top-level packages the module imports, which tell whether it may run threads. */
   private readonly importedPackages = new Set<string>();
-  private blockDepth = 0;
 
   constructor(
     source: string,
@@ -58,11 +55,13 @@ export class ProgramConverter extends ExpressionConverter {
     namesInLocals = false,
     /** Whether the source is a standard library module, whose imports of unsupported modules fail only when run. */
     private readonly library = false,
-    inheritedFutureFeatures: readonly string[] = []
+    inheritedFutureFeatures: readonly string[] = [],
+    allowsTopLevelAwait = false
   ) {
     const module = new ScopeBuilder('module', undefined, namesInLocals);
     super(source, module);
     this.module = module;
+    this.allowsTopLevelAwait = allowsTopLevelAwait;
     for (const feature of inheritedFutureFeatures) this.futureFeatures.add(feature);
   }
 
@@ -73,6 +72,7 @@ export class ProgramConverter extends ExpressionConverter {
     for (const node of nodes.slice(start, end === -1 ? undefined : end)) this.futureStatements.add(node.id);
     const body = this.block(nodes);
     if ([...this.importedPackages].some((name) => THREAD_PACKAGES.has(name))) markAllSuspending(body);
+    if (this.module.info.isAsync) markSuspendingStatements(body);
     resolveScopes(this.module);
     this.assignAtomicAnnotations();
     return {
@@ -96,17 +96,6 @@ export class ProgramConverter extends ExpressionConverter {
 
   private body(node: Node): Statement[] {
     return this.block(node.type === 'block' ? namedChildren(node) : [node]);
-  }
-
-  /** Converts a nested block that counts toward CPython's limit of statically nested blocks. */
-  private nestedBlock<T>(node: Node, convert: () => T): T {
-    this.blockDepth++;
-    try {
-      if (this.blockDepth > MAX_STATIC_BLOCKS) fail(rowOf(node), 'ループや try などの入れ子が深すぎます。');
-      return convert();
-    } finally {
-      this.blockDepth--;
-    }
   }
 
   // code-gauge-allow functionNcss 55 -- One case per kind of statement node, each delegating where it grows.
@@ -407,7 +396,7 @@ export class ProgramConverter extends ExpressionConverter {
     const outer = this.context;
     this.context = { ...outer, inLoop: true, inExceptStar: false };
     try {
-      return this.nestedBlock(node, () => this.body(node));
+      return this.body(node);
     } finally {
       this.context = outer;
     }
@@ -444,33 +433,31 @@ export class ProgramConverter extends ExpressionConverter {
   }
 
   private tryStatement(node: Node): Statement {
-    return this.nestedBlock(node, () => {
-      const body = this.body(field(node, 'body'));
-      const clauses = namedChildren(node);
-      const handlerNodes = clauses.filter((clause) => clause.type === 'except_clause');
-      const isGroupFlags = handlerNodes.map((handler) =>
-        children(handler).some((child) => child.type === '*' || child.text === 'except*')
-      );
-      const isGroup = isGroupFlags.some(Boolean);
-      if (isGroup && isGroupFlags.some((flag) => !flag)) {
-        fail(rowOf(node), '1つの try 文に except と except* を混ぜて書くことはできません。');
-      }
-      const handlers = handlerNodes.map((handler, index) =>
-        this.exceptHandler(handler, index === handlerNodes.length - 1, isGroup)
-      );
-      const elseNode = clauses.find((clause) => clause.type === 'else_clause');
-      const finallyNode = clauses.find((clause) => clause.type === 'finally_clause');
-      if (handlerNodes.length === 0 && !finallyNode) {
-        // CPython reports the line where it expected the clause: the else clause's, the next statement's, or the last.
-        fail(elseNode ? rowOf(elseNode) : followingRow(node), 'try 文には、except か finally の節が必要です。');
-      }
-      const orelse = elseNode ? this.body(field(elseNode, 'body')) : [];
-      const finalbody = finallyNode
-        ? this.body(namedChildren(finallyNode).find((child) => child.type === 'block') as Node)
-        : [];
-      const statement: Statement = { kind: 'try', body, handlers, isGroup, orelse, finalbody, row: rowOf(node) };
-      return statement;
-    });
+    const body = this.body(field(node, 'body'));
+    const clauses = namedChildren(node);
+    const handlerNodes = clauses.filter((clause) => clause.type === 'except_clause');
+    const isGroupFlags = handlerNodes.map((handler) =>
+      children(handler).some((child) => child.type === '*' || child.text === 'except*')
+    );
+    const isGroup = isGroupFlags.some(Boolean);
+    if (isGroup && isGroupFlags.some((flag) => !flag)) {
+      fail(rowOf(node), '1つの try 文に except と except* を混ぜて書くことはできません。');
+    }
+    const handlers = handlerNodes.map((handler, index) =>
+      this.exceptHandler(handler, index === handlerNodes.length - 1, isGroup)
+    );
+    const elseNode = clauses.find((clause) => clause.type === 'else_clause');
+    const finallyNode = clauses.find((clause) => clause.type === 'finally_clause');
+    if (handlerNodes.length === 0 && !finallyNode) {
+      // CPython reports the line where it expected the clause: the else clause's, the next statement's, or the last.
+      fail(elseNode ? rowOf(elseNode) : followingRow(node), 'try 文には、except か finally の節が必要です。');
+    }
+    const orelse = elseNode ? this.body(field(elseNode, 'body')) : [];
+    const finalbody = finallyNode
+      ? this.body(namedChildren(finallyNode).find((child) => child.type === 'block') as Node)
+      : [];
+    const statement: Statement = { kind: 'try', body, handlers, isGroup, orelse, finalbody, row: rowOf(node) };
+    return statement;
   }
 
   /** Converts an except clause, checking the rules CPython applies to it. */
@@ -501,25 +488,23 @@ export class ProgramConverter extends ExpressionConverter {
   private withStatement(node: Node): Statement {
     const isAsync = hasToken(node, 'async');
     if (isAsync) this.enterAsync(rowOf(node), 'async with は async def の関数の中にしか書けません。');
-    return this.nestedBlock(node, () => {
-      const items: WithItem[] = [];
-      const clause = namedChildren(node).find((child) => child.type === 'with_clause') as Node;
-      for (const item of namedChildren(clause)) {
-        const valueNode = field(item, 'value');
-        if (valueNode.type === 'as_pattern') {
-          const [contextNode] = namedChildren(valueNode);
-          const context = this.expression(contextNode);
-          const targetNode = namedChildren(field(valueNode, 'alias'))[0];
-          items.push({ context, target: this.target(targetNode) });
-        } else {
-          items.push({ context: this.expression(valueNode) });
-        }
+    const items: WithItem[] = [];
+    const clause = namedChildren(node).find((child) => child.type === 'with_clause') as Node;
+    for (const item of namedChildren(clause)) {
+      const valueNode = field(item, 'value');
+      if (valueNode.type === 'as_pattern') {
+        const [contextNode] = namedChildren(valueNode);
+        const context = this.expression(contextNode);
+        const targetNode = namedChildren(field(valueNode, 'alias'))[0];
+        items.push({ context, target: this.target(targetNode) });
+      } else {
+        items.push({ context: this.expression(valueNode) });
       }
-      const body = this.body(field(node, 'body'));
-      const statement: Statement = { kind: 'with', items, body, stepRow: this.stepRowOf(node), row: rowOf(node) };
-      if (isAsync) statement.isAsync = true;
-      return statement;
-    });
+    }
+    const body = this.body(field(node, 'body'));
+    const statement: Statement = { kind: 'with', items, body, stepRow: this.stepRowOf(node), row: rowOf(node) };
+    if (isAsync) statement.isAsync = true;
+    return statement;
   }
 
   // Definitions -----------------------------------------------------------------------------------------------------
@@ -564,17 +549,11 @@ export class ProgramConverter extends ExpressionConverter {
   protected functionBody(bodyNode: Node, fn: FunctionDef): void {
     this.inFunction(fn, () => {
       for (const parameter of fn.params) this.bindParameter(parameter);
-      const outerDepth = this.blockDepth;
-      this.blockDepth = 0;
-      try {
-        const body = this.body(bodyNode);
-        if (fn.scope.isGenerator && fn.scope.isAsync) rejectReturnValues(body);
-        if (fn.scope.isGenerator || fn.scope.isAsync) markSuspendingStatements(body);
-        fn.body = body;
-        fn.doc = docOf(body);
-      } finally {
-        this.blockDepth = outerDepth;
-      }
+      const body = this.body(bodyNode);
+      if (fn.scope.isGenerator && fn.scope.isAsync) rejectReturnValues(body);
+      if (fn.scope.isGenerator || fn.scope.isAsync) markSuspendingStatements(body);
+      fn.body = body;
+      fn.doc = docOf(body);
     });
   }
 

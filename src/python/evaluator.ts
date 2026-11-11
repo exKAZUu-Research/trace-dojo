@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 888 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss 893 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import { newAnnotate, recordAnnotation } from './annotations';
 import type {
   ClassDef,
@@ -38,7 +38,10 @@ import {
 } from './objects';
 import { equals, inplaceOp, isSame } from './operators';
 import type { Runtime } from './runtime';
+// code-gauge-allow-file fileNcss 893 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+import type { Suspension } from './suspendingEvaluator';
 import { targetSuspends } from './suspension';
+import { iterateSuspending, type SuspendingNext } from './threadIteration';
 import { isWaitRequest, PREEMPTION, schedulerOf, suspendingCall } from './threads';
 import { noteCaught, prependTraceback } from './tracebacks';
 import { genericBaseOf, newTypeParam, PyTypeAlias } from './typeParams';
@@ -453,8 +456,8 @@ export class Evaluator extends AsyncEvaluator {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Follows the protocol of the for loop, closing a generator it leaves.
-  // code-gauge-allow functionNcss 33 -- Follows the protocol of the for loop, closing a generator it leaves.
+  // code-gauge-allow functionCognitiveComplexity 27 -- Follows the protocol of the for loop, closing a generator it leaves.
+  // code-gauge-allow functionNcss 35 -- Follows the protocol of the for loop, closing a generator it leaves.
   private *forStatement(statement: Extract<Statement, { kind: 'for' }>, frame: Frame): Execution {
     const { runtime } = this;
     const { target } = statement;
@@ -467,8 +470,13 @@ export class Evaluator extends AsyncEvaluator {
     // What leaves the loop along with control, which stays alive when the loop's generator closes.
     let leaving: unknown;
     try {
-      const next = iterate(iterable);
-      for (let item = next(); item !== DONE; item = next()) {
+      // A thread reads its loop's iterable where it can suspend, so that waiting in a generator it reads suspends it.
+      const suspendingNext = runtime.threads ? iterateSuspending(iterable) : undefined;
+      const next = suspendingNext ? undefined : iterate(iterable);
+      const read = function* (): Suspension<PyValue | typeof DONE> {
+        return next ? next() : yield* (suspendingNext as SuspendingNext)();
+      };
+      for (let item = next ? next() : yield* read(); item !== DONE; item = next ? next() : yield* read()) {
         runtime.spend();
         if (runtime.threads?.shouldPreempt()) yield PREEMPTION as unknown as PyValue;
         runtime.currentRow = statement.row;

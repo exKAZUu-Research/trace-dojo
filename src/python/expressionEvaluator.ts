@@ -35,7 +35,7 @@ import { binaryOp, compareOp, unaryOp } from './operators';
 import { markGeneratorExpression } from './reflection';
 import type { Runtime } from './runtime';
 import { templateLiteral } from './templateStrings';
-import { noteUnwinding } from './tracebacks';
+import { noteUnwinding, setFrameGenerator } from './tracebacks';
 import {
   Ellipsis,
   functionClass,
@@ -626,18 +626,17 @@ export class ExpressionEvaluator {
   // Comprehensions --------------------------------------------------------------------------------------------------
 
   /** Runs a comprehension, whose first iterable `first` the enclosing frame evaluated. */
-  // code-gauge-allow functionNcss 37 -- Follows how CPython runs each kind of comprehension in its own scope.
+  // code-gauge-allow functionNcss 38 -- Follows how CPython runs each kind of comprehension in its own scope.
   protected comprehension(
     expression: Extract<Expression, { kind: 'comprehension' }>,
     frame: Frame,
     first = this.evaluate(expression.generators[0].iterable, frame)
   ): PyValue {
     const { runtime } = this;
-    const next = iterate(first);
     const inner = this.comprehensionFrame(expression, frame);
     if (expression.type === 'generator') {
       markGeneratorExpression(inner, first);
-      const body = this.comprehensionItems(expression, inner, next);
+      const body = this.generatorItems(expression, inner, first);
       const generator = new PyGenerator(
         generatorClass,
         '<genexpr>',
@@ -656,8 +655,10 @@ export class ExpressionEvaluator {
         () => [first, ...inner.locals.values(), ...inner.temporaries]
       );
       generator.frame = inner;
+      setFrameGenerator(inner, generator);
       return generator;
     }
+    const next = iterate(first);
     runtime.pushFrame(inner);
     try {
       inner.temporaries.push(first);
@@ -682,7 +683,16 @@ export class ExpressionEvaluator {
     }
   }
 
-  private comprehensionFrame(expression: Extract<Expression, { kind: 'comprehension' }>, frame: Frame): Frame {
+  /** The body of a generator expression's generator, which runs its clauses and yields its elements. */
+  protected generatorItems(
+    expression: Extract<Expression, { kind: 'comprehension' }>,
+    inner: Frame,
+    first: PyValue
+  ): Generator<PyValue, PyValue> {
+    return this.comprehensionItems(expression, inner, iterate(first));
+  }
+
+  protected comprehensionFrame(expression: Extract<Expression, { kind: 'comprehension' }>, frame: Frame): Frame {
     return this.nestedFrame('comprehension', expression.scope, frame);
   }
 

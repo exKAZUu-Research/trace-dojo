@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 438 -- The builtins module keeps every builtin function together.
+// code-gauge-allow-file fileNcss 510 -- The builtins module keeps every builtin function together.
 import { bytearrayClass, bytesClass, memoryviewClass, PyBytes } from './bytesValues';
 import { buildClass } from './classes';
 import { complexAbs } from './complexNumbers';
@@ -9,6 +9,7 @@ import { compile, COMPILE_KEYWORDS, evaluate, execute } from './dynamicCode';
 import { enumMembersOf } from './enums';
 import { pyHash } from './hashing';
 import { help } from './help';
+import { reduction, withState } from './iteratorStates';
 import { dunderImport } from './modules/importlib';
 import { argument, checkArgs } from './nativeArgs';
 import { asFloat, divmodFloat, floorDivInt, modInt, toIndex } from './numbers';
@@ -33,7 +34,10 @@ import {
 import { binaryOp, compareOp } from './operators';
 import { callerGlobals, callerLocals, callerNames, vars } from './reflection';
 import { currentRuntime } from './runtimeContext';
+import { siteBuiltins } from './siteBuiltins';
 import { iterStr, strLength } from './strings';
+import { registerBuiltinVariants } from './suspendingBuiltins';
+import { callSuspending, suspendingNextOf, withSuspendingNext } from './threadIteration';
 import { turtleClass } from './turtle';
 import { sortList } from './typeContainers';
 import { roundFloat, roundInt } from './typeNumbers';
@@ -96,47 +100,70 @@ enumerateClass.construct = (cls, args, kwargs) => {
   if (iterable === undefined) throw typeError("enumerate() missing required argument 'iterable'");
   checkArgs({ qualified: 'enumerate', min: 1, max: 2, style: 'takes', keywords: ['iterable', 'start'] }, args, kwargs);
   let index = toIndex(argument(args, kwargs, 1, 'start') ?? 0n);
-  const next = iterate(iterable);
-  return new PyIterator(
-    cls,
-    () => {
-      const item = next();
-      if (item === DONE) return DONE;
-      return currentRuntime().tuple([index++, item]);
-    },
-    () => [iterable]
-  );
+  const iterator = getIterator(iterable);
+  const next = nextOf(iterator);
+  const enumerated = (): PyValue | typeof DONE => {
+    const item = next();
+    if (item === DONE) return DONE;
+    return currentRuntime().tuple([index++, item]);
+  };
+  withState(enumerated, { reduce: () => newTuple([cls, newTuple([iterator, index])]) });
+  withSuspendingNext(enumerated, function* () {
+    const item = yield* suspendingNextOf(iterator)();
+    if (item === DONE) return DONE;
+    return currentRuntime().tuple([index++, item]);
+  });
+  return new PyIterator(cls, enumerated, () => [iterable]);
 };
 
 export const zipClass = builtinClass('zip');
-// code-gauge-allow duplicateLines 23 -- zip and itertools.zip_longest stop on exhausted iterables differently.
+// code-gauge-allow functionCognitiveComplexity 26 -- Each builtin iterator keeps its next function, its reduction, and its suspending next together.
+// code-gauge-allow functionNcss 35 -- Each builtin iterator keeps its next function, its reduction, and its suspending next together.
 zipClass.construct = (cls, args, kwargs) => {
   checkArgs(
     { qualified: 'zip', min: 0, max: Number.POSITIVE_INFINITY, style: 'takes', keywords: ['strict'] },
     args,
     kwargs
   );
-  const strict = isTruthy(kwargs?.get('strict') ?? false);
-  const nexts = args.map((iterable) => iterate(iterable));
+  let strict = isTruthy(kwargs?.get('strict') ?? false);
+  const iterators = args.map((iterable) => getIterator(iterable));
+  const nexts = iterators.map((iterator) => nextOf(iterator));
   let finished = false;
-  return new PyIterator(
-    cls,
-    () => {
-      if (finished || nexts.length === 0) return DONE;
-      const items: PyValue[] = [];
-      for (const [index, next] of nexts.entries()) {
-        const item = next();
-        if (item === DONE) {
-          finished = true;
-          if (strict) checkStrictZip(nexts, index);
-          return DONE;
-        }
-        items.push(item);
+  const zipped = (): PyValue | typeof DONE => {
+    if (finished || nexts.length === 0) return DONE;
+    const items: PyValue[] = [];
+    for (const [index, next] of nexts.entries()) {
+      const item = next();
+      if (item === DONE) {
+        finished = true;
+        if (strict) checkStrictZip(nexts, index);
+        return DONE;
       }
-      return currentRuntime().tuple(items);
+      items.push(item);
+    }
+    return currentRuntime().tuple(items);
+  };
+  withSuspendingNext(zipped, function* () {
+    if (finished || nexts.length === 0) return DONE;
+    const items: PyValue[] = [];
+    for (const [index, iterator] of iterators.entries()) {
+      const item = yield* suspendingNextOf(iterator)();
+      if (item === DONE) {
+        finished = true;
+        if (strict) checkStrictZip(nexts, index);
+        return DONE;
+      }
+      items.push(item);
+    }
+    return currentRuntime().tuple(items);
+  });
+  withState(zipped, {
+    reduce: () => newTuple(strict ? [cls, newTuple(iterators), true] : [cls, newTuple(iterators)]),
+    setState: (state) => {
+      strict = state !== 0n;
     },
-    () => args
-  );
+  });
+  return new PyIterator(cls, zipped, () => args);
 };
 
 // code-gauge-allow functionCognitiveComplexity 16 -- Words each length mismatch as CPython's strict zip does.
@@ -165,41 +192,58 @@ mapClass.construct = (cls, args, kwargs) => {
   );
   if (args.length < 2) throw typeError('map() must have at least two arguments.');
   const [fn, ...iterables] = args;
-  const nexts = iterables.map((iterable) => iterate(iterable));
-  return new PyIterator(
-    cls,
-    () => {
-      const items: PyValue[] = [];
-      for (const next of nexts) {
-        const item = next();
-        if (item === DONE) return DONE;
-        items.push(item);
-      }
-      return callValue(fn, items);
-    },
-    () => args
-  );
+  const iterators = iterables.map((iterable) => getIterator(iterable));
+  const nexts = iterators.map((iterator) => nextOf(iterator));
+  const mapped = (): PyValue | typeof DONE => {
+    const items: PyValue[] = [];
+    for (const next of nexts) {
+      const item = next();
+      if (item === DONE) return DONE;
+      items.push(item);
+    }
+    return callValue(fn, items);
+  };
+  withState(mapped, { reduce: () => newTuple([cls, newTuple([fn, ...iterators])]) });
+  withSuspendingNext(mapped, function* () {
+    const items: PyValue[] = [];
+    for (const iterator of iterators) {
+      const item = yield* suspendingNextOf(iterator)();
+      if (item === DONE) return DONE;
+      items.push(item);
+    }
+    return yield* callSuspending(fn, items);
+  });
+  return new PyIterator(cls, mapped, () => args);
 };
 
 export const filterClass = builtinClass('filter');
+// code-gauge-allow functionCognitiveComplexity 18 -- Each builtin iterator keeps its next function, its reduction, and its suspending next together.
 filterClass.construct = (cls, args, kwargs) => {
   checkArgs({ qualified: 'filter', min: 2, max: 2, style: 'expected' }, args, kwargs);
   const [fn, iterable] = args;
-  const next = iterate(iterable);
-  return new PyIterator(
-    cls,
-    () => {
-      for (let item = next(); item !== DONE; item = next()) {
-        currentRuntime().spend();
-        if (isTruthy(fn === None ? item : callValue(fn, [item]))) return item;
-      }
-      return DONE;
-    },
-    () => args
-  );
+  const iterator = getIterator(iterable);
+  const next = nextOf(iterator);
+  const filtered = (): PyValue | typeof DONE => {
+    for (let item = next(); item !== DONE; item = next()) {
+      currentRuntime().spend();
+      if (isTruthy(fn === None ? item : callValue(fn, [item]))) return item;
+    }
+    return DONE;
+  };
+  withState(filtered, { reduce: () => newTuple([cls, newTuple([fn, iterator])]) });
+  withSuspendingNext(filtered, function* () {
+    const suspendingNext = suspendingNextOf(iterator);
+    for (let item = yield* suspendingNext(); item !== DONE; item = yield* suspendingNext()) {
+      currentRuntime().spend();
+      if (isTruthy(fn === None ? item : yield* callSuspending(fn, [item]))) return item;
+    }
+    return DONE;
+  });
+  return new PyIterator(cls, filtered, () => args);
 };
 
 export const reversedClass = builtinClass('reversed');
+// code-gauge-allow functionCognitiveComplexity 20 -- Each builtin iterator keeps its next function, its reduction, and its suspending next together.
 reversedClass.construct = (_cls, args, kwargs) => {
   checkArgs({ qualified: 'reversed', min: 1, max: 1, style: 'expected' }, args, kwargs);
   const [sequence] = args;
@@ -218,6 +262,13 @@ reversedClass.construct = (_cls, args, kwargs) => {
     () => (index >= 0n ? getItem(sequence, index--) : DONE),
     () => (index >= 0n && BigInt(lengthOf(sequence)) > index ? Number(index) + 1 : 0)
   );
+  withState(next, {
+    reduce: () => (index >= 0n ? reduction('reversed', [sequence], index) : reduction('reversed', [newTuple([])])),
+    setState: (state) => {
+      const last = BigInt(lengthOf(sequence)) - 1n;
+      if (index >= 0n) index = state < -1n ? -1n : state > last ? last : state;
+    },
+  });
   return new PyIterator(reversedClass, next, () => [sequence]);
 };
 
@@ -258,6 +309,16 @@ function print(args: PyValue[], kwargs: Kwargs): PyValue {
   if (file === runtime.standardStream('stderr')) runtime.errorOutput += text;
   else runtime.budget.print(text);
   return None;
+}
+
+/** Whether an item's truth is `truth`, reading the items only up to the first such one, as `any` and `all` do. */
+function someItem(iterable: PyValue, truth: boolean): boolean {
+  const next = iterate(iterable);
+  for (let item = next(); item !== DONE; item = next()) {
+    currentRuntime().spend();
+    if (isTruthy(item) === truth) return true;
+  }
+  return false;
 }
 
 // code-gauge-allow functionNcss 33 -- Follows CPython's builtin sum, including its float compensation.
@@ -592,6 +653,20 @@ function unsupportedFunction(name: string, feature: string): PyValue {
   );
 }
 
+/**
+ * `dir(value)`: the sorted list its type's `__dir__` gives, which for objects of types that do not override `object`'s
+ * or `type`'s is the attributes they have.
+ */
+function dir(value: PyValue): PyValue {
+  const runtime = currentRuntime();
+  const custom = lookupSpecial(value, '__dir__');
+  if (custom === undefined || custom === objectClass.dict.get('__dir__') || custom === typeClass.dict.get('__dir__')) {
+    return runtime.dir(value);
+  }
+  const names = callValue(bindValue(custom, value), []);
+  return callValue(runtime.builtins.get('sorted') as PyValue, [names]);
+}
+
 function exitFunction(name: string): PyValue {
   return builtin(name, 'expected', 0, 1, (args) => {
     throw currentRuntime().systemExit(args[0]);
@@ -606,13 +681,19 @@ function one(name: string, run: (args: PyValue[]) => PyValue): PyValue {
 }
 
 export function createBuiltins(): Map<string, PyValue> {
+  const builtins = builtinNamespace();
+  registerBuiltinVariants(builtins);
+  return builtins;
+}
+
+function builtinNamespace(): Map<string, PyValue> {
   const exceptions = [...exceptionClasses.entries()];
   return new Map<string, PyValue>([
     ['__build_class__', buildClass],
     ['__import__', nativeFunction('__import__', dunderImport)],
     ['abs', one('abs', abs)],
-    ['all', one('all', ([iterable]) => toArray(iterable).every((item) => isTruthy(item)))],
-    ['any', one('any', ([iterable]) => toArray(iterable).some((item) => isTruthy(item)))],
+    ['all', one('all', ([iterable]) => !someItem(iterable, false))],
+    ['any', one('any', ([iterable]) => someItem(iterable, true))],
     ['ascii', one('ascii', ([value]) => pyAscii(value))],
     ['bin', one('bin', radix('0b', 2))],
     [
@@ -633,10 +714,7 @@ export function createBuiltins(): Map<string, PyValue> {
         return None;
       }),
     ],
-    [
-      'dir',
-      builtin('dir', 'expected', 0, 1, (args) => (args.length === 0 ? callerNames() : currentRuntime().dir(args[0]))),
-    ],
+    ['dir', builtin('dir', 'expected', 0, 1, (args) => (args.length === 0 ? callerNames() : dir(args[0])))],
     ['divmod', builtin('divmod', 'expected', 2, 2, divmod)],
     ['eval', builtin('eval', 'takes', 1, 3, evaluate, { keywords: ['globals', 'locals'] })],
     ['exec', builtin('exec', 'takes', 1, 3, execute, { keywords: ['globals', 'locals', 'closure'] })],
@@ -725,6 +803,7 @@ export function createBuiltins(): Map<string, PyValue> {
     ['open', unsupportedFunction('open', 'ファイルの読み書き（open()）')],
     ['quit', exitFunction('quit')],
     ['exit', exitFunction('exit')],
+    ...siteBuiltins(),
     ['help', nativeFunction('help', help)],
     ['Turtle', turtleClass],
   ]);
