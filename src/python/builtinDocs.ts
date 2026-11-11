@@ -36,6 +36,11 @@ function entry(value: PyValue): [string | undefined, string | undefined] | undef
   return undefined;
 }
 
+/** The C accelerator module CPython's function of this name in a module comes from, such as `_operator`, if any. */
+export function acceleratorModule(module: string, name: string): string | undefined {
+  return entries().get(`@${module}.${name}`)?.[0];
+}
+
 /** The docstring CPython's module of this name has, if it has one. */
 export function moduleDoc(name: string): string | undefined {
   return entries().get(name)?.[0];

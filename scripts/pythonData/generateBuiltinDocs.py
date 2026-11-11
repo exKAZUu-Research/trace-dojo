@@ -36,7 +36,11 @@ def main():
         except ImportError:
             continue
         add(entries, name, module.__doc__, None)
-        for value in vars(module).values():
+        for attribute, value in vars(module).items():
+            # The C accelerator a module's builtin function comes from, as `@module.name`.
+            if isinstance(value, types.BuiltinFunctionType) and isinstance(value.__self__, types.ModuleType):
+                if value.__module__ not in (None, name):
+                    entries.setdefault(f'@{name}.{attribute}', [value.__module__, None])
             if isinstance(value, type):
                 classes.append((value, name))
             elif isinstance(value, (types.BuiltinFunctionType, types.FunctionType)):
