@@ -89,6 +89,11 @@ export function lookupCodec(encoding: string, direction: 'encode' | 'decode'): T
 
 let aliasTable: Map<string, string> | undefined;
 
+/** The codec module an encoding name stands for, or undefined for an unknown one. */
+export function codecModuleOf(encoding: string): string | undefined {
+  return codecModule(encoding);
+}
+
 /** The codec module an encoding name stands for, found as CPython's encodings.search_function finds it. */
 function codecModule(encoding: string): string | undefined {
   if (!aliasTable) {

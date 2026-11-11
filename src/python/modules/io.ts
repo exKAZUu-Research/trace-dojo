@@ -3,11 +3,11 @@ import { bytesLikeData, newByteArray, newBytes, PyBytes } from '../bytesValues';
 import { addressOf, pyRepr } from '../conversions';
 import { method } from '../define';
 import { viewOf } from '../memoryview';
-import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import { callValue, getAttribute, lookupSpecial } from '../objects';
 import { currentRuntime } from '../runtimeContext';
+import { registerSourceModule } from '../sourceModules';
 import { iterStr } from '../strings';
 import {
   builtinClass,
@@ -24,6 +24,8 @@ import {
   valueError,
 } from '../types';
 import { PyClass, PyDescriptor, PyError, PyOpaque, type PyValue } from '../values';
+import { ioCodecNatives } from './ioCodecs';
+import { IO_SOURCE } from './ioPython';
 
 const unsupportedOperationClass = new PyClass(
   'UnsupportedOperation',
@@ -390,8 +392,9 @@ method(bytesIOClass, 'truncate', 'expected', 0, 1, (self, [sizeValue]) => {
 
 const FILE_FEATURE = 'ファイルの読み書き';
 
-registerModule(
+registerSourceModule(
   'io',
+  IO_SOURCE,
   () =>
     new Map<string, PyValue>([
       ['StringIO', stringIOClass],
@@ -401,23 +404,11 @@ registerModule(
       ['SEEK_CUR', 1n],
       ['SEEK_END', 2n],
       ['DEFAULT_BUFFER_SIZE', 131_072n],
+      ...ioCodecNatives(),
     ]),
-  Object.fromEntries(
-    [
-      'open',
-      'open_code',
-      'FileIO',
-      'TextIOWrapper',
-      'BufferedReader',
-      'BufferedWriter',
-      'BufferedRandom',
-      'BufferedRWPair',
-      'IOBase',
-      'RawIOBase',
-      'BufferedIOBase',
-      'TextIOBase',
-      'IncrementalNewlineDecoder',
-      'text_encoding',
-    ].map((name) => [name, `io.${name}（${FILE_FEATURE}）`])
-  )
+  {
+    unsupported: Object.fromEntries(
+      ['open', 'open_code', 'FileIO'].map((name) => [name, `io.${name}（${FILE_FEATURE}）`])
+    ),
+  }
 );
