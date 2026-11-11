@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 784 -- The statement converter keeps one method per kind of statement node together.
+// code-gauge-allow-file fileNcss 802 -- The statement converter keeps one method per kind of statement node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';

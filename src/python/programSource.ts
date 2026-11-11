@@ -77,32 +77,46 @@ export function indentation(line: string): number {
 
 /** The row a logical line starting at `start` ends on, past brackets, strings, and backslashes that continue it. */
 function logicalLineEnd(lines: readonly string[], start: number): number {
-  let depth = 0;
-  let quote: string | undefined;
+  const scan: LineScan = { depth: 0, quote: undefined };
   for (let row = start; row < lines.length; row++) {
-    const line = lines[row];
-    let continued = false;
-    for (let index = 0; index < line.length; index++) {
-      const char = line[index];
-      if (quote !== undefined) {
-        if (char === '\\') index++;
-        else if (line.startsWith(quote, index)) {
-          index += quote.length - 1;
-          quote = undefined;
-        }
-        continue;
-      }
-      if (char === '#') break;
-      if (char === '"' || char === "'") {
-        quote = line.startsWith(char.repeat(3), index) ? char.repeat(3) : char;
-        index += quote.length - 1;
-      } else if ('([{'.includes(char)) depth++;
-      else if (')]}'.includes(char)) depth--;
-      else if (char === '\\' && /^\\\r?\n?$/.test(line.slice(index))) continued = true;
-    }
+    const continued = scanLine(lines[row], scan);
     // A string in single quotes ends with its line.
-    if (quote !== undefined && quote.length === 1) quote = undefined;
-    if (depth <= 0 && quote === undefined && !continued) return row;
+    if (scan.quote !== undefined && scan.quote.length === 1) scan.quote = undefined;
+    if (scan.depth <= 0 && scan.quote === undefined && !continued) return row;
   }
   return lines.length - 1;
+}
+
+/** How far a scan of the lines of a logical line has got: its open brackets and the quotes of an open string. */
+interface LineScan {
+  depth: number;
+  quote: string | undefined;
+}
+
+/** Scans a line for brackets and strings, returning whether a backslash at its end continues it. */
+function scanLine(line: string, scan: LineScan): boolean {
+  for (let index = 0; index < line.length; index++) {
+    const char = line[index];
+    if (scan.quote !== undefined) {
+      index = skipInString(line, index, scan);
+      continue;
+    }
+    if (char === '#') break;
+    if (char === '"' || char === "'") {
+      scan.quote = line.startsWith(char.repeat(3), index) ? char.repeat(3) : char;
+      index += scan.quote.length - 1;
+    } else if ('([{'.includes(char)) scan.depth++;
+    else if (')]}'.includes(char)) scan.depth--;
+    else if (char === '\\' && /^\\\r?\n?$/.test(line.slice(index))) return true;
+  }
+  return false;
+}
+
+/** Steps over a character in a string, closing it at its quotes, and returns the index of the last character taken. */
+function skipInString(line: string, index: number, scan: LineScan): number {
+  const quote = scan.quote as string;
+  if (line[index] === '\\') return index + 1;
+  if (!line.startsWith(quote, index)) return index;
+  scan.quote = undefined;
+  return index + quote.length - 1;
 }

@@ -94,10 +94,7 @@ export function compile(args: PyValue[], kwargs: Kwargs): PyValue {
 
 /** `eval(source, /, globals=None, locals=None)`. */
 export function evaluate(args: PyValue[], kwargs: Kwargs): PyValue {
-  const source = sourceText(args[0]);
-  if (source === undefined) throw typeError('eval() arg 1 must be a string, bytes or code object');
-  const globals = argument(args, kwargs, 1, 'globals') ?? None;
-  const locals = argument(args, kwargs, 2, 'locals') ?? None;
+  const [source, globals, locals] = codeArguments(args, kwargs, 'eval');
   if (globals !== None && !(globals instanceof PyDict)) {
     throw typeError(
       isMapping(globals) ? 'globals must be a real dict; try eval(expr, {}, mapping)' : 'globals must be a dict'
@@ -113,10 +110,7 @@ export function evaluate(args: PyValue[], kwargs: Kwargs): PyValue {
 
 /** `exec(source, /, globals=None, locals=None, *, closure=None)`. */
 export function execute(args: PyValue[], kwargs: Kwargs): PyValue {
-  const source = sourceText(args[0]);
-  if (source === undefined) throw typeError('exec() arg 1 must be a string, bytes or code object');
-  const globals = argument(args, kwargs, 1, 'globals') ?? None;
-  const locals = argument(args, kwargs, 2, 'locals') ?? None;
+  const [source, globals, locals] = codeArguments(args, kwargs, 'exec');
   if (globals !== None && !(globals instanceof PyDict))
     throw typeError(`exec() globals must be a dict, not ${typeName(globals)}`);
   if (locals !== None && !isMapping(locals))
@@ -132,6 +126,13 @@ export function execute(args: PyValue[], kwargs: Kwargs): PyValue {
   const code = typeof source === 'string' ? compileCode(source, 'exec', '<string>', [...inheritedFeatures()]) : source;
   runCode(code, globals, locals);
   return None;
+}
+
+/** The source, globals, and locals arguments of eval() or exec(). */
+function codeArguments(args: PyValue[], kwargs: Kwargs, name: string): [string | Code, PyValue, PyValue] {
+  const source = sourceText(args[0]);
+  if (source === undefined) throw typeError(`${name}() arg 1 must be a string, bytes or code object`);
+  return [source, argument(args, kwargs, 1, 'globals') ?? None, argument(args, kwargs, 2, 'locals') ?? None];
 }
 
 /** The text of a source argument, the code object it is, or undefined for any other value. */

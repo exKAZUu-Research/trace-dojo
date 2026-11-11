@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 413 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 443 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import {
   classAnnotate,
   classAnnotations,
@@ -210,6 +210,7 @@ function builtinFunctionAttribute(fn: PyBuiltinFunction, name: string): PyValue 
 /** The prefix of the attributes of each kind of generator object, such as `cr_running` of a coroutine. */
 const GENERATOR_PREFIXES: Record<string, string> = { coroutine: 'cr_', async_generator: 'ag_' };
 
+// code-gauge-allow functionCognitiveComplexity 17 -- One case per attribute of CPython's generator getset table.
 function generatorAttribute(generator: PyGenerator, attribute: string): PyValue | undefined {
   if (attribute === '__name__') return generator.name;
   if (attribute === '__qualname__') return generator.qualifiedName;
@@ -330,6 +331,7 @@ function exceptionFieldOf(instance: PyInstance, name: string): PyValue | undefin
   return undefined;
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Follows the order object.__setattr__ tries data descriptors, special stores, and the instance dict in.
 export function setAttribute(target: PyValue, name: string, value: PyValue): void {
   currentRuntime().spend();
   if (target instanceof PyInstance || isSubclassInstance(target)) {
@@ -547,6 +549,7 @@ function noDictError(target: PyValue, name: string, attribute?: PyValue): Error 
   );
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Follows the order object.__delattr__ tries data descriptors, special stores, and the instance dict in.
 export function deleteAttribute(target: PyValue, name: string): void {
   if (target instanceof PyInstance || isSubclassInstance(target)) {
     const custom = userHook(target as PyObject, '__delattr__');

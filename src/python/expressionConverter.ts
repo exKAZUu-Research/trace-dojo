@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 618 -- The expression converter keeps one method per kind of expression node together.
+// code-gauge-allow-file fileNcss 624 -- The expression converter keeps one method per kind of expression node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -416,6 +416,7 @@ export abstract class ExpressionConverter {
 
   // Strings ---------------------------------------------------------------------------------------------------------
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- One case per string prefix a literal can have.
   private stringLiteral(node: Node): Expression {
     const strings = node.type === 'concatenated_string' ? namedChildren(node) : [node];
     const prefixes = strings.map((string) =>

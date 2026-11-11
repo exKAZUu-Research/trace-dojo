@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 401 -- The methods of the builtin containers share their helpers here.
 import { pyRepr } from './conversions';
 import { method } from './define';
 import { DictStore } from './dictStore';

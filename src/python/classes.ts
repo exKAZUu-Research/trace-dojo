@@ -61,7 +61,8 @@ export const classDefinitions = new WeakMap<PyClass, ClassDef>();
 // The class statement -----------------------------------------------------------------------------------------------
 
 /** Runs a class statement: evaluates the bases, runs the body in a namespace, and calls the metaclass. */
-// code-gauge-allow functionNcss 31 -- Follows how a class statement prepares its namespace and calls its metaclass.
+// code-gauge-allow functionNcss 35 -- Follows how a class statement prepares its namespace and calls its metaclass.
+// code-gauge-allow functionCognitiveComplexity 16 -- Follows how a class statement prepares its namespace and calls its metaclass.
 export function createClass(
   evaluator: Evaluator,
   def: ClassDef,
@@ -297,6 +298,7 @@ method(typingClass, '__mro_entries__', 'one', 1, 1, (self) => {
 // type.__new__ ------------------------------------------------------------------------------------------------------
 
 /** `type.__new__(meta, name, bases, namespace, **kwargs)`: creates a class and runs the hooks its bases define. */
+// code-gauge-allow functionNcss 35 -- Follows the steps of type.__new__ in order.
 export function typeNew(
   meta: PyClass,
   name: string,

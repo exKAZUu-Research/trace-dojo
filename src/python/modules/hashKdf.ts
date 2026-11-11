@@ -106,6 +106,7 @@ function sha256HmacOfDigest(key: Uint8Array): (digest: Uint8Array) => Uint8Array
 
 const schedule = new Int32Array(64);
 
+// code-gauge-allow functionNcss 31 -- The SHA-256 compression function as FIPS 180-4 states it.
 function sha256Compress(state: Int32Array, block: Int32Array): void {
   const w = schedule;
   w.set(block);

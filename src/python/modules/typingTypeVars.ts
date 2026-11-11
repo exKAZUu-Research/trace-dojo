@@ -115,6 +115,7 @@ method(newTypeClass, '__ror__', 'one', 1, 1, (self, [other]) => currentRuntime()
  * `typing.get_type_hints(obj, globalns=None, localns=None)`: the annotations of a function or module, or of a class
  * and its bases, with strings evaluated in the namespaces CPython chooses.
  */
+// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes typing.get_type_hints, one case per kind of object and namespace.
 export function getTypeHints(args: PyValue[], kwargs: Kwargs): PyValue {
   const [target, globalArgument, localArgument] = ['obj', 'globalns', 'localns'].map(
     (name, index) => args[index] ?? kwargs?.get(name) ?? None

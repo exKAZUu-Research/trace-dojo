@@ -300,6 +300,7 @@ method(
   'takes',
   1,
   2,
+  // code-gauge-allow functionCognitiveComplexity 17 -- One check per argument of memoryview.cast, in CPython's order.
   (self, args, kwargs) => {
     const view = asView(self);
     const formatValue = argument(args, kwargs, 0, 'format');

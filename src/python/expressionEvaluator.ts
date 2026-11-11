@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 561 -- The expression evaluator keeps one method per kind of expression together.
+// code-gauge-allow-file fileNcss 576 -- The expression evaluator keeps one method per kind of expression together.
 import type {
   Argument,
   Comprehension,
@@ -534,6 +534,7 @@ export class ExpressionEvaluator {
    * Creates a function object, evaluating its defaults in the defining frame unless `defaultValues` gives the values of
    * the parameters' defaults in order.
    */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Sets each attribute a new function object carries.
   createFunction(
     def: FunctionDef,
     frame: Frame,
@@ -581,8 +582,8 @@ export class ExpressionEvaluator {
 
   // Comprehensions --------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 32 -- Follows how CPython runs each kind of comprehension in its own scope.
   /** Runs a comprehension, whose first iterable `first` the enclosing frame evaluated. */
+  // code-gauge-allow functionNcss 37 -- Follows how CPython runs each kind of comprehension in its own scope.
   protected comprehension(
     expression: Extract<Expression, { kind: 'comprehension' }>,
     frame: Frame,

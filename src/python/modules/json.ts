@@ -454,6 +454,7 @@ function load(args: PyValue[], kwargs: Kwargs): PyValue {
 }
 
 /** `json.detect_encoding`: the encoding of JSON bytes, from a BOM or from where the first characters' zeros are. */
+// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes json.detect_encoding, one case per BOM and null-byte pattern.
 function detectEncoding(data: Uint8Array): string {
   const startsWith = (...bytes: number[]): boolean => bytes.every((byte, index) => data[index] === byte);
   if (startsWith(0x00, 0x00, 0xfe, 0xff) || startsWith(0xff, 0xfe, 0x00, 0x00)) return 'utf-32';

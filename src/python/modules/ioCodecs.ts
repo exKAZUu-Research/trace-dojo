@@ -49,23 +49,30 @@ function decodeChunk(
   final: boolean,
   state: number
 ): [string, number, number] {
-  const module = codecModuleOf(encoding);
-  if (module === 'utf_8' || module === 'utf_8_sig') {
-    let start = 0;
-    if (module === 'utf_8_sig' && state === 0) {
-      if (!final && data.length < 3 && [0xef, 0xbb, 0xbf].slice(0, data.length).every((byte, i) => data[i] === byte)) {
-        return ['', 0, 0];
-      }
-      if (data[0] === 0xef && data[1] === 0xbb && data[2] === 0xbf) start = 3;
-    }
-    const end = final ? data.length : data.length - incompleteUtf8Tail(data);
-    return [decodeBytes(data.subarray(start, end), 'utf8', errors), end, 1];
-  }
-  const unit = module === 'utf_16' || module === 'utf_16_le' || module === 'utf_16_be' ? 2 : 4;
-  if (unit === 2 || module === 'utf_32' || module === 'utf_32_le' || module === 'utf_32_be') {
-    return decodeUnits(module ?? '', errors, data, final, state, unit);
-  }
+  const module = codecModuleOf(encoding) ?? '';
+  if (module === 'utf_8' || module === 'utf_8_sig')
+    return decodeUtf8(module === 'utf_8_sig', errors, data, final, state);
+  if (module.startsWith('utf_16')) return decodeUnits(module, errors, data, final, state, 2);
+  if (module.startsWith('utf_32')) return decodeUnits(module, errors, data, final, state, 4);
   return [...decodeOthers(encoding, errors, data, final), state];
+}
+
+/** UTF-8, whose state is 1 once a UTF-8-SIG stream has passed the place of its BOM. */
+function decodeUtf8(
+  signed: boolean,
+  errors: string,
+  data: Uint8Array,
+  final: boolean,
+  state: number
+): [string, number, number] {
+  const bom = [0xef, 0xbb, 0xbf];
+  let start = 0;
+  if (signed && state === 0) {
+    if (!final && data.length < 3 && data.every((byte, index) => bom[index] === byte)) return ['', 0, 0];
+    if (bom.every((byte, index) => data[index] === byte)) start = 3;
+  }
+  const end = final ? data.length : data.length - incompleteUtf8Tail(data);
+  return [decodeBytes(data.subarray(start, end), 'utf8', errors), end, 1];
 }
 
 /** How many bytes at the end of UTF-8 data start a character that the data does not finish. */
@@ -81,6 +88,7 @@ function incompleteUtf8Tail(data: Uint8Array): number {
 }
 
 /** UTF-16 or UTF-32, whose state is 1 for little-endian and 2 for big-endian once a BOM or the first chunk chose. */
+// code-gauge-allow functionCognitiveComplexity 21 -- Handles the BOM, the whole code units, and a split surrogate pair of one chunk.
 function decodeUnits(
   module: string,
   errors: string,
@@ -93,19 +101,9 @@ function decodeUnits(
   let order = module.endsWith('_le') ? 1 : module.endsWith('_be') ? 2 : state;
   if (order === 0) {
     if (data.length < unit && !final) return ['', 0, 0];
-    const bom =
-      unit === 2
-        ? [
-            [0xff, 0xfe],
-            [0xfe, 0xff],
-          ]
-        : [
-            [0xff, 0xfe, 0, 0],
-            [0, 0, 0xfe, 0xff],
-          ];
-    const found = bom.findIndex((mark) => mark.every((byte, index) => data[index] === byte));
-    order = found === 1 ? 2 : 1;
-    if (found !== -1) start = unit;
+    const found = byteOrderMark(data, unit);
+    order = found === 'big' ? 2 : 1;
+    if (found !== undefined) start = unit;
   }
   let end = final ? data.length : start + Math.floor((data.length - start) / unit) * unit;
   // A UTF-16 high surrogate waits for the low one that follows it.
@@ -115,6 +113,13 @@ function decodeUnits(
   }
   const name = `${unit === 2 ? 'utf-16' : 'utf-32'}-${order === 1 ? 'le' : 'be'}`;
   return [decodeBytes(data.subarray(start, end), name, errors), end, order];
+}
+
+/** The byte order the BOM at the start of UTF-16 or UTF-32 data gives, or undefined without one. */
+function byteOrderMark(data: Uint8Array, unit: number): 'little' | 'big' | undefined {
+  const little = unit === 2 ? [0xff, 0xfe] : [0xff, 0xfe, 0, 0];
+  if (little.every((byte, index) => data[index] === byte)) return 'little';
+  return little.toReversed().every((byte, index) => data[index] === byte) ? 'big' : undefined;
 }
 
 /** Any other codec: the longest prefix that decodes strictly, or all the data at the end of the stream. */

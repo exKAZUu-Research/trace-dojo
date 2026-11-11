@@ -32,7 +32,6 @@ export function findReachableObjects(roots: unknown[]): Set<object> {
   return walk(roots, new Set()).visited;
 }
 
-// code-gauge-allow duplicateLines 16 -- Each language's runtime walks its own object model, so the loops cannot share code.
 function walk(roots: unknown[], reached: Set<TurtleState>): { visited: Set<object>; scanned: number } {
   const visited = new Set<object>();
   const pending = [...roots];
@@ -55,8 +54,8 @@ function walk(roots: unknown[], reached: Set<TurtleState>): { visited: Set<objec
 }
 
 /** Pushes what an object refers to, returning the number of elements among them. */
-// code-gauge-allow functionNcss 41 -- One case per kind of object that refers to others.
-// code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of object that refers to others.
+// code-gauge-allow functionNcss 46 -- One case per kind of object that refers to others.
+// code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of object that refers to others.
 function pushReferences(pending: unknown[], object: PyObject, reached: Set<TurtleState>): number {
   if (object instanceof PyList || object instanceof PyTuple || object instanceof PyDeque) {
     pushAll(pending, object.items);

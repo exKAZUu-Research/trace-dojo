@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 818 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss 866 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import { newAnnotate, recordAnnotation } from './annotations';
 import type {
   ClassDef,
@@ -132,18 +132,13 @@ export class Evaluator extends AsyncEvaluator {
   }
 
   // code-gauge-allow functionNcss 60 -- One case per kind of simple statement.
-  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of simple statement.
   private simpleStatement(statement: Statement, frame: Frame): Completion {
     const { runtime } = this;
     runtime.spend();
     runtime.currentRow = statement.row;
     switch (statement.kind) {
       case 'expression': {
-        const { expression } = statement;
-        const value = runtime.steps.runStatement(statement.stepRow, expression.kind === 'call', () =>
-          this.evaluate(expression, frame)
-        );
-        if (statement.display) callValue(getAttribute(runtime.importModule('sys'), 'displayhook'), [value]);
+        this.expressionStatement(statement, frame);
         return undefined;
       }
       case 'assign': {
@@ -169,16 +164,9 @@ export class Evaluator extends AsyncEvaluator {
       case 'nonlocal': {
         return undefined;
       }
-      case 'setupAnnotations': {
-        if (!frame.locals.has('__annotations__')) frame.locals.set('__annotations__', newDict());
-        return undefined;
-      }
+      case 'setupAnnotations':
       case 'setupAnnotate': {
-        frame.locals.set(
-          '__annotate__',
-          newAnnotate(undefined, frame.globals, () => frame.annotations)
-        );
-        frame.locals.set('__conditional_annotations__', newSet());
+        setUpAnnotations(statement.kind, frame);
         return undefined;
       }
       case 'break':
@@ -219,6 +207,16 @@ export class Evaluator extends AsyncEvaluator {
         throw new Error(`Not a simple statement: ${statement.kind}`);
       }
     }
+  }
+
+  /** Evaluates an expression statement, handing its value to sys.displayhook in the interactive mode. */
+  private expressionStatement(statement: Extract<Statement, { kind: 'expression' }>, frame: Frame): void {
+    const { runtime } = this;
+    const { expression } = statement;
+    const value = runtime.steps.runStatement(statement.stepRow, expression.kind === 'call', () =>
+      this.evaluate(expression, frame)
+    );
+    if (statement.display) callValue(getAttribute(runtime.importModule('sys'), 'displayhook'), [value]);
   }
 
   private assignStatement(statement: Extract<Statement, { kind: 'assign' }>, frame: Frame): void {
@@ -448,9 +446,8 @@ export class Evaluator extends AsyncEvaluator {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Follows the protocol of the for loop, closing a generator it leaves.
-  // code-gauge-allow functionNcss 31 -- Follows the protocol of the for loop, closing a generator it leaves.
-  // code-gauge-allow duplicateLines 29 -- Mirrors the async for loop, whose items come from an awaited `__anext__`.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Follows the protocol of the for loop, closing a generator it leaves.
+  // code-gauge-allow functionNcss 33 -- Follows the protocol of the for loop, closing a generator it leaves.
   private *forStatement(statement: Extract<Statement, { kind: 'for' }>, frame: Frame): Execution {
     const { runtime } = this;
     const { target } = statement;
@@ -1243,6 +1240,19 @@ function toException(value: PyValue, message: string): PyInstance {
   }
   if (value instanceof PyInstance && value.exception) return value;
   throw typeError(message);
+}
+
+/** Creates the __annotations__ dict of a module or class body, or its __annotate__ function for lazy annotations. */
+function setUpAnnotations(kind: 'setupAnnotations' | 'setupAnnotate', frame: Frame): void {
+  if (kind === 'setupAnnotations') {
+    if (!frame.locals.has('__annotations__')) frame.locals.set('__annotations__', newDict());
+    return;
+  }
+  frame.locals.set(
+    '__annotate__',
+    newAnnotate(undefined, frame.globals, () => frame.annotations)
+  );
+  frame.locals.set('__conditional_annotations__', newSet());
 }
 
 function matchesExceptionTypes(exception: PyInstance, types: PyValue): boolean {

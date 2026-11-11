@@ -22,6 +22,7 @@ export function encodeUu(data: Uint8Array, backtick: boolean): Uint8Array {
 }
 
 /** `binascii.a2b_uu`: the bytes of one line of uuencoded data, or the message of the binascii.Error it raises. */
+// code-gauge-allow functionCognitiveComplexity 18 -- Transcribes binascii_a2b_uu_impl.
 export function decodeUu(ascii: Uint8Array): Uint8Array | string {
   if (ascii.length === 0) return 'Missing length byte';
   let binLength = (ascii[0] - 0x20) & 0x3f;
@@ -65,31 +66,39 @@ export function decodeQp(ascii: Uint8Array, header: boolean): Uint8Array {
   while (index < ascii.length) {
     const char = ascii[index];
     if (char === 0x3d) {
-      index++;
-      if (index >= ascii.length) break;
-      const next = ascii[index];
-      if (next === 0x0a || next === 0x0d) {
-        // A soft line break.
-        if (next !== 0x0a) while (index < ascii.length && ascii[index] !== 0x0a) index++;
-        if (index < ascii.length) index++;
-      } else if (next === 0x3d) {
-        out.push(0x3d);
-        index++;
-      } else if (index + 1 < ascii.length && isHexDigit(next) && isHexDigit(ascii[index + 1])) {
-        out.push(Number.parseInt(String.fromCodePoint(next, ascii[index + 1]), 16));
-        index += 2;
-      } else {
-        out.push(0x3d);
-      }
-    } else if (header && char === 0x5f) {
-      out.push(0x20);
-      index++;
+      index = decodeQpEscape(ascii, index + 1, out);
     } else {
-      out.push(char);
+      out.push(header && char === 0x5f ? 0x20 : char);
       index++;
     }
   }
   return Uint8Array.from(out);
+}
+
+/** Decodes what follows an `=` at `index`, a soft line break or an escaped byte, and returns the index after it. */
+function decodeQpEscape(ascii: Uint8Array, index: number, out: number[]): number {
+  if (index >= ascii.length) return index;
+  const next = ascii[index];
+  if (next === 0x0a || next === 0x0d) {
+    let end = index;
+    if (next !== 0x0a) while (end < ascii.length && ascii[end] !== 0x0a) end++;
+    return end < ascii.length ? end + 1 : end;
+  }
+  if (next === 0x3d) {
+    out.push(0x3d);
+    return index + 1;
+  }
+  if (index + 1 < ascii.length && isHexDigit(next) && isHexDigit(ascii[index + 1])) {
+    out.push(Number.parseInt(String.fromCodePoint(next, ascii[index + 1]), 16));
+    return index + 2;
+  }
+  out.push(0x3d);
+  return index;
+}
+
+/** Whether a line ends at `index`, with LF or CRLF. */
+function isLineEnd(data: Uint8Array, index: number): boolean {
+  return data[index] === 0x0a || (data[index] === 0x0d && data[index + 1] === 0x0a);
 }
 
 interface QpOptions {
@@ -99,15 +108,14 @@ interface QpOptions {
 }
 
 /** `binascii.b2a_qp`: encodes data as quoted-printable, with lines of at most 76 characters. */
+// code-gauge-allow functionNcss 38 -- Transcribes binascii_b2a_qp_impl, which decides each byte in one pass.
 // code-gauge-allow functionCognitiveComplexity 30 -- Transcribes binascii_b2a_qp_impl, which decides each byte in one pass.
 export function encodeQp(data: Uint8Array, { quotetabs, istext, header }: QpOptions): Uint8Array {
   const newline = data.indexOf(0x0a);
   const crlf = newline > 0 && data[newline - 1] === 0x0d;
   const out: number[] = [];
   const softBreak = (): void => {
-    out.push(0x3d);
-    if (crlf) out.push(0x0d);
-    out.push(0x0a);
+    out.push(...(crlf ? [0x3d, 0x0d, 0x0a] : [0x3d, 0x0a]));
   };
   const pushHex = (byte: number): void => {
     const hex = byte.toString(16).toUpperCase().padStart(2, '0');
@@ -126,7 +134,7 @@ export function encodeQp(data: Uint8Array, { quotetabs, istext, header }: QpOpti
       pushHex(byte);
       index++;
       lineLength += 3;
-    } else if (istext && (byte === 0x0a || (index + 1 < data.length && byte === 0x0d && data[index + 1] === 0x0a))) {
+    } else if (istext && isLineEnd(data, index)) {
       lineLength = 0;
       // Whitespace at the end of a line is encoded, as it would be lost.
       const last = out.at(-1);
@@ -134,8 +142,7 @@ export function encodeQp(data: Uint8Array, { quotetabs, istext, header }: QpOpti
         out[out.length - 1] = 0x3d;
         pushHex(last);
       }
-      if (crlf) out.push(0x0d);
-      out.push(0x0a);
+      out.push(...(crlf ? [0x0d, 0x0a] : [0x0a]));
       index += byte === 0x0d ? 2 : 1;
     } else {
       if (index + 1 !== data.length && data[index + 1] !== 0x0a && lineLength + 1 >= MAXLINESIZE) {

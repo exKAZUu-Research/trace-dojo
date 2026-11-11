@@ -1,0 +1,82 @@
+import { expect, test } from 'vitest';
+
+import { executeProgram } from '../../src/interpreter/program';
+
+/** Runs a program that raises when a value it computes differs from what CPython 3.14.10 computes for it. */
+function expectSameAsCPython(program: string): void {
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+}
+
+test('template strings carry their interpolations and annotations are evaluated only when asked for', () => {
+  expectSameAsCPython(`from string.templatelib import Template, Interpolation
+import annotationlib, traceback, sys, weakref, threading, io, enum
+name = 'World'
+t = t'Hello {name!r:>8}!'
+assert type(t) is Template and t.strings == ('Hello ', '!')
+i = t.interpolations[0]
+assert (i.value, i.expression, i.conversion, i.format_spec) == ('World', 'name', 'r', '>8')
+assert list(t) == ['Hello ', i, '!']
+def f(x: Undefined) -> int: pass
+assert annotationlib.get_annotations(f, format=annotationlib.Format.STRING) == {'x': 'Undefined', 'return': 'int'}
+try:
+    f.__annotations__
+except NameError as e:
+    assert str(e) == "name 'Undefined' is not defined"
+`);
+});
+
+test('tracebacks link the frames an exception passed through, outermost first', () => {
+  expectSameAsCPython(`from string.templatelib import Template, Interpolation
+import annotationlib, traceback, sys, weakref, threading, io, enum
+def inner(): 1 / 0
+def outer(): inner()
+try:
+    outer()
+except ZeroDivisionError as e:
+    tb = e.__traceback__
+    names = []
+    while tb:
+        names.append(tb.tb_frame.f_code.co_name)
+        tb = tb.tb_next
+    assert names == ['<module>', 'outer', 'inner'], names
+    assert sys._getframe().f_code.co_name == '<module>'
+`);
+});
+
+test('finalizers run when the last reference goes, and a busy-waiting thread lets the others run', () => {
+  expectSameAsCPython(`from string.templatelib import Template, Interpolation
+import annotationlib, traceback, sys, weakref, threading, io, enum
+class Node: pass
+log = []
+n = Node()
+weakref.finalize(n, log.append, 'gone')
+del n
+assert log == ['gone']
+done = []
+def setter():
+    while not done:
+        pass
+    done.append('seen')
+worker = threading.Thread(target=setter)
+worker.start()
+done.append('set')
+worker.join()
+assert done == ['set', 'seen']
+`);
+});
+
+test('TextIOWrapper translates newlines and a strict flag rejects unknown bits', () => {
+  expectSameAsCPython(`from string.templatelib import Template, Interpolation
+import annotationlib, traceback, sys, weakref, threading, io, enum
+w = io.TextIOWrapper(io.BytesIO(), encoding='utf-8', newline='\\r\\n')
+w.write('a\\nb\\n'); w.flush()
+assert w.buffer.getvalue() == b'a\\r\\nb\\r\\n'
+class Color(enum.Flag, boundary=enum.STRICT):
+    RED = 1
+    GREEN = 2
+try:
+    Color(7)
+except ValueError as e:
+    assert str(e).startswith('<flag \\'Color\\'> invalid value 7'), str(e)
+`);
+});
