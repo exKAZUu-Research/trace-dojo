@@ -191,9 +191,17 @@ export function enumContains(cls: PyClass, value: PyValue): boolean {
 // code-gauge-allow functionNcss 32 -- Follows how EnumType turns a class body into members.
 export function createEnumMembers(cls: PyClass): void {
   cls.flags.isEnum = true;
+  // As EnumType does, the body's own `__new__` creates the members, and calling the class looks one up.
+  const create = cls.dict.get('__new__');
+  if (create !== undefined) {
+    cls.dict.delete('__new__');
+    cls.dict.set('__new_member__', create);
+  }
   const iterated: PyInstance[] = [];
   const named = new Map<string, PyInstance>();
   const lastValues: PyValue[] = [];
+  // The members so far, which a `__new__` creating the next one may read through `__members__`.
+  namedMembers.set(cls, named);
   for (const [name, attribute] of cls.dict) {
     let value = attribute;
     if (value instanceof PyOpaque && value.cls === nonmemberClass) {
@@ -204,7 +212,8 @@ export function createEnumMembers(cls: PyClass): void {
     if (forced) value = (attribute as PyOpaque).data as PyValue;
     if (!forced && (isDunderOrSunder(name) || isDescriptorLike(value))) continue;
     if (value instanceof PyOpaque && value.cls === autoClass) value = nextValue(cls, name, named.size, lastValues);
-    value = mixinValue(cls, value);
+    const created = create === undefined ? undefined : customMember(cls, value);
+    value = created ? (created.enumValue as PyValue) : mixinValue(cls, value);
     lastValues.push(value);
     const alias = [...named.values()].find((member) => keysEqual(member.enumValue as PyValue, value));
     if (alias) {
@@ -212,13 +221,12 @@ export function createEnumMembers(cls: PyClass): void {
       named.set(name, alias);
       continue;
     }
-    const member = newMember(cls, name, value);
+    const member = created ? initializeMember(created, name, value) : newMember(cls, name, value);
     named.set(name, member);
     cls.dict.set(name, member);
     if (!isFlagClass(cls) || isSingleBit(value)) iterated.push(member);
   }
   cls.enumMembers = iterated;
-  namedMembers.set(cls, named);
   useEnumMethodsOverMixin(cls);
 }
 
@@ -267,13 +275,36 @@ function isDescriptorLike(value: PyValue): boolean {
 function newMember(cls: PyClass, name: string | undefined, value: PyValue): PyInstance {
   const member = new PyInstance(cls);
   member.enumValue = value;
+  return initializeMember(member, name, value);
+}
+
+/** Names a new member and runs the class's `__init__` with the arguments its value stands for. */
+function initializeMember(member: PyInstance, name: string | undefined, value: PyValue): PyInstance {
   member.dict.set('_name_', name ?? None);
-  const init = cls.lookup('__init__');
-  if (init instanceof PyFunction) {
-    const args = value instanceof PyInstance || !isTupleValue(value) ? [value] : [...(value as PyTuple).items];
-    callValue(init, [member, ...args]);
-  }
+  const init = member.cls.lookup('__init__');
+  if (init instanceof PyFunction) callValue(init, [member, ...memberArguments(value)]);
   return member;
+}
+
+/**
+ * The member the class body's own `__new__` creates from the arguments a value stands for, whose value is the
+ * `_value_` it sets, else the value converted by the mixed-in type.
+ */
+function customMember(cls: PyClass, value: PyValue): PyInstance {
+  const args = memberArguments(value);
+  const member = callValue(getAttribute(cls, '__new_member__'), [cls, ...args]);
+  if (!(member instanceof PyInstance)) throw typeError(`${cls.name}.__new__ must return an instance of ${cls.name}`);
+  const own = member.dict.get('_value_');
+  member.dict.delete('_value_');
+  if (own !== undefined) member.enumValue = own;
+  else if (cls.isSubclassOf(intClass) || cls.isSubclassOf(strClass))
+    member.enumValue = mixinValue(cls, args[0] as PyValue);
+  else member.enumValue = value;
+  return member;
+}
+
+function memberArguments(value: PyValue): PyValue[] {
+  return value instanceof PyInstance || !isTupleValue(value) ? [value] : [...(value as PyTuple).items];
 }
 
 function isTupleValue(value: PyValue): boolean {

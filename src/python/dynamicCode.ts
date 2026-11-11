@@ -5,6 +5,7 @@ import { PyBytes } from './bytesValues';
 import { MappingNamespace } from './classes';
 import { method } from './define';
 import { Frame } from './frame';
+import { isIncompleteInput } from './incompleteInput';
 import { findIndentationError } from './indentation';
 import { builtinClassWithBase } from './modules/moduleClasses';
 import { defineProperty } from './modules/numberSupport';
@@ -44,17 +45,30 @@ function inheritedFeatures(): readonly string[] {
 
 // Code objects ------------------------------------------------------------------------------------------------------
 
-function newCode(code: Code): PyOpaque {
+function newCode(code: Code, flags: PyValue = 0n): PyOpaque {
   const info: CodeInfo = {
     name: '<module>',
     qualifiedName: '<module>',
     firstRow: 0,
     filename: code.filename,
     compiled: code,
+    futureFlags: futureFlagsOf(code, flags),
   };
   const object = new PyOpaque(codeClass, '', info);
   registerCode(code.module.scope, object);
   return object;
+}
+
+/**
+ * The `co_flags` of compiled module code: the future flags compile() was given, and of the features the code enables,
+ * those that change what CPython compiles.
+ */
+function futureFlagsOf(code: Code, flags: PyValue): bigint {
+  let all = (typeof flags === 'bigint' ? flags : 0n) & FUTURE_MASK;
+  for (const [flag, feature] of FUTURE_FLAGS) {
+    if (RECORDED_FEATURES.has(feature) && code.module.futureFeatures.includes(feature)) all |= flag;
+  }
+  return all;
 }
 
 /** What compile() compiled into a code object, or undefined for the code object of a function or frame. */
@@ -92,7 +106,71 @@ export function compile(args: PyValue[], kwargs: Kwargs): PyValue {
   if (onlyAst(flags) && astSupport) return parseTree(astSupport, text, mode, filename);
   const features = flagFeatures(flags);
   if (dontInherit === undefined || !isTruthy(dontInherit)) features.push(...inheritedFeatures());
-  return newCode(compileCode(text, mode, filename, features));
+  return newCode(compileInput(text, mode, filename, features, flags), flags);
+}
+
+/** `PyCF_DONT_IMPLY_DEDENT` and `PyCF_ALLOW_INCOMPLETE_INPUT`, with which `codeop` tells incomplete input. */
+const DONT_IMPLY_DEDENT = 0x2_00n;
+const ALLOW_INCOMPLETE_INPUT = 0x40_00n;
+
+/**
+ * Compiles source text with the input flags of compile(): without an implied dedent, a compound statement in single
+ * mode needs the newline after it, and with incomplete input allowed, text that may continue raises
+ * `_IncompleteInputError`.
+ */
+function compileInput(
+  text: string,
+  mode: Mode,
+  filename: string,
+  features: string[],
+  flags: PyValue | undefined
+): Code {
+  const bits = typeof flags === 'bigint' ? flags : 0n;
+  const lacksNewline = (bits & DONT_IMPLY_DEDENT) !== 0n && mode === 'single' && lacksFinalNewline(text);
+  try {
+    const code = compileCode(text, mode, filename, features);
+    const last = code.module.body.at(-1);
+    if (lacksNewline && last !== undefined && isCompound(last)) {
+      const cls = /\n[ \t]+$/.test(text) ? unshownIndentationErrorClass : unshownSyntaxErrorClass;
+      throw syntaxError(cls, filename, 'single モードの複合文の後に改行がない');
+    }
+    return code;
+  } catch (error) {
+    if ((bits & ALLOW_INCOMPLETE_INPUT) === 0n || !(error instanceof PyError)) throw error;
+    if (!(error.exception.cls === unshownSyntaxErrorClass || error.exception.cls === unshownIndentationErrorClass))
+      throw error;
+    if (lacksNewline || isIncompleteText(text, mode)) {
+      throw syntaxError(unshownIncompleteInputErrorClass, filename, 'incomplete input');
+    }
+    throw error;
+  }
+}
+
+/**
+ * Whether the last statement of text lacks the newline that ends it when no dedent is implied: its own line, or the
+ * line of its indented block's end, has none.
+ */
+function lacksFinalNewline(text: string): boolean {
+  if (text.endsWith('\n')) return false;
+  const lines = text.split('\n');
+  if (!isBlankLine(lines.at(-1) as string)) return true;
+  const lastCode = lines.findLast((line) => !isBlankLine(line)) ?? '';
+  return /^[ \t\f]/.test(lastCode);
+}
+
+function isBlankLine(line: string): boolean {
+  return /^[ \t\f]*(?:#.*)?\r?$/.test(line);
+}
+
+/** Whether text the grammar rejects may continue, deciding as CPython does for the text `codeop` asks about. */
+function isIncompleteText(text: string, mode: Mode): boolean {
+  const blank = text.split('\n').every(isBlankLine);
+  if (!text.endsWith('\n') && mode !== 'exec' && !blank) {
+    throw new UnsupportedFeatureError(
+      'compile() の PyCF_ALLOW_INCOMPLETE_INPUT に、改行で終わらない single・eval モードの文字列を渡すこと'
+    );
+  }
+  return isIncompleteInput(text, mode);
 }
 
 /** The tree `ast.parse` gives, raising the SyntaxError of text the grammar rejects. */
@@ -194,6 +272,8 @@ const FUTURE_FLAGS: [bigint, string][] = [
   [0x80_00_00n, 'generator_stop'],
   [0x1_00_00_00n, 'annotations'],
 ];
+const RECORDED_FEATURES = new Set(['annotations', 'barry_as_FLUFL']);
+const FUTURE_MASK = 0x1_fe_00_00n;
 /** `ast.PyCF_ONLY_AST` and `ast.PyCF_OPTIMIZED_AST`, which make compile() return an AST, and top-level await. */
 const AST_FLAGS = 0x4_00n | 0x80_00n;
 const TOP_LEVEL_AWAIT_FLAG = 0x20_00n;
@@ -230,7 +310,7 @@ function compileCode(source: string, mode: Mode, filename: string, features: rea
   const key = `${mode} ${[...new Set(features)].toSorted().join(',')}\n${source}`;
   let module = cache.get(key);
   if (!module) {
-    module = parseSource(source, filename, features);
+    module = parseSource(source, filename, features, mode);
     checkMode(module, mode, filename);
     cache.set(key, module);
   }
@@ -271,9 +351,14 @@ function markDisplays(statement: Statement): Statement {
   }
 }
 
-function parseSource(source: string, filename: string, features: readonly string[]): Module {
+function parseSource(source: string, filename: string, features: readonly string[], mode: Mode): Module {
   const indentationError = findIndentationError(source);
-  if (indentationError) throw syntaxError(unshownIndentationErrorClass, filename, reasonOf(indentationError));
+  if (indentationError) {
+    // In eval mode, the parser rejects a statement at its first token, before the tokenizer reads its indentation.
+    const cls =
+      mode === 'eval' && STATEMENT_START.test(source) ? unshownSyntaxErrorClass : unshownIndentationErrorClass;
+    throw syntaxError(cls, filename, reasonOf(indentationError));
+  }
   try {
     return parseDynamicCode(source, features);
   } catch (error) {
@@ -281,6 +366,10 @@ function parseSource(source: string, filename: string, features: readonly string
     throw syntaxError(unshownSyntaxErrorClass, filename, reasonOf(error.diagnostics[0]));
   }
 }
+
+/** The start of source text whose first line, not indented, begins a statement that is not an expression. */
+const STATEMENT_START =
+  /^(?:[ \t\f]*(?:#[^\n]*)?\r?\n)*(?:(?:if|elif|else|for|while|try|except|finally|with|def|class|async|del|pass|import|from|global|nonlocal|return|raise|assert|break|continue)\b|(?:match|case)\b[^\n]*:[ \t]*(?:#[^\n]*)?\r?(?:\n|$))/;
 
 function reasonOf({ row, message }: SourceDiagnostic): string {
   return message.endsWith('この採点環境では使えません。') ? message : `${row + 1} 行目: ${message}`;
@@ -319,6 +408,11 @@ const unshownIndentationErrorClass = builtinClassWithBase(
   exceptionClassNamed('IndentationError'),
   'builtins'
 );
+const unshownIncompleteInputErrorClass = builtinClassWithBase(
+  '_IncompleteInputError',
+  exceptionClassNamed('_IncompleteInputError'),
+  'builtins'
+);
 
 function syntaxError(cls: PyClass, filename: string, reason: string): PyError {
   const feature = `eval()・exec()・compile() に渡した文字列の構文エラーのメッセージ（${reason}）`;
@@ -327,7 +421,7 @@ function syntaxError(cls: PyClass, filename: string, reason: string): PyError {
   return new PyError(exception);
 }
 
-for (const cls of [unshownSyntaxErrorClass, unshownIndentationErrorClass]) {
+for (const cls of [unshownSyntaxErrorClass, unshownIndentationErrorClass, unshownIncompleteInputErrorClass]) {
   for (const name of ['__str__', '__repr__']) {
     method(cls, name, 'none', 0, 0, (self) => {
       throw new UnsupportedFeatureError(unshownMessage(self));

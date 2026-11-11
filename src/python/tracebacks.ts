@@ -160,6 +160,8 @@ export interface CodeInfo {
   compiled?: unknown;
   /** The scope of the code, which tells whether the code is the program's own. */
   scope?: object;
+  /** The `co_flags` of module code compile() created, which hold only the flags of its `__future__` features. */
+  futureFlags?: bigint;
 }
 
 const codeObjects = new WeakMap<object, PyOpaque>();
@@ -234,7 +236,12 @@ defineProperty(codeClass, 'co_filename', (self) => {
   if (filename === undefined) throw new UnsupportedFeatureError('スクリプトのファイルのパス（co_filename）');
   return filename;
 });
-for (const name of ['co_code', 'co_consts', 'co_names', 'co_varnames', 'co_nlocals', 'co_stacksize', 'co_flags']) {
+defineProperty(codeClass, 'co_flags', (self) => {
+  const { futureFlags } = infoOf(self);
+  if (futureFlags === undefined) throw new UnsupportedFeatureError('CPython のバイトコードの情報（co_flags）');
+  return futureFlags;
+});
+for (const name of ['co_code', 'co_consts', 'co_names', 'co_varnames', 'co_nlocals', 'co_stacksize']) {
   defineProperty(codeClass, name, () => {
     throw new UnsupportedFeatureError(`CPython のバイトコードの情報（${name}）`);
   });

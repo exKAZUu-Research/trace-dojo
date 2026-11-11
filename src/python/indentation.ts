@@ -36,10 +36,13 @@ export function findIndentationError(source: string): SourceDiagnostic | undefin
       }
       if (indent.altColumn !== level.altColumn) return { row, message: TAB_MESSAGE };
     }
+    // A clause where none may stand is the parser's error, which comes before the indentation of the lines after it.
+    if (line.misplaced) return undefined;
     expectsBlock = line.opensBlock;
     openerRow = row;
   }
-  if (expectsBlock) return expectedBlock((lines.at(-1)?.row ?? 0) + 1, openerRow);
+  // At the end of the input, CPython reports the last line.
+  if (expectsBlock) return expectedBlock(source.replace(/\r?\n$/, '').split('\n').length - 1, openerRow);
   return undefined;
 }
 
@@ -52,14 +55,18 @@ function expectedBlock(row: number, openerRow: number): SourceDiagnostic {
 interface LogicalLine {
   row: number;
   indent: Indent;
-  /** Whether the line ends with a colon outside brackets, which opens a block. */
+  /** Whether the line is a compound statement's header, ending with a colon outside brackets, which opens a block. */
   opensBlock: boolean;
+  /** Whether the line is a clause such as `else` that follows no header it may continue. */
+  misplaced: boolean;
 }
 
 /** Splits a source into its logical lines, skipping blank lines and lines holding only a comment. */
 function logicalLines(source: string): LogicalLine[] {
   const lines: LogicalLine[] = [];
   const scanner = new Scanner(source);
+  /** The first word of the last line at each indentation column that is still open. */
+  const previous = new Map<number, string>();
   while (!scanner.done) {
     const indent = scanner.readIndent();
     const row = scanner.row;
@@ -68,17 +75,57 @@ function logicalLines(source: string): LogicalLine[] {
       scanner.skipLine();
       continue;
     }
+    const keyword = scanner.peekWord();
     const lastToken = scanner.readLogicalLine();
-    lines.push({ row, indent, opensBlock: lastToken === ':' });
+    for (const column of previous.keys()) if (column > indent.column) previous.delete(column);
+    const misplaced = !continuesHeader(keyword, previous.get(indent.column));
+    lines.push({ row, indent, opensBlock: lastToken === ':' && BLOCK_KEYWORDS.has(keyword) && !misplaced, misplaced });
+    previous.set(indent.column, keyword);
   }
   return lines;
 }
+
+/** The headers a clause such as `else` continues, which must come before it at its indentation. */
+const CLAUSE_HEADERS: Record<string, readonly string[]> = {
+  elif: ['if', 'elif'],
+  else: ['if', 'elif', 'for', 'while', 'try', 'except', 'async'],
+  except: ['try', 'except'],
+  finally: ['try', 'except', 'else'],
+};
+
+function continuesHeader(keyword: string, previous: string | undefined): boolean {
+  const headers = CLAUSE_HEADERS[keyword];
+  return headers === undefined || (previous !== undefined && headers.includes(previous));
+}
+
+/** The keywords that begin the headers of compound statements and their clauses. */
+const BLOCK_KEYWORDS = new Set([
+  'if',
+  'elif',
+  'else',
+  'for',
+  'while',
+  'try',
+  'except',
+  'finally',
+  'with',
+  'def',
+  'class',
+  'async',
+  'match',
+  'case',
+]);
 
 class Scanner {
   private index = 0;
   row = 0;
 
   constructor(private readonly source: string) {}
+
+  /** The name or keyword at the current position, if any. */
+  peekWord(): string {
+    return /^[\p{L}_][\p{L}\p{N}_]*/u.exec(this.source.slice(this.index, this.index + 20))?.[0] ?? '';
+  }
 
   get done(): boolean {
     return this.index >= this.source.length;
