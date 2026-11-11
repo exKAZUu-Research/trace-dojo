@@ -10,6 +10,7 @@ import { GeneratorFinalizer } from './finalization';
 import { Frame } from './frame';
 import { findReachableObjects, findReachableTurtles } from './garbageCollection';
 import { resumeGenerator } from './generators';
+import { genericAlias } from './genericAlias';
 import { pyHash } from './hashing';
 import { instantiate } from './instances';
 import { keyError } from './items';
@@ -34,12 +35,11 @@ import {
   pyError,
   superClass,
   typeError,
-  typingClass,
   unionClass,
   valueError,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import {
+import { type PyTuple,
   DONE,
   type Kwargs,
   PyCell,
@@ -54,9 +54,7 @@ import {
   PyObject,
   PyOpaque,
   type PySet,
-  PyTuple,
-  type PyValue,
-} from './values';
+  type PyValue } from './values';
 
 export class Runtime {
   readonly world = new TurtleWorld();
@@ -159,6 +157,20 @@ export class Runtime {
       }
       result.push({ frame, row });
       row = frame.callRow;
+    }
+    return result;
+  }
+
+  /**
+   * Every frame with the row it is running, innermost first. A library module's frame counts as running the program's
+   * row that entered it, since its own rows are not the program's.
+   */
+  allFrames(): { frame: Frame; row: number | undefined }[] {
+    const result: { frame: Frame; row: number | undefined }[] = [];
+    let row = this.callerRow();
+    for (const frame of this.frames.toReversed()) {
+      result.push({ frame, row });
+      row = this.libraryEntryRows.has(frame) ? this.libraryEntryRows.get(frame) : frame.callRow;
     }
     return result;
   }
@@ -473,13 +485,6 @@ export class Runtime {
     if (this.threads) roots.push(...this.threads.roots());
     return roots;
   }
-}
-
-/** `list[int]` and the like, which type hints use. */
-function genericAlias(cls: PyClass, key: PyValue): PyOpaque {
-  const args = key instanceof PyTuple ? key.items : [key];
-  const text = `${cls.name}[${args.map((arg) => (arg instanceof PyClass ? arg.qualifiedName : arg instanceof PyOpaque ? arg.text : pyRepr(arg))).join(', ')}]`;
-  return new PyOpaque(typingClass, text, cls);
 }
 
 /** The types a `|` union holds, or the type itself. */

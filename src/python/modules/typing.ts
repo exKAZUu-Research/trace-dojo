@@ -57,6 +57,7 @@ for (const cls of [specialFormClass, typingClass, unionClass, formAliasClass, li
   method(cls, '__repr__', 'none', 0, 0, (self) => (self as PyOpaque).text);
   method(cls, '__or__', 'one', 1, 1, (self, [other]) => currentRuntime().unionType(self, other));
   method(cls, '__ror__', 'one', 1, 1, (self, [other]) => currentRuntime().unionType(other, self));
+  if (cls === typingClass) continue;
   method(cls, '__call__', 'expected', 0, Number.POSITIVE_INFINITY, (self) => {
     throw currentRuntime().unsupported(`${(self as PyOpaque).text} の呼び出し`);
   });

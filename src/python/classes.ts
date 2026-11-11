@@ -268,6 +268,9 @@ export function typeNew(
   const effectiveBases = classBases.length > 0 ? classBases : [objectClass];
   checkLayout(effectiveBases);
   const entries = namespaceEntries(namespace);
+  // As CPython does, a namespace without `__module__` takes the `__name__` of the globals calling `type()`.
+  if (!entries.has('__module__'))
+    entries.set('__module__', currentRuntime().frame.globals.get('__name__') ?? '__main__');
   const cls = new PyClass(name, effectiveBases, winner);
   cls.isBuiltin = false;
   cls.isBaseType = true;
@@ -331,7 +334,6 @@ function qualifiedNameOf(entries: Map<string, PyValue>, name: string): string {
 
 /** Fills a new class's dictionary from its namespace, adding what `type.__new__` adds. */
 function fillClassDict(cls: PyClass, entries: Map<string, PyValue>): void {
-  if (!entries.has('__module__')) entries.set('__module__', '__main__');
   wrapImplicitMethod(entries, '__new__', staticmethodClass);
   wrapImplicitMethod(entries, '__init_subclass__', classmethodClass);
   wrapImplicitMethod(entries, '__class_getitem__', classmethodClass);

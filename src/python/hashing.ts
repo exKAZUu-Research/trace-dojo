@@ -1,6 +1,6 @@
 import { PyBytes, PyMemoryView } from './bytesValues';
 import { callSpecial, lookupSpecial } from './objects';
-import { classOf, None, typeError, typeName } from './types';
+import { classOf, None, typeError, typeName, typingClass } from './types';
 import { PyComplex, PyInstance, PyObject, PySet, PyTuple, type PyValue } from './values';
 
 const MASK64 = (1n << 64n) - 1n;
@@ -137,7 +137,9 @@ export function pyHash(value: PyValue): bigint {
   if (value instanceof PyTuple && value.cls.isBuiltin) return hashTuple(value.items);
   const special = lookupSpecial(value, '__hash__');
   if (special === None) throw typeError(`unhashable type: '${typeName(value)}'`);
-  if (value instanceof PyBytes || value instanceof PyMemoryView) return callSpecial(value, '__hash__', []) as bigint;
+  if (value instanceof PyBytes || value instanceof PyMemoryView || value.cls === typingClass) {
+    return callSpecial(value, '__hash__', []) as bigint;
+  }
   if (special !== undefined && !isDefaultHash(special)) {
     const result = callSpecial(value, '__hash__', []);
     if (typeof result === 'boolean') return result ? 1n : 0n;

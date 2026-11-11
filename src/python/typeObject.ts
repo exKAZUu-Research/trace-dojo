@@ -369,6 +369,17 @@ function bindThroughSuper(value: PyValue, self: PyValue, selfClass: PyClass): Py
   return getter === undefined ? bindValue(value, self, selfClass) : callGetter(getter, value, self, selfClass);
 }
 
+// method ------------------------------------------------------------------------------------------------------------
+
+/** `types.MethodType(function, instance)`. */
+methodClass.construct = (cls, args, kwargs) => {
+  checkArgs({ qualified: 'method', min: 2, max: 2, style: 'expected' }, args, kwargs);
+  const [fn, self] = args;
+  if (!isCallable(fn)) throw typeError('first argument must be callable');
+  if (self === None) throw typeError('instance must not be None');
+  return new PyBoundMethod(cls, self, fn);
+};
+
 // slice -------------------------------------------------------------------------------------------------------------
 
 sliceClass.construct = (_cls, args, kwargs) => {

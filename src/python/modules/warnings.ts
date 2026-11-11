@@ -352,7 +352,43 @@ class deprecated:
             arg.__deprecated__ = msg
             return arg
         elif isinstance(arg, type):
-            _unsupported('クラスに付ける warnings.deprecated')
+            import functools
+            from types import MethodType
+
+            original_new = arg.__new__
+
+            @functools.wraps(original_new)
+            def __new__(cls, /, *args, **kwargs):
+                if cls is arg:
+                    warn(msg, category=category, stacklevel=stacklevel + 1)
+                if original_new is not object.__new__:
+                    return original_new(cls, *args, **kwargs)
+                elif cls.__init__ is object.__init__ and (args or kwargs):
+                    raise TypeError(f"{cls.__name__}() takes no arguments")
+                else:
+                    return original_new(cls)
+
+            arg.__new__ = staticmethod(__new__)
+
+            if "__init_subclass__" in arg.__dict__:
+                original_init_subclass = arg.__init_subclass__
+                if isinstance(original_init_subclass, MethodType):
+                    original_init_subclass = original_init_subclass.__func__
+
+                @functools.wraps(original_init_subclass)
+                def __init_subclass__(*args, **kwargs):
+                    warn(msg, category=category, stacklevel=stacklevel + 1)
+                    return original_init_subclass(*args, **kwargs)
+            else:
+                def __init_subclass__(cls, *args, **kwargs):
+                    warn(msg, category=category, stacklevel=stacklevel + 1)
+                    return super(arg, cls).__init_subclass__(*args, **kwargs)
+
+            arg.__init_subclass__ = classmethod(__init_subclass__)
+
+            arg.__deprecated__ = __new__.__deprecated__ = msg
+            __init_subclass__.__deprecated__ = msg
+            return arg
         elif callable(arg):
             import functools
 
@@ -367,6 +403,19 @@ class deprecated:
                 "@deprecated decorator with non-None category must be applied to "
                 f"a class or callable, not {arg!r}"
             )
+
+
+_DEPRECATED_MSG = "{name!r} is deprecated and slated for removal in Python {remove}"
+
+
+def _deprecated(name, message=_DEPRECATED_MSG, *, remove, _version=sys.version_info):
+    remove_formatted = f"{remove[0]}.{remove[1]}"
+    if (_version[:2] > remove) or (_version[:2] == remove and _version[3] != "alpha"):
+        msg = f"{name!r} was slated for removal after Python {remove_formatted} alpha"
+        raise RuntimeError(msg)
+    else:
+        msg = message.format(name=name, remove=remove_formatted)
+        warn(msg, DeprecationWarning, stacklevel=3)
 
 
 _filters_version = 1
@@ -388,8 +437,8 @@ registerSourceModule(
       [
         '_caller',
         builtin('_caller', 'one', 1, 1, ([level]) => {
-          const frames = currentRuntime().programFrames();
-          const found = frames[Number(toIndex(level)) - 1] ?? (Number(toIndex(level)) <= 1 ? frames[0] : undefined);
+          // The innermost frame is the one of `warn`, so level 1 is the frame that called it, as in CPython.
+          const found = currentRuntime().allFrames()[Math.max(Number(toIndex(level)), 1)];
           if (!found) return None;
           return newTuple([found.frame.moduleName, BigInt((found.row ?? -1) + 1)]);
         }),
