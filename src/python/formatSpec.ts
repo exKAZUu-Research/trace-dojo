@@ -84,7 +84,8 @@ export function formatValue(value: PyValue, text: string, fallback: (value: PyVa
   if (typeof value === 'bigint' || typeof value === 'boolean') return formatInt(BigInt(value), parseSpec(text, value));
   if (typeof value === 'number') return formatFloat(value, parseSpec(text, value));
   if (typeof value === 'string') return formatStr(value, parseSpec(text, value));
-  if (value instanceof PyComplex && text === '') return complexRepr(value);
+  if (value instanceof PyComplex)
+    return text === '' ? complexRepr(value) : formatComplex(value, parseSpec(text, value));
   if (text !== '') throw valueError(`unsupported format string passed to ${typeName(value)}.__format__`);
   return fallback(value);
 }
@@ -251,4 +252,27 @@ function pad(body: string, signAndPrefix: string, spec: Spec, defaultAlign: '<' 
       return fill.repeat(left) + signAndPrefix + body + fill.repeat(missing - left);
     }
   }
+}
+
+/** `complex.__format__`, which formats both parts as floats, as CPython's format_complex_internal does. */
+function formatComplex(value: PyComplex, spec: Spec): string {
+  let type = spec.type;
+  if (type !== undefined && !'eEfFgGn'.includes(type)) {
+    throw valueError(`Unknown format code '${type}' for object of type 'complex'`);
+  }
+  if (spec.zeroPad) throw valueError('Zero padding is not allowed in complex format specifier');
+  if (spec.align === '=') throw valueError("'=' alignment flag is not allowed in complex format specifier");
+  const { real, imag } = value;
+  // Without a type it reads as str() does: the real part only when it is not +0, in parentheses.
+  const like = type === undefined && spec.precision === undefined;
+  const skipReal = type === undefined && real === 0 && !Object.is(real, -0);
+  if (type === 'n') type = 'g';
+  if (type === undefined && spec.precision !== undefined) type = 'g';
+  const part = (number: number, sign: Spec['sign']): string => {
+    const text = formatFloat(number, { ...spec, fill: ' ', width: 0, align: undefined, sign, type });
+    return like && /^[+ -]?[\d,_]+\.0$/.test(text) ? text.slice(0, -2) : text;
+  };
+  const imaginary = `${part(imag, skipReal ? spec.sign : '+')}j`;
+  const body = skipReal ? imaginary : part(real, spec.sign) + imaginary;
+  return pad(spec.type === undefined && !skipReal ? `(${body})` : body, '', spec, '>');
 }
