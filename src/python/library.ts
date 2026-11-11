@@ -136,6 +136,8 @@ import './modules/stdlibPickle';
 import './modules/pickle';
 import './modules/pickletools';
 import './modules/wave';
+import './modules/xml/pyexpat';
+import './modules/xml/xmlParsers';
 import './modules/marshal';
 import './modules/gzip';
 import './modules/doctest';
