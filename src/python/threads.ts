@@ -18,7 +18,7 @@ import {
   type Kwargs,
   PyBoundMethod,
   PyBuiltinFunction,
-  type PyClass,
+  PyClass,
   PyFunction,
   type PyInstance,
   type PyValue,
@@ -305,6 +305,24 @@ export function blockingMethod(
   cls.dict.set(name, fn);
 }
 
+/** A builtin's variant that suspends the thread where a function it calls back, or an iterator it reads, waits. */
+export type SuspendingNative = (args: PyValue[], kwargs: Kwargs) => Suspension;
+
+/**
+ * Makes a call of a builtin function or method that calls back into Python, where the thread can suspend, run
+ * `variant`, so that a wait in the callback suspends the thread instead of waiting on the host's stack.
+ */
+export function registerSuspendingVariant(fn: PyBuiltinFunction, variant: SuspendingNative): void {
+  blockingNatives.set(fn.run, variant as unknown as BlockingNative);
+}
+
+/** The suspending variants of builtin classes whose construction reads an iterable, as `list(generator)` does. */
+const suspendingConstructors = new Map<PyClass, SuspendingNative>();
+
+export function registerSuspendingConstructor(cls: PyClass, variant: SuspendingNative): void {
+  suspendingConstructors.set(cls, variant);
+}
+
 /**
  * Calls a value so that the waits of blocking operations it makes suspend the calling thread: a function of the
  * program runs its frame step by step, and a blocking builtin runs its operation. Returns undefined for a value that
@@ -316,6 +334,7 @@ export function suspendingCall(callee: PyValue, args: PyValue[], kwargs: Kwargs)
       ? suspendingCall(callee.fastCall, args, kwargs)
       : suspendingCall(callee.fn, [callee.self, ...args], kwargs);
   }
+  if (callee instanceof PyClass) return suspendingConstructors.get(callee)?.(args, kwargs) as Suspension | undefined;
   if (callee instanceof PyBuiltinFunction) {
     const blocking = blockingNatives.get(callee.run);
     if (!blocking) return undefined;

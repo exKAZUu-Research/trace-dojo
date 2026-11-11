@@ -17,41 +17,45 @@ interface Indent {
  * block, a dedent to no enclosing level, or tabs and spaces mixed ambiguously, or the first nesting of brackets or
  * f-strings deeper than its tokenizer allows.
  */
-// code-gauge-allow functionNcss 31 -- Follows the indentation checks of CPython's tokenizer in their order.
-// code-gauge-allow functionCognitiveComplexity 26 -- Follows the indentation checks of CPython's tokenizer in their order.
 export function findIndentationError(source: string): SourceDiagnostic | undefined {
   const { lines, limitError } = logicalLines(source);
   const stack: Indent[] = [{ column: 0, altColumn: 0 }];
-  let expectsBlock = false;
-  let followsDecorator = false;
-  let openerRow = 0;
+  let previous: LogicalLine | undefined;
   for (const line of lines) {
-    const top = stack.at(-1) as Indent;
-    const { indent, row } = line;
-    if (indent.column > top.column) {
-      if (indent.altColumn <= top.altColumn) return { row, message: TAB_MESSAGE };
-      if (!expectsBlock) return { row, message: 'ここで字下げ（インデント）を始めることはできません。' };
-      stack.push(indent);
-      if (stack.length > MAX_INDENT_LEVELS) return { row, message: '字下げ（インデント）が深すぎます。' };
-    } else {
-      if (expectsBlock) return expectedBlock(row, openerRow);
-      if (followsDecorator && indent.column < top.column) {
-        return { row, message: 'デコレータの後の行の字下げ（インデント）を戻すことはできません。' };
-      }
-      while (indent.column < (stack.at(-1) as Indent).column) stack.pop();
-      const level = stack.at(-1) as Indent;
-      if (indent.column !== level.column) {
-        return { row, message: '字下げ（インデント）が、外側のどの行の字下げとも合っていません。' };
-      }
-      if (indent.altColumn !== level.altColumn) return { row, message: TAB_MESSAGE };
-    }
-    expectsBlock = line.opensBlock;
-    followsDecorator = line.isDecorator;
-    openerRow = row;
+    const error = indentError(stack, line, previous);
+    if (error) return error;
+    previous = line;
   }
   if (limitError) return limitError;
-  if (expectsBlock) return expectedBlock((lines.at(-1)?.row ?? 0) + 1, openerRow);
+  if (previous?.opensBlock) return expectedBlock(previous.row + 1, previous.row);
   return undefined;
+}
+
+/** The error a line's indentation makes after `previous`, keeping `stack` the indentation levels open. */
+// code-gauge-allow functionCognitiveComplexity 17 -- Follows the indentation checks of CPython's tokenizer in their order.
+function indentError(
+  stack: Indent[],
+  line: LogicalLine,
+  previous: LogicalLine | undefined
+): SourceDiagnostic | undefined {
+  const top = stack.at(-1) as Indent;
+  const { indent, row } = line;
+  if (indent.column > top.column) {
+    if (indent.altColumn <= top.altColumn) return { row, message: TAB_MESSAGE };
+    if (!previous?.opensBlock) return { row, message: 'ここで字下げ（インデント）を始めることはできません。' };
+    stack.push(indent);
+    return stack.length > MAX_INDENT_LEVELS ? { row, message: '字下げ（インデント）が深すぎます。' } : undefined;
+  }
+  if (previous?.opensBlock) return expectedBlock(row, previous.row);
+  if (previous?.isDecorator && indent.column < top.column) {
+    return { row, message: 'デコレータの後の行の字下げ（インデント）を戻すことはできません。' };
+  }
+  while (indent.column < (stack.at(-1) as Indent).column) stack.pop();
+  const level = stack.at(-1) as Indent;
+  if (indent.column !== level.column) {
+    return { row, message: '字下げ（インデント）が、外側のどの行の字下げとも合っていません。' };
+  }
+  return indent.altColumn === level.altColumn ? undefined : { row, message: TAB_MESSAGE };
 }
 
 const TAB_MESSAGE = '字下げ（インデント）に、タブとスペースが紛らわしく混ざっています。';

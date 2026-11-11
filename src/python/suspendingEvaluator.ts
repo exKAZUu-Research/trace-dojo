@@ -14,9 +14,10 @@ import { getAttribute, getItem, isTruthy, setAttribute, setItem } from './object
 import { binaryOp, compareOp, unaryOp } from './operators';
 import { targetSuspends } from './suspension';
 import { templateLiteral } from './templateStrings';
-import { suspendingCall } from './threads';
-import { newDict, None, sliceClass } from './types';
-import { type Kwargs, PySlice, type PyValue } from './values';
+import { iterateSuspending, type SuspendingNext } from './threadIteration';
+import { isWaitRequest, suspendingCall } from './threads';
+import { newDict, newList, newSet, None, sliceClass } from './types';
+import { DONE, type Kwargs, type PyDict, PyList, PySet, PySlice, type PyTuple, type PyValue } from './values';
 
 /**
  * A evaluation that may suspend the running generator: it yields what the generator gives the code resuming it and
@@ -128,7 +129,106 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
     if (expression.scope.isAsync && expression.type !== 'generator') {
       return yield* this.asyncComprehension(expression, frame, first);
     }
-    return this.comprehension(expression, frame, first);
+    if (expression.scope.isAsync || expression.type === 'generator')
+      return this.comprehension(expression, frame, first);
+    return yield* this.threadComprehension(expression, frame, first, iterateSuspending(first));
+  }
+
+  /**
+   * A generator expression of a program that runs threads (the only one that suspends without awaiting) passes the
+   * waits in its clauses on to the code resuming it.
+   */
+  protected override generatorItems(
+    expression: Extract<Expression, { kind: 'comprehension' }>,
+    inner: Frame,
+    first: PyValue
+  ): Generator<PyValue, PyValue> {
+    if (!expression.suspends || expression.scope.isAsync) return super.generatorItems(expression, inner, first);
+    return this.itemsSuspending(expression, inner, iterateSuspending(first));
+  }
+
+  /** Runs a list, set, or dict comprehension of a program that runs threads, passing the waits in it on. */
+  private *threadComprehension(
+    expression: Extract<Expression, { kind: 'comprehension' }>,
+    frame: Frame,
+    first: PyValue,
+    next: SuspendingNext
+  ): Suspension {
+    const { runtime } = this;
+    const inner = this.comprehensionFrame(expression, frame);
+    runtime.pushFrame(inner);
+    try {
+      inner.temporaries.push(first);
+      const result = expression.type === 'list' ? newList([]) : expression.type === 'set' ? newSet() : newDict();
+      inner.temporaries.push(result);
+      const items = this.itemsSuspending(expression, inner, next);
+      for (let step = items.next(); !step.done; step = items.next()) {
+        if (isWaitRequest(step.value)) {
+          yield step.value;
+          continue;
+        }
+        runtime.allocate(1);
+        if (result instanceof PyList) result.items.push(step.value);
+        else if (result instanceof PySet) result.table.add(step.value);
+        else {
+          const [key, value] = (step.value as PyTuple).items;
+          (result as PyDict).store.set(key, value);
+        }
+      }
+      return result;
+    } finally {
+      runtime.popFrame();
+    }
+  }
+
+  /**
+   * Runs the clauses of a comprehension, yielding each element (a key and value pair for a dict comprehension) and
+   * passing on the waits of the thread reading its iterables or evaluating its parts.
+   */
+  private *itemsSuspending(
+    expression: Extract<Expression, { kind: 'comprehension' }>,
+    frame: Frame,
+    firstNext: SuspendingNext
+  ): Suspension {
+    const { generators } = expression;
+    const { runtime } = this;
+    const level = function* (this: SuspendingEvaluator, index: number, next: SuspendingNext): Suspension<void> {
+      const generator = generators[index];
+      for (let item = yield* next(); item !== DONE; item = yield* next()) {
+        runtime.spend();
+        yield* this.assignSuspending(generator.target, item, frame);
+        let passes = true;
+        for (const condition of generator.conditions) {
+          if (!isTruthy(yield* this.evaluateSuspending(condition, frame))) {
+            passes = false;
+            break;
+          }
+        }
+        if (!passes) continue;
+        if (index + 1 < generators.length) {
+          const iterable = yield* this.evaluateSuspending(generators[index + 1].iterable, frame);
+          const length = frame.temporaries.length;
+          frame.temporaries.push(iterable);
+          try {
+            yield* level.call(this, index + 1, iterateSuspending(iterable));
+          } finally {
+            frame.temporaries.length = length;
+          }
+          continue;
+        }
+        const element = yield* this.evaluateSuspending(expression.element, frame);
+        if (expression.value === undefined) {
+          yield element;
+          continue;
+        }
+        frame.temporaries.push(element);
+        const value = yield* this.evaluateSuspending(expression.value, frame);
+        frame.temporaries.pop();
+        yield runtime.tuple([element, value]);
+      }
+    };
+    yield* level.call(this, 0, firstNext);
+    return None;
   }
 
   /** Evaluates `yield`, `yield from`, or `await`, which suspend the running generator or coroutine. */

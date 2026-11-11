@@ -9,6 +9,7 @@ import { callValue, isCallable, isTruthy, iterate } from '../objects';
 import { compareOp } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
+import { registerReduceVariant } from '../suspendingBuiltins';
 import { newGenericAlias } from '../typeHints';
 import { builtinClass, classOf, methodClass, newDict, newTuple, None, typeError } from '../types';
 import { DONE, type Kwargs, PyBoundMethod, PyBuiltinFunction, PyOpaque, type PyValue } from '../values';
@@ -1453,11 +1454,14 @@ except ImportError:
     pass
 `;
 
+const reduceFunction = builtin('reduce', 'expected', 2, 3, reduce);
+registerReduceVariant(reduceFunction);
+
 registerModule(
   '_functools',
   () =>
     new Map<string, PyValue>([
-      ['reduce', builtin('reduce', 'expected', 2, 3, reduce)],
+      ['reduce', reduceFunction],
       ['partial', partialClass],
       ['Placeholder', Placeholder],
       ['_PlaceholderType', placeholderClass],

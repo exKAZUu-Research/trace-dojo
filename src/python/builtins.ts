@@ -36,6 +36,8 @@ import { currentRuntime } from './runtimeContext';
 // code-gauge-allow-file fileNcss 430 -- The builtins module keeps every builtin function together.
 import { siteBuiltins } from './siteBuiltins';
 import { iterStr, strLength } from './strings';
+import { registerBuiltinVariants } from './suspendingBuiltins';
+import { callSuspending, suspendingNextOf, withSuspendingNext } from './threadIteration';
 import { turtleClass } from './turtle';
 import { sortList } from './typeContainers';
 import { roundFloat, roundInt } from './typeNumbers';
@@ -104,6 +106,11 @@ enumerateClass.construct = (cls, args, kwargs) => {
     return currentRuntime().tuple([index++, item]);
   };
   withState(enumerated, { reduce: () => newTuple([cls, newTuple([iterator, index])]) });
+  withSuspendingNext(enumerated, function* () {
+    const item = yield* suspendingNextOf(iterator)();
+    if (item === DONE) return DONE;
+    return currentRuntime().tuple([index++, item]);
+  });
   return new PyIterator(cls, enumerated, () => [iterable]);
 };
 
@@ -133,6 +140,20 @@ zipClass.construct = (cls, args, kwargs) => {
     }
     return currentRuntime().tuple(items);
   };
+  withSuspendingNext(zipped, function* () {
+    if (finished || nexts.length === 0) return DONE;
+    const items: PyValue[] = [];
+    for (const [index, iterator] of iterators.entries()) {
+      const item = yield* suspendingNextOf(iterator)();
+      if (item === DONE) {
+        finished = true;
+        if (strict) checkStrictZip(nexts, index);
+        return DONE;
+      }
+      items.push(item);
+    }
+    return currentRuntime().tuple(items);
+  });
   withState(zipped, {
     reduce: () => newTuple(strict ? [cls, newTuple(iterators), true] : [cls, newTuple(iterators)]),
     setState: (state) => {
@@ -180,6 +201,15 @@ mapClass.construct = (cls, args, kwargs) => {
     return callValue(fn, items);
   };
   withState(mapped, { reduce: () => newTuple([cls, newTuple([fn, ...iterators])]) });
+  withSuspendingNext(mapped, function* () {
+    const items: PyValue[] = [];
+    for (const iterator of iterators) {
+      const item = yield* suspendingNextOf(iterator)();
+      if (item === DONE) return DONE;
+      items.push(item);
+    }
+    return yield* callSuspending(fn, items);
+  });
   return new PyIterator(cls, mapped, () => args);
 };
 
@@ -197,6 +227,14 @@ filterClass.construct = (cls, args, kwargs) => {
     return DONE;
   };
   withState(filtered, { reduce: () => newTuple([cls, newTuple([fn, iterator])]) });
+  withSuspendingNext(filtered, function* () {
+    const suspendingNext = suspendingNextOf(iterator);
+    for (let item = yield* suspendingNext(); item !== DONE; item = yield* suspendingNext()) {
+      currentRuntime().spend();
+      if (isTruthy(fn === None ? item : yield* callSuspending(fn, [item]))) return item;
+    }
+    return DONE;
+  });
   return new PyIterator(cls, filtered, () => args);
 };
 
@@ -266,6 +304,16 @@ function print(args: PyValue[], kwargs: Kwargs): PyValue {
   if (file === runtime.standardStream('stderr')) runtime.errorOutput += text;
   else runtime.budget.print(text);
   return None;
+}
+
+/** Whether an item's truth is `truth`, reading the items only up to the first such one, as `any` and `all` do. */
+function someItem(iterable: PyValue, truth: boolean): boolean {
+  const next = iterate(iterable);
+  for (let item = next(); item !== DONE; item = next()) {
+    currentRuntime().spend();
+    if (isTruthy(item) === truth) return true;
+  }
+  return false;
 }
 
 // code-gauge-allow functionNcss 33 -- Follows CPython's builtin sum, including its float compensation.
@@ -620,13 +668,19 @@ function one(name: string, run: (args: PyValue[]) => PyValue): PyValue {
 }
 
 export function createBuiltins(): Map<string, PyValue> {
+  const builtins = builtinNamespace();
+  registerBuiltinVariants(builtins);
+  return builtins;
+}
+
+function builtinNamespace(): Map<string, PyValue> {
   const exceptions = [...exceptionClasses.entries()];
   return new Map<string, PyValue>([
     ['__build_class__', buildClass],
     ['__import__', nativeFunction('__import__', dunderImport)],
     ['abs', one('abs', abs)],
-    ['all', one('all', ([iterable]) => toArray(iterable).every((item) => isTruthy(item)))],
-    ['any', one('any', ([iterable]) => toArray(iterable).some((item) => isTruthy(item)))],
+    ['all', one('all', ([iterable]) => !someItem(iterable, false))],
+    ['any', one('any', ([iterable]) => someItem(iterable, true))],
     ['ascii', one('ascii', ([value]) => pyAscii(value))],
     ['bin', one('bin', radix('0b', 2))],
     ['breakpoint', unsupportedFunction('breakpoint', 'breakpoint()')],

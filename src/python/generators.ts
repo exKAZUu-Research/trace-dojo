@@ -57,25 +57,14 @@ export function generatorNext(generator: PyGenerator, input: GeneratorInput): Py
     : new PyError(newException(exceptionClassNamed('StopIteration'), [step.value]));
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Checks each state of a generator object as CPython does before resuming its frame.
 /**
  * Resumes a generator with the value its `yield` evaluates to or the exception it raises there, returning what it
  * yields next or, when it ends, what it returns.
  */
 export function resumeGenerator(generator: PyGenerator, input: GeneratorInput): Step {
+  const early = startResuming(generator, input);
+  if (early) return early;
   const kind = generatorKind(generator);
-  if (generator.running)
-    throw pyError(kind === 'generator' ? 'ValueError' : 'RuntimeError', `${kind} already executing`);
-  if (generator.finished) {
-    if (kind === 'coroutine') throw pyError('RuntimeError', 'cannot reuse already awaited coroutine');
-    if (input.error) throw input.error;
-    return { done: true, value: None };
-  }
-  if (!generator.started && !input.error && input.value !== None) {
-    throw typeError(`can't send non-None value to a just-started ${kind}`);
-  }
-  generator.started = true;
-  generator.running = true;
   try {
     let step = generator.resume(input);
     // A blocking operation in the generator's frame waits in the thread resuming it, which a native call runs.
@@ -91,6 +80,51 @@ export function resumeGenerator(generator: PyGenerator, input: GeneratorInput): 
   } finally {
     generator.running = false;
   }
+}
+
+/**
+ * Resumes a generator as {@link resumeGenerator} does, but passes the waits of blocking operations in its frame on to
+ * the code resuming it, so that a thread waiting there suspends instead of waiting on the host's stack.
+ */
+export function* resumeGeneratorSuspending(generator: PyGenerator, input: GeneratorInput): Suspension<Step> {
+  const early = startResuming(generator, input);
+  if (early) return early;
+  const kind = generatorKind(generator);
+  try {
+    let step = generator.resume(input);
+    while (!step.done && isWaitRequest(step.value)) {
+      yield step.value;
+      step = generator.resume({ value: None });
+    }
+    if (step.done) generator.finished = true;
+    return step;
+  } catch (error) {
+    generator.finished = true;
+    throw error instanceof PyError && leaks(error, kind) ? stopIterationLeak(error, kind) : error;
+  } finally {
+    generator.running = false;
+  }
+}
+
+/**
+ * Checks a generator's state as CPython does before resuming its frame and marks it running, or gives the step a
+ * finished generator gives at once.
+ */
+function startResuming(generator: PyGenerator, input: GeneratorInput): Step | undefined {
+  const kind = generatorKind(generator);
+  if (generator.running)
+    throw pyError(kind === 'generator' ? 'ValueError' : 'RuntimeError', `${kind} already executing`);
+  if (generator.finished) {
+    if (kind === 'coroutine') throw pyError('RuntimeError', 'cannot reuse already awaited coroutine');
+    if (input.error) throw input.error;
+    return { done: true, value: None };
+  }
+  if (!generator.started && !input.error && input.value !== None) {
+    throw typeError(`can't send non-None value to a just-started ${kind}`);
+  }
+  generator.started = true;
+  generator.running = true;
+  return undefined;
 }
 
 /** What error messages call a generator object, which coroutines and async generators share the machinery of. */

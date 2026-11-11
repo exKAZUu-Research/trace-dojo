@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss 877 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import { newAnnotate, recordAnnotation } from './annotations';
 import type {
   ClassDef,
@@ -37,7 +36,10 @@ import {
 } from './objects';
 import { equals, inplaceOp, isSame } from './operators';
 import type { Runtime } from './runtime';
+// code-gauge-allow-file fileNcss 877 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+import type { Suspension } from './suspendingEvaluator';
 import { targetSuspends } from './suspension';
+import { iterateSuspending, type SuspendingNext } from './threadIteration';
 import { isWaitRequest, PREEMPTION, schedulerOf, suspendingCall } from './threads';
 import { noteCaught, prependTraceback } from './tracebacks';
 import { genericBaseOf, newTypeParam, PyTypeAlias } from './typeParams';
@@ -464,8 +466,13 @@ export class Evaluator extends AsyncEvaluator {
     // What leaves the loop along with control, which stays alive when the loop's generator closes.
     let leaving: unknown;
     try {
-      const next = iterate(iterable);
-      for (let item = next(); item !== DONE; item = next()) {
+      // A thread reads its loop's iterable where it can suspend, so that waiting in a generator it reads suspends it.
+      const suspendingNext = runtime.threads ? iterateSuspending(iterable) : undefined;
+      const next = suspendingNext ? undefined : iterate(iterable);
+      const read = function* (): Suspension<PyValue | typeof DONE> {
+        return next ? next() : yield* (suspendingNext as SuspendingNext)();
+      };
+      for (let item = next ? next() : yield* read(); item !== DONE; item = next ? next() : yield* read()) {
         runtime.spend();
         if (runtime.threads?.shouldPreempt()) yield PREEMPTION as unknown as PyValue;
         runtime.currentRow = statement.row;

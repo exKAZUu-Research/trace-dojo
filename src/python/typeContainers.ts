@@ -197,24 +197,31 @@ function sequenceIndex(
 
 /** Sorts a list in place, stably, with keys computed once each, as `list.sort` does. */
 export function sortList(list: PyList, key: PyValue, reverse: boolean): void {
+  // As in CPython, the list is empty while the keys are computed and the items compared.
   const original = list.items;
-  const keys = key === None ? original : original.map((item) => callValue(key, [item]));
-  const indices = original.map((_, index) => index);
-  if (reverse) indices.reverse();
   list.items = [];
-  const runtime = currentRuntime();
   try {
-    const sorted = mergeSort(indices, (a, b) => {
-      runtime.spend();
-      return lessThan(keys[a], keys[b]);
-    });
-    if (reverse) sorted.reverse();
-    if (list.items.length > 0) throw valueError('list modified during sort');
-    list.items = sorted.map((index) => original[index]);
+    const keys = key === None ? original : original.map((item) => callValue(key, [item]));
+    sortByKeys(list, original, keys, reverse);
   } catch (error) {
     if (list.items.length === 0) list.items = original;
     throw error;
   }
+}
+
+/** Puts the items `sortList` took out of a list back in the order of their keys, stably. */
+export function sortByKeys(list: PyList, original: PyValue[], keys: PyValue[], reverse: boolean): void {
+  const indices = original.map((_, index) => index);
+  if (reverse) indices.reverse();
+  const runtime = currentRuntime();
+  const sorted = mergeSort(indices, (a, b) => {
+    runtime.spend();
+    return lessThan(keys[a], keys[b]);
+  });
+  if (reverse) sorted.reverse();
+  const modified = list.items.length > 0;
+  list.items = sorted.map((index) => original[index]);
+  if (modified) throw valueError('list modified during sort');
 }
 
 /** A stable merge sort that only asks whether one item is less than another, as Python's sort does. */
