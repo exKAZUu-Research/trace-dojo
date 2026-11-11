@@ -1,17 +1,18 @@
 import { builtin } from '../define';
-import { importModule, registerModule, registerUnsupportedAttributes } from '../modules';
+import { importModule, registerModule, registerSharedAttributes, registerUnsupportedAttributes } from '../modules';
 import { runModuleSource } from '../sourceModules';
 import {
+  annotatedAliasClass,
   annotatedGetItem,
   anyType,
   concatenateGetItem,
-  forwardRefClass,
   genericAliasClass,
   literalGetItem,
   newSpecialAlias,
   newSpecialForm,
   optionalGetItem,
   singleTypeForm,
+  typingAliasClass,
   typingArgs,
   typingBaseEntries,
   typingOrigin,
@@ -48,9 +49,9 @@ import { getTypeHints, newTypeClass } from './typingTypeVars';
 /** The names of typing that need features this grader does not support. */
 registerUnsupportedAttributes('typing', {
   NamedTupleMeta: 'typing.NamedTupleMeta（NamedTuple を CPython と違う仕組みで作るので、そのメタクラス）',
-  evaluate_forward_ref:
-    'typing.evaluate_forward_ref()（入れ子の文字列の型ヒントを CPython の typing の内部と同じ規則で評価すること）',
 });
+// typing imports annotationlib only when it needs it, as CPython's does.
+registerSharedAttributes('typing', { ForwardRef: 'annotationlib:ForwardRef' });
 
 /** `typing.EXCLUDED_ATTRIBUTES`, the attributes a protocol's members leave out. */
 const EXCLUDED_ATTRIBUTES = [
@@ -471,6 +472,162 @@ class TextIO(IO[str]):
     @abstractmethod
     def __enter__(self) -> TextIO:
         pass
+
+
+import operator
+
+# The class of a user generic class's aliases, such as Box[int], which is _GenericAlias in CPython.
+_UserGenericAlias = type(Generic[T])
+
+
+def evaluate_forward_ref(
+    forward_ref,
+    *,
+    owner=None,
+    globals=None,
+    locals=None,
+    type_params=None,
+    format=None,
+    _recursive_guard=frozenset(),
+):
+    """Evaluate a forward reference as a type hint.
+
+    This is similar to calling the ForwardRef.evaluate() method,
+    but unlike that method, evaluate_forward_ref() also
+    recursively evaluates forward references nested within the type hint.
+
+    *forward_ref* must be an instance of ForwardRef. *owner*, if given,
+    should be the object that holds the annotations that the forward reference
+    derived from, such as a module, class object, or function. It is used to
+    infer the namespaces to use for looking up names. *globals* and *locals*
+    can also be explicitly given to provide the global and local namespaces.
+    *type_params* is a tuple of type parameters that are in scope when
+    evaluating the forward reference. This parameter should be provided (though
+    it may be an empty tuple) if *owner* is not given and the forward reference
+    does not already have an owner set. *format* specifies the format of the
+    annotation and is a member of the annotationlib.Format enum, defaulting to
+    VALUE.
+
+    """
+    import annotationlib
+    if format == annotationlib.Format.STRING:
+        return forward_ref.__resolved_str__
+    if forward_ref.__forward_arg__ in _recursive_guard:
+        return forward_ref
+
+    if format is None:
+        format = annotationlib.Format.VALUE
+    value = forward_ref.evaluate(globals=globals, locals=locals,
+                                 type_params=type_params, owner=owner, format=format)
+
+    if (isinstance(value, annotationlib.ForwardRef)
+            and format == annotationlib.Format.FORWARDREF):
+        return value
+
+    if isinstance(value, str):
+        value = _make_forward_ref(value, module=forward_ref.__forward_module__,
+                                  owner=owner or forward_ref.__owner__,
+                                  is_argument=forward_ref.__forward_is_argument__,
+                                  is_class=forward_ref.__forward_is_class__)
+    if owner is None:
+        owner = forward_ref.__owner__
+    return _eval_type(
+        value,
+        globals,
+        locals,
+        type_params,
+        recursive_guard=_recursive_guard | {forward_ref.__forward_arg__},
+        format=format,
+        owner=owner,
+        parent_fwdref=forward_ref,
+    )
+
+
+def _make_forward_ref(code, *, parent_fwdref=None, **kwargs):
+    import annotationlib
+    if parent_fwdref is not None:
+        if parent_fwdref.__forward_module__ is not None:
+            kwargs['module'] = parent_fwdref.__forward_module__
+        if parent_fwdref.__owner__ is not None:
+            kwargs['owner'] = parent_fwdref.__owner__
+    return annotationlib.ForwardRef(code, **kwargs)
+
+
+def _is_param_expr(arg):
+    return arg is ... or isinstance(arg, (tuple, list, ParamSpec)) or (
+        isinstance(arg, _GenericAlias) and arg.__origin__ is Concatenate)
+
+
+def _should_unflatten_callable_args(typ, args):
+    return (
+        typ.__origin__ is collections.abc.Callable
+        and not (len(args) == 2 and _is_param_expr(args[0]))
+    )
+
+
+def _eval_type(t, globalns, localns, type_params, *, recursive_guard=frozenset(),
+               format=None, owner=None, parent_fwdref=None):
+    """Evaluate all forward references in the given type t."""
+    import annotationlib
+    if isinstance(t, annotationlib.ForwardRef):
+        return evaluate_forward_ref(t, globals=globalns, locals=localns,
+                                    type_params=type_params, owner=owner,
+                                    _recursive_guard=recursive_guard, format=format)
+    if isinstance(t, (_GenericAlias, _UserGenericAlias, types.GenericAlias, types.UnionType)):
+        if isinstance(t, types.GenericAlias):
+            args = tuple(
+                _make_forward_ref(arg, parent_fwdref=parent_fwdref) if isinstance(arg, str) else arg
+                for arg in t.__args__
+            )
+            is_unpacked = t.__unpacked__
+            if _should_unflatten_callable_args(t, args):
+                t = t.__origin__[(args[:-1], args[-1])]
+            else:
+                t = t.__origin__[args]
+            if is_unpacked:
+                t = Unpack[t]
+
+        ev_args = tuple(
+            _eval_type(
+                a, globalns, localns, type_params, recursive_guard=recursive_guard,
+                format=format, owner=owner,
+            )
+            for a in t.__args__
+        )
+        if ev_args == t.__args__:
+            return t
+        if isinstance(t, types.GenericAlias):
+            return types.GenericAlias(t.__origin__, ev_args)
+        if isinstance(t, types.UnionType):
+            return functools.reduce(operator.or_, ev_args)
+        else:
+            return t.copy_with(ev_args)
+    return t
+
+
+def _strip_annotations(t):
+    """Strip the annotations from a given type."""
+    if isinstance(t, _AnnotatedAlias):
+        return _strip_annotations(t.__origin__)
+    if hasattr(t, "__origin__") and t.__origin__ in (Required, NotRequired, ReadOnly):
+        return _strip_annotations(t.__args__[0])
+    if isinstance(t, (_GenericAlias, _UserGenericAlias)):
+        stripped_args = tuple(_strip_annotations(a) for a in t.__args__)
+        if stripped_args == t.__args__:
+            return t
+        return t.copy_with(stripped_args)
+    if isinstance(t, GenericAlias):
+        stripped_args = tuple(_strip_annotations(a) for a in t.__args__)
+        if stripped_args == t.__args__:
+            return t
+        return GenericAlias(t.__origin__, stripped_args)
+    if isinstance(t, Union):
+        stripped_args = tuple(_strip_annotations(a) for a in t.__args__)
+        if stripped_args == t.__args__:
+            return t
+        return functools.reduce(operator.or_, stripped_args)
+
+    return t
 `;
 
 // Subscripted aliases of typing stand for their origin in the bases of a class statement.
@@ -560,7 +717,8 @@ function aliases(abc: PyModule, collections: PyModule, re: PyModule): [string, P
     ]),
     ['Text', strClass],
     ['GenericAlias', genericAliasClass],
-    ['ForwardRef', forwardRefClass],
+    ['_GenericAlias', typingAliasClass],
+    ['_AnnotatedAlias', annotatedAliasClass],
     ['defaultdict', defaultdictClass],
   ];
 }

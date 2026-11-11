@@ -58,11 +58,18 @@ const asView = (self: PyValue): PyMemoryView => {
   return view;
 };
 
+/** The struct code of a view's format; an array of 'u' or 'w' exports format 'w', which struct does not know. */
+function nativeCode(view: PyMemoryView): (typeof NATIVE_CODES)[string] {
+  const info = NATIVE_CODES[view.format] as (typeof NATIVE_CODES)[string] | undefined;
+  if (!info) throw pyError('NotImplementedError', `memoryview: format ${view.format} not supported`);
+  return info;
+}
+
 // Items -------------------------------------------------------------------------------------------------------------
 
 function readItem(view: PyMemoryView, index: number): PyValue {
   const bytes = view.itemBytes(index);
-  const info = NATIVE_CODES[view.format];
+  const info = nativeCode(view);
   switch (info.kind) {
     case 'char': {
       return newBytes(new Uint8Array(bytes));
@@ -81,7 +88,7 @@ function readItem(view: PyMemoryView, index: number): PyValue {
 
 // code-gauge-allow functionCognitiveComplexity 25 -- Checks each kind of item as memoryview's pack_single does.
 function writeItem(view: PyMemoryView, index: number, value: PyValue): void {
-  const info = NATIVE_CODES[view.format];
+  const info = nativeCode(view);
   const out = view.source.data;
   const offset = view.itemOffset(index);
   const invalid = (kind: 'type' | 'value'): Error =>
@@ -117,7 +124,7 @@ function itemIndex(view: PyMemoryView, key: PyValue): number {
 function sliceView(view: PyMemoryView, slice: PySlice): PyMemoryView {
   if (view.shape) return sliceRows(view, slice);
   const { start, step, count } = sliceIndices(slice, view.count);
-  return new PyMemoryView(
+  const sliced = new PyMemoryView(
     view.source,
     view.offset + start * view.stride,
     count,
@@ -126,6 +133,8 @@ function sliceView(view: PyMemoryView, slice: PySlice): PyMemoryView {
     view.itemsize,
     view.readonly
   );
+  sliced.exporter = view.exporter;
+  return sliced;
 }
 
 /** A slice of the rows of a multi-dimensional view, whose rows a step other than 1 sets apart. */
@@ -143,6 +152,7 @@ function sliceRows(view: PyMemoryView, slice: PySlice): PyMemoryView {
     view.readonly
   );
   sliced.shape = [count, ...rest];
+  sliced.exporter = view.exporter;
   if (rowStride * step !== naturalRowStride(sliced)) sliced.rowStride = rowStride * step;
   return sliced;
 }
@@ -176,6 +186,7 @@ function copyView(view: PyMemoryView, readonly: boolean): PyMemoryView {
   );
   copy.shape = view.shape;
   copy.rowStride = view.rowStride;
+  copy.exporter = view.exporter;
   return copy;
 }
 
@@ -356,6 +367,7 @@ method(
       throw typeError('memoryview: product(shape) * itemsize != buffer size');
     }
     const cast = new PyMemoryView(view.source, view.offset, count, info.size, char, info.size, view.readonly);
+    cast.exporter = view.exporter;
     if (dimensions && dimensions.length > 1) cast.shape = dimensions;
     return cast;
   },
@@ -452,9 +464,15 @@ method(memoryviewClass, '__ne__', 'one', 1, 1, (self, [other]) => {
 
 function viewsEqual(view: PyMemoryView, other: PyValue): PyValue {
   if (view === other) return true;
-  if (!(other instanceof PyMemoryView) && !(other instanceof PyBytes)) return NotImplemented;
+  const exporter =
+    typeof other === 'object' && !other.cls.isBuiltin && lookupSpecial(other, '__buffer__') !== undefined;
+  if (!(other instanceof PyMemoryView) && !(other instanceof PyBytes) && !exporter) return NotImplemented;
   if (view.released || (other instanceof PyMemoryView && other.released)) return false;
   const otherView = viewOf(other);
+  if (!(view.format in NATIVE_CODES) || !(otherView.format in NATIVE_CODES)) {
+    otherView.release();
+    return NotImplemented;
+  }
   try {
     if (dimensionsOf(otherView).join(',') !== dimensionsOf(view).join(',')) return false;
     for (let index = 0; index < view.count; index++) {
@@ -482,7 +500,7 @@ method(memoryviewClass, '__repr__', 'none', 0, 0, (self) => {
 
 /** The data attributes of a memoryview, as read-only properties. */
 const ATTRIBUTES: Record<string, (view: PyMemoryView) => PyValue> = {
-  obj: (view) => view.source,
+  obj: (view) => view.exporter ?? view.source,
   nbytes: (view) => BigInt(view.nbytes),
   readonly: (view) => view.readonly,
   itemsize: (view) => BigInt(view.itemsize),

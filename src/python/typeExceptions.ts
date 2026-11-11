@@ -22,11 +22,34 @@ function rejectKeywords(cls: PyClass, kwargs: Kwargs): void {
   if (kwargs && kwargs.size > 0) throw typeError(`${cls.name}() takes no keyword arguments`);
 }
 
+/** The keyword arguments of the builtin exceptions that take some, as `NameError(msg, name=...)`. */
+const EXCEPTION_KEYWORDS: [string, readonly string[]][] = [
+  ['AttributeError', ['name', 'obj']],
+  ['NameError', ['name']],
+];
+
+/** Checks the keyword arguments of a builtin exception and stores those it takes in its state. */
+function exceptionKeywords(cls: PyClass, kwargs: Kwargs, state: ExceptionState | undefined): void {
+  if (!kwargs || kwargs.size === 0) return;
+  const accepted = EXCEPTION_KEYWORDS.find(([name]) => cls.mro.some((base) => base.isBuiltin && base.name === name));
+  if (!accepted) {
+    rejectKeywords(cls, kwargs);
+    return;
+  }
+  const [owner, names] = accepted;
+  for (const [key, value] of kwargs) {
+    if (!names.includes(key)) throw typeError(`${owner}() got an unexpected keyword argument '${key}'`);
+    if (!state) continue;
+    if (key === 'obj') state.object = value;
+    else state.name = typeof value === 'string' ? value : undefined;
+  }
+}
+
 baseExceptionClass.construct = (cls, args, kwargs) => {
   if (cls.isSubclassOf(exceptionClassNamed('BaseExceptionGroup'))) return constructGroup(cls, args, kwargs);
-  if (cls.isBuiltin) rejectKeywords(cls, kwargs);
   const exception = new PyInstance(osErrorSubclass(cls, args));
   exception.exception = { args: newTuple(args), suppressContext: false };
+  if (cls.isBuiltin) exceptionKeywords(cls, kwargs, exception.exception);
   if (isOSError(exception)) setOSErrorArgs(exception.exception, args);
   return exception;
 };
@@ -34,8 +57,8 @@ for (const cls of exceptionClasses.values())
   if (cls !== baseExceptionClass) cls.construct ??= baseExceptionClass.construct;
 
 method(baseExceptionClass, '__init__', 'expected', 0, Number.POSITIVE_INFINITY, (self, args, kwargs) => {
-  rejectKeywords(instanceOf(self).cls, kwargs);
   const state = instanceOf(self).exception;
+  exceptionKeywords(instanceOf(self).cls, kwargs, state);
   if (state && !state.exceptions) state.args = newTuple(args);
   if (state && isOSError(instanceOf(self))) setOSErrorArgs(state, args);
   return None;

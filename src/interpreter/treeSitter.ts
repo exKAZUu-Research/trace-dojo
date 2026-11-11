@@ -53,6 +53,7 @@ export function parseSource<T>(
 const MAX_NESTING_DEPTH = 300;
 
 function findTooDeepNode(root: Node, maxDepth: number): Node | undefined {
+  if (maxDepth === Number.POSITIVE_INFINITY) return;
   const cursor = root.walk();
   try {
     for (;;) {

@@ -309,7 +309,8 @@ function cellNames(fn: PyFunction | undefined): string[] {
 function freeNames(fn: PyFunction | undefined): string[] {
   if (!fn) return [];
   const { scope, usesClassCell, className } = fn.def;
-  const frees = new Set(scope.frees);
+  // A compiler-made `__annotate__` has the free variables of its closure, which its shared definition does not list.
+  const frees = new Set([...scope.frees, ...fn.closure.keys()]);
   if (usesClassCell && className !== undefined) frees.add('__class__');
   return [...frees].toSorted();
 }

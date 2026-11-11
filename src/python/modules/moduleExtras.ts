@@ -104,8 +104,6 @@ registerUnsupportedAttributes('_thread', {
   interrupt_main: 'シグナル（_thread.interrupt_main()）',
   start_joinable_thread: 'CPython の threading の内部の関数（_thread.start_joinable_thread()）',
 });
-registerUnsupportedAttributes('pickle', { PickleBuffer: 'pickle のプロトコル 5 のバッファ（pickle.PickleBuffer）' });
-registerUnsupportedAttributes('_pickle', { PickleBuffer: 'pickle のプロトコル 5 のバッファ（_pickle.PickleBuffer）' });
 registerUnsupportedAttributes('tomllib._parser', {
   __conditional_annotations__: 'モジュールの __conditional_annotations__',
 });

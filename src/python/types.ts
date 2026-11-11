@@ -419,6 +419,13 @@ export function resultClassOf(cls: PyClass): PyClass {
 }
 
 /** The name of a value's class, as error messages quote it. */
+/** A class's name as CPython's `%T` and `%N` formats show it: qualified by its module unless builtin or `__main__`. */
+export function fullyQualifiedName(cls: PyClass): string {
+  return cls.module === '__main__' || cls.module === 'builtins'
+    ? cls.qualifiedName
+    : `${cls.module}.${cls.qualifiedName}`;
+}
+
 export function typeName(value: PyValue): string {
   const cls = classOf(value);
   return cls.typeName ?? cls.name;

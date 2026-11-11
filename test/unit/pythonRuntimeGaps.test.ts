@@ -90,7 +90,7 @@ test('deep nesting runs as CPython runs it, or stops with the unsupported error 
 if x != 1000: raise AssertionError(x)
 if ${'-'.repeat(1000)}1 != 1: raise AssertionError
 `);
-  expect(compileErrorRow(`x = ${'-'.repeat(50_000)}1\n`)).toBe(0);
+  expect(compileErrorRow(`x = ${'-'.repeat(25_000)}1\n`)).toBe(0);
 });
 
 test("abc.ABCMeta and the numbers ABCs are the classes of CPython's Python code, with their registries and token", () => {

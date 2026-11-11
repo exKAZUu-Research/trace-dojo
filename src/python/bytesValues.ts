@@ -40,12 +40,17 @@ export class PyBytes extends PyObject {
 
   /** Raises CPython's BufferError while a memoryview the program can reach exports this object's buffer. */
   checkNoExports(): void {
-    if (this.views.size > 0) this.releaseUnreachableViews();
-    if (this.views.size > 0) {
+    if (this.hasExports()) {
       throw new PyError(
         newException(exceptionClassNamed('BufferError'), ['Existing exports of data: object cannot be re-sized'])
       );
     }
+  }
+
+  /** Whether a memoryview the program can reach exports this object's buffer. */
+  hasExports(): boolean {
+    if (this.views.size > 0) this.releaseUnreachableViews();
+    return this.views.size > 0;
   }
 
   /** Releases the views the program can no longer reach, which CPython would have freed already. */
@@ -81,6 +86,8 @@ export class PyMemoryView extends PyObject {
    * apart; undefined when its rows follow one another, as the items within a row always do.
    */
   rowStride?: number;
+  /** The object that exported the memory, as `array.array`, which `obj` shows; undefined for the source itself. */
+  exporter?: PyValue;
 
   // code-gauge-allow functionParameterCount 7 -- Each view field is set once at creation, as CPython's buffer struct.
   constructor(
