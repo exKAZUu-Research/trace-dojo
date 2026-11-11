@@ -2,17 +2,33 @@ import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { aliasArgumentText, isUnionable, PyGenericAlias } from '../genericAlias';
 import { registerModule } from '../modules';
-import { setAttribute } from '../objects';
+import { getAttribute, setAttribute } from '../objects';
+import { equals } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import {
   genericClass,
+  mroEntryHooks,
   NoDefault,
   paramSpecClass,
+  PyTypingAlias,
   typeAliasClass,
   typeVarClass,
   typeVarTupleClass,
 } from '../typeParams';
-import { builtinClass, Ellipsis, None, NotImplemented, pyError, typingClass, unionClass } from '../types';
+import {
+  builtinClass,
+  classOf,
+  Ellipsis,
+  newSet,
+  None,
+  NotImplemented,
+  objectClass,
+  pyError,
+  typeClass,
+  typeError,
+  typingClass,
+  unionClass,
+} from '../types';
 import { PyClass, PyError, PyList, PyOpaque, PyTuple, type PyValue } from '../values';
 import { TYPING_CLASSES } from './typingClasses';
 import { getTypeHints, newTypeClass } from './typingTypeVars';
@@ -37,6 +53,15 @@ function argumentText(value: PyValue): string {
   return pyRepr(value);
 }
 
+// A union compares and hashes as the set of its members.
+const unionMembers = (union: PyValue): PyValue[] => (union as PyOpaque).data as PyValue[];
+method(unionClass, '__eq__', 'one', 1, 1, (self, [other]) => {
+  if (!(other instanceof PyOpaque) || other.cls !== unionClass) return NotImplemented;
+  const [mine, theirs] = [unionMembers(self), unionMembers(other)];
+  return mine.length === theirs.length && mine.every((member) => theirs.some((each) => equals(each, member)));
+});
+method(unionClass, '__hash__', 'none', 0, 0, (self) => currentRuntime().hashOf(newSet(unionMembers(self), true)));
+
 for (const cls of [specialFormClass, typingClass, unionClass, formAliasClass, literalAliasClass]) {
   method(cls, '__getitem__', 'one', 1, 1, (self, [key]) => {
     const args = key instanceof PyTuple ? key.items : [key];
@@ -54,7 +79,7 @@ for (const cls of [specialFormClass, typingClass, unionClass, formAliasClass, li
         : text === 'typing.Literal'
           ? literalAliasClass
           : formAliasClass;
-    return new PyOpaque(cls, `${text}[${args.map(argumentText).join(', ')}]`);
+    return new PyOpaque(cls, `${text}[${args.map(argumentText).join(', ')}]`, { form: formName(text), args });
   });
   // A builtin alias and a union take part in `|` only with what `types.UnionType` accepts.
   const accepts = cls === typingClass || cls === unionClass ? isUnionable : () => true;
@@ -70,6 +95,83 @@ for (const cls of [specialFormClass, typingClass, unionClass, formAliasClass, li
     throw currentRuntime().unsupported(`${(self as PyOpaque).text} の呼び出し`);
   });
 }
+
+/** The name of a special form, such as `List` of `typing.List`, which an alias of it records. */
+function formName(text: string): string {
+  return text.slice('typing.'.length);
+}
+
+// Typing aliases as bases ---------------------------------------------------------------------------------------------
+
+/** The classes the aliases of `typing` stand for, by module, as their `__origin__`. */
+const ALIAS_ORIGINS: Record<string, [string, string]> = {
+  List: ['builtins', 'list'],
+  Dict: ['builtins', 'dict'],
+  Set: ['builtins', 'set'],
+  FrozenSet: ['builtins', 'frozenset'],
+  Tuple: ['builtins', 'tuple'],
+  Type: ['builtins', 'type'],
+  Deque: ['collections', 'deque'],
+  DefaultDict: ['collections', 'defaultdict'],
+  Callable: ['collections.abc', 'Callable'],
+  Iterable: ['collections.abc', 'Iterable'],
+  Iterator: ['collections.abc', 'Iterator'],
+  Sequence: ['collections.abc', 'Sequence'],
+  Mapping: ['collections.abc', 'Mapping'],
+  Generator: ['collections.abc', 'Generator'],
+};
+
+/** `typing._AnyMeta`, the metaclass of `typing.Any`, which CPython makes a class programs may derive from. */
+const anyMetaClass = builtinClass('_AnyMeta', typeClass, true);
+anyMetaClass.module = 'typing';
+const anyClass = new PyClass('Any', [objectClass], anyMetaClass);
+anyClass.mro = [anyClass, objectClass];
+anyClass.isBaseType = true;
+anyClass.module = 'typing';
+anyClass.construct = () => {
+  throw typeError('Any cannot be instantiated');
+};
+method(anyMetaClass, '__repr__', 'none', 0, 0, (self) =>
+  self === anyClass ? 'typing.Any' : `<class '${(self as PyClass).module}.${(self as PyClass).qualifiedName}'>`
+);
+method(anyMetaClass, '__instancecheck__', 'one', 1, 1, (self, [value]) => {
+  if (self === anyClass) throw typeError('typing.Any cannot be used with isinstance()');
+  return classOf(value).isSubclassOf(self as PyClass);
+});
+
+/** The form of a `typing` special form or alias of one, or undefined for any other value. */
+function typingForm(value: PyValue): { form: string; args?: PyValue[] } | undefined {
+  if (!(value instanceof PyOpaque)) return undefined;
+  if (value.cls === specialFormClass) return { form: formName(value.text) };
+  if (value.cls === formAliasClass || value.cls === literalAliasClass)
+    return value.data as { form: string; args: PyValue[] };
+  return undefined;
+}
+
+/** `_BaseGenericAlias.__mro_entries__`: the origin class, and Generic unless a later base brings it. */
+mroEntryHooks.push((base, _className, bases) => {
+  if (base instanceof PyOpaque && base.cls === unionClass) throw typeError(`Cannot subclass ${base.text}`);
+  const typing = typingForm(base);
+  if (!typing) return;
+  if (typing.form === 'Annotated' && typing.args) return [typing.args[0]];
+  const location = ALIAS_ORIGINS[typing.form];
+  if (!location) throw typeError(`Cannot subclass ${(base as PyOpaque).text}`);
+  const runtime = currentRuntime();
+  const origin =
+    location[0] === 'builtins'
+      ? (runtime.builtins.get(location[1]) as PyValue)
+      : getAttribute(runtime.importModule(location[0]), location[1]);
+  const entries = bases.includes(origin) ? [] : [origin];
+  const later = bases.slice(bases.indexOf(base) + 1);
+  const bringsGeneric = later.some(
+    (other) =>
+      typingForm(other) !== undefined ||
+      other instanceof PyTypingAlias ||
+      (other instanceof PyClass && other.isSubclassOf(genericClass))
+  );
+  if (!bringsGeneric) entries.push(genericClass);
+  return entries;
+});
 
 /** What `@overload` replaces each overload with, which the implementation that follows them replaces in turn. */
 const overloadDummy = builtin('_overload_dummy', 'expected', 0, Number.POSITIVE_INFINITY, () => {
@@ -95,8 +197,8 @@ function form(name: string): PyValue {
 
 registerModule('typing', () => {
   return new Map<string, PyValue>([
+    ['Any', anyClass],
     ...[
-      'Any',
       'List',
       'Dict',
       'Set',

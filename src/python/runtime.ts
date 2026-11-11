@@ -4,14 +4,13 @@ import { TurtleWorld } from '../interpreter/turtleWorld';
 import { createBuiltins } from './builtins';
 import type { PyMemoryView } from './bytesValues';
 import { bindArguments } from './calls';
-import { pyRepr } from './conversions';
 import { markIterableCoroutine } from './coroutines';
 import { Evaluator } from './evaluator';
 import { GeneratorFinalizer } from './finalization';
 import { Frame } from './frame';
 import { findReachableObjects, findReachableTurtles } from './garbageCollection';
 import { resumeGenerator } from './generators';
-import { genericAlias } from './genericAlias';
+import { aliasArgumentText, genericAlias } from './genericAlias';
 import { pyHash } from './hashing';
 import { instantiate } from './instances';
 import { keyError } from './items';
@@ -19,6 +18,7 @@ import { viewOf } from './memoryview';
 import { importModule } from './modules';
 import { systemExitError } from './modules/sys';
 import { bindValue, callValue, isTruthy, overriding, setAttribute, toArray } from './objects';
+import { equals, isSame } from './operators';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
 import type { Scheduler } from './threads';
@@ -387,10 +387,13 @@ export class Runtime {
 
   /** `int | None` and the like, which isinstance accepts and type hints use. */
   unionType(left: PyValue, right: PyValue): PyValue {
-    const items = [...unionMembers(left), ...unionMembers(right)];
-    const text = items
-      .map((item) => (item instanceof PyClass ? item.qualifiedName : item === None ? 'None' : pyRepr(item)))
-      .join(' | ');
+    const items: PyValue[] = [];
+    for (const item of [...unionMembers(left), ...unionMembers(right)]) {
+      if (!items.some((each) => isSame(each, item) || equals(each, item))) items.push(item);
+    }
+    // A union of one type is that type, as `int | int` is `int`.
+    if (items.length === 1) return items[0];
+    const text = items.map((item) => (item === None ? 'None' : aliasArgumentText(item))).join(' | ');
     return new PyOpaque(unionClass, text, items);
   }
 
