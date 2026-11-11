@@ -1,19 +1,11 @@
+import { functionAnnotations } from '../annotations';
 import { pyRepr } from '../conversions';
 import { method } from '../define';
 import { callValue, isCallable } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import { builtinClass, defineMethod, intClass, None, typeError, typeName, valueError } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
-import {
-  PyBoundMethod,
-  PyClass,
-  PyDescriptor,
-  type PyDict,
-  PyFunction,
-  PyInstance,
-  PyOpaque,
-  type PyValue,
-} from '../values';
+import { PyBoundMethod, PyClass, PyDescriptor, PyFunction, PyInstance, PyOpaque, type PyValue } from '../values';
 import { bindArguments, defineProperty } from './numberSupport';
 
 // Classes -----------------------------------------------------------------------------------------------------------
@@ -263,7 +255,7 @@ const KINDS_OF_PARAMETERS: Record<string, Kind> = {
 };
 
 function functionSignature(fn: PyFunction): Signature {
-  const annotations = currentRuntime().evaluator.annotationsOf(fn) as PyDict;
+  const annotations = functionAnnotations(fn);
   const annotationOf = (name: string): PyValue => annotations.store.get(name) ?? emptyClass;
   const positional = fn.def.params.filter((param) => param.kind === 'positionalOnly' || param.kind === 'positional');
   const firstDefault = positional.length - fn.defaults.length;

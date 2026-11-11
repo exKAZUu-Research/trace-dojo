@@ -1,3 +1,4 @@
+import { moduleAnnotations } from './annotations';
 import { classAttribute, specialAttribute } from './attributes';
 import { PyBytes, PyMemoryView } from './bytesValues';
 import {
@@ -208,7 +209,8 @@ function findAttribute(value: PyValue, name: string): PyValue | undefined {
 function moduleAttribute(module: PyModule, name: string): PyValue | undefined {
   const feature = module.unsupported.get(name);
   if (feature !== undefined) throw new UnsupportedFeatureError(feature);
-  return name === '__dict__' ? namespaceDict(module.dict) : module.dict.get(name);
+  if (name === '__dict__') return namespaceDict(module.dict);
+  return name === '__annotations__' ? moduleAnnotations(module) : module.dict.get(name);
 }
 
 export { deleteAttribute, setAttribute } from './attributes';

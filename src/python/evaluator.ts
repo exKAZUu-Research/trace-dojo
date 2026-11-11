@@ -1,4 +1,5 @@
 // code-gauge-allow-file fileNcss 818 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+import { newAnnotate, recordAnnotation } from './annotations';
 import type {
   ClassDef,
   ExceptHandler,
@@ -46,6 +47,7 @@ import {
   newDict,
   newException,
   newList,
+  newSet,
   newTuple,
   None,
   pyError,
@@ -134,9 +136,10 @@ export class Evaluator extends AsyncEvaluator {
     switch (statement.kind) {
       case 'expression': {
         const { expression } = statement;
-        runtime.steps.runStatement(statement.stepRow, expression.kind === 'call', () =>
+        const value = runtime.steps.runStatement(statement.stepRow, expression.kind === 'call', () =>
           this.evaluate(expression, frame)
         );
+        if (statement.display) callValue(getAttribute(runtime.importModule('sys'), 'displayhook'), [value]);
         return undefined;
       }
       case 'assign': {
@@ -164,6 +167,14 @@ export class Evaluator extends AsyncEvaluator {
       }
       case 'setupAnnotations': {
         if (!frame.locals.has('__annotations__')) frame.locals.set('__annotations__', newDict());
+        return undefined;
+      }
+      case 'setupAnnotate': {
+        frame.locals.set(
+          '__annotate__',
+          newAnnotate(undefined, frame.globals, () => frame.annotations)
+        );
+        frame.locals.set('__conditional_annotations__', newSet());
         return undefined;
       }
       case 'break':
@@ -348,7 +359,11 @@ export class Evaluator extends AsyncEvaluator {
       );
       setItem(annotations, statement.target.name, this.evaluate(annotation, frame));
     }
-    frame.annotations.push([statement.target.name, () => this.evaluate(annotation, frame)]);
+    recordAnnotation(frame, { name: statement.target.name, expression: annotation, frame });
+    if (statement.annotationIndex !== undefined) {
+      const conditional = frame.locals.get('__conditional_annotations__');
+      if (conditional !== undefined) callValue(getAttribute(conditional, 'add'), [BigInt(statement.annotationIndex)]);
+    }
   }
 
   // code-gauge-allow functionCognitiveComplexity 29 -- One case per kind of compound statement, each taking the path that can suspend when it must.

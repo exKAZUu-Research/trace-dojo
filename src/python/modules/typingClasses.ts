@@ -1,10 +1,11 @@
+import { evaluateAnnotations } from '../annotations';
 import type { ClassDef } from '../ast';
 import { pyRepr } from '../conversions';
 import { builtin } from '../define';
 import { getAttributeOrUndefined, isCallable } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import { genericClass, mroEntryHooks, parameterDeclaringClasses } from '../typeParams';
-import { builtinClass, classOf, dictClass, newDict, newSet, None, objectClass, typeClass, typeError } from '../types';
+import { builtinClass, classOf, dictClass, newSet, None, objectClass, typeClass, typeError } from '../types';
 import { type ClassAnnotations, type Kwargs, PyClass, type PyValue } from '../values';
 import { namedTupleClass } from './collections';
 import { PyNewType } from './typingTypeVars';
@@ -118,7 +119,7 @@ const NAMED_TUPLE_SPECIAL = new Set([
 // code-gauge-allow functionCognitiveComplexity 16 -- Follows how NamedTupleMeta builds the namedtuple class from the class body.
 namedTupleBase.classFactory = (def, namespace, annotations, keywords) => {
   if (keywords && keywords.size > 0) throw typeError('NamedTuple() takes no keyword arguments');
-  const fields = annotations.map(([name]) => name);
+  const fields = annotations.map((annotation) => annotation.name);
   const defaults: PyValue[] = [];
   const defaultNames: string[] = [];
   for (const name of fields) {
@@ -135,7 +136,7 @@ namedTupleBase.classFactory = (def, namespace, annotations, keywords) => {
   }
   const cls = namedTupleClass(def.name, fields, defaults);
   cls.qualifiedName = def.qualifiedName;
-  cls.dict.set('__annotations__', newDict(annotations.map(([name, evaluate]) => [name, evaluate()])));
+  cls.dict.set('__annotations__', evaluateAnnotations(annotations));
   cls.annotationNames = fields;
   for (const [name, value] of namespace) {
     if (NAMED_TUPLE_SPECIAL.has(name) || fields.includes(name)) continue;
@@ -215,20 +216,21 @@ function createTypedDict(
     for (const name of inherited.required) required.add(name);
     for (const name of inherited.optional) optional.add(name);
   }
-  for (const [name, evaluate] of own) {
-    annotations.push([name, evaluate]);
+  for (const annotation of own) {
+    const { name } = annotation;
+    annotations.push(annotation);
     required.delete(name);
     optional.delete(name);
     (total === false ? optional : required).add(name);
   }
   typedDicts.set(cls, { annotations, required, optional });
   cls.classFactory = createTypedDict;
-  cls.dict.set('__annotations__', newDict(annotations.map(([name, evaluate]) => [name, evaluate()])));
+  cls.dict.set('__annotations__', evaluateAnnotations(annotations));
   cls.dict.set('__required_keys__', newSet(required, true));
   cls.dict.set('__optional_keys__', newSet(optional, true));
   cls.dict.set('__total__', total);
   cls.dict.set('__doc__', namespace.get('__doc__') ?? None);
-  cls.annotationNames = annotations.map(([name]) => name);
+  cls.annotationNames = annotations.map((annotation) => annotation.name);
   return cls;
 }
 

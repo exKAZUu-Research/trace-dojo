@@ -10,6 +10,8 @@ import { equals } from './operators';
 import { currentRuntime } from './runtimeContext';
 import { NATIVE_CODES, readFloat, readInteger, writeFloat, writeInteger } from './structCodes';
 import {
+  bytearrayClass,
+  bytesClass,
   iteratorClass,
   nativeFunction,
   None,
@@ -332,4 +334,12 @@ for (const [name, read] of Object.entries(ATTRIBUTES)) {
       nativeFunction(name, ([self]) => read(asView(self)))
     )
   );
+}
+
+// The buffer protocol (PEP 688), which `collections.abc.Buffer` checks for.
+for (const cls of [bytesClass, bytearrayClass, memoryviewClass]) {
+  method(cls, '__buffer__', 'one', 1, 1, (self, [flags]) => {
+    toIndex(flags);
+    return viewOf(self);
+  });
 }

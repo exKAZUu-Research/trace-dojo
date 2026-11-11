@@ -1,6 +1,7 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
-import type { ClassDef, FunctionDef } from './ast';
+import type { ClassDef, Expression, FunctionDef } from './ast';
 import type { DictStore } from './dictStore';
+import type { Frame } from './frame';
 import type { SetTable } from './setTable';
 
 /**
@@ -133,8 +134,15 @@ export class PyClass extends PyObject {
   }
 }
 
-/** The names a class body annotates, in order, with how to evaluate each annotation. */
-export type ClassAnnotations = [string, () => PyValue][];
+/** An annotation the program wrote: the name it annotates, its expression, and the frame that evaluates it. */
+export interface Annotation {
+  name: string;
+  expression: Expression;
+  frame: Frame;
+}
+
+/** The annotations a class body ran, in the order of the source. */
+export type ClassAnnotations = Annotation[];
 
 /** The state of an exception that the `BaseException` layout adds to instances. */
 export interface ExceptionState {

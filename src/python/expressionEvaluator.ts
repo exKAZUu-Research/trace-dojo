@@ -15,6 +15,7 @@ import { newBytes } from './bytesValues';
 import { newComplex } from './complexNumbers';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
 import { Frame } from './frame';
+import { namespaceOf } from './namespaces';
 import {
   bindValue,
   callValue,
@@ -59,6 +60,7 @@ import {
   PyGenerator,
   PyInstance,
   PyList,
+  PyModule,
   PySlice,
   PyTuple,
   type PyValue,
@@ -208,7 +210,7 @@ export class ExpressionEvaluator {
         return value;
       }
       case 'name': {
-        const value = frame.locals.get(name) ?? frame.globals.get(name) ?? this.runtime.builtins.get(name);
+        const value = frame.locals.get(name) ?? frame.globals.get(name) ?? this.builtinsOf(frame).get(name);
         if (value === undefined) throw this.nameError(`name '${name}' is not defined`, name, frame);
         return value;
       }
@@ -224,11 +226,19 @@ export class ExpressionEvaluator {
         return value;
       }
       default: {
-        const value = frame.globals.get(name) ?? this.runtime.builtins.get(name) ?? classCellOf(name, frame);
+        const value = frame.globals.get(name) ?? this.builtinsOf(frame).get(name) ?? classCellOf(name, frame);
         if (value === undefined) throw this.nameError(`name '${name}' is not defined`, name, frame);
         return value;
       }
     }
+  }
+
+  /** The builtins a frame's names fall back to: those its globals' `__builtins__` holds, as in CPython. */
+  private builtinsOf(frame: Frame): Map<string, PyValue> {
+    const builtins = frame.globals.get('__builtins__');
+    if (builtins instanceof PyModule) return builtins.dict;
+    if (builtins instanceof PyDict) return namespaceOf(builtins);
+    return this.runtime.builtins;
   }
 
   private nameError(message: string, name: string, frame: Frame): PyError {
@@ -560,25 +570,12 @@ export class ExpressionEvaluator {
       def.usesClassCell ? frame.classCell : undefined
     );
     fn.module = frame.globals.get('__name__') ?? None;
-    if (typeParams) {
-      fn.typeParams = typeParams;
-      fn.annotationFrame = frame;
-    }
+    if (typeParams) fn.typeParams = typeParams;
+    if (def.returns || def.params.some((param) => param.annotation)) fn.annotationFrame = frame;
     this.runtime.allocate(2);
     let result: PyValue = fn;
     for (const decorator of decorators.toReversed()) result = callValue(decorator, [result]);
     return result;
-  }
-
-  /** The annotations of a function, evaluated when the program reads `__annotations__`. */
-  annotationsOf(fn: PyFunction): PyDict {
-    const dict = newDict();
-    const frame = (fn.annotationFrame as Frame | undefined) ?? this.runtime.frame;
-    for (const param of fn.def.params) {
-      if (param.annotation) dict.store.set(param.name, this.evaluate(param.annotation, frame));
-    }
-    if (fn.def.returns) dict.store.set('return', this.evaluate(fn.def.returns, frame));
-    return dict;
   }
 
   // Comprehensions --------------------------------------------------------------------------------------------------

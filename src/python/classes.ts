@@ -1,3 +1,4 @@
+import { classAnnotationLists, newAnnotate } from './annotations';
 import type { ClassDef } from './ast';
 import { method } from './define';
 import { createEnumMembers } from './enums';
@@ -25,6 +26,7 @@ import {
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import {
+  type ClassAnnotations,
   type Kwargs,
   PyBuiltinFunction,
   PyCell,
@@ -45,7 +47,7 @@ method(attributeDescriptorClass, '__repr__', 'none', 0, 0, (self) => (self as Py
 /** What a class body leaves for `type.__new__` besides its namespace, keyed by that namespace. */
 interface ClassBody {
   classCell: PyCell;
-  annotations: [string, () => PyValue][];
+  annotations: ClassAnnotations;
 }
 
 const pendingBodies = new WeakMap<object, ClassBody>();
@@ -79,6 +81,13 @@ export function createClass(
   if (bases !== originalBases) namespace.set('__orig_bases__', newTuple(originalBases));
   const classCell = new PyCell();
   const body = runClassBody(evaluator, def, frame, namespace, classCell);
+  // The annotations of the class body, which CPython's compiler gives the class as `__annotate_func__`.
+  if (body.annotations.length > 0 && !namespace.has('__annotations__')) {
+    namespace.set(
+      '__annotate_func__',
+      newAnnotate(def.qualifiedName, frame.globals, () => body.annotations)
+    );
+  }
   namespace.set('__static_attributes__', newTuple(def.staticAttributes));
   const factory = bases.find(
     (base): base is PyClass => base instanceof PyClass && base.classFactory !== undefined
@@ -200,7 +209,7 @@ function runClassBody(
 }
 
 /** A class body's namespace that a metaclass's `__prepare__` returned, read and written through its item methods. */
-class MappingNamespace extends Map<string, PyValue> {
+export class MappingNamespace extends Map<string, PyValue> {
   constructor(private readonly mapping: PyValue) {
     super();
   }
@@ -298,8 +307,8 @@ export function typeNew(
 
 /** Gives a class what its class statement's body left besides its namespace. */
 function applyBody(cls: PyClass, body: ClassBody): void {
-  cls.annotationNames = body.annotations.map(([annotated]) => annotated);
-  currentRuntime().classAnnotationThunks.set(cls, body.annotations);
+  cls.annotationNames = body.annotations.map((annotation) => annotation.name);
+  classAnnotationLists.set(cls, body.annotations);
   body.classCell.value = cls;
 }
 
@@ -338,7 +347,6 @@ function fillClassDict(cls: PyClass, entries: Map<string, PyValue>): void {
   wrapImplicitMethod(entries, '__new__', staticmethodClass);
   wrapImplicitMethod(entries, '__init_subclass__', classmethodClass);
   wrapImplicitMethod(entries, '__class_getitem__', classmethodClass);
-  if (!entries.has('__doc__')) entries.set('__doc__', None);
   const slots = defineClassSlots(cls, entries);
   cls.slotNames = slotNamesOf(cls, slots);
   const plain = cls.bases.every((base) => base.isBuiltin);
@@ -347,6 +355,8 @@ function fillClassDict(cls: PyClass, entries: Map<string, PyValue>): void {
       entries.set(name, new PyOpaque(attributeDescriptorClass, `<attribute '${name}' of '${cls.name}' objects>`));
     }
   }
+  // A class without a docstring gets `__doc__` after `__dict__` and `__weakref__`, as in CPython.
+  if (!entries.has('__doc__')) entries.set('__doc__', None);
   for (const [name, value] of entries) cls.dict.set(name, value);
   if (cls.dict.has('__eq__') && !cls.dict.has('__hash__')) cls.dict.set('__hash__', None);
 }

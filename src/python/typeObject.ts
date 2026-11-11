@@ -5,6 +5,7 @@ import { method } from './define';
 import { callGetter, descriptorGetter } from './descriptors';
 import { isEnumClass, isFlagClass } from './enums';
 import { generatorNext } from './generators';
+import { isUnionable } from './genericAlias';
 import { identityHash } from './hashing';
 import { defineNew, objectInitImplementation, objectNewImplementation, typeCall } from './instances';
 import { argument, checkArgs } from './nativeArgs';
@@ -185,8 +186,12 @@ method(
   1,
   (self, [value]) => value instanceof PyClass && value.isSubclassOf(self as PyClass)
 );
-method(typeClass, '__or__', 'one', 1, 1, (self, [other]) => currentRuntime().unionType(self, other));
-method(typeClass, '__ror__', 'one', 1, 1, (self, [other]) => currentRuntime().unionType(other, self));
+method(typeClass, '__or__', 'one', 1, 1, (self, [other]) =>
+  isUnionable(other) ? currentRuntime().unionType(self, other) : NotImplemented
+);
+method(typeClass, '__ror__', 'one', 1, 1, (self, [other]) =>
+  isUnionable(other) ? currentRuntime().unionType(other, self) : NotImplemented
+);
 
 // Singletons --------------------------------------------------------------------------------------------------------
 

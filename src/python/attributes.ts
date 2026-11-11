@@ -1,4 +1,13 @@
 // code-gauge-allow-file fileNcss 413 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+import {
+  classAnnotate,
+  classAnnotations,
+  functionAnnotate,
+  functionAnnotations,
+  setClassAnnotate,
+  setClassAnnotations,
+  setFunctionAnnotationAttribute,
+} from './annotations';
 import { AttributeStore } from './attributeStore';
 import { solidBase } from './classes';
 import {
@@ -117,7 +126,10 @@ function typeData(cls: PyClass, name: string): PyValue | undefined {
       return newDict(cls.dict.entries());
     }
     case '__annotations__': {
-      return cls.dict.get('__annotations__') ?? newDict(currentRuntime().classAnnotations(cls));
+      return cls.isBuiltin ? undefined : classAnnotations(cls);
+    }
+    case '__annotate__': {
+      return cls.isBuiltin ? undefined : classAnnotate(cls);
     }
     default: {
       return undefined;
@@ -234,7 +246,10 @@ function functionAttribute(fn: PyFunction, name: string): PyValue | undefined {
       return fn.keywordDefaults.size > 0 ? newDict(fn.keywordDefaults.entries()) : None;
     }
     case '__annotations__': {
-      return currentRuntime().evaluator.annotationsOf(fn);
+      return functionAnnotations(fn);
+    }
+    case '__annotate__': {
+      return functionAnnotate(fn);
     }
     case '__dict__': {
       return new PyDict(dictClass, new AttributeStore(fn.dict));
@@ -321,7 +336,8 @@ export function setAttribute(target: PyValue, name: string, value: PyValue): voi
     return;
   }
   if (target instanceof PyFunction) {
-    if (name === '__name__' && typeof value === 'string') target.name = value;
+    if (name === '__annotations__' || name === '__annotate__') setFunctionAnnotationAttribute(target, name, value);
+    else if (name === '__name__' && typeof value === 'string') target.name = value;
     else if (name === '__qualname__' && typeof value === 'string') target.qualifiedName = value;
     else target.dict.set(name, value);
     return;
@@ -365,7 +381,9 @@ function setClassAttribute(target: PyClass, name: string, value: PyValue): void 
   if (target.enumMembers?.some((member) => member.dict.get('_name_') === name)) {
     throw pyError('AttributeError', `cannot reassign member '${name}'`);
   }
-  target.dict.set(name, value);
+  if (name === '__annotations__') setClassAnnotations(target, value);
+  else if (name === '__annotate__') setClassAnnotate(target, value);
+  else target.dict.set(name, value);
 }
 
 /** Whether a value is an instance of a program's subclass of a builtin type other than object, such as list. */
@@ -527,7 +545,12 @@ export function deleteAttribute(target: PyValue, name: string): void {
   }
   if (target instanceof PyClass) {
     if (target.isBuiltin) throw typeError(`cannot delete '${name}' attribute of immutable type '${target.name}'`);
-    if (!target.dict.delete(name)) throw attributeError(target, name);
+    if (name === '__annotations__') setClassAnnotations(target, undefined);
+    else if (!target.dict.delete(name)) throw attributeError(target, name);
+    return;
+  }
+  if (target instanceof PyFunction && (name === '__annotations__' || name === '__annotate__')) {
+    setFunctionAnnotationAttribute(target, name, undefined);
     return;
   }
   if (target instanceof PyFunction || target instanceof PyModule) {

@@ -240,8 +240,9 @@ export interface ImportName {
 
 export type Statement = Span &
   Suspends &
+  /** An expression statement, which shows its value through `sys.displayhook` in compile()'s 'single' mode. */
   (
-    | { kind: 'expression'; expression: Expression; stepRow?: number }
+    | { kind: 'expression'; expression: Expression; stepRow?: number; display?: boolean }
     | { kind: 'assign'; targets: Target[]; value: Expression; stepRow?: number }
     | { kind: 'augmentedAssign'; target: Target; operator: BinaryOperator; value: Expression; stepRow?: number }
     | {
@@ -252,9 +253,13 @@ export type Statement = Span &
         stepRow?: number;
         /** Whether the annotation is stored into `__annotations__`, as `from __future__ import annotations` does. */
         storesAnnotation?: boolean;
+        /** The position among a module's annotations, which running it adds to `__conditional_annotations__`. */
+        annotationIndex?: number;
       }
     /** Creates the `__annotations__` dict that annotated assignments store into under `from __future__ import annotations`. */
     | { kind: 'setupAnnotations' }
+    /** Binds a module's `__annotate__` and `__conditional_annotations__`, which its annotations need. */
+    | { kind: 'setupAnnotate' }
     | { kind: 'delete'; targets: Target[]; stepRow?: number }
     | { kind: 'pass' }
     | { kind: 'break' | 'continue' }
@@ -296,4 +301,6 @@ export interface Module {
   body: Statement[];
   scope: ScopeInfo;
   doc?: string;
+  /** The `__future__` features the module enables, which the code it compiles inherits. */
+  futureFeatures: string[];
 }

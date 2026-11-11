@@ -62,6 +62,7 @@ import './modules/types';
 import './modules/keyword';
 import './modules/pprint';
 import './modules/abc';
+import './modules/annotationlib';
 import './modules/contextlib';
 import './modules/collectionsAbc';
 import './modules/warnings';

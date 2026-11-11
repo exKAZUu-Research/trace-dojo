@@ -5,8 +5,28 @@ import { checkArgs } from './nativeArgs';
 import { callValue, setAttribute } from './objects';
 import { equals } from './operators';
 import { currentRuntime } from './runtimeContext';
-import { builtinClass, newTuple, NotImplemented, propertyClass, typingClass } from './types';
-import { PyBuiltinFunction, PyClass, PyDescriptor, PyError, PyOpaque, PyTuple, type PyValue } from './values';
+import { typeAliasClass } from './typeParams';
+import {
+  builtinClass,
+  Ellipsis,
+  newTuple,
+  None,
+  NotImplemented,
+  propertyClass,
+  typingClass,
+  unionClass,
+} from './types';
+import {
+  PyBuiltinFunction,
+  PyClass,
+  PyDescriptor,
+  PyError,
+  PyList,
+  PyObject,
+  PyOpaque,
+  PyTuple,
+  type PyValue,
+} from './values';
 
 /** A `types.GenericAlias`, such as `list[int]`: its text, its origin (as `data`), and its arguments. */
 export class PyGenericAlias extends PyOpaque {
@@ -23,16 +43,30 @@ export class PyGenericAlias extends PyOpaque {
 /** `origin[key]` for a class whose subscription CPython implements with `types.GenericAlias`. */
 export function genericAlias(origin: PyValue, key: PyValue, cls: PyClass = typingClass): PyGenericAlias {
   const args = key instanceof PyTuple ? key.items : [key];
-  const text = `${aliasArgumentText(origin)}[${args.map(aliasArgumentText).join(', ')}]`;
-  return new PyGenericAlias(text, origin, args, cls);
+  return new PyGenericAlias(aliasText(origin, args), origin, args, cls);
 }
 
-/** `typing._type_repr`. */
-function aliasArgumentText(value: PyValue): string {
+function aliasText(origin: PyValue, args: readonly PyValue[]): string {
+  return `${aliasArgumentText(origin)}[${args.map(aliasArgumentText).join(', ')}]`;
+}
+
+/** `typing._type_repr`, which reads the repr of an argument each time, as it may change. */
+export function aliasArgumentText(value: PyValue): string {
   if (value instanceof PyClass) {
     return value.module === 'builtins' ? value.qualifiedName : `${value.module}.${value.qualifiedName}`;
   }
+  if (value instanceof PyGenericAlias) return aliasText(value.data as PyValue, value.args);
+  if (value === Ellipsis) return '...';
+  if (value instanceof PyList) return `[${value.items.map(aliasArgumentText).join(', ')}]`;
   return value instanceof PyOpaque ? value.text : pyRepr(value);
+}
+
+/** Whether `|` makes a union of a value, as `types.UnionType` accepts: None, a type, an alias, or a union. */
+export function isUnionable(value: PyValue): boolean {
+  if (value === None || value instanceof PyClass) return true;
+  return (
+    value instanceof PyObject && (value.cls === typingClass || value.cls === unionClass || value.cls === typeAliasClass)
+  );
 }
 
 typingClass.isBaseType = true;
@@ -47,6 +81,7 @@ function property(name: string, get: (self: PyGenericAlias) => PyValue): void {
 }
 
 property('__origin__', (self) => self.data as PyValue);
+method(typingClass, '__repr__', 'none', 0, 0, (self) => aliasArgumentText(self));
 property('__args__', (self) => newTuple([...self.args]));
 property('__unpacked__', () => false);
 method(typingClass, '__eq__', 'one', 1, 1, (self, [other]) => {

@@ -1,12 +1,12 @@
 import type { TracedFrame } from '../interpreter/traceRecorder';
 import type { ScopeInfo } from './ast';
-import type { PyCell, PyFunction, PyValue } from './values';
+import type { Annotation, PyCell, PyFunction, PyValue } from './values';
 
 /** The variables of a running module, class body, or function call. */
 export class Frame implements TracedFrame {
   readonly temporaries: PyValue[] = [];
-  /** The names a class body annotates, in order, which `@dataclass` reads. */
-  readonly annotations: [string, () => PyValue][] = [];
+  /** The annotations a module or class body ran, in the order of the source, which its `__annotate__` evaluates. */
+  readonly annotations: Annotation[] = [];
   /** How many `try` and `with` statements a generator's frame is inside, where closing it runs code. */
   protectedDepth = 0;
 

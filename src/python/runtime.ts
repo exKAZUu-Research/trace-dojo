@@ -39,7 +39,7 @@ import {
   valueError,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { type PyTuple,
+import {
   DONE,
   type Kwargs,
   PyCell,
@@ -54,7 +54,9 @@ import { type PyTuple,
   PyObject,
   PyOpaque,
   type PySet,
-  type PyValue } from './values';
+  PyTuple,
+  type PyValue,
+} from './values';
 
 export class Runtime {
   readonly world = new TurtleWorld();
@@ -323,14 +325,8 @@ export class Runtime {
   // Services for builtins ------------------------------------------------------------------------------------------
 
   readonly none = None;
-  /** The annotations of each class body, evaluated when the program reads `__annotations__` or `@dataclass` does. */
-  readonly classAnnotationThunks = new Map<PyClass, [string, () => PyValue][]>();
   readonly frozenDataclasses = new Set<PyClass>();
   private readonly streams = new Map<string, PyValue>();
-
-  classAnnotations(cls: PyClass): [PyValue, PyValue][] {
-    return (this.classAnnotationThunks.get(cls) ?? []).map(([name, thunk]) => [name, thunk()]);
-  }
 
   isFrozenDataclass(cls: PyClass): boolean {
     return cls.mro.some((each) => this.frozenDataclasses.has(each));
@@ -415,6 +411,12 @@ export class Runtime {
     }
     const classGetItem = cls.isBuiltin ? undefined : cls.lookup('__class_getitem__');
     if (classGetItem !== undefined) return callValue(bindValue(classGetItem, cls, cls), [key]);
+    if (cls === unionClass) {
+      const [first, ...rest] = key instanceof PyTuple ? key.items : [key];
+      let union = first;
+      for (const arg of rest) union = this.unionType(union, arg);
+      return union;
+    }
     if (cls.isBuiltin) return genericAlias(cls, key);
     throw typeError(`type '${cls.qualifiedName}' is not subscriptable`);
   }

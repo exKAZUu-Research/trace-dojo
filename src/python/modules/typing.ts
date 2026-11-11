@@ -1,5 +1,6 @@
 import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
+import { aliasArgumentText, isUnionable, PyGenericAlias } from '../genericAlias';
 import { registerModule } from '../modules';
 import { setAttribute } from '../objects';
 import { currentRuntime } from '../runtimeContext';
@@ -11,7 +12,7 @@ import {
   typeVarClass,
   typeVarTupleClass,
 } from '../typeParams';
-import { builtinClass, Ellipsis, None, pyError, typingClass, unionClass } from '../types';
+import { builtinClass, Ellipsis, None, NotImplemented, pyError, typingClass, unionClass } from '../types';
 import { PyClass, PyError, PyList, PyOpaque, PyTuple, type PyValue } from '../values';
 import { TYPING_CLASSES } from './typingClasses';
 import { getTypeHints, newTypeClass } from './typingTypeVars';
@@ -27,6 +28,7 @@ literalAliasClass.module = 'typing';
 function argumentText(value: PyValue): string {
   if (value instanceof PyClass)
     return value.module === 'builtins' ? value.qualifiedName : `${value.module}.${value.qualifiedName}`;
+  if (value instanceof PyGenericAlias) return aliasArgumentText(value);
   if (value instanceof PyOpaque) return value.text;
   // `typing._type_repr`, after the subscript turned None into its type, and Callable's list of argument types.
   if (value === None) return 'NoneType';
@@ -54,10 +56,16 @@ for (const cls of [specialFormClass, typingClass, unionClass, formAliasClass, li
           : formAliasClass;
     return new PyOpaque(cls, `${text}[${args.map(argumentText).join(', ')}]`);
   });
-  method(cls, '__repr__', 'none', 0, 0, (self) => (self as PyOpaque).text);
-  method(cls, '__or__', 'one', 1, 1, (self, [other]) => currentRuntime().unionType(self, other));
-  method(cls, '__ror__', 'one', 1, 1, (self, [other]) => currentRuntime().unionType(other, self));
+  // A builtin alias and a union take part in `|` only with what `types.UnionType` accepts.
+  const accepts = cls === typingClass || cls === unionClass ? isUnionable : () => true;
+  method(cls, '__or__', 'one', 1, 1, (self, [other]) =>
+    accepts(other) ? currentRuntime().unionType(self, other) : NotImplemented
+  );
+  method(cls, '__ror__', 'one', 1, 1, (self, [other]) =>
+    accepts(other) ? currentRuntime().unionType(other, self) : NotImplemented
+  );
   if (cls === typingClass) continue;
+  method(cls, '__repr__', 'none', 0, 0, (self) => (self as PyOpaque).text);
   method(cls, '__call__', 'expected', 0, Number.POSITIVE_INFINITY, (self) => {
     throw currentRuntime().unsupported(`${(self as PyOpaque).text} の呼び出し`);
   });
