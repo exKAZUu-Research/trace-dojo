@@ -1,3 +1,4 @@
+import { type PyBytes, PyMemoryView } from '../bytesValues';
 import { builtin } from '../define';
 import { toIndex } from '../numbers';
 import { registerSourceModule } from '../sourceModules';
@@ -5,9 +6,9 @@ import { strLength } from '../strings';
 import { intClass, isInstanceOf, pyError, typeError, typeName } from '../types';
 import type { PyValue } from '../values';
 
-// `array.array`, which CPython writes in C, written in Python over a list of converted items. Its items are converted
-// natively as CPython stores them in C types, with the same range errors, and packed with `struct` in the machine's
-// native layout, little-endian with 8-byte longs, for the methods that read or write bytes.
+// `array.array`, which CPython writes in C, written in Python over a bytearray holding its items in the machine's native
+// layout, little-endian with 8-byte longs, which memoryviews of the array share. Its items are converted natively as
+// CPython stores them in C types, with the same range errors, and packed and read with `struct`.
 const SOURCE = String.raw`
 import struct as _struct
 from operator import index as _index
@@ -18,9 +19,27 @@ _ITEMSIZE = {'b': 1, 'B': 1, 'u': 4, 'w': 4, 'h': 2, 'H': 2, 'i': 4, 'I': 4,
              'l': 8, 'L': 8, 'q': 8, 'Q': 8, 'f': 4, 'd': 8}
 
 
+def _code(typecode):
+    return 'I' if typecode in 'uw' else typecode
+
+
+def _encode(typecode, items):
+    if typecode in 'uw':
+        return _struct.pack(f'{len(items)}I', *[ord(item) for item in items])
+    return _struct.pack(f'{len(items)}{typecode}', *items)
+
+
+def _decode(typecode, data):
+    count = len(data) // _ITEMSIZE[typecode]
+    items = _struct.unpack(f'{count}{_code(typecode)}', data)
+    if typecode in 'uw':
+        return [chr(code) for code in items]
+    return list(items)
+
+
 def _new(typecode, items):
     result = array(typecode)
-    result._items = items
+    result._data = bytearray(_encode(typecode, items))
     return result
 
 
@@ -38,19 +57,41 @@ class array:
         if typecode not in typecodes:
             raise ValueError('bad typecode (must be b, B, u, w, h, H, i, I, l, L, q, Q, f or d)')
         self._typecode = typecode
-        self._items = []
+        # The items in the C layout CPython stores them in, which memoryviews of the array share.
+        self._data = bytearray()
         if len(args) == 2:
             initializer = args[1]
             if isinstance(initializer, str):
                 if typecode not in 'uw':
                     raise TypeError(f"cannot use a str to initialize an array with typecode '{typecode}'")
-                self._items = list(initializer)
+                self._data = bytearray(_encode(typecode, list(initializer)))
             elif isinstance(initializer, (bytes, bytearray)):
                 self.frombytes(initializer)
             elif isinstance(initializer, array) and initializer._typecode in 'uw' and typecode not in 'uw':
                 raise TypeError(f"cannot use a unicode array to initialize an array with typecode '{typecode}'")
             else:
-                self._items = [_convert(typecode, item) for item in initializer]
+                self._data = bytearray(_encode(typecode, [_convert(typecode, item) for item in initializer]))
+
+    def _items(self):
+        return _decode(self._typecode, self._data)
+
+    def _store(self, items):
+        data = _encode(self._typecode, items)
+        if len(data) != len(self._data):
+            self._check_resize()
+        self._data[:] = data
+
+    def _check_resize(self):
+        if _exported(self._data):
+            raise BufferError('cannot resize an array that is exporting buffers')
+
+    def _position(self, index, message):
+        count = len(self)
+        if index < 0:
+            index += count
+        if not 0 <= index < count:
+            raise IndexError(message)
+        return index * _ITEMSIZE[self._typecode]
 
     @property
     def typecode(self):
@@ -61,28 +102,28 @@ class array:
         return _ITEMSIZE[self._typecode]
 
     def __repr__(self):
-        if not self._items:
+        items = self._items()
+        if not items:
             return f"array('{self._typecode}')"
         if self._typecode in 'uw':
-            return f"array('{self._typecode}', {''.join(self._items)!r})"
-        return f"array('{self._typecode}', {self._items!r})"
+            return f"array('{self._typecode}', {''.join(items)!r})"
+        return f"array('{self._typecode}', {items!r})"
 
     def __len__(self):
-        return len(self._items)
+        return len(self._data) // _ITEMSIZE[self._typecode]
 
     def __iter__(self):
-        return iter(self._items)
+        return iter(self._items())
 
     def __contains__(self, value):
-        return value in self._items
+        return value in self._items()
 
     def __getitem__(self, index):
         if isinstance(index, slice):
-            return _new(self._typecode, self._items[index])
-        try:
-            return self._items[index]
-        except IndexError:
-            raise IndexError('array index out of range') from None
+            return _new(self._typecode, self._items()[index])
+        offset = self._position(_index(index), 'array index out of range')
+        value = _struct.unpack_from(_code(self._typecode), self._data, offset)[0]
+        return chr(value) if self._typecode in 'uw' else value
 
     def __setitem__(self, index, value):
         if isinstance(index, slice):
@@ -90,19 +131,23 @@ class array:
                 raise TypeError(f'can only assign array (not "{type(value).__name__}") to array slice')
             if value._typecode != self._typecode:
                 raise TypeError('bad argument type for built-in operation')
-            self._items[index] = value._items
+            items = self._items()
+            items[index] = value._items()
+            self._store(items)
             return
         converted = _convert(self._typecode, value)
-        try:
-            self._items[index] = converted
-        except IndexError:
-            raise IndexError('array assignment index out of range') from None
+        offset = self._position(_index(index), 'array assignment index out of range')
+        if self._typecode in 'uw':
+            converted = ord(converted)
+        _struct.pack_into(_code(self._typecode), self._data, offset, converted)
 
     def __delitem__(self, index):
+        items = self._items()
         try:
-            del self._items[index]
+            del items[index]
         except IndexError:
             raise IndexError('array assignment index out of range') from None
+        self._store(items)
 
     def _same_kind(self, other, message):
         if not isinstance(other, array):
@@ -112,124 +157,135 @@ class array:
 
     def __add__(self, other):
         self._same_kind(other, 'can only append array (not "%s") to array')
-        return _new(self._typecode, self._items + other._items)
+        return _new(self._typecode, self._items() + other._items())
 
     def __iadd__(self, other):
         self._same_kind(other, 'can only extend array with array (not "%s")')
-        self._items += other._items
+        self._store(self._items() + other._items())
         return self
 
     def __mul__(self, count):
-        return _new(self._typecode, self._items * count)
+        return _new(self._typecode, self._items() * count)
 
     def __rmul__(self, count):
-        return _new(self._typecode, self._items * count)
+        return _new(self._typecode, self._items() * count)
 
     def __imul__(self, count):
-        self._items *= count
+        self._store(self._items() * count)
         return self
 
     def __eq__(self, other):
         if not isinstance(other, array):
             return NotImplemented
-        return self._items == other._items
+        return self._items() == other._items()
 
     def __ne__(self, other):
         if not isinstance(other, array):
             return NotImplemented
-        return self._items != other._items
+        return self._items() != other._items()
 
     def __lt__(self, other):
         if not isinstance(other, array):
             return NotImplemented
-        return self._items < other._items
+        return self._items() < other._items()
 
     def __le__(self, other):
         if not isinstance(other, array):
             return NotImplemented
-        return self._items <= other._items
+        return self._items() <= other._items()
 
     def __gt__(self, other):
         if not isinstance(other, array):
             return NotImplemented
-        return self._items > other._items
+        return self._items() > other._items()
 
     def __ge__(self, other):
         if not isinstance(other, array):
             return NotImplemented
-        return self._items >= other._items
+        return self._items() >= other._items()
 
     def __copy__(self):
-        return _new(self._typecode, list(self._items))
+        return _new(self._typecode, self._items())
 
     def __deepcopy__(self, memo):
-        return _new(self._typecode, list(self._items))
+        return _new(self._typecode, self._items())
 
     def append(self, value, /):
-        self._items.append(_convert(self._typecode, value))
+        converted = _convert(self._typecode, value)
+        self._check_resize()
+        self._data += _encode(self._typecode, [converted])
 
     def extend(self, iterable, /):
         if isinstance(iterable, array):
             if iterable._typecode != self._typecode:
                 raise TypeError('can only extend with array of same kind')
-            self._items.extend(iterable._items)
+            self._store(self._items() + iterable._items())
             return
         for item in iterable:
-            self._items.append(_convert(self._typecode, item))
+            self.append(item)
 
     def insert(self, index, value, /):
-        self._items.insert(index, _convert(self._typecode, value))
+        items = self._items()
+        items.insert(index, _convert(self._typecode, value))
+        self._store(items)
 
     def pop(self, index=-1, /):
-        if not self._items:
+        items = self._items()
+        if not items:
             raise IndexError('pop from empty array')
         try:
-            return self._items.pop(index)
+            value = items.pop(index)
         except IndexError:
             raise IndexError('pop index out of range') from None
+        self._store(items)
+        return value
 
     def remove(self, value, /):
+        items = self._items()
         try:
-            self._items.remove(value)
+            items.remove(value)
         except ValueError:
             raise ValueError('array.remove(x): x not in array') from None
+        self._store(items)
 
     def index(self, value, start=0, stop=None, /):
+        items = self._items()
         if stop is None:
-            stop = len(self._items)
+            stop = len(items)
         try:
-            return self._items.index(value, start, stop)
+            return items.index(value, start, stop)
         except ValueError:
             raise ValueError('array.index(x): x not in array') from None
 
     def count(self, value, /):
-        return self._items.count(value)
+        return self._items().count(value)
 
     def reverse(self):
-        self._items.reverse()
+        self._store(self._items()[::-1])
 
     def clear(self):
-        self._items.clear()
+        self._store([])
 
     def tolist(self):
-        return list(self._items)
+        return self._items()
 
     def fromlist(self, items, /):
         if not isinstance(items, list):
             raise TypeError('arg must be list')
-        self._items.extend([_convert(self._typecode, item) for item in items])
+        converted = [_convert(self._typecode, item) for item in items]
+        self._store(self._items() + converted)
 
     def tounicode(self):
         if self._typecode not in 'uw':
             raise ValueError("tounicode() may only be called on unicode type arrays ('u' or 'w')")
-        return ''.join(self._items)
+        return ''.join(self._items())
 
     def fromunicode(self, text, /):
         if not isinstance(text, str):
             raise TypeError(f'fromunicode() argument must be str, not {type(text).__name__}')
         if self._typecode not in 'uw':
             raise ValueError("fromunicode() may only be called on unicode type arrays ('u' or 'w')")
-        self._items.extend(text)
+        self._store(self._items() + list(text))
 
     def buffer_info(self):
         _unsupported('配列のメモリ上の位置（array.buffer_info）')
@@ -238,34 +294,29 @@ class array:
         size = _ITEMSIZE[self._typecode]
         if size == 1:
             return
-        data = self.tobytes()
-        swapped = b''.join(data[start:start + size][::-1] for start in range(0, len(data), size))
-        self._items = []
-        self.frombytes(swapped)
+        data = bytes(self._data)
+        self._data[:] = b''.join(data[start:start + size][::-1] for start in range(0, len(data), size))
 
     def __buffer__(self, flags, /):
-        return memoryview(self.tobytes())
+        return _view(self, self._data, self._typecode)
 
     def tobytes(self):
-        if self._typecode in 'uw':
-            return _struct.pack(f'{len(self._items)}I', *[ord(item) for item in self._items])
-        return _struct.pack(f'{len(self._items)}{self._typecode}', *self._items)
+        return bytes(self._data)
 
     def frombytes(self, data, /):
-        if isinstance(data, array):
-            data = data.tobytes()
-        elif isinstance(data, memoryview):
-            data = data.tobytes()
+        if isinstance(data, (array, memoryview)):
+            data = bytes(data)
         elif not isinstance(data, (bytes, bytearray)):
             raise TypeError(f"a bytes-like object is required, not '{type(data).__name__}'")
         size = _ITEMSIZE[self._typecode]
         if len(data) % size:
             raise ValueError('bytes length not a multiple of item size')
-        count = len(data) // size
+        if data:
+            self._check_resize()
         if self._typecode in 'uw':
-            self._items.extend(chr(code) for code in _struct.unpack(f'{count}I', data))
+            self._store(self._items() + _decode(self._typecode, data))
         else:
-            self._items.extend(_struct.unpack(f'{count}{self._typecode}', data))
+            self._data += data
 
     def tofile(self, f, /):
         data = self.tobytes()
@@ -288,6 +339,24 @@ class array:
 ArrayType = array
 _c_type_name(array, 'array.array')
 `;
+
+/** The sizes of the items of each type code. */
+const ITEMSIZES: Record<string, number> = {
+  b: 1,
+  B: 1,
+  u: 4,
+  w: 4,
+  h: 2,
+  H: 2,
+  i: 4,
+  I: 4,
+  l: 8,
+  L: 8,
+  q: 8,
+  Q: 8,
+  f: 4,
+  d: 8,
+};
 
 /** The ranges of the integer type codes, and the messages CPython's converters give outside them. */
 const INTEGER_RANGES: Record<string, [bigint, bigint, string, string]> = {
@@ -361,6 +430,19 @@ registerSourceModule(
         '_convert',
         builtin('_convert', 'expected', 2, 2, ([typecode, value]) => convertItem(typecode as string, value)),
       ],
+      // A memoryview of the array's memory, typed as CPython's buffer of the array is, with the array as its `obj`.
+      [
+        '_view',
+        builtin('_view', 'expected', 3, 3, ([owner, data, typecode]) => {
+          const bytes = data as PyBytes;
+          const size = ITEMSIZES[typecode as string];
+          const format = typecode === 'u' ? 'w' : (typecode as string);
+          const view = new PyMemoryView(bytes, 0, bytes.length / size, size, format, size, false);
+          view.exporter = owner;
+          return view;
+        }),
+      ],
+      ['_exported', builtin('_exported', 'one', 1, 1, ([data]) => (data as PyBytes).hasExports())],
       [
         '_character_error',
         builtin('_character_error', 'expected', 2, 2, ([what, value]) => {
