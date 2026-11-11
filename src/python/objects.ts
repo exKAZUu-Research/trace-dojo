@@ -235,7 +235,8 @@ function moduleAttribute(module: PyModule, name: string): PyValue | undefined {
   if (name === '__dict__') return namespaceDict(module.dict);
   const value =
     name === '__annotations__' ? moduleAnnotations(module) : (module.dict.get(name) ?? importedModule(module, name));
-  if (value === undefined && module.partialFeature !== undefined)
+  // A special name the module lacks is one its module object lacks, which programs and pydoc look for.
+  if (value === undefined && module.partialFeature !== undefined && !/^__\w+__$/.test(name))
     throw new UnsupportedFeatureError(module.partialFeature);
   return value;
 }

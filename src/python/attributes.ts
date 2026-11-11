@@ -256,6 +256,9 @@ function builtinFunctionAttribute(fn: PyBuiltinFunction, name: string): PyValue 
 function moduleOf(fn: PyBuiltinFunction): PyValue {
   const runtime = currentRuntime();
   if (runtime.builtins.get(fn.name) === fn) return runtime.importModule('builtins');
+  // A function of a C accelerator, as `operator.add` is of `_operator`, belongs to it.
+  const owner = runtime.modules.get(builtinFunctionModule(runtime, fn) ?? '');
+  if (owner?.dict.get(fn.name) === fn) return owner;
   for (const module of runtime.modules.values()) if (module.dict.get(fn.name) === fn) return module;
   return None;
 }

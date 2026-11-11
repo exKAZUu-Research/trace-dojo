@@ -99,11 +99,12 @@ class _IncrementalEncoder:
         self.started = False
         self._stateful = _stateful_codec(self.encoding, 'encode')
 
+    # As CPython's encoders that write a BOM: 2 before it is written, and 0 once it is, or should not be.
     def getstate(self):
-        return 0
+        return 0 if self.started else 2
 
     def setstate(self, state):
-        self.started = state != 0
+        self.started = state == 0
 
 
 class _CodecInfo:
@@ -1354,7 +1355,8 @@ class TextIOWrapper(TextIOBase):
     write contains a newline character.
     """
 
-    _CHUNK_SIZE = 2048
+    # As in CPython's C TextIOWrapper, which reads and writes in chunks of this size.
+    _CHUNK_SIZE = 8192
 
     # Initialize _buffer as soon as possible since it's used by __del__()
     # which calls close()
@@ -1390,6 +1392,9 @@ class TextIOWrapper(TextIOBase):
         self._decoded_chars = ''  # buffer for text returned from decoder
         self._decoded_chars_used = 0  # offset into _decoded_chars for read()
         self._snapshot = None  # info for reconstructing decoder state
+        # The encoded text not written to the buffer yet, which CPython's C TextIOWrapper keeps up to a chunk of.
+        self._pending_bytes = []
+        self._pending_bytes_count = 0
         self._seekable = self._telling = self.buffer.seekable()
         self._has_read1 = hasattr(self.buffer, 'read1')
         self._configure(encoding, errors, newline,
@@ -1427,6 +1432,9 @@ class TextIOWrapper(TextIOBase):
                 except LookupError:
                     # Sometimes the encoder doesn't exist
                     pass
+        elif self.writable() and codecs.lookup(encoding).name in ('utf-16', 'utf-32'):
+            # As CPython's C TextIOWrapper, which writes the BOM only at the start of a stream it can tell it is at.
+            self._get_encoder().setstate(0)
 
     # self._snapshot is either None, or a tuple (dec_flags, next_input)
     # where dec_flags is the second (integer) item of the decoder state
@@ -1529,8 +1537,21 @@ class TextIOWrapper(TextIOBase):
         return self.buffer.writable()
 
     def flush(self):
-        self.buffer.flush()
+        if self.closed:
+            raise ValueError("I/O operation on closed file.")
         self._telling = self._seekable
+        self._writeflush()
+        self.buffer.flush()
+
+    def _writeflush(self):
+        """Writes the pending encoded text to the buffer in one piece."""
+        if not self._pending_bytes:
+            return
+        pending = self._pending_bytes
+        b = pending[0] if len(pending) == 1 else b''.join(pending)
+        self._pending_bytes = []
+        self._pending_bytes_count = 0
+        self.buffer.write(b)
 
     def close(self):
         if self.buffer is not None and not self.closed:
@@ -1567,9 +1588,16 @@ class TextIOWrapper(TextIOBase):
         encoder = self._encoder or self._get_encoder()
         # XXX What if we were just reading?
         b = encoder.encode(s)
-        self.buffer.write(b)
-        if self._line_buffering and (haslf or "\r" in s):
-            self.flush()
+        needflush = self._line_buffering and (haslf or "\r" in s)
+        # A chunk or more goes to the buffer apart from the text before it, which is not copied into it.
+        if len(b) >= self._CHUNK_SIZE:
+            self._writeflush()
+        self._pending_bytes.append(b)
+        self._pending_bytes_count += len(b)
+        if self._pending_bytes_count >= self._CHUNK_SIZE or needflush or self._write_through:
+            self._writeflush()
+        if needflush:
+            self.buffer.flush()
         if self._snapshot is not None:
             self._set_decoded_chars('')
             self._snapshot = None
@@ -1875,6 +1903,7 @@ class TextIOWrapper(TextIOBase):
                 raise TypeError(f"{size!r} is not an integer")
             else:
                 size = size_index()
+        self._writeflush()
         decoder = self._decoder or self._get_decoder()
         if size < 0:
             chunk = self.buffer.read()
@@ -1917,6 +1946,7 @@ class TextIOWrapper(TextIOBase):
                 raise TypeError(f"{size!r} is not an integer")
             else:
                 size = size_index()
+        self._writeflush()
 
         # Grab all the decoded text (we will rewind any extra bits later).
         line = self._get_decoded_chars()
