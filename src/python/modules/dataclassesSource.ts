@@ -4,6 +4,8 @@
  */
 export const DATACLASSES_SOURCE = String.raw`
 import copy
+import itertools
+import sys
 
 __all__ = ['dataclass', 'field', 'Field', 'FrozenInstanceError', 'InitVar', 'KW_ONLY', 'MISSING', 'fields', 'asdict',
            'astuple', 'make_dataclass', 'replace', 'is_dataclass']

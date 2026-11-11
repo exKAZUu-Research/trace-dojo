@@ -275,6 +275,8 @@ export class PyModule extends PyObject {
   readonly unsupported = new Map<string, string>();
   /** Attributes created when first read, such as those standard library code written in Python defines. */
   readonly lazy = new Map<string, () => PyValue>();
+  /** Attributes `dir()` does not list, such as those CPython's module `__getattr__` gives. */
+  readonly hidden = new Set<string>();
 
   constructor(
     cls: PyClass,
@@ -298,7 +300,9 @@ export class PyModule extends PyObject {
 
   /** The names of the module's attributes, including lazy ones not read yet. */
   names(): string[] {
-    return [...this.dict.keys(), ...this.lazy.keys()];
+    return [...this.dict.keys(), ...this.lazy.keys(), ...this.unsupported.keys()].filter(
+      (name) => !this.hidden.has(name)
+    );
   }
 }
 

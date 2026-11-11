@@ -157,7 +157,7 @@ export function setAttribute(target: PyValue, name: string, value: PyValue): voi
     if (target.enumMembers?.some((member) => member.dict.get('_name_') === name)) {
       throw pyError('AttributeError', `cannot reassign member '${name}'`);
     }
-    target.dict.set(name, value);
+    setClassAttribute(target, name, value);
     return;
   }
   const descriptor = classOf(target).lookup(name);
@@ -271,4 +271,18 @@ export function deleteInstanceAttribute(target: PyInstance, name: string): void 
     return;
   }
   if (!target.dict.delete(name)) throw attributeError(target, name);
+}
+
+/** Sets a class attribute, of which `__module__`, `__name__`, and `__qualname__` are the class's own data. */
+function setClassAttribute(cls: PyClass, name: string, value: PyValue): void {
+  if (name === '__name__' || name === '__qualname__') {
+    if (typeof value !== 'string') {
+      throw typeError(`can only assign string to ${cls.name}.${name}, not '${typeName(value)}'`);
+    }
+    if (name === '__name__') (cls as { name: string }).name = value;
+    else cls.qualifiedName = value;
+    return;
+  }
+  if (name === '__module__' && typeof value === 'string') cls.module = value;
+  cls.dict.set(name, value);
 }

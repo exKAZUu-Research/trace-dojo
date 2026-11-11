@@ -4,6 +4,7 @@
  * can await, are plain functions.
  */
 export const COLLECTIONS_ABC_SOURCE = String.raw`
+import sys
 __all__ = ['Awaitable', 'Coroutine', 'AsyncIterable', 'AsyncIterator', 'AsyncGenerator', 'Hashable', 'Iterable',
            'Iterator', 'Generator', 'Reversible', 'Sized', 'Container', 'Callable', 'Collection', 'Set', 'MutableSet',
            'Mapping', 'MutableMapping', 'MappingView', 'KeysView', 'ItemsView', 'ValuesView', 'Sequence',

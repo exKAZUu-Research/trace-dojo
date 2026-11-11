@@ -819,6 +819,8 @@ registerModule(
   () =>
     new Map<string, PyValue>([
       ['deque', dequeClass],
+      // CPython imports heapq into collections only when Counter.most_common needs it.
+      ['heapq', None],
       ['Counter', counterClass],
       ['defaultdict', defaultdictClass],
       ['OrderedDict', orderedDictClass],

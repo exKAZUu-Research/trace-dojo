@@ -2,7 +2,7 @@ import { abcMetaClass, initAbstractClass } from '../abstractClasses';
 import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { runLibrarySource } from '../librarySource';
-import { importModule, registerModule, registerUnsupportedAttributes } from '../modules';
+import { importModule, registerHiddenAttributes, registerModule, registerUnsupportedAttributes } from '../modules';
 import { getAttribute, getAttributeOrUndefined, isTruthy } from '../objects';
 import type { Runtime } from '../runtime';
 import { currentRuntime } from '../runtimeContext';
@@ -78,6 +78,8 @@ const UNSUPPORTED_NAMES: Record<string, string> = {
   Pattern: 'typing.Pattern（re モジュール）',
   Match: 'typing.Match（re モジュール）',
   evaluate_forward_ref: 'typing.evaluate_forward_ref（文字列の型ヒントの評価）',
+  ContextManager: 'typing.ContextManager（contextlib モジュール）',
+  AsyncContextManager: 'typing.AsyncContextManager（contextlib モジュール）',
   copyreg: 'モジュール copyreg',
   operator: 'モジュール operator',
   types: 'モジュール types',
@@ -121,6 +123,8 @@ registerModule('typing', (runtime) => {
   const namespace = new Map<string, PyValue>([...specialForms(), ...aliases(abc, collections), ...natives(runtime)]);
   return runLibrarySource('typing', TYPING_SOURCE, namespace);
 });
+// CPython's typing gives these through its module __getattr__, so dir() does not list them.
+registerHiddenAttributes('typing', ['ForwardRef', 'Match', 'Pattern', 'ContextManager', 'AsyncContextManager']);
 
 function specialForms(): [string, PyValue][] {
   const single = singleTypeForm(false);

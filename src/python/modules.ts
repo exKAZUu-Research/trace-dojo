@@ -10,6 +10,19 @@ const factories = new Map<string, ModuleFactory>();
 const lazyAttributes = new Map<string, Map<string, (runtime: Runtime) => PyValue>>();
 const unsupportedAttributes = new Map<string, Record<string, string>>([['sys', UNSUPPORTED_SYS_ATTRIBUTES]]);
 
+const moduleValues = new Map<string, { package: string; all?: readonly string[] }>();
+const hiddenAttributes = new Map<string, readonly string[]>();
+
+/** Registers the attributes of a module that `dir()` does not list. */
+export function registerHiddenAttributes(module: string, names: readonly string[]): void {
+  hiddenAttributes.set(module, names);
+}
+
+/** Registers a module's `__package__` and `__all__`, for the modules whose code does not define them. */
+export function registerModuleValues(module: string, packageName: string, all: readonly string[] | undefined): void {
+  moduleValues.set(module, { package: packageName, all });
+}
+
 /** Registers the attributes of a module this grader does not support, with the feature each error names. */
 export function registerUnsupportedAttributes(module: string, features: Record<string, string>): void {
   unsupportedAttributes.set(module, { ...unsupportedAttributes.get(module), ...features });
@@ -48,7 +61,13 @@ export function importModule(runtime: Runtime, name: string): PyModule {
   for (const [key, value] of factory(runtime)) module.dict.set(key, value);
   for (const [key, create] of lazyAttributes.get(name) ?? []) module.lazy.set(key, () => create(runtime));
   for (const [key, feature] of Object.entries(unsupportedAttributes.get(name) ?? {})) {
-    if (!module.dict.has(key)) module.unsupported.set(key, feature);
+    if (!module.dict.has(key) && !module.lazy.has(key)) module.unsupported.set(key, feature);
+  }
+  for (const hidden of hiddenAttributes.get(name) ?? []) module.hidden.add(hidden);
+  const values = moduleValues.get(name);
+  if (values) {
+    if (!module.dict.has('__package__')) module.dict.set('__package__', values.package);
+    if (values.all && !module.dict.has('__all__')) module.dict.set('__all__', runtime.listOf([...values.all]));
   }
   return module;
 }

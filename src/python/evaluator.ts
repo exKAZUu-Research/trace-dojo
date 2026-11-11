@@ -153,8 +153,17 @@ export class Evaluator extends ExpressionEvaluator {
       }
       case 'importStar': {
         const module = runtime.importModule(statement.module);
-        for (const name of module.names()) {
-          if (!name.startsWith('_')) frame.locals.set(name, module.attribute(name) as PyValue);
+        const all = module.attribute('__all__');
+        const names =
+          all === undefined
+            ? [...module.dict.keys(), ...module.lazy.keys()].filter(
+                (name) => !name.startsWith('_') && !module.hidden.has(name)
+              )
+            : runtime.toArray(all);
+        for (const name of names) {
+          // An unsupported name stays unbound, as importing it would stop the program.
+          const value = module.attribute(name as string);
+          if (value !== undefined) frame.locals.set(name as string, value);
         }
         return undefined;
       }

@@ -12,6 +12,7 @@ import { pyHash } from './hashing';
 import { keyError } from './items';
 import { importModule } from './modules';
 import { systemExitError } from './modules/sys';
+import { DEFAULT_MAX_STR_DIGITS } from './numbers';
 import { bindValue, callValue, isTruthy, lookupSpecial, setAttribute, toArray } from './objects';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
@@ -27,6 +28,7 @@ import {
   None,
   pyError,
   superClass,
+  typeClass,
   typeError,
   valueError,
 } from './types';
@@ -266,6 +268,8 @@ export class Runtime {
   // Services for builtins ------------------------------------------------------------------------------------------
 
   readonly none = None;
+  /** The limit sys.set_int_max_str_digits sets, 0 for none. */
+  intMaxStrDigits = DEFAULT_MAX_STR_DIGITS;
   private builtinsModuleValue: PyModule | undefined;
 
   /** The builtins module, which is the `__self__` of the builtin functions. */
@@ -341,12 +345,13 @@ export class Runtime {
         throw keyError(key);
       return member;
     }
-    const classGetItem = cls.isBuiltin ? undefined : cls.lookup('__class_getitem__');
-    // Only library classes define __class_getitem__, which binds to the class as a classmethod.
+    // Builtin and library classes define __class_getitem__, which is a classmethod even without the decorator.
+    const classGetItem = cls.lookup('__class_getitem__');
     if (classGetItem instanceof PyFunction) return callValue(classGetItem, [cls, key]);
     if (classGetItem instanceof PyDescriptor) return callValue(classGetItem.fn, [cls, key]);
+    if (classGetItem !== undefined) return callValue(bindValue(classGetItem, cls, cls), [key]);
     if (cls === unionClass) return unionGetItem(key);
-    if (cls.isBuiltin && cls.isBaseType) return newGenericAlias(cls, key);
+    if (cls === typeClass) return newGenericAlias(cls, key);
     throw typeError(`type '${cls.qualifiedName}' is not subscriptable`);
   }
 
@@ -400,10 +405,7 @@ export class Runtime {
       return this.toArray(callValue(bindValue(custom, value), []))
         .map(String)
         .toSorted(compareNames);
-    const names =
-      value instanceof PyModule
-        ? new Set([...value.names(), ...value.unsupported.keys()])
-        : objectAttributeNames(value);
+    const names = value instanceof PyModule ? new Set(value.names()) : objectAttributeNames(value);
     return [...names].toSorted(compareNames);
   }
 

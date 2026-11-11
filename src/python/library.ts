@@ -23,4 +23,5 @@ import './modules/bisect';
 import './modules/copy';
 import './modules/string';
 import './modules/typing';
+import './modules/unsupportedNames';
 import './modules/statistics';

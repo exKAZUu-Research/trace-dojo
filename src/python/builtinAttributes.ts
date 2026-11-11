@@ -1,6 +1,6 @@
 import type { BinaryOperator } from './ast';
 import { BUILTIN_DOC } from './attributes';
-import { isSubclassOfClass } from './builtins';
+import { enumerateClass, isSubclassOfClass } from './builtins';
 import { pyRepr } from './conversions';
 import { method } from './define';
 import { defineGetSet, defineUnsupportedAttributes } from './descriptors';
@@ -904,3 +904,7 @@ function floatFromHex(text: string): number {
   if (!Number.isFinite(result)) throw pyError('OverflowError', 'hexadecimal value too large to represent as a float');
   return negative ? -result : result;
 }
+
+method(enumerateClass, '__class_getitem__', 'one', 1, 1, (owner, [key]) => newGenericAlias(owner, key), {
+  binding: 'class',
+});

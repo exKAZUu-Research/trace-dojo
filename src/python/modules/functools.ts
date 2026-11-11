@@ -271,6 +271,7 @@ method(
   0,
   (self) => `<functools._lru_cache_wrapper object at ${addressOf(self as PyOpaque)}>`
 );
+method(cacheClass, '__get__', 'expected', 1, 2, (self, [instance]) => bindAsMethod(self as PyObject, instance ?? None));
 for (const name of ['__copy__', '__deepcopy__']) {
   method(cacheClass, name, 'expected', 0, 1, (self) => self);
 }
