@@ -368,7 +368,7 @@ function builtinIterate(value: PyValue): NextFunction | undefined {
   if (value instanceof PyDict) return iterateDict(value, 'keys');
   if (value instanceof PyDictView) return iterateDict(value.dict, value.view);
   if (value instanceof PySet) return iterateSet(value);
-  if (value instanceof PyIterator) return value.next;
+  if (value instanceof PyIterator && (value.cls.isBuiltin || isNativeNext(value))) return value.next;
   if (isIteratorGenerator(value)) return iterateGenerator(value);
   if (value instanceof PyClass && value.enumMembers) return iterate(newList([...value.enumMembers]));
   return undefined;
@@ -503,8 +503,13 @@ function iterateByProtocol(value: PyValue): NextFunction {
 }
 
 /** The next function of an iterator object, which calls its `__next__` until it raises StopIteration. */
+/** Whether a subclass of a builtin iterator keeps its type's __next__, which advances it natively. */
+function isNativeNext(iterator: PyIterator): boolean {
+  return lookupSpecial(iterator, '__next__') instanceof PyBuiltinFunction;
+}
+
 export function nextOf(iterator: PyValue): NextFunction {
-  if (iterator instanceof PyIterator) return iterator.next;
+  if (iterator instanceof PyIterator && (iterator.cls.isBuiltin || isNativeNext(iterator))) return iterator.next;
   if (isIteratorGenerator(iterator)) return () => currentRuntime().resumeGenerator(iterator);
   const next = lookupSpecial(iterator, '__next__');
   if (next === undefined) throw typeError(`iter() returned non-iterator of type '${typeName(iterator)}'`);
@@ -586,8 +591,10 @@ export function toArray(value: PyValue): PyValue[] {
 
 /** The iterator object `iter()` returns. */
 export function getIterator(value: PyValue): PyValue {
-  if (value instanceof PyIterator || isIteratorGenerator(value)) return value;
+  if ((value instanceof PyIterator && value.cls.isBuiltin) || isIteratorGenerator(value)) return value;
   const iter = lookupSpecial(value, '__iter__');
+  // A program's subclass of a builtin iterator, as of zip, iterates natively unless it defines __iter__.
+  if (value instanceof PyIterator && (iter === undefined || iter instanceof PyBuiltinFunction)) return value;
   if (iter !== undefined && iter !== None && !(iter instanceof PyBuiltinFunction)) {
     const iterator = callValue(bindValue(iter, value), []);
     if (lookupSpecial(iterator, '__next__') === undefined) {

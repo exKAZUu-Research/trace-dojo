@@ -184,3 +184,19 @@ assert ' |  Data descriptors defined here:\n |\n |  start\n' in out.getvalue(), 
 assert slice(1, 2) < slice(1, 3) and range(3) == range(0, 3) and True.__and__(2) == 0
 `);
 });
+
+test('programs subclass the builtin iterators, io streams, and itertools as CPython lets them, and format complex numbers', () => {
+  expectSameAsCPython(String.raw`import io, itertools
+class E(enumerate):
+    def __next__(self):
+        i, v = super().__next__()
+        return i * 10, v
+assert list(E('ab')) == [(0, 'a'), (10, 'b')] and type(E('')).__name__ == 'E'
+class S(io.StringIO):
+    def write(self, s): return super().write(s.upper())
+s = S(); s.write('hi'); assert s.getvalue() == 'HI'
+class C(itertools.count): pass
+c = C(5); assert (next(c), next(c)) == (5, 6) and isinstance(c, itertools.count)
+assert format(1j, '>4') == '  1j' and format(1+2j, '.2f') == '1.00+2.00j' and f'{-1.5-0.25j:^14}' == ' (-1.5-0.25j) '
+`);
+});

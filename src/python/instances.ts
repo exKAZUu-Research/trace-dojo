@@ -12,7 +12,16 @@ import {
   typeError,
   typeName,
 } from './types';
-import { type Kwargs, PyBuiltinFunction, PyClass, PyDescriptor, PyFunction, PyInstance, type PyValue } from './values';
+import {
+  type Kwargs,
+  PyBuiltinFunction,
+  PyClass,
+  PyDescriptor,
+  PyFunction,
+  PyInstance,
+  PyObject,
+  type PyValue,
+} from './values';
 
 type Create = (cls: PyClass, args: PyValue[], kwargs: Kwargs) => PyValue;
 
@@ -165,8 +174,13 @@ export function defineNew(cls: PyClass, create: Create): void {
 export function defineConstructingNew(cls: PyClass): void {
   const construct = cls.construct;
   if (!construct) return;
-  const create = (args: PyValue[], kwargs: Kwargs): PyValue =>
-    construct(checkSubtype(cls, args), args.slice(1), kwargs);
+  const create = (args: PyValue[], kwargs: Kwargs): PyValue => {
+    const subclass = checkSubtype(cls, args);
+    const made = construct(subclass, args.slice(1), kwargs);
+    // A construct that makes the type's own objects makes a subclass's by taking it as their class.
+    if (made instanceof PyObject && made.cls !== subclass && subclass.isSubclassOf(made.cls)) made.cls = subclass;
+    return made;
+  };
   cls.dict.set('__new__', new PyBuiltinFunction(builtinFunctionClass, '__new__', create, cls, 'static', cls.name));
 }
 

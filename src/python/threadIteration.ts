@@ -38,7 +38,7 @@ export function suspendingNextOf(iterator: PyValue): SuspendingNext {
       return step.done ? DONE : step.value;
     };
   }
-  if (iterator instanceof PyIterator) {
+  if (iterator instanceof PyIterator && iterator.cls.isBuiltin) {
     const { next } = iterator;
     return (
       suspendingNexts.get(next) ??

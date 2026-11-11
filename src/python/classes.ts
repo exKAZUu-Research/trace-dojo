@@ -20,6 +20,7 @@ import {
 import { firstRowOf } from './programSource';
 import { currentRuntime } from './runtimeContext';
 import { defineClassSlots, slotNamesOf } from './slots';
+import { isBaseType } from './subclassableTypes';
 import { noteUnwinding } from './tracebacks';
 import { initGenericSubclass, typingMroEntries } from './typeParams';
 import {
@@ -381,8 +382,7 @@ function checkBases(name: string, bases: readonly PyValue[]): PyClass[] {
   return bases.map((base) => {
     if (!(base instanceof PyClass)) throw typeError('bases must be types');
     if (base.unsupportedBase !== undefined) throw new UnsupportedFeatureError(base.unsupportedBase);
-    if (base.isBuiltin && !base.isBaseType)
-      throw typeError(`type '${base.typeName ?? base.name}' is not an acceptable base type`);
+    if (!isBaseType(base)) throw typeError(`type '${base.typeName ?? base.name}' is not an acceptable base type`);
     if (base.flags.isEnum && base.enumMembers && base.enumMembers.length > 0) {
       throw typeError(`${name}: cannot extend ${base.qualifiedName}`);
     }
