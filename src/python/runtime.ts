@@ -27,10 +27,12 @@ import {
   coroutineClass,
   exceptionClassNamed,
   generatorClass,
+  nativeFunction,
   newException,
   newList,
   newTuple,
   None,
+  propertyClass,
   pyError,
   superClass,
   typeError,
@@ -44,6 +46,7 @@ import {
   type Kwargs,
   PyCell,
   PyClass,
+  PyDescriptor,
   type PyDict,
   PyError,
   PyFunction,
@@ -503,7 +506,25 @@ function recursionErrorFor(error: unknown): unknown {
 function genericAlias(cls: PyClass, key: PyValue): PyOpaque {
   const args = key instanceof PyTuple ? key.items : [key];
   const text = `${aliasTypeText(cls)}[${args.map((arg) => (arg instanceof PyClass ? aliasTypeText(arg) : arg instanceof PyOpaque ? arg.text : pyRepr(arg))).join(', ')}]`;
-  return new PyOpaque(typingClass, text, cls);
+  const alias = new PyOpaque(typingClass, text, cls);
+  aliasArguments.set(alias, args);
+  return alias;
+}
+
+/** The arguments of each `list[int]`-like alias, which its `__args__` gives. */
+const aliasArguments = new WeakMap<PyOpaque, readonly PyValue[]>();
+
+for (const [name, read] of [
+  ['__origin__', (alias: PyOpaque): PyValue => alias.data as PyClass],
+  ['__args__', (alias: PyOpaque): PyValue => newTuple(aliasArguments.get(alias) ?? [])],
+] as const) {
+  typingClass.dict.set(
+    name,
+    new PyDescriptor(
+      propertyClass,
+      nativeFunction(name, ([self]) => read(self as PyOpaque))
+    )
+  );
 }
 
 function aliasTypeText(cls: PyClass): string {

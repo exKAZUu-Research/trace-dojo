@@ -54,6 +54,7 @@ const UNICODE_CODECS = [
   'utf_32_le',
   'utf_32_be',
   'raw_unicode_escape',
+  'unicode_escape',
 ];
 
 /** What `codecs.register` and `codecs.lookup` keep for each run. */

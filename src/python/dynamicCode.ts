@@ -28,7 +28,7 @@ import { unavailableValue } from './unavailableValues';
 import { UnsupportedFeatureError } from './unsupported';
 import { type Kwargs, type PyClass, PyDict, PyError, PyInstance, PyModule, PyOpaque, type PyValue } from './values';
 
-type Mode = 'exec' | 'eval' | 'single';
+export type Mode = 'exec' | 'eval' | 'single';
 
 interface Code {
   module: Module;
@@ -65,7 +65,9 @@ export function compile(args: PyValue[], kwargs: Kwargs): PyValue {
       throw typeError(`compile() missing required argument '${COMPILE_KEYWORDS[index]}' (pos ${index + 1})`);
     }
   }
-  const text = sourceText(source as PyValue);
+  const tree = astSupport?.isTree(source as PyValue) ? (source as PyValue) : undefined;
+  if (tree !== undefined && onlyAst(flags)) return tree;
+  const text = tree === undefined ? sourceText(source as PyValue) : astSupport?.unparse(tree);
   if (typeof text !== 'string') throw typeError('compile() arg 1 must be a string, bytes or AST object');
   if (typeof filename !== 'string') {
     throw typeError(`expected str, bytes or os.PathLike object, not ${typeName(filename as PyValue)}`);
@@ -75,8 +77,32 @@ export function compile(args: PyValue[], kwargs: Kwargs): PyValue {
   if (mode !== 'exec' && mode !== 'eval' && mode !== 'single') {
     throw valueError("compile() mode must be 'exec', 'eval' or 'single'");
   }
+  if (onlyAst(flags) && astSupport) {
+    const indentationError = findIndentationError(text);
+    if (indentationError) throw syntaxError(unshownIndentationErrorClass, filename, reasonOf(indentationError));
+    return astSupport.parse(text, mode, (reason) => syntaxError(unshownSyntaxErrorClass, filename, reason));
+  }
   checkFlags(flags);
   return new PyOpaque(codeClass, '', compileCode(text, mode, filename));
+}
+
+/** How compile() makes and reads the trees of the `ast` module, which that module provides. */
+export interface AstSupport {
+  /** Builds the tree of source text, calling `syntaxError` for the SyntaxError of text the grammar rejects. */
+  parse: (source: string, mode: Mode, syntaxError: (reason: string) => Error) => PyValue;
+  unparse: (tree: PyValue) => string;
+  isTree: (value: PyValue) => boolean;
+}
+
+let astSupport: AstSupport | undefined;
+
+export function registerAstSupport(support: AstSupport): void {
+  astSupport = support;
+}
+
+/** `PyCF_ONLY_AST`, which `ast.parse` passes, alone. */
+function onlyAst(flags: PyValue | undefined): boolean {
+  return flags === 0x4_00n;
 }
 
 /** `eval(source, /, globals=None, locals=None)`. */

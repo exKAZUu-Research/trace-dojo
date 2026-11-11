@@ -11,6 +11,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   '_thread',
   'abc',
   'argparse',
+  'ast',
   'array',
   'asyncio',
   'atexit',
