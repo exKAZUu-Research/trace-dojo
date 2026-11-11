@@ -33,6 +33,7 @@ import {
   typeError,
   typeName,
 } from './types';
+import { UnsupportedFeatureError } from './unsupported';
 import { DONE, PyClass, PyError, type PyFunction, PyInstance, PyTuple, type PyValue } from './values';
 
 type Completion = undefined | 'break' | 'continue' | { value: PyValue };
@@ -152,7 +153,9 @@ export class Evaluator extends ExpressionEvaluator {
       }
       case 'importStar': {
         const module = runtime.importModule(statement.module);
-        for (const [name, value] of module.dict) if (!name.startsWith('_')) frame.locals.set(name, value);
+        for (const name of module.names()) {
+          if (!name.startsWith('_')) frame.locals.set(name, module.attribute(name) as PyValue);
+        }
         return undefined;
       }
       default: {
@@ -188,7 +191,9 @@ export class Evaluator extends ExpressionEvaluator {
   private importFrom(statement: Extract<Statement, { kind: 'importFrom' }>, frame: Frame): void {
     const module = this.runtime.importModule(statement.module);
     for (const { name, binding } of statement.names) {
-      const value = module.dict.get(name);
+      const value = module.attribute(name);
+      const feature = module.unsupported.get(name);
+      if (value === undefined && feature !== undefined) throw new UnsupportedFeatureError(feature);
       if (value === undefined) {
         throw pyError('ImportError', `cannot import name '${name}' from '${statement.module}' (unknown location)`);
       }

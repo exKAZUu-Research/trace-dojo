@@ -1,3 +1,4 @@
+import { abstractInstantiationError, initAbstractClass } from './abstractClasses';
 import type { Argument, ClassDef } from './ast';
 import { method } from './define';
 import { createEnumMembers, enumLookup, isEnumClass } from './enums';
@@ -53,7 +54,7 @@ export function createClass(evaluator: Evaluator, def: ClassDef, frame: Frame): 
   const effectiveBases = bases.length > 0 ? bases : [objectClass];
   checkLayout(effectiveBases);
   const namespace = new Map<string, PyValue>([
-    ['__module__', '__main__'],
+    ['__module__', moduleNameOf(frame)],
     ['__qualname__', def.qualifiedName],
     ['__firstlineno__', BigInt(def.row + 1)],
   ]);
@@ -61,10 +62,14 @@ export function createClass(evaluator: Evaluator, def: ClassDef, frame: Frame): 
   const classCell = new PyCell();
   const body = runClassBody(evaluator, def, frame, namespace, classCell);
   namespace.delete('__qualname__');
+  const isLibrary = moduleNameOf(frame) !== '__main__';
   for (const forbidden of FORBIDDEN_CLASS_ATTRIBUTES) {
-    if (namespace.has(forbidden)) throw new UnsupportedFeatureError(`クラスの ${forbidden} の定義`);
+    if (namespace.has(forbidden) && !(isLibrary && forbidden === '__class_getitem__')) {
+      throw new UnsupportedFeatureError(`クラスの ${forbidden} の定義`);
+    }
   }
-  const cls = newClass(def, effectiveBases, namespace);
+  const cls = newClass(def, effectiveBases, namespace, moduleNameOf(frame));
+  if (effectiveBases.some((base) => base.abc)) initAbstractClass(cls);
   cls.annotationNames = body.annotations.map(([name]) => name);
   runtime.classAnnotationThunks.set(cls, body.annotations);
   classCell.value = cls;
@@ -72,6 +77,12 @@ export function createClass(evaluator: Evaluator, def: ClassDef, frame: Frame): 
   let result: PyValue = cls;
   for (const decorator of decorators.toReversed()) result = callValue(decorator, [result]);
   return result;
+}
+
+/** The name of the module whose code runs in a frame: the program's, or a standard library module written in Python. */
+export function moduleNameOf(frame: Frame): string {
+  const name = frame.globals.get('__name__');
+  return typeof name === 'string' ? name : '__main__';
 }
 
 /** Runs a class body in a frame of its own, filling `namespace`, and returns that frame. */
@@ -111,20 +122,46 @@ function evaluateBase(evaluator: Evaluator, def: ClassDef, argument: Argument, f
 }
 
 /** Creates a class from the namespace its body filled. */
-function newClass(def: ClassDef, bases: PyClass[], namespace: Map<string, PyValue>): PyClass {
-  const cls = new PyClass(def.name, bases, typeClass);
-  cls.isBuiltin = false;
-  cls.isBaseType = true;
-  cls.module = '__main__';
+function newClass(def: ClassDef, bases: PyClass[], namespace: Map<string, PyValue>, module: string): PyClass {
+  namespace.set('__static_attributes__', newTuple(def.staticAttributes));
+  const cls = newClassFromNamespace(def.name, bases, namespace, module);
   cls.qualifiedName = def.qualifiedName;
   cls.definition = def;
+  return cls;
+}
+
+/** Creates a class without a class statement, as `types.new_class` does for `dataclasses.make_dataclass`. */
+export function createDynamicClass(
+  name: string,
+  bases: PyClass[],
+  namespace: Map<string, PyValue>,
+  module: string
+): PyClass {
+  const effectiveBases = bases.length > 0 ? bases : [objectClass];
+  checkLayout(effectiveBases);
+  namespace.set('__module__', module);
+  const cls = newClassFromNamespace(name, effectiveBases, namespace, module);
+  if (effectiveBases.some((base) => base.abc)) initAbstractClass(cls);
+  return cls;
+}
+
+function newClassFromNamespace(
+  name: string,
+  bases: PyClass[],
+  namespace: Map<string, PyValue>,
+  module: string
+): PyClass {
+  const cls = new PyClass(name, bases, typeClass);
+  cls.isBuiltin = false;
+  cls.isBaseType = true;
+  cls.module = module;
   cls.mro = computeMro(cls);
+  for (const base of bases) base.subclasses.push(cls);
   cls.layout = { base: layoutOf(bases) };
-  namespace.set('__static_attributes__', newTuple(def.staticAttributes));
   if (!namespace.has('__doc__')) namespace.set('__doc__', None);
   if (bases.every((base) => base.isBuiltin)) {
     for (const name of ['__dict__', '__weakref__']) {
-      namespace.set(name, new PyOpaque(attributeDescriptorClass, `<attribute '${name}' of '${def.name}' objects>`));
+      namespace.set(name, new PyOpaque(attributeDescriptorClass, `<attribute '${name}' of '${cls.name}' objects>`));
     }
   }
   for (const [name, value] of namespace) cls.dict.set(name, value);
@@ -157,6 +194,8 @@ export function instantiate(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyVa
   if (cls.construct) return cls.construct(cls, args, kwargs);
   const builtinBase = cls.mro.find((base) => base.isBuiltin && base.construct);
   if (cls.isBuiltin && !builtinBase) throw typeError(`cannot create '${cls.qualifiedName}' instances`);
+  const abstract = abstractInstantiationError(cls);
+  if (abstract) throw abstract;
   let instance: PyValue;
   if (builtinBase && builtinBase !== objectClass && builtinBase.construct && !cls.isBuiltin) {
     instance = builtinBase.construct(cls, args, kwargs);

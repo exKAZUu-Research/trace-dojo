@@ -1,4 +1,4 @@
-import { setInstanceAttribute } from './attributes';
+import { deleteInstanceAttribute, setInstanceAttribute } from './attributes';
 import { addressOf, defaultRepr, pyFormat, pyRepr, pyStr } from './conversions';
 import { method } from './define';
 import { isEnumClass } from './enums';
@@ -6,6 +6,7 @@ import { identityHash, NATIVE_HASHES } from './hashing';
 import { argument, checkArgs } from './nativeArgs';
 import { bindValue, callValue, deleteAttribute, getAttribute, isCallable, lookupSpecial, nextOf } from './objects';
 import { currentRuntime } from './runtimeContext';
+import { typeOr } from './typeHints';
 import {
   builtinFunctionClass,
   classmethodClass,
@@ -92,7 +93,9 @@ method(objectClass, '__setattr__', 'expected', 2, 2, (self, [name, value]) => {
 });
 method(objectClass, '__getattribute__', 'one', 1, 1, (self, [name]) => getAttribute(self, name as string));
 method(objectClass, '__delattr__', 'one', 1, 1, (self, [name]) => {
-  deleteAttribute(self, name as string);
+  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  if (self instanceof PyInstance) deleteInstanceAttribute(self, name);
+  else deleteAttribute(self, name);
   return None;
 });
 method(objectClass, '__sizeof__', 'none', 0, 0, () => 16n);
@@ -143,8 +146,8 @@ method(
   1,
   (self, [value]) => value instanceof PyClass && value.isSubclassOf(self as PyClass)
 );
-method(typeClass, '__or__', 'one', 1, 1, (self, [other]) => currentRuntime().unionType(self, other));
-method(typeClass, '__ror__', 'one', 1, 1, (self, [other]) => currentRuntime().unionType(other, self));
+method(typeClass, '__or__', 'one', 1, 1, (self, [other]) => typeOr(self, other));
+method(typeClass, '__ror__', 'one', 1, 1, (self, [other]) => typeOr(other, self));
 
 // Singletons --------------------------------------------------------------------------------------------------------
 

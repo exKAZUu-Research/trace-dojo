@@ -1,3 +1,4 @@
+import { abstractSubclassCheck } from './abstractClasses';
 import { complexAbs } from './complexNumbers';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
 import { builtin } from './define';
@@ -62,7 +63,7 @@ import {
   valueError,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { DONE, type Kwargs, PyClass, PyComplex, PyDict, PyIterator, PyOpaque, PyTuple, type PyValue } from './values';
+import { DONE, type Kwargs, PyClass, PyComplex, PyDict, PyIterator, PyObject, PyTuple, type PyValue } from './values';
 
 // Iterator classes --------------------------------------------------------------------------------------------------
 
@@ -409,20 +410,29 @@ function ord([value]: PyValue[]): PyValue {
 
 /** Whether `value` is an instance of `classInfo`, a class, a tuple of them, or a union. */
 export function isInstance(value: PyValue, classInfo: PyValue, name = 'isinstance'): boolean {
-  if (classInfo instanceof PyClass) return classOf(value).isSubclassOf(classInfo);
+  if (classInfo instanceof PyClass) return isSubclassOfClass(classOf(value), classInfo);
   if (classInfo instanceof PyTuple) return classInfo.items.some((item) => isInstance(value, item, name));
-  if (classInfo instanceof PyOpaque && Array.isArray(classInfo.data)) {
-    return (classInfo.data as PyValue[]).some((item) => isInstance(value, item, name));
-  }
+  const check = classInfo instanceof PyObject ? classInfo.cls.subclassCheck : undefined;
+  if (check) return check(classInfo, classOf(value), 'isinstance');
   throw typeError(`${name}() arg 2 must be a type, a tuple of types, or a union`);
 }
 
+/** `issubclass(cls, classInfo)`, which an abstract base class decides with its own rules. */
+export function isSubclassOfClass(cls: PyClass, classInfo: PyClass): boolean {
+  if (classInfo.abc) return abstractSubclassCheck(classInfo, cls, isSubclassOfClass);
+  return cls.isSubclassOf(classInfo);
+}
+
 function isSubclass(cls: PyValue, classInfo: PyValue): boolean {
-  if (!(cls instanceof PyClass)) throw typeError('issubclass() arg 1 must be a class');
-  if (classInfo instanceof PyClass) return cls.isSubclassOf(classInfo);
+  if ((classInfo instanceof PyClass || classInfo instanceof PyTuple) && !(cls instanceof PyClass)) {
+    throw typeError('issubclass() arg 1 must be a class');
+  }
+  if (classInfo instanceof PyClass) return isSubclassOfClass(cls as PyClass, classInfo);
   if (classInfo instanceof PyTuple) return classInfo.items.some((item) => isSubclass(cls, item));
-  if (classInfo instanceof PyOpaque && Array.isArray(classInfo.data)) {
-    return (classInfo.data as PyValue[]).some((item) => isSubclass(cls, item));
+  const check = classInfo instanceof PyObject ? classInfo.cls.subclassCheck : undefined;
+  if (check) {
+    if (!(cls instanceof PyClass)) throw typeError('issubclass() arg 1 must be a class');
+    return check(classInfo, cls, 'issubclass');
   }
   throw typeError('issubclass() arg 2 must be a class, a tuple of classes, or a union');
 }

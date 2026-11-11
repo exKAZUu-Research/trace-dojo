@@ -20,6 +20,7 @@ import { DONE, type Kwargs, PyBuiltinFunction, PyClass, PyDict, PyOpaque, PyTupl
 import { makeNamedTupleClass } from './collections';
 
 const partialClass = builtinClass('partial');
+partialClass.tpName = 'functools.partial';
 partialClass.module = 'functools';
 interface Partial {
   fn: PyValue;
@@ -73,6 +74,7 @@ function reduce(args: PyValue[], kwargs: Kwargs): PyValue {
 
 let cacheInfoClass: PyClass | undefined;
 const cacheClass = builtinClass('_lru_cache_wrapper');
+cacheClass.tpName = 'functools._lru_cache_wrapper';
 cacheClass.module = 'functools';
 interface Cache {
   fn: PyValue;
@@ -171,6 +173,7 @@ function lruCache(args: PyValue[], kwargs: Kwargs): PyValue {
 }
 
 const keyWrapperClass = builtinClass('KeyWrapper');
+keyWrapperClass.tpName = 'functools.KeyWrapper';
 keyWrapperClass.module = 'functools';
 interface KeyWrapper {
   compare: PyValue;

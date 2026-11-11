@@ -3,6 +3,9 @@ export interface Span {
   row: number;
 }
 
+/** The row of every construct of standard library code written in Python, which is not part of the program. */
+export const LIBRARY_ROW = -1;
+
 /** How a name is read and written, settled by the scopes of the program before it runs. */
 export type NameAccess =
   /** A variable of the running function. */

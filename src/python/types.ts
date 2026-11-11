@@ -67,7 +67,6 @@ export const superClass = builtinClass('super');
 export const dictKeysClass = builtinClass('dict_keys');
 export const dictValuesClass = builtinClass('dict_values');
 export const dictItemsClass = builtinClass('dict_items');
-export const typingClass = builtinClass('_GenericAlias');
 export const cellClass = builtinClass('cell');
 
 for (const cls of [
@@ -330,7 +329,8 @@ export function classOf(value: PyValue): PyClass {
 
 /** The name of a value's class, as error messages quote it. */
 export function typeName(value: PyValue): string {
-  return classOf(value).name;
+  const cls = classOf(value);
+  return cls.tpName ?? cls.name;
 }
 
 export type { Kwargs };

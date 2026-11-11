@@ -117,7 +117,7 @@ function addSelf(variables: TraceVariables, name: string, self: PyInstance): voi
 /** The class variables of the classes the program defined, as Java shows static fields. */
 function addClassVariables(variables: TraceVariables, globals: Map<string, PyValue>): void {
   for (const value of globals.values()) {
-    if (!(value instanceof PyClass) || value.isBuiltin || value.enumMembers) continue;
+    if (!(value instanceof PyClass) || value.isBuiltin || value.module !== '__main__' || value.enumMembers) continue;
     for (const [key, field] of value.dict) {
       if (isDunder(key) || !isVariableValue(field)) continue;
       const scalar = scalarOf(field, new Set());

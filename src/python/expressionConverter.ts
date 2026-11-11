@@ -297,7 +297,7 @@ export abstract class ExpressionConverter {
     let seenDoubleStar = false;
     for (const argument of nodes) {
       const row = rowOf(argument);
-      if (argument.type === 'generator_expression' && nodes.length > 1) {
+      if (argument.type === 'generator_expression' && nodes.length > 1 && argument.child(0)?.type !== '(') {
         fail(row, 'ジェネレータ式を引数にするときは、それだけを書くか、( ) で囲んでください。');
       }
       if (argument.type === 'keyword_argument') {

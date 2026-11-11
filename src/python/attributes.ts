@@ -1,9 +1,13 @@
+import { registerVirtualSubclass } from './abstractClasses';
+import { isSubclassOfClass } from './builtins';
+import { newMappingProxy } from './mappingProxy';
 import { attributeError, bindValue, callValue, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import {
   classmethodClass,
   classOf,
   complexClass,
+  nativeFunction,
   newDict,
   newTuple,
   None,
@@ -24,6 +28,7 @@ import {
   PyGenerator,
   PyInstance,
   PyModule,
+  PyOpaque,
   PyRange,
   PySlice,
   type PyValue,
@@ -34,6 +39,9 @@ export function classAttribute(cls: PyClass, name: string): PyValue | undefined 
   const own = typeData(cls, name);
   if (own !== undefined) return own;
   const attribute = cls.lookup(name);
+  if (attribute === undefined && name === 'register' && cls.abc) {
+    return nativeFunction('register', ([subclass]) => registerVirtualSubclass(cls, subclass, isSubclassOfClass));
+  }
   if (attribute === undefined) {
     // Methods of the metaclass, such as `mro()`, bind to the class.
     const meta = typeClass.lookup(name);
@@ -77,7 +85,7 @@ function typeData(cls: PyClass, name: string): PyValue | undefined {
       return typeClass;
     }
     case '__dict__': {
-      return newDict(cls.dict.entries());
+      return newMappingProxy(newDict(cls.dict.entries()));
     }
     case '__annotations__': {
       return newDict(currentRuntime().classAnnotations(cls));
@@ -105,6 +113,7 @@ export function specialAttribute(value: PyValue, name: string): PyValue | undefi
   }
   if (value instanceof PyGenerator) return generatorAttribute(value, name);
   if (value instanceof PyInstance) return instanceAttribute(value, name);
+  if (value instanceof PyOpaque) return value.cls.opaqueAttribute?.(value, name);
   return undefined;
 }
 
@@ -290,9 +299,6 @@ export function setInstanceAttribute(target: PyInstance, name: string, value: Py
     callValue(attribute.setter, [target, value]);
     return;
   }
-  if (cls.flags.isDataclass && currentRuntime().isFrozenDataclass(cls)) {
-    throw currentRuntime().frozenInstanceError(`cannot assign to field '${name}'`);
-  }
   if (target.enumValue !== undefined) {
     throw pyError('AttributeError', `cannot set '${name}' attribute of enum member`);
   }
@@ -343,21 +349,12 @@ function noDictError(target: PyValue, name: string): Error {
 // code-gauge-allow functionCognitiveComplexity 23 -- Follows the rules of attribute deletion for each kind of object.
 export function deleteAttribute(target: PyValue, name: string): void {
   if (target instanceof PyInstance) {
-    const attribute = target.cls.lookup(name);
-    if (attribute instanceof PyDescriptor && attribute.cls === propertyClass) {
-      if (attribute.deleter === undefined || attribute.deleter === None) {
-        throw pyError(
-          'AttributeError',
-          `property '${propertyName(attribute, name)}' of '${target.cls.name}' object has no deleter`
-        );
-      }
-      callValue(attribute.deleter, [target]);
+    const custom = target.cls.isBuiltin ? undefined : lookupSpecial(target, '__delattr__');
+    if (custom !== undefined && !(custom instanceof PyBuiltinFunction)) {
+      callValue(bindValue(custom, target), [name]);
       return;
     }
-    if (target.cls.flags.isDataclass && currentRuntime().isFrozenDataclass(target.cls)) {
-      throw currentRuntime().frozenInstanceError(`cannot delete field '${name}'`);
-    }
-    if (!target.dict.delete(name)) throw attributeError(target, name);
+    deleteInstanceAttribute(target, name);
     return;
   }
   if (target instanceof PyClass) {
@@ -373,4 +370,20 @@ export function deleteAttribute(target: PyValue, name: string): void {
     throw pyError('AttributeError', `'${typeName(target)}' object attribute '${name}' is read-only`);
   }
   throw attributeError(target, name);
+}
+
+/** Deletes an instance attribute, honoring properties, as `object.__delattr__` does. */
+export function deleteInstanceAttribute(target: PyInstance, name: string): void {
+  const attribute = target.cls.lookup(name);
+  if (attribute instanceof PyDescriptor && attribute.cls === propertyClass) {
+    if (attribute.deleter === undefined || attribute.deleter === None) {
+      throw pyError(
+        'AttributeError',
+        `property '${propertyName(attribute, name)}' of '${target.cls.name}' object has no deleter`
+      );
+    }
+    callValue(attribute.deleter, [target]);
+    return;
+  }
+  if (!target.dict.delete(name)) throw attributeError(target, name);
 }

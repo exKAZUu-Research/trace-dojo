@@ -16,6 +16,7 @@ function iteratorOf(name: string, next: NextFunction, holds: () => Iterable<unkn
   if (!cls) {
     cls = builtinClass(name);
     cls.module = 'itertools';
+    cls.tpName = `itertools.${name}`;
     defineIteratorClass(cls);
     classes.set(name, cls);
   }
@@ -395,6 +396,7 @@ function batched(args: PyValue[], kwargs: Kwargs): PyValue {
 registerModule('itertools', () => {
   const chainClass = builtinClass('chain');
   chainClass.module = 'itertools';
+  chainClass.tpName = 'itertools.chain';
   chainClass.construct = (_cls, args) => chain(args);
   chainClass.dict.set('from_iterable', builtin('from_iterable', 'one', 1, 1, chainFromIterable));
   return new Map<string, PyValue>([

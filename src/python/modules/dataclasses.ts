@@ -1,359 +1,117 @@
-import type { FunctionDef } from '../ast';
-import { pyRepr } from '../conversions';
-import { builtin, method } from '../define';
-import { registerModule } from '../modules';
-import { argument, checkArgs } from '../nativeArgs';
-import { callValue, isTruthy } from '../objects';
-import { equals, lessThan } from '../operators';
-import { parsePython } from '../parse';
+import { createDynamicClass } from '../classes';
+import { builtin } from '../define';
+import { runLibrarySource } from '../librarySource';
+import { mappingProxyClass } from '../mappingProxy';
+import { importModule, registerModule } from '../modules';
+import { toArray } from '../objects';
 import { currentRuntime } from '../runtimeContext';
-import {
-  builtinClass,
-  dictClass,
-  exceptionClassNamed,
-  functionClass,
-  listClass,
-  methodDescriptorClass,
-  newDict,
-  newTuple,
-  None,
-  NotImplemented,
-  setClass,
-  typeError,
-  valueError,
-} from '../types';
-import {
-  type Kwargs,
-  PyBuiltinFunction,
-  PyClass,
-  PyDict,
-  PyFunction,
-  PyInstance,
-  PyList,
-  PyObject,
-  PyOpaque,
-  PyTuple,
-  type PyValue,
-} from '../values';
-import { builtinClassWithBase } from './moduleClasses';
+import { genericAliasClass } from '../typeHints';
+import { newDict, None, typeError } from '../types';
+import { UnsupportedFeatureError } from '../unsupported';
+import { PyClass, type PyDict, type PyValue } from '../values';
+import { DATACLASSES_SOURCE } from './dataclassesSource';
 
-export const frozenInstanceErrorClass = builtinClassWithBase(
-  'FrozenInstanceError',
-  exceptionClassNamed('AttributeError'),
-  'dataclasses'
-);
-const fieldClass = builtinClass('Field');
-fieldClass.module = 'dataclasses';
-const missingClass = builtinClass('_MISSING_TYPE');
-const MISSING = new PyOpaque(missingClass, 'MISSING');
+/** Python's keywords, which `make_dataclass` rejects as field names. */
+const KEYWORDS = new Set([
+  'False',
+  'None',
+  'True',
+  'and',
+  'as',
+  'assert',
+  'async',
+  'await',
+  'break',
+  'class',
+  'continue',
+  'def',
+  'del',
+  'elif',
+  'else',
+  'except',
+  'finally',
+  'for',
+  'from',
+  'global',
+  'if',
+  'import',
+  'in',
+  'is',
+  'lambda',
+  'nonlocal',
+  'not',
+  'or',
+  'pass',
+  'raise',
+  'return',
+  'try',
+  'while',
+  'with',
+  'yield',
+]);
 
-interface FieldSpec {
-  name: string;
-  default: PyValue;
-  factory: PyValue;
-  init: boolean;
-  repr: boolean;
-  compare: boolean;
-}
+registerModule('dataclasses', () => runLibrarySource('dataclasses', DATACLASSES_SOURCE, nativeHelpers()));
 
-function field(args: PyValue[], kwargs: Kwargs): PyValue {
-  checkArgs(
-    {
-      qualified: 'field',
-      min: 0,
-      max: 0,
-      style: 'takes',
-      keywords: ['default', 'default_factory', 'init', 'repr', 'hash', 'compare', 'metadata', 'kw_only'],
-    },
-    args,
-    kwargs
-  );
-  const spec: Omit<FieldSpec, 'name'> = {
-    default: kwargs?.get('default') ?? MISSING,
-    factory: kwargs?.get('default_factory') ?? MISSING,
-    init: isTruthy(kwargs?.get('init') ?? true),
-    repr: isTruthy(kwargs?.get('repr') ?? true),
-    compare: isTruthy(kwargs?.get('compare') ?? true),
-  };
-  if (spec.default !== MISSING && spec.factory !== MISSING)
-    throw valueError('cannot specify both default and default_factory');
-  return new PyOpaque(fieldClass, 'Field', spec);
-}
-
-const fieldsOfClass = new WeakMap<PyClass, FieldSpec[]>();
-
-/** The fields of a dataclass, its bases' first, as `@dataclass` collects them from the annotations. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Follows how dataclasses collects inherited and own fields.
-function collectFields(cls: PyClass): FieldSpec[] {
-  const fields: FieldSpec[] = [];
-  for (const base of cls.mro.slice(1).toReversed()) {
-    for (const spec of fieldsOfClass.get(base) ?? []) {
-      const index = fields.findIndex((each) => each.name === spec.name);
-      if (index === -1) fields.push(spec);
-      else fields[index] = spec;
-    }
-  }
-  for (const name of cls.annotationNames) {
-    const value = cls.dict.get(name);
-    let spec: FieldSpec = { name, default: MISSING, factory: MISSING, init: true, repr: true, compare: true };
-    if (value instanceof PyOpaque && value.cls === fieldClass) {
-      spec = { name, ...(value.data as Omit<FieldSpec, 'name'>) };
-      if (spec.default === MISSING) cls.dict.delete(name);
-      else cls.dict.set(name, spec.default);
-    } else if (value !== undefined) {
-      spec.default = value;
-    }
-    if (
-      spec.default instanceof PyObject &&
-      [listClass, dictClass, setClass].some((type) => (spec.default as PyObject).cls === type)
-    ) {
-      throw valueError(
-        `mutable default ${pyRepr(spec.default.cls)} for field ${name} is not allowed: use default_factory`
-      );
-    }
-    const index = fields.findIndex((each) => each.name === name);
-    if (index === -1) fields.push(spec);
-    else fields[index] = spec;
-  }
-  return fields;
-}
-
-/** Builds `__init__` from Python source, as CPython's dataclasses does, so that its argument errors match CPython's. */
-// code-gauge-allow functionNcss 46 -- Follows how dataclasses builds __init__ from defaults, factories, and init=False fields.
-// code-gauge-allow functionCognitiveComplexity 30 -- Follows how dataclasses builds __init__ from defaults, factories, and init=False fields.
-function initFunction(cls: PyClass, fields: FieldSpec[], frozen: boolean): PyFunction {
-  const initFields = fields.filter((spec) => spec.init);
-  let sawDefault = false;
-  for (const spec of initFields) {
-    const hasDefault = spec.default !== MISSING || spec.factory !== MISSING;
-    if (!hasDefault && sawDefault) throw typeError(`non-default argument '${spec.name}' follows default argument`);
-    sawDefault ||= hasDefault;
-  }
-  const params = initFields.map((spec) =>
-    spec.default !== MISSING || spec.factory !== MISSING ? `${spec.name}=__default__` : spec.name
-  );
-  const lines = [`def __init__(self${params.map((param) => `, ${param}`).join('')}):`];
-  for (const spec of fields) {
-    if (spec.factory !== MISSING) {
-      if (spec.init)
-        lines.push(`    if ${spec.name} is __factory_marker__:`, `        ${spec.name} = __factory_${spec.name}__()`);
-      else lines.push(`    ${spec.name} = __factory_${spec.name}__()`);
-    } else if (!spec.init) {
-      if (spec.default === MISSING) continue;
-      lines.push(`    ${spec.name} = __default_${spec.name}__`);
-    }
-    lines.push(`    __set__(self, '${spec.name}', ${spec.name})`);
-  }
-  lines.push('    __post_init__(self)');
-  const module = parsePython(`${lines.join('\n')}\n`);
-  const statement = module.body[0];
-  if (statement.kind !== 'functionDef') throw new Error('The generated __init__ is not a function');
-  const marker = new PyOpaque(missingClass, 'factory');
-  const globals = new Map<string, PyValue>([
-    ['__factory_marker__', marker],
+/** The natives the Python source of dataclasses uses in place of `exec` and of the modules CPython's imports. */
+function nativeHelpers(): Map<string, PyValue> {
+  return new Map<string, PyValue>([
+    ['_MappingProxyType', mappingProxyClass],
+    ['_GenericAlias', genericAliasClass],
     [
-      '__set__',
-      new PyBuiltinFunction(methodDescriptorClass, '__set__', ([self, name, value]) => {
-        (self as PyInstance).dict.set(name as string, value);
+      '_exec_source',
+      builtin('_exec_source', 'expected', 2, 2, ([source, module]) =>
+        newDict(runLibrarySource(module as string, source as string).entries())
+      ),
+    ],
+    ['_imported_module', builtin('_imported_module', 'expected', 1, 2, ([name, force]) => importedModule(name, force))],
+    ['_module_namespace', builtin('_module_namespace', 'one', 1, 1, ([name]) => moduleNamespace(name as string))],
+    [
+      '_get_annotations',
+      builtin('_get_annotations', 'one', 1, 1, ([cls]) => newDict(currentRuntime().classAnnotations(cls as PyClass))),
+    ],
+    [
+      '_set_annotations',
+      builtin('_set_annotations', 'expected', 2, 2, ([cls, annotations]) => {
+        const entries = (annotations as PyDict).store.ordered().map((entry): [string, () => PyValue] => {
+          const { value } = entry;
+          return [entry.key as string, () => value];
+        });
+        (cls as PyClass).annotationNames = entries.map(([name]) => name);
+        currentRuntime().classAnnotationThunks.set(cls as PyClass, entries);
         return None;
       }),
     ],
+    ['_iskeyword', builtin('_iskeyword', 'one', 1, 1, ([name]) => KEYWORDS.has(name as string))],
     [
-      '__post_init__',
-      new PyBuiltinFunction(methodDescriptorClass, '__post_init__', ([self]) => {
-        const postInit = cls.lookup('__post_init__');
-        return postInit === undefined ? None : callValue(postInit, [self]);
+      '_new_class',
+      builtin('_new_class', 'expected', 4, 4, ([name, bases, namespace, module]) => {
+        const classes = toArray(bases);
+        for (const base of classes) if (!(base instanceof PyClass)) throw typeError('bases must be types');
+        const entries = (namespace as PyDict).store
+          .ordered()
+          .map((entry): [string, PyValue] => [entry.key as string, entry.value]);
+        return createDynamicClass(name as string, classes as PyClass[], new Map(entries), module as string);
+      }),
+    ],
+    [
+      '_unsupported',
+      builtin('_unsupported', 'one', 1, 1, ([feature]) => {
+        throw new UnsupportedFeatureError(feature as string);
       }),
     ],
   ]);
-  for (const spec of fields) {
-    if (spec.factory !== MISSING) globals.set(`__factory_${spec.name}__`, spec.factory);
-    if (spec.default !== MISSING) globals.set(`__default_${spec.name}__`, spec.default);
-  }
-  globals.set('__builtins__', None);
-  const def: FunctionDef = statement.fn;
-  def.qualifiedName = `${cls.qualifiedName}.__init__`;
-  const defaults = initFields
-    .filter((spec) => spec.default !== MISSING || spec.factory !== MISSING)
-    .map((spec) => (spec.factory === MISSING ? spec.default : marker));
-  const fn = new PyFunction(functionClass, def, globals, new Map(), defaults, new Map(), undefined);
-  fn.module = '__main__';
-  void frozen;
-  return fn;
 }
 
-function nativeMethod(cls: PyClass, name: string, run: (self: PyValue, args: PyValue[]) => PyValue): void {
-  cls.dict.set(
-    name,
-    new PyBuiltinFunction(
-      methodDescriptorClass,
-      name,
-      (args) => run(args[0], args.slice(1)),
-      undefined,
-      'method',
-      cls.name
-    )
-  );
+function importedModule(name: PyValue, force: PyValue | undefined): PyValue {
+  const runtime = currentRuntime();
+  if (force === true) return importModule(runtime, name as string);
+  return runtime.modules.get(name as string) ?? None;
 }
 
-function valuesOf(instance: PyValue, fields: FieldSpec[]): PyValue[] {
-  return fields.map((spec) => (instance as PyInstance).dict.get(spec.name) ?? None);
+/** The namespace of a module as a dict, the program's for `__main__`, or None for a module not imported. */
+function moduleNamespace(name: string): PyValue {
+  const runtime = currentRuntime();
+  if (name === '__main__') return newDict(runtime.frames[0].globals.entries());
+  const module = runtime.modules.get(name);
+  return module === undefined ? None : newDict(module.dict.entries());
 }
-
-// code-gauge-allow functionNcss 37 -- Adds each method `@dataclass` generates for its options.
-// code-gauge-allow functionCognitiveComplexity 26 -- Adds each method `@dataclass` generates for its options.
-function processClass(
-  cls: PyClass,
-  options: { init: boolean; repr: boolean; eq: boolean; order: boolean; frozen: boolean }
-): PyClass {
-  const fields = collectFields(cls);
-  fieldsOfClass.set(cls, fields);
-  cls.flags.isDataclass = true;
-  if (options.frozen) currentRuntime().frozenDataclasses.add(cls);
-  if (options.init && !cls.dict.has('__init__')) cls.dict.set('__init__', initFunction(cls, fields, options.frozen));
-  const shown = fields.filter((spec) => spec.repr);
-  if (options.repr && !cls.dict.has('__repr__')) {
-    nativeMethod(cls, '__repr__', (self) => {
-      const instance = self as PyInstance;
-      return `${instance.cls.qualifiedName}(${shown.map((spec) => `${spec.name}=${pyRepr(instance.dict.get(spec.name) ?? None)}`).join(', ')})`;
-    });
-  }
-  const compared = fields.filter((spec) => spec.compare);
-  if (options.eq && !cls.dict.has('__eq__')) {
-    nativeMethod(cls, '__eq__', (self, [other]) => {
-      if (!(other instanceof PyInstance) || other.cls !== (self as PyInstance).cls) return NotImplemented;
-      const a = valuesOf(self, compared);
-      const b = valuesOf(other, compared);
-      return a.every((value, index) => equals(value, b[index]));
-    });
-  }
-  if (options.order) {
-    for (const [name, test] of [
-      ['__lt__', (a: PyValue[], b: PyValue[]) => compareTuples(a, b) < 0],
-      ['__le__', (a: PyValue[], b: PyValue[]) => compareTuples(a, b) <= 0],
-      ['__gt__', (a: PyValue[], b: PyValue[]) => compareTuples(a, b) > 0],
-      ['__ge__', (a: PyValue[], b: PyValue[]) => compareTuples(a, b) >= 0],
-    ] as const) {
-      nativeMethod(cls, name, (self, [other]) => {
-        if (!(other instanceof PyInstance) || other.cls !== (self as PyInstance).cls) return NotImplemented;
-        return test(valuesOf(self, compared), valuesOf(other, compared));
-      });
-    }
-  }
-  if (options.eq && options.frozen) {
-    nativeMethod(cls, '__hash__', (self) => currentRuntime().hashOf(newTuple(valuesOf(self, compared))));
-  } else if (options.eq && !cls.dict.has('__hash__')) {
-    cls.dict.set('__hash__', None);
-  }
-  if (cls.dict.get('__hash__') === None && !options.eq) cls.dict.delete('__hash__');
-  if (!cls.dict.has('__match_args__'))
-    cls.dict.set('__match_args__', newTuple(fields.filter((spec) => spec.init).map((spec) => spec.name)));
-  return cls;
-}
-
-function compareTuples(a: PyValue[], b: PyValue[]): number {
-  for (let index = 0; index < Math.min(a.length, b.length); index++) {
-    if (equals(a[index], b[index])) continue;
-    return lessThan(a[index], b[index]) ? -1 : 1;
-  }
-  return a.length - b.length;
-}
-
-function dataclass(args: PyValue[], kwargs: Kwargs): PyValue {
-  const options = {
-    init: isTruthy(kwargs?.get('init') ?? true),
-    repr: isTruthy(kwargs?.get('repr') ?? true),
-    eq: isTruthy(kwargs?.get('eq') ?? true),
-    order: isTruthy(kwargs?.get('order') ?? false),
-    frozen: isTruthy(kwargs?.get('frozen') ?? false),
-  };
-  if (options.order && !options.eq) throw valueError('eq must be true if order is true');
-  const [cls] = args;
-  if (cls instanceof PyClass) return processClass(cls, options);
-  if (cls !== undefined && cls !== None) throw typeError('dataclass() should be called on a class');
-  return builtin('wrap', 'one', 1, 1, ([target]) => {
-    if (!(target instanceof PyClass)) throw typeError('dataclass() should be called on a class');
-    return processClass(target, options);
-  });
-}
-
-/** `asdict()`: a dataclass's fields as a dict, converting nested dataclasses and copying containers. */
-function asdict(value: PyValue, asTuple: boolean): PyValue {
-  if (value instanceof PyInstance && value.cls.flags.isDataclass) {
-    const fields = fieldsOfClass.get(value.cls) ?? [];
-    if (asTuple) return newTuple(fields.map((spec) => asdict(value.dict.get(spec.name) ?? None, asTuple)));
-    return newDict(fields.map((spec) => [spec.name, asdict(value.dict.get(spec.name) ?? None, asTuple)]));
-  }
-  if (value instanceof PyList) return currentRuntime().listOf(value.items.map((item) => asdict(item, asTuple)));
-  if (value instanceof PyTuple) return newTuple(value.items.map((item) => asdict(item, asTuple)));
-  if (value instanceof PyDict) {
-    return newDict(value.store.ordered().map((entry) => [asdict(entry.key, asTuple), asdict(entry.value, asTuple)]));
-  }
-  return value;
-}
-
-function requireDataclass(value: PyValue, name: string): void {
-  if (!(value instanceof PyInstance && value.cls.flags.isDataclass)) {
-    throw typeError(`${name}() should be called on dataclass instances`);
-  }
-}
-
-method(fieldClass, '__repr__', 'none', 0, 0, () => 'Field(...)');
-
-registerModule(
-  'dataclasses',
-  () =>
-    new Map<string, PyValue>([
-      [
-        'dataclass',
-        builtin('dataclass', 'takes', 0, 1, dataclass, {
-          keywords: [
-            'init',
-            'repr',
-            'eq',
-            'order',
-            'unsafe_hash',
-            'frozen',
-            'match_args',
-            'kw_only',
-            'slots',
-            'weakref_slot',
-          ],
-        }),
-      ],
-      [
-        'field',
-        builtin('field', 'takes', 0, 0, field, {
-          keywords: ['default', 'default_factory', 'init', 'repr', 'hash', 'compare', 'metadata', 'kw_only'],
-        }),
-      ],
-      [
-        'asdict',
-        builtin('asdict', 'one', 1, 1, ([value]) => {
-          requireDataclass(value, 'asdict');
-          return asdict(value, false);
-        }),
-      ],
-      [
-        'astuple',
-        builtin('astuple', 'one', 1, 1, ([value]) => {
-          requireDataclass(value, 'astuple');
-          return asdict(value, true);
-        }),
-      ],
-      [
-        'is_dataclass',
-        builtin(
-          'is_dataclass',
-          'one',
-          1,
-          1,
-          ([value]) => (value instanceof PyClass ? value : (value as PyObject).cls)?.flags?.isDataclass === true
-        ),
-      ],
-      ['FrozenInstanceError', frozenInstanceErrorClass],
-      ['MISSING', MISSING],
-    ])
-);
-
-export { argument };

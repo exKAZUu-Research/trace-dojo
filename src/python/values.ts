@@ -63,6 +63,8 @@ export class PyClass extends PyObject {
   readonly dict = new Map<string, PyValue>();
   module = 'builtins';
   qualifiedName: string;
+  /** The name error messages give the type, which C types of standard library modules prefix with the module. */
+  tpName?: string;
   doc?: string;
   /** Creates an instance of a builtin class, as its `__new__` and `__init__` together would. */
   construct?: (cls: PyClass, args: PyValue[], kwargs: Kwargs) => PyValue;
@@ -72,9 +74,20 @@ export class PyClass extends PyObject {
   isBaseType = false;
   /** The ordered annotations of the class body, which `@dataclass` reads. */
   annotationNames: string[] = [];
-  readonly flags: { isEnum?: boolean; isDataclass?: boolean; isAbstractEnum?: boolean } = {};
+  readonly flags: { isEnum?: boolean; isAbstractEnum?: boolean } = {};
   /** The members of an Enum class, in definition order. */
   enumMembers?: PyInstance[];
+  /** Reads the attributes this builtin class's opaque instances have of their own, such as an alias's `__origin__`. */
+  opaqueAttribute?: (self: PyOpaque, name: string) => PyValue | undefined;
+  /**
+   * Decides `issubclass(cls, self)` for an instance of this class given to isinstance() or issubclass() as the class,
+   * as a metaclass's `__subclasscheck__` does.
+   */
+  subclassCheck?: (self: PyValue, cls: PyClass, caller: 'isinstance' | 'issubclass') => boolean;
+  /** The state `abc.ABCMeta` keeps for an abstract base class: the classes registered as its virtual subclasses. */
+  abc?: { registry: PyClass[] };
+  /** The classes the program and library code define with this class as a base, for `__subclasses__()`. */
+  readonly subclasses: PyClass[] = [];
   definition?: ClassDef;
 
   constructor(
@@ -248,6 +261,8 @@ export class PyBoundMethod extends PyObject {
 export class PyModule extends PyObject {
   /** Attributes this grader does not support, by name, with the feature to name in the error. */
   readonly unsupported = new Map<string, string>();
+  /** Attributes created when first read, such as those standard library code written in Python defines. */
+  readonly lazy = new Map<string, () => PyValue>();
 
   constructor(
     cls: PyClass,
@@ -255,6 +270,23 @@ export class PyModule extends PyObject {
     readonly dict: Map<string, PyValue>
   ) {
     super(cls);
+  }
+
+  /** Reads an attribute, creating it first if it is lazy. */
+  attribute(name: string): PyValue | undefined {
+    const value = this.dict.get(name);
+    if (value !== undefined) return value;
+    const create = this.lazy.get(name);
+    if (create === undefined) return undefined;
+    this.lazy.delete(name);
+    const created = create();
+    this.dict.set(name, created);
+    return created;
+  }
+
+  /** The names of the module's attributes, including lazy ones not read yet. */
+  names(): string[] {
+    return [...this.dict.keys(), ...this.lazy.keys()];
   }
 }
 

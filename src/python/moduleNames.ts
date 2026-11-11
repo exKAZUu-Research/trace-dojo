@@ -4,6 +4,7 @@ import { STDLIB_MODULE_NAMES } from './stdlibModuleNames';
 export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'bisect',
   'collections',
+  'collections.abc',
   'copy',
   'dataclasses',
   'enum',

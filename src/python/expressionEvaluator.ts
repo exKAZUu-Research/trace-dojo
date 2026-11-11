@@ -10,6 +10,7 @@ import type {
   NameRef,
   Target,
 } from './ast';
+import { moduleNameOf } from './classes';
 import { newComplex } from './complexNumbers';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
 import { Frame } from './frame';
@@ -508,7 +509,7 @@ export class ExpressionEvaluator {
       keywordDefaults,
       def.usesClassCell ? frame.classCell : undefined
     );
-    fn.module = '__main__';
+    fn.module = moduleNameOf(frame);
     this.runtime.allocate(2);
     let result: PyValue = fn;
     for (const decorator of decorators.toReversed()) result = callValue(decorator, [result]);

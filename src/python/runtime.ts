@@ -1,10 +1,10 @@
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
+import { LIBRARY_ROW } from './ast';
 import { createBuiltins } from './builtins';
 import { bindArguments } from './calls';
 import { instantiate } from './classes';
-import { pyRepr } from './conversions';
 import { Evaluator } from './evaluator';
 import { Frame } from './frame';
 import { findReachableTurtles } from './garbageCollection';
@@ -15,19 +15,18 @@ import { systemExitError } from './modules/sys';
 import { callValue, isTruthy, setAttribute, toArray } from './objects';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
+import { newGenericAlias, unionClass, unionGetItem } from './typeHints';
 import {
   classOf,
   exceptionClassNamed,
   generatorClass,
   newDict,
-  newException,
   newList,
   newTuple,
   None,
   pyError,
   superClass,
   typeError,
-  typingClass,
   valueError,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
@@ -36,6 +35,7 @@ import {
   type Kwargs,
   PyCell,
   PyClass,
+  PyDescriptor,
   type PyDict,
   PyError,
   PyFunction,
@@ -44,10 +44,9 @@ import {
   type PyList,
   PyModule,
   PyObject,
-  PyOpaque,
   type PySet,
   PySuper,
-  PyTuple,
+  type PyTuple,
   type PyValue,
 } from './values';
 
@@ -59,8 +58,7 @@ export class Runtime {
   readonly builtins: Map<string, PyValue>;
   readonly modules = new Map<string, PyModule>();
   readonly evaluator: Evaluator;
-  /** The row of the call being evaluated, from which calls the interpreter makes implicitly count as called. */
-  currentRow: number | undefined;
+  private row: number | undefined;
   /** What `print` wrote to stderr, which learners do not see, as Java's `System.err` output. */
   errorOutput = '';
   private allocatedSlots = 0;
@@ -69,6 +67,16 @@ export class Runtime {
   constructor() {
     this.builtins = createBuiltins();
     this.evaluator = new Evaluator(this);
+  }
+
+  /** The row of the call being evaluated, from which calls the interpreter makes implicitly count as called. */
+  get currentRow(): number | undefined {
+    return this.row;
+  }
+
+  /** Library code keeps the row of the program's code that called it. */
+  set currentRow(row: number | undefined) {
+    if (row !== LIBRARY_ROW) this.row = row;
   }
 
   get frame(): Frame {
@@ -142,7 +150,9 @@ export class Runtime {
       const value = bound.get(param.name);
       if (value !== undefined && !def.scope.cells.includes(param.name)) locals.set(param.name, value);
     }
-    return new Frame('function', locals, cells, fn.globals, this.currentRow, def.isAtomic, def.scope, fn, fn.classCell);
+    // A call into library code is part of the step of the program's code that made it.
+    const callRow = def.row === LIBRARY_ROW ? undefined : this.currentRow;
+    return new Frame('function', locals, cells, fn.globals, callRow, def.isAtomic, def.scope, fn, fn.classCell);
   }
 
   callFunction(fn: PyFunction, args: readonly PyValue[], kwargs: Kwargs): PyValue {
@@ -163,7 +173,7 @@ export class Runtime {
       fn.name,
       fn.qualifiedName,
       () => {
-        frame.callRow = this.currentRow;
+        if (fn.def.row !== LIBRARY_ROW) frame.callRow = this.currentRow;
         this.pushFrame(frame);
         try {
           return this.guardRecursion(() => body.next());
@@ -255,20 +265,10 @@ export class Runtime {
   readonly none = None;
   /** The annotations of each class body, evaluated when the program reads `__annotations__` or `@dataclass` does. */
   readonly classAnnotationThunks = new Map<PyClass, [string, () => PyValue][]>();
-  readonly frozenDataclasses = new Set<PyClass>();
   private readonly streams = new Map<string, PyValue>();
 
   classAnnotations(cls: PyClass): [PyValue, PyValue][] {
     return (this.classAnnotationThunks.get(cls) ?? []).map(([name, thunk]) => [name, thunk()]);
-  }
-
-  isFrozenDataclass(cls: PyClass): boolean {
-    return cls.mro.some((each) => this.frozenDataclasses.has(each));
-  }
-
-  frozenInstanceError(message: string): PyError {
-    const cls = this.importModule('dataclasses').dict.get('FrozenInstanceError') as PyClass;
-    return new PyError(newException(cls, [message]));
   }
 
   exceptionClass(name: string): PyClass {
@@ -312,15 +312,6 @@ export class Runtime {
     return systemExitError(code);
   }
 
-  /** `int | None` and the like, which isinstance accepts and type hints use. */
-  unionType(left: PyValue, right: PyValue): PyValue {
-    const items = [...unionMembers(left), ...unionMembers(right)];
-    const text = items
-      .map((item) => (item instanceof PyClass ? item.qualifiedName : item === None ? 'None' : pyRepr(item)))
-      .join(' | ');
-    return new PyOpaque(typingClass, text, items);
-  }
-
   /** The value of a key missing from a dict: a Counter's zero, a defaultdict's default, or a KeyError. */
   missingKey(dict: PyDict, key: PyValue): PyValue {
     if (dict.defaultFactory !== undefined && dict.defaultFactory !== None) {
@@ -340,11 +331,12 @@ export class Runtime {
         throw keyError(key);
       return member;
     }
-    if (cls.isBuiltin) {
-      const args = key instanceof PyTuple ? key.items : [key];
-      const text = `${cls.name}[${args.map((arg) => (arg instanceof PyClass ? arg.qualifiedName : arg instanceof PyOpaque ? arg.text : pyRepr(arg))).join(', ')}]`;
-      return new PyOpaque(typingClass, text, cls);
-    }
+    const classGetItem = cls.isBuiltin ? undefined : cls.lookup('__class_getitem__');
+    // Only library classes define __class_getitem__, which binds to the class as a classmethod.
+    if (classGetItem instanceof PyFunction) return callValue(classGetItem, [cls, key]);
+    if (classGetItem instanceof PyDescriptor) return callValue(classGetItem.fn, [cls, key]);
+    if (cls === unionClass) return unionGetItem(key);
+    if (cls.isBuiltin && cls.isBaseType) return newGenericAlias(cls, key);
     throw typeError(`type '${cls.qualifiedName}' is not subscriptable`);
   }
 
@@ -391,7 +383,7 @@ export class Runtime {
 
   /** The sorted attribute names `dir()` lists, which AttributeError suggestions choose from. */
   dirNames(value: PyValue): string[] {
-    const names = value instanceof PyModule ? new Set(value.dict.keys()) : objectAttributeNames(value);
+    const names = value instanceof PyModule ? new Set(value.names()) : objectAttributeNames(value);
     return [...names].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   }
 
@@ -416,11 +408,6 @@ export class Runtime {
     this.spend(Math.ceil(scanned / 64));
     this.world.retain((turtle) => reached.has(turtle));
   }
-}
-
-/** The types a `|` union holds, or the type itself. */
-function unionMembers(value: PyValue): PyValue[] {
-  return value instanceof PyOpaque && Array.isArray(value.data) ? (value.data as PyValue[]) : [value];
 }
 
 export { Frame, PyCell };

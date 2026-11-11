@@ -7,7 +7,7 @@ import { formatPercent } from './percentFormat';
 import { currentRuntime } from './runtimeContext';
 import { dictViewBinary, isSetLikeView } from './setOperations';
 import { compareStr, strLength } from './strings';
-import { classOf, newList, newSet, newTuple, NotImplemented, pyError, typeError, typeName } from './types';
+import { classOf, dictClass, newList, newSet, newTuple, NotImplemented, pyError, typeError, typeName } from './types';
 import {
   DONE,
   PyComplex,
@@ -16,6 +16,7 @@ import {
   PyInstance,
   PyList,
   PyObject,
+  PyOpaque,
   PyRange,
   PySet,
   PyTuple,
@@ -522,7 +523,11 @@ function nativeEquals(left: PyValue, right: PyValue): boolean | undefined {
   }
   if (typeof left === 'string' || typeof right === 'string' || isNumeric(left) || isNumeric(right)) return false;
   if (left instanceof PyRange && right instanceof PyRange) return rangesEqual(left, right);
-  if (left instanceof PyDict && right instanceof PyDict) return dictsEqual(left, right);
+  if (left instanceof PyDict && right instanceof PyDict) {
+    // A Counter compares with its own __eq__, which counts a missing element as zero.
+    if (hasOwnEquality(left) || hasOwnEquality(right)) return undefined;
+    return dictsEqual(left, right);
+  }
   if (left instanceof PyDictView && right instanceof PyDictView) {
     return left.view !== 'values' && left.view === right.view && dictsEqual(left.dict, right.dict);
   }
@@ -531,7 +536,13 @@ function nativeEquals(left: PyValue, right: PyValue): boolean | undefined {
   if (left instanceof PyDictView && left.view === 'keys' && right instanceof PySet) {
     return compareSets('==', newSet(iterateAll(left)), right);
   }
+  // Opaque builtins such as type hints compare with their own __eq__.
+  if (left instanceof PyOpaque || right instanceof PyOpaque) return left === right ? true : undefined;
   return left === right;
+}
+
+function hasOwnEquality(dict: PyDict): boolean {
+  return dict.cls.mro.some((cls) => cls !== dictClass && cls.isSubclassOf(dictClass) && cls.dict.has('__eq__'));
 }
 
 function sameSequenceKind(left: PyList | PyTuple, right: PyList | PyTuple): boolean {

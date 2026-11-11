@@ -5,6 +5,7 @@ import { currentRuntime } from './runtimeContext';
 import { iterStr, strLength } from './strings';
 import { superAttribute } from './typeObject';
 import {
+  builtinFunctionClass,
   classmethodClass,
   classOf,
   dictKeysClass,
@@ -94,7 +95,7 @@ export function bindValue(attribute: PyValue, instance: PyValue, owner: PyClass 
     if (attribute.binding === 'static') return attribute;
     const self = attribute.binding === 'class' ? owner : instance;
     return new PyBuiltinFunction(
-      classOf(attribute),
+      builtinFunctionClass,
       attribute.name,
       attribute.run,
       self,
@@ -157,7 +158,7 @@ function findAttribute(value: PyValue, name: string): PyValue | undefined {
   if (value instanceof PyModule) {
     const feature = value.unsupported.get(name);
     if (feature !== undefined) throw new UnsupportedFeatureError(feature);
-    return value.dict.get(name);
+    return value.attribute(name);
   }
   if (value instanceof PySuper) return superAttribute(value, name);
   const cls = classOf(value);

@@ -4,11 +4,12 @@ import { DictStore } from '../dictStore';
 import { mappingEntries } from '../expressionEvaluator';
 import { pyHash } from '../hashing';
 import { keyError } from '../items';
-import { registerModule } from '../modules';
+import { runLibrarySource } from '../librarySource';
+import { registerLazyAttributes, registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import { callValue, getIterator, isCallable, isTruthy, iterate, lookupSpecial, toArray } from '../objects';
-import { binaryOp, equals, keysEqual, lessThan } from '../operators';
+import { binaryOp, compareOp, equals, lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { containerRepr, dictBody, updateDict } from '../typeContainers';
 import {
@@ -41,10 +42,12 @@ import {
   PyTuple,
   type PyValue,
 } from '../values';
+import { COLLECTIONS_SOURCE } from './collectionsSource';
 
 // deque -------------------------------------------------------------------------------------------------------------
 
 export const dequeClass = builtinClass('deque');
+dequeClass.tpName = 'collections.deque';
 dequeClass.module = 'collections';
 dequeClass.construct = (cls, args, kwargs) => {
   checkArgs({ qualified: 'deque', min: 0, max: 2, style: 'takes', keywords: ['iterable', 'maxlen'] }, args, kwargs);
@@ -322,34 +325,157 @@ method(counterClass, '__repr__', 'none', 0, 0, (self) => {
     return `${counter.cls.name}(${dictBody(ordered)})`;
   });
 });
-for (const [name, combine] of [
-  ['__add__', (a: bigint, b: bigint) => a + b],
-  ['__sub__', (a: bigint, b: bigint) => a - b],
-  ['__or__', (a: bigint, b: bigint) => (a > b ? a : b)],
-  ['__and__', (a: bigint, b: bigint) => (a < b ? a : b)],
+// The arithmetic, comparisons, and in-place operators of Counter, as CPython's collections/__init__.py writes them.
+
+const countOf = (counter: PyDict, key: PyValue): PyValue => counter.store.get(key) ?? 0n;
+const isPositive = (value: PyValue): boolean => isTruthy(compareOp('>', value, 0n));
+const isCounter = (value: PyValue): value is PyDict => value instanceof PyDict && value.cls.isSubclassOf(counterClass);
+
+function newCounter(): PyDict {
+  currentRuntime().allocate(1);
+  return new PyDict(counterClass, new DictStore());
+}
+
+function counterBinary(self: PyDict, other: PyDict, combine: (count: PyValue, otherCount: PyValue) => PyValue): PyDict {
+  const result = newCounter();
+  for (const { key, value } of self.store.ordered()) {
+    const count = combine(value, countOf(other, key));
+    if (isPositive(count)) result.store.set(key, count);
+  }
+  return result;
+}
+
+/** Adds the counts only `other` has, as `+`, `-`, and `|` do, `-` negating them. */
+function addOtherCounts(result: PyDict, self: PyDict, other: PyDict, negate: boolean): PyDict {
+  for (const { key, value } of other.store.ordered()) {
+    if (self.store.has(key)) continue;
+    if (negate ? isTruthy(compareOp('<', value, 0n)) : isPositive(value)) {
+      result.store.set(key, negate ? binaryOp('-', 0n, value) : value);
+    }
+  }
+  return result;
+}
+
+const pickLarger = (count: PyValue, otherCount: PyValue): PyValue =>
+  isTruthy(compareOp('<', count, otherCount)) ? otherCount : count;
+const pickSmaller = (count: PyValue, otherCount: PyValue): PyValue =>
+  isTruthy(compareOp('<', count, otherCount)) ? count : otherCount;
+
+for (const [name, run] of [
+  [
+    '__add__',
+    (a: PyDict, b: PyDict) =>
+      addOtherCounts(
+        counterBinary(a, b, (x, y) => binaryOp('+', x, y)),
+        a,
+        b,
+        false
+      ),
+  ],
+  [
+    '__sub__',
+    (a: PyDict, b: PyDict) =>
+      addOtherCounts(
+        counterBinary(a, b, (x, y) => binaryOp('-', x, y)),
+        a,
+        b,
+        true
+      ),
+  ],
+  ['__or__', (a: PyDict, b: PyDict) => addOtherCounts(counterBinary(a, b, pickLarger), a, b, false)],
+  ['__and__', (a: PyDict, b: PyDict) => counterBinary(a, b, pickSmaller)],
 ] as const) {
-  method(counterClass, name, 'one', 1, 1, (self, [other]) => {
-    if (!(other instanceof PyDict) || !other.cls.isSubclassOf(counterClass)) return NotImplemented;
-    const result = new PyDict(counterClass, new DictStore());
-    const keys = counterOf(self)
-      .store.ordered()
-      .map((entry) => entry.key);
-    for (const entry of other.store.ordered()) if (!keys.some((key) => keysEqual(key, entry.key))) keys.push(entry.key);
-    for (const key of keys) {
-      const a = counterOf(self).store.get(key) ?? 0n;
-      const b = other.store.get(key) ?? 0n;
-      const isAnd = name === '__and__';
-      if (isAnd && (counterOf(self).store.get(key) === undefined || other.store.get(key) === undefined)) continue;
-      const value = combine(a as bigint, b as bigint);
-      if (value > 0n) result.store.set(key, value);
+  method(counterClass, name, 'one', 1, 1, (self, [other]) =>
+    isCounter(other) ? run(counterOf(self), other) : NotImplemented
+  );
+}
+
+for (const [name, keep] of [
+  ['__pos__', (count: PyValue) => (isPositive(count) ? count : undefined)],
+  ['__neg__', (count: PyValue) => (isTruthy(compareOp('<', count, 0n)) ? binaryOp('-', 0n, count) : undefined)],
+] as const) {
+  method(counterClass, name, 'none', 0, 0, (self) => {
+    const result = newCounter();
+    for (const { key, value } of counterOf(self).store.ordered()) {
+      const count = keep(value);
+      if (count !== undefined) result.store.set(key, count);
     }
     return result;
   });
 }
 
+/** Removes the counts that are not positive, as Counter's `_keep_positive` does after an in-place operator. */
+function keepPositive(counter: PyDict): PyDict {
+  for (const entry of counter.store.ordered()) if (!isPositive(entry.value)) counter.store.remove(entry);
+  return counter;
+}
+
+for (const [name, update] of [
+  ['__iadd__', (self: PyDict, key: PyValue, count: PyValue) => binaryOp('+', countOf(self, key), count)],
+  ['__isub__', (self: PyDict, key: PyValue, count: PyValue) => binaryOp('-', countOf(self, key), count)],
+  ['__ior__', (self: PyDict, key: PyValue, count: PyValue) => pickLarger(countOf(self, key), count)],
+] as const) {
+  method(counterClass, name, 'one', 1, 1, (self, [other]) => {
+    if (!isCounter(other)) return NotImplemented;
+    const counter = counterOf(self);
+    for (const { key, value } of other.store.ordered()) counter.store.set(key, update(counter, key, value));
+    return keepPositive(counter);
+  });
+}
+method(counterClass, '__iand__', 'one', 1, 1, (self, [other]) => {
+  if (!isCounter(other)) return NotImplemented;
+  const counter = counterOf(self);
+  for (const entry of counter.store.ordered()) {
+    const otherCount = countOf(other, entry.key);
+    if (isTruthy(compareOp('<', otherCount, entry.value))) entry.value = otherCount;
+  }
+  return keepPositive(counter);
+});
+
+/** Whether a comparison holds for the count of every element either Counter has. */
+function everyCount(self: PyDict, other: PyDict, operator: '==' | '<=' | '>='): boolean {
+  for (const counter of [self, other]) {
+    for (const { key } of counter.store.ordered()) {
+      if (!isTruthy(compareOp(operator, countOf(self, key), countOf(other, key)))) return false;
+    }
+  }
+  return true;
+}
+
+for (const [name, compare] of [
+  ['__eq__', (a: PyDict, b: PyDict) => everyCount(a, b, '==')],
+  ['__ne__', (a: PyDict, b: PyDict) => !everyCount(a, b, '==')],
+  ['__le__', (a: PyDict, b: PyDict) => everyCount(a, b, '<=')],
+  ['__lt__', (a: PyDict, b: PyDict) => everyCount(a, b, '<=') && !everyCount(a, b, '==')],
+  ['__ge__', (a: PyDict, b: PyDict) => everyCount(a, b, '>=')],
+  ['__gt__', (a: PyDict, b: PyDict) => everyCount(a, b, '>=') && !everyCount(a, b, '==')],
+] as const) {
+  method(counterClass, name, 'one', 1, 1, (self, [other]) =>
+    isCounter(other) ? compare(counterOf(self), other) : NotImplemented
+  );
+}
+method(counterClass, '__missing__', 'one', 1, 1, () => 0n);
+method(counterClass, '__delitem__', 'one', 1, 1, (self, [key]) => {
+  counterOf(self).store.delete(key);
+  return None;
+});
+method(counterClass, 'copy', 'none', 0, 0, (self) => callValue(counterOf(self).cls, [self]));
+method(
+  counterClass,
+  'fromkeys',
+  'expected',
+  1,
+  2,
+  () => {
+    throw pyError('NotImplementedError', 'Counter.fromkeys() is undefined.  Use Counter(iterable) instead.');
+  },
+  { binding: 'class' }
+);
+
 // defaultdict -------------------------------------------------------------------------------------------------------
 
 export const defaultdictClass = new PyClass('defaultdict', [dictClass], typeClass);
+defaultdictClass.tpName = 'collections.defaultdict';
 defaultdictClass.mro = [defaultdictClass, ...dictClass.mro];
 defaultdictClass.module = 'collections';
 defaultdictClass.layout = { base: 'native' };
@@ -382,6 +508,7 @@ defaultdictClass.dict.set(
 // OrderedDict -------------------------------------------------------------------------------------------------------
 
 export const orderedDictClass = new PyClass('OrderedDict', [dictClass], typeClass);
+orderedDictClass.tpName = 'collections.OrderedDict';
 orderedDictClass.mro = [orderedDictClass, ...dictClass.mro];
 orderedDictClass.module = 'collections';
 orderedDictClass.layout = { base: 'native' };
@@ -603,6 +730,16 @@ export function makeNamedTupleClass(name: string, fields: string[], module: stri
   cls.module = module;
   return cls;
 }
+
+const pythonNamespaces = new WeakMap<object, Map<string, PyValue>>();
+registerLazyAttributes('collections', ['ChainMap', 'UserDict', 'UserList', 'UserString'], (runtime, name) => {
+  let namespace = pythonNamespaces.get(runtime);
+  if (!namespace) {
+    namespace = runLibrarySource('collections', COLLECTIONS_SOURCE);
+    pythonNamespaces.set(runtime, namespace);
+  }
+  return namespace.get(name) as PyValue;
+});
 
 registerModule(
   'collections',

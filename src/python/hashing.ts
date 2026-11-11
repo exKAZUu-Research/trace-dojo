@@ -160,7 +160,9 @@ export function pyHash(value: PyValue): bigint {
     const result = callSpecial(value, '__hash__', []);
     if (typeof result === 'boolean') return result ? 1n : 0n;
     if (typeof result !== 'bigint') throw typeError('__hash__ method should return an integer');
-    return hashInt(result);
+    // As slot_tp_hash, an integer that fits in Py_hash_t is the hash itself, and a larger one is hashed.
+    if (result < -(1n << 63n) || result >= 1n << 63n) return hashInt(result);
+    return result === -1n ? -2n : result;
   }
   if (value instanceof PySet) return hashFrozenset(value);
   return identityHash(value);
