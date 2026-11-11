@@ -190,8 +190,11 @@ export function getAttribute(value: PyValue, name: string): PyValue {
 
 function missingAttribute(value: PyValue, name: string): PyValue | undefined {
   if (value instanceof PyClass) return undefined;
-  const hook = classOf(value).mro.find((cls) => cls.missingAttribute !== undefined)?.missingAttribute;
-  return hook?.(value, name);
+  for (const cls of classOf(value).mro) {
+    const found = cls.missingAttribute?.(value, name);
+    if (found !== undefined) return found;
+  }
+  return undefined;
 }
 
 /** Reads `value.name`, or returns undefined when it is missing. */

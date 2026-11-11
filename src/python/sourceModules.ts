@@ -1,4 +1,5 @@
 import type { Module } from './ast';
+import { allocateInstance, fieldsOf, makeCType } from './cTypes';
 import { builtin } from './define';
 import { Frame } from './frame';
 import { registerModule } from './modules';
@@ -53,7 +54,7 @@ export function runModuleSource(
   }
   // Only the helpers the code uses, so that a module's namespace lists no others.
   for (const [key, value] of commonNatives(runtime)) {
-    if (!namespace.has(key) && source.includes(key)) namespace.set(key, value);
+    if (!namespace.has(key) && new RegExp(String.raw`\b${key}\b`).test(source)) namespace.set(key, value);
   }
   if (!namespace.has('__doc__')) namespace.set('__doc__', parsed.doc ?? None);
   runtime.addLibraryNamespace(namespace);
@@ -93,6 +94,23 @@ function commonNatives(runtime: Runtime): [string, PyValue][] {
       // Gives a class the name its messages quote, as CPython's C types name themselves after their module.
       builtin('_c_type_name', 'expected', 2, 2, ([cls, name]) => {
         (cls as PyClass).typeName = name as string;
+        return None;
+      }),
+    ],
+    [
+      '_c_type',
+      // Makes a class the C type CPython's is (see makeCType); its objects keep their fields by _get_slot and _put_slot.
+      builtin('_c_type', 'expected', 1, 2, ([cls, subclassable]) => {
+        makeCType(cls as PyClass, subclassable !== false);
+        return None;
+      }),
+    ],
+    ['_allocate', builtin('_allocate', 'one', 1, 1, ([cls]) => allocateInstance(cls as PyClass))],
+    ['_get_slot', builtin('_get_slot', 'expected', 2, 2, ([self, index]) => fieldsOf(self)[Number(index)] ?? None)],
+    [
+      '_put_slot',
+      builtin('_put_slot', 'expected', 3, 3, ([self, index, value]) => {
+        fieldsOf(self)[Number(index)] = value;
         return None;
       }),
     ],

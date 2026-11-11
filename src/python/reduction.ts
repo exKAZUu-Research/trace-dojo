@@ -2,7 +2,7 @@
 // `__reduce__`, `__getstate__` and `__getnewargs__`, as CPython's typeobject.c and the builtin types define them.
 import { bytesLikeData, latin1Text, newBytes } from './bytesValues';
 import { method } from './define';
-import { ownDict } from './descriptors';
+import { fieldedCTypes, ownDict } from './descriptors';
 import { importModule } from './modules';
 import { toIndex } from './numbers';
 import { callValue, getAttribute, getAttributeOrUndefined, getIterator, lookupSpecial } from './objects';
@@ -154,7 +154,11 @@ function defaultState(obj: PyValue, required: boolean): PyValue {
 function hasPlainLayout(obj: PyValue): boolean {
   if (obj === None) return true;
   return (
-    obj instanceof PyInstance && obj.primitive === undefined && obj.exception === undefined && obj.turtle === undefined
+    obj instanceof PyInstance &&
+    obj.primitive === undefined &&
+    obj.exception === undefined &&
+    obj.turtle === undefined &&
+    !obj.cls.mro.some((cls) => fieldedCTypes.has(cls))
   );
 }
 

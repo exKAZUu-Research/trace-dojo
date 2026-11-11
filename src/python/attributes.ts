@@ -666,7 +666,7 @@ function setInstanceDictEntry(target: PyInstance, name: string, value: PyValue, 
     target.dict.set(name, value);
     return;
   }
-  if (cls.isBuiltin && !state && !target.turtle) throw noDictError(target, name);
+  if (cls.isBuiltin && !state && !target.turtle && !builtinClassesWithDict.has(cls)) throw noDictError(target, name);
   target.dict.set(name, value);
 }
 
