@@ -408,8 +408,18 @@ export function getIterator(value: PyValue): PyValue {
     }
     return iterator;
   }
-  const next = iterate(value);
-  return new PyIterator(iteratorClass(iteratorNameOf(value)), next, () => [value]);
+  const base = iterate(value);
+  let consumed = 0;
+  let exhausted = false;
+  const next = (): PyValue | typeof DONE => {
+    const item = base();
+    if (item === DONE) exhausted = true;
+    else consumed++;
+    return item;
+  };
+  const iterator = new PyIterator(iteratorClass(iteratorNameOf(value)), next, () => [value]);
+  iterator.lengthHint = () => (exhausted ? 0 : Math.max(0, lengthOf(value) - consumed));
+  return iterator;
 }
 
 function iteratorNameOf(value: PyValue): string {

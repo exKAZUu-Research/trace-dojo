@@ -225,7 +225,7 @@ function mergeSort(items: number[], less: (a: number, b: number) => boolean): nu
 
 function reversedIterator(sequence: PyList | PyTuple, name: string): PyIterator {
   let index = sequence.items.length - 1;
-  return new PyIterator(
+  const iterator = new PyIterator(
     iteratorClass(name),
     () => {
       if (index >= sequence.items.length) index = -1;
@@ -233,6 +233,8 @@ function reversedIterator(sequence: PyList | PyTuple, name: string): PyIterator 
     },
     () => [sequence]
   );
+  iterator.lengthHint = () => (index < sequence.items.length ? index + 1 : 0);
+  return iterator;
 }
 
 // tuple -------------------------------------------------------------------------------------------------------------
@@ -430,11 +432,13 @@ dictClass.dict.set('__hash__', None);
 
 function listIterator(items: PyValue[], name: string): PyIterator {
   let index = 0;
-  return new PyIterator(
+  const iterator = new PyIterator(
     iteratorClass(name),
     () => (index < items.length ? items[index++] : DONE),
     () => items
   );
+  iterator.lengthHint = () => items.length - index;
+  return iterator;
 }
 
 for (const [cls, view] of [

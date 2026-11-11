@@ -77,6 +77,8 @@ export class PyClass extends PyObject {
   readonly flags: { isEnum?: boolean; isAbstractEnum?: boolean } = {};
   /** The members of an Enum class, in definition order. */
   enumMembers?: PyInstance[];
+  /** The names `dir()` lists for an instance of this class, when its `__dir__` differs from object's. */
+  dirNames?: (self: PyValue) => Iterable<string>;
   /** Binds an instance of this builtin class read from a class, as its `__get__` would, such as a partial's. */
   nativeGet?: (self: PyObject, instance: PyValue, owner: PyClass) => PyValue;
   /** Reads the attributes this builtin class's opaque instances have of their own, such as an alias's `__origin__`. */
@@ -328,6 +330,9 @@ export const DONE = Symbol('done');
 
 /** An iterator implemented natively, such as a list iterator or the object `map()` returns. */
 export class PyIterator extends PyObject {
+  /** How many items are left, which `__length_hint__` gives for the iterators of sized containers. */
+  lengthHint?: () => number;
+
   constructor(
     cls: PyClass,
     readonly next: () => PyValue | typeof DONE,

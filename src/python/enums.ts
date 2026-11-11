@@ -1,6 +1,7 @@
 import { pyRepr, pyStr } from './conversions';
 import { hashInt, NATIVE_HASHES } from './hashing';
 import { intEnumValue, keysEqual } from './operators';
+import { currentRuntime } from './runtimeContext';
 import { builtinClass, defineMethod, newList, None, pyError, typeClass, typeError } from './types';
 import {
   type Kwargs,
@@ -114,3 +115,16 @@ export function enumMembersOf(cls: PyClass): PyValue {
 }
 
 export { None, typeClass };
+
+/** `Enum.__dir__`: a member lists the attributes it is meant to have, plus its own and its class's public ones. */
+enumClass.dirNames = (self) => {
+  const member = self as PyInstance;
+  const names = new Set(['__class__', '__doc__', '__eq__', '__hash__', '__module__', 'name', 'value']);
+  const memberNames = new Set((member.cls.enumMembers ?? []).map((each) => each.dict.get('_name_') as string));
+  if (member.cls.isSubclassOf(intEnumClass)) for (const name of currentRuntime().dirNames(0n)) names.add(name);
+  for (const name of member.dict.keys()) if (!name.startsWith('_') && !memberNames.has(name)) names.add(name);
+  for (const cls of member.cls.mro) {
+    for (const name of cls.dict.keys()) if (!name.startsWith('_') && !memberNames.has(name)) names.add(name);
+  }
+  return names;
+};

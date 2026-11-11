@@ -1,7 +1,7 @@
 import { abcInvalidationCount } from '../abstractClasses';
 import { addressOf, pyRepr } from '../conversions';
 import { builtin, method } from '../define';
-import { defineGetSet } from '../descriptors';
+import { defineGetSet, defineUnsupportedAttributes } from '../descriptors';
 import { DictStore } from '../dictStore';
 import { runLibrarySource } from '../librarySource';
 import { mappingProxyClass } from '../mappingProxy';
@@ -11,13 +11,14 @@ import { toIndex } from '../numbers';
 import { bindValue, callValue, isCallable, isTruthy, iterate, lookupSpecial } from '../objects';
 import { compareOp } from '../operators';
 import { currentRuntime } from '../runtimeContext';
-import { forwardRefClass, genericAliasClass, unionClass } from '../typeHints';
+import { forwardRefClass, genericAliasClass, newGenericAlias, unionClass } from '../typeHints';
 import {
   builtinClass,
   classOf,
   methodClass,
   methodDescriptorClass,
   namespaceDict,
+  newDict,
   newTuple,
   None,
   NotImplemented,
@@ -78,7 +79,9 @@ partialClass.construct = (_cls, args, kwargs) => {
 };
 
 function newPartial(fn: PyValue, args: PyValue[], kwargs: Map<string, PyValue>): PyOpaque {
-  return new PyOpaque(partialClass, 'partial', { fn, args, kwargs } satisfies Partial);
+  const partial = new PyOpaque(partialClass, 'partial', { fn, args, kwargs } satisfies Partial);
+  partial.attributes = new Map();
+  return partial;
 }
 
 /** Fills a partial's placeholders with call arguments in order, as CPython's partial does. */
@@ -93,6 +96,28 @@ function fillPlaceholders(args: readonly PyValue[], given: readonly PyValue[], n
   return [...filled, ...given.slice(index)];
 }
 partialClass.nativeGet = bindAsMethod;
+partialClass.dict.set('__module__', 'functools');
+defineGetSet(partialClass, 'func', (self) => ((self as PyOpaque).data as Partial).fn, { member: true });
+defineGetSet(partialClass, 'args', (self) => newTuple(((self as PyOpaque).data as Partial).args), { member: true });
+defineGetSet(partialClass, 'keywords', (self) => newDict(((self as PyOpaque).data as Partial).kwargs), {
+  member: true,
+});
+defineGetSet(partialClass, '__dict__', (self) => namespaceDict(attributesOf(self as PyOpaque)));
+defineUnsupportedAttributes(partialClass, {
+  __setstate__: 'functools.partial.__setstate__()（pickle で使う状態の復元）',
+  __vectorcalloffset__: 'functools.partial.__vectorcalloffset__（C の呼び出しの仕組み）',
+});
+method(partialClass, '__get__', 'expected', 1, 2, (self, [instance]) =>
+  bindAsMethod(self as PyObject, instance ?? None)
+);
+method(partialClass, '__class_getitem__', 'one', 1, 1, (owner, [key]) => newGenericAlias(owner, key), {
+  binding: 'class',
+});
+
+function attributesOf(object: PyOpaque): Map<string, PyValue> {
+  object.attributes ??= new Map();
+  return object.attributes;
+}
 partialClass.dict.set(
   '__call__',
   new PyBuiltinFunction(

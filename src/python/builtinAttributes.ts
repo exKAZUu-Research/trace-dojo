@@ -1,11 +1,12 @@
 import type { BinaryOperator } from './ast';
 import { BUILTIN_DOC } from './attributes';
+import { isSubclassOfClass } from './builtins';
 import { pyRepr } from './conversions';
 import { method } from './define';
 import { defineGetSet, defineUnsupportedAttributes } from './descriptors';
 import { deleteItem, setItem, sliceIndices } from './items';
 import { mappingProxyClass, newMappingProxy } from './mappingProxy';
-import { toIndex } from './numbers';
+import { exactBinary, scaleToFloat, toIndex } from './numbers';
 import { bindValue, callValue, getAttribute, isCallable, toArray } from './objects';
 import { binaryOp, inplaceOp, nativeBinaryOperation, unaryOp } from './operators';
 import { currentRuntime } from './runtimeContext';
@@ -47,6 +48,7 @@ import {
   strClass,
   superClass,
   tupleClass,
+  typeClass,
   typeError,
   typeName,
   valueError,
@@ -776,3 +778,129 @@ defineGetSet(
   },
   { nonData: true }
 );
+
+// type --------------------------------------------------------------------------------------------------------------
+
+const asClass = (self: PyValue): PyClass => self as PyClass;
+for (const name of [
+  '__name__',
+  '__qualname__',
+  '__module__',
+  '__bases__',
+  '__base__',
+  '__mro__',
+  '__dict__',
+  '__annotations__',
+]) {
+  defineGetSet(typeClass, name, (self) => getAttribute(asClass(self), name));
+}
+defineGetSet(typeClass, '__abstractmethods__', (self) => {
+  const value = asClass(self).dict.get('__abstractmethods__');
+  if (value === undefined || self === typeClass) {
+    throw pyError('AttributeError', `type object '${asClass(self).name}' has no attribute '__abstractmethods__'`);
+  }
+  return value;
+});
+defineGetSet(typeClass, '__type_params__', () => newTuple([]));
+defineGetSet(typeClass, '__annotate__', (self) => {
+  if (asClass(self).isBuiltin)
+    throw pyError('AttributeError', `type object '${asClass(self).name}' has no attribute '__annotate__'`);
+  if (currentRuntime().classAnnotations(asClass(self)).length === 0) return None;
+  return new PyBuiltinFunction(builtinFunctionClass, '__annotate__', ([format]) => {
+    if (format !== 1n && format !== 2n) throw pyError('NotImplementedError', pyRepr(format));
+    return newDict(currentRuntime().classAnnotations(asClass(self)));
+  });
+});
+defineUnsupportedAttributes(typeClass, {
+  __basicsize__: '型の __basicsize__（CPython のメモリ上の大きさ）',
+  __itemsize__: '型の __itemsize__（CPython のメモリ上の大きさ）',
+  __dictoffset__: '型の __dictoffset__（CPython のメモリ上の配置）',
+  __weakrefoffset__: '型の __weakrefoffset__（CPython のメモリ上の配置）',
+  __flags__: '型の __flags__（CPython の内部のフラグ）',
+  __text_signature__: '型の __text_signature__（シグネチャのデータ）',
+});
+method(
+  typeClass,
+  '__call__',
+  'expected',
+  0,
+  Number.POSITIVE_INFINITY,
+  (self, args, kwargs) => callValue(self, args, kwargs),
+  {
+    keywords: [],
+  }
+);
+method(typeClass, '__prepare__', 'expected', 0, Number.POSITIVE_INFINITY, () => newDict(), {
+  binding: 'class',
+  keywords: [],
+});
+method(typeClass, '__instancecheck__', 'one', 1, 1, (self, [instance]) => isInstanceOf(instance, asClass(self)));
+method(typeClass, '__subclasscheck__', 'one', 1, 1, (self, [cls]) => {
+  if (!(cls instanceof PyClass)) throw typeError('issubclass() arg 1 must be a class');
+  return isSubclassOfClass(cls, asClass(self));
+});
+
+function isInstanceOf(value: PyValue, cls: PyClass): boolean {
+  return isSubclassOfClass(classOf(value), cls);
+}
+
+// float.hex and float.fromhex -----------------------------------------------------------------------------------------
+
+method(floatClass, 'hex', 'none', 0, 0, (self) => floatHex(self as number));
+method(
+  floatClass,
+  'fromhex',
+  'one',
+  1,
+  1,
+  (cls, [text]) => {
+    if (typeof text !== 'string') throw typeError(`fromhex() argument must be str, not ${typeName(text)}`);
+    const value = floatFromHex(text);
+    return cls === floatClass ? value : callValue(cls, [value]);
+  },
+  { binding: 'class' }
+);
+
+/** `float.hex()`: a hexadecimal mantissa of 13 digits after the point and a binary exponent, as float_hex writes. */
+function floatHex(value: number): string {
+  if (Number.isNaN(value)) return 'nan';
+  if (!Number.isFinite(value)) return value > 0 ? 'inf' : '-inf';
+  const sign = value < 0 || Object.is(value, -0) ? '-' : '';
+  if (value === 0) return `${sign}0x0.0p+0`;
+  const { mantissa, exponent } = exactBinary(Math.abs(value));
+  // Normalize to a 53-bit mantissa with its leading bit 1, or the subnormal exponent -1022.
+  let bits = mantissa;
+  let shift = exponent;
+  while (bits < 1n << 52n && shift > -1074) {
+    bits <<= 1n;
+    shift--;
+  }
+  while (bits >= 1n << 53n) {
+    bits >>= 1n;
+    shift++;
+  }
+  const leading = bits >> 52n;
+  const fraction = (bits & ((1n << 52n) - 1n)).toString(16).padStart(13, '0');
+  const power = shift + 52;
+  return `${sign}0x${leading}.${fraction}p${power < 0 ? '-' : '+'}${Math.abs(power)}`;
+}
+
+/** `float.fromhex()`, rounding to nearest with ties to even, as float_fromhex does. */
+function floatFromHex(text: string): number {
+  const trimmed = text.trim();
+  const match = /^([+-]?)(?:(inf|infinity)|(nan)|(?:0x)?([0-9a-f]*)(?:\.([0-9a-f]*))?(?:p([+-]?[0-9]+))?)$/i.exec(
+    trimmed
+  );
+  if (!match) throw valueError('invalid hexadecimal floating-point string');
+  const [, sign, infinity, nan, whole = '', fraction = '', power = '0'] = match;
+  const negative = sign === '-';
+  if (infinity) return negative ? -Infinity : Infinity;
+  if (nan) return Number.NaN;
+  if (whole === '' && fraction === '') throw valueError('invalid hexadecimal floating-point string');
+  const digits = BigInt(`0x${whole}${fraction}` === '0x' ? '0' : `0x${whole}${fraction}`);
+  const exponent = Number(power) - 4 * fraction.length;
+  if (digits === 0n) return negative ? -0 : 0;
+  const result = scaleToFloat(digits, exponent);
+  if (!Number.isFinite(result)) throw pyError('OverflowError', 'hexadecimal value too large to represent as a float');
+  return negative ? -result : result;
+}

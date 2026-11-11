@@ -1,6 +1,6 @@
 import { builtin } from '../define';
 import { frexp } from '../hashing';
-import { registerModule } from '../modules';
+import { registerModule, registerUnsupportedAttributes } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
 import { exactBinary, floatRepr, intToFloat, scaleToFloat, toIndex } from '../numbers';
 import { bindValue, callValue, isTruthy, lookupSpecial, toArray } from '../objects';
@@ -8,6 +8,7 @@ import { binaryOp } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { newTuple, pyError, typeError, typeName, valueError } from '../types';
 import type { Kwargs, PyValue } from '../values';
+import { fma } from './mathFma';
 
 /** A real number argument as a float, as math functions convert theirs. */
 export function realArgument(value: PyValue): number {
@@ -259,6 +260,15 @@ function sumOfProducts(a: PyValue[], b: PyValue[]): PyValue {
   return total;
 }
 
+// CPython 3.14 takes these from the platform's C library (macOS's on the reference machine), whose results to the
+// last digit no published algorithm reproduces.
+registerUnsupportedAttributes('math', {
+  erf: 'math.erf()（C ライブラリの erf と最後の桁まで同じ値を出せないため）',
+  erfc: 'math.erfc()（C ライブラリの erfc と最後の桁まで同じ値を出せないため）',
+  gamma: 'math.gamma()（C ライブラリの tgamma と最後の桁まで同じ値を出せないため）',
+  lgamma: 'math.lgamma()（C ライブラリの lgamma と最後の桁まで同じ値を出せないため）',
+});
+
 registerModule('math', () => {
   return new Map<string, PyValue>([
     ['pi', Math.PI],
@@ -338,6 +348,7 @@ registerModule('math', () => {
       }),
     ],
     ['ulp', floatFunction('ulp', ulp)],
+    ['fma', builtin('fma', 'expected', 3, 3, ([x, y, z]) => fma(realArgument(x), realArgument(y), realArgument(z)))],
   ]);
 });
 

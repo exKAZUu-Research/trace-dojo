@@ -393,6 +393,8 @@ export class Runtime {
 
   /** The sorted attribute names `dir()` lists, which AttributeError suggestions choose from. */
   dirNames(value: PyValue): string[] {
+    const native = value instanceof PyClass ? undefined : classOf(value).mro.find((cls) => cls.dirNames)?.dirNames;
+    if (native) return [...new Set(native(value))].toSorted(compareNames);
     const custom = value instanceof PyClass ? undefined : lookupSpecial(value, '__dir__');
     if (custom instanceof PyFunction)
       return this.toArray(callValue(bindValue(custom, value), []))

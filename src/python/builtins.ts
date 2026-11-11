@@ -191,11 +191,13 @@ reversedClass.construct = (_cls, args, kwargs) => {
     throw typeError(`'${typeName(sequence)}' object is not reversible`);
   }
   let index = BigInt(lengthOf(sequence)) - 1n;
-  return new PyIterator(
+  const iterator = new PyIterator(
     reversedClass,
     () => (index >= 0n ? getItem(sequence, index--) : DONE),
     () => [sequence]
   );
+  iterator.lengthHint = () => (index >= 0n ? Number(index) + 1 : 0);
+  return iterator;
 };
 
 for (const cls of [enumerateClass, zipClass, mapClass, filterClass, reversedClass]) defineIteratorClass(cls);

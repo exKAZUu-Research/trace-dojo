@@ -1,5 +1,6 @@
 import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
+import { defineGetSet } from '../descriptors';
 import { DictStore } from '../dictStore';
 import { mappingEntries } from '../expressionEvaluator';
 import { pyHash } from '../hashing';
@@ -8,10 +9,20 @@ import { runLibrarySource } from '../librarySource';
 import { registerLazyAttributes, registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
-import { callValue, getIterator, isCallable, isTruthy, iterate, lookupSpecial, toArray } from '../objects';
+import {
+  callValue,
+  getAttribute,
+  getIterator,
+  isCallable,
+  isTruthy,
+  iterate,
+  lookupSpecial,
+  toArray,
+} from '../objects';
 import { binaryOp, compareOp, equals, lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { containerRepr, dictBody, updateDict } from '../typeContainers';
+import { newGenericAlias } from '../typeHints';
 import {
   builtinClass,
   dictClass,
@@ -155,7 +166,51 @@ method(
   (self) => new PyDeque(dequeOf(self).cls, [...dequeOf(self).items], dequeOf(self).maxlen)
 );
 method(dequeClass, '__len__', 'none', 0, 0, (self) => BigInt(dequeOf(self).items.length));
-method(dequeClass, '__bool__', 'none', 0, 0, (self) => dequeOf(self).items.length > 0);
+method(dequeClass, '__add__', 'one', 1, 1, (self, [other]) => {
+  if (!(other instanceof PyDeque)) throw typeError(`can only concatenate deque (not "${typeName(other)}") to deque`);
+  const result = copyDeque(dequeOf(self));
+  // The items are copied first, as `d + d` must not see its own appends.
+  // oxlint-disable-next-line unicorn/prefer-spread -- A copy, not an iteration, is the point.
+  const items = other.items.slice();
+  for (const item of items) push(result, item, false);
+  return result;
+});
+method(dequeClass, '__iadd__', 'one', 1, 1, (self, [other]) => {
+  for (const item of toArray(other)) push(dequeOf(self), item, false);
+  return self;
+});
+for (const name of ['__mul__', '__rmul__']) {
+  method(dequeClass, name, 'one', 1, 1, (self, [count]) => {
+    const result = copyDeque(dequeOf(self));
+    repeatDeque(result, count);
+    return result;
+  });
+}
+method(dequeClass, '__imul__', 'one', 1, 1, (self, [count]) => {
+  repeatDeque(dequeOf(self), count);
+  return self;
+});
+method(dequeClass, '__copy__', 'none', 0, 0, (self) => copyDeque(dequeOf(self)));
+method(dequeClass, '__class_getitem__', 'one', 1, 1, (owner, [key]) => newGenericAlias(owner, key), {
+  binding: 'class',
+});
+dequeClass.dict.set('__module__', 'collections');
+
+function copyDeque(deque: PyDeque): PyDeque {
+  currentRuntime().allocate(deque.items.length);
+  return new PyDeque(deque.cls, [...deque.items], deque.maxlen);
+}
+
+/** Repeats a deque's items in place, keeping only the last `maxlen` as appending them one by one would. */
+function repeatDeque(deque: PyDeque, countValue: PyValue): void {
+  const count = Number(toIndex(countValue));
+  const items = [...deque.items];
+  if (count <= 0) {
+    deque.items.length = 0;
+    return;
+  }
+  for (let round = 1; round < count; round++) for (const item of items) push(deque, item, false);
+}
 method(dequeClass, '__getitem__', 'one', 1, 1, (self, [key]) => dequeOf(self).items[dequeIndex(dequeOf(self), key)]);
 method(dequeClass, '__setitem__', 'expected', 2, 2, (self, [key, value]) => {
   dequeOf(self).items[dequeIndex(dequeOf(self), key)] = value;
@@ -455,6 +510,13 @@ for (const [name, compare] of [
   );
 }
 method(counterClass, '__missing__', 'one', 1, 1, () => 0n);
+method(counterClass, '_keep_positive', 'none', 0, 0, (self) => keepPositive(counterOf(self)));
+// Counter is a class written in Python in CPython, whose dictionary has what a class statement gives it.
+counterClass.dict.set('__module__', 'collections');
+counterClass.dict.set('__firstlineno__', 551n);
+counterClass.dict.set('__static_attributes__', newTuple([]));
+defineGetSet(counterClass, '__dict__', () => newDict());
+defineGetSet(counterClass, '__weakref__', () => None);
 method(counterClass, '__delitem__', 'one', 1, 1, (self, [key]) => {
   counterOf(self).store.delete(key);
   return None;
@@ -493,6 +555,8 @@ method(defaultdictClass, '__repr__', 'none', 0, 0, (self) => {
   return containerRepr(dict, '...', () => `defaultdict(${pyRepr(dict.defaultFactory ?? None)}, ${dictBody(dict)})`);
 });
 method(defaultdictClass, '__missing__', 'one', 1, 1, (self, [key]) => currentRuntime().missingKey(self as PyDict, key));
+method(defaultdictClass, '__copy__', 'none', 0, 0, (self) => callValue(getAttribute(self, 'copy'), []));
+defaultdictClass.dict.set('__module__', 'collections');
 defaultdictClass.dict.set(
   'default_factory',
   new PyDescriptor(
@@ -509,6 +573,7 @@ defaultdictClass.dict.set(
 
 export const orderedDictClass = new PyClass('OrderedDict', [dictClass], typeClass);
 orderedDictClass.tpName = 'collections.OrderedDict';
+defineGetSet(orderedDictClass, '__dict__', () => newDict());
 orderedDictClass.mro = [orderedDictClass, ...dictClass.mro];
 orderedDictClass.module = 'collections';
 orderedDictClass.layout = { base: 'native' };
@@ -607,11 +672,19 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
   const cls = new PyClass(typename, [tupleClass], typeClass);
   cls.mro = [cls, ...tupleClass.mro];
   cls.isBuiltin = false;
-  cls.module = '__main__';
   cls.layout = { base: 'native' };
   cls.construct = (tupleType, values, keywords) => newNamedTuple(tupleType, fields, defaults, values, keywords);
+  const module = kwargs?.get('module');
+  cls.module = typeof module === 'string' ? module : '__main__';
+  cls.dict.set('__doc__', `${typename}(${fields.join(', ')})`);
+  cls.dict.set('__slots__', newTuple([]));
   cls.dict.set('_fields', newTuple(fields));
+  cls.dict.set(
+    '_field_defaults',
+    newDict(defaults.map((value, index) => [fields[fields.length - defaults.length + index], value]))
+  );
   cls.dict.set('__match_args__', newTuple(fields));
+  cls.dict.set('__module__', cls.module);
   for (const [index, name] of fields.entries()) {
     cls.dict.set(
       name,
@@ -715,6 +788,8 @@ function defineNamedTupleMethods(): void {
   method(namedTupleBase, '_make', 'one', 1, 1, (cls, [iterable]) => callValue(cls, toArray(iterable)), {
     binding: 'class',
   });
+  namedTupleBase.dict.set('__replace__', namedTupleBase.dict.get('_replace') as PyValue);
+  method(namedTupleBase, '__getnewargs__', 'none', 0, 0, (self) => newTuple([...(self as PyTuple).items]));
 }
 defineNamedTupleMethods();
 
@@ -726,9 +801,7 @@ function namedtupleWithMethods(args: PyValue[], kwargs: Kwargs): PyValue {
 
 /** A namedtuple class that a library module defines, such as `functools.CacheInfo`. */
 export function makeNamedTupleClass(name: string, fields: string[], module: string): PyClass {
-  const cls = namedtupleWithMethods([name, newList(fields)], undefined) as PyClass;
-  cls.module = module;
-  return cls;
+  return namedtupleWithMethods([name, newList(fields)], new Map([['module', module]])) as PyClass;
 }
 
 const pythonNamespaces = new WeakMap<object, Map<string, PyValue>>();

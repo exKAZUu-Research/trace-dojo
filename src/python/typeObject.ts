@@ -1,6 +1,7 @@
 import { deleteInstanceAttribute, setInstanceAttribute } from './attributes';
 import { addressOf, defaultRepr, pyFormat, pyRepr, pyStr } from './conversions';
 import { method } from './define';
+import { defineUnsupportedAttributes } from './descriptors';
 import { isEnumClass } from './enums';
 import { identityHash, NATIVE_HASHES } from './hashing';
 import { argument, checkArgs } from './nativeArgs';
@@ -229,7 +230,42 @@ export function nextValue(iterator: PyValue): PyValue {
 }
 
 /** Gives every native iterator class the iterator protocol and a repr. */
+/** The iterator types whose `__length_hint__` gives how many items are left, and that can be pickled. */
+const SIZED_ITERATORS = new Set([
+  'list_iterator',
+  'list_reverseiterator',
+  'tuple_iterator',
+  'str_ascii_iterator',
+  'str_iterator',
+  'range_iterator',
+  'set_iterator',
+  'dict_keyiterator',
+  'dict_valueiterator',
+  'dict_itemiterator',
+  'dict_reversekeyiterator',
+  'dict_reversevalueiterator',
+  'dict_reverseitemiterator',
+  'reversed',
+]);
+const PICKLED_ITERATORS = new Set([
+  'list_iterator',
+  'list_reverseiterator',
+  'tuple_iterator',
+  'str_ascii_iterator',
+  'str_iterator',
+  'range_iterator',
+  'reversed',
+  'zip',
+  'map',
+]);
+
 export function defineIteratorClass(cls: PyClass): void {
+  if (SIZED_ITERATORS.has(cls.name)) {
+    method(cls, '__length_hint__', 'none', 0, 0, (self) => BigInt((self as PyIterator).lengthHint?.() ?? 0));
+  }
+  if (PICKLED_ITERATORS.has(cls.name)) {
+    defineUnsupportedAttributes(cls, { __setstate__: `${cls.name}.__setstate__()（pickle で使う状態の復元）` });
+  }
   method(cls, '__iter__', 'none', 0, 0, (self) => self);
   method(cls, '__next__', 'none', 0, 0, (self) => {
     const value = (self as PyIterator).next();

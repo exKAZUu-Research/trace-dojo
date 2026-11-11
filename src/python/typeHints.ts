@@ -1,9 +1,11 @@
 import { isSubclassOfClass } from './builtins';
 import { pyRepr } from './conversions';
 import { method } from './define';
+import { defineGetSet } from './descriptors';
 import { pyHash } from './hashing';
-import { callValue } from './objects';
+import { callValue, getAttributeOrUndefined } from './objects';
 import { equals } from './operators';
+import { currentRuntime } from './runtimeContext';
 import {
   builtinClass,
   classOf,
@@ -15,17 +17,7 @@ import {
   NotImplemented,
   typeError,
 } from './types';
-import {
-  type Kwargs,
-  PyBuiltinFunction,
-  PyClass,
-  PyFunction,
-  PyList,
-  PyObject,
-  PyOpaque,
-  PyTuple,
-  type PyValue,
-} from './values';
+import { type Kwargs, PyBuiltinFunction, PyClass, PyFunction, PyList, PyOpaque, PyTuple, type PyValue } from './values';
 
 /**
  * The objects of type hints: `list[int]` (types.GenericAlias), `int | str` (typing.Union), and the aliases and special
@@ -537,29 +529,44 @@ genericAliasClass.construct = (_cls, args) => {
   if (args.length !== 2) throw typeError(`GenericAlias expected 2 arguments, got ${args.length}`);
   return newGenericAlias(args[0], args[1]);
 };
+/** The attributes a types.GenericAlias has of its own; it reads every other attribute from its origin. */
+const GENERIC_ALIAS_OWN = new Set([
+  '__class__',
+  '__bases__',
+  '__origin__',
+  '__args__',
+  '__unpacked__',
+  '__parameters__',
+  '__typing_unpacked_tuple_args__',
+  '__mro_entries__',
+  '__reduce_ex__',
+  '__reduce__',
+  '__copy__',
+  '__deepcopy__',
+]);
 genericAliasClass.opaqueAttribute = (self, name) => {
   const alias = aliasOf(self);
   if (name === '__origin__') return alias.origin;
   if (name === '__args__') return newTuple(alias.args);
   if (name === '__parameters__') return newTuple([]);
   if (name === '__unpacked__') return false;
-  if (name === '__name__' || name === '__qualname__' || name === '__module__') {
-    return alias.origin instanceof PyObject
-      ? (alias.origin.cls.opaqueAttribute?.(alias.origin as PyOpaque, name) ?? classAttributeOf(alias.origin, name))
-      : undefined;
-  }
-  return;
+  if (name === '__typing_unpacked_tuple_args__') return None;
+  if (GENERIC_ALIAS_OWN.has(name)) return;
+  return getAttributeOrUndefined(alias.origin, name);
 };
+genericAliasClass.dirNames = (self) => [
+  ...currentRuntime().dirNames(aliasOf(self).origin),
+  '__origin__',
+  '__args__',
+  '__unpacked__',
+  '__parameters__',
+  '__typing_unpacked_tuple_args__',
+  '__mro_entries__',
+];
+method(genericAliasClass, '__mro_entries__', 'one', 1, 1, (self) => newTuple([aliasOf(self).origin]));
 genericAliasClass.subclassCheck = (_self, _cls, caller) => {
   throw typeError(`${caller}() argument 2 cannot be a parameterized generic`);
 };
-
-function classAttributeOf(value: PyValue, name: string): PyValue | undefined {
-  if (!(value instanceof PyClass)) return undefined;
-  if (name === '__name__') return value.name;
-  if (name === '__qualname__') return value.qualifiedName;
-  return value.module;
-}
 
 // collections.abc.Callable[...] -----------------------------------------------------------------------------------
 
@@ -612,12 +619,22 @@ method(unionClass, '__hash__', 'none', 0, 0, (self) => {
   for (const item of (self as PyOpaque).data as PyValue[]) hash ^= pyHash(item);
   return hash;
 });
-unionClass.opaqueAttribute = (self, name) => {
-  if (name === '__args__') return newTuple(self.data as PyValue[]);
-  if (name === '__origin__') return unionClass;
-  if (name === '__parameters__') return newTuple([]);
-  return;
-};
+for (const [name, get] of [
+  ['__args__', (self: PyValue) => newTuple((self as PyOpaque).data as PyValue[])],
+  ['__origin__', () => unionClass],
+  ['__parameters__', () => newTuple([])],
+  ['__name__', () => 'Union'],
+  ['__qualname__', () => 'Union'],
+] as const) {
+  defineGetSet(unionClass, name, get);
+}
+method(unionClass, '__getitem__', 'one', 1, 1, (self) => {
+  throw typeError(`${pyRepr(self)} is not a generic class`);
+});
+method(unionClass, '__mro_entries__', 'one', 1, 1, (self) => {
+  throw typeError(`Cannot subclass ${pyRepr(self)}`);
+});
+method(unionClass, '__class_getitem__', 'one', 1, 1, (_owner, [key]) => unionGetItem(key), { binding: 'class' });
 unionClass.construct = () => {
   throw typeError("cannot create 'typing.Union' instances");
 };

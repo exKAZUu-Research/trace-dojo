@@ -1,6 +1,6 @@
 import { registerVirtualSubclass } from './abstractClasses';
 import { isSubclassOfClass } from './builtins';
-import { isDataDescriptor, writeDescriptor } from './descriptors';
+import { isDataDescriptor, readDescriptor, writeDescriptor } from './descriptors';
 import { newMappingProxy } from './mappingProxy';
 import { attributeError, bindValue, callValue, getAttribute, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
@@ -47,6 +47,7 @@ export function classAttribute(cls: PyClass, name: string): PyValue | undefined 
   if (attribute === undefined) {
     // Methods of the metaclass, such as `mro()`, bind to the class.
     const meta = typeClass.lookup(name);
+    if (isDataDescriptor(meta)) return readDescriptor(meta, cls);
     return meta instanceof PyBuiltinFunction ? bindValue(meta, cls, typeClass) : undefined;
   }
   if (attribute instanceof PyDescriptor) {
