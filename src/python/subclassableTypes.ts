@@ -1,4 +1,3 @@
-import { defineConstructingNew } from './instances';
 import type { PyClass } from './values';
 
 /** The C types CPython lets programs subclass whose objects this grader makes by their `construct`. */
@@ -38,9 +37,10 @@ const SUBCLASSABLE = new Set([
 
 /** Whether a program's class may derive from a builtin class, as CPython's Py_TPFLAGS_BASETYPE tells. */
 export function isBaseType(cls: PyClass): boolean {
-  if (!cls.isBuiltin || cls.isBaseType) return true;
-  if (!SUBCLASSABLE.has(`${cls.module}.${cls.name}`)) return false;
-  // A subclass's objects come from the type's __new__, as CPython's tp_new makes them.
-  if (!cls.dict.has('__new__')) defineConstructingNew(cls);
-  return true;
+  return !cls.isBuiltin || cls.isBaseType || isSubclassableConstruct(cls);
+}
+
+/** Whether a builtin type creates its objects by its `construct` and yet CPython lets programs subclass it. */
+export function isSubclassableConstruct(cls: PyClass): boolean {
+  return cls.isBuiltin && cls.construct !== undefined && SUBCLASSABLE.has(`${cls.module}.${cls.name}`);
 }

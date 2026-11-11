@@ -2088,5 +2088,10 @@ def _check_methods(C, *methods):
     return True
 
 
+# CPython's io takes these from its C module _io.
+for _cls in (BufferedRWPair, BufferedRandom, BufferedReader, BufferedWriter, IncrementalNewlineDecoder, TextIOWrapper):
+    _cls.__module__ = '_io'
+del _cls
+
 del _c_type_name, _handled_exception, _standard_stderr
 `;

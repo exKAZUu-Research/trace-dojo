@@ -3,8 +3,6 @@
 //   bun scripts/generateBuiltinDocs.ts .tmp/builtinDocs.json && bun fmt src/python/data/builtinDocs.ts
 import { readFileSync, writeFileSync } from 'node:fs';
 
-// Imported after the modules that define the builtin classes, as the library imports it.
-import { PyAttribute } from '../src/python/attributeDescriptors';
 import { docKey, moduleDoc } from '../src/python/builtinDocs';
 import { SUPPORTED_MODULES } from '../src/python/moduleNames';
 import { builtinFunctionModule } from '../src/python/modules';
@@ -99,7 +97,7 @@ function collect(value: PyValue): void {
     else if (
       attribute instanceof PyBuiltinFunction ||
       attribute instanceof PyDescriptor ||
-      attribute instanceof PyAttribute
+      isAttributeDescriptor(attribute)
     )
       keys.add(`${key}.${name}`);
   }
@@ -122,4 +120,9 @@ function run(source: string, inspect: (runtime: Runtime, globals: Map<string, Py
     // A module this grader cannot import alone, which has no data then.
   }
   void PyModule;
+}
+
+/** A getset or member descriptor, known by its owner, as importing their module first would break the import order. */
+function isAttributeDescriptor(value: PyValue): boolean {
+  return (value as { owner?: unknown }).owner instanceof PyClass;
 }

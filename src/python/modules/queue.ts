@@ -139,7 +139,6 @@ class LifoQueue(Queue):
     def _get(self):
         return self.queue.pop()
 class _PySimpleQueue:
-    __module__ = '_queue'
     def __init__(self):
         self._queue = deque()
         self._count = threading.Semaphore(0)
