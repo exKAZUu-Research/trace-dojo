@@ -93,6 +93,11 @@ export function importModule(runtime: Runtime, name: string): PyModule {
   }
   const factory = factories.get(name);
   if (!factory) throw new UnsupportedFeatureError(`モジュール ${name}`);
+  // As in CPython, a package is imported before its submodule, and its code may import the submodule itself.
+  const dot = name.lastIndexOf('.');
+  const parent = dot === -1 ? undefined : importModule(runtime, name.slice(0, dot));
+  const imported = runtime.modules.get(name);
+  if (imported) return imported;
   // The builtins module's namespace is the one names fall back to, so that changing either changes the other.
   const module = new PyModule(moduleClass, name, name === 'builtins' ? runtime.builtins : new Map());
   runtime.modules.set(name, module);
@@ -102,8 +107,7 @@ export function importModule(runtime: Runtime, name: string): PyModule {
   addRegisteredAttributes(runtime, module);
   addLayoutAttributes(module, name);
   moduleTables.get(runtime)?.set(name, module);
-  const dot = name.lastIndexOf('.');
-  if (dot !== -1) importModule(runtime, name.slice(0, dot)).dict.set(name.slice(dot + 1), module);
+  parent?.dict.set(name.slice(dot + 1), module);
   return module;
 }
 

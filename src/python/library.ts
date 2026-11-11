@@ -39,6 +39,7 @@ import './modules/annotationlib';
 import './modules/dataclasses';
 import './modules/unsupportedNames';
 import './modules/moduleExtras';
+import './modules/osNames';
 import './modules/random';
 import './modules/itertools';
 import './modules/functools';
