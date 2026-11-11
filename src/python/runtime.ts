@@ -19,6 +19,7 @@ import { keyError } from './items';
 import { viewOf } from './memoryview';
 import { importModule } from './modules';
 import { systemExitError } from './modules/sys';
+import { checkNamespaceView } from './namespaceDifferences';
 import { DEFAULT_MAX_STR_DIGITS } from './numbers';
 import { bindValue, callValue, isTruthy, overriding, setAttribute, toArray } from './objects';
 import type { ProgramSource } from './programSource';
@@ -522,6 +523,7 @@ export class Runtime {
 
   /** The sorted attribute names `dir()` lists, which AttributeError suggestions choose from. */
   dirNames(value: PyValue): string[] {
+    checkNamespaceView(value, 'dir()');
     if (value instanceof PyClass && value.flags.isEnum && value.enumMembers) return enumClassDir(value, this);
     if (value instanceof PyInstance && value.enumValue !== undefined) return enumMemberDir(value, this);
     // A module lists the names this grader does not support too, as CPython's module has them.

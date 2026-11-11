@@ -15,6 +15,7 @@ import { newBytes } from './bytesValues';
 import { newComplex } from './complexNumbers';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
 import { Frame } from './frame';
+import { checkExtraName, programAttributeError } from './namespaceDifferences';
 import { namespaceOf } from './namespaces';
 import {
   bindValue,
@@ -97,7 +98,13 @@ export class ExpressionEvaluator {
         return this.dictDisplay(expression, frame);
       }
       case 'attribute': {
-        return getAttribute(this.evaluate(expression.object, frame), expression.name);
+        const object = this.evaluate(expression.object, frame);
+        checkExtraName(object, expression.name);
+        try {
+          return getAttribute(object, expression.name);
+        } catch (error) {
+          throw programAttributeError(error, object, expression.name);
+        }
       }
       case 'subscript': {
         const object = this.evaluate(expression.object, frame);

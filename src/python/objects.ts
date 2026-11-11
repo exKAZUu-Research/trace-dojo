@@ -14,6 +14,7 @@ import {
 import { getItem as getItemOf } from './items';
 import { clamp, reduction, withState } from './iteratorStates';
 import { completeNamespace } from './modules/moduleLayout';
+import { checkNamespaceListing } from './namespaceDifferences';
 import { namespaceDict } from './namespaces';
 import { describeIntegerIndex, toIndex } from './numbers';
 import { currentRuntime } from './runtimeContext';
@@ -246,6 +247,7 @@ function moduleAttribute(module: PyModule, name: string): PyValue | undefined {
   const feature = module.unsupported.get(name);
   if (feature !== undefined) throw new UnsupportedFeatureError(feature);
   if (name === '__dict__') {
+    checkNamespaceListing(module, 'モジュールの __dict__・vars()');
     completeNamespace(module);
     return namespaceDict(module.dict);
   }

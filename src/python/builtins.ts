@@ -12,6 +12,7 @@ import { pyHash } from './hashing';
 import { defineConstructingNew } from './instances';
 import { reduction, withState } from './iteratorStates';
 import { dunderImport } from './modules/importlib';
+import { checkExtraName, missingNamespaceName, readProgramAttribute } from './namespaceDifferences';
 import { argument, checkArgs } from './nativeArgs';
 import { asFloat, divmodFloat, floorDivInt, modInt, toIndex } from './numbers';
 import {
@@ -638,8 +639,8 @@ function getattr(args: PyValue[], kwargs: Kwargs): PyValue {
   checkArgs({ qualified: 'getattr', min: 2, max: 3, style: 'expected' }, args, kwargs);
   const [object, name, fallback] = args;
   if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
-  if (fallback === undefined) return getAttribute(object, name);
-  return getAttributeOrUndefined(object, name) ?? fallback;
+  if (fallback === undefined) return readProgramAttribute(object, name, () => getAttribute(object, name));
+  return readProgramAttribute(object, name, () => getAttributeOrUndefined(object, name) ?? fallback);
 }
 
 function sorted(args: PyValue[], kwargs: Kwargs): PyValue {
@@ -655,6 +656,8 @@ function hasAttribute(object: PyValue, name: PyValue): boolean {
   // An attribute this grader lacks exists in CPython, so code may test for it before it uses it.
   if (object instanceof PyModule && object.unsupported.has(name)) return true;
   if (unsupportedClassAttribute(object, name) !== undefined) return true;
+  if (missingNamespaceName(object, name) !== undefined) return true;
+  checkExtraName(object, name);
   return getAttributeOrUndefined(object, name) !== undefined;
 }
 

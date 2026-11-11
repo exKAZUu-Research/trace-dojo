@@ -27,6 +27,7 @@ import type { Frame } from './frame';
 import { delegateOf } from './generators';
 import { hasPythonLevelNew } from './instances';
 import { builtinFunctionModule } from './modules';
+import { checkNamespaceListing } from './namespaceDifferences';
 import { namespaceDict, namespaceOf } from './namespaces';
 import { attributeError, bindValue, callValue, getAttribute, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
@@ -158,6 +159,7 @@ export function typeData(cls: PyClass, name: string): PyValue | undefined {
       return cls.cls;
     }
     case '__dict__': {
+      checkNamespaceListing(cls, 'クラスの __dict__・vars()');
       // A read-only view of the class's own namespace, as CPython's mappingproxy.
       const types = currentRuntime().importModule('types');
       return callValue(types.dict.get('MappingProxyType') as PyValue, [namespaceDict(cls.dict)]);

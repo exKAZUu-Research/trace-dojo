@@ -1,4 +1,5 @@
 import type { Frame } from './frame';
+import { checkNamespaceListing } from './namespaceDifferences';
 import { namespaceDict } from './namespaces';
 import { getAttributeOrUndefined, getIterator } from './objects';
 import { currentRuntime } from './runtimeContext';
@@ -33,6 +34,7 @@ export function programFrames(): Frame[] {
 
 /** `vars(obj)`: the `__dict__` of an object. */
 export function vars(value: PyValue): PyValue {
+  checkNamespaceListing(value, 'vars()');
   const dict = getAttributeOrUndefined(value, '__dict__');
   if (dict === undefined) throw typeError('vars() argument must have __dict__ attribute');
   return dict;

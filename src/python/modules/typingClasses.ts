@@ -2,6 +2,7 @@ import { evaluateAnnotations } from '../annotations';
 import type { ClassDef, Expression } from '../ast';
 import { pyRepr, pyStr } from '../conversions';
 import { unpack } from '../expressionEvaluator';
+import { machineryClasses } from '../namespaceDifferences';
 import { callValue, getAttribute, getItem, isCallable, toArray } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import { mroEntryHooks } from '../typeParams';
@@ -24,6 +25,7 @@ import { PyNewType } from './typingTypeVars';
 
 // NamedTuple ------------------------------------------------------------------------------------------------------------
 
+const NAMED_TUPLE_INTERNALS = '__classdictcell__、__static_attributes__ などの NamedTupleMeta の内部';
 /** What a class statement deriving from `typing.NamedTuple` derives from, which creates a namedtuple class instead. */
 const namedTupleBase = builtinClass('NamedTuple');
 namedTupleBase.module = 'typing';
@@ -59,6 +61,7 @@ namedTupleBase.classFactory = (def, namespace, annotations, keywords) => {
     }
   }
   const cls = namedTupleClass(def.name, fields, defaults);
+  machineryClasses.set(cls, NAMED_TUPLE_INTERNALS);
   cls.qualifiedName = def.qualifiedName;
   cls.dict.set('__annotations__', evaluateAnnotations(annotations));
   cls.annotationNames = fields;
@@ -108,6 +111,7 @@ const namedTuple = nativeFunction('NamedTuple', (args, kwargs) => {
     []
   );
   cls.module = callerModule();
+  machineryClasses.set(cls, NAMED_TUPLE_INTERNALS);
   cls.dict.set('__annotations__', newDict(types));
   cls.dict.set('__orig_bases__', newTuple([namedTuple]));
   cls.annotationNames = pairs.map(([name]) => name as string);
@@ -222,6 +226,7 @@ function createTypedDict(
     (total === false ? optional : required).add(name);
   }
   typedDicts.set(cls, { annotations, required, optional });
+  machineryClasses.set(cls, '__readonly_keys__、__mutable_keys__、__annotate_func__ などの _TypedDictMeta の内部');
   cls.classFactory = createTypedDict;
   cls.dict.set('__annotations__', evaluateAnnotations(annotations));
   cls.dict.set('__required_keys__', newSet(required, true));
