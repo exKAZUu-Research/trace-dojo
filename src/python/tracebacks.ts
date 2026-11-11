@@ -1,3 +1,11 @@
+import type { Module, ScopeInfo } from './ast';
+import {
+  type CodeNames,
+  comprehensionsByScope,
+  functionCodeNames,
+  generatorCodeNames,
+  moduleCodeNames,
+} from './codeNames';
 import { addressOf } from './conversions';
 import { method } from './define';
 import type { Frame } from './frame';
@@ -245,7 +253,9 @@ export function functionCode(fn: PyFunction): PyOpaque {
 export const infoOf = (self: PyValue): CodeInfo => (self as PyOpaque).data as CodeInfo;
 
 function parameterCount(self: PyValue, kinds: string[]): bigint {
-  const fn = infoOf(self).fn;
+  const { fn, scope } = infoOf(self);
+  // A generator expression's code takes the iterator of its first iterable as its one positional parameter.
+  if (!fn && scope && comprehensionsByScope.has(scope as ScopeInfo)) return kinds.includes('positional') ? 1n : 0n;
   return BigInt(fn ? fn.def.params.filter((param) => kinds.includes(param.kind)).length : 0);
 }
 
@@ -274,13 +284,33 @@ defineProperty(codeClass, 'co_flags', (self) => {
 });
 defineProperty(codeClass, 'co_cellvars', (self) => newTuple(cellNames(infoOf(self).fn)));
 defineProperty(codeClass, 'co_freevars', (self) => newTuple(freeNames(infoOf(self).fn)));
+defineProperty(codeClass, 'co_varnames', (self) => newTuple(namesOf(self, 'co_varnames').varnames));
+defineProperty(codeClass, 'co_nlocals', (self) => BigInt(namesOf(self, 'co_nlocals').varnames.length));
+defineProperty(codeClass, 'co_names', (self) => newTuple(namesOf(self, 'co_names').names));
+
+const codeNamesCache = new WeakMap<object, CodeNames>();
+
+/** The names of a function's code, or of the module code compile() made, as CPython's compiler emits them. */
+function namesOf(self: PyValue, attribute: string): CodeNames {
+  const { fn, compiled, scope } = infoOf(self);
+  const generator = scope && comprehensionsByScope.get(scope as ScopeInfo);
+  if (generator) return generatorCodeNames(generator);
+  const source = fn?.def ?? (compiled as { module?: Module } | undefined)?.module;
+  if (!source) {
+    throw new UnsupportedFeatureError(`compile() で作ったもの以外のモジュールやクラスの本体のコードの ${attribute}`);
+  }
+  let names = codeNamesCache.get(source);
+  if (!names) {
+    names = 'params' in source ? functionCodeNames(source) : moduleCodeNames(source);
+    codeNamesCache.set(source, names);
+  }
+  return names;
+}
+
 // The bytecode, its offsets, and the tables over them, which also `replace()` would rebuild.
 for (const name of [
   'co_code',
   'co_consts',
-  'co_names',
-  'co_varnames',
-  'co_nlocals',
   'co_stacksize',
   'co_lines',
   'co_positions',
@@ -299,7 +329,12 @@ for (const name of [
 function cellNames(fn: PyFunction | undefined): string[] {
   if (!fn) return [];
   const { scope, params } = fn.def;
-  const cells = new Set([...scope.cells, ...(scope.inlinedCells ?? [])]);
+  // A variable only a comprehension CPython inlines reads stays a fast local.
+  const { captured } = functionCodeNames(fn.def);
+  const own = new Set([...scope.locals, ...params.map((param) => param.name), ...(scope.inlinedCells ?? [])]);
+  const cells = new Set(
+    [...scope.cells, ...(scope.inlinedCells ?? []), ...captured].filter((name) => captured.has(name) && own.has(name))
+  );
   const parameters = params.map((param) => param.name).filter((name) => cells.has(name));
   return [...parameters, ...[...cells].filter((name) => !parameters.includes(name)).toSorted()];
 }

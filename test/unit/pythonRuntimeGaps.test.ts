@@ -342,3 +342,250 @@ EXPECTED = "Counter({'a': 3, 'b': 2}) Counter({'a': 1})\\nCounter({'a': 5, 'b': 
 if _buf.getvalue() != EXPECTED: raise AssertionError(_buf.getvalue())
 `);
 });
+
+test("co_varnames, co_nlocals, co_cellvars, and co_names follow the order CPython's compiler emits names in", () => {
+  expectSameAsCPython(`import io as _io, contextlib as _contextlib
+_buf = _io.StringIO()
+_ctx = _contextlib.redirect_stdout(_buf)
+_ctx.__enter__()
+def show(f):
+    c = f.__code__
+    print(f.__name__, c.co_varnames, c.co_nlocals, c.co_argcount, c.co_cellvars, c.co_freevars, c.co_names)
+def f1(a, b=1, *args, c, d=2, **kw):
+    x = a + b
+    y = [i * x for i in args]
+    return y
+def f2():
+    if 0:
+        dead = 1
+    while False:
+        dead2 = 2
+    x: int
+    z: int = 3
+    return z
+def f3(n):
+    total = undefined_before
+    undefined_before = 0
+    for i, (j, k) in enumerate(n):
+        total += i
+    with open('x') as fh, open('y') as (g, h):
+        pass
+    try:
+        pass
+    except ValueError as err:
+        msg = str(err)
+    except TypeError as eg:
+        pass
+    else:
+        other = 1
+    finally:
+        fin = 2
+    del fin
+    try:
+        pass
+    except* KeyError as kg:
+        pass
+    return total
+def f4(seq):
+    def inner():
+        return captured
+    captured = 1
+    lam = lambda q, r=seq: q
+    gen = (v for v in seq if v)
+    d = {k: v for k, v in seq}
+    s = {w for w in seq for w2 in w}
+    if (walrus := len(seq)) > 1:
+        pass
+    ys = [last := y for y in seq]
+    return inner, lam
+def f5(subject):
+    match subject:
+        case [a, *rest]:
+            pass
+        case {'k': v, **others}:
+            pass
+        case Point(x=px, y=py) | Point(y=py, x=px):
+            pass
+        case str() as s if s:
+            pass
+        case _:
+            pass
+class K:
+    def m(self):
+        return super().m()
+    def n(self):
+        return __class__
+async def f6(xs):
+    async for a in xs:
+        pass
+    async with xs as b:
+        pass
+    r = await xs
+    return [c async for c in xs]
+def f7(a, /, b, *, c):
+    import os.path
+    import collections.abc as cabc
+    from json import dumps as d, loads
+    global G
+    G = 1
+    nonlocal_free = a
+    class Inner:
+        pass
+    @staticmethod
+    def deco(): pass
+    x = y = a.attr.sub
+    a.attr = b[c]
+    a.b += 1
+    print(f'{a!r:{b}}')
+    return os, cabc, d, loads
+def f8():
+    x = 1
+    del x
+    x = [x for x in range(3)]
+    y = [z for z in range(3) if z] + [z for z in range(2)]
+    return x, y
+for f in (f1, f2, f3, f4, f5, K.m, K.n, f6, f7, f8):
+    show(f)
+co = compile('[q for q in range(3)]\\nr = 1\\n{s: 1 for s in "ab"}\\nclass C:\\n    t = [u for u in "x"]\\n', '<m>', 'exec')
+print(co.co_varnames, co.co_nlocals, co.co_names)
+g = (i for i in range(3))
+print(g.gi_code.co_varnames, (lambda x, *y: 0).__code__.co_varnames)
+class Acct:
+    def __init__(self, n):
+        self.__n = n
+        __tmp = n * 2
+        self._Acct__z = __tmp
+    def get(self):
+        return [self.__n for _ in range(1)]
+def outer(a):
+    b = 1
+    def mid():
+        nonlocal b
+        b += 1
+        def inner():
+            return a + b
+        return inner
+    return mid
+def comps(xs, ys):
+    p = [[x * y for y in ys] for x in xs]
+    q = {x: [y for y in ys if y > x] for x in xs}
+    r = [lambda: x for x in xs]
+    s = [(lambda: z)() for z in xs]
+    t = [w for w in (v for v in xs)]
+    u = sorted(xs, key=lambda e: -e)
+    return p, q, r, s, t, u
+def flow(items):
+    i = 0
+    while i < 3:
+        i += 1
+        if i == 2:
+            continue
+    else:
+        done = True
+    for a, *rest in items:
+        first, (second, third) = a, rest
+    try:
+        return 1
+    finally:
+        cleanup = i
+    unreachable = 5
+def mutate(d, k):
+    d[k] += 1
+    d.x.y = 2
+    del d.x, d[k]
+    del d
+    x = y = z = 0
+    x, y = y, x
+    print(*[x], sep=str(y), **{'end': z})
+async def acomp(src):
+    res = [x async for x in src if await x]
+    gen = (y async for y in src)
+    async with src as (m, n):
+        await m
+    return res, gen
+def matcher(v):
+    match v:
+        case {'a': [1, x, *_], 'b': y} if x > y:
+            return x
+        case (1 | 2 | 3) as small:
+            return small
+        case object(real=re, imag=im):
+            return re
+        case [*_, last]:
+            return last
+def defaults(a=len, *, b=print, c=lambda q=min: q):
+    @staticmethod
+    def k(z=max): pass
+    class C(object, metaclass=type):
+        attr = a
+    return k, C
+def gen_func(n):
+    total = yield n
+    yield from range(total)
+for f in (Acct.__init__, Acct.get, outer, outer(1), outer(1)(), comps, flow, mutate, acomp, matcher, defaults, gen_func):
+    show(f)
+g = (k * 2 for k in range(3) if k for m in range(k))
+print(g.gi_code.co_varnames, g.gi_code.co_names, g.gi_code.co_argcount, g.gi_code.co_nlocals)
+print((lambda *a, **k: a).__code__.co_varnames, (lambda: [i for i in 'ab']).__code__.co_varnames)
+def generic[T](x: T, *ys: T) -> T:
+    return x
+def annotated():
+    Local = int
+    def inner(a: Local) -> Local:
+        return a
+    return inner
+class B:
+    def m(self, r):
+        return [super().m() for _ in r]
+    @classmethod
+    def c(cls):
+        return cls.__name__
+    @property
+    def p(self):
+        return self.__dict__
+def walrus_mod(xs):
+    if any((hit := x) > 2 for x in xs):
+        return hit
+    print([(y := v) for v in xs], y)
+def exc_names():
+    try:
+        pass
+    except* (ValueError, TypeError) as group:
+        handled = group
+    try:
+        pass
+    except Exception:
+        raise
+    finally:
+        pass
+def shadow(x):
+    x = [x for x in x]
+    return [x for x in x]
+def imports():
+    from os import path as p, sep
+    import json, re as regex
+    from collections.abc import Mapping
+    return p, sep, json, regex, Mapping
+def strings(n):
+    return f'{n:>{n}}' + t'{n!r}'.strings[0] + '%s' % n + 'x'.join([str(n)])
+def deleted():
+    a = 1
+    b = 2
+    del b
+    del a
+for f in (generic, annotated, B.m, B.c, B.p.fget, walrus_mod, exc_names, shadow, imports, strings, deleted):
+    show(f)
+co = compile('import os, sys as s\\nfrom json import loads\\n[x for x in range(2) if (w := x)]\\nprint(w)\\n', '<m>', 'exec')
+print(co.co_names, co.co_varnames, co.co_nlocals, co.co_argcount)
+co2 = compile('a + b * len(c)', '<e>', 'eval')
+print(co2.co_names, co2.co_varnames)
+co3 = compile('"""doc"""\\nfrom __future__ import annotations\\nx: int = 1\\n', '<m>', 'exec')
+print(co3.co_names)
+ns = {}
+exec('def h(q):\\n    return [q * i for i in range(q)]', ns)
+print(ns['h'].__code__.co_varnames, ns['h'].__code__.co_names)
+_ctx.__exit__(None, None, None)
+EXPECTED = "f1 ('a', 'b', 'c', 'd', 'args', 'kw', 'x', 'i', 'y') 9 2 () () ()\\nf2 ('dead', 'dead2', 'z') 3 0 () () ()\\nf3 ('n', 'undefined_before', 'total', 'i', 'j', 'k', 'fh', 'g', 'h', 'other', 'err', 'msg', 'eg', 'fin', 'kg') 15 1 () () ('enumerate', 'open', 'ValueError', 'str', 'TypeError', 'KeyError')\\nf4 ('seq', 'inner', 'lam', 'gen', 'k', 'v', 'd', 'w', 'w2', 's', 'walrus', 'y', 'last', 'ys') 14 1 ('captured',) () ('len',)\\nf5 ('subject', 'a', 'rest', 'v', 'others', 'px', 'py', 's') 8 1 () () ('Point', 'str')\\nm ('self',) 1 1 () ('__class__',) ('super', 'm')\\nn ('self',) 1 1 () ('__class__',) ()\\nf6 ('xs', 'a', 'b', 'r', 'c') 5 1 () () ()\\nf7 ('a', 'b', 'c', 'os', 'cabc', 'd', 'loads', 'nonlocal_free', 'Inner', 'deco', 'x', 'y') 12 2 () () ('os.path', 'collections.abc', 'abc', 'json', 'dumps', 'loads', 'G', 'staticmethod', 'attr', 'sub', 'b', 'print')\\nf8 ('x', 'z', 'y') 3 0 () () ('range',)\\n('q', 's') 2 ('range', 'r', 'C')\\n('.0', 'i') ('x', 'y')\\n__init__ ('self', 'n', '_Acct__tmp') 3 2 () () ('_Acct__n', '_Acct__z')\\nget ('self', '_') 2 1 () () ('range', '_Acct__n')\\nouter ('a', 'mid') 2 1 ('a', 'b') () ()\\nmid ('inner',) 1 0 () ('a', 'b') ()\\ninner () 0 0 () ('a', 'b') ()\\ncomps ('xs', 'ys', 'x', 'y', 'p', 'q', 'r', 'z', 's', 'w', 't', 'u') 12 2 ('x', 'z') () ('sorted',)\\nflow ('items', 'i', 'done', 'a', 'rest', 'first', 'second', 'third', 'cleanup', 'unreachable') 10 1 () () ()\\nmutate ('d', 'k', 'x', 'y', 'z') 5 2 () () ('x', 'y', 'print', 'str')\\nacomp ('src', 'x', 'res', 'gen', 'm', 'n') 6 1 () () ()\\nmatcher ('v', 'x', 'y', 'small', 're', 'im', 'last') 7 1 () () ('object',)\\ndefaults ('a', 'b', 'c', 'k', 'C') 5 1 ('a',) () ('staticmethod', 'max', 'object', 'type')\\ngen_func ('n', 'total') 2 1 () () ('range',)\\n('.0', 'k', 'm') ('range',) 1 3\\n('a', 'k') ('i',)\\ngeneric ('x', 'ys') 2 1 () () ()\\nannotated ('inner',) 1 0 ('Local',) () ('int',)\\nm ('self', 'r', '_') 3 2 () ('__class__',) ('super', 'm')\\nc ('cls',) 1 1 () () ('__name__',)\\np ('self',) 1 1 () () ('__dict__',)\\nwalrus_mod ('xs', 'v', 'y') 3 1 ('hit',) () ('any', 'print')\\nexc_names ('group', 'handled') 2 0 () () ('ValueError', 'TypeError', 'Exception')\\nshadow ('x',) 1 1 () () ()\\nimports ('p', 'sep', 'json', 'regex', 'Mapping') 5 0 () () ('os', 'path', 'sep', 'json', 're', 'collections.abc', 'Mapping')\\nstrings ('n',) 1 1 () () ('strings', 'join', 'str')\\ndeleted ('a', 'b') 2 0 () () ()\\n('os', 'sys', 's', 'json', 'loads', 'range', 'w', 'print') ('x', 'w') 2 0\\n('a', 'b', 'len', 'c') ()\\n('__conditional_annotations__', '__doc__', '__future__', 'annotations', 'x', '__annotations__')\\n('q', 'i') ('range',)\\n"
+if _buf.getvalue() != EXPECTED: raise AssertionError(_buf.getvalue())
+`);
+});

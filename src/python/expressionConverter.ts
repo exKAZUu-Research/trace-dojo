@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 628 -- The expression converter keeps one method per kind of expression node together.
+// code-gauge-allow-file fileNcss 632 -- The expression converter keeps one method per kind of expression node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -16,6 +16,7 @@ import type {
   Parameter,
   Target,
 } from './ast';
+import { comprehensionsByScope } from './codeNames';
 import {
   children,
   decodeBytesEscapes,
@@ -602,7 +603,15 @@ export abstract class ExpressionConverter {
       }
       const element = body.type === 'pair' ? this.expression(field(body, 'key')) : this.expression(body);
       const value = body.type === 'pair' ? this.expression(field(body, 'value')) : undefined;
-      return { kind: 'comprehension', type, element, value, generators, scope: scope.info, row: rowOf(node) };
+      return registered({
+        kind: 'comprehension',
+        type,
+        element,
+        value,
+        generators,
+        scope: scope.info,
+        row: rowOf(node),
+      });
     } finally {
       this.context = outer;
     }
@@ -952,3 +961,9 @@ const FLOAT_NUMBER = String.raw`(?:${POINT_FLOAT}(?:[eE][+-]?${DIGIT_PART})?|${D
 const INTEGER_LITERAL = /^(?:[1-9](?:_?\d)*|0+(?:_?0)*|0[bB](?:_?[01])+|0[oO](?:_?[0-7])+|0[xX](?:_?[\dA-Fa-f])+)$/;
 const FLOAT_LITERAL = new RegExp(`^${FLOAT_NUMBER}$`);
 const IMAGINARY_LITERAL = new RegExp(`^(?:${FLOAT_NUMBER}|${DIGIT_PART})[jJ]$`);
+
+/** Notes the comprehension of its scope, whose code a generator expression's `gi_code` describes. */
+function registered(comprehension: Extract<Expression, { kind: 'comprehension' }>): Expression {
+  comprehensionsByScope.set(comprehension.scope, comprehension);
+  return comprehension;
+}
