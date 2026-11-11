@@ -124,8 +124,7 @@ export class AstExpressionBuilder {
 
   // Expressions ---------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 60 -- One case per kind of expression node, each delegating where it grows.
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of expression node, each delegating where it grows.
+  // code-gauge-allow functionNcss 47 -- One case per kind of expression node, each delegating where it grows.
   expr(node: Node, ctx: Context = 'Load'): PyValue {
     const at = this.location(node);
     switch (node.type) {
@@ -191,6 +190,16 @@ export class AstExpressionBuilder {
           at
         );
       }
+      default: {
+        return this.displayOrOther(node, ctx, at);
+      }
+    }
+  }
+
+  /** The displays, comprehensions, and the other expressions that compose others. */
+  // code-gauge-allow functionNcss 45 -- One case per kind of expression node, each delegating where it grows.
+  private displayOrOther(node: Node, ctx: Context, at: Location): PyValue {
+    switch (node.type) {
       case 'list':
       case 'list_pattern': {
         return this.make('List', { elts: this.elements(namedChildren(node), ctx), ctx: this.singleton(ctx) }, at);
@@ -436,7 +445,7 @@ export class AstExpressionBuilder {
     });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Sorts each kind of parameter into CPython's lists.
+  // code-gauge-allow functionNcss 32 -- Sorts each kind of parameter into CPython's lists.
   protected arguments(node: Node): PyValue {
     const positional: PyValue[] = [];
     const posonly: PyValue[] = [];

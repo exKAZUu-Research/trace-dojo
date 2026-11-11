@@ -42,8 +42,7 @@ export abstract class AstPatternBuilder extends AstExpressionBuilder {
   }
 
   /** The pattern the nodes of one alternative make: one node, or a minus sign and a number. */
-  // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of pattern node.
-  // code-gauge-allow functionNcss 40 -- One case per kind of pattern node.
+  // code-gauge-allow functionNcss 46 -- One case per kind of pattern node.
   private patternOf(nodes: Node[]): PyValue {
     const [node] = nodes;
     const at = this.location(node, nodes.at(-1) as Node);

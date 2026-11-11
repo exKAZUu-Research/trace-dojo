@@ -77,13 +77,16 @@ export function compile(args: PyValue[], kwargs: Kwargs): PyValue {
   if (mode !== 'exec' && mode !== 'eval' && mode !== 'single') {
     throw valueError("compile() mode must be 'exec', 'eval' or 'single'");
   }
-  if (onlyAst(flags) && astSupport) {
-    const indentationError = findIndentationError(text);
-    if (indentationError) throw syntaxError(unshownIndentationErrorClass, filename, reasonOf(indentationError));
-    return astSupport.parse(text, mode, (reason) => syntaxError(unshownSyntaxErrorClass, filename, reason));
-  }
+  if (onlyAst(flags) && astSupport) return parseTree(astSupport, text, mode, filename);
   checkFlags(flags);
   return new PyOpaque(codeClass, '', compileCode(text, mode, filename));
+}
+
+/** The tree `ast.parse` gives, raising the SyntaxError of text the grammar rejects. */
+function parseTree(support: AstSupport, text: string, mode: Mode, filename: string): PyValue {
+  const indentationError = findIndentationError(text);
+  if (indentationError) throw syntaxError(unshownIndentationErrorClass, filename, reasonOf(indentationError));
+  return support.parse(text, mode, (reason) => syntaxError(unshownSyntaxErrorClass, filename, reason));
 }
 
 /** How compile() makes and reads the trees of the `ast` module, which that module provides. */

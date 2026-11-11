@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss 420 -- Builds every kind of CPython statement node, as ast.c and the parser's actions do.
 // Builds the trees of CPython's `ast` module from the syntax tree, as `compile(..., PyCF_ONLY_AST)` returns them.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -65,7 +64,6 @@ export class AstBuilder extends AstPatternBuilder {
   }
 
   // code-gauge-allow functionNcss 60 -- One case per kind of statement node, each delegating where it grows.
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of statement node, each delegating where it grows.
   private statements(node: Node): PyValue[] {
     const at = this.location(node);
     switch (node.type) {
