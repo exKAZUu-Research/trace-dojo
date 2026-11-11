@@ -1,17 +1,34 @@
-// code-gauge-allow-file fileNcss 503 -- The operator implementations of the builtin types belong together.
+// code-gauge-allow-file fileNcss 567 -- The operator implementations of the builtin types belong together.
 import type { BinaryOperator, CompareOperator } from './ast';
+import { isBytesLike, PyBytes } from './bytesValues';
 import { complexBinary, isComplexOperand, newComplex } from './complexNumbers';
+import { DictStore } from './dictStore';
 import { asFloat, divmodFloat, floorDivInt, intToFloat, modInt, trueDivideInt } from './numbers';
-import { bindValue, callValue, iterate, lookupSpecial } from './objects';
+import { bindValue, callSpecial, callValue, iterate, lookupSpecial, overriding } from './objects';
 import { formatPercent } from './percentFormat';
 import { currentRuntime } from './runtimeContext';
 import { compareStr, strLength } from './strings';
-import { classOf, newList, newSet, newTuple, NotImplemented, pyError, typeError, typeName } from './types';
+import {
+  classOf,
+  intClass,
+  newList,
+  newSet,
+  newTuple,
+  NotImplemented,
+  objectClass,
+  pyError,
+  resultClassOf,
+  strClass,
+  typeError,
+  typeName,
+  unbox,
+} from './types';
 import {
   DONE,
   PyComplex,
   PyDict,
   PyDictView,
+  PyError,
   PyInstance,
   PyList,
   PyObject,
@@ -21,7 +38,7 @@ import {
   type PyValue,
 } from './values';
 
-const SPECIAL_NAMES: Record<BinaryOperator, [string, string, string]> = {
+export const SPECIAL_NAMES: Record<BinaryOperator, [string, string, string]> = {
   '+': ['__add__', '__radd__', '__iadd__'],
   '-': ['__sub__', '__rsub__', '__isub__'],
   '*': ['__mul__', '__rmul__', '__imul__'],
@@ -47,21 +64,63 @@ function asInt(value: bigint | boolean): bigint {
   return typeof value === 'boolean' ? (value ? 1n : 0n) : value;
 }
 
+/**
+ * The special methods of builtin types, by the function in their class's dictionary, as the slots CPython's operators
+ * call: they return NotImplemented for an operand of another type where calling the method itself may raise.
+ */
+export const builtinSlots = new Map<PyValue, (self: PyValue, other: PyValue) => PyValue>();
+
+/** Whether a value's class is builtin, so that its operators are the builtin ones. */
+function isPlain(value: PyValue): boolean {
+  return typeof value !== 'object' || value.cls.isBuiltin;
+}
+
+/** Calls a special method found on an operand's class, through its slot when it is a builtin type's. */
+function callSlot(method: PyValue, self: PyValue, other: PyValue): PyValue {
+  const slot = builtinSlots.get(method);
+  return slot === undefined ? callValue(bindValue(method, self), [other]) : slot(self, other);
+}
+
 /** Python's binary operators. */
 export function binaryOp(operator: BinaryOperator, leftValue: PyValue, rightValue: PyValue): PyValue {
+  // The bitwise operators of a Flag combine its members into members, before an IntFlag counts as an int.
+  if ('|&^'.includes(operator) && (isFlagMember(leftValue) || isFlagMember(rightValue))) {
+    const combined = dispatchBinary(operator, leftValue, rightValue);
+    if (combined !== NotImplemented) return combined;
+  }
   const left = intEnumValue(leftValue);
-  const right = intEnumValue(rightValue);
-  const native = nativeBinary(operator, left, right);
-  if (native !== NotImplemented) return native;
+  // A str template formats an enum member itself, whose str() and repr() differ from its value's.
+  const right = operator === '%' && typeof left === 'string' ? rightValue : intEnumValue(rightValue);
+  if (isPlain(left) && isPlain(right)) {
+    const native = nativeBinary(operator, left, right);
+    if (native !== NotImplemented) return native;
+  }
   const result = dispatchBinary(operator, left, right);
   if (result !== NotImplemented) return result;
   throw binaryTypeError(operator, left, right);
 }
 
 /** Python's augmented assignment operators, which try the in-place method first. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Follows the in-place operator protocol and its fallback to the binary operator.
 export function inplaceOp(operator: BinaryOperator, left: PyValue, right: PyValue): PyValue {
-  if (left instanceof PyList && !(left instanceof PyInstance)) {
+  if (isPlain(left)) {
+    const native = nativeInplace(operator, left, right);
+    if (native !== NotImplemented) return native;
+  }
+  // A builtin type without a native in-place operator, such as deque, may define the method.
+  if (typeof left === 'object') {
+    const method = lookupSpecial(left, SPECIAL_NAMES[operator][2]);
+    if (method !== undefined) {
+      const result = callSlot(method, left, right);
+      if (result !== NotImplemented) return result;
+    }
+  }
+  return binaryOp(operator, left, right);
+}
+
+/** The in-place operators of the builtin mutable types, or NotImplemented for the others. */
+// code-gauge-allow functionCognitiveComplexity 18 -- One case per builtin mutable type.
+export function nativeInplace(operator: BinaryOperator, left: PyValue, right: PyValue): PyValue {
+  if (left instanceof PyList) {
     if (operator === '+') {
       left.items.push(...iterateAll(right));
       currentRuntime().allocate(0);
@@ -89,14 +148,11 @@ export function inplaceOp(operator: BinaryOperator, left: PyValue, right: PyValu
     for (const [key, value] of mappingItems(right)) left.store.set(key, value);
     return left;
   }
-  if (left instanceof PyObject && !classOf(left).isBuiltin) {
+  if (left instanceof PyBytes && left.isMutable) {
     const method = lookupSpecial(left, SPECIAL_NAMES[operator][2]);
-    if (method !== undefined) {
-      const result = callValue(bindValue(method, left), [right]);
-      if (result !== NotImplemented) return result;
-    }
+    if (method !== undefined) return callSlot(method, left, right);
   }
-  return binaryOp(operator, left, right);
+  return NotImplemented;
 }
 
 function iterateAll(value: PyValue): PyValue[] {
@@ -118,22 +174,23 @@ function dispatchBinary(operator: BinaryOperator, left: PyValue, right: PyValue)
   const leftMethod = lookupSpecial(left, name);
   const rightMethod = leftClass === rightClass ? undefined : lookupSpecial(right, reflected);
   // A subclass that overrides the reflected method gets the first chance.
-  if (rightMethod !== undefined && rightClass.isSubclassOf(leftClass) && rightClass !== leftClass) {
-    const result = callValue(bindValue(rightMethod, right), [left]);
+  if (rightMethod !== undefined && rightClass.isSubclassOf(leftClass) && rightMethod !== leftClass.lookup(reflected)) {
+    const result = callSlot(rightMethod, right, left);
     if (result !== NotImplemented) return result;
-    return leftMethod === undefined ? NotImplemented : callValue(bindValue(leftMethod, left), [right]);
+    return leftMethod === undefined ? NotImplemented : callSlot(leftMethod, left, right);
   }
   if (leftMethod !== undefined) {
-    const result = callValue(bindValue(leftMethod, left), [right]);
+    const result = callSlot(leftMethod, left, right);
     if (result !== NotImplemented) return result;
   }
-  if (rightMethod !== undefined) return callValue(bindValue(rightMethod, right), [left]);
+  if (rightMethod !== undefined) return callSlot(rightMethod, right, left);
   return NotImplemented;
 }
 
 function binaryTypeError(operator: BinaryOperator, left: PyValue, right: PyValue): Error {
-  if (operator === '+' && (typeof left === 'string' || isSequence(left)) && !isUserObject(right)) {
-    return typeError(`can only concatenate ${typeName(left)} (not "${typeName(right)}") to ${typeName(left)}`);
+  const base = sequenceTypeName(left);
+  if (operator === '+' && base !== undefined && !isUserObject(right)) {
+    return typeError(`can only concatenate ${base} (not "${typeName(right)}") to ${base}`);
   }
   if (operator === '*' && (isSequenceLike(left) || isSequenceLike(right))) {
     const other = isSequenceLike(left) ? right : left;
@@ -141,6 +198,14 @@ function binaryTypeError(operator: BinaryOperator, left: PyValue, right: PyValue
   }
   const shown = operator === '**' ? '** or pow()' : operator;
   return typeError(`unsupported operand type(s) for ${shown}: '${typeName(left)}' and '${typeName(right)}'`);
+}
+
+/** The name of the builtin sequence type a value is an instance of, which concatenation errors name. */
+function sequenceTypeName(value: PyValue): string | undefined {
+  if (typeof unbox(value) === 'string') return 'str';
+  if (value instanceof PyList) return 'list';
+  if (value instanceof PyTuple) return 'tuple';
+  return undefined;
 }
 
 /** Whether a value is an instance of a class the program defined, whose special methods decide its operators. */
@@ -158,7 +223,7 @@ function isSequenceLike(value: PyValue): boolean {
 
 /** The result of an operator on builtin operands, or NotImplemented when their types do not define it. */
 // code-gauge-allow functionCognitiveComplexity 18 -- One case per builtin type that defines binary operators.
-function nativeBinary(operator: BinaryOperator, left: PyValue, right: PyValue): PyValue {
+export function nativeBinary(operator: BinaryOperator, left: PyValue, right: PyValue): PyValue {
   if (isNumeric(left) && isNumeric(right)) return numericBinary(operator, left, right);
   if (isComplexOperand(left) && isComplexOperand(right) && (left instanceof PyComplex || right instanceof PyComplex)) {
     return complexBinary(operator, left, right);
@@ -171,7 +236,7 @@ function nativeBinary(operator: BinaryOperator, left: PyValue, right: PyValue): 
   if (left instanceof PyDictView && left.view !== 'values' && '&|-^'.includes(operator)) {
     return setBinary(operator, newSet(iterateAll(left)), newSet(iterateAll(right)));
   }
-  if (left instanceof PyDict && right instanceof PyDict && operator === '|' && classOf(left).isBuiltin) {
+  if (left instanceof PyDict && right instanceof PyDict && operator === '|') {
     return mergeDicts(left, right);
   }
   return NotImplemented;
@@ -198,7 +263,7 @@ function sequenceBinary(operator: BinaryOperator, left: PyList | PyTuple, right:
 }
 
 function mergeDicts(left: PyDict, right: PyDict): PyDict {
-  const result = new PyDict(left.cls, new (left.store.constructor as new () => PyDict['store'])());
+  const result = new PyDict(resultClassOf(left.cls), new DictStore(), left.defaultFactory);
   for (const entry of left.store.ordered()) result.store.set(entry.key, entry.value);
   for (const entry of right.store.ordered()) result.store.set(entry.key, entry.value);
   return result;
@@ -370,31 +435,34 @@ export function powFloat(x: number, y: number): PyValue {
 
 const UNARY_NAMES = { '-': '__neg__', '+': '__pos__', '~': '__invert__' } as const;
 
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per unary operator.
 export function unaryOp(operator: '-' | '+' | '~', operandValue: PyValue): PyValue {
+  if (operator === '~' && isFlagMember(operandValue)) return callSpecial(operandValue, '__invert__', []);
   const operand = intEnumValue(operandValue);
-  if (typeof operand === 'bigint' || typeof operand === 'boolean') {
-    const value = asInt(operand);
-    if (operator === '-') return -value;
-    if (operator === '+') return value;
-    return ~value;
-  }
-  if (typeof operand === 'number') {
-    if (operator === '-') return -operand;
-    if (operator === '+') return operand;
-  }
-  if (operand instanceof PyComplex) {
-    if (operator === '-') return new PyComplex(operand.cls, -operand.real, -operand.imag);
-    if (operator === '+') return operand;
+  if (isPlain(operand)) {
+    const native = nativeUnary(operator, operand);
+    if (native !== NotImplemented) return native;
   }
   const method = lookupSpecial(operand, UNARY_NAMES[operator]);
   if (method !== undefined) return callValue(bindValue(method, operand), []);
   throw typeError(`bad operand type for unary ${operator}: '${typeName(operand)}'`);
 }
 
+/** The unary operators of the builtin numbers, or NotImplemented for any other operand. */
+export function nativeUnary(operator: '-' | '+' | '~', operand: PyValue): PyValue {
+  if (typeof operand === 'bigint' || typeof operand === 'boolean') {
+    const value = asInt(operand);
+    return operator === '-' ? -value : operator === '+' ? value : ~value;
+  }
+  if (operator === '~') return NotImplemented;
+  if (typeof operand === 'number') return operator === '-' ? -operand : operand;
+  if (!(operand instanceof PyComplex)) return NotImplemented;
+  if (operator === '-') return newComplex(-operand.real, -operand.imag);
+  return operand.cls.isBuiltin ? operand : newComplex(operand.real, operand.imag);
+}
+
 // Comparisons -------------------------------------------------------------------------------------------------------
 
-const COMPARE_NAMES: Record<'<' | '<=' | '>' | '>=' | '==' | '!=', [string, string]> = {
+export const COMPARE_NAMES: Record<'<' | '<=' | '>' | '>=' | '==' | '!=', [string, string]> = {
   '<': ['__lt__', '__gt__'],
   '<=': ['__le__', '__ge__'],
   '>': ['__gt__', '__lt__'],
@@ -431,8 +499,10 @@ export function isSame(left: PyValue, right: PyValue): boolean {
 }
 
 function richCompare(operator: keyof typeof COMPARE_NAMES, left: PyValue, right: PyValue): PyValue {
-  const native = nativeCompare(operator, left, right);
-  if (native !== NotImplemented) return native;
+  if (isPlain(left) && isPlain(right)) {
+    const native = nativeCompare(operator, left, right);
+    if (native !== NotImplemented) return native;
+  }
   const [name, reflected] = COMPARE_NAMES[operator];
   const leftClass = classOf(left);
   const rightClass = classOf(right);
@@ -449,7 +519,7 @@ function richCompare(operator: keyof typeof COMPARE_NAMES, left: PyValue, right:
   for (const [receiver, method, argument] of attempts) {
     const special = lookupSpecial(receiver, method);
     if (special === undefined) continue;
-    const result = callValue(bindValue(special, receiver), [argument]);
+    const result = callSlot(special, receiver, argument);
     if (result !== NotImplemented) return result;
   }
   if (operator === '==') return left === right;
@@ -462,7 +532,7 @@ function isTruthyValue(value: PyValue): boolean {
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of builtin value.
-function nativeCompare(operator: keyof typeof COMPARE_NAMES, left: PyValue, right: PyValue): PyValue {
+export function nativeCompare(operator: keyof typeof COMPARE_NAMES, left: PyValue, right: PyValue): PyValue {
   if (isNumeric(left) && isNumeric(right)) {
     const a = typeof left === 'boolean' ? Number(left) : left;
     const b = typeof right === 'boolean' ? Number(right) : right;
@@ -510,9 +580,9 @@ function applyOrderValue(operator: keyof typeof COMPARE_NAMES, order: number): b
 }
 
 /** Equality of builtin values whose types define it natively, or undefined to defer to `__eq__` and the containers. */
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of builtin value.
+// code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of builtin value.
 function nativeEquals(left: PyValue, right: PyValue): boolean | undefined {
-  if (isUserObject(left) || isUserObject(right)) return undefined;
+  if (definesEquality(left) || definesEquality(right) || isBytesLike(left) || isBytesLike(right)) return undefined;
   if (left instanceof PyComplex || right instanceof PyComplex) {
     if (!isComplexOperand(left) || !isComplexOperand(right)) return false;
     const a = toComplexParts(left);
@@ -530,7 +600,20 @@ function nativeEquals(left: PyValue, right: PyValue): boolean | undefined {
   if (left instanceof PyDictView && left.view === 'keys' && right instanceof PySet) {
     return compareSets('==', newSet(iterateAll(left)), right);
   }
+  // Another builtin object, such as a deque, compares by its own `__eq__`.
+  if (builtinEquality(left) || builtinEquality(right)) return undefined;
   return left === right;
+}
+
+function builtinEquality(value: PyValue): boolean {
+  return value instanceof PyObject && lookupSpecial(value, '__eq__') !== objectClass.dict.get('__eq__');
+}
+
+/** Whether a value is an instance whose class defines `==`, such as a program's class or `fractions.Fraction`. */
+function definesEquality(value: PyValue): boolean {
+  if (!(value instanceof PyInstance)) return false;
+  const cls = classOf(value);
+  return !cls.isBuiltin || cls.lookup('__eq__') !== objectClass.dict.get('__eq__');
 }
 
 function sameSequenceKind(left: PyList | PyTuple, right: PyList | PyTuple): boolean {
@@ -612,14 +695,16 @@ export function equals(left: PyValue, right: PyValue): boolean {
 
 /** The int an IntEnum member stands for, which int operators use; any other value as it is. */
 export function intEnumValue(value: PyValue): PyValue {
-  if (
-    value instanceof PyInstance &&
-    typeof value.enumValue === 'bigint' &&
-    value.cls.mro.some((cls) => cls.isBuiltin && cls.name === 'IntEnum')
-  ) {
-    return value.enumValue;
-  }
+  if (!(value instanceof PyInstance) || value.enumValue === undefined) return value;
+  const { enumValue, cls } = value;
+  if (typeof enumValue === 'bigint' && cls.isSubclassOf(intClass)) return enumValue;
+  if (typeof enumValue === 'string' && cls.isSubclassOf(strClass)) return enumValue;
   return value;
+}
+
+/** Whether a value is a member of a Flag class, whose bitwise operators make members. */
+function isFlagMember(value: PyValue): boolean {
+  return value instanceof PyInstance && value.enumValue !== undefined && value.cls.lookup('__invert__') !== undefined;
 }
 
 /** Whether two dict keys or set elements are the same key: identical, or equal by `==`. */
@@ -645,8 +730,17 @@ export function lessThan(left: PyValue, right: PyValue): boolean {
 }
 
 /** Python's `in`. */
-// code-gauge-allow functionCognitiveComplexity 17 -- One fast path per builtin container, then the __contains__ and iteration protocols.
-export function contains(container: PyValue, item: PyValue): boolean {
+export function contains(containerValue: PyValue, item: PyValue): boolean {
+  // A StrEnum member is searched as the str it stands for.
+  const unboxed = intEnumValue(containerValue);
+  const container = typeof unboxed === 'string' ? unboxed : containerValue;
+  const special = overriding(container, '__contains__');
+  if (special !== undefined) return isTruthyValue(callValue(bindValue(special, container), [item]));
+  return builtinContains(container, item);
+}
+
+/** `item in container` as the builtin type of `container` defines it, whatever `__contains__` its class defines. */
+export function builtinContains(container: PyValue, item: PyValue): boolean {
   if (typeof container === 'string') {
     if (typeof item !== 'string') {
       throw typeError(`'in <string>' requires string as left operand, not ${typeName(item)}`);
@@ -654,22 +748,35 @@ export function contains(container: PyValue, item: PyValue): boolean {
     currentRuntime().scan(container.length);
     return container.includes(item);
   }
-  if (container instanceof PyDict && classOf(container).isBuiltin) return container.store.has(item);
+  if (container instanceof PyDict) return container.store.has(item);
   if (container instanceof PySet) return container.table.has(item);
   if (container instanceof PyDictView && container.view !== 'values') return viewContains(container, item);
   if (container instanceof PyRange && isIntLike(item)) return rangeContains(container, asInt(item));
-  if ((container instanceof PyList || container instanceof PyTuple) && classOf(container).isBuiltin) {
+  if (container instanceof PyList || container instanceof PyTuple) {
     currentRuntime().scan(container.items.length);
     return container.items.some((element) => equals(element, item));
   }
   const special = lookupSpecial(container, '__contains__');
   if (special !== undefined) return isTruthyValue(callValue(bindValue(special, container), [item]));
-  const next = iterate(container);
+  const next = iterateContainer(container);
   for (let element = next(); element !== DONE; element = next()) {
     currentRuntime().spend();
     if (equals(element, item)) return true;
   }
   return false;
+}
+
+/** Starts iterating the right operand of `in`, whose lack of both protocols CPython words differently. */
+function iterateContainer(container: PyValue): () => PyValue | typeof DONE {
+  try {
+    return iterate(container);
+  } catch (error) {
+    const message = error instanceof PyError ? error.exception.exception?.args.items[0] : undefined;
+    if (message === `'${typeName(container)}' object is not iterable`) {
+      throw typeError(`argument of type '${typeName(container)}' is not a container or iterable`);
+    }
+    throw error;
+  }
 }
 
 function viewContains(view: PyDictView, item: PyValue): boolean {

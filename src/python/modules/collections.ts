@@ -1,7 +1,9 @@
+// code-gauge-allow-file fileNcss 428 -- The collections types and the methods of each belong together.
 import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { DictStore } from '../dictStore';
 import { mappingEntries, storeKey } from '../expressionEvaluator';
+import { defineNew } from '../instances';
 import { keyError } from '../items';
 import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
@@ -12,6 +14,7 @@ import { currentRuntime } from '../runtimeContext';
 import { containerRepr, dictBody, updateDict } from '../typeContainers';
 import {
   builtinClass,
+  defineMethod,
   dictClass,
   iteratorClass,
   newDict,
@@ -43,15 +46,16 @@ import {
 
 // deque -------------------------------------------------------------------------------------------------------------
 
-export const dequeClass = builtinClass('deque');
+export const dequeClass = builtinClass('deque', undefined, true);
 dequeClass.module = 'collections';
+dequeClass.typeName = 'collections.deque';
 dequeClass.construct = (cls, args, kwargs) => {
   checkArgs({ qualified: 'deque', min: 0, max: 2, style: 'takes', keywords: ['iterable', 'maxlen'] }, args, kwargs);
   const iterable = argument(args, kwargs, 0, 'iterable');
   const maxlenValue = argument(args, kwargs, 1, 'maxlen') ?? None;
   let maxlen: number | undefined;
   if (maxlenValue !== None) {
-    maxlen = Number(toIndex(maxlenValue));
+    maxlen = Number(toIndex(maxlenValue, () => 'an integer is required'));
     if (maxlen < 0) throw valueError('maxlen must be non-negative');
   }
   const deque = new PyDeque(cls, [], maxlen);
@@ -59,6 +63,13 @@ dequeClass.construct = (cls, args, kwargs) => {
   return deque;
 };
 const dequeOf = (self: PyValue): PyDeque => self as PyDeque;
+defineNew(dequeClass, (subtype) => new PyDeque(subtype, [], undefined));
+defineMethod(dequeClass, '__init__', (self, args, kwargs) => {
+  const filled = (dequeClass.construct as NonNullable<PyClass['construct']>)(dequeClass, args, kwargs) as PyDeque;
+  dequeOf(self).items = filled.items;
+  dequeOf(self).maxlen = filled.maxlen;
+  return None;
+});
 
 function push(deque: PyDeque, item: PyValue, left: boolean): void {
   currentRuntime().allocate(1);
@@ -119,7 +130,7 @@ method(dequeClass, 'count', 'one', 1, 1, (self, [item]) =>
 );
 method(dequeClass, 'index', 'expected', 1, 3, (self, [item]) => {
   const index = dequeOf(self).items.findIndex((each) => equals(each, item));
-  if (index === -1) throw valueError(`${pyRepr(item)} is not in deque`);
+  if (index === -1) throw valueError('deque.index(x): x not in deque');
   return BigInt(index);
 });
 method(dequeClass, 'insert', 'expected', 2, 2, (self, [index, item]) => {
@@ -134,7 +145,7 @@ method(dequeClass, 'insert', 'expected', 2, 2, (self, [index, item]) => {
 method(dequeClass, 'remove', 'one', 1, 1, (self, [item]) => {
   const { items } = dequeOf(self);
   const index = items.findIndex((each) => equals(each, item));
-  if (index === -1) throw valueError(`${pyRepr(item)} is not in deque`);
+  if (index === -1) throw valueError('deque.remove(x): x not in deque');
   items.splice(index, 1);
   return None;
 });
@@ -169,7 +180,7 @@ method(dequeClass, '__iter__', 'none', 0, 0, (self) => {
   let index = 0;
   const length = deque.items.length;
   return new PyIterator(
-    iteratorClass('_collections._deque_iterator'),
+    iteratorClass('collections._deque_iterator'),
     () => {
       if (deque.items.length !== length) throw pyError('RuntimeError', 'deque mutated during iteration');
       return index < deque.items.length ? deque.items[index++] : DONE;
@@ -181,7 +192,7 @@ method(dequeClass, '__reversed__', 'none', 0, 0, (self) => {
   const items = [...dequeOf(self).items].toReversed();
   let index = 0;
   return new PyIterator(
-    iteratorClass('_collections._deque_reverse_iterator'),
+    iteratorClass('collections._deque_reverse_iterator'),
     () => (index < items.length ? items[index++] : DONE),
     () => items
   );
@@ -190,7 +201,9 @@ method(dequeClass, '__repr__', 'none', 0, 0, (self) => {
   const deque = dequeOf(self);
   return containerRepr(deque, '[...]', () => {
     const body = `[${deque.items.map((item) => pyRepr(item)).join(', ')}]`;
-    return deque.maxlen === undefined ? `deque(${body})` : `deque(${body}, maxlen=${deque.maxlen})`;
+    return deque.maxlen === undefined
+      ? `${deque.cls.name}(${body})`
+      : `${deque.cls.name}(${body}, maxlen=${deque.maxlen})`;
   });
 });
 method(dequeClass, '__eq__', 'one', 1, 1, (self, [other]) => {
@@ -216,6 +229,7 @@ export const counterClass = new PyClass('Counter', [dictClass], typeClass);
 counterClass.mro = [counterClass, ...dictClass.mro];
 counterClass.module = 'collections';
 counterClass.layout = { base: 'native' };
+counterClass.isBaseType = true;
 counterClass.construct = (cls, args, kwargs) => {
   checkArgs(
     { qualified: 'Counter', min: 0, max: 1, style: 'expected', keywords: [...(kwargs?.keys() ?? [])] },
@@ -226,6 +240,16 @@ counterClass.construct = (cls, args, kwargs) => {
   countInto(counter, args[0], kwargs, 1n);
   return counter;
 };
+
+defineMethod(counterClass, '__init__', (self, args, kwargs) => {
+  checkArgs(
+    { qualified: 'Counter', min: 0, max: 1, style: 'expected', keywords: [...(kwargs?.keys() ?? [])] },
+    args,
+    kwargs
+  );
+  countInto(self as PyDict, args[0], kwargs, 1n);
+  return None;
+});
 
 function countInto(counter: PyDict, source: PyValue | undefined, kwargs: Kwargs, sign: bigint): void {
   const add = (key: PyValue, amount: PyValue): void => {
@@ -350,7 +374,9 @@ for (const [name, combine] of [
 export const defaultdictClass = new PyClass('defaultdict', [dictClass], typeClass);
 defaultdictClass.mro = [defaultdictClass, ...dictClass.mro];
 defaultdictClass.module = 'collections';
+defaultdictClass.typeName = 'collections.defaultdict';
 defaultdictClass.layout = { base: 'native' };
+defaultdictClass.isBaseType = true;
 defaultdictClass.construct = (cls, args, kwargs) => {
   const factory = args[0] ?? None;
   if (factory !== None && !isCallable(factory)) throw typeError('first argument must be callable or None');
@@ -360,9 +386,21 @@ defaultdictClass.construct = (cls, args, kwargs) => {
   for (const [key, value] of kwargs ?? []) dict.store.set(key, value);
   return dict;
 };
+defineNew(defaultdictClass, (subtype) => new PyDict(subtype, new DictStore()));
+defineMethod(defaultdictClass, '__init__', (self, args, kwargs) => {
+  const filled = (defaultdictClass.construct as NonNullable<PyClass['construct']>)(defaultdictClass, args, kwargs);
+  const dict = self as PyDict;
+  dict.defaultFactory = (filled as PyDict).defaultFactory;
+  for (const entry of (filled as PyDict).store.ordered()) dict.store.set(entry.key, entry.value);
+  return None;
+});
 method(defaultdictClass, '__repr__', 'none', 0, 0, (self) => {
   const dict = self as PyDict;
-  return containerRepr(dict, '...', () => `defaultdict(${pyRepr(dict.defaultFactory ?? None)}, ${dictBody(dict)})`);
+  return containerRepr(
+    dict,
+    '...',
+    () => `${dict.cls.name}(${pyRepr(dict.defaultFactory ?? None)}, ${dictBody(dict)})`
+  );
 });
 method(defaultdictClass, '__missing__', 'one', 1, 1, (self, [key]) => currentRuntime().missingKey(self as PyDict, key));
 defaultdictClass.dict.set(
@@ -382,17 +420,26 @@ defaultdictClass.dict.set(
 export const orderedDictClass = new PyClass('OrderedDict', [dictClass], typeClass);
 orderedDictClass.mro = [orderedDictClass, ...dictClass.mro];
 orderedDictClass.module = 'collections';
+orderedDictClass.typeName = 'collections.OrderedDict';
 orderedDictClass.layout = { base: 'native' };
+orderedDictClass.isBaseType = true;
 orderedDictClass.construct = (cls, args, kwargs) => {
   const dict = new PyDict(cls, new DictStore());
   if (args.length > 0) updateDict(dict, args[0]);
   for (const [key, value] of kwargs ?? []) dict.store.set(key, value);
   return dict;
 };
+defineNew(orderedDictClass, (subtype) => new PyDict(subtype, new DictStore()));
+defineMethod(orderedDictClass, '__init__', (self, args, kwargs) => {
+  if (args.length > 1) throw typeError(`expected at most 1 argument, got ${args.length}`);
+  if (args.length > 0) updateDict(self as PyDict, args[0]);
+  for (const [key, value] of kwargs ?? []) (self as PyDict).store.set(key, value);
+  return None;
+});
 method(orderedDictClass, '__repr__', 'none', 0, 0, (self) => {
   const dict = self as PyDict;
-  if (dict.store.size === 0) return 'OrderedDict()';
-  return containerRepr(dict, '...', () => `OrderedDict(${dictBody(dict)})`);
+  if (dict.store.size === 0) return `${dict.cls.name}()`;
+  return containerRepr(dict, '...', () => `${dict.cls.name}(${dictBody(dict)})`);
 });
 method(
   orderedDictClass,
@@ -441,7 +488,7 @@ method(orderedDictClass, '__eq__', 'one', 1, 1, (self, [other]) => {
 
 // namedtuple --------------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionNcss 31 -- Follows collections.namedtuple's argument handling.
+// code-gauge-allow functionNcss 35 -- Follows collections.namedtuple's argument handling.
 function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
   checkArgs(
     {
@@ -481,7 +528,11 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
   cls.module = '__main__';
   cls.layout = { base: 'native' };
   cls.construct = (tupleType, values, keywords) => newNamedTuple(tupleType, fields, defaults, values, keywords);
+  cls.slotNames = new Set();
+  defineNew(cls, cls.construct);
   cls.dict.set('_fields', newTuple(fields));
+  const defaulted = fields.slice(fields.length - defaults.length);
+  cls.dict.set('_field_defaults', newDict(defaulted.map((name, index) => [name, defaults[index]])));
   cls.dict.set('__match_args__', newTuple(fields));
   for (const [index, name] of fields.entries()) {
     cls.dict.set(
@@ -593,6 +644,11 @@ function namedtupleWithMethods(args: PyValue[], kwargs: Kwargs): PyValue {
   const cls = namedtuple(args, kwargs) as PyClass;
   for (const [name, value] of namedTupleBase.dict) if (!cls.dict.has(name)) cls.dict.set(name, value);
   return cls;
+}
+
+/** The namedtuple class that a `typing.NamedTuple` class statement creates. */
+export function namedTupleClass(name: string, fields: string[], defaults: PyValue[]): PyClass {
+  return namedtupleWithMethods([name, newList(fields)], new Map([['defaults', newTuple(defaults)]])) as PyClass;
 }
 
 /** A namedtuple class that a library module defines, such as `functools.CacheInfo`. */

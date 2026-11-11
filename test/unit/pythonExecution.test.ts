@@ -61,11 +61,6 @@ test.each([
   ['an invalid color', "Turtle(0, 0, 'Z')", 'RuntimeError: Invalid color: Z'],
   ['unbounded recursion', 'def f(n):\n    return f(n + 1)\nf(0)', 'RecursionError: maximum recursion depth exceeded'],
   ['standard input', 'input()', '標準入力（input()）は、この採点環境では使えません。'],
-  [
-    'a subclass of a builtin type',
-    'class Stack(list):\n    pass',
-    '組み込み型 list を継承するクラスは、この採点環境では使えません。',
-  ],
 ])('%s ends the program as CPython describes it', (_, source, description) => {
   expect(executeProgram('python', source)).toMatchObject({ kind: 'executed', uncaughtException: description });
 });
@@ -86,7 +81,6 @@ test.each([
   ['a capture pattern before another case', 'match 1:\n    case x:\n        pass\n    case 2:\n        pass', 1],
   ['nonlocal at module level', 'nonlocal x', 0],
   ['a Python 2 print statement', "print 'x'", 0],
-  ['a conditional expression, which this grader does not support', 'x = 1 if True else 2', 0],
   ['an import of a file', 'import mymodule', 0],
 ])('%s is a compile error', (_, source, row) => {
   const execution = executeProgram('python', source);

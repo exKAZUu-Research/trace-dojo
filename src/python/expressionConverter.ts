@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 518 -- The expression converter keeps one method per kind of expression node together.
+// code-gauge-allow-file fileNcss 618 -- The expression converter keeps one method per kind of expression node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -18,6 +18,7 @@ import type {
 } from './ast';
 import {
   children,
+  decodeBytesEscapes,
   decodeEscapes,
   field,
   fieldNodes,
@@ -27,6 +28,8 @@ import {
   unsupported,
 } from './convertNodes';
 import { fail, ScopeBuilder } from './scopes';
+import { markSuspendingExpression } from './suspension';
+import { unparseAnnotation } from './unparse';
 
 /** What a function body being converted allows, which its early errors depend on. */
 export interface Context {
@@ -54,6 +57,10 @@ interface ParameterOrder {
 /** Converts expressions, targets, and parameters, registering the names they use and bind in their scopes. */
 export abstract class ExpressionConverter {
   protected context: Context;
+  /** The scope of the type parameters of the function being defined, which its annotations belong to. */
+  protected annotationContext: Context | undefined;
+  /** The features the module's `from __future__ import` statements enable. */
+  protected readonly futureFeatures = new Set<string>();
 
   constructor(
     protected readonly source: string,
@@ -98,7 +105,7 @@ export abstract class ExpressionConverter {
 
   // Expressions -----------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 51 -- One case per kind of expression node, each delegating where it grows.
+  // code-gauge-allow functionNcss 60 -- One case per kind of expression node, each delegating where it grows.
   expression(node: Node): Expression {
     const row = rowOf(node);
     switch (node.type) {
@@ -156,11 +163,25 @@ export abstract class ExpressionConverter {
       case 'comparison_operator': {
         return this.comparison(node);
       }
+      case 'type': {
+        // The grammar wraps the elements of a tuple or a list written in an annotation as types.
+        return this.typeExpression(namedChildren(node)[0]);
+      }
+      case 'conditional_expression': {
+        const [body, test, orelse] = namedChildren(node).map((child) => this.expression(child));
+        return { kind: 'conditional', test, body, orelse, row };
+      }
       case 'lambda': {
         return { kind: 'lambda', fn: this.lambda(node), row };
       }
       case 'named_expression': {
         return this.namedExpression(node);
+      }
+      case 'yield': {
+        return this.yieldExpression(node);
+      }
+      case 'await': {
+        return this.awaitExpression(node);
       }
       case 'list_comprehension':
       case 'set_comprehension':
@@ -176,7 +197,6 @@ export abstract class ExpressionConverter {
 
   private parenthesized(node: Node): Expression {
     const inner = namedChildren(node)[0];
-    if (inner.type === 'yield') return unsupported(inner, '値を受け取る yield');
     if (inner.type === 'list_splat') fail(rowOf(node), '* を付けた式は、ここには書けません。');
     return this.expression(inner);
   }
@@ -232,7 +252,12 @@ export abstract class ExpressionConverter {
   }
 
   private comparison(node: Node): Expression {
-    const operators = fieldNodes(node, 'operators').map((operator) => operator.type);
+    let operators = fieldNodes(node, 'operators').map((operator) => operator.type);
+    if (this.futureFeatures.has('barry_as_FLUFL')) {
+      if (operators.includes('!='))
+        fail(rowOf(node), 'from __future__ import barry_as_FLUFL の後では、!= の代わりに <> を使ってください。');
+      operators = operators.map((operator) => (operator === '<>' ? '!=' : operator));
+    }
     if (operators.includes('<>')) fail(rowOf(node), '演算子 <> は Python 3 では使えません。!= を使ってください。');
     return {
       kind: 'compare',
@@ -297,7 +322,7 @@ export abstract class ExpressionConverter {
     let seenDoubleStar = false;
     for (const argument of nodes) {
       const row = rowOf(argument);
-      if (argument.type === 'generator_expression' && nodes.length > 1) {
+      if (argument.type === 'generator_expression' && nodes.length > 1 && argument.child(0)?.type !== '(') {
         fail(row, 'ジェネレータ式を引数にするときは、それだけを書くか、( ) で囲んでください。');
       }
       if (argument.type === 'keyword_argument') {
@@ -319,6 +344,42 @@ export abstract class ExpressionConverter {
       }
     }
     return args;
+  }
+
+  /** `yield value` or `yield from iterable`, which makes the function it is in a generator. */
+  protected yieldExpression(node: Node): Expression {
+    const row = rowOf(node);
+    const { scope } = this.context;
+    if (scope.info.kind === 'comprehension') fail(row, '内包表記の中には yield を書けません。');
+    if (scope.info.kind !== 'function') fail(row, 'yield は関数の中にしか書けません。');
+    scope.info.isGenerator = true;
+    const valueNode = namedChildren(node)[0];
+    if (hasToken(node, 'from')) {
+      if (scope.info.isAsync) fail(row, 'async def の関数の中には yield from を書けません。');
+      if (!valueNode || valueNode.type === 'expression_list') fail(row, 'yield from の後には式を1つ書いてください。');
+      return { kind: 'yieldFrom', value: this.expression(valueNode), row };
+    }
+    return { kind: 'yield', value: valueNode ? this.expression(valueNode) : undefined, row };
+  }
+
+  private awaitExpression(node: Node): Expression {
+    const row = rowOf(node);
+    this.enterAsync(row, 'await は async def の関数の中にしか書けません。');
+    return { kind: 'await', value: this.expression(namedChildren(node)[0]), row };
+  }
+
+  /**
+   * Checks that an `await` or an `async for` at `row` runs in a coroutine, marking the comprehensions around it as
+   * async: up to a generator expression, which then is an async generator, or to the `async def` running them.
+   */
+  protected enterAsync(row: number, message: string): void {
+    let { scope } = this.context;
+    while (scope.info.kind === 'comprehension') {
+      scope.info.isAsync = true;
+      if (scope.isGeneratorExpression) return;
+      scope = scope.parent as ScopeBuilder;
+    }
+    if (scope.info.kind !== 'function' || !scope.info.isAsync) fail(row, message);
   }
 
   private namedExpression(node: Node): Expression {
@@ -357,21 +418,53 @@ export abstract class ExpressionConverter {
 
   private stringLiteral(node: Node): Expression {
     const strings = node.type === 'concatenated_string' ? namedChildren(node) : [node];
+    const prefixes = strings.map((string) =>
+      children(string)[0]
+        .text.replace(/['"]+$/, '')
+        .toLowerCase()
+    );
+    if (prefixes.some((prefix) => prefix.includes('b'))) return this.bytesLiteral(node, strings, prefixes);
     const parts: (string | FormattedValue)[] = [];
     let isFormatted = false;
-    for (const string of strings) {
-      const startNode = children(string)[0];
-      const prefix = startNode.text.replace(/['"]+$/, '').toLowerCase();
-      if (prefix.includes('b')) unsupported(string, "bytes のリテラル（b'...'）");
-      if (prefix.includes('u')) unsupported(string, '接頭辞 u の付いた文字列');
+    for (const [index, string] of strings.entries()) {
+      const prefix = prefixes[index];
+      if (prefix.includes('u') && prefix !== 'u')
+        fail(rowOf(string), '接頭辞 u は、ほかの接頭辞と組み合わせられません。');
       if (prefix.includes('t')) fail(rowOf(string), "テンプレート文字列（t'...'）は、この版の Python では使えません。");
       const isRaw = prefix.includes('r');
       if (prefix.includes('f')) isFormatted = true;
       this.stringParts(string, isRaw, parts);
     }
     const row = rowOf(node);
-    if (!isFormatted) return { kind: 'constant', value: { kind: 'str', value: (parts as string[]).join('') }, row };
+    if (!isFormatted) {
+      const isUnicode = /^[uU]['"]/.test(children(strings[0])[0].text) || undefined;
+      return { kind: 'constant', value: { kind: 'str', value: (parts as string[]).join(''), isUnicode }, row };
+    }
     return { kind: 'fstring', parts, row };
+  }
+
+  /** A bytes literal, or adjacent ones, which a str literal must not join. */
+  private bytesLiteral(node: Node, strings: Node[], prefixes: string[]): Expression {
+    const isBytes = prefixes.map((prefix) => prefix.includes('b'));
+    const mixed = strings.find((_, index) => isBytes[index] !== isBytes[0]);
+    if (mixed) fail(rowOf(mixed), 'bytes のリテラルと str のリテラルは、続けて書けません。');
+    const incompatible = strings.find((_, index) => /[fut]/.test(prefixes[index]));
+    if (incompatible) fail(rowOf(incompatible), 'bytes のリテラルには、接頭辞 b と f・u・t を一緒に付けられません。');
+    const parts: Uint8Array[] = [];
+    for (const [index, string] of strings.entries()) {
+      const nodes = children(string);
+      const text = this.source.slice(nodes[0].endIndex, (nodes.at(-1) as Node).startIndex);
+      // oxlint-disable-next-line eslint/no-control-regex -- Bytes literals may contain any ASCII character.
+      if (!/^[\u0000-\u007F]*$/.test(text)) fail(rowOf(string), 'bytes のリテラルには、ASCII の文字しか書けません。');
+      parts.push(decodeBytesEscapes(text, rowOf(string), prefixes[index].includes('r')));
+    }
+    const value = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+    let offset = 0;
+    for (const part of parts) {
+      value.set(part, offset);
+      offset += part.length;
+    }
+    return { kind: 'constant', value: { kind: 'bytes', value }, row: rowOf(node) };
   }
 
   /** Appends the text and the interpolations of one string literal, between its quotes. */
@@ -393,13 +486,13 @@ export abstract class ExpressionConverter {
       parts.push(this.interpolation(child));
       position = child.endIndex;
     }
-    pushText(endNode.startIndex);
+    // The grammar's string_end of a raw string such as r"\\" also covers the text, so the quote alone is measured.
+    pushText(endNode.endIndex - startNode.text.replace(/^[a-zA-Z]+/, '').length);
   }
 
   private interpolation(node: Node): FormattedValue {
     const expressionNode = field(node, 'expression');
     const row = rowOf(node);
-    if (expressionNode.type === 'yield') unsupported(node, '値を受け取る yield');
     const expression =
       expressionNode.type === 'expression_list' || expressionNode.type === 'pattern_list'
         ? { kind: 'tuple' as const, elements: namedChildren(expressionNode).map((child) => this.element(child)), row }
@@ -443,8 +536,8 @@ export abstract class ExpressionConverter {
 
   // Comprehensions and lambdas --------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 37 -- Follows how CPython scopes each part of a comprehension.
-  // code-gauge-allow functionCognitiveComplexity 23 -- Follows how CPython scopes each part of a comprehension.
+  // code-gauge-allow functionNcss 38 -- Follows how CPython scopes each part of a comprehension.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Follows how CPython scopes each part of a comprehension.
   private comprehension(node: Node): Expression {
     const type =
       node.type === 'list_comprehension'
@@ -457,6 +550,7 @@ export abstract class ExpressionConverter {
     const clauses = namedChildren(node).filter((child) => child.type === 'for_in_clause' || child.type === 'if_clause');
     const outer = this.context;
     const scope = new ScopeBuilder('comprehension', outer.scope);
+    scope.isGeneratorExpression = type === 'generator';
     const generators: Comprehension[] = [];
     for (const [index, clause] of clauses.entries()) {
       if (clause.type === 'if_clause') {
@@ -464,7 +558,11 @@ export abstract class ExpressionConverter {
         (generators.at(-1) as Comprehension).conditions.push(this.expression(namedChildren(clause)[0]));
         continue;
       }
-      if (hasToken(clause, 'async')) unsupported(clause, 'async for');
+      const isAsync = hasToken(clause, 'async');
+      if (isAsync) {
+        this.context = { ...outer, scope };
+        this.enterAsync(rowOf(clause), 'async for を使う内包表記は、async def の関数の中にしか書けません。');
+      }
       const rights = fieldNodes(clause, 'right');
       if (rights.length > 1) fail(rowOf(clause), '内包表記の in の後に複数の式を書くときは、( ) で囲んでください。');
       // The first iterable is evaluated in the enclosing scope, before the comprehension starts.
@@ -477,7 +575,7 @@ export abstract class ExpressionConverter {
         scope.iterationVariables.add(ref.name);
         return ref;
       });
-      generators.push({ target, iterable, conditions: [] });
+      generators.push(isAsync ? { target, iterable, conditions: [], isAsync } : { target, iterable, conditions: [] });
     }
     this.context = { ...outer, scope };
     try {
@@ -485,7 +583,6 @@ export abstract class ExpressionConverter {
       if (body.type === 'list_splat' || body.type === 'dictionary_splat') {
         fail(rowOf(body), '内包表記の要素に * や ** を付けることはできません。');
       }
-      if (body.type === 'yield') fail(rowOf(body), '内包表記の中には yield を書けません。');
       const element = body.type === 'pair' ? this.expression(field(body, 'key')) : this.expression(body);
       const value = body.type === 'pair' ? this.expression(field(body, 'value')) : undefined;
       return { kind: 'comprehension', type, element, value, generators, scope: scope.info, row: rowOf(node) };
@@ -502,8 +599,10 @@ export abstract class ExpressionConverter {
     this.inFunction(fn, () => {
       for (const parameter of fn.params) this.bindParameter(parameter);
       const bodyNode = field(node, 'body');
-      if (bodyNode.type === 'yield') unsupported(bodyNode, 'lambda の中の yield');
-      fn.body = this.expression(bodyNode);
+      if (bodyNode.type === 'yield') fail(rowOf(bodyNode), 'lambda の本体の yield は、( ) で囲んでください。');
+      const body = this.expression(bodyNode);
+      if (fn.scope.isGenerator) markSuspendingExpression(body);
+      fn.body = body;
     });
     return fn;
   }
@@ -522,6 +621,17 @@ export abstract class ExpressionConverter {
       usesClassCell: false,
       row: rowOf(node),
     };
+  }
+
+  /** Runs `convert` in `context`, or in the current context when it is undefined. */
+  protected inContext<T>(context: Context | undefined, convert: () => T): T {
+    const outer = this.context;
+    this.context = context ?? outer;
+    try {
+      return convert();
+    } finally {
+      this.context = outer;
+    }
   }
 
   /** Runs `convert` in the scope of `fn`, which `newFunction` created as the last child of the current scope. */
@@ -587,7 +697,7 @@ export abstract class ExpressionConverter {
     const row = rowOf(node);
     const valueNode = node.childForFieldName('value');
     const typeNode = node.childForFieldName('type');
-    const annotation = typeNode ? this.annotation(typeNode) : undefined;
+    const annotation = typeNode ? this.inContext(this.annotationContext, () => this.annotation(typeNode)) : undefined;
     const value = valueNode ? this.expression(valueNode) : undefined;
     const base = { default: value, annotation, row };
     const target =
@@ -606,7 +716,19 @@ export abstract class ExpressionConverter {
   /** Converts a type annotation, which runs only when a program reads `__annotations__`. */
   protected annotation(node: Node): Expression {
     const inner = node.type === 'type' ? namedChildren(node)[0] : node;
-    return this.typeExpression(inner);
+    if (node.descendantsOfType(['named_expression', 'yield']).length > 0) {
+      fail(rowOf(node), '型ヒントの中では、代入式（:=）や yield を使えません。');
+    }
+    if (!this.futureFeatures.has('annotations')) return this.typeExpression(inner);
+    // A stringified annotation is never evaluated, so the names it reads belong to no scope and are not mangled.
+    const outer = this.context;
+    this.context = { ...outer, scope: new ScopeBuilder('function', undefined), className: undefined };
+    try {
+      const text = unparseAnnotation(this.typeExpression(inner));
+      return { kind: 'constant', value: { kind: 'str', value: text }, row: rowOf(node) };
+    } finally {
+      this.context = outer;
+    }
   }
 
   private typeExpression(node: Node): Expression {
@@ -614,27 +736,58 @@ export abstract class ExpressionConverter {
     switch (node.type) {
       case 'generic_type': {
         const [base, parameters] = namedChildren(node);
-        const args = namedChildren(parameters).map((argument) => this.annotation(argument));
-        const index: Expression = args.length === 1 ? args[0] : { kind: 'tuple', elements: args, row };
+        const args = namedChildren(parameters).map((argument) => this.typeArgument(argument));
+        const [only] = args;
+        const index: Expression =
+          args.length === 1 && only.kind !== 'starred' && !hasToken(parameters, ',')
+            ? only
+            : { kind: 'tuple', elements: args, row };
         return { kind: 'subscript', object: this.typeExpression(base), index, row };
       }
       case 'union_type': {
-        const [left, right] = namedChildren(node);
-        return { kind: 'binary', operator: '|', left: this.annotation(left), right: this.annotation(right), row };
+        const [left, right] = namedChildren(node).map((child) => this.typeExpression(child));
+        return { kind: 'binary', operator: '|', left, right, row };
       }
       case 'member_type': {
         const [object, name] = namedChildren(node);
         return { kind: 'attribute', object: this.typeExpression(object), name: name.text, row };
       }
       case 'type': {
-        return this.annotation(node);
+        return this.typeExpression(namedChildren(node)[0]);
       }
-      case 'constrained_type':
       case 'splat_type': {
-        return unsupported(node, '型引数');
+        // `*args: *Ts` annotates with the one item that unpacking `Ts` gives, `typing.Unpack[Ts]`.
+        const value = this.typeExpression(namedChildren(node)[0]);
+        const unpacked: Expression = { kind: 'list', elements: [{ kind: 'starred', value, row }], row };
+        return {
+          kind: 'subscript',
+          object: unpacked,
+          index: { kind: 'constant', value: { kind: 'int', value: 0n }, row },
+          row,
+        };
       }
       default: {
         return this.expression(node);
+      }
+    }
+  }
+
+  /** An index of a subscript the grammar reads as a generic type, such as `x[a:b]` or `x[*a]`. */
+  private typeArgument(node: Node): Element {
+    const row = rowOf(node);
+    switch (node.type) {
+      case 'type': {
+        return this.typeArgument(namedChildren(node)[0]);
+      }
+      case 'constrained_type': {
+        const [lower, upper] = namedChildren(node).map((child) => this.typeExpression(child));
+        return { kind: 'slice', lower, upper, row };
+      }
+      case 'splat_type': {
+        return { kind: 'starred', value: this.typeExpression(namedChildren(node)[0]), row };
+      }
+      default: {
+        return this.typeExpression(node);
       }
     }
   }
@@ -670,11 +823,11 @@ export abstract class ExpressionConverter {
           elements.length === 1 &&
           !children(node).some((child) => child.type === ',');
         if (isParenthesizedName) return this.target(elements[0], bind);
-        return { kind: 'unpack', elements: elements.map((element) => this.target(element, bind)), row };
+        return this.unpackTarget(elements, bind, row);
       }
       case 'list_splat_pattern':
       case 'list_splat': {
-        return unsupported(node, '代入の左辺の *（残りをまとめて受け取る書き方）');
+        return fail(row, '* を付けた代入先は、( ) や [ ] で囲んだ並びの中にしか書けません。');
       }
       case 'true':
       case 'false':
@@ -686,6 +839,19 @@ export abstract class ExpressionConverter {
       }
     }
   }
+
+  private unpackTarget(elements: Node[], bind: (nameNode: Node) => NameRef, row: number): Target {
+    const starIndexes = elements.flatMap((element, index) => (isStarred(element) ? [index] : []));
+    if (starIndexes.length > 1) fail(row, '代入先の並びには、* を1つしか書けません。');
+    const targets = elements.map((element) =>
+      isStarred(element) ? this.target(namedChildren(element)[0], bind) : this.target(element, bind)
+    );
+    return { kind: 'unpack', elements: targets, starIndex: starIndexes[0], row };
+  }
+}
+
+function isStarred(node: Node): boolean {
+  return node.type === 'list_splat_pattern' || node.type === 'list_splat';
 }
 
 function makePositionalOnly(params: Parameter[], order: ParameterOrder, row: number): void {
@@ -718,15 +884,6 @@ function checkParameterOrder(parameter: Parameter, params: Parameter[], order: P
 /** Rejects a node that is no expression this grader converts, saying why. */
 function rejectExpression(node: Node): never {
   switch (node.type) {
-    case 'conditional_expression': {
-      return unsupported(node, '条件式（a if c else b）');
-    }
-    case 'await': {
-      return unsupported(node, 'await');
-    }
-    case 'yield': {
-      return unsupported(node, '値を受け取る yield');
-    }
     case 'list_splat': {
       return fail(rowOf(node), '* を付けた式は、ここには書けません。');
     }
@@ -758,22 +915,23 @@ function constantOf(node: Node): Constant {
   }
 }
 
-/** Parses a number literal, rejecting the forms CPython rejects and the forms this grader does not support. */
+/** Parses a number literal, rejecting the forms CPython's tokenizer rejects. */
 function parseNumber(node: Node): Constant {
   const text = node.text;
   const row = rowOf(node);
-  const isImaginary = /[jJ]$/.test(text);
-  const body = isImaginary ? text.slice(0, -1) : text;
-  if (/^0[xXoObB]/.test(body)) unsupported(node, `数値「${text}」（16進数・8進数・2進数のリテラル）`);
-  if (/[eE]/.test(body)) unsupported(node, `数値「${text}」（指数表記のリテラル）`);
-  if (/_(?:_|$|\.)|\._/.test(body) || body.endsWith('_')) fail(row, `数値「${text}」の _ の位置に誤りがあります。`);
-  const digits = body.replaceAll('_', '');
-  if (!isImaginary && !digits.includes('.')) {
-    if (/^0+[1-9]/.test(digits)) {
-      fail(row, '0 で始まる整数は書けません（8進数は 0o を付けて書きます）。');
-    }
-    return { kind: 'int', value: BigInt(digits) };
+  const digits = text.replaceAll('_', '').toLowerCase();
+  if (INTEGER_LITERAL.test(text)) return { kind: 'int', value: BigInt(digits) };
+  if (FLOAT_LITERAL.test(text)) return { kind: 'float', value: Number(digits) };
+  if (IMAGINARY_LITERAL.test(text)) return { kind: 'imaginary', value: Number(digits.slice(0, -1)) };
+  if (/^0+_?\d/.test(text) && /^[\d_]+$/.test(text)) {
+    fail(row, '0 で始まる整数は書けません（8進数は 0o を付けて書きます）。');
   }
-  const value = Number(digits);
-  return isImaginary ? { kind: 'imaginary', value } : { kind: 'float', value };
+  return fail(row, `数値「${text}」の書き方に誤りがあります。`);
 }
+
+const DIGIT_PART = String.raw`\d(?:_?\d)*`;
+const POINT_FLOAT = String.raw`(?:(?:${DIGIT_PART})?\.${DIGIT_PART}|${DIGIT_PART}\.)`;
+const FLOAT_NUMBER = String.raw`(?:${POINT_FLOAT}(?:[eE][+-]?${DIGIT_PART})?|${DIGIT_PART}[eE][+-]?${DIGIT_PART})`;
+const INTEGER_LITERAL = /^(?:[1-9](?:_?\d)*|0+(?:_?0)*|0[bB](?:_?[01])+|0[oO](?:_?[0-7])+|0[xX](?:_?[\dA-Fa-f])+)$/;
+const FLOAT_LITERAL = new RegExp(`^${FLOAT_NUMBER}$`);
+const IMAGINARY_LITERAL = new RegExp(`^(?:${FLOAT_NUMBER}|${DIGIT_PART})[jJ]$`);

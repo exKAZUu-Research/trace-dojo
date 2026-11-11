@@ -21,11 +21,27 @@ const MISSING_TOKEN_NAMES: Record<string, string> = {
  * Parses a module, throwing a `CompileError` for the errors CPython reports before running and for unsupported syntax.
  *
  * @param trace Makes the statements that record steps report their rows, for a model program.
+ * @param library Parses a standard library module written in Python, whose imports this grader checks when they run.
  */
-export function parsePython(source: string, trace?: TraceOptions): Module {
+export function parsePython(source: string, trace?: TraceOptions, library = false): Module {
+  return parseModule(source, trace, { library, namesInLocals: false });
+}
+
+/** Parses the source a program passes to `exec`, `eval`, or `compile`, whose names live in the namespace it runs in. */
+export function parseDynamicCode(source: string): Module {
+  return parseModule(source, undefined, { library: false, namesInLocals: true });
+}
+
+function parseModule(
+  source: string,
+  trace: TraceOptions | undefined,
+  { library, namesInLocals }: { library: boolean; namesInLocals: boolean }
+): Module {
   const indentationError = findIndentationError(source);
   if (indentationError) throw new CompileError([indentationError]);
-  return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) => new ProgramConverter(source, trace).convert(root));
+  return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) =>
+    new ProgramConverter(source, trace, namesInLocals, library).convert(root)
+  );
 }
 
 /** Matches the annotation a line comment ends with, which may follow an ordinary remark. */

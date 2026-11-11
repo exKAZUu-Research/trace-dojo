@@ -19,6 +19,10 @@ export class PyObject {
   private identityValue = 0;
   // Assigned right after construction for the metatypes, whose own classes do not exist yet.
   cls!: PyClass;
+  /** The attributes of an instance of a program's subclass of a builtin type such as list, which has no `dict`. */
+  instanceDict?: Map<string, PyValue>;
+  /** The values of the attributes `__slots__` declares, by name. */
+  slotValues?: Map<string, PyValue>;
 
   constructor(cls: PyClass | undefined) {
     if (cls) this.cls = cls;
@@ -63,19 +67,47 @@ export class PyClass extends PyObject {
   readonly dict = new Map<string, PyValue>();
   module = 'builtins';
   qualifiedName: string;
+  /** The name that messages of builtin code show for a type of a C extension module, such as `decimal.Decimal`. */
+  typeName?: string;
   doc?: string;
   /** Creates an instance of a builtin class, as its `__new__` and `__init__` together would. */
   construct?: (cls: PyClass, args: PyValue[], kwargs: Kwargs) => PyValue;
+  /** Creates an instance of `cls`, a subclass of this builtin class, as this class's `__new__` does. */
+  newInstance?: (cls: PyClass, args: PyValue[], kwargs: Kwargs) => PyValue;
   layout: ClassLayout = { base: 'object' };
   isBuiltin = true;
   /** Whether a program may subclass this builtin class. */
   isBaseType = false;
   /** The ordered annotations of the class body, which `@dataclass` reads. */
   annotationNames: string[] = [];
-  readonly flags: { isEnum?: boolean; isDataclass?: boolean; isAbstractEnum?: boolean } = {};
+  readonly flags: {
+    isEnum?: boolean;
+    isDataclass?: boolean;
+    isAbstractEnum?: boolean;
+    /** Whether the class or a base defined `__getattribute__` in its body. */
+    definesGetattribute?: boolean;
+  } = {};
   /** The members of an Enum class, in definition order. */
   enumMembers?: PyInstance[];
-  definition?: ClassDef;
+  /** What `isinstance()` answers for this class, when its metaclass decides it, as a protocol's does. */
+  instanceCheck?: (value: PyValue) => boolean;
+  /** Runs when a class deriving from this one is created, as `__init_subclass__` would. */
+  subclassHook?: (cls: PyClass) => void;
+  /**
+   * Creates a class written with this one as its base, in place of an ordinary class, as the metaclasses of
+   * `typing.NamedTuple` and `typing.TypedDict` do.
+   */
+  classFactory?: (
+    def: ClassDef,
+    namespace: Map<string, PyValue>,
+    annotations: ClassAnnotations,
+    keywords: Kwargs,
+    bases: PyClass[]
+  ) => PyClass;
+  /** The names `__slots__` declares along the MRO, when instances have no `__dict__`. */
+  slotNames?: Set<string>;
+  /** The abstract base classes whose `register()` made this class their virtual subclass. */
+  readonly registeredWith: PyClass[] = [];
 
   constructor(
     readonly name: string,
@@ -96,9 +128,13 @@ export class PyClass extends PyObject {
   }
 
   isSubclassOf(other: PyClass): boolean {
-    return this === other || this.mro.includes(other);
+    if (this === other || this.mro.includes(other)) return true;
+    return this.mro.some((cls) => cls.registeredWith.some((abstract) => abstract.isSubclassOf(other)));
   }
 }
+
+/** The names a class body annotates, in order, with how to evaluate each annotation. */
+export type ClassAnnotations = [string, () => PyValue][];
 
 /** The state of an exception that the `BaseException` layout adds to instances. */
 export interface ExceptionState {
@@ -127,6 +163,13 @@ export class PyInstance extends PyObject {
   turtle?: TurtleState;
   /** The value of an Enum member. */
   enumValue?: PyValue;
+  /** The builtin value an instance of a program's subclass of int, float, or str stands for. */
+  primitive?: bigint | number | string;
+}
+
+/** An instance of a number class of the standard library, such as `Fraction`, which traces show as its repr. */
+export abstract class PyNumberInstance extends PyInstance {
+  abstract reprText(): string;
 }
 
 export class PyList extends PyObject {
@@ -214,7 +257,11 @@ export class PyFunction extends PyObject {
   name: string;
   qualifiedName: string;
   doc: PyValue;
-  module = '__main__';
+  module: PyValue = '__main__';
+  /** The type parameters written in brackets after the name, as `__type_params__` gives them. */
+  typeParams: PyValue[] = [];
+  /** The frame of those type parameters, where the annotations that mention them are evaluated. */
+  annotationFrame?: unknown;
 
   // code-gauge-allow functionParameterCount 7 -- Each function field is set once at creation.
   constructor(
@@ -271,12 +318,13 @@ export class PyDescriptor extends PyObject {
   }
 }
 
+/** A `super()` object; one created with a class alone is unbound, without `self` and `selfClass`. */
 export class PySuper extends PyObject {
   constructor(
     cls: PyClass,
     readonly thisClass: PyClass,
-    readonly self: PyValue,
-    readonly selfClass: PyClass
+    readonly self?: PyValue,
+    readonly selfClass?: PyClass
   ) {
     super(cls);
   }
@@ -296,8 +344,12 @@ export class PyIterator extends PyObject {
   }
 }
 
+/** What resumes a generator: the value its `yield` evaluates to, or the exception raised there. */
+export type GeneratorInput = { value: PyValue; error?: undefined } | { error: PyError };
+
 /** A generator object, whose frame runs until its next `yield`. */
 export class PyGenerator extends PyObject {
+  started = false;
   running = false;
   finished = false;
 
@@ -305,7 +357,8 @@ export class PyGenerator extends PyObject {
     cls: PyClass,
     readonly name: string,
     readonly qualifiedName: string,
-    readonly resume: () => IteratorResult<PyValue, PyValue>,
+    /** Runs the generator's frame until it yields or returns. */
+    readonly resume: (input: GeneratorInput) => IteratorResult<PyValue, PyValue>,
     readonly holds: () => Iterable<unknown>
   ) {
     super(cls);
@@ -339,7 +392,7 @@ export class PyDeque extends PyObject {
   constructor(
     cls: PyClass,
     public items: PyValue[],
-    readonly maxlen: number | undefined
+    public maxlen: number | undefined
   ) {
     super(cls);
   }

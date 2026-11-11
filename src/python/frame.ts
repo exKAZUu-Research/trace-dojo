@@ -7,6 +7,8 @@ export class Frame implements TracedFrame {
   readonly temporaries: PyValue[] = [];
   /** The names a class body annotates, in order, which `@dataclass` reads. */
   readonly annotations: [string, () => PyValue][] = [];
+  /** How many `try` and `with` statements a generator's frame is inside, where closing it runs code. */
+  protectedDepth = 0;
 
   // code-gauge-allow functionParameterCount 9 -- Each frame field is set once at creation and read on every name access.
   constructor(
@@ -23,4 +25,10 @@ export class Frame implements TracedFrame {
     /** The class a method's `super()` refers to. */
     readonly classCell?: PyCell
   ) {}
+
+  /** The name of the module whose code runs here: `__main__` for the program. */
+  get moduleName(): string {
+    const name = this.globals.get('__name__');
+    return typeof name === 'string' ? name : '__main__';
+  }
 }

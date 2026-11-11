@@ -6,7 +6,17 @@ import { floatRepr, intToString } from '../numbers';
 import { callValue, isTruthy, toArray } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import { iterStr } from '../strings';
-import { exceptionClassNamed, newDict, newException, newList, None, typeError, typeName, valueError } from '../types';
+import {
+  exceptionClassNamed,
+  newDict,
+  newException,
+  newList,
+  None,
+  typeError,
+  typeName,
+  unbox,
+  valueError,
+} from '../types';
 import { type Kwargs, type PyClass, PyDict, PyError, PyList, type PyObject, PyTuple, type PyValue } from '../values';
 import { builtinClassWithBase } from './moduleClasses';
 
@@ -61,8 +71,9 @@ function floatText(value: number): string {
   return floatRepr(value);
 }
 
-function encode(value: PyValue, options: DumpOptions, level: number, stack: Set<PyObject>): string {
+function encode(item: PyValue, options: DumpOptions, level: number, stack: Set<PyObject>): string {
   currentRuntime().spend();
+  const value = unbox(item);
   if (value === None) return 'null';
   if (value === true) return 'true';
   if (value === false) return 'false';
@@ -107,7 +118,8 @@ function newline(options: DumpOptions, depth: number): string {
   return options.indent === undefined ? '' : `\n${options.indent.repeat(depth)}`;
 }
 
-function keyText(key: PyValue): string {
+function keyText(item: PyValue): string {
+  const key = unbox(item);
   if (typeof key === 'string') return key;
   if (key === true) return 'true';
   if (key === false) return 'false';

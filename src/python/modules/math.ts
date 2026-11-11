@@ -1,9 +1,10 @@
 import { builtin } from '../define';
+import { sumOfProducts, vectorNorm } from '../floatArithmetic';
 import { frexp } from '../hashing';
 import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
 import { exactBinary, floatRepr, intToFloat, scaleToFloat, toIndex } from '../numbers';
-import { bindValue, callValue, isTruthy, lookupSpecial, toArray } from '../objects';
+import { bindValue, callValue, isTruthy, iterate, lookupSpecial, toArray } from '../objects';
 import { binaryOp } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { newTuple, pyError, typeError, typeName, valueError } from '../types';
@@ -148,7 +149,7 @@ function perm(nValue: PyValue, kValue: PyValue | undefined): bigint {
 
 /** `math.fsum`: the exact sum of the floats, rounded once. */
 // code-gauge-allow functionCognitiveComplexity 16 -- Follows math.fsum's handling of NaN, infinities, and signed zero.
-function fsum(iterable: PyValue): number {
+export function fsum(iterable: PyValue): number {
   const values = toArray(iterable).map(realArgument);
   let infinity = 0;
   for (const value of values) {
@@ -167,11 +168,6 @@ function fsum(iterable: PyValue): number {
   const result = scaleToFloat(total, exponent);
   if (!Number.isFinite(result)) throw pyError('OverflowError', 'intermediate overflow in fsum');
   return result;
-}
-
-function hypot(values: number[]): number {
-  if (values.some((value) => !Number.isFinite(value) && !Number.isNaN(value))) return Number.POSITIVE_INFINITY;
-  return Math.hypot(...values);
 }
 
 function remainder(x: number, y: number): number {
@@ -252,13 +248,6 @@ function lcm(values: bigint[]): bigint {
   return result;
 }
 
-function sumOfProducts(a: PyValue[], b: PyValue[]): PyValue {
-  if (a.length !== b.length) throw valueError('Inputs are not the same length');
-  let total: PyValue = 0n;
-  for (const [index, value] of a.entries()) total = binaryOp('+', total, binaryOp('*', value, b[index]));
-  return total;
-}
-
 registerModule('math', () => {
   return new Map<string, PyValue>([
     ['pi', Math.PI],
@@ -316,11 +305,11 @@ registerModule('math', () => {
     ['comb', builtin('comb', 'expected', 2, 2, ([n, k]) => comb(n, k))],
     ['perm', builtin('perm', 'expected', 1, 2, ([n, k]) => perm(n, k))],
     ['pow', two('pow', pow)],
-    ['hypot', builtin('hypot', 'expected', 0, Number.POSITIVE_INFINITY, (args) => hypot(args.map(realArgument)))],
+    ['hypot', builtin('hypot', 'expected', 0, Number.POSITIVE_INFINITY, (args) => vectorNorm(args.map(realArgument)))],
     ['dist', builtin('dist', 'expected', 2, 2, ([p, q]) => dist(p, q))],
     ['fsum', builtin('fsum', 'one', 1, 1, ([iterable]) => fsum(iterable))],
     ['prod', builtin('prod', 'takes', 1, 1, product, { keywords: ['start'] })],
-    ['sumprod', builtin('sumprod', 'expected', 2, 2, ([p, q]) => sumOfProducts(toArray(p), toArray(q)))],
+    ['sumprod', builtin('sumprod', 'expected', 2, 2, ([p, q]) => sumOfProducts(iterate(p), iterate(q)))],
     ['isclose', builtin('isclose', 'takes', 2, 2, isclose, { keywords: ['rel_tol', 'abs_tol'] })],
     ['isfinite', builtin('isfinite', 'one', 1, 1, ([value]) => Number.isFinite(realArgument(value)))],
     ['isinf', builtin('isinf', 'one', 1, 1, ([value]) => isInfinite(realArgument(value)))],
@@ -346,7 +335,7 @@ function sqrt(x: number): number {
   return Math.sqrt(x);
 }
 
-function log(value: PyValue, base: PyValue | undefined): number {
+export function log(value: PyValue, base: PyValue | undefined): number {
   const numerator = logOf(value, (x) => x);
   if (base === undefined) return numerator;
   const denominator = logOf(base, (x) => x);
@@ -364,7 +353,7 @@ function dist(p: PyValue, q: PyValue): number {
   const a = toArray(p).map(realArgument);
   const b = toArray(q).map(realArgument);
   if (a.length !== b.length) throw valueError('both points must have the same number of dimensions');
-  return hypot(a.map((value, index) => value - b[index]));
+  return vectorNorm(a.map((value, index) => value - b[index]));
 }
 
 function isInfinite(x: number): boolean {

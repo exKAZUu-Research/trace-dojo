@@ -81,6 +81,15 @@ function field(args: PyValue[], kwargs: Kwargs): PyValue {
 }
 
 const fieldsOfClass = new WeakMap<PyClass, FieldSpec[]>();
+/** The fields each `__repr__` that `@dataclass` generated shows, which `pprint` lays out itself. */
+const generatedReprFields = new WeakMap<object, string[]>();
+
+/** The names of the fields a dataclass instance's generated `__repr__` shows, or undefined for any other value. */
+export function dataclassReprFields(value: PyValue): string[] | undefined {
+  if (!(value instanceof PyInstance) || !value.cls.flags.isDataclass) return undefined;
+  const repr = value.cls.lookup('__repr__');
+  return repr instanceof PyBuiltinFunction ? generatedReprFields.get(repr) : undefined;
+}
 
 /** The fields of a dataclass, its bases' first, as `@dataclass` collects them from the annotations. */
 // code-gauge-allow functionCognitiveComplexity 22 -- Follows how dataclasses collects inherited and own fields.
@@ -200,7 +209,7 @@ function valuesOf(instance: PyValue, fields: FieldSpec[]): PyValue[] {
   return fields.map((spec) => (instance as PyInstance).dict.get(spec.name) ?? None);
 }
 
-// code-gauge-allow functionNcss 37 -- Adds each method `@dataclass` generates for its options.
+// code-gauge-allow functionNcss 38 -- Adds each method `@dataclass` generates for its options.
 // code-gauge-allow functionCognitiveComplexity 26 -- Adds each method `@dataclass` generates for its options.
 function processClass(
   cls: PyClass,
@@ -217,6 +226,10 @@ function processClass(
       const instance = self as PyInstance;
       return `${instance.cls.qualifiedName}(${shown.map((spec) => `${spec.name}=${pyRepr(instance.dict.get(spec.name) ?? None)}`).join(', ')})`;
     });
+    generatedReprFields.set(
+      cls.dict.get('__repr__') as object,
+      shown.map((spec) => spec.name)
+    );
   }
   const compared = fields.filter((spec) => spec.compare);
   if (options.eq && !cls.dict.has('__eq__')) {

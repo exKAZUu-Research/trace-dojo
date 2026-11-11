@@ -9,6 +9,7 @@ import {
   PyClass,
   PyDict,
   PyError,
+  PyGenerator,
   PyInstance,
   PyList,
   PyObject,
@@ -44,6 +45,9 @@ export const boolClass = builtinClass('bool', intClass);
 export const floatClass = builtinClass('float');
 export const complexClass = builtinClass('complex');
 export const strClass = builtinClass('str');
+export const bytesClass = builtinClass('bytes');
+export const bytearrayClass = builtinClass('bytearray');
+export const memoryviewClass = builtinClass('memoryview');
 export const listClass = builtinClass('list');
 export const tupleClass = builtinClass('tuple');
 export const dictClass = builtinClass('dict');
@@ -60,6 +64,8 @@ export const builtinFunctionClass = builtinClass('builtin_function_or_method');
 export const methodDescriptorClass = builtinClass('method_descriptor');
 export const moduleClass = builtinClass('module');
 export const generatorClass = builtinClass('generator');
+export const coroutineClass = builtinClass('coroutine');
+export const asyncGeneratorClass = builtinClass('async_generator');
 export const staticmethodClass = builtinClass('staticmethod');
 export const classmethodClass = builtinClass('classmethod');
 export const propertyClass = builtinClass('property');
@@ -67,7 +73,12 @@ export const superClass = builtinClass('super');
 export const dictKeysClass = builtinClass('dict_keys');
 export const dictValuesClass = builtinClass('dict_values');
 export const dictItemsClass = builtinClass('dict_items');
-export const typingClass = builtinClass('_GenericAlias');
+/** `types.GenericAlias`, the class of a builtin class subscripted, such as `list[int]`. */
+export const typingClass = builtinClass('GenericAlias');
+typingClass.module = 'types';
+/** `typing.Union`, the class of a union such as `int | None`. */
+export const unionClass = builtinClass('Union');
+unionClass.module = 'typing';
 export const cellClass = builtinClass('cell');
 
 for (const cls of [
@@ -223,6 +234,7 @@ export type ExceptionName =
   | 'RuntimeError'
   | 'RecursionError'
   | 'StopIteration'
+  | 'StopAsyncIteration'
   | 'NotImplementedError'
   | 'MemoryError'
   | 'ImportError'
@@ -283,24 +295,44 @@ export function nativeFunction(name: string, run: NativeFunction, ownerName?: st
   return new PyBuiltinFunction(builtinFunctionClass, name, run, undefined, 'method', ownerName);
 }
 
-/** Adds a builtin method to a class, which receives the instance as its first argument. */
+/**
+ * Adds a builtin method to a class, which receives the instance as its first argument. The methods of int, float, and
+ * str receive the builtin values that instances of a program's subclasses stand for, as their own arguments too,
+ * except where CPython renders an argument with its own methods.
+ */
 export function defineMethod(
   cls: PyClass,
   name: string,
   run: (self: PyValue, args: PyValue[], kwargs: Kwargs) => PyValue,
   binding: NativeBinding = 'method'
 ): void {
+  const unboxes = PRIMITIVE_CLASSES.has(cls) && binding === 'method';
+  const unboxesArguments = unboxes && !RENDERING_METHODS.has(name);
   cls.dict.set(
     name,
     new PyBuiltinFunction(
       methodDescriptorClass,
       name,
-      (args, kwargs) => run(args[0], args.slice(1), kwargs),
+      (args, kwargs) => {
+        if (args.length === 0 && binding === 'method') {
+          throw typeError(`unbound method ${cls.name}.${name}() needs an argument`);
+        }
+        if (!unboxes) return run(args[0], args.slice(1), kwargs);
+        return run(unbox(args[0]), unboxesArguments ? args.slice(1).map(unbox) : args.slice(1), kwargs);
+      },
       undefined,
       binding,
       cls.name
     )
   );
+}
+
+const PRIMITIVE_CLASSES = new Set([intClass, boolClass, floatClass, strClass]);
+const RENDERING_METHODS = new Set(['__mod__', '__rmod__', 'format', 'format_map']);
+
+/** The builtin value of an instance of a program's subclass of int, float, or str, or any other value as it is. */
+export function unbox(value: PyValue): PyValue {
+  return value instanceof PyInstance && value.primitive !== undefined ? value.primitive : value;
 }
 
 /** Whether a value is an instance of `cls`, counting `bool` as an `int`. */
@@ -328,9 +360,29 @@ export function classOf(value: PyValue): PyClass {
   }
 }
 
+/**
+ * The class of the instance that a builtin method copying or combining an instance of `cls` creates: the builtin
+ * type itself for a program's subclass of list, tuple, dict, set, or frozenset, which CPython's C types create, and
+ * `cls` for the others, such as the collections types, which create an instance of the receiver's class.
+ */
+export function resultClassOf(cls: PyClass): PyClass {
+  if (cls.isBuiltin) return cls;
+  const base = cls.mro.find((each) => each.isBuiltin) ?? objectClass;
+  return [listClass, tupleClass, dictClass, setClass, frozensetClass].includes(base) ? base : cls;
+}
+
 /** The name of a value's class, as error messages quote it. */
 export function typeName(value: PyValue): string {
-  return classOf(value).name;
+  const cls = classOf(value);
+  return cls.typeName ?? cls.name;
 }
 
 export type { Kwargs };
+
+/**
+ * Whether a value is a generator object that is an iterator: a generator or an awaitable helper, but not a coroutine or
+ * an async generator, which share the machinery of generators without being iterators.
+ */
+export function isIteratorGenerator(value: PyValue): value is PyGenerator {
+  return value instanceof PyGenerator && value.cls !== coroutineClass && value.cls !== asyncGeneratorClass;
+}

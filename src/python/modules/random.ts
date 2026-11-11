@@ -16,7 +16,7 @@ const N = 624;
 const M = 397;
 
 /** The Mersenne Twister of CPython's `_random` module, seeded as `random.seed` seeds it. */
-class MersenneTwister {
+export class MersenneTwister {
   private readonly state = new Uint32Array(N);
   private index = N + 1;
   gaussNext: number | undefined;
@@ -108,7 +108,7 @@ class MersenneTwister {
 }
 
 /** The 32-bit words of a seed's absolute value, least significant first, as CPython's random_seed splits it. */
-function keyOf(seed: bigint): number[] {
+export function keyOf(seed: bigint): number[] {
   let value = seed < 0n ? -seed : seed;
   if (value === 0n) return [0];
   const key: number[] = [];
@@ -119,7 +119,7 @@ function keyOf(seed: bigint): number[] {
   return key;
 }
 
-function seedOf(value: PyValue | undefined): bigint {
+export function seedOf(value: PyValue | undefined): bigint {
   if (value === undefined || value === None) return BigInt(`0x${randomBytes(32).toString('hex')}`);
   if (typeof value === 'bigint' || typeof value === 'boolean') return BigInt(value);
   if (typeof value === 'string') {

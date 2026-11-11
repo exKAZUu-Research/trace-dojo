@@ -1,11 +1,12 @@
 import { pyHash } from './hashing';
 import { iterate } from './objects';
 import { SetTable } from './setTable';
+import { resultClassOf } from './types';
 import { DONE, PyDict, PySet, type PyValue } from './values';
 
 /** A new set of the same type (set or frozenset) as `like`, filled from a table. */
 function setLike(like: PySet, table: SetTable): PySet {
-  return new PySet(like.cls, table);
+  return new PySet(resultClassOf(like.cls), table);
 }
 
 /** Adds the elements of an iterable as CPython's set_update_internal does, which decides the resulting order. */

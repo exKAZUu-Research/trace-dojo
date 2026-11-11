@@ -29,7 +29,7 @@ baseExceptionClass.construct = (cls, args, kwargs) => {
   return exception;
 };
 for (const cls of exceptionClasses.values())
-  if (cls !== baseExceptionClass) cls.construct = baseExceptionClass.construct;
+  if (cls !== baseExceptionClass) cls.construct ??= baseExceptionClass.construct;
 
 method(baseExceptionClass, '__init__', 'expected', 0, Number.POSITIVE_INFINITY, (self, args, kwargs) => {
   rejectKeywords(instanceOf(self).cls, kwargs);

@@ -2,6 +2,7 @@ import { builtin } from '../define';
 import { registerModule } from '../modules';
 import { exceptionClassNamed, newException } from '../types';
 import { PyError, type PyValue } from '../values';
+import { sysInformation } from './sysInfo';
 
 registerModule(
   'sys',
@@ -16,6 +17,7 @@ registerModule(
       ['maxsize', 2n ** 63n - 1n],
       ['stdout', runtime.standardStream('stdout')],
       ['stderr', runtime.standardStream('stderr')],
+      ...sysInformation(runtime),
     ])
 );
 

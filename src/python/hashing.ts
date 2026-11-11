@@ -1,3 +1,4 @@
+import { PyBytes, PyMemoryView } from './bytesValues';
 import { callSpecial, lookupSpecial } from './objects';
 import { classOf, None, typeError, typeName } from './types';
 import { PyComplex, PyInstance, PyObject, PySet, PyTuple, type PyValue } from './values';
@@ -116,7 +117,7 @@ function hashString(value: string): bigint {
 const NONE_HASH = 4_238_894_112n;
 
 /** Python's `hash()`, raising TypeError for unhashable values. */
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of hashable value.
+// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of hashable value.
 export function pyHash(value: PyValue): bigint {
   switch (typeof value) {
     case 'bigint': {
@@ -133,20 +134,28 @@ export function pyHash(value: PyValue): bigint {
     }
   }
   if (value === None) return NONE_HASH;
-  if (value instanceof PyTuple && !(value instanceof PyInstance)) return hashTuple(value.items);
-  if (value instanceof PyComplex) {
-    const hash = signed(hashFloat(value.real) + 1_000_003n * hashFloat(value.imag));
-    return hash === -1n ? -2n : hash;
-  }
+  if (value instanceof PyTuple && value.cls.isBuiltin) return hashTuple(value.items);
   const special = lookupSpecial(value, '__hash__');
   if (special === None) throw typeError(`unhashable type: '${typeName(value)}'`);
+  if (value instanceof PyBytes || value instanceof PyMemoryView) return callSpecial(value, '__hash__', []) as bigint;
   if (special !== undefined && !isDefaultHash(special)) {
     const result = callSpecial(value, '__hash__', []);
     if (typeof result === 'boolean') return result ? 1n : 0n;
     if (typeof result !== 'bigint') throw typeError('__hash__ method should return an integer');
     return hashInt(result);
   }
+  return builtinHash(value);
+}
+
+/** The hash a builtin type's `__hash__` gives an instance of it or of a subclass that does not override it. */
+function builtinHash(value: PyObject): bigint {
   if (value instanceof PySet) return hashFrozenset(value);
+  if (value instanceof PyTuple) return hashTuple(value.items);
+  if (value instanceof PyComplex) {
+    const hash = signed(hashFloat(value.real) + 1_000_003n * hashFloat(value.imag));
+    return hash === -1n ? -2n : hash;
+  }
+  if (value instanceof PyInstance && value.primitive !== undefined) return pyHash(value.primitive);
   return identityHash(value);
 }
 

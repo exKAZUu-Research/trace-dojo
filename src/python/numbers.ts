@@ -31,11 +31,13 @@ export function describeIntegerIndex(value: PyValue): string {
 }
 
 /** Interprets a value as an integer index, as `operator.index()` does. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows operator.index for each kind of value.
+// code-gauge-allow functionCognitiveComplexity 19 -- Follows operator.index for each kind of value.
 export function toIndex(value: PyValue, describe: (value: PyValue) => string = describeIntegerIndex): bigint {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'boolean') return value ? 1n : 0n;
   if (value instanceof PyInstance) {
+    // An int subclass is an int, whatever its `__index__` says.
+    if (typeof value.primitive === 'bigint') return value.primitive;
     const index = lookupSpecial(value, '__index__');
     if (index !== undefined) {
       const result = callValue(bindValue(index, value), []);

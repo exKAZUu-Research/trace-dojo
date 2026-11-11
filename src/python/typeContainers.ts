@@ -3,11 +3,11 @@ import { method } from './define';
 import { DictStore } from './dictStore';
 import { mappingEntries, storeKey } from './expressionEvaluator';
 import { pyHash } from './hashing';
-import { keyError, sliceIndices } from './items';
+import { builtinGetItem, keyError, sliceIndices } from './items';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
-import { callValue, getItem, getIterator, isTruthy, iterate, lookupSpecial, toArray } from './objects';
-import { contains, equals, lessThan } from './operators';
+import { builtinIterator, callValue, getItem, getIterator, isTruthy, iterate, lookupSpecial, toArray } from './objects';
+import { builtinContains, contains, equals, lessThan } from './operators';
 import { currentRuntime } from './runtimeContext';
 import {
   differenceUpdate,
@@ -32,6 +32,7 @@ import {
   None,
   pyError,
   rangeClass,
+  resultClassOf,
   setClass,
   sliceClass,
   tupleClass,
@@ -93,9 +94,9 @@ method(listClass, '__repr__', 'none', 0, 0, (self) =>
   containerRepr(self as PyObject, '[...]', () => `[${joinReprs(listOf(self).items)}]`)
 );
 method(listClass, '__len__', 'none', 0, 0, (self) => BigInt(listOf(self).items.length));
-method(listClass, '__contains__', 'one', 1, 1, (self, [item]) => contains(self, item));
-method(listClass, '__getitem__', 'one', 1, 1, (self, [key]) => getItem(self, key));
-method(listClass, '__iter__', 'none', 0, 0, (self) => getIterator(self));
+method(listClass, '__contains__', 'one', 1, 1, (self, [item]) => builtinContains(self, item));
+method(listClass, '__getitem__', 'one', 1, 1, (self, [key]) => builtinGetItem(self, key));
+method(listClass, '__iter__', 'none', 0, 0, (self) => builtinIterator(self));
 method(listClass, '__reversed__', 'none', 0, 0, (self) => reversedIterator(listOf(self), 'list_reverseiterator'));
 method(listClass, 'append', 'one', 1, 1, (self, [item]) => {
   currentRuntime().allocate(1);
@@ -358,7 +359,7 @@ export function dictBody(dict: PyDict): string {
 
 method(dictClass, '__len__', 'none', 0, 0, (self) => BigInt(dictOf(self).store.size));
 method(dictClass, '__contains__', 'one', 1, 1, (self, [key]) => dictOf(self).store.has(key));
-method(dictClass, '__getitem__', 'one', 1, 1, (self, [key]) => getItem(self, key));
+method(dictClass, '__getitem__', 'one', 1, 1, (self, [key]) => builtinGetItem(self, key));
 method(dictClass, '__setitem__', 'expected', 2, 2, (self, [key, value]) => {
   storeKey(dictOf(self), key, value);
   return None;
@@ -408,7 +409,7 @@ method(dictClass, 'clear', 'none', 0, 0, (self) => {
   return None;
 });
 method(dictClass, 'copy', 'none', 0, 0, (self) => {
-  const copy = new PyDict(dictOf(self).cls, new DictStore(), dictOf(self).defaultFactory);
+  const copy = new PyDict(resultClassOf(dictOf(self).cls), new DictStore(), dictOf(self).defaultFactory);
   for (const entry of dictOf(self).store.ordered()) copy.store.set(entry.key, entry.value);
   return copy;
 });
@@ -426,6 +427,9 @@ method(
   { binding: 'class' }
 );
 dictClass.dict.set('__hash__', None);
+// The views of keys and items compare like sets, so they are unhashable as CPython's are.
+dictKeysClass.dict.set('__hash__', None);
+dictItemsClass.dict.set('__hash__', None);
 
 function listIterator(items: PyValue[], name: string): PyIterator {
   let index = 0;
@@ -506,8 +510,8 @@ for (const cls of [setClass, frozensetClass]) {
   method(cls, '__repr__', 'none', 0, 0, setRepr);
   method(cls, '__len__', 'none', 0, 0, (self) => BigInt(setOf(self).table.size));
   method(cls, '__contains__', 'one', 1, 1, (self, [item]) => setOf(self).table.has(item));
-  method(cls, '__iter__', 'none', 0, 0, (self) => getIterator(self));
-  method(cls, 'copy', 'none', 0, 0, (self) => new PySet(setOf(self).cls, setOf(self).table.copy()));
+  method(cls, '__iter__', 'none', 0, 0, (self) => builtinIterator(self));
+  method(cls, 'copy', 'none', 0, 0, (self) => new PySet(resultClassOf(setOf(self).cls), setOf(self).table.copy()));
   method(cls, 'union', 'expected', 0, Number.POSITIVE_INFINITY, (self, others) => setUnion(setOf(self), others));
   method(cls, 'intersection', 'expected', 0, Number.POSITIVE_INFINITY, (self, others) =>
     foldSets(setOf(self), others, setIntersection)
@@ -518,7 +522,7 @@ for (const cls of [setClass, frozensetClass]) {
   method(cls, 'symmetric_difference', 'one', 1, 1, (self, [other]) => {
     const table = (other instanceof PySet ? other.table : tableFrom(other)).copy();
     symmetricDifferenceUpdate(table, self);
-    return new PySet(setOf(self).cls, table);
+    return new PySet(resultClassOf(setOf(self).cls), table);
   });
   method(cls, 'isdisjoint', 'one', 1, 1, (self, [other]) =>
     toArray(other).every((item) => !setOf(self).table.has(item))
@@ -537,7 +541,7 @@ for (const cls of [setClass, frozensetClass]) {
 
 /** Applies a set operation with each of `others` in turn, starting from a copy of `set`. */
 function foldSets(set: PySet, others: PyValue[], operation: (set: PySet, other: PyValue) => PySet): PySet {
-  let result = new PySet(set.cls, set.table.copy());
+  let result = new PySet(resultClassOf(set.cls), set.table.copy());
   for (const other of others) result = operation(result, other);
   return result;
 }
