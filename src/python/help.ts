@@ -1,5 +1,6 @@
 import { getDoc } from './modules/inspect';
 import { formatSignatureWithin, signature } from './modules/inspectSignature';
+import { checkNamespaceView } from './namespaceDifferences';
 import { callValue, getAttribute } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { classOf, None, typeError } from './types';
@@ -25,6 +26,7 @@ export function help(args: PyValue[], kwargs?: Kwargs): PyValue {
   if (all.length === 0) throw new UnsupportedFeatureError('対話型のヘルプ（引数のない help()）');
   args = all;
   const [value] = args;
+  checkNamespaceView(value as PyValue, 'help()');
   const fn = value instanceof PyBoundMethod ? value.fn : value;
   const runtime = currentRuntime();
   // Other objects are pydoc's to document, as CPython's help() does.

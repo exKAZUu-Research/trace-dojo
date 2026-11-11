@@ -4,7 +4,7 @@ import { registerUnsupportedAttributes } from '../modules';
 import { registerSourceModule } from '../sourceModules';
 import { codeClass, frameClass, tracebackClass } from '../tracebacks';
 import { asyncGeneratorClass, cellClass, coroutineClass, generatorClass, methodClass, newDict, None } from '../types';
-import { PyFunction, PyGenerator, type PyValue } from '../values';
+import { type PyClass, PyFunction, PyGenerator, PyInstance, type PyValue } from '../values';
 
 // CPython's `types.py`, with `SimpleNamespace` and `MappingProxyType`, which CPython writes in C, written in Python.
 const SOURCE = String.raw`
@@ -38,106 +38,186 @@ GenericAlias = type(list[int])
 UnionType = type(int | str)
 
 
-class SimpleNamespace:
-    def __init__(self, mapping_or_iterable=(), /, **kwargs):
-        for key, value in dict(mapping_or_iterable).items():
-            if not isinstance(key, str):
-                raise TypeError("keywords must be strings")
-            setattr(self, key, value)
-        for key, value in kwargs.items():
-            setattr(self, key, value)
+def _simple_namespace_type():
+    allocate = _allocate
+    repr_running = set()
 
-    def __repr__(self):
-        if type(self) is SimpleNamespace:
-            name = 'namespace'
-        else:
-            name = type(self).__name__
-        if id(self) in _repr_running:
-            return name + '(...)'
-        _repr_running.add(id(self))
-        try:
-            items = [f'{key}={value!r}' for key, value in self.__dict__.items()]
-        finally:
-            _repr_running.discard(id(self))
-        return f"{name}({', '.join(items)})"
+    class SimpleNamespace:
+        def __new__(cls, *args, **kwargs):
+            return allocate(cls)
 
-    def __eq__(self, other):
-        if isinstance(self, SimpleNamespace) and isinstance(other, SimpleNamespace):
-            return self.__dict__ == other.__dict__
-        return NotImplemented
+        def __init__(self, *args, **kwargs):
+            if len(args) > 1:
+                raise TypeError(f'{type(self).__name__} expected at most 1 argument, got {len(args)}')
+            for key, value in dict(*args).items():
+                if not isinstance(key, str):
+                    raise TypeError("keywords must be strings")
+                setattr(self, key, value)
+            for key, value in kwargs.items():
+                setattr(self, key, value)
 
-    def __reduce__(self):
-        return (type(self), (), self.__dict__)
+        def __repr__(self):
+            if type(self) is SimpleNamespace:
+                name = 'namespace'
+            else:
+                name = type(self).__name__
+            if id(self) in repr_running:
+                return name + '(...)'
+            repr_running.add(id(self))
+            try:
+                items = [f'{key}={value!r}' for key, value in self.__dict__.items()]
+            finally:
+                repr_running.discard(id(self))
+            return f"{name}({', '.join(items)})"
 
-    def __replace__(self, /, **changes):
-        result = type(self)(**self.__dict__)
-        for key, value in changes.items():
-            setattr(result, key, value)
-        return result
+        def __eq__(self, other):
+            if isinstance(self, SimpleNamespace) and isinstance(other, SimpleNamespace):
+                return self.__dict__ == other.__dict__
+            return NotImplemented
 
+        def __ne__(self, other):
+            if isinstance(self, SimpleNamespace) and isinstance(other, SimpleNamespace):
+                return self.__dict__ != other.__dict__
+            return NotImplemented
 
-_repr_running = set()
-_c_type_name(SimpleNamespace, 'types.SimpleNamespace')
+        def __lt__(self, other):
+            if isinstance(self, SimpleNamespace) and isinstance(other, SimpleNamespace):
+                return self.__dict__ < other.__dict__
+            return NotImplemented
 
+        def __le__(self, other):
+            if isinstance(self, SimpleNamespace) and isinstance(other, SimpleNamespace):
+                return self.__dict__ <= other.__dict__
+            return NotImplemented
 
-class mappingproxy:
-    __module__ = 'builtins'
+        def __gt__(self, other):
+            if isinstance(self, SimpleNamespace) and isinstance(other, SimpleNamespace):
+                return self.__dict__ > other.__dict__
+            return NotImplemented
 
-    def __init__(self, mapping):
-        if not hasattr(mapping, 'keys') or not hasattr(mapping, '__getitem__') or isinstance(mapping, (list, tuple)):
-            raise TypeError(f'mappingproxy() argument must be a mapping, not {type(mapping).__name__}')
-        object.__setattr__(self, '_mapping', mapping)
+        def __ge__(self, other):
+            if isinstance(self, SimpleNamespace) and isinstance(other, SimpleNamespace):
+                return self.__dict__ >= other.__dict__
+            return NotImplemented
 
-    def __setattr__(self, name, value):
-        raise AttributeError(f"'mappingproxy' object has no attribute '{name}' and no __dict__ for setting new attributes")
+        def __reduce__(self):
+            return (type(self), (), self.__dict__)
 
-    def __getitem__(self, key):
-        return self._mapping[key]
+        def __replace__(self, /, **changes):
+            result = type(self)(**self.__dict__)
+            for key, value in changes.items():
+                setattr(result, key, value)
+            return result
 
-    def __contains__(self, key):
-        return key in self._mapping
-
-    def __iter__(self):
-        return iter(self._mapping)
-
-    def __reversed__(self):
-        return reversed(self._mapping)
-
-    def __len__(self):
-        return len(self._mapping)
-
-    def __eq__(self, other):
-        return self._mapping == other
-
-    def __or__(self, other):
-        return dict(self._mapping) | other
-
-    def __ror__(self, other):
-        return other | dict(self._mapping)
-
-    def __repr__(self):
-        return f'mappingproxy({self._mapping!r})'
-
-    def __str__(self):
-        return str(self._mapping)
-
-    def get(self, key, default=None):
-        return self._mapping.get(key, default)
-
-    def keys(self):
-        return self._mapping.keys()
-
-    def values(self):
-        return self._mapping.values()
-
-    def items(self):
-        return self._mapping.items()
-
-    def copy(self):
-        return self._mapping.copy()
+    _c_type_name(SimpleNamespace, 'types.SimpleNamespace')
+    _c_type(SimpleNamespace)
+    _adopt_implementation(SimpleNamespace)
+    return SimpleNamespace
 
 
-MappingProxyType = mappingproxy
+SimpleNamespace = _simple_namespace_type()
+
+
+def _mappingproxy_type():
+    # The helpers stay out of the module's namespace, as CPython's C type needs none.
+    allocate, get_slot, put_slot = _allocate, _get_slot, _put_slot
+
+    class mappingproxy:
+        __module__ = 'builtins'
+        # The mapping is kept outside the instance, as C's struct field is.
+        __slots__ = ()
+
+        def __new__(cls, *args, **kwargs):
+            if len(args) + len(kwargs) > 1:
+                raise TypeError(f'mappingproxy() takes at most 1 argument ({len(args) + len(kwargs)} given)')
+            if kwargs.keys() - {'mapping'}:
+                name = next(iter(kwargs))
+                raise TypeError(f"mappingproxy() got an unexpected keyword argument '{name}'")
+            if not args and not kwargs:
+                raise TypeError("mappingproxy() missing required argument 'mapping' (pos 1)")
+            mapping = args[0] if args else kwargs['mapping']
+            if not hasattr(mapping, 'keys') or not hasattr(mapping, '__getitem__') or isinstance(mapping, (list, tuple)):
+                raise TypeError(f'mappingproxy() argument must be a mapping, not {type(mapping).__name__}')
+            self = allocate(cls)
+            put_slot(self, 0, mapping)
+            return self
+
+        def __getitem__(self, key):
+            return get_slot(self, 0)[key]
+
+        def __contains__(self, key):
+            return key in get_slot(self, 0)
+
+        def __iter__(self):
+            return iter(get_slot(self, 0))
+
+        def __reversed__(self):
+            return reversed(get_slot(self, 0))
+
+        def __len__(self):
+            return len(get_slot(self, 0))
+
+        def __hash__(self):
+            return hash(get_slot(self, 0))
+
+        def __eq__(self, other):
+            return get_slot(self, 0) == other
+
+        def __ne__(self, other):
+            return get_slot(self, 0) != other
+
+        def __lt__(self, other):
+            return get_slot(self, 0) < other
+
+        def __le__(self, other):
+            return get_slot(self, 0) <= other
+
+        def __gt__(self, other):
+            return get_slot(self, 0) > other
+
+        def __ge__(self, other):
+            return get_slot(self, 0) >= other
+
+        def __or__(self, other):
+            if isinstance(other, mappingproxy):
+                other = get_slot(other, 0)
+            return get_slot(self, 0) | other
+
+        def __ror__(self, other):
+            return other | get_slot(self, 0)
+
+        def __ior__(self, other):
+            raise TypeError(f"'|=' is not supported by mappingproxy; use '|' instead")
+
+        def __repr__(self):
+            return f'mappingproxy({get_slot(self, 0)!r})'
+
+        def __str__(self):
+            return str(get_slot(self, 0))
+
+        def get(self, key, default=None, /):
+            return get_slot(self, 0).get(key, default)
+
+        def keys(self):
+            return get_slot(self, 0).keys()
+
+        def values(self):
+            return get_slot(self, 0).values()
+
+        def items(self):
+            return get_slot(self, 0).items()
+
+        def copy(self):
+            return get_slot(self, 0).copy()
+
+        def __class_getitem__(cls, item):
+            return GenericAlias(cls, item)
+
+    _c_type(mappingproxy, False)
+    return mappingproxy
+
+
+MappingProxyType = _mappingproxy_type()
 
 # The descriptors CPython's C types use for their attributes are properties here; a class's own __dict__ entry and a
 # slot have the same classes as in CPython.
@@ -149,24 +229,32 @@ del _C
 ClassMethodDescriptorType = type(dict.__dict__['fromkeys'])
 
 
-def coroutine(func):
-    if not callable(func):
-        raise TypeError('types.coroutine() expects a callable')
-    if _make_iterable_coroutine(func):
-        return func
+def _coroutine_function(make_iterable, mark_iterable):
+    # The helpers stay out of the module's namespace, as CPython's are C functions of _types.
+    def coroutine(func):
+        if not callable(func):
+            raise TypeError('types.coroutine() expects a callable')
+        if make_iterable(func):
+            return func
 
-    def wrapped(*args, **kwargs):
-        coro = func(*args, **kwargs)
-        _mark_iterable_coroutine(coro)
-        return coro
+        def wrapped(*args, **kwargs):
+            coro = func(*args, **kwargs)
+            mark_iterable(coro)
+            return coro
 
-    for name in ('__module__', '__name__', '__qualname__', '__doc__'):
-        try:
-            setattr(wrapped, name, getattr(func, name))
-        except AttributeError:
-            pass
-    wrapped.__wrapped__ = func
-    return wrapped
+        for name in ('__module__', '__name__', '__qualname__', '__doc__'):
+            try:
+                setattr(wrapped, name, getattr(func, name))
+            except AttributeError:
+                pass
+        wrapped.__wrapped__ = func
+        return wrapped
+
+    coroutine.__qualname__ = 'coroutine'
+    return coroutine
+
+
+coroutine = _coroutine_function(_make_iterable_coroutine, _mark_iterable_coroutine)
 
 
 def new_class(name, bases=(), kwds=None, exec_body=None):
@@ -342,13 +430,13 @@ class DynamicClassAttribute:
         return result
 
 
-del _f, _builtin_types, _c_type_name, mappingproxy
+del sys, _f, _builtin_types, _coroutine_function, _make_iterable_coroutine, _mark_iterable_coroutine, _c_type_name, _c_type, _adopt_implementation, _simple_namespace_type, _mappingproxy_type, _allocate, _get_slot, _put_slot
 `;
 
 registerSourceModule(
   'types',
   SOURCE,
-  () =>
+  (runtime) =>
     new Map<string, PyValue>([
       [
         '_builtin_types',
@@ -362,6 +450,15 @@ registerSourceModule(
           ['frame', frameClass],
           ['traceback', tracebackClass],
         ]),
+      ],
+      [
+        '_adopt_implementation',
+        // sys.implementation, created before this module, is an object of its SimpleNamespace type.
+        builtin('_adopt_implementation', 'one', 1, 1, ([cls]) => {
+          const implementation = runtime.modules.get('sys')?.dict.get('implementation');
+          if (implementation instanceof PyInstance) implementation.cls = cls as PyClass;
+          return None;
+        }),
       ],
       [
         '_make_iterable_coroutine',

@@ -40,6 +40,7 @@ import './modules/annotationlib';
 import './modules/dataclasses';
 import './modules/unsupportedNames';
 import './modules/moduleExtras';
+import './modules/siteBuiltinsModule';
 import './modules/osNames';
 import './modules/internalNames';
 import './modules/classExtras';

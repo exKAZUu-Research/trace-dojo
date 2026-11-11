@@ -63,6 +63,7 @@ def isabstract(object):
 
 
 def _getmembers(object, predicate, getter):
+    _check_namespace(object, 'inspect.getmembers()')
     results = []
     processed = set()
     names = dir(object)

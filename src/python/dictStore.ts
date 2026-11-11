@@ -96,6 +96,19 @@ export class DictStore {
     for (const entry of entries) if (entry.alive) yield entry;
   }
 
+  /**
+   * The live entry before `entry` in insertion order, or the last one when `entry` is undefined, as CPython's reverse
+   * iterators walk the entries back from where they are, past any added after it.
+   */
+  previous(entry: DictEntry | undefined): DictEntry | undefined {
+    const { entries } = this;
+    let index = entry === undefined ? entries.length : entries.indexOf(entry);
+    // An entry that compacting the entries dropped was deleted; the iterator then sees what is left before it.
+    if (index === -1) index = entries.length;
+    while (--index >= 0) if (entries[index]?.alive) return entries[index];
+    return undefined;
+  }
+
   ordered(): DictEntry[] {
     return this.entries.filter((entry) => entry.alive);
   }

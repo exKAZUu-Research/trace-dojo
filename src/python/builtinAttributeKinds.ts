@@ -1,6 +1,7 @@
 import { PyAttribute } from './attributeDescriptors';
 import { assignExceptionAttribute, specialAttribute } from './attributes';
 import { builtinClassLayout, builtinDoc } from './builtinDocs';
+import { orderClassNamespace, orderModuleClasses } from './classOrders';
 import { method } from './define';
 import { ownDict } from './descriptors';
 import { defineConstructingNew } from './instances';
@@ -8,7 +9,15 @@ import { addModuleCreationHook } from './modules';
 import { attributeError, bindValue, callValue } from './objects';
 import { nativeCompare } from './operators';
 import { allBuiltinClasses } from './subclasses';
-import { baseExceptionClass, classmethodClass, defineMethod, nativeFunction, None, propertyClass } from './types';
+import {
+  baseExceptionClass,
+  classmethodClass,
+  defineMethod,
+  iteratorClassSetup,
+  nativeFunction,
+  None,
+  propertyClass,
+} from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import { PyBuiltinFunction, PyClass, PyDescriptor, PyObject, type PyValue } from './values';
 
@@ -22,13 +31,17 @@ export function convertBuiltinAttributes(classes: Iterable<PyClass> = allBuiltin
     if (!cls.isBuiltin || converted.has(cls)) continue;
     converted.add(cls);
     const layout = builtinClassLayout(cls);
-    if (layout === undefined) continue;
-    const kinds = new Map(layout.split(' ').map((word) => word.split(':') as [string, string]));
-    // A type CPython gives tp_new has `__new__` in its namespace, which creates its objects as calling it does.
-    if (kinds.get('__new__') === 'builtin_function_or_method' && !cls.dict.has('__new__')) defineTypeNew(cls);
-    if (cls.isSubclassOf(baseExceptionClass)) defineOwnSlots(cls, kinds);
-    for (const [name, kind] of kinds) convertAttribute(cls, name, kind);
+    if (layout !== undefined) convertAttributes(cls, layout);
+    orderClassNamespace(cls);
   }
+}
+
+function convertAttributes(cls: PyClass, layout: string): void {
+  const kinds = new Map(layout.split(' ').map((word) => word.split(':') as [string, string]));
+  // A type CPython gives tp_new has `__new__` in its namespace, which creates its objects as calling it does.
+  if (kinds.get('__new__') === 'builtin_function_or_method' && !cls.dict.has('__new__')) defineTypeNew(cls);
+  if (cls.isSubclassOf(baseExceptionClass)) defineOwnSlots(cls, kinds);
+  for (const [name, kind] of kinds) convertAttribute(cls, name, kind);
 }
 
 /** Makes one attribute of a builtin class the kind of object CPython's type has under its name. */
@@ -125,8 +138,13 @@ function attributeOf(cls: PyClass, name: string, property: PyDescriptor, kind: '
 // The classes a module creates when a run imports it become CPython's descriptors as well.
 addModuleCreationHook((runtime, name) => () => {
   const module = runtime.modules.get(name);
-  if (module) convertBuiltinAttributes([...module.dict.values()].filter((value) => value instanceof PyClass));
+  if (!module) return;
+  convertBuiltinAttributes([...module.dict.values()].filter((value) => value instanceof PyClass));
+  orderModuleClasses(module.dict.values());
 });
+
+// The classes of native iterators are created when first used, which may be while a program runs.
+iteratorClassSetup.push((cls) => convertBuiltinAttributes([cls]));
 
 /** Gives a builtin type the `__new__` CPython's tp_new is, which creates objects as calling the type does. */
 function defineTypeNew(cls: PyClass): void {

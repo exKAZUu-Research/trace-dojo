@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 604 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 609 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import {
   classAnnotate,
   classAnnotations,
@@ -22,11 +22,12 @@ import {
   noteGetattributeAssigned,
   ownDict,
 } from './descriptors';
-import { enumClassData } from './enums';
+import { enumClassData, enumMemberData } from './enums';
 import type { Frame } from './frame';
 import { delegateOf } from './generators';
 import { hasPythonLevelNew } from './instances';
 import { builtinFunctionModule } from './modules';
+import { checkNamespaceListing } from './namespaceDifferences';
 import { namespaceDict, namespaceOf } from './namespaces';
 import { attributeError, bindValue, callValue, getAttribute, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
@@ -120,7 +121,7 @@ function isMetaDataDescriptor(attribute: PyValue): boolean {
   return (attribute instanceof PyDescriptor && isPropertyKind(attribute.cls)) || isDataDescriptor(attribute);
 }
 
-// code-gauge-allow functionNcss 33 -- One case per attribute a class keeps outside its dictionary.
+// code-gauge-allow functionNcss 34 -- One case per attribute a class keeps outside its dictionary.
 export function typeData(cls: PyClass, name: string): PyValue | undefined {
   switch (name) {
     case '__name__': {
@@ -158,6 +159,7 @@ export function typeData(cls: PyClass, name: string): PyValue | undefined {
       return cls.cls;
     }
     case '__dict__': {
+      checkNamespaceListing(cls, 'クラスの __dict__・vars()');
       // A read-only view of the class's own namespace, as CPython's mappingproxy.
       const types = currentRuntime().importModule('types');
       return callValue(types.dict.get('MappingProxyType') as PyValue, [namespaceDict(cls.dict)]);
@@ -361,7 +363,7 @@ function functionAttribute(fn: PyFunction, name: string): PyValue | undefined {
   }
 }
 
-// code-gauge-allow functionNcss 34 -- One case per attribute an instance of a builtin class keeps outside its dictionary.
+// code-gauge-allow functionNcss 37 -- One case per attribute an instance of a builtin class keeps outside its dictionary.
 function instanceAttribute(instance: PyInstance, name: string): PyValue | undefined {
   if (name === '__dict__') return dictAttribute(instance);
   if (name === '__weakref__' && instance.cls.lookup('__weakref__') !== undefined)
@@ -370,6 +372,8 @@ function instanceAttribute(instance: PyInstance, name: string): PyValue | undefi
   if (instance.enumValue !== undefined) {
     if (name === 'value' || name === '_value_') return instance.enumValue;
     if (name === 'name' || name === '_name_') return instance.dict.get('_name_');
+    const member = enumMemberData(instance, name);
+    if (member !== undefined) return member;
   }
   const state = instance.exception;
   if (!state) return undefined;
@@ -668,7 +672,7 @@ function setInstanceDictEntry(target: PyInstance, name: string, value: PyValue, 
     target.dict.set(name, value);
     return;
   }
-  if (cls.isBuiltin && !state && !target.turtle) throw noDictError(target, name);
+  if (cls.isBuiltin && !state && !target.turtle && !builtinClassesWithDict.has(cls)) throw noDictError(target, name);
   target.dict.set(name, value);
 }
 

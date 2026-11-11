@@ -432,7 +432,9 @@ function splitDefault(part: string): [string, string | undefined] {
 function evaluateDefault(text: string): PyValue | undefined {
   if (!/^(?:[-+]?[\w.]+|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|\(\)|\[\]|\{\})$/.test(text)) return undefined;
   const runtime = currentRuntime();
-  const globals = newDict([['sys', runtime.importModule('sys')]]);
+  // CPython looks names up in sys.modules too, where os, which its startup imports, always is.
+  const modules = /^[-+]?os\./.test(text) ? ['sys', 'os'] : ['sys'];
+  const globals = newDict(modules.map((name) => [name, runtime.importModule(name)]));
   try {
     return callValue(runtime.builtins.get('eval') as PyValue, [text, globals]);
   } catch {

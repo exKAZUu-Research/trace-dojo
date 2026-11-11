@@ -28,7 +28,6 @@ for (const iterator of [
 ]) {
   registerUnsupportedClassAttributes(`builtins.${iterator}`, of(ITERATOR_PICKLE, ['__setstate__']));
 }
-registerUnsupportedClassAttributes('builtins.generator', of(FINALIZER, ['__del__']));
 registerUnsupportedClassAttributes(
   'builtins.type',
   of(MEMORY, ['__basicsize__', '__dictoffset__', '__itemsize__', '__weakrefoffset__'])

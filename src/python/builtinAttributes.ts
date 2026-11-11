@@ -3,12 +3,13 @@ import { builtinTextSignature } from './builtinDocs';
 import { enumerateClass } from './builtins';
 import { addressOf } from './conversions';
 import { method } from './define';
+import { defineNew } from './instances';
 import { sliceIndices } from './items';
 import { defineProperty } from './modules/numberSupport';
 import { namespaceDict } from './namespaces';
 import { exactBinary, scaleToFloat, toIndex } from './numbers';
 import { bindValue, callValue, getAttribute, setAttribute } from './objects';
-import { binaryOp } from './operators';
+import { binaryOp, compareOp } from './operators';
 import { currentRuntime } from './runtimeContext';
 import { sharedNamespaceModules } from './sharedNamespaces';
 import { newGenericAlias } from './typeHints';
@@ -19,6 +20,7 @@ import {
   builtinFunctionClass,
   cellClass,
   classmethodClass,
+  classmethodDescriptorClass,
   classOf,
   complexClass,
   coroutineClass,
@@ -34,9 +36,11 @@ import {
   listClass,
   methodClass,
   methodDescriptorClass,
+  methodWrapperClass,
   newDict,
   newTuple,
   None,
+  NotImplemented,
   notImplementedClass,
   propertyClass,
   pyError,
@@ -51,13 +55,14 @@ import {
   typeName,
   unbox,
   valueError,
+  wrapperDescriptorClass,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import {
   type PyBoundMethod,
   type PyBuiltinFunction,
-  type PyCell,
-  type PyClass,
+  PyCell,
+  PyClass,
   type PyComplex,
   type PyDescriptor,
   PyDict,
@@ -317,6 +322,15 @@ method(methodDescriptorClass, '__get__', 'expected', 1, 2, (self, [instance]) =>
   instance === None ? self : bindValue(self, instance)
 );
 
+method(wrapperDescriptorClass, '__get__', 'expected', 1, 2, (self, [instance]) =>
+  instance === None ? self : bindValue(self, instance)
+);
+method(classmethodDescriptorClass, '__get__', 'expected', 1, 2, (self, [instance, owner]) => {
+  const cls = owner === undefined || owner === None ? classOf(instance as PyValue) : owner;
+  if (!(cls instanceof PyClass)) throw typeError(`descriptor '${(self as PyBuiltinFunction).name}' needs a type`);
+  return bindValue(self, cls, cls);
+});
+
 function objclassOf(fn: PyBuiltinFunction): PyValue {
   const name = fn.ownerName;
   const owner = [intClass, boolClass, floatClass, strClass, listClass, tupleClass, dictClass, setClass].find(
@@ -418,7 +432,15 @@ defineProperty(functionClass, '__globals__', (self) => {
   return namespaceDict(module === undefined ? globals : currentRuntime().importModule(module).dict);
 });
 unsupportedProperty(functionClass, '__builtins__', '関数の __builtins__（組み込みの名前空間そのもの）');
-for (const cls of [functionClass, methodClass, builtinFunctionClass, methodDescriptorClass]) {
+for (const cls of [
+  functionClass,
+  methodClass,
+  builtinFunctionClass,
+  methodDescriptorClass,
+  wrapperDescriptorClass,
+  classmethodDescriptorClass,
+  methodWrapperClass,
+]) {
   method(
     cls,
     '__call__',
@@ -438,11 +460,46 @@ function closureOf(fn: PyFunction): PyValue {
   return newTuple(
     names.map((name) => {
       const cell = fn.closure.get(name) ?? (fn.classCell as PyCell);
-      return new PyOpaque(cellClass, 'cell', cell);
+      return cellObject(cell);
     })
   );
 }
 
+/** The cell objects of the variables, one for each, as CPython's functions share the cells themselves. */
+const cellObjects = new WeakMap<PyCell, PyOpaque>();
+
+function cellObject(cell: PyCell): PyOpaque {
+  let object = cellObjects.get(cell);
+  if (!object) {
+    object = new PyOpaque(cellClass, 'cell', cell);
+    cellObjects.set(cell, object);
+  }
+  return object;
+}
+
+defineNew(cellClass, (_cls, args, kwargs) => {
+  if (kwargs !== undefined && kwargs.size > 0) throw typeError('cell() takes no keyword arguments');
+  if (args.length > 1) throw typeError(`cell expected at most 1 argument, got ${args.length}`);
+  return new PyOpaque(cellClass, 'cell', new PyCell(args[0]));
+});
+
+// CPython's cells compare by their contents, an empty cell before any other, which makes them unhashable.
+cellClass.dict.set('__hash__', None);
+for (const [name, operator] of [
+  ['__eq__', '=='],
+  ['__ne__', '!='],
+  ['__lt__', '<'],
+  ['__le__', '<='],
+  ['__gt__', '>'],
+  ['__ge__', '>='],
+] as const) {
+  method(cellClass, name, 'one', 1, 1, (self, [other]) => {
+    if (!(other instanceof PyOpaque) || other.cls !== cellClass) return NotImplemented;
+    const [a, b] = [((self as PyOpaque).data as PyCell).value, (other.data as PyCell).value];
+    if (a !== undefined && b !== undefined) return compareOp(operator, a, b);
+    return compareOp(operator, a === undefined ? 0n : 1n, b === undefined ? 0n : 1n);
+  });
+}
 method(cellClass, '__repr__', 'none', 0, 0, (self) => {
   const { value } = (self as PyOpaque).data as PyCell;
   const here = addressOf(self as PyOpaque);

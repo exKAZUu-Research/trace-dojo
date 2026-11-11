@@ -1,5 +1,5 @@
 import { addressOf } from './conversions';
-import { method } from './define';
+import { FINALIZER_FEATURE, method, unsupportedMethod, unsupportedSizeof } from './define';
 import type { Frame } from './frame';
 import { bindValue, callValue, getAttribute, getIterator, lookupSpecial } from './objects';
 import type { Suspension } from './suspendingEvaluator';
@@ -47,6 +47,8 @@ method(generatorClass, 'throw', 'expected', 1, 3, (self, args) =>
   generatorNext(self as PyGenerator, { error: thrownError(args) })
 );
 method(generatorClass, 'close', 'none', 0, 0, (self) => closeGenerator(self as PyGenerator));
+unsupportedMethod(generatorClass, '__del__', FINALIZER_FEATURE);
+unsupportedSizeof(generatorClass);
 
 /** Resumes a generator as `next()` or `send()` does, raising StopIteration with its return value when it ends. */
 export function generatorNext(generator: PyGenerator, input: GeneratorInput): PyValue {

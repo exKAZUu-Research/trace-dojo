@@ -22,6 +22,12 @@ if module.__package__ != derived:
 imports = {key: value.__name__ for key, value in vars(module).items() if isinstance(value, types.ModuleType)}
 if imports:
     layout['imports'] = dict(sorted(imports.items()))
+layout['names'] = ' '.join(vars(module))
+owners = {key: value.__module__ for key, value in vars(module).items()
+          if isinstance(value, (types.FunctionType, types.BuiltinFunctionType))
+          and isinstance(value.__module__, str) and value.__module__ != name}
+if owners:
+    layout['owners'] = owners
 print(json.dumps(layout))
 """
 

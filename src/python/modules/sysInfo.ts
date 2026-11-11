@@ -2,10 +2,13 @@ import { pyRepr } from '../conversions';
 import { SYS_BUILTIN_MODULE_NAMES, SYS_STDLIB_MODULE_NAMES } from '../data/sysModuleNames';
 import { builtin, method } from '../define';
 import type { Frame } from '../frame';
+import { defineNew } from '../instances';
 import { SUPPORTED_MODULES } from '../moduleNames';
 import { registerMainModule, trackModules } from '../modules';
 import { namespaceDict } from '../namespaces';
+import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
+import { lookupSpecial, toArray } from '../objects';
 import { sizeOf } from '../objectSizes';
 import type { Runtime } from '../runtime';
 import { currentRuntime } from '../runtimeContext';
@@ -27,7 +30,7 @@ import {
 } from '../types';
 import { unavailableValue } from '../unavailableValues';
 import { UnsupportedFeatureError } from '../unsupported';
-import { type Kwargs, PyInstance, PyModule, PyTuple, type PyValue } from '../values';
+import { type Kwargs, type PyClass, PyDict, PyInstance, PyModule, PyTuple, type PyValue } from '../values';
 import { defineProperty } from './numberSupport';
 
 /** What the reference CPython, 3.14.10 built for macOS, reports about itself. */
@@ -38,13 +41,7 @@ const ENCODING = 'utf-8';
 
 /** The attributes of `sys` that describe the interpreter, in addition to its I/O and exit. */
 export function sysInformation(runtime: Runtime): [string, PyValue][] {
-  const versionInfo = structSeq('version_info', [
-    ['major', 3n],
-    ['minor', 14n],
-    ['micro', 10n],
-    ['releaselevel', 'final'],
-    ['serial', 0n],
-  ]);
+  const versionInfo = VERSION_INFO;
   return [
     ['version', VERSION],
     ['version_info', versionInfo],
@@ -166,7 +163,11 @@ registerMainModule((runtime) => new PyModule(mainModuleClass, '__main__', (runti
 export function structSeq(
   name: string,
   fields: [string, PyValue][],
-  { module = 'sys', hidden = [] }: { module?: string; hidden?: [string, PyValue][] } = {}
+  {
+    module = 'sys',
+    hidden = [],
+    constructible = true,
+  }: { module?: string; hidden?: [string, PyValue][]; constructible?: boolean } = {}
 ): PyTuple {
   const cls = builtinClass(name, tupleClass);
   cls.module = module;
@@ -188,6 +189,7 @@ export function structSeq(
     return tuple;
   };
   const prefix = module === 'sys' ? 'sys.' : '';
+  defineStructSeqCreation(cls, `${prefix}${name}`, fields.length, hidden, extra, constructible ? create : undefined);
   method(cls, '__repr__', 'none', 0, 0, (self) => {
     const { items } = self as PyTuple;
     return `${prefix}${name}(${fields.map(([field], index) => `${field}=${pyRepr(items[index])}`).join(', ')})`;
@@ -206,6 +208,69 @@ export function structSeq(
   return create(all.map(([, value]) => value));
 }
 
+/**
+ * Gives a struct sequence type its `__reduce__`, with the hidden fields in a dict, and its `__new__`, or makes it
+ * refuse to be created, as `sys.flags` does.
+ */
+// code-gauge-allow functionParameterCount 6 -- The parts of the struct sequence that its creation needs.
+function defineStructSeqCreation(
+  cls: PyClass,
+  name: string,
+  visible: number,
+  hidden: [string, PyValue][],
+  extra: WeakMap<PyTuple, PyValue[]>,
+  create: ((values: PyValue[]) => PyTuple) | undefined
+): void {
+  method(cls, '__reduce__', 'none', 0, 0, (self) => {
+    const values = extra.get(self as PyTuple) ?? [];
+    const named = newDict(hidden.map(([field], index) => [field, values[index] ?? None]));
+    return newTuple([cls, newTuple([newTuple((self as PyTuple).items), named])]);
+  });
+  if (create) {
+    defineNew(cls, (_cls, args, kwargs) => create(structSeqValues(name, visible, hidden, args, kwargs)));
+    return;
+  }
+  cls.construct = () => {
+    throw typeError(`cannot create '${name}' instances`);
+  };
+}
+
+/** The values `structseq(sequence, dict=None)` gives a struct sequence, its hidden fields taken from the dict. */
+// code-gauge-allow functionCognitiveComplexity 16 -- One check per message of CPython's structseq_new.
+function structSeqValues(
+  name: string,
+  visible: number,
+  hidden: [string, PyValue][],
+  args: PyValue[],
+  kwargs: Kwargs
+): PyValue[] {
+  checkArgs({ qualified: 'structseq', min: 0, max: 2, style: 'takes', keywords: ['sequence', 'dict'] }, args, kwargs);
+  const sequence = argument(args, kwargs, 0, 'sequence');
+  if (sequence === undefined) throw typeError("structseq() missing required argument 'sequence' (pos 1)");
+  const named = argument(args, kwargs, 1, 'dict');
+  if (named !== undefined && !(named instanceof PyDict))
+    throw typeError(`${name}() takes a dict as second arg, if any`);
+  if (typeof sequence !== 'string' && lookupSpecial(sequence, '__iter__') === undefined) {
+    throw typeError('constructor requires a sequence');
+  }
+  const values = toArray(sequence);
+  const total = visible + hidden.length;
+  const given = `(${values.length}-sequence given)`;
+  if (visible === total && values.length !== visible) throw typeError(`${name}() takes a ${visible}-sequence ${given}`);
+  if (values.length < visible) throw typeError(`${name}() takes an at least ${visible}-sequence ${given}`);
+  if (values.length > total) throw typeError(`${name}() takes an at most ${total}-sequence ${given}`);
+  let used = 0;
+  for (const [field] of hidden.slice(values.length - visible)) {
+    const value = named instanceof PyDict ? named.store.get(field) : undefined;
+    if (value !== undefined) used++;
+    values.push(value ?? None);
+  }
+  if (named instanceof PyDict && named.store.size > used) {
+    throw typeError(`${name}() got duplicate or unexpected field name(s)`);
+  }
+  return values;
+}
+
 /** The values of a struct sequence's `__replace__(**changes)`: its values, with the changed fields replaced. */
 function replacedFields(fields: string[], values: PyValue[], args: PyValue[], kwargs: Kwargs): PyValue[] {
   if (args.length > 0) throw typeError('__replace__() takes no positional arguments');
@@ -215,6 +280,18 @@ function replacedFields(fields: string[], values: PyValue[], args: PyValue[], kw
   }
   return values.map((value, index) => kwargs?.get(fields[index]) ?? value);
 }
+
+const VERSION_INFO = structSeq(
+  'version_info',
+  [
+    ['major', 3n],
+    ['minor', 14n],
+    ['micro', 10n],
+    ['releaselevel', 'final'],
+    ['serial', 0n],
+  ],
+  { constructible: false }
+);
 
 const FLOAT_INFO = structSeq('float_info', [
   ['max', Number.MAX_VALUE],
@@ -275,9 +352,10 @@ const FLAGS = structSeq(
   {
     hidden: [
       ['gil', 1n],
-      ['context_aware_warnings', 0n],
       ['thread_inherit_context', 0n],
+      ['context_aware_warnings', 0n],
     ],
+    constructible: false,
   }
 );
 

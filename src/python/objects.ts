@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 452 -- The attribute lookup and the protocols every kind of object follows belong together.
+// code-gauge-allow-file fileNcss 466 -- The attribute lookup and the protocols every kind of object follows belong together.
 import { moduleAnnotations } from './annotations';
 import { PyAttribute } from './attributeDescriptors';
 import { classAttribute, specialAttribute } from './attributes';
@@ -13,6 +13,8 @@ import {
 } from './descriptors';
 import { getItem as getItemOf } from './items';
 import { clamp, reduction, withState } from './iteratorStates';
+import { completeNamespace } from './modules/moduleLayout';
+import { checkNamespaceListing } from './namespaceDifferences';
 import { namespaceDict } from './namespaces';
 import { describeIntegerIndex, toIndex } from './numbers';
 import { currentRuntime } from './runtimeContext';
@@ -177,7 +179,7 @@ export function attributeError(value: PyValue, name: string): PyError {
 export function getAttribute(value: PyValue, name: string): PyValue {
   const custom = customGetattribute(value);
   if (custom !== undefined) return getWithCustomGetattribute(value, name, custom);
-  const found = findAttribute(value, name);
+  const found = findAttribute(value, name) ?? missingAttribute(value, name);
   if (found !== undefined) return found;
   const getattr = value instanceof PyModule ? value.dict.get('__getattr__') : lookupSpecial(value, '__getattr__');
   if (getattr !== undefined && value instanceof PyModule) return callValue(getattr, [name]);
@@ -185,6 +187,15 @@ export function getAttribute(value: PyValue, name: string): PyValue {
   const feature = unsupportedClassAttribute(value, name);
   if (feature !== undefined) throw new UnsupportedFeatureError(feature);
   throw attributeError(value, name);
+}
+
+function missingAttribute(value: PyValue, name: string): PyValue | undefined {
+  if (value instanceof PyClass) return undefined;
+  for (const cls of classOf(value).mro) {
+    const found = cls.missingAttribute?.(value, name);
+    if (found !== undefined) return found;
+  }
+  return undefined;
 }
 
 /** Reads `value.name`, or returns undefined when it is missing. */
@@ -235,7 +246,11 @@ function typeDocOf(cls: PyClass, name: string): PyValue | undefined {
 function moduleAttribute(module: PyModule, name: string): PyValue | undefined {
   const feature = module.unsupported.get(name);
   if (feature !== undefined) throw new UnsupportedFeatureError(feature);
-  if (name === '__dict__') return namespaceDict(module.dict);
+  if (name === '__dict__') {
+    checkNamespaceListing(module, 'モジュールの __dict__・vars()');
+    completeNamespace(module);
+    return namespaceDict(module.dict);
+  }
   // A module's `__annotate__` is None until its code defines one, which reading it records, as CPython does.
   if (name === '__annotate__' && !module.dict.has(name)) module.dict.set(name, None);
   const value =
@@ -429,20 +444,38 @@ function iterateGenerator(generator: PyGenerator): NextFunction {
 function iterateString(value: string): NextFunction {
   const characters = iterStr(value);
   currentRuntime().scan(characters.length);
+  return iterateByIndex(
+    value,
+    () => characters.length,
+    (index) => characters[index] as string,
+    ''
+  );
+}
+
+/**
+ * Iterates the items of a sequence by their index, as the iterators of str and bytes do: one that reached the end
+ * stays there, and it reduces to `iter(sequence)` and its index, or to `iter(empty)` at the end.
+ */
+export function iterateByIndex(
+  sequence: PyValue,
+  length: () => number,
+  itemAt: (index: number) => PyValue,
+  empty: PyValue
+): NextFunction {
   let index = 0;
   let exhausted = false;
   const next = withRemaining(
     () => {
-      if (!exhausted && index < characters.length) return characters[index++];
+      if (!exhausted && index < length()) return itemAt(index++);
       exhausted = true;
       return DONE;
     },
-    () => (exhausted ? 0 : characters.length - index)
+    () => (exhausted ? 0 : Math.max(length() - index, 0))
   );
   return withState(next, {
-    reduce: () => (exhausted ? reduction('iter', ['']) : reduction('iter', [value], BigInt(index))),
+    reduce: () => (exhausted ? reduction('iter', [empty]) : reduction('iter', [sequence], BigInt(index))),
     setState: (state) => {
-      if (!exhausted) index = clamp(state, 0, characters.length);
+      if (!exhausted) index = clamp(state, 0, length());
     },
   });
 }

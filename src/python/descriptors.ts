@@ -43,6 +43,9 @@ export function callSetter(attribute: PyValue, instance: PyValue, value: PyValue
 /** The builtin classes whose instances take attributes all the same, as `functools.partial` objects do. */
 export const builtinClassesWithDict = new Set<PyClass>();
 
+/** The C types written in Python here (see makeCType), whose CPython objects hold fields beyond a dict. */
+export const fieldedCTypes = new WeakSet<PyClass>();
+
 /** The dictionary of an object's own attributes, or undefined for an object without one. */
 export function ownDict(value: PyValue): Map<string, PyValue> | undefined {
   if (value instanceof PyInstance) return value.cls.slotNames === undefined ? value.dict : undefined;

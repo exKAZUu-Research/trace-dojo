@@ -2,12 +2,13 @@ import { pyRepr } from './conversions';
 import { method } from './define';
 import { identityHash } from './hashing';
 import { argument, checkArgs } from './nativeArgs';
-import { callValue, getIterator, setAttribute, toArray } from './objects';
+import { bindValue, callValue, getIterator, setAttribute, toArray } from './objects';
 import { equals } from './operators';
 import { currentRuntime } from './runtimeContext';
 import { newGenericAlias, typeConvert } from './typeHints';
 import {
   builtinClass,
+  defineMethod,
   newTuple,
   None,
   noneClass,
@@ -61,6 +62,21 @@ export const aliasClass = typingType('_GenericAlias');
 export const genericClass = typingType('Generic');
 genericClass.layout = { base: 'object' };
 genericClass.isBaseType = true;
+// The class methods of CPython's C type, which subscription and class creation here reach natively.
+genericClass.dict.set('__module__', 'typing');
+defineMethod(
+  genericClass,
+  '__class_getitem__',
+  (owner, [key]) => subscriptGeneric(owner as PyClass, key as PyValue),
+  'class'
+);
+defineMethod(
+  genericClass,
+  '__init_subclass__',
+  (owner, args, kwargs) =>
+    callValue(bindValue(objectClass.dict.get('__init_subclass__') as PyValue, owner, owner as PyClass), args, kwargs),
+  'class'
+);
 
 /** The classes whose subscription declares the type parameters of a class deriving from it: Generic and Protocol. */
 export const parameterDeclaringClasses = new WeakSet<PyClass>([genericClass]);

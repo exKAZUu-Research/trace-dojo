@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 522 -- The builtins module keeps every builtin function together.
+// code-gauge-allow-file fileNcss 531 -- The builtins module keeps every builtin function together.
 import { bytearrayClass, bytesClass, memoryviewClass, PyBytes } from './bytesValues';
 import { checkShortcuts } from './checkShortcuts';
 import { buildClass } from './classes';
@@ -9,10 +9,10 @@ import { builtin } from './define';
 import { compile, COMPILE_KEYWORDS, evaluate, execute } from './dynamicCode';
 import { enumMembersOf } from './enums';
 import { pyHash } from './hashing';
-import { help } from './help';
 import { defineConstructingNew } from './instances';
 import { reduction, withState } from './iteratorStates';
 import { dunderImport } from './modules/importlib';
+import { checkExtraName, missingNamespaceName, readProgramAttribute } from './namespaceDifferences';
 import { argument, checkArgs } from './nativeArgs';
 import { asFloat, divmodFloat, floorDivInt, modInt, toIndex } from './numbers';
 import {
@@ -608,19 +608,20 @@ function iter(args: PyValue[], kwargs: Kwargs): PyValue {
   const [fn, sentinel] = args;
   if (!isCallable(fn)) throw typeError('iter(v, w): v must be callable');
   let finished = false;
-  return new PyIterator(
-    iteratorClass('callable_iterator'),
-    () => {
-      if (finished) return DONE;
-      const value = callValue(fn, []);
-      if (compareOp('==', value, sentinel) === true) {
-        finished = true;
-        return DONE;
-      }
-      return value;
-    },
-    () => [fn, sentinel]
-  );
+  const next = (): PyValue | typeof DONE => {
+    if (finished) return DONE;
+    const value = callValue(fn, []);
+    if (compareOp('==', value, sentinel) === true) {
+      finished = true;
+      return DONE;
+    }
+    return value;
+  };
+  withState(next, {
+    reduce: () =>
+      finished ? reduction('iter', [newTuple([])]) : reduction('iter', [fn as PyValue, sentinel as PyValue]),
+  });
+  return new PyIterator(iteratorClass('callable_iterator'), next, () => [fn, sentinel]);
 }
 
 function next(args: PyValue[], kwargs: Kwargs): PyValue {
@@ -638,8 +639,15 @@ function getattr(args: PyValue[], kwargs: Kwargs): PyValue {
   checkArgs({ qualified: 'getattr', min: 2, max: 3, style: 'expected' }, args, kwargs);
   const [object, name, fallback] = args;
   if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
-  if (fallback === undefined) return getAttribute(object, name);
-  return getAttributeOrUndefined(object, name) ?? fallback;
+  if (fallback === undefined) return readProgramAttribute(object, name, () => getAttribute(object, name));
+  return readProgramAttribute(object, name, () => {
+    const value = getAttributeOrUndefined(object, name);
+    if (value !== undefined) return value;
+    // A name CPython's namespace has is not one getattr() falls back for.
+    const feature = currentRuntime().inLibraryCode() ? undefined : missingNamespaceName(object, name);
+    if (feature !== undefined) throw new UnsupportedFeatureError(feature);
+    return fallback;
+  });
 }
 
 function sorted(args: PyValue[], kwargs: Kwargs): PyValue {
@@ -655,6 +663,8 @@ function hasAttribute(object: PyValue, name: PyValue): boolean {
   // An attribute this grader lacks exists in CPython, so code may test for it before it uses it.
   if (object instanceof PyModule && object.unsupported.has(name)) return true;
   if (unsupportedClassAttribute(object, name) !== undefined) return true;
+  if (missingNamespaceName(object, name) !== undefined) return true;
+  checkExtraName(object, name);
   return getAttributeOrUndefined(object, name) !== undefined;
 }
 
@@ -683,12 +693,6 @@ function dir(value: PyValue): PyValue {
   }
   const names = callValue(bindValue(custom, value), []);
   return callValue(runtime.builtins.get('sorted') as PyValue, [names]);
-}
-
-function exitFunction(name: string): PyValue {
-  return builtin(name, 'expected', 0, 1, (args) => {
-    throw currentRuntime().systemExit(args[0]);
-  });
 }
 
 // The namespace -----------------------------------------------------------------------------------------------------
@@ -819,10 +823,7 @@ function builtinNamespace(): Map<string, PyValue> {
     ['EnvironmentError', exceptionClasses.get('OSError') as PyValue],
     ['IOError', exceptionClasses.get('OSError') as PyValue],
     ['open', unsupportedFunction('open', 'ファイルの読み書き（open()）')],
-    ['quit', exitFunction('quit')],
-    ['exit', exitFunction('exit')],
     ...siteBuiltins(),
-    ['help', nativeFunction('help', help)],
     ['Turtle', turtleClass],
   ]);
 }

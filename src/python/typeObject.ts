@@ -16,7 +16,7 @@ import { generatorNext } from './generators';
 import { identityHash } from './hashing';
 import { defineNew, objectInitImplementation, objectNewImplementation, typeCall } from './instances';
 import { stateIndex, stateOf } from './iteratorStates';
-import { createModule, moduleRepr } from './modules/moduleLayout';
+import { createModule, initializeModule, moduleDir, moduleRepr } from './modules/moduleLayout';
 import { argument, checkArgs } from './nativeArgs';
 import {
   bindValue,
@@ -373,6 +373,11 @@ for (const [cls, kind] of [
 }
 method(moduleClass, '__repr__', 'none', 0, 0, (self) => moduleRepr(self as PyModule));
 moduleClass.construct = createModule;
+defineMethod(moduleClass, '__init__', (self, args, kwargs) => {
+  initializeModule(self as PyModule, args, kwargs);
+  return None;
+});
+method(moduleClass, '__dir__', 'none', 0, 0, (self) => moduleDir(self as PyModule));
 // A module's attributes are its namespace alone here, so a subclass's methods would not apply to its instances.
 moduleClass.unsupportedBase = 'types.ModuleType を継承したクラス';
 
@@ -437,6 +442,10 @@ const MOVED_ITERATORS = new Set([
 /** The native iterators that reduce to where they are, for pickle and copy. */
 const REDUCED_ITERATORS = new Set([
   ...MOVED_ITERATORS,
+  'dict_reversekeyiterator',
+  'dict_reversevalueiterator',
+  'dict_reverseitemiterator',
+  'callable_iterator',
   'dict_keyiterator',
   'dict_valueiterator',
   'dict_itemiterator',
@@ -450,6 +459,11 @@ const REDUCED_ITERATORS = new Set([
 /** The native iterators that know how many items they have left, as their `__length_hint__` tells. */
 const HINTED_ITERATORS = new Set([
   'list_iterator',
+  'bytes_iterator',
+  'bytearray_iterator',
+  'dict_reversekeyiterator',
+  'dict_reversevalueiterator',
+  'dict_reverseitemiterator',
   'list_reverseiterator',
   'tuple_iterator',
   'range_iterator',

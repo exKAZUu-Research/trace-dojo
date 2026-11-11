@@ -1,8 +1,9 @@
+import { memberDescriptorClass, type PyAttribute } from './attributeDescriptors';
 // The reduction protocol of `object` and the builtin types, which pickle and copyreg rely on: `__reduce_ex__`,
 // `__reduce__`, `__getstate__` and `__getnewargs__`, as CPython's typeobject.c and the builtin types define them.
 import { bytesLikeData, latin1Text, newBytes } from './bytesValues';
 import { method } from './define';
-import { ownDict } from './descriptors';
+import { fieldedCTypes, ownDict } from './descriptors';
 import { importModule } from './modules';
 import { toIndex } from './numbers';
 import { callValue, getAttribute, getAttributeOrUndefined, getIterator, lookupSpecial } from './objects';
@@ -20,6 +21,7 @@ import {
   iteratorClasses,
   methodClass,
   methodDescriptorClass,
+  methodWrapperClass,
   newDict,
   newList,
   newTuple,
@@ -33,6 +35,7 @@ import {
   typeError,
   typeName,
   unbox,
+  wrapperDescriptorClass,
 } from './types';
 import {
   type PyBoundMethod,
@@ -152,7 +155,11 @@ function defaultState(obj: PyValue, required: boolean): PyValue {
 function hasPlainLayout(obj: PyValue): boolean {
   if (obj === None) return true;
   return (
-    obj instanceof PyInstance && obj.primitive === undefined && obj.exception === undefined && obj.turtle === undefined
+    obj instanceof PyInstance &&
+    obj.primitive === undefined &&
+    obj.exception === undefined &&
+    obj.turtle === undefined &&
+    !obj.cls.mro.some((cls) => fieldedCTypes.has(cls))
   );
 }
 
@@ -204,7 +211,14 @@ method(sliceClass, '__reduce__', 'none', 0, 0, (self) => {
 });
 
 method(builtinFunctionClass, '__reduce__', 'none', 0, 0, (self) => reduceBuiltin(self as PyBuiltinFunction));
-method(methodDescriptorClass, '__reduce__', 'none', 0, 0, (self) => reduceBuiltin(self as PyBuiltinFunction));
+for (const cls of [methodDescriptorClass, wrapperDescriptorClass, methodWrapperClass]) {
+  method(cls, '__reduce__', 'none', 0, 0, (self) => reduceBuiltin(self as PyBuiltinFunction));
+}
+
+method(memberDescriptorClass, '__reduce__', 'none', 0, 0, (self) => {
+  const { owner, name } = self as PyAttribute;
+  return newTuple([currentRuntime().builtins.get('getattr') as PyValue, newTuple([owner, name])]);
+});
 
 /** A module's builtin function reduces to its name; a method to `getattr` of its object or class. */
 function reduceBuiltin(fn: PyBuiltinFunction): PyValue {

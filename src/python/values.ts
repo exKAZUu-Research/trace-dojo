@@ -96,6 +96,11 @@ export class PyClass extends PyObject {
   enumMembers?: PyInstance[];
   /** What `isinstance()` answers for this class, when its metaclass decides it, as a protocol's does. */
   instanceCheck?: (value: PyValue) => boolean;
+  /**
+   * Computes an attribute of an instance that the ordinary lookup does not find, as the `tp_getattro` of a C type such
+   * as `types.GenericAlias` does, or returns undefined.
+   */
+  missingAttribute?: (self: PyValue, name: string) => PyValue | undefined;
   /** Runs when a class deriving from this one is created, as `__init_subclass__` would. */
   subclassHook?: (cls: PyClass) => void;
   /**

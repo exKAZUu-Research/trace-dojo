@@ -19,6 +19,7 @@ import { keyError } from './items';
 import { viewOf } from './memoryview';
 import { importModule } from './modules';
 import { systemExitError } from './modules/sys';
+import { checkNamespaceView } from './namespaceDifferences';
 import { DEFAULT_MAX_STR_DIGITS } from './numbers';
 import { bindValue, callValue, isTruthy, overriding, setAttribute, toArray } from './objects';
 import type { ProgramSource } from './programSource';
@@ -532,6 +533,7 @@ export class Runtime {
 
   /** The sorted attribute names `dir()` lists, which AttributeError suggestions choose from. */
   dirNames(value: PyValue): string[] {
+    checkNamespaceView(value, 'dir()');
     if (value instanceof PyClass && value.flags.isEnum && value.enumMembers) return enumClassDir(value, this);
     if (value instanceof PyInstance && value.enumValue !== undefined) return enumMemberDir(value, this);
     // A module lists the names this grader does not support too, as CPython's module has them.
@@ -603,9 +605,9 @@ const FUNCTION_ATTRIBUTES = [
 
 /** The attributes of each kind of generator object that its class reads natively. */
 const GENERATOR_ATTRIBUTES: Record<string, string[]> = {
-  generator: ['__del__', 'gi_code', 'gi_frame', 'gi_yieldfrom'],
-  coroutine: ['__del__', 'cr_await', 'cr_code', 'cr_frame', 'cr_origin', 'cr_running', 'cr_suspended'],
-  async_generator: ['__del__', 'ag_await', 'ag_code', 'ag_frame', 'ag_running', 'ag_suspended'],
+  generator: ['gi_code', 'gi_frame', 'gi_yieldfrom'],
+  coroutine: ['cr_await', 'cr_code', 'cr_frame', 'cr_origin', 'cr_running', 'cr_suspended'],
+  async_generator: ['ag_await', 'ag_code', 'ag_frame', 'ag_running', 'ag_suspended'],
 };
 
 /** The attribute names `dir()` lists for an object other than a module. */
@@ -618,7 +620,7 @@ function objectAttributeNames(value: PyValue): Set<string> {
   for (const each of cls.mro) add(each.dict.keys());
   if (value instanceof PyInstance || value instanceof PyFunction) add(value.dict.keys());
   add(['__class__', '__doc__']);
-  if (!cls.isBuiltin || (value instanceof PyClass && !value.isBuiltin)) add(['__dict__', '__module__']);
+  if (!cls.isBuiltin || (value instanceof PyClass && !value.isBuiltin)) add(['__module__']);
   if (value instanceof PyFunction) add(FUNCTION_ATTRIBUTES);
   if (value instanceof PyGenerator) add(GENERATOR_ATTRIBUTES[value.cls.name] ?? []);
   if (value instanceof PyInstance && value.exception) {

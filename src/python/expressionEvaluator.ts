@@ -16,13 +16,13 @@ import { newComplex } from './complexNumbers';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
 import { Frame } from './frame';
 import { referencesOf } from './garbageCollection';
+import { programAttribute } from './namespaceDifferences';
 import { namespaceOf } from './namespaces';
 import {
   bindValue,
   callValue,
   deleteAttribute,
   deleteItem,
-  getAttribute,
   getItem,
   isTruthy,
   iterate,
@@ -164,7 +164,7 @@ export class ExpressionEvaluator {
     // An object's `__dict__` holds its attributes outside it.
     const { locals } = this.runtime.finalizer;
     if (locals.marking && expression.name === '__dict__') locals.escape(object);
-    return getAttribute(object, expression.name);
+    return programAttribute(object, expression.name);
   }
 
   private subscript(expression: Extract<Expression, { kind: 'subscript' }>, frame: Frame): PyValue {

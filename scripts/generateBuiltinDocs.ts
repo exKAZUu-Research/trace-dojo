@@ -16,7 +16,20 @@ import { PyBuiltinFunction, PyClass, PyDescriptor, PyModule, type PyValue } from
 const SAMPLES =
   'iter([]), iter(()), iter(""), iter({}), iter(set()), iter(range(1)), reversed([]), {}.keys(), {}.values(), ' +
   '{}.items(), iter({}.keys()), iter({}.values()), iter({}.items()), iter(b""), iter(bytearray()), ' +
-  '(x for x in []), len, [].append, type.__dict__, sys.flags, (lambda: 0), (lambda: 0).__get__(1), (lambda: 0).__code__';
+  '(x for x in []), len, [].append, type.__dict__, sys.flags, (lambda: 0), (lambda: 0).__get__(1), (lambda: 0).__code__, ' +
+  'reversed({}), reversed({}.values()), reversed({}.items()), iter(lambda: 0, 0), iter(memoryview(b"")), ' +
+  'iter(range(2 ** 70)), awaited, awaited.__await__(), generated, generated.asend(None), ' +
+  'generated.athrow(ValueError), cell(), sys._getframe(), (1).__add__, int.__add__, int.__dict__["real"], ' +
+  'dict.__dict__["fromkeys"], sys.float_info, sys.int_info, sys.hash_info, sys.thread_info, sys.version_info';
+/** The functions and objects that SAMPLES names. */
+const SAMPLE_SETUP = `import sys
+async def coroutine(): pass
+async def async_generator(): yield
+def cell():
+    x = 0
+    return (lambda: x).__closure__[0]
+awaited = coroutine()
+generated = async_generator()`;
 
 const reference = JSON.parse(readFileSync(process.argv[2] as string, 'utf8')) as Record<
   string,
@@ -45,7 +58,7 @@ for (const module of SUPPORTED_MODULES) {
     for (const name of value.unsupported.keys()) keys.add(`${module}.${name}`);
   });
 }
-run(`import sys\nsamples = [${SAMPLES}]`, (_runtime, globals) => {
+run(`${SAMPLE_SETUP}\nsamples = [${SAMPLES}]\nawaited.close()`, (_runtime, globals) => {
   const samples = globals.get('samples') as { items: PyValue[] } | undefined;
   for (const sample of samples?.items ?? []) collect(classOf(sample));
 });

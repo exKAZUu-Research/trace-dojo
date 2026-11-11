@@ -246,10 +246,6 @@ class Break(stmt):
     __match_args__ = ()
 
 
-class BuiltinImporter(object):
-    __doc__ = 'Meta path import for built-in modules.\n\nAll methods are either class or static methods to avoid the need to\ninstantiate the class.\n\n'
-
-
 class Call(expr):
     __doc__ = 'Call(expr func, expr* args, keyword* keywords)'
     _fields = ('func', 'args', 'keywords')
@@ -889,9 +885,9 @@ class withitem(AST):
     _attributes = ()
 
 
-for _cls in (AST, operator, Add, boolop, And, stmt, AnnAssign, Assert, Assign, AsyncFor, AsyncFunctionDef, AsyncWith, expr, Attribute, AugAssign, Await, BinOp, BitAnd, BitOr, BitXor, BoolOp, Break, BuiltinImporter, Call, ClassDef, Compare, Constant, Continue, expr_context, Del, Delete, Dict, DictComp, Div, cmpop, Eq, excepthandler, ExceptHandler, Expr, mod, Expression, FloorDiv, For, FormattedValue, FunctionDef, FunctionType, GeneratorExp, Global, Gt, GtE, If, IfExp, Import, ImportFrom, In, Interactive, Interpolation, unaryop, Invert, Is, IsNot, JoinedStr, LShift, Lambda, List, ListComp, Load, Lt, LtE, MatMult, Match, pattern, MatchAs, MatchClass, MatchMapping, MatchOr, MatchSequence, MatchSingleton, MatchStar, MatchValue, Mod, Module, Mult, Name, NamedExpr, Nonlocal, Not, NotEq, NotIn, Or, type_param, ParamSpec, Pass, Pow, RShift, Raise, Return, Set, SetComp, Slice, Starred, Store, Sub, Subscript, TemplateStr, Try, TryStar, Tuple, TypeAlias, type_ignore, TypeIgnore, TypeVar, TypeVarTuple, UAdd, USub, UnaryOp, While, With, Yield, YieldFrom, alias, arg, arguments, comprehension, keyword, match_case, withitem):
+_classes = (AST, operator, Add, boolop, And, stmt, AnnAssign, Assert, Assign, AsyncFor, AsyncFunctionDef, AsyncWith, expr, Attribute, AugAssign, Await, BinOp, BitAnd, BitOr, BitXor, BoolOp, Break, Call, ClassDef, Compare, Constant, Continue, expr_context, Del, Delete, Dict, DictComp, Div, cmpop, Eq, excepthandler, ExceptHandler, Expr, mod, Expression, FloorDiv, For, FormattedValue, FunctionDef, FunctionType, GeneratorExp, Global, Gt, GtE, If, IfExp, Import, ImportFrom, In, Interactive, Interpolation, unaryop, Invert, Is, IsNot, JoinedStr, LShift, Lambda, List, ListComp, Load, Lt, LtE, MatMult, Match, pattern, MatchAs, MatchClass, MatchMapping, MatchOr, MatchSequence, MatchSingleton, MatchStar, MatchValue, Mod, Module, Mult, Name, NamedExpr, Nonlocal, Not, NotEq, NotIn, Or, type_param, ParamSpec, Pass, Pow, RShift, Raise, Return, Set, SetComp, Slice, Starred, Store, Sub, Subscript, TemplateStr, Try, TryStar, Tuple, TypeAlias, type_ignore, TypeIgnore, TypeVar, TypeVarTuple, UAdd, USub, UnaryOp, While, With, Yield, YieldFrom, alias, arg, arguments, comprehension, keyword, match_case, withitem)
+for _cls in _classes:
     _cls.__module__ = 'ast'
-del _cls
 
 Add._field_types = {}
 Add.__annotations__ = Add._field_types
@@ -1278,4 +1274,8 @@ arguments.kwarg = None
 keyword.arg = None
 match_case.guard = None
 withitem.optional_vars = None
+
+for _cls in _classes:
+    _node_layout(_cls)
+del _cls, _classes, _node_layout
 `;

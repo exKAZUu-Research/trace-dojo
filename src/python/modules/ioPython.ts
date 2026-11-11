@@ -195,38 +195,40 @@ class IOBase(metaclass=abc.ABCMeta):
     ### Internal ###
 
     def _unsupported(self, name):
-        """Internal: raise an OSError exception for unsupported operations."""
         raise UnsupportedOperation(name)
 
     ### Positioning ###
 
     def seek(self, pos, whence=0):
-        """Change stream position.
+        """Change the stream position to the given byte offset.
 
-        Change the stream position to byte offset pos. Argument pos is
-        interpreted relative to the position indicated by whence.  Values
-        for whence are ints:
+          offset
+            The stream position, relative to 'whence'.
+          whence
+            The relative position to seek from.
 
-        * 0 -- start of stream (the default); offset should be zero or
-          positive
-        * 1 -- current stream position; offset may be negative
-        * 2 -- end of stream; offset is usually negative
-        Some operating systems / file systems could provide additional
-        values.
+        The offset is interpreted relative to the position indicated by
+        whence.  Values for whence are:
 
-        Return an int indicating the new absolute position.
+        * os.SEEK_SET or 0 -- start of stream (the default); offset should
+          be zero or positive
+        * os.SEEK_CUR or 1 -- current stream position; offset may be
+          negative
+        * os.SEEK_END or 2 -- end of stream; offset is usually negative
+
+        Return the new absolute position.
         """
         self._unsupported("seek")
 
     def tell(self):
-        """Return an int indicating the current stream position."""
+        """Return current stream position."""
         return self.seek(0, 1)
 
     def truncate(self, pos=None):
         """Truncate file to size bytes.
 
-        Size defaults to the current IO position as reported by tell().
-        Return the new size.
+        File pointer is left unchanged.  Size defaults to the current IO
+        position as reported by tell().  Return the new size.
         """
         self._unsupported("truncate")
 
@@ -254,7 +256,7 @@ class IOBase(metaclass=abc.ABCMeta):
                 self.__closed = True
 
     def __del__(self):
-        """Destructor.  Calls close()."""
+        """Called when the instance is about to be destroyed."""
         try:
             closed = self.closed
         except AttributeError:
@@ -275,7 +277,7 @@ class IOBase(metaclass=abc.ABCMeta):
     ### Inquiries ###
 
     def seekable(self):
-        """Return a bool indicating whether object supports random access.
+        """Return whether object supports random access.
 
         If False, seek(), tell() and truncate() will raise OSError.
         This method may need to do a test seek().
@@ -283,51 +285,39 @@ class IOBase(metaclass=abc.ABCMeta):
         return False
 
     def _checkSeekable(self, msg=None):
-        """Internal: raise UnsupportedOperation if file is not seekable
-        """
         if not self.seekable():
             raise UnsupportedOperation("File or stream is not seekable."
                                        if msg is None else msg)
 
     def readable(self):
-        """Return a bool indicating whether object was opened for reading.
+        """Return whether object was opened for reading.
 
         If False, read() will raise OSError.
         """
         return False
 
     def _checkReadable(self, msg=None):
-        """Internal: raise UnsupportedOperation if file is not readable
-        """
         if not self.readable():
             raise UnsupportedOperation("File or stream is not readable."
                                        if msg is None else msg)
 
     def writable(self):
-        """Return a bool indicating whether object was opened for writing.
+        """Return whether object was opened for writing.
 
-        If False, write() and truncate() will raise OSError.
+        If False, write() will raise OSError.
         """
         return False
 
     def _checkWritable(self, msg=None):
-        """Internal: raise UnsupportedOperation if file is not writable
-        """
         if not self.writable():
             raise UnsupportedOperation("File or stream is not writable."
                                        if msg is None else msg)
 
     @property
     def closed(self):
-        """closed: bool.  True iff the file has been closed.
-
-        For backwards compatibility, this is a property, not a predicate.
-        """
         return self.__closed
 
     def _checkClosed(self, msg=None):
-        """Internal: raise a ValueError if file is closed
-        """
         if self.closed:
             raise ValueError("I/O operation on closed file."
                              if msg is None else msg)
@@ -340,7 +330,6 @@ class IOBase(metaclass=abc.ABCMeta):
         return self
 
     def __exit__(self, *args):
-        """Context management protocol.  Calls close()"""
         self.close()
 
     ### Lower-level APIs ###
@@ -348,15 +337,14 @@ class IOBase(metaclass=abc.ABCMeta):
     # XXX Should these be present even if unimplemented?
 
     def fileno(self):
-        """Returns underlying file descriptor (an int) if one exists.
+        """Return underlying file descriptor if one exists.
 
-        An OSError is raised if the IO object does not use a file
-        descriptor.
+        Raise OSError if the IO object does not use a file descriptor.
         """
         self._unsupported("fileno")
 
     def isatty(self):
-        """Return a bool indicating whether this is an 'interactive' stream.
+        """Return whether this is an 'interactive' stream.
 
         Return False if it can't be determined.
         """
@@ -436,10 +424,10 @@ class IOBase(metaclass=abc.ABCMeta):
         return lines
 
     def writelines(self, lines):
-        """Write a list of lines to the stream.
+        """Write a list of lines to stream.
 
-        Line separators are not added, so it is usual for each of the lines
-        provided to have a line separator at the end.
+        Line separators are not added, so it is usual for each of the
+        lines provided to have a line separator at the end.
         """
         self._checkClosed()
         for line in lines:
@@ -462,11 +450,6 @@ class RawIOBase(IOBase):
     # a subclass doesn't implement either.)
 
     def read(self, size=-1):
-        """Read and return up to size bytes, where size is an int.
-
-        Returns an empty bytes object on EOF, or None if the object is
-        set not to block and has no data to read.
-        """
         if size is None:
             size = -1
         if size < 0:
@@ -492,19 +475,9 @@ class RawIOBase(IOBase):
             return data
 
     def readinto(self, b):
-        """Read bytes into a pre-allocated bytes-like object b.
-
-        Returns an int representing the number of bytes read (0 for EOF), or
-        None if the object is set not to block and has no data to read.
-        """
         self._unsupported("readinto")
 
     def write(self, b):
-        """Write the given buffer to the IO stream.
-
-        Returns the number of bytes written, which may be less than the
-        length of b in bytes.
-        """
         self._unsupported("write")
 
 
@@ -527,53 +500,38 @@ class BufferedIOBase(IOBase):
     """
 
     def read(self, size=-1):
-        """Read and return up to size bytes, where size is an int.
+        """Read and return up to n bytes.
 
-        If the argument is omitted, None, or negative, reads and
-        returns all data until EOF.
+        If the size argument is omitted, None, or negative, read and
+        return all data until EOF.
 
-        If the argument is positive, and the underlying raw stream is
+        If the size argument is positive, and the underlying raw stream is
         not 'interactive', multiple raw reads may be issued to satisfy
-        the byte count (unless EOF is reached first).  But for
-        interactive raw streams (XXX and for pipes?), at most one raw
-        read will be issued, and a short result does not imply that
-        EOF is imminent.
+        the byte count (unless EOF is reached first).
+        However, for interactive raw streams (as well as sockets and pipes),
+        at most one raw read will be issued, and a short result does not
+        imply that EOF is imminent.
 
-        Returns an empty bytes array on EOF.
+        Return an empty bytes object on EOF.
 
-        Raises BlockingIOError if the underlying raw stream has no
-        data at the moment.
+        Return None if the underlying raw stream was open in non-blocking
+        mode and no data is available at the moment.
         """
         self._unsupported("read")
 
     def read1(self, size=-1):
-        """Read up to size bytes with at most one read() system call,
-        where size is an int.
+        """Read and return up to size bytes, with at most one read() call to the underlying raw stream.
+
+        Return an empty bytes object on EOF.
+        A short result does not imply that EOF is imminent.
         """
         self._unsupported("read1")
 
     def readinto(self, b):
-        """Read bytes into a pre-allocated bytes-like object b.
-
-        Like read(), this may issue multiple reads to the underlying raw
-        stream, unless the latter is 'interactive'.
-
-        Returns an int representing the number of bytes read (0 for EOF).
-
-        Raises BlockingIOError if the underlying raw stream has no
-        data at the moment.
-        """
 
         return self._readinto(b, read1=False)
 
     def readinto1(self, b):
-        """Read bytes into buffer *b*, using at most one system call
-
-        Returns an int representing the number of bytes read (0 for EOF).
-
-        Raises BlockingIOError if the underlying raw stream has no
-        data at the moment.
-        """
 
         return self._readinto(b, read1=True)
 
@@ -593,19 +551,18 @@ class BufferedIOBase(IOBase):
         return n
 
     def write(self, b):
-        """Write the given bytes buffer to the IO stream.
+        """Write buffer b to the IO stream.
 
-        Return the number of bytes written, which is always the length of b
-        in bytes.
+        Return the number of bytes written, which is always
+        the length of b in bytes.
 
-        Raises BlockingIOError if the buffer is full and the
+        Raise BlockingIOError if the buffer is full and the
         underlying raw stream cannot accept more data at the moment.
         """
         self._unsupported("write")
 
     def detach(self):
-        """
-        Separate the underlying raw stream from the buffer and return it.
+        """Disconnect this buffer from its underlying raw stream and return it.
 
         After the raw stream has been detached, the buffer is in an unusable
         state.
@@ -622,6 +579,10 @@ class _BufferedIOMixin(BufferedIOBase):
     does *not* provide implementations of read(), readinto() or
     write().
     """
+
+    def __getstate__(self):
+        raise TypeError(f"cannot pickle {type(self).__name__!r} instances")
+
 
     def __init__(self, raw):
         self._raw = raw
@@ -698,9 +659,6 @@ class _BufferedIOMixin(BufferedIOBase):
     @property
     def mode(self):
         return self.raw.mode
-
-    def __getstate__(self):
-        raise TypeError(f"cannot pickle {self.__class__.__name__!r} object")
 
     def __repr__(self):
         modname = self.__class__.__module__
@@ -1189,42 +1147,46 @@ class TextIOBase(IOBase):
     """
 
     def read(self, size=-1):
-        """Read at most size characters from stream, where size is an int.
+        """Read at most size characters from stream.
 
         Read from underlying buffer until we have size characters or we hit
         EOF.  If size is negative or omitted, read until EOF.
-
-        Returns a string.
         """
         self._unsupported("read")
 
     def write(self, s):
-        """Write string s to stream and returning an int."""
+        """Write string s to stream.
+
+        Return the number of characters written
+        (which is always equal to the length of the string).
+        """
         self._unsupported("write")
 
     def truncate(self, pos=None):
-        """Truncate size to pos, where pos is an int."""
         self._unsupported("truncate")
 
     def readline(self, size=-1, /):
         """Read until newline or EOF.
 
-        Returns an empty string if EOF is hit immediately.
+        Return an empty string if EOF is hit immediately.
+        If size is specified, at most size characters will be read.
         """
         self._unsupported("readline")
 
     def detach(self):
-        """
-        Separate the underlying buffer from the TextIOBase and return it.
+        """Separate the underlying buffer from the TextIOBase and return it.
 
-        After the underlying buffer has been detached, the TextIO is in an
-        unusable state.
+        After the underlying buffer has been detached, the TextIO is in
+        an unusable state.
         """
         self._unsupported("detach")
 
     @property
     def encoding(self):
-        """Subclasses should override."""
+        """Encoding of the text stream.
+
+        Subclasses should override.
+        """
         return None
 
     @property
@@ -1239,9 +1201,10 @@ class TextIOBase(IOBase):
 
     @property
     def errors(self):
-        """Error setting of the decoder or encoder.
+        """The error setting of the decoder or encoder.
 
-        Subclasses should override."""
+        Subclasses should override.
+        """
         return None
 
 
@@ -1354,6 +1317,10 @@ class TextIOWrapper(TextIOBase):
     If line_buffering is True, a call to flush is implied when a call to
     write contains a newline character.
     """
+
+    def __getstate__(self):
+        raise TypeError(f"cannot pickle {type(self).__name__!r} instances")
+
 
     # As in CPython's C TextIOWrapper, which reads and writes in chunks of this size.
     _CHUNK_SIZE = 8192
@@ -2091,7 +2058,8 @@ def _check_methods(C, *methods):
 # CPython's io takes these from its C module _io.
 for _cls in (BufferedRWPair, BufferedRandom, BufferedReader, BufferedWriter, IncrementalNewlineDecoder, TextIOWrapper):
     _cls.__module__ = '_io'
+    _c_type(_cls)
 del _cls
 
-del _c_type_name, _handled_exception, _standard_stderr
+del _c_type_name, _c_type, _allocate, _handled_exception, _standard_stderr
 `;

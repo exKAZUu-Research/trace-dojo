@@ -1,19 +1,10 @@
-// code-gauge-allow-file fileNcss 520 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 529 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from './conversions';
 import { method } from './define';
 import { pyHash } from './hashing';
 import { definePythonLevelNew } from './instances';
 import { defineProperty } from './modules/numberSupport';
-import {
-  attributeError,
-  callValue,
-  getAttribute,
-  getAttributeOrUndefined,
-  getIterator,
-  isTruthy,
-  setAttribute,
-  toArray,
-} from './objects';
+import { attributeError, callValue, getAttribute, getIterator, isTruthy, setAttribute, toArray } from './objects';
 import { equals } from './operators';
 import { currentRuntime } from './runtimeContext';
 import { genericClass, PyTypeParam, PyTypingAlias } from './typeParams';
@@ -31,6 +22,7 @@ import {
   tupleClass,
   typeClass,
   typeError,
+  typeName,
 } from './types';
 import {
   type Kwargs,
@@ -103,6 +95,20 @@ function opaqueAttributes(cls: PyClass, attribute: AttributeHook): void {
     const value = attribute(self as PyOpaque, name as string);
     if (value === undefined) throw attributeError(self, name as string);
     return value;
+  });
+}
+
+/** Gives the objects of a C type the attributes `attribute` computes, as the type's own `__getattribute__` does. */
+function cTypeAttributes(cls: PyClass, attribute: AttributeHook): void {
+  cls.missingAttribute = (self, name) => attribute(self as PyOpaque, name);
+  defineGetattribute(cls);
+}
+
+/** The `__getattribute__` of a C type that defines its own tp_getattro, which reads attributes as lookup does. */
+function defineGetattribute(cls: PyClass): void {
+  method(cls, '__getattribute__', 'one', 1, 1, (self, [name]) => {
+    if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+    return getAttribute(self, name);
   });
 }
 
@@ -643,12 +649,12 @@ const genericAliasAttribute: AttributeHook = (self, name) => {
     return alias.starred && alias.origin === tupleClass ? newTuple(alias.args) : None;
   }
   if (GENERIC_ALIAS_OWN.has(name)) return;
-  return getAttributeOrUndefined(alias.origin, name);
+  return getAttribute(alias.origin, name);
 };
 const genericAliasCheck: ClassCheck = (_self, _cls, caller) => {
   throw typeError(`${caller}() argument 2 cannot be a parameterized generic`);
 };
-opaqueAttributes(genericAliasClass, genericAliasAttribute);
+cTypeAttributes(genericAliasClass, genericAliasAttribute);
 classChecks(genericAliasClass, genericAliasCheck);
 method(genericAliasClass, '__dir__', 'none', 0, 0, (self) => {
   const names = toArray(callValue(currentRuntime().builtins.get('dir') as PyValue, [aliasOf(self).origin]));
@@ -739,6 +745,7 @@ method(unionClass, '__mro_entries__', 'one', 1, 1, (self) => {
   throw typeError(`Cannot subclass ${pyRepr(self)}`);
 });
 method(unionClass, '__class_getitem__', 'one', 1, 1, (_owner, [key]) => unionGetItem(key), { binding: 'class' });
+defineGetattribute(unionClass);
 unionClass.construct = () => {
   throw typeError("cannot create 'typing.Union' instances");
 };

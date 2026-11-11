@@ -100,10 +100,28 @@ def builtin_types():
     found = [object]
     for cls in found:
         found.extend(sub for sub in type.__subclasses__(cls) if sub not in found and sub.__module__ == 'builtins')
+    async def coroutine():
+        pass
+
+    async def async_generator():
+        yield
+
+    def cell():
+        x = 0
+        return (lambda: x).__closure__[0]
+
+    awaited = coroutine()
+    generated = async_generator()
     for value in [iter([]), iter(()), iter(''), iter({}), iter(set()), iter(range(1)), reversed([]), {}.keys(),
                   {}.values(), {}.items(), iter({}.keys()), iter({}.values()), iter({}.items()), iter(b''),
-                  iter(bytearray()), (x for x in []), len, [].append, type.__dict__, sys.flags]:
+                  iter(bytearray()), (x for x in []), len, [].append, type.__dict__, sys.flags, reversed({}),
+                  reversed({}.values()), reversed({}.items()), iter(lambda: 0, 0), iter(memoryview(b'')),
+                  iter(range(2 ** 70)), awaited, awaited.__await__(), generated, generated.asend(None),
+                  generated.athrow(ValueError), cell(), sys._getframe(), (1).__add__, int.__add__,
+                  int.__dict__['real'], dict.__dict__['fromkeys'], sys.float_info, sys.int_info, sys.hash_info,
+                  sys.thread_info, sys.version_info]:
         found.append(type(value))
+    awaited.close()
     return found
 
 

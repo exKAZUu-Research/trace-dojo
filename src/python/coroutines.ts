@@ -1,7 +1,7 @@
 // Coroutines and async generators: the objects `async def` creates, which share the machinery of generators, and the
 // protocols of `await`, `async for`, and `async with`.
 import { addressOf } from './conversions';
-import { method } from './define';
+import { FINALIZER_FEATURE, method, unsupportedMethod, unsupportedSizeof } from './define';
 import type { Frame } from './frame';
 import {
   closeGenerator,
@@ -174,6 +174,7 @@ method(coroutineClass, '__await__', 'none', 0, 0, (self) => {
   );
 });
 defineIteratorMethods(coroutineWrapperClass);
+coroutineWrapperClass.dict.delete('__await__');
 
 /** Gives an awaitable helper object the methods of an iterator that a coroutine delegates to. */
 function defineIteratorMethods(cls: PyClass): void {
@@ -396,6 +397,11 @@ method(asyncGeneratorClass, 'athrow', 'expected', 1, 3, (self, args) => athrow(s
 method(asyncGeneratorClass, 'aclose', 'none', 0, 0, (self) => athrow(self as PyGenerator, undefined));
 defineIteratorMethods(asendClass);
 defineIteratorMethods(athrowClass);
+for (const cls of [coroutineClass, asyncGeneratorClass, asendClass, athrowClass]) {
+  unsupportedMethod(cls, '__del__', FINALIZER_FEATURE);
+}
+unsupportedSizeof(coroutineClass);
+unsupportedSizeof(asyncGeneratorClass);
 
 function initializeHooks(generator: PyGenerator): AsyncGeneratorState {
   const state = stateOf(generator);
