@@ -1,9 +1,11 @@
 import { bytesLikeData, newBytes } from '../bytesValues';
+import { charmapNatives } from '../charmapCodecs';
 import {
   codecModule,
   customErrorHandler,
   decodeBytes,
   encodeString,
+  lookupCodec,
   registerErrorHandler,
   setRegisteredCodecLookup,
 } from '../codecs';
@@ -21,7 +23,7 @@ import { PyError, PyInstance, PyTuple, type PyValue } from '../values';
 import { escapeDecodeFunction } from './escapeDecode';
 
 /** The codec modules whose `encodings` module this grader has, which `codecs.lookup` imports. */
-export const ENCODINGS_MODULES = [
+export const ENCODINGS_MODULES = new Set<string>([
   'ascii',
   'latin_1',
   'utf_8',
@@ -40,7 +42,12 @@ export const ENCODINGS_MODULES = [
   'hex_codec',
   'base64_codec',
   'zlib_codec',
-] as const;
+]);
+
+/** Adds the `encodings` module of a codec, which `codecs.lookup` imports. */
+export function addEncodingsModule(module: string): void {
+  ENCODINGS_MODULES.add(module);
+}
 
 /** The codecs whose stateless functions `_codecs` exports, such as `utf_8_encode` and `utf_8_decode`. */
 const UNICODE_CODECS = [
@@ -94,6 +101,7 @@ registerModule('_codecs', () => {
     entries.set(`${module}_decode`, unicodeDecoder(module));
   }
   entries.set('escape_decode', escapeDecodeFunction);
+  for (const [name, value] of charmapNatives()) entries.set(name, value);
   entries.set('utf_16_ex_decode', exDecoder(2));
   entries.set('utf_32_ex_decode', exDecoder(4));
   return entries;
@@ -165,7 +173,7 @@ function cacheKey(encoding: string): string {
 function searchEncodings(encoding: string): PyValue | undefined {
   const module = codecModule(encoding);
   if (module === undefined) return undefined;
-  if (!(ENCODINGS_MODULES as readonly string[]).includes(module)) {
+  if (!ENCODINGS_MODULES.has(module)) {
     throw currentRuntime().unsupported(`文字コード ${module}`);
   }
   const getregentry = importModule(currentRuntime(), `encodings.${module}`).dict.get('getregentry');
@@ -303,7 +311,7 @@ function incompleteTail(data: Uint8Array, module: string): number {
   if (module.startsWith('utf_32')) return data.length % 4;
   if (module === 'shift_jis' || module === 'cp932') return multibyteTail(data, shiftJisLength);
   if (module === 'euc_jp') return multibyteTail(data, eucJpLength);
-  return 0;
+  return lookupCodec(module, 'decode').incompleteTail?.(data) ?? 0;
 }
 
 /** The bytes of a UTF-8 sequence that the end of `data` leaves incomplete, when they are valid so far. */

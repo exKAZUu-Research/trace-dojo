@@ -20,6 +20,8 @@ export interface TextCodec {
    * reuses for its arguments.
    */
   inlineHandlers?: { encode: ReadonlySet<string>; decode: ReadonlySet<string> };
+  /** How many bytes at the end of data start a sequence that more data may complete, for incremental decoding. */
+  incompleteTail?: (data: Uint8Array) => number;
 }
 
 /** Creates the codec a module name stands for, loading its tables only when a program uses it. */
