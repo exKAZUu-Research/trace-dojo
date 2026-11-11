@@ -7,7 +7,6 @@ import {
   ExpressionEvaluator,
   formatPart,
   mergeMapping,
-  storeKey,
 } from './expressionEvaluator';
 import type { Frame } from './frame';
 import { delegateTo } from './generators';
@@ -247,7 +246,6 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
     }
   }
 
-  // code-gauge-allow duplicateLines 15 -- Mirrors the synchronous dict display step by step, sharing how it combines the values.
   private *dictSuspending(expression: Extract<Expression, { kind: 'dict' }>, frame: Frame): Suspension {
     const length = frame.temporaries.length;
     try {
@@ -260,7 +258,7 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
         }
         const key = yield* this.evaluateSuspending(item.key, frame);
         frame.temporaries.push(key);
-        storeKey(dict, key, yield* this.evaluateSuspending(item.value, frame));
+        dict.store.set(key, yield* this.evaluateSuspending(item.value, frame));
       }
       this.runtime.allocate(dict.store.size + 1);
       return dict;

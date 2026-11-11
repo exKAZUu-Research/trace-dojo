@@ -21,7 +21,6 @@ import {
   typeClass,
   typeError,
   typeName,
-  typingClass,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import {
@@ -245,14 +244,6 @@ function isKeyError(error: unknown): boolean {
   return error instanceof PyError && error.exception.cls.isSubclassOf(exceptionClassNamed('KeyError'));
 }
 
-// A generic alias such as `list[int]` stands for its class among the bases of a class statement.
-method(typingClass, '__mro_entries__', 'one', 1, 1, (self) => {
-  const origin = (self as PyOpaque).data;
-  if (!(origin instanceof PyClass))
-    throw new UnsupportedFeatureError(`${(self as PyOpaque).text} を基底クラスにすること`);
-  return newTuple([origin]);
-});
-
 // type.__new__ ------------------------------------------------------------------------------------------------------
 
 /** `type.__new__(meta, name, bases, namespace, **kwargs)`: creates a class and runs the hooks its bases define. */
@@ -305,8 +296,10 @@ function checkBases(name: string, bases: readonly PyValue[]): PyClass[] {
   const seen = new Set<PyClass>();
   return bases.map((base) => {
     if (!(base instanceof PyClass)) throw typeError('bases must be types');
-    if (base.isBuiltin && !base.isBaseType)
+    if (base.unsupportedBase !== undefined) throw new UnsupportedFeatureError(base.unsupportedBase);
+    if (base.isBuiltin && !base.isBaseType) {
       throw typeError(`type '${base.typeName ?? base.name}' is not an acceptable base type`);
+    }
     if (base.flags.isEnum && base.enumMembers && base.enumMembers.length > 0) {
       throw typeError(`${name}: cannot extend ${base.qualifiedName}`);
     }

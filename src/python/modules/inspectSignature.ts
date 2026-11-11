@@ -1,6 +1,6 @@
 import { pyRepr } from '../conversions';
 import { method } from '../define';
-import { callValue, isCallable } from '../objects';
+import { callValue, getAttributeOrUndefined, isCallable } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
 import {
@@ -245,8 +245,7 @@ export function formatAnnotation(annotation: PyValue): string {
       : `${annotation.module}.${annotation.qualifiedName}`;
   }
   const text = pyRepr(annotation);
-  // The constructs of typing, whose reprs name the module, are this grader's opaque values.
-  return annotation instanceof PyOpaque && text.startsWith('typing.')
+  return typeof annotation === 'object' && getAttributeOrUndefined(annotation, '__module__') === 'typing'
     ? text.replaceAll(/[\w.]+/g, (name) => (name.startsWith('typing.') ? name.slice('typing.'.length) : name))
     : text;
 }

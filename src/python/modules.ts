@@ -21,7 +21,7 @@ const functionModules = new WeakMap<PyBuiltinFunction, string>();
  */
 export function registerModule(name: string, factory: ModuleFactory, unsupported: Record<string, string> = {}): void {
   factories.set(name, factory);
-  unsupportedAttributes.set(name, unsupported);
+  registerUnsupportedAttributes(name, unsupported);
 }
 
 /** Whether a module of this name is registered, as a submodule a package imports on demand may be. */
@@ -39,9 +39,16 @@ export function trackModules(runtime: Runtime, table: Map<string, PyValue>): voi
   moduleTables.set(runtime, table);
 }
 
+const moduleValues = new Map<string, { package: string; all?: readonly string[] }>();
+
+/** Registers a module's `__package__` and `__all__`, for the modules whose code does not define them. */
+export function registerModuleValues(module: string, packageName: string, all: readonly string[] | undefined): void {
+  moduleValues.set(module, { package: packageName, all });
+}
+
 /** Names attributes of a module that this grader does not support, with the feature to name in their error. */
 export function registerUnsupportedAttributes(name: string, attributes: Record<string, string>): void {
-  unsupportedAttributes.set(name, attributes);
+  unsupportedAttributes.set(name, { ...unsupportedAttributes.get(name), ...attributes });
 }
 
 /** Sets how a run creates its `__main__` module, whose namespace is the program's globals. */
@@ -51,7 +58,6 @@ export function registerMainModule(create: (runtime: Runtime) => PyModule): void
 
 let createMainModule: ((runtime: Runtime) => PyModule) | undefined;
 
-// code-gauge-allow functionNcss 32 -- Creates, caches, and links a module as one import does.
 export function importModule(runtime: Runtime, name: string): PyModule {
   const cached = runtime.modules.get(name);
   if (cached) return cached;
@@ -76,12 +82,27 @@ export function importModule(runtime: Runtime, name: string): PyModule {
   module.dict.set('__name__', name);
   for (const [key, value] of runFactory(runtime, name, factory, module)) module.dict.set(key, value);
   recordFunctionModules(module);
-  const unsupported = name === 'sys' ? UNSUPPORTED_SYS_ATTRIBUTES : unsupportedAttributes.get(name);
-  for (const [key, feature] of Object.entries(unsupported ?? {})) module.unsupported.set(key, feature);
+  addRegisteredAttributes(runtime, module);
   moduleTables.get(runtime)?.set(name, module);
   const dot = name.lastIndexOf('.');
   if (dot !== -1) importModule(runtime, name.slice(0, dot)).dict.set(name.slice(dot + 1), module);
   return module;
+}
+
+/**
+ * Adds to a new module the names this grader does not support, which its code did not define, and the `__package__`
+ * and `__all__` registered for it.
+ */
+function addRegisteredAttributes(runtime: Runtime, module: PyModule): void {
+  const { name, dict } = module;
+  const unsupported = name === 'sys' ? UNSUPPORTED_SYS_ATTRIBUTES : unsupportedAttributes.get(name);
+  for (const [key, feature] of Object.entries(unsupported ?? {})) {
+    if (!dict.has(key)) module.unsupported.set(key, feature);
+  }
+  const values = moduleValues.get(name);
+  if (!values) return;
+  if (!dict.has('__package__')) dict.set('__package__', values.package);
+  if (values.all && !dict.has('__all__')) dict.set('__all__', runtime.listOf([...values.all]));
 }
 
 /** Records the module of the builtin functions a module creates, which their `__module__` names. */

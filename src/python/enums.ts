@@ -1,15 +1,18 @@
 import { pyRepr, pyStr } from './conversions';
 import { hashInt, pyHash } from './hashing';
+import { getItem } from './items';
 import { callValue, getAttribute, getIterator } from './objects';
 import { intEnumValue, keysEqual } from './operators';
 import { currentRuntime } from './runtimeContext';
 import { defineValueHash } from './slotWrappers';
 import {
   builtinClass,
+  classOf,
   defineMethod,
   intClass,
   newDict,
   newList,
+  newTuple,
   None,
   NotImplemented,
   objectClass,
@@ -26,9 +29,9 @@ import {
   PyDescriptor,
   PyFunction,
   PyInstance,
-  type PyList,
+  PyList,
   PyOpaque,
-  type PyTuple,
+  PyTuple,
   type PyValue,
 } from './values';
 
@@ -94,9 +97,10 @@ export function membersByName(cls: PyClass): Map<string, PyInstance> {
 }
 
 /** `Color(value)`: the member whose value equals `value`, a combination of flags, or what `_missing_` returns. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Follows EnumType.__call__ and Enum.__new__.
+// code-gauge-allow functionCognitiveComplexity 19 -- Follows EnumType.__call__ and Enum.__new__.
 export function enumLookup(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyValue {
-  if (args.length !== 1 || (kwargs && kwargs.size > 0)) {
+  if (args.length > 1 || (kwargs && kwargs.size > 0)) return createEnum(cls, args, kwargs);
+  if (args.length !== 1) {
     throw typeError(`${cls.name}() takes 1 positional argument but ${args.length} were given`);
   }
   const [value] = args;
@@ -115,6 +119,60 @@ export function enumLookup(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyVal
     return flagMember(cls, BigInt(value));
   }
   throw pyError('ValueError', `${pyRepr(value)} is not a valid ${cls.qualifiedName}`);
+}
+
+const FUNCTIONAL_KEYWORDS = new Set(['value', 'names', 'module', 'qualname', 'type', 'start', 'boundary']);
+
+/**
+ * `Enum('Name', names, *, module=None, qualname=None, type=None, start=1, boundary=None)`, the functional API of
+ * EnumType.__call__, which creates a new Enum class as `_create_` does.
+ */
+// code-gauge-allow functionCognitiveComplexity 26 -- Follows EnumType._create_, which accepts names in four forms.
+// code-gauge-allow functionNcss 40 -- Follows EnumType._create_, which accepts names in four forms.
+function createEnum(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyValue {
+  for (const key of kwargs?.keys() ?? []) {
+    if (!FUNCTIONAL_KEYWORDS.has(key)) {
+      throw typeError(`EnumType.__call__() got an unexpected keyword argument '${key}'`);
+    }
+  }
+  if (args.length > 2) throw typeError(`${cls.name}() takes 1 positional argument but ${args.length} were given`);
+  const option = (name: string, index: number): PyValue | undefined => args[index] ?? kwargs?.get(name);
+  const value = option('value', 0);
+  let names = option('names', 1) ?? None;
+  const start = option('start', -1) ?? 1n;
+  if (cls.enumMembers && cls.enumMembers.length > 0) throw typeError(`${cls.name} has no members defined`);
+  if (typeof names === 'string') names = newList(names.replaceAll(',', ' ').split(/\s+/).filter(Boolean));
+  const entries: [string, PyValue][] = [];
+  const items = names === None ? [] : currentRuntime().toArray(names);
+  const isSequence = names instanceof PyList || (names instanceof PyTuple && names.cls.isBuiltin);
+  if (isSequence && items.length > 0 && typeof items[0] === 'string') {
+    const generate = getAttribute(cls, '_generate_next_value_');
+    const lastValues: PyValue[] = [];
+    for (const [count, name] of items.entries()) {
+      const generated = callValue(generate, [name, start, BigInt(count), newList([...lastValues])]);
+      lastValues.push(generated);
+      entries.push([name as string, generated]);
+    }
+  } else {
+    for (const item of items) {
+      if (typeof item === 'string') entries.push([item, getItem(names, item)]);
+      else {
+        const [name, member] = currentRuntime().toArray(item);
+        entries.push([name as string, member]);
+      }
+    }
+  }
+  const mixin = option('type', -1);
+  const bases = mixin === undefined || mixin === None ? [cls] : [mixin, cls];
+  const module = option('module', -1);
+  const namespace = newDict([
+    ['__module__', module === undefined || module === None ? '__main__' : module],
+    ...entries,
+  ]);
+  const created = callValue(classOf(cls), [value as PyValue, newTuple(bases), namespace]) as PyClass;
+  const qualname = option('qualname', -1);
+  if (typeof qualname === 'string') created.qualifiedName = qualname;
+  return created;
 }
 
 /** `value in Color`: a member, or the value of one, as Python 3.12 and later decide. */

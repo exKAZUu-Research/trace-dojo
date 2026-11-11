@@ -1,4 +1,3 @@
-import { storeKey } from './expressionEvaluator';
 import { toIndex } from './numbers';
 import { bindValue, callValue, lookupSpecial, overriding, toArray } from './objects';
 import { currentRuntime } from './runtimeContext';
@@ -156,7 +155,7 @@ export function setItem(container: PyValue, key: PyValue, value: PyValue): void 
     return;
   }
   if (container instanceof PyDict && classOf(container).isBuiltin) {
-    storeKey(container, key, value);
+    container.store.set(key, value);
     return;
   }
   const name = container instanceof PyClass ? 'type' : typeName(container);

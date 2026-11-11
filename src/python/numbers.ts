@@ -1,8 +1,12 @@
 import { bindValue, callValue, lookupSpecial } from './objects';
+import { currentRuntime } from './runtimeContext';
 import { pyError, typeError, typeName, valueError } from './types';
 import { PyInstance, type PyValue } from './values';
 
-export const MAX_STR_DIGITS = 4300;
+/** The limit of decimal digits an int may convert to or from, which sys.set_int_max_str_digits changes (0: none). */
+export const DEFAULT_MAX_STR_DIGITS = 4300;
+
+const maxStrDigits = (): number => currentRuntime().intMaxStrDigits;
 
 // Conversions -------------------------------------------------------------------------------------------------------
 
@@ -52,16 +56,17 @@ export function toIndex(value: PyValue, describe: (value: PyValue) => string = d
 export function intToString(value: bigint): string {
   const text = value.toString();
   const digits = value < 0n ? text.length - 1 : text.length;
-  if (digits > MAX_STR_DIGITS) {
+  const limit = maxStrDigits();
+  if (limit > 0 && digits > limit) {
     throw valueError(
-      `Exceeds the limit (${MAX_STR_DIGITS} digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit`
+      `Exceeds the limit (${limit} digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit`
     );
   }
   return text;
 }
 
 /** Parses a string as `int(text, base)` does, returning undefined when it is not a valid literal. */
-// code-gauge-allow functionNcss 36 -- Follows the grammar of int() literals.
+// code-gauge-allow functionNcss 37 -- Follows the grammar of int() literals.
 // code-gauge-allow functionCognitiveComplexity 22 -- Follows the grammar of int() literals.
 export function parseIntText(text: string, base: number): bigint | undefined {
   let body = text.trim().replaceAll(/^[\s]+|[\s]+$/gu, '');
@@ -89,9 +94,10 @@ export function parseIntText(text: string, base: number): bigint | undefined {
   const valid = new RegExp(`^[${'0123456789abcdefghijklmnopqrstuvwxyz'.slice(0, radix)}]+$`, 'i');
   const normalized = toAsciiDigits(digits);
   if (!valid.test(normalized)) return undefined;
-  if (radix === 10 && normalized.length > MAX_STR_DIGITS) {
+  const limit = maxStrDigits();
+  if (radix === 10 && limit > 0 && normalized.length > limit) {
     throw valueError(
-      `Exceeds the limit (${MAX_STR_DIGITS} digits) for integer string conversion: value has ${normalized.length} digits; use sys.set_int_max_str_digits() to increase the limit`
+      `Exceeds the limit (${limit} digits) for integer string conversion: value has ${normalized.length} digits; use sys.set_int_max_str_digits() to increase the limit`
     );
   }
   let result = 0n;

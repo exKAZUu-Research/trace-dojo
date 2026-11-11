@@ -27,6 +27,7 @@ CellType = _builtin_types['cell']
 EllipsisType = type(Ellipsis)
 NoneType = type(None)
 GenericAlias = type(list[int])
+UnionType = type(int | str)
 NotImplementedType = type(NotImplemented)
 
 
@@ -203,7 +204,6 @@ registerUnsupportedAttributes('types', {
   prepare_class: 'メタクラスを使う types.prepare_class()',
   get_original_bases: 'types.get_original_bases()',
   DynamicClassAttribute: 'types.DynamicClassAttribute',
-  UnionType: 'types.UnionType',
   GetSetDescriptorType: 'types.GetSetDescriptorType',
   MemberDescriptorType: 'types.MemberDescriptorType',
   CapsuleType: 'types.CapsuleType',

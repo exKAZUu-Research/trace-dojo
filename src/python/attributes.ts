@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 478 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 508 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import { solidBase } from './classes';
+import { builtin } from './define';
 import {
   builtinClassAttribute,
   builtinClassesWithDict,
@@ -33,6 +34,8 @@ import {
   typeError,
   typeName,
 } from './types';
+import { unavailableValue } from './unavailableValues';
+import { UnsupportedFeatureError } from './unsupported';
 import {
   type ExceptionState,
   PyBoundMethod,
@@ -46,11 +49,34 @@ import {
   PyInstance,
   PyModule,
   PyObject,
+  PyOpaque,
   PyRange,
   PySlice,
   type PyValue,
 } from './values';
 import { weakReferenceOf } from './weakReferences';
+
+/** The feature to name for the docstring of a builtin module, which this grader does not have. */
+const TRACEBACK_FEATURE = '例外のトレースバック（__traceback__）';
+
+/**
+ * The `__traceback__` of an exception. A raised exception's traceback holds frame objects with the script's path,
+ * which this grader does not make, so the program reading it stops; the standard library's code, which only passes
+ * it on, gets a stand-in that stops the program if it is ever used.
+ */
+function tracebackOf(state: ExceptionState): PyValue {
+  if (!state.raised) return None;
+  if (!currentRuntime().inLibraryCode()) throw new UnsupportedFeatureError(TRACEBACK_FEATURE);
+  const traceback = state.traceback ?? unavailableValue(TRACEBACK_FEATURE);
+  state.traceback = traceback;
+  return traceback;
+}
+
+function isUnavailableTraceback(value: PyValue): boolean {
+  return value instanceof PyOpaque && value.text === TRACEBACK_FEATURE;
+}
+
+export const BUILTIN_DOC = '組み込みの関数・型・モジュールの説明文（__doc__）';
 
 /** Reads an attribute of a class: its own data, then the attributes of its MRO, bound as a class reads them. */
 // code-gauge-allow functionCognitiveComplexity 18 -- Follows the order CPython's type_getattro looks up an attribute in.
@@ -272,6 +298,11 @@ function functionAttribute(fn: PyFunction, name: string): PyValue | undefined {
     case '__annotations__': {
       return currentRuntime().evaluator.annotationsOf(fn);
     }
+    case '__annotate__': {
+      if (fn.annotate !== undefined) return fn.annotate;
+      if (!fn.def.returns && !fn.def.params.some((param) => param.annotation)) return None;
+      return builtin('__annotate__', 'one', 1, 1, () => currentRuntime().evaluator.annotationsOf(fn));
+    }
     case '__dict__': {
       return namespaceDict(fn.dict);
     }
@@ -310,7 +341,7 @@ function instanceAttribute(instance: PyInstance, name: string): PyValue | undefi
       return state.suppressContext;
     }
     case '__traceback__': {
-      return None;
+      return tracebackOf(state);
     }
     case 'exceptions': {
       return state.exceptions;
@@ -355,7 +386,11 @@ function setFunctionAttribute(fn: PyFunction, name: string, value: PyValue): voi
   if (name === '__name__' && typeof value === 'string') fn.name = value;
   else if (name === '__qualname__' && typeof value === 'string') fn.qualifiedName = value;
   else if (name === '__module__') fn.module = value;
-  else fn.dict.set(name, value);
+  else if (name === '__annotations__') fn.annotations = value;
+  else if (name === '__annotate__') {
+    fn.annotate = value;
+    fn.annotations = undefined;
+  } else fn.dict.set(name, value);
 }
 
 export function setAttribute(target: PyValue, name: string, value: PyValue): void {
@@ -541,9 +576,6 @@ function replaceDict(target: PyObject, value: PyValue): void {
 function setInstanceDictEntry(target: PyInstance, name: string, value: PyValue, attribute: PyValue | undefined): void {
   const cls = target.cls;
   if (cls.slotNames !== undefined) throw noDictError(target, name, attribute);
-  if (cls.flags.isDataclass && currentRuntime().isFrozenDataclass(cls)) {
-    throw currentRuntime().frozenInstanceError(`cannot assign to field '${name}'`);
-  }
   if (target.enumValue !== undefined && (name === 'name' || name === 'value')) {
     throw pyError('AttributeError', `<enum 'Enum'> cannot set attribute '${name}'`);
   }
@@ -567,6 +599,12 @@ function setExceptionField(state: ExceptionState, name: string, value: PyValue):
     }
     case '__context__': {
       state.context = value;
+      return true;
+    }
+    case '__traceback__': {
+      if (value !== None && !isUnavailableTraceback(value)) throw new UnsupportedFeatureError(TRACEBACK_FEATURE);
+      state.raised = value !== None;
+      state.traceback = value === None ? undefined : value;
       return true;
     }
     case '__suppress_context__': {
@@ -642,8 +680,5 @@ export function deleteInstanceAttribute(target: PyObject, name: string): void {
     return;
   }
   if (attribute !== undefined && callSetter(attribute, target, undefined)) return;
-  if (target.cls.flags.isDataclass && currentRuntime().isFrozenDataclass(target.cls)) {
-    throw currentRuntime().frozenInstanceError(`cannot delete field '${name}'`);
-  }
   if (!ownDict(target)?.delete(name)) throw attributeError(target, name);
 }

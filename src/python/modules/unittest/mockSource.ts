@@ -1,4 +1,4 @@
-// CPython 3.14's `Lib/unittest/mock.py`, with its own marker in place of `asyncio.coroutines._is_coroutine`, a stand-in for code objects, which this grader does not have, signatures read without annotationlib's formats, which this grader evaluates annotations eagerly for, `dataclasses.fields` imported where it is used, `pkgutil.resolve_name` copied in, since pkgutil's other functions search the file system, and the attributes of CPython's file objects and `open` listed, since this grader has neither.
+// CPython 3.14's `Lib/unittest/mock.py`, telling functions without their code objects, which this grader does not have, its own marker in place of `asyncio.coroutines._is_coroutine`, a stand-in for code objects, which this grader does not have, signatures read without annotationlib's formats, which this grader evaluates annotations eagerly for, `dataclasses.fields` imported where it is used, `pkgutil.resolve_name` copied in, since pkgutil's other functions search the file system, and the attributes of CPython's file objects and `open` listed, since this grader has neither.
 export const MOCK_SOURCE =
   String.raw`# mock.py
 # Test tools for mocking and patching.
@@ -107,7 +107,7 @@ def _is_async_obj(obj):
 
 
 def _is_async_func(func):
-    if getattr(func, '__code__', None):
+    if isinstance(func, FunctionTypes) or getattr(func, '__code__', None):
         return iscoroutinefunction(func)
     else:
         return False

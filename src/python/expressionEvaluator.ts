@@ -453,7 +453,7 @@ export class ExpressionEvaluator {
         const key = this.evaluate(item.key, frame);
         frame.temporaries.push(key);
         const value = this.evaluate(item.value, frame);
-        storeKey(dict, key, value);
+        dict.store.set(key, value);
       }
       this.runtime.allocate(dict.store.size + 1);
       return dict;
@@ -601,6 +601,9 @@ export class ExpressionEvaluator {
 
   /** The annotations of a function, evaluated when the program reads `__annotations__`. */
   annotationsOf(fn: PyFunction): PyDict {
+    // Annotations the program assigned, or that an assigned `__annotate__` computes, replace those of the def.
+    const assigned = fn.annotations ?? (fn.annotate && fn.annotate !== None ? callValue(fn.annotate, [1n]) : undefined);
+    if (assigned instanceof PyDict) return assigned;
     const dict = newDict();
     const frame = (fn.annotationFrame as Frame | undefined) ?? this.runtime.frame;
     for (const param of fn.def.params) {
@@ -646,7 +649,7 @@ export class ExpressionEvaluator {
       if (expression.type === 'dict') {
         const dict = newDict();
         inner.temporaries.push(dict);
-        const items = this.comprehensionItems(expression, inner, next, (key, value) => storeKey(dict, key, value));
+        const items = this.comprehensionItems(expression, inner, next, (key, value) => dict.store.set(key, value));
         while (!items.next().done);
         return dict;
       }
@@ -917,18 +920,6 @@ export function mappingEntries(mapping: PyValue): [PyValue, PyValue][] {
   const keys = lookupSpecial(mapping, 'keys');
   if (keys === undefined) throw typeError(`'${typeName(mapping)}' object is not a mapping`);
   return toArray(callValue(bindValue(keys, mapping), [])).map((key) => [key, getItem(mapping, key)]);
-}
-
-export function storeKey(dict: PyDict, key: PyValue, value: PyValue): void {
-  try {
-    dict.store.set(key, value);
-  } catch (error) {
-    const message = error instanceof PyError ? error.exception.exception?.args.items[0] : undefined;
-    if (typeof message === 'string' && message.startsWith('unhashable type')) {
-      throw typeError(`cannot use '${typeName(key)}' as a dict key (${message})`);
-    }
-    throw error;
-  }
 }
 
 /** The items a target list unpacks a value into, raising the errors CPython raises for a count mismatch. */

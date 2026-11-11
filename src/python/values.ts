@@ -78,11 +78,12 @@ export class PyClass extends PyObject {
   isBuiltin = true;
   /** Whether a program may subclass this builtin class. */
   isBaseType = false;
+  /** The feature to name when a class statement derives from this builtin class, which this grader does not support. */
+  unsupportedBase?: string;
   /** The ordered annotations of the class body, which `@dataclass` reads. */
   annotationNames: string[] = [];
   readonly flags: {
     isEnum?: boolean;
-    isDataclass?: boolean;
     isAbstractEnum?: boolean;
     /** Whether the class or a base defined `__getattribute__` in its body. */
     definesGetattribute?: boolean;
@@ -153,6 +154,10 @@ export interface ExceptionState {
   candidates?: string[];
   /** The instance whose attribute a NameError may have meant, as `self.name`. */
   selfValue?: PyValue;
+  /** Whether the exception has been raised, which gives it a traceback. */
+  raised?: boolean;
+  /** The stand-in for the traceback that the standard library's code read or assigned. */
+  traceback?: PyValue;
   /** The sub-exceptions of an exception group. */
   exceptions?: PyTuple;
   /** The file names an OSError was created with, which its `args` then leave out. */
@@ -268,6 +273,9 @@ export class PyFunction extends PyObject {
   typeParams: PyValue[] = [];
   /** The frame of those type parameters, where the annotations that mention them are evaluated. */
   annotationFrame?: unknown;
+  /** The `__annotations__` and `__annotate__` the program assigned. */
+  annotations?: PyValue;
+  annotate?: PyValue;
 
   // code-gauge-allow functionParameterCount 7 -- Each function field is set once at creation.
   constructor(
@@ -409,5 +417,6 @@ export class PyDeque extends PyObject {
 export class PyError extends Error {
   constructor(readonly exception: PyInstance) {
     super('Python exception');
+    if (exception.exception) exception.exception.raised = true;
   }
 }

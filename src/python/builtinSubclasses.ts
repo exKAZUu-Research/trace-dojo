@@ -1,7 +1,6 @@
 import { method } from './define';
 // Gives the builtin types the `__new__` and `__init__` that create and fill instances of a program's subclasses.
 import { DictStore } from './dictStore';
-import { storeKey } from './expressionEvaluator';
 import { defineNew } from './instances';
 import { deleteListItem, setListItem } from './items';
 import { checkArgs } from './nativeArgs';
@@ -10,7 +9,7 @@ import { currentRuntime } from './runtimeContext';
 import { updateTable } from './setOperations';
 import { SetTable } from './setTable';
 import { turtleClass } from './turtle';
-import { updateDict, withSetElementError } from './typeContainers';
+import { updateDict } from './typeContainers';
 import {
   baseExceptionClass,
   complexClass,
@@ -83,14 +82,14 @@ defineMethod(dictClass, '__init__', (self, args, kwargs) => {
 export function updateDictFromArguments(dict: PyDict, qualified: string, args: PyValue[], kwargs: Kwargs): void {
   checkArgs({ qualified, min: 0, max: 1, style: 'expected', keywords: [...(kwargs?.keys() ?? [])] }, args, kwargs);
   if (args.length > 0) updateDict(dict, args[0]);
-  for (const [key, value] of kwargs ?? []) storeKey(dict, key, value);
+  for (const [key, value] of kwargs ?? []) dict.store.set(key, value);
 }
 
 defineNew(setClass, (subtype) => new PySet(subtype, new SetTable()));
 defineMethod(setClass, '__init__', (self, args, kwargs) => {
   checkArgs({ qualified: 'set', min: 0, max: 1, style: 'expected' }, args, kwargs);
   const table = new SetTable();
-  if (args.length > 0) withSetElementError(() => updateTable(table, args[0]));
+  if (args.length > 0) updateTable(table, args[0]);
   currentRuntime().allocate(table.size);
   (self as PySet).table = table;
   return None;

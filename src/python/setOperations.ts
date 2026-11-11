@@ -1,8 +1,8 @@
 import { pyHash } from './hashing';
 import { iterate } from './objects';
 import { SetTable } from './setTable';
-import { resultClassOf } from './types';
-import { DONE, PyDict, PySet, type PyValue } from './values';
+import { resultClassOf, setClass } from './types';
+import { DONE, PyDict, PyDictView, PySet, type PyValue } from './values';
 
 /** A new set of the same type (set or frozenset) as `like`, filled from a table. */
 function setLike(like: PySet, table: SetTable): PySet {
@@ -106,4 +106,45 @@ export function setSymmetricDifference(set: PySet, other: PyValue): PySet {
   const table = tableOf(other).copy();
   symmetricDifferenceUpdate(table, set);
   return setLike(set, table);
+}
+
+/** Whether a value is a dict's keys or items view, which supports set operators. */
+export function isSetLikeView(value: PyValue): value is PyDictView {
+  return value instanceof PyDictView && value.view !== 'values';
+}
+
+/**
+ * A set operator with a keys or items view on either side, as CPython's dictviews_and, _or, _sub, and _xor do: all
+ * but `&` start from a set of the left operand.
+ */
+export function dictViewBinary(
+  operator: '&' | '|' | '-' | '^',
+  left: PyValue,
+  right: PyValue,
+  contains: (view: PyDictView, item: PyValue) => boolean
+): PySet {
+  if (operator === '&') return viewIntersection(left, right, contains);
+  const table = new SetTable();
+  updateTable(table, left);
+  if (operator === '|') updateTable(table, right);
+  else if (operator === '-') differenceUpdate(table, right);
+  else symmetricDifferenceUpdate(table, right);
+  return new PySet(setClass, table);
+}
+
+function viewIntersection(
+  left: PyValue,
+  right: PyValue,
+  contains: (view: PyDictView, item: PyValue) => boolean
+): PySet {
+  let [self, other] = isSetLikeView(left) ? [left, right] : [right as PyDictView, left];
+  const size = self.dict.store.size;
+  if (other instanceof PySet && other.cls === setClass && size <= other.table.size) {
+    return setIntersection(other, self);
+  }
+  if (isSetLikeView(other) && other.dict.store.size > size) [self, other] = [other, self];
+  const result = new SetTable();
+  const next = iterate(other);
+  for (let item = next(); item !== DONE; item = next()) if (contains(self, item)) result.add(item);
+  return new PySet(setClass, result);
 }

@@ -19,6 +19,7 @@ import {
   nextOf,
 } from './objects';
 import { currentRuntime } from './runtimeContext';
+import { typeOr } from './typeHints';
 import {
   builtinFunctionClass,
   classmethodClass,
@@ -181,8 +182,8 @@ method(
   1,
   (self, [value]) => value instanceof PyClass && value.isSubclassOf(self as PyClass)
 );
-method(typeClass, '__or__', 'one', 1, 1, (self, [other]) => currentRuntime().unionType(self, other));
-method(typeClass, '__ror__', 'one', 1, 1, (self, [other]) => currentRuntime().unionType(other, self));
+method(typeClass, '__or__', 'one', 1, 1, (self, [other]) => typeOr(self, other));
+method(typeClass, '__ror__', 'one', 1, 1, (self, [other]) => typeOr(other, self));
 
 // Singletons --------------------------------------------------------------------------------------------------------
 

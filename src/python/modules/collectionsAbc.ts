@@ -1,11 +1,12 @@
 import { builtin } from '../define';
 import { registerUnsupportedAttributes } from '../modules';
 import { registerSourceModule } from '../sourceModules';
+import { callableGenericAliasClass } from '../typeHints';
 import { builtinFunctionClass, functionClass, methodClass, methodDescriptorClass, typeClass } from '../types';
 import type { PyClass, PyValue } from '../values';
 
 // CPython's `_collections_abc.py` without the asynchronous ABCs, which need `async def`, `ByteString`, which needs a
-// metaclass `__new__` warning on use, and the generic alias of Callable, which subclasses GenericAlias. `collections`
+// metaclass `__new__` warning on use; the generic alias of Callable, which subclasses GenericAlias, is native. `collections`
 // registers deque here, as CPython's `collections/__init__.py` does.
 const SOURCE =
   String.raw`
@@ -366,6 +367,8 @@ class Callable(metaclass=ABCMeta):
                 return True
             return _check_methods(C, "__call__")
         return NotImplemented
+
+    __class_getitem__ = classmethod(_CallableGenericAlias)
 
 
 
@@ -973,6 +976,7 @@ registerSourceModule(
   SOURCE,
   () =>
     new Map<string, PyValue>([
+      ['_CallableGenericAlias', callableGenericAliasClass],
       [
         '_builtin_callable',
         // The builtin callables call natively, without a `__call__` in their class dictionaries.

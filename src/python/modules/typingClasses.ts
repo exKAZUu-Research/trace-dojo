@@ -247,6 +247,21 @@ mroEntryHooks.push((base, className) => {
   return;
 });
 
+/** Whether a class is a protocol, as `typing.is_protocol` asks. */
+export function isProtocol(value: PyValue): boolean {
+  return value instanceof PyClass && protocols.has(value);
+}
+
+/** The members of a protocol, as `typing.get_protocol_members` gives them. */
+export function protocolMemberNames(cls: PyClass): string[] {
+  return protocolMembers(cls);
+}
+
+/** Whether a class is a TypedDict class, as `typing.is_typeddict` asks. */
+export function isTypedDict(value: PyValue): boolean {
+  return value instanceof PyClass && typedDicts.has(value);
+}
+
 /** The names `typing` exports for protocols, named tuples, and typed dicts. */
 export const TYPING_CLASSES: [string, PyValue][] = [
   ['Protocol', protocolClass],

@@ -17,7 +17,7 @@ import { callValue, lengthOf } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { iterStr } from './strings';
 import { None, typeError, typeName, unbox, valueError } from './types';
-import { isTitleText } from './typeStr';
+import { isTitleSequence } from './unicodeCase';
 import type { PyValue } from './values';
 
 const dataOf = (self: PyValue): Uint8Array => (self as PyBytes).data;
@@ -72,7 +72,7 @@ shared('isascii', 'none', 0, 0, (self) => dataOf(self).every((code) => code < 0x
 shared('islower', 'none', 0, 0, (self) => dataOf(self).some(isLower) && !dataOf(self).some(isUpper));
 shared('isupper', 'none', 0, 0, (self) => dataOf(self).some(isUpper) && !dataOf(self).some(isLower));
 shared('istitle', 'none', 0, 0, (self) =>
-  isTitleText(
+  isTitleSequence(
     textOfBytes(self),
     (char) => isUpper(char.codePointAt(0) as number),
     (char) => isLower(char.codePointAt(0) as number)

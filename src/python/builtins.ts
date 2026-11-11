@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 414 -- The builtins module keeps every builtin function together.
+// code-gauge-allow-file fileNcss 416 -- The builtins module keeps every builtin function together.
 import { bytearrayClass, bytesClass, memoryviewClass } from './bytesValues';
 import { complexAbs } from './complexNumbers';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
@@ -501,6 +501,8 @@ function isSubclass(cls: PyValue, classInfo: PyValue): boolean {
   if (classInfo instanceof PyOpaque && Array.isArray(classInfo.data)) {
     return (classInfo.data as PyValue[]).some((item) => isSubclass(cls, item));
   }
+  const check = lookupSpecial(classInfo, '__subclasscheck__');
+  if (check !== undefined) return isTruthy(callValue(bindValue(check, classInfo), [cls]));
   throw typeError('issubclass() arg 2 must be a class, a tuple of classes, or a union');
 }
 

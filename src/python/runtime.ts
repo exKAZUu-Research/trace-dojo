@@ -3,7 +3,6 @@ import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import { createBuiltins } from './builtins';
 import { bindArguments } from './calls';
-import { pyRepr } from './conversions';
 import { markIterableCoroutine } from './coroutines';
 import { Evaluator } from './evaluator';
 import { GeneratorFinalizer } from './finalization';
@@ -15,10 +14,12 @@ import { instantiate } from './instances';
 import { keyError } from './items';
 import { importModule } from './modules';
 import { systemExitError } from './modules/sys';
+import { DEFAULT_MAX_STR_DIGITS } from './numbers';
 import { bindValue, callValue, isTruthy, overriding, setAttribute, toArray } from './objects';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
 import type { Scheduler } from './threads';
+import { newGenericAlias, unionOf } from './typeHints';
 import { boundSuper } from './typeObject';
 import { genericClass, subscriptGeneric } from './typeParams';
 import {
@@ -27,17 +28,12 @@ import {
   coroutineClass,
   exceptionClassNamed,
   generatorClass,
-  nativeFunction,
-  newException,
   newList,
   newTuple,
   None,
-  propertyClass,
   pyError,
   superClass,
   typeError,
-  typingClass,
-  unionClass,
   valueError,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
@@ -46,7 +42,6 @@ import {
   type Kwargs,
   PyCell,
   PyClass,
-  PyDescriptor,
   type PyDict,
   PyError,
   PyFunction,
@@ -55,9 +50,8 @@ import {
   type PyList,
   PyModule,
   PyObject,
-  PyOpaque,
   type PySet,
-  PyTuple,
+  type PyTuple,
   type PyValue,
 } from './values';
 
@@ -131,6 +125,12 @@ export class Runtime {
   }
 
   // Frames and calls ------------------------------------------------------------------------------------------------
+
+  /** Whether the running code is a standard library module's written in Python. */
+  inLibraryCode(): boolean {
+    const frame = this.frames.at(-1);
+    return frame !== undefined && this.libraryNamespaces.has(frame.globals);
+  }
 
   /** Marks the globals of a standard library module written in Python, whose frames stay out of the trace. */
   addLibraryNamespace(namespace: Map<string, PyValue>): void {
@@ -333,22 +333,14 @@ export class Runtime {
   // Services for builtins ------------------------------------------------------------------------------------------
 
   readonly none = None;
+  /** The limit sys.set_int_max_str_digits sets, 0 for none. */
+  intMaxStrDigits = DEFAULT_MAX_STR_DIGITS;
   /** The annotations of each class body, evaluated when the program reads `__annotations__` or `@dataclass` does. */
   readonly classAnnotationThunks = new Map<PyClass, [string, () => PyValue][]>();
-  readonly frozenDataclasses = new Set<PyClass>();
   private readonly streams = new Map<string, PyValue>();
 
   classAnnotations(cls: PyClass): [PyValue, PyValue][] {
     return (this.classAnnotationThunks.get(cls) ?? []).map(([name, thunk]) => [name, thunk()]);
-  }
-
-  isFrozenDataclass(cls: PyClass): boolean {
-    return cls.mro.some((each) => this.frozenDataclasses.has(each));
-  }
-
-  frozenInstanceError(message: string): PyError {
-    const cls = this.importModule('dataclasses').dict.get('FrozenInstanceError') as PyClass;
-    return new PyError(newException(cls, [message]));
   }
 
   exceptionClass(name: string): PyClass {
@@ -394,11 +386,7 @@ export class Runtime {
 
   /** `int | None` and the like, which isinstance accepts and type hints use. */
   unionType(left: PyValue, right: PyValue): PyValue {
-    const items = [...unionMembers(left), ...unionMembers(right)];
-    const text = items
-      .map((item) => (item instanceof PyClass ? item.qualifiedName : item === None ? 'None' : pyRepr(item)))
-      .join(' | ');
-    return new PyOpaque(unionClass, text, items);
+    return unionOf([left, right]);
   }
 
   /** The value of a key missing from a dict: a Counter's zero, a defaultdict's default, or a KeyError. */
@@ -423,9 +411,9 @@ export class Runtime {
         throw keyError(key);
       return member;
     }
-    const classGetItem = cls.isBuiltin ? undefined : cls.lookup('__class_getitem__');
+    const classGetItem = cls.isBuiltin ? cls.dict.get('__class_getitem__') : cls.lookup('__class_getitem__');
     if (classGetItem !== undefined) return callValue(bindValue(classGetItem, cls, cls), [key]);
-    if (cls.isBuiltin) return genericAlias(cls, key);
+    if (cls.isBuiltin) return newGenericAlias(cls, key);
     throw typeError(`type '${cls.qualifiedName}' is not subscriptable`);
   }
 
@@ -457,7 +445,11 @@ export class Runtime {
 
   /** The sorted attribute names `dir()` lists, which AttributeError suggestions choose from. */
   dirNames(value: PyValue): string[] {
-    const names = value instanceof PyModule ? new Set(value.dict.keys()) : objectAttributeNames(value);
+    // A module lists the names this grader does not support too, as CPython's module has them.
+    const names =
+      value instanceof PyModule
+        ? new Set([...value.dict.keys(), ...value.unsupported.keys()])
+        : objectAttributeNames(value);
     return [...names].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   }
 
@@ -502,49 +494,6 @@ function recursionErrorFor(error: unknown): unknown {
   return isHostStackOverflow(error) ? pyError('RecursionError', 'maximum recursion depth exceeded') : error;
 }
 
-/** `list[int]` and the like, which type hints use. */
-function genericAlias(cls: PyClass, key: PyValue): PyOpaque {
-  const args = key instanceof PyTuple ? key.items : [key];
-  const text = `${aliasTypeText(cls)}[${args.map((arg) => (arg instanceof PyClass ? aliasTypeText(arg) : arg instanceof PyOpaque ? arg.text : pyRepr(arg))).join(', ')}]`;
-  const alias = new PyOpaque(typingClass, text, cls);
-  aliasArguments.set(alias, args);
-  return alias;
-}
-
-/** The arguments of each `list[int]`-like alias, which its `__args__` gives. */
-const aliasArguments = new WeakMap<PyOpaque, readonly PyValue[]>();
-
-for (const [name, read] of [
-  ['__origin__', (alias: PyOpaque): PyValue => alias.data as PyClass],
-  ['__args__', (alias: PyOpaque): PyValue => newTuple(aliasArguments.get(alias) ?? [])],
-] as const) {
-  typingClass.dict.set(
-    name,
-    new PyDescriptor(
-      propertyClass,
-      nativeFunction(name, ([self]) => read(self as PyOpaque))
-    )
-  );
-}
-
-function aliasTypeText(cls: PyClass): string {
-  return cls.module === 'builtins' ? cls.qualifiedName : `${cls.module}.${cls.qualifiedName}`;
-}
-
-// `types.GenericAlias(origin, args)`, which `__class_getitem__ = classmethod(GenericAlias)` calls.
-typingClass.construct = (_cls, args, kwargs) => {
-  if (kwargs?.size) throw typeError('GenericAlias() takes no keyword arguments');
-  if (args.length !== 2) throw typeError(`GenericAlias expected 2 arguments, got ${args.length}`);
-  const [origin, key] = args;
-  if (!(origin instanceof PyClass)) throw new UnsupportedFeatureError('クラス以外を元にした types.GenericAlias');
-  return genericAlias(origin, key);
-};
-
-/** The types a `|` union holds, or the type itself. */
-function unionMembers(value: PyValue): PyValue[] {
-  return value instanceof PyOpaque && Array.isArray(value.data) ? (value.data as PyValue[]) : [value];
-}
-
 export { Frame, PyCell };
 
 /**
@@ -555,7 +504,21 @@ export function isHostStackOverflow(error: unknown): boolean {
   return error instanceof RangeError;
 }
 
+/** The attributes of a function that its class reads natively. */
+const FUNCTION_ATTRIBUTES = [
+  '__annotate__',
+  '__annotations__',
+  '__defaults__',
+  '__dict__',
+  '__kwdefaults__',
+  '__module__',
+  '__name__',
+  '__qualname__',
+  '__type_params__',
+];
+
 /** The attribute names `dir()` lists for an object other than a module. */
+// code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of object whose attributes its class reads natively.
 function objectAttributeNames(value: PyValue): Set<string> {
   const names = new Set<string>();
   const add = (keys: Iterable<string>): void => {
@@ -565,9 +528,12 @@ function objectAttributeNames(value: PyValue): Set<string> {
   for (const each of cls.mro) add(each.dict.keys());
   if (value instanceof PyInstance || value instanceof PyFunction) add(value.dict.keys());
   add(['__class__', '__doc__']);
-  if (value instanceof PyClass || value instanceof PyInstance) add(['__dict__', '__module__']);
+  if (!cls.isBuiltin || (value instanceof PyClass && !value.isBuiltin)) add(['__dict__', '__module__']);
+  if (value instanceof PyFunction) add(FUNCTION_ATTRIBUTES);
+  if (value instanceof PyGenerator && value.cls === generatorClass)
+    add(['__del__', 'gi_code', 'gi_frame', 'gi_yieldfrom']);
   if (value instanceof PyInstance && value.exception) {
-    add(['args', '__traceback__', '__cause__', '__context__', '__suppress_context__']);
+    add(['__dict__', 'args', '__traceback__', '__cause__', '__context__', '__suppress_context__']);
   }
   if (value instanceof PyInstance && value.enumValue !== undefined) add(['name', 'value']);
   return names;
