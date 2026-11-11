@@ -3,6 +3,7 @@ import { STDLIB_MODULE_NAMES } from './stdlibModuleNames';
 /** The standard library modules this grader implements, which programs may import. */
 export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   '__future__',
+  '_codecs',
   '_csv',
   '_thread',
   'abc',
@@ -16,6 +17,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'builtins',
   'calendar',
   'cmath',
+  'codecs',
   'collections',
   'collections.abc',
   'colorsys',

@@ -101,3 +101,6 @@ import './modules/uuid';
 import './modules/errno';
 import './modules/csv';
 import './modules/csvNative';
+import './modules/codecsModule';
+import './modules/codecsNative';
+import './modules/encodings';

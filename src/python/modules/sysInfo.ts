@@ -66,7 +66,6 @@ export function sysInformation(runtime: Runtime): [string, PyValue][] {
     ['intern', builtin('intern', 'one', 1, 1, ([value]) => intern(value))],
     ['exc_info', builtin('exc_info', 'none', 0, 0, () => excInfo(runtime))],
     ['exception', builtin('exception', 'none', 0, 0, () => runtime.evaluator.handledExceptions.at(-1) ?? None)],
-    ['modules', namespaceDict(moduleTable(runtime))],
   ];
 }
 
@@ -108,7 +107,15 @@ const STARTUP_MODULES = [
   'site',
 ];
 
-/** `sys.modules`: the startup modules, then those the program imports, which this grader implements or names only. */
+/**
+ * `sys.modules`: the startup modules, then those the program imports, which this grader implements or names only. The
+ * startup modules written in Python, such as `codecs`, read `sys` as they load, so `sys` must have its other attributes
+ * first.
+ */
+export function sysModules(runtime: Runtime): PyValue {
+  return namespaceDict(moduleTable(runtime));
+}
+
 function moduleTable(runtime: Runtime): Map<string, PyValue> {
   const table = new Map<string, PyValue>();
   for (const name of STARTUP_MODULES) {
