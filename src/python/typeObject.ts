@@ -222,7 +222,13 @@ function typeAttributeValue(instance: PyValue, name: string): PyValue {
     return None;
   }
   // As in CPython, only a class's own `__abstractmethods__` counts.
-  const value = name === '__abstractmethods__' ? instance.dict.get(name) : typeData(instance, name);
+  // `type.__dict__` holds the descriptor of `__abstractmethods__` itself, which is no value for type.
+  const value =
+    name === '__abstractmethods__'
+      ? instance === typeClass
+        ? undefined
+        : instance.dict.get(name)
+      : typeData(instance, name);
   if (value !== undefined) return value;
   if (name === '__abstractmethods__') throw pyError('AttributeError', name);
   throw pyError('AttributeError', `type object '${instance.name}' has no attribute '${name}'`);
