@@ -128,7 +128,13 @@ export function bindValue(attribute: PyValue, instance: PyValue, owner: PyClass 
       return callValue(attribute.fn, [instance]);
     }
   }
-  return attribute;
+  return boundByGetter(attribute, instance, owner);
+}
+
+/** An attribute that a `__get__` of the program's class binds, as special methods such as `unittest.mock`'s are. */
+function boundByGetter(attribute: PyValue, instance: PyValue, owner: PyClass): PyValue {
+  const getter = descriptorGetter(attribute);
+  return getter === undefined ? attribute : callValue(bindValue(getter, attribute), [instance, owner]);
 }
 
 /** The str or int that a method of `str` or `int` runs on for a member of an Enum mixing in that type. */
@@ -166,7 +172,8 @@ export function getAttribute(value: PyValue, name: string): PyValue {
   if (custom !== undefined) return getWithCustomGetattribute(value, name, custom);
   const found = findAttribute(value, name);
   if (found !== undefined) return found;
-  const getattr = lookupSpecial(value, '__getattr__');
+  const getattr = value instanceof PyModule ? value.dict.get('__getattr__') : lookupSpecial(value, '__getattr__');
+  if (getattr !== undefined && value instanceof PyModule) return callValue(getattr, [name]);
   if (getattr !== undefined) return callValue(bindValue(getattr, value), [name]);
   throw attributeError(value, name);
 }

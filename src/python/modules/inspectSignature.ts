@@ -2,10 +2,22 @@ import { pyRepr } from '../conversions';
 import { method } from '../define';
 import { callValue, isCallable } from '../objects';
 import { currentRuntime } from '../runtimeContext';
-import { builtinClass, defineMethod, intClass, None, typeError, typeName, valueError } from '../types';
+import { registerSourceModule } from '../sourceModules';
+import {
+  builtinClass,
+  defineMethod,
+  intClass,
+  newDict,
+  newTuple,
+  None,
+  typeError,
+  typeName,
+  valueError,
+} from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
 import {
   PyBoundMethod,
+  PyBuiltinFunction,
   PyClass,
   PyDescriptor,
   type PyDict,
@@ -14,6 +26,8 @@ import {
   PyOpaque,
   type PyValue,
 } from '../values';
+import { type Partial, partialClass } from './functools';
+import { INSPECT_BIND_SOURCE } from './inspectBindSource';
 import { bindArguments, defineProperty } from './numberSupport';
 
 // Classes -----------------------------------------------------------------------------------------------------------
@@ -88,6 +102,24 @@ defineProperty(parameterClass, 'name', (self) => parameterOf(self).name);
 defineProperty(parameterClass, 'kind', (self) => KINDS[parameterOf(self).kind]);
 defineProperty(parameterClass, 'default', (self) => parameterOf(self).default);
 defineProperty(parameterClass, 'annotation', (self) => parameterOf(self).annotation);
+method(
+  parameterClass,
+  'replace',
+  'none',
+  0,
+  0,
+  (self, _args, kwargs) => {
+    const parameter = parameterOf(self);
+    const kind = kwargs?.get('kind');
+    return newParameter({
+      name: (kwargs?.get('name') as string | undefined) ?? parameter.name,
+      kind: kind === undefined ? parameter.kind : (kindIndex(kind) as Kind),
+      default: kwargs?.get('default') ?? parameter.default,
+      annotation: kwargs?.get('annotation') ?? parameter.annotation,
+    });
+  },
+  { keywords: ['name', 'kind', 'default', 'annotation'] }
+);
 method(parameterClass, '__str__', 'none', 0, 0, (self) => formatParameter(parameterOf(self)));
 method(parameterClass, '__repr__', 'none', 0, 0, (self) => `<Parameter "${formatParameter(parameterOf(self))}">`);
 parameterClass.construct = (_cls, args, kwargs) => {
@@ -134,9 +166,17 @@ method(
   { keywords: ['parameters', 'return_annotation'] }
 );
 for (const name of ['bind', 'bind_partial']) {
-  defineMethod(signatureClass, name, () => {
-    throw new UnsupportedFeatureError(`inspect.Signature.${name}()`);
-  });
+  defineMethod(signatureClass, name, (self, args, kwargs) =>
+    callValue(
+      bindHelper('_bind'),
+      [self, newTuple(args), newDict([...(kwargs ?? [])])],
+      new Map([['partial', name === 'bind_partial']])
+    )
+  );
+}
+
+function bindHelper(name: string): PyValue {
+  return currentRuntime().importModule('_inspect_bind').dict.get(name) as PyValue;
 }
 signatureClass.construct = (_cls, args, kwargs) => {
   const [parameters, returnAnnotation] = bindArguments(
@@ -222,10 +262,16 @@ function signatureData(value: PyValue): Signature {
   if (value instanceof PyFunction) return functionSignature(value);
   if (value instanceof PyBoundMethod) return withoutFirst(signatureData(value.fn));
   if (value instanceof PyClass) return classSignature(value);
+  if (value instanceof PyOpaque && value.cls === partialClass) {
+    const wrapped = signature((value.data as Partial).fn);
+    return signatureOf(callValue(bindHelper('_signature_get_partial'), [wrapped, value]));
+  }
   if (value instanceof PyInstance && !value.cls.isBuiltin) {
     const call = value.cls.lookup('__call__');
     if (call instanceof PyFunction) return withoutFirst(functionSignature(call));
   }
+  const text = value instanceof PyBuiltinFunction ? builtinTextSignature(value) : undefined;
+  if (text !== undefined) return textSignature(text, (value as PyBuiltinFunction).self !== undefined);
   if (!isCallable(value)) throw typeError(`${pyRepr(value)} is not a callable object`);
   throw new UnsupportedFeatureError('組み込みの関数やクラスの inspect.signature()');
 }
@@ -280,3 +326,49 @@ function functionSignature(fn: PyFunction): Signature {
   });
   return { parameters, returnAnnotation: annotationOf('return') };
 }
+
+/** The `__text_signature__`s CPython gives the methods of `object` and `type`, where `$` marks the parameter binding fills. */
+const TEXT_SIGNATURES: Record<string, string> = {
+  'type.__call__': '$self, /, *args, **kwargs',
+  __init__: '$self, /, *args, **kwargs',
+  __new__: '$type, *args, **kwargs',
+  __init_subclass__: '$type, /',
+  __subclasshook__: '$type, object, /',
+  __delattr__: '$self, name, /',
+  __getattribute__: '$self, name, /',
+  __setattr__: '$self, name, value, /',
+  __format__: '$self, format_spec, /',
+  __reduce_ex__: '$self, protocol, /',
+  ...Object.fromEntries(
+    ['__eq__', '__ne__', '__lt__', '__le__', '__gt__', '__ge__'].map((name) => [name, '$self, value, /'])
+  ),
+  ...Object.fromEntries(
+    ['__dir__', '__getstate__', '__hash__', '__reduce__', '__repr__', '__sizeof__', '__str__'].map((name) => [
+      name,
+      '$self, /',
+    ])
+  ),
+};
+
+function builtinTextSignature(fn: PyBuiltinFunction): string | undefined {
+  const key = fn.ownerName === 'object' ? fn.name : `${fn.ownerName}.${fn.name}`;
+  return Object.hasOwn(TEXT_SIGNATURES, key) ? TEXT_SIGNATURES[key] : undefined;
+}
+
+/** The signature a `__text_signature__` describes, without its `$` parameter when the method is bound. */
+function textSignature(text: string, bound: boolean): Signature {
+  const names = text.split(', ');
+  const slash = names.indexOf('/');
+  const parameters: PyOpaque[] = [];
+  for (const [index, name] of names.entries()) {
+    if (name === '/' || (bound && name.startsWith('$'))) continue;
+    let kind: Kind = index < slash || name.startsWith('$') ? Kind.PositionalOnly : Kind.PositionalOrKeyword;
+    if (name.startsWith('**')) kind = Kind.VarKeyword;
+    else if (name.startsWith('*')) kind = Kind.VarPositional;
+    const bare = name.replace(/^[$*]+/, '');
+    parameters.push(newParameter({ name: bare, kind, default: emptyClass, annotation: emptyClass }));
+  }
+  return { parameters, returnAnnotation: emptyClass };
+}
+
+registerSourceModule('_inspect_bind', INSPECT_BIND_SOURCE);

@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss 478 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import { solidBase } from './classes';
 import {
+  builtinClassAttribute,
   builtinClassesWithDict,
   callGetter,
   callSetter,
@@ -138,7 +139,7 @@ function typeData(cls: PyClass, name: string): PyValue | undefined {
 /** The attributes builtin objects have of their own, outside any class dictionary. */
 // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of builtin object with attributes of its own.
 export function specialAttribute(value: PyValue, name: string): PyValue | undefined {
-  if (name === '__class__') return classOf(value);
+  if (name === '__class__') return builtinClassAttribute(value);
   if (typeof value === 'bigint' || typeof value === 'boolean') return integerAttribute(BigInt(value), name);
   if (typeof value === 'number') return realPartAttribute(value, 0, name);
   if (typeof value === 'string') return undefined;

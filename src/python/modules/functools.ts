@@ -16,9 +16,10 @@ import {
 } from '../objects';
 import { compareOp } from '../operators';
 import { currentRuntime } from '../runtimeContext';
-import { builtinClass, newTuple, None, NotImplemented, typeError } from '../types';
+import { builtinClass, newDict, newTuple, None, NotImplemented, typeError } from '../types';
 import { DONE, type Kwargs, PyBuiltinFunction, PyClass, PyDict, PyOpaque, PyTuple, type PyValue } from '../values';
 import { makeNamedTupleClass } from './collections';
+import { defineProperty } from './numberSupport';
 
 export const partialClass = builtinClass('partial');
 partialClass.module = 'functools';
@@ -34,6 +35,10 @@ partialClass.construct = (_cls, args, kwargs) => {
   if (!isCallable(fn)) throw typeError('the first argument must be callable');
   return new PyOpaque(partialClass, 'partial', { fn, args: rest, kwargs: new Map(kwargs) } satisfies Partial);
 };
+const partialOf = (self: PyValue): Partial => (self as PyOpaque).data as Partial;
+defineProperty(partialClass, 'func', (self) => partialOf(self).fn);
+defineProperty(partialClass, 'args', (self) => newTuple(partialOf(self).args));
+defineProperty(partialClass, 'keywords', (self) => newDict(partialOf(self).kwargs));
 partialClass.dict.set(
   '__call__',
   new PyBuiltinFunction(

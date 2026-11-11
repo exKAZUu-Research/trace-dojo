@@ -1,9 +1,10 @@
-// code-gauge-allow-file fileNcss 413 -- The builtins module keeps every builtin function together.
+// code-gauge-allow-file fileNcss 414 -- The builtins module keeps every builtin function together.
 import { bytearrayClass, bytesClass, memoryviewClass } from './bytesValues';
 import { complexAbs } from './complexNumbers';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
 import { aiter, anext } from './coroutines';
 import { builtin } from './define';
+import { claimedClass } from './descriptors';
 import { compile, COMPILE_KEYWORDS, evaluate, execute } from './dynamicCode';
 import { enumMembersOf } from './enums';
 import { pyHash } from './hashing';
@@ -469,7 +470,9 @@ export function isInstance(value: PyValue, classInfo: PyValue, name = 'isinstanc
     const cls = classOf(value);
     if (cls === classInfo) return true;
     const check = customCheck(classInfo, '__instancecheck__');
-    return check === undefined ? cls.isSubclassOf(classInfo) : isTruthy(callValue(check, [value]));
+    return check === undefined
+      ? cls.isSubclassOf(classInfo) || (claimedClass(value)?.isSubclassOf(classInfo) ?? false)
+      : isTruthy(callValue(check, [value]));
   }
   if (classInfo instanceof PyTuple) return classInfo.items.some((item) => isInstance(value, item, name));
   if (classInfo instanceof PyOpaque && Array.isArray(classInfo.data)) {

@@ -272,7 +272,9 @@ export class Evaluator extends AsyncEvaluator {
       // As in CPython, a name a package lacks may be a submodule, which importing it adds to the package.
       const submodule = `${statement.module}.${name}`;
       const value =
-        module.dict.get(name) ?? (isRegisteredModule(submodule) ? this.runtime.importModule(submodule) : undefined);
+        module.dict.get(name) ??
+        (module.dict.has('__getattr__') ? getAttributeOrUndefined(module, name) : undefined) ??
+        (isRegisteredModule(submodule) ? this.runtime.importModule(submodule) : undefined);
       if (value === undefined) {
         throw pyError('ImportError', `cannot import name '${name}' from '${statement.module}' (unknown location)`);
       }
@@ -438,7 +440,6 @@ export class Evaluator extends AsyncEvaluator {
   }
 
   // code-gauge-allow functionCognitiveComplexity 18 -- Follows the protocol of the for loop, closing a generator it leaves.
-  // code-gauge-allow functionNcss 31 -- Follows the protocol of the for loop, closing a generator it leaves.
   // code-gauge-allow duplicateLines 29 -- Mirrors the async for loop, whose items come from an awaited `__anext__`.
   private *forStatement(statement: Extract<Statement, { kind: 'for' }>, frame: Frame): Execution {
     const { runtime } = this;

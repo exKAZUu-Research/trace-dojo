@@ -1,9 +1,9 @@
 // The parts of attribute access that a program's own classes customize: descriptors, instance dictionaries outside
 // PyInstance, and `__getattribute__`.
-import { bindValue, callValue, lookupSpecial } from './objects';
+import { bindValue, callValue, getAttribute, lookupSpecial } from './objects';
 import { instancesHaveDict } from './slots';
 import { classOf, objectClass, pyError } from './types';
-import { type PyClass, PyError, PyFunction, PyInstance, PyObject, type PyValue } from './values';
+import { PyClass, PyError, PyFunction, PyInstance, PyObject, type PyValue } from './values';
 
 /** The `__get__` of an attribute whose class the program defined, or undefined for any other attribute. */
 export function descriptorGetter(attribute: PyValue): PyValue | undefined {
@@ -15,6 +15,19 @@ export function descriptorGetter(attribute: PyValue): PyValue | undefined {
 export function isDataDescriptor(attribute: PyValue): boolean {
   if (!(attribute instanceof PyObject) || attribute.cls.isBuiltin) return false;
   return attribute.cls.lookup('__set__') !== undefined || attribute.cls.lookup('__delete__') !== undefined;
+}
+
+/** `obj.__class__` as builtin objects answer it, or undefined when the program's class defines `__class__` itself. */
+export function builtinClassAttribute(value: PyValue): PyClass | undefined {
+  const defined = value instanceof PyInstance && !value.cls.isBuiltin && value.cls.lookup('__class__') !== undefined;
+  return defined ? undefined : classOf(value);
+}
+
+/** The class an instance's own `__class__` attribute claims, as `unittest.mock`'s spec'd mocks do, when not its type. */
+export function claimedClass(value: PyValue): PyClass | undefined {
+  if (builtinClassAttribute(value) !== undefined) return undefined;
+  const claimed = getAttribute(value, '__class__');
+  return claimed instanceof PyClass && claimed !== classOf(value) ? claimed : undefined;
 }
 
 /** Calls a descriptor's `__get__` for an instance, or for a class when `instance` is None. */

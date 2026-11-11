@@ -7,12 +7,13 @@ import {
   isCoroutineFunction,
 } from '../coroutines';
 import { builtin } from '../define';
+import { ownDict } from '../descriptors';
 import { registerModule } from '../modules';
 import { callValue, getAttribute, getAttributeOrUndefined, isTruthy } from '../objects';
 import type { Runtime } from '../runtime';
 import { currentRuntime } from '../runtimeContext';
 import { IS_ABSTRACT, typeFlags } from '../typeFlags';
-import { builtinFunctionClass, classOf, generatorClass, None, typeError, valueError } from '../types';
+import { builtinFunctionClass, classOf, generatorClass, None, pyError, typeError, valueError } from '../types';
 import { isUnavailable } from '../unavailableValues';
 import { UnsupportedFeatureError } from '../unsupported';
 import { PyBoundMethod, PyBuiltinFunction, PyClass, PyFunction, PyGenerator, PyModule, type PyValue } from '../values';
@@ -36,10 +37,32 @@ const PREDICATES: [string, (value: PyValue) => boolean][] = [
   // ABCMeta records `__abstractmethods__` once it creates a class, which sets the class's abstract flag.
   ['isabstract', (value) => value instanceof PyClass && (typeFlags(value) & IS_ABSTRACT) !== 0],
   [
+    'isdatadescriptor',
+    (value) =>
+      !(value instanceof PyClass || value instanceof PyBoundMethod || value instanceof PyFunction) &&
+      ['__set__', '__delete__'].some((name) => getAttributeOrUndefined(classOf(value), name) !== undefined),
+  ],
+  [
     'isroutine',
     (value) => value instanceof PyBuiltinFunction || value instanceof PyFunction || value instanceof PyBoundMethod,
   ],
 ];
+
+/** The flags of code objects, which inspect names although this grader has no code objects. */
+const CODE_FLAGS = {
+  CO_ASYNC_GENERATOR: 512,
+  CO_COROUTINE: 128,
+  CO_GENERATOR: 32,
+  CO_HAS_DOCSTRING: 67_108_864,
+  CO_ITERABLE_COROUTINE: 256,
+  CO_METHOD: 134_217_728,
+  CO_NESTED: 16,
+  CO_NEWLOCALS: 2,
+  CO_NOFREE: 64,
+  CO_OPTIMIZED: 1,
+  CO_VARARGS: 4,
+  CO_VARKEYWORDS: 8,
+};
 
 registerModule(
   'inspect',
@@ -53,6 +76,7 @@ registerModule(
         'signature',
         builtin('signature', 'takes', 1, 1, ([value]) => signature(value), { keywords: ['follow_wrapped'] }),
       ],
+      ...Object.entries(CODE_FLAGS).map(([name, flag]): [string, PyValue] => [name, BigInt(flag)]),
       ['Signature', signatureClass],
       ['Parameter', parameterClass],
       ['_empty', emptyClass],
@@ -62,6 +86,10 @@ registerModule(
       ['cleandoc', builtin('cleandoc', 'one', 1, 1, ([doc]) => cleanDoc(doc))],
       ['getmro', builtin('getmro', 'one', 1, 1, ([cls]) => getAttribute(cls, '__mro__'))],
       ['getmodule', builtin('getmodule', 'takes', 1, 2, ([value]) => getModule(runtime, value))],
+      [
+        'getattr_static',
+        builtin('getattr_static', 'takes', 2, 3, ([value, name, fallback]) => getattrStatic(value, name, fallback)),
+      ],
       [
         'unwrap',
         builtin('unwrap', 'takes', 1, 1, ([value], kwargs) => unwrap(value, kwargs?.get('stop')), {
@@ -85,10 +113,8 @@ registerModule(
       ['getgeneratorstate', 'ジェネレータの内部状態'],
       ['getgeneratorlocals', 'ジェネレータの内部状態'],
       ['getclosurevars', '関数の内部状態'],
-      ['getattr_static', 'inspect.getattr_static()'],
       ['getfullargspec', 'inspect.getfullargspec()'],
       ['getcallargs', 'inspect.getcallargs()'],
-      ['isdatadescriptor', 'inspect.isdatadescriptor()'],
       ['getmembers_static', 'inspect.getmembers_static()'],
     ].map(([name, feature]) => [name, `inspect.${name}()（${feature}）`])
   )
@@ -104,6 +130,24 @@ function getModule(runtime: Runtime, value: PyValue): PyValue {
   if (name === undefined) return None;
   const table = getAttribute(runtime.importModule('sys'), 'modules');
   return callValue(getAttribute(table, 'get'), [name]);
+}
+
+/** `inspect.getattr_static`: an attribute found without running descriptors, `__getattr__`, or `__getattribute__`. */
+function getattrStatic(value: PyValue, attribute: PyValue, fallback: PyValue | undefined): PyValue {
+  if (typeof attribute !== 'string') throw typeError('attribute name must be string');
+  const isClass = value instanceof PyClass;
+  const klass = isClass ? value : classOf(value);
+  const own = isClass ? undefined : ownDict(value)?.get(attribute);
+  const found = klass.lookup(attribute);
+  if (own !== undefined && found !== undefined && isDataDescriptorClass(classOf(found))) return found;
+  const result = own ?? found ?? (isClass ? classOf(klass).lookup(attribute) : undefined);
+  if (result !== undefined) return result;
+  if (fallback !== undefined) return fallback;
+  throw pyError('AttributeError', attribute);
+}
+
+function isDataDescriptorClass(cls: PyClass): boolean {
+  return cls.lookup('__get__') !== undefined && (cls.lookup('__set__') ?? cls.lookup('__delete__')) !== undefined;
 }
 
 /** `inspect.unwrap`: follows the chain of `__wrapped__` attributes, as decorators made with `functools.wraps` leave. */

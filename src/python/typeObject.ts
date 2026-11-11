@@ -209,6 +209,9 @@ method(
 method(functionClass, '__get__', 'expected', 1, 2, (self, [instance]) =>
   instance === None ? self : new PyBoundMethod(methodClass, instance, self)
 );
+for (const cls of [functionClass, methodClass, builtinFunctionClass]) {
+  defineMethod(cls, '__call__', (self, args, kwargs) => callValue(self, args, kwargs));
+}
 method(methodClass, '__repr__', 'none', 0, 0, (self) => {
   const bound = self as PyBoundMethod;
   const name = bound.fn instanceof PyFunction ? bound.fn.qualifiedName : pyStr(getAttribute(bound.fn, '__qualname__'));
@@ -299,7 +302,23 @@ method(propertyClass, '__get__', 'expected', 1, 2, (self, [instance]) => {
   if (instance === None) return self;
   return callValue(property.fn, [instance]);
 });
+method(propertyClass, '__set__', 'expected', 2, 2, (self, [instance, value]) =>
+  callAccessor(self as PyDescriptor, 'setter', [instance, value])
+);
+method(propertyClass, '__delete__', 'one', 1, 1, (self, [instance]) =>
+  callAccessor(self as PyDescriptor, 'deleter', [instance])
+);
 method(propertyClass, '__repr__', 'none', 0, 0, (self) => `<property object at ${addressOf(self as PyObject)}>`);
+
+function callAccessor(property: PyDescriptor, kind: 'setter' | 'deleter', args: PyValue[]): PyValue {
+  const accessor = property[kind];
+  if (accessor === undefined || accessor === None) {
+    const name = property.fn instanceof PyFunction ? `'${property.fn.name}' ` : '';
+    throw pyError('AttributeError', `property ${name}of '${typeName(args[0])}' object has no ${kind}`);
+  }
+  callValue(accessor, args);
+  return None;
+}
 
 function copyProperty(self: PyValue, change: { fn?: PyValue; setter?: PyValue; deleter?: PyValue }): PyValue {
   const property = self as PyDescriptor;
