@@ -120,6 +120,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'operator',
   'optparse',
   'pickle',
+  'pickletools',
   'os',
   'os.path',
   'pathlib',

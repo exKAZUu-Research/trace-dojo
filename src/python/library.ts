@@ -134,6 +134,7 @@ import './modules/statNative';
 import './modules/datetimePickle';
 import './modules/stdlibPickle';
 import './modules/pickle';
+import './modules/pickletools';
 import './modules/marshal';
 import './modules/gzip';
 import './modules/doctest';
