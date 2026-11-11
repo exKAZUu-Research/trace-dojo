@@ -78,6 +78,7 @@ import {
 import { UnsupportedFeatureError } from './unsupported';
 import {
   DONE,
+  type Kwargs,
   PyBoundMethod,
   PyBuiltinFunction,
   PyClass,
@@ -254,7 +255,13 @@ function typeAttributeValue(instance: PyValue, name: string): PyValue {
     return None;
   }
   // As in CPython, only a class's own `__abstractmethods__` counts.
-  const value = name === '__abstractmethods__' ? instance.dict.get(name) : typeData(instance, name);
+  // `type.__dict__` holds the descriptor of `__abstractmethods__` itself, which is no value for type.
+  const value =
+    name === '__abstractmethods__'
+      ? instance === typeClass
+        ? undefined
+        : instance.dict.get(name)
+      : typeData(instance, name);
   if (value !== undefined) return value;
   if (name === '__abstractmethods__') throw pyError('AttributeError', name);
   throw pyError('AttributeError', `type object '${instance.name}' has no attribute '${name}'`);
@@ -471,7 +478,11 @@ iteratorClassSetup.push(defineIteratorClass);
 
 // Descriptors -------------------------------------------------------------------------------------------------------
 
-propertyClass.construct = (cls, args, kwargs) => {
+propertyClass.construct = (cls, args, kwargs) => newProperty(cls, args, kwargs);
+// A program's subclass creates its instances through `__new__`, then initializes them with its own `__init__`.
+defineNew(propertyClass, (cls, args, kwargs) => newProperty(cls, args, kwargs));
+
+function newProperty(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyDescriptor {
   checkArgs(
     { qualified: 'property', min: 0, max: 4, style: 'takes', keywords: ['fget', 'fset', 'fdel', 'doc'] },
     args,
@@ -479,7 +490,24 @@ propertyClass.construct = (cls, args, kwargs) => {
   );
   const get = (index: number, name: string): PyValue => argument(args, kwargs, index, name) ?? None;
   return new PyDescriptor(cls, get(0, 'fget'), get(1, 'fset'), get(2, 'fdel'), get(3, 'doc'));
-};
+}
+// The constructors take the values, so that `__init__`, which a program's subclass calls through super(), checks them.
+method(
+  propertyClass,
+  '__init__',
+  'takes',
+  0,
+  Number.POSITIVE_INFINITY,
+  (_self, args, kwargs) => {
+    checkArgs(
+      { qualified: 'property', min: 0, max: 4, style: 'takes', keywords: ['fget', 'fset', 'fdel', 'doc'] },
+      args,
+      kwargs
+    );
+    return None;
+  },
+  { keywords: ['fget', 'fset', 'fdel', 'doc'] }
+);
 method(propertyClass, 'getter', 'one', 1, 1, (self, [fn]) => copyProperty(self, { fn }));
 method(propertyClass, 'setter', 'one', 1, 1, (self, [fn]) => copyProperty(self, { setter: fn }));
 method(propertyClass, 'deleter', 'one', 1, 1, (self, [fn]) => copyProperty(self, { deleter: fn }));
@@ -509,7 +537,7 @@ function callAccessor(property: PyDescriptor, kind: 'setter' | 'deleter', args: 
 function copyProperty(self: PyValue, change: { fn?: PyValue; setter?: PyValue; deleter?: PyValue }): PyValue {
   const property = self as PyDescriptor;
   return new PyDescriptor(
-    propertyClass,
+    property.cls,
     change.fn ?? property.fn,
     change.setter ?? property.setter,
     change.deleter ?? property.deleter,
@@ -522,6 +550,11 @@ for (const cls of [staticmethodClass, classmethodClass]) {
     checkArgs({ qualified: cls.name, min: 1, max: 1, style: 'expected' }, args, kwargs);
     return new PyDescriptor(descriptorClass, args[0]);
   };
+  defineNew(cls, (descriptorClass, args, kwargs) => {
+    checkArgs({ qualified: cls.name, min: 1, max: 1, style: 'expected' }, args, kwargs);
+    return new PyDescriptor(descriptorClass, args[0]);
+  });
+  method(cls, '__init__', 'expected', 1, 1, () => None);
   method(cls, '__repr__', 'none', 0, 0, (self) => `<${cls.name}(${pyRepr((self as PyDescriptor).fn)})>`);
   method(cls, '__get__', 'expected', 1, 2, (self, [instance, owner]) => {
     const descriptor = self as PyDescriptor;

@@ -1,6 +1,7 @@
 // `type.__flags__`, whose heap-type bit copyreg reads to tell C types from classes; the other bits follow CPython 3.14's
 // values for the builtin types and the classes programs define.
-import { baseExceptionClass } from './types';
+import { sharedPythonClasses } from './annotations';
+import { baseExceptionClass, typeClass } from './types';
 import { type PyClass, PySet } from './values';
 
 const HEAP_BASE = 0x56_00;
@@ -46,6 +47,7 @@ const BUILTIN_FLAGS: Record<string, number> = {
 };
 
 export function typeFlags(cls: PyClass): number {
+  if (sharedPythonClasses.has(cls)) return sharedClassFlags(cls);
   if (cls.isBuiltin) return builtinFlags(cls);
   const base = cls.mro.find((each) => each.isBuiltin) ?? cls;
   const baseFlags = builtinFlags(base);
@@ -55,6 +57,13 @@ export function typeFlags(cls: PyClass): number {
   const abstract = cls.dict.get('__abstractmethods__');
   if (abstract instanceof PySet && abstract.table.size > 0) flags |= IS_ABSTRACT;
   return flags >>> 0;
+}
+
+/** The flags of the classes CPython writes in Python that runs here share: abc.ABCMeta and the slotted ABCs. */
+function sharedClassFlags(cls: PyClass): number {
+  if (cls.mro.includes(typeClass)) return 0x80_80_5e_00;
+  const abstract = cls.dict.get('__abstractmethods__');
+  return (abstract instanceof PySet && abstract.table.size > 0 ? HEAP_BASE | IS_ABSTRACT : HEAP_BASE) >>> 0;
 }
 
 function builtinFlags(cls: PyClass): number {

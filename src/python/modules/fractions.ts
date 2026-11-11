@@ -1,3 +1,4 @@
+import { sharedPythonClasses } from '../annotations';
 import type { BinaryOperator } from '../ast';
 import { pyRepr } from '../conversions';
 import { hashInt } from '../hashing';
@@ -21,6 +22,7 @@ import {
   valueError,
 } from '../types';
 import { type Kwargs, PyClass, PyComplex, PyNumberInstance, PyTuple, type PyValue } from '../values';
+import { noteSubclass } from './abc';
 import { newDecimal, PyDecimal } from './decimal';
 import { fromInteger } from './decimalArithmetic';
 import { formatFractionValue } from './fractionFormat';
@@ -48,6 +50,8 @@ export const fractionClass = new PyClass('Fraction', [rationalClass], abcMetaCla
 fractionClass.mro = [fractionClass, ...rationalClass.mro];
 fractionClass.module = 'fractions';
 fractionClass.isBaseType = true;
+// CPython writes Fraction in Python, as a class without annotations that programs could change.
+sharedPythonClasses.add(fractionClass);
 
 const NEW_SIGNATURE = { qualified: 'Fraction.__new__', params: ['numerator', 'denominator'], required: 0 };
 
@@ -482,4 +486,7 @@ pythonMethod(
   'class'
 );
 
-registerModule('fractions', () => new Map<string, PyValue>([['Fraction', fractionClass]]));
+registerModule('fractions', (runtime) => {
+  noteSubclass(runtime, rationalClass, fractionClass);
+  return new Map<string, PyValue>([['Fraction', fractionClass]]);
+});

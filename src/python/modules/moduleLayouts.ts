@@ -5,6 +5,7 @@ import type { ModuleLayout } from './moduleLayout';
 /** How CPython provides each module this grader implements, in a process that imports only that module. */
 export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
   __future__: { kind: 'source' },
+  _abc: { kind: 'builtin' },
   _bz2: { kind: 'builtin', doc: false },
   _codecs: { kind: 'builtin', doc: false },
   _compat_pickle: { kind: 'source', doc: false },

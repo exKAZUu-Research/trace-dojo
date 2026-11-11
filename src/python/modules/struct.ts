@@ -1,6 +1,7 @@
-import { bytesLikeData, newBytes, PyBytes } from '../bytesValues';
+import { bytesLikeData, newBytes, PyBytes, PyMemoryView } from '../bytesValues';
 import { addressOf, pyRepr } from '../conversions';
 import { builtin, method } from '../define';
+import { viewOf } from '../memoryview';
 import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
@@ -250,10 +251,8 @@ function packInto(
 ): PyValue {
   if (buffer === undefined) throw structError('pack_into expected buffer argument');
   if (offsetValue === undefined) throw structError('pack_into expected offset argument');
-  if (!(buffer instanceof PyBytes) || !buffer.isMutable) {
-    throw typeError(`argument must be read-write bytes-like object, not ${typeName(buffer)}`);
-  }
-  const length = buffer.length;
+  const target = writableBuffer(buffer);
+  const length = target.length;
   let offset = Number(toIndex(offsetValue));
   if (offset < 0) {
     if (offset + layout.size > 0) throw structError(`no space to pack ${layout.size} bytes at offset ${offset}`);
@@ -267,8 +266,22 @@ function packInto(
   }
   const packed = new Uint8Array(layout.size);
   pack(layout, values, packed, 0);
-  buffer.data.set(packed, offset);
+  target.data.set(packed, target.start + offset);
   return None;
+}
+
+/** The memory a writable buffer such as a bytearray, a memoryview, or an array exposes, from `start` on. */
+function writableBuffer(buffer: PyValue): { data: Uint8Array; start: number; length: number } {
+  if (buffer instanceof PyBytes && buffer.isMutable) return { data: buffer.data, start: 0, length: buffer.length };
+  const exporter =
+    buffer instanceof PyMemoryView ||
+    (typeof buffer === 'object' && !buffer.cls.isBuiltin && lookupSpecial(buffer, '__buffer__') !== undefined);
+  const view = exporter ? viewOf(buffer) : undefined;
+  if (!view || view.readonly || view.stride !== view.itemsize || view.rowStride !== undefined) {
+    throw typeError(`argument must be read-write bytes-like object, not ${typeName(buffer)}`);
+  }
+  view.checkReleased();
+  return { data: view.source.data, start: view.offset, length: view.nbytes };
 }
 
 function packBytes(layout: Layout, values: PyValue[]): PyValue {

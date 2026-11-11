@@ -1,123 +1,76 @@
-import { newComplex } from '../complexNumbers';
+// The `numbers` module. Its ABCs are classes every run shares, since Fraction, which this grader writes natively,
+// derives from Rational; their namespaces, methods included, are the ones CPython's `Lib/numbers.py` gives them, from
+// one run of that code, and each run registers the builtin types with them when it imports the module, as that code
+// does.
+import { sharedPythonClasses } from '../annotations';
 import { registerModule } from '../modules';
-import { getAttribute, isTruthy } from '../objects';
-import { binaryOp, compareOp, unaryOp } from '../operators';
-import { toFloat, toInt } from '../typeNumbers';
-import { complexClass, floatClass, intClass, newTuple, None, objectClass, pyError, typeError } from '../types';
-import { type Kwargs, PyBuiltinFunction, PyClass, PyDescriptor, PyInstance, type PyValue } from '../values';
-import { abcMetaClass, abstractPlaceholders, registerVirtual } from './abc';
-import { defineProperty, defineSlot } from './numberSupport';
+import type { Runtime } from '../runtime';
+import { sharedNamespaceModules } from '../sharedNamespaces';
+import { runModuleSource } from '../sourceModules';
+import { complexClass, floatClass, intClass, objectClass } from '../types';
+import { PyClass, type PyValue } from '../values';
+import { abcMetaClass, abcRegister, adoptNamespace, noteSubclass, registerVirtual, sharedAbcValue } from './abc';
+import { NUMBERS_SOURCE } from './abcSource';
 
 export { abcMetaClass, registerVirtual };
 
-const abstractNames = new Map<PyClass, string[]>();
-
-function abstractClass(name: string, base: PyClass, abstracts: string): PyClass {
+function abstractClass(name: string, base: PyClass): PyClass {
   const cls = new PyClass(name, [base], abcMetaClass);
   cls.mro = [cls, ...base.mro];
   cls.module = 'numbers';
   cls.isBaseType = true;
-  cls.construct = constructAbstract;
-  const names = abstracts.split(' ').filter(Boolean);
-  abstractNames.set(cls, names);
-  for (const entry of names) defineAbstract(cls, entry);
+  sharedPythonClasses.add(cls);
   return cls;
 }
 
-/** Defines an abstract method: `name` raises NotImplementedError, `name@` is a property, and `name?` returns None. */
-function defineAbstract(cls: PyClass, entry: string): void {
-  const name = entry.replace(/[@?]$/, '');
-  const run = (): PyValue => {
-    if (entry.endsWith('?')) return None;
-    throw pyError('NotImplementedError');
-  };
-  if (entry.endsWith('@')) {
-    defineProperty(cls, name, run);
-  } else {
-    defineSlot(cls, name, run);
-  }
-  const placeholder = cls.dict.get(name) as PyValue;
-  abstractPlaceholders.add(placeholder instanceof PyDescriptor ? placeholder.fn : placeholder);
-  abstractPlaceholders.add(placeholder);
-}
+export const numberClass = abstractClass('Number', objectClass);
+export const complexAbstractClass = abstractClass('Complex', numberClass);
+export const realClass = abstractClass('Real', complexAbstractClass);
+export const rationalClass = abstractClass('Rational', realClass);
+export const integralClass = abstractClass('Integral', rationalClass);
 
-/** Creates an instance of an abstract base class or its subclass, refusing one with abstract methods left. */
-function constructAbstract(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyValue {
-  const missing = [
-    ...new Set(cls.mro.flatMap((base) => abstractNames.get(base) ?? []).map((name) => name.replace(/[@?]$/, ''))),
-  ]
-    .filter((name) => abstractPlaceholders.has(cls.lookup(name) as PyValue))
-    .toSorted();
-  if (missing.length > 0) {
-    const plural = missing.length === 1 ? 'method' : 'methods';
-    throw typeError(
-      `Can't instantiate abstract class ${cls.name} without an implementation for abstract ${plural} ${missing.map((name) => `'${name}'`).join(', ')}`
-    );
-  }
-  const hasArguments = args.length > 0 || (kwargs !== undefined && kwargs.size > 0);
-  const init = cls.lookup('__init__');
-  if (hasArguments && init instanceof PyBuiltinFunction && init === objectClass.dict.get('__init__')) {
-    throw typeError(`${cls.qualifiedName}() takes no arguments`);
-  }
-  return new PyInstance(cls);
-}
+const CLASSES = [numberClass, complexAbstractClass, realClass, rationalClass, integralClass];
 
-export const numberClass = abstractClass('Number', objectClass, '');
-numberClass.dict.set('__hash__', None);
-
-export const complexAbstractClass = abstractClass(
-  'Complex',
-  numberClass,
-  '__complex__? real@ imag@ __add__ __radd__ __neg__ __pos__ __mul__ __rmul__ __truediv__ __rtruediv__ __pow__ __rpow__ __abs__ conjugate __eq__'
-);
-defineSlot(complexAbstractClass, '__bool__', (self) => isTruthy(compareOp('!=', self, 0n)));
-defineSlot(complexAbstractClass, '__sub__', (self, [other]) => binaryOp('+', self, unaryOp('-', other)));
-defineSlot(complexAbstractClass, '__rsub__', (self, [other]) => binaryOp('+', unaryOp('-', self), other));
-
-export const realClass = abstractClass(
-  'Real',
-  complexAbstractClass,
-  '__float__ __trunc__ __floor__ __ceil__ __round__ __floordiv__ __rfloordiv__ __mod__ __rmod__ __lt__ __le__'
-);
-defineSlot(realClass, '__divmod__', (self, [other]) =>
-  newTuple([binaryOp('//', self, other), binaryOp('%', self, other)])
-);
-defineSlot(realClass, '__rdivmod__', (self, [other]) =>
-  newTuple([binaryOp('//', other, self), binaryOp('%', other, self)])
-);
-defineSlot(realClass, '__complex__', (self) => newComplex(toFloat(self), 0));
-defineProperty(realClass, 'real', (self) => unaryOp('+', self));
-defineProperty(realClass, 'imag', () => 0n);
-defineSlot(realClass, 'conjugate', (self) => unaryOp('+', self));
-
-export const rationalClass = abstractClass('Rational', realClass, 'numerator@ denominator@');
-defineSlot(rationalClass, '__float__', (self) =>
-  binaryOp('/', toInt(getAttribute(self, 'numerator')), toInt(getAttribute(self, 'denominator')))
-);
-
-export const integralClass = abstractClass(
-  'Integral',
-  rationalClass,
-  '__int__ __pow__ __lshift__ __rlshift__ __rshift__ __rrshift__ __and__ __rand__ __xor__ __rxor__ __or__ __ror__ __invert__'
-);
-defineSlot(integralClass, '__index__', (self) => toInt(self));
-defineSlot(integralClass, '__float__', (self) => toFloat(toInt(self)));
-defineProperty(integralClass, 'numerator', (self) => unaryOp('+', self));
-defineProperty(integralClass, 'denominator', () => 1n);
-
+// Native code asks these without a run, as CPython's registrations make them hold.
 registerVirtual(complexAbstractClass, complexClass);
 registerVirtual(realClass, floatClass);
 registerVirtual(integralClass, intClass);
 
+/** The namespace where numbers.py ran for the methods of the ABCs, whose frames, as a library's, stay out of traces. */
+const sharedNamespace = new Map<string, PyValue>([['__name__', 'numbers']]);
+sharedNamespaceModules.set(sharedNamespace, 'numbers');
+let shared = false;
+
+function shareClasses(runtime: Runtime): void {
+  runtime.addLibraryNamespace(sharedNamespace);
+  if (shared) return;
+  shared = true;
+  runModuleSource(runtime, sharedNamespace, NUMBERS_SOURCE);
+  for (const cls of CLASSES) {
+    adoptNamespace(cls, sharedNamespace.get(cls.name) as PyClass);
+    sharedNamespace.set(cls.name, cls);
+  }
+  // The decorator of the run that ran the code gives way to the shared one, which no run owns.
+  sharedNamespace.set('abstractmethod', sharedAbcValue('abstractmethod'));
+}
+
 registerModule('numbers', (runtime) => {
+  shareClasses(runtime);
+  // As numbers.py creates the ABCs and registers the builtin types, each with the ABCs created before it.
+  noteSubclass(runtime, objectClass, numberClass);
+  noteSubclass(runtime, numberClass, complexAbstractClass);
+  abcRegister(complexAbstractClass, complexClass, true);
+  noteSubclass(runtime, complexAbstractClass, realClass);
+  abcRegister(realClass, floatClass, true);
+  noteSubclass(runtime, realClass, rationalClass);
+  noteSubclass(runtime, rationalClass, integralClass);
+  abcRegister(integralClass, intClass, true);
   const abc = runtime.importModule('abc');
   return new Map<string, PyValue>([
+    ['__doc__', sharedNamespace.get('__doc__') as PyValue],
     ['ABCMeta', abcMetaClass],
     ['abstractmethod', abc.dict.get('abstractmethod') as PyValue],
-    ['Number', numberClass],
-    ['Complex', complexAbstractClass],
-    ['Real', realClass],
-    ['Rational', rationalClass],
-    ['Integral', integralClass],
+    ['__all__', runtime.listOf(CLASSES.map((cls) => cls.name))],
+    ...CLASSES.map((cls): [string, PyValue] => [cls.name, cls]),
   ]);
 });

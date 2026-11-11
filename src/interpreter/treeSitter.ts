@@ -31,14 +31,15 @@ export function parseSource<T>(
   parser: Parser,
   source: string,
   missingTokenNames: Record<string, string>,
-  convert: (root: Node) => T
+  convert: (root: Node) => T,
+  { maxNestingDepth = MAX_NESTING_DEPTH, tooDeepMessage = '括弧やブロックなどの入れ子が深すぎます。' } = {}
 ): T {
   const tree = parser.parse(source);
   if (!tree) throw new Error('The parser returned no tree');
   try {
-    const tooDeep = findTooDeepNode(tree.rootNode);
+    const tooDeep = findTooDeepNode(tree.rootNode, maxNestingDepth);
     if (tooDeep) {
-      throw new CompileError([{ row: tooDeep.startPosition.row, message: '括弧やブロックなどの入れ子が深すぎます。' }]);
+      throw new CompileError([{ row: tooDeep.startPosition.row, message: tooDeepMessage }]);
     }
     const syntaxErrors = collectSyntaxErrors(tree.rootNode, missingTokenNames);
     if (syntaxErrors.length > 0) throw new CompileError(syntaxErrors);
@@ -51,11 +52,12 @@ export function parseSource<T>(
 /** Converting, compiling, and running recurse into nested constructs, so deeper nesting would exhaust the stack. */
 const MAX_NESTING_DEPTH = 300;
 
-function findTooDeepNode(root: Node): Node | undefined {
+function findTooDeepNode(root: Node, maxDepth: number): Node | undefined {
+  if (maxDepth === Number.POSITIVE_INFINITY) return;
   const cursor = root.walk();
   try {
     for (;;) {
-      if (cursor.currentDepth > MAX_NESTING_DEPTH) return cursor.currentNode;
+      if (cursor.currentDepth > maxDepth) return cursor.currentNode;
       if (cursor.gotoFirstChild()) continue;
       while (!cursor.gotoNextSibling()) {
         if (!cursor.gotoParent()) return;

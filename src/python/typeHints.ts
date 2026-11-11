@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 517 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 520 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from './conversions';
 import { method } from './define';
 import { pyHash } from './hashing';
@@ -7,6 +7,7 @@ import { defineProperty } from './modules/numberSupport';
 import {
   attributeError,
   callValue,
+  getAttribute,
   getAttributeOrUndefined,
   getIterator,
   isTruthy,
@@ -84,7 +85,7 @@ unionClass.typeName = 'typing.Union';
 export const typingAliasClass = typingClass('_GenericAlias');
 const callableAliasClass = typingClass('_CallableGenericAlias', typingAliasClass);
 const literalAliasClass = typingClass('_LiteralGenericAlias', typingAliasClass);
-const annotatedAliasClass = typingClass('_AnnotatedAlias', typingAliasClass);
+export const annotatedAliasClass = typingClass('_AnnotatedAlias', typingAliasClass);
 export const specialAliasClass = typingClass('_SpecialGenericAlias');
 const tupleTypeClass = typingClass('_TupleType', specialAliasClass);
 const callableTypeClass = typingClass('_CallableType', specialAliasClass);
@@ -92,8 +93,6 @@ export const specialFormClass = typingClass('_SpecialForm');
 const typedCacheSpecialFormClass = typingClass('_TypedCacheSpecialForm', specialFormClass);
 const anyMetaClass = typingClass('_AnyMeta', typeClass);
 anyMetaClass.isBaseType = true;
-export const forwardRefClass = builtinClass('ForwardRef');
-forwardRefClass.module = 'annotationlib';
 
 type AttributeHook = (self: PyOpaque, name: string) => PyValue | undefined;
 type ClassCheck = (self: PyOpaque, cls: PyClass, caller: string) => boolean;
@@ -226,9 +225,15 @@ function convertNone(value: PyValue): PyValue {
 }
 
 /** `typing._type_convert`: None is NoneType and a string is a forward reference. */
-function typeConvert(value: PyValue): PyValue {
+export function typeConvert(value: PyValue): PyValue {
   if (value === None) return noneClass;
-  if (typeof value === 'string') return new PyOpaque(forwardRefClass, value);
+  if (typeof value === 'string') {
+    const forwardRef = currentRuntime().importModule('annotationlib').dict.get('ForwardRef') as PyValue;
+    const created = callValue(forwardRef, [value]);
+    // As CPython's typing, which compiles the reference at once so that a syntax error shows here.
+    getAttribute(created, '__forward_code__');
+    return created;
+  }
   return value;
 }
 
@@ -536,6 +541,14 @@ for (const cls of [typingAliasClass, callableAliasClass, literalAliasClass, anno
   });
   method(cls, '__or__', 'one', 1, 1, (self, [other]) => unionOf([self, other]));
   method(cls, '__ror__', 'one', 1, 1, (self, [other]) => unionOf([other, self]));
+  // The same alias with other arguments; an Annotated alias keeps its metadata.
+  method(cls, 'copy_with', 'one', 1, 1, (self, [params]) => {
+    const alias = aliasOf(self);
+    const items = toArray(params);
+    const { cls } = self as PyOpaque;
+    const args = cls === annotatedAliasClass ? [items[0], ...alias.args.slice(1)] : items;
+    return new PyOpaque(cls, '', { ...alias, args } satisfies AliasData);
+  });
   method(cls, '__eq__', 'one', 1, 1, (self, [other]) => aliasEquals(self, other));
   method(cls, '__hash__', 'none', 0, 0, (self) =>
     pyHash(newTuple([aliasOf(self).origin, newTuple(aliasOf(self).args)]))
@@ -738,13 +751,6 @@ export function unionGetItem(key: PyValue): PyValue {
 }
 
 // ForwardRef --------------------------------------------------------------------------------------------------------
-
-method(forwardRefClass, '__repr__', 'none', 0, 0, (self) => `ForwardRef(${pyRepr((self as PyOpaque).text)})`);
-method(forwardRefClass, '__eq__', 'one', 1, 1, (self, [other]) =>
-  other instanceof PyOpaque && other.cls === forwardRefClass ? other.text === (self as PyOpaque).text : NotImplemented
-);
-method(forwardRefClass, '__hash__', 'none', 0, 0, (self) => pyHash((self as PyOpaque).text));
-opaqueAttributes(forwardRefClass, (self, name) => (name === '__forward_arg__' ? self.text : undefined));
 
 /** The arguments `typing.get_args` gives, unflattening a Callable's parameters into a list. */
 export function typingArgs(value: PyValue): PyValue {

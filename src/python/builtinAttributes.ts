@@ -1,5 +1,7 @@
+import { implicitlyWrapped } from './annotations';
 import { builtinTextSignature } from './builtinDocs';
 import { enumerateClass } from './builtins';
+import { addressOf } from './conversions';
 import { method } from './define';
 import { sliceIndices } from './items';
 import { defineProperty } from './modules/numberSupport';
@@ -8,6 +10,7 @@ import { exactBinary, scaleToFloat, toIndex } from './numbers';
 import { bindValue, callValue, getAttribute, setAttribute } from './objects';
 import { binaryOp } from './operators';
 import { currentRuntime } from './runtimeContext';
+import { sharedNamespaceModules } from './sharedNamespaces';
 import { newGenericAlias } from './typeHints';
 import {
   asyncGeneratorClass,
@@ -376,9 +379,14 @@ function isAbstract(value: PyValue | undefined): boolean {
 
 for (const cls of [staticmethodClass, classmethodClass]) {
   defineProperty(cls, '__func__', (self) => asDescriptor(self).fn);
-  defineProperty(cls, '__wrapped__', (self) => asDescriptor(self).fn);
-  for (const name of ['__name__', '__qualname__', '__module__', '__annotations__', '__annotate__']) {
-    defineProperty(cls, name, (self) => getAttribute(asDescriptor(self).fn, name));
+  for (const name of ['__wrapped__', '__name__', '__qualname__', '__module__', '__annotations__', '__annotate__']) {
+    defineProperty(cls, name, (self) => {
+      if (implicitlyWrapped.has(self as object)) {
+        throw pyError('AttributeError', `'${typeName(self)}' object has no attribute '${name}'`);
+      }
+      const { fn } = asDescriptor(self);
+      return name === '__wrapped__' ? fn : getAttribute(fn, name);
+    });
   }
   defineProperty(cls, '__isabstractmethod__', (self) => isAbstract(asDescriptor(self).fn));
   defineProperty(cls, '__dict__', () => newDict());
@@ -403,7 +411,11 @@ defineProperty(superClass, '__thisclass__', (self) => asSuper(self).thisClass);
 
 defineProperty(functionClass, '__closure__', (self) => closureOf(self as PyFunction));
 unsupportedProperty(functionClass, '__code__', '関数のコードオブジェクト（__code__）');
-defineProperty(functionClass, '__globals__', (self) => namespaceDict((self as PyFunction).globals));
+defineProperty(functionClass, '__globals__', (self) => {
+  const { globals } = self as PyFunction;
+  const module = sharedNamespaceModules.get(globals);
+  return namespaceDict(module === undefined ? globals : currentRuntime().importModule(module).dict);
+});
 unsupportedProperty(functionClass, '__builtins__', '関数の __builtins__（組み込みの名前空間そのもの）');
 for (const cls of [functionClass, methodClass, builtinFunctionClass, methodDescriptorClass]) {
   method(
@@ -430,6 +442,13 @@ function closureOf(fn: PyFunction): PyValue {
   );
 }
 
+method(cellClass, '__repr__', 'none', 0, 0, (self) => {
+  const { value } = (self as PyOpaque).data as PyCell;
+  const here = addressOf(self as PyOpaque);
+  if (value === undefined) return `<cell at ${here}: empty>`;
+  const there = `0x${currentRuntime().idOf(value).toString(16)}`;
+  return `<cell at ${here}: ${typeName(value)} object at ${there}>`;
+});
 defineProperty(cellClass, 'cell_contents', (self) => {
   const { value } = (self as PyOpaque).data as PyCell;
   if (value === undefined) throw valueError('Cell is empty');

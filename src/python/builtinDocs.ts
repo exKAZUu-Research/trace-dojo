@@ -41,6 +41,13 @@ export function acceleratorModule(module: string, name: string): string | undefi
   return entries().get(`@${module}.${name}`)?.[0];
 }
 
+/** The docstrings of `object.__class__` and of the `__dict__` and `__weakref__` of the classes without `__slots__`. */
+export const INSTANCE_ATTRIBUTE_DOCS: Record<string, string> = {
+  __class__: "the object's class",
+  __dict__: 'dictionary for instance variables',
+  __weakref__: 'list of weak references to the object',
+};
+
 /** The docstring CPython's module of this name has, if it has one. */
 export function moduleDoc(name: string): string | undefined {
   return entries().get(name)?.[0];

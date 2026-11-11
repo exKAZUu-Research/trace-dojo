@@ -307,4 +307,6 @@ export interface Module {
   futureFeatures: string[];
   /** The source text the module was parsed from. */
   source?: string;
+  /** The depth of the deepest node of its syntax tree, which tells how deeply its code may recurse when evaluated. */
+  nestingDepth?: number;
 }

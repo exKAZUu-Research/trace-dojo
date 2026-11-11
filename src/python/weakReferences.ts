@@ -161,6 +161,11 @@ function referencesOf(object: PyObject): unknown[] {
   return [];
 }
 
+/** `weakref.ref(object)`, the reference without a callback that every such call shares. */
+export function weakReferenceTo(object: PyObject): PyOpaque {
+  return weakReference(object, undefined, weakrefClass);
+}
+
 /** The weak reference of an object that has one, which `obj.__weakref__` gives. */
 export function weakReferenceOf(object: PyValue): PyOpaque | undefined {
   return object instanceof PyObject ? references.get(object) : undefined;
@@ -172,7 +177,12 @@ method(weakrefClass, '__repr__', 'none', 0, 0, (self) => {
   const referent = liveReferent(self);
   const address = addressOf(self as PyOpaque);
   if (referent === undefined) return `<weakref at ${address}; dead>`;
-  return `<weakref at ${address}; to '${classOf(referent).qualifiedName}' at ${addressOf(referent)}>`;
+  // CPython adds the `__name__` the referent's type gives it, as classes and functions have.
+  const name =
+    referent instanceof PyClass || referent instanceof PyFunction || referent instanceof PyGenerator
+      ? ` (${referent.name})`
+      : '';
+  return `<weakref at ${address}; to '${classOf(referent).qualifiedName}' at ${addressOf(referent)}${name}>`;
 });
 defineSlot(weakrefClass, '__hash__', (self) => {
   const reference = referenceOf(self);

@@ -1,18 +1,11 @@
+import type { FunctionDef, NameRef, Statement } from './ast';
 import { Frame } from './frame';
 import { callValue, getItem, isCallable, isTruthy, setItem } from './objects';
 import { compareOp } from './operators';
+import { parseDynamicCode } from './parse';
 import { currentRuntime } from './runtimeContext';
-import { builtinFunctionClass, newDict, None, pyError, typeError, typeName } from './types';
-import {
-  type Annotation,
-  PyBuiltinFunction,
-  PyCell,
-  type PyClass,
-  PyDict,
-  PyFunction,
-  type PyModule,
-  type PyValue,
-} from './values';
+import { functionClass, newDict, None, pyError, typeError, typeName } from './types';
+import { type Annotation, PyCell, type PyClass, PyDict, PyFunction, type PyModule, type PyValue } from './values';
 
 // The lazy annotations of Python 3.14 (PEP 649 and PEP 749): a function, class, or module evaluates its annotations
 // only when its `__annotate__` is called, which reading `__annotations__` does once and caches.
@@ -28,42 +21,86 @@ export interface FakeNames {
   stringifier: (name: string) => PyValue;
 }
 
-/** What each `__annotate__` that this interpreter creates, as CPython's compiler does, evaluates, and its globals. */
-const annotateSources = new WeakMap<
-  PyBuiltinFunction,
-  { annotations: () => readonly Annotation[]; globals: Map<string, PyValue> }
->();
+/**
+ * The `__annotate__` function the compiler gives a function, class, or module: a Python function of one positional-only
+ * parameter, as CPython's, whose body this interpreter runs natively, evaluating the annotations for formats 1 and 2.
+ */
+export class PyAnnotateFunction extends PyFunction {
+  constructor(
+    qualifiedName: string,
+    globals: Map<string, PyValue>,
+    closure: Map<string, PyCell>,
+    readonly annotations: () => readonly Annotation[]
+  ) {
+    // Each has a definition of its own, as its code object's `co_qualname` names its owner.
+    super(functionClass, { ...annotateDefinition(), qualifiedName }, globals, closure, [], new Map(), undefined);
+  }
+
+  /** The body: `if format > VALUE_WITH_FAKE_GLOBALS: raise NotImplementedError`, then the annotations' values. */
+  run(format: PyValue): PyValue {
+    if (isTruthy(compareOp('>', format, 2n))) throw pyError('NotImplementedError');
+    return evaluateAnnotations(this.annotations());
+  }
+}
+
+let annotateDef: FunctionDef | undefined;
+
+/** The definition every `__annotate__` shares, whose parameters bind the call's arguments as CPython's do. */
+function annotateDefinition(): FunctionDef {
+  if (!annotateDef) {
+    const [statement] = parseDynamicCode('def __annotate__(format, /):\n    pass\n').body;
+    annotateDef = (statement as Extract<Statement, { kind: 'functionDef' }>).fn;
+  }
+  return annotateDef;
+}
 
 /** Creates the `__annotate__` of a function, class, or module, which evaluates `annotations` for formats 1 and 2. */
 export function newAnnotate(
   ownerName: string | undefined,
   globals: Map<string, PyValue>,
-  annotations: () => readonly Annotation[]
+  annotations: () => readonly Annotation[],
+  closure = new Map<string, PyCell>(),
+  /** The `co_qualname`, which for a function's `__annotate__` names the scope the function is defined in. */
+  codeName = ownerName === undefined ? '__annotate__' : `${ownerName}.__annotate__`
 ): PyValue {
-  const annotate = new PyBuiltinFunction(
-    builtinFunctionClass,
-    '__annotate__',
-    (args, kwargs) => {
-      if ((kwargs?.size ?? 0) > 0) throw typeError('__annotate__() takes no keyword arguments');
-      if (args.length !== 1) {
-        throw typeError(`__annotate__() takes exactly one argument (${args.length} given)`);
-      }
-      // The compiler's `if format > VALUE_WITH_FAKE_GLOBALS: raise NotImplementedError`.
-      if (isTruthy(compareOp('>', args[0], 2n))) throw pyError('NotImplementedError');
-      return evaluateAnnotations(annotations());
-    },
-    undefined,
-    'method',
-    ownerName
-  );
-  annotateSources.set(annotate, { annotations, globals });
+  const annotate = new PyAnnotateFunction(codeName, globals, closure, annotations);
+  annotate.qualifiedName = ownerName === undefined ? '__annotate__' : `${ownerName}.__annotate__`;
+  annotate.doc = None;
+  annotate.module = globals.get('__name__') ?? None;
   return annotate;
+}
+
+/**
+ * The cells CPython's `__annotate__` closes over: the variables of enclosing functions its annotations name. A cell the
+ * enclosing frame does not share holds the variable's value when the annotations were recorded.
+ */
+export function annotationClosure(annotations: readonly Annotation[]): Map<string, PyCell> {
+  const closure = new Map<string, PyCell>();
+  for (const { expression, frame } of annotations) {
+    if (frame.kind !== 'function') continue;
+    for (const { name, access } of nameReferences(expression)) {
+      if (access === 'cell') closure.set(name, frame.cells.get(name) ?? new PyCell());
+      else if (access === 'local' && !closure.has(name)) closure.set(name, new PyCell(frame.locals.get(name)));
+    }
+  }
+  return closure;
+}
+
+function nameReferences(node: unknown, found: NameRef[] = []): NameRef[] {
+  if (Array.isArray(node)) {
+    for (const item of node) nameReferences(item, found);
+  } else if (typeof node === 'object' && node !== null) {
+    const record = node as Record<string, unknown>;
+    if (record.kind === 'name' && typeof record.name === 'string' && typeof record.access === 'string') {
+      found.push(node as NameRef);
+    }
+    for (const value of Object.values(record)) nameReferences(value, found);
+  }
+  return found;
 }
 
 /** The globals an `__annotate__` evaluates names in, which annotationlib reads as its `__globals__`. */
 export function annotateGlobals(annotate: PyValue): Map<string, PyValue> {
-  const source = annotate instanceof PyBuiltinFunction ? annotateSources.get(annotate) : undefined;
-  if (source) return source.globals;
   if (annotate instanceof PyFunction) return annotate.globals;
   throw pyError('AttributeError', `'${typeName(annotate)}' object has no attribute '__globals__'`);
 }
@@ -93,8 +130,7 @@ export function evaluateAnnotations(annotations: readonly Annotation[], fake?: F
  * does by rebuilding the function from its code object with other globals and closure cells.
  */
 export function callAnnotateWithFakeGlobals(annotate: PyValue, fake: FakeNames): PyValue {
-  const source = annotate instanceof PyBuiltinFunction ? annotateSources.get(annotate) : undefined;
-  if (source) return evaluateAnnotations(source.annotations(), fake);
+  if (annotate instanceof PyAnnotateFunction) return evaluateAnnotations(annotate.annotations(), fake);
   if (!(annotate instanceof PyFunction)) {
     throw pyError('AttributeError', `'${typeName(annotate)}' object has no attribute '__code__'`);
   }
@@ -197,7 +233,16 @@ export function functionAnnotate(fn: PyFunction): PyValue {
   const state = functionState(fn);
   if (state.annotate === undefined) {
     const annotations = functionAnnotationList(fn);
-    state.annotate = annotations.length === 0 ? None : newAnnotate(fn.qualifiedName, fn.globals, () => annotations);
+    state.annotate =
+      annotations.length === 0
+        ? None
+        : newAnnotate(
+            fn.qualifiedName,
+            fn.globals,
+            () => annotations,
+            annotationClosure(annotations),
+            `${fn.def.qualifiedName.slice(0, fn.def.qualifiedName.lastIndexOf('.') + 1)}__annotate__`
+          );
   }
   return state.annotate;
 }
@@ -246,11 +291,40 @@ function callAnnotate(annotate: PyValue): PyDict {
 
 // Classes -------------------------------------------------------------------------------------------------------------
 
+/**
+ * The classes every run shares that CPython writes in Python without annotations, such as `abc.ABCMeta` and the
+ * numbers ABCs, whose `__annotate__` is None and whose `__annotations__` an empty dict, which each run keeps its own of.
+ */
+export const sharedPythonClasses = new WeakSet<PyClass>();
+
+/**
+ * The staticmethods and classmethods a class body's `__new__`, `__init_subclass__`, and `__class_getitem__` became,
+ * which CPython creates without copying the function's attributes, so that they have no `__name__` or `__wrapped__`.
+ */
+export const implicitlyWrapped = new WeakSet<object>();
+const sharedAnnotations = new WeakMap<object, Map<PyClass, PyDict>>();
+
+function sharedClassAnnotations(cls: PyClass): PyDict {
+  const runtime = currentRuntime();
+  let byClass = sharedAnnotations.get(runtime);
+  if (!byClass) {
+    byClass = new Map();
+    sharedAnnotations.set(runtime, byClass);
+  }
+  let annotations = byClass.get(cls);
+  if (!annotations) {
+    annotations = newDict();
+    byClass.set(cls, annotations);
+  }
+  return annotations;
+}
+
 /** The annotations of each class body, which its `__annotate__` evaluates. */
 export const classAnnotationLists = new WeakMap<PyClass, readonly Annotation[]>();
 
 /** `type.__annotate__`, which a class without annotations of its own records as None. */
 export function classAnnotate(cls: PyClass): PyValue {
+  if (sharedPythonClasses.has(cls)) return None;
   if (cls.isBuiltin) throw pyError('AttributeError', `type object '${cls.name}' has no attribute '__annotate__'`);
   const own = cls.dict.get('__annotate__') ?? cls.dict.get('__annotate_func__');
   if (own !== undefined) return own;
@@ -260,6 +334,7 @@ export function classAnnotate(cls: PyClass): PyValue {
 
 /** `type.__annotations__`: the class's own annotations, cached in its dict on the first read. */
 export function classAnnotations(cls: PyClass): PyValue {
+  if (sharedPythonClasses.has(cls)) return sharedClassAnnotations(cls);
   if (cls.isBuiltin) throw pyError('AttributeError', `type object '${cls.name}' has no attribute '__annotations__'`);
   const own = cls.dict.get('__annotations__') ?? cls.dict.get('__annotations_cache__');
   if (own !== undefined) return own;

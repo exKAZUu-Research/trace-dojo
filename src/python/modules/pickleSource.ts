@@ -1,4 +1,4 @@
-// CPython 3.14's `Lib/pickle.py`, with no `PickleBuffer`, and the unpickler raising the errors of CPython's C unpickler
+// CPython 3.14's `Lib/pickle.py`, with `PickleBuffer` written in Python, and the unpickler raising the errors of CPython's C unpickler
 // (`_pickle`), which the module's functions and classes stand for.
 export const PICKLE_SOURCE =
   String.raw`"""Create portable serialized representations of Python objects.
@@ -41,7 +41,65 @@ import _compat_pickle
 __all__ = ["PickleError", "PicklingError", "UnpicklingError", "Pickler",
            "Unpickler", "dump", "dumps", "load", "loads"]
 
-_HAVE_PICKLE_BUFFER = False
+
+
+class PickleBuffer:
+    """Wrapper for potentially out-of-band buffers"""
+
+    __slots__ = ('_pickle_buffer_view',)
+
+    def __new__(cls, *args, **kwargs):
+        given = len(args) + len(kwargs)
+        if given > 1:
+            raise TypeError(f'PickleBuffer() takes at most 1 argument ({given} given)')
+        if len(args) != 1:
+            raise TypeError(f'PickleBuffer() takes exactly 1 positional argument ({len(args)} given)')
+        try:
+            view = memoryview(args[0])
+        except TypeError:
+            raise TypeError(f"a bytes-like object is required, not '{type(args[0]).__name__}'") from None
+        self = object.__new__(cls)
+        self._pickle_buffer_view = view
+        return self
+
+    def raw(self):
+        """Return a memoryview of the raw memory underlying this buffer.
+Will raise BufferError is the buffer isn't contiguous."""
+        view = _pickle_buffer_view(self)
+        if not view.contiguous:
+            raise BufferError('cannot extract raw buffer from non-contiguous buffer')
+        return view.cast('B')
+
+    def release(self):
+        """Release the underlying buffer exposed by the PickleBuffer object."""
+        view = self._pickle_buffer_view
+        if view is not None:
+            self._pickle_buffer_view = None
+            view.release()
+
+    def __buffer__(self, flags, /):
+        return memoryview(_pickle_buffer_view(self))
+
+    def __release_buffer__(self, buffer, /):
+        pass
+
+    def __reduce_ex__(self, protocol, /):
+        raise TypeError("cannot pickle 'pickle.PickleBuffer' object")
+
+    def __reduce__(self):
+        raise TypeError("cannot pickle 'pickle.PickleBuffer' object")
+
+
+def _pickle_buffer_view(buffer):
+    view = buffer._pickle_buffer_view
+    if view is None:
+        raise ValueError('operation forbidden on released PickleBuffer object')
+    return view
+
+
+_c_type_name(PickleBuffer, 'pickle.PickleBuffer')
+__all__.append("PickleBuffer")
+_HAVE_PICKLE_BUFFER = True
 
 
 # Shortcut for use in isinstance testing
@@ -899,7 +957,8 @@ class _Pickler:
             if self.proto < 5:
                 raise PicklingError("PickleBuffer can only be pickled with "
                                     "protocol >= 5")
-            with obj.raw() as m:
+            # As CPython's C pickler, which reads the buffer itself rather than its raw() view.
+            with memoryview(obj) as m:
                 if not m.contiguous:
                     raise PicklingError("PickleBuffer can not be pickled when "
                                         "pointing to a non-contiguous buffer")

@@ -26,7 +26,6 @@ function rejectKeywords(cls: PyClass, kwargs: Kwargs): void {
 
 baseExceptionClass.construct = (cls, args, kwargs) => {
   if (cls.isSubclassOf(exceptionClassNamed('BaseExceptionGroup'))) return constructGroup(cls, args, kwargs);
-  if (cls.isBuiltin) rejectKeywords(cls, kwargs);
   const exception = new PyInstance(osErrorSubclass(cls, args));
   exception.exception = { args: newTuple(args), suppressContext: false };
   // A builtin class's __init__ does not run again, so its keyword arguments set its fields here.

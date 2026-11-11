@@ -79,6 +79,7 @@ export const asyncGeneratorClass = builtinClass('async_generator');
 export const staticmethodClass = builtinClass('staticmethod');
 export const classmethodClass = builtinClass('classmethod');
 export const propertyClass = builtinClass('property');
+for (const cls of [staticmethodClass, classmethodClass, propertyClass]) cls.isBaseType = true;
 export const superClass = builtinClass('super');
 export const dictKeysClass = builtinClass('dict_keys');
 export const dictValuesClass = builtinClass('dict_values');
@@ -422,6 +423,13 @@ export function resultClassOf(cls: PyClass): PyClass {
 }
 
 /** The name of a value's class, as error messages quote it. */
+/** A class's name as CPython's `%T` and `%N` formats show it: qualified by its module unless builtin or `__main__`. */
+export function fullyQualifiedName(cls: PyClass): string {
+  return cls.module === '__main__' || cls.module === 'builtins'
+    ? cls.qualifiedName
+    : `${cls.module}.${cls.qualifiedName}`;
+}
+
 export function typeName(value: PyValue): string {
   const cls = classOf(value);
   return cls.typeName ?? cls.name;
