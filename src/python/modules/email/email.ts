@@ -1,4 +1,4 @@
-// CPython's email package and quopri, which run CPython's own code.
+// CPython's email package, which run CPython's own code.
 import { registerSourceModule } from '../../sourceModules';
 import { EMAIL_BASE64MIME_SOURCE } from './base64mimeSource';
 import { EMAIL_CHARSET_SOURCE } from './charsetSource';
@@ -28,7 +28,6 @@ import { EMAIL_PARSER_SOURCE } from './parserSource';
 import { EMAIL__POLICYBASE_SOURCE } from './policybaseSource';
 import { EMAIL_POLICY_SOURCE } from './policySource';
 import { EMAIL_QUOPRIMIME_SOURCE } from './quoprimimeSource';
-import { QUOPRI_SOURCE } from './quopriSource';
 import { EMAIL_UTILS_SOURCE } from './utilsSource';
 
 registerSourceModule('email', EMAIL_SOURCE);
@@ -60,4 +59,3 @@ registerSourceModule('email.mime.message', EMAIL_MIME_MESSAGE_SOURCE);
 registerSourceModule('email.mime.multipart', EMAIL_MIME_MULTIPART_SOURCE);
 registerSourceModule('email.mime.nonmultipart', EMAIL_MIME_NONMULTIPART_SOURCE);
 registerSourceModule('email.mime.text', EMAIL_MIME_TEXT_SOURCE);
-registerSourceModule('quopri', QUOPRI_SOURCE);

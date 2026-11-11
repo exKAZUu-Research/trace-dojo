@@ -1,12 +1,13 @@
+import { setClassAnnotations } from '../annotations';
 import { builtin } from '../define';
 import { namespaceDict } from '../namespaces';
-import { currentRuntime } from '../runtimeContext';
+import { callValue, getAttribute } from '../objects';
 import { isMember } from '../slots';
 import { registerSourceModule } from '../sourceModules';
-import { newDict, None } from '../types';
-import { PyClass, type PyDict, PyFunction, type PyValue } from '../values';
+import { None } from '../types';
+import { type PyClass, PyFunction, type PyValue } from '../values';
 
-// CPython's 'dataclasses.py'. Without 'annotationlib', annotations come from '_get_annotations' and
+// CPython's 'dataclasses.py', whose annotations come from annotationlib through '_get_annotations' and
 // '_set_annotations'; the methods it generates run in globals of their own, so that they record no steps.
 const SOURCE = String.raw`import re
 import sys
@@ -249,8 +250,7 @@ _ATOMIC_TYPES = frozenset({
     types.FunctionType,
     type,
     range,
-    property,
-})
+    property })
 
 # Any marker is used in 'make_dataclass' to mark unannotated fields as 'Any'
 # without importing 'typing' module.
@@ -981,8 +981,7 @@ _hash_action = {(False, False, False, False): None,
                 (True,  True,  False, False): _hash_add,
                 (True,  True,  False, True ): _hash_exception,
                 (True,  True,  True,  False): _hash_add,
-                (True,  True,  True,  True ): _hash_exception,
-                }
+                (True,  True,  True,  True ): _hash_exception }
 # See https://bugs.python.org/issue32929#msg312829 for an if-statement
 # version of this table.
 
@@ -1778,14 +1777,19 @@ registerSourceModule(
     new Map<string, PyValue>([
       [
         '_get_annotations',
+        // annotationlib.get_annotations(cls, format=Format.FORWARDREF), as CPython's dataclasses reads them.
         builtin('_get_annotations', 'one', 1, 1, ([cls]) =>
-          cls instanceof PyClass ? newDict(runtime.classAnnotations(cls)) : newDict([])
+          callValue(
+            getAttribute(runtime.importModule('annotationlib'), 'get_annotations'),
+            [cls],
+            new Map([['format', 3n]])
+          )
         ),
       ],
       [
         '_set_annotations',
         builtin('_set_annotations', 'expected', 2, 2, ([cls, annotations]) => {
-          setAnnotations(cls as PyClass, annotations as PyDict);
+          setClassAnnotations(cls as PyClass, annotations);
           return None;
         }),
       ],
@@ -1809,12 +1813,3 @@ registerSourceModule(
       ],
     ])
 );
-
-/** Gives a class made by 'make_dataclass' the annotations its fields are declared with, as a class body would. */
-function setAnnotations(cls: PyClass, annotations: PyDict): void {
-  const entries = annotations.store
-    .ordered()
-    .map(({ key, value }): [string, () => PyValue] => [key as string, () => value]);
-  cls.annotationNames = entries.map(([name]) => name);
-  currentRuntime().classAnnotationThunks.set(cls, entries);
-}

@@ -1,5 +1,6 @@
 import { PyBytes } from '../bytesValues';
 import { pyRepr } from '../conversions';
+import { SYS_BUILTIN_MODULE_NAMES, SYS_STDLIB_MODULE_NAMES } from '../data/sysModuleNames';
 import { builtin, method } from '../define';
 import type { Frame } from '../frame';
 import { isSupportedModule } from '../moduleNames';
@@ -8,12 +9,14 @@ import { namespaceDict } from '../namespaces';
 import { toIndex } from '../numbers';
 import type { Runtime } from '../runtime';
 import { currentRuntime } from '../runtimeContext';
+import { stackFrame } from '../tracebacks';
 import {
   builtinClass,
   classOf,
   Ellipsis,
   moduleClass,
   newDict,
+  newSet,
   newTuple,
   None,
   NotImplemented,
@@ -77,14 +80,10 @@ export function sysInformation(runtime: Runtime): [string, PyValue][] {
       }),
     ],
     ['exc_info', builtin('exc_info', 'none', 0, 0, () => excInfo(runtime))],
-    // A program can add no audit hook, so raising an audit event does nothing, as in CPython without hooks.
-    [
-      'audit',
-      builtin('audit', 'expected', 1, Number.POSITIVE_INFINITY, ([event]) => {
-        if (typeof event !== 'string') throw typeError(`audit() argument 1 must be str, not ${typeName(event)}`);
-        return None;
-      }),
-    ],
+    ['_getframe', builtin('_getframe', 'expected', 0, 1, getFrame)],
+    ['stdlib_module_names', newSet(SYS_STDLIB_MODULE_NAMES, true)],
+    ['builtin_module_names', newTuple([...SYS_BUILTIN_MODULE_NAMES])],
+    ['audit', builtin('audit', 'expected', 1, Number.POSITIVE_INFINITY, audit)],
     ['exception', builtin('exception', 'none', 0, 0, () => runtime.evaluator.handledExceptions.at(-1) ?? None)],
   ];
 }
@@ -311,5 +310,19 @@ function intern(value: PyValue): PyValue {
 function excInfo(runtime: Runtime): PyValue {
   const exception = runtime.evaluator.handledExceptions.at(-1);
   if (!exception) return newTuple([None, None, None]);
-  return currentRuntime().tuple([exception.cls, exception, unavailableValue('トレースバックオブジェクト')]);
+  return currentRuntime().tuple([exception.cls, exception, exception.exception?.traceback ?? None]);
+}
+
+/** `sys.audit(event, *args)`, which calls no hooks, as no program can add one here. */
+function audit([event]: PyValue[]): PyValue {
+  if (typeof event !== 'string') throw typeError(`audit() argument 1 must be str, not ${typeName(event)}`);
+  return None;
+}
+
+/** `sys._getframe(depth=0)`: the frame object `depth` calls below the caller's. */
+function getFrame(args: PyValue[]): PyValue {
+  const depth = args.length === 0 ? 0n : toIndex(args[0]);
+  const frame = depth < 0n ? undefined : stackFrame(Number(depth));
+  if (frame === undefined) throw valueError('call stack is not deep enough');
+  return frame;
 }

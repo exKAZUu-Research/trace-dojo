@@ -162,7 +162,9 @@ export function pyHash(value: PyValue): bigint {
   if (value instanceof PyTuple && value.cls.isBuiltin) return hashTuple(value.items);
   const special = lookupSpecial(value, '__hash__');
   if (special === None) throw typeError(`unhashable type: '${typeName(value)}'`);
-  if (value instanceof PyBytes || value instanceof PyMemoryView) return callSpecial(value, '__hash__', []) as bigint;
+  if (value instanceof PyBytes || value instanceof PyMemoryView) {
+    return callSpecial(value, '__hash__', []) as bigint;
+  }
   if (special !== undefined && !isDefaultHash(special)) {
     const result = callSpecial(value, '__hash__', []);
     if (typeof result === 'boolean') return result ? 1n : 0n;

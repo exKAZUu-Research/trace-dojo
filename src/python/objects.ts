@@ -1,3 +1,4 @@
+import { moduleAnnotations } from './annotations';
 import { classAttribute, specialAttribute } from './attributes';
 import { PyBytes, PyMemoryView } from './bytesValues';
 import {
@@ -72,7 +73,9 @@ export function callValue(fn: PyValue, args: PyValue[], kwargs?: Kwargs): PyValu
     currentRuntime().spend();
     return fn.run(fn.self === undefined || fn.binding === 'static' ? args : [fn.self, ...args], kwargs);
   }
-  if (fn instanceof PyBoundMethod) return callValue(fn.fn, [fn.self, ...args], kwargs);
+  if (fn instanceof PyBoundMethod) {
+    return fn.fastCall ? callValue(fn.fastCall, args, kwargs) : callValue(fn.fn, [fn.self, ...args], kwargs);
+  }
   if (fn instanceof PyClass) return currentRuntime().instantiate(fn, args, kwargs);
   const call = lookupSpecial(fn, '__call__');
   if (call !== undefined) return callValue(bindValue(call, fn), args, kwargs);
@@ -222,7 +225,8 @@ function typeDocOf(cls: PyClass, name: string): PyValue | undefined {
 function moduleAttribute(module: PyModule, name: string): PyValue | undefined {
   const feature = module.unsupported.get(name);
   if (feature !== undefined) throw new UnsupportedFeatureError(feature);
-  return name === '__dict__' ? namespaceDict(module.dict) : module.dict.get(name);
+  if (name === '__dict__') return namespaceDict(module.dict);
+  return name === '__annotations__' ? moduleAnnotations(module) : module.dict.get(name);
 }
 
 export { deleteAttribute, setAttribute } from './attributes';
@@ -338,9 +342,26 @@ function builtinIterate(value: PyValue): NextFunction | undefined {
   return undefined;
 }
 
+/** How many items each native iterator has left, which its `__length_hint__` gives. */
+const remainingCounts = new WeakMap<NextFunction, () => number>();
+
+/** Records how many items an iterator's next function has left. */
+export function withRemaining(next: NextFunction, remaining: () => number): NextFunction {
+  remainingCounts.set(next, remaining);
+  return next;
+}
+
+/** How many items a native iterator has left, or undefined for an iterator that does not know. */
+export function remainingOf(next: NextFunction): number | undefined {
+  return remainingCounts.get(next)?.();
+}
+
 function iterateItems(sequence: PyList | PyTuple): NextFunction {
   let index = 0;
-  return () => (index < sequence.items.length ? sequence.items[index++] : DONE);
+  return withRemaining(
+    () => (index < sequence.items.length ? sequence.items[index++] : DONE),
+    () => Math.max(sequence.items.length - index, 0)
+  );
 }
 
 function iterateGenerator(generator: PyGenerator): NextFunction {
@@ -352,31 +373,43 @@ function iterateString(value: string): NextFunction {
   const characters = iterStr(value);
   currentRuntime().scan(characters.length);
   let index = 0;
-  return () => (index < characters.length ? characters[index++] : DONE);
+  return withRemaining(
+    () => (index < characters.length ? characters[index++] : DONE),
+    () => characters.length - index
+  );
 }
 
 function iterateRange(range: PyRange): NextFunction {
   const { step, length } = range;
   let current = range.start;
   let remaining = length;
-  return () => {
+  const next: NextFunction = () => {
     if (remaining <= 0n) return DONE;
     remaining--;
     const result = current;
     current += step;
     return result;
   };
+  return withRemaining(next, () => Number(remaining > 0n ? remaining : 0n));
 }
 
 function iterateSet(set: PySet): NextFunction {
   const { table } = set;
   const version = table.version;
+  const size = table.size;
   const entries = table.entries();
-  return () => {
+  let consumed = 0;
+  const next: NextFunction = () => {
     if (table.version !== version) throw pyError('RuntimeError', 'Set changed size during iteration');
-    const next = entries.next();
-    return next.done ? DONE : next.value.key;
+    const step = entries.next();
+    if (step.done) {
+      consumed = size;
+      return DONE;
+    }
+    consumed++;
+    return step.value.key;
   };
+  return withRemaining(next, () => (table.version === version ? size - consumed : 0));
 }
 
 /** Iterates with `__iter__`, or with `__getitem__` as the old sequence protocol does. */
@@ -431,15 +464,23 @@ function iterateDict(dict: PyDict, view: 'keys' | 'values' | 'items'): NextFunct
   const size = store.size;
   const entries = store.liveEntries();
   const runtime = currentRuntime();
-  return () => {
-    if (store.size !== size) throw pyError('RuntimeError', 'dictionary changed size during iteration');
-    const next = entries.next();
-    if (next.done) return DONE;
-    const entry = next.value;
-    if (view === 'keys') return entry.key;
-    if (view === 'values') return entry.value;
-    return runtime.tuple([entry.key, entry.value]);
-  };
+  let consumed = 0;
+  return withRemaining(
+    () => {
+      if (store.size !== size) throw pyError('RuntimeError', 'dictionary changed size during iteration');
+      const next = entries.next();
+      if (next.done) {
+        consumed = size;
+        return DONE;
+      }
+      consumed++;
+      const entry = next.value;
+      if (view === 'keys') return entry.key;
+      if (view === 'values') return entry.value;
+      return runtime.tuple([entry.key, entry.value]);
+    },
+    () => (store.size === size ? size - consumed : 0)
+  );
 }
 
 /** All the items an iterable yields. */

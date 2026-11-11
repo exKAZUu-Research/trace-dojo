@@ -1,33 +1,57 @@
+// code-gauge-allow-file fileNcss 418 -- The native random generator and the methods random.py's module functions run.
 import { newBytes } from '../bytesValues';
 import { pyStr } from '../conversions';
-import { method } from '../define';
+import { builtin, method } from '../define';
 import { sha512 } from '../hashAlgorithms';
 import { pyHash } from '../hashing';
+import { defineNew } from '../instances';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
 import { type ArgStyle, argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import { bindValue, callValue, getItem, isTruthy, lengthOf, setItem, toArray } from '../objects';
 import { binaryOp, lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
-import { builtinClass, newList, newTuple, None, pyError, typeError, typeName, valueError } from '../types';
-import { type Kwargs, PyDict, PyOpaque, PySet, PyTuple, type PyValue } from '../values';
+import { registerSourceModule } from '../sourceModules';
+import {
+  builtinClass,
+  classOf,
+  methodClass,
+  nativeFunction,
+  newList,
+  newTuple,
+  None,
+  objectClass,
+  pyError,
+  typeError,
+  typeName,
+  valueError,
+} from '../types';
+import {
+  type Kwargs,
+  PyBoundMethod,
+  PyDict,
+  PyFunction,
+  PyInstance,
+  type PyObject,
+  PyOpaque,
+  PySet,
+  PyTuple,
+  type PyValue,
+} from '../values';
 import { realArgument } from './math';
 import {
   betavariate,
   binomialvariate,
   expovariate,
   gammavariate,
-  LOG4,
   lognormvariate,
   normalvariate,
-  NV_MAGICCONST,
   paretovariate,
-  SG_MAGICCONST,
   triangular,
-  TWOPI,
   vonmisesvariate,
   weibullvariate,
 } from './randomDistributions';
+import { RANDOM_SOURCE } from './randomSource';
 
 const N = 624;
 const M = 397;
@@ -318,7 +342,6 @@ function gauss(generator: MersenneTwister, mu: number, sigma: number): number {
 
 /** `random.Random`, whose instances each have a generator of their own; the module's functions use a hidden one. */
 const randomClass = builtinClass('Random');
-randomClass.unsupportedBase = 'random.Random を継承したクラス';
 randomClass.module = 'random';
 randomClass.dict.set('__module__', 'random');
 randomClass.dict.set('VERSION', 3n);
@@ -527,6 +550,13 @@ function setstate(generator: MersenneTwister, state: PyValue): PyValue {
   }
   if (items.length !== 3) throw valueError(`too many values to unpack (expected 3, got ${items.length})`);
   const [, internal, gaussNext] = items;
+  restoreState(generator, internal);
+  generator.gaussNext = gaussNext === None ? undefined : realArgument(gaussNext);
+  return None;
+}
+
+/** `_random.Random.setstate(state)`: the 624 words of the Mersenne Twister and its position. */
+function restoreState(generator: MersenneTwister, internal: PyValue): void {
   if (!(internal instanceof PyTuple)) throw typeError('state vector must be a tuple');
   if (internal.items.length !== 625) throw valueError('state vector is the wrong size');
   const words = internal.items.slice(0, 624).map((word) => {
@@ -538,28 +568,130 @@ function setstate(generator: MersenneTwister, state: PyValue): PyValue {
   const index = Number(toIndex(internal.items[624]));
   if (index < 0 || index > 624) throw valueError('invalid state');
   generator.restore(words, index);
-  generator.gaussNext = gaussNext === None ? undefined : realArgument(gaussNext);
+}
+
+registerUnsupportedAttributes('random', { main: 'random.main()（コマンドライン）' });
+
+// _random ------------------------------------------------------------------------------------------------------------
+
+/**
+ * `_random.Random`, the Mersenne Twister under CPython's random.Random, which random.py derives from and programs may
+ * derive from in turn.
+ */
+const coreClass = builtinClass('Random', objectClass, true);
+coreClass.module = '_random';
+const coreGenerators = new WeakMap<PyObject, MersenneTwister>();
+
+function coreOf(self: PyValue): MersenneTwister {
+  let generator = coreGenerators.get(self as PyObject);
+  if (!generator) {
+    generator = new MersenneTwister();
+    generator.initByArray(keyOf(coreSeed(None)));
+    coreGenerators.set(self as PyObject, generator);
+  }
+  return generator;
+}
+
+/** The seed `_random.Random.seed(n)` takes: random bytes for None, an int's absolute value, or another value's hash. */
+function coreSeed(value: PyValue): bigint {
+  if (value === None) return seedOf(undefined);
+  if (typeof value === 'bigint' || typeof value === 'boolean') return BigInt(value);
+  return BigInt.asUintN(64, pyHash(value));
+}
+
+defineNew(coreClass, (cls, _args, kwargs) => {
+  if (cls === coreClass && kwargs !== undefined && kwargs.size > 0) {
+    throw typeError('Random() takes no keyword arguments');
+  }
+  currentRuntime().allocate(1);
+  const instance = new PyInstance(cls);
+  coreOf(instance);
+  return instance;
+});
+method(coreClass, '__init__', 'expected', 0, Number.POSITIVE_INFINITY, (self, args) => {
+  if (args.length > 1) throw typeError('Random() requires 0 or 1 argument');
+  coreOf(self).initByArray(keyOf(coreSeed(args[0] ?? None)));
+  return None;
+});
+method(coreClass, 'random', 'none', 0, 0, (self) => coreOf(self).random());
+method(coreClass, 'seed', 'expected', 0, 1, (self, [n]) => {
+  coreOf(self).initByArray(keyOf(coreSeed(n ?? None)));
+  return None;
+});
+method(coreClass, 'getrandbits', 'one', 1, 1, (self, [k]) => getrandbits(coreOf(self), k));
+method(coreClass, 'getstate', 'none', 0, 0, (self) => {
+  const { words, index } = coreOf(self).state();
+  return newTuple([...words.map(BigInt), BigInt(index)]);
+});
+method(coreClass, 'setstate', 'one', 1, 1, (self, [state]) => {
+  restoreState(coreOf(self), state);
+  return None;
+});
+
+registerModule('_random', () => new Map<string, PyValue>([['Random', coreClass]]));
+
+// random -------------------------------------------------------------------------------------------------------------
+
+/** Whether a method's parameters after `self` take these arguments. */
+function fitsSignature(fn: PyFunction, args: readonly PyValue[], kwargs: Kwargs): boolean {
+  const params = fn.def.params.slice(1);
+  const positional = params.filter((param) => param.kind === 'positionalOnly' || param.kind === 'positional');
+  const varArgs = params.some((param) => param.kind === 'varArgs');
+  const varKeywords = params.some((param) => param.kind === 'varKeywords');
+  if (args.length > positional.length && !varArgs) return false;
+  const named = new Set(kwargs?.keys());
+  for (const name of named) {
+    const param = params.find((each) => each.name === name && each.kind !== 'positionalOnly');
+    if (param === undefined && !varKeywords) return false;
+    // A keyword for a parameter the positional arguments already gave.
+    if (param !== undefined && positional.includes(param) && positional.indexOf(param) < args.length) return false;
+  }
+  return params.every(
+    (param, index) =>
+      param.default !== undefined ||
+      param.kind === 'varArgs' ||
+      param.kind === 'varKeywords' ||
+      (positional.includes(param) && index < args.length) ||
+      named.has(param.name)
+  );
+}
+
+/**
+ * Gives the module the natives of the hidden instance's methods, bound to the generator of random.py's `_inst`, which
+ * give what its Python methods give.
+ */
+function bindNatives(globals: PyValue, instance: PyValue): PyValue {
+  const fast = new PyOpaque(randomClass, 'Random', coreOf(instance));
+  for (const [name] of RANDOM_METHODS) {
+    // The function is random.py's method bound to _inst, as CPython's is, which runs the native in its place.
+    const fn = classOf(instance).lookup(name);
+    if (!(fn instanceof PyFunction)) continue;
+    const bound = new PyBoundMethod(methodClass, instance, fn);
+    const native = bindValue(randomClass.dict.get(name) as PyValue, fast);
+    // Arguments the Python method would refuse reach it, which words the TypeError as CPython does.
+    bound.fastCall = nativeFunction(name, (args, kwargs) =>
+      fitsSignature(fn, args, kwargs) ? callValue(native, args, kwargs) : callValue(fn, [instance, ...args], kwargs)
+    );
+    setItem(globals, name, bound);
+  }
   return None;
 }
 
-registerUnsupportedAttributes('random', {
-  SystemRandom: 'random.SystemRandom（OS の乱数）',
-  main: 'random.main()（コマンドライン）',
-});
-
-registerModule('random', () => {
-  const instance = callValue(randomClass, []) as PyOpaque;
-  const namespace = new Map<string, PyValue>([
-    ['Random', randomClass],
-    ['BPF', 53n],
-    ['RECIP_BPF', 2 ** -53],
-    ['NV_MAGICCONST', NV_MAGICCONST],
-    ['LOG4', LOG4],
-    ['SG_MAGICCONST', SG_MAGICCONST],
-    ['TWOPI', TWOPI],
-  ]);
-  for (const [name] of RANDOM_METHODS) namespace.set(name, bindValue(randomClass.dict.get(name) as PyValue, instance));
-  return namespace;
-});
+registerSourceModule(
+  'random',
+  RANDOM_SOURCE,
+  () =>
+    new Map<string, PyValue>([
+      [
+        '_bind_natives',
+        builtin('_bind_natives', 'expected', 2, 2, ([globals, instance]) => bindNatives(globals, instance)),
+      ],
+      // os.urandom, which SystemRandom reads: random bytes from the host.
+      [
+        '_urandom',
+        builtin('_urandom', 'one', 1, 1, ([n]) => newBytes(crypto.getRandomValues(new Uint8Array(Number(toIndex(n)))))),
+      ],
+    ])
+);
 
 export { isTruthy, typeName };

@@ -1,4 +1,5 @@
 import { bytesLikeData, newBytes, PyBytes } from './bytesValues';
+import { pyRepr } from './conversions';
 import { CODEC_ALIASES, NON_TEXT_CODECS } from './data/codecNames';
 import { toIndex } from './numbers';
 import { callValue, getAttribute, getAttributeOrUndefined } from './objects';
@@ -20,6 +21,19 @@ export interface TextCodec {
    * reuses for its arguments.
    */
   inlineHandlers?: { encode: ReadonlySet<string>; decode: ReadonlySet<string> };
+  /** How many bytes at the end of data start a sequence that more data may complete, for incremental decoding. */
+  incompleteTail?: (data: Uint8Array) => number;
+  /**
+   * A decoder that keeps the codec's state from one piece of data to the next, which decodes as far as it can unless
+   * `final` and says how many bytes it used; codecs without one decode each piece afresh.
+   */
+  incrementalDecoder?: () => (
+    data: Uint8Array,
+    errors: ErrorHandling,
+    final: boolean
+  ) => { text: string; consumed: number };
+  /** An encoder that keeps the codec's state, and characters that wait for the next, until `final`. */
+  incrementalEncoder?: () => (points: readonly number[], errors: ErrorHandling, final: boolean) => Uint8Array;
 }
 
 /** Creates the codec a module name stands for, loading its tables only when a program uses it. */
@@ -87,7 +101,11 @@ export function lookupCodec(encoding: string, direction: 'encode' | 'decode'): T
   let codec = codecs.get(module);
   if (!codec) {
     const create = codecFactories.get(module);
-    if (!create) throw currentRuntime().unsupported(`文字コード ${module}`);
+    if (!create) {
+      const info = encodingsCodecLookup?.(module);
+      if (info === undefined) throw currentRuntime().unsupported(`文字コード ${module}`);
+      return registeredTextCodec(info, encoding, direction);
+    }
     codec = create();
     codecs.set(module, codec);
   }
@@ -97,6 +115,13 @@ export function lookupCodec(encoding: string, direction: 'encode' | 'decode'): T
 /** Whether this grader implements the text codec of a codec module, such as `utf_8`. */
 export function hasTextCodec(module: string): boolean {
   return codecFactories.has(module);
+}
+
+/** Finds the CodecInfo of a codec written in Python, such as idna, from its `encodings` module. */
+let encodingsCodecLookup: ((module: string) => PyValue | undefined) | undefined;
+
+export function setEncodingsCodecLookup(lookup: (module: string) => PyValue | undefined): void {
+  encodingsCodecLookup = lookup;
 }
 
 /** Finds the CodecInfo of an encoding through the search functions a program registered with `codecs.register`. */
@@ -114,7 +139,7 @@ function registeredTextCodec(info: PyValue, encoding: string, direction: 'encode
     throw lookupError(`'${encoding}' is not a text encoding; use codecs.${direction}() to handle arbitrary codecs`);
   }
   const call = (name: 'encode' | 'decode', input: PyValue, errors: ErrorHandling): PyValue => {
-    const result = callValue(field(name), [input, errors.name]);
+    const result = callCodec(field(name), [input, errors.name], name, encoding);
     if (!(result instanceof PyTuple) || result.items.length !== 2) {
       throw typeError(`${name}r must return a tuple (object, integer)`);
     }
@@ -143,6 +168,23 @@ function registeredTextCodec(info: PyValue, encoding: string, direction: 'encode
   };
 }
 
+/**
+ * Calls a codec's function, adding to an exception it raises the note CPython adds, which names the codec as the
+ * program named it.
+ */
+export function callCodec(fn: PyValue, args: PyValue[], direction: 'encode' | 'decode', encoding: string): PyValue {
+  try {
+    return callValue(fn, args);
+  } catch (error) {
+    if (error instanceof PyError) {
+      callValue(getAttribute(error.exception, 'add_note'), [
+        `${direction === 'encode' ? 'encoding' : 'decoding'} with ${pyRepr(encoding)} codec failed`,
+      ]);
+    }
+    throw error;
+  }
+}
+
 /** The error handlers each run registered with `codecs.register_error`, by name. */
 const customErrorHandlers = new WeakMap<Runtime, Map<string, PyValue>>();
 
@@ -160,6 +202,11 @@ export function customErrorHandler(runtime: Runtime, name: string): PyValue | un
 }
 
 let aliasTable: Map<string, string> | undefined;
+
+/** The codec module an encoding name stands for, or undefined for an unknown one. */
+export function codecModuleOf(encoding: string): string | undefined {
+  return codecModule(encoding);
+}
 
 /** The codec module an encoding name stands for, found as CPython's encodings.search_function finds it. */
 export function codecModule(encoding: string): string | undefined {
@@ -192,6 +239,31 @@ function normalizeEncoding(encoding: string): string {
 
 function lookupError(message: string): PyError {
   return new PyError(newException(exceptionClassNamed('LookupError'), [message]));
+}
+
+/** What a decoder finds at a position: the text and how many bytes it took, or an error up to `end`. */
+export type DecodeStep = { text: string; length: number } | { reason: string; end: number };
+
+/** Decodes data a step at a time, giving each error to the error handler and resuming where it says. */
+export function decodeWithSteps(
+  data: Uint8Array,
+  errors: ErrorHandling,
+  step: (data: Uint8Array, index: number) => DecodeStep
+): string {
+  let text = '';
+  let index = 0;
+  while (index < data.length) {
+    const found = step(data, index);
+    if ('text' in found) {
+      text += found.text;
+      index += found.length;
+      continue;
+    }
+    const failure = errors.decodeError(index, found.end, found.reason);
+    text += failure.text;
+    index = failure.resume;
+  }
+  return text;
 }
 
 // Error handlers ----------------------------------------------------------------------------------------------------

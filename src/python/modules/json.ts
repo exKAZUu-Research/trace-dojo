@@ -346,11 +346,9 @@ class Decoder {
 
 registerUnsupportedAttributes('json', {
   __author__: 'json.__author__（作者の情報）',
-  codecs: 'モジュール codecs',
   decoder: 'モジュール json.decoder',
   encoder: 'モジュール json.encoder',
   scanner: 'モジュール json.scanner',
-  detect_encoding: 'json.detect_encoding()（bytes 型）',
 });
 
 /** The names the Python part defines for itself, which CPython keeps in json.decoder and json.encoder. */
@@ -370,8 +368,6 @@ registerModule('json', (runtime, moduleNamespace) => {
     ],
     ['_make_scanner', builtin('_make_scanner', 'one', 1, 1, ([decoder]) => makeScanner(decoder, namespace))],
     ['_c_make_encoder', builtin('_c_make_encoder', 'expected', 9, 9, (args) => makeEncoder(args, encodeAscii))],
-    ['dump', unsupportedBuiltin(runtime, 'dump', 'ファイルへの書き込み（json.dump）')],
-    ['load', unsupportedBuiltin(runtime, 'load', 'ファイルからの読み込み（json.load）')],
   ] as const) {
     namespace.set(name, value);
   }
@@ -384,19 +380,6 @@ registerModule('json', (runtime, moduleNamespace) => {
   for (const name of ['__version__', '__all__']) moduleNamespace.set(name, namespace.get(name) as PyValue);
   return new Map();
 });
-
-function unsupportedBuiltin(runtime: { unsupported(feature: string): Error }, name: string, feature: string): PyValue {
-  return builtin(
-    name,
-    'expected',
-    0,
-    Number.POSITIVE_INFINITY,
-    () => {
-      throw runtime.unsupported(feature);
-    },
-    { keywords: [] }
-  );
-}
 
 function skipWhitespace(text: string, indexValue: PyValue): bigint {
   const chars = iterStr(text);

@@ -2,8 +2,10 @@ import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import { createBuiltins } from './builtins';
+import type { PyMemoryView } from './bytesValues';
 import { bindArguments } from './calls';
 import { markIterableCoroutine } from './coroutines';
+import { enumClassDir, enumMemberDir } from './enums';
 import { Evaluator } from './evaluator';
 import { GeneratorFinalizer } from './finalization';
 import { Frame } from './frame';
@@ -12,13 +14,16 @@ import { resumeGenerator } from './generators';
 import { pyHash } from './hashing';
 import { instantiate } from './instances';
 import { keyError } from './items';
+import { viewOf } from './memoryview';
 import { importModule } from './modules';
 import { systemExitError } from './modules/sys';
 import { DEFAULT_MAX_STR_DIGITS } from './numbers';
 import { bindValue, callValue, isTruthy, overriding, setAttribute, toArray } from './objects';
+import type { ProgramSource } from './programSource';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
 import type { Scheduler } from './threads';
+import { noteUnwinding } from './tracebacks';
 import { newGenericAlias, unionOf } from './typeHints';
 import { boundSuper } from './typeObject';
 import { genericClass, subscriptGeneric } from './typeParams';
@@ -54,6 +59,7 @@ import {
   type PyTuple,
   type PyValue,
 } from './values';
+import { hasWeakCallbacks, runWeakCallbacks } from './weakReferences';
 
 /** The magnitude below which multiplying two ints costs no more than one operation. */
 const SAFE_INTEGER_BOUND = 1n << 53n;
@@ -71,6 +77,8 @@ export class Runtime {
   recursionLimit = 1000;
   /** The row of the call being evaluated, from which calls the interpreter makes implicitly count as called. */
   currentRow: number | undefined;
+  /** The program's source and definitions, which `inspect.getsource()` reads. */
+  program?: ProgramSource;
   /** The scheduler of the program's threads, once it starts one or waits. */
   threads?: Scheduler;
   /** The globals of the standard library modules written in Python. */
@@ -94,7 +102,11 @@ export class Runtime {
 
   // Budget ----------------------------------------------------------------------------------------------------------
 
+  /** The operations the run has spent, which the thread scheduler measures slices with. */
+  operations = 0;
+
   spend(cost = 1): void {
+    this.operations += cost;
     this.budget.spend(cost);
   }
 
@@ -169,20 +181,29 @@ export class Runtime {
    * modules, as `warnings` and `traceback` report them.
    */
   programFrames(): { frame: Frame; row: number | undefined }[] {
-    return this.stackFrames().filter((each) => !each.library);
+    const result: { frame: Frame; row: number | undefined }[] = [];
+    let row = this.currentRow;
+    for (const frame of this.frames.toReversed()) {
+      if (this.libraryEntryRows.has(frame)) {
+        row = this.libraryEntryRows.get(frame);
+        continue;
+      }
+      result.push({ frame, row });
+      row = frame.callRow;
+    }
+    return result;
   }
 
   /**
-   * Every running frame, innermost first, with the program's row each counts as running and whether it runs the code
-   * of a library module, whose frames have no row of their own.
+   * Every frame with the row it is running, innermost first. A library module's frame counts as running the program's
+   * row that entered it, since its own rows are not the program's.
    */
-  stackFrames(): { frame: Frame; row: number | undefined; library: boolean }[] {
-    const result: { frame: Frame; row: number | undefined; library: boolean }[] = [];
-    let row = this.currentRow;
+  allFrames(): { frame: Frame; row: number | undefined }[] {
+    const result: { frame: Frame; row: number | undefined }[] = [];
+    let row = this.callerRow();
     for (const frame of this.frames.toReversed()) {
-      const library = this.libraryEntryRows.has(frame);
-      result.push({ frame, row: library ? undefined : row, library });
-      row = library ? this.libraryEntryRows.get(frame) : frame.callRow;
+      result.push({ frame, row });
+      row = this.libraryEntryRows.has(frame) ? this.libraryEntryRows.get(frame) : frame.callRow;
     }
     return result;
   }
@@ -227,12 +248,14 @@ export class Runtime {
       return result;
     } catch (error) {
       const raised = recursionErrorFor(error);
+      noteUnwinding(raised);
       // The exception's traceback keeps the frame, and with it the function's variables, while a generator may close.
       const state = raised instanceof PyError ? raised.exception.exception : undefined;
       if (state && this.finalizer.pending.size > 0) (state.tracebackFrames ??= []).push(frame);
       throw raised;
     } finally {
       this.popFrame();
+      if (hasWeakCallbacks(this)) runWeakCallbacks([result]);
       // The function's variables die with its frame, which closes a generator only they held.
       const { finalizer } = this;
       if (finalizer.pending.size > 0 && result !== undefined) {
@@ -253,7 +276,8 @@ export class Runtime {
       fn.name,
       fn.qualifiedName,
       (input) => {
-        frame.callRow = this.currentRow;
+        const callerRow = this.currentRow;
+        frame.callRow = callerRow;
         this.pushFrame(frame);
         const depth = evaluator.attachHandling(handling);
         let finished = true;
@@ -261,9 +285,14 @@ export class Runtime {
           const step = this.guardRecursion(() => (input.error ? body.throw(input.error) : body.next(input.value)));
           finished = step.done === true;
           return step;
+        } catch (error) {
+          noteUnwinding(error);
+          throw error;
         } finally {
           handling = evaluator.detachHandling(depth);
           this.popFrame();
+          // The caller goes on at the row that resumed the generator, as its later calls and errors report.
+          this.currentRow = callerRow;
           this.finalizer.update(generator, frame, finished);
         }
       },
@@ -274,6 +303,7 @@ export class Runtime {
         ...handling,
       ]
     );
+    generator.frame = frame;
     if (!scope.isAsync) markIterableCoroutine(generator, fn);
     return generator;
   }
@@ -340,13 +370,7 @@ export class Runtime {
   readonly none = None;
   /** The limit sys.set_int_max_str_digits sets, 0 for none. */
   intMaxStrDigits = DEFAULT_MAX_STR_DIGITS;
-  /** The annotations of each class body, evaluated when the program reads `__annotations__` or `@dataclass` does. */
-  readonly classAnnotationThunks = new Map<PyClass, [string, () => PyValue][]>();
   private readonly streams = new Map<string, PyValue>();
-
-  classAnnotations(cls: PyClass): [PyValue, PyValue][] {
-    return (this.classAnnotationThunks.get(cls) ?? []).map(([name, thunk]) => [name, thunk()]);
-  }
 
   exceptionClass(name: string): PyClass {
     return exceptionClassNamed(name);
@@ -387,6 +411,11 @@ export class Runtime {
 
   systemExit(code: PyValue | undefined): PyError {
     return systemExitError(code);
+  }
+
+  /** The memoryview `memoryview(value)` gives. */
+  bufferView(value: PyValue): PyMemoryView {
+    return viewOf(value);
   }
 
   /** `int | None` and the like, which isinstance accepts and type hints use. */
@@ -450,6 +479,8 @@ export class Runtime {
 
   /** The sorted attribute names `dir()` lists, which AttributeError suggestions choose from. */
   dirNames(value: PyValue): string[] {
+    if (value instanceof PyClass && value.flags.isEnum && value.enumMembers) return enumClassDir(value, this);
+    if (value instanceof PyInstance && value.enumValue !== undefined) return enumMemberDir(value, this);
     // A module lists the names this grader does not support too, as CPython's module has them.
     const names =
       value instanceof PyModule
@@ -474,8 +505,8 @@ export class Runtime {
   }
 
   /** The objects that variables, objects, or pending values still reach, which reference counting would keep. */
-  reachableObjects(): Set<object> {
-    const roots = [...this.evaluator.handledExceptions, ...this.modules.values(), ...this.roots()];
+  reachableObjects(inFlight: unknown[] = []): Set<object> {
+    const roots = [...inFlight, ...this.evaluator.handledExceptions, ...this.modules.values(), ...this.roots()];
     const visited = findReachableObjects(roots);
     this.spend(Math.ceil(visited.size / 64));
     return visited;

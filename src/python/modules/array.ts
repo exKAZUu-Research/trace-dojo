@@ -6,9 +6,12 @@ import { intClass, isInstanceOf, pyError, typeError, typeName } from '../types';
 import type { PyValue } from '../values';
 
 // `array.array`, which CPython writes in C, written in Python over a list of converted items. Its items are converted
-// natively as CPython stores them in C types, with the same range errors; the parts that expose memory (bytes, buffers,
-// files) are not supported.
+// natively as CPython stores them in C types, with the same range errors, and packed with `struct` in the machine's
+// native layout, little-endian with 8-byte longs, for the methods that read or write bytes.
 const SOURCE = String.raw`
+import struct as _struct
+from operator import index as _index
+
 typecodes = 'bBuwhHiIlLqQfd'
 
 _ITEMSIZE = {'b': 1, 'B': 1, 'u': 4, 'w': 4, 'h': 2, 'H': 2, 'i': 4, 'I': 4,
@@ -42,6 +45,10 @@ class array:
                 if typecode not in 'uw':
                     raise TypeError(f"cannot use a str to initialize an array with typecode '{typecode}'")
                 self._items = list(initializer)
+            elif isinstance(initializer, (bytes, bytearray)):
+                self.frombytes(initializer)
+            elif isinstance(initializer, array) and initializer._typecode in 'uw' and typecode not in 'uw':
+                raise TypeError(f"cannot use a unicode array to initialize an array with typecode '{typecode}'")
             else:
                 self._items = [_convert(typecode, item) for item in initializer]
 
@@ -225,19 +232,54 @@ class array:
         _unsupported('配列のメモリ上の位置（array.buffer_info）')
 
     def byteswap(self):
-        _unsupported('配列のバイト順の入れ替え（array.byteswap）')
+        size = _ITEMSIZE[self._typecode]
+        if size == 1:
+            return
+        data = self.tobytes()
+        swapped = b''.join(data[start:start + size][::-1] for start in range(0, len(data), size))
+        self._items = []
+        self.frombytes(swapped)
+
+    def __buffer__(self, flags, /):
+        return memoryview(self.tobytes())
 
     def tobytes(self):
-        _unsupported('bytes 型（array.tobytes）')
+        if self._typecode in 'uw':
+            return _struct.pack(f'{len(self._items)}I', *[ord(item) for item in self._items])
+        return _struct.pack(f'{len(self._items)}{self._typecode}', *self._items)
 
     def frombytes(self, data, /):
-        _unsupported('bytes 型（array.frombytes）')
+        if isinstance(data, array):
+            data = data.tobytes()
+        elif isinstance(data, memoryview):
+            data = data.tobytes()
+        elif not isinstance(data, (bytes, bytearray)):
+            raise TypeError(f"a bytes-like object is required, not '{type(data).__name__}'")
+        size = _ITEMSIZE[self._typecode]
+        if len(data) % size:
+            raise ValueError('bytes length not a multiple of item size')
+        count = len(data) // size
+        if self._typecode in 'uw':
+            self._items.extend(chr(code) for code in _struct.unpack(f'{count}I', data))
+        else:
+            self._items.extend(_struct.unpack(f'{count}{self._typecode}', data))
 
-    def tofile(self, file, /):
-        _unsupported('ファイルの読み書き（array.tofile）')
+    def tofile(self, f, /):
+        data = self.tobytes()
+        for start in range(0, len(data), 64 * 1024):
+            f.write(data[start:start + 64 * 1024])
 
-    def fromfile(self, file, count, /):
-        _unsupported('ファイルの読み書き（array.fromfile）')
+    def fromfile(self, f, n, /):
+        n = _index(n)
+        if n < 0:
+            raise ValueError('negative count')
+        size = _ITEMSIZE[self._typecode] * n
+        data = f.read(size)
+        if not isinstance(data, bytes):
+            raise TypeError("read() didn't return bytes")
+        self.frombytes(data)
+        if len(data) != size:
+            raise EOFError("read() didn't return enough bytes")
 
 
 ArrayType = array

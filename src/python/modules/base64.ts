@@ -4,7 +4,8 @@ import { pyRepr } from '../conversions';
 import { builtin } from '../define';
 import { registerModule } from '../modules';
 import { argument } from '../nativeArgs';
-import { isTruthy } from '../objects';
+import { callValue, getAttribute, isTruthy, lengthOf } from '../objects';
+import { binaryOp } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { exceptionClassNamed, newException, None, pyError, typeError, typeName, unbox, valueError } from '../types';
 import { type Kwargs, PyError, type PyValue } from '../values';
@@ -268,6 +269,39 @@ function encodeBytes([value]: PyValue[]): PyValue {
   return newBytes(Uint8Array.from(pieces));
 }
 
+/** The bytes `encode` reads for one line of base64: 76 characters. */
+const MAXBINSIZE = 57n;
+
+/** `base64.encode(input, output)`, between binary streams such as io.BytesIO, line by line as CPython does. */
+function encodeStream([input, output]: PyValue[]): PyValue {
+  const runtime = currentRuntime();
+  const read = getAttribute(input, 'read');
+  const write = getAttribute(output, 'write');
+  const b2a = getAttribute(runtime.importModule('binascii'), 'b2a_base64');
+  for (let s = callValue(read, [MAXBINSIZE]); isTruthy(s); s = callValue(read, [MAXBINSIZE])) {
+    for (;;) {
+      if (BigInt(lengthOf(s)) >= MAXBINSIZE) break;
+      const more = callValue(read, [MAXBINSIZE - BigInt(lengthOf(s))]);
+      if (!isTruthy(more)) break;
+      s = binaryOp('+', s, more);
+    }
+    callValue(write, [callValue(b2a, [s])]);
+  }
+  return None;
+}
+
+/** `base64.decode(input, output)`, line by line. */
+function decodeStream([input, output]: PyValue[]): PyValue {
+  const runtime = currentRuntime();
+  const readline = getAttribute(input, 'readline');
+  const write = getAttribute(output, 'write');
+  const a2b = getAttribute(runtime.importModule('binascii'), 'a2b_base64');
+  for (let line = callValue(readline, []); isTruthy(line); line = callValue(readline, [])) {
+    callValue(write, [callValue(a2b, [line])]);
+  }
+  return None;
+}
+
 registerModule(
   'base64',
   () =>
@@ -360,10 +394,11 @@ registerModule(
       ],
       ['z85decode', builtin('z85decode', 'one', 1, 1, ([value]) => newBytes(z85decode(value)))],
       ['encodebytes', builtin('encodebytes', 'one', 1, 1, encodeBytes)],
+      ['encode', builtin('encode', 'takes', 2, 2, encodeStream, { keywords: ['input', 'output'] })],
+      ['decode', builtin('decode', 'takes', 2, 2, decodeStream, { keywords: ['input', 'output'] })],
       [
         'decodebytes',
         builtin('decodebytes', 'one', 1, 1, ([value]) => newBytes(decodeBase64(inputTypeCheck(value), false))),
       ],
-    ]),
-  { encode: 'base64.encode（ファイルの読み書き）', decode: 'base64.decode（ファイルの読み書き）' }
+    ])
 );

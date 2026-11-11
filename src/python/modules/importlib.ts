@@ -1,3 +1,4 @@
+import { builtin } from '../define';
 import { isSupportedModule, unsupportedModuleFeature } from '../moduleNames';
 import { registerModule } from '../modules';
 import { getAttribute, isTruthy } from '../objects';
@@ -52,10 +53,11 @@ registerModule(
           return importByName(text as string);
         }),
       ],
+      // The finders of the standard library, the only modules a program may import here, cache nothing to drop.
+      ['invalidate_caches', builtin('invalidate_caches', 'none', 0, 0, () => None)],
     ]),
   {
     reload: 'モジュールの再読み込み（importlib.reload()）',
-    invalidate_caches: 'importlib.invalidate_caches()',
     resources: 'importlib.resources',
     metadata: 'importlib.metadata',
     util: 'importlib.util',

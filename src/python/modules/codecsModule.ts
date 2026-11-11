@@ -1135,15 +1135,5 @@ registerSourceModule('codecs', SOURCE);
 // The codecs whose stateless functions this grader lacks, as `str.encode` lacks them.
 registerUnsupportedAttributes(
   'codecs',
-  Object.fromEntries(
-    [
-      'charmap_build',
-      'charmap_decode',
-      'charmap_encode',
-      'escape_encode',
-      'readbuffer_encode',
-      'utf_7_decode',
-      'utf_7_encode',
-    ].map((name) => [name, `codecs.${name}()`])
-  )
+  Object.fromEntries(['escape_encode', 'readbuffer_encode'].map((name) => [name, `codecs.${name}()`]))
 );

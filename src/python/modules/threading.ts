@@ -12,6 +12,7 @@ _start_thread = _thread._start_thread
 _allocate_lock = _thread.allocate_lock
 _time = _thread._monotonic
 get_ident = _thread.get_ident
+stack_size = _thread.stack_size
 get_native_id = _thread.get_native_id
 ThreadError = _thread.error
 TIMEOUT_MAX = _thread.TIMEOUT_MAX
@@ -674,6 +675,5 @@ registerSourceModule('threading', SOURCE, undefined, {
     setprofile_all_threads: 'threading.setprofile_all_threads()',
     settrace: 'threading.settrace()',
     settrace_all_threads: 'threading.settrace_all_threads()',
-    stack_size: 'threading.stack_size()',
   },
 });

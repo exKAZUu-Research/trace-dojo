@@ -13,6 +13,7 @@ import { delegateTo } from './generators';
 import { getAttribute, getItem, isTruthy, setAttribute, setItem } from './objects';
 import { binaryOp, compareOp, unaryOp } from './operators';
 import { targetSuspends } from './suspension';
+import { templateLiteral } from './templateStrings';
 import { suspendingCall } from './threads';
 import { newDict, None, sliceClass } from './types';
 import { type Kwargs, PySlice, type PyValue } from './values';
@@ -46,7 +47,7 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
         return yield* this.suspensionPoint(expression, frame);
       }
       case 'fstring': {
-        return yield* this.formattedStringSuspending(expression.parts, frame);
+        return yield* this.formattedStringSuspending(expression.parts, frame, expression.template);
       }
       case 'list':
       case 'tuple':
@@ -217,8 +218,9 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
     }
   }
 
-  private *formattedStringSuspending(parts: (string | FormattedValue)[], frame: Frame): Suspension {
+  private *formattedStringSuspending(parts: (string | FormattedValue)[], frame: Frame, template = false): Suspension {
     let result = '';
+    const fields: [PyValue, string][] = [];
     for (const part of parts) {
       if (typeof part === 'string') {
         result += part;
@@ -226,10 +228,14 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
       }
       const value = yield* this.evaluateSuspending(part.expression, frame);
       const spec = part.spec ? ((yield* this.evaluateSuspending(part.spec, frame)) as string) : '';
+      if (template) {
+        fields.push([value, spec]);
+        continue;
+      }
       result += formatPart(part, value, spec);
       this.runtime.buildString(result.length);
     }
-    return result;
+    return template ? templateLiteral(parts, fields) : result;
   }
 
   private *displaySuspending(kind: 'list' | 'tuple' | 'set', elements: Element[], frame: Frame): Suspension {

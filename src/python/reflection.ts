@@ -56,6 +56,11 @@ export function markGeneratorExpression(frame: Frame, iterable: PyValue): void {
   generatorIterables.set(frame, { value: iterable });
 }
 
+/** The frames CPython has on its stack: those of `frames` but the comprehensions it runs in the frame around them. */
+export function cpythonFrames(frames: readonly Frame[]): Frame[] {
+  return frames.filter((frame) => frame.kind !== 'comprehension' || generatorIterables.has(frame));
+}
+
 /**
  * The variables of a function's frame in CPython's order: the parameters and other variables in the order the
  * function first binds them, then the variables nested functions capture, then those it captures, each by name.

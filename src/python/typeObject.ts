@@ -17,6 +17,7 @@ import {
   isCallable,
   lookupSpecial,
   nextOf,
+  remainingOf,
 } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { typeOr } from './typeHints';
@@ -279,7 +280,28 @@ export function defineIteratorClass(cls: PyClass): void {
     return value;
   });
   method(cls, '__repr__', 'none', 0, 0, (self) => `<${cls.name} object at ${addressOf(self as PyObject)}>`);
+  if (HINTED_ITERATORS.has(cls.name)) {
+    method(cls, '__length_hint__', 'none', 0, 0, (self) => BigInt(remainingOf((self as PyIterator).next) ?? 0));
+  }
 }
+
+/** The native iterators that know how many items they have left, as their `__length_hint__` tells. */
+const HINTED_ITERATORS = new Set([
+  'list_iterator',
+  'list_reverseiterator',
+  'tuple_iterator',
+  'range_iterator',
+  'longrange_iterator',
+  'str_ascii_iterator',
+  'str_iterator',
+  'dict_keyiterator',
+  'dict_valueiterator',
+  'dict_itemiterator',
+  'set_iterator',
+  'reversed',
+  'collections._deque_iterator',
+  'collections._deque_reverse_iterator',
+]);
 
 for (const cls of iteratorClasses.values()) defineIteratorClass(cls);
 iteratorClassSetup.push(defineIteratorClass);
@@ -402,6 +424,17 @@ function bindThroughSuper(value: PyValue, self: PyValue, selfClass: PyClass): Py
   }
   return getter === undefined ? bindValue(value, self, selfClass) : callGetter(getter, value, self, selfClass);
 }
+
+// method ------------------------------------------------------------------------------------------------------------
+
+/** `types.MethodType(function, instance)`. */
+methodClass.construct = (cls, args, kwargs) => {
+  checkArgs({ qualified: 'method', min: 2, max: 2, style: 'expected' }, args, kwargs);
+  const [fn, self] = args;
+  if (!isCallable(fn)) throw typeError('first argument must be callable');
+  if (self === None) throw typeError('instance must not be None');
+  return new PyBoundMethod(cls, self, fn);
+};
 
 // slice -------------------------------------------------------------------------------------------------------------
 

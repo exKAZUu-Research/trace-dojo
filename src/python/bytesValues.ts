@@ -74,6 +74,8 @@ export class PyBytes extends PyObject {
 /** A `memoryview`: a one-dimensional view of items of `format` over the bytes of a bytes or bytearray object. */
 export class PyMemoryView extends PyObject {
   released = false;
+  /** The dimensions of a C-contiguous view that cast() gave more than one, or undefined for a one-dimensional view. */
+  shape?: number[];
 
   // code-gauge-allow functionParameterCount 7 -- Each view field is set once at creation, as CPython's buffer struct.
   constructor(
@@ -141,6 +143,10 @@ export function sameKind(self: PyBytes, data: Uint8Array): PyBytes {
 export function bytesLikeData(value: PyValue): Uint8Array | undefined {
   if (value instanceof PyBytes) return value.data;
   if (value instanceof PyMemoryView) return value.toBytes();
+  // A Python class implements the buffer protocol with `__buffer__` (PEP 688), as `array.array` does.
+  if (value instanceof PyObject && !value.cls.isBuiltin && value.cls.lookup('__buffer__') !== undefined) {
+    return currentRuntime().bufferView(value).toBytes();
+  }
   return undefined;
 }
 

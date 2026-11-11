@@ -9,6 +9,7 @@ import {
   generatorNext,
   isGeneratorExit,
   resumeGenerator,
+  setDelegate,
   thrownError,
 } from './generators';
 import { bindValue, callValue, getAttributeOrUndefined, isTruthy, lookupSpecial } from './objects';
@@ -258,6 +259,7 @@ export function* awaitValue(value: PyValue, frame: Frame, row: number | undefine
   frame.temporaries.push(iterator);
   const isCoroutine = iterator instanceof PyGenerator && iterator.cls === coroutineClass;
   if (isCoroutine) awaited.add(iterator);
+  setDelegate(frame, iterator);
   try {
     let input: GeneratorInput = { value: None };
     for (;;) {
@@ -279,6 +281,7 @@ export function* awaitValue(value: PyValue, frame: Frame, row: number | undefine
     }
   } finally {
     if (isCoroutine) awaited.delete(iterator);
+    setDelegate(frame, undefined);
     frame.temporaries.length = length;
   }
 }

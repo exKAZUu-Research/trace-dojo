@@ -1,10 +1,16 @@
 import { bytesLikeData, newBytes } from '../bytesValues';
+import { charmapNatives } from '../charmapCodecs';
 import {
+  callCodec,
   codecModule,
   customErrorHandler,
   decodeBytes,
   encodeString,
+  ErrorHandling,
+  hasTextCodec,
+  lookupCodec,
   registerErrorHandler,
+  setEncodingsCodecLookup,
   setRegisteredCodecLookup,
 } from '../codecs';
 import { builtin } from '../define';
@@ -17,11 +23,12 @@ import { currentRuntime } from '../runtimeContext';
 import { exceptionClassNamed, isInstanceOf, newException, newTuple, None, typeError, typeName } from '../types';
 import { characterName } from '../unicodeDatabase';
 import { escapePoint } from '../unicodeErrors';
+import { utf7Natives } from '../utf7';
 import { PyError, PyInstance, PyTuple, type PyValue } from '../values';
 import { escapeDecodeFunction } from './escapeDecode';
 
 /** The codec modules whose `encodings` module this grader has, which `codecs.lookup` imports. */
-export const ENCODINGS_MODULES = [
+export const ENCODINGS_MODULES = new Set<string>([
   'ascii',
   'latin_1',
   'utf_8',
@@ -35,12 +42,16 @@ export const ENCODINGS_MODULES = [
   'shift_jis',
   'cp932',
   'euc_jp',
-  'iso2022_jp',
   'rot_13',
   'hex_codec',
   'base64_codec',
   'zlib_codec',
-] as const;
+]);
+
+/** Adds the `encodings` module of a codec, which `codecs.lookup` imports. */
+export function addEncodingsModule(module: string): void {
+  ENCODINGS_MODULES.add(module);
+}
 
 /** The codecs whose stateless functions `_codecs` exports, such as `utf_8_encode` and `utf_8_decode`. */
 const UNICODE_CODECS = [
@@ -79,6 +90,14 @@ registerModule('_codecs', () => {
       builtin('_encode_with', 'expected', 3, 3, ([module, input, errors]) => encodeWith(module, input, errors)),
     ],
     [
+      '_incremental_decoder',
+      builtin('_incremental_decoder', 'one', 1, 1, ([module]) => incrementalDecoder(module as string)),
+    ],
+    [
+      '_incremental_encoder',
+      builtin('_incremental_encoder', 'one', 1, 1, ([module]) => incrementalEncoder(module as string)),
+    ],
+    [
       '_decode_with',
       builtin('_decode_with', 'expected', 4, 4, ([module, input, errors, final]) =>
         decodeWith(module as string, input, errors, isTruthy(final), `${module as string}_decode`)
@@ -94,12 +113,16 @@ registerModule('_codecs', () => {
     entries.set(`${module}_decode`, unicodeDecoder(module));
   }
   entries.set('escape_decode', escapeDecodeFunction);
+  for (const [name, value] of [...charmapNatives(), ...utf7Natives()]) entries.set(name, value);
   entries.set('utf_16_ex_decode', exDecoder(2));
   entries.set('utf_32_ex_decode', exDecoder(4));
   return entries;
 });
 
 // The codec registry -------------------------------------------------------------------------------------------------
+
+// `str.encode` and `bytes.decode` run the codecs written in Python through their `encodings` modules.
+setEncodingsCodecLookup((module) => (ENCODINGS_MODULES.has(module) ? searchEncodings(module) : undefined));
 
 // `str.encode` and `bytes.decode` find the encodings registered search functions give, as in CPython.
 setRegisteredCodecLookup((encoding) => {
@@ -165,7 +188,7 @@ function cacheKey(encoding: string): string {
 function searchEncodings(encoding: string): PyValue | undefined {
   const module = codecModule(encoding);
   if (module === undefined) return undefined;
-  if (!(ENCODINGS_MODULES as readonly string[]).includes(module)) {
+  if (!ENCODINGS_MODULES.has(module)) {
     throw currentRuntime().unsupported(`文字コード ${module}`);
   }
   const getregentry = importModule(currentRuntime(), `encodings.${module}`).dict.get('getregentry');
@@ -196,7 +219,7 @@ function codecFunction(direction: 'encode' | 'decode'): PyValue {
       const object = argument(args, kwargs, 0, 'obj') as PyValue;
       const encoding = stringArgument(direction, 'encoding', argument(args, kwargs, 1, 'encoding') ?? 'utf8');
       const errors = stringArgument(direction, 'errors', argument(args, kwargs, 2, 'errors') ?? 'strict');
-      const result = callValue(codecInfoFunction(lookup(encoding), direction), [object, errors]);
+      const result = callCodec(codecInfoFunction(lookup(encoding), direction), [object, errors], direction, encoding);
       if (!(result instanceof PyTuple) || result.items.length !== 2) {
         throw typeError(`${direction}r must return a tuple (object, integer)`);
       }
@@ -246,12 +269,62 @@ function unicodeDecoder(module: string): PyValue {
 function decodeWith(module: string, input: PyValue, errors: PyValue, final: boolean, name: string): PyValue {
   const data = requireBytes(input);
   const handler = errorsName(name, errors);
-  if (!final && module === 'iso2022_jp') {
-    throw currentRuntime().unsupported('ISO-2022-JP の少しずつの復号（codecs の IncrementalDecoder・StreamReader）');
-  }
   const used = final ? data.length : data.length - incompleteTail(data, module);
   const text = used === 0 ? '' : decodeBytes(data.subarray(0, used), module, handler);
   return newTuple([text, BigInt(used)]);
+}
+
+/**
+ * The incremental decoder or encoder of a codec that keeps a state, such as iso2022_jp, which io's TextIOWrapper uses
+ * in place of its own, or None for any other codec.
+ */
+export function statefulCodecFunction(encoding: string, direction: 'encode' | 'decode'): PyValue {
+  const module = codecModule(encoding);
+  if (module === undefined || !hasTextCodec(module)) return None;
+  const codec = lookupCodec(module, direction);
+  if (direction === 'decode') return codec.incrementalDecoder ? incrementalDecoder(module) : None;
+  return codec.incrementalEncoder ? incrementalEncoder(module) : None;
+}
+
+/**
+ * The decoder of an IncrementalDecoder or StreamReader of a multibyte codec, which keeps the codec's state from one
+ * call to the next: `decode(data, errors, final)` gives the text and how many bytes it used.
+ */
+function incrementalDecoder(module: string): PyValue {
+  const codec = lookupCodec(module, 'decode');
+  const decode = codec.incrementalDecoder?.();
+  return builtin('decode', 'expected', 3, 3, ([input, errors, final]) => {
+    if (!decode) return decodeWith(module, input, errors, isTruthy(final), `${module}_decode`);
+    const data = requireBytes(input);
+    const handling = new ErrorHandling(
+      errorsName('decode', errors),
+      codec.name,
+      new Uint8Array(data),
+      codec.inlineHandlers?.decode
+    );
+    const { text, consumed } = decode(data, handling, isTruthy(final));
+    return newTuple([text, BigInt(consumed)]);
+  });
+}
+
+/** The encoder of an IncrementalEncoder or StreamWriter of a multibyte codec, which keeps the codec's state. */
+function incrementalEncoder(module: string): PyValue {
+  const codec = lookupCodec(module, 'encode');
+  const encode = codec.incrementalEncoder?.();
+  return builtin('encode', 'expected', 3, 3, ([input, errors, final]) => {
+    if (typeof input !== 'string') throw typeError(`encode() argument 1 must be str, not ${typeName(input)}`);
+    if (!encode) return newBytes(encodeString(input, module, errorsName('encode', errors)));
+    // oxlint-disable-next-line typescript/no-misused-spread -- Python encodes strings by code point.
+    const points = [...input].map((char) => char.codePointAt(0) as number);
+    const handling = new ErrorHandling(
+      errorsName('encode', errors),
+      codec.name,
+      input,
+      codec.inlineHandlers?.encode,
+      points
+    );
+    return newBytes(encode(points, handling, isTruthy(final)));
+  });
 }
 
 /** `utf_16_ex_decode(data, errors, byteorder, final)`: decodes in the order a BOM gives, which it reports. */
@@ -303,7 +376,7 @@ function incompleteTail(data: Uint8Array, module: string): number {
   if (module.startsWith('utf_32')) return data.length % 4;
   if (module === 'shift_jis' || module === 'cp932') return multibyteTail(data, shiftJisLength);
   if (module === 'euc_jp') return multibyteTail(data, eucJpLength);
-  return 0;
+  return lookupCodec(module, 'decode').incompleteTail?.(data) ?? 0;
 }
 
 /** The bytes of a UTF-8 sequence that the end of `data` leaves incomplete, when they are valid so far. */

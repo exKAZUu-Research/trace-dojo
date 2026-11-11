@@ -163,11 +163,6 @@ test.each([
   ['hash() of a list', 'hash([])', "TypeError: unhashable type: 'list'"],
   ['a Counter of lists', 'import collections\ncollections.Counter([[]])', "TypeError: unhashable type: 'list'"],
   [
-    'the traceback of a raised exception',
-    'try:\n    1 / 0\nexcept Exception as e:\n    e.__traceback__',
-    '例外のトレースバック（__traceback__）は、この採点環境では使えません。',
-  ],
-  [
     'math.gamma, which CPython takes from the C library',
     'import math\nmath.gamma(1.5)',
     'math.gamma()（C ライブラリの tgamma と最後の桁まで同じ値を出せないため）は、この採点環境では使えません。',

@@ -39,6 +39,8 @@ export interface FormattedValue {
   spec?: Expression;
   /** The source text of a self-documenting `{x=}`, which precedes the value. */
   debugText?: string;
+  /** The source text of the expression, which a t-string's Interpolation keeps. */
+  expressionText?: string;
 }
 
 export type Argument =
@@ -73,7 +75,8 @@ export type Expression = Span &
   (
     | { kind: 'constant'; value: Constant }
     | NameRef
-    | { kind: 'fstring'; parts: (string | FormattedValue)[] }
+    /** An f-string, or a t-string (PEP 750) when `template` is set. */
+    | { kind: 'fstring'; parts: (string | FormattedValue)[]; template?: boolean }
     | { kind: 'list' | 'tuple' | 'set'; elements: Element[] }
     | { kind: 'dict'; items: DictItem[] }
     | { kind: 'attribute'; object: Expression; name: string }
@@ -250,9 +253,13 @@ export type Statement = Span &
         stepRow?: number;
         /** Whether the annotation is stored into `__annotations__`, as `from __future__ import annotations` does. */
         storesAnnotation?: boolean;
+        /** The position among a module's annotations, which running it adds to `__conditional_annotations__`. */
+        annotationIndex?: number;
       }
     /** Creates the `__annotations__` dict that annotated assignments store into under `from __future__ import annotations`. */
     | { kind: 'setupAnnotations' }
+    /** Binds a module's `__annotate__` and `__conditional_annotations__`, which its annotations need. */
+    | { kind: 'setupAnnotate' }
     | { kind: 'delete'; targets: Target[]; stepRow?: number }
     | { kind: 'pass' }
     | { kind: 'break' | 'continue' }
@@ -294,4 +301,8 @@ export interface Module {
   body: Statement[];
   scope: ScopeInfo;
   doc?: string;
+  /** The `__future__` features the module enables, which the code it compiles inherits. */
+  futureFeatures: string[];
+  /** The source text the module was parsed from. */
+  source?: string;
 }

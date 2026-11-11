@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 420 -- The enum machinery keeps the members, flags, and their boundaries together.
 import { pyRepr, pyStr } from './conversions';
 import { hashInt, pyHash } from './hashing';
 import { getItem } from './items';
@@ -248,11 +249,18 @@ function isDunderOrSunder(name: string): boolean {
 }
 
 function isDescriptorLike(value: PyValue): boolean {
-  return (
+  if (
     value instanceof PyFunction ||
     value instanceof PyDescriptor ||
     value instanceof PyBuiltinFunction ||
     value instanceof PyClass
+  ) {
+    return true;
+  }
+  // `enum._is_descriptor`: an object whose class defines __get__, __set__, or __delete__, as enum.property does.
+  return (
+    value instanceof PyInstance &&
+    ['__get__', '__set__', '__delete__'].some((name) => value.cls.lookup(name) !== undefined)
   );
 }
 
@@ -369,7 +377,7 @@ function flagMask(cls: PyClass): bigint {
 }
 
 /** The member for a flag value: a named member, or a combination named after the members whose bits it has. */
-export function flagMember(cls: PyClass, value: bigint): PyInstance {
+export function flagMember(cls: PyClass, value: bigint): PyValue {
   for (const member of membersByName(cls).values()) if (member.enumValue === value) return member;
   let cache = pseudoMembers.get(cls);
   if (!cache) {
@@ -379,17 +387,57 @@ export function flagMember(cls: PyClass, value: bigint): PyInstance {
   const cached = cache.get(value);
   if (cached) return cached;
   const mask = flagMask(cls);
+  const bounded = withinBoundary(cls, value, mask);
+  if (bounded === undefined) return value;
+  if (bounded !== value) return flagMember(cls, bounded);
   const extra = value & ~mask;
-  if ((extra !== 0n || value < 0n) && !cls.isSubclassOf(intClass)) throw invalidFlag(cls, value, mask);
+  if (extra !== 0n && boundaryOf(cls) !== 'keep') throw invalidFlag(cls, value, mask);
   const names = (cls.enumMembers ?? [])
     .filter((member) => ((member.enumValue as bigint) & value) !== 0n)
     .map((member) => memberName(member) as string);
-  if (extra !== 0n) names.push(String(extra));
+  // Unknown bits join the names of the known ones; a value with no known bits has no name.
+  if (extra !== 0n && names.length > 0) names.push(String(extra));
   const member = new PyInstance(cls);
   member.enumValue = value;
   member.dict.set('_name_', names.length === 0 ? None : names.join('|'));
   cache.set(value, member);
   return member;
+}
+
+/** The FlagBoundary of a Flag class: `_boundary_` of the class or a base, KEEP for an IntFlag and STRICT otherwise. */
+function boundaryOf(cls: PyClass): string {
+  const boundary = cls.lookup('_boundary_');
+  const value = boundary instanceof PyInstance ? boundary.enumValue : boundary;
+  if (typeof value === 'string') return value;
+  return cls.isSubclassOf(intClass) ? 'keep' : 'strict';
+}
+
+/**
+ * A flag value out of the class's range, adjusted as `Flag._missing_` does for the class's boundary: STRICT raises,
+ * CONFORM keeps the defined bits, EJECT gives the plain int (undefined here), and KEEP turns a negative value positive.
+ */
+function withinBoundary(cls: PyClass, value: bigint, mask: bigint): bigint | undefined {
+  const allBits = (1n << BigInt(mask.toString(2).length)) - 1n;
+  if (mask === 0n || (value >= ~allBits && value <= allBits && (value & (allBits ^ mask)) === 0n)) {
+    return value < 0n ? allBits + 1n + value : value;
+  }
+  switch (boundaryOf(cls)) {
+    case 'strict': {
+      throw invalidFlag(cls, value, mask);
+    }
+    case 'conform': {
+      return value & mask;
+    }
+    case 'eject': {
+      return undefined;
+    }
+    default: {
+      if (value >= 0n) return value;
+      const width = BigInt((-value).toString(2).length);
+      const ceiling = allBits + 1n > 1n << width ? allBits + 1n : 1n << width;
+      return ceiling + value;
+    }
+  }
 }
 
 function invalidFlag(cls: PyClass, value: bigint, mask: bigint): Error {
@@ -516,9 +564,78 @@ enumTypeClass.dict.set(
 );
 
 defineMethod(enumTypeClass, '__contains__', (cls, [value]) => enumContains(cls as PyClass, value));
+defineMethod(enumTypeClass, '__iter__', (cls) => getIterator(newList([...((cls as PyClass).enumMembers ?? [])])));
 defineMethod(enumTypeClass, '__reversed__', (cls) =>
   getIterator(newList([...((cls as PyClass).enumMembers ?? [])].toReversed()))
 );
+
+/** `EnumType.__dir__`: the members and the class's protocol, with what `dir()` lists of a mixed-in type. */
+export function enumClassDir(cls: PyClass, runtime: { dirNames: (value: PyValue) => string[] }): string[] {
+  const names = new Set([
+    '__class__',
+    '__contains__',
+    '__doc__',
+    '__getitem__',
+    '__init_subclass__',
+    '__iter__',
+    '__len__',
+    '__members__',
+    '__module__',
+    '__name__',
+    '__qualname__',
+    ...(cls.enumMembers ?? []).map((member) => memberName(member) as string),
+  ]);
+  const memberType = cls.mro.find((each) => each.isBuiltin && !each.flags.isEnum && each !== objectClass);
+  if (memberType) {
+    names.add('__new__');
+    for (const name of runtime.dirNames(memberType)) names.add(name);
+  }
+  return [...names].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/** `Enum.__dir__`: what a member offers beside the members, with all of `object.__dir__` for a mixed-in type. */
+export function enumMemberDir(member: PyInstance, runtime: { dirNames: (value: PyValue) => string[] }): string[] {
+  const cls = member.cls;
+  const memberType = cls.mro.find((each) => each.isBuiltin && !each.flags.isEnum && each !== objectClass);
+  const names = new Set(
+    memberType
+      ? runtime.dirNames(memberValue(member))
+      : ['__class__', '__doc__', '__eq__', '__hash__', '__module__', 'name', 'value']
+  );
+  const members = membersByName(cls);
+  for (const each of cls.mro) {
+    for (const name of each.dict.keys()) if (!name.startsWith('_') && !members.has(name)) names.add(name);
+  }
+  for (const name of ['__class__', '__doc__', '__eq__', '__hash__', '__module__']) names.add(name);
+  return [...names].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/** The data of an Enum class that EnumType keeps: its members by name and by value, and the bits of a Flag's. */
+export function enumClassData(cls: PyClass, name: string): PyValue | undefined {
+  const runtime = currentRuntime();
+  const named = membersByName(cls);
+  switch (name) {
+    case '_member_names_': {
+      return runtime.listOf((cls.enumMembers ?? []).map((member) => memberName(member)));
+    }
+    case '_member_map_': {
+      return newDict([...named].map(([key, member]): [PyValue, PyValue] => [key, member]));
+    }
+    case '_value2member_map_': {
+      return newDict([...named.values()].map((member): [PyValue, PyValue] => [member.enumValue as PyValue, member]));
+    }
+    case '_flag_mask_':
+    case '_singles_mask_': {
+      return isFlagClass(cls) ? flagMask(cls) : undefined;
+    }
+    case '_all_bits_': {
+      return isFlagClass(cls) ? (1n << BigInt(flagMask(cls).toString(2).length)) - 1n : undefined;
+    }
+    default: {
+      return undefined;
+    }
+  }
+}
 
 export function newAuto(): PyValue {
   return new PyOpaque(autoClass, 'auto()');

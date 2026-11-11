@@ -250,7 +250,7 @@ function collectParameters(args: readonly PyValue[]): PyValue[] {
  */
 export function typingMroEntries(base: PyValue, bases: readonly PyValue[], className: string): PyValue[] | undefined {
   for (const hook of mroEntryHooks) {
-    const entries = hook(base, className);
+    const entries = hook(base, className, bases);
     if (entries) return entries;
   }
   if (!(base instanceof PyTypingAlias) || base.isUnpack) return undefined;
@@ -265,7 +265,8 @@ function declaresParameters(value: PyValue): boolean {
 }
 
 /** The `__mro_entries__` of objects `typing` defines, such as `NamedTuple`, which give the classes they stand for. */
-export const mroEntryHooks: ((base: PyValue, className: string) => PyValue[] | undefined)[] = [];
+export const mroEntryHooks: ((base: PyValue, className: string, bases: readonly PyValue[]) => PyValue[] | undefined)[] =
+  [];
 
 /** Sets `__parameters__` of a class deriving from Generic, as `Generic.__init_subclass__` does. */
 // code-gauge-allow functionCognitiveComplexity 16 -- Follows Generic.__init_subclass__, which checks each way bases declare type parameters.

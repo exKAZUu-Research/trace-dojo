@@ -7,8 +7,7 @@ import { toIndex } from '../numbers';
 import { isTruthy } from '../objects';
 import { exceptionClassNamed, newException, typeError, typeName, unbox, valueError } from '../types';
 import { PyError, type PyValue } from '../values';
-import { a2bQp, b2aQp } from './binasciiQp';
-import { clinicFunction } from './clinicArgs';
+import { decodeQp, decodeUu, encodeQp, encodeUu } from './binasciiText';
 import { builtinClassWithBase } from './moduleClasses';
 
 export const binasciiErrorClass = builtinClassWithBase('Error', exceptionClassNamed('ValueError'), 'binascii');
@@ -210,31 +209,65 @@ registerModule(
         ),
       ],
       [
+        'a2b_uu',
+        builtin('a2b_uu', 'one', 1, 1, ([value]) => {
+          const decoded = decodeUu(asciiData(value));
+          if (typeof decoded === 'string') throw binasciiError(decoded);
+          return newBytes(decoded);
+        }),
+      ],
+      [
+        'b2a_uu',
+        builtin(
+          'b2a_uu',
+          'takes',
+          1,
+          1,
+          (args, kwargs) => {
+            const data = binaryData(args[0]);
+            if (data.length > 45) throw binasciiError('At most 45 bytes at once');
+            return newBytes(encodeUu(data, isTruthy(kwargs?.get('backtick') ?? false)));
+          },
+          { keywords: ['backtick'] }
+        ),
+      ],
+      [
         'a2b_qp',
-        clinicFunction(
-          { name: 'a2b_qp', params: ['data', 'header'], positionalOnly: 0, required: 1 },
-          ([data, header]) => newBytes(a2bQp(asciiData(data as PyValue), header !== undefined && isTruthy(header)))
+        builtin(
+          'a2b_qp',
+          'takes',
+          1,
+          2,
+          (args, kwargs) => {
+            const [data, header] = ['data', 'header'].map((name, index) => argument(args, kwargs, index, name));
+            return newBytes(decodeQp(asciiData(data as PyValue), isTruthy(header ?? false)));
+          },
+          { keywords: ['data', 'header'] }
         ),
       ],
       [
         'b2a_qp',
-        clinicFunction(
-          { name: 'b2a_qp', params: ['data', 'quotetabs', 'istext', 'header'], positionalOnly: 0, required: 1 },
-          ([data, quotetabs, istext, header]) =>
-            newBytes(
-              b2aQp(binaryData(data as PyValue), {
-                quotetabs: quotetabs !== undefined && isTruthy(quotetabs),
-                istext: istext === undefined || isTruthy(istext),
-                header: header !== undefined && isTruthy(header),
+        builtin(
+          'b2a_qp',
+          'takes',
+          1,
+          4,
+          (args, kwargs) => {
+            const [data, quotetabs, istext, header] = ['data', 'quotetabs', 'istext', 'header'].map((name, index) =>
+              argument(args, kwargs, index, name)
+            );
+            return newBytes(
+              encodeQp(binaryData(data as PyValue), {
+                quotetabs: isTruthy(quotetabs ?? false),
+                istext: isTruthy(istext ?? true),
+                header: isTruthy(header ?? false),
               })
-            )
+            );
+          },
+          { keywords: ['data', 'quotetabs', 'istext', 'header'] }
         ),
       ],
       ['Error', binasciiErrorClass],
       ['Incomplete', incompleteClass],
-    ]),
-  {
-    a2b_uu: 'binascii.a2b_uu',
-    b2a_uu: 'binascii.b2a_uu',
-  }
+    ])
 );

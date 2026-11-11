@@ -1,34 +1,62 @@
 import { type DictEntry, DictStore } from './dictStore';
 import { pyHash } from './hashing';
-import { UnsupportedFeatureError } from './unsupported';
 import type { PyValue } from './values';
+
+/** The entries of each object's attributes whose keys are not strings, with the attribute each was stored after. */
+interface Extras {
+  store: DictStore;
+  after: Map<DictEntry, string | undefined>;
+}
+
+const extrasOf = new WeakMap<Map<string, PyValue>, Extras>();
 
 /**
  * The entries of an object's attributes seen as a dict, so that the `__dict__` a program reads stays the object's own
- * attributes: what it stores through the dict, the object has, and the other way round.
+ * attributes: what it stores through the dict, the object has, and the other way round. A key that is not a string,
+ * which no attribute can have, is kept beside them and listed after the attribute stored last before it.
  */
 export class AttributeStore extends DictStore {
   constructor(private readonly attributes: Map<string, PyValue>) {
     super();
   }
 
+  private get extras(): Extras | undefined {
+    return extrasOf.get(this.attributes);
+  }
+
   override get size(): number {
-    return this.attributes.size;
+    return this.attributes.size + (this.extras?.store.size ?? 0);
   }
 
   override lookup(key: PyValue): DictEntry | undefined {
-    if (typeof key !== 'string') return undefined;
+    if (typeof key !== 'string') return this.extras?.store.lookup(key);
     const value = this.attributes.get(key);
     return value === undefined ? undefined : entryOf(key, value);
   }
 
   override set(key: PyValue, value: PyValue): void {
     if (typeof key !== 'string') {
-      pyHash(key);
-      throw new UnsupportedFeatureError('属性の辞書（__dict__）への文字列以外のキーの追加');
+      this.setExtra(key, value);
+      return;
     }
     if (!this.attributes.has(key)) this.version++;
     this.attributes.set(key, value);
+  }
+
+  private setExtra(key: PyValue, value: PyValue): void {
+    let extras = this.extras;
+    if (!extras) {
+      extras = { store: new DictStore(), after: new Map() };
+      extrasOf.set(this.attributes, extras);
+    }
+    const known = extras.store.lookup(key);
+    if (known) {
+      known.value = value;
+      return;
+    }
+    extras.store.set(key, value);
+    extras.after.set(extras.store.lookup(key) as DictEntry, [...this.attributes.keys()].at(-1));
+    this.version++;
   }
 
   override delete(key: PyValue): DictEntry | undefined {
@@ -38,17 +66,36 @@ export class AttributeStore extends DictStore {
   }
 
   override remove(entry: DictEntry): void {
-    this.attributes.delete(entry.key as string);
+    if (typeof entry.key === 'string') this.attributes.delete(entry.key);
+    else this.extras?.store.remove(entry);
     this.version++;
   }
 
   override clear(): void {
     this.attributes.clear();
+    extrasOf.delete(this.attributes);
     this.version++;
   }
 
   override *liveEntries(): Generator<DictEntry> {
-    for (const [key, value] of this.attributes) yield entryOf(key, value);
+    const extras = this.extras;
+    if (!extras) {
+      for (const [key, value] of this.attributes) yield entryOf(key, value);
+      return;
+    }
+    const pending = [...extras.store.liveEntries()];
+    const following = (key: string | undefined): DictEntry[] =>
+      pending.filter((entry) => extras.after.get(entry) === key);
+    yield* following(undefined);
+    for (const [key, value] of this.attributes) {
+      yield entryOf(key, value);
+      yield* following(key);
+    }
+    // The entries whose attribute was deleted since come last.
+    yield* pending.filter((entry) => {
+      const after = extras.after.get(entry);
+      return after !== undefined && !this.attributes.has(after);
+    });
   }
 
   override ordered(): DictEntry[] {

@@ -1,13 +1,16 @@
 import { pyRepr } from './conversions';
-import { callValue } from './objects';
+import { callValue, getAttribute } from './objects';
 import type { Runtime } from './runtime';
 import { None } from './types';
 import type { PyValue } from './values';
 
-/** `sys.displayhook`, which shows the value of an expression statement compiled in 'single' mode on sys.stdout. */
-export function displayValue(runtime: Runtime, value: PyValue): void {
-  if (value === None) return;
+/** `sys.displayhook(value)`: writes the repr of a value other than None to `sys.stdout` and keeps it as `_`. */
+export function displayValue(runtime: Runtime, value: PyValue): PyValue {
+  if (value === None) return None;
   runtime.builtins.set('_', None);
-  callValue(runtime.builtins.get('print') as PyValue, [pyRepr(value)]);
+  const write = getAttribute(getAttribute(runtime.importModule('sys'), 'stdout'), 'write');
+  callValue(write, [pyRepr(value)]);
+  callValue(write, ['\n']);
   runtime.builtins.set('_', value);
+  return None;
 }

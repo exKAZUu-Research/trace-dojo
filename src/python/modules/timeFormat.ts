@@ -1,7 +1,8 @@
 // `strftime` and `strptime` of the `time` and `datetime` modules in the C locale, as CPython 3.14 on macOS formats and
 // parses them (CPython hands most directives to the C library's strftime, whose extensions differ by platform).
-import { UnsupportedFeatureError } from '../unsupported';
 import { daysInMonth, fromIsoCalendar, fromOrdinal, isLeap, isoCalendar, toOrdinal } from './calendarMath';
+import { FLAG } from './re/constants';
+import { compileRegex } from './re/pattern';
 
 export const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 export const MONTH_NAMES = [
@@ -248,7 +249,13 @@ export function strptime(text: string, format: string): ParsedTime | { error: st
       if (directive === '') return { error: `stray % in format '${format}'` };
       return { error: `'${directive.replace('\\', '')}' is a bad directive in format '${format}'` };
     }
-    throw new UnsupportedFeatureError('同じ指定を2回含む strptime の書式');
+    // A directive repeated defines a group twice, which CPython's `re` rejects with its PatternError.
+    const cpythonPattern = expand(format)
+      .replaceAll('(?<', '(?P<')
+      .replace('(?P<Z>utc|gmt|jst)', '(?P<Z>jst|gmt|utc)')
+      .replaceAll(String.raw`(\.\d{1,6})?)?|Z)`, String.raw`(\.\d{1,6})?)?|(?-i:Z))`);
+    compileRegex(cpythonPattern, FLAG.IGNORECASE);
+    throw error;
   }
   const found = pattern.exec(text);
   if (!found || found.groups?.z === 'z') {

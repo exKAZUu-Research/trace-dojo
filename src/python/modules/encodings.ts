@@ -1,5 +1,9 @@
+import { CJK_MODULES } from '../cjkCodecs';
+import { ISO2022_MODULES } from '../iso2022Codecs';
+import { JIS_X_0213_MODULES } from '../jisX0213Codecs';
 import { registerSourceModule } from '../sourceModules';
 import type { PyValue } from '../values';
+import { addEncodingsModule } from './codecsNative';
 
 // CPython's `encodings/ascii.py`.
 const ASCII = String.raw`
@@ -1117,24 +1121,80 @@ class Codec(codecs.Codec):
     decode = codec.decode
 
 class IncrementalEncoder(codecs.IncrementalEncoder):
+    def __init__(self, errors='strict'):
+        codecs.IncrementalEncoder.__init__(self, errors)
+        self._encoder = _codecs._incremental_encoder(_NAME)
+
     def encode(self, input, final=False):
-        if _STATEFUL:
-            _unsupported('ISO-2022-JP \u306E\u5C11\u3057\u305A\u3064\u306E\u7B26\u53F7\u5316\uFF08codecs \u306E IncrementalEncoder\u30FBStreamWriter\uFF09')
-        return codec.encode(input, self.errors)[0]
+        return self._encoder(input, self.errors, final)
+
+    def reset(self):
+        self._encoder = _codecs._incremental_encoder(_NAME)
 
 class IncrementalDecoder(codecs.BufferedIncrementalDecoder):
+    def __init__(self, errors='strict'):
+        codecs.BufferedIncrementalDecoder.__init__(self, errors)
+        self._decoder = _codecs._incremental_decoder(_NAME)
+
     def _buffer_decode(self, input, errors, final):
-        return _codecs._decode_with(_NAME, input, errors, final)
+        return self._decoder(input, errors, final)
 
+    def reset(self):
+        codecs.BufferedIncrementalDecoder.reset(self)
+        self._decoder = _codecs._incremental_decoder(_NAME)
+
+# As _multibytecodec's MultibyteStreamReader: each read decodes what the stream gives, keeping the codec's state and
+# an incomplete sequence for the next, and reads a byte more while that gives no text.
 class StreamReader(Codec, codecs.StreamReader):
-    def decode(self, input, errors='strict'):
-        return _codecs._decode_with(_NAME, input, errors, False)
+    def __init__(self, stream, errors='strict'):
+        codecs.StreamReader.__init__(self, stream, errors)
+        self._decoder = _codecs._incremental_decoder(_NAME)
+        self._pending = b''
 
+    def _iread(self, method, sizehint):
+        if sizehint == 0:
+            return ''
+        whole = sizehint is None or sizehint < 0
+        while True:
+            data = getattr(self.stream, method)() if whole else getattr(self.stream, method)(sizehint)
+            if not isinstance(data, bytes):
+                raise TypeError("stream function returned a non-bytes object (%s)" % type(data).__name__)
+            end = not data
+            data = self._pending + data
+            text, consumed = self._decoder(data, self.errors, end or whole)
+            self._pending = data[consumed:]
+            if text or whole or end:
+                return text
+            sizehint = 1
+
+    def read(self, sizehint=None, chars=-1, firstline=False):
+        return self._iread('read', sizehint)
+
+    def readline(self, sizehint=None, keepends=True):
+        return self._iread('readline', sizehint)
+
+    def readlines(self, sizehint=None, keepends=True):
+        return self._iread('read', sizehint).splitlines(True)
+
+    def reset(self):
+        self._decoder = _codecs._incremental_decoder(_NAME)
+        self._pending = b''
+
+# As _multibytecodec's MultibyteStreamWriter, whose reset() writes nothing and keeps the codec's state.
 class StreamWriter(Codec, codecs.StreamWriter):
-    def encode(self, input, errors='strict'):
-        if _STATEFUL:
-            _unsupported('ISO-2022-JP \u306E\u5C11\u3057\u305A\u3064\u306E\u7B26\u53F7\u5316\uFF08codecs \u306E IncrementalEncoder\u30FBStreamWriter\uFF09')
-        return codec.encode(input, errors)
+    def __init__(self, stream, errors='strict'):
+        codecs.StreamWriter.__init__(self, stream, errors)
+        self._encoder = _codecs._incremental_encoder(_NAME)
+
+    def write(self, object):
+        self.stream.write(self._encoder(object, self.errors, False))
+
+    def writelines(self, lines):
+        for line in lines:
+            self.write(line)
+
+    def reset(self):
+        pass
 
 def getregentry():
     return codecs.CodecInfo(
@@ -1164,14 +1224,7 @@ registerSourceModule('encodings.rot_13', ROT_13);
 registerSourceModule('encodings.hex_codec', HEX_CODEC);
 registerSourceModule('encodings.base64_codec', BASE64_CODEC);
 registerSourceModule('encodings.zlib_codec', ZLIB_CODEC);
-for (const name of ['shift_jis', 'cp932', 'euc_jp', 'iso2022_jp']) {
-  registerSourceModule(
-    `encodings.${name}`,
-    MULTIBYTE,
-    () =>
-      new Map<string, PyValue>([
-        ['_NAME', name],
-        ['_STATEFUL', name === 'iso2022_jp'],
-      ])
-  );
+for (const name of ['shift_jis', 'cp932', 'euc_jp', ...ISO2022_MODULES, ...CJK_MODULES, ...JIS_X_0213_MODULES]) {
+  addEncodingsModule(name);
+  registerSourceModule(`encodings.${name}`, MULTIBYTE, () => new Map<string, PyValue>([['_NAME', name]]));
 }

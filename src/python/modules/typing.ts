@@ -13,11 +13,13 @@ import {
   optionalGetItem,
   singleTypeForm,
   typingArgs,
+  typingBaseEntries,
   typingOrigin,
   unionClass,
 } from '../typeHints';
 import {
   genericClass,
+  mroEntryHooks,
   NoDefault,
   paramSpecClass,
   typeAliasClass,
@@ -241,8 +243,7 @@ def dataclass_transform(
             "kw_only_default": kw_only_default,
             "frozen_default": frozen_default,
             "field_specifiers": field_specifiers,
-            "kwargs": kwargs,
-        }
+            "kwargs": kwargs }
         return cls_or_fn
     return decorator
 
@@ -337,6 +338,9 @@ class SupportsRound[T](Protocol):
     def __round__(self, ndigits: int = 0) -> T:
         pass
 `;
+
+// Subscripted aliases of typing stand for their origin in the bases of a class statement.
+mroEntryHooks.push(typingBaseEntries);
 
 registerModule('typing', (runtime, namespace) => {
   const abc = importModule(runtime, 'collections.abc');

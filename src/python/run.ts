@@ -3,9 +3,11 @@ import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { Module } from './ast';
 import { describeException } from './describe';
+import { recordFutureFeatures } from './dynamicCode';
 import { runExitCallbacks } from './modules/atexit';
 import { callValue } from './objects';
 import { parsePython } from './parse';
+import { programSourceOf } from './programSource';
 import { Frame, isHostStackOverflow, Runtime } from './runtime';
 import { withRuntime } from './runtimeContext';
 import { DeadlockError, WaitRequest } from './threads';
@@ -47,6 +49,8 @@ export interface PythonRun extends ProgramRun {
 export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Frame) => void): PythonRun {
   return withRuntime(runtime, () => {
     const globals = mainGlobals(runtime, module);
+    recordFutureFeatures(globals, module.futureFeatures);
+    if (module.source !== undefined) runtime.program = programSourceOf(module, module.source);
     const frame = new Frame('module', globals, new Map(), globals, undefined, false, module.scope);
     runtime.pushFrame(frame);
     try {

@@ -128,6 +128,7 @@ export function* delegateTo(iterable: PyValue, frame: Frame): Suspension {
   const iterator = getIterator(iterable);
   const length = frame.temporaries.length;
   frame.temporaries.push(iterator);
+  setDelegate(frame, iterator);
   try {
     let input: GeneratorInput = { value: None };
     for (;;) {
@@ -141,8 +142,22 @@ export function* delegateTo(iterable: PyValue, frame: Frame): Suspension {
       }
     }
   } finally {
+    setDelegate(frame, undefined);
     frame.temporaries.length = length;
   }
+}
+
+/** The iterator each frame's `yield from` delegates to, which `gi_yieldfrom` gives. */
+const delegates = new WeakMap<Frame, PyValue>();
+
+export function delegateOf(frame: Frame): PyValue | undefined {
+  return delegates.get(frame);
+}
+
+/** Records what a frame's `yield from` or `await` delegates to, or that it delegates no more. */
+export function setDelegate(frame: Frame, iterator: PyValue | undefined): void {
+  if (iterator === undefined) delegates.delete(frame);
+  else delegates.set(frame, iterator);
 }
 
 /** Passes one input to the iterator a `yield from` or an `await` delegates to, returning what it yields or returns. */

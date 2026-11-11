@@ -1,15 +1,12 @@
 import { builtin } from '../define';
-import { registerUnsupportedAttributes } from '../modules';
 import { registerSourceModule } from '../sourceModules';
 import { callableGenericAliasClass } from '../typeHints';
 import { builtinFunctionClass, functionClass, methodClass, methodDescriptorClass, typeClass } from '../types';
 import type { PyClass, PyValue } from '../values';
 
-// CPython's `_collections_abc.py` without the asynchronous ABCs, which need `async def`, `ByteString`, which needs a
-// metaclass `__new__` warning on use; the generic alias of Callable, which subclasses GenericAlias, is native. `collections`
-// registers deque here, as CPython's `collections/__init__.py` does.
-const SOURCE =
-  String.raw`
+// CPython's `_collections_abc.py` with the mapping proxy of `types` and without `framelocalsproxy`, the class of a
+// function's `f_locals`. `collections` registers deque here, as CPython's `collections/__init__.py` does.
+const SOURCE = String.raw`
 # Copyright 2007 Google, Inc. All Rights Reserved.
 # Licensed to PSF under a Contributor Agreement.
 
@@ -26,15 +23,7 @@ Unit tests are in test_collections.
 #
 # Though classes that inherit from an ABC would automatically receive a
 # new mixin method, registered classes would become non-compliant and
-# violate the contract promised by ` +
-  '`' +
-  String.raw`` +
-  '`' +
-  String.raw`isinstance(someobj, SomeABC)` +
-  '`' +
-  String.raw`` +
-  '`' +
-  String.raw`.
+# violate the contract promised by \x60\x60isinstance(someobj, SomeABC)\x60\x60.
 #
 # Though irritating, the correct procedure for adding new abstract or
 # mixin methods is to create a new ABC as a subclass of the previous
@@ -106,6 +95,17 @@ dict_items = type({}.items())
 ## misc ##
 from types import MappingProxyType as mappingproxy
 generator = type((lambda: (yield))())
+## coroutine ##
+async def _coro(): pass
+_coro = _coro()
+coroutine = type(_coro)
+_coro.close()  # Prevent ResourceWarning
+del _coro
+## asynchronous generator ##
+async def _ag(): yield
+_ag = _ag()
+async_generator = type(_ag)
+del _ag
 
 
 ### ONE-TRICK PONIES ###
@@ -135,6 +135,154 @@ class Hashable(metaclass=ABCMeta):
         if cls is Hashable:
             return _check_methods(C, "__hash__")
         return NotImplemented
+
+
+class Awaitable(metaclass=ABCMeta):
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __await__(self):
+        yield
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is Awaitable:
+            return _check_methods(C, "__await__")
+        return NotImplemented
+
+    __class_getitem__ = classmethod(GenericAlias)
+
+
+class Coroutine(Awaitable):
+
+    __slots__ = ()
+
+    @abstractmethod
+    def send(self, value):
+        """Send a value into the coroutine.
+        Return next yielded value or raise StopIteration.
+        """
+        raise StopIteration
+
+    @abstractmethod
+    def throw(self, typ, val=None, tb=None):
+        """Raise an exception in the coroutine.
+        Return next yielded value or raise StopIteration.
+        """
+        if val is None:
+            if tb is None:
+                raise typ
+            val = typ()
+        if tb is not None:
+            val = val.with_traceback(tb)
+        raise val
+
+    def close(self):
+        """Raise GeneratorExit inside coroutine.
+        """
+        try:
+            self.throw(GeneratorExit)
+        except (GeneratorExit, StopIteration):
+            pass
+        else:
+            raise RuntimeError("coroutine ignored GeneratorExit")
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is Coroutine:
+            return _check_methods(C, '__await__', 'send', 'throw', 'close')
+        return NotImplemented
+
+
+Coroutine.register(coroutine)
+
+
+class AsyncIterable(metaclass=ABCMeta):
+
+    __slots__ = ()
+
+    @abstractmethod
+    def __aiter__(self):
+        return AsyncIterator()
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is AsyncIterable:
+            return _check_methods(C, "__aiter__")
+        return NotImplemented
+
+    __class_getitem__ = classmethod(GenericAlias)
+
+
+class AsyncIterator(AsyncIterable):
+
+    __slots__ = ()
+
+    @abstractmethod
+    async def __anext__(self):
+        """Return the next item or raise StopAsyncIteration when exhausted."""
+        raise StopAsyncIteration
+
+    def __aiter__(self):
+        return self
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is AsyncIterator:
+            return _check_methods(C, "__anext__", "__aiter__")
+        return NotImplemented
+
+
+class AsyncGenerator(AsyncIterator):
+
+    __slots__ = ()
+
+    async def __anext__(self):
+        """Return the next item from the asynchronous generator.
+        When exhausted, raise StopAsyncIteration.
+        """
+        return await self.asend(None)
+
+    @abstractmethod
+    async def asend(self, value):
+        """Send a value into the asynchronous generator.
+        Return next yielded value or raise StopAsyncIteration.
+        """
+        raise StopAsyncIteration
+
+    @abstractmethod
+    async def athrow(self, typ, val=None, tb=None):
+        """Raise an exception in the asynchronous generator.
+        Return next yielded value or raise StopAsyncIteration.
+        """
+        if val is None:
+            if tb is None:
+                raise typ
+            val = typ()
+        if tb is not None:
+            val = val.with_traceback(tb)
+        raise val
+
+    async def aclose(self):
+        """Raise GeneratorExit inside coroutine.
+        """
+        try:
+            await self.athrow(GeneratorExit)
+        except (GeneratorExit, StopAsyncIteration):
+            pass
+        else:
+            raise RuntimeError("asynchronous generator ignored GeneratorExit")
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is AsyncGenerator:
+            return _check_methods(C, '__aiter__', '__anext__',
+                                  'asend', 'athrow', 'aclose')
+        return NotImplemented
+
+
+AsyncGenerator.register(async_generator)
 
 
 class Iterable(metaclass=ABCMeta):
@@ -316,32 +464,8 @@ class Buffer(metaclass=ABCMeta):
 
 
 def _is_param_expr(obj):
-    """Checks if obj matches either a list of types, ` +
-  '`' +
-  String.raw`` +
-  '`' +
-  String.raw`...` +
-  '`' +
-  String.raw`` +
-  '`' +
-  String.raw`, ` +
-  '`' +
-  String.raw`` +
-  '`' +
-  String.raw`ParamSpec` +
-  '`' +
-  String.raw`` +
-  '`' +
-  String.raw` or
-    ` +
-  '`' +
-  String.raw`` +
-  '`' +
-  String.raw`_ConcatenateGenericAlias` +
-  '`' +
-  String.raw`` +
-  '`' +
-  String.raw` from typing.py
+    """Checks if obj matches either a list of types, \x60\x60...\x60\x60, \x60\x60ParamSpec\x60\x60 or
+    \x60\x60_ConcatenateGenericAlias\x60\x60 from typing.py
     """
     if obj is Ellipsis:
         return True
@@ -369,7 +493,6 @@ class Callable(metaclass=ABCMeta):
         return NotImplemented
 
     __class_getitem__ = classmethod(_CallableGenericAlias)
-
 
 
 ### SETS ###
@@ -893,6 +1016,40 @@ Sequence.register(bytes)
 Sequence.register(range)
 Sequence.register(memoryview)
 
+class _DeprecateByteStringMeta(ABCMeta):
+    def __new__(cls, name, bases, namespace, **kwargs):
+        if name != "ByteString":
+            import warnings
+
+            warnings._deprecated(
+                "collections.abc.ByteString",
+                remove=(3, 17),
+            )
+        return super().__new__(cls, name, bases, namespace, **kwargs)
+
+    def __instancecheck__(cls, instance):
+        import warnings
+
+        warnings._deprecated(
+            "collections.abc.ByteString",
+            remove=(3, 17),
+        )
+        return super().__instancecheck__(instance)
+
+class ByteString(Sequence, metaclass=_DeprecateByteStringMeta):
+    """Deprecated ABC serving as a common supertype of \x60\x60bytes\x60\x60 and \x60\x60bytearray\x60\x60.
+
+    This ABC is scheduled for removal in Python 3.17.
+    Use \x60\x60isinstance(obj, collections.abc.Buffer)\x60\x60 to test if \x60\x60obj\x60\x60
+    implements the buffer protocol at runtime. For use in type annotations,
+    either use \x60\x60Buffer\x60\x60 or a union that explicitly specifies the types your
+    code supports (e.g., \x60\x60bytes | bytearray | memoryview\x60\x60).
+    """
+
+    __slots__ = ()
+
+ByteString.register(bytes)
+ByteString.register(bytearray)
 
 
 class MutableSequence(Sequence):
@@ -988,11 +1145,3 @@ registerSourceModule(
       ],
     ])
 );
-registerUnsupportedAttributes('collections.abc', {
-  Awaitable: '非同期処理（collections.abc.Awaitable）',
-  Coroutine: '非同期処理（collections.abc.Coroutine）',
-  AsyncIterable: '非同期処理（collections.abc.AsyncIterable）',
-  AsyncIterator: '非同期処理（collections.abc.AsyncIterator）',
-  AsyncGenerator: '非同期処理（collections.abc.AsyncGenerator）',
-  ByteString: '非推奨の collections.abc.ByteString',
-});

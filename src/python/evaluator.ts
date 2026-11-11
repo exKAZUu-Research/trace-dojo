@@ -1,4 +1,5 @@
-// code-gauge-allow-file fileNcss 836 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss 877 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+import { newAnnotate, recordAnnotation } from './annotations';
 import type {
   ClassDef,
   ExceptHandler,
@@ -12,12 +13,11 @@ import type {
   TypeParam,
 } from './ast';
 import { AsyncEvaluator } from './asyncEvaluator';
-import { createClass } from './classes';
+import { buildClass, createClass } from './classes';
 import { pyRepr } from './conversions';
 import { asyncYield } from './coroutines';
-import { displayValue } from './display';
 import { exceptionGroupOf, splitGroup } from './exceptionGroups';
-import { mappingEntries } from './expressionEvaluator';
+import { addArgument, type CallArguments, mappingEntries } from './expressionEvaluator';
 import type { Frame } from './frame';
 import { isMapping, isSequenceForMatch } from './matching';
 import { isRegisteredModule } from './modules';
@@ -38,7 +38,8 @@ import {
 import { equals, inplaceOp, isSame } from './operators';
 import type { Runtime } from './runtime';
 import { targetSuspends } from './suspension';
-import { isWaitRequest, schedulerOf, suspendingCall } from './threads';
+import { isWaitRequest, PREEMPTION, schedulerOf, suspendingCall } from './threads';
+import { noteCaught, prependTraceback } from './tracebacks';
 import { genericBaseOf, newTypeParam, PyTypeAlias } from './typeParams';
 import {
   baseExceptionClass,
@@ -48,6 +49,7 @@ import {
   newDict,
   newException,
   newList,
+  newSet,
   newTuple,
   None,
   pyError,
@@ -56,6 +58,7 @@ import {
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import { DONE, PyClass, PyError, type PyFunction, PyInstance, PyTuple, type PyValue } from './values';
+import { hasWeakCallbacks, runWeakCallbacks } from './weakReferences';
 
 const NO_EXCEPTIONS: PyInstance[] = [];
 
@@ -122,13 +125,14 @@ export class Evaluator extends AsyncEvaluator {
       const completion = isSimple(statement)
         ? this.simpleStatement(statement, frame)
         : yield* this.compoundStatement(statement, frame);
+      // An object a statement left unreachable is freed before the next one runs, calling its weakref callbacks.
+      if (hasWeakCallbacks(this.runtime)) runWeakCallbacks();
       if (completion) return completion;
     }
     return undefined;
   }
 
   // code-gauge-allow functionNcss 60 -- One case per kind of simple statement.
-  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of simple statement.
   private simpleStatement(statement: Statement, frame: Frame): Completion {
     const { runtime } = this;
     runtime.spend();
@@ -161,8 +165,9 @@ export class Evaluator extends AsyncEvaluator {
       case 'nonlocal': {
         return undefined;
       }
-      case 'setupAnnotations': {
-        if (!frame.locals.has('__annotations__')) frame.locals.set('__annotations__', newDict());
+      case 'setupAnnotations':
+      case 'setupAnnotate': {
+        setUpAnnotations(statement.kind, frame);
         return undefined;
       }
       case 'break':
@@ -174,7 +179,7 @@ export class Evaluator extends AsyncEvaluator {
       }
       case 'raise': {
         const exception = statement.exception ? this.evaluate(statement.exception, frame) : undefined;
-        throw this.raise(exception, statement.cause ? this.evaluate(statement.cause, frame) : undefined);
+        throw this.raise(exception, statement.cause ? this.evaluate(statement.cause, frame) : undefined, frame);
       }
       case 'assert': {
         if (isTruthy(this.evaluate(statement.test, frame))) return undefined;
@@ -205,13 +210,14 @@ export class Evaluator extends AsyncEvaluator {
     }
   }
 
+  /** Evaluates an expression statement, handing its value to sys.displayhook in compile()'s 'single' mode. */
   private expressionStatement(statement: Extract<Statement, { kind: 'expression' }>, frame: Frame): void {
     const { runtime } = this;
     const { expression } = statement;
     const result = runtime.steps.runStatement(statement.stepRow, expression.kind === 'call', () =>
       this.evaluate(expression, frame)
     );
-    if (statement.displays) displayValue(runtime, result);
+    if (statement.displays) callValue(getAttribute(runtime.importModule('sys'), 'displayhook'), [result]);
     // The statement drops its value, which closes a generator that only the value held.
     if (runtime.finalizer.pending.size > 0) this.release(result);
   }
@@ -359,7 +365,11 @@ export class Evaluator extends AsyncEvaluator {
       );
       setItem(annotations, statement.target.name, this.evaluate(annotation, frame));
     }
-    frame.annotations.push([statement.target.name, () => this.evaluate(annotation, frame)]);
+    recordAnnotation(frame, { name: statement.target.name, expression: annotation, frame });
+    if (statement.annotationIndex !== undefined) {
+      const conditional = frame.locals.get('__conditional_annotations__');
+      if (conditional !== undefined) callValue(getAttribute(conditional, 'add'), [BigInt(statement.annotationIndex)]);
+    }
   }
 
   // code-gauge-allow functionCognitiveComplexity 29 -- One case per kind of compound statement, each taking the path that can suspend when it must.
@@ -378,6 +388,7 @@ export class Evaluator extends AsyncEvaluator {
         const { test } = statement;
         while (isTruthy(test.suspends ? yield* this.evaluateSuspending(test, frame) : this.evaluate(test, frame))) {
           runtime.spend();
+          if (runtime.threads?.shouldPreempt()) yield PREEMPTION as unknown as PyValue;
           const completion = yield* this.block(statement.body, frame);
           if (completion === 'break') return undefined;
           if (completion && completion !== 'continue') return completion;
@@ -439,8 +450,8 @@ export class Evaluator extends AsyncEvaluator {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Follows the protocol of the for loop, closing a generator it leaves.
-  // code-gauge-allow duplicateLines 29 -- Mirrors the async for loop, whose items come from an awaited `__anext__`.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Follows the protocol of the for loop, closing a generator it leaves.
+  // code-gauge-allow functionNcss 33 -- Follows the protocol of the for loop, closing a generator it leaves.
   private *forStatement(statement: Extract<Statement, { kind: 'for' }>, frame: Frame): Execution {
     const { runtime } = this;
     const { target } = statement;
@@ -456,6 +467,7 @@ export class Evaluator extends AsyncEvaluator {
       const next = iterate(iterable);
       for (let item = next(); item !== DONE; item = next()) {
         runtime.spend();
+        if (runtime.threads?.shouldPreempt()) yield PREEMPTION as unknown as PyValue;
         runtime.currentRow = statement.row;
         if (suspendingTarget) yield* this.assignSuspending(target, item, frame);
         else this.assign(target, item, frame);
@@ -499,6 +511,35 @@ export class Evaluator extends AsyncEvaluator {
     this.storeName(typeParams.tuple, newTuple(params), scopeFrame);
     this.storeName(typeParams.genericBase, genericBaseOf(params), scopeFrame);
     return createClass(this, cls, scopeFrame, decorators);
+  }
+
+  /** Creates a class whose decorators or bases suspend the generator or coroutine running it, as `yield` does. */
+  private *defineClassSuspending(cls: ClassDef, frame: Frame): Generator<PyValue, PyValue, PyValue> {
+    const decorators: PyValue[] = [];
+    for (const decorator of cls.decorators) decorators.push(yield* this.evaluateSuspending(decorator, frame));
+    const scopeFrame = cls.typeParams ? this.typeParamFrame(cls.typeParams.scope, frame) : frame;
+    if (cls.typeParams) {
+      const params = this.createTypeParams(cls.typeParams.params, scopeFrame);
+      this.storeName(cls.typeParams.tuple, newTuple(params), scopeFrame);
+      this.storeName(cls.typeParams.genericBase, genericBaseOf(params), scopeFrame);
+    }
+    const collected: CallArguments = { args: [], kwargs: undefined };
+    const length = scopeFrame.temporaries.length;
+    try {
+      for (const argument of cls.bases) {
+        const value = yield* this.evaluateSuspending(argument.value, scopeFrame);
+        addArgument(
+          collected,
+          argument,
+          value,
+          { callee: buildClass, argumentList: cls.bases, leading: 2 },
+          scopeFrame
+        );
+      }
+      return createClass(this, cls, scopeFrame, decorators, collected);
+    } finally {
+      scopeFrame.temporaries.length = length;
+    }
   }
 
   /** Creates a `type` statement's alias, whose value the scope of its type parameters evaluates when first read. */
@@ -600,7 +641,7 @@ export class Evaluator extends AsyncEvaluator {
       case 'raise': {
         const exception = statement.exception ? yield* this.evaluateSuspending(statement.exception, frame) : undefined;
         const cause = statement.cause ? yield* this.evaluateSuspending(statement.cause, frame) : undefined;
-        throw this.raise(exception, cause);
+        throw this.raise(exception, cause, frame);
       }
       case 'assert': {
         if (isTruthy(yield* this.evaluateSuspending(statement.test, frame))) return undefined;
@@ -614,8 +655,12 @@ export class Evaluator extends AsyncEvaluator {
         this.storeName(statement.binding, this.defineFunction(statement.fn, frame, decorators, defaults), frame);
         return undefined;
       }
+      case 'classDef': {
+        this.storeName(statement.binding, yield* this.defineClassSuspending(statement.cls, frame), frame);
+        return undefined;
+      }
       default: {
-        throw this.runtime.unsupported('ジェネレータの中で、クラスの基底クラスやデコレータに書いた yield');
+        throw new Error(`Not a suspending statement: ${statement.kind}`);
       }
     }
   }
@@ -663,8 +708,11 @@ export class Evaluator extends AsyncEvaluator {
 
   // Exceptions --------------------------------------------------------------------------------------------------------
 
-  /** The error a `raise` statement raises, given the values of its exception and its cause. */
-  private raise(value: PyValue | undefined, cause: PyValue | undefined): PyError {
+  /**
+   * The error a `raise` statement in `frame` raises, given the values of its exception and its cause. Raising an
+   * exception adds the frame to its traceback, while a bare `raise` keeps the traceback it has.
+   */
+  private raise(value: PyValue | undefined, cause: PyValue | undefined, frame: Frame): PyError {
     if (value === undefined) {
       const active = this.handling.at(-1);
       if (!active) return pyError('RuntimeError', 'No active exception to reraise');
@@ -677,6 +725,7 @@ export class Evaluator extends AsyncEvaluator {
       state.suppressContext = true;
     }
     this.chain(exception);
+    if (state) prependTraceback(state, frame, this.runtime.currentRow);
     return new PyError(exception);
   }
 
@@ -721,6 +770,7 @@ export class Evaluator extends AsyncEvaluator {
     caught: PyError,
     frame: Frame
   ): Generator<PyValue, Outcome, PyValue> {
+    noteCaught(caught, frame);
     if (statement.isGroup) return yield* this.exceptStar(statement, caught, frame);
     let handler: ExceptHandler | undefined;
     for (const each of statement.handlers) {
@@ -1206,6 +1256,19 @@ function toException(value: PyValue, message: string): PyInstance {
   }
   if (value instanceof PyInstance && value.exception) return value;
   throw typeError(message);
+}
+
+/** Creates the __annotations__ dict of a module or class body, or its __annotate__ function for lazy annotations. */
+function setUpAnnotations(kind: 'setupAnnotations' | 'setupAnnotate', frame: Frame): void {
+  if (kind === 'setupAnnotations') {
+    if (!frame.locals.has('__annotations__')) frame.locals.set('__annotations__', newDict());
+    return;
+  }
+  frame.locals.set(
+    '__annotate__',
+    newAnnotate(undefined, frame.globals, () => frame.annotations)
+  );
+  frame.locals.set('__conditional_annotations__', newSet());
 }
 
 function matchesExceptionTypes(exception: PyInstance, types: PyValue): boolean {

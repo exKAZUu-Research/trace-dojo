@@ -14,10 +14,11 @@ import {
   valueError,
 } from '../types';
 import { PyError, PyOpaque, type PyValue } from '../values';
-import { BZ2_SOURCE } from './bz2Source';
+import { BZ2_CODEC_SOURCE, BZ2_SOURCE } from './bz2Source';
 import { BZ_FINISH, BZ_PARAM_ERROR, BZ_RUN, BZ_SEQUENCE_ERROR, BZ_STREAM_END, Bzip2Compressor } from './bzip2Compress';
 import { BZ_DATA_ERROR, Bzip2Decompressor } from './bzip2Decompress';
 import { cInt, clinicArgs, cSsize } from './clinicArgs';
+import { addEncodingsModule } from './codecsNative';
 import { dataArgument, defineReadOnly, OutputBuffer } from './zlib';
 import { ZStream } from './zlibDeflate';
 
@@ -187,5 +188,7 @@ registerModule(
     ])
 );
 registerSourceModule('bz2', BZ2_SOURCE);
+addEncodingsModule('bz2_codec');
+registerSourceModule('encodings.bz2_codec', BZ2_CODEC_SOURCE);
 // CPython 3.14's `compression/bz2.py`, which re-exports the module.
 registerSourceModule('compression.bz2', 'import bz2\n__doc__ = bz2.__doc__\ndel bz2\n\nfrom bz2 import *\n');

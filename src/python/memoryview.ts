@@ -6,10 +6,13 @@ import { pyHash } from './hashing';
 import { sliceIndices } from './items';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
+import { bindValue, callValue, lookupSpecial } from './objects';
 import { equals } from './operators';
 import { currentRuntime } from './runtimeContext';
 import { NATIVE_CODES, readFloat, readInteger, writeFloat, writeInteger } from './structCodes';
 import {
+  bytearrayClass,
+  bytesClass,
   iteratorClass,
   nativeFunction,
   None,
@@ -22,7 +25,8 @@ import {
   unbox,
   valueError,
 } from './types';
-import { DONE, PyDescriptor, PyIterator, type PyObject, PySlice, PyTuple, type PyValue } from './values';
+import { UnsupportedFeatureError } from './unsupported';
+import { DONE, PyDescriptor, PyIterator, PyList, type PyObject, PySlice, PyTuple, type PyValue } from './values';
 
 memoryviewClass.construct = (_cls, args, kwargs) => {
   checkArgs({ qualified: 'memoryview', min: 1, max: 1, style: 'takes', keywords: ['object'] }, args, kwargs);
@@ -44,7 +48,14 @@ export function viewOf(value: PyValue): PyMemoryView {
     );
   }
   if (!(value instanceof PyBytes)) {
-    throw typeError(`memoryview: a bytes-like object is required, not '${typeName(value)}'`);
+    // A Python class implements the buffer protocol with `__buffer__` (PEP 688).
+    const buffer = typeof value === 'object' && !value.cls.isBuiltin ? lookupSpecial(value, '__buffer__') : undefined;
+    if (buffer === undefined) throw typeError(`memoryview: a bytes-like object is required, not '${typeName(value)}'`);
+    const view = callValue(bindValue(buffer, value), [0n]);
+    if (!(view instanceof PyMemoryView)) {
+      throw typeError(`__buffer__ returned non-memoryview object '${typeName(view)}'`);
+    }
+    return view;
   }
   return new PyMemoryView(value, 0, value.length, 1, 'B', 1, !value.isMutable);
 }
@@ -112,6 +123,7 @@ function itemIndex(view: PyMemoryView, key: PyValue): number {
 }
 
 function sliceView(view: PyMemoryView, slice: PySlice): PyMemoryView {
+  if (view.shape) return sliceRows(view, slice);
   const { start, step, count } = sliceIndices(slice, view.count);
   return new PyMemoryView(
     view.source,
@@ -124,16 +136,47 @@ function sliceView(view: PyMemoryView, slice: PySlice): PyMemoryView {
   );
 }
 
+/** A slice of the rows of a multi-dimensional view, which stays C-contiguous for a step of 1. */
+function sliceRows(view: PyMemoryView, slice: PySlice): PyMemoryView {
+  const [rows, ...rest] = view.shape as number[];
+  const { start, step, count } = sliceIndices(slice, rows);
+  if (step !== 1 && count > 1) throw new UnsupportedFeatureError('多次元の memoryview の、step を指定したスライス');
+  const rowItems = rest.reduce((product, each) => product * each, 1);
+  const sliced = new PyMemoryView(
+    view.source,
+    view.offset + start * rowItems * view.itemsize,
+    count * rowItems,
+    view.itemsize,
+    view.format,
+    view.itemsize,
+    view.readonly
+  );
+  sliced.shape = [count, ...rest];
+  return sliced;
+}
+
 method(memoryviewClass, '__getitem__', 'one', 1, 1, (self, [key]) => {
   const view = asView(self);
   if (key instanceof PySlice) return sliceView(view, key);
-  if (key instanceof PyTuple) throw typeError('memoryview: invalid slice key');
+  if (key instanceof PyTuple) {
+    if (!view.shape) throw typeError('memoryview: invalid slice key');
+    return readItem(view, tupleIndex(view, key));
+  }
+  if (view.shape) throw subViewsNotImplemented();
   return readItem(view, itemIndex(view, key));
 });
 
 method(memoryviewClass, '__setitem__', 'expected', 2, 2, (self, [key, value]) => {
   const view = asView(self);
   if (view.readonly) throw typeError('cannot modify read-only memory');
+  if (key instanceof PyTuple && view.shape) {
+    writeItem(view, tupleIndex(view, key), value);
+    return None;
+  }
+  if (view.shape) {
+    if (key instanceof PySlice) throw new UnsupportedFeatureError('多次元の memoryview のスライスへの代入');
+    throw subViewsNotImplemented();
+  }
   if (!(key instanceof PySlice)) {
     writeItem(view, itemIndex(view, key), value);
     return None;
@@ -162,10 +205,11 @@ method(memoryviewClass, '__delitem__', 'one', 1, 1, (self) => {
   throw typeError('cannot delete memory');
 });
 
-method(memoryviewClass, '__len__', 'none', 0, 0, (self) => BigInt(asView(self).count));
+method(memoryviewClass, '__len__', 'none', 0, 0, (self) => BigInt(dimensionsOf(asView(self))[0]));
 
 method(memoryviewClass, '__iter__', 'none', 0, 0, (self) => {
   const view = asView(self);
+  if (view.shape) throw subViewsNotImplemented();
   let index = 0;
   return new PyIterator(
     iteratorClass('memory_iterator'),
@@ -176,10 +220,49 @@ method(memoryviewClass, '__iter__', 'none', 0, 0, (self) => {
 
 method(memoryviewClass, 'tolist', 'none', 0, 0, (self) => {
   const view = asView(self);
-  return currentRuntime().listOf(Array.from({ length: view.count }, (_, index) => readItem(view, index)));
+  return nestedItems(view, dimensionsOf(view), 0);
 });
 
-method(memoryviewClass, 'tobytes', 'takes', 0, 1, (self) => newBytes(asView(self).toBytes()), { keywords: ['order'] });
+method(
+  memoryviewClass,
+  'tobytes',
+  'takes',
+  0,
+  1,
+  (self, args, kwargs) => {
+    const view = asView(self);
+    const order = argument(args, kwargs, 0, 'order') ?? None;
+    if (order !== None && order !== 'C' && order !== 'F' && order !== 'A') {
+      throw valueError("order must be 'C', 'F' or 'A'");
+    }
+    return newBytes(order === 'F' && view.shape ? fortranBytes(view, view.shape) : view.toBytes());
+  },
+  { keywords: ['order'] }
+);
+
+/** The bytes of a multi-dimensional view in Fortran order, where the first index varies fastest. */
+function fortranBytes(view: PyMemoryView, shape: number[]): Uint8Array {
+  const bytes = view.toBytes();
+  const result = new Uint8Array(bytes.length);
+  const { itemsize } = view;
+  for (let flat = 0; flat < view.count; flat++) {
+    let rest = flat;
+    let target = 0;
+    let scale = 1;
+    // The C-order indices of the item, from the last dimension, give its position in Fortran order.
+    const indices = shape.toReversed().map((size) => {
+      const index = rest % size;
+      rest = Math.floor(rest / size);
+      return index;
+    });
+    for (const [axis, index] of indices.toReversed().entries()) {
+      target += index * scale;
+      scale *= shape[axis];
+    }
+    result.set(bytes.subarray(flat * itemsize, (flat + 1) * itemsize), target * itemsize);
+  }
+  return result;
+}
 
 method(
   memoryviewClass,
@@ -217,6 +300,7 @@ method(
   'takes',
   1,
   2,
+  // code-gauge-allow functionCognitiveComplexity 17 -- One check per argument of memoryview.cast, in CPython's order.
   (self, args, kwargs) => {
     const view = asView(self);
     const formatValue = argument(args, kwargs, 0, 'format');
@@ -237,8 +321,17 @@ method(
     if (view.nbytes % info.size !== 0) throw typeError('memoryview: length is not a multiple of itemsize');
     const count = view.nbytes / info.size;
     const shape = argument(args, kwargs, 1, 'shape');
-    if (shape !== undefined) checkShape(shape, count, info.size, view.nbytes);
-    return new PyMemoryView(view.source, view.offset, count, info.size, char, info.size, view.readonly);
+    if (view.count === 0) throw typeError('memoryview: cannot cast view with zeros in shape or strides');
+    const dimensions = shape === undefined ? undefined : shapeOf(shape);
+    if (view.shape && dimensions !== undefined && dimensions.length !== 1) {
+      throw typeError('memoryview: cast must be 1D -> ND or ND -> 1D');
+    }
+    if (dimensions && dimensions.reduce((product, size) => product * size, 1) * info.size !== view.nbytes) {
+      throw typeError('memoryview: product(shape) * itemsize != buffer size');
+    }
+    const cast = new PyMemoryView(view.source, view.offset, count, info.size, char, info.size, view.readonly);
+    if (dimensions && dimensions.length > 1) cast.shape = dimensions;
+    return cast;
   },
   { keywords: ['format', 'shape'] }
 );
@@ -247,13 +340,66 @@ function isByteFormat(format: string): boolean {
   return 'Bbc'.includes(format);
 }
 
-function checkShape(shape: PyValue, count: number, itemsize: number, nbytes: number): void {
-  const items = currentRuntime().toArray(shape);
-  if (items.length !== 1) throw currentRuntime().unsupported('多次元の memoryview');
-  if (Number(toIndex(items[0])) * itemsize !== nbytes) {
-    throw typeError('memoryview: product(shape) * itemsize != buffer size');
+/** The dimensions cast() is given, which must be positive integers. */
+function shapeOf(shape: PyValue): number[] {
+  if (!(shape instanceof PyTuple) && !(shape instanceof PyList)) throw typeError('shape must be a list or a tuple');
+  if (shape.items.length > 64) throw valueError('memoryview: number of dimensions must not exceed 64');
+  return shape.items.map((item) => {
+    if (typeof item !== 'bigint' || item <= 0n) {
+      throw valueError('memoryview.cast(): elements of shape must be integers > 0');
+    }
+    return Number(item);
+  });
+}
+
+/** The dimensions of a view: its shape, or its length for a one-dimensional one. */
+function dimensionsOf(view: PyMemoryView): number[] {
+  return view.shape ?? [view.count];
+}
+
+/** The strides of a view in bytes, row-major for one cast() gave several dimensions. */
+function stridesOf(view: PyMemoryView): number[] {
+  if (!view.shape) return [view.stride];
+  const strides: number[] = [];
+  let stride = view.itemsize;
+  for (const size of view.shape.toReversed()) {
+    strides.unshift(stride);
+    stride *= size;
   }
-  void count;
+  return strides;
+}
+
+/** The flat index of the item a tuple of indices names in a multi-dimensional view. */
+function tupleIndex(view: PyMemoryView, key: PyTuple): number {
+  const dimensions = dimensionsOf(view);
+  if (key.items.length !== dimensions.length) {
+    if (key.items.some((item) => item instanceof PySlice))
+      throw new UnsupportedFeatureError('多次元の memoryview のスライス');
+    throw typeError(`cannot index ${dimensions.length}-dimension view with ${key.items.length}-element tuple`);
+  }
+  let flat = 0;
+  for (const [axis, item] of key.items.entries()) {
+    const index = toIndex(item, () => 'memoryview: invalid slice key');
+    const size = BigInt(dimensions[axis]);
+    const resolved = index < 0n ? index + size : index;
+    if (resolved < 0n || resolved >= size) throw pyError('IndexError', `index out of bounds on dimension ${axis + 1}`);
+    flat = flat * dimensions[axis] + Number(resolved);
+  }
+  return flat;
+}
+
+function subViewsNotImplemented(): Error {
+  return pyError('NotImplementedError', 'multi-dimensional sub-views are not implemented');
+}
+
+/** The items of a view as nested lists, one level per dimension. */
+function nestedItems(view: PyMemoryView, dimensions: number[], start: number): PyValue {
+  const [size, ...rest] = dimensions;
+  const runtime = currentRuntime();
+  if (rest.length === 0)
+    return runtime.listOf(Array.from({ length: size }, (_, index) => readItem(view, start + index)));
+  const step = rest.reduce((product, each) => product * each, 1);
+  return runtime.listOf(Array.from({ length: size }, (_, index) => nestedItems(view, rest, start + index * step)));
 }
 
 method(memoryviewClass, 'release', 'none', 0, 0, (self) => {
@@ -267,7 +413,17 @@ method(memoryviewClass, '__exit__', 'expected', 0, Number.POSITIVE_INFINITY, (se
 });
 method(memoryviewClass, 'toreadonly', 'none', 0, 0, (self) => {
   const view = asView(self);
-  return new PyMemoryView(view.source, view.offset, view.count, view.stride, view.format, view.itemsize, true);
+  const readOnly = new PyMemoryView(
+    view.source,
+    view.offset,
+    view.count,
+    view.stride,
+    view.format,
+    view.itemsize,
+    true
+  );
+  readOnly.shape = view.shape;
+  return readOnly;
 });
 
 // Comparison, hashing, and repr -------------------------------------------------------------------------------------
@@ -284,7 +440,7 @@ function viewsEqual(view: PyMemoryView, other: PyValue): PyValue {
   if (view.released || (other instanceof PyMemoryView && other.released)) return false;
   const otherView = viewOf(other);
   try {
-    if (otherView.count !== view.count) return false;
+    if (dimensionsOf(otherView).join(',') !== dimensionsOf(view).join(',')) return false;
     for (let index = 0; index < view.count; index++) {
       if (!equals(readItem(view, index), readItem(otherView, index))) return false;
     }
@@ -315,12 +471,12 @@ const ATTRIBUTES: Record<string, (view: PyMemoryView) => PyValue> = {
   readonly: (view) => view.readonly,
   itemsize: (view) => BigInt(view.itemsize),
   format: (view) => view.format,
-  ndim: () => 1n,
-  shape: (view) => currentRuntime().tuple([BigInt(view.count)]),
-  strides: (view) => currentRuntime().tuple([BigInt(view.stride)]),
+  ndim: (view) => BigInt(dimensionsOf(view).length),
+  shape: (view) => currentRuntime().tuple(dimensionsOf(view).map(BigInt)),
+  strides: (view) => currentRuntime().tuple(stridesOf(view).map(BigInt)),
   suboffsets: () => currentRuntime().tuple([]),
   c_contiguous: (view) => view.stride === view.itemsize,
-  f_contiguous: (view) => view.stride === view.itemsize,
+  f_contiguous: (view) => view.stride === view.itemsize && !view.shape,
   contiguous: (view) => view.stride === view.itemsize,
 };
 
@@ -332,4 +488,12 @@ for (const [name, read] of Object.entries(ATTRIBUTES)) {
       nativeFunction(name, ([self]) => read(asView(self)))
     )
   );
+}
+
+// The buffer protocol (PEP 688), which `collections.abc.Buffer` checks for.
+for (const cls of [bytesClass, bytearrayClass, memoryviewClass]) {
+  method(cls, '__buffer__', 'one', 1, 1, (self, [flags]) => {
+    toIndex(flags);
+    return viewOf(self);
+  });
 }

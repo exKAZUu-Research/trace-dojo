@@ -15,6 +15,7 @@ import {
   iterate,
   lengthOf,
   lookupSpecial,
+  remainingOf,
   setItem,
 } from '../objects';
 import { binaryOp, compareOp, contains, equals, inplaceOp, isSame, unaryOp } from '../operators';
@@ -30,7 +31,6 @@ import {
   typeError,
   typeName,
 } from '../types';
-import { UnsupportedFeatureError } from '../unsupported';
 import { DONE, type Kwargs, PyComplex, PyDict, PyError, PyIterator, PyOpaque, type PyValue } from '../values';
 
 type Run = (args: PyValue[], kwargs: Kwargs) => PyValue;
@@ -128,32 +128,14 @@ function indexOf(sequence: PyValue, item: PyValue): bigint {
   throw pyError('ValueError', 'sequence.index(x): x not in sequence');
 }
 
-/** The native iterators whose `__length_hint__` reports how many items are left, which this grader does not track. */
-const HINTED_ITERATORS = new Set([
-  'list_iterator',
-  'list_reverseiterator',
-  'tuple_iterator',
-  'range_iterator',
-  'longrange_iterator',
-  'str_ascii_iterator',
-  'str_iterator',
-  'dict_keyiterator',
-  'dict_valueiterator',
-  'dict_itemiterator',
-  'dict_reversekeyiterator',
-  'set_iterator',
-  'reversed',
-  '_collections._deque_iterator',
-  '_collections._deque_reverse_iterator',
-]);
-
 function lengthHint(value: PyValue, fallback: PyValue | undefined): PyValue {
   const defaultValue = fallback === undefined ? 0n : toIndex(fallback);
   if (lookupSpecial(value, '__len__') !== undefined || typeof value === 'string' || value instanceof PyDict) {
     return BigInt(lengthOf(value));
   }
-  if (value instanceof PyIterator && HINTED_ITERATORS.has(value.cls.name)) {
-    throw new UnsupportedFeatureError('組み込みのイテレータへの operator.length_hint()');
+  if (value instanceof PyIterator) {
+    const remaining = remainingOf(value.next);
+    if (remaining !== undefined) return BigInt(remaining);
   }
   const hint = lookupSpecial(value, '__length_hint__');
   if (hint === undefined) return defaultValue;

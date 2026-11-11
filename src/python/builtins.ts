@@ -1,10 +1,10 @@
-// code-gauge-allow-file fileNcss 420 -- The builtins module keeps every builtin function together.
+// code-gauge-allow-file fileNcss 430 -- The builtins module keeps every builtin function together.
 import { bytearrayClass, bytesClass, memoryviewClass, PyBytes } from './bytesValues';
+import { buildClass } from './classes';
 import { complexAbs } from './complexNumbers';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
 import { aiter, anext } from './coroutines';
 import { builtin } from './define';
-import { claimedClass } from './descriptors';
 import { compile, COMPILE_KEYWORDS, evaluate, execute } from './dynamicCode';
 import { enumMembersOf } from './enums';
 import { pyHash } from './hashing';
@@ -28,6 +28,7 @@ import {
   nextOf,
   setAttribute,
   toArray,
+  withRemaining,
 } from './objects';
 import { binaryOp, compareOp } from './operators';
 import { callerGlobals, callerLocals, callerNames, vars } from './reflection';
@@ -211,11 +212,11 @@ reversedClass.construct = (_cls, args, kwargs) => {
     throw typeError(`'${typeName(sequence)}' object is not reversible`);
   }
   let index = BigInt(lengthOf(sequence)) - 1n;
-  return new PyIterator(
-    reversedClass,
+  const next = withRemaining(
     () => (index >= 0n ? getItem(sequence, index--) : DONE),
-    () => [sequence]
+    () => (index >= 0n && BigInt(lengthOf(sequence)) > index ? Number(index) + 1 : 0)
   );
+  return new PyIterator(reversedClass, next, () => [sequence]);
 };
 
 for (const cls of [enumerateClass, zipClass, mapClass, filterClass, reversedClass]) defineIteratorClass(cls);
@@ -474,9 +475,8 @@ export function isInstance(value: PyValue, classInfo: PyValue, name = 'isinstanc
     const cls = classOf(value);
     if (cls === classInfo) return true;
     const check = customCheck(classInfo, '__instancecheck__');
-    return check === undefined
-      ? cls.isSubclassOf(classInfo) || (claimedClass(value)?.isSubclassOf(classInfo) ?? false)
-      : isTruthy(callValue(check, [value]));
+    if (check !== undefined) return isTruthy(callValue(check, [value]));
+    return cls.isSubclassOf(classInfo) || claimedClass(value, cls)?.isSubclassOf(classInfo) === true;
   }
   if (classInfo instanceof PyTuple) return classInfo.items.some((item) => isInstance(value, item, name));
   if (classInfo instanceof PyOpaque && Array.isArray(classInfo.data)) {
@@ -485,6 +485,17 @@ export function isInstance(value: PyValue, classInfo: PyValue, name = 'isinstanc
   const check = lookupSpecial(classInfo, '__instancecheck__');
   if (check !== undefined) return isTruthy(callValue(bindValue(check, classInfo), [value]));
   throw typeError(`${name}() arg 2 must be a type, a tuple of types, or a union`);
+}
+
+/**
+ * The class an object of a program's class claims through `__class__`, as a weakref proxy claims its referent's,
+ * which isinstance() also accepts, or undefined for an object that claims its own.
+ */
+function claimedClass(value: PyValue, cls: PyClass): PyClass | undefined {
+  if (typeof value !== 'object' || cls.isBuiltin) return undefined;
+  if (!cls.flags.definesGetattribute && cls.lookup('__class__') === objectClass.dict.get('__class__')) return undefined;
+  const claimed = getAttributeOrUndefined(value, '__class__');
+  return claimed instanceof PyClass && claimed !== cls ? claimed : undefined;
 }
 
 /** The bound `__instancecheck__` or `__subclasscheck__` that the metaclass of `cls`, such as `abc.ABCMeta`, defines. */
@@ -587,7 +598,7 @@ function one(name: string, run: (args: PyValue[]) => PyValue): PyValue {
 export function createBuiltins(): Map<string, PyValue> {
   const exceptions = [...exceptionClasses.entries()];
   return new Map<string, PyValue>([
-    ['__build_class__', unsupportedFunction('__build_class__', '__build_class__()')],
+    ['__build_class__', buildClass],
     ['__import__', nativeFunction('__import__', dunderImport)],
     ['abs', one('abs', abs)],
     ['all', one('all', ([iterable]) => toArray(iterable).every((item) => isTruthy(item)))],

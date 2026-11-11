@@ -1,11 +1,15 @@
+import { classAnnotationLists, newAnnotate } from './annotations';
 import type { ClassDef } from './ast';
 import { method } from './define';
 import { createEnumMembers } from './enums';
 import type { Evaluator } from './evaluator';
+import type { CallArguments } from './expressionEvaluator';
 import { Frame } from './frame';
 import { bindValue, callValue, deleteItem, getAttributeOrUndefined, getItem, lookupSpecial, setItem } from './objects';
+import { firstRowOf } from './programSource';
 import { currentRuntime } from './runtimeContext';
 import { defineClassSlots, slotNamesOf } from './slots';
+import { noteUnwinding } from './tracebacks';
 import { initGenericSubclass, typingMroEntries } from './typeParams';
 import {
   builtinClass,
@@ -24,6 +28,7 @@ import {
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import {
+  type ClassAnnotations,
   type Kwargs,
   PyBuiltinFunction,
   PyCell,
@@ -44,22 +49,27 @@ method(attributeDescriptorClass, '__repr__', 'none', 0, 0, (self) => (self as Py
 /** What a class body leaves for `type.__new__` besides its namespace, keyed by that namespace. */
 interface ClassBody {
   classCell: PyCell;
-  annotations: [string, () => PyValue][];
+  annotations: ClassAnnotations;
 }
 
 const pendingBodies = new WeakMap<object, ClassBody>();
 
+/** The class statement that created each class, which `inspect.getsource()` finds the source of. */
+export const classDefinitions = new WeakMap<PyClass, ClassDef>();
+
 // The class statement -----------------------------------------------------------------------------------------------
 
 /** Runs a class statement: evaluates the bases, runs the body in a namespace, and calls the metaclass. */
-// code-gauge-allow functionNcss 31 -- Follows how a class statement prepares its namespace and calls its metaclass.
+// code-gauge-allow functionNcss 35 -- Follows how a class statement prepares its namespace and calls its metaclass.
+// code-gauge-allow functionCognitiveComplexity 16 -- Follows how a class statement prepares its namespace and calls its metaclass.
 export function createClass(
   evaluator: Evaluator,
   def: ClassDef,
   frame: Frame,
-  decorators: PyValue[] = def.decorators.map((decorator) => evaluator.evaluate(decorator, frame))
+  decorators: PyValue[] = def.decorators.map((decorator) => evaluator.evaluate(decorator, frame)),
+  evaluated?: CallArguments
 ): PyValue {
-  const { args: originalBases, kwargs } = evaluator.arguments(def.bases, frame, buildClass, 2);
+  const { args: originalBases, kwargs } = evaluated ?? evaluator.arguments(def.bases, frame, buildClass, 2);
   const bases = resolveBases(originalBases, def.name);
   const keywords = new Map(kwargs);
   const explicit = keywords.get('metaclass');
@@ -73,11 +83,18 @@ export function createClass(
   // A class body reads `__module__` from `__name__`, which code `exec` runs in fresh globals finds in builtins.
   namespace.set('__module__', frame.globals.get('__name__') ?? currentRuntime().builtins.get('__name__') ?? None);
   namespace.set('__qualname__', def.qualifiedName);
-  namespace.set('__firstlineno__', BigInt(def.row + 1));
+  namespace.set('__firstlineno__', BigInt(firstRowOf(def) + 1));
   if (def.doc !== undefined) namespace.set('__doc__', def.doc);
   if (bases !== originalBases) namespace.set('__orig_bases__', newTuple(originalBases));
   const classCell = new PyCell();
   const body = runClassBody(evaluator, def, frame, namespace, classCell);
+  // The annotations of the class body, which CPython's compiler gives the class as `__annotate_func__`.
+  if (body.annotations.length > 0 && !namespace.has('__annotations__')) {
+    namespace.set(
+      '__annotate_func__',
+      newAnnotate(def.qualifiedName, frame.globals, () => body.annotations)
+    );
+  }
   namespace.set('__static_attributes__', newTuple(def.staticAttributes));
   const factory = bases.find(
     (base): base is PyClass => base instanceof PyClass && base.classFactory !== undefined
@@ -93,6 +110,7 @@ export function createClass(
     classCell,
     annotations: body.annotations,
   });
+  if (result instanceof PyClass) classDefinitions.set(result, def);
   for (const decorator of decorators.toReversed()) result = callValue(decorator, [result]);
   return result;
 }
@@ -140,8 +158,29 @@ function resolveBases(bases: PyValue[], name: string): PyValue[] {
   return resolved;
 }
 
-/** Stands for `__build_class__` in the errors about unpacking a class statement's arguments. */
-const buildClass = new PyBuiltinFunction(builtinFunctionClass, '__build_class__', () => None);
+/**
+ * `__build_class__(func, name, *bases, metaclass=..., **kwds)`, which class statements call in CPython. A program's
+ * function has no class body's code, so its variables stay its own and the namespace keeps what `__prepare__` gave.
+ */
+export const buildClass = new PyBuiltinFunction(builtinFunctionClass, '__build_class__', (args, kwargs) => {
+  if (args.length < 2) throw typeError('__build_class__: not enough arguments');
+  const [func, name, ...originalBases] = args;
+  if (!(func instanceof PyFunction)) throw typeError('__build_class__: func must be a function');
+  if (typeof name !== 'string') throw typeError('__build_class__: name is not a string');
+  const bases = resolveBases(originalBases, name);
+  const keywords = new Map(kwargs);
+  const explicit = keywords.get('metaclass');
+  keywords.delete('metaclass');
+  const meta =
+    explicit === undefined || explicit instanceof PyClass
+      ? winningMeta(explicit ?? metaOfBases(bases), bases)
+      : explicit;
+  const prepared = meta === typeClass ? undefined : prepare(meta, name, bases, keywords);
+  const namespace = prepared === undefined ? new Map<string, PyValue>() : new MappingNamespace(prepared);
+  if (bases !== originalBases) namespace.set('__orig_bases__', newTuple(originalBases));
+  callValue(func, []);
+  return callMeta(meta, name, bases, prepared ?? namespace, keywords, { classCell: new PyCell(), annotations: [] });
+});
 
 function metaOfBases(bases: PyValue[]): PyClass {
   return bases.length === 0 ? typeClass : classOf(bases[0]);
@@ -192,6 +231,9 @@ function runClassBody(
   runtime.pushFrame(body);
   try {
     evaluator.runModule(def.body, body);
+  } catch (error) {
+    noteUnwinding(error);
+    throw error;
   } finally {
     runtime.popFrame();
   }
@@ -199,7 +241,7 @@ function runClassBody(
 }
 
 /** A class body's namespace that a metaclass's `__prepare__` returned, read and written through its item methods. */
-class MappingNamespace extends Map<string, PyValue> {
+export class MappingNamespace extends Map<string, PyValue> {
   constructor(private readonly mapping: PyValue) {
     super();
   }
@@ -247,6 +289,7 @@ function isKeyError(error: unknown): boolean {
 // type.__new__ ------------------------------------------------------------------------------------------------------
 
 /** `type.__new__(meta, name, bases, namespace, **kwargs)`: creates a class and runs the hooks its bases define. */
+// code-gauge-allow functionNcss 35 -- Follows the steps of type.__new__ in order.
 export function typeNew(
   meta: PyClass,
   name: string,
@@ -259,6 +302,9 @@ export function typeNew(
   const effectiveBases = classBases.length > 0 ? classBases : [objectClass];
   checkLayout(effectiveBases);
   const entries = namespaceEntries(namespace);
+  // As CPython does, a namespace without `__module__` takes the `__name__` of the globals calling `type()`.
+  if (!entries.has('__module__'))
+    entries.set('__module__', currentRuntime().frame.globals.get('__name__') ?? '__main__');
   const cls = new PyClass(name, effectiveBases, winner);
   cls.isBuiltin = false;
   cls.isBaseType = true;
@@ -275,7 +321,13 @@ export function typeNew(
     pendingBodies.delete(namespace);
     applyBody(cls, body);
   }
-  if (effectiveBases.some((base) => base.flags.isEnum)) createEnumMembers(cls);
+  if (effectiveBases.some((base) => base.flags.isEnum)) {
+    // EnumType takes `boundary=` itself, as the FlagBoundary of a Flag class.
+    const boundary = kwargs.get('boundary');
+    kwargs.delete('boundary');
+    if (boundary !== undefined && boundary !== None) cls.dict.set('_boundary_', boundary);
+    createEnumMembers(cls);
+  }
   const originalBases = cls.dict.get('__orig_bases__');
   initGenericSubclass(cls, originalBases instanceof PyTuple ? originalBases.items : undefined);
   for (const base of cls.mro.slice(1)) base.subclassHook?.(cls);
@@ -286,8 +338,8 @@ export function typeNew(
 
 /** Gives a class what its class statement's body left besides its namespace. */
 function applyBody(cls: PyClass, body: ClassBody): void {
-  cls.annotationNames = body.annotations.map(([annotated]) => annotated);
-  currentRuntime().classAnnotationThunks.set(cls, body.annotations);
+  cls.annotationNames = body.annotations.map((annotation) => annotation.name);
+  classAnnotationLists.set(cls, body.annotations);
   body.classCell.value = cls;
 }
 
@@ -297,9 +349,8 @@ function checkBases(name: string, bases: readonly PyValue[]): PyClass[] {
   return bases.map((base) => {
     if (!(base instanceof PyClass)) throw typeError('bases must be types');
     if (base.unsupportedBase !== undefined) throw new UnsupportedFeatureError(base.unsupportedBase);
-    if (base.isBuiltin && !base.isBaseType) {
+    if (base.isBuiltin && !base.isBaseType)
       throw typeError(`type '${base.typeName ?? base.name}' is not an acceptable base type`);
-    }
     if (base.flags.isEnum && base.enumMembers && base.enumMembers.length > 0) {
       throw typeError(`${name}: cannot extend ${base.qualifiedName}`);
     }
@@ -325,11 +376,9 @@ function qualifiedNameOf(entries: Map<string, PyValue>, name: string): string {
 
 /** Fills a new class's dictionary from its namespace, adding what `type.__new__` adds. */
 function fillClassDict(cls: PyClass, entries: Map<string, PyValue>): void {
-  if (!entries.has('__module__')) entries.set('__module__', '__main__');
   wrapImplicitMethod(entries, '__new__', staticmethodClass);
   wrapImplicitMethod(entries, '__init_subclass__', classmethodClass);
   wrapImplicitMethod(entries, '__class_getitem__', classmethodClass);
-  if (!entries.has('__doc__')) entries.set('__doc__', None);
   const slots = defineClassSlots(cls, entries);
   cls.slotNames = slotNamesOf(cls, slots);
   const plain = cls.bases.every((base) => base.isBuiltin);
@@ -338,6 +387,8 @@ function fillClassDict(cls: PyClass, entries: Map<string, PyValue>): void {
       entries.set(name, new PyOpaque(attributeDescriptorClass, `<attribute '${name}' of '${cls.name}' objects>`));
     }
   }
+  // A class without a docstring gets `__doc__` after `__dict__` and `__weakref__`, as in CPython.
+  if (!entries.has('__doc__')) entries.set('__doc__', None);
   for (const [name, value] of entries) cls.dict.set(name, value);
   if (cls.dict.has('__eq__') && !cls.dict.has('__hash__')) cls.dict.set('__hash__', None);
 }

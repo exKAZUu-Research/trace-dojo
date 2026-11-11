@@ -1,6 +1,7 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
-import type { ClassDef, FunctionDef } from './ast';
+import type { ClassDef, Expression, FunctionDef } from './ast';
 import type { DictStore } from './dictStore';
+import type { Frame } from './frame';
 import type { SetTable } from './setTable';
 
 /**
@@ -134,8 +135,17 @@ export class PyClass extends PyObject {
   }
 }
 
-/** The names a class body annotates, in order, with how to evaluate each annotation. */
-export type ClassAnnotations = [string, () => PyValue][];
+/** An annotation the program wrote: the name it annotates, its expression, and the frame that evaluates it. */
+export interface Annotation {
+  name: string;
+  expression: Expression;
+  frame: Frame;
+  /** The value of an annotation a function such as `NamedTuple()` was given, which needs no evaluation. */
+  value?: PyValue;
+}
+
+/** The annotations a class body ran, in the order of the source. */
+export type ClassAnnotations = Annotation[];
 
 /** The state of an exception that the `BaseException` layout adds to instances. */
 export interface ExceptionState {
@@ -156,10 +166,10 @@ export interface ExceptionState {
   selfValue?: PyValue;
   /** Whether the exception has been raised, which gives it a traceback. */
   raised?: boolean;
-  /** The stand-in for the traceback that the standard library's code read or assigned. */
-  traceback?: PyValue;
   /** The sub-exceptions of an exception group. */
   exceptions?: PyTuple;
+  /** The traceback object of the frames the exception passed through, or None. */
+  traceback?: PyValue;
   /** The file names an OSError was created with, which its `args` then leave out. */
   filename?: PyValue;
   filename2?: PyValue;
@@ -273,9 +283,6 @@ export class PyFunction extends PyObject {
   typeParams: PyValue[] = [];
   /** The frame of those type parameters, where the annotations that mention them are evaluated. */
   annotationFrame?: unknown;
-  /** The `__annotations__` and `__annotate__` the program assigned. */
-  annotations?: PyValue;
-  annotate?: PyValue;
 
   // code-gauge-allow functionParameterCount 7 -- Each function field is set once at creation.
   constructor(
@@ -297,6 +304,9 @@ export class PyFunction extends PyObject {
 }
 
 export class PyBoundMethod extends PyObject {
+  /** A native that gives what calling the method gives, which calls run instead, as random's functions have. */
+  fastCall?: PyValue;
+
   constructor(
     cls: PyClass,
     readonly self: PyValue,
@@ -367,6 +377,8 @@ export class PyGenerator extends PyObject {
   started = false;
   running = false;
   finished = false;
+  /** The frame the generator runs in, which `gi_frame` gives. */
+  frame?: unknown;
 
   constructor(
     cls: PyClass,

@@ -102,7 +102,7 @@ interface Sha2Constants {
 let sha2Constants: Sha2Constants | undefined;
 
 /** The SHA-2 constants, computed when a program first uses an algorithm that needs them. */
-function sha2(): Sha2Constants {
+export function sha2(): Sha2Constants {
   sha2Constants ??= computeSha2Constants();
   return sha2Constants;
 }

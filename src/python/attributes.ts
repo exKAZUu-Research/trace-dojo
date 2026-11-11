@@ -1,8 +1,15 @@
 // code-gauge-allow-file fileNcss 508 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
-import { solidBase } from './classes';
-import { builtin } from './define';
 import {
-  builtinClassAttribute,
+  classAnnotate,
+  classAnnotations,
+  functionAnnotate,
+  functionAnnotations,
+  setClassAnnotate,
+  setClassAnnotations,
+  setFunctionAnnotationAttribute,
+} from './annotations';
+import { solidBase } from './classes';
+import {
   builtinClassesWithDict,
   callGetter,
   callSetter,
@@ -11,12 +18,16 @@ import {
   noteGetattributeAssigned,
   ownDict,
 } from './descriptors';
+import { enumClassData } from './enums';
+import type { Frame } from './frame';
+import { delegateOf } from './generators';
 import { hasPythonLevelNew } from './instances';
 import { builtinFunctionModule } from './modules';
 import { namespaceDict, namespaceOf } from './namespaces';
 import { attributeError, bindValue, callValue, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { deleteMember, instancesHaveDict, isMember, writeMember } from './slots';
+import { codeObject, frameObject, functionCode, setTraceback } from './tracebacks';
 import { typeFlags } from './typeFlags';
 import {
   builtinFunctionClass,
@@ -27,6 +38,7 @@ import {
   newDict,
   newTuple,
   None,
+  objectClass,
   propertyClass,
   pyError,
   staticmethodClass,
@@ -34,8 +46,6 @@ import {
   typeError,
   typeName,
 } from './types';
-import { unavailableValue } from './unavailableValues';
-import { UnsupportedFeatureError } from './unsupported';
 import {
   type ExceptionState,
   PyBoundMethod,
@@ -49,39 +59,18 @@ import {
   PyInstance,
   PyModule,
   PyObject,
-  PyOpaque,
   PyRange,
   PySlice,
   type PyValue,
 } from './values';
 import { weakReferenceOf } from './weakReferences';
 
-/** The feature to name for the docstring of a builtin module, which this grader does not have. */
-const TRACEBACK_FEATURE = '例外のトレースバック（__traceback__）';
-
-/**
- * The `__traceback__` of an exception. A raised exception's traceback holds frame objects with the script's path,
- * which this grader does not make, so the program reading it stops; the standard library's code, which only passes
- * it on, gets a stand-in that stops the program if it is ever used.
- */
-function tracebackOf(state: ExceptionState): PyValue {
-  if (!state.raised) return None;
-  if (!currentRuntime().inLibraryCode()) throw new UnsupportedFeatureError(TRACEBACK_FEATURE);
-  const traceback = state.traceback ?? unavailableValue(TRACEBACK_FEATURE);
-  state.traceback = traceback;
-  return traceback;
-}
-
-function isUnavailableTraceback(value: PyValue): boolean {
-  return value instanceof PyOpaque && value.text === TRACEBACK_FEATURE;
-}
-
 export const BUILTIN_DOC = '組み込みの関数・型・モジュールの説明文（__doc__）';
 
 /** Reads an attribute of a class: its own data, then the attributes of its MRO, bound as a class reads them. */
 // code-gauge-allow functionCognitiveComplexity 18 -- Follows the order CPython's type_getattro looks up an attribute in.
 export function classAttribute(cls: PyClass, name: string): PyValue | undefined {
-  const own = typeData(cls, name);
+  const own = typeData(cls, name) ?? (cls.flags.isEnum ? enumClassData(cls, name) : undefined);
   if (own !== undefined) return own;
   const meta = cls.cls;
   const metaAttribute = meta === typeClass ? undefined : meta.lookup(name);
@@ -116,6 +105,7 @@ function isMetaDataDescriptor(attribute: PyValue): boolean {
   return (attribute instanceof PyDescriptor && attribute.cls === propertyClass) || isDataDescriptor(attribute);
 }
 
+// code-gauge-allow functionNcss 31 -- One case per attribute a class keeps outside its dictionary.
 function typeData(cls: PyClass, name: string): PyValue | undefined {
   switch (name) {
     case '__name__': {
@@ -154,7 +144,10 @@ function typeData(cls: PyClass, name: string): PyValue | undefined {
       return callValue(types.dict.get('MappingProxyType') as PyValue, [namespaceDict(cls.dict)]);
     }
     case '__annotations__': {
-      return cls.dict.get('__annotations__') ?? newDict(currentRuntime().classAnnotations(cls));
+      return cls.isBuiltin ? undefined : classAnnotations(cls);
+    }
+    case '__annotate__': {
+      return cls.isBuiltin ? undefined : classAnnotate(cls);
     }
     default: {
       return undefined;
@@ -162,10 +155,19 @@ function typeData(cls: PyClass, name: string): PyValue | undefined {
   }
 }
 
+/** `obj.__class__`, or undefined when a program's class defines `__class__`, as `unittest.mock`'s spec'd mocks do. */
+function ownClassAttribute(value: PyValue): PyValue | undefined {
+  const defines =
+    value instanceof PyInstance &&
+    !value.cls.isBuiltin &&
+    value.cls.lookup('__class__') !== objectClass.dict.get('__class__');
+  return defines ? undefined : classOf(value);
+}
+
 /** The attributes builtin objects have of their own, outside any class dictionary. */
 // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of builtin object with attributes of its own.
 export function specialAttribute(value: PyValue, name: string): PyValue | undefined {
-  if (name === '__class__') return builtinClassAttribute(value);
+  if (name === '__class__') return ownClassAttribute(value);
   if (typeof value === 'bigint' || typeof value === 'boolean') return integerAttribute(BigInt(value), name);
   if (typeof value === 'number') return realPartAttribute(value, 0, name);
   if (typeof value === 'string') return undefined;
@@ -256,6 +258,7 @@ function moduleOf(fn: PyBuiltinFunction): PyValue {
 /** The prefix of the attributes of each kind of generator object, such as `cr_running` of a coroutine. */
 const GENERATOR_PREFIXES: Record<string, string> = { coroutine: 'cr_', async_generator: 'ag_' };
 
+// code-gauge-allow functionCognitiveComplexity 17 -- One case per attribute of CPython's generator getset table.
 function generatorAttribute(generator: PyGenerator, attribute: string): PyValue | undefined {
   if (attribute === '__name__') return generator.name;
   if (attribute === '__qualname__') return generator.qualifiedName;
@@ -265,10 +268,10 @@ function generatorAttribute(generator: PyGenerator, attribute: string): PyValue 
   if (name === 'gi_await' && prefix !== 'gi_') return generatorAttribute(generator, 'gi_yieldfrom');
   if (name === 'gi_running') return generator.running;
   if (name === 'gi_suspended') return generator.started && !generator.running && !generator.finished;
-  if (name === 'gi_frame' && generator.finished) return None;
-  if (name === 'gi_frame' || name === 'gi_code' || name === 'gi_yieldfrom') {
-    throw currentRuntime().unsupported(`ジェネレータの ${attribute}`);
-  }
+  const frame = generator.frame as Frame | undefined;
+  if (name === 'gi_frame') return generator.finished || !frame ? None : frameObject(frame);
+  if (name === 'gi_code' && frame) return codeObject(frame);
+  if (name === 'gi_yieldfrom') return (frame && !generator.finished && delegateOf(frame)) || None;
   return undefined;
 }
 
@@ -286,6 +289,9 @@ function functionAttribute(fn: PyFunction, name: string): PyValue | undefined {
     case '__module__': {
       return fn.module;
     }
+    case '__code__': {
+      return functionCode(fn);
+    }
     case '__defaults__': {
       return fn.defaults.length > 0 ? newTuple(fn.defaults) : None;
     }
@@ -296,12 +302,10 @@ function functionAttribute(fn: PyFunction, name: string): PyValue | undefined {
       return fn.keywordDefaults.size > 0 ? newDict(fn.keywordDefaults.entries()) : None;
     }
     case '__annotations__': {
-      return currentRuntime().evaluator.annotationsOf(fn);
+      return functionAnnotations(fn);
     }
     case '__annotate__': {
-      if (fn.annotate !== undefined) return fn.annotate;
-      if (!fn.def.returns && !fn.def.params.some((param) => param.annotation)) return None;
-      return builtin('__annotate__', 'one', 1, 1, () => currentRuntime().evaluator.annotationsOf(fn));
+      return functionAnnotate(fn);
     }
     case '__dict__': {
       return namespaceDict(fn.dict);
@@ -341,7 +345,7 @@ function instanceAttribute(instance: PyInstance, name: string): PyValue | undefi
       return state.suppressContext;
     }
     case '__traceback__': {
-      return tracebackOf(state);
+      return state.traceback ?? None;
     }
     case 'exceptions': {
       return state.exceptions;
@@ -383,14 +387,11 @@ function osErrorField(state: ExceptionState, name: string): PyValue | undefined 
 }
 
 function setFunctionAttribute(fn: PyFunction, name: string, value: PyValue): void {
-  if (name === '__name__' && typeof value === 'string') fn.name = value;
+  if (name === '__annotations__' || name === '__annotate__') setFunctionAnnotationAttribute(fn, name, value);
+  else if (name === '__name__' && typeof value === 'string') fn.name = value;
   else if (name === '__qualname__' && typeof value === 'string') fn.qualifiedName = value;
   else if (name === '__module__') fn.module = value;
-  else if (name === '__annotations__') fn.annotations = value;
-  else if (name === '__annotate__') {
-    fn.annotate = value;
-    fn.annotations = undefined;
-  } else fn.dict.set(name, value);
+  else fn.dict.set(name, value);
 }
 
 export function setAttribute(target: PyValue, name: string, value: PyValue): void {
@@ -454,6 +455,7 @@ function userHook(target: PyObject, name: string): PyValue | undefined {
   return isNativeMethod(custom) ? undefined : custom;
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Follows the order type.__setattr__ checks the special attributes of a class in.
 function setClassAttribute(target: PyClass, name: string, value: PyValue): void {
   if (target.isBuiltin) throw typeError(`cannot set '${name}' attribute of immutable type '${target.name}'`);
   if (setClassAttributeThroughMeta(target, name, value)) return;
@@ -470,7 +472,9 @@ function setClassAttribute(target: PyClass, name: string, value: PyValue): void 
     return;
   }
   if (name === '__module__' && typeof value === 'string') target.module = value;
-  target.dict.set(name, value);
+  if (name === '__annotations__') setClassAnnotations(target, value);
+  else if (name === '__annotate__') setClassAnnotate(target, value);
+  else target.dict.set(name, value);
 }
 
 /** Whether a value is an instance of a program's subclass of a builtin type other than object, such as list. */
@@ -601,14 +605,12 @@ function setExceptionField(state: ExceptionState, name: string, value: PyValue):
       state.context = value;
       return true;
     }
-    case '__traceback__': {
-      if (value !== None && !isUnavailableTraceback(value)) throw new UnsupportedFeatureError(TRACEBACK_FEATURE);
-      state.raised = value !== None;
-      state.traceback = value === None ? undefined : value;
-      return true;
-    }
     case '__suppress_context__': {
       state.suppressContext = value === true;
+      return true;
+    }
+    case '__traceback__': {
+      setTraceback(state, value);
       return true;
     }
     case 'args': {
@@ -640,6 +642,7 @@ function noDictError(target: PyValue, name: string, attribute?: PyValue): Error 
   );
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Follows the order object.__delattr__ tries data descriptors, special stores, and the instance dict in.
 export function deleteAttribute(target: PyValue, name: string): void {
   if (target instanceof PyInstance || isSubclassInstance(target)) {
     const custom = userHook(target as PyObject, '__delattr__');
@@ -649,17 +652,20 @@ export function deleteAttribute(target: PyValue, name: string): void {
   }
   if (target instanceof PyClass) {
     if (target.isBuiltin) throw typeError(`cannot delete '${name}' attribute of immutable type '${target.name}'`);
-    if (!target.dict.delete(name)) throw attributeError(target, name);
+    if (name === '__annotations__') setClassAnnotations(target, undefined);
+    else if (!target.dict.delete(name)) throw attributeError(target, name);
+    return;
+  }
+  if (target instanceof PyFunction && (name === '__annotations__' || name === '__annotate__')) {
+    setFunctionAnnotationAttribute(target, name, undefined);
     return;
   }
   if (target instanceof PyFunction || target instanceof PyModule) {
     if (!target.dict.delete(name)) throw attributeError(target, name);
     return;
   }
-  if (classOf(target).lookup(name) !== undefined) {
-    throw pyError('AttributeError', `'${typeName(target)}' object attribute '${name}' is read-only`);
-  }
-  throw attributeError(target, name);
+  // Deleting an attribute of a builtin type's object fails as assigning it does.
+  throw readOnlyError(target, name);
 }
 
 /** Deletes an instance attribute, honoring descriptors and slots, as `object.__delattr__` does. */

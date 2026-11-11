@@ -1,4 +1,5 @@
 import { builtin } from '../define';
+import { displayValue } from '../display';
 import { registerModule } from '../modules';
 import { argument } from '../nativeArgs';
 import { toIndex } from '../numbers';
@@ -7,6 +8,7 @@ import { PyError, type PyValue } from '../values';
 import { sysInformation, sysModules } from './sysInfo';
 
 registerModule('sys', (runtime, namespace) => {
+  const displayhook = builtin('displayhook', 'one', 1, 1, ([value]) => displayValue(runtime, value));
   const entries = new Map<string, PyValue>([
     [
       'exit',
@@ -38,6 +40,8 @@ registerModule('sys', (runtime, namespace) => {
     ],
     ['stdout', runtime.standardStream('stdout')],
     ['stderr', runtime.standardStream('stderr')],
+    ['displayhook', displayhook],
+    ['__displayhook__', displayhook],
     ...sysInformation(runtime),
   ]);
   for (const [key, value] of entries) namespace.set(key, value);

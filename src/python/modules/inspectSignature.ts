@@ -1,8 +1,8 @@
+import { functionAnnotations } from '../annotations';
 import { pyRepr } from '../conversions';
 import { method } from '../define';
-import { callValue, getAttributeOrUndefined, isCallable } from '../objects';
+import { callValue, getAttribute, getAttributeOrUndefined, isCallable } from '../objects';
 import { currentRuntime } from '../runtimeContext';
-import { registerSourceModule } from '../sourceModules';
 import {
   builtinClass,
   defineMethod,
@@ -20,14 +20,12 @@ import {
   PyBuiltinFunction,
   PyClass,
   PyDescriptor,
-  type PyDict,
   PyFunction,
   PyInstance,
   PyOpaque,
   type PyValue,
 } from '../values';
 import { type Partial, partialClass } from './functools';
-import { INSPECT_BIND_SOURCE } from './inspectBindSource';
 import { bindArguments, defineProperty } from './numberSupport';
 
 // Classes -----------------------------------------------------------------------------------------------------------
@@ -102,24 +100,6 @@ defineProperty(parameterClass, 'name', (self) => parameterOf(self).name);
 defineProperty(parameterClass, 'kind', (self) => KINDS[parameterOf(self).kind]);
 defineProperty(parameterClass, 'default', (self) => parameterOf(self).default);
 defineProperty(parameterClass, 'annotation', (self) => parameterOf(self).annotation);
-method(
-  parameterClass,
-  'replace',
-  'none',
-  0,
-  0,
-  (self, _args, kwargs) => {
-    const parameter = parameterOf(self);
-    const kind = kwargs?.get('kind');
-    return newParameter({
-      name: (kwargs?.get('name') as string | undefined) ?? parameter.name,
-      kind: kind === undefined ? parameter.kind : (kindIndex(kind) as Kind),
-      default: kwargs?.get('default') ?? parameter.default,
-      annotation: kwargs?.get('annotation') ?? parameter.annotation,
-    });
-  },
-  { keywords: ['name', 'kind', 'default', 'annotation'] }
-);
 method(parameterClass, '__str__', 'none', 0, 0, (self) => formatParameter(parameterOf(self)));
 method(parameterClass, '__repr__', 'none', 0, 0, (self) => `<Parameter "${formatParameter(parameterOf(self))}">`);
 parameterClass.construct = (_cls, args, kwargs) => {
@@ -165,18 +145,16 @@ method(
   },
   { keywords: ['parameters', 'return_annotation'] }
 );
-for (const name of ['bind', 'bind_partial']) {
-  defineMethod(signatureClass, name, (self, args, kwargs) =>
-    callValue(
-      bindHelper('_bind'),
-      [self, newTuple(args), newDict([...(kwargs ?? [])])],
-      new Map([['partial', name === 'bind_partial']])
-    )
-  );
-}
-
-function bindHelper(name: string): PyValue {
-  return currentRuntime().importModule('_inspect_bind').dict.get(name) as PyValue;
+// Signature._bind is written in Python with the rest of inspect.
+for (const [name, partial] of [
+  ['bind', false],
+  ['bind_partial', true],
+] as const) {
+  defineMethod(signatureClass, name, (self, args, kwargs) => {
+    const bind = getAttribute(currentRuntime().importModule('inspect'), '_signature_bind');
+    const named = newDict(kwargs?.entries() ?? []);
+    return callValue(bind, [self, newTuple(args), named], new Map([['partial', partial]]));
+  });
 }
 signatureClass.construct = (_cls, args, kwargs) => {
   const [parameters, returnAnnotation] = bindArguments(
@@ -261,72 +239,51 @@ function signatureData(value: PyValue): Signature {
   if (value instanceof PyFunction) return functionSignature(value);
   if (value instanceof PyBoundMethod) return withoutFirst(signatureData(value.fn));
   if (value instanceof PyClass) return classSignature(value);
-  if (value instanceof PyOpaque && value.cls === partialClass) {
-    const wrapped = signature((value.data as Partial).fn);
-    return signatureOf(callValue(bindHelper('_signature_get_partial'), [wrapped, value]));
-  }
   if (value instanceof PyInstance && !value.cls.isBuiltin) {
     const call = value.cls.lookup('__call__');
     if (call instanceof PyFunction) return withoutFirst(functionSignature(call));
   }
+  if (value instanceof PyOpaque && value.cls === partialClass) return partialSignature(value);
   const text = value instanceof PyBuiltinFunction ? builtinTextSignature(value) : undefined;
   if (text !== undefined) return textSignature(text, (value as PyBuiltinFunction).self !== undefined);
   if (!isCallable(value)) throw typeError(`${pyRepr(value)} is not a callable object`);
   throw new UnsupportedFeatureError('組み込みの関数やクラスの inspect.signature()');
 }
 
-function classSignature(cls: PyClass): Signature {
-  for (const each of cls.mro) {
-    if (each.isBuiltin) break;
-    const init = each.dict.get('__init__');
-    if (init instanceof PyFunction) return withoutFirst(functionSignature(init));
-    const create = each.dict.get('__new__');
-    const fn = create instanceof PyDescriptor ? create.fn : create;
-    if (fn instanceof PyFunction) return withoutFirst(functionSignature(fn));
+/** The signature of a `functools.partial` object, as `_signature_get_partial` derives it from its function's. */
+// code-gauge-allow functionCognitiveComplexity 19 -- Follows the cases of _signature_get_partial in CPython's inspect.py.
+// code-gauge-allow functionNcss 32 -- Follows the cases of _signature_get_partial in CPython's inspect.py.
+function partialSignature(value: PyOpaque): Signature {
+  const { fn, args, kwargs } = value.data as Partial;
+  const { parameters, returnAnnotation } = signatureData(fn);
+  const params = parameters.map(parameterOf);
+  const positional = params.filter((each) => each.kind <= Kind.PositionalOrKeyword);
+  const hasVarArgs = params.some((each) => each.kind === Kind.VarPositional);
+  const accepts = (name: string): boolean =>
+    params.some((each) => each.name === name && each.kind !== Kind.PositionalOnly && each.kind !== Kind.VarPositional);
+  const hasVarKeywords = params.some((each) => each.kind === Kind.VarKeyword);
+  const badKeyword = [...kwargs.keys()].some((name) => !accepts(name) && !hasVarKeywords);
+  if ((args.length > positional.length && !hasVarArgs) || badKeyword) {
+    throw valueError(`partial object ${pyRepr(value)} has incorrect arguments`);
   }
-  if (cls.mro.every((each) => !each.isBuiltin || each === cls.mro.at(-1))) {
-    return { parameters: [], returnAnnotation: emptyClass };
+  const bound = new Set(positional.slice(0, args.length));
+  let keywordOnly = false;
+  const result: Parameter[] = [];
+  const moved: Parameter[] = [];
+  for (const param of params) {
+    if (bound.has(param)) continue;
+    const given = kwargs.get(param.name);
+    if (param.kind === Kind.PositionalOrKeyword && given !== undefined) keywordOnly = true;
+    if (keywordOnly && param.kind === Kind.VarPositional) continue;
+    const changed = { ...param, default: given ?? param.default };
+    if (keywordOnly && param.kind === Kind.PositionalOrKeyword) moved.push({ ...changed, kind: Kind.KeywordOnly });
+    else if (keywordOnly) moved.push(changed);
+    else result.push(changed);
   }
-  throw new UnsupportedFeatureError('組み込みのクラスを継承したクラスの inspect.signature()');
+  return { parameters: [...result, ...moved].map(newParameter), returnAnnotation };
 }
 
-function withoutFirst({ parameters, returnAnnotation }: Signature): Signature {
-  const [first] = parameters;
-  if (first === undefined) throw valueError('invalid method signature');
-  const kind = parameterOf(first).kind;
-  if (kind === Kind.VarPositional) return { parameters, returnAnnotation };
-  if (kind === Kind.KeywordOnly || kind === Kind.VarKeyword) throw valueError('invalid method signature');
-  return { parameters: parameters.slice(1), returnAnnotation };
-}
-
-const KINDS_OF_PARAMETERS: Record<string, Kind> = {
-  positionalOnly: Kind.PositionalOnly,
-  positional: Kind.PositionalOrKeyword,
-  varArgs: Kind.VarPositional,
-  keywordOnly: Kind.KeywordOnly,
-  varKeywords: Kind.VarKeyword,
-};
-
-function functionSignature(fn: PyFunction): Signature {
-  const annotations = currentRuntime().evaluator.annotationsOf(fn) as PyDict;
-  const annotationOf = (name: string): PyValue => annotations.store.get(name) ?? emptyClass;
-  const positional = fn.def.params.filter((param) => param.kind === 'positionalOnly' || param.kind === 'positional');
-  const firstDefault = positional.length - fn.defaults.length;
-  const parameters = fn.def.params.map((param) => {
-    const index = positional.indexOf(param);
-    const defaultValue =
-      index >= firstDefault && index !== -1 ? fn.defaults[index - firstDefault] : fn.keywordDefaults.get(param.name);
-    return newParameter({
-      name: param.name,
-      kind: KINDS_OF_PARAMETERS[param.kind],
-      default: defaultValue ?? emptyClass,
-      annotation: annotationOf(param.name),
-    });
-  });
-  return { parameters, returnAnnotation: annotationOf('return') };
-}
-
-/** The `__text_signature__`s CPython gives the methods of `object` and `type`, where `$` marks the parameter binding fills. */
+/** The `__text_signature__`s CPython gives the methods of `object` and `type`, where `$` marks the bound parameter. */
 const TEXT_SIGNATURES: Record<string, string> = {
   'type.__call__': '$self, /, *args, **kwargs',
   __init__: '$self, /, *args, **kwargs',
@@ -364,10 +321,60 @@ function textSignature(text: string, bound: boolean): Signature {
     let kind: Kind = index < slash || name.startsWith('$') ? Kind.PositionalOnly : Kind.PositionalOrKeyword;
     if (name.startsWith('**')) kind = Kind.VarKeyword;
     else if (name.startsWith('*')) kind = Kind.VarPositional;
-    const bare = name.replace(/^[$*]+/, '');
-    parameters.push(newParameter({ name: bare, kind, default: emptyClass, annotation: emptyClass }));
+    parameters.push(
+      newParameter({ name: name.replace(/^[$*]+/, ''), kind, default: emptyClass, annotation: emptyClass })
+    );
   }
   return { parameters, returnAnnotation: emptyClass };
 }
 
-registerSourceModule('_inspect_bind', INSPECT_BIND_SOURCE);
+function classSignature(cls: PyClass): Signature {
+  for (const each of cls.mro) {
+    if (each.isBuiltin) break;
+    const init = each.dict.get('__init__');
+    if (init instanceof PyFunction) return withoutFirst(functionSignature(init));
+    const create = each.dict.get('__new__');
+    const fn = create instanceof PyDescriptor ? create.fn : create;
+    if (fn instanceof PyFunction) return withoutFirst(functionSignature(fn));
+  }
+  if (cls.mro.every((each) => !each.isBuiltin || each === cls.mro.at(-1))) {
+    return { parameters: [], returnAnnotation: emptyClass };
+  }
+  throw new UnsupportedFeatureError('組み込みのクラスを継承したクラスの inspect.signature()');
+}
+
+function withoutFirst({ parameters, returnAnnotation }: Signature): Signature {
+  const [first] = parameters;
+  if (first === undefined) throw valueError('invalid method signature');
+  const kind = parameterOf(first).kind;
+  if (kind === Kind.VarPositional) return { parameters, returnAnnotation };
+  if (kind === Kind.KeywordOnly || kind === Kind.VarKeyword) throw valueError('invalid method signature');
+  return { parameters: parameters.slice(1), returnAnnotation };
+}
+
+const KINDS_OF_PARAMETERS: Record<string, Kind> = {
+  positionalOnly: Kind.PositionalOnly,
+  positional: Kind.PositionalOrKeyword,
+  varArgs: Kind.VarPositional,
+  keywordOnly: Kind.KeywordOnly,
+  varKeywords: Kind.VarKeyword,
+};
+
+function functionSignature(fn: PyFunction): Signature {
+  const annotations = functionAnnotations(fn);
+  const annotationOf = (name: string): PyValue => annotations.store.get(name) ?? emptyClass;
+  const positional = fn.def.params.filter((param) => param.kind === 'positionalOnly' || param.kind === 'positional');
+  const firstDefault = positional.length - fn.defaults.length;
+  const parameters = fn.def.params.map((param) => {
+    const index = positional.indexOf(param);
+    const defaultValue =
+      index >= firstDefault && index !== -1 ? fn.defaults[index - firstDefault] : fn.keywordDefaults.get(param.name);
+    return newParameter({
+      name: param.name,
+      kind: KINDS_OF_PARAMETERS[param.kind],
+      default: defaultValue ?? emptyClass,
+      annotation: annotationOf(param.name),
+    });
+  });
+  return { parameters, returnAnnotation: annotationOf('return') };
+}

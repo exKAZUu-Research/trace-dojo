@@ -1,24 +1,39 @@
-// code-gauge-allow-file fileNcss 478 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 514 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from './conversions';
 import { method } from './define';
 import { pyHash } from './hashing';
+import { definePythonLevelNew } from './instances';
 import { defineProperty } from './modules/numberSupport';
-import { attributeError, callValue, getAttributeOrUndefined, isTruthy, toArray } from './objects';
+import { attributeError, callValue, getAttributeOrUndefined, isTruthy, setAttribute, toArray } from './objects';
 import { equals } from './operators';
 import { currentRuntime } from './runtimeContext';
-import { PyTypeParam, PyTypingAlias } from './typeParams';
+import { genericClass, PyTypeParam, PyTypingAlias } from './typeParams';
 import {
   builtinClass,
   classOf,
+  defineMethod,
   Ellipsis,
   newList,
   newTuple,
   None,
   noneClass,
   NotImplemented,
+  objectClass,
+  typeClass,
   typeError,
 } from './types';
-import { type Kwargs, PyBuiltinFunction, PyClass, PyFunction, PyList, PyOpaque, PyTuple, type PyValue } from './values';
+import {
+  type Kwargs,
+  PyBuiltinFunction,
+  PyClass,
+  PyError,
+  PyFunction,
+  PyInstance,
+  PyList,
+  PyOpaque,
+  PyTuple,
+  type PyValue,
+} from './values';
 
 /**
  * The objects of type hints: `list[int]` (types.GenericAlias), `int | str` (typing.Union), and the aliases and special
@@ -64,7 +79,8 @@ const tupleTypeClass = typingClass('_TupleType', specialAliasClass);
 const callableTypeClass = typingClass('_CallableType', specialAliasClass);
 export const specialFormClass = typingClass('_SpecialForm');
 const typedCacheSpecialFormClass = typingClass('_TypedCacheSpecialForm', specialFormClass);
-const anyMetaClass = typingClass('_AnyMeta');
+const anyMetaClass = typingClass('_AnyMeta', typeClass);
+anyMetaClass.isBaseType = true;
 export const forwardRefClass = builtinClass('ForwardRef');
 forwardRefClass.module = 'annotationlib';
 
@@ -341,30 +357,58 @@ for (const cls of [specialFormClass, typedCacheSpecialFormClass]) {
 
 // Any ---------------------------------------------------------------------------------------------------------------
 
-export const anyType = new PyOpaque(anyMetaClass, 'Any');
-method(anyMetaClass, '__repr__', 'none', 0, 0, () => 'typing.Any');
-method(anyMetaClass, '__getitem__', 'one', 1, 1, () => {
-  throw typeError("type 'Any' is not subscriptable");
+/** `typing.Any`, a class of the metaclass `_AnyMeta`, which programs may derive from but not instantiate. */
+export const anyType = new PyClass('Any', [objectClass], anyMetaClass);
+anyType.mro = [anyType, objectClass];
+anyType.isBaseType = true;
+anyType.module = 'typing';
+definePythonLevelNew(anyType, (cls) => {
+  if (cls === anyType) throw typeError('Any cannot be instantiated');
+  currentRuntime().allocate(1);
+  return new PyInstance(cls);
 });
-method(
-  anyMetaClass,
-  '__call__',
-  'expected',
-  0,
-  Number.POSITIVE_INFINITY,
-  () => {
-    throw typeError('Any cannot be instantiated');
-  },
-  { keywords: [] }
+method(anyMetaClass, '__repr__', 'none', 0, 0, (self) =>
+  self === anyType ? 'typing.Any' : `<class '${(self as PyClass).module}.${(self as PyClass).qualifiedName}'>`
 );
-opaqueAttributes(anyMetaClass, (_self, name) => {
-  if (name === '__name__' || name === '__qualname__') return 'Any';
-  if (name === '__module__') return 'typing';
-  return;
+method(anyMetaClass, '__instancecheck__', 'one', 1, 1, (self, [value]) => {
+  if (self === anyType) throw typeError('typing.Any cannot be used with isinstance()');
+  return classOf(value).isSubclassOf(self as PyClass);
 });
-classChecks(anyMetaClass, (_self, _cls, caller) => {
-  throw typeError(`typing.Any cannot be used with ${caller}()`);
+method(anyMetaClass, '__subclasscheck__', 'one', 1, 1, (self, [value]) => {
+  if (self === anyType) throw typeError('typing.Any cannot be used with issubclass()');
+  if (!(value instanceof PyClass)) throw typeError('issubclass() arg 1 must be a class');
+  return value.isSubclassOf(self as PyClass);
 });
+
+// Typing objects as bases -------------------------------------------------------------------------------------------
+
+/**
+ * `__mro_entries__` of typing's objects: an alias stands for its origin, followed by Generic unless a later base
+ * brings it, as `_BaseGenericAlias.__mro_entries__` gives them; a union and a special form cannot be bases. Undefined
+ * for other objects.
+ */
+export function typingBaseEntries(base: PyValue, _className: string, bases: readonly PyValue[]): PyValue[] | undefined {
+  if (!(base instanceof PyOpaque)) return undefined;
+  if (base.cls === unionClass || base.cls.isSubclassOf(specialFormClass)) {
+    throw typeError(`Cannot subclass ${pyRepr(base)}`);
+  }
+  let origin: PyValue;
+  if (base.cls.isSubclassOf(specialAliasClass)) origin = specialOf(base).origin;
+  else if (base.cls === annotatedAliasClass) origin = aliasOf(base).args[0];
+  else if (base.cls.isSubclassOf(typingAliasClass)) origin = aliasOf(base).origin;
+  else return undefined;
+  const entries = bases.includes(origin) ? [] : [origin];
+  const later = bases.slice(bases.indexOf(base) + 1);
+  const bringsGeneric = later.some(
+    (other) =>
+      (other instanceof PyOpaque &&
+        (other.cls.isSubclassOf(typingAliasClass) || other.cls.isSubclassOf(specialAliasClass))) ||
+      other instanceof PyTypingAlias ||
+      (other instanceof PyClass && other.isSubclassOf(genericClass))
+  );
+  if (!bringsGeneric) entries.push(genericClass);
+  return entries;
+}
 
 // typing's aliases --------------------------------------------------------------------------------------------------
 
@@ -386,15 +430,7 @@ export function newSpecialAlias(
 
 for (const cls of [specialAliasClass, tupleTypeClass, callableTypeClass]) {
   method(cls, '__repr__', 'none', 0, 0, (self) => `typing.${specialOf(self).name}`);
-  method(
-    cls,
-    '__call__',
-    'expected',
-    0,
-    Number.POSITIVE_INFINITY,
-    (self, args, kwargs) => callAlias(specialOf(self), args, kwargs),
-    { keywords: [] }
-  );
+  defineMethod(cls, '__call__', (self, args, kwargs) => callAlias(specialOf(self), args, kwargs));
   method(cls, '__or__', 'one', 1, 1, (self, [other]) => unionOf([self, other]));
   method(cls, '__ror__', 'one', 1, 1, (self, [other]) => unionOf([other, self]));
   opaqueAttributes(cls, (self, name) => {
@@ -476,15 +512,16 @@ function isSubclassOfOrigin(cls: PyClass, origin: PyValue): boolean {
 for (const cls of [typingAliasClass, callableAliasClass, literalAliasClass, annotatedAliasClass]) {
   method(cls, '__repr__', 'none', 0, 0, (self) => typingAliasRepr(self as PyOpaque));
   method(cls, '__getitem__', 'one', 1, 1, (self, [key]) => substituteAlias(self as PyOpaque, key));
-  method(
-    cls,
-    '__call__',
-    'expected',
-    0,
-    Number.POSITIVE_INFINITY,
-    (self, args, kwargs) => callAlias(aliasOf(self), args, kwargs),
-    { keywords: [] }
-  );
+  defineMethod(cls, '__call__', (self, args, kwargs) => {
+    const result = callAlias(aliasOf(self), args, kwargs);
+    // `_BaseGenericAlias.__call__` records the alias on the instance where it can.
+    try {
+      setAttribute(result, '__orig_class__', self);
+    } catch (error) {
+      if (!(error instanceof PyError)) throw error;
+    }
+    return result;
+  });
   method(cls, '__or__', 'one', 1, 1, (self, [other]) => unionOf([self, other]));
   method(cls, '__ror__', 'one', 1, 1, (self, [other]) => unionOf([other, self]));
   method(cls, '__eq__', 'one', 1, 1, (self, [other]) => aliasEquals(self, other));

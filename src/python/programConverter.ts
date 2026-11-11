@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 784 -- The statement converter keeps one method per kind of statement node together.
+// code-gauge-allow-file fileNcss 802 -- The statement converter keeps one method per kind of statement node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -57,11 +57,13 @@ export class ProgramConverter extends ExpressionConverter {
     private readonly trace: TraceOptions | undefined,
     namesInLocals = false,
     /** Whether the source is a standard library module, whose imports of unsupported modules fail only when run. */
-    private readonly library = false
+    private readonly library = false,
+    inheritedFutureFeatures: readonly string[] = []
   ) {
     const module = new ScopeBuilder('module', undefined, namesInLocals);
     super(source, module);
     this.module = module;
+    for (const feature of inheritedFutureFeatures) this.futureFeatures.add(feature);
   }
 
   convert(root: Node): Module {
@@ -73,7 +75,12 @@ export class ProgramConverter extends ExpressionConverter {
     if ([...this.importedPackages].some((name) => THREAD_PACKAGES.has(name))) markAllSuspending(body);
     resolveScopes(this.module);
     this.assignAtomicAnnotations();
-    return { body: this.withAnnotationSetup(body), scope: this.module.info, doc: docOf(body) };
+    return {
+      body: this.withAnnotationSetup(body, true),
+      scope: this.module.info,
+      doc: docOf(body),
+      futureFeatures: [...this.futureFeatures],
+    };
   }
 
   /** The row whose step a statement records when tracing; a class body declares members and records none. */
@@ -195,14 +202,26 @@ export class ProgramConverter extends ExpressionConverter {
     return { kind: 'assert', test, message, row: rowOf(node) };
   }
 
-  /** Starts a module or class body with creating `__annotations__` when it stores annotations into it. */
-  private withAnnotationSetup(body: Statement[]): Statement[] {
-    const stores = (statements: Statement[]): boolean =>
-      statements.some(
-        (statement) => statement.kind === 'annotatedAssign' || blocksOf(statement).some((block) => stores(block))
-      );
-    if (!this.futureFeatures.has('annotations') || !stores(body)) return body;
-    return [{ kind: 'setupAnnotations', row: body[0].row }, ...body];
+  /**
+   * Starts a module or class body with creating `__annotations__` when it stores annotations into it, or a module with
+   * binding its `__annotate__`, numbering its annotations.
+   */
+  private withAnnotationSetup(body: Statement[], isModule = false): Statement[] {
+    const annotated: Extract<Statement, { kind: 'annotatedAssign' }>[] = [];
+    const collect = (statements: Statement[]): void => {
+      for (const statement of statements) {
+        if (statement.kind === 'annotatedAssign') annotated.push(statement);
+        for (const block of blocksOf(statement)) collect(block);
+      }
+    };
+    collect(body);
+    if (annotated.length === 0) return body;
+    if (this.futureFeatures.has('annotations')) return [{ kind: 'setupAnnotations', row: body[0].row }, ...body];
+    if (!isModule) return body;
+    for (const [index, statement] of annotated.filter((each) => each.target.kind === 'name').entries()) {
+      statement.annotationIndex = index;
+    }
+    return [{ kind: 'setupAnnotate', row: body[0].row }, ...body];
   }
 
   private jumpStatement(node: Node): Statement {
@@ -637,8 +656,17 @@ export class ProgramConverter extends ExpressionConverter {
     if (boundInner?.type === 'tuple')
       param.constraints = namedChildren(boundInner).map((each) => this.expression(each));
     else if (boundNode) param.bound = this.expression(boundNode);
-    if (defaultNode?.type === 'list_splat') unsupported(defaultNode, '* を付けた型引数のデフォルト');
-    if (defaultNode) param.default = this.expression(defaultNode);
+    if (defaultNode?.type === 'list_splat') {
+      // A TypeVarTuple's `= *X` defaults to the one item that unpacking X gives, as `[*X][0]`.
+      const row = rowOf(defaultNode);
+      const value = this.expression(namedChildren(defaultNode)[0]);
+      param.default = {
+        kind: 'subscript',
+        object: { kind: 'list', elements: [{ kind: 'starred', value, row }], row },
+        index: { kind: 'constant', value: { kind: 'int', value: 0n }, row },
+        row,
+      };
+    } else if (defaultNode) param.default = this.expression(defaultNode);
   }
 
   /** `type Name[T] = value`. */

@@ -28,20 +28,26 @@ export function parsePython(source: string, trace?: TraceOptions, library = fals
 }
 
 /** Parses the source a program passes to `exec`, `eval`, or `compile`, whose names live in the namespace it runs in. */
-export function parseDynamicCode(source: string): Module {
-  return parseModule(source, undefined, { library: false, namesInLocals: true });
+/** Parses code that `exec`, `eval`, or `compile` runs, which starts with the `__future__` features it inherits. */
+export function parseDynamicCode(source: string, futureFeatures: readonly string[] = []): Module {
+  return parseModule(source, undefined, { library: false, namesInLocals: true, futureFeatures });
 }
 
 function parseModule(
   source: string,
   trace: TraceOptions | undefined,
-  { library, namesInLocals }: { library: boolean; namesInLocals: boolean }
+  {
+    library,
+    namesInLocals,
+    futureFeatures = [],
+  }: { library: boolean; namesInLocals: boolean; futureFeatures?: readonly string[] }
 ): Module {
   const indentationError = findIndentationError(source);
   if (indentationError) throw new CompileError([indentationError]);
-  return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) =>
-    new ProgramConverter(source, trace, namesInLocals, library).convert(root)
-  );
+  return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) => ({
+    ...new ProgramConverter(source, trace, namesInLocals, library, futureFeatures).convert(root),
+    source,
+  }));
 }
 
 /** Matches the annotation a line comment ends with, which may follow an ordinary remark. */
