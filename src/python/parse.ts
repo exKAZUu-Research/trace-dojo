@@ -4,6 +4,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../interpreter/traceAnnotations';
 import { loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Module } from './ast';
+import { findBlockNestingError } from './blockNesting';
 import { findIndentationError } from './indentation';
 import { ProgramConverter } from './programConverter';
 
@@ -44,10 +45,12 @@ function parseModule(
 ): Module {
   const indentationError = findIndentationError(source);
   if (indentationError) throw new CompileError([indentationError]);
-  return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) => ({
-    ...new ProgramConverter(source, trace, namesInLocals, library, futureFeatures).convert(root),
-    source,
-  }));
+  return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) => {
+    const module = new ProgramConverter(source, trace, namesInLocals, library, futureFeatures).convert(root);
+    const nestingError = library ? undefined : findBlockNestingError(root);
+    if (nestingError) throw new CompileError([nestingError]);
+    return { ...module, source };
+  });
 }
 
 /** Matches the annotation a line comment ends with, which may follow an ordinary remark. */

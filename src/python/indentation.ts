@@ -1,6 +1,10 @@
 import type { SourceDiagnostic } from '../interpreter/diagnostics';
 
 const MAX_INDENT_LEVELS = 100;
+/** CPython's tokenizer's MAXLEVEL: the brackets, and the braces of f-string replacement fields, one may nest. */
+const MAX_BRACKET_LEVELS = 200;
+/** CPython's tokenizer's MAXFSTRINGLEVEL, the f-strings and t-strings nested inside one another it refuses. */
+const MAX_FSTRING_LEVELS = 150;
 
 interface Indent {
   column: number;
@@ -10,14 +14,16 @@ interface Indent {
 
 /**
  * Finds the first indentation error CPython's tokenizer and parser report: an unexpected indent, a missing indented
- * block, a dedent to no enclosing level, or tabs and spaces mixed ambiguously.
+ * block, a dedent to no enclosing level, or tabs and spaces mixed ambiguously, or the first nesting of brackets or
+ * f-strings deeper than its tokenizer allows.
  */
 // code-gauge-allow functionNcss 31 -- Follows the indentation checks of CPython's tokenizer in their order.
 // code-gauge-allow functionCognitiveComplexity 26 -- Follows the indentation checks of CPython's tokenizer in their order.
 export function findIndentationError(source: string): SourceDiagnostic | undefined {
-  const lines = logicalLines(source);
+  const { lines, limitError } = logicalLines(source);
   const stack: Indent[] = [{ column: 0, altColumn: 0 }];
   let expectsBlock = false;
+  let followsDecorator = false;
   let openerRow = 0;
   for (const line of lines) {
     const top = stack.at(-1) as Indent;
@@ -29,6 +35,9 @@ export function findIndentationError(source: string): SourceDiagnostic | undefin
       if (stack.length > MAX_INDENT_LEVELS) return { row, message: '字下げ（インデント）が深すぎます。' };
     } else {
       if (expectsBlock) return expectedBlock(row, openerRow);
+      if (followsDecorator && indent.column < top.column) {
+        return { row, message: 'デコレータの後の行の字下げ（インデント）を戻すことはできません。' };
+      }
       while (indent.column < (stack.at(-1) as Indent).column) stack.pop();
       const level = stack.at(-1) as Indent;
       if (indent.column !== level.column) {
@@ -37,8 +46,10 @@ export function findIndentationError(source: string): SourceDiagnostic | undefin
       if (indent.altColumn !== level.altColumn) return { row, message: TAB_MESSAGE };
     }
     expectsBlock = line.opensBlock;
+    followsDecorator = line.isDecorator;
     openerRow = row;
   }
+  if (limitError) return limitError;
   if (expectsBlock) return expectedBlock((lines.at(-1)?.row ?? 0) + 1, openerRow);
   return undefined;
 }
@@ -54,10 +65,15 @@ interface LogicalLine {
   indent: Indent;
   /** Whether the line ends with a colon outside brackets, which opens a block. */
   opensBlock: boolean;
+  /** Whether the line is a decorator, which the next line must follow at the same indentation. */
+  isDecorator: boolean;
 }
 
-/** Splits a source into its logical lines, skipping blank lines and lines holding only a comment. */
-function logicalLines(source: string): LogicalLine[] {
+/**
+ * Splits a source into its logical lines, skipping blank lines and lines holding only a comment, up to the line where
+ * the tokenizer stops at a nesting too deep.
+ */
+function logicalLines(source: string): { lines: LogicalLine[]; limitError?: SourceDiagnostic } {
   const lines: LogicalLine[] = [];
   const scanner = new Scanner(source);
   while (!scanner.done) {
@@ -68,15 +84,34 @@ function logicalLines(source: string): LogicalLine[] {
       scanner.skipLine();
       continue;
     }
-    const lastToken = scanner.readLogicalLine();
-    lines.push({ row, indent, opensBlock: lastToken === ':' });
+    try {
+      const lastToken = scanner.readLogicalLine();
+      lines.push({ row, indent, opensBlock: lastToken === ':', isDecorator: ch === '@' });
+    } catch (error) {
+      if (!(error instanceof NestingLimitError)) throw error;
+      lines.push({ row, indent, opensBlock: false, isDecorator: false });
+      return { lines, limitError: { row: error.row, message: error.message } };
+    }
   }
-  return lines;
+  return { lines };
+}
+
+/** Stops the scan where the tokenizer refuses a nesting too deep. */
+class NestingLimitError extends Error {
+  constructor(
+    readonly row: number,
+    message: string
+  ) {
+    super(message);
+  }
 }
 
 class Scanner {
   private index = 0;
   row = 0;
+  /** The brackets and f-string replacement fields open at the scanned point of the logical line. */
+  private bracketLevel = 0;
+  private fstringLevel = 0;
 
   constructor(private readonly source: string) {}
 
@@ -123,13 +158,13 @@ class Scanner {
 
   /** Reads to the end of a logical line, returning its last token outside comments. */
   readLogicalLine(): string {
-    let depth = 0;
+    this.bracketLevel = 0;
     let last = '';
     while (!this.done) {
       const ch = this.peek() as string;
       if (ch === '\n') {
         this.advance();
-        if (depth === 0) return last;
+        if (this.bracketLevel === 0) return last;
         continue;
       }
       if (this.skipTrivia(ch)) continue;
@@ -137,12 +172,19 @@ class Scanner {
         last = 'string';
         continue;
       }
-      if ('([{'.includes(ch)) depth++;
-      if (')]}'.includes(ch)) depth = Math.max(0, depth - 1);
+      if ('([{'.includes(ch)) this.openBracket();
+      if (')]}'.includes(ch)) this.bracketLevel = Math.max(0, this.bracketLevel - 1);
       this.index++;
       last = ch;
     }
     return last;
+  }
+
+  private openBracket(): void {
+    this.bracketLevel++;
+    if (this.bracketLevel > MAX_BRACKET_LEVELS) {
+      throw new NestingLimitError(this.row, `括弧の入れ子が深すぎます（${MAX_BRACKET_LEVELS} 段まで）。`);
+    }
   }
 
   /** Skips a comment, a line continuation, or a whitespace character starting at `ch`, telling whether it did. */
@@ -174,8 +216,19 @@ class Scanner {
   }
 
   /** Skips a string literal whose opening quote is next, including the expressions an f-string holds. */
-  // code-gauge-allow functionCognitiveComplexity 27 -- One case per escape and quote rule of string literals.
   private readString(isFormatted: boolean, isRaw: boolean): void {
+    if (isFormatted && ++this.fstringLevel >= MAX_FSTRING_LEVELS) {
+      throw new NestingLimitError(this.row, `f 文字列の入れ子が深すぎます（${MAX_FSTRING_LEVELS - 1} 段まで）。`);
+    }
+    try {
+      this.readStringBody(isFormatted, isRaw);
+    } finally {
+      if (isFormatted) this.fstringLevel--;
+    }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 27 -- One case per escape and quote rule of string literals.
+  private readStringBody(isFormatted: boolean, isRaw: boolean): void {
     const quote = this.peek() as string;
     const isTriple = this.peek(1) === quote && this.peek(2) === quote;
     const delimiter = isTriple ? quote.repeat(3) : quote;
@@ -202,8 +255,10 @@ class Scanner {
           this.index += 2;
           continue;
         }
+        this.openBracket();
         this.index++;
         this.readInterpolation();
+        this.bracketLevel--;
         continue;
       }
       this.advance();
@@ -216,13 +271,17 @@ class Scanner {
     while (!this.done) {
       if (this.skipStringLiteral()) continue;
       const ch = this.peek() as string;
-      if ('([{'.includes(ch)) depth++;
+      if ('([{'.includes(ch)) {
+        depth++;
+        this.openBracket();
+      }
       if (')]}'.includes(ch)) {
         if (depth === 0 && ch === '}') {
           this.index++;
           return;
         }
         depth--;
+        this.bracketLevel--;
       }
       this.advance();
     }

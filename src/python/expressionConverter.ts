@@ -285,7 +285,10 @@ export abstract class ExpressionConverter {
   private subscriptIndex(node: Node): Expression {
     const indexes = fieldNodes(node, 'subscript');
     const hasTrailingComma = children(node).some((child) => child.type === ',');
-    if (indexes.length === 1 && !hasTrailingComma) return this.expression(indexes[0]);
+    // `x[*a]` indexes with the tuple `(*a,)`, as a starred item always makes one.
+    if (indexes.length === 1 && !hasTrailingComma && indexes[0].type !== 'list_splat') {
+      return this.expression(indexes[0]);
+    }
     return { kind: 'tuple', elements: indexes.map((index) => this.element(index)), row: rowOf(node) };
   }
 
