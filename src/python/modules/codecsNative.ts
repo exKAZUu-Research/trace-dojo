@@ -1,12 +1,14 @@
 import { bytesLikeData, newBytes } from '../bytesValues';
 import { charmapNatives } from '../charmapCodecs';
 import {
+  callCodec,
   codecModule,
   customErrorHandler,
   decodeBytes,
   encodeString,
   lookupCodec,
   registerErrorHandler,
+  setEncodingsCodecLookup,
   setRegisteredCodecLookup,
 } from '../codecs';
 import { builtin } from '../define';
@@ -19,6 +21,7 @@ import { currentRuntime } from '../runtimeContext';
 import { exceptionClassNamed, isInstanceOf, newException, newTuple, None, typeError, typeName } from '../types';
 import { characterName } from '../unicodeDatabase';
 import { escapePoint } from '../unicodeErrors';
+import { utf7Natives } from '../utf7';
 import { PyError, PyInstance, PyTuple, type PyValue } from '../values';
 import { escapeDecodeFunction } from './escapeDecode';
 
@@ -101,13 +104,16 @@ registerModule('_codecs', () => {
     entries.set(`${module}_decode`, unicodeDecoder(module));
   }
   entries.set('escape_decode', escapeDecodeFunction);
-  for (const [name, value] of charmapNatives()) entries.set(name, value);
+  for (const [name, value] of [...charmapNatives(), ...utf7Natives()]) entries.set(name, value);
   entries.set('utf_16_ex_decode', exDecoder(2));
   entries.set('utf_32_ex_decode', exDecoder(4));
   return entries;
 });
 
 // The codec registry -------------------------------------------------------------------------------------------------
+
+// `str.encode` and `bytes.decode` run the codecs written in Python through their `encodings` modules.
+setEncodingsCodecLookup((module) => (ENCODINGS_MODULES.has(module) ? searchEncodings(module) : undefined));
 
 // `str.encode` and `bytes.decode` find the encodings registered search functions give, as in CPython.
 setRegisteredCodecLookup((encoding) => {
@@ -204,7 +210,7 @@ function codecFunction(direction: 'encode' | 'decode'): PyValue {
       const object = argument(args, kwargs, 0, 'obj') as PyValue;
       const encoding = stringArgument(direction, 'encoding', argument(args, kwargs, 1, 'encoding') ?? 'utf8');
       const errors = stringArgument(direction, 'errors', argument(args, kwargs, 2, 'errors') ?? 'strict');
-      const result = callValue(codecInfoFunction(lookup(encoding), direction), [object, errors]);
+      const result = callCodec(codecInfoFunction(lookup(encoding), direction), [object, errors], direction, encoding);
       if (!(result instanceof PyTuple) || result.items.length !== 2) {
         throw typeError(`${direction}r must return a tuple (object, integer)`);
       }
@@ -254,8 +260,8 @@ function unicodeDecoder(module: string): PyValue {
 function decodeWith(module: string, input: PyValue, errors: PyValue, final: boolean, name: string): PyValue {
   const data = requireBytes(input);
   const handler = errorsName(name, errors);
-  if (!final && module === 'iso2022_jp') {
-    throw currentRuntime().unsupported('ISO-2022-JP の少しずつの復号（codecs の IncrementalDecoder・StreamReader）');
+  if (!final && (module === 'iso2022_jp' || lookupCodec(module, 'decode').stateful === true)) {
+    throw currentRuntime().unsupported(`${module} の少しずつの復号（codecs の IncrementalDecoder・StreamReader）`);
   }
   const used = final ? data.length : data.length - incompleteTail(data, module);
   const text = used === 0 ? '' : decodeBytes(data.subarray(0, used), module, handler);

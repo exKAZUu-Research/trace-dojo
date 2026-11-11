@@ -1,10 +1,17 @@
 import { bytesLikeData, latin1Text } from '../bytesValues';
 import { UNIDATA_VERSION } from '../data/unicodeData';
-import { builtin } from '../define';
+import { builtin, method } from '../define';
 import { registerModule } from '../modules';
 import { currentRuntime } from '../runtimeContext';
 import { strLength } from '../strings';
-import { typeError, typeName, unbox, valueError } from '../types';
+import { builtinClass, typeError, typeName, unbox, valueError } from '../types';
+import {
+  isOldUnassigned,
+  oldDecomposition,
+  oldNormalizationDecomposition,
+  oldNumericValue,
+  oldProperties,
+} from '../unicode320';
 import {
   characterName,
   type CharacterProperties,
@@ -15,7 +22,41 @@ import {
   numericValueOf,
   propertiesOf,
 } from '../unicodeDatabase';
-import type { PyValue } from '../values';
+import { PyOpaque, type PyValue } from '../values';
+
+/** A version of the Unicode database: the current one, or the Unicode 3.2.0 one of `ucd_3_2_0`. */
+interface Database {
+  properties: (point: number) => CharacterProperties;
+  numeric: (point: number, kind: 'decimal' | 'digit' | 'numeric') => number | undefined;
+  decomposition: (point: number) => { tag: string; points: number[] } | undefined;
+  name: (point: number) => string | undefined;
+  lookup: (name: string) => number | number[] | undefined;
+  normalize: (form: NormalizationForm, text: string) => string;
+}
+
+const KINDS = { decimal: 'd', digit: 'dg', numeric: 'dgn' } as const;
+
+const CURRENT: Database = {
+  properties: propertiesOf,
+  numeric: (point, kind) => {
+    const entry = numericValueOf(point);
+    return entry && KINDS[kind].includes(entry.kind) ? entry.value : undefined;
+  },
+  decomposition: decompositionOf,
+  name: (point) => characterName(point),
+  lookup: (name) => lookupName(name, true),
+  normalize: (form, text) => normalize(form, text),
+};
+
+/** Unicode 3.2.0, which has no name aliases or named sequences and no names for the characters it lacks. */
+const UNICODE_3_2_0: Database = {
+  properties: oldProperties,
+  numeric: oldNumericValue,
+  decomposition: oldDecomposition,
+  name: (point) => (isOldUnassigned(point) ? undefined : characterName(point)),
+  lookup: (name) => lookupName(name, false, (point) => !isOldUnassigned(point)),
+  normalize: (form, text) => normalize(form, text, oldNormalizationDecomposition),
+};
 
 /** The code point of a one-character argument, or CPython's TypeError for any other value. */
 function characterArgument(argumentValue: PyValue, functionName: string, label: string): number {
@@ -30,26 +71,9 @@ function characterArgument(argumentValue: PyValue, functionName: string, label: 
   return value.codePointAt(0) as number;
 }
 
-function property<K extends keyof CharacterProperties>(name: string, key: K): PyValue {
-  return builtin(name, 'one', 1, 1, ([value]) => {
-    const result = propertiesOf(characterArgument(value, name, 'argument'))[key];
-    return typeof result === 'number' ? BigInt(result) : result;
-  });
-}
-
-/** `decimal()`, `digit()`, or `numeric()`, which accept the characters whose value is of `kinds`. */
-function numericFunction(name: string, kinds: string, message: string, toValue: (value: number) => PyValue): PyValue {
-  return builtin(name, 'expected', 1, 2, ([value, fallback]) => {
-    const entry = numericValueOf(characterArgument(value, name, 'argument 1'));
-    if (entry && kinds.includes(entry.kind)) return toValue(entry.value);
-    if (fallback !== undefined) return fallback;
-    throw valueError(message);
-  });
-}
-
 const NAME_MAX_LENGTH = 256;
 
-function lookup([argumentValue]: PyValue[]): PyValue {
+function lookup(database: Database, argumentValue: PyValue): PyValue {
   const value = unbox(argumentValue);
   let name: string;
   if (typeof value === 'string') name = value;
@@ -59,7 +83,7 @@ function lookup([argumentValue]: PyValue[]): PyValue {
     name = latin1Text(data);
   }
   if (name.length > NAME_MAX_LENGTH) throw currentRuntime().keyError('name too long');
-  const found = lookupName(name, true);
+  const found = database.lookup(name);
   if (found === undefined) throw currentRuntime().keyError(`undefined character name '${name}'`);
   return typeof found === 'number' ? String.fromCodePoint(found) : String.fromCodePoint(...found);
 }
@@ -73,50 +97,100 @@ function normalizationForm(formValue: PyValue, name: string): NormalizationForm 
   return value;
 }
 
-function normalized(name: string, args: PyValue[]): string {
+function normalized(database: Database, name: string, args: PyValue[]): string {
   const form = normalizationForm(args[0], name);
   const text = unbox(args[1]);
   if (typeof text !== 'string') throw typeError(`${name}() argument 2 must be str, not ${typeName(text)}`);
   currentRuntime().scan(text.length * 4);
-  return normalize(form, text);
+  return database.normalize(form, text);
 }
 
-function decomposition([value]: PyValue[]): PyValue {
-  const entry = decompositionOf(characterArgument(value, 'decomposition', 'argument'));
+function decomposition(database: Database, value: PyValue): PyValue {
+  const entry = database.decomposition(characterArgument(value, 'decomposition', 'argument'));
   if (!entry) return '';
   const points = entry.points.map((point) => point.toString(16).toUpperCase().padStart(4, '0'));
   return [...(entry.tag === '' ? [] : [`<${entry.tag}>`]), ...points].join(' ');
 }
 
-registerModule(
-  'unicodedata',
-  () =>
-    new Map<string, PyValue>([
-      ['lookup', builtin('lookup', 'one', 1, 1, lookup)],
-      [
-        'name',
-        builtin('name', 'expected', 1, 2, ([value, fallback]) => {
-          const name = characterName(characterArgument(value, 'name', 'argument 1'));
-          if (name !== undefined) return name;
+const PROPERTIES: [string, keyof CharacterProperties][] = [
+  ['category', 'category'],
+  ['bidirectional', 'bidirectional'],
+  ['combining', 'combining'],
+  ['east_asian_width', 'eastAsianWidth'],
+  ['mirrored', 'mirrored'],
+];
+
+const NUMERIC_MESSAGES = {
+  decimal: 'not a decimal',
+  digit: 'not a digit',
+  numeric: 'not a numeric character',
+} as const;
+
+/** The functions of a database: `name(args)`, by name, with its range of positional arguments. */
+function functionsOf(database: Database): [string, number, number, (args: PyValue[]) => PyValue][] {
+  return [
+    ['lookup', 1, 1, ([name]) => lookup(database, name)],
+    [
+      'name',
+      1,
+      2,
+      ([value, fallback]) => {
+        const name = database.name(characterArgument(value, 'name', 'argument 1'));
+        if (name !== undefined) return name;
+        if (fallback !== undefined) return fallback;
+        throw valueError('no such name');
+      },
+    ],
+    ...(['decimal', 'digit', 'numeric'] as const).map(
+      (kind): [string, number, number, (args: PyValue[]) => PyValue] => [
+        kind,
+        1,
+        2,
+        ([value, fallback]) => {
+          const found = database.numeric(characterArgument(value, kind, 'argument 1'), kind);
+          if (found !== undefined) return kind === 'numeric' ? found : BigInt(found);
           if (fallback !== undefined) return fallback;
-          throw valueError('no such name');
-        }),
-      ],
-      ['decimal', numericFunction('decimal', 'd', 'not a decimal', BigInt)],
-      ['digit', numericFunction('digit', 'dg', 'not a digit', BigInt)],
-      ['numeric', numericFunction('numeric', 'dgn', 'not a numeric character', (value) => value)],
-      ['category', property('category', 'category')],
-      ['bidirectional', property('bidirectional', 'bidirectional')],
-      ['combining', property('combining', 'combining')],
-      ['east_asian_width', property('east_asian_width', 'eastAsianWidth')],
-      ['mirrored', property('mirrored', 'mirrored')],
-      ['decomposition', builtin('decomposition', 'one', 1, 1, decomposition)],
-      ['normalize', builtin('normalize', 'expected', 2, 2, (args) => normalized('normalize', args))],
-      [
-        'is_normalized',
-        builtin('is_normalized', 'expected', 2, 2, (args) => normalized('is_normalized', args) === args[1]),
-      ],
-      ['unidata_version', UNIDATA_VERSION],
+          throw valueError(NUMERIC_MESSAGES[kind]);
+        },
+      ]
+    ),
+    ...PROPERTIES.map(([name, key]): [string, number, number, (args: PyValue[]) => PyValue] => [
+      name,
+      1,
+      1,
+      ([value]) => {
+        const result = database.properties(characterArgument(value, name, 'argument'))[key];
+        return typeof result === 'number' ? BigInt(result) : result;
+      },
     ]),
-  { ucd_3_2_0: 'unicodedata.ucd_3_2_0（Unicode 3.2.0 のデータ）', UCD: 'unicodedata.UCD' }
-);
+    ['decomposition', 1, 1, ([value]) => decomposition(database, value)],
+    ['normalize', 2, 2, (args) => normalized(database, 'normalize', args)],
+    ['is_normalized', 2, 2, (args) => normalized(database, 'is_normalized', args) === args[1]],
+  ];
+}
+
+/** The argument style of a function, whose messages differ for one argument. */
+const styleOf = (min: number, max: number): 'one' | 'expected' => (min === 1 && max === 1 ? 'one' : 'expected');
+
+/** `unicodedata.UCD`, the class of `ucd_3_2_0`, whose methods are the module's functions for Unicode 3.2.0. */
+const ucdClass = builtinClass('UCD');
+ucdClass.module = 'unicodedata';
+ucdClass.construct = () => {
+  throw typeError("cannot create 'unicodedata.UCD' instances");
+};
+for (const [name, min, max, run] of functionsOf(UNICODE_3_2_0)) {
+  method(ucdClass, name, styleOf(min, max), min, max, (_self, args) => run(args));
+}
+ucdClass.dict.set('unidata_version', '3.2.0');
+
+registerModule('unicodedata', () => {
+  return new Map<string, PyValue>([
+    ...functionsOf(CURRENT).map(([name, min, max, run]): [string, PyValue] => [
+      name,
+      builtin(name, styleOf(min, max), min, max, run),
+    ]),
+    ['unidata_version', UNIDATA_VERSION],
+    ['UCD', ucdClass],
+    ['ucd_3_2_0', new PyOpaque(ucdClass, '')],
+  ]);
+});

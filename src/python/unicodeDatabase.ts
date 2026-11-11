@@ -132,19 +132,25 @@ const compositionTable = lazy(() => {
 
 export type NormalizationForm = 'NFC' | 'NFD' | 'NFKC' | 'NFKD';
 
-/** `unicodedata.normalize(form, text)`, as Unicode Standard Annex #15 defines it. */
-export function normalize(form: NormalizationForm, text: string): string {
+type Decomposer = (point: number) => { tag: string; points: number[] } | undefined;
+
+/**
+ * `unicodedata.normalize(form, text)`, as Unicode Standard Annex #15 defines it, decomposing as `decomposition` gives,
+ * which an older version of the database changes.
+ */
+export function normalize(form: NormalizationForm, text: string, decomposition: Decomposer = decompositionOf): string {
   const points = decompose(
     iterStr(text).map((char) => char.codePointAt(0) as number),
-    form.includes('K')
+    form.includes('K'),
+    decomposition
   );
   return String.fromCodePoint(...(form.endsWith('C') ? compose(points) : points));
 }
 
-function decompose(points: number[], compatibility: boolean): number[] {
+function decompose(points: number[], compatibility: boolean, decomposer: Decomposer): number[] {
   const result: number[] = [];
   const add = (point: number): void => {
-    const decomposition = decompositionOf(point);
+    const decomposition = decomposer(point);
     if (decomposition && (compatibility || decomposition.tag === ''))
       for (const each of decomposition.points) add(each);
     else result.push(point);
@@ -334,14 +340,21 @@ const reverseNames = lazy(() => {
 
 /**
  * The character a name stands for, matched case-insensitively as `unicodedata.lookup()` and `\N{...}` do: a code
- * point, the code points of a named sequence when `withSequences` is set, or undefined.
+ * point, the code points of a named sequence when `withSequences` is set, or undefined. An older database, which
+ * `isAssigned` stands for, has no name aliases and no named sequences, and leaves out the names of the characters it
+ * lacks, though not their algorithmic names.
  */
-export function lookupName(text: string, withSequences: boolean): number | number[] | undefined {
+export function lookupName(
+  text: string,
+  withSequences: boolean,
+  isAssigned?: (point: number) => boolean
+): number | number[] | undefined {
   const name = text.replaceAll(/[a-z]/g, (char) => char.toUpperCase());
   const official = reverseNames().get(name);
-  if (official !== undefined) return official;
+  if (official !== undefined && (isAssigned?.(official) ?? true)) return official;
   const algorithmic = algorithmicPoint(name);
   if (algorithmic !== undefined) return algorithmic;
+  if (isAssigned) return undefined;
   const alias = aliasTable().find(([each]) => each === name);
   if (alias) return b36(alias[1]);
   const sequence = withSequences ? sequenceTable().find(([each]) => each === name) : undefined;

@@ -1,5 +1,7 @@
+import { CJK_MODULES } from '../cjkCodecs';
 import { registerSourceModule } from '../sourceModules';
 import type { PyValue } from '../values';
+import { addEncodingsModule } from './codecsNative';
 
 // CPython's `encodings/ascii.py`.
 const ASCII = String.raw`
@@ -1119,7 +1121,7 @@ class Codec(codecs.Codec):
 class IncrementalEncoder(codecs.IncrementalEncoder):
     def encode(self, input, final=False):
         if _STATEFUL:
-            _unsupported('ISO-2022-JP \u306E\u5C11\u3057\u305A\u3064\u306E\u7B26\u53F7\u5316\uFF08codecs \u306E IncrementalEncoder\u30FBStreamWriter\uFF09')
+            _unsupported(_NAME + ' \u306E\u5C11\u3057\u305A\u3064\u306E\u7B26\u53F7\u5316\uFF08codecs \u306E IncrementalEncoder\u30FBStreamWriter\uFF09')
         return codec.encode(input, self.errors)[0]
 
 class IncrementalDecoder(codecs.BufferedIncrementalDecoder):
@@ -1133,7 +1135,7 @@ class StreamReader(Codec, codecs.StreamReader):
 class StreamWriter(Codec, codecs.StreamWriter):
     def encode(self, input, errors='strict'):
         if _STATEFUL:
-            _unsupported('ISO-2022-JP \u306E\u5C11\u3057\u305A\u3064\u306E\u7B26\u53F7\u5316\uFF08codecs \u306E IncrementalEncoder\u30FBStreamWriter\uFF09')
+            _unsupported(_NAME + ' \u306E\u5C11\u3057\u305A\u3064\u306E\u7B26\u53F7\u5316\uFF08codecs \u306E IncrementalEncoder\u30FBStreamWriter\uFF09')
         return codec.encode(input, errors)
 
 def getregentry():
@@ -1164,14 +1166,15 @@ registerSourceModule('encodings.rot_13', ROT_13);
 registerSourceModule('encodings.hex_codec', HEX_CODEC);
 registerSourceModule('encodings.base64_codec', BASE64_CODEC);
 registerSourceModule('encodings.zlib_codec', ZLIB_CODEC);
-for (const name of ['shift_jis', 'cp932', 'euc_jp', 'iso2022_jp']) {
+for (const name of ['shift_jis', 'cp932', 'euc_jp', 'iso2022_jp', ...CJK_MODULES]) {
+  addEncodingsModule(name);
   registerSourceModule(
     `encodings.${name}`,
     MULTIBYTE,
     () =>
       new Map<string, PyValue>([
         ['_NAME', name],
-        ['_STATEFUL', name === 'iso2022_jp'],
+        ['_STATEFUL', name === 'iso2022_jp' || name === 'hz'],
       ])
   );
 }

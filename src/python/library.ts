@@ -113,6 +113,7 @@ import './modules/codecsModule';
 import './modules/codecsNative';
 import './modules/encodings';
 import './modules/charmapEncodings';
+import './modules/pythonCodecs';
 import './modules/pathlib';
 import './modules/pathlibOs';
 import './modules/glob';

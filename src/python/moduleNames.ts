@@ -87,6 +87,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'statistics',
   'string',
   'string.templatelib',
+  'stringprep',
   'struct',
   'sys',
   'textwrap',
