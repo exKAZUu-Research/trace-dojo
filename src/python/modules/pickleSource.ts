@@ -185,8 +185,10 @@ BYTEARRAY8       = b'\x96'  # push bytearray
 NEXT_BUFFER      = b'\x97'  # push next out-of-band buffer
 READONLY_BUFFER  = b'\x98'  # make top of stack readonly
 
-# dir() of a module this grader runs names the program's variables, as CPython's C modules see their caller's.
-__all__.extend(x for x in sorted(vars(sys.modules[__name__])) if x.isupper() and not x.startswith('_'))
+# dir() in a module this grader runs names the program's variables, as CPython's C modules see their caller's.
+import pickle as _module
+__all__.extend(x for x in dir(_module) if x.isupper() and not x.startswith('_'))
+del _module
 
 
 class _Framer:

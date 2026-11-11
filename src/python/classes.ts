@@ -381,8 +381,9 @@ function fillClassDict(cls: PyClass, entries: Map<string, PyValue>): void {
   wrapImplicitMethod(entries, '__class_getitem__', classmethodClass);
   const slots = defineClassSlots(cls, entries);
   cls.slotNames = slotNamesOf(cls, slots);
-  const plain = cls.bases.every((base) => base.isBuiltin);
   for (const name of ['__dict__', '__weakref__']) {
+    // Without __slots__, a class adds what no base gives its instances, as bases whose __slots__ omit it do not.
+    const plain = cls.bases.every((base) => base.isBuiltin || base.lookup(name) === undefined);
     if (slots === undefined ? plain : slots.includes(name)) {
       entries.set(name, new PyOpaque(attributeDescriptorClass, `<attribute '${name}' of '${cls.name}' objects>`));
     }

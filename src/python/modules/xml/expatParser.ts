@@ -170,7 +170,7 @@ export class ExpatParser {
     this.finalBuffer = isFinal;
     const start = this.bufferPtr;
     const end = this.input.cs.length;
-    const haveBytes = this.input.offsets[end] - this.input.offsets[start];
+    const haveBytes = this.input.byteLength - (this.input.offsets[start] as number);
     if (this.reparseDeferral && !isFinal && length > 0) {
       // Heuristic of expat's callProcessor: a partial token is parsed again only once the input has grown enough.
       const available = Math.max(0, this.buffer.start - CONTEXT_BYTES) + (this.buffer.size - this.buffer.end);
@@ -519,9 +519,9 @@ export class ExpatParser {
       case 'ENTITY_VALUE': {
         if (!dtd.keepProcessing) return true;
         let error: XmlError | undefined;
-        let text: number[] = [];
+        const text: number[] = [];
         try {
-          text = this.storeEntityValue(s + 1, next - 1);
+          this.storeEntityValue(s + 1, next - 1, text);
         } catch (error_) {
           if (!(error_ instanceof XmlError)) throw error_;
           error = error_;
@@ -581,16 +581,15 @@ export class ExpatParser {
     }
   }
 
-  /** `storeEntityValue`: the replacement text of an entity's literal, with character references replaced. */
-  private storeEntityValue(start: number, end: number): number[] {
+  /** `storeEntityValue`: adds the replacement text of an entity's literal, with character references replaced. */
+  private storeEntityValue(start: number, end: number, text: number[]): void {
     const tz = this.tokenizer;
-    const text: number[] = [];
     let ptr = start;
     for (;;) {
       const [tok, next] = tz.entityValueTok(ptr, end);
       switch (tok) {
         case TOK.NONE: {
-          return text;
+          return;
         }
         case TOK.PARAM_ENTITY_REF: {
           this.eventPtr = ptr;
@@ -1002,7 +1001,14 @@ export class ExpatParser {
     const h = this.handlers;
     const rawName = this.nameAt(tz, s + 1);
     const tag: Tag = { rawName, name: rawName, bindings: [] };
-    const [attributes, specified] = this.storeAtts(tz, s, tag, internal);
+    let stored: [string[], number];
+    try {
+      stored = this.storeAtts(tz, s, tag, internal);
+    } catch (error) {
+      if (error instanceof XmlError) this.freeBindings(tag);
+      throw error;
+    }
+    const [attributes, specified] = stored;
     let noHandlers = true;
     if (h.startElement) {
       h.startElement(tag.name, attributes, specified);
