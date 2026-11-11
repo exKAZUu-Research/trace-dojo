@@ -22,7 +22,7 @@ import { bindValue, callValue, isTruthy, overriding, setAttribute, toArray } fro
 import type { ProgramSource } from './programSource';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
-import type { Scheduler } from './threads';
+import { DEFAULT_SWITCH_INTERVAL, type Scheduler } from './threads';
 import { noteUnwinding } from './tracebacks';
 import { newGenericAlias, unionOf } from './typeHints';
 import { boundSuper } from './typeObject';
@@ -370,6 +370,8 @@ export class Runtime {
   readonly none = None;
   /** The limit sys.set_int_max_str_digits sets, 0 for none. */
   intMaxStrDigits = DEFAULT_MAX_STR_DIGITS;
+  /** The switch interval of `sys.setswitchinterval`, in microseconds, which scales the thread scheduler's slice. */
+  switchInterval = DEFAULT_SWITCH_INTERVAL;
   private readonly streams = new Map<string, PyValue>();
 
   exceptionClass(name: string): PyClass {

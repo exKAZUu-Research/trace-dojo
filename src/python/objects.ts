@@ -231,14 +231,19 @@ function moduleAttribute(module: PyModule, name: string): PyValue | undefined {
     : (module.dict.get(name) ?? importedModule(module, name));
 }
 
-/** The module CPython's module holds under `name` because its code imported it, which is the same object here too. */
-export function importedModule(module: PyModule, name: string): PyModule | undefined {
+/**
+ * The module CPython's module holds under `name` because its code imported it, which is the same object here too, or
+ * the object another module defines that this module shares, named `module:attribute`.
+ */
+export function importedModule(module: PyModule, name: string): PyValue | undefined {
   const target = module.imports.get(name);
   if (target === undefined) return undefined;
-  const imported = currentRuntime().importModule(target);
+  const [moduleName, attribute] = target.split(':');
+  const imported = currentRuntime().importModule(moduleName);
+  const value = attribute === undefined ? imported : getAttribute(imported, attribute);
   module.imports.delete(name);
-  module.dict.set(name, imported);
-  return imported;
+  module.dict.set(name, value);
+  return value;
 }
 
 export { deleteAttribute, setAttribute } from './attributes';

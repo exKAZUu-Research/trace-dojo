@@ -1,6 +1,5 @@
 import { addLayoutAttributes } from './modules/moduleLayout';
 import type { Runtime } from './runtime';
-import { UNSUPPORTED_SYS_ATTRIBUTES } from './sysAttributes';
 import { moduleClass } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import { PyBuiltinFunction, PyModule, type PyValue } from './values';
@@ -52,6 +51,16 @@ export function registerUnsupportedAttributes(name: string, attributes: Record<s
   unsupportedAttributes.set(name, { ...unsupportedAttributes.get(name), ...attributes });
 }
 
+const sharedAttributes = new Map<string, Record<string, string>>();
+
+/**
+ * Makes attributes of a module the objects another module defines, named `module:attribute`, which are read from it
+ * when first used, as `_thread._local` is `threading.local`, which the `threading` module defines here.
+ */
+export function registerSharedAttributes(name: string, attributes: Record<string, string>): void {
+  sharedAttributes.set(name, { ...sharedAttributes.get(name), ...attributes });
+}
+
 /** Sets how a run creates its `__main__` module, whose namespace is the program's globals. */
 export function registerMainModule(create: (runtime: Runtime) => PyModule): void {
   createMainModule = create;
@@ -94,9 +103,12 @@ export function importModule(runtime: Runtime, name: string): PyModule {
 /** Adds to a new module the names this grader does not support, which its code did not define, and its `__all__`. */
 function addRegisteredAttributes(runtime: Runtime, module: PyModule): void {
   const { name, dict } = module;
-  const unsupported = name === 'sys' ? UNSUPPORTED_SYS_ATTRIBUTES : unsupportedAttributes.get(name);
+  const unsupported = unsupportedAttributes.get(name);
   for (const [key, feature] of Object.entries(unsupported ?? {})) {
     if (!dict.has(key)) module.unsupported.set(key, feature);
+  }
+  for (const [key, target] of Object.entries(sharedAttributes.get(name) ?? {})) {
+    if (!dict.has(key)) module.imports.set(key, target);
   }
   const all = moduleAlls.get(name);
   if (all && !dict.has('__all__')) dict.set('__all__', runtime.listOf([...all]));

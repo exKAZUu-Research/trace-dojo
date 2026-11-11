@@ -18,6 +18,33 @@ ThreadError = _thread.error
 TIMEOUT_MAX = _thread.TIMEOUT_MAX
 Lock = _thread.lock
 _CRLock = _thread.RLock
+_LockType = _thread.LockType
+_daemon_threads_allowed = _thread.daemon_threads_allowed
+_is_main_interpreter = _thread._is_main_interpreter
+_HAVE_THREAD_NATIVE_ID = True
+_SHUTTING_DOWN = False
+from weakref import WeakSet
+
+__all__ = ['get_ident', 'active_count', 'Condition', 'current_thread',
+           'enumerate', 'main_thread', 'TIMEOUT_MAX',
+           'Event', 'Lock', 'RLock', 'Semaphore', 'BoundedSemaphore', 'Thread',
+           'Barrier', 'BrokenBarrierError', 'Timer', 'ThreadError',
+           'setprofile', 'settrace', 'local', 'stack_size',
+           'excepthook', 'ExceptHookArgs', 'gettrace', 'getprofile',
+           'setprofile_all_threads','settrace_all_threads']
+__all__ += ['get_native_id']
+
+# A program here can install no trace or profile function, so none is ever set.
+_profile_hook = None
+_trace_hook = None
+
+
+def getprofile():
+    return _profile_hook
+
+
+def gettrace():
+    return _trace_hook
 
 
 def RLock(*args, **kwargs):

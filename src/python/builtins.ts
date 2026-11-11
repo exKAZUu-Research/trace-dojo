@@ -59,6 +59,7 @@ import {
   NotImplemented,
   objectClass,
   propertyClass,
+  pyError,
   rangeClass,
   setClass,
   sliceClass,
@@ -605,7 +606,14 @@ export function createBuiltins(): Map<string, PyValue> {
     ['any', one('any', ([iterable]) => toArray(iterable).some((item) => isTruthy(item)))],
     ['ascii', one('ascii', ([value]) => pyAscii(value))],
     ['bin', one('bin', radix('0b', 2))],
-    ['breakpoint', unsupportedFunction('breakpoint', 'breakpoint()')],
+    [
+      'breakpoint',
+      nativeFunction('breakpoint', (args, kwargs) => {
+        const hook = currentRuntime().importModule('sys').dict.get('breakpointhook');
+        if (hook === undefined) throw pyError('RuntimeError', 'lost sys.breakpointhook');
+        return callValue(hook, args, kwargs);
+      }),
+    ],
     ['callable', one('callable', ([value]) => isCallable(value))],
     ['chr', one('chr', chr)],
     ['compile', builtin('compile', 'takes', 0, 6, compile, { keywords: COMPILE_KEYWORDS })],
